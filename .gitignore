@@ -1,0 +1,14 @@
+﻿.env
+.env.*
+*.sql
+*.dump
+*.zip
+*.tar
+*.tar.gz
+*.log
+.DS_Store
+.idea/
+.vscode/
+node_modules/
+vendor/
+wp-config.php
