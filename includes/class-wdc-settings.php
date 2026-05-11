@@ -9,7 +9,8 @@ defined( 'ABSPATH' ) || exit;
 
 class WDC_Settings {
 	public const OPTION_NAME = 'wdc_settings';
-	public const SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL = 'russian_post_international_parcel';
+	public const SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL = 'russian_post_worldwide_parcel';
+	private const LEGACY_SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL = 'russian_post_international_parcel';
 
 	/**
 	 * @return array<string, mixed>
@@ -20,7 +21,7 @@ class WDC_Settings {
 			'fallback_enabled' => 'yes',
 			'currency' => 'RUB',
 			'services' => array(
-				self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL => array(
+				self::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL => array(
 					'enabled' => 'yes',
 					'origin_postcode' => '630005',
 					'object_code' => 4031,
@@ -87,14 +88,14 @@ class WDC_Settings {
 	 */
 	public function sanitize( array $settings ): array {
 		$current = $this->merge_defaults( $this->get_defaults(), $this->migrate_legacy_settings( $settings ) );
-		$service = $current['services'][ self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ];
+		$service = $current['services'][ self::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ];
 
 		return array(
 			'debug_enabled' => $this->sanitize_yes_no( $current['debug_enabled'] ),
 			'fallback_enabled' => $this->sanitize_yes_no( $current['fallback_enabled'] ),
 			'currency' => sanitize_text_field( (string) $current['currency'] ),
 			'services' => array(
-				self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL => array(
+				self::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL => array(
 					'enabled' => $this->sanitize_yes_no( $service['enabled'] ),
 					'origin_postcode' => sanitize_text_field( (string) $service['origin_postcode'] ),
 					'object_code' => absint( $service['object_code'] ),
@@ -145,21 +146,31 @@ class WDC_Settings {
 	 * @return array<string, mixed>
 	 */
 	private function migrate_legacy_settings( array $settings ): array {
+		if ( ! isset( $settings['services'] ) || ! is_array( $settings['services'] ) ) {
+			$settings['services'] = array();
+		}
+
+		if (
+			isset( $settings['services'][ self::LEGACY_SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ] )
+			&& is_array( $settings['services'][ self::LEGACY_SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ] )
+			&& ! isset( $settings['services'][ self::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ] )
+		) {
+			$settings['services'][ self::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ] = $settings['services'][ self::LEGACY_SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ];
+		}
+
 		if ( isset( $settings['max_package_weight_g'] ) ) {
-			if ( ! isset( $settings['services'] ) || ! is_array( $settings['services'] ) ) {
-				$settings['services'] = array();
+			if ( ! isset( $settings['services'][ self::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ] ) || ! is_array( $settings['services'][ self::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ] ) ) {
+				$settings['services'][ self::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ] = array();
 			}
 
-			if ( ! isset( $settings['services'][ self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ] ) || ! is_array( $settings['services'][ self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ] ) ) {
-				$settings['services'][ self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ] = array();
-			}
-
-			if ( ! isset( $settings['services'][ self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ]['max_package_weight_g'] ) ) {
-				$settings['services'][ self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ]['max_package_weight_g'] = $settings['max_package_weight_g'];
+			if ( ! isset( $settings['services'][ self::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ]['max_package_weight_g'] ) ) {
+				$settings['services'][ self::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ]['max_package_weight_g'] = $settings['max_package_weight_g'];
 			}
 
 			unset( $settings['max_package_weight_g'] );
 		}
+
+		unset( $settings['services'][ self::LEGACY_SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ] );
 
 		return $settings;
 	}

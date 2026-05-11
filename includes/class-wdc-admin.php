@@ -159,44 +159,45 @@ class WDC_Admin {
 	 * @param array<string, mixed> $settings Settings.
 	 */
 	private function render_russian_post_international_tab( array $settings ): void {
-		$service = $settings['services'][ WDC_Settings::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ];
+		$service = $settings['services'][ WDC_Settings::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ];
 		?>
 		<h2><?php echo esc_html__( 'Почта России — международная доставка', 'walls-delivery-calc' ); ?></h2>
+		<p><?php echo esc_html__( 'Этот блок относится только к международной доставке Почтой России. Доставка по России будет отдельным сценарием.', 'walls-delivery-calc' ); ?></p>
 		<table class="form-table" role="presentation">
 			<tbody>
 				<?php $this->render_service_yes_no_row( 'enabled', __( 'Enabled', 'walls-delivery-calc' ), $service['enabled'] ); ?>
 				<tr>
 					<th scope="row"><label for="wdc_origin_postcode"><?php echo esc_html__( 'Origin postcode', 'walls-delivery-calc' ); ?></label></th>
-					<td><input id="wdc_origin_postcode" type="text" name="wdc_settings[services][russian_post_international_parcel][origin_postcode]" value="<?php echo esc_attr( (string) $service['origin_postcode'] ); ?>"></td>
+					<td><input id="wdc_origin_postcode" type="text" name="wdc_settings[services][russian_post_worldwide_parcel][origin_postcode]" value="<?php echo esc_attr( (string) $service['origin_postcode'] ); ?>"></td>
 				</tr>
 				<tr>
 					<th scope="row"><label for="wdc_object_code"><?php echo esc_html__( 'Object code', 'walls-delivery-calc' ); ?></label></th>
-					<td><input id="wdc_object_code" type="number" min="0" name="wdc_settings[services][russian_post_international_parcel][object_code]" value="<?php echo esc_attr( (string) $service['object_code'] ); ?>"></td>
+					<td><input id="wdc_object_code" type="number" min="0" name="wdc_settings[services][russian_post_worldwide_parcel][object_code]" value="<?php echo esc_attr( (string) $service['object_code'] ); ?>"></td>
 				</tr>
 				<tr>
 					<th scope="row"><label for="wdc_isavia"><?php echo esc_html__( 'Isavia', 'walls-delivery-calc' ); ?></label></th>
-					<td><input id="wdc_isavia" type="number" min="0" max="1" name="wdc_settings[services][russian_post_international_parcel][isavia]" value="<?php echo esc_attr( (string) $service['isavia'] ); ?>"></td>
+					<td><input id="wdc_isavia" type="number" min="0" max="1" name="wdc_settings[services][russian_post_worldwide_parcel][isavia]" value="<?php echo esc_attr( (string) $service['isavia'] ); ?>"></td>
 				</tr>
 				<tr>
 					<th scope="row"><label for="wdc_max_package_weight_g"><?php echo esc_html__( 'Max package weight, g', 'walls-delivery-calc' ); ?></label></th>
-					<td><input id="wdc_max_package_weight_g" type="number" min="0" name="wdc_settings[services][russian_post_international_parcel][max_package_weight_g]" value="<?php echo esc_attr( (string) $service['max_package_weight_g'] ); ?>"></td>
+					<td><input id="wdc_max_package_weight_g" type="number" min="0" name="wdc_settings[services][russian_post_worldwide_parcel][max_package_weight_g]" value="<?php echo esc_attr( (string) $service['max_package_weight_g'] ); ?>"></td>
 				</tr>
 				<tr>
 					<th scope="row"><label for="wdc_formula_divider"><?php echo esc_html__( 'Formula divider', 'walls-delivery-calc' ); ?></label></th>
-					<td><input id="wdc_formula_divider" type="number" step="0.01" name="wdc_settings[services][russian_post_international_parcel][formula_divider]" value="<?php echo esc_attr( (string) $service['formula_divider'] ); ?>"></td>
+					<td><input id="wdc_formula_divider" type="number" step="0.01" name="wdc_settings[services][russian_post_worldwide_parcel][formula_divider]" value="<?php echo esc_attr( (string) $service['formula_divider'] ); ?>"></td>
 				</tr>
 				<tr>
 					<th scope="row"><label for="wdc_formula_add_rub"><?php echo esc_html__( 'Formula add, RUB', 'walls-delivery-calc' ); ?></label></th>
-					<td><input id="wdc_formula_add_rub" type="number" step="0.01" name="wdc_settings[services][russian_post_international_parcel][formula_add_rub]" value="<?php echo esc_attr( (string) $service['formula_add_rub'] ); ?>"></td>
+					<td><input id="wdc_formula_add_rub" type="number" step="0.01" name="wdc_settings[services][russian_post_worldwide_parcel][formula_add_rub]" value="<?php echo esc_attr( (string) $service['formula_add_rub'] ); ?>"></td>
 				</tr>
 				<?php $this->render_service_yes_no_row( 'cache_until_end_of_day', __( 'Cache until end of day', 'walls-delivery-calc' ), $service['cache_until_end_of_day'] ); ?>
 				<tr>
 					<th scope="row"><label for="wdc_fallback_label"><?php echo esc_html__( 'Fallback label', 'walls-delivery-calc' ); ?></label></th>
-					<td><textarea id="wdc_fallback_label" class="large-text" rows="3" name="wdc_settings[services][russian_post_international_parcel][fallback_label]"><?php echo esc_textarea( (string) $service['fallback_label'] ); ?></textarea></td>
+					<td><textarea id="wdc_fallback_label" class="large-text" rows="3" name="wdc_settings[services][russian_post_worldwide_parcel][fallback_label]"><?php echo esc_textarea( (string) $service['fallback_label'] ); ?></textarea></td>
 				</tr>
 				<tr>
 					<th scope="row"><label for="wdc_calculated_label_template"><?php echo esc_html__( 'Calculated label template', 'walls-delivery-calc' ); ?></label></th>
-					<td><textarea id="wdc_calculated_label_template" class="large-text" rows="3" name="wdc_settings[services][russian_post_international_parcel][calculated_label_template]"><?php echo esc_textarea( (string) $service['calculated_label_template'] ); ?></textarea></td>
+					<td><textarea id="wdc_calculated_label_template" class="large-text" rows="3" name="wdc_settings[services][russian_post_worldwide_parcel][calculated_label_template]"><?php echo esc_textarea( (string) $service['calculated_label_template'] ); ?></textarea></td>
 				</tr>
 			</tbody>
 		</table>
@@ -264,7 +265,7 @@ class WDC_Admin {
 		<tr>
 			<th scope="row"><label for="wdc_service_<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $label ); ?></label></th>
 			<td>
-				<select id="wdc_service_<?php echo esc_attr( $key ); ?>" name="wdc_settings[services][russian_post_international_parcel][<?php echo esc_attr( $key ); ?>]">
+				<select id="wdc_service_<?php echo esc_attr( $key ); ?>" name="wdc_settings[services][russian_post_worldwide_parcel][<?php echo esc_attr( $key ); ?>]">
 					<option value="yes" <?php selected( $value, 'yes' ); ?>><?php echo esc_html__( 'yes', 'walls-delivery-calc' ); ?></option>
 					<option value="no" <?php selected( $value, 'no' ); ?>><?php echo esc_html__( 'no', 'walls-delivery-calc' ); ?></option>
 				</select>

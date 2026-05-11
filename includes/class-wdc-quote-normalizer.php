@@ -18,7 +18,7 @@ class WDC_Quote_Normalizer {
 			'success' => true,
 			'carrier_id' => WDC_Carrier_Registry::CARRIER_RUSSIAN_POST,
 			'carrier_title' => 'Почта России',
-			'service_id' => WDC_Carrier_Registry::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL,
+			'service_id' => WDC_Carrier_Registry::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL,
 			'service_title' => 'Почта России — международная доставка',
 			'destination' => array(
 				'country' => '',
@@ -46,7 +46,7 @@ class WDC_Quote_Normalizer {
 	 */
 	public function get_default_rate(): array {
 		return array(
-			'rate_id' => 'russian_post_international_parcel_ground',
+			'rate_id' => 'russian_post_worldwide_parcel_ground',
 			'rate_title' => 'Доставка Почтой России',
 			'label_template' => 'Ориентировочная цена доставки вашей посылки в {country}',
 			'delivery_method' => 'post_office',
@@ -118,11 +118,11 @@ class WDC_Quote_Normalizer {
 			'success' => true,
 			'carrier_id' => WDC_Carrier_Registry::CARRIER_RUSSIAN_POST,
 			'carrier_title' => 'Почта России',
-			'service_id' => WDC_Carrier_Registry::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL,
+			'service_id' => WDC_Carrier_Registry::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL,
 			'service_title' => 'Почта России — международная доставка',
 			'rates' => array(
 				array(
-					'rate_id' => 'russian_post_international_parcel_fallback',
+					'rate_id' => 'russian_post_worldwide_parcel_fallback',
 					'rate_title' => $fallback_label,
 					'label_template' => $fallback_label,
 					'price' => 0,
@@ -187,15 +187,15 @@ class WDC_Quote_Normalizer {
 		}
 
 		if (
-			isset( $context['settings']['services'][ WDC_Carrier_Registry::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ]['fallback_label'] )
-			&& is_scalar( $context['settings']['services'][ WDC_Carrier_Registry::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ]['fallback_label'] )
+			isset( $context['settings']['services'][ WDC_Carrier_Registry::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ]['fallback_label'] )
+			&& is_scalar( $context['settings']['services'][ WDC_Carrier_Registry::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ]['fallback_label'] )
 		) {
-			return (string) $context['settings']['services'][ WDC_Carrier_Registry::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ]['fallback_label'];
+			return (string) $context['settings']['services'][ WDC_Carrier_Registry::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ]['fallback_label'];
 		}
 
 		if ( class_exists( 'WDC_Settings' ) ) {
 			$settings = ( new WDC_Settings() )->get();
-			$service = $settings['services'][ WDC_Carrier_Registry::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ] ?? array();
+			$service = $settings['services'][ WDC_Carrier_Registry::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ] ?? array();
 
 			if ( isset( $service['fallback_label'] ) && is_scalar( $service['fallback_label'] ) ) {
 				return (string) $service['fallback_label'];

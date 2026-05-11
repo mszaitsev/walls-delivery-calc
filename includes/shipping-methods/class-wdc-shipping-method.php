@@ -15,8 +15,8 @@ class WDC_Shipping_Method extends WC_Shipping_Method {
 	public function __construct( int $instance_id = 0 ) {
 		$this->id                 = 'wdc_dynamic_delivery';
 		$this->instance_id        = absint( $instance_id );
-		$this->method_title       = __( 'Walls Delivery Calc', 'walls-delivery-calc' );
-		$this->method_description = __( 'Расчет стоимости доставки через внешние API.', 'walls-delivery-calc' );
+		$this->method_title       = __( 'Почта России — международная доставка', 'walls-delivery-calc' );
+		$this->method_description = __( 'Расчет международной доставки Почтой России через API.', 'walls-delivery-calc' );
 		$this->supports           = array(
 			'shipping-zones',
 			'instance-settings',
@@ -28,7 +28,7 @@ class WDC_Shipping_Method extends WC_Shipping_Method {
 	}
 
 	public function init(): void {
-		$this->title = __( 'Walls Delivery Calc', 'walls-delivery-calc' );
+		$this->title = __( 'Почта России — международная доставка', 'walls-delivery-calc' );
 	}
 
 	/**
