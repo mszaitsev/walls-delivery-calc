@@ -10,10 +10,6 @@ defined( 'ABSPATH' ) || exit;
 class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 	public const INTERNATIONAL_OUTGOING_PARCEL_OBJECT_CODE = 4031;
 
-	private const HARD_CODED_COUNTRIES = array(
-		'BG' => 100,
-	);
-
 	private WDC_Settings $settings;
 
 	private WDC_Quote_Normalizer $normalizer;
@@ -26,13 +22,16 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 
 	private WDC_Logger $logger;
 
+	private WDC_Location_Mapper $location_mapper;
+
 	public function __construct(
 		?WDC_Settings $settings = null,
 		?WDC_Quote_Normalizer $normalizer = null,
 		?WDC_Weight_Calculator $weight_calculator = null,
 		?WDC_Cache $cache = null,
 		?WDC_Russian_Post_API $api = null,
-		?WDC_Logger $logger = null
+		?WDC_Logger $logger = null,
+		?WDC_Location_Mapper $location_mapper = null
 	) {
 		$this->settings = $settings ?? new WDC_Settings();
 		$this->normalizer = $normalizer ?? new WDC_Quote_Normalizer();
@@ -40,6 +39,7 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 		$this->cache = $cache ?? new WDC_Cache();
 		$this->logger = $logger ?? new WDC_Logger();
 		$this->api = $api ?? new WDC_Russian_Post_API( $this->logger );
+		$this->location_mapper = $location_mapper ?? new WDC_Location_Mapper( null, $this->logger, $this->settings );
 	}
 
 	public function get_id(): string {
@@ -84,7 +84,17 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 			return $this->fallback( 'service_disabled', $context, $debug_enabled );
 		}
 
-		if ( ! isset( self::HARD_CODED_COUNTRIES[ $country_code ] ) ) {
+		$country_mapping = $this->location_mapper->map_country( $this->get_id(), $country_code );
+		if ( empty( $country_mapping['success'] ) || empty( $country_mapping['carrier_country_id'] ) ) {
+			$this->debug_log(
+				$debug_enabled,
+				'Russian Post worldwide unsupported country.',
+				array(
+					'country_code' => $country_code,
+					'mapping' => $country_mapping,
+				)
+			);
+
 			return $this->fallback( 'unsupported_country_' . $country_code, $context, $debug_enabled );
 		}
 
@@ -105,8 +115,13 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 			return $this->fallback( 'overweight', $context, $debug_enabled );
 		}
 
-		$carrier_country_id = self::HARD_CODED_COUNTRIES[ $country_code ];
+		$carrier_country_id = absint( $country_mapping['carrier_country_id'] );
+		if ( 0 === $carrier_country_id ) {
+			return $this->fallback( 'invalid_country_mapping_' . $country_code, $context, $debug_enabled, $country_mapping );
+		}
+
 		$destination['carrier_country_id'] = (string) $carrier_country_id;
+		$destination['country'] = (string) ( $country_mapping['country_name'] ?? $destination['country'] );
 		$context['destination'] = $destination;
 		$request_params = $this->build_request_params( $service_settings, $carrier_country_id, $weight['total_weight_g'] );
 		$cache_key = $this->build_cache_key( $request_params );
