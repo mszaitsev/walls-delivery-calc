@@ -74,6 +74,7 @@ final class WDC_Plugin {
 		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-order-meta.php';
 		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-admin.php';
 		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-country-mapper.php';
+		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-location-mapper.php';
 		require_once WDC_PLUGIN_DIR . 'includes/carriers/interface-wdc-carrier.php';
 		require_once WDC_PLUGIN_DIR . 'includes/carriers/russian-post/class-wdc-russian-post-carrier.php';
 		require_once WDC_PLUGIN_DIR . 'includes/carriers/russian-post/class-wdc-russian-post-api.php';

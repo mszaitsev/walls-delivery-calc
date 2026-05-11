@@ -23,12 +23,15 @@ class WDC_Carrier_Registry {
 					self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL => array(
 						'title' => 'Почта России — международная доставка',
 						'direction' => self::DIRECTION_INTERNATIONAL_EXPORT,
+						'excluded_destination_countries' => array( 'RU' ),
 						'supports' => array(
 							'country_mapper' => true,
 							'city_mapper' => false,
 							'pickup_point' => false,
+							'post_office' => true,
 							'courier_door' => false,
 							'delivery_terms' => true,
+							'multiple_rates' => true,
 						),
 					),
 				),

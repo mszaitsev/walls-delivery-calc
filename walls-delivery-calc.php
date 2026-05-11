@@ -16,7 +16,7 @@ defined( 'ABSPATH' ) || exit;
 define( 'WDC_PLUGIN_FILE', __FILE__ );
 define( 'WDC_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WDC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
-define( 'WDC_VERSION', '0.2.0' );
+define( 'WDC_VERSION', '0.3.0' );
 
 require_once WDC_PLUGIN_DIR . 'includes/class-wdc-plugin.php';
 

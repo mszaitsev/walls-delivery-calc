@@ -29,6 +29,8 @@ class WDC_Shipping_Method extends WC_Shipping_Method {
 	 * @param array<string, mixed> $package WooCommerce package data.
 	 */
 	public function calculate_shipping( $package = array() ) {
+		unset( $package );
+
 		$this->add_rate(
 			array(
 				'id'    => $this->get_rate_id(),
@@ -36,5 +38,35 @@ class WDC_Shipping_Method extends WC_Shipping_Method {
 				'cost'  => 0,
 			)
 		);
+	}
+
+	/**
+	 * Future helper for adding one WooCommerce rate per normalized quote rate.
+	 *
+	 * @param array<string, mixed> $quote Normalized carrier quote.
+	 */
+	protected function add_quote_rates( array $quote ): void {
+		if ( empty( $quote['rates'] ) || ! is_array( $quote['rates'] ) ) {
+			return;
+		}
+
+		foreach ( $quote['rates'] as $rate ) {
+			if ( ! is_array( $rate ) ) {
+				continue;
+			}
+
+			$rate_id = isset( $rate['rate_id'] ) ? sanitize_key( (string) $rate['rate_id'] ) : '';
+			if ( '' === $rate_id ) {
+				continue;
+			}
+
+			$this->add_rate(
+				array(
+					'id'    => $this->get_rate_id( $rate_id ),
+					'label' => isset( $rate['rate_title'] ) ? sanitize_text_field( (string) $rate['rate_title'] ) : '',
+					'cost'  => isset( $rate['price'] ) ? (float) $rate['price'] : 0,
+				)
+			);
+		}
 	}
 }
