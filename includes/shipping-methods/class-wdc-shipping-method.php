@@ -8,6 +8,10 @@
 defined( 'ABSPATH' ) || exit;
 
 class WDC_Shipping_Method extends WC_Shipping_Method {
+	private WDC_Logger $logger;
+
+	private WDC_Settings $settings;
+
 	public function __construct( int $instance_id = 0 ) {
 		$this->id                 = 'wdc_dynamic_delivery';
 		$this->instance_id        = absint( $instance_id );
@@ -17,6 +21,8 @@ class WDC_Shipping_Method extends WC_Shipping_Method {
 			'shipping-zones',
 			'instance-settings',
 		);
+		$this->logger             = new WDC_Logger();
+		$this->settings           = new WDC_Settings();
 
 		$this->init();
 	}
@@ -29,14 +35,20 @@ class WDC_Shipping_Method extends WC_Shipping_Method {
 	 * @param array<string, mixed> $package WooCommerce package data.
 	 */
 	public function calculate_shipping( $package = array() ) {
-		$carrier = new WDC_Russian_Post_Carrier();
+		$carrier = new WDC_Russian_Post_Carrier( $this->settings, null, null, null, null, $this->logger );
 		$quote = $carrier->get_quote( is_array( $package ) ? $package : array() );
 
-		if ( ! empty( $quote['success'] ) && $this->add_quote_rates( $quote ) ) {
+		if ( empty( $quote['success'] ) ) {
+			$this->debug_log( 'Shipping quote success=false.', array( 'quote' => $quote ) );
 			return;
 		}
 
-		$this->add_fallback_rate();
+		if ( empty( $quote['rates'] ) || ! is_array( $quote['rates'] ) ) {
+			$this->debug_log( 'Shipping quote returned no rates.', array( 'quote' => $quote ) );
+			return;
+		}
+
+		$this->add_quote_rates( $quote );
 	}
 
 	/**
@@ -46,6 +58,7 @@ class WDC_Shipping_Method extends WC_Shipping_Method {
 	 */
 	protected function add_quote_rates( array $quote ): bool {
 		if ( empty( $quote['rates'] ) || ! is_array( $quote['rates'] ) ) {
+			$this->debug_log( 'No rates returned for WooCommerce shipping method.', array( 'quote' => $quote ) );
 			return false;
 		}
 
@@ -77,11 +90,20 @@ class WDC_Shipping_Method extends WC_Shipping_Method {
 			$added = true;
 		}
 
+		if ( ! $added ) {
+			$this->debug_log( 'No valid WooCommerce rates were added.', array( 'quote' => $quote ) );
+		}
+
 		return $added;
 	}
 
-	private function add_fallback_rate(): void {
-		$quote = ( new WDC_Quote_Normalizer() )->create_fallback_quote();
-		$this->add_quote_rates( $quote );
+	/**
+	 * @param array<string, mixed> $context Debug context.
+	 */
+	private function debug_log( string $message, array $context = array() ): void {
+		$settings = $this->settings->get();
+		if ( 'yes' === $settings['debug_enabled'] ) {
+			$this->logger->log( 'debug', $message, $context );
+		}
 	}
 }
