@@ -251,8 +251,16 @@ class WDC_Russian_Post_Countries {
 			$iso2 = strtoupper( $this->first_code( $raw, array( 'code', 'Code' ), 2 ) );
 		}
 
+		if ( '' === $iso2 ) {
+			$iso2 = $this->extract_iso_from_altnames( $raw, 2, 2 );
+		}
+
 		if ( '' === $iso3 ) {
 			$iso3 = strtoupper( $this->first_code( $raw, array( 'code', 'Code' ), 3 ) );
+		}
+
+		if ( '' === $iso3 ) {
+			$iso3 = $this->extract_iso_from_altnames( $raw, 3, 3 );
 		}
 
 		if ( '' !== $carrier_country_id && ! is_numeric( $carrier_country_id ) ) {
@@ -310,6 +318,32 @@ class WDC_Russian_Post_Countries {
 			$value = strtoupper( trim( (string) $raw[ $key ] ) );
 			if ( preg_match( '/^[A-Z]{' . $length . '}$/', $value ) ) {
 				return $value;
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * @param array<string, mixed> $raw Raw country record.
+	 */
+	private function extract_iso_from_altnames( array $raw, int $type, int $length ): string {
+		if ( empty( $raw['altnames'] ) || ! is_array( $raw['altnames'] ) ) {
+			return '';
+		}
+
+		foreach ( $raw['altnames'] as $altname ) {
+			if ( ! is_array( $altname ) ) {
+				continue;
+			}
+
+			if ( ! isset( $altname['type'], $altname['name'] ) || (int) $altname['type'] !== $type || ! is_scalar( $altname['name'] ) ) {
+				continue;
+			}
+
+			$name = strtoupper( trim( (string) $altname['name'] ) );
+			if ( preg_match( '/^[A-Z]{' . $length . '}$/', $name ) ) {
+				return $name;
 			}
 		}
 
