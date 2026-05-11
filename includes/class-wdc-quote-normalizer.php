@@ -15,40 +15,6 @@ class WDC_Quote_Normalizer {
 	 * express, pickup/post office, door delivery, economy, standard, or
 	 * other carrier-specific variants.
 	 *
-	 * @phpstan-type WDCServiceRate array{
-	 *   rate_id: string,
-	 *   rate_title: string,
-	 *   label_template: string,
-	 *   delivery_method: string,
-	 *   delivery_method_title: string,
-	 *   transport_type: string,
-	 *   transport_type_title: string,
-	 *   tariff_type: string,
-	 *   tariff_type_title: string,
-	 *   price: float|int,
-	 *   currency: string,
-	 *   delivery_days_min: int|null,
-	 *   delivery_days_max: int|null,
-	 *   delivery_days_text: string,
-	 *   is_fallback: bool,
-	 *   meta: array<string, mixed>,
-	 *   raw: array<string, mixed>
-	 * }
-	 * @phpstan-type WDCServiceQuote array{
-	 *   success: bool,
-	 *   carrier_id: string,
-	 *   carrier_title: string,
-	 *   service_id: string,
-	 *   service_title: string,
-	 *   destination: array{country: string, country_code: string, carrier_country_id: string, city: string, carrier_city_id: string, postal_code: string},
-	 *   weight: array{cart_weight_g: int, packaging_weight_g: int, total_weight_g: int},
-	 *   rates: array<int, WDCServiceRate>,
-	 *   meta: array<string, mixed>,
-	 *   raw: array<string, mixed>,
-	 *   error_code: string,
-	 *   error_message: string
-	 * }
-	 *
 	 * @return array<string, mixed>
 	 */
 	public function get_default_quote(): array {
@@ -165,6 +131,14 @@ class WDC_Quote_Normalizer {
 
 		if ( isset( $context['weight'] ) && is_array( $context['weight'] ) ) {
 			$quote['weight'] = $context['weight'];
+		}
+
+		if ( isset( $context['meta'] ) && is_array( $context['meta'] ) ) {
+			$quote['meta'] = $context['meta'];
+		}
+
+		if ( isset( $context['raw'] ) && is_array( $context['raw'] ) ) {
+			$quote['raw'] = $context['raw'];
 		}
 
 		return $this->normalize_quote( $quote );

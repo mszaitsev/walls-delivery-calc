@@ -9,6 +9,7 @@ defined( 'ABSPATH' ) || exit;
 
 class WDC_Settings {
 	public const OPTION_NAME = 'wdc_settings';
+	public const SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL = 'russian_post_international_parcel';
 
 	/**
 	 * @return array<string, mixed>
@@ -17,14 +18,14 @@ class WDC_Settings {
 		return array(
 			'debug_enabled' => 'no',
 			'fallback_enabled' => 'yes',
-			'max_package_weight_g' => 19990,
 			'currency' => 'RUB',
 			'services' => array(
-				'russian_post_international_parcel' => array(
+				self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL => array(
 					'enabled' => 'yes',
 					'origin_postcode' => '630005',
 					'object_code' => 4031,
 					'isavia' => 0,
+					'max_package_weight_g' => 19990,
 					'formula_divider' => 0.89,
 					'formula_add_rub' => 200,
 					'cache_until_end_of_day' => 'yes',
@@ -34,28 +35,28 @@ class WDC_Settings {
 			),
 			'packaging_tiers' => array(
 				array(
-					'from_g' => 0,
-					'to_g' => 1000,
+					'from_weight_g' => 0,
+					'to_weight_g' => 1000,
 					'packaging_weight_g' => 150,
 				),
 				array(
-					'from_g' => 1001,
-					'to_g' => 3000,
+					'from_weight_g' => 1001,
+					'to_weight_g' => 3000,
 					'packaging_weight_g' => 250,
 				),
 				array(
-					'from_g' => 3001,
-					'to_g' => 7000,
+					'from_weight_g' => 3001,
+					'to_weight_g' => 7000,
 					'packaging_weight_g' => 400,
 				),
 				array(
-					'from_g' => 7001,
-					'to_g' => 15000,
+					'from_weight_g' => 7001,
+					'to_weight_g' => 15000,
 					'packaging_weight_g' => 550,
 				),
 				array(
-					'from_g' => 15001,
-					'to_g' => 19990,
+					'from_weight_g' => 15001,
+					'to_weight_g' => 19990,
 					'packaging_weight_g' => 700,
 				),
 			),
@@ -68,6 +69,7 @@ class WDC_Settings {
 	public function get(): array {
 		$settings = get_option( self::OPTION_NAME, array() );
 		$settings = is_array( $settings ) ? $settings : array();
+		$settings = $this->migrate_legacy_settings( $settings );
 
 		return $this->merge_defaults( $this->get_defaults(), $settings );
 	}
@@ -84,21 +86,21 @@ class WDC_Settings {
 	 * @return array<string, mixed>
 	 */
 	public function sanitize( array $settings ): array {
-		$current = $this->merge_defaults( $this->get_defaults(), $settings );
-		$service = $current['services']['russian_post_international_parcel'];
+		$current = $this->merge_defaults( $this->get_defaults(), $this->migrate_legacy_settings( $settings ) );
+		$service = $current['services'][ self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ];
 
 		return array(
 			'debug_enabled' => $this->sanitize_yes_no( $current['debug_enabled'] ),
 			'fallback_enabled' => $this->sanitize_yes_no( $current['fallback_enabled'] ),
-			'max_package_weight_g' => max( 0, absint( $current['max_package_weight_g'] ) ),
 			'currency' => sanitize_text_field( (string) $current['currency'] ),
 			'services' => array(
-				'russian_post_international_parcel' => array(
+				self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL => array(
 					'enabled' => $this->sanitize_yes_no( $service['enabled'] ),
 					'origin_postcode' => sanitize_text_field( (string) $service['origin_postcode'] ),
 					'object_code' => absint( $service['object_code'] ),
 					'isavia' => absint( $service['isavia'] ),
-					'formula_divider' => (float) $service['formula_divider'],
+					'max_package_weight_g' => max( 0, absint( $service['max_package_weight_g'] ) ),
+					'formula_divider' => max( 0.01, (float) $service['formula_divider'] ),
 					'formula_add_rub' => (float) $service['formula_add_rub'],
 					'cache_until_end_of_day' => $this->sanitize_yes_no( $service['cache_until_end_of_day'] ),
 					'fallback_label' => sanitize_text_field( (string) $service['fallback_label'] ),
@@ -129,13 +131,37 @@ class WDC_Settings {
 			}
 
 			$sanitized[] = array(
-				'from_g' => isset( $tier['from_g'] ) ? absint( $tier['from_g'] ) : 0,
-				'to_g' => isset( $tier['to_g'] ) ? absint( $tier['to_g'] ) : 0,
+				'from_weight_g' => isset( $tier['from_weight_g'] ) ? absint( $tier['from_weight_g'] ) : absint( $tier['from_g'] ?? 0 ),
+				'to_weight_g' => isset( $tier['to_weight_g'] ) ? absint( $tier['to_weight_g'] ) : absint( $tier['to_g'] ?? 0 ),
 				'packaging_weight_g' => isset( $tier['packaging_weight_g'] ) ? absint( $tier['packaging_weight_g'] ) : 0,
 			);
 		}
 
 		return ! empty( $sanitized ) ? $sanitized : $this->get_defaults()['packaging_tiers'];
+	}
+
+	/**
+	 * @param array<string, mixed> $settings Saved or submitted settings.
+	 * @return array<string, mixed>
+	 */
+	private function migrate_legacy_settings( array $settings ): array {
+		if ( isset( $settings['max_package_weight_g'] ) ) {
+			if ( ! isset( $settings['services'] ) || ! is_array( $settings['services'] ) ) {
+				$settings['services'] = array();
+			}
+
+			if ( ! isset( $settings['services'][ self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ] ) || ! is_array( $settings['services'][ self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ] ) ) {
+				$settings['services'][ self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ] = array();
+			}
+
+			if ( ! isset( $settings['services'][ self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ]['max_package_weight_g'] ) ) {
+				$settings['services'][ self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ]['max_package_weight_g'] = $settings['max_package_weight_g'];
+			}
+
+			unset( $settings['max_package_weight_g'] );
+		}
+
+		return $settings;
 	}
 
 	/**
