@@ -12,6 +12,8 @@ final class WDC_Plugin {
 
 	private WDC_Logger $logger;
 
+	private WDC_Settings $settings;
+
 	public static function instance(): WDC_Plugin {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -23,6 +25,7 @@ final class WDC_Plugin {
 	private function __construct() {
 		$this->load_dependencies();
 		$this->logger = new WDC_Logger();
+		$this->settings = new WDC_Settings();
 
 		add_action( 'plugins_loaded', array( $this, 'init' ) );
 	}
@@ -32,7 +35,7 @@ final class WDC_Plugin {
 		add_filter( 'woocommerce_shipping_methods', array( $this, 'register_shipping_method' ) );
 
 		if ( is_admin() ) {
-			$admin = new WDC_Admin( $this->logger );
+			$admin = new WDC_Admin( $this->logger, $this->settings );
 			$admin->init();
 		}
 	}
@@ -57,8 +60,15 @@ final class WDC_Plugin {
 		return $this->logger;
 	}
 
+	public function settings(): WDC_Settings {
+		return $this->settings;
+	}
+
 	private function load_dependencies(): void {
 		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-logger.php';
+		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-settings.php';
+		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-carrier-registry.php';
+		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-quote-normalizer.php';
 		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-cache.php';
 		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-weight-calculator.php';
 		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-order-meta.php';
