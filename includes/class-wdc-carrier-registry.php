@@ -9,7 +9,7 @@ defined( 'ABSPATH' ) || exit;
 
 class WDC_Carrier_Registry {
 	public const CARRIER_RUSSIAN_POST = 'russian_post';
-	public const SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL = 'russian_post_international_parcel';
+	public const SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL = 'russian_post_worldwide_parcel';
 	public const DIRECTION_INTERNATIONAL_EXPORT = 'international_export';
 
 	/**
@@ -20,7 +20,7 @@ class WDC_Carrier_Registry {
 			self::CARRIER_RUSSIAN_POST => array(
 				'title' => 'Почта России',
 				'services' => array(
-					self::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL => array(
+					self::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL => array(
 						'title' => 'Почта России — международная доставка',
 						'direction' => self::DIRECTION_INTERNATIONAL_EXPORT,
 						'excluded_destination_countries' => array( 'RU' ),

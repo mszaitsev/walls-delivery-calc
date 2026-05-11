@@ -1,6 +1,6 @@
 <?php
 /**
- * Russian Post international export carrier.
+ * Russian Post worldwide export carrier.
  *
  * @package Walls_Delivery_Calc
  */
@@ -66,7 +66,7 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 	 */
 	public function get_quote( array $package, array $context = array() ): array {
 		$settings = $this->settings->get();
-		$service_settings = $settings['services'][ WDC_Carrier_Registry::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ];
+		$service_settings = $settings['services'][ WDC_Carrier_Registry::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ];
 		$debug_enabled = 'yes' === $settings['debug_enabled'];
 		$country_code = $this->get_destination_country_code( $package );
 		$country_name = $this->get_destination_country_name( $country_code );
@@ -95,7 +95,7 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 		if ( $weight['total_weight_g'] > $max_package_weight_g ) {
 			$this->debug_log(
 				$debug_enabled,
-				'Russian Post package overweight.',
+				'Russian Post worldwide package overweight.',
 				array(
 					'weight' => $weight,
 					'max_package_weight_g' => $max_package_weight_g,
@@ -126,7 +126,7 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 
 		$this->debug_log(
 			$debug_enabled,
-			'Russian Post price calculated.',
+			'Russian Post worldwide price calculated.',
 			array(
 				'price_rub' => $price_rub,
 				'formula_divider' => $service_settings['formula_divider'],
@@ -143,7 +143,7 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 				'weight' => $weight,
 				'rates' => array(
 					array(
-						'rate_id' => 'russian_post_international_parcel_' . $transport_type,
+						'rate_id' => 'russian_post_worldwide_parcel_' . $transport_type,
 						'rate_title' => 'Доставка Почтой России',
 						'label_template' => (string) $service_settings['calculated_label_template'],
 						'delivery_method' => 'post_office',
@@ -179,11 +179,11 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 	 * @return array<string, mixed>
 	 */
 	private function fallback( string $reason, array $context, bool $debug_enabled, array $api_result = array() ): array {
-		$this->debug_log( $debug_enabled, 'Russian Post fallback used.', array( 'reason' => $reason, 'api_result' => $api_result ) );
+		$this->debug_log( $debug_enabled, 'Russian Post worldwide fallback used.', array( 'reason' => $reason, 'api_result' => $api_result ) );
 
 		$quote = $this->normalizer->create_fallback_quote( $context );
 		if ( empty( $quote['rates'] ) ) {
-			$this->debug_log( $debug_enabled, 'Russian Post fallback disabled.', array( 'reason' => $reason ) );
+			$this->debug_log( $debug_enabled, 'Russian Post worldwide fallback disabled.', array( 'reason' => $reason ) );
 		}
 
 		$quote['meta']['fallback_reason'] = $reason;
@@ -224,12 +224,12 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 	private function get_cached_api_result( string $cache_key, array $request_params, array $service_settings, bool $debug_enabled ): array {
 		$cached = $this->cache->get( $cache_key );
 		if ( false !== $cached && is_array( $cached ) ) {
-			$this->debug_log( $debug_enabled, 'Russian Post cache hit.', array( 'cache_key' => $cache_key ) );
+			$this->debug_log( $debug_enabled, 'Russian Post worldwide cache hit.', array( 'cache_key' => $cache_key ) );
 
 			return $cached;
 		}
 
-		$this->debug_log( $debug_enabled, 'Russian Post cache miss.', array( 'cache_key' => $cache_key, 'params' => $request_params ) );
+		$this->debug_log( $debug_enabled, 'Russian Post worldwide cache miss.', array( 'cache_key' => $cache_key, 'params' => $request_params ) );
 
 		$result = $this->api->calculate_tariff( $request_params, $debug_enabled );
 		if ( ! empty( $result['success'] ) && 'yes' === $service_settings['cache_until_end_of_day'] ) {
@@ -243,7 +243,7 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 	 * @param array<string, scalar> $request_params Request params.
 	 */
 	private function build_cache_key( array $request_params ): string {
-		return 'rp_intl_' . md5( wp_json_encode( $request_params ) );
+		return 'rp_worldwide_' . md5( wp_json_encode( $request_params ) );
 	}
 
 	/**
