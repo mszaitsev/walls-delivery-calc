@@ -11,10 +11,6 @@ class WDC_Quote_Normalizer {
 	/**
 	 * Normalized quote shape for a carrier/service response.
 	 *
-	 * A single service can return multiple rates: ground, air, courier,
-	 * express, pickup/post office, door delivery, economy, standard, or
-	 * other carrier-specific variants.
-	 *
 	 * @return array<string, mixed>
 	 */
 	public function get_default_quote(): array {
@@ -37,9 +33,7 @@ class WDC_Quote_Normalizer {
 				'packaging_weight_g' => 0,
 				'total_weight_g' => 0,
 			),
-			'rates' => array(
-				$this->get_default_rate(),
-			),
+			'rates' => array(),
 			'meta' => array(),
 			'raw' => array(),
 			'error_code' => '',
@@ -78,17 +72,13 @@ class WDC_Quote_Normalizer {
 	 */
 	public function normalize_quote( array $quote ): array {
 		$normalized = array_replace_recursive( $this->get_default_quote(), $quote );
-		$rates = isset( $quote['rates'] ) && is_array( $quote['rates'] ) ? $quote['rates'] : $normalized['rates'];
+		$rates = isset( $quote['rates'] ) && is_array( $quote['rates'] ) ? $quote['rates'] : array();
 
 		$normalized['rates'] = array();
 		foreach ( $rates as $rate ) {
 			if ( is_array( $rate ) ) {
 				$normalized['rates'][] = $this->normalize_rate( $rate );
 			}
-		}
-
-		if ( empty( $normalized['rates'] ) ) {
-			$normalized['rates'][] = $this->get_default_rate();
 		}
 
 		return $normalized;
@@ -107,6 +97,22 @@ class WDC_Quote_Normalizer {
 	 * @return array<string, mixed>
 	 */
 	public function create_fallback_quote( array $context = array() ): array {
+		$fallback_enabled = $this->is_fallback_enabled( $context );
+
+		if ( ! $fallback_enabled ) {
+			return $this->normalize_quote(
+				array(
+					'success' => false,
+					'rates' => array(),
+					'meta' => array(
+						'fallback_enabled' => 'no',
+					),
+					'error_code' => 'fallback_disabled',
+					'error_message' => 'Fallback shipping rate is disabled.',
+				)
+			);
+		}
+
 		$fallback_label = $this->get_fallback_label( $context );
 		$quote = array(
 			'success' => true,
@@ -123,22 +129,19 @@ class WDC_Quote_Normalizer {
 					'is_fallback' => true,
 				),
 			),
+			'meta' => array(
+				'fallback_enabled' => 'yes',
+			),
 		);
 
-		if ( isset( $context['destination'] ) && is_array( $context['destination'] ) ) {
-			$quote['destination'] = $context['destination'];
-		}
-
-		if ( isset( $context['weight'] ) && is_array( $context['weight'] ) ) {
-			$quote['weight'] = $context['weight'];
-		}
-
-		if ( isset( $context['meta'] ) && is_array( $context['meta'] ) ) {
-			$quote['meta'] = $context['meta'];
-		}
-
-		if ( isset( $context['raw'] ) && is_array( $context['raw'] ) ) {
-			$quote['raw'] = $context['raw'];
+		foreach ( array( 'destination', 'weight', 'meta', 'raw' ) as $key ) {
+			if ( isset( $context[ $key ] ) && is_array( $context[ $key ] ) ) {
+				if ( 'meta' === $key ) {
+					$quote['meta'] = array_merge( $quote['meta'], $context['meta'] );
+				} else {
+					$quote[ $key ] = $context[ $key ];
+				}
+			}
 		}
 
 		return $this->normalize_quote( $quote );
@@ -152,6 +155,27 @@ class WDC_Quote_Normalizer {
 	 */
 	public function normalize( array $quote ): array {
 		return $this->normalize_quote( $quote );
+	}
+
+	/**
+	 * @param array<string, mixed> $context Optional fallback context.
+	 */
+	private function is_fallback_enabled( array $context ): bool {
+		if ( isset( $context['fallback_enabled'] ) ) {
+			return 'yes' === $context['fallback_enabled'] || true === $context['fallback_enabled'];
+		}
+
+		if ( isset( $context['settings']['fallback_enabled'] ) ) {
+			return 'yes' === $context['settings']['fallback_enabled'];
+		}
+
+		if ( class_exists( 'WDC_Settings' ) ) {
+			$settings = ( new WDC_Settings() )->get();
+
+			return 'yes' === $settings['fallback_enabled'];
+		}
+
+		return true;
 	}
 
 	/**

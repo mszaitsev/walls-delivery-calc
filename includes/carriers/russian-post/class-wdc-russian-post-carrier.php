@@ -75,6 +75,7 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 			$context,
 			array(
 				'settings' => $settings,
+				'fallback_enabled' => $settings['fallback_enabled'],
 				'destination' => $destination,
 			)
 		);
@@ -181,6 +182,10 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 		$this->debug_log( $debug_enabled, 'Russian Post fallback used.', array( 'reason' => $reason, 'api_result' => $api_result ) );
 
 		$quote = $this->normalizer->create_fallback_quote( $context );
+		if ( empty( $quote['rates'] ) ) {
+			$this->debug_log( $debug_enabled, 'Russian Post fallback disabled.', array( 'reason' => $reason ) );
+		}
+
 		$quote['meta']['fallback_reason'] = $reason;
 		$quote['error_code'] = $reason;
 		$quote['error_message'] = $reason;
