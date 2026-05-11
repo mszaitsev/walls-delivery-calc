@@ -91,10 +91,7 @@ class WDC_Admin {
 
 			<nav class="nav-tab-wrapper">
 				<?php foreach ( $tabs as $tab_key => $tab_label ) : ?>
-					<a
-						class="nav-tab <?php echo esc_attr( $active_tab === $tab_key ? 'nav-tab-active' : '' ); ?>"
-						href="<?php echo esc_url( add_query_arg( array( 'page' => 'wdc-delivery-calc', 'tab' => $tab_key ), admin_url( 'admin.php' ) ) ); ?>"
-					>
+					<a class="nav-tab <?php echo esc_attr( $active_tab === $tab_key ? 'nav-tab-active' : '' ); ?>" href="<?php echo esc_url( add_query_arg( array( 'page' => 'wdc-delivery-calc', 'tab' => $tab_key ), admin_url( 'admin.php' ) ) ); ?>">
 						<?php echo esc_html( $tab_label ); ?>
 					</a>
 				<?php endforeach; ?>
@@ -150,10 +147,6 @@ class WDC_Admin {
 				<?php $this->render_yes_no_row( 'debug_enabled', __( 'Debug enabled', 'walls-delivery-calc' ), $settings['debug_enabled'] ); ?>
 				<?php $this->render_yes_no_row( 'fallback_enabled', __( 'Fallback enabled', 'walls-delivery-calc' ), $settings['fallback_enabled'] ); ?>
 				<tr>
-					<th scope="row"><label for="wdc_max_package_weight_g"><?php echo esc_html__( 'Max package weight, g', 'walls-delivery-calc' ); ?></label></th>
-					<td><input id="wdc_max_package_weight_g" type="number" min="0" name="wdc_settings[max_package_weight_g]" value="<?php echo esc_attr( (string) $settings['max_package_weight_g'] ); ?>"></td>
-				</tr>
-				<tr>
 					<th scope="row"><label for="wdc_currency"><?php echo esc_html__( 'Currency', 'walls-delivery-calc' ); ?></label></th>
 					<td><input id="wdc_currency" type="text" name="wdc_settings[currency]" value="<?php echo esc_attr( (string) $settings['currency'] ); ?>"></td>
 				</tr>
@@ -166,7 +159,7 @@ class WDC_Admin {
 	 * @param array<string, mixed> $settings Settings.
 	 */
 	private function render_russian_post_international_tab( array $settings ): void {
-		$service = $settings['services']['russian_post_international_parcel'];
+		$service = $settings['services'][ WDC_Settings::SERVICE_RUSSIAN_POST_INTERNATIONAL_PARCEL ];
 		?>
 		<h2><?php echo esc_html__( 'Почта России — международная доставка', 'walls-delivery-calc' ); ?></h2>
 		<table class="form-table" role="presentation">
@@ -183,6 +176,10 @@ class WDC_Admin {
 				<tr>
 					<th scope="row"><label for="wdc_isavia"><?php echo esc_html__( 'Isavia', 'walls-delivery-calc' ); ?></label></th>
 					<td><input id="wdc_isavia" type="number" min="0" max="1" name="wdc_settings[services][russian_post_international_parcel][isavia]" value="<?php echo esc_attr( (string) $service['isavia'] ); ?>"></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="wdc_max_package_weight_g"><?php echo esc_html__( 'Max package weight, g', 'walls-delivery-calc' ); ?></label></th>
+					<td><input id="wdc_max_package_weight_g" type="number" min="0" name="wdc_settings[services][russian_post_international_parcel][max_package_weight_g]" value="<?php echo esc_attr( (string) $service['max_package_weight_g'] ); ?>"></td>
 				</tr>
 				<tr>
 					<th scope="row"><label for="wdc_formula_divider"><?php echo esc_html__( 'Formula divider', 'walls-delivery-calc' ); ?></label></th>
@@ -224,8 +221,8 @@ class WDC_Admin {
 			<tbody>
 				<?php foreach ( $tiers as $index => $tier ) : ?>
 					<tr>
-						<td><input type="number" min="0" name="wdc_settings[packaging_tiers][<?php echo esc_attr( (string) $index ); ?>][from_g]" value="<?php echo esc_attr( (string) $tier['from_g'] ); ?>"></td>
-						<td><input type="number" min="0" name="wdc_settings[packaging_tiers][<?php echo esc_attr( (string) $index ); ?>][to_g]" value="<?php echo esc_attr( (string) $tier['to_g'] ); ?>"></td>
+						<td><input type="number" min="0" name="wdc_settings[packaging_tiers][<?php echo esc_attr( (string) $index ); ?>][from_weight_g]" value="<?php echo esc_attr( (string) $tier['from_weight_g'] ); ?>"></td>
+						<td><input type="number" min="0" name="wdc_settings[packaging_tiers][<?php echo esc_attr( (string) $index ); ?>][to_weight_g]" value="<?php echo esc_attr( (string) $tier['to_weight_g'] ); ?>"></td>
 						<td><input type="number" min="0" name="wdc_settings[packaging_tiers][<?php echo esc_attr( (string) $index ); ?>][packaging_weight_g]" value="<?php echo esc_attr( (string) $tier['packaging_weight_g'] ); ?>"></td>
 					</tr>
 				<?php endforeach; ?>
