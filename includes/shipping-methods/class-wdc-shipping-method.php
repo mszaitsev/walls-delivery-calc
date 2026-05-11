@@ -10,7 +10,7 @@ defined( 'ABSPATH' ) || exit;
 class WDC_Shipping_Method extends WC_Shipping_Method {
 	private WDC_Logger $logger;
 
-	private WDC_Settings $settings;
+	private WDC_Settings $wdc_settings;
 
 	public function __construct( int $instance_id = 0 ) {
 		$this->id                 = 'wdc_dynamic_delivery';
@@ -22,7 +22,7 @@ class WDC_Shipping_Method extends WC_Shipping_Method {
 			'instance-settings',
 		);
 		$this->logger             = new WDC_Logger();
-		$this->settings           = new WDC_Settings();
+		$this->wdc_settings       = new WDC_Settings();
 
 		$this->init();
 	}
@@ -35,7 +35,7 @@ class WDC_Shipping_Method extends WC_Shipping_Method {
 	 * @param array<string, mixed> $package WooCommerce package data.
 	 */
 	public function calculate_shipping( $package = array() ) {
-		$carrier = new WDC_Russian_Post_Carrier( $this->settings, null, null, null, null, $this->logger );
+		$carrier = new WDC_Russian_Post_Carrier( $this->wdc_settings, null, null, null, null, $this->logger );
 		$quote = $carrier->get_quote( is_array( $package ) ? $package : array() );
 
 		if ( empty( $quote['success'] ) ) {
@@ -101,7 +101,7 @@ class WDC_Shipping_Method extends WC_Shipping_Method {
 	 * @param array<string, mixed> $context Debug context.
 	 */
 	private function debug_log( string $message, array $context = array() ): void {
-		$settings = $this->settings->get();
+		$settings = $this->wdc_settings->get();
 		if ( 'yes' === $settings['debug_enabled'] ) {
 			$this->logger->log( 'debug', $message, $context );
 		}
