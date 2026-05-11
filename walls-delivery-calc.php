@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name: Walls Delivery Calсulator
+ * Plugin Name: Калькулятор доставок walls-shop.ru
  * Author: Михаил Зайцев
  * Description: Расчет стоимости доставки для WooCommerce.
  * Text Domain: walls-delivery-calc
