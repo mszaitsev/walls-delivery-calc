@@ -235,7 +235,11 @@ class WDC_Russian_Post_Countries {
 			'json_error' => '',
 			'raw_country_count' => 0,
 			'normalized_country_count' => 0,
+			'matched_country_count' => 0,
 			'enabled_country_count' => 0,
+			'skipped_unmatched_count' => 0,
+			'skipped_blocked_count' => 0,
+			'skipped_ru_count' => 0,
 			'last_error' => '',
 		);
 	}
@@ -258,24 +262,29 @@ class WDC_Russian_Post_Countries {
 	 */
 	private function normalize_countries( array $items, int &$normalized_count, int &$enabled_count ): array {
 		$countries = array();
+		$wc_country_names = $this->build_wc_country_name_map();
 
 		foreach ( $items as $item ) {
 			if ( ! is_array( $item ) ) {
 				continue;
 			}
 
-			$country = $this->normalize_country( $item );
+			$country = $this->normalize_country( $item, $wc_country_names );
 			if ( empty( $country['iso2'] ) || empty( $country['carrier_country_id'] ) ) {
+				++$this->last_diagnostics['skipped_unmatched_count'];
 				continue;
 			}
 
 			++$normalized_count;
+			++$this->last_diagnostics['matched_country_count'];
 
-			if ( 'RU' === $country['iso2'] ) {
+			if ( $this->is_russian_country( $country ) ) {
+				++$this->last_diagnostics['skipped_ru_count'];
 				continue;
 			}
 
 			if ( empty( $country['enabled'] ) ) {
+				++$this->last_diagnostics['skipped_blocked_count'];
 				continue;
 			}
 
@@ -306,9 +315,10 @@ class WDC_Russian_Post_Countries {
 
 	/**
 	 * @param array<string, mixed> $raw Raw country record.
+	 * @param array<string, string> $wc_country_names Normalized WooCommerce country name to ISO2 map.
 	 * @return array<string, mixed>
 	 */
-	private function normalize_country( array $raw ): array {
+	private function normalize_country( array $raw, array $wc_country_names = array() ): array {
 		$iso2 = strtoupper( $this->first_code( $raw, array( 'iso2', 'alpha2', 'a2', 'code2', 'countryCode2', 'country_code_iso2', 'country_iso2', 'country_code' ), 2 ) );
 		$iso3 = strtoupper( $this->first_code( $raw, array( 'iso3', 'alpha3', 'a3', 'code3', 'countryCode3', 'country_code_iso3', 'country_iso3' ), 3 ) );
 		$carrier_country_id = $this->first_scalar(
@@ -349,6 +359,13 @@ class WDC_Russian_Post_Countries {
 			$iso2 = $this->extract_iso_from_altnames( $raw, 2, 2 );
 		}
 
+		if ( '' === $iso2 && '' !== $name ) {
+			$normalized_name = $this->normalize_country_name_for_match( $name );
+			if ( isset( $wc_country_names[ $normalized_name ] ) ) {
+				$iso2 = $wc_country_names[ $normalized_name ];
+			}
+		}
+
 		if ( '' === $iso3 ) {
 			$iso3 = strtoupper( $this->first_code( $raw, array( 'code', 'Code' ), 3 ) );
 		}
@@ -369,6 +386,68 @@ class WDC_Russian_Post_Countries {
 			'enabled' => $this->is_country_enabled( $raw ),
 			'raw' => $raw,
 		);
+	}
+
+	/**
+	 * @return array<string, string>
+	 */
+	private function build_wc_country_name_map(): array {
+		if ( ! function_exists( 'WC' ) ) {
+			return array();
+		}
+
+		$woocommerce = WC();
+		if ( ! is_object( $woocommerce ) || empty( $woocommerce->countries ) ) {
+			return array();
+		}
+
+		$countries = $woocommerce->countries->get_countries();
+		if ( ! is_array( $countries ) ) {
+			return array();
+		}
+
+		$map = array();
+		foreach ( $countries as $iso2 => $name ) {
+			if ( ! is_scalar( $iso2 ) || ! is_scalar( $name ) ) {
+				continue;
+			}
+
+			$iso2 = strtoupper( sanitize_text_field( (string) $iso2 ) );
+			$normalized_name = $this->normalize_country_name_for_match( (string) $name );
+
+			if ( '' !== $iso2 && '' !== $normalized_name && ! isset( $map[ $normalized_name ] ) ) {
+				$map[ $normalized_name ] = $iso2;
+			}
+		}
+
+		return $map;
+	}
+
+	private function normalize_country_name_for_match( string $name ): string {
+		$name = trim( $name );
+		$name = str_replace( array( 'ё', 'Ё' ), array( 'е', 'Е' ), $name );
+		$name = str_replace( array( '"', "'", '«', '»', '.', ',' ), ' ', $name );
+		$name = preg_replace( '/\s+/u', ' ', $name );
+		$name = is_string( $name ) ? trim( $name ) : '';
+
+		if ( function_exists( 'mb_strtoupper' ) ) {
+			return mb_strtoupper( $name, 'UTF-8' );
+		}
+
+		return strtoupper( $name );
+	}
+
+	/**
+	 * @param array<string, mixed> $country Normalized country record.
+	 */
+	private function is_russian_country( array $country ): bool {
+		if ( 'RU' === (string) ( $country['iso2'] ?? '' ) ) {
+			return true;
+		}
+
+		$name = $this->normalize_country_name_for_match( (string) ( $country['name'] ?? '' ) );
+
+		return in_array( $name, array( 'РОССИЯ', 'РОССИЙСКАЯ ФЕДЕРАЦИЯ' ), true );
 	}
 
 	/**

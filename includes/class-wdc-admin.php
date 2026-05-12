@@ -86,7 +86,7 @@ class WDC_Admin {
 		);
 
 		if ( ! empty( $countries ) ) {
-			delete_transient( $this->get_countries_refresh_error_key() );
+			set_transient( $this->get_countries_refresh_error_key(), $diagnostics, MINUTE_IN_SECONDS );
 			$args['countries_refreshed'] = 'true';
 		} else {
 			set_transient( $this->get_countries_refresh_error_key(), $diagnostics, MINUTE_IN_SECONDS );
@@ -109,6 +109,33 @@ class WDC_Admin {
 		delete_transient( $this->get_countries_refresh_error_key() );
 
 		return is_array( $error ) ? $error : array();
+	}
+
+	/**
+	 * @param array<string, mixed> $stats Refresh diagnostics.
+	 */
+	private function render_countries_refresh_stats( array $stats ): void {
+		?>
+		<p>
+			<strong><?php echo esc_html__( 'Raw countries:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['raw_country_count'] ?? 0 ) ); ?>
+			&nbsp;|&nbsp;
+			<strong><?php echo esc_html__( 'Matched:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['matched_country_count'] ?? 0 ) ); ?>
+			&nbsp;|&nbsp;
+			<strong><?php echo esc_html__( 'Enabled:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['enabled_country_count'] ?? 0 ) ); ?>
+			&nbsp;|&nbsp;
+			<strong><?php echo esc_html__( 'Skipped unmatched:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['skipped_unmatched_count'] ?? 0 ) ); ?>
+			&nbsp;|&nbsp;
+			<strong><?php echo esc_html__( 'Skipped blocked:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['skipped_blocked_count'] ?? 0 ) ); ?>
+			&nbsp;|&nbsp;
+			<strong><?php echo esc_html__( 'Skipped RU:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['skipped_ru_count'] ?? 0 ) ); ?>
+		</p>
+		<?php
 	}
 
 	public function render_page(): void {
@@ -139,6 +166,9 @@ class WDC_Admin {
 			<?php if ( isset( $_GET['countries_refreshed'] ) && 'true' === sanitize_text_field( wp_unslash( $_GET['countries_refreshed'] ) ) ) : ?>
 				<div class="notice notice-success is-dismissible">
 					<p><?php echo esc_html__( 'Справочник стран Почты России обновлен.', 'walls-delivery-calc' ); ?></p>
+					<?php if ( ! empty( $countries_refresh_error ) ) : ?>
+						<?php $this->render_countries_refresh_stats( $countries_refresh_error ); ?>
+					<?php endif; ?>
 				</div>
 			<?php endif; ?>
 
@@ -153,16 +183,8 @@ class WDC_Admin {
 						<p>
 							<strong><?php echo esc_html__( 'HTTP code:', 'walls-delivery-calc' ); ?></strong>
 							<?php echo esc_html( (string) ( $countries_refresh_error['http_code'] ?? 0 ) ); ?>
-							&nbsp;|&nbsp;
-							<strong><?php echo esc_html__( 'Raw countries:', 'walls-delivery-calc' ); ?></strong>
-							<?php echo esc_html( (string) ( $countries_refresh_error['raw_country_count'] ?? 0 ) ); ?>
-							&nbsp;|&nbsp;
-							<strong><?php echo esc_html__( 'Normalized:', 'walls-delivery-calc' ); ?></strong>
-							<?php echo esc_html( (string) ( $countries_refresh_error['normalized_country_count'] ?? 0 ) ); ?>
-							&nbsp;|&nbsp;
-							<strong><?php echo esc_html__( 'Normalized enabled:', 'walls-delivery-calc' ); ?></strong>
-							<?php echo esc_html( (string) ( $countries_refresh_error['enabled_country_count'] ?? 0 ) ); ?>
 						</p>
+						<?php $this->render_countries_refresh_stats( $countries_refresh_error ); ?>
 						<?php if ( ! empty( $countries_refresh_error['body_snippet'] ) ) : ?>
 							<p>
 								<strong><?php echo esc_html__( 'Response snippet:', 'walls-delivery-calc' ); ?></strong>
