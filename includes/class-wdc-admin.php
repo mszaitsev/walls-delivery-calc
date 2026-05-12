@@ -34,6 +34,11 @@ class WDC_Admin {
 	}
 
 	public function handle_save(): void {
+		if ( isset( $_POST['wdc_countries_refresh_submit'] ) ) {
+			$this->handle_countries_refresh();
+			return;
+		}
+
 		if ( ! isset( $_POST['wdc_settings_submit'] ) ) {
 			return;
 		}
@@ -65,6 +70,74 @@ class WDC_Admin {
 		exit;
 	}
 
+	private function handle_countries_refresh(): void {
+		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+			wp_die( esc_html__( 'You do not have permission to refresh countries.', 'walls-delivery-calc' ) );
+		}
+
+		check_admin_referer( 'wdc_save_settings', 'wdc_settings_nonce' );
+
+		$countries_client = new WDC_Russian_Post_Countries( null, $this->logger, $this->settings );
+		$countries = $countries_client->refresh_countries();
+		$diagnostics = $countries_client->get_last_diagnostics();
+		$args = array(
+			'page' => 'wdc-delivery-calc',
+			'tab' => 'countries',
+		);
+
+		if ( ! empty( $countries ) ) {
+			set_transient( $this->get_countries_refresh_error_key(), $diagnostics, MINUTE_IN_SECONDS );
+			$args['countries_refreshed'] = 'true';
+		} else {
+			set_transient( $this->get_countries_refresh_error_key(), $diagnostics, MINUTE_IN_SECONDS );
+			$args['countries_refresh_failed'] = 'true';
+		}
+
+		wp_safe_redirect( add_query_arg( $args, admin_url( 'admin.php' ) ) );
+		exit;
+	}
+
+	private function get_countries_refresh_error_key(): string {
+		return 'wdc_russian_post_countries_refresh_error_' . get_current_user_id();
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	private function get_countries_refresh_error(): array {
+		$error = get_transient( $this->get_countries_refresh_error_key() );
+		delete_transient( $this->get_countries_refresh_error_key() );
+
+		return is_array( $error ) ? $error : array();
+	}
+
+	/**
+	 * @param array<string, mixed> $stats Refresh diagnostics.
+	 */
+	private function render_countries_refresh_stats( array $stats ): void {
+		?>
+		<p>
+			<strong><?php echo esc_html__( 'Raw countries:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['raw_country_count'] ?? 0 ) ); ?>
+			&nbsp;|&nbsp;
+			<strong><?php echo esc_html__( 'Matched:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['matched_country_count'] ?? 0 ) ); ?>
+			&nbsp;|&nbsp;
+			<strong><?php echo esc_html__( 'Enabled:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['enabled_country_count'] ?? 0 ) ); ?>
+			&nbsp;|&nbsp;
+			<strong><?php echo esc_html__( 'Skipped unmatched:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['skipped_unmatched_count'] ?? 0 ) ); ?>
+			&nbsp;|&nbsp;
+			<strong><?php echo esc_html__( 'Skipped blocked:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['skipped_blocked_count'] ?? 0 ) ); ?>
+			&nbsp;|&nbsp;
+			<strong><?php echo esc_html__( 'Skipped RU:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['skipped_ru_count'] ?? 0 ) ); ?>
+		</p>
+		<?php
+	}
+
 	public function render_page(): void {
 		if ( ! current_user_can( 'manage_woocommerce' ) ) {
 			wp_die( esc_html__( 'You do not have permission to access this page.', 'walls-delivery-calc' ) );
@@ -74,6 +147,7 @@ class WDC_Admin {
 		$active_tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'general';
 		$active_tab = array_key_exists( $active_tab, $tabs ) ? $active_tab : 'general';
 		$settings = $this->settings->get();
+		$countries_refresh_error = $this->get_countries_refresh_error();
 		?>
 		<div class="wrap">
 			<h1><?php echo esc_html__( 'Walls Delivery Calc', 'walls-delivery-calc' ); ?></h1>
@@ -86,6 +160,38 @@ class WDC_Admin {
 			<?php if ( isset( $_GET['updated'] ) && 'true' === sanitize_text_field( wp_unslash( $_GET['updated'] ) ) ) : ?>
 				<div class="notice notice-success is-dismissible">
 					<p><?php echo esc_html__( 'Настройки сохранены.', 'walls-delivery-calc' ); ?></p>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( isset( $_GET['countries_refreshed'] ) && 'true' === sanitize_text_field( wp_unslash( $_GET['countries_refreshed'] ) ) ) : ?>
+				<div class="notice notice-success is-dismissible">
+					<p><?php echo esc_html__( 'Справочник стран Почты России обновлен.', 'walls-delivery-calc' ); ?></p>
+					<?php if ( ! empty( $countries_refresh_error ) ) : ?>
+						<?php $this->render_countries_refresh_stats( $countries_refresh_error ); ?>
+					<?php endif; ?>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( isset( $_GET['countries_refresh_failed'] ) && 'true' === sanitize_text_field( wp_unslash( $_GET['countries_refresh_failed'] ) ) ) : ?>
+				<div class="notice notice-error is-dismissible">
+					<p><?php echo esc_html__( 'Не удалось обновить справочник стран Почты России. Checkout продолжит работать через fallback.', 'walls-delivery-calc' ); ?></p>
+					<?php if ( ! empty( $countries_refresh_error ) ) : ?>
+						<p>
+							<strong><?php echo esc_html__( 'Причина:', 'walls-delivery-calc' ); ?></strong>
+							<?php echo esc_html( (string) ( $countries_refresh_error['last_error'] ?? 'unknown_error' ) ); ?>
+						</p>
+						<p>
+							<strong><?php echo esc_html__( 'HTTP code:', 'walls-delivery-calc' ); ?></strong>
+							<?php echo esc_html( (string) ( $countries_refresh_error['http_code'] ?? 0 ) ); ?>
+						</p>
+						<?php $this->render_countries_refresh_stats( $countries_refresh_error ); ?>
+						<?php if ( ! empty( $countries_refresh_error['body_snippet'] ) ) : ?>
+							<p>
+								<strong><?php echo esc_html__( 'Response snippet:', 'walls-delivery-calc' ); ?></strong>
+								<code><?php echo esc_html( (string) $countries_refresh_error['body_snippet'] ); ?></code>
+							</p>
+						<?php endif; ?>
+					<?php endif; ?>
 				</div>
 			<?php endif; ?>
 
@@ -233,9 +339,57 @@ class WDC_Admin {
 	}
 
 	private function render_countries_tab(): void {
+		$countries_client = new WDC_Russian_Post_Countries( null, $this->logger, $this->settings );
+		$payload = $countries_client->get_cache_payload();
+		$countries = $countries_client->get_countries();
+		$enabled_countries = array_filter(
+			$countries,
+			static function ( array $country ): bool {
+				return ! empty( $country['enabled'] ) && 'RU' !== (string) ( $country['iso2'] ?? '' );
+			}
+		);
 		?>
 		<h2><?php echo esc_html__( 'Страны', 'walls-delivery-calc' ); ?></h2>
-		<p><?php echo esc_html__( 'Сопоставление стран WooCommerce со справочником Почты России будет добавлено на следующем этапе.', 'walls-delivery-calc' ); ?></p>
+		<p><?php echo esc_html__( 'Автоматическое сопоставление: WooCommerce ISO2 -> ISO2 Почты России.', 'walls-delivery-calc' ); ?></p>
+		<p>
+			<button type="submit" class="button button-secondary" name="wdc_countries_refresh_submit" value="1">
+				<?php echo esc_html__( 'Обновить справочник стран Почты России', 'walls-delivery-calc' ); ?>
+			</button>
+		</p>
+		<p>
+			<strong><?php echo esc_html__( 'Количество стран:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) count( $enabled_countries ) ); ?>
+			&nbsp;|&nbsp;
+			<strong><?php echo esc_html__( 'Дата последнего обновления:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( ! empty( $payload['updated_at'] ) ? (string) $payload['updated_at'] : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
+		</p>
+
+		<table class="widefat striped" style="max-width: 960px;">
+			<thead>
+				<tr>
+					<th><?php echo esc_html__( 'WooCommerce ISO', 'walls-delivery-calc' ); ?></th>
+					<th><?php echo esc_html__( 'Страна', 'walls-delivery-calc' ); ?></th>
+					<th><?php echo esc_html__( 'Код Почты России', 'walls-delivery-calc' ); ?></th>
+					<th><?php echo esc_html__( 'Доступна', 'walls-delivery-calc' ); ?></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php if ( empty( $enabled_countries ) ) : ?>
+					<tr>
+						<td colspan="4"><?php echo esc_html__( 'Справочник еще не загружен или не содержит доступных международных стран.', 'walls-delivery-calc' ); ?></td>
+					</tr>
+				<?php else : ?>
+					<?php foreach ( $enabled_countries as $country ) : ?>
+						<tr>
+							<td><?php echo esc_html( (string) $country['iso2'] ); ?></td>
+							<td><?php echo esc_html( (string) $country['name'] ); ?></td>
+							<td><?php echo esc_html( (string) $country['carrier_country_id'] ); ?></td>
+							<td><?php echo esc_html__( 'Да', 'walls-delivery-calc' ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+				<?php endif; ?>
+			</tbody>
+		</table>
 		<?php
 	}
 
