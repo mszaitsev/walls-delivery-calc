@@ -34,6 +34,16 @@ class WDC_Admin {
 	}
 
 	public function handle_save(): void {
+		if ( isset( $_POST['wdc_preview_bulk_country_overrides'] ) ) {
+			$this->handle_bulk_country_overrides_preview();
+			return;
+		}
+
+		if ( isset( $_POST['wdc_apply_bulk_country_overrides'] ) ) {
+			$this->handle_bulk_country_overrides_apply();
+			return;
+		}
+
 		if ( isset( $_POST['wdc_country_overrides_submit'] ) ) {
 			$this->handle_country_overrides_save();
 			return;
@@ -133,8 +143,193 @@ class WDC_Admin {
 		exit;
 	}
 
+	private function handle_bulk_country_overrides_preview(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You do not have permission to preview country overrides.', 'walls-delivery-calc' ) );
+		}
+
+		check_admin_referer( 'wdc_save_settings', 'wdc_settings_nonce' );
+
+		$countries_client = new WDC_Russian_Post_Countries( null, $this->logger, $this->settings );
+		$payload = $countries_client->get_cache_payload();
+		$all_countries = isset( $payload['all_countries'] ) && is_array( $payload['all_countries'] ) ? $payload['all_countries'] : array();
+
+		if ( empty( $all_countries ) ) {
+			wp_safe_redirect(
+				add_query_arg(
+					array(
+						'page' => 'wdc-delivery-calc',
+						'tab' => 'countries',
+						'bulk_country_cache_missing' => 'true',
+					),
+					admin_url( 'admin.php' )
+				)
+			);
+			exit;
+		}
+
+		$enabled_text = $this->get_posted_bulk_country_text( 'wdc_bulk_country_enabled_text' );
+		$disabled_text = $this->get_posted_bulk_country_text( 'wdc_bulk_country_disabled_text' );
+		$preview = $this->build_bulk_country_overrides_preview( $enabled_text, $disabled_text, $all_countries );
+
+		set_transient(
+			$this->get_bulk_country_preview_key(),
+			array(
+				'enabled_text' => $enabled_text,
+				'disabled_text' => $disabled_text,
+				'rows' => $preview,
+			),
+			MINUTE_IN_SECONDS * 10
+		);
+
+		wp_safe_redirect(
+			add_query_arg(
+				array(
+					'page' => 'wdc-delivery-calc',
+					'tab' => 'countries',
+					'bulk_country_preview' => 'true',
+				),
+				admin_url( 'admin.php' )
+			)
+		);
+		exit;
+	}
+
+	private function handle_bulk_country_overrides_apply(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'You do not have permission to apply country overrides.', 'walls-delivery-calc' ) );
+		}
+
+		check_admin_referer( 'wdc_save_settings', 'wdc_settings_nonce' );
+
+		$countries_client = new WDC_Russian_Post_Countries( null, $this->logger, $this->settings );
+		$payload = $countries_client->get_cache_payload();
+		$all_countries = isset( $payload['all_countries'] ) && is_array( $payload['all_countries'] ) ? $payload['all_countries'] : array();
+
+		if ( empty( $all_countries ) ) {
+			wp_safe_redirect(
+				add_query_arg(
+					array(
+						'page' => 'wdc-delivery-calc',
+						'tab' => 'countries',
+						'bulk_country_cache_missing' => 'true',
+					),
+					admin_url( 'admin.php' )
+				)
+			);
+			exit;
+		}
+
+		$enabled_text = $this->get_posted_bulk_country_text( 'wdc_bulk_country_enabled_text' );
+		$disabled_text = $this->get_posted_bulk_country_text( 'wdc_bulk_country_disabled_text' );
+		$preview = $this->build_bulk_country_overrides_preview( $enabled_text, $disabled_text, $all_countries );
+		$preview_data = get_transient( $this->get_bulk_country_preview_key() );
+		$preview_data = is_array( $preview_data ) ? $preview_data : array();
+
+		if (
+			! isset( $preview_data['enabled_text'], $preview_data['disabled_text'] )
+			|| (string) $preview_data['enabled_text'] !== $enabled_text
+			|| (string) $preview_data['disabled_text'] !== $disabled_text
+		) {
+			set_transient(
+				$this->get_bulk_country_preview_key(),
+				array(
+					'enabled_text' => $enabled_text,
+					'disabled_text' => $disabled_text,
+					'rows' => $preview,
+				),
+				MINUTE_IN_SECONDS * 10
+			);
+
+			wp_safe_redirect(
+				add_query_arg(
+					array(
+						'page' => 'wdc-delivery-calc',
+						'tab' => 'countries',
+						'bulk_country_preview' => 'true',
+					),
+					admin_url( 'admin.php' )
+				)
+			);
+			exit;
+		}
+
+		$settings = $this->settings->get();
+		$service_key = WDC_Settings::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL;
+		$overrides = isset( $settings['country_overrides'][ $service_key ] ) && is_array( $settings['country_overrides'][ $service_key ] )
+			? $settings['country_overrides'][ $service_key ]
+			: array();
+		$changed = 0;
+		$skipped = 0;
+		$note = sprintf(
+			/* translators: %s: date. */
+			__( 'изменено вручную %s', 'walls-delivery-calc' ),
+			wp_date( 'd.m.Y' )
+		);
+
+		foreach ( $preview as $row ) {
+			$action = (string) ( $row['action'] ?? '' );
+			if ( ! in_array( $action, array( 'change_to_yes', 'change_to_no' ), true ) ) {
+				++$skipped;
+				continue;
+			}
+
+			$country = isset( $row['country'] ) && is_array( $row['country'] ) ? $row['country'] : array();
+			$key = $this->get_bulk_country_override_key( $country );
+			if ( '' === $key ) {
+				++$skipped;
+				continue;
+			}
+
+			$existing = isset( $overrides[ $key ] ) && is_array( $overrides[ $key ] ) ? $overrides[ $key ] : array();
+			$overrides[ $key ] = array(
+				'enabled' => 'change_to_yes' === $action ? 'yes' : 'no',
+				'manual_iso2' => isset( $existing['manual_iso2'] ) ? (string) $existing['manual_iso2'] : (string) ( $country['manual_iso2'] ?? '' ),
+				'carrier_country_id' => (string) ( $country['carrier_country_id'] ?? '' ),
+				'country_name' => (string) ( $country['name'] ?? '' ),
+				'note' => $note,
+			);
+			++$changed;
+		}
+
+		$settings['country_overrides'][ $service_key ] = $overrides;
+		$this->settings->update( $settings );
+		$countries_client->rebuild_cached_effective_countries();
+
+		set_transient(
+			$this->get_bulk_country_apply_result_key(),
+			array(
+				'changed' => $changed,
+				'skipped' => $skipped,
+			),
+			MINUTE_IN_SECONDS
+		);
+
+		delete_transient( $this->get_bulk_country_preview_key() );
+
+		wp_safe_redirect(
+			add_query_arg(
+				array(
+					'page' => 'wdc-delivery-calc',
+					'tab' => 'countries',
+					'bulk_country_applied' => 'true',
+				),
+				admin_url( 'admin.php' )
+			)
+		);
+		exit;
+	}
+
 	private function get_countries_refresh_error_key(): string {
 		return 'wdc_russian_post_countries_refresh_error_' . get_current_user_id();
+	}
+
+	private function get_bulk_country_preview_key(): string {
+		return 'wdc_bulk_country_preview_' . get_current_user_id();
+	}
+
+	private function get_bulk_country_apply_result_key(): string {
+		return 'wdc_bulk_country_apply_result_' . get_current_user_id();
 	}
 
 	/**
@@ -240,6 +435,34 @@ class WDC_Admin {
 							</p>
 						<?php endif; ?>
 					<?php endif; ?>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( isset( $_GET['bulk_country_cache_missing'] ) && 'true' === sanitize_text_field( wp_unslash( $_GET['bulk_country_cache_missing'] ) ) ) : ?>
+				<div class="notice notice-warning is-dismissible">
+					<p><?php echo esc_html__( 'Сначала обновите справочник стран Почты России.', 'walls-delivery-calc' ); ?></p>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( isset( $_GET['bulk_country_applied'] ) && 'true' === sanitize_text_field( wp_unslash( $_GET['bulk_country_applied'] ) ) ) : ?>
+				<?php
+				$bulk_apply_result = get_transient( $this->get_bulk_country_apply_result_key() );
+				delete_transient( $this->get_bulk_country_apply_result_key() );
+				$bulk_apply_result = is_array( $bulk_apply_result ) ? $bulk_apply_result : array();
+				?>
+				<div class="notice notice-success is-dismissible">
+					<p>
+						<?php
+						echo esc_html(
+							sprintf(
+								/* translators: 1: changed count, 2: skipped count. */
+								__( 'Массовые настройки стран применены. Изменено: %1$d. Пропущено: %2$d.', 'walls-delivery-calc' ),
+								absint( $bulk_apply_result['changed'] ?? 0 ),
+								absint( $bulk_apply_result['skipped'] ?? 0 )
+							)
+						);
+						?>
+					</p>
 				</div>
 			<?php endif; ?>
 
@@ -466,6 +689,7 @@ class WDC_Admin {
 		</p>
 
 		<?php $this->render_country_tables_assets(); ?>
+		<?php $this->render_bulk_country_overrides_block( $all_countries ); ?>
 
 		<h3><?php echo esc_html__( 'Доступные страны', 'walls-delivery-calc' ); ?></h3>
 		<?php $this->render_country_overrides_table( $enabled_countries, 'wdc-enabled-countries' ); ?>
@@ -474,6 +698,91 @@ class WDC_Admin {
 		<?php $this->render_country_overrides_table( $disabled_countries, 'wdc-disabled-countries' ); ?>
 
 		<?php submit_button( __( 'Сохранить ручные настройки стран', 'walls-delivery-calc' ), 'primary', 'wdc_country_overrides_submit' ); ?>
+		<?php
+	}
+
+	/**
+	 * @param array<int, array<string, mixed>> $all_countries All countries from cache.
+	 */
+	private function render_bulk_country_overrides_block( array $all_countries ): void {
+		$preview_data = get_transient( $this->get_bulk_country_preview_key() );
+		$preview_data = is_array( $preview_data ) ? $preview_data : array();
+		$has_preview = isset( $_GET['bulk_country_preview'] ) && 'true' === sanitize_text_field( wp_unslash( $_GET['bulk_country_preview'] ) );
+		$enabled_text = isset( $preview_data['enabled_text'] ) ? (string) $preview_data['enabled_text'] : '';
+		$disabled_text = isset( $preview_data['disabled_text'] ) ? (string) $preview_data['disabled_text'] : '';
+		$preview_rows = isset( $preview_data['rows'] ) && is_array( $preview_data['rows'] ) ? $preview_data['rows'] : array();
+		?>
+		<hr>
+		<h3><?php echo esc_html__( 'Массовая сверка стран', 'walls-delivery-calc' ); ?></h3>
+		<?php if ( empty( $all_countries ) ) : ?>
+			<p><?php echo esc_html__( 'Сначала обновите справочник стран Почты России.', 'walls-delivery-calc' ); ?></p>
+			<?php return; ?>
+		<?php endif; ?>
+		<table class="form-table wdc-bulk-country-overrides" role="presentation">
+			<tbody>
+				<tr>
+					<th scope="row"><label for="wdc_bulk_country_enabled_text"><?php echo esc_html__( 'Страны, куда доставка есть', 'walls-delivery-calc' ); ?></label></th>
+					<td><textarea id="wdc_bulk_country_enabled_text" class="large-text code" rows="8" name="wdc_bulk_country_enabled_text"><?php echo esc_textarea( $enabled_text ); ?></textarea></td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="wdc_bulk_country_disabled_text"><?php echo esc_html__( 'Страны, куда доставки нет', 'walls-delivery-calc' ); ?></label></th>
+					<td><textarea id="wdc_bulk_country_disabled_text" class="large-text code" rows="8" name="wdc_bulk_country_disabled_text"><?php echo esc_textarea( $disabled_text ); ?></textarea></td>
+				</tr>
+			</tbody>
+		</table>
+		<?php submit_button( __( 'Предварительно проверить изменения', 'walls-delivery-calc' ), 'secondary', 'wdc_preview_bulk_country_overrides', false ); ?>
+
+		<?php if ( $has_preview ) : ?>
+			<?php $this->render_bulk_country_preview_table( $preview_rows ); ?>
+			<?php submit_button( __( 'Применить изменения', 'walls-delivery-calc' ), 'primary', 'wdc_apply_bulk_country_overrides', false ); ?>
+		<?php endif; ?>
+		<hr>
+		<?php
+	}
+
+	/**
+	 * @param array<int, array<string, mixed>> $rows Preview rows.
+	 */
+	private function render_bulk_country_preview_table( array $rows ): void {
+		?>
+		<h4><?php echo esc_html__( 'Таблица изменений', 'walls-delivery-calc' ); ?></h4>
+		<table class="widefat striped wdc-bulk-country-preview-table" style="max-width: 1400px;">
+			<thead>
+				<tr>
+					<th><?php echo esc_html__( 'Страна из списка', 'walls-delivery-calc' ); ?></th>
+					<th><?php echo esc_html__( 'Найденная страна', 'walls-delivery-calc' ); ?></th>
+					<th><?php echo esc_html__( 'Код Почты России', 'walls-delivery-calc' ); ?></th>
+					<th><?php echo esc_html__( 'ISO', 'walls-delivery-calc' ); ?></th>
+					<th><?php echo esc_html__( 'Текущий итог', 'walls-delivery-calc' ); ?></th>
+					<th><?php echo esc_html__( 'Текущий ручной режим', 'walls-delivery-calc' ); ?></th>
+					<th><?php echo esc_html__( 'Целевой режим', 'walls-delivery-calc' ); ?></th>
+					<th><?php echo esc_html__( 'Действие', 'walls-delivery-calc' ); ?></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php if ( empty( $rows ) ) : ?>
+					<tr>
+						<td colspan="8"><?php echo esc_html__( 'Нет строк для проверки.', 'walls-delivery-calc' ); ?></td>
+					</tr>
+				<?php else : ?>
+					<?php foreach ( $rows as $row ) : ?>
+						<tr>
+							<td><?php echo esc_html( (string) ( $row['input'] ?? '' ) ); ?></td>
+							<td><?php echo esc_html( (string) ( $row['found_name'] ?? '' ) ); ?></td>
+							<td><?php echo esc_html( (string) ( $row['carrier_country_id'] ?? '' ) ); ?></td>
+							<td><?php echo esc_html( (string) ( $row['iso2'] ?? '' ) ); ?></td>
+							<td><?php echo esc_html( $this->get_bulk_country_effective_label( $row['current_effective'] ?? null ) ); ?></td>
+							<td><?php echo esc_html( $this->get_bulk_country_manual_label( (string) ( $row['current_manual'] ?? '' ) ) ); ?></td>
+							<td><?php echo esc_html( $this->get_bulk_country_target_label( (string) ( $row['target'] ?? '' ) ) ); ?></td>
+							<td>
+								<code><?php echo esc_html( (string) ( $row['action'] ?? '' ) ); ?></code><br>
+								<?php echo esc_html( $this->get_bulk_country_action_label( (string) ( $row['action'] ?? '' ) ) ); ?>
+							</td>
+						</tr>
+					<?php endforeach; ?>
+				<?php endif; ?>
+			</tbody>
+		</table>
 		<?php
 	}
 
@@ -645,6 +954,227 @@ class WDC_Admin {
 			})();
 		</script>
 		<?php
+	}
+
+	private function get_posted_bulk_country_text( string $key ): string {
+		return isset( $_POST[ $key ] ) ? sanitize_textarea_field( wp_unslash( $_POST[ $key ] ) ) : '';
+	}
+
+	private function normalize_bulk_country_name( string $name ): string {
+		$name = preg_split( '/[\t;]/u', $name, 2 )[0] ?? '';
+		$name = trim( $name );
+		$name = str_replace( array( 'ё', 'Ё' ), array( 'е', 'Е' ), $name );
+		$name = str_replace( array( '.', '"', "'", '«', '»', '„', '“', '”' ), ' ', $name );
+		$name = preg_replace( '/\s+/u', ' ', $name );
+		$name = is_string( $name ) ? trim( $name ) : '';
+
+		if ( function_exists( 'mb_strtoupper' ) ) {
+			return mb_strtoupper( $name, 'UTF-8' );
+		}
+
+		return strtoupper( $name );
+	}
+
+	/**
+	 * @return array<string, array{input: string, normalized: string}>
+	 */
+	private function parse_bulk_country_lines( string $text ): array {
+		$lines = preg_split( '/\R/u', $text );
+		$parsed = array();
+
+		if ( ! is_array( $lines ) ) {
+			return $parsed;
+		}
+
+		foreach ( $lines as $line ) {
+			$input = trim( (string) $line );
+			$normalized = $this->normalize_bulk_country_name( $input );
+			if ( '' === $normalized ) {
+				continue;
+			}
+
+			$parsed[ $normalized ] = array(
+				'input' => $input,
+				'normalized' => $normalized,
+			);
+		}
+
+		return $parsed;
+	}
+
+	/**
+	 * @param array<int, array<string, mixed>> $all_countries All countries.
+	 * @return array<string, array<int, array<string, mixed>>>
+	 */
+	private function build_bulk_country_name_index( array $all_countries ): array {
+		$index = array();
+
+		foreach ( $all_countries as $country ) {
+			if ( ! is_array( $country ) ) {
+				continue;
+			}
+
+			$normalized = $this->normalize_bulk_country_name( (string) ( $country['name'] ?? '' ) );
+			if ( '' === $normalized ) {
+				continue;
+			}
+
+			if ( ! isset( $index[ $normalized ] ) ) {
+				$index[ $normalized ] = array();
+			}
+
+			$index[ $normalized ][] = $country;
+		}
+
+		return $index;
+	}
+
+	/**
+	 * @param array<int, array<string, mixed>> $all_countries All countries.
+	 * @return array<int, array<string, mixed>>
+	 */
+	private function build_bulk_country_overrides_preview( string $enabled_text, string $disabled_text, array $all_countries ): array {
+		$enabled_lines = $this->parse_bulk_country_lines( $enabled_text );
+		$disabled_lines = $this->parse_bulk_country_lines( $disabled_text );
+		$index = $this->build_bulk_country_name_index( $all_countries );
+		$rows = array();
+		$normalized_names = array_unique( array_merge( array_keys( $enabled_lines ), array_keys( $disabled_lines ) ) );
+		sort( $normalized_names, SORT_NATURAL | SORT_FLAG_CASE );
+
+		foreach ( $normalized_names as $normalized ) {
+			$in_enabled = isset( $enabled_lines[ $normalized ] );
+			$in_disabled = isset( $disabled_lines[ $normalized ] );
+			$line = $in_enabled ? $enabled_lines[ $normalized ] : $disabled_lines[ $normalized ];
+			$target = $in_enabled ? 'yes' : 'no';
+
+			if ( $in_enabled && $in_disabled ) {
+				$rows[] = $this->create_bulk_country_preview_row( $line['input'], $target, 'conflict' );
+				continue;
+			}
+
+			$matches = $index[ $normalized ] ?? array();
+			if ( empty( $matches ) ) {
+				$rows[] = $this->create_bulk_country_preview_row( $line['input'], $target, 'not_found' );
+				continue;
+			}
+
+			if ( count( $matches ) > 1 ) {
+				$rows[] = $this->create_bulk_country_preview_row(
+					$line['input'],
+					$target,
+					'ambiguous',
+					array(
+						'found_name' => implode( ', ', array_map( static fn( array $country ): string => (string) ( $country['name'] ?? '' ), $matches ) ),
+					)
+				);
+				continue;
+			}
+
+			$country = $matches[0];
+			$target_enabled = 'yes' === $target;
+			$current_effective = true === ( $country['effective_enabled'] ?? false );
+			$current_manual = (string) ( $country['manual_status'] ?? 'auto' );
+			$action = '';
+
+			if ( in_array( $current_manual, array( 'yes', 'no' ), true ) ) {
+				$action = $current_manual === $target ? 'no_change_manual_correct' : ( $target_enabled ? 'change_to_yes' : 'change_to_no' );
+			} elseif ( $current_effective === $target_enabled ) {
+				$action = 'no_change_auto_correct';
+			} else {
+				$action = $target_enabled ? 'change_to_yes' : 'change_to_no';
+			}
+
+			$rows[] = $this->create_bulk_country_preview_row(
+				$line['input'],
+				$target,
+				$action,
+				array(
+					'country' => $country,
+					'found_name' => (string) ( $country['name'] ?? '' ),
+					'carrier_country_id' => (string) ( $country['carrier_country_id'] ?? '' ),
+					'iso2' => (string) ( $country['iso2'] ?? '' ),
+					'current_effective' => $current_effective,
+					'current_manual' => $current_manual,
+				)
+			);
+		}
+
+		return $rows;
+	}
+
+	/**
+	 * @param array<string, mixed> $extra Extra row data.
+	 * @return array<string, mixed>
+	 */
+	private function create_bulk_country_preview_row( string $input, string $target, string $action, array $extra = array() ): array {
+		return array_merge(
+			array(
+				'input' => $input,
+				'found_name' => '',
+				'carrier_country_id' => '',
+				'iso2' => '',
+				'current_effective' => null,
+				'current_manual' => '',
+				'target' => $target,
+				'action' => $action,
+			),
+			$extra
+		);
+	}
+
+	/**
+	 * @param array<string, mixed> $country Country.
+	 */
+	private function get_bulk_country_override_key( array $country ): string {
+		if ( ! empty( $country['iso2'] ) ) {
+			return strtoupper( (string) $country['iso2'] );
+		}
+
+		if ( ! empty( $country['carrier_country_id'] ) ) {
+			return 'carrier:' . (string) $country['carrier_country_id'];
+		}
+
+		return '';
+	}
+
+	private function get_bulk_country_effective_label( $value ): string {
+		if ( true === $value ) {
+			return __( 'Доставка есть', 'walls-delivery-calc' );
+		}
+
+		if ( false === $value ) {
+			return __( 'Доставки нет', 'walls-delivery-calc' );
+		}
+
+		return '';
+	}
+
+	private function get_bulk_country_manual_label( string $status ): string {
+		$labels = array(
+			'auto' => __( 'Авто', 'walls-delivery-calc' ),
+			'yes' => __( 'Доставка есть', 'walls-delivery-calc' ),
+			'no' => __( 'Доставки нет', 'walls-delivery-calc' ),
+		);
+
+		return $labels[ $status ] ?? $status;
+	}
+
+	private function get_bulk_country_target_label( string $target ): string {
+		return 'yes' === $target ? __( 'Доставка есть', 'walls-delivery-calc' ) : __( 'Доставки нет', 'walls-delivery-calc' );
+	}
+
+	private function get_bulk_country_action_label( string $action ): string {
+		$labels = array(
+			'no_change_auto_correct' => __( 'Не менять: авто уже верно', 'walls-delivery-calc' ),
+			'no_change_manual_correct' => __( 'Не менять: ручной режим уже верен', 'walls-delivery-calc' ),
+			'change_to_yes' => __( 'Изменить на "Доставка есть"', 'walls-delivery-calc' ),
+			'change_to_no' => __( 'Изменить на "Доставки нет"', 'walls-delivery-calc' ),
+			'not_found' => __( 'Не найдено', 'walls-delivery-calc' ),
+			'conflict' => __( 'Конфликт: страна есть в обоих списках', 'walls-delivery-calc' ),
+			'ambiguous' => __( 'Неоднозначное совпадение', 'walls-delivery-calc' ),
+		);
+
+		return $labels[ $action ] ?? $action;
 	}
 
 	/**
