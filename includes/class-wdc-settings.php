@@ -34,6 +34,9 @@ class WDC_Settings {
 					'calculated_label_template' => 'Ориентировочная цена доставки вашей посылки в {country} (требуется уточнение у менеджера магазина)',
 				),
 			),
+			'country_overrides' => array(
+				self::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL => array(),
+			),
 			'packaging_tiers' => array(
 				array(
 					'from_weight_g' => 0,
@@ -79,7 +82,10 @@ class WDC_Settings {
 	 * @param array<string, mixed> $settings Settings to save.
 	 */
 	public function update( array $settings ): bool {
-		return update_option( self::OPTION_NAME, $this->sanitize( $settings ) );
+		$existing = get_option( self::OPTION_NAME, array() );
+		$existing = is_array( $existing ) ? $this->migrate_legacy_settings( $existing ) : array();
+
+		return update_option( self::OPTION_NAME, $this->sanitize( $this->merge_submitted_settings( $existing, $settings ) ) );
 	}
 
 	/**
@@ -108,12 +114,52 @@ class WDC_Settings {
 					'calculated_label_template' => sanitize_text_field( (string) $service['calculated_label_template'] ),
 				),
 			),
+			'country_overrides' => array(
+				self::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL => $this->sanitize_country_overrides(
+					$current['country_overrides'][ self::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ] ?? array()
+				),
+			),
 			'packaging_tiers' => $this->sanitize_packaging_tiers( $current['packaging_tiers'] ),
 		);
 	}
 
 	private function sanitize_yes_no( $value ): string {
 		return 'yes' === $value ? 'yes' : 'no';
+	}
+
+	/**
+	 * @param mixed $overrides Raw country overrides.
+	 * @return array<string, array<string, string>>
+	 */
+	private function sanitize_country_overrides( $overrides ): array {
+		if ( ! is_array( $overrides ) ) {
+			return array();
+		}
+
+		$sanitized = array();
+		foreach ( $overrides as $key => $override ) {
+			if ( ! is_scalar( $key ) || ! is_array( $override ) ) {
+				continue;
+			}
+
+			$key = preg_replace( '/[^a-zA-Z0-9:_-]/', '', (string) $key );
+			if ( '' === $key ) {
+				continue;
+			}
+
+			$enabled = isset( $override['enabled'] ) && in_array( $override['enabled'], array( 'auto', 'yes', 'no' ), true )
+				? (string) $override['enabled']
+				: 'auto';
+
+			$sanitized[ $key ] = array(
+				'enabled' => $enabled,
+				'carrier_country_id' => isset( $override['carrier_country_id'] ) ? sanitize_text_field( (string) $override['carrier_country_id'] ) : '',
+				'country_name' => isset( $override['country_name'] ) ? sanitize_text_field( (string) $override['country_name'] ) : '',
+				'note' => isset( $override['note'] ) ? sanitize_text_field( (string) $override['note'] ) : '',
+			);
+		}
+
+		return $sanitized;
 	}
 
 	/**
@@ -198,5 +244,22 @@ class WDC_Settings {
 		}
 
 		return $settings;
+	}
+
+	/**
+	 * @param array<string, mixed> $existing Existing saved settings.
+	 * @param array<string, mixed> $submitted Submitted settings.
+	 * @return array<string, mixed>
+	 */
+	private function merge_submitted_settings( array $existing, array $submitted ): array {
+		foreach ( $submitted as $key => $value ) {
+			if ( is_array( $value ) && isset( $existing[ $key ] ) && is_array( $existing[ $key ] ) ) {
+				$existing[ $key ] = $this->merge_submitted_settings( $existing[ $key ], $value );
+			} else {
+				$existing[ $key ] = $value;
+			}
+		}
+
+		return $existing;
 	}
 }
