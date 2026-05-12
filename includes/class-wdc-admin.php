@@ -168,8 +168,11 @@ class WDC_Admin {
 			<strong><?php echo esc_html__( 'Skipped no parcel:', 'walls-delivery-calc' ); ?></strong>
 			<?php echo esc_html( (string) ( $stats['skipped_no_parcel_count'] ?? 0 ) ); ?>
 			&nbsp;|&nbsp;
-			<strong><?php echo esc_html__( 'Skipped parcel blocked:', 'walls-delivery-calc' ); ?></strong>
-			<?php echo esc_html( (string) ( $stats['skipped_parcel_blocked_count'] ?? 0 ) ); ?>
+			<strong><?php echo esc_html__( 'Manually matched:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['manually_matched_count'] ?? 0 ) ); ?>
+			&nbsp;|&nbsp;
+			<strong><?php echo esc_html__( 'Requires parcel.block check:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['requires_check_count'] ?? 0 ) ); ?>
 			&nbsp;|&nbsp;
 			<strong><?php echo esc_html__( 'Skipped RU:', 'walls-delivery-calc' ); ?></strong>
 			<?php echo esc_html( (string) ( $stats['skipped_ru_count'] ?? 0 ) ); ?>
@@ -400,7 +403,9 @@ class WDC_Admin {
 			array_filter(
 				$all_countries,
 				static function ( array $country ): bool {
-					return empty( $country['effective_enabled'] );
+					return empty( $country['effective_enabled'] )
+						|| 'requires_check' === (string) ( $country['auto_status'] ?? '' )
+						|| 'manual_disabled' === (string) ( $country['effective_reason'] ?? '' );
 				}
 			)
 		);
@@ -442,8 +447,11 @@ class WDC_Admin {
 			<strong><?php echo esc_html__( 'Skipped no parcel:', 'walls-delivery-calc' ); ?></strong>
 			<?php echo esc_html( (string) ( $stats['skipped_no_parcel_count'] ?? 0 ) ); ?>
 			&nbsp;|&nbsp;
-			<strong><?php echo esc_html__( 'Skipped parcel blocked:', 'walls-delivery-calc' ); ?></strong>
-			<?php echo esc_html( (string) ( $stats['skipped_parcel_blocked_count'] ?? 0 ) ); ?>
+			<strong><?php echo esc_html__( 'Manually matched:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['manually_matched_count'] ?? 0 ) ); ?>
+			&nbsp;|&nbsp;
+			<strong><?php echo esc_html__( 'Requires parcel.block check:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['requires_check_count'] ?? 0 ) ); ?>
 			&nbsp;|&nbsp;
 			<strong><?php echo esc_html__( 'Skipped RU:', 'walls-delivery-calc' ); ?></strong>
 			<?php echo esc_html( (string) ( $stats['skipped_ru_count'] ?? 0 ) ); ?>
@@ -466,11 +474,13 @@ class WDC_Admin {
 	 * @param array<int, array<string, mixed>> $countries Countries.
 	 */
 	private function render_country_overrides_table( array $countries ): void {
+		$wc_countries = $this->get_wc_countries_for_select();
 		?>
 		<table class="widefat striped" style="max-width: 1200px;">
 			<thead>
 				<tr>
 					<th><?php echo esc_html__( 'WooCommerce ISO', 'walls-delivery-calc' ); ?></th>
+					<th><?php echo esc_html__( 'Ручное сопоставление WooCommerce', 'walls-delivery-calc' ); ?></th>
 					<th><?php echo esc_html__( 'Страна', 'walls-delivery-calc' ); ?></th>
 					<th><?php echo esc_html__( 'Код Почты России', 'walls-delivery-calc' ); ?></th>
 					<th><?php echo esc_html__( 'Авто-статус', 'walls-delivery-calc' ); ?></th>
@@ -482,19 +492,41 @@ class WDC_Admin {
 			<tbody>
 				<?php if ( empty( $countries ) ) : ?>
 					<tr>
-						<td colspan="7"><?php echo esc_html__( 'Нет стран для отображения.', 'walls-delivery-calc' ); ?></td>
+						<td colspan="8"><?php echo esc_html__( 'Нет стран для отображения.', 'walls-delivery-calc' ); ?></td>
 					</tr>
 				<?php else : ?>
 					<?php foreach ( $countries as $country ) : ?>
 						<?php
 						$override_key = (string) ( $country['override_key'] ?? ( ! empty( $country['iso2'] ) ? strtoupper( (string) $country['iso2'] ) : 'carrier:' . (string) ( $country['carrier_country_id'] ?? '' ) ) );
 						$manual_status = (string) ( $country['manual_status'] ?? 'auto' );
+						$manual_iso2 = (string) ( $country['manual_iso2'] ?? '' );
+						$is_unmatched = 'unmatched' === (string) ( $country['auto_status'] ?? '' ) || ! empty( $country['manually_matched'] );
 						?>
 						<tr>
 							<td><?php echo esc_html( (string) ( $country['iso2'] ?? '' ) ); ?></td>
+							<td>
+								<?php if ( $is_unmatched ) : ?>
+									<select name="wdc_country_overrides[<?php echo esc_attr( $override_key ); ?>][manual_iso2]">
+										<option value=""><?php echo esc_html__( 'Не сопоставлено', 'walls-delivery-calc' ); ?></option>
+										<?php foreach ( $wc_countries as $iso2 => $wc_country_name ) : ?>
+											<option value="<?php echo esc_attr( $iso2 ); ?>" <?php selected( $manual_iso2, $iso2 ); ?>>
+												<?php echo esc_html( $iso2 . ' — ' . $wc_country_name ); ?>
+											</option>
+										<?php endforeach; ?>
+									</select>
+								<?php else : ?>
+									<input type="hidden" name="wdc_country_overrides[<?php echo esc_attr( $override_key ); ?>][manual_iso2]" value="">
+									<?php echo esc_html__( 'Авто', 'walls-delivery-calc' ); ?>
+								<?php endif; ?>
+							</td>
 							<td><?php echo esc_html( (string) ( $country['name'] ?? '' ) ); ?></td>
 							<td><?php echo esc_html( (string) ( $country['carrier_country_id'] ?? '' ) ); ?></td>
-							<td><?php echo esc_html( $this->get_country_status_label( (string) ( $country['auto_status'] ?? '' ) ) ); ?></td>
+							<td>
+								<?php echo esc_html( $this->get_country_status_label( (string) ( $country['auto_status'] ?? '' ) ) ); ?>
+								<?php if ( 'requires_check' === (string) ( $country['auto_status'] ?? '' ) ) : ?>
+									<br><small><?php echo esc_html__( 'Требует проверки: parcel.block=1, но тарифный расчет может работать', 'walls-delivery-calc' ); ?></small>
+								<?php endif; ?>
+							</td>
 							<td>
 								<input type="hidden" name="wdc_country_overrides[<?php echo esc_attr( $override_key ); ?>][carrier_country_id]" value="<?php echo esc_attr( (string) ( $country['carrier_country_id'] ?? '' ) ); ?>">
 								<input type="hidden" name="wdc_country_overrides[<?php echo esc_attr( $override_key ); ?>][country_name]" value="<?php echo esc_attr( (string) ( $country['name'] ?? '' ) ); ?>">
@@ -514,16 +546,49 @@ class WDC_Admin {
 		<?php
 	}
 
+	/**
+	 * @return array<string, string>
+	 */
+	private function get_wc_countries_for_select(): array {
+		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || empty( WC()->countries ) ) {
+			return array();
+		}
+
+		$countries = WC()->countries->get_countries();
+		if ( ! is_array( $countries ) ) {
+			return array();
+		}
+
+		$prepared = array();
+		foreach ( $countries as $iso2 => $name ) {
+			if ( ! is_scalar( $iso2 ) || ! is_scalar( $name ) ) {
+				continue;
+			}
+
+			$iso2 = strtoupper( sanitize_text_field( (string) $iso2 ) );
+			if ( ! preg_match( '/^[A-Z]{2}$/', $iso2 ) ) {
+				continue;
+			}
+
+			$prepared[ $iso2 ] = sanitize_text_field( (string) $name );
+		}
+
+		asort( $prepared, SORT_NATURAL | SORT_FLAG_CASE );
+
+		return $prepared;
+	}
+
 	private function get_country_status_label( string $status ): string {
 		$labels = array(
 			'enabled' => __( 'Доступна', 'walls-delivery-calc' ),
 			'unmatched' => __( 'Не сопоставлена', 'walls-delivery-calc' ),
 			'no_parcel' => __( 'Нет parcel', 'walls-delivery-calc' ),
-			'parcel_blocked' => __( 'Parcel заблокирован', 'walls-delivery-calc' ),
+			'requires_check' => __( 'Требует проверки по признаку parcel.block', 'walls-delivery-calc' ),
 			'ru' => __( 'Россия исключена', 'walls-delivery-calc' ),
 			'manual_enabled' => __( 'Включена вручную', 'walls-delivery-calc' ),
 			'manual_disabled' => __( 'Отключена вручную', 'walls-delivery-calc' ),
 			'auto_enabled' => __( 'Доступна автоматически', 'walls-delivery-calc' ),
+			'auto_requires_check' => __( 'Доступна, требует проверки', 'walls-delivery-calc' ),
 		);
 
 		return $labels[ $status ] ?? $status;

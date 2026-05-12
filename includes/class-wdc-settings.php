@@ -150,9 +150,12 @@ class WDC_Settings {
 			$enabled = isset( $override['enabled'] ) && in_array( $override['enabled'], array( 'auto', 'yes', 'no' ), true )
 				? (string) $override['enabled']
 				: 'auto';
+			$manual_iso2 = isset( $override['manual_iso2'] ) ? strtoupper( sanitize_text_field( (string) $override['manual_iso2'] ) ) : '';
+			$manual_iso2 = preg_match( '/^[A-Z]{2}$/', $manual_iso2 ) ? $manual_iso2 : '';
 
 			$sanitized[ $key ] = array(
 				'enabled' => $enabled,
+				'manual_iso2' => $manual_iso2,
 				'carrier_country_id' => isset( $override['carrier_country_id'] ) ? sanitize_text_field( (string) $override['carrier_country_id'] ) : '',
 				'country_name' => isset( $override['country_name'] ) ? sanitize_text_field( (string) $override['country_name'] ) : '',
 				'note' => isset( $override['note'] ) ? sanitize_text_field( (string) $override['note'] ) : '',
