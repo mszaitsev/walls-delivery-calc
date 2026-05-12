@@ -395,7 +395,7 @@ class WDC_Admin {
 			array_filter(
 				$all_countries,
 				static function ( array $country ): bool {
-					return ! empty( $country['effective_enabled'] );
+					return true === ( $country['effective_enabled'] ?? false );
 				}
 			)
 		);
@@ -403,9 +403,7 @@ class WDC_Admin {
 			array_filter(
 				$all_countries,
 				static function ( array $country ): bool {
-					return empty( $country['effective_enabled'] )
-						|| 'requires_check' === (string) ( $country['auto_status'] ?? '' )
-						|| 'manual_disabled' === (string) ( $country['effective_reason'] ?? '' );
+					return true !== ( $country['effective_enabled'] ?? false );
 				}
 			)
 		);
@@ -460,11 +458,13 @@ class WDC_Admin {
 			<?php echo esc_html( ! empty( $payload['updated_at'] ) ? (string) $payload['updated_at'] : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
 		</p>
 
+		<?php $this->render_country_tables_assets(); ?>
+
 		<h3><?php echo esc_html__( 'Доступные страны', 'walls-delivery-calc' ); ?></h3>
-		<?php $this->render_country_overrides_table( $enabled_countries ); ?>
+		<?php $this->render_country_overrides_table( $enabled_countries, 'wdc-enabled-countries' ); ?>
 
 		<h3><?php echo esc_html__( 'Недоступные / требуют проверки', 'walls-delivery-calc' ); ?></h3>
-		<?php $this->render_country_overrides_table( $disabled_countries ); ?>
+		<?php $this->render_country_overrides_table( $disabled_countries, 'wdc-disabled-countries' ); ?>
 
 		<?php submit_button( __( 'Сохранить ручные настройки стран', 'walls-delivery-calc' ), 'primary', 'wdc_country_overrides_submit' ); ?>
 		<?php
@@ -473,19 +473,29 @@ class WDC_Admin {
 	/**
 	 * @param array<int, array<string, mixed>> $countries Countries.
 	 */
-	private function render_country_overrides_table( array $countries ): void {
+	private function render_country_overrides_table( array $countries, string $table_id ): void {
 		$wc_countries = $this->get_wc_countries_for_select();
+		$effective_options = $this->get_effective_reason_options( $countries );
 		?>
-		<table class="widefat striped" style="max-width: 1200px;">
+		<p class="wdc-country-table-filter">
+			<label for="<?php echo esc_attr( $table_id ); ?>_filter"><?php echo esc_html__( 'Фильтр по итогу', 'walls-delivery-calc' ); ?></label>
+			<select id="<?php echo esc_attr( $table_id ); ?>_filter" class="wdc-effective-filter" data-table-id="<?php echo esc_attr( $table_id ); ?>">
+				<option value=""><?php echo esc_html__( 'Все', 'walls-delivery-calc' ); ?></option>
+				<?php foreach ( $effective_options as $reason => $label ) : ?>
+					<option value="<?php echo esc_attr( $reason ); ?>"><?php echo esc_html( $label ); ?></option>
+				<?php endforeach; ?>
+			</select>
+		</p>
+		<table id="<?php echo esc_attr( $table_id ); ?>" class="widefat striped wdc-country-overrides-table" style="max-width: 1200px;">
 			<thead>
 				<tr>
 					<th><?php echo esc_html__( 'WooCommerce ISO', 'walls-delivery-calc' ); ?></th>
 					<th><?php echo esc_html__( 'Ручное сопоставление WooCommerce', 'walls-delivery-calc' ); ?></th>
 					<th><?php echo esc_html__( 'Страна', 'walls-delivery-calc' ); ?></th>
 					<th><?php echo esc_html__( 'Код Почты России', 'walls-delivery-calc' ); ?></th>
-					<th><?php echo esc_html__( 'Авто-статус', 'walls-delivery-calc' ); ?></th>
+					<th class="wdc-auto-status-column"><?php echo esc_html__( 'Авто-статус', 'walls-delivery-calc' ); ?></th>
 					<th><?php echo esc_html__( 'Ручной режим', 'walls-delivery-calc' ); ?></th>
-					<th><?php echo esc_html__( 'Итог', 'walls-delivery-calc' ); ?></th>
+					<th><button type="button" class="button-link wdc-effective-sort" data-table-id="<?php echo esc_attr( $table_id ); ?>"><?php echo esc_html__( 'Итог', 'walls-delivery-calc' ); ?></button></th>
 					<th><?php echo esc_html__( 'Примечание', 'walls-delivery-calc' ); ?></th>
 				</tr>
 			</thead>
@@ -501,8 +511,10 @@ class WDC_Admin {
 						$manual_status = (string) ( $country['manual_status'] ?? 'auto' );
 						$manual_iso2 = (string) ( $country['manual_iso2'] ?? '' );
 						$is_unmatched = 'unmatched' === (string) ( $country['auto_status'] ?? '' ) || ! empty( $country['manually_matched'] );
+						$effective_reason = (string) ( $country['effective_reason'] ?? '' );
+						$effective_label = $this->get_country_status_label( $effective_reason );
 						?>
-						<tr>
+						<tr data-effective-reason="<?php echo esc_attr( $effective_reason ); ?>" data-effective-label="<?php echo esc_attr( $effective_label ); ?>">
 							<td><?php echo esc_html( (string) ( $country['iso2'] ?? '' ) ); ?></td>
 							<td>
 								<?php if ( $is_unmatched ) : ?>
@@ -536,7 +548,7 @@ class WDC_Admin {
 									<option value="no" <?php selected( $manual_status, 'no' ); ?>><?php echo esc_html__( 'Доставки нет', 'walls-delivery-calc' ); ?></option>
 								</select>
 							</td>
-							<td><?php echo esc_html( $this->get_country_status_label( (string) ( $country['effective_reason'] ?? '' ) ) ); ?></td>
+							<td><?php echo esc_html( $effective_label ); ?></td>
 							<td><input type="text" class="regular-text" name="wdc_country_overrides[<?php echo esc_attr( $override_key ); ?>][note]" value="<?php echo esc_attr( (string) ( $country['note'] ?? '' ) ); ?>"></td>
 						</tr>
 					<?php endforeach; ?>
@@ -544,6 +556,104 @@ class WDC_Admin {
 			</tbody>
 		</table>
 		<?php
+	}
+
+	private function render_country_tables_assets(): void {
+		?>
+		<style>
+			.wdc-country-overrides-table .wdc-auto-status-column,
+			.wdc-country-overrides-table td:nth-child(5) {
+				min-width: 200px;
+				white-space: normal;
+			}
+			.wdc-country-overrides-table td:nth-child(5) small {
+				display: block;
+				max-width: 240px;
+				line-height: 1.35;
+			}
+			.wdc-country-table-filter {
+				margin: 8px 0;
+			}
+			.wdc-country-table-filter label {
+				margin-right: 8px;
+			}
+			.wdc-effective-sort {
+				font-weight: 600;
+			}
+		</style>
+		<script>
+			(function() {
+				function getTable(id) {
+					return document.getElementById(id);
+				}
+
+				function getBodyRows(table) {
+					if (!table || !table.tBodies.length) {
+						return [];
+					}
+
+					return Array.prototype.slice.call(table.tBodies[0].rows);
+				}
+
+				document.addEventListener('change', function(event) {
+					if (!event.target.classList.contains('wdc-effective-filter')) {
+						return;
+					}
+
+					var table = getTable(event.target.getAttribute('data-table-id'));
+					var selectedReason = event.target.value;
+					getBodyRows(table).forEach(function(row) {
+						if (!row.hasAttribute('data-effective-reason')) {
+							return;
+						}
+
+						row.style.display = !selectedReason || row.getAttribute('data-effective-reason') === selectedReason ? '' : 'none';
+					});
+				});
+
+				document.addEventListener('click', function(event) {
+					if (!event.target.classList.contains('wdc-effective-sort')) {
+						return;
+					}
+
+					var table = getTable(event.target.getAttribute('data-table-id'));
+					if (!table || !table.tBodies.length) {
+						return;
+					}
+
+					var direction = event.target.getAttribute('data-sort-direction') === 'asc' ? 'desc' : 'asc';
+					event.target.setAttribute('data-sort-direction', direction);
+					getBodyRows(table).sort(function(a, b) {
+						var labelA = (a.getAttribute('data-effective-label') || '').toLocaleLowerCase();
+						var labelB = (b.getAttribute('data-effective-label') || '').toLocaleLowerCase();
+						return direction === 'asc' ? labelA.localeCompare(labelB) : labelB.localeCompare(labelA);
+					}).forEach(function(row) {
+						table.tBodies[0].appendChild(row);
+					});
+				});
+			})();
+		</script>
+		<?php
+	}
+
+	/**
+	 * @param array<int, array<string, mixed>> $countries Countries.
+	 * @return array<string, string>
+	 */
+	private function get_effective_reason_options( array $countries ): array {
+		$options = array();
+		foreach ( $countries as $country ) {
+			$reason = (string) ( $country['effective_reason'] ?? '' );
+			if ( '' === $reason || isset( $options[ $reason ] ) ) {
+				continue;
+			}
+
+			$options[ $reason ] = $this->get_country_status_label( $reason );
+		}
+
+		asort( $options, SORT_NATURAL | SORT_FLAG_CASE );
+
+		return $options;
 	}
 
 	/**
@@ -582,12 +692,13 @@ class WDC_Admin {
 		$labels = array(
 			'enabled' => __( 'Доступна', 'walls-delivery-calc' ),
 			'unmatched' => __( 'Не сопоставлена', 'walls-delivery-calc' ),
-			'no_parcel' => __( 'Нет parcel', 'walls-delivery-calc' ),
-			'requires_check' => __( 'Требует проверки по признаку parcel.block', 'walls-delivery-calc' ),
+			'no_parcel' => __( 'Нет данных по посылкам', 'walls-delivery-calc' ),
+			'parcel_blocked' => __( 'Требует проверки', 'walls-delivery-calc' ),
+			'requires_check' => __( 'Требует проверки', 'walls-delivery-calc' ),
 			'ru' => __( 'Россия исключена', 'walls-delivery-calc' ),
-			'manual_enabled' => __( 'Включена вручную', 'walls-delivery-calc' ),
+			'manual_enabled' => __( 'Доступна вручную', 'walls-delivery-calc' ),
 			'manual_disabled' => __( 'Отключена вручную', 'walls-delivery-calc' ),
-			'auto_enabled' => __( 'Доступна автоматически', 'walls-delivery-calc' ),
+			'auto_enabled' => __( 'Доступна', 'walls-delivery-calc' ),
 			'auto_requires_check' => __( 'Доступна, требует проверки', 'walls-delivery-calc' ),
 		);
 
