@@ -57,6 +57,7 @@ class WDC_Russian_Post_API {
 				'success' => false,
 				'error_code' => 'http_status_' . $code,
 				'error_message' => 'Russian Post API returned HTTP ' . $code . '.',
+				'http_code' => $code,
 				'url' => $url,
 				'params' => $params,
 				'raw' => is_array( $decoded ) ? $decoded : array( 'body' => $body ),
@@ -68,6 +69,7 @@ class WDC_Russian_Post_API {
 				'success' => false,
 				'error_code' => 'invalid_json',
 				'error_message' => 'Russian Post API returned invalid JSON.',
+				'http_code' => $code,
 				'url' => $url,
 				'params' => $params,
 				'raw' => array( 'body' => $body ),
@@ -79,6 +81,7 @@ class WDC_Russian_Post_API {
 				'success' => false,
 				'error_code' => 'api_error',
 				'error_message' => $this->extract_api_error_message( $decoded ),
+				'http_code' => $code,
 				'url' => $url,
 				'params' => $params,
 				'raw' => $decoded,
@@ -87,6 +90,7 @@ class WDC_Russian_Post_API {
 
 		return array(
 			'success' => true,
+			'http_code' => $code,
 			'url' => $url,
 			'params' => $params,
 			'raw' => $decoded,

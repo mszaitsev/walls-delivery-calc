@@ -344,6 +344,13 @@ class WDC_Admin {
 					<th scope="row"><label for="wdc_formula_add_rub"><?php echo esc_html__( 'Formula add, RUB', 'walls-delivery-calc' ); ?></label></th>
 					<td><input id="wdc_formula_add_rub" type="number" step="0.01" name="wdc_settings[services][russian_post_worldwide_parcel][formula_add_rub]" value="<?php echo esc_attr( (string) $service['formula_add_rub'] ); ?>"></td>
 				</tr>
+				<tr>
+					<th scope="row"><label for="wdc_shipping_discount_percent_from_items_total"><?php echo esc_html__( 'Вычитать из доставки процент от чистой стоимости товаров', 'walls-delivery-calc' ); ?></label></th>
+					<td>
+						<input id="wdc_shipping_discount_percent_from_items_total" type="number" min="0" max="100" step="0.01" name="wdc_settings[services][russian_post_worldwide_parcel][shipping_discount_percent_from_items_total]" value="<?php echo esc_attr( (string) $service['shipping_discount_percent_from_items_total'] ); ?>">
+						<p class="description"><?php echo esc_html__( 'Чистая стоимость товаров — сумма товаров после промокодов и скидок, без доставки. Скидка округляется вниз до целого рубля. Итоговая доставка не может быть меньше 1 рубля.', 'walls-delivery-calc' ); ?></p>
+					</td>
+				</tr>
 				<?php $this->render_service_yes_no_row( 'cache_until_end_of_day', __( 'Cache until end of day', 'walls-delivery-calc' ), $service['cache_until_end_of_day'] ); ?>
 				<tr>
 					<th scope="row"><label for="wdc_fallback_label"><?php echo esc_html__( 'Fallback label', 'walls-delivery-calc' ); ?></label></th>
