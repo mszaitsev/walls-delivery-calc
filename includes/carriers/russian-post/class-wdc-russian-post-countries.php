@@ -238,8 +238,14 @@ class WDC_Russian_Post_Countries {
 			'matched_country_count' => 0,
 			'enabled_country_count' => 0,
 			'skipped_unmatched_count' => 0,
-			'skipped_blocked_count' => 0,
+			'skipped_no_parcel_count' => 0,
+			'skipped_parcel_blocked_count' => 0,
 			'skipped_ru_count' => 0,
+			'examples' => array(
+				'unmatched' => array(),
+				'no_parcel' => array(),
+				'parcel_blocked' => array(),
+			),
 			'last_error' => '',
 		);
 	}
@@ -272,6 +278,7 @@ class WDC_Russian_Post_Countries {
 			$country = $this->normalize_country( $item, $wc_country_names );
 			if ( empty( $country['iso2'] ) || empty( $country['carrier_country_id'] ) ) {
 				++$this->last_diagnostics['skipped_unmatched_count'];
+				$this->add_skip_example( 'unmatched', $item );
 				continue;
 			}
 
@@ -279,12 +286,20 @@ class WDC_Russian_Post_Countries {
 			++$this->last_diagnostics['matched_country_count'];
 
 			if ( $this->is_russian_country( $country ) ) {
+				$country['availability']['reason'] = 'ru';
 				++$this->last_diagnostics['skipped_ru_count'];
 				continue;
 			}
 
 			if ( empty( $country['enabled'] ) ) {
-				++$this->last_diagnostics['skipped_blocked_count'];
+				$reason = (string) ( $country['availability']['reason'] ?? 'no_parcel' );
+				if ( 'parcel_blocked' === $reason ) {
+					++$this->last_diagnostics['skipped_parcel_blocked_count'];
+					$this->add_skip_example( 'parcel_blocked', $item );
+				} else {
+					++$this->last_diagnostics['skipped_no_parcel_count'];
+					$this->add_skip_example( 'no_parcel', $item );
+				}
 				continue;
 			}
 
@@ -378,12 +393,15 @@ class WDC_Russian_Post_Countries {
 			$carrier_country_id = $this->first_numeric_scalar( $raw, array( 'id', 'Id', 'country_id', 'countryId', 'code', 'Code' ) );
 		}
 
+		$availability = $this->get_parcel_availability( $raw );
+
 		return array(
 			'carrier_country_id' => sanitize_text_field( $carrier_country_id ),
 			'name' => sanitize_text_field( '' !== $name ? $name : $iso2 ),
 			'iso2' => sanitize_text_field( $iso2 ),
 			'iso3' => sanitize_text_field( $iso3 ),
-			'enabled' => $this->is_country_enabled( $raw ),
+			'enabled' => 'enabled' === $availability['reason'],
+			'availability' => $availability,
 			'raw' => $raw,
 		);
 	}
@@ -525,67 +543,57 @@ class WDC_Russian_Post_Countries {
 
 	/**
 	 * @param array<string, mixed> $raw Raw country record.
+	 * @return array<string, mixed>
 	 */
-	private function is_country_enabled( array $raw ): bool {
-		if (
-			$this->is_truthy_flag( $raw['block'] ?? null )
-			|| $this->is_truthy_flag( $raw['blocked'] ?? null )
-			|| $this->is_truthy_flag( $raw['disabled'] ?? null )
-			|| $this->is_truthy_flag( $raw['parcel_block'] ?? null )
-			|| $this->is_truthy_flag( $raw['parcelBlock'] ?? null )
-		) {
-			return false;
+	private function get_parcel_availability( array $raw ): array {
+		$parcel = $raw['parcel'] ?? null;
+		if ( ! is_array( $parcel ) ) {
+			return array(
+				'has_parcel' => false,
+				'parcel_block' => null,
+				'reason' => 'no_parcel',
+			);
 		}
 
-		if (
-			isset( $raw['parcel'] )
-			&& is_array( $raw['parcel'] )
-			&& ( $this->is_truthy_flag( $raw['parcel']['block'] ?? null ) || $this->is_truthy_flag( $raw['parcel']['blocked'] ?? null ) )
-		) {
-			return false;
+		$parcel_block = array_key_exists( 'block', $parcel ) ? $parcel['block'] : null;
+		if ( 1 === $parcel_block || '1' === $parcel_block ) {
+			return array(
+				'has_parcel' => true,
+				'parcel_block' => $parcel_block,
+				'reason' => 'parcel_blocked',
+			);
 		}
 
-		foreach ( array( 'parcel_enabled', 'parcelEnabled', 'parcel_available', 'parcelAvailable', 'enabled', 'available', 'support', 'supported', 'allowed' ) as $key ) {
-			if ( array_key_exists( $key, $raw ) ) {
-				return $this->is_truthy_flag( $raw[ $key ] );
-			}
-		}
-
-		if ( array_key_exists( 'parcel', $raw ) ) {
-			$parcel = $raw['parcel'];
-
-			if ( is_array( $parcel ) ) {
-				if ( $this->is_truthy_flag( $parcel['block'] ?? null ) || $this->is_truthy_flag( $parcel['blocked'] ?? null ) ) {
-					return false;
-				}
-
-				foreach ( array( 'enabled', 'available', 'support', 'supported', 'allowed' ) as $key ) {
-					if ( array_key_exists( $key, $parcel ) ) {
-						return $this->is_truthy_flag( $parcel[ $key ] );
-					}
-				}
-			} elseif ( ! $this->is_truthy_flag( $parcel ) ) {
-				return false;
-			}
-		}
-
-		return true;
+		return array(
+			'has_parcel' => true,
+			'parcel_block' => $parcel_block,
+			'reason' => 'enabled',
+		);
 	}
 
-	private function is_truthy_flag( $value ): bool {
-		if ( is_bool( $value ) ) {
-			return $value;
+	/**
+	 * @param array<string, mixed> $raw Raw country record.
+	 */
+	private function add_skip_example( string $bucket, array $raw ): void {
+		if (
+			! isset( $this->last_diagnostics['examples'][ $bucket ] )
+			|| ! is_array( $this->last_diagnostics['examples'][ $bucket ] )
+			|| count( $this->last_diagnostics['examples'][ $bucket ] ) >= 30
+		) {
+			return;
 		}
 
-		if ( is_numeric( $value ) ) {
-			return 0 !== (int) $value;
+		$example = array(
+			'country_id' => $this->first_scalar( $raw, array( 'id', 'Id', 'country_id', 'countryId', 'code', 'Code' ) ),
+			'name' => $this->first_scalar( $raw, array( 'name', 'Name', 'country_name', 'countryName' ) ),
+		);
+
+		if ( 'parcel_blocked' === $bucket ) {
+			$parcel = $raw['parcel'] ?? array();
+			$example['parcel_block'] = is_array( $parcel ) && array_key_exists( 'block', $parcel ) ? $parcel['block'] : null;
 		}
 
-		if ( is_string( $value ) ) {
-			return in_array( strtolower( trim( $value ) ), array( '1', 'yes', 'true', 'y', 'on' ), true );
-		}
-
-		return false;
+		$this->last_diagnostics['examples'][ $bucket ][] = $example;
 	}
 
 	/**

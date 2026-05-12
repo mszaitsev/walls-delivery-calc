@@ -129,8 +129,11 @@ class WDC_Admin {
 			<strong><?php echo esc_html__( 'Skipped unmatched:', 'walls-delivery-calc' ); ?></strong>
 			<?php echo esc_html( (string) ( $stats['skipped_unmatched_count'] ?? 0 ) ); ?>
 			&nbsp;|&nbsp;
-			<strong><?php echo esc_html__( 'Skipped blocked:', 'walls-delivery-calc' ); ?></strong>
-			<?php echo esc_html( (string) ( $stats['skipped_blocked_count'] ?? 0 ) ); ?>
+			<strong><?php echo esc_html__( 'Skipped no parcel:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['skipped_no_parcel_count'] ?? 0 ) ); ?>
+			&nbsp;|&nbsp;
+			<strong><?php echo esc_html__( 'Skipped parcel blocked:', 'walls-delivery-calc' ); ?></strong>
+			<?php echo esc_html( (string) ( $stats['skipped_parcel_blocked_count'] ?? 0 ) ); ?>
 			&nbsp;|&nbsp;
 			<strong><?php echo esc_html__( 'Skipped RU:', 'walls-delivery-calc' ); ?></strong>
 			<?php echo esc_html( (string) ( $stats['skipped_ru_count'] ?? 0 ) ); ?>
