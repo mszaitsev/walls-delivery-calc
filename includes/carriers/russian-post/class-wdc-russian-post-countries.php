@@ -369,7 +369,11 @@ class WDC_Russian_Post_Countries {
 			}
 
 			$country = $this->normalize_country( $item, $wc_country_names );
-			if ( empty( $country['iso2'] ) || empty( $country['carrier_country_id'] ) ) {
+			if ( $this->is_russia_country( $item, (string) ( $country['iso2'] ?? '' ) ) ) {
+				$country = $this->apply_russia_exclusion( $country );
+			}
+
+			if ( 'ru' !== (string) ( $country['auto_status'] ?? '' ) && ( empty( $country['iso2'] ) || empty( $country['carrier_country_id'] ) ) ) {
 				$country['auto_status'] = 'unmatched';
 				$country['availability']['match_reason'] = 'unmatched';
 				$country = $this->apply_country_override( $country, $overrides );
@@ -382,11 +386,6 @@ class WDC_Russian_Post_Countries {
 			}
 
 			++$normalized_count;
-
-			if ( $this->is_russian_country( $country ) ) {
-				$country['auto_status'] = 'ru';
-				$country['availability']['reason'] = 'ru';
-			}
 
 			$country = $this->apply_country_override( $country, $overrides );
 			$all_countries[] = $country;
@@ -495,6 +494,12 @@ class WDC_Russian_Post_Countries {
 
 		$availability = $this->get_parcel_availability( $raw );
 		$auto_status = $this->get_auto_status_from_availability( $availability );
+		if ( $this->is_russia_country( $raw, $iso2 ) ) {
+			$auto_status = 'ru';
+			$availability['reason'] = 'ru';
+			$availability['requires_check'] = false;
+		}
+
 		if ( 'requires_check' === $auto_status ) {
 			$this->debug_log(
 				'Russian Post country has parcel.block=1 warning.',
@@ -593,16 +598,64 @@ class WDC_Russian_Post_Countries {
 	}
 
 	/**
-	 * @param array<string, mixed> $country Normalized country record.
+	 * @param array<string, mixed> $raw Raw or normalized country record.
 	 */
-	private function is_russian_country( array $country ): bool {
-		if ( 'RU' === (string) ( $country['iso2'] ?? '' ) ) {
+	private function is_russia_country( array $raw, string $iso2 = '' ): bool {
+		if ( 'RU' === strtoupper( trim( $iso2 ) ) ) {
 			return true;
 		}
 
-		$name = $this->normalize_country_name_for_match( (string) ( $country['name'] ?? '' ) );
+		if ( isset( $raw['iso2'] ) && is_scalar( $raw['iso2'] ) && 'RU' === strtoupper( trim( (string) $raw['iso2'] ) ) ) {
+			return true;
+		}
 
-		return in_array( $name, array( 'РОССИЯ', 'РОССИЙСКАЯ ФЕДЕРАЦИЯ' ), true );
+		$name = $this->first_scalar(
+			$raw,
+			array(
+				'name',
+				'Name',
+				'country_name',
+				'countryName',
+				'fullname',
+				'fullName',
+				'nameRu',
+				'nameRus',
+				'russianName',
+			)
+		);
+		$name = $this->normalize_country_name_for_match( $name );
+
+		return in_array(
+			$name,
+			array(
+				'РОССИЯ',
+				'РОССИЙСКАЯ ФЕДЕРАЦИЯ',
+				'РФ',
+				'RUSSIA',
+				'RUSSIAN FEDERATION',
+			),
+			true
+		);
+	}
+
+	/**
+	 * @param array<string, mixed> $country Country record.
+	 * @return array<string, mixed>
+	 */
+	private function apply_russia_exclusion( array $country ): array {
+		$country['auto_status'] = 'ru';
+		$country['effective_enabled'] = false;
+		$country['effective_reason'] = 'ru';
+		$country['enabled'] = false;
+
+		if ( ! isset( $country['availability'] ) || ! is_array( $country['availability'] ) ) {
+			$country['availability'] = array();
+		}
+
+		$country['availability']['reason'] = 'ru';
+		$country['availability']['requires_check'] = false;
+
+		return $country;
 	}
 
 	/**
@@ -636,9 +689,19 @@ class WDC_Russian_Post_Countries {
 	 * @return array<string, mixed>
 	 */
 	private function apply_country_override( array $country, array $overrides ): array {
+		$is_russia = $this->is_russia_country(
+			isset( $country['raw'] ) && is_array( $country['raw'] ) ? $country['raw'] : $country,
+			(string) ( $country['iso2'] ?? '' )
+		);
+
 		if (
-			'parcel_blocked' === (string) ( $country['auto_status'] ?? '' )
+			(
+				! $is_russia
+				&& 'parcel_blocked' === (string) ( $country['auto_status'] ?? '' )
+			)
 			|| (
+				! $is_russia
+				&&
 				isset( $country['availability'] )
 				&& is_array( $country['availability'] )
 				&& ( 1 === ( $country['availability']['parcel_block'] ?? null ) || '1' === ( $country['availability']['parcel_block'] ?? null ) )
@@ -674,12 +737,18 @@ class WDC_Russian_Post_Countries {
 			$country['iso2'] = $manual_iso2;
 			$country['manually_matched'] = true;
 			$country['auto_status'] = $this->get_auto_status_from_availability( isset( $country['availability'] ) && is_array( $country['availability'] ) ? $country['availability'] : array() );
-			if ( $this->is_russian_country( $country ) ) {
-				$country['auto_status'] = 'ru';
-				$country['availability']['reason'] = 'ru';
-			}
 		} else {
 			$country['manually_matched'] = false;
+		}
+
+		if (
+			$is_russia
+			|| $this->is_russia_country(
+				isset( $country['raw'] ) && is_array( $country['raw'] ) ? $country['raw'] : $country,
+				(string) ( $country['iso2'] ?? '' )
+			)
+		) {
+			return $this->apply_russia_exclusion( $country );
 		}
 
 		if ( 'yes' === $manual_status ) {
