@@ -510,15 +510,17 @@ class WDC_Admin {
 						$override_key = (string) ( $country['override_key'] ?? ( ! empty( $country['iso2'] ) ? strtoupper( (string) $country['iso2'] ) : 'carrier:' . (string) ( $country['carrier_country_id'] ?? '' ) ) );
 						$manual_status = (string) ( $country['manual_status'] ?? 'auto' );
 						$manual_iso2 = (string) ( $country['manual_iso2'] ?? '' );
-						$is_unmatched = 'unmatched' === (string) ( $country['auto_status'] ?? '' ) || ! empty( $country['manually_matched'] );
+						$auto_status = (string) ( $country['auto_status'] ?? '' );
+						$is_ru = 'ru' === $auto_status;
+						$is_unmatched = ! $is_ru && ( 'unmatched' === $auto_status || ! empty( $country['manually_matched'] ) );
 						$effective_reason = (string) ( $country['effective_reason'] ?? '' );
 						$effective_label = $this->get_country_status_label( $effective_reason );
 						?>
 						<tr data-effective-reason="<?php echo esc_attr( $effective_reason ); ?>" data-effective-label="<?php echo esc_attr( $effective_label ); ?>">
 							<td><?php echo esc_html( (string) ( $country['iso2'] ?? '' ) ); ?></td>
 							<td>
-								<?php if ( $is_unmatched ) : ?>
-									<select name="wdc_country_overrides[<?php echo esc_attr( $override_key ); ?>][manual_iso2]">
+								<?php if ( $is_unmatched || $is_ru ) : ?>
+									<select name="wdc_country_overrides[<?php echo esc_attr( $override_key ); ?>][manual_iso2]" <?php disabled( $is_ru ); ?>>
 										<option value=""><?php echo esc_html__( 'Не сопоставлено', 'walls-delivery-calc' ); ?></option>
 										<?php foreach ( $wc_countries as $iso2 => $wc_country_name ) : ?>
 											<option value="<?php echo esc_attr( $iso2 ); ?>" <?php selected( $manual_iso2, $iso2 ); ?>>
@@ -534,15 +536,17 @@ class WDC_Admin {
 							<td><?php echo esc_html( (string) ( $country['name'] ?? '' ) ); ?></td>
 							<td><?php echo esc_html( (string) ( $country['carrier_country_id'] ?? '' ) ); ?></td>
 							<td>
-								<?php echo esc_html( $this->get_country_status_label( (string) ( $country['auto_status'] ?? '' ) ) ); ?>
-								<?php if ( 'requires_check' === (string) ( $country['auto_status'] ?? '' ) ) : ?>
+								<?php echo esc_html( $this->get_country_status_label( $auto_status ) ); ?>
+								<?php if ( 'requires_check' === $auto_status ) : ?>
 									<br><small><?php echo esc_html__( 'Требует проверки: parcel.block=1, но тарифный расчет может работать', 'walls-delivery-calc' ); ?></small>
+								<?php elseif ( $is_ru ) : ?>
+									<br><small><?php echo esc_html__( 'Россия исключена из международной доставки', 'walls-delivery-calc' ); ?></small>
 								<?php endif; ?>
 							</td>
 							<td>
 								<input type="hidden" name="wdc_country_overrides[<?php echo esc_attr( $override_key ); ?>][carrier_country_id]" value="<?php echo esc_attr( (string) ( $country['carrier_country_id'] ?? '' ) ); ?>">
 								<input type="hidden" name="wdc_country_overrides[<?php echo esc_attr( $override_key ); ?>][country_name]" value="<?php echo esc_attr( (string) ( $country['name'] ?? '' ) ); ?>">
-								<select name="wdc_country_overrides[<?php echo esc_attr( $override_key ); ?>][enabled]">
+								<select name="wdc_country_overrides[<?php echo esc_attr( $override_key ); ?>][enabled]" <?php disabled( $is_ru ); ?>>
 									<option value="auto" <?php selected( $manual_status, 'auto' ); ?>><?php echo esc_html__( 'Авто', 'walls-delivery-calc' ); ?></option>
 									<option value="yes" <?php selected( $manual_status, 'yes' ); ?>><?php echo esc_html__( 'Доставка есть', 'walls-delivery-calc' ); ?></option>
 									<option value="no" <?php selected( $manual_status, 'no' ); ?>><?php echo esc_html__( 'Доставки нет', 'walls-delivery-calc' ); ?></option>
