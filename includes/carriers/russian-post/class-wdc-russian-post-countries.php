@@ -20,6 +20,11 @@ class WDC_Russian_Post_Countries {
 
 	private string $last_error = '';
 
+	/**
+	 * @var array<string, mixed>
+	 */
+	private array $last_diagnostics = array();
+
 	public function __construct( ?WDC_Cache $cache = null, ?WDC_Logger $logger = null, ?WDC_Settings $settings = null ) {
 		$this->cache = $cache ?? new WDC_Cache();
 		$this->logger = $logger ?? new WDC_Logger();
@@ -33,12 +38,25 @@ class WDC_Russian_Post_Countries {
 		if ( ! $force_refresh ) {
 			$cached = $this->get_cached_payload();
 			if ( ! empty( $cached['countries'] ) && is_array( $cached['countries'] ) ) {
-				$this->debug_log( 'Russian Post countries cache hit.', array( 'cache_key' => self::CACHE_KEY ) );
+				$this->debug_log(
+					'Russian Post countries cache hit.',
+					array(
+						'cache_key' => self::CACHE_KEY,
+						'enabled_country_count' => count( $cached['countries'] ),
+						'last_error' => $this->last_error,
+					)
+				);
 
 				return $cached['countries'];
 			}
 
-			$this->debug_log( 'Russian Post countries cache miss.', array( 'cache_key' => self::CACHE_KEY ) );
+			$this->debug_log(
+				'Russian Post countries cache miss.',
+				array(
+					'cache_key' => self::CACHE_KEY,
+					'last_error' => $this->last_error,
+				)
+			);
 		}
 
 		$countries = $this->refresh_countries();
@@ -48,6 +66,15 @@ class WDC_Russian_Post_Countries {
 
 		$cached = $this->get_cached_payload();
 		if ( ! empty( $cached['countries'] ) && is_array( $cached['countries'] ) ) {
+			$this->debug_log(
+				'Russian Post countries using cached data after refresh error.',
+				array(
+					'cache_key' => self::CACHE_KEY,
+					'enabled_country_count' => count( $cached['countries'] ),
+					'last_error' => $this->last_error,
+				)
+			);
+
 			return $cached['countries'];
 		}
 
@@ -75,7 +102,8 @@ class WDC_Russian_Post_Countries {
 	 */
 	public function refresh_countries(): array {
 		$this->last_error = '';
-		$this->debug_log( 'Russian Post countries refresh started.', array( 'url' => self::API_URL ) );
+		$this->last_diagnostics = $this->create_empty_diagnostics();
+		$this->debug_log( 'Russian Post countries refresh started.', array( 'request_url' => self::API_URL ) );
 
 		$response = wp_remote_get(
 			self::API_URL,
@@ -89,33 +117,63 @@ class WDC_Russian_Post_Countries {
 
 		if ( is_wp_error( $response ) ) {
 			$this->last_error = $response->get_error_message();
-			$this->debug_log( 'Russian Post countries refresh failed.', array( 'error' => $this->last_error ) );
+			$this->last_diagnostics['last_error'] = $this->last_error;
+			$this->debug_refresh_diagnostics( 'Russian Post countries refresh failed.' );
 
 			return array();
 		}
 
 		$code = (int) wp_remote_retrieve_response_code( $response );
 		$body = (string) wp_remote_retrieve_body( $response );
-		$decoded = json_decode( $body, true );
+		$this->last_diagnostics['http_code'] = $code;
+		$this->last_diagnostics['body_snippet'] = $this->get_body_snippet( $body );
 
 		if ( $code < 200 || $code >= 300 ) {
 			$this->last_error = 'Russian Post countries API returned HTTP ' . $code . '.';
-			$this->debug_log( 'Russian Post countries refresh failed.', array( 'code' => $code, 'body' => $body ) );
+			$this->last_diagnostics['last_error'] = $this->last_error;
+			$this->debug_refresh_diagnostics( 'Russian Post countries refresh failed.' );
+
+			return array();
+		}
+
+		$decoded = json_decode( $body, true );
+		if ( JSON_ERROR_NONE !== json_last_error() ) {
+			$this->last_error = 'JSON decode error: ' . json_last_error_msg();
+			$this->last_diagnostics['json_error'] = json_last_error_msg();
+			$this->last_diagnostics['last_error'] = $this->last_error;
+			$this->debug_refresh_diagnostics( 'Russian Post countries refresh failed.' );
 
 			return array();
 		}
 
 		if ( ! is_array( $decoded ) ) {
-			$this->last_error = 'Russian Post countries API returned invalid JSON.';
-			$this->debug_log( 'Russian Post countries refresh failed.', array( 'error' => 'invalid_json', 'body' => $body ) );
+			$this->last_error = 'Russian Post countries API returned JSON that is not an array.';
+			$this->last_diagnostics['last_error'] = $this->last_error;
+			$this->debug_refresh_diagnostics( 'Russian Post countries refresh failed.' );
 
 			return array();
 		}
 
-		$countries = $this->normalize_countries( $decoded );
+		$items = $this->extract_country_items( $decoded );
+		if ( null === $items ) {
+			$this->last_error = 'Country list not found in API response.';
+			$this->last_diagnostics['last_error'] = $this->last_error;
+			$this->debug_refresh_diagnostics( 'Russian Post countries refresh failed.' );
+
+			return array();
+		}
+
+		$this->last_diagnostics['raw_country_count'] = count( $items );
+		$normalized_count = 0;
+		$enabled_count = 0;
+		$countries = $this->normalize_countries( $items, $normalized_count, $enabled_count );
+		$this->last_diagnostics['normalized_country_count'] = $normalized_count;
+		$this->last_diagnostics['enabled_country_count'] = $enabled_count;
+
 		if ( empty( $countries ) ) {
 			$this->last_error = 'Russian Post countries API returned no usable country data.';
-			$this->debug_log( 'Russian Post countries refresh failed.', array( 'error' => 'missing_country_data', 'raw' => $decoded ) );
+			$this->last_diagnostics['last_error'] = $this->last_error;
+			$this->debug_refresh_diagnostics( 'Russian Post countries refresh failed.' );
 
 			return array();
 		}
@@ -127,7 +185,8 @@ class WDC_Russian_Post_Countries {
 		);
 
 		$this->cache->set( self::CACHE_KEY, $payload, self::CACHE_TTL );
-		$this->debug_log( 'Russian Post countries refresh completed.', array( 'count' => count( $countries ), 'cache_key' => self::CACHE_KEY ) );
+		$this->last_diagnostics['last_error'] = '';
+		$this->debug_refresh_diagnostics( 'Russian Post countries refresh completed.' );
 
 		return $countries;
 	}
@@ -152,6 +211,13 @@ class WDC_Russian_Post_Countries {
 	/**
 	 * @return array<string, mixed>
 	 */
+	public function get_last_diagnostics(): array {
+		return $this->last_diagnostics;
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
 	private function get_cached_payload(): array {
 		$cached = $this->cache->get( self::CACHE_KEY );
 
@@ -159,11 +225,38 @@ class WDC_Russian_Post_Countries {
 	}
 
 	/**
-	 * @param array<string, mixed> $decoded Raw API response.
+	 * @return array<string, mixed>
+	 */
+	private function create_empty_diagnostics(): array {
+		return array(
+			'request_url' => self::API_URL,
+			'http_code' => 0,
+			'body_snippet' => '',
+			'json_error' => '',
+			'raw_country_count' => 0,
+			'normalized_country_count' => 0,
+			'enabled_country_count' => 0,
+			'last_error' => '',
+		);
+	}
+
+	private function get_body_snippet( string $body ): string {
+		if ( function_exists( 'mb_substr' ) ) {
+			return mb_substr( $body, 0, 1000 );
+		}
+
+		return substr( $body, 0, 1000 );
+	}
+
+	private function debug_refresh_diagnostics( string $message ): void {
+		$this->debug_log( $message, $this->last_diagnostics );
+	}
+
+	/**
+	 * @param array<int, mixed> $items Raw country records.
 	 * @return array<string, array<string, mixed>>
 	 */
-	private function normalize_countries( array $decoded ): array {
-		$items = $this->extract_country_items( $decoded );
+	private function normalize_countries( array $items, int &$normalized_count, int &$enabled_count ): array {
 		$countries = array();
 
 		foreach ( $items as $item ) {
@@ -176,6 +269,8 @@ class WDC_Russian_Post_Countries {
 				continue;
 			}
 
+			++$normalized_count;
+
 			if ( 'RU' === $country['iso2'] ) {
 				continue;
 			}
@@ -184,6 +279,7 @@ class WDC_Russian_Post_Countries {
 				continue;
 			}
 
+			++$enabled_count;
 			$countries[ $country['iso2'] ] = $country;
 		}
 
@@ -194,20 +290,18 @@ class WDC_Russian_Post_Countries {
 
 	/**
 	 * @param array<string, mixed> $decoded Raw API response.
-	 * @return array<int, mixed>
+	 * @return array<int, mixed>|null
 	 */
-	private function extract_country_items( array $decoded ): array {
-		foreach ( array( 'countries', 'country', 'items', 'data', 'dictionary', 'records', 'list' ) as $key ) {
-			if ( isset( $decoded[ $key ] ) && is_array( $decoded[ $key ] ) ) {
-				return array_values( $decoded[ $key ] );
-			}
+	private function extract_country_items( array $decoded ): ?array {
+		if ( isset( $decoded['country'] ) && is_array( $decoded['country'] ) ) {
+			return array_values( $decoded['country'] );
 		}
 
 		if ( $this->is_list_array( $decoded ) ) {
 			return $decoded;
 		}
 
-		return array_values( $decoded );
+		return null;
 	}
 
 	/**
@@ -405,7 +499,7 @@ class WDC_Russian_Post_Countries {
 		}
 
 		if ( is_numeric( $value ) ) {
-			return 1 === (int) $value;
+			return 0 !== (int) $value;
 		}
 
 		if ( is_string( $value ) ) {

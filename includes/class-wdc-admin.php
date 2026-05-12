@@ -79,19 +79,36 @@ class WDC_Admin {
 
 		$countries_client = new WDC_Russian_Post_Countries( null, $this->logger, $this->settings );
 		$countries = $countries_client->refresh_countries();
+		$diagnostics = $countries_client->get_last_diagnostics();
 		$args = array(
 			'page' => 'wdc-delivery-calc',
 			'tab' => 'countries',
 		);
 
 		if ( ! empty( $countries ) ) {
+			delete_transient( $this->get_countries_refresh_error_key() );
 			$args['countries_refreshed'] = 'true';
 		} else {
+			set_transient( $this->get_countries_refresh_error_key(), $diagnostics, MINUTE_IN_SECONDS );
 			$args['countries_refresh_failed'] = 'true';
 		}
 
 		wp_safe_redirect( add_query_arg( $args, admin_url( 'admin.php' ) ) );
 		exit;
+	}
+
+	private function get_countries_refresh_error_key(): string {
+		return 'wdc_russian_post_countries_refresh_error_' . get_current_user_id();
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	private function get_countries_refresh_error(): array {
+		$error = get_transient( $this->get_countries_refresh_error_key() );
+		delete_transient( $this->get_countries_refresh_error_key() );
+
+		return is_array( $error ) ? $error : array();
 	}
 
 	public function render_page(): void {
@@ -103,6 +120,7 @@ class WDC_Admin {
 		$active_tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'general';
 		$active_tab = array_key_exists( $active_tab, $tabs ) ? $active_tab : 'general';
 		$settings = $this->settings->get();
+		$countries_refresh_error = $this->get_countries_refresh_error();
 		?>
 		<div class="wrap">
 			<h1><?php echo esc_html__( 'Walls Delivery Calc', 'walls-delivery-calc' ); ?></h1>
@@ -127,6 +145,31 @@ class WDC_Admin {
 			<?php if ( isset( $_GET['countries_refresh_failed'] ) && 'true' === sanitize_text_field( wp_unslash( $_GET['countries_refresh_failed'] ) ) ) : ?>
 				<div class="notice notice-error is-dismissible">
 					<p><?php echo esc_html__( 'Не удалось обновить справочник стран Почты России. Checkout продолжит работать через fallback.', 'walls-delivery-calc' ); ?></p>
+					<?php if ( ! empty( $countries_refresh_error ) ) : ?>
+						<p>
+							<strong><?php echo esc_html__( 'Причина:', 'walls-delivery-calc' ); ?></strong>
+							<?php echo esc_html( (string) ( $countries_refresh_error['last_error'] ?? 'unknown_error' ) ); ?>
+						</p>
+						<p>
+							<strong><?php echo esc_html__( 'HTTP code:', 'walls-delivery-calc' ); ?></strong>
+							<?php echo esc_html( (string) ( $countries_refresh_error['http_code'] ?? 0 ) ); ?>
+							&nbsp;|&nbsp;
+							<strong><?php echo esc_html__( 'Raw countries:', 'walls-delivery-calc' ); ?></strong>
+							<?php echo esc_html( (string) ( $countries_refresh_error['raw_country_count'] ?? 0 ) ); ?>
+							&nbsp;|&nbsp;
+							<strong><?php echo esc_html__( 'Normalized:', 'walls-delivery-calc' ); ?></strong>
+							<?php echo esc_html( (string) ( $countries_refresh_error['normalized_country_count'] ?? 0 ) ); ?>
+							&nbsp;|&nbsp;
+							<strong><?php echo esc_html__( 'Normalized enabled:', 'walls-delivery-calc' ); ?></strong>
+							<?php echo esc_html( (string) ( $countries_refresh_error['enabled_country_count'] ?? 0 ) ); ?>
+						</p>
+						<?php if ( ! empty( $countries_refresh_error['body_snippet'] ) ) : ?>
+							<p>
+								<strong><?php echo esc_html__( 'Response snippet:', 'walls-delivery-calc' ); ?></strong>
+								<code><?php echo esc_html( (string) $countries_refresh_error['body_snippet'] ); ?></code>
+							</p>
+						<?php endif; ?>
+					<?php endif; ?>
 				</div>
 			<?php endif; ?>
 
