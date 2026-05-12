@@ -14,6 +14,8 @@ final class WDC_Plugin {
 
 	private WDC_Settings $settings;
 
+	private WDC_Order_Meta $order_meta;
+
 	public static function instance(): WDC_Plugin {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -26,11 +28,13 @@ final class WDC_Plugin {
 		$this->load_dependencies();
 		$this->logger = new WDC_Logger();
 		$this->settings = new WDC_Settings();
+		$this->order_meta = new WDC_Order_Meta( $this->logger, $this->settings );
 
 		add_action( 'plugins_loaded', array( $this, 'init' ) );
 	}
 
 	public function init(): void {
+		$this->order_meta->init();
 		add_action( 'woocommerce_shipping_init', array( $this, 'load_shipping_method' ) );
 		add_filter( 'woocommerce_shipping_methods', array( $this, 'register_shipping_method' ) );
 

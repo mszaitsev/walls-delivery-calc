@@ -71,12 +71,16 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 		$country_code = $this->get_destination_country_code( $package );
 		$country_name = $this->get_destination_country_name( $country_code );
 		$destination = $this->build_destination( $package, $country_code, $country_name );
+		$items_net_total_rub = $this->get_items_net_total_rub( $package );
 		$context = array_merge(
 			$context,
 			array(
 				'settings' => $settings,
 				'fallback_enabled' => $settings['fallback_enabled'],
 				'destination' => $destination,
+				'meta' => array(
+					'items_net_total_rub' => $items_net_total_rub,
+				),
 			)
 		);
 
@@ -131,22 +135,30 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 			return $this->fallback( (string) ( $api_result['error_code'] ?? 'api_error' ), $context, $debug_enabled, $api_result );
 		}
 
-		$price_rub = $this->extract_price_rub( $api_result['raw'] );
-		if ( null === $price_rub ) {
+		$api_original_price_kop = $this->extract_price_kop( $api_result['raw'] );
+		if ( null === $api_original_price_kop ) {
 			return $this->fallback( 'missing_price', $context, $debug_enabled, $api_result );
 		}
 
-		$calculated_price = (int) ceil( $price_rub / (float) $service_settings['formula_divider'] + (float) $service_settings['formula_add_rub'] );
+		$api_original_price_rub = (float) $api_original_price_kop / 100;
+		$shipping_price_before_items_discount = (int) ceil( $api_original_price_rub / (float) $service_settings['formula_divider'] + (float) $service_settings['formula_add_rub'] );
+		$discount_percent = (float) $service_settings['shipping_discount_percent_from_items_total'];
+		$discount_amount = (int) floor( $items_net_total_rub * $discount_percent / 100 );
+		$calculated_price = max( 1, $shipping_price_before_items_discount - $discount_amount );
 		$transport_type = $this->map_transport_type( $api_result['raw']['transtype'] ?? null );
 
 		$this->debug_log(
 			$debug_enabled,
 			'Russian Post worldwide price calculated.',
 			array(
-				'price_rub' => $price_rub,
+				'price_rub' => $api_original_price_rub,
 				'formula_divider' => $service_settings['formula_divider'],
 				'formula_add_rub' => $service_settings['formula_add_rub'],
-				'calculated_price' => $calculated_price,
+				'items_net_total' => $items_net_total_rub,
+				'discount_percent' => $discount_percent,
+				'discount_amount' => $discount_amount,
+				'shipping_price_before_items_discount' => $shipping_price_before_items_discount,
+				'final_shipping_price' => $calculated_price,
 				'cache_key' => $cache_key,
 			)
 		);
@@ -170,8 +182,16 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 						'price' => $calculated_price,
 						'currency' => (string) $settings['currency'],
 						'meta' => array(
-							'base_price_rub' => $price_rub,
+							'base_price_rub' => $api_original_price_rub,
+							'api_original_price_kop' => $api_original_price_kop,
+							'api_original_price_rub' => $api_original_price_rub,
+							'items_net_total_rub' => $items_net_total_rub,
+							'shipping_discount_percent_from_items_total' => $discount_percent,
+							'shipping_discount_amount_rub' => $discount_amount,
+							'shipping_price_before_items_discount_rub' => $shipping_price_before_items_discount,
 							'cache_key' => $cache_key,
+							'cache_hit' => ! empty( $api_result['cache_hit'] ),
+							'http_code' => isset( $api_result['http_code'] ) ? (int) $api_result['http_code'] : 0,
 							'request_url' => $api_result['url'] ?? '',
 							'request_params' => $request_params,
 						),
@@ -179,7 +199,10 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 					),
 				),
 				'meta' => array(
+					'items_net_total_rub' => $items_net_total_rub,
 					'cache_key' => $cache_key,
+					'cache_hit' => ! empty( $api_result['cache_hit'] ),
+					'http_code' => isset( $api_result['http_code'] ) ? (int) $api_result['http_code'] : 0,
 					'request_url' => $api_result['url'] ?? '',
 					'request_params' => $request_params,
 				),
@@ -240,6 +263,7 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 		$cached = $this->cache->get( $cache_key );
 		if ( false !== $cached && is_array( $cached ) ) {
 			$this->debug_log( $debug_enabled, 'Russian Post worldwide cache hit.', array( 'cache_key' => $cache_key ) );
+			$cached['cache_hit'] = true;
 
 			return $cached;
 		}
@@ -247,6 +271,7 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 		$this->debug_log( $debug_enabled, 'Russian Post worldwide cache miss.', array( 'cache_key' => $cache_key, 'params' => $request_params ) );
 
 		$result = $this->api->calculate_tariff( $request_params, $debug_enabled );
+		$result['cache_hit'] = false;
 		if ( ! empty( $result['success'] ) && 'yes' === $service_settings['cache_until_end_of_day'] ) {
 			$this->cache->set( $cache_key, $result, $this->cache->get_seconds_until_end_of_day() );
 		}
@@ -265,13 +290,41 @@ class WDC_Russian_Post_Carrier implements WDC_Carrier_Interface {
 	 * @param array<string, mixed> $raw Raw API response.
 	 */
 	private function extract_price_rub( array $raw ): ?float {
+		$value = $this->extract_price_kop( $raw );
+
+		return null === $value ? null : (float) $value / 100;
+	}
+
+	/**
+	 * @param array<string, mixed> $raw Raw API response.
+	 */
+	private function extract_price_kop( array $raw ): ?int {
 		$value = $raw['paynds'] ?? $raw['paymoneynds'] ?? null;
 
 		if ( ! is_numeric( $value ) ) {
 			return null;
 		}
 
-		return (float) $value / 100;
+		return (int) $value;
+	}
+
+	/**
+	 * @param array<string, mixed> $package WooCommerce package data.
+	 */
+	private function get_items_net_total_rub( array $package ): float {
+		if ( isset( $package['contents_cost'] ) && is_numeric( $package['contents_cost'] ) ) {
+			return max( 0, (float) $package['contents_cost'] );
+		}
+
+		$total = 0.0;
+		$contents = isset( $package['contents'] ) && is_array( $package['contents'] ) ? $package['contents'] : array();
+		foreach ( $contents as $item ) {
+			if ( is_array( $item ) && isset( $item['line_total'] ) && is_numeric( $item['line_total'] ) ) {
+				$total += (float) $item['line_total'];
+			}
+		}
+
+		return max( 0, $total );
 	}
 
 	private function map_transport_type( $transtype ): string {
