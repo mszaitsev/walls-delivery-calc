@@ -14,10 +14,13 @@ use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
 use WallsShop\WDC\Domain\Carrier\CarrierIdentity;
+use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\DeliveryQuote;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
@@ -78,6 +81,10 @@ function checkout_promo_rule(): Rule {
 	return new Rule( null, 'Demo promo -500', true, 10, 'rate', 'demo', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 500, RuleOperationBases::RUBLES, true, false );
 }
 
+function checkout_increase_rule(): Rule {
+	return new Rule( null, 'Demo +200', true, 10, 'rate', 'demo', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 200, RuleOperationBases::RUBLES, false, false );
+}
+
 final class CheckoutFailingCarrier implements CarrierAdapterInterface {
 	public function get_identity(): CarrierIdentity {
 		return new CarrierIdentity( 'failing', 'Failing Carrier', 'fixed', true );
@@ -93,6 +100,40 @@ final class CheckoutFailingCarrier implements CarrierAdapterInterface {
 
 	public function quote( QuoteRequest $request ): DeliveryQuote {
 		throw new RuntimeException( 'Intentional carrier failure.' );
+	}
+}
+
+final class CheckoutExistingCrossedCarrier implements CarrierAdapterInterface {
+	public function get_identity(): CarrierIdentity {
+		return new CarrierIdentity( 'crossed', 'Existing Crossed Carrier', 'fixed', true );
+	}
+
+	public function get_capabilities(): CarrierCapabilities {
+		return new CarrierCapabilities( supports_quotes: true );
+	}
+
+	public function supports_country( string $countryCode ): bool {
+		return true;
+	}
+
+	public function quote( QuoteRequest $request ): DeliveryQuote {
+		$rate = new DeliveryRate(
+			'crossed:pickup',
+			'crossed',
+			'Existing Crossed Carrier',
+			DeliveryType::PICKUP,
+			'Existing crossed pickup',
+			DeliveryType::PICKUP,
+			'Existing crossed pickup',
+			DeliveryType::PICKUP,
+			'Existing crossed pickup',
+			Money::from_rubles( 400 ),
+			null,
+			Money::from_rubles( 500 ),
+			DateRange::single( 4 )
+		);
+
+		return new DeliveryQuote( 'crossed-demo', 'crossed', $request->destination, $request->package, array( $rate ), true, '', '', false, 'manual' );
 	}
 }
 
@@ -112,9 +153,21 @@ checkout_smoke_assert( 35000 === $result->rates[0]->price->get_kopecks(), 'Cheap
 $result = $orchestrator->calculate( checkout_request(), array(), RateSorter::FASTEST );
 checkout_smoke_assert( 3 === $result->rates[0]->delivery_days->min_days, 'Fastest sorting must put courier first.' );
 
+$result = $orchestrator->calculate( checkout_request( 'RU', 'pickup' ), array( checkout_increase_rule() ) );
+checkout_smoke_assert( 55000 === $result->rates[0]->price->get_kopecks(), 'Regular +200 rule must modify pickup price.' );
+checkout_smoke_assert( null === $result->rates[0]->crossed_price, 'Regular price rule must not create crossed price.' );
+checkout_smoke_assert( ! $result->rates[0]->has_discount(), 'Regular price rule must not be treated as a promo discount.' );
+
 $result = $orchestrator->calculate( checkout_request( 'RU', 'pickup' ), array( checkout_promo_rule() ) );
 checkout_smoke_assert( 100 === $result->rates[0]->price->get_kopecks(), 'Rule engine must modify demo pickup rate.' );
 checkout_smoke_assert( 35000 === $result->rates[0]->crossed_price?->get_kopecks(), 'Crossed price must survive rule application.' );
+checkout_smoke_assert( $result->rates[0]->has_discount(), 'Promo rule must be treated as a discount when crossed price is present.' );
+
+$registry = new CarrierRegistry();
+$registry->register( new CheckoutExistingCrossedCarrier() );
+$result = checkout_orchestrator( $registry )->calculate( checkout_request(), array( checkout_increase_rule() ) );
+checkout_smoke_assert( 60000 === $result->rates[0]->price->get_kopecks(), 'Regular rule must modify rate with existing crossed price.' );
+checkout_smoke_assert( 50000 === $result->rates[0]->crossed_price?->get_kopecks(), 'Existing crossed price must be preserved when no promo rule is applied.' );
 
 $registry = new CarrierRegistry();
 $registry->register( new CheckoutFailingCarrier() );
