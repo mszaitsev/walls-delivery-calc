@@ -14,7 +14,7 @@ final class SettingsRepository {
 	public function all(): array {
 		$settings = get_option( self::OPTION_NAME, array() );
 
-		return is_array( $settings ) ? $settings : array();
+		return array_merge( $this->defaults(), is_array( $settings ) ? $settings : array() );
 	}
 
 	/**
@@ -22,6 +22,16 @@ final class SettingsRepository {
 	 */
 	public function replace( array $settings ): bool {
 		return update_option( self::OPTION_NAME, $settings, false );
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	public function defaults(): array {
+		return array(
+			'shop_processing_days'    => 1,
+			'auto_generate_next_year' => true,
+		);
 	}
 
 	public function set( string $key, mixed $value ): bool {
