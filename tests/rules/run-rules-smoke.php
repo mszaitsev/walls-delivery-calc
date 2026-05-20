@@ -50,6 +50,22 @@ function price_rule( string $name, string $operation, float $value, string $base
 
 $engine = new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) );
 
+$hydrated_condition = new RuleCondition( 7, 3, 2, RuleConditionTypes::CITY, RuleOperators::CONTAINS, 'mos', null, array( 'Moscow' ) );
+$hydrated_rule      = Rule::from_array(
+	array(
+		'name'            => 'Hydrate condition object',
+		'action_type'     => RuleActionTypes::CHANGE_PRICE,
+		'operation_type'  => RuleOperationTypes::INCREASE,
+		'operation_base'  => RuleOperationBases::RUBLES,
+		'conditions'      => array( $hydrated_condition ),
+	)
+);
+rules_smoke_assert( 1 === count( $hydrated_rule->conditions ), 'Rule::from_array must keep condition objects.' );
+rules_smoke_assert( RuleConditionTypes::CITY === $hydrated_rule->conditions[0]->condition_type, 'Hydrated condition type must be preserved.' );
+rules_smoke_assert( RuleOperators::CONTAINS === $hydrated_rule->conditions[0]->operator, 'Hydrated condition operator must be preserved.' );
+rules_smoke_assert( 'mos' === $hydrated_rule->conditions[0]->value_text, 'Hydrated condition value_text must be preserved.' );
+rules_smoke_assert( array( 'Moscow' ) === $hydrated_rule->conditions[0]->value_json, 'Repository-style hydrate must preserve condition value_json.' );
+
 $result = $engine->apply_rules( array( price_rule( '+200', RuleOperationTypes::INCREASE, 200 ) ), rules_context() );
 rules_smoke_assert( 65000 === $result->final_price?->get_kopecks(), '+200 RUB must produce 650 RUB.' );
 

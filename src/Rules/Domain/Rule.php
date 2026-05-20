@@ -54,7 +54,7 @@ final class Rule {
 	 */
 	public static function from_array( array $data ): self {
 		$conditions = array_map(
-			static fn ( mixed $condition ): RuleCondition => RuleCondition::from_array( is_array( $condition ) ? $condition : array() ),
+			static fn ( mixed $condition ): RuleCondition => $condition instanceof RuleCondition ? $condition : RuleCondition::from_array( is_array( $condition ) ? $condition : array() ),
 			is_array( $data['conditions'] ?? null ) ? $data['conditions'] : array()
 		);
 
