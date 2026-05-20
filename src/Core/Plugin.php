@@ -13,6 +13,18 @@ use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
 use WallsShop\WDC\Calendar\Services\TimezoneService;
 use WallsShop\WDC\Calendar\Services\YearGenerator;
 use WallsShop\WDC\Calendar\Storage\CalendarRepository;
+use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
+use WallsShop\WDC\Carriers\Runtime\DemoCarrier;
+use WallsShop\WDC\Checkout\Admin\CheckoutSimulationPage;
+use WallsShop\WDC\Checkout\Cache\QuoteCache;
+use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
+use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
+use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
+use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
+use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
+use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Infrastructure\Database\MigrationManager;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
@@ -68,6 +80,36 @@ final class Plugin {
 		$this->container->register( RuleEvaluator::class, fn(): RuleEvaluator => new RuleEvaluator( $this->container->get( ConditionEvaluator::class ) ) );
 		$this->container->register( RuleEngine::class, fn(): RuleEngine => new RuleEngine( $this->container->get( RuleEvaluator::class ) ) );
 		$this->container->register( RuleSimulator::class, fn(): RuleSimulator => new RuleSimulator( $this->container->get( RuleEngine::class ) ) );
+		$this->container->register( DemoCarrier::class, fn(): DemoCarrier => new DemoCarrier() );
+		$this->container->register(
+			CarrierRegistry::class,
+			function (): CarrierRegistry {
+				$registry = new CarrierRegistry();
+				$registry->register( $this->container->get( DemoCarrier::class ) );
+
+				return $registry;
+			}
+		);
+		$this->container->register( QuoteCache::class, fn(): QuoteCache => new QuoteCache() );
+		$this->container->register( RateSorter::class, fn(): RateSorter => new RateSorter() );
+		$this->container->register( FallbackRateFactory::class, fn(): FallbackRateFactory => new FallbackRateFactory() );
+		$this->container->register( RuleAppliedRateBuilder::class, fn(): RuleAppliedRateBuilder => new RuleAppliedRateBuilder( $this->container->get( RuleEngine::class ) ) );
+		$this->container->register( CheckoutLogger::class, fn(): CheckoutLogger => new CheckoutLogger( $this->container->get( Logger::class ) ) );
+		$this->container->register( CarrierExecutionGuard::class, fn(): CarrierExecutionGuard => new CarrierExecutionGuard( $this->container->get( CheckoutLogger::class ) ) );
+		$this->container->register(
+			CheckoutOrchestrator::class,
+			fn(): CheckoutOrchestrator => new CheckoutOrchestrator(
+				$this->container->get( CarrierRegistry::class ),
+				$this->container->get( RuleAppliedRateBuilder::class ),
+				$this->container->get( RateSorter::class ),
+				$this->container->get( FallbackRateFactory::class ),
+				$this->container->get( CarrierExecutionGuard::class ),
+				$this->container->get( CheckoutLogger::class ),
+				$this->container->get( QuoteCache::class )
+			)
+		);
+		$this->container->register( WooCommerceRateMapper::class, fn(): WooCommerceRateMapper => new WooCommerceRateMapper() );
+		$this->container->register( NewShippingMethod::class, fn(): NewShippingMethod => new NewShippingMethod( $this->container->get( CheckoutOrchestrator::class ), $this->container->get( WooCommerceRateMapper::class ) ) );
 		$this->container->register( LocationSearchService::class, fn(): LocationSearchService => new LocationSearchService( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( LocationImportService::class, fn(): LocationImportService => new LocationImportService( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( GarChangesService::class, fn(): GarChangesService => new GarChangesService() );
@@ -142,6 +184,13 @@ final class Plugin {
 				$this->container->get( RuleSimulator::class )
 			)
 		);
+		$this->container->register(
+			CheckoutSimulationPage::class,
+			fn(): CheckoutSimulationPage => new CheckoutSimulationPage(
+				$this->environment,
+				$this->container->get( CheckoutOrchestrator::class )
+			)
+		);
 	}
 
 	private function register_hooks(): void {
@@ -156,6 +205,7 @@ final class Plugin {
 			$this->container->get( CalendarAdminPage::class )->register();
 			$this->container->get( LocationsAdminPage::class )->register();
 			$this->container->get( RulesAdminPage::class )->register();
+			$this->container->get( CheckoutSimulationPage::class )->register();
 		}
 	}
 
