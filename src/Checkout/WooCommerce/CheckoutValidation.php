@@ -3,13 +3,15 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Checkout\Validation\CheckoutAddressValidation;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 
 defined( 'ABSPATH' ) || exit;
 
 final class CheckoutValidation {
 	public function __construct(
-		private CheckoutSessionManager $session_manager
+		private CheckoutSessionManager $session_manager,
+		private ?CheckoutAddressValidation $address_validation = null
 	) {
 	}
 
@@ -18,14 +20,18 @@ final class CheckoutValidation {
 	}
 
 	public function validate( mixed $data = array(), mixed $errors = null ): void {
+		$data = is_array( $data ) ? $data : array();
 		$rate = $this->selected_rate();
 		if ( array() === $rate ) {
+			$this->validate_city( $this->session_manager->selected_delivery_type(), $data, $errors );
 			if ( DeliveryType::PICKUP === $this->session_manager->selected_delivery_type() && ! $this->has_any_pickup_selection() ) {
-				$this->add_error( $errors );
+				$this->add_pickup_error( $errors );
 			}
 
 			return;
 		}
+
+		$this->validate_city( (string) ( $rate['delivery_type'] ?? '' ), $data, $errors );
 
 		if ( DeliveryType::PICKUP !== (string) ( $rate['delivery_type'] ?? '' ) ) {
 			return;
@@ -35,10 +41,23 @@ final class CheckoutValidation {
 			return;
 		}
 
-		$this->add_error( $errors );
+		$this->add_pickup_error( $errors );
 	}
 
-	private function add_error( mixed $errors = null ): void {
+	private function validate_city( string $delivery_type, array $data, mixed $errors = null ): void {
+		if ( ! in_array( $delivery_type, array( DeliveryType::PICKUP, DeliveryType::COURIER ), true ) ) {
+			return;
+		}
+
+		$validator = $this->address_validation ?? new CheckoutAddressValidation( $this->session_manager );
+		if ( $validator->has_city( $data ) ) {
+			return;
+		}
+
+		$this->add_city_error( $errors );
+	}
+
+	private function add_pickup_error( mixed $errors = null ): void {
 		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
 			$errors->add( 'wdc_pickup_required', __( 'Please select a pickup point.', 'walls-delivery-calc' ) );
 			return;
@@ -46,6 +65,17 @@ final class CheckoutValidation {
 
 		if ( function_exists( 'wc_add_notice' ) ) {
 			wc_add_notice( __( 'Please select a pickup point.', 'walls-delivery-calc' ), 'error' );
+		}
+	}
+
+	private function add_city_error( mixed $errors = null ): void {
+		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
+			$errors->add( 'wdc_city_required', __( 'Please enter a delivery city.', 'walls-delivery-calc' ) );
+			return;
+		}
+
+		if ( function_exists( 'wc_add_notice' ) ) {
+			wc_add_notice( __( 'Please enter a delivery city.', 'walls-delivery-calc' ), 'error' );
 		}
 	}
 

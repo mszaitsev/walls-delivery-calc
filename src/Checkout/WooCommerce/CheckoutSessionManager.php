@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
+
 defined( 'ABSPATH' ) || exit;
 
 final class CheckoutSessionManager {
@@ -12,6 +14,9 @@ final class CheckoutSessionManager {
 	private const SORT_MODE_KEY     = 'wdc_platform_checkout_sort_mode';
 	private const RATES_KEY         = 'wdc_platform_rates';
 	private const DEBUG_KEY         = 'wdc_platform_debug';
+	private const NORMALIZED_ADDRESS_KEY = 'wdc_platform_normalized_address';
+	private const SELECTED_CITY_KEY      = 'wdc_platform_selected_city';
+	private const FALLBACK_CITY_KEY      = 'wdc_platform_fallback_city';
 
 	public function save_selected_delivery_type( string $delivery_type ): void {
 		$this->set( self::DELIVERY_TYPE_KEY, $delivery_type );
@@ -98,6 +103,40 @@ final class CheckoutSessionManager {
 		$debug = $this->get( self::DEBUG_KEY, array() );
 
 		return is_array( $debug ) ? $debug : array();
+	}
+
+	public function save_normalized_address_result( AddressNormalizationResult $result ): void {
+		$this->set( self::NORMALIZED_ADDRESS_KEY, $result->to_array() );
+	}
+
+	public function normalized_address_result(): ?AddressNormalizationResult {
+		$result = $this->get( self::NORMALIZED_ADDRESS_KEY, array() );
+
+		return is_array( $result ) && array() !== $result ? AddressNormalizationResult::from_array( $result ) : null;
+	}
+
+	/**
+	 * @param array<string,mixed> $city
+	 */
+	public function save_selected_city( array $city ): void {
+		$this->set( self::SELECTED_CITY_KEY, $city );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function selected_city(): array {
+		$city = $this->get( self::SELECTED_CITY_KEY, array() );
+
+		return is_array( $city ) ? $city : array();
+	}
+
+	public function save_fallback_city( string $city ): void {
+		$this->set( self::FALLBACK_CITY_KEY, $city );
+	}
+
+	public function fallback_city(): string {
+		return (string) $this->get( self::FALLBACK_CITY_KEY, '' );
 	}
 
 	private function set( string $key, mixed $value ): void {

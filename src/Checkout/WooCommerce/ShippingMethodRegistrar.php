@@ -73,6 +73,12 @@ final class ShippingMethodRegistrar {
 			array( 'wdc-platform-checkout-rates' ),
 			$this->environment->version()
 		);
+		wp_enqueue_style(
+			'wdc-platform-address-normalization',
+			$this->environment->plugin_url() . 'assets/frontend/address-normalization.css',
+			array( 'wdc-platform-checkout-rates' ),
+			$this->environment->version()
+		);
 	}
 
 	private function enabled(): bool {

@@ -38,6 +38,19 @@ final class OrderShippingMetaPersister {
 			'_wdc_platform_fallback_used'            => ! empty( $rate['fallback_used'] ) || 'fallback' === (string) ( $rate['carrier_key'] ?? '' ),
 		);
 
+		$address = $this->session_manager->normalized_address_result();
+		if ( null !== $address ) {
+			$address_fallback_used = $address->address->fallback || ! $address->address->normalized;
+			$map['_wdc_platform_normalized']           = $address->address->normalized;
+			$map['_wdc_platform_normalization_source'] = $address->source;
+			$map['_wdc_platform_fallback_city']        = $this->session_manager->fallback_city();
+			$map['_wdc_platform_fallback_address']     = $address_fallback_used ? $address->address->raw_address : '';
+			$map['_wdc_platform_address_fallback_used'] = $address_fallback_used;
+			$map['_wdc_platform_resolved_postcode']    = $address->address->postcode;
+			$map['_wdc_platform_fias_id']              = $address->address->fias_id;
+			$map['_wdc_platform_gar_id']               = $address->address->gar_id;
+		}
+
 		$pickup = $this->session_manager->pickup_selection();
 		if (
 			'pickup' === (string) ( $rate['delivery_type'] ?? '' )
