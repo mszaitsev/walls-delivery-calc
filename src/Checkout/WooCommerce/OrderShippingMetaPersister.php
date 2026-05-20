@@ -39,7 +39,10 @@ final class OrderShippingMetaPersister {
 		);
 
 		$pickup = $this->session_manager->pickup_selection();
-		if ( 'pickup' === (string) ( $rate['delivery_type'] ?? '' ) && array() !== $pickup ) {
+		if (
+			'pickup' === (string) ( $rate['delivery_type'] ?? '' )
+			&& $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) )
+		) {
 			$map['_wdc_platform_pickup_code']      = $pickup['point_code'] ?? '';
 			$map['_wdc_platform_pickup_address']   = $pickup['point_address'] ?? '';
 			$map['_wdc_platform_pickup_comment']   = $pickup['point_comment'] ?? '';

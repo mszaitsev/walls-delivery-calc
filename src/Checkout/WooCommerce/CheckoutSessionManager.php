@@ -42,6 +42,24 @@ final class CheckoutSessionManager {
 		return (string) $this->get( self::PICKUP_CARRIER_KEY, '' );
 	}
 
+	public function pickup_selection_matches( string $carrierKey, string $rateId ): bool {
+		$selection = $this->pickup_selection();
+		if ( array() === $selection || '' === trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
+			return false;
+		}
+
+		if ( trim( (string) ( $selection['carrier_key'] ?? '' ) ) !== trim( $carrierKey ) ) {
+			return false;
+		}
+
+		$selection_rate_id = trim( (string) ( $selection['rate_id'] ?? '' ) );
+		if ( '' === $selection_rate_id ) {
+			return true;
+		}
+
+		return $this->normalize_rate_id( $selection_rate_id ) === $this->normalize_rate_id( $rateId );
+	}
+
 	public function save_sort_mode( string $sort_mode ): void {
 		$this->set( self::SORT_MODE_KEY, $sort_mode );
 	}
@@ -104,5 +122,14 @@ final class CheckoutSessionManager {
 		}
 
 		return null;
+	}
+
+	private function normalize_rate_id( string $rate_id ): string {
+		$prefix = NewShippingMethod::METHOD_ID . ':';
+		if ( str_starts_with( $rate_id, $prefix ) ) {
+			return substr( $rate_id, strlen( $prefix ) );
+		}
+
+		return $rate_id;
 	}
 }

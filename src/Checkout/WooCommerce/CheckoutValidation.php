@@ -18,15 +18,27 @@ final class CheckoutValidation {
 	}
 
 	public function validate( mixed $data = array(), mixed $errors = null ): void {
-		if ( DeliveryType::PICKUP !== $this->selected_delivery_type() ) {
+		$rate = $this->selected_rate();
+		if ( array() === $rate ) {
+			if ( DeliveryType::PICKUP === $this->session_manager->selected_delivery_type() && ! $this->has_any_pickup_selection() ) {
+				$this->add_error( $errors );
+			}
+
 			return;
 		}
 
-		$selection = $this->session_manager->pickup_selection();
-		if ( '' !== trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
+		if ( DeliveryType::PICKUP !== (string) ( $rate['delivery_type'] ?? '' ) ) {
 			return;
 		}
 
+		if ( $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) ) ) {
+			return;
+		}
+
+		$this->add_error( $errors );
+	}
+
+	private function add_error( mixed $errors = null ): void {
 		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
 			$errors->add( 'wdc_pickup_required', __( 'Please select a pickup point.', 'walls-delivery-calc' ) );
 			return;
@@ -37,27 +49,31 @@ final class CheckoutValidation {
 		}
 	}
 
-	private function selected_delivery_type(): string {
-		$selected = $this->session_manager->selected_delivery_type();
-		if ( '' !== $selected ) {
-			return $selected;
-		}
-
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function selected_rate(): array {
 		$rates = $this->session_manager->rates();
 		foreach ( $this->chosen_shipping_methods() as $rate_id ) {
 			if ( isset( $rates[ $rate_id ] ) ) {
-				return (string) ( $rates[ $rate_id ]['delivery_type'] ?? '' );
+				return $rates[ $rate_id ];
 			}
 
 			if ( str_starts_with( $rate_id, NewShippingMethod::METHOD_ID . ':' ) ) {
 				$normalized = substr( $rate_id, strlen( NewShippingMethod::METHOD_ID . ':' ) );
 				if ( isset( $rates[ $normalized ] ) ) {
-					return (string) ( $rates[ $normalized ]['delivery_type'] ?? '' );
+					return $rates[ $normalized ];
 				}
 			}
 		}
 
-		return '';
+		return array();
+	}
+
+	private function has_any_pickup_selection(): bool {
+		$selection = $this->session_manager->pickup_selection();
+
+		return '' !== trim( (string) ( $selection['point_code'] ?? '' ) );
 	}
 
 	/**
