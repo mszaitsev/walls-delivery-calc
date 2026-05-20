@@ -18,6 +18,11 @@ use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Admin\LocationsAdminPage;
+use WallsShop\WDC\Locations\Import\LocationImportService;
+use WallsShop\WDC\Locations\Services\GarChangesService;
+use WallsShop\WDC\Locations\Services\LocationSearchService;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\WooCommerce\HPOSCompatibility;
 
 defined( 'ABSPATH' ) || exit;
@@ -51,6 +56,10 @@ final class Plugin {
 		$this->container->register( MigrationManager::class, fn(): MigrationManager => new MigrationManager( $this->environment->version(), $this->environment->plugin_dir() . 'database/migrations' ) );
 		$this->container->register( ActionScheduler::class, fn(): ActionScheduler => new ActionScheduler( $this->container->get( Logger::class ) ) );
 		$this->container->register( CalendarRepository::class, fn(): CalendarRepository => new CalendarRepository() );
+		$this->container->register( LocationRepository::class, fn(): LocationRepository => new LocationRepository() );
+		$this->container->register( LocationSearchService::class, fn(): LocationSearchService => new LocationSearchService( $this->container->get( LocationRepository::class ) ) );
+		$this->container->register( LocationImportService::class, fn(): LocationImportService => new LocationImportService( $this->container->get( LocationRepository::class ) ) );
+		$this->container->register( GarChangesService::class, fn(): GarChangesService => new GarChangesService() );
 		$this->container->register( YearGenerator::class, fn(): YearGenerator => new YearGenerator() );
 		$this->container->register( TimezoneService::class, fn(): TimezoneService => new TimezoneService() );
 		$this->container->register( DeliveryDateFormatter::class, fn(): DeliveryDateFormatter => new DeliveryDateFormatter() );
@@ -105,6 +114,15 @@ final class Plugin {
 				$this->container->get( YearGenerator::class )
 			)
 		);
+		$this->container->register(
+			LocationsAdminPage::class,
+			fn(): LocationsAdminPage => new LocationsAdminPage(
+				$this->environment,
+				$this->container->get( LocationRepository::class ),
+				$this->container->get( LocationSearchService::class ),
+				$this->container->get( LocationImportService::class )
+			)
+		);
 	}
 
 	private function register_hooks(): void {
@@ -117,6 +135,7 @@ final class Plugin {
 			$this->container->get( AdminNotices::class )->register();
 			$this->container->get( AdminMenu::class )->register();
 			$this->container->get( CalendarAdminPage::class )->register();
+			$this->container->get( LocationsAdminPage::class )->register();
 		}
 	}
 
@@ -124,6 +143,7 @@ final class Plugin {
 		$this->container->get( MigrationManager::class )->run();
 		$this->container->get( CalendarService::class )->ensure_initial_years();
 		$this->container->get( ActionScheduler::class );
+		$this->container->get( GarChangesService::class );
 		$this->container->get( CalendarScheduler::class )->register();
 	}
 

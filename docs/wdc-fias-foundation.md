@@ -1,0 +1,71 @@
+# WDC FIAS/GAR Locations Foundation
+
+## Locations Storage Architecture
+
+The locations foundation stores settlement-level delivery destinations in `wdc_locations`.
+The table is intentionally independent from checkout and legacy shipping code. It can be populated from a small demo dataset today and from FIAS/GAR-oriented importers later.
+
+Key fields:
+
+- `fias_id` and `gar_id` keep external address registry identifiers.
+- `country_code`, `region_name`, `region_code`, `city_name`, `settlement_name`, and `settlement_type` describe the destination.
+- `display_name` is the user-facing label, for example `Бердск — Новосибирская область`.
+- `searchable_text` is a lowercased combined search string used by the repository fallback search.
+- `active` allows keeping historical rows without showing them in lookup results.
+
+`LocationRepository` is registered in the core container and provides save, bulk insert, lookup, search, grouped search, and count operations.
+
+## FIAS/GAR Abstraction
+
+This stage does not download FIAS archives, call GAR APIs, or run a full sync pipeline. The foundation only introduces stable storage and service boundaries.
+
+`GarChangesService` is a placeholder abstraction for future GAR change detection. It tracks whether changes are pending, when the last check happened, and can mark the state as checked without making network calls.
+
+## Aliases
+
+`wdc_location_aliases` stores alternate names for a location:
+
+- `location_id` links the alias to a canonical location.
+- `alias` keeps the original alias.
+- `alias_normalized` stores a normalized lookup key.
+- `source` can later identify whether an alias came from admin data, GAR, FIAS, carrier mapping, or another source.
+
+Alias lookup is not wired into runtime checkout yet.
+
+## Search Ranking
+
+`LocationSearchService` normalizes queries by replacing `ё` with `е`, lowercasing, trimming, and collapsing multiple spaces.
+
+Ranking rules are deliberately simple:
+
+- exact settlement or city match ranks highest;
+- exact region match is boosted;
+- prefix matches outrank partial matches;
+- broad `searchable_text` matches are included as a low-weight fallback.
+
+No Elasticsearch, Meilisearch, external API, REST endpoint, AJAX endpoint, or frontend autocomplete is introduced in this stage.
+
+## Normalization Abstraction
+
+`AddressNormalizerInterface` defines a future normalizer contract returning the existing domain `AddressNormalizationResult`.
+
+`FallbackAddressNormalizer` does not call external services. It returns:
+
+- `success=false`;
+- `source=fallback`;
+- an `Address` with the raw address preserved;
+- optional context values copied into the existing domain `Address`.
+
+The existing domain `Address` model is reused and not duplicated.
+
+## Future Checkout Integration
+
+Checkout can later depend on `LocationSearchService` and `AddressNormalizerInterface`, but this stage intentionally avoids WooCommerce field overrides, REST API, AJAX autocomplete, and runtime shipping orchestration.
+
+## Future Carrier City Mapping
+
+Carrier integrations can later map carrier city identifiers or aliases to `wdc_locations` through `wdc_location_aliases` or a dedicated carrier mapping table. The canonical location record should remain the shared destination identity.
+
+## Future GAR Changes Sync
+
+A later GAR sync can build on `GarChangesService` by adding a real adapter that checks GAR change feeds, records pending changes, and triggers a controlled import/update process.

@@ -1,0 +1,48 @@
+.wdc-locations-admin {
+	max-width: 960px;
+}
+
+.wdc-locations-summary,
+.wdc-locations-import,
+.wdc-locations-search {
+	margin: 16px 0;
+}
+
+.wdc-locations-search label {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-width: 420px;
+}
+
+.wdc-locations-search {
+	display: flex;
+	align-items: flex-end;
+	gap: 8px;
+}
+
+.wdc-locations-region {
+	margin: 18px 0;
+	border: 1px solid #dcdcde;
+	background: #fff;
+}
+
+.wdc-locations-region h2 {
+	margin: 0;
+	padding: 10px 12px;
+	border-bottom: 1px solid #dcdcde;
+	font-size: 14px;
+	background: #f6f7f7;
+}
+
+.wdc-location-row {
+	display: grid;
+	grid-template-columns: minmax(220px, 1fr) 120px 80px;
+	gap: 12px;
+	padding: 10px 12px;
+	border-bottom: 1px solid #f0f0f1;
+}
+
+.wdc-location-row:last-child {
+	border-bottom: 0;
+}
