@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
@@ -12,6 +13,12 @@ use WallsShop\WDC\Domain\Quote\QuoteRequest;
 defined( 'ABSPATH' ) || exit;
 
 final class WooCommercePackageMapper {
+	public function __construct(
+		private ?CheckoutAddressRuntime $address_runtime = null,
+		private ?CheckoutSessionManager $session_manager = null
+	) {
+	}
+
 	/**
 	 * @param array<string,mixed> $package
 	 * @param array<string,mixed> $customer_context
@@ -19,7 +26,8 @@ final class WooCommercePackageMapper {
 	public function map( array $package, array $customer_context = array() ): QuoteRequest {
 		$destination = is_array( $package['destination'] ?? null ) ? $package['destination'] : array();
 		$country     = strtoupper( trim( (string) ( $destination['country'] ?? 'RU' ) ) );
-		$city        = trim( (string) ( $destination['city'] ?? '' ) );
+		$address     = $this->destination_address( $destination, $country );
+		$request_country = '' !== trim( $address->country_code ) ? $address->country_code : ( '' !== $country ? $country : 'RU' );
 		$total       = Money::from_rubles( (float) ( $package['contents_cost'] ?? 0 ) );
 		$items       = $this->items_from_contents( is_array( $package['contents'] ?? null ) ? $package['contents'] : array() );
 		$weight_g    = (int) round( max( 0.0, (float) ( $package['contents_weight'] ?? 0 ) ) * 1000 );
@@ -30,15 +38,8 @@ final class WooCommercePackageMapper {
 		}
 
 		return new QuoteRequest(
-			'' !== $country ? $country : 'RU',
-			new Address(
-				country_code: '' !== $country ? $country : 'RU',
-				city: $city,
-				postcode: (string) ( $destination['postcode'] ?? '' ),
-				street: (string) ( $destination['address'] ?? $destination['address_1'] ?? '' ),
-				house: (string) ( $destination['address_2'] ?? '' ),
-				raw_address: trim( (string) ( $destination['address'] ?? $destination['address_1'] ?? '' ) . ' ' . (string) ( $destination['address_2'] ?? '' ) )
-			),
+			$request_country,
+			$address,
 			$domain_package,
 			$this->payment_method(),
 			$total,
@@ -47,10 +48,48 @@ final class WooCommercePackageMapper {
 				array(
 					'items_quantity' => $domain_package->get_total_quantity(),
 					'source'         => 'woocommerce_checkout',
+					'normalized_address' => $address->normalized,
+					'fallback_address'   => $address->fallback,
 				),
 				$customer_context
 			)
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $destination
+	 */
+	private function destination_address( array $destination, string $country ): Address {
+		if ( $this->address_runtime instanceof CheckoutAddressRuntime && $this->has_destination_data( $destination ) ) {
+			return $this->address_runtime->resolve_checkout_address( $destination )->address;
+		}
+
+		$session_result = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->normalized_address_result() : null;
+		if ( null !== $session_result ) {
+			return $session_result->address;
+		}
+
+		return new Address(
+			country_code: '' !== $country ? $country : 'RU',
+			city: trim( (string) ( $destination['city'] ?? '' ) ),
+			postcode: (string) ( $destination['postcode'] ?? '' ),
+			street: (string) ( $destination['address'] ?? $destination['address_1'] ?? '' ),
+			house: (string) ( $destination['address_2'] ?? '' ),
+			raw_address: trim( (string) ( $destination['address'] ?? $destination['address_1'] ?? '' ) . ' ' . (string) ( $destination['address_2'] ?? '' ) )
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $destination
+	 */
+	private function has_destination_data( array $destination ): bool {
+		foreach ( array( 'city', 'postcode', 'address', 'address_1', 'address_2' ) as $key ) {
+			if ( '' !== trim( (string) ( $destination[ $key ] ?? '' ) ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**

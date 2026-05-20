@@ -31,6 +31,14 @@ final class CheckoutDebugPanel {
 		echo '<dt>' . esc_html__( 'Rates', 'walls-delivery-calc' ) . '</dt><dd>' . esc_html( (string) ( $debug['rates_count'] ?? 0 ) ) . '</dd>';
 		echo '<dt>' . esc_html__( 'Cache hits', 'walls-delivery-calc' ) . '</dt><dd>' . esc_html( (string) ( $debug['cache_hits'] ?? 0 ) ) . '</dd>';
 		echo '<dt>' . esc_html__( 'Fallback', 'walls-delivery-calc' ) . '</dt><dd>' . esc_html( ! empty( $debug['fallback_used'] ) ? 'yes' : 'no' ) . '</dd>';
+
+		$address = $this->session_manager->normalized_address_result();
+		if ( null !== $address ) {
+			$city = '' !== trim( $address->address->settlement ) ? $address->address->settlement : $address->address->city;
+			echo '<dt>' . esc_html__( 'Normalized address', 'walls-delivery-calc' ) . '</dt><dd>' . esc_html( $city . ' / ' . $address->address->postcode ) . '</dd>';
+			echo '<dt>' . esc_html__( 'Address fallback', 'walls-delivery-calc' ) . '</dt><dd>' . esc_html( $address->address->fallback ? 'yes' : 'no' ) . '</dd>';
+			echo '<dt>' . esc_html__( 'Normalization source', 'walls-delivery-calc' ) . '</dt><dd>' . esc_html( $address->source ) . '</dd>';
+		}
 		echo '</dl>';
 
 		if ( ! empty( $debug['carrier_errors'] ) && is_array( $debug['carrier_errors'] ) ) {

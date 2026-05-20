@@ -300,7 +300,7 @@ pickup_smoke_assert( 'NSK-LENINA-1' === ( $order->meta['_wdc_platform_pickup_cod
 pickup_smoke_assert( isset( $order->meta['_wdc_platform_pickup_address'], $order->meta['_wdc_platform_pickup_comment'], $order->meta['_wdc_platform_pickup_work_time'] ), 'Order meta must save pickup details.' );
 
 $errors = new WdcPickupSmokeErrors();
-( new CheckoutValidation( $session ) )->validate( array(), $errors );
+( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Novosibirsk' ), $errors );
 pickup_smoke_assert( ! $errors->has_errors(), 'Validation must pass for matching pickup selection.' );
 
 $session->save_pickup_selection(
@@ -315,7 +315,7 @@ $session->save_pickup_selection(
 	)
 );
 $errors = new WdcPickupSmokeErrors();
-( new CheckoutValidation( $session ) )->validate( array(), $errors );
+( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Novosibirsk' ), $errors );
 pickup_smoke_assert( $errors->has_errors(), 'Validation must fail for pickup selection from another carrier or rate.' );
 $order = new WdcPickupSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
@@ -334,7 +334,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( NewShippingMethod::METHOD_ID . ':demo:courier' ) );
 $errors = new WdcPickupSmokeErrors();
-( new CheckoutValidation( $session ) )->validate( array(), $errors );
+( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Novosibirsk' ), $errors );
 pickup_smoke_assert( ! $errors->has_errors(), 'Validation must pass for courier with stale pickup selection.' );
 $order = new WdcPickupSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
@@ -364,7 +364,7 @@ $session->save_pickup_selection(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'demo:pickup' ) );
 $errors = new WdcPickupSmokeErrors();
-( new CheckoutValidation( $session ) )->validate( array(), $errors );
+( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Novosibirsk' ), $errors );
 pickup_smoke_assert( ! $errors->has_errors(), 'Validation must accept full pickup selection rate id for normalized selected rate.' );
 
 $orchestrator = pickup_smoke_orchestrator();
