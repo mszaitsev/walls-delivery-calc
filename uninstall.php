@@ -14,7 +14,7 @@ delete_site_option( 'wdc_settings' );
 
 global $wpdb;
 
-if ( isset( $wpdb ) && $wpdb instanceof wpdb ) {
+if ( is_object( $wpdb ) && isset( $wpdb->options ) && method_exists( $wpdb, 'prepare' ) ) {
 	$transient_prefixes = array(
 		'_transient_wdc_',
 		'_transient_timeout_wdc_',
