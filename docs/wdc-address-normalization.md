@@ -85,9 +85,14 @@ The output is informational only.
 - `_wdc_platform_normalization_source`
 - `_wdc_platform_fallback_city`
 - `_wdc_platform_fallback_address`
+- `_wdc_platform_address_fallback_used`
 - `_wdc_platform_resolved_postcode`
 - `_wdc_platform_fias_id`
 - `_wdc_platform_gar_id`
+
+`_wdc_platform_fallback_address` stores the raw fallback address text when the address was not normalized. For successfully normalized addresses it is an empty string.
+
+`_wdc_platform_address_fallback_used` stores the boolean fallback-address flag.
 
 ## Future work
 

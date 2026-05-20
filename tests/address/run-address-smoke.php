@@ -227,6 +227,25 @@ address_smoke_assert( $unknown_result->address->fallback, 'Unknown city must be 
 address_smoke_assert( 'fallback' === $unknown_result->source, 'Unknown city must use fallback source.' );
 address_smoke_assert( '' === $unknown_result->address->postcode, 'Unknown city must not set postcode.' );
 
+$session->save_rates(
+	array(
+		'demo:courier' => array(
+			'carrier_key' => 'demo',
+			'rate_id' => 'demo:courier',
+			'delivery_type' => 'courier',
+			'crossed_price' => null,
+			'planned_delivery_comment' => '',
+			'comments' => array(),
+			'fallback_used' => false,
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( NewShippingMethod::METHOD_ID . ':demo:courier' ) );
+$order = new WdcAddressSmokeOrder();
+( new OrderShippingMetaPersister( $session ) )->persist( $order );
+address_smoke_assert( $unknown_result->address->raw_address === ( $order->meta['_wdc_platform_fallback_address'] ?? null ), 'Fallback order meta must persist raw fallback address.' );
+address_smoke_assert( true === ( $order->meta['_wdc_platform_address_fallback_used'] ?? false ), 'Fallback order meta must persist fallback address flag.' );
+
 $fallback = ( new FallbackAddressNormalizer() )->normalize( 'Fallback raw', array( 'city' => 'Fallback City' ) );
 address_smoke_assert( $fallback->address->fallback, 'Fallback normalizer must mark fallback.' );
 
@@ -266,6 +285,8 @@ $order = new WdcAddressSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
 address_smoke_assert( true === ( $order->meta['_wdc_platform_normalized'] ?? false ), 'Order meta must persist normalized flag.' );
 address_smoke_assert( 'fias' === ( $order->meta['_wdc_platform_normalization_source'] ?? '' ), 'Order meta must persist normalization source.' );
+address_smoke_assert( '' === ( $order->meta['_wdc_platform_fallback_address'] ?? null ), 'Normalized order meta must clear fallback address text.' );
+address_smoke_assert( false === ( $order->meta['_wdc_platform_address_fallback_used'] ?? true ), 'Normalized order meta must persist false fallback address flag.' );
 address_smoke_assert( $known_postcode === ( $order->meta['_wdc_platform_resolved_postcode'] ?? '' ), 'Order meta must persist resolved postcode.' );
 address_smoke_assert( '' !== ( $order->meta['_wdc_platform_fias_id'] ?? '' ), 'Order meta must persist FIAS id.' );
 address_smoke_assert( '' !== ( $order->meta['_wdc_platform_gar_id'] ?? '' ), 'Order meta must persist GAR id.' );
