@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use WallsShop\WDC\Calendar\CalendarTypes;
+use WallsShop\WDC\Calendar\Admin\CalendarAdminPage;
 use WallsShop\WDC\Calendar\Services\CalendarService;
 use WallsShop\WDC\Calendar\Services\DeliveryDateCalculator;
 use WallsShop\WDC\Calendar\Services\DeliveryDateFormatter;
@@ -9,6 +10,7 @@ use WallsShop\WDC\Calendar\Services\TimezoneService;
 use WallsShop\WDC\Calendar\Services\YearGenerator;
 use WallsShop\WDC\Calendar\Storage\CalendarRepository;
 use WallsShop\WDC\Core\Autoloader;
+use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
@@ -87,6 +89,54 @@ function current_time( string $type ): string {
 	return '2026-05-20 12:00:00';
 }
 
+function trailingslashit( string $value ): string {
+	return rtrim( $value, '/\\' ) . '/';
+}
+
+function current_user_can( string $capability ): bool {
+	return true;
+}
+
+function esc_html__( string $text, string $domain = '' ): string {
+	return $text;
+}
+
+function esc_html( mixed $text ): string {
+	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+}
+
+function esc_attr( mixed $text ): string {
+	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+}
+
+function selected( mixed $selected, mixed $current, bool $display = true ): string {
+	$result = ( (string) $selected === (string) $current ) ? ' selected="selected"' : '';
+	if ( $display ) {
+		echo $result;
+	}
+	return $result;
+}
+
+function checked( mixed $checked, mixed $current = true, bool $display = true ): string {
+	$result = ( (string) $checked === (string) $current ) ? ' checked="checked"' : '';
+	if ( $display ) {
+		echo $result;
+	}
+	return $result;
+}
+
+function wp_nonce_field( string $action, string $name ): void {
+	printf( '<input type="hidden" name="%s" value="test-nonce">', esc_attr( $name ) );
+}
+
+function sanitize_key( mixed $key ): string {
+	return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $key ) ) ?? '';
+}
+
+function wp_unslash( mixed $value ): mixed {
+	return $value;
+}
+
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
@@ -124,5 +174,37 @@ calendar_smoke_assert( '2026-05-26' === $planned->planned_date_max, 'Calendar-da
 
 $working = $calculator->calculate( '2026-05-20 12:00:00 Asia/Novosibirsk', 1, DateRange::single( 5, DateRange::UNIT_WORKING_DAYS ) );
 calendar_smoke_assert( '2026-05-28' === $working->planned_date_min, 'Working-day delivery must skip carrier weekends.' );
+
+update_option(
+	'wdc_calendar_attention_required',
+	array(
+		'carrier_ru_2026' => array(
+			'calendar_type' => CalendarTypes::CARRIER_RU,
+			'year'          => 2026,
+		),
+	),
+	false
+);
+
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_REQUEST                  = array(
+	'calendar_type' => CalendarTypes::CARRIER_RU,
+	'year'          => '2026',
+);
+$_POST                     = array();
+
+$admin_page = new CalendarAdminPage(
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.6.0' ),
+	$calendar,
+	$repository,
+	$generator
+);
+
+ob_start();
+$admin_page->render_page();
+ob_end_clean();
+
+$attention = get_option( 'wdc_calendar_attention_required', array() );
+calendar_smoke_assert( isset( $attention['carrier_ru_2026'] ), 'Opening calendar admin page must not resolve calendar_attention_required.' );
 
 echo "Calendar smoke test passed.\n";

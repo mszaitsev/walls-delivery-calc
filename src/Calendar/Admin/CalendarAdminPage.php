@@ -57,7 +57,6 @@ final class CalendarAdminPage {
 		$message       = $this->handle_post( $calendar_type, $year );
 
 		$this->calendar_service->ensure_year_exists( $calendar_type, $year );
-		$this->calendar_service->mark_attention_resolved( $calendar_type, $year );
 		$days = $this->repository->get_year( $calendar_type, $year );
 		?>
 		<div class="wrap wdc-calendar-admin">
