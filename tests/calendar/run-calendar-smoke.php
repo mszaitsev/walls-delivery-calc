@@ -194,7 +194,7 @@ $_REQUEST                  = array(
 $_POST                     = array();
 
 $admin_page = new CalendarAdminPage(
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.6.0' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.7.0' ),
 	$calendar,
 	$repository,
 	$generator
