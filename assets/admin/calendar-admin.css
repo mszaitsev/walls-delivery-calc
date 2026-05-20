@@ -1,0 +1,92 @@
+.wdc-calendar-admin {
+	max-width: 1280px;
+}
+
+.wdc-calendar-filters,
+.wdc-calendar-toolbar {
+	align-items: end;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	margin: 16px 0;
+}
+
+.wdc-calendar-filters label {
+	display: grid;
+	gap: 4px;
+}
+
+.wdc-calendar-grid {
+	display: grid;
+	gap: 16px;
+	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.wdc-calendar-month {
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	padding: 12px;
+}
+
+.wdc-calendar-month h2 {
+	font-size: 15px;
+	margin: 0 0 10px;
+}
+
+.wdc-calendar-weekdays,
+.wdc-calendar-days {
+	display: grid;
+	gap: 4px;
+	grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.wdc-calendar-weekdays {
+	color: #646970;
+	font-size: 11px;
+	font-weight: 600;
+	margin-bottom: 4px;
+	text-align: center;
+}
+
+.wdc-calendar-days::before {
+	content: "";
+	grid-column: span var(--wdc-month-offset);
+}
+
+.wdc-calendar-day {
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	cursor: pointer;
+	display: grid;
+	gap: 4px;
+	min-height: 62px;
+	padding: 5px;
+}
+
+.wdc-calendar-day input[type="checkbox"] {
+	position: absolute;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.wdc-calendar-day-number {
+	font-weight: 700;
+	line-height: 1;
+}
+
+.wdc-calendar-reason {
+	font-size: 11px;
+	min-height: 24px;
+	width: 100%;
+}
+
+.wdc-calendar-day.is-working {
+	background: #effaf2;
+	border-color: #4ab866;
+}
+
+.wdc-calendar-day.is-non-working {
+	background: #fff2f2;
+	border-color: #d63638;
+}
