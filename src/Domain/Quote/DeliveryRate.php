@@ -41,7 +41,8 @@ final class DeliveryRate {
 	}
 
 	public function has_discount(): bool {
-		return null !== $this->crossed_price && $this->crossed_price->get_kopecks() > $this->price->get_kopecks();
+		return ( null !== $this->crossed_price && $this->crossed_price->get_kopecks() > $this->price->get_kopecks() )
+			|| ( null !== $this->original_price && $this->original_price->get_kopecks() > $this->price->get_kopecks() );
 	}
 
 	/**

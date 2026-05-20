@@ -23,7 +23,13 @@ use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutDebugPanel;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
+use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Checkout\WooCommerce\ShippingMethodRegistrar;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Infrastructure\Database\MigrationManager;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
@@ -109,7 +115,26 @@ final class Plugin {
 			)
 		);
 		$this->container->register( WooCommerceRateMapper::class, fn(): WooCommerceRateMapper => new WooCommerceRateMapper() );
-		$this->container->register( NewShippingMethod::class, fn(): NewShippingMethod => new NewShippingMethod( $this->container->get( CheckoutOrchestrator::class ), $this->container->get( WooCommerceRateMapper::class ) ) );
+		$this->container->register( WooCommercePackageMapper::class, fn(): WooCommercePackageMapper => new WooCommercePackageMapper() );
+		$this->container->register( CheckoutSessionManager::class, fn(): CheckoutSessionManager => new CheckoutSessionManager() );
+		$this->container->register(
+			ShippingMethodRegistrar::class,
+			fn(): ShippingMethodRegistrar => new ShippingMethodRegistrar(
+				$this->container->get( FeatureFlags::class ),
+				$this->container->get( SettingsRepository::class ),
+				$this->container->get( CheckoutOrchestrator::class ),
+				$this->container->get( WooCommercePackageMapper::class ),
+				$this->container->get( WooCommerceRateMapper::class ),
+				$this->container->get( CheckoutSessionManager::class ),
+				$this->container->get( RuleRepository::class ),
+				$this->environment,
+				$this->container->get( Logger::class )
+			)
+		);
+		$this->container->register( NewShippingMethod::class, fn(): NewShippingMethod => new NewShippingMethod() );
+		$this->container->register( CheckoutRateRenderer::class, fn(): CheckoutRateRenderer => new CheckoutRateRenderer() );
+		$this->container->register( OrderShippingMetaPersister::class, fn(): OrderShippingMetaPersister => new OrderShippingMetaPersister( $this->container->get( CheckoutSessionManager::class ) ) );
+		$this->container->register( CheckoutDebugPanel::class, fn(): CheckoutDebugPanel => new CheckoutDebugPanel( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( LocationSearchService::class, fn(): LocationSearchService => new LocationSearchService( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( LocationImportService::class, fn(): LocationImportService => new LocationImportService( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( GarChangesService::class, fn(): GarChangesService => new GarChangesService() );
@@ -198,6 +223,10 @@ final class Plugin {
 
 		add_action( 'plugins_loaded', array( $this, 'boot_modules' ), 20 );
 		register_activation_hook( $this->environment->plugin_file(), array( $this, 'activate' ) );
+		$this->container->get( ShippingMethodRegistrar::class )->register();
+		$this->container->get( CheckoutRateRenderer::class )->register();
+		$this->container->get( OrderShippingMetaPersister::class )->register();
+		$this->container->get( CheckoutDebugPanel::class )->register();
 
 		if ( is_admin() ) {
 			$this->container->get( AdminNotices::class )->register();
