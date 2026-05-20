@@ -287,4 +287,37 @@ wc_checkout_smoke_assert( isset( $order->meta['_wdc_platform_carrier_key'] ), 'O
 wc_checkout_smoke_assert( isset( $order->meta['_wdc_platform_rate_id'] ), 'Order meta persister must save rate id.' );
 wc_checkout_smoke_assert( array_key_exists( '_wdc_platform_fallback_used', $order->meta ), 'Order meta persister must save fallback flag.' );
 
+$session->save_rates(
+	array(
+		'demo:pickup'  => array(
+			'carrier_key'                  => 'demo',
+			'rate_id'                      => 'demo:pickup',
+			'delivery_type'                => 'pickup',
+			'crossed_price'                => null,
+			'planned_delivery_comment'     => 'Pickup comment',
+			'comments'                     => array(),
+			'fallback_used'                => false,
+		),
+		'demo:courier' => array(
+			'carrier_key'                  => 'demo',
+			'rate_id'                      => 'demo:courier',
+			'delivery_type'                => 'courier',
+			'crossed_price'                => null,
+			'planned_delivery_comment'     => 'Courier comment',
+			'comments'                     => array(),
+			'fallback_used'                => false,
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:demo:courier' ) );
+$order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session ) )->persist( $order );
+wc_checkout_smoke_assert( 'demo:courier' === ( $order->meta['_wdc_platform_rate_id'] ?? '' ), 'Persister must save selected courier from full WooCommerce rate id.' );
+wc_checkout_smoke_assert( 'courier' === ( $order->meta['_wdc_platform_delivery_type'] ?? '' ), 'Persister must not fall back to first pickup rate.' );
+
+WC()->session->set( 'chosen_shipping_methods', array( 'legacy_method:rate' ) );
+$order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session ) )->persist( $order );
+wc_checkout_smoke_assert( array() === $order->meta, 'Persister must ignore non-WDC selected shipping methods.' );
+
 echo "WooCommerce checkout smoke test passed.\n";

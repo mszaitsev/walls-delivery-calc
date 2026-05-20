@@ -54,9 +54,18 @@ final class OrderShippingMetaPersister {
 			if ( isset( $rates[ $rate_id ] ) ) {
 				return $rates[ $rate_id ];
 			}
+
+			if ( ! str_starts_with( $rate_id, NewShippingMethod::METHOD_ID . ':' ) ) {
+				continue;
+			}
+
+			$normalized = substr( $rate_id, strlen( NewShippingMethod::METHOD_ID . ':' ) );
+			if ( isset( $rates[ $normalized ] ) ) {
+				return $rates[ $normalized ];
+			}
 		}
 
-		return count( $rates ) > 0 ? reset( $rates ) : array();
+		return array();
 	}
 
 	/**

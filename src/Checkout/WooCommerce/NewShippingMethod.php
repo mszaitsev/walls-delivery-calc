@@ -94,7 +94,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 
 			foreach ( $result->rates as $rate ) {
 				$mapped = $this->rate_mapper->map( $rate, $result->fallback_used );
-				$stored[ $mapped['id'] ] = array_merge(
+				$stored_rate = array_merge(
 					$mapped['meta_data'],
 					array(
 						'rate_id'                  => $rate->rate_id,
@@ -102,6 +102,8 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 						'fallback_used'            => $result->fallback_used,
 					)
 				);
+				$stored[ $mapped['id'] ] = $stored_rate;
+				$stored[ self::METHOD_ID . ':' . $mapped['id'] ] = $stored_rate;
 				$this->add_rate( $mapped );
 			}
 
