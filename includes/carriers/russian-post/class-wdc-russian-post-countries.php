@@ -1,6 +1,6 @@
 <?php
 /**
- * Russian Post countries placeholder.
+ * Russian Post countries dictionary client.
  *
  * @package Walls_Delivery_Calc
  */
@@ -8,4 +8,994 @@
 defined( 'ABSPATH' ) || exit;
 
 class WDC_Russian_Post_Countries {
+	private const API_URL = 'https://tariff.pochta.ru/v2/dictionary/country';
+	private const CACHE_KEY = 'wdc_russian_post_worldwide_countries';
+	private const CACHE_TTL = 7 * DAY_IN_SECONDS;
+
+	private WDC_Cache $cache;
+
+	private WDC_Logger $logger;
+
+	private WDC_Settings $settings;
+
+	private string $last_error = '';
+
+	/**
+	 * @var array<string, mixed>
+	 */
+	private array $last_diagnostics = array();
+
+	public function __construct( ?WDC_Cache $cache = null, ?WDC_Logger $logger = null, ?WDC_Settings $settings = null ) {
+		$this->cache = $cache ?? new WDC_Cache();
+		$this->logger = $logger ?? new WDC_Logger();
+		$this->settings = $settings ?? new WDC_Settings();
+	}
+
+	/**
+	 * @return array<string, array<string, mixed>>
+	 */
+	public function get_countries( bool $force_refresh = false ): array {
+		if ( ! $force_refresh ) {
+			$cached = $this->get_cached_payload();
+			if ( ! empty( $cached['countries'] ) && is_array( $cached['countries'] ) ) {
+				$this->debug_log(
+					'Russian Post countries cache hit.',
+					array(
+						'cache_key' => self::CACHE_KEY,
+						'enabled_country_count' => count( $cached['countries'] ),
+						'last_error' => $this->last_error,
+					)
+				);
+
+				return $cached['countries'];
+			}
+
+			$this->debug_log(
+				'Russian Post countries cache miss.',
+				array(
+					'cache_key' => self::CACHE_KEY,
+					'last_error' => $this->last_error,
+				)
+			);
+		}
+
+		$countries = $this->refresh_countries();
+		if ( ! empty( $countries ) ) {
+			return $countries;
+		}
+
+		$cached = $this->get_cached_payload();
+		if ( ! empty( $cached['countries'] ) && is_array( $cached['countries'] ) ) {
+			$this->debug_log(
+				'Russian Post countries using cached data after refresh error.',
+				array(
+					'cache_key' => self::CACHE_KEY,
+					'enabled_country_count' => count( $cached['countries'] ),
+					'last_error' => $this->last_error,
+				)
+			);
+
+			return $cached['countries'];
+		}
+
+		return array();
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	public function get_country_by_wc_code( string $wc_country_code ): array {
+		$wc_country_code = strtoupper( sanitize_text_field( $wc_country_code ) );
+		if ( '' === $wc_country_code ) {
+			return array();
+		}
+
+		$countries = $this->get_countries();
+
+		return isset( $countries[ $wc_country_code ] ) && is_array( $countries[ $wc_country_code ] )
+			? $countries[ $wc_country_code ]
+			: array();
+	}
+
+	/**
+	 * Probe Russian Post tariff API for a single destination country.
+	 *
+	 * @return array<string, mixed>
+	 */
+	public function check_country_tariff_availability( string $carrier_country_id, int $weight_g = 1000 ): array {
+		$carrier_country_id = absint( $carrier_country_id );
+		$weight_g = max( 1, absint( $weight_g ) );
+		if ( 0 === $carrier_country_id ) {
+			return array(
+				'success' => false,
+				'available' => false,
+				'price_found' => false,
+				'error_message' => 'Invalid Russian Post country id.',
+				'raw' => array(),
+			);
+		}
+
+		$settings = $this->settings->get();
+		$debug_enabled = isset( $settings['debug_enabled'] ) && 'yes' === $settings['debug_enabled'];
+		$api = new WDC_Russian_Post_API( $this->logger );
+		$result = $api->calculate_tariff(
+			array(
+				'object' => 4031,
+				'from' => '630005',
+				'country-to' => $carrier_country_id,
+				'weight' => $weight_g,
+				'isavia' => 0,
+			),
+			$debug_enabled
+		);
+		$raw = isset( $result['raw'] ) && is_array( $result['raw'] ) ? $result['raw'] : array();
+		$price_found = isset( $raw['paynds'] ) && is_numeric( $raw['paynds'] );
+		if ( ! $price_found ) {
+			$price_found = isset( $raw['paymoneynds'] ) && is_numeric( $raw['paymoneynds'] );
+		}
+
+		return array(
+			'success' => ! empty( $result['success'] ),
+			'available' => ! empty( $result['success'] ) && $price_found,
+			'price_found' => $price_found,
+			'error_message' => isset( $result['error_message'] ) ? (string) $result['error_message'] : '',
+			'raw' => $raw,
+		);
+	}
+
+	/**
+	 * @return array<string, array<string, mixed>>
+	 */
+	public function refresh_countries(): array {
+		$this->last_error = '';
+		$this->last_diagnostics = $this->create_empty_diagnostics();
+		$this->debug_log( 'Russian Post countries refresh started.', array( 'request_url' => self::API_URL ) );
+
+		$response = wp_remote_get(
+			self::API_URL,
+			array(
+				'timeout' => 20,
+				'headers' => array(
+					'Accept' => 'application/json',
+				),
+			)
+		);
+
+		if ( is_wp_error( $response ) ) {
+			$this->last_error = $response->get_error_message();
+			$this->last_diagnostics['last_error'] = $this->last_error;
+			$this->debug_refresh_diagnostics( 'Russian Post countries refresh failed.' );
+
+			return array();
+		}
+
+		$code = (int) wp_remote_retrieve_response_code( $response );
+		$body = (string) wp_remote_retrieve_body( $response );
+		$this->last_diagnostics['http_code'] = $code;
+		$this->last_diagnostics['body_snippet'] = $this->get_body_snippet( $body );
+
+		if ( $code < 200 || $code >= 300 ) {
+			$this->last_error = 'Russian Post countries API returned HTTP ' . $code . '.';
+			$this->last_diagnostics['last_error'] = $this->last_error;
+			$this->debug_refresh_diagnostics( 'Russian Post countries refresh failed.' );
+
+			return array();
+		}
+
+		$decoded = json_decode( $body, true );
+		if ( JSON_ERROR_NONE !== json_last_error() ) {
+			$this->last_error = 'JSON decode error: ' . json_last_error_msg();
+			$this->last_diagnostics['json_error'] = json_last_error_msg();
+			$this->last_diagnostics['last_error'] = $this->last_error;
+			$this->debug_refresh_diagnostics( 'Russian Post countries refresh failed.' );
+
+			return array();
+		}
+
+		if ( ! is_array( $decoded ) ) {
+			$this->last_error = 'Russian Post countries API returned JSON that is not an array.';
+			$this->last_diagnostics['last_error'] = $this->last_error;
+			$this->debug_refresh_diagnostics( 'Russian Post countries refresh failed.' );
+
+			return array();
+		}
+
+		$items = $this->extract_country_items( $decoded );
+		if ( null === $items ) {
+			$this->last_error = 'Country list not found in API response.';
+			$this->last_diagnostics['last_error'] = $this->last_error;
+			$this->debug_refresh_diagnostics( 'Russian Post countries refresh failed.' );
+
+			return array();
+		}
+
+		$this->last_diagnostics['raw_country_count'] = count( $items );
+		$normalized_count = 0;
+		$enabled_count = 0;
+		$all_countries = array();
+		$countries = $this->normalize_countries( $items, $normalized_count, $enabled_count, $all_countries );
+		$this->last_diagnostics['normalized_country_count'] = $normalized_count;
+		$this->last_diagnostics['enabled_country_count'] = $enabled_count;
+
+		if ( empty( $all_countries ) ) {
+			$this->last_error = 'Russian Post countries API returned no usable country data.';
+			$this->last_diagnostics['last_error'] = $this->last_error;
+			$this->debug_refresh_diagnostics( 'Russian Post countries refresh failed.' );
+
+			return array();
+		}
+
+		$payload = array(
+			'updated_at' => current_time( 'mysql' ),
+			'updated_at_gmt' => current_time( 'mysql', true ),
+			'stats' => $this->last_diagnostics,
+			'countries' => $countries,
+			'all_countries' => $all_countries,
+		);
+
+		$this->cache->set( self::CACHE_KEY, $payload, self::CACHE_TTL );
+		$this->last_diagnostics['last_error'] = '';
+		$this->debug_refresh_diagnostics( 'Russian Post countries refresh completed.' );
+
+		return $countries;
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	public function get_cache_payload(): array {
+		$cached = $this->get_cached_payload();
+
+		return ! empty( $cached ) ? $cached : array(
+			'updated_at' => '',
+			'updated_at_gmt' => '',
+			'stats' => $this->create_empty_diagnostics(),
+			'countries' => array(),
+			'all_countries' => array(),
+		);
+	}
+
+	public function rebuild_cached_effective_countries(): bool {
+		$payload = $this->get_cached_payload();
+		if ( empty( $payload['all_countries'] ) || ! is_array( $payload['all_countries'] ) ) {
+			return false;
+		}
+
+		$stats = $this->create_empty_diagnostics();
+		$stats['raw_country_count'] = isset( $payload['stats']['raw_country_count'] ) ? absint( $payload['stats']['raw_country_count'] ) : count( $payload['all_countries'] );
+		$all_countries = array();
+		$countries = array();
+		$overrides = $this->get_country_overrides();
+
+		foreach ( $payload['all_countries'] as $country ) {
+			if ( ! is_array( $country ) ) {
+				continue;
+			}
+
+			$country = $this->apply_country_override( $country, $overrides );
+			$all_countries[] = $country;
+			$this->count_country_status( $country, $stats );
+
+			if ( ! empty( $country['effective_enabled'] ) && ! empty( $country['iso2'] ) && ! empty( $country['carrier_country_id'] ) ) {
+				$countries[ (string) $country['iso2'] ] = $country;
+			}
+		}
+
+		$this->sort_countries_by_name( $all_countries );
+		ksort( $countries );
+		$payload['stats'] = $stats;
+		$payload['countries'] = $countries;
+		$payload['all_countries'] = $all_countries;
+
+		return $this->cache->set( self::CACHE_KEY, $payload, self::CACHE_TTL );
+	}
+
+	public function get_last_error(): string {
+		return $this->last_error;
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	public function get_last_diagnostics(): array {
+		return $this->last_diagnostics;
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	private function get_cached_payload(): array {
+		$cached = $this->cache->get( self::CACHE_KEY );
+
+		return is_array( $cached ) ? $cached : array();
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	private function create_empty_diagnostics(): array {
+		return array(
+			'request_url' => self::API_URL,
+			'http_code' => 0,
+			'body_snippet' => '',
+			'json_error' => '',
+			'raw_country_count' => 0,
+			'normalized_country_count' => 0,
+			'matched_country_count' => 0,
+			'manually_matched_count' => 0,
+			'auto_enabled_count' => 0,
+			'enabled_country_count' => 0,
+			'effective_enabled_count' => 0,
+			'requires_check_count' => 0,
+			'manual_enabled_count' => 0,
+			'manual_disabled_count' => 0,
+			'unmatched_count' => 0,
+			'skipped_unmatched_count' => 0,
+			'skipped_no_parcel_count' => 0,
+			'skipped_ru_count' => 0,
+			'examples' => array(
+				'unmatched' => array(),
+				'no_parcel' => array(),
+				'requires_check' => array(),
+			),
+			'last_error' => '',
+		);
+	}
+
+	private function get_body_snippet( string $body ): string {
+		if ( function_exists( 'mb_substr' ) ) {
+			return mb_substr( $body, 0, 1000 );
+		}
+
+		return substr( $body, 0, 1000 );
+	}
+
+	private function debug_refresh_diagnostics( string $message ): void {
+		$this->debug_log( $message, $this->last_diagnostics );
+	}
+
+	/**
+	 * @param array<int, mixed> $items Raw country records.
+	 * @return array<string, array<string, mixed>>
+	 */
+	private function normalize_countries( array $items, int &$normalized_count, int &$enabled_count, array &$all_countries ): array {
+		$countries = array();
+		$wc_country_names = $this->build_wc_country_name_map();
+		$overrides = $this->get_country_overrides();
+
+		foreach ( $items as $item ) {
+			if ( ! is_array( $item ) ) {
+				continue;
+			}
+
+			$country = $this->normalize_country( $item, $wc_country_names );
+			if ( $this->is_russia_country( $item, (string) ( $country['iso2'] ?? '' ) ) ) {
+				$country = $this->apply_russia_exclusion( $country );
+			}
+
+			if ( 'ru' !== (string) ( $country['auto_status'] ?? '' ) && ( empty( $country['iso2'] ) || empty( $country['carrier_country_id'] ) ) ) {
+				$country['auto_status'] = 'unmatched';
+				$country['availability']['match_reason'] = 'unmatched';
+				$country = $this->apply_country_override( $country, $overrides );
+				$all_countries[] = $country;
+				$this->count_country_status( $country, $this->last_diagnostics );
+				if ( 'unmatched' === (string) ( $country['auto_status'] ?? '' ) ) {
+					$this->add_skip_example( 'unmatched', $item );
+				}
+				continue;
+			}
+
+			++$normalized_count;
+
+			$country = $this->apply_country_override( $country, $overrides );
+			$all_countries[] = $country;
+			$this->count_country_status( $country, $this->last_diagnostics );
+
+			if ( 'no_parcel' === $country['auto_status'] ) {
+				$this->add_skip_example( 'no_parcel', $item );
+			} elseif ( 'requires_check' === $country['auto_status'] ) {
+				$this->add_skip_example( 'requires_check', $item );
+			}
+
+			if ( empty( $country['effective_enabled'] ) || empty( $country['iso2'] ) || empty( $country['carrier_country_id'] ) ) {
+				continue;
+			}
+
+			++$enabled_count;
+			$countries[ $country['iso2'] ] = $country;
+		}
+
+		$this->sort_countries_by_name( $all_countries );
+		ksort( $countries );
+
+		return $countries;
+	}
+
+	/**
+	 * @param array<string, mixed> $decoded Raw API response.
+	 * @return array<int, mixed>|null
+	 */
+	private function extract_country_items( array $decoded ): ?array {
+		if ( isset( $decoded['country'] ) && is_array( $decoded['country'] ) ) {
+			return array_values( $decoded['country'] );
+		}
+
+		if ( $this->is_list_array( $decoded ) ) {
+			return $decoded;
+		}
+
+		return null;
+	}
+
+	/**
+	 * @param array<string, mixed> $raw Raw country record.
+	 * @param array<string, string> $wc_country_names Normalized WooCommerce country name to ISO2 map.
+	 * @return array<string, mixed>
+	 */
+	private function normalize_country( array $raw, array $wc_country_names = array() ): array {
+		$iso2 = strtoupper( $this->first_code( $raw, array( 'iso2', 'alpha2', 'a2', 'code2', 'countryCode2', 'country_code_iso2', 'country_iso2', 'country_code' ), 2 ) );
+		$iso3 = strtoupper( $this->first_code( $raw, array( 'iso3', 'alpha3', 'a3', 'code3', 'countryCode3', 'country_code_iso3', 'country_iso3' ), 3 ) );
+		$carrier_country_id = $this->first_scalar(
+			$raw,
+			array(
+				'carrier_country_id',
+				'country_id',
+				'country-id',
+				'countryId',
+				'id',
+				'Id',
+				'code',
+				'Code',
+				'country',
+				'country-to',
+			)
+		);
+		$name = $this->first_scalar(
+			$raw,
+			array(
+				'name',
+				'Name',
+				'country_name',
+				'countryName',
+				'fullname',
+				'fullName',
+				'nameRu',
+				'nameRus',
+				'russianName',
+			)
+		);
+
+		if ( '' === $iso2 ) {
+			$iso2 = strtoupper( $this->first_code( $raw, array( 'code', 'Code' ), 2 ) );
+		}
+
+		if ( '' === $iso2 ) {
+			$iso2 = $this->extract_iso_from_altnames( $raw, 2, 2 );
+		}
+
+		if ( '' === $iso2 && '' !== $name ) {
+			$normalized_name = $this->normalize_country_name_for_match( $name );
+			if ( isset( $wc_country_names[ $normalized_name ] ) ) {
+				$iso2 = $wc_country_names[ $normalized_name ];
+			}
+		}
+
+		if ( '' === $iso3 ) {
+			$iso3 = strtoupper( $this->first_code( $raw, array( 'code', 'Code' ), 3 ) );
+		}
+
+		if ( '' === $iso3 ) {
+			$iso3 = $this->extract_iso_from_altnames( $raw, 3, 3 );
+		}
+
+		if ( '' !== $carrier_country_id && ! is_numeric( $carrier_country_id ) ) {
+			$carrier_country_id = $this->first_numeric_scalar( $raw, array( 'id', 'Id', 'country_id', 'countryId', 'code', 'Code' ) );
+		}
+
+		$availability = $this->get_parcel_availability( $raw );
+		$auto_status = $this->get_auto_status_from_availability( $availability );
+		if ( $this->is_russia_country( $raw, $iso2 ) ) {
+			$auto_status = 'ru';
+			$availability['reason'] = 'ru';
+			$availability['requires_check'] = false;
+		}
+
+		if ( 'requires_check' === $auto_status ) {
+			$this->debug_log(
+				'Russian Post country has parcel.block=1 warning.',
+				array(
+					'country_id' => $carrier_country_id,
+					'country_name' => '' !== $name ? $name : $iso2,
+					'iso2' => $iso2,
+					'parcel_block' => $availability['parcel_block'] ?? null,
+					'note' => 'Dictionary says parcel.block=1, but country is kept enabled/requires_check because tariff API may still calculate.',
+				)
+			);
+		}
+
+		return array(
+			'carrier_country_id' => sanitize_text_field( $carrier_country_id ),
+			'name' => sanitize_text_field( '' !== $name ? $name : $iso2 ),
+			'iso2' => sanitize_text_field( $iso2 ),
+			'iso3' => sanitize_text_field( $iso3 ),
+			'enabled' => in_array( $auto_status, array( 'enabled', 'requires_check' ), true ),
+			'auto_status' => $auto_status,
+			'manual_status' => 'auto',
+			'effective_enabled' => in_array( $auto_status, array( 'enabled', 'requires_check' ), true ),
+			'effective_reason' => 'requires_check' === $auto_status ? 'auto_requires_check' : ( 'enabled' === $auto_status ? 'auto_enabled' : $auto_status ),
+			'note' => '',
+			'availability' => $availability,
+			'raw' => $raw,
+		);
+	}
+
+	/**
+	 * @return array<string, string>
+	 */
+	private function build_wc_country_name_map(): array {
+		if ( ! function_exists( 'WC' ) ) {
+			return array();
+		}
+
+		$woocommerce = WC();
+		if ( ! is_object( $woocommerce ) || empty( $woocommerce->countries ) ) {
+			return array();
+		}
+
+		$countries = $woocommerce->countries->get_countries();
+		if ( ! is_array( $countries ) ) {
+			return array();
+		}
+
+		$map = array();
+		foreach ( $countries as $iso2 => $name ) {
+			if ( ! is_scalar( $iso2 ) || ! is_scalar( $name ) ) {
+				continue;
+			}
+
+			$iso2 = strtoupper( sanitize_text_field( (string) $iso2 ) );
+			$normalized_name = $this->normalize_country_name_for_match( (string) $name );
+
+			if ( '' !== $iso2 && '' !== $normalized_name && ! isset( $map[ $normalized_name ] ) ) {
+				$map[ $normalized_name ] = $iso2;
+			}
+		}
+
+		return $map;
+	}
+
+	private function is_valid_wc_country_code( string $iso2 ): bool {
+		if ( ! preg_match( '/^[A-Z]{2}$/', $iso2 ) ) {
+			return false;
+		}
+
+		if ( ! function_exists( 'WC' ) ) {
+			return true;
+		}
+
+		$woocommerce = WC();
+		if ( ! is_object( $woocommerce ) || empty( $woocommerce->countries ) ) {
+			return true;
+		}
+
+		$countries = $woocommerce->countries->get_countries();
+
+		return ! is_array( $countries ) || isset( $countries[ $iso2 ] );
+	}
+
+	private function normalize_country_name_for_match( string $name ): string {
+		$name = trim( $name );
+		$name = str_replace( array( 'ё', 'Ё' ), array( 'е', 'Е' ), $name );
+		$name = str_replace( array( '"', "'", '«', '»', '.', ',' ), ' ', $name );
+		$name = preg_replace( '/\s+/u', ' ', $name );
+		$name = is_string( $name ) ? trim( $name ) : '';
+
+		if ( function_exists( 'mb_strtoupper' ) ) {
+			return mb_strtoupper( $name, 'UTF-8' );
+		}
+
+		return strtoupper( $name );
+	}
+
+	/**
+	 * @param array<string, mixed> $raw Raw or normalized country record.
+	 */
+	private function is_russia_country( array $raw, string $iso2 = '' ): bool {
+		if ( 'RU' === strtoupper( trim( $iso2 ) ) ) {
+			return true;
+		}
+
+		if ( isset( $raw['iso2'] ) && is_scalar( $raw['iso2'] ) && 'RU' === strtoupper( trim( (string) $raw['iso2'] ) ) ) {
+			return true;
+		}
+
+		$name = $this->first_scalar(
+			$raw,
+			array(
+				'name',
+				'Name',
+				'country_name',
+				'countryName',
+				'fullname',
+				'fullName',
+				'nameRu',
+				'nameRus',
+				'russianName',
+			)
+		);
+		$name = $this->normalize_country_name_for_match( $name );
+
+		return in_array(
+			$name,
+			array(
+				'РОССИЯ',
+				'РОССИЙСКАЯ ФЕДЕРАЦИЯ',
+				'РФ',
+				'RUSSIA',
+				'RUSSIAN FEDERATION',
+			),
+			true
+		);
+	}
+
+	/**
+	 * @param array<string, mixed> $country Country record.
+	 * @return array<string, mixed>
+	 */
+	private function apply_russia_exclusion( array $country ): array {
+		$country['auto_status'] = 'ru';
+		$country['effective_enabled'] = false;
+		$country['effective_reason'] = 'ru';
+		$country['enabled'] = false;
+
+		if ( ! isset( $country['availability'] ) || ! is_array( $country['availability'] ) ) {
+			$country['availability'] = array();
+		}
+
+		$country['availability']['reason'] = 'ru';
+		$country['availability']['requires_check'] = false;
+
+		return $country;
+	}
+
+	/**
+	 * @return array<string, array<string, string>>
+	 */
+	private function get_country_overrides(): array {
+		$settings = $this->settings->get();
+		$overrides = $settings['country_overrides'][ WDC_Settings::SERVICE_RUSSIAN_POST_WORLDWIDE_PARCEL ] ?? array();
+
+		return is_array( $overrides ) ? $overrides : array();
+	}
+
+	/**
+	 * @param array<string, mixed> $country Country record.
+	 */
+	private function get_override_key( array $country ): string {
+		if ( ! empty( $country['override_key'] ) && 0 === strpos( (string) $country['override_key'], 'carrier:' ) ) {
+			return (string) $country['override_key'];
+		}
+
+		if ( ! empty( $country['iso2'] ) ) {
+			return strtoupper( (string) $country['iso2'] );
+		}
+
+		return 'carrier:' . (string) ( $country['carrier_country_id'] ?? '' );
+	}
+
+	/**
+	 * @param array<string, mixed> $country Country record.
+	 * @param array<string, array<string, string>> $overrides Country overrides.
+	 * @return array<string, mixed>
+	 */
+	private function apply_country_override( array $country, array $overrides ): array {
+		$is_russia = $this->is_russia_country(
+			isset( $country['raw'] ) && is_array( $country['raw'] ) ? $country['raw'] : $country,
+			(string) ( $country['iso2'] ?? '' )
+		);
+
+		if (
+			(
+				! $is_russia
+				&& 'parcel_blocked' === (string) ( $country['auto_status'] ?? '' )
+			)
+			|| (
+				! $is_russia
+				&&
+				isset( $country['availability'] )
+				&& is_array( $country['availability'] )
+				&& ( 1 === ( $country['availability']['parcel_block'] ?? null ) || '1' === ( $country['availability']['parcel_block'] ?? null ) )
+			)
+		) {
+			$country['auto_status'] = 'requires_check';
+			$country['availability']['reason'] = 'parcel_block_warning';
+			$country['availability']['requires_check'] = true;
+		}
+
+		$key = $this->get_override_key( $country );
+		$override = $overrides[ $key ] ?? $overrides[ strtolower( $key ) ] ?? array();
+		$manual_status = isset( $override['enabled'] ) && in_array( $override['enabled'], array( 'auto', 'yes', 'no' ), true )
+			? (string) $override['enabled']
+			: 'auto';
+		$manual_iso2 = isset( $override['manual_iso2'] ) ? strtoupper( sanitize_text_field( (string) $override['manual_iso2'] ) ) : '';
+		$manual_iso2 = $this->is_valid_wc_country_code( $manual_iso2 ) ? $manual_iso2 : '';
+
+		$country['override_key'] = $key;
+		$country['manual_status'] = $manual_status;
+		$country['manual_iso2'] = $manual_iso2;
+		$country['note'] = isset( $override['note'] ) ? (string) $override['note'] : '';
+
+		if ( isset( $override['carrier_country_id'] ) && '' !== (string) $override['carrier_country_id'] ) {
+			$country['override_carrier_country_id'] = (string) $override['carrier_country_id'];
+		}
+
+		if ( isset( $override['country_name'] ) && '' !== (string) $override['country_name'] ) {
+			$country['override_country_name'] = (string) $override['country_name'];
+		}
+
+		if ( '' !== $manual_iso2 && 0 === strpos( $key, 'carrier:' ) && ! empty( $country['carrier_country_id'] ) ) {
+			$country['iso2'] = $manual_iso2;
+			$country['manually_matched'] = true;
+			$country['auto_status'] = $this->get_auto_status_from_availability( isset( $country['availability'] ) && is_array( $country['availability'] ) ? $country['availability'] : array() );
+		} else {
+			$country['manually_matched'] = false;
+		}
+
+		if (
+			$is_russia
+			|| $this->is_russia_country(
+				isset( $country['raw'] ) && is_array( $country['raw'] ) ? $country['raw'] : $country,
+				(string) ( $country['iso2'] ?? '' )
+			)
+		) {
+			return $this->apply_russia_exclusion( $country );
+		}
+
+		if ( 'yes' === $manual_status ) {
+			$can_map = ! empty( $country['iso2'] ) && ! empty( $country['carrier_country_id'] ) && 'RU' !== (string) $country['iso2'];
+			$country['effective_enabled'] = $can_map;
+			$country['effective_reason'] = $can_map ? 'manual_enabled' : (string) ( $country['auto_status'] ?? 'unmatched' );
+		} elseif ( 'no' === $manual_status ) {
+			$country['effective_enabled'] = false;
+			$country['effective_reason'] = 'manual_disabled';
+		} else {
+			$auto_status = (string) ( $country['auto_status'] ?? '' );
+			$auto_enabled = in_array( $auto_status, array( 'enabled', 'requires_check' ), true );
+			$country['effective_enabled'] = $auto_enabled;
+			$country['effective_reason'] = 'requires_check' === $auto_status ? 'auto_requires_check' : ( $auto_enabled ? 'auto_enabled' : (string) ( $country['auto_status'] ?? 'unmatched' ) );
+		}
+
+		$country['enabled'] = (bool) $country['effective_enabled'];
+
+		return $country;
+	}
+
+	/**
+	 * @param array<string, mixed> $country Country record.
+	 * @param array<string, mixed> $stats Stats accumulator.
+	 */
+	private function count_country_status( array $country, array &$stats ): void {
+		$auto_status = (string) ( $country['auto_status'] ?? 'unmatched' );
+		$manual_status = (string) ( $country['manual_status'] ?? 'auto' );
+
+		if ( ! empty( $country['manually_matched'] ) ) {
+			++$stats['manually_matched_count'];
+			++$stats['matched_country_count'];
+		} elseif ( 'unmatched' === $auto_status ) {
+			++$stats['unmatched_count'];
+			++$stats['skipped_unmatched_count'];
+		} else {
+			++$stats['matched_country_count'];
+		}
+
+		if ( 'enabled' === $auto_status ) {
+			++$stats['auto_enabled_count'];
+		} elseif ( 'requires_check' === $auto_status ) {
+			++$stats['requires_check_count'];
+		} elseif ( 'no_parcel' === $auto_status ) {
+			++$stats['skipped_no_parcel_count'];
+		} elseif ( 'ru' === $auto_status ) {
+			++$stats['skipped_ru_count'];
+		}
+
+		if ( 'yes' === $manual_status ) {
+			++$stats['manual_enabled_count'];
+		} elseif ( 'no' === $manual_status ) {
+			++$stats['manual_disabled_count'];
+		}
+
+		if ( ! empty( $country['effective_enabled'] ) ) {
+			++$stats['enabled_country_count'];
+			++$stats['effective_enabled_count'];
+		}
+	}
+
+	/**
+	 * @param array<int, array<string, mixed>> $countries Countries.
+	 */
+	private function sort_countries_by_name( array &$countries ): void {
+		usort(
+			$countries,
+			function ( array $a, array $b ): int {
+				return strnatcasecmp( (string) ( $a['name'] ?? '' ), (string) ( $b['name'] ?? '' ) );
+			}
+		);
+	}
+
+	/**
+	 * @param array<string, mixed> $raw Raw country record.
+	 * @param array<int, string>  $keys Candidate field names.
+	 */
+	private function first_scalar( array $raw, array $keys ): string {
+		foreach ( $keys as $key ) {
+			if ( isset( $raw[ $key ] ) && is_scalar( $raw[ $key ] ) ) {
+				return trim( (string) $raw[ $key ] );
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * @param array<string, mixed> $raw Raw country record.
+	 * @param array<int, string>  $keys Candidate field names.
+	 */
+	private function first_numeric_scalar( array $raw, array $keys ): string {
+		foreach ( $keys as $key ) {
+			if ( isset( $raw[ $key ] ) && is_scalar( $raw[ $key ] ) && is_numeric( $raw[ $key ] ) ) {
+				return trim( (string) $raw[ $key ] );
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * @param array<string, mixed> $raw Raw country record.
+	 * @param array<int, string>  $keys Candidate field names.
+	 */
+	private function first_code( array $raw, array $keys, int $length ): string {
+		foreach ( $keys as $key ) {
+			if ( ! isset( $raw[ $key ] ) || ! is_scalar( $raw[ $key ] ) ) {
+				continue;
+			}
+
+			$value = strtoupper( trim( (string) $raw[ $key ] ) );
+			if ( preg_match( '/^[A-Z]{' . $length . '}$/', $value ) ) {
+				return $value;
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * @param array<string, mixed> $raw Raw country record.
+	 */
+	private function extract_iso_from_altnames( array $raw, int $type, int $length ): string {
+		if ( empty( $raw['altnames'] ) || ! is_array( $raw['altnames'] ) ) {
+			return '';
+		}
+
+		foreach ( $raw['altnames'] as $altname ) {
+			if ( ! is_array( $altname ) ) {
+				continue;
+			}
+
+			if ( ! isset( $altname['type'], $altname['name'] ) || (int) $altname['type'] !== $type || ! is_scalar( $altname['name'] ) ) {
+				continue;
+			}
+
+			$name = strtoupper( trim( (string) $altname['name'] ) );
+			if ( preg_match( '/^[A-Z]{' . $length . '}$/', $name ) ) {
+				return $name;
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * @param array<string, mixed> $raw Raw country record.
+	 * @return array<string, mixed>
+	 */
+	private function get_parcel_availability( array $raw ): array {
+		$parcel = $raw['parcel'] ?? null;
+		if ( ! is_array( $parcel ) ) {
+			return array(
+				'has_parcel' => false,
+				'parcel_block' => null,
+				'reason' => 'no_parcel',
+				'requires_check' => false,
+			);
+		}
+
+		$parcel_block = array_key_exists( 'block', $parcel ) ? $parcel['block'] : null;
+		if ( 1 === $parcel_block || '1' === $parcel_block ) {
+			return array(
+				'has_parcel' => true,
+				'parcel_block' => $parcel_block,
+				'reason' => 'parcel_block_warning',
+				'requires_check' => true,
+			);
+		}
+
+		return array(
+			'has_parcel' => true,
+			'parcel_block' => $parcel_block,
+			'reason' => 'enabled',
+			'requires_check' => false,
+		);
+	}
+
+	/**
+	 * @param array<string, mixed> $availability Parcel availability data.
+	 */
+	private function get_auto_status_from_availability( array $availability ): string {
+		if ( empty( $availability['has_parcel'] ) ) {
+			return 'no_parcel';
+		}
+
+		if (
+			! empty( $availability['requires_check'] )
+			|| in_array( (string) ( $availability['reason'] ?? '' ), array( 'parcel_block_warning', 'parcel_blocked' ), true )
+			|| 1 === ( $availability['parcel_block'] ?? null )
+			|| '1' === ( $availability['parcel_block'] ?? null )
+		) {
+			return 'requires_check';
+		}
+
+		return 'enabled';
+	}
+
+	/**
+	 * @param array<string, mixed> $raw Raw country record.
+	 */
+	private function add_skip_example( string $bucket, array $raw ): void {
+		if (
+			! isset( $this->last_diagnostics['examples'][ $bucket ] )
+			|| ! is_array( $this->last_diagnostics['examples'][ $bucket ] )
+			|| count( $this->last_diagnostics['examples'][ $bucket ] ) >= 30
+		) {
+			return;
+		}
+
+		$example = array(
+			'country_id' => $this->first_scalar( $raw, array( 'id', 'Id', 'country_id', 'countryId', 'code', 'Code' ) ),
+			'name' => $this->first_scalar( $raw, array( 'name', 'Name', 'country_name', 'countryName' ) ),
+		);
+
+		if ( 'requires_check' === $bucket ) {
+			$parcel = $raw['parcel'] ?? array();
+			$example['parcel_block'] = is_array( $parcel ) && array_key_exists( 'block', $parcel ) ? $parcel['block'] : null;
+		}
+
+		$this->last_diagnostics['examples'][ $bucket ][] = $example;
+	}
+
+	/**
+	 * @param array<mixed> $items Candidate list.
+	 */
+	private function is_list_array( array $items ): bool {
+		$index = 0;
+		foreach ( array_keys( $items ) as $key ) {
+			if ( $key !== $index ) {
+				return false;
+			}
+
+			++$index;
+		}
+
+		return true;
+	}
+
+	/**
+	 * @param array<string, mixed> $context Debug context.
+	 */
+	private function debug_log( string $message, array $context = array() ): void {
+		$settings = $this->settings->get();
+		if ( isset( $settings['debug_enabled'] ) && 'yes' === $settings['debug_enabled'] ) {
+			$this->logger->log( 'debug', $message, $context );
+		}
+	}
 }

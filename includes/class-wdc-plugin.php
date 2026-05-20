@@ -12,6 +12,10 @@ final class WDC_Plugin {
 
 	private WDC_Logger $logger;
 
+	private WDC_Settings $settings;
+
+	private WDC_Order_Meta $order_meta;
+
 	public static function instance(): WDC_Plugin {
 		if ( null === self::$instance ) {
 			self::$instance = new self();
@@ -23,16 +27,19 @@ final class WDC_Plugin {
 	private function __construct() {
 		$this->load_dependencies();
 		$this->logger = new WDC_Logger();
+		$this->settings = new WDC_Settings();
+		$this->order_meta = new WDC_Order_Meta( $this->logger, $this->settings );
 
 		add_action( 'plugins_loaded', array( $this, 'init' ) );
 	}
 
 	public function init(): void {
+		$this->order_meta->init();
 		add_action( 'woocommerce_shipping_init', array( $this, 'load_shipping_method' ) );
 		add_filter( 'woocommerce_shipping_methods', array( $this, 'register_shipping_method' ) );
 
 		if ( is_admin() ) {
-			$admin = new WDC_Admin( $this->logger );
+			$admin = new WDC_Admin( $this->logger, $this->settings );
 			$admin->init();
 		}
 	}
@@ -57,13 +64,21 @@ final class WDC_Plugin {
 		return $this->logger;
 	}
 
+	public function settings(): WDC_Settings {
+		return $this->settings;
+	}
+
 	private function load_dependencies(): void {
 		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-logger.php';
+		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-settings.php';
+		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-carrier-registry.php';
+		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-quote-normalizer.php';
 		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-cache.php';
 		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-weight-calculator.php';
 		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-order-meta.php';
 		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-admin.php';
 		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-country-mapper.php';
+		require_once WDC_PLUGIN_DIR . 'includes/class-wdc-location-mapper.php';
 		require_once WDC_PLUGIN_DIR . 'includes/carriers/interface-wdc-carrier.php';
 		require_once WDC_PLUGIN_DIR . 'includes/carriers/russian-post/class-wdc-russian-post-carrier.php';
 		require_once WDC_PLUGIN_DIR . 'includes/carriers/russian-post/class-wdc-russian-post-api.php';
