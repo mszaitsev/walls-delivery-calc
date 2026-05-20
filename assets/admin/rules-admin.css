@@ -1,0 +1,67 @@
+.wdc-rules-admin .wdc-rules-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin: 16px 0;
+}
+
+.wdc-rules-table {
+	margin-top: 12px;
+}
+
+.wdc-rules-result {
+	margin-top: 20px;
+	padding: 16px;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+}
+
+.wdc-rules-result-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+	gap: 12px;
+	margin-bottom: 16px;
+}
+
+.wdc-rules-result-grid span {
+	display: grid;
+	gap: 4px;
+	padding: 12px;
+	background: #f6f7f7;
+	border-left: 4px solid #2271b1;
+}
+
+.wdc-rules-comments {
+	margin-bottom: 16px;
+	padding: 12px;
+	background: #fcf9e8;
+	border-left: 4px solid #dba617;
+}
+
+.wdc-rules-audit {
+	display: grid;
+	gap: 10px;
+}
+
+.wdc-rules-audit-entry {
+	padding: 12px;
+	border: 1px solid #dcdcde;
+	border-left-width: 4px;
+	background: #fff;
+}
+
+.wdc-rules-audit-entry.is-applied {
+	border-left-color: #00a32a;
+}
+
+.wdc-rules-audit-entry.is-not-applied {
+	border-left-color: #8c8f94;
+	opacity: .72;
+}
+
+.wdc-rules-audit-entry strong,
+.wdc-rules-audit-entry span {
+	display: inline-block;
+	margin-right: 8px;
+}

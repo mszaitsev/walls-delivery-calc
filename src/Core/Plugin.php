@@ -23,6 +23,12 @@ use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Services\GarChangesService;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Rules\Admin\RulesAdminPage;
+use WallsShop\WDC\Rules\Services\ConditionEvaluator;
+use WallsShop\WDC\Rules\Services\RuleEngine;
+use WallsShop\WDC\Rules\Services\RuleEvaluator;
+use WallsShop\WDC\Rules\Services\RuleSimulator;
+use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\WooCommerce\HPOSCompatibility;
 
 defined( 'ABSPATH' ) || exit;
@@ -57,6 +63,11 @@ final class Plugin {
 		$this->container->register( ActionScheduler::class, fn(): ActionScheduler => new ActionScheduler( $this->container->get( Logger::class ) ) );
 		$this->container->register( CalendarRepository::class, fn(): CalendarRepository => new CalendarRepository() );
 		$this->container->register( LocationRepository::class, fn(): LocationRepository => new LocationRepository() );
+		$this->container->register( RuleRepository::class, fn(): RuleRepository => new RuleRepository() );
+		$this->container->register( ConditionEvaluator::class, fn(): ConditionEvaluator => new ConditionEvaluator() );
+		$this->container->register( RuleEvaluator::class, fn(): RuleEvaluator => new RuleEvaluator( $this->container->get( ConditionEvaluator::class ) ) );
+		$this->container->register( RuleEngine::class, fn(): RuleEngine => new RuleEngine( $this->container->get( RuleEvaluator::class ) ) );
+		$this->container->register( RuleSimulator::class, fn(): RuleSimulator => new RuleSimulator( $this->container->get( RuleEngine::class ) ) );
 		$this->container->register( LocationSearchService::class, fn(): LocationSearchService => new LocationSearchService( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( LocationImportService::class, fn(): LocationImportService => new LocationImportService( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( GarChangesService::class, fn(): GarChangesService => new GarChangesService() );
@@ -123,6 +134,14 @@ final class Plugin {
 				$this->container->get( LocationImportService::class )
 			)
 		);
+		$this->container->register(
+			RulesAdminPage::class,
+			fn(): RulesAdminPage => new RulesAdminPage(
+				$this->environment,
+				$this->container->get( RuleRepository::class ),
+				$this->container->get( RuleSimulator::class )
+			)
+		);
 	}
 
 	private function register_hooks(): void {
@@ -136,6 +155,7 @@ final class Plugin {
 			$this->container->get( AdminMenu::class )->register();
 			$this->container->get( CalendarAdminPage::class )->register();
 			$this->container->get( LocationsAdminPage::class )->register();
+			$this->container->get( RulesAdminPage::class )->register();
 		}
 	}
 
