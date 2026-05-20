@@ -6,6 +6,11 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 defined( 'ABSPATH' ) || exit;
 
 final class CheckoutRateRenderer {
+	public function __construct(
+		private ?CheckoutSessionManager $session_manager = null
+	) {
+	}
+
 	public function register(): void {
 		add_action( 'woocommerce_after_shipping_rate', array( $this, 'render' ), 10, 2 );
 	}
@@ -39,6 +44,8 @@ final class CheckoutRateRenderer {
 			}
 		}
 
+		$this->render_selected_pickup( $meta );
+
 		echo '</div>';
 	}
 
@@ -61,5 +68,26 @@ final class CheckoutRateRenderer {
 
 	private function format_money( int $kopecks ): string {
 		return rtrim( rtrim( number_format( $kopecks / 100, 2, '.', ' ' ), '0' ), '.' ) . ' ₽';
+	}
+	/**
+	 * @param array<string,mixed> $meta
+	 */
+	private function render_selected_pickup( array $meta ): void {
+		if ( ! $this->session_manager instanceof CheckoutSessionManager || 'pickup' !== (string) ( $meta['delivery_type'] ?? '' ) ) {
+			return;
+		}
+
+		$selection = $this->session_manager->pickup_selection();
+		if ( '' === trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
+			return;
+		}
+
+		echo '<span class="wdc-platform-pickup-selected">' . esc_html( (string) ( $selection['point_address'] ?? '' ) ) . '</span>';
+		if ( '' !== trim( (string) ( $selection['point_work_time'] ?? '' ) ) ) {
+			echo '<span class="wdc-platform-pickup-selected">' . esc_html( (string) $selection['point_work_time'] ) . '</span>';
+		}
+		if ( '' !== trim( (string) ( $selection['point_comment'] ?? '' ) ) ) {
+			echo '<span class="wdc-platform-pickup-selected">' . esc_html( (string) $selection['point_comment'] ) . '</span>';
+		}
 	}
 }

@@ -7,6 +7,8 @@ defined( 'ABSPATH' ) || exit;
 
 final class CheckoutSessionManager {
 	private const DELIVERY_TYPE_KEY = 'wdc_platform_selected_delivery_type';
+	private const PICKUP_SELECTION_KEY = 'wdc_platform_pickup_selection';
+	private const PICKUP_CARRIER_KEY = 'wdc_platform_selected_pickup_carrier';
 	private const SORT_MODE_KEY     = 'wdc_platform_checkout_sort_mode';
 	private const RATES_KEY         = 'wdc_platform_rates';
 	private const DEBUG_KEY         = 'wdc_platform_debug';
@@ -17,6 +19,45 @@ final class CheckoutSessionManager {
 
 	public function selected_delivery_type(): string {
 		return (string) $this->get( self::DELIVERY_TYPE_KEY, '' );
+	}
+
+	/**
+	 * @param array<string,mixed> $selection
+	 */
+	public function save_pickup_selection( array $selection ): void {
+		$this->set( self::PICKUP_SELECTION_KEY, $selection );
+		$this->set( self::PICKUP_CARRIER_KEY, (string) ( $selection['carrier_key'] ?? '' ) );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function pickup_selection(): array {
+		$selection = $this->get( self::PICKUP_SELECTION_KEY, array() );
+
+		return is_array( $selection ) ? $selection : array();
+	}
+
+	public function selected_pickup_carrier(): string {
+		return (string) $this->get( self::PICKUP_CARRIER_KEY, '' );
+	}
+
+	public function pickup_selection_matches( string $carrierKey, string $rateId ): bool {
+		$selection = $this->pickup_selection();
+		if ( array() === $selection || '' === trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
+			return false;
+		}
+
+		if ( trim( (string) ( $selection['carrier_key'] ?? '' ) ) !== trim( $carrierKey ) ) {
+			return false;
+		}
+
+		$selection_rate_id = trim( (string) ( $selection['rate_id'] ?? '' ) );
+		if ( '' === $selection_rate_id ) {
+			return true;
+		}
+
+		return $this->normalize_rate_id( $selection_rate_id ) === $this->normalize_rate_id( $rateId );
 	}
 
 	public function save_sort_mode( string $sort_mode ): void {
@@ -81,5 +122,14 @@ final class CheckoutSessionManager {
 		}
 
 		return null;
+	}
+
+	private function normalize_rate_id( string $rate_id ): string {
+		$prefix = NewShippingMethod::METHOD_ID . ':';
+		if ( str_starts_with( $rate_id, $prefix ) ) {
+			return substr( $rate_id, strlen( $prefix ) );
+		}
+
+		return $rate_id;
 	}
 }

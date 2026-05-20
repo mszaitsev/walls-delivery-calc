@@ -12,6 +12,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryQuote;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -33,6 +34,17 @@ final class DemoCarrier implements CarrierAdapterInterface {
 
 	public function supports_country( string $countryCode ): bool {
 		return 'RU' === strtoupper( trim( $countryCode ) );
+	}
+
+	/**
+	 * @return array<int,\WallsShop\WDC\Domain\Pickup\PickupPoint>
+	 */
+	public function get_pickup_points( QuoteRequest $request ): array {
+		if ( ! $this->supports_country( $request->country_code ) ) {
+			return array();
+		}
+
+		return ( new DemoPickupProvider() )->get_points( self::KEY, $request->destination );
 	}
 
 	public function quote( QuoteRequest $request ): DeliveryQuote {

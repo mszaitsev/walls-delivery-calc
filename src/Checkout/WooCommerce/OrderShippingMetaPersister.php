@@ -38,6 +38,17 @@ final class OrderShippingMetaPersister {
 			'_wdc_platform_fallback_used'            => ! empty( $rate['fallback_used'] ) || 'fallback' === (string) ( $rate['carrier_key'] ?? '' ),
 		);
 
+		$pickup = $this->session_manager->pickup_selection();
+		if (
+			'pickup' === (string) ( $rate['delivery_type'] ?? '' )
+			&& $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) )
+		) {
+			$map['_wdc_platform_pickup_code']      = $pickup['point_code'] ?? '';
+			$map['_wdc_platform_pickup_address']   = $pickup['point_address'] ?? '';
+			$map['_wdc_platform_pickup_comment']   = $pickup['point_comment'] ?? '';
+			$map['_wdc_platform_pickup_work_time'] = $pickup['point_work_time'] ?? '';
+		}
+
 		foreach ( $map as $key => $value ) {
 			$order->update_meta_data( $key, $value );
 		}

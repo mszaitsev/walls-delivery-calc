@@ -30,6 +30,8 @@ final class WooCommerceRateMapper {
 				'comments'        => $rate->comments,
 				'disabled'        => $rate->disabled,
 				'disabled_reason' => $rate->disabled_reason,
+				'requires_pickup_point' => $rate->requires_pickup_point,
+				'requires_courier_address' => $rate->requires_courier_address,
 				'fallback_used'   => $fallback_used || 'fallback' === $rate->carrier_key,
 			),
 		);
