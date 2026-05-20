@@ -19,6 +19,18 @@ final class FeatureFlags {
 		return true === ( $this->flags[ $flag ] ?? false );
 	}
 
+	public function new_shipping_method_enabled(): bool {
+		return $this->enabled( 'new_shipping_method_enabled' );
+	}
+
+	public function set( string $flag, bool $enabled ): void {
+		$this->flags[ $flag ] = $enabled;
+	}
+
+	public function set_new_shipping_method_enabled( bool $enabled ): void {
+		$this->set( 'new_shipping_method_enabled', $enabled );
+	}
+
 	/**
 	 * @return array<string, bool>
 	 */

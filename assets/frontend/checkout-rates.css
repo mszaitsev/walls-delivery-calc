@@ -1,0 +1,47 @@
+.wdc-platform-rate-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px 10px;
+	margin: 4px 0 0 24px;
+	font-size: 12px;
+	line-height: 1.35;
+	color: #475569;
+}
+
+.wdc-platform-crossed-price {
+	color: #64748b;
+	text-decoration: line-through;
+}
+
+.wdc-platform-delivery-comment {
+	color: #334155;
+}
+
+.wdc-platform-rate-meta--fallback {
+	color: #92400e;
+}
+
+.wdc-platform-debug-panel {
+	margin-top: 16px;
+	padding: 12px;
+	border: 1px solid #cbd5e1;
+	background: #f8fafc;
+	color: #0f172a;
+	font-size: 12px;
+}
+
+.wdc-platform-debug-panel h3 {
+	margin: 0 0 8px;
+	font-size: 14px;
+}
+
+.wdc-platform-debug-panel dl {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	gap: 4px 10px;
+	margin: 0 0 8px;
+}
+
+.wdc-platform-debug-panel ul {
+	margin: 6px 0 0 18px;
+}

@@ -29,8 +29,10 @@ final class SettingsRepository {
 	 */
 	public function defaults(): array {
 		return array(
-			'shop_processing_days'    => 1,
-			'auto_generate_next_year' => true,
+			'shop_processing_days'          => 1,
+			'auto_generate_next_year'       => true,
+			'enable_new_checkout_shipping' => false,
+			'checkout_sort_mode'            => 'cheapest',
 		);
 	}
 
