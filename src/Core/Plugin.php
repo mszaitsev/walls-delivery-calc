@@ -24,10 +24,13 @@ use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDebugPanel;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Checkout\WooCommerce\PickupPointRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\ShippingMethodRegistrar;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
@@ -41,6 +44,9 @@ use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Services\GarChangesService;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Pickup\Admin\PickupAdminPage;
+use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
+use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 use WallsShop\WDC\Rules\Admin\RulesAdminPage;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
@@ -81,6 +87,8 @@ final class Plugin {
 		$this->container->register( ActionScheduler::class, fn(): ActionScheduler => new ActionScheduler( $this->container->get( Logger::class ) ) );
 		$this->container->register( CalendarRepository::class, fn(): CalendarRepository => new CalendarRepository() );
 		$this->container->register( LocationRepository::class, fn(): LocationRepository => new LocationRepository() );
+		$this->container->register( PickupPointRepository::class, fn(): PickupPointRepository => new PickupPointRepository() );
+		$this->container->register( DemoPickupProvider::class, fn(): DemoPickupProvider => new DemoPickupProvider( $this->environment->plugin_dir() . 'database/demo/pickup-points-demo.json' ) );
 		$this->container->register( RuleRepository::class, fn(): RuleRepository => new RuleRepository() );
 		$this->container->register( ConditionEvaluator::class, fn(): ConditionEvaluator => new ConditionEvaluator() );
 		$this->container->register( RuleEvaluator::class, fn(): RuleEvaluator => new RuleEvaluator( $this->container->get( ConditionEvaluator::class ) ) );
@@ -132,7 +140,18 @@ final class Plugin {
 			)
 		);
 		$this->container->register( NewShippingMethod::class, fn(): NewShippingMethod => new NewShippingMethod() );
-		$this->container->register( CheckoutRateRenderer::class, fn(): CheckoutRateRenderer => new CheckoutRateRenderer() );
+		$this->container->register( PickupPointRenderer::class, fn(): PickupPointRenderer => new PickupPointRenderer() );
+		$this->container->register( CheckoutRateRenderer::class, fn(): CheckoutRateRenderer => new CheckoutRateRenderer( $this->container->get( CheckoutSessionManager::class ) ) );
+		$this->container->register(
+			CheckoutDeliveryTypeSelector::class,
+			fn(): CheckoutDeliveryTypeSelector => new CheckoutDeliveryTypeSelector(
+				$this->container->get( CheckoutSessionManager::class ),
+				$this->container->get( PickupPointRepository::class ),
+				$this->container->get( DemoPickupProvider::class ),
+				$this->container->get( PickupPointRenderer::class )
+			)
+		);
+		$this->container->register( CheckoutValidation::class, fn(): CheckoutValidation => new CheckoutValidation( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( OrderShippingMetaPersister::class, fn(): OrderShippingMetaPersister => new OrderShippingMetaPersister( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( CheckoutDebugPanel::class, fn(): CheckoutDebugPanel => new CheckoutDebugPanel( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( LocationSearchService::class, fn(): LocationSearchService => new LocationSearchService( $this->container->get( LocationRepository::class ) ) );
@@ -216,6 +235,14 @@ final class Plugin {
 				$this->container->get( CheckoutOrchestrator::class )
 			)
 		);
+		$this->container->register(
+			PickupAdminPage::class,
+			fn(): PickupAdminPage => new PickupAdminPage(
+				$this->environment,
+				$this->container->get( PickupPointRepository::class ),
+				$this->container->get( DemoPickupProvider::class )
+			)
+		);
 	}
 
 	private function register_hooks(): void {
@@ -225,6 +252,8 @@ final class Plugin {
 		register_activation_hook( $this->environment->plugin_file(), array( $this, 'activate' ) );
 		$this->container->get( ShippingMethodRegistrar::class )->register();
 		$this->container->get( CheckoutRateRenderer::class )->register();
+		$this->container->get( CheckoutDeliveryTypeSelector::class )->register();
+		$this->container->get( CheckoutValidation::class )->register();
 		$this->container->get( OrderShippingMetaPersister::class )->register();
 		$this->container->get( CheckoutDebugPanel::class )->register();
 
@@ -235,6 +264,7 @@ final class Plugin {
 			$this->container->get( LocationsAdminPage::class )->register();
 			$this->container->get( RulesAdminPage::class )->register();
 			$this->container->get( CheckoutSimulationPage::class )->register();
+			$this->container->get( PickupAdminPage::class )->register();
 		}
 	}
 

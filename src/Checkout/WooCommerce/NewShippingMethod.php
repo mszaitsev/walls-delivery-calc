@@ -85,6 +85,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 				is_array( $package ) ? $package : array(),
 				array(
 					'delivery_type' => $this->session_manager->selected_delivery_type(),
+					'pickup_selection' => $this->session_manager->pickup_selection(),
 					'sort_mode'     => $sort,
 				)
 			);

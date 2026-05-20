@@ -1,0 +1,284 @@
+<?php
+declare(strict_types=1);
+
+defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
+defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
+
+if ( ! function_exists( 'wp_json_encode' ) ) {
+	function wp_json_encode( mixed $value ): string|false {
+		return json_encode( $value );
+	}
+}
+
+if ( ! function_exists( 'current_time' ) ) {
+	function current_time( string $type ): string {
+		return gmdate( 'Y-m-d H:i:s' );
+	}
+}
+
+if ( ! function_exists( 'sanitize_text_field' ) ) {
+	function sanitize_text_field( string $value ): string {
+		return trim( strip_tags( $value ) );
+	}
+}
+
+if ( ! function_exists( 'wp_unslash' ) ) {
+	function wp_unslash( mixed $value ): mixed {
+		return $value;
+	}
+}
+
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $prefix = 'wp_';
+		public int $insert_id = 0;
+		/** @var array<int,array<string,mixed>> */
+		public array $pickup_rows = array();
+
+		public function get_charset_collate(): string {
+			return 'DEFAULT CHARSET=utf8mb4';
+		}
+
+		public function esc_like( string $text ): string {
+			return addcslashes( $text, '_%\\' );
+		}
+
+		public function prepare( string $query, mixed ...$args ): string {
+			foreach ( $args as $arg ) {
+				$value = is_int( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'";
+				$query = preg_replace( '/%[sd]/', $value, $query, 1 ) ?? $query;
+			}
+
+			return $query;
+		}
+
+		public function insert( string $table, array $data, array $format = array() ): bool {
+			$this->insert_id++;
+			$data['id'] = $this->insert_id;
+			$this->pickup_rows[] = $data;
+
+			return true;
+		}
+
+		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
+			foreach ( $this->pickup_rows as $index => $row ) {
+				if ( (int) ( $row['id'] ?? 0 ) === (int) ( $where['id'] ?? 0 ) ) {
+					$this->pickup_rows[ $index ] = array_merge( $row, $data );
+				}
+			}
+
+			return true;
+		}
+
+		public function get_row( string $query, mixed $output = null ): ?array {
+			if ( ! preg_match( "/carrier_key = '([^']+)'.*point_code = '([^']+)'/", $query, $matches ) ) {
+				return null;
+			}
+
+			foreach ( $this->pickup_rows as $row ) {
+				if ( $row['carrier_key'] === $matches[1] && $row['point_code'] === $matches[2] ) {
+					return $row;
+				}
+			}
+
+			return null;
+		}
+
+		public function get_results( string $query, mixed $output = null ): array {
+			if ( ! preg_match( "/carrier_key = '([^']+)'.*country_code = '([^']+)'.*city_name LIKE '%([^']+)%'/", $query, $matches ) ) {
+				return array();
+			}
+
+			return array_values(
+				array_filter(
+					$this->pickup_rows,
+					static fn ( array $row ): bool => (bool) ( $row['active'] ?? 0 )
+						&& $row['carrier_key'] === $matches[1]
+						&& $row['country_code'] === $matches[2]
+						&& false !== stripos( (string) $row['city_name'], $matches[3] )
+				)
+			);
+		}
+
+		public function get_var( string $query ): int {
+			return count( $this->pickup_rows );
+		}
+
+		public function query( string $query ): bool {
+			if ( str_starts_with( strtoupper( trim( $query ) ), 'DELETE' ) ) {
+				$this->pickup_rows = array();
+			}
+
+			return true;
+		}
+	}
+}
+
+if ( ! class_exists( 'WC_Shipping_Method' ) ) {
+	class WC_Shipping_Method {
+		public string $id = '';
+	}
+}
+
+$GLOBALS['wpdb'] = new wpdb();
+
+final class WdcPickupSmokeSession {
+	/** @var array<string,mixed> */
+	private array $data = array();
+
+	public function set( string $key, mixed $value ): void {
+		$this->data[ $key ] = $value;
+	}
+
+	public function get( string $key, mixed $default = null ): mixed {
+		return $this->data[ $key ] ?? $default;
+	}
+}
+
+final class WdcPickupSmokeWooCommerce {
+	public WdcPickupSmokeSession $session;
+
+	public function __construct() {
+		$this->session = new WdcPickupSmokeSession();
+	}
+}
+
+if ( ! function_exists( 'WC' ) ) {
+	function WC(): WdcPickupSmokeWooCommerce {
+		static $wc = null;
+		if ( null === $wc ) {
+			$wc = new WdcPickupSmokeWooCommerce();
+		}
+
+		return $wc;
+	}
+}
+
+require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
+
+( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+
+use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
+use WallsShop\WDC\Carriers\Runtime\DemoCarrier;
+use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
+use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
+use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
+use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
+use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
+use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
+use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
+use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
+use WallsShop\WDC\Rules\Services\ConditionEvaluator;
+use WallsShop\WDC\Rules\Services\RuleEngine;
+use WallsShop\WDC\Rules\Services\RuleEvaluator;
+
+function pickup_smoke_assert( bool $condition, string $message ): void {
+	if ( ! $condition ) {
+		throw new RuntimeException( $message );
+	}
+}
+
+final class WdcPickupSmokeOrder {
+	/** @var array<string,mixed> */
+	public array $meta = array();
+
+	public function update_meta_data( string $key, mixed $value ): void {
+		$this->meta[ $key ] = $value;
+	}
+}
+
+function pickup_smoke_request( string $delivery_type = '' ): QuoteRequest {
+	return new QuoteRequest(
+		'RU',
+		new Address( country_code: 'RU', city: 'Novosibirsk' ),
+		Package::from_items( array(), 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) ),
+		'',
+		Money::from_rubles( 1000 ),
+		'2026-05-21',
+		array( 'delivery_type' => $delivery_type )
+	);
+}
+
+function pickup_smoke_orchestrator(): CheckoutOrchestrator {
+	$logger = new CheckoutLogger();
+	$registry = new CarrierRegistry();
+	$registry->register( new DemoCarrier() );
+
+	return new CheckoutOrchestrator(
+		$registry,
+		new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) ),
+		new RateSorter(),
+		new FallbackRateFactory(),
+		new CarrierExecutionGuard( $logger ),
+		$logger
+	);
+}
+
+$provider = new DemoPickupProvider( dirname( __DIR__, 2 ) . '/database/demo/pickup-points-demo.json' );
+$repo     = new PickupPointRepository();
+$imported = $repo->save_many( $provider->load_points() );
+pickup_smoke_assert( $imported >= 5, 'Demo pickup import must load at least five points.' );
+pickup_smoke_assert( $repo->count_all() >= 5, 'Pickup repository must count imported rows.' );
+
+$nsk = $repo->search( 'demo', 'RU', 'Novosibirsk' );
+pickup_smoke_assert( count( $nsk ) >= 2, 'Pickup search must find Novosibirsk points.' );
+pickup_smoke_assert( null !== $repo->find_by_code( 'demo', 'NSK-LENINA-1' ), 'Pickup repository must find point by carrier and code.' );
+
+$session = new CheckoutSessionManager();
+$session->save_selected_delivery_type( DeliveryType::PICKUP );
+$session->save_pickup_selection(
+	array(
+		'carrier_key'      => 'demo',
+		'rate_id'          => 'demo:pickup',
+		'point_code'       => 'NSK-LENINA-1',
+		'point_address'    => 'Novosibirsk, Lenina street, 1',
+		'point_comment'    => 'Demo pickup point near the city center.',
+		'point_work_time'  => 'Mon-Fri 10:00-20:00',
+		'selected_at'      => '2026-05-21T00:00:00+00:00',
+	)
+);
+pickup_smoke_assert( 'pickup' === $session->selected_delivery_type(), 'Session must save selected delivery type.' );
+pickup_smoke_assert( 'NSK-LENINA-1' === ( $session->pickup_selection()['point_code'] ?? '' ), 'Session must save pickup selection.' );
+pickup_smoke_assert( 'demo' === $session->selected_pickup_carrier(), 'Session must save selected pickup carrier.' );
+
+$carrier = new DemoCarrier();
+$pickup_quote = $carrier->quote( pickup_smoke_request( DeliveryType::PICKUP ) );
+pickup_smoke_assert( 1 === count( $pickup_quote->rates ), 'Pickup quote must return pickup-only rate when requested.' );
+pickup_smoke_assert( $pickup_quote->rates[0]->requires_pickup_point, 'Pickup delivery must require pickup point.' );
+
+$courier_quote = $carrier->quote( pickup_smoke_request( DeliveryType::COURIER ) );
+pickup_smoke_assert( 1 === count( $courier_quote->rates ), 'Courier quote must return courier-only rate when requested.' );
+pickup_smoke_assert( ! $courier_quote->rates[0]->requires_pickup_point, 'Courier delivery must not require pickup point.' );
+pickup_smoke_assert( $courier_quote->rates[0]->requires_courier_address, 'Courier delivery must require courier address marker.' );
+
+$session->save_rates(
+	array(
+		'demo:pickup' => array(
+			'carrier_key'      => 'demo',
+			'rate_id'          => 'demo:pickup',
+			'delivery_type'    => 'pickup',
+			'fallback_used'    => false,
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( NewShippingMethod::METHOD_ID . ':demo:pickup' ) );
+$order = new WdcPickupSmokeOrder();
+( new OrderShippingMetaPersister( $session ) )->persist( $order );
+pickup_smoke_assert( 'NSK-LENINA-1' === ( $order->meta['_wdc_platform_pickup_code'] ?? '' ), 'Order meta must save pickup code.' );
+pickup_smoke_assert( isset( $order->meta['_wdc_platform_pickup_address'], $order->meta['_wdc_platform_pickup_comment'], $order->meta['_wdc_platform_pickup_work_time'] ), 'Order meta must save pickup details.' );
+
+$orchestrator = pickup_smoke_orchestrator();
+$pickup_rates = $orchestrator->calculate_rates( pickup_smoke_request( DeliveryType::PICKUP ) );
+$courier_rates = $orchestrator->calculate_rates( pickup_smoke_request( DeliveryType::COURIER ) );
+pickup_smoke_assert( array() !== $pickup_rates && 'pickup' === $pickup_rates[0]->delivery_type, 'Orchestrator must filter pickup delivery type.' );
+pickup_smoke_assert( array() !== $courier_rates && 'courier' === $courier_rates[0]->delivery_type, 'Orchestrator must filter courier delivery type.' );
+
+echo "Pickup foundation smoke test passed.\n";

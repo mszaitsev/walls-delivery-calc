@@ -67,6 +67,12 @@ final class ShippingMethodRegistrar {
 			array(),
 			$this->environment->version()
 		);
+		wp_enqueue_style(
+			'wdc-platform-pickup-foundation',
+			$this->environment->plugin_url() . 'assets/frontend/pickup-foundation.css',
+			array( 'wdc-platform-checkout-rates' ),
+			$this->environment->version()
+		);
 	}
 
 	private function enabled(): bool {

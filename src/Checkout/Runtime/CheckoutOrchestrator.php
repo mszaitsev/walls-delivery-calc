@@ -74,6 +74,10 @@ final class CheckoutOrchestrator {
 					continue;
 				}
 
+				if ( '' !== $delivery_type && $rate->delivery_type !== $delivery_type ) {
+					continue;
+				}
+
 				$applied = $this->rule_builder->apply( $rate, $this->context_for_rate( $request, $rate ), $rules );
 				$rates[] = $applied['rate'];
 				$audit[] = array(
