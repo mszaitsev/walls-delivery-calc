@@ -36,6 +36,12 @@ final class SettingsRepository {
 			'show_checkout_debug_panel'     => false,
 			'enable_demo_carrier'           => true,
 			'location_search_limit'          => 100,
+			'fias_api_enabled'              => true,
+			'fias_api_timeout'              => 3,
+			'fias_api_daily_limit'          => 10000,
+			'fias_api_minute_limit'         => 100,
+			'dadata_enabled'                => false,
+			'dadata_api_timeout'            => 3,
 		);
 	}
 

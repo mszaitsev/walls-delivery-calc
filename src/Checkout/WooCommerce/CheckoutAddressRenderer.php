@@ -33,7 +33,10 @@ final class CheckoutAddressRenderer {
 			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--fallback">' . esc_html__( 'Используется введенный вручную населенный пункт', 'walls-delivery-calc' ) . '</p>';
 		}
 		if ( '' !== trim( $address->postcode ) ) {
-			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--postcode">' . esc_html__( 'Индекс:', 'walls-delivery-calc' ) . ' ' . esc_html( $address->postcode ) . '</p>';
+			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--postcode">' . esc_html__( 'Индекс:', 'walls-delivery-calc' ) . ' ' . esc_html( $address->postcode ) . ' <span class="wdc-address-normalization__source">(' . esc_html( $this->postcode_source_label( $result->source, $result->error_code ) ) . ')</span></p>';
+		}
+		if ( in_array( $result->error_code, array( 'api_timeout', 'api_failed', 'api_parse_failed', 'rate_limited' ), true ) ) {
+			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--api">' . esc_html__( 'Адрес будет обработан вручную, проверка сейчас недоступна.', 'walls-delivery-calc' ) . '</p>';
 		}
 		if ( ! $address->fallback ) {
 			echo '<p class="wdc-address-normalization__source">' . esc_html__( 'Источник:', 'walls-delivery-calc' ) . ' ' . esc_html( $this->source_label( $result->source ) ) . '</p>';
@@ -48,5 +51,17 @@ final class CheckoutAddressRenderer {
 			'fallback' => __( 'введено вручную', 'walls-delivery-calc' ),
 			default => $source,
 		};
+	}
+
+	private function postcode_source_label( string $source, string $error_code ): string {
+		if ( 'fias' === $source && '' === $error_code ) {
+			return __( 'FIAS/local', 'walls-delivery-calc' );
+		}
+
+		if ( 'fallback' === $source ) {
+			return __( 'manual', 'walls-delivery-calc' );
+		}
+
+		return __( 'checkout', 'walls-delivery-calc' );
 	}
 }

@@ -93,6 +93,33 @@ final class SettingsAdminPage {
 								<input id="wdc_location_search_limit" type="number" name="location_search_limit" value="<?php echo esc_attr( (string) ( $values['location_search_limit'] ?? 100 ) ); ?>" min="10" max="300" step="1">
 							</td>
 						</tr>
+						<tr>
+							<th colspan="2"><h2><?php echo esc_html__( 'ФИАС/ГАР', 'walls-delivery-calc' ); ?></h2></th>
+						</tr>
+						<tr>
+							<th scope="row"><?php echo esc_html__( 'Включить API ФИАС/ГАР', 'walls-delivery-calc' ); ?></th>
+							<td><label><input type="checkbox" name="fias_api_enabled" value="1" <?php checked( ! empty( $values['fias_api_enabled'] ) ); ?>> <?php echo esc_html__( 'Использовать внешний API после локального поиска.', 'walls-delivery-calc' ); ?></label></td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="wdc_fias_api_timeout"><?php echo esc_html__( 'Таймаут API ФИАС (сек)', 'walls-delivery-calc' ); ?></label></th>
+							<td><input id="wdc_fias_api_timeout" type="number" name="fias_api_timeout" value="<?php echo esc_attr( (string) ( $values['fias_api_timeout'] ?? 3 ) ); ?>" min="1" max="15" step="1"></td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="wdc_fias_api_daily_limit"><?php echo esc_html__( 'Суточный лимит запросов', 'walls-delivery-calc' ); ?></label></th>
+							<td><input id="wdc_fias_api_daily_limit" type="number" name="fias_api_daily_limit" value="<?php echo esc_attr( (string) ( $values['fias_api_daily_limit'] ?? 10000 ) ); ?>" min="1" max="1000000" step="1"></td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="wdc_fias_api_minute_limit"><?php echo esc_html__( 'Лимит запросов в минуту', 'walls-delivery-calc' ); ?></label></th>
+							<td><input id="wdc_fias_api_minute_limit" type="number" name="fias_api_minute_limit" value="<?php echo esc_attr( (string) ( $values['fias_api_minute_limit'] ?? 100 ) ); ?>" min="1" max="10000" step="1"></td>
+						</tr>
+						<tr>
+							<th scope="row"><?php echo esc_html__( 'Включить fallback DaData', 'walls-delivery-calc' ); ?></th>
+							<td><label><input type="checkbox" name="dadata_enabled" value="1" <?php checked( ! empty( $values['dadata_enabled'] ) ); ?>> <?php echo esc_html__( 'Зарезервировано для будущей интеграции DaData.', 'walls-delivery-calc' ); ?></label></td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="wdc_dadata_api_timeout"><?php echo esc_html__( 'Таймаут DaData', 'walls-delivery-calc' ); ?></label></th>
+							<td><input id="wdc_dadata_api_timeout" type="number" name="dadata_api_timeout" value="<?php echo esc_attr( (string) ( $values['dadata_api_timeout'] ?? 3 ) ); ?>" min="1" max="15" step="1"></td>
+						</tr>
 					</tbody>
 				</table>
 				<?php submit_button( __( 'Сохранить настройки', 'walls-delivery-calc' ) ); ?>
@@ -111,7 +138,11 @@ final class SettingsAdminPage {
 			$sort_mode = RateSorter::CHEAPEST;
 		}
 
-		$limit = isset( $data['location_search_limit'] ) ? $this->absint( wp_unslash( (string) $data['location_search_limit'] ) ) : 100;
+		$limit             = isset( $data['location_search_limit'] ) ? $this->absint( wp_unslash( (string) $data['location_search_limit'] ) ) : 100;
+		$fias_timeout      = isset( $data['fias_api_timeout'] ) ? $this->absint( wp_unslash( (string) $data['fias_api_timeout'] ) ) : 3;
+		$fias_daily_limit  = isset( $data['fias_api_daily_limit'] ) ? $this->absint( wp_unslash( (string) $data['fias_api_daily_limit'] ) ) : 10000;
+		$fias_minute_limit = isset( $data['fias_api_minute_limit'] ) ? $this->absint( wp_unslash( (string) $data['fias_api_minute_limit'] ) ) : 100;
+		$dadata_timeout    = isset( $data['dadata_api_timeout'] ) ? $this->absint( wp_unslash( (string) $data['dadata_api_timeout'] ) ) : 3;
 
 		return array(
 			'enable_new_checkout_shipping' => ! empty( $data['enable_new_checkout_shipping'] ),
@@ -119,6 +150,12 @@ final class SettingsAdminPage {
 			'show_checkout_debug_panel'    => ! empty( $data['show_checkout_debug_panel'] ),
 			'enable_demo_carrier'          => ! empty( $data['enable_demo_carrier'] ),
 			'location_search_limit'         => max( 10, min( 300, $limit > 0 ? $limit : 100 ) ),
+			'fias_api_enabled'             => ! empty( $data['fias_api_enabled'] ),
+			'fias_api_timeout'             => max( 1, min( 15, $fias_timeout > 0 ? $fias_timeout : 3 ) ),
+			'fias_api_daily_limit'         => max( 1, min( 1000000, $fias_daily_limit > 0 ? $fias_daily_limit : 10000 ) ),
+			'fias_api_minute_limit'        => max( 1, min( 10000, $fias_minute_limit > 0 ? $fias_minute_limit : 100 ) ),
+			'dadata_enabled'               => ! empty( $data['dadata_enabled'] ),
+			'dadata_api_timeout'           => max( 1, min( 15, $dadata_timeout > 0 ? $dadata_timeout : 3 ) ),
 		);
 	}
 
