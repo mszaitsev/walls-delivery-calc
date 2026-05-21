@@ -534,6 +534,21 @@ runtime_smoke_assert( str_contains( (string) $GLOBALS['wdc_test_scripts']['wdc-p
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-suggestions'] ), 'Address suggestions script must not enqueue when DaData suggestions are disabled.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-city-selector'] ), 'Local city selector script must enqueue when DaData suggestions are disabled.' );
 
+$GLOBALS['wdc_test_scripts'] = array();
+$GLOBALS['wdc_test_styles'] = array();
+$GLOBALS['wdc_test_localized_scripts'] = array();
+$settings->set( 'dadata_suggestions_enabled', true );
+$registrar->enqueue_assets();
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-suggestions'] ), 'Address suggestions script must enqueue when DaData suggestions are requested even if API key is missing.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_styles']['wdc-platform-address-suggestions'] ), 'Address suggestions CSS must enqueue when DaData suggestions are requested.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-city-selector'] ), 'Local city selector script must not enqueue when DaData suggestions are requested.' );
+$suggestions_config = $GLOBALS['wdc_test_localized_scripts']['wdc-platform-address-suggestions']['wdcPlatformAddressSuggestions'] ?? array();
+runtime_smoke_assert( true === ( $suggestions_config['suggestions_requested'] ?? false ), 'Address suggestions config must show suggestions_requested=true.' );
+runtime_smoke_assert( false === ( $suggestions_config['enabled'] ?? true ), 'Address suggestions config must show enabled=false when API key is missing.' );
+runtime_smoke_assert( false === ( $suggestions_config['api_key_ready'] ?? true ), 'Address suggestions config must show api_key_ready=false when API key is missing.' );
+runtime_smoke_assert( array_key_exists( 'encryption_ready', $suggestions_config ), 'Address suggestions config must expose encryption_ready.' );
+runtime_smoke_assert( ! array_key_exists( 'api_key', $suggestions_config ) && ! array_key_exists( 'token', $suggestions_config ), 'Address suggestions frontend config must not expose DaData credentials.' );
+
 $demo_orchestrator = runtime_smoke_orchestrator_with_demo();
 $all_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), RateSorter::CHEAPEST, false )->rates;
 runtime_smoke_assert( 2 === count( $all_rates ), 'Orchestrator must return pickup and courier rates.' );

@@ -1,20 +1,42 @@
-# WDC DaData Suggestions 0.14.4
+# WDC DaData Suggestions 0.14.6
 
-## Задача
+## Purpose
 
-DaData в этой версии используется не как постфактум-нормализатор уже введенной строки, а как пошаговый источник визуальных подсказок в классическом WooCommerce checkout.
+DaData suggestions are a visual, step-by-step checkout flow, not only post-factum address normalization. The buyer should be able to type a city, choose a city suggestion, type a street or address, choose a street, then choose a house and resolve the final address.
 
-Покупатель вводит город и адрес, видит варианты, выбирает их из popup и постепенно получает заполненные поля города, индекса, улицы, дома и квартиры. Ручной ввод остается рабочим fallback.
+The flow is:
+
+`city -> address/street -> house_after_street -> resolve`
+
+Manual checkout input remains valid fallback.
 
 ## Server Proxy
 
-Браузер вызывает только WordPress AJAX action:
+The browser calls only the WordPress AJAX action:
 
 `wdc_platform_dadata_address_suggest`
 
-API-ключ DaData хранится на сервере через `EncryptionService` в настройке `dadata_api_key_encrypted`. Во frontend config передаются только служебные значения `ajax_url`, `nonce`, `min_chars`, `debug`, `enabled`, `strings`, `stages` и `actions`; ключ или токен в HTML/JS не локализуются.
+The DaData API key is never sent to the browser. It is stored encrypted on the server through the same setting used by post-factum DaData normalization:
 
-Серверный клиент обращается к:
+`dadata_api_token_encrypted`
+
+Frontend config may contain only service flags and labels:
+
+- `ajax_url`
+- `nonce`
+- `min_chars`
+- `debug`
+- `suggestions_requested`
+- `enabled`
+- `api_key_ready`
+- `encryption_ready`
+- `strings`
+- `stages`
+- `actions`
+
+## Endpoint
+
+Server-side requests use DaData Suggest API:
 
 `https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address`
 
@@ -24,26 +46,26 @@ Headers:
 - `Content-Type: application/json`
 - `Accept: application/json`
 
-Secret key и `X-Secret` не используются.
+`X-Secret` is not used.
 
 ## Stages
 
-`stage=city` ищет город или населенный пункт:
+`stage=city`:
 
 - `locations: [{ country_iso_code: "RU" }]`
 - `from_bound: city`
 - `to_bound: settlement`
 
-`stage=address` ищет улицу или дом:
+`stage=address`:
 
 - `locations: [{ country_iso_code: "RU" }]`
-- `locations_boost` с `city_kladr_id` или `settlement_kladr_id`, если выбран город
+- `locations_boost` with selected `city_kladr_id` or `settlement_kladr_id`
 - `from_bound: street`
 - `to_bound: house`
 
-Город именно бустит выдачу, а не ограничивает ее. Если покупатель выбирает адрес в другом городе, выбранный адрес становится источником истины.
+The city is a boost, not a hard restriction.
 
-`stage=house_after_street` включается после выбора улицы:
+`stage=house_after_street`:
 
 - `locations: [{ fias_id: street_fias_id }]`
 - `from_bound: house`
@@ -51,105 +73,60 @@ Secret key и `X-Secret` не используются.
 - `restrict_value: true`
 - `count: 20`
 
-`stage=resolve` уточняет выбранный дом/квартиру по `unrestrictedValue` с `count: 1`.
+`stage=resolve`:
 
-## Frontend Flow
+- `query: unrestrictedValue`
+- `count: 1`
 
-City suggestions подключаются к `shipping_city`, иначе к `billing_city`. При выборе города frontend заполняет city, postcode, state/region и hidden fields DaData, затем запускает `update_checkout`.
+## Frontend
 
-Address suggestions подключаются к `shipping_address_1`, иначе к `billing_address_1`. При выборе улицы:
+When `dadata_suggestions_enabled=true`, `checkout-address-suggestions.js` and CSS are loaded even if the API key is missing or encryption is not ready. In that case `config.enabled=false`, no AJAX request is sent, and admins with debug enabled see a clear message under `address_1`.
 
-- `address_1` получает `street_with_type`
-- сохраняются `street_fias_id` и `street_kladr_id`
-- статус становится `street_selected`
-- фокус остается в `address_1`
-- следующий ввод дома идет через `house_after_street`
+Search handlers are delegated to `document.body` and listen only to `input`, `keyup`, and `paste`. `blur` and `change` do not start searches. WooCommerce refreshes are handled through `updated_checkout` and `wc_fragments_refreshed`.
 
-При выборе дома или квартиры выполняется `resolve`, после чего обновляются city, address_1, address_2, postcode и hidden fields. Статус становится `resolved`, затем запускается `update_checkout`.
+Supported selectors:
 
-## Hidden Fields
+- city: `shipping_city`, `billing_city`
+- address 1: `shipping_address_1`, `billing_address_1`, including `input` and `textarea`
+- address 2: `shipping_address_2`, `billing_address_2`
+- postcode/state are filled when available
 
-Для billing и shipping добавляются hidden fields вида `{prefix}_dadata_*`:
+No `update_checkout` is triggered while typing. It is triggered only after a suggestion is selected and applied.
 
-- `status`
-- `unrestricted_value`
-- region/city/settlement FIAS/KLADR данные
-- street/house FIAS/KLADR данные
-- `block`, `flat`, `fias_id`, `kladr_id`, `fias_level`
+## Street To House
 
-Статусы: `empty`, `city_selected`, `street_selected`, `house_selected`, `resolved`, `manual`, `invalid`.
+When a street item is selected:
 
-## Fallback
+- `address_1` becomes `street_with_type + " "`
+- status becomes `street_selected`
+- `street_fias_id` and `street_kladr_id` are saved
+- the next address input uses `stage=house_after_street`
 
-Если DaData выключена, ключ не задан, API недоступен или подсказки не подходят, checkout не блокируется. Покупатель может продолжить ручной ввод. Для ручного сценария сохраняется `manual`, совместимые WDC meta получают `normalized=false`, `normalization_source=manual|fallback`, `address_fallback_used=true`.
+When a house or flat item is selected:
 
-Город остается обязательным: если city пустой, checkout validation должна просить ввести населенный пункт.
+- frontend calls `stage=resolve`
+- the resolved item fills city, state, postcode, address_1, address_2
+- status becomes `resolved`
+- popup closes
+- `update_checkout` runs
 
-## Order Meta
+## Hidden Fields And Order Meta
 
-На `woocommerce_checkout_create_order` сохраняются:
+The frontend writes `{billing|shipping}_dadata_*` hidden fields for region, city, settlement, street, house, flat, FIAS/KLADR ids, unrestricted value, status, and FIAS level.
 
-- `_billing_dadata_*`
-- `_shipping_dadata_*`
-
-Также заполняются совместимые WDC meta:
-
-- `_wdc_platform_fias_id`
-- `_wdc_platform_gar_id`
-- `_wdc_platform_resolved_postcode`
-- `_wdc_platform_normalized`
-- `_wdc_platform_normalization_source`
-- `_wdc_platform_fallback_address`
-- `_wdc_platform_address_fallback_used`
-
-## Local City Picker
-
-Если DaData suggestions включены и API-ключ сохранен, локальный city picker не подключается, чтобы на поле города не было двух конкурирующих popup. Если DaData suggestions выключены, локальный city picker работает как раньше.
-
-## Debug
-
-При включенном checkout debug frontend пишет в console:
-
-- `address suggestions script loaded`
-- `config enabled / disabled`
-- `city field found` или `city field not found`
-- `address field found` или `address field not found`
-- `address field selector used`
-- `address input event`
-- `stage`
-- `query`
-- context: `city_kladr_id`, `street_fias_id`
-- `ajax request start`
-- `ajax success items count`
-- `ajax fail`
-- `suggestion popup opened`
-- `selected level`
-- `suggestion selected`
-- `status`
-- `resolve request start`
-- `resolve request success`
-
-Телефон, email и API-ключ не логируются.
+Order persistence stores `_billing_dadata_*`, `_shipping_dadata_*`, and compatible WDC meta such as `_wdc_platform_fias_id`, `_wdc_platform_resolved_postcode`, `_wdc_platform_normalized`, and `_wdc_platform_normalization_source`.
 
 ## Troubleshooting
 
-Если подсказки адреса не появляются:
+1. Check that `checkout-address-suggestions.js` is loaded on checkout.
+2. Enable checkout debug panel.
+3. Check the debug block under `billing_address_1` or `shipping_address_1`: `DaData подсказки: script loaded`, `config enabled`, `api key ready`, `encryption ready`, `address field`, `last query`, `last ajax status`, `last items count`.
+4. Check Console for `address suggestions script loaded`, `address field found`, `address input event`, `ajax request start`.
+5. Check Network for `admin-ajax.php?action=wdc_platform_dadata_address_suggest`.
+6. Manual endpoint probe: POST `admin-ajax.php?action=wdc_platform_dadata_address_suggest` with `stage=address` and `query=тверская`.
+7. If `config enabled: no`, check that DaData suggestions are enabled, the API key is saved, and `APP_ENCRYPTION_KEY` is configured.
+8. If `address field: not found`, inspect the real checkout input names. The expected names are `billing_address_1`, `shipping_address_1`, `billing_city`, and `shipping_city`.
 
-1. Проверьте настройки: новая доставка включена, `Включить подсказки DaData` включено, API-ключ DaData сохранен.
-2. Откройте Console под администратором с включенным checkout debug panel.
-3. Должны быть логи `address suggestions script loaded`, `address field found`, `address field selector used`.
-4. При вводе в `billing_address_1` или `shipping_address_1` должен появиться `address input event`, затем `ajax request start`.
-5. В Network должен быть запрос `admin-ajax.php?action=wdc_platform_dadata_address_suggest`.
-6. Если есть `address field not found`, проверьте реальные имена checkout inputs: `billing_address_1`, `shipping_address_1`, `billing_city`, `shipping_city`.
-7. Если `config disabled`, значит DaData suggestions выключены или API-ключ не считается сохраненным сервером.
+## Fallback
 
-## Проверка
-
-1. Включить новую доставку.
-2. Включить подсказки DaData.
-3. Сохранить API-ключ DaData.
-4. Включить checkout debug panel.
-5. На checkout ввести город и выбрать подсказку.
-6. Ввести улицу, выбрать улицу.
-7. Добавить дом и выбрать дом.
-8. Проверить hidden fields, console debug и order meta после оформления.
+If DaData is disabled, missing credentials, API failure, or the buyer ignores suggestions, checkout should not be blocked. The address is treated as manual fallback unless city is empty. Empty city should still produce the normal validation error asking for the settlement.

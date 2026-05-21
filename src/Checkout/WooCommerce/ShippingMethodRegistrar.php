@@ -84,7 +84,7 @@ final class ShippingMethodRegistrar {
 			array( 'wdc-platform-checkout-rates' ),
 			$this->environment->version()
 		);
-		if ( $this->suggestions_enabled() ) {
+		if ( $this->suggestions_requested() ) {
 			wp_enqueue_style(
 				'wdc-platform-address-suggestions',
 				$this->environment->plugin_url() . 'assets/frontend/checkout-address-suggestions.css',
@@ -105,7 +105,7 @@ final class ShippingMethodRegistrar {
 				$city_selector_dependencies[] = 'wc-checkout';
 			}
 
-			if ( ! $this->suggestions_enabled() ) {
+			if ( ! $this->suggestions_requested() ) {
 				wp_enqueue_script(
 					'wdc-platform-city-selector',
 					$this->environment->plugin_url() . 'assets/frontend/checkout-city-selector.js',
@@ -144,7 +144,7 @@ final class ShippingMethodRegistrar {
 					)
 				);
 			}
-			if ( $this->suggestions_enabled() ) {
+			if ( $this->suggestions_requested() ) {
 				wp_enqueue_script(
 					'wdc-platform-address-suggestions',
 					$this->environment->plugin_url() . 'assets/frontend/checkout-address-suggestions.js',
@@ -167,6 +167,10 @@ final class ShippingMethodRegistrar {
 		return $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->enabled() && $this->suggestion_settings->has_api_key();
 	}
 
+	private function suggestions_requested(): bool {
+		return $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->enabled();
+	}
+
 	/**
 	 * @return array<string,mixed>
 	 */
@@ -176,7 +180,10 @@ final class ShippingMethodRegistrar {
 			'nonce'     => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( AddressSuggestionAjax::NONCE_ACTION ) : '',
 			'min_chars' => 3,
 			'debug'     => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
+			'suggestions_requested' => $this->suggestions_requested(),
 			'enabled'   => $this->suggestions_enabled(),
+			'api_key_ready' => $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->has_api_key(),
+			'encryption_ready' => $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->encryption_ready(),
 			'action'    => AddressSuggestionAjax::ACTION,
 			'actions'   => array(
 				'suggest' => AddressSuggestionAjax::ACTION,

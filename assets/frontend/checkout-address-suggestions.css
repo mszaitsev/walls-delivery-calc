@@ -54,6 +54,16 @@
 	font-size: 13px;
 }
 
+.wdc-address-suggestions-debug {
+	margin-top: 6px;
+	padding: 8px 10px;
+	border: 1px solid #d0d5dd;
+	background: #f9fafb;
+	color: #344054;
+	font-size: 12px;
+	line-height: 1.45;
+}
+
 @media (max-width: 900px) {
 	.wdc-address-suggestions {
 		left: 0 !important;

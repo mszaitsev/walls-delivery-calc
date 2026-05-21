@@ -3,12 +3,22 @@
 
 	var config = window.wdcPlatformAddressSuggestions || {};
 	var namespace = '.wdcAddressSuggestions';
-	var CITY_SELECTOR = '#shipping_city,input[name="shipping_city"],#billing_city,input[name="billing_city"]';
-	var ADDRESS_SELECTOR = '#shipping_address_1,input[name="shipping_address_1"],#billing_address_1,input[name="billing_address_1"]';
-	var ADDRESS_2_SELECTOR = '#shipping_address_2,input[name="shipping_address_2"],#billing_address_2,input[name="billing_address_2"]';
-	var debounceTimer = null;
-	var debounceDelay = 850;
+	var CITY_SELECTOR = '#shipping_city,input[name="shipping_city"],textarea[name="shipping_city"],#billing_city,input[name="billing_city"],textarea[name="billing_city"]';
+	var ADDRESS_SELECTOR = '#shipping_address_1,input[name="shipping_address_1"],textarea[name="shipping_address_1"],#billing_address_1,input[name="billing_address_1"],textarea[name="billing_address_1"]';
+	var ADDRESS_2_SELECTOR = '#shipping_address_2,input[name="shipping_address_2"],textarea[name="shipping_address_2"],#billing_address_2,input[name="billing_address_2"],textarea[name="billing_address_2"]';
+	var debounceTimers = {};
+	var debounceDelay = 300;
 	var selectedStreet = {};
+	var itemStore = {};
+	var itemCounter = 0;
+	var debugState = {
+		scriptLoaded: true,
+		configEnabled: !! config.enabled,
+		fieldFound: false,
+		lastQuery: '',
+		lastAjaxStatus: '',
+		lastItemsCount: ''
+	};
 	var hiddenKeys = [
 		'dadata_status',
 		'dadata_unrestricted_value',
@@ -48,24 +58,38 @@
 		return parseInt( config.min_chars || 3, 10 ) || 3;
 	}
 
-	function visibleEnabled( elements ) {
+	function isUsable( input ) {
+		return input.length && ! input.prop( 'disabled' ) && ! input.prop( 'readonly' );
+	}
+
+	function visibleUsable( elements ) {
 		return elements.filter( ':visible' ).filter( function () {
-			return ! $( this ).prop( 'disabled' );
+			return isUsable( $( this ) );
 		} );
 	}
 
-	function candidates( prefix, name ) {
-		if ( 'state' === name ) {
-			return $( '#' + prefix + '_state,select[name="' + prefix + '_state"],input[name="' + prefix + '_state"]' );
-		}
+	function usableFallback( elements ) {
+		return elements.filter( function () {
+			return isUsable( $( this ) );
+		} );
+	}
 
-		return $( '#' + prefix + '_' + name + ',input[name="' + prefix + '_' + name + '"]' );
+	function firstUsable( selector ) {
+		var all = $( selector );
+		var visible = visibleUsable( all );
+		if ( visible.length ) {
+			return visible.first();
+		}
+		var fallback = usableFallback( all );
+		return ( fallback.length ? fallback : all ).first();
 	}
 
 	function field( prefix, name ) {
-		var all = candidates( prefix, name );
-		var usable = visibleEnabled( all );
-		return ( usable.length ? usable : all ).first();
+		if ( 'state' === name ) {
+			return firstUsable( '#' + prefix + '_state,select[name="' + prefix + '_state"],input[name="' + prefix + '_state"]' );
+		}
+
+		return firstUsable( '#' + prefix + '_' + name + ',input[name="' + prefix + '_' + name + '"],textarea[name="' + prefix + '_' + name + '"]' );
 	}
 
 	function prefixFromInput( input ) {
@@ -73,36 +97,8 @@
 		return 0 === name.indexOf( 'billing_' ) ? 'billing' : 'shipping';
 	}
 
-	function checkoutInputsSnapshot() {
-		var names = [
-			'billing_city',
-			'shipping_city',
-			'billing_address_1',
-			'shipping_address_1'
-		];
-		var found = {};
-		names.forEach( function ( name ) {
-			var input = $( '#' + name + ',input[name="' + name + '"]' );
-			found[ name ] = {
-				count: input.length,
-				visible: visibleEnabled( input ).length
-			};
-		} );
-		return found;
-	}
-
-	function diagnoseFields() {
-		var city = visibleEnabled( $( CITY_SELECTOR ) );
-		var address = visibleEnabled( $( ADDRESS_SELECTOR ) );
-		log( city.length ? 'city field found' : 'city field not found', checkoutInputsSnapshot() );
-		log( address.length ? 'address field found' : 'address field not found', checkoutInputsSnapshot() );
-		if ( address.length ) {
-			log( 'address field selector used', {
-				selector: ADDRESS_SELECTOR,
-				name: address.first().attr( 'name' ) || '',
-				id: address.first().attr( 'id' ) || ''
-			} );
-		}
+	function fieldKey( input ) {
+		return input.attr( 'name' ) || input.attr( 'id' ) || 'unknown';
 	}
 
 	function ensureHiddenFields( prefix ) {
@@ -129,7 +125,7 @@
 
 	function setStatus( prefix, status ) {
 		hidden( prefix, 'dadata_status' ).val( status );
-		log( 'status', { status: status } );
+		renderDebugBlock();
 	}
 
 	function setHiddenData( prefix, item, status ) {
@@ -140,14 +136,6 @@
 			hidden( prefix, 'dadata_' + key ).val( data[ key ] || '' );
 		} );
 		hidden( prefix, 'dadata_fias_level' ).val( item ? item.fiasLevel || '' : '' );
-	}
-
-	function clearStreet( prefix ) {
-		selectedStreet[ prefix ] = null;
-		hidden( prefix, 'dadata_street' ).val( '' );
-		hidden( prefix, 'dadata_street_with_type' ).val( '' );
-		hidden( prefix, 'dadata_street_fias_id' ).val( '' );
-		hidden( prefix, 'dadata_street_kladr_id' ).val( '' );
 	}
 
 	function context( prefix ) {
@@ -161,35 +149,114 @@
 		};
 	}
 
-	function popup() {
-		var box = $( '.wdc-address-suggestions' );
+	function popupFor( input ) {
+		var key = fieldKey( input ).replace( /[^a-zA-Z0-9_-]/g, '-' );
+		var id = 'wdc-address-suggestions-' + key;
+		var box = $( '#' + id );
 		if ( box.length ) {
 			return box;
 		}
-		return $( '<div class="wdc-address-suggestions" role="listbox"></div>' ).appendTo( document.body );
+
+		return $( '<div>', { id: id, class: 'wdc-address-suggestions', role: 'listbox' } ).insertAfter( input );
 	}
 
 	function closePopup() {
-		popup().hide().empty();
+		$( '.wdc-address-suggestions' ).hide().empty();
 	}
 
-	function positionPopup( input ) {
-		var offset = input.offset() || { top: 0, left: 0 };
-		var width = Math.min( 1300, Math.max( input.outerWidth() || 0, 320 ) );
-		popup().css( {
-			top: offset.top + ( input.outerHeight() || 0 ) + 4,
-			left: offset.left,
-			width: width
+	function positionPopup( input, box ) {
+		var offset = input.offset();
+		if ( offset && input.outerHeight() ) {
+			box.css( {
+				position: 'absolute',
+				top: offset.top + input.outerHeight() + 4,
+				left: offset.left,
+				width: Math.min( 1300, Math.max( input.outerWidth() || 0, 320 ) )
+			} );
+			return;
+		}
+
+		box.css( {
+			position: 'static',
+			width: '100%'
 		} );
 	}
 
 	function showNotice( input, message ) {
-		var id = 'wdc-address-suggestions-notice';
-		var notice = $( '#' + id );
+		var notice = input.siblings( '.wdc-address-suggestions__notice' ).first();
 		if ( ! notice.length ) {
-			notice = $( '<p>', { id: id, class: 'wdc-address-suggestions__notice' } ).insertAfter( input );
+			notice = $( '<p>', { class: 'wdc-address-suggestions__notice' } ).insertAfter( input );
 		}
 		notice.text( message ).show();
+	}
+
+	function renderDebugBlock() {
+		if ( ! config.debug ) {
+			return;
+		}
+		var address = firstUsable( ADDRESS_SELECTOR );
+		if ( ! address.length ) {
+			log( 'address field not found', checkoutInputsSnapshot() );
+			return;
+		}
+		var block = address.siblings( '.wdc-address-suggestions-debug' ).first();
+		if ( ! block.length ) {
+			block = $( '<div>', { class: 'wdc-address-suggestions-debug' } ).insertAfter( address );
+		}
+		block.html(
+			'<strong>DaData подсказки:</strong> script loaded<br>' +
+			'config enabled: ' + ( debugState.configEnabled ? 'yes' : 'no' ) + '<br>' +
+			'api key ready: ' + ( config.api_key_ready ? 'yes' : 'no' ) + '<br>' +
+			'encryption ready: ' + ( config.encryption_ready ? 'yes' : 'no' ) + '<br>' +
+			'address field: ' + ( debugState.fieldFound ? 'found' : 'not found' ) + '<br>' +
+			'last query: ' + escapeHtml( debugState.lastQuery ) + '<br>' +
+			'last ajax status: ' + escapeHtml( debugState.lastAjaxStatus ) + '<br>' +
+			'last items count: ' + escapeHtml( debugState.lastItemsCount )
+		);
+		if ( config.suggestions_requested && ! config.enabled ) {
+			showNotice( address, 'Подсказки DaData включены, но API-ключ не настроен или недоступно шифрование.' );
+		}
+	}
+
+	function escapeHtml( value ) {
+		return String( value || '' ).replace( /[&<>"']/g, function ( char ) {
+			return {
+				'&': '&amp;',
+				'<': '&lt;',
+				'>': '&gt;',
+				'"': '&quot;',
+				"'": '&#039;'
+			}[ char ];
+		} );
+	}
+
+	function checkoutInputsSnapshot() {
+		var names = [ 'billing_city', 'shipping_city', 'billing_address_1', 'shipping_address_1' ];
+		var found = {};
+		names.forEach( function ( name ) {
+			var input = $( '#' + name + ',input[name="' + name + '"],textarea[name="' + name + '"]' );
+			found[ name ] = {
+				count: input.length,
+				visible: visibleUsable( input ).length,
+				enabled: usableFallback( input ).length
+			};
+		} );
+		return found;
+	}
+
+	function diagnoseFields() {
+		var address = firstUsable( ADDRESS_SELECTOR );
+		debugState.fieldFound = !! address.length;
+		log( address.length ? 'address field found' : 'address field not found', checkoutInputsSnapshot() );
+		log( firstUsable( CITY_SELECTOR ).length ? 'city field found' : 'city field not found', checkoutInputsSnapshot() );
+		if ( address.length ) {
+			log( 'address field selector used', {
+				selector: ADDRESS_SELECTOR,
+				name: address.attr( 'name' ) || '',
+				id: address.attr( 'id' ) || ''
+			} );
+		}
+		renderDebugBlock();
 	}
 
 	function request( stage, query, prefix, done ) {
@@ -200,58 +267,78 @@
 			query: query,
 			context: context( prefix )
 		};
+		debugState.lastAjaxStatus = 'pending';
+		renderDebugBlock();
 		log( 'stage', { stage: stage } );
-		log( 'query', { query: query } );
+		log( 'query', { query: query, length: query.length } );
 		log( 'ajax request start', payload );
 		$.post( config.ajax_url || '', payload ).done( function ( response ) {
 			var body = response && response.data ? response.data : response;
 			var items = body && body.items ? body.items : [];
+			debugState.lastAjaxStatus = body && false === body.success ? body.error_code || 'failed' : 'success';
+			debugState.lastItemsCount = String( items.length );
+			renderDebugBlock();
 			log( 'ajax success items count', { count: items.length, error_code: body ? body.error_code || '' : '' } );
 			done( items, body || {} );
 		} ).fail( function ( xhr ) {
+			debugState.lastAjaxStatus = 'fail ' + ( xhr && xhr.status ? xhr.status : 0 );
+			debugState.lastItemsCount = '0';
+			renderDebugBlock();
 			log( 'ajax fail', { status: xhr && xhr.status ? xhr.status : 0 } );
 			done( [], {} );
 		} );
 	}
 
-	function emptyItem() {
-		return $( '<div class="wdc-address-suggestions__empty" role="status"></div>' )
-			.text( ( config.strings && config.strings.not_found ) || 'Адрес не найден. Можно продолжить ручной ввод.' );
-	}
-
 	function renderItems( input, items, onSelect ) {
-		var box = popup();
+		var box = popupFor( input );
 		box.empty();
+		itemStore = {};
 		if ( ! items.length ) {
-			box.append( emptyItem() );
-			positionPopup( input );
+			box.append( $( '<div>', { class: 'wdc-address-suggestions__empty', role: 'status' } ).text( ( config.strings && config.strings.not_found ) || 'Адрес не найден. Можно продолжить ручной ввод.' ) );
+			positionPopup( input, box );
 			box.show();
 			log( 'suggestion popup opened', { items: 0 } );
 			return;
 		}
 		items.forEach( function ( item ) {
+			var key = 'item-' + ( ++itemCounter );
+			itemStore[ key ] = item;
 			$( '<button type="button" class="wdc-address-suggestions__item"></button>' )
-				.attr( 'data-level', item.level || 'unknown' )
+				.attr( 'data-key', key )
 				.append( $( '<span class="wdc-address-suggestions__label"></span>' ).text( item.label || item.value || '' ) )
 				.append( $( '<span class="wdc-address-suggestions__sublabel"></span>' ).text( item.subLabel || '' ) )
-				.on( 'mousedown' + namespace, function ( event ) {
+				.on( 'mousedown' + namespace + ' click' + namespace, function ( event ) {
 					event.preventDefault();
-					log( 'suggestion selected', { level: item.level || 'unknown', label: item.label || item.value || '' } );
-					onSelect( item );
+					event.stopPropagation();
+					event.stopImmediatePropagation();
+					var selected = itemStore[ $( this ).attr( 'data-key' ) || '' ];
+					log( 'suggestion selected', { level: selected ? selected.level : 'unknown', label: selected ? selected.label || selected.value || '' : '' } );
+					if ( selected ) {
+						onSelect( selected );
+					}
 				} )
 				.appendTo( box );
 		} );
-		positionPopup( input );
+		positionPopup( input, box );
 		box.show();
 		log( 'suggestion popup opened', { items: items.length } );
 	}
 
-	function schedule( input, stage, prefix ) {
-		window.clearTimeout( debounceTimer );
-		debounceTimer = window.setTimeout( function () {
+	function scheduleSearch( input, stage, prefix ) {
+		var key = fieldKey( input );
+		window.clearTimeout( debounceTimers[ key ] );
+		debounceTimers[ key ] = window.setTimeout( function () {
 			var query = $.trim( input.val() || '' );
+			debugState.lastQuery = query;
+			renderDebugBlock();
 			if ( query.length < minChars() ) {
 				closePopup();
+				return;
+			}
+			if ( ! config.enabled ) {
+				debugState.lastAjaxStatus = 'config disabled';
+				renderDebugBlock();
+				log( 'config disabled', config );
 				return;
 			}
 			request( stage, query, prefix, function ( items ) {
@@ -264,13 +351,14 @@
 
 	function selectItem( input, prefix, item ) {
 		var data = item.data || {};
-		log( 'selected level', { level: item.level } );
 		if ( 'city' === item.level || 'settlement' === item.level ) {
 			field( prefix, 'city' ).val( data.city || data.settlement || data.region || item.value || '' );
 			field( prefix, 'postcode' ).val( data.postal_code || field( prefix, 'postcode' ).val() || '' );
 			field( prefix, 'state' ).val( data.region_code || data.region || data.region_with_type || field( prefix, 'state' ).val() || '' );
 			setHiddenData( prefix, item, 'city_selected' );
-			clearStreet( prefix );
+			selectedStreet[ prefix ] = null;
+			hidden( prefix, 'dadata_street_fias_id' ).val( '' );
+			hidden( prefix, 'dadata_street_kladr_id' ).val( '' );
 			closePopup();
 			$( document.body ).trigger( 'update_checkout' );
 			return;
@@ -315,47 +403,45 @@
 		}
 		field( prefix, 'postcode' ).val( data.postal_code || field( prefix, 'postcode' ).val() || '' );
 		setHiddenData( prefix, item, 'resolved' );
-		showNotice( field( prefix, 'address_1' ), ( config.strings && config.strings.selected ) ? config.strings.selected + ' ' + ( item.label || item.value || '' ) : 'Адрес выбран: ' + ( item.label || item.value || '' ) );
+		showNotice( field( prefix, 'address_1' ), ( config.strings && config.strings.selected ? config.strings.selected + ' ' : 'Адрес выбран: ' ) + ( item.label || item.value || '' ) );
 		closePopup();
 		$( document.body ).trigger( 'update_checkout' );
 	}
 
 	function bind() {
-		if ( ! config.enabled ) {
-			log( 'config disabled', config );
-			return;
-		}
-
 		ensureHiddenFields( 'shipping' );
 		ensureHiddenFields( 'billing' );
 		diagnoseFields();
 
 		$( document.body )
-			.off( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace + ' change' + namespace + ' blur' + namespace, CITY_SELECTOR )
-			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace + ' change' + namespace + ' blur' + namespace, CITY_SELECTOR, function () {
-				var input = $( this );
+			.off( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, CITY_SELECTOR )
+			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, CITY_SELECTOR, function ( event ) {
+				var input = $( event.target );
 				var prefix = prefixFromInput( input );
-				log( 'city input event', { prefix: prefix, value: input.val() || '' } );
-				schedule( input, 'city', prefix );
+				var query = $.trim( input.val() || '' );
+				log( 'city input event', { query: query, length: query.length, stage: 'city' } );
+				scheduleSearch( input, 'city', prefix );
 			} );
 
 		$( document.body )
-			.off( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace + ' change' + namespace + ' blur' + namespace, ADDRESS_SELECTOR )
-			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace + ' change' + namespace + ' blur' + namespace, ADDRESS_SELECTOR, function () {
-				var input = $( this );
+			.off( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, ADDRESS_SELECTOR )
+			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, ADDRESS_SELECTOR, function ( event ) {
+				var input = $( event.target );
 				var prefix = prefixFromInput( input );
-				var stage = context( prefix ).street_fias_id ? 'house_after_street' : 'address';
-				log( 'address input event', { prefix: prefix, value: input.val() || '', stage: stage } );
+				var query = $.trim( input.val() || '' );
+				var stage = selectedStreet[ prefix ] || context( prefix ).street_fias_id ? 'house_after_street' : 'address';
+				debugState.fieldFound = true;
+				log( 'address input event', { query: query, length: query.length, stage: stage } );
 				if ( 'resolved' !== hidden( prefix, 'dadata_status' ).val() ) {
 					setStatus( prefix, 'manual' );
 				}
-				schedule( input, stage, prefix );
+				scheduleSearch( input, stage, prefix );
 			} );
 
 		$( document.body )
-			.off( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace + ' change' + namespace + ' blur' + namespace, ADDRESS_2_SELECTOR )
-			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace + ' change' + namespace + ' blur' + namespace, ADDRESS_2_SELECTOR, function () {
-				var input = $( this );
+			.off( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, ADDRESS_2_SELECTOR )
+			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, ADDRESS_2_SELECTOR, function ( event ) {
+				var input = $( event.target );
 				var prefix = prefixFromInput( input );
 				hidden( prefix, 'dadata_flat' ).val( input.val() || '' );
 				if ( 'resolved' !== hidden( prefix, 'dadata_status' ).val() ) {
@@ -373,12 +459,7 @@
 	}
 
 	log( 'address suggestions script loaded', config );
-	if ( ! config.enabled ) {
-		log( 'config disabled', config );
-		return;
-	}
-	log( 'config enabled', config );
-
+	log( config.enabled ? 'config enabled' : 'config disabled', config );
 	$( bind );
 	$( document.body ).on( 'updated_checkout' + namespace + ' wc_fragments_refreshed' + namespace, bind );
 }( jQuery, window, document ) );
