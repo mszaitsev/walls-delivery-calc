@@ -34,6 +34,24 @@ if ( ! function_exists( '__' ) ) {
 	}
 }
 
+if ( ! function_exists( 'esc_html__' ) ) {
+	function esc_html__( string $text, string $domain = '' ): string {
+		return $text;
+	}
+}
+
+if ( ! function_exists( 'esc_html' ) ) {
+	function esc_html( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( string $capability ): bool {
+		return 'manage_woocommerce' === $capability;
+	}
+}
+
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
@@ -195,6 +213,7 @@ use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
@@ -217,6 +236,10 @@ final class WdcPickupSmokeOrder {
 		$this->meta[ $key ] = $value;
 	}
 
+	public function get_meta( string $key, bool $single = true ): mixed {
+		return $this->meta[ $key ] ?? '';
+	}
+
 	public function set_shipping_address_1( string $value ): void {
 		$this->shipping['address_1'] = $value;
 	}
@@ -235,6 +258,35 @@ final class WdcPickupSmokeOrder {
 
 	public function set_shipping_country( string $value ): void {
 		$this->shipping['country'] = $value;
+	}
+
+	public function get_shipping_address_1(): string {
+		return $this->shipping['address_1'] ?? '';
+	}
+
+	public function get_shipping_address_2(): string {
+		return $this->shipping['address_2'] ?? '';
+	}
+
+	public function get_shipping_city(): string {
+		return $this->shipping['city'] ?? '';
+	}
+
+	public function get_shipping_postcode(): string {
+		return $this->shipping['postcode'] ?? '';
+	}
+
+	public function get_shipping_country(): string {
+		return $this->shipping['country'] ?? '';
+	}
+}
+
+final class WdcPickupSmokeShippingItem {
+	/** @var array<string,mixed> */
+	public array $meta = array();
+
+	public function add_meta_data( string $key, mixed $value, bool $unique = false ): void {
+		$this->meta[ $key ] = $value;
 	}
 }
 
@@ -352,13 +404,27 @@ $session->save_normalized_address_result(
 );
 WC()->session->set( 'chosen_shipping_methods', array( NewShippingMethod::METHOD_ID . ':demo:pickup' ) );
 $order = new WdcPickupSmokeOrder();
-( new OrderShippingMetaPersister( $session ) )->persist( $order );
+$persister = new OrderShippingMetaPersister( $session );
+$persister->persist( $order );
+$shipping_item = new WdcPickupSmokeShippingItem();
+$persister->persist_shipping_item_meta( $shipping_item, 0, array(), $order );
 pickup_smoke_assert( 'demo-nsk-001' === ( $order->meta['_wdc_platform_pickup_code'] ?? '' ), 'Order meta must save pickup code.' );
 pickup_smoke_assert( isset( $order->meta['_wdc_platform_pickup_address'], $order->meta['_wdc_platform_pickup_comment'], $order->meta['_wdc_platform_pickup_work_time'] ), 'Order meta must save pickup details.' );
 pickup_smoke_assert( 'Красный проспект, 25' === ( $order->shipping['address_1'] ?? '' ), 'Pickup order must write pickup address to shipping address_1.' );
 pickup_smoke_assert( 'Код ПВЗ: demo-nsk-001' === ( $order->shipping['address_2'] ?? '' ), 'Pickup order must write pickup code to shipping address_2.' );
 pickup_smoke_assert( 'Новосибирск' === ( $order->shipping['city'] ?? '' ), 'Pickup order must write normalized city to shipping city.' );
 pickup_smoke_assert( '630000' === ( $order->shipping['postcode'] ?? '' ), 'Pickup order must write resolved postcode to shipping postcode.' );
+pickup_smoke_assert( 'demo-nsk-001' === ( $shipping_item->meta['Код ПВЗ'] ?? '' ), 'Pickup shipping item meta must save pickup code.' );
+pickup_smoke_assert( isset( $shipping_item->meta['Адрес ПВЗ'], $shipping_item->meta['Комментарий ПВЗ'], $shipping_item->meta['Режим работы ПВЗ'] ), 'Pickup shipping item meta must save visible pickup details.' );
+pickup_smoke_assert( 'Пункт выдачи' === ( $shipping_item->meta['Тип доставки'] ?? '' ), 'Pickup shipping item meta must expose human delivery type.' );
+ob_start();
+( new OrderDeliveryMetabox() )->render( $order );
+$metabox_html = (string) ob_get_clean();
+pickup_smoke_assert( str_contains( $metabox_html, 'Код ПВЗ' ) && str_contains( $metabox_html, 'Адрес ПВЗ' ), 'Order metabox must render pickup fields from order meta.' );
+pickup_smoke_assert( ! str_contains( $metabox_html, 'postmeta' ), 'Order metabox must not expose direct postmeta access.' );
+$metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Orders/Admin/OrderDeliveryMetabox.php' );
+pickup_smoke_assert( str_contains( $metabox_source, 'get_meta' ), 'Order metabox must read order meta through WC CRUD get_meta.' );
+pickup_smoke_assert( ! str_contains( $metabox_source, 'get_post_meta' ) && ! str_contains( $metabox_source, 'update_post_meta' ) && ! str_contains( $metabox_source, '$wpdb' ), 'Order metabox must not use direct postmeta or wpdb access.' );
 
 $errors = new WdcPickupSmokeErrors();
 ( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
@@ -398,9 +464,18 @@ $errors = new WdcPickupSmokeErrors();
 ( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
 pickup_smoke_assert( ! $errors->has_errors(), 'Validation must pass for courier with stale pickup selection.' );
 $order = new WdcPickupSmokeOrder();
-( new OrderShippingMetaPersister( $session ) )->persist( $order );
+$persister = new OrderShippingMetaPersister( $session );
+$persister->persist( $order );
+$shipping_item = new WdcPickupSmokeShippingItem();
+$persister->persist_shipping_item_meta( $shipping_item, 0, array(), $order );
 pickup_smoke_assert( ! isset( $order->meta['_wdc_platform_pickup_code'] ), 'Courier order meta must not save stale pickup selection.' );
 pickup_smoke_assert( array() === $order->shipping, 'Courier order must not write pickup shipping address.' );
+pickup_smoke_assert( ! isset( $shipping_item->meta['Код ПВЗ'], $shipping_item->meta['Адрес ПВЗ'] ), 'Courier shipping item meta must not save stale pickup data.' );
+
+ob_start();
+( new OrderDeliveryMetabox() )->render( new WdcPickupSmokeOrder() );
+$empty_metabox_html = (string) ob_get_clean();
+pickup_smoke_assert( str_contains( $empty_metabox_html, 'Данные WDC для заказа не сохранены.' ), 'Order metabox must render fallback message without WDC meta.' );
 
 $session->save_selected_delivery_type( DeliveryType::PICKUP );
 $session->save_rates(

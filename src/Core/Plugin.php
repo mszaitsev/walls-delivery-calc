@@ -57,6 +57,7 @@ use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
 use WallsShop\WDC\Locations\Services\GarChangesService;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Pickup\Admin\PickupAdminPage;
 use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
@@ -285,6 +286,7 @@ final class Plugin {
 			)
 		);
 		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox() );
 	}
 
 	private function register_hooks(): void {
@@ -314,6 +316,7 @@ final class Plugin {
 			$this->container->get( RulesAdminPage::class )->register();
 			$this->container->get( CheckoutSimulationPage::class )->register();
 			$this->container->get( PickupAdminPage::class )->register();
+			$this->container->get( OrderDeliveryMetabox::class )->register();
 		}
 	}
 

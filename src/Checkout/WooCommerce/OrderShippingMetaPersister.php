@@ -13,6 +13,7 @@ final class OrderShippingMetaPersister {
 
 	public function register(): void {
 		add_action( 'woocommerce_checkout_create_order', array( $this, 'persist' ), 20, 2 );
+		add_action( 'woocommerce_checkout_create_order_shipping_item', array( $this, 'persist_shipping_item_meta' ), 20, 4 );
 	}
 
 	/**
@@ -69,6 +70,54 @@ final class OrderShippingMetaPersister {
 	}
 
 	/**
+	 * @param mixed $item WooCommerce shipping item.
+	 * @param mixed $package_key Checkout package key.
+	 * @param mixed $package Checkout package.
+	 * @param mixed $order WooCommerce order.
+	 */
+	public function persist_shipping_item_meta( mixed $item, mixed $package_key = null, mixed $package = null, mixed $order = null ): void {
+		unset( $package_key, $package, $order );
+
+		if ( ! is_object( $item ) || ! method_exists( $item, 'add_meta_data' ) ) {
+			return;
+		}
+
+		$rate = $this->selected_rate();
+		if ( array() === $rate ) {
+			return;
+		}
+
+		$delivery_type = (string) ( $rate['delivery_type'] ?? '' );
+		$rows          = array(
+			'Перевозчик'       => (string) ( $rate['carrier_key'] ?? '' ),
+			'Способ доставки'  => (string) ( $rate['rate_id'] ?? '' ),
+			'Тип доставки'     => $this->delivery_type_label( $delivery_type ),
+			'Срок доставки'    => (string) ( $rate['planned_delivery_comment'] ?? '' ),
+			'Населенный пункт' => $this->address_summary(),
+			'Нормализация'     => $this->normalization_summary(),
+		);
+
+		$pickup = $this->session_manager->pickup_selection();
+		if (
+			'pickup' === $delivery_type
+			&& $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) )
+		) {
+			$rows['Код ПВЗ']          = (string) ( $pickup['point_code'] ?? '' );
+			$rows['Адрес ПВЗ']        = (string) ( $pickup['point_address'] ?? '' );
+			$rows['Комментарий ПВЗ']  = (string) ( $pickup['point_comment'] ?? '' );
+			$rows['Режим работы ПВЗ'] = (string) ( $pickup['point_work_time'] ?? '' );
+		}
+
+		foreach ( $rows as $label => $value ) {
+			if ( '' === trim( (string) $value ) ) {
+				continue;
+			}
+
+			$item->add_meta_data( $label, $value, true );
+		}
+	}
+
+	/**
 	 * @param array<string,mixed> $pickup
 	 */
 	private function set_pickup_shipping_address( object $order, array $pickup, mixed $address_result ): void {
@@ -84,6 +133,40 @@ final class OrderShippingMetaPersister {
 		if ( '' !== $value && method_exists( $order, $method ) ) {
 			$order->{$method}( $value );
 		}
+	}
+
+	private function delivery_type_label( string $delivery_type ): string {
+		return match ( $delivery_type ) {
+			'pickup' => 'Пункт выдачи',
+			'courier' => 'Курьер',
+			default => $delivery_type,
+		};
+	}
+
+	private function address_summary(): string {
+		$address_result = $this->session_manager->normalized_address_result();
+		if ( null === $address_result ) {
+			return $this->session_manager->fallback_city();
+		}
+
+		$address  = $address_result->address;
+		$city     = (string) ( $address->settlement ?: $address->city ?: $this->session_manager->fallback_city() );
+		$postcode = (string) $address->postcode;
+
+		return trim( $city . ( '' !== $postcode ? ' / ' . $postcode : '' ), ' /' );
+	}
+
+	private function normalization_summary(): string {
+		$address_result = $this->session_manager->normalized_address_result();
+		if ( null === $address_result ) {
+			return '';
+		}
+
+		if ( $address_result->address->fallback || ! $address_result->address->normalized ) {
+			return 'введено вручную';
+		}
+
+		return in_array( $address_result->source, array( 'fias', 'gar' ), true ) ? 'ФИАС/ГАР' : (string) $address_result->source;
 	}
 
 	/**

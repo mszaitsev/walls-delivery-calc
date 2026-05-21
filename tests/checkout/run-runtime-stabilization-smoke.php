@@ -347,7 +347,7 @@ function runtime_smoke_assert( bool $condition, string $message ): void {
 }
 
 function runtime_smoke_environment(): PluginEnvironment {
-	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.11' );
+	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.12' );
 }
 
 function runtime_smoke_request( string $delivery_type = '' ): QuoteRequest {
