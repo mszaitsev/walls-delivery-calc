@@ -11,7 +11,8 @@ final class AddressNormalizationResult {
 		public readonly float $confidence = 0.0,
 		public readonly string $source = 'manual',
 		public readonly string $error_code = '',
-		public readonly string $error_message = ''
+		public readonly string $error_message = '',
+		public readonly array $debug = array()
 	) {
 	}
 
@@ -27,6 +28,7 @@ final class AddressNormalizationResult {
 			'source'        => $this->source,
 			'error_code'    => $this->error_code,
 			'error_message' => $this->error_message,
+			'debug'         => $this->debug,
 		);
 	}
 
@@ -41,7 +43,8 @@ final class AddressNormalizationResult {
 			(float) ( $data['confidence'] ?? 0.0 ),
 			(string) ( $data['source'] ?? 'manual' ),
 			(string) ( $data['error_code'] ?? '' ),
-			(string) ( $data['error_message'] ?? '' )
+			(string) ( $data['error_message'] ?? '' ),
+			is_array( $data['debug'] ?? null ) ? $data['debug'] : array()
 		);
 	}
 

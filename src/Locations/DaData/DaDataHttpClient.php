@@ -18,7 +18,7 @@ final class DaDataHttpClient {
 	/**
 	 * @return array{success:bool,status_code:int,body:mixed,error_message:string,timeout:bool}
 	 */
-	public function clean_address( string $address, string $token, string $secret ): array {
+	public function clean_address( string $address, string $token ): array {
 		$this->logger->request_start( array( 'host' => 'cleaner.dadata.ru' ) );
 
 		if ( ! function_exists( 'wp_remote_post' ) ) {
@@ -42,7 +42,6 @@ final class DaDataHttpClient {
 						'Content-Type'  => 'application/json',
 						'Accept'        => 'application/json',
 						'Authorization' => 'Token ' . $token,
-						'X-Secret'      => $secret,
 					),
 					'body' => $body,
 				)

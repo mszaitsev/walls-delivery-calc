@@ -49,11 +49,13 @@ final class CheckoutDebugPanel {
 		$this->row( __( 'Сортировка в session', 'walls-delivery-calc' ), $this->session_manager->selected_sort_mode() );
 		$this->row( __( 'Примененная сортировка', 'walls-delivery-calc' ), (string) ( $debug['sort_mode'] ?? '' ) );
 		if ( null !== $address ) {
+			$address_debug = $address->debug;
 			$this->row( __( 'Источник нормализации', 'walls-delivery-calc' ), $this->source_label( $address->source ) );
-			if ( 'dadata' === $address->source ) {
-				$this->row( __( 'DaData status', 'walls-delivery-calc' ), $address->success ? 'success' : 'failed' );
-				$this->row( __( 'DaData error', 'walls-delivery-calc' ), $address->error_code );
-			}
+			$this->row( __( 'normalized', 'walls-delivery-calc' ), $address->address->normalized ? 'true' : 'false' );
+			$this->row( __( 'Normalization chain', 'walls-delivery-calc' ), implode( ' → ', $this->normalization_chain( $address_debug ) ) );
+			$this->row( __( 'DaData status', 'walls-delivery-calc' ), (string) ( $address_debug['dadata_status'] ?? ( 'dadata' === $address->source ? ( $address->success ? 'dadata success' : 'dadata failed' ) : '' ) ) );
+			$this->row( __( 'DaData error_code', 'walls-delivery-calc' ), (string) ( $address_debug['dadata_error_code'] ?? $address->error_code ) );
+			$this->dadata_query_rows( is_array( $address_debug['dadata_query'] ?? null ) ? $address_debug['dadata_query'] : array() );
 		}
 		echo '</dl>';
 
@@ -75,6 +77,7 @@ final class CheckoutDebugPanel {
 			echo '</ul>';
 		}
 
+		$this->render_console_trace( $address );
 		echo '</section>';
 	}
 
@@ -88,5 +91,72 @@ final class CheckoutDebugPanel {
 			'fallback' => __( 'введено вручную', 'walls-delivery-calc' ),
 			default => $source,
 		};
+	}
+
+	/**
+	 * @param array<string,mixed> $debug
+	 * @return array<int,string>
+	 */
+	private function normalization_chain( array $debug ): array {
+		$chain = $debug['normalization_chain'] ?? array();
+		return is_array( $chain ) && array() !== $chain
+			? array_map( 'strval', $chain )
+			: array( 'local city DB', 'fias placeholder', 'dadata', 'manual fallback' );
+	}
+
+	/**
+	 * @param array<string,mixed> $query
+	 */
+	private function dadata_query_rows( array $query ): void {
+		if ( array() === $query ) {
+			return;
+		}
+
+		$this->row( __( 'DaData query string', 'walls-delivery-calc' ), (string) ( $query['query'] ?? '' ) );
+		$this->row( __( 'DaData country', 'walls-delivery-calc' ), (string) ( $query['country'] ?? '' ) );
+		$this->row( __( 'DaData region', 'walls-delivery-calc' ), (string) ( $query['region'] ?? '' ) );
+		$this->row( __( 'DaData city', 'walls-delivery-calc' ), (string) ( $query['city'] ?? '' ) );
+		$this->row( __( 'DaData address_1', 'walls-delivery-calc' ), (string) ( $query['address_1'] ?? '' ) );
+		$this->row( __( 'DaData address_2', 'walls-delivery-calc' ), (string) ( $query['address_2'] ?? '' ) );
+	}
+
+	private function render_console_trace( mixed $address ): void {
+		if ( null === $address ) {
+			return;
+		}
+
+		$debug = is_object( $address ) && isset( $address->debug ) && is_array( $address->debug ) ? $address->debug : array();
+		$status = (string) ( $debug['dadata_status'] ?? '' );
+		$messages = array( 'dadata normalization started' );
+		if ( isset( $debug['dadata_query'] ) ) {
+			$messages[] = 'dadata request prepared';
+		}
+
+		$messages[] = match ( $status ) {
+			'dadata success' => 'dadata success',
+			'dadata timeout' => 'dadata timeout',
+			'dadata skipped: disabled' => 'dadata skipped: disabled',
+			'dadata skipped: missing token' => 'dadata skipped: missing token',
+			'dadata skipped: empty address' => 'dadata skipped: empty address',
+			default => 'dadata failed',
+		};
+
+		$payload = array(
+			'messages' => $messages,
+			'status'   => $status,
+			'source'   => is_object( $address ) ? (string) ( $address->source ?? '' ) : '',
+			'normalized' => is_object( $address ) && isset( $address->address ) && is_object( $address->address ) ? (bool) $address->address->normalized : false,
+			'error_code' => (string) ( $debug['dadata_error_code'] ?? ( is_object( $address ) ? (string) ( $address->error_code ?? '' ) : '' ) ),
+			'query'    => $debug['dadata_query'] ?? array(),
+		);
+		$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $payload, JSON_UNESCAPED_UNICODE ) : json_encode( $payload, JSON_UNESCAPED_UNICODE );
+		if ( ! is_string( $json ) ) {
+			return;
+		}
+
+		echo '<script>if(window.console){console.groupCollapsed("WDC DaData normalization");';
+		echo 'var wdcDaDataDebug=' . $json . ';';
+		echo 'wdcDaDataDebug.messages.forEach(function(message){console.log(message, wdcDaDataDebug);});';
+		echo 'console.groupEnd();}</script>';
 	}
 }

@@ -1,6 +1,6 @@
 # WDC DaData Address Normalization
 
-Version 0.14.0 adds real DaData address cleaning as a fallback in the checkout address pipeline.
+Version 0.14.1 uses DaData address cleaning as a token-only fallback in the checkout address pipeline.
 
 ## Role in the fallback chain
 
@@ -21,10 +21,8 @@ Settings store:
 
 - `dadata_api_token_encrypted`
 - `dadata_api_token_masked`
-- `dadata_secret_key_encrypted`
-- `dadata_secret_key_masked`
 
-`DaDataCredentials` encrypts token and secret through `EncryptionService`. Raw token and secret are never rendered back into the settings page. Empty token or secret input on save clears the stored value.
+`DaDataCredentials` encrypts the API token through `EncryptionService`. The raw token is never rendered back into the settings page. Empty token input on save clears the stored value. DaData secret key is not used.
 
 If `APP_ENCRYPTION_KEY` is not configured, credentials are not saved, settings show an admin warning, and DaData is treated as not configured.
 
@@ -53,10 +51,11 @@ POST https://cleaner.dadata.ru/api/v1/clean/address
 Content-Type: application/json
 Accept: application/json
 Authorization: Token <token>
-X-Secret: <secret>
 
 ["Россия, Новосибирская область, Новосибирск, Красный проспект, 25"]
 ```
+
+No `X-Secret` header is sent.
 
 ## Response mapping
 
@@ -92,6 +91,8 @@ Successful DaData results are marked:
 
 ## Failure cases
 
+DaData runs only when there is a city context and a non-empty checkout address line (`shipping_address_1` or `billing_address_1`). If the address line is empty, no HTTP request is made.
+
 DaData returns an unsuccessful normalization result without throwing fatals:
 
 - `dadata_disabled`
@@ -104,7 +105,18 @@ After any unsuccessful DaData result, checkout continues to manual fallback.
 
 ## Logging and privacy
 
-`DaDataLogger` redacts sensitive context keys. Logs do not include raw token, secret, full raw address, phone, email, or customer names. HTTP failures and parse errors are logged with status/error metadata only.
+`DaDataLogger` redacts sensitive context keys. Logs do not include raw token, full raw address, phone, email, or customer names. HTTP failures and parse errors are logged with status/error metadata only.
+
+When checkout debug panel is enabled for admins, it shows the DaData query parts, final query string, normalization chain, current source, normalized flag, and DaData error code. The same debug-only render emits browser console messages:
+
+- `dadata normalization started`
+- `dadata request prepared`
+- `dadata success`
+- `dadata failed`
+- `dadata timeout`
+- `dadata skipped: disabled`
+- `dadata skipped: missing token`
+- `dadata skipped: empty address`
 
 ## Order data
 
@@ -131,7 +143,7 @@ php tests/checkout/run-runtime-stabilization-smoke.php
 git diff --check
 ```
 
-For a manual live test, configure `APP_ENCRYPTION_KEY`, save the DaData API token and secret in WDC settings, enable DaData normalization, then place a checkout address with city, street, and house.
+For a manual live test, configure `APP_ENCRYPTION_KEY`, save the DaData API token in WDC settings, enable DaData normalization, enable checkout debug panel, then place a checkout address with city and street/address line.
 
 ## Known limitations
 

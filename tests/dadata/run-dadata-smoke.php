@@ -2,8 +2,11 @@
 declare(strict_types=1);
 
 use WallsShop\WDC\Checkout\Address\AddressQueryBuilder;
+use WallsShop\WDC\Checkout\Address\CheckoutAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\DaDataAddressNormalizer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Core\Autoloader;
@@ -13,6 +16,8 @@ use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\DaData\DaDataCredentials;
 use WallsShop\WDC\Locations\DaData\DaDataHttpClient;
 use WallsShop\WDC\Locations\DaData\DaDataLogger;
+use WallsShop\WDC\Locations\Normalization\AddressNormalizerInterface;
+use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'APP_ENCRYPTION_KEY' ) || define( 'APP_ENCRYPTION_KEY', 'test-dadata-encryption-key' );
@@ -24,6 +29,8 @@ $GLOBALS['wdc_dadata_http_mode'] = 'success';
 function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['wdc_dadata_options'][ $key ] ?? $default; }
 function update_option( string $key, mixed $value, bool|string $autoload = false ): bool { $GLOBALS['wdc_dadata_options'][ $key ] = $value; return true; }
 function __( string $text, string $domain = '' ): string { return $text; }
+function esc_html__( string $text, string $domain = '' ): string { return $text; }
+function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags | JSON_UNESCAPED_UNICODE ); }
 function is_wp_error( mixed $value ): bool { return is_object( $value ) && method_exists( $value, 'get_error_message' ); }
 function wp_remote_retrieve_response_code( array $response ): int { return (int) ( $response['response']['code'] ?? 0 ); }
@@ -95,6 +102,12 @@ final class WdcDaDataSmokeOrder {
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
+final class WdcDaDataSmokeFiasPlaceholder implements AddressNormalizerInterface {
+	public function normalize( string $input, array $context = array() ): AddressNormalizationResult {
+		return new AddressNormalizationResult( $input, new Address( country_code: 'RU', city: (string) ( $context['city'] ?? '' ), raw_address: $input ), false, 0.0, 'fias', 'fias_runtime_disabled' );
+	}
+}
+
 function dadata_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
 		throw new RuntimeException( $message );
@@ -104,18 +117,15 @@ function dadata_smoke_assert( bool $condition, string $message ): void {
 $settings = new SettingsRepository();
 $credentials = new DaDataCredentials( $settings, new EncryptionService() );
 $credentials->save_token( 'raw-dadata-token' );
-$credentials->save_secret( 'raw-dadata-secret' );
 $all_settings = $settings->all();
-dadata_smoke_assert( isset( $all_settings['dadata_api_token_encrypted'], $all_settings['dadata_secret_key_encrypted'] ), 'Encrypted DaData credentials must be stored.' );
+dadata_smoke_assert( isset( $all_settings['dadata_api_token_encrypted'] ), 'Encrypted DaData token must be stored.' );
+dadata_smoke_assert( ! isset( $all_settings['dadata_secret_key_encrypted'], $all_settings['dadata_secret_key_masked'] ), 'DaData secret key must not be stored anymore.' );
 dadata_smoke_assert( 'raw-dadata-token' !== $all_settings['dadata_api_token_encrypted'], 'Stored DaData token must be encrypted.' );
-dadata_smoke_assert( 'raw-dadata-secret' !== $all_settings['dadata_secret_key_encrypted'], 'Stored DaData secret must be encrypted.' );
-dadata_smoke_assert( '********' === $credentials->masked_token() && '********' === $credentials->masked_secret(), 'DaData masked output must be stars only.' );
+dadata_smoke_assert( '********' === $credentials->masked_token(), 'DaData masked token must be stars only.' );
 dadata_smoke_assert( ! str_contains( $credentials->masked_token(), 'raw-dadata-token' ), 'Raw token must not appear in masked token.' );
-dadata_smoke_assert( ! str_contains( $credentials->masked_secret(), 'raw-dadata-secret' ), 'Raw secret must not appear in masked secret.' );
 
 $credentials->save_token( '' );
-$credentials->save_secret( '' );
-dadata_smoke_assert( ! $credentials->has_token() && ! $credentials->has_secret(), 'Empty DaData credential saves must clear values.' );
+dadata_smoke_assert( ! $credentials->has_token(), 'Empty DaData token save must clear value.' );
 
 $logger = new DaDataLogger( new Logger() );
 $http = new DaDataHttpClient( 1, $logger );
@@ -141,8 +151,7 @@ dadata_smoke_assert( ! $missing->success && 'dadata_credentials_missing' === $mi
 dadata_smoke_assert( 0 === count( $GLOBALS['wdc_dadata_http_requests'] ), 'Missing credentials must not call HTTP.' );
 
 $credentials->save_token( 'raw-dadata-token' );
-$credentials->save_secret( 'raw-dadata-secret' );
-$empty = $normalizer->normalize( '', array_merge( $context, array( 'address_2' => '' ) ) );
+$empty = $normalizer->normalize( '', array_merge( $context, array( 'address_1' => '' ) ) );
 dadata_smoke_assert( ! $empty->success && 'dadata_empty_address' === $empty->error_code, 'Empty street/house must fail before HTTP.' );
 dadata_smoke_assert( 0 === count( $GLOBALS['wdc_dadata_http_requests'] ), 'Empty address must not call HTTP.' );
 
@@ -157,13 +166,25 @@ dadata_smoke_assert( 0.95 === $success->confidence, 'DaData qc=0/qc_complete=0 m
 $request = $GLOBALS['wdc_dadata_http_requests'][0] ?? array();
 dadata_smoke_assert( ! str_contains( (string) ( $request['args']['body'] ?? '' ), 'raw-dadata-token' ), 'HTTP request body must not contain token.' );
 dadata_smoke_assert( str_contains( (string) ( $request['args']['body'] ?? '' ), 'Красный проспект' ), 'HTTP request body must contain address query.' );
+dadata_smoke_assert( array( 'Content-Type', 'Accept', 'Authorization' ) === array_keys( $request['args']['headers'] ?? array() ), 'DaData request headers must contain only content type, accept, and authorization.' );
+dadata_smoke_assert( 'Token raw-dadata-token' === ( $request['args']['headers']['Authorization'] ?? '' ), 'DaData Authorization header must use token only.' );
+dadata_smoke_assert( ! isset( $request['args']['headers']['X-Secret'] ), 'DaData request must not send X-Secret.' );
+dadata_smoke_assert( str_contains( (string) ( $success->debug['dadata_query']['query'] ?? '' ), 'Россия' ), 'DaData debug query must include final query string.' );
 
 $GLOBALS['wdc_dadata_http_mode'] = 'timeout';
 $timeout = $normalizer->normalize( 'Новосибирск Красный проспект 25', $context );
 dadata_smoke_assert( ! $timeout->success && 'dadata_timeout' === $timeout->error_code, 'DaData timeout must return unsuccessful result.' );
 
+$GLOBALS['wdc_dadata_http_mode'] = 'failure';
+$chain = new CheckoutAddressNormalizer( new WdcDaDataSmokeFiasPlaceholder(), $normalizer, new FallbackAddressNormalizer() );
+$fallback_after_failure = $chain->normalize( 'Новосибирск Красный проспект 25', $context );
+dadata_smoke_assert( ! $fallback_after_failure->success && 'fallback' === $fallback_after_failure->source, 'Fallback chain must survive failed DaData response.' );
+dadata_smoke_assert( 'dadata_api_failed' === ( $fallback_after_failure->debug['dadata_error_code'] ?? '' ), 'Fallback result must keep DaData error code for debug.' );
+$GLOBALS['wdc_dadata_http_mode'] = 'success';
+
 $session = new CheckoutSessionManager();
 $session->save_normalized_address_result( $success );
+$session->save_address_fingerprint( 'dadata-smoke-fingerprint' );
 $session->save_city_context( array( 'source' => 'local_db', 'postcode' => '630000' ) );
 $session->save_rates(
 	array(
@@ -181,5 +202,10 @@ dadata_smoke_assert( true === ( $order->meta['_wdc_platform_normalized'] ?? fals
 dadata_smoke_assert( 'dadata' === ( $order->meta['_wdc_platform_normalization_source'] ?? '' ), 'DaData order meta must persist source=dadata.' );
 dadata_smoke_assert( '630099' === ( $order->meta['_wdc_platform_resolved_postcode'] ?? '' ), 'DaData order meta must persist DaData postcode.' );
 dadata_smoke_assert( 'dadata-fias-id' === ( $order->meta['_wdc_platform_fias_id'] ?? '' ), 'DaData order meta must persist FIAS id.' );
+
+ob_start();
+( new WallsShop\WDC\Checkout\WooCommerce\CheckoutAddressRenderer( $session ) )->render();
+$renderer = (string) ob_get_clean();
+dadata_smoke_assert( str_contains( $renderer, 'Адрес уточнен через DaData' ), 'Renderer must show DaData success UX text.' );
 
 echo "DaData smoke test passed.\n";

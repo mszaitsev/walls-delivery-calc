@@ -30,6 +30,23 @@ final class CheckoutAddressNormalizer {
 			return $dadata;
 		}
 
-		return $this->fallback_normalizer->normalize( $input, $context );
+		$fallback = $this->fallback_normalizer->normalize( $input, $context );
+
+		return new AddressNormalizationResult(
+			$fallback->input,
+			$fallback->address,
+			$fallback->success,
+			$fallback->confidence,
+			$fallback->source,
+			$fallback->error_code,
+			$fallback->error_message,
+			array_merge(
+				$dadata->debug,
+				array(
+					'dadata_error_code' => $dadata->error_code,
+					'dadata_success'    => $dadata->success,
+				)
+			)
+		);
 	}
 }
