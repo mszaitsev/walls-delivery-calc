@@ -118,13 +118,11 @@ final class CalendarAdminPage {
 					<?php
 					$date_value = $date->format( 'Y-m-d' );
 					$day        = $days[ $date_value ] ?? new CalendarDay( $date_value, false, '', $calendar_type );
-					$state      = $day->working ? __( 'рабочий день', 'walls-delivery-calc' ) : __( 'нерабочий день', 'walls-delivery-calc' );
 					?>
-					<label class="wdc-calendar-day <?php echo $day->working ? 'is-working' : 'is-non-working'; ?>" title="<?php echo esc_attr( $state ); ?>">
+					<label class="wdc-calendar-day <?php echo $day->working ? 'is-working' : 'is-non-working'; ?>">
 						<input type="hidden" name="days[<?php echo esc_attr( $date_value ); ?>][working]" value="0">
 						<input class="wdc-calendar-day-toggle" type="checkbox" name="days[<?php echo esc_attr( $date_value ); ?>][working]" value="1" <?php checked( $day->working ); ?>>
 						<span class="wdc-calendar-day-number"><?php echo esc_html( $date->format( 'j' ) ); ?></span>
-						<span class="wdc-calendar-day-state"><?php echo esc_html( $state ); ?></span>
 					</label>
 				<?php endforeach; ?>
 			</div>
