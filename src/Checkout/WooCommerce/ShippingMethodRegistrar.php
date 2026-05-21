@@ -114,6 +114,22 @@ final class ShippingMethodRegistrar {
 				$this->environment->version(),
 				true
 			);
+			wp_enqueue_script(
+				'wdc-platform-address-normalization',
+				$this->environment->plugin_url() . 'assets/frontend/checkout-address-normalization.js',
+				array( 'jquery' ),
+				$this->environment->version(),
+				true
+			);
+			if ( function_exists( 'wp_localize_script' ) ) {
+				wp_localize_script(
+					'wdc-platform-address-normalization',
+					'wdcPlatformAddressNormalization',
+					array(
+						'debug' => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
+					)
+				);
+			}
 		}
 	}
 

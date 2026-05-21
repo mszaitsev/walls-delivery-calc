@@ -55,10 +55,10 @@ final class SettingsAdminPage {
 				<div class="notice notice-warning"><p><?php echo esc_html__( 'APP_ENCRYPTION_KEY не задан. API-токен ФИАС/ГАР не будет сохранен, пока ключ шифрования не настроен.', 'walls-delivery-calc' ); ?></p></div>
 			<?php endif; ?>
 			<?php if ( $this->dadata_credentials instanceof DaDataCredentials && ! $this->dadata_credentials->encryption_ready() ) : ?>
-				<div class="notice notice-warning"><p><?php echo esc_html__( 'APP_ENCRYPTION_KEY is not configured. DaData credentials cannot be saved until encryption is available.', 'walls-delivery-calc' ); ?></p></div>
+				<div class="notice notice-warning"><p><?php echo esc_html__( 'APP_ENCRYPTION_KEY не задан. API-токен DaData не будет сохранен, пока ключ шифрования не настроен.', 'walls-delivery-calc' ); ?></p></div>
 			<?php endif; ?>
 			<?php if ( ! empty( $values['dadata_enabled'] ) && $this->dadata_credentials instanceof DaDataCredentials && ! $this->dadata_credentials->has_token() ) : ?>
-				<div class="notice notice-warning"><p><?php echo esc_html__( 'DaData normalization is enabled, but API token is missing.', 'walls-delivery-calc' ); ?></p></div>
+				<div class="notice notice-warning"><p><?php echo esc_html__( 'Нормализация DaData включена, но API-токен не задан.', 'walls-delivery-calc' ); ?></p></div>
 			<?php endif; ?>
 			<form method="post">
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
@@ -95,7 +95,8 @@ final class SettingsAdminPage {
 							<th scope="row"><label for="wdc_fias_api_token"><?php echo esc_html__( 'API-токен ФИАС/ГАР', 'walls-delivery-calc' ); ?></label></th>
 							<td>
 								<input id="wdc_fias_api_token" type="password" name="fias_api_token" value="" placeholder="<?php echo esc_attr( $this->fias_token_placeholder() ); ?>" autocomplete="new-password">
-								<p class="description"><?php echo esc_html__( 'Оставьте поле пустым и сохраните настройки, чтобы удалить токен.', 'walls-delivery-calc' ); ?></p>
+								<p class="description"><?php echo esc_html__( 'Оставьте поле пустым, чтобы сохранить текущий токен без изменений.', 'walls-delivery-calc' ); ?></p>
+								<p><label><input type="checkbox" name="clear_fias_token" value="1"> <?php echo esc_html__( 'Удалить сохраненный токен ФИАС/ГАР', 'walls-delivery-calc' ); ?></label></p>
 								<p><strong><?php echo esc_html__( 'Статус:', 'walls-delivery-calc' ); ?></strong> <?php echo esc_html( $this->fias_token_status() ); ?></p>
 							</td>
 						</tr>
@@ -116,15 +117,17 @@ final class SettingsAdminPage {
 							<td><input id="wdc_fias_api_minute_limit" type="number" name="fias_api_minute_limit" value="<?php echo esc_attr( (string) ( $values['fias_api_minute_limit'] ?? 100 ) ); ?>" min="1" max="10000" step="1"></td>
 						</tr>
 						<tr>
-							<th scope="row"><?php echo esc_html__( 'Включить fallback DaData', 'walls-delivery-calc' ); ?></th>
-							<td><label><input type="checkbox" name="dadata_enabled" value="1" <?php checked( ! empty( $values['dadata_enabled'] ) ); ?>> <?php echo esc_html__( 'Use DaData as a real address normalization fallback after the FIAS placeholder.', 'walls-delivery-calc' ); ?></label></td>
+							<th scope="row"><?php echo esc_html__( 'Нормализация адреса через DaData', 'walls-delivery-calc' ); ?></th>
+							<td><label><input type="checkbox" name="dadata_enabled" value="1" <?php checked( ! empty( $values['dadata_enabled'] ) ); ?>> <?php echo esc_html__( 'Включить DaData для нормализации адреса покупателя после проверки ФИАС/ГАР.', 'walls-delivery-calc' ); ?></label></td>
 						</tr>
+						<tr><th colspan="2"><p><?php echo esc_html__( 'Нормализация адреса покупателя через DaData выполняется только после ввода улицы или адресной строки.', 'walls-delivery-calc' ); ?></p></th></tr>
 						<tr>
-							<th scope="row"><label for="wdc_dadata_api_token"><?php echo esc_html__( 'DaData API token', 'walls-delivery-calc' ); ?></label></th>
+							<th scope="row"><label for="wdc_dadata_api_token"><?php echo esc_html__( 'API-токен DaData', 'walls-delivery-calc' ); ?></label></th>
 							<td>
 								<input id="wdc_dadata_api_token" type="password" name="dadata_api_token" value="" placeholder="<?php echo esc_attr( $this->dadata_token_placeholder() ); ?>" autocomplete="new-password">
-								<p class="description"><?php echo esc_html__( 'Leave empty and save to clear the stored token.', 'walls-delivery-calc' ); ?></p>
-								<p><strong><?php echo esc_html__( 'Status:', 'walls-delivery-calc' ); ?></strong> <?php echo esc_html( $this->dadata_token_status() ); ?></p>
+								<p class="description"><?php echo esc_html__( 'Оставьте поле пустым, чтобы сохранить текущий токен без изменений.', 'walls-delivery-calc' ); ?></p>
+								<p><label><input type="checkbox" name="clear_dadata_token" value="1"> <?php echo esc_html__( 'Удалить сохраненный токен DaData', 'walls-delivery-calc' ); ?></label></p>
+								<p><strong><?php echo esc_html__( 'Статус:', 'walls-delivery-calc' ); ?></strong> <?php echo esc_html( $this->dadata_token_status() ); ?></p>
 							</td>
 						</tr>
 						<tr>
@@ -199,25 +202,33 @@ final class SettingsAdminPage {
 	}
 
 	private function dadata_token_placeholder(): string {
-		return $this->dadata_credentials instanceof DaDataCredentials && $this->dadata_credentials->has_token() ? $this->dadata_credentials->masked_token() : 'Token is not set';
+		return $this->dadata_credentials instanceof DaDataCredentials && $this->dadata_credentials->has_token() ? $this->dadata_credentials->masked_token() : 'Токен не задан';
 	}
 
 	private function dadata_token_status(): string {
-		return $this->dadata_credentials instanceof DaDataCredentials && $this->dadata_credentials->has_token() ? 'Token saved' : 'Token is not set';
+		return $this->dadata_credentials instanceof DaDataCredentials && $this->dadata_credentials->has_token() ? 'Токен сохранен' : 'Токен не задан';
 	}
 
 	/**
 	 * @param array<string,mixed> $data
 	 */
 	private function handle_fias_token( array $data ): string {
-		if ( ! $this->fias_credentials instanceof FiasCredentials || ! array_key_exists( 'fias_api_token', $data ) ) {
+		if ( ! $this->fias_credentials instanceof FiasCredentials ) {
+			return '';
+		}
+
+		if ( ! empty( $data['clear_fias_token'] ) ) {
+			$this->fias_credentials->clear_token();
+			return ' ' . __( 'Токен ФИАС/ГАР удален.', 'walls-delivery-calc' );
+		}
+
+		if ( ! array_key_exists( 'fias_api_token', $data ) ) {
 			return '';
 		}
 
 		$token = wp_unslash( (string) $data['fias_api_token'] );
 		if ( '' === trim( $token ) ) {
-			$this->fias_credentials->clear_token();
-			return ' ' . __( 'Токен ФИАС/ГАР удален.', 'walls-delivery-calc' );
+			return '';
 		}
 
 		if ( ! $this->fias_credentials->save_token( $token ) ) {
@@ -236,16 +247,20 @@ final class SettingsAdminPage {
 		}
 
 		$message = '';
+		if ( ! empty( $data['clear_dadata_token'] ) ) {
+			$this->dadata_credentials->clear_token();
+			return ' ' . __( 'Токен DaData удален.', 'walls-delivery-calc' );
+		}
+
 		if ( array_key_exists( 'dadata_api_token', $data ) ) {
 			$token = wp_unslash( (string) $data['dadata_api_token'] );
 			if ( '' === trim( $token ) ) {
-				$this->dadata_credentials->clear_token();
-				$message .= ' ' . __( 'DaData token cleared.', 'walls-delivery-calc' );
+				return '';
 			} elseif ( ! $this->dadata_credentials->encryption_ready() ) {
-				$message .= ' ' . __( 'DaData token was not saved: configure APP_ENCRYPTION_KEY.', 'walls-delivery-calc' );
+				$message .= ' ' . __( 'Токен DaData не сохранен: настройте APP_ENCRYPTION_KEY.', 'walls-delivery-calc' );
 			} else {
 				$this->dadata_credentials->save_token( $token );
-				$message .= ' ' . __( 'DaData token saved.', 'walls-delivery-calc' );
+				$message .= ' ' . __( 'Токен DaData сохранен.', 'walls-delivery-calc' );
 			}
 		}
 

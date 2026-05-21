@@ -7,6 +7,9 @@ defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
 $GLOBALS['wdc_test_options'] = array();
 $GLOBALS['wdc_test_actions'] = array();
 $GLOBALS['wdc_test_filters'] = array();
+$GLOBALS['wdc_test_scripts'] = array();
+$GLOBALS['wdc_test_localized_scripts'] = array();
+$GLOBALS['wdc_test_styles'] = array();
 
 if ( ! function_exists( 'get_option' ) ) {
 	function get_option( string $key, mixed $default = false ): mixed {
@@ -30,6 +33,30 @@ if ( ! function_exists( 'add_action' ) ) {
 if ( ! function_exists( 'add_filter' ) ) {
 	function add_filter( string $hook, mixed $callback, int $priority = 10, int $accepted_args = 1 ): void {
 		$GLOBALS['wdc_test_filters'][ $hook ][] = array( $callback, $priority, $accepted_args );
+	}
+}
+
+if ( ! function_exists( 'wp_enqueue_script' ) ) {
+	function wp_enqueue_script( string $handle, string $src = '', array $deps = array(), string|bool|null $ver = false, bool $in_footer = false ): void {
+		$GLOBALS['wdc_test_scripts'][ $handle ] = compact( 'src', 'deps', 'ver', 'in_footer' );
+	}
+}
+
+if ( ! function_exists( 'wp_localize_script' ) ) {
+	function wp_localize_script( string $handle, string $object_name, array $l10n ): void {
+		$GLOBALS['wdc_test_localized_scripts'][ $handle ][ $object_name ] = $l10n;
+	}
+}
+
+if ( ! function_exists( 'wp_enqueue_style' ) ) {
+	function wp_enqueue_style( string $handle, string $src = '', array $deps = array(), string|bool|null $ver = false ): void {
+		$GLOBALS['wdc_test_styles'][ $handle ] = compact( 'src', 'deps', 'ver' );
+	}
+}
+
+if ( ! function_exists( 'wp_script_is' ) ) {
+	function wp_script_is( string $handle, string $status = 'enqueued' ): bool {
+		return 'wc-checkout' === $handle && 'registered' === $status;
 	}
 }
 
@@ -493,9 +520,17 @@ foreach ( array( '.wdc-platform-pickup-point', 'pickup select changed', 'pickup 
 	runtime_smoke_assert( str_contains( $checkout_sort_js, $needle ), 'Pickup frontend JS must contain ' . $needle . '.' );
 }
 
+$address_normalization_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-address-normalization.js' );
+foreach ( array( 'shipping_address_1', 'billing_address_1', 'debounceTimer', 'update_checkout', '.wdcAddressNormalization', 'address input changed', 'address debounce scheduled', 'update_checkout triggered for address normalization' ) as $needle ) {
+	runtime_smoke_assert( str_contains( $address_normalization_js, $needle ), 'Address normalization JS must contain ' . $needle . '.' );
+}
+
 $settings->set( 'enable_new_checkout_shipping', true );
 runtime_smoke_assert( $gate->enabled(), 'Feature gate must be enabled through SettingsRepository.' );
 runtime_smoke_assert( isset( $registrar->register_shipping_method( array() )[ NewShippingMethod::METHOD_ID ] ), 'Shipping method registration must be enabled through settings.' );
+$registrar->enqueue_assets();
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-normalization'] ), 'Address normalization script must enqueue when feature gate is enabled.' );
+runtime_smoke_assert( str_contains( (string) $GLOBALS['wdc_test_scripts']['wdc-platform-address-normalization']['src'], 'checkout-address-normalization.js' ), 'Address normalization script src must point to checkout-address-normalization.js.' );
 
 $demo_orchestrator = runtime_smoke_orchestrator_with_demo();
 $all_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), RateSorter::CHEAPEST, false )->rates;

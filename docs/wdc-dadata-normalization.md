@@ -1,6 +1,6 @@
 # WDC DaData Address Normalization
 
-Version 0.14.1 uses DaData address cleaning as a token-only fallback in the checkout address pipeline.
+Version 0.14.2 uses DaData address cleaning as a token-only fallback in the checkout address pipeline.
 
 ## Role in the fallback chain
 
@@ -13,7 +13,7 @@ The full chain is:
 3. DaData cleaner API.
 4. Manual fallback.
 
-DaData runs only when `dadata_enabled` is enabled and both credentials are configured.
+DaData runs only when `dadata_enabled` is enabled and the API token is configured.
 
 ## Credentials
 
@@ -22,7 +22,7 @@ Settings store:
 - `dadata_api_token_encrypted`
 - `dadata_api_token_masked`
 
-`DaDataCredentials` encrypts the API token through `EncryptionService`. The raw token is never rendered back into the settings page. Empty token input on save clears the stored value. DaData secret key is not used.
+`DaDataCredentials` encrypts the API token through `EncryptionService`. The raw token is never rendered back into the settings page. Empty password input on save keeps the current token unchanged. To delete the token, use the separate `Удалить сохраненный токен DaData` checkbox. DaData secret key is not used.
 
 If `APP_ENCRYPTION_KEY` is not configured, credentials are not saved, settings show an admin warning, and DaData is treated as not configured.
 
@@ -93,6 +93,8 @@ Successful DaData results are marked:
 
 DaData runs only when there is a city context and a non-empty checkout address line (`shipping_address_1` or `billing_address_1`). If the address line is empty, no HTTP request is made.
 
+Checkout recalculation is triggered by `assets/frontend/checkout-address-normalization.js`. It listens to `shipping_address_1`, `shipping_address_2`, `billing_address_1`, and `billing_address_2`, debounces input, then triggers WooCommerce `update_checkout`. DaData runs on the backend during that update.
+
 DaData returns an unsuccessful normalization result without throwing fatals:
 
 - `dadata_disabled`
@@ -143,7 +145,16 @@ php tests/checkout/run-runtime-stabilization-smoke.php
 git diff --check
 ```
 
-For a manual live test, configure `APP_ENCRYPTION_KEY`, save the DaData API token in WDC settings, enable DaData normalization, enable checkout debug panel, then place a checkout address with city and street/address line.
+Manual checkout test:
+
+1. Configure `APP_ENCRYPTION_KEY`.
+2. Enable DaData in WDC settings.
+3. Save the DaData API token.
+4. Enable the checkout debug panel.
+5. Select a city.
+6. Enter street/address line and house if available.
+7. Wait for `update_checkout`.
+8. Check the debug panel for DaData status and query string.
 
 ## Known limitations
 

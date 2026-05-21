@@ -5,6 +5,7 @@ use WallsShop\WDC\Checkout\Address\AddressQueryBuilder;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\DaDataAddressNormalizer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
@@ -16,6 +17,7 @@ use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\DaData\DaDataCredentials;
 use WallsShop\WDC\Locations\DaData\DaDataHttpClient;
 use WallsShop\WDC\Locations\DaData\DaDataLogger;
+use WallsShop\WDC\Locations\Fias\FiasCredentials;
 use WallsShop\WDC\Locations\Normalization\AddressNormalizerInterface;
 use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
 
@@ -31,6 +33,16 @@ function update_option( string $key, mixed $value, bool|string $autoload = false
 function __( string $text, string $domain = '' ): string { return $text; }
 function esc_html__( string $text, string $domain = '' ): string { return $text; }
 function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function sanitize_text_field( string $value ): string { return trim( strip_tags( $value ) ); }
+function sanitize_key( string $value ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( $value ) ) ?: ''; }
+function wp_unslash( mixed $value ): mixed { return $value; }
+function wp_verify_nonce( string $nonce, string $action ): bool { return true; }
+function current_user_can( string $capability ): bool { return true; }
+function checked( mixed $checked, mixed $current = true, bool $display = true ): string { $result = (string) $checked === (string) $current ? ' checked="checked"' : ''; if ( $display ) { echo $result; } return $result; }
+function selected( mixed $selected, mixed $current = true, bool $display = true ): string { $result = (string) $selected === (string) $current ? ' selected="selected"' : ''; if ( $display ) { echo $result; } return $result; }
+function wp_nonce_field( string $action, string $name ): void { echo '<input type="hidden" name="' . esc_attr( $name ) . '" value="nonce">'; }
+function submit_button( string $text ): void { echo '<button type="submit">' . esc_html( $text ) . '</button>'; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags | JSON_UNESCAPED_UNICODE ); }
 function is_wp_error( mixed $value ): bool { return is_object( $value ) && method_exists( $value, 'get_error_message' ); }
 function wp_remote_retrieve_response_code( array $response ): int { return (int) ( $response['response']['code'] ?? 0 ); }
@@ -116,7 +128,9 @@ function dadata_smoke_assert( bool $condition, string $message ): void {
 
 $settings = new SettingsRepository();
 $credentials = new DaDataCredentials( $settings, new EncryptionService() );
+$fias_credentials = new FiasCredentials( $settings, new EncryptionService() );
 $credentials->save_token( 'raw-dadata-token' );
+$fias_credentials->save_token( 'raw-fias-token' );
 $all_settings = $settings->all();
 dadata_smoke_assert( isset( $all_settings['dadata_api_token_encrypted'] ), 'Encrypted DaData token must be stored.' );
 dadata_smoke_assert( ! isset( $all_settings['dadata_secret_key_encrypted'], $all_settings['dadata_secret_key_masked'] ), 'DaData secret key must not be stored anymore.' );
@@ -124,8 +138,47 @@ dadata_smoke_assert( 'raw-dadata-token' !== $all_settings['dadata_api_token_encr
 dadata_smoke_assert( '********' === $credentials->masked_token(), 'DaData masked token must be stars only.' );
 dadata_smoke_assert( ! str_contains( $credentials->masked_token(), 'raw-dadata-token' ), 'Raw token must not appear in masked token.' );
 
-$credentials->save_token( '' );
-dadata_smoke_assert( ! $credentials->has_token(), 'Empty DaData token save must clear value.' );
+ob_start();
+( new SettingsAdminPage( $settings, $fias_credentials, $credentials ) )->render_page();
+$settings_html = (string) ob_get_clean();
+foreach ( array( 'Нормализация адреса через DaData', 'Включить DaData', 'API-токен DaData', 'Таймаут DaData', 'Токен сохранен', 'Удалить сохраненный токен DaData', 'Нормализация адреса покупателя' ) as $needle ) {
+	dadata_smoke_assert( str_contains( $settings_html, $needle ), 'DaData settings UI must contain Russian string: ' . $needle );
+}
+foreach ( array( 'DaData API token', 'Token saved', 'Token is not set', 'Leave empty', 'Status:' ) as $needle ) {
+	dadata_smoke_assert( ! str_contains( $settings_html, $needle ), 'DaData settings UI must not contain English string: ' . $needle );
+}
+
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_POST = array(
+	'wdc_platform_settings_nonce' => 'nonce',
+	'dadata_enabled'             => '1',
+	'dadata_api_token'           => '',
+	'fias_api_token'             => '',
+);
+ob_start();
+( new SettingsAdminPage( $settings, $fias_credentials, $credentials ) )->render_page();
+ob_end_clean();
+dadata_smoke_assert( $credentials->has_token(), 'Empty DaData password field must preserve existing token.' );
+dadata_smoke_assert( $fias_credentials->has_token(), 'Empty FIAS password field must preserve existing token.' );
+
+$_POST['clear_dadata_token'] = '1';
+ob_start();
+( new SettingsAdminPage( $settings, $fias_credentials, $credentials ) )->render_page();
+ob_end_clean();
+dadata_smoke_assert( ! $credentials->has_token(), 'DaData clear checkbox must remove saved token.' );
+dadata_smoke_assert( $fias_credentials->has_token(), 'DaData clear checkbox must not remove FIAS token.' );
+
+$_POST = array(
+	'wdc_platform_settings_nonce' => 'nonce',
+	'fias_api_token'             => '',
+	'clear_fias_token'           => '1',
+);
+ob_start();
+( new SettingsAdminPage( $settings, $fias_credentials, $credentials ) )->render_page();
+ob_end_clean();
+dadata_smoke_assert( ! $fias_credentials->has_token(), 'FIAS clear checkbox must remove saved token.' );
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_POST = array();
 
 $logger = new DaDataLogger( new Logger() );
 $http = new DaDataHttpClient( 1, $logger );
