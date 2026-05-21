@@ -23,6 +23,7 @@ use WallsShop\WDC\Checkout\Address\FiasAddressNormalizer;
 use WallsShop\WDC\Checkout\Admin\CheckoutSimulationPage;
 use WallsShop\WDC\Checkout\Cache\QuoteCache;
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
@@ -139,6 +140,7 @@ final class Plugin {
 		);
 		$this->container->register( CheckoutSessionManager::class, fn(): CheckoutSessionManager => new CheckoutSessionManager() );
 		$this->container->register( CheckoutLocationSearch::class, fn(): CheckoutLocationSearch => new CheckoutLocationSearch( $this->container->get( LocationSearchService::class ) ) );
+		$this->container->register( CheckoutLocationAjax::class, fn(): CheckoutLocationAjax => new CheckoutLocationAjax( $this->container->get( CheckoutLocationSearch::class ) ) );
 		$this->container->register( CheckoutCityResolver::class, fn(): CheckoutCityResolver => new CheckoutCityResolver( $this->container->get( LocationRepository::class ), $this->container->get( CheckoutLocationSearch::class ) ) );
 		$this->container->register( FiasAddressNormalizer::class, fn(): FiasAddressNormalizer => new FiasAddressNormalizer( $this->container->get( CheckoutCityResolver::class ) ) );
 		$this->container->register( DaDataAddressNormalizer::class, fn(): DaDataAddressNormalizer => new DaDataAddressNormalizer() );
@@ -295,6 +297,7 @@ final class Plugin {
 			$this->container->get( CheckoutRateRenderer::class )->register();
 			$this->container->get( CheckoutDeliveryTypeSelector::class )->register();
 			$this->container->get( CheckoutSortSelector::class )->register();
+			$this->container->get( CheckoutLocationAjax::class )->register();
 			$this->container->get( CheckoutAddressRuntime::class )->register();
 			$this->container->get( CheckoutAddressRenderer::class )->register();
 			$this->container->get( CheckoutValidation::class )->register();

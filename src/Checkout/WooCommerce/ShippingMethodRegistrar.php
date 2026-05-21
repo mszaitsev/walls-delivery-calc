@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -80,7 +81,27 @@ final class ShippingMethodRegistrar {
 			array( 'wdc-platform-checkout-rates' ),
 			$this->environment->version()
 		);
+		wp_enqueue_style(
+			'wdc-platform-city-selector',
+			$this->environment->plugin_url() . 'assets/frontend/checkout-city-selector.css',
+			array( 'wdc-platform-checkout-rates' ),
+			$this->environment->version()
+		);
 		if ( function_exists( 'wp_enqueue_script' ) ) {
+			wp_enqueue_script(
+				'wdc-platform-city-selector',
+				$this->environment->plugin_url() . 'assets/frontend/checkout-city-selector.js',
+				array( 'jquery' ),
+				$this->environment->version(),
+				true
+			);
+			if ( function_exists( 'wp_localize_script' ) ) {
+				wp_localize_script(
+					'wdc-platform-city-selector',
+					'wdcPlatformCitySelector',
+					$this->city_selector_config()
+				);
+			}
 			wp_enqueue_script(
 				'wdc-platform-checkout-sort',
 				$this->environment->plugin_url() . 'assets/frontend/checkout-sort.js',
@@ -89,6 +110,23 @@ final class ShippingMethodRegistrar {
 				true
 			);
 		}
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function city_selector_config(): array {
+		return array(
+			'ajax_url'  => function_exists( 'admin_url' ) ? admin_url( 'admin-ajax.php' ) : '',
+			'nonce'     => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( CheckoutLocationAjax::NONCE_ACTION ) : '',
+			'min_chars' => 3,
+			'strings'   => array(
+				'start'     => __( 'Начните вводить населенный пункт', 'walls-delivery-calc' ),
+				'not_found' => __( 'Населенный пункт не найден. Будет использовано введенное значение.', 'walls-delivery-calc' ),
+				'error'     => __( 'Ошибка поиска населенного пункта.', 'walls-delivery-calc' ),
+				'searching' => __( 'Идет поиск...', 'walls-delivery-calc' ),
+			),
+		);
 	}
 
 }

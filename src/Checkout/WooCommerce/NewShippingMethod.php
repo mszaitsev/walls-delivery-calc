@@ -116,6 +116,8 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 					'fallback_used'  => $result->fallback_used,
 					'carrier_errors' => $result->carrier_errors,
 					'audit'          => $result->audit,
+					'raw_checkout_city' => (string) ( ( is_array( $package ) && is_array( $package['destination'] ?? null ) ) ? ( $package['destination']['city'] ?? '' ) : '' ),
+					'sort_mode'      => $sort,
 				)
 			);
 		} catch ( \Throwable $exception ) {

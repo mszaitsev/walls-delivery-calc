@@ -1,4 +1,4 @@
-# WDC Runtime Stabilization 0.12.2
+# WDC Runtime Stabilization 0.12.3
 
 ## Что исправлено
 
@@ -10,6 +10,9 @@
 - Radio-переключатель `wdc_platform_delivery_type` под тарифами убран.
 - Демо-населенные пункты и демо-ПВЗ русифицированы.
 - Добавлена простая сортировка вариантов доставки на checkout.
+- Добавлен рабочий checkout city selector/autocomplete v1 для классического WooCommerce checkout.
+- Нормализованный адрес теперь привязан к fingerprint текущего checkout address, поэтому старый город не остается в session после смены города.
+- Сохраненный выбор ПВЗ очищается при смене города и не показывается, если пункт не относится к текущему городу.
 
 ## Как включить новую доставку
 
@@ -43,6 +46,42 @@
 
 Выбранный тип доставки определяется выбранным WooCommerce shipping rate. Для pickup rate показывается selector ПВЗ. Для courier rate показывается подсказка: «Для курьерской доставки будет использован адрес, указанный в checkout.»
 
+## City selector v1
+
+На checkout подключается простой autocomplete населенного пункта. Он работает только когда новая система доставки включена через `CheckoutFeatureGate`.
+
+Что делает selector:
+
+- использует `shipping_city`, а если его нет — `billing_city`;
+- после 3 символов вызывает AJAX action `wdc_platform_search_locations`;
+- показывает результаты группами по регионам;
+- при выборе населенного пункта заполняет city, postcode и state/region, если поля доступны;
+- сохраняет выбранный населенный пункт в hidden fields:
+  `wdc_platform_location_id`, `wdc_platform_location_fias_id`, `wdc_platform_location_gar_id`, `wdc_platform_location_display_name`, `wdc_platform_location_postcode`, `wdc_platform_location_region_name`;
+- запускает штатный WooCommerce `update_checkout`.
+
+Если населенный пункт не найден, checkout не блокируется: введенный вручную город используется как fallback.
+
+Как проверить:
+
+1. Включите новую доставку и DemoCarrier.
+2. На checkout начните вводить `Новос`.
+3. Выберите «Новосибирск — Новосибирская область».
+4. Убедитесь, что индекс заполнен значением `630000`, а блок проверки адреса показывает Новосибирск.
+5. Замените город на `Москва` и выберите Москву из списка.
+6. Блок проверки адреса должен показать Москву, а старый Новосибирск не должен оставаться.
+
+## Address fingerprint
+
+Checkout address runtime строит fingerprint из страны, города, индекса, адреса и hidden selected location fields. Если fingerprint изменился, session очищает:
+
+- старый normalized address result;
+- selected city / fallback city;
+- pickup selection;
+- cached WooCommerce shipping rates.
+
+Это нужно, чтобы ПВЗ и блок проверки адреса всегда соответствовали текущему checkout city, а не прошлому значению из session.
+
 ## Сортировка
 
 На checkout выводится select «Сортировка доставки»:
@@ -51,6 +90,8 @@
 - «По сроку»
 
 Выбор сохраняется в WooCommerce session через стандартный `woocommerce_checkout_update_order_review`. Минимальный JS `assets/frontend/checkout-sort.js` только вызывает штатный `update_checkout` при изменении select. Если JS не сработает, checkout не ломается и использует настройку по умолчанию.
+
+Session sort mode имеет приоритет над настройкой `checkout_sort_mode`. При смене select очищается WooCommerce shipping cache, чтобы порядок методов пересчитался сразу.
 
 Как проверить:
 
@@ -74,6 +115,13 @@
 - «Новосиб»
 
 Если сохраненных ПВЗ в таблице нет, DemoPickupProvider может вернуть demo points по fallback city.
+
+Проверка смены города:
+
+1. Выберите Новосибирск и убедитесь, что доступны `demo-nsk-001`, `demo-nsk-002`, `demo-nsk-003`.
+2. Выберите один из новосибирских ПВЗ.
+3. Смените город на Москву.
+4. Старый `demo-nsk-*` должен исчезнуть, selection должен сброситься, в списке должен остаться московский demo point.
 
 ## Проверка fallback
 

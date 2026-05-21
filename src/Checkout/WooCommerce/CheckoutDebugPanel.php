@@ -30,19 +30,26 @@ final class CheckoutDebugPanel {
 			return;
 		}
 
+		$address = $this->session_manager->normalized_address_result();
+		$city    = null !== $address ? ( '' !== trim( $address->address->settlement ) ? $address->address->settlement : $address->address->city ) : '';
+		$selected_city = $this->session_manager->selected_city();
+
 		echo '<section class="wdc-platform-debug-panel">';
 		echo '<h3>' . esc_html__( 'Отладка checkout WDC', 'walls-delivery-calc' ) . '</h3>';
 		echo '<dl>';
-		echo '<dt>' . esc_html__( 'Тарифы', 'walls-delivery-calc' ) . '</dt><dd>' . esc_html( (string) ( $debug['rates_count'] ?? 0 ) ) . '</dd>';
-		echo '<dt>' . esc_html__( 'Попадания в кеш', 'walls-delivery-calc' ) . '</dt><dd>' . esc_html( (string) ( $debug['cache_hits'] ?? 0 ) ) . '</dd>';
-		echo '<dt>' . esc_html__( 'Резервный тариф', 'walls-delivery-calc' ) . '</dt><dd>' . esc_html( ! empty( $debug['fallback_used'] ) ? __( 'да', 'walls-delivery-calc' ) : __( 'нет', 'walls-delivery-calc' ) ) . '</dd>';
-
-		$address = $this->session_manager->normalized_address_result();
+		$this->row( __( 'Тарифы', 'walls-delivery-calc' ), (string) ( $debug['rates_count'] ?? 0 ) );
+		$this->row( __( 'Попадания в кеш', 'walls-delivery-calc' ), (string) ( $debug['cache_hits'] ?? 0 ) );
+		$this->row( __( 'Резервный тариф', 'walls-delivery-calc' ), ! empty( $debug['fallback_used'] ) ? __( 'да', 'walls-delivery-calc' ) : __( 'нет', 'walls-delivery-calc' ) );
+		$this->row( __( 'Fingerprint адреса', 'walls-delivery-calc' ), $this->session_manager->address_fingerprint() );
+		$this->row( __( 'ID выбранного населенного пункта', 'walls-delivery-calc' ), (string) ( $selected_city['id'] ?? '' ) );
+		$this->row( __( 'Нормализованный город', 'walls-delivery-calc' ), $city );
+		$this->row( __( 'Город из checkout', 'walls-delivery-calc' ), (string) ( $debug['raw_checkout_city'] ?? '' ) );
+		$this->row( __( 'Город в session', 'walls-delivery-calc' ), (string) ( $selected_city['city_name'] ?? '' ) );
+		$this->row( __( 'Fallback-город', 'walls-delivery-calc' ), $this->session_manager->fallback_city() );
+		$this->row( __( 'Сортировка в session', 'walls-delivery-calc' ), $this->session_manager->selected_sort_mode() );
+		$this->row( __( 'Примененная сортировка', 'walls-delivery-calc' ), (string) ( $debug['sort_mode'] ?? '' ) );
 		if ( null !== $address ) {
-			$city = '' !== trim( $address->address->settlement ) ? $address->address->settlement : $address->address->city;
-			echo '<dt>' . esc_html__( 'Нормализованный адрес', 'walls-delivery-calc' ) . '</dt><dd>' . esc_html( $city . ' / ' . $address->address->postcode ) . '</dd>';
-			echo '<dt>' . esc_html__( 'Адрес введен вручную', 'walls-delivery-calc' ) . '</dt><dd>' . esc_html( $address->address->fallback ? __( 'да', 'walls-delivery-calc' ) : __( 'нет', 'walls-delivery-calc' ) ) . '</dd>';
-			echo '<dt>' . esc_html__( 'Источник нормализации', 'walls-delivery-calc' ) . '</dt><dd>' . esc_html( $this->source_label( $address->source ) ) . '</dd>';
+			$this->row( __( 'Источник нормализации', 'walls-delivery-calc' ), $this->source_label( $address->source ) );
 		}
 		echo '</dl>';
 
@@ -65,6 +72,10 @@ final class CheckoutDebugPanel {
 		}
 
 		echo '</section>';
+	}
+
+	private function row( string $label, string $value ): void {
+		echo '<dt>' . esc_html( $label ) . '</dt><dd>' . esc_html( $value ) . '</dd>';
 	}
 
 	private function source_label( string $source ): string {

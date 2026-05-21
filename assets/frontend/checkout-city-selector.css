@@ -1,0 +1,51 @@
+.wdc-city-selector {
+	margin-top: 6px;
+	max-width: 420px;
+	border: 1px solid #c3c4c7;
+	background: #fff;
+}
+
+.wdc-city-selector:empty {
+	display: none;
+}
+
+.wdc-city-selector__hint,
+.wdc-city-selector__message {
+	padding: 8px 10px;
+	color: #646970;
+	font-size: 13px;
+}
+
+.wdc-city-selector__message.is-error {
+	color: #b32d2e;
+}
+
+.wdc-city-selector__region {
+	padding: 7px 10px;
+	background: #f6f7f7;
+	font-weight: 600;
+	font-size: 12px;
+}
+
+.wdc-city-selector__item {
+	display: block;
+	width: 100%;
+	padding: 8px 10px;
+	border: 0;
+	border-top: 1px solid #f0f0f1;
+	background: #fff;
+	color: #1d2327;
+	text-align: left;
+	cursor: pointer;
+}
+
+.wdc-city-selector__item:hover,
+.wdc-city-selector__item:focus {
+	background: #f0f6fc;
+}
+
+@media (max-width: 600px) {
+	.wdc-city-selector {
+		max-width: none;
+	}
+}

@@ -66,12 +66,12 @@ final class CheckoutValidation {
 
 	private function add_city_error( mixed $errors = null ): void {
 		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
-			$errors->add( 'wdc_city_required', __( 'Укажите населенный пункт доставки.', 'walls-delivery-calc' ) );
+			$errors->add( 'wdc_city_required', __( 'Введите населенный пункт.', 'walls-delivery-calc' ) );
 			return;
 		}
 
 		if ( function_exists( 'wc_add_notice' ) ) {
-			wc_add_notice( __( 'Укажите населенный пункт доставки.', 'walls-delivery-calc' ), 'error' );
+			wc_add_notice( __( 'Введите населенный пункт.', 'walls-delivery-calc' ), 'error' );
 		}
 	}
 

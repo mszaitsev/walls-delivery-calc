@@ -73,7 +73,7 @@ final class CheckoutDeliveryTypeSelector {
 		echo '</select></label>';
 
 		if ( '' !== $selected ) {
-			$point = $this->repository->find_by_code( $carrier_key, $selected ) ?? $this->find_demo_point( $points, $selected );
+			$point = $this->find_demo_point( $points, $selected );
 			if ( $point instanceof PickupPoint ) {
 				echo $this->renderer->render( $point );
 			}
@@ -94,7 +94,7 @@ final class CheckoutDeliveryTypeSelector {
 			return;
 		}
 
-		$point = $this->repository->find_by_code( $carrier, $code ) ?? $this->find_demo_point( $this->points_for_checkout( $carrier ), $code );
+		$point = $this->find_demo_point( $this->points_for_checkout( $carrier ), $code );
 		if ( ! $point instanceof PickupPoint ) {
 			return;
 		}
@@ -125,6 +125,19 @@ final class CheckoutDeliveryTypeSelector {
 	private function checkout_destination(): Address {
 		$country = 'RU';
 		$city    = '';
+		$selected_city = $this->session_manager->selected_city();
+		if ( ! empty( $selected_city['city_name'] ) ) {
+			return new Address(
+				country_code: ! empty( $selected_city['country_code'] ) ? (string) $selected_city['country_code'] : $country,
+				region_name: (string) ( $selected_city['region_name'] ?? '' ),
+				city: (string) $selected_city['city_name'],
+				postcode: (string) ( $selected_city['postcode'] ?? '' ),
+				fias_id: (string) ( $selected_city['fias_id'] ?? '' ),
+				gar_id: (string) ( $selected_city['gar_id'] ?? '' ),
+				normalized: true
+			);
+		}
+
 		if ( function_exists( 'WC' ) && is_object( WC() ) && isset( WC()->customer ) && is_object( WC()->customer ) ) {
 			$customer = WC()->customer;
 			$country  = method_exists( $customer, 'get_shipping_country' ) ? (string) $customer->get_shipping_country() : $country;

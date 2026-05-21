@@ -17,7 +17,7 @@ final class CheckoutAddressRenderer {
 
 	public function render(): void {
 		$result = $this->session_manager->normalized_address_result();
-		if ( null === $result ) {
+		if ( null === $result || '' === $this->session_manager->address_fingerprint() ) {
 			return;
 		}
 

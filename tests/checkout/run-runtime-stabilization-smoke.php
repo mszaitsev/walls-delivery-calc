@@ -74,6 +74,18 @@ if ( ! function_exists( 'wp_json_encode' ) ) {
 	}
 }
 
+if ( ! function_exists( 'admin_url' ) ) {
+	function admin_url( string $path = '' ): string {
+		return 'https://example.test/wp-admin/' . ltrim( $path, '/' );
+	}
+}
+
+if ( ! function_exists( 'wp_create_nonce' ) ) {
+	function wp_create_nonce( string $action ): string {
+		return 'nonce-' . $action;
+	}
+}
+
 if ( ! function_exists( '__' ) ) {
 	function __( string $text, string $domain = '' ): string {
 		return $text;
@@ -222,6 +234,10 @@ final class WdcRuntimeSmokeSession {
 	public function get( string $key, mixed $default = null ): mixed {
 		return $this->data[ $key ] ?? $default;
 	}
+
+	public function __unset( string $key ): void {
+		unset( $this->data[ $key ] );
+	}
 }
 
 final class WdcRuntimeSmokeWooCommerce {
@@ -291,7 +307,7 @@ function runtime_smoke_assert( bool $condition, string $message ): void {
 }
 
 function runtime_smoke_environment(): PluginEnvironment {
-	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.2' );
+	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.3' );
 }
 
 function runtime_smoke_request( string $delivery_type = '' ): QuoteRequest {
@@ -359,6 +375,11 @@ runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'
 /** @var ShippingMethodRegistrar $registrar */
 $registrar = $container->get( ShippingMethodRegistrar::class );
 runtime_smoke_assert( array() === $registrar->register_shipping_method( array() ), 'Shipping method registration must be disabled while feature gate is false.' );
+$city_selector_config = $registrar->city_selector_config();
+runtime_smoke_assert( 'https://example.test/wp-admin/admin-ajax.php' === $city_selector_config['ajax_url'], 'City selector config must expose AJAX URL.' );
+runtime_smoke_assert( 3 === $city_selector_config['min_chars'], 'City selector config must require three characters.' );
+runtime_smoke_assert( str_starts_with( $city_selector_config['nonce'], 'nonce-' ), 'City selector config must expose nonce.' );
+runtime_smoke_assert( 'Идет поиск...' === $city_selector_config['strings']['searching'], 'City selector config strings must be Russian.' );
 
 $settings->set( 'enable_new_checkout_shipping', true );
 runtime_smoke_assert( $gate->enabled(), 'Feature gate must be enabled through SettingsRepository.' );
@@ -503,8 +524,10 @@ runtime_smoke_assert( str_contains( $selector_output, 'Выберите пунк
 
 $sort_session = new CheckoutSessionManager();
 $sort_selector = new CheckoutSortSelector( $sort_session, $settings );
+WC()->session->set( 'shipping_for_package_0', array( 'cached' => true ) );
 $sort_selector->capture_update_order_review( 'wdc_platform_checkout_sort_mode=fastest' );
 runtime_smoke_assert( RateSorter::FASTEST === $sort_session->selected_sort_mode(), 'Sort selector must save fastest in session.' );
+runtime_smoke_assert( null === WC()->session->get( 'shipping_for_package_0' ), 'Sort selector must clear WooCommerce shipping cache when sort changes.' );
 
 $fallback_rate = ( new FallbackRateFactory() )->create();
 runtime_smoke_assert( 'Нет видимых доступных вариантов доставки, обратитесь к менеджеру магазина' === $fallback_rate->title, 'Fallback rate label must be Russian.' );

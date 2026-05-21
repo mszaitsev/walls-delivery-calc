@@ -39,7 +39,7 @@ final class LocationSearchService {
 		$grouped   = array();
 
 		foreach ( $locations as $location ) {
-			$region = '' !== $location->region_name ? $location->region_name : __( 'Unknown region', 'walls-delivery-calc' );
+			$region = '' !== $location->region_name ? $location->region_name : __( 'Регион не указан', 'walls-delivery-calc' );
 			$grouped[ $region ][] = $location;
 		}
 

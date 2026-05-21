@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Checkout\Address;
 
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
@@ -23,13 +24,7 @@ final class CheckoutAddressRuntime {
 	}
 
 	public function update_order_review( mixed $posted_data ): void {
-		$data = array();
-		if ( is_string( $posted_data ) ) {
-			parse_str( $posted_data, $data );
-		} elseif ( is_array( $posted_data ) ) {
-			$data = $posted_data;
-		}
-
+		$data = $this->parse_posted_data( $posted_data );
 		$this->resolve_checkout_address( $data );
 	}
 
@@ -37,7 +32,26 @@ final class CheckoutAddressRuntime {
 	 * @param array<string,mixed> $checkoutData
 	 */
 	public function resolve_checkout_address( array $checkoutData ): AddressNormalizationResult {
-		$context  = $this->context_from_checkout_data( $checkoutData );
+		$context     = $this->context_from_checkout_data( $checkoutData );
+		$fingerprint = $this->fingerprint_from_context( $context );
+
+		if ( '' !== $this->session_manager->address_fingerprint() && $fingerprint !== $this->session_manager->address_fingerprint() ) {
+			$this->session_manager->clear_normalized_address();
+			$this->session_manager->clear_pickup_selection();
+			$this->clear_shipping_rate_cache();
+		}
+
+		$selected = $this->selected_location_from_context( $context );
+		if ( array() !== $selected ) {
+			$result = $this->result_from_selected_location( $context, $selected );
+			$this->session_manager->save_selected_city( $selected );
+			$this->session_manager->save_fallback_city( '' );
+			$this->session_manager->save_normalized_address_result( $result );
+			$this->session_manager->save_address_fingerprint( $fingerprint );
+
+			return $result;
+		}
+
 		$raw      = $this->raw_address( $context );
 		$result   = $this->normalizer->normalize( $raw, $context );
 		$location = $this->city_resolver->resolve_city( (string) $context['city'] );
@@ -55,8 +69,31 @@ final class CheckoutAddressRuntime {
 		}
 
 		$this->session_manager->save_normalized_address_result( $result );
+		$this->session_manager->save_address_fingerprint( $fingerprint );
 
 		return $result;
+	}
+
+	/**
+	 * @param array<string,mixed> $checkoutData
+	 */
+	public function fingerprint_from_checkout_data( array $checkoutData ): string {
+		return $this->fingerprint_from_context( $this->context_from_checkout_data( $checkoutData ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $posted_data
+	 * @return array<string,mixed>
+	 */
+	private function parse_posted_data( mixed $posted_data ): array {
+		$data = array();
+		if ( is_string( $posted_data ) ) {
+			parse_str( $posted_data, $data );
+		} elseif ( is_array( $posted_data ) ) {
+			$data = $posted_data;
+		}
+
+		return $data;
 	}
 
 	/**
@@ -64,13 +101,15 @@ final class CheckoutAddressRuntime {
 	 * @return array<string,string>
 	 */
 	private function context_from_checkout_data( array $checkoutData ): array {
-		$country   = $this->value( $checkoutData, 'shipping_country', 'country', 'RU' );
-		$city      = $this->value( $checkoutData, 'shipping_city', 'city', '' );
-		$postcode  = $this->value( $checkoutData, 'shipping_postcode', 'postcode', '' );
-		$address_1 = $this->value( $checkoutData, 'shipping_address_1', 'address_1', '' );
-		$address_2 = $this->value( $checkoutData, 'shipping_address_2', 'address_2', '' );
-		if ( '' === $address_1 ) {
-			$address_1 = $this->value( $checkoutData, 'address', 'street', '' );
+		$country   = $this->value( $checkoutData, 'shipping_country', 'billing_country', $this->value( $checkoutData, 'country', 'country', 'RU' ) );
+		$city      = $this->value( $checkoutData, 'shipping_city', 'billing_city', $this->value( $checkoutData, 'city', 'city', '' ) );
+		$postcode  = $this->value( $checkoutData, 'shipping_postcode', 'billing_postcode', $this->value( $checkoutData, 'postcode', 'postcode', '' ) );
+		$address_1 = $this->value( $checkoutData, 'shipping_address_1', 'billing_address_1', $this->value( $checkoutData, 'address', 'street', '' ) );
+		$address_2 = $this->value( $checkoutData, 'shipping_address_2', 'billing_address_2', '' );
+
+		$selected_postcode = $this->value( $checkoutData, 'wdc_platform_location_postcode', 'wdc_platform_location_postcode', '' );
+		if ( '' !== $selected_postcode ) {
+			$postcode = $selected_postcode;
 		}
 
 		if ( '' === $postcode && '' !== $city ) {
@@ -78,11 +117,89 @@ final class CheckoutAddressRuntime {
 		}
 
 		return array(
-			'country_code' => strtoupper( $country ),
-			'city'         => $city,
-			'postcode'     => $postcode,
-			'address_1'    => $address_1,
-			'address_2'    => $address_2,
+			'country_code'          => strtoupper( $country ),
+			'city'                  => $city,
+			'postcode'              => $postcode,
+			'address_1'             => $address_1,
+			'address_2'             => $address_2,
+			'selected_location_id'  => $this->value( $checkoutData, 'wdc_platform_location_id', 'wdc_platform_location_id', '' ),
+			'selected_fias_id'      => $this->value( $checkoutData, 'wdc_platform_location_fias_id', 'wdc_platform_location_fias_id', '' ),
+			'selected_gar_id'       => $this->value( $checkoutData, 'wdc_platform_location_gar_id', 'wdc_platform_location_gar_id', '' ),
+			'selected_display_name' => $this->value( $checkoutData, 'wdc_platform_location_display_name', 'wdc_platform_location_display_name', '' ),
+			'selected_region_name'  => $this->value( $checkoutData, 'wdc_platform_location_region_name', 'wdc_platform_location_region_name', '' ),
+		);
+	}
+
+	/**
+	 * @param array<string,string> $context
+	 * @return array<string,mixed>
+	 */
+	private function selected_location_from_context( array $context ): array {
+		if ( '' === $context['selected_location_id'] && '' === $context['selected_fias_id'] && '' === $context['selected_gar_id'] && '' === $context['selected_display_name'] ) {
+			return array();
+		}
+
+		return array(
+			'id'              => $context['selected_location_id'],
+			'fias_id'         => $context['selected_fias_id'],
+			'gar_id'          => $context['selected_gar_id'],
+			'country_code'    => $context['country_code'],
+			'region_name'     => $context['selected_region_name'],
+			'region_code'     => '',
+			'city_name'       => $context['city'],
+			'settlement_name' => '',
+			'settlement_type' => 'город',
+			'display_name'    => $context['selected_display_name'],
+			'postcode'        => $context['postcode'],
+			'active'          => true,
+		);
+	}
+
+	/**
+	 * @param array<string,string> $context
+	 * @param array<string,mixed>  $selected
+	 */
+	private function result_from_selected_location( array $context, array $selected ): AddressNormalizationResult {
+		$city = (string) ( $selected['city_name'] ?? $context['city'] );
+		$address = new Address(
+			country_code: $context['country_code'],
+			region_name: (string) ( $selected['region_name'] ?? '' ),
+			city: $city,
+			postcode: (string) ( $selected['postcode'] ?? $context['postcode'] ),
+			street: $context['address_1'],
+			house: $context['address_2'],
+			raw_address: $this->raw_address( array_merge( $context, array( 'city' => $city, 'postcode' => (string) ( $selected['postcode'] ?? $context['postcode'] ) ) ) ),
+			fias_id: (string) ( $selected['fias_id'] ?? '' ),
+			gar_id: (string) ( $selected['gar_id'] ?? '' ),
+			normalized: true,
+			fallback: false
+		);
+
+		return new AddressNormalizationResult( $address->raw_address, $address, true, 1.0, '' !== $address->fias_id ? 'fias' : 'manual' );
+	}
+
+	/**
+	 * @param array<string,string> $context
+	 */
+	private function fingerprint_from_context( array $context ): string {
+		return sha1(
+			implode(
+				'|',
+				array_map(
+					static fn ( string $value ): string => function_exists( 'mb_strtolower' ) ? mb_strtolower( trim( $value ), 'UTF-8' ) : strtolower( trim( $value ) ),
+					array(
+						$context['country_code'],
+						$context['city'],
+						$context['postcode'],
+						$context['address_1'],
+						$context['address_2'],
+						$context['selected_location_id'],
+						$context['selected_fias_id'],
+						$context['selected_gar_id'],
+						$context['selected_display_name'],
+					)
+				)
+			)
 		);
 	}
 
@@ -105,6 +222,25 @@ final class CheckoutAddressRuntime {
 				)
 			)
 		);
+	}
+
+	private function clear_shipping_rate_cache(): void {
+		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! isset( WC()->session ) || ! is_object( WC()->session ) ) {
+			return;
+		}
+
+		$session = WC()->session;
+		for ( $index = 0; $index < 20; $index++ ) {
+			$key = 'shipping_for_package_' . $index;
+			if ( method_exists( $session, '__unset' ) ) {
+				$session->__unset( $key );
+				continue;
+			}
+
+			if ( method_exists( $session, 'set' ) ) {
+				$session->set( $key, null );
+			}
+		}
 	}
 
 	/**

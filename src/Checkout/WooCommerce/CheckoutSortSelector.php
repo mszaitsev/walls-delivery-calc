@@ -47,7 +47,11 @@ final class CheckoutSortSelector {
 	private function capture( array $data ): void {
 		$mode = isset( $data['wdc_platform_checkout_sort_mode'] ) ? sanitize_key( wp_unslash( (string) $data['wdc_platform_checkout_sort_mode'] ) ) : '';
 		if ( in_array( $mode, array( RateSorter::CHEAPEST, RateSorter::FASTEST ), true ) ) {
+			$previous = $this->session_manager->selected_sort_mode();
 			$this->session_manager->save_sort_mode( $mode );
+			if ( $previous !== $mode ) {
+				$this->clear_shipping_rate_cache();
+			}
 		}
 	}
 
@@ -56,5 +60,24 @@ final class CheckoutSortSelector {
 		$mode         = '' !== $session_mode ? $session_mode : $this->settings->get_string( 'checkout_sort_mode', RateSorter::CHEAPEST );
 
 		return RateSorter::FASTEST === $mode ? RateSorter::FASTEST : RateSorter::CHEAPEST;
+	}
+
+	private function clear_shipping_rate_cache(): void {
+		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! isset( WC()->session ) || ! is_object( WC()->session ) ) {
+			return;
+		}
+
+		$session = WC()->session;
+		for ( $index = 0; $index < 20; $index++ ) {
+			$key = 'shipping_for_package_' . $index;
+			if ( method_exists( $session, '__unset' ) ) {
+				$session->__unset( $key );
+				continue;
+			}
+
+			if ( method_exists( $session, 'set' ) ) {
+				$session->set( $key, null );
+			}
+		}
 	}
 }

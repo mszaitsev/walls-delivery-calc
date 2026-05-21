@@ -263,6 +263,9 @@ $nsk = $repo->search( 'demo', 'RU', 'Новосибирск' );
 pickup_smoke_assert( count( $nsk ) >= 3, 'Pickup search must find Novosibirsk points.' );
 pickup_smoke_assert( count( $repo->search( 'demo', 'RU', 'новосибирск' ) ) >= 3, 'Pickup search must be case tolerant for Russian city names.' );
 pickup_smoke_assert( count( $repo->search( 'demo', 'RU', 'Новосиб' ) ) >= 3, 'Pickup search must support partial Russian city names.' );
+$moscow = $repo->search( 'demo', 'RU', 'Москва' );
+pickup_smoke_assert( array() !== $moscow, 'Pickup search must find Moscow demo point.' );
+pickup_smoke_assert( ! in_array( 'demo-nsk-001', array_map( static fn ( object $point ): string => $point->code, $moscow ), true ), 'Moscow pickup search must not include Novosibirsk points.' );
 pickup_smoke_assert( null !== $repo->find_by_code( 'demo', 'demo-nsk-001' ), 'Pickup repository must find point by carrier and code.' );
 
 $session = new CheckoutSessionManager();
