@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Pickup\Admin;
 
+use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
@@ -27,11 +28,11 @@ final class PickupAdminPage {
 	}
 
 	public function add_menu_page(): void {
-		add_submenu_page( 'woocommerce', esc_html__( 'WDC Pickup', 'walls-delivery-calc' ), esc_html__( 'WDC Pickup', 'walls-delivery-calc' ), 'manage_options', self::PAGE_SLUG, array( $this, 'render_page' ) );
+		add_submenu_page( AdminMenu::MENU_SLUG, esc_html__( 'ПВЗ', 'walls-delivery-calc' ), esc_html__( 'ПВЗ', 'walls-delivery-calc' ), AdminMenu::CAPABILITY, self::PAGE_SLUG, array( $this, 'render_page' ) );
 	}
 
 	public function render_page(): void {
-		if ( ! current_user_can( 'manage_options' ) ) {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return;
 		}
 
@@ -41,32 +42,32 @@ final class PickupAdminPage {
 		$grouped = $this->group_by_city( $points );
 		?>
 		<div class="wrap">
-			<h1><?php echo esc_html__( 'WDC Pickup', 'walls-delivery-calc' ); ?></h1>
+			<h1><?php echo esc_html__( 'Пункты выдачи заказов', 'walls-delivery-calc' ); ?></h1>
 			<?php if ( '' !== $message ) : ?>
 				<div class="notice notice-success is-dismissible"><p><?php echo esc_html( $message ); ?></p></div>
 			<?php endif; ?>
 
-			<p><strong><?php echo esc_html__( 'Pickup points count:', 'walls-delivery-calc' ); ?></strong> <?php echo esc_html( (string) $this->repository->count_all() ); ?></p>
+			<p><strong><?php echo esc_html__( 'Количество ПВЗ:', 'walls-delivery-calc' ); ?></strong> <?php echo esc_html( (string) $this->repository->count_all() ); ?></p>
 
 			<form method="post">
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
-				<button class="button" type="submit" name="wdc_pickup_action" value="import_demo"><?php echo esc_html__( 'Import demo pickup points', 'walls-delivery-calc' ); ?></button>
-				<button class="button button-primary" type="submit" name="wdc_pickup_action" value="reimport_demo"><?php echo esc_html__( 'Reimport demo pickup points', 'walls-delivery-calc' ); ?></button>
+				<button class="button" type="submit" name="wdc_pickup_action" value="import_demo"><?php echo esc_html__( 'Импортировать демо-ПВЗ', 'walls-delivery-calc' ); ?></button>
+				<button class="button button-primary" type="submit" name="wdc_pickup_action" value="reimport_demo"><?php echo esc_html__( 'Переимпортировать демо-ПВЗ', 'walls-delivery-calc' ); ?></button>
 			</form>
 
 			<form method="get" style="margin-top: 16px;">
 				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>">
 				<label>
-					<span><?php echo esc_html__( 'Search by city', 'walls-delivery-calc' ); ?></span>
-					<input type="search" name="pickup_city" value="<?php echo esc_attr( $city ); ?>" placeholder="Novosibirsk">
+					<span><?php echo esc_html__( 'Поиск по городу', 'walls-delivery-calc' ); ?></span>
+					<input type="search" name="pickup_city" value="<?php echo esc_attr( $city ); ?>" placeholder="Новосибирск">
 				</label>
-				<button class="button" type="submit"><?php echo esc_html__( 'Search', 'walls-delivery-calc' ); ?></button>
+				<button class="button" type="submit"><?php echo esc_html__( 'Найти', 'walls-delivery-calc' ); ?></button>
 			</form>
 
 			<?php foreach ( $grouped as $group_city => $city_points ) : ?>
 				<h2><?php echo esc_html( $group_city ); ?></h2>
 				<table class="widefat striped">
-					<thead><tr><th><?php echo esc_html__( 'Code', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Address', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Work time', 'walls-delivery-calc' ); ?></th></tr></thead>
+					<thead><tr><th><?php echo esc_html__( 'Код', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Адрес', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Время работы', 'walls-delivery-calc' ); ?></th></tr></thead>
 					<tbody>
 						<?php foreach ( $city_points as $point ) : ?>
 							<tr><td><?php echo esc_html( $point->code ); ?></td><td><?php echo esc_html( $point->address ); ?></td><td><?php echo esc_html( $point->work_time ); ?></td></tr>
@@ -83,7 +84,7 @@ final class PickupAdminPage {
 			return '';
 		}
 
-		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( (string) $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( 'manage_options' ) ) {
+		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( (string) $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return '';
 		}
 
@@ -98,7 +99,7 @@ final class PickupAdminPage {
 
 		$count = $this->repository->save_many( $this->provider->load_points() );
 
-		return sprintf( __( 'Demo pickup points imported: %d.', 'walls-delivery-calc' ), $count );
+		return sprintf( __( 'Импортировано демо-ПВЗ: %d.', 'walls-delivery-calc' ), $count );
 	}
 
 	/**

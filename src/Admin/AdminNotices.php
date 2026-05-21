@@ -46,7 +46,7 @@ final class AdminNotices {
 
 		?>
 		<div class="notice notice-warning">
-			<p><strong><?php echo esc_html__( 'WDC Platform requirements need attention:', 'walls-delivery-calc' ); ?></strong></p>
+			<p><strong><?php echo esc_html__( 'Калькулятор доставок: проверьте требования:', 'walls-delivery-calc' ); ?></strong></p>
 			<ul>
 				<?php foreach ( $failed as $check ) : ?>
 					<li>
@@ -79,8 +79,8 @@ final class AdminNotices {
 		?>
 		<div class="notice notice-warning">
 			<p>
-				<strong><?php echo esc_html__( 'WDC calendar_attention_required:', 'walls-delivery-calc' ); ?></strong>
-				<?php echo esc_html__( 'A next-year calendar was generated automatically. Please review and save it in WDC Calendars.', 'walls-delivery-calc' ); ?>
+				<strong><?php echo esc_html__( 'Календарь требует проверки:', 'walls-delivery-calc' ); ?></strong>
+				<?php echo esc_html__( 'Календарь на следующий год сгенерирован автоматически. Проверьте и сохраните его в разделе «Календари».', 'walls-delivery-calc' ); ?>
 			</p>
 		</div>
 		<?php

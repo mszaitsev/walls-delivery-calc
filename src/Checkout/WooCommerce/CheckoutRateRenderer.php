@@ -67,7 +67,7 @@ final class CheckoutRateRenderer {
 	}
 
 	private function format_money( int $kopecks ): string {
-		return rtrim( rtrim( number_format( $kopecks / 100, 2, '.', ' ' ), '0' ), '.' ) . ' ₽';
+		return rtrim( rtrim( number_format( $kopecks / 100, 2, '.', ' ' ), '0' ), '.' ) . ' руб.';
 	}
 	/**
 	 * @param array<string,mixed> $meta

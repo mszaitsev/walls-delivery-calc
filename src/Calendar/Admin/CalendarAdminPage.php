@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Calendar\Admin;
 use DatePeriod;
 use DateTimeImmutable;
 use DateTimeZone;
+use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Calendar\CalendarTypes;
 use WallsShop\WDC\Calendar\Services\CalendarService;
 use WallsShop\WDC\Calendar\Services\TimezoneService;
@@ -35,7 +36,7 @@ final class CalendarAdminPage {
 	}
 
 	public function add_menu_page(): void {
-		add_submenu_page( 'woocommerce', esc_html__( 'WDC Calendars', 'walls-delivery-calc' ), esc_html__( 'WDC Calendars', 'walls-delivery-calc' ), 'manage_options', self::PAGE_SLUG, array( $this, 'render_page' ) );
+		add_submenu_page( AdminMenu::MENU_SLUG, esc_html__( 'Календари', 'walls-delivery-calc' ), esc_html__( 'Календари', 'walls-delivery-calc' ), AdminMenu::CAPABILITY, self::PAGE_SLUG, array( $this, 'render_page' ) );
 	}
 
 	public function enqueue_assets( string $hook_suffix ): void {
@@ -48,7 +49,7 @@ final class CalendarAdminPage {
 	}
 
 	public function render_page(): void {
-		if ( ! current_user_can( 'manage_options' ) ) {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return;
 		}
 
@@ -60,31 +61,31 @@ final class CalendarAdminPage {
 		$days = $this->repository->get_year( $calendar_type, $year );
 		?>
 		<div class="wrap wdc-calendar-admin">
-			<h1><?php echo esc_html__( 'WDC Calendars', 'walls-delivery-calc' ); ?></h1>
+			<h1><?php echo esc_html__( 'Календари', 'walls-delivery-calc' ); ?></h1>
 			<?php if ( '' !== $message ) : ?>
 				<div class="notice notice-success is-dismissible"><p><?php echo esc_html( $message ); ?></p></div>
 			<?php endif; ?>
 			<form class="wdc-calendar-filters" method="get">
 				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>">
-				<label><span><?php echo esc_html__( 'Calendar', 'walls-delivery-calc' ); ?></span>
+				<label><span><?php echo esc_html__( 'Календарь', 'walls-delivery-calc' ); ?></span>
 					<select name="calendar_type">
 						<?php foreach ( $this->calendar_labels() as $type => $label ) : ?>
 							<option value="<?php echo esc_attr( $type ); ?>" <?php selected( $calendar_type, $type ); ?>><?php echo esc_html( $label ); ?></option>
 						<?php endforeach; ?>
 					</select>
 				</label>
-				<label><span><?php echo esc_html__( 'Year', 'walls-delivery-calc' ); ?></span>
+				<label><span><?php echo esc_html__( 'Год', 'walls-delivery-calc' ); ?></span>
 					<input type="number" name="year" min="2026" max="2100" value="<?php echo esc_attr( (string) $year ); ?>">
 				</label>
-				<button class="button" type="submit"><?php echo esc_html__( 'Open', 'walls-delivery-calc' ); ?></button>
+				<button class="button" type="submit"><?php echo esc_html__( 'Открыть', 'walls-delivery-calc' ); ?></button>
 			</form>
 			<form method="post">
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 				<input type="hidden" name="calendar_type" value="<?php echo esc_attr( $calendar_type ); ?>">
 				<input type="hidden" name="year" value="<?php echo esc_attr( (string) $year ); ?>">
 				<div class="wdc-calendar-toolbar">
-					<button class="button" type="submit" name="wdc_calendar_action" value="generate"><?php echo esc_html__( 'Generate year', 'walls-delivery-calc' ); ?></button>
-					<button class="button button-primary" type="submit" name="wdc_calendar_action" value="save"><?php echo esc_html__( 'Save calendar', 'walls-delivery-calc' ); ?></button>
+					<button class="button" type="submit" name="wdc_calendar_action" value="generate"><?php echo esc_html__( 'Сгенерировать год', 'walls-delivery-calc' ); ?></button>
+					<button class="button button-primary" type="submit" name="wdc_calendar_action" value="save"><?php echo esc_html__( 'Сохранить календарь', 'walls-delivery-calc' ); ?></button>
 				</div>
 				<div class="wdc-calendar-grid">
 					<?php foreach ( range( 1, 12 ) as $month ) : ?>
@@ -134,7 +135,7 @@ final class CalendarAdminPage {
 			return '';
 		}
 
-		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( 'manage_options' ) ) {
+		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return '';
 		}
 
@@ -143,7 +144,7 @@ final class CalendarAdminPage {
 			$this->repository->delete_year( $calendar_type, $year );
 			$this->repository->save_days( $this->year_generator->generate_year( $calendar_type, $year ) );
 			$this->calendar_service->mark_attention_resolved( $calendar_type, $year );
-			return __( 'Calendar year generated.', 'walls-delivery-calc' );
+			return __( 'Год календаря сгенерирован.', 'walls-delivery-calc' );
 		}
 
 		if ( 'save' !== $action ) {
@@ -167,7 +168,7 @@ final class CalendarAdminPage {
 
 		$this->repository->save_days( $days );
 		$this->calendar_service->mark_attention_resolved( $calendar_type, $year );
-		return __( 'Calendar saved.', 'walls-delivery-calc' );
+		return __( 'Календарь сохранен.', 'walls-delivery-calc' );
 	}
 
 	private function requested_calendar_type(): string {

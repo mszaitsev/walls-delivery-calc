@@ -20,7 +20,7 @@ final class DemoCarrier implements CarrierAdapterInterface {
 	public const KEY = 'demo';
 
 	public function get_identity(): CarrierIdentity {
-		return new CarrierIdentity( self::KEY, 'Demo Carrier', 'fixed', true );
+		return new CarrierIdentity( self::KEY, 'Тестовая доставка', 'fixed', true );
 	}
 
 	public function get_capabilities(): CarrierCapabilities {
@@ -56,11 +56,11 @@ final class DemoCarrier implements CarrierAdapterInterface {
 		$rates          = array();
 
 		if ( '' === $requested_type || DeliveryType::PICKUP === $requested_type ) {
-			$rates[] = $this->rate( DeliveryType::PICKUP, 'Пункт выдачи Demo', Money::from_rubles( 350 ), DateRange::single( 5 ), true );
+			$rates[] = $this->rate( DeliveryType::PICKUP, 'Тестовый пункт выдачи', Money::from_rubles( 350 ), DateRange::single( 5 ), true );
 		}
 
 		if ( '' === $requested_type || DeliveryType::COURIER === $requested_type ) {
-			$rates[] = $this->rate( DeliveryType::COURIER, 'Курьер Demo', Money::from_rubles( 550 ), DateRange::single( 3 ), false );
+			$rates[] = $this->rate( DeliveryType::COURIER, 'Тестовая курьерская доставка', Money::from_rubles( 550 ), DateRange::single( 3 ), false );
 		}
 
 		return new DeliveryQuote( $this->quote_id( $request ), self::KEY, $request->destination, $request->package, $rates, true, '', '', false, 'manual' );
@@ -70,7 +70,7 @@ final class DemoCarrier implements CarrierAdapterInterface {
 		return new DeliveryRate(
 			self::KEY . ':' . $delivery_type,
 			self::KEY,
-			'Demo Carrier',
+			'Тестовая доставка',
 			$delivery_type,
 			$title,
 			$delivery_type,
@@ -83,7 +83,7 @@ final class DemoCarrier implements CarrierAdapterInterface {
 			$days,
 			'',
 			$days->min_days . ' дн.',
-			$promo_like ? array( 'Demo promo candidate' ) : array(),
+			$promo_like ? array( 'Тестовый промо-тариф' ) : array(),
 			false,
 			'',
 			DeliveryType::PICKUP === $delivery_type,

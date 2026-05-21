@@ -56,7 +56,7 @@ final class CheckoutDeliveryTypeSelector {
 		}
 
 		if ( ! empty( $meta['requires_courier_address'] ) ) {
-			echo '<div class="wdc-courier-notice">' . esc_html__( 'Courier delivery will use the checkout address.', 'walls-delivery-calc' ) . '</div>';
+			echo '<div class="wdc-courier-notice">' . esc_html__( 'Курьерская доставка будет оформлена на адрес из checkout.', 'walls-delivery-calc' ) . '</div>';
 		}
 	}
 
@@ -68,9 +68,9 @@ final class CheckoutDeliveryTypeSelector {
 		echo '<div class="wdc-pickup-selector">';
 		echo '<input type="hidden" name="wdc_platform_pickup_rate_id" value="' . esc_attr( $rate_id ) . '">';
 		echo '<input type="hidden" name="wdc_platform_pickup_carrier" value="' . esc_attr( $carrier_key ) . '">';
-		echo '<label><span>' . esc_html__( 'Pickup point', 'walls-delivery-calc' ) . '</span>';
+		echo '<label><span>' . esc_html__( 'Пункт выдачи', 'walls-delivery-calc' ) . '</span>';
 		echo '<select name="wdc_platform_pickup_point">';
-		echo '<option value="">' . esc_html__( 'Select pickup point', 'walls-delivery-calc' ) . '</option>';
+		echo '<option value="">' . esc_html__( 'Выберите пункт выдачи', 'walls-delivery-calc' ) . '</option>';
 		foreach ( $points as $point ) {
 			echo '<option value="' . esc_attr( $point->code ) . '" ' . selected( $selected, $point->code, false ) . '>' . esc_html( $point->city . ' - ' . $point->address ) . '</option>';
 		}
@@ -195,6 +195,6 @@ final class CheckoutDeliveryTypeSelector {
 	}
 
 	private function label_for_type( string $delivery_type ): string {
-		return DeliveryType::PICKUP === $delivery_type ? __( 'Pickup', 'walls-delivery-calc' ) : __( 'Courier', 'walls-delivery-calc' );
+		return DeliveryType::PICKUP === $delivery_type ? __( 'Пункт выдачи', 'walls-delivery-calc' ) : __( 'Курьер', 'walls-delivery-calc' );
 	}
 }

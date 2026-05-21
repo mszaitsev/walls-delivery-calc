@@ -33,6 +33,8 @@ final class SettingsRepository {
 			'auto_generate_next_year'       => true,
 			'enable_new_checkout_shipping' => false,
 			'checkout_sort_mode'            => 'cheapest',
+			'show_checkout_debug_panel'     => false,
+			'enable_demo_carrier'           => true,
 		);
 	}
 

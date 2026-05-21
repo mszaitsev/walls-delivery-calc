@@ -36,6 +36,12 @@ if ( ! function_exists( 'wp_json_encode' ) ) {
 	}
 }
 
+if ( ! function_exists( '__' ) ) {
+	function __( string $text, string $domain = '' ): string {
+		return $text;
+	}
+}
+
 if ( ! function_exists( 'trailingslashit' ) ) {
 	function trailingslashit( string $value ): string {
 		return rtrim( $value, '/\\' ) . DIRECTORY_SEPARATOR;
