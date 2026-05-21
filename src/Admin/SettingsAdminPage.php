@@ -87,6 +87,12 @@ final class SettingsAdminPage {
 								</label>
 							</td>
 						</tr>
+						<tr>
+							<th scope="row"><label for="wdc_location_search_limit"><?php echo esc_html__( 'Лимит результатов поиска населенных пунктов', 'walls-delivery-calc' ); ?></label></th>
+							<td>
+								<input id="wdc_location_search_limit" type="number" name="location_search_limit" value="<?php echo esc_attr( (string) ( $values['location_search_limit'] ?? 100 ) ); ?>" min="10" max="300" step="1">
+							</td>
+						</tr>
 					</tbody>
 				</table>
 				<?php submit_button( __( 'Сохранить настройки', 'walls-delivery-calc' ) ); ?>
@@ -105,12 +111,19 @@ final class SettingsAdminPage {
 			$sort_mode = RateSorter::CHEAPEST;
 		}
 
+		$limit = isset( $data['location_search_limit'] ) ? $this->absint( wp_unslash( (string) $data['location_search_limit'] ) ) : 100;
+
 		return array(
 			'enable_new_checkout_shipping' => ! empty( $data['enable_new_checkout_shipping'] ),
 			'checkout_sort_mode'           => $sort_mode,
 			'show_checkout_debug_panel'    => ! empty( $data['show_checkout_debug_panel'] ),
 			'enable_demo_carrier'          => ! empty( $data['enable_demo_carrier'] ),
+			'location_search_limit'         => max( 10, min( 300, $limit > 0 ? $limit : 100 ) ),
 		);
+	}
+
+	private function absint( mixed $value ): int {
+		return function_exists( 'absint' ) ? absint( $value ) : abs( (int) $value );
 	}
 
 	private function handle_post(): string {

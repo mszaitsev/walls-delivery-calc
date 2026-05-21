@@ -16,6 +16,7 @@ use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Core\Autoloader;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
@@ -23,6 +24,17 @@ use WallsShop\WDC\Locations\Storage\LocationRepository;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
+
+$GLOBALS['wdc_address_test_options'] = array();
+
+function get_option( string $key, mixed $default = false ): mixed {
+	return $GLOBALS['wdc_address_test_options'][ $key ] ?? $default;
+}
+
+function update_option( string $key, mixed $value, bool|string $autoload = false ): bool {
+	$GLOBALS['wdc_address_test_options'][ $key ] = $value;
+	return true;
+}
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -223,7 +235,7 @@ address_smoke_assert( $known_postcode === $resolver->resolve_postcode( $known_ci
 
 $_REQUEST = array( 'query' => 'Новос' );
 ob_start();
-( new CheckoutLocationAjax( $search ) )->handle();
+( new CheckoutLocationAjax( $search, new SettingsRepository() ) )->handle();
 $ajax_payload = json_decode( (string) ob_get_clean(), true );
 address_smoke_assert( true === ( $ajax_payload['success'] ?? false ), 'Location AJAX must return success.' );
 address_smoke_assert( 'Новосибирская область' === ( $ajax_payload['data']['groups'][0]['region'] ?? '' ), 'Location AJAX must group Новос by region.' );

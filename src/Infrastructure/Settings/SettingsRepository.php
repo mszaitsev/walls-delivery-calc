@@ -35,6 +35,7 @@ final class SettingsRepository {
 			'checkout_sort_mode'            => 'cheapest',
 			'show_checkout_debug_panel'     => false,
 			'enable_demo_carrier'           => true,
+			'location_search_limit'          => 100,
 		);
 	}
 

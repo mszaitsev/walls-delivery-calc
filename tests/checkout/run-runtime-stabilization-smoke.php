@@ -346,7 +346,7 @@ function runtime_smoke_assert( bool $condition, string $message ): void {
 }
 
 function runtime_smoke_environment(): PluginEnvironment {
-	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.6' );
+	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.8' );
 }
 
 function runtime_smoke_request( string $delivery_type = '' ): QuoteRequest {
@@ -424,10 +424,18 @@ runtime_smoke_assert( 'Идет поиск...' === $city_selector_config['string
 
 $location_repository = new LocationRepository( $GLOBALS['wpdb'] );
 ( new LocationImportService( $location_repository ) )->import_from_json_file( dirname( __DIR__, 2 ) . '/database/demo/locations-demo.json' );
-$location_ajax = new CheckoutLocationAjax( new CheckoutLocationSearch( new LocationSearchService( $location_repository ) ) );
+$location_settings = new SettingsRepository();
+$location_ajax = new CheckoutLocationAjax( new CheckoutLocationSearch( new LocationSearchService( $location_repository ) ), $location_settings );
 $location_payload = $location_ajax->payload( 'Новос' );
 runtime_smoke_assert( 'Новосибирская область' === ( $location_payload['groups'][0]['region'] ?? '' ), 'Location AJAX payload must group Новос by region.' );
 runtime_smoke_assert( 'Новосибирск' === ( $location_payload['groups'][0]['locations'][0]['city_name'] ?? '' ), 'Location AJAX payload must return Новосибирск.' );
+runtime_smoke_assert( 100 === $location_payload['limit'], 'Location AJAX payload must include default limit.' );
+runtime_smoke_assert( isset( $location_payload['limit_reached'] ), 'Location AJAX payload must include limit_reached.' );
+$location_settings->set( 'location_search_limit', 10 );
+runtime_smoke_assert( 10 === $location_ajax->payload( 'Новос' )['limit'], 'Location AJAX must use SettingsRepository location_search_limit.' );
+$location_settings->set( 'location_search_limit', 999 );
+runtime_smoke_assert( 300 === $location_ajax->payload( 'Новос' )['limit'], 'Location AJAX must clamp location_search_limit to max.' );
+$location_settings->set( 'location_search_limit', 100 );
 runtime_smoke_assert( array() === $location_ajax->payload( 'xx' )['groups'], 'Short location AJAX query must return empty groups.' );
 runtime_smoke_assert( array() === $location_ajax->payload( 'НеизвестныйГород' )['groups'], 'Unknown location AJAX query must return empty groups.' );
 $_REQUEST = array(
@@ -449,12 +457,18 @@ runtime_smoke_assert( true === ( $ajax_response['success'] ?? false ), 'Location
 runtime_smoke_assert( 'Новосибирск' === ( $ajax_response['data']['groups'][0]['locations'][0]['city_name'] ?? '' ), 'Location AJAX handle must return grouped Новосибирск results.' );
 
 $city_selector_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.js' );
-foreach ( array( 'updated_checkout', '.wdcCitySelector', 'input[name="shipping_city"]', 'wdc_platform_search_locations', 'update_checkout', 'wdc_platform_location_id', 'event.target', ':visible', ':disabled', 'city input event', 'ajax request start', 'locationStore', 'data-location-key', 'mousedown.wdcCitySelector', 'isSelecting', 'preventDefault', 'stopPropagation', 'wdc-city-selector-selected', 'setTimeout' ) as $needle ) {
+foreach ( array( 'updated_checkout', '.wdcCitySelector', 'input[name="shipping_city"]', 'wdc_platform_search_locations', 'update_checkout', 'wdc_platform_location_id', 'event.target', ':visible', ':disabled', 'city input event', 'ajax request start', 'locationStore', 'data-location-key', 'mousedown.wdcCitySelector', 'isSelecting', 'preventDefault', 'stopPropagation', 'wdc-city-selector-selected', 'setTimeout', 'suppressSearch', 'search suppressed', 'suppressSearch disabled after updated_checkout', 'wdc-city-picker-overlay', 'wdc-city-picker-panel', 'wdc-city-picker-close', 'Escape', 'wdc-city-picker-search', 'manual fallback city' ) as $needle ) {
 	runtime_smoke_assert( str_contains( $city_selector_js, $needle ), 'City selector JS must contain ' . $needle . '.' );
 }
 runtime_smoke_assert( str_contains( $city_selector_js, "input.wdcCitySelector keyup.wdcCitySelector change.wdcCitySelector paste.wdcCitySelector" ), 'City selector JS must use delegated input.wdcCitySelector events.' );
 runtime_smoke_assert( ! str_contains( $city_selector_js, 'data-location="' ), 'City selector JS must not store encoded JSON in data-location.' );
 runtime_smoke_assert( ! str_contains( $city_selector_js, 'JSON.stringify( location )' ), 'City selector JS must not stringify location payload into HTML attributes.' );
+runtime_smoke_assert( ! str_contains( $city_selector_js, 'locations-demo.json' ), 'City selector JS must not preload full location dataset.' );
+
+$city_selector_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.css' );
+foreach ( array( 'max-width: 1300px', 'grid-template-columns: repeat(2', 'grid-template-columns: 1fr', 'position: fixed' ) as $needle ) {
+	runtime_smoke_assert( str_contains( $city_selector_css, $needle ), 'City selector CSS must contain ' . $needle . '.' );
+}
 
 $settings->set( 'enable_new_checkout_shipping', true );
 runtime_smoke_assert( $gate->enabled(), 'Feature gate must be enabled through SettingsRepository.' );
@@ -473,17 +487,22 @@ $cheap_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), 
 runtime_smoke_assert( DeliveryType::PICKUP === $cheap_rates[0]->delivery_type, 'Cheapest sort must put pickup first.' );
 
 $settings_page = new SettingsAdminPage( $settings );
+runtime_smoke_assert( 100 === $settings->get_int( 'location_search_limit', 0 ), 'SettingsRepository must default location_search_limit to 100.' );
 $sanitized = $settings_page->sanitize_settings(
 	array(
 		'enable_new_checkout_shipping' => '1',
 		'checkout_sort_mode'           => 'unexpected',
 		'show_checkout_debug_panel'    => 'on',
+		'location_search_limit'        => '100',
 	)
 );
 runtime_smoke_assert( true === $sanitized['enable_new_checkout_shipping'], 'enable_new_checkout_shipping must sanitize to true.' );
 runtime_smoke_assert( RateSorter::CHEAPEST === $sanitized['checkout_sort_mode'], 'Invalid checkout_sort_mode must fall back to cheapest.' );
 runtime_smoke_assert( true === $sanitized['show_checkout_debug_panel'], 'show_checkout_debug_panel must sanitize to true.' );
 runtime_smoke_assert( false === $sanitized['enable_demo_carrier'], 'Missing enable_demo_carrier checkbox must sanitize to false.' );
+runtime_smoke_assert( 100 === $sanitized['location_search_limit'], 'location_search_limit=100 must sanitize to 100.' );
+runtime_smoke_assert( 10 === $settings_page->sanitize_settings( array( 'location_search_limit' => '5' ) )['location_search_limit'], 'location_search_limit below min must clamp to 10.' );
+runtime_smoke_assert( 300 === $settings_page->sanitize_settings( array( 'location_search_limit' => '999' ) )['location_search_limit'], 'location_search_limit above max must clamp to 300.' );
 
 $GLOBALS['wdc_test_options'] = array(
 	'wdc_core_settings' => array(

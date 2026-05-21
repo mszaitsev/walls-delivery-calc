@@ -1,4 +1,4 @@
-# WDC Runtime Stabilization 0.12.4
+# WDC Runtime Stabilization 0.12.8
 
 ## Что исправлено
 
@@ -15,6 +15,8 @@
 - AJAX endpoint `wdc_platform_search_locations` регистрируется для logged-in и guest checkout независимо от `is_admin()`.
 - Нормализованный адрес теперь привязан к fingerprint текущего checkout address, поэтому старый город не остается в session после смены города.
 - Сохраненный выбор ПВЗ очищается при смене города и не показывается, если пункт не относится к текущему городу.
+- City selector теперь открывается как overlay/popup и не сдвигает checkout вниз.
+- Backend search ограничивает количество результатов настройкой `location_search_limit`, по умолчанию 100.
 
 ## Как включить новую доставку
 
@@ -48,40 +50,57 @@
 
 Выбранный тип доставки определяется выбранным WooCommerce shipping rate. Для pickup rate показывается selector ПВЗ. Для courier rate показывается подсказка: «Для курьерской доставки будет использован адрес, указанный в checkout.»
 
-## City selector v1
+## City picker overlay
 
-На checkout подключается простой autocomplete населенного пункта. Он работает только когда новая система доставки включена через `CheckoutFeatureGate`.
+На checkout подключается popup выбора населенного пункта. Он работает только когда новая система доставки включена через `CheckoutFeatureGate`.
 
 Что делает selector:
 
 - использует `#shipping_city` / `input[name="shipping_city"]`, а если их нет — `#billing_city` / `input[name="billing_city"]`;
+- при focus/click по стандартному полю города открывает overlay с отдельным полем поиска;
 - после 3 символов вызывает AJAX action `wdc_platform_search_locations`;
-- показывает результаты группами по регионам;
+- показывает результаты группами по регионам внутри scrollable popup;
 - при выборе населенного пункта заполняет city, postcode и state/region, если поля доступны;
 - сохраняет выбранный населенный пункт в hidden fields:
   `wdc_platform_location_id`, `wdc_platform_location_fias_id`, `wdc_platform_location_gar_id`, `wdc_platform_location_display_name`, `wdc_platform_location_postcode`, `wdc_platform_location_region_name`;
 - запускает штатный WooCommerce `update_checkout`.
 
-При простом вводе selector делает только AJAX search и не запускает `update_checkout` на каждый символ, чтобы WooCommerce не уничтожал список результатов. Checkout обновляется после выбора города из списка или на blur при ручном вводе.
+Frontend не загружает полный справочник городов. Он отправляет только введенный query, а backend возвращает найденные варианты в пределах `location_search_limit`.
 
-Если населенный пункт не найден, под полем показывается «Населенный пункт не найден. Будет использовано введенное значение.», а checkout не блокируется: введенный вручную город используется как fallback.
+Desktop popup: `max-width: 1300px`, `width: min(1300px, calc(100vw - 48px))`, результаты могут идти в 2 колонки. Mobile popup: почти full-screen, `width: calc(100vw - 24px)`, результаты в 1 колонку.
+
+При простом вводе picker делает только AJAX search и не запускает `update_checkout` на каждый символ. Checkout обновляется после выбора города из списка или при закрытии popup с ручным fallback-вводом.
+
+Если населенный пункт не найден, в popup показывается «Населенный пункт не найден. Будет использовано введенное значение.», а checkout не блокируется: введенный вручную город используется как fallback.
+
+Если backend достиг лимита результатов, frontend показывает «Показаны первые 100 результатов. Уточните запрос.».
 
 Как проверить:
 
 1. Включите новую доставку и DemoCarrier.
-2. На checkout начните вводить `Новос`.
-3. Должен появиться список населенных пунктов.
-4. Выберите «Новосибирск — Новосибирская область».
-5. Убедитесь, что индекс заполнен значением `630000`, а checkout обновился.
-6. Блок проверки адреса должен показать Новосибирск.
-7. Замените город на `Москва` и выберите Москву из списка.
-8. Блок проверки адреса должен показать Москву, а старый Новосибирск не должен оставаться.
+2. Кликните поле города на checkout.
+3. Должен открыться popup «Выберите населенный пункт».
+4. Введите `Новос`.
+5. Выберите «Новосибирск — Новосибирская область».
+6. Popup должен закрыться.
+7. Убедитесь, что город, индекс и регион заполнены, а checkout обновился.
+8. Блок проверки адреса должен показать Новосибирск.
 
 Troubleshooting:
 
 - В Network проверьте запрос `admin-ajax.php?action=wdc_platform_search_locations`.
-- Для администратора можно включить debug panel в настройках. Тогда city selector пишет в Console сообщения `wdc city selector: selector initialized`, найденное поле города, ajax url, query и AJAX success/error.
-- Если список появился и сразу исчезает, проверьте, что используется версия не ниже `0.12.4`: начиная с нее `update_checkout` не вызывается на каждый ввод.
+- Для администратора можно включить debug panel в настройках. Тогда city picker пишет в Console: `city picker opened`, `search input query`, `ajax request start`, `ajax success groups count`, `limit reached`, `city picker closed`, `location selected`, `manual fallback city`.
+
+## Search limit
+
+Настройка «Калькулятор доставок → Настройки → Лимит результатов поиска населенных пунктов» управляет максимальным числом результатов AJAX-поиска.
+
+- option key: `location_search_limit`;
+- default: 100;
+- min: 10;
+- max: 300.
+
+AJAX response содержит `limit` и `limit_reached`. Если `limit_reached=true`, frontend просит уточнить запрос.
 
 ## Address fingerprint
 

@@ -125,6 +125,7 @@ final class ShippingMethodRegistrar {
 			'ajax_url'  => function_exists( 'admin_url' ) ? admin_url( 'admin-ajax.php' ) : '',
 			'nonce'     => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( CheckoutLocationAjax::NONCE_ACTION ) : '',
 			'min_chars' => 3,
+			'location_search_limit' => max( 10, min( 300, $this->settings->get_int( 'location_search_limit', 100 ) ) ),
 			'debug'     => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
 			'strings'   => array(
 				'start'     => __( 'Начните вводить населенный пункт', 'walls-delivery-calc' ),

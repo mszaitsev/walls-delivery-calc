@@ -58,7 +58,7 @@ final class LocationRepository {
 	 */
 	public function search( string $query, int $limit = 20 ): array {
 		$query = $this->normalize_query( $query );
-		$limit = max( 1, min( 200, $limit ) );
+		$limit = max( 1, min( 300, $limit ) );
 
 		if ( '' === $query ) {
 			return array();

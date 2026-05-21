@@ -34,8 +34,8 @@ final class LocationSearchService {
 	/**
 	 * @return array<string, array<int, Location>>
 	 */
-	public function grouped( string $query ): array {
-		$locations = $this->search( $query, 50 );
+	public function grouped( string $query, int $limit = 100 ): array {
+		$locations = $this->search( $query, $limit );
 		$grouped   = array();
 
 		foreach ( $locations as $location ) {

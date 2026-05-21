@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\Locations;
 
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
@@ -12,7 +13,8 @@ final class CheckoutLocationAjax {
 	public const NONCE_ACTION = 'wdc_platform_location_search';
 
 	public function __construct(
-		private CheckoutLocationSearch $search
+		private CheckoutLocationSearch $search,
+		private SettingsRepository $settings
 	) {
 	}
 
@@ -36,19 +38,26 @@ final class CheckoutLocationAjax {
 	 * @return array<string,mixed>
 	 */
 	public function payload( string $query ): array {
+		$limit = $this->limit();
 		if ( $this->length( $query ) < 3 ) {
-			return array( 'groups' => array() );
+			return array( 'groups' => array(), 'limit' => $limit, 'limit_reached' => false );
 		}
 
 		$groups = array();
-		foreach ( $this->search->grouped( $query ) as $region => $locations ) {
+		$total  = 0;
+		foreach ( $this->search->grouped( $query, $limit ) as $region => $locations ) {
+			$total += count( $locations );
 			$groups[] = array(
 				'region'    => (string) $region,
 				'locations' => array_map( array( $this, 'location_payload' ), $locations ),
 			);
 		}
 
-		return array( 'groups' => $groups );
+		return array( 'groups' => $groups, 'limit' => $limit, 'limit_reached' => $total >= $limit );
+	}
+
+	private function limit(): int {
+		return max( 10, min( 300, $this->settings->get_int( 'location_search_limit', 100 ) ) );
 	}
 
 	/**
