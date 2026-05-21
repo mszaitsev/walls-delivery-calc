@@ -3,6 +3,8 @@
 	max-width: 420px;
 	border: 1px solid #c3c4c7;
 	background: #fff;
+	position: relative;
+	z-index: 50;
 }
 
 .wdc-city-selector:empty {
@@ -31,17 +33,26 @@
 	display: block;
 	width: 100%;
 	padding: 8px 10px;
-	border: 0;
 	border-top: 1px solid #f0f0f1;
 	background: #fff;
 	color: #1d2327;
 	text-align: left;
 	cursor: pointer;
+	user-select: none;
 }
 
 .wdc-city-selector__item:hover,
 .wdc-city-selector__item:focus {
 	background: #f0f6fc;
+	outline: 1px solid #72aee6;
+	outline-offset: -1px;
+}
+
+.wdc-city-selector-selected {
+	margin-top: 6px;
+	max-width: 420px;
+	color: #2271b1;
+	font-size: 13px;
 }
 
 @media (max-width: 600px) {
