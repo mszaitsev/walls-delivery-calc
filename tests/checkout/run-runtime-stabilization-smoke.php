@@ -346,7 +346,7 @@ function runtime_smoke_assert( bool $condition, string $message ): void {
 }
 
 function runtime_smoke_environment(): PluginEnvironment {
-	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.4' );
+	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.5' );
 }
 
 function runtime_smoke_request( string $delivery_type = '' ): QuoteRequest {
@@ -449,9 +449,10 @@ runtime_smoke_assert( true === ( $ajax_response['success'] ?? false ), 'Location
 runtime_smoke_assert( 'Новосибирск' === ( $ajax_response['data']['groups'][0]['locations'][0]['city_name'] ?? '' ), 'Location AJAX handle must return grouped Новосибирск results.' );
 
 $city_selector_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.js' );
-foreach ( array( 'updated_checkout', '.wdcCitySelector', 'input[name="shipping_city"]', 'wdc_platform_search_locations', 'update_checkout', 'wdc_platform_location_id' ) as $needle ) {
+foreach ( array( 'updated_checkout', '.wdcCitySelector', 'input[name="shipping_city"]', 'wdc_platform_search_locations', 'update_checkout', 'wdc_platform_location_id', 'event.target', ':visible', ':disabled', 'city input event', 'ajax request start' ) as $needle ) {
 	runtime_smoke_assert( str_contains( $city_selector_js, $needle ), 'City selector JS must contain ' . $needle . '.' );
 }
+runtime_smoke_assert( str_contains( $city_selector_js, ".on( 'input' + namespace + ' keyup'" ), 'City selector JS must use delegated input.wdcCitySelector events.' );
 
 $settings->set( 'enable_new_checkout_shipping', true );
 runtime_smoke_assert( $gate->enabled(), 'Feature gate must be enabled through SettingsRepository.' );

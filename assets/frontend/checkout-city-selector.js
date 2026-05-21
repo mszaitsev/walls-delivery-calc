@@ -3,6 +3,7 @@
 
 	var config = window.wdcPlatformCitySelector || {};
 	var namespace = '.wdcCitySelector';
+	var citySelector = '#shipping_city, input[name="shipping_city"], #billing_city, input[name="billing_city"]';
 	var timer = null;
 	var selectedDisplay = '';
 	var hiddenNames = [
@@ -20,11 +21,18 @@
 		}
 	}
 
-	function firstField( selectors ) {
+	function isUsableField( field ) {
+		var $field = $( field );
+		return $field.length && $field.is( ':visible' ) && ! $field.is( ':disabled' ) && 'hidden' !== String( $field.attr( 'type' ) || '' ).toLowerCase();
+	}
+
+	function firstUsableField( selectors ) {
 		for ( var index = 0; index < selectors.length; index++ ) {
-			var $field = $( selectors[ index ] ).first();
-			if ( $field.length ) {
-				return $field;
+			var $fields = $( selectors[ index ] );
+			for ( var fieldIndex = 0; fieldIndex < $fields.length; fieldIndex++ ) {
+				if ( isUsableField( $fields[ fieldIndex ] ) ) {
+					return $( $fields[ fieldIndex ] );
+				}
 			}
 		}
 
@@ -32,15 +40,15 @@
 	}
 
 	function cityField() {
-		return firstField( [ '#shipping_city', 'input[name="shipping_city"]', '#billing_city', 'input[name="billing_city"]' ] );
+		return firstUsableField( [ '#shipping_city', 'input[name="shipping_city"]', '#billing_city', 'input[name="billing_city"]' ] );
 	}
 
 	function postcodeField() {
-		return firstField( [ '#shipping_postcode', 'input[name="shipping_postcode"]', '#billing_postcode', 'input[name="billing_postcode"]' ] );
+		return firstUsableField( [ '#shipping_postcode', 'input[name="shipping_postcode"]', '#billing_postcode', 'input[name="billing_postcode"]' ] );
 	}
 
 	function stateField() {
-		return firstField( [ '#shipping_state', 'select[name="shipping_state"]', 'input[name="shipping_state"]', '#billing_state', 'select[name="billing_state"]', 'input[name="billing_state"]' ] );
+		return firstUsableField( [ '#shipping_state', 'select[name="shipping_state"]', 'input[name="shipping_state"]', '#billing_state', 'select[name="billing_state"]', 'input[name="billing_state"]' ] );
 	}
 
 	function checkoutForm( $field ) {
@@ -117,7 +125,7 @@
 			return;
 		}
 
-		debug( 'query', query );
+		debug( 'ajax request start', query );
 		renderMessage( $box, config.strings && config.strings.searching ? config.strings.searching : '', 'is-loading' );
 
 		$.ajax( {
@@ -137,7 +145,7 @@
 			}
 			renderMessage( $box, config.strings && config.strings.error ? config.strings.error : '', 'is-error' );
 		} ).fail( function ( xhr ) {
-			debug( 'ajax error', xhr );
+			debug( 'ajax fail', xhr );
 			renderMessage( $box, config.strings && config.strings.error ? config.strings.error : '', 'is-error' );
 		} );
 	}
@@ -165,59 +173,77 @@
 		$( document.body ).trigger( 'update_checkout' );
 	}
 
-	function bind( $field ) {
-		var $form = checkoutForm( $field );
-		if ( ! $form.length ) {
-			debug( 'checkout form not found' );
+	function handleCityInput( event ) {
+		var $field = $( event.target );
+		if ( ! isUsableField( $field ) ) {
+			debug( 'city input ignored unusable field', event.type );
 			return;
 		}
 
-		ensureHiddenFields( $form );
-		resultsBox( $field );
-		$field.off( namespace );
-		$field.on( 'input' + namespace, function () {
-			var query = String( $field.val() || '' );
-			window.clearTimeout( timer );
-			if ( selectedDisplay && query !== selectedDisplay ) {
-				clearHidden();
-			}
-
-			timer = window.setTimeout( function () {
-				if ( query.length < ( config.min_chars || 3 ) ) {
-					resultsBox( $field ).empty();
-					return;
-				}
-				search( query, $field );
-			}, 300 );
+		var query = String( $field.val() || '' );
+		debug( 'city input event', {
+			eventType: event.type,
+			fieldId: $field.attr( 'id' ) || '',
+			fieldName: $field.attr( 'name' ) || '',
+			query: query,
+			queryLength: query.length
 		} );
 
-		$field.on( 'blur' + namespace, function () {
-			var query = String( $field.val() || '' );
-			if ( selectedDisplay && query !== selectedDisplay ) {
-				clearHidden();
+		window.clearTimeout( timer );
+		if ( selectedDisplay && query !== selectedDisplay ) {
+			clearHidden();
+		}
+
+		timer = window.setTimeout( function () {
+			if ( query.length < ( config.min_chars || 3 ) ) {
+				resultsBox( $field ).empty();
+				return;
 			}
-			if ( query.length >= ( config.min_chars || 3 ) && ! selectedDisplay ) {
-				$( document.body ).trigger( 'update_checkout' );
-			}
-		} );
+
+			debug( 'search scheduled', query );
+			search( query, $field );
+		}, 300 );
+	}
+
+	function handleCityBlur( event ) {
+		var $field = $( event.target );
+		if ( ! isUsableField( $field ) ) {
+			return;
+		}
+
+		var query = String( $field.val() || '' );
+		if ( selectedDisplay && query !== selectedDisplay ) {
+			clearHidden();
+		}
+		if ( query.length >= ( config.min_chars || 3 ) && ! selectedDisplay ) {
+			$( document.body ).trigger( 'update_checkout' );
+		}
 	}
 
 	function init() {
 		var $field = cityField();
+		var $form = $field.length ? checkoutForm( $field ) : $( 'form.checkout' ).first();
+
 		debug( 'selector initialized' );
 		debug( $field.length ? 'city field found' : 'city field not found' );
 		debug( 'ajax url', config.ajax_url || '' );
 
-		if ( ! $field.length ) {
-			return;
+		if ( $form.length ) {
+			ensureHiddenFields( $form );
 		}
-		if ( ! config.ajax_url ) {
-			return;
+		if ( $field.length ) {
+			resultsBox( $field );
 		}
-
-		bind( $field );
 	}
 
+	$( document.body ).off( 'input' + namespace + ' keyup' + namespace + ' change' + namespace + ' paste' + namespace, citySelector );
+	$( document.body ).on( 'input' + namespace + ' keyup' + namespace + ' change' + namespace + ' paste' + namespace, citySelector, function ( event ) {
+		handleCityInput( event );
+	} );
+	$( document.body ).off( 'blur' + namespace, citySelector );
+	$( document.body ).on( 'blur' + namespace, citySelector, function ( event ) {
+		handleCityBlur( event );
+	} );
 	$( document.body ).off( 'click' + namespace, '.wdc-city-selector__item' );
 	$( document.body ).on( 'click' + namespace, '.wdc-city-selector__item', function () {
 		selectLocation( JSON.parse( decodeURIComponent( $( this ).attr( 'data-location' ) || '{}' ) ) );
