@@ -1,6 +1,6 @@
 # WDC DaData Address Normalization
 
-Version 0.14.2 uses DaData address cleaning as a token-only fallback in the checkout address pipeline.
+Version 0.14.3 uses DaData Suggest API as a token-only fallback in the checkout address pipeline.
 
 ## Role in the fallback chain
 
@@ -10,7 +10,7 @@ The full chain is:
 
 1. Local city context.
 2. FIAS/GAR placeholder. Real FIAS runtime normalization is intentionally disabled.
-3. DaData cleaner API.
+3. DaData Suggest API.
 4. Manual fallback.
 
 DaData runs only when `dadata_enabled` is enabled and the API token is configured.
@@ -44,31 +44,33 @@ Example:
 Россия, Новосибирская область, Новосибирск, Красный проспект, 25
 ```
 
-The HTTP request is:
+The HTTP request uses DaData Suggest API, not Cleaner API:
 
 ```http
-POST https://cleaner.dadata.ru/api/v1/clean/address
+POST https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address
 Content-Type: application/json
 Accept: application/json
 Authorization: Token <token>
 
-["Россия, Новосибирская область, Новосибирск, Красный проспект, 25"]
+{"query":"Россия, Новосибирская область, Новосибирск, Красный проспект, 25","count":1}
 ```
 
 No `X-Secret` header is sent.
 
+Suggest API suggestions do not guarantee the same automatic standardization semantics as Cleaner API, but they are suitable for clarifying the checkout address entered by the customer.
+
 ## Response mapping
 
-The first object from the DaData response is mapped into `Address`:
+The first object from `response.suggestions[0]` is mapped into `Address`:
 
-- `postal_code` -> `postcode`
-- `region_with_type` or `region` -> `region_name`
-- `region_iso_code` or `region_kladr_id` -> `region_code`
-- `city` or `settlement` -> `city` / `settlement`
-- `street_with_type` -> `street`
-- `house` plus `block` -> `house`
-- `result` -> `raw_address`
-- `fias_id` -> `fias_id`
+- `value` or `unrestricted_value` -> normalized full address
+- `data.postal_code` -> `postcode`
+- `data.region_with_type` or `data.region` -> `region_name`
+- `data.region_iso_code` -> `region_code`
+- `data.city` or `data.settlement` -> `city` / `settlement`
+- `data.street_with_type` -> `street`
+- `data.house` plus `data.block` -> `house`
+- `data.fias_id` -> `fias_id`
 
 `geo_lat` and `geo_lon` are intentionally ignored for now.
 
@@ -100,6 +102,7 @@ DaData returns an unsuccessful normalization result without throwing fatals:
 - `dadata_disabled`
 - `dadata_credentials_missing`
 - `dadata_empty_address`
+- `dadata_no_suggestions`
 - `dadata_api_failed`
 - `dadata_timeout`
 

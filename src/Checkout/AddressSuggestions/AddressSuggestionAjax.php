@@ -1,0 +1,63 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\Checkout\AddressSuggestions;
+
+defined( 'ABSPATH' ) || exit;
+
+final class AddressSuggestionAjax {
+	public const ACTION = 'wdc_platform_dadata_address_suggest';
+	public const NONCE_ACTION = 'wdc_platform_dadata_address_suggest';
+
+	public function __construct( private AddressSuggestionService $service ) {
+	}
+
+	public function register(): void {
+		add_action( 'wp_ajax_' . self::ACTION, array( $this, 'handle' ) );
+		add_action( 'wp_ajax_nopriv_' . self::ACTION, array( $this, 'handle' ) );
+	}
+
+	public function handle(): void {
+		$stage = $this->field( 'stage' );
+		$query = $this->field( 'query' );
+		$context = $this->context();
+		$payload = $this->service->suggest( $stage, $query, $context );
+
+		if ( function_exists( 'wp_send_json' ) ) {
+			wp_send_json( $payload );
+			return;
+		}
+
+		echo function_exists( 'wp_json_encode' ) ? wp_json_encode( $payload, JSON_UNESCAPED_UNICODE ) : json_encode( $payload, JSON_UNESCAPED_UNICODE );
+	}
+
+	private function field( string $key ): string {
+		$value = $_POST[ $key ] ?? $_REQUEST[ $key ] ?? '';
+		$value = is_array( $value ) ? '' : (string) $value;
+		$value = function_exists( 'wp_unslash' ) ? wp_unslash( $value ) : $value;
+		return function_exists( 'sanitize_text_field' ) ? sanitize_text_field( (string) $value ) : trim( strip_tags( (string) $value ) );
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private function context(): array {
+		$raw = $_POST['context'] ?? $_REQUEST['context'] ?? array();
+		if ( is_string( $raw ) ) {
+			$decoded = json_decode( function_exists( 'wp_unslash' ) ? wp_unslash( $raw ) : $raw, true );
+			$raw = is_array( $decoded ) ? $decoded : array();
+		}
+		if ( ! is_array( $raw ) ) {
+			$raw = array();
+		}
+
+		$context = array();
+		foreach ( array( 'city_kladr_id', 'city_fias_id', 'settlement_kladr_id', 'settlement_fias_id', 'street_fias_id' ) as $key ) {
+			$value = $raw[ $key ] ?? '';
+			$value = is_array( $value ) ? '' : (string) $value;
+			$context[ $key ] = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $value ) : trim( strip_tags( $value ) );
+		}
+
+		return $context;
+	}
+}

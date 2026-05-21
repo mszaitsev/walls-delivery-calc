@@ -21,6 +21,12 @@ use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
 use WallsShop\WDC\Checkout\Address\AddressQueryBuilder;
 use WallsShop\WDC\Checkout\Address\DaDataAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\FiasAddressNormalizer;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionAjax;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionNormalizer;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
+use WallsShop\WDC\Checkout\AddressSuggestions\DaDataSuggestionClient;
 use WallsShop\WDC\Checkout\Admin\CheckoutSimulationPage;
 use WallsShop\WDC\Checkout\Cache\QuoteCache;
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
@@ -167,6 +173,12 @@ final class Plugin {
 		$this->container->register( DaDataHttpClient::class, fn(): DaDataHttpClient => new DaDataHttpClient( $this->container->get( SettingsRepository::class )->get_int( 'dadata_api_timeout', 3 ), $this->container->get( DaDataLogger::class ) ) );
 		$this->container->register( AddressQueryBuilder::class, fn(): AddressQueryBuilder => new AddressQueryBuilder() );
 		$this->container->register( DaDataAddressNormalizer::class, fn(): DaDataAddressNormalizer => new DaDataAddressNormalizer( $this->container->get( SettingsRepository::class ), $this->container->get( DaDataCredentials::class ), $this->container->get( DaDataHttpClient::class ), $this->container->get( AddressQueryBuilder::class ) ) );
+		$this->container->register( AddressSuggestionSettings::class, fn(): AddressSuggestionSettings => new AddressSuggestionSettings( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ) ) );
+		$this->container->register( AddressSuggestionNormalizer::class, fn(): AddressSuggestionNormalizer => new AddressSuggestionNormalizer() );
+		$this->container->register( DaDataSuggestionClient::class, fn(): DaDataSuggestionClient => new DaDataSuggestionClient( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataLogger::class ) ) );
+		$this->container->register( AddressSuggestionClientInterface::class, fn(): AddressSuggestionClientInterface => $this->container->get( DaDataSuggestionClient::class ) );
+		$this->container->register( AddressSuggestionService::class, fn(): AddressSuggestionService => new AddressSuggestionService( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( AddressSuggestionClientInterface::class ), $this->container->get( AddressSuggestionNormalizer::class ) ) );
+		$this->container->register( AddressSuggestionAjax::class, fn(): AddressSuggestionAjax => new AddressSuggestionAjax( $this->container->get( AddressSuggestionService::class ) ) );
 		$this->container->register( FallbackAddressNormalizer::class, fn(): FallbackAddressNormalizer => new FallbackAddressNormalizer() );
 		$this->container->register(
 			CheckoutAddressNormalizer::class,
@@ -198,7 +210,8 @@ final class Plugin {
 				$this->container->get( CheckoutSessionManager::class ),
 				$this->container->get( RuleRepository::class ),
 				$this->environment,
-				$this->container->get( Logger::class )
+				$this->container->get( Logger::class ),
+				$this->container->get( AddressSuggestionSettings::class )
 			)
 		);
 		$this->container->register( NewShippingMethod::class, fn(): NewShippingMethod => new NewShippingMethod() );
@@ -316,7 +329,7 @@ final class Plugin {
 				$this->container->get( DemoPickupProvider::class )
 			)
 		);
-		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ), $this->container->get( DaDataCredentials::class ) ) );
+		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ), $this->container->get( DaDataCredentials::class ), $this->container->get( AddressSuggestionSettings::class ) ) );
 		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox() );
 	}
 
@@ -327,6 +340,7 @@ final class Plugin {
 		register_activation_hook( $this->environment->plugin_file(), array( $this, 'activate' ) );
 		$this->container->get( ShippingMethodRegistrar::class )->register();
 		$this->container->get( CheckoutLocationAjax::class )->register();
+		$this->container->get( AddressSuggestionAjax::class )->register();
 		if ( $this->container->get( CheckoutFeatureGate::class )->enabled() ) {
 			$this->container->get( CheckoutRateRenderer::class )->register();
 			$this->container->get( CheckoutDeliveryTypeSelector::class )->register();

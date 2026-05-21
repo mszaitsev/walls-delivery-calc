@@ -55,6 +55,10 @@ final class CheckoutDebugPanel {
 			$this->row( __( 'Normalization chain', 'walls-delivery-calc' ), implode( ' → ', $this->normalization_chain( $address_debug ) ) );
 			$this->row( __( 'DaData status', 'walls-delivery-calc' ), (string) ( $address_debug['dadata_status'] ?? ( 'dadata' === $address->source ? ( $address->success ? 'dadata success' : 'dadata failed' ) : '' ) ) );
 			$this->row( __( 'DaData error_code', 'walls-delivery-calc' ), (string) ( $address_debug['dadata_error_code'] ?? $address->error_code ) );
+			$this->row( __( 'DaData endpoint', 'walls-delivery-calc' ), (string) ( $address_debug['dadata_endpoint'] ?? '' ) );
+			$this->row( __( 'DaData status code', 'walls-delivery-calc' ), (string) ( $address_debug['dadata_status_code'] ?? '' ) );
+			$this->row( __( 'DaData suggestions count', 'walls-delivery-calc' ), (string) ( $address_debug['dadata_suggestions_count'] ?? '' ) );
+			$this->row( __( 'DaData first suggestion', 'walls-delivery-calc' ), (string) ( $address_debug['dadata_first_suggestion_value'] ?? '' ) );
 			$this->dadata_query_rows( is_array( $address_debug['dadata_query'] ?? null ) ? $address_debug['dadata_query'] : array() );
 		}
 		echo '</dl>';

@@ -6,7 +6,7 @@ namespace WallsShop\WDC\Locations\DaData;
 defined( 'ABSPATH' ) || exit;
 
 final class DaDataHttpClient {
-	private const CLEAN_ADDRESS_ENDPOINT = 'https://cleaner.dadata.ru/api/v1/clean/address';
+	private const SUGGEST_ADDRESS_ENDPOINT = 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address';
 
 	public function __construct(
 		private int $timeout,
@@ -16,18 +16,18 @@ final class DaDataHttpClient {
 	}
 
 	/**
-	 * @return array{success:bool,status_code:int,body:mixed,error_message:string,timeout:bool}
+	 * @return array<string,mixed>
 	 */
 	public function clean_address( string $address, string $token ): array {
-		$this->logger->request_start( array( 'host' => 'cleaner.dadata.ru' ) );
+		$this->logger->request_start( array( 'host' => 'suggestions.dadata.ru', 'endpoint' => 'suggest/address' ) );
 
 		if ( ! function_exists( 'wp_remote_post' ) ) {
 			return $this->failure( 'wp_remote_post is unavailable.', false );
 		}
 
 		$body = function_exists( 'wp_json_encode' )
-			? wp_json_encode( array( $address ), JSON_UNESCAPED_UNICODE )
-			: json_encode( array( $address ), JSON_UNESCAPED_UNICODE );
+			? wp_json_encode( array( 'query' => $address, 'count' => 1 ), JSON_UNESCAPED_UNICODE )
+			: json_encode( array( 'query' => $address, 'count' => 1 ), JSON_UNESCAPED_UNICODE );
 
 		if ( ! is_string( $body ) ) {
 			return $this->failure( 'DaData JSON encode failed.', false );
@@ -35,7 +35,7 @@ final class DaDataHttpClient {
 
 		try {
 			$response = wp_remote_post(
-				self::CLEAN_ADDRESS_ENDPOINT,
+				self::SUGGEST_ADDRESS_ENDPOINT,
 				array(
 					'timeout' => $this->timeout,
 					'headers' => array(
@@ -69,19 +69,40 @@ final class DaDataHttpClient {
 			$this->logger->parse_error( array( 'status_code' => $status_code ) );
 		}
 
-		$success = $status_code >= 200 && $status_code < 300 && is_array( $parsed ) && isset( $parsed[0] ) && is_array( $parsed[0] );
+		$suggestions = is_array( $parsed ) && is_array( $parsed['suggestions'] ?? null ) ? $parsed['suggestions'] : array();
+		$suggestions_count = count( $suggestions );
+		$first_suggestion = is_array( $suggestions[0] ?? null ) ? $suggestions[0] : null;
+		$success = $status_code >= 200 && $status_code < 300 && is_array( $first_suggestion );
+
+		if ( $status_code >= 200 && $status_code < 300 && ! $success ) {
+			return array(
+				'success'             => false,
+				'status_code'         => $status_code,
+				'body'                => null,
+				'error_message'       => 'DaData returned no suggestions.',
+				'error_code'          => 'dadata_no_suggestions',
+				'timeout'             => false,
+				'endpoint'            => 'suggest/address',
+				'suggestions_count'   => $suggestions_count,
+				'first_suggestion_value' => '',
+			);
+		}
 
 		return array(
 			'success'       => $success,
 			'status_code'   => $status_code,
-			'body'          => $success ? $parsed[0] : null,
+			'body'          => $success ? $first_suggestion : null,
 			'error_message' => $success ? '' : 'DaData HTTP status ' . $status_code,
+			'error_code'    => $success ? '' : 'dadata_api_failed',
 			'timeout'       => false,
+			'endpoint'      => 'suggest/address',
+			'suggestions_count' => $suggestions_count,
+			'first_suggestion_value' => is_array( $first_suggestion ) ? (string) ( $first_suggestion['value'] ?? '' ) : '',
 		);
 	}
 
 	/**
-	 * @return array{success:bool,status_code:int,body:mixed,error_message:string,timeout:bool}
+	 * @return array<string,mixed>
 	 */
 	private function failure( string $message, bool $timeout ): array {
 		if ( $timeout ) {
@@ -95,7 +116,11 @@ final class DaDataHttpClient {
 			'status_code'   => 0,
 			'body'          => null,
 			'error_message' => $message,
+			'error_code'    => $timeout ? 'dadata_timeout' : 'dadata_api_failed',
 			'timeout'       => $timeout,
+			'endpoint'      => 'suggest/address',
+			'suggestions_count' => 0,
+			'first_suggestion_value' => '',
 		);
 	}
 

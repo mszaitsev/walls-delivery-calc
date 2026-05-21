@@ -1,5 +1,16 @@
 # WDC Runtime Stabilization 0.12.8
 
+## DaData Suggestions 0.14.4
+
+- Добавлен foundation для визуальных DaData-подсказок адреса через серверный AJAX proxy `wdc_platform_dadata_address_suggest`.
+- API-ключ DaData хранится только на сервере через `EncryptionService` и не попадает во frontend config.
+- Если `dadata_suggestions_enabled=true` и API-ключ сохранен, checkout использует DaData city/address suggestions; локальный city picker не подключается, чтобы не было двух popup на одном поле.
+- Если DaData suggestions выключены, локальный city picker работает как раньше.
+- Поддержан flow `city -> street -> house_after_street -> resolve`.
+- `address` stage использует `locations_boost` по выбранному городу, а не жесткое ограничение `locations`.
+- Выбранные DaData данные сохраняются в hidden fields `{billing|shipping}_dadata_*` и затем в order meta.
+- Ручной ввод остается fallback: checkout не блокируется, если DaData недоступна или покупатель продолжил вручную.
+
 ## Что исправлено
 
 - Устранен fatal при создании `NewShippingMethod`: внутренний репозиторий настроек не конфликтует с публичным свойством WooCommerce `WC_Settings_API::$settings`.

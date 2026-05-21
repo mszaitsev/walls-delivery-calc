@@ -45,17 +45,20 @@ final class DaDataAddressNormalizer implements AddressNormalizerInterface {
 
 		$response = $this->http_client->clean_address( $query, $this->credentials->token() );
 		if ( empty( $response['success'] ) || ! is_array( $response['body'] ?? null ) ) {
+			$response_debug = $this->response_debug( $response );
 			return $this->failure(
 				$input,
 				$context,
-				! empty( $response['timeout'] ) ? 'dadata_timeout' : 'dadata_api_failed',
+				(string) ( $response['error_code'] ?? ( ! empty( $response['timeout'] ) ? 'dadata_timeout' : 'dadata_api_failed' ) ),
 				(string) ( $response['error_message'] ?? 'DaData request failed.' ),
-				! empty( $response['timeout'] ) ? 'dadata timeout' : 'dadata failed',
-				$query_debug
+				! empty( $response['timeout'] ) ? 'dadata timeout' : ( 'dadata_no_suggestions' === (string) ( $response['error_code'] ?? '' ) ? 'dadata failed' : 'dadata failed' ),
+				array_merge( $query_debug, $response_debug )
 			);
 		}
 
-		$body = $response['body'];
+		$suggestion = $response['body'];
+		$body = is_array( $suggestion['data'] ?? null ) ? $suggestion['data'] : array();
+		$normalized_address = (string) ( $suggestion['unrestricted_value'] ?? ( $suggestion['value'] ?? $query ) );
 		$address = new Address(
 			country_code: (string) ( $context['country_code'] ?? 'RU' ),
 			country_name: 'Россия',
@@ -66,7 +69,7 @@ final class DaDataAddressNormalizer implements AddressNormalizerInterface {
 			postcode: (string) ( $body['postal_code'] ?? ( $context['postcode'] ?? '' ) ),
 			street: (string) ( $body['street_with_type'] ?? ( $body['street'] ?? ( $context['address_1'] ?? '' ) ) ),
 			house: trim( (string) ( $body['house'] ?? ( $context['address_2'] ?? '' ) ) . ( '' !== (string) ( $body['block'] ?? '' ) ? ' ' . (string) $body['block'] : '' ) ),
-			raw_address: (string) ( $body['result'] ?? $query ),
+			raw_address: $normalized_address,
 			fias_id: (string) ( $body['fias_id'] ?? '' ),
 			normalized: true,
 			fallback: false
@@ -80,7 +83,7 @@ final class DaDataAddressNormalizer implements AddressNormalizerInterface {
 			'dadata',
 			'',
 			'',
-			$this->debug_payload( 'dadata success', $query_debug )
+			$this->debug_payload( 'dadata success', array_merge( $query_debug, $this->response_debug( $response ) ) )
 		);
 	}
 
@@ -128,6 +131,23 @@ final class DaDataAddressNormalizer implements AddressNormalizerInterface {
 			'normalization_chain' => array( 'local city DB', 'fias placeholder', 'dadata', 'manual fallback' ),
 			'dadata_status'       => $status,
 			'dadata_query'        => $query_debug,
+			'dadata_endpoint'     => (string) ( $query_debug['endpoint'] ?? 'suggest/address' ),
+			'dadata_status_code'  => (int) ( $query_debug['status_code'] ?? 0 ),
+			'dadata_suggestions_count' => (int) ( $query_debug['suggestions_count'] ?? 0 ),
+			'dadata_first_suggestion_value' => (string) ( $query_debug['first_suggestion_value'] ?? '' ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $response
+	 * @return array<string,mixed>
+	 */
+	private function response_debug( array $response ): array {
+		return array(
+			'endpoint'               => (string) ( $response['endpoint'] ?? 'suggest/address' ),
+			'status_code'            => (int) ( $response['status_code'] ?? 0 ),
+			'suggestions_count'      => (int) ( $response['suggestions_count'] ?? 0 ),
+			'first_suggestion_value' => (string) ( $response['first_suggestion_value'] ?? '' ),
 		);
 	}
 

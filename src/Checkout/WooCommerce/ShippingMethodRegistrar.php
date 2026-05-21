@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionAjax;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Core\PluginEnvironment;
@@ -22,7 +24,8 @@ final class ShippingMethodRegistrar {
 		private CheckoutSessionManager $session_manager,
 		private RuleRepository $rule_repository,
 		private PluginEnvironment $environment,
-		private Logger $logger
+		private Logger $logger,
+		private ?AddressSuggestionSettings $suggestion_settings = null
 	) {
 	}
 
@@ -87,25 +90,33 @@ final class ShippingMethodRegistrar {
 			array( 'wdc-platform-checkout-rates' ),
 			$this->environment->version()
 		);
+		wp_enqueue_style(
+			'wdc-platform-address-suggestions',
+			$this->environment->plugin_url() . 'assets/frontend/checkout-address-suggestions.css',
+			array( 'wdc-platform-checkout-rates' ),
+			$this->environment->version()
+		);
 		if ( function_exists( 'wp_enqueue_script' ) ) {
 			$city_selector_dependencies = array( 'jquery' );
 			if ( function_exists( 'wp_script_is' ) && wp_script_is( 'wc-checkout', 'registered' ) ) {
 				$city_selector_dependencies[] = 'wc-checkout';
 			}
 
-			wp_enqueue_script(
-				'wdc-platform-city-selector',
-				$this->environment->plugin_url() . 'assets/frontend/checkout-city-selector.js',
-				$city_selector_dependencies,
-				$this->environment->version(),
-				true
-			);
-			if ( function_exists( 'wp_localize_script' ) ) {
-				wp_localize_script(
+			if ( ! $this->suggestions_enabled() ) {
+				wp_enqueue_script(
 					'wdc-platform-city-selector',
-					'wdcPlatformCitySelector',
-					$this->city_selector_config()
+					$this->environment->plugin_url() . 'assets/frontend/checkout-city-selector.js',
+					$city_selector_dependencies,
+					$this->environment->version(),
+					true
 				);
+				if ( function_exists( 'wp_localize_script' ) ) {
+					wp_localize_script(
+						'wdc-platform-city-selector',
+						'wdcPlatformCitySelector',
+						$this->city_selector_config()
+					);
+				}
 			}
 			wp_enqueue_script(
 				'wdc-platform-checkout-sort',
@@ -130,7 +141,30 @@ final class ShippingMethodRegistrar {
 					)
 				);
 			}
+			wp_enqueue_script(
+				'wdc-platform-address-suggestions',
+				$this->environment->plugin_url() . 'assets/frontend/checkout-address-suggestions.js',
+				array( 'jquery' ),
+				$this->environment->version(),
+				true
+			);
+			if ( function_exists( 'wp_localize_script' ) ) {
+				wp_localize_script(
+					'wdc-platform-address-suggestions',
+					'wdcPlatformAddressSuggestions',
+					array(
+						'ajax_url' => function_exists( 'admin_url' ) ? admin_url( 'admin-ajax.php' ) : '',
+						'debug'    => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
+						'enabled'  => $this->suggestions_enabled(),
+						'action'   => AddressSuggestionAjax::ACTION,
+					)
+				);
+			}
 		}
+	}
+
+	private function suggestions_enabled(): bool {
+		return $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->enabled() && $this->suggestion_settings->has_api_key();
 	}
 
 	/**

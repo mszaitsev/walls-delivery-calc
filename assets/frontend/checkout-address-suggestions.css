@@ -1,0 +1,51 @@
+.wdc-address-suggestions {
+	position: absolute;
+	z-index: 99999;
+	display: none;
+	max-width: 1300px;
+	max-height: 320px;
+	overflow: auto;
+	background: #fff;
+	border: 1px solid #d8d8d8;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+.wdc-address-suggestions__item {
+	display: block;
+	width: 100%;
+	padding: 10px 12px;
+	border: 0;
+	border-bottom: 1px solid #eee;
+	background: #fff;
+	color: #1f2933;
+	text-align: left;
+	cursor: pointer;
+}
+
+.wdc-address-suggestions__item:hover,
+.wdc-address-suggestions__item:focus {
+	background: #f4f7fb;
+}
+
+.wdc-address-suggestions__label,
+.wdc-address-suggestions__sublabel {
+	display: block;
+}
+
+.wdc-address-suggestions__label {
+	font-weight: 600;
+}
+
+.wdc-address-suggestions__sublabel {
+	margin-top: 2px;
+	color: #667085;
+	font-size: 12px;
+}
+
+@media (max-width: 900px) {
+	.wdc-address-suggestions {
+		left: 0 !important;
+		width: 100% !important;
+		max-width: 100%;
+	}
+}

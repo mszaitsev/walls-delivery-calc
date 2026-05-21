@@ -57,22 +57,31 @@ function wp_remote_post( string $url, array $args = array() ): array {
 		return array( 'response' => array( 'code' => 500 ), 'body' => '{}' );
 	}
 
+	if ( 'empty' === $GLOBALS['wdc_dadata_http_mode'] ) {
+		return array( 'response' => array( 'code' => 200 ), 'body' => wp_json_encode( array( 'suggestions' => array() ) ) );
+	}
+
 	return array(
 		'response' => array( 'code' => 200 ),
 		'body'     => wp_json_encode(
 			array(
-				array(
-					'postal_code'      => '630099',
-					'region_with_type' => 'Новосибирская обл',
-					'region_iso_code'  => 'RU-NVS',
-					'city'             => 'Новосибирск',
-					'street_with_type' => 'Красный пр-кт',
-					'house'            => '25',
-					'block'            => '',
-					'result'           => '630099, Новосибирская обл, г Новосибирск, Красный пр-кт, д 25',
-					'fias_id'          => 'dadata-fias-id',
-					'qc'               => 0,
-					'qc_complete'      => 0,
+				'suggestions' => array(
+					array(
+						'value'              => 'Новосибирск, Красный пр-кт, 25',
+						'unrestricted_value' => '630099, Новосибирская обл, г Новосибирск, Красный пр-кт, д 25',
+						'data'               => array(
+							'postal_code'      => '630099',
+							'region_with_type' => 'Новосибирская обл',
+							'region_iso_code'  => 'RU-NVS',
+							'city'             => 'Новосибирск',
+							'street_with_type' => 'Красный пр-кт',
+							'house'            => '25',
+							'block'            => '',
+							'fias_id'          => 'dadata-fias-id',
+							'qc'               => 0,
+							'qc_complete'      => 0,
+						),
+					),
 				),
 			)
 		),
@@ -217,12 +226,24 @@ dadata_smoke_assert( '25' === $success->address->house, 'DaData house must map t
 dadata_smoke_assert( 'dadata-fias-id' === $success->address->fias_id, 'DaData fias_id must map to address FIAS id.' );
 dadata_smoke_assert( 0.95 === $success->confidence, 'DaData qc=0/qc_complete=0 must map to high confidence.' );
 $request = $GLOBALS['wdc_dadata_http_requests'][0] ?? array();
+$request_body = json_decode( (string) ( $request['args']['body'] ?? '' ), true );
+dadata_smoke_assert( str_contains( (string) ( $request['url'] ?? '' ), 'suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address' ), 'DaData request must use Suggest API URL.' );
+dadata_smoke_assert( is_array( $request_body ) && ! array_is_list( $request_body ), 'DaData request body must be a JSON object.' );
+dadata_smoke_assert( 1 === (int) ( $request_body['count'] ?? 0 ), 'DaData request body must set count=1.' );
+dadata_smoke_assert( str_contains( (string) ( $request_body['query'] ?? '' ), 'Красный проспект' ), 'DaData request body query must contain address query.' );
 dadata_smoke_assert( ! str_contains( (string) ( $request['args']['body'] ?? '' ), 'raw-dadata-token' ), 'HTTP request body must not contain token.' );
 dadata_smoke_assert( str_contains( (string) ( $request['args']['body'] ?? '' ), 'Красный проспект' ), 'HTTP request body must contain address query.' );
 dadata_smoke_assert( array( 'Content-Type', 'Accept', 'Authorization' ) === array_keys( $request['args']['headers'] ?? array() ), 'DaData request headers must contain only content type, accept, and authorization.' );
 dadata_smoke_assert( 'Token raw-dadata-token' === ( $request['args']['headers']['Authorization'] ?? '' ), 'DaData Authorization header must use token only.' );
 dadata_smoke_assert( ! isset( $request['args']['headers']['X-Secret'] ), 'DaData request must not send X-Secret.' );
 dadata_smoke_assert( str_contains( (string) ( $success->debug['dadata_query']['query'] ?? '' ), 'Россия' ), 'DaData debug query must include final query string.' );
+dadata_smoke_assert( 'suggest/address' === ( $success->debug['dadata_endpoint'] ?? '' ), 'DaData debug must include suggest/address endpoint.' );
+dadata_smoke_assert( 1 === (int) ( $success->debug['dadata_suggestions_count'] ?? 0 ), 'DaData debug must include suggestions count.' );
+dadata_smoke_assert( 'Новосибирск, Красный пр-кт, 25' === ( $success->debug['dadata_first_suggestion_value'] ?? '' ), 'DaData debug must include first suggestion value.' );
+
+$GLOBALS['wdc_dadata_http_mode'] = 'empty';
+$empty_suggestions = $normalizer->normalize( 'Новосибирск Красный проспект 25', $context );
+dadata_smoke_assert( ! $empty_suggestions->success && 'dadata_no_suggestions' === $empty_suggestions->error_code, 'Empty DaData suggestions must return dadata_no_suggestions.' );
 
 $GLOBALS['wdc_dadata_http_mode'] = 'timeout';
 $timeout = $normalizer->normalize( 'Новосибирск Красный проспект 25', $context );
