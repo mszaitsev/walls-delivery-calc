@@ -53,7 +53,10 @@ final class CheckoutLocationAjax {
 			);
 		}
 
-		return array( 'groups' => $groups, 'limit' => $limit, 'limit_reached' => $total >= $limit );
+		return array_merge(
+			array( 'groups' => $groups, 'limit' => $limit, 'limit_reached' => $total >= $limit ),
+			$this->search->last_search_meta()
+		);
 	}
 
 	private function limit(): int {

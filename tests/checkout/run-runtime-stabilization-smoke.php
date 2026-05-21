@@ -330,6 +330,7 @@ use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Import\LocationImportService;
+use WallsShop\WDC\Locations\Services\KeyboardLayoutTransformer;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
@@ -346,7 +347,7 @@ function runtime_smoke_assert( bool $condition, string $message ): void {
 }
 
 function runtime_smoke_environment(): PluginEnvironment {
-	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.8' );
+	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.9' );
 }
 
 function runtime_smoke_request( string $delivery_type = '' ): QuoteRequest {
@@ -425,10 +426,17 @@ runtime_smoke_assert( 'Идет поиск...' === $city_selector_config['string
 $location_repository = new LocationRepository( $GLOBALS['wpdb'] );
 ( new LocationImportService( $location_repository ) )->import_from_json_file( dirname( __DIR__, 2 ) . '/database/demo/locations-demo.json' );
 $location_settings = new SettingsRepository();
-$location_ajax = new CheckoutLocationAjax( new CheckoutLocationSearch( new LocationSearchService( $location_repository ) ), $location_settings );
+$keyboard_layout = new KeyboardLayoutTransformer();
+runtime_smoke_assert( 'новос' === $keyboard_layout->latin_to_cyrillic_layout( 'yjdjc' ), 'Keyboard layout must map yjdjc to новос.' );
+runtime_smoke_assert( 'привет' === $keyboard_layout->latin_to_cyrillic_layout( 'ghbdtn' ), 'Keyboard layout must map ghbdtn to привет.' );
+runtime_smoke_assert( in_array( 'новос', $keyboard_layout->variants( 'yjdjc' ), true ), 'Keyboard variants must include corrected query.' );
+$location_search_service = new LocationSearchService( $location_repository, $keyboard_layout );
+$location_ajax = new CheckoutLocationAjax( new CheckoutLocationSearch( $location_search_service ), $location_settings );
 $location_payload = $location_ajax->payload( 'Новос' );
 runtime_smoke_assert( 'Новосибирская область' === ( $location_payload['groups'][0]['region'] ?? '' ), 'Location AJAX payload must group Новос by region.' );
 runtime_smoke_assert( 'Новосибирск' === ( $location_payload['groups'][0]['locations'][0]['city_name'] ?? '' ), 'Location AJAX payload must return Новосибирск.' );
+runtime_smoke_assert( 'Новосибирск' === ( $location_ajax->payload( 'yjdjc' )['groups'][0]['locations'][0]['city_name'] ?? '' ), 'Location search must find Новосибирск through keyboard layout correction.' );
+runtime_smoke_assert( array() === $location_ajax->payload( 'Berlin' )['groups'], 'Keyboard layout correction must not make Berlin match Russian cities accidentally.' );
 runtime_smoke_assert( 100 === $location_payload['limit'], 'Location AJAX payload must include default limit.' );
 runtime_smoke_assert( isset( $location_payload['limit_reached'] ), 'Location AJAX payload must include limit_reached.' );
 $location_settings->set( 'location_search_limit', 10 );
@@ -457,7 +465,7 @@ runtime_smoke_assert( true === ( $ajax_response['success'] ?? false ), 'Location
 runtime_smoke_assert( 'Новосибирск' === ( $ajax_response['data']['groups'][0]['locations'][0]['city_name'] ?? '' ), 'Location AJAX handle must return grouped Новосибирск results.' );
 
 $city_selector_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.js' );
-foreach ( array( 'updated_checkout', '.wdcCitySelector', 'input[name="shipping_city"]', 'wdc_platform_search_locations', 'update_checkout', 'wdc_platform_location_id', 'event.target', ':visible', ':disabled', 'city input event', 'ajax request start', 'locationStore', 'data-location-key', 'mousedown.wdcCitySelector', 'isSelecting', 'preventDefault', 'stopPropagation', 'wdc-city-selector-selected', 'setTimeout', 'suppressSearch', 'search suppressed', 'suppressSearch disabled after updated_checkout', 'wdc-city-picker-overlay', 'wdc-city-picker-panel', 'wdc-city-picker-close', 'Escape', 'wdc-city-picker-search', 'manual fallback city' ) as $needle ) {
+foreach ( array( 'updated_checkout', '.wdcCitySelector', 'input[name="shipping_city"]', 'wdc_platform_search_locations', 'update_checkout', 'wdc_platform_location_id', 'event.target', ':visible', ':disabled', 'city input event', 'ajax request start', 'locationStore', 'data-location-key', 'mousedown.wdcCitySelector', 'isSelecting', 'preventDefault', 'stopPropagation', 'wdc-city-selector-selected', 'setTimeout', 'suppressSearch', 'search suppressed', 'suppressSearch disabled after updated_checkout', 'wdc-city-picker-overlay', 'wdc-city-picker-panel', 'wdc-city-picker-close', 'Escape', 'wdc-city-picker-search', 'manual fallback city', 'wdc-city-picker-fallback', 'Выбрать введенный населенный пункт', 'corrected query', 'correction used' ) as $needle ) {
 	runtime_smoke_assert( str_contains( $city_selector_js, $needle ), 'City selector JS must contain ' . $needle . '.' );
 }
 runtime_smoke_assert( str_contains( $city_selector_js, "input.wdcCitySelector keyup.wdcCitySelector change.wdcCitySelector paste.wdcCitySelector" ), 'City selector JS must use delegated input.wdcCitySelector events.' );
@@ -466,7 +474,7 @@ runtime_smoke_assert( ! str_contains( $city_selector_js, 'JSON.stringify( locati
 runtime_smoke_assert( ! str_contains( $city_selector_js, 'locations-demo.json' ), 'City selector JS must not preload full location dataset.' );
 
 $city_selector_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.css' );
-foreach ( array( 'max-width: 1300px', 'grid-template-columns: repeat(2', 'grid-template-columns: 1fr', 'position: fixed' ) as $needle ) {
+foreach ( array( 'max-width: 1300px', 'grid-template-columns: repeat(2', '@media (max-width: 900px)', 'grid-template-columns: 1fr', 'width: 100%', 'min-width: 0', 'position: fixed' ) as $needle ) {
 	runtime_smoke_assert( str_contains( $city_selector_css, $needle ), 'City selector CSS must contain ' . $needle . '.' );
 }
 

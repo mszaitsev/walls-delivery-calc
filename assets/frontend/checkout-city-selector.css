@@ -68,6 +68,8 @@
 .wdc-city-picker-results {
 	padding: 0 18px 18px;
 	overflow: auto;
+	width: 100%;
+	box-sizing: border-box;
 }
 
 .wdc-city-picker-message,
@@ -75,6 +77,22 @@
 	padding: 10px 12px;
 	color: #646970;
 	font-size: 14px;
+}
+
+.wdc-city-picker-fallback {
+	margin: 0 12px 12px;
+	padding: 10px 12px;
+	border: 1px solid #2271b1;
+	background: #2271b1;
+	color: #fff;
+	cursor: pointer;
+	font-size: 14px;
+}
+
+.wdc-city-picker-fallback:hover,
+.wdc-city-picker-fallback:focus {
+	background: #135e96;
+	outline: 1px solid #72aee6;
 }
 
 .wdc-city-picker-message.is-error {
@@ -136,7 +154,7 @@
 	font-size: 13px;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 900px) {
 	.wdc-city-picker-overlay {
 		align-items: flex-start;
 		padding: 12px;
@@ -144,6 +162,7 @@
 
 	.wdc-city-picker-panel {
 		width: calc(100vw - 24px);
+		min-width: 0;
 		max-height: calc(100vh - 24px);
 	}
 
@@ -153,13 +172,22 @@
 
 	.wdc-city-picker-search {
 		margin: 12px 14px;
+		width: calc(100% - 28px);
+		box-sizing: border-box;
 	}
 
 	.wdc-city-picker-results {
 		padding: 0 14px 14px;
+		width: 100%;
 	}
 
 	.wdc-city-picker-groups {
+		width: 100%;
 		grid-template-columns: 1fr;
+	}
+
+	.wdc-city-picker-group {
+		width: 100%;
+		min-width: 0;
 	}
 }

@@ -9,26 +9,69 @@ use WallsShop\WDC\Locations\ValueObjects\Location;
 defined( 'ABSPATH' ) || exit;
 
 final class LocationSearchService {
-	public function __construct( private LocationRepository $repository ) {
+	/** @var array<string,mixed> */
+	private array $last_search_meta = array(
+		'original_query'   => '',
+		'corrected_query'  => '',
+		'correction_used'  => false,
+		'results_count'    => 0,
+	);
+
+	public function __construct(
+		private LocationRepository $repository,
+		private ?KeyboardLayoutTransformer $keyboard_layout = null
+	) {
+		$this->keyboard_layout = $this->keyboard_layout ?? new KeyboardLayoutTransformer();
 	}
 
 	/**
 	 * @return array<int, Location>
 	 */
 	public function search( string $query, int $limit = 20 ): array {
-		$normalized = $this->normalize( $query );
+		$original_normalized = $this->normalize( $query );
+		$this->last_search_meta = array(
+			'original_query'   => $query,
+			'corrected_query'  => '',
+			'correction_used'  => false,
+			'results_count'    => 0,
+		);
+
+		$normalized = $original_normalized;
 		if ( '' === $normalized ) {
 			return array();
 		}
 
 		$locations = $this->repository->search( $normalized, max( $limit * 3, 50 ) );
+		$corrected = '';
+		if ( array() === $locations ) {
+			foreach ( $this->keyboard_layout->variants( $query ) as $variant ) {
+				$variant_normalized = $this->normalize( $variant );
+				if ( '' === $variant_normalized || $variant_normalized === $original_normalized ) {
+					continue;
+				}
+
+				$variant_locations = $this->repository->search( $variant_normalized, max( $limit * 3, 50 ) );
+				if ( array() !== $variant_locations ) {
+					$locations  = $variant_locations;
+					$normalized = $variant_normalized;
+					$corrected  = $variant;
+					$this->last_search_meta['correction_used'] = true;
+					break;
+				}
+			}
+		}
+
 		usort(
 			$locations,
 			fn( Location $a, Location $b ): int => $this->rank( $b, $normalized ) <=> $this->rank( $a, $normalized )
 				?: strcmp( $a->display_name, $b->display_name )
 		);
 
-		return array_slice( $locations, 0, max( 1, $limit ) );
+		$final = array_slice( $locations, 0, max( 1, $limit ) );
+		$this->last_search_meta['corrected_query'] = $corrected;
+		$this->last_search_meta['results_count']   = count( $final );
+
+		return $final;
 	}
 
 	/**
@@ -50,6 +93,13 @@ final class LocationSearchService {
 
 	public function normalize( string $value ): string {
 		return Location::normalize_search_text( $value );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function last_search_meta(): array {
+		return $this->last_search_meta;
 	}
 
 	private function rank( Location $location, string $query ): int {

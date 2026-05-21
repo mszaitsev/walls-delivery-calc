@@ -17,6 +17,7 @@
 - Сохраненный выбор ПВЗ очищается при смене города и не показывается, если пункт не относится к текущему городу.
 - City selector теперь открывается как overlay/popup и не сдвигает checkout вниз.
 - Backend search ограничивает количество результатов настройкой `location_search_limit`, по умолчанию 100.
+- Поиск поддерживает исправление ошибочной EN/RU раскладки клавиатуры, например `yjdjc` → `новос`.
 
 ## Как включить новую доставку
 
@@ -67,13 +68,15 @@
 
 Frontend не загружает полный справочник городов. Он отправляет только введенный query, а backend возвращает найденные варианты в пределах `location_search_limit`.
 
-Desktop popup: `max-width: 1300px`, `width: min(1300px, calc(100vw - 48px))`, результаты могут идти в 2 колонки. Mobile popup: почти full-screen, `width: calc(100vw - 24px)`, результаты в 1 колонку.
+Desktop popup: `max-width: 1300px`, `width: min(1300px, calc(100vw - 48px))`, результаты могут идти в 2 колонки. Mobile popup: почти full-screen, `width: calc(100vw - 24px)`, результаты строго в 1 колонку и занимают всю ширину.
 
 При простом вводе picker делает только AJAX search и не запускает `update_checkout` на каждый символ. Checkout обновляется после выбора города из списка или при закрытии popup с ручным fallback-вводом.
 
-Если населенный пункт не найден, в popup показывается «Населенный пункт не найден. Будет использовано введенное значение.», а checkout не блокируется: введенный вручную город используется как fallback.
+Если населенный пункт не найден, в popup показывается «Населенный пункт не найден. Будет использовано введенное значение.» и кнопка «Выбрать введенный населенный пункт». При выборе fallback city hidden location fields остаются пустыми, адрес считается manual fallback: `normalized=false`, `fallback=true`.
 
 Если backend достиг лимита результатов, frontend показывает «Показаны первые 100 результатов. Уточните запрос.».
+
+Поиск исправляет только клавиатурную раскладку, не транслитерирует названия. Пример: `yjdjc` ищется как `новос` и находит Новосибирск. Запрос вроде `Berlin` не должен случайно находить русские города.
 
 Как проверить:
 
@@ -90,6 +93,12 @@ Troubleshooting:
 
 - В Network проверьте запрос `admin-ajax.php?action=wdc_platform_search_locations`.
 - Для администратора можно включить debug panel в настройках. Тогда city picker пишет в Console: `city picker opened`, `search input query`, `ajax request start`, `ajax success groups count`, `limit reached`, `city picker closed`, `location selected`, `manual fallback city`.
+
+## Normalized vs fallback city
+
+Normalized city выбран из справочника через popup. Для него сохраняются hidden location fields, postcode, FIAS/GAR ids, а блок проверки адреса показывает «Населенный пункт определен».
+
+Manual fallback city введен вручную через кнопку «Выбрать введенный населенный пункт» или закрытие popup с новым текстом. Для него hidden location fields пустые, FIAS/GAR не показывается, а блок проверки адреса пишет «Используется введенный вручную населенный пункт».
 
 ## Search limit
 

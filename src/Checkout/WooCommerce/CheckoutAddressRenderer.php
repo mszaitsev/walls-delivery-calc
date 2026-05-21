@@ -30,12 +30,14 @@ final class CheckoutAddressRenderer {
 			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--normalized">' . esc_html__( 'Населенный пункт определен:', 'walls-delivery-calc' ) . ' ' . esc_html( $city ) . '</p>';
 		}
 		if ( $address->fallback ) {
-			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--fallback">' . esc_html__( 'Город не найден в справочнике, будет использовано введенное значение.', 'walls-delivery-calc' ) . '</p>';
+			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--fallback">' . esc_html__( 'Используется введенный вручную населенный пункт', 'walls-delivery-calc' ) . '</p>';
 		}
 		if ( '' !== trim( $address->postcode ) ) {
 			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--postcode">' . esc_html__( 'Индекс:', 'walls-delivery-calc' ) . ' ' . esc_html( $address->postcode ) . '</p>';
 		}
-		echo '<p class="wdc-address-normalization__source">' . esc_html__( 'Источник:', 'walls-delivery-calc' ) . ' ' . esc_html( $this->source_label( $result->source ) ) . '</p>';
+		if ( ! $address->fallback ) {
+			echo '<p class="wdc-address-normalization__source">' . esc_html__( 'Источник:', 'walls-delivery-calc' ) . ' ' . esc_html( $this->source_label( $result->source ) ) . '</p>';
+		}
 		echo '</div>';
 		echo '</td></tr>';
 	}

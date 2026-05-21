@@ -305,6 +305,17 @@ address_smoke_assert( true === ( $order->meta['_wdc_platform_address_fallback_us
 $fallback = ( new FallbackAddressNormalizer() )->normalize( 'Fallback raw', array( 'city' => 'Fallback City' ) );
 address_smoke_assert( $fallback->address->fallback, 'Fallback normalizer must mark fallback.' );
 
+$manual_fallback = $runtime->resolve_checkout_address(
+	array(
+		'shipping_country'   => 'RU',
+		'shipping_city'      => 'Berlin',
+		'shipping_address_1' => 'Manual street',
+	)
+);
+address_smoke_assert( $manual_fallback->address->fallback, 'Manual unknown city must remain fallback.' );
+address_smoke_assert( ! $manual_fallback->address->normalized, 'Manual unknown city must not be normalized.' );
+address_smoke_assert( '' === $manual_fallback->address->fias_id && '' === $manual_fallback->address->gar_id, 'Manual fallback city must not set FIAS/GAR ids.' );
+
 $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => $known_city ) );
 $mapper = new WooCommercePackageMapper( $runtime, $session );
 $request = $mapper->map(

@@ -28,6 +28,13 @@ final class CheckoutLocationSearch {
 		return $this->search_service->grouped( $query, $limit );
 	}
 
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function last_search_meta(): array {
+		return $this->search_service->last_search_meta();
+	}
+
 	public function best_match( string $query ): ?Location {
 		$normalized = $this->search_service->normalize( $query );
 		if ( '' === $normalized ) {

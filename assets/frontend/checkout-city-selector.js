@@ -156,13 +156,20 @@
 		resultsBox().html( '<div class="wdc-city-picker-message ' + className + '">' + escapeHtml( message || '' ) + '</div>' );
 	}
 
+	function renderFallbackMessage( message ) {
+		resultsBox().html(
+			'<div class="wdc-city-picker-message is-empty">' + escapeHtml( message || '' ) + '</div>' +
+			'<button type="button" class="wdc-city-picker-fallback">Выбрать введенный населенный пункт</button>'
+		);
+	}
+
 	function renderResults( groups, limitReached, limit ) {
 		locationStore = {};
 		locationSeq = 0;
 
 		var limitMessage = limitReached ? '<div class="wdc-city-picker-limit">Показаны первые ' + escapeHtml( limit ) + ' результатов. Уточните запрос.</div>' : '';
 		if ( ! groups || ! groups.length ) {
-			renderMessage( config.strings && config.strings.not_found ? config.strings.not_found : '', 'is-empty' );
+			renderFallbackMessage( config.strings && config.strings.not_found ? config.strings.not_found : '' );
 			return;
 		}
 
@@ -214,6 +221,8 @@
 			var groups = response && response.data && response.data.groups ? response.data.groups : [];
 			debug( 'ajax success groups count', groups.length );
 			debug( 'limit reached', !! ( response && response.data && response.data.limit_reached ) );
+			debug( 'corrected query', response && response.data ? response.data.corrected_query || '' : '' );
+			debug( 'correction used', !! ( response && response.data && response.data.correction_used ) );
 			if ( response && response.success ) {
 				renderResults( groups, !! response.data.limit_reached, response.data.limit || config.location_search_limit || 100 );
 				return;
@@ -295,6 +304,8 @@
 		debug( 'manual fallback city', query );
 		clearHidden();
 		setFieldValue( $field, query );
+		selectedDisplay = query;
+		renderSelectedNotice( $field, 'введенный вручную населенный пункт' );
 		window.setTimeout( function () {
 			$( document.body ).trigger( 'update_checkout' );
 		}, 50 );
@@ -484,6 +495,12 @@
 	} );
 	$( document.body ).off( 'click.wdcCitySelector', '.wdc-city-picker-close' );
 	$( document.body ).on( 'click.wdcCitySelector', '.wdc-city-picker-close', function () {
+		closePicker( { manualFallback: true } );
+	} );
+	$( document.body ).off( 'click.wdcCitySelector', '.wdc-city-picker-fallback' );
+	$( document.body ).on( 'click.wdcCitySelector', '.wdc-city-picker-fallback', function ( event ) {
+		event.preventDefault();
+		event.stopPropagation();
 		closePicker( { manualFallback: true } );
 	} );
 	$( document.body ).off( 'mousedown.wdcCitySelector', '.wdc-city-picker-overlay' );
