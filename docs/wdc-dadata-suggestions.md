@@ -84,6 +84,8 @@ When `dadata_suggestions_enabled=true`, `checkout-address-suggestions.js` and CS
 
 Search handlers are delegated to `document.body` and listen only to `input`, `keyup`, and `paste`. `blur` and `change` do not start searches. WooCommerce refreshes are handled through `updated_checkout` and `wc_fragments_refreshed`.
 
+The frontend explicitly detects the active checkout mode. Shipping fields are used only when the WooCommerce ship-to-different-address checkbox is checked and visible usable shipping city/address fields exist. Otherwise billing is the active mode. Hidden shipping fields in the DOM are ignored.
+
 Supported selectors:
 
 - city: `shipping_city`, `billing_city`
@@ -92,6 +94,8 @@ Supported selectors:
 - postcode/state are filled when available
 
 No `update_checkout` is triggered while typing. It is triggered only after a suggestion is selected and applied.
+
+Popup, notice, and debug block are rendered next to the active address field: usually `billing_address_1`; `shipping_address_1` is used only in active shipping mode.
 
 ## Street To House
 
@@ -121,11 +125,12 @@ Order persistence stores `_billing_dadata_*`, `_shipping_dadata_*`, and compatib
 1. Check that `checkout-address-suggestions.js` is loaded on checkout.
 2. Enable checkout debug panel.
 3. Check the debug block under `billing_address_1` or `shipping_address_1`: `DaData подсказки: script loaded`, `config enabled`, `api key ready`, `encryption ready`, `address field`, `last query`, `last ajax status`, `last items count`.
-4. Check Console for `address suggestions script loaded`, `address field found`, `address input event`, `ajax request start`.
-5. Check Network for `admin-ajax.php?action=wdc_platform_dadata_address_suggest`.
-6. Manual endpoint probe: POST `admin-ajax.php?action=wdc_platform_dadata_address_suggest` with `stage=address` and `query=тверская`.
-7. If `config enabled: no`, check that DaData suggestions are enabled, the API key is saved, and `APP_ENCRYPTION_KEY` is configured.
-8. If `address field: not found`, inspect the real checkout input names. The expected names are `billing_address_1`, `shipping_address_1`, `billing_city`, and `shipping_city`.
+4. Check the debug block values `active mode`, `active address field`, and `active city field`.
+5. Check Console for `address suggestions script loaded`, `active checkout prefix: billing`, `using address field selector`, `address input event`, `ajax request start`.
+6. Check Network for `admin-ajax.php?action=wdc_platform_dadata_address_suggest`.
+7. Manual endpoint probe: POST `admin-ajax.php?action=wdc_platform_dadata_address_suggest` with `stage=address` and `query=тверская`.
+8. If `config enabled: no`, check that DaData suggestions are enabled, the API key is saved, and `APP_ENCRYPTION_KEY` is configured.
+9. If `address field: not found`, inspect the real checkout input names. The expected names are `billing_address_1`, `shipping_address_1`, `billing_city`, and `shipping_city`.
 
 ## Fallback
 

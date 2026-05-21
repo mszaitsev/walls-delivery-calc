@@ -3,18 +3,19 @@
 
 	var config = window.wdcPlatformAddressSuggestions || {};
 	var namespace = '.wdcAddressSuggestions';
-	var CITY_SELECTOR = '#shipping_city,input[name="shipping_city"],textarea[name="shipping_city"],#billing_city,input[name="billing_city"],textarea[name="billing_city"]';
-	var ADDRESS_SELECTOR = '#shipping_address_1,input[name="shipping_address_1"],textarea[name="shipping_address_1"],#billing_address_1,input[name="billing_address_1"],textarea[name="billing_address_1"]';
-	var ADDRESS_2_SELECTOR = '#shipping_address_2,input[name="shipping_address_2"],textarea[name="shipping_address_2"],#billing_address_2,input[name="billing_address_2"],textarea[name="billing_address_2"]';
 	var debounceTimers = {};
 	var debounceDelay = 300;
 	var selectedStreet = {};
 	var itemStore = {};
 	var itemCounter = 0;
+	var activePrefix = 'billing';
 	var debugState = {
 		scriptLoaded: true,
 		configEnabled: !! config.enabled,
 		fieldFound: false,
+		activeMode: 'billing',
+		activeAddressField: '',
+		activeCityField: '',
 		lastQuery: '',
 		lastAjaxStatus: '',
 		lastItemsCount: ''
@@ -74,8 +75,16 @@
 		} );
 	}
 
-	function firstUsable( selector ) {
-		var all = $( selector );
+	function selectorFor( prefix, name ) {
+		if ( 'state' === name ) {
+			return '#' + prefix + '_state,select[name="' + prefix + '_state"],input[name="' + prefix + '_state"]';
+		}
+
+		return '#' + prefix + '_' + name + ',input[name="' + prefix + '_' + name + '"],textarea[name="' + prefix + '_' + name + '"]';
+	}
+
+	function firstUsableFor( prefix, name ) {
+		var all = $( selectorFor( prefix, name ) );
 		var visible = visibleUsable( all );
 		if ( visible.length ) {
 			return visible.first();
@@ -84,17 +93,21 @@
 		return ( fallback.length ? fallback : all ).first();
 	}
 
-	function field( prefix, name ) {
-		if ( 'state' === name ) {
-			return firstUsable( '#' + prefix + '_state,select[name="' + prefix + '_state"],input[name="' + prefix + '_state"]' );
-		}
-
-		return firstUsable( '#' + prefix + '_' + name + ',input[name="' + prefix + '_' + name + '"],textarea[name="' + prefix + '_' + name + '"]' );
+	function activeCheckoutPrefix() {
+		var shipToggle = $( '#ship-to-different-address-checkbox,input[name="ship_to_different_address"]' ).first();
+		var shippingChecked = shipToggle.length ? shipToggle.is( ':checked' ) : false;
+		var shippingAddressVisible = visibleUsable( $( selectorFor( 'shipping', 'address_1' ) ) ).length > 0;
+		var shippingCityVisible = visibleUsable( $( selectorFor( 'shipping', 'city' ) ) ).length > 0;
+		var shippingModeActive = shippingChecked && ( shippingAddressVisible || shippingCityVisible );
+		var billingAddressVisible = visibleUsable( $( selectorFor( 'billing', 'address_1' ) ) ).length > 0;
+		log( 'shipping mode active', { active: shippingModeActive, checked: shippingChecked, shipping_address_visible: shippingAddressVisible, shipping_city_visible: shippingCityVisible } );
+		log( 'billing mode active', { active: ! shippingModeActive, billing_address_visible: billingAddressVisible } );
+		log( 'active checkout prefix: ' + ( shippingModeActive ? 'shipping' : 'billing' ) );
+		return shippingModeActive ? 'shipping' : 'billing';
 	}
 
-	function prefixFromInput( input ) {
-		var name = input.attr( 'name' ) || input.attr( 'id' ) || '';
-		return 0 === name.indexOf( 'billing_' ) ? 'billing' : 'shipping';
+	function field( prefix, name ) {
+		return firstUsableFor( prefix, name );
 	}
 
 	function fieldKey( input ) {
@@ -165,17 +178,6 @@
 	}
 
 	function positionPopup( input, box ) {
-		var offset = input.offset();
-		if ( offset && input.outerHeight() ) {
-			box.css( {
-				position: 'absolute',
-				top: offset.top + input.outerHeight() + 4,
-				left: offset.left,
-				width: Math.min( 1300, Math.max( input.outerWidth() || 0, 320 ) )
-			} );
-			return;
-		}
-
 		box.css( {
 			position: 'static',
 			width: '100%'
@@ -190,11 +192,30 @@
 		notice.text( message ).show();
 	}
 
+	function addDebugHit( input ) {
+		if ( ! config.debug ) {
+			return;
+		}
+		input.siblings( '.wdc-address-debug-hit' ).remove();
+		var marker = $( '<div>', { class: 'wdc-address-debug-hit' } ).text( 'DaData input detected' ).insertAfter( input );
+		window.setTimeout( function () {
+			marker.fadeOut( 150, function () {
+				marker.remove();
+			} );
+		}, 2000 );
+	}
+
 	function renderDebugBlock() {
 		if ( ! config.debug ) {
 			return;
 		}
-		var address = firstUsable( ADDRESS_SELECTOR );
+		var prefix = activeCheckoutPrefix();
+		var address = field( prefix, 'address_1' );
+		var city = field( prefix, 'city' );
+		debugState.activeMode = prefix;
+		debugState.activeAddressField = fieldKey( address );
+		debugState.activeCityField = fieldKey( city );
+		debugState.fieldFound = !! address.length;
 		if ( ! address.length ) {
 			log( 'address field not found', checkoutInputsSnapshot() );
 			return;
@@ -208,6 +229,9 @@
 			'config enabled: ' + ( debugState.configEnabled ? 'yes' : 'no' ) + '<br>' +
 			'api key ready: ' + ( config.api_key_ready ? 'yes' : 'no' ) + '<br>' +
 			'encryption ready: ' + ( config.encryption_ready ? 'yes' : 'no' ) + '<br>' +
+			'active mode: ' + escapeHtml( debugState.activeMode ) + '<br>' +
+			'active address field: ' + escapeHtml( debugState.activeAddressField ) + '<br>' +
+			'active city field: ' + escapeHtml( debugState.activeCityField ) + '<br>' +
 			'address field: ' + ( debugState.fieldFound ? 'found' : 'not found' ) + '<br>' +
 			'last query: ' + escapeHtml( debugState.lastQuery ) + '<br>' +
 			'last ajax status: ' + escapeHtml( debugState.lastAjaxStatus ) + '<br>' +
@@ -245,17 +269,16 @@
 	}
 
 	function diagnoseFields() {
-		var address = firstUsable( ADDRESS_SELECTOR );
+		var prefix = activeCheckoutPrefix();
+		var addressSelector = selectorFor( prefix, 'address_1' );
+		var citySelector = selectorFor( prefix, 'city' );
+		var address = field( prefix, 'address_1' );
+		var city = field( prefix, 'city' );
 		debugState.fieldFound = !! address.length;
 		log( address.length ? 'address field found' : 'address field not found', checkoutInputsSnapshot() );
-		log( firstUsable( CITY_SELECTOR ).length ? 'city field found' : 'city field not found', checkoutInputsSnapshot() );
-		if ( address.length ) {
-			log( 'address field selector used', {
-				selector: ADDRESS_SELECTOR,
-				name: address.attr( 'name' ) || '',
-				id: address.attr( 'id' ) || ''
-			} );
-		}
+		log( city.length ? 'city field found' : 'city field not found', checkoutInputsSnapshot() );
+		log( 'using address field selector', { selector: addressSelector, field: fieldKey( address ) } );
+		log( 'using city field selector', { selector: citySelector, field: fieldKey( city ) } );
 		renderDebugBlock();
 	}
 
@@ -409,43 +432,38 @@
 	}
 
 	function bind() {
-		ensureHiddenFields( 'shipping' );
-		ensureHiddenFields( 'billing' );
+		activePrefix = activeCheckoutPrefix();
+		var citySelector = selectorFor( activePrefix, 'city' );
+		var addressSelector = selectorFor( activePrefix, 'address_1' );
+		var address2Selector = selectorFor( activePrefix, 'address_2' );
+		ensureHiddenFields( activePrefix );
 		diagnoseFields();
 
+		$( document.body ).off( namespace );
 		$( document.body )
-			.off( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, CITY_SELECTOR )
-			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, CITY_SELECTOR, function ( event ) {
+			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, citySelector, function ( event ) {
 				var input = $( event.target );
-				var prefix = prefixFromInput( input );
 				var query = $.trim( input.val() || '' );
 				log( 'city input event', { query: query, length: query.length, stage: 'city' } );
-				scheduleSearch( input, 'city', prefix );
-			} );
-
-		$( document.body )
-			.off( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, ADDRESS_SELECTOR )
-			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, ADDRESS_SELECTOR, function ( event ) {
+				scheduleSearch( input, 'city', activePrefix );
+			} )
+			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, addressSelector, function ( event ) {
 				var input = $( event.target );
-				var prefix = prefixFromInput( input );
 				var query = $.trim( input.val() || '' );
-				var stage = selectedStreet[ prefix ] || context( prefix ).street_fias_id ? 'house_after_street' : 'address';
+				var stage = selectedStreet[ activePrefix ] || context( activePrefix ).street_fias_id ? 'house_after_street' : 'address';
 				debugState.fieldFound = true;
 				log( 'address input event', { query: query, length: query.length, stage: stage } );
-				if ( 'resolved' !== hidden( prefix, 'dadata_status' ).val() ) {
-					setStatus( prefix, 'manual' );
+				addDebugHit( input );
+				if ( 'resolved' !== hidden( activePrefix, 'dadata_status' ).val() ) {
+					setStatus( activePrefix, 'manual' );
 				}
-				scheduleSearch( input, stage, prefix );
-			} );
-
-		$( document.body )
-			.off( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, ADDRESS_2_SELECTOR )
-			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, ADDRESS_2_SELECTOR, function ( event ) {
+				scheduleSearch( input, stage, activePrefix );
+			} )
+			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, address2Selector, function ( event ) {
 				var input = $( event.target );
-				var prefix = prefixFromInput( input );
-				hidden( prefix, 'dadata_flat' ).val( input.val() || '' );
-				if ( 'resolved' !== hidden( prefix, 'dadata_status' ).val() ) {
-					setStatus( prefix, 'manual' );
+				hidden( activePrefix, 'dadata_flat' ).val( input.val() || '' );
+				if ( 'resolved' !== hidden( activePrefix, 'dadata_status' ).val() ) {
+					setStatus( activePrefix, 'manual' );
 				}
 			} );
 
