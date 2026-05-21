@@ -29,9 +29,15 @@ final class CheckoutLocationAjax {
 		}
 
 		$query = isset( $_REQUEST['query'] ) ? sanitize_text_field( wp_unslash( (string) $_REQUEST['query'] ) ) : '';
+		$this->send_success( $this->payload( $query ) );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function payload( string $query ): array {
 		if ( $this->length( $query ) < 3 ) {
-			$this->send_success( array( 'groups' => array() ) );
-			return;
+			return array( 'groups' => array() );
 		}
 
 		$groups = array();
@@ -42,7 +48,7 @@ final class CheckoutLocationAjax {
 			);
 		}
 
-		$this->send_success( array( 'groups' => $groups ) );
+		return array( 'groups' => $groups );
 	}
 
 	/**

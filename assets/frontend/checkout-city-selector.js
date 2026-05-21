@@ -2,6 +2,7 @@
 	'use strict';
 
 	var config = window.wdcPlatformCitySelector || {};
+	var namespace = '.wdcCitySelector';
 	var timer = null;
 	var selectedDisplay = '';
 	var hiddenNames = [
@@ -13,19 +14,38 @@
 		'wdc_platform_location_region_name'
 	];
 
+	function debug() {
+		if ( config.debug && window.console && window.console.log ) {
+			window.console.log.apply( window.console, [ 'wdc city selector:' ].concat( Array.prototype.slice.call( arguments ) ) );
+		}
+	}
+
+	function firstField( selectors ) {
+		for ( var index = 0; index < selectors.length; index++ ) {
+			var $field = $( selectors[ index ] ).first();
+			if ( $field.length ) {
+				return $field;
+			}
+		}
+
+		return $();
+	}
+
 	function cityField() {
-		var $shipping = $( '#shipping_city' );
-		return $shipping.length ? $shipping : $( '#billing_city' );
+		return firstField( [ '#shipping_city', 'input[name="shipping_city"]', '#billing_city', 'input[name="billing_city"]' ] );
 	}
 
 	function postcodeField() {
-		var $shipping = $( '#shipping_postcode' );
-		return $shipping.length ? $shipping : $( '#billing_postcode' );
+		return firstField( [ '#shipping_postcode', 'input[name="shipping_postcode"]', '#billing_postcode', 'input[name="billing_postcode"]' ] );
 	}
 
 	function stateField() {
-		var $shipping = $( '#shipping_state' );
-		return $shipping.length ? $shipping : $( '#billing_state' );
+		return firstField( [ '#shipping_state', 'select[name="shipping_state"]', 'input[name="shipping_state"]', '#billing_state', 'select[name="billing_state"]', 'input[name="billing_state"]' ] );
+	}
+
+	function checkoutForm( $field ) {
+		var $form = $field.closest( 'form.checkout' );
+		return $form.length ? $form : $( 'form.checkout' ).first();
 	}
 
 	function ensureHiddenFields( $form ) {
@@ -37,7 +57,8 @@
 	}
 
 	function setHidden( name, value ) {
-		$( 'input[name="' + name + '"]' ).val( value || '' );
+		var $form = $( 'form.checkout' ).first();
+		$form.find( 'input[name="' + name + '"]' ).val( value || '' );
 	}
 
 	function clearHidden() {
@@ -48,7 +69,7 @@
 	}
 
 	function resultsBox( $field ) {
-		var $box = $( '.wdc-city-selector' );
+		var $box = $field.siblings( '.wdc-city-selector' ).first();
 		if ( ! $box.length ) {
 			$box = $( '<div class="wdc-city-selector" role="listbox" />' );
 			$field.after( $box );
@@ -57,7 +78,7 @@
 	}
 
 	function renderMessage( $box, message, className ) {
-		$box.html( '<div class="wdc-city-selector__message ' + className + '">' + message + '</div>' );
+		$box.html( '<div class="wdc-city-selector__message ' + className + '">' + escapeHtml( message || '' ) + '</div>' );
 	}
 
 	function renderResults( $box, groups ) {
@@ -71,7 +92,9 @@
 			html += '<div class="wdc-city-selector__group">';
 			html += '<div class="wdc-city-selector__region">' + escapeHtml( group.region || '' ) + '</div>';
 			( group.locations || [] ).forEach( function ( location ) {
-				var label = location.display_name || location.city_name || location.settlement_name || '';
+				var city = location.settlement_name || location.city_name || '';
+				var region = location.region_name || '';
+				var label = city && region ? city + ' — ' + region : ( location.display_name || city );
 				html += '<button type="button" class="wdc-city-selector__item" data-location="' + encodeURIComponent( JSON.stringify( location ) ) + '">';
 				html += escapeHtml( label );
 				html += '</button>';
@@ -89,6 +112,12 @@
 
 	function search( query, $field ) {
 		var $box = resultsBox( $field );
+		if ( ! config.ajax_url ) {
+			debug( 'ajax url missing' );
+			return;
+		}
+
+		debug( 'query', query );
 		renderMessage( $box, config.strings && config.strings.searching ? config.strings.searching : '', 'is-loading' );
 
 		$.ajax( {
@@ -101,19 +130,23 @@
 				query: query
 			}
 		} ).done( function ( response ) {
+			debug( 'ajax success', response );
 			if ( response && response.success ) {
 				renderResults( $box, response.data ? response.data.groups : [] );
 				return;
 			}
 			renderMessage( $box, config.strings && config.strings.error ? config.strings.error : '', 'is-error' );
-		} ).fail( function () {
+		} ).fail( function ( xhr ) {
+			debug( 'ajax error', xhr );
 			renderMessage( $box, config.strings && config.strings.error ? config.strings.error : '', 'is-error' );
 		} );
 	}
 
 	function selectLocation( location ) {
 		var city = location.settlement_name || location.city_name || '';
-		cityField().val( city ).trigger( 'change' );
+		var $city = cityField();
+
+		$city.val( city ).trigger( 'change' );
 		if ( location.postcode ) {
 			postcodeField().val( location.postcode ).trigger( 'change' );
 		}
@@ -127,45 +160,69 @@
 		setHidden( 'wdc_platform_location_display_name', location.display_name );
 		setHidden( 'wdc_platform_location_postcode', location.postcode );
 		setHidden( 'wdc_platform_location_region_name', location.region_name );
-		selectedDisplay = location.display_name || city;
-		$( '.wdc-city-selector' ).empty();
+		selectedDisplay = city;
+		resultsBox( $city ).empty();
 		$( document.body ).trigger( 'update_checkout' );
 	}
 
-	function init() {
-		var $field = cityField();
-		if ( ! $field.length || ! config.ajax_url ) {
+	function bind( $field ) {
+		var $form = checkoutForm( $field );
+		if ( ! $form.length ) {
+			debug( 'checkout form not found' );
 			return;
 		}
 
-		var $form = $field.closest( 'form.checkout' );
-		if ( ! $form.length ) {
-			$form = $( 'form.checkout' );
-		}
 		ensureHiddenFields( $form );
-		resultsBox( $field ).html( '<div class="wdc-city-selector__hint">' + ( config.strings && config.strings.start ? config.strings.start : '' ) + '</div>' );
-
-		$( document.body ).on( 'click', '.wdc-city-selector__item', function () {
-			selectLocation( JSON.parse( decodeURIComponent( $( this ).attr( 'data-location' ) || '{}' ) ) );
-		} );
-
-		$field.on( 'input', function () {
+		resultsBox( $field );
+		$field.off( namespace );
+		$field.on( 'input' + namespace, function () {
 			var query = String( $field.val() || '' );
 			window.clearTimeout( timer );
 			if ( selectedDisplay && query !== selectedDisplay ) {
 				clearHidden();
 			}
+
 			timer = window.setTimeout( function () {
 				if ( query.length < ( config.min_chars || 3 ) ) {
 					resultsBox( $field ).empty();
-					$( document.body ).trigger( 'update_checkout' );
 					return;
 				}
 				search( query, $field );
-				$( document.body ).trigger( 'update_checkout' );
 			}, 300 );
+		} );
+
+		$field.on( 'blur' + namespace, function () {
+			var query = String( $field.val() || '' );
+			if ( selectedDisplay && query !== selectedDisplay ) {
+				clearHidden();
+			}
+			if ( query.length >= ( config.min_chars || 3 ) && ! selectedDisplay ) {
+				$( document.body ).trigger( 'update_checkout' );
+			}
 		} );
 	}
 
+	function init() {
+		var $field = cityField();
+		debug( 'selector initialized' );
+		debug( $field.length ? 'city field found' : 'city field not found' );
+		debug( 'ajax url', config.ajax_url || '' );
+
+		if ( ! $field.length ) {
+			return;
+		}
+		if ( ! config.ajax_url ) {
+			return;
+		}
+
+		bind( $field );
+	}
+
+	$( document.body ).off( 'click' + namespace, '.wdc-city-selector__item' );
+	$( document.body ).on( 'click' + namespace, '.wdc-city-selector__item', function () {
+		selectLocation( JSON.parse( decodeURIComponent( $( this ).attr( 'data-location' ) || '{}' ) ) );
+	} );
+
 	$( init );
+	$( document.body ).on( 'updated_checkout' + namespace + ' wc_fragments_refreshed' + namespace, init );
 }( jQuery ) );

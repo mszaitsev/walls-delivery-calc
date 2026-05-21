@@ -293,11 +293,11 @@ final class Plugin {
 		add_action( 'plugins_loaded', array( $this, 'boot_modules' ), 20 );
 		register_activation_hook( $this->environment->plugin_file(), array( $this, 'activate' ) );
 		$this->container->get( ShippingMethodRegistrar::class )->register();
+		$this->container->get( CheckoutLocationAjax::class )->register();
 		if ( $this->container->get( CheckoutFeatureGate::class )->enabled() ) {
 			$this->container->get( CheckoutRateRenderer::class )->register();
 			$this->container->get( CheckoutDeliveryTypeSelector::class )->register();
 			$this->container->get( CheckoutSortSelector::class )->register();
-			$this->container->get( CheckoutLocationAjax::class )->register();
 			$this->container->get( CheckoutAddressRuntime::class )->register();
 			$this->container->get( CheckoutAddressRenderer::class )->register();
 			$this->container->get( CheckoutValidation::class )->register();

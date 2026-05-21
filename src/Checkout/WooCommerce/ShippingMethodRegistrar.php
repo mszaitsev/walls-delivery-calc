@@ -88,10 +88,15 @@ final class ShippingMethodRegistrar {
 			$this->environment->version()
 		);
 		if ( function_exists( 'wp_enqueue_script' ) ) {
+			$city_selector_dependencies = array( 'jquery' );
+			if ( function_exists( 'wp_script_is' ) && wp_script_is( 'wc-checkout', 'registered' ) ) {
+				$city_selector_dependencies[] = 'wc-checkout';
+			}
+
 			wp_enqueue_script(
 				'wdc-platform-city-selector',
 				$this->environment->plugin_url() . 'assets/frontend/checkout-city-selector.js',
-				array( 'jquery' ),
+				$city_selector_dependencies,
 				$this->environment->version(),
 				true
 			);
@@ -120,6 +125,7 @@ final class ShippingMethodRegistrar {
 			'ajax_url'  => function_exists( 'admin_url' ) ? admin_url( 'admin-ajax.php' ) : '',
 			'nonce'     => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( CheckoutLocationAjax::NONCE_ACTION ) : '',
 			'min_chars' => 3,
+			'debug'     => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
 			'strings'   => array(
 				'start'     => __( 'Начните вводить населенный пункт', 'walls-delivery-calc' ),
 				'not_found' => __( 'Населенный пункт не найден. Будет использовано введенное значение.', 'walls-delivery-calc' ),

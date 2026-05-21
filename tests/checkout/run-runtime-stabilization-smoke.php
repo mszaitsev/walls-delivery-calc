@@ -50,6 +50,12 @@ if ( ! function_exists( 'current_user_can' ) ) {
 	}
 }
 
+if ( ! function_exists( 'current_time' ) ) {
+	function current_time( string $type ): string {
+		return '2026-05-21 12:00:00';
+	}
+}
+
 if ( ! function_exists( 'sanitize_text_field' ) ) {
 	function sanitize_text_field( string $value ): string {
 		return trim( strip_tags( $value ) );
@@ -83,6 +89,12 @@ if ( ! function_exists( 'admin_url' ) ) {
 if ( ! function_exists( 'wp_create_nonce' ) ) {
 	function wp_create_nonce( string $action ): string {
 		return 'nonce-' . $action;
+	}
+}
+
+if ( ! function_exists( 'wp_verify_nonce' ) ) {
+	function wp_verify_nonce( string $nonce, string $action ): bool {
+		return 'nonce-' . $action === $nonce;
 	}
 }
 
@@ -158,12 +170,30 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public int $insert_id = 0;
 		/** @var array<int,array<string,mixed>> */
 		public array $pickup_rows = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $location_rows = array();
 
 		public function esc_like( string $text ): string {
 			return addcslashes( $text, '_%\\' );
 		}
 
 		public function get_results( string $query, mixed $output = null ): array {
+			if ( str_contains( $query, 'wdc_locations' ) ) {
+				preg_match( "/searchable_text LIKE '([^']+)'/", $query, $like_matches );
+				$needle = trim( (string) ( $like_matches[1] ?? '' ), '%' );
+				preg_match( '/LIMIT ([0-9]+)/', $query, $limit_matches );
+				$limit = (int) ( $limit_matches[1] ?? 50 );
+				$rows = array_values(
+					array_filter(
+						$this->location_rows,
+						static fn ( array $row ): bool => (bool) ( $row['active'] ?? 0 )
+							&& ( '' === $needle || str_contains( (string) ( $row['searchable_text'] ?? '' ), $needle ) )
+					)
+				);
+				usort( $rows, static fn ( array $a, array $b ): int => strcmp( (string) $a['display_name'], (string) $b['display_name'] ) );
+				return array_slice( $rows, 0, max( 1, $limit ) );
+			}
+
 			if ( ! preg_match( "/carrier_key = '([^']+)'.*country_code = '([^']+)'/", $query, $matches ) ) {
 				return array();
 			}
@@ -203,7 +233,11 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public function insert( string $table, array $data, array $format = array() ): bool {
 			$this->insert_id++;
 			$data['id'] = $this->insert_id;
-			$this->pickup_rows[] = $data;
+			if ( str_contains( $table, 'wdc_locations' ) ) {
+				$this->location_rows[] = $data;
+			} else {
+				$this->pickup_rows[] = $data;
+			}
 			return true;
 		}
 
@@ -266,6 +300,8 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\Runtime\DemoCarrier;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
@@ -293,6 +329,9 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Import\LocationImportService;
+use WallsShop\WDC\Locations\Services\LocationSearchService;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
@@ -307,7 +346,7 @@ function runtime_smoke_assert( bool $condition, string $message ): void {
 }
 
 function runtime_smoke_environment(): PluginEnvironment {
-	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.3' );
+	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.4' );
 }
 
 function runtime_smoke_request( string $delivery_type = '' ): QuoteRequest {
@@ -368,6 +407,8 @@ $method = new NewShippingMethod();
 runtime_smoke_assert( $method instanceof NewShippingMethod, 'NewShippingMethod must instantiate without a settings visibility fatal.' );
 
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_filters']['woocommerce_shipping_methods'] ), 'Shipping method filter must be registered.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_' . CheckoutLocationAjax::ACTION] ), 'Location AJAX endpoint must register for logged-in users.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_nopriv_' . CheckoutLocationAjax::ACTION] ), 'Location AJAX endpoint must register for guests.' );
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['woocommerce_after_shipping_rate'] ), 'Checkout rate renderer hook must not register while feature gate is false.' );
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['woocommerce_review_order_before_shipping'] ), 'Address renderer hook must not register while feature gate is false.' );
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_actions']['wp_enqueue_scripts'] ), 'Frontend CSS enqueue hook must not register while feature gate is false.' );
@@ -380,6 +421,37 @@ runtime_smoke_assert( 'https://example.test/wp-admin/admin-ajax.php' === $city_s
 runtime_smoke_assert( 3 === $city_selector_config['min_chars'], 'City selector config must require three characters.' );
 runtime_smoke_assert( str_starts_with( $city_selector_config['nonce'], 'nonce-' ), 'City selector config must expose nonce.' );
 runtime_smoke_assert( 'Идет поиск...' === $city_selector_config['strings']['searching'], 'City selector config strings must be Russian.' );
+
+$location_repository = new LocationRepository( $GLOBALS['wpdb'] );
+( new LocationImportService( $location_repository ) )->import_from_json_file( dirname( __DIR__, 2 ) . '/database/demo/locations-demo.json' );
+$location_ajax = new CheckoutLocationAjax( new CheckoutLocationSearch( new LocationSearchService( $location_repository ) ) );
+$location_payload = $location_ajax->payload( 'Новос' );
+runtime_smoke_assert( 'Новосибирская область' === ( $location_payload['groups'][0]['region'] ?? '' ), 'Location AJAX payload must group Новос by region.' );
+runtime_smoke_assert( 'Новосибирск' === ( $location_payload['groups'][0]['locations'][0]['city_name'] ?? '' ), 'Location AJAX payload must return Новосибирск.' );
+runtime_smoke_assert( array() === $location_ajax->payload( 'xx' )['groups'], 'Short location AJAX query must return empty groups.' );
+runtime_smoke_assert( array() === $location_ajax->payload( 'НеизвестныйГород' )['groups'], 'Unknown location AJAX query must return empty groups.' );
+$_REQUEST = array(
+	'nonce' => 'bad-nonce',
+	'query' => 'Новос',
+);
+ob_start();
+$location_ajax->handle();
+$nonce_error = json_decode( (string) ob_get_clean(), true );
+runtime_smoke_assert( false === ( $nonce_error['success'] ?? true ), 'Location AJAX must reject nonce mismatch.' );
+$_REQUEST = array(
+	'nonce' => wp_create_nonce( CheckoutLocationAjax::NONCE_ACTION ),
+	'query' => 'Новос',
+);
+ob_start();
+$location_ajax->handle();
+$ajax_response = json_decode( (string) ob_get_clean(), true );
+runtime_smoke_assert( true === ( $ajax_response['success'] ?? false ), 'Location AJAX handle must return success for valid nonce.' );
+runtime_smoke_assert( 'Новосибирск' === ( $ajax_response['data']['groups'][0]['locations'][0]['city_name'] ?? '' ), 'Location AJAX handle must return grouped Новосибирск results.' );
+
+$city_selector_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.js' );
+foreach ( array( 'updated_checkout', '.wdcCitySelector', 'input[name="shipping_city"]', 'wdc_platform_search_locations', 'update_checkout', 'wdc_platform_location_id' ) as $needle ) {
+	runtime_smoke_assert( str_contains( $city_selector_js, $needle ), 'City selector JS must contain ' . $needle . '.' );
+}
 
 $settings->set( 'enable_new_checkout_shipping', true );
 runtime_smoke_assert( $gate->enabled(), 'Feature gate must be enabled through SettingsRepository.' );
