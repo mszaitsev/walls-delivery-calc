@@ -52,7 +52,15 @@ final class EncryptionService {
 		return false === $plain_text ? null : $plain_text;
 	}
 
+	public function has_configured_key(): bool {
+		return defined( 'APP_ENCRYPTION_KEY' ) && is_string( APP_ENCRYPTION_KEY ) && '' !== APP_ENCRYPTION_KEY;
+	}
+
 	private function key(): string {
+		if ( $this->has_configured_key() ) {
+			return hash( 'sha256', APP_ENCRYPTION_KEY, true );
+		}
+
 		if ( defined( 'WDC_SECRET_KEY' ) && is_string( WDC_SECRET_KEY ) && '' !== WDC_SECRET_KEY ) {
 			return hash( 'sha256', WDC_SECRET_KEY, true );
 		}

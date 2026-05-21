@@ -52,6 +52,7 @@ use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Admin\LocationsAdminPage;
+use WallsShop\WDC\Locations\Fias\FiasCredentials;
 use WallsShop\WDC\Locations\Fias\FiasEndpoints;
 use WallsShop\WDC\Locations\Fias\FiasHttpClient;
 use WallsShop\WDC\Locations\Fias\FiasLogger;
@@ -153,9 +154,10 @@ final class Plugin {
 		$this->container->register( CheckoutCityResolver::class, fn(): CheckoutCityResolver => new CheckoutCityResolver( $this->container->get( LocationRepository::class ), $this->container->get( CheckoutLocationSearch::class ) ) );
 		$this->container->register( FiasEndpoints::class, fn(): FiasEndpoints => new FiasEndpoints() );
 		$this->container->register( FiasLogger::class, fn(): FiasLogger => new FiasLogger( $this->container->get( Logger::class ) ) );
+		$this->container->register( FiasCredentials::class, fn(): FiasCredentials => new FiasCredentials( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ) ) );
 		$this->container->register( FiasRateLimiter::class, fn(): FiasRateLimiter => new FiasRateLimiter( $this->container->get( SettingsRepository::class ), $this->container->get( FiasLogger::class ) ) );
 		$this->container->register( FiasHttpClient::class, fn(): FiasHttpClient => new FiasHttpClient( $this->container->get( SettingsRepository::class )->get_int( 'fias_api_timeout', 3 ), $this->container->get( FiasLogger::class ) ) );
-		$this->container->register( FiasAddressNormalizer::class, fn(): FiasAddressNormalizer => new FiasAddressNormalizer( $this->container->get( CheckoutCityResolver::class ), $this->container->get( SettingsRepository::class ), $this->container->get( FiasEndpoints::class ), $this->container->get( FiasHttpClient::class ), $this->container->get( FiasRateLimiter::class ), $this->container->get( FiasLogger::class ) ) );
+		$this->container->register( FiasAddressNormalizer::class, fn(): FiasAddressNormalizer => new FiasAddressNormalizer( $this->container->get( CheckoutCityResolver::class ), $this->container->get( SettingsRepository::class ), $this->container->get( FiasEndpoints::class ), $this->container->get( FiasHttpClient::class ), $this->container->get( FiasRateLimiter::class ), $this->container->get( FiasLogger::class ), $this->container->get( FiasCredentials::class ) ) );
 		$this->container->register( DaDataAddressNormalizer::class, fn(): DaDataAddressNormalizer => new DaDataAddressNormalizer() );
 		$this->container->register( FallbackAddressNormalizer::class, fn(): FallbackAddressNormalizer => new FallbackAddressNormalizer() );
 		$this->container->register(
@@ -213,7 +215,7 @@ final class Plugin {
 		$this->container->register( LocationAliasGenerator::class, fn(): LocationAliasGenerator => new LocationAliasGenerator() );
 		$this->container->register( FiasImportManager::class, fn(): FiasImportManager => new FiasImportManager( $this->environment, $this->container->get( LocationRepository::class ), $this->container->get( LocationAliasGenerator::class ), $this->container->get( ActionScheduler::class ) ) );
 		$this->container->register( GarChangesClient::class, fn(): GarChangesClient => new GarChangesClient( $this->container->get( FiasHttpClient::class ) ) );
-		$this->container->register( GarSyncManager::class, fn(): GarSyncManager => new GarSyncManager( $this->container->get( ActionScheduler::class ), $this->container->get( GarChangesClient::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( GarSyncManager::class, fn(): GarSyncManager => new GarSyncManager( $this->container->get( ActionScheduler::class ), $this->container->get( GarChangesClient::class ), $this->container->get( Logger::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( GarChangesService::class, fn(): GarChangesService => new GarChangesService() );
 		$this->container->register( YearGenerator::class, fn(): YearGenerator => new YearGenerator() );
 		$this->container->register( TimezoneService::class, fn(): TimezoneService => new TimezoneService() );
@@ -279,7 +281,8 @@ final class Plugin {
 				$this->container->get( FiasRateLimiter::class ),
 				$this->container->get( GarSyncManager::class ),
 				$this->container->get( FiasImportManager::class ),
-				$this->container->get( SettingsRepository::class )
+				$this->container->get( SettingsRepository::class ),
+				$this->container->get( FiasCredentials::class )
 			)
 		);
 		$this->container->register(
@@ -305,7 +308,7 @@ final class Plugin {
 				$this->container->get( DemoPickupProvider::class )
 			)
 		);
-		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ) ) );
 		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox() );
 	}
 

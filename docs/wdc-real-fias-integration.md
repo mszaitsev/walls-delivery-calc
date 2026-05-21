@@ -1,50 +1,74 @@
-# WDC Real FIAS/GAR Integration
+# WDC FIAS/GAR Integration Foundation
 
-## Architecture
+## Current Scope
 
-The checkout address runtime uses a fallback-first chain:
+FIAS/GAR integration is prepared, but runtime address standardization through the public API is temporarily disabled. The API documentation has several similar address methods, and the working contract must be verified manually after a real token is available.
 
-1. Local locations database and aliases.
-2. FIAS/GAR HTTP API when local confidence is low and API is enabled.
-3. DaData placeholder fallback, currently disabled and without real requests.
-4. Manual fallback address, which never blocks checkout.
+The plugin can store a FIAS/GAR API token now. The token is encrypted with `EncryptionService`, masked in admin UI, and never rendered or logged as raw text.
 
-Runtime URL construction lives in `FiasEndpoints`. HTTP transport lives in `FiasHttpClient`, and checkout code only receives a normalized result or a safe unsuccessful result.
+## Local City Database
 
-## Hybrid Normalization
+The local database contains only city-level data:
 
-Local DB remains the first UX layer. Exact city or settlement matches normalize immediately and can fill missing postcode from the local `Location`. Prefix/uncertain matches may call FIAS/GAR. If FIAS returns a more precise postcode, that postcode overwrites the local or checkout postcode.
+- regions
+- cities and settlements
+- settlement postcodes
+- settlement `fias_id` and `gar_id`
 
-Unknown cities are allowed. They become fallback/manual results and checkout continues.
+It does not contain streets, houses, or address objects. Because of that, local data is not treated as full address normalization.
 
-## Limiter
+Local data is used for:
 
-`FiasRateLimiter` uses WordPress transients for per-minute and per-day counters. Limits are configured through settings:
+- city selector
+- region and postcode context
+- settlement `fias_id` / `gar_id`
+- pickup filtering
+- checkout context
 
-- `fias_api_daily_limit`
-- `fias_api_minute_limit`
+Local data is not used for:
 
-When the limiter blocks a request, no exception reaches checkout. The normalizer returns an unsuccessful FIAS result and the chain continues to fallback.
+- street normalization
+- house normalization
+- full address standardization
 
-## Timeout Behavior
+## Checkout Chain
 
-`FiasHttpClient` passes the configured timeout to `wp_remote_get` and `wp_remote_post`. Timeouts, HTTP errors, malformed JSON, and unexpected response shapes are logged and converted into safe unsuccessful responses.
+The checkout chain is:
+
+1. Local city DB provides city context.
+2. FIAS placeholder returns an unsuccessful result:
+   - `fias_token_missing` when no token is saved.
+   - `fias_runtime_disabled` when a token is saved but runtime API methods are not verified.
+3. DaData fallback placeholder runs next.
+4. Manual fallback keeps checkout alive.
+
+No runtime HTTP request to FIAS is executed by `FiasAddressNormalizer` at this stage.
+
+## Foundation Kept
+
+These classes remain in place for the next stage:
+
+- `FiasEndpoints`
+- `FiasHttpClient`
+- `FiasLogger`
+- `FiasRateLimiter`
+- `FiasCredentials`
+
+They are not used by checkout runtime normalization until the API method contract is verified.
 
 ## GAR Sync
 
-`GarChangesClient` wraps GAR changes endpoints on `fias-public-service.nalog.ru`. `GarSyncManager` schedules a daily detect-only check through the existing ActionScheduler abstraction. It stores detection records in `wdc_gar_changes` but does not auto-apply changes.
+GAR detect-only architecture remains prepared. Runtime GAR requests are disabled by default and must be explicitly enabled in a later verified stage. Disabled GAR checks do not affect checkout.
 
-## Aliases
+## Prepared Imports And Aliases
 
-`LocationAliasGenerator` generates aliases for imported locations. Prepared imports persist generated aliases into `wdc_location_aliases`. Examples:
+Prepared JSON imports still support city-level dataset loading and alias generation. Aliases improve city selection only; they do not imply full address standardization.
+
+Examples:
 
 - Новосибирск: `новосиб`, `нск`, `новосибирская`
 - Бердск: `бердск`
 
-## Prepared Imports
+## Timeout And Safety
 
-`FiasImportManager` supports prepared JSON datasets, batch processing, location inserts, and alias generation. The sample dataset is `database/demo/fias-prepared-sample.json` and intentionally stays small.
-
-## Checkout Safety
-
-Checkout never depends on a successful external API response. API disabled, rate-limited, timeout, parse failure, and GAR failure states all resolve into fallback-safe results. The renderer may show a calm API-unavailable notice, but validation keeps unknown cities allowed.
+Because checkout runtime does not call FIAS now, FIAS timeouts cannot affect checkout. Future HTTP failures must remain fail-open: unsuccessful normalizer result, then DaData/manual fallback.

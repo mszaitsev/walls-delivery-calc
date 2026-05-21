@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
 use WallsShop\WDC\Checkout\Address\DaDataAddressNormalizer;
@@ -11,7 +12,9 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
+use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Fias\FiasCredentials;
 use WallsShop\WDC\Locations\Fias\FiasEndpoints;
 use WallsShop\WDC\Locations\Fias\FiasHttpClient;
 use WallsShop\WDC\Locations\Fias\FiasLogger;
@@ -20,17 +23,16 @@ use WallsShop\WDC\Locations\Gar\GarChangesClient;
 use WallsShop\WDC\Locations\Gar\GarSyncManager;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
-use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
-use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
+defined( 'APP_ENCRYPTION_KEY' ) || define( 'APP_ENCRYPTION_KEY', 'test-fias-encryption-key' );
 
 $GLOBALS['wdc_fias_options'] = array();
 $GLOBALS['wdc_fias_transients'] = array();
-$GLOBALS['wdc_fias_http_mode'] = 'success';
+$GLOBALS['wdc_fias_http_requests'] = 0;
 
 function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['wdc_fias_options'][ $key ] ?? $default; }
 function update_option( string $key, mixed $value, bool|string $autoload = false ): bool { $GLOBALS['wdc_fias_options'][ $key ] = $value; return true; }
@@ -38,24 +40,45 @@ function get_transient( string $key ): mixed { return $GLOBALS['wdc_fias_transie
 function set_transient( string $key, mixed $value, int $ttl ): bool { $GLOBALS['wdc_fias_transients'][ $key ] = $value; return true; }
 function current_time( string $type ): string { return '2026-05-21 12:00:00'; }
 function __( string $text, string $domain = '' ): string { return $text; }
+function esc_html__( string $text, string $domain = '' ): string { return $text; }
+function esc_attr__( string $text, string $domain = '' ): string { return $text; }
+function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags | JSON_UNESCAPED_UNICODE ); }
+function wp_unslash( mixed $value ): mixed { return $value; }
+function sanitize_text_field( string $value ): string { return trim( strip_tags( $value ) ); }
+function sanitize_key( string $value ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( $value ) ) ?: ''; }
+function checked( mixed $checked, mixed $current = true, bool $display = true ): string { $result = (string) $checked === (string) $current ? ' checked="checked"' : ''; if ( $display ) { echo $result; } return $result; }
+function selected( mixed $selected, mixed $current = true, bool $display = true ): string { $result = (string) $selected === (string) $current ? ' selected="selected"' : ''; if ( $display ) { echo $result; } return $result; }
+function current_user_can( string $capability ): bool { return true; }
+function wp_verify_nonce( string $nonce, string $action ): bool { return true; }
+function wp_nonce_field( string $action, string $name ): void { echo '<input type="hidden" name="' . esc_attr( $name ) . '" value="nonce">'; }
+function submit_button( string $text ): void { echo '<button type="submit">' . esc_html( $text ) . '</button>'; }
 function is_wp_error( mixed $value ): bool { return is_object( $value ) && method_exists( $value, 'get_error_message' ); }
 function wp_remote_retrieve_response_code( array $response ): int { return (int) ( $response['response']['code'] ?? 0 ); }
 function wp_remote_retrieve_body( array $response ): string { return (string) ( $response['body'] ?? '' ); }
+function wp_remote_post( string $url, array $args = array() ): array { ++$GLOBALS['wdc_fias_http_requests']; return array( 'response' => array( 'code' => 500 ), 'body' => '{}' ); }
+function wp_remote_get( string $url, array $args = array() ): array { ++$GLOBALS['wdc_fias_http_requests']; return array( 'response' => array( 'code' => 500 ), 'body' => '{}' ); }
 
-function wp_remote_post( string $url, array $args = array() ): array|object {
-	if ( 'timeout' === $GLOBALS['wdc_fias_http_mode'] ) {
-		return new class { public function get_error_message(): string { return 'cURL error 28: Operation timed out'; } };
-	}
-
-	return array(
-		'response' => array( 'code' => 200 ),
-		'body'     => wp_json_encode( array( 'suggestions' => array( array( 'data' => array( 'city' => 'Новосибирск', 'region' => 'Новосибирская область', 'postal_code' => '630099', 'fias_id' => 'api-fias-nsk', 'gar_id' => 'api-gar-nsk' ) ) ) ) ),
-	);
+final class WdcFiasSmokeSession {
+	private array $data = array();
+	public function set( string $key, mixed $value ): void { $this->data[ $key ] = $value; }
+	public function get( string $key, mixed $default = null ): mixed { return $this->data[ $key ] ?? $default; }
+	public function __unset( string $key ): void { unset( $this->data[ $key ] ); }
 }
 
-function wp_remote_get( string $url, array $args = array() ): array|object {
-	return new class { public function get_error_message(): string { return 'cURL error 28: Operation timed out'; } };
+final class WdcFiasSmokeWooCommerce {
+	public WdcFiasSmokeSession $session;
+	public function __construct() { $this->session = new WdcFiasSmokeSession(); }
+}
+
+function WC(): WdcFiasSmokeWooCommerce {
+	static $wc = null;
+	if ( null === $wc ) {
+		$wc = new WdcFiasSmokeWooCommerce();
+	}
+
+	return $wc;
 }
 
 if ( ! class_exists( 'wpdb' ) ) {
@@ -83,7 +106,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 			usort( $rows, static fn ( array $a, array $b ): int => strcmp( (string) $a['display_name'], (string) $b['display_name'] ) );
 			return array_slice( array_values( $rows ), 0, $limit );
 		}
-		public function get_var( mixed $query ): int { return str_contains( (string) $query, 'wdc_location_aliases' ) ? count( $this->tables['wdc_location_aliases'] ?? array() ) : count( $this->tables['wdc_locations'] ?? array() ); }
+		public function get_var( mixed $query ): int { return count( $this->tables['wdc_locations'] ?? array() ); }
 		public function query( mixed $query ): int { return 1; }
 	}
 }
@@ -97,63 +120,61 @@ function fias_smoke_assert( bool $condition, string $message ): void {
 	}
 }
 
+$settings = new SettingsRepository();
+$encryption = new EncryptionService();
+$credentials = new FiasCredentials( $settings, $encryption );
+fias_smoke_assert( $credentials->save_token( 'raw-secret-token' ), 'Saving token must succeed with APP_ENCRYPTION_KEY.' );
+$all_settings = $settings->all();
+fias_smoke_assert( isset( $all_settings['fias_api_token_encrypted'], $all_settings['fias_api_token_masked'] ), 'Encrypted and masked token settings must be stored.' );
+fias_smoke_assert( 'raw-secret-token' !== $all_settings['fias_api_token_encrypted'], 'Encrypted token must not equal raw token.' );
+fias_smoke_assert( '********' === $credentials->masked_token(), 'Masked token must be stars only.' );
+fias_smoke_assert( ! str_contains( $credentials->masked_token(), 'raw-secret-token' ), 'Raw token must not appear in masked output.' );
+
+ob_start();
+( new SettingsAdminPage( $settings, $credentials ) )->render_page();
+$settings_html = (string) ob_get_clean();
+fias_smoke_assert( ! str_contains( $settings_html, 'raw-secret-token' ), 'Raw token must never appear in settings UI.' );
+fias_smoke_assert( str_contains( $settings_html, '********' ), 'Settings UI must show only token mask.' );
+
+$credentials->save_token( '' );
+fias_smoke_assert( ! $credentials->has_token(), 'Empty token save must clear token.' );
+
 $wpdb = new wpdb();
 $repository = new LocationRepository( $wpdb );
 ( new LocationImportService( $repository ) )->import_from_array(
 	array(
 		array( 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Новосибирск', 'postcode' => '630000', 'fias_id' => 'local-fias-nsk', 'gar_id' => 'local-gar-nsk' ),
-		array( 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'city_name' => 'Бердск', 'postcode' => '633010', 'fias_id' => 'local-fias-berdsk', 'gar_id' => 'local-gar-berdsk' ),
 	)
 );
 
-$settings = new SettingsRepository();
-$settings->replace( array_merge( $settings->defaults(), array( 'fias_api_enabled' => true, 'fias_api_minute_limit' => 1, 'fias_api_daily_limit' => 10 ) ) );
-$logger = new FiasLogger( new Logger() );
-$limiter = new FiasRateLimiter( $settings, $logger );
-fias_smoke_assert( $limiter->can_request(), 'Limiter must allow first request.' );
-$limiter->increment();
-fias_smoke_assert( ! $limiter->can_request(), 'Limiter must block after minute limit.' );
-$GLOBALS['wdc_fias_transients'] = array();
-
 $search = new CheckoutLocationSearch( new LocationSearchService( $repository ) );
 $resolver = new CheckoutCityResolver( $repository, $search );
+$logger = new FiasLogger( new Logger() );
+$limiter = new FiasRateLimiter( $settings, $logger );
 $http = new FiasHttpClient( 1, $logger );
-$fias = new FiasAddressNormalizer( $resolver, $settings, new FiasEndpoints(), $http, $limiter, $logger );
+$fias = new FiasAddressNormalizer( $resolver, $settings, new FiasEndpoints(), $http, $limiter, $logger, $credentials );
+
+$missing = $fias->normalize( 'Новосибирск, Ленина, 1', array( 'country_code' => 'RU', 'city' => 'Новосибирск' ) );
+fias_smoke_assert( ! $missing->success && 'fias_token_missing' === $missing->error_code, 'No token must return fias_token_missing.' );
+
+$credentials->save_token( 'raw-secret-token' );
+$disabled = $fias->normalize( 'Новосибирск, Ленина, 1', array( 'country_code' => 'RU', 'city' => 'Новосибирск' ) );
+fias_smoke_assert( ! $disabled->success && 'fias_runtime_disabled' === $disabled->error_code, 'Saved token must return runtime disabled placeholder.' );
+fias_smoke_assert( 0 === $GLOBALS['wdc_fias_http_requests'], 'FIAS normalizer must not execute runtime HTTP requests.' );
+
+$session = new CheckoutSessionManager();
 $normalizer = new CheckoutAddressNormalizer( $fias, new DaDataAddressNormalizer(), new FallbackAddressNormalizer() );
-$runtime = new CheckoutAddressRuntime( $normalizer, $resolver, new CheckoutSessionManager() );
+$runtime = new CheckoutAddressRuntime( $normalizer, $resolver, $session );
+$known_city = (string) $wpdb->tables['wdc_locations'][1]['city_name'];
+$result = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => $known_city, 'shipping_address_1' => 'Ленина', 'shipping_address_2' => '1' ) );
+fias_smoke_assert( ! $result->success && $result->address->fallback, 'Checkout chain must continue to manual fallback after disabled FIAS and DaData.' );
+fias_smoke_assert( '630000' === $result->address->postcode, 'Local city DB must still provide postcode context.' );
+fias_smoke_assert( array() !== $session->selected_city(), 'Local city DB must still provide selected city context.' );
 
-$known = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => 'Новосибирск' ) );
-fias_smoke_assert( $known->success && '630000' === $known->address->postcode, 'Known exact city must normalize locally and fill postcode.' );
-
-$settings->set( 'fias_api_enabled', false );
-$disabled = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => 'Unknown City' ) );
-fias_smoke_assert( ! $disabled->success && $disabled->address->fallback, 'API disabled unknown city must fall back.' );
-
-$settings->set( 'fias_api_enabled', true );
-$GLOBALS['wdc_fias_http_mode'] = 'timeout';
-$timeout = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => 'Unknown Timeout City' ) );
-fias_smoke_assert( ! $timeout->success && $timeout->address->fallback, 'API timeout must fall back and keep checkout alive.' );
-
-$GLOBALS['wdc_fias_http_mode'] = 'success';
-$GLOBALS['wdc_fias_transients'] = array();
-$api = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => 'Новос', 'shipping_postcode' => '630000' ) );
-fias_smoke_assert( $api->success, 'Uncertain local city must normalize through API.' );
-fias_smoke_assert( '630099' === $api->address->postcode, 'API postcode must overwrite local/checkout postcode.' );
-fias_smoke_assert( 'api-fias-nsk' === $api->address->fias_id, 'API FIAS id must be used.' );
-
-$GLOBALS['wdc_fias_transients'] = array();
-$unknown = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => 'Completely Unknown' ) );
-fias_smoke_assert( $unknown->success, 'Successful fake API can normalize unknown city.' );
-
-$aliases = ( new LocationAliasGenerator() )->generate( new Location( city_name: 'Новосибирск', display_name: 'Новосибирск' ) );
-fias_smoke_assert( in_array( 'новосиб', $aliases, true ) && in_array( 'нск', $aliases, true ), 'Alias generator must create Novosibirsk aliases.' );
-
-$gar = new GarSyncManager( new ActionScheduler( new Logger() ), new GarChangesClient( $http ), new Logger(), $wpdb );
-$GLOBALS['wdc_fias_http_mode'] = 'timeout';
+$gar = new GarSyncManager( new ActionScheduler( new Logger() ), new GarChangesClient( $http ), new Logger(), $settings, $wpdb );
+$before_gar_requests = $GLOBALS['wdc_fias_http_requests'];
 $gar_status = $gar->check_for_changes();
-fias_smoke_assert( false === $gar_status['ok'], 'GAR sync safe failure must return non-ok status.' );
-
-$survived = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => 'Checkout Survives Failure' ) );
-fias_smoke_assert( ! $survived->success && $survived->address->fallback, 'Checkout must survive API failure with fallback address.' );
+fias_smoke_assert( ! empty( $gar_status['disabled'] ), 'GAR runtime requests must be disabled by default.' );
+fias_smoke_assert( $before_gar_requests === $GLOBALS['wdc_fias_http_requests'], 'GAR disabled check must not execute HTTP requests.' );
 
 echo "FIAS smoke test passed.\n";

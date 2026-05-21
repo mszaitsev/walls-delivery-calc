@@ -31,6 +31,9 @@ final class CheckoutAddressRenderer {
 		}
 		if ( $address->fallback ) {
 			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--fallback">' . esc_html__( 'Используется введенный вручную населенный пункт', 'walls-delivery-calc' ) . '</p>';
+			if ( '' !== trim( $city ) ) {
+				echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--fallback-city">' . esc_html( $city ) . '</p>';
+			}
 		}
 		if ( '' !== trim( $address->postcode ) ) {
 			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--postcode">' . esc_html__( 'Индекс:', 'walls-delivery-calc' ) . ' ' . esc_html( $address->postcode ) . ' <span class="wdc-address-normalization__source">(' . esc_html( $this->postcode_source_label( $result->source, $result->error_code ) ) . ')</span></p>';

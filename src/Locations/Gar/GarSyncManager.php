@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Locations\Gar;
 
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -20,6 +21,7 @@ final class GarSyncManager {
 		private ActionScheduler $scheduler,
 		private GarChangesClient $client,
 		private Logger $logger,
+		private ?SettingsRepository $settings = null,
 		?\wpdb $db = null
 	) {
 		global $wpdb;
@@ -35,6 +37,20 @@ final class GarSyncManager {
 	}
 
 	public function check_for_changes(): array {
+		if ( ! $this->settings instanceof SettingsRepository || ! $this->settings->get_bool( 'gar_sync_enabled', false ) ) {
+			$status = array(
+				'ok'            => true,
+				'pending'       => false,
+				'disabled'      => true,
+				'last_check_at' => current_time( 'mysql' ),
+				'message'       => 'GAR runtime requests are disabled until API methods are verified.',
+			);
+			update_option( self::LAST_STATUS_OPTION, $status, false );
+			update_option( self::PENDING_OPTION, false, false );
+
+			return $status;
+		}
+
 		$response = $this->client->request_changes();
 		$now      = current_time( 'mysql' );
 		update_option( self::LAST_CHECK_OPTION, $now, false );

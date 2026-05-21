@@ -7,6 +7,7 @@ use RuntimeException;
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Fias\FiasCredentials;
 use WallsShop\WDC\Locations\Fias\FiasRateLimiter;
 use WallsShop\WDC\Locations\Gar\GarSyncManager;
 use WallsShop\WDC\Locations\Import\FiasImportManager;
@@ -30,7 +31,8 @@ final class LocationsAdminPage {
 		private ?FiasRateLimiter $fias_limiter = null,
 		private ?GarSyncManager $gar_sync = null,
 		private ?FiasImportManager $fias_import = null,
-		private ?SettingsRepository $settings = null
+		private ?SettingsRepository $settings = null,
+		private ?FiasCredentials $fias_credentials = null
 	) {
 	}
 
@@ -69,7 +71,9 @@ final class LocationsAdminPage {
 			<div class="wdc-locations-summary">
 				<p><strong><?php echo esc_html__( 'Населенных пунктов:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_all() ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'Регионов/областей:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_regions() ); ?></span></p>
-				<p><strong><?php echo esc_html__( 'FIAS API:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->settings instanceof SettingsRepository && $this->settings->get_bool( 'fias_api_enabled', true ) ? 'enabled' : 'disabled' ); ?></span></p>
+				<p><strong><?php echo esc_html__( 'ФИАС/ГАР API-токен:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->fias_credentials instanceof FiasCredentials && $this->fias_credentials->has_token() ? 'задан' : 'не задан' ); ?></span></p>
+				<p><strong><?php echo esc_html__( 'Runtime-нормализация:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html__( 'временно отключена до проверки API', 'walls-delivery-calc' ); ?></span></p>
+				<p><strong><?php echo esc_html__( 'Источник населенных пунктов:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html__( 'локальная база', 'walls-delivery-calc' ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'FIAS limiter:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->limiter_label() ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'GAR sync:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->gar_status_label() ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'Aliases:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_aliases() ); ?></span></p>
