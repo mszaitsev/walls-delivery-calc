@@ -347,7 +347,7 @@ function runtime_smoke_assert( bool $condition, string $message ): void {
 }
 
 function runtime_smoke_environment(): PluginEnvironment {
-	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.10' );
+	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.11' );
 }
 
 function runtime_smoke_request( string $delivery_type = '' ): QuoteRequest {
@@ -465,7 +465,7 @@ runtime_smoke_assert( true === ( $ajax_response['success'] ?? false ), 'Location
 runtime_smoke_assert( 'Новосибирск' === ( $ajax_response['data']['groups'][0]['locations'][0]['city_name'] ?? '' ), 'Location AJAX handle must return grouped Новосибирск results.' );
 
 $city_selector_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.js' );
-foreach ( array( 'updated_checkout', '.wdcCitySelector', 'input[name="shipping_city"]', 'wdc_platform_search_locations', 'update_checkout', 'wdc_platform_location_id', 'event.target', ':visible', ':disabled', 'city input event', 'ajax request start', 'locationStore', 'data-location-key', 'mousedown.wdcCitySelector', 'isSelecting', 'preventDefault', 'stopPropagation', 'stopImmediatePropagation', 'wdc-city-selector-selected', 'setTimeout', 'suppressSearch', 'search suppressed', 'suppressSearch disabled after updated_checkout', 'wdc-city-picker-overlay', 'wdc-city-picker-panel', 'wdc-city-picker-close', 'Escape', 'wdc-city-picker-search', 'manual fallback city', 'wdc-city-picker-fallback', 'fallback button mousedown', 'fallback selection start', 'fallback city applied', 'picker closed after fallback', 'update_checkout triggered after fallback', 'closePicker', 'Выбрать введенный населенный пункт', 'corrected query', 'correction used' ) as $needle ) {
+foreach ( array( 'updated_checkout', '.wdcCitySelector', 'input[name="shipping_city"]', 'wdc_platform_search_locations', 'update_checkout', 'wdc_platform_location_id', 'event.target', ':visible', ':disabled', 'city input event', 'ajax request start', 'locationStore', 'data-location-key', 'mousedown.wdcCitySelector', 'isSelecting', 'preventDefault', 'stopPropagation', 'stopImmediatePropagation', 'wdc-city-selector-selected', 'setTimeout', 'suppressSearch', 'search suppressed', 'suppressSearch disabled after updated_checkout', 'wdc-city-picker-overlay', 'wdc-city-picker-panel', 'wdc-city-picker-close', 'Escape', 'wdc-city-picker-search', 'manual fallback city', 'wdc-city-picker-fallback', 'fallback button mousedown', 'fallback selection start', 'fallback city applied', 'picker closed after fallback', 'update_checkout triggered after fallback', 'update_checkout triggered after empty city', 'empty city picker close', 'closePicker', 'skipManualFallback', 'Выбрать введенный населенный пункт', 'corrected query', 'correction used' ) as $needle ) {
 	runtime_smoke_assert( str_contains( $city_selector_js, $needle ), 'City selector JS must contain ' . $needle . '.' );
 }
 runtime_smoke_assert( str_contains( $city_selector_js, "input.wdcCitySelector keyup.wdcCitySelector change.wdcCitySelector paste.wdcCitySelector" ), 'City selector JS must use delegated input.wdcCitySelector events.' );
@@ -476,6 +476,11 @@ runtime_smoke_assert( ! str_contains( $city_selector_js, 'locations-demo.json' )
 $city_selector_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.css' );
 foreach ( array( 'max-width: 1300px', 'grid-template-columns: repeat(2', '@media (max-width: 900px)', 'grid-template-columns: 1fr', 'width: 100%', 'min-width: 0', 'position: fixed' ) as $needle ) {
 	runtime_smoke_assert( str_contains( $city_selector_css, $needle ), 'City selector CSS must contain ' . $needle . '.' );
+}
+
+$checkout_sort_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-sort.js' );
+foreach ( array( '.wdc-platform-pickup-point', 'pickup select changed', 'pickup carrier', 'pickup rate id', 'pickup point code', 'update_checkout triggered after pickup selection' ) as $needle ) {
+	runtime_smoke_assert( str_contains( $checkout_sort_js, $needle ), 'Pickup frontend JS must contain ' . $needle . '.' );
 }
 
 $settings->set( 'enable_new_checkout_shipping', true );

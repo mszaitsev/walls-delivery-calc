@@ -60,10 +60,29 @@ final class OrderShippingMetaPersister {
 			$map['_wdc_platform_pickup_address']   = $pickup['point_address'] ?? '';
 			$map['_wdc_platform_pickup_comment']   = $pickup['point_comment'] ?? '';
 			$map['_wdc_platform_pickup_work_time'] = $pickup['point_work_time'] ?? '';
+			$this->set_pickup_shipping_address( $order, $pickup, $address );
 		}
 
 		foreach ( $map as $key => $value ) {
 			$order->update_meta_data( $key, $value );
+		}
+	}
+
+	/**
+	 * @param array<string,mixed> $pickup
+	 */
+	private function set_pickup_shipping_address( object $order, array $pickup, mixed $address_result ): void {
+		$address = is_object( $address_result ) && isset( $address_result->address ) ? $address_result->address : null;
+		$this->call_order_setter( $order, 'set_shipping_address_1', (string) ( $pickup['point_address'] ?? '' ) );
+		$this->call_order_setter( $order, 'set_shipping_address_2', '' !== (string) ( $pickup['point_code'] ?? '' ) ? 'Код ПВЗ: ' . (string) $pickup['point_code'] : '' );
+		$this->call_order_setter( $order, 'set_shipping_city', is_object( $address ) ? (string) ( $address->settlement ?: $address->city ) : '' );
+		$this->call_order_setter( $order, 'set_shipping_postcode', is_object( $address ) ? (string) $address->postcode : '' );
+		$this->call_order_setter( $order, 'set_shipping_country', is_object( $address ) && '' !== (string) $address->country_code ? (string) $address->country_code : 'RU' );
+	}
+
+	private function call_order_setter( object $order, string $method, string $value ): void {
+		if ( '' !== $value && method_exists( $order, $method ) ) {
+			$order->{$method}( $value );
 		}
 	}
 

@@ -278,7 +278,11 @@
 	function closePicker( options ) {
 		options = options || {};
 		if ( options.manualFallback && ! options.skipManualFallback ) {
-			applyFallbackSelection();
+			if ( '' === String( searchInput().val() || '' ).trim() ) {
+				applyEmptyCityClose();
+			} else {
+				applyFallbackSelection();
+			}
 			return;
 		}
 
@@ -286,6 +290,20 @@
 		activeCityField = isUsableField( activeCityField ) ? activeCityField : null;
 		$( '.wdc-city-picker-overlay, .wdc-city-picker-panel, .wdc-city-selector' ).remove();
 		debug( 'city picker closed' );
+	}
+
+	function applyEmptyCityClose() {
+		debug( 'empty city picker close' );
+		var $field = cityField();
+		if ( $field.length ) {
+			$field.val( '' ).trigger( 'input' ).trigger( 'change' );
+		}
+		clearHidden();
+		closePicker( { skipManualFallback: true } );
+		window.setTimeout( function () {
+			debug( 'update_checkout triggered after empty city' );
+			$( document.body ).trigger( 'update_checkout' );
+		}, 50 );
 	}
 
 	function stopEvent( event ) {

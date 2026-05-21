@@ -183,11 +183,14 @@ use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Checkout\WooCommerce\PickupPointRenderer;
 use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
@@ -207,9 +210,31 @@ function pickup_smoke_assert( bool $condition, string $message ): void {
 final class WdcPickupSmokeOrder {
 	/** @var array<string,mixed> */
 	public array $meta = array();
+	/** @var array<string,string> */
+	public array $shipping = array();
 
 	public function update_meta_data( string $key, mixed $value ): void {
 		$this->meta[ $key ] = $value;
+	}
+
+	public function set_shipping_address_1( string $value ): void {
+		$this->shipping['address_1'] = $value;
+	}
+
+	public function set_shipping_address_2( string $value ): void {
+		$this->shipping['address_2'] = $value;
+	}
+
+	public function set_shipping_city( string $value ): void {
+		$this->shipping['city'] = $value;
+	}
+
+	public function set_shipping_postcode( string $value ): void {
+		$this->shipping['postcode'] = $value;
+	}
+
+	public function set_shipping_country( string $value ): void {
+		$this->shipping['country'] = $value;
 	}
 }
 
@@ -269,6 +294,13 @@ pickup_smoke_assert( ! in_array( 'demo-nsk-001', array_map( static fn ( object $
 pickup_smoke_assert( null !== $repo->find_by_code( 'demo', 'demo-nsk-001' ), 'Pickup repository must find point by carrier and code.' );
 
 $session = new CheckoutSessionManager();
+$capture_session = new CheckoutSessionManager();
+( new CheckoutDeliveryTypeSelector( $capture_session, $repo, $provider, new PickupPointRenderer() ) )->capture_update_order_review( 'wdc_platform_pickup_carrier=demo&wdc_platform_pickup_rate_id=demo%3Apickup&wdc_platform_pickup_point=demo-nsk-001' );
+$captured_pickup = $capture_session->pickup_selection();
+pickup_smoke_assert( 'demo-nsk-001' === ( $captured_pickup['point_code'] ?? '' ), 'Pickup update capture must save point code.' );
+pickup_smoke_assert( 'Красный проспект, 25' === ( $captured_pickup['point_address'] ?? '' ), 'Pickup update capture must save point address.' );
+pickup_smoke_assert( '' !== ( $captured_pickup['point_comment'] ?? '' ), 'Pickup update capture must save point comment.' );
+pickup_smoke_assert( '' !== ( $captured_pickup['point_work_time'] ?? '' ), 'Pickup update capture must save point work time.' );
 $session->save_selected_delivery_type( DeliveryType::PICKUP );
 $session->save_pickup_selection(
 	array(
@@ -309,11 +341,24 @@ $session->save_rates(
 		),
 	)
 );
+$session->save_normalized_address_result(
+	new AddressNormalizationResult(
+		'RU 630000 Новосибирск',
+		new Address( country_code: 'RU', city: 'Новосибирск', postcode: '630000', normalized: true ),
+		true,
+		1.0,
+		'fias'
+	)
+);
 WC()->session->set( 'chosen_shipping_methods', array( NewShippingMethod::METHOD_ID . ':demo:pickup' ) );
 $order = new WdcPickupSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
 pickup_smoke_assert( 'demo-nsk-001' === ( $order->meta['_wdc_platform_pickup_code'] ?? '' ), 'Order meta must save pickup code.' );
 pickup_smoke_assert( isset( $order->meta['_wdc_platform_pickup_address'], $order->meta['_wdc_platform_pickup_comment'], $order->meta['_wdc_platform_pickup_work_time'] ), 'Order meta must save pickup details.' );
+pickup_smoke_assert( 'Красный проспект, 25' === ( $order->shipping['address_1'] ?? '' ), 'Pickup order must write pickup address to shipping address_1.' );
+pickup_smoke_assert( 'Код ПВЗ: demo-nsk-001' === ( $order->shipping['address_2'] ?? '' ), 'Pickup order must write pickup code to shipping address_2.' );
+pickup_smoke_assert( 'Новосибирск' === ( $order->shipping['city'] ?? '' ), 'Pickup order must write normalized city to shipping city.' );
+pickup_smoke_assert( '630000' === ( $order->shipping['postcode'] ?? '' ), 'Pickup order must write resolved postcode to shipping postcode.' );
 
 $errors = new WdcPickupSmokeErrors();
 ( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
@@ -355,6 +400,7 @@ pickup_smoke_assert( ! $errors->has_errors(), 'Validation must pass for courier 
 $order = new WdcPickupSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
 pickup_smoke_assert( ! isset( $order->meta['_wdc_platform_pickup_code'] ), 'Courier order meta must not save stale pickup selection.' );
+pickup_smoke_assert( array() === $order->shipping, 'Courier order must not write pickup shipping address.' );
 
 $session->save_selected_delivery_type( DeliveryType::PICKUP );
 $session->save_rates(
