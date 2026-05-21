@@ -50,6 +50,10 @@ final class CheckoutDebugPanel {
 		$this->row( __( 'Примененная сортировка', 'walls-delivery-calc' ), (string) ( $debug['sort_mode'] ?? '' ) );
 		if ( null !== $address ) {
 			$this->row( __( 'Источник нормализации', 'walls-delivery-calc' ), $this->source_label( $address->source ) );
+			if ( 'dadata' === $address->source ) {
+				$this->row( __( 'DaData status', 'walls-delivery-calc' ), $address->success ? 'success' : 'failed' );
+				$this->row( __( 'DaData error', 'walls-delivery-calc' ), $address->error_code );
+			}
 		}
 		echo '</dl>';
 

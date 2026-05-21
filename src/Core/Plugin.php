@@ -18,6 +18,7 @@ use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\Runtime\DemoCarrier;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
+use WallsShop\WDC\Checkout\Address\AddressQueryBuilder;
 use WallsShop\WDC\Checkout\Address\DaDataAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\FiasAddressNormalizer;
 use WallsShop\WDC\Checkout\Admin\CheckoutSimulationPage;
@@ -52,6 +53,9 @@ use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Admin\LocationsAdminPage;
+use WallsShop\WDC\Locations\DaData\DaDataCredentials;
+use WallsShop\WDC\Locations\DaData\DaDataHttpClient;
+use WallsShop\WDC\Locations\DaData\DaDataLogger;
 use WallsShop\WDC\Locations\Fias\FiasCredentials;
 use WallsShop\WDC\Locations\Fias\FiasEndpoints;
 use WallsShop\WDC\Locations\Fias\FiasHttpClient;
@@ -158,7 +162,11 @@ final class Plugin {
 		$this->container->register( FiasRateLimiter::class, fn(): FiasRateLimiter => new FiasRateLimiter( $this->container->get( SettingsRepository::class ), $this->container->get( FiasLogger::class ) ) );
 		$this->container->register( FiasHttpClient::class, fn(): FiasHttpClient => new FiasHttpClient( $this->container->get( SettingsRepository::class )->get_int( 'fias_api_timeout', 3 ), $this->container->get( FiasLogger::class ) ) );
 		$this->container->register( FiasAddressNormalizer::class, fn(): FiasAddressNormalizer => new FiasAddressNormalizer( $this->container->get( CheckoutCityResolver::class ), $this->container->get( SettingsRepository::class ), $this->container->get( FiasEndpoints::class ), $this->container->get( FiasHttpClient::class ), $this->container->get( FiasRateLimiter::class ), $this->container->get( FiasLogger::class ), $this->container->get( FiasCredentials::class ) ) );
-		$this->container->register( DaDataAddressNormalizer::class, fn(): DaDataAddressNormalizer => new DaDataAddressNormalizer() );
+		$this->container->register( DaDataLogger::class, fn(): DaDataLogger => new DaDataLogger( $this->container->get( Logger::class ) ) );
+		$this->container->register( DaDataCredentials::class, fn(): DaDataCredentials => new DaDataCredentials( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ) ) );
+		$this->container->register( DaDataHttpClient::class, fn(): DaDataHttpClient => new DaDataHttpClient( $this->container->get( SettingsRepository::class )->get_int( 'dadata_api_timeout', 3 ), $this->container->get( DaDataLogger::class ) ) );
+		$this->container->register( AddressQueryBuilder::class, fn(): AddressQueryBuilder => new AddressQueryBuilder() );
+		$this->container->register( DaDataAddressNormalizer::class, fn(): DaDataAddressNormalizer => new DaDataAddressNormalizer( $this->container->get( SettingsRepository::class ), $this->container->get( DaDataCredentials::class ), $this->container->get( DaDataHttpClient::class ), $this->container->get( AddressQueryBuilder::class ) ) );
 		$this->container->register( FallbackAddressNormalizer::class, fn(): FallbackAddressNormalizer => new FallbackAddressNormalizer() );
 		$this->container->register(
 			CheckoutAddressNormalizer::class,
@@ -308,7 +316,7 @@ final class Plugin {
 				$this->container->get( DemoPickupProvider::class )
 			)
 		);
-		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ) ) );
+		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ), $this->container->get( DaDataCredentials::class ) ) );
 		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox() );
 	}
 

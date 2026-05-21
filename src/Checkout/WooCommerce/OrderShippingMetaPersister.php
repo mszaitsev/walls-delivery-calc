@@ -49,7 +49,7 @@ final class OrderShippingMetaPersister {
 			$map['_wdc_platform_fallback_city']        = $this->session_manager->fallback_city();
 			$map['_wdc_platform_fallback_address']     = $address_fallback_used ? $address->address->raw_address : '';
 			$map['_wdc_platform_address_fallback_used'] = $address_fallback_used;
-			$map['_wdc_platform_resolved_postcode']    = (string) ( $city_context['postcode'] ?? $address->address->postcode );
+			$map['_wdc_platform_resolved_postcode']    = 'dadata' === $address->source && '' !== trim( $address->address->postcode ) ? $address->address->postcode : (string) ( $city_context['postcode'] ?? $address->address->postcode );
 			$map['_wdc_platform_fias_id']              = $address->address->fias_id;
 			$map['_wdc_platform_gar_id']               = $address->address->gar_id;
 			$map['_wdc_platform_city_source']          = $city_source;

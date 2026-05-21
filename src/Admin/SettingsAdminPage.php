@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Admin;
 
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\DaData\DaDataCredentials;
 use WallsShop\WDC\Locations\Fias\FiasCredentials;
 
 defined( 'ABSPATH' ) || exit;
@@ -17,7 +18,8 @@ final class SettingsAdminPage {
 
 	public function __construct(
 		private SettingsRepository $settings,
-		private ?FiasCredentials $fias_credentials = null
+		private ?FiasCredentials $fias_credentials = null,
+		private ?DaDataCredentials $dadata_credentials = null
 	) {
 	}
 
@@ -51,6 +53,12 @@ final class SettingsAdminPage {
 			<?php endif; ?>
 			<?php if ( $this->fias_credentials instanceof FiasCredentials && ! $this->fias_credentials->encryption_ready() ) : ?>
 				<div class="notice notice-warning"><p><?php echo esc_html__( 'APP_ENCRYPTION_KEY не задан. API-токен ФИАС/ГАР не будет сохранен, пока ключ шифрования не настроен.', 'walls-delivery-calc' ); ?></p></div>
+			<?php endif; ?>
+			<?php if ( $this->dadata_credentials instanceof DaDataCredentials && ! $this->dadata_credentials->encryption_ready() ) : ?>
+				<div class="notice notice-warning"><p><?php echo esc_html__( 'APP_ENCRYPTION_KEY is not configured. DaData credentials cannot be saved until encryption is available.', 'walls-delivery-calc' ); ?></p></div>
+			<?php endif; ?>
+			<?php if ( ! empty( $values['dadata_enabled'] ) && $this->dadata_credentials instanceof DaDataCredentials && ( ! $this->dadata_credentials->has_token() || ! $this->dadata_credentials->has_secret() ) ) : ?>
+				<div class="notice notice-warning"><p><?php echo esc_html__( 'DaData normalization is enabled, but token or secret key is missing.', 'walls-delivery-calc' ); ?></p></div>
 			<?php endif; ?>
 			<form method="post">
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
@@ -109,11 +117,27 @@ final class SettingsAdminPage {
 						</tr>
 						<tr>
 							<th scope="row"><?php echo esc_html__( 'Включить fallback DaData', 'walls-delivery-calc' ); ?></th>
-							<td><label><input type="checkbox" name="dadata_enabled" value="1" <?php checked( ! empty( $values['dadata_enabled'] ) ); ?>> <?php echo esc_html__( 'Зарезервировано для будущей интеграции DaData.', 'walls-delivery-calc' ); ?></label></td>
+							<td><label><input type="checkbox" name="dadata_enabled" value="1" <?php checked( ! empty( $values['dadata_enabled'] ) ); ?>> <?php echo esc_html__( 'Use DaData as a real address normalization fallback after the FIAS placeholder.', 'walls-delivery-calc' ); ?></label></td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="wdc_dadata_api_token"><?php echo esc_html__( 'DaData API token', 'walls-delivery-calc' ); ?></label></th>
+							<td>
+								<input id="wdc_dadata_api_token" type="password" name="dadata_api_token" value="" placeholder="<?php echo esc_attr( $this->dadata_token_placeholder() ); ?>" autocomplete="new-password">
+								<p class="description"><?php echo esc_html__( 'Leave empty and save to clear the stored token.', 'walls-delivery-calc' ); ?></p>
+								<p><strong><?php echo esc_html__( 'Status:', 'walls-delivery-calc' ); ?></strong> <?php echo esc_html( $this->dadata_token_status() ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="wdc_dadata_secret_key"><?php echo esc_html__( 'DaData secret key', 'walls-delivery-calc' ); ?></label></th>
+							<td>
+								<input id="wdc_dadata_secret_key" type="password" name="dadata_secret_key" value="" placeholder="<?php echo esc_attr( $this->dadata_secret_placeholder() ); ?>" autocomplete="new-password">
+								<p class="description"><?php echo esc_html__( 'Leave empty and save to clear the stored secret key.', 'walls-delivery-calc' ); ?></p>
+								<p><strong><?php echo esc_html__( 'Status:', 'walls-delivery-calc' ); ?></strong> <?php echo esc_html( $this->dadata_secret_status() ); ?></p>
+							</td>
 						</tr>
 						<tr>
 							<th scope="row"><label for="wdc_dadata_api_timeout"><?php echo esc_html__( 'Таймаут DaData', 'walls-delivery-calc' ); ?></label></th>
-							<td><input id="wdc_dadata_api_timeout" type="number" name="dadata_api_timeout" value="<?php echo esc_attr( (string) ( $values['dadata_api_timeout'] ?? 3 ) ); ?>" min="1" max="15" step="1"></td>
+							<td><input id="wdc_dadata_api_timeout" type="number" name="dadata_api_timeout" value="<?php echo esc_attr( (string) ( $values['dadata_api_timeout'] ?? 3 ) ); ?>" min="1" max="10" step="1"></td>
 						</tr>
 					</tbody>
 				</table>
@@ -150,7 +174,7 @@ final class SettingsAdminPage {
 			'fias_api_daily_limit'         => max( 1, min( 1000000, $fias_daily_limit > 0 ? $fias_daily_limit : 10000 ) ),
 			'fias_api_minute_limit'        => max( 1, min( 10000, $fias_minute_limit > 0 ? $fias_minute_limit : 100 ) ),
 			'dadata_enabled'               => ! empty( $data['dadata_enabled'] ),
-			'dadata_api_timeout'           => max( 1, min( 15, $dadata_timeout > 0 ? $dadata_timeout : 3 ) ),
+			'dadata_api_timeout'           => max( 1, min( 10, $dadata_timeout > 0 ? $dadata_timeout : 3 ) ),
 		);
 	}
 
@@ -169,6 +193,7 @@ final class SettingsAdminPage {
 
 		$this->settings->replace( array_merge( $this->settings->all(), $this->sanitize_settings( $_POST ) ) );
 		$token_message = $this->handle_fias_token( $_POST );
+		$token_message .= $this->handle_dadata_credentials( $_POST );
 
 		return __( 'Настройки сохранены.', 'walls-delivery-calc' ) . $token_message;
 	}
@@ -179,6 +204,22 @@ final class SettingsAdminPage {
 
 	private function fias_token_status(): string {
 		return $this->fias_credentials instanceof FiasCredentials && $this->fias_credentials->has_token() ? 'Токен сохранен' : 'Токен не задан';
+	}
+
+	private function dadata_token_placeholder(): string {
+		return $this->dadata_credentials instanceof DaDataCredentials && $this->dadata_credentials->has_token() ? $this->dadata_credentials->masked_token() : 'Token is not set';
+	}
+
+	private function dadata_secret_placeholder(): string {
+		return $this->dadata_credentials instanceof DaDataCredentials && $this->dadata_credentials->has_secret() ? $this->dadata_credentials->masked_secret() : 'Secret key is not set';
+	}
+
+	private function dadata_token_status(): string {
+		return $this->dadata_credentials instanceof DaDataCredentials && $this->dadata_credentials->has_token() ? 'Token saved' : 'Token is not set';
+	}
+
+	private function dadata_secret_status(): string {
+		return $this->dadata_credentials instanceof DaDataCredentials && $this->dadata_credentials->has_secret() ? 'Secret key saved' : 'Secret key is not set';
 	}
 
 	/**
@@ -200,5 +241,43 @@ final class SettingsAdminPage {
 		}
 
 		return ' ' . __( 'Токен ФИАС/ГАР сохранен.', 'walls-delivery-calc' );
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function handle_dadata_credentials( array $data ): string {
+		if ( ! $this->dadata_credentials instanceof DaDataCredentials ) {
+			return '';
+		}
+
+		$message = '';
+		if ( array_key_exists( 'dadata_api_token', $data ) ) {
+			$token = wp_unslash( (string) $data['dadata_api_token'] );
+			if ( '' === trim( $token ) ) {
+				$this->dadata_credentials->clear_token();
+				$message .= ' ' . __( 'DaData token cleared.', 'walls-delivery-calc' );
+			} elseif ( ! $this->dadata_credentials->encryption_ready() ) {
+				$message .= ' ' . __( 'DaData token was not saved: configure APP_ENCRYPTION_KEY.', 'walls-delivery-calc' );
+			} else {
+				$this->dadata_credentials->save_token( $token );
+				$message .= ' ' . __( 'DaData token saved.', 'walls-delivery-calc' );
+			}
+		}
+
+		if ( array_key_exists( 'dadata_secret_key', $data ) ) {
+			$secret = wp_unslash( (string) $data['dadata_secret_key'] );
+			if ( '' === trim( $secret ) ) {
+				$this->dadata_credentials->clear_secret();
+				$message .= ' ' . __( 'DaData secret key cleared.', 'walls-delivery-calc' );
+			} elseif ( ! $this->dadata_credentials->encryption_ready() ) {
+				$message .= ' ' . __( 'DaData secret key was not saved: configure APP_ENCRYPTION_KEY.', 'walls-delivery-calc' );
+			} else {
+				$this->dadata_credentials->save_secret( $secret );
+				$message .= ' ' . __( 'DaData secret key saved.', 'walls-delivery-calc' );
+			}
+		}
+
+		return $message;
 	}
 }
