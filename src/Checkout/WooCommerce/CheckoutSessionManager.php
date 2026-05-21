@@ -17,6 +17,7 @@ final class CheckoutSessionManager {
 	private const NORMALIZED_ADDRESS_KEY = 'wdc_platform_normalized_address';
 	private const SELECTED_CITY_KEY      = 'wdc_platform_selected_city';
 	private const FALLBACK_CITY_KEY      = 'wdc_platform_fallback_city';
+	private const ADDRESS_FINGERPRINT_KEY = 'wdc_platform_address_fingerprint';
 
 	public function save_selected_delivery_type( string $delivery_type ): void {
 		$this->set( self::DELIVERY_TYPE_KEY, $delivery_type );
@@ -45,6 +46,11 @@ final class CheckoutSessionManager {
 
 	public function selected_pickup_carrier(): string {
 		return (string) $this->get( self::PICKUP_CARRIER_KEY, '' );
+	}
+
+	public function clear_pickup_selection(): void {
+		$this->set( self::PICKUP_SELECTION_KEY, array() );
+		$this->set( self::PICKUP_CARRIER_KEY, '' );
 	}
 
 	public function pickup_selection_matches( string $carrierKey, string $rateId ): bool {
@@ -115,6 +121,12 @@ final class CheckoutSessionManager {
 		return is_array( $result ) && array() !== $result ? AddressNormalizationResult::from_array( $result ) : null;
 	}
 
+	public function clear_normalized_address(): void {
+		$this->set( self::NORMALIZED_ADDRESS_KEY, array() );
+		$this->set( self::SELECTED_CITY_KEY, array() );
+		$this->set( self::FALLBACK_CITY_KEY, '' );
+	}
+
 	/**
 	 * @param array<string,mixed> $city
 	 */
@@ -137,6 +149,14 @@ final class CheckoutSessionManager {
 
 	public function fallback_city(): string {
 		return (string) $this->get( self::FALLBACK_CITY_KEY, '' );
+	}
+
+	public function save_address_fingerprint( string $fingerprint ): void {
+		$this->set( self::ADDRESS_FINGERPRINT_KEY, $fingerprint );
+	}
+
+	public function address_fingerprint(): string {
+		return (string) $this->get( self::ADDRESS_FINGERPRINT_KEY, '' );
 	}
 
 	private function set( string $key, mixed $value ): void {

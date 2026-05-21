@@ -47,16 +47,12 @@ final class CheckoutDeliveryTypeSelector {
 		}
 
 		$rate_id = (string) ( $meta['rate_id'] ?? $this->method_id( $method ) );
-		echo '<div class="wdc-delivery-type-controls">';
-		echo '<label><input type="radio" name="wdc_platform_delivery_type" value="' . esc_attr( $delivery_type ) . '" ' . checked( $this->selected_delivery_type_for_rate( $delivery_type, $rate_id ), $delivery_type, false ) . '> ' . esc_html( $this->label_for_type( $delivery_type ) ) . '</label>';
-		echo '</div>';
-
 		if ( ! empty( $meta['requires_pickup_point'] ) ) {
 			$this->render_pickup_selector( (string) $meta['carrier_key'], $rate_id );
 		}
 
 		if ( ! empty( $meta['requires_courier_address'] ) ) {
-			echo '<div class="wdc-courier-notice">' . esc_html__( 'Courier delivery will use the checkout address.', 'walls-delivery-calc' ) . '</div>';
+			echo '<div class="wdc-courier-notice">' . esc_html__( 'Для курьерской доставки будет использован адрес, указанный в checkout.', 'walls-delivery-calc' ) . '</div>';
 		}
 	}
 
@@ -68,16 +64,16 @@ final class CheckoutDeliveryTypeSelector {
 		echo '<div class="wdc-pickup-selector">';
 		echo '<input type="hidden" name="wdc_platform_pickup_rate_id" value="' . esc_attr( $rate_id ) . '">';
 		echo '<input type="hidden" name="wdc_platform_pickup_carrier" value="' . esc_attr( $carrier_key ) . '">';
-		echo '<label><span>' . esc_html__( 'Pickup point', 'walls-delivery-calc' ) . '</span>';
-		echo '<select name="wdc_platform_pickup_point">';
-		echo '<option value="">' . esc_html__( 'Select pickup point', 'walls-delivery-calc' ) . '</option>';
+		echo '<label><span>' . esc_html__( 'Пункт выдачи', 'walls-delivery-calc' ) . '</span>';
+		echo '<select class="wdc-platform-pickup-point" name="wdc_platform_pickup_point">';
+		echo '<option value="">' . esc_html__( 'Выберите пункт выдачи', 'walls-delivery-calc' ) . '</option>';
 		foreach ( $points as $point ) {
 			echo '<option value="' . esc_attr( $point->code ) . '" ' . selected( $selected, $point->code, false ) . '>' . esc_html( $point->city . ' - ' . $point->address ) . '</option>';
 		}
 		echo '</select></label>';
 
 		if ( '' !== $selected ) {
-			$point = $this->repository->find_by_code( $carrier_key, $selected ) ?? $this->find_demo_point( $points, $selected );
+			$point = $this->find_demo_point( $points, $selected );
 			if ( $point instanceof PickupPoint ) {
 				echo $this->renderer->render( $point );
 			}
@@ -90,11 +86,6 @@ final class CheckoutDeliveryTypeSelector {
 	 * @param array<string,mixed> $data
 	 */
 	private function capture( array $data ): void {
-		$delivery_type = isset( $data['wdc_platform_delivery_type'] ) ? sanitize_text_field( wp_unslash( (string) $data['wdc_platform_delivery_type'] ) ) : '';
-		if ( in_array( $delivery_type, array( DeliveryType::PICKUP, DeliveryType::COURIER ), true ) ) {
-			$this->session_manager->save_selected_delivery_type( $delivery_type );
-		}
-
 		$carrier = isset( $data['wdc_platform_pickup_carrier'] ) ? sanitize_text_field( wp_unslash( (string) $data['wdc_platform_pickup_carrier'] ) ) : '';
 		$code    = isset( $data['wdc_platform_pickup_point'] ) ? sanitize_text_field( wp_unslash( (string) $data['wdc_platform_pickup_point'] ) ) : '';
 		$rate_id = isset( $data['wdc_platform_pickup_rate_id'] ) ? sanitize_text_field( wp_unslash( (string) $data['wdc_platform_pickup_rate_id'] ) ) : '';
@@ -103,7 +94,7 @@ final class CheckoutDeliveryTypeSelector {
 			return;
 		}
 
-		$point = $this->repository->find_by_code( $carrier, $code ) ?? $this->find_demo_point( $this->points_for_checkout( $carrier ), $code );
+		$point = $this->find_demo_point( $this->points_for_checkout( $carrier ), $code );
 		if ( ! $point instanceof PickupPoint ) {
 			return;
 		}
@@ -134,6 +125,19 @@ final class CheckoutDeliveryTypeSelector {
 	private function checkout_destination(): Address {
 		$country = 'RU';
 		$city    = '';
+		$selected_city = $this->session_manager->selected_city();
+		if ( ! empty( $selected_city['city_name'] ) ) {
+			return new Address(
+				country_code: ! empty( $selected_city['country_code'] ) ? (string) $selected_city['country_code'] : $country,
+				region_name: (string) ( $selected_city['region_name'] ?? '' ),
+				city: (string) $selected_city['city_name'],
+				postcode: (string) ( $selected_city['postcode'] ?? '' ),
+				fias_id: (string) ( $selected_city['fias_id'] ?? '' ),
+				gar_id: (string) ( $selected_city['gar_id'] ?? '' ),
+				normalized: true
+			);
+		}
+
 		if ( function_exists( 'WC' ) && is_object( WC() ) && isset( WC()->customer ) && is_object( WC()->customer ) ) {
 			$customer = WC()->customer;
 			$country  = method_exists( $customer, 'get_shipping_country' ) ? (string) $customer->get_shipping_country() : $country;
@@ -170,31 +174,5 @@ final class CheckoutDeliveryTypeSelector {
 
 	private function method_id( mixed $method ): string {
 		return is_object( $method ) && isset( $method->id ) ? (string) $method->id : '';
-	}
-
-	private function selected_delivery_type_for_rate( string $delivery_type, string $rate_id ): string {
-		$selected = $this->session_manager->selected_delivery_type();
-		if ( '' !== $selected ) {
-			return $selected;
-		}
-
-		return $this->is_chosen_rate( $rate_id ) ? $delivery_type : '';
-	}
-
-	private function is_chosen_rate( string $rate_id ): bool {
-		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! isset( WC()->session ) || ! is_object( WC()->session ) || ! method_exists( WC()->session, 'get' ) ) {
-			return false;
-		}
-
-		$chosen = WC()->session->get( 'chosen_shipping_methods', array() );
-		if ( ! is_array( $chosen ) ) {
-			return false;
-		}
-
-		return in_array( $rate_id, $chosen, true ) || in_array( NewShippingMethod::METHOD_ID . ':' . $rate_id, $chosen, true );
-	}
-
-	private function label_for_type( string $delivery_type ): string {
-		return DeliveryType::PICKUP === $delivery_type ? __( 'Pickup', 'walls-delivery-calc' ) : __( 'Courier', 'walls-delivery-calc' );
 	}
 }

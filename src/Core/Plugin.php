@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Core;
 
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Admin\AdminNotices;
+use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Calendar\Admin\CalendarAdminPage;
 use WallsShop\WDC\Calendar\Services\CalendarScheduler;
 use WallsShop\WDC\Calendar\Services\CalendarService;
@@ -22,6 +23,7 @@ use WallsShop\WDC\Checkout\Address\FiasAddressNormalizer;
 use WallsShop\WDC\Checkout\Admin\CheckoutSimulationPage;
 use WallsShop\WDC\Checkout\Cache\QuoteCache;
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
@@ -33,8 +35,10 @@ use WallsShop\WDC\Checkout\Validation\CheckoutAddressValidation;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutAddressRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDebugPanel;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutFeatureGate;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSortSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
@@ -53,6 +57,7 @@ use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
 use WallsShop\WDC\Locations\Services\GarChangesService;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Pickup\Admin\PickupAdminPage;
 use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
@@ -91,6 +96,7 @@ final class Plugin {
 		$this->container->register( FeatureFlags::class, fn(): FeatureFlags => new FeatureFlags() );
 		$this->container->register( Logger::class, fn(): Logger => new Logger() );
 		$this->container->register( SettingsRepository::class, fn(): SettingsRepository => new SettingsRepository() );
+		$this->container->register( CheckoutFeatureGate::class, fn(): CheckoutFeatureGate => new CheckoutFeatureGate( $this->container->get( FeatureFlags::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( EncryptionService::class, fn(): EncryptionService => new EncryptionService() );
 		$this->container->register( MigrationManager::class, fn(): MigrationManager => new MigrationManager( $this->environment->version(), $this->environment->plugin_dir() . 'database/migrations' ) );
 		$this->container->register( ActionScheduler::class, fn(): ActionScheduler => new ActionScheduler( $this->container->get( Logger::class ) ) );
@@ -108,7 +114,9 @@ final class Plugin {
 			CarrierRegistry::class,
 			function (): CarrierRegistry {
 				$registry = new CarrierRegistry();
-				$registry->register( $this->container->get( DemoCarrier::class ) );
+				if ( $this->container->get( SettingsRepository::class )->get_bool( 'enable_demo_carrier', true ) ) {
+					$registry->register( $this->container->get( DemoCarrier::class ) );
+				}
 
 				return $registry;
 			}
@@ -133,6 +141,7 @@ final class Plugin {
 		);
 		$this->container->register( CheckoutSessionManager::class, fn(): CheckoutSessionManager => new CheckoutSessionManager() );
 		$this->container->register( CheckoutLocationSearch::class, fn(): CheckoutLocationSearch => new CheckoutLocationSearch( $this->container->get( LocationSearchService::class ) ) );
+		$this->container->register( CheckoutLocationAjax::class, fn(): CheckoutLocationAjax => new CheckoutLocationAjax( $this->container->get( CheckoutLocationSearch::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( CheckoutCityResolver::class, fn(): CheckoutCityResolver => new CheckoutCityResolver( $this->container->get( LocationRepository::class ), $this->container->get( CheckoutLocationSearch::class ) ) );
 		$this->container->register( FiasAddressNormalizer::class, fn(): FiasAddressNormalizer => new FiasAddressNormalizer( $this->container->get( CheckoutCityResolver::class ) ) );
 		$this->container->register( DaDataAddressNormalizer::class, fn(): DaDataAddressNormalizer => new DaDataAddressNormalizer() );
@@ -159,7 +168,7 @@ final class Plugin {
 		$this->container->register(
 			ShippingMethodRegistrar::class,
 			fn(): ShippingMethodRegistrar => new ShippingMethodRegistrar(
-				$this->container->get( FeatureFlags::class ),
+				$this->container->get( CheckoutFeatureGate::class ),
 				$this->container->get( SettingsRepository::class ),
 				$this->container->get( CheckoutOrchestrator::class ),
 				$this->container->get( WooCommercePackageMapper::class ),
@@ -183,8 +192,9 @@ final class Plugin {
 			)
 		);
 		$this->container->register( CheckoutValidation::class, fn(): CheckoutValidation => new CheckoutValidation( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutAddressValidation::class ) ) );
+		$this->container->register( CheckoutSortSelector::class, fn(): CheckoutSortSelector => new CheckoutSortSelector( $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( OrderShippingMetaPersister::class, fn(): OrderShippingMetaPersister => new OrderShippingMetaPersister( $this->container->get( CheckoutSessionManager::class ) ) );
-		$this->container->register( CheckoutDebugPanel::class, fn(): CheckoutDebugPanel => new CheckoutDebugPanel( $this->container->get( CheckoutSessionManager::class ) ) );
+		$this->container->register( CheckoutDebugPanel::class, fn(): CheckoutDebugPanel => new CheckoutDebugPanel( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutFeatureGate::class ) ) );
 		$this->container->register( CheckoutAddressRenderer::class, fn(): CheckoutAddressRenderer => new CheckoutAddressRenderer( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( LocationSearchService::class, fn(): LocationSearchService => new LocationSearchService( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( LocationImportService::class, fn(): LocationImportService => new LocationImportService( $this->container->get( LocationRepository::class ) ) );
@@ -275,6 +285,8 @@ final class Plugin {
 				$this->container->get( DemoPickupProvider::class )
 			)
 		);
+		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox() );
 	}
 
 	private function register_hooks(): void {
@@ -283,22 +295,28 @@ final class Plugin {
 		add_action( 'plugins_loaded', array( $this, 'boot_modules' ), 20 );
 		register_activation_hook( $this->environment->plugin_file(), array( $this, 'activate' ) );
 		$this->container->get( ShippingMethodRegistrar::class )->register();
-		$this->container->get( CheckoutRateRenderer::class )->register();
-		$this->container->get( CheckoutDeliveryTypeSelector::class )->register();
-		$this->container->get( CheckoutAddressRuntime::class )->register();
-		$this->container->get( CheckoutAddressRenderer::class )->register();
-		$this->container->get( CheckoutValidation::class )->register();
-		$this->container->get( OrderShippingMetaPersister::class )->register();
-		$this->container->get( CheckoutDebugPanel::class )->register();
+		$this->container->get( CheckoutLocationAjax::class )->register();
+		if ( $this->container->get( CheckoutFeatureGate::class )->enabled() ) {
+			$this->container->get( CheckoutRateRenderer::class )->register();
+			$this->container->get( CheckoutDeliveryTypeSelector::class )->register();
+			$this->container->get( CheckoutSortSelector::class )->register();
+			$this->container->get( CheckoutAddressRuntime::class )->register();
+			$this->container->get( CheckoutAddressRenderer::class )->register();
+			$this->container->get( CheckoutValidation::class )->register();
+			$this->container->get( OrderShippingMetaPersister::class )->register();
+			$this->container->get( CheckoutDebugPanel::class )->register();
+		}
 
 		if ( is_admin() ) {
 			$this->container->get( AdminNotices::class )->register();
 			$this->container->get( AdminMenu::class )->register();
+			$this->container->get( SettingsAdminPage::class )->register();
 			$this->container->get( CalendarAdminPage::class )->register();
 			$this->container->get( LocationsAdminPage::class )->register();
 			$this->container->get( RulesAdminPage::class )->register();
 			$this->container->get( CheckoutSimulationPage::class )->register();
 			$this->container->get( PickupAdminPage::class )->register();
+			$this->container->get( OrderDeliveryMetabox::class )->register();
 		}
 	}
 

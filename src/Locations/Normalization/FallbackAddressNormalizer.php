@@ -24,6 +24,6 @@ final class FallbackAddressNormalizer implements AddressNormalizerInterface {
 			fallback: true
 		);
 
-		return new AddressNormalizationResult( $input, $address, false, 0.0, 'fallback', 'normalizer_unavailable', 'No external normalizer is configured.' );
+		return new AddressNormalizationResult( $input, $address, false, 0.0, 'fallback', 'normalizer_unavailable', 'Внешний нормализатор не настроен.' );
 	}
 }

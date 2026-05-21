@@ -17,7 +17,7 @@ final class FallbackRateFactory {
 		return new DeliveryRate(
 			'fallback:manager',
 			'fallback',
-			'Fallback',
+			'Резервный тариф',
 			DeliveryType::UNKNOWN,
 			$title,
 			DeliveryType::UNKNOWN,

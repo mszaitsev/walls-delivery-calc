@@ -21,7 +21,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	private static ?WooCommerceRateMapper $configured_rate_mapper = null;
 	private static ?CheckoutSessionManager $configured_session_manager = null;
 	private static ?RuleRepository $configured_rule_repository = null;
-	private static ?SettingsRepository $configured_settings = null;
+	private static ?SettingsRepository $configured_settings_repository = null;
 	private static ?PluginEnvironment $configured_environment = null;
 	private static ?Logger $configured_logger = null;
 
@@ -30,7 +30,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	private WooCommerceRateMapper $rate_mapper;
 	private CheckoutSessionManager $session_manager;
 	private RuleRepository $rule_repository;
-	private SettingsRepository $settings;
+	private SettingsRepository $settings_repository;
 	private ?PluginEnvironment $environment;
 	private ?Logger $logger;
 
@@ -49,7 +49,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		self::$configured_rate_mapper    = $rate_mapper;
 		self::$configured_session_manager = $session_manager;
 		self::$configured_rule_repository = $rule_repository;
-		self::$configured_settings       = $settings;
+		self::$configured_settings_repository = $settings;
 		self::$configured_environment    = $environment;
 		self::$configured_logger         = $logger;
 	}
@@ -57,10 +57,10 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	public function __construct( int $instance_id = 0 ) {
 		$this->id                 = self::METHOD_ID;
 		$this->instance_id        = $instance_id;
-		$this->method_title       = 'WDC Platform Delivery';
-		$this->method_description = 'WDC platform delivery powered by the new checkout orchestration pipeline.';
+		$this->method_title       = __( 'Калькулятор доставок', 'walls-delivery-calc' );
+		$this->method_description = __( 'Новая система расчета доставки WDC.', 'walls-delivery-calc' );
 		$this->enabled            = 'yes';
-		$this->title              = 'WDC Platform Delivery';
+		$this->title              = __( 'Калькулятор доставок', 'walls-delivery-calc' );
 		$this->supports           = array( 'shipping-zones', 'instance-settings' );
 
 		$this->orchestrator     = self::$configured_orchestrator ?? $this->fallback_orchestrator();
@@ -68,7 +68,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		$this->rate_mapper      = self::$configured_rate_mapper ?? new WooCommerceRateMapper();
 		$this->session_manager  = self::$configured_session_manager ?? new CheckoutSessionManager();
 		$this->rule_repository  = self::$configured_rule_repository ?? new RuleRepository();
-		$this->settings         = self::$configured_settings ?? new SettingsRepository();
+		$this->settings_repository = self::$configured_settings_repository ?? new SettingsRepository();
 		$this->environment      = self::$configured_environment;
 		$this->logger           = self::$configured_logger;
 	}
@@ -84,7 +84,6 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 			$request = $this->package_mapper->map(
 				is_array( $package ) ? $package : array(),
 				array(
-					'delivery_type' => $this->session_manager->selected_delivery_type(),
 					'pickup_selection' => $this->session_manager->pickup_selection(),
 					'sort_mode'     => $sort,
 				)
@@ -117,6 +116,8 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 					'fallback_used'  => $result->fallback_used,
 					'carrier_errors' => $result->carrier_errors,
 					'audit'          => $result->audit,
+					'raw_checkout_city' => (string) ( ( is_array( $package ) && is_array( $package['destination'] ?? null ) ) ? ( $package['destination']['city'] ?? '' ) : '' ),
+					'sort_mode'      => $sort,
 				)
 			);
 		} catch ( \Throwable $exception ) {
@@ -124,13 +125,13 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 			$this->add_rate(
 				array(
 					'id'        => 'fallback:checkout-exception',
-					'label'     => 'WDC Platform Delivery',
+					'label'     => __( 'Калькулятор доставок', 'walls-delivery-calc' ),
 					'cost'      => '0',
 					'meta_data' => array(
 						'carrier_key'     => 'fallback',
 						'delivery_type'   => 'unknown',
 						'fallback_used'   => true,
-						'comments'        => array( 'Checkout fallback used after calculation error.' ),
+						'comments'        => array( __( 'Использован резервный вариант после ошибки расчета.', 'walls-delivery-calc' ) ),
 						'crossed_price'   => null,
 					),
 				)
@@ -139,7 +140,8 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	}
 
 	private function sort_mode(): string {
-		$mode = $this->settings->get_string( 'checkout_sort_mode', RateSorter::CHEAPEST );
+		$session_mode = $this->session_manager->selected_sort_mode();
+		$mode         = '' !== $session_mode ? $session_mode : $this->settings_repository->get_string( 'checkout_sort_mode', RateSorter::CHEAPEST );
 
 		return RateSorter::FASTEST === $mode ? RateSorter::FASTEST : RateSorter::CHEAPEST;
 	}

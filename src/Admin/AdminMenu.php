@@ -10,6 +10,9 @@ use WallsShop\WDC\Core\RequirementsChecker;
 defined( 'ABSPATH' ) || exit;
 
 final class AdminMenu {
+	public const MENU_SLUG = 'wdc-platform';
+	public const CAPABILITY = 'manage_woocommerce';
+
 	private PluginEnvironment $environment;
 
 	private FeatureFlags $feature_flags;
@@ -27,35 +30,45 @@ final class AdminMenu {
 	}
 
 	public function add_menu_page(): void {
+		add_menu_page(
+			esc_html__( 'Калькулятор доставок', 'walls-delivery-calc' ),
+			esc_html__( 'Калькулятор доставок', 'walls-delivery-calc' ),
+			self::CAPABILITY,
+			self::MENU_SLUG,
+			array( $this, 'render_page' ),
+			'dashicons-location-alt',
+			56
+		);
+
 		add_submenu_page(
-			'woocommerce',
-			esc_html__( 'WDC Platform', 'walls-delivery-calc' ),
-			esc_html__( 'WDC Platform', 'walls-delivery-calc' ),
-			'manage_options',
-			'wdc-platform',
+			self::MENU_SLUG,
+			esc_html__( 'Обзор', 'walls-delivery-calc' ),
+			esc_html__( 'Обзор', 'walls-delivery-calc' ),
+			self::CAPABILITY,
+			self::MENU_SLUG,
 			array( $this, 'render_page' )
 		);
 	}
 
 	public function render_page(): void {
-		if ( ! current_user_can( 'manage_options' ) ) {
+		if ( ! current_user_can( self::CAPABILITY ) ) {
 			return;
 		}
 
 		?>
 		<div class="wrap">
-			<h1><?php echo esc_html__( 'WDC Platform', 'walls-delivery-calc' ); ?></h1>
+			<h1><?php echo esc_html__( 'Калькулятор доставок', 'walls-delivery-calc' ); ?></h1>
 			<table class="widefat striped" style="max-width: 760px;">
 				<tbody>
-					<?php $this->render_row( 'Plugin version', $this->environment->version() ); ?>
-					<?php $this->render_row( 'PHP version', PHP_VERSION ); ?>
-					<?php $this->render_row( 'WooCommerce version', '' !== $this->environment->wc_version() ? $this->environment->wc_version() : 'unknown' ); ?>
-					<?php $this->render_row( 'HPOS status', $this->environment->hpos_enabled() ? 'enabled' : 'disabled' ); ?>
-					<?php $this->render_row( 'Action Scheduler status', function_exists( 'as_schedule_single_action' ) ? 'available' : 'missing' ); ?>
+					<?php $this->render_row( __( 'Версия плагина', 'walls-delivery-calc' ), $this->environment->version() ); ?>
+					<?php $this->render_row( __( 'Версия PHP', 'walls-delivery-calc' ), PHP_VERSION ); ?>
+					<?php $this->render_row( __( 'Версия WooCommerce', 'walls-delivery-calc' ), '' !== $this->environment->wc_version() ? $this->environment->wc_version() : __( 'не определена', 'walls-delivery-calc' ) ); ?>
+					<?php $this->render_row( __( 'Статус HPOS', 'walls-delivery-calc' ), $this->environment->hpos_enabled() ? __( 'включен', 'walls-delivery-calc' ) : __( 'выключен', 'walls-delivery-calc' ) ); ?>
+					<?php $this->render_row( __( 'Статус Action Scheduler', 'walls-delivery-calc' ), function_exists( 'as_schedule_single_action' ) ? __( 'доступен', 'walls-delivery-calc' ) : __( 'не найден', 'walls-delivery-calc' ) ); ?>
 				</tbody>
 			</table>
 
-			<h2><?php echo esc_html__( 'Feature flags', 'walls-delivery-calc' ); ?></h2>
+			<h2><?php echo esc_html__( 'Флаги функций', 'walls-delivery-calc' ); ?></h2>
 			<table class="widefat striped" style="max-width: 760px;">
 				<tbody>
 					<?php foreach ( $this->feature_flags->all() as $flag => $enabled ) : ?>
@@ -64,11 +77,11 @@ final class AdminMenu {
 				</tbody>
 			</table>
 
-			<h2><?php echo esc_html__( 'Requirements', 'walls-delivery-calc' ); ?></h2>
+			<h2><?php echo esc_html__( 'Требования', 'walls-delivery-calc' ); ?></h2>
 			<table class="widefat striped" style="max-width: 760px;">
 				<tbody>
 					<?php foreach ( $this->requirements->checks() as $check ) : ?>
-						<?php $this->render_row( $check['label'], $check['ok'] ? 'ok' : $check['actual'] . ' / required ' . $check['required'] ); ?>
+						<?php $this->render_row( $check['label'], $check['ok'] ? __( 'ок', 'walls-delivery-calc' ) : $check['actual'] . ' / ' . __( 'требуется', 'walls-delivery-calc' ) . ' ' . $check['required'] ); ?>
 					<?php endforeach; ?>
 				</tbody>
 			</table>

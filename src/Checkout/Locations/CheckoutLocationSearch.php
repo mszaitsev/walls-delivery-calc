@@ -17,15 +17,22 @@ final class CheckoutLocationSearch {
 	/**
 	 * @return array<int,Location>
 	 */
-	public function search( string $query ): array {
-		return $this->search_service->search( $query, 20 );
+	public function search( string $query, int $limit = 100 ): array {
+		return $this->search_service->search( $query, $limit );
 	}
 
 	/**
 	 * @return array<string,array<int,Location>>
 	 */
-	public function grouped( string $query ): array {
-		return $this->search_service->grouped( $query );
+	public function grouped( string $query, int $limit = 100 ): array {
+		return $this->search_service->grouped( $query, $limit );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function last_search_meta(): array {
+		return $this->search_service->last_search_meta();
 	}
 
 	public function best_match( string $query ): ?Location {

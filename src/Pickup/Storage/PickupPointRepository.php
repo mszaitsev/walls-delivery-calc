@@ -61,22 +61,33 @@ final class PickupPointRepository {
 		$country = strtoupper( trim( $country ) );
 		$city    = trim( $city );
 
-		if ( '' === $carrier || '' === $country || '' === $city ) {
+		if ( '' === $carrier || '' === $country ) {
 			return array();
 		}
 
-		$like = '%' . $this->wpdb->esc_like( $city ) . '%';
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
-				"SELECT * FROM {$this->table_name()} WHERE active = 1 AND carrier_key = %s AND country_code = %s AND city_name LIKE %s ORDER BY city_name ASC, address ASC LIMIT 100",
+				"SELECT * FROM {$this->table_name()} WHERE active = 1 AND carrier_key = %s AND country_code = %s ORDER BY city_name ASC, address ASC LIMIT 100",
 				$carrier,
-				$country,
-				$like
+				$country
 			),
 			ARRAY_A
 		);
 
-		return $this->rows_to_points( is_array( $rows ) ? $rows : array() );
+		$points = $this->rows_to_points( is_array( $rows ) ? $rows : array() );
+		if ( '' === $city ) {
+			return $points;
+		}
+
+		$query = $this->normalize_city( $city );
+
+		return array_values(
+			array_filter(
+				$points,
+				fn ( PickupPoint $point ): bool => str_contains( $this->normalize_city( $point->city ), $query )
+					|| str_contains( $query, $this->normalize_city( $point->city ) )
+			)
+		);
 	}
 
 	public function count_all(): int {
@@ -171,5 +182,11 @@ final class PickupPointRepository {
 
 	private function table_name(): string {
 		return $this->wpdb->prefix . 'wdc_pickup_points';
+	}
+
+	private function normalize_city( string $value ): string {
+		$value = trim( $value );
+
+		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
 	}
 }

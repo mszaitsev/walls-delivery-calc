@@ -23,17 +23,13 @@ final class CheckoutValidation {
 		$data = is_array( $data ) ? $data : array();
 		$rate = $this->selected_rate();
 		if ( array() === $rate ) {
-			$this->validate_city( $this->session_manager->selected_delivery_type(), $data, $errors );
-			if ( DeliveryType::PICKUP === $this->session_manager->selected_delivery_type() && ! $this->has_any_pickup_selection() ) {
-				$this->add_pickup_error( $errors );
-			}
-
 			return;
 		}
 
-		$this->validate_city( (string) ( $rate['delivery_type'] ?? '' ), $data, $errors );
+		$delivery_type = (string) ( $rate['delivery_type'] ?? '' );
+		$this->validate_city( $delivery_type, $data, $errors );
 
-		if ( DeliveryType::PICKUP !== (string) ( $rate['delivery_type'] ?? '' ) ) {
+		if ( DeliveryType::PICKUP !== $delivery_type ) {
 			return;
 		}
 
@@ -59,23 +55,23 @@ final class CheckoutValidation {
 
 	private function add_pickup_error( mixed $errors = null ): void {
 		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
-			$errors->add( 'wdc_pickup_required', __( 'Please select a pickup point.', 'walls-delivery-calc' ) );
+			$errors->add( 'wdc_pickup_required', __( 'Выберите пункт выдачи.', 'walls-delivery-calc' ) );
 			return;
 		}
 
 		if ( function_exists( 'wc_add_notice' ) ) {
-			wc_add_notice( __( 'Please select a pickup point.', 'walls-delivery-calc' ), 'error' );
+			wc_add_notice( __( 'Выберите пункт выдачи.', 'walls-delivery-calc' ), 'error' );
 		}
 	}
 
 	private function add_city_error( mixed $errors = null ): void {
 		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
-			$errors->add( 'wdc_city_required', __( 'Please enter a delivery city.', 'walls-delivery-calc' ) );
+			$errors->add( 'wdc_city_required', __( 'Введите населенный пункт.', 'walls-delivery-calc' ) );
 			return;
 		}
 
 		if ( function_exists( 'wc_add_notice' ) ) {
-			wc_add_notice( __( 'Please enter a delivery city.', 'walls-delivery-calc' ), 'error' );
+			wc_add_notice( __( 'Введите населенный пункт.', 'walls-delivery-calc' ), 'error' );
 		}
 	}
 
@@ -98,12 +94,6 @@ final class CheckoutValidation {
 		}
 
 		return array();
-	}
-
-	private function has_any_pickup_selection(): bool {
-		$selection = $this->session_manager->pickup_selection();
-
-		return '' !== trim( (string) ( $selection['point_code'] ?? '' ) );
 	}
 
 	/**

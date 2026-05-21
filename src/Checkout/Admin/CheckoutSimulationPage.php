@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\Admin;
 
+use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Checkout\Runtime\CheckoutCalculationResult;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Core\PluginEnvironment;
@@ -36,7 +37,7 @@ final class CheckoutSimulationPage {
 	}
 
 	public function add_menu_page(): void {
-		add_submenu_page( 'woocommerce', esc_html__( 'WDC Checkout Simulation', 'walls-delivery-calc' ), esc_html__( 'WDC Checkout Simulation', 'walls-delivery-calc' ), 'manage_options', self::PAGE_SLUG, array( $this, 'render_page' ) );
+		add_submenu_page( AdminMenu::MENU_SLUG, esc_html__( 'Симулятор checkout', 'walls-delivery-calc' ), esc_html__( 'Симулятор checkout', 'walls-delivery-calc' ), AdminMenu::CAPABILITY, self::PAGE_SLUG, array( $this, 'render_page' ) );
 	}
 
 	public function enqueue_assets( string $hook_suffix ): void {
@@ -48,26 +49,26 @@ final class CheckoutSimulationPage {
 	}
 
 	public function render_page(): void {
-		if ( ! current_user_can( 'manage_options' ) ) {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return;
 		}
 
 		$result = $this->maybe_simulate();
 		?>
 		<div class="wrap wdc-checkout-simulation">
-			<h1><?php echo esc_html__( 'WDC Checkout Simulation', 'walls-delivery-calc' ); ?></h1>
+			<h1><?php echo esc_html__( 'Симулятор checkout', 'walls-delivery-calc' ); ?></h1>
 			<form method="post" class="wdc-simulation-form">
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
-				<label>Country <input name="country" value="<?php echo esc_attr( $this->posted( 'country', 'RU' ) ); ?>"></label>
-				<label>City <input name="city" value="<?php echo esc_attr( $this->posted( 'city', 'Moscow' ) ); ?>"></label>
-				<label>Order total <input name="order_total" type="number" step="0.01" value="<?php echo esc_attr( $this->posted( 'order_total', '1000' ) ); ?>"></label>
-				<label>Weight, g <input name="weight" type="number" value="<?php echo esc_attr( $this->posted( 'weight', '1000' ) ); ?>"></label>
-				<label>Delivery type <select name="delivery_type">
-					<?php foreach ( array( '' => 'all', 'pickup' => 'pickup', 'courier' => 'courier' ) as $value => $label ) : ?>
+				<label><?php echo esc_html__( 'Страна', 'walls-delivery-calc' ); ?> <input name="country" value="<?php echo esc_attr( $this->posted( 'country', 'RU' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Город', 'walls-delivery-calc' ); ?> <input name="city" value="<?php echo esc_attr( $this->posted( 'city', 'Москва' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Сумма заказа', 'walls-delivery-calc' ); ?> <input name="order_total" type="number" step="0.01" value="<?php echo esc_attr( $this->posted( 'order_total', '1000' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?> <input name="weight" type="number" value="<?php echo esc_attr( $this->posted( 'weight', '1000' ) ); ?>"></label>
+				<label><?php echo esc_html__( 'Тип доставки', 'walls-delivery-calc' ); ?> <select name="delivery_type">
+					<?php foreach ( array( '' => __( 'все', 'walls-delivery-calc' ), 'pickup' => __( 'пункт выдачи', 'walls-delivery-calc' ), 'courier' => __( 'курьер', 'walls-delivery-calc' ) ) as $value => $label ) : ?>
 						<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $this->posted( 'delivery_type', '' ), $value ); ?>><?php echo esc_html( $label ); ?></option>
 					<?php endforeach; ?>
 				</select></label>
-				<button class="button button-primary" type="submit" name="wdc_checkout_action" value="simulate"><?php echo esc_html__( 'Simulate', 'walls-delivery-calc' ); ?></button>
+				<button class="button button-primary" type="submit" name="wdc_checkout_action" value="simulate"><?php echo esc_html__( 'Симулировать', 'walls-delivery-calc' ); ?></button>
 			</form>
 
 			<?php if ( $result instanceof CheckoutCalculationResult ) : ?>
@@ -82,7 +83,7 @@ final class CheckoutSimulationPage {
 			return null;
 		}
 
-		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( 'manage_options' ) ) {
+		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return null;
 		}
 
@@ -91,15 +92,15 @@ final class CheckoutSimulationPage {
 
 	private function request_from_post(): QuoteRequest {
 		$country       = strtoupper( $this->posted( 'country', 'RU' ) );
-		$city          = $this->posted( 'city', 'Moscow' );
+		$city          = $this->posted( 'city', 'Москва' );
 		$order_total   = Money::from_rubles( $this->posted( 'order_total', '1000' ) );
 		$weight        = max( 0, (int) $this->posted( 'weight', '1000' ) );
 		$delivery_type = $this->posted( 'delivery_type', '' );
-		$item          = new PackageItem( 'DEMO', 'Demo item', 1, $order_total, $order_total, $weight, 10, 10, 10 );
+		$item          = new PackageItem( 'DEMO', 'Тестовый товар', 1, $order_total, $order_total, $weight, 10, 10, 10 );
 
 		return new QuoteRequest(
 			$country,
-			new Address( country_code: $country, city: $city, street: 'Demo street', house: '1', raw_address: $city . ', Demo street 1' ),
+			new Address( country_code: $country, city: $city, street: 'Тестовая улица', house: '1', raw_address: $city . ', Тестовая улица 1' ),
 			Package::from_items( array( $item ), 0, $order_total, $order_total ),
 			'card',
 			$order_total,
@@ -113,13 +114,13 @@ final class CheckoutSimulationPage {
 	 */
 	private function demo_rules(): array {
 		return array(
-			new Rule( null, 'Demo promo -500', true, 10, 'rate', 'demo', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 500, RuleOperationBases::RUBLES, true, false ),
+			new Rule( null, 'Демо-промо -500', true, 10, 'rate', 'demo', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 500, RuleOperationBases::RUBLES, true, false ),
 		);
 	}
 
 	private function render_result( CheckoutCalculationResult $result ): void {
 		if ( $result->fallback_used ) {
-			echo '<div class="wdc-fallback-warning">Fallback used.</div>';
+			echo '<div class="wdc-fallback-warning">' . esc_html__( 'Использован резервный тариф.', 'walls-delivery-calc' ) . '</div>';
 		}
 
 		echo '<section class="wdc-rate-list">';
@@ -128,8 +129,8 @@ final class CheckoutSimulationPage {
 		}
 		echo '</section>';
 
-		$this->render_block( 'Audit', $result->audit );
-		$this->render_block( 'Carrier errors', $result->carrier_errors );
+		$this->render_block( __( 'Аудит', 'walls-delivery-calc' ), $result->audit );
+		$this->render_block( __( 'Ошибки перевозчиков', 'walls-delivery-calc' ), $result->carrier_errors );
 	}
 
 	private function render_rate( DeliveryRate $rate ): void {

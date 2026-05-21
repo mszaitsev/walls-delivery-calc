@@ -25,27 +25,27 @@ final class RequirementsChecker {
 			),
 			'woocommerce_active' => array(
 				'ok'       => class_exists( 'WooCommerce' ),
-				'label'    => 'WooCommerce active',
-				'actual'   => class_exists( 'WooCommerce' ) ? 'yes' : 'no',
-				'required' => 'yes',
+				'label'    => 'WooCommerce активен',
+				'actual'   => class_exists( 'WooCommerce' ) ? 'да' : 'нет',
+				'required' => 'да',
 			),
 			'woocommerce_version' => array(
 				'ok'       => '' !== $this->environment->wc_version() && version_compare( $this->environment->wc_version(), '9.0', '>=' ),
-				'label'    => 'WooCommerce version',
-				'actual'   => '' !== $this->environment->wc_version() ? $this->environment->wc_version() : 'unknown',
+				'label'    => 'Версия WooCommerce',
+				'actual'   => '' !== $this->environment->wc_version() ? $this->environment->wc_version() : 'не определена',
 				'required' => '9.0+',
 			),
 			'action_scheduler' => array(
 				'ok'       => function_exists( 'as_schedule_single_action' ),
 				'label'    => 'Action Scheduler',
-				'actual'   => function_exists( 'as_schedule_single_action' ) ? 'available' : 'missing',
-				'required' => 'available',
+				'actual'   => function_exists( 'as_schedule_single_action' ) ? 'доступен' : 'не найден',
+				'required' => 'доступен',
 			),
 			'hpos' => array(
 				'ok'       => class_exists( '\Automattic\WooCommerce\Utilities\FeaturesUtil' ),
 				'label'    => 'HPOS',
-				'actual'   => class_exists( '\Automattic\WooCommerce\Utilities\FeaturesUtil' ) ? 'available' : 'missing',
-				'required' => 'available',
+				'actual'   => class_exists( '\Automattic\WooCommerce\Utilities\FeaturesUtil' ) ? 'доступен' : 'не найден',
+				'required' => 'доступен',
 			),
 		);
 	}

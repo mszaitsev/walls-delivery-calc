@@ -16,10 +16,15 @@
 	gap: 4px;
 }
 
+.wdc-calendar-current-title {
+	font-size: 18px;
+	margin: 8px 0 16px;
+}
+
 .wdc-calendar-grid {
 	display: grid;
 	gap: 16px;
-	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .wdc-calendar-month {
@@ -55,13 +60,16 @@
 }
 
 .wdc-calendar-day {
+	align-items: center;
+	aspect-ratio: 1 / 1;
 	border: 1px solid #c3c4c7;
 	border-radius: 4px;
 	cursor: pointer;
-	display: grid;
-	gap: 4px;
-	min-height: 62px;
-	padding: 5px;
+	display: flex;
+	justify-content: center;
+	min-height: 38px;
+	padding: 0;
+	transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
 }
 
 .wdc-calendar-day input[type="checkbox"] {
@@ -71,22 +79,24 @@
 }
 
 .wdc-calendar-day-number {
+	display: block;
+	font-size: 15px;
 	font-weight: 700;
 	line-height: 1;
-}
-
-.wdc-calendar-reason {
-	font-size: 11px;
-	min-height: 24px;
-	width: 100%;
+	text-align: center;
 }
 
 .wdc-calendar-day.is-working {
-	background: #effaf2;
+	background: #e8f7ed;
 	border-color: #4ab866;
 }
 
 .wdc-calendar-day.is-non-working {
-	background: #fff2f2;
+	background: #fdecec;
 	border-color: #d63638;
+}
+
+.wdc-calendar-day:hover {
+	box-shadow: 0 0 0 2px rgba(34, 113, 177, 0.16);
+	transform: translateY(-1px);
 }

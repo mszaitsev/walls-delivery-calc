@@ -17,26 +17,36 @@ final class CheckoutAddressRenderer {
 
 	public function render(): void {
 		$result = $this->session_manager->normalized_address_result();
-		if ( null === $result ) {
+		if ( null === $result || '' === $this->session_manager->address_fingerprint() ) {
 			return;
 		}
 
 		$address = $result->address;
 		$city    = '' !== trim( $address->settlement ) ? $address->settlement : $address->city;
 
-		echo '<tr class="wdc-address-normalization-row"><th>' . esc_html__( 'Address check', 'walls-delivery-calc' ) . '</th><td>';
+		echo '<tr class="wdc-address-normalization-row"><th>' . esc_html__( 'Проверка адреса', 'walls-delivery-calc' ) . '</th><td>';
 		echo '<div class="wdc-address-normalization">';
 		if ( $address->normalized ) {
-			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--normalized">' . esc_html__( 'City normalized:', 'walls-delivery-calc' ) . ' ' . esc_html( $city ) . '</p>';
+			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--normalized">' . esc_html__( 'Населенный пункт определен:', 'walls-delivery-calc' ) . ' ' . esc_html( $city ) . '</p>';
 		}
 		if ( $address->fallback ) {
-			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--fallback">' . esc_html__( 'Unknown city is accepted as fallback.', 'walls-delivery-calc' ) . '</p>';
+			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--fallback">' . esc_html__( 'Используется введенный вручную населенный пункт', 'walls-delivery-calc' ) . '</p>';
 		}
 		if ( '' !== trim( $address->postcode ) ) {
-			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--postcode">' . esc_html__( 'Resolved postcode:', 'walls-delivery-calc' ) . ' ' . esc_html( $address->postcode ) . '</p>';
+			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--postcode">' . esc_html__( 'Индекс:', 'walls-delivery-calc' ) . ' ' . esc_html( $address->postcode ) . '</p>';
 		}
-		echo '<p class="wdc-address-normalization__source">' . esc_html__( 'Source:', 'walls-delivery-calc' ) . ' ' . esc_html( $result->source ) . '</p>';
+		if ( ! $address->fallback ) {
+			echo '<p class="wdc-address-normalization__source">' . esc_html__( 'Источник:', 'walls-delivery-calc' ) . ' ' . esc_html( $this->source_label( $result->source ) ) . '</p>';
+		}
 		echo '</div>';
 		echo '</td></tr>';
+	}
+
+	private function source_label( string $source ): string {
+		return match ( $source ) {
+			'fias' => __( 'ФИАС/ГАР', 'walls-delivery-calc' ),
+			'fallback' => __( 'введено вручную', 'walls-delivery-calc' ),
+			default => $source,
+		};
 	}
 }

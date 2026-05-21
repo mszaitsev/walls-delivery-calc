@@ -58,7 +58,7 @@ final class LocationRepository {
 	 */
 	public function search( string $query, int $limit = 20 ): array {
 		$query = $this->normalize_query( $query );
-		$limit = max( 1, min( 200, $limit ) );
+		$limit = max( 1, min( 300, $limit ) );
 
 		if ( '' === $query ) {
 			return array();
@@ -85,7 +85,7 @@ final class LocationRepository {
 		$grouped   = array();
 
 		foreach ( $locations as $location ) {
-			$region = '' !== $location->region_name ? $location->region_name : __( 'Unknown region', 'walls-delivery-calc' );
+			$region = '' !== $location->region_name ? $location->region_name : __( 'Регион не указан', 'walls-delivery-calc' );
 			$grouped[ $region ][] = $location;
 		}
 
@@ -96,6 +96,10 @@ final class LocationRepository {
 
 	public function count_all(): int {
 		return (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$this->table_name()}" );
+	}
+
+	public function count_regions(): int {
+		return (int) $this->wpdb->get_var( "SELECT COUNT(DISTINCT region_name) FROM {$this->table_name()} WHERE active = 1 AND region_name != ''" );
 	}
 
 	public function delete_all(): void {

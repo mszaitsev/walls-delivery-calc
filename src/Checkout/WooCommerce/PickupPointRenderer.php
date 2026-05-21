@@ -22,7 +22,7 @@ final class PickupPointRenderer {
 		}
 
 		if ( $point->has_extra_cost() ) {
-			$parts[] = '<span class="wdc-pickup-info__line">' . esc_html( sprintf( __( 'Extra pickup cost: %s', 'walls-delivery-calc' ), $this->format_money( $point->extra_cost?->get_kopecks() ?? 0 ) ) ) . '</span>';
+			$parts[] = '<span class="wdc-pickup-info__line">' . esc_html( sprintf( __( 'Доплата за ПВЗ: %s', 'walls-delivery-calc' ), $this->format_money( $point->extra_cost?->get_kopecks() ?? 0 ) ) ) . '</span>';
 		}
 
 		$parts[] = '</div>';
@@ -31,6 +31,6 @@ final class PickupPointRenderer {
 	}
 
 	private function format_money( int $kopecks ): string {
-		return rtrim( rtrim( number_format( $kopecks / 100, 2, '.', ' ' ), '0' ), '.' ) . ' ₽';
+		return rtrim( rtrim( number_format( $kopecks / 100, 2, '.', ' ' ), '0' ), '.' ) . ' руб.';
 	}
 }

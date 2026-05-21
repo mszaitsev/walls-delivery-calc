@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Rules\Admin;
 
 use RuntimeException;
+use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleAuditEntry;
@@ -31,7 +32,7 @@ final class RulesAdminPage {
 	}
 
 	public function add_menu_page(): void {
-		add_submenu_page( 'woocommerce', esc_html__( 'WDC Rules', 'walls-delivery-calc' ), esc_html__( 'WDC Rules', 'walls-delivery-calc' ), 'manage_options', self::PAGE_SLUG, array( $this, 'render_page' ) );
+		add_submenu_page( AdminMenu::MENU_SLUG, esc_html__( 'Правила', 'walls-delivery-calc' ), esc_html__( 'Правила', 'walls-delivery-calc' ), AdminMenu::CAPABILITY, self::PAGE_SLUG, array( $this, 'render_page' ) );
 	}
 
 	public function enqueue_assets( string $hook_suffix ): void {
@@ -43,7 +44,7 @@ final class RulesAdminPage {
 	}
 
 	public function render_page(): void {
-		if ( ! current_user_can( 'manage_options' ) ) {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return;
 		}
 
@@ -52,32 +53,32 @@ final class RulesAdminPage {
 		$rules      = $this->repository->get_enabled_rules();
 		?>
 		<div class="wrap wdc-rules-admin">
-			<h1><?php echo esc_html__( 'WDC Rules', 'walls-delivery-calc' ); ?></h1>
+			<h1><?php echo esc_html__( 'Правила', 'walls-delivery-calc' ); ?></h1>
 			<?php if ( '' !== $message ) : ?>
 				<div class="notice notice-success is-dismissible"><p><?php echo esc_html( $message ); ?></p></div>
 			<?php endif; ?>
 
 			<form class="wdc-rules-actions" method="post">
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
-				<button class="button" type="submit" name="wdc_rules_action" value="create_demo"><?php echo esc_html__( 'Create demo rules', 'walls-delivery-calc' ); ?></button>
-				<button class="button" type="submit" name="wdc_rules_action" value="delete_demo"><?php echo esc_html__( 'Delete demo rules', 'walls-delivery-calc' ); ?></button>
-				<button class="button button-primary" type="submit" name="wdc_rules_action" value="simulate"><?php echo esc_html__( 'Simulate', 'walls-delivery-calc' ); ?></button>
+				<button class="button" type="submit" name="wdc_rules_action" value="create_demo"><?php echo esc_html__( 'Создать демо-правила', 'walls-delivery-calc' ); ?></button>
+				<button class="button" type="submit" name="wdc_rules_action" value="delete_demo"><?php echo esc_html__( 'Удалить демо-правила', 'walls-delivery-calc' ); ?></button>
+				<button class="button button-primary" type="submit" name="wdc_rules_action" value="simulate"><?php echo esc_html__( 'Симулировать', 'walls-delivery-calc' ); ?></button>
 			</form>
 
 			<table class="widefat striped wdc-rules-table">
 				<thead>
 					<tr>
-						<th><?php echo esc_html__( 'Priority', 'walls-delivery-calc' ); ?></th>
-						<th><?php echo esc_html__( 'Name', 'walls-delivery-calc' ); ?></th>
-						<th><?php echo esc_html__( 'Action', 'walls-delivery-calc' ); ?></th>
-						<th><?php echo esc_html__( 'Operation', 'walls-delivery-calc' ); ?></th>
-						<th><?php echo esc_html__( 'Promo', 'walls-delivery-calc' ); ?></th>
-						<th><?php echo esc_html__( 'Stop', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Приоритет', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Название', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Действие', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Операция', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Промо', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Стоп', 'walls-delivery-calc' ); ?></th>
 					</tr>
 				</thead>
 				<tbody>
 					<?php if ( array() === $rules ) : ?>
-						<tr><td colspan="6"><?php echo esc_html__( 'No rules yet.', 'walls-delivery-calc' ); ?></td></tr>
+						<tr><td colspan="6"><?php echo esc_html__( 'Правил пока нет.', 'walls-delivery-calc' ); ?></td></tr>
 					<?php endif; ?>
 					<?php foreach ( $rules as $rule ) : ?>
 						<tr>
@@ -85,8 +86,8 @@ final class RulesAdminPage {
 							<td><?php echo esc_html( $rule->name ); ?></td>
 							<td><?php echo esc_html( $rule->action_type ); ?></td>
 							<td><?php echo esc_html( trim( $rule->operation_type . ' ' . $rule->operation_value . ' ' . $rule->operation_base ) ); ?></td>
-							<td><?php echo esc_html( $rule->promo_shipping ? 'yes' : 'no' ); ?></td>
-							<td><?php echo esc_html( $rule->stop_processing ? 'yes' : 'no' ); ?></td>
+							<td><?php echo esc_html( $rule->promo_shipping ? __( 'да', 'walls-delivery-calc' ) : __( 'нет', 'walls-delivery-calc' ) ); ?></td>
+							<td><?php echo esc_html( $rule->stop_processing ? __( 'да', 'walls-delivery-calc' ) : __( 'нет', 'walls-delivery-calc' ) ); ?></td>
 						</tr>
 					<?php endforeach; ?>
 				</tbody>
@@ -102,12 +103,12 @@ final class RulesAdminPage {
 	private function render_simulation( RuleEngineResult $result ): void {
 		?>
 		<section class="wdc-rules-result">
-			<h2><?php echo esc_html__( 'Simulation result', 'walls-delivery-calc' ); ?></h2>
+			<h2><?php echo esc_html__( 'Результат симуляции', 'walls-delivery-calc' ); ?></h2>
 			<div class="wdc-rules-result-grid">
-				<span><?php echo esc_html__( 'Original price', 'walls-delivery-calc' ); ?><strong><?php echo esc_html( $this->money_label( $result->original_price ) ); ?></strong></span>
-				<span><?php echo esc_html__( 'Crossed price', 'walls-delivery-calc' ); ?><strong><?php echo esc_html( $this->money_label( $result->crossed_price ) ); ?></strong></span>
-				<span><?php echo esc_html__( 'Final price', 'walls-delivery-calc' ); ?><strong><?php echo esc_html( $this->money_label( $result->final_price ) ); ?></strong></span>
-				<span><?php echo esc_html__( 'Disabled', 'walls-delivery-calc' ); ?><strong><?php echo esc_html( $result->disabled ? 'yes' : 'no' ); ?></strong></span>
+				<span><?php echo esc_html__( 'Исходная цена', 'walls-delivery-calc' ); ?><strong><?php echo esc_html( $this->money_label( $result->original_price ) ); ?></strong></span>
+				<span><?php echo esc_html__( 'Зачеркнутая цена', 'walls-delivery-calc' ); ?><strong><?php echo esc_html( $this->money_label( $result->crossed_price ) ); ?></strong></span>
+				<span><?php echo esc_html__( 'Итоговая цена', 'walls-delivery-calc' ); ?><strong><?php echo esc_html( $this->money_label( $result->final_price ) ); ?></strong></span>
+				<span><?php echo esc_html__( 'Отключено', 'walls-delivery-calc' ); ?><strong><?php echo esc_html( $result->disabled ? __( 'да', 'walls-delivery-calc' ) : __( 'нет', 'walls-delivery-calc' ) ); ?></strong></span>
 			</div>
 			<?php if ( array() !== $result->comments ) : ?>
 				<div class="wdc-rules-comments">
@@ -140,7 +141,7 @@ final class RulesAdminPage {
 			return '';
 		}
 
-		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( 'manage_options' ) ) {
+		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return '';
 		}
 
@@ -152,17 +153,17 @@ final class RulesAdminPage {
 				return $exception->getMessage();
 			}
 
-			return sprintf( __( 'Demo rules created: %d.', 'walls-delivery-calc' ), $count );
+			return sprintf( __( 'Создано демо-правил: %d.', 'walls-delivery-calc' ), $count );
 		}
 
 		if ( 'delete_demo' === $action ) {
 			$this->repository->delete_all();
-			return __( 'Demo rules deleted.', 'walls-delivery-calc' );
+			return __( 'Демо-правила удалены.', 'walls-delivery-calc' );
 		}
 
 		if ( 'simulate' === $action ) {
 			$simulation = $this->simulator->simulate( $this->repository->get_enabled_rules() );
-			return __( 'Simulation completed.', 'walls-delivery-calc' );
+			return __( 'Симуляция завершена.', 'walls-delivery-calc' );
 		}
 
 		return '';

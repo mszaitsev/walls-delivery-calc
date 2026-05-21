@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Calendar\Admin;
 use DatePeriod;
 use DateTimeImmutable;
 use DateTimeZone;
+use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Calendar\CalendarTypes;
 use WallsShop\WDC\Calendar\Services\CalendarService;
 use WallsShop\WDC\Calendar\Services\TimezoneService;
@@ -35,7 +36,7 @@ final class CalendarAdminPage {
 	}
 
 	public function add_menu_page(): void {
-		add_submenu_page( 'woocommerce', esc_html__( 'WDC Calendars', 'walls-delivery-calc' ), esc_html__( 'WDC Calendars', 'walls-delivery-calc' ), 'manage_options', self::PAGE_SLUG, array( $this, 'render_page' ) );
+		add_submenu_page( AdminMenu::MENU_SLUG, esc_html__( 'Календари', 'walls-delivery-calc' ), esc_html__( 'Календари', 'walls-delivery-calc' ), AdminMenu::CAPABILITY, self::PAGE_SLUG, array( $this, 'render_page' ) );
 	}
 
 	public function enqueue_assets( string $hook_suffix ): void {
@@ -48,7 +49,7 @@ final class CalendarAdminPage {
 	}
 
 	public function render_page(): void {
-		if ( ! current_user_can( 'manage_options' ) ) {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return;
 		}
 
@@ -60,32 +61,33 @@ final class CalendarAdminPage {
 		$days = $this->repository->get_year( $calendar_type, $year );
 		?>
 		<div class="wrap wdc-calendar-admin">
-			<h1><?php echo esc_html__( 'WDC Calendars', 'walls-delivery-calc' ); ?></h1>
+			<h1><?php echo esc_html__( 'Календари', 'walls-delivery-calc' ); ?></h1>
 			<?php if ( '' !== $message ) : ?>
 				<div class="notice notice-success is-dismissible"><p><?php echo esc_html( $message ); ?></p></div>
 			<?php endif; ?>
 			<form class="wdc-calendar-filters" method="get">
 				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>">
-				<label><span><?php echo esc_html__( 'Calendar', 'walls-delivery-calc' ); ?></span>
+				<label><span><?php echo esc_html__( 'Тип календаря', 'walls-delivery-calc' ); ?></span>
 					<select name="calendar_type">
 						<?php foreach ( $this->calendar_labels() as $type => $label ) : ?>
 							<option value="<?php echo esc_attr( $type ); ?>" <?php selected( $calendar_type, $type ); ?>><?php echo esc_html( $label ); ?></option>
 						<?php endforeach; ?>
 					</select>
 				</label>
-				<label><span><?php echo esc_html__( 'Year', 'walls-delivery-calc' ); ?></span>
+				<label><span><?php echo esc_html__( 'Год', 'walls-delivery-calc' ); ?></span>
 					<input type="number" name="year" min="2026" max="2100" value="<?php echo esc_attr( (string) $year ); ?>">
 				</label>
-				<button class="button" type="submit"><?php echo esc_html__( 'Open', 'walls-delivery-calc' ); ?></button>
+				<button class="button" type="submit"><?php echo esc_html__( 'Открыть', 'walls-delivery-calc' ); ?></button>
 			</form>
 			<form method="post">
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 				<input type="hidden" name="calendar_type" value="<?php echo esc_attr( $calendar_type ); ?>">
 				<input type="hidden" name="year" value="<?php echo esc_attr( (string) $year ); ?>">
 				<div class="wdc-calendar-toolbar">
-					<button class="button" type="submit" name="wdc_calendar_action" value="generate"><?php echo esc_html__( 'Generate year', 'walls-delivery-calc' ); ?></button>
-					<button class="button button-primary" type="submit" name="wdc_calendar_action" value="save"><?php echo esc_html__( 'Save calendar', 'walls-delivery-calc' ); ?></button>
+					<button class="button" type="submit" name="wdc_calendar_action" value="generate"><?php echo esc_html__( 'Сгенерировать год', 'walls-delivery-calc' ); ?></button>
+					<button class="button button-primary" type="submit" name="wdc_calendar_action" value="save"><?php echo esc_html__( 'Сохранить календарь', 'walls-delivery-calc' ); ?></button>
 				</div>
+				<h2 class="wdc-calendar-current-title"><?php echo esc_html( sprintf( '%s, %d год', $this->calendar_label( $calendar_type ), $year ) ); ?></h2>
 				<div class="wdc-calendar-grid">
 					<?php foreach ( range( 1, 12 ) as $month ) : ?>
 						<?php $this->render_month( $calendar_type, $year, $month, $days ); ?>
@@ -105,9 +107,9 @@ final class CalendarAdminPage {
 		$period   = new DatePeriod( $start, new \DateInterval( 'P1D' ), $start->modify( '+1 month' ) );
 		?>
 		<section class="wdc-calendar-month">
-			<h2><?php echo esc_html( $start->format( 'F Y' ) ); ?></h2>
+			<h2><?php echo esc_html( $this->month_name( $month ) . ' ' . $year ); ?></h2>
 			<div class="wdc-calendar-weekdays">
-				<?php foreach ( array( 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun' ) as $weekday ) : ?>
+				<?php foreach ( array( 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс' ) as $weekday ) : ?>
 					<span><?php echo esc_html( $weekday ); ?></span>
 				<?php endforeach; ?>
 			</div>
@@ -115,13 +117,12 @@ final class CalendarAdminPage {
 				<?php foreach ( $period as $date ) : ?>
 					<?php
 					$date_value = $date->format( 'Y-m-d' );
-					$day        = $days[ $date_value ] ?? new CalendarDay( $date_value, false, 'generated', $calendar_type );
+					$day        = $days[ $date_value ] ?? new CalendarDay( $date_value, false, '', $calendar_type );
 					?>
 					<label class="wdc-calendar-day <?php echo $day->working ? 'is-working' : 'is-non-working'; ?>">
 						<input type="hidden" name="days[<?php echo esc_attr( $date_value ); ?>][working]" value="0">
 						<input class="wdc-calendar-day-toggle" type="checkbox" name="days[<?php echo esc_attr( $date_value ); ?>][working]" value="1" <?php checked( $day->working ); ?>>
 						<span class="wdc-calendar-day-number"><?php echo esc_html( $date->format( 'j' ) ); ?></span>
-						<input class="wdc-calendar-reason" type="text" name="days[<?php echo esc_attr( $date_value ); ?>][reason]" value="<?php echo esc_attr( $day->reason ); ?>">
 					</label>
 				<?php endforeach; ?>
 			</div>
@@ -134,7 +135,7 @@ final class CalendarAdminPage {
 			return '';
 		}
 
-		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( 'manage_options' ) ) {
+		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return '';
 		}
 
@@ -143,7 +144,7 @@ final class CalendarAdminPage {
 			$this->repository->delete_year( $calendar_type, $year );
 			$this->repository->save_days( $this->year_generator->generate_year( $calendar_type, $year ) );
 			$this->calendar_service->mark_attention_resolved( $calendar_type, $year );
-			return __( 'Calendar year generated.', 'walls-delivery-calc' );
+			return __( 'Год календаря сгенерирован.', 'walls-delivery-calc' );
 		}
 
 		if ( 'save' !== $action ) {
@@ -160,14 +161,14 @@ final class CalendarAdminPage {
 			$days[] = new CalendarDay(
 				(string) $date,
 				isset( $data['working'] ) && '1' === (string) $data['working'],
-				isset( $data['reason'] ) ? sanitize_text_field( (string) $data['reason'] ) : 'manual',
+				'',
 				$calendar_type
 			);
 		}
 
 		$this->repository->save_days( $days );
 		$this->calendar_service->mark_attention_resolved( $calendar_type, $year );
-		return __( 'Calendar saved.', 'walls-delivery-calc' );
+		return __( 'Календарь сохранен.', 'walls-delivery-calc' );
 	}
 
 	private function requested_calendar_type(): string {
@@ -185,8 +186,33 @@ final class CalendarAdminPage {
 	 */
 	private function calendar_labels(): array {
 		return array(
-			CalendarTypes::CARRIER_RU => 'РФ/ТК',
-			CalendarTypes::SHOP       => 'Магазин',
+			CalendarTypes::CARRIER_RU => 'Календарь РФ/ТК',
+			CalendarTypes::SHOP       => 'Календарь магазина',
 		);
+	}
+
+	private function calendar_label( string $calendar_type ): string {
+		$labels = $this->calendar_labels();
+
+		return $labels[ $calendar_type ] ?? $labels[ CalendarTypes::CARRIER_RU ];
+	}
+
+	private function month_name( int $month ): string {
+		$months = array(
+			1  => 'Январь',
+			2  => 'Февраль',
+			3  => 'Март',
+			4  => 'Апрель',
+			5  => 'Май',
+			6  => 'Июнь',
+			7  => 'Июль',
+			8  => 'Август',
+			9  => 'Сентябрь',
+			10 => 'Октябрь',
+			11 => 'Ноябрь',
+			12 => 'Декабрь',
+		);
+
+		return $months[ $month ] ?? '';
 	}
 }

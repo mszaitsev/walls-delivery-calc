@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Locations\Admin;
 
 use RuntimeException;
+use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
@@ -31,7 +32,7 @@ final class LocationsAdminPage {
 	}
 
 	public function add_menu_page(): void {
-		add_submenu_page( 'woocommerce', esc_html__( 'WDC Locations', 'walls-delivery-calc' ), esc_html__( 'WDC Locations', 'walls-delivery-calc' ), 'manage_options', self::PAGE_SLUG, array( $this, 'render_page' ) );
+		add_submenu_page( AdminMenu::MENU_SLUG, esc_html__( 'Населенные пункты', 'walls-delivery-calc' ), esc_html__( 'Населенные пункты', 'walls-delivery-calc' ), AdminMenu::CAPABILITY, self::PAGE_SLUG, array( $this, 'render_page' ) );
 	}
 
 	public function enqueue_assets( string $hook_suffix ): void {
@@ -43,7 +44,7 @@ final class LocationsAdminPage {
 	}
 
 	public function render_page(): void {
-		if ( ! current_user_can( 'manage_options' ) ) {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return;
 		}
 
@@ -52,35 +53,41 @@ final class LocationsAdminPage {
 		$grouped = '' !== trim( $query ) ? $this->search_service->grouped( $query ) : array();
 		?>
 		<div class="wrap wdc-locations-admin">
-			<h1><?php echo esc_html__( 'WDC Locations', 'walls-delivery-calc' ); ?></h1>
+			<h1><?php echo esc_html__( 'Населенные пункты', 'walls-delivery-calc' ); ?></h1>
 			<?php if ( '' !== $message ) : ?>
 				<div class="notice notice-success is-dismissible"><p><?php echo esc_html( $message ); ?></p></div>
 			<?php endif; ?>
 
 			<div class="wdc-locations-summary">
-				<strong><?php echo esc_html__( 'Locations count:', 'walls-delivery-calc' ); ?></strong>
-				<span><?php echo esc_html( (string) $this->repository->count_all() ); ?></span>
+				<p>
+					<strong><?php echo esc_html__( 'Населенных пунктов:', 'walls-delivery-calc' ); ?></strong>
+					<span><?php echo esc_html( (string) $this->repository->count_all() ); ?></span>
+				</p>
+				<p>
+					<strong><?php echo esc_html__( 'Регионов/областей:', 'walls-delivery-calc' ); ?></strong>
+					<span><?php echo esc_html( (string) $this->repository->count_regions() ); ?></span>
+				</p>
 			</div>
 
 			<form class="wdc-locations-import" method="post">
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
-				<button class="button" type="submit" name="wdc_locations_action" value="import_demo"><?php echo esc_html__( 'Import demo dataset', 'walls-delivery-calc' ); ?></button>
-				<button class="button button-primary" type="submit" name="wdc_locations_action" value="reimport_demo"><?php echo esc_html__( 'Reimport demo dataset', 'walls-delivery-calc' ); ?></button>
+				<button class="button" type="submit" name="wdc_locations_action" value="import_demo"><?php echo esc_html__( 'Импортировать демо-данные', 'walls-delivery-calc' ); ?></button>
+				<button class="button button-primary" type="submit" name="wdc_locations_action" value="reimport_demo"><?php echo esc_html__( 'Переимпортировать демо-данные', 'walls-delivery-calc' ); ?></button>
 			</form>
 
 			<form class="wdc-locations-search" method="get">
 				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>">
 				<label>
-					<span><?php echo esc_html__( 'Search locations', 'walls-delivery-calc' ); ?></span>
+					<span><?php echo esc_html__( 'Поиск населенных пунктов', 'walls-delivery-calc' ); ?></span>
 					<input type="search" name="location_query" value="<?php echo esc_attr( $query ); ?>" placeholder="<?php echo esc_attr__( 'Новос', 'walls-delivery-calc' ); ?>">
 				</label>
-				<button class="button" type="submit"><?php echo esc_html__( 'Search', 'walls-delivery-calc' ); ?></button>
+				<button class="button" type="submit"><?php echo esc_html__( 'Найти', 'walls-delivery-calc' ); ?></button>
 			</form>
 
 			<?php if ( '' !== trim( $query ) ) : ?>
 				<div class="wdc-locations-results">
 					<?php if ( array() === $grouped ) : ?>
-						<p><?php echo esc_html__( 'No locations found.', 'walls-delivery-calc' ); ?></p>
+						<p><?php echo esc_html__( 'Населенные пункты не найдены.', 'walls-delivery-calc' ); ?></p>
 					<?php endif; ?>
 					<?php foreach ( $grouped as $region => $locations ) : ?>
 						<section class="wdc-locations-region">
@@ -111,7 +118,7 @@ final class LocationsAdminPage {
 			return '';
 		}
 
-		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( 'manage_options' ) ) {
+		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return '';
 		}
 
@@ -130,6 +137,6 @@ final class LocationsAdminPage {
 			return $exception->getMessage();
 		}
 
-		return sprintf( __( 'Demo locations imported: %d.', 'walls-delivery-calc' ), $imported );
+		return sprintf( __( 'Импортировано демо-населенных пунктов: %d.', 'walls-delivery-calc' ), $imported );
 	}
 }

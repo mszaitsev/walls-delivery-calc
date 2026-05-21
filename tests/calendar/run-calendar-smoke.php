@@ -101,6 +101,10 @@ function esc_html__( string $text, string $domain = '' ): string {
 	return $text;
 }
 
+function __( string $text, string $domain = '' ): string {
+	return $text;
+}
+
 function esc_html( mixed $text ): string {
 	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
 }
@@ -194,7 +198,7 @@ $_REQUEST                  = array(
 $_POST                     = array();
 
 $admin_page = new CalendarAdminPage(
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.7.0' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.12.14' ),
 	$calendar,
 	$repository,
 	$generator
@@ -202,9 +206,20 @@ $admin_page = new CalendarAdminPage(
 
 ob_start();
 $admin_page->render_page();
-ob_end_clean();
+$calendar_html = (string) ob_get_clean();
 
 $attention = get_option( 'wdc_calendar_attention_required', array() );
 calendar_smoke_assert( isset( $attention['carrier_ru_2026'] ), 'Opening calendar admin page must not resolve calendar_attention_required.' );
+foreach ( array( 'Календарь РФ/ТК', 'Календарь магазина', 'Сгенерировать год', 'Сохранить календарь', 'Календарь РФ/ТК, 2026 год', 'Январь', 'Пн' ) as $needle ) {
+	calendar_smoke_assert( str_contains( $calendar_html, $needle ), 'Calendar admin page must render Russian label: ' . $needle );
+}
+foreach ( array( 'wdc-calendar-reason', 'wdc-calendar-day-state', 'name="days[2026-01-01][reason]"', '>w<', '>weekday<', '>weekend<', '>generated<', '>manual<', '>holiday<', 'рабочий день', 'нерабочий день' ) as $needle ) {
+	calendar_smoke_assert( ! str_contains( $calendar_html, $needle ), 'Calendar admin page must not render reason marker: ' . $needle );
+}
+calendar_smoke_assert( str_contains( $calendar_html, 'wdc-calendar-day-toggle' ), 'Calendar UI must keep clickable working/non-working toggles.' );
+$calendar_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/calendar-admin.css' );
+foreach ( array( '.wdc-calendar-day.is-working', '.wdc-calendar-day.is-non-working', 'display: flex', 'align-items: center', 'justify-content: center', 'aspect-ratio: 1 / 1', 'transition:' ) as $needle ) {
+	calendar_smoke_assert( str_contains( $calendar_css, $needle ), 'Calendar CSS must contain centered square day style: ' . $needle );
+}
 
 echo "Calendar smoke test passed.\n";

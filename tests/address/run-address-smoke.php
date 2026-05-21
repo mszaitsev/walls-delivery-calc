@@ -6,14 +6,17 @@ use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
 use WallsShop\WDC\Checkout\Address\DaDataAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\FiasAddressNormalizer;
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\Validation\CheckoutAddressValidation;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutAddressRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Core\Autoloader;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
@@ -21,6 +24,17 @@ use WallsShop\WDC\Locations\Storage\LocationRepository;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
+
+$GLOBALS['wdc_address_test_options'] = array();
+
+function get_option( string $key, mixed $default = false ): mixed {
+	return $GLOBALS['wdc_address_test_options'][ $key ] ?? $default;
+}
+
+function update_option( string $key, mixed $value, bool|string $autoload = false ): bool {
+	$GLOBALS['wdc_address_test_options'][ $key ] = $value;
+	return true;
+}
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -117,6 +131,18 @@ function __( string $text, string $domain = '' ): string {
 	return $text;
 }
 
+function esc_html__( string $text, string $domain = '' ): string {
+	return $text;
+}
+
+function esc_html( mixed $text ): string {
+	return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+}
+
+function wp_json_encode( mixed $value, int $flags = 0 ): string|false {
+	return json_encode( $value, $flags );
+}
+
 function sanitize_text_field( string $value ): string {
 	return trim( strip_tags( $value ) );
 }
@@ -135,6 +161,10 @@ final class WdcAddressSmokeSession {
 
 	public function get( string $key, mixed $default = null ): mixed {
 		return $this->data[ $key ] ?? $default;
+	}
+
+	public function __unset( string $key ): void {
+		unset( $this->data[ $key ] );
 	}
 }
 
@@ -203,6 +233,14 @@ $known = $resolver->resolve_city( $known_city );
 address_smoke_assert( null !== $known, 'Known city must resolve.' );
 address_smoke_assert( $known_postcode === $resolver->resolve_postcode( $known_city ), 'Known city postcode must resolve.' );
 
+$_REQUEST = array( 'query' => 'Новос' );
+ob_start();
+( new CheckoutLocationAjax( $search, new SettingsRepository() ) )->handle();
+$ajax_payload = json_decode( (string) ob_get_clean(), true );
+address_smoke_assert( true === ( $ajax_payload['success'] ?? false ), 'Location AJAX must return success.' );
+address_smoke_assert( 'Новосибирская область' === ( $ajax_payload['data']['groups'][0]['region'] ?? '' ), 'Location AJAX must group Новос by region.' );
+address_smoke_assert( 'Новосибирск' === ( $ajax_payload['data']['groups'][0]['locations'][0]['city_name'] ?? '' ), 'Location AJAX must return Новосибирск result.' );
+
 $known_result = $runtime->resolve_checkout_address(
 	array(
 		'shipping_country' => 'RU',
@@ -214,6 +252,24 @@ $known_result = $runtime->resolve_checkout_address(
 address_smoke_assert( $known_result->success, 'FIAS stub must normalize known city.' );
 address_smoke_assert( $known_result->address->normalized, 'Known city result must be marked normalized.' );
 address_smoke_assert( $known_postcode === $known_result->address->postcode, 'Known city result must set postcode.' );
+
+$selected_result = $runtime->resolve_checkout_address(
+	array(
+		'shipping_country'                    => 'RU',
+		'shipping_city'                       => 'Новосибирск',
+		'shipping_address_1'                  => 'Красный проспект',
+		'wdc_platform_location_id'            => '1',
+		'wdc_platform_location_fias_id'       => 'demo-fias-nsk',
+		'wdc_platform_location_gar_id'        => 'demo-gar-nsk',
+		'wdc_platform_location_display_name'  => 'Новосибирск, Новосибирская область',
+		'wdc_platform_location_postcode'      => '630000',
+		'wdc_platform_location_region_name'   => 'Новосибирская область',
+	)
+);
+address_smoke_assert( $selected_result->address->normalized, 'Hidden selected location must normalize address.' );
+address_smoke_assert( '630000' === $selected_result->address->postcode, 'Hidden selected location must set postcode.' );
+address_smoke_assert( 'demo-fias-nsk' === $selected_result->address->fias_id, 'Hidden selected location must set FIAS id.' );
+address_smoke_assert( 'demo-gar-nsk' === $selected_result->address->gar_id, 'Hidden selected location must set GAR id.' );
 
 $unknown_result = $runtime->resolve_checkout_address(
 	array(
@@ -249,6 +305,17 @@ address_smoke_assert( true === ( $order->meta['_wdc_platform_address_fallback_us
 $fallback = ( new FallbackAddressNormalizer() )->normalize( 'Fallback raw', array( 'city' => 'Fallback City' ) );
 address_smoke_assert( $fallback->address->fallback, 'Fallback normalizer must mark fallback.' );
 
+$manual_fallback = $runtime->resolve_checkout_address(
+	array(
+		'shipping_country'   => 'RU',
+		'shipping_city'      => 'Berlin',
+		'shipping_address_1' => 'Manual street',
+	)
+);
+address_smoke_assert( $manual_fallback->address->fallback, 'Manual unknown city must remain fallback.' );
+address_smoke_assert( ! $manual_fallback->address->normalized, 'Manual unknown city must not be normalized.' );
+address_smoke_assert( '' === $manual_fallback->address->fias_id && '' === $manual_fallback->address->gar_id, 'Manual fallback city must not set FIAS/GAR ids.' );
+
 $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => $known_city ) );
 $mapper = new WooCommercePackageMapper( $runtime, $session );
 $request = $mapper->map(
@@ -266,6 +333,36 @@ address_smoke_assert( false === $request->destination->fallback, 'QuoteRequest k
 $stored = $session->normalized_address_result();
 address_smoke_assert( null !== $stored && $stored->address->normalized, 'Session must persist normalized address result.' );
 address_smoke_assert( array() !== $session->selected_city(), 'Session must persist selected city.' );
+
+$session->save_pickup_selection(
+	array(
+		'carrier_key'    => 'demo',
+		'rate_id'        => 'demo:pickup',
+		'point_code'     => 'demo-nsk-001',
+		'point_address'  => 'Красный проспект, 25',
+		'selected_at'    => '2026-05-21T00:00:00+00:00',
+	)
+);
+WC()->session->set( 'shipping_for_package_0', array( 'cached' => true ) );
+$nsk_fingerprint = $session->address_fingerprint();
+$moscow_result = $runtime->resolve_checkout_address(
+	array(
+		'shipping_country'   => 'RU',
+		'shipping_city'      => 'Москва',
+		'shipping_address_1' => 'Тверская',
+	)
+);
+address_smoke_assert( $nsk_fingerprint !== $session->address_fingerprint(), 'Address fingerprint must change after Новосибирск -> Москва.' );
+address_smoke_assert( 'Москва' === $moscow_result->address->city, 'Normalized address must switch to Москва.' );
+address_smoke_assert( 'Москва' === $session->normalized_address_result()?->address->city, 'Session normalized city must not stay Новосибирск.' );
+address_smoke_assert( array() === $session->pickup_selection(), 'Pickup selection must clear after city fingerprint changes.' );
+address_smoke_assert( null === WC()->session->get( 'shipping_for_package_0' ), 'Address fingerprint change must clear WooCommerce shipping cache.' );
+
+ob_start();
+( new CheckoutAddressRenderer( $session ) )->render();
+$address_output = (string) ob_get_clean();
+address_smoke_assert( str_contains( $address_output, 'Москва' ), 'Address renderer must show current city.' );
+address_smoke_assert( ! str_contains( $address_output, 'Новосибирск' ), 'Address renderer must not show stale normalized city.' );
 
 $session->save_rates(
 	array(
@@ -287,7 +384,7 @@ address_smoke_assert( true === ( $order->meta['_wdc_platform_normalized'] ?? fal
 address_smoke_assert( 'fias' === ( $order->meta['_wdc_platform_normalization_source'] ?? '' ), 'Order meta must persist normalization source.' );
 address_smoke_assert( '' === ( $order->meta['_wdc_platform_fallback_address'] ?? null ), 'Normalized order meta must clear fallback address text.' );
 address_smoke_assert( false === ( $order->meta['_wdc_platform_address_fallback_used'] ?? true ), 'Normalized order meta must persist false fallback address flag.' );
-address_smoke_assert( $known_postcode === ( $order->meta['_wdc_platform_resolved_postcode'] ?? '' ), 'Order meta must persist resolved postcode.' );
+address_smoke_assert( '101000' === ( $order->meta['_wdc_platform_resolved_postcode'] ?? '' ), 'Order meta must persist current resolved postcode.' );
 address_smoke_assert( '' !== ( $order->meta['_wdc_platform_fias_id'] ?? '' ), 'Order meta must persist FIAS id.' );
 address_smoke_assert( '' !== ( $order->meta['_wdc_platform_gar_id'] ?? '' ), 'Order meta must persist GAR id.' );
 
@@ -311,5 +408,6 @@ $empty_session->save_selected_delivery_type( 'courier' );
 $errors = new WdcAddressSmokeErrors();
 ( new CheckoutValidation( $empty_session, new CheckoutAddressValidation( $empty_session ) ) )->validate( array( 'shipping_city' => '' ), $errors );
 address_smoke_assert( isset( $errors->errors['wdc_city_required'] ), 'Courier validation must require city when no runtime city exists.' );
+address_smoke_assert( 'Введите населенный пункт.' === ( $errors->errors['wdc_city_required'] ?? '' ), 'City empty validation message must be Russian.' );
 
 echo "Address normalization smoke test passed.\n";
