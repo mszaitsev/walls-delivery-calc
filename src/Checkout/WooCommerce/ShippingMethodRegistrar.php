@@ -84,18 +84,21 @@ final class ShippingMethodRegistrar {
 			array( 'wdc-platform-checkout-rates' ),
 			$this->environment->version()
 		);
-		wp_enqueue_style(
-			'wdc-platform-city-selector',
-			$this->environment->plugin_url() . 'assets/frontend/checkout-city-selector.css',
-			array( 'wdc-platform-checkout-rates' ),
-			$this->environment->version()
-		);
-		wp_enqueue_style(
-			'wdc-platform-address-suggestions',
-			$this->environment->plugin_url() . 'assets/frontend/checkout-address-suggestions.css',
-			array( 'wdc-platform-checkout-rates' ),
-			$this->environment->version()
-		);
+		if ( $this->suggestions_enabled() ) {
+			wp_enqueue_style(
+				'wdc-platform-address-suggestions',
+				$this->environment->plugin_url() . 'assets/frontend/checkout-address-suggestions.css',
+				array( 'wdc-platform-checkout-rates' ),
+				$this->environment->version()
+			);
+		} else {
+			wp_enqueue_style(
+				'wdc-platform-city-selector',
+				$this->environment->plugin_url() . 'assets/frontend/checkout-city-selector.css',
+				array( 'wdc-platform-checkout-rates' ),
+				$this->environment->version()
+			);
+		}
 		if ( function_exists( 'wp_enqueue_script' ) ) {
 			$city_selector_dependencies = array( 'jquery' );
 			if ( function_exists( 'wp_script_is' ) && wp_script_is( 'wc-checkout', 'registered' ) ) {
@@ -141,30 +144,55 @@ final class ShippingMethodRegistrar {
 					)
 				);
 			}
-			wp_enqueue_script(
-				'wdc-platform-address-suggestions',
-				$this->environment->plugin_url() . 'assets/frontend/checkout-address-suggestions.js',
-				array( 'jquery' ),
-				$this->environment->version(),
-				true
-			);
-			if ( function_exists( 'wp_localize_script' ) ) {
-				wp_localize_script(
+			if ( $this->suggestions_enabled() ) {
+				wp_enqueue_script(
 					'wdc-platform-address-suggestions',
-					'wdcPlatformAddressSuggestions',
-					array(
-						'ajax_url' => function_exists( 'admin_url' ) ? admin_url( 'admin-ajax.php' ) : '',
-						'debug'    => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
-						'enabled'  => $this->suggestions_enabled(),
-						'action'   => AddressSuggestionAjax::ACTION,
-					)
+					$this->environment->plugin_url() . 'assets/frontend/checkout-address-suggestions.js',
+					array( 'jquery' ),
+					$this->environment->version(),
+					true
 				);
+				if ( function_exists( 'wp_localize_script' ) ) {
+					wp_localize_script(
+						'wdc-platform-address-suggestions',
+						'wdcPlatformAddressSuggestions',
+						$this->address_suggestions_config()
+					);
+				}
 			}
 		}
 	}
 
 	private function suggestions_enabled(): bool {
 		return $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->enabled() && $this->suggestion_settings->has_api_key();
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function address_suggestions_config(): array {
+		return array(
+			'ajax_url'  => function_exists( 'admin_url' ) ? admin_url( 'admin-ajax.php' ) : '',
+			'nonce'     => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( AddressSuggestionAjax::NONCE_ACTION ) : '',
+			'min_chars' => 3,
+			'debug'     => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
+			'enabled'   => $this->suggestions_enabled(),
+			'action'    => AddressSuggestionAjax::ACTION,
+			'actions'   => array(
+				'suggest' => AddressSuggestionAjax::ACTION,
+			),
+			'stages'    => array(
+				'city'               => 'city',
+				'address'            => 'address',
+				'house_after_street' => 'house_after_street',
+				'resolve'            => 'resolve',
+			),
+			'strings'   => array(
+				'not_found' => __( 'Адрес не найден. Можно продолжить ручной ввод.', 'walls-delivery-calc' ),
+				'add_house' => __( 'Добавьте номер дома', 'walls-delivery-calc' ),
+				'selected'  => __( 'Адрес выбран:', 'walls-delivery-calc' ),
+			),
+		);
 	}
 
 	/**

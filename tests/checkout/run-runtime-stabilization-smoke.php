@@ -531,13 +531,8 @@ runtime_smoke_assert( isset( $registrar->register_shipping_method( array() )[ Ne
 $registrar->enqueue_assets();
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-normalization'] ), 'Address normalization script must enqueue when feature gate is enabled.' );
 runtime_smoke_assert( str_contains( (string) $GLOBALS['wdc_test_scripts']['wdc-platform-address-normalization']['src'], 'checkout-address-normalization.js' ), 'Address normalization script src must point to checkout-address-normalization.js.' );
-runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-suggestions'] ), 'Address suggestions script must enqueue when feature gate is enabled.' );
-runtime_smoke_assert( str_contains( (string) $GLOBALS['wdc_test_scripts']['wdc-platform-address-suggestions']['src'], 'checkout-address-suggestions.js' ), 'Address suggestions script src must point to checkout-address-suggestions.js.' );
-runtime_smoke_assert( isset( $GLOBALS['wdc_test_styles']['wdc-platform-address-suggestions'] ), 'Address suggestions CSS must enqueue when feature gate is enabled.' );
-$suggestions_config = $GLOBALS['wdc_test_localized_scripts']['wdc-platform-address-suggestions']['wdcPlatformAddressSuggestions'] ?? array();
-runtime_smoke_assert( 'wdc_platform_dadata_address_suggest' === ( $suggestions_config['action'] ?? '' ), 'Address suggestions frontend config must expose AJAX action.' );
-runtime_smoke_assert( array_key_exists( 'enabled', $suggestions_config ), 'Address suggestions frontend config must expose enabled state.' );
-runtime_smoke_assert( ! array_key_exists( 'api_key', $suggestions_config ) && ! array_key_exists( 'token', $suggestions_config ), 'Address suggestions frontend config must not expose DaData credentials.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-suggestions'] ), 'Address suggestions script must not enqueue when DaData suggestions are disabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-city-selector'] ), 'Local city selector script must enqueue when DaData suggestions are disabled.' );
 
 $demo_orchestrator = runtime_smoke_orchestrator_with_demo();
 $all_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), RateSorter::CHEAPEST, false )->rates;

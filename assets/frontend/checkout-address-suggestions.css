@@ -27,6 +27,12 @@
 	background: #f4f7fb;
 }
 
+.wdc-address-suggestions__empty {
+	padding: 10px 12px;
+	color: #667085;
+	background: #fff;
+}
+
 .wdc-address-suggestions__label,
 .wdc-address-suggestions__sublabel {
 	display: block;
@@ -40,6 +46,12 @@
 	margin-top: 2px;
 	color: #667085;
 	font-size: 12px;
+}
+
+.wdc-address-suggestions__notice {
+	margin: 6px 0 0;
+	color: #475467;
+	font-size: 13px;
 }
 
 @media (max-width: 900px) {

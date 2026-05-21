@@ -12,7 +12,7 @@ DaData в этой версии используется не как постф�
 
 `wdc_platform_dadata_address_suggest`
 
-API-ключ DaData хранится на сервере через `EncryptionService` в настройке `dadata_api_key_encrypted`. Во frontend config передаются только `ajax_url`, `debug`, `enabled` и `action`; ключ или токен в HTML/JS не локализуются.
+API-ключ DaData хранится на сервере через `EncryptionService` в настройке `dadata_api_key_encrypted`. Во frontend config передаются только служебные значения `ajax_url`, `nonce`, `min_chars`, `debug`, `enabled`, `strings`, `stages` и `actions`; ключ или токен в HTML/JS не локализуются.
 
 Серверный клиент обращается к:
 
@@ -110,15 +110,38 @@ Address suggestions подключаются к `shipping_address_1`, иначе
 
 При включенном checkout debug frontend пишет в console:
 
-- `dadata stage`
+- `address suggestions script loaded`
+- `config enabled / disabled`
+- `city field found` или `city field not found`
+- `address field found` или `address field not found`
+- `address field selector used`
+- `address input event`
+- `stage`
 - `query`
 - context: `city_kladr_id`, `street_fias_id`
-- `suggestions count`
+- `ajax request start`
+- `ajax success items count`
+- `ajax fail`
+- `suggestion popup opened`
 - `selected level`
+- `suggestion selected`
 - `status`
-- `resolve request`
+- `resolve request start`
+- `resolve request success`
 
 Телефон, email и API-ключ не логируются.
+
+## Troubleshooting
+
+Если подсказки адреса не появляются:
+
+1. Проверьте настройки: новая доставка включена, `Включить подсказки DaData` включено, API-ключ DaData сохранен.
+2. Откройте Console под администратором с включенным checkout debug panel.
+3. Должны быть логи `address suggestions script loaded`, `address field found`, `address field selector used`.
+4. При вводе в `billing_address_1` или `shipping_address_1` должен появиться `address input event`, затем `ajax request start`.
+5. В Network должен быть запрос `admin-ajax.php?action=wdc_platform_dadata_address_suggest`.
+6. Если есть `address field not found`, проверьте реальные имена checkout inputs: `billing_address_1`, `shipping_address_1`, `billing_city`, `shipping_city`.
+7. Если `config disabled`, значит DaData suggestions выключены или API-ключ не считается сохраненным сервером.
 
 ## Проверка
 

@@ -161,7 +161,7 @@ foreach ( array( '9', '75' ) as $level ) {
 }
 
 $js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-address-suggestions.js' );
-foreach ( array( 'shipping_city', 'billing_city', 'shipping_address_1', 'billing_address_1', 'shipping_address_2', 'billing_address_2', 'house_after_street', 'resolve', 'dadata_status', 'dadata_unrestricted_value', 'dadata_region_fias_id', 'dadata_city_kladr_id', 'dadata_street_fias_id', 'dadata_house_fias_id', 'dadata_fias_level', 'update_checkout', 'wdc_platform_dadata_address_suggest' ) as $needle ) {
+foreach ( array( 'ADDRESS_SELECTOR', 'shipping_city', 'billing_city', 'shipping_address_1', 'billing_address_1', 'shipping_address_2', 'billing_address_2', 'postcode', 'house_after_street', 'resolve', 'street_selected', 'resolved', 'dadata_status', 'dadata_unrestricted_value', 'dadata_region_fias_id', 'dadata_city_kladr_id', 'dadata_street_fias_id', 'dadata_house_fias_id', 'dadata_fias_level', 'update_checkout', 'updated_checkout', 'wc_fragments_refreshed', 'wdc_platform_dadata_address_suggest', 'address suggestions script loaded', 'config enabled', 'config disabled', 'address field found', 'address field not found', 'address field selector used', 'address input event', 'ajax request start', 'ajax success items count', 'ajax fail', 'suggestion popup opened', 'suggestion selected', 'resolve request start', 'resolve request success', '.off( \'input\' + namespace + \' keyup\' + namespace + \' paste\' + namespace', 'setHiddenData' ) as $needle ) {
 	dadata_suggestions_assert( str_contains( $js, $needle ), 'Frontend suggestions JS must contain ' . $needle . '.' );
 }
 dadata_suggestions_assert( ! str_contains( $js, 'api_key' ) && ! str_contains( $js, 'secret-api-key' ), 'Frontend suggestions JS must not contain API key names or values.' );
@@ -170,8 +170,18 @@ dadata_suggestions_assert( str_contains( $js, "'manual'" ), 'Frontend must suppo
 
 $registrar = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/ShippingMethodRegistrar.php' );
 dadata_suggestions_assert( str_contains( $registrar, 'wdc-platform-address-suggestions' ), 'ShippingMethodRegistrar must enqueue address suggestions assets.' );
-dadata_suggestions_assert( str_contains( $registrar, "'enabled'  => " . '$this->suggestions_enabled()' ), 'Frontend config must expose only enabled state.' );
+dadata_suggestions_assert( str_contains( $registrar, 'address_suggestions_config' ), 'ShippingMethodRegistrar must expose address suggestions config.' );
+dadata_suggestions_assert( str_contains( $registrar, "'nonce'" ), 'Address suggestions config must include nonce.' );
+dadata_suggestions_assert( str_contains( $registrar, "'min_chars'" ), 'Address suggestions config must include min_chars.' );
+dadata_suggestions_assert( str_contains( $registrar, "'strings'" ), 'Address suggestions config must include strings.' );
+dadata_suggestions_assert( str_contains( $registrar, "'stages'" ), 'Address suggestions config must include stages.' );
+dadata_suggestions_assert( str_contains( $registrar, "'actions'" ), 'Address suggestions config must include actions.' );
+dadata_suggestions_assert( str_contains( $registrar, 'if ( $this->suggestions_enabled() )' ), 'Address suggestions assets must enqueue only when DaData suggestions are enabled.' );
 dadata_suggestions_assert( ! str_contains( $registrar, "'api_key'" ) && ! str_contains( $registrar, '"api_key"' ), 'ShippingMethodRegistrar must not localize the DaData API key.' );
+
+$ajax = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/AddressSuggestions/AddressSuggestionAjax.php' );
+dadata_suggestions_assert( str_contains( $ajax, "add_action( 'wp_ajax_' . self::ACTION" ), 'AddressSuggestionAjax must register logged-in AJAX action.' );
+dadata_suggestions_assert( str_contains( $ajax, "add_action( 'wp_ajax_nopriv_' . self::ACTION" ), 'AddressSuggestionAjax must register guest AJAX action.' );
 
 $GLOBALS['wdc_dadata_suggestions_options'] = array();
 $disabled_settings = new SettingsRepository();
