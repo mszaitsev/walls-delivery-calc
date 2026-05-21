@@ -8,6 +8,7 @@ use WallsShop\WDC\Checkout\Address\DaDataAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\FiasAddressNormalizer;
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutAddressRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
@@ -170,6 +171,21 @@ $result = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU',
 fias_smoke_assert( ! $result->success && $result->address->fallback, 'Checkout chain must continue to manual fallback after disabled FIAS and DaData.' );
 fias_smoke_assert( '630000' === $result->address->postcode, 'Local city DB must still provide postcode context.' );
 fias_smoke_assert( array() !== $session->selected_city(), 'Local city DB must still provide selected city context.' );
+fias_smoke_assert( 'local_db' === ( $session->city_context()['source'] ?? '' ), 'Local city DB must set local_db city source.' );
+
+ob_start();
+( new CheckoutAddressRenderer( $session ) )->render();
+$local_city_html = (string) ob_get_clean();
+fias_smoke_assert( str_contains( $local_city_html, 'Населенный пункт выбран из справочника' ), 'Renderer must show dictionary city for local city context.' );
+fias_smoke_assert( ! str_contains( $local_city_html, 'Используется введенный вручную населенный пункт' ), 'Renderer must not show manual city for local city context.' );
+
+$manual = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => 'Berlin', 'shipping_address_1' => 'Manual street' ) );
+fias_smoke_assert( 'manual' === ( $session->city_context()['source'] ?? '' ), 'Unknown city must set manual city source.' );
+ob_start();
+( new CheckoutAddressRenderer( $session ) )->render();
+$manual_city_html = (string) ob_get_clean();
+fias_smoke_assert( str_contains( $manual_city_html, 'Используется введенный вручную населенный пункт' ), 'Renderer must show manual city state for manual fallback city.' );
+fias_smoke_assert( ! $manual->success, 'Manual city chain must remain unsuccessful normalization.' );
 
 $gar = new GarSyncManager( new ActionScheduler( new Logger() ), new GarChangesClient( $http ), new Logger(), $settings, $wpdb );
 $before_gar_requests = $GLOBALS['wdc_fias_http_requests'];

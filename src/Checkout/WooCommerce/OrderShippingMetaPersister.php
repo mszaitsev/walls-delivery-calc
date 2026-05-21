@@ -41,15 +41,22 @@ final class OrderShippingMetaPersister {
 
 		$address = $this->session_manager->normalized_address_result();
 		if ( null !== $address ) {
-			$address_fallback_used = $address->address->fallback || ! $address->address->normalized;
+			$city_context = $this->session_manager->city_context();
+			$city_source = (string) ( $city_context['source'] ?? 'manual' );
+			$address_fallback_used = 'manual' === $city_source && ( $address->address->fallback || ! $address->address->normalized );
 			$map['_wdc_platform_normalized']           = $address->address->normalized;
 			$map['_wdc_platform_normalization_source'] = $address->source;
 			$map['_wdc_platform_fallback_city']        = $this->session_manager->fallback_city();
 			$map['_wdc_platform_fallback_address']     = $address_fallback_used ? $address->address->raw_address : '';
 			$map['_wdc_platform_address_fallback_used'] = $address_fallback_used;
-			$map['_wdc_platform_resolved_postcode']    = $address->address->postcode;
+			$map['_wdc_platform_resolved_postcode']    = (string) ( $city_context['postcode'] ?? $address->address->postcode );
 			$map['_wdc_platform_fias_id']              = $address->address->fias_id;
 			$map['_wdc_platform_gar_id']               = $address->address->gar_id;
+			$map['_wdc_platform_city_source']          = $city_source;
+			$map['_wdc_platform_city_display_name']    = $this->city_display( $city_context, $address );
+			$map['_wdc_platform_city_postcode']        = (string) ( $city_context['postcode'] ?? $address->address->postcode );
+			$map['_wdc_platform_city_fias_id']         = (string) ( $city_context['fias_id'] ?? '' );
+			$map['_wdc_platform_city_gar_id']          = (string) ( $city_context['gar_id'] ?? '' );
 		}
 
 		$pickup = $this->session_manager->pickup_selection();
@@ -144,6 +151,11 @@ final class OrderShippingMetaPersister {
 	}
 
 	private function address_summary(): string {
+		$city_context = $this->session_manager->city_context();
+		if ( array() !== $city_context ) {
+			return trim( $this->city_display( $city_context, $this->session_manager->normalized_address_result() ) . ( '' !== (string) ( $city_context['postcode'] ?? '' ) ? ' / ' . (string) $city_context['postcode'] : '' ), ' /' );
+		}
+
 		$address_result = $this->session_manager->normalized_address_result();
 		if ( null === $address_result ) {
 			return $this->session_manager->fallback_city();
@@ -163,10 +175,33 @@ final class OrderShippingMetaPersister {
 		}
 
 		if ( $address_result->address->fallback || ! $address_result->address->normalized ) {
-			return 'введено вручную';
+			return 'не выполнялась';
 		}
 
 		return in_array( $address_result->source, array( 'fias', 'gar' ), true ) ? 'ФИАС/ГАР' : (string) $address_result->source;
+	}
+
+	/**
+	 * @param array<string,mixed> $city_context
+	 */
+	private function city_display( array $city_context, mixed $address_result = null ): string {
+		$display = trim( (string) ( $city_context['display_name'] ?? '' ) );
+		if ( '' !== $display ) {
+			return $display;
+		}
+
+		$city = trim( (string) ( $city_context['settlement_name'] ?? '' ) );
+		if ( '' === $city ) {
+			$city = trim( (string) ( $city_context['city_name'] ?? '' ) );
+		}
+
+		if ( '' === $city && is_object( $address_result ) && isset( $address_result->address ) ) {
+			$city = (string) ( $address_result->address->settlement ?: $address_result->address->city );
+		}
+
+		$region = trim( (string) ( $city_context['region_name'] ?? '' ) );
+
+		return trim( $city . ( '' !== $region ? ' — ' . $region : '' ) );
 	}
 
 	/**

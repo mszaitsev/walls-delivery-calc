@@ -21,29 +21,38 @@ final class CheckoutAddressRenderer {
 			return;
 		}
 
-		$address = $result->address;
-		$city    = '' !== trim( $address->settlement ) ? $address->settlement : $address->city;
+		$address      = $result->address;
+		$city         = '' !== trim( $address->settlement ) ? $address->settlement : $address->city;
+		$city_context = $this->session_manager->city_context();
+		$postcode     = (string) ( $city_context['postcode'] ?? $address->postcode );
 
 		echo '<tr class="wdc-address-normalization-row"><th>' . esc_html__( 'Проверка адреса', 'walls-delivery-calc' ) . '</th><td>';
 		echo '<div class="wdc-address-normalization">';
-		if ( $address->normalized ) {
-			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--normalized">' . esc_html__( 'Населенный пункт определен:', 'walls-delivery-calc' ) . ' ' . esc_html( $city ) . '</p>';
-		}
-		if ( $address->fallback ) {
+		if ( 'local_db' === (string) ( $city_context['source'] ?? '' ) ) {
+			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--city-context">' . esc_html__( 'Населенный пункт выбран из справочника', 'walls-delivery-calc' ) . '</p>';
+			$display = $this->city_display( $city_context );
+			if ( '' !== $display ) {
+				echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--city-display">' . esc_html( $display ) . '</p>';
+			}
+		} elseif ( $address->fallback ) {
 			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--fallback">' . esc_html__( 'Используется введенный вручную населенный пункт', 'walls-delivery-calc' ) . '</p>';
 			if ( '' !== trim( $city ) ) {
 				echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--fallback-city">' . esc_html( $city ) . '</p>';
 			}
+		} elseif ( $address->normalized ) {
+			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--normalized">' . esc_html__( 'Населенный пункт определен:', 'walls-delivery-calc' ) . ' ' . esc_html( $city ) . '</p>';
 		}
-		if ( '' !== trim( $address->postcode ) ) {
-			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--postcode">' . esc_html__( 'Индекс:', 'walls-delivery-calc' ) . ' ' . esc_html( $address->postcode ) . ' <span class="wdc-address-normalization__source">(' . esc_html( $this->postcode_source_label( $result->source, $result->error_code ) ) . ')</span></p>';
+
+		if ( '' !== trim( $postcode ) ) {
+			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--postcode">' . esc_html__( 'Индекс:', 'walls-delivery-calc' ) . ' ' . esc_html( $postcode ) . '</p>';
 		}
-		if ( in_array( $result->error_code, array( 'api_timeout', 'api_failed', 'api_parse_failed', 'rate_limited' ), true ) ) {
-			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--api">' . esc_html__( 'Адрес будет обработан вручную, проверка сейчас недоступна.', 'walls-delivery-calc' ) . '</p>';
+
+		if ( $address->normalized ) {
+			echo '<p class="wdc-address-normalization__source">' . esc_html__( 'Адрес нормализован через:', 'walls-delivery-calc' ) . ' ' . esc_html( $this->source_label( $result->source ) ) . '</p>';
+		} else {
+			echo '<p class="wdc-address-normalization__source">' . esc_html__( 'Адрес улица/дом не нормализован', 'walls-delivery-calc' ) . '</p>';
 		}
-		if ( ! $address->fallback ) {
-			echo '<p class="wdc-address-normalization__source">' . esc_html__( 'Источник:', 'walls-delivery-calc' ) . ' ' . esc_html( $this->source_label( $result->source ) ) . '</p>';
-		}
+
 		echo '</div>';
 		echo '</td></tr>';
 	}
@@ -51,20 +60,28 @@ final class CheckoutAddressRenderer {
 	private function source_label( string $source ): string {
 		return match ( $source ) {
 			'fias' => __( 'ФИАС/ГАР', 'walls-delivery-calc' ),
-			'fallback' => __( 'введено вручную', 'walls-delivery-calc' ),
+			'dadata' => __( 'DaData', 'walls-delivery-calc' ),
+			'fallback' => __( 'fallback', 'walls-delivery-calc' ),
 			default => $source,
 		};
 	}
 
-	private function postcode_source_label( string $source, string $error_code ): string {
-		if ( 'fias' === $source && '' === $error_code ) {
-			return __( 'FIAS/local', 'walls-delivery-calc' );
+	/**
+	 * @param array<string,mixed> $city_context
+	 */
+	private function city_display( array $city_context ): string {
+		$display = trim( (string) ( $city_context['display_name'] ?? '' ) );
+		if ( '' !== $display ) {
+			return $display;
 		}
 
-		if ( 'fallback' === $source ) {
-			return __( 'manual', 'walls-delivery-calc' );
+		$city = trim( (string) ( $city_context['settlement_name'] ?? '' ) );
+		if ( '' === $city ) {
+			$city = trim( (string) ( $city_context['city_name'] ?? '' ) );
 		}
 
-		return __( 'checkout', 'walls-delivery-calc' );
+		$region = trim( (string) ( $city_context['region_name'] ?? '' ) );
+
+		return trim( $city . ( '' !== $region ? ' — ' . $region : '' ) );
 	}
 }

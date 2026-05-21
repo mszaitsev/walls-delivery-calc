@@ -88,8 +88,10 @@ final class OrderDeliveryMetabox {
 			'Способ доставки'        => $this->order_meta( $order, '_wdc_platform_rate_id' ),
 			'Тип доставки'           => $this->delivery_type_label( $delivery_type ),
 			'Срок доставки'          => $this->order_meta( $order, '_wdc_platform_planned_delivery_comment' ),
-			'Населенный пункт / индекс' => $this->city_summary( $order ),
-			'Нормализация'           => $this->normalization_label( $order ),
+			'Населенный пункт' => $this->city_summary( $order ),
+			'Источник населенного пункта' => $this->city_source_label( $order ),
+			'Индекс населенного пункта' => $this->order_meta( $order, '_wdc_platform_city_postcode' ),
+			'Нормализация адреса' => $this->normalization_label( $order ),
 		);
 
 		if ( 'pickup' === $delivery_type ) {
@@ -126,8 +128,16 @@ final class OrderDeliveryMetabox {
 	}
 
 	private function city_summary( object $order ): string {
+		$city = $this->order_meta( $order, '_wdc_platform_city_display_name' );
+		if ( '' !== $city ) {
+			return $city;
+		}
+
 		$city     = $this->order_meta( $order, '_wdc_platform_fallback_city' );
-		$postcode = $this->order_meta( $order, '_wdc_platform_resolved_postcode' );
+		$postcode = $this->order_meta( $order, '_wdc_platform_city_postcode' );
+		if ( '' === $postcode ) {
+			$postcode = $this->order_meta( $order, '_wdc_platform_resolved_postcode' );
+		}
 		if ( '' === $city && method_exists( $order, 'get_shipping_city' ) ) {
 			$city = trim( (string) $order->get_shipping_city() );
 		}
@@ -135,11 +145,19 @@ final class OrderDeliveryMetabox {
 		return trim( $city . ( '' !== $postcode ? ' / ' . $postcode : '' ), ' /' );
 	}
 
+	private function city_source_label( object $order ): string {
+		return match ( $this->order_meta( $order, '_wdc_platform_city_source' ) ) {
+			'local_db' => 'справочник плагина',
+			'manual' => 'введено вручную',
+			default => '',
+		};
+	}
+
 	private function normalization_label( object $order ): string {
 		$normalized = $this->order_meta( $order, '_wdc_platform_normalized' );
 		$source     = $this->order_meta( $order, '_wdc_platform_normalization_source' );
-		$fias_id    = $this->order_meta( $order, '_wdc_platform_fias_id' );
-		$gar_id     = $this->order_meta( $order, '_wdc_platform_gar_id' );
+		$fias_id    = $this->order_meta( $order, '_wdc_platform_city_fias_id' );
+		$gar_id     = $this->order_meta( $order, '_wdc_platform_city_gar_id' );
 
 		if ( '1' === $normalized || 'true' === $normalized ) {
 			$label = in_array( $source, array( 'fias', 'gar' ), true ) ? 'ФИАС/ГАР' : $source;
@@ -148,11 +166,11 @@ final class OrderDeliveryMetabox {
 			return trim( $label . ( '' !== $ids ? ': ' . $ids : '' ) );
 		}
 
-		if ( '' !== $this->order_meta( $order, '_wdc_platform_fallback_city' ) || 'fallback' === $source ) {
-			return 'введено вручную';
+		if ( 'fallback' === $source ) {
+			return 'fallback';
 		}
 
-		return $source;
+		return '' !== $source ? $source : 'не выполнялась';
 	}
 
 	private function shipping_address( object $order ): string {
