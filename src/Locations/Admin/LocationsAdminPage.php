@@ -59,8 +59,14 @@ final class LocationsAdminPage {
 			<?php endif; ?>
 
 			<div class="wdc-locations-summary">
-				<strong><?php echo esc_html__( 'Количество населенных пунктов:', 'walls-delivery-calc' ); ?></strong>
-				<span><?php echo esc_html( (string) $this->repository->count_all() ); ?></span>
+				<p>
+					<strong><?php echo esc_html__( 'Населенных пунктов:', 'walls-delivery-calc' ); ?></strong>
+					<span><?php echo esc_html( (string) $this->repository->count_all() ); ?></span>
+				</p>
+				<p>
+					<strong><?php echo esc_html__( 'Регионов/областей:', 'walls-delivery-calc' ); ?></strong>
+					<span><?php echo esc_html( (string) $this->repository->count_regions() ); ?></span>
+				</p>
 			</div>
 
 			<form class="wdc-locations-import" method="post">

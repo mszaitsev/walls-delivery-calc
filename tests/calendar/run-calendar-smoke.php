@@ -101,6 +101,10 @@ function esc_html__( string $text, string $domain = '' ): string {
 	return $text;
 }
 
+function __( string $text, string $domain = '' ): string {
+	return $text;
+}
+
 function esc_html( mixed $text ): string {
 	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
 }
@@ -202,9 +206,16 @@ $admin_page = new CalendarAdminPage(
 
 ob_start();
 $admin_page->render_page();
-ob_end_clean();
+$calendar_html = (string) ob_get_clean();
 
 $attention = get_option( 'wdc_calendar_attention_required', array() );
 calendar_smoke_assert( isset( $attention['carrier_ru_2026'] ), 'Opening calendar admin page must not resolve calendar_attention_required.' );
+foreach ( array( 'Календарь РФ/ТК', 'Календарь магазина', 'Сгенерировать год', 'Сохранить календарь', 'Календарь РФ/ТК, 2026 год', 'Январь', 'Пн', 'рабочий день', 'нерабочий день' ) as $needle ) {
+	calendar_smoke_assert( str_contains( $calendar_html, $needle ), 'Calendar admin page must render Russian label: ' . $needle );
+}
+foreach ( array( 'wdc-calendar-reason', 'name="days[2026-01-01][reason]"', '>w<', '>weekday<', '>weekend<', '>generated<', '>manual<', '>holiday<' ) as $needle ) {
+	calendar_smoke_assert( ! str_contains( $calendar_html, $needle ), 'Calendar admin page must not render reason marker: ' . $needle );
+}
+calendar_smoke_assert( str_contains( $calendar_html, 'wdc-calendar-day-toggle' ), 'Calendar UI must keep clickable working/non-working toggles.' );
 
 echo "Calendar smoke test passed.\n";

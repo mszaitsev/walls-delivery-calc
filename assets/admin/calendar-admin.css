@@ -16,6 +16,11 @@
 	gap: 4px;
 }
 
+.wdc-calendar-current-title {
+	font-size: 18px;
+	margin: 8px 0 16px;
+}
+
 .wdc-calendar-grid {
 	display: grid;
 	gap: 16px;
@@ -75,10 +80,10 @@
 	line-height: 1;
 }
 
-.wdc-calendar-reason {
+.wdc-calendar-day-state {
+	align-self: end;
 	font-size: 11px;
-	min-height: 24px;
-	width: 100%;
+	line-height: 1.2;
 }
 
 .wdc-calendar-day.is-working {

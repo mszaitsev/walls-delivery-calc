@@ -67,7 +67,7 @@ final class CalendarAdminPage {
 			<?php endif; ?>
 			<form class="wdc-calendar-filters" method="get">
 				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>">
-				<label><span><?php echo esc_html__( 'Календарь', 'walls-delivery-calc' ); ?></span>
+				<label><span><?php echo esc_html__( 'Тип календаря', 'walls-delivery-calc' ); ?></span>
 					<select name="calendar_type">
 						<?php foreach ( $this->calendar_labels() as $type => $label ) : ?>
 							<option value="<?php echo esc_attr( $type ); ?>" <?php selected( $calendar_type, $type ); ?>><?php echo esc_html( $label ); ?></option>
@@ -87,6 +87,7 @@ final class CalendarAdminPage {
 					<button class="button" type="submit" name="wdc_calendar_action" value="generate"><?php echo esc_html__( 'Сгенерировать год', 'walls-delivery-calc' ); ?></button>
 					<button class="button button-primary" type="submit" name="wdc_calendar_action" value="save"><?php echo esc_html__( 'Сохранить календарь', 'walls-delivery-calc' ); ?></button>
 				</div>
+				<h2 class="wdc-calendar-current-title"><?php echo esc_html( sprintf( '%s, %d год', $this->calendar_label( $calendar_type ), $year ) ); ?></h2>
 				<div class="wdc-calendar-grid">
 					<?php foreach ( range( 1, 12 ) as $month ) : ?>
 						<?php $this->render_month( $calendar_type, $year, $month, $days ); ?>
@@ -106,9 +107,9 @@ final class CalendarAdminPage {
 		$period   = new DatePeriod( $start, new \DateInterval( 'P1D' ), $start->modify( '+1 month' ) );
 		?>
 		<section class="wdc-calendar-month">
-			<h2><?php echo esc_html( $start->format( 'F Y' ) ); ?></h2>
+			<h2><?php echo esc_html( $this->month_name( $month ) . ' ' . $year ); ?></h2>
 			<div class="wdc-calendar-weekdays">
-				<?php foreach ( array( 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun' ) as $weekday ) : ?>
+				<?php foreach ( array( 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс' ) as $weekday ) : ?>
 					<span><?php echo esc_html( $weekday ); ?></span>
 				<?php endforeach; ?>
 			</div>
@@ -116,13 +117,14 @@ final class CalendarAdminPage {
 				<?php foreach ( $period as $date ) : ?>
 					<?php
 					$date_value = $date->format( 'Y-m-d' );
-					$day        = $days[ $date_value ] ?? new CalendarDay( $date_value, false, 'generated', $calendar_type );
+					$day        = $days[ $date_value ] ?? new CalendarDay( $date_value, false, '', $calendar_type );
+					$state      = $day->working ? __( 'рабочий день', 'walls-delivery-calc' ) : __( 'нерабочий день', 'walls-delivery-calc' );
 					?>
-					<label class="wdc-calendar-day <?php echo $day->working ? 'is-working' : 'is-non-working'; ?>">
+					<label class="wdc-calendar-day <?php echo $day->working ? 'is-working' : 'is-non-working'; ?>" title="<?php echo esc_attr( $state ); ?>">
 						<input type="hidden" name="days[<?php echo esc_attr( $date_value ); ?>][working]" value="0">
 						<input class="wdc-calendar-day-toggle" type="checkbox" name="days[<?php echo esc_attr( $date_value ); ?>][working]" value="1" <?php checked( $day->working ); ?>>
 						<span class="wdc-calendar-day-number"><?php echo esc_html( $date->format( 'j' ) ); ?></span>
-						<input class="wdc-calendar-reason" type="text" name="days[<?php echo esc_attr( $date_value ); ?>][reason]" value="<?php echo esc_attr( $day->reason ); ?>">
+						<span class="wdc-calendar-day-state"><?php echo esc_html( $state ); ?></span>
 					</label>
 				<?php endforeach; ?>
 			</div>
@@ -161,7 +163,7 @@ final class CalendarAdminPage {
 			$days[] = new CalendarDay(
 				(string) $date,
 				isset( $data['working'] ) && '1' === (string) $data['working'],
-				isset( $data['reason'] ) ? sanitize_text_field( (string) $data['reason'] ) : 'manual',
+				'',
 				$calendar_type
 			);
 		}
@@ -186,8 +188,33 @@ final class CalendarAdminPage {
 	 */
 	private function calendar_labels(): array {
 		return array(
-			CalendarTypes::CARRIER_RU => 'РФ/ТК',
-			CalendarTypes::SHOP       => 'Магазин',
+			CalendarTypes::CARRIER_RU => 'Календарь РФ/ТК',
+			CalendarTypes::SHOP       => 'Календарь магазина',
 		);
+	}
+
+	private function calendar_label( string $calendar_type ): string {
+		$labels = $this->calendar_labels();
+
+		return $labels[ $calendar_type ] ?? $labels[ CalendarTypes::CARRIER_RU ];
+	}
+
+	private function month_name( int $month ): string {
+		$months = array(
+			1  => 'Январь',
+			2  => 'Февраль',
+			3  => 'Март',
+			4  => 'Апрель',
+			5  => 'Май',
+			6  => 'Июнь',
+			7  => 'Июль',
+			8  => 'Август',
+			9  => 'Сентябрь',
+			10 => 'Октябрь',
+			11 => 'Ноябрь',
+			12 => 'Декабрь',
+		);
+
+		return $months[ $month ] ?? '';
 	}
 }

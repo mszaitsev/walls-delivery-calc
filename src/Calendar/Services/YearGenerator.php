@@ -38,7 +38,7 @@ final class YearGenerator {
 			$days[] = new CalendarDay(
 				$date->format( 'Y-m-d' ),
 				$working,
-				$working ? 'weekday' : 'weekend',
+				'',
 				$calendar_type
 			);
 		}
