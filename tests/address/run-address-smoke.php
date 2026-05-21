@@ -21,6 +21,7 @@ use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
@@ -151,6 +152,10 @@ function wp_unslash( mixed $value ): mixed {
 	return $value;
 }
 
+function current_user_can( string $capability ): bool {
+	return true;
+}
+
 final class WdcAddressSmokeSession {
 	/** @var array<string,mixed> */
 	private array $data = array();
@@ -191,6 +196,10 @@ final class WdcAddressSmokeOrder {
 
 	public function update_meta_data( string $key, mixed $value ): void {
 		$this->meta[ $key ] = $value;
+	}
+
+	public function get_meta( string $key, bool $single = true ): mixed {
+		return $this->meta[ $key ] ?? '';
 	}
 }
 
@@ -249,9 +258,10 @@ $known_result = $runtime->resolve_checkout_address(
 		'shipping_address_2' => '1',
 	)
 );
-address_smoke_assert( $known_result->success, 'FIAS stub must normalize known city.' );
-address_smoke_assert( $known_result->address->normalized, 'Known city result must be marked normalized.' );
-address_smoke_assert( $known_postcode === $known_result->address->postcode, 'Known city result must set postcode.' );
+address_smoke_assert( ! $known_result->success, 'FIAS placeholder must not normalize known city.' );
+address_smoke_assert( ! $known_result->address->normalized, 'Known city result must not be marked normalized.' );
+address_smoke_assert( $known_result->address->fallback, 'Known city must continue to manual fallback.' );
+address_smoke_assert( $known_postcode === $known_result->address->postcode, 'Known city result must keep local postcode context.' );
 
 $selected_result = $runtime->resolve_checkout_address(
 	array(
@@ -266,10 +276,19 @@ $selected_result = $runtime->resolve_checkout_address(
 		'wdc_platform_location_region_name'   => 'Новосибирская область',
 	)
 );
-address_smoke_assert( $selected_result->address->normalized, 'Hidden selected location must normalize address.' );
+address_smoke_assert( ! $selected_result->address->normalized, 'Hidden selected location must not normalize full address.' );
 address_smoke_assert( '630000' === $selected_result->address->postcode, 'Hidden selected location must set postcode.' );
-address_smoke_assert( 'demo-fias-nsk' === $selected_result->address->fias_id, 'Hidden selected location must set FIAS id.' );
-address_smoke_assert( 'demo-gar-nsk' === $selected_result->address->gar_id, 'Hidden selected location must set GAR id.' );
+$selected_city_context = $session->city_context();
+address_smoke_assert( 'local_db' === ( $selected_city_context['source'] ?? '' ), 'Hidden selected location must set local_db city source.' );
+address_smoke_assert( false === ( $selected_city_context['is_manual_city'] ?? true ), 'Hidden selected location must not be manual city.' );
+address_smoke_assert( 'demo-fias-nsk' === ( $selected_city_context['fias_id'] ?? '' ), 'Hidden selected location must preserve city FIAS id.' );
+address_smoke_assert( 'demo-gar-nsk' === ( $selected_city_context['gar_id'] ?? '' ), 'Hidden selected location must preserve city GAR id.' );
+
+ob_start();
+( new CheckoutAddressRenderer( $session ) )->render();
+$selected_address_output = (string) ob_get_clean();
+address_smoke_assert( str_contains( $selected_address_output, 'Населенный пункт выбран из справочника' ), 'Renderer must show selected city dictionary state.' );
+address_smoke_assert( ! str_contains( $selected_address_output, 'Используется введенный вручную населенный пункт' ), 'Renderer must not show manual city for selected local city.' );
 
 $unknown_result = $runtime->resolve_checkout_address(
 	array(
@@ -326,12 +345,12 @@ $request = $mapper->map(
 		'contents' => array(),
 	)
 );
-address_smoke_assert( $request->destination->normalized, 'QuoteRequest destination must be normalized.' );
+address_smoke_assert( ! $request->destination->normalized, 'QuoteRequest destination must not be address-normalized by local city DB.' );
 address_smoke_assert( $known_postcode === $request->destination->postcode, 'QuoteRequest destination must include resolved postcode.' );
-address_smoke_assert( false === $request->destination->fallback, 'QuoteRequest known destination must not be fallback.' );
+address_smoke_assert( true === $request->destination->fallback, 'QuoteRequest known destination must use manual fallback until FIAS runtime is verified.' );
 
 $stored = $session->normalized_address_result();
-address_smoke_assert( null !== $stored && $stored->address->normalized, 'Session must persist normalized address result.' );
+address_smoke_assert( null !== $stored && $stored->address->fallback, 'Session must persist fallback address result.' );
 address_smoke_assert( array() !== $session->selected_city(), 'Session must persist selected city.' );
 
 $session->save_pickup_selection(
@@ -380,13 +399,23 @@ $session->save_rates(
 WC()->session->set( 'chosen_shipping_methods', array( NewShippingMethod::METHOD_ID . ':demo:courier' ) );
 $order = new WdcAddressSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
-address_smoke_assert( true === ( $order->meta['_wdc_platform_normalized'] ?? false ), 'Order meta must persist normalized flag.' );
-address_smoke_assert( 'fias' === ( $order->meta['_wdc_platform_normalization_source'] ?? '' ), 'Order meta must persist normalization source.' );
-address_smoke_assert( '' === ( $order->meta['_wdc_platform_fallback_address'] ?? null ), 'Normalized order meta must clear fallback address text.' );
-address_smoke_assert( false === ( $order->meta['_wdc_platform_address_fallback_used'] ?? true ), 'Normalized order meta must persist false fallback address flag.' );
+address_smoke_assert( false === ( $order->meta['_wdc_platform_normalized'] ?? true ), 'Order meta must not mark local city context as normalized.' );
+address_smoke_assert( 'fallback' === ( $order->meta['_wdc_platform_normalization_source'] ?? '' ), 'Order meta must persist fallback normalization source.' );
+address_smoke_assert( '' === ( $order->meta['_wdc_platform_fallback_address'] ?? null ), 'Local DB city must not create fallback address text by itself.' );
+address_smoke_assert( false === ( $order->meta['_wdc_platform_address_fallback_used'] ?? true ), 'Local DB city must not mark address fallback used by itself.' );
 address_smoke_assert( '101000' === ( $order->meta['_wdc_platform_resolved_postcode'] ?? '' ), 'Order meta must persist current resolved postcode.' );
-address_smoke_assert( '' !== ( $order->meta['_wdc_platform_fias_id'] ?? '' ), 'Order meta must persist FIAS id.' );
-address_smoke_assert( '' !== ( $order->meta['_wdc_platform_gar_id'] ?? '' ), 'Order meta must persist GAR id.' );
+address_smoke_assert( '' === ( $order->meta['_wdc_platform_fias_id'] ?? '' ), 'Manual fallback must not persist FIAS id as normalized address data.' );
+address_smoke_assert( '' === ( $order->meta['_wdc_platform_gar_id'] ?? '' ), 'Manual fallback must not persist GAR id as normalized address data.' );
+address_smoke_assert( 'local_db' === ( $order->meta['_wdc_platform_city_source'] ?? '' ), 'Order meta must persist city source separately.' );
+address_smoke_assert( '101000' === ( $order->meta['_wdc_platform_city_postcode'] ?? '' ), 'Order meta must persist city postcode separately.' );
+address_smoke_assert( '' !== ( $order->meta['_wdc_platform_city_fias_id'] ?? '' ), 'Order meta must persist city FIAS id separately.' );
+address_smoke_assert( '' !== ( $order->meta['_wdc_platform_city_gar_id'] ?? '' ), 'Order meta must persist city GAR id separately.' );
+
+ob_start();
+( new OrderDeliveryMetabox() )->render( $order );
+$metabox_output = (string) ob_get_clean();
+address_smoke_assert( str_contains( $metabox_output, 'Источник населенного пункта' ), 'Order metabox must render city source label.' );
+address_smoke_assert( str_contains( $metabox_output, 'Нормализация адреса' ), 'Order metabox must render address normalization label.' );
 
 $session->save_rates(
 	array(

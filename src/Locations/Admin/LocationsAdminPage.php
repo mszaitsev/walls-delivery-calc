@@ -6,6 +6,11 @@ namespace WallsShop\WDC\Locations\Admin;
 use RuntimeException;
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Fias\FiasCredentials;
+use WallsShop\WDC\Locations\Fias\FiasRateLimiter;
+use WallsShop\WDC\Locations\Gar\GarSyncManager;
+use WallsShop\WDC\Locations\Import\FiasImportManager;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
@@ -22,7 +27,12 @@ final class LocationsAdminPage {
 		private PluginEnvironment $environment,
 		private LocationRepository $repository,
 		private LocationSearchService $search_service,
-		private LocationImportService $import_service
+		private LocationImportService $import_service,
+		private ?FiasRateLimiter $fias_limiter = null,
+		private ?GarSyncManager $gar_sync = null,
+		private ?FiasImportManager $fias_import = null,
+		private ?SettingsRepository $settings = null,
+		private ?FiasCredentials $fias_credentials = null
 	) {
 	}
 
@@ -59,20 +69,21 @@ final class LocationsAdminPage {
 			<?php endif; ?>
 
 			<div class="wdc-locations-summary">
-				<p>
-					<strong><?php echo esc_html__( 'Населенных пунктов:', 'walls-delivery-calc' ); ?></strong>
-					<span><?php echo esc_html( (string) $this->repository->count_all() ); ?></span>
-				</p>
-				<p>
-					<strong><?php echo esc_html__( 'Регионов/областей:', 'walls-delivery-calc' ); ?></strong>
-					<span><?php echo esc_html( (string) $this->repository->count_regions() ); ?></span>
-				</p>
+				<p><strong><?php echo esc_html__( 'Населенных пунктов:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_all() ); ?></span></p>
+				<p><strong><?php echo esc_html__( 'Регионов/областей:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_regions() ); ?></span></p>
+				<p><strong><?php echo esc_html__( 'ФИАС/ГАР API-токен:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->fias_credentials instanceof FiasCredentials && $this->fias_credentials->has_token() ? 'задан' : 'не задан' ); ?></span></p>
+				<p><strong><?php echo esc_html__( 'Runtime-нормализация:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html__( 'временно отключена до проверки API', 'walls-delivery-calc' ); ?></span></p>
+				<p><strong><?php echo esc_html__( 'Источник населенных пунктов:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html__( 'локальная база', 'walls-delivery-calc' ); ?></span></p>
+				<p><strong><?php echo esc_html__( 'FIAS limiter:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->limiter_label() ); ?></span></p>
+				<p><strong><?php echo esc_html__( 'GAR sync:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->gar_status_label() ); ?></span></p>
+				<p><strong><?php echo esc_html__( 'Aliases:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_aliases() ); ?></span></p>
 			</div>
 
 			<form class="wdc-locations-import" method="post">
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 				<button class="button" type="submit" name="wdc_locations_action" value="import_demo"><?php echo esc_html__( 'Импортировать демо-данные', 'walls-delivery-calc' ); ?></button>
 				<button class="button button-primary" type="submit" name="wdc_locations_action" value="reimport_demo"><?php echo esc_html__( 'Переимпортировать демо-данные', 'walls-delivery-calc' ); ?></button>
+				<button class="button" type="submit" name="wdc_locations_action" value="import_fias_prepared"><?php echo esc_html__( 'Import prepared FIAS dataset', 'walls-delivery-calc' ); ?></button>
 			</form>
 
 			<form class="wdc-locations-search" method="get">
@@ -123,8 +134,22 @@ final class LocationsAdminPage {
 		}
 
 		$action = isset( $_POST['wdc_locations_action'] ) ? sanitize_key( wp_unslash( $_POST['wdc_locations_action'] ) ) : '';
-		if ( ! in_array( $action, array( 'import_demo', 'reimport_demo' ), true ) ) {
+		if ( ! in_array( $action, array( 'import_demo', 'reimport_demo', 'import_fias_prepared' ), true ) ) {
 			return '';
+		}
+
+		if ( 'import_fias_prepared' === $action ) {
+			if ( ! $this->fias_import instanceof FiasImportManager ) {
+				return 'Prepared FIAS importer is unavailable.';
+			}
+
+			try {
+				$imported = $this->fias_import->import_prepared_dataset();
+			} catch ( RuntimeException $exception ) {
+				return $exception->getMessage();
+			}
+
+			return sprintf( 'Imported prepared FIAS locations: %d.', $imported );
 		}
 
 		if ( 'reimport_demo' === $action ) {
@@ -138,5 +163,27 @@ final class LocationsAdminPage {
 		}
 
 		return sprintf( __( 'Импортировано демо-населенных пунктов: %d.', 'walls-delivery-calc' ), $imported );
+	}
+
+	private function limiter_label(): string {
+		if ( ! $this->fias_limiter instanceof FiasRateLimiter ) {
+			return 'n/a';
+		}
+
+		$stats = $this->fias_limiter->stats();
+		return sprintf( '%d/%d minute, %d/%d day', $stats['minute_count'], $stats['minute_limit'], $stats['day_count'], $stats['daily_limit'] );
+	}
+
+	private function gar_status_label(): string {
+		if ( ! $this->gar_sync instanceof GarSyncManager ) {
+			return 'n/a';
+		}
+
+		$status = $this->gar_sync->status();
+		if ( array() === $status ) {
+			return 'not checked';
+		}
+
+		return ! empty( $status['pending'] ) ? 'pending changes detected' : 'no pending changes';
 	}
 }

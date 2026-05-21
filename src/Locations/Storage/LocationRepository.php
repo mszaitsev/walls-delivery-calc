@@ -102,6 +102,35 @@ final class LocationRepository {
 		return (int) $this->wpdb->get_var( "SELECT COUNT(DISTINCT region_name) FROM {$this->table_name()} WHERE active = 1 AND region_name != ''" );
 	}
 
+	public function count_aliases(): int {
+		return (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$this->alias_table_name()}" );
+	}
+
+	/**
+	 * @param array<int,string> $aliases
+	 */
+	public function save_aliases( int $location_id, array $aliases, string $source = 'generated' ): void {
+		$location_id = max( 0, $location_id );
+		if ( 0 === $location_id ) {
+			return;
+		}
+
+		$now = current_time( 'mysql' );
+		foreach ( array_values( array_unique( array_filter( array_map( 'trim', $aliases ) ) ) ) as $alias ) {
+			$this->wpdb->insert(
+				$this->alias_table_name(),
+				array(
+					'location_id'       => $location_id,
+					'alias'             => $alias,
+					'alias_normalized'  => Location::normalize_search_text( $alias ),
+					'source'            => $source,
+					'created_at'        => $now,
+				),
+				array( '%d', '%s', '%s', '%s', '%s' )
+			);
+		}
+	}
+
 	public function delete_all(): void {
 		$this->wpdb->query( "DELETE FROM {$this->table_name()}" );
 	}
@@ -175,5 +204,9 @@ final class LocationRepository {
 
 	private function table_name(): string {
 		return $this->wpdb->prefix . 'wdc_locations';
+	}
+
+	private function alias_table_name(): string {
+		return $this->wpdb->prefix . 'wdc_location_aliases';
 	}
 }

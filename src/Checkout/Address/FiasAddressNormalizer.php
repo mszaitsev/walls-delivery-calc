@@ -6,14 +6,25 @@ namespace WallsShop\WDC\Checkout\Address;
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Fias\FiasCredentials;
+use WallsShop\WDC\Locations\Fias\FiasEndpoints;
+use WallsShop\WDC\Locations\Fias\FiasHttpClient;
+use WallsShop\WDC\Locations\Fias\FiasLogger;
+use WallsShop\WDC\Locations\Fias\FiasRateLimiter;
 use WallsShop\WDC\Locations\Normalization\AddressNormalizerInterface;
-use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
 
 final class FiasAddressNormalizer implements AddressNormalizerInterface {
 	public function __construct(
-		private CheckoutCityResolver $city_resolver
+		private CheckoutCityResolver $city_resolver,
+		private ?SettingsRepository $settings = null,
+		private ?FiasEndpoints $endpoints = null,
+		private ?FiasHttpClient $http_client = null,
+		private ?FiasRateLimiter $rate_limiter = null,
+		private ?FiasLogger $logger = null,
+		private ?FiasCredentials $credentials = null
 	) {
 	}
 
@@ -21,46 +32,22 @@ final class FiasAddressNormalizer implements AddressNormalizerInterface {
 	 * @param array<string,mixed> $context
 	 */
 	public function normalize( string $input, array $context = array() ): AddressNormalizationResult {
-		$city_input = trim( (string) ( $context['city'] ?? '' ) );
-		if ( '' === $city_input ) {
-			$city_input = $input;
-		}
+		// FIAS runtime normalization is intentionally disabled until the API methods are verified with a real token.
+		$has_token = $this->credentials instanceof FiasCredentials && $this->credentials->has_token();
+		$error_code = $has_token ? 'fias_runtime_disabled' : 'fias_token_missing';
+		$message = $has_token
+			? 'FIAS API normalization is prepared but disabled until API methods are verified.'
+			: 'FIAS token is not configured.';
 
-		$location = $this->city_resolver->resolve_city( $city_input );
-		if ( ! $location instanceof Location ) {
-			return new AddressNormalizationResult(
-				$input,
-				$this->address_from_context( $input, $context ),
-				false,
-				0.0,
-				'fias',
-				'location_not_found',
-				'Local FIAS stub could not match the checkout city.'
-			);
-		}
-
-		$postcode = trim( $location->postcode );
-		if ( '' === $postcode ) {
-			$postcode = trim( (string) ( $context['postcode'] ?? '' ) );
-		}
-
-		$address = new Address(
-			country_code: '' !== $location->country_code ? $location->country_code : (string) ( $context['country_code'] ?? '' ),
-			region_name: $location->region_name,
-			region_code: $location->region_code,
-			city: $location->city_name,
-			settlement: $location->settlement_name,
-			postcode: $postcode,
-			street: (string) ( $context['address_1'] ?? '' ),
-			house: (string) ( $context['address_2'] ?? '' ),
-			raw_address: $input,
-			fias_id: $location->fias_id,
-			gar_id: $location->gar_id,
-			normalized: true,
-			fallback: false
+		return new AddressNormalizationResult(
+			$input,
+			$this->address_from_context( $input, $context ),
+			false,
+			0.0,
+			'fias',
+			$error_code,
+			$message
 		);
-
-		return new AddressNormalizationResult( $input, $address, true, 0.85, 'fias' );
 	}
 
 	/**

@@ -43,9 +43,10 @@ final class CheckoutAddressRuntime {
 
 		$selected = $this->selected_location_from_context( $context );
 		if ( array() !== $selected ) {
-			$result = $this->result_from_selected_location( $context, $selected );
+			$this->session_manager->save_city_context( $this->city_context_from_location( $selected ) );
 			$this->session_manager->save_selected_city( $selected );
 			$this->session_manager->save_fallback_city( '' );
+			$result = $this->normalizer->normalize( $this->raw_address( $context ), $context );
 			$this->session_manager->save_normalized_address_result( $result );
 			$this->session_manager->save_address_fingerprint( $fingerprint );
 
@@ -58,11 +59,13 @@ final class CheckoutAddressRuntime {
 
 		if ( $location instanceof Location ) {
 			$this->session_manager->save_selected_city( $location->to_array() );
+			$this->session_manager->save_city_context( $this->city_context_from_location( $location->to_array() ) );
 		} else {
 			$this->session_manager->save_selected_city( array() );
+			$this->session_manager->save_city_context( $this->manual_city_context( $context ) );
 		}
 
-		if ( $result->address->fallback ) {
+		if ( $result->address->fallback && ! $location instanceof Location ) {
 			$this->session_manager->save_fallback_city( (string) $context['city'] );
 		} else {
 			$this->session_manager->save_fallback_city( '' );
@@ -152,30 +155,49 @@ final class CheckoutAddressRuntime {
 			'display_name'    => $context['selected_display_name'],
 			'postcode'        => $context['postcode'],
 			'active'          => true,
+			'source'          => 'local_db',
+			'is_manual_city'  => false,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $location
+	 * @return array<string,mixed>
+	 */
+	private function city_context_from_location( array $location ): array {
+		return array(
+			'location_id'     => (string) ( $location['id'] ?? '' ),
+			'city_name'       => (string) ( $location['city_name'] ?? '' ),
+			'settlement_name' => (string) ( $location['settlement_name'] ?? '' ),
+			'display_name'    => (string) ( $location['display_name'] ?? '' ),
+			'region_name'     => (string) ( $location['region_name'] ?? '' ),
+			'region_code'     => (string) ( $location['region_code'] ?? '' ),
+			'postcode'        => (string) ( $location['postcode'] ?? '' ),
+			'fias_id'         => (string) ( $location['fias_id'] ?? '' ),
+			'gar_id'          => (string) ( $location['gar_id'] ?? '' ),
+			'source'          => 'local_db',
+			'is_manual_city'  => false,
 		);
 	}
 
 	/**
 	 * @param array<string,string> $context
-	 * @param array<string,mixed>  $selected
+	 * @return array<string,mixed>
 	 */
-	private function result_from_selected_location( array $context, array $selected ): AddressNormalizationResult {
-		$city = (string) ( $selected['city_name'] ?? $context['city'] );
-		$address = new Address(
-			country_code: $context['country_code'],
-			region_name: (string) ( $selected['region_name'] ?? '' ),
-			city: $city,
-			postcode: (string) ( $selected['postcode'] ?? $context['postcode'] ),
-			street: $context['address_1'],
-			house: $context['address_2'],
-			raw_address: $this->raw_address( array_merge( $context, array( 'city' => $city, 'postcode' => (string) ( $selected['postcode'] ?? $context['postcode'] ) ) ) ),
-			fias_id: (string) ( $selected['fias_id'] ?? '' ),
-			gar_id: (string) ( $selected['gar_id'] ?? '' ),
-			normalized: true,
-			fallback: false
+	private function manual_city_context( array $context ): array {
+		return array(
+			'location_id'     => '',
+			'city_name'       => $context['city'],
+			'settlement_name' => '',
+			'display_name'    => $context['city'],
+			'region_name'     => '',
+			'region_code'     => '',
+			'postcode'        => $context['postcode'],
+			'fias_id'         => '',
+			'gar_id'          => '',
+			'source'          => 'manual',
+			'is_manual_city'  => true,
 		);
-
-		return new AddressNormalizationResult( $address->raw_address, $address, true, 1.0, '' !== $address->fias_id ? 'fias' : 'manual' );
 	}
 
 	/**

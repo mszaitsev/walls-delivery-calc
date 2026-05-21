@@ -16,6 +16,7 @@ final class CheckoutSessionManager {
 	private const DEBUG_KEY         = 'wdc_platform_debug';
 	private const NORMALIZED_ADDRESS_KEY = 'wdc_platform_normalized_address';
 	private const SELECTED_CITY_KEY      = 'wdc_platform_selected_city';
+	private const CITY_CONTEXT_KEY       = 'wdc_platform_city_context';
 	private const FALLBACK_CITY_KEY      = 'wdc_platform_fallback_city';
 	private const ADDRESS_FINGERPRINT_KEY = 'wdc_platform_address_fingerprint';
 
@@ -124,6 +125,7 @@ final class CheckoutSessionManager {
 	public function clear_normalized_address(): void {
 		$this->set( self::NORMALIZED_ADDRESS_KEY, array() );
 		$this->set( self::SELECTED_CITY_KEY, array() );
+		$this->set( self::CITY_CONTEXT_KEY, array() );
 		$this->set( self::FALLBACK_CITY_KEY, '' );
 	}
 
@@ -141,6 +143,22 @@ final class CheckoutSessionManager {
 		$city = $this->get( self::SELECTED_CITY_KEY, array() );
 
 		return is_array( $city ) ? $city : array();
+	}
+
+	/**
+	 * @param array<string,mixed> $context
+	 */
+	public function save_city_context( array $context ): void {
+		$this->set( self::CITY_CONTEXT_KEY, $context );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function city_context(): array {
+		$context = $this->get( self::CITY_CONTEXT_KEY, array() );
+
+		return is_array( $context ) ? $context : array();
 	}
 
 	public function save_fallback_city( string $city ): void {
