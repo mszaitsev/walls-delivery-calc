@@ -27,12 +27,12 @@ final class DemoPickupProvider implements PickupProviderInterface {
 			return array();
 		}
 
-		$city = trim( $destination->city ?: $destination->settlement );
+		$city = trim( $destination->settlement ?: $destination->city );
 
 		return array_values(
 			array_filter(
 				$this->load_points(),
-				static fn ( PickupPoint $point ): bool => '' === $city || 0 === strcasecmp( $point->city, $city )
+				fn ( PickupPoint $point ): bool => '' === $city || $this->city_matches( $point->city, $city )
 			)
 		);
 	}
@@ -60,5 +60,20 @@ final class DemoPickupProvider implements PickupProviderInterface {
 		}
 
 		return $points;
+	}
+
+	private function city_matches( string $point_city, string $query ): bool {
+		$point_city = $this->normalize_city( $point_city );
+		$query      = $this->normalize_city( $query );
+
+		return $point_city === $query
+			|| str_contains( $point_city, $query )
+			|| str_contains( $query, $point_city );
+	}
+
+	private function normalize_city( string $value ): string {
+		$value = trim( $value );
+
+		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
 	}
 }

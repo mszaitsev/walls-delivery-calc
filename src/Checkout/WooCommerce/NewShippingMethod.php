@@ -84,7 +84,6 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 			$request = $this->package_mapper->map(
 				is_array( $package ) ? $package : array(),
 				array(
-					'delivery_type' => $this->session_manager->selected_delivery_type(),
 					'pickup_selection' => $this->session_manager->pickup_selection(),
 					'sort_mode'     => $sort,
 				)
@@ -139,7 +138,8 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	}
 
 	private function sort_mode(): string {
-		$mode = $this->settings_repository->get_string( 'checkout_sort_mode', RateSorter::CHEAPEST );
+		$session_mode = $this->session_manager->selected_sort_mode();
+		$mode         = '' !== $session_mode ? $session_mode : $this->settings_repository->get_string( 'checkout_sort_mode', RateSorter::CHEAPEST );
 
 		return RateSorter::FASTEST === $mode ? RateSorter::FASTEST : RateSorter::CHEAPEST;
 	}

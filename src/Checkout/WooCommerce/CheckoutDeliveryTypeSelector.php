@@ -47,16 +47,12 @@ final class CheckoutDeliveryTypeSelector {
 		}
 
 		$rate_id = (string) ( $meta['rate_id'] ?? $this->method_id( $method ) );
-		echo '<div class="wdc-delivery-type-controls">';
-		echo '<label><input type="radio" name="wdc_platform_delivery_type" value="' . esc_attr( $delivery_type ) . '" ' . checked( $this->selected_delivery_type_for_rate( $delivery_type, $rate_id ), $delivery_type, false ) . '> ' . esc_html( $this->label_for_type( $delivery_type ) ) . '</label>';
-		echo '</div>';
-
 		if ( ! empty( $meta['requires_pickup_point'] ) ) {
 			$this->render_pickup_selector( (string) $meta['carrier_key'], $rate_id );
 		}
 
 		if ( ! empty( $meta['requires_courier_address'] ) ) {
-			echo '<div class="wdc-courier-notice">' . esc_html__( 'Курьерская доставка будет оформлена на адрес из checkout.', 'walls-delivery-calc' ) . '</div>';
+			echo '<div class="wdc-courier-notice">' . esc_html__( 'Для курьерской доставки будет использован адрес, указанный в checkout.', 'walls-delivery-calc' ) . '</div>';
 		}
 	}
 
@@ -90,11 +86,6 @@ final class CheckoutDeliveryTypeSelector {
 	 * @param array<string,mixed> $data
 	 */
 	private function capture( array $data ): void {
-		$delivery_type = isset( $data['wdc_platform_delivery_type'] ) ? sanitize_text_field( wp_unslash( (string) $data['wdc_platform_delivery_type'] ) ) : '';
-		if ( in_array( $delivery_type, array( DeliveryType::PICKUP, DeliveryType::COURIER ), true ) ) {
-			$this->session_manager->save_selected_delivery_type( $delivery_type );
-		}
-
 		$carrier = isset( $data['wdc_platform_pickup_carrier'] ) ? sanitize_text_field( wp_unslash( (string) $data['wdc_platform_pickup_carrier'] ) ) : '';
 		$code    = isset( $data['wdc_platform_pickup_point'] ) ? sanitize_text_field( wp_unslash( (string) $data['wdc_platform_pickup_point'] ) ) : '';
 		$rate_id = isset( $data['wdc_platform_pickup_rate_id'] ) ? sanitize_text_field( wp_unslash( (string) $data['wdc_platform_pickup_rate_id'] ) ) : '';
@@ -170,31 +161,5 @@ final class CheckoutDeliveryTypeSelector {
 
 	private function method_id( mixed $method ): string {
 		return is_object( $method ) && isset( $method->id ) ? (string) $method->id : '';
-	}
-
-	private function selected_delivery_type_for_rate( string $delivery_type, string $rate_id ): string {
-		$selected = $this->session_manager->selected_delivery_type();
-		if ( '' !== $selected ) {
-			return $selected;
-		}
-
-		return $this->is_chosen_rate( $rate_id ) ? $delivery_type : '';
-	}
-
-	private function is_chosen_rate( string $rate_id ): bool {
-		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! isset( WC()->session ) || ! is_object( WC()->session ) || ! method_exists( WC()->session, 'get' ) ) {
-			return false;
-		}
-
-		$chosen = WC()->session->get( 'chosen_shipping_methods', array() );
-		if ( ! is_array( $chosen ) ) {
-			return false;
-		}
-
-		return in_array( $rate_id, $chosen, true ) || in_array( NewShippingMethod::METHOD_ID . ':' . $rate_id, $chosen, true );
-	}
-
-	private function label_for_type( string $delivery_type ): string {
-		return DeliveryType::PICKUP === $delivery_type ? __( 'Пункт выдачи', 'walls-delivery-calc' ) : __( 'Курьер', 'walls-delivery-calc' );
 	}
 }

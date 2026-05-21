@@ -91,7 +91,19 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 
 		public function get_results( string $query, mixed $output = null ): array {
-			if ( ! preg_match( "/carrier_key = '([^']+)'.*country_code = '([^']+)'.*city_name LIKE '%([^']+)%'/", $query, $matches ) ) {
+			if ( preg_match( "/carrier_key = '([^']+)'.*country_code = '([^']+)'.*city_name LIKE '%([^']+)%'/", $query, $matches ) ) {
+				return array_values(
+					array_filter(
+						$this->pickup_rows,
+						static fn ( array $row ): bool => (bool) ( $row['active'] ?? 0 )
+							&& $row['carrier_key'] === $matches[1]
+							&& $row['country_code'] === $matches[2]
+							&& false !== ( function_exists( 'mb_stripos' ) ? mb_stripos( (string) $row['city_name'], $matches[3] ) : stripos( (string) $row['city_name'], $matches[3] ) )
+					)
+				);
+			}
+
+			if ( ! preg_match( "/carrier_key = '([^']+)'.*country_code = '([^']+)'/", $query, $matches ) ) {
 				return array();
 			}
 
@@ -101,7 +113,6 @@ if ( ! class_exists( 'wpdb' ) ) {
 					static fn ( array $row ): bool => (bool) ( $row['active'] ?? 0 )
 						&& $row['carrier_key'] === $matches[1]
 						&& $row['country_code'] === $matches[2]
-						&& false !== stripos( (string) $row['city_name'], $matches[3] )
 				)
 			);
 		}
@@ -218,7 +229,7 @@ final class WdcPickupSmokeErrors {
 function pickup_smoke_request( string $delivery_type = '' ): QuoteRequest {
 	return new QuoteRequest(
 		'RU',
-		new Address( country_code: 'RU', city: 'Novosibirsk' ),
+		new Address( country_code: 'RU', city: 'Новосибирск' ),
 		Package::from_items( array(), 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) ),
 		'',
 		Money::from_rubles( 1000 ),
@@ -248,9 +259,11 @@ $imported = $repo->save_many( $provider->load_points() );
 pickup_smoke_assert( $imported >= 5, 'Demo pickup import must load at least five points.' );
 pickup_smoke_assert( $repo->count_all() >= 5, 'Pickup repository must count imported rows.' );
 
-$nsk = $repo->search( 'demo', 'RU', 'Novosibirsk' );
-pickup_smoke_assert( count( $nsk ) >= 2, 'Pickup search must find Novosibirsk points.' );
-pickup_smoke_assert( null !== $repo->find_by_code( 'demo', 'NSK-LENINA-1' ), 'Pickup repository must find point by carrier and code.' );
+$nsk = $repo->search( 'demo', 'RU', 'Новосибирск' );
+pickup_smoke_assert( count( $nsk ) >= 3, 'Pickup search must find Novosibirsk points.' );
+pickup_smoke_assert( count( $repo->search( 'demo', 'RU', 'новосибирск' ) ) >= 3, 'Pickup search must be case tolerant for Russian city names.' );
+pickup_smoke_assert( count( $repo->search( 'demo', 'RU', 'Новосиб' ) ) >= 3, 'Pickup search must support partial Russian city names.' );
+pickup_smoke_assert( null !== $repo->find_by_code( 'demo', 'demo-nsk-001' ), 'Pickup repository must find point by carrier and code.' );
 
 $session = new CheckoutSessionManager();
 $session->save_selected_delivery_type( DeliveryType::PICKUP );
@@ -258,15 +271,15 @@ $session->save_pickup_selection(
 	array(
 		'carrier_key'      => 'demo',
 		'rate_id'          => 'demo:pickup',
-		'point_code'       => 'NSK-LENINA-1',
-		'point_address'    => 'Novosibirsk, Lenina street, 1',
-		'point_comment'    => 'Demo pickup point near the city center.',
-		'point_work_time'  => 'Mon-Fri 10:00-20:00',
+		'point_code'       => 'demo-nsk-001',
+		'point_address'    => 'Красный проспект, 25',
+		'point_comment'    => 'Тестовый пункт выдачи в центре города',
+		'point_work_time'  => 'Пн-Сб 10:00-20:00',
 		'selected_at'      => '2026-05-21T00:00:00+00:00',
 	)
 );
 pickup_smoke_assert( 'pickup' === $session->selected_delivery_type(), 'Session must save selected delivery type.' );
-pickup_smoke_assert( 'NSK-LENINA-1' === ( $session->pickup_selection()['point_code'] ?? '' ), 'Session must save pickup selection.' );
+pickup_smoke_assert( 'demo-nsk-001' === ( $session->pickup_selection()['point_code'] ?? '' ), 'Session must save pickup selection.' );
 pickup_smoke_assert( 'demo' === $session->selected_pickup_carrier(), 'Session must save selected pickup carrier.' );
 pickup_smoke_assert( $session->pickup_selection_matches( 'demo', 'demo:pickup' ), 'Pickup selection must match normalized rate id.' );
 pickup_smoke_assert( $session->pickup_selection_matches( 'demo', NewShippingMethod::METHOD_ID . ':demo:pickup' ), 'Pickup selection must match full WooCommerce rate id.' );
@@ -275,13 +288,13 @@ pickup_smoke_assert( ! $session->pickup_selection_matches( 'demo', 'demo:courier
 
 $carrier = new DemoCarrier();
 $pickup_quote = $carrier->quote( pickup_smoke_request( DeliveryType::PICKUP ) );
-pickup_smoke_assert( 1 === count( $pickup_quote->rates ), 'Pickup quote must return pickup-only rate when requested.' );
+pickup_smoke_assert( 2 === count( $pickup_quote->rates ), 'Pickup context must not hide courier rate.' );
 pickup_smoke_assert( $pickup_quote->rates[0]->requires_pickup_point, 'Pickup delivery must require pickup point.' );
 
 $courier_quote = $carrier->quote( pickup_smoke_request( DeliveryType::COURIER ) );
-pickup_smoke_assert( 1 === count( $courier_quote->rates ), 'Courier quote must return courier-only rate when requested.' );
-pickup_smoke_assert( ! $courier_quote->rates[0]->requires_pickup_point, 'Courier delivery must not require pickup point.' );
-pickup_smoke_assert( $courier_quote->rates[0]->requires_courier_address, 'Courier delivery must require courier address marker.' );
+pickup_smoke_assert( 2 === count( $courier_quote->rates ), 'Courier context must not hide pickup rate.' );
+pickup_smoke_assert( ! $courier_quote->rates[1]->requires_pickup_point, 'Courier delivery must not require pickup point.' );
+pickup_smoke_assert( $courier_quote->rates[1]->requires_courier_address, 'Courier delivery must require courier address marker.' );
 
 $session->save_rates(
 	array(
@@ -296,11 +309,11 @@ $session->save_rates(
 WC()->session->set( 'chosen_shipping_methods', array( NewShippingMethod::METHOD_ID . ':demo:pickup' ) );
 $order = new WdcPickupSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
-pickup_smoke_assert( 'NSK-LENINA-1' === ( $order->meta['_wdc_platform_pickup_code'] ?? '' ), 'Order meta must save pickup code.' );
+pickup_smoke_assert( 'demo-nsk-001' === ( $order->meta['_wdc_platform_pickup_code'] ?? '' ), 'Order meta must save pickup code.' );
 pickup_smoke_assert( isset( $order->meta['_wdc_platform_pickup_address'], $order->meta['_wdc_platform_pickup_comment'], $order->meta['_wdc_platform_pickup_work_time'] ), 'Order meta must save pickup details.' );
 
 $errors = new WdcPickupSmokeErrors();
-( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Novosibirsk' ), $errors );
+( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
 pickup_smoke_assert( ! $errors->has_errors(), 'Validation must pass for matching pickup selection.' );
 
 $session->save_pickup_selection(
@@ -315,7 +328,7 @@ $session->save_pickup_selection(
 	)
 );
 $errors = new WdcPickupSmokeErrors();
-( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Novosibirsk' ), $errors );
+( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
 pickup_smoke_assert( $errors->has_errors(), 'Validation must fail for pickup selection from another carrier or rate.' );
 $order = new WdcPickupSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
@@ -334,7 +347,7 @@ $session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( NewShippingMethod::METHOD_ID . ':demo:courier' ) );
 $errors = new WdcPickupSmokeErrors();
-( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Novosibirsk' ), $errors );
+( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
 pickup_smoke_assert( ! $errors->has_errors(), 'Validation must pass for courier with stale pickup selection.' );
 $order = new WdcPickupSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
@@ -355,22 +368,22 @@ $session->save_pickup_selection(
 	array(
 		'carrier_key'      => 'demo',
 		'rate_id'          => NewShippingMethod::METHOD_ID . ':demo:pickup',
-		'point_code'       => 'NSK-LENINA-1',
-		'point_address'    => 'Novosibirsk, Lenina street, 1',
-		'point_comment'    => 'Demo pickup point near the city center.',
-		'point_work_time'  => 'Mon-Fri 10:00-20:00',
+		'point_code'       => 'demo-nsk-001',
+		'point_address'    => 'Красный проспект, 25',
+		'point_comment'    => 'Тестовый пункт выдачи в центре города',
+		'point_work_time'  => 'Пн-Сб 10:00-20:00',
 		'selected_at'      => '2026-05-21T00:00:00+00:00',
 	)
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'demo:pickup' ) );
 $errors = new WdcPickupSmokeErrors();
-( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Novosibirsk' ), $errors );
+( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
 pickup_smoke_assert( ! $errors->has_errors(), 'Validation must accept full pickup selection rate id for normalized selected rate.' );
 
 $orchestrator = pickup_smoke_orchestrator();
 $pickup_rates = $orchestrator->calculate_rates( pickup_smoke_request( DeliveryType::PICKUP ) );
 $courier_rates = $orchestrator->calculate_rates( pickup_smoke_request( DeliveryType::COURIER ) );
-pickup_smoke_assert( array() !== $pickup_rates && 'pickup' === $pickup_rates[0]->delivery_type, 'Orchestrator must filter pickup delivery type.' );
-pickup_smoke_assert( array() !== $courier_rates && 'courier' === $courier_rates[0]->delivery_type, 'Orchestrator must filter courier delivery type.' );
+pickup_smoke_assert( 2 === count( $pickup_rates ), 'Orchestrator must not filter rates by pickup delivery type.' );
+pickup_smoke_assert( 2 === count( $courier_rates ), 'Orchestrator must not filter rates by courier delivery type.' );
 
 echo "Pickup foundation smoke test passed.\n";

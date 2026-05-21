@@ -80,6 +80,15 @@ final class ShippingMethodRegistrar {
 			array( 'wdc-platform-checkout-rates' ),
 			$this->environment->version()
 		);
+		if ( function_exists( 'wp_enqueue_script' ) ) {
+			wp_enqueue_script(
+				'wdc-platform-checkout-sort',
+				$this->environment->plugin_url() . 'assets/frontend/checkout-sort.js',
+				array( 'jquery' ),
+				$this->environment->version(),
+				true
+			);
+		}
 	}
 
 }

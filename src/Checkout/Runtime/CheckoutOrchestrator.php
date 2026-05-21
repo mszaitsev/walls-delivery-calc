@@ -49,7 +49,7 @@ final class CheckoutOrchestrator {
 
 		foreach ( $carriers as $carrier ) {
 			$carrier_key   = $carrier->get_identity()->key;
-			$delivery_type = (string) ( $request->customer_context['delivery_type'] ?? '' );
+			$delivery_type = '';
 			$quote         = null;
 
 			if ( $cache_enabled && $this->quote_cache instanceof QuoteCache ) {
@@ -71,10 +71,6 @@ final class CheckoutOrchestrator {
 
 			foreach ( $quote->rates as $rate ) {
 				if ( ! $rate instanceof DeliveryRate ) {
-					continue;
-				}
-
-				if ( '' !== $delivery_type && $rate->delivery_type !== $delivery_type ) {
 					continue;
 				}
 

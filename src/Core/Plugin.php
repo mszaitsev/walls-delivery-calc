@@ -37,6 +37,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutFeatureGate;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSortSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
@@ -188,6 +189,7 @@ final class Plugin {
 			)
 		);
 		$this->container->register( CheckoutValidation::class, fn(): CheckoutValidation => new CheckoutValidation( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutAddressValidation::class ) ) );
+		$this->container->register( CheckoutSortSelector::class, fn(): CheckoutSortSelector => new CheckoutSortSelector( $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( OrderShippingMetaPersister::class, fn(): OrderShippingMetaPersister => new OrderShippingMetaPersister( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( CheckoutDebugPanel::class, fn(): CheckoutDebugPanel => new CheckoutDebugPanel( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutFeatureGate::class ) ) );
 		$this->container->register( CheckoutAddressRenderer::class, fn(): CheckoutAddressRenderer => new CheckoutAddressRenderer( $this->container->get( CheckoutSessionManager::class ) ) );
@@ -292,6 +294,7 @@ final class Plugin {
 		if ( $this->container->get( CheckoutFeatureGate::class )->enabled() ) {
 			$this->container->get( CheckoutRateRenderer::class )->register();
 			$this->container->get( CheckoutDeliveryTypeSelector::class )->register();
+			$this->container->get( CheckoutSortSelector::class )->register();
 			$this->container->get( CheckoutAddressRuntime::class )->register();
 			$this->container->get( CheckoutAddressRenderer::class )->register();
 			$this->container->get( CheckoutValidation::class )->register();

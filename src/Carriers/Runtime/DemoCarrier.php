@@ -52,16 +52,10 @@ final class DemoCarrier implements CarrierAdapterInterface {
 			return new DeliveryQuote( $this->quote_id( $request ), self::KEY, $request->destination, $request->package, array(), true, '', '', false, 'manual' );
 		}
 
-		$requested_type = (string) ( $request->customer_context['delivery_type'] ?? '' );
-		$rates          = array();
-
-		if ( '' === $requested_type || DeliveryType::PICKUP === $requested_type ) {
-			$rates[] = $this->rate( DeliveryType::PICKUP, 'Тестовый пункт выдачи', Money::from_rubles( 350 ), DateRange::single( 5 ), true );
-		}
-
-		if ( '' === $requested_type || DeliveryType::COURIER === $requested_type ) {
-			$rates[] = $this->rate( DeliveryType::COURIER, 'Тестовая курьерская доставка', Money::from_rubles( 550 ), DateRange::single( 3 ), false );
-		}
+		$rates = array(
+			$this->rate( DeliveryType::PICKUP, 'Тестовый пункт выдачи', Money::from_rubles( 350 ), DateRange::single( 5 ), true ),
+			$this->rate( DeliveryType::COURIER, 'Тестовая курьерская доставка', Money::from_rubles( 550 ), DateRange::single( 3 ), false ),
+		);
 
 		return new DeliveryQuote( $this->quote_id( $request ), self::KEY, $request->destination, $request->package, $rates, true, '', '', false, 'manual' );
 	}

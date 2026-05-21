@@ -17,7 +17,6 @@ if ( ! function_exists( 'get_option' ) ) {
 if ( ! function_exists( 'update_option' ) ) {
 	function update_option( string $key, mixed $value, bool|string $autoload = false ): bool {
 		$GLOBALS['wdc_test_options'][ $key ] = $value;
-
 		return true;
 	}
 }
@@ -93,6 +92,22 @@ if ( ! function_exists( 'esc_html' ) ) {
 	}
 }
 
+if ( ! function_exists( 'esc_attr' ) ) {
+	function esc_attr( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+
+if ( ! function_exists( 'selected' ) ) {
+	function selected( mixed $selected, mixed $current = true, bool $display = true ): string {
+		$result = (string) $selected === (string) $current ? ' selected="selected"' : '';
+		if ( $display ) {
+			echo $result;
+		}
+		return $result;
+	}
+}
+
 if ( ! function_exists( 'trailingslashit' ) ) {
 	function trailingslashit( string $value ): string {
 		return rtrim( $value, '/\\' ) . DIRECTORY_SEPARATOR;
@@ -129,22 +144,63 @@ if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
 		public int $insert_id = 0;
+		/** @var array<int,array<string,mixed>> */
+		public array $pickup_rows = array();
+
+		public function esc_like( string $text ): string {
+			return addcslashes( $text, '_%\\' );
+		}
 
 		public function get_results( string $query, mixed $output = null ): array {
-			return array();
+			if ( ! preg_match( "/carrier_key = '([^']+)'.*country_code = '([^']+)'/", $query, $matches ) ) {
+				return array();
+			}
+
+			return array_values(
+				array_filter(
+					$this->pickup_rows,
+					static fn ( array $row ): bool => (bool) ( $row['active'] ?? 0 )
+						&& $row['carrier_key'] === $matches[1]
+						&& $row['country_code'] === $matches[2]
+				)
+			);
 		}
 
 		public function get_row( string $query, mixed $output = null ): ?array {
+			if ( ! preg_match( "/carrier_key = '([^']+)'.*point_code = '([^']+)'/", $query, $matches ) ) {
+				return null;
+			}
+
+			foreach ( $this->pickup_rows as $row ) {
+				if ( $row['carrier_key'] === $matches[1] && $row['point_code'] === $matches[2] ) {
+					return $row;
+				}
+			}
+
 			return null;
 		}
 
 		public function prepare( string $query, mixed ...$args ): string {
+			foreach ( $args as $arg ) {
+				$value = is_int( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'";
+				$query = preg_replace( '/%[sd]/', $value, $query, 1 ) ?? $query;
+			}
 			return $query;
 		}
 
 		public function insert( string $table, array $data, array $format = array() ): bool {
 			$this->insert_id++;
+			$data['id'] = $this->insert_id;
+			$this->pickup_rows[] = $data;
 			return true;
+		}
+
+		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
+			return true;
+		}
+
+		public function get_var( string $query ): int {
+			return count( $this->pickup_rows );
 		}
 
 		public function query( string $query ): bool {
@@ -182,7 +238,6 @@ if ( ! function_exists( 'WC' ) ) {
 		if ( null === $wc ) {
 			$wc = new WdcRuntimeSmokeWooCommerce();
 		}
-
 		return $wc;
 	}
 }
@@ -194,27 +249,39 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
+use WallsShop\WDC\Carriers\Runtime\DemoCarrier;
+use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
+use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
+use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDebugPanel;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutFeatureGate;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSortSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
+use WallsShop\WDC\Checkout\WooCommerce\PickupPointRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\ShippingMethodRegistrar;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Core\FeatureFlags;
 use WallsShop\WDC\Core\Plugin;
 use WallsShop\WDC\Core\PluginEnvironment;
-use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
+use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
+use WallsShop\WDC\Rules\Services\ConditionEvaluator;
+use WallsShop\WDC\Rules\Services\RuleEngine;
+use WallsShop\WDC\Rules\Services\RuleEvaluator;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
 
 function runtime_smoke_assert( bool $condition, string $message ): void {
@@ -224,10 +291,10 @@ function runtime_smoke_assert( bool $condition, string $message ): void {
 }
 
 function runtime_smoke_environment(): PluginEnvironment {
-	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.1' );
+	return new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), '', '0.12.2' );
 }
 
-function runtime_smoke_request(): QuoteRequest {
+function runtime_smoke_request( string $delivery_type = '' ): QuoteRequest {
 	return new QuoteRequest(
 		'RU',
 		new Address( country_code: 'RU', city: 'Новосибирск' ),
@@ -235,7 +302,22 @@ function runtime_smoke_request(): QuoteRequest {
 		'',
 		Money::from_rubles( 1000 ),
 		'2026-05-21',
-		array()
+		'' !== $delivery_type ? array( 'delivery_type' => $delivery_type ) : array()
+	);
+}
+
+function runtime_smoke_orchestrator_with_demo(): CheckoutOrchestrator {
+	$logger   = new CheckoutLogger();
+	$registry = new CarrierRegistry();
+	$registry->register( new DemoCarrier() );
+
+	return new CheckoutOrchestrator(
+		$registry,
+		new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) ),
+		new RateSorter(),
+		new FallbackRateFactory(),
+		new CarrierExecutionGuard( $logger ),
+		$logger
 	);
 }
 
@@ -281,6 +363,18 @@ runtime_smoke_assert( array() === $registrar->register_shipping_method( array() 
 $settings->set( 'enable_new_checkout_shipping', true );
 runtime_smoke_assert( $gate->enabled(), 'Feature gate must be enabled through SettingsRepository.' );
 runtime_smoke_assert( isset( $registrar->register_shipping_method( array() )[ NewShippingMethod::METHOD_ID ] ), 'Shipping method registration must be enabled through settings.' );
+
+$demo_orchestrator = runtime_smoke_orchestrator_with_demo();
+$all_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), RateSorter::CHEAPEST, false )->rates;
+runtime_smoke_assert( 2 === count( $all_rates ), 'Orchestrator must return pickup and courier rates.' );
+runtime_smoke_assert( array( DeliveryType::PICKUP, DeliveryType::COURIER ) === array_map( static fn ( object $rate ): string => $rate->delivery_type, $all_rates ), 'Demo rates must include pickup and courier.' );
+runtime_smoke_assert( 2 === count( $demo_orchestrator->calculate( runtime_smoke_request( DeliveryType::PICKUP ), array(), RateSorter::CHEAPEST, false )->rates ), 'Selected pickup delivery type must not hide courier.' );
+runtime_smoke_assert( 2 === count( $demo_orchestrator->calculate( runtime_smoke_request( DeliveryType::COURIER ), array(), RateSorter::CHEAPEST, false )->rates ), 'Selected courier delivery type must not hide pickup.' );
+
+$fast_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), RateSorter::FASTEST, false )->rates;
+runtime_smoke_assert( DeliveryType::COURIER === $fast_rates[0]->delivery_type, 'Fastest sort must put courier first.' );
+$cheap_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), RateSorter::CHEAPEST, false )->rates;
+runtime_smoke_assert( DeliveryType::PICKUP === $cheap_rates[0]->delivery_type, 'Cheapest sort must put pickup first.' );
 
 $settings_page = new SettingsAdminPage( $settings );
 $sanitized = $settings_page->sanitize_settings(
@@ -346,9 +440,71 @@ $errors = new class {
 	}
 };
 $validation_session = new CheckoutSessionManager();
-$validation_session->save_selected_delivery_type( DeliveryType::PICKUP );
+$validation_session->save_rates(
+	array(
+		'demo:pickup' => array(
+			'carrier_key'   => 'demo',
+			'rate_id'       => 'demo:pickup',
+			'delivery_type' => DeliveryType::PICKUP,
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'demo:pickup' ) );
 ( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
 runtime_smoke_assert( 'Выберите пункт выдачи.' === ( $errors->errors['wdc_pickup_required'] ?? '' ), 'Pickup validation label must be Russian.' );
+
+$validation_session->save_pickup_selection(
+	array(
+		'carrier_key'   => 'demo',
+		'rate_id'       => 'demo:pickup',
+		'point_code'    => 'demo-nsk-001',
+		'point_address' => 'Красный проспект, 25',
+	)
+);
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Matching pickup selection must validate.' );
+
+$validation_session->save_rates(
+	array(
+		'demo:courier' => array(
+			'carrier_key'   => 'demo',
+			'rate_id'       => 'demo:courier',
+			'delivery_type' => DeliveryType::COURIER,
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'demo:courier' ) );
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Courier rate must ignore stale pickup selection.' );
+
+$repo = new PickupPointRepository();
+$repo->save_many( ( new DemoPickupProvider( dirname( __DIR__, 2 ) . '/database/demo/pickup-points-demo.json' ) )->load_points() );
+runtime_smoke_assert( count( $repo->search( 'demo', 'RU', 'Новосибирск' ) ) >= 3, 'Demo pickup search must find Новосибирск.' );
+runtime_smoke_assert( count( $repo->search( 'demo', 'RU', 'новосибирск' ) ) >= 3, 'Demo pickup search must find lowercase Новосибирск.' );
+runtime_smoke_assert( count( $repo->search( 'demo', 'RU', 'Новосиб' ) ) >= 3, 'Demo pickup search must find partial Новосиб.' );
+
+$renderer = new CheckoutDeliveryTypeSelector( new CheckoutSessionManager(), $repo, new DemoPickupProvider(), new PickupPointRenderer() );
+$rate = new class {
+	public function get_meta_data(): array {
+		return array(
+			'carrier_key'           => 'demo',
+			'rate_id'               => 'demo:pickup',
+			'delivery_type'         => 'pickup',
+			'requires_pickup_point' => true,
+		);
+	}
+};
+ob_start();
+$renderer->render( $rate );
+$selector_output = (string) ob_get_clean();
+runtime_smoke_assert( ! str_contains( $selector_output, 'wdc_platform_delivery_type' ), 'Delivery type radio must not render.' );
+runtime_smoke_assert( str_contains( $selector_output, 'Выберите пункт выдачи' ), 'Pickup selector label must be Russian.' );
+
+$sort_session = new CheckoutSessionManager();
+$sort_selector = new CheckoutSortSelector( $sort_session, $settings );
+$sort_selector->capture_update_order_review( 'wdc_platform_checkout_sort_mode=fastest' );
+runtime_smoke_assert( RateSorter::FASTEST === $sort_session->selected_sort_mode(), 'Sort selector must save fastest in session.' );
 
 $fallback_rate = ( new FallbackRateFactory() )->create();
 runtime_smoke_assert( 'Нет видимых доступных вариантов доставки, обратитесь к менеджеру магазина' === $fallback_rate->title, 'Fallback rate label must be Russian.' );

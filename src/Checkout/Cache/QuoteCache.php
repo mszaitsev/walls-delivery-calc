@@ -75,7 +75,7 @@ final class QuoteCache {
 			(string) $request->package->get_total_weight_g(),
 			(string) $request->order_total->get_kopecks(),
 			$carrier_key,
-			$delivery_type ?: (string) ( $request->customer_context['delivery_type'] ?? '' ),
+			$delivery_type,
 			$request->calculation_date,
 		);
 

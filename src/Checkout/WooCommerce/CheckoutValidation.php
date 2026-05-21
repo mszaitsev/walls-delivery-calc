@@ -23,17 +23,13 @@ final class CheckoutValidation {
 		$data = is_array( $data ) ? $data : array();
 		$rate = $this->selected_rate();
 		if ( array() === $rate ) {
-			$this->validate_city( $this->session_manager->selected_delivery_type(), $data, $errors );
-			if ( DeliveryType::PICKUP === $this->session_manager->selected_delivery_type() && ! $this->has_any_pickup_selection() ) {
-				$this->add_pickup_error( $errors );
-			}
-
 			return;
 		}
 
-		$this->validate_city( (string) ( $rate['delivery_type'] ?? '' ), $data, $errors );
+		$delivery_type = (string) ( $rate['delivery_type'] ?? '' );
+		$this->validate_city( $delivery_type, $data, $errors );
 
-		if ( DeliveryType::PICKUP !== (string) ( $rate['delivery_type'] ?? '' ) ) {
+		if ( DeliveryType::PICKUP !== $delivery_type ) {
 			return;
 		}
 
@@ -98,12 +94,6 @@ final class CheckoutValidation {
 		}
 
 		return array();
-	}
-
-	private function has_any_pickup_selection(): bool {
-		$selection = $this->session_manager->pickup_selection();
-
-		return '' !== trim( (string) ( $selection['point_code'] ?? '' ) );
 	}
 
 	/**
