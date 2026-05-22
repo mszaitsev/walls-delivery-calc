@@ -539,7 +539,9 @@ runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-city-sel
 $suggestions_config = $GLOBALS['wdc_test_localized_scripts']['wdc-platform-address-suggestions']['wdcPlatformAddressSuggestions'] ?? array();
 runtime_smoke_assert( true === ( $suggestions_config['suggestions_requested'] ?? false ), 'Address suggestions config must show suggestions_requested=true.' );
 runtime_smoke_assert( false === ( $suggestions_config['enabled'] ?? true ), 'Address suggestions config must show enabled=false when API key is missing.' );
-runtime_smoke_assert( false === ( $suggestions_config['api_key_ready'] ?? true ), 'Address suggestions config must show api_key_ready=false when API key is missing.' );
+runtime_smoke_assert( false === ( $suggestions_config['tokens_ready'] ?? true ), 'Address suggestions config must show tokens_ready=false when tokens are missing.' );
+runtime_smoke_assert( 0 === (int) ( $suggestions_config['total_tokens_count'] ?? -1 ), 'Address suggestions config must expose total_tokens_count.' );
+runtime_smoke_assert( 0 === (int) ( $suggestions_config['available_tokens_count'] ?? -1 ), 'Address suggestions config must expose available_tokens_count.' );
 runtime_smoke_assert( array_key_exists( 'encryption_ready', $suggestions_config ), 'Address suggestions config must expose encryption_ready.' );
 runtime_smoke_assert( ! array_key_exists( 'api_key', $suggestions_config ) && ! array_key_exists( 'token', $suggestions_config ), 'Address suggestions frontend config must not expose DaData credentials.' );
 

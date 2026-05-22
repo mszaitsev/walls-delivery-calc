@@ -114,6 +114,31 @@
 		return field.length ? String( field.val() || '' ).trim() : '';
 	}
 
+	function checkoutFieldValue( prefix, name ) {
+		var field = firstUsable( prefix, name );
+		if ( ! field.length ) {
+			return '';
+		}
+		if ( 'state' === name && field.is( 'select' ) ) {
+			var selected = field.find( 'option:selected' );
+			var text = selected.length ? cleanQueryPart( selected.text() ) : '';
+			return text || cleanQueryPart( field.val() );
+		}
+		return cleanQueryPart( field.val() );
+	}
+
+	function cleanQueryPart( value ) {
+		var cleaned = String( value || '' )
+			.replace( /\s+/g, ' ' )
+			.replace( /^[\s,]+|[\s,]+$/g, '' )
+			.trim();
+		var duplicate = cleaned.match( /^(.+?)\s+-\s+(.+)$/ );
+		if ( duplicate && duplicate[1] && duplicate[2] ) {
+			return duplicate[1].trim();
+		}
+		return cleaned;
+	}
+
 	function activeCheckoutPrefix() {
 		var toggle = $( '#ship-to-different-address-checkbox,input[name="ship_to_different_address"]' ).first();
 		var shippingChecked = toggle.length ? toggle.is( ':checked' ) : false;
@@ -203,9 +228,9 @@
 	}
 
 	function openingQuery( prefix ) {
-		var region = hidden( prefix, 'dadata_region_with_type' ).val() || hidden( prefix, 'dadata_region' ).val() || globalHiddenValue( 'wdc_platform_location_region_name' ) || fieldValue( prefix, 'state' );
-		var city = hidden( prefix, 'dadata_city_with_type' ).val() || hidden( prefix, 'dadata_city' ).val() || hidden( prefix, 'dadata_settlement_with_type' ).val() || hidden( prefix, 'dadata_settlement' ).val() || globalHiddenValue( 'wdc_platform_location_display_name' ) || fieldValue( prefix, 'city' );
-		var address = fieldValue( prefix, 'address_1' );
+		var region = checkoutFieldValue( prefix, 'state' );
+		var city = checkoutFieldValue( prefix, 'city' );
+		var address = checkoutFieldValue( prefix, 'address_1' );
 		var parts = [];
 		if ( region ) {
 			parts.push( region );
@@ -215,9 +240,13 @@
 		}
 		if ( address ) {
 			parts.push( address );
-			return parts.join( ', ' );
+			var fullQuery = parts.join( ', ' );
+			log( 'opening query built', { regionSource: 'checkout_state', region: region, citySource: 'checkout_city', city: city, addressSource: 'checkout_address_1', address: address, query: fullQuery } );
+			return fullQuery;
 		}
-		return parts.length ? parts.join( ', ' ) + ', ' : '';
+		var query = parts.length ? parts.join( ', ' ) + ', ' : '';
+		log( 'opening query built', { regionSource: 'checkout_state', region: region, citySource: 'checkout_city', city: city, addressSource: 'checkout_address_1', address: address, query: query } );
+		return query;
 	}
 
 	function houseWithType( data ) {
@@ -345,7 +374,9 @@
 		block.html(
 			'<strong>DaData подсказки:</strong> script loaded<br>' +
 			'config enabled: ' + ( debugState.configEnabled ? 'yes' : 'no' ) + '<br>' +
-			'api key ready: ' + ( config.api_key_ready ? 'yes' : 'no' ) + '<br>' +
+			'tokens ready: ' + ( config.tokens_ready ? 'yes' : 'no' ) + '<br>' +
+			'total tokens: ' + escapeHtml( config.total_tokens_count || 0 ) + '<br>' +
+			'available tokens: ' + escapeHtml( config.available_tokens_count || 0 ) + '<br>' +
 			'encryption ready: ' + ( config.encryption_ready ? 'yes' : 'no' ) + '<br>' +
 			'active mode: ' + escapeHtml( debugState.activePrefix ) + '<br>' +
 			'active prefix: ' + escapeHtml( debugState.activePrefix ) + '<br>' +
@@ -407,6 +438,17 @@
 		resultsBox().find( '.wdc-address-picker-manual' ).data( 'manual-query', query );
 	}
 
+	function renderUnavailable( query, errorCode ) {
+		debugState.lastAjaxStatus = errorCode || 'suggestions unavailable';
+		renderDebugBlock();
+		resultsBox().html(
+			'<div class="wdc-address-picker-empty">Подсказки адреса временно недоступны. Введите адрес вручную.</div>' +
+			'<button type="button" class="wdc-address-picker-manual">Использовать введенный адрес</button>'
+		);
+		resultsBox().find( '.wdc-address-picker-manual' ).data( 'manual-query', query );
+		log( 'dadata suggestions unavailable', { error_code: errorCode || '' } );
+	}
+
 	function renderResults( items, query ) {
 		itemStore = {};
 		itemCounter = 0;
@@ -445,9 +487,14 @@
 			if ( ! config.enabled ) {
 				debugState.lastAjaxStatus = 'config disabled';
 				renderDebugBlock();
+				renderUnavailable( query, 'config_disabled' );
 				return;
 			}
-			request( stage, query, prefix, function ( items ) {
+			request( stage, query, prefix, function ( items, body ) {
+				if ( body && ( 'no_available_dadata_token' === body.error_code || 'dadata_daily_limit_exhausted' === body.error_code ) ) {
+					renderUnavailable( query, body.error_code );
+					return;
+				}
 				renderResults( items, query );
 			} );
 		}, debounceDelay );

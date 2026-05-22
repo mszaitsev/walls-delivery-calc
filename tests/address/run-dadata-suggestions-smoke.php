@@ -4,6 +4,7 @@ declare(strict_types=1);
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionNormalizer;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataSuggestionClient;
+use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
@@ -17,6 +18,7 @@ defined( 'APP_ENCRYPTION_KEY' ) || define( 'APP_ENCRYPTION_KEY', 'test-dadata-su
 
 $GLOBALS['wdc_dadata_suggestions_options'] = array();
 $GLOBALS['wdc_dadata_suggestions_http_requests'] = array();
+$GLOBALS['wdc_dadata_suggestions_http_response_queue'] = array();
 
 function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['wdc_dadata_suggestions_options'][ $key ] ?? $default; }
 function update_option( string $key, mixed $value, bool|string $autoload = false ): bool { $GLOBALS['wdc_dadata_suggestions_options'][ $key ] = $value; return true; }
@@ -29,6 +31,9 @@ function wp_remote_retrieve_response_code( array $response ): int { return (int)
 function wp_remote_retrieve_body( array $response ): string { return (string) ( $response['body'] ?? '' ); }
 function wp_remote_post( string $url, array $args = array() ): array {
 	$GLOBALS['wdc_dadata_suggestions_http_requests'][] = array( 'url' => $url, 'args' => $args );
+	if ( ! empty( $GLOBALS['wdc_dadata_suggestions_http_response_queue'] ) ) {
+		return array_shift( $GLOBALS['wdc_dadata_suggestions_http_response_queue'] );
+	}
 	return array(
 		'response' => array( 'code' => 200 ),
 		'body' => wp_json_encode(
@@ -115,11 +120,56 @@ $settings->replace(
 		)
 	)
 );
-$suggestion_settings = new AddressSuggestionSettings( $settings, new EncryptionService() );
-$suggestion_settings->save_api_key( 'secret-api-key' );
-dadata_suggestions_assert( 'dadata_api_token_encrypted' === AddressSuggestionSettings::API_KEY_ENCRYPTED, 'DaData suggestions must use the single encrypted API key setting.' );
-dadata_suggestions_assert( 'dadata_api_token_masked' === AddressSuggestionSettings::API_KEY_MASKED, 'DaData suggestions must use the single masked API key setting.' );
-$client = new DaDataSuggestionClient( $suggestion_settings, new Logger() );
+$encryption = new EncryptionService();
+$token_pool = new DaDataTokenPool( $settings, $encryption );
+$token_pool->save_tokens_from_admin(
+	array(
+		'id' => array( 'first-token', 'second-token' ),
+		'label' => array( 'Primary', 'Reserve' ),
+		'token' => array( 'secret-api-key', 'reserve-api-key' ),
+		'daily_limit' => array( 10000, 10000 ),
+		'enabled' => array( 0 => '1', 1 => '1' ),
+	)
+);
+$suggestion_settings = new AddressSuggestionSettings( $settings, $encryption, $token_pool );
+$client = new DaDataSuggestionClient( $suggestion_settings, $token_pool, new Logger() );
+dadata_suggestions_assert( 2 === $token_pool->total_tokens_count(), 'DaData suggestions must support multiple tokens.' );
+dadata_suggestions_assert( 2 === $token_pool->available_tokens_count(), 'DaData suggestions must report available tokens.' );
+dadata_suggestions_assert( 3 === $suggestion_settings->timeout(), 'DaData suggestions timeout must remain a global setting.' );
+dadata_suggestions_assert( 10 === $suggestion_settings->count(), 'DaData suggestions count must remain a global setting.' );
+$saved_tokens = $token_pool->tokens();
+dadata_suggestions_assert( '********-key' === ( $saved_tokens[0]['masked_token'] ?? '' ), 'DaData token must be stored masked.' );
+dadata_suggestions_assert( ! str_contains( serialize( $saved_tokens ), 'secret-api-key' ), 'DaData tokens must not be stored in plaintext.' );
+$old_encrypted = (string) $saved_tokens[0]['encrypted_token'];
+$token_pool->save_tokens_from_admin(
+	array(
+		'id' => array( 'first-token', 'second-token' ),
+		'label' => array( 'Primary updated', 'Reserve' ),
+		'token' => array( '', '' ),
+		'daily_limit' => array( 0, 1000001 ),
+		'enabled' => array( 0 => '1', 1 => '1' ),
+	)
+);
+$saved_tokens = $token_pool->tokens();
+dadata_suggestions_assert( $old_encrypted === (string) $saved_tokens[0]['encrypted_token'], 'Empty token input must preserve existing encrypted token.' );
+dadata_suggestions_assert( 10000 === (int) $saved_tokens[0]['daily_limit'], 'Empty or zero daily limit must fall back to default.' );
+dadata_suggestions_assert( 1000000 === (int) $saved_tokens[1]['daily_limit'], 'Daily limit must be capped at max value.' );
+$token_pool->save_tokens_from_admin(
+	array(
+		'id' => array( 'first-token', 'second-token' ),
+		'label' => array( 'Primary updated', 'Reserve' ),
+		'token' => array( 'replacement-api-key', '' ),
+		'daily_limit' => array( 1, 10000 ),
+		'enabled' => array( 0 => '1', 1 => '1' ),
+	)
+);
+$saved_tokens = $token_pool->tokens();
+dadata_suggestions_assert( $old_encrypted !== (string) $saved_tokens[0]['encrypted_token'], 'New token input must replace encrypted token.' );
+dadata_suggestions_assert( '********-key' === (string) $saved_tokens[0]['masked_token'], 'Replaced token must update masked value.' );
+$token_pool->increment_usage( 'first-token' );
+dadata_suggestions_assert( 1 === $token_pool->usage_today( 'first-token' ), 'Token usage counter must increment.' );
+dadata_suggestions_assert( 0 === $token_pool->remaining_today( $token_pool->tokens()[0] ), 'Token remaining counter must honor daily limit.' );
+dadata_suggestions_assert( 'second-token' === (string) ( $token_pool->next_available_token()['id'] ?? '' ), 'Token pool must skip exhausted tokens.' );
 
 $city_body = $client->body( 'city', 'Новосибирск' );
 dadata_suggestions_assert( array( array( 'country_iso_code' => 'RU' ) ) === $city_body['locations'], 'City stage must restrict locations to RU.' );
@@ -145,9 +195,54 @@ dadata_suggestions_assert( true === $response['success'], 'DaData suggestion cli
 dadata_suggestions_assert( 1 === count( $GLOBALS['wdc_dadata_suggestions_http_requests'] ), 'DaData suggestion client must perform one HTTP request.' );
 $request = $GLOBALS['wdc_dadata_suggestions_http_requests'][0];
 dadata_suggestions_assert( 'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address' === $request['url'], 'DaData suggestion client must use Suggest API URL.' );
-dadata_suggestions_assert( 'Token secret-api-key' === $request['args']['headers']['Authorization'], 'DaData suggestion client must send Authorization token.' );
+dadata_suggestions_assert( 'Token reserve-api-key' === $request['args']['headers']['Authorization'], 'DaData suggestion client must use the next available token.' );
 dadata_suggestions_assert( ! isset( $request['args']['headers']['X-Secret'] ), 'DaData suggestion client must not send X-Secret.' );
 dadata_suggestions_assert( is_array( json_decode( (string) $request['args']['body'], true ) ), 'DaData suggestion request body must be a JSON object.' );
+
+$empty_settings = new SettingsRepository();
+$empty_settings->replace( array_merge( $empty_settings->all(), array( 'dadata_suggestions_enabled' => true, 'dadata_suggestions_tokens' => array() ) ) );
+$empty_pool = new DaDataTokenPool( $empty_settings, new EncryptionService() );
+$empty_client = new DaDataSuggestionClient( new AddressSuggestionSettings( $empty_settings, new EncryptionService(), $empty_pool ), $empty_pool, new Logger() );
+$empty_response = $empty_client->suggest( 'address', 'test' );
+dadata_suggestions_assert( 'no_available_dadata_token' === $empty_response['error_code'], 'Client must return no_available_dadata_token when no enabled tokens exist.' );
+
+$exhausted_settings = new SettingsRepository();
+$exhausted_settings->replace( array_merge( $exhausted_settings->all(), array( 'dadata_suggestions_enabled' => true ) ) );
+$exhausted_pool = new DaDataTokenPool( $exhausted_settings, new EncryptionService() );
+$exhausted_pool->save_tokens_from_admin(
+	array(
+		'id' => array( 'only-token' ),
+		'label' => array( 'Only' ),
+		'token' => array( 'only-api-key' ),
+		'daily_limit' => array( 1 ),
+		'enabled' => array( 0 => '1' ),
+	)
+);
+$exhausted_pool->increment_usage( 'only-token' );
+$exhausted_response = ( new DaDataSuggestionClient( new AddressSuggestionSettings( $exhausted_settings, new EncryptionService(), $exhausted_pool ), $exhausted_pool, new Logger() ) )->suggest( 'address', 'test' );
+dadata_suggestions_assert( 'dadata_daily_limit_exhausted' === $exhausted_response['error_code'], 'Client must return dadata_daily_limit_exhausted when all tokens reached daily limit.' );
+
+$quota_settings = new SettingsRepository();
+$quota_settings->replace( array_merge( $quota_settings->all(), array( 'dadata_suggestions_enabled' => true ) ) );
+$quota_pool = new DaDataTokenPool( $quota_settings, new EncryptionService() );
+$quota_pool->save_tokens_from_admin(
+	array(
+		'id' => array( 'quota-first', 'quota-second' ),
+		'label' => array( 'Quota first', 'Quota second' ),
+		'token' => array( 'quota-first-key', 'quota-second-key' ),
+		'daily_limit' => array( 10000, 10000 ),
+		'enabled' => array( 0 => '1', 1 => '1' ),
+	)
+);
+$GLOBALS['wdc_dadata_suggestions_http_requests'] = array();
+$GLOBALS['wdc_dadata_suggestions_http_response_queue'] = array(
+	array( 'response' => array( 'code' => 429 ), 'body' => '{"message":"Daily limit exceeded"}' ),
+	array( 'response' => array( 'code' => 200 ), 'body' => wp_json_encode( array( 'suggestions' => array() ) ) ),
+);
+$quota_response = ( new DaDataSuggestionClient( new AddressSuggestionSettings( $quota_settings, new EncryptionService(), $quota_pool ), $quota_pool, new Logger() ) )->suggest( 'address', 'test' );
+dadata_suggestions_assert( true === $quota_response['success'], 'Client must retry with the next token after quota response.' );
+dadata_suggestions_assert( 2 === count( $GLOBALS['wdc_dadata_suggestions_http_requests'] ), 'Quota retry must send a second request.' );
+dadata_suggestions_assert( 'Token quota-second-key' === $GLOBALS['wdc_dadata_suggestions_http_requests'][1]['args']['headers']['Authorization'], 'Quota retry must use second token.' );
 
 $normalizer = new AddressSuggestionNormalizer();
 $street_item = $normalizer->normalize( array( 'value' => 'Красный пр-кт', 'data' => array( 'fias_level' => '7', 'street_with_type' => 'Красный пр-кт' ) ) );
@@ -162,7 +257,7 @@ foreach ( array( '9', '75' ) as $level ) {
 }
 
 $js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-address-suggestions.js' );
-foreach ( array( 'activeCheckoutPrefix', 'openAddressPicker', 'address picker opened', "mousedown' + namespace + ' focus' + namespace + ' click", 'selectorFor( activePrefix, \'address_1\' )', 'firstUsable( activePrefix, \'address_1\' )', 'firstUsable( prefix, \'city\' )', 'firstUsable( prefix, \'address_2\' )', 'textarea[name="', 'shipping', 'billing', 'address_1', 'postcode', '.wdc-address-picker-search', 'modal search input', 'addressPickerState', 'selectedStreet', 'house_after_street', 'resolve', 'street_selected', 'resolved', 'Использовать введенный адрес', 'manual fallback selected', 'Изменить улицу', 'wdc-address-picker-change-street', 'dadata_status', 'dadata_unrestricted_value', 'dadata_region_fias_id', 'dadata_city_kladr_id', 'dadata_street_fias_id', 'dadata_house_fias_id', 'dadata_fias_level', 'update_checkout', 'updated_checkout', 'wc_fragments_refreshed', 'wdc_platform_dadata_address_suggest', 'address suggestions script loaded', 'config enabled', 'config disabled', 'DaData подсказки:', 'api key ready:', 'encryption ready:', 'active mode:', 'active address field:', 'active city field:', 'modal opened:', 'last stage:', 'last query:', 'shipping mode active', 'billing mode active', 'using address field selector', 'address field found', 'address field not found', 'ajax request start', 'ajax success items count', 'ajax fail', 'street selected', 'house selected', 'resolve request start', 'resolve request success', 'debounceDelay = 300', 'itemStore', 'data-key', 'setHiddenData' ) as $needle ) {
+foreach ( array( 'activeCheckoutPrefix', 'openAddressPicker', 'address picker opened', "mousedown' + namespace + ' focus' + namespace + ' click", 'selectorFor( activePrefix, \'address_1\' )', 'firstUsable( activePrefix, \'address_1\' )', 'firstUsable( prefix, \'city\' )', 'firstUsable( prefix, \'address_2\' )', 'textarea[name="', 'shipping', 'billing', 'address_1', 'postcode', '.wdc-address-picker-search', 'modal search input', 'addressPickerState', 'selectedStreet', 'house_after_street', 'resolve', 'street_selected', 'resolved', 'Использовать введенный адрес', 'manual fallback selected', 'Изменить улицу', 'wdc-address-picker-change-street', 'dadata_status', 'dadata_unrestricted_value', 'dadata_region_fias_id', 'dadata_city_kladr_id', 'dadata_street_fias_id', 'dadata_house_fias_id', 'dadata_fias_level', 'update_checkout', 'updated_checkout', 'wc_fragments_refreshed', 'wdc_platform_dadata_address_suggest', 'address suggestions script loaded', 'config enabled', 'config disabled', 'DaData подсказки:', 'tokens ready:', 'total tokens:', 'available tokens:', 'encryption ready:', 'active mode:', 'active address field:', 'active city field:', 'modal opened:', 'last stage:', 'last query:', 'shipping mode active', 'billing mode active', 'using address field selector', 'address field found', 'address field not found', 'ajax request start', 'ajax success items count', 'ajax fail', 'street selected', 'house selected', 'resolve request start', 'resolve request success', 'debounceDelay = 300', 'itemStore', 'data-key', 'setHiddenData', 'no_available_dadata_token', 'dadata_daily_limit_exhausted', 'Подсказки адреса временно недоступны. Введите адрес вручную.' ) as $needle ) {
 	dadata_suggestions_assert( str_contains( $js, $needle ), 'Frontend suggestions JS must contain ' . $needle . '.' );
 }
 dadata_suggestions_assert( ! str_contains( $js, 'secret-api-key' ) && ! str_contains( $js, 'Authorization' ), 'Frontend suggestions JS must not contain API key values or Authorization headers.' );
@@ -177,11 +272,49 @@ dadata_suggestions_assert( ! str_contains( $js, "change' + namespace" ) && ! str
 dadata_suggestions_assert( str_contains( $js, 'firstUsable( prefix, \'city\' ).val( data.city || data.settlement' ), 'Selected house must update city from selected address.' );
 dadata_suggestions_assert( str_contains( $js, "'manual'" ), 'Frontend must support manual fallback status.' );
 dadata_suggestions_assert( str_contains( $js, 'openingQuery' ), 'Frontend must build opening query from checkout fields.' );
+dadata_suggestions_assert( str_contains( $js, 'cleanQueryPart' ), 'Frontend must sanitize opening query parts.' );
+dadata_suggestions_assert( str_contains( $js, 'checkoutFieldValue' ), 'Opening query must read checkout field values.' );
+dadata_suggestions_assert( str_contains( $js, "field.find( 'option:selected' )" ), 'Opening query must read selected state option text for select fields.' );
 dadata_suggestions_assert( str_contains( $js, "searchInput().val( openingQuery( activePrefix ) );" ), 'Address picker must seed search from region, city, and address.' );
+dadata_suggestions_assert( str_contains( $js, "var region = checkoutFieldValue( prefix, 'state' );" ), 'Opening query region must come from checkout state field.' );
+dadata_suggestions_assert( str_contains( $js, "var city = checkoutFieldValue( prefix, 'city' );" ), 'Opening query city must come from checkout city field.' );
+dadata_suggestions_assert( str_contains( $js, "var address = checkoutFieldValue( prefix, 'address_1' );" ), 'Opening query address must come from checkout address_1 field.' );
+dadata_suggestions_assert( str_contains( $js, "parts.join( ', ' ) + ', '" ), 'Opening query must keep trailing comma when address is empty.' );
+dadata_suggestions_assert( str_contains( $js, 'opening query built' ) && str_contains( $js, "regionSource: 'checkout_state'" ) && str_contains( $js, "citySource: 'checkout_city'" ) && str_contains( $js, "addressSource: 'checkout_address_1'" ), 'Opening query debug log must show checkout field sources.' );
 dadata_suggestions_assert( str_contains( $js, "'' === query.trim()" ) && str_contains( $js, 'stateFor( prefix ).selectedStreet = null;' ), 'Clearing modal search must reset selected street and address mode.' );
 dadata_suggestions_assert( str_contains( $js, 'formatStreetHouse' ) && str_contains( $js, 'formatAddressWithoutRegionCity' ) && str_contains( $js, 'formatFullAddressWithoutCountry' ), 'Frontend must format final address lines.' );
 dadata_suggestions_assert( str_contains( $js, 'localLocationMatchesDadata' ), 'Frontend must compare selected local location with DaData result.' );
 dadata_suggestions_assert( str_contains( $js, 'wdc_platform_location_display_name' ) && str_contains( $js, 'wdc_platform_location_region_name' ) && str_contains( $js, 'wdc_platform_location_postcode' ), 'Frontend must keep WDC-compatible location hidden fields in sync.' );
+
+$opening_start = strpos( $js, 'function openingQuery' );
+$opening_end = strpos( $js, 'function houseWithType' );
+$opening_body = false !== $opening_start && false !== $opening_end ? substr( $js, $opening_start, $opening_end - $opening_start ) : '';
+dadata_suggestions_assert( '' !== $opening_body, 'Opening query helper must be present.' );
+dadata_suggestions_assert( ! str_contains( $opening_body, 'wdc_platform_location_display_name' ), 'Opening query must not use hidden display_name.' );
+dadata_suggestions_assert( ! str_contains( $opening_body, 'showSelectedNotice' ), 'Opening query must not use selected notice text.' );
+dadata_suggestions_assert( ! str_contains( $opening_body, 'lastResolved' ) && ! str_contains( $opening_body, 'selectedStreet' ), 'Opening query must not use previous resolved suggestion or selected street.' );
+
+$test_clean_query_part = static function ( string $value ): string {
+	$cleaned = trim( preg_replace( '/\s+/', ' ', trim( $value, " \t\n\r\0\x0B," ) ) ?? '' );
+	if ( preg_match( '/^(.+?)\s+-\s+(.+)$/u', $cleaned, $matches ) ) {
+		return trim( $matches[1] );
+	}
+	return $cleaned;
+};
+$test_opening_query = static function ( string $region, string $city, string $address ) use ( $test_clean_query_part ): string {
+	$region = $test_clean_query_part( $region );
+	$city = $test_clean_query_part( $city );
+	$address = $test_clean_query_part( $address );
+	$parts = array_values( array_filter( array( $region, $city ), static fn ( string $part ): bool => '' !== $part ) );
+	if ( '' !== $address ) {
+		$parts[] = $address;
+		return implode( ', ', $parts );
+	}
+	return array() !== $parts ? implode( ', ', $parts ) . ', ' : '';
+};
+dadata_suggestions_assert( 'Новосибирская область, Новосибирск, ул Демьяна Бедного' === $test_opening_query( 'Новосибирская область', 'Новосибирск', 'ул Демьяна Бедного' ), 'Opening query example with address must use visible checkout values.' );
+dadata_suggestions_assert( 'Новосибирская область, Новосибирск, ' === $test_opening_query( 'Новосибирская область', 'Новосибирск', '' ), 'Opening query example with empty address must keep trailing comma.' );
+dadata_suggestions_assert( 'Новосибирская область, Новосибирск, ул Демьяна Бедного' === $test_opening_query( 'Новосибирская область', 'Новосибирск - Новосибирская область', 'ул Демьяна Бедного' ), 'Opening query cleanup must strip city display suffix if it appears.' );
 
 $css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-address-suggestions.css' );
 foreach ( array( '.wdc-address-picker-overlay', '.wdc-address-picker-panel', '.wdc-address-picker-search', '.wdc-address-picker-results', '.wdc-address-picker-item', '.wdc-address-picker-empty', '.wdc-address-picker-hint', '.wdc-address-picker-selected', 'max-width: 1300px', 'column-count: 2', '@media (max-width: 900px)', 'column-count: 1' ) as $needle ) {
@@ -199,10 +332,12 @@ dadata_suggestions_assert( str_contains( $registrar, "'strings'" ), 'Address sug
 dadata_suggestions_assert( str_contains( $registrar, "'stages'" ), 'Address suggestions config must include stages.' );
 dadata_suggestions_assert( str_contains( $registrar, "'actions'" ), 'Address suggestions config must include actions.' );
 dadata_suggestions_assert( str_contains( $registrar, "'suggestions_requested'" ), 'Address suggestions config must include suggestions_requested.' );
-dadata_suggestions_assert( str_contains( $registrar, "'api_key_ready'" ), 'Address suggestions config must include api_key_ready.' );
+dadata_suggestions_assert( str_contains( $registrar, "'tokens_ready'" ), 'Address suggestions config must include tokens_ready.' );
+dadata_suggestions_assert( str_contains( $registrar, "'total_tokens_count'" ), 'Address suggestions config must include total_tokens_count.' );
+dadata_suggestions_assert( str_contains( $registrar, "'available_tokens_count'" ), 'Address suggestions config must include available_tokens_count.' );
 dadata_suggestions_assert( str_contains( $registrar, "'encryption_ready'" ), 'Address suggestions config must include encryption_ready.' );
 dadata_suggestions_assert( str_contains( $registrar, 'if ( $this->suggestions_requested() )' ), 'Address suggestions assets must enqueue when DaData suggestions are requested.' );
-dadata_suggestions_assert( ! str_contains( $registrar, "'api_key'" ) && ! str_contains( $registrar, '"api_key"' ), 'ShippingMethodRegistrar must not localize the DaData API key.' );
+dadata_suggestions_assert( ! str_contains( $registrar, "'api_key'" ) && ! str_contains( $registrar, '"api_key"' ) && ! str_contains( $registrar, 'api_key_ready' ), 'ShippingMethodRegistrar must not localize the DaData API key.' );
 
 $checkout_normalizer = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Address/CheckoutAddressNormalizer.php' );
 dadata_suggestions_assert( ! str_contains( $checkout_normalizer, 'dadata_normalizer' ), 'CheckoutAddressNormalizer pipeline must not include DaData post-factum normalizer.' );
@@ -210,7 +345,9 @@ dadata_suggestions_assert( ! str_contains( $checkout_normalizer, 'dadata_normali
 $settings_page = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Admin/SettingsAdminPage.php' );
 dadata_suggestions_assert( ! str_contains( $settings_page, 'dadata_enabled' ), 'Settings page must not expose separate DaData normalizer toggle.' );
 dadata_suggestions_assert( ! str_contains( $settings_page, 'dadata_api_token" name="dadata_api_token' ), 'Settings page must not expose separate DaData normalizer token.' );
-dadata_suggestions_assert( str_contains( $settings_page, 'API-ключ DaData для подсказок адреса' ), 'Settings page must expose the suggestions API key.' );
+dadata_suggestions_assert( str_contains( $settings_page, 'dadata_suggestions_tokens' ), 'Settings page must expose the DaData suggestions token list.' );
+dadata_suggestions_assert( str_contains( $settings_page, 'Суточный лимит запросов' ), 'Settings page must expose daily request limit per token.' );
+dadata_suggestions_assert( str_contains( $settings_page, 'Токены не добавлены. Нажмите' ), 'Settings page must show an empty token list message.' );
 
 $ajax = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/AddressSuggestions/AddressSuggestionAjax.php' );
 dadata_suggestions_assert( str_contains( $ajax, "add_action( 'wp_ajax_' . self::ACTION" ), 'AddressSuggestionAjax must register logged-in AJAX action.' );

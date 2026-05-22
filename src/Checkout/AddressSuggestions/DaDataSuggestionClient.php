@@ -12,6 +12,7 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 
 	public function __construct(
 		private AddressSuggestionSettings $settings,
+		private DaDataTokenPool $token_pool,
 		private Logger $logger
 	) {
 	}
@@ -31,59 +32,82 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 			return $this->failure( 'dadata_encode_failed', 'DaData JSON encode failed.', 0 );
 		}
 
-		$this->logger->debug( 'DaData suggestions request started.', array( 'host' => 'suggestions.dadata.ru', 'endpoint' => 'suggest/address', 'stage' => $stage ) );
+		$active_count = count( $this->token_pool->active_tokens() );
+		if ( 0 === $active_count ) {
+			return $this->failure( 'no_available_dadata_token', 'No configured DaData token.', 0 );
+		}
 
-		try {
-			$response = wp_remote_post(
-				self::ENDPOINT,
-				array(
-					'timeout' => $this->settings->timeout(),
-					'headers' => array(
-						'Authorization' => 'Token ' . $this->settings->api_key(),
-						'Content-Type'  => 'application/json',
-						'Accept'        => 'application/json',
-					),
-					'body' => $json,
-				)
+		$attempts = max( 1, $active_count );
+		for ( $attempt = 0; $attempt < $attempts; ++$attempt ) {
+			$token = $this->token_pool->next_available_token();
+			if ( null === $token ) {
+				return $this->failure( 'dadata_daily_limit_exhausted', 'All DaData tokens are exhausted for today.', 0 );
+			}
+
+			$this->logger->debug( 'DaData suggestions request started.', array( 'host' => 'suggestions.dadata.ru', 'endpoint' => 'suggest/address', 'stage' => $stage, 'token_id' => (string) $token['id'] ) );
+
+			try {
+				$response = wp_remote_post(
+					self::ENDPOINT,
+					array(
+						'timeout' => $this->settings->timeout(),
+						'headers' => array(
+							'Authorization' => 'Token ' . (string) $token['token'],
+							'Content-Type'  => 'application/json',
+							'Accept'        => 'application/json',
+						),
+						'body' => $json,
+					)
+				);
+				$this->token_pool->increment_usage( (string) $token['id'] );
+			} catch ( \Throwable $exception ) {
+				$this->token_pool->increment_usage( (string) $token['id'] );
+				return $this->failure( 'dadata_timeout', $exception->getMessage(), 0 );
+			}
+
+			if ( function_exists( 'is_wp_error' ) && is_wp_error( $response ) ) {
+				$message = method_exists( $response, 'get_error_message' ) ? $response->get_error_message() : 'WordPress HTTP error.';
+				return $this->failure( 'dadata_api_failed', $message, 0 );
+			}
+
+			if ( ! is_array( $response ) ) {
+				return $this->failure( 'dadata_api_failed', 'Unexpected HTTP response.', 0 );
+			}
+
+			$status_code = function_exists( 'wp_remote_retrieve_response_code' ) ? (int) wp_remote_retrieve_response_code( $response ) : (int) ( $response['response']['code'] ?? 0 );
+			$raw_body    = function_exists( 'wp_remote_retrieve_body' ) ? (string) wp_remote_retrieve_body( $response ) : (string) ( $response['body'] ?? '' );
+			$decoded     = '' !== trim( $raw_body ) ? json_decode( $raw_body, true ) : null;
+
+			$this->logger->debug( 'DaData suggestions response received.', array( 'status_code' => $status_code, 'stage' => $stage, 'token_id' => (string) $token['id'] ) );
+
+			if ( $this->is_limit_response( $status_code, $raw_body, $decoded ) ) {
+				$this->token_pool->mark_exhausted( $token );
+				continue;
+			}
+
+			if ( ! is_array( $decoded ) ) {
+				return $this->failure( 'dadata_parse_failed', 'DaData response parse failed.', $status_code );
+			}
+
+			if ( $status_code < 200 || $status_code >= 300 ) {
+				return $this->failure( 'dadata_api_failed', 'DaData HTTP status ' . $status_code, $status_code );
+			}
+
+			$suggestions = is_array( $decoded['suggestions'] ?? null ) ? $decoded['suggestions'] : array();
+
+			return array(
+				'success'       => true,
+				'stage'         => $stage,
+				'status_code'   => $status_code,
+				'body'          => $body,
+				'suggestions'   => $suggestions,
+				'error_code'    => '',
+				'error_message' => '',
+				'token_id'      => (string) $token['id'],
 			);
-		} catch ( \Throwable $exception ) {
-			return $this->failure( 'dadata_timeout', $exception->getMessage(), 0 );
 		}
 
-		if ( function_exists( 'is_wp_error' ) && is_wp_error( $response ) ) {
-			$message = method_exists( $response, 'get_error_message' ) ? $response->get_error_message() : 'WordPress HTTP error.';
-			return $this->failure( 'dadata_api_failed', $message, 0 );
-		}
-
-		if ( ! is_array( $response ) ) {
-			return $this->failure( 'dadata_api_failed', 'Unexpected HTTP response.', 0 );
-		}
-
-		$status_code = function_exists( 'wp_remote_retrieve_response_code' ) ? (int) wp_remote_retrieve_response_code( $response ) : (int) ( $response['response']['code'] ?? 0 );
-		$raw_body    = function_exists( 'wp_remote_retrieve_body' ) ? (string) wp_remote_retrieve_body( $response ) : (string) ( $response['body'] ?? '' );
-		$decoded     = '' !== trim( $raw_body ) ? json_decode( $raw_body, true ) : null;
-
-		$this->logger->debug( 'DaData suggestions response received.', array( 'status_code' => $status_code, 'stage' => $stage ) );
-
-		if ( ! is_array( $decoded ) ) {
-			return $this->failure( 'dadata_parse_failed', 'DaData response parse failed.', $status_code );
-		}
-
-		if ( $status_code < 200 || $status_code >= 300 ) {
-			return $this->failure( 'dadata_api_failed', 'DaData HTTP status ' . $status_code, $status_code );
-		}
-
-		$suggestions = is_array( $decoded['suggestions'] ?? null ) ? $decoded['suggestions'] : array();
-
-		return array(
-			'success'       => true,
-			'stage'         => $stage,
-			'status_code'   => $status_code,
-			'body'          => $body,
-			'suggestions'   => $suggestions,
-			'error_code'    => '',
-			'error_message' => '',
-		);
+		return $this->failure( 'dadata_daily_limit_exhausted', 'All DaData tokens are exhausted for today.', 0 );
 	}
 
 	/**
@@ -134,5 +158,19 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 			'error_code'    => $code,
 			'error_message' => $message,
 		);
+	}
+
+	/**
+	 * @param mixed $decoded
+	 */
+	private function is_limit_response( int $status_code, string $raw_body, mixed $decoded ): bool {
+		$text = strtolower( $raw_body );
+		if ( is_array( $decoded ) ) {
+			$encoded = function_exists( 'wp_json_encode' ) ? wp_json_encode( $decoded ) : json_encode( $decoded );
+			$text .= ' ' . strtolower( is_string( $encoded ) ? $encoded : '' );
+		}
+
+		return in_array( $status_code, array( 402, 403, 429 ), true )
+			&& ( str_contains( $text, 'limit' ) || str_contains( $text, 'quota' ) || str_contains( $text, 'daily' ) || str_contains( $text, 'exceeded' ) );
 	}
 }

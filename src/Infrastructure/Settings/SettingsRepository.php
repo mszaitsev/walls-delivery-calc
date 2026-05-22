@@ -43,6 +43,7 @@ final class SettingsRepository {
 			'dadata_suggestions_enabled'    => false,
 			'dadata_suggestions_timeout'    => 3,
 			'dadata_suggestions_count'      => 10,
+			'dadata_suggestions_tokens'     => array(),
 		);
 	}
 

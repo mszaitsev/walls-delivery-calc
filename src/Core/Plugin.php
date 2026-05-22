@@ -24,6 +24,7 @@ use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionNormalizer;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
+use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataSuggestionClient;
 use WallsShop\WDC\Checkout\Admin\CheckoutSimulationPage;
 use WallsShop\WDC\Checkout\Cache\QuoteCache;
@@ -163,9 +164,10 @@ final class Plugin {
 		$this->container->register( FiasRateLimiter::class, fn(): FiasRateLimiter => new FiasRateLimiter( $this->container->get( SettingsRepository::class ), $this->container->get( FiasLogger::class ) ) );
 		$this->container->register( FiasHttpClient::class, fn(): FiasHttpClient => new FiasHttpClient( $this->container->get( SettingsRepository::class )->get_int( 'fias_api_timeout', 3 ), $this->container->get( FiasLogger::class ) ) );
 		$this->container->register( FiasAddressNormalizer::class, fn(): FiasAddressNormalizer => new FiasAddressNormalizer( $this->container->get( CheckoutCityResolver::class ), $this->container->get( SettingsRepository::class ), $this->container->get( FiasEndpoints::class ), $this->container->get( FiasHttpClient::class ), $this->container->get( FiasRateLimiter::class ), $this->container->get( FiasLogger::class ), $this->container->get( FiasCredentials::class ) ) );
-		$this->container->register( AddressSuggestionSettings::class, fn(): AddressSuggestionSettings => new AddressSuggestionSettings( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ) ) );
+		$this->container->register( DaDataTokenPool::class, fn(): DaDataTokenPool => new DaDataTokenPool( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ) ) );
+		$this->container->register( AddressSuggestionSettings::class, fn(): AddressSuggestionSettings => new AddressSuggestionSettings( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ), $this->container->get( DaDataTokenPool::class ) ) );
 		$this->container->register( AddressSuggestionNormalizer::class, fn(): AddressSuggestionNormalizer => new AddressSuggestionNormalizer() );
-		$this->container->register( DaDataSuggestionClient::class, fn(): DaDataSuggestionClient => new DaDataSuggestionClient( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( DaDataSuggestionClient::class, fn(): DaDataSuggestionClient => new DaDataSuggestionClient( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( AddressSuggestionClientInterface::class, fn(): AddressSuggestionClientInterface => $this->container->get( DaDataSuggestionClient::class ) );
 		$this->container->register( AddressSuggestionService::class, fn(): AddressSuggestionService => new AddressSuggestionService( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( AddressSuggestionClientInterface::class ), $this->container->get( AddressSuggestionNormalizer::class ) ) );
 		$this->container->register( AddressSuggestionAjax::class, fn(): AddressSuggestionAjax => new AddressSuggestionAjax( $this->container->get( AddressSuggestionService::class ) ) );
@@ -200,7 +202,8 @@ final class Plugin {
 				$this->container->get( RuleRepository::class ),
 				$this->environment,
 				$this->container->get( Logger::class ),
-				$this->container->get( AddressSuggestionSettings::class )
+				$this->container->get( AddressSuggestionSettings::class ),
+				$this->container->get( DaDataTokenPool::class )
 			)
 		);
 		$this->container->register( NewShippingMethod::class, fn(): NewShippingMethod => new NewShippingMethod() );
@@ -318,7 +321,7 @@ final class Plugin {
 				$this->container->get( DemoPickupProvider::class )
 			)
 		);
-		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ), $this->container->get( AddressSuggestionSettings::class ) ) );
+		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ), $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ) ) );
 		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox() );
 	}
 

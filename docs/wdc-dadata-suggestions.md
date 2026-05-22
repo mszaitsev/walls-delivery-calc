@@ -1,62 +1,88 @@
-# WDC DaData Suggestions 0.14.9
+# WDC DaData Suggestions 0.14.11
 
-DaData is used only for visual address suggestions in checkout. Post-factum DaData address normalization has been removed from the runtime normalization pipeline.
+DaData используется только для визуальных подсказок адреса в checkout. Постфактум-нормализация адреса через DaData удалена из runtime pipeline.
 
-The remaining checkout chain is:
+Цепочка нормализации checkout остается:
 
 `local city context -> FIAS placeholder -> manual fallback`
 
-## Credentials
+## Токены
 
-There is one DaData credential in settings:
+В разделе `Подсказки адреса DaData` больше нет одиночного API-ключа. Используется список токенов в option `dadata_suggestions_tokens`.
 
-`API-ключ DaData для подсказок адреса`
+Каждая строка токена хранит:
 
-It is stored encrypted on the server under `dadata_api_token_encrypted` and is used only by:
+- `id`
+- encrypted token
+- masked token
+- `daily_limit`
+- `enabled`
+- `label`
+- `created_at`
+- `updated_at`
 
-- `AddressSuggestionSettings`
-- `DaDataSuggestionClient`
-- `AddressSuggestionAjax`
-- `AddressSuggestionService`
+Plaintext-токен не сохраняется, не показывается в админке и не локализуется во frontend config. После сохранения видна только masked-версия. Пустое поле токена при сохранении сохраняет уже зашифрованное значение без изменений.
 
-The API key is never localized to frontend config.
+Общие настройки раздела:
 
-## Local City Picker
+- включить подсказки DaData
+- timeout подсказок DaData
+- количество подсказок DaData
 
-The local city picker remains enabled and is still responsible for city selection, local city context, and initial postcode fill. DaData address suggestions do not replace city selection.
+Timeout и количество подсказок общие для всех токенов.
 
-If DaData suggestions are disabled, the local city picker continues to work as before.
+## Суточные лимиты
+
+Для каждого токена задается суточный лимит запросов. Использование считается по ключу:
+
+`wdc_dadata_suggestions_usage_{token_id}_{Ymd}`
+
+Дата берется из WordPress date/time API, если оно доступно. Счетчик хранится до конца текущего дня с небольшим буфером.
+
+Запрос засчитывается только когда HTTP request фактически отправлен в DaData. Если токен уже достиг лимита, он пропускается и запрос через него не выполняется.
+
+## Выбор Токена
+
+`DaDataTokenPool` выбирает первый включенный токен, у которого есть остаток на сегодня. `DaDataSuggestionClient` отправляет запрос с выбранным токеном:
+
+`Authorization: Token <token>`
+
+Если DaData возвращает ошибку лимита или квоты, текущий токен считается исчерпанным на сегодня, и клиент повторяет запрос со следующим доступным токеном. Количество попыток ограничено числом активных токенов.
+
+Если токенов нет, AJAX возвращает:
+
+`no_available_dadata_token`
+
+Если все токены исчерпаны:
+
+`dadata_daily_limit_exhausted`
+
+В обоих случаях checkout не ломается, а modal address picker предлагает ручной ввод.
 
 ## Address Picker UX
 
-The buyer focuses or clicks the active WooCommerce `address_1` field. WDC opens its own address picker modal. Search happens only inside the modal search input.
+Покупатель фокусируется или кликает активное WooCommerce поле `address_1`. WDC открывает собственную модалку выбора адреса. Поиск выполняется только внутри поля поиска модалки.
 
-No inline autocomplete is attached directly to the WooCommerce field.
+Inline-autocomplete прямо внутри WooCommerce поля не используется.
 
-When the modal opens, the search input is seeded from checkout context:
+При открытии модалки search input заполняется из видимых checkout fields:
 
-`region, city, address_1`
+`region/state, city, address_1`
 
-Examples:
+Примеры:
 
 - `Новосибирская область, Новосибирск, Некрасова`
 - `Новосибирская область, Новосибирск, `
 
-The region/city sources are, in order:
-
-1. selected local location or DaData hidden fields
-2. WooCommerce region/city fields
-3. empty value
-
-If the seeded query has enough characters, the address search starts immediately.
+Hidden `wdc_platform_location_display_name`, selected notice и прошлые DaData suggestions не участвуют в opening query.
 
 ## DaData Request
 
-Server-side requests use DaData Suggest API:
+Server-side proxy использует DaData Suggest API:
 
 `https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address`
 
-`stage=address` sends the full query string and uses only RU country scope:
+`stage=address` отправляет полную строку поиска:
 
 - `query`
 - `count`
@@ -64,53 +90,53 @@ Server-side requests use DaData Suggest API:
 - `from_bound: street`
 - `to_bound: house`
 
-`locations_boost` is not sent. City priority is intentionally not used because the full query already includes region and city.
+`locations_boost` не отправляется. Приоритет по городу не используется, потому что регион и город уже входят в полную query string.
 
-`stage=house_after_street` may restrict by selected `street_fias_id`, because the buyer explicitly selected that street.
+`stage=house_after_street` может ограничивать поиск выбранной `street_fias_id`, потому что пользователь явно выбрал улицу.
 
-`stage=resolve` resolves the final selected unrestricted address with `count: 1`.
+`stage=resolve` уточняет финальный выбранный адрес с `count: 1`.
 
 ## Street To House
 
-When a street is selected:
+Если выбрана улица:
 
-- `address_1` becomes `street_with_type + " "`
-- status becomes `street_selected`
-- street FIAS/KLADR hidden fields are saved
-- the modal stays open
-- the next search uses `stage=house_after_street`
+- `address_1` получает `street_with_type + " "`
+- status становится `street_selected`
+- street FIAS/KLADR hidden fields сохраняются
+- модалка остается открытой
+- следующий поиск идет через `stage=house_after_street`
 
-If the buyer clicks `Изменить улицу`, or clears the modal search input, selected street state is reset and the next search returns to `stage=address`.
+Кнопка `Изменить улицу` или полная очистка search input сбрасывает выбранную улицу и возвращает поиск в `stage=address`.
 
-## Applying Final Address
+## Финальный Адрес
 
-Final address levels are house, flat, and FIAS levels `8`, `9`, or `75`.
+Финальным считаются house, flat и FIAS levels `8`, `9`, `75`.
 
-After selection, WDC calls `resolve` and applies the resolved item.
+После выбора WDC делает `resolve` и применяет результат:
 
-Case A: same selected region/city by FIAS id.
+- если регион/город совпадают с локальным выбором по FIAS id, city/region не меняются, а `address_1` получает только улицу и дом;
+- если регион/город отличаются, но сопоставлены локально, city/region обновляются из DaData, а `address_1` получает только улицу и дом;
+- если локального сопоставления нет, city/region обновляются из DaData, а `address_1` получает полный адрес без страны.
 
-- city and region fields are not changed
-- `address_1` gets street/house only, for example `ул Некрасова, д 10`
-- DaData `postal_code` overwrites checkout postcode when present
+DaData `postal_code` считается более точным и всегда перезаписывает checkout postcode, если присутствует в resolved address.
 
-Case B: different region/city that can be matched locally.
+## Manual Fallback
 
-- city and region can be updated to the selected address
-- `address_1` still gets street/house only
-- DaData `postal_code` overwrites checkout postcode when present
+Если подсказки не вернули результат, токены недоступны или лимиты исчерпаны, модалка показывает:
 
-Case C: selected region/city cannot be matched to the local city context.
+`Подсказки адреса временно недоступны. Введите адрес вручную.`
 
-- city and region are updated from DaData values
-- `address_1` gets the full address without country, for example `Новосибирская обл, г Новосибирск, ул Некрасова, д 10`
-- DaData `postal_code` overwrites checkout postcode when present
+Покупатель может нажать `Использовать введенный адрес`. В этом режиме:
 
-The frontend helper `localLocationMatchesDadata()` compares FIAS ids from the current local selection with the resolved DaData item.
+- search value записывается в `address_1`
+- status становится `manual`
+- выбранный город и область не меняются
+- address-specific DaData ids очищаются
+- checkout не блокируется
 
 ## Hidden Fields And Order Meta
 
-Resolved address selection fills `{billing|shipping}_dadata_*` hidden fields:
+Resolved address selection заполняет `{billing|shipping}_dadata_*` hidden fields:
 
 - status
 - unrestricted value
@@ -118,7 +144,7 @@ Resolved address selection fills `{billing|shipping}_dadata_*` hidden fields:
 - FIAS/KLADR ids
 - FIAS level
 
-WDC-compatible location hidden fields are updated when present:
+WDC-compatible location hidden fields обновляются, если они есть:
 
 - `wdc_platform_location_fias_id`
 - `wdc_platform_location_gar_id`
@@ -126,16 +152,4 @@ WDC-compatible location hidden fields are updated when present:
 - `wdc_platform_location_region_name`
 - `wdc_platform_location_postcode`
 
-Order persistence stores the DaData hidden fields and compatible WDC meta.
-
-## Manual Fallback
-
-If DaData returns no result, the buyer can use `Использовать введенный адрес`.
-
-Manual fallback:
-
-- writes the modal search value to `address_1`
-- sets status to `manual`
-- does not change selected city or region
-- clears address-specific DaData ids
-- does not block checkout
+Order persistence сохраняет DaData hidden fields и совместимые WDC meta.

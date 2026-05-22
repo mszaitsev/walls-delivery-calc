@@ -22,8 +22,8 @@ final class AddressSuggestionService {
 			return $this->failure( 'dadata_suggestions_disabled' );
 		}
 
-		if ( ! $this->settings->has_api_key() ) {
-			return $this->failure( 'dadata_api_key_missing' );
+		if ( ! $this->settings->has_any_configured_token() ) {
+			return $this->failure( 'no_available_dadata_token' );
 		}
 
 		$response = $this->client->suggest( $stage, $query, $context );

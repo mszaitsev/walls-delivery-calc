@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionAjax;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
+use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Core\PluginEnvironment;
@@ -25,7 +26,8 @@ final class ShippingMethodRegistrar {
 		private RuleRepository $rule_repository,
 		private PluginEnvironment $environment,
 		private Logger $logger,
-		private ?AddressSuggestionSettings $suggestion_settings = null
+		private ?AddressSuggestionSettings $suggestion_settings = null,
+		private ?DaDataTokenPool $token_pool = null
 	) {
 	}
 
@@ -145,7 +147,7 @@ final class ShippingMethodRegistrar {
 	}
 
 	private function suggestions_enabled(): bool {
-		return $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->enabled() && $this->suggestion_settings->has_api_key();
+		return $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->enabled() && $this->suggestion_settings->encryption_ready() && $this->suggestion_settings->has_any_configured_token();
 	}
 
 	private function suggestions_requested(): bool {
@@ -163,7 +165,9 @@ final class ShippingMethodRegistrar {
 			'debug'     => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
 			'suggestions_requested' => $this->suggestions_requested(),
 			'enabled'   => $this->suggestions_enabled(),
-			'api_key_ready' => $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->has_api_key(),
+			'tokens_ready' => $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->has_any_configured_token(),
+			'total_tokens_count' => $this->token_pool instanceof DaDataTokenPool ? $this->token_pool->total_tokens_count() : 0,
+			'available_tokens_count' => $this->token_pool instanceof DaDataTokenPool ? $this->token_pool->available_tokens_count() : 0,
 			'encryption_ready' => $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->encryption_ready(),
 			'action'    => AddressSuggestionAjax::ACTION,
 			'actions'   => array(
