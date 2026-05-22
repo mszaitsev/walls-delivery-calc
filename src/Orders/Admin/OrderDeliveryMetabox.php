@@ -92,6 +92,8 @@ final class OrderDeliveryMetabox {
 			'Источник населенного пункта' => $this->city_source_label( $order ),
 			'Индекс населенного пункта' => $this->order_meta( $order, '_wdc_platform_city_postcode' ),
 			'Нормализация адреса' => $this->normalization_label( $order ),
+			'Индекс' => $this->order_meta( $order, '_wdc_platform_resolved_postcode' ),
+			'FIAS ID' => $this->order_meta( $order, '_wdc_platform_fias_id' ),
 		);
 
 		if ( 'pickup' === $delivery_type ) {
@@ -156,11 +158,18 @@ final class OrderDeliveryMetabox {
 	private function normalization_label( object $order ): string {
 		$normalized = $this->order_meta( $order, '_wdc_platform_normalized' );
 		$source     = $this->order_meta( $order, '_wdc_platform_normalization_source' );
-		$fias_id    = $this->order_meta( $order, '_wdc_platform_city_fias_id' );
+		$fias_id    = $this->order_meta( $order, '_wdc_platform_fias_id' );
+		if ( '' === $fias_id ) {
+			$fias_id = $this->order_meta( $order, '_wdc_platform_city_fias_id' );
+		}
 		$gar_id     = $this->order_meta( $order, '_wdc_platform_city_gar_id' );
 
 		if ( '1' === $normalized || 'true' === $normalized ) {
-			$label = in_array( $source, array( 'fias', 'gar' ), true ) ? 'ФИАС/ГАР' : $source;
+			$label = match ( $source ) {
+				'fias', 'gar' => 'ФИАС/ГАР',
+				'dadata' => 'DaData',
+				default => $source,
+			};
 			$ids   = trim( $fias_id . ( '' !== $gar_id ? ' / ' . $gar_id : '' ), ' /' );
 
 			return trim( $label . ( '' !== $ids ? ': ' . $ids : '' ) );

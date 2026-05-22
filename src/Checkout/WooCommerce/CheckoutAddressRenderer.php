@@ -24,11 +24,22 @@ final class CheckoutAddressRenderer {
 		$address      = $result->address;
 		$city         = '' !== trim( $address->settlement ) ? $address->settlement : $address->city;
 		$city_context = $this->session_manager->city_context();
-		$postcode     = (string) ( $city_context['postcode'] ?? $address->postcode );
+		$postcode     = 'dadata' === $result->source && '' !== trim( $address->postcode ) ? $address->postcode : (string) ( $city_context['postcode'] ?? $address->postcode );
+		$street_house = trim( $address->street . ( '' !== trim( $address->house ) ? ', ' . $address->house : '' ) );
 
 		echo '<tr class="wdc-address-normalization-row"><th>' . esc_html__( 'Проверка адреса', 'walls-delivery-calc' ) . '</th><td>';
 		echo '<div class="wdc-address-normalization">';
-		if ( 'local_db' === (string) ( $city_context['source'] ?? '' ) ) {
+		if ( 'dadata' === $result->source && $result->success ) {
+			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--normalized">' . esc_html__( 'Адрес уточнен через DaData', 'walls-delivery-calc' ) . '</p>';
+			if ( '' !== trim( $address->raw_address ) ) {
+				echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--dadata-address">' . esc_html( $address->raw_address ) . '</p>';
+			} elseif ( '' !== $street_house ) {
+				echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--dadata-address">' . esc_html( $street_house ) . '</p>';
+			}
+			if ( '' !== trim( $address->fias_id ) ) {
+				echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--fias-id">' . esc_html__( 'FIAS ID:', 'walls-delivery-calc' ) . ' ' . esc_html( substr( $address->fias_id, 0, 8 ) ) . '</p>';
+			}
+		} elseif ( 'local_db' === (string) ( $city_context['source'] ?? '' ) ) {
 			echo '<p class="wdc-address-normalization__notice wdc-address-normalization__notice--city-context">' . esc_html__( 'Населенный пункт выбран из справочника', 'walls-delivery-calc' ) . '</p>';
 			$display = $this->city_display( $city_context );
 			if ( '' !== $display ) {

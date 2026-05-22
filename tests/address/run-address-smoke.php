@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 use WallsShop\WDC\Checkout\Address\CheckoutAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
-use WallsShop\WDC\Checkout\Address\DaDataAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\FiasAddressNormalizer;
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
@@ -230,7 +229,6 @@ $resolver = new CheckoutCityResolver( $repository, $search );
 $session = new CheckoutSessionManager();
 $normalizer = new CheckoutAddressNormalizer(
 	new FiasAddressNormalizer( $resolver ),
-	new DaDataAddressNormalizer(),
 	new FallbackAddressNormalizer()
 );
 $runtime = new CheckoutAddressRuntime( $normalizer, $resolver, $session );
@@ -262,6 +260,23 @@ address_smoke_assert( ! $known_result->success, 'FIAS placeholder must not norma
 address_smoke_assert( ! $known_result->address->normalized, 'Known city result must not be marked normalized.' );
 address_smoke_assert( $known_result->address->fallback, 'Known city must continue to manual fallback.' );
 address_smoke_assert( $known_postcode === $known_result->address->postcode, 'Known city result must keep local postcode context.' );
+$fingerprint_a = $runtime->fingerprint_from_checkout_data(
+	array(
+		'shipping_country' => 'RU',
+		'shipping_city' => $known_city,
+		'shipping_address_1' => 'Main street',
+		'shipping_address_2' => '1',
+	)
+);
+$fingerprint_b = $runtime->fingerprint_from_checkout_data(
+	array(
+		'shipping_country' => 'RU',
+		'shipping_city' => $known_city,
+		'shipping_address_1' => 'Changed street',
+		'shipping_address_2' => '1',
+	)
+);
+address_smoke_assert( $fingerprint_a !== $fingerprint_b, 'Address fingerprint must change when address_1 changes.' );
 
 $selected_result = $runtime->resolve_checkout_address(
 	array(

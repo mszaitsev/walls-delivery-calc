@@ -4,7 +4,6 @@ declare(strict_types=1);
 use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
-use WallsShop\WDC\Checkout\Address\DaDataAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\FiasAddressNormalizer;
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
@@ -164,7 +163,7 @@ fias_smoke_assert( ! $disabled->success && 'fias_runtime_disabled' === $disabled
 fias_smoke_assert( 0 === $GLOBALS['wdc_fias_http_requests'], 'FIAS normalizer must not execute runtime HTTP requests.' );
 
 $session = new CheckoutSessionManager();
-$normalizer = new CheckoutAddressNormalizer( $fias, new DaDataAddressNormalizer(), new FallbackAddressNormalizer() );
+$normalizer = new CheckoutAddressNormalizer( $fias, new FallbackAddressNormalizer() );
 $runtime = new CheckoutAddressRuntime( $normalizer, $resolver, $session );
 $known_city = (string) $wpdb->tables['wdc_locations'][1]['city_name'];
 $result = $runtime->resolve_checkout_address( array( 'shipping_country' => 'RU', 'shipping_city' => $known_city, 'shipping_address_1' => 'Ленина', 'shipping_address_2' => '1' ) );

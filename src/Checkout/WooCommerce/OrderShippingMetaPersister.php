@@ -24,8 +24,13 @@ final class OrderShippingMetaPersister {
 			return;
 		}
 
+		$dadata_meta = $this->dadata_meta_from_checkout_data( $data );
+
 		$rate = $this->selected_rate();
 		if ( array() === $rate ) {
+			foreach ( $dadata_meta as $key => $value ) {
+				$order->update_meta_data( $key, $value );
+			}
 			return;
 		}
 
@@ -49,7 +54,7 @@ final class OrderShippingMetaPersister {
 			$map['_wdc_platform_fallback_city']        = $this->session_manager->fallback_city();
 			$map['_wdc_platform_fallback_address']     = $address_fallback_used ? $address->address->raw_address : '';
 			$map['_wdc_platform_address_fallback_used'] = $address_fallback_used;
-			$map['_wdc_platform_resolved_postcode']    = (string) ( $city_context['postcode'] ?? $address->address->postcode );
+			$map['_wdc_platform_resolved_postcode']    = 'dadata' === $address->source && '' !== trim( $address->address->postcode ) ? $address->address->postcode : (string) ( $city_context['postcode'] ?? $address->address->postcode );
 			$map['_wdc_platform_fias_id']              = $address->address->fias_id;
 			$map['_wdc_platform_gar_id']               = $address->address->gar_id;
 			$map['_wdc_platform_city_source']          = $city_source;
@@ -58,6 +63,8 @@ final class OrderShippingMetaPersister {
 			$map['_wdc_platform_city_fias_id']         = (string) ( $city_context['fias_id'] ?? '' );
 			$map['_wdc_platform_city_gar_id']          = (string) ( $city_context['gar_id'] ?? '' );
 		}
+
+		$map = array_merge( $map, $dadata_meta, $this->compatible_dadata_meta( $data ) );
 
 		$pickup = $this->session_manager->pickup_selection();
 		if (
@@ -179,6 +186,115 @@ final class OrderShippingMetaPersister {
 		}
 
 		return in_array( $address_result->source, array( 'fias', 'gar' ), true ) ? 'ФИАС/ГАР' : (string) $address_result->source;
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private function dadata_meta_from_checkout_data( array $data ): array {
+		$meta = array();
+		foreach ( array( 'billing', 'shipping' ) as $prefix ) {
+			foreach ( $this->dadata_field_keys() as $field ) {
+				$key = $prefix . '_dadata_' . $field;
+				if ( ! array_key_exists( $key, $data ) ) {
+					continue;
+				}
+
+				$meta[ '_' . $key ] = $this->sanitize_checkout_value( $data[ $key ] );
+			}
+		}
+
+		return $meta;
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private function compatible_dadata_meta( array $data ): array {
+		$prefix = $this->preferred_dadata_prefix( $data );
+		if ( '' === $prefix ) {
+			return array();
+		}
+
+		$status     = $this->checkout_string( $data, $prefix . '_dadata_status' );
+		$normalized = in_array( $status, array( 'house_selected', 'resolved' ), true );
+		$source     = $normalized || in_array( $status, array( 'city_selected', 'street_selected' ), true ) ? 'dadata' : ( 'manual' === $status ? 'manual' : 'fallback' );
+		$address    = trim( $this->checkout_string( $data, $prefix . '_address_1' ) . ' ' . $this->checkout_string( $data, $prefix . '_address_2' ) );
+
+		return array(
+			'_wdc_platform_fias_id'               => $this->checkout_string( $data, $prefix . '_dadata_fias_id' ),
+			'_wdc_platform_gar_id'                => '',
+			'_wdc_platform_resolved_postcode'     => $this->checkout_string( $data, $prefix . '_postcode' ),
+			'_wdc_platform_normalized'            => $normalized,
+			'_wdc_platform_normalization_source'  => $source,
+			'_wdc_platform_fallback_address'      => $normalized ? '' : $address,
+			'_wdc_platform_address_fallback_used' => ! $normalized,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function preferred_dadata_prefix( array $data ): string {
+		foreach ( array( 'shipping', 'billing' ) as $prefix ) {
+			$status = $this->checkout_string( $data, $prefix . '_dadata_status' );
+			if ( '' !== $status ) {
+				return $prefix;
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function dadata_field_keys(): array {
+		return array(
+			'status',
+			'unrestricted_value',
+			'region',
+			'region_with_type',
+			'region_fias_id',
+			'region_kladr_id',
+			'city',
+			'city_with_type',
+			'city_fias_id',
+			'city_kladr_id',
+			'settlement',
+			'settlement_with_type',
+			'settlement_fias_id',
+			'settlement_kladr_id',
+			'street',
+			'street_with_type',
+			'street_fias_id',
+			'street_kladr_id',
+			'house',
+			'house_fias_id',
+			'house_kladr_id',
+			'block',
+			'flat',
+			'fias_id',
+			'kladr_id',
+			'fias_level',
+		);
+	}
+
+	private function checkout_string( array $data, string $key ): string {
+		if ( ! array_key_exists( $key, $data ) ) {
+			return '';
+		}
+
+		return $this->sanitize_checkout_value( $data[ $key ] );
+	}
+
+	private function sanitize_checkout_value( mixed $value ): string {
+		$value = is_scalar( $value ) ? (string) $value : '';
+		$value = function_exists( 'wp_unslash' ) ? wp_unslash( $value ) : $value;
+
+		return function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $value ) : trim( $value );
 	}
 
 	/**

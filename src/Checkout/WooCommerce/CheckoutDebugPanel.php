@@ -49,7 +49,10 @@ final class CheckoutDebugPanel {
 		$this->row( __( 'Сортировка в session', 'walls-delivery-calc' ), $this->session_manager->selected_sort_mode() );
 		$this->row( __( 'Примененная сортировка', 'walls-delivery-calc' ), (string) ( $debug['sort_mode'] ?? '' ) );
 		if ( null !== $address ) {
+			$address_debug = $address->debug;
 			$this->row( __( 'Источник нормализации', 'walls-delivery-calc' ), $this->source_label( $address->source ) );
+			$this->row( __( 'normalized', 'walls-delivery-calc' ), $address->address->normalized ? 'true' : 'false' );
+			$this->row( __( 'Normalization chain', 'walls-delivery-calc' ), implode( ' -> ', $this->normalization_chain( $address_debug ) ) );
 		}
 		echo '</dl>';
 
@@ -84,5 +87,16 @@ final class CheckoutDebugPanel {
 			'fallback' => __( 'введено вручную', 'walls-delivery-calc' ),
 			default => $source,
 		};
+	}
+
+	/**
+	 * @param array<string,mixed> $debug
+	 * @return array<int,string>
+	 */
+	private function normalization_chain( array $debug ): array {
+		$chain = $debug['normalization_chain'] ?? array();
+		return is_array( $chain ) && array() !== $chain
+			? array_map( 'strval', $chain )
+			: array( 'local city DB', 'fias placeholder', 'manual fallback' );
 	}
 }

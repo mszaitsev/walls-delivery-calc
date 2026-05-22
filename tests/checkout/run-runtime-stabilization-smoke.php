@@ -7,6 +7,9 @@ defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
 $GLOBALS['wdc_test_options'] = array();
 $GLOBALS['wdc_test_actions'] = array();
 $GLOBALS['wdc_test_filters'] = array();
+$GLOBALS['wdc_test_scripts'] = array();
+$GLOBALS['wdc_test_localized_scripts'] = array();
+$GLOBALS['wdc_test_styles'] = array();
 
 if ( ! function_exists( 'get_option' ) ) {
 	function get_option( string $key, mixed $default = false ): mixed {
@@ -30,6 +33,30 @@ if ( ! function_exists( 'add_action' ) ) {
 if ( ! function_exists( 'add_filter' ) ) {
 	function add_filter( string $hook, mixed $callback, int $priority = 10, int $accepted_args = 1 ): void {
 		$GLOBALS['wdc_test_filters'][ $hook ][] = array( $callback, $priority, $accepted_args );
+	}
+}
+
+if ( ! function_exists( 'wp_enqueue_script' ) ) {
+	function wp_enqueue_script( string $handle, string $src = '', array $deps = array(), string|bool|null $ver = false, bool $in_footer = false ): void {
+		$GLOBALS['wdc_test_scripts'][ $handle ] = compact( 'src', 'deps', 'ver', 'in_footer' );
+	}
+}
+
+if ( ! function_exists( 'wp_localize_script' ) ) {
+	function wp_localize_script( string $handle, string $object_name, array $l10n ): void {
+		$GLOBALS['wdc_test_localized_scripts'][ $handle ][ $object_name ] = $l10n;
+	}
+}
+
+if ( ! function_exists( 'wp_enqueue_style' ) ) {
+	function wp_enqueue_style( string $handle, string $src = '', array $deps = array(), string|bool|null $ver = false ): void {
+		$GLOBALS['wdc_test_styles'][ $handle ] = compact( 'src', 'deps', 'ver' );
+	}
+}
+
+if ( ! function_exists( 'wp_script_is' ) ) {
+	function wp_script_is( string $handle, string $status = 'enqueued' ): bool {
+		return 'wc-checkout' === $handle && 'registered' === $status;
 	}
 }
 
@@ -464,7 +491,7 @@ $ajax_response = json_decode( (string) ob_get_clean(), true );
 runtime_smoke_assert( true === ( $ajax_response['success'] ?? false ), 'Location AJAX handle must return success for valid nonce.' );
 runtime_smoke_assert( 'Новосибирск' === ( $ajax_response['data']['groups'][0]['locations'][0]['city_name'] ?? '' ), 'Location AJAX handle must return grouped Новосибирск results.' );
 
-$city_selector_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.js' );
+$city_selector_js = str_replace( "\r\n", "\n", (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.js' ) );
 foreach ( array( 'updated_checkout', '.wdcCitySelector', 'input[name="shipping_city"]', 'wdc_platform_search_locations', 'update_checkout', 'wdc_platform_location_id', 'event.target', ':visible', ':disabled', 'city input event', 'ajax request start', 'locationStore', 'data-location-key', 'mousedown.wdcCitySelector', 'isSelecting', 'preventDefault', 'stopPropagation', 'stopImmediatePropagation', 'wdc-city-selector-selected', 'setTimeout', 'suppressSearch', 'search suppressed', 'suppressSearch disabled after updated_checkout', 'wdc-city-picker-overlay', 'wdc-city-picker-panel', 'wdc-city-picker-close', 'Escape', 'wdc-city-picker-search', 'manual fallback city', 'wdc-city-picker-fallback', 'fallback button mousedown', 'fallback selection start', 'fallback city applied', 'picker closed after fallback', 'update_checkout triggered after fallback', 'closePicker', 'applyManualFallbackCity', 'applySelectedLocation', 'originalCityValue', 'Выбрать введенный населенный пункт', 'corrected query', 'correction used' ) as $needle ) {
 	runtime_smoke_assert( str_contains( $city_selector_js, $needle ), 'City selector JS must contain ' . $needle . '.' );
 }
@@ -496,6 +523,27 @@ foreach ( array( '.wdc-platform-pickup-point', 'pickup select changed', 'pickup 
 $settings->set( 'enable_new_checkout_shipping', true );
 runtime_smoke_assert( $gate->enabled(), 'Feature gate must be enabled through SettingsRepository.' );
 runtime_smoke_assert( isset( $registrar->register_shipping_method( array() )[ NewShippingMethod::METHOD_ID ] ), 'Shipping method registration must be enabled through settings.' );
+$registrar->enqueue_assets();
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-normalization'] ), 'Address normalization script must not enqueue.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-suggestions'] ), 'Address suggestions script must not enqueue when DaData suggestions are disabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-city-selector'] ), 'Local city selector script must enqueue when DaData suggestions are disabled.' );
+
+$GLOBALS['wdc_test_scripts'] = array();
+$GLOBALS['wdc_test_styles'] = array();
+$GLOBALS['wdc_test_localized_scripts'] = array();
+$settings->set( 'dadata_suggestions_enabled', true );
+$registrar->enqueue_assets();
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-suggestions'] ), 'Address suggestions script must enqueue when DaData suggestions are requested even if API key is missing.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_styles']['wdc-platform-address-suggestions'] ), 'Address suggestions CSS must enqueue when DaData suggestions are requested.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-city-selector'] ), 'Local city selector script must still enqueue when DaData suggestions are requested.' );
+$suggestions_config = $GLOBALS['wdc_test_localized_scripts']['wdc-platform-address-suggestions']['wdcPlatformAddressSuggestions'] ?? array();
+runtime_smoke_assert( true === ( $suggestions_config['suggestions_requested'] ?? false ), 'Address suggestions config must show suggestions_requested=true.' );
+runtime_smoke_assert( false === ( $suggestions_config['enabled'] ?? true ), 'Address suggestions config must show enabled=false when API key is missing.' );
+runtime_smoke_assert( false === ( $suggestions_config['tokens_ready'] ?? true ), 'Address suggestions config must show tokens_ready=false when tokens are missing.' );
+runtime_smoke_assert( 0 === (int) ( $suggestions_config['total_tokens_count'] ?? -1 ), 'Address suggestions config must expose total_tokens_count.' );
+runtime_smoke_assert( 0 === (int) ( $suggestions_config['available_tokens_count'] ?? -1 ), 'Address suggestions config must expose available_tokens_count.' );
+runtime_smoke_assert( array_key_exists( 'encryption_ready', $suggestions_config ), 'Address suggestions config must expose encryption_ready.' );
+runtime_smoke_assert( ! array_key_exists( 'api_key', $suggestions_config ) && ! array_key_exists( 'token', $suggestions_config ), 'Address suggestions frontend config must not expose DaData credentials.' );
 
 $demo_orchestrator = runtime_smoke_orchestrator_with_demo();
 $all_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), RateSorter::CHEAPEST, false )->rates;

@@ -53,9 +53,18 @@ final class CheckoutAddressRuntime {
 			return $result;
 		}
 
+		$location = $this->city_resolver->resolve_city( (string) $context['city'] );
+		if ( $location instanceof Location ) {
+			$location_data = $location->to_array();
+			$context['region_name'] = (string) ( $location_data['region_name'] ?? '' );
+			$context['region_code'] = (string) ( $location_data['region_code'] ?? '' );
+			if ( '' === (string) ( $context['postcode'] ?? '' ) ) {
+				$context['postcode'] = (string) ( $location_data['postcode'] ?? '' );
+			}
+		}
+
 		$raw      = $this->raw_address( $context );
 		$result   = $this->normalizer->normalize( $raw, $context );
-		$location = $this->city_resolver->resolve_city( (string) $context['city'] );
 
 		if ( $location instanceof Location ) {
 			$this->session_manager->save_selected_city( $location->to_array() );

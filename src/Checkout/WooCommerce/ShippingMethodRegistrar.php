@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionAjax;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
+use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Core\PluginEnvironment;
@@ -22,7 +25,9 @@ final class ShippingMethodRegistrar {
 		private CheckoutSessionManager $session_manager,
 		private RuleRepository $rule_repository,
 		private PluginEnvironment $environment,
-		private Logger $logger
+		private Logger $logger,
+		private ?AddressSuggestionSettings $suggestion_settings = null,
+		private ?DaDataTokenPool $token_pool = null
 	) {
 	}
 
@@ -81,6 +86,14 @@ final class ShippingMethodRegistrar {
 			array( 'wdc-platform-checkout-rates' ),
 			$this->environment->version()
 		);
+		if ( $this->suggestions_requested() ) {
+			wp_enqueue_style(
+				'wdc-platform-address-suggestions',
+				$this->environment->plugin_url() . 'assets/frontend/checkout-address-suggestions.css',
+				array( 'wdc-platform-checkout-rates' ),
+				$this->environment->version()
+			);
+		}
 		wp_enqueue_style(
 			'wdc-platform-city-selector',
 			$this->environment->plugin_url() . 'assets/frontend/checkout-city-selector.css',
@@ -114,7 +127,66 @@ final class ShippingMethodRegistrar {
 				$this->environment->version(),
 				true
 			);
+			if ( $this->suggestions_requested() ) {
+				wp_enqueue_script(
+					'wdc-platform-address-suggestions',
+					$this->environment->plugin_url() . 'assets/frontend/checkout-address-suggestions.js',
+					array( 'jquery' ),
+					$this->environment->version(),
+					true
+				);
+				if ( function_exists( 'wp_localize_script' ) ) {
+					wp_localize_script(
+						'wdc-platform-address-suggestions',
+						'wdcPlatformAddressSuggestions',
+						$this->address_suggestions_config()
+					);
+				}
+			}
 		}
+	}
+
+	private function suggestions_enabled(): bool {
+		return $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->enabled() && $this->suggestion_settings->encryption_ready() && $this->suggestion_settings->has_any_configured_token();
+	}
+
+	private function suggestions_requested(): bool {
+		return $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->enabled();
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function address_suggestions_config(): array {
+		return array(
+			'ajax_url'  => function_exists( 'admin_url' ) ? admin_url( 'admin-ajax.php' ) : '',
+			'nonce'     => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( AddressSuggestionAjax::NONCE_ACTION ) : '',
+			'min_chars' => 3,
+			'debug'     => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
+			'suggestions_requested' => $this->suggestions_requested(),
+			'enabled'   => $this->suggestions_enabled(),
+			'tokens_ready' => $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->has_any_configured_token(),
+			'total_tokens_count' => $this->token_pool instanceof DaDataTokenPool ? $this->token_pool->total_tokens_count() : 0,
+			'available_tokens_count' => $this->token_pool instanceof DaDataTokenPool ? $this->token_pool->available_tokens_count() : 0,
+			'encryption_ready' => $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->encryption_ready(),
+			'action'    => AddressSuggestionAjax::ACTION,
+			'selection_action' => AddressSuggestionAjax::SELECTION_ACTION,
+			'actions'   => array(
+				'suggest' => AddressSuggestionAjax::ACTION,
+				'selection' => AddressSuggestionAjax::SELECTION_ACTION,
+			),
+			'stages'    => array(
+				'city'               => 'city',
+				'address'            => 'address',
+				'house_after_street' => 'house_after_street',
+				'resolve'            => 'resolve',
+			),
+			'strings'   => array(
+				'not_found' => __( 'Адрес не найден. Можно продолжить ручной ввод.', 'walls-delivery-calc' ),
+				'add_house' => __( 'Добавьте номер дома', 'walls-delivery-calc' ),
+				'selected'  => __( 'Адрес выбран:', 'walls-delivery-calc' ),
+			),
+		);
 	}
 
 	/**
