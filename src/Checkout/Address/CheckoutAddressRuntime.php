@@ -181,7 +181,7 @@ final class CheckoutAddressRuntime {
 			'display_name'    => (string) ( $location['display_name'] ?? '' ),
 			'region_name'     => (string) ( $location['region_name'] ?? '' ),
 			'region_code'     => (string) ( $location['region_code'] ?? '' ),
-			'postcode'        => (string) ( $location['postal_code'] ?? $location['postcode'] ?? '' ),
+			'postcode'        => (string) ( $location['postal_code'] ?? '' ),
 			'fias_id'         => (string) ( $location['fias_id'] ?? '' ),
 			'gar_id'          => (string) ( $location['gar_id'] ?? '' ),
 			'source'          => 'local_db',

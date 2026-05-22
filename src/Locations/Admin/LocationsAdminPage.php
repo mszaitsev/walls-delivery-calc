@@ -25,6 +25,9 @@ final class LocationsAdminPage {
 	private const PAGE_SLUG = 'wdc-platform-locations';
 	private const NONCE_ACTION = 'wdc_locations_import_demo';
 	private const NONCE_NAME = 'wdc_locations_nonce';
+	private const GAR_JOB_OPTION = 'wdc_gar_import_job';
+	private const SNAPSHOT_EXPORT_JOB_OPTION = 'wdc_locations_snapshot_export_job';
+	private const SNAPSHOT_IMPORT_JOB_OPTION = 'wdc_locations_snapshot_import_job';
 
 	public function __construct(
 		private PluginEnvironment $environment,
@@ -45,6 +48,15 @@ final class LocationsAdminPage {
 	public function register(): void {
 		add_action( 'admin_menu', array( $this, 'add_menu_page' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
+		add_action( 'wp_ajax_wdc_gar_import_start', array( $this, 'ajax_gar_import_start' ) );
+		add_action( 'wp_ajax_wdc_gar_import_step', array( $this, 'ajax_gar_import_step' ) );
+		add_action( 'wp_ajax_wdc_gar_import_status', array( $this, 'ajax_gar_import_status' ) );
+		add_action( 'wp_ajax_wdc_gar_import_cancel', array( $this, 'ajax_gar_import_cancel' ) );
+		add_action( 'wp_ajax_wdc_locations_snapshot_export_start', array( $this, 'ajax_snapshot_export_start' ) );
+		add_action( 'wp_ajax_wdc_locations_snapshot_export_step', array( $this, 'ajax_snapshot_export_step' ) );
+		add_action( 'wp_ajax_wdc_locations_snapshot_import_start', array( $this, 'ajax_snapshot_import_start' ) );
+		add_action( 'wp_ajax_wdc_locations_snapshot_import_step', array( $this, 'ajax_snapshot_import_step' ) );
+		add_action( 'wp_ajax_wdc_location_details', array( $this, 'ajax_location_details' ) );
 	}
 
 	public function add_menu_page(): void {
@@ -85,7 +97,7 @@ final class LocationsAdminPage {
 				<p><strong><?php echo esc_html__( 'Aliases:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_aliases() ); ?></span></p>
 			</div>
 
-			<form class="wdc-locations-import" method="post" enctype="multipart/form-data">
+			<form id="wdc-gar-import-form" class="wdc-locations-import" method="post" enctype="multipart/form-data">
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 				<h2><?php echo esc_html__( 'Импорт GAR/ФИАС CSV', 'walls-delivery-calc' ); ?></h2>
 				<label>
@@ -97,19 +109,21 @@ final class LocationsAdminPage {
 					<input type="text" name="wdc_gar_places_path" placeholder="/path/to/gar_places.csv">
 				</label>
 				<p class="description"><?php echo esc_html__( 'Поддерживается структура region_* → district_* → city_* → place_*. Поля district_* и city_* необязательны, неизвестные колонки игнорируются. Импорт заменит локальную базу населенных пунктов, регионов, алиасов и carrier mappings.', 'walls-delivery-calc' ); ?></p>
-				<button class="button button-primary" type="submit" name="wdc_locations_action" value="import_gar_csv" onclick="return window.confirm('<?php echo esc_js( __( 'Импорт заменит локальную базу населенных пунктов. Продолжить?', 'walls-delivery-calc' ) ); ?>');"><?php echo esc_html__( 'Импортировать населенные пункты', 'walls-delivery-calc' ); ?></button>
+				<button class="button button-primary" type="button" id="wdc-gar-import-start"><?php echo esc_html__( 'Начать импорт', 'walls-delivery-calc' ); ?></button>
 				<button class="button button-secondary" type="submit" name="wdc_locations_action" value="clear_all" onclick="return window.confirm('<?php echo esc_js( __( 'Удалить все населенные пункты и алиасы из локальной базы WDC?', 'walls-delivery-calc' ) ); ?>');"><?php echo esc_html__( 'Очистить базу населенных пунктов', 'walls-delivery-calc' ); ?></button>
+				<div id="wdc-gar-import-progress" class="wdc-progress" hidden><progress value="0" max="100"></progress><pre></pre></div>
 			</form>
 
-			<form class="wdc-locations-import" method="post" enctype="multipart/form-data">
+			<form id="wdc-snapshot-form" class="wdc-locations-import" method="post" enctype="multipart/form-data">
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 				<h2><?php echo esc_html__( 'Экспорт / импорт подготовленной базы', 'walls-delivery-calc' ); ?></h2>
-				<button class="button" type="submit" name="wdc_locations_action" value="export_snapshot"><?php echo esc_html__( 'Экспортировать snapshot', 'walls-delivery-calc' ); ?></button>
+				<button class="button" type="button" id="wdc-snapshot-export-start"><?php echo esc_html__( 'Экспортировать snapshot', 'walls-delivery-calc' ); ?></button>
 				<label>
 					<span><?php echo esc_html__( 'JSONL snapshot', 'walls-delivery-calc' ); ?></span>
 					<input type="file" name="wdc_locations_snapshot" accept=".jsonl,application/x-ndjson,application/json">
 				</label>
-				<button class="button button-secondary" type="submit" name="wdc_locations_action" value="import_snapshot" onclick="return window.confirm('<?php echo esc_js( __( 'Импорт snapshot заменит текущую локальную базу населенных пунктов и carrier mappings. Продолжить?', 'walls-delivery-calc' ) ); ?>');"><?php echo esc_html__( 'Импортировать snapshot', 'walls-delivery-calc' ); ?></button>
+				<button class="button button-secondary" type="button" id="wdc-snapshot-import-start"><?php echo esc_html__( 'Импортировать snapshot', 'walls-delivery-calc' ); ?></button>
+				<div id="wdc-snapshot-progress" class="wdc-progress" hidden><progress value="0" max="100"></progress><pre></pre></div>
 			</form>
 
 			<form class="wdc-locations-search" method="get">
@@ -137,6 +151,7 @@ final class LocationsAdminPage {
 				</div>
 			<?php endif; ?>
 		</div>
+		<?php $this->render_progress_script(); ?>
 		<?php
 	}
 
@@ -146,7 +161,79 @@ final class LocationsAdminPage {
 			<strong><?php echo esc_html( $location->display_name ); ?></strong>
 			<span><?php echo esc_html( $location->postal_code ); ?></span>
 			<span><?php echo esc_html( $location->country_code ); ?></span>
+			<button class="button button-small wdc-location-details-toggle" type="button" data-location-id="<?php echo esc_attr( (string) $location->id ); ?>"><?php echo esc_html__( 'Детали', 'walls-delivery-calc' ); ?></button>
+			<div class="wdc-location-details" hidden></div>
 		</div>
+		<?php
+	}
+
+	private function render_progress_script(): void {
+		$ajax_url = function_exists( 'admin_url' ) ? admin_url( 'admin-ajax.php' ) : 'admin-ajax.php';
+		$nonce = function_exists( 'wp_create_nonce' ) ? wp_create_nonce( self::NONCE_ACTION ) : 'test-nonce';
+		?>
+		<script>
+		(function(){
+			const ajaxUrl = <?php echo json_encode( $ajax_url ); ?>;
+			const nonce = <?php echo json_encode( $nonce ); ?>;
+			function post(action, data) {
+				data = data || new FormData();
+				data.append('action', action);
+				data.append('<?php echo esc_js( self::NONCE_NAME ); ?>', nonce);
+				return fetch(ajaxUrl, {method:'POST', body:data, credentials:'same-origin'}).then(r => r.json());
+			}
+			function render(box, job) {
+				if (!box || !job) return;
+				box.hidden = false;
+				const progress = box.querySelector('progress');
+				const text = box.querySelector('pre');
+				const total = Number(job.rows_total_estimated || job.total_rows || job.stage_rows || 1);
+				const done = Number(job.processed_rows || job.rows_exported || job.imported || job.rows_read || 0);
+				progress.value = Math.min(100, Math.round(done / Math.max(1, total) * 100));
+				text.textContent = JSON.stringify(job, null, 2);
+			}
+			function loop(action, box) {
+				post(action).then(resp => {
+					const job = resp && resp.data ? resp.data : {};
+					render(box, job);
+					if (job.phase && job.phase !== 'finished' && job.phase !== 'failed') {
+						window.setTimeout(() => loop(action, box), 250);
+					}
+				});
+			}
+			const garStart = document.getElementById('wdc-gar-import-start');
+			if (garStart) garStart.addEventListener('click', function(){
+				if (!window.confirm('<?php echo esc_js( __( 'Импорт заменит локальную базу населенных пунктов. Продолжить?', 'walls-delivery-calc' ) ); ?>')) return;
+				const form = document.getElementById('wdc-gar-import-form');
+				const box = document.getElementById('wdc-gar-import-progress');
+				post('wdc_gar_import_start', new FormData(form)).then(resp => { render(box, resp.data); loop('wdc_gar_import_step', box); });
+			});
+			const exportStart = document.getElementById('wdc-snapshot-export-start');
+			if (exportStart) exportStart.addEventListener('click', function(){
+				const box = document.getElementById('wdc-snapshot-progress');
+				post('wdc_locations_snapshot_export_start').then(resp => { render(box, resp.data); loop('wdc_locations_snapshot_export_step', box); });
+			});
+			const importStart = document.getElementById('wdc-snapshot-import-start');
+			if (importStart) importStart.addEventListener('click', function(){
+				if (!window.confirm('<?php echo esc_js( __( 'Импорт snapshot заменит текущую локальную базу населенных пунктов и carrier mappings. Продолжить?', 'walls-delivery-calc' ) ); ?>')) return;
+				const form = document.getElementById('wdc-snapshot-form');
+				const box = document.getElementById('wdc-snapshot-progress');
+				post('wdc_locations_snapshot_import_start', new FormData(form)).then(resp => { render(box, resp.data); loop('wdc_locations_snapshot_import_step', box); });
+			});
+			document.addEventListener('click', function(event){
+				const button = event.target.closest('.wdc-location-details-toggle');
+				if (!button) return;
+				const panel = button.parentElement.querySelector('.wdc-location-details');
+				if (!panel.hidden) { panel.hidden = true; return; }
+				const data = new FormData();
+				data.append('location_id', button.getAttribute('data-location-id') || '');
+				post('wdc_location_details', data).then(resp => {
+					const row = resp && resp.data ? resp.data : {};
+					panel.innerHTML = '<table class="widefat striped"><tbody>' + Object.keys(row).map(k => '<tr><th>'+k+'</th><td>'+String(row[k] ?? '—')+'</td></tr>').join('') + '</tbody></table>';
+					panel.hidden = false;
+				});
+			});
+		})();
+		</script>
 		<?php
 	}
 
@@ -244,6 +331,137 @@ final class LocationsAdminPage {
 		}
 
 		return sanitize_text_field( wp_unslash( $_FILES[ $field ]['tmp_name'] ) );
+	}
+
+	public function ajax_gar_import_start(): void {
+		$this->guard_ajax();
+		if ( ! $this->gar_importer instanceof GarPlacesCsvImporter ) {
+			$this->send_json( array( 'phase' => 'failed', 'errors' => array( 'GAR CSV importer is unavailable.' ) ) );
+		}
+		$path = isset( $_POST['wdc_gar_places_path'] ) ? sanitize_text_field( wp_unslash( (string) $_POST['wdc_gar_places_path'] ) ) : '';
+		if ( '' === $path ) {
+			$path = $this->persist_upload( 'wdc_gar_places_csv', 'wdc-imports', 'gar_places.csv' );
+		}
+		$this->repository->clear_all();
+		$job = $this->gar_importer->create_job( $path );
+		update_option( self::GAR_JOB_OPTION, $job, false );
+		$this->send_json( $job );
+	}
+
+	public function ajax_gar_import_step(): void {
+		$this->guard_ajax();
+		$job = get_option( self::GAR_JOB_OPTION, array() );
+		$job = is_array( $job ) && $this->gar_importer instanceof GarPlacesCsvImporter ? $this->gar_importer->step_job( $job ) : array( 'phase' => 'failed', 'errors' => array( 'GAR import job is unavailable.' ) );
+		update_option( self::GAR_JOB_OPTION, $job, false );
+		$this->send_json( $job );
+	}
+
+	public function ajax_gar_import_status(): void {
+		$this->guard_ajax();
+		$job = get_option( self::GAR_JOB_OPTION, array( 'phase' => 'idle' ) );
+		$this->send_json( is_array( $job ) ? $job : array( 'phase' => 'idle' ) );
+	}
+
+	public function ajax_gar_import_cancel(): void {
+		$this->guard_ajax();
+		delete_option( self::GAR_JOB_OPTION );
+		$this->send_json( array( 'phase' => 'idle', 'cancelled' => true ) );
+	}
+
+	public function ajax_snapshot_export_start(): void {
+		$this->guard_ajax();
+		if ( ! $this->snapshot_exporter instanceof LocationsSnapshotExporter ) {
+			$this->send_json( array( 'phase' => 'failed', 'errors' => array( 'Snapshot exporter is unavailable.' ) ) );
+		}
+		$path = $this->tmp_path( 'wdc-exports', 'locations-' . gmdate( 'Ymd-His' ) . '.jsonl' );
+		$job = $this->snapshot_exporter->create_job( $path, $this->environment->version() );
+		$job['download_path'] = $path;
+		update_option( self::SNAPSHOT_EXPORT_JOB_OPTION, $job, false );
+		$this->send_json( $job );
+	}
+
+	public function ajax_snapshot_export_step(): void {
+		$this->guard_ajax();
+		$job = get_option( self::SNAPSHOT_EXPORT_JOB_OPTION, array() );
+		$job = is_array( $job ) && $this->snapshot_exporter instanceof LocationsSnapshotExporter ? $this->snapshot_exporter->step_job( $job ) : array( 'phase' => 'failed', 'errors' => array( 'Snapshot export job is unavailable.' ) );
+		update_option( self::SNAPSHOT_EXPORT_JOB_OPTION, $job, false );
+		$this->send_json( $job );
+	}
+
+	public function ajax_snapshot_import_start(): void {
+		$this->guard_ajax();
+		if ( ! $this->snapshot_importer instanceof LocationsSnapshotImporter ) {
+			$this->send_json( array( 'phase' => 'failed', 'errors' => array( 'Snapshot importer is unavailable.' ) ) );
+		}
+		$path = $this->persist_upload( 'wdc_locations_snapshot', 'wdc-imports', 'locations-snapshot.jsonl' );
+		$job = $this->snapshot_importer->create_job( $path );
+		update_option( self::SNAPSHOT_IMPORT_JOB_OPTION, $job, false );
+		$this->send_json( $job );
+	}
+
+	public function ajax_snapshot_import_step(): void {
+		$this->guard_ajax();
+		$job = get_option( self::SNAPSHOT_IMPORT_JOB_OPTION, array() );
+		$job = is_array( $job ) && $this->snapshot_importer instanceof LocationsSnapshotImporter ? $this->snapshot_importer->step_job( $job ) : array( 'phase' => 'failed', 'errors' => array( 'Snapshot import job is unavailable.' ) );
+		update_option( self::SNAPSHOT_IMPORT_JOB_OPTION, $job, false );
+		$this->send_json( $job );
+	}
+
+	public function ajax_location_details(): void {
+		$this->guard_ajax();
+		$id = isset( $_POST['location_id'] ) ? (int) $_POST['location_id'] : 0;
+		$row = $this->repository->find_raw_by_id( $id );
+		$fields = array( 'id', 'gar_object_id', 'fias_id', 'gar_id', 'kladr_id', 'country_code', 'region_name', 'region_code', 'region_type', 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level', 'city_name', 'city_type', 'city_fias_id', 'city_kladr_id', 'settlement_name', 'settlement_type', 'place_name', 'place_type', 'place_level', 'display_name', 'searchable_text', 'postal_code', 'okato', 'oktmo', 'latitude', 'longitude', 'active', 'created_at', 'updated_at' );
+		$data = array();
+		foreach ( $fields as $field ) {
+			$data[ $field ] = isset( $row[ $field ] ) ? (string) $row[ $field ] : '';
+		}
+		$this->send_json( $data );
+	}
+
+	private function guard_ajax(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			$this->send_json( array( 'phase' => 'failed', 'errors' => array( 'Forbidden.' ) ), false );
+		}
+		$nonce = isset( $_POST[ self::NONCE_NAME ] ) ? sanitize_text_field( wp_unslash( (string) $_POST[ self::NONCE_NAME ] ) ) : '';
+		if ( ! wp_verify_nonce( $nonce, self::NONCE_ACTION ) ) {
+			$this->send_json( array( 'phase' => 'failed', 'errors' => array( 'Invalid nonce.' ) ), false );
+		}
+	}
+
+	private function persist_upload( string $field, string $dir, string $fallback_name ): string {
+		if ( empty( $_FILES[ $field ]['tmp_name'] ) || ! is_string( $_FILES[ $field ]['tmp_name'] ) ) {
+			throw new RuntimeException( 'Upload file is missing.' );
+		}
+		$target = $this->tmp_path( $dir, sanitize_file_name( (string) ( $_FILES[ $field ]['name'] ?? $fallback_name ) ) );
+		if ( ! @move_uploaded_file( $_FILES[ $field ]['tmp_name'], $target ) ) {
+			if ( ! @copy( $_FILES[ $field ]['tmp_name'], $target ) ) {
+				throw new RuntimeException( 'Unable to persist uploaded file.' );
+			}
+		}
+
+		return $target;
+	}
+
+	private function tmp_path( string $dir, string $name ): string {
+		$uploads = function_exists( 'wp_upload_dir' ) ? wp_upload_dir() : array( 'basedir' => sys_get_temp_dir() );
+		$base = rtrim( (string) ( $uploads['basedir'] ?? sys_get_temp_dir() ), '/\\' ) . DIRECTORY_SEPARATOR . $dir;
+		if ( ! is_dir( $base ) ) {
+			wp_mkdir_p( $base );
+		}
+
+		return $base . DIRECTORY_SEPARATOR . $name;
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function send_json( array $data, bool $success = true ): void {
+		if ( function_exists( 'wp_send_json_success' ) ) {
+			$success ? wp_send_json_success( $data ) : wp_send_json_error( $data );
+			return;
+		}
+		echo json_encode( array( 'success' => $success, 'data' => $data ), JSON_UNESCAPED_UNICODE );
 	}
 
 	private function limiter_label(): string {

@@ -86,7 +86,7 @@ final class Location {
 	public static function from_array( array $data ): self {
 		$place_name      = (string) ( $data['place_name'] ?? $data['settlement_name'] ?? $data['city_name'] ?? '' );
 		$place_type      = (string) ( $data['place_type'] ?? $data['settlement_type'] ?? '' );
-		$postal_code     = (string) ( $data['postal_code'] ?? $data['postcode'] ?? '' );
+		$postal_code     = (string) ( $data['postal_code'] ?? '' );
 		$gar_object_id   = self::int_value( $data['gar_object_id'] ?? $data['gar_id'] ?? 0 );
 		$settlement_name = (string) ( $data['settlement_name'] ?? $place_name );
 		$settlement_type = (string) ( $data['settlement_type'] ?? $place_type );

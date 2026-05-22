@@ -300,6 +300,8 @@ gar_smoke_assert( 4 === $result->locations_imported, 'Locations must be imported
 gar_smoke_assert( 2 === $result->regions_imported, 'Regions must be deduplicated by region_code.' );
 gar_smoke_assert( 0 === count( $wpdb->stage ), 'Stage table must be cleared after success.' );
 gar_smoke_assert( 'Новосибирский' === (string) ( $wpdb->stage_history[1]['district_name'] ?? '' ), 'district_* must be imported to staging.' );
+$repeat = $importer->import_from_file( dirname( __DIR__ ) . '/fixtures/gar_places_sample.csv' );
+gar_smoke_assert( $repeat->success && 4 === count( $wpdb->locations ), 'Repeated import must update existing locations, not duplicate them.' );
 
 $novosibirsk = $locations->find_by_gar_object_id( 1001 );
 gar_smoke_assert( null !== $novosibirsk && 1001 === $novosibirsk->gar_object_id, 'gar_object_id must be stored.' );
@@ -340,7 +342,7 @@ gar_smoke_assert( 1 === count( $wpdb->carrier_codes ), 'carrier_codes table foun
 
 $snapshot = tempnam( sys_get_temp_dir(), 'wdc-snapshot-' );
 gar_smoke_assert( is_string( $snapshot ), 'Snapshot temp file must be created.' );
-$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.1' );
+$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.2' );
 gar_smoke_assert( $exported > 0, 'Snapshot export must include rows from 4 tables.' );
 $snapshot_text = (string) file_get_contents( $snapshot );
 gar_smoke_assert( str_contains( $snapshot_text, '"table":"wdc_regions"' ) && str_contains( $snapshot_text, '"table":"wdc_location_carrier_codes"' ), 'Snapshot export must include all foundation tables.' );
@@ -361,6 +363,23 @@ foreach ( $restored_db->locations as $restored_location ) {
 gar_smoke_assert( $restored_has_district, 'Snapshot import must restore district fields.' );
 @unlink( $snapshot );
 
+$snapshot_job_file = tempnam( sys_get_temp_dir(), 'wdc-snapshot-job-' );
+gar_smoke_assert( is_string( $snapshot_job_file ), 'Snapshot job temp file must be created.' );
+$snapshot_exporter = new LocationsSnapshotExporter( $wpdb );
+$snapshot_job = $snapshot_exporter->create_job( $snapshot_job_file, '0.15.2' );
+for ( $i = 0; $i < 100 && 'finished' !== $snapshot_job['phase']; $i++ ) {
+	$snapshot_job = $snapshot_exporter->step_job( $snapshot_job, 2 );
+}
+gar_smoke_assert( 'finished' === $snapshot_job['phase'] && (int) $snapshot_job['rows_exported'] > 0, 'Snapshot export job must write JSONL in chunks.' );
+$snapshot_import_job_db = new wpdb();
+$snapshot_importer = new LocationsSnapshotImporter( $snapshot_import_job_db );
+$snapshot_import_job = $snapshot_importer->create_job( $snapshot_job_file );
+for ( $i = 0; $i < 100 && 'finished' !== $snapshot_import_job['phase']; $i++ ) {
+	$snapshot_import_job = $snapshot_importer->step_job( $snapshot_import_job, 2 );
+}
+gar_smoke_assert( 'finished' === $snapshot_import_job['phase'] && (int) $snapshot_import_job['imported'] > 0, 'Snapshot import job must read JSONL in chunks.' );
+@unlink( $snapshot_job_file );
+
 $bad_header = tempnam( sys_get_temp_dir(), 'wdc-gar-bad-header-' );
 gar_smoke_assert( is_string( $bad_header ), 'Bad header temp file must be created.' );
 file_put_contents( $bad_header, "\"region_code\";\"region_name\";\"place_name\";\"fias_id\"\n\"54\";\"Новосибирская обл\";\"Новосибирск\";\"fias\"\n" );
@@ -374,12 +393,22 @@ $missing_stage = new GarPlacesCsvImporter( new LocationRepository( $missing_stag
 $missing_stage_result = $missing_stage->import_from_file( dirname( __DIR__ ) . '/fixtures/gar_places_sample.csv' );
 gar_smoke_assert( ! $missing_stage_result->success && str_contains( implode( ' ', $missing_stage_result->errors ), 'GAR staging table does not exist. Run plugin migrations first.' ), 'clear_stage must report missing staging table.' );
 
+$job_db = new wpdb();
+$job_importer = new GarPlacesCsvImporter( new LocationRepository( $job_db ), new RegionRepository( $job_db ), new LocationAliasGenerator(), $job_db );
+$job = $job_importer->create_job( dirname( __DIR__ ) . '/fixtures/gar_places_sample.csv', 'test-job' );
+gar_smoke_assert( 'staging' === $job['phase'], 'GAR progress job must start in staging phase.' );
+for ( $i = 0; $i < 10 && 'finished' !== $job['phase'] && 'failed' !== $job['phase']; $i++ ) {
+	$job = $job_importer->step_job( $job );
+}
+gar_smoke_assert( 'finished' === $job['phase'], 'GAR progress job must advance staging -> processing -> finished.' );
+gar_smoke_assert( (int) $job['rows_read'] > 0 && (int) $job['locations_imported'] > 0, 'GAR progress counters must increase.' );
+
 $_SERVER['REQUEST_METHOD'] = 'GET';
-$_GET = array();
+$_GET = array( 'location_query' => 'Новос' );
 $_POST = array();
 ob_start();
 ( new LocationsAdminPage(
-	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.1' ),
+	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.2' ),
 	$locations,
 	$search_service,
 	new LocationImportService( $locations ),
@@ -396,5 +425,7 @@ $html = (string) ob_get_clean();
 gar_smoke_assert( ! str_contains( $html, 'Импортировать демо-данные' ), 'Admin demo buttons must be removed.' );
 gar_smoke_assert( ! str_contains( $html, 'Import prepared FIAS dataset' ), 'Prepared FIAS button must be removed.' );
 gar_smoke_assert( str_contains( $html, 'Импорт GAR/ФИАС CSV' ), 'Admin GAR CSV import block must be rendered.' );
+gar_smoke_assert( str_contains( $html, 'wdc_gar_import_start' ) && str_contains( $html, 'wdc_locations_snapshot_export_start' ), 'Admin page must include chunked progress AJAX actions.' );
+gar_smoke_assert( str_contains( $html, 'wdc-location-details-toggle' ) && str_contains( $html, 'wdc_location_details' ), 'Admin search must include details button/action.' );
 
 echo "GAR import smoke test passed.\n";

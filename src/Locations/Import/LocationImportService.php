@@ -66,7 +66,7 @@ final class LocationImportService {
 				'region_name'     => (string) ( $row[1] ?? '' ),
 				'city_name'       => (string) ( $row[2] ?? '' ),
 				'settlement_name' => (string) ( $row[3] ?? '' ),
-				'postcode'        => (string) ( $row[4] ?? '' ),
+				'postal_code'     => (string) ( $row[4] ?? '' ),
 				'fias_id'         => (string) ( $row[5] ?? '' ),
 				'gar_id'          => (string) ( $row[6] ?? '' ),
 			);
@@ -121,7 +121,7 @@ final class LocationImportService {
 				'place_level'            => $row['place_level'] ?? 0,
 				'okato'                  => trim( (string) ( $row['okato'] ?? '' ) ),
 				'oktmo'                  => trim( (string) ( $row['oktmo'] ?? '' ) ),
-				'postal_code'            => trim( (string) ( $row['postal_code'] ?? $row['postcode'] ?? '' ) ),
+				'postal_code'            => trim( (string) ( $row['postal_code'] ?? '' ) ),
 			)
 		);
 	}

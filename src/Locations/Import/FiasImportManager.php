@@ -125,7 +125,7 @@ final class FiasImportManager {
 				'place_level'            => $row['place_level'] ?? 0,
 				'okato'                  => trim( (string) ( $row['okato'] ?? '' ) ),
 				'oktmo'                  => trim( (string) ( $row['oktmo'] ?? '' ) ),
-				'postal_code'            => trim( (string) ( $row['postal_code'] ?? $row['postcode'] ?? '' ) ),
+				'postal_code'            => trim( (string) ( $row['postal_code'] ?? '' ) ),
 			)
 		);
 	}

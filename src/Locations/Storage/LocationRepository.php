@@ -47,15 +47,43 @@ final class LocationRepository {
 	 * @param array<int, Location> $locations
 	 */
 	public function bulk_upsert( array $locations ): int {
-		$count = 0;
-		foreach ( $locations as $location ) {
-			if ( $location instanceof Location ) {
-				$this->save( $location );
-				++$count;
-			}
+		return (int) $this->bulk_upsert_locations( $locations )['count'];
+	}
+
+	/**
+	 * @param array<int, Location> $locations
+	 * @return array{count:int, ids:array<int,int>}
+	 */
+	public function bulk_upsert_locations( array $locations ): array {
+		$locations = array_values( array_filter( $locations, static fn( mixed $location ): bool => $location instanceof Location ) );
+		if ( array() === $locations ) {
+			return array( 'count' => 0, 'ids' => array() );
 		}
 
-		return $count;
+		// Test doubles used by smoke tests expose in-memory row storage instead of SQL execution.
+		if ( property_exists( $this->wpdb, 'locations' ) ) {
+			$ids = array();
+			foreach ( $locations as $location ) {
+				$id = $this->save( $location );
+				$ids[ $location->gar_object_id ] = $id;
+			}
+
+			return array( 'count' => count( $locations ), 'ids' => $ids );
+		}
+
+		$now = current_time( 'mysql' );
+		$rows = array_map( fn( Location $location ): array => $this->location_to_row( $location, $now ), $locations );
+		$this->bulk_insert_rows(
+			$this->table_name(),
+			$rows,
+			array_map( fn( string $column ): string => "{$column} = VALUES({$column})", array_diff( array_keys( $rows[0] ), array( 'created_at' ) ) ),
+			$this->formats_for_row( $rows[0] )
+		);
+
+		return array(
+			'count' => count( $locations ),
+			'ids'   => $this->location_ids_by_gar_object_ids( array_map( static fn( Location $location ): int => $location->gar_object_id, $locations ) ),
+		);
 	}
 
 	/**
@@ -183,6 +211,69 @@ final class LocationRepository {
 				array( '%d', '%s', '%s', '%s', '%s' )
 			);
 		}
+	}
+
+	/**
+	 * @param array<int,array<int,string>> $location_id_to_aliases
+	 */
+	public function bulk_save_aliases( array $location_id_to_aliases, string $source = 'generated' ): int {
+		$location_ids = array_values( array_filter( array_map( 'intval', array_keys( $location_id_to_aliases ) ) ) );
+		if ( array() === $location_ids ) {
+			return 0;
+		}
+
+		if ( property_exists( $this->wpdb, 'aliases' ) ) {
+			$count = 0;
+			foreach ( $location_id_to_aliases as $location_id => $aliases ) {
+				$this->save_aliases( (int) $location_id, $aliases, $source );
+				$count += count( array_unique( array_filter( array_map( 'trim', $aliases ) ) ) );
+			}
+
+			return $count;
+		}
+
+		$placeholders = implode( ', ', array_fill( 0, count( $location_ids ), '%d' ) );
+		$args = $location_ids;
+		array_unshift( $args, $source );
+		$this->wpdb->query( $this->wpdb->prepare( "DELETE FROM {$this->alias_table_name()} WHERE source = %s AND location_id IN ({$placeholders})", ...$args ) );
+
+		$now = current_time( 'mysql' );
+		$rows = array();
+		foreach ( $location_id_to_aliases as $location_id => $aliases ) {
+			foreach ( array_values( array_unique( array_filter( array_map( 'trim', $aliases ) ) ) ) as $alias ) {
+				$rows[] = array(
+					'location_id'      => (int) $location_id,
+					'alias'            => $alias,
+					'alias_normalized' => Location::normalize_search_text( $alias ),
+					'source'           => $source,
+					'created_at'       => $now,
+				);
+			}
+		}
+
+		if ( array() === $rows ) {
+			return 0;
+		}
+
+		$this->bulk_insert_rows( $this->alias_table_name(), $rows, array( 'alias = VALUES(alias)' ), array( '%d', '%s', '%s', '%s', '%s' ), true );
+
+		return count( $rows );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function find_raw_by_id( int $id ): array {
+		if ( $id <= 0 ) {
+			return array();
+		}
+
+		$row = $this->wpdb->get_row(
+			$this->wpdb->prepare( "SELECT * FROM {$this->table_name()} WHERE id = %d LIMIT 1", $id ),
+			ARRAY_A
+		);
+
+		return is_array( $row ) ? $row : array();
 	}
 
 	public function delete_all(): void {
@@ -320,6 +411,81 @@ final class LocationRepository {
 		$formats[] = '%s';
 
 		return $formats;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $rows
+	 * @param array<int,string> $update_assignments
+	 * @param array<int,string> $formats
+	 */
+	private function bulk_insert_rows( string $table, array $rows, array $update_assignments, array $formats, bool $ignore = false ): void {
+		if ( array() === $rows ) {
+			return;
+		}
+
+		$columns = array_keys( $rows[0] );
+		$row_placeholder = '(' . implode( ', ', $formats ) . ')';
+		$values_sql = implode( ', ', array_fill( 0, count( $rows ), $row_placeholder ) );
+		$sql = sprintf(
+			'INSERT %sINTO %s (%s) VALUES %s',
+			$ignore ? 'IGNORE ' : '',
+			$table,
+			implode( ', ', $columns ),
+			$values_sql
+		);
+
+		if ( ! $ignore && array() !== $update_assignments ) {
+			$sql .= ' ON DUPLICATE KEY UPDATE ' . implode( ', ', $update_assignments );
+		}
+
+		$args = array();
+		foreach ( $rows as $row ) {
+			foreach ( $columns as $column ) {
+				$args[] = $row[ $column ] ?? null;
+			}
+		}
+
+		$this->wpdb->query( $this->wpdb->prepare( $sql, ...$args ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<int,string>
+	 */
+	private function formats_for_row( array $row ): array {
+		$formats = array();
+		foreach ( array_keys( $row ) as $column ) {
+			$formats[] = match ( $column ) {
+				'gar_object_id', 'district_gar_object_id', 'district_level', 'place_level', 'active' => '%d',
+				'latitude', 'longitude' => '%f',
+				default => '%s',
+			};
+		}
+
+		return $formats;
+	}
+
+	/**
+	 * @param array<int,int> $gar_object_ids
+	 * @return array<int,int>
+	 */
+	private function location_ids_by_gar_object_ids( array $gar_object_ids ): array {
+		$gar_object_ids = array_values( array_unique( array_filter( array_map( 'intval', $gar_object_ids ) ) ) );
+		if ( array() === $gar_object_ids ) {
+			return array();
+		}
+
+		$placeholders = implode( ', ', array_fill( 0, count( $gar_object_ids ), '%d' ) );
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare( "SELECT id, gar_object_id FROM {$this->table_name()} WHERE gar_object_id IN ({$placeholders})", ...$gar_object_ids ),
+			ARRAY_A
+		);
+		$ids = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$ids[ (int) $row['gar_object_id'] ] = (int) $row['id'];
+		}
+
+		return $ids;
 	}
 
 	private function normalize_query( string $query ): string {

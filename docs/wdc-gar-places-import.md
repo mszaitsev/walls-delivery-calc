@@ -1,6 +1,6 @@
 # WDC GAR Places Import
 
-Version: 0.15.1.
+Version: 0.15.2.
 
 ## Source CSV
 
@@ -24,11 +24,13 @@ The importer:
 
 1. Clears `wdc_gar_places_stage`.
 2. Streams CSV rows with `SplFileObject` and `fgetcsv` semantics.
-3. Loads valid rows into `wdc_gar_places_stage`.
+3. Loads valid rows into `wdc_gar_places_stage` with multi-row batch inserts.
 4. Deduplicates regions by `region_code` into `wdc_regions`.
-5. Imports places into `wdc_locations`.
-6. Generates aliases into `wdc_location_aliases`.
+5. Imports places into `wdc_locations` with bulk `INSERT ... ON DUPLICATE KEY UPDATE` by `gar_object_id`/`fias_id`.
+6. Replaces GAR aliases in batches in `wdc_location_aliases`.
 7. Clears staging after a successful import.
+
+The admin importer runs as a chunked AJAX job with progress instead of one long POST. The progress panel shows phase, rows read, stage rows, processed rows, imported locations, aliases, skipped rows, and errors. The real file is expected to be about 64 MB and about 160000 rows.
 
 Before import, the local base is replaced: locations, aliases, regions, and carrier mappings are cleared. Carrier mappings are included because a full location reload can orphan old mappings.
 
@@ -71,7 +73,7 @@ The admin section `Экспорт / импорт подготовленной б
 The first JSONL row is metadata:
 
 ```json
-{"type":"meta","version":"0.15.1","tables":["wdc_regions","wdc_locations","wdc_location_aliases","wdc_location_carrier_codes"],"created_at":"2026-05-23 12:00:00"}
+{"type":"meta","version":"0.15.2","tables":["wdc_regions","wdc_locations","wdc_location_aliases","wdc_location_carrier_codes"],"created_at":"2026-05-23 12:00:00"}
 ```
 
 Following rows use:
@@ -80,7 +82,7 @@ Following rows use:
 {"type":"row","table":"wdc_locations","data":{"gar_object_id":1001}}
 ```
 
-Export reads tables page by page. Import replaces the four tables, ignores snapshot columns absent from the current schema, and lets missing current columns use DB defaults or `NULL`.
+Export reads tables page by page. Import replaces the four tables, ignores snapshot columns absent from the current schema, and lets missing current columns use DB defaults or `NULL`. Admin snapshot export/import also runs as chunked AJAX jobs with progress.
 
 Snapshot import softly accepts old `postcode` values as `postal_code` fallback, but snapshot export does not emit `postcode`.
 
@@ -88,7 +90,7 @@ Snapshot import softly accepts old `postcode` values as `postal_code` fallback, 
 
 The production CSV is about 46 MB and 160716 rows. The importer is streaming, but a web request can still hit PHP limits. For production-size imports, increase `max_execution_time`, `upload_max_filesize`, and `post_max_size`, or import on a test/staging environment and transfer a JSONL snapshot to the live site.
 
-Processing currently saves locations row by row after staging. A future performance pass can add batch upserts for the final `wdc_locations` transfer.
+The admin search result rows include a `Детали` button. It opens an inline panel loaded through `wdc_location_details` and shows the full `wdc_locations` row for inspection and DaData/carrier-mapping diagnostics.
 
 ## Future Work
 

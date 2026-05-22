@@ -24,7 +24,7 @@ final class LocationsSnapshotExporter {
 		$this->wpdb = $db ?? $wpdb;
 	}
 
-	public function export_to_file( string $path, string $version = '0.15.1', int $page_size = 1000 ): int {
+	public function export_to_file( string $path, string $version = '0.15.2', int $page_size = 1000 ): int {
 		$handle = fopen( $path, 'wb' );
 		if ( false === $handle ) {
 			throw new RuntimeException( 'Snapshot file cannot be opened for writing.' );
@@ -77,7 +77,7 @@ final class LocationsSnapshotExporter {
 		return $rows;
 	}
 
-	public function stream_download( string $version = '0.15.1' ): void {
+	public function stream_download( string $version = '0.15.2' ): void {
 		$file = wp_tempnam( 'wdc-locations-snapshot-' );
 		if ( ! is_string( $file ) || '' === $file ) {
 			throw new RuntimeException( 'Unable to create temporary snapshot file.' );
@@ -91,11 +91,111 @@ final class LocationsSnapshotExporter {
 	}
 
 	/**
+	 * @return array<string,mixed>
+	 */
+	public function create_job( string $path, string $version = '0.15.2' ): array {
+		return array(
+			'job_id'        => md5( $path . microtime( true ) ),
+			'path'          => $path,
+			'version'       => $version,
+			'phase'         => 'exporting',
+			'table_index'   => 0,
+			'offset'        => 0,
+			'rows_exported' => 0,
+			'total_rows'    => $this->total_rows(),
+			'created_at'    => current_time( 'mysql' ),
+			'updated_at'    => current_time( 'mysql' ),
+			'errors'        => array(),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $job
+	 * @return array<string,mixed>
+	 */
+	public function step_job( array $job, int $page_size = 1000 ): array {
+		try {
+			if ( 'exporting' !== (string) ( $job['phase'] ?? '' ) ) {
+				return $job;
+			}
+
+			$path = (string) ( $job['path'] ?? '' );
+			if ( '' === $path ) {
+				throw new RuntimeException( 'Snapshot export path is missing.' );
+			}
+
+			if ( 0 === (int) ( $job['table_index'] ?? 0 ) && 0 === (int) ( $job['offset'] ?? 0 ) && ( ! file_exists( $path ) || 0 === (int) filesize( $path ) ) ) {
+				file_put_contents(
+					$path,
+					$this->encode(
+						array(
+							'type'       => 'meta',
+							'version'    => (string) ( $job['version'] ?? '0.15.2' ),
+							'tables'     => $this->tables,
+							'created_at' => current_time( 'mysql' ),
+						)
+					) . "\n"
+				);
+			}
+
+			$table_index = (int) ( $job['table_index'] ?? 0 );
+			if ( ! isset( $this->tables[ $table_index ] ) ) {
+				$job['phase'] = 'finished';
+				$job['updated_at'] = current_time( 'mysql' );
+				return $job;
+			}
+
+			$table = $this->tables[ $table_index ];
+			$full_table = $this->wpdb->prefix . $table;
+			$offset = (int) ( $job['offset'] ?? 0 );
+			$data = $this->wpdb->get_results(
+				$this->wpdb->prepare( "SELECT * FROM {$full_table} LIMIT %d OFFSET %d", $page_size, $offset ),
+				ARRAY_A
+			);
+			$data = is_array( $data ) ? $data : array();
+			$handle = fopen( $path, 'ab' );
+			if ( false === $handle ) {
+				throw new RuntimeException( 'Snapshot export file cannot be opened.' );
+			}
+			foreach ( $data as $row ) {
+				fwrite( $handle, $this->encode( array( 'type' => 'row', 'table' => $table, 'data' => $this->export_row( $table, $row ) ) ) . "\n" );
+				++$job['rows_exported'];
+			}
+			fclose( $handle );
+
+			if ( count( $data ) < $page_size ) {
+				$job['table_index'] = $table_index + 1;
+				$job['offset'] = 0;
+				if ( ! isset( $this->tables[ (int) $job['table_index'] ] ) ) {
+					$job['phase'] = 'finished';
+				}
+			} else {
+				$job['offset'] = $offset + $page_size;
+			}
+		} catch ( RuntimeException $exception ) {
+			$job['phase'] = 'failed';
+			$job['errors'][] = $exception->getMessage();
+		}
+
+		$job['updated_at'] = current_time( 'mysql' );
+		return $job;
+	}
+
+	/**
 	 * @param array<string,mixed> $data
 	 */
 	private function encode( array $data ): string {
 		$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $data, JSON_UNESCAPED_UNICODE ) : json_encode( $data, JSON_UNESCAPED_UNICODE );
 		return is_string( $json ) ? $json : '{}';
+	}
+
+	private function total_rows(): int {
+		$total = 0;
+		foreach ( $this->tables as $table ) {
+			$total += (int) $this->wpdb->get_var( 'SELECT COUNT(*) FROM ' . $this->wpdb->prefix . $table );
+		}
+
+		return $total;
 	}
 
 	/**
