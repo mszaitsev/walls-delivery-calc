@@ -158,10 +158,12 @@ final class LocationsAdminPage {
 	private function render_location_row( Location $location ): void {
 		?>
 		<div class="wdc-location-row">
-			<strong><?php echo esc_html( $location->display_name ); ?></strong>
-			<span><?php echo esc_html( $location->postal_code ); ?></span>
-			<span><?php echo esc_html( $location->country_code ); ?></span>
-			<button class="button button-small wdc-location-details-toggle" type="button" data-location-id="<?php echo esc_attr( (string) $location->id ); ?>"><?php echo esc_html__( 'Детали', 'walls-delivery-calc' ); ?></button>
+			<div class="wdc-location-row-main">
+				<button class="button button-small wdc-location-details-toggle" type="button" data-location-id="<?php echo esc_attr( (string) $location->id ); ?>"><?php echo esc_html__( 'Детали', 'walls-delivery-calc' ); ?></button>
+				<strong class="wdc-location-title"><?php echo esc_html( $location->display_name ); ?></strong>
+				<span class="wdc-location-postal"><?php echo esc_html( $location->postal_code ); ?></span>
+				<span class="wdc-location-country"><?php echo esc_html( $location->country_code ); ?></span>
+			</div>
 			<div class="wdc-location-details" hidden></div>
 		</div>
 		<?php
@@ -222,7 +224,9 @@ final class LocationsAdminPage {
 			document.addEventListener('click', function(event){
 				const button = event.target.closest('.wdc-location-details-toggle');
 				if (!button) return;
-				const panel = button.parentElement.querySelector('.wdc-location-details');
+				const row = button.closest('.wdc-location-row');
+				const panel = row ? row.querySelector('.wdc-location-details') : null;
+				if (!panel) return;
 				if (!panel.hidden) { panel.hidden = true; return; }
 				const data = new FormData();
 				data.append('location_id', button.getAttribute('data-location-id') || '');

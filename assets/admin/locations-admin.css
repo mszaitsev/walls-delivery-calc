@@ -36,11 +36,34 @@
 }
 
 .wdc-location-row {
-	display: grid;
-	grid-template-columns: minmax(220px, 1fr) 120px 80px;
-	gap: 12px;
+	display: block;
 	padding: 10px 12px;
 	border-bottom: 1px solid #f0f0f1;
+}
+
+.wdc-location-row-main {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.wdc-location-title {
+	margin-right: auto;
+}
+
+.wdc-location-details {
+	display: block;
+	width: 100%;
+	margin-top: 10px;
+}
+
+.wdc-location-details[hidden] {
+	display: none;
+}
+
+.wdc-location-details table {
+	width: 100%;
 }
 
 .wdc-location-row:last-child {

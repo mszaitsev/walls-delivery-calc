@@ -3,7 +3,7 @@
 ## Locations Storage Architecture
 
 The locations foundation stores settlement-level delivery destinations in `wdc_locations`.
-The table is intentionally independent from checkout and legacy shipping code. As of `0.15.3`, production data is populated from a prepared GAR/ФИАС CSV instead of the old demo admin import.
+The table is intentionally independent from checkout and legacy shipping code. As of `0.15.4`, production data is populated from a prepared GAR/ФИАС CSV instead of the old demo admin import.
 
 Key fields:
 
@@ -72,4 +72,4 @@ A later GAR sync can build on `GarChangesService` by adding a real adapter that 
 
 # GAR CSV Import Note
 
-As of `0.15.3`, the local places foundation is populated from prepared `gar_places.csv` through `wdc_gar_places_stage`, `wdc_regions`, and the expanded `wdc_locations` schema. The CSV importer maps fields by header, supports optional `district_*` and `city_*` levels, imports `display_name` as-is, ignores unknown columns, uses bulk inserts/upserts, exposes chunked admin progress, checks staging schema before loading rows, reports SQL bulk failures in job errors, and uses `postal_code` instead of legacy `postcode`. See [wdc-gar-places-import.md](wdc-gar-places-import.md) for the current import and snapshot workflow.
+As of `0.15.4`, the local places foundation is populated from prepared `gar_places.csv` through `wdc_gar_places_stage`, `wdc_regions`, and the expanded `wdc_locations` schema. The CSV importer maps fields by header, supports optional `district_*` and `city_*` levels, imports `display_name` as-is, ignores unknown columns, uses bulk inserts/upserts, exposes chunked admin progress, checks staging schema before loading rows, reports SQL bulk failures in job errors, and uses `postal_code` instead of legacy `postcode`. See [wdc-gar-places-import.md](wdc-gar-places-import.md) for the current import and snapshot workflow.

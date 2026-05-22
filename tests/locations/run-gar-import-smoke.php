@@ -469,7 +469,7 @@ gar_smoke_assert( 1 === count( $wpdb->carrier_codes ), 'carrier_codes table foun
 
 $snapshot = tempnam( sys_get_temp_dir(), 'wdc-snapshot-' );
 gar_smoke_assert( is_string( $snapshot ), 'Snapshot temp file must be created.' );
-$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.3' );
+$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.4' );
 gar_smoke_assert( $exported > 0, 'Snapshot export must include rows from 4 tables.' );
 $snapshot_text = (string) file_get_contents( $snapshot );
 gar_smoke_assert( str_contains( $snapshot_text, '"table":"wdc_regions"' ) && str_contains( $snapshot_text, '"table":"wdc_location_carrier_codes"' ), 'Snapshot export must include all foundation tables.' );
@@ -493,7 +493,7 @@ gar_smoke_assert( $restored_has_district, 'Snapshot import must restore district
 $snapshot_job_file = tempnam( sys_get_temp_dir(), 'wdc-snapshot-job-' );
 gar_smoke_assert( is_string( $snapshot_job_file ), 'Snapshot job temp file must be created.' );
 $snapshot_exporter = new LocationsSnapshotExporter( $wpdb );
-$snapshot_job = $snapshot_exporter->create_job( $snapshot_job_file, '0.15.3' );
+$snapshot_job = $snapshot_exporter->create_job( $snapshot_job_file, '0.15.4' );
 for ( $i = 0; $i < 100 && 'finished' !== $snapshot_job['phase']; $i++ ) {
 	$snapshot_job = $snapshot_exporter->step_job( $snapshot_job, 2 );
 }
@@ -540,7 +540,7 @@ $_GET = array( 'location_query' => 'Новос' );
 $_POST = array();
 ob_start();
 ( new LocationsAdminPage(
-	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.3' ),
+	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.4' ),
 	$locations,
 	$search_service,
 	new LocationImportService( $locations ),
@@ -559,5 +559,13 @@ gar_smoke_assert( ! str_contains( $html, 'Import prepared FIAS dataset' ), 'Prep
 gar_smoke_assert( str_contains( $html, 'Импорт GAR/ФИАС CSV' ), 'Admin GAR CSV import block must be rendered.' );
 gar_smoke_assert( str_contains( $html, 'wdc_gar_import_start' ) && str_contains( $html, 'wdc_locations_snapshot_export_start' ), 'Admin page must include chunked progress AJAX actions.' );
 gar_smoke_assert( str_contains( $html, 'wdc-location-details-toggle' ) && str_contains( $html, 'wdc_location_details' ), 'Admin search must include details button/action.' );
+$main_pos = strpos( $html, 'wdc-location-row-main' );
+$button_pos = strpos( $html, 'wdc-location-details-toggle' );
+$title_pos = strpos( $html, 'wdc-location-title' );
+$details_pos = strpos( $html, 'wdc-location-details" hidden' );
+gar_smoke_assert( false !== $main_pos, 'Admin search row must render wdc-location-row-main wrapper.' );
+gar_smoke_assert( false !== $button_pos && false !== $title_pos && $button_pos < $title_pos, 'Details button must render before location title.' );
+gar_smoke_assert( false !== $details_pos && $main_pos < $details_pos, 'Details panel must render after row main wrapper.' );
+gar_smoke_assert( str_contains( $html, "button.closest('.wdc-location-row')" ) && ! str_contains( $html, "button.parentElement.querySelector('.wdc-location-details')" ), 'Details JS must find row with closest().');
 
 echo "GAR import smoke test passed.\n";

@@ -1,6 +1,6 @@
 # WDC GAR Places Import
 
-Version: 0.15.3.
+Version: 0.15.4.
 
 ## Source CSV
 
@@ -32,7 +32,7 @@ The importer:
 
 The admin importer runs as a chunked AJAX job with progress instead of one long POST. The progress panel shows phase, rows read, stage rows, processed rows, imported locations, aliases, skipped rows, and errors. The real file is expected to be about 64 MB and about 160000 rows.
 
-Version `0.15.3` adds a follow-up migration `0010_add_gar_district_columns.php` for installations where `0008` had already run before `district_*` columns were introduced. The importer also checks staging schema before loading CSV rows and reports SQL failures from bulk inserts instead of advancing progress counters after a failed query.
+Version `0.15.3` added a follow-up migration `0010_add_gar_district_columns.php` for installations where `0008` had already run before `district_*` columns were introduced. The importer also checks staging schema before loading CSV rows and reports SQL failures from bulk inserts instead of advancing progress counters after a failed query.
 
 Before import, the local base is replaced: locations, aliases, regions, and carrier mappings are cleared. Carrier mappings are included because a full location reload can orphan old mappings.
 
@@ -75,7 +75,7 @@ The admin section `Экспорт / импорт подготовленной б
 The first JSONL row is metadata:
 
 ```json
-{"type":"meta","version":"0.15.3","tables":["wdc_regions","wdc_locations","wdc_location_aliases","wdc_location_carrier_codes"],"created_at":"2026-05-23 12:00:00"}
+{"type":"meta","version":"0.15.4","tables":["wdc_regions","wdc_locations","wdc_location_aliases","wdc_location_carrier_codes"],"created_at":"2026-05-23 12:00:00"}
 ```
 
 Following rows use:
