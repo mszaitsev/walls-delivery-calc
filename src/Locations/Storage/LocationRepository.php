@@ -107,6 +107,16 @@ final class LocationRepository {
 	}
 
 	/**
+	 * @return array{locations_deleted:int|null, aliases_deleted:int|null}
+	 */
+	public function clear_all(): array {
+		return array(
+			'aliases_deleted'   => $this->clear_table( $this->alias_table_name() ),
+			'locations_deleted' => $this->clear_table( $this->table_name() ),
+		);
+	}
+
+	/**
 	 * @param array<int,string> $aliases
 	 */
 	public function save_aliases( int $location_id, array $aliases, string $source = 'generated' ): void {
@@ -133,6 +143,31 @@ final class LocationRepository {
 
 	public function delete_all(): void {
 		$this->wpdb->query( "DELETE FROM {$this->table_name()}" );
+	}
+
+	private function clear_table( string $table ): ?int {
+		if ( ! $this->table_exists( $table ) ) {
+			return null;
+		}
+
+		$count = (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$table}" );
+		$result = $this->wpdb->query( "TRUNCATE TABLE {$table}" );
+
+		if ( false === $result ) {
+			$result = $this->wpdb->query( "DELETE FROM {$table}" );
+		}
+
+		if ( false === $result ) {
+			throw new \RuntimeException( 'Unable to clear locations table.' );
+		}
+
+		return $count;
+	}
+
+	private function table_exists( string $table ): bool {
+		$prepared = $this->wpdb->prepare( 'SHOW TABLES LIKE %s', $table );
+		$result = $this->wpdb->get_var( $prepared );
+		return ! in_array( $result, array( null, '', 0, '0' ), true );
 	}
 
 	private function find_one( string $column, int|string $value, string $format ): ?Location {
