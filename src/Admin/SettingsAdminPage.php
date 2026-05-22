@@ -205,7 +205,7 @@ final class SettingsAdminPage {
 		echo '<p class="description">' . esc_html__( 'Исходные токены не показываются после сохранения. Пустое поле токена сохраняет текущий токен без изменений.', 'walls-delivery-calc' ) . '</p>';
 		echo '<p class="wdc-dadata-no-tokens" ' . ( array() === $tokens ? '' : 'style="display:none"' ) . '>' . esc_html__( 'Токены не добавлены. Нажмите «Добавить токен».', 'walls-delivery-calc' ) . '</p>';
 		echo '<table class="widefat striped wdc-dadata-token-table"><thead><tr>';
-		foreach ( array( 'Включен', 'Название', 'Токен', 'Суточный лимит запросов', 'Использовано сегодня', 'Осталось сегодня', 'Действия' ) as $heading ) {
+		foreach ( array( 'Включен', 'Название', 'Токен', 'Суточный лимит запросов', 'Использовано сегодня', 'Осталось сегодня', 'Последняя попытка', 'Последний статус', 'Действия' ) as $heading ) {
 			echo '<th>' . esc_html( $heading ) . '</th>';
 		}
 		echo '</tr></thead><tbody>';
@@ -230,7 +230,7 @@ final class SettingsAdminPage {
 					'<td><input type="text" name="dadata_suggestions_tokens[label][' + index + ']" value="" placeholder="Основной"></td>' +
 					'<td><input type="password" name="dadata_suggestions_tokens[token][' + index + ']" value="" autocomplete="new-password" placeholder="Новый токен"></td>' +
 					'<td><input type="number" name="dadata_suggestions_tokens[daily_limit][' + index + ']" value="10000" min="1" max="1000000" step="1"></td>' +
-					'<td>0</td><td>10000</td>' +
+					'<td>0</td><td>10000</td><td>-</td><td>-</td>' +
 					'<td><label><input type="checkbox" name="dadata_suggestions_tokens[delete][' + index + ']" value="1"> Удалить</label></td>';
 				tbody.appendChild(row);
 				if (empty) { empty.style.display = 'none'; }
@@ -251,6 +251,7 @@ final class SettingsAdminPage {
 		$id = (string) ( $token['id'] ?? '' );
 		$usage = $this->token_pool->usage_today( $id );
 		$remaining = $this->token_pool->remaining_today( $token );
+		$last_request = $this->token_pool->last_request_today( $id );
 		$row_class = $remaining <= 0 ? ' class="wdc-dadata-token-exhausted"' : '';
 		$index_attr = esc_attr( (string) $index );
 		echo '<tr' . $row_class . '>';
@@ -260,6 +261,8 @@ final class SettingsAdminPage {
 		echo '<td><input type="number" name="dadata_suggestions_tokens[daily_limit][' . $index_attr . ']" value="' . esc_attr( (string) ( $token['daily_limit'] ?? 10000 ) ) . '" min="1" max="1000000" step="1"></td>';
 		echo '<td>' . esc_html( (string) $usage ) . '</td>';
 		echo '<td>' . esc_html( (string) $remaining ) . ( $remaining <= 0 ? '<br><strong>' . esc_html__( 'Лимит на сегодня исчерпан', 'walls-delivery-calc' ) . '</strong>' : '' ) . '</td>';
+		echo '<td>' . esc_html( (string) ( $last_request['stage'] ?? '-' ) ) . '<br><small>' . esc_html( (string) ( $last_request['time'] ?? '' ) ) . '</small></td>';
+		echo '<td>' . esc_html( (string) ( $last_request['status_code'] ?? '-' ) ) . '<br><small>' . esc_html( (string) ( $last_request['error_code'] ?? '' ) ) . '</small></td>';
 		echo '<td><label><input type="checkbox" name="dadata_suggestions_tokens[delete][' . $index_attr . ']" value="1"> ' . esc_html__( 'Удалить', 'walls-delivery-calc' ) . '</label></td>';
 		echo '</tr>';
 	}

@@ -151,8 +151,6 @@
 	function stateFor( prefix ) {
 		if ( ! addressPickerState[ prefix ] ) {
 			addressPickerState[ prefix ] = {
-				selectedStreet: null,
-				mode: 'address',
 				lastResolved: null
 			};
 		}
@@ -216,14 +214,11 @@
 	}
 
 	function context( prefix ) {
-		var current = stateFor( prefix );
-		var street = current.selectedStreet || {};
 		return {
 			city_kladr_id: hidden( prefix, 'dadata_city_kladr_id' ).val() || '',
 			city_fias_id: hidden( prefix, 'dadata_city_fias_id' ).val() || '',
 			settlement_kladr_id: hidden( prefix, 'dadata_settlement_kladr_id' ).val() || '',
-			settlement_fias_id: hidden( prefix, 'dadata_settlement_fias_id' ).val() || '',
-			street_fias_id: street.fias_id || hidden( prefix, 'dadata_street_fias_id' ).val() || ''
+			settlement_fias_id: hidden( prefix, 'dadata_settlement_fias_id' ).val() || ''
 		};
 	}
 
@@ -290,6 +285,11 @@
 		].filter( Boolean ).join( ', ' );
 	}
 
+	function ensureTrailingComma( value ) {
+		var text = String( value || '' ).replace( /\s+/g, ' ' ).replace( /\s*,\s*$/g, '' ).trim();
+		return text ? text + ', ' : '';
+	}
+
 	function currentLocationFias() {
 		return {
 			region: globalHiddenValue( 'wdc_platform_location_region_fias_id' ),
@@ -348,12 +348,8 @@
 		return picker().find( '.wdc-address-picker-hint' );
 	}
 
-	function showHint( message, withChangeStreet ) {
-		var html = message ? '<span>' + escapeHtml( message ) + '</span>' : '';
-		if ( withChangeStreet ) {
-			html += ' <button type="button" class="wdc-address-picker-change-street">Изменить улицу</button>';
-		}
-		hintBox().html( html );
+	function showHint( message ) {
+		hintBox().html( message ? '<span>' + escapeHtml( message ) + '</span>' : '' );
 	}
 
 	function escapeHtml( value ) {
@@ -474,11 +470,7 @@
 		debounceTimer = window.setTimeout( function () {
 			var prefix = activePrefix;
 			var query = String( searchInput().val() || '' );
-			if ( '' === query.trim() ) {
-				stateFor( prefix ).selectedStreet = null;
-				stateFor( prefix ).mode = 'address';
-			}
-			var stage = stateFor( prefix ).selectedStreet ? 'house_after_street' : 'address';
+			var stage = 'address';
 			log( 'modal search input', { query: query, stage: stage } );
 			if ( query.trim().length < minChars() ) {
 				resultsBox().empty();
@@ -514,7 +506,7 @@
 		picker().attr( 'aria-hidden', 'false' ).addClass( 'is-open' );
 		searchInput().val( openingQuery( activePrefix ) );
 		resultsBox().empty();
-		showHint( stateFor( activePrefix ).selectedStreet ? 'Добавьте номер дома' : '', !! stateFor( activePrefix ).selectedStreet );
+		showHint( '' );
 		log( 'address picker opened', { active_prefix: activePrefix } );
 		window.setTimeout( function () {
 			searchInput().trigger( 'focus' ).trigger( 'select' );
@@ -537,20 +529,17 @@
 		var prefix = activePrefix;
 		var data = item.data || {};
 		if ( 'street' === item.level ) {
-			stateFor( prefix ).selectedStreet = {
-				fias_id: data.street_fias_id || '',
-				kladr_id: data.street_kladr_id || ''
-			};
-			stateFor( prefix ).mode = 'house_after_street';
 			firstUsable( prefix, 'address_1' ).val( ( data.street_with_type || item.value || '' ) + ' ' );
 			setHiddenData( prefix, item, 'street_selected' );
 			hidden( prefix, 'dadata_house' ).val( '' );
 			hidden( prefix, 'dadata_house_fias_id' ).val( '' );
 			hidden( prefix, 'dadata_house_kladr_id' ).val( '' );
-			searchInput().val( ( data.street_with_type || item.value || '' ) + ' ' );
+			searchInput().val( ensureTrailingComma( item.unrestrictedValue || item.value || item.label || data.street_with_type || '' ) );
 			resultsBox().empty();
-			showHint( 'Добавьте номер дома', true );
+			showHint( 'Уточните номер дома' );
 			log( 'street selected', item );
+			searchInput().trigger( 'focus' );
+			scheduleModalSearch();
 			return;
 		}
 		if ( 'house' === item.level || 'flat' === item.level ) {
@@ -603,20 +592,10 @@
 		clearAddressHidden( prefix );
 		hidden( prefix, 'dadata_status' ).val( 'manual' );
 		hidden( prefix, 'dadata_unrestricted_value' ).val( value );
-		stateFor( prefix ).selectedStreet = null;
-		stateFor( prefix ).mode = 'address';
 		log( 'manual fallback selected', { value: value } );
 		closeAddressPicker();
 		showSelectedNotice( prefix, 'Адрес введен вручную' );
 		$( document.body ).trigger( 'update_checkout' );
-	}
-
-	function changeStreet() {
-		stateFor( activePrefix ).selectedStreet = null;
-		stateFor( activePrefix ).mode = 'address';
-		searchInput().val( '' ).trigger( 'focus' );
-		resultsBox().empty();
-		showHint( '' );
 	}
 
 	function bind() {
@@ -642,7 +621,6 @@
 				selectItem( itemStore[ $( this ).attr( 'data-key' ) || '' ] );
 			} )
 			.on( 'click' + namespace, '.wdc-address-picker-manual', manualFallback )
-			.on( 'click' + namespace, '.wdc-address-picker-change-street', changeStreet )
 			.on( 'click' + namespace, '.wdc-address-picker-close', closeAddressPicker )
 			.on( 'mousedown' + namespace, '.wdc-address-picker-overlay', function ( event ) {
 				if ( event.target === this ) {

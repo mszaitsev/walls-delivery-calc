@@ -94,6 +94,10 @@ final class DaDataTokenPool {
 	 * @param array<string,mixed> $token
 	 */
 	public function remaining_today( array $token ): int {
+		if ( $this->is_exhausted_today( (string) ( $token['id'] ?? '' ) ) ) {
+			return 0;
+		}
+
 		$limit = $this->daily_limit( $token['daily_limit'] ?? self::DEFAULT_DAILY_LIMIT );
 		return max( 0, $limit - $this->usage_today( (string) ( $token['id'] ?? '' ) ) );
 	}
@@ -106,7 +110,49 @@ final class DaDataTokenPool {
 	 * @param array<string,mixed> $token
 	 */
 	public function mark_exhausted( array $token ): void {
-		$this->set_usage( (string) ( $token['id'] ?? '' ), $this->daily_limit( $token['daily_limit'] ?? self::DEFAULT_DAILY_LIMIT ) );
+		$token_id = (string) ( $token['id'] ?? '' );
+		if ( '' === $token_id ) {
+			return;
+		}
+
+		$this->set_daily_value( $this->exhausted_key( $token_id ), 1 );
+	}
+
+	public function is_exhausted_today( string $token_id ): bool {
+		if ( '' === $token_id ) {
+			return false;
+		}
+
+		return (bool) $this->get_daily_value( $this->exhausted_key( $token_id ), 0 );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function last_request_today( string $token_id ): array {
+		$value = $this->get_daily_value( $this->last_request_key( $token_id ), array() );
+		return is_array( $value ) ? $value : array();
+	}
+
+	public function record_request_attempt( string $token_id, string $stage, string $query, bool $attempted, bool $counted, int $status_code, string $error_code ): void {
+		if ( '' === $token_id ) {
+			return;
+		}
+
+		$this->set_daily_value(
+			$this->last_request_key( $token_id ),
+			array(
+				'token_id' => $token_id,
+				'stage' => $this->sanitize_key( $stage ),
+				'query_preview' => $this->safe_query_preview( $query ),
+				'query_hash' => hash( 'sha256', $query ),
+				'http_attempted' => $attempted,
+				'counted' => $counted,
+				'status_code' => $status_code,
+				'error_code' => $this->sanitize_key( $error_code ),
+				'time' => $this->now(),
+			)
+		);
 	}
 
 	/**
@@ -169,17 +215,32 @@ final class DaDataTokenPool {
 			return;
 		}
 
-		$key = $this->usage_key( $token_id );
+		$this->set_daily_value( $this->usage_key( $token_id ), max( 0, $usage ) );
+	}
+
+	private function set_daily_value( string $key, mixed $value ): void {
 		if ( function_exists( 'set_transient' ) ) {
-			set_transient( $key, max( 0, $usage ), $this->usage_ttl() );
+			set_transient( $key, $value, $this->usage_ttl() );
 			return;
 		}
 
-		update_option( $key, max( 0, $usage ), false );
+		update_option( $key, $value, false );
+	}
+
+	private function get_daily_value( string $key, mixed $default ): mixed {
+		return function_exists( 'get_transient' ) ? get_transient( $key ) : get_option( $key, $default );
 	}
 
 	private function usage_key( string $token_id ): string {
 		return 'wdc_dadata_suggestions_usage_' . $this->sanitize_key( $token_id ) . '_' . $this->today();
+	}
+
+	private function exhausted_key( string $token_id ): string {
+		return 'wdc_dadata_suggestions_exhausted_' . $this->sanitize_key( $token_id ) . '_' . $this->today();
+	}
+
+	private function last_request_key( string $token_id ): string {
+		return 'wdc_dadata_suggestions_last_request_' . $this->sanitize_key( $token_id ) . '_' . $this->today();
 	}
 
 	private function today(): string {
@@ -228,5 +289,14 @@ final class DaDataTokenPool {
 
 	private function unslash( string $value ): string {
 		return function_exists( 'wp_unslash' ) ? (string) wp_unslash( $value ) : $value;
+	}
+
+	private function safe_query_preview( string $query ): string {
+		$clean = preg_replace( '/\s+/', ' ', trim( $query ) ) ?? '';
+		if ( function_exists( 'mb_substr' ) ) {
+			return mb_substr( $clean, 0, 40 );
+		}
+
+		return substr( $clean, 0, 40 );
 	}
 }

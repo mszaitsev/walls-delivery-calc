@@ -62,15 +62,18 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 				$this->token_pool->increment_usage( (string) $token['id'] );
 			} catch ( \Throwable $exception ) {
 				$this->token_pool->increment_usage( (string) $token['id'] );
+				$this->token_pool->record_request_attempt( (string) $token['id'], $stage, $query, true, true, 0, 'dadata_timeout' );
 				return $this->failure( 'dadata_timeout', $exception->getMessage(), 0 );
 			}
 
 			if ( function_exists( 'is_wp_error' ) && is_wp_error( $response ) ) {
 				$message = method_exists( $response, 'get_error_message' ) ? $response->get_error_message() : 'WordPress HTTP error.';
+				$this->token_pool->record_request_attempt( (string) $token['id'], $stage, $query, true, true, 0, 'dadata_api_failed' );
 				return $this->failure( 'dadata_api_failed', $message, 0 );
 			}
 
 			if ( ! is_array( $response ) ) {
+				$this->token_pool->record_request_attempt( (string) $token['id'], $stage, $query, true, true, 0, 'dadata_api_failed' );
 				return $this->failure( 'dadata_api_failed', 'Unexpected HTTP response.', 0 );
 			}
 
@@ -81,19 +84,23 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 			$this->logger->debug( 'DaData suggestions response received.', array( 'status_code' => $status_code, 'stage' => $stage, 'token_id' => (string) $token['id'] ) );
 
 			if ( $this->is_limit_response( $status_code, $raw_body, $decoded ) ) {
+				$this->token_pool->record_request_attempt( (string) $token['id'], $stage, $query, true, true, $status_code, 'dadata_daily_limit_exhausted' );
 				$this->token_pool->mark_exhausted( $token );
 				continue;
 			}
 
 			if ( ! is_array( $decoded ) ) {
+				$this->token_pool->record_request_attempt( (string) $token['id'], $stage, $query, true, true, $status_code, 'dadata_parse_failed' );
 				return $this->failure( 'dadata_parse_failed', 'DaData response parse failed.', $status_code );
 			}
 
 			if ( $status_code < 200 || $status_code >= 300 ) {
+				$this->token_pool->record_request_attempt( (string) $token['id'], $stage, $query, true, true, $status_code, 'dadata_api_failed' );
 				return $this->failure( 'dadata_api_failed', 'DaData HTTP status ' . $status_code, $status_code );
 			}
 
 			$suggestions = is_array( $decoded['suggestions'] ?? null ) ? $decoded['suggestions'] : array();
+			$this->token_pool->record_request_attempt( (string) $token['id'], $stage, $query, true, true, $status_code, '' );
 
 			return array(
 				'success'       => true,

@@ -1,4 +1,4 @@
-# WDC DaData Suggestions 0.14.11
+# WDC DaData Suggestions 0.14.12
 
 DaData используется только для визуальных подсказок адреса в checkout. Постфактум-нормализация адреса через DaData удалена из runtime pipeline.
 
@@ -6,56 +6,67 @@ DaData используется только для визуальных под�
 
 `local city context -> FIAS placeholder -> manual fallback`
 
-## Токены
+## Токены И Лимиты
 
-В разделе `Подсказки адреса DaData` больше нет одиночного API-ключа. Используется список токенов в option `dadata_suggestions_tokens`.
+В разделе `Подсказки адреса DaData` используется список токенов в option `dadata_suggestions_tokens`.
 
-Каждая строка токена хранит:
+Каждая строка токена хранит `id`, encrypted token, masked token, `daily_limit`, `enabled`, `label`, `created_at`, `updated_at`.
 
-- `id`
-- encrypted token
-- masked token
-- `daily_limit`
-- `enabled`
-- `label`
-- `created_at`
-- `updated_at`
+Plaintext-токен не сохраняется, не показывается в админке и не локализуется во frontend config. Пустое поле токена при сохранении сохраняет уже зашифрованное значение без изменений.
 
-Plaintext-токен не сохраняется, не показывается в админке и не локализуется во frontend config. После сохранения видна только masked-версия. Пустое поле токена при сохранении сохраняет уже зашифрованное значение без изменений.
+Timeout и количество подсказок остаются общими настройками для всего раздела DaData.
 
-Общие настройки раздела:
+## Учет Запросов
 
-- включить подсказки DaData
-- timeout подсказок DaData
-- количество подсказок DaData
+Счетчик `usage_today` увеличивается ровно один раз на каждую фактическую HTTP-попытку `wp_remote_post` к DaData:
 
-Timeout и количество подсказок общие для всех токенов.
+- `stage=address`
+- `stage=resolve`
+- `stage=city`, если используется
+- retry при переключении на следующий токен
 
-## Суточные лимиты
+Если токен уже исчерпан и запрос через него не отправлялся, счетчик не увеличивается.
 
-Для каждого токена задается суточный лимит запросов. Использование считается по ключу:
+Если запрос был отправлен и получил timeout, HTTP error, `400`, `403`, `429` или другой ответ, счетчик увеличивается, потому что HTTP-попытка фактически была сделана.
+
+Ключ счетчика:
 
 `wdc_dadata_suggestions_usage_{token_id}_{Ymd}`
 
-Дата берется из WordPress date/time API, если оно доступно. Счетчик хранится до конца текущего дня с небольшим буфером.
+Если DaData возвращает quota/limit error, токен помечается отдельным дневным флагом как исчерпанный, но `usage_today` не подменяется значением лимита. Это нужно, чтобы число в админке отражало реальные HTTP-попытки.
 
-Запрос засчитывается только когда HTTP request фактически отправлен в DaData. Если токен уже достиг лимита, он пропускается и запрос через него не выполняется.
+В таблице токенов также показывается последний request audit:
+
+- stage
+- время попытки
+- HTTP status
+- error code
+
+Ключ audit:
+
+`wdc_dadata_suggestions_last_request_{token_id}_{Ymd}`
+
+Возможные причины расхождения с кабинетом DaData:
+
+- кабинет DaData обновляет статистику с задержкой;
+- тот же токен используется где-то еще;
+- `resolve` после выбора дома считается отдельным запросом;
+- retry на другой токен добавляет отдельную HTTP-попытку;
+- city-stage requests тоже считаются, если включены в сценарии.
 
 ## Выбор Токена
 
-`DaDataTokenPool` выбирает первый включенный токен, у которого есть остаток на сегодня. `DaDataSuggestionClient` отправляет запрос с выбранным токеном:
+`DaDataTokenPool` выбирает первый включенный токен, у которого есть остаток на сегодня и который не помечен исчерпанным.
+
+`DaDataSuggestionClient` отправляет запрос с выбранным токеном:
 
 `Authorization: Token <token>`
 
-Если DaData возвращает ошибку лимита или квоты, текущий токен считается исчерпанным на сегодня, и клиент повторяет запрос со следующим доступным токеном. Количество попыток ограничено числом активных токенов.
+Если DaData возвращает ошибку лимита или квоты, текущий токен помечается исчерпанным на сегодня, и клиент повторяет запрос со следующим доступным токеном. Количество попыток ограничено числом активных токенов.
 
-Если токенов нет, AJAX возвращает:
+Если токенов нет, AJAX возвращает `no_available_dadata_token`.
 
-`no_available_dadata_token`
-
-Если все токены исчерпаны:
-
-`dadata_daily_limit_exhausted`
+Если все токены исчерпаны, AJAX возвращает `dadata_daily_limit_exhausted`.
 
 В обоих случаях checkout не ломается, а modal address picker предлагает ручной ввод.
 
@@ -76,13 +87,31 @@ Inline-autocomplete прямо внутри WooCommerce поля не испол
 
 Hidden `wdc_platform_location_display_name`, selected notice и прошлые DaData suggestions не участвуют в opening query.
 
+## Поиск Улицы И Дома
+
+Frontend больше не переводит picker в отдельный restricted mode после выбора улицы.
+
+Поиск адреса всегда идет через `stage=address` по полной строке, которую видит пользователь в modal search input. `house_after_street` остается на backend на будущее, но frontend не вызывает его автоматически.
+
+Если выбрана улица:
+
+- `address_1` получает `street_with_type + " "`;
+- status становится `street_selected`;
+- street FIAS/KLADR hidden fields сохраняются;
+- search input получает полный `unrestrictedValue` или `value` выбранной улицы с завершающей `, `;
+- модалка остается открытой;
+- hint показывает `Уточните номер дома`;
+- следующий поиск снова идет через `stage=address`.
+
+Если пользователь стирает строку и вводит другую улицу, старый `street_fias_id` не влияет на поиск.
+
 ## DaData Request
 
 Server-side proxy использует DaData Suggest API:
 
 `https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address`
 
-`stage=address` отправляет полную строку поиска:
+`stage=address` отправляет:
 
 - `query`
 - `count`
@@ -92,21 +121,7 @@ Server-side proxy использует DaData Suggest API:
 
 `locations_boost` не отправляется. Приоритет по городу не используется, потому что регион и город уже входят в полную query string.
 
-`stage=house_after_street` может ограничивать поиск выбранной `street_fias_id`, потому что пользователь явно выбрал улицу.
-
 `stage=resolve` уточняет финальный выбранный адрес с `count: 1`.
-
-## Street To House
-
-Если выбрана улица:
-
-- `address_1` получает `street_with_type + " "`
-- status становится `street_selected`
-- street FIAS/KLADR hidden fields сохраняются
-- модалка остается открытой
-- следующий поиск идет через `stage=house_after_street`
-
-Кнопка `Изменить улицу` или полная очистка search input сбрасывает выбранную улицу и возвращает поиск в `stage=address`.
 
 ## Финальный Адрес
 
@@ -128,11 +143,11 @@ DaData `postal_code` считается более точным и всегда 
 
 Покупатель может нажать `Использовать введенный адрес`. В этом режиме:
 
-- search value записывается в `address_1`
-- status становится `manual`
-- выбранный город и область не меняются
-- address-specific DaData ids очищаются
-- checkout не блокируется
+- search value записывается в `address_1`;
+- status становится `manual`;
+- выбранный город и область не меняются;
+- address-specific DaData ids очищаются;
+- checkout не блокируется.
 
 ## Hidden Fields And Order Meta
 
