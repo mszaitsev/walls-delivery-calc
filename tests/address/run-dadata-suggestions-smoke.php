@@ -217,16 +217,30 @@ ob_start();
 ( new AddressSuggestionAjax( new WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService( $suggestion_settings, $client, new AddressSuggestionNormalizer() ), $token_pool ) )->handle_selection();
 $selection_payload = json_decode( (string) ob_get_clean(), true );
 dadata_suggestions_assert( true === ( $selection_payload['success'] ?? false ) && true === ( $selection_payload['counted'] ?? false ), 'Selection endpoint must count selected DaData suggestion.' );
+dadata_suggestions_assert( 'suggestion_click' === ( $selection_payload['usage_type'] ?? '' ), 'Selection endpoint must default missing usage_type to suggestion_click.' );
 dadata_suggestions_assert( 2 === $token_pool->usage_today( 'second-token' ), 'Selecting suggestion must increment last used token by additional +1.' );
 dadata_suggestions_assert( 'selection' === ( $token_pool->last_request_today( 'second-token' )['stage'] ?? '' ), 'Selection usage must update diagnostics stage.' );
 dadata_suggestions_assert( 'selection' === ( $token_pool->last_request_today( 'second-token' )['status_code'] ?? '' ), 'Selection usage must update diagnostics status.' );
+dadata_suggestions_assert( 'suggestion_click' === ( $token_pool->last_request_today( 'second-token' )['error_code'] ?? '' ), 'Selection usage diagnostics must store suggestion_click usage type.' );
+
+$_POST = array( 'level' => 'house', 'usage_type' => 'final_selection' );
+ob_start();
+( new AddressSuggestionAjax( new WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService( $suggestion_settings, $client, new AddressSuggestionNormalizer() ), $token_pool ) )->handle_selection();
+$final_selection_payload = json_decode( (string) ob_get_clean(), true );
+dadata_suggestions_assert( true === ( $final_selection_payload['success'] ?? false ) && true === ( $final_selection_payload['counted'] ?? false ), 'Final selection endpoint call must count selected final DaData address.' );
+dadata_suggestions_assert( 'final_selection' === ( $final_selection_payload['usage_type'] ?? '' ), 'Final selection endpoint must preserve usage_type=final_selection.' );
+dadata_suggestions_assert( 3 === $token_pool->usage_today( 'second-token' ), 'Final house selection must add +2 total selection usage: suggestion_click and final_selection.' );
+dadata_suggestions_assert( 'final_selection' === ( $token_pool->last_request_today( 'second-token' )['stage'] ?? '' ), 'Final selection usage must update diagnostics stage.' );
+dadata_suggestions_assert( 'selection' === ( $token_pool->last_request_today( 'second-token' )['status_code'] ?? '' ), 'Final selection usage must keep fire-and-forget selection status.' );
+dadata_suggestions_assert( 'final_selection' === ( $token_pool->last_request_today( 'second-token' )['error_code'] ?? '' ), 'Final selection usage diagnostics must store final_selection usage type.' );
 
 $token_pool->set_last_used_token_id( '' );
-$_POST = array( 'level' => 'street' );
+$_POST = array( 'level' => 'street', 'usage_type' => 'final_selection' );
 ob_start();
 ( new AddressSuggestionAjax( new WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService( $suggestion_settings, $client, new AddressSuggestionNormalizer() ), $token_pool ) )->handle_selection();
 $missing_selection_payload = json_decode( (string) ob_get_clean(), true );
 dadata_suggestions_assert( true === ( $missing_selection_payload['success'] ?? false ) && false === ( $missing_selection_payload['counted'] ?? true ), 'Selection endpoint must not fail when last token id is missing.' );
+dadata_suggestions_assert( 'final_selection' === ( $missing_selection_payload['usage_type'] ?? '' ), 'Final selection endpoint must return counted=false when last token id is missing.' );
 
 $empty_settings = new SettingsRepository();
 $empty_settings->replace( array_merge( $empty_settings->all(), array( 'dadata_suggestions_enabled' => true, 'dadata_suggestions_tokens' => array() ) ) );
@@ -322,6 +336,26 @@ $GLOBALS['wdc_dadata_suggestions_http_requests'] = array();
 $selection_limit_client->suggest( 'address', 'after selection limit' );
 dadata_suggestions_assert( 'Token selection-second-key' === $GLOBALS['wdc_dadata_suggestions_http_requests'][0]['args']['headers']['Authorization'], 'If selection exhausts first token, next suggest must use second token.' );
 
+$street_selection_settings = new SettingsRepository();
+$street_selection_settings->replace( array_merge( $street_selection_settings->all(), array( 'dadata_suggestions_enabled' => true, 'dadata_suggestions_tokens' => array() ) ) );
+$street_selection_pool = new DaDataTokenPool( $street_selection_settings, new EncryptionService() );
+$street_selection_pool->save_tokens_from_admin(
+	array(
+		'id' => array( 'street-selection-token' ),
+		'label' => array( 'Street selection' ),
+		'token' => array( 'street-selection-key' ),
+		'daily_limit' => array( 10000 ),
+		'enabled' => array( 0 => '1' ),
+	)
+);
+$street_selection_pool->set_last_used_token_id( 'street-selection-token' );
+$_POST = array( 'level' => 'street', 'usage_type' => 'suggestion_click' );
+ob_start();
+( new AddressSuggestionAjax( new WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService( new AddressSuggestionSettings( $street_selection_settings, new EncryptionService(), $street_selection_pool ), new DaDataSuggestionClient( new AddressSuggestionSettings( $street_selection_settings, new EncryptionService(), $street_selection_pool ), $street_selection_pool, new Logger() ), new AddressSuggestionNormalizer() ), $street_selection_pool ) )->handle_selection();
+ob_get_clean();
+dadata_suggestions_assert( 1 === $street_selection_pool->usage_today( 'street-selection-token' ), 'Street selection must count only the suggestion_click usage.' );
+dadata_suggestions_assert( 'selection' === ( $street_selection_pool->last_request_today( 'street-selection-token' )['stage'] ?? '' ), 'Street selection must not count final_selection usage.' );
+
 $normalizer = new AddressSuggestionNormalizer();
 $street_item = $normalizer->normalize( array( 'value' => 'Красный пр-кт', 'data' => array( 'fias_level' => '7', 'street_with_type' => 'Красный пр-кт' ) ) );
 dadata_suggestions_assert( 'street' === $street_item['level'], 'Normalizer must detect street suggestions.' );
@@ -343,7 +377,9 @@ dadata_suggestions_assert( ! str_contains( $js, 'var ADDRESS_SELECTOR' ), 'Front
 dadata_suggestions_assert( ! str_contains( $js, '#shipping_address_1,input[name="shipping_address_1"],textarea[name="shipping_address_1"],#billing_address_1' ), 'Frontend suggestions JS must not mix shipping and billing address selectors.' );
 dadata_suggestions_assert( ! str_contains( $js, ".on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, addressSelector" ), 'Frontend suggestions JS must not search from WooCommerce address_1 input.' );
 dadata_suggestions_assert( str_contains( $js, ".on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, '.wdc-address-picker-search'" ), 'Frontend suggestions JS must search from modal input.' );
-dadata_suggestions_assert( str_contains( $js, 'trackSelectionUsage( selectedItem );' ) && str_contains( $js, 'selectItem( selectedItem );' ), 'Selection usage call must be fire-and-forget before applying selected item.' );
+dadata_suggestions_assert( str_contains( $js, "trackSelectionUsage( selectedItem, 'suggestion_click' );" ) && str_contains( $js, 'selectItem( selectedItem );' ), 'Suggestion click usage call must be fire-and-forget before applying selected item.' );
+dadata_suggestions_assert( str_contains( $js, "trackSelectionUsage( item, 'final_selection' );" ), 'Final selection usage must be called from the final address apply path.' );
+dadata_suggestions_assert( str_contains( $js, "usage_type: usageType || 'suggestion_click'" ), 'Selection usage AJAX must send usage_type and default to suggestion_click.' );
 dadata_suggestions_assert( ! str_contains( $js, 'house_after_street' ), 'Frontend suggestions JS must not automatically use house_after_street mode.' );
 dadata_suggestions_assert( ! str_contains( $js, 'selectedStreet' ), 'Frontend suggestions JS must not keep sticky selectedStreet state.' );
 dadata_suggestions_assert( ! str_contains( $js, 'Изменить улицу' ) && ! str_contains( $js, 'wdc-address-picker-change-street' ), 'Frontend suggestions JS must not show change-street mode UI.' );

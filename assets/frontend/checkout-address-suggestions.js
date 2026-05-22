@@ -426,14 +426,15 @@
 		} );
 	}
 
-	function trackSelectionUsage( item ) {
+	function trackSelectionUsage( item, usageType ) {
 		if ( ! config.ajax_url ) {
 			return;
 		}
 		$.post( config.ajax_url, {
 			action: config.selection_action || 'wdc_platform_dadata_suggestion_selected',
 			nonce: config.nonce || '',
-			level: item && item.level ? item.level : 'unknown'
+			level: item && item.level ? item.level : 'unknown',
+			usage_type: usageType || 'suggestion_click'
 		} ).done( function ( response ) {
 			log( 'selection usage counted', response || {} );
 		} ).fail( function () {
@@ -591,6 +592,7 @@
 		}
 		setHiddenData( prefix, item, 'resolved' );
 		stateFor( prefix ).lastResolved = item;
+		trackSelectionUsage( item, 'final_selection' );
 		closeAddressPicker();
 		showSelectedNotice( prefix, 'Адрес выбран: ' + ( item.label || item.value || '' ) );
 		$( document.body ).trigger( 'update_checkout' );
@@ -634,7 +636,7 @@
 					event.stopImmediatePropagation();
 				}
 				var selectedItem = itemStore[ $( this ).attr( 'data-key' ) || '' ];
-				trackSelectionUsage( selectedItem );
+				trackSelectionUsage( selectedItem, 'suggestion_click' );
 				selectItem( selectedItem );
 			} )
 			.on( 'click' + namespace, '.wdc-address-picker-manual', manualFallback )

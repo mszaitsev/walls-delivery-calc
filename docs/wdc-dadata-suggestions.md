@@ -1,4 +1,4 @@
-# WDC DaData Suggestions 0.14.13
+# WDC DaData Suggestions 0.14.14
 
 DaData используется только для визуальных подсказок адреса в checkout. Постфактум-нормализация адреса через DaData удалена из runtime pipeline.
 
@@ -35,6 +35,20 @@ HTTP-попытка считается один раз для:
 `wdc_platform_dadata_suggestion_selected`
 
 Frontend вызывает этот endpoint fire-and-forget при клике по DaData item. Запрос не блокирует UX и не мешает применению адреса, если endpoint не ответил.
+
+Endpoint принимает `usage_type`:
+
+- `suggestion_click` - клик по любой строке подсказки, значение по умолчанию для обратной совместимости;
+- `final_selection` - финальный выбор адреса, после которого модалка закрывается и данные переносятся в checkout fields.
+
+Итоговый учет:
+
+- HTTP request to DaData: `+1`;
+- click on suggestion row: `+1`;
+- final address selection that closes modal and fills checkout fields: `+1`;
+- manual fallback: `+0`.
+
+Для финального выбора дома/квартиры обычно получается: HTTP-поиск `+1`, клик по строке `+1`, resolve HTTP request `+1`, финальное применение адреса `+1`.
 
 Для selection usage используется последний DaData token id, сохраненный после последнего HTTP request в сессии WooCommerce. Если token id не найден, endpoint возвращает success с `counted=false` и checkout не ломается.
 

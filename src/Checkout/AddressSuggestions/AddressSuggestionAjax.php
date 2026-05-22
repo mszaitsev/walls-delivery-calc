@@ -39,16 +39,19 @@ final class AddressSuggestionAjax {
 
 	public function handle_selection(): void {
 		$token_id = $this->token_pool instanceof DaDataTokenPool ? $this->token_pool->last_used_token_id() : '';
+		$usage_type = $this->selection_usage_type();
+		$stage = 'final_selection' === $usage_type ? 'final_selection' : 'selection';
 		$counted = false;
 		if ( '' !== $token_id && $this->token_pool instanceof DaDataTokenPool ) {
 			$this->token_pool->increment_usage( $token_id );
-			$this->token_pool->record_request_attempt( $token_id, 'selection', $this->field( 'level' ), false, true, 'selection', '' );
+			$this->token_pool->record_request_attempt( $token_id, $stage, $this->field( 'level' ), false, true, 'selection', $usage_type );
 			$counted = true;
 		}
 
 		$payload = array(
 			'success' => true,
 			'counted' => $counted,
+			'usage_type' => $usage_type,
 		);
 
 		if ( function_exists( 'wp_send_json' ) ) {
@@ -57,6 +60,11 @@ final class AddressSuggestionAjax {
 		}
 
 		echo function_exists( 'wp_json_encode' ) ? wp_json_encode( $payload, JSON_UNESCAPED_UNICODE ) : json_encode( $payload, JSON_UNESCAPED_UNICODE );
+	}
+
+	private function selection_usage_type(): string {
+		$type = $this->field( 'usage_type' );
+		return 'final_selection' === $type ? 'final_selection' : 'suggestion_click';
 	}
 
 	private function field( string $key ): string {
