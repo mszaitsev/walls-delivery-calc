@@ -84,6 +84,8 @@ final class LocationsAdminPage {
 				<button class="button" type="submit" name="wdc_locations_action" value="import_demo"><?php echo esc_html__( 'Импортировать демо-данные', 'walls-delivery-calc' ); ?></button>
 				<button class="button button-primary" type="submit" name="wdc_locations_action" value="reimport_demo"><?php echo esc_html__( 'Переимпортировать демо-данные', 'walls-delivery-calc' ); ?></button>
 				<button class="button" type="submit" name="wdc_locations_action" value="import_fias_prepared"><?php echo esc_html__( 'Import prepared FIAS dataset', 'walls-delivery-calc' ); ?></button>
+				<p class="description"><?php echo esc_html__( 'Будут удалены все населенные пункты и алиасы из локальной базы WDC. Это действие нужно выполнять перед загрузкой новой полной базы.', 'walls-delivery-calc' ); ?></p>
+				<button class="button button-secondary" type="submit" name="wdc_locations_action" value="clear_all" onclick="return window.confirm('<?php echo esc_js( __( 'Удалить все населенные пункты и алиасы из локальной базы WDC?', 'walls-delivery-calc' ) ); ?>');"><?php echo esc_html__( 'Очистить базу населенных пунктов', 'walls-delivery-calc' ); ?></button>
 			</form>
 
 			<form class="wdc-locations-search" method="get">
@@ -134,8 +136,22 @@ final class LocationsAdminPage {
 		}
 
 		$action = isset( $_POST['wdc_locations_action'] ) ? sanitize_key( wp_unslash( $_POST['wdc_locations_action'] ) ) : '';
-		if ( ! in_array( $action, array( 'import_demo', 'reimport_demo', 'import_fias_prepared' ), true ) ) {
+		if ( ! in_array( $action, array( 'import_demo', 'reimport_demo', 'import_fias_prepared', 'clear_all' ), true ) ) {
 			return '';
+		}
+
+		if ( 'clear_all' === $action ) {
+			try {
+				$stats = $this->repository->clear_all();
+			} catch ( RuntimeException ) {
+				return __( 'Не удалось очистить базу населенных пунктов. Подробности см. в логах.', 'walls-delivery-calc' );
+			}
+
+			return sprintf(
+				__( 'База населенных пунктов очищена. Удалено: населенных пунктов — %s, алиасов — %s.', 'walls-delivery-calc' ),
+				$this->deleted_count_label( $stats['locations_deleted'] ),
+				$this->deleted_count_label( $stats['aliases_deleted'] )
+			);
 		}
 
 		if ( 'import_fias_prepared' === $action ) {
@@ -172,6 +188,10 @@ final class LocationsAdminPage {
 
 		$stats = $this->fias_limiter->stats();
 		return sprintf( '%d/%d minute, %d/%d day', $stats['minute_count'], $stats['minute_limit'], $stats['day_count'], $stats['daily_limit'] );
+	}
+
+	private function deleted_count_label( ?int $count ): string {
+		return null === $count ? '0' : (string) $count;
 	}
 
 	private function gar_status_label(): string {
