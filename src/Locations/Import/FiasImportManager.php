@@ -97,7 +97,7 @@ final class FiasImportManager {
 
 		return new Location(
 			null,
-			trim( (string) ( $row['fias_id'] ?? '' ) ),
+			$this->fias_id( $row['fias_id'] ?? '', $row['gar_id'] ?? '' ),
 			trim( (string) ( $row['gar_id'] ?? '' ) ),
 			strtoupper( trim( (string) ( $row['country_code'] ?? 'RU' ) ) ),
 			$region,
@@ -109,8 +109,39 @@ final class FiasImportManager {
 			trim( (string) ( $row['postcode'] ?? '' ) ),
 			isset( $row['latitude'] ) && '' !== (string) $row['latitude'] ? (float) $row['latitude'] : null,
 			isset( $row['longitude'] ) && '' !== (string) $row['longitude'] ? (float) $row['longitude'] : null,
-			(bool) ( $row['active'] ?? true )
+			(bool) ( $row['active'] ?? true ),
+			$this->gar_object_id( $row['gar_object_id'] ?? $row['gar_id'] ?? '' ),
+			trim( (string) ( $row['kladr_id'] ?? '' ) ),
+			'',
+			trim( (string) ( $row['city_type'] ?? '' ) ),
+			trim( (string) ( $row['city_fias_id'] ?? '' ) ),
+			trim( (string) ( $row['city_kladr_id'] ?? '' ) ),
+			trim( (string) ( $row['place_name'] ?? $settlement ?: $city ) ),
+			trim( (string) ( $row['place_type'] ?? $row['settlement_type'] ?? 'city' ) ),
+			isset( $row['place_level'] ) && '' !== (string) $row['place_level'] ? (int) $row['place_level'] : 0,
+			trim( (string) ( $row['okato'] ?? '' ) ),
+			trim( (string) ( $row['oktmo'] ?? '' ) ),
+			trim( (string) ( $row['postal_code'] ?? $row['postcode'] ?? '' ) )
 		);
+	}
+
+	private function gar_object_id( mixed $value ): int {
+		$value = trim( (string) $value );
+		if ( is_numeric( $value ) ) {
+			return (int) $value;
+		}
+
+		return '' !== $value ? (int) sprintf( '%u', crc32( $value ) ) : 0;
+	}
+
+	private function fias_id( mixed $value, mixed $fallback ): string {
+		$value = trim( (string) $value );
+		if ( '' !== $value ) {
+			return $value;
+		}
+
+		$fallback = trim( (string) $fallback );
+		return '' !== $fallback ? 'legacy-' . $fallback : '';
 	}
 
 	private function day(): int {

@@ -56,7 +56,7 @@ final class CheckoutLocationSearch {
 	}
 
 	private function score( Location $location, string $query ): int {
-		$settlement = $this->normalize( $location->settlement_name );
+		$settlement = $this->normalize( $location->resolved_place_name() );
 		$city       = $this->normalize( $location->city_name );
 		$region     = $this->normalize( $location->region_name );
 		$display    = $this->normalize( $location->display_name );

@@ -208,7 +208,7 @@ $importer = new LocationImportService( $repository );
 $search = new LocationSearchService( $repository );
 
 $imported = $importer->import_from_json_file( dirname( __DIR__, 2 ) . '/database/demo/locations-demo.json' );
-locations_smoke_assert( $imported >= 9, 'Demo dataset must import the stabilization demo locations.' );
+locations_smoke_assert( $imported >= 9, sprintf( 'Demo dataset must import the stabilization demo locations, imported %d.', $imported ) );
 locations_smoke_assert( $repository->count_all() > 0, 'Repository count must be greater than zero.' );
 locations_smoke_assert( method_exists( $repository, 'count_regions' ), 'LocationRepository must expose count_regions method.' );
 locations_smoke_assert( $repository->count_regions() >= 5, 'Repository must count unique active regions.' );
@@ -242,7 +242,10 @@ $locations_html = (string) ob_get_clean();
 locations_smoke_assert( str_contains( $locations_html, 'Регионов/областей:' ), 'Locations admin page must render regions counter label.' );
 
 locations_smoke_assert( str_contains( $locations_html, 'Очистить базу населенных пунктов' ), 'Locations admin page must render clear locations button.' );
-locations_smoke_assert( str_contains( $locations_html, 'Будут удалены все населенные пункты и алиасы из локальной базы WDC.' ), 'Locations admin page must render clear warning.' );
+locations_smoke_assert( str_contains( $locations_html, 'Импорт GAR/ФИАС CSV' ), 'Locations admin page must render GAR CSV import section.' );
+locations_smoke_assert( str_contains( $locations_html, 'Экспорт / импорт подготовленной базы' ), 'Locations admin page must render snapshot section.' );
+locations_smoke_assert( ! str_contains( $locations_html, 'Импортировать демо-данные' ), 'Locations admin page must not render demo import button.' );
+locations_smoke_assert( ! str_contains( $locations_html, 'Import prepared FIAS dataset' ), 'Locations admin page must not render prepared FIAS import button.' );
 locations_smoke_assert( str_contains( $locations_html, 'Удалить все населенные пункты и алиасы из локальной базы WDC?' ), 'Locations admin page must render JS confirmation.' );
 
 locations_smoke_assert( method_exists( $repository, 'clear_all' ), 'LocationRepository must expose clear_all method.' );

@@ -3,7 +3,7 @@
 ## Locations Storage Architecture
 
 The locations foundation stores settlement-level delivery destinations in `wdc_locations`.
-The table is intentionally independent from checkout and legacy shipping code. It can be populated from a small demo dataset today and from FIAS/GAR-oriented importers later.
+The table is intentionally independent from checkout and legacy shipping code. As of `0.15.0`, production data is populated from a prepared GAR/ФИАС CSV instead of the old demo admin import.
 
 Key fields:
 
@@ -69,3 +69,7 @@ Carrier integrations can later map carrier city identifiers or aliases to `wdc_l
 ## Future GAR Changes Sync
 
 A later GAR sync can build on `GarChangesService` by adding a real adapter that checks GAR change feeds, records pending changes, and triggers a controlled import/update process.
+
+# GAR CSV Import Note
+
+As of `0.15.0`, the local places foundation is populated from prepared `gar_places.csv` through `wdc_gar_places_stage`, `wdc_regions`, and the expanded `wdc_locations` schema. See [wdc-gar-places-import.md](wdc-gar-places-import.md) for the current import and snapshot workflow.
