@@ -235,7 +235,10 @@ final class LocationRepository {
 		$placeholders = implode( ', ', array_fill( 0, count( $location_ids ), '%d' ) );
 		$args = $location_ids;
 		array_unshift( $args, $source );
-		$this->wpdb->query( $this->wpdb->prepare( "DELETE FROM {$this->alias_table_name()} WHERE source = %s AND location_id IN ({$placeholders})", ...$args ) );
+		$result = $this->wpdb->query( $this->wpdb->prepare( "DELETE FROM {$this->alias_table_name()} WHERE source = %s AND location_id IN ({$placeholders})", ...$args ) );
+		if ( false === $result ) {
+			$this->throw_sql_error( 'Location aliases cleanup failed' );
+		}
 
 		$now = current_time( 'mysql' );
 		$rows = array();
@@ -445,7 +448,15 @@ final class LocationRepository {
 			}
 		}
 
-		$this->wpdb->query( $this->wpdb->prepare( $sql, ...$args ) );
+		$result = $this->wpdb->query( $this->wpdb->prepare( $sql, ...$args ) );
+		if ( false === $result ) {
+			$this->throw_sql_error( str_contains( $table, 'wdc_locations' ) ? 'Location bulk upsert failed' : 'Location bulk insert failed' );
+		}
+	}
+
+	private function throw_sql_error( string $message ): never {
+		$error = trim( (string) ( $this->wpdb->last_error ?? '' ) );
+		throw new RuntimeException( trim( $message . ': ' . ( '' !== $error ? $error : 'unknown SQL error' ) ) );
 	}
 
 	/**

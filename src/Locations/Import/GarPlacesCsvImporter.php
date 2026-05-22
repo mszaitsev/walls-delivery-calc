@@ -142,6 +142,7 @@ final class GarPlacesCsvImporter {
 		if ( ! is_readable( $path ) ) {
 			throw new RuntimeException( 'GAR CSV file is not readable.' );
 		}
+		$this->ensure_stage_schema();
 
 		$file = new SplFileObject( $path, 'rb' );
 		$file->setFlags( SplFileObject::READ_CSV | SplFileObject::SKIP_EMPTY );
@@ -257,6 +258,7 @@ final class GarPlacesCsvImporter {
 
 		if ( 0 === (int) ( $job['byte_offset'] ?? 0 ) ) {
 			$this->clear_stage();
+			$this->ensure_stage_schema();
 		}
 
 		$handle = fopen( $path, 'rb' );
@@ -447,7 +449,7 @@ final class GarPlacesCsvImporter {
 	 * @param array<int,array<string,mixed>> $rows
 	 */
 	private function insert_stage_batch( array $rows ): int {
-		if ( property_exists( $this->wpdb, 'stage' ) ) {
+		if ( property_exists( $this->wpdb, 'stage' ) && ! (bool) ( $this->wpdb->force_sql_bulk ?? false ) ) {
 			foreach ( $rows as $row ) {
 				$this->wpdb->insert( $this->stage_table(), $row, $this->stage_formats( $row ) );
 			}
@@ -484,7 +486,11 @@ final class GarPlacesCsvImporter {
 			}
 		}
 
-		$this->wpdb->query( $this->wpdb->prepare( $sql, ...$args ) );
+		$result = $this->wpdb->query( $this->wpdb->prepare( $sql, ...$args ) );
+		if ( false === $result ) {
+			$error = trim( (string) ( $this->wpdb->last_error ?? '' ) );
+			throw new RuntimeException( trim( 'GAR stage bulk insert failed: ' . ( '' !== $error ? $error : 'unknown SQL error' ) ) );
+		}
 	}
 
 	/**
@@ -580,6 +586,27 @@ final class GarPlacesCsvImporter {
 		$prepared = $this->wpdb->prepare( 'SHOW TABLES LIKE %s', $table );
 		$result = $this->wpdb->get_var( $prepared );
 		return ! in_array( $result, array( null, '', 0, '0' ), true );
+	}
+
+	private function ensure_stage_schema(): void {
+		if ( ! $this->table_exists( $this->stage_table() ) ) {
+			throw new RuntimeException( 'GAR staging table does not exist. Run plugin migrations first.' );
+		}
+
+		$rows = $this->wpdb->get_results( "DESCRIBE {$this->stage_table()}", ARRAY_A );
+		$columns = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$field = (string) ( $row['Field'] ?? '' );
+			if ( '' !== $field ) {
+				$columns[ $field ] = true;
+			}
+		}
+
+		foreach ( $this->stage_columns as $column ) {
+			if ( ! isset( $columns[ $column ] ) ) {
+				throw new RuntimeException( 'GAR staging table schema is outdated. Run plugin migrations.' );
+			}
+		}
 	}
 
 	private function stage_table(): string {

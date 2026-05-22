@@ -27,6 +27,13 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $aliases = array();
 		public array $carrier_codes = array();
 		public array $missing_tables = array();
+		public array $stage_columns = array( 'region_code', 'region_name', 'region_type', 'region_fias_id', 'region_kladr_id', 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level', 'city_name', 'city_type', 'city_fias_id', 'city_kladr_id', 'place_name', 'place_type', 'place_level', 'display_name', 'fias_id', 'gar_object_id', 'kladr_id', 'okato', 'oktmo', 'postal_code' );
+		public array $location_columns = array( 'id', 'gar_object_id', 'fias_id', 'kladr_id', 'gar_id', 'country_code', 'region_name', 'region_code', 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level', 'city_name', 'city_type', 'city_fias_id', 'city_kladr_id', 'settlement_name', 'settlement_type', 'place_name', 'place_type', 'place_level', 'display_name', 'postal_code', 'okato', 'oktmo', 'latitude', 'longitude', 'searchable_text', 'active', 'created_at', 'updated_at' );
+		public array $indexes = array();
+		public bool $force_sql_bulk = false;
+		public bool $fail_next_query = false;
+		public bool $fail_bulk_insert = false;
+		public string $last_error = '';
 
 		public function prepare( string $query, mixed ...$args ): array {
 			return array( 'query' => $query, 'args' => $args );
@@ -114,6 +121,25 @@ if ( ! class_exists( 'wpdb' ) ) {
 			$sql = is_array( $query ) ? $query['query'] : (string) $query;
 			$args = is_array( $query ) ? $query['args'] : array();
 
+			if ( str_starts_with( $sql, 'SHOW COLUMNS FROM' ) ) {
+				$parts = preg_split( '/\s+/', $sql );
+				$table = (string) ( $parts[3] ?? '' );
+				$column = (string) ( $args[0] ?? '' );
+				$columns = $this->columns_for( $table );
+				if ( '' !== $column ) {
+					return in_array( $column, $columns, true ) ? array( array( 'Field' => $column ) ) : array();
+				}
+
+				return array_map( static fn( string $field ): array => array( 'Field' => $field ), $columns );
+			}
+
+			if ( str_starts_with( $sql, 'SHOW INDEX FROM' ) ) {
+				$parts = preg_split( '/\s+/', $sql );
+				$table = (string) ( $parts[3] ?? '' );
+				$index = (string) ( $args[0] ?? '' );
+				return in_array( $index, $this->indexes[ $table ] ?? array(), true ) ? array( array( 'Key_name' => $index ) ) : array();
+			}
+
 			if ( str_starts_with( $sql, 'DESCRIBE' ) ) {
 				$table = trim( substr( $sql, 9 ) );
 				return array_map( static fn( string $field ): array => array( 'Field' => $field ), $this->columns_for( $table ) );
@@ -174,16 +200,42 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return count( $this->locations );
 		}
 
-		public function query( string $query ): int {
-			if ( str_contains( $query, 'wdc_gar_places_stage' ) ) {
+		public function query( mixed $query ): int|false {
+			$sql = is_array( $query ) ? (string) $query['query'] : (string) $query;
+			if ( $this->fail_next_query ) {
+				$this->fail_next_query = false;
+				$this->last_error = '' !== $this->last_error ? $this->last_error : 'simulated SQL failure';
+				return false;
+			}
+			if ( $this->fail_bulk_insert && str_starts_with( $sql, 'INSERT' ) ) {
+				$this->last_error = '' !== $this->last_error ? $this->last_error : 'simulated SQL insert failure';
+				return false;
+			}
+
+			if ( preg_match( '/ALTER TABLE (wdc_[a-z_]+) ADD COLUMN ([a-z_]+)/', $sql, $match ) ) {
+				if ( 'wdc_gar_places_stage' === $match[1] && ! in_array( $match[2], $this->stage_columns, true ) ) {
+					$this->stage_columns[] = $match[2];
+				}
+				if ( 'wdc_locations' === $match[1] && ! in_array( $match[2], $this->location_columns, true ) ) {
+					$this->location_columns[] = $match[2];
+				}
+				return 1;
+			}
+
+			if ( preg_match( '/ALTER TABLE (wdc_[a-z_]+) ADD KEY ([a-z_]+)/', $sql, $match ) ) {
+				$this->indexes[ $match[1] ][] = $match[2];
+				return 1;
+			}
+
+			if ( str_contains( $sql, 'wdc_gar_places_stage' ) ) {
 				$this->stage = array();
-			} elseif ( str_contains( $query, 'wdc_location_aliases' ) ) {
+			} elseif ( str_contains( $sql, 'wdc_location_aliases' ) ) {
 				$this->aliases = array();
-			} elseif ( str_contains( $query, 'wdc_location_carrier_codes' ) ) {
+			} elseif ( str_contains( $sql, 'wdc_location_carrier_codes' ) ) {
 				$this->carrier_codes = array();
-			} elseif ( str_contains( $query, 'wdc_locations' ) ) {
+			} elseif ( str_contains( $sql, 'wdc_locations' ) ) {
 				$this->locations = array();
-			} elseif ( str_contains( $query, 'wdc_regions' ) ) {
+			} elseif ( str_contains( $sql, 'wdc_regions' ) ) {
 				$this->regions = array();
 			}
 			return 1;
@@ -214,7 +266,11 @@ if ( ! class_exists( 'wpdb' ) ) {
 			}
 
 			if ( 'wdc_locations' === $table ) {
-				return array( 'id', 'gar_object_id', 'fias_id', 'kladr_id', 'gar_id', 'country_code', 'region_name', 'region_code', 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level', 'city_name', 'city_type', 'city_fias_id', 'city_kladr_id', 'settlement_name', 'settlement_type', 'place_name', 'place_type', 'place_level', 'display_name', 'postal_code', 'okato', 'oktmo', 'latitude', 'longitude', 'searchable_text', 'active', 'created_at', 'updated_at' );
+				return $this->location_columns;
+			}
+
+			if ( 'wdc_gar_places_stage' === $table ) {
+				return $this->stage_columns;
 			}
 
 			return array( 'id', 'region_code', 'region_name', 'gar_object_id', 'fias_id', 'carrier_key', 'external_code', 'created_at', 'updated_at' );
@@ -287,6 +343,77 @@ function gar_smoke_assert( bool $condition, string $message ): void {
 	}
 }
 
+$old_schema_db = new wpdb();
+$old_schema_db->stage_columns = array_values(
+	array_diff(
+		$old_schema_db->stage_columns,
+		array( 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level' )
+	)
+);
+$old_schema_db->location_columns = array_values(
+	array_diff(
+		$old_schema_db->location_columns,
+		array( 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level' )
+	)
+);
+$GLOBALS['wpdb'] = $old_schema_db;
+$migration_0010 = require dirname( __DIR__, 2 ) . '/database/migrations/0010_add_gar_district_columns.php';
+$migration_0010();
+foreach ( array( 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level' ) as $column ) {
+	gar_smoke_assert( in_array( $column, $old_schema_db->stage_columns, true ), '0010 migration must add missing stage district columns.' );
+	gar_smoke_assert( in_array( $column, $old_schema_db->location_columns, true ), '0010 migration must add missing location district columns.' );
+}
+foreach ( array( 'district_fias_id', 'district_gar_object_id' ) as $index ) {
+	gar_smoke_assert( in_array( $index, $old_schema_db->indexes['wdc_gar_places_stage'] ?? array(), true ), '0010 migration must add stage district indexes.' );
+}
+foreach ( array( 'ix_district_fias_id', 'ix_district_gar_object_id', 'ix_region_district_place' ) as $index ) {
+	gar_smoke_assert( in_array( $index, $old_schema_db->indexes['wdc_locations'] ?? array(), true ), '0010 migration must add location district indexes.' );
+}
+
+$outdated_db = new wpdb();
+$outdated_db->stage_columns = array_values( array_diff( $outdated_db->stage_columns, array( 'district_name' ) ) );
+$outdated_importer = new GarPlacesCsvImporter( new LocationRepository( $outdated_db ), new RegionRepository( $outdated_db ), new LocationAliasGenerator(), $outdated_db );
+$outdated_result = $outdated_importer->import_from_file( dirname( __DIR__ ) . '/fixtures/gar_places_sample.csv' );
+gar_smoke_assert( ! $outdated_result->success && str_contains( implode( ' ', $outdated_result->errors ), 'GAR staging table schema is outdated. Run plugin migrations.' ), 'Outdated stage schema must fail with clear preflight error.' );
+
+$failing_db = new wpdb();
+$failing_db->force_sql_bulk = true;
+$failing_db->fail_bulk_insert = true;
+$failing_db->last_error = 'Unknown column district_name';
+$failing_importer = new GarPlacesCsvImporter( new LocationRepository( $failing_db ), new RegionRepository( $failing_db ), new LocationAliasGenerator(), $failing_db );
+$failing_job = $failing_importer->create_job( dirname( __DIR__ ) . '/fixtures/gar_places_sample.csv', 'failing-job' );
+$failing_job = $failing_importer->step_job( $failing_job );
+gar_smoke_assert( 'failed' === $failing_job['phase'], 'Failed stage bulk insert must set GAR job phase to failed.' );
+gar_smoke_assert( 0 === (int) $failing_job['stage_rows'], 'Failed stage bulk insert must not increment stage_rows.' );
+gar_smoke_assert( array() !== $failing_job['errors'] && str_contains( implode( ' ', $failing_job['errors'] ), 'GAR stage bulk insert failed: Unknown column district_name' ), 'Failed stage bulk insert must expose SQL error in job errors.' );
+
+$direct_failure_db = new wpdb();
+$direct_failure_db->fail_bulk_insert = true;
+$direct_failure_db->last_error = 'simulated stage insert failure';
+$direct_failure_importer = new GarPlacesCsvImporter( new LocationRepository( $direct_failure_db ), new RegionRepository( $direct_failure_db ), new LocationAliasGenerator(), $direct_failure_db );
+$bulk_stage = new ReflectionMethod( GarPlacesCsvImporter::class, 'bulk_insert_stage_rows' );
+$bulk_stage->setAccessible( true );
+$thrown = false;
+try {
+	$bulk_stage->invoke(
+		$direct_failure_importer,
+		array(
+			array(
+				'region_code' => '54',
+				'region_name' => 'Новосибирская обл',
+				'place_name' => 'Новосибирск',
+				'fias_id' => 'fias',
+				'gar_object_id' => 1,
+			),
+		)
+	);
+} catch ( ReflectionException $exception ) {
+	throw $exception;
+} catch ( Throwable $exception ) {
+	$thrown = str_contains( $exception->getMessage(), 'GAR stage bulk insert failed: simulated stage insert failure' );
+}
+gar_smoke_assert( $thrown, 'bulk_insert_stage_rows must throw RuntimeException when $wpdb->query() returns false.' );
+
 $wpdb = new wpdb();
 $locations = new LocationRepository( $wpdb );
 $regions = new RegionRepository( $wpdb );
@@ -342,7 +469,7 @@ gar_smoke_assert( 1 === count( $wpdb->carrier_codes ), 'carrier_codes table foun
 
 $snapshot = tempnam( sys_get_temp_dir(), 'wdc-snapshot-' );
 gar_smoke_assert( is_string( $snapshot ), 'Snapshot temp file must be created.' );
-$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.2' );
+$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.3' );
 gar_smoke_assert( $exported > 0, 'Snapshot export must include rows from 4 tables.' );
 $snapshot_text = (string) file_get_contents( $snapshot );
 gar_smoke_assert( str_contains( $snapshot_text, '"table":"wdc_regions"' ) && str_contains( $snapshot_text, '"table":"wdc_location_carrier_codes"' ), 'Snapshot export must include all foundation tables.' );
@@ -366,7 +493,7 @@ gar_smoke_assert( $restored_has_district, 'Snapshot import must restore district
 $snapshot_job_file = tempnam( sys_get_temp_dir(), 'wdc-snapshot-job-' );
 gar_smoke_assert( is_string( $snapshot_job_file ), 'Snapshot job temp file must be created.' );
 $snapshot_exporter = new LocationsSnapshotExporter( $wpdb );
-$snapshot_job = $snapshot_exporter->create_job( $snapshot_job_file, '0.15.2' );
+$snapshot_job = $snapshot_exporter->create_job( $snapshot_job_file, '0.15.3' );
 for ( $i = 0; $i < 100 && 'finished' !== $snapshot_job['phase']; $i++ ) {
 	$snapshot_job = $snapshot_exporter->step_job( $snapshot_job, 2 );
 }
@@ -402,13 +529,18 @@ for ( $i = 0; $i < 10 && 'finished' !== $job['phase'] && 'failed' !== $job['phas
 }
 gar_smoke_assert( 'finished' === $job['phase'], 'GAR progress job must advance staging -> processing -> finished.' );
 gar_smoke_assert( (int) $job['rows_read'] > 0 && (int) $job['locations_imported'] > 0, 'GAR progress counters must increase.' );
+gar_smoke_assert( 4 === (int) $job['rows_read'], 'Successful sample job must read all 4 data rows.' );
+gar_smoke_assert( 4 === (int) $job['stage_rows'], 'Successful sample job must stage all 4 valid rows.' );
+gar_smoke_assert( 4 === (int) $job['processed_rows'], 'Successful sample job must process all 4 staged rows.' );
+gar_smoke_assert( 4 === (int) $job['locations_imported'], 'Successful sample job must import all 4 locations.' );
+gar_smoke_assert( (int) $job['regions_imported'] > 0, 'Successful sample job must import regions.' );
 
 $_SERVER['REQUEST_METHOD'] = 'GET';
 $_GET = array( 'location_query' => 'Новос' );
 $_POST = array();
 ob_start();
 ( new LocationsAdminPage(
-	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.2' ),
+	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.3' ),
 	$locations,
 	$search_service,
 	new LocationImportService( $locations ),
