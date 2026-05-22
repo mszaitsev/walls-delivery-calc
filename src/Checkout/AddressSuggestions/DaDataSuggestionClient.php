@@ -45,6 +45,7 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 			}
 
 			$this->logger->debug( 'DaData suggestions request started.', array( 'host' => 'suggestions.dadata.ru', 'endpoint' => 'suggest/address', 'stage' => $stage, 'token_id' => (string) $token['id'] ) );
+			$this->token_pool->set_last_used_token_id( (string) $token['id'] );
 
 			try {
 				$response = wp_remote_post(

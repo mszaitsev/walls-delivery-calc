@@ -11,6 +11,7 @@ defined( 'ABSPATH' ) || exit;
 final class DaDataTokenPool {
 	public const OPTION_KEY = 'dadata_suggestions_tokens';
 	private const DEFAULT_DAILY_LIMIT = 10000;
+	private static string $fallback_last_used_token_id = '';
 
 	public function __construct(
 		private SettingsRepository $settings,
@@ -106,6 +107,23 @@ final class DaDataTokenPool {
 		$this->set_usage( $token_id, $this->usage_today( $token_id ) + 1 );
 	}
 
+	public function set_last_used_token_id( string $token_id ): void {
+		$token_id = $this->sanitize_key( $token_id );
+		self::$fallback_last_used_token_id = $token_id;
+		if ( function_exists( 'WC' ) && is_object( WC() ) && isset( WC()->session ) && is_object( WC()->session ) && method_exists( WC()->session, 'set' ) ) {
+			WC()->session->set( 'wdc_dadata_last_token_id', $token_id );
+		}
+	}
+
+	public function last_used_token_id(): string {
+		if ( function_exists( 'WC' ) && is_object( WC() ) && isset( WC()->session ) && is_object( WC()->session ) && method_exists( WC()->session, 'get' ) ) {
+			$value = WC()->session->get( 'wdc_dadata_last_token_id', '' );
+			return is_scalar( $value ) ? $this->sanitize_key( (string) $value ) : '';
+		}
+
+		return self::$fallback_last_used_token_id;
+	}
+
 	/**
 	 * @param array<string,mixed> $token
 	 */
@@ -134,7 +152,7 @@ final class DaDataTokenPool {
 		return is_array( $value ) ? $value : array();
 	}
 
-	public function record_request_attempt( string $token_id, string $stage, string $query, bool $attempted, bool $counted, int $status_code, string $error_code ): void {
+	public function record_request_attempt( string $token_id, string $stage, string $query, bool $attempted, bool $counted, int|string $status_code, string $error_code ): void {
 		if ( '' === $token_id ) {
 			return;
 		}

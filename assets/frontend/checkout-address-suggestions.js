@@ -426,6 +426,21 @@
 		} );
 	}
 
+	function trackSelectionUsage( item ) {
+		if ( ! config.ajax_url ) {
+			return;
+		}
+		$.post( config.ajax_url, {
+			action: config.selection_action || 'wdc_platform_dadata_suggestion_selected',
+			nonce: config.nonce || '',
+			level: item && item.level ? item.level : 'unknown'
+		} ).done( function ( response ) {
+			log( 'selection usage counted', response || {} );
+		} ).fail( function () {
+			log( 'selection usage failed' );
+		} );
+	}
+
 	function renderEmpty( query ) {
 		resultsBox().html(
 			'<div class="wdc-address-picker-empty">Адрес не найден. Можно продолжить ручной ввод.</div>' +
@@ -618,7 +633,9 @@
 				if ( event.stopImmediatePropagation ) {
 					event.stopImmediatePropagation();
 				}
-				selectItem( itemStore[ $( this ).attr( 'data-key' ) || '' ] );
+				var selectedItem = itemStore[ $( this ).attr( 'data-key' ) || '' ];
+				trackSelectionUsage( selectedItem );
+				selectItem( selectedItem );
 			} )
 			.on( 'click' + namespace, '.wdc-address-picker-manual', manualFallback )
 			.on( 'click' + namespace, '.wdc-address-picker-close', closeAddressPicker )

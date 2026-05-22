@@ -7,14 +7,20 @@ defined( 'ABSPATH' ) || exit;
 
 final class AddressSuggestionAjax {
 	public const ACTION = 'wdc_platform_dadata_address_suggest';
+	public const SELECTION_ACTION = 'wdc_platform_dadata_suggestion_selected';
 	public const NONCE_ACTION = 'wdc_platform_dadata_address_suggest';
 
-	public function __construct( private AddressSuggestionService $service ) {
+	public function __construct(
+		private AddressSuggestionService $service,
+		private ?DaDataTokenPool $token_pool = null
+	) {
 	}
 
 	public function register(): void {
 		add_action( 'wp_ajax_' . self::ACTION, array( $this, 'handle' ) );
 		add_action( 'wp_ajax_nopriv_' . self::ACTION, array( $this, 'handle' ) );
+		add_action( 'wp_ajax_' . self::SELECTION_ACTION, array( $this, 'handle_selection' ) );
+		add_action( 'wp_ajax_nopriv_' . self::SELECTION_ACTION, array( $this, 'handle_selection' ) );
 	}
 
 	public function handle(): void {
@@ -22,6 +28,28 @@ final class AddressSuggestionAjax {
 		$query = $this->field( 'query' );
 		$context = $this->context();
 		$payload = $this->service->suggest( $stage, $query, $context );
+
+		if ( function_exists( 'wp_send_json' ) ) {
+			wp_send_json( $payload );
+			return;
+		}
+
+		echo function_exists( 'wp_json_encode' ) ? wp_json_encode( $payload, JSON_UNESCAPED_UNICODE ) : json_encode( $payload, JSON_UNESCAPED_UNICODE );
+	}
+
+	public function handle_selection(): void {
+		$token_id = $this->token_pool instanceof DaDataTokenPool ? $this->token_pool->last_used_token_id() : '';
+		$counted = false;
+		if ( '' !== $token_id && $this->token_pool instanceof DaDataTokenPool ) {
+			$this->token_pool->increment_usage( $token_id );
+			$this->token_pool->record_request_attempt( $token_id, 'selection', $this->field( 'level' ), false, true, 'selection', '' );
+			$counted = true;
+		}
+
+		$payload = array(
+			'success' => true,
+			'counted' => $counted,
+		);
 
 		if ( function_exists( 'wp_send_json' ) ) {
 			wp_send_json( $payload );

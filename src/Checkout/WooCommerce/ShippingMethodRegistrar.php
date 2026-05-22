@@ -170,8 +170,10 @@ final class ShippingMethodRegistrar {
 			'available_tokens_count' => $this->token_pool instanceof DaDataTokenPool ? $this->token_pool->available_tokens_count() : 0,
 			'encryption_ready' => $this->suggestion_settings instanceof AddressSuggestionSettings && $this->suggestion_settings->encryption_ready(),
 			'action'    => AddressSuggestionAjax::ACTION,
+			'selection_action' => AddressSuggestionAjax::SELECTION_ACTION,
 			'actions'   => array(
 				'suggest' => AddressSuggestionAjax::ACTION,
+				'selection' => AddressSuggestionAjax::SELECTION_ACTION,
 			),
 			'stages'    => array(
 				'city'               => 'city',

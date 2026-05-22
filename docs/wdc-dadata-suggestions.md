@@ -1,46 +1,57 @@
-# WDC DaData Suggestions 0.14.12
+# WDC DaData Suggestions 0.14.13
 
 DaData используется только для визуальных подсказок адреса в checkout. Постфактум-нормализация адреса через DaData удалена из runtime pipeline.
-
-Цепочка нормализации checkout остается:
-
-`local city context -> FIAS placeholder -> manual fallback`
 
 ## Токены И Лимиты
 
 В разделе `Подсказки адреса DaData` используется список токенов в option `dadata_suggestions_tokens`.
 
-Каждая строка токена хранит `id`, encrypted token, masked token, `daily_limit`, `enabled`, `label`, `created_at`, `updated_at`.
+Каждый токен хранит `id`, encrypted token, masked token, `daily_limit`, `enabled`, `label`, `created_at`, `updated_at`.
 
-Plaintext-токен не сохраняется, не показывается в админке и не локализуется во frontend config. Пустое поле токена при сохранении сохраняет уже зашифрованное значение без изменений.
+Plaintext-токен не сохраняется, не показывается в админке и не локализуется во frontend config. Пустое поле токена при сохранении оставляет уже зашифрованное значение без изменений.
 
 Timeout и количество подсказок остаются общими настройками для всего раздела DaData.
 
-## Учет Запросов
+## Учет Использований
 
-Счетчик `usage_today` увеличивается ровно один раз на каждую фактическую HTTP-попытку `wp_remote_post` к DaData:
+`usage_today` теперь считает две вещи:
 
-- `stage=address`
-- `stage=resolve`
-- `stage=city`, если используется
-- retry при переключении на следующий токен
+- каждую фактическую HTTP-попытку `wp_remote_post` к DaData;
+- выбор строки подсказки пользователем.
+
+HTTP-попытка считается один раз для:
+
+- `stage=address`;
+- `stage=resolve`;
+- `stage=city`, если используется;
+- retry при переключении на следующий токен.
 
 Если токен уже исчерпан и запрос через него не отправлялся, счетчик не увеличивается.
 
 Если запрос был отправлен и получил timeout, HTTP error, `400`, `403`, `429` или другой ответ, счетчик увеличивается, потому что HTTP-попытка фактически была сделана.
 
+Выбор строки подсказки считается отдельным использованием через AJAX action:
+
+`wdc_platform_dadata_suggestion_selected`
+
+Frontend вызывает этот endpoint fire-and-forget при клике по DaData item. Запрос не блокирует UX и не мешает применению адреса, если endpoint не ответил.
+
+Для selection usage используется последний DaData token id, сохраненный после последнего HTTP request в сессии WooCommerce. Если token id не найден, endpoint возвращает success с `counted=false` и checkout не ломается.
+
+Ручной fallback `Использовать введенный адрес` не считается выбором DaData-подсказки и не добавляет selection usage.
+
 Ключ счетчика:
 
 `wdc_dadata_suggestions_usage_{token_id}_{Ymd}`
 
-Если DaData возвращает quota/limit error, токен помечается отдельным дневным флагом как исчерпанный, но `usage_today` не подменяется значением лимита. Это нужно, чтобы число в админке отражало реальные HTTP-попытки.
+Если DaData возвращает quota/limit error, токен помечается отдельным дневным флагом как исчерпанный, но `usage_today` не подменяется значением лимита. Число в админке отражает реальные HTTP-попытки и выборы подсказок.
 
-В таблице токенов также показывается последний request audit:
+В таблице токенов показывается последний request audit:
 
-- stage
-- время попытки
-- HTTP status
-- error code
+- stage;
+- время попытки;
+- HTTP status или `selection`;
+- error code.
 
 Ключ audit:
 
@@ -51,6 +62,7 @@ Timeout и количество подсказок остаются общими
 - кабинет DaData обновляет статистику с задержкой;
 - тот же токен используется где-то еще;
 - `resolve` после выбора дома считается отдельным запросом;
+- клик по строке подсказки считается отдельным selection usage;
 - retry на другой токен добавляет отдельную HTTP-попытку;
 - city-stage requests тоже считаются, если включены в сценарии.
 
@@ -68,28 +80,19 @@ Timeout и количество подсказок остаются общими
 
 Если все токены исчерпаны, AJAX возвращает `dadata_daily_limit_exhausted`.
 
-В обоих случаях checkout не ломается, а modal address picker предлагает ручной ввод.
-
 ## Address Picker UX
 
 Покупатель фокусируется или кликает активное WooCommerce поле `address_1`. WDC открывает собственную модалку выбора адреса. Поиск выполняется только внутри поля поиска модалки.
-
-Inline-autocomplete прямо внутри WooCommerce поля не используется.
 
 При открытии модалки search input заполняется из видимых checkout fields:
 
 `region/state, city, address_1`
 
-Примеры:
-
-- `Новосибирская область, Новосибирск, Некрасова`
-- `Новосибирская область, Новосибирск, `
-
 Hidden `wdc_platform_location_display_name`, selected notice и прошлые DaData suggestions не участвуют в opening query.
 
 ## Поиск Улицы И Дома
 
-Frontend больше не переводит picker в отдельный restricted mode после выбора улицы.
+Frontend не переводит picker в отдельный restricted mode после выбора улицы.
 
 Поиск адреса всегда идет через `stage=address` по полной строке, которую видит пользователь в modal search input. `house_after_street` остается на backend на будущее, но frontend не вызывает его автоматически.
 
@@ -105,66 +108,21 @@ Frontend больше не переводит picker в отдельный restr
 
 Если пользователь стирает строку и вводит другую улицу, старый `street_fias_id` не влияет на поиск.
 
-## DaData Request
-
-Server-side proxy использует DaData Suggest API:
-
-`https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address`
-
-`stage=address` отправляет:
-
-- `query`
-- `count`
-- `locations: [{ country_iso_code: "RU" }]`
-- `from_bound: street`
-- `to_bound: house`
-
-`locations_boost` не отправляется. Приоритет по городу не используется, потому что регион и город уже входят в полную query string.
-
-`stage=resolve` уточняет финальный выбранный адрес с `count: 1`.
-
 ## Финальный Адрес
 
 Финальным считаются house, flat и FIAS levels `8`, `9`, `75`.
 
-После выбора WDC делает `resolve` и применяет результат:
-
-- если регион/город совпадают с локальным выбором по FIAS id, city/region не меняются, а `address_1` получает только улицу и дом;
-- если регион/город отличаются, но сопоставлены локально, city/region обновляются из DaData, а `address_1` получает только улицу и дом;
-- если локального сопоставления нет, city/region обновляются из DaData, а `address_1` получает полный адрес без страны.
-
-DaData `postal_code` считается более точным и всегда перезаписывает checkout postcode, если присутствует в resolved address.
+После выбора WDC делает `resolve` и применяет результат. DaData `postal_code` считается более точным и всегда перезаписывает checkout postcode, если присутствует в resolved address.
 
 ## Manual Fallback
 
-Если подсказки не вернули результат, токены недоступны или лимиты исчерпаны, модалка показывает:
+Если подсказки не вернули результат, токены недоступны или лимиты исчерпаны, модалка показывает ручной fallback.
 
-`Подсказки адреса временно недоступны. Введите адрес вручную.`
-
-Покупатель может нажать `Использовать введенный адрес`. В этом режиме:
+При `Использовать введенный адрес`:
 
 - search value записывается в `address_1`;
 - status становится `manual`;
 - выбранный город и область не меняются;
 - address-specific DaData ids очищаются;
+- selection usage не добавляется;
 - checkout не блокируется.
-
-## Hidden Fields And Order Meta
-
-Resolved address selection заполняет `{billing|shipping}_dadata_*` hidden fields:
-
-- status
-- unrestricted value
-- region/city/settlement/street/house/flat data
-- FIAS/KLADR ids
-- FIAS level
-
-WDC-compatible location hidden fields обновляются, если они есть:
-
-- `wdc_platform_location_fias_id`
-- `wdc_platform_location_gar_id`
-- `wdc_platform_location_display_name`
-- `wdc_platform_location_region_name`
-- `wdc_platform_location_postcode`
-
-Order persistence сохраняет DaData hidden fields и совместимые WDC meta.

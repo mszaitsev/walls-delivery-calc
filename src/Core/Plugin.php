@@ -170,7 +170,7 @@ final class Plugin {
 		$this->container->register( DaDataSuggestionClient::class, fn(): DaDataSuggestionClient => new DaDataSuggestionClient( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( AddressSuggestionClientInterface::class, fn(): AddressSuggestionClientInterface => $this->container->get( DaDataSuggestionClient::class ) );
 		$this->container->register( AddressSuggestionService::class, fn(): AddressSuggestionService => new AddressSuggestionService( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( AddressSuggestionClientInterface::class ), $this->container->get( AddressSuggestionNormalizer::class ) ) );
-		$this->container->register( AddressSuggestionAjax::class, fn(): AddressSuggestionAjax => new AddressSuggestionAjax( $this->container->get( AddressSuggestionService::class ) ) );
+		$this->container->register( AddressSuggestionAjax::class, fn(): AddressSuggestionAjax => new AddressSuggestionAjax( $this->container->get( AddressSuggestionService::class ), $this->container->get( DaDataTokenPool::class ) ) );
 		$this->container->register( FallbackAddressNormalizer::class, fn(): FallbackAddressNormalizer => new FallbackAddressNormalizer() );
 		$this->container->register(
 			CheckoutAddressNormalizer::class,
