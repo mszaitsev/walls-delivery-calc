@@ -1,56 +1,149 @@
-.wdc-address-suggestions {
-	position: absolute;
+.wdc-address-picker-overlay {
+	position: fixed;
+	inset: 0;
 	z-index: 99999;
 	display: none;
+	align-items: flex-start;
+	justify-content: center;
+	padding: 24px;
+	background: rgba(0, 0, 0, 0.28);
+	box-sizing: border-box;
+}
+
+.wdc-address-picker-overlay.is-open {
+	display: flex;
+}
+
+.wdc-address-picker-panel {
+	width: min(1300px, calc(100vw - 48px));
 	max-width: 1300px;
-	max-height: 320px;
-	overflow: auto;
+	max-height: calc(100vh - 48px);
+	display: flex;
+	flex-direction: column;
 	background: #fff;
-	border: 1px solid #d8d8d8;
-	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+	border: 1px solid #c3c4c7;
+	box-shadow: 0 12px 36px rgba(0, 0, 0, 0.22);
+	box-sizing: border-box;
 }
 
-.wdc-address-suggestions__item {
-	display: block;
-	width: 100%;
-	padding: 10px 12px;
-	border: 0;
-	border-bottom: 1px solid #eee;
-	background: #fff;
-	color: #1f2933;
-	text-align: left;
-	cursor: pointer;
+.wdc-address-picker-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 16px 18px 12px;
+	border-bottom: 1px solid #f0f0f1;
 }
 
-.wdc-address-suggestions__item:hover,
-.wdc-address-suggestions__item:focus {
-	background: #f4f7fb;
-}
-
-.wdc-address-suggestions__empty {
-	padding: 10px 12px;
-	color: #667085;
-	background: #fff;
-}
-
-.wdc-address-suggestions__label,
-.wdc-address-suggestions__sublabel {
-	display: block;
-}
-
-.wdc-address-suggestions__label {
+.wdc-address-picker-title {
+	color: #1d2327;
+	font-size: 18px;
 	font-weight: 600;
 }
 
-.wdc-address-suggestions__sublabel {
+.wdc-address-picker-close {
+	width: 36px;
+	height: 36px;
+	border: 1px solid #c3c4c7;
+	background: #fff;
+	color: #1d2327;
+	cursor: pointer;
+	font-size: 24px;
+	line-height: 1;
+}
+
+.wdc-address-picker-search {
+	margin: 14px 18px 8px;
+	width: auto;
+	min-height: 42px;
+	font-size: 16px;
+}
+
+.wdc-address-picker-hint {
+	min-height: 20px;
+	padding: 0 18px 10px;
+	color: #475467;
+	font-size: 13px;
+}
+
+.wdc-address-picker-change-street {
+	margin-left: 8px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: #2271b1;
+	cursor: pointer;
+	text-decoration: underline;
+}
+
+.wdc-address-picker-results {
+	padding: 0 18px 18px;
+	overflow: auto;
+	width: 100%;
+	box-sizing: border-box;
+}
+
+.wdc-address-picker-groups {
+	column-count: 2;
+	column-gap: 16px;
+}
+
+.wdc-address-picker-item {
+	display: inline-block;
+	width: 100%;
+	margin: 0 0 8px;
+	padding: 10px 12px;
+	border: 1px solid #e0e0e0;
+	background: #fff;
+	color: #1d2327;
+	text-align: left;
+	cursor: pointer;
+	break-inside: avoid;
+	page-break-inside: avoid;
+	box-sizing: border-box;
+}
+
+.wdc-address-picker-item:hover,
+.wdc-address-picker-item:focus {
+	background: #f0f6fc;
+	outline: 1px solid #72aee6;
+	outline-offset: -1px;
+}
+
+.wdc-address-picker-label,
+.wdc-address-picker-sublabel {
+	display: block;
+}
+
+.wdc-address-picker-label {
+	font-weight: 600;
+}
+
+.wdc-address-picker-sublabel {
 	margin-top: 2px;
 	color: #667085;
 	font-size: 12px;
 }
 
-.wdc-address-suggestions__notice {
-	margin: 6px 0 0;
-	color: #475467;
+.wdc-address-picker-empty {
+	padding: 10px 12px;
+	color: #646970;
+	font-size: 14px;
+}
+
+.wdc-address-picker-manual {
+	margin: 0 12px 12px;
+	padding: 10px 12px;
+	border: 1px solid #2271b1;
+	background: #2271b1;
+	color: #fff;
+	cursor: pointer;
+	font-size: 14px;
+}
+
+.wdc-address-picker-selected {
+	margin-top: 6px;
+	color: #2271b1;
 	font-size: 13px;
 }
 
@@ -64,16 +157,37 @@
 	line-height: 1.45;
 }
 
-.wdc-address-debug-hit {
-	margin-top: 4px;
-	color: #175cd3;
-	font-size: 12px;
-}
-
 @media (max-width: 900px) {
-	.wdc-address-suggestions {
-		left: 0 !important;
-		width: 100% !important;
-		max-width: 100%;
+	.wdc-address-picker-overlay {
+		align-items: flex-start;
+		padding: 12px;
+	}
+
+	.wdc-address-picker-panel {
+		width: calc(100vw - 24px);
+		min-width: 0;
+		max-height: calc(100vh - 24px);
+	}
+
+	.wdc-address-picker-search {
+		margin: 12px 14px 8px;
+		width: calc(100% - 28px);
+		box-sizing: border-box;
+	}
+
+	.wdc-address-picker-hint,
+	.wdc-address-picker-results {
+		padding-right: 14px;
+		padding-left: 14px;
+	}
+
+	.wdc-address-picker-groups {
+		width: 100%;
+		column-count: 1;
+	}
+
+	.wdc-address-picker-item {
+		width: 100%;
+		min-width: 0;
 	}
 }

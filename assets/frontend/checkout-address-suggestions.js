@@ -3,19 +3,20 @@
 
 	var config = window.wdcPlatformAddressSuggestions || {};
 	var namespace = '.wdcAddressSuggestions';
-	var debounceTimers = {};
+	var debounceTimer = null;
 	var debounceDelay = 300;
-	var selectedStreet = {};
+	var activePrefix = 'billing';
+	var activeAddressField = null;
+	var pickerOpen = false;
 	var itemStore = {};
 	var itemCounter = 0;
-	var activePrefix = 'billing';
+	var addressPickerState = {};
 	var debugState = {
 		scriptLoaded: true,
 		configEnabled: !! config.enabled,
-		fieldFound: false,
-		activeMode: 'billing',
-		activeAddressField: '',
-		activeCityField: '',
+		activePrefix: 'billing',
+		modalOpened: 'no',
+		lastStage: '',
 		lastQuery: '',
 		lastAjaxStatus: '',
 		lastItemsCount: ''
@@ -51,7 +52,7 @@
 
 	function log( message, data ) {
 		if ( config.debug && window.console && window.console.log ) {
-			window.console.log( '[WDC DaData suggestions] ' + message, data || {} );
+			window.console.log( '[WDC DaData address picker] ' + message, data || {} );
 		}
 	}
 
@@ -59,68 +60,62 @@
 		return parseInt( config.min_chars || 3, 10 ) || 3;
 	}
 
-	function isUsable( input ) {
-		return input.length && ! input.prop( 'disabled' ) && ! input.prop( 'readonly' );
-	}
-
-	function visibleUsable( elements ) {
-		return elements.filter( ':visible' ).filter( function () {
-			return isUsable( $( this ) );
-		} );
-	}
-
-	function usableFallback( elements ) {
-		return elements.filter( function () {
-			return isUsable( $( this ) );
-		} );
-	}
-
 	function selectorFor( prefix, name ) {
 		if ( 'state' === name ) {
 			return '#' + prefix + '_state,select[name="' + prefix + '_state"],input[name="' + prefix + '_state"]';
 		}
-
 		return '#' + prefix + '_' + name + ',input[name="' + prefix + '_' + name + '"],textarea[name="' + prefix + '_' + name + '"]';
 	}
 
-	function firstUsableFor( prefix, name ) {
-		var all = $( selectorFor( prefix, name ) );
-		var visible = visibleUsable( all );
+	function isUsable( element ) {
+		var field = $( element );
+		return field.length && ! field.prop( 'disabled' ) && ! field.prop( 'readonly' );
+	}
+
+	function visibleUsable( selector ) {
+		return $( selector ).filter( ':visible' ).filter( function () {
+			return isUsable( this );
+		} );
+	}
+
+	function firstUsable( prefix, name ) {
+		var selector = selectorFor( prefix, name );
+		var visible = visibleUsable( selector );
 		if ( visible.length ) {
 			return visible.first();
 		}
-		var fallback = usableFallback( all );
-		return ( fallback.length ? fallback : all ).first();
+		return $( selector ).filter( function () {
+			return isUsable( this );
+		} ).first();
 	}
 
 	function activeCheckoutPrefix() {
-		var shipToggle = $( '#ship-to-different-address-checkbox,input[name="ship_to_different_address"]' ).first();
-		var shippingChecked = shipToggle.length ? shipToggle.is( ':checked' ) : false;
-		var shippingAddressVisible = visibleUsable( $( selectorFor( 'shipping', 'address_1' ) ) ).length > 0;
-		var shippingCityVisible = visibleUsable( $( selectorFor( 'shipping', 'city' ) ) ).length > 0;
-		var shippingModeActive = shippingChecked && ( shippingAddressVisible || shippingCityVisible );
-		var billingAddressVisible = visibleUsable( $( selectorFor( 'billing', 'address_1' ) ) ).length > 0;
-		log( 'shipping mode active', { active: shippingModeActive, checked: shippingChecked, shipping_address_visible: shippingAddressVisible, shipping_city_visible: shippingCityVisible } );
-		log( 'billing mode active', { active: ! shippingModeActive, billing_address_visible: billingAddressVisible } );
-		log( 'active checkout prefix: ' + ( shippingModeActive ? 'shipping' : 'billing' ) );
-		return shippingModeActive ? 'shipping' : 'billing';
+		var toggle = $( '#ship-to-different-address-checkbox,input[name="ship_to_different_address"]' ).first();
+		var shippingChecked = toggle.length ? toggle.is( ':checked' ) : false;
+		var shippingActive = shippingChecked && ( visibleUsable( selectorFor( 'shipping', 'address_1' ) ).length > 0 || visibleUsable( selectorFor( 'shipping', 'city' ) ).length > 0 );
+		log( 'shipping mode active', { active: shippingActive } );
+		log( 'billing mode active', { active: ! shippingActive } );
+		return shippingActive ? 'shipping' : 'billing';
 	}
 
-	function field( prefix, name ) {
-		return firstUsableFor( prefix, name );
-	}
-
-	function fieldKey( input ) {
-		return input.attr( 'name' ) || input.attr( 'id' ) || 'unknown';
+	function stateFor( prefix ) {
+		if ( ! addressPickerState[ prefix ] ) {
+			addressPickerState[ prefix ] = {
+				selectedStreet: null,
+				mode: 'address',
+				lastResolved: null
+			};
+		}
+		return addressPickerState[ prefix ];
 	}
 
 	function ensureHiddenFields( prefix ) {
-		var anchor = field( prefix, 'address_2' );
+		var anchor = firstUsable( prefix, 'address_2' );
 		if ( ! anchor.length ) {
-			anchor = field( prefix, 'address_1' );
+			anchor = firstUsable( prefix, 'address_1' );
 		}
 		if ( ! anchor.length ) {
-			anchor = field( prefix, 'city' );
+			anchor = firstUsable( prefix, 'city' );
 		}
 		hiddenKeys.forEach( function ( key ) {
 			var name = prefix + '_' + key;
@@ -136,9 +131,24 @@
 		return $( 'input[name="' + prefix + '_' + key + '"]' );
 	}
 
-	function setStatus( prefix, status ) {
-		hidden( prefix, 'dadata_status' ).val( status );
-		renderDebugBlock();
+	function clearAddressHidden( prefix ) {
+		[
+			'dadata_unrestricted_value',
+			'dadata_street',
+			'dadata_street_with_type',
+			'dadata_street_fias_id',
+			'dadata_street_kladr_id',
+			'dadata_house',
+			'dadata_house_fias_id',
+			'dadata_house_kladr_id',
+			'dadata_block',
+			'dadata_flat',
+			'dadata_fias_id',
+			'dadata_kladr_id',
+			'dadata_fias_level'
+		].forEach( function ( key ) {
+			hidden( prefix, key ).val( '' );
+		} );
 	}
 
 	function setHiddenData( prefix, item, status ) {
@@ -152,7 +162,8 @@
 	}
 
 	function context( prefix ) {
-		var street = selectedStreet[ prefix ] || {};
+		var current = stateFor( prefix );
+		var street = current.selectedStreet || {};
 		return {
 			city_kladr_id: hidden( prefix, 'dadata_city_kladr_id' ).val() || '',
 			city_fias_id: hidden( prefix, 'dadata_city_fias_id' ).val() || '',
@@ -162,64 +173,59 @@
 		};
 	}
 
-	function popupFor( input ) {
-		var key = fieldKey( input ).replace( /[^a-zA-Z0-9_-]/g, '-' );
-		var id = 'wdc-address-suggestions-' + key;
-		var box = $( '#' + id );
-		if ( box.length ) {
-			return box;
+	function picker() {
+		var overlay = $( '.wdc-address-picker-overlay' );
+		if ( overlay.length ) {
+			return overlay;
 		}
-
-		return $( '<div>', { id: id, class: 'wdc-address-suggestions', role: 'listbox' } ).insertAfter( input );
+		overlay = $(
+			'<div class="wdc-address-picker-overlay" aria-hidden="true">' +
+				'<div class="wdc-address-picker-panel" role="dialog" aria-modal="true" aria-label="Выберите адрес доставки">' +
+					'<div class="wdc-address-picker-header">' +
+						'<div class="wdc-address-picker-title">Выберите адрес доставки</div>' +
+						'<button type="button" class="wdc-address-picker-close" aria-label="Закрыть">×</button>' +
+					'</div>' +
+					'<input type="search" class="wdc-address-picker-search" autocomplete="off" placeholder="Начните вводить улицу и дом">' +
+					'<div class="wdc-address-picker-hint"></div>' +
+					'<div class="wdc-address-picker-results" role="listbox"></div>' +
+				'</div>' +
+			'</div>'
+		);
+		$( document.body ).append( overlay );
+		return overlay;
 	}
 
-	function closePopup() {
-		$( '.wdc-address-suggestions' ).hide().empty();
+	function searchInput() {
+		return picker().find( '.wdc-address-picker-search' );
 	}
 
-	function positionPopup( input, box ) {
-		box.css( {
-			position: 'static',
-			width: '100%'
+	function resultsBox() {
+		return picker().find( '.wdc-address-picker-results' );
+	}
+
+	function hintBox() {
+		return picker().find( '.wdc-address-picker-hint' );
+	}
+
+	function showHint( message, withChangeStreet ) {
+		var html = message ? '<span>' + escapeHtml( message ) + '</span>' : '';
+		if ( withChangeStreet ) {
+			html += ' <button type="button" class="wdc-address-picker-change-street">Изменить улицу</button>';
+		}
+		hintBox().html( html );
+	}
+
+	function escapeHtml( value ) {
+		return String( value || '' ).replace( /[&<>"']/g, function ( char ) {
+			return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ char ];
 		} );
-	}
-
-	function showNotice( input, message ) {
-		var notice = input.siblings( '.wdc-address-suggestions__notice' ).first();
-		if ( ! notice.length ) {
-			notice = $( '<p>', { class: 'wdc-address-suggestions__notice' } ).insertAfter( input );
-		}
-		notice.text( message ).show();
-	}
-
-	function addDebugHit( input ) {
-		if ( ! config.debug ) {
-			return;
-		}
-		input.siblings( '.wdc-address-debug-hit' ).remove();
-		var marker = $( '<div>', { class: 'wdc-address-debug-hit' } ).text( 'DaData input detected' ).insertAfter( input );
-		window.setTimeout( function () {
-			marker.fadeOut( 150, function () {
-				marker.remove();
-			} );
-		}, 2000 );
 	}
 
 	function renderDebugBlock() {
 		if ( ! config.debug ) {
 			return;
 		}
-		var prefix = activeCheckoutPrefix();
-		var address = field( prefix, 'address_1' );
-		var city = field( prefix, 'city' );
-		debugState.activeMode = prefix;
-		debugState.activeAddressField = fieldKey( address );
-		debugState.activeCityField = fieldKey( city );
-		debugState.fieldFound = !! address.length;
-		if ( ! address.length ) {
-			log( 'address field not found', checkoutInputsSnapshot() );
-			return;
-		}
+		var address = firstUsable( activePrefix, 'address_1' );
 		var block = address.siblings( '.wdc-address-suggestions-debug' ).first();
 		if ( ! block.length ) {
 			block = $( '<div>', { class: 'wdc-address-suggestions-debug' } ).insertAfter( address );
@@ -229,79 +235,48 @@
 			'config enabled: ' + ( debugState.configEnabled ? 'yes' : 'no' ) + '<br>' +
 			'api key ready: ' + ( config.api_key_ready ? 'yes' : 'no' ) + '<br>' +
 			'encryption ready: ' + ( config.encryption_ready ? 'yes' : 'no' ) + '<br>' +
-			'active mode: ' + escapeHtml( debugState.activeMode ) + '<br>' +
-			'active address field: ' + escapeHtml( debugState.activeAddressField ) + '<br>' +
-			'active city field: ' + escapeHtml( debugState.activeCityField ) + '<br>' +
-			'address field: ' + ( debugState.fieldFound ? 'found' : 'not found' ) + '<br>' +
+			'active mode: ' + escapeHtml( debugState.activePrefix ) + '<br>' +
+			'active prefix: ' + escapeHtml( debugState.activePrefix ) + '<br>' +
+			'active address field: ' + escapeHtml( selectorFor( debugState.activePrefix, 'address_1' ) ) + '<br>' +
+			'active city field: ' + escapeHtml( selectorFor( debugState.activePrefix, 'city' ) ) + '<br>' +
+			'modal opened: ' + escapeHtml( debugState.modalOpened ) + '<br>' +
+			'last stage: ' + escapeHtml( debugState.lastStage ) + '<br>' +
 			'last query: ' + escapeHtml( debugState.lastQuery ) + '<br>' +
 			'last ajax status: ' + escapeHtml( debugState.lastAjaxStatus ) + '<br>' +
 			'last items count: ' + escapeHtml( debugState.lastItemsCount )
 		);
-		if ( config.suggestions_requested && ! config.enabled ) {
-			showNotice( address, 'Подсказки DaData включены, но API-ключ не настроен или недоступно шифрование.' );
+	}
+
+	function showSelectedNotice( prefix, message ) {
+		var address = firstUsable( prefix, 'address_1' );
+		var notice = address.siblings( '.wdc-address-picker-selected' ).first();
+		if ( ! notice.length ) {
+			notice = $( '<div>', { class: 'wdc-address-picker-selected' } ).insertAfter( address );
 		}
-	}
-
-	function escapeHtml( value ) {
-		return String( value || '' ).replace( /[&<>"']/g, function ( char ) {
-			return {
-				'&': '&amp;',
-				'<': '&lt;',
-				'>': '&gt;',
-				'"': '&quot;',
-				"'": '&#039;'
-			}[ char ];
-		} );
-	}
-
-	function checkoutInputsSnapshot() {
-		var names = [ 'billing_city', 'shipping_city', 'billing_address_1', 'shipping_address_1' ];
-		var found = {};
-		names.forEach( function ( name ) {
-			var input = $( '#' + name + ',input[name="' + name + '"],textarea[name="' + name + '"]' );
-			found[ name ] = {
-				count: input.length,
-				visible: visibleUsable( input ).length,
-				enabled: usableFallback( input ).length
-			};
-		} );
-		return found;
-	}
-
-	function diagnoseFields() {
-		var prefix = activeCheckoutPrefix();
-		var addressSelector = selectorFor( prefix, 'address_1' );
-		var citySelector = selectorFor( prefix, 'city' );
-		var address = field( prefix, 'address_1' );
-		var city = field( prefix, 'city' );
-		debugState.fieldFound = !! address.length;
-		log( address.length ? 'address field found' : 'address field not found', checkoutInputsSnapshot() );
-		log( city.length ? 'city field found' : 'city field not found', checkoutInputsSnapshot() );
-		log( 'using address field selector', { selector: addressSelector, field: fieldKey( address ) } );
-		log( 'using city field selector', { selector: citySelector, field: fieldKey( city ) } );
-		renderDebugBlock();
+		notice.text( message );
 	}
 
 	function request( stage, query, prefix, done ) {
-		var payload = {
+		debugState.lastStage = stage;
+		debugState.lastQuery = query;
+		debugState.lastAjaxStatus = 'pending';
+		renderDebugBlock();
+		log( 'stage', { stage: stage } );
+		log( 'query', { query: query } );
+		log( 'ajax request start', { stage: stage, query: query, context: context( prefix ) } );
+		$.post( config.ajax_url || '', {
 			action: config.action || 'wdc_platform_dadata_address_suggest',
 			nonce: config.nonce || '',
 			stage: stage,
 			query: query,
 			context: context( prefix )
-		};
-		debugState.lastAjaxStatus = 'pending';
-		renderDebugBlock();
-		log( 'stage', { stage: stage } );
-		log( 'query', { query: query, length: query.length } );
-		log( 'ajax request start', payload );
-		$.post( config.ajax_url || '', payload ).done( function ( response ) {
+		} ).done( function ( response ) {
 			var body = response && response.data ? response.data : response;
 			var items = body && body.items ? body.items : [];
 			debugState.lastAjaxStatus = body && false === body.success ? body.error_code || 'failed' : 'success';
 			debugState.lastItemsCount = String( items.length );
 			renderDebugBlock();
-			log( 'ajax success items count', { count: items.length, error_code: body ? body.error_code || '' : '' } );
+			log( 'ajax success items count', { count: items.length } );
 			done( items, body || {} );
 		} ).fail( function ( xhr ) {
 			debugState.lastAjaxStatus = 'fail ' + ( xhr && xhr.status ? xhr.status : 0 );
@@ -312,104 +287,117 @@
 		} );
 	}
 
-	function renderItems( input, items, onSelect ) {
-		var box = popupFor( input );
-		box.empty();
-		itemStore = {};
-		if ( ! items.length ) {
-			box.append( $( '<div>', { class: 'wdc-address-suggestions__empty', role: 'status' } ).text( ( config.strings && config.strings.not_found ) || 'Адрес не найден. Можно продолжить ручной ввод.' ) );
-			positionPopup( input, box );
-			box.show();
-			log( 'suggestion popup opened', { items: 0 } );
-			return;
-		}
-		items.forEach( function ( item ) {
-			var key = 'item-' + ( ++itemCounter );
-			itemStore[ key ] = item;
-			$( '<button type="button" class="wdc-address-suggestions__item"></button>' )
-				.attr( 'data-key', key )
-				.append( $( '<span class="wdc-address-suggestions__label"></span>' ).text( item.label || item.value || '' ) )
-				.append( $( '<span class="wdc-address-suggestions__sublabel"></span>' ).text( item.subLabel || '' ) )
-				.on( 'mousedown' + namespace + ' click' + namespace, function ( event ) {
-					event.preventDefault();
-					event.stopPropagation();
-					event.stopImmediatePropagation();
-					var selected = itemStore[ $( this ).attr( 'data-key' ) || '' ];
-					log( 'suggestion selected', { level: selected ? selected.level : 'unknown', label: selected ? selected.label || selected.value || '' : '' } );
-					if ( selected ) {
-						onSelect( selected );
-					}
-				} )
-				.appendTo( box );
-		} );
-		positionPopup( input, box );
-		box.show();
-		log( 'suggestion popup opened', { items: items.length } );
+	function renderEmpty( query ) {
+		resultsBox().html(
+			'<div class="wdc-address-picker-empty">Адрес не найден. Можно продолжить ручной ввод.</div>' +
+			'<button type="button" class="wdc-address-picker-manual">Использовать введенный адрес</button>'
+		);
+		resultsBox().find( '.wdc-address-picker-manual' ).data( 'manual-query', query );
 	}
 
-	function scheduleSearch( input, stage, prefix ) {
-		var key = fieldKey( input );
-		window.clearTimeout( debounceTimers[ key ] );
-		debounceTimers[ key ] = window.setTimeout( function () {
-			var query = $.trim( input.val() || '' );
-			debugState.lastQuery = query;
-			renderDebugBlock();
+	function renderResults( items, query ) {
+		itemStore = {};
+		itemCounter = 0;
+		if ( ! items.length ) {
+			renderEmpty( query );
+			return;
+		}
+		var html = '<div class="wdc-address-picker-groups">';
+		items.forEach( function ( item ) {
+			var key = 'address-item-' + ( ++itemCounter );
+			itemStore[ key ] = item;
+			html += '<button type="button" class="wdc-address-picker-item" data-key="' + escapeHtml( key ) + '">';
+			html += '<span class="wdc-address-picker-label">' + escapeHtml( item.label || item.value || '' ) + '</span>';
+			html += '<span class="wdc-address-picker-sublabel">' + escapeHtml( item.subLabel || '' ) + '</span>';
+			html += '</button>';
+		} );
+		html += '</div>';
+		resultsBox().html( html );
+	}
+
+	function scheduleModalSearch() {
+		window.clearTimeout( debounceTimer );
+		debounceTimer = window.setTimeout( function () {
+			var prefix = activePrefix;
+			var query = String( searchInput().val() || '' ).trim();
+			var stage = stateFor( prefix ).selectedStreet ? 'house_after_street' : 'address';
+			log( 'modal search input', { query: query, stage: stage } );
 			if ( query.length < minChars() ) {
-				closePopup();
+				resultsBox().empty();
 				return;
 			}
 			if ( ! config.enabled ) {
 				debugState.lastAjaxStatus = 'config disabled';
 				renderDebugBlock();
-				log( 'config disabled', config );
 				return;
 			}
 			request( stage, query, prefix, function ( items ) {
-				renderItems( input, items, function ( item ) {
-					selectItem( input, prefix, item );
-				} );
+				renderResults( items, query );
 			} );
 		}, debounceDelay );
 	}
 
-	function selectItem( input, prefix, item ) {
-		var data = item.data || {};
-		if ( 'city' === item.level || 'settlement' === item.level ) {
-			field( prefix, 'city' ).val( data.city || data.settlement || data.region || item.value || '' );
-			field( prefix, 'postcode' ).val( data.postal_code || field( prefix, 'postcode' ).val() || '' );
-			field( prefix, 'state' ).val( data.region_code || data.region || data.region_with_type || field( prefix, 'state' ).val() || '' );
-			setHiddenData( prefix, item, 'city_selected' );
-			selectedStreet[ prefix ] = null;
-			hidden( prefix, 'dadata_street_fias_id' ).val( '' );
-			hidden( prefix, 'dadata_street_kladr_id' ).val( '' );
-			closePopup();
-			$( document.body ).trigger( 'update_checkout' );
-			return;
+	function openAddressPicker( target ) {
+		activePrefix = activeCheckoutPrefix();
+		activeAddressField = firstUsable( activePrefix, 'address_1' );
+		if ( ! activeAddressField.length || ( target && target !== activeAddressField[0] ) ) {
+			activeAddressField = $( target );
 		}
+		ensureHiddenFields( activePrefix );
+		pickerOpen = true;
+		debugState.activePrefix = activePrefix;
+		debugState.modalOpened = 'yes';
+		renderDebugBlock();
+		picker().attr( 'aria-hidden', 'false' ).addClass( 'is-open' );
+		searchInput().val( String( activeAddressField.val() || '' ) );
+		resultsBox().empty();
+		showHint( stateFor( activePrefix ).selectedStreet ? 'Добавьте номер дома' : '', !! stateFor( activePrefix ).selectedStreet );
+		log( 'address picker opened', { active_prefix: activePrefix } );
+		window.setTimeout( function () {
+			searchInput().trigger( 'focus' ).trigger( 'select' );
+		}, 20 );
+		if ( searchInput().val().length >= minChars() ) {
+			scheduleModalSearch();
+		}
+	}
 
+	function closeAddressPicker() {
+		pickerOpen = false;
+		debugState.modalOpened = 'no';
+		renderDebugBlock();
+		picker().attr( 'aria-hidden', 'true' ).removeClass( 'is-open' );
+		resultsBox().empty();
+		log( 'modal closed' );
+	}
+
+	function selectItem( item ) {
+		var prefix = activePrefix;
+		var data = item.data || {};
 		if ( 'street' === item.level ) {
-			field( prefix, 'address_1' ).val( ( data.street_with_type || item.value || '' ) + ' ' ).focus();
-			selectedStreet[ prefix ] = {
+			stateFor( prefix ).selectedStreet = {
 				fias_id: data.street_fias_id || '',
 				kladr_id: data.street_kladr_id || ''
 			};
+			stateFor( prefix ).mode = 'house_after_street';
+			firstUsable( prefix, 'address_1' ).val( ( data.street_with_type || item.value || '' ) + ' ' );
 			setHiddenData( prefix, item, 'street_selected' );
-			showNotice( input, ( config.strings && config.strings.add_house ) || 'Добавьте номер дома' );
-			closePopup();
+			hidden( prefix, 'dadata_house' ).val( '' );
+			hidden( prefix, 'dadata_house_fias_id' ).val( '' );
+			hidden( prefix, 'dadata_house_kladr_id' ).val( '' );
+			searchInput().val( ( data.street_with_type || item.value || '' ) + ' ' );
+			resultsBox().empty();
+			showHint( 'Добавьте номер дома', true );
+			log( 'street selected', item );
 			return;
 		}
-
 		if ( 'house' === item.level || 'flat' === item.level ) {
+			log( 'house selected', item );
 			log( 'resolve request start', { query: item.unrestrictedValue || item.value || '' } );
 			request( 'resolve', item.unrestrictedValue || item.value || '', prefix, function ( items ) {
-				log( 'resolve request success', { items: items.length } );
+				log( 'resolve request success', { count: items.length } );
 				applyResolved( prefix, items[0] || item );
 			} );
-			return;
 		}
-
-		setHiddenData( prefix, item, 'manual' );
-		closePopup();
 	}
 
 	function applyResolved( prefix, item ) {
@@ -418,62 +406,86 @@
 		if ( data.block ) {
 			house += ' ' + data.block;
 		}
-		field( prefix, 'city' ).val( data.city || data.settlement || data.region || field( prefix, 'city' ).val() || '' );
-		field( prefix, 'state' ).val( data.region_code || data.region || data.region_with_type || field( prefix, 'state' ).val() || '' );
-		field( prefix, 'address_1' ).val( $.trim( ( data.street_with_type || '' ) + ( house ? ', ' + house : '' ) ) );
-		if ( data.flat && ! field( prefix, 'address_2' ).val() ) {
-			field( prefix, 'address_2' ).val( data.flat );
+		firstUsable( prefix, 'city' ).val( data.city || data.settlement || data.region || firstUsable( prefix, 'city' ).val() || '' );
+		firstUsable( prefix, 'state' ).val( data.region_code || data.region || data.region_with_type || firstUsable( prefix, 'state' ).val() || '' );
+		firstUsable( prefix, 'postcode' ).val( data.postal_code || firstUsable( prefix, 'postcode' ).val() || '' );
+		firstUsable( prefix, 'address_1' ).val( String( ( data.street_with_type || '' ) + ( house ? ', ' + house : '' ) ).trim() );
+		if ( data.flat && ! firstUsable( prefix, 'address_2' ).val() ) {
+			firstUsable( prefix, 'address_2' ).val( data.flat );
 		}
-		field( prefix, 'postcode' ).val( data.postal_code || field( prefix, 'postcode' ).val() || '' );
 		setHiddenData( prefix, item, 'resolved' );
-		showNotice( field( prefix, 'address_1' ), ( config.strings && config.strings.selected ? config.strings.selected + ' ' : 'Адрес выбран: ' ) + ( item.label || item.value || '' ) );
-		closePopup();
+		stateFor( prefix ).lastResolved = item;
+		closeAddressPicker();
+		showSelectedNotice( prefix, 'Адрес выбран: ' + ( item.label || item.value || '' ) );
 		$( document.body ).trigger( 'update_checkout' );
+	}
+
+	function manualFallback() {
+		var prefix = activePrefix;
+		var value = String( searchInput().val() || '' ).trim();
+		if ( '' === value ) {
+			closeAddressPicker();
+			return;
+		}
+		firstUsable( prefix, 'address_1' ).val( value );
+		clearAddressHidden( prefix );
+		hidden( prefix, 'dadata_status' ).val( 'manual' );
+		hidden( prefix, 'dadata_unrestricted_value' ).val( value );
+		stateFor( prefix ).selectedStreet = null;
+		stateFor( prefix ).mode = 'address';
+		log( 'manual fallback selected', { value: value } );
+		closeAddressPicker();
+		showSelectedNotice( prefix, 'Адрес введен вручную' );
+		$( document.body ).trigger( 'update_checkout' );
+	}
+
+	function changeStreet() {
+		stateFor( activePrefix ).selectedStreet = null;
+		stateFor( activePrefix ).mode = 'address';
+		searchInput().val( '' ).trigger( 'focus' );
+		resultsBox().empty();
+		showHint( '' );
 	}
 
 	function bind() {
 		activePrefix = activeCheckoutPrefix();
-		var citySelector = selectorFor( activePrefix, 'city' );
 		var addressSelector = selectorFor( activePrefix, 'address_1' );
-		var address2Selector = selectorFor( activePrefix, 'address_2' );
+		activeAddressField = firstUsable( activePrefix, 'address_1' );
 		ensureHiddenFields( activePrefix );
-		diagnoseFields();
-
+		log( 'using address field selector', { selector: addressSelector } );
+		log( activeAddressField && activeAddressField.length ? 'address field found' : 'address field not found', { selector: addressSelector } );
+		renderDebugBlock();
 		$( document.body ).off( namespace );
 		$( document.body )
-			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, citySelector, function ( event ) {
-				var input = $( event.target );
-				var query = $.trim( input.val() || '' );
-				log( 'city input event', { query: query, length: query.length, stage: 'city' } );
-				scheduleSearch( input, 'city', activePrefix );
+			.on( 'mousedown' + namespace + ' focus' + namespace + ' click' + namespace, addressSelector, function ( event ) {
+				openAddressPicker( event.target );
 			} )
-			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, addressSelector, function ( event ) {
-				var input = $( event.target );
-				var query = $.trim( input.val() || '' );
-				var stage = selectedStreet[ activePrefix ] || context( activePrefix ).street_fias_id ? 'house_after_street' : 'address';
-				debugState.fieldFound = true;
-				log( 'address input event', { query: query, length: query.length, stage: stage } );
-				addDebugHit( input );
-				if ( 'resolved' !== hidden( activePrefix, 'dadata_status' ).val() ) {
-					setStatus( activePrefix, 'manual' );
+			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, '.wdc-address-picker-search', scheduleModalSearch )
+			.on( 'mousedown' + namespace + ' click' + namespace, '.wdc-address-picker-item', function ( event ) {
+				event.preventDefault();
+				event.stopPropagation();
+				if ( event.stopImmediatePropagation ) {
+					event.stopImmediatePropagation();
 				}
-				scheduleSearch( input, stage, activePrefix );
+				selectItem( itemStore[ $( this ).attr( 'data-key' ) || '' ] );
 			} )
-			.on( 'input' + namespace + ' keyup' + namespace + ' paste' + namespace, address2Selector, function ( event ) {
-				var input = $( event.target );
-				hidden( activePrefix, 'dadata_flat' ).val( input.val() || '' );
-				if ( 'resolved' !== hidden( activePrefix, 'dadata_status' ).val() ) {
-					setStatus( activePrefix, 'manual' );
+			.on( 'click' + namespace, '.wdc-address-picker-manual', manualFallback )
+			.on( 'click' + namespace, '.wdc-address-picker-change-street', changeStreet )
+			.on( 'click' + namespace, '.wdc-address-picker-close', closeAddressPicker )
+			.on( 'mousedown' + namespace, '.wdc-address-picker-overlay', function ( event ) {
+				if ( event.target === this ) {
+					closeAddressPicker();
 				}
+			} )
+			.on( 'mousedown' + namespace + ' click' + namespace, '.wdc-address-picker-panel', function ( event ) {
+				event.stopPropagation();
 			} );
-
-		$( document )
-			.off( 'mousedown' + namespace )
-			.on( 'mousedown' + namespace, function ( event ) {
-				if ( ! $( event.target ).closest( '.wdc-address-suggestions' ).length ) {
-					closePopup();
-				}
-			} );
+		$( document ).off( 'keydown' + namespace ).on( 'keydown' + namespace, function ( event ) {
+			if ( 'Escape' === event.key && pickerOpen ) {
+				event.preventDefault();
+				closeAddressPicker();
+			}
+		} );
 	}
 
 	log( 'address suggestions script loaded', config );

@@ -1,14 +1,12 @@
-# WDC DaData Suggestions 0.14.6
+# WDC DaData Suggestions 0.14.8
 
 ## Purpose
 
-DaData suggestions are a visual, step-by-step checkout flow, not only post-factum address normalization. The buyer should be able to type a city, choose a city suggestion, type a street or address, choose a street, then choose a house and resolve the final address.
+DaData suggestions are now an address picker flow, not inline autocomplete inside the WooCommerce `address_1` field.
 
-The flow is:
+The buyer clicks or focuses the standard checkout address field, WDC opens its own modal, and all DaData search happens inside the modal search input. After the buyer chooses a final house or flat, WDC fills the WooCommerce fields programmatically.
 
-`city -> address/street -> house_after_street -> resolve`
-
-Manual checkout input remains valid fallback.
+This is more stable for WooCommerce checkout because WooCommerce may redraw billing and shipping fields during `updated_checkout`, while the picker keeps its own search input, results area, state, and selection flow.
 
 ## Server Proxy
 
@@ -16,7 +14,7 @@ The browser calls only the WordPress AJAX action:
 
 `wdc_platform_dadata_address_suggest`
 
-The DaData API key is never sent to the browser. It is stored encrypted on the server through the same setting used by post-factum DaData normalization:
+The DaData API key is never sent to the browser. It is stored encrypted on the server through the same setting used by DaData normalization:
 
 `dadata_api_token_encrypted`
 
@@ -48,71 +46,92 @@ Headers:
 
 `X-Secret` is not used.
 
+## Address Picker UX
+
+Opening:
+
+- active `billing_address_1` opens the picker by default;
+- active `shipping_address_1` opens it only when ship-to-different-address is checked and visible usable shipping fields exist;
+- no extra “choose address” button is rendered;
+- disabled suggestions do not open the picker.
+
+Modal structure:
+
+- title: `Выберите адрес доставки`
+- search input: `.wdc-address-picker-search`
+- results: `.wdc-address-picker-results`
+- hint area: `.wdc-address-picker-hint`
+- close button, ESC, and outside click support
+
+Desktop layout uses a wide panel up to 1300px with two-column results when space allows. Mobile layout uses one column and fits the viewport.
+
 ## Stages
-
-`stage=city`:
-
-- `locations: [{ country_iso_code: "RU" }]`
-- `from_bound: city`
-- `to_bound: settlement`
 
 `stage=address`:
 
-- `locations: [{ country_iso_code: "RU" }]`
-- `locations_boost` with selected `city_kladr_id` or `settlement_kladr_id`
-- `from_bound: street`
-- `to_bound: house`
-
-The city is a boost, not a hard restriction.
+- used while searching street or full address in the modal;
+- sends `locations: [{ country_iso_code: "RU" }]`;
+- sends `locations_boost` with selected `city_kladr_id` or `settlement_kladr_id` when available;
+- city is a boost, not a hard restriction.
 
 `stage=house_after_street`:
 
-- `locations: [{ fias_id: street_fias_id }]`
-- `from_bound: house`
-- `to_bound: house`
-- `restrict_value: true`
-- `count: 20`
+- used after a street-only suggestion is selected;
+- restricts by `street_fias_id`;
+- searches houses only;
+- requests up to 20 items.
 
 `stage=resolve`:
 
-- `query: unrestrictedValue`
-- `count: 1`
+- used after a house or flat suggestion is selected;
+- sends the selected `unrestrictedValue`;
+- requests `count: 1`;
+- final resolved item fills WooCommerce fields and hidden DaData fields.
 
-## Frontend
-
-When `dadata_suggestions_enabled=true`, `checkout-address-suggestions.js` and CSS are loaded even if the API key is missing or encryption is not ready. In that case `config.enabled=false`, no AJAX request is sent, and admins with debug enabled see a clear message under `address_1`.
-
-Search handlers are delegated to `document.body` and listen only to `input`, `keyup`, and `paste`. `blur` and `change` do not start searches. WooCommerce refreshes are handled through `updated_checkout` and `wc_fragments_refreshed`.
-
-The frontend explicitly detects the active checkout mode. Shipping fields are used only when the WooCommerce ship-to-different-address checkbox is checked and visible usable shipping city/address fields exist. Otherwise billing is the active mode. Hidden shipping fields in the DOM are ignored.
-
-Supported selectors:
-
-- city: `shipping_city`, `billing_city`
-- address 1: `shipping_address_1`, `billing_address_1`, including `input` and `textarea`
-- address 2: `shipping_address_2`, `billing_address_2`
-- postcode/state are filled when available
-
-No `update_checkout` is triggered while typing. It is triggered only after a suggestion is selected and applied.
-
-Popup, notice, and debug block are rendered next to the active address field: usually `billing_address_1`; `shipping_address_1` is used only in active shipping mode.
+`stage=city` remains available for DaData city mode, but the modal address picker uses `address`, `house_after_street`, and `resolve`.
 
 ## Street To House
 
 When a street item is selected:
 
-- `address_1` becomes `street_with_type + " "`
-- status becomes `street_selected`
-- `street_fias_id` and `street_kladr_id` are saved
-- the next address input uses `stage=house_after_street`
+- standard `address_1` becomes `street_with_type + " "`;
+- status becomes `street_selected`;
+- street FIAS/KLADR hidden fields are saved;
+- the modal stays open;
+- hint says `Добавьте номер дома`;
+- the next modal search uses `stage=house_after_street`;
+- the buyer can click `Изменить улицу` to return to `stage=address`.
 
 When a house or flat item is selected:
 
-- frontend calls `stage=resolve`
-- the resolved item fills city, state, postcode, address_1, address_2
-- status becomes `resolved`
-- popup closes
-- `update_checkout` runs
+- frontend calls `stage=resolve`;
+- resolved data fills city, state, postcode, address_1, and address_2 when available;
+- status becomes `resolved`;
+- hidden fields are filled;
+- modal closes;
+- a selected notice appears near `address_1`;
+- `update_checkout` runs.
+
+## Manual Fallback
+
+If DaData returns no useful results, the modal shows:
+
+`Адрес не найден. Можно продолжить ручной ввод.`
+
+The buyer can click:
+
+`Использовать введенный адрес`
+
+Manual fallback:
+
+- writes the modal search value into `address_1`;
+- sets status to `manual`;
+- clears address-specific DaData ids while keeping city fields;
+- closes the modal;
+- triggers `update_checkout`;
+- does not block checkout.
+
+City is still required by normal checkout validation.
 
 ## Hidden Fields And Order Meta
 
@@ -124,14 +143,10 @@ Order persistence stores `_billing_dadata_*`, `_shipping_dadata_*`, and compatib
 
 1. Check that `checkout-address-suggestions.js` is loaded on checkout.
 2. Enable checkout debug panel.
-3. Check the debug block under `billing_address_1` or `shipping_address_1`: `DaData подсказки: script loaded`, `config enabled`, `api key ready`, `encryption ready`, `address field`, `last query`, `last ajax status`, `last items count`.
-4. Check the debug block values `active mode`, `active address field`, and `active city field`.
-5. Check Console for `address suggestions script loaded`, `active checkout prefix: billing`, `using address field selector`, `address input event`, `ajax request start`.
+3. Click or focus the active `address_1` field.
+4. Check Console for `address picker opened`, `modal search input`, `ajax request start`, and `ajax success items count`.
+5. Check the debug block near `address_1`: `script loaded`, `config enabled`, `active prefix`, `modal opened`, `last stage`, `last query`, `last ajax status`, `last items count`.
 6. Check Network for `admin-ajax.php?action=wdc_platform_dadata_address_suggest`.
 7. Manual endpoint probe: POST `admin-ajax.php?action=wdc_platform_dadata_address_suggest` with `stage=address` and `query=тверская`.
 8. If `config enabled: no`, check that DaData suggestions are enabled, the API key is saved, and `APP_ENCRYPTION_KEY` is configured.
-9. If `address field: not found`, inspect the real checkout input names. The expected names are `billing_address_1`, `shipping_address_1`, `billing_city`, and `shipping_city`.
-
-## Fallback
-
-If DaData is disabled, missing credentials, API failure, or the buyer ignores suggestions, checkout should not be blocked. The address is treated as manual fallback unless city is empty. Empty city should still produce the normal validation error asking for the settlement.
+9. If the modal opens near the wrong field, check active mode: shipping is used only when ship-to-different-address is checked and usable shipping fields are visible.
