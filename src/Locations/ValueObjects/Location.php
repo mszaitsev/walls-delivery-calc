@@ -17,13 +17,18 @@ final class Location {
 		public readonly string $settlement_name = '',
 		public readonly string $settlement_type = '',
 		public readonly string $display_name = '',
-		public readonly string $postcode = '',
 		public readonly ?float $latitude = null,
 		public readonly ?float $longitude = null,
 		public readonly bool $active = true,
 		public readonly int $gar_object_id = 0,
 		public readonly string $kladr_id = '',
 		public readonly string $region_type = '',
+		public readonly string $district_name = '',
+		public readonly string $district_type = '',
+		public readonly string $district_fias_id = '',
+		public readonly string $district_kladr_id = '',
+		public readonly int $district_gar_object_id = 0,
+		public readonly ?int $district_level = null,
 		public readonly string $city_type = '',
 		public readonly string $city_fias_id = '',
 		public readonly string $city_kladr_id = '',
@@ -41,32 +46,37 @@ final class Location {
 	 */
 	public function to_array(): array {
 		return array(
-			'id'              => $this->id,
-			'fias_id'         => $this->fias_id,
-			'gar_id'          => $this->gar_id,
-			'gar_object_id'   => $this->gar_object_id,
-			'kladr_id'        => $this->kladr_id,
-			'country_code'    => $this->country_code,
-			'region_name'     => $this->region_name,
-			'region_type'     => $this->region_type,
-			'region_code'     => $this->region_code,
-			'city_name'       => $this->city_name,
-			'city_type'       => $this->city_type,
-			'city_fias_id'    => $this->city_fias_id,
-			'city_kladr_id'   => $this->city_kladr_id,
-			'settlement_name' => $this->settlement_name,
-			'settlement_type' => $this->settlement_type,
-			'place_name'      => $this->resolved_place_name(),
-			'place_type'      => $this->resolved_place_type(),
-			'place_level'     => $this->place_level,
-			'display_name'    => $this->resolved_display_name(),
-			'postcode'        => $this->postcode,
-			'postal_code'     => $this->postal_code,
-			'okato'           => $this->okato,
-			'oktmo'           => $this->oktmo,
-			'latitude'        => $this->latitude,
-			'longitude'       => $this->longitude,
-			'active'          => $this->active,
+			'id'                     => $this->id,
+			'fias_id'                => $this->fias_id,
+			'gar_id'                 => $this->gar_id,
+			'gar_object_id'          => $this->gar_object_id,
+			'kladr_id'               => $this->kladr_id,
+			'country_code'           => $this->country_code,
+			'region_name'            => $this->region_name,
+			'region_type'            => $this->region_type,
+			'region_code'            => $this->region_code,
+			'district_name'          => $this->district_name,
+			'district_type'          => $this->district_type,
+			'district_fias_id'       => $this->district_fias_id,
+			'district_kladr_id'      => $this->district_kladr_id,
+			'district_gar_object_id' => $this->district_gar_object_id,
+			'district_level'         => $this->district_level,
+			'city_name'              => $this->city_name,
+			'city_type'              => $this->city_type,
+			'city_fias_id'           => $this->city_fias_id,
+			'city_kladr_id'          => $this->city_kladr_id,
+			'settlement_name'        => $this->settlement_name,
+			'settlement_type'        => $this->settlement_type,
+			'place_name'             => $this->resolved_place_name(),
+			'place_type'             => $this->resolved_place_type(),
+			'place_level'            => $this->place_level,
+			'display_name'           => $this->resolved_display_name(),
+			'postal_code'            => $this->postal_code,
+			'okato'                  => $this->okato,
+			'oktmo'                  => $this->oktmo,
+			'latitude'               => $this->latitude,
+			'longitude'              => $this->longitude,
+			'active'                 => $this->active,
 		);
 	}
 
@@ -92,13 +102,18 @@ final class Location {
 			$settlement_name,
 			$settlement_type,
 			(string) ( $data['display_name'] ?? '' ),
-			(string) ( $data['postcode'] ?? $postal_code ),
 			isset( $data['latitude'] ) && '' !== (string) $data['latitude'] ? (float) $data['latitude'] : null,
 			isset( $data['longitude'] ) && '' !== (string) $data['longitude'] ? (float) $data['longitude'] : null,
 			(bool) ( $data['active'] ?? true ),
 			$gar_object_id,
 			(string) ( $data['kladr_id'] ?? '' ),
 			(string) ( $data['region_type'] ?? '' ),
+			(string) ( $data['district_name'] ?? '' ),
+			(string) ( $data['district_type'] ?? '' ),
+			(string) ( $data['district_fias_id'] ?? '' ),
+			(string) ( $data['district_kladr_id'] ?? '' ),
+			self::int_value( $data['district_gar_object_id'] ?? 0 ),
+			isset( $data['district_level'] ) && '' !== (string) $data['district_level'] ? (int) $data['district_level'] : null,
 			(string) ( $data['city_type'] ?? '' ),
 			(string) ( $data['city_fias_id'] ?? '' ),
 			(string) ( $data['city_kladr_id'] ?? '' ),
@@ -157,17 +172,23 @@ final class Location {
 			implode(
 				' ',
 				array(
-					$this->resolved_display_name(),
-					$this->resolved_place_name(),
-					$this->resolved_place_type(),
-					$this->city_name,
-					$this->city_type,
 					$this->region_name,
-					$this->region_code,
+					$this->district_name,
+					$this->city_name,
+					$this->resolved_place_name(),
+					$this->resolved_display_name(),
 					$this->fias_id,
-					(string) $this->gar_object_id,
-					$this->gar_id,
 					$this->kladr_id,
+					(string) $this->gar_object_id,
+					$this->district_fias_id,
+					$this->district_kladr_id,
+					(string) $this->district_gar_object_id,
+					$this->city_fias_id,
+					$this->city_kladr_id,
+					$this->region_code,
+					$this->resolved_place_type(),
+					$this->city_type,
+					$this->district_type,
 				)
 			)
 		);
@@ -198,12 +219,16 @@ final class Location {
 			return trim( $this->display_name );
 		}
 
-		$name = $this->resolved_place_name();
-		if ( '' === $name ) {
-			return '';
-		}
+		$parts = array(
+			trim( $this->region_name ),
+			$this->typed_name( $this->district_type, $this->district_name ),
+			$this->typed_name( $this->city_type, $this->city_name ),
+			$this->typed_name( $this->resolved_place_type(), $this->resolved_place_name() ),
+		);
 
-		return '' !== trim( $this->region_name ) ? sprintf( '%s, %s', $name, trim( $this->region_name ) ) : $name;
+		$parts = array_values( array_unique( array_filter( $parts, static fn( string $part ): bool => '' !== $part ) ) );
+
+		return implode( ', ', $parts );
 	}
 
 	public static function normalize_search_text( string $value ): string {
@@ -213,6 +238,16 @@ final class Location {
 		$value = preg_replace( '/\s+/u', ' ', trim( $value ) );
 
 		return is_string( $value ) ? $value : '';
+	}
+
+	private function typed_name( string $type, string $name ): string {
+		$type = trim( $type );
+		$name = trim( $name );
+		if ( '' === $name ) {
+			return '';
+		}
+
+		return '' !== $type ? trim( $type . ' ' . $name ) : $name;
 	}
 
 	private static function int_value( mixed $value ): int {

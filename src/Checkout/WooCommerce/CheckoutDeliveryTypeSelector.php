@@ -131,7 +131,7 @@ final class CheckoutDeliveryTypeSelector {
 				country_code: ! empty( $selected_city['country_code'] ) ? (string) $selected_city['country_code'] : $country,
 				region_name: (string) ( $selected_city['region_name'] ?? '' ),
 				city: (string) $selected_city['city_name'],
-				postcode: (string) ( $selected_city['postcode'] ?? '' ),
+				postcode: (string) ( $selected_city['postal_code'] ?? $selected_city['postcode'] ?? '' ),
 				fias_id: (string) ( $selected_city['fias_id'] ?? '' ),
 				gar_id: (string) ( $selected_city['gar_id'] ?? '' ),
 				normalized: true

@@ -272,36 +272,40 @@ final class LocationRepository {
 		$display     = $location->resolved_display_name();
 		$place_name  = $location->resolved_place_name();
 		$place_type  = $location->resolved_place_type();
-		$postal_code = '' !== $location->postal_code ? $location->postal_code : $location->postcode;
 
 		return array(
-			'gar_object_id'   => $location->gar_object_id,
-			'fias_id'         => $location->fias_id,
-			'kladr_id'        => $location->kladr_id,
-			'gar_id'          => '' !== $location->gar_id ? $location->gar_id : (string) $location->gar_object_id,
-			'country_code'    => '' !== $location->country_code ? $location->country_code : 'RU',
-			'region_name'     => $location->region_name,
-			'region_code'     => $location->region_code,
-			'city_name'       => $location->city_name,
-			'city_type'       => $location->city_type,
-			'city_fias_id'    => $location->city_fias_id,
-			'city_kladr_id'   => $location->city_kladr_id,
-			'settlement_name' => $place_name,
-			'settlement_type' => $place_type,
-			'place_name'      => $place_name,
-			'place_type'      => $place_type,
-			'place_level'     => max( 0, $location->place_level ),
-			'display_name'    => $display,
-			'postcode'        => $postal_code,
-			'postal_code'     => $postal_code,
-			'okato'           => $location->okato,
-			'oktmo'           => $location->oktmo,
-			'latitude'        => $location->latitude,
-			'longitude'       => $location->longitude,
-			'searchable_text' => $location->get_searchable_text(),
-			'active'          => $location->active ? 1 : 0,
-			'created_at'      => $now,
-			'updated_at'      => $now,
+			'gar_object_id'          => $location->gar_object_id,
+			'fias_id'                => $location->fias_id,
+			'kladr_id'               => $location->kladr_id,
+			'gar_id'                 => '' !== $location->gar_id ? $location->gar_id : (string) $location->gar_object_id,
+			'country_code'           => '' !== $location->country_code ? $location->country_code : 'RU',
+			'region_name'            => $location->region_name,
+			'region_code'            => $location->region_code,
+			'district_name'          => $location->district_name,
+			'district_type'          => $location->district_type,
+			'district_fias_id'       => $location->district_fias_id,
+			'district_kladr_id'      => $location->district_kladr_id,
+			'district_gar_object_id' => $location->district_gar_object_id > 0 ? $location->district_gar_object_id : null,
+			'district_level'         => $location->district_level,
+			'city_name'              => $location->city_name,
+			'city_type'              => $location->city_type,
+			'city_fias_id'           => $location->city_fias_id,
+			'city_kladr_id'          => $location->city_kladr_id,
+			'settlement_name'        => $place_name,
+			'settlement_type'        => $place_type,
+			'place_name'             => $place_name,
+			'place_type'             => $place_type,
+			'place_level'            => max( 0, $location->place_level ),
+			'display_name'           => $display,
+			'postal_code'            => $location->postal_code,
+			'okato'                  => $location->okato,
+			'oktmo'                  => $location->oktmo,
+			'latitude'               => $location->latitude,
+			'longitude'              => $location->longitude,
+			'searchable_text'        => $location->get_searchable_text(),
+			'active'                 => $location->active ? 1 : 0,
+			'created_at'             => $now,
+			'updated_at'             => $now,
 		);
 	}
 
@@ -309,7 +313,7 @@ final class LocationRepository {
 	 * @return array<int,string>
 	 */
 	private function formats( bool $with_created_at = true ): array {
-		$formats = array( '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%s', '%d' );
+		$formats = array( '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%f', '%f', '%s', '%d' );
 		if ( $with_created_at ) {
 			$formats[] = '%s';
 		}

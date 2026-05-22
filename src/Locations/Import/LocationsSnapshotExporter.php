@@ -24,7 +24,7 @@ final class LocationsSnapshotExporter {
 		$this->wpdb = $db ?? $wpdb;
 	}
 
-	public function export_to_file( string $path, string $version = '0.15.0', int $page_size = 1000 ): int {
+	public function export_to_file( string $path, string $version = '0.15.1', int $page_size = 1000 ): int {
 		$handle = fopen( $path, 'wb' );
 		if ( false === $handle ) {
 			throw new RuntimeException( 'Snapshot file cannot be opened for writing.' );
@@ -54,6 +54,7 @@ final class LocationsSnapshotExporter {
 				);
 				$data = is_array( $data ) ? $data : array();
 				foreach ( $data as $row ) {
+					$row = $this->export_row( $table, $row );
 					fwrite(
 						$handle,
 						$this->encode(
@@ -76,7 +77,7 @@ final class LocationsSnapshotExporter {
 		return $rows;
 	}
 
-	public function stream_download( string $version = '0.15.0' ): void {
+	public function stream_download( string $version = '0.15.1' ): void {
 		$file = wp_tempnam( 'wdc-locations-snapshot-' );
 		if ( ! is_string( $file ) || '' === $file ) {
 			throw new RuntimeException( 'Unable to create temporary snapshot file.' );
@@ -95,5 +96,19 @@ final class LocationsSnapshotExporter {
 	private function encode( array $data ): string {
 		$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $data, JSON_UNESCAPED_UNICODE ) : json_encode( $data, JSON_UNESCAPED_UNICODE );
 		return is_string( $json ) ? $json : '{}';
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,mixed>
+	 */
+	private function export_row( string $table, array $row ): array {
+		if ( 'wdc_locations' !== $table ) {
+			return $row;
+		}
+
+		unset( $row['postcode'] );
+
+		return $row;
 	}
 }

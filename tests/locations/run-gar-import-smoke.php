@@ -23,8 +23,10 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $locations = array();
 		public array $regions = array();
 		public array $stage = array();
+		public array $stage_history = array();
 		public array $aliases = array();
 		public array $carrier_codes = array();
+		public array $missing_tables = array();
 
 		public function prepare( string $query, mixed ...$args ): array {
 			return array( 'query' => $query, 'args' => $args );
@@ -37,6 +39,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public function insert( string $table, array $data, ?array $format = null ): int {
 			if ( str_contains( $table, 'wdc_gar_places_stage' ) ) {
 				$this->stage[] = $data;
+				$this->stage_history[] = $data;
 				return 1;
 			}
 
@@ -156,7 +159,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public function get_var( mixed $query ): int|string|null {
 			$sql = is_array( $query ) ? $query['query'] : (string) $query;
 			if ( str_contains( $sql, 'SHOW TABLES LIKE' ) ) {
-				return is_array( $query ) ? (string) $query['args'][0] : '';
+				$table = is_array( $query ) ? (string) $query['args'][0] : '';
+				return in_array( $table, $this->missing_tables, true ) ? 0 : $table;
 			}
 			if ( str_contains( $sql, 'wdc_regions' ) ) {
 				return count( $this->regions );
@@ -205,7 +209,15 @@ if ( ! class_exists( 'wpdb' ) ) {
 		private function columns_for( string $table ): array {
 			$rows = $this->rows_for_table( $table );
 			$first = reset( $rows );
-			return is_array( $first ) ? array_keys( $first ) : array( 'id', 'region_code', 'region_name', 'gar_object_id', 'fias_id', 'carrier_key', 'external_code' );
+			if ( is_array( $first ) ) {
+				return array_keys( $first );
+			}
+
+			if ( 'wdc_locations' === $table ) {
+				return array( 'id', 'gar_object_id', 'fias_id', 'kladr_id', 'gar_id', 'country_code', 'region_name', 'region_code', 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level', 'city_name', 'city_type', 'city_fias_id', 'city_kladr_id', 'settlement_name', 'settlement_type', 'place_name', 'place_type', 'place_level', 'display_name', 'postal_code', 'okato', 'oktmo', 'latitude', 'longitude', 'searchable_text', 'active', 'created_at', 'updated_at' );
+			}
+
+			return array( 'id', 'region_code', 'region_name', 'gar_object_id', 'fias_id', 'carrier_key', 'external_code', 'created_at', 'updated_at' );
 		}
 	}
 }
@@ -283,20 +295,33 @@ $importer = new GarPlacesCsvImporter( $locations, $regions, new LocationAliasGen
 $result = $importer->import_from_file( dirname( __DIR__ ) . '/fixtures/gar_places_sample.csv' );
 
 gar_smoke_assert( $result->success, 'GAR import must succeed.' );
-gar_smoke_assert( 6 === $result->rows_read, 'CSV delimiter ; must be parsed.' );
-gar_smoke_assert( 6 === $result->locations_imported, 'Locations must be imported.' );
-gar_smoke_assert( 4 === $result->regions_imported, 'Regions must be deduplicated by region_code.' );
+gar_smoke_assert( 4 === $result->rows_read, 'CSV delimiter ; must be parsed and header skipped.' );
+gar_smoke_assert( 4 === $result->locations_imported, 'Locations must be imported.' );
+gar_smoke_assert( 2 === $result->regions_imported, 'Regions must be deduplicated by region_code.' );
 gar_smoke_assert( 0 === count( $wpdb->stage ), 'Stage table must be cleared after success.' );
+gar_smoke_assert( 'Новосибирский' === (string) ( $wpdb->stage_history[1]['district_name'] ?? '' ), 'district_* must be imported to staging.' );
 
 $novosibirsk = $locations->find_by_gar_object_id( 1001 );
 gar_smoke_assert( null !== $novosibirsk && 1001 === $novosibirsk->gar_object_id, 'gar_object_id must be stored.' );
 gar_smoke_assert( '' === $novosibirsk->postal_code, 'Empty postal_code must be preserved.' );
-gar_smoke_assert( '' !== $novosibirsk->display_name, 'display_name must be stored.' );
+gar_smoke_assert( 'Новосибирская обл, г Новосибирск' === $novosibirsk->display_name, 'display_name must be imported as-is.' );
 gar_smoke_assert( null !== $locations->find_by_fias_id( '22222222-2222-2222-2222-222222222001' ), 'fias_id must be searchable and unique-compatible.' );
 gar_smoke_assert( null !== $locations->find_by_kladr_id( '5400000100000' ), 'Search by kladr_id must find row.' );
 gar_smoke_assert( count( $search_service->search( 'Новос' ) ) > 0, 'Search "Новос" must find Novosibirsk.' );
 gar_smoke_assert( count( $search_service->search( '5400000100000' ) ) > 0, 'Search must include kladr_id.' );
 gar_smoke_assert( null !== ( new CheckoutLocationSearch( $search_service ) )->best_match( 'Новосибирск' ), 'Local city picker search must still work.' );
+
+$gusiny_brod = $locations->find_by_gar_object_id( 1002 );
+gar_smoke_assert( null !== $gusiny_brod && 'Новосибирский' === $gusiny_brod->district_name, 'district_* must be imported to locations.' );
+gar_smoke_assert( '630555' === $gusiny_brod->postal_code, 'postal_code must be imported.' );
+gar_smoke_assert( str_contains( $gusiny_brod->display_name, 'Новосибирский р-н' ), 'Search result display must include district from CSV display_name.' );
+gar_smoke_assert( count( $search_service->search( 'Новосибирский' ) ) > 0, 'Search must find by district_name.' );
+gar_smoke_assert( count( $search_service->search( 'Гусиный Брод' ) ) > 0, 'Search must find Gusinny Brod.' );
+gar_smoke_assert( count( $search_service->search( '33333333-3333-3333-3333-333333333001' ) ) > 0, 'Search must find by district_fias_id.' );
+gar_smoke_assert( count( $search_service->search( '5400100000000' ) ) > 0, 'Search must find by district_kladr_id.' );
+
+$fallback = $locations->find_by_gar_object_id( 1004 );
+gar_smoke_assert( null !== $fallback && 'Новосибирская обл, р-н Новосибирский, г Новосибирск, рп Краснообск' === $fallback->display_name, 'Fallback display_name must include district.' );
 
 $wpdb->insert(
 	'wdc_location_carrier_codes',
@@ -315,23 +340,46 @@ gar_smoke_assert( 1 === count( $wpdb->carrier_codes ), 'carrier_codes table foun
 
 $snapshot = tempnam( sys_get_temp_dir(), 'wdc-snapshot-' );
 gar_smoke_assert( is_string( $snapshot ), 'Snapshot temp file must be created.' );
-$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.0' );
+$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.1' );
 gar_smoke_assert( $exported > 0, 'Snapshot export must include rows from 4 tables.' );
 $snapshot_text = (string) file_get_contents( $snapshot );
 gar_smoke_assert( str_contains( $snapshot_text, '"table":"wdc_regions"' ) && str_contains( $snapshot_text, '"table":"wdc_location_carrier_codes"' ), 'Snapshot export must include all foundation tables.' );
+gar_smoke_assert( str_contains( $snapshot_text, '"district_name":"Новосибирский"' ) && str_contains( $snapshot_text, '"postal_code":"630555"' ), 'Snapshot export must preserve district_* and postal_code.' );
+gar_smoke_assert( ! str_contains( $snapshot_text, '"postcode"' ), 'Snapshot export must not include postcode as a location field.' );
 
 $restored_db = new wpdb();
 $restored = ( new LocationsSnapshotImporter( $restored_db ) )->import_from_file( $snapshot );
 gar_smoke_assert( $restored === $exported, 'Snapshot import must restore exported rows.' );
 gar_smoke_assert( count( $restored_db->locations ) === count( $wpdb->locations ), 'Snapshot import must restore locations.' );
+$restored_has_district = false;
+foreach ( $restored_db->locations as $restored_location ) {
+	if ( 'Новосибирский' === (string) ( $restored_location['district_name'] ?? '' ) ) {
+		$restored_has_district = true;
+		break;
+	}
+}
+gar_smoke_assert( $restored_has_district, 'Snapshot import must restore district fields.' );
 @unlink( $snapshot );
+
+$bad_header = tempnam( sys_get_temp_dir(), 'wdc-gar-bad-header-' );
+gar_smoke_assert( is_string( $bad_header ), 'Bad header temp file must be created.' );
+file_put_contents( $bad_header, "\"region_code\";\"region_name\";\"place_name\";\"fias_id\"\n\"54\";\"Новосибирская обл\";\"Новосибирск\";\"fias\"\n" );
+$bad_result = $importer->import_from_file( $bad_header );
+gar_smoke_assert( ! $bad_result->success && str_contains( implode( ' ', $bad_result->errors ), 'GAR CSV missing required column: gar_object_id' ), 'Missing required header must return clear error.' );
+@unlink( $bad_header );
+
+$missing_stage_db = new wpdb();
+$missing_stage_db->missing_tables = array( 'wdc_gar_places_stage' );
+$missing_stage = new GarPlacesCsvImporter( new LocationRepository( $missing_stage_db ), new RegionRepository( $missing_stage_db ), new LocationAliasGenerator(), $missing_stage_db );
+$missing_stage_result = $missing_stage->import_from_file( dirname( __DIR__ ) . '/fixtures/gar_places_sample.csv' );
+gar_smoke_assert( ! $missing_stage_result->success && str_contains( implode( ' ', $missing_stage_result->errors ), 'GAR staging table does not exist. Run plugin migrations first.' ), 'clear_stage must report missing staging table.' );
 
 $_SERVER['REQUEST_METHOD'] = 'GET';
 $_GET = array();
 $_POST = array();
 ob_start();
 ( new LocationsAdminPage(
-	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.0' ),
+	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.1' ),
 	$locations,
 	$search_service,
 	new LocationImportService( $locations ),

@@ -234,7 +234,7 @@ $normalizer = new CheckoutAddressNormalizer(
 $runtime = new CheckoutAddressRuntime( $normalizer, $resolver, $session );
 
 $known_city = (string) $wpdb->rows[1]['city_name'];
-$known_postcode = (string) $wpdb->rows[1]['postcode'];
+$known_postcode = (string) ( $wpdb->rows[1]['postal_code'] ?? '' );
 
 $known = $resolver->resolve_city( $known_city );
 address_smoke_assert( null !== $known, 'Known city must resolve.' );

@@ -37,7 +37,7 @@ final class CheckoutCityResolver {
 			return null;
 		}
 
-		$postcode = trim( $location->postcode );
+		$postcode = trim( $location->postal_code );
 
 		return '' !== $postcode ? $postcode : null;
 	}

@@ -385,7 +385,7 @@
 		} );
 
 		setFieldValue( $city, city );
-		setFieldValue( $postcode, location.postcode );
+		setFieldValue( $postcode, location.postal_code );
 		setStateField( $state, location );
 
 		debug( 'fields after', {
@@ -398,7 +398,7 @@
 		setHidden( 'wdc_platform_location_fias_id', location.fias_id );
 		setHidden( 'wdc_platform_location_gar_id', location.gar_id );
 		setHidden( 'wdc_platform_location_display_name', location.display_name || label );
-		setHidden( 'wdc_platform_location_postcode', location.postcode );
+		setHidden( 'wdc_platform_location_postcode', location.postal_code );
 		setHidden( 'wdc_platform_location_region_name', location.region_name );
 		debug( 'hidden fields set' );
 

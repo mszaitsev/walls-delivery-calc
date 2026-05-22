@@ -1,16 +1,20 @@
 # WDC GAR Places Import
 
-Version: 0.15.0.
+Version: 0.15.1.
 
 ## Source CSV
 
 `gar_places.csv` is a prepared UTF-8 CSV without BOM. It uses `;` as delimiter and double quotes around values. Empty values are normalized to empty strings/`NULL` depending on the target column.
 
+The importer is header-based: the first row must contain column names. Header names are trimmed, UTF-8 BOM is removed, and names are lowercased before matching. Column order is not important. Unknown columns are ignored.
+
 Expected columns:
 
-`region_code`, `region_name`, `region_type`, `region_fias_id`, `region_kladr_id`, `city_name`, `city_type`, `city_fias_id`, `city_kladr_id`, `place_name`, `place_type`, `place_level`, `display_name`, `fias_id`, `gar_object_id`, `kladr_id`, `okato`, `oktmo`, `postal_code`.
+`region_code`, `region_name`, `region_type`, `region_fias_id`, `region_kladr_id`, `district_name`, `district_type`, `district_fias_id`, `district_kladr_id`, `district_gar_object_id`, `district_level`, `city_name`, `city_type`, `city_fias_id`, `city_kladr_id`, `place_name`, `place_type`, `place_level`, `display_name`, `fias_id`, `gar_object_id`, `kladr_id`, `okato`, `oktmo`, `postal_code`.
 
-Rows without `gar_object_id`, `fias_id`, `place_name`, or `region_code` are skipped.
+Required columns are `region_code`, `region_name`, `place_name`, `fias_id`, and `gar_object_id`. If any required column is absent from the header, import returns a clear error. Rows with an empty required value are skipped.
+
+The current hierarchy is `region_* -> district_* -> city_* -> place_*`. `district_*` and `city_*` can be empty.
 
 ## Import Flow
 
@@ -34,11 +38,11 @@ Before import, the local base is replaced: locations, aliases, regions, and carr
 
 `wdc_gar_places_stage` mirrors the CSV one-to-one. It is disposable and is cleared before import and after success.
 
-`wdc_locations` keeps the internal `id` for compatibility, but the canonical external key is `gar_object_id`. It also stores `fias_id`, `kladr_id`, city fields, place fields, OKATO/OKTMO, and `postal_code`.
+`wdc_locations` keeps the internal `id` for compatibility, but the canonical external key is `gar_object_id`. It also stores `fias_id`, `kladr_id`, district fields, city fields, place fields, OKATO/OKTMO, and `postal_code`.
 
-`display_name` is stored in the database, not rebuilt on every frontend request. If an imported row has an empty `display_name`, the importer builds a fallback from place and region fields.
+`display_name` is imported and stored as-is when present in the CSV. If an imported row has an empty `display_name`, the importer builds a fallback from region, district, city, and place fields.
 
-`postal_code` is imported but not used in delivery calculations yet. It may be empty in the current prepared CSV.
+`postal_code` is imported but not used in delivery calculations yet. It may be empty in the current prepared CSV. `postal_code` is the only location postal-index field used by the new domain/runtime; legacy `postcode` is not exported in snapshots and should not be used for GAR locations.
 
 `wdc_location_carrier_codes` is a foundation table for future carrier mappings. This branch does not populate CDEK/DPD codes. Future examples:
 
@@ -67,7 +71,7 @@ The admin section `Экспорт / импорт подготовленной б
 The first JSONL row is metadata:
 
 ```json
-{"type":"meta","version":"0.15.0","tables":["wdc_regions","wdc_locations","wdc_location_aliases","wdc_location_carrier_codes"],"created_at":"2026-05-23 12:00:00"}
+{"type":"meta","version":"0.15.1","tables":["wdc_regions","wdc_locations","wdc_location_aliases","wdc_location_carrier_codes"],"created_at":"2026-05-23 12:00:00"}
 ```
 
 Following rows use:
@@ -78,9 +82,13 @@ Following rows use:
 
 Export reads tables page by page. Import replaces the four tables, ignores snapshot columns absent from the current schema, and lets missing current columns use DB defaults or `NULL`.
 
+Snapshot import softly accepts old `postcode` values as `postal_code` fallback, but snapshot export does not emit `postcode`.
+
 ## Server Requirements
 
 The production CSV is about 46 MB and 160716 rows. The importer is streaming, but a web request can still hit PHP limits. For production-size imports, increase `max_execution_time`, `upload_max_filesize`, and `post_max_size`, or import on a test/staging environment and transfer a JSONL snapshot to the live site.
+
+Processing currently saves locations row by row after staging. A future performance pass can add batch upserts for the final `wdc_locations` transfer.
 
 ## Future Work
 

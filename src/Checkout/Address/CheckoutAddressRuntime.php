@@ -59,7 +59,7 @@ final class CheckoutAddressRuntime {
 			$context['region_name'] = (string) ( $location_data['region_name'] ?? '' );
 			$context['region_code'] = (string) ( $location_data['region_code'] ?? '' );
 			if ( '' === (string) ( $context['postcode'] ?? '' ) ) {
-				$context['postcode'] = (string) ( $location_data['postcode'] ?? '' );
+				$context['postcode'] = (string) ( $location_data['postal_code'] ?? '' );
 			}
 		}
 
@@ -162,7 +162,7 @@ final class CheckoutAddressRuntime {
 			'settlement_name' => '',
 			'settlement_type' => 'город',
 			'display_name'    => $context['selected_display_name'],
-			'postcode'        => $context['postcode'],
+			'postal_code'     => $context['postcode'],
 			'active'          => true,
 			'source'          => 'local_db',
 			'is_manual_city'  => false,
@@ -181,7 +181,7 @@ final class CheckoutAddressRuntime {
 			'display_name'    => (string) ( $location['display_name'] ?? '' ),
 			'region_name'     => (string) ( $location['region_name'] ?? '' ),
 			'region_code'     => (string) ( $location['region_code'] ?? '' ),
-			'postcode'        => (string) ( $location['postcode'] ?? '' ),
+			'postcode'        => (string) ( $location['postal_code'] ?? $location['postcode'] ?? '' ),
 			'fias_id'         => (string) ( $location['fias_id'] ?? '' ),
 			'gar_id'          => (string) ( $location['gar_id'] ?? '' ),
 			'source'          => 'local_db',

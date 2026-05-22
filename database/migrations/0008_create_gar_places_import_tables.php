@@ -36,6 +36,12 @@ return static function (): void {
 			region_type varchar(30) NULL,
 			region_fias_id char(36) NULL,
 			region_kladr_id varchar(19) NULL,
+			district_name varchar(160) NULL,
+			district_type varchar(30) NULL,
+			district_fias_id char(36) NULL,
+			district_kladr_id varchar(19) NULL,
+			district_gar_object_id bigint(20) unsigned NULL,
+			district_level smallint NULL,
 			city_name varchar(120) NULL,
 			city_type varchar(30) NULL,
 			city_fias_id char(36) NULL,
@@ -53,7 +59,9 @@ return static function (): void {
 			KEY gar_object_id (gar_object_id),
 			KEY fias_id (fias_id),
 			KEY region_code (region_code),
-			KEY kladr_id (kladr_id)
+			KEY kladr_id (kladr_id),
+			KEY district_fias_id (district_fias_id),
+			KEY district_gar_object_id (district_gar_object_id)
 		) {$charset_collate};"
 	);
 
@@ -67,6 +75,12 @@ return static function (): void {
 			country_code varchar(8) NOT NULL DEFAULT 'RU',
 			region_name varchar(255) NOT NULL DEFAULT '',
 			region_code char(2) NOT NULL,
+			district_name varchar(160) NOT NULL DEFAULT '',
+			district_type varchar(30) NOT NULL DEFAULT '',
+			district_fias_id char(36) NULL,
+			district_kladr_id varchar(19) NULL,
+			district_gar_object_id bigint(20) unsigned NULL,
+			district_level smallint unsigned NULL,
 			city_name varchar(120) NULL,
 			city_type varchar(30) NULL,
 			city_fias_id char(36) NULL,
@@ -81,7 +95,6 @@ return static function (): void {
 			okato varchar(20) NULL,
 			oktmo varchar(20) NULL,
 			postal_code varchar(10) NULL,
-			postcode varchar(32) NOT NULL DEFAULT '',
 			latitude decimal(10,7) NULL,
 			longitude decimal(10,7) NULL,
 			active tinyint(1) NOT NULL DEFAULT 1,
@@ -93,14 +106,16 @@ return static function (): void {
 			KEY ix_kladr_id (kladr_id),
 			KEY ix_region_code (region_code),
 			KEY ix_region_place (region_code, place_name),
+			KEY ix_district_fias_id (district_fias_id),
+			KEY ix_district_gar_object_id (district_gar_object_id),
+			KEY ix_region_district_place (region_code, district_name, place_name),
 			KEY ix_city_fias_id (city_fias_id),
 			KEY ix_city_place (city_name, place_name),
 			KEY ix_active (active),
 			KEY country_code (country_code),
 			KEY region_name (region_name),
 			KEY city_name (city_name),
-			KEY settlement_name (settlement_name),
-			KEY postcode (postcode)
+			KEY settlement_name (settlement_name)
 		) {$charset_collate};"
 	);
 

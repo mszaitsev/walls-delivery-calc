@@ -96,7 +96,7 @@ final class LocationsAdminPage {
 					<span><?php echo esc_html__( 'Путь к CSV на сервере', 'walls-delivery-calc' ); ?></span>
 					<input type="text" name="wdc_gar_places_path" placeholder="/path/to/gar_places.csv">
 				</label>
-				<p class="description"><?php echo esc_html__( 'Импорт заменит локальную базу населенных пунктов, регионов, алиасов и carrier mappings. Для большого файла может потребоваться увеличить лимиты PHP.', 'walls-delivery-calc' ); ?></p>
+				<p class="description"><?php echo esc_html__( 'Поддерживается структура region_* → district_* → city_* → place_*. Поля district_* и city_* необязательны, неизвестные колонки игнорируются. Импорт заменит локальную базу населенных пунктов, регионов, алиасов и carrier mappings.', 'walls-delivery-calc' ); ?></p>
 				<button class="button button-primary" type="submit" name="wdc_locations_action" value="import_gar_csv" onclick="return window.confirm('<?php echo esc_js( __( 'Импорт заменит локальную базу населенных пунктов. Продолжить?', 'walls-delivery-calc' ) ); ?>');"><?php echo esc_html__( 'Импортировать населенные пункты', 'walls-delivery-calc' ); ?></button>
 				<button class="button button-secondary" type="submit" name="wdc_locations_action" value="clear_all" onclick="return window.confirm('<?php echo esc_js( __( 'Удалить все населенные пункты и алиасы из локальной базы WDC?', 'walls-delivery-calc' ) ); ?>');"><?php echo esc_html__( 'Очистить базу населенных пунктов', 'walls-delivery-calc' ); ?></button>
 			</form>
@@ -144,7 +144,7 @@ final class LocationsAdminPage {
 		?>
 		<div class="wdc-location-row">
 			<strong><?php echo esc_html( $location->display_name ); ?></strong>
-			<span><?php echo esc_html( '' !== $location->postal_code ? $location->postal_code : $location->postcode ); ?></span>
+			<span><?php echo esc_html( $location->postal_code ); ?></span>
 			<span><?php echo esc_html( $location->country_code ); ?></span>
 		</div>
 		<?php

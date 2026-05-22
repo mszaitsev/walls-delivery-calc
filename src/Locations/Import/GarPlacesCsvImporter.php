@@ -20,12 +20,18 @@ final class GarPlacesCsvImporter {
 	private GarImportResult $result;
 
 	/** @var array<int,string> */
-	private array $columns = array(
+	private array $stage_columns = array(
 		'region_code',
 		'region_name',
 		'region_type',
 		'region_fias_id',
 		'region_kladr_id',
+		'district_name',
+		'district_type',
+		'district_fias_id',
+		'district_kladr_id',
+		'district_gar_object_id',
+		'district_level',
 		'city_name',
 		'city_type',
 		'city_fias_id',
@@ -40,6 +46,15 @@ final class GarPlacesCsvImporter {
 		'okato',
 		'oktmo',
 		'postal_code',
+	);
+
+	/** @var array<int,string> */
+	private array $required_columns = array(
+		'region_code',
+		'region_name',
+		'place_name',
+		'fias_id',
+		'gar_object_id',
 	);
 
 	public function __construct(
@@ -79,19 +94,36 @@ final class GarPlacesCsvImporter {
 		$file->setFlags( SplFileObject::READ_CSV | SplFileObject::SKIP_EMPTY );
 		$file->setCsvControl( ';', '"', '\\' );
 
-		$batch = array();
-		$loaded = 0;
+		$header = null;
 		foreach ( $file as $row ) {
 			if ( ! is_array( $row ) || array( null ) === $row ) {
 				continue;
 			}
 
-			if ( 0 === $this->result->rows_read && isset( $row[0] ) && 'region_code' === $this->clean( $row[0] ) ) {
+			$header = $this->header_map( $row );
+			break;
+		}
+
+		if ( null === $header || array() === $header ) {
+			throw new RuntimeException( 'GAR CSV header row is missing.' );
+		}
+
+		foreach ( $this->required_columns as $required ) {
+			if ( ! array_key_exists( $required, $header ) ) {
+				throw new RuntimeException( sprintf( 'GAR CSV missing required column: %s', $required ) );
+			}
+		}
+
+		$batch = array();
+		$loaded = 0;
+		while ( ! $file->eof() ) {
+			$row = $file->fgetcsv();
+			if ( ! is_array( $row ) || array( null ) === $row ) {
 				continue;
 			}
 
 			++$this->result->rows_read;
-			$mapped = $this->map_csv_row( $row );
+			$mapped = $this->map_csv_row( $row, $header );
 			if ( null === $mapped ) {
 				++$this->result->skipped_rows;
 				continue;
@@ -134,6 +166,7 @@ final class GarPlacesCsvImporter {
 				$locations[] = $location;
 			}
 
+			// Current import saves row-by-row. Future optimization: batch upsert the processed locations.
 			foreach ( $locations as $location ) {
 				$id = $this->locations->save( $location );
 				$aliases = $this->alias_generator->generate( $location );
@@ -149,32 +182,64 @@ final class GarPlacesCsvImporter {
 	}
 
 	public function clear_stage(): void {
+		if ( ! $this->table_exists( $this->stage_table() ) ) {
+			throw new RuntimeException( 'GAR staging table does not exist. Run plugin migrations first.' );
+		}
+
 		$this->wpdb->query( "TRUNCATE TABLE {$this->stage_table()}" );
 	}
 
 	/**
 	 * @param array<int,mixed> $row
-	 * @return array<string,mixed>|null
+	 * @return array<string,int>
 	 */
-	private function map_csv_row( array $row ): ?array {
-		$mapped = array();
-		foreach ( $this->columns as $index => $column ) {
-			$mapped[ $column ] = $this->clean( $row[ $index ] ?? '' );
+	private function header_map( array $row ): array {
+		$map = array();
+		foreach ( $row as $index => $column ) {
+			$name = $this->normalize_header( (string) $column );
+			if ( '' !== $name && ! isset( $map[ $name ] ) ) {
+				$map[ $name ] = (int) $index;
+			}
 		}
 
-		if (
-			'' === $mapped['gar_object_id']
-			|| '' === $mapped['fias_id']
-			|| '' === $mapped['place_name']
-			|| '' === $mapped['region_code']
-		) {
-			return null;
+		return $map;
+	}
+
+	/**
+	 * @param array<int,mixed> $row
+	 * @param array<string,int> $header
+	 * @return array<string,mixed>|null
+	 */
+	private function map_csv_row( array $row, array $header ): ?array {
+		$mapped = array();
+		foreach ( $this->stage_columns as $column ) {
+			$mapped[ $column ] = $this->value( $row, $header, $column );
+		}
+
+		foreach ( $this->required_columns as $required ) {
+			if ( '' === $mapped[ $required ] ) {
+				return null;
+			}
 		}
 
 		$mapped['gar_object_id'] = (int) $mapped['gar_object_id'];
+		$mapped['district_gar_object_id'] = '' === $mapped['district_gar_object_id'] ? null : (int) $mapped['district_gar_object_id'];
+		$mapped['district_level'] = '' === $mapped['district_level'] ? null : (int) $mapped['district_level'];
 		$mapped['place_level'] = '' === $mapped['place_level'] ? null : (int) $mapped['place_level'];
 
 		return $mapped;
+	}
+
+	/**
+	 * @param array<int,mixed> $row
+	 * @param array<string,int> $header
+	 */
+	private function value( array $row, array $header, string $column ): string {
+		if ( ! array_key_exists( $column, $header ) ) {
+			return '';
+		}
+
+		return $this->clean( $row[ $header[ $column ] ] ?? '' );
 	}
 
 	/**
@@ -182,7 +247,7 @@ final class GarPlacesCsvImporter {
 	 */
 	private function insert_stage_batch( array $rows ): int {
 		foreach ( $rows as $row ) {
-			$this->wpdb->insert( $this->stage_table(), $row, $this->stage_formats() );
+			$this->wpdb->insert( $this->stage_table(), $row, $this->stage_formats( $row ) );
 		}
 
 		return count( $rows );
@@ -213,36 +278,33 @@ final class GarPlacesCsvImporter {
 	 */
 	private function stage_row_to_location( array $row ): Location {
 		$display = trim( (string) ( $row['display_name'] ?? '' ) );
-		if ( '' === $display ) {
-			$parts = array_filter(
-				array(
-					trim( (string) ( $row['place_type'] ?? '' ) . ' ' . (string) ( $row['place_name'] ?? '' ) ),
-					(string) ( $row['region_name'] ?? '' ),
-				)
-			);
-			$display = implode( ', ', $parts );
-		}
 
 		return Location::from_array(
 			array(
-				'gar_object_id' => $row['gar_object_id'] ?? 0,
-				'fias_id'       => $row['fias_id'] ?? '',
-				'kladr_id'      => $row['kladr_id'] ?? '',
-				'country_code'  => 'RU',
-				'region_name'   => $row['region_name'] ?? '',
-				'region_type'   => $row['region_type'] ?? '',
-				'region_code'   => $row['region_code'] ?? '',
-				'city_name'     => $row['city_name'] ?? '',
-				'city_type'     => $row['city_type'] ?? '',
-				'city_fias_id'  => $row['city_fias_id'] ?? '',
-				'city_kladr_id' => $row['city_kladr_id'] ?? '',
-				'place_name'    => $row['place_name'] ?? '',
-				'place_type'    => $row['place_type'] ?? '',
-				'place_level'   => $row['place_level'] ?? 0,
-				'display_name'  => $display,
-				'okato'         => $row['okato'] ?? '',
-				'oktmo'         => $row['oktmo'] ?? '',
-				'postal_code'   => $row['postal_code'] ?? '',
+				'gar_object_id'          => $row['gar_object_id'] ?? 0,
+				'fias_id'                => $row['fias_id'] ?? '',
+				'kladr_id'               => $row['kladr_id'] ?? '',
+				'country_code'           => 'RU',
+				'region_name'            => $row['region_name'] ?? '',
+				'region_type'            => $row['region_type'] ?? '',
+				'region_code'            => $row['region_code'] ?? '',
+				'district_name'          => $row['district_name'] ?? '',
+				'district_type'          => $row['district_type'] ?? '',
+				'district_fias_id'       => $row['district_fias_id'] ?? '',
+				'district_kladr_id'      => $row['district_kladr_id'] ?? '',
+				'district_gar_object_id' => $row['district_gar_object_id'] ?? 0,
+				'district_level'         => $row['district_level'] ?? null,
+				'city_name'              => $row['city_name'] ?? '',
+				'city_type'              => $row['city_type'] ?? '',
+				'city_fias_id'           => $row['city_fias_id'] ?? '',
+				'city_kladr_id'          => $row['city_kladr_id'] ?? '',
+				'place_name'             => $row['place_name'] ?? '',
+				'place_type'             => $row['place_type'] ?? '',
+				'place_level'            => $row['place_level'] ?? 0,
+				'display_name'           => $display,
+				'okato'                  => $row['okato'] ?? '',
+				'oktmo'                  => $row['oktmo'] ?? '',
+				'postal_code'            => $row['postal_code'] ?? '',
 			)
 		);
 	}
@@ -256,11 +318,34 @@ final class GarPlacesCsvImporter {
 		return preg_replace( '/^\xEF\xBB\xBF/', '', $value ) ?? $value;
 	}
 
+	private function normalize_header( string $value ): string {
+		return strtolower( $this->clean( $value ) );
+	}
+
 	/**
+	 * @param array<string,mixed> $row
 	 * @return array<int,string>
 	 */
-	private function stage_formats(): array {
-		return array( '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%s', '%s', '%s', '%s' );
+	private function stage_formats( array $row ): array {
+		$integer_columns = array(
+			'gar_object_id'          => true,
+			'district_gar_object_id' => true,
+			'district_level'         => true,
+			'place_level'            => true,
+		);
+
+		$formats = array();
+		foreach ( array_keys( $row ) as $column ) {
+			$formats[] = isset( $integer_columns[ $column ] ) ? '%d' : '%s';
+		}
+
+		return $formats;
+	}
+
+	private function table_exists( string $table ): bool {
+		$prepared = $this->wpdb->prepare( 'SHOW TABLES LIKE %s', $table );
+		$result = $this->wpdb->get_var( $prepared );
+		return ! in_array( $result, array( null, '', 0, '0' ), true );
 	}
 
 	private function stage_table(): string {

@@ -59,7 +59,8 @@ final class LocationsSnapshotImporter {
 				continue;
 			}
 
-			$data = array_intersect_key( $row['data'], array_flip( $columns[ $table ] ?? array() ) );
+			$data = $this->normalize_row( $table, $row['data'] );
+			$data = array_intersect_key( $data, array_flip( $columns[ $table ] ?? array() ) );
 			if ( array() === $data ) {
 				continue;
 			}
@@ -87,5 +88,18 @@ final class LocationsSnapshotImporter {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private function normalize_row( string $table, array $data ): array {
+		if ( 'wdc_locations' === $table ) {
+			$data['postal_code'] = (string) ( $data['postal_code'] ?? $data['postcode'] ?? '' );
+			unset( $data['postcode'] );
+		}
+
+		return $data;
 	}
 }
