@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 use WallsShop\WDC\Checkout\Address\CheckoutAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
-use WallsShop\WDC\Checkout\Address\DaDataAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\FiasAddressNormalizer;
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
@@ -230,7 +229,6 @@ $resolver = new CheckoutCityResolver( $repository, $search );
 $session = new CheckoutSessionManager();
 $normalizer = new CheckoutAddressNormalizer(
 	new FiasAddressNormalizer( $resolver ),
-	new DaDataAddressNormalizer(),
 	new FallbackAddressNormalizer()
 );
 $runtime = new CheckoutAddressRuntime( $normalizer, $resolver, $session );

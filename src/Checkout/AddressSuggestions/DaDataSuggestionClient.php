@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\AddressSuggestions;
 
-use WallsShop\WDC\Locations\DaData\DaDataLogger;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -12,7 +12,7 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 
 	public function __construct(
 		private AddressSuggestionSettings $settings,
-		private DaDataLogger $logger
+		private Logger $logger
 	) {
 	}
 
@@ -31,7 +31,7 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 			return $this->failure( 'dadata_encode_failed', 'DaData JSON encode failed.', 0 );
 		}
 
-		$this->logger->request_start( array( 'host' => 'suggestions.dadata.ru', 'endpoint' => 'suggest/address', 'stage' => $stage ) );
+		$this->logger->debug( 'DaData suggestions request started.', array( 'host' => 'suggestions.dadata.ru', 'endpoint' => 'suggest/address', 'stage' => $stage ) );
 
 		try {
 			$response = wp_remote_post(
@@ -63,7 +63,7 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 		$raw_body    = function_exists( 'wp_remote_retrieve_body' ) ? (string) wp_remote_retrieve_body( $response ) : (string) ( $response['body'] ?? '' );
 		$decoded     = '' !== trim( $raw_body ) ? json_decode( $raw_body, true ) : null;
 
-		$this->logger->response_status( $status_code, array( 'stage' => $stage ) );
+		$this->logger->debug( 'DaData suggestions response received.', array( 'status_code' => $status_code, 'stage' => $stage ) );
 
 		if ( ! is_array( $decoded ) ) {
 			return $this->failure( 'dadata_parse_failed', 'DaData response parse failed.', $status_code );
@@ -115,10 +115,6 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 
 		if ( 'address' === $stage ) {
 			$body['locations'] = array( array( 'country_iso_code' => 'RU' ) );
-			$boost = (string) ( $context['settlement_kladr_id'] ?? $context['city_kladr_id'] ?? '' );
-			if ( '' !== $boost ) {
-				$body['locations_boost'] = array( array( 'kladr_id' => $boost ) );
-			}
 			$body['from_bound'] = array( 'value' => 'street' );
 			$body['to_bound'] = array( 'value' => 'house' );
 		}

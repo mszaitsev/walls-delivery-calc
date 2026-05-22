@@ -5,13 +5,12 @@ namespace WallsShop\WDC\Checkout\AddressSuggestions;
 
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
-use WallsShop\WDC\Locations\DaData\DaDataCredentials;
 
 defined( 'ABSPATH' ) || exit;
 
 final class AddressSuggestionSettings {
-	public const API_KEY_ENCRYPTED = DaDataCredentials::TOKEN_ENCRYPTED_KEY;
-	public const API_KEY_MASKED = DaDataCredentials::TOKEN_MASKED_KEY;
+	public const API_KEY_ENCRYPTED = 'dadata_api_token_encrypted';
+	public const API_KEY_MASKED = 'dadata_api_token_masked';
 	private const LEGACY_API_KEY_ENCRYPTED = 'dadata_api_key_encrypted';
 	private const LEGACY_API_KEY_MASKED = 'dadata_api_key_masked';
 
@@ -76,7 +75,7 @@ final class AddressSuggestionSettings {
 	}
 
 	public function timeout(): int {
-		return max( 1, min( 10, $this->settings->get_int( 'dadata_api_timeout', 3 ) ) );
+		return max( 1, min( 10, $this->settings->get_int( 'dadata_suggestions_timeout', 3 ) ) );
 	}
 
 	public function count(): int {

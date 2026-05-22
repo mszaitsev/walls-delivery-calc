@@ -91,35 +91,32 @@ final class ShippingMethodRegistrar {
 				array( 'wdc-platform-checkout-rates' ),
 				$this->environment->version()
 			);
-		} else {
-			wp_enqueue_style(
-				'wdc-platform-city-selector',
-				$this->environment->plugin_url() . 'assets/frontend/checkout-city-selector.css',
-				array( 'wdc-platform-checkout-rates' ),
-				$this->environment->version()
-			);
 		}
+		wp_enqueue_style(
+			'wdc-platform-city-selector',
+			$this->environment->plugin_url() . 'assets/frontend/checkout-city-selector.css',
+			array( 'wdc-platform-checkout-rates' ),
+			$this->environment->version()
+		);
 		if ( function_exists( 'wp_enqueue_script' ) ) {
 			$city_selector_dependencies = array( 'jquery' );
 			if ( function_exists( 'wp_script_is' ) && wp_script_is( 'wc-checkout', 'registered' ) ) {
 				$city_selector_dependencies[] = 'wc-checkout';
 			}
 
-			if ( ! $this->suggestions_requested() ) {
-				wp_enqueue_script(
+			wp_enqueue_script(
+				'wdc-platform-city-selector',
+				$this->environment->plugin_url() . 'assets/frontend/checkout-city-selector.js',
+				$city_selector_dependencies,
+				$this->environment->version(),
+				true
+			);
+			if ( function_exists( 'wp_localize_script' ) ) {
+				wp_localize_script(
 					'wdc-platform-city-selector',
-					$this->environment->plugin_url() . 'assets/frontend/checkout-city-selector.js',
-					$city_selector_dependencies,
-					$this->environment->version(),
-					true
+					'wdcPlatformCitySelector',
+					$this->city_selector_config()
 				);
-				if ( function_exists( 'wp_localize_script' ) ) {
-					wp_localize_script(
-						'wdc-platform-city-selector',
-						'wdcPlatformCitySelector',
-						$this->city_selector_config()
-					);
-				}
 			}
 			wp_enqueue_script(
 				'wdc-platform-checkout-sort',
@@ -128,22 +125,6 @@ final class ShippingMethodRegistrar {
 				$this->environment->version(),
 				true
 			);
-			wp_enqueue_script(
-				'wdc-platform-address-normalization',
-				$this->environment->plugin_url() . 'assets/frontend/checkout-address-normalization.js',
-				array( 'jquery' ),
-				$this->environment->version(),
-				true
-			);
-			if ( function_exists( 'wp_localize_script' ) ) {
-				wp_localize_script(
-					'wdc-platform-address-normalization',
-					'wdcPlatformAddressNormalization',
-					array(
-						'debug' => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
-					)
-				);
-			}
 			if ( $this->suggestions_requested() ) {
 				wp_enqueue_script(
 					'wdc-platform-address-suggestions',

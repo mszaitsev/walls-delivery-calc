@@ -61,7 +61,7 @@ final class AddressSuggestionNormalizer {
 			'city', 'city_with_type', 'city_fias_id', 'city_kladr_id',
 			'settlement', 'settlement_with_type', 'settlement_fias_id', 'settlement_kladr_id',
 			'street', 'street_with_type', 'street_fias_id', 'street_kladr_id',
-			'house', 'house_fias_id', 'house_kladr_id', 'block', 'flat',
+			'house', 'house_type', 'house_fias_id', 'house_kladr_id', 'block', 'block_type', 'stead', 'stead_type', 'flat',
 			'fias_id', 'kladr_id', 'postal_code',
 		);
 

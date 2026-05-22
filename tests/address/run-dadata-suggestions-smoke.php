@@ -11,8 +11,6 @@ use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
-use WallsShop\WDC\Locations\DaData\DaDataCredentials;
-use WallsShop\WDC\Locations\DaData\DaDataLogger;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'APP_ENCRYPTION_KEY' ) || define( 'APP_ENCRYPTION_KEY', 'test-dadata-suggestions-key' );
@@ -119,9 +117,9 @@ $settings->replace(
 );
 $suggestion_settings = new AddressSuggestionSettings( $settings, new EncryptionService() );
 $suggestion_settings->save_api_key( 'secret-api-key' );
-dadata_suggestions_assert( DaDataCredentials::TOKEN_ENCRYPTED_KEY === AddressSuggestionSettings::API_KEY_ENCRYPTED, 'DaData suggestions and normalizer must use the same encrypted credential key.' );
-dadata_suggestions_assert( DaDataCredentials::TOKEN_MASKED_KEY === AddressSuggestionSettings::API_KEY_MASKED, 'DaData suggestions and normalizer must use the same masked credential key.' );
-$client = new DaDataSuggestionClient( $suggestion_settings, new DaDataLogger( new Logger() ) );
+dadata_suggestions_assert( 'dadata_api_token_encrypted' === AddressSuggestionSettings::API_KEY_ENCRYPTED, 'DaData suggestions must use the single encrypted API key setting.' );
+dadata_suggestions_assert( 'dadata_api_token_masked' === AddressSuggestionSettings::API_KEY_MASKED, 'DaData suggestions must use the single masked API key setting.' );
+$client = new DaDataSuggestionClient( $suggestion_settings, new Logger() );
 
 $city_body = $client->body( 'city', 'Новосибирск' );
 dadata_suggestions_assert( array( array( 'country_iso_code' => 'RU' ) ) === $city_body['locations'], 'City stage must restrict locations to RU.' );
@@ -130,7 +128,7 @@ dadata_suggestions_assert( array( 'value' => 'settlement' ) === $city_body['to_b
 
 $address_body = $client->body( 'address', 'Красный 25', array( 'city_kladr_id' => '5400000100000' ) );
 dadata_suggestions_assert( array( array( 'country_iso_code' => 'RU' ) ) === $address_body['locations'], 'Address stage must keep RU locations only.' );
-dadata_suggestions_assert( array( array( 'kladr_id' => '5400000100000' ) ) === $address_body['locations_boost'], 'Address stage must use city KLADR as locations_boost.' );
+dadata_suggestions_assert( ! isset( $address_body['locations_boost'] ), 'Address stage must not use locations_boost.' );
 dadata_suggestions_assert( array( 'value' => 'street' ) === $address_body['from_bound'], 'Address stage must start from street.' );
 dadata_suggestions_assert( array( 'value' => 'house' ) === $address_body['to_bound'], 'Address stage must end at house.' );
 
@@ -178,6 +176,12 @@ dadata_suggestions_assert( str_contains( $js, '$( document.body ).off( namespace
 dadata_suggestions_assert( ! str_contains( $js, "change' + namespace" ) && ! str_contains( $js, "blur' + namespace" ), 'Frontend suggestions JS must not use blur/change to trigger search.' );
 dadata_suggestions_assert( str_contains( $js, 'firstUsable( prefix, \'city\' ).val( data.city || data.settlement' ), 'Selected house must update city from selected address.' );
 dadata_suggestions_assert( str_contains( $js, "'manual'" ), 'Frontend must support manual fallback status.' );
+dadata_suggestions_assert( str_contains( $js, 'openingQuery' ), 'Frontend must build opening query from checkout fields.' );
+dadata_suggestions_assert( str_contains( $js, "searchInput().val( openingQuery( activePrefix ) );" ), 'Address picker must seed search from region, city, and address.' );
+dadata_suggestions_assert( str_contains( $js, "'' === query.trim()" ) && str_contains( $js, 'stateFor( prefix ).selectedStreet = null;' ), 'Clearing modal search must reset selected street and address mode.' );
+dadata_suggestions_assert( str_contains( $js, 'formatStreetHouse' ) && str_contains( $js, 'formatAddressWithoutRegionCity' ) && str_contains( $js, 'formatFullAddressWithoutCountry' ), 'Frontend must format final address lines.' );
+dadata_suggestions_assert( str_contains( $js, 'localLocationMatchesDadata' ), 'Frontend must compare selected local location with DaData result.' );
+dadata_suggestions_assert( str_contains( $js, 'wdc_platform_location_display_name' ) && str_contains( $js, 'wdc_platform_location_region_name' ) && str_contains( $js, 'wdc_platform_location_postcode' ), 'Frontend must keep WDC-compatible location hidden fields in sync.' );
 
 $css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-address-suggestions.css' );
 foreach ( array( '.wdc-address-picker-overlay', '.wdc-address-picker-panel', '.wdc-address-picker-search', '.wdc-address-picker-results', '.wdc-address-picker-item', '.wdc-address-picker-empty', '.wdc-address-picker-hint', '.wdc-address-picker-selected', 'max-width: 1300px', 'column-count: 2', '@media (max-width: 900px)', 'column-count: 1' ) as $needle ) {
@@ -186,6 +190,8 @@ foreach ( array( '.wdc-address-picker-overlay', '.wdc-address-picker-panel', '.w
 
 $registrar = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/ShippingMethodRegistrar.php' );
 dadata_suggestions_assert( str_contains( $registrar, 'wdc-platform-address-suggestions' ), 'ShippingMethodRegistrar must enqueue address suggestions assets.' );
+dadata_suggestions_assert( ! str_contains( $registrar, 'checkout-address-normalization.js' ), 'ShippingMethodRegistrar must not enqueue post-factum address normalization JS.' );
+dadata_suggestions_assert( str_contains( $registrar, 'wdc-platform-city-selector' ), 'ShippingMethodRegistrar must keep local city selector assets.' );
 dadata_suggestions_assert( str_contains( $registrar, 'address_suggestions_config' ), 'ShippingMethodRegistrar must expose address suggestions config.' );
 dadata_suggestions_assert( str_contains( $registrar, "'nonce'" ), 'Address suggestions config must include nonce.' );
 dadata_suggestions_assert( str_contains( $registrar, "'min_chars'" ), 'Address suggestions config must include min_chars.' );
@@ -197,6 +203,14 @@ dadata_suggestions_assert( str_contains( $registrar, "'api_key_ready'" ), 'Addre
 dadata_suggestions_assert( str_contains( $registrar, "'encryption_ready'" ), 'Address suggestions config must include encryption_ready.' );
 dadata_suggestions_assert( str_contains( $registrar, 'if ( $this->suggestions_requested() )' ), 'Address suggestions assets must enqueue when DaData suggestions are requested.' );
 dadata_suggestions_assert( ! str_contains( $registrar, "'api_key'" ) && ! str_contains( $registrar, '"api_key"' ), 'ShippingMethodRegistrar must not localize the DaData API key.' );
+
+$checkout_normalizer = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Address/CheckoutAddressNormalizer.php' );
+dadata_suggestions_assert( ! str_contains( $checkout_normalizer, 'dadata_normalizer' ), 'CheckoutAddressNormalizer pipeline must not include DaData post-factum normalizer.' );
+
+$settings_page = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Admin/SettingsAdminPage.php' );
+dadata_suggestions_assert( ! str_contains( $settings_page, 'dadata_enabled' ), 'Settings page must not expose separate DaData normalizer toggle.' );
+dadata_suggestions_assert( ! str_contains( $settings_page, 'dadata_api_token" name="dadata_api_token' ), 'Settings page must not expose separate DaData normalizer token.' );
+dadata_suggestions_assert( str_contains( $settings_page, 'API-ключ DaData для подсказок адреса' ), 'Settings page must expose the suggestions API key.' );
 
 $ajax = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/AddressSuggestions/AddressSuggestionAjax.php' );
 dadata_suggestions_assert( str_contains( $ajax, "add_action( 'wp_ajax_' . self::ACTION" ), 'AddressSuggestionAjax must register logged-in AJAX action.' );

@@ -3,10 +3,9 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Admin;
 
-use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
+use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
-use WallsShop\WDC\Locations\DaData\DaDataCredentials;
 use WallsShop\WDC\Locations\Fias\FiasCredentials;
 
 defined( 'ABSPATH' ) || exit;
@@ -20,7 +19,6 @@ final class SettingsAdminPage {
 	public function __construct(
 		private SettingsRepository $settings,
 		private ?FiasCredentials $fias_credentials = null,
-		private ?DaDataCredentials $dadata_credentials = null,
 		private ?AddressSuggestionSettings $suggestion_settings = null
 	) {
 	}
@@ -55,12 +53,6 @@ final class SettingsAdminPage {
 			<?php endif; ?>
 			<?php if ( $this->fias_credentials instanceof FiasCredentials && ! $this->fias_credentials->encryption_ready() ) : ?>
 				<div class="notice notice-warning"><p><?php echo esc_html__( 'APP_ENCRYPTION_KEY не задан. API-токен ФИАС/ГАР не будет сохранен, пока ключ шифрования не настроен.', 'walls-delivery-calc' ); ?></p></div>
-			<?php endif; ?>
-			<?php if ( $this->dadata_credentials instanceof DaDataCredentials && ! $this->dadata_credentials->encryption_ready() ) : ?>
-				<div class="notice notice-warning"><p><?php echo esc_html__( 'APP_ENCRYPTION_KEY не задан. API-токен DaData не будет сохранен, пока ключ шифрования не настроен.', 'walls-delivery-calc' ); ?></p></div>
-			<?php endif; ?>
-			<?php if ( ! empty( $values['dadata_enabled'] ) && $this->dadata_credentials instanceof DaDataCredentials && ! $this->dadata_credentials->has_token() ) : ?>
-				<div class="notice notice-warning"><p><?php echo esc_html__( 'Нормализация DaData включена, но API-токен не задан.', 'walls-delivery-calc' ); ?></p></div>
 			<?php endif; ?>
 			<?php if ( $this->suggestion_settings instanceof AddressSuggestionSettings && ! $this->suggestion_settings->encryption_ready() ) : ?>
 				<div class="notice notice-warning"><p><?php echo esc_html__( 'APP_ENCRYPTION_KEY не задан. API-ключ DaData для подсказок не будет сохранен, пока ключ шифрования не настроен.', 'walls-delivery-calc' ); ?></p></div>
@@ -98,7 +90,7 @@ final class SettingsAdminPage {
 							<td><input id="wdc_location_search_limit" type="number" name="location_search_limit" value="<?php echo esc_attr( (string) ( $values['location_search_limit'] ?? 100 ) ); ?>" min="10" max="300" step="1"></td>
 						</tr>
 						<tr><th colspan="2"><h2><?php echo esc_html__( 'ФИАС/ГАР', 'walls-delivery-calc' ); ?></h2></th></tr>
-						<tr><th colspan="2"><p><?php echo esc_html__( 'Интеграция с ФИАС/ГАР подготовлена. Фактическая стандартизация через API будет включена после проверки рабочих методов API.', 'walls-delivery-calc' ); ?></p></th></tr>
+						<tr><th colspan="2"><p><?php echo esc_html__( 'Интеграция с ФИАС/ГАР подготовлена. Runtime-нормализация через реальный API временно отключена.', 'walls-delivery-calc' ); ?></p></th></tr>
 						<tr>
 							<th scope="row"><label for="wdc_fias_api_token"><?php echo esc_html__( 'API-токен ФИАС/ГАР', 'walls-delivery-calc' ); ?></label></th>
 							<td>
@@ -124,36 +116,23 @@ final class SettingsAdminPage {
 							<th scope="row"><label for="wdc_fias_api_minute_limit"><?php echo esc_html__( 'Лимит запросов в минуту', 'walls-delivery-calc' ); ?></label></th>
 							<td><input id="wdc_fias_api_minute_limit" type="number" name="fias_api_minute_limit" value="<?php echo esc_attr( (string) ( $values['fias_api_minute_limit'] ?? 100 ) ); ?>" min="1" max="10000" step="1"></td>
 						</tr>
+						<tr><th colspan="2"><h2><?php echo esc_html__( 'Подсказки адреса DaData', 'walls-delivery-calc' ); ?></h2></th></tr>
 						<tr>
-							<th scope="row"><?php echo esc_html__( 'Нормализация адреса через DaData', 'walls-delivery-calc' ); ?></th>
-							<td><label><input type="checkbox" name="dadata_enabled" value="1" <?php checked( ! empty( $values['dadata_enabled'] ) ); ?>> <?php echo esc_html__( 'Включить DaData для нормализации адреса покупателя после проверки ФИАС/ГАР.', 'walls-delivery-calc' ); ?></label></td>
-						</tr>
-						<tr><th colspan="2"><p><?php echo esc_html__( 'Нормализация адреса покупателя через DaData выполняется только после ввода улицы или адресной строки.', 'walls-delivery-calc' ); ?></p></th></tr>
-						<tr>
-							<th scope="row"><label for="wdc_dadata_api_token"><?php echo esc_html__( 'API-токен DaData', 'walls-delivery-calc' ); ?></label></th>
-							<td>
-								<input id="wdc_dadata_api_token" type="password" name="dadata_api_token" value="" placeholder="<?php echo esc_attr( $this->dadata_token_placeholder() ); ?>" autocomplete="new-password">
-								<p class="description"><?php echo esc_html__( 'Оставьте поле пустым, чтобы сохранить текущий токен без изменений.', 'walls-delivery-calc' ); ?></p>
-								<p><label><input type="checkbox" name="clear_dadata_token" value="1"> <?php echo esc_html__( 'Удалить сохраненный токен DaData', 'walls-delivery-calc' ); ?></label></p>
-								<p><strong><?php echo esc_html__( 'Статус:', 'walls-delivery-calc' ); ?></strong> <?php echo esc_html( $this->dadata_token_status() ); ?></p>
-							</td>
+							<th scope="row"><?php echo esc_html__( 'Включить подсказки DaData', 'walls-delivery-calc' ); ?></th>
+							<td><label><input type="checkbox" name="dadata_suggestions_enabled" value="1" <?php checked( ! empty( $values['dadata_suggestions_enabled'] ) ); ?>> <?php echo esc_html__( 'Показывать визуальные подсказки адреса в checkout.', 'walls-delivery-calc' ); ?></label></td>
 						</tr>
 						<tr>
-							<th scope="row"><label for="wdc_dadata_api_timeout"><?php echo esc_html__( 'Таймаут DaData', 'walls-delivery-calc' ); ?></label></th>
-							<td><input id="wdc_dadata_api_timeout" type="number" name="dadata_api_timeout" value="<?php echo esc_attr( (string) ( $values['dadata_api_timeout'] ?? 3 ) ); ?>" min="1" max="10" step="1"></td>
-						</tr>
-						<tr>
-							<th scope="row"><?php echo esc_html__( 'Подсказки DaData', 'walls-delivery-calc' ); ?></th>
-							<td><label><input type="checkbox" name="dadata_suggestions_enabled" value="1" <?php checked( ! empty( $values['dadata_suggestions_enabled'] ) ); ?>> <?php echo esc_html__( 'Включить подсказки DaData для города и адреса.', 'walls-delivery-calc' ); ?></label></td>
-						</tr>
-						<tr>
-							<th scope="row"><label for="wdc_dadata_api_key"><?php echo esc_html__( 'API-ключ DaData для подсказок', 'walls-delivery-calc' ); ?></label></th>
+							<th scope="row"><label for="wdc_dadata_api_key"><?php echo esc_html__( 'API-ключ DaData для подсказок адреса', 'walls-delivery-calc' ); ?></label></th>
 							<td>
 								<input id="wdc_dadata_api_key" type="password" name="dadata_api_key" value="" placeholder="<?php echo esc_attr( $this->dadata_api_key_placeholder() ); ?>" autocomplete="new-password">
 								<p class="description"><?php echo esc_html__( 'Ключ хранится зашифрованным на сервере и не передается в браузер.', 'walls-delivery-calc' ); ?></p>
 								<p><label><input type="checkbox" name="clear_dadata_api_key" value="1"> <?php echo esc_html__( 'Удалить сохраненный API-ключ DaData', 'walls-delivery-calc' ); ?></label></p>
 								<p><strong><?php echo esc_html__( 'Статус:', 'walls-delivery-calc' ); ?></strong> <?php echo esc_html( $this->dadata_api_key_status() ); ?></p>
 							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="wdc_dadata_suggestions_timeout"><?php echo esc_html__( 'Таймаут подсказок DaData', 'walls-delivery-calc' ); ?></label></th>
+							<td><input id="wdc_dadata_suggestions_timeout" type="number" name="dadata_suggestions_timeout" value="<?php echo esc_attr( (string) ( $values['dadata_suggestions_timeout'] ?? 3 ) ); ?>" min="1" max="10" step="1"></td>
 						</tr>
 						<tr>
 							<th scope="row"><label for="wdc_dadata_suggestions_count"><?php echo esc_html__( 'Количество подсказок DaData', 'walls-delivery-calc' ); ?></label></th>
@@ -177,12 +156,12 @@ final class SettingsAdminPage {
 			$sort_mode = RateSorter::CHEAPEST;
 		}
 
-		$limit             = isset( $data['location_search_limit'] ) ? $this->absint( wp_unslash( (string) $data['location_search_limit'] ) ) : 100;
-		$fias_timeout      = isset( $data['fias_api_timeout'] ) ? $this->absint( wp_unslash( (string) $data['fias_api_timeout'] ) ) : 3;
-		$fias_daily_limit  = isset( $data['fias_api_daily_limit'] ) ? $this->absint( wp_unslash( (string) $data['fias_api_daily_limit'] ) ) : 10000;
-		$fias_minute_limit = isset( $data['fias_api_minute_limit'] ) ? $this->absint( wp_unslash( (string) $data['fias_api_minute_limit'] ) ) : 100;
-		$dadata_timeout    = isset( $data['dadata_api_timeout'] ) ? $this->absint( wp_unslash( (string) $data['dadata_api_timeout'] ) ) : 3;
-		$dadata_suggestions_count = isset( $data['dadata_suggestions_count'] ) ? $this->absint( wp_unslash( (string) $data['dadata_suggestions_count'] ) ) : 10;
+		$limit                     = isset( $data['location_search_limit'] ) ? $this->absint( wp_unslash( (string) $data['location_search_limit'] ) ) : 100;
+		$fias_timeout              = isset( $data['fias_api_timeout'] ) ? $this->absint( wp_unslash( (string) $data['fias_api_timeout'] ) ) : 3;
+		$fias_daily_limit          = isset( $data['fias_api_daily_limit'] ) ? $this->absint( wp_unslash( (string) $data['fias_api_daily_limit'] ) ) : 10000;
+		$fias_minute_limit         = isset( $data['fias_api_minute_limit'] ) ? $this->absint( wp_unslash( (string) $data['fias_api_minute_limit'] ) ) : 100;
+		$dadata_suggestions_timeout = isset( $data['dadata_suggestions_timeout'] ) ? $this->absint( wp_unslash( (string) $data['dadata_suggestions_timeout'] ) ) : 3;
+		$dadata_suggestions_count  = isset( $data['dadata_suggestions_count'] ) ? $this->absint( wp_unslash( (string) $data['dadata_suggestions_count'] ) ) : 10;
 
 		return array(
 			'enable_new_checkout_shipping' => ! empty( $data['enable_new_checkout_shipping'] ),
@@ -194,9 +173,8 @@ final class SettingsAdminPage {
 			'fias_api_timeout'             => max( 1, min( 15, $fias_timeout > 0 ? $fias_timeout : 3 ) ),
 			'fias_api_daily_limit'         => max( 1, min( 1000000, $fias_daily_limit > 0 ? $fias_daily_limit : 10000 ) ),
 			'fias_api_minute_limit'        => max( 1, min( 10000, $fias_minute_limit > 0 ? $fias_minute_limit : 100 ) ),
-			'dadata_enabled'               => ! empty( $data['dadata_enabled'] ),
-			'dadata_api_timeout'           => max( 1, min( 10, $dadata_timeout > 0 ? $dadata_timeout : 3 ) ),
 			'dadata_suggestions_enabled'   => ! empty( $data['dadata_suggestions_enabled'] ),
+			'dadata_suggestions_timeout'   => max( 1, min( 10, $dadata_suggestions_timeout > 0 ? $dadata_suggestions_timeout : 3 ) ),
 			'dadata_suggestions_count'     => max( 3, min( 20, $dadata_suggestions_count > 0 ? $dadata_suggestions_count : 10 ) ),
 		);
 	}
@@ -216,7 +194,6 @@ final class SettingsAdminPage {
 
 		$this->settings->replace( array_merge( $this->settings->all(), $this->sanitize_settings( $_POST ) ) );
 		$token_message = $this->handle_fias_token( $_POST );
-		$token_message .= $this->handle_dadata_credentials( $_POST );
 		$token_message .= $this->handle_dadata_api_key( $_POST );
 
 		return __( 'Настройки сохранены.', 'walls-delivery-calc' ) . $token_message;
@@ -228,14 +205,6 @@ final class SettingsAdminPage {
 
 	private function fias_token_status(): string {
 		return $this->fias_credentials instanceof FiasCredentials && $this->fias_credentials->has_token() ? 'Токен сохранен' : 'Токен не задан';
-	}
-
-	private function dadata_token_placeholder(): string {
-		return $this->dadata_credentials instanceof DaDataCredentials && $this->dadata_credentials->has_token() ? $this->dadata_credentials->masked_token() : 'Токен не задан';
-	}
-
-	private function dadata_token_status(): string {
-		return $this->dadata_credentials instanceof DaDataCredentials && $this->dadata_credentials->has_token() ? 'Токен сохранен' : 'Токен не задан';
 	}
 
 	private function dadata_api_key_placeholder(): string {
@@ -273,35 +242,6 @@ final class SettingsAdminPage {
 		}
 
 		return ' ' . __( 'Токен ФИАС/ГАР сохранен.', 'walls-delivery-calc' );
-	}
-
-	/**
-	 * @param array<string,mixed> $data
-	 */
-	private function handle_dadata_credentials( array $data ): string {
-		if ( ! $this->dadata_credentials instanceof DaDataCredentials ) {
-			return '';
-		}
-
-		$message = '';
-		if ( ! empty( $data['clear_dadata_token'] ) ) {
-			$this->dadata_credentials->clear_token();
-			return ' ' . __( 'Токен DaData удален.', 'walls-delivery-calc' );
-		}
-
-		if ( array_key_exists( 'dadata_api_token', $data ) ) {
-			$token = wp_unslash( (string) $data['dadata_api_token'] );
-			if ( '' === trim( $token ) ) {
-				return '';
-			} elseif ( ! $this->dadata_credentials->encryption_ready() ) {
-				$message .= ' ' . __( 'Токен DaData не сохранен: настройте APP_ENCRYPTION_KEY.', 'walls-delivery-calc' );
-			} else {
-				$this->dadata_credentials->save_token( $token );
-				$message .= ' ' . __( 'Токен DaData сохранен.', 'walls-delivery-calc' );
-			}
-		}
-
-		return $message;
 	}
 
 	/**

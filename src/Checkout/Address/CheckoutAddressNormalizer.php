@@ -11,7 +11,6 @@ defined( 'ABSPATH' ) || exit;
 final class CheckoutAddressNormalizer {
 	public function __construct(
 		private AddressNormalizerInterface $fias_normalizer,
-		private AddressNormalizerInterface $dadata_normalizer,
 		private AddressNormalizerInterface $fallback_normalizer
 	) {
 	}
@@ -25,13 +24,7 @@ final class CheckoutAddressNormalizer {
 			return $fias;
 		}
 
-		$dadata = $this->dadata_normalizer->normalize( $input, $context );
-		if ( $dadata->success ) {
-			return $dadata;
-		}
-
 		$fallback = $this->fallback_normalizer->normalize( $input, $context );
-
 		return new AddressNormalizationResult(
 			$fallback->input,
 			$fallback->address,
@@ -40,13 +33,7 @@ final class CheckoutAddressNormalizer {
 			$fallback->source,
 			$fallback->error_code,
 			$fallback->error_message,
-			array_merge(
-				$dadata->debug,
-				array(
-					'dadata_error_code' => $dadata->error_code,
-					'dadata_success'    => $dadata->success,
-				)
-			)
+			$fallback->debug
 		);
 	}
 }

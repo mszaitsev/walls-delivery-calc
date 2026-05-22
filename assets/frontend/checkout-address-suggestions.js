@@ -41,9 +41,13 @@
 		'dadata_street_fias_id',
 		'dadata_street_kladr_id',
 		'dadata_house',
+		'dadata_house_type',
 		'dadata_house_fias_id',
 		'dadata_house_kladr_id',
 		'dadata_block',
+		'dadata_block_type',
+		'dadata_stead',
+		'dadata_stead_type',
 		'dadata_flat',
 		'dadata_fias_id',
 		'dadata_kladr_id',
@@ -87,6 +91,27 @@
 		return $( selector ).filter( function () {
 			return isUsable( this );
 		} ).first();
+	}
+
+	function globalHidden( name ) {
+		return $( 'input[name="' + name + '"]' ).first();
+	}
+
+	function globalHiddenValue( name ) {
+		var field = globalHidden( name );
+		return field.length ? String( field.val() || '' ) : '';
+	}
+
+	function setGlobalHidden( name, value ) {
+		var field = globalHidden( name );
+		if ( field.length ) {
+			field.val( value || '' );
+		}
+	}
+
+	function fieldValue( prefix, name ) {
+		var field = firstUsable( prefix, name );
+		return field.length ? String( field.val() || '' ).trim() : '';
 	}
 
 	function activeCheckoutPrefix() {
@@ -139,9 +164,13 @@
 			'dadata_street_fias_id',
 			'dadata_street_kladr_id',
 			'dadata_house',
+			'dadata_house_type',
 			'dadata_house_fias_id',
 			'dadata_house_kladr_id',
 			'dadata_block',
+			'dadata_block_type',
+			'dadata_stead',
+			'dadata_stead_type',
 			'dadata_flat',
 			'dadata_fias_id',
 			'dadata_kladr_id',
@@ -171,6 +200,89 @@
 			settlement_fias_id: hidden( prefix, 'dadata_settlement_fias_id' ).val() || '',
 			street_fias_id: street.fias_id || hidden( prefix, 'dadata_street_fias_id' ).val() || ''
 		};
+	}
+
+	function openingQuery( prefix ) {
+		var region = hidden( prefix, 'dadata_region_with_type' ).val() || hidden( prefix, 'dadata_region' ).val() || globalHiddenValue( 'wdc_platform_location_region_name' ) || fieldValue( prefix, 'state' );
+		var city = hidden( prefix, 'dadata_city_with_type' ).val() || hidden( prefix, 'dadata_city' ).val() || hidden( prefix, 'dadata_settlement_with_type' ).val() || hidden( prefix, 'dadata_settlement' ).val() || globalHiddenValue( 'wdc_platform_location_display_name' ) || fieldValue( prefix, 'city' );
+		var address = fieldValue( prefix, 'address_1' );
+		var parts = [];
+		if ( region ) {
+			parts.push( region );
+		}
+		if ( city ) {
+			parts.push( city );
+		}
+		if ( address ) {
+			parts.push( address );
+			return parts.join( ', ' );
+		}
+		return parts.length ? parts.join( ', ' ) + ', ' : '';
+	}
+
+	function houseWithType( data ) {
+		if ( data.house ) {
+			return String( ( data.house_type || 'д' ) + ' ' + data.house ).trim();
+		}
+		if ( data.stead ) {
+			return String( ( data.stead_type || 'уч' ) + ' ' + data.stead ).trim();
+		}
+		return '';
+	}
+
+	function formatStreetHouse( data ) {
+		var parts = [];
+		if ( data.street_with_type || data.street ) {
+			parts.push( data.street_with_type || data.street );
+		}
+		if ( houseWithType( data ) ) {
+			parts.push( houseWithType( data ) );
+		}
+		if ( data.block ) {
+			parts.push( String( ( data.block_type || 'к' ) + ' ' + data.block ).trim() );
+		}
+		return parts.join( ', ' );
+	}
+
+	function formatAddressWithoutRegionCity( data ) {
+		return formatStreetHouse( data );
+	}
+
+	function formatFullAddressWithoutCountry( item ) {
+		var data = item.data || {};
+		var unrestricted = String( item.unrestrictedValue || item.value || '' ).replace( /^Россия,\s*/i, '' );
+		if ( unrestricted ) {
+			return unrestricted;
+		}
+		return [
+			data.region_with_type || data.region || '',
+			data.city_with_type || data.city || data.settlement_with_type || data.settlement || '',
+			formatStreetHouse( data )
+		].filter( Boolean ).join( ', ' );
+	}
+
+	function currentLocationFias() {
+		return {
+			region: globalHiddenValue( 'wdc_platform_location_region_fias_id' ),
+			city: globalHiddenValue( 'wdc_platform_location_fias_id' )
+		};
+	}
+
+	function dadataLocationFias( data ) {
+		return {
+			region: data.region_fias_id || '',
+			city: data.city_fias_id || data.settlement_fias_id || ''
+		};
+	}
+
+	function sameSelectedLocation( data ) {
+		var current = currentLocationFias();
+		var dadata = dadataLocationFias( data );
+		return !! ( current.city && dadata.city && current.city === dadata.city && ( ! current.region || ! dadata.region || current.region === dadata.region ) );
+	}
+
+	function localLocationMatchesDadata( data ) {
+		return sameSelectedLocation( data );
 	}
 
 	function picker() {
@@ -319,10 +431,14 @@
 		window.clearTimeout( debounceTimer );
 		debounceTimer = window.setTimeout( function () {
 			var prefix = activePrefix;
-			var query = String( searchInput().val() || '' ).trim();
+			var query = String( searchInput().val() || '' );
+			if ( '' === query.trim() ) {
+				stateFor( prefix ).selectedStreet = null;
+				stateFor( prefix ).mode = 'address';
+			}
 			var stage = stateFor( prefix ).selectedStreet ? 'house_after_street' : 'address';
 			log( 'modal search input', { query: query, stage: stage } );
-			if ( query.length < minChars() ) {
+			if ( query.trim().length < minChars() ) {
 				resultsBox().empty();
 				return;
 			}
@@ -349,14 +465,14 @@
 		debugState.modalOpened = 'yes';
 		renderDebugBlock();
 		picker().attr( 'aria-hidden', 'false' ).addClass( 'is-open' );
-		searchInput().val( String( activeAddressField.val() || '' ) );
+		searchInput().val( openingQuery( activePrefix ) );
 		resultsBox().empty();
 		showHint( stateFor( activePrefix ).selectedStreet ? 'Добавьте номер дома' : '', !! stateFor( activePrefix ).selectedStreet );
 		log( 'address picker opened', { active_prefix: activePrefix } );
 		window.setTimeout( function () {
 			searchInput().trigger( 'focus' ).trigger( 'select' );
 		}, 20 );
-		if ( searchInput().val().length >= minChars() ) {
+		if ( searchInput().val().trim().length >= minChars() ) {
 			scheduleModalSearch();
 		}
 	}
@@ -402,14 +518,23 @@
 
 	function applyResolved( prefix, item ) {
 		var data = item.data || {};
-		var house = data.house || '';
-		if ( data.block ) {
-			house += ' ' + data.block;
+		var sameLocation = sameSelectedLocation( data );
+		var matchedLocalLocation = localLocationMatchesDadata( data );
+		var addressLine = sameLocation || matchedLocalLocation ? formatAddressWithoutRegionCity( data ) : formatFullAddressWithoutCountry( item );
+		if ( sameLocation ) {
+			firstUsable( prefix, 'address_1' ).val( addressLine );
+		} else {
+			firstUsable( prefix, 'city' ).val( data.city || data.settlement || data.region || firstUsable( prefix, 'city' ).val() || '' );
+			firstUsable( prefix, 'state' ).val( data.region_code || data.region || data.region_with_type || firstUsable( prefix, 'state' ).val() || '' );
+			firstUsable( prefix, 'address_1' ).val( addressLine );
+			setGlobalHidden( 'wdc_platform_location_fias_id', data.city_fias_id || data.settlement_fias_id || '' );
+			setGlobalHidden( 'wdc_platform_location_display_name', data.city || data.settlement || data.city_with_type || data.settlement_with_type || '' );
+			setGlobalHidden( 'wdc_platform_location_region_name', data.region_with_type || data.region || '' );
 		}
-		firstUsable( prefix, 'city' ).val( data.city || data.settlement || data.region || firstUsable( prefix, 'city' ).val() || '' );
-		firstUsable( prefix, 'state' ).val( data.region_code || data.region || data.region_with_type || firstUsable( prefix, 'state' ).val() || '' );
-		firstUsable( prefix, 'postcode' ).val( data.postal_code || firstUsable( prefix, 'postcode' ).val() || '' );
-		firstUsable( prefix, 'address_1' ).val( String( ( data.street_with_type || '' ) + ( house ? ', ' + house : '' ) ).trim() );
+		if ( data.postal_code ) {
+			firstUsable( prefix, 'postcode' ).val( data.postal_code );
+			setGlobalHidden( 'wdc_platform_location_postcode', data.postal_code );
+		}
 		if ( data.flat && ! firstUsable( prefix, 'address_2' ).val() ) {
 			firstUsable( prefix, 'address_2' ).val( data.flat );
 		}

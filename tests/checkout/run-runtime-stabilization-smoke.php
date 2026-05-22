@@ -520,17 +520,11 @@ foreach ( array( '.wdc-platform-pickup-point', 'pickup select changed', 'pickup 
 	runtime_smoke_assert( str_contains( $checkout_sort_js, $needle ), 'Pickup frontend JS must contain ' . $needle . '.' );
 }
 
-$address_normalization_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-address-normalization.js' );
-foreach ( array( 'shipping_address_1', 'billing_address_1', 'debounceTimer', 'update_checkout', '.wdcAddressNormalization', 'address input changed', 'address debounce scheduled', 'update_checkout triggered for address normalization' ) as $needle ) {
-	runtime_smoke_assert( str_contains( $address_normalization_js, $needle ), 'Address normalization JS must contain ' . $needle . '.' );
-}
-
 $settings->set( 'enable_new_checkout_shipping', true );
 runtime_smoke_assert( $gate->enabled(), 'Feature gate must be enabled through SettingsRepository.' );
 runtime_smoke_assert( isset( $registrar->register_shipping_method( array() )[ NewShippingMethod::METHOD_ID ] ), 'Shipping method registration must be enabled through settings.' );
 $registrar->enqueue_assets();
-runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-normalization'] ), 'Address normalization script must enqueue when feature gate is enabled.' );
-runtime_smoke_assert( str_contains( (string) $GLOBALS['wdc_test_scripts']['wdc-platform-address-normalization']['src'], 'checkout-address-normalization.js' ), 'Address normalization script src must point to checkout-address-normalization.js.' );
+runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-normalization'] ), 'Address normalization script must not enqueue.' );
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-suggestions'] ), 'Address suggestions script must not enqueue when DaData suggestions are disabled.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-city-selector'] ), 'Local city selector script must enqueue when DaData suggestions are disabled.' );
 
@@ -541,7 +535,7 @@ $settings->set( 'dadata_suggestions_enabled', true );
 $registrar->enqueue_assets();
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-suggestions'] ), 'Address suggestions script must enqueue when DaData suggestions are requested even if API key is missing.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_styles']['wdc-platform-address-suggestions'] ), 'Address suggestions CSS must enqueue when DaData suggestions are requested.' );
-runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-city-selector'] ), 'Local city selector script must not enqueue when DaData suggestions are requested.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-city-selector'] ), 'Local city selector script must still enqueue when DaData suggestions are requested.' );
 $suggestions_config = $GLOBALS['wdc_test_localized_scripts']['wdc-platform-address-suggestions']['wdcPlatformAddressSuggestions'] ?? array();
 runtime_smoke_assert( true === ( $suggestions_config['suggestions_requested'] ?? false ), 'Address suggestions config must show suggestions_requested=true.' );
 runtime_smoke_assert( false === ( $suggestions_config['enabled'] ?? true ), 'Address suggestions config must show enabled=false when API key is missing.' );
