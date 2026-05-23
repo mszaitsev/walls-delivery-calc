@@ -1,6 +1,6 @@
 # WDC GAR Places Import
 
-Version: 0.15.6.
+Version: 0.15.7.
 
 ## Source CSV
 
@@ -121,7 +121,7 @@ The admin section `Экспорт / импорт подготовленной б
 The first JSONL row is metadata:
 
 ```json
-{"type":"meta","version":"0.15.6","tables":["wdc_regions","wdc_locations","wdc_location_aliases","wdc_location_carrier_codes"],"created_at":"2026-05-23 12:00:00"}
+{"type":"meta","version":"0.15.7","tables":["wdc_regions","wdc_locations","wdc_location_aliases","wdc_location_carrier_codes"],"created_at":"2026-05-23 12:00:00"}
 ```
 
 Following rows use:
@@ -138,7 +138,7 @@ Snapshot import softly accepts old `postcode` values as `postal_code` fallback b
 
 The production CSV is about 46 MB and 160716 rows. The importer is streaming, but a web request can still hit PHP limits. For production-size imports, increase `max_execution_time`, `upload_max_filesize`, and `post_max_size`, or import on a test/staging environment and transfer a JSONL snapshot to the live site.
 
-The admin search result rows include a `Детали` button. It opens an inline panel loaded through `wdc_location_details` and shows the full `wdc_locations` row for inspection and DaData/carrier-mapping diagnostics.
+The admin search result rows include a `Детали` button. It opens an inline panel loaded through `wdc_location_details` and shows the full `wdc_locations` row for inspection and DaData/carrier-mapping diagnostics. Details values are rendered with DOM nodes and `textContent`; database values from GAR/CSV are not injected through `innerHTML`.
 
 ## Future Work
 

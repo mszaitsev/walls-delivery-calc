@@ -382,6 +382,30 @@ final class LocationsAdminPage {
 					}
 				});
 			}
+			function safeText(value) {
+				if (value === null || value === undefined || value === '') return '—';
+				if (typeof value === 'object') {
+					try { return JSON.stringify(value); } catch (e) { return String(value); }
+				}
+				return String(value);
+			}
+			function renderDetailsTable(row) {
+				const table = document.createElement('table');
+				table.className = 'widefat striped';
+				const tbody = document.createElement('tbody');
+				Object.keys(row || {}).forEach(function(key){
+					const tr = document.createElement('tr');
+					const th = document.createElement('th');
+					const td = document.createElement('td');
+					th.textContent = key;
+					td.textContent = safeText(row[key]);
+					tr.appendChild(th);
+					tr.appendChild(td);
+					tbody.appendChild(tr);
+				});
+				table.appendChild(tbody);
+				return table;
+			}
 			const garStart = document.getElementById('wdc-gar-import-start');
 			if (garStart) garStart.addEventListener('click', function(){
 				if (!window.confirm('<?php echo esc_js( __( 'Импорт заменит локальную базу населенных пунктов. Продолжить?', 'walls-delivery-calc' ) ); ?>')) return;
@@ -417,7 +441,10 @@ final class LocationsAdminPage {
 				data.append('location_id', button.getAttribute('data-location-id') || '');
 				post('wdc_location_details', data).then(resp => {
 					const row = resp && resp.data ? resp.data : {};
-					panel.innerHTML = '<table class="widefat striped"><tbody>' + Object.keys(row).map(k => '<tr><th>'+k+'</th><td>'+String(row[k] ?? '—')+'</td></tr>').join('') + '</tbody></table>';
+					while (panel.firstChild) {
+						panel.removeChild(panel.firstChild);
+					}
+					panel.appendChild(renderDetailsTable(row));
 					panel.hidden = false;
 				});
 			});
