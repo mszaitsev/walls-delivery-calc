@@ -3,7 +3,7 @@
 ## Locations Storage Architecture
 
 The locations foundation stores settlement-level delivery destinations in `wdc_locations`.
-The table is intentionally independent from checkout and legacy shipping code. As of `0.15.7`, production data is populated from a prepared GAR/ФИАС CSV instead of the old demo admin import.
+The table is intentionally independent from checkout and legacy shipping code. As of `0.15.8`, production data is populated from a prepared GAR/ФИАС CSV instead of the old demo admin import.
 
 Key fields:
 
@@ -72,7 +72,7 @@ A later GAR sync can build on `GarChangesService` by adding a real adapter that 
 
 # GAR CSV Import Note
 
-As of `0.15.7`, the local places foundation is populated from prepared `gar_places.csv` through `wdc_gar_places_stage`, `wdc_regions`, and the expanded `wdc_locations` schema. The CSV importer maps fields by header, supports optional `district_*` and `city_*` levels, imports `region_type` into locations, imports `display_name` as-is, ignores unknown columns, uses bulk inserts/upserts, exposes chunked admin progress, checks staging schema before loading rows, reports SQL bulk failures in job errors, and uses `postal_code` instead of legacy `postcode`. See [wdc-gar-places-import.md](wdc-gar-places-import.md) for the current import and snapshot workflow.
+As of `0.15.8`, the local places foundation is populated from prepared `gar_places.csv` through `wdc_gar_places_stage`, `wdc_regions`, and the expanded `wdc_locations` schema. The CSV importer maps fields by header, supports optional `district_*` and `city_*` levels, imports `region_type` into locations, imports `display_name` as-is, ignores unknown columns, uses bulk inserts/upserts, exposes chunked admin progress, checks staging schema before loading rows, reports SQL bulk failures in job errors, and uses `postal_code` instead of legacy `postcode`. See [wdc-gar-places-import.md](wdc-gar-places-import.md) for the current import and snapshot workflow.
 
 The admin locations page includes paginated search with ranked ordering and compact page numbers. Direct `place_name` matches are preferred over city, district, region, and broad `searchable_text` matches, so a settlement named by the query appears above rows where the same text only occurs in a parent field. Search group headers use `region_name` plus mapped `region_type` after the name and are sorted by `region_name`.
 

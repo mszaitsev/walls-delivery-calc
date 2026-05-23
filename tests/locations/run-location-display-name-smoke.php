@@ -225,7 +225,7 @@ $repository->save( Location::from_array( array_merge( $location->to_array(), arr
 update_option( 'wdc_location_type_display_rules', $rules, false );
 
 $admin = new LocationsAdminPage(
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.7' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.8' ),
 	$repository,
 	new LocationSearchService( $repository ),
 	new LocationImportService( $repository )

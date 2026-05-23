@@ -34,6 +34,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public bool $force_sql_bulk = false;
 		public bool $fail_next_query = false;
 		public bool $fail_bulk_insert = false;
+		public bool $duplicate_column_on_add = false;
+		public bool $duplicate_index_on_add = false;
 		public string $last_error = '';
 
 		public function prepare( string $query, mixed ...$args ): array {
@@ -96,6 +98,16 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public function get_row( array $prepared, string $output ): ?array {
 			$query = $prepared['query'];
 			$value = (string) ( $prepared['args'][0] ?? '' );
+			if ( str_starts_with( $query, 'SHOW COLUMNS FROM' ) ) {
+				$parts = preg_split( '/\s+/', $query );
+				$table = (string) ( $parts[3] ?? '' );
+				return in_array( $value, $this->columns_for( $table ), true ) ? array( 'Field' => $value ) : null;
+			}
+			if ( str_starts_with( $query, 'SHOW INDEX FROM' ) ) {
+				$parts = preg_split( '/\s+/', $query );
+				$table = (string) ( $parts[3] ?? '' );
+				return in_array( $value, $this->indexes[ $table ] ?? array(), true ) ? array( 'Key_name' => $value ) : null;
+			}
 			if ( str_contains( $query, 'FROM wdc_regions' ) ) {
 				return $this->regions[ $value ] ?? null;
 			}
@@ -214,6 +226,10 @@ if ( ! class_exists( 'wpdb' ) ) {
 			}
 
 			if ( preg_match( '/ALTER TABLE (wdc_[a-z_]+) ADD COLUMN ([a-z_]+)/', $sql, $match ) ) {
+				if ( $this->duplicate_column_on_add ) {
+					$this->last_error = "Duplicate column name '{$match[2]}'";
+					return false;
+				}
 				if ( 'wdc_gar_places_stage' === $match[1] && ! in_array( $match[2], $this->stage_columns, true ) ) {
 					$this->stage_columns[] = $match[2];
 				}
@@ -224,6 +240,10 @@ if ( ! class_exists( 'wpdb' ) ) {
 			}
 
 			if ( preg_match( '/ALTER TABLE (wdc_[a-z_]+) ADD KEY ([a-z_]+)/', $sql, $match ) ) {
+				if ( $this->duplicate_index_on_add ) {
+					$this->last_error = "Duplicate key name '{$match[2]}'";
+					return false;
+				}
 				$this->indexes[ $match[1] ][] = $match[2];
 				return 1;
 			}
@@ -391,6 +411,22 @@ $migration_0011 = require dirname( __DIR__, 2 ) . '/database/migrations/0011_add
 $migration_0011();
 gar_smoke_assert( in_array( 'region_type', $old_region_type_db->location_columns, true ), '0011 migration must add missing location region_type column.' );
 gar_smoke_assert( in_array( 'ix_region_type', $old_region_type_db->indexes['wdc_locations'] ?? array(), true ), '0011 migration must add region_type index.' );
+$migration_0011();
+gar_smoke_assert( in_array( 'region_type', $old_region_type_db->location_columns, true ) && in_array( 'ix_region_type', $old_region_type_db->indexes['wdc_locations'] ?? array(), true ), '0011 migration must be safe to run twice.' );
+
+$existing_region_type_db = new wpdb();
+$existing_region_type_db->indexes['wdc_locations'] = array( 'ix_region_type' );
+$GLOBALS['wpdb'] = $existing_region_type_db;
+$migration_0011();
+gar_smoke_assert( in_array( 'region_type', $existing_region_type_db->location_columns, true ) && in_array( 'ix_region_type', $existing_region_type_db->indexes['wdc_locations'] ?? array(), true ), '0011 migration must not fail if column and index already exist.' );
+
+$duplicate_region_type_db = new wpdb();
+$duplicate_region_type_db->location_columns = array_values( array_diff( $duplicate_region_type_db->location_columns, array( 'region_type' ) ) );
+$duplicate_region_type_db->duplicate_column_on_add = true;
+$duplicate_region_type_db->duplicate_index_on_add = true;
+$GLOBALS['wpdb'] = $duplicate_region_type_db;
+$migration_0011();
+gar_smoke_assert( true, '0011 migration must tolerate duplicate column/index SQL errors.' );
 
 $outdated_db = new wpdb();
 $outdated_db->stage_columns = array_values( array_diff( $outdated_db->stage_columns, array( 'district_name' ) ) );
@@ -539,7 +575,7 @@ gar_smoke_assert( 1 === count( $wpdb->carrier_codes ), 'carrier_codes table foun
 
 $snapshot = tempnam( sys_get_temp_dir(), 'wdc-snapshot-' );
 gar_smoke_assert( is_string( $snapshot ), 'Snapshot temp file must be created.' );
-$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.7' );
+$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.8' );
 gar_smoke_assert( $exported > 0, 'Snapshot export must include rows from 4 tables.' );
 $snapshot_text = (string) file_get_contents( $snapshot );
 gar_smoke_assert( str_contains( $snapshot_text, '"table":"wdc_regions"' ) && str_contains( $snapshot_text, '"table":"wdc_location_carrier_codes"' ), 'Snapshot export must include all foundation tables.' );
@@ -563,7 +599,7 @@ gar_smoke_assert( $restored_has_district, 'Snapshot import must restore district
 $snapshot_job_file = tempnam( sys_get_temp_dir(), 'wdc-snapshot-job-' );
 gar_smoke_assert( is_string( $snapshot_job_file ), 'Snapshot job temp file must be created.' );
 $snapshot_exporter = new LocationsSnapshotExporter( $wpdb );
-$snapshot_job = $snapshot_exporter->create_job( $snapshot_job_file, '0.15.7' );
+$snapshot_job = $snapshot_exporter->create_job( $snapshot_job_file, '0.15.8' );
 for ( $i = 0; $i < 100 && 'finished' !== $snapshot_job['phase']; $i++ ) {
 	$snapshot_job = $snapshot_exporter->step_job( $snapshot_job, 2 );
 }
@@ -622,7 +658,7 @@ $_GET = array( 'location_query' => 'Новос' );
 $_POST = array();
 ob_start();
 ( new LocationsAdminPage(
-	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.7' ),
+	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.8' ),
 	$locations,
 	$search_service,
 	new LocationImportService( $locations ),
@@ -657,7 +693,7 @@ gar_smoke_assert( str_contains( $html, "button.closest('.wdc-location-row')" ) &
 $_POST = array( 'wdc_locations_nonce' => 'test-nonce', 'location_id' => (string) $novosibirsk->id );
 ob_start();
 ( new LocationsAdminPage(
-	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.7' ),
+	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.8' ),
 	$locations,
 	$search_service,
 	new LocationImportService( $locations )
