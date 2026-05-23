@@ -19,6 +19,74 @@
 	display: flex;
 	align-items: flex-end;
 	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.wdc-locations-pagination {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin: 12px 0;
+}
+
+.wdc-locations-pagination .disabled {
+	pointer-events: none;
+	opacity: 0.55;
+}
+
+.wdc-page-numbers {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.wdc-page-number.current {
+	font-weight: 700;
+	border-color: #2271b1;
+	box-shadow: inset 0 0 0 1px #2271b1;
+}
+
+.wdc-page-ellipsis {
+	padding: 0 4px;
+	color: #646970;
+}
+
+.wdc-type-rules-group {
+	margin: 10px 0;
+	border: 1px solid #dcdcde;
+	background: #fff;
+}
+
+.wdc-type-rules-group summary {
+	padding: 10px 12px;
+	font-weight: 600;
+	cursor: pointer;
+	background: #f6f7f7;
+}
+
+.wdc-type-rules-group .wdc-type-rules-table {
+	border: 0;
+	border-top: 1px solid #dcdcde;
+}
+
+.wdc-type-rules-table input[type="text"],
+.wdc-type-rules-table select {
+	width: 100%;
+	max-width: 220px;
+}
+
+.wdc-progress progress {
+	width: 100%;
+	max-width: 520px;
+}
+
+.wdc-progress pre {
+	max-height: 280px;
+	overflow: auto;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	padding: 10px;
 }
 
 .wdc-locations-region {

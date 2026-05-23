@@ -183,10 +183,10 @@ final class LocationsAdminPage {
 					<?php if ( array() === $grouped ) : ?>
 						<p><?php echo esc_html__( 'Населенные пункты не найдены.', 'walls-delivery-calc' ); ?></p>
 					<?php endif; ?>
-					<?php foreach ( $grouped as $region => $locations ) : ?>
+					<?php foreach ( $grouped as $group ) : ?>
 						<section class="wdc-locations-region">
-							<h2><?php echo esc_html( $region ); ?></h2>
-							<?php foreach ( $locations as $location ) : ?>
+							<h2><?php echo esc_html( (string) $group['label'] ); ?></h2>
+							<?php foreach ( $group['locations'] as $location ) : ?>
 								<?php $this->render_location_row( $location ); ?>
 							<?php endforeach; ?>
 						</section>
@@ -215,16 +215,25 @@ final class LocationsAdminPage {
 
 	/**
 	 * @param array<int,Location> $locations
-	 * @return array<string,array<int,Location>>
+	 * @return array<int,array{sort_key:string,label:string,locations:array<int,Location>}>
 	 */
 	private function group_locations_by_region( array $locations ): array {
 		$grouped = array();
+		$formatter = LocationDisplayNameFormatter::from_rules( $this->type_display_rules() );
 		foreach ( $locations as $location ) {
-			$region = '' !== $location->region_name ? $location->region_name : __( 'Регион не указан', 'walls-delivery-calc' );
-			$grouped[ $region ][] = $location;
+			$sort_key = '' !== $location->region_name ? $location->region_name : __( 'Регион не указан', 'walls-delivery-calc' );
+			if ( ! isset( $grouped[ $sort_key ] ) ) {
+				$label = '' !== $location->region_name ? $formatter->format_region_group_header( $location ) : $sort_key;
+				$grouped[ $sort_key ] = array(
+					'sort_key'  => $sort_key,
+					'label'     => $label,
+					'locations' => array(),
+				);
+			}
+			$grouped[ $sort_key ]['locations'][] = $location;
 		}
 		ksort( $grouped );
-		return $grouped;
+		return array_values( $grouped );
 	}
 
 	/**
@@ -249,8 +258,46 @@ final class LocationsAdminPage {
 			) as $link ) : ?>
 				<a class="button button-small <?php echo (int) $link['target'] === $page ? 'disabled' : ''; ?>" href="<?php echo esc_attr( $this->search_page_url( $query, (int) $link['target'], $per_page ) ); ?>"><?php echo esc_html( $link['label'] ); ?></a>
 			<?php endforeach; ?>
+			<span class="wdc-page-numbers">
+				<?php foreach ( $this->pagination_numbers( $page, $total_pages ) as $item ) : ?>
+					<?php if ( 'ellipsis' === $item ) : ?>
+						<span class="wdc-page-ellipsis">…</span>
+					<?php else : ?>
+						<a class="button button-small wdc-page-number <?php echo (int) $item === $page ? 'current' : ''; ?>" href="<?php echo esc_attr( $this->search_page_url( $query, (int) $item, $per_page ) ); ?>"><?php echo esc_html( (string) $item ); ?></a>
+					<?php endif; ?>
+				<?php endforeach; ?>
+			</span>
 		</div>
 		<?php
+	}
+
+	/**
+	 * @return array<int,int|string>
+	 */
+	private function pagination_numbers( int $page, int $total_pages ): array {
+		if ( $total_pages <= 1 ) {
+			return array( 1 );
+		}
+
+		if ( $total_pages <= 9 ) {
+			return range( 1, $total_pages );
+		}
+
+		$pages = array( 1 );
+		$start = max( 2, $page - 2 );
+		$end = min( $total_pages - 1, $page + 2 );
+		if ( $start > 2 ) {
+			$pages[] = 'ellipsis';
+		}
+		for ( $index = $start; $index <= $end; $index++ ) {
+			$pages[] = $index;
+		}
+		if ( $end < $total_pages - 1 ) {
+			$pages[] = 'ellipsis';
+		}
+		$pages[] = $total_pages;
+
+		return $pages;
 	}
 
 	private function search_page_url( string $query, int $page, int $per_page ): string {
@@ -272,7 +319,8 @@ final class LocationsAdminPage {
 			$scope_types = array_values( array_unique( array_merge( $types[ $scope ] ?? array(), array_keys( $rules[ $scope ] ?? array() ) ) ) );
 			sort( $scope_types );
 			?>
-			<h3><?php echo esc_html( $label ); ?></h3>
+			<details class="wdc-type-rules-group" <?php echo 'region' === $scope ? 'open' : ''; ?>>
+				<summary><?php echo esc_html( sprintf( '%1$s — %2$d типов', $label, count( $scope_types ) ) ); ?></summary>
 			<table class="widefat striped wdc-type-rules-table">
 				<thead><tr><th><?php echo esc_html__( 'Тип в базе', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Отображать как', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Позиция', 'walls-delivery-calc' ); ?></th></tr></thead>
 				<tbody>
@@ -294,6 +342,7 @@ final class LocationsAdminPage {
 				<?php endif; ?>
 				</tbody>
 			</table>
+			</details>
 			<?php
 		endforeach;
 	}

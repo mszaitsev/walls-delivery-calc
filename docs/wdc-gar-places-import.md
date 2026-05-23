@@ -1,6 +1,6 @@
 # WDC GAR Places Import
 
-Version: 0.15.4.
+Version: 0.15.6.
 
 ## Source CSV
 
@@ -32,7 +32,27 @@ The importer:
 
 The admin importer runs as a chunked AJAX job with progress instead of one long POST. The progress panel shows phase, rows read, stage rows, processed rows, imported locations, aliases, skipped rows, and errors. The real file is expected to be about 64 MB and about 160000 rows.
 
-Version `0.15.3` added a follow-up migration `0010_add_gar_district_columns.php` for installations where `0008` had already run before `district_*` columns were introduced. The importer also checks staging schema before loading CSV rows and reports SQL failures from bulk inserts instead of advancing progress counters after a failed query.
+The follow-up migration `0010_add_gar_district_columns.php` covers installations where `0008` had already run before `district_*` columns were introduced. The importer also checks staging schema before loading CSV rows and reports SQL failures from bulk inserts instead of advancing progress counters after a failed query.
+
+## Admin Search
+
+The admin locations search is paginated. It defaults to 20 rows per page and supports 10, 20, 50, and 100 rows per page. The page shows total matches, the current visible range, first/previous/next/last links, and compact page numbers with ellipses for long result sets.
+
+Search results are ranked so direct settlement matches are shown before parent-field matches:
+
+1. exact `place_name`
+2. prefix `place_name`
+3. partial `place_name`
+4. exact `city_name`
+5. prefix `city_name`
+6. partial `city_name`
+7. `district_name`
+8. `region_name`
+9. `display_name` / `searchable_text`
+
+The result details panel returns GAR/location fields including `display_name`, type fields, `searchable_text`, and `postal_code`. It does not expose legacy `postcode`.
+
+Search result group headers use `region_name` plus the mapped visual `region_type` after the name. The group sort key remains plain `region_name`, so visual type labels do not change ordering. If the region type rule is hidden, the suffix is omitted.
 
 Before import, the local base is replaced: locations, aliases, regions, and carrier mappings are cleared. Carrier mappings are included because a full location reload can orphan old mappings.
 
@@ -44,7 +64,33 @@ Before import, the local base is replaced: locations, aliases, regions, and carr
 
 `wdc_locations` keeps the internal `id` for compatibility, but the canonical external key is `gar_object_id`. It also stores `fias_id`, `kladr_id`, district fields, city fields, place fields, OKATO/OKTMO, and `postal_code`.
 
+`region_type` is stored in `wdc_locations` as well as `wdc_regions`. Migration `0011_add_location_region_type.php` backfills the column for installations that had already applied an older `0008`.
+
 `display_name` is imported and stored as-is when present in the CSV. If an imported row has an empty `display_name`, the importer builds a fallback from region, district, city, and place fields.
+
+`display_name` can be rebuilt later from admin type display rules. Rules are stored in `wdc_location_type_display_rules` and can control how `region_type`, `city_type`, and `place_type` are displayed:
+
+- `before`
+- `after`
+- `hidden`
+
+`district_type` is not configurable yet and is always displayed as `district_name + " " + district_type`.
+
+The formatter builds:
+
+```text
+region_part, district_part, city_part, place_part
+```
+
+Example:
+
+```text
+Новосибирская обл, Новосибирский р-н, село Гусиный Брод
+```
+
+The admin action `Пересобрать display_name` runs as a chunked AJAX job. Each batch recalculates `display_name`, refreshes `searchable_text`, regenerates GAR aliases, and updates a progress bar plus a JSON status block for diagnostics.
+
+The type-rule editor is split into collapsible Region, City, and Place sections. Each summary shows how many source types are currently available in that section.
 
 `postal_code` is imported but not used in delivery calculations yet. It may be empty in the current prepared CSV. `postal_code` is the only location postal-index field used by the new domain/runtime; legacy `postcode` is not exported in snapshots and should not be used for GAR locations.
 
@@ -75,7 +121,7 @@ The admin section `Экспорт / импорт подготовленной б
 The first JSONL row is metadata:
 
 ```json
-{"type":"meta","version":"0.15.4","tables":["wdc_regions","wdc_locations","wdc_location_aliases","wdc_location_carrier_codes"],"created_at":"2026-05-23 12:00:00"}
+{"type":"meta","version":"0.15.6","tables":["wdc_regions","wdc_locations","wdc_location_aliases","wdc_location_carrier_codes"],"created_at":"2026-05-23 12:00:00"}
 ```
 
 Following rows use:
@@ -86,7 +132,7 @@ Following rows use:
 
 Export reads tables page by page. Import replaces the four tables, ignores snapshot columns absent from the current schema, and lets missing current columns use DB defaults or `NULL`. Admin snapshot export/import also runs as chunked AJAX jobs with progress.
 
-Snapshot import softly accepts old `postcode` values as `postal_code` fallback, but snapshot export does not emit `postcode`.
+Snapshot import softly accepts old `postcode` values as `postal_code` fallback before rows reach the location domain model, but snapshot export does not emit `postcode`. `Location::from_array()` itself only reads `postal_code`.
 
 ## Server Requirements
 

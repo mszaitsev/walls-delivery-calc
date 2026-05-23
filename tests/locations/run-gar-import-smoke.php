@@ -15,6 +15,7 @@ use WallsShop\WDC\Locations\Storage\RegionRepository;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
+$GLOBALS['wdc_gar_smoke_options'] = array();
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -28,7 +29,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $carrier_codes = array();
 		public array $missing_tables = array();
 		public array $stage_columns = array( 'region_code', 'region_name', 'region_type', 'region_fias_id', 'region_kladr_id', 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level', 'city_name', 'city_type', 'city_fias_id', 'city_kladr_id', 'place_name', 'place_type', 'place_level', 'display_name', 'fias_id', 'gar_object_id', 'kladr_id', 'okato', 'oktmo', 'postal_code' );
-		public array $location_columns = array( 'id', 'gar_object_id', 'fias_id', 'kladr_id', 'gar_id', 'country_code', 'region_name', 'region_code', 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level', 'city_name', 'city_type', 'city_fias_id', 'city_kladr_id', 'settlement_name', 'settlement_type', 'place_name', 'place_type', 'place_level', 'display_name', 'postal_code', 'okato', 'oktmo', 'latitude', 'longitude', 'searchable_text', 'active', 'created_at', 'updated_at' );
+		public array $location_columns = array( 'id', 'gar_object_id', 'fias_id', 'kladr_id', 'gar_id', 'country_code', 'region_name', 'region_code', 'region_type', 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level', 'city_name', 'city_type', 'city_fias_id', 'city_kladr_id', 'settlement_name', 'settlement_type', 'place_name', 'place_type', 'place_level', 'display_name', 'postal_code', 'okato', 'oktmo', 'latitude', 'longitude', 'searchable_text', 'active', 'created_at', 'updated_at' );
 		public array $indexes = array();
 		public bool $force_sql_bulk = false;
 		public bool $fail_next_query = false;
@@ -109,7 +110,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 				if ( str_contains( $query, 'kladr_id' ) && (string) $row['kladr_id'] === $value ) {
 					return $this->join_region( $row );
 				}
-				if ( str_contains( $query, 'WHERE l.id' ) && (int) $row['id'] === (int) $value ) {
+				if ( ( str_contains( $query, 'WHERE l.id' ) || str_contains( $query, 'WHERE id =' ) ) && (int) $row['id'] === (int) $value ) {
 					return $this->join_region( $row );
 				}
 			}
@@ -334,6 +335,20 @@ function wp_nonce_field( string $action, string $name ): void {
 	printf( '<input type="hidden" name="%s" value="test-nonce">', esc_attr( $name ) );
 }
 
+function get_option( string $key, mixed $default = false ): mixed {
+	return $GLOBALS['wdc_gar_smoke_options'][ $key ] ?? $default;
+}
+
+function update_option( string $key, mixed $value, bool|string $autoload = false ): bool {
+	$GLOBALS['wdc_gar_smoke_options'][ $key ] = $value;
+	return true;
+}
+
+function delete_option( string $key ): bool {
+	unset( $GLOBALS['wdc_gar_smoke_options'][ $key ] );
+	return true;
+}
+
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
@@ -369,6 +384,13 @@ foreach ( array( 'district_fias_id', 'district_gar_object_id' ) as $index ) {
 foreach ( array( 'ix_district_fias_id', 'ix_district_gar_object_id', 'ix_region_district_place' ) as $index ) {
 	gar_smoke_assert( in_array( $index, $old_schema_db->indexes['wdc_locations'] ?? array(), true ), '0010 migration must add location district indexes.' );
 }
+$old_region_type_db = new wpdb();
+$old_region_type_db->location_columns = array_values( array_diff( $old_region_type_db->location_columns, array( 'region_type' ) ) );
+$GLOBALS['wpdb'] = $old_region_type_db;
+$migration_0011 = require dirname( __DIR__, 2 ) . '/database/migrations/0011_add_location_region_type.php';
+$migration_0011();
+gar_smoke_assert( in_array( 'region_type', $old_region_type_db->location_columns, true ), '0011 migration must add missing location region_type column.' );
+gar_smoke_assert( in_array( 'ix_region_type', $old_region_type_db->indexes['wdc_locations'] ?? array(), true ), '0011 migration must add region_type index.' );
 
 $outdated_db = new wpdb();
 $outdated_db->stage_columns = array_values( array_diff( $outdated_db->stage_columns, array( 'district_name' ) ) );
@@ -432,6 +454,7 @@ gar_smoke_assert( $repeat->success && 4 === count( $wpdb->locations ), 'Repeated
 
 $novosibirsk = $locations->find_by_gar_object_id( 1001 );
 gar_smoke_assert( null !== $novosibirsk && 1001 === $novosibirsk->gar_object_id, 'gar_object_id must be stored.' );
+gar_smoke_assert( 'обл' === $novosibirsk->region_type, 'region_type must be imported from CSV and visible in Location.' );
 gar_smoke_assert( '' === $novosibirsk->postal_code, 'Empty postal_code must be preserved.' );
 gar_smoke_assert( 'Новосибирская обл, г Новосибирск' === $novosibirsk->display_name, 'display_name must be imported as-is.' );
 gar_smoke_assert( null !== $locations->find_by_fias_id( '22222222-2222-2222-2222-222222222001' ), 'fias_id must be searchable and unique-compatible.' );
@@ -439,6 +462,14 @@ gar_smoke_assert( null !== $locations->find_by_kladr_id( '5400000100000' ), 'Sea
 gar_smoke_assert( count( $search_service->search( 'Новос' ) ) > 0, 'Search "Новос" must find Novosibirsk.' );
 gar_smoke_assert( count( $search_service->search( '5400000100000' ) ) > 0, 'Search must include kladr_id.' );
 gar_smoke_assert( null !== ( new CheckoutLocationSearch( $search_service ) )->best_match( 'Новосибирск' ), 'Local city picker search must still work.' );
+
+$paginated = $locations->search_paginated( 'Новос', 1, 20 );
+gar_smoke_assert( 20 === $paginated['per_page'] && 1 === $paginated['page'], 'Search pagination must default to page 1 and per_page 20-compatible output.' );
+gar_smoke_assert( $paginated['total'] >= 1 && $paginated['total_pages'] >= 1, 'Search pagination must return total and total_pages.' );
+gar_smoke_assert( 20 === $locations->search_paginated( 'Новос', 1, 999 )['per_page'], 'Search pagination must clamp invalid per_page to default 20.' );
+foreach ( array( 10, 20, 50, 100 ) as $per_page ) {
+	gar_smoke_assert( $per_page === $locations->search_paginated( 'Новос', 1, $per_page )['per_page'], 'Search pagination must support configured per_page values.' );
+}
 
 $gusiny_brod = $locations->find_by_gar_object_id( 1002 );
 gar_smoke_assert( null !== $gusiny_brod && 'Новосибирский' === $gusiny_brod->district_name, 'district_* must be imported to locations.' );
@@ -448,6 +479,45 @@ gar_smoke_assert( count( $search_service->search( 'Новосибирский' )
 gar_smoke_assert( count( $search_service->search( 'Гусиный Брод' ) ) > 0, 'Search must find Gusinny Brod.' );
 gar_smoke_assert( count( $search_service->search( '33333333-3333-3333-3333-333333333001' ) ) > 0, 'Search must find by district_fias_id.' );
 gar_smoke_assert( count( $search_service->search( '5400100000000' ) ) > 0, 'Search must find by district_kladr_id.' );
+
+$locations->save(
+	WallsShop\WDC\Locations\ValueObjects\Location::from_array(
+		array(
+			'gar_object_id' => 1999,
+			'fias_id' => '99999999-9999-9999-9999-999999999999',
+			'region_code' => '54',
+			'region_name' => 'Новосибирская обл',
+			'district_name' => 'Гусиный Брод',
+			'district_type' => 'р-н',
+			'place_name' => 'Тестовый',
+			'place_type' => 'поселок',
+			'place_level' => 6,
+			'display_name' => 'Новосибирская обл, Гусиный Брод р-н, поселок Тестовый',
+			'active' => true,
+		)
+	)
+);
+$ranked_gusiny = $locations->search_paginated( 'Гусиный Брод', 1, 10 )['items'];
+gar_smoke_assert( 1002 === $ranked_gusiny[0]->gar_object_id, 'Ranking must put exact place match above district-only match.' );
+$locations->save(
+	WallsShop\WDC\Locations\ValueObjects\Location::from_array(
+		array(
+			'gar_object_id' => 1998,
+			'fias_id' => '99999999-9999-9999-9999-999999999998',
+			'region_code' => '54',
+			'region_name' => 'Новосибирская обл',
+			'district_name' => 'Новосибирск',
+			'district_type' => 'р-н',
+			'place_name' => 'Районный',
+			'place_type' => 'поселок',
+			'place_level' => 6,
+			'display_name' => 'Новосибирская обл, Новосибирск р-н, поселок Районный',
+			'active' => true,
+		)
+	)
+);
+$ranked_nsk = $locations->search_paginated( 'Новосибирск', 1, 10 )['items'];
+gar_smoke_assert( 1001 === $ranked_nsk[0]->gar_object_id, 'Ranking must put exact city/place match above district-only match.' );
 
 $fallback = $locations->find_by_gar_object_id( 1004 );
 gar_smoke_assert( null !== $fallback && 'Новосибирская обл, р-н Новосибирский, г Новосибирск, рп Краснообск' === $fallback->display_name, 'Fallback display_name must include district.' );
@@ -469,7 +539,7 @@ gar_smoke_assert( 1 === count( $wpdb->carrier_codes ), 'carrier_codes table foun
 
 $snapshot = tempnam( sys_get_temp_dir(), 'wdc-snapshot-' );
 gar_smoke_assert( is_string( $snapshot ), 'Snapshot temp file must be created.' );
-$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.4' );
+$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.6' );
 gar_smoke_assert( $exported > 0, 'Snapshot export must include rows from 4 tables.' );
 $snapshot_text = (string) file_get_contents( $snapshot );
 gar_smoke_assert( str_contains( $snapshot_text, '"table":"wdc_regions"' ) && str_contains( $snapshot_text, '"table":"wdc_location_carrier_codes"' ), 'Snapshot export must include all foundation tables.' );
@@ -493,7 +563,7 @@ gar_smoke_assert( $restored_has_district, 'Snapshot import must restore district
 $snapshot_job_file = tempnam( sys_get_temp_dir(), 'wdc-snapshot-job-' );
 gar_smoke_assert( is_string( $snapshot_job_file ), 'Snapshot job temp file must be created.' );
 $snapshot_exporter = new LocationsSnapshotExporter( $wpdb );
-$snapshot_job = $snapshot_exporter->create_job( $snapshot_job_file, '0.15.4' );
+$snapshot_job = $snapshot_exporter->create_job( $snapshot_job_file, '0.15.6' );
 for ( $i = 0; $i < 100 && 'finished' !== $snapshot_job['phase']; $i++ ) {
 	$snapshot_job = $snapshot_exporter->step_job( $snapshot_job, 2 );
 }
@@ -536,11 +606,23 @@ gar_smoke_assert( 4 === (int) $job['locations_imported'], 'Successful sample job
 gar_smoke_assert( (int) $job['regions_imported'] > 0, 'Successful sample job must import regions.' );
 
 $_SERVER['REQUEST_METHOD'] = 'GET';
+update_option(
+	'wdc_location_type_display_rules',
+	array(
+		'region' => array(
+			'обл' => array( 'display' => 'обл.', 'position' => 'after' ),
+			'респ' => array( 'display' => 'Республика', 'position' => 'before' ),
+		),
+		'city' => array(),
+		'place' => array(),
+	),
+	false
+);
 $_GET = array( 'location_query' => 'Новос' );
 $_POST = array();
 ob_start();
 ( new LocationsAdminPage(
-	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.4' ),
+	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.6' ),
 	$locations,
 	$search_service,
 	new LocationImportService( $locations ),
@@ -559,6 +641,10 @@ gar_smoke_assert( ! str_contains( $html, 'Import prepared FIAS dataset' ), 'Prep
 gar_smoke_assert( str_contains( $html, 'Импорт GAR/ФИАС CSV' ), 'Admin GAR CSV import block must be rendered.' );
 gar_smoke_assert( str_contains( $html, 'wdc_gar_import_start' ) && str_contains( $html, 'wdc_locations_snapshot_export_start' ), 'Admin page must include chunked progress AJAX actions.' );
 gar_smoke_assert( str_contains( $html, 'wdc-location-details-toggle' ) && str_contains( $html, 'wdc_location_details' ), 'Admin search must include details button/action.' );
+gar_smoke_assert( str_contains( $html, 'wdc-locations-pagination' ) && str_contains( $html, 'Найдено всего:' ) && str_contains( $html, 'location_per_page' ), 'Admin search must include pagination controls.' );
+gar_smoke_assert( str_contains( $html, 'Пересобрать display_name' ) && str_contains( $html, 'wdc-display-name-rebuild-progress' ) && str_contains( $html, 'JSON status' ), 'Admin page must include display_name rebuild progress UI.' );
+gar_smoke_assert( str_contains( $html, 'Отображение типов населенных пунктов' ) && str_contains( $html, '<details class="wdc-type-rules-group" open' ) && str_contains( $html, 'Регион —' ), 'Admin page must include collapsible type display rules table.' );
+gar_smoke_assert( str_contains( $html, 'Новосибирская обл' ), 'Admin group header must include region_name and visual region_type.' );
 $main_pos = strpos( $html, 'wdc-location-row-main' );
 $button_pos = strpos( $html, 'wdc-location-details-toggle' );
 $title_pos = strpos( $html, 'wdc-location-title' );
@@ -567,5 +653,19 @@ gar_smoke_assert( false !== $main_pos, 'Admin search row must render wdc-locatio
 gar_smoke_assert( false !== $button_pos && false !== $title_pos && $button_pos < $title_pos, 'Details button must render before location title.' );
 gar_smoke_assert( false !== $details_pos && $main_pos < $details_pos, 'Details panel must render after row main wrapper.' );
 gar_smoke_assert( str_contains( $html, "button.closest('.wdc-location-row')" ) && ! str_contains( $html, "button.parentElement.querySelector('.wdc-location-details')" ), 'Details JS must find row with closest().');
+
+$_POST = array( 'wdc_locations_nonce' => 'test-nonce', 'location_id' => (string) $novosibirsk->id );
+ob_start();
+( new LocationsAdminPage(
+	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.6' ),
+	$locations,
+	$search_service,
+	new LocationImportService( $locations )
+) )->ajax_location_details();
+$details_payload = json_decode( (string) ob_get_clean(), true );
+$details_data = $details_payload['data'] ?? array();
+gar_smoke_assert( isset( $details_data['display_name'], $details_data['region_type'], $details_data['city_type'], $details_data['place_type'], $details_data['district_type'], $details_data['searchable_text'], $details_data['postal_code'] ), 'Details payload must contain expected location fields.' );
+gar_smoke_assert( 'обл' === (string) ( $details_data['region_type'] ?? '' ), 'Details payload must include imported region_type.' );
+gar_smoke_assert( ! array_key_exists( 'postcode', $details_data ), 'Details payload must not contain postcode.' );
 
 echo "GAR import smoke test passed.\n";
