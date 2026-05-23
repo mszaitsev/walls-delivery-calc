@@ -16,6 +16,8 @@ use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Import\LocationsSnapshotExporter;
 use WallsShop\WDC\Locations\Import\LocationsSnapshotImporter;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
+use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
+use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
@@ -28,6 +30,8 @@ final class LocationsAdminPage {
 	private const GAR_JOB_OPTION = 'wdc_gar_import_job';
 	private const SNAPSHOT_EXPORT_JOB_OPTION = 'wdc_locations_snapshot_export_job';
 	private const SNAPSHOT_IMPORT_JOB_OPTION = 'wdc_locations_snapshot_import_job';
+	private const DISPLAY_RULES_OPTION = 'wdc_location_type_display_rules';
+	private const DISPLAY_REBUILD_JOB_OPTION = 'wdc_locations_display_name_rebuild_job';
 
 	public function __construct(
 		private PluginEnvironment $environment,
@@ -57,6 +61,10 @@ final class LocationsAdminPage {
 		add_action( 'wp_ajax_wdc_locations_snapshot_import_start', array( $this, 'ajax_snapshot_import_start' ) );
 		add_action( 'wp_ajax_wdc_locations_snapshot_import_step', array( $this, 'ajax_snapshot_import_step' ) );
 		add_action( 'wp_ajax_wdc_location_details', array( $this, 'ajax_location_details' ) );
+		add_action( 'wp_ajax_wdc_locations_display_name_rebuild_start', array( $this, 'ajax_display_name_rebuild_start' ) );
+		add_action( 'wp_ajax_wdc_locations_display_name_rebuild_step', array( $this, 'ajax_display_name_rebuild_step' ) );
+		add_action( 'wp_ajax_wdc_locations_display_name_rebuild_status', array( $this, 'ajax_display_name_rebuild_status' ) );
+		add_action( 'wp_ajax_wdc_locations_display_name_rebuild_cancel', array( $this, 'ajax_display_name_rebuild_cancel' ) );
 	}
 
 	public function add_menu_page(): void {
@@ -78,7 +86,10 @@ final class LocationsAdminPage {
 
 		$message = $this->handle_post();
 		$query   = isset( $_GET['location_query'] ) ? sanitize_text_field( wp_unslash( $_GET['location_query'] ) ) : '';
-		$grouped = '' !== trim( $query ) ? $this->search_service->grouped( $query ) : array();
+		$search_page = isset( $_GET['location_search_page'] ) ? max( 1, (int) $_GET['location_search_page'] ) : 1;
+		$per_page = isset( $_GET['location_per_page'] ) ? (int) $_GET['location_per_page'] : 20;
+		$paginated = '' !== trim( $query ) ? $this->repository->search_paginated( $query, $search_page, $per_page ) : array( 'items' => array(), 'total' => 0, 'page' => 1, 'per_page' => 20, 'total_pages' => 0 );
+		$grouped = $this->group_locations_by_region( $paginated['items'] );
 		?>
 		<div class="wrap wdc-locations-admin">
 			<h1><?php echo esc_html__( 'Населенные пункты', 'walls-delivery-calc' ); ?></h1>
@@ -126,17 +137,49 @@ final class LocationsAdminPage {
 				<div id="wdc-snapshot-progress" class="wdc-progress" hidden><progress value="0" max="100"></progress><pre></pre></div>
 			</form>
 
+			<form class="wdc-locations-import wdc-location-type-rules" method="post">
+				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
+				<h2><?php echo esc_html__( 'Отображение типов населенных пунктов', 'walls-delivery-calc' ); ?></h2>
+				<input type="hidden" name="wdc_locations_action" value="save_type_rules">
+				<?php $this->render_type_rules_table(); ?>
+				<p><button class="button button-primary" type="submit"><?php echo esc_html__( 'Сохранить правила отображения', 'walls-delivery-calc' ); ?></button></p>
+			</form>
+
+			<div class="wdc-locations-import wdc-display-name-rebuild">
+				<h2><?php echo esc_html__( 'Обработка display_name', 'walls-delivery-calc' ); ?></h2>
+				<p class="description"><?php echo esc_html__( 'Пакетно пересобирает display_name, searchable_text и GAR aliases с учетом текущих правил отображения типов.', 'walls-delivery-calc' ); ?></p>
+				<button class="button button-primary" type="button" id="wdc-display-name-rebuild-start"><?php echo esc_html__( 'Пересобрать display_name', 'walls-delivery-calc' ); ?></button>
+				<div id="wdc-display-name-rebuild-progress" class="wdc-progress" hidden>
+					<progress value="0" max="100"></progress>
+					<p class="wdc-progress-summary"></p>
+					<details open>
+						<summary><?php echo esc_html__( 'JSON status', 'walls-delivery-calc' ); ?></summary>
+						<pre></pre>
+					</details>
+				</div>
+			</div>
+
 			<form class="wdc-locations-search" method="get">
 				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>">
 				<label>
 					<span><?php echo esc_html__( 'Поиск населенных пунктов', 'walls-delivery-calc' ); ?></span>
 					<input type="search" name="location_query" value="<?php echo esc_attr( $query ); ?>" placeholder="<?php echo esc_attr__( 'Новос', 'walls-delivery-calc' ); ?>">
 				</label>
+				<label>
+					<span><?php echo esc_html__( 'Показывать по', 'walls-delivery-calc' ); ?></span>
+					<select name="location_per_page" onchange="this.form.location_search_page.value='1'; this.form.submit();">
+						<?php foreach ( array( 10, 20, 50, 100 ) as $value ) : ?>
+							<option value="<?php echo esc_attr( (string) $value ); ?>" <?php echo (int) $paginated['per_page'] === $value ? 'selected' : ''; ?>><?php echo esc_html( (string) $value ); ?></option>
+						<?php endforeach; ?>
+					</select>
+				</label>
+				<input type="hidden" name="location_search_page" value="<?php echo esc_attr( (string) $paginated['page'] ); ?>">
 				<button class="button" type="submit"><?php echo esc_html__( 'Найти', 'walls-delivery-calc' ); ?></button>
 			</form>
 
 			<?php if ( '' !== trim( $query ) ) : ?>
 				<div class="wdc-locations-results">
+					<?php $this->render_search_pagination( $query, $paginated ); ?>
 					<?php if ( array() === $grouped ) : ?>
 						<p><?php echo esc_html__( 'Населенные пункты не найдены.', 'walls-delivery-calc' ); ?></p>
 					<?php endif; ?>
@@ -148,6 +191,7 @@ final class LocationsAdminPage {
 							<?php endforeach; ?>
 						</section>
 					<?php endforeach; ?>
+					<?php $this->render_search_pagination( $query, $paginated ); ?>
 				</div>
 			<?php endif; ?>
 		</div>
@@ -167,6 +211,91 @@ final class LocationsAdminPage {
 			<div class="wdc-location-details" hidden></div>
 		</div>
 		<?php
+	}
+
+	/**
+	 * @param array<int,Location> $locations
+	 * @return array<string,array<int,Location>>
+	 */
+	private function group_locations_by_region( array $locations ): array {
+		$grouped = array();
+		foreach ( $locations as $location ) {
+			$region = '' !== $location->region_name ? $location->region_name : __( 'Регион не указан', 'walls-delivery-calc' );
+			$grouped[ $region ][] = $location;
+		}
+		ksort( $grouped );
+		return $grouped;
+	}
+
+	/**
+	 * @param array{items:array<int,Location>, total:int, page:int, per_page:int, total_pages:int} $paginated
+	 */
+	private function render_search_pagination( string $query, array $paginated ): void {
+		$total = (int) $paginated['total'];
+		$page = (int) $paginated['page'];
+		$per_page = (int) $paginated['per_page'];
+		$total_pages = (int) $paginated['total_pages'];
+		$from = $total > 0 ? ( ( $page - 1 ) * $per_page ) + 1 : 0;
+		$to = min( $total, $page * $per_page );
+		?>
+		<div class="wdc-locations-pagination">
+			<span><?php echo esc_html( sprintf( __( 'Найдено всего: %d', 'walls-delivery-calc' ), $total ) ); ?></span>
+			<span><?php echo esc_html( sprintf( __( '%1$d–%2$d из %3$d', 'walls-delivery-calc' ), $from, $to, $total ) ); ?></span>
+			<?php foreach ( array(
+				array( 'target' => 1, 'label' => '« Первая' ),
+				array( 'target' => max( 1, $page - 1 ), 'label' => '‹ Предыдущая' ),
+				array( 'target' => min( max( 1, $total_pages ), $page + 1 ), 'label' => 'Следующая ›' ),
+				array( 'target' => max( 1, $total_pages ), 'label' => 'Последняя »' ),
+			) as $link ) : ?>
+				<a class="button button-small <?php echo (int) $link['target'] === $page ? 'disabled' : ''; ?>" href="<?php echo esc_attr( $this->search_page_url( $query, (int) $link['target'], $per_page ) ); ?>"><?php echo esc_html( $link['label'] ); ?></a>
+			<?php endforeach; ?>
+		</div>
+		<?php
+	}
+
+	private function search_page_url( string $query, int $page, int $per_page ): string {
+		$args = array(
+			'page'                 => self::PAGE_SLUG,
+			'location_query'       => $query,
+			'location_search_page' => max( 1, $page ),
+			'location_per_page'    => $per_page,
+		);
+		$url = 'admin.php?' . http_build_query( $args );
+		return function_exists( 'admin_url' ) ? admin_url( $url ) : $url;
+	}
+
+	private function render_type_rules_table(): void {
+		$rules = $this->type_display_rules();
+		$types = $this->repository->distinct_location_types();
+		$labels = array( 'region' => 'Регион', 'city' => 'Город', 'place' => 'Населенный пункт' );
+		foreach ( $labels as $scope => $label ) :
+			$scope_types = array_values( array_unique( array_merge( $types[ $scope ] ?? array(), array_keys( $rules[ $scope ] ?? array() ) ) ) );
+			sort( $scope_types );
+			?>
+			<h3><?php echo esc_html( $label ); ?></h3>
+			<table class="widefat striped wdc-type-rules-table">
+				<thead><tr><th><?php echo esc_html__( 'Тип в базе', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Отображать как', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Позиция', 'walls-delivery-calc' ); ?></th></tr></thead>
+				<tbody>
+				<?php foreach ( $scope_types as $type ) : $rule = $rules[ $scope ][ $type ] ?? array(); ?>
+					<tr>
+						<th><?php echo esc_html( $type ); ?><input type="hidden" name="type_rules[<?php echo esc_attr( $scope ); ?>][<?php echo esc_attr( $type ); ?>][source]" value="<?php echo esc_attr( $type ); ?>"></th>
+						<td><input type="text" name="type_rules[<?php echo esc_attr( $scope ); ?>][<?php echo esc_attr( $type ); ?>][display]" value="<?php echo esc_attr( (string) ( $rule['display'] ?? $type ) ); ?>"></td>
+						<td>
+							<select name="type_rules[<?php echo esc_attr( $scope ); ?>][<?php echo esc_attr( $type ); ?>][position]">
+								<?php foreach ( array( 'before' => 'Перед названием', 'after' => 'После названия', 'hidden' => 'Не показывать' ) as $value => $text ) : ?>
+									<option value="<?php echo esc_attr( $value ); ?>" <?php echo (string) ( $rule['position'] ?? $this->default_type_position( $scope ) ) === $value ? 'selected' : ''; ?>><?php echo esc_html( $text ); ?></option>
+								<?php endforeach; ?>
+							</select>
+						</td>
+					</tr>
+				<?php endforeach; ?>
+				<?php if ( array() === $scope_types ) : ?>
+					<tr><td colspan="3"><?php echo esc_html__( 'Типы пока не найдены в базе.', 'walls-delivery-calc' ); ?></td></tr>
+				<?php endif; ?>
+				</tbody>
+			</table>
+			<?php
+		endforeach;
 	}
 
 	private function render_progress_script(): void {
@@ -191,6 +320,8 @@ final class LocationsAdminPage {
 				const total = Number(job.rows_total_estimated || job.total_rows || job.stage_rows || 1);
 				const done = Number(job.processed_rows || job.rows_exported || job.imported || job.rows_read || 0);
 				progress.value = Math.min(100, Math.round(done / Math.max(1, total) * 100));
+				const summary = box.querySelector('.wdc-progress-summary');
+				if (summary) summary.textContent = 'phase: ' + (job.phase || '') + ', processed: ' + (job.processed || done || 0) + ' / ' + (job.total || total || 0) + ', updated: ' + (job.updated || 0) + ', aliases: ' + (job.aliases_updated || 0);
 				text.textContent = JSON.stringify(job, null, 2);
 			}
 			function loop(action, box) {
@@ -220,6 +351,11 @@ final class LocationsAdminPage {
 				const form = document.getElementById('wdc-snapshot-form');
 				const box = document.getElementById('wdc-snapshot-progress');
 				post('wdc_locations_snapshot_import_start', new FormData(form)).then(resp => { render(box, resp.data); loop('wdc_locations_snapshot_import_step', box); });
+			});
+			const rebuildStart = document.getElementById('wdc-display-name-rebuild-start');
+			if (rebuildStart) rebuildStart.addEventListener('click', function(){
+				const box = document.getElementById('wdc-display-name-rebuild-progress');
+				post('wdc_locations_display_name_rebuild_start').then(resp => { render(box, resp.data); loop('wdc_locations_display_name_rebuild_step', box); });
 			});
 			document.addEventListener('click', function(event){
 				const button = event.target.closest('.wdc-location-details-toggle');
@@ -251,8 +387,14 @@ final class LocationsAdminPage {
 		}
 
 		$action = isset( $_POST['wdc_locations_action'] ) ? sanitize_key( wp_unslash( $_POST['wdc_locations_action'] ) ) : '';
-		if ( ! in_array( $action, array( 'import_gar_csv', 'clear_all', 'export_snapshot', 'import_snapshot' ), true ) ) {
+		if ( ! in_array( $action, array( 'import_gar_csv', 'clear_all', 'export_snapshot', 'import_snapshot', 'save_type_rules' ), true ) ) {
 			return '';
+		}
+
+		if ( 'save_type_rules' === $action ) {
+			$rules = $this->sanitize_type_rules( $_POST['type_rules'] ?? array() );
+			$this->update_option( self::DISPLAY_RULES_OPTION, $rules );
+			return __( 'Правила отображения типов сохранены.', 'walls-delivery-calc' );
 		}
 
 		if ( 'clear_all' === $action ) {
@@ -337,6 +479,48 @@ final class LocationsAdminPage {
 		return sanitize_text_field( wp_unslash( $_FILES[ $field ]['tmp_name'] ) );
 	}
 
+	/**
+	 * @return array<string,array<string,array{display:string,position:string}>>
+	 */
+	private function type_display_rules(): array {
+		$rules = $this->get_option( self::DISPLAY_RULES_OPTION, array() );
+		return is_array( $rules ) ? $this->sanitize_type_rules( $rules ) : array();
+	}
+
+	/**
+	 * @param mixed $raw
+	 * @return array<string,array<string,array{display:string,position:string}>>
+	 */
+	private function sanitize_type_rules( mixed $raw ): array {
+		$result = array( 'region' => array(), 'city' => array(), 'place' => array() );
+		if ( ! is_array( $raw ) ) {
+			return $result;
+		}
+
+		foreach ( array( 'region', 'city', 'place' ) as $scope ) {
+			foreach ( is_array( $raw[ $scope ] ?? null ) ? $raw[ $scope ] : array() as $source => $rule ) {
+				$source = sanitize_text_field( wp_unslash( (string) $source ) );
+				if ( '' === $source || ! is_array( $rule ) ) {
+					continue;
+				}
+				$position = sanitize_key( wp_unslash( (string) ( $rule['position'] ?? $this->default_type_position( $scope ) ) ) );
+				if ( ! in_array( $position, array( 'before', 'after', 'hidden' ), true ) ) {
+					$position = $this->default_type_position( $scope );
+				}
+				$result[ $scope ][ $source ] = array(
+					'display'  => sanitize_text_field( wp_unslash( (string) ( $rule['display'] ?? $source ) ) ),
+					'position' => $position,
+				);
+			}
+		}
+
+		return $result;
+	}
+
+	private function default_type_position( string $scope ): string {
+		return 'region' === $scope ? 'after' : 'before';
+	}
+
 	public function ajax_gar_import_start(): void {
 		$this->guard_ajax();
 		if ( ! $this->gar_importer instanceof GarPlacesCsvImporter ) {
@@ -348,27 +532,27 @@ final class LocationsAdminPage {
 		}
 		$this->repository->clear_all();
 		$job = $this->gar_importer->create_job( $path );
-		update_option( self::GAR_JOB_OPTION, $job, false );
+		$this->update_option( self::GAR_JOB_OPTION, $job );
 		$this->send_json( $job );
 	}
 
 	public function ajax_gar_import_step(): void {
 		$this->guard_ajax();
-		$job = get_option( self::GAR_JOB_OPTION, array() );
+		$job = $this->get_option( self::GAR_JOB_OPTION, array() );
 		$job = is_array( $job ) && $this->gar_importer instanceof GarPlacesCsvImporter ? $this->gar_importer->step_job( $job ) : array( 'phase' => 'failed', 'errors' => array( 'GAR import job is unavailable.' ) );
-		update_option( self::GAR_JOB_OPTION, $job, false );
+		$this->update_option( self::GAR_JOB_OPTION, $job );
 		$this->send_json( $job );
 	}
 
 	public function ajax_gar_import_status(): void {
 		$this->guard_ajax();
-		$job = get_option( self::GAR_JOB_OPTION, array( 'phase' => 'idle' ) );
+		$job = $this->get_option( self::GAR_JOB_OPTION, array( 'phase' => 'idle' ) );
 		$this->send_json( is_array( $job ) ? $job : array( 'phase' => 'idle' ) );
 	}
 
 	public function ajax_gar_import_cancel(): void {
 		$this->guard_ajax();
-		delete_option( self::GAR_JOB_OPTION );
+		$this->delete_option( self::GAR_JOB_OPTION );
 		$this->send_json( array( 'phase' => 'idle', 'cancelled' => true ) );
 	}
 
@@ -380,15 +564,15 @@ final class LocationsAdminPage {
 		$path = $this->tmp_path( 'wdc-exports', 'locations-' . gmdate( 'Ymd-His' ) . '.jsonl' );
 		$job = $this->snapshot_exporter->create_job( $path, $this->environment->version() );
 		$job['download_path'] = $path;
-		update_option( self::SNAPSHOT_EXPORT_JOB_OPTION, $job, false );
+		$this->update_option( self::SNAPSHOT_EXPORT_JOB_OPTION, $job );
 		$this->send_json( $job );
 	}
 
 	public function ajax_snapshot_export_step(): void {
 		$this->guard_ajax();
-		$job = get_option( self::SNAPSHOT_EXPORT_JOB_OPTION, array() );
+		$job = $this->get_option( self::SNAPSHOT_EXPORT_JOB_OPTION, array() );
 		$job = is_array( $job ) && $this->snapshot_exporter instanceof LocationsSnapshotExporter ? $this->snapshot_exporter->step_job( $job ) : array( 'phase' => 'failed', 'errors' => array( 'Snapshot export job is unavailable.' ) );
-		update_option( self::SNAPSHOT_EXPORT_JOB_OPTION, $job, false );
+		$this->update_option( self::SNAPSHOT_EXPORT_JOB_OPTION, $job );
 		$this->send_json( $job );
 	}
 
@@ -399,15 +583,15 @@ final class LocationsAdminPage {
 		}
 		$path = $this->persist_upload( 'wdc_locations_snapshot', 'wdc-imports', 'locations-snapshot.jsonl' );
 		$job = $this->snapshot_importer->create_job( $path );
-		update_option( self::SNAPSHOT_IMPORT_JOB_OPTION, $job, false );
+		$this->update_option( self::SNAPSHOT_IMPORT_JOB_OPTION, $job );
 		$this->send_json( $job );
 	}
 
 	public function ajax_snapshot_import_step(): void {
 		$this->guard_ajax();
-		$job = get_option( self::SNAPSHOT_IMPORT_JOB_OPTION, array() );
+		$job = $this->get_option( self::SNAPSHOT_IMPORT_JOB_OPTION, array() );
 		$job = is_array( $job ) && $this->snapshot_importer instanceof LocationsSnapshotImporter ? $this->snapshot_importer->step_job( $job ) : array( 'phase' => 'failed', 'errors' => array( 'Snapshot import job is unavailable.' ) );
-		update_option( self::SNAPSHOT_IMPORT_JOB_OPTION, $job, false );
+		$this->update_option( self::SNAPSHOT_IMPORT_JOB_OPTION, $job );
 		$this->send_json( $job );
 	}
 
@@ -423,6 +607,96 @@ final class LocationsAdminPage {
 		$this->send_json( $data );
 	}
 
+	public function ajax_display_name_rebuild_start(): void {
+		$this->guard_ajax();
+		$job = array(
+			'job_id'          => md5( 'display-name-' . microtime( true ) ),
+			'total'           => $this->repository->count_all(),
+			'processed'       => 0,
+			'updated'         => 0,
+			'aliases_updated' => 0,
+			'last_id'         => 0,
+			'phase'           => 'running',
+			'errors'          => array(),
+			'started_at'      => current_time( 'mysql' ),
+			'updated_at'      => current_time( 'mysql' ),
+			'current_batch'   => 0,
+		);
+		$this->update_option( self::DISPLAY_REBUILD_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	public function ajax_display_name_rebuild_step(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::DISPLAY_REBUILD_JOB_OPTION, array() );
+		$job = is_array( $job ) ? $this->step_display_name_rebuild_job( $job ) : array( 'phase' => 'failed', 'errors' => array( 'Display name rebuild job is unavailable.' ) );
+		$this->update_option( self::DISPLAY_REBUILD_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	public function ajax_display_name_rebuild_status(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::DISPLAY_REBUILD_JOB_OPTION, array( 'phase' => 'idle' ) );
+		$this->send_json( is_array( $job ) ? $job : array( 'phase' => 'idle' ) );
+	}
+
+	public function ajax_display_name_rebuild_cancel(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::DISPLAY_REBUILD_JOB_OPTION, array() );
+		$job = is_array( $job ) ? $job : array();
+		$job['phase'] = 'canceled';
+		$job['updated_at'] = current_time( 'mysql' );
+		$this->update_option( self::DISPLAY_REBUILD_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	/**
+	 * @param array<string,mixed> $job
+	 * @return array<string,mixed>
+	 */
+	private function step_display_name_rebuild_job( array $job ): array {
+		if ( 'running' !== (string) ( $job['phase'] ?? '' ) ) {
+			return $job;
+		}
+
+		try {
+			$formatter = LocationDisplayNameFormatter::from_rules( $this->type_display_rules() );
+			$alias_generator = new LocationAliasGenerator();
+			$locations = $this->repository->find_batch_after_id( (int) ( $job['last_id'] ?? 0 ), 500 );
+			$aliases = array();
+			$updated = 0;
+			$last_id = (int) ( $job['last_id'] ?? 0 );
+			foreach ( $locations as $location ) {
+				$last_id = max( $last_id, (int) $location->id );
+				$display = $formatter->format_location( $location );
+				if ( '' === $display ) {
+					$display = $location->resolved_display_name();
+				}
+				if ( $this->repository->update_display_fields( $location, $display ) ) {
+					++$updated;
+				}
+				if ( null !== $location->id && $location->id > 0 ) {
+					$aliases[ (int) $location->id ] = $alias_generator->generate( Location::from_array( array_merge( $location->to_array(), array( 'display_name' => $display ) ) ) );
+				}
+			}
+			$aliases_updated = $this->repository->bulk_save_aliases( $aliases, 'gar_import' );
+			$job['processed'] = (int) ( $job['processed'] ?? 0 ) + count( $locations );
+			$job['updated'] = (int) ( $job['updated'] ?? 0 ) + $updated;
+			$job['aliases_updated'] = (int) ( $job['aliases_updated'] ?? 0 ) + $aliases_updated;
+			$job['last_id'] = $last_id;
+			$job['current_batch'] = count( $locations );
+			if ( array() === $locations || (int) $job['processed'] >= (int) ( $job['total'] ?? 0 ) ) {
+				$job['phase'] = 'finished';
+			}
+		} catch ( RuntimeException $exception ) {
+			$job['phase'] = 'failed';
+			$job['errors'][] = $exception->getMessage();
+		}
+
+		$job['updated_at'] = current_time( 'mysql' );
+		return $job;
+	}
+
 	private function guard_ajax(): void {
 		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			$this->send_json( array( 'phase' => 'failed', 'errors' => array( 'Forbidden.' ) ), false );
@@ -431,6 +705,18 @@ final class LocationsAdminPage {
 		if ( ! wp_verify_nonce( $nonce, self::NONCE_ACTION ) ) {
 			$this->send_json( array( 'phase' => 'failed', 'errors' => array( 'Invalid nonce.' ) ), false );
 		}
+	}
+
+	private function get_option( string $key, mixed $default = false ): mixed {
+		return function_exists( 'get_option' ) ? get_option( $key, $default ) : $default;
+	}
+
+	private function update_option( string $key, mixed $value ): bool {
+		return function_exists( 'update_option' ) ? update_option( $key, $value, false ) : true;
+	}
+
+	private function delete_option( string $key ): bool {
+		return function_exists( 'delete_option' ) ? delete_option( $key ) : true;
 	}
 
 	private function persist_upload( string $field, string $dir, string $fallback_name ): string {
