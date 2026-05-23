@@ -575,7 +575,7 @@ gar_smoke_assert( 1 === count( $wpdb->carrier_codes ), 'carrier_codes table foun
 
 $snapshot = tempnam( sys_get_temp_dir(), 'wdc-snapshot-' );
 gar_smoke_assert( is_string( $snapshot ), 'Snapshot temp file must be created.' );
-$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.8' );
+$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.9' );
 gar_smoke_assert( $exported > 0, 'Snapshot export must include rows from 4 tables.' );
 $snapshot_text = (string) file_get_contents( $snapshot );
 gar_smoke_assert( str_contains( $snapshot_text, '"table":"wdc_regions"' ) && str_contains( $snapshot_text, '"table":"wdc_location_carrier_codes"' ), 'Snapshot export must include all foundation tables.' );
@@ -599,7 +599,7 @@ gar_smoke_assert( $restored_has_district, 'Snapshot import must restore district
 $snapshot_job_file = tempnam( sys_get_temp_dir(), 'wdc-snapshot-job-' );
 gar_smoke_assert( is_string( $snapshot_job_file ), 'Snapshot job temp file must be created.' );
 $snapshot_exporter = new LocationsSnapshotExporter( $wpdb );
-$snapshot_job = $snapshot_exporter->create_job( $snapshot_job_file, '0.15.8' );
+$snapshot_job = $snapshot_exporter->create_job( $snapshot_job_file, '0.15.9' );
 for ( $i = 0; $i < 100 && 'finished' !== $snapshot_job['phase']; $i++ ) {
 	$snapshot_job = $snapshot_exporter->step_job( $snapshot_job, 2 );
 }
@@ -658,7 +658,7 @@ $_GET = array( 'location_query' => 'Новос' );
 $_POST = array();
 ob_start();
 ( new LocationsAdminPage(
-	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.8' ),
+	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.9' ),
 	$locations,
 	$search_service,
 	new LocationImportService( $locations ),
@@ -693,7 +693,7 @@ gar_smoke_assert( str_contains( $html, "button.closest('.wdc-location-row')" ) &
 $_POST = array( 'wdc_locations_nonce' => 'test-nonce', 'location_id' => (string) $novosibirsk->id );
 ob_start();
 ( new LocationsAdminPage(
-	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.8' ),
+	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.9' ),
 	$locations,
 	$search_service,
 	new LocationImportService( $locations )

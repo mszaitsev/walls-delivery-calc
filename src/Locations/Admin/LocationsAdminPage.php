@@ -319,7 +319,7 @@ final class LocationsAdminPage {
 			$scope_types = array_values( array_unique( array_merge( $types[ $scope ] ?? array(), array_keys( $rules[ $scope ] ?? array() ) ) ) );
 			sort( $scope_types );
 			?>
-			<details class="wdc-type-rules-group" <?php echo 'region' === $scope ? 'open' : ''; ?>>
+			<details class="wdc-type-rules-group">
 				<summary><?php echo esc_html( sprintf( '%1$s — %2$d типов', $label, count( $scope_types ) ) ); ?></summary>
 			<table class="widefat striped wdc-type-rules-table">
 				<thead><tr><th><?php echo esc_html__( 'Тип в базе', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Отображать как', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Позиция', 'walls-delivery-calc' ); ?></th></tr></thead>

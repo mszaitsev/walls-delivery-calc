@@ -225,7 +225,7 @@ $repository->save( Location::from_array( array_merge( $location->to_array(), arr
 update_option( 'wdc_location_type_display_rules', $rules, false );
 
 $admin = new LocationsAdminPage(
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.8' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.9' ),
 	$repository,
 	new LocationSearchService( $repository ),
 	new LocationImportService( $repository )
@@ -256,7 +256,7 @@ $html = (string) ob_get_clean();
 display_smoke_assert( str_contains( $html, 'Пересобрать display_name' ) && str_contains( $html, 'wdc-display-name-rebuild-progress' ), 'Admin page must render display_name rebuild button and progress.' );
 display_smoke_assert( str_contains( $html, 'JSON status' ), 'Admin page must render JSON status block.' );
 display_smoke_assert( str_contains( $html, 'Отображение типов населенных пунктов' ), 'Admin page must render type rules settings.' );
-display_smoke_assert( str_contains( $html, '<details class="wdc-type-rules-group" open' ) && str_contains( $html, '<summary>Регион —' ) && str_contains( $html, '<summary>Город —' ) && str_contains( $html, '<summary>Населенный пункт —' ), 'Type rules settings must render collapsible details/summary blocks with counts.' );
+display_smoke_assert( str_contains( $html, '<details class="wdc-type-rules-group">' ) && ! str_contains( $html, '<details class="wdc-type-rules-group" open' ) && str_contains( $html, '<summary>Регион —' ) && str_contains( $html, '<summary>Город —' ) && str_contains( $html, '<summary>Населенный пункт —' ), 'Type rules settings must render collapsed details/summary blocks with counts.' );
 display_smoke_assert( str_contains( $html, 'Новосибирская обл' ), 'Admin group header must include region name plus visual region type.' );
 display_smoke_assert( ! str_contains( $html, "panel.innerHTML = '<table" ), 'Details JS must not render DB values through innerHTML table concatenation.' );
 display_smoke_assert( str_contains( $html, 'function renderDetailsTable(row)' ) && str_contains( $html, "document.createElement('table')" ) && str_contains( $html, "document.createElement('tr')" ) && str_contains( $html, 'textContent' ), 'Details JS must render table with createElement/textContent.' );
