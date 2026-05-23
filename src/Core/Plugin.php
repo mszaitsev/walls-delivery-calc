@@ -66,12 +66,16 @@ use WallsShop\WDC\Locations\Fias\FiasRateLimiter;
 use WallsShop\WDC\Locations\Gar\GarChangesClient;
 use WallsShop\WDC\Locations\Gar\GarSyncManager;
 use WallsShop\WDC\Locations\Import\FiasImportManager;
+use WallsShop\WDC\Locations\Import\GarPlacesCsvImporter;
 use WallsShop\WDC\Locations\Import\LocationImportService;
+use WallsShop\WDC\Locations\Import\LocationsSnapshotExporter;
+use WallsShop\WDC\Locations\Import\LocationsSnapshotImporter;
 use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
 use WallsShop\WDC\Locations\Services\GarChangesService;
 use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\Storage\RegionRepository;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Pickup\Admin\PickupAdminPage;
 use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
@@ -117,6 +121,7 @@ final class Plugin {
 		$this->container->register( ActionScheduler::class, fn(): ActionScheduler => new ActionScheduler( $this->container->get( Logger::class ) ) );
 		$this->container->register( CalendarRepository::class, fn(): CalendarRepository => new CalendarRepository() );
 		$this->container->register( LocationRepository::class, fn(): LocationRepository => new LocationRepository() );
+		$this->container->register( RegionRepository::class, fn(): RegionRepository => new RegionRepository() );
 		$this->container->register( PickupPointRepository::class, fn(): PickupPointRepository => new PickupPointRepository() );
 		$this->container->register( DemoPickupProvider::class, fn(): DemoPickupProvider => new DemoPickupProvider( $this->environment->plugin_dir() . 'database/demo/pickup-points-demo.json' ) );
 		$this->container->register( RuleRepository::class, fn(): RuleRepository => new RuleRepository() );
@@ -226,6 +231,9 @@ final class Plugin {
 		$this->container->register( LocationSearchService::class, fn(): LocationSearchService => new LocationSearchService( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( LocationImportService::class, fn(): LocationImportService => new LocationImportService( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( LocationAliasGenerator::class, fn(): LocationAliasGenerator => new LocationAliasGenerator() );
+		$this->container->register( GarPlacesCsvImporter::class, fn(): GarPlacesCsvImporter => new GarPlacesCsvImporter( $this->container->get( LocationRepository::class ), $this->container->get( RegionRepository::class ), $this->container->get( LocationAliasGenerator::class ) ) );
+		$this->container->register( LocationsSnapshotExporter::class, fn(): LocationsSnapshotExporter => new LocationsSnapshotExporter() );
+		$this->container->register( LocationsSnapshotImporter::class, fn(): LocationsSnapshotImporter => new LocationsSnapshotImporter() );
 		$this->container->register( FiasImportManager::class, fn(): FiasImportManager => new FiasImportManager( $this->environment, $this->container->get( LocationRepository::class ), $this->container->get( LocationAliasGenerator::class ), $this->container->get( ActionScheduler::class ) ) );
 		$this->container->register( GarChangesClient::class, fn(): GarChangesClient => new GarChangesClient( $this->container->get( FiasHttpClient::class ) ) );
 		$this->container->register( GarSyncManager::class, fn(): GarSyncManager => new GarSyncManager( $this->container->get( ActionScheduler::class ), $this->container->get( GarChangesClient::class ), $this->container->get( Logger::class ), $this->container->get( SettingsRepository::class ) ) );
@@ -295,7 +303,10 @@ final class Plugin {
 				$this->container->get( GarSyncManager::class ),
 				$this->container->get( FiasImportManager::class ),
 				$this->container->get( SettingsRepository::class ),
-				$this->container->get( FiasCredentials::class )
+				$this->container->get( FiasCredentials::class ),
+				$this->container->get( GarPlacesCsvImporter::class ),
+				$this->container->get( LocationsSnapshotExporter::class ),
+				$this->container->get( LocationsSnapshotImporter::class )
 			)
 		);
 		$this->container->register(

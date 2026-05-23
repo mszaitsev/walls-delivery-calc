@@ -72,7 +72,7 @@ final class CheckoutLocationAjax {
 			'city_name'       => $location->city_name,
 			'settlement_name' => $location->settlement_name,
 			'display_name'    => $location->display_name,
-			'postcode'        => $location->postcode,
+			'postal_code'     => $location->postal_code,
 			'region_name'     => $location->region_name,
 			'region_code'     => $location->region_code,
 			'fias_id'         => $location->fias_id,

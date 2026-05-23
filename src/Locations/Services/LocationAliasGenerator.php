@@ -9,7 +9,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class LocationAliasGenerator {
 	public function generate( Location $location ): array {
-		$name = trim( '' !== $location->settlement_name ? $location->settlement_name : $location->city_name );
+		$name = trim( $location->resolved_place_name() );
 		if ( '' === $name ) {
 			return array();
 		}

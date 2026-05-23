@@ -22,3 +22,7 @@
 - данные WooCommerce.
 
 Использовать кнопку нужно перед загрузкой новой полной базы населенных пунктов, чтобы демо-данные и старые алиасы не смешивались с реальным справочником.
+
+# 0.15.x GAR Import Update
+
+Full clear now removes local locations, aliases, regions, and `wdc_location_carrier_codes`. Carrier mappings are cleared during a full GAR reimport because location IDs and GAR mappings may be replaced together.

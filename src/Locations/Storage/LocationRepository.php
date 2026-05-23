@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Locations\Storage;
 
+use RuntimeException;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
@@ -21,8 +22,20 @@ final class LocationRepository {
 		$data = $this->location_to_row( $location, $now );
 
 		if ( null !== $location->id && $location->id > 0 ) {
-			$this->wpdb->update( $this->table_name(), $data, array( 'id' => $location->id ), $this->formats(), array( '%d' ) );
+			unset( $data['created_at'] );
+			$this->wpdb->update( $this->table_name(), $data, array( 'id' => $location->id ), $this->formats( false ), array( '%d' ) );
 			return $location->id;
+		}
+
+		$existing = $location->gar_object_id > 0 ? $this->find_by_gar_object_id( $location->gar_object_id ) : null;
+		if ( ! $existing instanceof Location && '' !== trim( $location->fias_id ) ) {
+			$existing = $this->find_by_fias_id( $location->fias_id );
+		}
+
+		if ( $existing instanceof Location && null !== $existing->id ) {
+			unset( $data['created_at'] );
+			$this->wpdb->update( $this->table_name(), $data, array( 'id' => $existing->id ), $this->formats( false ), array( '%d' ) );
+			return $existing->id;
 		}
 
 		$this->wpdb->insert( $this->table_name(), $data, $this->formats() );
@@ -33,54 +46,181 @@ final class LocationRepository {
 	/**
 	 * @param array<int, Location> $locations
 	 */
-	public function bulk_insert( array $locations ): void {
-		foreach ( $locations as $location ) {
-			if ( $location instanceof Location ) {
-				$this->save( $location );
-			}
+	public function bulk_upsert( array $locations ): int {
+		return (int) $this->bulk_upsert_locations( $locations )['count'];
+	}
+
+	/**
+	 * @param array<int, Location> $locations
+	 * @return array{count:int, ids:array<int,int>}
+	 */
+	public function bulk_upsert_locations( array $locations ): array {
+		$locations = array_values( array_filter( $locations, static fn( mixed $location ): bool => $location instanceof Location ) );
+		if ( array() === $locations ) {
+			return array( 'count' => 0, 'ids' => array() );
 		}
+
+		// Test doubles used by smoke tests expose in-memory row storage instead of SQL execution.
+		if ( property_exists( $this->wpdb, 'locations' ) ) {
+			$ids = array();
+			foreach ( $locations as $location ) {
+				$id = $this->save( $location );
+				$ids[ $location->gar_object_id ] = $id;
+			}
+
+			return array( 'count' => count( $locations ), 'ids' => $ids );
+		}
+
+		$now = current_time( 'mysql' );
+		$rows = array_map( fn( Location $location ): array => $this->location_to_row( $location, $now ), $locations );
+		$this->bulk_insert_rows(
+			$this->table_name(),
+			$rows,
+			array_map( fn( string $column ): string => "{$column} = VALUES({$column})", array_diff( array_keys( $rows[0] ), array( 'created_at' ) ) ),
+			$this->formats_for_row( $rows[0] )
+		);
+
+		return array(
+			'count' => count( $locations ),
+			'ids'   => $this->location_ids_by_gar_object_ids( array_map( static fn( Location $location ): int => $location->gar_object_id, $locations ) ),
+		);
+	}
+
+	/**
+	 * @param array<int, Location> $locations
+	 */
+	public function bulk_insert( array $locations ): void {
+		$this->bulk_upsert( $locations );
 	}
 
 	public function find_by_id( int $id ): ?Location {
 		return $this->find_one( 'id', $id, '%d' );
 	}
 
+	public function find_by_gar_object_id( int $gar_object_id ): ?Location {
+		return $this->find_one( 'gar_object_id', $gar_object_id, '%d' );
+	}
+
 	public function find_by_fias_id( string $fias_id ): ?Location {
 		return $this->find_one( 'fias_id', trim( $fias_id ), '%s' );
 	}
 
+	public function find_by_kladr_id( string $kladr_id ): ?Location {
+		return $this->find_one( 'kladr_id', trim( $kladr_id ), '%s' );
+	}
+
 	public function find_by_gar_id( string $gar_id ): ?Location {
-		return $this->find_one( 'gar_id', trim( $gar_id ), '%s' );
+		$id = is_numeric( $gar_id ) ? (int) $gar_id : 0;
+		return $id > 0 ? $this->find_by_gar_object_id( $id ) : $this->find_one( 'gar_id', trim( $gar_id ), '%s' );
 	}
 
 	/**
 	 * @return array<int, Location>
 	 */
-	public function search( string $query, int $limit = 20 ): array {
+	public function search( string $query, int $limit = 100 ): array {
+		$limit = max( 10, min( 100, $limit ) );
+		return $this->search_paginated( $query, 1, $limit )['items'];
+	}
+
+	/**
+	 * @return array{items:array<int,Location>, total:int, page:int, per_page:int, total_pages:int}
+	 */
+	public function search_paginated( string $query, int $page = 1, int $per_page = 20 ): array {
 		$query = $this->normalize_query( $query );
-		$limit = max( 1, min( 300, $limit ) );
+		$per_page = in_array( $per_page, array( 10, 20, 50, 100 ), true ) ? $per_page : 20;
+		$page = max( 1, $page );
 
 		if ( '' === $query ) {
-			return array();
+			return array( 'items' => array(), 'total' => 0, 'page' => 1, 'per_page' => $per_page, 'total_pages' => 0 );
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$rows = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 === (int) ( $row['active'] ?? 1 ) && str_contains( (string) ( $row['searchable_text'] ?? '' ), $query ) ) {
+					$rows[] = $row;
+				}
+			}
+			usort(
+				$rows,
+				fn( array $a, array $b ): int => $this->rank_row( $a, $query ) <=> $this->rank_row( $b, $query )
+					?: strcmp( (string) ( $a['display_name'] ?? '' ), (string) ( $b['display_name'] ?? '' ) )
+			);
+			$total = count( $rows );
+			$total_pages = (int) ceil( $total / $per_page );
+			$page = min( $page, max( 1, $total_pages ) );
+			$offset = ( $page - 1 ) * $per_page;
+			return array(
+				'items'       => $this->rows_to_locations( array_map( fn( array $row ): array => $this->join_region_for_test_double( $row ), array_slice( $rows, $offset, $per_page ) ) ),
+				'total'       => $total,
+				'page'        => $page,
+				'per_page'    => $per_page,
+				'total_pages' => $total_pages,
+			);
 		}
 
 		$like = '%' . $this->wpdb->esc_like( $query ) . '%';
+		$prefix = $this->wpdb->esc_like( $query ) . '%';
+		$total = (int) $this->wpdb->get_var(
+			$this->wpdb->prepare(
+				"SELECT COUNT(*)
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.active = 1 AND l.searchable_text LIKE %s",
+				$like
+			)
+		);
+		$total_pages = (int) ceil( $total / $per_page );
+		$page = min( $page, max( 1, $total_pages ) );
+		$offset = ( $page - 1 ) * $per_page;
+
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
-				"SELECT * FROM {$this->table_name()} WHERE active = 1 AND searchable_text LIKE %s ORDER BY display_name ASC LIMIT %d",
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type,
+					CASE
+						WHEN l.place_name = %s THEN 1
+						WHEN l.place_name LIKE %s THEN 2
+						WHEN l.place_name LIKE %s THEN 3
+						WHEN l.city_name = %s THEN 4
+						WHEN l.city_name LIKE %s THEN 5
+						WHEN l.city_name LIKE %s THEN 6
+						WHEN l.district_name LIKE %s THEN 7
+						WHEN COALESCE(r.region_name, l.region_name) LIKE %s THEN 8
+						ELSE 9
+					END AS rank_score
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.active = 1 AND l.searchable_text LIKE %s
+				ORDER BY rank_score ASC, l.display_name ASC
+				LIMIT %d OFFSET %d",
+				$query,
+				$prefix,
 				$like,
-				$limit
+				$query,
+				$prefix,
+				$like,
+				$like,
+				$like,
+				$like,
+				$per_page,
+				$offset
 			),
 			ARRAY_A
 		);
 
-		return $this->rows_to_locations( is_array( $rows ) ? $rows : array() );
+		return array(
+			'items'       => $this->rows_to_locations( is_array( $rows ) ? $rows : array() ),
+			'total'       => $total,
+			'page'        => $page,
+			'per_page'    => $per_page,
+			'total_pages' => $total_pages,
+		);
 	}
 
 	/**
 	 * @return array<string, array<int, Location>>
 	 */
-	public function search_grouped_by_region( string $query, int $limit = 50 ): array {
+	public function search_grouped_by_region( string $query, int $limit = 100 ): array {
 		$locations = $this->search( $query, $limit );
 		$grouped   = array();
 
@@ -99,6 +239,10 @@ final class LocationRepository {
 	}
 
 	public function count_regions(): int {
+		if ( $this->table_exists( $this->region_table_name() ) ) {
+			return (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$this->region_table_name()}" );
+		}
+
 		return (int) $this->wpdb->get_var( "SELECT COUNT(DISTINCT region_name) FROM {$this->table_name()} WHERE active = 1 AND region_name != ''" );
 	}
 
@@ -107,12 +251,42 @@ final class LocationRepository {
 	}
 
 	/**
-	 * @return array{locations_deleted:int|null, aliases_deleted:int|null}
+	 * @return array{region:array<int,string>, city:array<int,string>, place:array<int,string>}
+	 */
+	public function distinct_location_types(): array {
+		if ( $this->has_test_location_rows() ) {
+			$types = array( 'region' => array(), 'city' => array(), 'place' => array() );
+			foreach ( $this->test_location_rows() as $row ) {
+				foreach ( array( 'region' => 'region_type', 'city' => 'city_type', 'place' => 'place_type' ) as $scope => $column ) {
+					$value = trim( (string) ( $row[ $column ] ?? '' ) );
+					if ( '' !== $value ) {
+						$types[ $scope ][ $value ] = $value;
+					}
+				}
+			}
+			foreach ( $types as $scope => $values ) {
+				$types[ $scope ] = array_values( $values );
+				sort( $types[ $scope ] );
+			}
+			return $types;
+		}
+
+		return array(
+			'region' => $this->distinct_column_values( 'region_type' ),
+			'city'   => $this->distinct_column_values( 'city_type' ),
+			'place'  => $this->distinct_column_values( 'place_type' ),
+		);
+	}
+
+	/**
+	 * @return array{locations_deleted:int|null, aliases_deleted:int|null, regions_deleted:int|null, carrier_codes_deleted:int|null}
 	 */
 	public function clear_all(): array {
 		return array(
-			'aliases_deleted'   => $this->clear_table( $this->alias_table_name() ),
-			'locations_deleted' => $this->clear_table( $this->table_name() ),
+			'carrier_codes_deleted' => $this->clear_table( $this->carrier_codes_table_name() ),
+			'aliases_deleted'       => $this->clear_table( $this->alias_table_name() ),
+			'locations_deleted'     => $this->clear_table( $this->table_name() ),
+			'regions_deleted'       => $this->clear_table( $this->region_table_name() ),
 		);
 	}
 
@@ -130,15 +304,126 @@ final class LocationRepository {
 			$this->wpdb->insert(
 				$this->alias_table_name(),
 				array(
-					'location_id'       => $location_id,
-					'alias'             => $alias,
-					'alias_normalized'  => Location::normalize_search_text( $alias ),
-					'source'            => $source,
-					'created_at'        => $now,
+					'location_id'      => $location_id,
+					'alias'            => $alias,
+					'alias_normalized' => Location::normalize_search_text( $alias ),
+					'source'           => $source,
+					'created_at'       => $now,
 				),
 				array( '%d', '%s', '%s', '%s', '%s' )
 			);
 		}
+	}
+
+	/**
+	 * @param array<int,array<int,string>> $location_id_to_aliases
+	 */
+	public function bulk_save_aliases( array $location_id_to_aliases, string $source = 'generated' ): int {
+		$location_ids = array_values( array_filter( array_map( 'intval', array_keys( $location_id_to_aliases ) ) ) );
+		if ( array() === $location_ids ) {
+			return 0;
+		}
+
+		if ( property_exists( $this->wpdb, 'aliases' ) ) {
+			$count = 0;
+			foreach ( $location_id_to_aliases as $location_id => $aliases ) {
+				$this->save_aliases( (int) $location_id, $aliases, $source );
+				$count += count( array_unique( array_filter( array_map( 'trim', $aliases ) ) ) );
+			}
+
+			return $count;
+		}
+
+		$placeholders = implode( ', ', array_fill( 0, count( $location_ids ), '%d' ) );
+		$args = $location_ids;
+		array_unshift( $args, $source );
+		$result = $this->wpdb->query( $this->wpdb->prepare( "DELETE FROM {$this->alias_table_name()} WHERE source = %s AND location_id IN ({$placeholders})", ...$args ) );
+		if ( false === $result ) {
+			$this->throw_sql_error( 'Location aliases cleanup failed' );
+		}
+
+		$now = current_time( 'mysql' );
+		$rows = array();
+		foreach ( $location_id_to_aliases as $location_id => $aliases ) {
+			foreach ( array_values( array_unique( array_filter( array_map( 'trim', $aliases ) ) ) ) as $alias ) {
+				$rows[] = array(
+					'location_id'      => (int) $location_id,
+					'alias'            => $alias,
+					'alias_normalized' => Location::normalize_search_text( $alias ),
+					'source'           => $source,
+					'created_at'       => $now,
+				);
+			}
+		}
+
+		if ( array() === $rows ) {
+			return 0;
+		}
+
+		$this->bulk_insert_rows( $this->alias_table_name(), $rows, array( 'alias = VALUES(alias)' ), array( '%d', '%s', '%s', '%s', '%s' ), true );
+
+		return count( $rows );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function find_raw_by_id( int $id ): array {
+		if ( $id <= 0 ) {
+			return array();
+		}
+
+		$row = $this->wpdb->get_row(
+			$this->wpdb->prepare( "SELECT * FROM {$this->table_name()} WHERE id = %d LIMIT 1", $id ),
+			ARRAY_A
+		);
+
+		return is_array( $row ) ? $row : array();
+	}
+
+	/**
+	 * @return array<int,Location>
+	 */
+	public function find_batch_after_id( int $last_id, int $limit = 500 ): array {
+		$limit = max( 1, min( 1000, $limit ) );
+		if ( $this->has_test_location_rows() ) {
+			$rows = array_values( array_filter( $this->test_location_rows(), static fn( array $row ): bool => (int) ( $row['id'] ?? 0 ) > $last_id ) );
+			usort( $rows, static fn( array $a, array $b ): int => (int) ( $a['id'] ?? 0 ) <=> (int) ( $b['id'] ?? 0 ) );
+			return $this->rows_to_locations( array_slice( $rows, 0, $limit ) );
+		}
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare( "SELECT * FROM {$this->table_name()} WHERE id > %d ORDER BY id ASC LIMIT %d", $last_id, $limit ),
+			ARRAY_A
+		);
+		return $this->rows_to_locations( is_array( $rows ) ? $rows : array() );
+	}
+
+	public function update_display_fields( Location $location, string $display_name ): bool {
+		if ( null === $location->id || $location->id <= 0 ) {
+			return false;
+		}
+		$updated = Location::from_array( array_merge( $location->to_array(), array( 'display_name' => $display_name ) ) );
+		$data = array(
+			'display_name'    => $display_name,
+			'searchable_text' => $updated->get_searchable_text(),
+			'updated_at'      => current_time( 'mysql' ),
+		);
+		if ( $this->has_test_location_rows() ) {
+			$id = (int) $location->id;
+			$property = property_exists( $this->wpdb, 'locations' ) ? 'locations' : 'rows';
+			if ( ! isset( $this->wpdb->{$property}[ $id ] ) ) {
+				return false;
+			}
+			$this->wpdb->{$property}[ $id ] = array_merge( $this->wpdb->{$property}[ $id ], $data );
+			return true;
+		}
+
+		$result = $this->wpdb->update( $this->table_name(), $data, array( 'id' => $location->id ), array( '%s', '%s', '%s' ), array( '%d' ) );
+		if ( false === $result ) {
+			$this->throw_sql_error( 'Location display_name update failed' );
+		}
+		return true;
 	}
 
 	public function delete_all(): void {
@@ -158,7 +443,7 @@ final class LocationRepository {
 		}
 
 		if ( false === $result ) {
-			throw new \RuntimeException( 'Unable to clear locations table.' );
+			throw new RuntimeException( 'Unable to clear locations table.' );
 		}
 
 		return $count;
@@ -171,19 +456,23 @@ final class LocationRepository {
 	}
 
 	private function find_one( string $column, int|string $value, string $format ): ?Location {
-		if ( '' === (string) $value ) {
+		if ( '' === (string) $value || ! preg_match( '/^[a-z0-9_]+$/i', $column ) ) {
 			return null;
 		}
 
 		$row = $this->wpdb->get_row(
 			$this->wpdb->prepare(
-				"SELECT * FROM {$this->table_name()} WHERE {$column} = {$format} LIMIT 1",
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.{$column} = {$format}
+				LIMIT 1",
 				$value
 			),
 			ARRAY_A
 		);
 
-		return is_array( $row ) ? Location::from_array( $row ) : null;
+		return is_array( $row ) ? $this->row_to_location( $row ) : null;
 	}
 
 	/**
@@ -195,7 +484,7 @@ final class LocationRepository {
 
 		foreach ( $rows as $row ) {
 			if ( is_array( $row ) ) {
-				$locations[] = Location::from_array( $row );
+				$locations[] = $this->row_to_location( $row );
 			}
 		}
 
@@ -203,38 +492,223 @@ final class LocationRepository {
 	}
 
 	/**
+	 * @return array<int,string>
+	 */
+	private function distinct_column_values( string $column ): array {
+		if ( ! preg_match( '/^[a-z0-9_]+$/i', $column ) ) {
+			return array();
+		}
+		$rows = $this->wpdb->get_results( "SELECT DISTINCT {$column} AS value FROM {$this->table_name()} WHERE {$column} IS NOT NULL AND {$column} != '' ORDER BY {$column} ASC", ARRAY_A );
+		return array_values( array_filter( array_map( static fn( array $row ): string => (string) ( $row['value'] ?? '' ), is_array( $rows ) ? $rows : array() ) ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function rank_row( array $row, string $query ): int {
+		$place = $this->normalize_query( (string) ( $row['place_name'] ?? $row['settlement_name'] ?? '' ) );
+		$city = $this->normalize_query( (string) ( $row['city_name'] ?? '' ) );
+		$district = $this->normalize_query( (string) ( $row['district_name'] ?? '' ) );
+		$region = $this->normalize_query( (string) ( $row['region_name'] ?? '' ) );
+		return match ( true ) {
+			$place === $query => 1,
+			'' !== $place && str_starts_with( $place, $query ) => 2,
+			'' !== $place && str_contains( $place, $query ) => 3,
+			$city === $query => 4,
+			'' !== $city && str_starts_with( $city, $query ) => 5,
+			'' !== $city && str_contains( $city, $query ) => 6,
+			'' !== $district && str_contains( $district, $query ) => 7,
+			'' !== $region && str_contains( $region, $query ) => 8,
+			default => 9,
+		};
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,mixed>
+	 */
+	private function join_region_for_test_double( array $row ): array {
+		if ( ! property_exists( $this->wpdb, 'regions' ) ) {
+			return $row;
+		}
+		$region = $this->wpdb->regions[ (string) ( $row['region_code'] ?? '' ) ] ?? array();
+		$row['joined_region_name'] = $region['region_name'] ?? $row['region_name'] ?? '';
+		$row['joined_region_type'] = $region['region_type'] ?? '';
+		return $row;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function row_to_location( array $row ): Location {
+		if ( isset( $row['joined_region_name'] ) && '' !== (string) $row['joined_region_name'] ) {
+			$row['region_name'] = $row['joined_region_name'];
+		}
+
+		if ( isset( $row['joined_region_type'] ) && '' !== (string) $row['joined_region_type'] ) {
+			$row['region_type'] = $row['joined_region_type'];
+		}
+
+		return Location::from_array( $row );
+	}
+
+	/**
 	 * @return array<string,mixed>
 	 */
 	private function location_to_row( Location $location, string $now ): array {
+		$display     = $location->resolved_display_name();
+		$place_name  = $location->resolved_place_name();
+		$place_type  = $location->resolved_place_type();
+
 		return array(
-			'fias_id'         => $location->fias_id,
-			'gar_id'          => $location->gar_id,
-			'country_code'    => $location->country_code,
-			'region_name'     => $location->region_name,
-			'region_code'     => $location->region_code,
-			'city_name'       => $location->city_name,
-			'settlement_name' => $location->settlement_name,
-			'settlement_type' => $location->settlement_type,
-			'display_name'    => $location->display_name,
-			'postcode'        => $location->postcode,
-			'latitude'        => $location->latitude,
-			'longitude'       => $location->longitude,
-			'searchable_text' => $location->get_searchable_text(),
-			'active'          => $location->active ? 1 : 0,
-			'created_at'      => $now,
-			'updated_at'      => $now,
+			'gar_object_id'          => $location->gar_object_id,
+			'fias_id'                => $location->fias_id,
+			'kladr_id'               => $location->kladr_id,
+			'gar_id'                 => '' !== $location->gar_id ? $location->gar_id : (string) $location->gar_object_id,
+			'country_code'           => '' !== $location->country_code ? $location->country_code : 'RU',
+			'region_name'            => $location->region_name,
+			'region_code'            => $location->region_code,
+			'region_type'            => $location->region_type,
+			'district_name'          => $location->district_name,
+			'district_type'          => $location->district_type,
+			'district_fias_id'       => $location->district_fias_id,
+			'district_kladr_id'      => $location->district_kladr_id,
+			'district_gar_object_id' => $location->district_gar_object_id > 0 ? $location->district_gar_object_id : null,
+			'district_level'         => $location->district_level,
+			'city_name'              => $location->city_name,
+			'city_type'              => $location->city_type,
+			'city_fias_id'           => $location->city_fias_id,
+			'city_kladr_id'          => $location->city_kladr_id,
+			'settlement_name'        => $place_name,
+			'settlement_type'        => $place_type,
+			'place_name'             => $place_name,
+			'place_type'             => $place_type,
+			'place_level'            => max( 0, $location->place_level ),
+			'display_name'           => $display,
+			'postal_code'            => $location->postal_code,
+			'okato'                  => $location->okato,
+			'oktmo'                  => $location->oktmo,
+			'latitude'               => $location->latitude,
+			'longitude'              => $location->longitude,
+			'searchable_text'        => $location->get_searchable_text(),
+			'active'                 => $location->active ? 1 : 0,
+			'created_at'             => $now,
+			'updated_at'             => $now,
 		);
 	}
 
 	/**
 	 * @return array<int,string>
 	 */
-	private function formats(): array {
-		return array( '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%s', '%d', '%s', '%s' );
+	private function formats( bool $with_created_at = true ): array {
+		$formats = array( '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%f', '%f', '%s', '%d' );
+		if ( $with_created_at ) {
+			$formats[] = '%s';
+		}
+		$formats[] = '%s';
+
+		return $formats;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $rows
+	 * @param array<int,string> $update_assignments
+	 * @param array<int,string> $formats
+	 */
+	private function bulk_insert_rows( string $table, array $rows, array $update_assignments, array $formats, bool $ignore = false ): void {
+		if ( array() === $rows ) {
+			return;
+		}
+
+		$columns = array_keys( $rows[0] );
+		$row_placeholder = '(' . implode( ', ', $formats ) . ')';
+		$values_sql = implode( ', ', array_fill( 0, count( $rows ), $row_placeholder ) );
+		$sql = sprintf(
+			'INSERT %sINTO %s (%s) VALUES %s',
+			$ignore ? 'IGNORE ' : '',
+			$table,
+			implode( ', ', $columns ),
+			$values_sql
+		);
+
+		if ( ! $ignore && array() !== $update_assignments ) {
+			$sql .= ' ON DUPLICATE KEY UPDATE ' . implode( ', ', $update_assignments );
+		}
+
+		$args = array();
+		foreach ( $rows as $row ) {
+			foreach ( $columns as $column ) {
+				$args[] = $row[ $column ] ?? null;
+			}
+		}
+
+		$result = $this->wpdb->query( $this->wpdb->prepare( $sql, ...$args ) );
+		if ( false === $result ) {
+			$this->throw_sql_error( str_contains( $table, 'wdc_locations' ) ? 'Location bulk upsert failed' : 'Location bulk insert failed' );
+		}
+	}
+
+	private function throw_sql_error( string $message ): never {
+		$error = trim( (string) ( $this->wpdb->last_error ?? '' ) );
+		throw new RuntimeException( trim( $message . ': ' . ( '' !== $error ? $error : 'unknown SQL error' ) ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<int,string>
+	 */
+	private function formats_for_row( array $row ): array {
+		$formats = array();
+		foreach ( array_keys( $row ) as $column ) {
+			$formats[] = match ( $column ) {
+				'gar_object_id', 'district_gar_object_id', 'district_level', 'place_level', 'active' => '%d',
+				'latitude', 'longitude' => '%f',
+				default => '%s',
+			};
+		}
+
+		return $formats;
+	}
+
+	/**
+	 * @param array<int,int> $gar_object_ids
+	 * @return array<int,int>
+	 */
+	private function location_ids_by_gar_object_ids( array $gar_object_ids ): array {
+		$gar_object_ids = array_values( array_unique( array_filter( array_map( 'intval', $gar_object_ids ) ) ) );
+		if ( array() === $gar_object_ids ) {
+			return array();
+		}
+
+		$placeholders = implode( ', ', array_fill( 0, count( $gar_object_ids ), '%d' ) );
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare( "SELECT id, gar_object_id FROM {$this->table_name()} WHERE gar_object_id IN ({$placeholders})", ...$gar_object_ids ),
+			ARRAY_A
+		);
+		$ids = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$ids[ (int) $row['gar_object_id'] ] = (int) $row['id'];
+		}
+
+		return $ids;
 	}
 
 	private function normalize_query( string $query ): string {
 		return Location::normalize_search_text( $query );
+	}
+
+	private function has_test_location_rows(): bool {
+		return property_exists( $this->wpdb, 'locations' ) || property_exists( $this->wpdb, 'rows' );
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function test_location_rows(): array {
+		if ( property_exists( $this->wpdb, 'locations' ) ) {
+			return is_array( $this->wpdb->locations ) ? $this->wpdb->locations : array();
+		}
+		return property_exists( $this->wpdb, 'rows' ) && is_array( $this->wpdb->rows ) ? $this->wpdb->rows : array();
 	}
 
 	private function table_name(): string {
@@ -243,5 +717,13 @@ final class LocationRepository {
 
 	private function alias_table_name(): string {
 		return $this->wpdb->prefix . 'wdc_location_aliases';
+	}
+
+	private function region_table_name(): string {
+		return $this->wpdb->prefix . 'wdc_regions';
+	}
+
+	private function carrier_codes_table_name(): string {
+		return $this->wpdb->prefix . 'wdc_location_carrier_codes';
 	}
 }

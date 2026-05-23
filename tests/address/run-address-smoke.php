@@ -222,7 +222,38 @@ function address_smoke_assert( bool $condition, string $message ): void {
 
 $wpdb = new wpdb();
 $repository = new LocationRepository( $wpdb );
-( new LocationImportService( $repository ) )->import_from_json_file( dirname( __DIR__, 2 ) . '/database/demo/locations-demo.json' );
+( new LocationImportService( $repository ) )->import_from_array(
+	array(
+		array(
+			'country_code'   => 'RU',
+			'region_name'    => 'Новосибирская область',
+			'region_code'    => '54',
+			'city_name'      => 'Новосибирск',
+			'display_name'   => 'Новосибирск, Новосибирская область',
+			'postal_code'    => '630000',
+			'fias_id'        => 'demo-fias-nsk',
+			'gar_id'         => 'demo-gar-nsk',
+			'gar_object_id'  => 540000000001,
+			'place_name'     => 'Новосибирск',
+			'place_type'     => 'г',
+			'place_level'    => 4,
+		),
+		array(
+			'country_code'   => 'RU',
+			'region_name'    => 'Москва',
+			'region_code'    => '77',
+			'city_name'      => 'Москва',
+			'display_name'   => 'Москва',
+			'postal_code'    => '101000',
+			'fias_id'        => 'demo-fias-moscow',
+			'gar_id'         => 'demo-gar-moscow',
+			'gar_object_id'  => 770000000001,
+			'place_name'     => 'Москва',
+			'place_type'     => 'г',
+			'place_level'    => 4,
+		),
+	)
+);
 
 $search = new CheckoutLocationSearch( new LocationSearchService( $repository ) );
 $resolver = new CheckoutCityResolver( $repository, $search );
@@ -234,7 +265,7 @@ $normalizer = new CheckoutAddressNormalizer(
 $runtime = new CheckoutAddressRuntime( $normalizer, $resolver, $session );
 
 $known_city = (string) $wpdb->rows[1]['city_name'];
-$known_postcode = (string) $wpdb->rows[1]['postcode'];
+$known_postcode = (string) ( $wpdb->rows[1]['postal_code'] ?? '' );
 
 $known = $resolver->resolve_city( $known_city );
 address_smoke_assert( null !== $known, 'Known city must resolve.' );

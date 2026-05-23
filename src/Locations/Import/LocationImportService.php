@@ -66,7 +66,7 @@ final class LocationImportService {
 				'region_name'     => (string) ( $row[1] ?? '' ),
 				'city_name'       => (string) ( $row[2] ?? '' ),
 				'settlement_name' => (string) ( $row[3] ?? '' ),
-				'postcode'        => (string) ( $row[4] ?? '' ),
+				'postal_code'     => (string) ( $row[4] ?? '' ),
 				'fias_id'         => (string) ( $row[5] ?? '' ),
 				'gar_id'          => (string) ( $row[6] ?? '' ),
 			);
@@ -91,21 +91,57 @@ final class LocationImportService {
 			$display = '' !== $region ? sprintf( '%s — %s', $name, $region ) : $name;
 		}
 
-		return new Location(
-			null,
-			trim( (string) ( $row['fias_id'] ?? '' ) ),
-			trim( (string) ( $row['gar_id'] ?? '' ) ),
-			strtoupper( trim( (string) ( $row['country_code'] ?? '' ) ) ),
-			$region,
-			trim( (string) ( $row['region_code'] ?? '' ) ),
-			$city,
-			$settlement,
-			trim( (string) ( $row['settlement_type'] ?? '' ) ),
-			$display,
-			trim( (string) ( $row['postcode'] ?? '' ) ),
-			isset( $row['latitude'] ) && '' !== (string) $row['latitude'] ? (float) $row['latitude'] : null,
-			isset( $row['longitude'] ) && '' !== (string) $row['longitude'] ? (float) $row['longitude'] : null,
-			(bool) ( $row['active'] ?? true )
+		return Location::from_array(
+			array(
+				'fias_id'                => $this->fias_id( $row['fias_id'] ?? '', $row['gar_id'] ?? '' ),
+				'gar_id'                 => trim( (string) ( $row['gar_id'] ?? '' ) ),
+				'country_code'           => strtoupper( trim( (string) ( $row['country_code'] ?? '' ) ) ),
+				'region_name'            => $region,
+				'region_code'            => trim( (string) ( $row['region_code'] ?? '' ) ),
+				'district_name'          => trim( (string) ( $row['district_name'] ?? '' ) ),
+				'district_type'          => trim( (string) ( $row['district_type'] ?? '' ) ),
+				'district_fias_id'       => trim( (string) ( $row['district_fias_id'] ?? '' ) ),
+				'district_kladr_id'      => trim( (string) ( $row['district_kladr_id'] ?? '' ) ),
+				'district_gar_object_id' => $row['district_gar_object_id'] ?? 0,
+				'district_level'         => $row['district_level'] ?? null,
+				'city_name'              => $city,
+				'city_type'              => trim( (string) ( $row['city_type'] ?? '' ) ),
+				'city_fias_id'           => trim( (string) ( $row['city_fias_id'] ?? '' ) ),
+				'city_kladr_id'          => trim( (string) ( $row['city_kladr_id'] ?? '' ) ),
+				'settlement_name'        => $settlement,
+				'settlement_type'        => trim( (string) ( $row['settlement_type'] ?? '' ) ),
+				'display_name'           => $display,
+				'latitude'               => $row['latitude'] ?? null,
+				'longitude'              => $row['longitude'] ?? null,
+				'active'                 => (bool) ( $row['active'] ?? true ),
+				'gar_object_id'          => $this->gar_object_id( $row['gar_object_id'] ?? $row['gar_id'] ?? '' ),
+				'kladr_id'               => trim( (string) ( $row['kladr_id'] ?? '' ) ),
+				'place_name'             => trim( (string) ( $row['place_name'] ?? $settlement ?: $city ) ),
+				'place_type'             => trim( (string) ( $row['place_type'] ?? $row['settlement_type'] ?? '' ) ),
+				'place_level'            => $row['place_level'] ?? 0,
+				'okato'                  => trim( (string) ( $row['okato'] ?? '' ) ),
+				'oktmo'                  => trim( (string) ( $row['oktmo'] ?? '' ) ),
+				'postal_code'            => trim( (string) ( $row['postal_code'] ?? '' ) ),
+			)
 		);
+	}
+
+	private function gar_object_id( mixed $value ): int {
+		$value = trim( (string) $value );
+		if ( is_numeric( $value ) ) {
+			return (int) $value;
+		}
+
+		return '' !== $value ? (int) sprintf( '%u', crc32( $value ) ) : 0;
+	}
+
+	private function fias_id( mixed $value, mixed $fallback ): string {
+		$value = trim( (string) $value );
+		if ( '' !== $value ) {
+			return $value;
+		}
+
+		$fallback = trim( (string) $fallback );
+		return '' !== $fallback ? 'legacy-' . $fallback : '';
 	}
 }

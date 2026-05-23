@@ -3,7 +3,7 @@
 ## Locations Storage Architecture
 
 The locations foundation stores settlement-level delivery destinations in `wdc_locations`.
-The table is intentionally independent from checkout and legacy shipping code. It can be populated from a small demo dataset today and from FIAS/GAR-oriented importers later.
+The table is intentionally independent from checkout and legacy shipping code. As of `0.15.10`, production data is populated from a prepared GAR/ФИАС CSV instead of the old demo admin import.
 
 Key fields:
 
@@ -69,3 +69,19 @@ Carrier integrations can later map carrier city identifiers or aliases to `wdc_l
 ## Future GAR Changes Sync
 
 A later GAR sync can build on `GarChangesService` by adding a real adapter that checks GAR change feeds, records pending changes, and triggers a controlled import/update process.
+
+# GAR CSV Import Note
+
+As of `0.15.10`, the local places foundation is populated from prepared `gar_places.csv` through `wdc_gar_places_stage`, `wdc_regions`, and the expanded `wdc_locations` schema. The CSV importer maps fields by header, supports optional `district_*` and `city_*` levels, imports `region_type` into locations, imports `display_name` as-is, ignores unknown columns, uses bulk inserts/upserts, exposes chunked admin progress, checks staging schema before loading rows, reports SQL bulk failures in job errors, and uses `postal_code` instead of legacy `postcode`. Snapshot export/import transfers the four location tables plus the `wdc_location_type_display_rules` option. See [wdc-gar-places-import.md](wdc-gar-places-import.md) for the current import and snapshot workflow.
+
+The admin locations page includes paginated search with ranked ordering and compact page numbers. Direct `place_name` matches are preferred over city, district, region, and broad `searchable_text` matches, so a settlement named by the query appears above rows where the same text only occurs in a parent field. Search group headers use `region_name` plus mapped `region_type` after the name and are sorted by `region_name`.
+
+`LocationDisplayNameFormatter` owns the admin-side display formula:
+
+```text
+region_part, district_part, city_part, place_part
+```
+
+Type display rules are stored in `wdc_location_type_display_rules`. They apply to `region_type`, `city_type`, and `place_type` with `before`, `after`, or `hidden` positions. `district_type` remains fixed as `district_name + " " + district_type`. The admin settings are grouped into collapsible Region, City, and Place sections with per-section type counts.
+
+The admin `Пересобрать display_name` action runs as a chunked AJAX job with a progress bar and JSON status block. It updates `display_name`, refreshes `searchable_text`, and regenerates GAR aliases for each processed batch.
