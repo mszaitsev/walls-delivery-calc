@@ -18,13 +18,18 @@ final class LocationsSnapshotExporter {
 		'wdc_location_carrier_codes',
 	);
 
+	/** @var array<int,string> */
+	private array $options = array(
+		'wdc_location_type_display_rules',
+	);
+
 	public function __construct( ?\wpdb $db = null ) {
 		global $wpdb;
 
 		$this->wpdb = $db ?? $wpdb;
 	}
 
-	public function export_to_file( string $path, string $version = '0.15.9', int $page_size = 1000 ): int {
+	public function export_to_file( string $path, string $version = '0.15.10', int $page_size = 1000 ): int {
 		$handle = fopen( $path, 'wb' );
 		if ( false === $handle ) {
 			throw new RuntimeException( 'Snapshot file cannot be opened for writing.' );
@@ -38,11 +43,16 @@ final class LocationsSnapshotExporter {
 					'type'       => 'meta',
 					'version'    => $version,
 					'tables'     => $this->tables,
+					'options'    => $this->options,
 					'created_at' => current_time( 'mysql' ),
 				),
 				JSON_UNESCAPED_UNICODE
 			) . "\n"
 		);
+		foreach ( $this->option_rows() as $option_row ) {
+			fwrite( $handle, $this->encode( $option_row, JSON_UNESCAPED_UNICODE ) . "\n" );
+			++$rows;
+		}
 
 		foreach ( $this->tables as $table ) {
 			$full_table = $this->wpdb->prefix . $table;
@@ -77,7 +87,7 @@ final class LocationsSnapshotExporter {
 		return $rows;
 	}
 
-	public function stream_download( string $version = '0.15.9' ): void {
+	public function stream_download( string $version = '0.15.10' ): void {
 		$file = wp_tempnam( 'wdc-locations-snapshot-' );
 		if ( ! is_string( $file ) || '' === $file ) {
 			throw new RuntimeException( 'Unable to create temporary snapshot file.' );
@@ -93,7 +103,7 @@ final class LocationsSnapshotExporter {
 	/**
 	 * @return array<string,mixed>
 	 */
-	public function create_job( string $path, string $version = '0.15.9' ): array {
+	public function create_job( string $path, string $version = '0.15.10' ): array {
 		return array(
 			'job_id'        => md5( $path . microtime( true ) ),
 			'path'          => $path,
@@ -102,7 +112,7 @@ final class LocationsSnapshotExporter {
 			'table_index'   => 0,
 			'offset'        => 0,
 			'rows_exported' => 0,
-			'total_rows'    => $this->total_rows(),
+			'total_rows'    => $this->total_rows() + count( $this->options ),
 			'created_at'    => current_time( 'mysql' ),
 			'updated_at'    => current_time( 'mysql' ),
 			'errors'        => array(),
@@ -130,12 +140,22 @@ final class LocationsSnapshotExporter {
 					$this->encode(
 						array(
 							'type'       => 'meta',
-							'version'    => (string) ( $job['version'] ?? '0.15.9' ),
+							'version'    => (string) ( $job['version'] ?? '0.15.10' ),
 							'tables'     => $this->tables,
+							'options'    => $this->options,
 							'created_at' => current_time( 'mysql' ),
 						)
 					) . "\n"
 				);
+				$handle = fopen( $path, 'ab' );
+				if ( false === $handle ) {
+					throw new RuntimeException( 'Snapshot export file cannot be opened.' );
+				}
+				foreach ( $this->option_rows() as $option_row ) {
+					fwrite( $handle, $this->encode( $option_row ) . "\n" );
+					++$job['rows_exported'];
+				}
+				fclose( $handle );
 			}
 
 			$table_index = (int) ( $job['table_index'] ?? 0 );
@@ -210,5 +230,52 @@ final class LocationsSnapshotExporter {
 		unset( $row['postcode'] );
 
 		return $row;
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function option_rows(): array {
+		return array(
+			array(
+				'type' => 'option',
+				'name' => 'wdc_location_type_display_rules',
+				'data' => $this->sanitize_type_rules( get_option( 'wdc_location_type_display_rules', array() ) ),
+			),
+		);
+	}
+
+	/**
+	 * @param mixed $raw
+	 * @return array<string,array<string,array{display:string,position:string}>>
+	 */
+	private function sanitize_type_rules( mixed $raw ): array {
+		$result = array( 'region' => array(), 'city' => array(), 'place' => array() );
+		if ( ! is_array( $raw ) ) {
+			return $result;
+		}
+
+		foreach ( array( 'region', 'city', 'place' ) as $scope ) {
+			foreach ( is_array( $raw[ $scope ] ?? null ) ? $raw[ $scope ] : array() as $source => $rule ) {
+				$source = sanitize_text_field( wp_unslash( (string) $source ) );
+				if ( '' === $source || ! is_array( $rule ) ) {
+					continue;
+				}
+				$position = sanitize_key( wp_unslash( (string) ( $rule['position'] ?? $this->default_type_position( $scope ) ) ) );
+				if ( ! in_array( $position, array( 'before', 'after', 'hidden' ), true ) ) {
+					$position = $this->default_type_position( $scope );
+				}
+				$result[ $scope ][ $source ] = array(
+					'display'  => sanitize_text_field( wp_unslash( (string) ( $rule['display'] ?? $source ) ) ),
+					'position' => $position,
+				);
+			}
+		}
+
+		return $result;
+	}
+
+	private function default_type_position( string $scope ): string {
+		return 'region' === $scope ? 'after' : 'before';
 	}
 }

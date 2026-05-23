@@ -50,7 +50,14 @@ final class LocationsSnapshotImporter {
 			}
 
 			$row = json_decode( $line, true );
-			if ( ! is_array( $row ) || 'row' !== ( $row['type'] ?? '' ) ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			if ( $this->import_option_row( $row ) ) {
+				++$imported;
+				continue;
+			}
+			if ( 'row' !== ( $row['type'] ?? '' ) ) {
 				continue;
 			}
 
@@ -131,7 +138,15 @@ final class LocationsSnapshotImporter {
 				++$read;
 				++$job['rows_read'];
 				$row = json_decode( trim( $line ), true );
-				if ( ! is_array( $row ) || 'row' !== ( $row['type'] ?? '' ) ) {
+				if ( ! is_array( $row ) ) {
+					++$job['skipped'];
+					continue;
+				}
+				if ( $this->import_option_row( $row ) ) {
+					++$job['imported'];
+					continue;
+				}
+				if ( 'row' !== ( $row['type'] ?? '' ) ) {
 					++$job['skipped'];
 					continue;
 				}
@@ -193,5 +208,51 @@ final class LocationsSnapshotImporter {
 		}
 
 		return $data;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function import_option_row( array $row ): bool {
+		if ( 'option' !== ( $row['type'] ?? '' ) || 'wdc_location_type_display_rules' !== (string) ( $row['name'] ?? '' ) ) {
+			return false;
+		}
+
+		update_option( 'wdc_location_type_display_rules', $this->sanitize_type_rules( $row['data'] ?? array() ) );
+		return true;
+	}
+
+	/**
+	 * @param mixed $raw
+	 * @return array<string,array<string,array{display:string,position:string}>>
+	 */
+	private function sanitize_type_rules( mixed $raw ): array {
+		$result = array( 'region' => array(), 'city' => array(), 'place' => array() );
+		if ( ! is_array( $raw ) ) {
+			return $result;
+		}
+
+		foreach ( array( 'region', 'city', 'place' ) as $scope ) {
+			foreach ( is_array( $raw[ $scope ] ?? null ) ? $raw[ $scope ] : array() as $source => $rule ) {
+				$source = sanitize_text_field( wp_unslash( (string) $source ) );
+				if ( '' === $source || ! is_array( $rule ) ) {
+					continue;
+				}
+				$position = sanitize_key( wp_unslash( (string) ( $rule['position'] ?? $this->default_type_position( $scope ) ) ) );
+				if ( ! in_array( $position, array( 'before', 'after', 'hidden' ), true ) ) {
+					$position = $this->default_type_position( $scope );
+				}
+				$result[ $scope ][ $source ] = array(
+					'display'  => sanitize_text_field( wp_unslash( (string) ( $rule['display'] ?? $source ) ) ),
+					'position' => $position,
+				);
+			}
+		}
+
+		return $result;
+	}
+
+	private function default_type_position( string $scope ): string {
+		return 'region' === $scope ? 'after' : 'before';
 	}
 }

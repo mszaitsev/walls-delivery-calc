@@ -1,6 +1,6 @@
 # WDC GAR Places Import
 
-Version: 0.15.9.
+Version: 0.15.10.
 
 ## Source CSV
 
@@ -117,11 +117,15 @@ The admin section `Экспорт / импорт подготовленной б
 - `wdc_locations`
 - `wdc_location_aliases`
 - `wdc_location_carrier_codes`
+- option `wdc_location_type_display_rules`
+
+Only this display-rules option is carried with the snapshot; the exporter does not dump all plugin options. The option is written as a separate `type=option` row, and import sanitizes it before `update_option()`.
 
 The first JSONL row is metadata:
 
 ```json
-{"type":"meta","version":"0.15.9","tables":["wdc_regions","wdc_locations","wdc_location_aliases","wdc_location_carrier_codes"],"created_at":"2026-05-23 12:00:00"}
+{"type":"meta","version":"0.15.10","tables":["wdc_regions","wdc_locations","wdc_location_aliases","wdc_location_carrier_codes"],"options":["wdc_location_type_display_rules"],"created_at":"2026-05-23 12:00:00"}
+{"type":"option","name":"wdc_location_type_display_rules","data":{"region":{"обл":{"display":"обл.","position":"after"}}}}
 ```
 
 Following rows use:

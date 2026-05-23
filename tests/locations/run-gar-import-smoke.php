@@ -573,19 +573,36 @@ $wpdb->insert(
 );
 gar_smoke_assert( 1 === count( $wpdb->carrier_codes ), 'carrier_codes table foundation must accept rows.' );
 
+update_option(
+	'wdc_location_type_display_rules',
+	array(
+		'region' => array(
+			'обл' => array( 'display' => 'обл.', 'position' => 'after' ),
+		),
+		'city' => array(
+			'г' => array( 'display' => 'г.', 'position' => 'before' ),
+		),
+		'place' => array(
+			'село' => array( 'display' => 'с.', 'position' => 'before' ),
+		),
+	)
+);
 $snapshot = tempnam( sys_get_temp_dir(), 'wdc-snapshot-' );
 gar_smoke_assert( is_string( $snapshot ), 'Snapshot temp file must be created.' );
-$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.9' );
+$exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.10' );
 gar_smoke_assert( $exported > 0, 'Snapshot export must include rows from 4 tables.' );
 $snapshot_text = (string) file_get_contents( $snapshot );
 gar_smoke_assert( str_contains( $snapshot_text, '"table":"wdc_regions"' ) && str_contains( $snapshot_text, '"table":"wdc_location_carrier_codes"' ), 'Snapshot export must include all foundation tables.' );
 gar_smoke_assert( str_contains( $snapshot_text, '"district_name":"Новосибирский"' ) && str_contains( $snapshot_text, '"postal_code":"630555"' ), 'Snapshot export must preserve district_* and postal_code.' );
 gar_smoke_assert( ! str_contains( $snapshot_text, '"postcode"' ), 'Snapshot export must not include postcode as a location field.' );
+gar_smoke_assert( str_contains( $snapshot_text, '"type":"option"' ) && str_contains( $snapshot_text, '"name":"wdc_location_type_display_rules"' ), 'Snapshot export must include type display rules option row.' );
 
 $restored_db = new wpdb();
+delete_option( 'wdc_location_type_display_rules' );
 $restored = ( new LocationsSnapshotImporter( $restored_db ) )->import_from_file( $snapshot );
 gar_smoke_assert( $restored === $exported, 'Snapshot import must restore exported rows.' );
 gar_smoke_assert( count( $restored_db->locations ) === count( $wpdb->locations ), 'Snapshot import must restore locations.' );
+gar_smoke_assert( 'обл.' === (string) ( get_option( 'wdc_location_type_display_rules', array() )['region']['обл']['display'] ?? '' ), 'Snapshot import must restore type display rules option.' );
 $restored_has_district = false;
 foreach ( $restored_db->locations as $restored_location ) {
 	if ( 'Новосибирский' === (string) ( $restored_location['district_name'] ?? '' ) ) {
@@ -599,19 +616,35 @@ gar_smoke_assert( $restored_has_district, 'Snapshot import must restore district
 $snapshot_job_file = tempnam( sys_get_temp_dir(), 'wdc-snapshot-job-' );
 gar_smoke_assert( is_string( $snapshot_job_file ), 'Snapshot job temp file must be created.' );
 $snapshot_exporter = new LocationsSnapshotExporter( $wpdb );
-$snapshot_job = $snapshot_exporter->create_job( $snapshot_job_file, '0.15.9' );
+$snapshot_job = $snapshot_exporter->create_job( $snapshot_job_file, '0.15.10' );
 for ( $i = 0; $i < 100 && 'finished' !== $snapshot_job['phase']; $i++ ) {
 	$snapshot_job = $snapshot_exporter->step_job( $snapshot_job, 2 );
 }
 gar_smoke_assert( 'finished' === $snapshot_job['phase'] && (int) $snapshot_job['rows_exported'] > 0, 'Snapshot export job must write JSONL in chunks.' );
+$snapshot_job_text = (string) file_get_contents( $snapshot_job_file );
+gar_smoke_assert( 1 === substr_count( $snapshot_job_text, '"name":"wdc_location_type_display_rules"' ), 'Snapshot export job must write type rules option row once.' );
 $snapshot_import_job_db = new wpdb();
 $snapshot_importer = new LocationsSnapshotImporter( $snapshot_import_job_db );
+delete_option( 'wdc_location_type_display_rules' );
 $snapshot_import_job = $snapshot_importer->create_job( $snapshot_job_file );
 for ( $i = 0; $i < 100 && 'finished' !== $snapshot_import_job['phase']; $i++ ) {
 	$snapshot_import_job = $snapshot_importer->step_job( $snapshot_import_job, 2 );
 }
 gar_smoke_assert( 'finished' === $snapshot_import_job['phase'] && (int) $snapshot_import_job['imported'] > 0, 'Snapshot import job must read JSONL in chunks.' );
+gar_smoke_assert( 'с.' === (string) ( get_option( 'wdc_location_type_display_rules', array() )['place']['село']['display'] ?? '' ), 'Snapshot import job must restore type display rules option.' );
 @unlink( $snapshot_job_file );
+
+$invalid_option_snapshot = tempnam( sys_get_temp_dir(), 'wdc-snapshot-option-' );
+gar_smoke_assert( is_string( $invalid_option_snapshot ), 'Invalid option snapshot temp file must be created.' );
+file_put_contents(
+	$invalid_option_snapshot,
+	json_encode( array( 'type' => 'meta', 'version' => '0.15.10', 'tables' => array(), 'options' => array( 'wdc_location_type_display_rules' ), 'created_at' => current_time( 'mysql' ) ), JSON_UNESCAPED_UNICODE ) . "\n" .
+	json_encode( array( 'type' => 'option', 'name' => 'wdc_location_type_display_rules', 'data' => array( 'city' => array( 'г' => array( 'display' => 'г.', 'position' => 'sideways' ) ) ) ), JSON_UNESCAPED_UNICODE ) . "\n"
+);
+delete_option( 'wdc_location_type_display_rules' );
+( new LocationsSnapshotImporter( new wpdb() ) )->import_from_file( $invalid_option_snapshot );
+gar_smoke_assert( 'before' === (string) ( get_option( 'wdc_location_type_display_rules', array() )['city']['г']['position'] ?? '' ), 'Snapshot import must sanitize invalid type rule position to default.' );
+@unlink( $invalid_option_snapshot );
 
 $bad_header = tempnam( sys_get_temp_dir(), 'wdc-gar-bad-header-' );
 gar_smoke_assert( is_string( $bad_header ), 'Bad header temp file must be created.' );
@@ -658,7 +691,7 @@ $_GET = array( 'location_query' => 'Новос' );
 $_POST = array();
 ob_start();
 ( new LocationsAdminPage(
-	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.9' ),
+	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.10' ),
 	$locations,
 	$search_service,
 	new LocationImportService( $locations ),
@@ -679,7 +712,7 @@ gar_smoke_assert( str_contains( $html, 'wdc_gar_import_start' ) && str_contains(
 gar_smoke_assert( str_contains( $html, 'wdc-location-details-toggle' ) && str_contains( $html, 'wdc_location_details' ), 'Admin search must include details button/action.' );
 gar_smoke_assert( str_contains( $html, 'wdc-locations-pagination' ) && str_contains( $html, 'Найдено всего:' ) && str_contains( $html, 'location_per_page' ), 'Admin search must include pagination controls.' );
 gar_smoke_assert( str_contains( $html, 'Пересобрать display_name' ) && str_contains( $html, 'wdc-display-name-rebuild-progress' ) && str_contains( $html, 'JSON status' ), 'Admin page must include display_name rebuild progress UI.' );
-gar_smoke_assert( str_contains( $html, 'Отображение типов населенных пунктов' ) && str_contains( $html, '<details class="wdc-type-rules-group" open' ) && str_contains( $html, 'Регион —' ), 'Admin page must include collapsible type display rules table.' );
+gar_smoke_assert( str_contains( $html, 'Отображение типов населенных пунктов' ) && str_contains( $html, '<details class="wdc-type-rules-group">' ) && ! str_contains( $html, '<details class="wdc-type-rules-group" open' ) && str_contains( $html, 'Регион —' ), 'Admin page must include collapsed type display rules table.' );
 gar_smoke_assert( str_contains( $html, 'Новосибирская обл' ), 'Admin group header must include region_name and visual region_type.' );
 $main_pos = strpos( $html, 'wdc-location-row-main' );
 $button_pos = strpos( $html, 'wdc-location-details-toggle' );
@@ -693,7 +726,7 @@ gar_smoke_assert( str_contains( $html, "button.closest('.wdc-location-row')" ) &
 $_POST = array( 'wdc_locations_nonce' => 'test-nonce', 'location_id' => (string) $novosibirsk->id );
 ob_start();
 ( new LocationsAdminPage(
-	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.9' ),
+	new WallsShop\WDC\Core\PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.15.10' ),
 	$locations,
 	$search_service,
 	new LocationImportService( $locations )
