@@ -250,6 +250,174 @@ final class LocationRepository {
 		return (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$this->alias_table_name()}" );
 	}
 
+	public function count_with_postal_code(): int {
+		if ( $this->has_test_location_rows() ) {
+			return count(
+				array_filter(
+					$this->test_location_rows(),
+					static fn( array $row ): bool => '' !== trim( (string) ( $row['postal_code'] ?? '' ) )
+				)
+			);
+		}
+
+		return (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$this->table_name()} WHERE postal_code IS NOT NULL AND postal_code != ''" );
+	}
+
+	public function count_without_postal_code(): int {
+		if ( $this->has_test_location_rows() ) {
+			return count(
+				array_filter(
+					$this->test_location_rows(),
+					static fn( array $row ): bool => '' === trim( (string) ( $row['postal_code'] ?? '' ) )
+				)
+			);
+		}
+
+		return (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$this->table_name()} WHERE postal_code IS NULL OR postal_code = ''" );
+	}
+
+	public function count_technical_no_index_marker(): int {
+		if ( $this->has_test_location_rows() ) {
+			return count(
+				array_filter(
+					$this->test_location_rows(),
+					static fn( array $row ): bool => '999999999' === (string) ( $row['postal_code'] ?? '' )
+				)
+			);
+		}
+
+		return (int) $this->wpdb->get_var( $this->wpdb->prepare( "SELECT COUNT(*) FROM {$this->table_name()} WHERE postal_code = %s", '999999999' ) );
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function next_postcode_batch( bool $cities_first, int $limit, int $last_id ): array {
+		$limit = max( 1, min( 20, $limit ) );
+		if ( ! $cities_first ) {
+			return $this->random_postcode_batch_for_non_cities( $limit );
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$rows = array_values(
+				array_filter(
+					$this->test_location_rows(),
+					static fn( array $row ): bool =>
+						(int) ( $row['id'] ?? 0 ) > $last_id
+						&& in_array( (string) ( $row['place_type'] ?? '' ), array( 'г', 'г.' ), true )
+						&& '' === trim( (string) ( $row['postal_code'] ?? '' ) )
+						&& '' !== trim( (string) ( $row['fias_id'] ?? '' ) )
+				)
+			);
+			usort( $rows, static fn( array $a, array $b ): int => (int) ( $a['id'] ?? 0 ) <=> (int) ( $b['id'] ?? 0 ) );
+			return array_slice( $rows, 0, $limit );
+		}
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT * FROM {$this->table_name()}
+				WHERE id > %d
+					AND place_type IN ('г', 'г.')
+					AND (postal_code IS NULL OR postal_code = '')
+					AND fias_id IS NOT NULL
+					AND fias_id != ''
+				ORDER BY id ASC
+				LIMIT %d",
+				$last_id,
+				$limit
+			),
+			ARRAY_A
+		);
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function random_postcode_batch_for_non_cities( int $limit ): array {
+		$limit = max( 1, min( 20, $limit ) );
+		if ( $this->has_test_location_rows() ) {
+			$rows = array_values(
+				array_filter(
+					$this->test_location_rows(),
+					static fn( array $row ): bool =>
+						! in_array( (string) ( $row['place_type'] ?? '' ), array( 'г', 'г.' ), true )
+						&& '' === trim( (string) ( $row['postal_code'] ?? '' ) )
+						&& '999999999' !== (string) ( $row['postal_code'] ?? '' )
+						&& '' !== trim( (string) ( $row['fias_id'] ?? '' ) )
+				)
+			);
+			shuffle( $rows );
+			return array_slice( $rows, 0, $limit );
+		}
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT * FROM {$this->table_name()}
+				WHERE place_type NOT IN ('г', 'г.')
+					AND (postal_code IS NULL OR postal_code = '')
+					AND COALESCE(postal_code, '') != '999999999'
+					AND fias_id IS NOT NULL
+					AND fias_id != ''
+				ORDER BY RAND()
+				LIMIT %d",
+				$limit
+			),
+			ARRAY_A
+		);
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	public function update_postal_code( int $location_id, string $postal_code ): bool {
+		if ( $location_id <= 0 ) {
+			return false;
+		}
+
+		$data = array(
+			'postal_code' => $postal_code,
+			'updated_at'  => current_time( 'mysql' ),
+		);
+		if ( $this->has_test_location_rows() ) {
+			$property = property_exists( $this->wpdb, 'locations' ) ? 'locations' : 'rows';
+			if ( ! isset( $this->wpdb->{$property}[ $location_id ] ) ) {
+				return false;
+			}
+			$this->wpdb->{$property}[ $location_id ] = array_merge( $this->wpdb->{$property}[ $location_id ], $data );
+			return true;
+		}
+
+		$result = $this->wpdb->update( $this->table_name(), $data, array( 'id' => $location_id ), array( '%s', '%s' ), array( '%d' ) );
+		if ( false === $result ) {
+			$this->throw_sql_error( 'Location postal_code update failed' );
+		}
+
+		return true;
+	}
+
+	public function clear_postal_code_marker( string $marker = '999999999' ): int {
+		if ( $this->has_test_location_rows() ) {
+			$property = property_exists( $this->wpdb, 'locations' ) ? 'locations' : 'rows';
+			$count = 0;
+			foreach ( $this->wpdb->{$property} as $id => $row ) {
+				if ( $marker === (string) ( $row['postal_code'] ?? '' ) ) {
+					$this->wpdb->{$property}[ $id ]['postal_code'] = '';
+					$this->wpdb->{$property}[ $id ]['updated_at'] = current_time( 'mysql' );
+					++$count;
+				}
+			}
+			return $count;
+		}
+
+		$result = $this->wpdb->query( $this->wpdb->prepare( "UPDATE {$this->table_name()} SET postal_code = '', updated_at = %s WHERE postal_code = %s", current_time( 'mysql' ), $marker ) );
+		if ( false === $result ) {
+			$this->throw_sql_error( 'Location postal_code marker cleanup failed' );
+		}
+
+		return (int) $result;
+	}
+
 	/**
 	 * @return array{region:array<int,string>, city:array<int,string>, place:array<int,string>}
 	 */

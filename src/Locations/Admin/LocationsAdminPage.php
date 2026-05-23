@@ -18,6 +18,7 @@ use WallsShop\WDC\Locations\Import\LocationsSnapshotImporter;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
+use WallsShop\WDC\Locations\Postcodes\DaDataPostcodeClient;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
@@ -32,6 +33,8 @@ final class LocationsAdminPage {
 	private const SNAPSHOT_IMPORT_JOB_OPTION = 'wdc_locations_snapshot_import_job';
 	private const DISPLAY_RULES_OPTION = 'wdc_location_type_display_rules';
 	private const DISPLAY_REBUILD_JOB_OPTION = 'wdc_locations_display_name_rebuild_job';
+	private const DADATA_POSTCODE_JOB_OPTION = 'wdc_dadata_postcode_fill_job';
+	private const DADATA_POSTCODE_MARKER = '999999999';
 
 	public function __construct(
 		private PluginEnvironment $environment,
@@ -45,7 +48,8 @@ final class LocationsAdminPage {
 		private ?FiasCredentials $fias_credentials = null,
 		private ?GarPlacesCsvImporter $gar_importer = null,
 		private ?LocationsSnapshotExporter $snapshot_exporter = null,
-		private ?LocationsSnapshotImporter $snapshot_importer = null
+		private ?LocationsSnapshotImporter $snapshot_importer = null,
+		private ?DaDataPostcodeClient $postcode_client = null
 	) {
 	}
 
@@ -65,6 +69,11 @@ final class LocationsAdminPage {
 		add_action( 'wp_ajax_wdc_locations_display_name_rebuild_step', array( $this, 'ajax_display_name_rebuild_step' ) );
 		add_action( 'wp_ajax_wdc_locations_display_name_rebuild_status', array( $this, 'ajax_display_name_rebuild_status' ) );
 		add_action( 'wp_ajax_wdc_locations_display_name_rebuild_cancel', array( $this, 'ajax_display_name_rebuild_cancel' ) );
+		add_action( 'wp_ajax_wdc_dadata_postcode_fill_start', array( $this, 'ajax_dadata_postcode_fill_start' ) );
+		add_action( 'wp_ajax_wdc_dadata_postcode_fill_step', array( $this, 'ajax_dadata_postcode_fill_step' ) );
+		add_action( 'wp_ajax_wdc_dadata_postcode_fill_status', array( $this, 'ajax_dadata_postcode_fill_status' ) );
+		add_action( 'wp_ajax_wdc_dadata_postcode_fill_cancel', array( $this, 'ajax_dadata_postcode_fill_cancel' ) );
+		add_action( 'wp_ajax_wdc_dadata_postcode_clear_markers', array( $this, 'ajax_dadata_postcode_clear_markers' ) );
 	}
 
 	public function add_menu_page(): void {
@@ -106,6 +115,26 @@ final class LocationsAdminPage {
 				<p><strong><?php echo esc_html__( 'FIAS limiter:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->limiter_label() ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'GAR sync:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->gar_status_label() ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'Aliases:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_aliases() ); ?></span></p>
+			</div>
+
+			<div class="wdc-locations-import wdc-dadata-postcode-fill">
+				<h2><?php echo esc_html__( 'Заполнение почтовых индексов через DaData', 'walls-delivery-calc' ); ?></h2>
+				<div class="wdc-locations-summary">
+					<p><strong><?php echo esc_html__( 'Всего населенных пунктов:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_all() ); ?></span></p>
+					<p><strong><?php echo esc_html__( 'postal_code заполнен:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_with_postal_code() ); ?></span></p>
+					<p><strong><?php echo esc_html__( 'postal_code отсутствует:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_without_postal_code() ); ?></span></p>
+					<p><strong><?php echo esc_html__( 'technical no-index marker count:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_technical_no_index_marker() ); ?></span></p>
+				</div>
+				<button class="button button-primary" type="button" id="wdc-dadata-postcode-fill-start"><?php echo esc_html__( 'Получить индексы через DaData', 'walls-delivery-calc' ); ?></button>
+				<button class="button button-secondary" type="button" id="wdc-dadata-postcode-clear-markers"><?php echo esc_html__( 'Удалить технические значения 999999999', 'walls-delivery-calc' ); ?></button>
+				<div id="wdc-dadata-postcode-progress" class="wdc-progress" hidden>
+					<progress value="0" max="100"></progress>
+					<p class="wdc-progress-summary"></p>
+					<details open>
+						<summary><?php echo esc_html__( 'JSON status', 'walls-delivery-calc' ); ?></summary>
+						<pre></pre>
+					</details>
+				</div>
 			</div>
 
 			<form id="wdc-gar-import-form" class="wdc-locations-import" method="post" enctype="multipart/form-data">
@@ -370,15 +399,15 @@ final class LocationsAdminPage {
 				const done = Number(job.processed_rows || job.rows_exported || job.imported || job.rows_read || 0);
 				progress.value = Math.min(100, Math.round(done / Math.max(1, total) * 100));
 				const summary = box.querySelector('.wdc-progress-summary');
-				if (summary) summary.textContent = 'phase: ' + (job.phase || '') + ', processed: ' + (job.processed || done || 0) + ' / ' + (job.total || total || 0) + ', updated: ' + (job.updated || 0) + ', aliases: ' + (job.aliases_updated || 0);
+				if (summary) summary.textContent = 'phase: ' + (job.phase || '') + ', processed: ' + (job.processed || done || 0) + ' / ' + (job.total || total || 0) + ', updated: ' + (job.updated || 0) + ', marked_no_index: ' + (job.marked_no_index || 0) + ', skipped: ' + (job.skipped || 0) + ', errors: ' + (job.errors || 0) + ', consecutive_errors: ' + (job.consecutive_errors || 0) + ', priority: ' + (job.current_priority || '') + ', aliases: ' + (job.aliases_updated || 0);
 				text.textContent = JSON.stringify(job, null, 2);
 			}
-			function loop(action, box) {
+			function loop(action, box, delay) {
 				post(action).then(resp => {
 					const job = resp && resp.data ? resp.data : {};
 					render(box, job);
-					if (job.phase && job.phase !== 'finished' && job.phase !== 'failed') {
-						window.setTimeout(() => loop(action, box), 250);
+					if (job.phase && job.phase !== 'finished' && job.phase !== 'failed' && job.phase !== 'canceled') {
+						window.setTimeout(() => loop(action, box, delay), delay || 250);
 					}
 				});
 			}
@@ -429,6 +458,16 @@ final class LocationsAdminPage {
 			if (rebuildStart) rebuildStart.addEventListener('click', function(){
 				const box = document.getElementById('wdc-display-name-rebuild-progress');
 				post('wdc_locations_display_name_rebuild_start').then(resp => { render(box, resp.data); loop('wdc_locations_display_name_rebuild_step', box); });
+			});
+			const postcodeStart = document.getElementById('wdc-dadata-postcode-fill-start');
+			if (postcodeStart) postcodeStart.addEventListener('click', function(){
+				const box = document.getElementById('wdc-dadata-postcode-progress');
+				post('wdc_dadata_postcode_fill_start').then(resp => { render(box, resp.data); loop('wdc_dadata_postcode_fill_step', box, 1000); });
+			});
+			const postcodeClear = document.getElementById('wdc-dadata-postcode-clear-markers');
+			if (postcodeClear) postcodeClear.addEventListener('click', function(){
+				const box = document.getElementById('wdc-dadata-postcode-progress');
+				post('wdc_dadata_postcode_clear_markers').then(resp => { render(box, resp.data); });
 			});
 			document.addEventListener('click', function(event){
 				const button = event.target.closest('.wdc-location-details-toggle');
@@ -724,6 +763,189 @@ final class LocationsAdminPage {
 		$job['updated_at'] = current_time( 'mysql' );
 		$this->update_option( self::DISPLAY_REBUILD_JOB_OPTION, $job );
 		$this->send_json( $job );
+	}
+
+	public function ajax_dadata_postcode_fill_start(): void {
+		$this->guard_ajax();
+		$job = array(
+			'job_id'             => md5( 'dadata-postcode-' . microtime( true ) ),
+			'phase'              => 'running',
+			'total'              => $this->repository->count_without_postal_code(),
+			'processed'          => 0,
+			'updated'            => 0,
+			'marked_no_index'    => 0,
+			'skipped'            => 0,
+			'errors'             => 0,
+			'consecutive_errors' => 0,
+			'last_id'            => 0,
+			'current_priority'   => 'cities',
+			'tokens_exhausted'   => false,
+			'started_at'         => current_time( 'mysql' ),
+			'updated_at'         => current_time( 'mysql' ),
+			'last_error'         => '',
+			'last_location_id'   => 0,
+			'last_fias_id'       => '',
+			'last_place_name'    => '',
+			'reason'             => '',
+		);
+		$this->update_option( self::DADATA_POSTCODE_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	public function ajax_dadata_postcode_fill_step(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::DADATA_POSTCODE_JOB_OPTION, array() );
+		$job = is_array( $job ) ? $this->step_dadata_postcode_job( $job ) : $this->dadata_postcode_failed_job( 'DaData postcode fill job is unavailable.' );
+		$this->update_option( self::DADATA_POSTCODE_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	public function ajax_dadata_postcode_fill_status(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::DADATA_POSTCODE_JOB_OPTION, array( 'phase' => 'idle' ) );
+		$this->send_json( is_array( $job ) ? $job : array( 'phase' => 'idle' ) );
+	}
+
+	public function ajax_dadata_postcode_fill_cancel(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::DADATA_POSTCODE_JOB_OPTION, array() );
+		$job = is_array( $job ) ? $job : array();
+		$job['phase'] = 'canceled';
+		$job['updated_at'] = current_time( 'mysql' );
+		$this->update_option( self::DADATA_POSTCODE_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	public function ajax_dadata_postcode_clear_markers(): void {
+		$this->guard_ajax();
+		$cleared = $this->repository->clear_postal_code_marker( self::DADATA_POSTCODE_MARKER );
+		$this->send_json(
+			array(
+				'phase' => 'finished',
+				'cleared' => $cleared,
+				'message' => sprintf( __( 'Очищено технических значений: %d.', 'walls-delivery-calc' ), $cleared ),
+				'total' => $this->repository->count_without_postal_code(),
+				'processed' => $cleared,
+				'updated_at' => current_time( 'mysql' ),
+			)
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $job
+	 * @return array<string,mixed>
+	 */
+	private function step_dadata_postcode_job( array $job ): array {
+		if ( 'running' !== (string) ( $job['phase'] ?? '' ) ) {
+			return $job;
+		}
+
+		if ( ! $this->postcode_client instanceof DaDataPostcodeClient ) {
+			return $this->fail_dadata_postcode_job( $job, 'DaData postcode client is unavailable.' );
+		}
+
+		$limit = random_int( 10, 20 );
+		$phase = (string) ( $job['current_priority'] ?? 'cities' );
+		$batch = 'cities' === $phase
+			? $this->repository->next_postcode_batch( true, $limit, (int) ( $job['last_id'] ?? 0 ) )
+			: $this->repository->random_postcode_batch_for_non_cities( $limit );
+
+		if ( array() === $batch && 'cities' === $phase ) {
+			$job['current_priority'] = 'others';
+			$job['last_id'] = 0;
+			$batch = $this->repository->random_postcode_batch_for_non_cities( $limit );
+		}
+
+		if ( array() === $batch ) {
+			$job['phase'] = 'finished';
+			$job['updated_at'] = current_time( 'mysql' );
+			return $job;
+		}
+
+		foreach ( $batch as $location ) {
+			$location_id = (int) ( $location['id'] ?? 0 );
+			$fias_id = (string) ( $location['fias_id'] ?? '' );
+			$place_name = (string) ( $location['place_name'] ?? $location['settlement_name'] ?? '' );
+			$job['last_location_id'] = $location_id;
+			$job['last_fias_id'] = $fias_id;
+			$job['last_place_name'] = $place_name;
+			if ( 'cities' === (string) ( $job['current_priority'] ?? '' ) ) {
+				$job['last_id'] = max( (int) ( $job['last_id'] ?? 0 ), $location_id );
+			}
+
+			if ( $location_id <= 0 || '' === trim( $fias_id ) || '' !== trim( (string) ( $location['postal_code'] ?? '' ) ) ) {
+				++$job['skipped'];
+				continue;
+			}
+
+			++$job['processed'];
+			$result = $this->postcode_client->find_postal_code( $location );
+			if ( ! empty( $result['tokens_exhausted'] ) ) {
+				$job['phase'] = 'finished';
+				$job['reason'] = 'daily_limit_exhausted';
+				$job['tokens_exhausted'] = true;
+				$job['last_error'] = __( 'Суточный лимит всех токенов DaData исчерпан. Продолжите обработку позже повторным нажатием кнопки.', 'walls-delivery-calc' );
+				break;
+			}
+
+			if ( empty( $result['success'] ) ) {
+				++$job['errors'];
+				++$job['consecutive_errors'];
+				$job['last_error'] = (string) ( $result['error_message'] ?? $result['error_code'] ?? 'DaData error.' );
+				if ( (int) $job['consecutive_errors'] >= 30 ) {
+					$job['phase'] = 'failed';
+					$job['last_error'] = __( 'DaData стабильно возвращает ошибки или неподходящие данные. Работа остановлена после 30 ошибок подряд.', 'walls-delivery-calc' );
+					break;
+				}
+				continue;
+			}
+
+			$postcode = trim( (string) ( $result['postal_code'] ?? '' ) );
+			if ( '' === $postcode ) {
+				$postcode = self::DADATA_POSTCODE_MARKER;
+				if ( $this->repository->update_postal_code( $location_id, $postcode ) ) {
+					++$job['marked_no_index'];
+				}
+			} elseif ( $this->repository->update_postal_code( $location_id, $postcode ) ) {
+				++$job['updated'];
+			}
+
+			$job['consecutive_errors'] = 0;
+		}
+
+		$job['updated_at'] = current_time( 'mysql' );
+		return $job;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function dadata_postcode_failed_job( string $message ): array {
+		return array(
+			'phase' => 'failed',
+			'processed' => 0,
+			'updated' => 0,
+			'marked_no_index' => 0,
+			'skipped' => 0,
+			'errors' => 1,
+			'consecutive_errors' => 1,
+			'tokens_exhausted' => false,
+			'last_error' => $message,
+			'updated_at' => current_time( 'mysql' ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $job
+	 * @return array<string,mixed>
+	 */
+	private function fail_dadata_postcode_job( array $job, string $message ): array {
+		$job['phase'] = 'failed';
+		$job['last_error'] = $message;
+		$job['errors'] = (int) ( $job['errors'] ?? 0 ) + 1;
+		$job['consecutive_errors'] = (int) ( $job['consecutive_errors'] ?? 0 ) + 1;
+		$job['updated_at'] = current_time( 'mysql' );
+		return $job;
 	}
 
 	/**
