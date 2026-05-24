@@ -88,16 +88,12 @@ final class SettingsAdminPage {
 							<td><label><input type="checkbox" name="enable_demo_carrier" value="1" <?php checked( ! empty( $values['enable_demo_carrier'] ) ); ?>> <?php echo esc_html__( 'Использовать тестовые тарифы до подключения реальных перевозчиков.', 'walls-delivery-calc' ); ?></label></td>
 						</tr>
 						<tr>
-							<th scope="row"><label for="wdc_location_search_limit"><?php echo esc_html__( 'Лимит результатов поиска населенных пунктов', 'walls-delivery-calc' ); ?></label></th>
-							<td><input id="wdc_location_search_limit" type="number" name="location_search_limit" value="<?php echo esc_attr( (string) ( $values['location_search_limit'] ?? 100 ) ); ?>" min="10" max="300" step="1"></td>
-						</tr>
-						<tr>
 							<th scope="row"><?php echo esc_html__( 'Подставлять область в поиск населенного пункта на checkout', 'walls-delivery-calc' ); ?></th>
 							<td><label><input type="checkbox" name="include_region_in_checkout_city_picker_query" value="1" <?php checked( ! empty( $values['include_region_in_checkout_city_picker_query'] ) ); ?>> <?php echo esc_html__( 'При открытии выбора населенного пункта использовать область вместе с городом.', 'walls-delivery-calc' ); ?></label></td>
 						</tr>
 						<tr>
 							<th scope="row"><label for="wdc_checkout_location_search_limit"><?php echo esc_html__( 'Максимум вариантов поиска населенного пункта на checkout', 'walls-delivery-calc' ); ?></label></th>
-							<td><input id="wdc_checkout_location_search_limit" type="number" name="checkout_location_search_limit" value="<?php echo esc_attr( (string) ( $values['checkout_location_search_limit'] ?? 100 ) ); ?>" min="10" max="300" step="1"></td>
+							<td><input id="wdc_checkout_location_search_limit" type="number" name="checkout_location_search_limit" value="<?php echo esc_attr( (string) ( $values['checkout_location_search_limit'] ?? 100 ) ); ?>" min="10" max="500" step="1"></td>
 						</tr>
 						<tr>
 							<th scope="row"><label for="wdc_checkout_location_region_limit"><?php echo esc_html__( 'Максимум вариантов в одной области', 'walls-delivery-calc' ); ?></label></th>
@@ -165,7 +161,6 @@ final class SettingsAdminPage {
 			$sort_mode = RateSorter::CHEAPEST;
 		}
 
-		$limit                      = isset( $data['location_search_limit'] ) ? $this->absint( wp_unslash( (string) $data['location_search_limit'] ) ) : 100;
 		$checkout_location_limit    = isset( $data['checkout_location_search_limit'] ) ? $this->absint( wp_unslash( (string) $data['checkout_location_search_limit'] ) ) : 100;
 		$checkout_region_limit      = isset( $data['checkout_location_region_limit'] ) ? $this->absint( wp_unslash( (string) $data['checkout_location_region_limit'] ) ) : 10;
 		$fias_timeout               = isset( $data['fias_api_timeout'] ) ? $this->absint( wp_unslash( (string) $data['fias_api_timeout'] ) ) : 3;
@@ -179,9 +174,8 @@ final class SettingsAdminPage {
 			'checkout_sort_mode'           => $sort_mode,
 			'show_checkout_debug_panel'    => ! empty( $data['show_checkout_debug_panel'] ),
 			'enable_demo_carrier'          => ! empty( $data['enable_demo_carrier'] ),
-			'location_search_limit'        => max( 10, min( 300, $limit > 0 ? $limit : 100 ) ),
 			'include_region_in_checkout_city_picker_query' => ! array_key_exists( 'include_region_in_checkout_city_picker_query', $data ) ? false : ! empty( $data['include_region_in_checkout_city_picker_query'] ),
-			'checkout_location_search_limit' => max( 10, min( 300, $checkout_location_limit > 0 ? $checkout_location_limit : 100 ) ),
+			'checkout_location_search_limit' => max( 10, min( 500, $checkout_location_limit > 0 ? $checkout_location_limit : 100 ) ),
 			'checkout_location_region_limit' => max( 3, min( 50, $checkout_region_limit > 0 ? $checkout_region_limit : 10 ) ),
 			'fias_api_enabled'             => ! empty( $data['fias_api_enabled'] ),
 			'fias_api_timeout'             => max( 1, min( 15, $fias_timeout > 0 ? $fias_timeout : 3 ) ),

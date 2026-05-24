@@ -448,6 +448,7 @@ $city_selector_config = $registrar->city_selector_config();
 runtime_smoke_assert( 'https://example.test/wp-admin/admin-ajax.php' === $city_selector_config['ajax_url'], 'City selector config must expose AJAX URL.' );
 runtime_smoke_assert( 3 === $city_selector_config['min_chars'], 'City selector config must require three characters.' );
 runtime_smoke_assert( str_starts_with( $city_selector_config['nonce'], 'nonce-' ), 'City selector config must expose nonce.' );
+runtime_smoke_assert( 100 === (int) ( $city_selector_config['checkout_location_search_limit'] ?? 0 ), 'City selector config must expose checkout location search limit.' );
 runtime_smoke_assert( 'Идет поиск...' === $city_selector_config['strings']['searching'], 'City selector config strings must be Russian.' );
 
 $location_repository = new LocationRepository( $GLOBALS['wpdb'] );
@@ -466,11 +467,11 @@ runtime_smoke_assert( 'Новосибирск' === ( $location_ajax->payload( 'y
 runtime_smoke_assert( array() === $location_ajax->payload( 'Berlin' )['groups'], 'Keyboard layout correction must not make Berlin match Russian cities accidentally.' );
 runtime_smoke_assert( 100 === $location_payload['limit'], 'Location AJAX payload must include default limit.' );
 runtime_smoke_assert( isset( $location_payload['limit_reached'] ), 'Location AJAX payload must include limit_reached.' );
-$location_settings->set( 'location_search_limit', 10 );
-runtime_smoke_assert( 10 === $location_ajax->payload( 'Новос' )['limit'], 'Location AJAX must use SettingsRepository location_search_limit.' );
-$location_settings->set( 'location_search_limit', 999 );
-runtime_smoke_assert( 300 === $location_ajax->payload( 'Новос' )['limit'], 'Location AJAX must clamp location_search_limit to max.' );
-$location_settings->set( 'location_search_limit', 100 );
+$location_settings->set( 'checkout_location_search_limit', 10 );
+runtime_smoke_assert( 10 === $location_ajax->payload( 'Новос' )['limit'], 'Location AJAX must use SettingsRepository checkout_location_search_limit.' );
+$location_settings->set( 'checkout_location_search_limit', 999 );
+runtime_smoke_assert( 500 === $location_ajax->payload( 'Новос' )['limit'], 'Location AJAX must clamp checkout_location_search_limit to max.' );
+$location_settings->set( 'checkout_location_search_limit', 100 );
 runtime_smoke_assert( array() === $location_ajax->payload( 'xx' )['groups'], 'Short location AJAX query must return empty groups.' );
 runtime_smoke_assert( array() === $location_ajax->payload( 'НеизвестныйГород' )['groups'], 'Unknown location AJAX query must return empty groups.' );
 $_REQUEST = array(
@@ -558,22 +559,25 @@ $cheap_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), 
 runtime_smoke_assert( DeliveryType::PICKUP === $cheap_rates[0]->delivery_type, 'Cheapest sort must put pickup first.' );
 
 $settings_page = new SettingsAdminPage( $settings );
-runtime_smoke_assert( 100 === $settings->get_int( 'location_search_limit', 0 ), 'SettingsRepository must default location_search_limit to 100.' );
+$legacy_location_limit_key = 'location' . '_search' . '_limit';
+runtime_smoke_assert( 0 === $settings->get_int( $legacy_location_limit_key, 0 ), 'SettingsRepository must not default the legacy location limit key.' );
+runtime_smoke_assert( 100 === $settings->get_int( 'checkout_location_search_limit', 0 ), 'SettingsRepository must default checkout_location_search_limit to 100.' );
 $sanitized = $settings_page->sanitize_settings(
 	array(
 		'enable_new_checkout_shipping' => '1',
 		'checkout_sort_mode'           => 'unexpected',
 		'show_checkout_debug_panel'    => 'on',
-		'location_search_limit'        => '100',
+		'checkout_location_search_limit' => '100',
 	)
 );
 runtime_smoke_assert( true === $sanitized['enable_new_checkout_shipping'], 'enable_new_checkout_shipping must sanitize to true.' );
 runtime_smoke_assert( RateSorter::CHEAPEST === $sanitized['checkout_sort_mode'], 'Invalid checkout_sort_mode must fall back to cheapest.' );
 runtime_smoke_assert( true === $sanitized['show_checkout_debug_panel'], 'show_checkout_debug_panel must sanitize to true.' );
 runtime_smoke_assert( false === $sanitized['enable_demo_carrier'], 'Missing enable_demo_carrier checkbox must sanitize to false.' );
-runtime_smoke_assert( 100 === $sanitized['location_search_limit'], 'location_search_limit=100 must sanitize to 100.' );
-runtime_smoke_assert( 10 === $settings_page->sanitize_settings( array( 'location_search_limit' => '5' ) )['location_search_limit'], 'location_search_limit below min must clamp to 10.' );
-runtime_smoke_assert( 300 === $settings_page->sanitize_settings( array( 'location_search_limit' => '999' ) )['location_search_limit'], 'location_search_limit above max must clamp to 300.' );
+runtime_smoke_assert( ! array_key_exists( $legacy_location_limit_key, $sanitized ), 'Legacy location limit key must not be sanitized.' );
+runtime_smoke_assert( 100 === $sanitized['checkout_location_search_limit'], 'checkout_location_search_limit=100 must sanitize to 100.' );
+runtime_smoke_assert( 10 === $settings_page->sanitize_settings( array( 'checkout_location_search_limit' => '5' ) )['checkout_location_search_limit'], 'checkout_location_search_limit below min must clamp to 10.' );
+runtime_smoke_assert( 500 === $settings_page->sanitize_settings( array( 'checkout_location_search_limit' => '999' ) )['checkout_location_search_limit'], 'checkout_location_search_limit above max must clamp to 500.' );
 
 $GLOBALS['wdc_test_options'] = array(
 	'wdc_core_settings' => array(

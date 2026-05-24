@@ -258,7 +258,7 @@
 				action: 'wdc_platform_search_locations',
 				nonce: config.nonce,
 				query: query,
-				limit: config.location_search_limit || 100,
+				limit: config.checkout_location_search_limit || 100,
 				region_limit: config.location_region_limit || 10,
 				force_region_code: forceRegionCode
 			}
@@ -269,7 +269,7 @@
 			debug( 'corrected query', response && response.data ? response.data.corrected_query || '' : '' );
 			debug( 'correction used', !! ( response && response.data && response.data.correction_used ) );
 			if ( response && response.success ) {
-				renderResults( groups, !! response.data.limit_reached, response.data.limit || config.location_search_limit || 100 );
+				renderResults( groups, !! response.data.limit_reached, response.data.limit || config.checkout_location_search_limit || 100 );
 				return;
 			}
 			renderMessage( config.strings && config.strings.error ? config.strings.error : '', 'is-error' );

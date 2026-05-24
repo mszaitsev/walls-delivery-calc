@@ -94,10 +94,7 @@ final class CheckoutLocationAjax {
 	}
 
 	private function limit(): int {
-		$legacy = $this->settings->get_int( 'location_search_limit', 100 );
-		$checkout = $this->settings->get_int( 'checkout_location_search_limit', $legacy );
-		$limit = 100 !== $checkout ? $checkout : $legacy;
-		return max( 10, min( 300, $limit ) );
+		return max( 10, min( 500, $this->settings->get_int( 'checkout_location_search_limit', 100 ) ) );
 	}
 
 	private function region_limit(): int {

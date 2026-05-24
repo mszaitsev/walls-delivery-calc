@@ -50,7 +50,7 @@ The city picker AJAX response returns grouped results:
 The checkout settings are:
 
 - `include_region_in_checkout_city_picker_query`, default `true`;
-- `checkout_location_search_limit`, default `100`, min `10`, max `300`;
+- `checkout_location_search_limit`, default `100`, min `10`, max `500`;
 - `checkout_location_region_limit`, default `10`, min `3`, max `50`.
 
 When region prefill is enabled, opening the picker seeds the modal query from `state + ", " + city`; with only one field filled it uses that field, and with both empty it leaves the query empty. Each region initially shows up to `checkout_location_region_limit` rows. If more rows exist, the frontend shows `Показать все варианты в области` and repeats search with `force_region_code`, returning only that region up to the global checkout search limit.
