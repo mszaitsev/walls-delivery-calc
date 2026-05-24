@@ -158,6 +158,10 @@ checkout_location_picker_assert( 'resolved' !== $search->resolve_checkout_fields
 $city_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.js' );
 $address_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-address-suggestions.js' );
 checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'include_region_in_query' ) && str_contains( $city_js, 'wdc-city-picker-show-region' ), 'Frontend city picker supports region prefill and show-all-region.' );
+checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'applySelectedLocation( location, { updateCheckout: true, explicit: true' ), 'User modal selection must explicitly trigger checkout update.' );
+checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'applySelectedLocation( body.selected, { updateCheckout: false, explicit: false, source: \'auto\', updateFields: false } )' ), 'Auto-resolve does not trigger update_checkout loop.' );
+checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'hiddenValue( \'wdc_platform_location_fias_id\' ) === String( body.selected.fias_id || \'\' )' ), 'Repeated updated_checkout with same hidden fias_id does not call applySelectedLocation again.' );
+checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'if ( ! hasSelectedLocation() )' ) && str_contains( $city_js, 'scheduleAutoResolve();' ), 'updated_checkout restores notice without auto-resolve when hidden selected location exists.' );
 checkout_location_picker_assert( is_string( $address_js ) && str_contains( $address_js, "locationSource: 'local_selected'" ), 'DaData address opening query uses selected display_name when fias_id exists.' );
 checkout_location_picker_assert( is_string( $address_js ) && str_contains( $address_js, "regionSource: 'checkout_state'" ), 'DaData address opening query falls back to state/city/address.' );
 

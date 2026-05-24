@@ -408,10 +408,14 @@
 			return;
 		}
 
-		applySelectedLocation( location );
+		applySelectedLocation( location, { updateCheckout: true, explicit: true, source: 'modal', updateFields: true } );
 	}
 
-	function applySelectedLocation( location ) {
+	function applySelectedLocation( location, options ) {
+		options = options || {};
+		var updateCheckout = false !== options.updateCheckout;
+		var updateFields = false !== options.updateFields;
+		var source = options.source || ( false === options.explicit ? 'auto' : 'modal' );
 		isSelecting = true;
 		suppressSearch = true;
 		window.clearTimeout( suppressTimer );
@@ -431,11 +435,13 @@
 			state: $state.val()
 		} );
 
-		setFieldValue( $city, city );
-		if ( location.postal_code ) {
-			setFieldValue( $postcode, location.postal_code );
+		if ( updateFields ) {
+			setFieldValue( $city, city );
+			if ( location.postal_code ) {
+				setFieldValue( $postcode, location.postal_code );
+			}
+			setStateField( $state, location );
 		}
-		setStateField( $state, location );
 
 		debug( 'fields after', {
 			city: $city.val(),
@@ -458,20 +464,24 @@
 		setHidden( 'wdc_platform_location_city_type', location.city_type );
 		setHidden( 'wdc_platform_location_place_name', location.place_name || location.settlement_name );
 		setHidden( 'wdc_platform_location_place_type', location.place_type );
-		setHidden( 'wdc_platform_location_selected_source', location.selected_source || 'modal' );
-		explicitSelection = 'auto' !== location.selected_source;
+		setHidden( 'wdc_platform_location_selected_source', source );
+		explicitSelection = true === options.explicit;
 		debug( 'hidden fields set' );
 
-		resultsBox().empty();
-		closePicker();
+		if ( updateCheckout || true === options.explicit ) {
+			resultsBox().empty();
+			closePicker();
+		}
 		selectedDisplay = location.display_name || label;
 		renderSelectedNotice( $city, selectedDisplay, location.postal_code, false );
 
 		isSelecting = false;
-		window.setTimeout( function () {
-			debug( 'update_checkout triggered' );
-			$( document.body ).trigger( 'update_checkout' );
-		}, 50 );
+		if ( updateCheckout ) {
+			window.setTimeout( function () {
+				debug( 'update_checkout triggered' );
+				$( document.body ).trigger( 'update_checkout' );
+			}, 50 );
+		}
 		suppressTimer = window.setTimeout( function () {
 			suppressSearch = false;
 			debug( 'suppressSearch disabled by timeout' );
@@ -526,7 +536,9 @@
 			ensureHiddenFields( $form );
 		}
 		restoreSelectedNotice();
-		scheduleAutoResolve();
+		if ( ! hasSelectedLocation() ) {
+			scheduleAutoResolve();
+		}
 	}
 
 	function afterCheckoutUpdated() {
@@ -541,16 +553,20 @@
 		renderSelectedNotice( cityField(), 'Просим проверить название и внести верный населенный пункт', '', true );
 	}
 
+	function hasSelectedLocation() {
+		return !! ( hiddenValue( 'wdc_platform_location_fias_id' ) && hiddenValue( 'wdc_platform_location_display_name' ) );
+	}
+
 	function scheduleAutoResolve() {
 		window.clearTimeout( autoResolveTimer );
-		if ( explicitSelection || pickerOpen || isSelecting ) {
+		if ( explicitSelection || pickerOpen || isSelecting || hasSelectedLocation() ) {
 			return;
 		}
 		autoResolveTimer = window.setTimeout( autoResolve, 450 );
 	}
 
 	function autoResolve() {
-		if ( ! config.ajax_url || explicitSelection || pickerOpen || isSelecting ) {
+		if ( ! config.ajax_url || explicitSelection || pickerOpen || isSelecting || hasSelectedLocation() ) {
 			return;
 		}
 		var regionText = checkoutFieldText( stateField() );
@@ -572,8 +588,11 @@
 		} ).done( function ( response ) {
 			var body = response && response.data ? response.data : {};
 			if ( response && response.success && 'resolved' === body.status && body.selected ) {
-				body.selected.selected_source = 'auto';
-				applySelectedLocation( body.selected );
+				if ( hiddenValue( 'wdc_platform_location_fias_id' ) === String( body.selected.fias_id || '' ) ) {
+					restoreSelectedNotice();
+					return;
+				}
+				applySelectedLocation( body.selected, { updateCheckout: false, explicit: false, source: 'auto', updateFields: false } );
 				return;
 			}
 			clearHidden();
