@@ -1,6 +1,6 @@
 # WDC Russian Post Countries
 
-Version: 0.19.2.
+Version: 0.19.3.
 
 ## Persistent Mapping Table
 
@@ -15,7 +15,7 @@ Each row stores one WooCommerce country and its Russian Post dictionary match:
 - WooCommerce code/name
 - Russian Post country id/name/ISO2
 - parcel availability and block flags
-- API availability and match status
+- API availability, match status, and `match_source`
 - manual mode and manual comment
 - calculated `effective_enabled`
 - last check timestamp
@@ -29,13 +29,23 @@ The admin action calls `RussianPostCountryMappingService::refresh_from_api()`:
 
 1. Fetch Russian Post country dictionary through `RussianPostApiClient::fetch_countries()`.
 2. Read WooCommerce countries from `WC()->countries->get_countries()`.
-3. Match by ISO2 country code.
-4. Exclude `RU`.
-5. Upsert every non-RU WooCommerce country into the mapping table.
-6. Preserve existing `manual_mode` and `manual_comment`.
-7. Store raw JSON and `last_checked_at`.
+3. Build an index by normalized Russian Post country name.
+4. Match WooCommerce countries by normalized country name, then by configured aliases for known naming differences.
+5. Exclude `RU`.
+6. Upsert every non-RU WooCommerce country into the mapping table.
+7. Preserve existing `manual_mode` and `manual_comment`.
+8. Store raw JSON, `match_source`, and `last_checked_at`.
 
-Refresh stats include raw API count, WooCommerce count, matched count, enabled count, skipped/unmatched count, manual enabled/disabled counts, and errors.
+The Russian Post dictionary may return rows like `{id, name, parcel}` without ISO2. In that case `rp_country_id` is filled from `id`, `rp_country_name` from `name`, and `rp_iso2` remains empty.
+
+Refresh stats include raw API count, name index count, sample API keys, WooCommerce count, matched count, enabled count, skipped/unmatched count, manual enabled/disabled counts, and errors. If the API has rows but the name index is empty, refresh reports `country_name_index_empty`.
+
+`match_source` values:
+
+- `name`: direct normalized name match
+- `alias`: match through the alias map
+- `none`: no match
+- `iso2`: reserved for a future API response that includes ISO2 again
 
 ## Effective Enabled
 
@@ -64,6 +74,7 @@ The page includes:
 - filters for effective enabled/disabled, matched/unmatched, manual enabled/disabled, and auto
 - search by WooCommerce name, Russian Post name, country code, or Russian Post ISO2
 - pagination with 20/50/100 per page
+- match source column
 - per-row actions: auto, enable manually, disable manually
 
 Manual row changes set the comment to:
@@ -77,7 +88,7 @@ The page has two textarea inputs:
 - `Страны, куда доставка есть`
 - `Страны, куда доставки нет`
 
-Format is one country per line. Matching is case-insensitive, normalizes `ё/е`, and checks WooCommerce country name, Russian Post country name, WooCommerce country code, and Russian Post ISO2.
+Format is one country per line. Matching is case-insensitive, normalizes `ё/е`, removes punctuation, and checks WooCommerce country name, Russian Post country name, WooCommerce country code, and Russian Post ISO2 when present.
 
 The first submit builds a preview:
 

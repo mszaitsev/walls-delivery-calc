@@ -89,8 +89,8 @@ function wp_remote_get( string $url, array $args = array() ): mixed {
 			'body' => json_encode(
 				array(
 					'country' => array(
-						array( 'id' => 840, 'iso2' => 'US', 'name' => 'United States', 'parcel' => array( 'block' => 0 ) ),
-						array( 'id' => 643, 'iso2' => 'RU', 'name' => 'Россия', 'parcel' => array( 'block' => 0 ) ),
+						array( 'id' => 840, 'name' => 'СОЕДИНЕННЫЕ ШТАТЫ АМЕРИКИ', 'parcel' => array( 'block' => 0 ) ),
+						array( 'id' => 643, 'name' => 'Россия', 'parcel' => array( 'block' => 0 ) ),
 					),
 				)
 			),

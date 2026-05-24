@@ -1,6 +1,6 @@
 # WDC Russian Post International Carrier
 
-Version: 0.19.0.
+Version: 0.19.3.
 
 ## Scope
 
@@ -64,6 +64,8 @@ All HTTP requests use the WordPress HTTP API. Runtime settings include tariff en
 Debug logs include endpoint, sanitized params, raw response, parsed response, cache hit/miss, formula calculation, and fallback reason. Token-like fields are omitted from request params and the shared logger redactor handles sensitive context keys.
 
 As of 0.19.2, the country directory uses the persistent `wdc_russian_post_country_mappings` table. Runtime returns only rows with `effective_enabled=1`; RU is always excluded. The Russian Post dictionary endpoint is used by the admin refresh flow and optional lazy refresh when `auto_refresh_countries_if_empty` is enabled.
+
+As of 0.19.3, Russian Post country refresh matches API rows by normalized country name because the dictionary can omit ISO2 and return only `id`, `name`, and `parcel`. Known WooCommerce/Russian Post naming differences are handled by an alias map, and `rp_iso2` may be empty at runtime.
 
 Tariff API results are cached until the end of the current WordPress timezone day. Cache keys include carrier, service, country, request params, and weight.
 

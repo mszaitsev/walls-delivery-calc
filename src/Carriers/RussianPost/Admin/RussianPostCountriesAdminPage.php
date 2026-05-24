@@ -87,13 +87,39 @@ final class RussianPostCountriesAdminPage {
 
 	private function render_bulk_forms(): void {
 		?>
+		<style>
+			.wdc-rp-bulk-columns {
+				display: flex;
+				gap: 24px;
+				align-items: flex-start;
+				flex-wrap: wrap;
+				margin: 12px 0;
+			}
+			.wdc-rp-bulk-column {
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+			}
+			.wdc-rp-bulk-column textarea {
+				width: 360px;
+				max-width: 100%;
+			}
+		</style>
 		<h2><?php echo esc_html__( 'Bulk-вставка списков', 'walls-delivery-calc' ); ?></h2>
 		<form method="post">
 			<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 			<input type="hidden" name="wdc_rp_country_action" value="preview_bulk">
 			<p><?php echo esc_html__( 'Формат: 1 страна = 1 строка.', 'walls-delivery-calc' ); ?></p>
-			<p><label><strong><?php echo esc_html__( 'Страны, куда доставка есть', 'walls-delivery-calc' ); ?></strong><br><textarea name="available_countries" rows="7" cols="45" placeholder="АВСТРИЯ&#10;АЗЕРБАЙДЖАН&#10;АЛБАНИЯ"></textarea></label>
-			<label style="margin-left:20px;"><strong><?php echo esc_html__( 'Страны, куда доставки нет', 'walls-delivery-calc' ); ?></strong><br><textarea name="unavailable_countries" rows="7" cols="45"></textarea></label></p>
+			<div class="wdc-rp-bulk-columns">
+				<div class="wdc-rp-bulk-column">
+					<label for="wdc-rp-available-countries"><strong><?php echo esc_html__( 'Страны, куда доставка есть', 'walls-delivery-calc' ); ?></strong></label>
+					<textarea id="wdc-rp-available-countries" name="available_countries" rows="7" cols="45" placeholder="АВСТРИЯ&#10;АЗЕРБАЙДЖАН&#10;АЛБАНИЯ"></textarea>
+				</div>
+				<div class="wdc-rp-bulk-column">
+					<label for="wdc-rp-unavailable-countries"><strong><?php echo esc_html__( 'Страны, куда доставки нет', 'walls-delivery-calc' ); ?></strong></label>
+					<textarea id="wdc-rp-unavailable-countries" name="unavailable_countries" rows="7" cols="45"></textarea>
+				</div>
+			</div>
 			<button class="button" type="submit"><?php echo esc_html__( 'Проверить изменения', 'walls-delivery-calc' ); ?></button>
 		</form>
 		<?php
@@ -178,7 +204,7 @@ final class RussianPostCountriesAdminPage {
 	 */
 	private function render_table( array $items ): void {
 		echo '<table class="widefat striped"><thead><tr>';
-		foreach ( array( 'WooCommerce код', 'Страна WooCommerce', 'Страна Почты России', 'ID Почты России', 'ISO2 Почты', 'Сопоставлено', 'API доступно', 'Parcel', 'Block', 'Ручной режим', 'Итог', 'Комментарий', 'Последняя проверка', 'Действия' ) as $heading ) {
+		foreach ( array( 'WooCommerce код', 'Страна WooCommerce', 'Страна Почты России', 'ID Почты России', 'ISO2 Почты', 'Сопоставлено', 'Источник сопоставления', 'API доступно', 'Parcel', 'Block', 'Ручной режим', 'Итог', 'Комментарий', 'Последняя проверка', 'Действия' ) as $heading ) {
 			echo '<th>' . esc_html( $heading ) . '</th>';
 		}
 		echo '</tr></thead><tbody>';
@@ -190,6 +216,7 @@ final class RussianPostCountriesAdminPage {
 			echo '<td>' . esc_html( $item->rp_country_id ) . '</td>';
 			echo '<td>' . esc_html( $item->rp_iso2 ) . '</td>';
 			echo '<td>' . esc_html( $this->yes_no( $item->matched ) ) . '</td>';
+			echo '<td>' . esc_html( $item->match_source ) . '</td>';
 			echo '<td>' . esc_html( $this->yes_no( $item->api_available ) ) . '</td>';
 			echo '<td>' . esc_html( $this->yes_no( $item->has_parcel ) ) . '</td>';
 			echo '<td>' . esc_html( $this->yes_no( $item->parcel_block ) ) . '</td>';

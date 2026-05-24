@@ -21,12 +21,14 @@ final class RussianPostCountryMappingService {
 	public function refresh_from_api(): array {
 		$stats = array(
 			'raw_api_count'    => 0,
+			'indexed_by_name_count' => 0,
 			'wc_count'         => 0,
 			'matched'          => 0,
 			'enabled'          => 0,
 			'skipped'          => 0,
 			'manual_enabled'   => 0,
 			'manual_disabled'  => 0,
+			'sample_api_keys'  => array(),
 			'errors'           => array(),
 		);
 		$this->logger->info( 'Russian Post country mapping refresh started.' );
@@ -41,7 +43,12 @@ final class RussianPostCountryMappingService {
 
 		$items = $this->extract_items( $result['raw'] );
 		$stats['raw_api_count'] = count( $items );
-		$rp_by_iso = $this->index_by_iso2( $items );
+		$stats['sample_api_keys'] = isset( $items[0] ) && is_array( $items[0] ) ? array_keys( $items[0] ) : array();
+		$rp_by_name = $this->index_by_normalized_name( $items );
+		$stats['indexed_by_name_count'] = count( $rp_by_name );
+		if ( $stats['raw_api_count'] > 0 && 0 === $stats['indexed_by_name_count'] ) {
+			$stats['errors'][] = 'country_name_index_empty';
+		}
 		$wc_countries = $this->wc_countries();
 		$stats['wc_count'] = count( $wc_countries );
 
@@ -52,7 +59,9 @@ final class RussianPostCountryMappingService {
 			}
 
 			$existing = $this->repository->find_by_wc_country_code( $wc_code );
-			$rp = $rp_by_iso[ $wc_code ] ?? null;
+			$match = $this->match_country( $wc_code, (string) $wc_name, $rp_by_name );
+			$rp = $match['row'];
+			$match_source = $match['source'];
 			$has_parcel = is_array( $rp ) && isset( $rp['parcel'] ) && is_array( $rp['parcel'] );
 			$parcel_block = $has_parcel && ( 1 === ( $rp['parcel']['block'] ?? null ) || '1' === ( $rp['parcel']['block'] ?? null ) );
 			$matched = is_array( $rp );
@@ -65,13 +74,14 @@ final class RussianPostCountryMappingService {
 				array(
 					'wc_country_code'   => $wc_code,
 					'wc_country_name'   => (string) $wc_name,
-					'rp_country_id'     => is_array( $rp ) ? $this->first_scalar( $rp, array( 'carrier_country_id', 'country_id', 'country-id', 'countryId', 'id', 'Id', 'code', 'Code', 'country', 'country-to' ) ) : '',
+					'rp_country_id'     => is_array( $rp ) ? $this->first_scalar( $rp, array( 'id', 'Id' ) ) : '',
 					'rp_country_name'   => is_array( $rp ) ? $this->first_scalar( $rp, array( 'name', 'Name', 'country_name', 'countryName', 'fullname', 'fullName', 'nameRu', 'nameRus', 'russianName' ) ) : '',
-					'rp_iso2'           => is_array( $rp ) ? $wc_code : '',
+					'rp_iso2'           => '',
 					'has_parcel'        => $has_parcel,
 					'parcel_block'      => $parcel_block,
 					'api_available'     => $api_available,
 					'matched'           => $matched,
+					'match_source'      => $match_source,
 					'manual_mode'       => $manual_mode,
 					'manual_comment'    => $manual_comment,
 					'last_checked_at'   => $this->now(),
@@ -172,22 +182,85 @@ final class RussianPostCountryMappingService {
 	 * @param array<int,mixed> $items
 	 * @return array<string,array<string,mixed>>
 	 */
-	private function index_by_iso2( array $items ): array {
+	private function index_by_normalized_name( array $items ): array {
 		$indexed = array();
 		foreach ( $items as $item ) {
 			if ( ! is_array( $item ) ) {
 				continue;
 			}
-			$iso2 = strtoupper( $this->first_code( $item, array( 'iso2', 'alpha2', 'a2', 'code2', 'countryCode2', 'country_code_iso2', 'country_iso2', 'country_code' ), 2 ) );
-			if ( '' === $iso2 ) {
-				$iso2 = strtoupper( $this->first_code( $item, array( 'code', 'Code' ), 2 ) );
-			}
-			if ( '' !== $iso2 && 'RU' !== $iso2 ) {
-				$indexed[ $iso2 ] = $item;
+			$name = $this->first_scalar( $item, array( 'name', 'Name', 'country_name', 'countryName', 'fullname', 'fullName', 'nameRu', 'nameRus', 'russianName' ) );
+			$key = $this->normalize_key( $name );
+			if ( '' !== $key ) {
+				$indexed[ $key ] = $item;
 			}
 		}
 
 		return $indexed;
+	}
+
+	/**
+	 * @param array<string,array<string,mixed>> $rp_by_name
+	 * @return array{row:?array<string,mixed>,source:string}
+	 */
+	private function match_country( string $wc_code, string $wc_name, array $rp_by_name ): array {
+		$name_key = $this->normalize_key( $wc_name );
+		if ( isset( $rp_by_name[ $name_key ] ) ) {
+			return array( 'row' => $rp_by_name[ $name_key ], 'source' => 'name' );
+		}
+
+		foreach ( $this->aliases_for( $wc_code, $wc_name ) as $alias ) {
+			$key = $this->normalize_key( $alias );
+			if ( isset( $rp_by_name[ $key ] ) ) {
+				return array( 'row' => $rp_by_name[ $key ], 'source' => 'alias' );
+			}
+		}
+
+		return array( 'row' => null, 'source' => 'none' );
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function aliases_for( string $wc_code, string $wc_name ): array {
+		$keys = array( strtoupper( trim( $wc_code ) ), $this->normalize_key( $wc_name ) );
+		$aliases = array();
+		foreach ( $keys as $key ) {
+			foreach ( $this->country_aliases()[ $key ] ?? array() as $alias ) {
+				$aliases[] = $alias;
+			}
+		}
+
+		return array_values( array_unique( $aliases ) );
+	}
+
+	/**
+	 * @return array<string,array<int,string>>
+	 */
+	private function country_aliases(): array {
+		return array(
+			'US' => array( 'СОЕДИНЕННЫЕ ШТАТЫ АМЕРИКИ', 'США' ),
+			'UNITED STATES' => array( 'СОЕДИНЕННЫЕ ШТАТЫ АМЕРИКИ', 'США' ),
+			'США' => array( 'СОЕДИНЕННЫЕ ШТАТЫ АМЕРИКИ' ),
+			'СОЕДИНЕННЫЕ ШТАТЫ' => array( 'СОЕДИНЕННЫЕ ШТАТЫ АМЕРИКИ' ),
+			'GB' => array( 'ВЕЛИКОБРИТАНИЯ' ),
+			'UNITED KINGDOM' => array( 'ВЕЛИКОБРИТАНИЯ' ),
+			'ВЕЛИКОБРИТАНИЯ' => array( 'ВЕЛИКОБРИТАНИЯ' ),
+			'KR' => array( 'РЕСПУБЛИКА КОРЕЯ' ),
+			'SOUTH KOREA' => array( 'РЕСПУБЛИКА КОРЕЯ' ),
+			'ЮЖНАЯ КОРЕЯ' => array( 'РЕСПУБЛИКА КОРЕЯ' ),
+			'KP' => array( 'КНДР' ),
+			'NORTH KOREA' => array( 'КНДР' ),
+			'СЕВЕРНАЯ КОРЕЯ' => array( 'КНДР' ),
+			'CZ' => array( 'ЧЕХИЯ' ),
+			'CZECHIA' => array( 'ЧЕХИЯ' ),
+			'ЧЕХИЯ' => array( 'ЧЕХИЯ' ),
+			'TR' => array( 'ТУРЦИЯ' ),
+			'TURKEY' => array( 'ТУРЦИЯ' ),
+			'ТУРЦИЯ' => array( 'ТУРЦИЯ' ),
+			'AE' => array( 'ОБЪЕДИНЕННЫЕ АРАБСКИЕ ЭМИРАТЫ' ),
+			'UNITED ARAB EMIRATES' => array( 'ОБЪЕДИНЕННЫЕ АРАБСКИЕ ЭМИРАТЫ' ),
+			'ОАЭ' => array( 'ОБЪЕДИНЕННЫЕ АРАБСКИЕ ЭМИРАТЫ' ),
+		);
 	}
 
 	/**
@@ -211,24 +284,6 @@ final class RussianPostCountryMappingService {
 		foreach ( $keys as $key ) {
 			if ( isset( $raw[ $key ] ) && is_scalar( $raw[ $key ] ) ) {
 				return trim( (string) $raw[ $key ] );
-			}
-		}
-
-		return '';
-	}
-
-	/**
-	 * @param array<string,mixed> $raw
-	 * @param array<int,string>  $keys
-	 */
-	private function first_code( array $raw, array $keys, int $length ): string {
-		foreach ( $keys as $key ) {
-			if ( ! isset( $raw[ $key ] ) || ! is_scalar( $raw[ $key ] ) ) {
-				continue;
-			}
-			$value = strtoupper( trim( (string) $raw[ $key ] ) );
-			if ( preg_match( '/^[A-Z]{' . $length . '}$/', $value ) ) {
-				return $value;
 			}
 		}
 
@@ -323,6 +378,7 @@ final class RussianPostCountryMappingService {
 
 	private function normalize_key( string $value ): string {
 		$value = trim( str_replace( array( 'ё', 'Ё' ), array( 'е', 'Е' ), $value ) );
+		$value = preg_replace( '/[^\p{L}\p{N}\s]+/u', ' ', $value );
 		$value = preg_replace( '/\s+/u', ' ', $value );
 		$value = is_string( $value ) ? $value : '';
 

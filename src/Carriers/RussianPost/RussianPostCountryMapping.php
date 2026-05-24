@@ -24,6 +24,7 @@ final class RussianPostCountryMapping {
 		public readonly bool $parcel_block,
 		public readonly bool $api_available,
 		public readonly bool $matched,
+		public readonly string $match_source,
 		public readonly string $manual_mode,
 		public readonly bool $effective_enabled,
 		public readonly ?string $last_checked_at,
@@ -52,6 +53,7 @@ final class RussianPostCountryMapping {
 			! empty( $row['parcel_block'] ),
 			! empty( $row['api_available'] ),
 			! empty( $row['matched'] ),
+			self::normalize_match_source( (string) ( $row['match_source'] ?? 'none' ) ),
 			self::normalize_mode( (string) ( $row['manual_mode'] ?? self::MODE_AUTO ) ),
 			! empty( $row['effective_enabled'] ),
 			isset( $row['last_checked_at'] ) && null !== $row['last_checked_at'] ? (string) $row['last_checked_at'] : null,
@@ -77,6 +79,7 @@ final class RussianPostCountryMapping {
 			'parcel_block'      => $this->parcel_block,
 			'api_available'     => $this->api_available,
 			'matched'           => $this->matched,
+			'match_source'      => $this->match_source,
 			'manual_mode'       => $this->manual_mode,
 			'effective_enabled' => $this->effective_enabled,
 			'last_checked_at'   => $this->last_checked_at,
@@ -89,5 +92,9 @@ final class RussianPostCountryMapping {
 
 	public static function normalize_mode( string $mode ): string {
 		return in_array( $mode, array( self::MODE_AUTO, self::MODE_ENABLED, self::MODE_DISABLED ), true ) ? $mode : self::MODE_AUTO;
+	}
+
+	public static function normalize_match_source( string $source ): string {
+		return in_array( $source, array( 'name', 'alias', 'iso2', 'none' ), true ) ? $source : 'none';
 	}
 }

@@ -47,10 +47,10 @@ function wp_remote_get( string $url, array $args = array() ): array {
 		'body' => json_encode(
 			array(
 				'country' => array(
-					array( 'id' => '040', 'iso2' => 'AT', 'name' => 'АВСТРИЯ', 'parcel' => array( 'block' => 0 ) ),
-					array( 'id' => '031', 'iso2' => 'AZ', 'name' => 'АЗЕРБАЙДЖАН', 'parcel' => array( 'block' => 1 ) ),
-					array( 'id' => '008', 'iso2' => 'AL', 'name' => '<script>alert(1)</script>', 'parcel' => array( 'block' => 0 ) ),
-					array( 'id' => '643', 'iso2' => 'RU', 'name' => 'РОССИЯ', 'parcel' => array( 'block' => 0 ) ),
+					array( 'id' => 40, 'name' => 'АВСТРИЯ', 'parcel' => array( 'block' => 0 ) ),
+					array( 'id' => 31, 'name' => 'АЗЕРБАЙДЖАН', 'parcel' => array( 'block' => 1 ) ),
+					array( 'id' => 840, 'name' => 'СОЕДИНЕННЫЕ ШТАТЫ АМЕРИКИ', 'parcel' => array( 'block' => 0 ) ),
+					array( 'id' => 643, 'name' => 'РОССИЯ', 'parcel' => array( 'block' => 0 ) ),
 				),
 			)
 		),
@@ -157,8 +157,8 @@ $GLOBALS['wpdb'] = new wpdb();
 final class RpCountriesSmokeCountries {
 	public function get_countries(): array {
 		return array(
-			'AT' => 'Austria',
-			'AZ' => 'Azerbaijan',
+			'AT' => 'Австрия',
+			'AZ' => 'Азербайджан',
 			'AL' => 'Albania',
 			'US' => 'United States',
 			'RU' => 'Russia',
@@ -192,20 +192,27 @@ $service = new RussianPostCountryMappingService( $repo, $client, $logger );
 $stats = $service->refresh_from_api();
 
 country_smoke_assert( 4 === $stats['raw_api_count'], 'refresh_from_api counts raw API countries.' );
+country_smoke_assert( $stats['indexed_by_name_count'] > 0, 'API countries without ISO2 are indexed by normalized name.' );
 country_smoke_assert( null === $repo->find_by_wc_country_code( 'RU' ), 'RU excluded.' );
 country_smoke_assert( $repo->find_by_wc_country_code( 'AT' )?->effective_enabled, 'Matched country with parcel and no block is enabled in auto.' );
-country_smoke_assert( ! $repo->find_by_wc_country_code( 'US' )?->effective_enabled, 'Unmatched country is disabled.' );
+country_smoke_assert( '40' === $repo->find_by_wc_country_code( 'AT' )?->rp_country_id, 'rp_country_id is filled from API id.' );
+country_smoke_assert( '' === $repo->find_by_wc_country_code( 'AT' )?->rp_iso2, 'Empty rp_iso2 is allowed when API does not provide ISO2.' );
+country_smoke_assert( 'name' === $repo->find_by_wc_country_code( 'AT' )?->match_source, 'Austria matches by normalized name.' );
 country_smoke_assert( ! $repo->find_by_wc_country_code( 'AZ' )?->effective_enabled, 'Parcel block disables auto country.' );
-
-$repo->set_manual_mode( 'US', RussianPostCountryMapping::MODE_ENABLED, 'manual keep' );
-$repo->set_manual_mode( 'AT', RussianPostCountryMapping::MODE_DISABLED, 'manual off' );
-country_smoke_assert( $repo->find_by_wc_country_code( 'US' )?->effective_enabled, 'Manual enabled overrides unmatched/API disabled.' );
-country_smoke_assert( ! $repo->find_by_wc_country_code( 'AT' )?->effective_enabled, 'Manual disabled overrides API enabled.' );
-$service->refresh_from_api();
-country_smoke_assert( 'enabled' === $repo->find_by_wc_country_code( 'US' )?->manual_mode && 'manual keep' === $repo->find_by_wc_country_code( 'US' )?->manual_comment, 'Refresh does not erase manual mode/comment.' );
+country_smoke_assert( $repo->find_by_wc_country_code( 'US' )?->effective_enabled && 'alias' === $repo->find_by_wc_country_code( 'US' )?->match_source, 'Alias matching works for United States.' );
 
 $directory = new RussianPostCountryDirectory( $client, $logger, $repo, $service, $rp_settings );
-country_smoke_assert( [] !== $directory->get_country( 'US' ), 'get_country reads persistent table and returns manual enabled.' );
+$at_country = $directory->get_country( 'AT' );
+country_smoke_assert( '40' === ( $at_country['carrier_country_id'] ?? '' ), 'runtime get_country("AT") returns carrier_country_id=40 for fixture.' );
+
+$repo->set_manual_mode( 'AL', RussianPostCountryMapping::MODE_ENABLED, 'manual keep' );
+$repo->set_manual_mode( 'AT', RussianPostCountryMapping::MODE_DISABLED, 'manual off' );
+country_smoke_assert( $repo->find_by_wc_country_code( 'AL' )?->effective_enabled, 'Manual enabled overrides unmatched/API disabled.' );
+country_smoke_assert( ! $repo->find_by_wc_country_code( 'AT' )?->effective_enabled, 'Manual disabled overrides API enabled.' );
+$service->refresh_from_api();
+country_smoke_assert( 'enabled' === $repo->find_by_wc_country_code( 'AL' )?->manual_mode && 'manual keep' === $repo->find_by_wc_country_code( 'AL' )?->manual_comment, 'Refresh does not erase manual mode/comment.' );
+
+country_smoke_assert( [] !== $directory->get_country( 'AL' ), 'get_country reads persistent table and returns manual enabled.' );
 country_smoke_assert( [] === $directory->get_country( 'AT' ), 'get_country returns only effective enabled.' );
 $carrier = new RussianPostInternationalCarrier( $rp_settings, $client, $directory, $logger );
 $item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 1000 );
@@ -216,7 +223,7 @@ $preview = $service->preview_bulk_lists( array( 'АВСТРИЯ' ), array() );
 country_smoke_assert( ! empty( $preview['success'] ) && 1 === count( $preview['available']['changes'] ), 'Bulk available preview detects changes.' );
 $preview = $service->preview_bulk_lists( array(), array( 'United States' ) );
 country_smoke_assert( ! empty( $preview['success'] ) && 1 === count( $preview['unavailable']['changes'] ), 'Bulk unavailable preview detects changes.' );
-$preview = $service->preview_bulk_lists( array( 'AT' ), array( 'Austria' ) );
+$preview = $service->preview_bulk_lists( array( 'AT' ), array( 'Австрия' ) );
 country_smoke_assert( empty( $preview['success'] ) && 'duplicate_rows' === $preview['error'], 'Duplicate country in both lists returns error.' );
 $preview = $service->preview_bulk_lists( array( 'Neverland' ), array() );
 country_smoke_assert( array( 'Neverland' ) === $preview['unrecognized'], 'Unrecognized rows reported.' );
@@ -230,6 +237,7 @@ ob_start();
 $admin->render_page();
 $html = (string) ob_get_clean();
 country_smoke_assert( ! str_contains( $html, '<script>alert(1)</script>' ), 'Admin output escapes or sanitizes country names from API.' );
+country_smoke_assert( str_contains( $html, 'Источник сопоставления' ) && str_contains( $html, '>alias<' ), 'Admin table shows match_source.' );
 
 $legacy_diff = function_exists( 'shell_exec' ) ? trim( (string) shell_exec( 'git diff --name-only -- includes' ) ) : '';
 country_smoke_assert( '' === $legacy_diff, 'legacy includes/* must not be modified.' );

@@ -30,6 +30,7 @@ return static function (): void {
 				parcel_block tinyint(1) NOT NULL DEFAULT 0,
 				api_available tinyint(1) NOT NULL DEFAULT 0,
 				matched tinyint(1) NOT NULL DEFAULT 0,
+				match_source varchar(20) NOT NULL DEFAULT 'none',
 				manual_mode varchar(20) NOT NULL DEFAULT 'auto',
 				effective_enabled tinyint(1) NOT NULL DEFAULT 0,
 				last_checked_at datetime NULL,
@@ -42,6 +43,7 @@ return static function (): void {
 				KEY rp_country_id (rp_country_id),
 				KEY rp_iso2 (rp_iso2),
 				KEY matched (matched),
+				KEY match_source (match_source),
 				KEY effective_enabled (effective_enabled),
 				KEY manual_mode (manual_mode)
 			) {$charset_collate};"
@@ -61,6 +63,7 @@ return static function (): void {
 			parcel_block tinyint(1) NOT NULL DEFAULT 0,
 			api_available tinyint(1) NOT NULL DEFAULT 0,
 			matched tinyint(1) NOT NULL DEFAULT 0,
+			match_source varchar(20) NOT NULL DEFAULT 'none',
 			manual_mode varchar(20) NOT NULL DEFAULT 'auto',
 			effective_enabled tinyint(1) NOT NULL DEFAULT 0,
 			last_checked_at datetime NULL,
@@ -73,6 +76,7 @@ return static function (): void {
 			KEY rp_country_id (rp_country_id),
 			KEY rp_iso2 (rp_iso2),
 			KEY matched (matched),
+			KEY match_source (match_source),
 			KEY effective_enabled (effective_enabled),
 			KEY manual_mode (manual_mode)
 		) {$charset_collate};"

@@ -36,6 +36,7 @@ final class RussianPostCountryMappingRepository {
 			'parcel_block'      => ! empty( $data['parcel_block'] ) ? 1 : 0,
 			'api_available'     => ! empty( $data['api_available'] ) ? 1 : 0,
 			'matched'           => ! empty( $data['matched'] ) ? 1 : 0,
+			'match_source'      => RussianPostCountryMapping::normalize_match_source( (string) ( $data['match_source'] ?? 'none' ) ),
 			'manual_mode'       => $manual_mode,
 			'effective_enabled' => $this->effective_enabled( $manual_mode, ! empty( $data['matched'] ), ! empty( $data['api_available'] ), ! empty( $data['has_parcel'] ), ! empty( $data['parcel_block'] ) ) ? 1 : 0,
 			'last_checked_at'   => (string) ( $data['last_checked_at'] ?? $now ),
@@ -219,7 +220,7 @@ final class RussianPostCountryMappingRepository {
 	 * @return array<int,string>
 	 */
 	private function formats( bool $include_created ): array {
-		$formats = array( '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%d', '%d', '%s', '%d', '%s', '%s', '%s', '%s' );
+		$formats = array( '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%d', '%d', '%s', '%s', '%d', '%s', '%s', '%s', '%s' );
 		if ( $include_created ) {
 			$formats[] = '%s';
 		}
