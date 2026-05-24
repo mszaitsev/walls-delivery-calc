@@ -396,6 +396,42 @@ final class LocationRepository {
 		return true;
 	}
 
+	public function update_postal_code_by_fias_id( string $fias_id, string $postal_code ): int {
+		$fias_id = trim( $fias_id );
+		$postal_code = trim( $postal_code );
+		if ( '' === $fias_id || ! preg_match( '/^\d{6}$/', $postal_code ) ) {
+			return 0;
+		}
+
+		$data = array(
+			'postal_code' => $postal_code,
+			'updated_at'  => current_time( 'mysql' ),
+		);
+
+		if ( $this->has_test_location_rows() ) {
+			$property = property_exists( $this->wpdb, 'locations' ) ? 'locations' : 'rows';
+			$updated = 0;
+			foreach ( $this->wpdb->{$property} as $id => $row ) {
+				if ( $fias_id !== trim( (string) ( $row['fias_id'] ?? '' ) ) ) {
+					continue;
+				}
+				if ( $postal_code === (string) ( $row['postal_code'] ?? '' ) ) {
+					continue;
+				}
+				$this->wpdb->{$property}[ $id ] = array_merge( $row, $data );
+				++$updated;
+			}
+			return $updated;
+		}
+
+		$result = $this->wpdb->update( $this->table_name(), $data, array( 'fias_id' => $fias_id ), array( '%s', '%s' ), array( '%s' ) );
+		if ( false === $result ) {
+			$this->throw_sql_error( 'Location postal_code update by fias_id failed' );
+		}
+
+		return (int) $result;
+	}
+
 	public function clear_postal_code_marker( string $marker = '999999999' ): int {
 		if ( $this->has_test_location_rows() ) {
 			$property = property_exists( $this->wpdb, 'locations' ) ? 'locations' : 'rows';

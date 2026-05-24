@@ -128,6 +128,25 @@ Frontend не переводит picker в отдельный restricted mode п
 
 После выбора WDC делает `resolve` и применяет результат. DaData `postal_code` считается более точным и всегда перезаписывает checkout postcode, если присутствует в resolved address.
 
+## Realtime Postal Code Sync
+
+Каждый успешный server-side ответ DaData suggestions дополнительно используется для мягкого пополнения локальной базы `wdc_locations.postal_code`.
+
+`DaDataSuggestionClient` передает уже полученный decoded response в `DaDataPostcodeResponseSync`. Сервис проходит по `suggestions`, берет только `suggestion.data.fias_id` и `suggestion.data.postal_code`, ищет локальный населенный пункт строго по `fias_id` и обновляет `postal_code`, если индекс валиден и состоит из 6 цифр.
+
+Этот механизм:
+
+- не делает дополнительных запросов к DaData;
+- не увеличивает usage counter отдельно;
+- не передает API token во frontend;
+- не сверяет название населенного пункта, потому что realtime sync опирается на совпавший `fias_id`;
+- не создает новые locations, если `fias_id` не найден;
+- не пишет technical marker `999999999`;
+- пропускает ответы без `fias_id` или без `postal_code`;
+- заменяет `999999999` на реальный индекс, если такой индекс пришел в обычном suggestions/resolve response.
+
+Ошибки sync не ломают checkout suggestions flow: они ловятся внутри `DaDataSuggestionClient` и пишутся только в log без полного адреса или персональных данных.
+
 ## Manual Fallback
 
 Если подсказки не вернули результат, токены недоступны или лимиты исчерпаны, модалка показывает ручной fallback.

@@ -4,6 +4,8 @@ This is a one-time admin mechanism for filling `wdc_locations.postal_code` throu
 
 When postcode enrichment is finished and verified, remove the temporary tool while keeping the filled `postal_code` data in `wdc_locations`.
 
+The realtime postcode sync from already received DaData address suggestion responses can stay. It is a useful permanent mechanism and does not belong to the one-time batch cleanup.
+
 Files and code to remove:
 
 - `src/Locations/Postcodes/DaDataPostcodeClient.php`.
@@ -32,4 +34,8 @@ Do not remove:
 
 - Existing `postal_code` values in `wdc_locations`.
 - `DaDataTokenPool`, because it is still used by checkout address suggestions.
+- `src/Locations/Postcodes/DaDataPostcodeResponseSync.php`, unless the decision is to remove all postcode enrichment.
+- `DaDataSuggestionClient` realtime sync wiring, unless all postcode enrichment is removed.
 - Existing visual address suggestion settings and docs.
+
+If all postcode enrichment is removed later, also delete `DaDataPostcodeResponseSync`, its DI registration, its `DaDataSuggestionClient` optional dependency, and the response-sync smoke test.

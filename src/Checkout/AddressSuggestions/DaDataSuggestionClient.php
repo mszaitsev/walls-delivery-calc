@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\AddressSuggestions;
 
 use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Locations\Postcodes\DaDataPostcodeResponseSync;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -13,7 +14,8 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 	public function __construct(
 		private AddressSuggestionSettings $settings,
 		private DaDataTokenPool $token_pool,
-		private Logger $logger
+		private Logger $logger,
+		private ?DaDataPostcodeResponseSync $postcode_sync = null
 	) {
 	}
 
@@ -101,6 +103,7 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 			}
 
 			$suggestions = is_array( $decoded['suggestions'] ?? null ) ? $decoded['suggestions'] : array();
+			$this->sync_postcodes_from_response( $decoded );
 			$this->token_pool->record_request_attempt( (string) $token['id'], $stage, $query, true, true, $status_code, '' );
 
 			return array(
@@ -116,6 +119,30 @@ final class DaDataSuggestionClient implements AddressSuggestionClientInterface {
 		}
 
 		return $this->failure( 'dadata_daily_limit_exhausted', 'All DaData tokens are exhausted for today.', 0 );
+	}
+
+	/**
+	 * @param array<string,mixed> $decoded
+	 */
+	private function sync_postcodes_from_response( array $decoded ): void {
+		if ( ! $this->postcode_sync instanceof DaDataPostcodeResponseSync ) {
+			return;
+		}
+
+		try {
+			$summary = $this->postcode_sync->sync_from_dadata_response( $decoded );
+			$this->logger->debug(
+				'DaData postcode response sync summary.',
+				array(
+					'checked' => (int) ( $summary['checked'] ?? 0 ),
+					'matched' => (int) ( $summary['matched'] ?? 0 ),
+					'updated' => (int) ( $summary['updated'] ?? 0 ),
+					'not_found' => (int) ( $summary['not_found'] ?? 0 ),
+				)
+			);
+		} catch ( \Throwable $exception ) {
+			$this->logger->warning( 'DaData postcode response sync failed.', array( 'error' => $exception->getMessage() ) );
+		}
 	}
 
 	/**
