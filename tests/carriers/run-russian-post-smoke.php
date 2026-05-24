@@ -6,6 +6,7 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostApiClient;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
+use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
@@ -100,6 +101,16 @@ function wp_remote_get( string $url, array $args = array() ): mixed {
 }
 function wp_remote_retrieve_response_code( mixed $response ): int { return (int) ( $response['response']['code'] ?? 0 ); }
 function wp_remote_retrieve_body( mixed $response ): string { return (string) ( $response['body'] ?? '' ); }
+function current_user_can( string $capability ): bool { return true; }
+function esc_html__( string $text, string $domain = '' ): string { return $text; }
+function __( string $text, string $domain = '' ): string { return $text; }
+function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
+function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
+function sanitize_key( mixed $key ): string { return strtolower( preg_replace( '/[^a-z0-9_\\-]/', '', (string) $key ) ?? '' ); }
+function checked( mixed $checked, mixed $current = true, bool $display = true ): string { $result = $checked == $current ? 'checked="checked"' : ''; if ( $display ) { echo $result; } return $result; }
+function selected( mixed $selected, mixed $current = true, bool $display = true ): string { $result = $selected == $current ? 'selected="selected"' : ''; if ( $display ) { echo $result; } return $result; }
+function wp_nonce_field( string $action, string $name ): void { echo '<input type="hidden" name="' . esc_attr( $name ) . '" value="nonce">'; }
+function submit_button( string $text ): void { echo '<button type="submit">' . esc_html( $text ) . '</button>'; }
 
 final class WP_Error {
 	public function __construct( private string $message ) {}
@@ -215,6 +226,46 @@ rp_smoke_assert( 'russian_post_worldwide_parcel' === $order->meta['_wdc_platform
 rp_smoke_assert( DeliveryType::COURIER === $order->meta['_wdc_platform_delivery_type'], 'Order meta must contain delivery_type.' );
 rp_smoke_assert( 0 === $order->meta['_wdc_platform_requires_pickup_point'], 'Order meta must store requires_pickup_point = 0.' );
 rp_smoke_assert( is_array( $order->meta['_wdc_platform_rate_meta'] ), 'Order meta must contain sanitized rate metadata.' );
+
+$GLOBALS['wdc_rp_options'] = array();
+$settings = new SettingsRepository();
+$admin = new SettingsAdminPage( $settings, null, null, null, new RussianPostSettings( $settings ) );
+ob_start();
+$admin->render_page();
+$rendered = (string) ob_get_clean();
+rp_smoke_assert( str_contains( $rendered, 'name="russian_post_worldwide_parcel[enabled]" value="1" checked="checked"' ), 'Empty saved settings render must use enabled=true Russian Post default.' );
+rp_smoke_assert( str_contains( $rendered, 'value="https://tariff.pochta.ru/v2/calculate/tariff"' ), 'Empty saved settings render must show tariff endpoint default.' );
+rp_smoke_assert( str_contains( $rendered, 'value="https://tariff.pochta.ru/v2/dictionary/country"' ), 'Empty saved settings render must show country endpoint default.' );
+rp_smoke_assert( str_contains( $rendered, 'name="russian_post_worldwide_parcel[origin_postcode]" value="630005"' ), 'Empty saved settings render must show origin postcode default.' );
+rp_smoke_assert( str_contains( $rendered, 'name="russian_post_worldwide_parcel[object_code]" value="4031"' ), 'Empty saved settings render must show object code default.' );
+rp_smoke_assert( str_contains( $rendered, 'name="russian_post_worldwide_parcel[max_package_weight_g]" value="19990"' ), 'Empty saved settings render must show max package weight default.' );
+rp_smoke_assert( str_contains( $rendered, 'name="russian_post_worldwide_parcel[fallback_enabled]" value="1" checked="checked"' ), 'Empty saved settings render must show fallback enabled default.' );
+rp_smoke_assert( str_contains( $rendered, 'value="Стоимость доставки рассчитает менеджер"' ), 'Empty saved settings render must show fallback text default.' );
+rp_smoke_assert( str_contains( $rendered, 'name="russian_post_worldwide_parcel[cache_until_end_of_day]" value="1" checked="checked"' ), 'Empty saved settings render must show cache-until-end-of-day default.' );
+
+$sanitized = $admin->sanitize_settings( array( 'checkout_sort_mode' => 'fastest' ) );
+rp_smoke_assert( 'https://tariff.pochta.ru/v2/calculate/tariff' === $sanitized['russian_post_worldwide_parcel']['api_endpoint'], 'Saving unrelated settings must not blank Russian Post tariff endpoint.' );
+rp_smoke_assert( 'https://tariff.pochta.ru/v2/dictionary/country' === $sanitized['russian_post_worldwide_parcel']['country_endpoint'], 'Saving unrelated settings must not blank Russian Post country endpoint.' );
+
+$settings->replace( array( 'russian_post_worldwide_parcel' => array( 'enabled' => false, 'max_package_weight_g' => 12345 ) ) );
+$admin = new SettingsAdminPage( $settings, null, null, null, new RussianPostSettings( $settings ) );
+$sanitized = $admin->sanitize_settings(
+	array(
+		'russian_post_worldwide_parcel' => array(
+			'enabled' => '1',
+			'api_endpoint' => '',
+			'country_endpoint' => '',
+			'fallback_text' => '',
+		),
+	)
+);
+rp_smoke_assert( true === $sanitized['russian_post_worldwide_parcel']['enabled'], 'Saved partial settings must accept submitted enabled flag.' );
+rp_smoke_assert( 12345 === $sanitized['russian_post_worldwide_parcel']['max_package_weight_g'], 'Saved partial settings must preserve current service values.' );
+rp_smoke_assert( 'https://tariff.pochta.ru/v2/calculate/tariff' === $sanitized['russian_post_worldwide_parcel']['api_endpoint'], 'Saved partial settings must merge empty tariff endpoint with default.' );
+rp_smoke_assert( 'https://tariff.pochta.ru/v2/dictionary/country' === $sanitized['russian_post_worldwide_parcel']['country_endpoint'], 'Saved partial settings must merge empty country endpoint with default.' );
+rp_smoke_assert( '630005' === $sanitized['russian_post_worldwide_parcel']['origin_postcode'], 'Saved partial settings must merge origin postcode default.' );
+rp_smoke_assert( 4031 === $sanitized['russian_post_worldwide_parcel']['object_code'], 'Saved partial settings must merge object code default.' );
+rp_smoke_assert( 'Стоимость доставки рассчитает менеджер' === $sanitized['russian_post_worldwide_parcel']['fallback_text'], 'Saved partial settings must merge fallback text default.' );
 
 $legacy_diff = function_exists( 'shell_exec' ) ? trim( (string) shell_exec( 'git diff --name-only -- includes' ) ) : '';
 rp_smoke_assert( '' === $legacy_diff, 'legacy includes/* must not be modified.' );

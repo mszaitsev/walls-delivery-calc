@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Admin;
 
+use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
@@ -21,7 +22,8 @@ final class SettingsAdminPage {
 		private SettingsRepository $settings,
 		private ?FiasCredentials $fias_credentials = null,
 		private ?AddressSuggestionSettings $suggestion_settings = null,
-		private ?DaDataTokenPool $token_pool = null
+		private ?DaDataTokenPool $token_pool = null,
+		private ?RussianPostSettings $russian_post_settings = null
 	) {
 	}
 
@@ -88,7 +90,7 @@ final class SettingsAdminPage {
 							<td><label><input type="checkbox" name="enable_demo_carrier" value="1" <?php checked( ! empty( $values['enable_demo_carrier'] ) ); ?>> <?php echo esc_html__( 'Использовать тестовые тарифы до подключения реальных перевозчиков.', 'walls-delivery-calc' ); ?></label></td>
 						</tr>
 						<tr><th colspan="2"><h2><?php echo esc_html__( 'Почта России — международная доставка', 'walls-delivery-calc' ); ?></h2></th></tr>
-						<?php $rp = is_array( $values['russian_post_worldwide_parcel'] ?? null ) ? $values['russian_post_worldwide_parcel'] : array(); ?>
+						<?php $rp = $this->russian_post_admin_values( $values ); ?>
 						<tr>
 							<th scope="row"><?php echo esc_html__( 'Включить сервис', 'walls-delivery-calc' ); ?></th>
 							<td><label><input type="checkbox" name="russian_post_worldwide_parcel[enabled]" value="1" <?php checked( ! empty( $rp['enabled'] ) ); ?>> <?php echo esc_html__( 'Показывать международную доставку Почтой России для стран кроме RU.', 'walls-delivery-calc' ); ?></label></td>
@@ -106,6 +108,18 @@ final class SettingsAdminPage {
 							<td><input id="wdc_rp_api_token" type="password" name="russian_post_worldwide_parcel[api_token]" value="" placeholder="<?php echo esc_attr( '' !== (string) ( $rp['api_token'] ?? '' ) ? '********' : 'Токен не задан' ); ?>" autocomplete="new-password"><p class="description"><?php echo esc_html__( 'Оставьте пустым, чтобы сохранить текущий токен. Токен не пишется в debug logs.', 'walls-delivery-calc' ); ?></p></td>
 						</tr>
 						<tr>
+							<th scope="row"><label for="wdc_rp_origin_postcode"><?php echo esc_html__( 'Индекс отправления', 'walls-delivery-calc' ); ?></label></th>
+							<td><input id="wdc_rp_origin_postcode" type="text" name="russian_post_worldwide_parcel[origin_postcode]" value="<?php echo esc_attr( (string) ( $rp['origin_postcode'] ?? '630005' ) ); ?>"></td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="wdc_rp_object_code"><?php echo esc_html__( 'Код объекта отправления', 'walls-delivery-calc' ); ?></label></th>
+							<td><input id="wdc_rp_object_code" type="number" name="russian_post_worldwide_parcel[object_code]" value="<?php echo esc_attr( (string) ( $rp['object_code'] ?? 4031 ) ); ?>" min="1" step="1"></td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="wdc_rp_isavia"><?php echo esc_html__( 'Авиадоставка', 'walls-delivery-calc' ); ?></label></th>
+							<td><select id="wdc_rp_isavia" name="russian_post_worldwide_parcel[isavia]"><option value="0" <?php selected( (int) ( $rp['isavia'] ?? 0 ), 0 ); ?>><?php echo esc_html__( 'Нет', 'walls-delivery-calc' ); ?></option><option value="1" <?php selected( (int) ( $rp['isavia'] ?? 0 ), 1 ); ?>><?php echo esc_html__( 'Да', 'walls-delivery-calc' ); ?></option></select></td>
+						</tr>
+						<tr>
 							<th scope="row"><label for="wdc_rp_timeout"><?php echo esc_html__( 'Таймаут API Почты России (сек)', 'walls-delivery-calc' ); ?></label></th>
 							<td><input id="wdc_rp_timeout" type="number" name="russian_post_worldwide_parcel[timeout]" value="<?php echo esc_attr( (string) ( $rp['timeout'] ?? 20 ) ); ?>" min="1" max="60" step="1"></td>
 						</tr>
@@ -116,6 +130,10 @@ final class SettingsAdminPage {
 						<tr>
 							<th scope="row"><?php echo esc_html__( 'Fallback', 'walls-delivery-calc' ); ?></th>
 							<td><label><input type="checkbox" name="russian_post_worldwide_parcel[fallback_enabled]" value="1" <?php checked( ! empty( $rp['fallback_enabled'] ) ); ?>> <?php echo esc_html__( 'Показывать нулевой тариф при ошибке API, отсутствии тарифа или overweight.', 'walls-delivery-calc' ); ?></label><br><input class="regular-text" type="text" name="russian_post_worldwide_parcel[fallback_text]" value="<?php echo esc_attr( (string) ( $rp['fallback_text'] ?? 'Стоимость доставки рассчитает менеджер' ) ); ?>"></td>
+						</tr>
+						<tr>
+							<th scope="row"><?php echo esc_html__( 'Кэш тарифа', 'walls-delivery-calc' ); ?></th>
+							<td><label><input type="checkbox" name="russian_post_worldwide_parcel[cache_until_end_of_day]" value="1" <?php checked( ! empty( $rp['cache_until_end_of_day'] ) ); ?>> <?php echo esc_html__( 'Кэшировать тариф до конца дня по timezone WordPress.', 'walls-delivery-calc' ); ?></label></td>
 						</tr>
 						<tr>
 							<th scope="row"><?php echo esc_html__( 'Debug Почты России', 'walls-delivery-calc' ); ?></th>
@@ -230,22 +248,69 @@ final class SettingsAdminPage {
 	 * @return array<string,mixed>
 	 */
 	private function sanitize_russian_post_settings( array $data, array $current ): array {
+		$current = array_merge( $this->russian_post_defaults(), $current );
+		if ( array() === $data ) {
+			return $current;
+		}
+
 		$token = array_key_exists( 'api_token', $data ) ? trim( wp_unslash( (string) $data['api_token'] ) ) : '';
+		$api_endpoint = $this->non_empty_string( $data, 'api_endpoint', (string) $current['api_endpoint'] );
+		$country_endpoint = $this->non_empty_string( $data, 'country_endpoint', (string) $current['country_endpoint'] );
+		$origin_postcode = $this->non_empty_string( $data, 'origin_postcode', (string) $current['origin_postcode'] );
+		$fallback_text = $this->non_empty_string( $data, 'fallback_text', (string) $current['fallback_text'] );
 
 		return array_merge(
 			$current,
 			array(
 				'enabled'              => ! empty( $data['enabled'] ),
-				'api_endpoint'         => $this->sanitize_url( wp_unslash( (string) ( $data['api_endpoint'] ?? ( $current['api_endpoint'] ?? '' ) ) ) ),
-				'country_endpoint'     => $this->sanitize_url( wp_unslash( (string) ( $data['country_endpoint'] ?? ( $current['country_endpoint'] ?? '' ) ) ) ),
+				'api_endpoint'         => $this->sanitize_url( $api_endpoint ),
+				'country_endpoint'     => $this->sanitize_url( $country_endpoint ),
 				'api_token'            => '' !== $token ? sanitize_text_field( $token ) : (string) ( $current['api_token'] ?? '' ),
+				'origin_postcode'      => sanitize_text_field( $origin_postcode ),
+				'object_code'          => max( 1, $this->absint( wp_unslash( (string) ( $data['object_code'] ?? ( $current['object_code'] ?? 4031 ) ) ) ) ),
+				'isavia'               => ! empty( $data['isavia'] ) ? 1 : 0,
 				'timeout'              => max( 1, min( 60, $this->absint( wp_unslash( (string) ( $data['timeout'] ?? ( $current['timeout'] ?? 20 ) ) ) ) ) ),
 				'debug'                => ! empty( $data['debug'] ),
 				'max_package_weight_g' => max( 1, min( 100000, $this->absint( wp_unslash( (string) ( $data['max_package_weight_g'] ?? ( $current['max_package_weight_g'] ?? 19990 ) ) ) ) ) ),
 				'fallback_enabled'     => ! empty( $data['fallback_enabled'] ),
-				'fallback_text'        => sanitize_text_field( wp_unslash( (string) ( $data['fallback_text'] ?? ( $current['fallback_text'] ?? 'Стоимость доставки рассчитает менеджер' ) ) ) ),
+				'fallback_text'        => sanitize_text_field( $fallback_text ),
+				'cache_until_end_of_day' => ! empty( $data['cache_until_end_of_day'] ),
 			)
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $values
+	 * @return array<string,mixed>
+	 */
+	private function russian_post_admin_values( array $values ): array {
+		$saved = is_array( $values['russian_post_worldwide_parcel'] ?? null ) ? $values['russian_post_worldwide_parcel'] : array();
+
+		return array_merge( $this->russian_post_defaults(), $saved );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function russian_post_defaults(): array {
+		if ( ! $this->russian_post_settings instanceof RussianPostSettings ) {
+			$this->russian_post_settings = new RussianPostSettings( $this->settings );
+		}
+
+		return $this->russian_post_settings->defaults();
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function non_empty_string( array $data, string $key, string $default ): string {
+		if ( ! array_key_exists( $key, $data ) ) {
+			return $default;
+		}
+
+		$value = trim( wp_unslash( (string) $data[ $key ] ) );
+
+		return '' !== $value ? $value : $default;
 	}
 
 	private function sanitize_url( string $value ): string {
