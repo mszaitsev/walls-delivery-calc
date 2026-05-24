@@ -63,14 +63,19 @@ Checkout city search is hierarchy-aware:
 
 - query normalization lowercases text, replaces `ё` with `е`, converts punctuation to spaces, and collapses whitespace;
 - type words from raw GAR types and admin display rules are treated as level markers, not as database search values;
+- `МО` is treated as a region-level alias for `Московская область`, independent of display rules;
 - matching checks region, district, city, and place names independently;
 - only exact and prefix matches are allowed, so there is no contains-inside-word behavior;
 - place/city matches are stronger than district/region context matches;
-- exact-place and same-bucket region groups are sorted alphabetically by region name;
+- exact/prefix matches use hierarchy seniority inside the same bucket: city-level matches rank above place-level matches, then same-seniority groups sort alphabetically by region name;
 - region-name-only matches remain visible but rank below strong place/city matches;
 - upper-level matches expand downward, so a city query can show the city and its nested places.
 
 The picker searches only when the modal opens with the initial query or when the modal search input emits a real `input` event. External checkout city focus/select/click/change events do not run search. AJAX search uses a request sequence guard, so stale responses cannot replace current results or render fallback after a newer query. Show-all-region keeps the user's base query in the AJAX payload and sends the selected region separately as `force_region_code`; the region label may be shown visually in the input but is not required as a search token.
+
+The modal has a stronger loading state: `Идёт поиск, подождите несколько секунд` plus a CSS spinner. Below the search input, two permanent actions are shown: `Использовать введенное название` applies manual fallback with the current input, and `Очистить название` clears the input, force-region state, and results hint.
+
+The admin `Населенные пункты` search now reuses the same hierarchy-aware exact/prefix logic as checkout. Before hierarchy search, admin search performs exact identifier lookup by `fias_id`, `gar_id`/`gar_object_id`, `kladr_id`, and `postal_code`; if an exact identifier match exists, only those rows are returned.
 
 ## Debug panel
 

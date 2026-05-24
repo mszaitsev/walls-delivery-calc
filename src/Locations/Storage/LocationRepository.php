@@ -123,6 +123,56 @@ final class LocationRepository {
 	}
 
 	/**
+	 * @return array<int,Location>
+	 */
+	public function find_exact_admin_identifier_matches( string $query ): array {
+		$query = trim( $query );
+		if ( '' === $query ) {
+			return array();
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$rows = array_values(
+				array_filter(
+					$this->test_location_rows(),
+					static fn( array $row ): bool =>
+						1 === (int) ( $row['active'] ?? 1 )
+						&& (
+							$query === (string) ( $row['fias_id'] ?? '' )
+							|| $query === (string) ( $row['gar_id'] ?? '' )
+							|| $query === (string) ( $row['gar_object_id'] ?? '' )
+							|| $query === (string) ( $row['kladr_id'] ?? '' )
+							|| $query === (string) ( $row['postal_code'] ?? '' )
+						)
+				)
+			);
+			usort( $rows, static fn( array $a, array $b ): int => strcmp( (string) ( $a['display_name'] ?? '' ), (string) ( $b['display_name'] ?? '' ) ) );
+			return $this->rows_to_locations( array_map( fn( array $row ): array => $this->join_region_for_test_double( $row ), $rows ) );
+		}
+
+		$where = array( 'l.fias_id = %s', 'l.gar_id = %s', 'l.kladr_id = %s', 'l.postal_code = %s' );
+		$args = array( $query, $query, $query, $query );
+		if ( is_numeric( $query ) ) {
+			$where[] = 'l.gar_object_id = %d';
+			$args[] = (int) $query;
+		}
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.active = 1 AND (" . implode( ' OR ', $where ) . ')
+				ORDER BY l.display_name ASC',
+				...$args
+			),
+			ARRAY_A
+		);
+
+		return $this->rows_to_locations( is_array( $rows ) ? $rows : array() );
+	}
+
+	/**
 	 * @param array<int,string> $tokens
 	 * @return array<int, Location>
 	 */

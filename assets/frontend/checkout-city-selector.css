@@ -59,10 +59,40 @@
 }
 
 .wdc-city-picker-search {
-	margin: 14px 18px;
+	margin: 14px 18px 8px;
 	width: auto;
 	min-height: 42px;
 	font-size: 16px;
+}
+
+.wdc-city-picker-actions {
+	display: flex;
+	gap: 8px;
+	margin: 0 18px 14px;
+}
+
+.wdc-city-picker-use-manual,
+.wdc-city-picker-clear {
+	padding: 9px 12px;
+	border: 1px solid #2271b1;
+	background: #2271b1;
+	color: #fff;
+	cursor: pointer;
+	font-size: 14px;
+}
+
+.wdc-city-picker-clear {
+	border-color: #8c8f94;
+	background: #fff;
+	color: #1d2327;
+}
+
+.wdc-city-picker-use-manual:disabled,
+.wdc-city-picker-clear:disabled {
+	border-color: #dcdcde;
+	background: #f6f7f7;
+	color: #a7aaad;
+	cursor: default;
 }
 
 .wdc-city-picker-results {
@@ -79,26 +109,47 @@
 	font-size: 14px;
 }
 
-.wdc-city-picker-fallback {
-	margin: 0 12px 12px;
-	padding: 10px 12px;
-	border: 1px solid #2271b1;
-	background: #2271b1;
-	color: #fff;
-	cursor: pointer;
-	font-size: 14px;
-}
-
-.wdc-city-picker-fallback:hover,
-.wdc-city-picker-fallback:focus,
+.wdc-city-picker-use-manual:not(:disabled):hover,
+.wdc-city-picker-use-manual:not(:disabled):focus,
 .wdc-city-picker-show-region:hover,
 .wdc-city-picker-show-region:focus {
 	background: #135e96;
 	outline: 1px solid #72aee6;
 }
 
+.wdc-city-picker-clear:not(:disabled):hover,
+.wdc-city-picker-clear:not(:disabled):focus {
+	border-color: #2271b1;
+	color: #135e96;
+	outline: 1px solid #72aee6;
+}
+
 .wdc-city-picker-message.is-error {
 	color: #b32d2e;
+}
+
+.wdc-city-picker-message.is-loading {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	font-weight: 600;
+	color: #1d2327;
+}
+
+.wdc-city-picker-message.is-loading::before {
+	content: "";
+	width: 18px;
+	height: 18px;
+	border: 2px solid #c3c4c7;
+	border-top-color: #2271b1;
+	border-radius: 50%;
+	animation: wdc-city-picker-spin 0.8s linear infinite;
+}
+
+@keyframes wdc-city-picker-spin {
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 .wdc-city-picker-limit {
@@ -197,9 +248,14 @@
 	}
 
 	.wdc-city-picker-search {
-		margin: 12px 14px;
+		margin: 12px 14px 8px;
 		width: calc(100% - 28px);
 		box-sizing: border-box;
+	}
+
+	.wdc-city-picker-actions {
+		margin: 0 14px 12px;
+		flex-direction: column;
 	}
 
 	.wdc-city-picker-results {

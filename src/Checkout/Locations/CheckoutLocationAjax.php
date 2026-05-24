@@ -64,7 +64,7 @@ final class CheckoutLocationAjax {
 	public function payload( string $query, string $force_region_code = '' ): array {
 		$limit = $this->limit();
 		$region_limit = $this->region_limit();
-		if ( $this->length( $query ) < 3 && '' === trim( $force_region_code ) ) {
+		if ( $this->length( $query ) < 3 && '' === trim( $force_region_code ) && 'мо' !== $this->normalize_short_query( $query ) ) {
 			return array( 'groups' => array(), 'total' => 0, 'limit' => $limit, 'region_limit' => $region_limit, 'limit_reached' => false );
 		}
 
@@ -161,5 +161,11 @@ final class CheckoutLocationAjax {
 
 	private function length( string $value ): int {
 		return function_exists( 'mb_strlen' ) ? mb_strlen( trim( $value ), 'UTF-8' ) : strlen( trim( $value ) );
+	}
+
+	private function normalize_short_query( string $query ): string {
+		$query = str_replace( array( 'Ё', 'ё' ), array( 'Е', 'е' ), $query );
+		$query = function_exists( 'mb_strtolower' ) ? mb_strtolower( trim( $query ), 'UTF-8' ) : strtolower( trim( $query ) );
+		return $query;
 	}
 }

@@ -112,6 +112,13 @@ final class LocationSearchService {
 	}
 
 	/**
+	 * @return array<int, Location>
+	 */
+	public function find_exact_admin_identifier_matches( string $query ): array {
+		return $this->repository->find_exact_admin_identifier_matches( $query );
+	}
+
+	/**
 	 * @return array<string,mixed>
 	 */
 	public function last_search_meta(): array {

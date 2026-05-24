@@ -15,15 +15,23 @@ final class CheckoutLocationSearchParser {
 	}
 
 	/**
-	 * @return array{query:string,tokens:array<int,string>,real_tokens:array<int,string>,markers:array<string,bool>,has_markers:bool}
+	 * @return array{query:string,tokens:array<int,string>,real_tokens:array<int,string>,markers:array<string,bool>,has_markers:bool,region_alias_tokens:array<int,string>}
 	 */
 	public function parse( string $query ): array {
 		$normalized = $this->normalize( $query );
 		$tokens = $this->tokenize_normalized( $normalized );
 		$markers = array();
 		$real = array();
+		$region_alias_tokens = array();
 
 		foreach ( $tokens as $token ) {
+			if ( 'мо' === $token ) {
+				$markers['region'] = true;
+				$real[] = 'московская';
+				$region_alias_tokens[] = 'московская';
+				continue;
+			}
+
 			$scope = $this->marker_scope( $token );
 			if ( '' !== $scope ) {
 				$markers[ $scope ] = true;
@@ -38,6 +46,7 @@ final class CheckoutLocationSearchParser {
 			'real_tokens' => array_values( array_unique( $real ) ),
 			'markers'     => $markers,
 			'has_markers' => array() !== $markers,
+			'region_alias_tokens' => array_values( array_unique( $region_alias_tokens ) ),
 		);
 	}
 

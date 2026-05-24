@@ -183,6 +183,10 @@
 						'<button type="button" class="wdc-city-picker-close" aria-label="Закрыть">×</button>' +
 					'</div>' +
 					'<input type="search" class="wdc-city-picker-search" autocomplete="off" placeholder="Начните вводить населенный пункт">' +
+					'<div class="wdc-city-picker-actions">' +
+						'<button type="button" class="wdc-city-picker-use-manual" disabled>Использовать введенное название</button>' +
+						'<button type="button" class="wdc-city-picker-clear" disabled>Очистить название</button>' +
+					'</div>' +
 					'<div class="wdc-city-picker-results" role="listbox"></div>' +
 				'</div>' +
 			'</div>'
@@ -200,18 +204,23 @@
 		return picker().find( '.wdc-city-picker-results' );
 	}
 
+	function updatePickerActions() {
+		var value = $.trim( String( searchInput().val() || '' ) );
+		picker().find( '.wdc-city-picker-use-manual, .wdc-city-picker-clear' ).prop( 'disabled', '' === value );
+	}
+
 	function renderMessage( message, className ) {
+		updatePickerActions();
 		resultsBox().html( '<div class="wdc-city-picker-message ' + className + '">' + escapeHtml( message || '' ) + '</div>' );
 	}
 
 	function renderFallbackMessage( message ) {
-		resultsBox().html(
-			'<div class="wdc-city-picker-message is-empty">' + escapeHtml( message || '' ) + '</div>' +
-			'<button type="button" class="wdc-city-picker-fallback">Выбрать введенный населенный пункт</button>'
-		);
+		updatePickerActions();
+		resultsBox().html( '<div class="wdc-city-picker-message is-empty">' + escapeHtml( message || '' ) + '</div>' );
 	}
 
 	function renderResults( groups, limitReached, limit ) {
+		updatePickerActions();
 		locationStore = {};
 		locationSeq = 0;
 
@@ -248,6 +257,10 @@
 		} );
 	}
 
+	function isShortSearchAlias( query ) {
+		return 'мо' === $.trim( String( query || '' ) ).toLowerCase();
+	}
+
 	function search( query, options ) {
 		options = options || {};
 		query = String( query || '' );
@@ -256,7 +269,7 @@
 			debug( 'ajax url missing' );
 			return;
 		}
-		if ( query.length < ( config.min_chars || 3 ) && ! requestForceRegionCode ) {
+		if ( query.length < ( config.min_chars || 3 ) && ! requestForceRegionCode && ! isShortSearchAlias( query ) ) {
 			renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint' );
 			return;
 		}
@@ -319,7 +332,7 @@
 		}
 
 		timer = window.setTimeout( function () {
-			if ( query.length < ( config.min_chars || 3 ) ) {
+			if ( query.length < ( config.min_chars || 3 ) && ! isShortSearchAlias( query ) ) {
 				renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint' );
 				return;
 			}
@@ -347,13 +360,14 @@
 		pickerOpen = true;
 		picker().attr( 'aria-hidden', 'false' ).addClass( 'is-open' );
 		searchInput().val( originalCityValue );
+		updatePickerActions();
 		debug( 'city picker opened' );
 
 		window.setTimeout( function () {
 			searchInput().trigger( 'focus' ).trigger( 'select' );
 		}, 20 );
 
-		if ( originalCityValue.length >= ( config.min_chars || 3 ) ) {
+		if ( originalCityValue.length >= ( config.min_chars || 3 ) || isShortSearchAlias( originalCityValue ) ) {
 			search( originalCityValue, { force: true } );
 		} else {
 			renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint' );
@@ -664,6 +678,7 @@
 	$( document.body ).on( 'input.wdcCitySelector', '.wdc-city-picker-search', function () {
 		forceRegionCode = '';
 		currentBaseQuery = String( $( this ).val() || '' );
+		updatePickerActions();
 		scheduleSearch( currentBaseQuery );
 	} );
 	$( document.body ).off( 'mousedown.wdcCitySelector click.wdcCitySelector keydown.wdcCitySelector', '.wdc-city-selector__item' );
@@ -696,6 +711,7 @@
 		if ( label && current.indexOf( label ) !== 0 ) {
 			searchInput().val( label + ( current ? ', ' + current : ', ' ) );
 		}
+		updatePickerActions();
 		search( current, { force: true, forceRegionCode: forceRegionCode } );
 	} );
 	$( document.body ).off( 'click.wdcCitySelector', '.wdc-city-picker-close' );
@@ -703,21 +719,32 @@
 		stopEvent( event );
 		closePicker();
 	} );
-	$( document.body ).off( 'mousedown.wdcCitySelector click.wdcCitySelector keydown.wdcCitySelector', '.wdc-city-picker-fallback' );
-	$( document.body ).on( 'mousedown.wdcCitySelector', '.wdc-city-picker-fallback', function ( event ) {
-		debug( 'fallback button mousedown' );
+	$( document.body ).off( 'mousedown.wdcCitySelector click.wdcCitySelector keydown.wdcCitySelector', '.wdc-city-picker-use-manual' );
+	$( document.body ).on( 'mousedown.wdcCitySelector', '.wdc-city-picker-use-manual', function ( event ) {
+		debug( 'manual city button mousedown' );
 		stopEvent( event );
 		applyManualFallbackCity( searchInput().val() );
 	} );
-	$( document.body ).on( 'click.wdcCitySelector', '.wdc-city-picker-fallback', function ( event ) {
+	$( document.body ).on( 'click.wdcCitySelector', '.wdc-city-picker-use-manual', function ( event ) {
 		stopEvent( event );
 	} );
-	$( document.body ).on( 'keydown.wdcCitySelector', '.wdc-city-picker-fallback', function ( event ) {
+	$( document.body ).on( 'keydown.wdcCitySelector', '.wdc-city-picker-use-manual', function ( event ) {
 		if ( 'Enter' !== event.key && ' ' !== event.key ) {
 			return;
 		}
 		stopEvent( event );
 		applyManualFallbackCity( searchInput().val() );
+	} );
+	$( document.body ).off( 'click.wdcCitySelector', '.wdc-city-picker-clear' );
+	$( document.body ).on( 'click.wdcCitySelector', '.wdc-city-picker-clear', function ( event ) {
+		stopEvent( event );
+		forceRegionCode = '';
+		currentBaseQuery = '';
+		lastSearchQuery = '';
+		lastSearchForceRegionCode = '';
+		searchInput().val( '' );
+		updatePickerActions();
+		renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint' );
 	} );
 	$( document.body ).off( 'mousedown.wdcCitySelector click.wdcCitySelector', '.wdc-city-picker-panel' );
 	$( document.body ).on( 'mousedown.wdcCitySelector click.wdcCitySelector', '.wdc-city-picker-panel', function ( event ) {

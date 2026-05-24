@@ -3,11 +3,13 @@ declare(strict_types=1);
 
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Locations\Admin\LocationsAdminPage;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
@@ -202,6 +204,21 @@ function locations_smoke_assert( bool $condition, string $message ): void {
 	}
 }
 
+function locations_smoke_location( array $data ): Location {
+	return Location::from_array(
+		array_merge(
+			array(
+				'country_code' => 'RU',
+				'active' => true,
+				'region_type' => 'обл',
+				'place_type' => 'село',
+				'postal_code' => '',
+			),
+			$data
+		)
+	);
+}
+
 $wpdb = new wpdb();
 $repository = new LocationRepository( $wpdb );
 $importer = new LocationImportService( $repository );
@@ -222,6 +239,24 @@ locations_smoke_assert( isset( $grouped['Новосибирская област
 
 $exact = $search->search( 'новосибирск', 5 );
 locations_smoke_assert( isset( $exact[0] ) && '' !== $exact[0]->display_name, 'Exact city match must rank first.' );
+
+$repository->save( locations_smoke_location( array( 'gar_object_id' => 900001, 'gar_id' => 'gar-admin-gb', 'fias_id' => 'fias-admin-gb', 'kladr_id' => 'kladr-admin-gb', 'region_code' => '54', 'region_name' => 'Новосибирская', 'district_name' => 'Новосибирский', 'district_type' => 'р-н', 'place_name' => 'Гусиный Брод', 'place_type' => 'село', 'display_name' => 'Новосибирская обл., Новосибирский р-н, село Гусиный Брод', 'postal_code' => '630555' ) ) );
+$repository->save( locations_smoke_location( array( 'gar_object_id' => 900002, 'fias_id' => 'fias-admin-verh', 'region_code' => '54', 'region_name' => 'Новосибирская', 'place_name' => 'Верхобродово', 'place_type' => 'д', 'display_name' => 'Новосибирская обл., деревня Верхобродово' ) ) );
+$repository->save( locations_smoke_location( array( 'gar_object_id' => 900003, 'fias_id' => 'fias-admin-brod', 'region_code' => '54', 'region_name' => 'Новосибирская', 'place_name' => 'Брод', 'place_type' => 'д', 'display_name' => 'Новосибирская обл., деревня Брод' ) ) );
+$repository->save( locations_smoke_location( array( 'gar_object_id' => 900004, 'fias_id' => 'fias-admin-mo-ivan', 'region_code' => '50', 'region_name' => 'Московская', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Московская обл., село Ивановка', 'postal_code' => '140000' ) ) );
+$repository->save( locations_smoke_location( array( 'gar_object_id' => 900005, 'fias_id' => 'fias-admin-mo-postal', 'region_code' => '50', 'region_name' => 'Московская', 'place_name' => 'Почтовый', 'place_type' => 'село', 'display_name' => 'Московская обл., село Почтовый', 'postal_code' => '140000' ) ) );
+$admin_hierarchy = new CheckoutLocationSearch( $search );
+$admin_gusiny = $admin_hierarchy->search_paginated( 'гусиный брод', 1, 20 )['items'];
+locations_smoke_assert( isset( $admin_gusiny[0] ) && 'fias-admin-gb' === $admin_gusiny[0]->fias_id, 'Admin hierarchy search must find Гусиный Брод first.' );
+$admin_brod_ids = array_map( static fn( Location $location ): string => $location->fias_id, $admin_hierarchy->search_paginated( 'брод', 1, 20 )['items'] );
+locations_smoke_assert( in_array( 'fias-admin-brod', $admin_brod_ids, true ) && ! in_array( 'fias-admin-verh', $admin_brod_ids, true ), 'Admin hierarchy search must use exact/prefix only and not show Верхобродово for брод.' );
+locations_smoke_assert( '50' === (string) ( $admin_hierarchy->search_paginated( 'мо', 1, 20 )['items'][0]->region_code ?? '' ), 'Admin hierarchy search must support МО alias.' );
+locations_smoke_assert( 'fias-admin-mo-ivan' === ( $admin_hierarchy->search_paginated( 'мо ивановка', 1, 20 )['items'][0]->fias_id ?? '' ), 'Admin hierarchy search must prioritize Ивановка in Moscow region for МО.' );
+locations_smoke_assert( 1 === count( $admin_hierarchy->search_paginated( 'fias-admin-gb', 1, 20 )['items'] ) && 'fias-admin-gb' === $admin_hierarchy->search_paginated( 'fias-admin-gb', 1, 20 )['items'][0]->fias_id, 'Admin exact fias_id lookup must return only one location.' );
+locations_smoke_assert( 1 === count( $admin_hierarchy->search_paginated( 'gar-admin-gb', 1, 20 )['items'] ) && 'fias-admin-gb' === $admin_hierarchy->search_paginated( 'gar-admin-gb', 1, 20 )['items'][0]->fias_id, 'Admin exact gar_id lookup must return only one location.' );
+locations_smoke_assert( 1 === count( $admin_hierarchy->search_paginated( 'kladr-admin-gb', 1, 20 )['items'] ) && 'fias-admin-gb' === $admin_hierarchy->search_paginated( 'kladr-admin-gb', 1, 20 )['items'][0]->fias_id, 'Admin exact kladr_id lookup must return only one location.' );
+$admin_postal = $admin_hierarchy->search_paginated( '140000', 1, 20 )['items'];
+locations_smoke_assert( 2 === count( $admin_postal ) && array() === array_filter( $admin_postal, static fn( Location $location ): bool => '140000' !== $location->postal_code ), 'Admin exact postal_code lookup must return only matching postal_code rows.' );
 
 $fallback = ( new FallbackAddressNormalizer() )->normalize( 'Новосибирск, Красный проспект, 1' );
 locations_smoke_assert( false === $fallback->success, 'Fallback normalizer must not report success.' );
@@ -299,7 +334,9 @@ locations_smoke_assert( 0 === $admin_repository->count_all() && 0 === $admin_rep
 
 $locations_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Admin/LocationsAdminPage.php' );
 locations_smoke_assert( str_contains( $locations_admin_source, 'wp_verify_nonce' ) && str_contains( $locations_admin_source, 'current_user_can( AdminMenu::CAPABILITY' ), 'Admin clear action must require nonce and capability.' );
+locations_smoke_assert( str_contains( $locations_admin_source, 'CheckoutLocationSearch' ) && str_contains( $locations_admin_source, 'search_paginated( $query' ), 'Locations admin page must use hierarchy-aware search.' );
 $repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Storage/LocationRepository.php' );
 locations_smoke_assert( ! str_contains( $repository_source, 'pickup' ) && ! str_contains( $repository_source, 'rules' ) && ! str_contains( $repository_source, 'calendar' ) && ! str_contains( $repository_source, 'options' ), 'clear_all must not target pickup/rules/calendar/settings storage.' );
+locations_smoke_assert( str_contains( $repository_source, 'find_exact_admin_identifier_matches' ) && str_contains( $repository_source, 'postal_code' ), 'LocationRepository must expose exact admin identifier lookup.' );
 
 echo "Locations smoke test passed.\n";

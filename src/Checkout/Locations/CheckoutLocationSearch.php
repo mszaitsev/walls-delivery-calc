@@ -105,6 +105,55 @@ final class CheckoutLocationSearch {
 	}
 
 	/**
+	 * @return array{items:array<int,Location>, total:int, page:int, per_page:int, total_pages:int}
+	 */
+	public function search_paginated( string $query, int $page = 1, int $per_page = 20 ): array {
+		$per_page = in_array( $per_page, array( 10, 20, 50, 100 ), true ) ? $per_page : 20;
+		$page = max( 1, $page );
+		$query = trim( $query );
+		if ( '' === $query ) {
+			return array( 'items' => array(), 'total' => 0, 'page' => 1, 'per_page' => $per_page, 'total_pages' => 0 );
+		}
+
+		$exact = $this->search_service->find_exact_admin_identifier_matches( $query );
+		if ( array() !== $exact ) {
+			$total = count( $exact );
+			$total_pages = (int) ceil( $total / $per_page );
+			$page = min( $page, max( 1, $total_pages ) );
+			$offset = ( $page - 1 ) * $per_page;
+			return array(
+				'items'       => array_slice( $exact, $offset, $per_page ),
+				'total'       => $total,
+				'page'        => $page,
+				'per_page'    => $per_page,
+				'total_pages' => $total_pages,
+			);
+		}
+
+		$parser = $this->parser();
+		$parsed = $parser->parse( $query );
+		if ( array() === $parsed['real_tokens'] ) {
+			return array( 'items' => array(), 'total' => 0, 'page' => 1, 'per_page' => $per_page, 'total_pages' => 0 );
+		}
+
+		$scored = $this->scored_hierarchy_candidates( $parsed, $parser, 250, '' );
+		usort( $scored, fn( array $a, array $b ): int => $this->compare_scored_locations( $a, $b ) );
+		$items = array_map( static fn( array $row ): Location => $row['location'], $scored );
+		$total = count( $items );
+		$total_pages = (int) ceil( $total / $per_page );
+		$page = min( $page, max( 1, $total_pages ) );
+		$offset = ( $page - 1 ) * $per_page;
+
+		return array(
+			'items'       => array_slice( $items, $offset, $per_page ),
+			'total'       => $total,
+			'page'        => $page,
+			'per_page'    => $per_page,
+			'total_pages' => $total_pages,
+		);
+	}
+
+	/**
 	 * @return array<string,mixed>
 	 */
 	public function last_search_meta(): array {
@@ -212,7 +261,7 @@ final class CheckoutLocationSearch {
 	}
 
 	/**
-	 * @param array{query:string,real_tokens:array<int,string>,markers:array<string,bool>} $parsed
+	 * @param array{query:string,real_tokens:array<int,string>,markers:array<string,bool>,region_alias_tokens?:array<int,string>} $parsed
 	 * @return array{total:int,matched_tokens:int,matched_levels:int,all_tokens:bool,place_match:int,city_match:int,district_match:int,region_match:int,group_strength:int,depth:int}
 	 */
 	private function hierarchy_score( Location $location, array $parsed, CheckoutLocationSearchParser $parser ): array {
@@ -225,10 +274,12 @@ final class CheckoutLocationSearch {
 			'place'    => $parser->normalize( $location->resolved_place_name() ),
 		);
 
+		$region_alias_tokens = $parsed['region_alias_tokens'] ?? array();
+		$region_alias_query = in_array( $query, $region_alias_tokens, true );
 		$phrase = array(
-			'place'    => $this->phrase_match_strength( $fields['place'], $query ),
-			'city'     => $this->phrase_match_strength( $fields['city'], $query ),
-			'district' => $this->phrase_match_strength( $fields['district'], $query ),
+			'place'    => $region_alias_query ? 0 : $this->phrase_match_strength( $fields['place'], $query ),
+			'city'     => $region_alias_query ? 0 : $this->phrase_match_strength( $fields['city'], $query ),
+			'district' => $region_alias_query ? 0 : $this->phrase_match_strength( $fields['district'], $query ),
 			'region'   => $this->phrase_match_strength( $fields['region'], $query ),
 		);
 
@@ -236,7 +287,8 @@ final class CheckoutLocationSearch {
 		$matched_tokens = 0;
 		foreach ( $tokens as $token ) {
 			$matched = false;
-			foreach ( $fields as $level => $value ) {
+			$search_fields = in_array( $token, $region_alias_tokens, true ) ? array( 'region' => $fields['region'] ) : $fields;
+			foreach ( $search_fields as $level => $value ) {
 				$strength = $this->token_match_strength( $value, $token );
 				if ( $strength > 0 ) {
 					$matched = true;
@@ -252,23 +304,27 @@ final class CheckoutLocationSearch {
 			$level_matches[ $level ] = max( $level_matches[ $level ], $strength );
 		}
 
-		$exact_place = 3 === $phrase['place'] || 3 === $level_matches['place'];
-		$prefix_place = ! $exact_place && ( 2 === $phrase['place'] || 2 === $level_matches['place'] );
 		$exact_city = 3 === $phrase['city'] || 3 === $level_matches['city'];
 		$prefix_city = ! $exact_city && ( 2 === $phrase['city'] || 2 === $level_matches['city'] );
+		$exact_place = 3 === $phrase['place'] || 3 === $level_matches['place'];
+		$prefix_place = ! $exact_place && ( 2 === $phrase['place'] || 2 === $level_matches['place'] );
 		$matched_levels = count( array_filter( $level_matches, static fn( int $strength ): bool => $strength > 0 ) );
 		$all_tokens = $matched_tokens === count( $tokens );
 		$depth = ( '' !== $fields['place'] ? 4 : 0 ) + ( '' !== $fields['city'] ? 3 : 0 ) + ( '' !== $fields['district'] ? 2 : 0 ) + ( '' !== $fields['region'] ? 1 : 0 );
 		$district_place = $level_matches['district'] > 0 && $level_matches['place'] > 0;
 		$region_only_match = $level_matches['region'] > 0 && 0 === $level_matches['place'] && 0 === $level_matches['city'] && ! $district_place;
+		$matched_hierarchy_rank = match ( true ) {
+			$level_matches['city'] > 0 => 3,
+			$level_matches['place'] > 0 => 2,
+			$level_matches['district'] > 0 => 1,
+			default => 0,
+		};
 		$group_rank_bucket = match ( true ) {
-			$exact_place => 1,
-			$prefix_place => 2,
-			$exact_city => 3,
-			$prefix_city => 4,
-			$district_place => 5,
-			$region_only_match => 6,
-			default => 7,
+			$exact_city || $exact_place => 1,
+			$prefix_city || $prefix_place => 2,
+			$district_place => 3,
+			$region_only_match => 4,
+			default => 5,
 		};
 		$group_strength = 800 - ( $group_rank_bucket * 100 );
 
@@ -306,6 +362,7 @@ final class CheckoutLocationSearch {
 			'region_match'   => $level_matches['region'],
 			'region_only_match' => $region_only_match,
 			'group_rank_bucket' => $group_rank_bucket,
+			'matched_hierarchy_rank' => $matched_hierarchy_rank,
 			'group_strength' => $group_strength,
 			'depth'          => $depth,
 		);
@@ -313,6 +370,7 @@ final class CheckoutLocationSearch {
 
 	private function compare_scored_locations( array $a, array $b ): int {
 		return (int) $b['score']['matched_levels'] <=> (int) $a['score']['matched_levels']
+			?: (int) $b['score']['matched_hierarchy_rank'] <=> (int) $a['score']['matched_hierarchy_rank']
 			?: (int) $b['score']['place_match'] <=> (int) $a['score']['place_match']
 			?: (int) $b['score']['city_match'] <=> (int) $a['score']['city_match']
 			?: (int) $b['score']['district_match'] <=> (int) $a['score']['district_match']
@@ -400,8 +458,8 @@ final class CheckoutLocationSearch {
 	}
 
 	/**
-	 * @param array{query:string,tokens:array<int,string>,real_tokens:array<int,string>,markers:array<string,bool>,has_markers:bool} $parsed
-	 * @return array{query:string,tokens:array<int,string>,real_tokens:array<int,string>,markers:array<string,bool>,has_markers:bool}
+	 * @param array{query:string,tokens:array<int,string>,real_tokens:array<int,string>,markers:array<string,bool>,has_markers:bool,region_alias_tokens?:array<int,string>} $parsed
+	 * @return array{query:string,tokens:array<int,string>,real_tokens:array<int,string>,markers:array<string,bool>,has_markers:bool,region_alias_tokens?:array<int,string>}
 	 */
 	private function remove_forced_region_tokens( array $parsed, string $force_region_code, CheckoutLocationSearchParser $parser ): array {
 		$candidates = $this->search_service->checkout_hierarchy_candidates( array(), 1, $force_region_code );
@@ -439,7 +497,8 @@ final class CheckoutLocationSearch {
 			$by_region[ $key ]['rows'][] = $row;
 			$by_region[ $key ]['label'] = $formatter->format_checkout_region_header( $location );
 			$by_region[ $key ]['sort'] = $location->region_name;
-			$by_region[ $key ]['bucket'] = min( (int) ( $by_region[ $key ]['bucket'] ?? 7 ), (int) $row['score']['group_rank_bucket'] );
+			$by_region[ $key ]['bucket'] = min( (int) ( $by_region[ $key ]['bucket'] ?? 5 ), (int) $row['score']['group_rank_bucket'] );
+			$by_region[ $key ]['matched_hierarchy_rank'] = max( (int) ( $by_region[ $key ]['matched_hierarchy_rank'] ?? 0 ), (int) $row['score']['matched_hierarchy_rank'] );
 			$by_region[ $key ]['group_strength'] = max( (int) ( $by_region[ $key ]['group_strength'] ?? 0 ), (int) $row['score']['group_strength'] );
 			$by_region[ $key ]['score'] = max( (int) ( $by_region[ $key ]['score'] ?? 0 ), (int) $row['score']['total'] );
 		}
@@ -448,6 +507,7 @@ final class CheckoutLocationSearch {
 		uasort(
 			$by_region,
 			static fn( array $a, array $b ): int => (int) $a['bucket'] <=> (int) $b['bucket']
+				?: (int) $b['matched_hierarchy_rank'] <=> (int) $a['matched_hierarchy_rank']
 				?: strcmp( (string) $a['sort'], (string) $b['sort'] )
 				?: (int) $b['score'] <=> (int) $a['score']
 		);
