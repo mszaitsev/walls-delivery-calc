@@ -233,6 +233,7 @@ final class RuleRepository {
 					'promo_shipping'  => (bool) (int) $row['promo_shipping'],
 					'stop_processing' => (bool) (int) $row['stop_processing'],
 					'conditions'      => $conditions,
+					'condition_group_logic' => $this->decode_group_logic( $row['condition_group_logic'] ?? '' ),
 				)
 			)
 		);
@@ -269,6 +270,7 @@ final class RuleRepository {
 			'operation_base'  => $rule->operation_base,
 			'promo_shipping'  => $rule->promo_shipping ? 1 : 0,
 			'stop_processing' => $rule->stop_processing ? 1 : 0,
+			'condition_group_logic' => wp_json_encode( Rule::normalized_group_logic( $rule->condition_group_logic ) ),
 			'created_at'      => $now,
 			'updated_at'      => $now,
 		);
@@ -278,7 +280,19 @@ final class RuleRepository {
 	 * @return array<int,string>
 	 */
 	private function rule_formats(): array {
-		return array( '%s', '%d', '%d', '%s', '%s', '%s', '%s', '%f', '%s', '%d', '%d', '%s', '%s' );
+		return array( '%s', '%d', '%d', '%s', '%s', '%s', '%s', '%f', '%s', '%d', '%d', '%s', '%s', '%s' );
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function decode_group_logic( mixed $value ): array {
+		if ( is_string( $value ) && '' !== trim( $value ) ) {
+			$decoded = json_decode( $value, true );
+			return Rule::normalized_group_logic( is_array( $decoded ) ? $decoded : array() );
+		}
+
+		return Rule::normalized_group_logic( is_array( $value ) ? $value : array() );
 	}
 
 	private function rules_table(): string {

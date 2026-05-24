@@ -81,7 +81,9 @@
 	}
 
 	function renderSelectValue(row, definition, state, numeric) {
+		var wrapper = document.createElement('div');
 		var select = document.createElement('select');
+		wrapper.className = 'wdc-value-with-unit';
 		select.className = 'wdc-condition-specific-control';
 		select.appendChild(option(config().strings.selectValue || 'Выберите значение', '', false));
 		Object.keys(definition.options || {}).forEach(function (value) {
@@ -96,7 +98,9 @@
 			}
 			syncValueState(row, state);
 		});
-		return select;
+		wrapper.appendChild(select);
+		appendUnit(wrapper, definition);
+		return wrapper;
 	}
 
 	function renderLocationValue(row, state) {
@@ -106,19 +110,27 @@
 		var displayName = state.value_json && state.value_json.display_name ? state.value_json.display_name : '';
 		var fiasId = state.value_json && state.value_json.fias_id ? state.value_json.fias_id : state.value_text;
 
-		input.type = 'search';
+		input.type = 'text';
 		input.className = 'wdc-location-search';
-		input.placeholder = config().strings.searchLocation || 'Начните вводить населенный пункт';
-		input.value = displayName ? displayName + ' (' + fiasId + ')' : (state.value_text || '');
+		input.placeholder = config().strings.searchLocation || 'Введите FIAS ID населенного пункта';
+		input.value = state.value_text || fiasId || '';
 		results.className = 'wdc-location-results';
 		wrapper.className = 'wdc-location-field';
 		wrapper.appendChild(input);
 		wrapper.appendChild(results);
+		if (displayName && fiasId) {
+			var current = document.createElement('span');
+			current.textContent = displayName + ' (' + fiasId + ')';
+			results.appendChild(current);
+		}
 
 		input.addEventListener('input', function () {
 			var query = input.value.trim();
 			results.innerHTML = '';
 			if (query.length < 3) {
+				state.value_text = query;
+				state.value_json = query ? { fias_id: query } : {};
+				syncValueState(row, state);
 				return;
 			}
 
@@ -132,21 +144,18 @@
 						var empty = document.createElement('span');
 						empty.textContent = config().strings.noResults || 'Ничего не найдено';
 						results.appendChild(empty);
+						state.value_text = query;
+						state.value_json = { fias_id: query };
+						syncValueState(row, state);
 						return;
 					}
-					items.forEach(function (item) {
-						var button = document.createElement('button');
-						button.type = 'button';
-						button.textContent = item.label;
-						button.addEventListener('click', function () {
-							state.value_text = item.fias_id;
-							state.value_json = { fias_id: item.fias_id, display_name: item.display_name };
-							input.value = item.label;
-							results.innerHTML = '';
-							syncValueState(row, state);
-						});
-						results.appendChild(button);
-					});
+					var item = items[0];
+					var found = document.createElement('span');
+					found.textContent = item.display_name + ' (' + item.fias_id + ')';
+					results.appendChild(found);
+					state.value_text = item.fias_id;
+					state.value_json = { fias_id: item.fias_id, display_name: item.display_name };
+					syncValueState(row, state);
 				});
 		});
 
@@ -206,12 +215,12 @@
 				state.value_number = number.value;
 				syncValueState(row, state);
 			});
-			target.appendChild(number);
+			target.appendChild(wrapWithUnit(number, definition));
 		} else if (definition.input === 'select') {
 			target.appendChild(renderSelectValue(row, definition, state, false));
 		} else if (definition.input === 'select_number') {
 			target.appendChild(renderSelectValue(row, definition, state, true));
-		} else if (definition.input === 'location') {
+		} else if (definition.input === 'fias_id') {
 			target.appendChild(renderLocationValue(row, state));
 		} else if (definition.input === 'dimensions') {
 			target.appendChild(renderDimensionsValue(row, state));
@@ -226,6 +235,25 @@
 			});
 			target.appendChild(date);
 		}
+	}
+
+	function appendUnit(wrapper, definition) {
+		if (!definition.unit) {
+			return;
+		}
+
+		var unit = document.createElement('span');
+		unit.className = 'wdc-condition-unit';
+		unit.textContent = definition.unit;
+		wrapper.appendChild(unit);
+	}
+
+	function wrapWithUnit(control, definition) {
+		var wrapper = document.createElement('div');
+		wrapper.className = 'wdc-value-with-unit';
+		wrapper.appendChild(control);
+		appendUnit(wrapper, definition);
+		return wrapper;
 	}
 
 	function initConditionRow(row) {

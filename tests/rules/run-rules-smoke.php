@@ -195,6 +195,15 @@ $city_fias_rule = new Rule(
 );
 $result = $engine->apply_rules( array( $city_fias_rule ), rules_context( 450, 1000, 'Other city', array( 'selected_location_fias_id' => 'fias-nsk' ) ) );
 rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'city condition must compare by selected location fias_id.' );
+$result = $engine->apply_rules( array( $city_fias_rule ), rules_context( 450, 1000, 'Новосибирск', array( 'selected_location_fias_id' => 'fias-other' ) ) );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'city condition must be false for a different fias_id.' );
+$city_neq_rule = Rule::from_array( array_merge( $city_fias_rule->to_array(), array( 'conditions' => array( new RuleCondition( null, null, 1, RuleConditionTypes::CITY, RuleOperators::NEQ, 'fias-nsk' ) ) ) ) );
+$result = $engine->apply_rules( array( $city_neq_rule ), rules_context( 450, 1000, 'Other city', array( 'selected_location_fias_id' => 'fias-other' ) ) );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'city != condition must be true for different non-empty fias_id.' );
+$result = $engine->apply_rules( array( $city_fias_rule ), rules_context( 450, 1000, 'Новосибирск') );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'city condition must be false when context fias_id is empty.' );
+$result = $engine->apply_rules( array( $city_fias_rule ), rules_context( 450, 1000, 'fias-nsk') );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'city condition must not fall back to city text/display name.' );
 
 $weight_rule = new Rule(
 	null,
@@ -270,5 +279,56 @@ $date_rule = new Rule(
 );
 $result = $engine->apply_rules( array( $date_rule ), rules_context() );
 rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'date condition must evaluate stored YYYY-MM-DD values.' );
+
+$and_group_rule = new Rule(
+	null,
+	'AND group',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array(
+		new RuleCondition( null, null, 1, RuleConditionTypes::COUNTRY, RuleOperators::EQ, 'RU' ),
+		new RuleCondition( null, null, 1, RuleConditionTypes::PAYMENT_METHOD, RuleOperators::EQ, 'cash' ),
+	),
+	array( 1 => 'and', 2 => 'and', 3 => 'and' )
+);
+$result = $engine->apply_rules( array( $and_group_rule ), rules_context() );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'AND group must require all conditions.' );
+
+$or_group_rule = Rule::from_array( array_merge( $and_group_rule->to_array(), array( 'name' => 'OR group', 'condition_group_logic' => array( 1 => 'or', 2 => 'and', 3 => 'and' ) ) ) );
+$result = $engine->apply_rules( array( $or_group_rule ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'OR group must require at least one condition.' );
+
+$groups_or_rule = new Rule(
+	null,
+	'Groups OR',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array(
+		new RuleCondition( null, null, 1, RuleConditionTypes::PAYMENT_METHOD, RuleOperators::EQ, 'cash' ),
+		new RuleCondition( null, null, 2, RuleConditionTypes::COUNTRY, RuleOperators::EQ, 'RU' ),
+	),
+	array( 1 => 'and', 2 => 'and', 3 => 'and' )
+);
+$result = $engine->apply_rules( array( $groups_or_rule ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'Condition groups must combine via OR.' );
+
+$result = $engine->apply_rules( array( Rule::from_array( array_merge( price_rule( 'No conditions', RuleOperationTypes::DECREASE, 10 )->to_array(), array( 'conditions' => array() ) ) ) ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'Rules without conditions must still apply.' );
 
 echo "Rules smoke test passed.\n";

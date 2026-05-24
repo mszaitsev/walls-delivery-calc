@@ -32,7 +32,7 @@ final class RuleConditionUiSchema {
 				'operators' => self::NUMERIC_OPERATORS,
 				'input'     => 'integer',
 				'storage'   => 'value_number',
-				'unit'      => '',
+				'unit'      => __( 'шт.', 'walls-delivery-calc' ),
 			),
 			RuleConditionTypes::PAYMENT_METHOD => array(
 				'label'     => __( 'Способ оплаты', 'walls-delivery-calc' ),
@@ -44,7 +44,7 @@ final class RuleConditionUiSchema {
 			RuleConditionTypes::CITY => array(
 				'label'     => __( 'Населенный пункт', 'walls-delivery-calc' ),
 				'operators' => self::EQUALS_OPERATORS,
-				'input'     => 'location',
+				'input'     => 'fias_id',
 				'storage'   => 'value_text_value_json',
 			),
 			RuleConditionTypes::COUNTRY => array(
@@ -73,7 +73,7 @@ final class RuleConditionUiSchema {
 				'operators' => self::NUMERIC_OPERATORS,
 				'input'     => 'number',
 				'storage'   => 'value_number',
-				'unit'      => __( 'г', 'walls-delivery-calc' ),
+				'unit'      => __( 'грамм', 'walls-delivery-calc' ),
 			),
 			RuleConditionTypes::DIMENSIONS => array(
 				'label'     => __( 'Габариты (Д*Ш*В см)', 'walls-delivery-calc' ),
@@ -197,7 +197,7 @@ final class RuleConditionUiSchema {
 		return new RuleCondition(
 			null,
 			null,
-			max( 1, isset( $raw['condition_group'] ) ? (int) sanitize_text_field( (string) $raw['condition_group'] ) : 1 ),
+			$this->sanitize_group( $raw['condition_group'] ?? 1 ),
 			$type,
 			$operator,
 			$value_text,
@@ -329,6 +329,12 @@ final class RuleConditionUiSchema {
 		return 1 === preg_match( '/^\d{4}-\d{2}-\d{2}$/', $value ) ? $value : '';
 	}
 
+	private function sanitize_group( mixed $value ): int {
+		$group = (int) sanitize_text_field( (string) $value );
+
+		return in_array( $group, array( 1, 2, 3 ), true ) ? $group : 1;
+	}
+
 	/**
 	 * @param array<string,mixed> $definition
 	 */
@@ -336,7 +342,7 @@ final class RuleConditionUiSchema {
 		$input = (string) ( $definition['input'] ?? '' );
 		$options = is_array( $definition['options'] ?? null ) ? $definition['options'] : array();
 
-		if ( 'location' === $input ) {
+		if ( 'fias_id' === $input ) {
 			$display = (string) ( $condition->value_json['display_name'] ?? '' );
 			$fias_id = (string) ( $condition->value_json['fias_id'] ?? $condition->value_text );
 			return '' !== $display ? trim( $display . ' (' . $fias_id . ')' ) : $condition->value_text;

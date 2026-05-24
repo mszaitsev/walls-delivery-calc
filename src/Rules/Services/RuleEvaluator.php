@@ -73,10 +73,17 @@ final class RuleEvaluator {
 			$groups[ $condition->condition_group ][] = $condition;
 		}
 
-		foreach ( $groups as $conditions ) {
-			$group_matches = true;
+		$logic = Rule::normalized_group_logic( $rule->condition_group_logic );
+		foreach ( $groups as $group => $conditions ) {
+			$mode = $logic[ (int) $group ] ?? 'and';
+			$group_matches = 'and' === $mode;
 			foreach ( $conditions as $condition ) {
-				if ( ! $this->condition_evaluator->evaluate( $condition, $context ) ) {
+				$matches = $this->condition_evaluator->evaluate( $condition, $context );
+				if ( 'or' === $mode && $matches ) {
+					$group_matches = true;
+					break;
+				}
+				if ( 'and' === $mode && ! $matches ) {
 					$group_matches = false;
 					break;
 				}

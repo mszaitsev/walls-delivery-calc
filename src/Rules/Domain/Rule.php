@@ -24,7 +24,8 @@ final class Rule {
 		public readonly string $operation_base,
 		public readonly bool $promo_shipping,
 		public readonly bool $stop_processing,
-		public readonly array $conditions = array()
+		public readonly array $conditions = array(),
+		public readonly array $condition_group_logic = array( 1 => 'and', 2 => 'and', 3 => 'and' )
 	) {
 	}
 
@@ -46,6 +47,7 @@ final class Rule {
 			'promo_shipping'  => $this->promo_shipping,
 			'stop_processing' => $this->stop_processing,
 			'conditions'      => array_map( static fn ( RuleCondition $condition ): array => $condition->to_array(), $this->conditions ),
+			'condition_group_logic' => $this->normalized_group_logic( $this->condition_group_logic ),
 		);
 	}
 
@@ -71,7 +73,8 @@ final class Rule {
 			(string) ( $data['operation_base'] ?? RuleOperationBases::RUBLES ),
 			(bool) ( $data['promo_shipping'] ?? false ),
 			(bool) ( $data['stop_processing'] ?? false ),
-			$conditions
+			$conditions,
+			self::normalized_group_logic( is_array( $data['condition_group_logic'] ?? null ) ? $data['condition_group_logic'] : array() )
 		);
 	}
 
@@ -101,6 +104,26 @@ final class Rule {
 			$errors = array_merge( $errors, $condition->validate() );
 		}
 
+		foreach ( $this->normalized_group_logic( $this->condition_group_logic ) as $logic ) {
+			if ( ! in_array( $logic, array( 'and', 'or' ), true ) ) {
+				$errors[] = 'condition_group_logic is invalid';
+			}
+		}
+
 		return $errors;
+	}
+
+	/**
+	 * @param array<int|string,mixed> $logic
+	 * @return array<int,string>
+	 */
+	public static function normalized_group_logic( array $logic ): array {
+		$result = array();
+		for ( $group = 1; $group <= 3; ++$group ) {
+			$value = strtolower( (string) ( $logic[ $group ] ?? $logic[ (string) $group ] ?? 'and' ) );
+			$result[ $group ] = 'or' === $value ? 'or' : 'and';
+		}
+
+		return $result;
 	}
 }

@@ -345,6 +345,8 @@ rules_admin_smoke_assert( $payment_condition instanceof RuleCondition && 'cod' =
 $city_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::CITY, 'operator' => RuleOperators::EQ, 'value_text' => 'fias-nsk', 'value_json' => '{"display_name":"Новосибирская область, г Новосибирск"}' ) );
 rules_admin_smoke_assert( $city_condition instanceof RuleCondition && 'fias-nsk' === $city_condition->value_text, 'city must store fias_id in value_text.' );
 rules_admin_smoke_assert( 'fias-nsk' === ( $city_condition->value_json['fias_id'] ?? '' ) && 'Новосибирская область, г Новосибирск' === ( $city_condition->value_json['display_name'] ?? '' ), 'city must store display_name/fias_id in value_json.' );
+$invalid_group_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::ORDER_TOTAL, 'condition_group' => '7', 'operator' => RuleOperators::GTE, 'value_number' => '5000' ) );
+rules_admin_smoke_assert( $invalid_group_condition instanceof RuleCondition && 1 === $invalid_group_condition->condition_group, 'Invalid condition group must be sanitized to 1.' );
 $country_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::COUNTRY, 'operator' => RuleOperators::EQ, 'value_text' => 'RU' ) );
 rules_admin_smoke_assert( $country_condition instanceof RuleCondition && 'RU' === $country_condition->value_text, 'country must store country code.' );
 $delivery_type_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::DELIVERY_TYPE, 'operator' => RuleOperators::EQ, 'value_text' => 'pickup' ) );
@@ -396,6 +398,27 @@ rules_admin_smoke_assert( 7 === $delivery_days_result->final_delivery_days?->min
 $business_days_rule = Rule::from_array( array_merge( $delivery_days_rule->to_array(), array( 'operation_base' => RuleOperationBases::BUSINESS_DAYS ) ) );
 rules_admin_smoke_assert( array() === $business_days_rule->validate(), 'business_days must be valid for change_delivery_days.' );
 
+$logic_rule_id = $repository->save_rule(
+	new Rule(
+		null,
+		'Logic storage',
+		true,
+		50,
+		'default',
+		'',
+		RuleActionTypes::CHANGE_PRICE,
+		RuleOperationTypes::DECREASE,
+		10,
+		RuleOperationBases::RUBLES,
+		false,
+		false,
+		array(),
+		array( 1 => 'and', 2 => 'or', 3 => 'and' )
+	)
+);
+$logic_rule = $repository->get_rule( $logic_rule_id );
+rules_admin_smoke_assert( $logic_rule instanceof Rule && array( 1 => 'and', 2 => 'or', 3 => 'and' ) === $logic_rule->condition_group_logic, 'Rule must store condition_group_logic.' );
+
 $admin_page_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Rules/Admin/RulesAdminPage.php' );
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'Создать демо-правила' ), 'Admin page must not show create demo button.' );
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'Удалить демо-правила' ), 'Admin page must not show delete demo button.' );
@@ -409,6 +432,19 @@ rules_admin_smoke_assert( str_contains( $admin_page_source, 'Итоговый с
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'RuleOperationBases::CALENDAR_DAYS' ), 'change_delivery_days must default to calendar_days in admin handling.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, "delivery_type_options()" ), 'Simulation delivery_type must use select values pickup/courier.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'payment_method_options()' ) && ! str_contains( $admin_page_source, "'payment_method' => 'card'" ), 'Simulation payment_method must use WooCommerce gateways without hardcoded card default.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, "Условие %d" ) && str_contains( $admin_page_source, 'data-condition-group' ), 'Condition group UI must use select groups 1/2/3.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'condition_group_logic[<?php echo esc_attr( (string) $group ); ?>]' ), 'Rule form must save condition_group_logic inputs.' );
+
+$schema_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Rules/Admin/RuleConditionUiSchema.php' );
+foreach ( array( 'руб.', 'шт.', 'грамм', 'куб.м.' ) as $unit_label ) {
+	rules_admin_smoke_assert( str_contains( $schema_source, $unit_label ), 'Condition UI schema must expose unit label: ' . $unit_label );
+}
+rules_admin_smoke_assert( str_contains( $schema_source, "'input'     => 'fias_id'" ), 'City condition UI must be FIAS ID only.' );
+
+$js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/rules-admin.js' );
+rules_admin_smoke_assert( str_contains( $js_source, 'appendUnit' ), 'JS must render unit labels next to value controls.' );
+rules_admin_smoke_assert( str_contains( $js_source, 'Введите FIAS ID населенного пункта' ) || str_contains( $admin_page_source, 'Введите FIAS ID населенного пункта' ), 'UI must use FIAS ID placeholder for city.' );
+rules_admin_smoke_assert( ! str_contains( $js_source, 'Начните вводить населенный пункт' ), 'UI must not contain location autocomplete by name.' );
 
 $legacy_files = shell_exec( 'git diff --name-only -- includes' );
 rules_admin_smoke_assert( '' === trim( (string) $legacy_files ), 'Legacy includes/* must remain unchanged.' );

@@ -123,6 +123,35 @@
 	min-width: 220px;
 }
 
+.wdc-value-with-unit {
+	display: grid;
+	grid-template-columns: minmax(120px, 1fr) auto;
+	gap: 8px;
+	align-items: center;
+}
+
+.wdc-condition-unit {
+	color: #646970;
+	white-space: nowrap;
+}
+
+.wdc-condition-group-logic {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	align-items: end;
+	margin: 8px 0 14px;
+	padding: 12px;
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+}
+
+.wdc-condition-group-logic label {
+	display: grid;
+	gap: 4px;
+}
+
 .wdc-dimensions-fields {
 	display: grid;
 	grid-template-columns: repeat(3, minmax(80px, 1fr));

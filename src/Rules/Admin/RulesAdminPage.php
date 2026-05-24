@@ -281,6 +281,7 @@ final class RulesAdminPage {
 				</div>
 
 				<h3><?php echo esc_html__( 'Условия применения', 'walls-delivery-calc' ); ?></h3>
+				<?php $this->render_group_logic_fields( $rule ); ?>
 				<div class="wdc-conditions" data-conditions>
 					<?php foreach ( $this->conditions_for_form( $rule ) as $index => $condition ) : ?>
 						<?php $this->render_condition_row( $condition, $index ); ?>
@@ -302,8 +303,12 @@ final class RulesAdminPage {
 		?>
 		<div class="wdc-condition-row" data-condition-row data-condition-value="<?php echo esc_attr( $this->condition_value_payload( $condition ) ); ?>">
 			<label>
-				<span><?php echo esc_html__( 'Группа', 'walls-delivery-calc' ); ?></span>
-				<input type="number" min="1" name="conditions[<?php echo esc_attr( (string) $index ); ?>][condition_group]" value="<?php echo esc_attr( (string) $condition->condition_group ); ?>">
+				<span><?php echo esc_html__( 'Условие', 'walls-delivery-calc' ); ?></span>
+				<select name="conditions[<?php echo esc_attr( (string) $index ); ?>][condition_group]" data-condition-group>
+					<?php for ( $group = 1; $group <= 3; ++$group ) : ?>
+						<option value="<?php echo esc_attr( (string) $group ); ?>" <?php selected( min( 3, max( 1, $condition->condition_group ) ), $group ); ?>><?php echo esc_html( sprintf( __( 'Условие %d', 'walls-delivery-calc' ), $group ) ); ?></option>
+					<?php endfor; ?>
+				</select>
 			</label>
 			<label>
 				<span><?php echo esc_html__( 'Тип условия', 'walls-delivery-calc' ); ?></span>
@@ -450,7 +455,7 @@ final class RulesAdminPage {
 	private function save_rule_action(): void {
 		$rule = $this->sanitize_rule_from_post();
 		$this->form_rule = $rule;
-		$this->errors    = $this->localized_errors( $rule->validate() );
+		$this->errors    = array_merge( $this->localized_errors( $rule->validate() ), $this->validate_admin_conditions( $rule ) );
 
 		if ( array() !== $this->errors ) {
 			return;
@@ -579,7 +584,8 @@ final class RulesAdminPage {
 			$operation_base,
 			isset( $_POST['promo_shipping'] ),
 			isset( $_POST['stop_processing'] ),
-			$this->sanitize_conditions_from_post()
+			$this->sanitize_conditions_from_post(),
+			$this->sanitize_group_logic_from_post()
 		);
 	}
 
@@ -695,13 +701,13 @@ final class RulesAdminPage {
 
 		$groups = array();
 		foreach ( $rule->conditions as $condition ) {
-			$value = null !== $condition->value_number ? (string) $condition->value_number : $condition->value_text;
 			$groups[ $condition->condition_group ][] = $this->condition_schema()->condition_summary( $condition );
 		}
 
 		$parts = array();
+		$logic = Rule::normalized_group_logic( $rule->condition_group_logic );
 		foreach ( $groups as $group => $conditions ) {
-			$parts[] = sprintf( __( 'Группа %d: %s', 'walls-delivery-calc' ), (int) $group, implode( '; ', $conditions ) );
+			$parts[] = sprintf( __( 'Условие %1$d (%2$s): %3$s', 'walls-delivery-calc' ), (int) $group, $this->group_logic_label( $logic[ (int) $group ] ?? 'and' ), implode( '; ', $conditions ) );
 		}
 
 		return implode( ' | ', $parts );
@@ -753,6 +759,7 @@ final class RulesAdminPage {
 			RuleConditionTypes::DELIVERY_TYPE  => __( 'тип доставки', 'walls-delivery-calc' ),
 			RuleConditionTypes::DELIVERY_PRICE => __( 'цена доставки', 'walls-delivery-calc' ),
 			RuleConditionTypes::WEIGHT         => __( 'вес', 'walls-delivery-calc' ),
+			RuleConditionTypes::DIMENSIONS     => __( 'габариты (Д*Ш*В см)', 'walls-delivery-calc' ),
 			RuleConditionTypes::VOLUME         => __( 'объем', 'walls-delivery-calc' ),
 			RuleConditionTypes::DAY_OF_WEEK    => __( 'день недели', 'walls-delivery-calc' ),
 			RuleConditionTypes::DAY_OF_MONTH   => __( 'день месяца', 'walls-delivery-calc' ),
@@ -789,6 +796,7 @@ final class RulesAdminPage {
 			'condition_group must be greater than 0'  => __( 'Группа условия должна быть больше 0.', 'walls-delivery-calc' ),
 			'condition_type is invalid'               => __( 'Некорректный тип условия.', 'walls-delivery-calc' ),
 			'operator is invalid'                     => __( 'Некорректный оператор условия.', 'walls-delivery-calc' ),
+			'condition_group_logic is invalid'        => __( 'Некорректная логика группы условий.', 'walls-delivery-calc' ),
 		);
 
 		return array_map( static fn ( string $error ): string => $map[ $error ] ?? $error, $errors );
@@ -928,6 +936,76 @@ final class RulesAdminPage {
 		return sprintf( '%d %s', $days, $unit );
 	}
 
+	private function render_group_logic_fields( Rule $rule ): void {
+		$logic = Rule::normalized_group_logic( $rule->condition_group_logic );
+		?>
+		<div class="wdc-condition-group-logic">
+			<strong><?php echo esc_html__( 'Логика групп условий', 'walls-delivery-calc' ); ?></strong>
+			<?php for ( $group = 1; $group <= 3; ++$group ) : ?>
+				<label>
+					<span><?php echo esc_html( sprintf( __( 'Условие %d', 'walls-delivery-calc' ), $group ) ); ?></span>
+					<select name="condition_group_logic[<?php echo esc_attr( (string) $group ); ?>]" data-group-logic>
+						<option value="and" <?php selected( $logic[ $group ], 'and' ); ?>><?php echo esc_html__( 'И', 'walls-delivery-calc' ); ?></option>
+						<option value="or" <?php selected( $logic[ $group ], 'or' ); ?>><?php echo esc_html__( 'ИЛИ', 'walls-delivery-calc' ); ?></option>
+					</select>
+				</label>
+			<?php endfor; ?>
+		</div>
+		<?php
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function sanitize_group_logic_from_post(): array {
+		$raw = wp_unslash( $_POST['condition_group_logic'] ?? array() );
+		$raw = is_array( $raw ) ? $raw : array();
+
+		$logic = array();
+		for ( $group = 1; $group <= 3; ++$group ) {
+			$value = isset( $raw[ $group ] ) ? sanitize_key( (string) $raw[ $group ] ) : 'and';
+			$logic[ $group ] = 'or' === $value ? 'or' : 'and';
+		}
+
+		return $logic;
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function validate_admin_conditions( Rule $rule ): array {
+		$errors = array();
+		foreach ( $rule->conditions as $condition ) {
+			if ( RuleConditionTypes::CITY !== $condition->condition_type ) {
+				continue;
+			}
+
+			if ( '' === trim( $condition->value_text ) || ! $this->location_fias_id_exists( $condition->value_text ) ) {
+				$errors[] = __( 'Для условия Населенный пункт нужно указать существующий FIAS ID из локальной базы населенных пунктов.', 'walls-delivery-calc' );
+			}
+		}
+
+		return $errors;
+	}
+
+	private function location_fias_id_exists( string $fias_id ): bool {
+		global $wpdb;
+
+		$table = $wpdb->prefix . 'wdc_locations';
+		$result = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT fias_id FROM {$table} WHERE active = 1 AND fias_id = %s LIMIT 1",
+				$fias_id
+			)
+		);
+
+		return ! in_array( $result, array( null, '', 0, '0' ), true );
+	}
+
+	private function group_logic_label( string $logic ): string {
+		return 'or' === $logic ? __( 'ИЛИ', 'walls-delivery-calc' ) : __( 'И', 'walls-delivery-calc' );
+	}
+
 	private function condition_schema(): RuleConditionUiSchema {
 		static $schema = null;
 		if ( ! $schema instanceof RuleConditionUiSchema ) {
@@ -953,8 +1031,8 @@ final class RulesAdminPage {
 			),
 			'strings' => array(
 				'selectValue' => __( 'Выберите значение', 'walls-delivery-calc' ),
-				'searchLocation' => __( 'Начните вводить населенный пункт', 'walls-delivery-calc' ),
-				'noResults' => __( 'Ничего не найдено', 'walls-delivery-calc' ),
+				'searchLocation' => __( 'Введите FIAS ID населенного пункта', 'walls-delivery-calc' ),
+				'noResults' => __( 'FIAS ID не найден в локальной базе населенных пунктов', 'walls-delivery-calc' ),
 			),
 		);
 	}
@@ -1036,12 +1114,10 @@ final class RulesAdminPage {
 
 		$query = isset( $_REQUEST['query'] ) ? sanitize_text_field( wp_unslash( (string) $_REQUEST['query'] ) ) : '';
 		$table = $wpdb->prefix . 'wdc_locations';
-		$like = '%' . $wpdb->esc_like( $query ) . '%';
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT fias_id, display_name FROM {$table} WHERE active = 1 AND (display_name LIKE %s OR fias_id LIKE %s) ORDER BY display_name ASC LIMIT 20",
-				$like,
-				$like
+				"SELECT fias_id, display_name FROM {$table} WHERE active = 1 AND fias_id = %s LIMIT 1",
+				$query
 			),
 			ARRAY_A
 		);

@@ -104,12 +104,14 @@ final class ConditionEvaluator {
 
 	private function compare_city( string $left, RuleCondition $condition, RuleEvaluationContext $context ): bool {
 		$fias_id = trim( (string) ( $context->meta['selected_location_fias_id'] ?? $context->meta['location_fias_id'] ?? $context->meta['_wdc_platform_location_fias_id'] ?? $context->destination->fias_id ) );
-		if ( '' !== $fias_id && '' !== trim( $condition->value_text ) ) {
-			$matches = strtolower( $fias_id ) === strtolower( trim( $condition->value_text ) );
-			return RuleOperators::NEQ === $condition->operator ? ! $matches : $matches;
+		$condition_fias_id = trim( $condition->value_text );
+		if ( '' === $fias_id || '' === $condition_fias_id ) {
+			return false;
 		}
 
-		return $this->compare_strings( $left, $condition );
+		$matches = strtolower( $fias_id ) === strtolower( $condition_fias_id );
+
+		return RuleOperators::NEQ === $condition->operator ? ! $matches : $matches;
 	}
 
 	private function compare_dimensions( RuleEvaluationContext $context, RuleCondition $condition ): bool {
