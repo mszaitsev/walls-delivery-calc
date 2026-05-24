@@ -25,7 +25,8 @@ final class Rule {
 		public readonly bool $promo_shipping,
 		public readonly bool $stop_processing,
 		public readonly array $conditions = array(),
-		public readonly array $condition_group_logic = array( 1 => 'and', 2 => 'and', 3 => 'and' )
+		public readonly array $condition_group_logic = array( 1 => 'and', 2 => 'and', 3 => 'and' ),
+		public readonly string $operation_text = ''
 	) {
 	}
 
@@ -44,6 +45,7 @@ final class Rule {
 			'operation_type'  => $this->operation_type,
 			'operation_value' => $this->operation_value,
 			'operation_base'  => $this->operation_base,
+			'operation_text'  => $this->operation_text,
 			'promo_shipping'  => $this->promo_shipping,
 			'stop_processing' => $this->stop_processing,
 			'conditions'      => array_map( static fn ( RuleCondition $condition ): array => $condition->to_array(), $this->conditions ),
@@ -74,7 +76,8 @@ final class Rule {
 			(bool) ( $data['promo_shipping'] ?? false ),
 			(bool) ( $data['stop_processing'] ?? false ),
 			$conditions,
-			self::normalized_group_logic( is_array( $data['condition_group_logic'] ?? null ) ? $data['condition_group_logic'] : array() )
+			self::normalized_group_logic( is_array( $data['condition_group_logic'] ?? null ) ? $data['condition_group_logic'] : array() ),
+			(string) ( $data['operation_text'] ?? '' )
 		);
 	}
 
@@ -98,6 +101,10 @@ final class Rule {
 
 		if ( ! RuleOperationBases::is_valid( $this->operation_base ) ) {
 			$errors[] = 'operation_base is invalid';
+		}
+
+		if ( RuleActionTypes::ADD_COMMENT === $this->action_type && '' === trim( $this->operation_text ) ) {
+			$errors[] = 'operation_text is required';
 		}
 
 		foreach ( $this->conditions as $condition ) {

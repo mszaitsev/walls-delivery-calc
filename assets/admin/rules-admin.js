@@ -175,8 +175,8 @@
 			var span = document.createElement('span');
 			var input = document.createElement('input');
 			span.textContent = item[1] + ', см';
-			input.type = 'number';
-			input.step = '0.01';
+			input.type = 'text';
+			input.inputMode = 'decimal';
 			input.value = json[item[0]] || '';
 			input.addEventListener('input', function () {
 				if (input.value === '') {
@@ -208,8 +208,8 @@
 
 		if (definition.storage === 'value_number' && definition.input.indexOf('select') !== 0) {
 			var number = document.createElement('input');
-			number.type = 'number';
-			number.step = definition.input === 'integer' ? '1' : '0.0001';
+			number.type = 'text';
+			number.inputMode = definition.input === 'integer' ? 'numeric' : 'decimal';
 			number.value = state.value_number || '';
 			number.addEventListener('input', function () {
 				state.value_number = number.value;
@@ -289,6 +289,8 @@
 		var action = root.querySelector('[data-action-type]');
 		var fields = root.querySelector('[data-operation-fields]');
 		var base = root.querySelector('[data-operation-base]');
+		var operationType = root.querySelector('[name="operation_type"]');
+		var comment = root.querySelector('[data-operation-comment]');
 
 		if (!action || !fields) {
 			return;
@@ -296,12 +298,37 @@
 
 		var disabled = action.value === 'disable_rate';
 		var daysAction = action.value === 'change_delivery_days';
+		var commentAction = action.value === 'add_comment';
 		fields.classList.toggle('is-operation-disabled', disabled);
+		fields.classList.toggle('is-comment-operation', commentAction);
 		fields.querySelectorAll('[data-operation-control]').forEach(function (field) {
-			field.disabled = disabled;
+			field.disabled = disabled || commentAction;
 		});
 
+		if (operationType) {
+			operationType.querySelectorAll('option').forEach(function (option) {
+				var show = !commentAction || option.value === 'equals';
+				option.hidden = !show;
+				option.disabled = !show;
+			});
+			if (commentAction) {
+				operationType.value = 'equals';
+			}
+		}
+
+		if (comment) {
+			comment.hidden = !commentAction;
+			comment.querySelectorAll('textarea').forEach(function (field) {
+				field.disabled = !commentAction;
+			});
+		}
+
 		if (!base) {
+			return;
+		}
+
+		if (commentAction) {
+			base.value = 'rubles';
 			return;
 		}
 

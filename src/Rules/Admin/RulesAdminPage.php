@@ -258,7 +258,7 @@ final class RulesAdminPage {
 							<?php endforeach; ?>
 						</select>
 					</label>
-					<label>
+					<label data-operation-type-field>
 						<span><?php echo esc_html__( 'Операция', 'walls-delivery-calc' ); ?></span>
 						<select name="operation_type" data-operation-control>
 							<?php foreach ( RuleOperationTypes::all() as $value ) : ?>
@@ -266,17 +266,21 @@ final class RulesAdminPage {
 							<?php endforeach; ?>
 						</select>
 					</label>
-					<label>
+					<label data-operation-value-field>
 						<span><?php echo esc_html__( 'Значение', 'walls-delivery-calc' ); ?></span>
-						<input type="number" step="0.0001" name="operation_value" value="<?php echo esc_attr( (string) $rule->operation_value ); ?>" data-operation-control>
+						<input type="text" inputmode="decimal" name="operation_value" value="<?php echo esc_attr( (string) $rule->operation_value ); ?>" data-operation-control>
 					</label>
-					<label>
+					<label data-operation-base-field>
 						<span><?php echo esc_html__( 'База', 'walls-delivery-calc' ); ?></span>
 						<select name="operation_base" data-operation-control data-operation-base>
 							<?php foreach ( RuleOperationBases::all() as $value ) : ?>
 								<option value="<?php echo esc_attr( $value ); ?>" data-base-kind="<?php echo esc_attr( in_array( $value, RuleOperationBases::day_bases(), true ) ? 'days' : 'money' ); ?>" <?php selected( $rule->operation_base, $value ); ?>><?php echo esc_html( $this->operation_base_label( $value ) ); ?></option>
 							<?php endforeach; ?>
 						</select>
+					</label>
+					<label class="wdc-operation-comment" data-operation-comment>
+						<span><?php echo esc_html__( 'Комментарий', 'walls-delivery-calc' ); ?></span>
+						<textarea name="operation_text" rows="3"><?php echo esc_textarea( $rule->operation_text ); ?></textarea>
 					</label>
 				</div>
 
@@ -341,19 +345,19 @@ final class RulesAdminPage {
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 				<input type="hidden" name="wdc_rules_action" value="simulate">
 				<div class="wdc-rule-grid">
-					<label><span><?php echo esc_html__( 'Исходная цена доставки', 'walls-delivery-calc' ); ?></span><input type="number" step="0.01" name="simulation[delivery_price]" value="<?php echo esc_attr( (string) $input['delivery_price'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Исходная цена доставки', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[delivery_price]" value="<?php echo esc_attr( (string) $input['delivery_price'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Исходный срок доставки', 'walls-delivery-calc' ); ?></span><input type="number" min="0" name="simulation[delivery_days]" value="<?php echo esc_attr( (string) $input['delivery_days'] ); ?>"></label>
-					<label><span><?php echo esc_html__( 'Сумма заказа', 'walls-delivery-calc' ); ?></span><input type="number" step="0.01" name="simulation[order_total]" value="<?php echo esc_attr( (string) $input['order_total'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Сумма заказа', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[order_total]" value="<?php echo esc_attr( (string) $input['order_total'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?></span><input type="number" name="simulation[weight]" value="<?php echo esc_attr( (string) $input['weight'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Страна', 'walls-delivery-calc' ); ?></span><?php $this->render_select( 'simulation[country]', $this->country_options(), (string) $input['country'] ); ?></label>
 					<label><span><?php echo esc_html__( 'Город', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[city]" value="<?php echo esc_attr( (string) $input['city'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'FIAS ID населенного пункта', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[location_fias_id]" value="<?php echo esc_attr( (string) $input['location_fias_id'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Тип доставки', 'walls-delivery-calc' ); ?></span><?php $this->render_select( 'simulation[delivery_type]', $this->condition_schema()->delivery_type_options(), (string) $input['delivery_type'] ); ?></label>
 					<label><span><?php echo esc_html__( 'Способ оплаты', 'walls-delivery-calc' ); ?></span><?php $this->render_select( 'simulation[payment_method]', $this->payment_method_options(), (string) $input['payment_method'] ); ?></label>
-					<label><span><?php echo esc_html__( 'Длина, см', 'walls-delivery-calc' ); ?></span><input type="number" step="0.01" name="simulation[length_cm]" value="<?php echo esc_attr( (string) $input['length_cm'] ); ?>"></label>
-					<label><span><?php echo esc_html__( 'Ширина, см', 'walls-delivery-calc' ); ?></span><input type="number" step="0.01" name="simulation[width_cm]" value="<?php echo esc_attr( (string) $input['width_cm'] ); ?>"></label>
-					<label><span><?php echo esc_html__( 'Высота, см', 'walls-delivery-calc' ); ?></span><input type="number" step="0.01" name="simulation[height_cm]" value="<?php echo esc_attr( (string) $input['height_cm'] ); ?>"></label>
-					<label><span><?php echo esc_html__( 'Объем, куб.м.', 'walls-delivery-calc' ); ?></span><input type="number" step="0.0001" name="simulation[volume_m3]" value="<?php echo esc_attr( (string) $input['volume_m3'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Длина, см', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[length_cm]" value="<?php echo esc_attr( (string) $input['length_cm'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Ширина, см', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[width_cm]" value="<?php echo esc_attr( (string) $input['width_cm'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Высота, см', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[height_cm]" value="<?php echo esc_attr( (string) $input['height_cm'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Объем, куб.м.', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[volume_m3]" value="<?php echo esc_attr( (string) $input['volume_m3'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Дата', 'walls-delivery-calc' ); ?></span><input type="date" name="simulation[date]" value="<?php echo esc_attr( (string) $input['date'] ); ?>"></label>
 				</div>
 				<p class="submit"><button class="button button-primary" type="submit"><?php echo esc_html__( 'Симулировать расчет', 'walls-delivery-calc' ); ?></button></p>
@@ -555,7 +559,8 @@ final class RulesAdminPage {
 		$action_type = isset( $_POST['action_type'] ) ? sanitize_key( wp_unslash( $_POST['action_type'] ) ) : RuleActionTypes::CHANGE_PRICE;
 		$operation_type = isset( $_POST['operation_type'] ) ? sanitize_key( wp_unslash( $_POST['operation_type'] ) ) : RuleOperationTypes::EQUALS;
 		$operation_base = isset( $_POST['operation_base'] ) ? sanitize_key( wp_unslash( $_POST['operation_base'] ) ) : RuleOperationBases::RUBLES;
-		$operation_value = isset( $_POST['operation_value'] ) ? (float) sanitize_text_field( wp_unslash( $_POST['operation_value'] ) ) : 0.0;
+		$operation_value = isset( $_POST['operation_value'] ) ? RuleConditionUiSchema::normalize_decimal_input( wp_unslash( $_POST['operation_value'] ) ) : 0.0;
+		$operation_text = isset( $_POST['operation_text'] ) ? sanitize_textarea_field( wp_unslash( $_POST['operation_text'] ) ) : '';
 
 		if ( RuleActionTypes::CHANGE_DELIVERY_DAYS === $action_type && ! in_array( $operation_base, RuleOperationBases::day_bases(), true ) ) {
 			$operation_base = RuleOperationBases::CALENDAR_DAYS;
@@ -566,6 +571,12 @@ final class RulesAdminPage {
 		}
 
 		if ( RuleActionTypes::DISABLE_RATE === $action_type ) {
+			$operation_type  = RuleOperationTypes::EQUALS;
+			$operation_base  = RuleOperationBases::RUBLES;
+			$operation_value = 0.0;
+		}
+
+		if ( RuleActionTypes::ADD_COMMENT === $action_type ) {
 			$operation_type  = RuleOperationTypes::EQUALS;
 			$operation_base  = RuleOperationBases::RUBLES;
 			$operation_value = 0.0;
@@ -585,7 +596,8 @@ final class RulesAdminPage {
 			isset( $_POST['promo_shipping'] ),
 			isset( $_POST['stop_processing'] ),
 			$this->sanitize_conditions_from_post(),
-			$this->sanitize_group_logic_from_post()
+			$this->sanitize_group_logic_from_post(),
+			$operation_text
 		);
 	}
 
@@ -605,12 +617,7 @@ final class RulesAdminPage {
 			}
 
 			$condition_type = isset( $item['condition_type'] ) ? sanitize_key( $item['condition_type'] ) : '';
-			$operator       = isset( $item['operator'] ) ? sanitize_key( $item['operator'] ) : '';
-			$value_text     = isset( $item['value_text'] ) ? sanitize_text_field( (string) $item['value_text'] ) : '';
-			$value_number   = isset( $item['value_number'] ) ? trim( sanitize_text_field( (string) $item['value_number'] ) ) : '';
-			$value_json     = isset( $item['value_json'] ) ? trim( sanitize_text_field( (string) $item['value_json'] ) ) : '';
-
-			if ( '' === $condition_type && '' === $operator && '' === $value_text && '' === $value_number && '' === $value_json ) {
+			if ( '' === $condition_type ) {
 				continue;
 			}
 
@@ -635,19 +642,19 @@ final class RulesAdminPage {
 		$defaults = $this->default_simulation_input();
 
 		return array(
-			'delivery_price' => isset( $raw['delivery_price'] ) ? max( 0.0, (float) sanitize_text_field( (string) $raw['delivery_price'] ) ) : $defaults['delivery_price'],
+			'delivery_price' => isset( $raw['delivery_price'] ) ? max( 0.0, RuleConditionUiSchema::normalize_decimal_input( $raw['delivery_price'] ) ) : $defaults['delivery_price'],
 			'delivery_days'  => isset( $raw['delivery_days'] ) ? max( 0, (int) sanitize_text_field( (string) $raw['delivery_days'] ) ) : $defaults['delivery_days'],
-			'order_total'    => isset( $raw['order_total'] ) ? max( 0.0, (float) sanitize_text_field( (string) $raw['order_total'] ) ) : $defaults['order_total'],
+			'order_total'    => isset( $raw['order_total'] ) ? max( 0.0, RuleConditionUiSchema::normalize_decimal_input( $raw['order_total'] ) ) : $defaults['order_total'],
 			'weight'         => isset( $raw['weight'] ) ? max( 0, (int) sanitize_text_field( (string) $raw['weight'] ) ) : $defaults['weight'],
 			'country'        => isset( $raw['country'] ) ? sanitize_text_field( (string) $raw['country'] ) : $defaults['country'],
 			'city'           => isset( $raw['city'] ) ? sanitize_text_field( (string) $raw['city'] ) : $defaults['city'],
 			'location_fias_id' => isset( $raw['location_fias_id'] ) ? sanitize_text_field( (string) $raw['location_fias_id'] ) : $defaults['location_fias_id'],
 			'delivery_type'  => in_array( (string) ( $raw['delivery_type'] ?? '' ), array_keys( $this->condition_schema()->delivery_type_options() ), true ) ? sanitize_text_field( (string) $raw['delivery_type'] ) : $defaults['delivery_type'],
 			'payment_method' => isset( $raw['payment_method'] ) ? sanitize_text_field( (string) $raw['payment_method'] ) : $defaults['payment_method'],
-			'length_cm'      => isset( $raw['length_cm'] ) ? max( 0.0, (float) sanitize_text_field( (string) $raw['length_cm'] ) ) : $defaults['length_cm'],
-			'width_cm'       => isset( $raw['width_cm'] ) ? max( 0.0, (float) sanitize_text_field( (string) $raw['width_cm'] ) ) : $defaults['width_cm'],
-			'height_cm'      => isset( $raw['height_cm'] ) ? max( 0.0, (float) sanitize_text_field( (string) $raw['height_cm'] ) ) : $defaults['height_cm'],
-			'volume_m3'      => isset( $raw['volume_m3'] ) ? max( 0.0, (float) sanitize_text_field( (string) $raw['volume_m3'] ) ) : $defaults['volume_m3'],
+			'length_cm'      => isset( $raw['length_cm'] ) ? max( 0.0, RuleConditionUiSchema::normalize_decimal_input( $raw['length_cm'] ) ) : $defaults['length_cm'],
+			'width_cm'       => isset( $raw['width_cm'] ) ? max( 0.0, RuleConditionUiSchema::normalize_decimal_input( $raw['width_cm'] ) ) : $defaults['width_cm'],
+			'height_cm'      => isset( $raw['height_cm'] ) ? max( 0.0, RuleConditionUiSchema::normalize_decimal_input( $raw['height_cm'] ) ) : $defaults['height_cm'],
+			'volume_m3'      => isset( $raw['volume_m3'] ) ? max( 0.0, RuleConditionUiSchema::normalize_decimal_input( $raw['volume_m3'] ) ) : $defaults['volume_m3'],
 			'date'           => isset( $raw['date'] ) && 1 === preg_match( '/^\d{4}-\d{2}-\d{2}$/', (string) $raw['date'] ) ? sanitize_text_field( (string) $raw['date'] ) : $defaults['date'],
 		);
 	}
@@ -718,7 +725,17 @@ final class RulesAdminPage {
 			return __( 'Не используется', 'walls-delivery-calc' );
 		}
 
-		return trim( $this->operation_type_label( $rule->operation_type ) . ' ' . (string) $rule->operation_value . ' ' . $this->operation_base_label( $rule->operation_base ) );
+		if ( RuleActionTypes::ADD_COMMENT === $rule->action_type ) {
+			return sprintf( __( 'комментарий: "%s"', 'walls-delivery-calc' ), $rule->operation_text );
+		}
+
+		$prefix = array(
+			RuleOperationTypes::INCREASE => __( 'увеличить на', 'walls-delivery-calc' ),
+			RuleOperationTypes::DECREASE => __( 'уменьшить на', 'walls-delivery-calc' ),
+			RuleOperationTypes::EQUALS   => __( 'установить', 'walls-delivery-calc' ),
+		)[ $rule->operation_type ] ?? $this->operation_type_label( $rule->operation_type );
+
+		return trim( $prefix . ' ' . $this->operation_value_label( $rule ) );
 	}
 
 	private function action_label( string $value ): string {
@@ -740,13 +757,30 @@ final class RulesAdminPage {
 
 	private function operation_base_label( string $value ): string {
 		return array(
-			RuleOperationBases::RUBLES                         => __( 'рубли', 'walls-delivery-calc' ),
+			RuleOperationBases::RUBLES                         => __( 'руб.', 'walls-delivery-calc' ),
 			RuleOperationBases::PERCENT_OF_DELIVERY            => __( '% от доставки', 'walls-delivery-calc' ),
 			RuleOperationBases::PERCENT_OF_ORDER               => __( '% от заказа', 'walls-delivery-calc' ),
 			RuleOperationBases::PERCENT_OF_ORDER_AND_DELIVERY  => __( '% от заказа и доставки', 'walls-delivery-calc' ),
-			RuleOperationBases::CALENDAR_DAYS                  => __( 'календарные дни', 'walls-delivery-calc' ),
-			RuleOperationBases::BUSINESS_DAYS                  => __( 'рабочие дни', 'walls-delivery-calc' ),
+			RuleOperationBases::CALENDAR_DAYS                  => __( 'календарных дня', 'walls-delivery-calc' ),
+			RuleOperationBases::BUSINESS_DAYS                  => __( 'рабочих дня', 'walls-delivery-calc' ),
 		)[ $value ] ?? $value;
+	}
+
+	private function operation_value_label( Rule $rule ): string {
+		$value = $this->format_decimal( $rule->operation_value );
+		$base  = $this->operation_base_label( $rule->operation_base );
+
+		if ( in_array( $rule->operation_base, array( RuleOperationBases::PERCENT_OF_DELIVERY, RuleOperationBases::PERCENT_OF_ORDER, RuleOperationBases::PERCENT_OF_ORDER_AND_DELIVERY ), true ) ) {
+			return $value . $base;
+		}
+
+		return trim( $value . ' ' . $base );
+	}
+
+	private function format_decimal( float $value ): string {
+		$formatted = rtrim( rtrim( number_format( $value, 4, '.', '' ), '0' ), '.' );
+
+		return '' === $formatted ? '0' : $formatted;
 	}
 
 	private function condition_type_label( string $value ): string {
@@ -793,6 +827,7 @@ final class RulesAdminPage {
 			'action_type is invalid'                  => __( 'Некорректный тип действия.', 'walls-delivery-calc' ),
 			'operation_type is invalid'               => __( 'Некорректная операция.', 'walls-delivery-calc' ),
 			'operation_base is invalid'               => __( 'Некорректная база операции.', 'walls-delivery-calc' ),
+			'operation_text is required'              => __( 'Комментарий обязателен для действия "Добавить комментарий".', 'walls-delivery-calc' ),
 			'condition_group must be greater than 0'  => __( 'Группа условия должна быть больше 0.', 'walls-delivery-calc' ),
 			'condition_type is invalid'               => __( 'Некорректный тип условия.', 'walls-delivery-calc' ),
 			'operator is invalid'                     => __( 'Некорректный оператор условия.', 'walls-delivery-calc' ),

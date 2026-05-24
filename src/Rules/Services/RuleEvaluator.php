@@ -47,7 +47,7 @@ final class RuleEvaluator {
 		}
 
 		if ( RuleActionTypes::ADD_COMMENT === $rule->action_type ) {
-			$comment = '' !== trim( $rule->target_value ) ? $rule->target_value : $rule->name;
+			$comment = '' !== trim( $rule->operation_text ) ? $rule->operation_text : $rule->name;
 			$audit[] = new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, null, $comment, $rule->operation_type, true, 'Comment added.' );
 
 			return new RuleEvaluationResult( true, true, null, null, array( $comment ), false, '', $audit, $rule->stop_processing );

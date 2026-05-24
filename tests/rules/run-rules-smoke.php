@@ -2,11 +2,13 @@
 declare(strict_types=1);
 
 use WallsShop\WDC\Core\Autoloader;
+use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleCondition;
 use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
@@ -74,6 +76,14 @@ rules_smoke_assert( 65000 === $result->final_price?->get_kopecks(), '+200 RUB mu
 
 $result = $engine->apply_rules( array( price_rule( '-10%', RuleOperationTypes::DECREASE, 10, RuleOperationBases::PERCENT_OF_DELIVERY ) ), rules_context() );
 rules_smoke_assert( 40500 === $result->final_price?->get_kopecks(), '-10% delivery must produce 405 RUB.' );
+
+$comment_rule = new Rule( null, 'Add comment', true, 10, 'default', '', RuleActionTypes::ADD_COMMENT, RuleOperationTypes::EQUALS, 0, RuleOperationBases::RUBLES, false, false, array(), array( 1 => 'and', 2 => 'and', 3 => 'and' ), 'Позвонить за час' );
+$result = $engine->apply_rules( array( $comment_rule ), rules_context() );
+rules_smoke_assert( array( 'Позвонить за час' ) === $result->comments, 'add_comment must add operation_text to RuleEngineResult comments.' );
+$rate_builder = new RuleAppliedRateBuilder( $engine );
+$rate = new DeliveryRate( 'rate-1', 'demo', 'Demo', 'svc', 'Service', 'tariff', 'Tariff', 'courier', 'Demo delivery', Money::from_rubles( 450 ), null, null, DateRange::single( 5 ) );
+$built = $rate_builder->apply( $rate, rules_context(), array( $comment_rule ) );
+rules_smoke_assert( in_array( 'Позвонить за час', $built['rate']->comments, true ), 'Runtime rate builder must pass rule comments to delivery rate comments.' );
 
 $result = $engine->apply_rules( array( price_rule( 'promo -500', RuleOperationTypes::DECREASE, 500, RuleOperationBases::RUBLES, true ) ), rules_context() );
 rules_smoke_assert( 100 === $result->final_price?->get_kopecks(), 'Promo discount must clamp final price to 1 RUB.' );

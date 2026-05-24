@@ -268,6 +268,7 @@ final class RuleRepository {
 			'operation_type'  => $rule->operation_type,
 			'operation_value' => $rule->operation_value,
 			'operation_base'  => $rule->operation_base,
+			'operation_text'  => $rule->operation_text,
 			'promo_shipping'  => $rule->promo_shipping ? 1 : 0,
 			'stop_processing' => $rule->stop_processing ? 1 : 0,
 			'condition_group_logic' => wp_json_encode( Rule::normalized_group_logic( $rule->condition_group_logic ) ),
@@ -280,7 +281,7 @@ final class RuleRepository {
 	 * @return array<int,string>
 	 */
 	private function rule_formats(): array {
-		return array( '%s', '%d', '%d', '%s', '%s', '%s', '%s', '%f', '%s', '%d', '%d', '%s', '%s', '%s' );
+		return array( '%s', '%d', '%d', '%s', '%s', '%s', '%s', '%f', '%s', '%s', '%d', '%d', '%s', '%s', '%s' );
 	}
 
 	/**

@@ -15,6 +15,7 @@ use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
 use WallsShop\WDC\Rules\Services\RuleSimulator;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
+use WallsShop\WDC\Rules\Admin\RulesAdminPage;
 use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleConditionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
@@ -45,6 +46,24 @@ if ( ! function_exists( 'sanitize_key' ) ) {
 if ( ! function_exists( 'sanitize_text_field' ) ) {
 	function sanitize_text_field( string $value ): string {
 		return trim( strip_tags( $value ) );
+	}
+}
+
+if ( ! function_exists( 'sanitize_textarea_field' ) ) {
+	function sanitize_textarea_field( string $value ): string {
+		return trim( strip_tags( $value ) );
+	}
+}
+
+if ( ! function_exists( 'wp_unslash' ) ) {
+	function wp_unslash( mixed $value ): mixed {
+		return $value;
+	}
+}
+
+if ( ! function_exists( 'absint' ) ) {
+	function absint( mixed $value ): int {
+		return abs( (int) $value );
 	}
 }
 
@@ -369,6 +388,14 @@ $date_condition = $schema->sanitize_condition_input( array( 'condition_type' => 
 rules_admin_smoke_assert( $date_condition instanceof RuleCondition && '2026-05-25' === $date_condition->value_text, 'date UI dd.mm.yyyy must store YYYY-MM-DD.' );
 $normalized_operator = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::PAYMENT_METHOD, 'operator' => RuleOperators::GT, 'value_text' => 'cod' ) );
 rules_admin_smoke_assert( $normalized_operator instanceof RuleCondition && RuleOperators::EQ === $normalized_operator->operator, 'Invalid operator must be normalized to condition default.' );
+$comma_decimal_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::ORDER_TOTAL, 'operator' => RuleOperators::GTE, 'value_number' => '12,5' ) );
+rules_admin_smoke_assert( $comma_decimal_condition instanceof RuleCondition && 12.5 === $comma_decimal_condition->value_number, 'Comma decimal condition values must normalize to dot decimals.' );
+$dot_decimal_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::ORDER_TOTAL, 'operator' => RuleOperators::GTE, 'value_number' => '12.5' ) );
+rules_admin_smoke_assert( $dot_decimal_condition instanceof RuleCondition && 12.5 === $dot_decimal_condition->value_number, 'Dot decimal condition values must remain valid.' );
+$comma_dimensions_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::DIMENSIONS, 'operator' => RuleOperators::GTE, 'value_json' => '{}', 'length_cm' => '12,5' ) );
+rules_admin_smoke_assert( $comma_dimensions_condition instanceof RuleCondition && 12.5 === $comma_dimensions_condition->value_json['length_cm'], 'Dimensions must accept comma decimals.' );
+$empty_type_condition = $schema->sanitize_condition_input( array( 'condition_type' => '', 'operator' => RuleOperators::EQ, 'value_number' => '12' ) );
+rules_admin_smoke_assert( null === $empty_type_condition, 'Rows with empty condition_type must be ignored even if operator/value is filled.' );
 
 $simulation_db = new wpdb();
 $simulation_repository = new RuleRepository( $simulation_db );
@@ -419,6 +446,56 @@ $logic_rule_id = $repository->save_rule(
 $logic_rule = $repository->get_rule( $logic_rule_id );
 rules_admin_smoke_assert( $logic_rule instanceof Rule && array( 1 => 'and', 2 => 'or', 3 => 'and' ) === $logic_rule->condition_group_logic, 'Rule must store condition_group_logic.' );
 
+$comment_rule_id = $repository->save_rule(
+	new Rule(
+		null,
+		'Comment storage',
+		true,
+		60,
+		'default',
+		'',
+		RuleActionTypes::ADD_COMMENT,
+		RuleOperationTypes::EQUALS,
+		0,
+		RuleOperationBases::RUBLES,
+		false,
+		false,
+		array(),
+		array( 1 => 'and', 2 => 'and', 3 => 'and' ),
+		'Оставить у двери'
+	)
+);
+$comment_rule = $repository->get_rule( $comment_rule_id );
+rules_admin_smoke_assert( $comment_rule instanceof Rule && 'Оставить у двери' === $comment_rule->operation_text, 'add_comment must save operation_text.' );
+rules_admin_smoke_assert( in_array( 'operation_text is required', ( new Rule( null, 'No comment', true, 10, 'default', '', RuleActionTypes::ADD_COMMENT, RuleOperationTypes::EQUALS, 0, RuleOperationBases::RUBLES, false, false ) )->validate(), true ), 'add_comment must require operation_text.' );
+
+$admin_reflection = new ReflectionClass( RulesAdminPage::class );
+$admin_page = $admin_reflection->newInstanceWithoutConstructor();
+$operation_summary = $admin_reflection->getMethod( 'operation_summary' );
+$operation_summary->setAccessible( true );
+rules_admin_smoke_assert( str_contains( $operation_summary->invoke( $admin_page, new Rule( null, 'Increase percent', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 12.4, RuleOperationBases::PERCENT_OF_ORDER, false, false ) ), 'увеличить на 12.4% от заказа' ), 'Increase summary must contain "увеличить на" and no space before percent.' );
+rules_admin_smoke_assert( str_contains( $operation_summary->invoke( $admin_page, new Rule( null, 'Decrease percent', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 10, RuleOperationBases::PERCENT_OF_DELIVERY, false, false ) ), 'уменьшить на 10% от доставки' ), 'Decrease summary must contain "уменьшить на" and no space before percent.' );
+rules_admin_smoke_assert( 'установить 500 руб.' === $operation_summary->invoke( $admin_page, new Rule( null, 'Equals rub', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::EQUALS, 500, RuleOperationBases::RUBLES, false, false ) ), 'Equals summary must not contain extra "на" and rub values must keep spacing.' );
+rules_admin_smoke_assert( 'увеличить на 3 календарных дня' === $operation_summary->invoke( $admin_page, new Rule( null, 'Days', true, 10, 'default', '', RuleActionTypes::CHANGE_DELIVERY_DAYS, RuleOperationTypes::INCREASE, 3, RuleOperationBases::CALENDAR_DAYS, false, false ) ), 'Day values must keep normal spacing.' );
+rules_admin_smoke_assert( str_contains( $operation_summary->invoke( $admin_page, $comment_rule ), 'Оставить у двери' ), 'Table summary must show comment text.' );
+
+$sanitize_rule = $admin_reflection->getMethod( 'sanitize_rule_from_post' );
+$sanitize_rule->setAccessible( true );
+$repository_property = $admin_reflection->getProperty( 'repository' );
+$repository_property->setAccessible( true );
+$repository_property->setValue( $admin_page, new RuleRepository( new wpdb() ) );
+$_POST = array(
+	'name'            => 'Equals without conditions',
+	'action_type'     => RuleActionTypes::CHANGE_PRICE,
+	'operation_type'  => RuleOperationTypes::EQUALS,
+	'operation_value' => '12,5',
+	'operation_base'  => RuleOperationBases::RUBLES,
+	'conditions'      => array( array( 'condition_type' => '', 'operator' => RuleOperators::EQ, 'value_number' => '10' ) ),
+);
+$sanitized_rule = $sanitize_rule->invoke( $admin_page );
+rules_admin_smoke_assert( $sanitized_rule instanceof Rule && array() === $sanitized_rule->conditions && 12.5 === $sanitized_rule->operation_value && array() === $sanitized_rule->validate(), 'Equals rule without conditions must save and normalize comma operation_value.' );
+$_POST = array();
+
 $admin_page_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Rules/Admin/RulesAdminPage.php' );
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'Создать демо-правила' ), 'Admin page must not show create demo button.' );
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'Удалить демо-правила' ), 'Admin page must not show delete demo button.' );
@@ -434,6 +511,8 @@ rules_admin_smoke_assert( str_contains( $admin_page_source, "delivery_type_optio
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'payment_method_options()' ) && ! str_contains( $admin_page_source, "'payment_method' => 'card'" ), 'Simulation payment_method must use WooCommerce gateways without hardcoded card default.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, "Условие %d" ) && str_contains( $admin_page_source, 'data-condition-group' ), 'Condition group UI must use select groups 1/2/3.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'condition_group_logic[<?php echo esc_attr( (string) $group ); ?>]' ), 'Rule form must save condition_group_logic inputs.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'name="operation_text"' ), 'add_comment UI must expose operation_text textarea.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'RuleConditionUiSchema::normalize_decimal_input' ), 'Admin sanitize must normalize decimal inputs with comma or dot.' );
 
 $schema_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Rules/Admin/RuleConditionUiSchema.php' );
 foreach ( array( 'руб.', 'шт.', 'грамм', 'куб.м.' ) as $unit_label ) {
@@ -443,6 +522,7 @@ rules_admin_smoke_assert( str_contains( $schema_source, "'input'     => 'fias_id
 
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/rules-admin.js' );
 rules_admin_smoke_assert( str_contains( $js_source, 'appendUnit' ), 'JS must render unit labels next to value controls.' );
+rules_admin_smoke_assert( str_contains( $js_source, "action.value === 'add_comment'" ) && str_contains( $js_source, "operationType.value = 'equals'" ), 'JS must switch add_comment to equals-only comment mode.' );
 rules_admin_smoke_assert( str_contains( $js_source, 'Введите FIAS ID населенного пункта' ) || str_contains( $admin_page_source, 'Введите FIAS ID населенного пункта' ), 'UI must use FIAS ID placeholder for city.' );
 rules_admin_smoke_assert( ! str_contains( $js_source, 'Начните вводить населенный пункт' ), 'UI must not contain location autocomplete by name.' );
 

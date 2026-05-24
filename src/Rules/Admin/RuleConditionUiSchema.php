@@ -150,7 +150,7 @@ final class RuleConditionUiSchema {
 	 */
 	public function sanitize_condition_input( array $raw ): ?RuleCondition {
 		$type = isset( $raw['condition_type'] ) ? sanitize_key( (string) $raw['condition_type'] ) : '';
-		if ( '' === $type && $this->is_empty_row( $raw ) ) {
+		if ( '' === $type ) {
 			return null;
 		}
 
@@ -183,8 +183,11 @@ final class RuleConditionUiSchema {
 		} elseif ( 'value_json' === $storage ) {
 			$value_json = $this->json_array( $raw['value_json'] ?? array() );
 			foreach ( array( 'length_cm', 'width_cm', 'height_cm' ) as $key ) {
+				if ( isset( $value_json[ $key ] ) && '' !== trim( (string) $value_json[ $key ] ) ) {
+					$value_json[ $key ] = max( 0.0, self::normalize_decimal_input( $value_json[ $key ] ) );
+				}
 				if ( isset( $raw[ $key ] ) && '' !== trim( (string) $raw[ $key ] ) ) {
-					$value_json[ $key ] = max( 0.0, (float) sanitize_text_field( (string) $raw[ $key ] ) );
+					$value_json[ $key ] = max( 0.0, self::normalize_decimal_input( $raw[ $key ] ) );
 				}
 			}
 		} else {
@@ -280,21 +283,16 @@ final class RuleConditionUiSchema {
 		);
 	}
 
-	private function is_empty_row( array $raw ): bool {
-		foreach ( array( 'operator', 'value_text', 'value_number', 'value_json', 'length_cm', 'width_cm', 'height_cm' ) as $key ) {
-			$value = isset( $raw[ $key ] ) && is_scalar( $raw[ $key ] ) ? (string) $raw[ $key ] : ( wp_json_encode( $raw[ $key ] ?? '' ) ?: '' );
-			if ( isset( $raw[ $key ] ) && '' !== trim( $value ) ) {
-				return false;
-			}
-		}
-
-		return true;
-	}
-
 	private function number_value( mixed $value ): ?float {
-		$value = trim( sanitize_text_field( (string) $value ) );
+		$value = trim( str_replace( ',', '.', sanitize_text_field( (string) $value ) ) );
 
 		return '' === $value ? null : (float) $value;
+	}
+
+	public static function normalize_decimal_input( mixed $value ): float {
+		$value = trim( str_replace( ',', '.', sanitize_text_field( (string) $value ) ) );
+
+		return '' === $value ? 0.0 : (float) $value;
 	}
 
 	/**

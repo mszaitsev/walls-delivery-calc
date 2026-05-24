@@ -1,6 +1,6 @@
 # WDC Rules Admin
 
-Version: 0.18.4.
+Version: 0.18.5.
 
 ## Default rules
 
@@ -62,6 +62,8 @@ Weight is stored and compared in grams. Volume is entered and compared in cubic 
 
 The condition form shows unit labels next to value fields where units matter: `руб.` for order total and delivery price, `шт.` for item count, `грамм` for weight, and `куб.м.` for volume.
 
+Decimal fields accept both comma and dot input. Admin sanitization trims spaces, converts `,` to `.`, and stores normalized float values. This applies to operation values, numeric conditions, dimensions, and simulation numeric fields. Integer-only fields such as day numbers and condition group ids remain integers.
+
 ## Actions
 
 Supported action types are the domain action types:
@@ -71,7 +73,7 @@ Supported action types are the domain action types:
 - `add_comment`
 - `disable_rate`
 
-`disable_rate` saves safe operation defaults. `add_comment` currently uses the existing rule model behavior in `RuleEvaluator`: because default rules keep `target_value` empty, the rule name is used as the comment text unless the domain model is expanded later.
+`disable_rate` saves safe operation defaults. `add_comment` uses `wdc_rules.operation_text`, added by migration `0014_add_rule_operation_text.php`. In the admin form it switches the operation to `Установить`, hides numeric operation fields, and shows a required comment textarea. The evaluator appends `operation_text` to `RuleEngineResult::comments`; `RuleAppliedRateBuilder` merges those comments into the delivery rate comments, so the existing frontend/order-meta comment flow receives them.
 
 For `change_delivery_days`, operation bases are limited to:
 
@@ -79,6 +81,14 @@ For `change_delivery_days`, operation bases are limited to:
 - `business_days`
 
 If an invalid base is posted for a delivery-days rule, the admin handler normalizes it to `calendar_days`.
+
+Operation summaries are formatted for the Russian admin table:
+
+- `increase`: `увеличить на 12.4% от заказа`
+- `decrease`: `уменьшить на 10% от доставки`
+- `equals`: `установить 500 руб.`
+
+Percent bases are joined without a space before `%`; ruble and day bases keep normal spacing.
 
 ## Simulation
 

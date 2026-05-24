@@ -18,9 +18,13 @@ The repository returns enabled rules ordered by the internal sort order (`priori
 
 Condition values are type-aware. Numeric conditions use `value_number`; select/text identifiers use `value_text`; city stores FIAS ID in `value_text` and display metadata in `value_json`; dimensions store `length_cm`, `width_cm`, and `height_cm` in `value_json`. Weight is compared in grams. Volume is compared in cubic meters after converting package `cm3` to `m3`. City matching is FIAS-only: if the context or condition FIAS ID is empty, the condition is false, and display names or city text are not used as a fallback.
 
+Admin numeric input is normalized before reaching the domain model: both `12.5` and `12,5` become `12.5`. The normalization is used for rule operation values, numeric condition values, dimensions, and simulation numeric inputs.
+
 ## Audit Trail
 
 Every evaluated rule emits `RuleAuditEntry` records. Applied entries include the changed value where relevant. Non-applied entries include the reason, such as disabled rules or unmatched conditions.
+
+`add_comment` rules store their text in `Rule::operation_text`. When such a rule applies, `RuleEvaluator` adds that text to `RuleEngineResult::comments`. Checkout runtime then merges rule comments into `DeliveryRate::comments`, preserving the existing frontend note and order-meta pipeline.
 
 ## Promo Shipping
 
@@ -34,7 +38,7 @@ Rules can set `stop_processing`. When an applied rule has this flag, `RuleEngine
 
 ## Admin Builder
 
-The rules admin page is a CRUD interface for default rules. It uses the same type-aware condition matrix as the evaluator, shows unit labels beside numeric fields, limits condition groups to `Условие 1` through `Условие 3`, and saves the per-group AND/OR logic with the rule.
+The rules admin page is a CRUD interface for default rules. It uses the same type-aware condition matrix as the evaluator, shows unit labels beside numeric fields, limits condition groups to `Условие 1` through `Условие 3`, and saves the per-group AND/OR logic with the rule. Operation summaries are Russian text, with `увеличить на` and `уменьшить на`; percentage bases render without an extra space before `%`.
 
 ## Future Checkout Integration
 

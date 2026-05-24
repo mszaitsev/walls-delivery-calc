@@ -203,6 +203,20 @@
 	opacity: .65;
 }
 
+.wdc-operation-fields.is-comment-operation [data-operation-value-field],
+.wdc-operation-fields.is-comment-operation [data-operation-base-field] {
+	display: none;
+}
+
+.wdc-operation-comment {
+	grid-column: 1 / -1;
+}
+
+.wdc-operation-comment textarea {
+	width: 100%;
+	max-width: 640px;
+}
+
 .wdc-rules-result-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
