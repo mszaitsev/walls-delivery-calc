@@ -151,7 +151,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	 */
 	private function checkout_rules(): array {
 		try {
-			$rules = $this->rule_repository->get_enabled_rules();
+			$rules = $this->rule_repository->get_default_rules();
 			if ( array() !== $rules ) {
 				return $rules;
 			}

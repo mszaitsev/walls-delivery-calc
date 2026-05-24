@@ -9,6 +9,9 @@ use WallsShop\WDC\Rules\Domain\RuleCondition;
 defined( 'ABSPATH' ) || exit;
 
 final class RuleRepository {
+	public const TARGET_DEFAULT = 'default';
+	public const TARGET_CARRIER = 'carrier';
+
 	private \wpdb $wpdb;
 
 	public function __construct( ?\wpdb $db = null ) {
@@ -18,6 +21,8 @@ final class RuleRepository {
 	}
 
 	public function save_rule( Rule $rule ): int {
+		$this->normalize_legacy_default_rules();
+
 		$now  = current_time( 'mysql' );
 		$data = $this->rule_to_row( $rule, $now );
 
@@ -45,6 +50,8 @@ final class RuleRepository {
 	}
 
 	public function get_rule( int $id ): ?Rule {
+		$this->normalize_legacy_default_rules();
+
 		$row = $this->wpdb->get_row(
 			$this->wpdb->prepare( "SELECT * FROM {$this->rules_table()} WHERE id = %d LIMIT 1", $id ),
 			ARRAY_A
@@ -57,6 +64,8 @@ final class RuleRepository {
 	 * @return array<int,Rule>
 	 */
 	public function get_enabled_rules(): array {
+		$this->normalize_legacy_default_rules();
+
 		$rows = $this->wpdb->get_results( "SELECT * FROM {$this->rules_table()} WHERE enabled = 1 ORDER BY promo_shipping ASC, priority ASC, id ASC", ARRAY_A );
 
 		return $this->rows_to_rules( is_array( $rows ) ? $rows : array() );
@@ -65,7 +74,43 @@ final class RuleRepository {
 	/**
 	 * @return array<int,Rule>
 	 */
+	public function get_default_rules(): array {
+		$this->normalize_legacy_default_rules();
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT * FROM {$this->rules_table()} WHERE enabled = 1 AND target_type = %s ORDER BY promo_shipping ASC, priority ASC, id ASC",
+				self::TARGET_DEFAULT
+			),
+			ARRAY_A
+		);
+
+		return $this->rows_to_rules( is_array( $rows ) ? $rows : array() );
+	}
+
+	/**
+	 * @return array<int,Rule>
+	 */
+	public function get_all_default_rules(): array {
+		$this->normalize_legacy_default_rules();
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT * FROM {$this->rules_table()} WHERE target_type = %s ORDER BY enabled DESC, priority ASC, id ASC",
+				self::TARGET_DEFAULT
+			),
+			ARRAY_A
+		);
+
+		return $this->rows_to_rules( is_array( $rows ) ? $rows : array() );
+	}
+
+	/**
+	 * @return array<int,Rule>
+	 */
 	public function get_rules_for_target( string $targetType, string $targetValue ): array {
+		$this->normalize_legacy_default_rules();
+
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
 				"SELECT * FROM {$this->rules_table()} WHERE enabled = 1 AND target_type = %s AND target_value = %s ORDER BY promo_shipping ASC, priority ASC, id ASC",
@@ -76,6 +121,29 @@ final class RuleRepository {
 		);
 
 		return $this->rows_to_rules( is_array( $rows ) ? $rows : array() );
+	}
+
+	/**
+	 * @return array<int,Rule>
+	 */
+	public function get_rules_for_carrier_with_default_fallback( string $carrierKey ): array {
+		return $this->get_rules_for_target_or_default( self::TARGET_CARRIER, $carrierKey );
+	}
+
+	/**
+	 * @return array<int,Rule>
+	 */
+	public function get_rules_for_target_or_default( string $target_type, string $target_value ): array {
+		$target_rules = $this->get_rules_for_target( $target_type, $target_value );
+		if ( array() !== $target_rules ) {
+			return $target_rules;
+		}
+
+		return $this->get_default_rules();
+	}
+
+	public function normalize_legacy_default_rules(): void {
+		$this->wpdb->query( "UPDATE {$this->rules_table()} SET target_type = 'default', target_value = '' WHERE target_type IS NULL OR target_type = ''" );
 	}
 
 	/**

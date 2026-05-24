@@ -1,3 +1,8 @@
+.wdc-rules-admin .description {
+	max-width: 760px;
+}
+
+.wdc-rules-toolbar,
 .wdc-rules-admin .wdc-rules-actions {
 	display: flex;
 	flex-wrap: wrap;
@@ -5,16 +10,102 @@
 	margin: 16px 0;
 }
 
+.wdc-rules-scope {
+	display: grid;
+	gap: 4px;
+	margin: 14px 0;
+	padding: 12px;
+	background: #f6f7f7;
+	border-left: 4px solid #2271b1;
+}
+
 .wdc-rules-table {
 	margin-top: 12px;
 }
 
+.wdc-rules-table td {
+	vertical-align: top;
+}
+
+.wdc-rules-table small {
+	display: block;
+	margin-top: 4px;
+	color: #646970;
+}
+
+.wdc-rules-row-actions {
+	min-width: 290px;
+}
+
+.wdc-inline-form {
+	display: inline-block;
+	margin: 0 4px 4px 0;
+}
+
+.wdc-rules-card,
 .wdc-rules-result {
 	margin-top: 20px;
 	padding: 16px;
 	background: #fff;
 	border: 1px solid #dcdcde;
 	border-radius: 4px;
+}
+
+.wdc-rule-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+	gap: 14px;
+	max-width: 980px;
+}
+
+.wdc-rule-grid label,
+.wdc-condition-row label {
+	display: grid;
+	gap: 5px;
+}
+
+.wdc-rule-grid input,
+.wdc-rule-grid select,
+.wdc-condition-row input,
+.wdc-condition-row select {
+	width: 100%;
+	max-width: 100%;
+}
+
+.wdc-checkbox {
+	align-content: end;
+	grid-template-columns: auto 1fr;
+	align-items: center;
+	gap: 8px;
+}
+
+.wdc-checkbox input {
+	width: auto;
+}
+
+.wdc-conditions {
+	display: grid;
+	gap: 10px;
+	margin-bottom: 10px;
+}
+
+.wdc-condition-row {
+	display: grid;
+	grid-template-columns: minmax(80px, .55fr) repeat(4, minmax(140px, 1fr)) auto;
+	gap: 10px;
+	align-items: end;
+	padding: 12px;
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+}
+
+.wdc-condition-row.is-template {
+	display: none;
+}
+
+.wdc-operation-fields.is-operation-disabled [data-operation-control] {
+	opacity: .65;
 }
 
 .wdc-rules-result-grid {
@@ -64,4 +155,17 @@
 .wdc-rules-audit-entry span {
 	display: inline-block;
 	margin-right: 8px;
+}
+
+@media (max-width: 960px) {
+	.wdc-condition-row {
+		grid-template-columns: 1fr 1fr;
+	}
+}
+
+@media (max-width: 600px) {
+	.wdc-condition-row,
+	.wdc-rule-grid {
+		grid-template-columns: 1fr;
+	}
 }

@@ -463,7 +463,7 @@ final class LocationsAdminPage {
 			const postcodeStart = document.getElementById('wdc-dadata-postcode-fill-start');
 			if (postcodeStart) postcodeStart.addEventListener('click', function(){
 				const box = document.getElementById('wdc-dadata-postcode-progress');
-				post('wdc_dadata_postcode_fill_start').then(resp => { render(box, resp.data); loop('wdc_dadata_postcode_fill_step', box, 4000 + Math.floor(Math.random() * 2001)); });
+				post('wdc_dadata_postcode_fill_start').then(resp => { render(box, resp.data); loop('wdc_dadata_postcode_fill_step', box, 2000 + Math.floor(Math.random() * 2001)); });
 			});
 			const postcodeClear = document.getElementById('wdc-dadata-postcode-clear-markers');
 			if (postcodeClear) postcodeClear.addEventListener('click', function(){

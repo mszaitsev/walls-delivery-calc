@@ -18,6 +18,10 @@ The new checkout path is registered as a WooCommerce shipping method with id `wd
 
 `NewShippingMethod` is a real `WC_Shipping_Method`. It calculates rates through `CheckoutOrchestrator`, uses DemoCarrier through `CarrierRegistry`, applies checkout rules, maps returned rates to WooCommerce rate arrays, and adds them through `add_rate()`.
 
+As of version 0.18.0, checkout runtime reads enabled default rules through `RuleRepository::get_default_rules()` instead of applying every enabled rule globally. Default rules have `target_type=default` and an empty `target_value`.
+
+`RuleRepository` also exposes `get_rules_for_target_or_default()` and `get_rules_for_carrier_with_default_fallback()` for the future carrier-specific rules stage. Once carrier keys are wired into rule selection, carrier rules can override default rules without changing the rule engine contract.
+
 ## Session persistence
 
 `CheckoutSessionManager` stores selected `delivery_type`, selected sort mode, last mapped rates, and debug data in the WooCommerce session abstraction. Pickup points and tariffs are not persisted yet.

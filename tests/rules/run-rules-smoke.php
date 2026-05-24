@@ -45,7 +45,7 @@ function rules_context( float $delivery_price = 450, int $weight = 1000, string 
 }
 
 function price_rule( string $name, string $operation, float $value, string $base = RuleOperationBases::RUBLES, bool $promo = false, bool $stop = false ): Rule {
-	return new Rule( null, $name, true, 10, 'rate', 'demo', RuleActionTypes::CHANGE_PRICE, $operation, $value, $base, $promo, $stop );
+	return new Rule( null, $name, true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, $operation, $value, $base, $promo, $stop );
 }
 
 $engine = new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) );
