@@ -503,7 +503,8 @@ runtime_smoke_assert( ! str_contains( $close_picker_match['body'], 'update_check
 runtime_smoke_assert( str_contains( $city_selector_js, ".on( 'click.wdcCitySelector', '.wdc-city-picker-close', function ( event )" ) && str_contains( $city_selector_js, "stopEvent( event );\n\t\tclosePicker();" ), 'Close button handler must call closePicker only.' );
 runtime_smoke_assert( str_contains( $city_selector_js, "if ( event.target === this ) {\n\t\t\tclosePicker();" ), 'Outside overlay click must call closePicker only.' );
 runtime_smoke_assert( str_contains( $city_selector_js, "if ( 'Escape' === event.key && pickerOpen ) {\n\t\t\tevent.preventDefault();\n\t\t\tclosePicker();" ), 'Escape handler must call closePicker only.' );
-runtime_smoke_assert( str_contains( $city_selector_js, "input.wdcCitySelector keyup.wdcCitySelector change.wdcCitySelector paste.wdcCitySelector" ), 'City selector JS must use delegated input.wdcCitySelector events.' );
+runtime_smoke_assert( str_contains( $city_selector_js, ".on( 'input.wdcCitySelector', '.wdc-city-picker-search'" ), 'City selector JS must search from modal input events.' );
+runtime_smoke_assert( ! str_contains( $city_selector_js, "keyup.wdcCitySelector change.wdcCitySelector paste.wdcCitySelector', citySelector" ), 'City selector JS must not search from external city keyup/change/paste.' );
 runtime_smoke_assert( ! str_contains( $city_selector_js, 'data-location="' ), 'City selector JS must not store encoded JSON in data-location.' );
 runtime_smoke_assert( ! str_contains( $city_selector_js, 'JSON.stringify( location )' ), 'City selector JS must not stringify location payload into HTML attributes.' );
 runtime_smoke_assert( ! str_contains( $city_selector_js, 'locations-demo.json' ), 'City selector JS must not preload full location dataset.' );

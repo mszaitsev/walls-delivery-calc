@@ -15,6 +15,11 @@
 	var forceRegionCode = '';
 	var autoResolveTimer = null;
 	var explicitSelection = false;
+	var searchRequestSeq = 0;
+	var activeSearchSeq = 0;
+	var currentSearchQuery = '';
+	var lastSearchQuery = '';
+	var lastSearchForceRegionCode = '';
 	var locationStore = {};
 	var locationSeq = 0;
 	var hiddenNames = [
@@ -123,7 +128,7 @@
 		if ( $field.length && label ) {
 			var text = invalid ? label : 'Выбран: ' + label;
 			if ( ! invalid && postcode ) {
-				text += '\nИндекс: ' + postcode;
+				text += ', ' + postcode;
 			}
 			selectedNotice( $field ).toggleClass( 'is-invalid', !! invalid ).text( text );
 		}
@@ -241,12 +246,27 @@
 		} );
 	}
 
-	function search( query ) {
+	function search( query, options ) {
+		options = options || {};
+		query = String( query || '' );
 		if ( ! config.ajax_url ) {
 			debug( 'ajax url missing' );
 			return;
 		}
+		if ( query.length < ( config.min_chars || 3 ) ) {
+			renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint' );
+			return;
+		}
+		if ( ! options.force && query === lastSearchQuery && forceRegionCode === lastSearchForceRegionCode ) {
+			debug( 'search skipped unchanged query', query );
+			return;
+		}
 
+		var seq = ++searchRequestSeq;
+		activeSearchSeq = seq;
+		currentSearchQuery = query;
+		lastSearchQuery = query;
+		lastSearchForceRegionCode = forceRegionCode;
 		debug( 'ajax request start', query );
 		renderMessage( config.strings && config.strings.searching ? config.strings.searching : '', 'is-loading' );
 
@@ -263,6 +283,10 @@
 				force_region_code: forceRegionCode
 			}
 		} ).done( function ( response ) {
+			if ( seq !== activeSearchSeq || query !== currentSearchQuery ) {
+				debug( 'stale ajax response ignored', { seq: seq, active: activeSearchSeq, query: query, current: currentSearchQuery } );
+				return;
+			}
 			var groups = response && response.data && response.data.groups ? response.data.groups : [];
 			debug( 'ajax success groups count', groups.length );
 			debug( 'limit reached', !! ( response && response.data && response.data.limit_reached ) );
@@ -274,6 +298,10 @@
 			}
 			renderMessage( config.strings && config.strings.error ? config.strings.error : '', 'is-error' );
 		} ).fail( function ( xhr ) {
+			if ( seq !== activeSearchSeq || query !== currentSearchQuery ) {
+				debug( 'stale ajax failure ignored', { seq: seq, active: activeSearchSeq, query: query, current: currentSearchQuery } );
+				return;
+			}
 			debug( 'ajax fail', xhr );
 			renderMessage( config.strings && config.strings.error ? config.strings.error : '', 'is-error' );
 		} );
@@ -301,10 +329,16 @@
 		if ( ! isUsableField( $field ) ) {
 			return;
 		}
+		if ( pickerOpen && activeCityField === $field[0] ) {
+			searchInput().trigger( 'focus' ).trigger( 'select' );
+			return;
+		}
 
 		activeCityField = $field[0];
 		originalCityValue = initialPickerQuery( $field );
 		forceRegionCode = '';
+		lastSearchQuery = '';
+		lastSearchForceRegionCode = '';
 		pickerOpen = true;
 		picker().attr( 'aria-hidden', 'false' ).addClass( 'is-open' );
 		searchInput().val( originalCityValue );
@@ -315,7 +349,7 @@
 		}, 20 );
 
 		if ( originalCityValue.length >= ( config.min_chars || 3 ) ) {
-			search( originalCityValue );
+			search( originalCityValue, { force: true } );
 		} else {
 			renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint' );
 		}
@@ -323,6 +357,8 @@
 
 	function closePicker() {
 		pickerOpen = false;
+		activeSearchSeq = ++searchRequestSeq;
+		currentSearchQuery = '';
 		activeCityField = isUsableField( activeCityField ) ? activeCityField : null;
 		$( '.wdc-city-picker-overlay, .wdc-city-picker-panel, .wdc-city-selector' ).remove();
 		debug( 'city picker closed' );
@@ -488,7 +524,7 @@
 		}, 1000 );
 	}
 
-	function handleCityInput( event ) {
+	function handleExternalCityChanged( event ) {
 		var $field = $( event.target );
 		if ( suppressSearch ) {
 			debug( 'search suppressed', event.type );
@@ -513,9 +549,6 @@
 			clearHidden();
 			scheduleAutoResolve();
 		}
-		openPicker( $field );
-		searchInput().val( query );
-		scheduleSearch( query );
 	}
 
 	function handleCityBlur() {
@@ -607,9 +640,9 @@
 	$( document.body ).on( 'focus.wdcCitySelector click.wdcCitySelector', citySelector, function ( event ) {
 		openPicker( $( event.target ) );
 	} );
-	$( document.body ).off( 'input.wdcCitySelector keyup.wdcCitySelector change.wdcCitySelector paste.wdcCitySelector', citySelector );
-	$( document.body ).on( 'input.wdcCitySelector keyup.wdcCitySelector change.wdcCitySelector paste.wdcCitySelector', citySelector, function ( event ) {
-		handleCityInput( event );
+	$( document.body ).off( 'input.wdcCitySelector change.wdcCitySelector', citySelector );
+	$( document.body ).on( 'input.wdcCitySelector change.wdcCitySelector', citySelector, function ( event ) {
+		handleExternalCityChanged( event );
 	} );
 	$( document.body ).off( 'change.wdcCitySelector blur.wdcCitySelector', '#shipping_state, select[name="shipping_state"], input[name="shipping_state"], #billing_state, select[name="billing_state"], input[name="billing_state"]' );
 	$( document.body ).on( 'change.wdcCitySelector blur.wdcCitySelector', '#shipping_state, select[name="shipping_state"], input[name="shipping_state"], #billing_state, select[name="billing_state"], input[name="billing_state"]', function () {
@@ -621,8 +654,9 @@
 	} );
 	$( document.body ).off( 'blur.wdcCitySelector', citySelector );
 	$( document.body ).on( 'blur.wdcCitySelector', citySelector, handleCityBlur );
-	$( document.body ).off( 'input.wdcCitySelector keyup.wdcCitySelector paste.wdcCitySelector', '.wdc-city-picker-search' );
-	$( document.body ).on( 'input.wdcCitySelector keyup.wdcCitySelector paste.wdcCitySelector', '.wdc-city-picker-search', function () {
+	$( document.body ).off( 'input.wdcCitySelector', '.wdc-city-picker-search' );
+	$( document.body ).on( 'input.wdcCitySelector', '.wdc-city-picker-search', function () {
+		forceRegionCode = '';
 		scheduleSearch( String( $( this ).val() || '' ) );
 	} );
 	$( document.body ).off( 'mousedown.wdcCitySelector click.wdcCitySelector keydown.wdcCitySelector', '.wdc-city-selector__item' );
@@ -655,7 +689,7 @@
 		if ( label && current.indexOf( label ) !== 0 ) {
 			searchInput().val( label + ( current ? ', ' + current : ', ' ) );
 		}
-		search( searchInput().val() );
+		search( searchInput().val(), { force: true } );
 	} );
 	$( document.body ).off( 'click.wdcCitySelector', '.wdc-city-picker-close' );
 	$( document.body ).on( 'click.wdcCitySelector', '.wdc-city-picker-close', function ( event ) {

@@ -250,11 +250,12 @@ final class CheckoutLocationSearch {
 		$all_tokens = $matched_tokens === count( $tokens );
 		$depth = ( '' !== $fields['place'] ? 4 : 0 ) + ( '' !== $fields['city'] ? 3 : 0 ) + ( '' !== $fields['district'] ? 2 : 0 ) + ( '' !== $fields['region'] ? 1 : 0 );
 		$district_place = $level_matches['district'] > 0 && $level_matches['place'] > 0;
+		$region_only_match = $level_matches['region'] > 0 && 0 === $level_matches['place'] && 0 === $level_matches['city'] && ! $district_place;
 		$group_strength = match ( true ) {
 			$level_matches['place'] > 0 => 500,
 			$level_matches['city'] > 0 => 400,
 			$district_place => 350,
-			$level_matches['region'] > 0 && 1 === count( $tokens ) => 250,
+			$region_only_match => 250,
 			default => 100,
 		};
 
@@ -290,6 +291,7 @@ final class CheckoutLocationSearch {
 			'city_match'     => $level_matches['city'],
 			'district_match' => $level_matches['district'],
 			'region_match'   => $level_matches['region'],
+			'region_only_match' => $region_only_match,
 			'group_strength' => $group_strength,
 			'depth'          => $depth,
 		);
@@ -350,7 +352,7 @@ final class CheckoutLocationSearch {
 		return array_values(
 			array_filter(
 				$scored,
-				static fn( array $row ): bool => (int) $row['score']['place_match'] > 0 || (int) $row['score']['city_match'] > 0
+				static fn( array $row ): bool => (int) $row['score']['place_match'] > 0 || (int) $row['score']['city_match'] > 0 || ! empty( $row['score']['region_only_match'] )
 			)
 		);
 	}
@@ -402,6 +404,7 @@ final class CheckoutLocationSearch {
 			$by_region[ $key ]['group_strength'] = max( (int) ( $by_region[ $key ]['group_strength'] ?? 0 ), (int) $row['score']['group_strength'] );
 			$by_region[ $key ]['score'] = max( (int) ( $by_region[ $key ]['score'] ?? 0 ), (int) $row['score']['total'] );
 		}
+		$effective_region_limit = 1 === count( $by_region ) ? min( $limit, $region_limit * 3 ) : $region_limit;
 
 		uasort(
 			$by_region,
@@ -416,7 +419,7 @@ final class CheckoutLocationSearch {
 			if ( $shown_total >= $limit ) {
 				break;
 			}
-			$rows = array_slice( $group['rows'], 0, '' !== $force_region_code ? $limit : $region_limit );
+			$rows = array_slice( $group['rows'], 0, '' !== $force_region_code ? $limit : $effective_region_limit );
 			$rows = array_slice( $rows, 0, $limit - $shown_total );
 			$shown_total += count( $rows );
 			$groups[] = array(
