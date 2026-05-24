@@ -16,13 +16,15 @@ The new checkout path is registered as a WooCommerce shipping method with id `wd
 
 ## Orchestration runtime
 
-`NewShippingMethod` is a real `WC_Shipping_Method`. It calculates rates through `CheckoutOrchestrator`, uses DemoCarrier through `CarrierRegistry`, applies checkout rules, maps returned rates to WooCommerce rate arrays, and adds them through `add_rate()`.
+`NewShippingMethod` is a real `WC_Shipping_Method`. It calculates rates through `CheckoutOrchestrator`, uses registered carriers through `CarrierRegistry`, applies checkout rules, maps returned rates to WooCommerce rate arrays, and adds them through `add_rate()`.
 
 As of version 0.18.3, checkout runtime reads enabled default rules through `RuleRepository::get_default_rules()` instead of applying every enabled rule globally. Default rules have `target_type=default` and an empty `target_value`. If no default rules exist, runtime continues without rules; `database/demo/rules-demo.json` is not used as a checkout fallback. Rules are applied in the same top-to-bottom order shown in the rules admin table.
 
 As of version 0.18.4, rule context carries selected location FIAS ID when available. City conditions are FIAS-only: they compare the selected location FIAS ID with the condition value and do not fall back to city or display-name text. Package dimensions are aggregated from WooCommerce product dimensions using max length, width, and height across cart items, while volume remains total package volume in `cm3` and is converted to cubic meters by the rule evaluator.
 
-`RuleRepository` also exposes `get_rules_for_target_or_default()` and `get_rules_for_carrier_with_default_fallback()` for the future carrier-specific rules stage. Once carrier keys are wired into rule selection, carrier rules can override default rules without changing the rule engine contract.
+As of version 0.19.0, runtime resolves rules per carrier with `RuleRepository::get_rules_for_carrier_with_default_fallback($carrierKey)` when available. Carrier rules can override default rules without changing the rule engine contract. If no carrier-specific rules exist, default rules are applied.
+
+As of version 0.19.0, `russian_post` / `russian_post_worldwide_parcel` is registered as the real “Почта России — международная доставка” carrier. It is international-only, excludes `RU`, uses the new `Package` weight plus shared packaging tiers, and returns a zero-cost manager fallback instead of failing checkout for API errors, missing tariff/price, unsupported country, or overweight.
 
 ## Session persistence
 
@@ -39,6 +41,11 @@ As of version 0.18.4, rule context carries selected location FIAS ID when availa
 - `_wdc_platform_planned_delivery_comment`
 - `_wdc_platform_comments`
 - `_wdc_platform_fallback_used`
+- `_wdc_platform_requires_pickup_point`
+- `_wdc_platform_service_key`
+- `_wdc_platform_rate_meta`
+
+Russian Post rate metadata includes sanitized API request/response diagnostics, cache metadata, formula inputs/results, package weight data, country mapping, and fallback reason when fallback is used. Secrets and tokens are not stored in the request params.
 
 When checkout has an unambiguous local selected location, the order stores only:
 

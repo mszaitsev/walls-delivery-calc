@@ -43,6 +43,9 @@ final class OrderShippingMetaPersister {
 			'_wdc_platform_planned_delivery_comment' => $rate['planned_delivery_comment'] ?? '',
 			'_wdc_platform_comments'                 => $rate['comments'] ?? array(),
 			'_wdc_platform_fallback_used'            => ! empty( $rate['fallback_used'] ) || 'fallback' === (string) ( $rate['carrier_key'] ?? '' ),
+			'_wdc_platform_requires_pickup_point'    => ! empty( $rate['requires_pickup_point'] ) ? 1 : 0,
+			'_wdc_platform_service_key'              => $rate['service_key'] ?? '',
+			'_wdc_platform_rate_meta'                => $rate['rate_meta'] ?? array(),
 		);
 
 		$address = $this->session_manager->normalized_address_result();

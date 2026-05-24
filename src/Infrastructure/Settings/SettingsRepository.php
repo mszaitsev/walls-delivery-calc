@@ -46,6 +46,31 @@ final class SettingsRepository {
 			'dadata_suggestions_timeout'    => 3,
 			'dadata_suggestions_count'      => 10,
 			'dadata_suggestions_tokens'     => array(),
+			'russian_post_worldwide_parcel' => array(
+				'enabled'                 => true,
+				'api_endpoint'            => 'https://tariff.pochta.ru/v2/calculate/tariff',
+				'country_endpoint'        => 'https://tariff.pochta.ru/v2/dictionary/country',
+				'api_token'               => '',
+				'origin_postcode'         => '630005',
+				'object_code'             => 4031,
+				'isavia'                  => 0,
+				'timeout'                 => 20,
+				'debug'                   => false,
+				'max_package_weight_g'    => 19990,
+				'formula_divider'         => 0.89,
+				'formula_add_rub'         => 200,
+				'vat_rate'                => 0.2,
+				'fallback_enabled'        => true,
+				'fallback_text'           => 'Стоимость доставки рассчитает менеджер',
+				'cache_until_end_of_day'  => true,
+			),
+			'packaging_tiers'              => array(
+				array( 'from_weight_g' => 0, 'to_weight_g' => 1000, 'packaging_weight_g' => 150 ),
+				array( 'from_weight_g' => 1001, 'to_weight_g' => 3000, 'packaging_weight_g' => 250 ),
+				array( 'from_weight_g' => 3001, 'to_weight_g' => 7000, 'packaging_weight_g' => 400 ),
+				array( 'from_weight_g' => 7001, 'to_weight_g' => 15000, 'packaging_weight_g' => 550 ),
+				array( 'from_weight_g' => 15001, 'to_weight_g' => 19990, 'packaging_weight_g' => 700 ),
+			),
 		);
 	}
 

@@ -15,7 +15,11 @@ use WallsShop\WDC\Calendar\Services\TimezoneService;
 use WallsShop\WDC\Calendar\Services\YearGenerator;
 use WallsShop\WDC\Calendar\Storage\CalendarRepository;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostApiClient;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\Runtime\DemoCarrier;
+use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
 use WallsShop\WDC\Checkout\Address\FiasAddressNormalizer;
@@ -131,10 +135,15 @@ final class Plugin {
 		$this->container->register( RuleEngine::class, fn(): RuleEngine => new RuleEngine( $this->container->get( RuleEvaluator::class ) ) );
 		$this->container->register( RuleSimulator::class, fn(): RuleSimulator => new RuleSimulator( $this->container->get( RuleEngine::class ) ) );
 		$this->container->register( DemoCarrier::class, fn(): DemoCarrier => new DemoCarrier() );
+		$this->container->register( RussianPostSettings::class, fn(): RussianPostSettings => new RussianPostSettings( $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( RussianPostApiClient::class, fn(): RussianPostApiClient => new RussianPostApiClient( $this->container->get( RussianPostSettings::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( RussianPostCountryDirectory::class, fn(): RussianPostCountryDirectory => new RussianPostCountryDirectory( $this->container->get( RussianPostApiClient::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( RussianPostInternationalCarrier::class, fn(): RussianPostInternationalCarrier => new RussianPostInternationalCarrier( $this->container->get( RussianPostSettings::class ), $this->container->get( RussianPostApiClient::class ), $this->container->get( RussianPostCountryDirectory::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register(
 			CarrierRegistry::class,
 			function (): CarrierRegistry {
 				$registry = new CarrierRegistry();
+				$registry->register( $this->container->get( RussianPostInternationalCarrier::class ) );
 				if ( $this->container->get( SettingsRepository::class )->get_bool( 'enable_demo_carrier', true ) ) {
 					$registry->register( $this->container->get( DemoCarrier::class ) );
 				}
@@ -196,7 +205,7 @@ final class Plugin {
 		);
 		$this->container->register( CheckoutAddressValidation::class, fn(): CheckoutAddressValidation => new CheckoutAddressValidation( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( WooCommerceRateMapper::class, fn(): WooCommerceRateMapper => new WooCommerceRateMapper() );
-		$this->container->register( WooCommercePackageMapper::class, fn(): WooCommercePackageMapper => new WooCommercePackageMapper( $this->container->get( CheckoutAddressRuntime::class ), $this->container->get( CheckoutSessionManager::class ) ) );
+		$this->container->register( WooCommercePackageMapper::class, fn(): WooCommercePackageMapper => new WooCommercePackageMapper( $this->container->get( CheckoutAddressRuntime::class ), $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register(
 			ShippingMethodRegistrar::class,
 			fn(): ShippingMethodRegistrar => new ShippingMethodRegistrar(

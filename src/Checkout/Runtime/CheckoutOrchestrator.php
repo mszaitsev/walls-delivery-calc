@@ -36,7 +36,7 @@ final class CheckoutOrchestrator {
 	/**
 	 * @param array<int,Rule> $rules
 	 */
-	public function calculate( QuoteRequest $request, array $rules = array(), string $sort = RateSorter::CHEAPEST, bool $cache_enabled = true ): CheckoutCalculationResult {
+	public function calculate( QuoteRequest $request, array $rules = array(), string $sort = RateSorter::CHEAPEST, bool $cache_enabled = true, ?callable $rules_resolver = null ): CheckoutCalculationResult {
 		$carrier_errors = array();
 		$audit          = array();
 		$cache_hits     = 0;
@@ -74,7 +74,9 @@ final class CheckoutOrchestrator {
 					continue;
 				}
 
-				$applied = $this->rule_builder->apply( $rate, $this->context_for_rate( $request, $rate ), $rules );
+				$rules_for_rate = null !== $rules_resolver ? $rules_resolver( $rate->carrier_key ) : $rules;
+				$rules_for_rate = is_array( $rules_for_rate ) ? $rules_for_rate : array();
+				$applied = $this->rule_builder->apply( $rate, $this->context_for_rate( $request, $rate ), $rules_for_rate );
 				$rates[] = $applied['rate'];
 				$audit[] = array(
 					'rate_id' => $rate->rate_id,
