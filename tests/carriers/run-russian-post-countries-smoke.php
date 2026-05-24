@@ -1,0 +1,237 @@
+<?php
+declare(strict_types=1);
+
+use WallsShop\WDC\Admin\AdminMenu;
+use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostCountriesAdminPage;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostApiClient;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMapping;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingRepository;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingService;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
+use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
+use WallsShop\WDC\Core\Autoloader;
+use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Package\PackageItem;
+use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+
+defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
+defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
+
+$GLOBALS['rp_country_options'] = array();
+$GLOBALS['rp_country_tables_created'] = array();
+
+function country_smoke_assert( bool $condition, string $message ): void {
+	if ( ! $condition ) {
+		throw new RuntimeException( $message );
+	}
+}
+
+function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['rp_country_options'][ $key ] ?? $default; }
+function update_option( string $key, mixed $value, mixed $autoload = null ): bool { $GLOBALS['rp_country_options'][ $key ] = $value; return true; }
+function current_time( string $type ): string { return '2026-05-25 12:00:00'; }
+function wp_date( string $format ): string { return date( $format, strtotime( '2026-05-25 12:00:00' ) ); }
+function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
+function sanitize_textarea_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
+function sanitize_key( mixed $value ): string { return strtolower( preg_replace( '/[^a-zA-Z0-9_\\-]/', '', (string) $value ) ?? '' ); }
+function wp_unslash( mixed $value ): mixed { return $value; }
+function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
+function is_wp_error( mixed $value ): bool { return false; }
+function wp_remote_get( string $url, array $args = array() ): array {
+	return array(
+		'response' => array( 'code' => 200 ),
+		'body' => json_encode(
+			array(
+				'country' => array(
+					array( 'id' => '040', 'iso2' => 'AT', 'name' => 'АВСТРИЯ', 'parcel' => array( 'block' => 0 ) ),
+					array( 'id' => '031', 'iso2' => 'AZ', 'name' => 'АЗЕРБАЙДЖАН', 'parcel' => array( 'block' => 1 ) ),
+					array( 'id' => '008', 'iso2' => 'AL', 'name' => '<script>alert(1)</script>', 'parcel' => array( 'block' => 0 ) ),
+					array( 'id' => '643', 'iso2' => 'RU', 'name' => 'РОССИЯ', 'parcel' => array( 'block' => 0 ) ),
+				),
+			)
+		),
+	);
+}
+function wp_remote_retrieve_response_code( mixed $response ): int { return (int) ( $response['response']['code'] ?? 0 ); }
+function wp_remote_retrieve_body( mixed $response ): string { return (string) ( $response['body'] ?? '' ); }
+function current_user_can( string $capability ): bool { return AdminMenu::CAPABILITY === $capability; }
+function wp_verify_nonce( string $nonce, string $action ): bool { return 'nonce' === $nonce; }
+function wp_nonce_field( string $action, string $name, bool $referer = true, bool $display = true ): string { $html = '<input type="hidden" name="' . esc_attr( $name ) . '" value="nonce">'; if ( $display ) { echo $html; } return $html; }
+function __( string $text, string $domain = '' ): string { return $text; }
+function esc_html__( string $text, string $domain = '' ): string { return $text; }
+function esc_attr__( string $text, string $domain = '' ): string { return $text; }
+function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_url( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function selected( mixed $selected, mixed $current = true, bool $display = true ): string { $result = (string) $selected === (string) $current ? ' selected="selected"' : ''; if ( $display ) { echo $result; } return $result; }
+function add_action( string $hook, mixed $callback ): void {}
+function add_submenu_page( mixed ...$args ): void {}
+function admin_url( string $path = '' ): string { return 'https://example.test/wp-admin/' . ltrim( $path, '/' ); }
+function add_query_arg( array $params, string $url ): string { return $url . '?' . http_build_query( $params ); }
+function absint( mixed $value ): int { return abs( (int) $value ); }
+
+function dbDelta( string $sql ): void {
+	$GLOBALS['rp_country_tables_created'][] = $sql;
+}
+
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $prefix = 'wp_';
+		public int $insert_id = 0;
+		/** @var array<int,array<string,mixed>> */
+		public array $rp_rows = array();
+
+		public function get_charset_collate(): string { return ''; }
+		public function esc_like( string $text ): string { return addcslashes( $text, '_%\\' ); }
+		public function prepare( string $query, mixed ...$args ): string {
+			foreach ( $args as $arg ) {
+				$value = is_int( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'";
+				$query = preg_replace( '/%[sd]/', $value, $query, 1 ) ?? $query;
+			}
+			return $query;
+		}
+		public function insert( string $table, array $data, array $format = array() ): bool {
+			$this->insert_id++;
+			$data['id'] = $this->insert_id;
+			$this->rp_rows[] = $data;
+			return true;
+		}
+		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
+			foreach ( $this->rp_rows as $i => $row ) {
+				$match = true;
+				foreach ( $where as $key => $value ) {
+					if ( (string) ( $row[ $key ] ?? '' ) !== (string) $value ) {
+						$match = false;
+					}
+				}
+				if ( $match ) {
+					$this->rp_rows[ $i ] = array_merge( $row, $data );
+				}
+			}
+			return true;
+		}
+		public function get_row( string $query, mixed $output = null ): ?array {
+			if ( str_contains( $query, 'COUNT(*) AS total' ) ) {
+				return array(
+					'total' => count( $this->rp_rows ),
+					'matched' => array_sum( array_column( $this->rp_rows, 'matched' ) ),
+					'api_available' => array_sum( array_column( $this->rp_rows, 'api_available' ) ),
+					'enabled' => array_sum( array_column( $this->rp_rows, 'effective_enabled' ) ),
+					'skipped' => count( array_filter( $this->rp_rows, static fn( array $r ): bool => empty( $r['matched'] ) ) ),
+					'manual_enabled' => count( array_filter( $this->rp_rows, static fn( array $r ): bool => 'enabled' === ( $r['manual_mode'] ?? '' ) ) ),
+					'manual_disabled' => count( array_filter( $this->rp_rows, static fn( array $r ): bool => 'disabled' === ( $r['manual_mode'] ?? '' ) ) ),
+					'last_checked_at' => '2026-05-25 12:00:00',
+				);
+			}
+			if ( preg_match( "/wc_country_code = '([^']+)'/", $query, $m ) ) {
+				foreach ( $this->rp_rows as $row ) {
+					if ( $row['wc_country_code'] === $m[1] ) {
+						return $row;
+					}
+				}
+			}
+			return null;
+		}
+		public function get_results( string $query, mixed $output = null ): array {
+			$rows = $this->rp_rows;
+			if ( str_contains( $query, 'effective_enabled = 1' ) ) {
+				$rows = array_values( array_filter( $rows, static fn( array $r ): bool => ! empty( $r['effective_enabled'] ) ) );
+			}
+			if ( str_contains( $query, 'effective_enabled = 0' ) ) {
+				$rows = array_values( array_filter( $rows, static fn( array $r ): bool => empty( $r['effective_enabled'] ) ) );
+			}
+			return $rows;
+		}
+		public function get_col( string $query ): array { return array_values( array_column( array_filter( $this->rp_rows, static fn( array $r ): bool => ! empty( $r['effective_enabled'] ) ), 'wc_country_code' ) ); }
+		public function get_var( string $query ): mixed { return count( $this->rp_rows ); }
+		public function query( string $query ): bool { if ( str_contains( $query, 'CREATE TABLE' ) ) { $GLOBALS['rp_country_tables_created'][] = $query; } if ( str_starts_with( $query, 'DELETE' ) ) { $this->rp_rows = array(); } return true; }
+	}
+}
+
+$GLOBALS['wpdb'] = new wpdb();
+
+final class RpCountriesSmokeCountries {
+	public function get_countries(): array {
+		return array(
+			'AT' => 'Austria',
+			'AZ' => 'Azerbaijan',
+			'AL' => 'Albania',
+			'US' => 'United States',
+			'RU' => 'Russia',
+		);
+	}
+}
+function WC(): object {
+	static $wc = null;
+	if ( null === $wc ) {
+		$wc = new class {
+			public RpCountriesSmokeCountries $countries;
+			public function __construct() { $this->countries = new RpCountriesSmokeCountries(); }
+		};
+	}
+	return $wc;
+}
+
+require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
+( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+
+$migration = require dirname( __DIR__, 2 ) . '/database/migrations/0016_create_russian_post_country_mappings.php';
+$migration();
+country_smoke_assert( [] !== $GLOBALS['rp_country_tables_created'] && str_contains( $GLOBALS['rp_country_tables_created'][0], 'wdc_russian_post_country_mappings' ), 'Migration creates mapping table.' );
+
+$settings_repo = new SettingsRepository();
+$rp_settings = new RussianPostSettings( $settings_repo );
+$logger = new Logger();
+$client = new RussianPostApiClient( $rp_settings, $logger );
+$repo = new RussianPostCountryMappingRepository( $GLOBALS['wpdb'] );
+$service = new RussianPostCountryMappingService( $repo, $client, $logger );
+$stats = $service->refresh_from_api();
+
+country_smoke_assert( 4 === $stats['raw_api_count'], 'refresh_from_api counts raw API countries.' );
+country_smoke_assert( null === $repo->find_by_wc_country_code( 'RU' ), 'RU excluded.' );
+country_smoke_assert( $repo->find_by_wc_country_code( 'AT' )?->effective_enabled, 'Matched country with parcel and no block is enabled in auto.' );
+country_smoke_assert( ! $repo->find_by_wc_country_code( 'US' )?->effective_enabled, 'Unmatched country is disabled.' );
+country_smoke_assert( ! $repo->find_by_wc_country_code( 'AZ' )?->effective_enabled, 'Parcel block disables auto country.' );
+
+$repo->set_manual_mode( 'US', RussianPostCountryMapping::MODE_ENABLED, 'manual keep' );
+$repo->set_manual_mode( 'AT', RussianPostCountryMapping::MODE_DISABLED, 'manual off' );
+country_smoke_assert( $repo->find_by_wc_country_code( 'US' )?->effective_enabled, 'Manual enabled overrides unmatched/API disabled.' );
+country_smoke_assert( ! $repo->find_by_wc_country_code( 'AT' )?->effective_enabled, 'Manual disabled overrides API enabled.' );
+$service->refresh_from_api();
+country_smoke_assert( 'enabled' === $repo->find_by_wc_country_code( 'US' )?->manual_mode && 'manual keep' === $repo->find_by_wc_country_code( 'US' )?->manual_comment, 'Refresh does not erase manual mode/comment.' );
+
+$directory = new RussianPostCountryDirectory( $client, $logger, $repo, $service, $rp_settings );
+country_smoke_assert( [] !== $directory->get_country( 'US' ), 'get_country reads persistent table and returns manual enabled.' );
+country_smoke_assert( [] === $directory->get_country( 'AT' ), 'get_country returns only effective enabled.' );
+$carrier = new RussianPostInternationalCarrier( $rp_settings, $client, $directory, $logger );
+$item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 1000 );
+$quote = $carrier->quote( new QuoteRequest( 'AT', new Address( country_code: 'AT', city: 'Vienna', street: 'Test', house: '1', raw_address: 'Test 1' ), Package::from_items( array( $item ), 0, Money::from_rubles( 100 ), Money::from_rubles( 100 ) ), 'card', Money::from_rubles( 100 ), '2026-05-25' ) );
+country_smoke_assert( $quote->has_available_rates() && 'unsupported_country_AT' === $quote->rates[0]->meta['fallback_reason'], 'quote() uses fallback for disabled country mapping.' );
+
+$preview = $service->preview_bulk_lists( array( 'АВСТРИЯ' ), array() );
+country_smoke_assert( ! empty( $preview['success'] ) && 1 === count( $preview['available']['changes'] ), 'Bulk available preview detects changes.' );
+$preview = $service->preview_bulk_lists( array(), array( 'United States' ) );
+country_smoke_assert( ! empty( $preview['success'] ) && 1 === count( $preview['unavailable']['changes'] ), 'Bulk unavailable preview detects changes.' );
+$preview = $service->preview_bulk_lists( array( 'AT' ), array( 'Austria' ) );
+country_smoke_assert( empty( $preview['success'] ) && 'duplicate_rows' === $preview['error'], 'Duplicate country in both lists returns error.' );
+$preview = $service->preview_bulk_lists( array( 'Neverland' ), array() );
+country_smoke_assert( array( 'Neverland' ) === $preview['unrecognized'], 'Unrecognized rows reported.' );
+$preview = $service->preview_bulk_lists( array( 'АВСТРИЯ' ), array() );
+$apply = $service->apply_bulk_preview( $preview );
+country_smoke_assert( 'изменено вручную 25.05.2026' === $apply['manual_comment'], 'Manual comment saved with DD.MM.YYYY date.' );
+country_smoke_assert( 'изменено вручную 25.05.2026' === $repo->find_by_wc_country_code( 'AT' )?->manual_comment, 'Manual comment persisted.' );
+
+$admin = new RussianPostCountriesAdminPage( $repo, $service );
+ob_start();
+$admin->render_page();
+$html = (string) ob_get_clean();
+country_smoke_assert( ! str_contains( $html, '<script>alert(1)</script>' ), 'Admin output escapes or sanitizes country names from API.' );
+
+$legacy_diff = function_exists( 'shell_exec' ) ? trim( (string) shell_exec( 'git diff --name-only -- includes' ) ) : '';
+country_smoke_assert( '' === $legacy_diff, 'legacy includes/* must not be modified.' );
+
+echo "Russian Post countries smoke test passed.\n";

@@ -54,6 +54,7 @@ final class RussianPostSettings {
 			'fallback_enabled'     => true,
 			'fallback_text'        => 'Стоимость доставки рассчитает менеджер',
 			'cache_until_end_of_day' => true,
+			'auto_refresh_countries_if_empty' => false,
 		);
 	}
 

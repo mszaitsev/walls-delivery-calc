@@ -4,6 +4,8 @@ declare(strict_types=1);
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostApiClient;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingRepository;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingService;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
 use WallsShop\WDC\Admin\SettingsAdminPage;
@@ -37,6 +39,7 @@ use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperators;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
+defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
 
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
@@ -52,7 +55,13 @@ $GLOBALS['wdc_rp_session'] = new class {
 };
 $GLOBALS['wdc_rp_wc'] = new class {
 	public mixed $session;
-	public function __construct() { $this->session = $GLOBALS['wdc_rp_session']; }
+	public mixed $countries;
+	public function __construct() {
+		$this->session = $GLOBALS['wdc_rp_session'];
+		$this->countries = new class {
+			public function get_countries(): array { return array( 'US' => 'United States', 'RU' => 'Russia' ); }
+		};
+	}
 };
 
 function rp_smoke_assert( bool $condition, string $message ): void {
@@ -112,6 +121,47 @@ function selected( mixed $selected, mixed $current = true, bool $display = true 
 function wp_nonce_field( string $action, string $name ): void { echo '<input type="hidden" name="' . esc_attr( $name ) . '" value="nonce">'; }
 function submit_button( string $text ): void { echo '<button type="submit">' . esc_html( $text ) . '</button>'; }
 
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $prefix = 'wp_';
+		public int $insert_id = 0;
+		public array $rp_rows = array();
+		public function esc_like( string $text ): string { return addcslashes( $text, '_%\\' ); }
+		public function prepare( string $query, mixed ...$args ): string {
+			foreach ( $args as $arg ) {
+				$value = is_int( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'";
+				$query = preg_replace( '/%[sd]/', $value, $query, 1 ) ?? $query;
+			}
+			return $query;
+		}
+		public function insert( string $table, array $data, array $format = array() ): bool { $this->insert_id++; $data['id'] = $this->insert_id; $this->rp_rows[] = $data; return true; }
+		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
+			foreach ( $this->rp_rows as $i => $row ) {
+				if ( (string) ( $row['wc_country_code'] ?? '' ) === (string) ( $where['wc_country_code'] ?? '' ) ) {
+					$this->rp_rows[ $i ] = array_merge( $row, $data );
+				}
+			}
+			return true;
+		}
+		public function get_row( string $query, mixed $output = null ): ?array {
+			if ( str_contains( $query, 'COUNT(*) AS total' ) ) {
+				return array( 'total' => count( $this->rp_rows ), 'matched' => 0, 'api_available' => 0, 'enabled' => 0, 'skipped' => 0, 'manual_enabled' => 0, 'manual_disabled' => 0, 'last_checked_at' => '' );
+			}
+			if ( preg_match( "/wc_country_code = '([^']+)'/", $query, $m ) ) {
+				foreach ( $this->rp_rows as $row ) {
+					if ( $row['wc_country_code'] === $m[1] ) { return $row; }
+				}
+			}
+			return null;
+		}
+		public function get_results( string $query, mixed $output = null ): array { return $this->rp_rows; }
+		public function get_col( string $query ): array { return array_values( array_column( array_filter( $this->rp_rows, static fn( array $r ): bool => ! empty( $r['effective_enabled'] ) ), 'wc_country_code' ) ); }
+		public function get_var( string $query ): mixed { return count( $this->rp_rows ); }
+		public function query( string $query ): bool { if ( str_starts_with( $query, 'DELETE' ) ) { $this->rp_rows = array(); } return true; }
+	}
+}
+$GLOBALS['wpdb'] = new wpdb();
+
 final class WP_Error {
 	public function __construct( private string $message ) {}
 	public function get_error_message(): string { return $this->message; }
@@ -144,8 +194,13 @@ function rp_carrier( SettingsRepository $settings ): RussianPostInternationalCar
 	$logger = new Logger();
 	$rp_settings = new RussianPostSettings( $settings );
 	$client = new RussianPostApiClient( $rp_settings, $logger );
+	$repo = new RussianPostCountryMappingRepository( $GLOBALS['wpdb'] );
+	$service = new RussianPostCountryMappingService( $repo, $client, $logger );
+	if ( 0 === $repo->count_all() ) {
+		$service->refresh_from_api();
+	}
 
-	return new RussianPostInternationalCarrier( $rp_settings, $client, new RussianPostCountryDirectory( $client, $logger ), $logger );
+	return new RussianPostInternationalCarrier( $rp_settings, $client, new RussianPostCountryDirectory( $client, $logger, $repo, $service, $rp_settings ), $logger );
 }
 
 function rp_request( int $item_weight = 1000, string $country = 'US' ): QuoteRequest {

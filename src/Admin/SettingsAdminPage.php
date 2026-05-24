@@ -136,6 +136,10 @@ final class SettingsAdminPage {
 							<td><label><input type="checkbox" name="russian_post_worldwide_parcel[cache_until_end_of_day]" value="1" <?php checked( ! empty( $rp['cache_until_end_of_day'] ) ); ?>> <?php echo esc_html__( 'Кэшировать тариф до конца дня по timezone WordPress.', 'walls-delivery-calc' ); ?></label></td>
 						</tr>
 						<tr>
+							<th scope="row"><?php echo esc_html__( 'Автообновление стран', 'walls-delivery-calc' ); ?></th>
+							<td><label><input type="checkbox" name="russian_post_worldwide_parcel[auto_refresh_countries_if_empty]" value="1" <?php checked( ! empty( $rp['auto_refresh_countries_if_empty'] ) ); ?>> <?php echo esc_html__( 'Автоматически обновить справочник стран, если таблица пустая.', 'walls-delivery-calc' ); ?></label></td>
+						</tr>
+						<tr>
 							<th scope="row"><?php echo esc_html__( 'Debug Почты России', 'walls-delivery-calc' ); ?></th>
 							<td><label><input type="checkbox" name="russian_post_worldwide_parcel[debug]" value="1" <?php checked( ! empty( $rp['debug'] ) ); ?>> <?php echo esc_html__( 'Логировать endpoint, параметры без секретов, ответы, cache hit/miss, формулу и fallback reason.', 'walls-delivery-calc' ); ?></label></td>
 						</tr>
@@ -275,6 +279,7 @@ final class SettingsAdminPage {
 				'fallback_enabled'     => ! empty( $data['fallback_enabled'] ),
 				'fallback_text'        => sanitize_text_field( $fallback_text ),
 				'cache_until_end_of_day' => ! empty( $data['cache_until_end_of_day'] ),
+				'auto_refresh_countries_if_empty' => ! empty( $data['auto_refresh_countries_if_empty'] ),
 			)
 		);
 	}

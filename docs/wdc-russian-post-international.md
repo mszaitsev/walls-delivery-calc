@@ -63,9 +63,11 @@ All HTTP requests use the WordPress HTTP API. Runtime settings include tariff en
 
 Debug logs include endpoint, sanitized params, raw response, parsed response, cache hit/miss, formula calculation, and fallback reason. Token-like fields are omitted from request params and the shared logger redactor handles sensitive context keys.
 
-The country directory uses the Russian Post dictionary endpoint and maps carrier country IDs to WooCommerce ISO2 country codes when present. RU is excluded even if present in the dictionary.
+As of 0.19.2, the country directory uses the persistent `wdc_russian_post_country_mappings` table. Runtime returns only rows with `effective_enabled=1`; RU is always excluded. The Russian Post dictionary endpoint is used by the admin refresh flow and optional lazy refresh when `auto_refresh_countries_if_empty` is enabled.
 
 Tariff API results are cached until the end of the current WordPress timezone day. Cache keys include carrier, service, country, request params, and weight.
+
+Country mapping administration lives in `Калькулятор доставок -> Почта России: страны`. See `docs/wdc-russian-post-countries.md`.
 
 ## Rules
 

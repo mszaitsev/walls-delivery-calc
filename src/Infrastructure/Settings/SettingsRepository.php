@@ -63,6 +63,7 @@ final class SettingsRepository {
 				'fallback_enabled'        => true,
 				'fallback_text'           => 'Стоимость доставки рассчитает менеджер',
 				'cache_until_end_of_day'  => true,
+				'auto_refresh_countries_if_empty' => false,
 			),
 			'packaging_tiers'              => array(
 				array( 'from_weight_g' => 0, 'to_weight_g' => 1000, 'packaging_weight_g' => 150 ),

@@ -13,7 +13,10 @@ final class RussianPostCountryDirectory {
 
 	public function __construct(
 		private RussianPostApiClient $client,
-		private Logger $logger
+		private Logger $logger,
+		private ?RussianPostCountryMappingRepository $repository = null,
+		private ?RussianPostCountryMappingService $service = null,
+		private ?RussianPostSettings $settings = null
 	) {
 	}
 
@@ -26,46 +29,57 @@ final class RussianPostCountryDirectory {
 			return array();
 		}
 
-		$countries = $this->countries();
+		$repository = $this->repository();
+		if ( 0 === $repository->count_all() && $this->auto_refresh_if_empty() ) {
+			$this->service()?->refresh_from_api();
+		}
 
-		return isset( $countries[ $country_code ] ) && is_array( $countries[ $country_code ] ) ? $countries[ $country_code ] : array();
+		$mapping = $repository->find_by_wc_country_code( $country_code );
+		if ( ! $mapping instanceof RussianPostCountryMapping || ! $mapping->effective_enabled ) {
+			return array();
+		}
+
+		return array(
+			'carrier_country_id' => $mapping->rp_country_id,
+			'name'               => $mapping->rp_country_name,
+			'iso2'               => $mapping->wc_country_code,
+			'effective_enabled'  => true,
+			'availability'       => array(
+				'has_parcel'     => $mapping->has_parcel,
+				'parcel_block'   => $mapping->parcel_block,
+				'api_available'  => $mapping->api_available,
+				'manual_mode'    => $mapping->manual_mode,
+			),
+			'raw'                => $mapping->raw,
+		);
 	}
 
 	/**
 	 * @return array<string,array<string,mixed>>
 	 */
 	public function countries(): array {
-		$cached = $this->cache_get();
-		if ( is_array( $cached ) && isset( $cached['countries'] ) && is_array( $cached['countries'] ) ) {
-			$this->logger->debug( 'Russian Post countries cache hit.', array( 'cache_key' => self::CACHE_KEY ) );
-			return $cached['countries'];
+		$repository = $this->repository();
+		if ( 0 === $repository->count_all() && $this->auto_refresh_if_empty() ) {
+			$this->service()?->refresh_from_api();
 		}
 
-		$this->logger->debug( 'Russian Post countries cache miss.', array( 'cache_key' => self::CACHE_KEY ) );
-		$result = $this->client->fetch_countries();
-		if ( empty( $result['success'] ) || ! is_array( $result['raw'] ?? null ) ) {
-			return array();
-		}
-
-		$items = $this->extract_items( $result['raw'] );
 		$countries = array();
-		foreach ( $items as $item ) {
-			if ( ! is_array( $item ) ) {
-				continue;
+		foreach ( $repository->all() as $mapping ) {
+			if ( $mapping->effective_enabled && 'RU' !== $mapping->wc_country_code ) {
+				$countries[ $mapping->wc_country_code ] = array(
+					'carrier_country_id' => $mapping->rp_country_id,
+					'name'               => $mapping->rp_country_name,
+					'iso2'               => $mapping->wc_country_code,
+					'effective_enabled'  => true,
+					'raw'                => $mapping->raw,
+				);
 			}
-
-			$country = $this->normalize( $item );
-			if ( empty( $country['effective_enabled'] ) || empty( $country['iso2'] ) || empty( $country['carrier_country_id'] ) ) {
-				continue;
-			}
-
-			$countries[ (string) $country['iso2'] ] = $country;
+		}
+		if ( array() !== $countries ) {
+			return $countries;
 		}
 
-		ksort( $countries );
-		$this->cache_set( array( 'countries' => $countries, 'raw' => $result['raw'] ) );
-
-		return $countries;
+		return array();
 	}
 
 	/**
@@ -178,5 +192,25 @@ final class RussianPostCountryDirectory {
 		if ( function_exists( 'set_transient' ) ) {
 			set_transient( self::CACHE_KEY, $payload, self::CACHE_TTL );
 		}
+	}
+
+	private function repository(): RussianPostCountryMappingRepository {
+		if ( ! $this->repository instanceof RussianPostCountryMappingRepository ) {
+			$this->repository = new RussianPostCountryMappingRepository();
+		}
+
+		return $this->repository;
+	}
+
+	private function service(): ?RussianPostCountryMappingService {
+		return $this->service;
+	}
+
+	private function auto_refresh_if_empty(): bool {
+		if ( ! $this->settings instanceof RussianPostSettings ) {
+			return false;
+		}
+
+		return ! empty( $this->settings->all()['auto_refresh_countries_if_empty'] );
 	}
 }
