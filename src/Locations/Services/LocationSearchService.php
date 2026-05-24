@@ -96,6 +96,29 @@ final class LocationSearchService {
 	}
 
 	/**
+	 * @param array<int,string> $tokens
+	 * @return array<int, Location>
+	 */
+	public function search_by_tokens( array $tokens, int $limit = 300, bool $require_all = false, string $force_region_code = '' ): array {
+		return $this->repository->search_by_tokens( $tokens, $limit, $require_all, $force_region_code );
+	}
+
+	/**
+	 * @param array<int,string> $tokens
+	 * @return array<int, Location>
+	 */
+	public function checkout_hierarchy_candidates( array $tokens, int $limit = 1000, string $force_region_code = '' ): array {
+		return $this->repository->checkout_hierarchy_candidates( $tokens, $limit, $force_region_code );
+	}
+
+	/**
+	 * @return array<int, Location>
+	 */
+	public function find_exact_admin_identifier_matches( string $query ): array {
+		return $this->repository->find_exact_admin_identifier_matches( $query );
+	}
+
+	/**
 	 * @return array<string,mixed>
 	 */
 	public function last_search_meta(): array {

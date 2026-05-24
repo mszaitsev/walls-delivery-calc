@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Locations\Admin;
 
 use RuntimeException;
 use WallsShop\WDC\Admin\AdminMenu;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Fias\FiasCredentials;
@@ -97,7 +98,7 @@ final class LocationsAdminPage {
 		$query   = isset( $_GET['location_query'] ) ? sanitize_text_field( wp_unslash( $_GET['location_query'] ) ) : '';
 		$search_page = isset( $_GET['location_search_page'] ) ? max( 1, (int) $_GET['location_search_page'] ) : 1;
 		$per_page = isset( $_GET['location_per_page'] ) ? (int) $_GET['location_per_page'] : 20;
-		$paginated = '' !== trim( $query ) ? $this->repository->search_paginated( $query, $search_page, $per_page ) : array( 'items' => array(), 'total' => 0, 'page' => 1, 'per_page' => 20, 'total_pages' => 0 );
+		$paginated = '' !== trim( $query ) ? ( new CheckoutLocationSearch( $this->search_service ) )->search_paginated( $query, $search_page, $per_page ) : array( 'items' => array(), 'total' => 0, 'page' => 1, 'per_page' => 20, 'total_pages' => 0 );
 		$grouped = $this->group_locations_by_region( $paginated['items'] );
 		?>
 		<div class="wrap wdc-locations-admin">
@@ -462,7 +463,7 @@ final class LocationsAdminPage {
 			const postcodeStart = document.getElementById('wdc-dadata-postcode-fill-start');
 			if (postcodeStart) postcodeStart.addEventListener('click', function(){
 				const box = document.getElementById('wdc-dadata-postcode-progress');
-				post('wdc_dadata_postcode_fill_start').then(resp => { render(box, resp.data); loop('wdc_dadata_postcode_fill_step', box, 1000); });
+				post('wdc_dadata_postcode_fill_start').then(resp => { render(box, resp.data); loop('wdc_dadata_postcode_fill_step', box, 4000 + Math.floor(Math.random() * 2001)); });
 			});
 			const postcodeClear = document.getElementById('wdc-dadata-postcode-clear-markers');
 			if (postcodeClear) postcodeClear.addEventListener('click', function(){

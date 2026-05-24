@@ -74,7 +74,7 @@ A later GAR sync can build on `GarChangesService` by adding a real adapter that 
 
 As of `0.15.10`, the local places foundation is populated from prepared `gar_places.csv` through `wdc_gar_places_stage`, `wdc_regions`, and the expanded `wdc_locations` schema. The CSV importer maps fields by header, supports optional `district_*` and `city_*` levels, imports `region_type` into locations, imports `display_name` as-is, ignores unknown columns, uses bulk inserts/upserts, exposes chunked admin progress, checks staging schema before loading rows, reports SQL bulk failures in job errors, and uses `postal_code` instead of legacy `postcode`. Snapshot export/import transfers the four location tables plus the `wdc_location_type_display_rules` option. See [wdc-gar-places-import.md](wdc-gar-places-import.md) for the current import and snapshot workflow.
 
-The admin locations page includes paginated search with ranked ordering and compact page numbers. Direct `place_name` matches are preferred over city, district, region, and broad `searchable_text` matches, so a settlement named by the query appears above rows where the same text only occurs in a parent field. Search group headers use `region_name` plus mapped `region_type` after the name and are sorted by `region_name`.
+The admin locations page includes paginated search with ranked ordering and compact page numbers. As of `0.17.5`, admin search uses the same hierarchy-aware exact/prefix matcher as checkout instead of broad `searchable_text` contains matching. It also checks exact `fias_id`, `gar_id`/`gar_object_id`, `kladr_id`, and `postal_code` before hierarchy search; exact identifier matches return only those rows. Search group headers use `region_name` plus mapped `region_type` after the name and are sorted by `region_name`.
 
 `LocationDisplayNameFormatter` owns the admin-side display formula:
 
@@ -85,3 +85,17 @@ region_part, district_part, city_part, place_part
 Type display rules are stored in `wdc_location_type_display_rules`. They apply to `region_type`, `city_type`, and `place_type` with `before`, `after`, or `hidden` positions. `district_type` remains fixed as `district_name + " " + district_type`. The admin settings are grouped into collapsible Region, City, and Place sections with per-section type counts.
 
 The admin `Пересобрать display_name` action runs as a chunked AJAX job with a progress bar and JSON status block. It updates `display_name`, refreshes `searchable_text`, and regenerates GAR aliases for each processed batch.
+
+## Checkout City Picker V2
+
+As of `0.17.5`, checkout lookup uses the local GAR/FIAS locations table for a hierarchy-aware city picker.
+
+`CheckoutLocationSearchParser` normalizes mixed queries such as `Алтайский край, Курьинский р-н, село Ивановка`: punctuation is treated as separators, `ё` is normalized to `е`, and type words are removed from the real search token set. Type words from raw GAR types and admin display rules, for example `область`, `обл.`, `район`, `р-н`, `город`, `г.`, `село`, and `деревня`, are level markers only. The special alias `МО` expands to the region-level token `московская`, so it searches as `Московская область` regardless of region type display rules.
+
+Checkout search is not a full-text search over `searchable_text`. It checks `region_name`, `district_name`, `city_name`, and the resolved lowest-level place name separately, using only exact and prefix matches. It does not match inside a word: `брод` can match `Брод`, `Бродки`, and `Бродовка`, but not `Верхобродово`.
+
+Ranking promotes candidates that match more hierarchy levels, then exact/prefix city/place, district, and region matches. Strong place matches filter away weak unrelated candidates, but region-name-only matches remain visible at lower priority. Region groups use rank buckets: exact city/place, prefix city/place, district+place, region-only, then other. Inside exact/prefix buckets, hierarchy seniority is applied first, so city-level matches rank above place-level matches; groups with the same seniority sort alphabetically by region name. If a query matches an upper level, for example `Домодедово` as `city_name`, checkout can show the city itself plus nested places inside that city.
+
+The checkout picker loading state uses the text `Идёт поиск, подождите несколько секунд` with a lightweight CSS spinner. Permanent modal actions let the customer use the current input as a manual city value or clear the input/results without waiting for an empty-result fallback button.
+
+`LocationDisplayNameFormatter` now also formats checkout region headers, option labels, state field values, and city field values. Region headers always use `region_name + mapped region_type` unless the type is hidden. Option rows use the settlement label plus useful parent hierarchy, for example `с. Гусиный Брод - Новосибирский р-н, Новосибирская обл.`.

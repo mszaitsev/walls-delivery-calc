@@ -197,15 +197,22 @@ final class ShippingMethodRegistrar {
 			'ajax_url'  => function_exists( 'admin_url' ) ? admin_url( 'admin-ajax.php' ) : '',
 			'nonce'     => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( CheckoutLocationAjax::NONCE_ACTION ) : '',
 			'min_chars' => 3,
-			'location_search_limit' => max( 10, min( 300, $this->settings->get_int( 'location_search_limit', 100 ) ) ),
+			'include_region_in_query' => $this->settings->get_bool( 'include_region_in_checkout_city_picker_query', true ),
+			'checkout_location_search_limit' => $this->city_location_limit(),
+			'location_region_limit' => max( 3, min( 50, $this->settings->get_int( 'checkout_location_region_limit', 10 ) ) ),
+			'resolve_action' => CheckoutLocationAjax::RESOLVE_ACTION,
 			'debug'     => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
 			'strings'   => array(
 				'start'     => __( 'Начните вводить населенный пункт', 'walls-delivery-calc' ),
-				'not_found' => __( 'Населенный пункт не найден. Будет использовано введенное значение.', 'walls-delivery-calc' ),
+				'not_found' => __( 'Населенный пункт не найден. Можно использовать введенное название.', 'walls-delivery-calc' ),
 				'error'     => __( 'Ошибка поиска населенного пункта.', 'walls-delivery-calc' ),
-				'searching' => __( 'Идет поиск...', 'walls-delivery-calc' ),
+				'searching' => __( 'Идёт поиск, подождите несколько секунд', 'walls-delivery-calc' ),
 			),
 		);
+	}
+
+	private function city_location_limit(): int {
+		return max( 10, min( 500, $this->settings->get_int( 'checkout_location_search_limit', 100 ) ) );
 	}
 
 }

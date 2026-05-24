@@ -87,6 +87,64 @@ final class LocationDisplayNameFormatter {
 		return trim( $region_name . ' ' . $display );
 	}
 
+	public function format_checkout_region_header( Location $location ): string {
+		return $this->format_region_group_header( $location );
+	}
+
+	public function format_checkout_location_option( Location $location ): string {
+		$main = $this->format_part( 'place', $location->resolved_place_type(), $location->resolved_place_name() );
+		if ( '' === $main ) {
+			$main = $this->format_part( 'city', $location->city_type, $location->city_name );
+		}
+
+		$context = array();
+		$district = $this->format_district( $location->district_type, $location->district_name );
+		$city = $this->format_part( 'city', $location->city_type, $location->city_name );
+		$region = $this->format_part( 'region', $location->region_type, $location->region_name );
+
+		foreach ( array( $district, $city, $region ) as $part ) {
+			$part = trim( $part );
+			if ( '' !== $part && $part !== $main && ! in_array( $part, $context, true ) ) {
+				$context[] = $part;
+			}
+		}
+
+		return trim( $main . ( array() !== $context ? ' - ' . implode( ', ', $context ) : '' ) );
+	}
+
+	public function format_checkout_state_value( Location $location ): string {
+		return $this->format_part( 'region', $location->region_type, $location->region_name );
+	}
+
+	public function format_checkout_city_value( Location $location ): string {
+		$parts = array(
+			$this->format_district( $location->district_type, $location->district_name ),
+			$this->format_part( 'city', $location->city_type, $location->city_name ),
+			$this->format_part( 'place', $location->resolved_place_type(), $location->resolved_place_name() ),
+		);
+
+		$region = $this->format_checkout_state_value( $location );
+		$parts = array_values(
+			array_filter(
+				array_unique( array_map( 'trim', $parts ) ),
+				static fn( string $part ): bool => '' !== $part && $part !== $region
+			)
+		);
+
+		return implode( ', ', $parts );
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	public function display_variants( string $scope, string $type ): array {
+		$type = trim( $type );
+		$rule = $this->rules[ $scope ][ $type ] ?? array();
+		$display = trim( (string) ( $rule['display'] ?? '' ) );
+
+		return array_values( array_unique( array_filter( array( $type, $display ) ) ) );
+	}
+
 	private function format_district( string $type, string $name ): string {
 		$name = trim( $name );
 		$type = trim( $type );

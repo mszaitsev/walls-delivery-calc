@@ -123,6 +123,196 @@ final class LocationRepository {
 	}
 
 	/**
+	 * @return array<int,Location>
+	 */
+	public function find_exact_admin_identifier_matches( string $query ): array {
+		$query = trim( $query );
+		if ( '' === $query ) {
+			return array();
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$rows = array_values(
+				array_filter(
+					$this->test_location_rows(),
+					static fn( array $row ): bool =>
+						1 === (int) ( $row['active'] ?? 1 )
+						&& (
+							$query === (string) ( $row['fias_id'] ?? '' )
+							|| $query === (string) ( $row['gar_id'] ?? '' )
+							|| $query === (string) ( $row['gar_object_id'] ?? '' )
+							|| $query === (string) ( $row['kladr_id'] ?? '' )
+							|| $query === (string) ( $row['postal_code'] ?? '' )
+						)
+				)
+			);
+			usort( $rows, static fn( array $a, array $b ): int => strcmp( (string) ( $a['display_name'] ?? '' ), (string) ( $b['display_name'] ?? '' ) ) );
+			return $this->rows_to_locations( array_map( fn( array $row ): array => $this->join_region_for_test_double( $row ), $rows ) );
+		}
+
+		$where = array( 'l.fias_id = %s', 'l.gar_id = %s', 'l.kladr_id = %s', 'l.postal_code = %s' );
+		$args = array( $query, $query, $query, $query );
+		if ( is_numeric( $query ) ) {
+			$where[] = 'l.gar_object_id = %d';
+			$args[] = (int) $query;
+		}
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.active = 1 AND (" . implode( ' OR ', $where ) . ')
+				ORDER BY l.display_name ASC',
+				...$args
+			),
+			ARRAY_A
+		);
+
+		return $this->rows_to_locations( is_array( $rows ) ? $rows : array() );
+	}
+
+	/**
+	 * @param array<int,string> $tokens
+	 * @return array<int, Location>
+	 */
+	public function search_by_tokens( array $tokens, int $limit = 300, bool $require_all = false, string $force_region_code = '' ): array {
+		$tokens = array_values( array_unique( array_filter( array_map( fn( string $token ): string => $this->normalize_query( $token ), $tokens ) ) ) );
+		$limit = max( 10, min( 300, $limit ) );
+		$force_region_code = trim( $force_region_code );
+
+		if ( array() === $tokens ) {
+			return array();
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$rows = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+					continue;
+				}
+				if ( '' !== $force_region_code && $force_region_code !== (string) ( $row['region_code'] ?? '' ) ) {
+					continue;
+				}
+				$haystack = $this->normalize_query( (string) ( $row['searchable_text'] ?? '' ) . ' ' . implode( ' ', array_values( $row ) ) );
+				$matches = 0;
+				foreach ( $tokens as $token ) {
+					if ( str_contains( $haystack, $token ) ) {
+						++$matches;
+					}
+				}
+				if ( ( $require_all && $matches === count( $tokens ) ) || ( ! $require_all && $matches > 0 ) ) {
+					$rows[] = $this->join_region_for_test_double( $row );
+				}
+			}
+
+			return $this->rows_to_locations( array_slice( $rows, 0, $limit ) );
+		}
+
+		$where = array( 'l.active = 1' );
+		$args = array();
+		if ( '' !== $force_region_code ) {
+			$where[] = 'l.region_code = %s';
+			$args[] = $force_region_code;
+		}
+
+		$parts = array();
+		foreach ( $tokens as $token ) {
+			$parts[] = 'l.searchable_text LIKE %s';
+			$args[] = '%' . $this->wpdb->esc_like( $token ) . '%';
+		}
+		$where[] = '(' . implode( $require_all ? ' AND ' : ' OR ', $parts ) . ')';
+		$args[] = $limit;
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE " . implode( ' AND ', $where ) . '
+				ORDER BY l.display_name ASC
+				LIMIT %d',
+				...$args
+			),
+			ARRAY_A
+		);
+
+		return $this->rows_to_locations( is_array( $rows ) ? $rows : array() );
+	}
+
+	/**
+	 * @param array<int,string> $tokens
+	 * @return array<int,Location>
+	 */
+	public function checkout_hierarchy_candidates( array $tokens, int $limit = 1000, string $force_region_code = '' ): array {
+		$tokens = array_values( array_unique( array_filter( array_map( fn( string $token ): string => $this->normalize_query( $token ), $tokens ) ) ) );
+		$limit = max( 10, min( 2000, $limit ) );
+		$force_region_code = trim( $force_region_code );
+		if ( array() === $tokens && '' === $force_region_code ) {
+			return array();
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$rows = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+					continue;
+				}
+				if ( '' !== $force_region_code && $force_region_code !== (string) ( $row['region_code'] ?? '' ) ) {
+					continue;
+				}
+				if ( array() === $tokens || $this->row_has_checkout_prefix_match( $row, $tokens ) ) {
+					$rows[] = $this->join_region_for_test_double( $row );
+				}
+			}
+
+			return $this->rows_to_locations( array_slice( $rows, 0, $limit ) );
+		}
+
+		$where = array( 'l.active = 1' );
+		$args = array();
+		if ( '' !== $force_region_code ) {
+			$where[] = 'l.region_code = %s';
+			$args[] = $force_region_code;
+		}
+
+		if ( array() !== $tokens ) {
+			$token_where = array();
+			foreach ( $tokens as $token ) {
+				foreach ( array( 'region_name', 'district_name', 'city_name', 'place_name', 'settlement_name' ) as $column ) {
+					$token_where[] = "l.{$column} LIKE %s";
+					$args[] = $this->wpdb->esc_like( $token ) . '%';
+				}
+				$token_where[] = 'l.fias_id = %s';
+				$args[] = $token;
+				$token_where[] = 'l.kladr_id = %s';
+				$args[] = $token;
+				if ( is_numeric( $token ) ) {
+					$token_where[] = 'l.gar_object_id = %d';
+					$args[] = (int) $token;
+				}
+			}
+			$where[] = '(' . implode( ' OR ', $token_where ) . ')';
+		}
+		$args[] = $limit;
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE " . implode( ' AND ', $where ) . '
+				ORDER BY l.display_name ASC
+				LIMIT %d',
+				...$args
+			),
+			ARRAY_A
+		);
+
+		return $this->rows_to_locations( is_array( $rows ) ? $rows : array() );
+	}
+
+	/**
 	 * @return array{items:array<int,Location>, total:int, page:int, per_page:int, total_pages:int}
 	 */
 	public function search_paginated( string $query, int $page = 1, int $per_page = 20 ): array {
@@ -703,6 +893,23 @@ final class LocationRepository {
 		$row['joined_region_name'] = $region['region_name'] ?? $row['region_name'] ?? '';
 		$row['joined_region_type'] = $region['region_type'] ?? '';
 		return $row;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @param array<int,string> $tokens
+	 */
+	private function row_has_checkout_prefix_match( array $row, array $tokens ): bool {
+		foreach ( $tokens as $token ) {
+			foreach ( array( 'region_name', 'district_name', 'city_name', 'place_name', 'settlement_name', 'fias_id', 'kladr_id', 'gar_object_id' ) as $column ) {
+				$value = $this->normalize_query( (string) ( $row[ $column ] ?? '' ) );
+				if ( '' !== $value && ( $value === $token || str_starts_with( $value, $token ) || ( is_numeric( $token ) && $value === $token ) ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 
 	/**
