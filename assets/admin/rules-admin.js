@@ -7,8 +7,8 @@
 		});
 	}
 
-	function refreshConditionIndexes(container) {
-		container.querySelectorAll('[data-condition-row]').forEach(function (row, index) {
+	function refreshConditionIndexes(root) {
+		root.querySelectorAll('[data-condition-row]').forEach(function (row, index) {
 			updateConditionNames(row, index);
 		});
 	}
@@ -261,18 +261,23 @@
 		renderValueControl(row);
 	}
 
-	function createConditionRow(container) {
-		var rows = container.querySelectorAll('[data-condition-row]');
-		var source = rows.length ? rows[rows.length - 1] : null;
+	function createConditionRow(groupBlock) {
+		var source = groupBlock.querySelector('[data-condition-template]');
+		var list = groupBlock.querySelector('[data-condition-list]');
+		var group = groupBlock.dataset.conditionGroupBlock || '1';
 
-		if (!source) {
+		if (!source || !list) {
 			return;
 		}
 
 		var clone = source.cloneNode(true);
+		clone.classList.remove('is-template');
+		clone.removeAttribute('data-condition-template');
+		clone.setAttribute('data-condition-row', '');
 		clone.querySelectorAll('input, select').forEach(function (field) {
+			field.disabled = false;
 			if (field.name.indexOf('[condition_group]') !== -1) {
-				field.value = '1';
+				field.value = group;
 				return;
 			}
 
@@ -280,8 +285,8 @@
 		});
 		clone.dataset.conditionValue = '{}';
 
-		container.appendChild(clone);
-		refreshConditionIndexes(container);
+		list.appendChild(clone);
+		refreshConditionIndexes(document);
 		initConditionRow(clone);
 	}
 
@@ -380,9 +385,9 @@
 	document.addEventListener('click', function (event) {
 		var addButton = event.target.closest('[data-add-condition]');
 		if (addButton) {
-			var container = document.querySelector('[data-conditions]');
-			if (container) {
-				createConditionRow(container);
+			var groupBlock = addButton.closest('[data-condition-group-block]');
+			if (groupBlock) {
+				createConditionRow(groupBlock);
 			}
 			return;
 		}
@@ -390,16 +395,9 @@
 		var removeButton = event.target.closest('[data-remove-condition]');
 		if (removeButton) {
 			var row = removeButton.closest('[data-condition-row]');
-			var container = row ? row.parentElement : null;
-			if (row && container && container.querySelectorAll('[data-condition-row]').length > 1) {
+			if (row) {
 				row.remove();
-				refreshConditionIndexes(container);
-		} else if (row) {
-				row.querySelectorAll('input, select').forEach(function (field) {
-					field.value = field.name.indexOf('[condition_group]') !== -1 ? '1' : '';
-				});
-				row.dataset.conditionValue = '{}';
-				initConditionRow(row);
+				refreshConditionIndexes(document);
 			}
 			return;
 		}
@@ -469,5 +467,6 @@
 	document.addEventListener('DOMContentLoaded', function () {
 		syncOperationFields(document);
 		document.querySelectorAll('[data-condition-row]').forEach(initConditionRow);
+		refreshConditionIndexes(document);
 	});
 }());

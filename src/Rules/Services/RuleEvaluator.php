@@ -74,8 +74,14 @@ final class RuleEvaluator {
 		}
 
 		$logic = Rule::normalized_group_logic( $rule->condition_group_logic );
-		foreach ( $groups as $group => $conditions ) {
-			$mode = $logic[ (int) $group ] ?? 'and';
+		$result = array( 1 => false, 2 => false, 3 => false );
+		for ( $group = 1; $group <= 3; ++$group ) {
+			$conditions = $groups[ $group ] ?? array();
+			if ( array() === $conditions ) {
+				continue;
+			}
+
+			$mode = $logic[ $group ] ?? 'and';
 			$group_matches = 'and' === $mode;
 			foreach ( $conditions as $condition ) {
 				$matches = $this->condition_evaluator->evaluate( $condition, $context );
@@ -88,13 +94,24 @@ final class RuleEvaluator {
 					break;
 				}
 			}
-
-			if ( $group_matches ) {
-				return true;
-			}
+			$result[ $group ] = $group_matches;
 		}
 
-		return false;
+		return match ( Rule::normalized_group_expression( $rule->condition_group_expression ) ) {
+			'condition_1'              => $result[1],
+			'condition_2'              => $result[2],
+			'condition_3'              => $result[3],
+			'condition_1_or_2'         => $result[1] || $result[2],
+			'condition_1_and_2'        => $result[1] && $result[2],
+			'condition_1_or_3'         => $result[1] || $result[3],
+			'condition_1_and_3'        => $result[1] && $result[3],
+			'condition_2_or_3'         => $result[2] || $result[3],
+			'condition_2_and_3'        => $result[2] && $result[3],
+			'condition_1_and_2_and_3'  => $result[1] && $result[2] && $result[3],
+			'condition_1_and_2_or_3'   => ( $result[1] && $result[2] ) || $result[3],
+			'condition_1_or_2_and_3'   => $result[1] || ( $result[2] && $result[3] ),
+			default                    => $result[1] || $result[2] || $result[3],
+		};
 	}
 
 	private function apply_price_operation( Money $current_price, RuleEvaluationContext $context, Rule $rule ): Money {

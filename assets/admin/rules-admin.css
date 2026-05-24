@@ -108,9 +108,33 @@
 	margin-bottom: 10px;
 }
 
+.wdc-condition-groups {
+	display: grid;
+	gap: 14px;
+	margin-bottom: 12px;
+}
+
+.wdc-condition-group {
+	display: grid;
+	gap: 10px;
+	padding: 12px;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+}
+
+.wdc-condition-group h4 {
+	margin: 0;
+}
+
+.wdc-condition-list {
+	display: grid;
+	gap: 10px;
+}
+
 .wdc-condition-row {
 	display: grid;
-	grid-template-columns: minmax(80px, .55fr) minmax(190px, 1fr) minmax(90px, .65fr) minmax(240px, 1.4fr) auto;
+	grid-template-columns: minmax(190px, 1fr) minmax(90px, .65fr) minmax(240px, 1.4fr) auto;
 	gap: 10px;
 	align-items: end;
 	padding: 12px;
@@ -150,6 +174,10 @@
 .wdc-condition-group-logic label {
 	display: grid;
 	gap: 4px;
+}
+
+.wdc-condition-expression {
+	min-width: min(420px, 100%);
 }
 
 .wdc-dimensions-fields {

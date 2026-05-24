@@ -286,12 +286,21 @@ final class RulesAdminPage {
 
 				<h3><?php echo esc_html__( 'Условия применения', 'walls-delivery-calc' ); ?></h3>
 				<?php $this->render_group_logic_fields( $rule ); ?>
-				<div class="wdc-conditions" data-conditions>
-					<?php foreach ( $this->conditions_for_form( $rule ) as $index => $condition ) : ?>
-						<?php $this->render_condition_row( $condition, $index ); ?>
+				<div class="wdc-condition-groups" data-conditions>
+					<?php $condition_index = 0; ?>
+					<?php foreach ( $this->conditions_by_group_for_form( $rule ) as $group => $conditions ) : ?>
+						<section class="wdc-condition-group" data-condition-group-block="<?php echo esc_attr( (string) $group ); ?>">
+							<h4><?php echo esc_html( sprintf( __( 'Условие %d', 'walls-delivery-calc' ), $group ) ); ?></h4>
+							<div class="wdc-condition-list" data-condition-list>
+								<?php foreach ( $conditions as $condition ) : ?>
+									<?php $this->render_condition_row( $condition, $condition_index++, (int) $group ); ?>
+								<?php endforeach; ?>
+							</div>
+							<?php $this->render_condition_row( new RuleCondition( null, null, (int) $group, '', '', '', null, array() ), -1, (int) $group, true ); ?>
+							<button class="button" type="button" data-add-condition data-condition-group="<?php echo esc_attr( (string) $group ); ?>"><?php echo esc_html( sprintf( __( 'Добавить условие в Условие %d', 'walls-delivery-calc' ), $group ) ); ?></button>
+						</section>
 					<?php endforeach; ?>
 				</div>
-				<button class="button" type="button" data-add-condition><?php echo esc_html__( 'Добавить условие', 'walls-delivery-calc' ); ?></button>
 
 				<p class="submit">
 					<button class="button button-primary" type="submit"><?php echo esc_html__( 'Сохранить правило', 'walls-delivery-calc' ); ?></button>
@@ -302,21 +311,15 @@ final class RulesAdminPage {
 		<?php
 	}
 
-	private function render_condition_row( RuleCondition $condition, int $index ): void {
+	private function render_condition_row( RuleCondition $condition, int $index, int $group, bool $template = false ): void {
 		$value_json = wp_json_encode( $condition->value_json );
+		$name_prefix = $template ? 'conditions[__index__]' : 'conditions[' . (string) $index . ']';
 		?>
-		<div class="wdc-condition-row" data-condition-row data-condition-value="<?php echo esc_attr( $this->condition_value_payload( $condition ) ); ?>">
-			<label>
-				<span><?php echo esc_html__( 'Условие', 'walls-delivery-calc' ); ?></span>
-				<select name="conditions[<?php echo esc_attr( (string) $index ); ?>][condition_group]" data-condition-group>
-					<?php for ( $group = 1; $group <= 3; ++$group ) : ?>
-						<option value="<?php echo esc_attr( (string) $group ); ?>" <?php selected( min( 3, max( 1, $condition->condition_group ) ), $group ); ?>><?php echo esc_html( sprintf( __( 'Условие %d', 'walls-delivery-calc' ), $group ) ); ?></option>
-					<?php endfor; ?>
-				</select>
-			</label>
+		<div class="wdc-condition-row <?php echo $template ? 'is-template' : ''; ?>" <?php echo $template ? 'data-condition-template' : 'data-condition-row'; ?> data-condition-value="<?php echo esc_attr( $this->condition_value_payload( $condition ) ); ?>">
+			<input type="hidden" name="<?php echo esc_attr( $name_prefix ); ?>[condition_group]" value="<?php echo esc_attr( (string) $group ); ?>" data-condition-group <?php disabled( $template ); ?>>
 			<label>
 				<span><?php echo esc_html__( 'Тип условия', 'walls-delivery-calc' ); ?></span>
-				<select name="conditions[<?php echo esc_attr( (string) $index ); ?>][condition_type]">
+				<select name="<?php echo esc_attr( $name_prefix ); ?>[condition_type]" <?php disabled( $template ); ?>>
 					<option value=""><?php echo esc_html__( 'Не выбрано', 'walls-delivery-calc' ); ?></option>
 					<?php foreach ( RuleConditionTypes::all() as $value ) : ?>
 						<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $condition->condition_type, $value ); ?>><?php echo esc_html( $this->condition_type_label( $value ) ); ?></option>
@@ -325,13 +328,13 @@ final class RulesAdminPage {
 			</label>
 			<label>
 				<span><?php echo esc_html__( 'Оператор', 'walls-delivery-calc' ); ?></span>
-				<select name="conditions[<?php echo esc_attr( (string) $index ); ?>][operator]" data-condition-operator data-selected-operator="<?php echo esc_attr( $condition->operator ); ?>"></select>
+				<select name="<?php echo esc_attr( $name_prefix ); ?>[operator]" data-condition-operator data-selected-operator="<?php echo esc_attr( $condition->operator ); ?>" <?php disabled( $template ); ?>></select>
 			</label>
 			<div class="wdc-condition-value" data-condition-value-control></div>
-			<input type="hidden" name="conditions[<?php echo esc_attr( (string) $index ); ?>][value_text]" value="<?php echo esc_attr( $condition->value_text ); ?>" data-value-text>
-			<input type="hidden" name="conditions[<?php echo esc_attr( (string) $index ); ?>][value_number]" value="<?php echo esc_attr( null === $condition->value_number ? '' : (string) $condition->value_number ); ?>" data-value-number>
-			<input type="hidden" name="conditions[<?php echo esc_attr( (string) $index ); ?>][value_json]" value="<?php echo esc_attr( false === $value_json ? '{}' : $value_json ); ?>" data-value-json>
-			<button class="button" type="button" data-remove-condition><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button>
+			<input type="hidden" name="<?php echo esc_attr( $name_prefix ); ?>[value_text]" value="<?php echo esc_attr( $condition->value_text ); ?>" data-value-text <?php disabled( $template ); ?>>
+			<input type="hidden" name="<?php echo esc_attr( $name_prefix ); ?>[value_number]" value="<?php echo esc_attr( null === $condition->value_number ? '' : (string) $condition->value_number ); ?>" data-value-number <?php disabled( $template ); ?>>
+			<input type="hidden" name="<?php echo esc_attr( $name_prefix ); ?>[value_json]" value="<?php echo esc_attr( false === $value_json ? '{}' : $value_json ); ?>" data-value-json <?php disabled( $template ); ?>>
+			<button class="button" type="button" data-remove-condition <?php disabled( $template ); ?>><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button>
 		</div>
 		<?php
 	}
@@ -597,7 +600,8 @@ final class RulesAdminPage {
 			isset( $_POST['stop_processing'] ),
 			$this->sanitize_conditions_from_post(),
 			$this->sanitize_group_logic_from_post(),
-			$operation_text
+			$operation_text,
+			$this->sanitize_group_expression_from_post()
 		);
 	}
 
@@ -697,13 +701,20 @@ final class RulesAdminPage {
 	/**
 	 * @return array<int,RuleCondition>
 	 */
-	private function conditions_for_form( Rule $rule ): array {
-		return array() !== $rule->conditions ? $rule->conditions : array( new RuleCondition( null, null, 1, '', '', '', null, array() ) );
+	private function conditions_by_group_for_form( Rule $rule ): array {
+		$groups = array( 1 => array(), 2 => array(), 3 => array() );
+		foreach ( $rule->conditions as $condition ) {
+			$group = min( 3, max( 1, $condition->condition_group ) );
+			$groups[ $group ][] = $condition;
+		}
+
+		return $groups;
 	}
 
 	private function conditions_summary( Rule $rule ): string {
+		$expression = sprintf( __( 'Условие применения: %s', 'walls-delivery-calc' ), $this->group_expression_label( $rule->condition_group_expression ) );
 		if ( array() === $rule->conditions ) {
-			return __( 'Без условий', 'walls-delivery-calc' );
+			return $expression . ' | ' . __( 'Без условий', 'walls-delivery-calc' );
 		}
 
 		$groups = array();
@@ -713,6 +724,7 @@ final class RulesAdminPage {
 
 		$parts = array();
 		$logic = Rule::normalized_group_logic( $rule->condition_group_logic );
+		$parts[] = $expression;
 		foreach ( $groups as $group => $conditions ) {
 			$parts[] = sprintf( __( 'Условие %1$d (%2$s): %3$s', 'walls-delivery-calc' ), (int) $group, $this->group_logic_label( $logic[ (int) $group ] ?? 'and' ), implode( '; ', $conditions ) );
 		}
@@ -832,6 +844,7 @@ final class RulesAdminPage {
 			'condition_type is invalid'               => __( 'Некорректный тип условия.', 'walls-delivery-calc' ),
 			'operator is invalid'                     => __( 'Некорректный оператор условия.', 'walls-delivery-calc' ),
 			'condition_group_logic is invalid'        => __( 'Некорректная логика группы условий.', 'walls-delivery-calc' ),
+			'condition_group_expression is invalid'   => __( 'Некорректное условие применения.', 'walls-delivery-calc' ),
 		);
 
 		return array_map( static fn ( string $error ): string => $map[ $error ] ?? $error, $errors );
@@ -975,7 +988,15 @@ final class RulesAdminPage {
 		$logic = Rule::normalized_group_logic( $rule->condition_group_logic );
 		?>
 		<div class="wdc-condition-group-logic">
-			<strong><?php echo esc_html__( 'Логика групп условий', 'walls-delivery-calc' ); ?></strong>
+			<label class="wdc-condition-expression">
+				<span><?php echo esc_html__( 'Условие применения', 'walls-delivery-calc' ); ?></span>
+				<select name="condition_group_expression" data-group-expression>
+					<?php foreach ( $this->group_expression_options() as $value => $label ) : ?>
+						<option value="<?php echo esc_attr( $value ); ?>" <?php selected( Rule::normalized_group_expression( $rule->condition_group_expression ), $value ); ?>><?php echo esc_html( $label ); ?></option>
+					<?php endforeach; ?>
+				</select>
+			</label>
+			<strong><?php echo esc_html__( 'Логика условий внутри групп', 'walls-delivery-calc' ); ?></strong>
 			<?php for ( $group = 1; $group <= 3; ++$group ) : ?>
 				<label>
 					<span><?php echo esc_html( sprintf( __( 'Условие %d', 'walls-delivery-calc' ), $group ) ); ?></span>
@@ -1003,6 +1024,39 @@ final class RulesAdminPage {
 		}
 
 		return $logic;
+	}
+
+	private function sanitize_group_expression_from_post(): string {
+		$value = isset( $_POST['condition_group_expression'] ) ? sanitize_key( wp_unslash( $_POST['condition_group_expression'] ) ) : Rule::DEFAULT_GROUP_EXPRESSION;
+
+		return Rule::normalized_group_expression( $value );
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private function group_expression_options(): array {
+		return array(
+			'condition_1'              => __( 'Условие 1', 'walls-delivery-calc' ),
+			'condition_2'              => __( 'Условие 2', 'walls-delivery-calc' ),
+			'condition_3'              => __( 'Условие 3', 'walls-delivery-calc' ),
+			'condition_1_or_2'         => __( 'Условие 1 ИЛИ Условие 2', 'walls-delivery-calc' ),
+			'condition_1_and_2'        => __( 'Условие 1 И Условие 2', 'walls-delivery-calc' ),
+			'condition_1_or_3'         => __( 'Условие 1 ИЛИ Условие 3', 'walls-delivery-calc' ),
+			'condition_1_and_3'        => __( 'Условие 1 И Условие 3', 'walls-delivery-calc' ),
+			'condition_2_or_3'         => __( 'Условие 2 ИЛИ Условие 3', 'walls-delivery-calc' ),
+			'condition_2_and_3'        => __( 'Условие 2 И Условие 3', 'walls-delivery-calc' ),
+			'condition_1_or_2_or_3'    => __( 'Условие 1 ИЛИ Условие 2 ИЛИ Условие 3', 'walls-delivery-calc' ),
+			'condition_1_and_2_and_3'  => __( 'Условие 1 И Условие 2 И Условие 3', 'walls-delivery-calc' ),
+			'condition_1_and_2_or_3'   => __( '(Условие 1 И Условие 2) ИЛИ Условие 3', 'walls-delivery-calc' ),
+			'condition_1_or_2_and_3'   => __( 'Условие 1 ИЛИ (Условие 2 И Условие 3)', 'walls-delivery-calc' ),
+		);
+	}
+
+	private function group_expression_label( string $expression ): string {
+		$options = $this->group_expression_options();
+
+		return $options[ Rule::normalized_group_expression( $expression ) ] ?? $options[ Rule::DEFAULT_GROUP_EXPRESSION ];
 	}
 
 	/**

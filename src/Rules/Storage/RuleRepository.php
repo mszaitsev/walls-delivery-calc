@@ -234,6 +234,7 @@ final class RuleRepository {
 					'stop_processing' => (bool) (int) $row['stop_processing'],
 					'conditions'      => $conditions,
 					'condition_group_logic' => $this->decode_group_logic( $row['condition_group_logic'] ?? '' ),
+					'condition_group_expression' => Rule::normalized_group_expression( $row['condition_group_expression'] ?? Rule::DEFAULT_GROUP_EXPRESSION ),
 				)
 			)
 		);
@@ -272,6 +273,7 @@ final class RuleRepository {
 			'promo_shipping'  => $rule->promo_shipping ? 1 : 0,
 			'stop_processing' => $rule->stop_processing ? 1 : 0,
 			'condition_group_logic' => wp_json_encode( Rule::normalized_group_logic( $rule->condition_group_logic ) ),
+			'condition_group_expression' => Rule::normalized_group_expression( $rule->condition_group_expression ),
 			'created_at'      => $now,
 			'updated_at'      => $now,
 		);
@@ -281,7 +283,7 @@ final class RuleRepository {
 	 * @return array<int,string>
 	 */
 	private function rule_formats(): array {
-		return array( '%s', '%d', '%d', '%s', '%s', '%s', '%s', '%f', '%s', '%s', '%d', '%d', '%s', '%s', '%s' );
+		return array( '%s', '%d', '%d', '%s', '%s', '%s', '%s', '%f', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s' );
 	}
 
 	/**

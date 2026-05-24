@@ -440,11 +440,16 @@ $logic_rule_id = $repository->save_rule(
 		false,
 		false,
 		array(),
-		array( 1 => 'and', 2 => 'or', 3 => 'and' )
+		array( 1 => 'and', 2 => 'or', 3 => 'and' ),
+		'',
+		'condition_1_and_2_or_3'
 	)
 );
 $logic_rule = $repository->get_rule( $logic_rule_id );
 rules_admin_smoke_assert( $logic_rule instanceof Rule && array( 1 => 'and', 2 => 'or', 3 => 'and' ) === $logic_rule->condition_group_logic, 'Rule must store condition_group_logic.' );
+rules_admin_smoke_assert( $logic_rule instanceof Rule && 'condition_1_and_2_or_3' === $logic_rule->condition_group_expression, 'Rule must store condition_group_expression.' );
+rules_admin_smoke_assert( Rule::DEFAULT_GROUP_EXPRESSION === Rule::from_array( array( 'name' => 'Default expression' ) )->condition_group_expression, 'Default condition_group_expression must preserve legacy OR behavior.' );
+rules_admin_smoke_assert( Rule::DEFAULT_GROUP_EXPRESSION === Rule::normalized_group_expression( 'invalid' ), 'Invalid condition_group_expression must normalize to default.' );
 
 $comment_rule_id = $repository->save_rule(
 	new Rule(
@@ -490,10 +495,11 @@ $_POST = array(
 	'operation_type'  => RuleOperationTypes::EQUALS,
 	'operation_value' => '12,5',
 	'operation_base'  => RuleOperationBases::RUBLES,
+	'condition_group_expression' => 'condition_1_and_2',
 	'conditions'      => array( array( 'condition_type' => '', 'operator' => RuleOperators::EQ, 'value_number' => '10' ) ),
 );
 $sanitized_rule = $sanitize_rule->invoke( $admin_page );
-rules_admin_smoke_assert( $sanitized_rule instanceof Rule && array() === $sanitized_rule->conditions && 12.5 === $sanitized_rule->operation_value && array() === $sanitized_rule->validate(), 'Equals rule without conditions must save and normalize comma operation_value.' );
+rules_admin_smoke_assert( $sanitized_rule instanceof Rule && array() === $sanitized_rule->conditions && 12.5 === $sanitized_rule->operation_value && 'condition_1_and_2' === $sanitized_rule->condition_group_expression && array() === $sanitized_rule->validate(), 'Equals rule without conditions must save and normalize comma operation_value.' );
 $_POST = array();
 
 $admin_page_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Rules/Admin/RulesAdminPage.php' );
@@ -511,6 +517,11 @@ rules_admin_smoke_assert( str_contains( $admin_page_source, "delivery_type_optio
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'payment_method_options()' ) && ! str_contains( $admin_page_source, "'payment_method' => 'card'" ), 'Simulation payment_method must use WooCommerce gateways without hardcoded card default.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, "Условие %d" ) && str_contains( $admin_page_source, 'data-condition-group' ), 'Condition group UI must use select groups 1/2/3.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'condition_group_logic[<?php echo esc_attr( (string) $group ); ?>]' ), 'Rule form must save condition_group_logic inputs.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'Логика условий внутри групп' ), 'Internal group logic UI must be clearly labeled.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'name="condition_group_expression"' ), 'Rule form must save condition_group_expression.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'condition_1_and_2_or_3' ) && str_contains( $admin_page_source, '(Условие 1 И Условие 2) ИЛИ Условие 3' ), 'Condition expression options must include grouped labels.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'data-condition-group-block' ) && str_contains( $admin_page_source, 'Добавить условие в Условие %d' ), 'Edit form must group conditions and add rows inside a group.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'Условие применения: %s' ), 'Summary must include condition expression label.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'name="operation_text"' ), 'add_comment UI must expose operation_text textarea.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'RuleConditionUiSchema::normalize_decimal_input' ), 'Admin sanitize must normalize decimal inputs with comma or dot.' );
 
@@ -522,6 +533,7 @@ rules_admin_smoke_assert( str_contains( $schema_source, "'input'     => 'fias_id
 
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/rules-admin.js' );
 rules_admin_smoke_assert( str_contains( $js_source, 'appendUnit' ), 'JS must render unit labels next to value controls.' );
+rules_admin_smoke_assert( str_contains( $js_source, 'data-condition-template' ) && str_contains( $js_source, 'dataset.conditionGroupBlock' ), 'JS add condition must clone rows inside the selected group.' );
 rules_admin_smoke_assert( str_contains( $js_source, "action.value === 'add_comment'" ) && str_contains( $js_source, "operationType.value = 'equals'" ), 'JS must switch add_comment to equals-only comment mode.' );
 rules_admin_smoke_assert( str_contains( $js_source, 'Введите FIAS ID населенного пункта' ) || str_contains( $admin_page_source, 'Введите FIAS ID населенного пункта' ), 'UI must use FIAS ID placeholder for city.' );
 rules_admin_smoke_assert( ! str_contains( $js_source, 'Начните вводить населенный пункт' ), 'UI must not contain location autocomplete by name.' );

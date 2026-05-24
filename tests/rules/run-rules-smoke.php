@@ -336,7 +336,52 @@ $groups_or_rule = new Rule(
 	array( 1 => 'and', 2 => 'and', 3 => 'and' )
 );
 $result = $engine->apply_rules( array( $groups_or_rule ), rules_context() );
-rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'Condition groups must combine via OR.' );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'Default condition_group_expression must combine groups via OR.' );
+
+rules_smoke_assert( Rule::DEFAULT_GROUP_EXPRESSION === Rule::normalized_group_expression( 'bad-expression' ), 'Invalid group expression must normalize to default.' );
+
+$expression_conditions = array(
+	new RuleCondition( null, null, 1, RuleConditionTypes::COUNTRY, RuleOperators::EQ, 'RU' ),
+	new RuleCondition( null, null, 2, RuleConditionTypes::PAYMENT_METHOD, RuleOperators::EQ, 'cash' ),
+	new RuleCondition( null, null, 3, RuleConditionTypes::DELIVERY_TYPE, RuleOperators::EQ, 'courier' ),
+);
+$expression_rule = static function ( string $expression, ?array $conditions = null ) use ( $expression_conditions ): Rule {
+	return new Rule(
+		null,
+		'Expression ' . $expression,
+		true,
+		10,
+		'default',
+		'',
+		RuleActionTypes::CHANGE_PRICE,
+		RuleOperationTypes::DECREASE,
+		10,
+		RuleOperationBases::RUBLES,
+		false,
+		false,
+		$conditions ?? $expression_conditions,
+		array( 1 => 'and', 2 => 'and', 3 => 'and' ),
+		'',
+		$expression
+	);
+};
+
+$result = $engine->apply_rules( array( $expression_rule( 'condition_1' ) ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'condition_1 must match only group 1.' );
+$result = $engine->apply_rules( array( $expression_rule( 'condition_2' ) ), rules_context() );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'condition_2 must be false when group 2 is false.' );
+$result = $engine->apply_rules( array( $expression_rule( 'condition_1_and_2' ) ), rules_context() );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'condition_1_and_2 must require both groups.' );
+$result = $engine->apply_rules( array( $expression_rule( 'condition_1_or_2' ) ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'condition_1_or_2 must accept either group.' );
+$result = $engine->apply_rules( array( $expression_rule( 'condition_1_and_2_or_3' ) ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'condition_1_and_2_or_3 must evaluate as (1 AND 2) OR 3.' );
+$result = $engine->apply_rules( array( $expression_rule( 'condition_1_or_2_and_3' ) ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'condition_1_or_2_and_3 must evaluate as 1 OR (2 AND 3).' );
+$result = $engine->apply_rules( array( $expression_rule( 'condition_1_and_2_and_3' ) ), rules_context() );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'condition_1_and_2_and_3 must require all groups.' );
+$result = $engine->apply_rules( array( $expression_rule( 'condition_1_and_2', array( new RuleCondition( null, null, 1, RuleConditionTypes::COUNTRY, RuleOperators::EQ, 'RU' ) ) ) ), rules_context() );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'Empty group used in expression must count false.' );
 
 $result = $engine->apply_rules( array( Rule::from_array( array_merge( price_rule( 'No conditions', RuleOperationTypes::DECREASE, 10 )->to_array(), array( 'conditions' => array() ) ) ) ), rules_context() );
 rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'Rules without conditions must still apply.' );

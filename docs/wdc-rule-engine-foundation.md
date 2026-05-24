@@ -6,7 +6,14 @@ The rule engine foundation lives under `src/Rules` and is split into domain obje
 
 ## Conditions And Groups
 
-Each rule contains zero or more `RuleCondition` objects. Conditions belong to one of three groups (`1`, `2`, or `3`). The rule stores per-group logic in `condition_group_logic`: `and` requires every condition in that group, and `or` requires at least one condition in that group. Empty groups are ignored. Groups are always combined with `OR`, so a rule applies when at least one non-empty group matches. Rules without conditions apply.
+Each rule contains zero or more `RuleCondition` objects. Conditions belong to one of three groups (`1`, `2`, or `3`).
+
+The rule stores two levels of condition logic:
+
+- `condition_group_logic` controls logic inside each group. `and` requires every condition in that group, and `or` requires at least one condition in that group.
+- `condition_group_expression` controls how group results are combined. The default is `condition_1_or_2_or_3`, preserving the original group1 OR group2 OR group3 behavior.
+
+Supported expressions are `condition_1`, `condition_2`, `condition_3`, every pair joined with `and` or `or`, `condition_1_or_2_or_3`, `condition_1_and_2_and_3`, `condition_1_and_2_or_3` as `(1 AND 2) OR 3`, and `condition_1_or_2_and_3` as `1 OR (2 AND 3)`. Empty groups referenced by an expression evaluate to false. Rules without conditions apply.
 
 Supported condition types cover order totals, item counts, payment method, destination, delivery type, price, weight, volume, and date parts. Operators include numeric comparison, string equality, `IN` and `NOT_IN`, and containment checks.
 
@@ -38,7 +45,7 @@ Rules can set `stop_processing`. When an applied rule has this flag, `RuleEngine
 
 ## Admin Builder
 
-The rules admin page is a CRUD interface for default rules. It uses the same type-aware condition matrix as the evaluator, shows unit labels beside numeric fields, limits condition groups to `Условие 1` through `Условие 3`, and saves the per-group AND/OR logic with the rule. Operation summaries are Russian text, with `увеличить на` and `уменьшить на`; percentage bases render without an extra space before `%`.
+The rules admin page is a CRUD interface for default rules. It uses the same type-aware condition matrix as the evaluator, shows unit labels beside numeric fields, visually groups condition rows under `Условие 1` through `Условие 3`, saves per-group AND/OR logic, and saves the separate group expression. Operation summaries are Russian text, with `увеличить на` and `уменьшить на`; percentage bases render without an extra space before `%`.
 
 ## Future Checkout Integration
 

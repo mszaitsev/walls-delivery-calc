@@ -1,6 +1,6 @@
 # WDC Rules Admin
 
-Version: 0.18.5.
+Version: 0.18.6.
 
 ## Default rules
 
@@ -33,9 +33,30 @@ Rules are shown and applied from top to bottom. The database `priority` column i
 
 Rules can have multiple conditions. The UI is type-specific: managers choose a condition type, then see only the valid operator and value control for that type. The old universal "text plus number" editor is no longer shown.
 
-Conditions are assigned to one of three groups shown as `Условие 1`, `Условие 2`, and `Условие 3`. Each group has its own logic setting stored in `wdc_rules.condition_group_logic` as JSON, for example `{"1":"and","2":"and","3":"or"}`.
+Conditions are assigned to one of three groups shown as `Условие 1`, `Условие 2`, and `Условие 3`. The edit form renders those groups as separate blocks, and each block has its own `Добавить условие в Условие N` button. Rows keep `condition_group` as a hidden value so saved rules reopen with conditions under the same group.
 
-Within a group, `and` means every condition in that group must match, and `or` means at least one condition must match. Empty groups are ignored. Groups themselves are always combined with OR, so a rule applies when any non-empty group matches. Rules without conditions still apply.
+There are two separate logic settings:
+
+- `condition_group_logic` controls logic inside each group. It is stored as JSON, for example `{"1":"and","2":"and","3":"or"}`. `and` means every condition in that group must match; `or` means at least one condition in that group must match.
+- `condition_group_expression` controls how the three group results are combined. It is stored on `wdc_rules.condition_group_expression`.
+
+Default expression is `condition_1_or_2_or_3`, which preserves the old behavior: group 1 OR group 2 OR group 3. If an expression references an empty group, that group is false. Rules without any conditions still apply.
+
+Supported group expressions:
+
+- `condition_1`: Условие 1
+- `condition_2`: Условие 2
+- `condition_3`: Условие 3
+- `condition_1_or_2`: Условие 1 ИЛИ Условие 2
+- `condition_1_and_2`: Условие 1 И Условие 2
+- `condition_1_or_3`: Условие 1 ИЛИ Условие 3
+- `condition_1_and_3`: Условие 1 И Условие 3
+- `condition_2_or_3`: Условие 2 ИЛИ Условие 3
+- `condition_2_and_3`: Условие 2 И Условие 3
+- `condition_1_or_2_or_3`: Условие 1 ИЛИ Условие 2 ИЛИ Условие 3
+- `condition_1_and_2_and_3`: Условие 1 И Условие 2 И Условие 3
+- `condition_1_and_2_or_3`: (Условие 1 И Условие 2) ИЛИ Условие 3
+- `condition_1_or_2_and_3`: Условие 1 ИЛИ (Условие 2 И Условие 3)
 
 Condition matrix:
 
