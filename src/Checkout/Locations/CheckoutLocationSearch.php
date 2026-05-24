@@ -35,10 +35,13 @@ final class CheckoutLocationSearch {
 	public function search_for_picker( string $query, int $limit = 100, int $region_limit = 10, string $force_region_code = '' ): array {
 		$parser = $this->parser();
 		$parsed = $parser->parse( $query );
+		if ( '' !== trim( $force_region_code ) ) {
+			$parsed = $this->remove_forced_region_tokens( $parsed, $force_region_code, $parser );
+		}
 		$tokens = $parsed['real_tokens'];
 		$limit = max( 10, min( 500, $limit ) );
 		$region_limit = max( 3, min( 50, $region_limit ) );
-		if ( array() === $tokens ) {
+		if ( array() === $tokens && '' === trim( $force_region_code ) ) {
 			return array( 'items' => array(), 'groups' => array(), 'total' => 0 );
 		}
 
@@ -60,11 +63,14 @@ final class CheckoutLocationSearch {
 			fn( array $a, array $b ): int => $this->compare_scored_locations( $a, $b )
 		);
 
+		$groups = $this->group_picker_items( $scored, $limit, $region_limit, $force_region_code );
 		$items = array_map( static fn( array $row ): Location => $row['location'], array_slice( $scored, 0, $limit ) );
 		return array(
-			'items'  => $items,
-			'groups' => $this->group_picker_items( $scored, $limit, $region_limit, $force_region_code ),
-			'total'  => count( $scored ),
+			'items'          => $items,
+			'groups'         => $groups['groups'],
+			'total'          => count( $scored ),
+			'shown_total'    => $groups['shown_total'],
+			'has_more_total' => $groups['has_more_total'],
 		);
 	}
 
@@ -246,18 +252,25 @@ final class CheckoutLocationSearch {
 			$level_matches[ $level ] = max( $level_matches[ $level ], $strength );
 		}
 
+		$exact_place = 3 === $phrase['place'] || 3 === $level_matches['place'];
+		$prefix_place = ! $exact_place && ( 2 === $phrase['place'] || 2 === $level_matches['place'] );
+		$exact_city = 3 === $phrase['city'] || 3 === $level_matches['city'];
+		$prefix_city = ! $exact_city && ( 2 === $phrase['city'] || 2 === $level_matches['city'] );
 		$matched_levels = count( array_filter( $level_matches, static fn( int $strength ): bool => $strength > 0 ) );
 		$all_tokens = $matched_tokens === count( $tokens );
 		$depth = ( '' !== $fields['place'] ? 4 : 0 ) + ( '' !== $fields['city'] ? 3 : 0 ) + ( '' !== $fields['district'] ? 2 : 0 ) + ( '' !== $fields['region'] ? 1 : 0 );
 		$district_place = $level_matches['district'] > 0 && $level_matches['place'] > 0;
 		$region_only_match = $level_matches['region'] > 0 && 0 === $level_matches['place'] && 0 === $level_matches['city'] && ! $district_place;
-		$group_strength = match ( true ) {
-			$level_matches['place'] > 0 => 500,
-			$level_matches['city'] > 0 => 400,
-			$district_place => 350,
-			$region_only_match => 250,
-			default => 100,
+		$group_rank_bucket = match ( true ) {
+			$exact_place => 1,
+			$prefix_place => 2,
+			$exact_city => 3,
+			$prefix_city => 4,
+			$district_place => 5,
+			$region_only_match => 6,
+			default => 7,
 		};
+		$group_strength = 800 - ( $group_rank_bucket * 100 );
 
 		$total = ( $all_tokens ? 100000 : 0 )
 			+ ( $matched_levels * 10000 )
@@ -292,6 +305,7 @@ final class CheckoutLocationSearch {
 			'district_match' => $level_matches['district'],
 			'region_match'   => $level_matches['region'],
 			'region_only_match' => $region_only_match,
+			'group_rank_bucket' => $group_rank_bucket,
 			'group_strength' => $group_strength,
 			'depth'          => $depth,
 		);
@@ -386,8 +400,32 @@ final class CheckoutLocationSearch {
 	}
 
 	/**
+	 * @param array{query:string,tokens:array<int,string>,real_tokens:array<int,string>,markers:array<string,bool>,has_markers:bool} $parsed
+	 * @return array{query:string,tokens:array<int,string>,real_tokens:array<int,string>,markers:array<string,bool>,has_markers:bool}
+	 */
+	private function remove_forced_region_tokens( array $parsed, string $force_region_code, CheckoutLocationSearchParser $parser ): array {
+		$candidates = $this->search_service->checkout_hierarchy_candidates( array(), 1, $force_region_code );
+		$region = $candidates[0]->region_name ?? '';
+		$region = $parser->normalize( $region );
+		if ( '' === $region ) {
+			return $parsed;
+		}
+
+		$tokens = array_values(
+			array_filter(
+				$parsed['real_tokens'],
+				fn( string $token ): bool => 0 === $this->token_match_strength( $region, $token )
+			)
+		);
+		$parsed['real_tokens'] = $tokens;
+		$parsed['query'] = implode( ' ', $tokens );
+
+		return $parsed;
+	}
+
+	/**
 	 * @param array<int,array{location:Location,score:array<string,mixed>}> $scored
-	 * @return array<int,array<string,mixed>>
+	 * @return array{groups:array<int,array<string,mixed>>,shown_total:int,has_more_total:bool}
 	 */
 	private function group_picker_items( array $scored, int $limit, int $region_limit, string $force_region_code ): array {
 		$formatter = $this->formatter();
@@ -401,6 +439,7 @@ final class CheckoutLocationSearch {
 			$by_region[ $key ]['rows'][] = $row;
 			$by_region[ $key ]['label'] = $formatter->format_checkout_region_header( $location );
 			$by_region[ $key ]['sort'] = $location->region_name;
+			$by_region[ $key ]['bucket'] = min( (int) ( $by_region[ $key ]['bucket'] ?? 7 ), (int) $row['score']['group_rank_bucket'] );
 			$by_region[ $key ]['group_strength'] = max( (int) ( $by_region[ $key ]['group_strength'] ?? 0 ), (int) $row['score']['group_strength'] );
 			$by_region[ $key ]['score'] = max( (int) ( $by_region[ $key ]['score'] ?? 0 ), (int) $row['score']['total'] );
 		}
@@ -408,33 +447,44 @@ final class CheckoutLocationSearch {
 
 		uasort(
 			$by_region,
-			static fn( array $a, array $b ): int => (int) $b['group_strength'] <=> (int) $a['group_strength']
-				?: (int) $b['score'] <=> (int) $a['score']
+			static fn( array $a, array $b ): int => (int) $a['bucket'] <=> (int) $b['bucket']
 				?: strcmp( (string) $a['sort'], (string) $b['sort'] )
+				?: (int) $b['score'] <=> (int) $a['score']
 		);
 
 		$groups = array();
 		$shown_total = 0;
+		$has_more_total = false;
 		foreach ( $by_region as $key => $group ) {
 			if ( $shown_total >= $limit ) {
+				$has_more_total = true;
 				break;
 			}
 			$rows = array_slice( $group['rows'], 0, '' !== $force_region_code ? $limit : $effective_region_limit );
-			$rows = array_slice( $rows, 0, $limit - $shown_total );
+			$available_slots = $limit - $shown_total;
+			if ( count( $rows ) > $available_slots ) {
+				$has_more_total = true;
+			}
+			$rows = array_slice( $rows, 0, $available_slots );
 			$shown_total += count( $rows );
+			$group_has_more = count( $group['rows'] ) > count( $rows );
 			$groups[] = array(
 				'region_key'       => (string) $key,
 				'region_label'     => (string) $group['label'],
 				'region_sort_name' => (string) $group['sort'],
 				'total_in_region'  => count( $group['rows'] ),
 				'shown_count'      => count( $rows ),
-				'has_more'         => '' === $force_region_code && count( $group['rows'] ) > count( $rows ),
+				'has_more'         => '' === $force_region_code && $group_has_more,
 				'expand_query'     => (string) $group['label'],
 				'items'            => array_map( static fn( array $row ): Location => $row['location'], $rows ),
 			);
 		}
 
-		return $groups;
+		return array(
+			'groups'         => $groups,
+			'shown_total'    => $shown_total,
+			'has_more_total' => $has_more_total,
+		);
 	}
 
 	private function formatter(): LocationDisplayNameFormatter {

@@ -18,7 +18,9 @@
 	var searchRequestSeq = 0;
 	var activeSearchSeq = 0;
 	var currentSearchQuery = '';
+	var currentBaseQuery = '';
 	var lastSearchQuery = '';
+	var currentSearchForceRegionCode = '';
 	var lastSearchForceRegionCode = '';
 	var locationStore = {};
 	var locationSeq = 0;
@@ -249,15 +251,16 @@
 	function search( query, options ) {
 		options = options || {};
 		query = String( query || '' );
+		var requestForceRegionCode = undefined !== options.forceRegionCode ? String( options.forceRegionCode || '' ) : forceRegionCode;
 		if ( ! config.ajax_url ) {
 			debug( 'ajax url missing' );
 			return;
 		}
-		if ( query.length < ( config.min_chars || 3 ) ) {
+		if ( query.length < ( config.min_chars || 3 ) && ! requestForceRegionCode ) {
 			renderMessage( config.strings && config.strings.start ? config.strings.start : '', 'is-hint' );
 			return;
 		}
-		if ( ! options.force && query === lastSearchQuery && forceRegionCode === lastSearchForceRegionCode ) {
+		if ( ! options.force && query === lastSearchQuery && requestForceRegionCode === lastSearchForceRegionCode ) {
 			debug( 'search skipped unchanged query', query );
 			return;
 		}
@@ -265,8 +268,9 @@
 		var seq = ++searchRequestSeq;
 		activeSearchSeq = seq;
 		currentSearchQuery = query;
+		currentSearchForceRegionCode = requestForceRegionCode;
 		lastSearchQuery = query;
-		lastSearchForceRegionCode = forceRegionCode;
+		lastSearchForceRegionCode = requestForceRegionCode;
 		debug( 'ajax request start', query );
 		renderMessage( config.strings && config.strings.searching ? config.strings.searching : '', 'is-loading' );
 
@@ -280,11 +284,11 @@
 				query: query,
 				limit: config.checkout_location_search_limit || 100,
 				region_limit: config.location_region_limit || 10,
-				force_region_code: forceRegionCode
+				force_region_code: requestForceRegionCode
 			}
 		} ).done( function ( response ) {
-			if ( seq !== activeSearchSeq || query !== currentSearchQuery ) {
-				debug( 'stale ajax response ignored', { seq: seq, active: activeSearchSeq, query: query, current: currentSearchQuery } );
+			if ( seq !== activeSearchSeq || query !== currentSearchQuery || requestForceRegionCode !== currentSearchForceRegionCode ) {
+				debug( 'stale ajax response ignored', { seq: seq, active: activeSearchSeq, query: query, current: currentSearchQuery, forceRegionCode: requestForceRegionCode, currentForceRegionCode: currentSearchForceRegionCode } );
 				return;
 			}
 			var groups = response && response.data && response.data.groups ? response.data.groups : [];
@@ -298,8 +302,8 @@
 			}
 			renderMessage( config.strings && config.strings.error ? config.strings.error : '', 'is-error' );
 		} ).fail( function ( xhr ) {
-			if ( seq !== activeSearchSeq || query !== currentSearchQuery ) {
-				debug( 'stale ajax failure ignored', { seq: seq, active: activeSearchSeq, query: query, current: currentSearchQuery } );
+			if ( seq !== activeSearchSeq || query !== currentSearchQuery || requestForceRegionCode !== currentSearchForceRegionCode ) {
+				debug( 'stale ajax failure ignored', { seq: seq, active: activeSearchSeq, query: query, current: currentSearchQuery, forceRegionCode: requestForceRegionCode, currentForceRegionCode: currentSearchForceRegionCode } );
 				return;
 			}
 			debug( 'ajax fail', xhr );
@@ -337,6 +341,7 @@
 		activeCityField = $field[0];
 		originalCityValue = initialPickerQuery( $field );
 		forceRegionCode = '';
+		currentBaseQuery = originalCityValue;
 		lastSearchQuery = '';
 		lastSearchForceRegionCode = '';
 		pickerOpen = true;
@@ -359,6 +364,7 @@
 		pickerOpen = false;
 		activeSearchSeq = ++searchRequestSeq;
 		currentSearchQuery = '';
+		currentSearchForceRegionCode = '';
 		activeCityField = isUsableField( activeCityField ) ? activeCityField : null;
 		$( '.wdc-city-picker-overlay, .wdc-city-picker-panel, .wdc-city-selector' ).remove();
 		debug( 'city picker closed' );
@@ -657,7 +663,8 @@
 	$( document.body ).off( 'input.wdcCitySelector', '.wdc-city-picker-search' );
 	$( document.body ).on( 'input.wdcCitySelector', '.wdc-city-picker-search', function () {
 		forceRegionCode = '';
-		scheduleSearch( String( $( this ).val() || '' ) );
+		currentBaseQuery = String( $( this ).val() || '' );
+		scheduleSearch( currentBaseQuery );
 	} );
 	$( document.body ).off( 'mousedown.wdcCitySelector click.wdcCitySelector keydown.wdcCitySelector', '.wdc-city-selector__item' );
 	$( document.body ).on( 'mousedown.wdcCitySelector', '.wdc-city-selector__item', function ( event ) {
@@ -685,11 +692,11 @@
 		stopEvent( event );
 		forceRegionCode = String( $( this ).attr( 'data-region-code' ) || '' );
 		var label = String( $( this ).attr( 'data-region-label' ) || '' );
-		var current = String( searchInput().val() || '' );
+		var current = currentBaseQuery || String( searchInput().val() || '' );
 		if ( label && current.indexOf( label ) !== 0 ) {
 			searchInput().val( label + ( current ? ', ' + current : ', ' ) );
 		}
-		search( searchInput().val(), { force: true } );
+		search( current, { force: true, forceRegionCode: forceRegionCode } );
 	} );
 	$( document.body ).off( 'click.wdcCitySelector', '.wdc-city-picker-close' );
 	$( document.body ).on( 'click.wdcCitySelector', '.wdc-city-picker-close', function ( event ) {

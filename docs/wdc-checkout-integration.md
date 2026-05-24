@@ -55,6 +55,8 @@ The checkout settings are:
 
 When region prefill is enabled, opening the picker seeds the modal query from `state + ", " + city`; with only one field filled it uses that field, and with both empty it leaves the query empty. Each region initially shows up to `checkout_location_region_limit` rows. If the result contains only one region, checkout shows up to `checkout_location_region_limit * 3` rows, capped by `checkout_location_search_limit`. If more rows exist, the frontend shows `Показать все варианты в области` and repeats search with `force_region_code`, returning only that region up to the global checkout search limit.
 
+The global search limit counts only items actually shown in groups. Per-region hidden rows and show-all buttons do not consume that limit; `limit_reached` means the picker filled `checkout_location_search_limit` visible items and still had more visible candidates to show.
+
 Selecting a location writes formatted state/city values, fills postcode only when the local row has one, stores the selected local payload in hidden checkout fields, and renders a full-width one-line selected notice: `Выбран: {display_name}` or `Выбран: {display_name}, {postal_code}`. On checkout load, after `updated_checkout`, and after manual state/city edits, the frontend calls `wdc_platform_resolve_checkout_location`; only one confident local match restores hidden selected state, otherwise checkout shows `Просим проверить название и внести верный населенный пункт`.
 
 Checkout city search is hierarchy-aware:
@@ -64,10 +66,11 @@ Checkout city search is hierarchy-aware:
 - matching checks region, district, city, and place names independently;
 - only exact and prefix matches are allowed, so there is no contains-inside-word behavior;
 - place/city matches are stronger than district/region context matches;
+- exact-place and same-bucket region groups are sorted alphabetically by region name;
 - region-name-only matches remain visible but rank below strong place/city matches;
 - upper-level matches expand downward, so a city query can show the city and its nested places.
 
-The picker searches only when the modal opens with the initial query or when the modal search input emits a real `input` event. External checkout city focus/select/click/change events do not run search. AJAX search uses a request sequence guard, so stale responses cannot replace current results or render fallback after a newer query.
+The picker searches only when the modal opens with the initial query or when the modal search input emits a real `input` event. External checkout city focus/select/click/change events do not run search. AJAX search uses a request sequence guard, so stale responses cannot replace current results or render fallback after a newer query. Show-all-region keeps the user's base query in the AJAX payload and sends the selected region separately as `force_region_code`; the region label may be shown visually in the input but is not required as a search token.
 
 ## Debug panel
 

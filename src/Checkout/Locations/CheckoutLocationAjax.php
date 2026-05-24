@@ -64,7 +64,7 @@ final class CheckoutLocationAjax {
 	public function payload( string $query, string $force_region_code = '' ): array {
 		$limit = $this->limit();
 		$region_limit = $this->region_limit();
-		if ( $this->length( $query ) < 3 ) {
+		if ( $this->length( $query ) < 3 && '' === trim( $force_region_code ) ) {
 			return array( 'groups' => array(), 'total' => 0, 'limit' => $limit, 'region_limit' => $region_limit, 'limit_reached' => false );
 		}
 
@@ -86,9 +86,11 @@ final class CheckoutLocationAjax {
 			);
 		}
 		$total = (int) $result['total'];
+		$shown_total = (int) ( $result['shown_total'] ?? 0 );
+		$has_more_total = (bool) ( $result['has_more_total'] ?? false );
 
 		return array_merge(
-			array( 'groups' => $groups, 'total' => $total, 'limit' => $limit, 'region_limit' => $region_limit, 'limit_reached' => $total >= $limit ),
+			array( 'groups' => $groups, 'total' => $total, 'shown_total' => $shown_total, 'limit' => $limit, 'region_limit' => $region_limit, 'limit_reached' => $has_more_total ),
 			$this->search->last_search_meta()
 		);
 	}

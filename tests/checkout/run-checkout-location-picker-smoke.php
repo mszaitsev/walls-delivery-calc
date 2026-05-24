@@ -90,6 +90,9 @@ $wpdb->regions = array(
 	'02' => array( 'region_name' => 'Башкортостан', 'region_type' => 'Республика' ),
 	'50' => array( 'region_name' => 'Московская', 'region_type' => 'обл' ),
 	'48' => array( 'region_name' => 'Липецкая', 'region_type' => 'обл' ),
+	'69' => array( 'region_name' => 'Тверская', 'region_type' => 'обл' ),
+	'35' => array( 'region_name' => 'Вологодская', 'region_type' => 'обл' ),
+	'53' => array( 'region_name' => 'Новгородская', 'region_type' => 'обл' ),
 );
 
 update_option(
@@ -126,6 +129,10 @@ $locations = array(
 	checkout_location_picker_location( array( 'gar_object_id' => 5003, 'fias_id' => 'fias-skripino', 'region_code' => '50', 'region_name' => 'Московская', 'region_type' => 'обл', 'city_name' => 'Домодедово', 'city_type' => 'г', 'place_name' => 'Скрипино-1', 'place_type' => 'д', 'display_name' => 'Московская обл., г. Домодедово, деревня Скрипино-1' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 4801, 'fias_id' => 'fias-lip-ivan', 'region_code' => '48', 'region_name' => 'Липецкая', 'region_type' => 'обл', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Липецкая обл., село Ивановка' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 4802, 'fias_id' => 'fias-lip-mos', 'region_code' => '48', 'region_name' => 'Липецкая', 'region_type' => 'обл', 'place_name' => 'Московская Слобода', 'place_type' => 'село', 'display_name' => 'Липецкая обл., село Московская Слобода' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 6901, 'fias_id' => 'fias-tver-brod', 'region_code' => '69', 'region_name' => 'Тверская', 'region_type' => 'обл', 'place_name' => 'Брод', 'place_type' => 'д', 'display_name' => 'Тверская обл., деревня Брод' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 6902, 'fias_id' => 'fias-tver-ivan', 'region_code' => '69', 'region_name' => 'Тверская', 'region_type' => 'обл', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Тверская обл., село Ивановка' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 3501, 'fias_id' => 'fias-vologda-brod', 'region_code' => '35', 'region_name' => 'Вологодская', 'region_type' => 'обл', 'place_name' => 'Брод', 'place_type' => 'д', 'display_name' => 'Вологодская обл., деревня Брод' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 5301, 'fias_id' => 'fias-novgorod-brod', 'region_code' => '53', 'region_name' => 'Новгородская', 'region_type' => 'обл', 'place_name' => 'Бродовка', 'place_type' => 'д', 'display_name' => 'Новгородская обл., деревня Бродовка' ) ),
 );
 foreach ( $locations as $location ) {
 	$repository->save( $location );
@@ -135,6 +142,19 @@ for ( $i = 0; $i < 12; ++$i ) {
 }
 for ( $i = 0; $i < 42; ++$i ) {
 	$repository->save( checkout_location_picker_location( array( 'gar_object_id' => 6000 + $i, 'fias_id' => 'fias-single-' . $i, 'region_code' => '50', 'region_name' => 'Московская', 'region_type' => 'обл', 'place_name' => 'Тестоград ' . $i, 'place_type' => 'д', 'display_name' => 'Московская обл., деревня Тестоград ' . $i ) ) );
+}
+foreach ( array( '54' => 'Новосибирская', '22' => 'Алтайский', '48' => 'Липецкая' ) as $region_code => $region_name ) {
+	for ( $i = 0; $i < 100; ++$i ) {
+		$repository->save( checkout_location_picker_location( array( 'gar_object_id' => 700000 + (int) $region_code * 1000 + $i, 'fias_id' => 'fias-many-' . $region_code . '-' . $i, 'region_code' => $region_code, 'region_name' => $region_name, 'region_type' => 'обл', 'place_name' => 'Многообластный ' . $i, 'place_type' => 'д', 'display_name' => $region_name . ' обл., деревня Многообластный ' . $i ) ) );
+	}
+}
+for ( $region = 1; $region <= 30; ++$region ) {
+	$code = '9' . str_pad( (string) $region, 2, '0', STR_PAD_LEFT );
+	$name = 'Лимитная ' . str_pad( (string) $region, 2, '0', STR_PAD_LEFT );
+	$wpdb->regions[ $code ] = array( 'region_name' => $name, 'region_type' => 'обл' );
+	for ( $i = 0; $i < 5; ++$i ) {
+		$repository->save( checkout_location_picker_location( array( 'gar_object_id' => 800000 + $region * 10 + $i, 'fias_id' => 'fias-limit-' . $region . '-' . $i, 'region_code' => $code, 'region_name' => $name, 'region_type' => 'обл', 'place_name' => 'Лимитоград ' . $i, 'place_type' => 'д', 'display_name' => $name . ' обл., деревня Лимитоград ' . $i ) ) );
+	}
 }
 
 $settings = new SettingsRepository();
@@ -185,6 +205,11 @@ checkout_location_picker_assert( ! in_array( 'fias-verh', $gusi_ids, true ), 'Hi
 $brod_ids = $flatten_fias( $ajax->payload( 'брод' ) );
 checkout_location_picker_assert( in_array( 'fias-brod', $brod_ids, true ) && in_array( 'fias-brodki', $brod_ids, true ) && in_array( 'fias-brodovka', $brod_ids, true ), 'Prefix search finds Брод, Бродки, and Бродовка.' );
 checkout_location_picker_assert( ! in_array( 'fias-verh', $brod_ids, true ), 'Prefix search does not match inside word Верхобродово.' );
+$brod_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $ajax->payload( 'брод' )['groups'] ?? array() );
+checkout_location_picker_assert( array_slice( $brod_regions, 0, 3 ) === array( 'Вологодская', 'Новосибирская', 'Тверская' ), 'Exact place region groups sort alphabetically.' );
+checkout_location_picker_assert( in_array( 'Новгородская', $brod_regions, true ) && array_search( 'Новгородская', $brod_regions, true ) > 2, 'Non-exact groups appear after exact groups.' );
+$ivan_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $ajax->payload( 'ивановка' )['groups'] ?? array() );
+checkout_location_picker_assert( array_slice( $ivan_regions, 0, 3 ) === array( 'Алтайский', 'Липецкая', 'Тверская' ), 'Exact Ивановка region groups sort alphabetically.' );
 
 $domodedovo_ids = $flatten_fias( $ajax->payload( 'домодедово' ) );
 checkout_location_picker_assert( in_array( 'fias-domodedovo', $domodedovo_ids, true ) && in_array( 'fias-avdotino', $domodedovo_ids, true ) && in_array( 'fias-skripino', $domodedovo_ids, true ), 'Upper-level city search returns city and nested places.' );
@@ -199,6 +224,19 @@ checkout_location_picker_assert( '54' === (string) ( $ajax->payload( 'новос
 checkout_location_picker_assert( 'fias-alt-ivan' === ( $ajax->payload( 'курьинский ивановка' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'District plus place ranks Курьинский Ивановка first.' );
 checkout_location_picker_assert( 'fias-lip-ivan' === ( $ajax->payload( 'липецкая область ивановка' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'Region marker is treated as hierarchy marker, not DB value.' );
 checkout_location_picker_assert( array() === $flatten_fias( $ajax->payload( 'село' ) ), 'Type words alone are not searchable DB values.' );
+$settings->set( 'checkout_location_region_limit', 5 );
+$settings->set( 'checkout_location_search_limit', 100 );
+$many_payload = $ajax->payload( 'многообластный' );
+checkout_location_picker_assert( 15 === (int) $many_payload['shown_total'] && false === (bool) $many_payload['limit_reached'] && 3 === count( $many_payload['groups'] ), 'Global limit counts only shown items across 3 regions.' );
+$limit_payload = $ajax->payload( 'лимитоград' );
+checkout_location_picker_assert( 100 === (int) $limit_payload['shown_total'] && true === (bool) $limit_payload['limit_reached'], 'Global limit_reached applies only when shown items hit global limit.' );
+$settings->set( 'checkout_location_region_limit', 10 );
+$settings->set( 'checkout_location_search_limit', 100 );
+$forced_brod = $ajax->payload( 'брод', '69' );
+checkout_location_picker_assert( in_array( 'fias-tver-brod', $flatten_fias( $forced_brod ), true ), 'force_region_code plus брод returns region items.' );
+checkout_location_picker_assert( in_array( 'fias-tver-brod', $flatten_fias( $ajax->payload( 'Тверская область, брод', '69' ) ), true ), 'force_region_code tolerates region-prefixed query.' );
+$forced_empty = $ajax->payload( '', '69' );
+checkout_location_picker_assert( (int) $forced_empty['shown_total'] === (int) $forced_empty['total'] && in_array( 'fias-tver-brod', $flatten_fias( $forced_empty ), true ), 'force_region_code with empty query returns all region items within limit.' );
 
 $selected = $payload['groups'][0]['items'][0];
 checkout_location_picker_assert( 'Алтайский край' === $selected['state_value'] && str_contains( $selected['city_value'], 'Курьинский р-н' ) && '658320' === $selected['postal_code'], 'Choosing location payload sets state_value, city_value, postal_code.' );
@@ -221,6 +259,8 @@ checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js
 checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'searchRequestSeq' ) && str_contains( $city_js, 'activeSearchSeq' ) && str_contains( $city_js, 'stale ajax response ignored' ), 'City picker JS has stale request guard.' );
 checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, ".on( 'input.wdcCitySelector', '.wdc-city-picker-search'" ), 'City picker searches only on modal search input changes.' );
 checkout_location_picker_assert( is_string( $city_js ) && ! str_contains( $city_js, "keyup.wdcCitySelector change.wdcCitySelector paste.wdcCitySelector', citySelector" ), 'City picker search is not bound to keyup/change of external city field.' );
+checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'currentBaseQuery' ) && str_contains( $city_js, "search( current, { force: true, forceRegionCode: forceRegionCode } )" ), 'Show-all region uses base query plus force_region_code.' );
+checkout_location_picker_assert( is_string( $city_js ) && str_contains( $city_js, 'forceRegionCode = \'\';' ) && str_contains( $city_js, 'currentBaseQuery = String( $( this ).val() || \'\' );' ), 'Manual modal input clears forceRegionCode.' );
 checkout_location_picker_assert( is_string( $city_js ) && ! str_contains( $city_js, 'Индекс:' ), 'City selected notice no longer contains Индекс label.' );
 checkout_location_picker_assert( is_string( $address_js ) && str_contains( $address_js, "locationSource: 'local_selected'" ), 'DaData address opening query uses selected display_name when fias_id exists.' );
 checkout_location_picker_assert( is_string( $address_js ) && str_contains( $address_js, "regionSource: 'checkout_state'" ), 'DaData address opening query falls back to state/city/address.' );
