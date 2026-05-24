@@ -121,6 +121,8 @@ $repository = new LocationRepository( $wpdb );
 $locations = array(
 	checkout_location_picker_location( array( 'gar_object_id' => 1001, 'fias_id' => 'fias-nsk', 'kladr_id' => 'kladr-nsk', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'city_name' => 'Новосибирск', 'city_type' => 'г', 'place_name' => 'Новосибирск', 'place_type' => 'г', 'display_name' => 'Новосибирская обл., г. Новосибирск', 'postal_code' => '630000' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 1002, 'fias_id' => 'fias-gb', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'district_name' => 'Новосибирский', 'district_type' => 'р-н', 'place_name' => 'Гусиный Брод', 'place_type' => 'село', 'display_name' => 'Новосибирская обл., Новосибирский р-н, село Гусиный Брод', 'postal_code' => '630555' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 1007, 'fias_id' => 'fias-nsk-child-beta', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'city_name' => 'Новосибирск', 'city_type' => 'г', 'place_name' => 'Бета', 'place_type' => 'д', 'display_name' => 'Новосибирская обл., г. Новосибирск, деревня Бета' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 1008, 'fias_id' => 'fias-nsk-child-alpha', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'city_name' => 'Новосибирск', 'city_type' => 'г', 'place_name' => 'Альфа', 'place_type' => 'д', 'display_name' => 'Новосибирская обл., г. Новосибирск, деревня Альфа' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 1003, 'fias_id' => 'fias-brod', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'place_name' => 'Брод', 'place_type' => 'село', 'display_name' => 'Новосибирская обл., село Брод' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 1004, 'fias_id' => 'fias-brodki', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'place_name' => 'Бродки', 'place_type' => 'д', 'display_name' => 'Новосибирская обл., деревня Бродки' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 1005, 'fias_id' => 'fias-brodovka', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'place_name' => 'Бродовка', 'place_type' => 'д', 'display_name' => 'Новосибирская обл., деревня Бродовка' ) ),
@@ -229,6 +231,7 @@ checkout_location_picker_assert( array_slice( $prefix_seniority_regions, 2, 2 ) 
 
 $domodedovo_ids = $flatten_fias( $ajax->payload( 'домодедово' ) );
 checkout_location_picker_assert( in_array( 'fias-domodedovo', $domodedovo_ids, true ) && in_array( 'fias-avdotino', $domodedovo_ids, true ) && in_array( 'fias-skripino', $domodedovo_ids, true ), 'Upper-level city search returns city and nested places.' );
+checkout_location_picker_assert( 'fias-domodedovo' === ( $ajax->payload( 'домодедово', '50' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'force_region_code keeps top-level Домодедово before child settlements.' );
 
 $moscow_ids = $flatten_fias( $ajax->payload( 'московская область' ) );
 checkout_location_picker_assert( in_array( 'fias-domodedovo', $moscow_ids, true ) && in_array( 'fias-avdotino', $moscow_ids, true ), 'Region-only search returns locations in the region.' );
@@ -251,6 +254,12 @@ $limit_payload = $ajax->payload( 'лимитоград' );
 checkout_location_picker_assert( 100 === (int) $limit_payload['shown_total'] && true === (bool) $limit_payload['limit_reached'], 'Global limit_reached applies only when shown items hit global limit.' );
 $settings->set( 'checkout_location_region_limit', 10 );
 $settings->set( 'checkout_location_search_limit', 100 );
+$forced_nsk = $ajax->payload( 'Новосибирск', '54' );
+$forced_nsk_ids = array_map( static fn( array $item ): string => (string) ( $item['fias_id'] ?? '' ), $forced_nsk['groups'][0]['items'] ?? array() );
+checkout_location_picker_assert( 'fias-nsk' === ( $forced_nsk_ids[0] ?? '' ), 'force_region_code plus Новосибирск keeps own exact city first.' );
+checkout_location_picker_assert( array_search( 'fias-nsk-child-alpha', $forced_nsk_ids, true ) > 0 && array_search( 'fias-nsk-child-beta', $forced_nsk_ids, true ) > 0, 'Child places inside Новосибирск do not outrank own exact city.' );
+checkout_location_picker_assert( array_search( 'fias-nsk-child-alpha', $forced_nsk_ids, true ) < array_search( 'fias-nsk-child-beta', $forced_nsk_ids, true ), 'Parent/context results sort alphabetically by own resolved_place_name.' );
+checkout_location_picker_assert( 'fias-nsk' === ( $ajax->payload( 'Новосибирск' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'Regular search still keeps own exact Новосибирск first.' );
 $forced_brod = $ajax->payload( 'брод', '69' );
 $forced_brod_ids = $flatten_fias( $forced_brod );
 checkout_location_picker_assert( in_array( 'fias-tver-brod', $flatten_fias( $forced_brod ), true ), 'force_region_code plus брод returns region items.' );
