@@ -151,32 +151,12 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	 */
 	private function checkout_rules(): array {
 		try {
-			$rules = $this->rule_repository->get_default_rules();
-			if ( array() !== $rules ) {
-				return $rules;
-			}
+			return $this->rule_repository->get_default_rules();
 		} catch ( \Throwable $exception ) {
 			$this->log_exception( $exception );
 		}
 
-		return $this->demo_rules();
-	}
-
-	/**
-	 * @return array<int,Rule>
-	 */
-	private function demo_rules(): array {
-		$path = $this->environment instanceof PluginEnvironment ? $this->environment->plugin_dir() . 'database/demo/rules-demo.json' : dirname( __DIR__, 3 ) . '/database/demo/rules-demo.json';
-		if ( ! is_readable( $path ) ) {
-			return array();
-		}
-
-		$data = json_decode( (string) file_get_contents( $path ), true );
-		if ( ! is_array( $data ) ) {
-			return array();
-		}
-
-		return array_map( static fn ( array $rule ): Rule => Rule::from_array( $rule ), array_filter( $data, 'is_array' ) );
+		return array();
 	}
 
 	private function log_exception( \Throwable $exception ): void {
