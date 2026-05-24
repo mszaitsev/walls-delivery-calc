@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Domain\Common;
 final class DateRange {
 	public const UNIT_CALENDAR_DAYS = 'calendar_days';
 	public const UNIT_WORKING_DAYS  = 'working_days';
+	public const UNIT_BUSINESS_DAYS = 'business_days';
 
 	public function __construct(
 		public readonly ?int $min_days = null,
@@ -54,8 +55,8 @@ final class DateRange {
 	public function validate(): array {
 		$errors = array();
 
-		if ( ! in_array( $this->unit, array( self::UNIT_CALENDAR_DAYS, self::UNIT_WORKING_DAYS ), true ) ) {
-			$errors[] = 'unit must be calendar_days or working_days';
+		if ( ! in_array( $this->unit, array( self::UNIT_CALENDAR_DAYS, self::UNIT_WORKING_DAYS, self::UNIT_BUSINESS_DAYS ), true ) ) {
+			$errors[] = 'unit must be calendar_days, working_days, or business_days';
 		}
 
 		if ( null !== $this->min_days && $this->min_days < 0 ) {

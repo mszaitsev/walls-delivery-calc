@@ -12,6 +12,7 @@ final class RuleConditionTypes {
 	public const DELIVERY_TYPE  = 'delivery_type';
 	public const DELIVERY_PRICE = 'delivery_price';
 	public const WEIGHT         = 'weight';
+	public const DIMENSIONS     = 'dimensions';
 	public const VOLUME         = 'volume';
 	public const DAY_OF_WEEK    = 'day_of_week';
 	public const DAY_OF_MONTH   = 'day_of_month';
@@ -31,6 +32,7 @@ final class RuleConditionTypes {
 			self::DELIVERY_TYPE,
 			self::DELIVERY_PRICE,
 			self::WEIGHT,
+			self::DIMENSIONS,
 			self::VOLUME,
 			self::DAY_OF_WEEK,
 			self::DAY_OF_MONTH,

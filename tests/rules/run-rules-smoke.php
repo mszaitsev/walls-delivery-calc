@@ -2,10 +2,13 @@
 declare(strict_types=1);
 
 use WallsShop\WDC\Core\Autoloader;
+use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
+use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleCondition;
 use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
@@ -30,22 +33,24 @@ function rules_smoke_assert( bool $condition, string $message ): void {
 	}
 }
 
-function rules_context( float $delivery_price = 450, int $weight = 1000, string $city = 'Moscow' ): RuleEvaluationContext {
-	$item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), $weight, 10, 10, 10 );
+function rules_context( float $delivery_price = 450, int $weight = 1000, string $city = 'Moscow', array $meta = array(), string $fias_id = '' ): RuleEvaluationContext {
+	$item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), $weight, 120, 20, 15 );
 
 	return new RuleEvaluationContext(
 		Money::from_rubles( 1000 ),
 		Money::from_rubles( $delivery_price ),
 		Package::from_items( array( $item ), 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) ),
-		new Address( country_code: 'RU', city: $city, street: 'Tverskaya', house: '1', raw_address: $city . ', Tverskaya 1' ),
+		new Address( country_code: 'RU', city: $city, street: 'Tverskaya', house: '1', raw_address: $city . ', Tverskaya 1', fias_id: $fias_id ),
 		'courier',
 		'card',
-		'2026-05-21'
+		'2026-05-21',
+		array(),
+		$meta
 	);
 }
 
 function price_rule( string $name, string $operation, float $value, string $base = RuleOperationBases::RUBLES, bool $promo = false, bool $stop = false ): Rule {
-	return new Rule( null, $name, true, 10, 'rate', 'demo', RuleActionTypes::CHANGE_PRICE, $operation, $value, $base, $promo, $stop );
+	return new Rule( null, $name, true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, $operation, $value, $base, $promo, $stop );
 }
 
 $engine = new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) );
@@ -71,6 +76,14 @@ rules_smoke_assert( 65000 === $result->final_price?->get_kopecks(), '+200 RUB mu
 
 $result = $engine->apply_rules( array( price_rule( '-10%', RuleOperationTypes::DECREASE, 10, RuleOperationBases::PERCENT_OF_DELIVERY ) ), rules_context() );
 rules_smoke_assert( 40500 === $result->final_price?->get_kopecks(), '-10% delivery must produce 405 RUB.' );
+
+$comment_rule = new Rule( null, 'Add comment', true, 10, 'default', '', RuleActionTypes::ADD_COMMENT, RuleOperationTypes::EQUALS, 0, RuleOperationBases::RUBLES, false, false, array(), array( 1 => 'and', 2 => 'and', 3 => 'and' ), 'Позвонить за час' );
+$result = $engine->apply_rules( array( $comment_rule ), rules_context() );
+rules_smoke_assert( array( 'Позвонить за час' ) === $result->comments, 'add_comment must add operation_text to RuleEngineResult comments.' );
+$rate_builder = new RuleAppliedRateBuilder( $engine );
+$rate = new DeliveryRate( 'rate-1', 'demo', 'Demo', 'svc', 'Service', 'tariff', 'Tariff', 'courier', 'Demo delivery', Money::from_rubles( 450 ), null, null, DateRange::single( 5 ) );
+$built = $rate_builder->apply( $rate, rules_context(), array( $comment_rule ) );
+rules_smoke_assert( in_array( 'Позвонить за час', $built['rate']->comments, true ), 'Runtime rate builder must pass rule comments to delivery rate comments.' );
 
 $result = $engine->apply_rules( array( price_rule( 'promo -500', RuleOperationTypes::DECREASE, 500, RuleOperationBases::RUBLES, true ) ), rules_context() );
 rules_smoke_assert( 100 === $result->final_price?->get_kopecks(), 'Promo discount must clamp final price to 1 RUB.' );
@@ -125,5 +138,252 @@ $result = $engine->apply_rules(
 );
 rules_smoke_assert( 55000 === $result->final_price?->get_kopecks(), 'stop_processing must stop subsequent rules.' );
 rules_smoke_assert( count( $result->audit ) >= 1, 'Audit entries must be generated.' );
+
+$delivery_days_rule = new Rule(
+	null,
+	'Business days +2',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_DELIVERY_DAYS,
+	RuleOperationTypes::INCREASE,
+	2,
+	RuleOperationBases::BUSINESS_DAYS,
+	false,
+	false
+);
+$context_with_days = RuleEvaluationContext::from_array( array_merge( rules_context()->to_array(), array( 'meta' => array( 'original_delivery_days' => 5 ) ) ) );
+$result = $engine->apply_rules( array( $delivery_days_rule ), $context_with_days );
+rules_smoke_assert( 7 === $result->final_delivery_days?->min_days, 'Delivery days increase must use the original delivery days.' );
+rules_smoke_assert( DateRange::UNIT_BUSINESS_DAYS === $result->final_delivery_days?->unit, 'change_delivery_days must support business_days.' );
+
+$calendar_days_rule = Rule::from_array(
+	array(
+		'name'            => 'Calendar days default',
+		'target_type'     => 'default',
+		'action_type'     => RuleActionTypes::CHANGE_DELIVERY_DAYS,
+		'operation_type'  => RuleOperationTypes::EQUALS,
+		'operation_value' => 3,
+		'operation_base'  => RuleOperationBases::CALENDAR_DAYS,
+	)
+);
+rules_smoke_assert( array() === $calendar_days_rule->validate(), 'calendar_days must be a valid operation base.' );
+
+$payment_rule = new Rule(
+	null,
+	'Payment',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array( new RuleCondition( null, null, 1, RuleConditionTypes::PAYMENT_METHOD, RuleOperators::EQ, 'card' ) )
+);
+$result = $engine->apply_rules( array( $payment_rule ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'payment_method condition must still work.' );
+
+$city_fias_rule = new Rule(
+	null,
+	'City FIAS',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array( new RuleCondition( null, null, 1, RuleConditionTypes::CITY, RuleOperators::EQ, 'fias-nsk', null, array( 'fias_id' => 'fias-nsk', 'display_name' => 'Новосибирск' ) ) )
+);
+$result = $engine->apply_rules( array( $city_fias_rule ), rules_context( 450, 1000, 'Other city', array( 'selected_location_fias_id' => 'fias-nsk' ) ) );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'city condition must compare by selected location fias_id.' );
+$result = $engine->apply_rules( array( $city_fias_rule ), rules_context( 450, 1000, 'Новосибирск', array( 'selected_location_fias_id' => 'fias-other' ) ) );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'city condition must be false for a different fias_id.' );
+$city_neq_rule = Rule::from_array( array_merge( $city_fias_rule->to_array(), array( 'conditions' => array( new RuleCondition( null, null, 1, RuleConditionTypes::CITY, RuleOperators::NEQ, 'fias-nsk' ) ) ) ) );
+$result = $engine->apply_rules( array( $city_neq_rule ), rules_context( 450, 1000, 'Other city', array( 'selected_location_fias_id' => 'fias-other' ) ) );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'city != condition must be true for different non-empty fias_id.' );
+$result = $engine->apply_rules( array( $city_fias_rule ), rules_context( 450, 1000, 'Новосибирск') );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'city condition must be false when context fias_id is empty.' );
+$result = $engine->apply_rules( array( $city_fias_rule ), rules_context( 450, 1000, 'fias-nsk') );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'city condition must not fall back to city text/display name.' );
+
+$weight_rule = new Rule(
+	null,
+	'Weight grams',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array( new RuleCondition( null, null, 1, RuleConditionTypes::WEIGHT, RuleOperators::GTE, '', 12000 ) )
+);
+$result = $engine->apply_rules( array( $weight_rule ), rules_context( 450, 12000 ) );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'weight condition must compare grams without conversion.' );
+
+$dimensions_rule = new Rule(
+	null,
+	'Dimensions',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array( new RuleCondition( null, null, 1, RuleConditionTypes::DIMENSIONS, RuleOperators::GTE, '', null, array( 'length_cm' => 100, 'height_cm' => 10 ) ) )
+);
+$result = $engine->apply_rules( array( $dimensions_rule ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'dimensions condition must compare all filled fields.' );
+$dimensions_ignore_empty = new RuleCondition( null, null, 1, RuleConditionTypes::DIMENSIONS, RuleOperators::GTE, '', null, array( 'length_cm' => 100 ) );
+$result = $engine->apply_rules( array( Rule::from_array( array_merge( $dimensions_rule->to_array(), array( 'conditions' => array( $dimensions_ignore_empty ) ) ) ) ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'dimensions condition must ignore empty fields.' );
+
+$volume_rule = new Rule(
+	null,
+	'Volume m3',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array( new RuleCondition( null, null, 1, RuleConditionTypes::VOLUME, RuleOperators::GTE, '', 0.036 ) )
+);
+$result = $engine->apply_rules( array( $volume_rule ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'volume condition must compare cubic meters.' );
+
+$date_rule = new Rule(
+	null,
+	'Date',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array( new RuleCondition( null, null, 1, RuleConditionTypes::DATE, RuleOperators::GTE, '2026-05-20' ) )
+);
+$result = $engine->apply_rules( array( $date_rule ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'date condition must evaluate stored YYYY-MM-DD values.' );
+
+$and_group_rule = new Rule(
+	null,
+	'AND group',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array(
+		new RuleCondition( null, null, 1, RuleConditionTypes::COUNTRY, RuleOperators::EQ, 'RU' ),
+		new RuleCondition( null, null, 1, RuleConditionTypes::PAYMENT_METHOD, RuleOperators::EQ, 'cash' ),
+	),
+	array( 1 => 'and', 2 => 'and', 3 => 'and' )
+);
+$result = $engine->apply_rules( array( $and_group_rule ), rules_context() );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'AND group must require all conditions.' );
+
+$or_group_rule = Rule::from_array( array_merge( $and_group_rule->to_array(), array( 'name' => 'OR group', 'condition_group_logic' => array( 1 => 'or', 2 => 'and', 3 => 'and' ) ) ) );
+$result = $engine->apply_rules( array( $or_group_rule ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'OR group must require at least one condition.' );
+
+$groups_or_rule = new Rule(
+	null,
+	'Groups OR',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array(
+		new RuleCondition( null, null, 1, RuleConditionTypes::PAYMENT_METHOD, RuleOperators::EQ, 'cash' ),
+		new RuleCondition( null, null, 2, RuleConditionTypes::COUNTRY, RuleOperators::EQ, 'RU' ),
+	),
+	array( 1 => 'and', 2 => 'and', 3 => 'and' )
+);
+$result = $engine->apply_rules( array( $groups_or_rule ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'Default condition_group_expression must combine groups via OR.' );
+
+rules_smoke_assert( Rule::DEFAULT_GROUP_EXPRESSION === Rule::normalized_group_expression( 'bad-expression' ), 'Invalid group expression must normalize to default.' );
+
+$expression_conditions = array(
+	new RuleCondition( null, null, 1, RuleConditionTypes::COUNTRY, RuleOperators::EQ, 'RU' ),
+	new RuleCondition( null, null, 2, RuleConditionTypes::PAYMENT_METHOD, RuleOperators::EQ, 'cash' ),
+	new RuleCondition( null, null, 3, RuleConditionTypes::DELIVERY_TYPE, RuleOperators::EQ, 'courier' ),
+);
+$expression_rule = static function ( string $expression, ?array $conditions = null ) use ( $expression_conditions ): Rule {
+	return new Rule(
+		null,
+		'Expression ' . $expression,
+		true,
+		10,
+		'default',
+		'',
+		RuleActionTypes::CHANGE_PRICE,
+		RuleOperationTypes::DECREASE,
+		10,
+		RuleOperationBases::RUBLES,
+		false,
+		false,
+		$conditions ?? $expression_conditions,
+		array( 1 => 'and', 2 => 'and', 3 => 'and' ),
+		'',
+		$expression
+	);
+};
+
+$result = $engine->apply_rules( array( $expression_rule( 'condition_1' ) ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'condition_1 must match only group 1.' );
+$result = $engine->apply_rules( array( $expression_rule( 'condition_2' ) ), rules_context() );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'condition_2 must be false when group 2 is false.' );
+$result = $engine->apply_rules( array( $expression_rule( 'condition_1_and_2' ) ), rules_context() );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'condition_1_and_2 must require both groups.' );
+$result = $engine->apply_rules( array( $expression_rule( 'condition_1_or_2' ) ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'condition_1_or_2 must accept either group.' );
+$result = $engine->apply_rules( array( $expression_rule( 'condition_1_and_2_or_3' ) ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'condition_1_and_2_or_3 must evaluate as (1 AND 2) OR 3.' );
+$result = $engine->apply_rules( array( $expression_rule( 'condition_1_or_2_and_3' ) ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'condition_1_or_2_and_3 must evaluate as 1 OR (2 AND 3).' );
+$result = $engine->apply_rules( array( $expression_rule( 'condition_1_and_2_and_3' ) ), rules_context() );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'condition_1_and_2_and_3 must require all groups.' );
+$result = $engine->apply_rules( array( $expression_rule( 'condition_1_and_2', array( new RuleCondition( null, null, 1, RuleConditionTypes::COUNTRY, RuleOperators::EQ, 'RU' ) ) ) ), rules_context() );
+rules_smoke_assert( 45000 === $result->final_price?->get_kopecks(), 'Empty group used in expression must count false.' );
+
+$result = $engine->apply_rules( array( Rule::from_array( array_merge( price_rule( 'No conditions', RuleOperationTypes::DECREASE, 10 )->to_array(), array( 'conditions' => array() ) ) ) ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'Rules without conditions must still apply.' );
 
 echo "Rules smoke test passed.\n";

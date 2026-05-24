@@ -107,7 +107,15 @@ final class CheckoutOrchestrator {
 			$request->payment_method,
 			$request->calculation_date,
 			array(),
-			array_merge( $rate->meta, array( 'carrier_key' => $rate->carrier_key, 'rate_id' => $rate->rate_id ) )
+			array_merge(
+				$request->customer_context,
+				$rate->meta,
+				array(
+					'carrier_key' => $rate->carrier_key,
+					'rate_id'     => $rate->rate_id,
+					'selected_location_fias_id' => (string) ( $request->customer_context['selected_location_fias_id'] ?? $request->destination->fias_id ),
+				)
+			)
 		);
 	}
 }

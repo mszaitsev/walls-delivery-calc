@@ -9,6 +9,9 @@ use WallsShop\WDC\Rules\Domain\RuleCondition;
 defined( 'ABSPATH' ) || exit;
 
 final class RuleRepository {
+	public const TARGET_DEFAULT = 'default';
+	public const TARGET_CARRIER = 'carrier';
+
 	private \wpdb $wpdb;
 
 	public function __construct( ?\wpdb $db = null ) {
@@ -18,6 +21,8 @@ final class RuleRepository {
 	}
 
 	public function save_rule( Rule $rule ): int {
+		$this->normalize_legacy_default_rules();
+
 		$now  = current_time( 'mysql' );
 		$data = $this->rule_to_row( $rule, $now );
 
@@ -45,6 +50,8 @@ final class RuleRepository {
 	}
 
 	public function get_rule( int $id ): ?Rule {
+		$this->normalize_legacy_default_rules();
+
 		$row = $this->wpdb->get_row(
 			$this->wpdb->prepare( "SELECT * FROM {$this->rules_table()} WHERE id = %d LIMIT 1", $id ),
 			ARRAY_A
@@ -57,7 +64,43 @@ final class RuleRepository {
 	 * @return array<int,Rule>
 	 */
 	public function get_enabled_rules(): array {
-		$rows = $this->wpdb->get_results( "SELECT * FROM {$this->rules_table()} WHERE enabled = 1 ORDER BY promo_shipping ASC, priority ASC, id ASC", ARRAY_A );
+		$this->normalize_legacy_default_rules();
+
+		$rows = $this->wpdb->get_results( "SELECT * FROM {$this->rules_table()} WHERE enabled = 1 ORDER BY priority ASC, id ASC", ARRAY_A );
+
+		return $this->rows_to_rules( is_array( $rows ) ? $rows : array() );
+	}
+
+	/**
+	 * @return array<int,Rule>
+	 */
+	public function get_default_rules(): array {
+		$this->normalize_legacy_default_rules();
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT * FROM {$this->rules_table()} WHERE enabled = 1 AND target_type = %s ORDER BY priority ASC, id ASC",
+				self::TARGET_DEFAULT
+			),
+			ARRAY_A
+		);
+
+		return $this->rows_to_rules( is_array( $rows ) ? $rows : array() );
+	}
+
+	/**
+	 * @return array<int,Rule>
+	 */
+	public function get_all_default_rules(): array {
+		$this->normalize_legacy_default_rules();
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT * FROM {$this->rules_table()} WHERE target_type = %s ORDER BY priority ASC, id ASC",
+				self::TARGET_DEFAULT
+			),
+			ARRAY_A
+		);
 
 		return $this->rows_to_rules( is_array( $rows ) ? $rows : array() );
 	}
@@ -66,9 +109,11 @@ final class RuleRepository {
 	 * @return array<int,Rule>
 	 */
 	public function get_rules_for_target( string $targetType, string $targetValue ): array {
+		$this->normalize_legacy_default_rules();
+
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
-				"SELECT * FROM {$this->rules_table()} WHERE enabled = 1 AND target_type = %s AND target_value = %s ORDER BY promo_shipping ASC, priority ASC, id ASC",
+				"SELECT * FROM {$this->rules_table()} WHERE enabled = 1 AND target_type = %s AND target_value = %s ORDER BY priority ASC, id ASC",
 				$targetType,
 				$targetValue
 			),
@@ -76,6 +121,59 @@ final class RuleRepository {
 		);
 
 		return $this->rows_to_rules( is_array( $rows ) ? $rows : array() );
+	}
+
+	/**
+	 * @return array<int,Rule>
+	 */
+	public function get_rules_for_carrier_with_default_fallback( string $carrierKey ): array {
+		return $this->get_rules_for_target_or_default( self::TARGET_CARRIER, $carrierKey );
+	}
+
+	/**
+	 * @return array<int,Rule>
+	 */
+	public function get_rules_for_target_or_default( string $target_type, string $target_value ): array {
+		$target_rules = $this->get_rules_for_target( $target_type, $target_value );
+		if ( array() !== $target_rules ) {
+			return $target_rules;
+		}
+
+		return $this->get_default_rules();
+	}
+
+	public function normalize_legacy_default_rules(): void {
+		$this->wpdb->query( "UPDATE {$this->rules_table()} SET target_type = 'default', target_value = '' WHERE target_type IS NULL OR target_type = ''" );
+	}
+
+	/**
+	 * @param array<int,int> $ordered_ids
+	 */
+	public function reorder_default_rules( array $ordered_ids ): void {
+		$this->normalize_legacy_default_rules();
+
+		$position = 10;
+		foreach ( $ordered_ids as $id ) {
+			$id = (int) $id;
+			if ( $id <= 0 ) {
+				continue;
+			}
+
+			$this->wpdb->update(
+				$this->rules_table(),
+				array(
+					'priority'   => $position,
+					'updated_at' => current_time( 'mysql' ),
+				),
+				array(
+					'id'          => $id,
+					'target_type' => self::TARGET_DEFAULT,
+				),
+				array( '%d', '%s' ),
+				array( '%d', '%s' )
+			);
+			$position += 10;
+		}
 	}
 
 	/**
@@ -135,6 +233,8 @@ final class RuleRepository {
 					'promo_shipping'  => (bool) (int) $row['promo_shipping'],
 					'stop_processing' => (bool) (int) $row['stop_processing'],
 					'conditions'      => $conditions,
+					'condition_group_logic' => $this->decode_group_logic( $row['condition_group_logic'] ?? '' ),
+					'condition_group_expression' => Rule::normalized_group_expression( $row['condition_group_expression'] ?? Rule::DEFAULT_GROUP_EXPRESSION ),
 				)
 			)
 		);
@@ -169,8 +269,11 @@ final class RuleRepository {
 			'operation_type'  => $rule->operation_type,
 			'operation_value' => $rule->operation_value,
 			'operation_base'  => $rule->operation_base,
+			'operation_text'  => $rule->operation_text,
 			'promo_shipping'  => $rule->promo_shipping ? 1 : 0,
 			'stop_processing' => $rule->stop_processing ? 1 : 0,
+			'condition_group_logic' => wp_json_encode( Rule::normalized_group_logic( $rule->condition_group_logic ) ),
+			'condition_group_expression' => Rule::normalized_group_expression( $rule->condition_group_expression ),
 			'created_at'      => $now,
 			'updated_at'      => $now,
 		);
@@ -180,7 +283,19 @@ final class RuleRepository {
 	 * @return array<int,string>
 	 */
 	private function rule_formats(): array {
-		return array( '%s', '%d', '%d', '%s', '%s', '%s', '%s', '%f', '%s', '%d', '%d', '%s', '%s' );
+		return array( '%s', '%d', '%d', '%s', '%s', '%s', '%s', '%f', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s' );
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function decode_group_logic( mixed $value ): array {
+		if ( is_string( $value ) && '' !== trim( $value ) ) {
+			$decoded = json_decode( $value, true );
+			return Rule::normalized_group_logic( is_array( $decoded ) ? $decoded : array() );
+		}
+
+		return Rule::normalized_group_logic( is_array( $value ) ? $value : array() );
 	}
 
 	private function rules_table(): string {

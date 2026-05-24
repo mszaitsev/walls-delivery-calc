@@ -199,12 +199,42 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $pickup_rows = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $location_rows = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $rule_rows = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $rule_condition_rows = array();
 
 		public function esc_like( string $text ): string {
 			return addcslashes( $text, '_%\\' );
 		}
 
 		public function get_results( string $query, mixed $output = null ): array {
+			if ( str_contains( $query, 'wdc_rule_conditions' ) ) {
+				preg_match( '/rule_id = ([0-9]+)/', $query, $matches );
+				$rule_id = (int) ( $matches[1] ?? 0 );
+				return array_values( array_filter( $this->rule_condition_rows, static fn ( array $row ): bool => (int) $row['rule_id'] === $rule_id ) );
+			}
+
+			if ( str_contains( $query, 'wdc_rules' ) ) {
+				$rows = $this->rule_rows;
+				if ( str_contains( $query, 'enabled = 1' ) ) {
+					$rows = array_values( array_filter( $rows, static fn ( array $row ): bool => (int) $row['enabled'] === 1 ) );
+				}
+				if ( preg_match( "/target_type = '([^']*)'/", $query, $matches ) ) {
+					$rows = array_values( array_filter( $rows, static fn ( array $row ): bool => (string) $row['target_type'] === $matches[1] ) );
+				}
+				if ( preg_match( "/target_value = '([^']*)'/", $query, $matches ) ) {
+					$rows = array_values( array_filter( $rows, static fn ( array $row ): bool => (string) $row['target_value'] === $matches[1] ) );
+				}
+				usort(
+					$rows,
+					static fn ( array $a, array $b ): int => ( (int) $a['promo_shipping'] <=> (int) $b['promo_shipping'] )
+						?: ( (int) $a['priority'] <=> (int) $b['priority'] )
+						?: ( (int) $a['id'] <=> (int) $b['id'] )
+				);
+				return $rows;
+			}
+
 			if ( str_contains( $query, 'wdc_locations' ) ) {
 				preg_match( "/searchable_text LIKE '([^']+)'/", $query, $like_matches );
 				$needle = trim( (string) ( $like_matches[1] ?? '' ), '%' );
@@ -277,6 +307,15 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 
 		public function query( string $query ): bool {
+			if ( str_starts_with( $query, 'UPDATE' ) && str_contains( $query, 'wdc_rules' ) ) {
+				foreach ( $this->rule_rows as $index => $row ) {
+					if ( '' === (string) ( $row['target_type'] ?? '' ) ) {
+						$this->rule_rows[ $index ]['target_type'] = 'default';
+						$this->rule_rows[ $index ]['target_value'] = '';
+					}
+				}
+			}
+
 			return true;
 		}
 	}
@@ -366,6 +405,9 @@ use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
+use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
+use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
+use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 
 function runtime_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -433,6 +475,44 @@ NewShippingMethod::configure(
 );
 $method = new NewShippingMethod();
 runtime_smoke_assert( $method instanceof NewShippingMethod, 'NewShippingMethod must instantiate without a settings visibility fatal.' );
+
+$checkout_rules_method = ( new ReflectionClass( NewShippingMethod::class ) )->getMethod( 'checkout_rules' );
+$checkout_rules_method->setAccessible( true );
+$rules_db = new wpdb();
+NewShippingMethod::configure(
+	$container->get( CheckoutOrchestrator::class ),
+	$container->get( WooCommercePackageMapper::class ),
+	$container->get( WooCommerceRateMapper::class ),
+	$container->get( CheckoutSessionManager::class ),
+	new RuleRepository( $rules_db ),
+	$settings,
+	runtime_smoke_environment(),
+	new Logger()
+);
+$method_without_rules = new NewShippingMethod();
+runtime_smoke_assert( array() === $checkout_rules_method->invoke( $method_without_rules ), 'No default rules must return an empty checkout rules list.' );
+runtime_smoke_assert( is_readable( dirname( __DIR__, 2 ) . '/database/demo/rules-demo.json' ), 'Demo rules fixture should exist for fallback regression coverage.' );
+runtime_smoke_assert( array() === $checkout_rules_method->invoke( $method_without_rules ), 'Demo rules must not be used as checkout fallback.' );
+
+$rules_db->rule_rows[] = array(
+	'id'              => 1,
+	'name'            => 'Default checkout rule',
+	'enabled'         => 1,
+	'priority'        => 10,
+	'target_type'     => 'default',
+	'target_value'    => '',
+	'action_type'     => RuleActionTypes::CHANGE_PRICE,
+	'operation_type'  => RuleOperationTypes::DECREASE,
+	'operation_value' => 100,
+	'operation_base'  => RuleOperationBases::RUBLES,
+	'promo_shipping'  => 0,
+	'stop_processing' => 0,
+	'created_at'      => '2026-05-21 12:00:00',
+	'updated_at'      => '2026-05-21 12:00:00',
+);
+$checkout_rules = $checkout_rules_method->invoke( new NewShippingMethod() );
+runtime_smoke_assert( 1 === count( $checkout_rules ), 'Existing default rules must be used by checkout runtime.' );
+runtime_smoke_assert( 'Default checkout rule' === $checkout_rules[0]->name, 'Checkout runtime must return the stored default rule.' );
 
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_filters']['woocommerce_shipping_methods'] ), 'Shipping method filter must be registered.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_actions']['wp_ajax_' . CheckoutLocationAjax::ACTION] ), 'Location AJAX endpoint must register for logged-in users.' );

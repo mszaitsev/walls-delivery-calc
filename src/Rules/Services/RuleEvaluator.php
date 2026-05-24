@@ -38,14 +38,16 @@ final class RuleEvaluator {
 		}
 
 		if ( RuleActionTypes::CHANGE_DELIVERY_DAYS === $rule->action_type ) {
-			$range   = DateRange::single( max( 0, (int) round( $rule->operation_value ) ) );
+			$unit    = RuleOperationBases::BUSINESS_DAYS === $rule->operation_base ? DateRange::UNIT_BUSINESS_DAYS : DateRange::UNIT_CALENDAR_DAYS;
+			$days    = $this->apply_delivery_days_operation( $context, $rule );
+			$range   = DateRange::single( $days, $unit );
 			$audit[] = new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, null, $range->to_array(), $rule->operation_type, true, 'Delivery days changed.' );
 
 			return new RuleEvaluationResult( true, true, null, $range, array(), false, '', $audit, $rule->stop_processing );
 		}
 
 		if ( RuleActionTypes::ADD_COMMENT === $rule->action_type ) {
-			$comment = '' !== trim( $rule->target_value ) ? $rule->target_value : $rule->name;
+			$comment = '' !== trim( $rule->operation_text ) ? $rule->operation_text : $rule->name;
 			$audit[] = new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, null, $comment, $rule->operation_type, true, 'Comment added.' );
 
 			return new RuleEvaluationResult( true, true, null, null, array( $comment ), false, '', $audit, $rule->stop_processing );
@@ -71,21 +73,45 @@ final class RuleEvaluator {
 			$groups[ $condition->condition_group ][] = $condition;
 		}
 
-		foreach ( $groups as $conditions ) {
-			$group_matches = true;
+		$logic = Rule::normalized_group_logic( $rule->condition_group_logic );
+		$result = array( 1 => false, 2 => false, 3 => false );
+		for ( $group = 1; $group <= 3; ++$group ) {
+			$conditions = $groups[ $group ] ?? array();
+			if ( array() === $conditions ) {
+				continue;
+			}
+
+			$mode = $logic[ $group ] ?? 'and';
+			$group_matches = 'and' === $mode;
 			foreach ( $conditions as $condition ) {
-				if ( ! $this->condition_evaluator->evaluate( $condition, $context ) ) {
+				$matches = $this->condition_evaluator->evaluate( $condition, $context );
+				if ( 'or' === $mode && $matches ) {
+					$group_matches = true;
+					break;
+				}
+				if ( 'and' === $mode && ! $matches ) {
 					$group_matches = false;
 					break;
 				}
 			}
-
-			if ( $group_matches ) {
-				return true;
-			}
+			$result[ $group ] = $group_matches;
 		}
 
-		return false;
+		return match ( Rule::normalized_group_expression( $rule->condition_group_expression ) ) {
+			'condition_1'              => $result[1],
+			'condition_2'              => $result[2],
+			'condition_3'              => $result[3],
+			'condition_1_or_2'         => $result[1] || $result[2],
+			'condition_1_and_2'        => $result[1] && $result[2],
+			'condition_1_or_3'         => $result[1] || $result[3],
+			'condition_1_and_3'        => $result[1] && $result[3],
+			'condition_2_or_3'         => $result[2] || $result[3],
+			'condition_2_and_3'        => $result[2] && $result[3],
+			'condition_1_and_2_and_3'  => $result[1] && $result[2] && $result[3],
+			'condition_1_and_2_or_3'   => ( $result[1] && $result[2] ) || $result[3],
+			'condition_1_or_2_and_3'   => $result[1] || ( $result[2] && $result[3] ),
+			default                    => $result[1] || $result[2] || $result[3],
+		};
 	}
 
 	private function apply_price_operation( Money $current_price, RuleEvaluationContext $context, Rule $rule ): Money {
@@ -96,6 +122,19 @@ final class RuleEvaluator {
 			RuleOperationTypes::DECREASE => $current_price->subtract( $delta ),
 			RuleOperationTypes::EQUALS   => $delta,
 			default                      => $current_price,
+		};
+	}
+
+	private function apply_delivery_days_operation( RuleEvaluationContext $context, Rule $rule ): int {
+		$value = max( 0, (int) round( $rule->operation_value ) );
+		$base  = isset( $context->meta['current_delivery_days'] )
+			? max( 0, (int) $context->meta['current_delivery_days'] )
+			: ( isset( $context->meta['original_delivery_days'] ) ? max( 0, (int) $context->meta['original_delivery_days'] ) : 0 );
+
+		return match ( $rule->operation_type ) {
+			RuleOperationTypes::INCREASE => $base + $value,
+			RuleOperationTypes::DECREASE => max( 0, $base - $value ),
+			default                      => $value,
 		};
 	}
 
