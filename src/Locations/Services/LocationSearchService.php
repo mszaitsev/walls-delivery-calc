@@ -104,6 +104,14 @@ final class LocationSearchService {
 	}
 
 	/**
+	 * @param array<int,string> $tokens
+	 * @return array<int, Location>
+	 */
+	public function checkout_hierarchy_candidates( array $tokens, int $limit = 1000, string $force_region_code = '' ): array {
+		return $this->repository->checkout_hierarchy_candidates( $tokens, $limit, $force_region_code );
+	}
+
+	/**
 	 * @return array<string,mixed>
 	 */
 	public function last_search_meta(): array {

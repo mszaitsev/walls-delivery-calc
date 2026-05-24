@@ -88,10 +88,12 @@ The admin `Пересобрать display_name` action runs as a chunked AJAX jo
 
 ## Checkout City Picker V2
 
-As of `0.17.1`, checkout lookup uses the local GAR/FIAS locations table for a type-aware city picker.
+As of `0.17.2`, checkout lookup uses the local GAR/FIAS locations table for a hierarchy-aware city picker.
 
-`CheckoutLocationSearch::search_for_picker()` tokenizes mixed queries such as `Алтайский край, Курьинский р-н, село Ивановка`: punctuation is treated as separators, `ё` is normalized to `е`, one-character noise is dropped except meaningful `г`, and `р-н`/`район` are treated as district synonyms. Matching considers region, district, city, place, mapped display type text, raw type text, `display_name`, `searchable_text`, `fias_id`, `kladr_id`, and `gar_object_id`.
+`CheckoutLocationSearchParser` normalizes mixed queries such as `Алтайский край, Курьинский р-н, село Ивановка`: punctuation is treated as separators, `ё` is normalized to `е`, and type words are removed from the real search token set. Type words from raw GAR types and admin display rules, for example `область`, `обл.`, `район`, `р-н`, `город`, `г.`, `село`, and `деревня`, are level markers only.
 
-Ranking promotes candidates that match more tokens, then full-token matches, then exact/prefix/partial lowest-level place names, followed by city, district, region, and broad searchable fallback. Region groups are sorted so regions with exact place-name hits rise first; multiple exact-hit regions are alphabetical.
+Checkout search is not a full-text search over `searchable_text`. It checks `region_name`, `district_name`, `city_name`, and the resolved lowest-level place name separately, using only exact and prefix matches. It does not match inside a word: `брод` can match `Брод`, `Бродки`, and `Бродовка`, but not `Верхобродово`.
+
+Ranking promotes candidates that match more hierarchy levels, then exact/prefix place, city, district, and region matches. Strong place matches filter away weak unrelated candidates. If a query matches an upper level, for example `Домодедово` as `city_name`, checkout can show the city itself plus nested places inside that city.
 
 `LocationDisplayNameFormatter` now also formats checkout region headers, option labels, state field values, and city field values. Region headers always use `region_name + mapped region_type` unless the type is hidden. Option rows use the settlement label plus useful parent hierarchy, for example `с. Гусиный Брод - Новосибирский р-н, Новосибирская обл.`.

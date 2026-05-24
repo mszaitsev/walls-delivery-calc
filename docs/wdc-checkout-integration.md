@@ -57,6 +57,15 @@ When region prefill is enabled, opening the picker seeds the modal query from `s
 
 Selecting a location writes formatted state/city values, fills postcode only when the local row has one, stores the selected local payload in hidden checkout fields, and renders a full-width selected notice. On checkout load, after `updated_checkout`, and after manual state/city edits, the frontend calls `wdc_platform_resolve_checkout_location`; only one confident local match restores hidden selected state, otherwise checkout shows `Просим проверить название и внести верный населенный пункт`.
 
+Checkout city search is hierarchy-aware:
+
+- query normalization lowercases text, replaces `ё` with `е`, converts punctuation to spaces, and collapses whitespace;
+- type words from raw GAR types and admin display rules are treated as level markers, not as database search values;
+- matching checks region, district, city, and place names independently;
+- only exact and prefix matches are allowed, so there is no contains-inside-word behavior;
+- place/city matches are stronger than district/region context matches;
+- upper-level matches expand downward, so a city query can show the city and its nested places.
+
 ## Debug panel
 
 `CheckoutDebugPanel` renders checkout debug data only for users with `manage_options`. It shows orchestration rate count, cache hits, fallback state, carrier errors, and returned orchestration rates.

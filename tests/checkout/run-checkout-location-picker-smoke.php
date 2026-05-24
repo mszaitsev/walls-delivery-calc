@@ -88,6 +88,8 @@ $wpdb->regions = array(
 	'54' => array( 'region_name' => 'Новосибирская', 'region_type' => 'обл' ),
 	'22' => array( 'region_name' => 'Алтайский', 'region_type' => 'край' ),
 	'02' => array( 'region_name' => 'Башкортостан', 'region_type' => 'Республика' ),
+	'50' => array( 'region_name' => 'Московская', 'region_type' => 'обл' ),
+	'48' => array( 'region_name' => 'Липецкая', 'region_type' => 'обл' ),
 );
 
 update_option(
@@ -112,9 +114,17 @@ $repository = new LocationRepository( $wpdb );
 $locations = array(
 	checkout_location_picker_location( array( 'gar_object_id' => 1001, 'fias_id' => 'fias-nsk', 'kladr_id' => 'kladr-nsk', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'city_name' => 'Новосибирск', 'city_type' => 'г', 'place_name' => 'Новосибирск', 'place_type' => 'г', 'display_name' => 'Новосибирская обл., г. Новосибирск', 'postal_code' => '630000' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 1002, 'fias_id' => 'fias-gb', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'district_name' => 'Новосибирский', 'district_type' => 'р-н', 'place_name' => 'Гусиный Брод', 'place_type' => 'село', 'display_name' => 'Новосибирская обл., Новосибирский р-н, село Гусиный Брод', 'postal_code' => '630555' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 1003, 'fias_id' => 'fias-brod', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'place_name' => 'Брод', 'place_type' => 'село', 'display_name' => 'Новосибирская обл., село Брод' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 1004, 'fias_id' => 'fias-brodki', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'place_name' => 'Бродки', 'place_type' => 'д', 'display_name' => 'Новосибирская обл., деревня Бродки' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 1005, 'fias_id' => 'fias-brodovka', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'place_name' => 'Бродовка', 'place_type' => 'д', 'display_name' => 'Новосибирская обл., деревня Бродовка' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 1006, 'fias_id' => 'fias-verh', 'region_code' => '54', 'region_name' => 'Новосибирская', 'region_type' => 'обл', 'place_name' => 'Верхобродово', 'place_type' => 'д', 'display_name' => 'Новосибирская обл., деревня Верхобродово' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 2001, 'fias_id' => 'fias-alt-ivan', 'region_code' => '22', 'region_name' => 'Алтайский', 'region_type' => 'край', 'district_name' => 'Курьинский', 'district_type' => 'р-н', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Алтайский край, Курьинский р-н, село Ивановка', 'postal_code' => '658320' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 2002, 'fias_id' => 'fias-alt-ivan-2', 'region_code' => '22', 'region_name' => 'Алтайский', 'region_type' => 'край', 'district_name' => 'Курьинский', 'district_type' => 'р-н', 'place_name' => 'Ивановка Верхняя', 'place_type' => 'село', 'display_name' => 'Алтайский край, Курьинский р-н, село Ивановка Верхняя' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 3001, 'fias_id' => 'fias-bash-vet', 'region_code' => '02', 'region_name' => 'Башкортостан', 'region_type' => 'Республика', 'city_name' => 'Уфа', 'city_type' => 'г', 'place_name' => 'Ветошниково', 'place_type' => 'д', 'display_name' => 'Башкортостан Республика, г. Уфа, д. Ветошниково' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 5001, 'fias_id' => 'fias-domodedovo', 'region_code' => '50', 'region_name' => 'Московская', 'region_type' => 'обл', 'city_name' => 'Домодедово', 'city_type' => 'г', 'place_name' => 'Домодедово', 'place_type' => 'г', 'display_name' => 'Московская обл., г. Домодедово' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 5002, 'fias_id' => 'fias-avdotino', 'region_code' => '50', 'region_name' => 'Московская', 'region_type' => 'обл', 'city_name' => 'Домодедово', 'city_type' => 'г', 'place_name' => 'Авдотьино', 'place_type' => 'д', 'display_name' => 'Московская обл., г. Домодедово, деревня Авдотьино' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 5003, 'fias_id' => 'fias-skripino', 'region_code' => '50', 'region_name' => 'Московская', 'region_type' => 'обл', 'city_name' => 'Домодедово', 'city_type' => 'г', 'place_name' => 'Скрипино-1', 'place_type' => 'д', 'display_name' => 'Московская обл., г. Домодедово, деревня Скрипино-1' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 4801, 'fias_id' => 'fias-lip-ivan', 'region_code' => '48', 'region_name' => 'Липецкая', 'region_type' => 'обл', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Липецкая обл., село Ивановка' ) ),
 );
 foreach ( $locations as $location ) {
 	$repository->save( $location );
@@ -147,6 +157,33 @@ $forced = $ajax->payload( 'Ивановка', '22' );
 checkout_location_picker_assert( 1 === count( $forced['groups'] ) && '22' === (string) $forced['groups'][0]['region_code'], 'force_region_code returns only that region.' );
 checkout_location_picker_assert( 'Алтайский край' === (string) $ajax->payload( 'Ивановка' )['groups'][0]['region_label'], 'Exact place match promotes its region.' );
 checkout_location_picker_assert( strcmp( 'Алтайский край', 'Башкортостан Республика' ) < 0, 'Multiple exact-place regions sort alphabetically.' );
+
+$flatten_fias = static function ( array $payload ): array {
+	$ids = array();
+	foreach ( $payload['groups'] ?? array() as $group ) {
+		foreach ( $group['items'] ?? array() as $item ) {
+			$ids[] = (string) ( $item['fias_id'] ?? '' );
+		}
+	}
+	return $ids;
+};
+
+$gusi_ids = $flatten_fias( $ajax->payload( 'гусиный брод' ) );
+checkout_location_picker_assert( array() !== $gusi_ids && 'fias-gb' === $gusi_ids[0], 'Hierarchy search finds Гусиный Брод for гусиный брод.' );
+checkout_location_picker_assert( ! in_array( 'fias-verh', $gusi_ids, true ), 'Hierarchy search does not show Верхобродово for гусиный брод.' );
+
+$brod_ids = $flatten_fias( $ajax->payload( 'брод' ) );
+checkout_location_picker_assert( in_array( 'fias-brod', $brod_ids, true ) && in_array( 'fias-brodki', $brod_ids, true ) && in_array( 'fias-brodovka', $brod_ids, true ), 'Prefix search finds Брод, Бродки, and Бродовка.' );
+checkout_location_picker_assert( ! in_array( 'fias-verh', $brod_ids, true ), 'Prefix search does not match inside word Верхобродово.' );
+
+$domodedovo_ids = $flatten_fias( $ajax->payload( 'домодедово' ) );
+checkout_location_picker_assert( in_array( 'fias-domodedovo', $domodedovo_ids, true ) && in_array( 'fias-avdotino', $domodedovo_ids, true ) && in_array( 'fias-skripino', $domodedovo_ids, true ), 'Upper-level city search returns city and nested places.' );
+
+$moscow_ids = $flatten_fias( $ajax->payload( 'московская область' ) );
+checkout_location_picker_assert( in_array( 'fias-domodedovo', $moscow_ids, true ) && in_array( 'fias-avdotino', $moscow_ids, true ), 'Region-only search returns locations in the region.' );
+checkout_location_picker_assert( 'fias-alt-ivan' === ( $ajax->payload( 'курьинский ивановка' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'District plus place ranks Курьинский Ивановка first.' );
+checkout_location_picker_assert( 'fias-lip-ivan' === ( $ajax->payload( 'липецкая область ивановка' )['groups'][0]['items'][0]['fias_id'] ?? '' ), 'Region marker is treated as hierarchy marker, not DB value.' );
+checkout_location_picker_assert( array() === $flatten_fias( $ajax->payload( 'село' ) ), 'Type words alone are not searchable DB values.' );
 
 $selected = $payload['groups'][0]['items'][0];
 checkout_location_picker_assert( 'Алтайский край' === $selected['state_value'] && str_contains( $selected['city_value'], 'Курьинский р-н' ) && '658320' === $selected['postal_code'], 'Choosing location payload sets state_value, city_value, postal_code.' );
