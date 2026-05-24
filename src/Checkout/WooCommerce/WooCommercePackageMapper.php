@@ -50,6 +50,7 @@ final class WooCommercePackageMapper {
 					'source'         => 'woocommerce_checkout',
 					'normalized_address' => $address->normalized,
 					'fallback_address'   => $address->fallback,
+					'selected_location_fias_id' => $this->selected_location_fias_id( $address ),
 				),
 				$customer_context
 			)
@@ -114,7 +115,10 @@ final class WooCommercePackageMapper {
 				$quantity,
 				Money::from_rubles( $quantity > 0 ? $total->get_rubles() / $quantity : 0 ),
 				$total,
-				$this->product_weight_g( $product )
+				$this->product_weight_g( $product ),
+				$this->product_dimension_cm( $product, 'get_length' ),
+				$this->product_dimension_cm( $product, 'get_width' ),
+				$this->product_dimension_cm( $product, 'get_height' )
 			);
 		}
 
@@ -137,7 +141,30 @@ final class WooCommercePackageMapper {
 		return (int) round( max( 0.0, (float) $product->get_weight() ) * 1000 );
 	}
 
+	private function product_dimension_cm( mixed $product, string $method ): int {
+		if ( ! is_object( $product ) || ! method_exists( $product, $method ) ) {
+			return 0;
+		}
+
+		return (int) round( max( 0.0, (float) $product->{$method}() ) );
+	}
+
 	private function payment_method(): string {
 		return isset( $_POST['payment_method'] ) ? sanitize_text_field( wp_unslash( (string) $_POST['payment_method'] ) ) : '';
+	}
+
+	private function selected_location_fias_id( Address $address ): string {
+		if ( '' !== trim( $address->fias_id ) ) {
+			return $address->fias_id;
+		}
+
+		$city = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->selected_city() : array();
+		if ( '' !== trim( (string) ( $city['fias_id'] ?? '' ) ) ) {
+			return (string) $city['fias_id'];
+		}
+
+		$context = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->city_context() : array();
+
+		return (string) ( $context['fias_id'] ?? '' );
 	}
 }

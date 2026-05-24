@@ -13,6 +13,226 @@
 		});
 	}
 
+	function config() {
+		return window.wdcRulesAdmin || { conditions: {}, operatorLabels: {}, strings: {}, locationSearch: {} };
+	}
+
+	function parseJson(value, fallback) {
+		try {
+			return value ? JSON.parse(value) : fallback;
+		} catch (error) {
+			return fallback;
+		}
+	}
+
+	function conditionDefinition(type) {
+		return config().conditions[type] || null;
+	}
+
+	function setHidden(row, key, value) {
+		var field = row.querySelector('[data-' + key.replace('_', '-') + ']');
+		if (field) {
+			field.value = value == null ? '' : String(value);
+		}
+	}
+
+	function valueState(row) {
+		var payload = parseJson(row.dataset.conditionValue || '{}', {});
+		var valueJsonField = row.querySelector('[data-value-json]');
+		return {
+			value_text: row.querySelector('[data-value-text]') ? row.querySelector('[data-value-text]').value : (payload.value_text || ''),
+			value_number: row.querySelector('[data-value-number]') ? row.querySelector('[data-value-number]').value : (payload.value_number || ''),
+			value_json: valueJsonField ? parseJson(valueJsonField.value, {}) : (payload.value_json || {})
+		};
+	}
+
+	function syncValueState(row, state) {
+		setHidden(row, 'value_text', state.value_text || '');
+		setHidden(row, 'value_number', state.value_number == null ? '' : state.value_number);
+		setHidden(row, 'value_json', JSON.stringify(state.value_json || {}));
+		row.dataset.conditionValue = JSON.stringify(state);
+	}
+
+	function option(label, value, selected) {
+		var element = document.createElement('option');
+		element.value = value;
+		element.textContent = label;
+		element.selected = selected;
+		return element;
+	}
+
+	function updateOperators(row) {
+		var type = row.querySelector('[name*="[condition_type]"]').value;
+		var definition = conditionDefinition(type);
+		var select = row.querySelector('[data-condition-operator]');
+		var selected = select.dataset.selectedOperator || select.value;
+		var labels = config().operatorLabels || {};
+
+		select.innerHTML = '';
+		if (!definition) {
+			select.appendChild(option('Не выбрано', '', true));
+			return;
+		}
+
+		(definition.operators || []).forEach(function (operator, index) {
+			select.appendChild(option(labels[operator] || operator, operator, selected ? selected === operator : index === 0));
+		});
+		select.dataset.selectedOperator = select.value;
+	}
+
+	function renderSelectValue(row, definition, state, numeric) {
+		var select = document.createElement('select');
+		select.className = 'wdc-condition-specific-control';
+		select.appendChild(option(config().strings.selectValue || 'Выберите значение', '', false));
+		Object.keys(definition.options || {}).forEach(function (value) {
+			var selectedValue = numeric ? String(state.value_number || '') : String(state.value_text || '');
+			select.appendChild(option(definition.options[value], value, selectedValue === String(value)));
+		});
+		select.addEventListener('change', function () {
+			if (numeric) {
+				state.value_number = select.value;
+			} else {
+				state.value_text = select.value;
+			}
+			syncValueState(row, state);
+		});
+		return select;
+	}
+
+	function renderLocationValue(row, state) {
+		var wrapper = document.createElement('div');
+		var input = document.createElement('input');
+		var results = document.createElement('div');
+		var displayName = state.value_json && state.value_json.display_name ? state.value_json.display_name : '';
+		var fiasId = state.value_json && state.value_json.fias_id ? state.value_json.fias_id : state.value_text;
+
+		input.type = 'search';
+		input.className = 'wdc-location-search';
+		input.placeholder = config().strings.searchLocation || 'Начните вводить населенный пункт';
+		input.value = displayName ? displayName + ' (' + fiasId + ')' : (state.value_text || '');
+		results.className = 'wdc-location-results';
+		wrapper.className = 'wdc-location-field';
+		wrapper.appendChild(input);
+		wrapper.appendChild(results);
+
+		input.addEventListener('input', function () {
+			var query = input.value.trim();
+			results.innerHTML = '';
+			if (query.length < 3) {
+				return;
+			}
+
+			var search = config().locationSearch || {};
+			var url = search.ajaxUrl + '?action=' + encodeURIComponent(search.action) + '&nonce=' + encodeURIComponent(search.nonce) + '&query=' + encodeURIComponent(query);
+			window.fetch(url, { credentials: 'same-origin' })
+				.then(function (response) { return response.json(); })
+				.then(function (payload) {
+					var items = payload && payload.success && payload.data && Array.isArray(payload.data.items) ? payload.data.items : [];
+					if (!items.length) {
+						var empty = document.createElement('span');
+						empty.textContent = config().strings.noResults || 'Ничего не найдено';
+						results.appendChild(empty);
+						return;
+					}
+					items.forEach(function (item) {
+						var button = document.createElement('button');
+						button.type = 'button';
+						button.textContent = item.label;
+						button.addEventListener('click', function () {
+							state.value_text = item.fias_id;
+							state.value_json = { fias_id: item.fias_id, display_name: item.display_name };
+							input.value = item.label;
+							results.innerHTML = '';
+							syncValueState(row, state);
+						});
+						results.appendChild(button);
+					});
+				});
+		});
+
+		return wrapper;
+	}
+
+	function renderDimensionsValue(row, state) {
+		var wrapper = document.createElement('div');
+		var json = state.value_json || {};
+		wrapper.className = 'wdc-dimensions-fields';
+		[
+			['length_cm', 'Длина'],
+			['width_cm', 'Ширина'],
+			['height_cm', 'Высота']
+		].forEach(function (item) {
+			var label = document.createElement('label');
+			var span = document.createElement('span');
+			var input = document.createElement('input');
+			span.textContent = item[1] + ', см';
+			input.type = 'number';
+			input.step = '0.01';
+			input.value = json[item[0]] || '';
+			input.addEventListener('input', function () {
+				if (input.value === '') {
+					delete json[item[0]];
+				} else {
+					json[item[0]] = input.value;
+				}
+				state.value_json = json;
+				syncValueState(row, state);
+			});
+			label.appendChild(span);
+			label.appendChild(input);
+			wrapper.appendChild(label);
+		});
+		return wrapper;
+	}
+
+	function renderValueControl(row) {
+		var type = row.querySelector('[name*="[condition_type]"]').value;
+		var definition = conditionDefinition(type);
+		var target = row.querySelector('[data-condition-value-control]');
+		var state = valueState(row);
+
+		target.innerHTML = '';
+		if (!definition) {
+			syncValueState(row, { value_text: '', value_number: '', value_json: {} });
+			return;
+		}
+
+		if (definition.storage === 'value_number' && definition.input.indexOf('select') !== 0) {
+			var number = document.createElement('input');
+			number.type = 'number';
+			number.step = definition.input === 'integer' ? '1' : '0.0001';
+			number.value = state.value_number || '';
+			number.addEventListener('input', function () {
+				state.value_number = number.value;
+				syncValueState(row, state);
+			});
+			target.appendChild(number);
+		} else if (definition.input === 'select') {
+			target.appendChild(renderSelectValue(row, definition, state, false));
+		} else if (definition.input === 'select_number') {
+			target.appendChild(renderSelectValue(row, definition, state, true));
+		} else if (definition.input === 'location') {
+			target.appendChild(renderLocationValue(row, state));
+		} else if (definition.input === 'dimensions') {
+			target.appendChild(renderDimensionsValue(row, state));
+		} else if (definition.input === 'date') {
+			var date = document.createElement('input');
+			date.type = 'text';
+			date.placeholder = 'дд.мм.гггг';
+			date.value = /^\d{4}-\d{2}-\d{2}$/.test(state.value_text || '') ? state.value_text.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3.$2.$1') : (state.value_text || '');
+			date.addEventListener('input', function () {
+				state.value_text = date.value;
+				syncValueState(row, state);
+			});
+			target.appendChild(date);
+		}
+	}
+
+	function initConditionRow(row) {
+		updateOperators(row);
+		renderValueControl(row);
+	}
+
 	function createConditionRow(container) {
 		var rows = container.querySelectorAll('[data-condition-row]');
 		var source = rows.length ? rows[rows.length - 1] : null;
@@ -30,9 +250,11 @@
 
 			field.value = '';
 		});
+		clone.dataset.conditionValue = '{}';
 
 		container.appendChild(clone);
 		refreshConditionIndexes(container);
+		initConditionRow(clone);
 	}
 
 	function syncOperationFields(root) {
@@ -117,10 +339,12 @@
 			if (row && container && container.querySelectorAll('[data-condition-row]').length > 1) {
 				row.remove();
 				refreshConditionIndexes(container);
-			} else if (row) {
+		} else if (row) {
 				row.querySelectorAll('input, select').forEach(function (field) {
 					field.value = field.name.indexOf('[condition_group]') !== -1 ? '1' : '';
 				});
+				row.dataset.conditionValue = '{}';
+				initConditionRow(row);
 			}
 			return;
 		}
@@ -134,6 +358,18 @@
 	document.addEventListener('change', function (event) {
 		if (event.target.matches('[data-action-type]')) {
 			syncOperationFields(document);
+		}
+
+		if (event.target.matches('[name*="[condition_type]"]')) {
+			var row = event.target.closest('[data-condition-row]');
+			if (row) {
+				syncValueState(row, { value_text: '', value_number: '', value_json: {} });
+				initConditionRow(row);
+			}
+		}
+
+		if (event.target.matches('[data-condition-operator]')) {
+			event.target.dataset.selectedOperator = event.target.value;
 		}
 	});
 
@@ -177,5 +413,6 @@
 
 	document.addEventListener('DOMContentLoaded', function () {
 		syncOperationFields(document);
+		document.querySelectorAll('[data-condition-row]').forEach(initConditionRow);
 	});
 }());

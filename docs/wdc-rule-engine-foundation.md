@@ -16,6 +16,8 @@ Supported condition types cover order totals, item counts, payment method, desti
 
 The repository returns enabled rules ordered by the internal sort order (`priority ASC`, then `id ASC`). Admin users manage that order visually from top to bottom; the evaluator intentionally does not handle global ordering.
 
+Condition values are type-aware. Numeric conditions use `value_number`; select/text identifiers use `value_text`; city stores FIAS ID in `value_text` and display metadata in `value_json`; dimensions store `length_cm`, `width_cm`, and `height_cm` in `value_json`. Weight is compared in grams. Volume is compared in cubic meters after converting package `cm3` to `m3`. City matching prefers FIAS ID from the rule context or destination address and falls back to city text only when no FIAS ID is present.
+
 ## Audit Trail
 
 Every evaluated rule emits `RuleAuditEntry` records. Applied entries include the changed value where relevant. Non-applied entries include the reason, such as disabled rules or unmatched conditions.

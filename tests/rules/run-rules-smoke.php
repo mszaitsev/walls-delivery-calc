@@ -31,17 +31,19 @@ function rules_smoke_assert( bool $condition, string $message ): void {
 	}
 }
 
-function rules_context( float $delivery_price = 450, int $weight = 1000, string $city = 'Moscow' ): RuleEvaluationContext {
-	$item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), $weight, 10, 10, 10 );
+function rules_context( float $delivery_price = 450, int $weight = 1000, string $city = 'Moscow', array $meta = array(), string $fias_id = '' ): RuleEvaluationContext {
+	$item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), $weight, 120, 20, 15 );
 
 	return new RuleEvaluationContext(
 		Money::from_rubles( 1000 ),
 		Money::from_rubles( $delivery_price ),
 		Package::from_items( array( $item ), 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) ),
-		new Address( country_code: 'RU', city: $city, street: 'Tverskaya', house: '1', raw_address: $city . ', Tverskaya 1' ),
+		new Address( country_code: 'RU', city: $city, street: 'Tverskaya', house: '1', raw_address: $city . ', Tverskaya 1', fias_id: $fias_id ),
 		'courier',
 		'card',
-		'2026-05-21'
+		'2026-05-21',
+		array(),
+		$meta
 	);
 }
 
@@ -157,5 +159,116 @@ $calendar_days_rule = Rule::from_array(
 	)
 );
 rules_smoke_assert( array() === $calendar_days_rule->validate(), 'calendar_days must be a valid operation base.' );
+
+$payment_rule = new Rule(
+	null,
+	'Payment',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array( new RuleCondition( null, null, 1, RuleConditionTypes::PAYMENT_METHOD, RuleOperators::EQ, 'card' ) )
+);
+$result = $engine->apply_rules( array( $payment_rule ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'payment_method condition must still work.' );
+
+$city_fias_rule = new Rule(
+	null,
+	'City FIAS',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array( new RuleCondition( null, null, 1, RuleConditionTypes::CITY, RuleOperators::EQ, 'fias-nsk', null, array( 'fias_id' => 'fias-nsk', 'display_name' => 'Новосибирск' ) ) )
+);
+$result = $engine->apply_rules( array( $city_fias_rule ), rules_context( 450, 1000, 'Other city', array( 'selected_location_fias_id' => 'fias-nsk' ) ) );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'city condition must compare by selected location fias_id.' );
+
+$weight_rule = new Rule(
+	null,
+	'Weight grams',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array( new RuleCondition( null, null, 1, RuleConditionTypes::WEIGHT, RuleOperators::GTE, '', 12000 ) )
+);
+$result = $engine->apply_rules( array( $weight_rule ), rules_context( 450, 12000 ) );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'weight condition must compare grams without conversion.' );
+
+$dimensions_rule = new Rule(
+	null,
+	'Dimensions',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array( new RuleCondition( null, null, 1, RuleConditionTypes::DIMENSIONS, RuleOperators::GTE, '', null, array( 'length_cm' => 100, 'height_cm' => 10 ) ) )
+);
+$result = $engine->apply_rules( array( $dimensions_rule ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'dimensions condition must compare all filled fields.' );
+$dimensions_ignore_empty = new RuleCondition( null, null, 1, RuleConditionTypes::DIMENSIONS, RuleOperators::GTE, '', null, array( 'length_cm' => 100 ) );
+$result = $engine->apply_rules( array( Rule::from_array( array_merge( $dimensions_rule->to_array(), array( 'conditions' => array( $dimensions_ignore_empty ) ) ) ) ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'dimensions condition must ignore empty fields.' );
+
+$volume_rule = new Rule(
+	null,
+	'Volume m3',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array( new RuleCondition( null, null, 1, RuleConditionTypes::VOLUME, RuleOperators::GTE, '', 0.036 ) )
+);
+$result = $engine->apply_rules( array( $volume_rule ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'volume condition must compare cubic meters.' );
+
+$date_rule = new Rule(
+	null,
+	'Date',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_PRICE,
+	RuleOperationTypes::DECREASE,
+	10,
+	RuleOperationBases::RUBLES,
+	false,
+	false,
+	array( new RuleCondition( null, null, 1, RuleConditionTypes::DATE, RuleOperators::GTE, '2026-05-20' ) )
+);
+$result = $engine->apply_rules( array( $date_rule ), rules_context() );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'date condition must evaluate stored YYYY-MM-DD values.' );
 
 echo "Rules smoke test passed.\n";

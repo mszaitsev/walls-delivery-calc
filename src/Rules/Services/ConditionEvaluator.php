@@ -11,10 +11,18 @@ use WallsShop\WDC\Rules\ValueObjects\RuleOperators;
 
 final class ConditionEvaluator {
 	public function evaluate( RuleCondition $condition, RuleEvaluationContext $context ): bool {
+		if ( RuleConditionTypes::DIMENSIONS === $condition->condition_type ) {
+			return $this->compare_dimensions( $context, $condition );
+		}
+
 		$left = $this->context_value( $condition->condition_type, $context );
 
 		if ( RuleConditionTypes::DATE === $condition->condition_type ) {
 			return $this->compare_dates( (string) $left, $condition );
+		}
+
+		if ( RuleConditionTypes::CITY === $condition->condition_type ) {
+			return $this->compare_city( (string) $left, $condition, $context );
 		}
 
 		if ( is_int( $left ) || is_float( $left ) ) {
@@ -34,7 +42,7 @@ final class ConditionEvaluator {
 			RuleConditionTypes::DELIVERY_TYPE  => $context->delivery_type,
 			RuleConditionTypes::DELIVERY_PRICE => $context->delivery_price->get_rubles(),
 			RuleConditionTypes::WEIGHT         => $context->package->get_total_weight_g(),
-			RuleConditionTypes::VOLUME         => $context->package->get_total_volume_cm3(),
+			RuleConditionTypes::VOLUME         => $context->package->get_total_volume_cm3() / 1000000,
 			RuleConditionTypes::DAY_OF_WEEK    => (int) ( new DateTimeImmutable( $context->calculation_date ) )->format( 'N' ),
 			RuleConditionTypes::DAY_OF_MONTH   => (int) ( new DateTimeImmutable( $context->calculation_date ) )->format( 'j' ),
 			RuleConditionTypes::MONTH          => (int) ( new DateTimeImmutable( $context->calculation_date ) )->format( 'n' ),
@@ -90,6 +98,52 @@ final class ConditionEvaluator {
 			RuleOperators::GTE => $left_date >= $right_date,
 			RuleOperators::LT  => $left_date < $right_date,
 			RuleOperators::LTE => $left_date <= $right_date,
+			default            => false,
+		};
+	}
+
+	private function compare_city( string $left, RuleCondition $condition, RuleEvaluationContext $context ): bool {
+		$fias_id = trim( (string) ( $context->meta['selected_location_fias_id'] ?? $context->meta['location_fias_id'] ?? $context->meta['_wdc_platform_location_fias_id'] ?? $context->destination->fias_id ) );
+		if ( '' !== $fias_id && '' !== trim( $condition->value_text ) ) {
+			$matches = strtolower( $fias_id ) === strtolower( trim( $condition->value_text ) );
+			return RuleOperators::NEQ === $condition->operator ? ! $matches : $matches;
+		}
+
+		return $this->compare_strings( $left, $condition );
+	}
+
+	private function compare_dimensions( RuleEvaluationContext $context, RuleCondition $condition ): bool {
+		$checks = array();
+		$left = array(
+			'length_cm' => $context->package->length_cm,
+			'width_cm'  => $context->package->width_cm,
+			'height_cm' => $context->package->height_cm,
+		);
+
+		foreach ( array( 'length_cm', 'width_cm', 'height_cm' ) as $key ) {
+			if ( ! isset( $condition->value_json[ $key ] ) || '' === (string) $condition->value_json[ $key ] ) {
+				continue;
+			}
+
+			$actual = $left[ $key ];
+			if ( null === $actual ) {
+				return false;
+			}
+
+			$checks[] = $this->compare_number_pair( (float) $actual, (float) $condition->value_json[ $key ], $condition->operator );
+		}
+
+		return array() !== $checks && ! in_array( false, $checks, true );
+	}
+
+	private function compare_number_pair( float $left, float $right, string $operator ): bool {
+		return match ( $operator ) {
+			RuleOperators::EQ  => $left === $right,
+			RuleOperators::NEQ => $left !== $right,
+			RuleOperators::GT  => $left > $right,
+			RuleOperators::GTE => $left >= $right,
+			RuleOperators::LT  => $left < $right,
+			RuleOperators::LTE => $left <= $right,
 			default            => false,
 		};
 	}

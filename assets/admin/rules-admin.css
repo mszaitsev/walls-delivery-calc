@@ -110,13 +110,60 @@
 
 .wdc-condition-row {
 	display: grid;
-	grid-template-columns: minmax(80px, .55fr) repeat(4, minmax(140px, 1fr)) auto;
+	grid-template-columns: minmax(80px, .55fr) minmax(190px, 1fr) minmax(90px, .65fr) minmax(240px, 1.4fr) auto;
 	gap: 10px;
 	align-items: end;
 	padding: 12px;
 	background: #f6f7f7;
 	border: 1px solid #dcdcde;
 	border-radius: 4px;
+}
+
+.wdc-condition-value {
+	min-width: 220px;
+}
+
+.wdc-dimensions-fields {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(80px, 1fr));
+	gap: 8px;
+}
+
+.wdc-location-field {
+	position: relative;
+}
+
+.wdc-location-results {
+	position: absolute;
+	z-index: 20;
+	right: 0;
+	left: 0;
+	display: grid;
+	gap: 2px;
+	max-height: 240px;
+	overflow: auto;
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
+}
+
+.wdc-location-results:empty {
+	display: none;
+}
+
+.wdc-location-results button,
+.wdc-location-results span {
+	display: block;
+	width: 100%;
+	padding: 8px;
+	text-align: left;
+	background: #fff;
+	border: 0;
+}
+
+.wdc-location-results button:hover,
+.wdc-location-results button:focus {
+	background: #f0f6fc;
 }
 
 .wdc-condition-row.is-template {

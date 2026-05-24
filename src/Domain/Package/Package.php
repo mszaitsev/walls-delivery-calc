@@ -30,15 +30,21 @@ final class Package {
 	public static function from_items( array $items, int $packaging_weight_g, Money $cart_total, Money $declared_value ): self {
 		$weight_g = 0;
 		$volume   = 0;
+		$length   = 0;
+		$width    = 0;
+		$height   = 0;
 
 		foreach ( $items as $item ) {
 			if ( $item instanceof PackageItem ) {
 				$weight_g += $item->get_total_weight_g();
 				$volume   += $item->get_volume_cm3();
+				$length    = max( $length, $item->length_cm );
+				$width     = max( $width, $item->width_cm );
+				$height    = max( $height, $item->height_cm );
 			}
 		}
 
-		return new self( $items, $declared_value, $cart_total, $weight_g, $packaging_weight_g, $weight_g + $packaging_weight_g, null, null, null, $volume, 'cart' );
+		return new self( $items, $declared_value, $cart_total, $weight_g, $packaging_weight_g, $weight_g + $packaging_weight_g, $length > 0 ? $length : null, $width > 0 ? $width : null, $height > 0 ? $height : null, $volume, 'cart' );
 	}
 
 	/**

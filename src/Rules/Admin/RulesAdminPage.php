@@ -51,6 +51,7 @@ final class RulesAdminPage {
 	public function register(): void {
 		add_action( 'admin_menu', array( $this, 'add_menu_page' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
+		add_action( 'wp_ajax_wdc_rules_location_search', array( $this, 'ajax_location_search' ) );
 	}
 
 	public function add_menu_page(): void {
@@ -64,6 +65,9 @@ final class RulesAdminPage {
 
 		wp_enqueue_style( 'wdc-rules-admin', $this->environment->plugin_url() . 'assets/admin/rules-admin.css', array(), $this->environment->version() );
 		wp_enqueue_script( 'wdc-rules-admin', $this->environment->plugin_url() . 'assets/admin/rules-admin.js', array(), $this->environment->version(), true );
+		if ( function_exists( 'wp_localize_script' ) ) {
+			wp_localize_script( 'wdc-rules-admin', 'wdcRulesAdmin', $this->js_config() );
+		}
 	}
 
 	public function render_page(): void {
@@ -294,8 +298,9 @@ final class RulesAdminPage {
 	}
 
 	private function render_condition_row( RuleCondition $condition, int $index ): void {
+		$value_json = wp_json_encode( $condition->value_json );
 		?>
-		<div class="wdc-condition-row" data-condition-row>
+		<div class="wdc-condition-row" data-condition-row data-condition-value="<?php echo esc_attr( $this->condition_value_payload( $condition ) ); ?>">
 			<label>
 				<span><?php echo esc_html__( 'Группа', 'walls-delivery-calc' ); ?></span>
 				<input type="number" min="1" name="conditions[<?php echo esc_attr( (string) $index ); ?>][condition_group]" value="<?php echo esc_attr( (string) $condition->condition_group ); ?>">
@@ -311,21 +316,12 @@ final class RulesAdminPage {
 			</label>
 			<label>
 				<span><?php echo esc_html__( 'Оператор', 'walls-delivery-calc' ); ?></span>
-				<select name="conditions[<?php echo esc_attr( (string) $index ); ?>][operator]">
-					<option value=""><?php echo esc_html__( 'Не выбрано', 'walls-delivery-calc' ); ?></option>
-					<?php foreach ( RuleOperators::all() as $value ) : ?>
-						<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $condition->operator, $value ); ?>><?php echo esc_html( $this->operator_label( $value ) ); ?></option>
-					<?php endforeach; ?>
-				</select>
+				<select name="conditions[<?php echo esc_attr( (string) $index ); ?>][operator]" data-condition-operator data-selected-operator="<?php echo esc_attr( $condition->operator ); ?>"></select>
 			</label>
-			<label>
-				<span><?php echo esc_html__( 'Текст', 'walls-delivery-calc' ); ?></span>
-				<input type="text" name="conditions[<?php echo esc_attr( (string) $index ); ?>][value_text]" value="<?php echo esc_attr( $condition->value_text ); ?>">
-			</label>
-			<label>
-				<span><?php echo esc_html__( 'Число', 'walls-delivery-calc' ); ?></span>
-				<input type="number" step="0.0001" name="conditions[<?php echo esc_attr( (string) $index ); ?>][value_number]" value="<?php echo esc_attr( null === $condition->value_number ? '' : (string) $condition->value_number ); ?>">
-			</label>
+			<div class="wdc-condition-value" data-condition-value-control></div>
+			<input type="hidden" name="conditions[<?php echo esc_attr( (string) $index ); ?>][value_text]" value="<?php echo esc_attr( $condition->value_text ); ?>" data-value-text>
+			<input type="hidden" name="conditions[<?php echo esc_attr( (string) $index ); ?>][value_number]" value="<?php echo esc_attr( null === $condition->value_number ? '' : (string) $condition->value_number ); ?>" data-value-number>
+			<input type="hidden" name="conditions[<?php echo esc_attr( (string) $index ); ?>][value_json]" value="<?php echo esc_attr( false === $value_json ? '{}' : $value_json ); ?>" data-value-json>
 			<button class="button" type="button" data-remove-condition><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button>
 		</div>
 		<?php
@@ -344,10 +340,15 @@ final class RulesAdminPage {
 					<label><span><?php echo esc_html__( 'Исходный срок доставки', 'walls-delivery-calc' ); ?></span><input type="number" min="0" name="simulation[delivery_days]" value="<?php echo esc_attr( (string) $input['delivery_days'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Сумма заказа', 'walls-delivery-calc' ); ?></span><input type="number" step="0.01" name="simulation[order_total]" value="<?php echo esc_attr( (string) $input['order_total'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?></span><input type="number" name="simulation[weight]" value="<?php echo esc_attr( (string) $input['weight'] ); ?>"></label>
-					<label><span><?php echo esc_html__( 'Страна', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[country]" value="<?php echo esc_attr( (string) $input['country'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Страна', 'walls-delivery-calc' ); ?></span><?php $this->render_select( 'simulation[country]', $this->country_options(), (string) $input['country'] ); ?></label>
 					<label><span><?php echo esc_html__( 'Город', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[city]" value="<?php echo esc_attr( (string) $input['city'] ); ?>"></label>
-					<label><span><?php echo esc_html__( 'Тип доставки', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[delivery_type]" value="<?php echo esc_attr( (string) $input['delivery_type'] ); ?>"></label>
-					<label><span><?php echo esc_html__( 'Способ оплаты', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[payment_method]" value="<?php echo esc_attr( (string) $input['payment_method'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'FIAS ID населенного пункта', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[location_fias_id]" value="<?php echo esc_attr( (string) $input['location_fias_id'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Тип доставки', 'walls-delivery-calc' ); ?></span><?php $this->render_select( 'simulation[delivery_type]', $this->condition_schema()->delivery_type_options(), (string) $input['delivery_type'] ); ?></label>
+					<label><span><?php echo esc_html__( 'Способ оплаты', 'walls-delivery-calc' ); ?></span><?php $this->render_select( 'simulation[payment_method]', $this->payment_method_options(), (string) $input['payment_method'] ); ?></label>
+					<label><span><?php echo esc_html__( 'Длина, см', 'walls-delivery-calc' ); ?></span><input type="number" step="0.01" name="simulation[length_cm]" value="<?php echo esc_attr( (string) $input['length_cm'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Ширина, см', 'walls-delivery-calc' ); ?></span><input type="number" step="0.01" name="simulation[width_cm]" value="<?php echo esc_attr( (string) $input['width_cm'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Высота, см', 'walls-delivery-calc' ); ?></span><input type="number" step="0.01" name="simulation[height_cm]" value="<?php echo esc_attr( (string) $input['height_cm'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Объем, куб.м.', 'walls-delivery-calc' ); ?></span><input type="number" step="0.0001" name="simulation[volume_m3]" value="<?php echo esc_attr( (string) $input['volume_m3'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Дата', 'walls-delivery-calc' ); ?></span><input type="date" name="simulation[date]" value="<?php echo esc_attr( (string) $input['date'] ); ?>"></label>
 				</div>
 				<p class="submit"><button class="button button-primary" type="submit"><?php echo esc_html__( 'Симулировать расчет', 'walls-delivery-calc' ); ?></button></p>
@@ -601,21 +602,16 @@ final class RulesAdminPage {
 			$operator       = isset( $item['operator'] ) ? sanitize_key( $item['operator'] ) : '';
 			$value_text     = isset( $item['value_text'] ) ? sanitize_text_field( (string) $item['value_text'] ) : '';
 			$value_number   = isset( $item['value_number'] ) ? trim( sanitize_text_field( (string) $item['value_number'] ) ) : '';
+			$value_json     = isset( $item['value_json'] ) ? trim( sanitize_text_field( (string) $item['value_json'] ) ) : '';
 
-			if ( '' === $condition_type && '' === $operator && '' === $value_text && '' === $value_number ) {
+			if ( '' === $condition_type && '' === $operator && '' === $value_text && '' === $value_number && '' === $value_json ) {
 				continue;
 			}
 
-			$conditions[] = new RuleCondition(
-				null,
-				null,
-				max( 1, isset( $item['condition_group'] ) ? (int) sanitize_text_field( (string) $item['condition_group'] ) : 1 ),
-				$condition_type,
-				$operator,
-				$value_text,
-				'' === $value_number ? null : (float) $value_number,
-				array()
-			);
+			$condition = $this->condition_schema()->sanitize_condition_input( $item );
+			if ( $condition instanceof RuleCondition ) {
+				$conditions[] = $condition;
+			}
 		}
 
 		return $conditions;
@@ -639,8 +635,13 @@ final class RulesAdminPage {
 			'weight'         => isset( $raw['weight'] ) ? max( 0, (int) sanitize_text_field( (string) $raw['weight'] ) ) : $defaults['weight'],
 			'country'        => isset( $raw['country'] ) ? sanitize_text_field( (string) $raw['country'] ) : $defaults['country'],
 			'city'           => isset( $raw['city'] ) ? sanitize_text_field( (string) $raw['city'] ) : $defaults['city'],
-			'delivery_type'  => isset( $raw['delivery_type'] ) ? sanitize_text_field( (string) $raw['delivery_type'] ) : $defaults['delivery_type'],
+			'location_fias_id' => isset( $raw['location_fias_id'] ) ? sanitize_text_field( (string) $raw['location_fias_id'] ) : $defaults['location_fias_id'],
+			'delivery_type'  => in_array( (string) ( $raw['delivery_type'] ?? '' ), array_keys( $this->condition_schema()->delivery_type_options() ), true ) ? sanitize_text_field( (string) $raw['delivery_type'] ) : $defaults['delivery_type'],
 			'payment_method' => isset( $raw['payment_method'] ) ? sanitize_text_field( (string) $raw['payment_method'] ) : $defaults['payment_method'],
+			'length_cm'      => isset( $raw['length_cm'] ) ? max( 0.0, (float) sanitize_text_field( (string) $raw['length_cm'] ) ) : $defaults['length_cm'],
+			'width_cm'       => isset( $raw['width_cm'] ) ? max( 0.0, (float) sanitize_text_field( (string) $raw['width_cm'] ) ) : $defaults['width_cm'],
+			'height_cm'      => isset( $raw['height_cm'] ) ? max( 0.0, (float) sanitize_text_field( (string) $raw['height_cm'] ) ) : $defaults['height_cm'],
+			'volume_m3'      => isset( $raw['volume_m3'] ) ? max( 0.0, (float) sanitize_text_field( (string) $raw['volume_m3'] ) ) : $defaults['volume_m3'],
 			'date'           => isset( $raw['date'] ) && 1 === preg_match( '/^\d{4}-\d{2}-\d{2}$/', (string) $raw['date'] ) ? sanitize_text_field( (string) $raw['date'] ) : $defaults['date'],
 		);
 	}
@@ -650,18 +651,25 @@ final class RulesAdminPage {
 	 */
 	private function simulation_context( array $input ): RuleEvaluationContext {
 		$order_total = Money::from_rubles( (float) $input['order_total'] );
-		$item        = new PackageItem( 'SIM', 'Simulation item', 1, $order_total, $order_total, (int) $input['weight'], 10, 10, 10 );
+		$length = (int) round( (float) $input['length_cm'] );
+		$width  = (int) round( (float) $input['width_cm'] );
+		$height = (int) round( (float) $input['height_cm'] );
+		$item   = new PackageItem( 'SIM', 'Simulation item', 1, $order_total, $order_total, (int) $input['weight'], $length, $width, $height );
+		$package = Package::from_items( array( $item ), 0, $order_total, $order_total );
+		if ( (float) $input['volume_m3'] > 0 ) {
+			$package = new Package( array( $item ), $order_total, $order_total, (int) $input['weight'], 0, (int) $input['weight'], $length, $width, $height, (int) round( (float) $input['volume_m3'] * 1000000 ), 'manual' );
+		}
 
 		return new RuleEvaluationContext(
 			$order_total,
 			Money::from_rubles( (float) $input['delivery_price'] ),
-			Package::from_items( array( $item ), 0, $order_total, $order_total ),
-			new Address( country_code: (string) $input['country'], city: (string) $input['city'], raw_address: (string) $input['city'] ),
+			$package,
+			new Address( country_code: (string) $input['country'], city: (string) $input['city'], raw_address: (string) $input['city'], fias_id: (string) $input['location_fias_id'] ),
 			(string) $input['delivery_type'],
 			(string) $input['payment_method'],
 			(string) $input['date'],
 			array(),
-			array( 'original_delivery_days' => (int) $input['delivery_days'] )
+			array( 'original_delivery_days' => (int) $input['delivery_days'], 'selected_location_fias_id' => (string) $input['location_fias_id'] )
 		);
 	}
 
@@ -688,7 +696,7 @@ final class RulesAdminPage {
 		$groups = array();
 		foreach ( $rule->conditions as $condition ) {
 			$value = null !== $condition->value_number ? (string) $condition->value_number : $condition->value_text;
-			$groups[ $condition->condition_group ][] = $this->condition_type_label( $condition->condition_type ) . ' ' . $this->operator_label( $condition->operator ) . ' ' . $value;
+			$groups[ $condition->condition_group ][] = $this->condition_schema()->condition_summary( $condition );
 		}
 
 		$parts = array();
@@ -797,8 +805,13 @@ final class RulesAdminPage {
 			'weight'         => 12000,
 			'country'        => 'RU',
 			'city'           => 'Moscow',
+			'location_fias_id' => '',
 			'delivery_type'  => 'courier',
-			'payment_method' => 'card',
+			'payment_method' => $this->default_payment_method(),
+			'length_cm'      => 10,
+			'width_cm'       => 10,
+			'height_cm'      => 10,
+			'volume_m3'      => 0.001,
 			'date'           => ( new DateTimeImmutable() )->format( 'Y-m-d' ),
 		);
 	}
@@ -913,5 +926,140 @@ final class RulesAdminPage {
 		$days = $range->min_days ?? $range->max_days ?? 0;
 
 		return sprintf( '%d %s', $days, $unit );
+	}
+
+	private function condition_schema(): RuleConditionUiSchema {
+		static $schema = null;
+		if ( ! $schema instanceof RuleConditionUiSchema ) {
+			$schema = new RuleConditionUiSchema();
+		}
+
+		return $schema;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function js_config(): array {
+		$schema = $this->condition_schema();
+
+		return array(
+			'conditions' => $schema->definitions( $this->payment_method_options(), $this->country_options() ),
+			'operatorLabels' => $schema->operator_labels(),
+			'locationSearch' => array(
+				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+				'action'  => 'wdc_rules_location_search',
+				'nonce'   => wp_create_nonce( self::NONCE_ACTION ),
+			),
+			'strings' => array(
+				'selectValue' => __( 'Выберите значение', 'walls-delivery-calc' ),
+				'searchLocation' => __( 'Начните вводить населенный пункт', 'walls-delivery-calc' ),
+				'noResults' => __( 'Ничего не найдено', 'walls-delivery-calc' ),
+			),
+		);
+	}
+
+	private function condition_value_payload( RuleCondition $condition ): string {
+		$payload = wp_json_encode(
+			array(
+				'value_text'   => $condition->value_text,
+				'value_number' => $condition->value_number,
+				'value_json'   => $condition->value_json,
+			)
+		);
+
+		return false === $payload ? '{}' : $payload;
+	}
+
+	/**
+	 * @param array<string,string|int> $options
+	 */
+	private function render_select( string $name, array $options, string $selected ): void {
+		?>
+		<select name="<?php echo esc_attr( $name ); ?>">
+			<?php foreach ( $options as $value => $label ) : ?>
+				<option value="<?php echo esc_attr( (string) $value ); ?>" <?php selected( $selected, (string) $value ); ?>><?php echo esc_html( (string) $label ); ?></option>
+			<?php endforeach; ?>
+		</select>
+		<?php
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private function payment_method_options(): array {
+		$options = array();
+		if ( function_exists( 'WC' ) && is_object( WC() ) && isset( WC()->payment_gateways ) && is_object( WC()->payment_gateways ) && method_exists( WC()->payment_gateways, 'payment_gateways' ) ) {
+			$gateways = WC()->payment_gateways->payment_gateways();
+			if ( is_array( $gateways ) ) {
+				foreach ( $gateways as $id => $gateway ) {
+					$title = is_object( $gateway ) && isset( $gateway->title ) ? (string) $gateway->title : (string) $id;
+					$options[ (string) $id ] = '' !== trim( $title ) ? $title : (string) $id;
+				}
+			}
+		}
+
+		return array() !== $options ? $options : array( 'cod' => __( 'Оплата при получении', 'walls-delivery-calc' ) );
+	}
+
+	private function default_payment_method(): string {
+		$options = $this->payment_method_options();
+
+		return (string) array_key_first( $options );
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private function country_options(): array {
+		if ( function_exists( 'WC' ) && is_object( WC() ) && isset( WC()->countries ) && is_object( WC()->countries ) && method_exists( WC()->countries, 'get_countries' ) ) {
+			$countries = WC()->countries->get_countries();
+			if ( is_array( $countries ) && array() !== $countries ) {
+				return array_map( 'strval', $countries );
+			}
+		}
+
+		return array( 'RU' => __( 'Россия', 'walls-delivery-calc' ) );
+	}
+
+	public function ajax_location_search(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 );
+		}
+
+		$nonce = isset( $_REQUEST['nonce'] ) ? sanitize_text_field( wp_unslash( (string) $_REQUEST['nonce'] ) ) : '';
+		if ( ! wp_verify_nonce( $nonce, self::NONCE_ACTION ) ) {
+			wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 );
+		}
+
+		global $wpdb;
+
+		$query = isset( $_REQUEST['query'] ) ? sanitize_text_field( wp_unslash( (string) $_REQUEST['query'] ) ) : '';
+		$table = $wpdb->prefix . 'wdc_locations';
+		$like = '%' . $wpdb->esc_like( $query ) . '%';
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT fias_id, display_name FROM {$table} WHERE active = 1 AND (display_name LIKE %s OR fias_id LIKE %s) ORDER BY display_name ASC LIMIT 20",
+				$like,
+				$like
+			),
+			ARRAY_A
+		);
+
+		$items = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$fias_id = (string) ( $row['fias_id'] ?? '' );
+			if ( '' === $fias_id ) {
+				continue;
+			}
+			$display = (string) ( $row['display_name'] ?? $fias_id );
+			$items[] = array(
+				'fias_id'      => $fias_id,
+				'display_name' => $display,
+				'label'        => $display . ' (' . $fias_id . ')',
+			);
+		}
+
+		wp_send_json_success( array( 'items' => $items ) );
 	}
 }

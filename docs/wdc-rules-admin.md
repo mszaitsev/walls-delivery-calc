@@ -1,6 +1,6 @@
 # WDC Rules Admin
 
-Version: 0.18.2.
+Version: 0.18.3.
 
 ## Default rules
 
@@ -31,15 +31,32 @@ Rules are shown and applied from top to bottom. The database `priority` column i
 
 ## Conditions
 
-Rules can have multiple conditions. A condition has:
+Rules can have multiple conditions. The UI is type-specific: managers choose a condition type, then see only the valid operator and value control for that type. The old universal "text plus number" editor is no longer shown.
 
-- group number
-- condition type
-- operator
-- text value
-- numeric value
+Conditions inside the same `condition_group` are evaluated as AND. Different groups are evaluated as OR.
 
-Empty condition rows are ignored before validation. Conditions inside the same `condition_group` are evaluated as AND. Different groups are evaluated as OR.
+Condition matrix:
+
+| Type | Label | Operators | UI value | Storage | Unit/source |
+| --- | --- | --- | --- | --- | --- |
+| `order_total` | Сумма заказа | `>=`, `=`, `!=`, `>`, `<`, `<=` | number | `value_number` | руб. |
+| `items_count` | Количество товаров | numeric | integer | `value_number` | items |
+| `payment_method` | Способ оплаты | `=`, `!=` | select | `value_text` | WooCommerce gateway id |
+| `city` | Населенный пункт | `=`, `!=` | autocomplete | `value_text`, `value_json` | FIAS ID plus display name |
+| `country` | Страна | `=`, `!=` | select | `value_text` | WooCommerce country code |
+| `delivery_type` | Тип доставки | `=`, `!=` | select | `value_text` | `pickup` or `courier` |
+| `delivery_price` | Рассчитанная стоимость доставки | numeric | number | `value_number` | руб. |
+| `weight` | Вес | numeric | number | `value_number` | grams |
+| `dimensions` | Габариты | numeric | length/width/height | `value_json` | cm |
+| `volume` | Объем | numeric | number | `value_number` | cubic meters |
+| `day_of_week` | День недели | `=`, `!=` | select | `value_number` | 1..7 |
+| `day_of_month` | День месяца | numeric | select | `value_number` | 1..31 |
+| `month` | Месяц | `=`, `!=` | select | `value_number` | 1..12 |
+| `date` | Дата | numeric | `dd.mm.yyyy` | `value_text` | normalized `YYYY-MM-DD` |
+
+The city condition searches the local WDC locations table. It stores `value_text=fias_id` and `value_json={fias_id, display_name}`. Runtime compares FIAS ID first, then falls back to normalized city text when no FIAS ID is available.
+
+Weight is stored and compared in grams. Volume is entered and compared in cubic meters; package volume in `cm3` is converted by the evaluator. Dimensions compare every filled field and ignore empty dimension fields.
 
 ## Actions
 
@@ -67,8 +84,11 @@ The "Проверить правила" section builds a real `RuleEvaluationCon
 - original delivery days
 - order total
 - weight
+- dimensions
+- volume in cubic meters
 - country
 - city
+- location FIAS ID
 - delivery type
 - payment method
 - calculation date

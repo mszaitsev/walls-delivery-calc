@@ -6,6 +6,7 @@ use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
+use WallsShop\WDC\Rules\Admin\RuleConditionUiSchema;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleCondition;
 use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
@@ -26,6 +27,24 @@ defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
 if ( ! function_exists( 'current_time' ) ) {
 	function current_time( string $type ): string {
 		return '2026-05-21 12:00:00';
+	}
+}
+
+if ( ! function_exists( '__' ) ) {
+	function __( string $text, string $domain = '' ): string {
+		return $text;
+	}
+}
+
+if ( ! function_exists( 'sanitize_key' ) ) {
+	function sanitize_key( string $value ): string {
+		return strtolower( preg_replace( '/[^a-zA-Z0-9_\-]/', '', $value ) ?? '' );
+	}
+}
+
+if ( ! function_exists( 'sanitize_text_field' ) ) {
+	function sanitize_text_field( string $value ): string {
+		return trim( strip_tags( $value ) );
 	}
 }
 
@@ -316,6 +335,39 @@ rules_admin_smoke_assert( in_array( 'action_type is invalid', $invalid_errors, t
 rules_admin_smoke_assert( in_array( 'condition_type is invalid', $invalid_errors, true ), 'Invalid condition type must be rejected.' );
 rules_admin_smoke_assert( in_array( 'operator is invalid', $invalid_errors, true ), 'Invalid operator must be rejected.' );
 
+$schema = new RuleConditionUiSchema();
+$order_total_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::ORDER_TOTAL, 'operator' => RuleOperators::GTE, 'value_number' => '5000' ) );
+rules_admin_smoke_assert( $order_total_condition instanceof RuleCondition && 5000.0 === $order_total_condition->value_number && '' === $order_total_condition->value_text, 'order_total must store value_number.' );
+$items_count_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::ITEMS_COUNT, 'operator' => RuleOperators::EQ, 'value_number' => '3' ) );
+rules_admin_smoke_assert( $items_count_condition instanceof RuleCondition && 3.0 === $items_count_condition->value_number, 'items_count must store value_number.' );
+$payment_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::PAYMENT_METHOD, 'operator' => RuleOperators::EQ, 'value_text' => 'cod' ) );
+rules_admin_smoke_assert( $payment_condition instanceof RuleCondition && 'cod' === $payment_condition->value_text, 'payment_method must store gateway id in value_text.' );
+$city_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::CITY, 'operator' => RuleOperators::EQ, 'value_text' => 'fias-nsk', 'value_json' => '{"display_name":"Новосибирская область, г Новосибирск"}' ) );
+rules_admin_smoke_assert( $city_condition instanceof RuleCondition && 'fias-nsk' === $city_condition->value_text, 'city must store fias_id in value_text.' );
+rules_admin_smoke_assert( 'fias-nsk' === ( $city_condition->value_json['fias_id'] ?? '' ) && 'Новосибирская область, г Новосибирск' === ( $city_condition->value_json['display_name'] ?? '' ), 'city must store display_name/fias_id in value_json.' );
+$country_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::COUNTRY, 'operator' => RuleOperators::EQ, 'value_text' => 'RU' ) );
+rules_admin_smoke_assert( $country_condition instanceof RuleCondition && 'RU' === $country_condition->value_text, 'country must store country code.' );
+$delivery_type_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::DELIVERY_TYPE, 'operator' => RuleOperators::EQ, 'value_text' => 'pickup' ) );
+rules_admin_smoke_assert( $delivery_type_condition instanceof RuleCondition && 'pickup' === $delivery_type_condition->value_text, 'delivery_type must store pickup/courier.' );
+$delivery_price_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::DELIVERY_PRICE, 'operator' => RuleOperators::LTE, 'value_number' => '450.5' ) );
+rules_admin_smoke_assert( $delivery_price_condition instanceof RuleCondition && 450.5 === $delivery_price_condition->value_number, 'delivery_price must store rub value_number.' );
+$weight_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::WEIGHT, 'operator' => RuleOperators::GT, 'value_number' => '12000' ) );
+rules_admin_smoke_assert( $weight_condition instanceof RuleCondition && 12000.0 === $weight_condition->value_number, 'weight must store grams.' );
+$dimensions_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::DIMENSIONS, 'operator' => RuleOperators::GTE, 'value_json' => '{"length_cm":"100","height_cm":"10"}' ) );
+rules_admin_smoke_assert( $dimensions_condition instanceof RuleCondition && '100' === (string) ( $dimensions_condition->value_json['length_cm'] ?? '' ) && ! isset( $dimensions_condition->value_json['width_cm'] ), 'dimensions must store filled length/width/height in value_json.' );
+$volume_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::VOLUME, 'operator' => RuleOperators::GTE, 'value_number' => '0.25' ) );
+rules_admin_smoke_assert( $volume_condition instanceof RuleCondition && 0.25 === $volume_condition->value_number, 'volume must store cubic meters in value_number.' );
+$day_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::DAY_OF_WEEK, 'operator' => RuleOperators::EQ, 'value_number' => '1' ) );
+rules_admin_smoke_assert( $day_condition instanceof RuleCondition && 1.0 === $day_condition->value_number, 'day_of_week must store 1..7 value_number.' );
+$month_day_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::DAY_OF_MONTH, 'operator' => RuleOperators::EQ, 'value_number' => '31' ) );
+rules_admin_smoke_assert( $month_day_condition instanceof RuleCondition && 31.0 === $month_day_condition->value_number, 'day_of_month must store 1..31 value_number.' );
+$month_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::MONTH, 'operator' => RuleOperators::EQ, 'value_number' => '12' ) );
+rules_admin_smoke_assert( $month_condition instanceof RuleCondition && 12.0 === $month_condition->value_number, 'month must store 1..12 value_number.' );
+$date_condition = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::DATE, 'operator' => RuleOperators::GTE, 'value_text' => '25.05.2026' ) );
+rules_admin_smoke_assert( $date_condition instanceof RuleCondition && '2026-05-25' === $date_condition->value_text, 'date UI dd.mm.yyyy must store YYYY-MM-DD.' );
+$normalized_operator = $schema->sanitize_condition_input( array( 'condition_type' => RuleConditionTypes::PAYMENT_METHOD, 'operator' => RuleOperators::GT, 'value_text' => 'cod' ) );
+rules_admin_smoke_assert( $normalized_operator instanceof RuleCondition && RuleOperators::EQ === $normalized_operator->operator, 'Invalid operator must be normalized to condition default.' );
+
 $simulation_db = new wpdb();
 $simulation_repository = new RuleRepository( $simulation_db );
 $simulation_repository->save_rule( rules_admin_rule( 'Simulation default', 10, true ) );
@@ -349,11 +401,14 @@ rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'Создать д
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'Удалить демо-правила' ), 'Admin page must not show delete demo button.' );
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'Приоритет' ), 'Admin UI must not contain priority wording.' );
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'name="priority"' ), 'Admin UI must not expose a priority field.' );
+rules_admin_smoke_assert( ! str_contains( $admin_page_source, "esc_html__( 'Текст'" ) && ! str_contains( $admin_page_source, "esc_html__( 'Число'" ), 'Admin UI must not expose universal text and number inputs for every condition.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'wdc_rules_action" value="reorder_rules"' ), 'Admin UI must expose a drag-sort reorder action.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'data-rule-row' ), 'Admin table rows must be draggable.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'Исходный срок доставки' ), 'Simulation UI must always expose original delivery days.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'Итоговый срок' ), 'Simulation result must show final delivery days.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'RuleOperationBases::CALENDAR_DAYS' ), 'change_delivery_days must default to calendar_days in admin handling.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, "delivery_type_options()" ), 'Simulation delivery_type must use select values pickup/courier.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'payment_method_options()' ) && ! str_contains( $admin_page_source, "'payment_method' => 'card'" ), 'Simulation payment_method must use WooCommerce gateways without hardcoded card default.' );
 
 $legacy_files = shell_exec( 'git diff --name-only -- includes' );
 rules_admin_smoke_assert( '' === trim( (string) $legacy_files ), 'Legacy includes/* must remain unchanged.' );
