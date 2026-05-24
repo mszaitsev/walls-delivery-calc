@@ -136,6 +136,9 @@ $locations = array(
 	checkout_location_picker_location( array( 'gar_object_id' => 5004, 'fias_id' => 'fias-mo-ivan', 'region_code' => '50', 'region_name' => 'Московская', 'region_type' => 'обл', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Московская обл., село Ивановка' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 6901, 'fias_id' => 'fias-tver-brod', 'region_code' => '69', 'region_name' => 'Тверская', 'region_type' => 'обл', 'place_name' => 'Брод', 'place_type' => 'д', 'display_name' => 'Тверская обл., деревня Брод' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 6902, 'fias_id' => 'fias-tver-ivan', 'region_code' => '69', 'region_name' => 'Тверская', 'region_type' => 'обл', 'place_name' => 'Ивановка', 'place_type' => 'село', 'display_name' => 'Тверская обл., село Ивановка' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 6903, 'fias_id' => 'fias-tver-brodki', 'region_code' => '69', 'region_name' => 'Тверская', 'region_type' => 'обл', 'place_name' => 'Бродки', 'place_type' => 'д', 'display_name' => 'Тверская обл., деревня Бродки' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 6904, 'fias_id' => 'fias-tver-brod-city', 'region_code' => '69', 'region_name' => 'Тверская', 'region_type' => 'обл', 'city_name' => 'Бродоград', 'city_type' => 'г', 'place_name' => 'Бродоград', 'place_type' => 'г', 'display_name' => 'Тверская обл., г. Бродоград' ) ),
+	checkout_location_picker_location( array( 'gar_object_id' => 6905, 'fias_id' => 'fias-tver-brodograd-place', 'region_code' => '69', 'region_name' => 'Тверская', 'region_type' => 'обл', 'place_name' => 'Бродоград', 'place_type' => 'село', 'display_name' => 'Тверская обл., село Бродоград' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 3501, 'fias_id' => 'fias-vologda-brod', 'region_code' => '35', 'region_name' => 'Вологодская', 'region_type' => 'обл', 'place_name' => 'Брод', 'place_type' => 'д', 'display_name' => 'Вологодская обл., деревня Брод' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 5301, 'fias_id' => 'fias-novgorod-brod', 'region_code' => '53', 'region_name' => 'Новгородская', 'region_type' => 'обл', 'place_name' => 'Бродовка', 'place_type' => 'д', 'display_name' => 'Новгородская обл., деревня Бродовка' ) ),
 	checkout_location_picker_location( array( 'gar_object_id' => 30001, 'fias_id' => 'fias-astr-brod-city', 'region_code' => '30', 'region_name' => 'Астраханская', 'region_type' => 'обл', 'city_name' => 'Брод', 'city_type' => 'г', 'place_name' => 'Брод', 'place_type' => 'г', 'display_name' => 'Астраханская обл., г. Брод' ) ),
@@ -221,8 +224,8 @@ checkout_location_picker_assert( in_array( 'Новгородская', $brod_reg
 $ivan_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $ajax->payload( 'ивановка' )['groups'] ?? array() );
 checkout_location_picker_assert( array_slice( $ivan_regions, 0, 4 ) === array( 'Алтайский', 'Липецкая', 'Московская', 'Тверская' ), 'Same seniority exact Ивановка region groups sort alphabetically.' );
 $prefix_seniority_regions = array_map( static fn( array $group ): string => (string) $group['region_sort_name'], $ajax->payload( 'бродог' )['groups'] ?? array() );
-checkout_location_picker_assert( 'Амурская' === ( $prefix_seniority_regions[0] ?? '' ), 'Prefix city match ranks above prefix place match.' );
-checkout_location_picker_assert( array_slice( $prefix_seniority_regions, 1, 2 ) === array( 'Белгородская', 'Воронежская' ), 'Same seniority prefix place groups sort alphabetically.' );
+checkout_location_picker_assert( array_slice( $prefix_seniority_regions, 0, 2 ) === array( 'Амурская', 'Тверская' ), 'Same seniority prefix city groups sort alphabetically above prefix place.' );
+checkout_location_picker_assert( array_slice( $prefix_seniority_regions, 2, 2 ) === array( 'Белгородская', 'Воронежская' ), 'Same seniority prefix place groups sort alphabetically.' );
 
 $domodedovo_ids = $flatten_fias( $ajax->payload( 'домодедово' ) );
 checkout_location_picker_assert( in_array( 'fias-domodedovo', $domodedovo_ids, true ) && in_array( 'fias-avdotino', $domodedovo_ids, true ) && in_array( 'fias-skripino', $domodedovo_ids, true ), 'Upper-level city search returns city and nested places.' );
@@ -249,8 +252,15 @@ checkout_location_picker_assert( 100 === (int) $limit_payload['shown_total'] && 
 $settings->set( 'checkout_location_region_limit', 10 );
 $settings->set( 'checkout_location_search_limit', 100 );
 $forced_brod = $ajax->payload( 'брод', '69' );
+$forced_brod_ids = $flatten_fias( $forced_brod );
 checkout_location_picker_assert( in_array( 'fias-tver-brod', $flatten_fias( $forced_brod ), true ), 'force_region_code plus брод returns region items.' );
+checkout_location_picker_assert( 'fias-tver-brod' === ( $forced_brod['groups'][0]['items'][0]['fias_id'] ?? '' ), 'force_region_code plus exact place puts exact match first inside region.' );
+checkout_location_picker_assert( array_search( 'fias-tver-brod', $forced_brod_ids, true ) < array_search( 'fias-tver-brodki', $forced_brod_ids, true ), 'force_region_code plus prefix place keeps exact before prefix inside region.' );
+$forced_brodog = $ajax->payload( 'бродог', '69' );
+checkout_location_picker_assert( 'fias-tver-brod-city' === ( $forced_brodog['groups'][0]['items'][0]['fias_id'] ?? '' ) && 'fias-tver-brodograd-place' === ( $forced_brodog['groups'][0]['items'][1]['fias_id'] ?? '' ), 'force_region_code preserves city-over-place seniority inside region.' );
 checkout_location_picker_assert( in_array( 'fias-tver-brod', $flatten_fias( $ajax->payload( 'Тверская область, брод', '69' ) ), true ), 'force_region_code tolerates region-prefixed query.' );
+$forced_prefixed_brod = $ajax->payload( 'Тверская область, брод', '69' );
+checkout_location_picker_assert( 'fias-tver-brod' === ( $forced_prefixed_brod['groups'][0]['items'][0]['fias_id'] ?? '' ), 'Show-all region keeps ranked order inside selected region.' );
 $forced_empty = $ajax->payload( '', '69' );
 checkout_location_picker_assert( (int) $forced_empty['shown_total'] === (int) $forced_empty['total'] && in_array( 'fias-tver-brod', $flatten_fias( $forced_empty ), true ), 'force_region_code with empty query returns all region items within limit.' );
 

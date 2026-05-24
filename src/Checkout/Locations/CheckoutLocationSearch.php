@@ -313,18 +313,18 @@ final class CheckoutLocationSearch {
 		$depth = ( '' !== $fields['place'] ? 4 : 0 ) + ( '' !== $fields['city'] ? 3 : 0 ) + ( '' !== $fields['district'] ? 2 : 0 ) + ( '' !== $fields['region'] ? 1 : 0 );
 		$district_place = $level_matches['district'] > 0 && $level_matches['place'] > 0;
 		$region_only_match = $level_matches['region'] > 0 && 0 === $level_matches['place'] && 0 === $level_matches['city'] && ! $district_place;
-		$matched_hierarchy_rank = match ( true ) {
-			$level_matches['city'] > 0 => 3,
-			$level_matches['place'] > 0 => 2,
-			$level_matches['district'] > 0 => 1,
-			default => 0,
-		};
 		$group_rank_bucket = match ( true ) {
 			$exact_city || $exact_place => 1,
 			$prefix_city || $prefix_place => 2,
 			$district_place => 3,
 			$region_only_match => 4,
 			default => 5,
+		};
+		$matched_hierarchy_rank = match ( $group_rank_bucket ) {
+			1 => $exact_city ? 3 : 2,
+			2 => $prefix_city ? 3 : 2,
+			3 => 1,
+			default => 0,
 		};
 		$group_strength = 800 - ( $group_rank_bucket * 100 );
 
@@ -369,8 +369,9 @@ final class CheckoutLocationSearch {
 	}
 
 	private function compare_scored_locations( array $a, array $b ): int {
-		return (int) $b['score']['matched_levels'] <=> (int) $a['score']['matched_levels']
+		return (int) $a['score']['group_rank_bucket'] <=> (int) $b['score']['group_rank_bucket']
 			?: (int) $b['score']['matched_hierarchy_rank'] <=> (int) $a['score']['matched_hierarchy_rank']
+			?: (int) $b['score']['matched_levels'] <=> (int) $a['score']['matched_levels']
 			?: (int) $b['score']['place_match'] <=> (int) $a['score']['place_match']
 			?: (int) $b['score']['city_match'] <=> (int) $a['score']['city_match']
 			?: (int) $b['score']['district_match'] <=> (int) $a['score']['district_match']
@@ -497,8 +498,16 @@ final class CheckoutLocationSearch {
 			$by_region[ $key ]['rows'][] = $row;
 			$by_region[ $key ]['label'] = $formatter->format_checkout_region_header( $location );
 			$by_region[ $key ]['sort'] = $location->region_name;
-			$by_region[ $key ]['bucket'] = min( (int) ( $by_region[ $key ]['bucket'] ?? 5 ), (int) $row['score']['group_rank_bucket'] );
-			$by_region[ $key ]['matched_hierarchy_rank'] = max( (int) ( $by_region[ $key ]['matched_hierarchy_rank'] ?? 0 ), (int) $row['score']['matched_hierarchy_rank'] );
+			$row_bucket = (int) $row['score']['group_rank_bucket'];
+			$current_bucket = (int) ( $by_region[ $key ]['bucket'] ?? 5 );
+			if ( $row_bucket < $current_bucket ) {
+				$by_region[ $key ]['bucket'] = $row_bucket;
+				$by_region[ $key ]['matched_hierarchy_rank'] = (int) $row['score']['matched_hierarchy_rank'];
+			} elseif ( $row_bucket === $current_bucket ) {
+				$by_region[ $key ]['matched_hierarchy_rank'] = max( (int) ( $by_region[ $key ]['matched_hierarchy_rank'] ?? 0 ), (int) $row['score']['matched_hierarchy_rank'] );
+			} else {
+				$by_region[ $key ]['bucket'] = $current_bucket;
+			}
 			$by_region[ $key ]['group_strength'] = max( (int) ( $by_region[ $key ]['group_strength'] ?? 0 ), (int) $row['score']['group_strength'] );
 			$by_region[ $key ]['score'] = max( (int) ( $by_region[ $key ]['score'] ?? 0 ), (int) $row['score']['total'] );
 		}
@@ -520,14 +529,16 @@ final class CheckoutLocationSearch {
 				$has_more_total = true;
 				break;
 			}
-			$rows = array_slice( $group['rows'], 0, '' !== $force_region_code ? $limit : $effective_region_limit );
+			$group_rows = $group['rows'];
+			usort( $group_rows, fn( array $a, array $b ): int => $this->compare_scored_locations( $a, $b ) );
+			$rows = array_slice( $group_rows, 0, '' !== $force_region_code ? $limit : $effective_region_limit );
 			$available_slots = $limit - $shown_total;
 			if ( count( $rows ) > $available_slots ) {
 				$has_more_total = true;
 			}
 			$rows = array_slice( $rows, 0, $available_slots );
 			$shown_total += count( $rows );
-			$group_has_more = count( $group['rows'] ) > count( $rows );
+			$group_has_more = count( $group_rows ) > count( $rows );
 			$groups[] = array(
 				'region_key'       => (string) $key,
 				'region_label'     => (string) $group['label'],
