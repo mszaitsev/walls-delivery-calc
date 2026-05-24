@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use WallsShop\WDC\Core\Autoloader;
+use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
@@ -125,5 +126,36 @@ $result = $engine->apply_rules(
 );
 rules_smoke_assert( 55000 === $result->final_price?->get_kopecks(), 'stop_processing must stop subsequent rules.' );
 rules_smoke_assert( count( $result->audit ) >= 1, 'Audit entries must be generated.' );
+
+$delivery_days_rule = new Rule(
+	null,
+	'Business days +2',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_DELIVERY_DAYS,
+	RuleOperationTypes::INCREASE,
+	2,
+	RuleOperationBases::BUSINESS_DAYS,
+	false,
+	false
+);
+$context_with_days = RuleEvaluationContext::from_array( array_merge( rules_context()->to_array(), array( 'meta' => array( 'original_delivery_days' => 5 ) ) ) );
+$result = $engine->apply_rules( array( $delivery_days_rule ), $context_with_days );
+rules_smoke_assert( 7 === $result->final_delivery_days?->min_days, 'Delivery days increase must use the original delivery days.' );
+rules_smoke_assert( DateRange::UNIT_BUSINESS_DAYS === $result->final_delivery_days?->unit, 'change_delivery_days must support business_days.' );
+
+$calendar_days_rule = Rule::from_array(
+	array(
+		'name'            => 'Calendar days default',
+		'target_type'     => 'default',
+		'action_type'     => RuleActionTypes::CHANGE_DELIVERY_DAYS,
+		'operation_type'  => RuleOperationTypes::EQUALS,
+		'operation_value' => 3,
+		'operation_base'  => RuleOperationBases::CALENDAR_DAYS,
+	)
+);
+rules_smoke_assert( array() === $calendar_days_rule->validate(), 'calendar_days must be a valid operation base.' );
 
 echo "Rules smoke test passed.\n";

@@ -232,7 +232,11 @@ $carrier_id = $repository->save_rule( rules_admin_rule( 'Carrier rule', 5, true,
 
 $default_rules = $repository->get_default_rules();
 rules_admin_smoke_assert( 2 === count( $default_rules ), 'get_default_rules must return only enabled default rules.' );
-rules_admin_smoke_assert( array( $legacy_id, $default_id ) === array_map( static fn ( Rule $rule ): ?int => $rule->id, $default_rules ), 'Default rules must be ordered by priority.' );
+rules_admin_smoke_assert( array( $legacy_id, $default_id ) === array_map( static fn ( Rule $rule ): ?int => $rule->id, $default_rules ), 'Default rules must be ordered by table order.' );
+
+$repository->reorder_default_rules( array( $default_id, $legacy_id, $disabled_id ) );
+$default_rules = $repository->get_default_rules();
+rules_admin_smoke_assert( array( $default_id, $legacy_id ) === array_map( static fn ( Rule $rule ): ?int => $rule->id, $default_rules ), 'Drag-sort ordering must persist for enabled default rules.' );
 
 $all_default_rules = $repository->get_all_default_rules();
 rules_admin_smoke_assert( 3 === count( $all_default_rules ), 'get_all_default_rules must include disabled default rules.' );
@@ -271,8 +275,8 @@ $toggle_data['enabled'] = true;
 $repository->save_rule( Rule::from_array( $toggle_data ) );
 rules_admin_smoke_assert( true === $repository->get_rule( $disabled_id )?->enabled, 'Toggle must change enabled state.' );
 
-$move_a = $repository->get_rule( $legacy_id );
-$move_b = $repository->get_rule( $default_id );
+$move_a = $repository->get_rule( $default_id );
+$move_b = $repository->get_rule( $legacy_id );
 rules_admin_smoke_assert( $move_a instanceof Rule && $move_b instanceof Rule, 'Move fixture rules must exist.' );
 $a = $move_a->to_array();
 $b = $move_b->to_array();
@@ -280,7 +284,7 @@ $a['priority'] = $move_b->priority;
 $b['priority'] = $move_a->priority;
 $repository->save_rule( Rule::from_array( $a ) );
 $repository->save_rule( Rule::from_array( $b ) );
-rules_admin_smoke_assert( $repository->get_rule( $legacy_id )?->priority === $move_b->priority, 'Move must swap priorities.' );
+rules_admin_smoke_assert( $repository->get_rule( $default_id )?->priority === $move_b->priority, 'Move must swap sort order values.' );
 
 $repository->delete_rule( $duplicate_id );
 rules_admin_smoke_assert( null === $repository->get_rule( $duplicate_id ), 'Delete must remove rule.' );
@@ -320,9 +324,36 @@ $simulator = new RuleSimulator( new RuleEngine( new RuleEvaluator( new Condition
 $simulation = $simulator->simulate( $simulation_repository->get_default_rules(), rules_admin_context() );
 rules_admin_smoke_assert( 40000 === $simulation->final_price?->get_kopecks(), 'Simulation must use default rules.' );
 
+$delivery_days_rule = new Rule(
+	null,
+	'Delivery days',
+	true,
+	10,
+	'default',
+	'',
+	RuleActionTypes::CHANGE_DELIVERY_DAYS,
+	RuleOperationTypes::INCREASE,
+	2,
+	RuleOperationBases::CALENDAR_DAYS,
+	false,
+	false
+);
+rules_admin_smoke_assert( array() === $delivery_days_rule->validate(), 'calendar_days must be valid for change_delivery_days.' );
+$delivery_days_result = $simulator->simulate( array( $delivery_days_rule ), RuleEvaluationContext::from_array( array_merge( rules_admin_context()->to_array(), array( 'meta' => array( 'original_delivery_days' => 5 ) ) ) ) );
+rules_admin_smoke_assert( 7 === $delivery_days_result->final_delivery_days?->min_days, 'Simulation must change delivery days when a delivery-days rule applies.' );
+$business_days_rule = Rule::from_array( array_merge( $delivery_days_rule->to_array(), array( 'operation_base' => RuleOperationBases::BUSINESS_DAYS ) ) );
+rules_admin_smoke_assert( array() === $business_days_rule->validate(), 'business_days must be valid for change_delivery_days.' );
+
 $admin_page_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Rules/Admin/RulesAdminPage.php' );
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'Создать демо-правила' ), 'Admin page must not show create demo button.' );
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'Удалить демо-правила' ), 'Admin page must not show delete demo button.' );
+rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'Приоритет' ), 'Admin UI must not contain priority wording.' );
+rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'name="priority"' ), 'Admin UI must not expose a priority field.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'wdc_rules_action" value="reorder_rules"' ), 'Admin UI must expose a drag-sort reorder action.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'data-rule-row' ), 'Admin table rows must be draggable.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'Исходный срок доставки' ), 'Simulation UI must always expose original delivery days.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'Итоговый срок' ), 'Simulation result must show final delivery days.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'RuleOperationBases::CALENDAR_DAYS' ), 'change_delivery_days must default to calendar_days in admin handling.' );
 
 $legacy_files = shell_exec( 'git diff --name-only -- includes' );
 rules_admin_smoke_assert( '' === trim( (string) $legacy_files ), 'Legacy includes/* must remain unchanged.' );

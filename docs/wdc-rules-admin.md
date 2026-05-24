@@ -1,6 +1,6 @@
 # WDC Rules Admin
 
-Version: 0.18.1.
+Version: 0.18.2.
 
 ## Default rules
 
@@ -22,9 +22,12 @@ The page supports regular WordPress admin POST forms with nonce and `AdminMenu::
 - duplicate rule
 - enable or disable rule
 - delete rule
-- move up or down by swapping priority with the neighboring default rule
+- move up or down by swapping internal sort order with the neighboring default rule
+- drag-and-drop table sorting, saved through the `reorder_rules` POST action
 
 Duplicated rules are disabled by default for safety.
+
+Rules are shown and applied from top to bottom. The database `priority` column is still used internally as a sort order value, but the admin UI does not expose it as a user-facing priority field.
 
 ## Conditions
 
@@ -49,11 +52,19 @@ Supported action types are the domain action types:
 
 `disable_rate` saves safe operation defaults. `add_comment` currently uses the existing rule model behavior in `RuleEvaluator`: because default rules keep `target_value` empty, the rule name is used as the comment text unless the domain model is expanded later.
 
+For `change_delivery_days`, operation bases are limited to:
+
+- `calendar_days`
+- `business_days`
+
+If an invalid base is posted for a delivery-days rule, the admin handler normalizes it to `calendar_days`.
+
 ## Simulation
 
 The "Проверить правила" section builds a real `RuleEvaluationContext` from the form:
 
 - original delivery price
+- original delivery days
 - order total
 - weight
 - country
@@ -62,7 +73,7 @@ The "Проверить правила" section builds a real `RuleEvaluationCon
 - payment method
 - calculation date
 
-Simulation uses `RuleRepository::get_default_rules()` and displays original price, crossed price, final price, disabled state, comments, and rule audit entries.
+Simulation uses `RuleRepository::get_default_rules()` and displays original price, crossed price, final price, original delivery days, final delivery days, disabled state, comments, and rule audit entries.
 
 ## Future Carrier Rules
 

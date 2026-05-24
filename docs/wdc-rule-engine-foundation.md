@@ -14,7 +14,7 @@ Supported condition types cover order totals, item counts, payment method, desti
 
 `ConditionEvaluator` evaluates one condition against a `RuleEvaluationContext`. `RuleEvaluator` evaluates a single rule and returns a `RuleEvaluationResult`. `RuleEngine` applies an ordered rule list and produces a `RuleEngineResult`.
 
-The repository returns enabled rules ordered by `priority ASC`, with `promo_shipping` rules after regular rules. The evaluator intentionally does not handle global ordering.
+The repository returns enabled rules ordered by the internal sort order (`priority ASC`, then `id ASC`). Admin users manage that order visually from top to bottom; the evaluator intentionally does not handle global ordering.
 
 ## Audit Trail
 

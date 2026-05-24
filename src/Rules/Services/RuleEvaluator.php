@@ -38,7 +38,9 @@ final class RuleEvaluator {
 		}
 
 		if ( RuleActionTypes::CHANGE_DELIVERY_DAYS === $rule->action_type ) {
-			$range   = DateRange::single( max( 0, (int) round( $rule->operation_value ) ) );
+			$unit    = RuleOperationBases::BUSINESS_DAYS === $rule->operation_base ? DateRange::UNIT_BUSINESS_DAYS : DateRange::UNIT_CALENDAR_DAYS;
+			$days    = $this->apply_delivery_days_operation( $context, $rule );
+			$range   = DateRange::single( $days, $unit );
 			$audit[] = new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, null, $range->to_array(), $rule->operation_type, true, 'Delivery days changed.' );
 
 			return new RuleEvaluationResult( true, true, null, $range, array(), false, '', $audit, $rule->stop_processing );
@@ -96,6 +98,19 @@ final class RuleEvaluator {
 			RuleOperationTypes::DECREASE => $current_price->subtract( $delta ),
 			RuleOperationTypes::EQUALS   => $delta,
 			default                      => $current_price,
+		};
+	}
+
+	private function apply_delivery_days_operation( RuleEvaluationContext $context, Rule $rule ): int {
+		$value = max( 0, (int) round( $rule->operation_value ) );
+		$base  = isset( $context->meta['current_delivery_days'] )
+			? max( 0, (int) $context->meta['current_delivery_days'] )
+			: ( isset( $context->meta['original_delivery_days'] ) ? max( 0, (int) $context->meta['original_delivery_days'] ) : 0 );
+
+		return match ( $rule->operation_type ) {
+			RuleOperationTypes::INCREASE => $base + $value,
+			RuleOperationTypes::DECREASE => max( 0, $base - $value ),
+			default                      => $value,
 		};
 	}
 

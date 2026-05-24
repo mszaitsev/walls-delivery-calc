@@ -66,7 +66,7 @@ final class RuleRepository {
 	public function get_enabled_rules(): array {
 		$this->normalize_legacy_default_rules();
 
-		$rows = $this->wpdb->get_results( "SELECT * FROM {$this->rules_table()} WHERE enabled = 1 ORDER BY promo_shipping ASC, priority ASC, id ASC", ARRAY_A );
+		$rows = $this->wpdb->get_results( "SELECT * FROM {$this->rules_table()} WHERE enabled = 1 ORDER BY priority ASC, id ASC", ARRAY_A );
 
 		return $this->rows_to_rules( is_array( $rows ) ? $rows : array() );
 	}
@@ -79,7 +79,7 @@ final class RuleRepository {
 
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
-				"SELECT * FROM {$this->rules_table()} WHERE enabled = 1 AND target_type = %s ORDER BY promo_shipping ASC, priority ASC, id ASC",
+				"SELECT * FROM {$this->rules_table()} WHERE enabled = 1 AND target_type = %s ORDER BY priority ASC, id ASC",
 				self::TARGET_DEFAULT
 			),
 			ARRAY_A
@@ -96,7 +96,7 @@ final class RuleRepository {
 
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
-				"SELECT * FROM {$this->rules_table()} WHERE target_type = %s ORDER BY enabled DESC, priority ASC, id ASC",
+				"SELECT * FROM {$this->rules_table()} WHERE target_type = %s ORDER BY priority ASC, id ASC",
 				self::TARGET_DEFAULT
 			),
 			ARRAY_A
@@ -113,7 +113,7 @@ final class RuleRepository {
 
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
-				"SELECT * FROM {$this->rules_table()} WHERE enabled = 1 AND target_type = %s AND target_value = %s ORDER BY promo_shipping ASC, priority ASC, id ASC",
+				"SELECT * FROM {$this->rules_table()} WHERE enabled = 1 AND target_type = %s AND target_value = %s ORDER BY priority ASC, id ASC",
 				$targetType,
 				$targetValue
 			),
@@ -144,6 +144,36 @@ final class RuleRepository {
 
 	public function normalize_legacy_default_rules(): void {
 		$this->wpdb->query( "UPDATE {$this->rules_table()} SET target_type = 'default', target_value = '' WHERE target_type IS NULL OR target_type = ''" );
+	}
+
+	/**
+	 * @param array<int,int> $ordered_ids
+	 */
+	public function reorder_default_rules( array $ordered_ids ): void {
+		$this->normalize_legacy_default_rules();
+
+		$position = 10;
+		foreach ( $ordered_ids as $id ) {
+			$id = (int) $id;
+			if ( $id <= 0 ) {
+				continue;
+			}
+
+			$this->wpdb->update(
+				$this->rules_table(),
+				array(
+					'priority'   => $position,
+					'updated_at' => current_time( 'mysql' ),
+				),
+				array(
+					'id'          => $id,
+					'target_type' => self::TARGET_DEFAULT,
+				),
+				array( '%d', '%s' ),
+				array( '%d', '%s' )
+			);
+			$position += 10;
+		}
 	}
 
 	/**

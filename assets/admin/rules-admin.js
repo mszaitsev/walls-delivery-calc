@@ -38,16 +38,66 @@
 	function syncOperationFields(root) {
 		var action = root.querySelector('[data-action-type]');
 		var fields = root.querySelector('[data-operation-fields]');
+		var base = root.querySelector('[data-operation-base]');
 
 		if (!action || !fields) {
 			return;
 		}
 
 		var disabled = action.value === 'disable_rate';
+		var daysAction = action.value === 'change_delivery_days';
 		fields.classList.toggle('is-operation-disabled', disabled);
 		fields.querySelectorAll('[data-operation-control]').forEach(function (field) {
 			field.disabled = disabled;
 		});
+
+		if (!base) {
+			return;
+		}
+
+		var selectedVisible = false;
+		base.querySelectorAll('option').forEach(function (option) {
+			var show = daysAction ? option.dataset.baseKind === 'days' : option.dataset.baseKind !== 'days';
+			option.hidden = !show;
+			option.disabled = !show;
+			if (option.selected && show) {
+				selectedVisible = true;
+			}
+		});
+
+		if (!selectedVisible) {
+			base.value = daysAction ? 'calendar_days' : 'rubles';
+		}
+	}
+
+	function submitRuleOrder() {
+		var form = document.querySelector('[data-reorder-form]');
+		var input = form ? form.querySelector('[data-ordered-rule-ids]') : null;
+		var rows = Array.prototype.slice.call(document.querySelectorAll('[data-rule-row]'));
+
+		if (!form || !input || rows.length < 2) {
+			return;
+		}
+
+		input.value = rows.map(function (row) {
+			return row.dataset.ruleId;
+		}).filter(Boolean).join(',');
+		form.submit();
+	}
+
+	function rowAfterPointer(tbody, y) {
+		var rows = Array.prototype.slice.call(tbody.querySelectorAll('[data-rule-row]:not(.is-dragging)'));
+
+		return rows.reduce(function (closest, row) {
+			var box = row.getBoundingClientRect();
+			var offset = y - box.top - box.height / 2;
+
+			if (offset < 0 && offset > closest.offset) {
+				return { offset: offset, row: row };
+			}
+
+			return closest;
+		}, { offset: Number.NEGATIVE_INFINITY, row: null }).row;
 	}
 
 	document.addEventListener('click', function (event) {
@@ -85,6 +135,44 @@
 		if (event.target.matches('[data-action-type]')) {
 			syncOperationFields(document);
 		}
+	});
+
+	document.addEventListener('dragstart', function (event) {
+		var row = event.target.closest('[data-rule-row]');
+		if (!row) {
+			return;
+		}
+
+		row.classList.add('is-dragging');
+		event.dataTransfer.effectAllowed = 'move';
+		event.dataTransfer.setData('text/plain', row.dataset.ruleId || '');
+	});
+
+	document.addEventListener('dragover', function (event) {
+		var tbody = event.target.closest('.wdc-rules-table tbody');
+		var dragging = document.querySelector('[data-rule-row].is-dragging');
+
+		if (!tbody || !dragging) {
+			return;
+		}
+
+		event.preventDefault();
+		var after = rowAfterPointer(tbody, event.clientY);
+		if (after) {
+			tbody.insertBefore(dragging, after);
+		} else {
+			tbody.appendChild(dragging);
+		}
+	});
+
+	document.addEventListener('dragend', function (event) {
+		var row = event.target.closest('[data-rule-row]');
+		if (!row) {
+			return;
+		}
+
+		row.classList.remove('is-dragging');
+		submitRuleOrder();
 	});
 
 	document.addEventListener('DOMContentLoaded', function () {

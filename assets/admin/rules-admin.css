@@ -33,6 +33,25 @@
 	color: #646970;
 }
 
+.wdc-rules-table [data-rule-row] {
+	cursor: move;
+}
+
+.wdc-rules-table [data-rule-row].is-dragging {
+	opacity: .55;
+}
+
+.wdc-drag-handle {
+	display: inline-block;
+	margin-right: 6px;
+	color: #646970;
+	font-weight: 700;
+}
+
+.wdc-reorder-form {
+	display: none;
+}
+
 .wdc-rules-row-actions {
 	min-width: 290px;
 }

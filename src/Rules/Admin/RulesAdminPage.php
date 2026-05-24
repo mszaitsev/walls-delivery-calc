@@ -7,6 +7,7 @@ use DateTimeImmutable;
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
@@ -124,7 +125,7 @@ final class RulesAdminPage {
 			'deleted'    => __( 'Правило удалено.', 'walls-delivery-calc' ),
 			'toggled'    => __( 'Статус правила изменен.', 'walls-delivery-calc' ),
 			'duplicated' => __( 'Копия правила создана и отключена.', 'walls-delivery-calc' ),
-			'moved'      => __( 'Приоритет правила изменен.', 'walls-delivery-calc' ),
+			'moved'      => __( 'Порядок правил изменен.', 'walls-delivery-calc' ),
 			'simulated'  => __( 'Симуляция завершена.', 'walls-delivery-calc' ),
 		);
 
@@ -157,7 +158,7 @@ final class RulesAdminPage {
 			<thead>
 				<tr>
 					<th><?php echo esc_html__( 'Вкл.', 'walls-delivery-calc' ); ?></th>
-					<th><?php echo esc_html__( 'Приоритет', 'walls-delivery-calc' ); ?></th>
+					<th><?php echo esc_html__( 'Порядок', 'walls-delivery-calc' ); ?></th>
 					<th><?php echo esc_html__( 'Название', 'walls-delivery-calc' ); ?></th>
 					<th><?php echo esc_html__( 'Условия', 'walls-delivery-calc' ); ?></th>
 					<th><?php echo esc_html__( 'Действие', 'walls-delivery-calc' ); ?></th>
@@ -171,10 +172,10 @@ final class RulesAdminPage {
 				<?php if ( array() === $rules ) : ?>
 					<tr><td colspan="9"><?php echo esc_html__( 'Дефолтные правила пока не созданы.', 'walls-delivery-calc' ); ?></td></tr>
 				<?php endif; ?>
-				<?php foreach ( $rules as $rule ) : ?>
-					<tr>
+				<?php foreach ( $rules as $index => $rule ) : ?>
+					<tr draggable="true" data-rule-row data-rule-id="<?php echo esc_attr( (string) $rule->id ); ?>">
 						<td><?php echo esc_html( $rule->enabled ? __( 'да', 'walls-delivery-calc' ) : __( 'нет', 'walls-delivery-calc' ) ); ?></td>
-						<td><?php echo esc_html( (string) $rule->priority ); ?></td>
+						<td><span class="wdc-drag-handle" aria-hidden="true">↕</span><?php echo esc_html( (string) ( $index + 1 ) ); ?></td>
 						<td>
 							<strong><?php echo esc_html( $rule->name ); ?></strong>
 							<small><?php echo esc_html__( 'Дефолтные правила', 'walls-delivery-calc' ); ?></small>
@@ -196,6 +197,11 @@ final class RulesAdminPage {
 				<?php endforeach; ?>
 			</tbody>
 		</table>
+		<form method="post" class="wdc-reorder-form" data-reorder-form>
+			<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
+			<input type="hidden" name="wdc_rules_action" value="reorder_rules">
+			<input type="hidden" name="ordered_rule_ids" value="" data-ordered-rule-ids>
+		</form>
 		<?php
 	}
 
@@ -223,10 +229,6 @@ final class RulesAdminPage {
 					<label>
 						<span><?php echo esc_html__( 'Название', 'walls-delivery-calc' ); ?></span>
 						<input class="regular-text" type="text" name="name" value="<?php echo esc_attr( $rule->name ); ?>" required>
-					</label>
-					<label>
-						<span><?php echo esc_html__( 'Приоритет', 'walls-delivery-calc' ); ?></span>
-						<input type="number" name="priority" value="<?php echo esc_attr( (string) $rule->priority ); ?>">
 					</label>
 					<label class="wdc-checkbox">
 						<input type="checkbox" name="enabled" value="1" <?php echo $rule->enabled ? 'checked' : ''; ?>>
@@ -266,9 +268,9 @@ final class RulesAdminPage {
 					</label>
 					<label>
 						<span><?php echo esc_html__( 'База', 'walls-delivery-calc' ); ?></span>
-						<select name="operation_base" data-operation-control>
+						<select name="operation_base" data-operation-control data-operation-base>
 							<?php foreach ( RuleOperationBases::all() as $value ) : ?>
-								<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $rule->operation_base, $value ); ?>><?php echo esc_html( $this->operation_base_label( $value ) ); ?></option>
+								<option value="<?php echo esc_attr( $value ); ?>" data-base-kind="<?php echo esc_attr( in_array( $value, RuleOperationBases::day_bases(), true ) ? 'days' : 'money' ); ?>" <?php selected( $rule->operation_base, $value ); ?>><?php echo esc_html( $this->operation_base_label( $value ) ); ?></option>
 							<?php endforeach; ?>
 						</select>
 					</label>
@@ -339,6 +341,7 @@ final class RulesAdminPage {
 				<input type="hidden" name="wdc_rules_action" value="simulate">
 				<div class="wdc-rule-grid">
 					<label><span><?php echo esc_html__( 'Исходная цена доставки', 'walls-delivery-calc' ); ?></span><input type="number" step="0.01" name="simulation[delivery_price]" value="<?php echo esc_attr( (string) $input['delivery_price'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Исходный срок доставки', 'walls-delivery-calc' ); ?></span><input type="number" min="0" name="simulation[delivery_days]" value="<?php echo esc_attr( (string) $input['delivery_days'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Сумма заказа', 'walls-delivery-calc' ); ?></span><input type="number" step="0.01" name="simulation[order_total]" value="<?php echo esc_attr( (string) $input['order_total'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?></span><input type="number" name="simulation[weight]" value="<?php echo esc_attr( (string) $input['weight'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Страна', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[country]" value="<?php echo esc_attr( (string) $input['country'] ); ?>"></label>
@@ -354,6 +357,8 @@ final class RulesAdminPage {
 	}
 
 	private function render_simulation( RuleEngineResult $result ): void {
+		$original_days = DateRange::single( max( 0, (int) ( $this->simulation_input['delivery_days'] ?? $this->default_simulation_input()['delivery_days'] ) ) );
+		$final_days    = $result->final_delivery_days ?? $original_days;
 		?>
 		<section class="wdc-rules-result">
 			<h2><?php echo esc_html__( 'Результат проверки', 'walls-delivery-calc' ); ?></h2>
@@ -361,6 +366,8 @@ final class RulesAdminPage {
 				<span><?php echo esc_html__( 'Исходная цена', 'walls-delivery-calc' ); ?><strong><?php echo esc_html( $this->money_label( $result->original_price ) ); ?></strong></span>
 				<span><?php echo esc_html__( 'Зачеркнутая цена', 'walls-delivery-calc' ); ?><strong><?php echo esc_html( $this->money_label( $result->crossed_price ) ); ?></strong></span>
 				<span><?php echo esc_html__( 'Итоговая цена', 'walls-delivery-calc' ); ?><strong><?php echo esc_html( $this->money_label( $result->final_price ) ); ?></strong></span>
+				<span><?php echo esc_html__( 'Исходный срок', 'walls-delivery-calc' ); ?><strong><?php echo esc_html( $this->date_range_label( $original_days ) ); ?></strong></span>
+				<span><?php echo esc_html__( 'Итоговый срок', 'walls-delivery-calc' ); ?><strong><?php echo esc_html( $this->date_range_label( $final_days ) ); ?></strong></span>
 				<span><?php echo esc_html__( 'Отключено', 'walls-delivery-calc' ); ?><strong><?php echo esc_html( $result->disabled ? __( 'да', 'walls-delivery-calc' ) : __( 'нет', 'walls-delivery-calc' ) ); ?></strong></span>
 			</div>
 			<?php if ( array() !== $result->comments ) : ?>
@@ -423,6 +430,11 @@ final class RulesAdminPage {
 
 		if ( 'move_up' === $action || 'move_down' === $action ) {
 			$this->move_rule_action( $action );
+			return;
+		}
+
+		if ( 'reorder_rules' === $action ) {
+			$this->reorder_rules_action();
 			return;
 		}
 
@@ -539,6 +551,14 @@ final class RulesAdminPage {
 		$operation_base = isset( $_POST['operation_base'] ) ? sanitize_key( wp_unslash( $_POST['operation_base'] ) ) : RuleOperationBases::RUBLES;
 		$operation_value = isset( $_POST['operation_value'] ) ? (float) sanitize_text_field( wp_unslash( $_POST['operation_value'] ) ) : 0.0;
 
+		if ( RuleActionTypes::CHANGE_DELIVERY_DAYS === $action_type && ! in_array( $operation_base, RuleOperationBases::day_bases(), true ) ) {
+			$operation_base = RuleOperationBases::CALENDAR_DAYS;
+		}
+
+		if ( RuleActionTypes::CHANGE_DELIVERY_DAYS !== $action_type && in_array( $operation_base, RuleOperationBases::day_bases(), true ) ) {
+			$operation_base = RuleOperationBases::RUBLES;
+		}
+
 		if ( RuleActionTypes::DISABLE_RATE === $action_type ) {
 			$operation_type  = RuleOperationTypes::EQUALS;
 			$operation_base  = RuleOperationBases::RUBLES;
@@ -549,7 +569,7 @@ final class RulesAdminPage {
 			isset( $_POST['rule_id'] ) && absint( wp_unslash( $_POST['rule_id'] ) ) > 0 ? absint( wp_unslash( $_POST['rule_id'] ) ) : null,
 			isset( $_POST['name'] ) ? sanitize_text_field( wp_unslash( $_POST['name'] ) ) : '',
 			isset( $_POST['enabled'] ),
-			isset( $_POST['priority'] ) ? (int) sanitize_text_field( wp_unslash( $_POST['priority'] ) ) : 100,
+			$this->sort_order_from_post(),
 			RuleRepository::TARGET_DEFAULT,
 			'',
 			$action_type,
@@ -614,6 +634,7 @@ final class RulesAdminPage {
 
 		return array(
 			'delivery_price' => isset( $raw['delivery_price'] ) ? max( 0.0, (float) sanitize_text_field( (string) $raw['delivery_price'] ) ) : $defaults['delivery_price'],
+			'delivery_days'  => isset( $raw['delivery_days'] ) ? max( 0, (int) sanitize_text_field( (string) $raw['delivery_days'] ) ) : $defaults['delivery_days'],
 			'order_total'    => isset( $raw['order_total'] ) ? max( 0.0, (float) sanitize_text_field( (string) $raw['order_total'] ) ) : $defaults['order_total'],
 			'weight'         => isset( $raw['weight'] ) ? max( 0, (int) sanitize_text_field( (string) $raw['weight'] ) ) : $defaults['weight'],
 			'country'        => isset( $raw['country'] ) ? sanitize_text_field( (string) $raw['country'] ) : $defaults['country'],
@@ -638,7 +659,9 @@ final class RulesAdminPage {
 			new Address( country_code: (string) $input['country'], city: (string) $input['city'], raw_address: (string) $input['city'] ),
 			(string) $input['delivery_type'],
 			(string) $input['payment_method'],
-			(string) $input['date']
+			(string) $input['date'],
+			array(),
+			array( 'original_delivery_days' => (int) $input['delivery_days'] )
 		);
 	}
 
@@ -647,7 +670,7 @@ final class RulesAdminPage {
 	}
 
 	private function empty_rule(): Rule {
-		return new Rule( null, '', true, 100, RuleRepository::TARGET_DEFAULT, '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 0, RuleOperationBases::RUBLES, false, false );
+		return new Rule( null, '', true, $this->next_sort_order(), RuleRepository::TARGET_DEFAULT, '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 0, RuleOperationBases::RUBLES, false, false );
 	}
 
 	/**
@@ -707,6 +730,8 @@ final class RulesAdminPage {
 			RuleOperationBases::PERCENT_OF_DELIVERY            => __( '% от доставки', 'walls-delivery-calc' ),
 			RuleOperationBases::PERCENT_OF_ORDER               => __( '% от заказа', 'walls-delivery-calc' ),
 			RuleOperationBases::PERCENT_OF_ORDER_AND_DELIVERY  => __( '% от заказа и доставки', 'walls-delivery-calc' ),
+			RuleOperationBases::CALENDAR_DAYS                  => __( 'календарные дни', 'walls-delivery-calc' ),
+			RuleOperationBases::BUSINESS_DAYS                  => __( 'рабочие дни', 'walls-delivery-calc' ),
 		)[ $value ] ?? $value;
 	}
 
@@ -767,6 +792,7 @@ final class RulesAdminPage {
 	private function default_simulation_input(): array {
 		return array(
 			'delivery_price' => 450,
+			'delivery_days'  => 5,
 			'order_total'    => 1000,
 			'weight'         => 12000,
 			'country'        => 'RU',
@@ -835,5 +861,57 @@ final class RulesAdminPage {
 		}
 
 		return number_format( (float) $money->get_rubles(), 2, '.', ' ' ) . ' ' . $money->get_currency();
+	}
+
+	private function reorder_rules_action(): void {
+		$raw = isset( $_POST['ordered_rule_ids'] ) ? sanitize_text_field( wp_unslash( $_POST['ordered_rule_ids'] ) ) : '';
+		$ids = array_values(
+			array_filter(
+				array_map( 'absint', explode( ',', $raw ) ),
+				static fn ( int $id ): bool => $id > 0
+			)
+		);
+
+		if ( array() !== $ids ) {
+			$this->repository->reorder_default_rules( $ids );
+		}
+
+		$this->redirect_with_notice( 'moved' );
+	}
+
+	private function sort_order_from_post(): int {
+		$id = isset( $_POST['rule_id'] ) ? absint( wp_unslash( $_POST['rule_id'] ) ) : 0;
+		if ( $id > 0 ) {
+			$rule = $this->repository->get_rule( $id );
+			if ( $rule instanceof Rule ) {
+				return $rule->priority;
+			}
+		}
+
+		return $this->next_sort_order();
+	}
+
+	private function next_sort_order(): int {
+		$rules = $this->repository->get_all_default_rules();
+		$last  = 0;
+		foreach ( $rules as $rule ) {
+			$last = max( $last, $rule->priority );
+		}
+
+		return $last + 10;
+	}
+
+	private function date_range_label( DateRange $range ): string {
+		$unit = DateRange::UNIT_BUSINESS_DAYS === $range->unit || DateRange::UNIT_WORKING_DAYS === $range->unit
+			? __( 'раб. дн.', 'walls-delivery-calc' )
+			: __( 'к. дн.', 'walls-delivery-calc' );
+
+		if ( null !== $range->min_days && null !== $range->max_days && $range->min_days !== $range->max_days ) {
+			return sprintf( '%d-%d %s', $range->min_days, $range->max_days, $unit );
+		}
+
+		$days = $range->min_days ?? $range->max_days ?? 0;
+
+		return sprintf( '%d %s', $days, $unit );
 	}
 }
