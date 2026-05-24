@@ -85,3 +85,13 @@ region_part, district_part, city_part, place_part
 Type display rules are stored in `wdc_location_type_display_rules`. They apply to `region_type`, `city_type`, and `place_type` with `before`, `after`, or `hidden` positions. `district_type` remains fixed as `district_name + " " + district_type`. The admin settings are grouped into collapsible Region, City, and Place sections with per-section type counts.
 
 The admin `Пересобрать display_name` action runs as a chunked AJAX job with a progress bar and JSON status block. It updates `display_name`, refreshes `searchable_text`, and regenerates GAR aliases for each processed batch.
+
+## Checkout City Picker V2
+
+As of `0.17.0`, checkout lookup uses the local GAR/FIAS locations table for a type-aware city picker.
+
+`CheckoutLocationSearch::search_for_picker()` tokenizes mixed queries such as `Алтайский край, Курьинский р-н, село Ивановка`: punctuation is treated as separators, `ё` is normalized to `е`, one-character noise is dropped except meaningful `г`, and `р-н`/`район` are treated as district synonyms. Matching considers region, district, city, place, mapped display type text, raw type text, `display_name`, `searchable_text`, `fias_id`, `kladr_id`, and `gar_object_id`.
+
+Ranking promotes candidates that match more tokens, then full-token matches, then exact/prefix/partial lowest-level place names, followed by city, district, region, and broad searchable fallback. Region groups are sorted so regions with exact place-name hits rise first; multiple exact-hit regions are alphabetical.
+
+`LocationDisplayNameFormatter` now also formats checkout region headers, option labels, state field values, and city field values. Region headers always use `region_name + mapped region_type` unless the type is hidden. Option rows use the settlement label plus useful parent hierarchy, for example `с. Гусиный Брод - Новосибирский р-н, Новосибирская обл.`.

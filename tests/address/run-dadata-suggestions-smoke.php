@@ -414,7 +414,7 @@ $opening_start = strpos( $js, 'function openingQuery' );
 $opening_end = strpos( $js, 'function houseWithType' );
 $opening_body = false !== $opening_start && false !== $opening_end ? substr( $js, $opening_start, $opening_end - $opening_start ) : '';
 dadata_suggestions_assert( '' !== $opening_body, 'Opening query helper must be present.' );
-dadata_suggestions_assert( ! str_contains( $opening_body, 'wdc_platform_location_display_name' ), 'Opening query must not use hidden display_name.' );
+dadata_suggestions_assert( str_contains( $opening_body, 'wdc_platform_location_fias_id' ) && str_contains( $opening_body, 'wdc_platform_location_display_name' ), 'Opening query must prefer selected local location when fias_id exists.' );
 dadata_suggestions_assert( ! str_contains( $opening_body, 'showSelectedNotice' ), 'Opening query must not use selected notice text.' );
 dadata_suggestions_assert( ! str_contains( $opening_body, 'lastResolved' ) && ! str_contains( $opening_body, 'selectedStreet' ), 'Opening query must not use previous resolved suggestion or selected street.' );
 

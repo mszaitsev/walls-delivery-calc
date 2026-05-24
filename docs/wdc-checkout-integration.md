@@ -34,6 +34,29 @@ The new checkout path is registered as a WooCommerce shipping method with id `wd
 - `_wdc_platform_comments`
 - `_wdc_platform_fallback_used`
 
+When checkout has an unambiguous local selected location, the order stores only:
+
+- `_wdc_platform_location_fias_id`
+- `_wdc_platform_location_display_name`
+
+Other local location fields such as region, district, city, place, GAR/KLADR ids, and postcode stay in checkout hidden state only and are not expanded into order meta.
+
+## Checkout City Picker V2
+
+The city picker AJAX response returns grouped results:
+
+`groups[].region_key`, `region_label`, `region_sort_name`, `total_in_region`, `shown_count`, `has_more`, `expand_query`, and `items[]`.
+
+The checkout settings are:
+
+- `include_region_in_checkout_city_picker_query`, default `true`;
+- `checkout_location_search_limit`, default `100`, min `10`, max `300`;
+- `checkout_location_region_limit`, default `10`, min `3`, max `50`.
+
+When region prefill is enabled, opening the picker seeds the modal query from `state + ", " + city`; with only one field filled it uses that field, and with both empty it leaves the query empty. Each region initially shows up to `checkout_location_region_limit` rows. If more rows exist, the frontend shows `Показать все варианты в области` and repeats search with `force_region_code`, returning only that region up to the global checkout search limit.
+
+Selecting a location writes formatted state/city values, fills postcode only when the local row has one, stores the selected local payload in hidden checkout fields, and renders a full-width selected notice. On checkout load, after `updated_checkout`, and after manual state/city edits, the frontend calls `wdc_platform_resolve_checkout_location`; only one confident local match restores hidden selected state, otherwise checkout shows `Просим проверить название и внести верный населенный пункт`.
+
 ## Debug panel
 
 `CheckoutDebugPanel` renders checkout debug data only for users with `manage_options`. It shows orchestration rate count, cache hits, fallback state, carrier errors, and returned orchestration rates.

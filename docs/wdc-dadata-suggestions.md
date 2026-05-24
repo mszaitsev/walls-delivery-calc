@@ -98,11 +98,15 @@ Endpoint принимает `usage_type`:
 
 Покупатель фокусируется или кликает активное WooCommerce поле `address_1`. WDC открывает собственную модалку выбора адреса. Поиск выполняется только внутри поля поиска модалки.
 
-При открытии модалки search input заполняется из видимых checkout fields:
+При открытии модалки search input заполняется из выбранного локального населенного пункта, если он есть:
+
+`selected_location.display_name, address_1`
+
+Локальный контекст используется только когда hidden `wdc_platform_location_fias_id` и `wdc_platform_location_display_name` заполнены после выбора в city picker или успешного auto-resolve.
+
+Если локальный населенный пункт не выбран однозначно, используется fallback из видимых checkout fields:
 
 `region/state, city, address_1`
-
-Hidden `wdc_platform_location_display_name`, selected notice и прошлые DaData suggestions не участвуют в opening query.
 
 ## Поиск Улицы И Дома
 

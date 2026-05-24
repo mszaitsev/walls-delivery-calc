@@ -96,6 +96,14 @@ final class LocationSearchService {
 	}
 
 	/**
+	 * @param array<int,string> $tokens
+	 * @return array<int, Location>
+	 */
+	public function search_by_tokens( array $tokens, int $limit = 300, bool $require_all = false, string $force_region_code = '' ): array {
+		return $this->repository->search_by_tokens( $tokens, $limit, $require_all, $force_region_code );
+	}
+
+	/**
 	 * @return array<string,mixed>
 	 */
 	public function last_search_meta(): array {

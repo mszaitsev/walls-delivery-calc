@@ -90,7 +90,9 @@
 }
 
 .wdc-city-picker-fallback:hover,
-.wdc-city-picker-fallback:focus {
+.wdc-city-picker-fallback:focus,
+.wdc-city-picker-show-region:hover,
+.wdc-city-picker-show-region:focus {
 	background: #135e96;
 	outline: 1px solid #72aee6;
 }
@@ -151,11 +153,31 @@
 	outline-offset: -1px;
 }
 
+.wdc-city-picker-show-region {
+	display: block;
+	width: calc(100% - 22px);
+	margin: 10px 11px 11px;
+	padding: 9px 10px;
+	border: 1px solid #2271b1;
+	background: #2271b1;
+	color: #fff;
+	text-align: center;
+	cursor: pointer;
+	box-sizing: border-box;
+}
+
 .wdc-city-selector-selected {
 	margin-top: 6px;
-	max-width: 420px;
+	width: 100%;
+	max-width: none;
+	box-sizing: border-box;
+	white-space: pre-line;
 	color: #2271b1;
 	font-size: 13px;
+}
+
+.wdc-city-selector-selected.is-invalid {
+	color: #b32d2e;
 }
 
 @media (max-width: 900px) {

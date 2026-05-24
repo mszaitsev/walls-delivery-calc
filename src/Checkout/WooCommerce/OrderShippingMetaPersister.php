@@ -25,10 +25,11 @@ final class OrderShippingMetaPersister {
 		}
 
 		$dadata_meta = $this->dadata_meta_from_checkout_data( $data );
+		$location_meta = $this->location_meta_from_checkout_data( $data );
 
 		$rate = $this->selected_rate();
 		if ( array() === $rate ) {
-			foreach ( $dadata_meta as $key => $value ) {
+			foreach ( array_merge( $dadata_meta, $location_meta ) as $key => $value ) {
 				$order->update_meta_data( $key, $value );
 			}
 			return;
@@ -64,7 +65,7 @@ final class OrderShippingMetaPersister {
 			$map['_wdc_platform_city_gar_id']          = (string) ( $city_context['gar_id'] ?? '' );
 		}
 
-		$map = array_merge( $map, $dadata_meta, $this->compatible_dadata_meta( $data ) );
+		$map = array_merge( $map, $dadata_meta, $this->compatible_dadata_meta( $data ), $location_meta );
 
 		$pickup = $this->session_manager->pickup_selection();
 		if (
@@ -206,6 +207,22 @@ final class OrderShippingMetaPersister {
 		}
 
 		return $meta;
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private function location_meta_from_checkout_data( array $data ): array {
+		$fias_id = $this->checkout_string( $data, 'wdc_platform_location_fias_id' );
+		if ( '' === $fias_id ) {
+			return array();
+		}
+
+		return array(
+			'_wdc_platform_location_fias_id'     => $fias_id,
+			'_wdc_platform_location_display_name' => $this->checkout_string( $data, 'wdc_platform_location_display_name' ),
+		);
 	}
 
 	/**

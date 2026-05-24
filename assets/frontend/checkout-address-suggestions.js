@@ -223,6 +223,14 @@
 	}
 
 	function openingQuery( prefix ) {
+		var selectedFiasId = globalHiddenValue( 'wdc_platform_location_fias_id' );
+		var selectedDisplayName = globalHiddenValue( 'wdc_platform_location_display_name' );
+		var selectedAddress = checkoutFieldValue( prefix, 'address_1' );
+		if ( selectedFiasId && selectedDisplayName ) {
+			var selectedQuery = selectedDisplayName + ', ' + ( selectedAddress || '' );
+			log( 'opening query built', { locationSource: 'local_selected', fias_id: selectedFiasId, display_name: selectedDisplayName, addressSource: 'checkout_address_1', address: selectedAddress, query: selectedQuery } );
+			return selectedQuery;
+		}
 		var region = checkoutFieldValue( prefix, 'state' );
 		var city = checkoutFieldValue( prefix, 'city' );
 		var address = checkoutFieldValue( prefix, 'address_1' );
