@@ -14,7 +14,14 @@
 }
 
 .wdc-platform-delivery-comment {
+	display: block;
+	flex-basis: 100%;
 	color: #334155;
+}
+
+.wdc-rate-comment,
+.wdc-shipping-rate-comment {
+	display: block;
 }
 
 .wdc-platform-rate-meta--fallback {

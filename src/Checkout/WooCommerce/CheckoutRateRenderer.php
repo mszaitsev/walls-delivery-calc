@@ -33,13 +33,13 @@ final class CheckoutRateRenderer {
 		}
 
 		if ( '' !== trim( (string) ( $meta['planned_delivery_comment'] ?? '' ) ) ) {
-			echo '<span class="wdc-platform-delivery-comment">' . esc_html( (string) $meta['planned_delivery_comment'] ) . '</span>';
+			echo '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' . esc_html( (string) $meta['planned_delivery_comment'] ) . '</div>';
 		}
 
 		if ( is_array( $meta['comments'] ?? null ) ) {
 			foreach ( $meta['comments'] as $comment ) {
 				if ( '' !== trim( (string) $comment ) ) {
-					echo '<span class="wdc-platform-delivery-comment">' . esc_html( (string) $comment ) . '</span>';
+					echo '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' . esc_html( (string) $comment ) . '</div>';
 				}
 			}
 		}

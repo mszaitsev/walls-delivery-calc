@@ -1,6 +1,6 @@
 # WDC Russian Post International Carrier
 
-Version: 0.21.8.
+Version: 0.21.9.
 
 ## Scope
 
@@ -28,14 +28,18 @@ The old built-in storefront formula `/0.89 + 200` has been removed. Commercial a
 
 ## Fallback
 
-API errors, missing tariff/price, unsupported countries, disabled country mappings, and overweight packages do not throw checkout errors. When fallback is enabled, the carrier returns a visible zero-cost rate with:
+API errors, zero or missing tariff/price, unsupported countries, disabled country mappings, and overweight packages do not throw checkout errors. When fallback is enabled, the carrier returns a visible zero-cost terminal fallback rate with:
 
-- title/comment from `fallback_text`, default `Стоимость доставки рассчитает менеджер`
+- customer-facing method title from `fallback_text`, default `Стоимость доставки рассчитает менеджер`
+- empty comments, so the fallback text is not duplicated below the method title
 - `meta.fallback = true`
+- `meta.terminal_fallback = true`
+- `meta.skip_rules = true`
+- `meta.skip_service_post_processing = true`
 - `meta.fallback_reason`
 - safe API/package metadata without secrets
 
-When fallback is disabled, the quote returns no visible rate and the checkout-level fallback can take over if no other carrier has visible rates.
+Terminal fallback rates stay at price `0`: service rules, rule-added comments, service customer comments, minimum price, and ruble rounding are skipped. When fallback is disabled, the quote returns no visible rate and the checkout-level fallback can take over if no other carrier has visible rates.
 
 For the `carrier_directory` delivery-service availability mode, checkout keeps the Russian Post service in the candidate list even when a country mapping is disabled. The carrier then returns its controlled fallback rate and `fallback_reason` such as `unsupported_country_PL`, instead of the generic checkout fallback text.
 
@@ -69,7 +73,7 @@ Country mapping administration now lives inside the delivery service screen at `
 
 Checkout continues to apply rules after the carrier quote. Runtime resolves service rules first and uses default fallback only when the service has no enabled own rules and `use_default_rules_when_no_service_rules` is enabled.
 
-`add_comment` rule text is merged into rate comments and persisted through the existing rate/session/order meta flow. `disable_rate` marks the rate unavailable, so it is hidden before final checkout rates are returned.
+For normal rates, `add_comment` rule text is merged into rate comments and persisted through the existing rate/session/order meta flow. Checkout renders each service/rule comment as its own line. `disable_rate` marks the rate unavailable, so it is hidden before final checkout rates are returned. Terminal fallback rates set `skip_rules=true`, so rule price changes and rule comments do not apply.
 
 The Russian Post service rules simulation calls the carrier first, obtains the real API/base quote, then applies service rules only. It shows base price, final price, audit, fallback/cache metadata, and source details. It does not apply default-rule fallback.
 # Russian Post International

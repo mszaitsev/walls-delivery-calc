@@ -21,7 +21,7 @@ final class RuleAppliedRateBuilder {
 	 * @return array{rate:DeliveryRate,audit:array<int,array<string,mixed>>}
 	 */
 	public function apply( DeliveryRate $rate, RuleEvaluationContext $context, array $rules ): array {
-		if ( array() === $rules ) {
+		if ( array() === $rules || ! empty( $rate->meta['skip_rules'] ) ) {
 			return array( 'rate' => $rate, 'audit' => array() );
 		}
 

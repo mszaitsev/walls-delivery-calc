@@ -605,6 +605,10 @@ foreach ( array( '.wdc-platform-pickup-point', 'pickup select changed', 'pickup 
 }
 $delivery_type_selector_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' );
 runtime_smoke_assert( ! str_contains( $delivery_type_selector_source, 'Для курьерской доставки будет использован адрес, указанный в checkout.' ), 'Checkout delivery type selector must not auto-render courier customer comment.' );
+$rate_renderer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutRateRenderer.php' );
+$checkout_rates_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-rates.css' );
+runtime_smoke_assert( str_contains( $rate_renderer_source, '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' ), 'Rate renderer must render comments as block elements, not inline-only spans.' );
+runtime_smoke_assert( str_contains( $checkout_rates_css, '.wdc-platform-delivery-comment' ) && str_contains( $checkout_rates_css, 'flex-basis: 100%' ) && str_contains( $checkout_rates_css, '.wdc-shipping-rate-comment' ) && str_contains( $checkout_rates_css, 'display: block' ), 'Checkout comments CSS must force each service/rule comment onto its own line.' );
 $src_iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . '/src' ) );
 foreach ( $src_iterator as $src_file ) {
 	if ( ! $src_file->isFile() || 'php' !== $src_file->getExtension() ) {

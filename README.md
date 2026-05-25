@@ -1,6 +1,6 @@
 # Walls Delivery Calc
 
-Version: 0.21.8.
+Version: 0.21.9.
 
 Walls Delivery Calc is a WooCommerce delivery calculator plugin. The runtime is now `src/` only: the old `includes/*` legacy bootstrap, shipping method, carriers, API clients, settings, helpers, and cache wrappers have been removed.
 

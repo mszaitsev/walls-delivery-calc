@@ -256,7 +256,8 @@ $item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 100 ), Money::fro
 $quote = $carrier->quote( new QuoteRequest( 'AT', new Address( country_code: 'AT', city: 'Vienna', street: 'Test', house: '1', raw_address: 'Test 1' ), Package::from_items( array( $item ), 0, Money::from_rubles( 100 ), Money::from_rubles( 100 ) ), 'card', Money::from_rubles( 100 ), '2026-05-25' ) );
 country_smoke_assert( $quote->has_available_rates() && 'unsupported_country_AT' === $quote->rates[0]->meta['fallback_reason'], 'quote() uses fallback for disabled country mapping.' );
 country_smoke_assert( 0 === $quote->rates[0]->price->get_kopecks() && DeliveryType::PICKUP === $quote->rates[0]->delivery_type && ! $quote->rates[0]->requires_courier_address, 'Disabled country fallback rate is visible, zero-cost, and pickup-like.' );
-country_smoke_assert( in_array( $disabled_country_fallback_text, $quote->rates[0]->comments, true ), 'Configured disabled-country fallback_text is exposed as customer-facing comment.' );
+country_smoke_assert( $disabled_country_fallback_text === $quote->rates[0]->title && array() === $quote->rates[0]->comments, 'Configured disabled-country fallback_text is exposed as title without duplicate comments.' );
+country_smoke_assert( ! empty( $quote->rates[0]->meta['skip_rules'] ) && ! empty( $quote->rates[0]->meta['skip_service_post_processing'] ), 'Disabled country fallback must be terminal.' );
 
 $preview = $service->preview_bulk_lists( array( 'АВСТРИЯ' ), array() );
 country_smoke_assert( ! empty( $preview['success'] ) && 1 === count( $preview['available']['changes'] ), 'Bulk available preview detects changes.' );

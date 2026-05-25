@@ -104,7 +104,10 @@ final class CheckoutOrchestrator {
 				}
 				$rate = $service instanceof DeliveryService ? $this->rate_for_service( $rate, $service ) : $rate;
 				$rules_source = 'none';
-				if ( $service instanceof DeliveryService && $this->service_manager instanceof DeliveryServiceManager ) {
+				if ( ! empty( $rate->meta['skip_rules'] ) ) {
+					$rules_for_rate = array();
+					$rules_source = 'skipped_fallback';
+				} elseif ( $service instanceof DeliveryService && $this->service_manager instanceof DeliveryServiceManager ) {
 					$rules_data = $this->service_manager->rules_for_service( $service );
 					$rules_for_rate = $rules_data['rules'];
 					$rules_source = $rules_data['source'];
@@ -114,7 +117,7 @@ final class CheckoutOrchestrator {
 					$rules_source = array() !== $rules_for_rate ? 'default' : 'none';
 				}
 				$applied = $this->rule_builder->apply( $rate, $this->context_for_rate( $service_request, $rate ), $rules_for_rate );
-				$processed = $service instanceof DeliveryService && $this->service_manager instanceof DeliveryServiceManager
+				$processed = $service instanceof DeliveryService && $this->service_manager instanceof DeliveryServiceManager && empty( $applied['rate']->meta['skip_service_post_processing'] )
 					? $this->service_manager->post_process_rate( $applied['rate'], $service )
 					: $applied['rate'];
 				$processed = $this->rate_with_meta( $processed, array( 'rules_source' => $rules_source ) );
@@ -176,7 +179,8 @@ final class CheckoutOrchestrator {
 			DeliveryType::COURIER => trim( $service->courier_customer_comment ),
 			default => '',
 		};
-		$apply_service_comment = '' !== $comment && empty( $rate->meta['fallback'] );
+		$is_fallback = ! empty( $rate->meta['fallback'] );
+		$apply_service_comment = '' !== $comment && ! $is_fallback;
 		$comments = $apply_service_comment ? array_values( array_filter( array_merge( array( $comment ), $rate->comments ), static fn ( mixed $item ): bool => '' !== trim( (string) $item ) ) ) : $rate->comments;
 
 		return new DeliveryRate(
@@ -188,7 +192,7 @@ final class CheckoutOrchestrator {
 			$rate->tariff_key,
 			$rate->tariff_name,
 			$rate->delivery_type,
-			$service->title,
+			$is_fallback ? $rate->title : $service->title,
 			$rate->price,
 			$rate->original_price,
 			$rate->crossed_price,

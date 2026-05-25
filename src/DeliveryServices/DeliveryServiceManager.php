@@ -45,7 +45,7 @@ final class DeliveryServiceManager {
 	}
 
 	public function post_process_rate( DeliveryRate $rate, DeliveryService $service ): DeliveryRate {
-		if ( $rate->disabled || $rate->price->is_zero() ) {
+		if ( $rate->disabled || $rate->price->is_zero() || ! empty( $rate->meta['fallback'] ) || ! empty( $rate->meta['skip_service_post_processing'] ) ) {
 			return $this->rate_with_meta( $rate, array( 'round_up_applied' => false, 'minimum_price_applied' => false ) );
 		}
 

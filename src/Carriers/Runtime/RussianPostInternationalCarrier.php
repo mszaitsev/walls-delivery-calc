@@ -79,6 +79,9 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 		if ( null === $price ) {
 			return $this->fallback_quote( $request, $package, 'missing_price', array( 'api_result' => $api_result, 'cache_key' => $cache_key ) );
 		}
+		if ( $price['price_with_vat_rub'] <= 0 ) {
+			return $this->fallback_quote( $request, $package, 'zero_price', array( 'api_result' => $api_result, 'cache_key' => $cache_key ) );
+		}
 
 		$meta = array(
 			'api_price_rub' => $price['api_price_rub'],
@@ -152,7 +155,7 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 			self::SERVICE_KEY,
 			RussianPostSettings::TITLE,
 			'fallback',
-			$comment,
+			RussianPostSettings::TITLE,
 			DeliveryType::PICKUP,
 			$comment,
 			Money::from_rubles( 0 ),
@@ -161,12 +164,25 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 			DateRange::range( null, null ),
 			'',
 			'',
-			array( $comment ),
+			array(),
 			false,
 			'',
 			false,
 			false,
-			array_merge( array( 'fallback' => true, 'fallback_reason' => $reason, 'package' => $package->to_array() ), $extra )
+			array_merge(
+				array(
+					'fallback' => true,
+					'terminal_fallback' => true,
+					'skip_rules' => true,
+					'skip_service_post_processing' => true,
+					'fallback_reason' => $reason,
+					'fallback_text' => $comment,
+					'round_up_applied' => false,
+					'minimum_price_applied' => false,
+					'package' => $package->to_array(),
+				),
+				$extra
+			)
 		);
 
 		return new DeliveryQuote( $this->quote_id( $request, $package ), self::KEY, $request->destination, $package, array( $rate ), true, $reason, $reason, false, 'fallback', $rate->meta );

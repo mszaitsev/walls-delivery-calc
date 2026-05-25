@@ -107,6 +107,12 @@ function wp_remote_get( string $url, array $args = array() ): mixed {
 	if ( 'no_vat' === $GLOBALS['wdc_rp_remote_mode'] ) {
 		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'paymoney' => 10000, 'transtype' => 2 ) ) );
 	}
+	if ( 'zero' === $GLOBALS['wdc_rp_remote_mode'] ) {
+		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'paynds' => 0, 'transtype' => 2 ) ) );
+	}
+	if ( 'missing_price' === $GLOBALS['wdc_rp_remote_mode'] ) {
+		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'transtype' => 2 ) ) );
+	}
 
 	return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'paynds' => 10000, 'transtype' => 2 ) ) );
 }
@@ -250,8 +256,36 @@ $quote = $carrier->quote( rp_request() );
 rp_smoke_assert( $quote->has_available_rates(), 'API fail must return fallback rate.' );
 rp_smoke_assert( 0 === $quote->rates[0]->price->get_kopecks(), 'Fallback rate must be zero cost.' );
 rp_smoke_assert( 'http_status_500' === $quote->rates[0]->meta['fallback_reason'], 'Fallback must keep reason in meta.' );
-rp_smoke_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && array( 'Стоимость доставки рассчитает менеджер' ) === $quote->rates[0]->comments && '' === $quote->rates[0]->planned_delivery_comment, 'Russian Post fallback must expose fallback text as the main customer-facing pickup comment.' );
+rp_smoke_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && 'Стоимость доставки рассчитает менеджер' === $quote->rates[0]->title && array() === $quote->rates[0]->comments && '' === $quote->rates[0]->planned_delivery_comment, 'Russian Post terminal fallback must expose fallback text as title only.' );
+rp_smoke_assert( ! empty( $quote->rates[0]->meta['skip_rules'] ) && ! empty( $quote->rates[0]->meta['skip_service_post_processing'] ) && ! empty( $quote->rates[0]->meta['terminal_fallback'] ), 'Russian Post fallback must request skipped rules and service post-processing.' );
 
+$fallback_rule = new Rule( null, 'Add 100', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 100, RuleOperationBases::RUBLES, false, false );
+$fallback_comment_rule = new Rule( null, 'Fallback comment', true, 20, 'default', '', RuleActionTypes::ADD_COMMENT, RuleOperationTypes::EQUALS, 0, RuleOperationBases::RUBLES, false, false, array(), array( 1 => 'and', 2 => 'and', 3 => 'and' ), 'Комментарий правила' );
+$builder = new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) );
+$fallback_rate = $quote->rates[0];
+$fallback_request = rp_request();
+$built = $builder->apply( $fallback_rate, new \WallsShop\WDC\Rules\Domain\RuleEvaluationContext( Money::from_rubles( 1000 ), $fallback_rate->price, $fallback_request->package, $fallback_request->destination, $fallback_rate->delivery_type, '', '2026-05-25' ), array( $fallback_rule, $fallback_comment_rule ) );
+rp_smoke_assert( 0 === $built['rate']->price->get_kopecks() && array() === $built['rate']->comments && array() === $built['audit'], 'Rules must not change Russian Post terminal fallback price or comments.' );
+
+$GLOBALS['wdc_rp_remote_mode'] = 'zero';
+$GLOBALS['wdc_rp_transients'] = array();
+$quote = $carrier->quote( rp_request() );
+rp_smoke_assert( $quote->has_available_rates() && 'zero_price' === $quote->rates[0]->meta['fallback_reason'] && 0 === $quote->rates[0]->price->get_kopecks() && array() === $quote->rates[0]->comments, 'API zero price must trigger terminal fallback.' );
+
+$GLOBALS['wdc_rp_remote_mode'] = 'missing_price';
+$GLOBALS['wdc_rp_transients'] = array();
+$quote = $carrier->quote( rp_request() );
+rp_smoke_assert( $quote->has_available_rates() && 'missing_price' === $quote->rates[0]->meta['fallback_reason'] && 0 === $quote->rates[0]->price->get_kopecks() && array() === $quote->rates[0]->comments, 'API missing price must trigger terminal fallback.' );
+
+$fallback_disabled_settings = rp_settings();
+$fallback_disabled_settings->set( 'russian_post_worldwide_parcel', array_merge( $fallback_disabled_settings->all()['russian_post_worldwide_parcel'], array( 'fallback_enabled' => false ) ) );
+$GLOBALS['wdc_rp_remote_mode'] = 'fail';
+$GLOBALS['wdc_rp_transients'] = array();
+$quote = rp_carrier( $fallback_disabled_settings )->quote( rp_request() );
+rp_smoke_assert( ! $quote->has_available_rates() && 'http_status_500' === $quote->error_code, 'When fallback_enabled=false Russian Post must return no visible fallback rate.' );
+
+$settings = rp_settings();
+$carrier = rp_carrier( $settings );
 $GLOBALS['wdc_rp_remote_mode'] = 'success';
 $GLOBALS['wdc_rp_transients'] = array();
 $quote = $carrier->quote( rp_request( 0 ) );

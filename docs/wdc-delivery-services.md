@@ -1,6 +1,6 @@
 # WDC Delivery Services
 
-Version 0.21.0 adds the permanent delivery-service foundation. Version 0.21.1 adds reusable service-specific rules admin on top of the same storage model. Version 0.21.3 turns the service edit screen into real per-tab administration. Version 0.21.8 adds delivery-type customer comments. The model is intentionally table-based, not a single serialized option, so it can grow to API carriers, fixed-rate services, weight-based services, user-created services, service settings, pickup logic, credentials references, statistics, debug data, and history.
+Version 0.21.0 adds the permanent delivery-service foundation. Version 0.21.1 adds reusable service-specific rules admin on top of the same storage model. Version 0.21.3 turns the service edit screen into real per-tab administration. Version 0.21.8 adds delivery-type customer comments. Version 0.21.9 makes checkout comments render as separate lines and translates service admin select labels. The model is intentionally table-based, not a single serialized option, so it can grow to API carriers, fixed-rate services, weight-based services, user-created services, service settings, pickup logic, credentials references, statistics, debug data, and history.
 
 ## Tables
 
@@ -41,8 +41,8 @@ The admin page is `Калькулятор доставок → Службы до
 The service edit page is `admin.php?page=wdc-delivery-services&service=<service_key>` and exposes real tabs:
 
 - `Основное`: service key, title, carrier key, service type, enabled state, sort order, and default-rule fallback.
-- `Доступность`: availability mode plus the selected/all-except country list. `carrier_directory` services show that availability is driven by the carrier directory. Russian Post also links to its countries tab.
-- `Расчет`: service post-processing (`round_up_to_ruble`, `minimum_price_rub`) and service-specific calculation settings.
+- `Доступность`: availability mode plus the selected/all-except country list. The admin shows Russian labels (`Справочник перевозчика`, `Только выбранные страны`, `Все страны`, `Все страны, кроме выбранных`) while storing the technical values. `carrier_directory` services show that availability is driven by the carrier directory. Russian Post also links to its countries tab.
+- `Расчет`: service post-processing (`round_up_to_ruble`, `minimum_price_rub`) and service-specific calculation settings. The visible labels use Russian wording such as `Минимальная цена, руб.` and `Ставка НДС`.
 - `Правила`: embedded reusable rules admin for `target_type=service`.
 - `Страны Почты России`: only for `russian_post_worldwide_parcel`; embeds the Russian Post country mapping admin.
 
@@ -50,7 +50,7 @@ Russian Post international service settings now live on the service `Расче�
 
 As of 0.21.6, packaging tiers are no longer Russian Post service settings. They are global settings on `Правила расчета -> Упаковка`. Each service controls `include_packaging_weight` and `packaging_weight_mode` on its `Расчет` tab. The database stores `total_weight` or `package_item`, while the admin select shows Russian labels: `Прибавлять к общему весу посылки` and `Добавлять отдельной строкой «Упаковка»`.
 
-As of 0.21.8, the service `Расчет` tab also stores `pickup_customer_comment` and `courier_customer_comment` in `wdc_delivery_services`. Empty values are allowed. At checkout, a normal pickup/courier rate receives the matching service comment first, then rule-added comments are appended. Fallback rates use their configured fallback text as the primary customer-facing comment and can still receive rule comments after that.
+As of 0.21.8, the service `Расчет` tab also stores `pickup_customer_comment` and `courier_customer_comment` in `wdc_delivery_services`. Empty values are allowed. At checkout, a normal pickup/courier rate receives the matching service comment first, then rule-added comments are appended. As of 0.21.9, each checkout comment is rendered as a separate block line rather than relying on inline spans.
 
 ## Service Rules
 

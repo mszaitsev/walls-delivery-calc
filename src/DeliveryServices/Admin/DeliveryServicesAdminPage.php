@@ -185,7 +185,7 @@ final class DeliveryServicesAdminPage {
 							<td><a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&service=' . rawurlencode( $service->service_key ) ) ); ?>"><?php echo esc_html( $service->title ); ?></a></td>
 							<td><?php echo esc_html( $service->service_type ); ?></td>
 							<td><?php echo esc_html( $service->carrier_key ); ?></td>
-							<td><?php echo esc_html( $service->availability_mode ); ?></td>
+							<td><?php echo esc_html( $this->availability_mode_label( $service->availability_mode ) ); ?></td>
 							<td><?php echo esc_html( $this->countries_summary( $service ) ); ?></td>
 							<td><?php echo esc_html( $service->use_default_rules_when_no_service_rules ? __( 'own/default', 'walls-delivery-calc' ) : __( 'own only', 'walls-delivery-calc' ) ); ?></td>
 							<td><?php echo esc_html( $service->round_up_to_ruble ? __( 'да', 'walls-delivery-calc' ) : __( 'нет', 'walls-delivery-calc' ) ); ?></td>
@@ -273,7 +273,7 @@ final class DeliveryServicesAdminPage {
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 			<table class="form-table" role="presentation">
-				<?php $this->select_row( 'availability_mode', __( 'Доступность', 'walls-delivery-calc' ), $service->availability_mode, array( DeliveryService::AVAILABILITY_CARRIER_DIRECTORY, DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, DeliveryService::AVAILABILITY_ALL_COUNTRIES, DeliveryService::AVAILABILITY_ALL_EXCEPT_SELECTED ) ); ?>
+				<?php $this->select_assoc_row( 'availability_mode', __( 'Доступность', 'walls-delivery-calc' ), $service->availability_mode, $this->availability_mode_options() ); ?>
 				<?php if ( DeliveryService::AVAILABILITY_CARRIER_DIRECTORY === $service->availability_mode ) : ?>
 					<tr><th scope="row"><?php echo esc_html__( 'Справочник перевозчика', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html__( 'Доступность определяется справочником перевозчика.', 'walls-delivery-calc' ); ?> <?php if ( RussianPostSettings::SERVICE_KEY === $service->service_key ) : ?><a class="button" href="<?php echo esc_url( $this->service_tab_url( $service, 'russian_post_countries' ) ); ?>"><?php echo esc_html__( 'Открыть страны Почты России', 'walls-delivery-calc' ); ?></a><?php endif; ?></td></tr>
 				<?php endif; ?>
@@ -296,7 +296,7 @@ final class DeliveryServicesAdminPage {
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 			<table class="form-table" role="presentation">
 				<?php $this->checkbox_row( 'round_up_to_ruble', __( 'Округлять вверх до рубля', 'walls-delivery-calc' ), $service->round_up_to_ruble ); ?>
-				<?php $this->text_row( 'minimum_price_rub', __( 'Minimum price RUB', 'walls-delivery-calc' ), (string) $service->minimum_price_rub ); ?>
+				<?php $this->text_row( 'minimum_price_rub', __( 'Минимальная цена, руб.', 'walls-delivery-calc' ), (string) $service->minimum_price_rub ); ?>
 				<?php $this->checkbox_row( 'include_packaging_weight', __( 'Учитывать вес упаковки', 'walls-delivery-calc' ), $service->include_packaging_weight ); ?>
 				<?php $this->select_assoc_row( 'packaging_weight_mode', __( 'Способ учета веса упаковки', 'walls-delivery-calc' ), $service->packaging_weight_mode, $this->packaging_weight_mode_options() ); ?>
 				<?php $this->textarea_row( 'pickup_customer_comment', __( 'Комментарий для покупателя — доставка до ПВЗ', 'walls-delivery-calc' ), $service->pickup_customer_comment ); ?>
@@ -309,7 +309,7 @@ final class DeliveryServicesAdminPage {
 					<?php $this->text_row( 'rp_object_code', __( 'Код объекта отправления', 'walls-delivery-calc' ), (string) ( $rp['object_code'] ?? 4031 ) ); ?>
 					<?php $this->select_row( 'rp_isavia', __( 'Авиадоставка', 'walls-delivery-calc' ), (string) ( $rp['isavia'] ?? 0 ), array( '0', '1' ) ); ?>
 					<?php $this->text_row( 'rp_timeout', __( 'Таймаут API, сек', 'walls-delivery-calc' ), (string) ( $rp['timeout'] ?? 20 ) ); ?>
-					<?php $this->text_row( 'rp_vat_rate', __( 'VAT rate', 'walls-delivery-calc' ), (string) ( $rp['vat_rate'] ?? 0.2 ) ); ?>
+					<?php $this->text_row( 'rp_vat_rate', __( 'Ставка НДС', 'walls-delivery-calc' ), (string) ( $rp['vat_rate'] ?? 0.2 ) ); ?>
 					<?php $this->text_row( 'rp_max_package_weight_g', __( 'Максимальный вес сервиса, г', 'walls-delivery-calc' ), (string) ( $rp['max_package_weight_g'] ?? 19990 ) ); ?>
 					<?php $this->checkbox_row( 'rp_fallback_enabled', __( 'Fallback', 'walls-delivery-calc' ), ! empty( $rp['fallback_enabled'] ) ); ?>
 					<?php $this->text_row( 'rp_fallback_text', __( 'Fallback text', 'walls-delivery-calc' ), (string) ( $rp['fallback_text'] ?? '' ) ); ?>
@@ -378,9 +378,9 @@ final class DeliveryServicesAdminPage {
 				<?php $this->text_row( 'title', __( 'Название', 'walls-delivery-calc' ), $service->title ?? '' ); ?>
 				<?php $this->text_row( 'carrier_key', __( 'Carrier key', 'walls-delivery-calc' ), $service->carrier_key ?? '' ); ?>
 				<?php $this->select_row( 'service_type', __( 'Тип', 'walls-delivery-calc' ), $service->service_type ?? DeliveryService::TYPE_FIXED, array( DeliveryService::TYPE_API, DeliveryService::TYPE_FIXED, DeliveryService::TYPE_WEIGHT_BASED ) ); ?>
-				<?php $this->select_row( 'availability_mode', __( 'Доступность', 'walls-delivery-calc' ), $service->availability_mode ?? DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, array( DeliveryService::AVAILABILITY_CARRIER_DIRECTORY, DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, DeliveryService::AVAILABILITY_ALL_COUNTRIES, DeliveryService::AVAILABILITY_ALL_EXCEPT_SELECTED ) ); ?>
+				<?php $this->select_assoc_row( 'availability_mode', __( 'Доступность', 'walls-delivery-calc' ), $service->availability_mode ?? DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, $this->availability_mode_options() ); ?>
 				<?php $this->text_row( 'countries', __( 'Countries', 'walls-delivery-calc' ), $service instanceof DeliveryService ? implode( ',', $this->countries->countries( (int) $service->id ) ) : '' ); ?>
-				<?php $this->text_row( 'minimum_price_rub', __( 'Minimum price RUB', 'walls-delivery-calc' ), (string) ( $service->minimum_price_rub ?? 1 ) ); ?>
+				<?php $this->text_row( 'minimum_price_rub', __( 'Минимальная цена, руб.', 'walls-delivery-calc' ), (string) ( $service->minimum_price_rub ?? 1 ) ); ?>
 				<?php $this->text_row( 'sort_order', __( 'Sort order', 'walls-delivery-calc' ), (string) ( $service->sort_order ?? 100 ) ); ?>
 				<?php $this->checkbox_row( 'enabled', __( 'Включена', 'walls-delivery-calc' ), $service->enabled ?? true ); ?>
 				<?php $this->checkbox_row( 'use_default_rules_when_no_service_rules', __( 'Fallback на default rules', 'walls-delivery-calc' ), $service->use_default_rules_when_no_service_rules ?? true ); ?>
@@ -508,6 +508,22 @@ final class DeliveryServicesAdminPage {
 		);
 	}
 
+	/**
+	 * @return array<string,string>
+	 */
+	private function availability_mode_options(): array {
+		return array(
+			DeliveryService::AVAILABILITY_CARRIER_DIRECTORY => __( 'Справочник перевозчика', 'walls-delivery-calc' ),
+			DeliveryService::AVAILABILITY_SELECTED_COUNTRIES => __( 'Только выбранные страны', 'walls-delivery-calc' ),
+			DeliveryService::AVAILABILITY_ALL_COUNTRIES => __( 'Все страны', 'walls-delivery-calc' ),
+			DeliveryService::AVAILABILITY_ALL_EXCEPT_SELECTED => __( 'Все страны, кроме выбранных', 'walls-delivery-calc' ),
+		);
+	}
+
+	private function availability_mode_label( string $mode ): string {
+		return $this->availability_mode_options()[ $mode ] ?? $mode;
+	}
+
 	private function sanitize_textarea( mixed $value ): string {
 		$value = wp_unslash( $value );
 
@@ -558,10 +574,20 @@ final class DeliveryServicesAdminPage {
 
 	private function countries_summary( DeliveryService $service ): string {
 		if ( DeliveryService::AVAILABILITY_CARRIER_DIRECTORY === $service->availability_mode ) {
-			return __( 'carrier directory', 'walls-delivery-calc' );
+			return __( 'Справочник перевозчика', 'walls-delivery-calc' );
 		}
 		if ( DeliveryService::AVAILABILITY_ALL_COUNTRIES === $service->availability_mode ) {
-			return __( 'all', 'walls-delivery-calc' );
+			return __( 'Все страны', 'walls-delivery-calc' );
+		}
+		if ( DeliveryService::AVAILABILITY_SELECTED_COUNTRIES === $service->availability_mode ) {
+			$countries = null === $service->id ? array() : $this->countries->countries( (int) $service->id );
+
+			return array() === $countries ? __( 'Только выбранные страны', 'walls-delivery-calc' ) : implode( ', ', $countries );
+		}
+		if ( DeliveryService::AVAILABILITY_ALL_EXCEPT_SELECTED === $service->availability_mode ) {
+			$countries = null === $service->id ? array() : $this->countries->countries( (int) $service->id );
+
+			return array() === $countries ? __( 'Все страны, кроме выбранных', 'walls-delivery-calc' ) : __( 'Все, кроме: ', 'walls-delivery-calc' ) . implode( ', ', $countries );
 		}
 		$countries = null === $service->id ? array() : $this->countries->countries( (int) $service->id );
 

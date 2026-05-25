@@ -292,8 +292,13 @@ wdc_ds_assert( ! in_array( 'Комментарий курьера', $pickup_rate
 $courier_rate = $rate_for_service->invoke( $orchestrator, new DeliveryRate( 'rate', 'carrier', 'Carrier', 'svc', 'Svc', 'tariff', 'Tariff', DeliveryType::COURIER, 'Svc', Money::from_rubles( 100 ), null, null, DateRange::range( null, null ) ), $comment_service );
 wdc_ds_assert( array( 'Комментарий курьера' ) === $courier_rate->comments && DeliveryType::COURIER === $courier_rate->meta['service_customer_comment_type'], 'Courier service customer comment must apply only to courier rates.' );
 wdc_ds_assert( ! in_array( 'Комментарий ПВЗ', $courier_rate->comments, true ), 'Pickup customer comment must not appear on courier rates.' );
-$fallback_rate = $rate_for_service->invoke( $orchestrator, new DeliveryRate( 'rate', 'carrier', 'Carrier', 'svc', 'Svc', 'fallback', 'Fallback', DeliveryType::PICKUP, 'Fallback', Money::from_rubles( 0 ), null, null, DateRange::range( null, null ), '', '', array( 'fallback text' ), false, '', false, false, array( 'fallback' => true ) ), $comment_service );
-wdc_ds_assert( array( 'fallback text' ) === $fallback_rate->comments && 'no' === $fallback_rate->meta['service_customer_comment_applied'], 'Fallback rate must keep fallback_text as the main customer-facing comment.' );
+$fallback_rate = $rate_for_service->invoke( $orchestrator, new DeliveryRate( 'rate', 'carrier', 'Carrier', 'svc', 'Svc', 'fallback', 'Fallback', DeliveryType::PICKUP, 'fallback text', Money::from_rubles( 0 ), null, null, DateRange::range( null, null ), '', '', array(), false, '', false, false, array( 'fallback' => true, 'skip_service_post_processing' => true ) ), $comment_service );
+wdc_ds_assert( 'fallback text' === $fallback_rate->title && array() === $fallback_rate->comments && 'no' === $fallback_rate->meta['service_customer_comment_applied'], 'Fallback rate must keep fallback_text as title without service customer comments.' );
+$processed_fallback = $manager->post_process_rate(
+	new DeliveryRate( 'rate', 'carrier', 'Carrier', 'fixed_test', 'Fixed', 'fallback', 'Fallback', DeliveryType::PICKUP, 'fallback text', Money::from_rubles( 0 ), null, null, DateRange::range( null, null ), '', '', array(), false, '', false, false, array( 'fallback' => true, 'skip_service_post_processing' => true ) ),
+	$services->find_by_service_key( 'fixed_test' )
+);
+wdc_ds_assert( 0 === $processed_fallback->price->get_kopecks() && empty( $processed_fallback->meta['minimum_price_applied'] ) && empty( $processed_fallback->meta['round_up_applied'] ), 'Service post-processing must not change fallback price.' );
 $countries->delete_countries( $custom_id );
 wdc_ds_assert( array() === $countries->countries( $custom_id ), 'Country repository must delete countries.' );
 
@@ -334,6 +339,9 @@ wdc_ds_assert( str_contains( $delivery_admin_source, 'simulate_service_rules' ) 
 wdc_ds_assert( str_contains( $delivery_admin_source, 'include_packaging_weight' ) && str_contains( $delivery_admin_source, 'packaging_weight_mode' ) && ! str_contains( $delivery_admin_source, 'rp_packaging_tiers' ), 'Delivery service calculation tab must expose packaging controls and not Russian Post packaging tiers.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'Прибавлять к общему весу посылки' ) && str_contains( $delivery_admin_source, 'Добавлять отдельной строкой «Упаковка»' ), 'Packaging mode select must render Russian labels while storing technical values.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'pickup_customer_comment' ) && str_contains( $delivery_admin_source, 'courier_customer_comment' ) && str_contains( $delivery_admin_source, 'Комментарий для покупателя — доставка до ПВЗ' ) && str_contains( $delivery_admin_source, 'Комментарий для покупателя — курьерская доставка' ), 'Delivery service calculation tab must expose pickup/courier customer comments.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'Справочник перевозчика' ) && str_contains( $delivery_admin_source, 'Только выбранные страны' ) && str_contains( $delivery_admin_source, 'Все страны, кроме выбранных' ) && str_contains( $delivery_admin_source, 'AVAILABILITY_CARRIER_DIRECTORY' ), 'Availability select must render Russian labels while storing technical values.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'Минимальная цена, руб.' ) && str_contains( $delivery_admin_source, 'Ставка НДС' ), 'Calculation tab must render translated labels.' );
+wdc_ds_assert( ! str_contains( $delivery_admin_source, 'Minimum price RUB' ) && ! str_contains( $delivery_admin_source, 'VAT rate' ), 'Calculation tab must not render old English labels.' );
 
 $settings_page_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Admin/SettingsAdminPage.php' );
 wdc_ds_assert( ! str_contains( $settings_page_source, 'russian_post_worldwide_parcel[' ), 'Platform settings page must not render Russian Post service-specific fields.' );
