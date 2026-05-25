@@ -30,7 +30,7 @@ final class RuleFormulaFormatter {
 
 			$name = trim( (string) ( $entry['rule_name'] ?? '' ) );
 			$name = '' !== $name ? $name : 'Без названия';
-			$lines[] = 'Правило "' . $name . '": ' . $this->operation_label( (string) ( $entry['operation'] ?? '' ) ) . ' → ' . $this->format_price( $after ) . ' руб.';
+			$lines[] = 'Правило "' . $name . '": ' . $this->operation_label( (string) ( $entry['operation'] ?? '' ), $entry ) . ' → ' . $this->format_price( $after ) . ' руб.';
 		}
 
 		if ( ! empty( $post_processing['minimum_price_applied'] ) ) {
@@ -46,14 +46,33 @@ final class RuleFormulaFormatter {
 		return array_values( array_unique( $lines ) );
 	}
 
-	private function operation_label( string $operation ): string {
+	/**
+	 * @param array<string,mixed> $entry
+	 */
+	private function operation_label( string $operation, array $entry ): string {
+		$value = array_key_exists( 'operation_value', $entry ) && is_numeric( $entry['operation_value'] )
+			? $this->format_decimal( (float) $entry['operation_value'] )
+			: '';
+		$base = $this->operation_base_label( (string) ( $entry['operation_base'] ?? '' ) );
+		$suffix = '' !== $value ? ' ' . $value . $base : '';
+
 		return match ( $operation ) {
-			'increase' => 'увеличить',
-			'decrease' => 'уменьшить',
-			'set' => 'установить',
-			'multiply' => 'умножить',
-			'divide' => 'разделить',
+			'increase' => 'увеличить на' . $suffix,
+			'decrease' => 'уменьшить на' . $suffix,
+			'set' => 'установить' . $suffix,
+			'multiply' => 'умножить на' . $suffix,
+			'divide' => 'разделить на' . $suffix,
 			default => '' !== $operation ? $operation : 'изменить цену',
+		};
+	}
+
+	private function operation_base_label( string $base ): string {
+		return match ( $base ) {
+			'rubles' => ' руб.',
+			'percent_of_delivery' => '% от доставки',
+			'percent_of_order' => '% от заказа',
+			'percent_of_order_and_delivery' => '% от заказа и доставки',
+			default => '',
 		};
 	}
 
@@ -77,5 +96,12 @@ final class RuleFormulaFormatter {
 		$formatted = number_format( $value, 2, '.', ' ' );
 
 		return str_ends_with( $formatted, '.00' ) ? substr( $formatted, 0, -3 ) : $formatted;
+	}
+
+	private function format_decimal( float $value ): string {
+		$formatted = number_format( $value, 4, '.', '' );
+		$formatted = rtrim( rtrim( $formatted, '0' ), '.' );
+
+		return '' !== $formatted ? $formatted : '0';
 	}
 }

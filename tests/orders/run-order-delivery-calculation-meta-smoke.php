@@ -4,7 +4,20 @@ declare(strict_types=1);
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Core\Autoloader;
+use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
+use WallsShop\WDC\Rules\Domain\Rule;
+use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
+use WallsShop\WDC\Rules\Services\ConditionEvaluator;
+use WallsShop\WDC\Rules\Services\RuleEngine;
+use WallsShop\WDC\Rules\Services\RuleEvaluator;
+use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
+use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
+use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
+use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 
@@ -40,6 +53,44 @@ function esc_html( mixed $text ): string { return htmlspecialchars( (string) $te
 function wp_unslash( mixed $value ): mixed { return $value; }
 function sanitize_text_field( mixed $value ): string { return trim( (string) $value ); }
 
+function wdc_order_meta_real_rule_audit(): array {
+	$engine = new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) );
+	$context = new RuleEvaluationContext(
+		Money::from_rubles( 5000 ),
+		Money::from_rubles( 1200 ),
+		new Package( array(), Money::from_rubles( 5000 ), Money::from_rubles( 5000 ), 1000, 0, 1000 ),
+		new Address( country_code: 'PL', country_name: 'Польша' ),
+		DeliveryType::PICKUP,
+		'card',
+		'2026-05-26'
+	);
+	$result = $engine->apply_rules(
+		array(
+			new Rule( 101, 'Множитель', true, 10, 'service', 'russian_post_worldwide_parcel', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::MULTIPLY, 1.2, RuleOperationBases::RUBLES, false, false ),
+			new Rule( 102, 'Делитель', true, 20, 'service', 'russian_post_worldwide_parcel', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DIVIDE, 0.89, RuleOperationBases::RUBLES, false, false ),
+			new Rule( 103, 'Фикс. обработка', true, 30, 'service', 'russian_post_worldwide_parcel', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 200, RuleOperationBases::RUBLES, false, false ),
+		),
+		$context
+	);
+
+	$audit = array_map( static fn ( object $entry ): array => method_exists( $entry, 'to_array' ) ? $entry->to_array() : array(), $result->audit );
+	foreach ( $audit as $entry ) {
+		foreach ( array( 'rule_name', 'action_type', 'operation', 'operation_value', 'operation_base', 'before_value', 'after_value', 'applied' ) as $key ) {
+			order_meta_smoke_assert( array_key_exists( $key, $entry ), 'Real RuleEngine audit must contain ' . $key . '.' );
+		}
+	}
+
+	$formula = ( new RuleFormulaFormatter() )->lines( 1200.0, $audit, $result->final_price->get_rubles() );
+	order_meta_smoke_assert( (bool) preg_grep( '/Множитель/u', $formula ), 'Formula must include multiply rule name from real audit.' );
+	order_meta_smoke_assert( (bool) preg_grep( '/Делитель/u', $formula ), 'Formula must include divide rule name from real audit.' );
+	order_meta_smoke_assert( (bool) preg_grep( '/Фикс\\. обработка/u', $formula ), 'Formula must include fixed increase rule name from real audit.' );
+	order_meta_smoke_assert( (bool) preg_grep( '/умножить на 1\\.2/u', $formula ), 'Formula must render multiply value from real audit.' );
+	order_meta_smoke_assert( (bool) preg_grep( '/разделить на 0\\.89/u', $formula ), 'Formula must render divide value from real audit.' );
+	order_meta_smoke_assert( (bool) preg_grep( '/увеличить на 200 руб\\./u', $formula ), 'Formula must render fixed ruble increase from real audit.' );
+
+	return $audit;
+}
+
 final class WdcOrderMetaSmokeOrder {
 	public array $meta = array();
 	public array $shipping = array();
@@ -69,6 +120,7 @@ final class WdcOrderMetaSmokeShippingItem {
 }
 
 function wdc_order_meta_rate( array $overrides = array() ): array {
+	$real_audit = wdc_order_meta_real_rule_audit();
 	$rate_meta = array_merge(
 		array(
 			'api_base_price_rub' => 1200.0,
@@ -90,28 +142,7 @@ function wdc_order_meta_rate( array $overrides = array() ): array {
 			'include_packaging_weight' => true,
 			'packaging_weight_mode' => 'total_weight',
 			'no_pickup_selection' => true,
-			'rules_audit' => array(
-				array(
-					'rule_id' => 10,
-					'rule_name' => 'Наценка',
-					'action_type' => 'change_price',
-					'before_value' => array( 'amount_kopecks' => 120000, 'currency' => 'RUB' ),
-					'after_value' => array( 'amount_kopecks' => 134831, 'currency' => 'RUB' ),
-					'operation' => 'divide',
-					'applied' => true,
-					'reason' => 'Price changed.',
-				),
-				array(
-					'rule_id' => 11,
-					'rule_name' => 'Фикс. обработка',
-					'action_type' => 'change_price',
-					'before_value' => array( 'amount_kopecks' => 134831, 'currency' => 'RUB' ),
-					'after_value' => array( 'amount_kopecks' => 154831, 'currency' => 'RUB' ),
-					'operation' => 'increase',
-					'applied' => true,
-					'reason' => 'Price changed.',
-				),
-			),
+			'rules_audit' => $real_audit,
 		),
 		$overrides['rate_meta'] ?? array()
 	);
@@ -165,7 +196,7 @@ order_meta_smoke_assert( ! isset( $calculation['result']['final_delivery_days_mi
 ob_start();
 ( new OrderDeliveryMetabox() )->render( $order );
 $html = (string) ob_get_clean();
-foreach ( array( 'Польша (PL)', 'Вес товаров', '1 549 руб.', 'Базовая цена API', 'Правило &quot;Наценка&quot;' ) as $needle ) {
+foreach ( array( 'Польша (PL)', 'Вес товаров', '1 549 руб.', 'Базовая цена API', 'Правило &quot;Множитель&quot;', 'Правило &quot;Делитель&quot;', 'Правило &quot;Фикс. обработка&quot;' ) as $needle ) {
 	order_meta_smoke_assert( str_contains( $html, $needle ), 'Order metabox must render calculation field: ' . $needle );
 }
 order_meta_smoke_assert( ! str_contains( $html, '0 дн.' ), 'Order metabox must not render empty delivery days.' );

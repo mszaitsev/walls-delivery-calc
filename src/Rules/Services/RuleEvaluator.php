@@ -32,7 +32,7 @@ final class RuleEvaluator {
 
 		if ( RuleActionTypes::CHANGE_PRICE === $rule->action_type ) {
 			$modified = $this->apply_price_operation( $context->delivery_price, $context, $rule );
-			$audit[]  = new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, $context->delivery_price->to_array(), $modified->to_array(), $rule->operation_type, true, 'Price changed.' );
+			$audit[]  = new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, $context->delivery_price->to_array(), $modified->to_array(), $rule->operation_type, true, 'Price changed.', $rule->operation_value, $rule->operation_base );
 
 			return new RuleEvaluationResult( true, true, $modified, null, array(), false, '', $audit, $rule->stop_processing );
 		}
@@ -41,21 +41,21 @@ final class RuleEvaluator {
 			$unit    = RuleOperationBases::BUSINESS_DAYS === $rule->operation_base ? DateRange::UNIT_BUSINESS_DAYS : DateRange::UNIT_CALENDAR_DAYS;
 			$days    = $this->apply_delivery_days_operation( $context, $rule );
 			$range   = DateRange::single( $days, $unit );
-			$audit[] = new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, null, $range->to_array(), $rule->operation_type, true, 'Delivery days changed.' );
+			$audit[] = new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, null, $range->to_array(), $rule->operation_type, true, 'Delivery days changed.', $rule->operation_value, $rule->operation_base );
 
 			return new RuleEvaluationResult( true, true, null, $range, array(), false, '', $audit, $rule->stop_processing );
 		}
 
 		if ( RuleActionTypes::ADD_COMMENT === $rule->action_type ) {
 			$comment = '' !== trim( $rule->operation_text ) ? $rule->operation_text : $rule->name;
-			$audit[] = new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, null, $comment, $rule->operation_type, true, 'Comment added.' );
+			$audit[] = new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, null, $comment, $rule->operation_type, true, 'Comment added.', $rule->operation_value, $rule->operation_base );
 
 			return new RuleEvaluationResult( true, true, null, null, array( $comment ), false, '', $audit, $rule->stop_processing );
 		}
 
 		if ( RuleActionTypes::DISABLE_RATE === $rule->action_type ) {
 			$reason  = '' !== trim( $rule->target_value ) ? $rule->target_value : $rule->name;
-			$audit[] = new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, false, true, $rule->operation_type, true, $reason );
+			$audit[] = new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, false, true, $rule->operation_type, true, $reason, $rule->operation_value, $rule->operation_base );
 
 			return new RuleEvaluationResult( true, true, null, null, array(), true, $reason, $audit, $rule->stop_processing );
 		}
@@ -163,7 +163,7 @@ final class RuleEvaluator {
 			array(),
 			false,
 			'',
-			array( new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, null, null, $rule->operation_type, false, $reason ) ),
+			array( new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, null, null, $rule->operation_type, false, $reason, $rule->operation_value, $rule->operation_base ) ),
 			false
 		);
 	}
