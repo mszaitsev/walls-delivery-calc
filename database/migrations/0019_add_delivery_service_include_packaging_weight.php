@@ -8,6 +8,11 @@ return static function (): void {
 
 	$table = $wpdb->prefix . 'wdc_delivery_services';
 
+	$table_exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
+	if ( null === $table_exists ) {
+		return;
+	}
+
 	$has_include = $wpdb->get_var( $wpdb->prepare( 'SHOW COLUMNS FROM ' . $table . ' LIKE %s', 'include_packaging_weight' ) );
 	if ( null === $has_include ) {
 		$wpdb->query( 'ALTER TABLE ' . $table . ' ADD include_packaging_weight tinyint(1) NOT NULL DEFAULT 1 AFTER minimum_price_rub' );
