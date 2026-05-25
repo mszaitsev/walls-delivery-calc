@@ -20,6 +20,8 @@ return static function (): void {
 		use_default_rules_when_no_service_rules tinyint(1) NOT NULL DEFAULT 1,
 		round_up_to_ruble tinyint(1) NOT NULL DEFAULT 1,
 		minimum_price_rub decimal(12,4) NOT NULL DEFAULT 1.0000,
+		include_packaging_weight tinyint(1) NOT NULL DEFAULT 1,
+		packaging_weight_mode varchar(30) NOT NULL DEFAULT 'total_weight',
 		sort_order int NOT NULL DEFAULT 100,
 		deleted tinyint(1) NOT NULL DEFAULT 0,
 		created_at datetime NOT NULL,

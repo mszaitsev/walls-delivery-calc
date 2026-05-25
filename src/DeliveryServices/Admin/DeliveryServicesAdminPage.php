@@ -20,6 +20,8 @@ use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Packaging\PackagingApplicationResult;
+use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
 use WallsShop\WDC\Rules\Admin\RuleAdminContext;
 use WallsShop\WDC\Rules\Admin\RulesAdminPage;
@@ -42,7 +44,8 @@ final class DeliveryServicesAdminPage {
 		private ?RussianPostCountriesAdminPage $russian_post_countries = null,
 		private ?RussianPostInternationalCarrier $russian_post_carrier = null,
 		private ?RuleAppliedRateBuilder $rule_builder = null,
-		private ?DeliveryServiceManager $manager = null
+		private ?DeliveryServiceManager $manager = null,
+		private ?PackagingWeightCalculator $packaging_calculator = null
 	) {
 	}
 
@@ -294,6 +297,8 @@ final class DeliveryServicesAdminPage {
 			<table class="form-table" role="presentation">
 				<?php $this->checkbox_row( 'round_up_to_ruble', __( 'Округлять вверх до рубля', 'walls-delivery-calc' ), $service->round_up_to_ruble ); ?>
 				<?php $this->text_row( 'minimum_price_rub', __( 'Minimum price RUB', 'walls-delivery-calc' ), (string) $service->minimum_price_rub ); ?>
+				<?php $this->checkbox_row( 'include_packaging_weight', __( 'Учитывать вес упаковки', 'walls-delivery-calc' ), $service->include_packaging_weight ); ?>
+				<?php $this->select_row( 'packaging_weight_mode', __( 'Способ учета веса упаковки', 'walls-delivery-calc' ), $service->packaging_weight_mode, array( DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT, DeliveryService::PACKAGING_WEIGHT_PACKAGE_ITEM ) ); ?>
 				<?php if ( RussianPostSettings::SERVICE_KEY === $service->service_key ) : ?>
 					<tr><th colspan="2"><h3><?php echo esc_html__( 'Почта России', 'walls-delivery-calc' ); ?></h3></th></tr>
 					<?php $this->text_row( 'rp_api_endpoint', __( 'API endpoint тарифа', 'walls-delivery-calc' ), (string) ( $rp['api_endpoint'] ?? '' ) ); ?>
@@ -309,7 +314,6 @@ final class DeliveryServicesAdminPage {
 					<?php $this->checkbox_row( 'rp_cache_until_end_of_day', __( 'Кэш до конца дня', 'walls-delivery-calc' ), ! empty( $rp['cache_until_end_of_day'] ) ); ?>
 					<?php $this->checkbox_row( 'rp_auto_refresh_countries_if_empty', __( 'Автообновление стран, если пусто', 'walls-delivery-calc' ), ! empty( $rp['auto_refresh_countries_if_empty'] ) ); ?>
 					<?php $this->checkbox_row( 'rp_debug', __( 'Debug Почты России', 'walls-delivery-calc' ), ! empty( $rp['debug'] ) ); ?>
-					<tr><th scope="row"><label for="rp_packaging_tiers"><?php echo esc_html__( 'Packaging tiers JSON', 'walls-delivery-calc' ); ?></label></th><td><textarea id="rp_packaging_tiers" name="rp_packaging_tiers" rows="5" class="large-text code"><?php echo esc_textarea( (string) wp_json_encode( $rp['packaging_tiers'] ?? array(), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) ); ?></textarea></td></tr>
 				<?php endif; ?>
 			</table>
 			<?php submit_button( __( 'Сохранить расчет', 'walls-delivery-calc' ) ); ?>
@@ -469,6 +473,8 @@ final class DeliveryServicesAdminPage {
 		return array(
 			'round_up_to_ruble' => isset( $_POST['round_up_to_ruble'] ) ? 1 : 0,
 			'minimum_price_rub' => max( 0, (float) str_replace( ',', '.', (string) wp_unslash( $_POST['minimum_price_rub'] ?? '1' ) ) ),
+			'include_packaging_weight' => isset( $_POST['include_packaging_weight'] ) ? 1 : 0,
+			'packaging_weight_mode' => DeliveryService::normalize_packaging_weight_mode( sanitize_key( wp_unslash( $_POST['packaging_weight_mode'] ?? DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT ) ) ),
 		);
 	}
 
@@ -490,9 +496,6 @@ final class DeliveryServicesAdminPage {
 		$int = static fn ( string $key, int $default = 0 ): int => max( 0, (int) ( $_POST[ $key ] ?? $default ) );
 		$string = static fn ( string $key, string $default = '' ): string => sanitize_text_field( wp_unslash( $_POST[ $key ] ?? $default ) );
 		$url = static fn ( string $key, string $default = '' ): string => function_exists( 'esc_url_raw' ) ? esc_url_raw( (string) wp_unslash( $_POST[ $key ] ?? $default ) ) : filter_var( (string) wp_unslash( $_POST[ $key ] ?? $default ), FILTER_SANITIZE_URL );
-		$tiers_raw = (string) wp_unslash( $_POST['rp_packaging_tiers'] ?? '[]' );
-		$tiers = json_decode( $tiers_raw, true );
-
 		return array(
 			'api_endpoint' => array( 'value' => $url( 'rp_api_endpoint', 'https://tariff.pochta.ru/v2/calculate/tariff' ), 'format' => 'string' ),
 			'country_endpoint' => array( 'value' => $url( 'rp_country_endpoint', 'https://tariff.pochta.ru/v2/dictionary/country' ), 'format' => 'string' ),
@@ -507,7 +510,6 @@ final class DeliveryServicesAdminPage {
 			'cache_until_end_of_day' => array( 'value' => isset( $_POST['rp_cache_until_end_of_day'] ), 'format' => 'bool' ),
 			'auto_refresh_countries_if_empty' => array( 'value' => isset( $_POST['rp_auto_refresh_countries_if_empty'] ), 'format' => 'bool' ),
 			'debug' => array( 'value' => isset( $_POST['rp_debug'] ), 'format' => 'bool' ),
-			'packaging_tiers' => array( 'value' => is_array( $tiers ) ? $tiers : array(), 'format' => 'json' ),
 		);
 	}
 
@@ -603,6 +605,10 @@ final class DeliveryServicesAdminPage {
 		$date = sanitize_text_field( (string) ( $input['date'] ?? gmdate( 'Y-m-d' ) ) );
 		$item = new PackageItem( 'SIM', 'Simulation', 1, Money::from_rubles( $order_total ), Money::from_rubles( $order_total ), $weight );
 		$package = Package::from_items( array( $item ), 0, Money::from_rubles( $order_total ), Money::from_rubles( $order_total ) );
+		$packaging = $this->packaging_calculator instanceof PackagingWeightCalculator
+			? $this->packaging_calculator->apply_to_package( $package, $service )
+			: new PackagingApplicationResult( $package->weight_g, 0, $package->get_total_weight_g(), $service->include_packaging_weight, $service->packaging_weight_mode, $package );
+		$package = $packaging->package;
 		$request = new QuoteRequest( $country, new Address( country_code: $country ), $package, '', Money::from_rubles( $order_total ), $date );
 		$quote = $this->russian_post_carrier->quote( $request );
 		$rate = $quote->rates[0] ?? null;
@@ -624,6 +630,10 @@ final class DeliveryServicesAdminPage {
 			'base_price' => $rate->price->get_rubles() . ' ' . $rate->price->get_currency(),
 			'final_price' => $processed->price->get_rubles() . ' ' . $processed->price->get_currency(),
 			'delivery_days' => null !== $processed->delivery_days ? trim( (string) ( $processed->delivery_days->min_days ?? '-' ) . '-' . (string) ( $processed->delivery_days->max_days ?? '-' ), '-' ) : '-',
+			'products_weight_g' => $packaging->original_products_weight_g,
+			'packaging_weight_g' => $packaging->packaging_weight_g,
+			'package_weight_with_packaging_g' => $packaging->final_package_weight_g,
+			'packaging_weight_mode' => $packaging->packaging_weight_mode,
 			'source' => implode( ' / ', array_filter( array( $quote->source, ! empty( $rate->meta['fallback_reason'] ) ? 'fallback: ' . $rate->meta['fallback_reason'] : '', ! empty( $rate->meta['cache_hit'] ) ? 'cache hit' : 'cache miss' ) ) ),
 			'audit' => $applied['audit'],
 			'notice' => array() === $rules ? __( 'Для службы не настроены собственные правила.', 'walls-delivery-calc' ) : '',

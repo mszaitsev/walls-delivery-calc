@@ -619,6 +619,7 @@ rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'Приорите�
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'name="priority"' ), 'Admin UI must not expose a priority field.' );
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, "esc_html__( 'Текст'" ) && ! str_contains( $admin_page_source, "esc_html__( 'Число'" ), 'Admin UI must not expose universal text and number inputs for every condition.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'wdc_rules_action" value="reorder_rules"' ), 'Admin UI must expose a drag-sort reorder action.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, "tab=packaging" ) && str_contains( $admin_page_source, 'save_packaging_tiers' ) && str_contains( $admin_page_source, 'PackagingWeightCalculator::SETTINGS_KEY' ), 'Rules admin must expose packaging weight tiers tab.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'data-rule-row' ), 'Admin table rows must be draggable.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'render_for_context( RuleAdminContext $context )' ) && str_contains( $admin_page_source, 'render_embedded_for_context( RuleAdminContext $context )' ), 'Rules admin must expose full and embedded reusable context rendering.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'posted_context_rule' ) && str_contains( $admin_page_source, 'rule_matches_context' ), 'Rules admin actions must verify target context.' );

@@ -66,6 +66,16 @@ final class Package {
 		return $this->total_weight_g;
 	}
 
+	public function with_packaging_weight( int $packaging_weight_g ): self {
+		$packaging_weight_g = max( 0, $packaging_weight_g );
+
+		return new self( $this->items, $this->declared_value, $this->cart_total, $this->weight_g, $packaging_weight_g, $this->weight_g + $packaging_weight_g, $this->length_cm, $this->width_cm, $this->height_cm, $this->volume_cm3, $this->source );
+	}
+
+	public function with_added_item( PackageItem $item, int $packaging_weight_g ): self {
+		return self::from_items( array_merge( $this->items, array( $item ) ), max( 0, $packaging_weight_g ), $this->cart_total, $this->declared_value );
+	}
+
 	public function get_total_volume_cm3(): int {
 		return $this->volume_cm3 ?? array_reduce(
 			$this->items,

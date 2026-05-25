@@ -58,7 +58,7 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 			return $this->empty_quote( $request, 'unsupported_country_' . $country_code );
 		}
 
-		$package = $this->package_with_packaging( $request->package );
+		$package = $request->package;
 		if ( $package->get_total_weight_g() > (int) $settings['max_package_weight_g'] ) {
 			return $this->fallback_quote( $request, $package, 'overweight', array( 'max_package_weight_g' => (int) $settings['max_package_weight_g'] ) );
 		}
@@ -170,36 +170,6 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 		);
 
 		return new DeliveryQuote( $this->quote_id( $request, $package ), self::KEY, $request->destination, $package, array( $rate ), true, $reason, $reason, false, 'fallback', $rate->meta );
-	}
-
-	private function package_with_packaging( Package $package ): Package {
-		$packaging = $this->packaging_weight( $package->weight_g );
-		if ( $packaging === $package->packaging_weight_g ) {
-			return $package;
-		}
-
-		return new Package( $package->items, $package->declared_value, $package->cart_total, $package->weight_g, $packaging, $package->weight_g + $packaging, $package->length_cm, $package->width_cm, $package->height_cm, $package->volume_cm3, $package->source );
-	}
-
-	private function packaging_weight( int $weight_g ): int {
-		$settings = $this->settings->all();
-		$tiers = is_array( $settings['packaging_tiers'] ?? null ) ? $settings['packaging_tiers'] : array();
-		$max = 0;
-		foreach ( $tiers as $tier ) {
-			if ( ! is_array( $tier ) ) {
-				continue;
-			}
-
-			$from = max( 0, (int) ( $tier['from_weight_g'] ?? 0 ) );
-			$to = max( 0, (int) ( $tier['to_weight_g'] ?? 0 ) );
-			$value = max( 0, (int) ( $tier['packaging_weight_g'] ?? 0 ) );
-			$max = max( $max, $value );
-			if ( $weight_g >= $from && ( 0 === $to || $weight_g <= $to ) ) {
-				return $value;
-			}
-		}
-
-		return $max;
 	}
 
 	/**

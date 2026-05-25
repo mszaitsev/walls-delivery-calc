@@ -45,7 +45,9 @@ The service edit page is `admin.php?page=wdc-delivery-services&service=<service_
 - `Правила`: embedded reusable rules admin for `target_type=service`.
 - `Страны Почты России`: only for `russian_post_worldwide_parcel`; embeds the Russian Post country mapping admin.
 
-Russian Post international service settings now live on the service `Расчет` tab and are saved to `wdc_delivery_service_settings`: API endpoint, country endpoint, origin postcode, object code, ISAVIA flag, timeout, VAT rate, max package weight, fallback controls, cache-until-end-of-day, auto-refresh-countries-if-empty, debug flag, and packaging tiers. The service `enabled` flag is authoritative and is not duplicated as a Russian Post setting.
+Russian Post international service settings now live on the service `Расчет` tab and are saved to `wdc_delivery_service_settings`: API endpoint, country endpoint, origin postcode, object code, ISAVIA flag, timeout, VAT rate, max package weight, fallback controls, cache-until-end-of-day, auto-refresh-countries-if-empty, and debug flag. The service `enabled` flag is authoritative and is not duplicated as a Russian Post setting.
+
+As of 0.21.6, packaging tiers are no longer Russian Post service settings. They are global settings on `Правила расчета -> Упаковка`. Each service controls `include_packaging_weight` and `packaging_weight_mode` on its `Расчет` tab. `total_weight` adds packaging to the total package weight; `package_item` adds the `WDC_PACKAGING` virtual item.
 
 ## Service Rules
 

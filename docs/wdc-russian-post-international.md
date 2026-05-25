@@ -1,6 +1,6 @@
 # WDC Russian Post International Carrier
 
-Version: 0.21.5.
+Version: 0.21.6.
 
 ## Scope
 
@@ -41,13 +41,15 @@ When fallback is disabled, the quote returns no visible rate and the checkout-le
 
 Product weight comes from the new `Package` model. Products without weight contribute `0g`.
 
-Packaging weight is added from the shared `packaging_tiers` setting. The carrier checks `max_package_weight_g` from the Russian Post service settings, not a global limit. Overweight suppresses the ordinary tariff and uses fallback when enabled.
+Packaging weight is added by the shared `PackagingWeightCalculator` before the carrier is called. Russian Post uses `total_weight` mode, so the tariff API receives products weight plus packaging. The carrier checks `max_package_weight_g` from the Russian Post service settings, not a global limit. Overweight suppresses the ordinary tariff and uses fallback when enabled.
 
 ## API, Country Mapping, And Cache
 
-All HTTP requests use the WordPress HTTP API. Runtime settings include tariff endpoint, country dictionary endpoint, timeout, debug flag, service max weight, fallback text, country auto-refresh, cache mode, VAT rate, and packaging tiers.
+All HTTP requests use the WordPress HTTP API. Runtime settings include tariff endpoint, country dictionary endpoint, timeout, debug flag, service max weight, fallback text, country auto-refresh, cache mode, and VAT rate.
 
 As of 0.21.3, Russian Post international settings are service-specific settings. They are edited at `Службы доставки -> Почта России — международная доставка -> Расчет` and stored in `wdc_delivery_service_settings`. The platform settings page no longer renders or saves Russian Post carrier fields. The service row `enabled` flag is the authoritative on/off switch; it is not duplicated in the Russian Post settings payload.
+
+As of 0.21.6, packaging tiers are global calculator settings on `Правила расчета -> Упаковка`, not Russian Post service settings.
 
 Debug logs include endpoint, sanitized params, raw response, parsed response, cache hit/miss, API base price, and fallback reason. Token-like fields are omitted from request params and the shared logger redactor handles sensitive context keys.
 

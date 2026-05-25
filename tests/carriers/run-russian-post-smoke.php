@@ -19,6 +19,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Core\Autoloader;
+use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
@@ -27,6 +28,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleCondition;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
@@ -211,6 +213,7 @@ function rp_request( int $item_weight = 1000, string $country = 'US' ): QuoteReq
 
 $settings = rp_settings();
 $carrier = rp_carrier( $settings );
+rp_smoke_assert( ! array_key_exists( 'packaging_tiers', ( new RussianPostSettings( $settings ) )->all() ), 'RussianPostSettings must not expose packaging_tiers as service-specific settings.' );
 
 $GLOBALS['wdc_rp_remote_mode'] = 'no_vat';
 $quote = $carrier->quote( rp_request() );
@@ -233,7 +236,18 @@ rp_smoke_assert( 'http_status_500' === $quote->rates[0]->meta['fallback_reason']
 $GLOBALS['wdc_rp_remote_mode'] = 'success';
 $GLOBALS['wdc_rp_transients'] = array();
 $quote = $carrier->quote( rp_request( 0 ) );
-rp_smoke_assert( 150 === $quote->package->packaging_weight_g && 150 === $quote->package->total_weight_g, 'No-weight product must be 0g plus packaging tier.' );
+rp_smoke_assert( 0 === $quote->package->packaging_weight_g && 0 === $quote->package->total_weight_g, 'Direct carrier quote must not apply global packaging tiers by itself.' );
+
+$settings->set( PackagingWeightCalculator::SETTINGS_KEY, array( array( 'cart_weight_from_g' => 0, 'cart_weight_to_g' => 3000, 'packaging_weight_g' => 250 ) ) );
+$calculator = new PackagingWeightCalculator( $settings );
+$service = DeliveryService::from_array( array( 'service_key' => RussianPostSettings::SERVICE_KEY, 'carrier_key' => RussianPostSettings::CARRIER_KEY, 'include_packaging_weight' => 1, 'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT ) );
+$packaged = $calculator->apply_to_package( rp_request( 1000 )->package, $service );
+$quote = $carrier->quote( new QuoteRequest( 'US', new Address( country_code: 'US', city: 'New York', street: 'Broadway', house: '1', raw_address: 'Broadway 1' ), $packaged->package, 'card', Money::from_rubles( 1000 ), '2026-05-25' ) );
+rp_smoke_assert( 1250 === (int) ( $quote->rates[0]->meta['request_params']['weight'] ?? 0 ), 'Russian Post API must receive products weight plus packaging when service packaging is applied.' );
+$disabled_service = DeliveryService::from_array( array( 'service_key' => RussianPostSettings::SERVICE_KEY, 'carrier_key' => RussianPostSettings::CARRIER_KEY, 'include_packaging_weight' => 0, 'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT ) );
+$packaged = $calculator->apply_to_package( rp_request( 1000 )->package, $disabled_service );
+$quote = $carrier->quote( new QuoteRequest( 'US', new Address( country_code: 'US', city: 'New York', street: 'Broadway', house: '1', raw_address: 'Broadway 1' ), $packaged->package, 'card', Money::from_rubles( 1000 ), '2026-05-25' ) );
+rp_smoke_assert( 1000 === (int) ( $quote->rates[0]->meta['request_params']['weight'] ?? 0 ), 'Russian Post API must receive product weight only when service packaging is disabled.' );
 
 $settings->set( 'russian_post_worldwide_parcel', array_merge( $settings->all()['russian_post_worldwide_parcel'], array( 'max_package_weight_g' => 100 ) ) );
 $quote = rp_carrier( $settings )->quote( rp_request( 1000 ) );

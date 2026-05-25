@@ -201,6 +201,8 @@ use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 $GLOBALS['wpdb'] = new wpdb();
 $migration = require dirname( __DIR__, 2 ) . '/database/migrations/0018_create_delivery_services_tables.php';
 $migration();
+$migration_0019 = require dirname( __DIR__, 2 ) . '/database/migrations/0019_add_delivery_service_include_packaging_weight.php';
+$migration_0019();
 wdc_ds_assert( count( $GLOBALS['wdc_db_delta'] ?? array() ) === 3, 'Delivery services migration must create three tables.' );
 
 $services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
@@ -210,6 +212,7 @@ $countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
 $rp = $services->ensure_russian_post_service();
 wdc_ds_assert( RussianPostSettings::SERVICE_KEY === $rp->service_key, 'Russian Post service must be auto-created.' );
 wdc_ds_assert( DeliveryService::AVAILABILITY_CARRIER_DIRECTORY === $rp->availability_mode, 'Russian Post service must use carrier_directory availability.' );
+wdc_ds_assert( true === $rp->include_packaging_weight && DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT === $rp->packaging_weight_mode, 'Russian Post service must default to total_weight packaging.' );
 wdc_ds_assert( array() === $GLOBALS['wpdb']->rules, 'Russian Post bootstrap must not auto-create rules.' );
 
 $custom_id = $services->create_service( array( 'service_key' => 'fixed_test', 'service_type' => DeliveryService::TYPE_FIXED, 'title' => 'Fixed', 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES ) );
@@ -293,6 +296,7 @@ wdc_ds_assert( str_contains( $delivery_admin_source, 'render_embedded_for_contex
 wdc_ds_assert( str_contains( $delivery_admin_source, 'render_russian_post_countries_tab' ) && str_contains( $delivery_admin_source, 'Страны Почты России' ), 'Russian Post countries must be embedded as a service tab.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'save_russian_post_settings' ) && str_contains( $delivery_admin_source, 'DeliveryServiceSettingsRepository' ), 'Russian Post calculation settings must save to delivery service settings storage.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'simulate_service_rules' ) && str_contains( $delivery_admin_source, 'QuoteRequest' ) && str_contains( $delivery_admin_source, 'RussianPostInternationalCarrier' ), 'Russian Post service rules simulation must call the real carrier quote flow.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'include_packaging_weight' ) && str_contains( $delivery_admin_source, 'packaging_weight_mode' ) && ! str_contains( $delivery_admin_source, 'rp_packaging_tiers' ), 'Delivery service calculation tab must expose packaging controls and not Russian Post packaging tiers.' );
 
 $settings_page_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Admin/SettingsAdminPage.php' );
 wdc_ds_assert( ! str_contains( $settings_page_source, 'russian_post_worldwide_parcel[' ), 'Platform settings page must not render Russian Post service-specific fields.' );

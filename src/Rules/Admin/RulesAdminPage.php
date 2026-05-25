@@ -11,6 +11,8 @@ use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleAuditEntry;
 use WallsShop\WDC\Rules\Domain\RuleCondition;
@@ -52,7 +54,8 @@ final class RulesAdminPage {
 	public function __construct(
 		private PluginEnvironment $environment,
 		private RuleRepository $repository,
-		private RuleSimulator $simulator
+		private RuleSimulator $simulator,
+		private ?SettingsRepository $settings = null
 	) {
 	}
 
@@ -81,6 +84,10 @@ final class RulesAdminPage {
 	public function render_page(): void {
 		$this->context = RuleAdminContext::default();
 		$this->service_simulation_runner = null;
+		if ( 'packaging' === $this->current_tab() ) {
+			$this->render_packaging_page();
+			return;
+		}
 		$this->render_full_for_current_context();
 	}
 
@@ -116,10 +123,24 @@ final class RulesAdminPage {
 		?>
 		<div class="wrap wdc-rules-admin">
 			<h1><?php echo esc_html( $this->context()->list_title ); ?></h1>
+			<?php $this->render_full_tabs( 'rules' ); ?>
 			<p class="description"><?php echo esc_html( $this->context()->is_default() ? __( 'Эти правила применяются по умолчанию для служб доставки, у которых нет включенных собственных правил.', 'walls-delivery-calc' ) : __( 'Эти правила применяются только для выбранной службы доставки. Симуляция на этой вкладке не подмешивает дефолтные правила.', 'walls-delivery-calc' ) ); ?></p>
 			<?php $this->render_context_body( $data['rules'], $data['edit_rule'] ); ?>
 		</div>
 		<?php
+	}
+
+	private function render_full_tabs( string $active ): void {
+		?>
+		<nav class="nav-tab-wrapper">
+			<a class="nav-tab <?php echo 'rules' === $active ? 'nav-tab-active' : ''; ?>" href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG ) ); ?>"><?php echo esc_html__( 'Правила', 'walls-delivery-calc' ); ?></a>
+			<a class="nav-tab <?php echo 'packaging' === $active ? 'nav-tab-active' : ''; ?>" href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=packaging' ) ); ?>"><?php echo esc_html__( 'Упаковка', 'walls-delivery-calc' ); ?></a>
+		</nav>
+		<?php
+	}
+
+	private function current_tab(): string {
+		return isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'rules';
 	}
 
 	/**
@@ -864,6 +885,128 @@ final class RulesAdminPage {
 		)[ $value ] ?? $value;
 	}
 
+	private function render_packaging_page(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			return;
+		}
+		$this->handle_packaging_post();
+		$tiers = $this->settings instanceof SettingsRepository ? $this->settings->get_array( PackagingWeightCalculator::SETTINGS_KEY, array() ) : array();
+		$tiers = is_array( $tiers ) ? array_values( array_filter( $tiers, 'is_array' ) ) : array();
+		?>
+		<div class="wrap wdc-rules-admin">
+			<h1><?php echo esc_html__( 'Дефолтные правила расчета', 'walls-delivery-calc' ); ?></h1>
+			<?php $this->render_full_tabs( 'packaging' ); ?>
+			<?php $this->render_notices(); ?>
+			<form method="post" class="wdc-packaging-form">
+				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
+				<input type="hidden" name="wdc_rules_action" value="save_packaging_tiers">
+				<table class="widefat striped wdc-packaging-tiers">
+					<thead><tr>
+						<th><?php echo esc_html__( 'Вес корзины от, г', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Вес корзины до, г', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Вес упаковки, г', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Действия', 'walls-delivery-calc' ); ?></th>
+					</tr></thead>
+					<tbody>
+						<?php foreach ( array_merge( $tiers, array( array() ) ) as $index => $tier ) : ?>
+							<tr>
+								<td><input type="number" min="0" name="packaging_tiers[<?php echo esc_attr( (string) $index ); ?>][cart_weight_from_g]" value="<?php echo esc_attr( (string) ( $tier['cart_weight_from_g'] ?? '' ) ); ?>"></td>
+								<td><input type="number" min="0" name="packaging_tiers[<?php echo esc_attr( (string) $index ); ?>][cart_weight_to_g]" value="<?php echo esc_attr( (string) ( $tier['cart_weight_to_g'] ?? '' ) ); ?>"></td>
+								<td><input type="number" min="0" name="packaging_tiers[<?php echo esc_attr( (string) $index ); ?>][packaging_weight_g]" value="<?php echo esc_attr( (string) ( $tier['packaging_weight_g'] ?? '' ) ); ?>"></td>
+								<td><button class="button" type="button" data-wdc-remove-packaging-row><?php echo esc_html__( 'Удалить строку', 'walls-delivery-calc' ); ?></button></td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+				<p>
+					<button class="button" type="button" data-wdc-add-packaging-row><?php echo esc_html__( 'Добавить строку', 'walls-delivery-calc' ); ?></button>
+					<button class="button button-primary" type="submit"><?php echo esc_html__( 'Сохранить настройки', 'walls-delivery-calc' ); ?></button>
+				</p>
+			</form>
+			<script>
+				document.addEventListener('click', function(event) {
+					if (event.target && event.target.matches('[data-wdc-remove-packaging-row]')) {
+						event.target.closest('tr').remove();
+					}
+					if (event.target && event.target.matches('[data-wdc-add-packaging-row]')) {
+						var tbody = document.querySelector('.wdc-packaging-tiers tbody');
+						var row = tbody ? tbody.querySelector('tr:last-child') : null;
+						if (!row || !tbody) { return; }
+						var clone = row.cloneNode(true);
+						var index = tbody.querySelectorAll('tr').length;
+						clone.querySelectorAll('input').forEach(function(input) {
+							input.value = '';
+							input.name = input.name.replace(/packaging_tiers\[[0-9]+\]/, 'packaging_tiers[' + index + ']');
+						});
+						tbody.appendChild(clone);
+					}
+				});
+			</script>
+		</div>
+		<?php
+	}
+
+	private function handle_packaging_post(): void {
+		if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) || ! isset( $_POST[ self::NONCE_NAME ] ) ) {
+			return;
+		}
+		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			$this->errors[] = __( 'Недостаточно прав или истек срок nonce.', 'walls-delivery-calc' );
+			return;
+		}
+		$action = isset( $_POST['wdc_rules_action'] ) ? sanitize_key( wp_unslash( $_POST['wdc_rules_action'] ) ) : '';
+		if ( 'save_packaging_tiers' !== $action || ! $this->settings instanceof SettingsRepository ) {
+			return;
+		}
+		$result = $this->sanitize_packaging_tiers( is_array( $_POST['packaging_tiers'] ?? null ) ? wp_unslash( $_POST['packaging_tiers'] ) : array() );
+		if ( array() !== $result['errors'] ) {
+			$this->errors = array_merge( $this->errors, $result['errors'] );
+			return;
+		}
+		$this->settings->set( PackagingWeightCalculator::SETTINGS_KEY, $result['tiers'] );
+	}
+
+	/**
+	 * @param array<int|string,mixed> $rows
+	 * @return array{tiers:array<int,array{cart_weight_from_g:int,cart_weight_to_g:int,packaging_weight_g:int}>,errors:array<int,string>}
+	 */
+	private function sanitize_packaging_tiers( array $rows ): array {
+		$tiers = array();
+		$errors = array();
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$raw = array_map( static fn( mixed $value ): string => trim( (string) $value ), $row );
+			if ( '' === ( $raw['cart_weight_from_g'] ?? '' ) && '' === ( $raw['cart_weight_to_g'] ?? '' ) && '' === ( $raw['packaging_weight_g'] ?? '' ) ) {
+				continue;
+			}
+			if ( '' === ( $raw['cart_weight_from_g'] ?? '' ) || '' === ( $raw['cart_weight_to_g'] ?? '' ) || '' === ( $raw['packaging_weight_g'] ?? '' ) ) {
+				$errors[] = __( 'Все поля строки упаковки обязательны.', 'walls-delivery-calc' );
+				continue;
+			}
+			$tier = array(
+				'cart_weight_from_g' => max( 0, (int) $raw['cart_weight_from_g'] ),
+				'cart_weight_to_g' => max( 0, (int) $raw['cart_weight_to_g'] ),
+				'packaging_weight_g' => max( 0, (int) $raw['packaging_weight_g'] ),
+			);
+			if ( $tier['cart_weight_to_g'] < $tier['cart_weight_from_g'] ) {
+				$errors[] = __( 'Вес корзины до не может быть меньше веса от.', 'walls-delivery-calc' );
+				continue;
+			}
+			$tiers[] = $tier;
+		}
+		usort( $tiers, static fn( array $a, array $b ): int => $a['cart_weight_from_g'] <=> $b['cart_weight_from_g'] );
+		for ( $i = 1; $i < count( $tiers ); ++$i ) {
+			if ( $tiers[ $i ]['cart_weight_from_g'] <= $tiers[ $i - 1 ]['cart_weight_to_g'] ) {
+				$errors[] = __( 'Диапазоны веса упаковки не должны пересекаться.', 'walls-delivery-calc' );
+				break;
+			}
+		}
+
+		return array( 'tiers' => $tiers, 'errors' => $errors );
+	}
+
 	private function render_service_simulation_form(): void {
 		$input = $this->simulation_input + array(
 			'country' => 'US',
@@ -879,7 +1022,7 @@ final class RulesAdminPage {
 				<input type="hidden" name="wdc_rules_action" value="simulate">
 				<div class="wdc-rule-grid">
 					<label><span><?php echo esc_html__( 'Страна назначения', 'walls-delivery-calc' ); ?></span><?php $this->render_select( 'simulation[country]', $this->country_options(), (string) $input['country'] ); ?></label>
-					<label><span><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?></span><input type="number" min="0" name="simulation[weight]" value="<?php echo esc_attr( (string) $input['weight'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Вес товаров, г', 'walls-delivery-calc' ); ?></span><input type="number" min="0" name="simulation[weight]" value="<?php echo esc_attr( (string) $input['weight'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Сумма заказа, руб.', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[order_total]" value="<?php echo esc_attr( (string) $input['order_total'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Дата', 'walls-delivery-calc' ); ?></span><input type="date" name="simulation[date]" value="<?php echo esc_attr( (string) $input['date'] ); ?>"></label>
 				</div>
@@ -899,6 +1042,10 @@ final class RulesAdminPage {
 			<table class="widefat striped"><tbody>
 				<tr><th><?php echo esc_html__( 'API/base price', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['base_price'] ?? '-' ) ); ?></td></tr>
 				<tr><th><?php echo esc_html__( 'Final price after service rules', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['final_price'] ?? '-' ) ); ?></td></tr>
+				<tr><th><?php echo esc_html__( 'Вес товаров, г', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['products_weight_g'] ?? '-' ) ); ?></td></tr>
+				<tr><th><?php echo esc_html__( 'Вес упаковки, г', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['packaging_weight_g'] ?? '-' ) ); ?></td></tr>
+				<tr><th><?php echo esc_html__( 'Итоговый вес для API, г', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['package_weight_with_packaging_g'] ?? '-' ) ); ?></td></tr>
+				<tr><th><?php echo esc_html__( 'Способ учета упаковки', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['packaging_weight_mode'] ?? '-' ) ); ?></td></tr>
 				<tr><th><?php echo esc_html__( 'Source/fallback/cache', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['source'] ?? '-' ) ); ?></td></tr>
 				<tr><th><?php echo esc_html__( 'Delivery days', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['delivery_days'] ?? '-' ) ); ?></td></tr>
 			</tbody></table>

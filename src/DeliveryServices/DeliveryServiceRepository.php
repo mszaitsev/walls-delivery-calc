@@ -107,6 +107,8 @@ final class DeliveryServiceRepository {
 				'use_default_rules_when_no_service_rules' => 1,
 				'round_up_to_ruble' => 1,
 				'minimum_price_rub' => 1,
+				'include_packaging_weight' => 1,
+				'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
 				'sort_order' => 10,
 				'deleted' => 0,
 			)
@@ -132,6 +134,8 @@ final class DeliveryServiceRepository {
 			'use_default_rules_when_no_service_rules' => '%d',
 			'round_up_to_ruble' => '%d',
 			'minimum_price_rub' => '%f',
+			'include_packaging_weight' => '%d',
+			'packaging_weight_mode' => '%s',
 			'sort_order' => '%d',
 			'deleted' => '%d',
 		);
@@ -145,6 +149,9 @@ final class DeliveryServiceRepository {
 				'%f' => 'minimum_price_rub' === $key ? max( 0, (float) str_replace( ',', '.', (string) $data[ $key ] ) ) : (float) str_replace( ',', '.', (string) $data[ $key ] ),
 				default => (string) $data[ $key ],
 			};
+			if ( 'packaging_weight_mode' === $key ) {
+				$row[ $key ] = DeliveryService::normalize_packaging_weight_mode( (string) $row[ $key ] );
+			}
 		}
 
 		if ( $include_created ) {
@@ -159,6 +166,8 @@ final class DeliveryServiceRepository {
 					'use_default_rules_when_no_service_rules' => 1,
 					'round_up_to_ruble' => 1,
 					'minimum_price_rub' => 1.0,
+					'include_packaging_weight' => 1,
+					'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
 					'sort_order' => 100,
 					'deleted' => 0,
 				),
@@ -182,7 +191,7 @@ final class DeliveryServiceRepository {
 	 * @return array<int,string>
 	 */
 	private function formats(): array {
-		return array( '%s', '%s', '%s', '%s', '%d', '%s', '%d', '%d', '%f', '%d', '%d', '%s', '%s' );
+		return array( '%s', '%s', '%s', '%s', '%d', '%s', '%d', '%d', '%f', '%d', '%s', '%d', '%d', '%s', '%s' );
 	}
 
 	/**
@@ -200,6 +209,8 @@ final class DeliveryServiceRepository {
 			'use_default_rules_when_no_service_rules' => '%d',
 			'round_up_to_ruble' => '%d',
 			'minimum_price_rub' => '%f',
+			'include_packaging_weight' => '%d',
+			'packaging_weight_mode' => '%s',
 			'sort_order' => '%d',
 			'deleted' => '%d',
 			'created_at' => '%s',

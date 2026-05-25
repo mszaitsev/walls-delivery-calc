@@ -64,13 +64,7 @@ final class SettingsRepository {
 				'cache_until_end_of_day'  => true,
 				'auto_refresh_countries_if_empty' => false,
 			),
-			'packaging_tiers'              => array(
-				array( 'from_weight_g' => 0, 'to_weight_g' => 1000, 'packaging_weight_g' => 150 ),
-				array( 'from_weight_g' => 1001, 'to_weight_g' => 3000, 'packaging_weight_g' => 250 ),
-				array( 'from_weight_g' => 3001, 'to_weight_g' => 7000, 'packaging_weight_g' => 400 ),
-				array( 'from_weight_g' => 7001, 'to_weight_g' => 15000, 'packaging_weight_g' => 550 ),
-				array( 'from_weight_g' => 15001, 'to_weight_g' => 19990, 'packaging_weight_g' => 700 ),
-			),
+			'packaging_weight_tiers'       => array(),
 		);
 	}
 

@@ -90,6 +90,7 @@ use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\Storage\RegionRepository;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
+use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Pickup\Admin\PickupAdminPage;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 use WallsShop\WDC\Rules\Admin\RulesAdminPage;
@@ -139,6 +140,7 @@ final class Plugin {
 		$this->container->register( DeliveryServiceRepository::class, fn(): DeliveryServiceRepository => new DeliveryServiceRepository() );
 		$this->container->register( DeliveryServiceSettingsRepository::class, fn(): DeliveryServiceSettingsRepository => new DeliveryServiceSettingsRepository() );
 		$this->container->register( DeliveryServiceCountryRepository::class, fn(): DeliveryServiceCountryRepository => new DeliveryServiceCountryRepository() );
+		$this->container->register( PackagingWeightCalculator::class, fn(): PackagingWeightCalculator => new PackagingWeightCalculator( $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( ConditionEvaluator::class, fn(): ConditionEvaluator => new ConditionEvaluator() );
 		$this->container->register( RuleEvaluator::class, fn(): RuleEvaluator => new RuleEvaluator( $this->container->get( ConditionEvaluator::class ) ) );
 		$this->container->register( RuleEngine::class, fn(): RuleEngine => new RuleEngine( $this->container->get( RuleEvaluator::class ) ) );
@@ -177,7 +179,8 @@ final class Plugin {
 				$this->container->get( CheckoutLogger::class ),
 				$this->container->get( QuoteCache::class ),
 				$this->container->get( DeliveryServiceRegistry::class ),
-				$this->container->get( DeliveryServiceManager::class )
+				$this->container->get( DeliveryServiceManager::class ),
+				$this->container->get( PackagingWeightCalculator::class )
 			)
 		);
 		$this->container->register( CheckoutSessionManager::class, fn(): CheckoutSessionManager => new CheckoutSessionManager() );
@@ -337,7 +340,8 @@ final class Plugin {
 			fn(): RulesAdminPage => new RulesAdminPage(
 				$this->environment,
 				$this->container->get( RuleRepository::class ),
-				$this->container->get( RuleSimulator::class )
+				$this->container->get( RuleSimulator::class ),
+				$this->container->get( SettingsRepository::class )
 			)
 		);
 		$this->container->register(
@@ -356,7 +360,7 @@ final class Plugin {
 		);
 		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ), $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( RussianPostSettings::class ) ) );
 		$this->container->register( RussianPostCountriesAdminPage::class, fn(): RussianPostCountriesAdminPage => new RussianPostCountriesAdminPage( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ) ) );
-		$this->container->register( DeliveryServicesAdminPage::class, fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceCountryRepository::class ), $this->container->get( RulesAdminPage::class ), $this->container->get( RuleRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ), $this->container->get( RussianPostSettings::class ), $this->container->get( RussianPostCountriesAdminPage::class ), $this->container->get( RussianPostInternationalCarrier::class ), $this->container->get( RuleAppliedRateBuilder::class ), $this->container->get( DeliveryServiceManager::class ) ) );
+		$this->container->register( DeliveryServicesAdminPage::class, fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceCountryRepository::class ), $this->container->get( RulesAdminPage::class ), $this->container->get( RuleRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ), $this->container->get( RussianPostSettings::class ), $this->container->get( RussianPostCountriesAdminPage::class ), $this->container->get( RussianPostInternationalCarrier::class ), $this->container->get( RuleAppliedRateBuilder::class ), $this->container->get( DeliveryServiceManager::class ), $this->container->get( PackagingWeightCalculator::class ) ) );
 		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox() );
 	}
 

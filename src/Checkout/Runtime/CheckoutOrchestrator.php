@@ -9,9 +9,12 @@ use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRegistry;
+use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryQuote;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Packaging\PackagingApplicationResult;
+use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
 
@@ -27,7 +30,8 @@ final class CheckoutOrchestrator {
 		private CheckoutLogger $logger,
 		private ?QuoteCache $quote_cache = null,
 		private ?DeliveryServiceRegistry $service_registry = null,
-		private ?DeliveryServiceManager $service_manager = null
+		private ?DeliveryServiceManager $service_manager = null,
+		private ?PackagingWeightCalculator $packaging_calculator = null
 	) {
 	}
 
@@ -65,9 +69,15 @@ final class CheckoutOrchestrator {
 			$service_key   = $service instanceof DeliveryService ? $service->service_key : '';
 			$delivery_type = '';
 			$quote         = null;
+			$service_request = $request;
+			$packaging_result = null;
+			if ( $service instanceof DeliveryService && $this->packaging_calculator instanceof PackagingWeightCalculator ) {
+				$packaging_result = $this->packaging_calculator->apply_to_package( $request->package, $service );
+				$service_request = $this->request_with_package( $request, $packaging_result->package, $packaging_result );
+			}
 
 			if ( $cache_enabled && $this->quote_cache instanceof QuoteCache ) {
-				$quote = $this->quote_cache->get( $request, $carrier_key, $delivery_type, $service_key );
+				$quote = $this->quote_cache->get( $service_request, $carrier_key, $delivery_type, $service_key );
 				if ( $quote instanceof DeliveryQuote ) {
 					++$cache_hits;
 					$this->logger->info( 'Quote cache hit.', array( 'carrier' => $carrier_key ) );
@@ -77,9 +87,9 @@ final class CheckoutOrchestrator {
 			}
 
 			if ( ! $quote instanceof DeliveryQuote ) {
-				$quote = $this->execution_guard->quote( $carrier, $request, $carrier_errors );
+				$quote = $this->execution_guard->quote( $carrier, $service_request, $carrier_errors );
 				if ( $cache_enabled && $this->quote_cache instanceof QuoteCache && $quote->success ) {
-					$this->quote_cache->set( $request, $carrier_key, $quote, $delivery_type, $service_key );
+					$this->quote_cache->set( $service_request, $carrier_key, $quote, $delivery_type, $service_key );
 				}
 			}
 
@@ -88,6 +98,9 @@ final class CheckoutOrchestrator {
 					continue;
 				}
 
+				if ( $packaging_result instanceof PackagingApplicationResult ) {
+					$rate = $this->rate_with_meta( $rate, $packaging_result->to_meta() );
+				}
 				$rate = $service instanceof DeliveryService ? $this->rate_for_service( $rate, $service ) : $rate;
 				$rules_source = 'none';
 				if ( $service instanceof DeliveryService && $this->service_manager instanceof DeliveryServiceManager ) {
@@ -99,7 +112,7 @@ final class CheckoutOrchestrator {
 					$rules_for_rate = is_array( $rules_for_rate ) ? $rules_for_rate : array();
 					$rules_source = array() !== $rules_for_rate ? 'default' : 'none';
 				}
-				$applied = $this->rule_builder->apply( $rate, $this->context_for_rate( $request, $rate ), $rules_for_rate );
+				$applied = $this->rule_builder->apply( $rate, $this->context_for_rate( $service_request, $rate ), $rules_for_rate );
 				$processed = $service instanceof DeliveryService && $this->service_manager instanceof DeliveryServiceManager
 					? $this->service_manager->post_process_rate( $applied['rate'], $service )
 					: $applied['rate'];
@@ -229,6 +242,18 @@ final class CheckoutOrchestrator {
 					'selected_location_fias_id' => (string) ( $request->customer_context['selected_location_fias_id'] ?? $request->destination->fias_id ),
 				)
 			)
+		);
+	}
+
+	private function request_with_package( QuoteRequest $request, Package $package, PackagingApplicationResult $packaging ): QuoteRequest {
+		return new QuoteRequest(
+			$request->country_code,
+			$request->destination,
+			$package,
+			$request->payment_method,
+			$request->order_total,
+			$request->calculation_date,
+			array_merge( $request->customer_context, $packaging->to_meta() )
 		);
 	}
 }

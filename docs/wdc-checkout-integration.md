@@ -34,6 +34,8 @@ As of version 0.21.3, Russian Post carrier settings are read from the delivery s
 
 Admin simulation has two modes. The default rules page applies rules to the entered delivery price only. The service rules tab performs a real service quote first, then applies enabled service rules only; default fallback is intentionally not mixed into service simulation.
 
+As of version 0.21.6, checkout applies service packaging before calling a carrier. `include_packaging_weight=false` leaves the package unchanged. `total_weight` adds packaging to total package weight. `package_item` adds the `WDC_PACKAGING` virtual item. Quote cache keys, carrier API requests, overweight checks, and rule weight conditions all see the package after this preprocessing.
+
 As of version 0.19.0, `russian_post` / `russian_post_worldwide_parcel` is registered as the real “Почта России — международная доставка” carrier. It is international-only, excludes `RU`, uses the new `Package` weight plus shared packaging tiers, and returns a zero-cost manager fallback instead of failing checkout for API errors, missing tariff/price, unsupported country, or overweight.
 
 As of version 0.19.2, Russian Post country support is read from the persistent `wdc_russian_post_country_mappings` table. Checkout does not rely on live country dictionary calls by default. If a destination country has no enabled mapping, the carrier returns its configured fallback/no-rate behavior with `unsupported_country_{code}`.

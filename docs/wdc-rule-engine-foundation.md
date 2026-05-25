@@ -68,6 +68,8 @@ All rule mutations verify the current target before editing, deleting, toggling,
 Service rule fallback is runtime-only. If a service has enabled service rules, runtime applies them and records `rules_source=service`. If it has no enabled service rules and `use_default_rules_when_no_service_rules` is enabled, runtime applies default rules and records `rules_source=default`. Disabled service rules do not count as own rules for fallback. If fallback is off, runtime records `rules_source=none`.
 
 Simulation is intentionally separated: the default page simulates default rules over the administrator-entered delivery price and does not call APIs. A service tab simulates only that service's own enabled rules and does not add default fallback automatically. For Russian Post, service simulation first calls the carrier with destination country, package weight, order total, and date, then applies service rules to the returned base quote and displays base/final price, audit, fallback, source, and cache data.
+
+As of 0.21.6, the default rules admin page has a second tab, `Упаковка`, for global packaging weight tiers. Weight conditions in runtime see the package after service packaging has been applied, so service-specific packaging can affect weight-based rules.
 # Rule Engine Foundation
 
 Rules now support service-level targeting:

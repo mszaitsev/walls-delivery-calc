@@ -34,13 +34,7 @@ final class RussianPostSettings {
 			$service['enabled'] = $delivery_service->enabled;
 		}
 
-		return array_merge(
-			$this->defaults(),
-			$service,
-			array(
-				'packaging_tiers' => is_array( $settings['packaging_tiers'] ?? null ) ? $settings['packaging_tiers'] : array(),
-			)
-		);
+		return array_merge( $this->defaults(), $service );
 	}
 
 	/**
