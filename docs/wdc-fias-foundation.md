@@ -3,7 +3,7 @@
 ## Locations Storage Architecture
 
 The locations foundation stores settlement-level delivery destinations in `wdc_locations`.
-The table is intentionally independent from checkout and legacy shipping code. As of `0.15.10`, production data is populated from a prepared GAR/ФИАС CSV instead of the old demo admin import.
+The table is intentionally independent from removed legacy shipping code. As of `0.20.0`, the plugin is `src/` only and fresh-install oriented. Production data is populated from prepared GAR/ФИАС CSV or snapshots; demo JSON is test fixture data only.
 
 Key fields:
 

@@ -188,7 +188,7 @@ function wp_unslash( mixed $value ): mixed {
 }
 
 function wp_verify_nonce( string $nonce, string $action ): bool {
-	return 'test-nonce' === $nonce && 'wdc_locations_import_demo' === $action;
+	return 'test-nonce' === $nonce && 'wdc_locations_admin' === $action;
 }
 
 function wp_nonce_field( string $action, string $name ): void {
@@ -224,7 +224,7 @@ $repository = new LocationRepository( $wpdb );
 $importer = new LocationImportService( $repository );
 $search = new LocationSearchService( $repository );
 
-$imported = $importer->import_from_json_file( dirname( __DIR__, 2 ) . '/database/demo/locations-demo.json' );
+$imported = $importer->import_from_json_file( dirname( __DIR__ ) . '/fixtures/demo/locations-demo.json' );
 locations_smoke_assert( $imported >= 9, sprintf( 'Demo dataset must import the stabilization demo locations, imported %d.', $imported ) );
 locations_smoke_assert( $repository->count_all() > 0, 'Repository count must be greater than zero.' );
 locations_smoke_assert( method_exists( $repository, 'count_regions' ), 'LocationRepository must expose count_regions method.' );
@@ -314,7 +314,7 @@ $admin_wpdb = new wpdb();
 $admin_repository = new LocationRepository( $admin_wpdb );
 $admin_importer = new LocationImportService( $admin_repository );
 $admin_search = new LocationSearchService( $admin_repository );
-$admin_importer->import_from_json_file( dirname( __DIR__, 2 ) . '/database/demo/locations-demo.json' );
+$admin_importer->import_from_json_file( dirname( __DIR__ ) . '/fixtures/demo/locations-demo.json' );
 $admin_repository->save_aliases( 1, array( 'Admin alias' ) );
 $_SERVER['REQUEST_METHOD'] = 'POST';
 $_POST = array(

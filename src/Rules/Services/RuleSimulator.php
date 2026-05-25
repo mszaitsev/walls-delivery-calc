@@ -21,13 +21,13 @@ final class RuleSimulator {
 	 * @param array<int,Rule> $rules
 	 */
 	public function simulate( array $rules, ?RuleEvaluationContext $context = null ): RuleEngineResult {
-		return $this->engine->apply_rules( $rules, $context ?? $this->demo_context() );
+		return $this->engine->apply_rules( $rules, $context ?? $this->sample_context() );
 	}
 
-	public function demo_context(): RuleEvaluationContext {
+	public function sample_context(): RuleEvaluationContext {
 		$item = new PackageItem(
-			sku: 'DEMO',
-			name: 'Demo item',
+			sku: 'SAMPLE',
+			name: 'Sample item',
 			quantity: 1,
 			unit_price: Money::from_rubles( 1000 ),
 			total_price: Money::from_rubles( 1000 ),

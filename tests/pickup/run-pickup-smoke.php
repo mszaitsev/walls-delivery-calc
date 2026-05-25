@@ -192,9 +192,10 @@ if ( ! function_exists( 'WC' ) ) {
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once dirname( __DIR__ ) . '/fixtures/TestDemoCarrier.php';
+require_once dirname( __DIR__ ) . '/fixtures/TestPickupProvider.php';
 
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
-use WallsShop\WDC\Carriers\Runtime\DemoCarrier;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
@@ -214,7 +215,6 @@ use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
-use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
@@ -318,7 +318,7 @@ function pickup_smoke_request( string $delivery_type = '' ): QuoteRequest {
 function pickup_smoke_orchestrator(): CheckoutOrchestrator {
 	$logger = new CheckoutLogger();
 	$registry = new CarrierRegistry();
-	$registry->register( new DemoCarrier() );
+	$registry->register( new TestDemoCarrier() );
 
 	return new CheckoutOrchestrator(
 		$registry,
@@ -330,7 +330,7 @@ function pickup_smoke_orchestrator(): CheckoutOrchestrator {
 	);
 }
 
-$provider = new DemoPickupProvider( dirname( __DIR__, 2 ) . '/database/demo/pickup-points-demo.json' );
+$provider = new TestPickupProvider( dirname( __DIR__ ) . '/fixtures/demo/pickup-points-demo.json' );
 $repo     = new PickupPointRepository();
 $imported = $repo->save_many( $provider->load_points() );
 pickup_smoke_assert( $imported >= 5, 'Demo pickup import must load at least five points.' );
@@ -347,7 +347,7 @@ pickup_smoke_assert( null !== $repo->find_by_code( 'demo', 'demo-nsk-001' ), 'Pi
 
 $session = new CheckoutSessionManager();
 $capture_session = new CheckoutSessionManager();
-( new CheckoutDeliveryTypeSelector( $capture_session, $repo, $provider, new PickupPointRenderer() ) )->capture_update_order_review( 'wdc_platform_pickup_carrier=demo&wdc_platform_pickup_rate_id=demo%3Apickup&wdc_platform_pickup_point=demo-nsk-001' );
+( new CheckoutDeliveryTypeSelector( $capture_session, $repo, new PickupPointRenderer() ) )->capture_update_order_review( 'wdc_platform_pickup_carrier=demo&wdc_platform_pickup_rate_id=demo%3Apickup&wdc_platform_pickup_point=demo-nsk-001' );
 $captured_pickup = $capture_session->pickup_selection();
 pickup_smoke_assert( 'demo-nsk-001' === ( $captured_pickup['point_code'] ?? '' ), 'Pickup update capture must save point code.' );
 pickup_smoke_assert( 'Красный проспект, 25' === ( $captured_pickup['point_address'] ?? '' ), 'Pickup update capture must save point address.' );
@@ -373,7 +373,7 @@ pickup_smoke_assert( $session->pickup_selection_matches( 'demo', NewShippingMeth
 pickup_smoke_assert( ! $session->pickup_selection_matches( 'other_carrier', 'demo:pickup' ), 'Pickup selection must reject another carrier.' );
 pickup_smoke_assert( ! $session->pickup_selection_matches( 'demo', 'demo:courier' ), 'Pickup selection must reject another rate.' );
 
-$carrier = new DemoCarrier();
+$carrier = new TestDemoCarrier();
 $pickup_quote = $carrier->quote( pickup_smoke_request( DeliveryType::PICKUP ) );
 pickup_smoke_assert( 2 === count( $pickup_quote->rates ), 'Pickup context must not hide courier rate.' );
 pickup_smoke_assert( $pickup_quote->rates[0]->requires_pickup_point, 'Pickup delivery must require pickup point.' );

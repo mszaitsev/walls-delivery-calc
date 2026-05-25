@@ -142,6 +142,6 @@ final class LocationImportService {
 		}
 
 		$fallback = trim( (string) $fallback );
-		return '' !== $fallback ? 'legacy-' . $fallback : '';
+		return '' !== $fallback ? 'gar-' . $fallback : '';
 	}
 }

@@ -173,7 +173,6 @@ function rp_settings(): SettingsRepository {
 		array_merge(
 			$settings->defaults(),
 			array(
-				'enable_demo_carrier' => false,
 				'russian_post_worldwide_parcel' => array_merge(
 					$settings->defaults()['russian_post_worldwide_parcel'],
 					array(
@@ -321,8 +320,5 @@ rp_smoke_assert( 'https://tariff.pochta.ru/v2/dictionary/country' === $sanitized
 rp_smoke_assert( '630005' === $sanitized['russian_post_worldwide_parcel']['origin_postcode'], 'Saved partial settings must merge origin postcode default.' );
 rp_smoke_assert( 4031 === $sanitized['russian_post_worldwide_parcel']['object_code'], 'Saved partial settings must merge object code default.' );
 rp_smoke_assert( 'Стоимость доставки рассчитает менеджер' === $sanitized['russian_post_worldwide_parcel']['fallback_text'], 'Saved partial settings must merge fallback text default.' );
-
-$legacy_diff = function_exists( 'shell_exec' ) ? trim( (string) shell_exec( 'git diff --name-only -- includes' ) ) : '';
-rp_smoke_assert( '' === $legacy_diff, 'legacy includes/* must not be modified.' );
 
 echo "Russian Post smoke test passed.\n";

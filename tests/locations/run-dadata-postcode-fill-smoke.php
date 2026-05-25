@@ -132,7 +132,7 @@ function wp_unslash( mixed $value ): mixed {
 }
 
 function wp_verify_nonce( string $nonce, string $action ): bool {
-	return 'test-nonce' === $nonce && 'wdc_locations_import_demo' === $action;
+	return 'test-nonce' === $nonce && 'wdc_locations_admin' === $action;
 }
 
 function wp_nonce_field( string $action, string $name ): void {

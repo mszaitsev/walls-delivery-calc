@@ -1,5 +1,7 @@
 # План перехода к новой архитектуре
 
+Archived/not-runtime as of 0.20.0: this plan documents the completed migration away from legacy `includes/*`. Current runtime is `src/` only and fresh-install oriented.
+
 ## Что сохраняем из текущей базы
 
 - Функциональное поведение текущего расчета международной Почты России.

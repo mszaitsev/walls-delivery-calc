@@ -27,7 +27,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class LocationsAdminPage {
 	private const PAGE_SLUG = 'wdc-platform-locations';
-	private const NONCE_ACTION = 'wdc_locations_import_demo';
+	private const NONCE_ACTION = 'wdc_locations_admin';
 	private const NONCE_NAME = 'wdc_locations_nonce';
 	private const GAR_JOB_OPTION = 'wdc_gar_import_job';
 	private const SNAPSHOT_EXPORT_JOB_OPTION = 'wdc_locations_snapshot_export_job';

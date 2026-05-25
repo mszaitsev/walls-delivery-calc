@@ -85,10 +85,6 @@ final class SettingsAdminPage {
 							<th scope="row"><?php echo esc_html__( 'Показывать отладочный блок checkout администраторам', 'walls-delivery-calc' ); ?></th>
 							<td><label><input type="checkbox" name="show_checkout_debug_panel" value="1" <?php checked( ! empty( $values['show_checkout_debug_panel'] ) ); ?>> <?php echo esc_html__( 'Отладка скрыта по умолчанию.', 'walls-delivery-calc' ); ?></label></td>
 						</tr>
-						<tr>
-							<th scope="row"><?php echo esc_html__( 'Включить тестовую ТК Demo', 'walls-delivery-calc' ); ?></th>
-							<td><label><input type="checkbox" name="enable_demo_carrier" value="1" <?php checked( ! empty( $values['enable_demo_carrier'] ) ); ?>> <?php echo esc_html__( 'Использовать тестовые тарифы до подключения реальных перевозчиков.', 'walls-delivery-calc' ); ?></label></td>
-						</tr>
 						<tr><th colspan="2"><h2><?php echo esc_html__( 'Почта России — международная доставка', 'walls-delivery-calc' ); ?></h2></th></tr>
 						<?php $rp = $this->russian_post_admin_values( $values ); ?>
 						<tr>
@@ -231,7 +227,6 @@ final class SettingsAdminPage {
 			'enable_new_checkout_shipping' => ! empty( $data['enable_new_checkout_shipping'] ),
 			'checkout_sort_mode'           => $sort_mode,
 			'show_checkout_debug_panel'    => ! empty( $data['show_checkout_debug_panel'] ),
-			'enable_demo_carrier'          => ! empty( $data['enable_demo_carrier'] ),
 			'include_region_in_checkout_city_picker_query' => ! array_key_exists( 'include_region_in_checkout_city_picker_query', $data ) ? false : ! empty( $data['include_region_in_checkout_city_picker_query'] ),
 			'checkout_location_search_limit' => max( 10, min( 500, $checkout_location_limit > 0 ? $checkout_location_limit : 100 ) ),
 			'checkout_location_region_limit' => max( 3, min( 50, $checkout_region_limit > 0 ? $checkout_region_limit : 10 ) ),

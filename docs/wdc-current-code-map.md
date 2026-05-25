@@ -1,5 +1,7 @@
 # Карта текущего кода Walls Delivery Calc
 
+Archived/not-runtime as of 0.20.0: this map describes the old legacy `includes/*` runtime and is kept only as migration history. Current runtime is `src/` only.
+
 ## Сводная таблица
 
 | Путь | Назначение | Ключевые классы/функции | Хуки | Связи | Решение |

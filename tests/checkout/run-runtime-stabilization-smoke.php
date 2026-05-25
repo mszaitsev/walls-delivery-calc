@@ -361,11 +361,12 @@ if ( ! function_exists( 'WC' ) ) {
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once dirname( __DIR__ ) . '/fixtures/TestDemoCarrier.php';
+require_once dirname( __DIR__ ) . '/fixtures/TestPickupProvider.php';
 
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
-use WallsShop\WDC\Carriers\Runtime\DemoCarrier;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
@@ -399,7 +400,6 @@ use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Services\KeyboardLayoutTransformer;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
-use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
@@ -434,7 +434,7 @@ function runtime_smoke_request( string $delivery_type = '' ): QuoteRequest {
 function runtime_smoke_orchestrator_with_demo(): CheckoutOrchestrator {
 	$logger   = new CheckoutLogger();
 	$registry = new CarrierRegistry();
-	$registry->register( new DemoCarrier() );
+	$registry->register( new TestDemoCarrier() );
 
 	return new CheckoutOrchestrator(
 		$registry,
@@ -491,7 +491,7 @@ NewShippingMethod::configure(
 );
 $method_without_rules = new NewShippingMethod();
 runtime_smoke_assert( array() === $checkout_rules_method->invoke( $method_without_rules ), 'No default rules must return an empty checkout rules list.' );
-runtime_smoke_assert( is_readable( dirname( __DIR__, 2 ) . '/database/demo/rules-demo.json' ), 'Demo rules fixture should exist for fallback regression coverage.' );
+runtime_smoke_assert( is_readable( dirname( __DIR__ ) . '/fixtures/demo/rules-demo.json' ), 'Demo rules fixture should exist for fallback regression coverage.' );
 runtime_smoke_assert( array() === $checkout_rules_method->invoke( $method_without_rules ), 'Demo rules must not be used as checkout fallback.' );
 
 $rules_db->rule_rows[] = array(
@@ -532,7 +532,7 @@ runtime_smoke_assert( 100 === (int) ( $city_selector_config['checkout_location_s
 runtime_smoke_assert( 'Идёт поиск, подождите несколько секунд' === $city_selector_config['strings']['searching'], 'City selector config strings must be Russian.' );
 
 $location_repository = new LocationRepository( $GLOBALS['wpdb'] );
-( new LocationImportService( $location_repository ) )->import_from_json_file( dirname( __DIR__, 2 ) . '/database/demo/locations-demo.json' );
+( new LocationImportService( $location_repository ) )->import_from_json_file( dirname( __DIR__ ) . '/fixtures/demo/locations-demo.json' );
 $location_settings = new SettingsRepository();
 $keyboard_layout = new KeyboardLayoutTransformer();
 runtime_smoke_assert( 'новос' === $keyboard_layout->latin_to_cyrillic_layout( 'yjdjc' ), 'Keyboard layout must map yjdjc to новос.' );
@@ -654,7 +654,6 @@ $sanitized = $settings_page->sanitize_settings(
 runtime_smoke_assert( true === $sanitized['enable_new_checkout_shipping'], 'enable_new_checkout_shipping must sanitize to true.' );
 runtime_smoke_assert( RateSorter::CHEAPEST === $sanitized['checkout_sort_mode'], 'Invalid checkout_sort_mode must fall back to cheapest.' );
 runtime_smoke_assert( true === $sanitized['show_checkout_debug_panel'], 'show_checkout_debug_panel must sanitize to true.' );
-runtime_smoke_assert( false === $sanitized['enable_demo_carrier'], 'Missing enable_demo_carrier checkbox must sanitize to false.' );
 runtime_smoke_assert( ! array_key_exists( $legacy_location_limit_key, $sanitized ), 'Legacy location limit key must not be sanitized.' );
 runtime_smoke_assert( 100 === $sanitized['checkout_location_search_limit'], 'checkout_location_search_limit=100 must sanitize to 100.' );
 runtime_smoke_assert( 10 === $settings_page->sanitize_settings( array( 'checkout_location_search_limit' => '5' ) )['checkout_location_search_limit'], 'checkout_location_search_limit below min must clamp to 10.' );
@@ -663,7 +662,6 @@ runtime_smoke_assert( 500 === $settings_page->sanitize_settings( array( 'checkou
 $GLOBALS['wdc_test_options'] = array(
 	'wdc_core_settings' => array(
 		'enable_new_checkout_shipping' => true,
-		'enable_demo_carrier'          => false,
 		'checkout_sort_mode'           => RateSorter::CHEAPEST,
 		'show_checkout_debug_panel'    => false,
 	),
@@ -750,12 +748,12 @@ WC()->session->set( 'chosen_shipping_methods', array( 'demo:courier' ) );
 runtime_smoke_assert( array() === $errors->errors, 'Courier rate must ignore stale pickup selection.' );
 
 $repo = new PickupPointRepository();
-$repo->save_many( ( new DemoPickupProvider( dirname( __DIR__, 2 ) . '/database/demo/pickup-points-demo.json' ) )->load_points() );
+$repo->save_many( ( new TestPickupProvider( dirname( __DIR__ ) . '/fixtures/demo/pickup-points-demo.json' ) )->load_points() );
 runtime_smoke_assert( count( $repo->search( 'demo', 'RU', 'Новосибирск' ) ) >= 3, 'Demo pickup search must find Новосибирск.' );
 runtime_smoke_assert( count( $repo->search( 'demo', 'RU', 'новосибирск' ) ) >= 3, 'Demo pickup search must find lowercase Новосибирск.' );
 runtime_smoke_assert( count( $repo->search( 'demo', 'RU', 'Новосиб' ) ) >= 3, 'Demo pickup search must find partial Новосиб.' );
 
-$renderer = new CheckoutDeliveryTypeSelector( new CheckoutSessionManager(), $repo, new DemoPickupProvider(), new PickupPointRenderer() );
+$renderer = new CheckoutDeliveryTypeSelector( new CheckoutSessionManager(), $repo, new PickupPointRenderer() );
 $rate = new class {
 	public function get_meta_data(): array {
 		return array(

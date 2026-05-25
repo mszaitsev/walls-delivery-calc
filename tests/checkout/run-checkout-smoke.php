@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
-use WallsShop\WDC\Carriers\Runtime\DemoCarrier;
 use WallsShop\WDC\Checkout\Cache\QuoteCache;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
@@ -35,6 +34,7 @@ defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEP
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once dirname( __DIR__ ) . '/fixtures/TestDemoCarrier.php';
 
 function checkout_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -63,7 +63,7 @@ function checkout_orchestrator( ?CarrierRegistry $registry = null, ?QuoteCache $
 
 	if ( null === $registry ) {
 		$registry = new CarrierRegistry();
-		$registry->register( new DemoCarrier() );
+		$registry->register( new TestDemoCarrier() );
 	}
 
 	return new CheckoutOrchestrator(

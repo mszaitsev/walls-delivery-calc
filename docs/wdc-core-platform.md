@@ -1,10 +1,10 @@
 # WDC Core Platform
 
-Version `0.4.0` introduces a new platform core that lives alongside the legacy plugin code.
+Version `0.20.0` makes the platform core the only runtime.
 
 ## Architecture
 
-New code is isolated under `src/` and uses the `WallsShop\WDC` namespace. Legacy `WDC_*` classes, the legacy shipping method, and the existing checkout behavior remain in `includes/` and continue to load as before.
+Runtime code lives under `src/` and uses the `WallsShop\WDC` namespace. Legacy `WDC_*` classes, the old shipping method, and `includes/*` bootstrap have been removed.
 
 Primary areas:
 
@@ -12,7 +12,7 @@ Primary areas:
 - `Infrastructure` for logging, settings, encryption, database migration skeletons, and queue abstraction.
 - `WooCommerce` for WooCommerce-specific integration such as HPOS compatibility.
 - `Admin` for the new platform status page and notices.
-- `Domain`, `Carriers`, `Rules`, `Calendar`, `Locations`, and `Shipments` are reserved for later platform modules.
+- `Domain`, `Carriers`, `Rules`, `Calendar`, `Locations`, `Pickup`, `Checkout`, and `Orders` hold the active platform modules.
 
 ## Namespaces
 
@@ -24,7 +24,7 @@ Examples:
 - `WallsShop\WDC\Infrastructure`
 - `WallsShop\WDC\Domain`
 
-Legacy classes such as `WDC_Plugin`, `WDC_Settings`, and `WDC_Shipping_Method` are not renamed or moved.
+There are no runtime `WDC_*` class dependencies.
 
 ## Autoloader
 
@@ -68,7 +68,7 @@ It supports reading and writing settings plus typed getters:
 - `get_int`
 - `get_array`
 
-Legacy settings are not migrated.
+Legacy settings are not migrated; this runtime generation is fresh-install-only.
 
 ## Encryption Service
 
@@ -105,18 +105,17 @@ Older WooCommerce versions are handled with a class-exists fallback.
 
 `src/Core/FeatureFlags.php` currently stores flags in PHP:
 
-- `legacy_shipping_enabled => true`
 - `new_core_enabled => true`
 - `new_checkout_flow_enabled => false`
 - `new_carriers_enabled => false`
+- `new_shipping_method_enabled => false`
 
 They will later move to settings.
 
-## Legacy Coexistence
+## Runtime Bootstrap
 
-The main plugin file now loads both systems:
+The main plugin file now loads only the platform bootstrap:
 
-- legacy bootstrap from `includes/class-wdc-plugin.php`
-- new platform bootstrap from `src/Core/bootstrap.php`
+- `src/Core/bootstrap.php`
 
-The old shipping method, Russian Post code, admin page, hooks, uninstall file, and checkout flow remain untouched.
+`Plugin` registers the service container, WooCommerce shipping method registrar, checkout runtime, admin pages, activation migrations, and scheduled platform jobs.
