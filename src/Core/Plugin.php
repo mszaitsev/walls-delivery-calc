@@ -58,6 +58,12 @@ use WallsShop\WDC\Checkout\WooCommerce\PickupPointRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\ShippingMethodRegistrar;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
+use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRegistry;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Infrastructure\Database\MigrationManager;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
@@ -130,6 +136,9 @@ final class Plugin {
 		$this->container->register( RegionRepository::class, fn(): RegionRepository => new RegionRepository() );
 		$this->container->register( PickupPointRepository::class, fn(): PickupPointRepository => new PickupPointRepository() );
 		$this->container->register( RuleRepository::class, fn(): RuleRepository => new RuleRepository() );
+		$this->container->register( DeliveryServiceRepository::class, fn(): DeliveryServiceRepository => new DeliveryServiceRepository() );
+		$this->container->register( DeliveryServiceSettingsRepository::class, fn(): DeliveryServiceSettingsRepository => new DeliveryServiceSettingsRepository() );
+		$this->container->register( DeliveryServiceCountryRepository::class, fn(): DeliveryServiceCountryRepository => new DeliveryServiceCountryRepository() );
 		$this->container->register( ConditionEvaluator::class, fn(): ConditionEvaluator => new ConditionEvaluator() );
 		$this->container->register( RuleEvaluator::class, fn(): RuleEvaluator => new RuleEvaluator( $this->container->get( ConditionEvaluator::class ) ) );
 		$this->container->register( RuleEngine::class, fn(): RuleEngine => new RuleEngine( $this->container->get( RuleEvaluator::class ) ) );
@@ -149,6 +158,8 @@ final class Plugin {
 				return $registry;
 			}
 		);
+		$this->container->register( DeliveryServiceRegistry::class, fn(): DeliveryServiceRegistry => new DeliveryServiceRegistry( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( CarrierRegistry::class ) ) );
+		$this->container->register( DeliveryServiceManager::class, fn(): DeliveryServiceManager => new DeliveryServiceManager( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceCountryRepository::class ), $this->container->get( RuleRepository::class ), $this->container->get( RussianPostCountryDirectory::class ) ) );
 		$this->container->register( QuoteCache::class, fn(): QuoteCache => new QuoteCache() );
 		$this->container->register( RateSorter::class, fn(): RateSorter => new RateSorter() );
 		$this->container->register( FallbackRateFactory::class, fn(): FallbackRateFactory => new FallbackRateFactory() );
@@ -164,7 +175,9 @@ final class Plugin {
 				$this->container->get( FallbackRateFactory::class ),
 				$this->container->get( CarrierExecutionGuard::class ),
 				$this->container->get( CheckoutLogger::class ),
-				$this->container->get( QuoteCache::class )
+				$this->container->get( QuoteCache::class ),
+				$this->container->get( DeliveryServiceRegistry::class ),
+				$this->container->get( DeliveryServiceManager::class )
 			)
 		);
 		$this->container->register( CheckoutSessionManager::class, fn(): CheckoutSessionManager => new CheckoutSessionManager() );
@@ -217,7 +230,8 @@ final class Plugin {
 				$this->environment,
 				$this->container->get( Logger::class ),
 				$this->container->get( AddressSuggestionSettings::class ),
-				$this->container->get( DaDataTokenPool::class )
+				$this->container->get( DaDataTokenPool::class ),
+				$this->container->get( DeliveryServiceManager::class )
 			)
 		);
 		$this->container->register( NewShippingMethod::class, fn(): NewShippingMethod => new NewShippingMethod() );
@@ -342,6 +356,7 @@ final class Plugin {
 		);
 		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ), $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( RussianPostSettings::class ) ) );
 		$this->container->register( RussianPostCountriesAdminPage::class, fn(): RussianPostCountriesAdminPage => new RussianPostCountriesAdminPage( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ) ) );
+		$this->container->register( DeliveryServicesAdminPage::class, fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceCountryRepository::class ) ) );
 		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox() );
 	}
 
@@ -374,12 +389,14 @@ final class Plugin {
 			$this->container->get( CheckoutSimulationPage::class )->register();
 			$this->container->get( PickupAdminPage::class )->register();
 			$this->container->get( RussianPostCountriesAdminPage::class )->register();
+			$this->container->get( DeliveryServicesAdminPage::class )->register();
 			$this->container->get( OrderDeliveryMetabox::class )->register();
 		}
 	}
 
 	public function boot_modules(): void {
 		$this->container->get( MigrationManager::class )->run();
+		$this->container->get( DeliveryServiceManager::class )->ensure_builtin_services();
 		$this->container->get( CalendarService::class )->ensure_initial_years();
 		$this->container->get( ActionScheduler::class );
 		$this->container->get( GarChangesService::class );
@@ -390,6 +407,7 @@ final class Plugin {
 
 	public function activate(): void {
 		$this->container->get( MigrationManager::class )->run();
+		$this->container->get( DeliveryServiceManager::class )->ensure_builtin_services();
 		$this->container->get( CalendarService::class )->ensure_initial_years();
 	}
 }

@@ -573,6 +573,12 @@ final class RulesAdminPage {
 			$operation_base = RuleOperationBases::RUBLES;
 		}
 
+		if ( in_array( $operation_type, array( RuleOperationTypes::MULTIPLY, RuleOperationTypes::DIVIDE ), true ) ) {
+			$action_type = RuleActionTypes::CHANGE_PRICE;
+			$operation_base = RuleOperationBases::RUBLES;
+			$operation_value = max( 0.0001, $operation_value );
+		}
+
 		if ( RuleActionTypes::DISABLE_RATE === $action_type ) {
 			$operation_type  = RuleOperationTypes::EQUALS;
 			$operation_base  = RuleOperationBases::RUBLES;
@@ -745,6 +751,8 @@ final class RulesAdminPage {
 			RuleOperationTypes::INCREASE => __( 'увеличить на', 'walls-delivery-calc' ),
 			RuleOperationTypes::DECREASE => __( 'уменьшить на', 'walls-delivery-calc' ),
 			RuleOperationTypes::EQUALS   => __( 'установить', 'walls-delivery-calc' ),
+			RuleOperationTypes::MULTIPLY => __( 'умножить на', 'walls-delivery-calc' ),
+			RuleOperationTypes::DIVIDE   => __( 'разделить на', 'walls-delivery-calc' ),
 		)[ $rule->operation_type ] ?? $this->operation_type_label( $rule->operation_type );
 
 		return trim( $prefix . ' ' . $this->operation_value_label( $rule ) );
@@ -764,6 +772,8 @@ final class RulesAdminPage {
 			RuleOperationTypes::INCREASE => __( 'Увеличить', 'walls-delivery-calc' ),
 			RuleOperationTypes::DECREASE => __( 'Уменьшить', 'walls-delivery-calc' ),
 			RuleOperationTypes::EQUALS   => __( 'Установить', 'walls-delivery-calc' ),
+			RuleOperationTypes::MULTIPLY => __( 'Умножить на', 'walls-delivery-calc' ),
+			RuleOperationTypes::DIVIDE   => __( 'Разделить на', 'walls-delivery-calc' ),
 		)[ $value ] ?? $value;
 	}
 
@@ -781,6 +791,10 @@ final class RulesAdminPage {
 	private function operation_value_label( Rule $rule ): string {
 		$value = $this->format_decimal( $rule->operation_value );
 		$base  = $this->operation_base_label( $rule->operation_base );
+
+		if ( in_array( $rule->operation_type, array( RuleOperationTypes::MULTIPLY, RuleOperationTypes::DIVIDE ), true ) ) {
+			return $value;
+		}
 
 		if ( in_array( $rule->operation_base, array( RuleOperationBases::PERCENT_OF_DELIVERY, RuleOperationBases::PERCENT_OF_ORDER, RuleOperationBases::PERCENT_OF_ORDER_AND_DELIVERY ), true ) ) {
 			return $value . $base;
@@ -839,6 +853,7 @@ final class RulesAdminPage {
 			'action_type is invalid'                  => __( 'Некорректный тип действия.', 'walls-delivery-calc' ),
 			'operation_type is invalid'               => __( 'Некорректная операция.', 'walls-delivery-calc' ),
 			'operation_base is invalid'               => __( 'Некорректная база операции.', 'walls-delivery-calc' ),
+			'operation_value must be greater than 0'  => __( 'Значение операции должно быть больше нуля.', 'walls-delivery-calc' ),
 			'operation_text is required'              => __( 'Комментарий обязателен для действия "Добавить комментарий".', 'walls-delivery-calc' ),
 			'condition_group must be greater than 0'  => __( 'Группа условия должна быть больше 0.', 'walls-delivery-calc' ),
 			'condition_type is invalid'               => __( 'Некорректный тип условия.', 'walls-delivery-calc' ),

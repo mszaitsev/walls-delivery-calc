@@ -304,6 +304,7 @@
 		var disabled = action.value === 'disable_rate';
 		var daysAction = action.value === 'change_delivery_days';
 		var commentAction = action.value === 'add_comment';
+		var factorAction = operationType && (operationType.value === 'multiply' || operationType.value === 'divide');
 		fields.classList.toggle('is-operation-disabled', disabled);
 		fields.classList.toggle('is-comment-operation', commentAction);
 		fields.querySelectorAll('[data-operation-control]').forEach(function (field) {
@@ -339,7 +340,7 @@
 
 		var selectedVisible = false;
 		base.querySelectorAll('option').forEach(function (option) {
-			var show = daysAction ? option.dataset.baseKind === 'days' : option.dataset.baseKind !== 'days';
+			var show = !factorAction && (daysAction ? option.dataset.baseKind === 'days' : option.dataset.baseKind !== 'days');
 			option.hidden = !show;
 			option.disabled = !show;
 			if (option.selected && show) {
@@ -349,6 +350,10 @@
 
 		if (!selectedVisible) {
 			base.value = daysAction ? 'calendar_days' : 'rubles';
+		}
+		var baseField = root.querySelector('[data-operation-base-field]');
+		if (baseField) {
+			baseField.hidden = factorAction;
 		}
 	}
 
@@ -409,7 +414,7 @@
 	});
 
 	document.addEventListener('change', function (event) {
-		if (event.target.matches('[data-action-type]')) {
+		if (event.target.matches('[data-action-type], [name="operation_type"]')) {
 			syncOperationFields(document);
 		}
 

@@ -77,6 +77,15 @@ rules_smoke_assert( 65000 === $result->final_price?->get_kopecks(), '+200 RUB mu
 $result = $engine->apply_rules( array( price_rule( '-10%', RuleOperationTypes::DECREASE, 10, RuleOperationBases::PERCENT_OF_DELIVERY ) ), rules_context() );
 rules_smoke_assert( 40500 === $result->final_price?->get_kopecks(), '-10% delivery must produce 405 RUB.' );
 
+$result = $engine->apply_rules( array( price_rule( '*2', RuleOperationTypes::MULTIPLY, 2 ) ), rules_context() );
+rules_smoke_assert( 90000 === $result->final_price?->get_kopecks(), 'multiply must produce 900 RUB.' );
+
+$result = $engine->apply_rules( array( price_rule( '/2', RuleOperationTypes::DIVIDE, 2 ) ), rules_context() );
+rules_smoke_assert( 22500 === $result->final_price?->get_kopecks(), 'divide must produce 225 RUB.' );
+
+$comma_rule = Rule::from_array( array_merge( price_rule( '*1,5', RuleOperationTypes::MULTIPLY, 1.5 )->to_array(), array( 'operation_value' => '1,5' ) ) );
+rules_smoke_assert( 1.5 === $comma_rule->operation_value, 'Comma decimal normalization must hydrate to decimal value.' );
+
 $comment_rule = new Rule( null, 'Add comment', true, 10, 'default', '', RuleActionTypes::ADD_COMMENT, RuleOperationTypes::EQUALS, 0, RuleOperationBases::RUBLES, false, false, array(), array( 1 => 'and', 2 => 'and', 3 => 'and' ), 'Позвонить за час' );
 $result = $engine->apply_rules( array( $comment_rule ), rules_context() );
 rules_smoke_assert( array( 'Позвонить за час' ) === $result->comments, 'add_comment must add operation_text to RuleEngineResult comments.' );

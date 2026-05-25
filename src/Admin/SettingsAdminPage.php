@@ -137,7 +137,7 @@ final class SettingsAdminPage {
 						</tr>
 						<tr>
 							<th scope="row"><?php echo esc_html__( 'Debug Почты России', 'walls-delivery-calc' ); ?></th>
-							<td><label><input type="checkbox" name="russian_post_worldwide_parcel[debug]" value="1" <?php checked( ! empty( $rp['debug'] ) ); ?>> <?php echo esc_html__( 'Логировать endpoint, параметры без секретов, ответы, cache hit/miss, формулу и fallback reason.', 'walls-delivery-calc' ); ?></label></td>
+							<td><label><input type="checkbox" name="russian_post_worldwide_parcel[debug]" value="1" <?php checked( ! empty( $rp['debug'] ) ); ?>> <?php echo esc_html__( 'Логировать endpoint, параметры без секретов, ответы, cache hit/miss, API base price и fallback reason.', 'walls-delivery-calc' ); ?></label></td>
 						</tr>
 						<tr>
 							<th scope="row"><?php echo esc_html__( 'Подставлять область в поиск населенного пункта на checkout', 'walls-delivery-calc' ); ?></th>

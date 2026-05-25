@@ -48,8 +48,6 @@ final class RussianPostSettings {
 			'timeout'              => 20,
 			'debug'                => false,
 			'max_package_weight_g' => 19990,
-			'formula_divider'      => 0.89,
-			'formula_add_rub'      => 200,
 			'vat_rate'             => 0.2,
 			'fallback_enabled'     => true,
 			'fallback_text'        => 'Стоимость доставки рассчитает менеджер',

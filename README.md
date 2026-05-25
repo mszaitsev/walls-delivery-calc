@@ -1,16 +1,17 @@
 # Walls Delivery Calc
 
-Version: 0.20.0.
+Version: 0.21.0.
 
 Walls Delivery Calc is a WooCommerce delivery calculator plugin. The runtime is now `src/` only: the old `includes/*` legacy bootstrap, shipping method, carriers, API clients, settings, helpers, and cache wrappers have been removed.
 
-This branch targets fresh installs only. Compatibility migrations for old legacy state are not part of the active install path. Current migrations still create the active platform schema: calendar, locations/GAR, pickup points, rules, DaData-related settings/options, and Russian Post country mappings.
+This branch targets fresh installs only. Compatibility migrations for old legacy state are not part of the active install path. Current migrations create the active platform schema: calendar, locations/GAR, pickup points, rules, DaData-related settings/options, Russian Post country mappings, and delivery service tables.
 
 ## Runtime
 
 - Main plugin file loads `src/Core/bootstrap.php`.
 - `WallsShop\WDC\Core\Plugin` registers the service container, hooks, activation install, migrations, WooCommerce shipping method, checkout runtime, admin pages, and scheduled jobs.
 - `CarrierRegistry` registers the current real carrier: Russian Post international.
+- `DeliveryServiceRegistry` and `DeliveryServiceManager` wrap carriers as persistent delivery services.
 - Demo JSON fixtures live under `tests/fixtures/demo` and are not used from runtime paths.
 
 ## Russian Post International
@@ -23,4 +24,14 @@ Russian Post international delivery runs through the `src` architecture:
 - `WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingRepository`
 - `WallsShop\WDC\Carriers\RussianPost\RussianPostSettings`
 
-The carrier is international-only, excludes `RU`, uses shared package and packaging-weight logic, caches quotes until the end of the current WordPress day, and returns configured manager fallback rates for API/availability failures when enabled.
+The carrier is international-only, excludes `RU`, uses shared package and packaging-weight logic, caches quotes until the end of the current WordPress day, and returns configured manager fallback rates for API/availability failures when enabled. It returns API/VAT base price only; the old `/0.89 + 200` built-in markup has been removed.
+
+## Delivery Services
+
+Version 0.21.0 adds persistent delivery services:
+
+- `wdc_delivery_services`
+- `wdc_delivery_service_settings`
+- `wdc_delivery_service_countries`
+
+Russian Post international is auto-created as `russian_post_worldwide_parcel`. Service-specific rules can override default rules, and default fallback is controlled per service. Service post-processing applies minimum price and ruble rounding after rules while preserving zero fallback rates.

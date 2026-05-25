@@ -7,12 +7,14 @@ final class RuleOperationTypes {
 	public const INCREASE = 'increase';
 	public const DECREASE = 'decrease';
 	public const EQUALS   = 'equals';
+	public const MULTIPLY = 'multiply';
+	public const DIVIDE   = 'divide';
 
 	/**
 	 * @return array<int,string>
 	 */
 	public static function all(): array {
-		return array( self::INCREASE, self::DECREASE, self::EQUALS );
+		return array( self::INCREASE, self::DECREASE, self::EQUALS, self::MULTIPLY, self::DIVIDE );
 	}
 
 	public static function is_valid( string $value ): bool {

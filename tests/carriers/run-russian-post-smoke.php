@@ -215,13 +215,13 @@ $carrier = rp_carrier( $settings );
 $GLOBALS['wdc_rp_remote_mode'] = 'no_vat';
 $quote = $carrier->quote( rp_request() );
 rp_smoke_assert( $quote->has_available_rates(), 'API success must return a rate.' );
-rp_smoke_assert( 33500 === $quote->rates[0]->price->get_kopecks(), 'API price without VAT must apply VAT once and formula ceil(price / 0.89 + 200).' );
+rp_smoke_assert( 12000 === $quote->rates[0]->price->get_kopecks(), 'API price without VAT must apply VAT once and return base price without built-in formula.' );
 rp_smoke_assert( false === $quote->rates[0]->meta['api_price_has_vat'], 'No-VAT source price must be marked as without VAT.' );
 
 $GLOBALS['wdc_rp_remote_mode'] = 'success';
 $GLOBALS['wdc_rp_transients'] = array();
 $quote = $carrier->quote( rp_request() );
-rp_smoke_assert( 31300 === $quote->rates[0]->price->get_kopecks(), 'API price with VAT must not double VAT.' );
+rp_smoke_assert( 10000 === $quote->rates[0]->price->get_kopecks(), 'API price with VAT must not double VAT and must not add built-in markup.' );
 
 $GLOBALS['wdc_rp_remote_mode'] = 'fail';
 $GLOBALS['wdc_rp_transients'] = array();
@@ -260,7 +260,7 @@ $orchestrator = new CheckoutOrchestrator( $registry, new RuleAppliedRateBuilder(
 $increase_rule = new Rule( null, 'Add 10', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 10, RuleOperationBases::RUBLES, false, false );
 $comment_rule = new Rule( null, 'Comment', true, 20, 'default', '', RuleActionTypes::ADD_COMMENT, RuleOperationTypes::EQUALS, 0, RuleOperationBases::RUBLES, false, false, array(), array( 1 => 'and', 2 => 'and', 3 => 'and' ), 'Комментарий правила' );
 $result = $orchestrator->calculate( rp_request(), array( $increase_rule, $comment_rule ), RateSorter::CHEAPEST, false );
-rp_smoke_assert( 32300 === $result->rates[0]->price->get_kopecks(), 'Rules must apply after carrier quote.' );
+rp_smoke_assert( 11000 === $result->rates[0]->price->get_kopecks(), 'Rules must apply after carrier quote.' );
 rp_smoke_assert( in_array( 'Комментарий правила', $result->rates[0]->comments, true ), 'add_comment rule must appear in rate comments.' );
 $disable_rule = new Rule( null, 'Disable US', true, 10, 'default', 'disabled', RuleActionTypes::DISABLE_RATE, RuleOperationTypes::EQUALS, 0, RuleOperationBases::RUBLES, false, false, array( new RuleCondition( null, null, 1, RuleConditionTypes::COUNTRY, RuleOperators::EQ, 'US' ) ) );
 $result = $orchestrator->calculate( rp_request(), array( $disable_rule ), RateSorter::CHEAPEST, false );

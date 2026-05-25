@@ -45,6 +45,10 @@ final class OrderShippingMetaPersister {
 			'_wdc_platform_fallback_used'            => ! empty( $rate['fallback_used'] ) || 'fallback' === (string) ( $rate['carrier_key'] ?? '' ),
 			'_wdc_platform_requires_pickup_point'    => ! empty( $rate['requires_pickup_point'] ) ? 1 : 0,
 			'_wdc_platform_service_key'              => $rate['service_key'] ?? '',
+			'_wdc_platform_service_title'            => $rate['service_title'] ?? '',
+			'_wdc_platform_rules_source'             => $rate['rules_source'] ?? 'none',
+			'_wdc_platform_round_up_applied'         => ! empty( $rate['round_up_applied'] ) ? 1 : 0,
+			'_wdc_platform_minimum_price_applied'    => ! empty( $rate['minimum_price_applied'] ) ? 1 : 0,
 			'_wdc_platform_rate_meta'                => $rate['rate_meta'] ?? array(),
 		);
 

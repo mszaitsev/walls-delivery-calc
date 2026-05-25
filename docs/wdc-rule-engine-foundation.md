@@ -51,4 +51,21 @@ The rules admin page is a CRUD interface for default rules. It uses the same typ
 
 ## Checkout Integration
 
-Checkout orchestration builds `RuleEvaluationContext` from WooCommerce checkout state, fetches carrier-specific rules with default fallback, applies `RuleEngine`, and maps the result back to delivery rates.
+Checkout orchestration builds `RuleEvaluationContext` from WooCommerce checkout state, fetches service-specific rules with service-controlled default fallback, applies `RuleEngine`, and maps the result back to delivery rates.
+
+As of 0.21.0, service rules use `target_type=service` and `target_value=<service_key>`.
+# Rule Engine Foundation
+
+Rules now support service-level targeting:
+
+- `target_type=default` for global default rules.
+- `target_type=service` and `target_value=<service_key>` for service-specific rules.
+
+Runtime checks service rules first. If no enabled service rules exist and `use_default_rules_when_no_service_rules` is true on the service, default rules are used. Otherwise the service runs with no rules. The runtime writes `rules_source` as `service`, `default`, or `none`.
+
+Price operations now include:
+
+- `multiply`: `price * value`
+- `divide`: `price / value`
+
+Both accept decimal values, comma or dot input, require values greater than zero, and do not use ruble or percent operation bases.

@@ -699,7 +699,7 @@ ob_start();
 $debug_output = (string) ob_get_clean();
 runtime_smoke_assert( str_contains( $debug_output, 'Отладка checkout WDC' ), 'Debug panel must render when explicitly enabled.' );
 
-runtime_smoke_assert( 'Калькулятор доставок' === $method->method_title, 'Shipping method title must be Russian.' );
+runtime_smoke_assert( 'Калькулятор доставки w.ALL.s' === $method->method_title, 'Shipping method title must be updated.' );
 
 $errors = new class {
 	/** @var array<string,string> */

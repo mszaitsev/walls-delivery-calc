@@ -80,15 +80,12 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 			return $this->fallback_quote( $request, $package, 'missing_price', array( 'api_result' => $api_result, 'cache_key' => $cache_key ) );
 		}
 
-		$final_rub = (int) ceil( $price['price_with_vat_rub'] / (float) $settings['formula_divider'] + (float) $settings['formula_add_rub'] );
 		$meta = array(
 			'api_price_rub' => $price['api_price_rub'],
 			'api_price_has_vat' => $price['has_vat'],
 			'api_price_with_vat_rub' => $price['price_with_vat_rub'],
 			'vat_rate' => (float) $settings['vat_rate'],
-			'formula_divider' => (float) $settings['formula_divider'],
-			'formula_add_rub' => (float) $settings['formula_add_rub'],
-			'formula_result_rub' => $final_rub,
+			'api_base_price_rub' => $price['price_with_vat_rub'],
 			'cache_key' => $cache_key,
 			'cache_hit' => ! empty( $api_result['cache_hit'] ),
 			'request_url' => (string) ( $api_result['url'] ?? '' ),
@@ -103,7 +100,7 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 			'package' => $package->to_array(),
 		);
 
-		$this->debug( 'Russian Post formula calculated.', $meta );
+		$this->debug( 'Russian Post API base price calculated.', $meta );
 
 		$rate = new DeliveryRate(
 			self::SERVICE_KEY,
@@ -115,7 +112,7 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 			RussianPostSettings::TITLE,
 			DeliveryType::COURIER,
 			RussianPostSettings::TITLE,
-			Money::from_rubles( $final_rub ),
+			Money::from_rubles( $price['price_with_vat_rub'] ),
 			null,
 			null,
 			DateRange::range( null, null ),

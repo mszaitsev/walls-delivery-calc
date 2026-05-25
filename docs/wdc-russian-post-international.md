@@ -1,6 +1,6 @@
 # WDC Russian Post International Carrier
 
-Version: 0.20.0.
+Version: 0.21.0.
 
 ## Scope
 
@@ -22,15 +22,9 @@ The carrier supports only non-RU destinations. `RU` is excluded in `supports_cou
 
 ## Pricing
 
-Russian Post tariff API prices are normalized before applying the storefront formula:
+Russian Post tariff API prices are normalized to API/VAT base price only. If API response contains VAT fields (`paynds` or `paymoneynds`), the value is treated as already including VAT. If only non-VAT fields (`paymoney` or `pay`) are present, VAT is applied once using the configured VAT rate, default `0.2`.
 
-```text
-ceil((API price with VAT applied) / 0.89 + 200)
-```
-
-If API response contains VAT fields (`paynds` or `paymoneynds`), the value is treated as already including VAT. If only non-VAT fields (`paymoney` or `pay`) are present, VAT is applied once using the configured VAT rate, default `0.2`.
-
-The resulting shipping price is stored as RUB and rounded with `ceil`.
+The old built-in storefront formula `/0.89 + 200` has been removed. Commercial adjustments now belong to service/default rules and service post-processing.
 
 ## Fallback
 
@@ -53,7 +47,7 @@ Packaging weight is added from the shared `packaging_tiers` setting. The carrier
 
 All HTTP requests use the WordPress HTTP API. Runtime settings include tariff endpoint, country dictionary endpoint, API token, timeout, debug flag, service max weight, and fallback text.
 
-Debug logs include endpoint, sanitized params, raw response, parsed response, cache hit/miss, formula calculation, and fallback reason. Token-like fields are omitted from request params and the shared logger redactor handles sensitive context keys.
+Debug logs include endpoint, sanitized params, raw response, parsed response, cache hit/miss, API base price, and fallback reason. Token-like fields are omitted from request params and the shared logger redactor handles sensitive context keys.
 
 As of 0.19.2, the country directory uses the persistent `wdc_russian_post_country_mappings` table. Runtime returns only rows with `effective_enabled=1`; RU is always excluded. The Russian Post dictionary endpoint is used by the admin refresh flow and optional lazy refresh when `auto_refresh_countries_if_empty` is enabled.
 
@@ -70,3 +64,15 @@ Country mapping administration lives in `Калькулятор доставок
 Checkout continues to apply rules after the carrier quote. The new shipping method now resolves rules per carrier with `get_rules_for_carrier_with_default_fallback($carrierKey)` when available, otherwise it falls back to default rules.
 
 `add_comment` rule text is merged into rate comments and persisted through the existing rate/session/order meta flow. `disable_rate` marks the rate unavailable, so it is hidden before final checkout rates are returned.
+# Russian Post International
+
+Russian Post international is now the first delivery service in the delivery-services foundation:
+
+- `service_key`: `russian_post_worldwide_parcel`
+- `carrier_key`: `russian_post`
+- `service_type`: `api`
+- `availability_mode`: `carrier_directory`
+
+The carrier still talks to the Russian Post tariff API and applies VAT when the API response does not already include VAT. The previous built-in commercial formula `/0.89 + 200` has been removed. Markups belong in service/default rules, not in the carrier.
+
+Fallback rates remain zero-price manager-contact rates. Service post-processing keeps fallback zero as zero.

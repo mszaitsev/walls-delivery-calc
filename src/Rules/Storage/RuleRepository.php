@@ -11,6 +11,7 @@ defined( 'ABSPATH' ) || exit;
 final class RuleRepository {
 	public const TARGET_DEFAULT = 'default';
 	public const TARGET_CARRIER = 'carrier';
+	public const TARGET_SERVICE = 'service';
 
 	private \wpdb $wpdb;
 
@@ -116,6 +117,31 @@ final class RuleRepository {
 	 */
 	public function get_rules_for_carrier_with_default_fallback( string $carrierKey ): array {
 		return $this->get_rules_for_target_or_default( self::TARGET_CARRIER, $carrierKey );
+	}
+
+	/**
+	 * @return array<int,Rule>
+	 */
+	public function get_rules_for_service( string $service_key ): array {
+		return $this->get_rules_for_target( self::TARGET_SERVICE, $service_key );
+	}
+
+	/**
+	 * @return array{rules:array<int,Rule>,source:string}
+	 */
+	public function get_rules_for_service_with_default_fallback( string $service_key, bool $fallback_to_default = true ): array {
+		$service_rules = $this->get_rules_for_service( $service_key );
+		if ( array() !== $service_rules ) {
+			return array( 'rules' => $service_rules, 'source' => 'service' );
+		}
+
+		if ( $fallback_to_default ) {
+			$default_rules = $this->get_default_rules();
+
+			return array( 'rules' => $default_rules, 'source' => array() !== $default_rules ? 'default' : 'none' );
+		}
+
+		return array( 'rules' => array(), 'source' => 'none' );
 	}
 
 	/**

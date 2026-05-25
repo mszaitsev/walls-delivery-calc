@@ -121,6 +121,8 @@ final class RuleEvaluator {
 			RuleOperationTypes::INCREASE => $current_price->add( $delta ),
 			RuleOperationTypes::DECREASE => $current_price->subtract( $delta ),
 			RuleOperationTypes::EQUALS   => $delta,
+			RuleOperationTypes::MULTIPLY => $current_price->multiply( max( 0, $rule->operation_value ) ),
+			RuleOperationTypes::DIVIDE   => $rule->operation_value > 0 ? $current_price->multiply( 1 / $rule->operation_value ) : $current_price,
 			default                      => $current_price,
 		};
 	}
