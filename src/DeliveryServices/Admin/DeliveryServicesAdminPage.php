@@ -7,6 +7,11 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\Rules\Admin\RuleAdminContext;
+use WallsShop\WDC\Rules\Admin\RulesAdminPage;
+use WallsShop\WDC\Rules\Domain\Rule;
+use WallsShop\WDC\Rules\Domain\RuleCondition;
+use WallsShop\WDC\Rules\Storage\RuleRepository;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -15,7 +20,9 @@ final class DeliveryServicesAdminPage {
 
 	public function __construct(
 		private DeliveryServiceRepository $services,
-		private DeliveryServiceCountryRepository $countries
+		private DeliveryServiceCountryRepository $countries,
+		private RulesAdminPage $rules_admin,
+		private RuleRepository $rules
 	) {
 	}
 
@@ -63,6 +70,16 @@ final class DeliveryServicesAdminPage {
 
 		if ( 'reorder' === $action ) {
 			$this->services->reorder( array_map( 'intval', explode( ',', (string) wp_unslash( $_POST['ordered_ids'] ?? '' ) ) ) );
+		}
+
+		if ( 'copy_default_rules' === $action ) {
+			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
+			$service = $this->services->find_by_service_key( $service_key );
+			if ( $service instanceof DeliveryService ) {
+				$this->copy_default_rules_to_service( $service );
+				wp_safe_redirect( $this->service_rules_url( $service, array( 'wdc_rules_notice' => 'copied' ) ) );
+				exit;
+			}
 		}
 
 		wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG ) );
@@ -149,17 +166,57 @@ final class DeliveryServicesAdminPage {
 	}
 
 	private function render_edit_page( DeliveryService $service ): void {
-		$tabs = array( 'Основное', 'Доступность', 'Расчет', 'Правила' );
+		$current_tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'main';
+		$tabs = array(
+			'main' => 'Основное',
+			'availability' => 'Доступность',
+			'calculation' => 'Расчет',
+			'rules' => 'Правила',
+		);
 		?>
 		<h2><?php echo esc_html( $service->title ); ?></h2>
 		<nav class="nav-tab-wrapper">
-			<?php foreach ( $tabs as $index => $tab ) : ?>
-				<a class="nav-tab <?php echo 0 === $index ? 'nav-tab-active' : ''; ?>" href="#"><?php echo esc_html( $tab ); ?></a>
+			<?php foreach ( $tabs as $tab_key => $tab ) : ?>
+				<a class="nav-tab <?php echo $current_tab === $tab_key ? 'nav-tab-active' : ''; ?>" href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&service=' . rawurlencode( $service->service_key ) . '&tab=' . rawurlencode( $tab_key ) ) ); ?>"><?php echo esc_html( $tab ); ?></a>
 			<?php endforeach; ?>
 		</nav>
-		<?php $this->render_service_form( $service ); ?>
+		<?php if ( 'rules' === $current_tab ) : ?>
+			<?php $this->render_rules_tab( $service ); ?>
+		<?php else : ?>
+			<?php $this->render_service_form( $service ); ?>
+		<?php endif; ?>
 		<p><a href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::MENU_SLUG ) ); ?>"><?php echo esc_html__( 'Назад к списку', 'walls-delivery-calc' ); ?></a></p>
 		<?php
+	}
+
+	private function render_rules_tab( DeliveryService $service ): void {
+		$service_rules = $this->rules->get_all_rules_for_target( RuleRepository::TARGET_SERVICE, $service->service_key );
+		if ( array() === $service_rules ) {
+			?>
+			<div class="notice notice-info inline"><p><?php echo esc_html__( 'Для этой службы не настроены собственные правила. При расчете будут применяться дефолтные правила, если включена соответствующая настройка службы.', 'walls-delivery-calc' ); ?></p></div>
+			<p><a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=wdc-rules' ) ); ?>"><?php echo esc_html__( 'Открыть дефолтные правила', 'walls-delivery-calc' ); ?></a></p>
+			<?php
+		}
+		?>
+		<form method="post" style="margin: 12px 0;" onsubmit="<?php echo array() !== $service_rules ? esc_attr( "return confirm('У службы уже есть собственные правила. Скопировать дефолтные правила дополнительно?');" ) : ''; ?>">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="copy_default_rules">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<button class="button"><?php echo esc_html__( 'Скопировать дефолтные правила', 'walls-delivery-calc' ); ?></button>
+		</form>
+		<?php
+		$this->rules_admin->render_for_context(
+			new RuleAdminContext(
+				RuleRepository::TARGET_SERVICE,
+				$service->service_key,
+				self::MENU_SLUG,
+				$this->service_rules_url( $service ),
+				'Правила службы: ' . $service->title,
+				'Правило службы',
+				'Для этой службы не настроены собственные правила. При расчете будут применяться дефолтные правила, если включена соответствующая настройка службы.',
+				true
+			)
+		);
 	}
 
 	private function render_create_form(): void {
@@ -235,7 +292,7 @@ final class DeliveryServicesAdminPage {
 			'carrier_key' => sanitize_key( wp_unslash( $_POST['carrier_key'] ?? '' ) ),
 			'service_type' => sanitize_key( wp_unslash( $_POST['service_type'] ?? DeliveryService::TYPE_FIXED ) ),
 			'availability_mode' => sanitize_key( wp_unslash( $_POST['availability_mode'] ?? DeliveryService::AVAILABILITY_SELECTED_COUNTRIES ) ),
-			'minimum_price_rub' => (float) str_replace( ',', '.', (string) wp_unslash( $_POST['minimum_price_rub'] ?? '1' ) ),
+			'minimum_price_rub' => max( 0, (float) str_replace( ',', '.', (string) wp_unslash( $_POST['minimum_price_rub'] ?? '1' ) ) ),
 			'sort_order' => (int) ( $_POST['sort_order'] ?? 100 ),
 			'enabled' => isset( $_POST['enabled'] ) ? 1 : 0,
 			'use_default_rules_when_no_service_rules' => isset( $_POST['use_default_rules_when_no_service_rules'] ) ? 1 : 0,
@@ -261,5 +318,44 @@ final class DeliveryServicesAdminPage {
 		$countries = null === $service->id ? array() : $this->countries->countries( (int) $service->id );
 
 		return array() === $countries ? '-' : implode( ', ', $countries );
+	}
+
+	/**
+	 * @param array<string,mixed> $args
+	 */
+	private function service_rules_url( DeliveryService $service, array $args = array() ): string {
+		return admin_url( 'admin.php?' . http_build_query( array_merge( array( 'page' => self::MENU_SLUG, 'service' => $service->service_key, 'tab' => 'rules' ), $args ) ) );
+	}
+
+	private function copy_default_rules_to_service( DeliveryService $service ): void {
+		$priority = $this->next_service_rule_priority( $service );
+		foreach ( $this->rules->get_all_rules_for_target( RuleRepository::TARGET_DEFAULT, '' ) as $rule ) {
+			$data = $rule->to_array();
+			$data['id'] = null;
+			$data['target_type'] = RuleRepository::TARGET_SERVICE;
+			$data['target_value'] = $service->service_key;
+			$data['priority'] = $priority;
+			$data['conditions'] = array_map(
+				static function ( RuleCondition $condition ): array {
+					$item = $condition->to_array();
+					$item['id'] = null;
+					$item['rule_id'] = null;
+
+					return $item;
+				},
+				$rule->conditions
+			);
+			$this->rules->save_rule( Rule::from_array( $data ) );
+			$priority += 10;
+		}
+	}
+
+	private function next_service_rule_priority( DeliveryService $service ): int {
+		$last = 0;
+		foreach ( $this->rules->get_all_rules_for_target( RuleRepository::TARGET_SERVICE, $service->service_key ) as $rule ) {
+			$last = max( $last, $rule->priority );
+		}
+
+		return $last + 10;
 	}
 }

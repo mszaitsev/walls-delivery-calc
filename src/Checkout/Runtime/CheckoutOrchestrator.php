@@ -62,11 +62,12 @@ final class CheckoutOrchestrator {
 			$carrier = $entry['carrier'];
 			$service = $entry['service'];
 			$carrier_key   = $carrier->get_identity()->key;
+			$service_key   = $service instanceof DeliveryService ? $service->service_key : '';
 			$delivery_type = '';
 			$quote         = null;
 
 			if ( $cache_enabled && $this->quote_cache instanceof QuoteCache ) {
-				$quote = $this->quote_cache->get( $request, $carrier_key, $delivery_type );
+				$quote = $this->quote_cache->get( $request, $carrier_key, $delivery_type, $service_key );
 				if ( $quote instanceof DeliveryQuote ) {
 					++$cache_hits;
 					$this->logger->info( 'Quote cache hit.', array( 'carrier' => $carrier_key ) );
@@ -78,7 +79,7 @@ final class CheckoutOrchestrator {
 			if ( ! $quote instanceof DeliveryQuote ) {
 				$quote = $this->execution_guard->quote( $carrier, $request, $carrier_errors );
 				if ( $cache_enabled && $this->quote_cache instanceof QuoteCache && $quote->success ) {
-					$this->quote_cache->set( $request, $carrier_key, $quote, $delivery_type );
+					$this->quote_cache->set( $request, $carrier_key, $quote, $delivery_type, $service_key );
 				}
 			}
 

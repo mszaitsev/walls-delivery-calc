@@ -30,7 +30,10 @@ if ( ! class_exists( 'wpdb' ) ) {
 		/** @var array<int,array<string,mixed>> */
 		public array $rules = array();
 		/** @var array<int,array<string,mixed>> */
+		public array $conditions = array();
+		/** @var array<int,array<string,mixed>> */
 		public array $queries = array();
+		private int $condition_insert_id = 0;
 
 		public function get_charset_collate(): string { return 'DEFAULT CHARSET=utf8mb4'; }
 		public function query( string $query ): bool { $this->queries[] = array( 'query' => $query ); return true; }
@@ -46,6 +49,11 @@ if ( ! class_exists( 'wpdb' ) ) {
 				$this->settings[] = $data;
 			} elseif ( str_contains( $table, 'wdc_delivery_service_countries' ) ) {
 				$this->countries[] = $data;
+			} elseif ( str_contains( $table, 'wdc_rule_conditions' ) ) {
+				$data['id'] = ++$this->condition_insert_id;
+				$this->conditions[] = $data;
+			} elseif ( str_contains( $table, 'wdc_rules' ) ) {
+				$this->rules[] = $data;
 			} elseif ( str_contains( $table, 'wdc_delivery_services' ) ) {
 				$this->services[] = $data;
 			}
@@ -82,6 +90,13 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return true;
 		}
 		public function get_row( string $query, mixed $output = null ): ?array {
+			if ( str_contains( $query, 'wdc_rules' ) && preg_match( '/WHERE id = ([0-9]+)/', $query, $matches ) ) {
+				foreach ( $this->rules as $row ) {
+					if ( (int) $row['id'] === (int) $matches[1] ) {
+						return $row;
+					}
+				}
+			}
 			if ( str_contains( $query, 'wdc_delivery_services' ) && preg_match( "/service_key = '([^']+)'/", $query, $matches ) ) {
 				foreach ( $this->services as $row ) {
 					if ( $row['service_key'] === $matches[1] && empty( $row['deleted'] ) ) {
@@ -109,6 +124,13 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return null;
 		}
 		public function get_results( string $query, mixed $output = null ): array {
+			if ( str_contains( $query, 'wdc_rule_conditions' ) ) {
+				preg_match( '/rule_id = ([0-9]+)/', $query, $matches );
+				$rule_id = (int) ( $matches[1] ?? 0 );
+				$rows = array_values( array_filter( $this->conditions, static fn ( array $row ): bool => (int) $row['rule_id'] === $rule_id ) );
+				usort( $rows, static fn ( array $a, array $b ): int => ( (int) $a['condition_group'] <=> (int) $b['condition_group'] ) ?: ( (int) $a['id'] <=> (int) $b['id'] ) );
+				return $rows;
+			}
 			if ( str_contains( $query, 'wdc_delivery_services' ) ) {
 				return array_values( array_filter( $this->services, static fn ( array $row ): bool => empty( $row['deleted'] ) ) );
 			}
@@ -117,12 +139,16 @@ if ( ! class_exists( 'wpdb' ) ) {
 			}
 			if ( str_contains( $query, 'wdc_rules' ) ) {
 				$rows = $this->rules;
+				if ( str_contains( $query, 'enabled = 1' ) ) {
+					$rows = array_values( array_filter( $rows, static fn ( array $row ): bool => (int) ( $row['enabled'] ?? 0 ) === 1 ) );
+				}
 				if ( preg_match( "/target_type = '([^']+)'/", $query, $matches ) ) {
 					$rows = array_values( array_filter( $rows, static fn ( array $row ): bool => $row['target_type'] === $matches[1] ) );
 				}
-				if ( preg_match( "/target_value = '([^']+)'/", $query, $matches ) ) {
+				if ( preg_match( "/target_value = '([^']*)'/", $query, $matches ) ) {
 					$rows = array_values( array_filter( $rows, static fn ( array $row ): bool => $row['target_value'] === $matches[1] ) );
 				}
+				usort( $rows, static fn ( array $a, array $b ): int => ( (int) $a['priority'] <=> (int) $b['priority'] ) ?: ( (int) $a['id'] <=> (int) $b['id'] ) );
 				return $rows;
 			}
 			return array();
@@ -140,6 +166,12 @@ if ( ! class_exists( 'wpdb' ) ) {
 			if ( str_contains( $table, 'wdc_delivery_service_countries' ) ) {
 				return $this->countries;
 			}
+			if ( str_contains( $table, 'wdc_rule_conditions' ) ) {
+				return $this->conditions;
+			}
+			if ( str_contains( $table, 'wdc_rules' ) ) {
+				return $this->rules;
+			}
 			return $this->services;
 		}
 	}
@@ -149,6 +181,7 @@ function dbDelta( string $sql ): void { $GLOBALS['wdc_db_delta'][] = $sql; }
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
@@ -157,7 +190,10 @@ use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Rules\Domain\Rule;
+use WallsShop\WDC\Rules\Domain\RuleCondition;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
+use WallsShop\WDC\Rules\ValueObjects\RuleConditionTypes;
+use WallsShop\WDC\Rules\ValueObjects\RuleOperators;
 use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
@@ -180,6 +216,9 @@ $custom_id = $services->create_service( array( 'service_key' => 'fixed_test', 's
 $services->update_service( $custom_id, array( 'enabled' => 0, 'minimum_price_rub' => '10,5' ) );
 $custom = $services->find_by_service_key( 'fixed_test' );
 wdc_ds_assert( $custom instanceof DeliveryService && ! $custom->enabled && 10.5 === $custom->minimum_price_rub, 'Service CRUD must update enabled and decimal fields.' );
+$services->update_service( $custom_id, array( 'minimum_price_rub' => '-5,25' ) );
+$custom = $services->find_by_service_key( 'fixed_test' );
+wdc_ds_assert( $custom instanceof DeliveryService && 0.0 === $custom->minimum_price_rub, 'minimum_price_rub must clamp negative values to zero.' );
 
 $settings->set_setting( $custom_id, 'endpoint', 'https://example.test', 'string' );
 $settings->set_setting( $custom_id, 'limits', array( 'max_weight_g' => 1000 ) );
@@ -221,8 +260,31 @@ $countries->delete_countries( $custom_id );
 wdc_ds_assert( array() === $countries->countries( $custom_id ), 'Country repository must delete countries.' );
 
 $GLOBALS['wpdb']->rules[] = array( 'id' => 1, 'name' => 'Service rule', 'enabled' => 1, 'priority' => 10, 'target_type' => RuleRepository::TARGET_SERVICE, 'target_value' => 'fixed_test', 'action_type' => RuleActionTypes::CHANGE_PRICE, 'operation_type' => RuleOperationTypes::MULTIPLY, 'operation_value' => 2, 'operation_base' => RuleOperationBases::RUBLES, 'operation_text' => '', 'promo_shipping' => 0, 'stop_processing' => 0, 'condition_group_logic' => '[]', 'condition_group_expression' => Rule::DEFAULT_GROUP_EXPRESSION );
+$GLOBALS['wpdb']->rules[] = array( 'id' => 2, 'name' => 'Default rule', 'enabled' => 1, 'priority' => 20, 'target_type' => RuleRepository::TARGET_DEFAULT, 'target_value' => '', 'action_type' => RuleActionTypes::CHANGE_PRICE, 'operation_type' => RuleOperationTypes::DECREASE, 'operation_value' => 100, 'operation_base' => RuleOperationBases::RUBLES, 'operation_text' => '', 'promo_shipping' => 0, 'stop_processing' => 0, 'condition_group_logic' => '[]', 'condition_group_expression' => Rule::DEFAULT_GROUP_EXPRESSION );
+$GLOBALS['wpdb']->rules[] = array( 'id' => 3, 'name' => 'Disabled service rule', 'enabled' => 0, 'priority' => 10, 'target_type' => RuleRepository::TARGET_SERVICE, 'target_value' => 'disabled_only_service', 'action_type' => RuleActionTypes::CHANGE_PRICE, 'operation_type' => RuleOperationTypes::MULTIPLY, 'operation_value' => 2, 'operation_base' => RuleOperationBases::RUBLES, 'operation_text' => '', 'promo_shipping' => 0, 'stop_processing' => 0, 'condition_group_logic' => '[]', 'condition_group_expression' => Rule::DEFAULT_GROUP_EXPRESSION );
+$GLOBALS['wpdb']->conditions[] = array( 'id' => 1, 'rule_id' => 2, 'condition_group' => 1, 'condition_type' => RuleConditionTypes::COUNTRY, 'operator' => RuleOperators::EQ, 'value_text' => 'RU', 'value_number' => null, 'value_json' => '{}' );
 $rule_repo = new RuleRepository( $GLOBALS['wpdb'] );
 $service_rules = $rule_repo->get_rules_for_service_with_default_fallback( 'fixed_test' );
 wdc_ds_assert( 'service' === $service_rules['source'] && 1 === count( $service_rules['rules'] ), 'Service rules must override defaults.' );
+$disabled_only_rules = $rule_repo->get_rules_for_service_with_default_fallback( 'disabled_only_service', true );
+wdc_ds_assert( 'default' === $disabled_only_rules['source'] && 1 === count( $disabled_only_rules['rules'] ) && 2 === $disabled_only_rules['rules'][0]->id, 'Only disabled service rules must fall back to defaults when fallback is enabled.' );
+$no_fallback_rules = $rule_repo->get_rules_for_service_with_default_fallback( 'disabled_only_service', false );
+wdc_ds_assert( 'none' === $no_fallback_rules['source'] && array() === $no_fallback_rules['rules'], 'Disabled service rules must not count as own rules when fallback is disabled.' );
+
+$admin_reflection = new ReflectionClass( DeliveryServicesAdminPage::class );
+$admin_page = $admin_reflection->newInstanceWithoutConstructor();
+$rules_property = $admin_reflection->getProperty( 'rules' );
+$rules_property->setAccessible( true );
+$rules_property->setValue( $admin_page, $rule_repo );
+$copy_method = $admin_reflection->getMethod( 'copy_default_rules_to_service' );
+$copy_method->setAccessible( true );
+$copy_method->invoke( $admin_page, $services->find_by_service_key( 'fixed_test' ) );
+$copied_rules = $rule_repo->get_all_rules_for_target( RuleRepository::TARGET_SERVICE, 'fixed_test' );
+wdc_ds_assert( 2 === count( $copied_rules ), 'Copy default rules must append service rules without deleting existing service rules.' );
+$copied_rule = $copied_rules[1];
+wdc_ds_assert( 2 !== $copied_rule->id && RuleRepository::TARGET_SERVICE === $copied_rule->target_type && 'fixed_test' === $copied_rule->target_value, 'Copied rule must get a new id and belong to the service target.' );
+wdc_ds_assert( RuleOperationTypes::DECREASE === $copied_rule->operation_type && 100.0 === $copied_rule->operation_value, 'Copied rule must preserve operation.' );
+wdc_ds_assert( 1 === count( $copied_rule->conditions ) && RuleConditionTypes::COUNTRY === $copied_rule->conditions[0]->condition_type && 'RU' === $copied_rule->conditions[0]->value_text, 'Copied rule must preserve conditions.' );
+wdc_ds_assert( 1 === count( $rule_repo->get_all_rules_for_target( RuleRepository::TARGET_DEFAULT, '' ) ), 'Copy default rules must leave default rules unchanged.' );
 
 echo "Delivery services smoke test passed.\n";

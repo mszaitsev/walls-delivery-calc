@@ -26,6 +26,10 @@ As of version 0.18.4, rule context carries selected location FIAS ID when availa
 
 As of version 0.21.0, runtime resolves rules per service with `RuleRepository::get_rules_for_service_with_default_fallback($serviceKey, $fallback)`. Service rules override default rules. If no service-specific rules exist, default rules are applied only when the service enables default fallback.
 
+As of version 0.21.1, only enabled service rules count as service-specific runtime rules. If a service has only disabled own rules, runtime still falls back to default rules when `use_default_rules_when_no_service_rules` is enabled; otherwise it applies no rules and records `rules_source=none`.
+
+The quote cache key includes `service_key` in addition to carrier, package, destination, total, delivery type, and date. Different services backed by the same carrier no longer share cached quotes.
+
 As of version 0.19.0, `russian_post` / `russian_post_worldwide_parcel` is registered as the real “Почта России — международная доставка” carrier. It is international-only, excludes `RU`, uses the new `Package` weight plus shared packaging tiers, and returns a zero-cost manager fallback instead of failing checkout for API errors, missing tariff/price, unsupported country, or overweight.
 
 As of version 0.19.2, Russian Post country support is read from the persistent `wdc_russian_post_country_mappings` table. Checkout does not rely on live country dictionary calls by default. If a destination country has no enabled mapping, the carrier returns its configured fallback/no-rate behavior with `unsupported_country_{code}`.

@@ -142,7 +142,7 @@ final class DeliveryServiceRepository {
 			}
 			$row[ $key ] = match ( $format ) {
 				'%d' => (int) $data[ $key ],
-				'%f' => (float) str_replace( ',', '.', (string) $data[ $key ] ),
+				'%f' => 'minimum_price_rub' === $key ? max( 0, (float) str_replace( ',', '.', (string) $data[ $key ] ) ) : (float) str_replace( ',', '.', (string) $data[ $key ] ),
 				default => (string) $data[ $key ],
 			};
 		}

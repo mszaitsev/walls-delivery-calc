@@ -54,6 +54,20 @@ The rules admin page is a CRUD interface for default rules. It uses the same typ
 Checkout orchestration builds `RuleEvaluationContext` from WooCommerce checkout state, fetches service-specific rules with service-controlled default fallback, applies `RuleEngine`, and maps the result back to delivery rates.
 
 As of 0.21.0, service rules use `target_type=service` and `target_value=<service_key>`.
+
+As of 0.21.1, the admin UI is target-context aware. `RuleAdminContext` describes `target_type`, `target_value`, page slug, return URL, titles, empty message, and simulation availability. The default rules page renders the reusable admin with the default context. A delivery service rules tab renders the same controls with `target_type=service` and the service key.
+
+Repository APIs are target-aware:
+
+- `get_rules_for_target($target_type, $target_value)` returns enabled rules for runtime/simulation.
+- `get_all_rules_for_target($target_type, $target_value)` returns enabled and disabled rules for admin lists.
+- `reorder_rules_for_target($target_type, $target_value, $ordered_ids)` updates only rows that belong to the requested target.
+
+All rule mutations verify the current target before editing, deleting, toggling, duplicating, moving, or reordering a rule. A rule from one service cannot be changed through another service URL.
+
+Service rule fallback is runtime-only. If a service has enabled service rules, runtime applies them and records `rules_source=service`. If it has no enabled service rules and `use_default_rules_when_no_service_rules` is enabled, runtime applies default rules and records `rules_source=default`. Disabled service rules do not count as own rules for fallback. If fallback is off, runtime records `rules_source=none`.
+
+Simulation is intentionally separated: the default page simulates default rules; a service tab simulates only that service's own enabled rules and does not add default fallback automatically.
 # Rule Engine Foundation
 
 Rules now support service-level targeting:
@@ -69,3 +83,5 @@ Price operations now include:
 - `divide`: `price / value`
 
 Both accept decimal values, comma or dot input, require values greater than zero, and do not use ruble or percent operation bases.
+
+The delivery service tab can copy default rules into a service. Copies are new `target_type=service` rows with fresh ids, the selected service key, preserved conditions, group logic/expression, operations, promo flags, stop-processing flags, and operation text. Existing service rules remain in place; copied rules are appended after them.

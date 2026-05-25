@@ -18,8 +18,8 @@ final class QuoteCache {
 		$this->namespace = $this->load_namespace();
 	}
 
-	public function get( QuoteRequest $request, string $carrier_key, string $delivery_type = '' ): ?DeliveryQuote {
-		$key   = $this->key( $request, $carrier_key, $delivery_type );
+	public function get( QuoteRequest $request, string $carrier_key, string $delivery_type = '', string $service_key = '' ): ?DeliveryQuote {
+		$key   = $this->key( $request, $carrier_key, $delivery_type, $service_key );
 		$entry = self::$memory[ $key ] ?? null;
 		if ( is_array( $entry ) && (int) ( $entry['expires'] ?? 0 ) < time() ) {
 			unset( self::$memory[ $key ] );
@@ -34,8 +34,8 @@ final class QuoteCache {
 		return DeliveryQuote::from_array( array_merge( $data, array( 'cache_hit' => true, 'source' => 'cache' ) ) );
 	}
 
-	public function set( QuoteRequest $request, string $carrier_key, DeliveryQuote $quote, string $delivery_type = '' ): void {
-		$key  = $this->key( $request, $carrier_key, $delivery_type );
+	public function set( QuoteRequest $request, string $carrier_key, DeliveryQuote $quote, string $delivery_type = '', string $service_key = '' ): void {
+		$key  = $this->key( $request, $carrier_key, $delivery_type, $service_key );
 		$data = $quote->to_array();
 		$ttl  = $this->ttl();
 
@@ -51,7 +51,11 @@ final class QuoteCache {
 		}
 	}
 
-	private function key( QuoteRequest $request, string $carrier_key, string $delivery_type ): string {
+	public function cache_key( QuoteRequest $request, string $carrier_key, string $delivery_type = '', string $service_key = '' ): string {
+		return $this->key( $request, $carrier_key, $delivery_type, $service_key );
+	}
+
+	private function key( QuoteRequest $request, string $carrier_key, string $delivery_type, string $service_key = '' ): string {
 		$parts = array(
 			$this->namespace,
 			$request->country_code,
@@ -59,6 +63,7 @@ final class QuoteCache {
 			(string) $request->package->get_total_weight_g(),
 			(string) $request->order_total->get_kopecks(),
 			$carrier_key,
+			$service_key,
 			$delivery_type,
 			$request->calculation_date,
 		);

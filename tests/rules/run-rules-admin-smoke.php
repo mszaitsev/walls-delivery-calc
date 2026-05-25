@@ -14,6 +14,7 @@ use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
 use WallsShop\WDC\Rules\Services\RuleSimulator;
+use WallsShop\WDC\Rules\Admin\RuleAdminContext;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Rules\Admin\RulesAdminPage;
 use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
@@ -103,9 +104,12 @@ if ( ! class_exists( 'wpdb' ) ) {
 			}
 
 			foreach ( $this->rules as $index => $row ) {
-				if ( (int) $row['id'] === (int) ( $where['id'] ?? 0 ) ) {
+				$matches = true;
+				foreach ( $where as $key => $value ) {
+					$matches = $matches && (string) ( $row[ $key ] ?? '' ) === (string) $value;
+				}
+				if ( $matches ) {
 					$this->rules[ $index ] = array_merge( $row, $data, array( 'id' => $row['id'] ) );
-					return true;
 				}
 			}
 
@@ -285,6 +289,22 @@ rules_admin_smoke_assert( 1 === count( $carrier_rules ) && $carrier_rules[0]->id
 
 $fallback_rules = $repository->get_rules_for_carrier_with_default_fallback( 'missing' );
 rules_admin_smoke_assert( count( $fallback_rules ) === count( $default_rules ), 'Missing carrier rules must fall back to defaults.' );
+
+$service_id = $repository->save_rule( rules_admin_rule( 'Service enabled', 40, true, RuleRepository::TARGET_SERVICE, 'service_a' ) );
+$service_disabled_id = $repository->save_rule( rules_admin_rule( 'Service disabled', 50, false, RuleRepository::TARGET_SERVICE, 'service_a' ) );
+$other_service_id = $repository->save_rule( rules_admin_rule( 'Other service', 60, true, RuleRepository::TARGET_SERVICE, 'service_b' ) );
+$service_rules = $repository->get_all_rules_for_target( RuleRepository::TARGET_SERVICE, 'service_a' );
+rules_admin_smoke_assert( array( $service_id, $service_disabled_id ) === array_map( static fn ( Rule $rule ): ?int => $rule->id, $service_rules ), 'Service rules tab must list only rules for the current service target.' );
+$default_target_rules = $repository->get_all_rules_for_target( RuleRepository::TARGET_DEFAULT, '' );
+rules_admin_smoke_assert( ! in_array( $service_id, array_map( static fn ( Rule $rule ): ?int => $rule->id, $default_target_rules ), true ), 'Default rules page must not list service rules.' );
+$other_priority = $repository->get_rule( $other_service_id )?->priority;
+$repository->reorder_rules_for_target( RuleRepository::TARGET_SERVICE, 'service_a', array( $other_service_id, $service_disabled_id, $service_id ) );
+rules_admin_smoke_assert( $other_priority === $repository->get_rule( $other_service_id )?->priority, 'Reorder for one service must not affect another service target.' );
+rules_admin_smoke_assert( array( $service_disabled_id, $service_id ) === array_map( static fn ( Rule $rule ): ?int => $rule->id, $repository->get_all_rules_for_target( RuleRepository::TARGET_SERVICE, 'service_a' ) ), 'Reorder must apply only to rules belonging to the target.' );
+$service_duplicate_data = $repository->get_rule( $service_id )?->to_array() ?? array();
+$service_duplicate_data['id'] = null;
+$service_duplicate_id = $repository->save_rule( Rule::from_array( $service_duplicate_data ) );
+rules_admin_smoke_assert( RuleRepository::TARGET_SERVICE === $repository->get_rule( $service_duplicate_id )?->target_type && 'service_a' === $repository->get_rule( $service_duplicate_id )?->target_value, 'Duplicate must keep the same target.' );
 
 $edited = Rule::from_array(
 	array_merge(
@@ -489,6 +509,9 @@ $sanitize_rule->setAccessible( true );
 $repository_property = $admin_reflection->getProperty( 'repository' );
 $repository_property->setAccessible( true );
 $repository_property->setValue( $admin_page, new RuleRepository( new wpdb() ) );
+$context_property = $admin_reflection->getProperty( 'context' );
+$context_property->setAccessible( true );
+$context_property->setValue( $admin_page, new RuleAdminContext( RuleRepository::TARGET_SERVICE, 'service_a', 'wdc-delivery-services', 'admin.php?page=wdc-delivery-services&service=service_a&tab=rules', 'Service rules', 'Service rule', 'No service rules.', true ) );
 $_POST = array(
 	'name'            => 'Equals without conditions',
 	'action_type'     => RuleActionTypes::CHANGE_PRICE,
@@ -499,7 +522,7 @@ $_POST = array(
 	'conditions'      => array( array( 'condition_type' => '', 'operator' => RuleOperators::EQ, 'value_number' => '10' ) ),
 );
 $sanitized_rule = $sanitize_rule->invoke( $admin_page );
-rules_admin_smoke_assert( $sanitized_rule instanceof Rule && array() === $sanitized_rule->conditions && 12.5 === $sanitized_rule->operation_value && 'condition_1_and_2' === $sanitized_rule->condition_group_expression && array() === $sanitized_rule->validate(), 'Equals rule without conditions must save and normalize comma operation_value.' );
+rules_admin_smoke_assert( $sanitized_rule instanceof Rule && RuleRepository::TARGET_SERVICE === $sanitized_rule->target_type && 'service_a' === $sanitized_rule->target_value && array() === $sanitized_rule->conditions && 12.5 === $sanitized_rule->operation_value && 'condition_1_and_2' === $sanitized_rule->condition_group_expression && array() === $sanitized_rule->validate(), 'Service rules admin context must save service target and normalize comma operation_value.' );
 $_POST = array();
 
 $admin_page_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Rules/Admin/RulesAdminPage.php' );
@@ -510,6 +533,10 @@ rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'name="priority"' 
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, "esc_html__( 'Текст'" ) && ! str_contains( $admin_page_source, "esc_html__( 'Число'" ), 'Admin UI must not expose universal text and number inputs for every condition.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'wdc_rules_action" value="reorder_rules"' ), 'Admin UI must expose a drag-sort reorder action.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'data-rule-row' ), 'Admin table rows must be draggable.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'render_for_context( RuleAdminContext $context )' ), 'Rules admin must expose reusable context rendering.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'posted_context_rule' ) && str_contains( $admin_page_source, 'rule_matches_context' ), 'Rules admin actions must verify target context.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'get_all_rules_for_target( $this->context()->target_type' ), 'Rules admin list must use target-aware repository methods.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'get_rules_for_target( $this->context()->target_type' ), 'Rules admin simulation must use only current target rules.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'Исходный срок доставки' ), 'Simulation UI must always expose original delivery days.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'Итоговый срок' ), 'Simulation result must show final delivery days.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'RuleOperationBases::CALENDAR_DAYS' ), 'change_delivery_days must default to calendar_days in admin handling.' );
@@ -530,6 +557,10 @@ foreach ( array( 'руб.', 'шт.', 'грамм', 'куб.м.' ) as $unit_label
 	rules_admin_smoke_assert( str_contains( $schema_source, $unit_label ), 'Condition UI schema must expose unit label: ' . $unit_label );
 }
 rules_admin_smoke_assert( str_contains( $schema_source, "'input'     => 'fias_id'" ), 'City condition UI must be FIAS ID only.' );
+
+$delivery_services_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
+rules_admin_smoke_assert( str_contains( $delivery_services_admin_source, 'render_rules_tab' ) && str_contains( $delivery_services_admin_source, 'Скопировать дефолтные правила' ), 'Delivery service page must expose service rules tab with copy default rules action.' );
+rules_admin_smoke_assert( str_contains( $delivery_services_admin_source, 'copy_default_rules_to_service' ) && str_contains( $delivery_services_admin_source, "RuleRepository::TARGET_SERVICE" ), 'Copy default rules must create service-targeted copies.' );
 
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/rules-admin.js' );
 rules_admin_smoke_assert( str_contains( $js_source, 'appendUnit' ), 'JS must render unit labels next to value controls.' );

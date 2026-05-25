@@ -41,6 +41,8 @@ final class RulesAdminPage {
 	/** @var array<string,mixed> */
 	private array $simulation_input = array();
 
+	private ?RuleAdminContext $context = null;
+
 	public function __construct(
 		private PluginEnvironment $environment,
 		private RuleRepository $repository,
@@ -59,7 +61,7 @@ final class RulesAdminPage {
 	}
 
 	public function enqueue_assets( string $hook_suffix ): void {
-		if ( ! str_contains( $hook_suffix, self::PAGE_SLUG ) ) {
+		if ( ! str_contains( $hook_suffix, self::PAGE_SLUG ) && ! str_contains( $hook_suffix, 'wdc-delivery-services' ) ) {
 			return;
 		}
 
@@ -75,16 +77,17 @@ final class RulesAdminPage {
 			return;
 		}
 
+		$this->context ??= RuleAdminContext::default();
 		$this->handle_post();
 		$this->load_simulation_from_request();
 
-		$rules     = $this->repository->get_all_default_rules();
+		$rules     = $this->repository->get_all_rules_for_target( $this->context()->target_type, $this->context()->target_value );
 		$edit_rule = $this->form_rule;
 		if ( null === $edit_rule ) {
 			$edit_id = isset( $_GET['edit_rule'] ) ? absint( wp_unslash( $_GET['edit_rule'] ) ) : 0;
 			if ( $edit_id > 0 ) {
 				$loaded = $this->repository->get_rule( $edit_id );
-				if ( $loaded instanceof Rule && RuleRepository::TARGET_DEFAULT === $loaded->target_type ) {
+				if ( $this->rule_matches_context( $loaded ) ) {
 					$edit_rule = $loaded;
 				}
 			}
@@ -92,8 +95,8 @@ final class RulesAdminPage {
 
 		?>
 		<div class="wrap wdc-rules-admin">
-			<h1><?php echo esc_html__( 'Правила расчета', 'walls-delivery-calc' ); ?></h1>
-			<p class="description"><?php echo esc_html__( 'Эти правила применяются по умолчанию для транспортных компаний, у которых не настроены собственные правила.', 'walls-delivery-calc' ); ?></p>
+			<h1><?php echo esc_html( $this->context()->list_title ); ?></h1>
+			<p class="description"><?php echo esc_html( $this->context()->is_default() ? __( 'Эти правила применяются по умолчанию для служб доставки, у которых нет включенных собственных правил.', 'walls-delivery-calc' ) : __( 'Эти правила применяются только для выбранной службы доставки. Симуляция на этой вкладке не подмешивает дефолтные правила.', 'walls-delivery-calc' ) ); ?></p>
 
 			<?php $this->render_notices(); ?>
 
@@ -103,8 +106,8 @@ final class RulesAdminPage {
 			</div>
 
 			<section class="wdc-rules-scope">
-				<strong><?php echo esc_html__( 'Дефолтные правила', 'walls-delivery-calc' ); ?></strong>
-				<span><?php echo esc_html__( 'target_type=default, target_value пустой. Условия внутри группы работают как AND, разные группы как OR.', 'walls-delivery-calc' ); ?></span>
+				<strong><?php echo esc_html( $this->context()->list_title ); ?></strong>
+				<span><?php echo esc_html( sprintf( 'target_type=%s, target_value=%s. Условия внутри группы работают как AND, разные группы как OR.', $this->context()->target_type, '' === $this->context()->target_value ? 'empty' : $this->context()->target_value ) ); ?></span>
 			</section>
 
 			<?php $this->render_rules_table( $rules ); ?>
@@ -113,7 +116,9 @@ final class RulesAdminPage {
 				<?php $this->render_rule_form( $edit_rule ?? $this->empty_rule() ); ?>
 			<?php endif; ?>
 
-			<?php $this->render_simulation_form(); ?>
+			<?php if ( $this->context()->allow_simulation ) : ?>
+				<?php $this->render_simulation_form(); ?>
+			<?php endif; ?>
 
 			<?php if ( $this->simulation instanceof RuleEngineResult ) : ?>
 				<?php $this->render_simulation( $this->simulation ); ?>
@@ -131,6 +136,7 @@ final class RulesAdminPage {
 			'duplicated' => __( 'Копия правила создана и отключена.', 'walls-delivery-calc' ),
 			'moved'      => __( 'Порядок правил изменен.', 'walls-delivery-calc' ),
 			'simulated'  => __( 'Симуляция завершена.', 'walls-delivery-calc' ),
+			'copied'     => __( 'Дефолтные правила скопированы в службу.', 'walls-delivery-calc' ),
 		);
 
 		if ( isset( $messages[ $notice ] ) ) {
@@ -174,7 +180,7 @@ final class RulesAdminPage {
 			</thead>
 			<tbody>
 				<?php if ( array() === $rules ) : ?>
-					<tr><td colspan="9"><?php echo esc_html__( 'Дефолтные правила пока не созданы.', 'walls-delivery-calc' ); ?></td></tr>
+					<tr><td colspan="9"><?php echo esc_html( $this->context()->empty_message ); ?></td></tr>
 				<?php endif; ?>
 				<?php foreach ( $rules as $index => $rule ) : ?>
 					<tr draggable="true" data-rule-row data-rule-id="<?php echo esc_attr( (string) $rule->id ); ?>">
@@ -182,7 +188,7 @@ final class RulesAdminPage {
 						<td><span class="wdc-drag-handle" aria-hidden="true">↕</span><?php echo esc_html( (string) ( $index + 1 ) ); ?></td>
 						<td>
 							<strong><?php echo esc_html( $rule->name ); ?></strong>
-							<small><?php echo esc_html__( 'Дефолтные правила', 'walls-delivery-calc' ); ?></small>
+							<small><?php echo esc_html( $this->context()->is_default() ? __( 'Дефолтные правила', 'walls-delivery-calc' ) : __( 'Правила службы', 'walls-delivery-calc' ) ); ?></small>
 						</td>
 						<td><?php echo esc_html( $this->conditions_summary( $rule ) ); ?></td>
 						<td><?php echo esc_html( $this->action_label( $rule->action_type ) ); ?></td>
@@ -453,13 +459,24 @@ final class RulesAdminPage {
 
 		if ( 'simulate' === $action ) {
 			$this->simulation_input = $this->sanitize_simulation_input();
-			$this->simulation       = $this->simulator->simulate( $this->repository->get_default_rules(), $this->simulation_context( $this->simulation_input ) );
+			$rules = $this->repository->get_rules_for_target( $this->context()->target_type, $this->context()->target_value );
+			if ( array() === $rules && ! $this->context()->is_default() ) {
+				$this->errors[] = __( 'Для службы не настроены собственные правила.', 'walls-delivery-calc' );
+				return;
+			}
+			$this->simulation       = $this->simulator->simulate( $rules, $this->simulation_context( $this->simulation_input ) );
 			$token = $this->store_simulation_result();
 			$this->redirect_with_notice( 'simulated', array( 'simulation_token' => $token ) );
 		}
 	}
 
 	private function save_rule_action(): void {
+		$posted_id = isset( $_POST['rule_id'] ) ? absint( wp_unslash( $_POST['rule_id'] ) ) : 0;
+		if ( $posted_id > 0 && ! $this->posted_context_rule() instanceof Rule ) {
+			$this->errors[] = __( 'Правило не принадлежит текущему контексту.', 'walls-delivery-calc' );
+			return;
+		}
+
 		$rule = $this->sanitize_rule_from_post();
 		$this->form_rule = $rule;
 		$this->errors    = array_merge( $this->localized_errors( $rule->validate() ), $this->validate_admin_conditions( $rule ) );
@@ -473,7 +490,7 @@ final class RulesAdminPage {
 	}
 
 	private function delete_rule_action(): void {
-		$rule = $this->posted_default_rule();
+		$rule = $this->posted_context_rule();
 		if ( $rule instanceof Rule ) {
 			$this->repository->delete_rule( (int) $rule->id );
 		}
@@ -482,7 +499,7 @@ final class RulesAdminPage {
 	}
 
 	private function toggle_rule_action(): void {
-		$rule = $this->posted_default_rule();
+		$rule = $this->posted_context_rule();
 		if ( $rule instanceof Rule ) {
 			$data            = $rule->to_array();
 			$data['enabled'] = ! $rule->enabled;
@@ -493,7 +510,7 @@ final class RulesAdminPage {
 	}
 
 	private function duplicate_rule_action(): void {
-		$rule = $this->posted_default_rule();
+		$rule = $this->posted_context_rule();
 		if ( $rule instanceof Rule ) {
 			$data               = $rule->to_array();
 			$data['id']         = null;
@@ -516,12 +533,12 @@ final class RulesAdminPage {
 	}
 
 	private function move_rule_action( string $action ): void {
-		$rule = $this->posted_default_rule();
+		$rule = $this->posted_context_rule();
 		if ( ! $rule instanceof Rule ) {
 			$this->redirect_with_notice( 'moved' );
 		}
 
-		$rules = $this->repository->get_all_default_rules();
+		$rules = $this->repository->get_all_rules_for_target( $this->context()->target_type, $this->context()->target_value );
 		foreach ( $rules as $index => $current ) {
 			if ( $current->id !== $rule->id ) {
 				continue;
@@ -547,7 +564,7 @@ final class RulesAdminPage {
 		$this->redirect_with_notice( 'moved' );
 	}
 
-	private function posted_default_rule(): ?Rule {
+	private function posted_context_rule(): ?Rule {
 		$id = isset( $_POST['rule_id'] ) ? absint( wp_unslash( $_POST['rule_id'] ) ) : 0;
 		if ( $id <= 0 ) {
 			return null;
@@ -555,7 +572,7 @@ final class RulesAdminPage {
 
 		$rule = $this->repository->get_rule( $id );
 
-		return $rule instanceof Rule && RuleRepository::TARGET_DEFAULT === $rule->target_type ? $rule : null;
+		return $this->rule_matches_context( $rule ) ? $rule : null;
 	}
 
 	private function sanitize_rule_from_post(): Rule {
@@ -596,8 +613,8 @@ final class RulesAdminPage {
 			isset( $_POST['name'] ) ? sanitize_text_field( wp_unslash( $_POST['name'] ) ) : '',
 			isset( $_POST['enabled'] ),
 			$this->sort_order_from_post(),
-			RuleRepository::TARGET_DEFAULT,
-			'',
+			$this->context()->target_type,
+			$this->context()->target_value,
 			$action_type,
 			$operation_type,
 			$operation_value,
@@ -701,7 +718,7 @@ final class RulesAdminPage {
 	}
 
 	private function empty_rule(): Rule {
-		return new Rule( null, '', true, $this->next_sort_order(), RuleRepository::TARGET_DEFAULT, '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 0, RuleOperationBases::RUBLES, false, false );
+		return new Rule( null, '', true, $this->next_sort_order(), $this->context()->target_type, $this->context()->target_value, RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 0, RuleOperationBases::RUBLES, false, false );
 	}
 
 	/**
@@ -775,6 +792,23 @@ final class RulesAdminPage {
 			RuleOperationTypes::MULTIPLY => __( 'Умножить на', 'walls-delivery-calc' ),
 			RuleOperationTypes::DIVIDE   => __( 'Разделить на', 'walls-delivery-calc' ),
 		)[ $value ] ?? $value;
+	}
+
+	public function render_for_context( RuleAdminContext $context ): void {
+		$this->context = $context;
+		$this->render_page();
+	}
+
+	private function context(): RuleAdminContext {
+		$this->context ??= RuleAdminContext::default();
+
+		return $this->context;
+	}
+
+	private function rule_matches_context( mixed $rule ): bool {
+		return $rule instanceof Rule
+			&& $rule->target_type === $this->context()->target_type
+			&& $rule->target_value === $this->context()->target_value;
 	}
 
 	private function operation_base_label( string $value ): string {
@@ -934,7 +968,13 @@ final class RulesAdminPage {
 	 * @param array<string,mixed> $args
 	 */
 	private function page_url( array $args = array() ): string {
-		$query = array_merge( array( 'page' => self::PAGE_SLUG ), $args );
+		if ( ! $this->context()->is_default() ) {
+			$separator = str_contains( $this->context()->return_url, '?' ) ? '&' : '?';
+
+			return $this->context()->return_url . ( array() === $args ? '' : $separator . http_build_query( $args ) );
+		}
+
+		$query = array_merge( array( 'page' => $this->context()->page_slug ), $args );
 
 		return admin_url( 'admin.php?' . http_build_query( $query ) );
 	}
@@ -957,7 +997,7 @@ final class RulesAdminPage {
 		);
 
 		if ( array() !== $ids ) {
-			$this->repository->reorder_default_rules( $ids );
+			$this->repository->reorder_rules_for_target( $this->context()->target_type, $this->context()->target_value, $ids );
 		}
 
 		$this->redirect_with_notice( 'moved' );
@@ -976,7 +1016,7 @@ final class RulesAdminPage {
 	}
 
 	private function next_sort_order(): int {
-		$rules = $this->repository->get_all_default_rules();
+		$rules = $this->repository->get_all_rules_for_target( $this->context()->target_type, $this->context()->target_value );
 		$last  = 0;
 		foreach ( $rules as $rule ) {
 			$last = max( $last, $rule->priority );
