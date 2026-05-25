@@ -38,10 +38,10 @@ final class RussianPostCountriesAdminPage {
 		if ( '' === $message ) {
 			$message = $this->notice_from_request();
 		}
-		$this->render_body( $message, false );
+		$this->render_body( $message );
 	}
 
-	private function render_body( string $message, bool $wrap ): void {
+	private function render_body( string $message ): void {
 		$filter  = isset( $_GET['rp_filter'] ) ? sanitize_key( wp_unslash( (string) $_GET['rp_filter'] ) ) : 'all';
 		$search  = isset( $_GET['s'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['s'] ) ) : '';
 		$per_page = isset( $_GET['per_page'] ) ? absint( wp_unslash( (string) $_GET['per_page'] ) ) : 20;
@@ -49,7 +49,7 @@ final class RussianPostCountriesAdminPage {
 		$list    = $this->repository->list( $filter, $search, $page, $per_page );
 		$stats   = $this->repository->count_stats();
 		?>
-		<?php if ( $wrap ) : ?><div class="wrap"><h1><?php echo esc_html__( 'Почта России — страны', 'walls-delivery-calc' ); ?></h1><?php else : ?><div class="wdc-rp-countries-admin"><?php endif; ?>
+		<div class="wdc-rp-countries-admin">
 			<?php if ( '' !== $message ) : ?><div class="notice notice-success is-dismissible"><p><?php echo esc_html( $message ); ?></p></div><?php endif; ?>
 
 			<form method="post" style="margin: 12px 0;">

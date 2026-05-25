@@ -1,6 +1,6 @@
 # WDC Russian Post Countries
 
-Version: 0.21.4.
+Version: 0.21.5.
 
 ## Persistent Mapping Table
 
@@ -70,7 +70,7 @@ URL:
 
 `admin.php?page=wdc-delivery-services&service=russian_post_worldwide_parcel&tab=russian_post_countries`
 
-The old standalone submenu is no longer registered, and `RussianPostCountriesAdminPage` is embedded-only. It renders without its own `.wrap` or duplicate `h1`, and refresh/manual/bulk actions return to the service countries tab.
+The old standalone submenu is no longer registered, and `RussianPostCountriesAdminPage` is embedded-only. It always renders `<div class="wdc-rp-countries-admin">` without its own `.wrap` or duplicate `h1`, and refresh/manual/bulk actions return to the service countries tab.
 
 The page includes:
 
