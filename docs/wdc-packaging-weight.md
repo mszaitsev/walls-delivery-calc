@@ -1,6 +1,6 @@
 # WDC Packaging Weight
 
-Version: 0.21.6.
+Version: 0.21.8.
 
 Packaging weight is a global calculator setting, not a carrier-specific Russian Post setting.
 
@@ -28,6 +28,11 @@ Every delivery service has:
 
 - `include_packaging_weight`, default `true`
 - `packaging_weight_mode`, default `total_weight`
+
+The database stores technical values. The service calculation tab renders Russian labels:
+
+- `total_weight`: `Прибавлять к общему весу посылки`
+- `package_item`: `Добавлять отдельной строкой «Упаковка»`
 
 `total_weight` adds the matched packaging weight to the package total weight. It does not add a package item.
 

@@ -15,6 +15,7 @@ use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -248,10 +249,14 @@ country_smoke_assert( '' === $repo->find_by_wc_country_code( 'AT' )?->manual_com
 $repo->set_manual_mode( 'AT', RussianPostCountryMapping::MODE_DISABLED, 'manual off' );
 
 country_smoke_assert( [] === $directory->get_country( 'AT' ), 'get_country returns only effective enabled.' );
+$disabled_country_fallback_text = 'Наиболее вероятно, мы не сможем доставить посылку в вашу страну.';
+$settings_repo->set( 'russian_post_worldwide_parcel', array_merge( $settings_repo->all()['russian_post_worldwide_parcel'], array( 'fallback_text' => $disabled_country_fallback_text ) ) );
 $carrier = new RussianPostInternationalCarrier( $rp_settings, $client, $directory, $logger );
 $item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 1000 );
 $quote = $carrier->quote( new QuoteRequest( 'AT', new Address( country_code: 'AT', city: 'Vienna', street: 'Test', house: '1', raw_address: 'Test 1' ), Package::from_items( array( $item ), 0, Money::from_rubles( 100 ), Money::from_rubles( 100 ) ), 'card', Money::from_rubles( 100 ), '2026-05-25' ) );
 country_smoke_assert( $quote->has_available_rates() && 'unsupported_country_AT' === $quote->rates[0]->meta['fallback_reason'], 'quote() uses fallback for disabled country mapping.' );
+country_smoke_assert( 0 === $quote->rates[0]->price->get_kopecks() && DeliveryType::PICKUP === $quote->rates[0]->delivery_type && ! $quote->rates[0]->requires_courier_address, 'Disabled country fallback rate is visible, zero-cost, and pickup-like.' );
+country_smoke_assert( in_array( $disabled_country_fallback_text, $quote->rates[0]->comments, true ), 'Configured disabled-country fallback_text is exposed as customer-facing comment.' );
 
 $preview = $service->preview_bulk_lists( array( 'АВСТРИЯ' ), array() );
 country_smoke_assert( ! empty( $preview['success'] ) && 1 === count( $preview['available']['changes'] ), 'Bulk available preview detects changes.' );

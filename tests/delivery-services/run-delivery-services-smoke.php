@@ -180,6 +180,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 function dbDelta( string $sql ): void { $GLOBALS['wdc_db_delta'][] = $sql; }
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
+use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
@@ -189,6 +190,7 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleCondition;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
@@ -203,6 +205,8 @@ $migration = require dirname( __DIR__, 2 ) . '/database/migrations/0018_create_d
 $migration();
 $migration_0019 = require dirname( __DIR__, 2 ) . '/database/migrations/0019_add_delivery_service_include_packaging_weight.php';
 $migration_0019();
+$migration_0020 = require dirname( __DIR__, 2 ) . '/database/migrations/0020_add_delivery_service_customer_comments.php';
+$migration_0020();
 wdc_ds_assert( count( $GLOBALS['wdc_db_delta'] ?? array() ) === 3, 'Delivery services migration must create three tables.' );
 
 $services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
@@ -222,6 +226,12 @@ wdc_ds_assert( $custom instanceof DeliveryService && ! $custom->enabled && 10.5 
 $services->update_service( $custom_id, array( 'minimum_price_rub' => '-5,25' ) );
 $custom = $services->find_by_service_key( 'fixed_test' );
 wdc_ds_assert( $custom instanceof DeliveryService && 0.0 === $custom->minimum_price_rub, 'minimum_price_rub must clamp negative values to zero.' );
+$services->update_service( $custom_id, array( 'pickup_customer_comment' => "ПВЗ\nкомментарий", 'courier_customer_comment' => 'Курьерский комментарий' ) );
+$custom = $services->find_by_service_key( 'fixed_test' );
+wdc_ds_assert( $custom instanceof DeliveryService && "ПВЗ\nкомментарий" === $custom->pickup_customer_comment && 'Курьерский комментарий' === $custom->courier_customer_comment, 'Service customer comments must save and load.' );
+$services->update_service( $custom_id, array( 'pickup_customer_comment' => '', 'courier_customer_comment' => '' ) );
+$custom = $services->find_by_service_key( 'fixed_test' );
+wdc_ds_assert( $custom instanceof DeliveryService && '' === $custom->pickup_customer_comment && '' === $custom->courier_customer_comment, 'Service customer comments may be empty.' );
 
 $settings->set_setting( $custom_id, 'endpoint', 'https://example.test', 'string' );
 $settings->set_setting( $custom_id, 'limits', array( 'max_weight_g' => 1000 ) );
@@ -259,6 +269,31 @@ $processed_zero = $manager->post_process_rate(
 	$services->find_by_service_key( 'fixed_test' )
 );
 wdc_ds_assert( 0 === $processed_zero->price->get_kopecks(), 'Fallback zero must stay zero during service post-processing.' );
+$rp_service = $services->find_by_service_key( RussianPostSettings::SERVICE_KEY );
+wdc_ds_assert( $rp_service instanceof DeliveryService && $manager->service_available_for_country( $rp_service, 'PL' ), 'Russian Post carrier_directory service must stay available so carrier can return disabled-country fallback.' );
+wdc_ds_assert( $rp_service instanceof DeliveryService && ! $manager->service_available_for_country( $rp_service, 'RU' ), 'Russian Post international service must still reject RU.' );
+
+$orchestrator_reflection = new ReflectionClass( CheckoutOrchestrator::class );
+$orchestrator = $orchestrator_reflection->newInstanceWithoutConstructor();
+$rate_for_service = $orchestrator_reflection->getMethod( 'rate_for_service' );
+$rate_for_service->setAccessible( true );
+$comment_service = DeliveryService::from_array(
+	array(
+		'service_key' => 'commented',
+		'carrier_key' => 'carrier',
+		'title' => 'Commented',
+		'pickup_customer_comment' => 'Комментарий ПВЗ',
+		'courier_customer_comment' => 'Комментарий курьера',
+	)
+);
+$pickup_rate = $rate_for_service->invoke( $orchestrator, new DeliveryRate( 'rate', 'carrier', 'Carrier', 'svc', 'Svc', 'tariff', 'Tariff', DeliveryType::PICKUP, 'Svc', Money::from_rubles( 100 ), null, null, DateRange::range( null, null ), '', '', array( 'Комментарий правила' ) ), $comment_service );
+wdc_ds_assert( array( 'Комментарий ПВЗ', 'Комментарий правила' ) === $pickup_rate->comments && 'yes' === $pickup_rate->meta['service_customer_comment_applied'] && DeliveryType::PICKUP === $pickup_rate->meta['service_customer_comment_type'], 'Pickup service customer comment must be prepended before rule comments.' );
+wdc_ds_assert( ! in_array( 'Комментарий курьера', $pickup_rate->comments, true ), 'Courier customer comment must not appear on pickup rates.' );
+$courier_rate = $rate_for_service->invoke( $orchestrator, new DeliveryRate( 'rate', 'carrier', 'Carrier', 'svc', 'Svc', 'tariff', 'Tariff', DeliveryType::COURIER, 'Svc', Money::from_rubles( 100 ), null, null, DateRange::range( null, null ) ), $comment_service );
+wdc_ds_assert( array( 'Комментарий курьера' ) === $courier_rate->comments && DeliveryType::COURIER === $courier_rate->meta['service_customer_comment_type'], 'Courier service customer comment must apply only to courier rates.' );
+wdc_ds_assert( ! in_array( 'Комментарий ПВЗ', $courier_rate->comments, true ), 'Pickup customer comment must not appear on courier rates.' );
+$fallback_rate = $rate_for_service->invoke( $orchestrator, new DeliveryRate( 'rate', 'carrier', 'Carrier', 'svc', 'Svc', 'fallback', 'Fallback', DeliveryType::PICKUP, 'Fallback', Money::from_rubles( 0 ), null, null, DateRange::range( null, null ), '', '', array( 'fallback text' ), false, '', false, false, array( 'fallback' => true ) ), $comment_service );
+wdc_ds_assert( array( 'fallback text' ) === $fallback_rate->comments && 'no' === $fallback_rate->meta['service_customer_comment_applied'], 'Fallback rate must keep fallback_text as the main customer-facing comment.' );
 $countries->delete_countries( $custom_id );
 wdc_ds_assert( array() === $countries->countries( $custom_id ), 'Country repository must delete countries.' );
 
@@ -297,6 +332,8 @@ wdc_ds_assert( str_contains( $delivery_admin_source, 'render_russian_post_countr
 wdc_ds_assert( str_contains( $delivery_admin_source, 'save_russian_post_settings' ) && str_contains( $delivery_admin_source, 'DeliveryServiceSettingsRepository' ), 'Russian Post calculation settings must save to delivery service settings storage.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'simulate_service_rules' ) && str_contains( $delivery_admin_source, 'QuoteRequest' ) && str_contains( $delivery_admin_source, 'RussianPostInternationalCarrier' ), 'Russian Post service rules simulation must call the real carrier quote flow.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'include_packaging_weight' ) && str_contains( $delivery_admin_source, 'packaging_weight_mode' ) && ! str_contains( $delivery_admin_source, 'rp_packaging_tiers' ), 'Delivery service calculation tab must expose packaging controls and not Russian Post packaging tiers.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'Прибавлять к общему весу посылки' ) && str_contains( $delivery_admin_source, 'Добавлять отдельной строкой «Упаковка»' ), 'Packaging mode select must render Russian labels while storing technical values.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'pickup_customer_comment' ) && str_contains( $delivery_admin_source, 'courier_customer_comment' ) && str_contains( $delivery_admin_source, 'Комментарий для покупателя — доставка до ПВЗ' ) && str_contains( $delivery_admin_source, 'Комментарий для покупателя — курьерская доставка' ), 'Delivery service calculation tab must expose pickup/courier customer comments.' );
 
 $settings_page_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Admin/SettingsAdminPage.php' );
 wdc_ds_assert( ! str_contains( $settings_page_source, 'russian_post_worldwide_parcel[' ), 'Platform settings page must not render Russian Post service-specific fields.' );

@@ -603,6 +603,15 @@ $checkout_sort_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets
 foreach ( array( '.wdc-platform-pickup-point', 'pickup select changed', 'pickup carrier', 'pickup rate id', 'pickup point code', 'update_checkout triggered after pickup selection' ) as $needle ) {
 	runtime_smoke_assert( str_contains( $checkout_sort_js, $needle ), 'Pickup frontend JS must contain ' . $needle . '.' );
 }
+$delivery_type_selector_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' );
+runtime_smoke_assert( ! str_contains( $delivery_type_selector_source, 'Для курьерской доставки будет использован адрес, указанный в checkout.' ), 'Checkout delivery type selector must not auto-render courier customer comment.' );
+$src_iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . '/src' ) );
+foreach ( $src_iterator as $src_file ) {
+	if ( ! $src_file->isFile() || 'php' !== $src_file->getExtension() ) {
+		continue;
+	}
+	runtime_smoke_assert( ! str_contains( (string) file_get_contents( $src_file->getPathname() ), 'Для курьерской доставки будет использован адрес, указанный в checkout.' ), 'Courier auto-comment text must not exist in src unless explicitly configured.' );
+}
 
 $settings->set( 'enable_new_checkout_shipping', true );
 runtime_smoke_assert( $gate->enabled(), 'Feature gate must be enabled through SettingsRepository.' );

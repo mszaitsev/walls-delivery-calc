@@ -48,10 +48,6 @@ final class CheckoutDeliveryTypeSelector {
 		if ( ! empty( $meta['requires_pickup_point'] ) ) {
 			$this->render_pickup_selector( (string) $meta['carrier_key'], $rate_id );
 		}
-
-		if ( ! empty( $meta['requires_courier_address'] ) ) {
-			echo '<div class="wdc-courier-notice">' . esc_html__( 'Для курьерской доставки будет использован адрес, указанный в checkout.', 'walls-delivery-calc' ) . '</div>';
-		}
 	}
 
 	private function render_pickup_selector( string $carrier_key, string $rate_id ): void {

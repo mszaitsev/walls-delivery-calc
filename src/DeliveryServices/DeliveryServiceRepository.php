@@ -109,6 +109,8 @@ final class DeliveryServiceRepository {
 				'minimum_price_rub' => 1,
 				'include_packaging_weight' => 1,
 				'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+				'pickup_customer_comment' => '',
+				'courier_customer_comment' => '',
 				'sort_order' => 10,
 				'deleted' => 0,
 			)
@@ -136,6 +138,8 @@ final class DeliveryServiceRepository {
 			'minimum_price_rub' => '%f',
 			'include_packaging_weight' => '%d',
 			'packaging_weight_mode' => '%s',
+			'pickup_customer_comment' => '%s',
+			'courier_customer_comment' => '%s',
 			'sort_order' => '%d',
 			'deleted' => '%d',
 		);
@@ -168,6 +172,8 @@ final class DeliveryServiceRepository {
 					'minimum_price_rub' => 1.0,
 					'include_packaging_weight' => 1,
 					'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+					'pickup_customer_comment' => '',
+					'courier_customer_comment' => '',
 					'sort_order' => 100,
 					'deleted' => 0,
 				),
@@ -191,7 +197,7 @@ final class DeliveryServiceRepository {
 	 * @return array<int,string>
 	 */
 	private function formats(): array {
-		return array( '%s', '%s', '%s', '%s', '%d', '%s', '%d', '%d', '%f', '%d', '%s', '%d', '%d', '%s', '%s' );
+		return array( '%s', '%s', '%s', '%s', '%d', '%s', '%d', '%d', '%f', '%d', '%s', '%s', '%s', '%d', '%d', '%s', '%s' );
 	}
 
 	/**
@@ -211,6 +217,8 @@ final class DeliveryServiceRepository {
 			'minimum_price_rub' => '%f',
 			'include_packaging_weight' => '%d',
 			'packaging_weight_mode' => '%s',
+			'pickup_customer_comment' => '%s',
+			'courier_customer_comment' => '%s',
 			'sort_order' => '%d',
 			'deleted' => '%d',
 			'created_at' => '%s',

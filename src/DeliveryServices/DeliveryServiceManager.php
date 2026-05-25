@@ -98,7 +98,7 @@ final class DeliveryServiceManager {
 
 	private function carrier_directory_available( DeliveryService $service, string $country_code ): bool {
 		if ( 'russian_post' === $service->carrier_key ) {
-			return 'RU' !== $country_code && array() !== $this->russian_post_countries->get_country( $country_code );
+			return 'RU' !== $country_code;
 		}
 
 		return true;

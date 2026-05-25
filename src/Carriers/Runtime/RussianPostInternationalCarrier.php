@@ -110,7 +110,7 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 			RussianPostSettings::TITLE,
 			$this->transport_type( $api_result['raw']['transtype'] ?? null ),
 			RussianPostSettings::TITLE,
-			DeliveryType::COURIER,
+			DeliveryType::PICKUP,
 			RussianPostSettings::TITLE,
 			Money::from_rubles( $price['price_with_vat_rub'] ),
 			null,
@@ -122,7 +122,7 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 			false,
 			'',
 			false,
-			true,
+			false,
 			$meta
 		);
 
@@ -153,19 +153,19 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 			RussianPostSettings::TITLE,
 			'fallback',
 			$comment,
-			DeliveryType::COURIER,
+			DeliveryType::PICKUP,
 			$comment,
 			Money::from_rubles( 0 ),
 			null,
 			null,
 			DateRange::range( null, null ),
 			'',
-			$comment,
+			'',
 			array( $comment ),
 			false,
 			'',
 			false,
-			true,
+			false,
 			array_merge( array( 'fallback' => true, 'fallback_reason' => $reason, 'package' => $package->to_array() ), $extra )
 		);
 

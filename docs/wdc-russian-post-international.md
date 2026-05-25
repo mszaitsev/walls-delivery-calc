@@ -1,6 +1,6 @@
 # WDC Russian Post International Carrier
 
-Version: 0.21.6.
+Version: 0.21.8.
 
 ## Scope
 
@@ -18,7 +18,7 @@ The plugin is fresh-install-only for this runtime generation. Legacy compatibili
 
 The carrier supports only non-RU destinations. `RU` is excluded in `supports_country()` and direct quotes for RU return no ordinary rate.
 
-`DeliveryType::COURIER` is used temporarily because the checkout validation/UI currently recognizes courier and pickup as first-class customer flows. The actual service is postal international delivery; the service/tariff metadata keeps `russian_post_worldwide_parcel`.
+Russian Post international is exposed as `DeliveryType::PICKUP`. It does not require selecting a pickup point and does not render the old automatic courier-address notice. If the service has a pickup customer comment, that comment is shown for normal Russian Post rates.
 
 ## Pricing
 
@@ -28,7 +28,7 @@ The old built-in storefront formula `/0.89 + 200` has been removed. Commercial a
 
 ## Fallback
 
-API errors, missing tariff/price, unsupported countries, and overweight packages do not throw checkout errors. When fallback is enabled, the carrier returns a visible zero-cost rate with:
+API errors, missing tariff/price, unsupported countries, disabled country mappings, and overweight packages do not throw checkout errors. When fallback is enabled, the carrier returns a visible zero-cost rate with:
 
 - title/comment from `fallback_text`, default `Стоимость доставки рассчитает менеджер`
 - `meta.fallback = true`
@@ -36,6 +36,8 @@ API errors, missing tariff/price, unsupported countries, and overweight packages
 - safe API/package metadata without secrets
 
 When fallback is disabled, the quote returns no visible rate and the checkout-level fallback can take over if no other carrier has visible rates.
+
+For the `carrier_directory` delivery-service availability mode, checkout keeps the Russian Post service in the candidate list even when a country mapping is disabled. The carrier then returns its controlled fallback rate and `fallback_reason` such as `unsupported_country_PL`, instead of the generic checkout fallback text.
 
 ## Weight And Packaging
 

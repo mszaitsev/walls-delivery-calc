@@ -298,7 +298,9 @@ final class DeliveryServicesAdminPage {
 				<?php $this->checkbox_row( 'round_up_to_ruble', __( 'Округлять вверх до рубля', 'walls-delivery-calc' ), $service->round_up_to_ruble ); ?>
 				<?php $this->text_row( 'minimum_price_rub', __( 'Minimum price RUB', 'walls-delivery-calc' ), (string) $service->minimum_price_rub ); ?>
 				<?php $this->checkbox_row( 'include_packaging_weight', __( 'Учитывать вес упаковки', 'walls-delivery-calc' ), $service->include_packaging_weight ); ?>
-				<?php $this->select_row( 'packaging_weight_mode', __( 'Способ учета веса упаковки', 'walls-delivery-calc' ), $service->packaging_weight_mode, array( DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT, DeliveryService::PACKAGING_WEIGHT_PACKAGE_ITEM ) ); ?>
+				<?php $this->select_assoc_row( 'packaging_weight_mode', __( 'Способ учета веса упаковки', 'walls-delivery-calc' ), $service->packaging_weight_mode, $this->packaging_weight_mode_options() ); ?>
+				<?php $this->textarea_row( 'pickup_customer_comment', __( 'Комментарий для покупателя — доставка до ПВЗ', 'walls-delivery-calc' ), $service->pickup_customer_comment ); ?>
+				<?php $this->textarea_row( 'courier_customer_comment', __( 'Комментарий для покупателя — курьерская доставка', 'walls-delivery-calc' ), $service->courier_customer_comment ); ?>
 				<?php if ( RussianPostSettings::SERVICE_KEY === $service->service_key ) : ?>
 					<tr><th colspan="2"><h3><?php echo esc_html__( 'Почта России', 'walls-delivery-calc' ); ?></h3></th></tr>
 					<?php $this->text_row( 'rp_api_endpoint', __( 'API endpoint тарифа', 'walls-delivery-calc' ), (string) ( $rp['api_endpoint'] ?? '' ) ); ?>
@@ -398,16 +400,32 @@ final class DeliveryServicesAdminPage {
 		<?php
 	}
 
+	private function textarea_row( string $name, string $label, string $value ): void {
+		?>
+		<tr>
+			<th scope="row"><label for="<?php echo esc_attr( $name ); ?>"><?php echo esc_html( $label ); ?></label></th>
+			<td><textarea class="large-text" rows="3" id="<?php echo esc_attr( $name ); ?>" name="<?php echo esc_attr( $name ); ?>"><?php echo esc_textarea( $value ); ?></textarea></td>
+		</tr>
+		<?php
+	}
+
 	/**
 	 * @param array<int,string> $options
 	 */
 	private function select_row( string $name, string $label, string $value, array $options ): void {
+		$this->select_assoc_row( $name, $label, $value, array_combine( $options, $options ) ?: array() );
+	}
+
+	/**
+	 * @param array<string,string> $options
+	 */
+	private function select_assoc_row( string $name, string $label, string $value, array $options ): void {
 		?>
 		<tr>
 			<th scope="row"><label for="<?php echo esc_attr( $name ); ?>"><?php echo esc_html( $label ); ?></label></th>
 			<td><select id="<?php echo esc_attr( $name ); ?>" name="<?php echo esc_attr( $name ); ?>">
-				<?php foreach ( $options as $option ) : ?>
-					<option value="<?php echo esc_attr( $option ); ?>" <?php selected( $value, $option ); ?>><?php echo esc_html( $option ); ?></option>
+				<?php foreach ( $options as $option => $label_text ) : ?>
+					<option value="<?php echo esc_attr( (string) $option ); ?>" <?php selected( $value, (string) $option ); ?>><?php echo esc_html( $label_text ); ?></option>
 				<?php endforeach; ?>
 			</select></td>
 		</tr>
@@ -475,7 +493,25 @@ final class DeliveryServicesAdminPage {
 			'minimum_price_rub' => max( 0, (float) str_replace( ',', '.', (string) wp_unslash( $_POST['minimum_price_rub'] ?? '1' ) ) ),
 			'include_packaging_weight' => isset( $_POST['include_packaging_weight'] ) ? 1 : 0,
 			'packaging_weight_mode' => DeliveryService::normalize_packaging_weight_mode( sanitize_key( wp_unslash( $_POST['packaging_weight_mode'] ?? DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT ) ) ),
+			'pickup_customer_comment' => $this->sanitize_textarea( $_POST['pickup_customer_comment'] ?? '' ),
+			'courier_customer_comment' => $this->sanitize_textarea( $_POST['courier_customer_comment'] ?? '' ),
 		);
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private function packaging_weight_mode_options(): array {
+		return array(
+			DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT => __( 'Прибавлять к общему весу посылки', 'walls-delivery-calc' ),
+			DeliveryService::PACKAGING_WEIGHT_PACKAGE_ITEM => __( 'Добавлять отдельной строкой «Упаковка»', 'walls-delivery-calc' ),
+		);
+	}
+
+	private function sanitize_textarea( mixed $value ): string {
+		$value = wp_unslash( $value );
+
+		return function_exists( 'sanitize_textarea_field' ) ? sanitize_textarea_field( $value ) : trim( strip_tags( (string) $value ) );
 	}
 
 	private function save_russian_post_settings( int $service_id ): void {
@@ -621,7 +657,7 @@ final class DeliveryServicesAdminPage {
 			);
 		}
 
-		$context = new RuleEvaluationContext( Money::from_rubles( $order_total ), $rate->price, $package, $request->destination, DeliveryType::COURIER, '', $date, array(), array( 'original_delivery_days' => $rate->delivery_days?->min_days ?? 0 ) );
+		$context = new RuleEvaluationContext( Money::from_rubles( $order_total ), $rate->price, $package, $request->destination, $rate->delivery_type, '', $date, array(), array( 'original_delivery_days' => $rate->delivery_days?->min_days ?? 0 ) );
 		$applied = $this->rule_builder->apply( $rate, $context, $rules );
 		$final = $applied['rate'];
 		$processed = $this->manager instanceof DeliveryServiceManager ? $this->manager->post_process_rate( $final, $service ) : $final;

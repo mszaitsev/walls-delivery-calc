@@ -36,9 +36,13 @@ Admin simulation has two modes. The default rules page applies rules to the ente
 
 As of version 0.21.6, checkout applies service packaging before calling a carrier. `include_packaging_weight=false` leaves the package unchanged. `total_weight` adds packaging to total package weight. `package_item` adds the `WDC_PACKAGING` virtual item. Quote cache keys, carrier API requests, overweight checks, and rule weight conditions all see the package after this preprocessing.
 
+As of version 0.21.8, service rows can define separate pickup and courier customer comments. For normal rates, checkout prepends the service comment matching `delivery_type` and then appends comments produced by `add_comment` rules. For fallback rates, the carrier fallback text remains the primary customer-facing comment, with rule comments after it when rules apply. The old automatic courier checkout notice is not rendered unless equivalent text is explicitly configured as a service or rule comment.
+
 As of version 0.19.0, `russian_post` / `russian_post_worldwide_parcel` is registered as the real “Почта России — международная доставка” carrier. It is international-only, excludes `RU`, uses the new `Package` weight plus shared packaging tiers, and returns a zero-cost manager fallback instead of failing checkout for API errors, missing tariff/price, unsupported country, or overweight.
 
 As of version 0.19.2, Russian Post country support is read from the persistent `wdc_russian_post_country_mappings` table. Checkout does not rely on live country dictionary calls by default. If a destination country has no enabled mapping, the carrier returns its configured fallback/no-rate behavior with `unsupported_country_{code}`.
+
+For Russian Post service availability, `carrier_directory` no longer filters out disabled countries before the carrier runs. This lets Russian Post return a visible zero-cost fallback rate with the configured fallback text when fallback is enabled; otherwise checkout may fall through to the generic fallback if no visible rates remain.
 
 As of version 0.20.0, `CarrierRegistry` registers the real Russian Post international carrier only. The previous demo carrier toggle and demo pickup provider are test fixtures only and are not registered by `Plugin`.
 

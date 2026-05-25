@@ -1,6 +1,6 @@
 # WDC Delivery Services
 
-Version 0.21.0 adds the permanent delivery-service foundation. Version 0.21.1 adds reusable service-specific rules admin on top of the same storage model. Version 0.21.3 turns the service edit screen into real per-tab administration. The model is intentionally table-based, not a single serialized option, so it can grow to API carriers, fixed-rate services, weight-based services, user-created services, service settings, pickup logic, credentials references, statistics, debug data, and history.
+Version 0.21.0 adds the permanent delivery-service foundation. Version 0.21.1 adds reusable service-specific rules admin on top of the same storage model. Version 0.21.3 turns the service edit screen into real per-tab administration. Version 0.21.8 adds delivery-type customer comments. The model is intentionally table-based, not a single serialized option, so it can grow to API carriers, fixed-rate services, weight-based services, user-created services, service settings, pickup logic, credentials references, statistics, debug data, and history.
 
 ## Tables
 
@@ -12,6 +12,7 @@ Version 0.21.0 adds the permanent delivery-service foundation. Version 0.21.1 ad
 - `availability_mode` supports `carrier_directory`, `selected_countries`, `all_countries`, and `all_except_selected`.
 - `use_default_rules_when_no_service_rules` controls service rule fallback.
 - `round_up_to_ruble` and `minimum_price_rub` are service-level post-processing controls.
+- `pickup_customer_comment` and `courier_customer_comment` store service customer-facing comments per delivery type.
 - `sort_order` and `deleted` support admin ordering and soft deletion.
 
 `{$wpdb->prefix}wdc_delivery_service_settings` stores service-specific settings as individual key/value rows with `value_format` (`json`, `string`, `number`, `bool`). It is for endpoints, credentials references, limits, future pickup settings, tariffs, and UI state. Real secrets must not be stored as plaintext here; future encrypted storage can be referenced from this table.
@@ -47,7 +48,9 @@ The service edit page is `admin.php?page=wdc-delivery-services&service=<service_
 
 Russian Post international service settings now live on the service `Расчет` tab and are saved to `wdc_delivery_service_settings`: API endpoint, country endpoint, origin postcode, object code, ISAVIA flag, timeout, VAT rate, max package weight, fallback controls, cache-until-end-of-day, auto-refresh-countries-if-empty, and debug flag. The service `enabled` flag is authoritative and is not duplicated as a Russian Post setting.
 
-As of 0.21.6, packaging tiers are no longer Russian Post service settings. They are global settings on `Правила расчета -> Упаковка`. Each service controls `include_packaging_weight` and `packaging_weight_mode` on its `Расчет` tab. `total_weight` adds packaging to the total package weight; `package_item` adds the `WDC_PACKAGING` virtual item.
+As of 0.21.6, packaging tiers are no longer Russian Post service settings. They are global settings on `Правила расчета -> Упаковка`. Each service controls `include_packaging_weight` and `packaging_weight_mode` on its `Расчет` tab. The database stores `total_weight` or `package_item`, while the admin select shows Russian labels: `Прибавлять к общему весу посылки` and `Добавлять отдельной строкой «Упаковка»`.
+
+As of 0.21.8, the service `Расчет` tab also stores `pickup_customer_comment` and `courier_customer_comment` in `wdc_delivery_services`. Empty values are allowed. At checkout, a normal pickup/courier rate receives the matching service comment first, then rule-added comments are appended. Fallback rates use their configured fallback text as the primary customer-facing comment and can still receive rule comments after that.
 
 ## Service Rules
 

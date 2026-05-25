@@ -220,6 +220,24 @@ $quote = $carrier->quote( rp_request() );
 rp_smoke_assert( $quote->has_available_rates(), 'API success must return a rate.' );
 rp_smoke_assert( 12000 === $quote->rates[0]->price->get_kopecks(), 'API price without VAT must apply VAT once and return base price without built-in formula.' );
 rp_smoke_assert( false === $quote->rates[0]->meta['api_price_has_vat'], 'No-VAT source price must be marked as without VAT.' );
+rp_smoke_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && ! $quote->rates[0]->requires_courier_address, 'Russian Post international rate must be treated as pickup without courier address notice.' );
+$orchestrator_reflection = new ReflectionClass( CheckoutOrchestrator::class );
+$service_rate_method = $orchestrator_reflection->getMethod( 'rate_for_service' );
+$service_rate_method->setAccessible( true );
+$service_rate = $service_rate_method->invoke(
+	$orchestrator_reflection->newInstanceWithoutConstructor(),
+	$quote->rates[0],
+	DeliveryService::from_array(
+		array(
+			'service_key' => RussianPostSettings::SERVICE_KEY,
+			'carrier_key' => RussianPostSettings::CARRIER_KEY,
+			'title' => RussianPostSettings::TITLE,
+			'pickup_customer_comment' => 'Комментарий Почты России для ПВЗ',
+			'courier_customer_comment' => 'Комментарий Почты России для курьера',
+		)
+	)
+);
+rp_smoke_assert( in_array( 'Комментарий Почты России для ПВЗ', $service_rate->comments, true ) && ! in_array( 'Комментарий Почты России для курьера', $service_rate->comments, true ), 'Russian Post international pickup rate must use pickup_customer_comment only.' );
 
 $GLOBALS['wdc_rp_remote_mode'] = 'success';
 $GLOBALS['wdc_rp_transients'] = array();
@@ -232,6 +250,7 @@ $quote = $carrier->quote( rp_request() );
 rp_smoke_assert( $quote->has_available_rates(), 'API fail must return fallback rate.' );
 rp_smoke_assert( 0 === $quote->rates[0]->price->get_kopecks(), 'Fallback rate must be zero cost.' );
 rp_smoke_assert( 'http_status_500' === $quote->rates[0]->meta['fallback_reason'], 'Fallback must keep reason in meta.' );
+rp_smoke_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && array( 'Стоимость доставки рассчитает менеджер' ) === $quote->rates[0]->comments && '' === $quote->rates[0]->planned_delivery_comment, 'Russian Post fallback must expose fallback text as the main customer-facing pickup comment.' );
 
 $GLOBALS['wdc_rp_remote_mode'] = 'success';
 $GLOBALS['wdc_rp_transients'] = array();
@@ -291,9 +310,12 @@ $order = new class {
 ( new OrderShippingMetaPersister( $session ) )->persist( $order, array() );
 rp_smoke_assert( 'russian_post' === $order->meta['_wdc_platform_carrier_key'], 'Order meta must contain carrier_key.' );
 rp_smoke_assert( 'russian_post_worldwide_parcel' === $order->meta['_wdc_platform_rate_id'], 'Order meta must contain rate_id.' );
-rp_smoke_assert( DeliveryType::COURIER === $order->meta['_wdc_platform_delivery_type'], 'Order meta must contain delivery_type.' );
+rp_smoke_assert( DeliveryType::PICKUP === $order->meta['_wdc_platform_delivery_type'], 'Order meta must contain delivery_type.' );
 rp_smoke_assert( 0 === $order->meta['_wdc_platform_requires_pickup_point'], 'Order meta must store requires_pickup_point = 0.' );
 rp_smoke_assert( is_array( $order->meta['_wdc_platform_rate_meta'] ), 'Order meta must contain sanitized rate metadata.' );
+
+$delivery_type_selector_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' );
+rp_smoke_assert( ! str_contains( $delivery_type_selector_source, 'Для курьерской доставки будет использован адрес, указанный в checkout.' ), 'Checkout must not auto-render courier address comment.' );
 
 $GLOBALS['wdc_rp_options'] = array();
 $settings = new SettingsRepository();

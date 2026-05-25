@@ -12,6 +12,7 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceRegistry;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryQuote;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Packaging\PackagingApplicationResult;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
@@ -169,6 +170,15 @@ final class CheckoutOrchestrator {
 	}
 
 	private function rate_for_service( DeliveryRate $rate, DeliveryService $service ): DeliveryRate {
+		$comment_type = $rate->delivery_type;
+		$comment = match ( $comment_type ) {
+			DeliveryType::PICKUP => trim( $service->pickup_customer_comment ),
+			DeliveryType::COURIER => trim( $service->courier_customer_comment ),
+			default => '',
+		};
+		$apply_service_comment = '' !== $comment && empty( $rate->meta['fallback'] );
+		$comments = $apply_service_comment ? array_values( array_filter( array_merge( array( $comment ), $rate->comments ), static fn ( mixed $item ): bool => '' !== trim( (string) $item ) ) ) : $rate->comments;
+
 		return new DeliveryRate(
 			$rate->rate_id,
 			$service->carrier_key,
@@ -185,12 +195,21 @@ final class CheckoutOrchestrator {
 			$rate->delivery_days,
 			$rate->planned_delivery_date,
 			$rate->planned_delivery_comment,
-			$rate->comments,
+			$comments,
 			$rate->disabled,
 			$rate->disabled_reason,
 			$rate->requires_pickup_point,
 			$rate->requires_courier_address,
-			array_merge( $rate->meta, array( 'service_key' => $service->service_key, 'service_title' => $service->title, 'carrier_key' => $service->carrier_key ) )
+			array_merge(
+				$rate->meta,
+				array(
+					'service_key' => $service->service_key,
+					'service_title' => $service->title,
+					'carrier_key' => $service->carrier_key,
+					'service_customer_comment_applied' => $apply_service_comment ? 'yes' : 'no',
+					'service_customer_comment_type' => in_array( $comment_type, array( DeliveryType::PICKUP, DeliveryType::COURIER ), true ) ? $comment_type : '',
+				)
+			)
 		);
 	}
 
