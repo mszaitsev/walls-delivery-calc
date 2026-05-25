@@ -180,7 +180,7 @@ final class RussianPostCountryMappingService {
 	public function manual_mapping_options(): array {
 		$options = array();
 		foreach ( $this->repository->all() as $mapping ) {
-			if ( $mapping->matched || 'manual' === $mapping->match_source ) {
+			if ( $mapping->matched || 'manual' === $mapping->match_source || '' !== $mapping->rp_country_id || '' !== $mapping->rp_country_name ) {
 				continue;
 			}
 			$options[] = array(
@@ -214,7 +214,7 @@ final class RussianPostCountryMappingService {
 				continue;
 			}
 			$mapping = $this->repository->find_by_wc_country_code( $wc_code );
-			if ( ! $mapping instanceof RussianPostCountryMapping || $mapping->matched || 'manual' === $mapping->match_source ) {
+			if ( ! $mapping instanceof RussianPostCountryMapping || $mapping->matched || 'manual' === $mapping->match_source || '' !== $mapping->rp_country_id || '' !== $mapping->rp_country_name ) {
 				continue;
 			}
 			$this->repository->set_manual_mapping( $wc_code, $by_key[ $key ], $comment );

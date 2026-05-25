@@ -206,6 +206,10 @@ country_smoke_assert( false === $repo->find_by_wc_country_code( 'AL' )?->matched
 country_smoke_assert( 2 === count( $stats['unmatched_api_countries'] ), 'Unmatched API countries are returned for manual mapping.' );
 country_smoke_assert( ! in_array( '', array_column( $GLOBALS['wpdb']->rp_rows, 'wc_country_code' ), true ), 'Unmatched API countries are not stored as RP-only rows.' );
 country_smoke_assert( ! in_array( '76', array_map( 'strval', array_column( $GLOBALS['wpdb']->rp_rows, 'rp_country_id' ) ), true ), 'Unmatched API countries are not stored in mapping table.' );
+$manual_options = $service->manual_mapping_options();
+$manual_option_codes = array_column( $manual_options, 'wc_country_code' );
+country_smoke_assert( ! in_array( 'AT', $manual_option_codes, true ) && ! in_array( 'US', $manual_option_codes, true ), 'Matched WC countries are excluded from manual_mapping_options().' );
+country_smoke_assert( in_array( 'AL', $manual_option_codes, true ), 'Unmatched WC country without Russian Post id is available in manual_mapping_options().' );
 
 $_SERVER['REQUEST_METHOD'] = 'POST';
 $_POST = array(
@@ -227,11 +231,15 @@ country_smoke_assert( '40' === ( $at_country['carrier_country_id'] ?? '' ), 'run
 
 $manual_payload = array_values( array_filter( $stats['unmatched_api_countries'], static fn( array $row ): bool => '999' === (string) ( $row['rp_country_id'] ?? '' ) ) );
 country_smoke_assert( [] !== $manual_payload, 'Unmatched API payload contains manual mapping candidate.' );
+$blocked_manual_result = $service->apply_manual_mappings( $stats['unmatched_api_countries'], array( (string) $manual_payload[0]['key'] => 'AT' ) );
+country_smoke_assert( 0 === $blocked_manual_result['updated'] && '40' === $repo->find_by_wc_country_code( 'AT' )?->rp_country_id, 'Manual mapping backend skips already matched WC countries.' );
 $manual_result = $service->apply_manual_mappings( $stats['unmatched_api_countries'], array( (string) $manual_payload[0]['key'] => 'AL' ) );
 country_smoke_assert( 1 === $manual_result['updated'], 'Manual mapping updates WooCommerce row.' );
 country_smoke_assert( 'manual' === $repo->find_by_wc_country_code( 'AL' )?->match_source && '999' === $repo->find_by_wc_country_code( 'AL' )?->rp_country_id, 'Manual mapping stores match_source and Russian Post id.' );
 country_smoke_assert( 'сопоставлено вручную 25.05.2026' === $repo->find_by_wc_country_code( 'AL' )?->manual_comment, 'Manual mapping writes mapping comment.' );
 country_smoke_assert( '999' === ( $directory->get_country( 'AL' )['carrier_country_id'] ?? '' ), 'After manual mapping runtime get_country(WC_CODE) works.' );
+$manual_options = $service->manual_mapping_options();
+country_smoke_assert( ! in_array( 'AL', array_column( $manual_options, 'wc_country_code' ), true ), 'Manual matched WC country is excluded from manual_mapping_options().' );
 
 $repo->set_manual_mode( 'AT', RussianPostCountryMapping::MODE_DISABLED, 'manual off' );
 country_smoke_assert( ! $repo->find_by_wc_country_code( 'AT' )?->effective_enabled, 'Manual disabled overrides API enabled.' );
