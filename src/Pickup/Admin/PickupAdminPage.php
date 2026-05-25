@@ -12,6 +12,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class PickupAdminPage {
 	private const PAGE_SLUG = 'wdc-platform-pickup';
+	private const DEMO_CARRIER_KEYS = array( 'demo' );
 
 	public function __construct(
 		private PluginEnvironment $environment,
@@ -31,6 +32,8 @@ final class PickupAdminPage {
 		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return;
 		}
+
+		$this->repository->delete_by_carrier_keys( self::DEMO_CARRIER_KEYS );
 
 		$city    = isset( $_GET['pickup_city'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['pickup_city'] ) ) : '';
 		$carrier = isset( $_GET['pickup_carrier'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['pickup_carrier'] ) ) : '';

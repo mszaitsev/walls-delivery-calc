@@ -99,6 +99,32 @@ final class PickupPointRepository {
 	}
 
 	/**
+	 * @param array<int,string> $carrier_keys
+	 */
+	public function delete_by_carrier_keys( array $carrier_keys ): int {
+		$carrier_keys = array_values(
+			array_filter(
+				array_map( static fn ( mixed $key ): string => trim( (string) $key ), $carrier_keys ),
+				static fn ( string $key ): bool => '' !== $key
+			)
+		);
+
+		if ( array() === $carrier_keys ) {
+			return 0;
+		}
+
+		$placeholders = implode( ',', array_fill( 0, count( $carrier_keys ), '%s' ) );
+		$result       = $this->wpdb->query(
+			$this->wpdb->prepare(
+				"DELETE FROM {$this->table_name()} WHERE carrier_key IN ({$placeholders})",
+				...$carrier_keys
+			)
+		);
+
+		return is_int( $result ) ? $result : 0;
+	}
+
+	/**
 	 * @return array<string,mixed>|null
 	 */
 	private function find_row_by_code( string $carrier, string $code ): ?array {
