@@ -1,5 +1,7 @@
 # WDC Checkout Integration
 
+As of version 0.20.0, checkout is part of the `src/`-only runtime. The legacy `includes/*` shipping method and demo runtime fallback have been removed; demo datasets used by smoke tests live under `tests/fixtures/demo`.
+
 ## WooCommerce integration flow
 
 The new checkout path is registered as a WooCommerce shipping method with id `wdc_platform_delivery` and title `WDC Platform Delivery`. Runtime flow:
@@ -18,7 +20,7 @@ The new checkout path is registered as a WooCommerce shipping method with id `wd
 
 `NewShippingMethod` is a real `WC_Shipping_Method`. It calculates rates through `CheckoutOrchestrator`, uses registered carriers through `CarrierRegistry`, applies checkout rules, maps returned rates to WooCommerce rate arrays, and adds them through `add_rate()`.
 
-As of version 0.18.3, checkout runtime reads enabled default rules through `RuleRepository::get_default_rules()` instead of applying every enabled rule globally. Default rules have `target_type=default` and an empty `target_value`. If no default rules exist, runtime continues without rules; `database/demo/rules-demo.json` is not used as a checkout fallback. Rules are applied in the same top-to-bottom order shown in the rules admin table.
+As of version 0.18.3, checkout runtime reads enabled default rules through `RuleRepository::get_default_rules()` instead of applying every enabled rule globally. Default rules have `target_type=default` and an empty `target_value`. If no default rules exist, runtime continues without rules; there is no demo rules fallback in runtime paths. Rules are applied in the same top-to-bottom order shown in the rules admin table.
 
 As of version 0.18.4, rule context carries selected location FIAS ID when available. City conditions are FIAS-only: they compare the selected location FIAS ID with the condition value and do not fall back to city or display-name text. Package dimensions are aggregated from WooCommerce product dimensions using max length, width, and height across cart items, while volume remains total package volume in `cm3` and is converted to cubic meters by the rule evaluator.
 
@@ -27,6 +29,8 @@ As of version 0.19.0, runtime resolves rules per carrier with `RuleRepository::g
 As of version 0.19.0, `russian_post` / `russian_post_worldwide_parcel` is registered as the real “Почта России — международная доставка” carrier. It is international-only, excludes `RU`, uses the new `Package` weight plus shared packaging tiers, and returns a zero-cost manager fallback instead of failing checkout for API errors, missing tariff/price, unsupported country, or overweight.
 
 As of version 0.19.2, Russian Post country support is read from the persistent `wdc_russian_post_country_mappings` table. Checkout does not rely on live country dictionary calls by default. If a destination country has no enabled mapping, the carrier returns its configured fallback/no-rate behavior with `unsupported_country_{code}`.
+
+As of version 0.20.0, `CarrierRegistry` registers the real Russian Post international carrier only. The previous demo carrier toggle and demo pickup provider are test fixtures only and are not registered by `Plugin`.
 
 ## Session persistence
 

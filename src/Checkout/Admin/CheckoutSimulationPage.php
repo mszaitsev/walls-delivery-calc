@@ -87,7 +87,7 @@ final class CheckoutSimulationPage {
 			return null;
 		}
 
-		return $this->orchestrator->calculate( $this->request_from_post(), $this->demo_rules(), 'cheapest', false );
+		return $this->orchestrator->calculate( $this->request_from_post(), $this->sample_rules(), 'cheapest', false );
 	}
 
 	private function request_from_post(): QuoteRequest {
@@ -112,9 +112,9 @@ final class CheckoutSimulationPage {
 	/**
 	 * @return array<int,Rule>
 	 */
-	private function demo_rules(): array {
+	private function sample_rules(): array {
 		return array(
-			new Rule( null, 'Демо-промо -500', true, 10, 'rate', 'demo', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 500, RuleOperationBases::RUBLES, true, false ),
+			new Rule( null, 'Sample promo -500', true, 10, 'rate', 'sample', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 500, RuleOperationBases::RUBLES, true, false ),
 		);
 	}
 

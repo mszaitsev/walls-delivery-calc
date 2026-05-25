@@ -1,5 +1,7 @@
 # WDC Domain Model
 
+Historical note: references to legacy `includes/*` in this document describe earlier migration stages only. As of 0.20.0, runtime is `src/` only.
+
 ## Назначение
 
 Domain model описывает чистые сущности доставки для новой архитектуры `WallsShop\WDC`. Эти классы нужны как общий язык между будущими сервисами расчета, выбора ПВЗ, создания отправлений, синхронизации статусов и UI-слоем.

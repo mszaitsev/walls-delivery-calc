@@ -6,20 +6,16 @@ namespace WallsShop\WDC\Pickup\Admin;
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
-use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 
 defined( 'ABSPATH' ) || exit;
 
 final class PickupAdminPage {
 	private const PAGE_SLUG = 'wdc-platform-pickup';
-	private const NONCE_ACTION = 'wdc_pickup_import_demo';
-	private const NONCE_NAME = 'wdc_pickup_nonce';
 
 	public function __construct(
 		private PluginEnvironment $environment,
-		private PickupPointRepository $repository,
-		private DemoPickupProvider $provider
+		private PickupPointRepository $repository
 	) {
 	}
 
@@ -36,27 +32,21 @@ final class PickupAdminPage {
 			return;
 		}
 
-		$message = $this->handle_post();
 		$city    = isset( $_GET['pickup_city'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['pickup_city'] ) ) : '';
-		$points  = '' !== trim( $city ) ? $this->repository->search( 'demo', 'RU', $city ) : array();
+		$carrier = isset( $_GET['pickup_carrier'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['pickup_carrier'] ) ) : '';
+		$points  = '' !== trim( $city ) && '' !== trim( $carrier ) ? $this->repository->search( $carrier, 'RU', $city ) : array();
 		$grouped = $this->group_by_city( $points );
 		?>
 		<div class="wrap">
 			<h1><?php echo esc_html__( 'Пункты выдачи заказов', 'walls-delivery-calc' ); ?></h1>
-			<?php if ( '' !== $message ) : ?>
-				<div class="notice notice-success is-dismissible"><p><?php echo esc_html( $message ); ?></p></div>
-			<?php endif; ?>
-
 			<p><strong><?php echo esc_html__( 'Количество ПВЗ:', 'walls-delivery-calc' ); ?></strong> <?php echo esc_html( (string) $this->repository->count_all() ); ?></p>
-
-			<form method="post">
-				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
-				<button class="button" type="submit" name="wdc_pickup_action" value="import_demo"><?php echo esc_html__( 'Импортировать демо-ПВЗ', 'walls-delivery-calc' ); ?></button>
-				<button class="button button-primary" type="submit" name="wdc_pickup_action" value="reimport_demo"><?php echo esc_html__( 'Переимпортировать демо-ПВЗ', 'walls-delivery-calc' ); ?></button>
-			</form>
 
 			<form method="get" style="margin-top: 16px;">
 				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>">
+				<label>
+					<span><?php echo esc_html__( 'Ключ перевозчика', 'walls-delivery-calc' ); ?></span>
+					<input type="search" name="pickup_carrier" value="<?php echo esc_attr( $carrier ); ?>" placeholder="russian_post">
+				</label>
 				<label>
 					<span><?php echo esc_html__( 'Поиск по городу', 'walls-delivery-calc' ); ?></span>
 					<input type="search" name="pickup_city" value="<?php echo esc_attr( $city ); ?>" placeholder="Новосибирск">
@@ -77,29 +67,6 @@ final class PickupAdminPage {
 			<?php endforeach; ?>
 		</div>
 		<?php
-	}
-
-	private function handle_post(): string {
-		if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) || ! isset( $_POST[ self::NONCE_NAME ] ) ) {
-			return '';
-		}
-
-		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( (string) $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( AdminMenu::CAPABILITY ) ) {
-			return '';
-		}
-
-		$action = isset( $_POST['wdc_pickup_action'] ) ? sanitize_key( wp_unslash( (string) $_POST['wdc_pickup_action'] ) ) : '';
-		if ( ! in_array( $action, array( 'import_demo', 'reimport_demo' ), true ) ) {
-			return '';
-		}
-
-		if ( 'reimport_demo' === $action ) {
-			$this->repository->delete_all();
-		}
-
-		$count = $this->repository->save_many( $this->provider->load_points() );
-
-		return sprintf( __( 'Импортировано демо-ПВЗ: %d.', 'walls-delivery-calc' ), $count );
 	}
 
 	/**

@@ -2,7 +2,7 @@
 
 ## Carrier architecture
 
-The new runtime delivery layer lives under `src/Carriers` and `src/Checkout`. It is separate from legacy `includes/shipping-methods` and does not register a production WooCommerce shipping method yet.
+The runtime delivery layer lives under `src/Carriers` and `src/Checkout`. As of `0.20.0`, the legacy `includes/*` shipping method is removed and the `src` WooCommerce shipping method is the active runtime path.
 
 Carrier adapters implement `CarrierAdapterInterface`:
 
@@ -28,16 +28,9 @@ Carrier adapters implement `CarrierAdapterInterface`:
 
 The richer `CheckoutCalculationResult` carries rates, fallback state, cache hit count, rule audit, and carrier errors. `calculate_rates()` remains a simple rates-only convenience method.
 
-## Demo carrier
+## Registered carriers
 
-`DemoCarrier` is not a real integration. It exists to prove the runtime pipeline.
-
-For `RU` it returns:
-
-- pickup: 350 RUB, 5 calendar days, promo-like metadata;
-- courier: 550 RUB, 3 calendar days.
-
-For non-RU countries it returns a successful empty quote, allowing the orchestrator to demonstrate fallback behavior.
+`CarrierRegistry` registers Russian Post international through `RussianPostInternationalCarrier`. Demo carriers are not registered in runtime; smoke tests use local fixtures under `tests/fixtures`.
 
 ## Rule integration
 
@@ -51,11 +44,11 @@ Supported rule effects:
 - comments;
 - delivery days.
 
-The admin simulation uses a demo promo rule: 350 RUB minus 500 RUB clamps to 1 RUB and preserves crossed price 350 RUB.
+The admin simulation uses in-memory sample rules and does not load runtime demo datasets.
 
 ## Cache
 
-`QuoteCache` wraps the existing `WDC_Cache` transient infrastructure when WordPress is available. In smoke tests it falls back to in-memory storage.
+`QuoteCache` is owned by `src/Checkout/Cache` and no longer wraps the removed `WDC_Cache` class. It uses a runtime namespace and in-memory storage for smoke tests.
 
 The cache key is derived from:
 

@@ -1,5 +1,7 @@
 # WDC Legacy Uninstall Cleanup
 
+Archived/not-runtime as of 0.20.0: this document describes cleanup behavior from the removed legacy runtime and is retained only as historical context.
+
 This document describes the cleanup performed by the legacy `walls-delivery-calc` plugin when it is deleted through the standard WordPress plugin deletion flow.
 
 ## What uninstall.php removes

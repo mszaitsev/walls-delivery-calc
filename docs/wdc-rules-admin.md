@@ -11,7 +11,7 @@ Rules created on this page always use:
 - `target_type = default`
 - `target_value = ''`
 
-The admin UI does not expose target fields. Existing legacy rules with an empty `target_type` are normalized to default rules by migration `0012_normalize_default_rules.php` and by `RuleRepository::normalize_legacy_default_rules()`.
+The admin UI does not expose target fields. Fresh installs create the current rules schema directly; old empty-target legacy normalization is no longer part of runtime or the active migration list.
 
 ## CRUD
 

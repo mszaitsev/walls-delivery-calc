@@ -1,21 +1,13 @@
 # WDC Russian Post International Carrier
 
-Version: 0.19.4.
+Version: 0.20.0.
 
 ## Scope
 
 The new runtime carrier is `russian_post` with service `russian_post_worldwide_parcel`.
-It implements “Почта России — международная доставка” in the `src/` architecture without using `includes/*` as runtime dependencies.
+It implements “Почта России — международная доставка” entirely in the `src/` architecture. As of `0.20.0`, the legacy `includes/*` runtime has been removed and Russian Post no longer depends on old `WDC_*` classes.
 
-Legacy files used as logic references:
-
-- `includes/carriers/russian-post/class-wdc-russian-post-carrier.php`
-- `includes/carriers/russian-post/class-wdc-russian-post-api.php`
-- `includes/carriers/russian-post/class-wdc-russian-post-countries.php`
-- `includes/class-wdc-weight-calculator.php`
-- `includes/class-wdc-settings.php`
-
-Those files remain legacy-only and must not be modified by this migration.
+The plugin is fresh-install-only for this runtime generation. Legacy compatibility migrations for old `includes/*` state are not required by production install.
 
 ## Runtime Classes
 

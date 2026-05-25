@@ -14,30 +14,19 @@ final class QuoteCache {
 
 	private string $namespace = 'v1';
 
-	public function __construct(
-		private ?object $cache = null
-	) {
-		if ( null === $this->cache && class_exists( '\WDC_Cache' ) ) {
-			$this->cache = new \WDC_Cache();
-		}
-
+	public function __construct() {
 		$this->namespace = $this->load_namespace();
 	}
 
 	public function get( QuoteRequest $request, string $carrier_key, string $delivery_type = '' ): ?DeliveryQuote {
-		$key  = $this->key( $request, $carrier_key, $delivery_type );
-		if ( $this->cache instanceof \WDC_Cache ) {
-			$data = $this->cache->get( $key );
-		} else {
-			$entry = self::$memory[ $key ] ?? null;
-			if ( is_array( $entry ) && (int) ( $entry['expires'] ?? 0 ) < time() ) {
-				unset( self::$memory[ $key ] );
-				$entry = null;
-			}
-
-			$data = is_array( $entry ) ? ( $entry['value'] ?? null ) : null;
+		$key   = $this->key( $request, $carrier_key, $delivery_type );
+		$entry = self::$memory[ $key ] ?? null;
+		if ( is_array( $entry ) && (int) ( $entry['expires'] ?? 0 ) < time() ) {
+			unset( self::$memory[ $key ] );
+			$entry = null;
 		}
 
+		$data = is_array( $entry ) ? ( $entry['value'] ?? null ) : null;
 		if ( ! is_array( $data ) ) {
 			return null;
 		}
@@ -49,11 +38,6 @@ final class QuoteCache {
 		$key  = $this->key( $request, $carrier_key, $delivery_type );
 		$data = $quote->to_array();
 		$ttl  = $this->ttl();
-
-		if ( $this->cache instanceof \WDC_Cache ) {
-			$this->cache->set( $key, $data, $ttl );
-			return;
-		}
 
 		self::$memory[ $key ] = array( 'value' => $data, 'expires' => time() + $ttl );
 	}
@@ -83,10 +67,6 @@ final class QuoteCache {
 	}
 
 	private function ttl(): int {
-		if ( $this->cache instanceof \WDC_Cache ) {
-			return $this->cache->get_seconds_until_end_of_day();
-		}
-
 		$end = strtotime( 'today 23:59:59' );
 
 		return is_int( $end ) ? max( 1, $end - time() ) : 86400;

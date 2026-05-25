@@ -1,5 +1,7 @@
 # WDC Rule Engine Foundation
 
+As of version 0.20.0, rule storage is fresh-install oriented. The active migration set creates the current rules schema directly; old empty-target normalization for legacy rows was removed from runtime and from the active migration list.
+
 ## Architecture
 
 The rule engine foundation lives under `src/Rules` and is split into domain objects, storage, services, admin UI, and value object constants. Domain classes do not depend on WordPress runtime APIs, while storage and admin code are isolated behind repository and page classes.
@@ -47,6 +49,6 @@ Rules can set `stop_processing`. When an applied rule has this flag, `RuleEngine
 
 The rules admin page is a CRUD interface for default rules. It uses the same type-aware condition matrix as the evaluator, shows unit labels beside numeric fields, visually groups condition rows under `Условие 1` through `Условие 3`, saves per-group AND/OR logic, and saves the separate group expression. Operation summaries are Russian text, with `увеличить на` and `уменьшить на`; percentage bases render without an extra space before `%`.
 
-## Future Checkout Integration
+## Checkout Integration
 
-No checkout runtime integration is included in this foundation. Future orchestration can build `RuleEvaluationContext` from WooCommerce checkout state, fetch rules from `RuleRepository`, apply `RuleEngine`, and map the result back to delivery rates.
+Checkout orchestration builds `RuleEvaluationContext` from WooCommerce checkout state, fetches carrier-specific rules with default fallback, applies `RuleEngine`, and maps the result back to delivery rates.

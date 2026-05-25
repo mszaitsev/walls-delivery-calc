@@ -2,7 +2,7 @@
 
 ## Architecture
 
-Pickup foundation adds a storage/provider/runtime layer for checkout pickup delivery without maps, AJAX, modal UI, carrier API calls, shipment export, or legacy shipping changes.
+Pickup foundation adds storage and checkout runtime support for pickup delivery without maps, modal UI, carrier API calls, or shipment export. Legacy shipping code has been removed.
 
 The first runtime path is:
 
@@ -27,14 +27,9 @@ The first runtime path is:
 
 The unique storage identity is `carrier_key + point_code`.
 
-## Provider Abstraction
+## Runtime Lookup
 
-`PickupProviderInterface` describes carrier pickup point providers:
-
-- `supports_carrier(string $carrierKey)`
-- `get_points(string $carrierKey, Address $destination): array`
-
-`DemoPickupProvider` reads `database/demo/pickup-points-demo.json`. It supports the demo carrier in Russia and filters by destination city when available.
+Checkout pickup selection reads points from `PickupPointRepository` by carrier, country, and city. Runtime no longer falls back to bundled demo JSON. Test pickup data lives under `tests/fixtures/demo`.
 
 ## Checkout Flow
 

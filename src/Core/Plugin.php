@@ -21,7 +21,6 @@ use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostApiClient;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
-use WallsShop\WDC\Carriers\Runtime\DemoCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressNormalizer;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
@@ -86,7 +85,6 @@ use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\Storage\RegionRepository;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Pickup\Admin\PickupAdminPage;
-use WallsShop\WDC\Pickup\Services\DemoPickupProvider;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 use WallsShop\WDC\Rules\Admin\RulesAdminPage;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
@@ -131,13 +129,11 @@ final class Plugin {
 		$this->container->register( LocationRepository::class, fn(): LocationRepository => new LocationRepository() );
 		$this->container->register( RegionRepository::class, fn(): RegionRepository => new RegionRepository() );
 		$this->container->register( PickupPointRepository::class, fn(): PickupPointRepository => new PickupPointRepository() );
-		$this->container->register( DemoPickupProvider::class, fn(): DemoPickupProvider => new DemoPickupProvider( $this->environment->plugin_dir() . 'database/demo/pickup-points-demo.json' ) );
 		$this->container->register( RuleRepository::class, fn(): RuleRepository => new RuleRepository() );
 		$this->container->register( ConditionEvaluator::class, fn(): ConditionEvaluator => new ConditionEvaluator() );
 		$this->container->register( RuleEvaluator::class, fn(): RuleEvaluator => new RuleEvaluator( $this->container->get( ConditionEvaluator::class ) ) );
 		$this->container->register( RuleEngine::class, fn(): RuleEngine => new RuleEngine( $this->container->get( RuleEvaluator::class ) ) );
 		$this->container->register( RuleSimulator::class, fn(): RuleSimulator => new RuleSimulator( $this->container->get( RuleEngine::class ) ) );
-		$this->container->register( DemoCarrier::class, fn(): DemoCarrier => new DemoCarrier() );
 		$this->container->register( RussianPostSettings::class, fn(): RussianPostSettings => new RussianPostSettings( $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( RussianPostApiClient::class, fn(): RussianPostApiClient => new RussianPostApiClient( $this->container->get( RussianPostSettings::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( RussianPostCountryMappingRepository::class, fn(): RussianPostCountryMappingRepository => new RussianPostCountryMappingRepository() );
@@ -149,9 +145,6 @@ final class Plugin {
 			function (): CarrierRegistry {
 				$registry = new CarrierRegistry();
 				$registry->register( $this->container->get( RussianPostInternationalCarrier::class ) );
-				if ( $this->container->get( SettingsRepository::class )->get_bool( 'enable_demo_carrier', true ) ) {
-					$registry->register( $this->container->get( DemoCarrier::class ) );
-				}
 
 				return $registry;
 			}
@@ -235,7 +228,6 @@ final class Plugin {
 			fn(): CheckoutDeliveryTypeSelector => new CheckoutDeliveryTypeSelector(
 				$this->container->get( CheckoutSessionManager::class ),
 				$this->container->get( PickupPointRepository::class ),
-				$this->container->get( DemoPickupProvider::class ),
 				$this->container->get( PickupPointRenderer::class )
 			)
 		);
@@ -345,8 +337,7 @@ final class Plugin {
 			PickupAdminPage::class,
 			fn(): PickupAdminPage => new PickupAdminPage(
 				$this->environment,
-				$this->container->get( PickupPointRepository::class ),
-				$this->container->get( DemoPickupProvider::class )
+				$this->container->get( PickupPointRepository::class )
 			)
 		);
 		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ), $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( RussianPostSettings::class ) ) );

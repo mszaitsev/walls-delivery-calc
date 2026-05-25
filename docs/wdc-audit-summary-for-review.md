@@ -1,5 +1,7 @@
 # Summary for Review
 
+Archived/not-runtime as of 0.20.0: this review summary describes the old legacy `includes/*` runtime. It is retained only as historical context after the `src/`-only migration.
+
 ## Что сделано
 
 В рамках аудита изучена текущая база WordPress/WooCommerce-плагина `walls-delivery-calc` и добавлены технические документы. Функциональный PHP/JS/CSS код не изменялся, версия плагина не менялась.

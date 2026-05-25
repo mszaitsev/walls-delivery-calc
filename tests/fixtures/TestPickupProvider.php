@@ -1,29 +1,20 @@
 <?php
 declare(strict_types=1);
 
-namespace WallsShop\WDC\Pickup\Services;
-
-use WallsShop\WDC\Carriers\Runtime\DemoCarrier;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 
-defined( 'ABSPATH' ) || exit;
-
-final class DemoPickupProvider implements PickupProviderInterface {
+final class TestPickupProvider {
 	public function __construct(
 		private string $dataset_path = ''
 	) {
 	}
 
-	public function supports_carrier( string $carrierKey ): bool {
-		return DemoCarrier::KEY === trim( $carrierKey );
-	}
-
 	/**
 	 * @return array<int,PickupPoint>
 	 */
-	public function get_points( string $carrierKey, Address $destination ): array {
-		if ( ! $this->supports_carrier( $carrierKey ) || 'RU' !== strtoupper( trim( $destination->country_code ) ) ) {
+	public function get_points( string $carrier_key, Address $destination ): array {
+		if ( 'demo' !== trim( $carrier_key ) || 'RU' !== strtoupper( trim( $destination->country_code ) ) ) {
 			return array();
 		}
 
@@ -41,7 +32,7 @@ final class DemoPickupProvider implements PickupProviderInterface {
 	 * @return array<int,PickupPoint>
 	 */
 	public function load_points(): array {
-		$path = '' !== $this->dataset_path ? $this->dataset_path : dirname( __DIR__, 3 ) . '/database/demo/pickup-points-demo.json';
+		$path = '' !== $this->dataset_path ? $this->dataset_path : dirname( __DIR__ ) . '/fixtures/demo/pickup-points-demo.json';
 		if ( ! is_readable( $path ) ) {
 			return array();
 		}

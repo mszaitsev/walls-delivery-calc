@@ -6,7 +6,6 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
-use WallsShop\WDC\Pickup\Services\PickupProviderInterface;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -15,7 +14,6 @@ final class CheckoutDeliveryTypeSelector {
 	public function __construct(
 		private CheckoutSessionManager $session_manager,
 		private PickupPointRepository $repository,
-		private PickupProviderInterface $pickup_provider,
 		private PickupPointRenderer $renderer
 	) {
 	}
@@ -73,7 +71,7 @@ final class CheckoutDeliveryTypeSelector {
 		echo '</select></label>';
 
 		if ( '' !== $selected ) {
-			$point = $this->find_demo_point( $points, $selected );
+			$point = $this->find_point( $points, $selected );
 			if ( $point instanceof PickupPoint ) {
 				echo $this->renderer->render( $point );
 			}
@@ -94,7 +92,7 @@ final class CheckoutDeliveryTypeSelector {
 			return;
 		}
 
-		$point = $this->find_demo_point( $this->points_for_checkout( $carrier ), $code );
+		$point = $this->find_point( $this->points_for_checkout( $carrier ), $code );
 		if ( ! $point instanceof PickupPoint ) {
 			return;
 		}
@@ -117,9 +115,7 @@ final class CheckoutDeliveryTypeSelector {
 	 */
 	private function points_for_checkout( string $carrier_key ): array {
 		$destination = $this->checkout_destination();
-		$points      = $this->repository->search( $carrier_key, $destination->country_code ?: 'RU', $destination->city );
-
-		return array() !== $points ? $points : $this->pickup_provider->get_points( $carrier_key, $destination );
+		return $this->repository->search( $carrier_key, $destination->country_code ?: 'RU', $destination->city );
 	}
 
 	private function checkout_destination(): Address {
@@ -150,7 +146,7 @@ final class CheckoutDeliveryTypeSelector {
 	/**
 	 * @param array<int,PickupPoint> $points
 	 */
-	private function find_demo_point( array $points, string $code ): ?PickupPoint {
+	private function find_point( array $points, string $code ): ?PickupPoint {
 		foreach ( $points as $point ) {
 			if ( $point->code === $code ) {
 				return $point;

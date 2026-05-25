@@ -141,9 +141,9 @@ if ( ! function_exists( 'WC' ) ) {
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
+require_once dirname( __DIR__ ) . '/fixtures/TestDemoCarrier.php';
 
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
-use WallsShop\WDC\Carriers\Runtime\DemoCarrier;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
@@ -221,7 +221,7 @@ function wc_checkout_smoke_package( string $country = 'RU' ): array {
 function wc_checkout_smoke_orchestrator(): CheckoutOrchestrator {
 	$logger   = new CheckoutLogger();
 	$registry = new CarrierRegistry();
-	$registry->register( new DemoCarrier() );
+	$registry->register( new TestDemoCarrier() );
 
 	return new CheckoutOrchestrator(
 		$registry,
@@ -244,7 +244,7 @@ wc_checkout_smoke_assert( count( $request->package->items ) === 1, 'Package mapp
 
 $orchestrator = wc_checkout_smoke_orchestrator();
 $result       = $orchestrator->calculate( $request );
-wc_checkout_smoke_assert( count( $result->rates ) >= 2, 'DemoCarrier must return checkout rates.' );
+wc_checkout_smoke_assert( count( $result->rates ) >= 2, 'TestDemoCarrier must return checkout rates.' );
 
 $promo = new Rule( null, 'Smoke promo -500', true, 10, 'rate', 'demo', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 500, RuleOperationBases::RUBLES, true, false );
 $result = $orchestrator->calculate( $request, array( $promo ), RateSorter::CHEAPEST, false );

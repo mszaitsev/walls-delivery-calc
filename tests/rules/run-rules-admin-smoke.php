@@ -260,21 +260,21 @@ function rules_admin_context(): RuleEvaluationContext {
 $wpdb = new wpdb();
 $repository = new RuleRepository( $wpdb );
 
-$legacy_id = $repository->save_rule( rules_admin_rule( 'Legacy empty target', 10, true, '', 'legacy' ) );
-$saved = $repository->get_rule( $legacy_id );
-rules_admin_smoke_assert( $saved instanceof Rule && 'default' === $saved->target_type && '' === $saved->target_value, 'Legacy empty target_type must normalize to default.' );
-
+$first_default_id = $repository->save_rule( rules_admin_rule( 'Default first', 10, true ) );
 $default_id = $repository->save_rule( rules_admin_rule( 'Default enabled', 20, true ) );
+$saved = $repository->get_rule( $first_default_id );
+rules_admin_smoke_assert( $saved instanceof Rule && 'default' === $saved->target_type && '' === $saved->target_value, 'Default rules must persist current target fields.' );
+
 $disabled_id = $repository->save_rule( rules_admin_rule( 'Default disabled', 30, false ) );
 $carrier_id = $repository->save_rule( rules_admin_rule( 'Carrier rule', 5, true, 'carrier', 'demo' ) );
 
 $default_rules = $repository->get_default_rules();
 rules_admin_smoke_assert( 2 === count( $default_rules ), 'get_default_rules must return only enabled default rules.' );
-rules_admin_smoke_assert( array( $legacy_id, $default_id ) === array_map( static fn ( Rule $rule ): ?int => $rule->id, $default_rules ), 'Default rules must be ordered by table order.' );
+rules_admin_smoke_assert( array( $first_default_id, $default_id ) === array_map( static fn ( Rule $rule ): ?int => $rule->id, $default_rules ), 'Default rules must be ordered by table order.' );
 
-$repository->reorder_default_rules( array( $default_id, $legacy_id, $disabled_id ) );
+$repository->reorder_default_rules( array( $default_id, $first_default_id, $disabled_id ) );
 $default_rules = $repository->get_default_rules();
-rules_admin_smoke_assert( array( $default_id, $legacy_id ) === array_map( static fn ( Rule $rule ): ?int => $rule->id, $default_rules ), 'Drag-sort ordering must persist for enabled default rules.' );
+rules_admin_smoke_assert( array( $default_id, $first_default_id ) === array_map( static fn ( Rule $rule ): ?int => $rule->id, $default_rules ), 'Drag-sort ordering must persist for enabled default rules.' );
 
 $all_default_rules = $repository->get_all_default_rules();
 rules_admin_smoke_assert( 3 === count( $all_default_rules ), 'get_all_default_rules must include disabled default rules.' );
@@ -314,7 +314,7 @@ $repository->save_rule( Rule::from_array( $toggle_data ) );
 rules_admin_smoke_assert( true === $repository->get_rule( $disabled_id )?->enabled, 'Toggle must change enabled state.' );
 
 $move_a = $repository->get_rule( $default_id );
-$move_b = $repository->get_rule( $legacy_id );
+$move_b = $repository->get_rule( $first_default_id );
 rules_admin_smoke_assert( $move_a instanceof Rule && $move_b instanceof Rule, 'Move fixture rules must exist.' );
 $a = $move_a->to_array();
 $b = $move_b->to_array();
@@ -448,7 +448,7 @@ $logic_rule_id = $repository->save_rule(
 $logic_rule = $repository->get_rule( $logic_rule_id );
 rules_admin_smoke_assert( $logic_rule instanceof Rule && array( 1 => 'and', 2 => 'or', 3 => 'and' ) === $logic_rule->condition_group_logic, 'Rule must store condition_group_logic.' );
 rules_admin_smoke_assert( $logic_rule instanceof Rule && 'condition_1_and_2_or_3' === $logic_rule->condition_group_expression, 'Rule must store condition_group_expression.' );
-rules_admin_smoke_assert( Rule::DEFAULT_GROUP_EXPRESSION === Rule::from_array( array( 'name' => 'Default expression' ) )->condition_group_expression, 'Default condition_group_expression must preserve legacy OR behavior.' );
+rules_admin_smoke_assert( Rule::DEFAULT_GROUP_EXPRESSION === Rule::from_array( array( 'name' => 'Default expression' ) )->condition_group_expression, 'Default condition_group_expression must preserve default OR behavior.' );
 rules_admin_smoke_assert( Rule::DEFAULT_GROUP_EXPRESSION === Rule::normalized_group_expression( 'invalid' ), 'Invalid condition_group_expression must normalize to default.' );
 
 $comment_rule_id = $repository->save_rule(
@@ -537,8 +537,5 @@ rules_admin_smoke_assert( str_contains( $js_source, 'data-condition-template' ) 
 rules_admin_smoke_assert( str_contains( $js_source, "action.value === 'add_comment'" ) && str_contains( $js_source, "operationType.value = 'equals'" ), 'JS must switch add_comment to equals-only comment mode.' );
 rules_admin_smoke_assert( str_contains( $js_source, 'Введите FIAS ID населенного пункта' ) || str_contains( $admin_page_source, 'Введите FIAS ID населенного пункта' ), 'UI must use FIAS ID placeholder for city.' );
 rules_admin_smoke_assert( ! str_contains( $js_source, 'Начните вводить населенный пункт' ), 'UI must not contain location autocomplete by name.' );
-
-$legacy_files = shell_exec( 'git diff --name-only -- includes' );
-rules_admin_smoke_assert( '' === trim( (string) $legacy_files ), 'Legacy includes/* must remain unchanged.' );
 
 echo "Rules admin smoke test passed.\n";

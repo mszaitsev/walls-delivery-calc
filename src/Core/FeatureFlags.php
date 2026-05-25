@@ -8,7 +8,6 @@ defined( 'ABSPATH' ) || exit;
 final class FeatureFlags {
 	/** @var array<string, bool> */
 	private array $flags = array(
-		'legacy_shipping_enabled'     => true,
 		'new_core_enabled'            => true,
 		'new_checkout_flow_enabled'   => false,
 		'new_carriers_enabled'        => false,

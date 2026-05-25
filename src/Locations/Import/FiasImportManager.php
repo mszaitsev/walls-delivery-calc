@@ -35,7 +35,10 @@ final class FiasImportManager {
 	}
 
 	public function import_prepared_dataset( ?string $file = null, int $batch_size = 100 ): int {
-		$file = $file ?? $this->environment->plugin_dir() . 'database/demo/fias-prepared-sample.json';
+		if ( null === $file || '' === trim( $file ) ) {
+			throw new RuntimeException( 'Prepared FIAS JSON file path is required.' );
+		}
+
 		if ( ! is_readable( $file ) ) {
 			throw new RuntimeException( 'Prepared FIAS JSON file is not readable.' );
 		}
@@ -146,7 +149,7 @@ final class FiasImportManager {
 		}
 
 		$fallback = trim( (string) $fallback );
-		return '' !== $fallback ? 'legacy-' . $fallback : '';
+		return '' !== $fallback ? 'gar-' . $fallback : '';
 	}
 
 	private function day(): int {

@@ -1,5 +1,7 @@
 # Архитектурный аудит Walls Delivery Calc
 
+Archived/not-runtime as of 0.20.0: this document describes the pre-removal legacy `includes/*` architecture for historical context only. Current runtime is `src/` only.
+
 ## Краткое резюме
 
 Текущий плагин `walls-delivery-calc` - небольшой процедурно-классовый WooCommerce-плагин без Composer, namespaces и автозагрузчика. Основной реализованный сценарий: один WooCommerce shipping method `wdc_dynamic_delivery`, который рассчитывает международную доставку Почтой России через публичный tariff API, добавляет ставку в classic checkout и сохраняет диагностические данные расчета в meta заказа.

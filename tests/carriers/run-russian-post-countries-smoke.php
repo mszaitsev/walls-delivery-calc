@@ -278,7 +278,4 @@ country_smoke_assert( str_contains( $html, 'Источник сопоставл�
 country_smoke_assert( ! str_contains( $html, 'ISO2 Почты' ), 'Admin table has no Russian Post ISO2 column.' );
 country_smoke_assert( str_contains( $html, 'wdc-rp-country-enabled' ) && str_contains( $html, 'wdc-rp-country-disabled' ) && str_contains( $html, '✅' ) && str_contains( $html, '❌' ), 'WooCommerce code column shows enabled/disabled marker.' );
 
-$legacy_diff = function_exists( 'shell_exec' ) ? trim( (string) shell_exec( 'git diff --name-only -- includes' ) ) : '';
-country_smoke_assert( '' === $legacy_diff, 'legacy includes/* must not be modified.' );
-
 echo "Russian Post countries smoke test passed.\n";
