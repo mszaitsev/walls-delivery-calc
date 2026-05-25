@@ -3,9 +3,14 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
+use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
+
 defined( 'ABSPATH' ) || exit;
 
 final class OrderShippingMetaPersister {
+	public const CALCULATION_META_KEY = '_wdc_delivery_calculation_data';
+
 	public function __construct(
 		private CheckoutSessionManager $session_manager
 	) {
@@ -49,7 +54,7 @@ final class OrderShippingMetaPersister {
 			'_wdc_platform_rules_source'             => $rate['rules_source'] ?? 'none',
 			'_wdc_platform_round_up_applied'         => ! empty( $rate['round_up_applied'] ) ? 1 : 0,
 			'_wdc_platform_minimum_price_applied'    => ! empty( $rate['minimum_price_applied'] ) ? 1 : 0,
-			'_wdc_platform_rate_meta'                => $rate['rate_meta'] ?? array(),
+			'_wdc_platform_rate_meta'                => $this->sanitized_rate_meta( is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array() ),
 		);
 
 		$address = $this->session_manager->normalized_address_result();
@@ -86,6 +91,11 @@ final class OrderShippingMetaPersister {
 			$this->set_pickup_shipping_address( $order, $pickup, $address );
 		}
 
+		$calculation_data = $this->delivery_calculation_data( $rate, $map );
+		if ( array() !== $calculation_data ) {
+			$map[ self::CALCULATION_META_KEY ] = $calculation_data;
+		}
+
 		foreach ( $map as $key => $value ) {
 			$order->update_meta_data( $key, $value );
 		}
@@ -110,6 +120,11 @@ final class OrderShippingMetaPersister {
 		}
 
 		$delivery_type = (string) ( $rate['delivery_type'] ?? '' );
+		if ( $this->is_russian_post_international_rate( $rate ) ) {
+			$item->add_meta_data( 'Способ доставки', 'международная доставка Почтой России', true );
+			return;
+		}
+
 		$rows          = array(
 			'Перевозчик'       => (string) ( $rate['carrier_key'] ?? '' ),
 			'Способ доставки'  => (string) ( $rate['rate_id'] ?? '' ),
@@ -137,6 +152,226 @@ final class OrderShippingMetaPersister {
 
 			$item->add_meta_data( $label, $value, true );
 		}
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $order_meta
+	 * @return array<string,mixed>
+	 */
+	private function delivery_calculation_data( array $rate, array $order_meta ): array {
+		$rate_meta   = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
+		$destination = $this->calculation_destination_data( $rate_meta, $order_meta );
+		$api         = $this->calculation_api_data( $rate_meta );
+		$result      = $this->calculation_result_data( $rate, $rate_meta );
+
+		return array_filter(
+			array(
+				'carrier_key'   => (string) ( $rate['carrier_key'] ?? '' ),
+				'service_key'   => (string) ( $rate['service_key'] ?? '' ),
+				'service_title' => (string) ( $rate['service_title'] ?? '' ),
+				'rate_id'       => (string) ( $rate['rate_id'] ?? '' ),
+				'delivery_type' => (string) ( $rate['delivery_type'] ?? '' ),
+				'pickup'        => $this->calculation_pickup_data( $rate ),
+				'destination'   => $destination,
+				'package'       => $this->calculation_package_data( $rate_meta ),
+				'api'           => $api,
+				'rules'         => $this->calculation_rules_data( $rate, $rate_meta, $api, $result ),
+				'result'        => $result,
+			),
+			static fn ( mixed $value ): bool => array() !== $value && '' !== $value
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @return array<string,mixed>
+	 */
+	private function calculation_pickup_data( array $rate ): array {
+		if ( 'pickup' !== (string) ( $rate['delivery_type'] ?? '' ) ) {
+			return array();
+		}
+
+		$pickup = $this->session_manager->pickup_selection();
+		if ( ! $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) ) ) {
+			return array();
+		}
+
+		return array(
+			'point_code'    => (string) ( $pickup['point_code'] ?? '' ),
+			'point_name'    => (string) ( $pickup['point_name'] ?? '' ),
+			'point_address' => (string) ( $pickup['point_address'] ?? '' ),
+			'point_raw'     => $pickup,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $rate_meta
+	 * @param array<string,mixed> $order_meta
+	 * @return array<string,mixed>
+	 */
+	private function calculation_destination_data( array $rate_meta, array $order_meta ): array {
+		$country = is_array( $rate_meta['country_mapping'] ?? null ) ? $rate_meta['country_mapping'] : array();
+
+		return array_filter(
+			array(
+				'country_code'      => (string) ( $country['country_code'] ?? '' ),
+				'country_name'      => (string) ( $country['country_name'] ?? '' ),
+				'city_display_name' => (string) ( $order_meta['_wdc_platform_city_display_name'] ?? '' ),
+				'fias_id'           => (string) ( $order_meta['_wdc_platform_fias_id'] ?? $order_meta['_wdc_platform_city_fias_id'] ?? '' ),
+			),
+			static fn ( mixed $value ): bool => '' !== $value
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $rate_meta
+	 * @return array<string,mixed>
+	 */
+	private function calculation_package_data( array $rate_meta ): array {
+		$package      = is_array( $rate_meta['package'] ?? null ) ? $rate_meta['package'] : array();
+		$final_weight = (int) ( $rate_meta['package_weight_with_packaging_g'] ?? $package['total_weight_g'] ?? $package['weight_g'] ?? 0 );
+
+		return array(
+			'products_weight_g'          => (int) ( $rate_meta['products_weight_g'] ?? $package['weight_g'] ?? $final_weight ),
+			'packaging_weight_g'         => (int) ( $rate_meta['packaging_weight_g'] ?? 0 ),
+			'final_weight_g'             => $final_weight,
+			'include_packaging_weight'   => ! empty( $rate_meta['include_packaging_weight'] ),
+			'packaging_weight_mode'      => (string) ( $rate_meta['packaging_weight_mode'] ?? '' ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $rate_meta
+	 * @return array<string,mixed>
+	 */
+	private function calculation_api_data( array $rate_meta ): array {
+		$country    = is_array( $rate_meta['country_mapping'] ?? null ) ? $rate_meta['country_mapping'] : array();
+		$api_result = is_array( $rate_meta['api_result'] ?? null ) ? $rate_meta['api_result'] : array();
+
+		return array_filter(
+			array(
+				'api_base_price_rub'      => $this->nullable_float( $rate_meta['api_base_price_rub'] ?? $rate_meta['api_price_with_vat_rub'] ?? null ),
+				'api_price_has_vat'       => array_key_exists( 'api_price_has_vat', $rate_meta ) ? (bool) $rate_meta['api_price_has_vat'] : null,
+				'api_price_with_vat_rub'  => $this->nullable_float( $rate_meta['api_price_with_vat_rub'] ?? null ),
+				'vat_rate'                => $this->nullable_float( $rate_meta['vat_rate'] ?? null ),
+				'request_params'          => is_array( $rate_meta['request_params'] ?? null ) ? $this->sanitize_request_params( $rate_meta['request_params'] ) : array(),
+				'cache_hit'               => ! empty( $rate_meta['cache_hit'] ),
+				'http_code'               => (int) ( $rate_meta['http_code'] ?? $api_result['http_code'] ?? 0 ),
+				'carrier_country_id'      => (string) ( $country['carrier_country_id'] ?? '' ),
+				'country_name'            => (string) ( $country['country_name'] ?? '' ),
+			),
+			static fn ( mixed $value ): bool => null !== $value && array() !== $value && '' !== $value && 0 !== $value
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $rate_meta
+	 * @return array<string,mixed>
+	 */
+	private function calculation_result_data( array $rate, array $rate_meta ): array {
+		$result = array(
+			'final_price_rub'       => $this->nullable_float( $rate['cost'] ?? null ) ?? 0.0,
+			'round_up_applied'      => ! empty( $rate['round_up_applied'] ) || ! empty( $rate_meta['round_up_applied'] ),
+			'minimum_price_applied' => ! empty( $rate['minimum_price_applied'] ) || ! empty( $rate_meta['minimum_price_applied'] ),
+			'fallback'              => ! empty( $rate_meta['fallback'] ) || ! empty( $rate['fallback_used'] ),
+			'fallback_reason'       => (string) ( $rate_meta['fallback_reason'] ?? '' ),
+			'fallback_text'         => (string) ( $rate_meta['fallback_text'] ?? '' ),
+		);
+
+		$delivery_days = is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array();
+		$min_days      = $delivery_days['min_days'] ?? $delivery_days['min'] ?? null;
+		$max_days      = $delivery_days['max_days'] ?? $delivery_days['max'] ?? null;
+		if ( is_numeric( $min_days ) && (int) $min_days > 0 ) {
+			$result['final_delivery_days_min'] = (int) $min_days;
+		}
+		if ( is_numeric( $max_days ) && (int) $max_days > 0 ) {
+			$result['final_delivery_days_max'] = (int) $max_days;
+		}
+
+		return array_filter( $result, static fn ( mixed $value ): bool => '' !== $value && null !== $value );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $rate_meta
+	 * @param array<string,mixed> $api
+	 * @param array<string,mixed> $result
+	 * @return array<string,mixed>
+	 */
+	private function calculation_rules_data( array $rate, array $rate_meta, array $api, array $result ): array {
+		$source      = (string) ( $rate['rules_source'] ?? $rate_meta['rules_source'] ?? 'none' );
+		$is_fallback = ! empty( $result['fallback'] ) || ! empty( $rate_meta['terminal_fallback'] );
+		if ( $is_fallback ) {
+			return array(
+				'rules_source'          => 'skipped_fallback' === $source ? $source : 'none',
+				'applied_rules'         => array(),
+				'formula_visualization' => array(),
+			);
+		}
+
+		$audit = is_array( $rate_meta['rules_audit'] ?? null ) ? array_values( $rate_meta['rules_audit'] ) : array();
+		$base  = $this->nullable_float( $api['api_base_price_rub'] ?? null ) ?? $this->nullable_float( $rate['cost'] ?? null ) ?? 0.0;
+		$final = $this->nullable_float( $result['final_price_rub'] ?? null ) ?? $base;
+
+		return array(
+			'rules_source'          => $source,
+			'applied_rules'         => $audit,
+			'formula_visualization' => ( new RuleFormulaFormatter() )->lines(
+				$base,
+				$audit,
+				$final,
+				array(
+					'round_up_applied'      => ! empty( $result['round_up_applied'] ),
+					'minimum_price_applied' => ! empty( $result['minimum_price_applied'] ),
+				)
+			),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $params
+	 * @return array<string,scalar>
+	 */
+	private function sanitize_request_params( array $params ): array {
+		$sanitized = array();
+		foreach ( $params as $key => $value ) {
+			if ( is_scalar( $value ) ) {
+				$sanitized[ (string) $key ] = $value;
+			}
+		}
+
+		return $sanitized;
+	}
+
+	/**
+	 * @param array<string,mixed> $meta
+	 * @return array<string,mixed>
+	 */
+	private function sanitized_rate_meta( array $meta ): array {
+		unset( $meta['raw_response'] );
+		if ( is_array( $meta['api_result'] ?? null ) ) {
+			unset( $meta['api_result']['raw'], $meta['api_result']['parsed_response'], $meta['api_result']['raw_response'] );
+		}
+
+		return $meta;
+	}
+
+	private function nullable_float( mixed $value ): ?float {
+		return is_numeric( $value ) ? (float) $value : null;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function is_russian_post_international_rate( array $rate ): bool {
+		$service_key = (string) ( $rate['service_key'] ?? '' );
+		$rate_id     = (string) ( $rate['rate_id'] ?? '' );
+
+		return RussianPostInternationalCarrier::SERVICE_KEY === $service_key
+			|| RussianPostInternationalCarrier::SERVICE_KEY === $rate_id
+			|| str_starts_with( $rate_id, RussianPostInternationalCarrier::SERVICE_KEY . ':' );
 	}
 
 	/**

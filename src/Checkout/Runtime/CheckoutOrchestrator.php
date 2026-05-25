@@ -120,7 +120,13 @@ final class CheckoutOrchestrator {
 				$processed = $service instanceof DeliveryService && $this->service_manager instanceof DeliveryServiceManager && empty( $applied['rate']->meta['skip_service_post_processing'] )
 					? $this->service_manager->post_process_rate( $applied['rate'], $service )
 					: $applied['rate'];
-				$processed = $this->rate_with_meta( $processed, array( 'rules_source' => $rules_source ) );
+				$processed = $this->rate_with_meta(
+					$processed,
+					array(
+						'rules_source' => $rules_source,
+						'rules_audit'  => $applied['audit'],
+					)
+				);
 				$rates[] = $processed;
 				$audit[] = array(
 					'rate_id' => $rate->rate_id,

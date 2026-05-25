@@ -48,6 +48,12 @@ Russian Post terminal fallback rates carry `fallback=true`, `terminal_fallback=t
 
 As of 0.21.11, Russian Post international keeps `delivery_type=pickup` but does not require a customer-selected pickup point. Its rates carry `no_pickup_selection=true`. Checkout validation and the pickup selector UI both honor that flag: Russian Post passes without a selected pickup point, while other pickup carriers still require one when their rate requires pickup selection.
 
+As of 0.21.12, checkout persists a separate order-level calculation payload in `_wdc_delivery_calculation_data`. This payload is the technical source for support/debug views and contains carrier/service keys, rate id, delivery type, pickup data when selected, destination, package weights, sanitized API data, rule audit/formula, and final result values.
+
+For Russian Post international, standard WooCommerce shipping item meta is intentionally minimal: only `Способ доставки: международная доставка Почтой России` is visible. Technical fields such as `carrier_key`, `service_key`, `rules_source`, `delivery_type`, `no_pickup_selection`, API/package data, and rule audit are hidden from the shipping item and stored in `_wdc_delivery_calculation_data`.
+
+The order admin metabox `Калькулятор доставок` prefers `_wdc_delivery_calculation_data`. For normal Russian Post rates it shows destination country, products/packaging/final API weight, API base price and VAT status, readable rule formula lines, final price, and delivery days only when non-empty. For Russian Post terminal fallback it shows fallback reason/text and final price `0`; rules are not displayed because fallback rates skip rules and service post-processing.
+
 As of version 0.20.0, `CarrierRegistry` registers the real Russian Post international carrier only. The previous demo carrier toggle and demo pickup provider are test fixtures only and are not registered by `Plugin`.
 
 ## Session persistence
@@ -74,6 +80,8 @@ As of version 0.20.0, `CarrierRegistry` registers the real Russian Post internat
 - `_wdc_platform_rate_meta`
 
 Russian Post rate metadata includes sanitized API request/response diagnostics, cache metadata, API base price data, package weight data, country mapping, and fallback reason when fallback is used. Secrets and tokens are not stored in the request params.
+
+`_wdc_platform_*` keys remain for compatibility, but new technical calculation details should be read from `_wdc_delivery_calculation_data`. Raw carrier responses are not copied into that calculation payload; only a sanitized subset such as request params, cache hit, HTTP code, country mapping, API price, package weights, fallback status, and rule audit/formula is saved.
 
 When checkout has an unambiguous local selected location, the order stores only:
 

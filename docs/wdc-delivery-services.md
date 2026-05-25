@@ -1,6 +1,6 @@
 # WDC Delivery Services
 
-Version 0.21.0 adds the permanent delivery-service foundation. Version 0.21.1 adds reusable service-specific rules admin on top of the same storage model. Version 0.21.3 turns the service edit screen into real per-tab administration. Version 0.21.8 adds delivery-type customer comments. Version 0.21.9 makes checkout comments render as separate lines and translates service admin select labels. The model is intentionally table-based, not a single serialized option, so it can grow to API carriers, fixed-rate services, weight-based services, user-created services, service settings, pickup logic, credentials references, statistics, debug data, and history.
+Version 0.21.0 adds the permanent delivery-service foundation. Version 0.21.1 adds reusable service-specific rules admin on top of the same storage model. Version 0.21.3 turns the service edit screen into real per-tab administration. Version 0.21.8 adds delivery-type customer comments. Version 0.21.9 makes checkout comments render as separate lines and translates service admin select labels. Version 0.21.12 moves technical order calculation data into `_wdc_delivery_calculation_data` and keeps Russian Post shipping item meta visually clean. The model is intentionally table-based, not a single serialized option, so it can grow to API carriers, fixed-rate services, weight-based services, user-created services, service settings, pickup logic, credentials references, statistics, debug data, and history.
 
 ## Tables
 
@@ -66,3 +66,9 @@ If a service has no own rules, the tab shows an empty-state message, a link to d
 Service simulation uses only rules from the current service target. It does not automatically mix in default fallback; if the service has no own rules, the simulation reports that own rules are not configured.
 
 For Russian Post the service simulation performs a real service quote first, using destination country, package weight, order total, and calculation date. The screen then shows API/base price, final price after service rules, audit details, source/fallback/cache metadata, and delivery days when available. Default rules page simulation remains a pure rule simulation over the administrator-entered base delivery price and does not call carrier APIs.
+
+## Order Admin Data
+
+Delivery services can save a structured order calculation payload under `_wdc_delivery_calculation_data`. It contains stable technical data for future carrier support: service/carrier ids, rate id, delivery type, pickup selection when applicable, destination, package weights, sanitized API fields, rule audit/formula, final price, fallback state, and delivery days when non-empty.
+
+For `russian_post_worldwide_parcel`, the normal WooCommerce shipping item meta shows only `Способ доставки: международная доставка Почтой России`. The order metabox `Калькулятор доставок` is the admin-facing place for calculation details: destination country, products/packaging/final API weight, API base price, VAT status, readable rules formula, and final result. Terminal fallback rates save fallback reason/text and final price `0`, but do not show rules because fallback bypasses rules and service post-processing.

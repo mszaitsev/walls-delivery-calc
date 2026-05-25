@@ -1,6 +1,6 @@
 # Walls Delivery Calc
 
-Version: 0.21.11.
+Version: 0.21.12.
 
 Walls Delivery Calc is a WooCommerce delivery calculator plugin. The runtime is now `src/` only: the old `includes/*` legacy bootstrap, shipping method, carriers, API clients, settings, helpers, and cache wrappers have been removed.
 
@@ -43,5 +43,7 @@ Version 0.21.3 adds real service edit tabs. Main, availability, calculation, rul
 Version 0.21.4 removes the remaining standalone Russian Post countries admin page surface. The countries admin class is embedded-only and is reachable through the Russian Post delivery service tab.
 
 Version 0.21.5 removes the last dead standalone render branch from the embedded-only Russian Post countries admin.
+
+Version 0.21.12 adds structured order calculation data. The selected delivery calculation is saved to `_wdc_delivery_calculation_data`, and the WooCommerce order metabox `Калькулятор доставок` renders the readable admin view. For Russian Post international, visible shipping item meta is reduced to `Способ доставки: международная доставка Почтой России`; API, package, rules, fallback, and technical service metadata are stored in the hidden calculation payload instead.
 
 Version 0.21.6 moves packaging weight into the new `src/` foundation. Global tiers live on `Правила расчета -> Упаковка` as `packaging_weight_tiers`; services choose whether to include packaging and whether to apply it as `total_weight` or a `WDC_PACKAGING` virtual package item. Russian Post international uses final total weight.

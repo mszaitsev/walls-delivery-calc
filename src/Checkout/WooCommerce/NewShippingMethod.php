@@ -104,7 +104,10 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 					$mapped['meta_data'],
 					array(
 						'rate_id'                  => $rate->rate_id,
+						'label'                    => $mapped['label'],
+						'cost'                     => $mapped['cost'],
 						'planned_delivery_comment' => $rate->planned_delivery_comment,
+						'delivery_days'            => $rate->delivery_days->to_array(),
 						'fallback_used'            => $result->fallback_used,
 						'service_title'            => $rate->service_name,
 						'rules_source'             => (string) ( $rate->meta['rules_source'] ?? 'none' ),

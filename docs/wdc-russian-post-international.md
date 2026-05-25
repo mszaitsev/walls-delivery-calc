@@ -1,6 +1,6 @@
 # WDC Russian Post International Carrier
 
-Version: 0.21.11.
+Version: 0.21.12.
 
 ## Scope
 
@@ -77,6 +77,18 @@ Checkout continues to apply rules after the carrier quote. Runtime resolves serv
 For normal rates, `add_comment` rule text is merged into rate comments and persisted through the existing rate/session/order meta flow. Checkout renders each service/rule comment as its own line. `disable_rate` marks the rate unavailable, so it is hidden before final checkout rates are returned. Terminal fallback rates set `skip_rules=true`, so rule price changes and rule comments do not apply.
 
 The Russian Post service rules simulation calls the carrier first, obtains the real API/base quote, then applies service rules only. It shows base price, final price, audit, fallback/cache metadata, and source details. It does not apply default-rule fallback.
+
+## Order Calculation Data
+
+As of 0.21.12, Russian Post international keeps the WooCommerce shipping item meta visually clean. The only visible shipping-item row is:
+
+- `Способ доставки: международная доставка Почтой России`
+
+Technical values such as `carrier_key`, `service_key`, `rate_id`, `delivery_type`, `rules_source`, `round_up_applied`, `no_pickup_selection`, package data, API diagnostics, and rule audit are stored in the order-level `_wdc_delivery_calculation_data` structure instead of being shown as standard shipping method meta.
+
+The order admin metabox `Калькулятор доставок` reads this structure and shows the customer-support view: service title, destination country, product weight, packaging weight, final API weight, API base price with VAT information, rule formula, final price, and delivery days only when the carrier actually provides them. Russian Post tariff API currently does not return delivery days, so empty/zero delivery time rows are not rendered.
+
+Terminal fallback rates are also saved in `_wdc_delivery_calculation_data`. They keep final price `0`, store `fallback_reason` and `fallback_text`, and do not store a rule formula because fallback bypasses rules and service post-processing.
 # Russian Post International
 
 Russian Post international is now the first delivery service in the delivery-services foundation:
