@@ -125,6 +125,7 @@ final class RussianPostCountryMappingRepository {
 		}
 
 		$mode = RussianPostCountryMapping::normalize_mode( $mode );
+		$comment = RussianPostCountryMapping::MODE_AUTO === $mode ? '' : $comment;
 		$this->wpdb->update(
 			$this->table(),
 			array(
@@ -135,6 +136,41 @@ final class RussianPostCountryMappingRepository {
 			),
 			array( 'wc_country_code' => strtoupper( $wcCode ) ),
 			array( '%s', '%s', '%d', '%s' ),
+			array( '%s' )
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	public function set_manual_mapping( string $wcCode, array $data, string $comment = '' ): void {
+		$mapping = $this->find_by_wc_country_code( $wcCode );
+		if ( ! $mapping instanceof RussianPostCountryMapping ) {
+			return;
+		}
+
+		$has_parcel = ! empty( $data['has_parcel'] );
+		$parcel_block = ! empty( $data['parcel_block'] );
+		$api_available = $has_parcel;
+		$this->wpdb->update(
+			$this->table(),
+			array(
+				'rp_country_id'     => sanitize_text_field( (string) ( $data['rp_country_id'] ?? '' ) ),
+				'rp_country_name'   => sanitize_text_field( (string) ( $data['rp_country_name'] ?? '' ) ),
+				'rp_iso2'           => '',
+				'has_parcel'        => $has_parcel ? 1 : 0,
+				'parcel_block'      => $parcel_block ? 1 : 0,
+				'api_available'     => $api_available ? 1 : 0,
+				'matched'           => 1,
+				'match_source'      => 'manual',
+				'effective_enabled' => $this->effective_enabled( $mapping->manual_mode, true, $api_available, $has_parcel, $parcel_block ) ? 1 : 0,
+				'last_checked_at'   => $this->now(),
+				'manual_comment'    => sanitize_text_field( $comment ),
+				'raw_json'          => $this->encode_raw( $data['raw'] ?? array() ),
+				'updated_at'        => $this->now(),
+			),
+			array( 'wc_country_code' => strtoupper( $wcCode ) ),
+			array( '%s', '%s', '%s', '%d', '%d', '%d', '%d', '%s', '%d', '%s', '%s', '%s', '%s' ),
 			array( '%s' )
 		);
 	}
@@ -180,6 +216,7 @@ final class RussianPostCountryMappingRepository {
 			'disabled'        => 'effective_enabled = 0',
 			'matched'         => 'matched = 1',
 			'unmatched'       => 'matched = 0',
+			'manual_mapping'  => "match_source = 'manual'",
 			'manual_enabled'  => "manual_mode = 'enabled'",
 			'manual_disabled' => "manual_mode = 'disabled'",
 			'auto'            => "manual_mode = 'auto'",
@@ -189,7 +226,7 @@ final class RussianPostCountryMappingRepository {
 		}
 		if ( '' !== trim( $search ) ) {
 			$like = '%' . $this->wpdb->esc_like( trim( $search ) ) . '%';
-			$parts[] = $this->wpdb->prepare( '(wc_country_code LIKE %s OR wc_country_name LIKE %s OR rp_country_name LIKE %s OR rp_iso2 LIKE %s)', $like, $like, $like, $like );
+			$parts[] = $this->wpdb->prepare( '(wc_country_code LIKE %s OR wc_country_name LIKE %s OR rp_country_name LIKE %s OR rp_country_id LIKE %s)', $like, $like, $like, $like );
 		}
 
 		return array() === $parts ? '' : 'WHERE ' . implode( ' AND ', $parts );

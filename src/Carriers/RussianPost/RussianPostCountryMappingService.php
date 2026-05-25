@@ -29,6 +29,7 @@ final class RussianPostCountryMappingService {
 			'manual_enabled'   => 0,
 			'manual_disabled'  => 0,
 			'sample_api_keys'  => array(),
+			'unmatched_api_countries' => array(),
 			'errors'           => array(),
 		);
 		$this->logger->info( 'Russian Post country mapping refresh started.' );
@@ -51,6 +52,7 @@ final class RussianPostCountryMappingService {
 		}
 		$wc_countries = $this->wc_countries();
 		$stats['wc_count'] = count( $wc_countries );
+		$used_api_keys = array();
 
 		foreach ( $wc_countries as $wc_code => $wc_name ) {
 			$wc_code = strtoupper( (string) $wc_code );
@@ -62,6 +64,10 @@ final class RussianPostCountryMappingService {
 			$match = $this->match_country( $wc_code, (string) $wc_name, $rp_by_name );
 			$rp = $match['row'];
 			$match_source = $match['source'];
+			if ( ! is_array( $rp ) && $existing instanceof RussianPostCountryMapping && 'manual' === $existing->match_source && $existing->matched ) {
+				$rp = $existing->raw;
+				$match_source = 'manual';
+			}
 			$has_parcel = is_array( $rp ) && isset( $rp['parcel'] ) && is_array( $rp['parcel'] );
 			$parcel_block = $has_parcel && ( 1 === ( $rp['parcel']['block'] ?? null ) || '1' === ( $rp['parcel']['block'] ?? null ) );
 			$matched = is_array( $rp );
@@ -91,6 +97,7 @@ final class RussianPostCountryMappingService {
 
 			if ( $matched ) {
 				++$stats['matched'];
+				$used_api_keys[] = $this->api_row_key( $rp );
 			} else {
 				++$stats['skipped'];
 			}
@@ -104,6 +111,7 @@ final class RussianPostCountryMappingService {
 				++$stats['manual_disabled'];
 			}
 		}
+		$stats['unmatched_api_countries'] = $this->unmatched_api_payload( $items, $used_api_keys );
 
 		$this->logger->info( 'Russian Post country mapping refresh completed.', $stats );
 
@@ -167,6 +175,57 @@ final class RussianPostCountryMappingService {
 	}
 
 	/**
+	 * @return array<int,array<string,string>>
+	 */
+	public function manual_mapping_options(): array {
+		$options = array();
+		foreach ( $this->repository->all() as $mapping ) {
+			if ( $mapping->matched || 'manual' === $mapping->match_source ) {
+				continue;
+			}
+			$options[] = array(
+				'wc_country_code' => $mapping->wc_country_code,
+				'wc_country_name' => $mapping->wc_country_name,
+			);
+		}
+
+		return $options;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $payload
+	 * @param array<string,string>          $selections
+	 * @return array<string,mixed>
+	 */
+	public function apply_manual_mappings( array $payload, array $selections ): array {
+		$by_key = array();
+		foreach ( $payload as $row ) {
+			if ( is_array( $row ) && isset( $row['key'] ) ) {
+				$by_key[ (string) $row['key'] ] = $row;
+			}
+		}
+
+		$comment = 'сопоставлено вручную ' . ( function_exists( 'wp_date' ) ? wp_date( 'd.m.Y' ) : gmdate( 'd.m.Y' ) );
+		$updated = 0;
+		$used_wc_codes = array();
+		foreach ( $selections as $key => $wc_code ) {
+			$wc_code = strtoupper( trim( (string) $wc_code ) );
+			if ( '' === $wc_code || isset( $used_wc_codes[ $wc_code ] ) || ! isset( $by_key[ $key ] ) ) {
+				continue;
+			}
+			$mapping = $this->repository->find_by_wc_country_code( $wc_code );
+			if ( ! $mapping instanceof RussianPostCountryMapping || $mapping->matched || 'manual' === $mapping->match_source ) {
+				continue;
+			}
+			$this->repository->set_manual_mapping( $wc_code, $by_key[ $key ], $comment );
+			$used_wc_codes[ $wc_code ] = true;
+			++$updated;
+		}
+
+		return array( 'success' => true, 'updated' => $updated, 'manual_comment' => $comment );
+	}
+
+	/**
 	 * @param array<string,mixed> $raw
 	 * @return array<int,mixed>
 	 */
@@ -199,6 +258,48 @@ final class RussianPostCountryMappingService {
 	}
 
 	/**
+	 * @param array<int,mixed>  $items
+	 * @param array<int,string> $used_keys
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function unmatched_api_payload( array $items, array $used_keys ): array {
+		$used = array_fill_keys( array_filter( $used_keys ), true );
+		$payload = array();
+		foreach ( $items as $item ) {
+			if ( ! is_array( $item ) || $this->is_russia_row( $item ) ) {
+				continue;
+			}
+			$key = $this->api_row_key( $item );
+			if ( '' === $key || isset( $used[ $key ] ) ) {
+				continue;
+			}
+			$payload[] = $this->manual_payload_row( $item );
+		}
+
+		return $payload;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,mixed>
+	 */
+	private function manual_payload_row( array $row ): array {
+		$has_parcel = isset( $row['parcel'] ) && is_array( $row['parcel'] );
+		$parcel_block = $has_parcel && ( 1 === ( $row['parcel']['block'] ?? null ) || '1' === ( $row['parcel']['block'] ?? null ) );
+		$id = $this->first_scalar( $row, array( 'id', 'Id' ) );
+		$name = $this->first_scalar( $row, array( 'name', 'Name', 'country_name', 'countryName', 'fullname', 'fullName', 'nameRu', 'nameRus', 'russianName' ) );
+
+		return array(
+			'key'             => sha1( $this->api_row_key( $row ) ),
+			'rp_country_id'   => $id,
+			'rp_country_name' => $name,
+			'has_parcel'      => $has_parcel,
+			'parcel_block'    => $parcel_block,
+			'raw'             => $row,
+		);
+	}
+
+	/**
 	 * @param array<string,array<string,mixed>> $rp_by_name
 	 * @return array{row:?array<string,mixed>,source:string}
 	 */
@@ -216,6 +317,30 @@ final class RussianPostCountryMappingService {
 		}
 
 		return array( 'row' => null, 'source' => 'none' );
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function api_row_key( array $row ): string {
+		$id = $this->first_scalar( $row, array( 'id', 'Id' ) );
+		if ( '' !== $id ) {
+			return 'id:' . $id;
+		}
+
+		$name = $this->first_scalar( $row, array( 'name', 'Name', 'country_name', 'countryName', 'fullname', 'fullName', 'nameRu', 'nameRus', 'russianName' ) );
+
+		return '' === $name ? '' : 'name:' . $this->normalize_key( $name );
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function is_russia_row( array $row ): bool {
+		$id = $this->first_scalar( $row, array( 'id', 'Id' ) );
+		$name = $this->normalize_key( $this->first_scalar( $row, array( 'name', 'Name', 'country_name', 'countryName', 'fullname', 'fullName', 'nameRu', 'nameRus', 'russianName' ) ) );
+
+		return '643' === $id || 'РОССИЯ' === $name || 'РОССИЙСКАЯ ФЕДЕРАЦИЯ' === $name;
 	}
 
 	/**
@@ -324,7 +449,7 @@ final class RussianPostCountryMappingService {
 	private function country_index(): array {
 		$index = array();
 		foreach ( $this->repository->all() as $mapping ) {
-			foreach ( array( $mapping->wc_country_code, $mapping->rp_iso2, $mapping->wc_country_name, $mapping->rp_country_name ) as $value ) {
+			foreach ( array( $mapping->wc_country_code, $mapping->wc_country_name, $mapping->rp_country_name, $mapping->rp_country_id ) as $value ) {
 				$key = $this->normalize_key( $value );
 				if ( '' !== $key && ! isset( $index[ $key ] ) ) {
 					$index[ $key ] = $mapping;

@@ -1,6 +1,6 @@
 # WDC Russian Post International Carrier
 
-Version: 0.19.3.
+Version: 0.19.4.
 
 ## Scope
 
@@ -66,6 +66,8 @@ Debug logs include endpoint, sanitized params, raw response, parsed response, ca
 As of 0.19.2, the country directory uses the persistent `wdc_russian_post_country_mappings` table. Runtime returns only rows with `effective_enabled=1`; RU is always excluded. The Russian Post dictionary endpoint is used by the admin refresh flow and optional lazy refresh when `auto_refresh_countries_if_empty` is enabled.
 
 As of 0.19.3, Russian Post country refresh matches API rows by normalized country name because the dictionary can omit ISO2 and return only `id`, `name`, and `parcel`. Known WooCommerce/Russian Post naming differences are handled by an alias map, and `rp_iso2` may be empty at runtime.
+
+As of 0.19.4, refresh keeps the persistent mapping table WooCommerce-centric. Unused Russian Post API countries are returned only to the admin manual-mapping UI after refresh; they are not stored as RP-only rows and are invisible to checkout runtime until an admin maps one to a WooCommerce country.
 
 Tariff API results are cached until the end of the current WordPress timezone day. Cache keys include carrier, service, country, request params, and weight.
 

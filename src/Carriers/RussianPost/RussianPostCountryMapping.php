@@ -95,6 +95,6 @@ final class RussianPostCountryMapping {
 	}
 
 	public static function normalize_match_source( string $source ): string {
-		return in_array( $source, array( 'name', 'alias', 'iso2', 'none' ), true ) ? $source : 'none';
+		return in_array( $source, array( 'name', 'alias', 'manual', 'none' ), true ) ? $source : 'none';
 	}
 }

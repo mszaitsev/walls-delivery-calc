@@ -18,6 +18,9 @@ final class RussianPostCountriesAdminPage {
 	/** @var array<string,mixed> */
 	private array $last_preview = array();
 
+	/** @var array<int,array<string,mixed>> */
+	private array $last_manual_mapping = array();
+
 	public function __construct(
 		private RussianPostCountryMappingRepository $repository,
 		private RussianPostCountryMappingService $service
@@ -55,6 +58,7 @@ final class RussianPostCountriesAdminPage {
 			</form>
 
 			<?php $this->render_stats( $stats ); ?>
+			<?php $this->render_manual_mapping(); ?>
 			<?php $this->render_bulk_forms(); ?>
 			<?php $this->render_preview(); ?>
 			<?php $this->render_filters( $filter, $search, $per_page ); ?>
@@ -104,6 +108,14 @@ final class RussianPostCountriesAdminPage {
 				width: 360px;
 				max-width: 100%;
 			}
+			.wdc-rp-country-enabled {
+				color: #0a7f2e;
+				font-weight: 600;
+			}
+			.wdc-rp-country-disabled {
+				color: #b32d2e;
+				font-weight: 600;
+			}
 		</style>
 		<h2><?php echo esc_html__( 'Bulk-вставка списков', 'walls-delivery-calc' ); ?></h2>
 		<form method="post">
@@ -123,6 +135,39 @@ final class RussianPostCountriesAdminPage {
 			<button class="button" type="submit"><?php echo esc_html__( 'Проверить изменения', 'walls-delivery-calc' ); ?></button>
 		</form>
 		<?php
+	}
+
+	private function render_manual_mapping(): void {
+		if ( array() === $this->last_manual_mapping ) {
+			return;
+		}
+
+		$options = $this->service->manual_mapping_options();
+		if ( array() === $options ) {
+			return;
+		}
+
+		$payload = base64_encode( wp_json_encode( $this->last_manual_mapping ) ?: '' );
+		echo '<h2>' . esc_html__( 'Страны Почты России, требующие ручного сопоставления', 'walls-delivery-calc' ) . '</h2>';
+		echo '<form method="post">';
+		wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME );
+		echo '<input type="hidden" name="wdc_rp_country_action" value="apply_manual_mapping">';
+		echo '<input type="hidden" name="manual_mapping_payload" value="' . esc_attr( $payload ) . '">';
+		echo '<table class="widefat striped" style="max-width: 980px;"><thead><tr><th>' . esc_html__( 'Страна Почты России', 'walls-delivery-calc' ) . '</th><th>' . esc_html__( 'Сопоставить со страной WooCommerce', 'walls-delivery-calc' ) . '</th></tr></thead><tbody>';
+		foreach ( $this->last_manual_mapping as $row ) {
+			$key = (string) ( $row['key'] ?? '' );
+			echo '<tr><td>' . esc_html( (string) ( $row['rp_country_name'] ?? '' ) ) . ' <code>' . esc_html( (string) ( $row['rp_country_id'] ?? '' ) ) . '</code></td><td>';
+			echo '<select name="manual_mappings[' . esc_attr( $key ) . ']"><option value="">' . esc_html__( 'Не сопоставлять', 'walls-delivery-calc' ) . '</option>';
+			foreach ( $options as $option ) {
+				$code = (string) ( $option['wc_country_code'] ?? '' );
+				$name = (string) ( $option['wc_country_name'] ?? '' );
+				echo '<option value="' . esc_attr( $code ) . '">' . esc_html( $code . ' — ' . $name ) . '</option>';
+			}
+			echo '</select></td></tr>';
+		}
+		echo '</tbody></table>';
+		echo '<p><button class="button button-primary" type="submit">' . esc_html__( 'Сохранить сопоставления', 'walls-delivery-calc' ) . '</button></p>';
+		echo '</form>';
 	}
 
 	private function render_preview(): void {
@@ -181,7 +226,7 @@ final class RussianPostCountriesAdminPage {
 	}
 
 	private function render_filters( string $filter, string $search, int $per_page ): void {
-		$options = array( 'all' => 'Все', 'enabled' => 'Итог включен', 'disabled' => 'Итог выключен', 'matched' => 'Сопоставлено', 'unmatched' => 'Не сопоставлено', 'manual_enabled' => 'Ручное включение', 'manual_disabled' => 'Ручное отключение', 'auto' => 'Auto' );
+		$options = array( 'all' => 'Все', 'enabled' => 'Итог включен', 'disabled' => 'Итог выключен', 'matched' => 'Сопоставлено', 'unmatched' => 'Не сопоставлено', 'manual_mapping' => 'Ручное сопоставление', 'manual_enabled' => 'Ручное включение', 'manual_disabled' => 'Ручное отключение', 'auto' => 'Auto' );
 		echo '<form method="get" style="margin: 16px 0;">';
 		echo '<input type="hidden" name="page" value="' . esc_attr( self::PAGE_SLUG ) . '">';
 		echo '<select name="rp_filter">';
@@ -204,17 +249,16 @@ final class RussianPostCountriesAdminPage {
 	 */
 	private function render_table( array $items ): void {
 		echo '<table class="widefat striped"><thead><tr>';
-		foreach ( array( 'WooCommerce код', 'Страна WooCommerce', 'Страна Почты России', 'ID Почты России', 'ISO2 Почты', 'Сопоставлено', 'Источник сопоставления', 'API доступно', 'Parcel', 'Block', 'Ручной режим', 'Итог', 'Комментарий', 'Последняя проверка', 'Действия' ) as $heading ) {
+		foreach ( array( 'WooCommerce код', 'Страна WooCommerce', 'Страна Почты России', 'ID Почты России', 'Сопоставлено', 'Источник сопоставления', 'API доступно', 'Parcel', 'Block', 'Ручной режим', 'Итог', 'Комментарий', 'Последняя проверка', 'Действия' ) as $heading ) {
 			echo '<th>' . esc_html( $heading ) . '</th>';
 		}
 		echo '</tr></thead><tbody>';
 		foreach ( $items as $item ) {
 			echo '<tr>';
-			echo '<td>' . esc_html( $item->wc_country_code ) . '</td>';
+			echo '<td class="' . esc_attr( $item->effective_enabled ? 'wdc-rp-country-enabled' : 'wdc-rp-country-disabled' ) . '">' . esc_html( ( $item->effective_enabled ? '✅ ' : '❌ ' ) . $item->wc_country_code ) . '</td>';
 			echo '<td>' . esc_html( $item->wc_country_name ) . '</td>';
 			echo '<td>' . esc_html( $item->rp_country_name ) . '</td>';
 			echo '<td>' . esc_html( $item->rp_country_id ) . '</td>';
-			echo '<td>' . esc_html( $item->rp_iso2 ) . '</td>';
 			echo '<td>' . esc_html( $this->yes_no( $item->matched ) ) . '</td>';
 			echo '<td>' . esc_html( $item->match_source ) . '</td>';
 			echo '<td>' . esc_html( $this->yes_no( $item->api_available ) ) . '</td>';
@@ -266,13 +310,21 @@ final class RussianPostCountriesAdminPage {
 		$action = isset( $_POST['wdc_rp_country_action'] ) ? sanitize_key( wp_unslash( (string) $_POST['wdc_rp_country_action'] ) ) : '';
 		if ( 'refresh' === $action ) {
 			$stats = $this->service->refresh_from_api();
+			$this->last_manual_mapping = is_array( $stats['unmatched_api_countries'] ?? null ) ? $stats['unmatched_api_countries'] : array();
 			return sprintf( __( 'Справочник обновлен. Сопоставлено: %d, включено: %d.', 'walls-delivery-calc' ), (int) $stats['matched'], (int) $stats['enabled'] );
 		}
 		if ( 'manual_mode' === $action ) {
 			$code = isset( $_POST['wc_country_code'] ) ? sanitize_text_field( wp_unslash( (string) $_POST['wc_country_code'] ) ) : '';
 			$mode = isset( $_POST['manual_mode'] ) ? sanitize_key( wp_unslash( (string) $_POST['manual_mode'] ) ) : RussianPostCountryMapping::MODE_AUTO;
-			$this->repository->set_manual_mode( $code, $mode, $this->manual_comment() );
+			$this->repository->set_manual_mode( $code, $mode, RussianPostCountryMapping::MODE_AUTO === $mode ? '' : $this->manual_comment() );
 			return __( 'Ручной режим сохранен.', 'walls-delivery-calc' );
+		}
+		if ( 'apply_manual_mapping' === $action ) {
+			$payload = isset( $_POST['manual_mapping_payload'] ) ? base64_decode( sanitize_text_field( wp_unslash( (string) $_POST['manual_mapping_payload'] ) ), true ) : '';
+			$rows = is_string( $payload ) ? json_decode( $payload, true ) : array();
+			$selections = isset( $_POST['manual_mappings'] ) && is_array( $_POST['manual_mappings'] ) ? array_map( 'sanitize_text_field', wp_unslash( $_POST['manual_mappings'] ) ) : array();
+			$result = $this->service->apply_manual_mappings( is_array( $rows ) ? $rows : array(), is_array( $selections ) ? $selections : array() );
+			return sprintf( __( 'Ручные сопоставления сохранены: %d.', 'walls-delivery-calc' ), (int) ( $result['updated'] ?? 0 ) );
 		}
 		if ( 'preview_bulk' === $action ) {
 			$this->last_preview = $this->service->preview_bulk_lists( $this->textarea_lines( 'available_countries' ), $this->textarea_lines( 'unavailable_countries' ) );
