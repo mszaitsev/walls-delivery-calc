@@ -20,10 +20,16 @@ final class LocationRepository {
 	public function save( Location $location ): int {
 		$now  = current_time( 'mysql' );
 		$data = $this->location_to_row( $location, $now );
+		$country_changed = true;
 
 		if ( null !== $location->id && $location->id > 0 ) {
+			$existing = $this->find_by_id( $location->id );
+			$country_changed = ! $existing instanceof Location || $this->normalize_country_code( $existing->country_code ) !== $this->normalize_country_code( $location->country_code );
 			unset( $data['created_at'] );
 			$this->wpdb->update( $this->table_name(), $data, array( 'id' => $location->id ), $this->formats( false ), array( '%d' ) );
+			if ( $country_changed ) {
+				$this->mark_country_index_stale();
+			}
 			return $location->id;
 		}
 
@@ -33,12 +39,17 @@ final class LocationRepository {
 		}
 
 		if ( $existing instanceof Location && null !== $existing->id ) {
+			$country_changed = $this->normalize_country_code( $existing->country_code ) !== $this->normalize_country_code( $location->country_code );
 			unset( $data['created_at'] );
 			$this->wpdb->update( $this->table_name(), $data, array( 'id' => $existing->id ), $this->formats( false ), array( '%d' ) );
+			if ( $country_changed ) {
+				$this->mark_country_index_stale();
+			}
 			return $existing->id;
 		}
 
 		$this->wpdb->insert( $this->table_name(), $data, $this->formats() );
+		$this->mark_country_index_stale();
 
 		return (int) $this->wpdb->insert_id;
 	}
@@ -79,6 +90,7 @@ final class LocationRepository {
 			array_map( fn( string $column ): string => "{$column} = VALUES({$column})", array_diff( array_keys( $rows[0] ), array( 'created_at' ) ) ),
 			$this->formats_for_row( $rows[0] )
 		);
+		$this->mark_country_index_stale();
 
 		return array(
 			'count' => count( $locations ),
@@ -117,9 +129,9 @@ final class LocationRepository {
 	/**
 	 * @return array<int, Location>
 	 */
-	public function search( string $query, int $limit = 100 ): array {
+	public function search( string $query, int $limit = 100, string $country_code = '' ): array {
 		$limit = max( 10, min( 100, $limit ) );
-		return $this->search_paginated( $query, 1, $limit )['items'];
+		return $this->search_paginated( $query, 1, $limit, $country_code )['items'];
 	}
 
 	/**
@@ -176,10 +188,11 @@ final class LocationRepository {
 	 * @param array<int,string> $tokens
 	 * @return array<int, Location>
 	 */
-	public function search_by_tokens( array $tokens, int $limit = 300, bool $require_all = false, string $force_region_code = '' ): array {
+	public function search_by_tokens( array $tokens, int $limit = 300, bool $require_all = false, string $force_region_code = '', string $country_code = '' ): array {
 		$tokens = array_values( array_unique( array_filter( array_map( fn( string $token ): string => $this->normalize_query( $token ), $tokens ) ) ) );
 		$limit = max( 10, min( 300, $limit ) );
 		$force_region_code = trim( $force_region_code );
+		$country_code = $this->normalize_country_code( $country_code );
 
 		if ( array() === $tokens ) {
 			return array();
@@ -189,6 +202,9 @@ final class LocationRepository {
 			$rows = array();
 			foreach ( $this->test_location_rows() as $row ) {
 				if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+					continue;
+				}
+				if ( ! $this->row_country_matches( $row, $country_code ) ) {
 					continue;
 				}
 				if ( '' !== $force_region_code && $force_region_code !== (string) ( $row['region_code'] ?? '' ) ) {
@@ -211,6 +227,10 @@ final class LocationRepository {
 
 		$where = array( 'l.active = 1' );
 		$args = array();
+		if ( '' !== $country_code ) {
+			$where[] = 'l.country_code = %s';
+			$args[] = $country_code;
+		}
 		if ( '' !== $force_region_code ) {
 			$where[] = 'l.region_code = %s';
 			$args[] = $force_region_code;
@@ -244,10 +264,11 @@ final class LocationRepository {
 	 * @param array<int,string> $tokens
 	 * @return array<int,Location>
 	 */
-	public function checkout_hierarchy_candidates( array $tokens, int $limit = 1000, string $force_region_code = '' ): array {
+	public function checkout_hierarchy_candidates( array $tokens, int $limit = 1000, string $force_region_code = '', string $country_code = '' ): array {
 		$tokens = array_values( array_unique( array_filter( array_map( fn( string $token ): string => $this->normalize_query( $token ), $tokens ) ) ) );
 		$limit = max( 10, min( 2000, $limit ) );
 		$force_region_code = trim( $force_region_code );
+		$country_code = $this->normalize_country_code( $country_code );
 		if ( array() === $tokens && '' === $force_region_code ) {
 			return array();
 		}
@@ -256,6 +277,9 @@ final class LocationRepository {
 			$rows = array();
 			foreach ( $this->test_location_rows() as $row ) {
 				if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+					continue;
+				}
+				if ( ! $this->row_country_matches( $row, $country_code ) ) {
 					continue;
 				}
 				if ( '' !== $force_region_code && $force_region_code !== (string) ( $row['region_code'] ?? '' ) ) {
@@ -271,6 +295,10 @@ final class LocationRepository {
 
 		$where = array( 'l.active = 1' );
 		$args = array();
+		if ( '' !== $country_code ) {
+			$where[] = 'l.country_code = %s';
+			$args[] = $country_code;
+		}
 		if ( '' !== $force_region_code ) {
 			$where[] = 'l.region_code = %s';
 			$args[] = $force_region_code;
@@ -315,10 +343,11 @@ final class LocationRepository {
 	/**
 	 * @return array{items:array<int,Location>, total:int, page:int, per_page:int, total_pages:int}
 	 */
-	public function search_paginated( string $query, int $page = 1, int $per_page = 20 ): array {
+	public function search_paginated( string $query, int $page = 1, int $per_page = 20, string $country_code = '' ): array {
 		$query = $this->normalize_query( $query );
 		$per_page = in_array( $per_page, array( 10, 20, 50, 100 ), true ) ? $per_page : 20;
 		$page = max( 1, $page );
+		$country_code = $this->normalize_country_code( $country_code );
 
 		if ( '' === $query ) {
 			return array( 'items' => array(), 'total' => 0, 'page' => 1, 'per_page' => $per_page, 'total_pages' => 0 );
@@ -327,7 +356,7 @@ final class LocationRepository {
 		if ( $this->has_test_location_rows() ) {
 			$rows = array();
 			foreach ( $this->test_location_rows() as $row ) {
-				if ( 1 === (int) ( $row['active'] ?? 1 ) && str_contains( (string) ( $row['searchable_text'] ?? '' ), $query ) ) {
+				if ( 1 === (int) ( $row['active'] ?? 1 ) && $this->row_country_matches( $row, $country_code ) && str_contains( (string) ( $row['searchable_text'] ?? '' ), $query ) ) {
 					$rows[] = $row;
 				}
 			}
@@ -351,18 +380,41 @@ final class LocationRepository {
 
 		$like = '%' . $this->wpdb->esc_like( $query ) . '%';
 		$prefix = $this->wpdb->esc_like( $query ) . '%';
+		$where = array( 'l.active = 1', 'l.searchable_text LIKE %s' );
+		$count_args = array( $like );
+		if ( '' !== $country_code ) {
+			$where[] = 'l.country_code = %s';
+			$count_args[] = $country_code;
+		}
 		$total = (int) $this->wpdb->get_var(
 			$this->wpdb->prepare(
 				"SELECT COUNT(*)
 				FROM {$this->table_name()} l
 				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
-				WHERE l.active = 1 AND l.searchable_text LIKE %s",
-				$like
+				WHERE " . implode( ' AND ', $where ),
+				...$count_args
 			)
 		);
 		$total_pages = (int) ceil( $total / $per_page );
 		$page = min( $page, max( 1, $total_pages ) );
 		$offset = ( $page - 1 ) * $per_page;
+
+		$args = array(
+			$query,
+			$prefix,
+			$like,
+			$query,
+			$prefix,
+			$like,
+			$like,
+			$like,
+			$like,
+		);
+		if ( '' !== $country_code ) {
+			$args[] = $country_code;
+		}
+		$args[] = $per_page;
+		$args[] = $offset;
 
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
@@ -380,20 +432,10 @@ final class LocationRepository {
 					END AS rank_score
 				FROM {$this->table_name()} l
 				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
-				WHERE l.active = 1 AND l.searchable_text LIKE %s
+				WHERE " . implode( ' AND ', $where ) . "
 				ORDER BY rank_score ASC, l.display_name ASC
 				LIMIT %d OFFSET %d",
-				$query,
-				$prefix,
-				$like,
-				$query,
-				$prefix,
-				$like,
-				$like,
-				$like,
-				$like,
-				$per_page,
-				$offset
+				...$args
 			),
 			ARRAY_A
 		);
@@ -477,6 +519,71 @@ final class LocationRepository {
 		}
 
 		return (int) $this->wpdb->get_var( $this->wpdb->prepare( "SELECT COUNT(*) FROM {$this->table_name()} WHERE postal_code = %s", '999999999' ) );
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	public function distinct_country_codes(): array {
+		if ( property_exists( $this->wpdb, 'distinct_country_codes_calls' ) ) {
+			++$this->wpdb->distinct_country_codes_calls;
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$countries = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+					continue;
+				}
+				$country = $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) );
+				if ( '' !== $country ) {
+					$countries[] = $country;
+				}
+			}
+			$countries = array_values( array_unique( $countries ) );
+			sort( $countries );
+			return $countries;
+		}
+
+		$rows = $this->wpdb->get_col( "SELECT DISTINCT country_code FROM {$this->table_name()} WHERE active = 1 AND country_code IS NOT NULL AND country_code != '' ORDER BY country_code ASC" );
+		$countries = is_array( $rows ) ? array_map( fn( mixed $code ): string => $this->normalize_country_code( (string) $code ), $rows ) : array();
+		return array_values( array_unique( array_filter( $countries ) ) );
+	}
+
+	/**
+	 * @return array<string,int>
+	 */
+	public function country_counts(): array {
+		if ( property_exists( $this->wpdb, 'country_counts_calls' ) ) {
+			++$this->wpdb->country_counts_calls;
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$counts = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+					continue;
+				}
+				$country = $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) );
+				if ( '' === $country ) {
+					continue;
+				}
+				$counts[ $country ] = ( $counts[ $country ] ?? 0 ) + 1;
+			}
+			ksort( $counts );
+			return $counts;
+		}
+
+		$rows = $this->wpdb->get_results( "SELECT country_code, COUNT(*) AS location_count FROM {$this->table_name()} WHERE active = 1 AND country_code IS NOT NULL AND country_code != '' GROUP BY country_code ORDER BY country_code ASC", ARRAY_A );
+		$counts = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$country = $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) );
+			if ( '' !== $country ) {
+				$counts[ $country ] = max( 0, (int) ( $row['location_count'] ?? 0 ) );
+			}
+		}
+		ksort( $counts );
+		return $counts;
 	}
 
 	/**
@@ -570,7 +677,7 @@ final class LocationRepository {
 			'updated_at'  => current_time( 'mysql' ),
 		);
 		if ( $this->has_test_location_rows() ) {
-			$property = property_exists( $this->wpdb, 'locations' ) ? 'locations' : 'rows';
+			$property = $this->test_location_rows_property();
 			if ( ! isset( $this->wpdb->{$property}[ $location_id ] ) ) {
 				return false;
 			}
@@ -588,7 +695,7 @@ final class LocationRepository {
 
 	public function clear_postal_code_marker( string $marker = '999999999' ): int {
 		if ( $this->has_test_location_rows() ) {
-			$property = property_exists( $this->wpdb, 'locations' ) ? 'locations' : 'rows';
+			$property = $this->test_location_rows_property();
 			$count = 0;
 			foreach ( $this->wpdb->{$property} as $id => $row ) {
 				if ( $marker === (string) ( $row['postal_code'] ?? '' ) ) {
@@ -640,12 +747,14 @@ final class LocationRepository {
 	 * @return array{locations_deleted:int|null, aliases_deleted:int|null, regions_deleted:int|null, carrier_codes_deleted:int|null}
 	 */
 	public function clear_all(): array {
-		return array(
+		$result = array(
 			'carrier_codes_deleted' => $this->clear_table( $this->carrier_codes_table_name() ),
 			'aliases_deleted'       => $this->clear_table( $this->alias_table_name() ),
 			'locations_deleted'     => $this->clear_table( $this->table_name() ),
 			'regions_deleted'       => $this->clear_table( $this->region_table_name() ),
 		);
+		$this->mark_country_index_stale();
+		return $result;
 	}
 
 	/**
@@ -769,7 +878,7 @@ final class LocationRepository {
 		);
 		if ( $this->has_test_location_rows() ) {
 			$id = (int) $location->id;
-			$property = property_exists( $this->wpdb, 'locations' ) ? 'locations' : 'rows';
+			$property = $this->test_location_rows_property();
 			if ( ! isset( $this->wpdb->{$property}[ $id ] ) ) {
 				return false;
 			}
@@ -786,6 +895,7 @@ final class LocationRepository {
 
 	public function delete_all(): void {
 		$this->wpdb->query( "DELETE FROM {$this->table_name()}" );
+		$this->mark_country_index_stale();
 	}
 
 	private function clear_table( string $table ): ?int {
@@ -815,6 +925,15 @@ final class LocationRepository {
 
 	private function find_one( string $column, int|string $value, string $format ): ?Location {
 		if ( '' === (string) $value || ! preg_match( '/^[a-z0-9_]+$/i', $column ) ) {
+			return null;
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( (string) ( $row[ $column ] ?? '' ) === (string) $value ) {
+					return $this->row_to_location( $this->join_region_for_test_double( $row ) );
+				}
+			}
 			return null;
 		}
 
@@ -1072,8 +1191,26 @@ final class LocationRepository {
 		return Location::normalize_search_text( $query );
 	}
 
+	private function normalize_country_code( string $country_code ): string {
+		$country_code = strtoupper( trim( $country_code ) );
+		return preg_match( '/^[A-Z]{2}$/', $country_code ) ? $country_code : '';
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function row_country_matches( array $row, string $country_code ): bool {
+		return '' === $country_code || $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) ) === $country_code;
+	}
+
+	private function mark_country_index_stale(): void {
+		if ( class_exists( \WallsShop\WDC\Locations\Services\LocationCountryIndexService::class ) ) {
+			\WallsShop\WDC\Locations\Services\LocationCountryIndexService::mark_option_stale();
+		}
+	}
+
 	private function has_test_location_rows(): bool {
-		return property_exists( $this->wpdb, 'locations' ) || property_exists( $this->wpdb, 'rows' );
+		return property_exists( $this->wpdb, 'locations' ) || property_exists( $this->wpdb, 'rows' ) || property_exists( $this->wpdb, 'location_rows' );
 	}
 
 	/**
@@ -1083,7 +1220,20 @@ final class LocationRepository {
 		if ( property_exists( $this->wpdb, 'locations' ) ) {
 			return is_array( $this->wpdb->locations ) ? $this->wpdb->locations : array();
 		}
+		if ( property_exists( $this->wpdb, 'location_rows' ) ) {
+			return is_array( $this->wpdb->location_rows ) ? $this->wpdb->location_rows : array();
+		}
 		return property_exists( $this->wpdb, 'rows' ) && is_array( $this->wpdb->rows ) ? $this->wpdb->rows : array();
+	}
+
+	private function test_location_rows_property(): string {
+		if ( property_exists( $this->wpdb, 'locations' ) ) {
+			return 'locations';
+		}
+		if ( property_exists( $this->wpdb, 'location_rows' ) ) {
+			return 'location_rows';
+		}
+		return 'rows';
 	}
 
 	private function table_name(): string {

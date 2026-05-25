@@ -12,6 +12,7 @@ use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -29,7 +30,8 @@ final class ShippingMethodRegistrar {
 		private Logger $logger,
 		private ?AddressSuggestionSettings $suggestion_settings = null,
 		private ?DaDataTokenPool $token_pool = null,
-		private ?DeliveryServiceManager $service_manager = null
+		private ?DeliveryServiceManager $service_manager = null,
+		private ?LocationCountryIndexService $location_country_index = null
 	) {
 	}
 
@@ -203,6 +205,7 @@ final class ShippingMethodRegistrar {
 			'include_region_in_query' => $this->settings->get_bool( 'include_region_in_checkout_city_picker_query', true ),
 			'checkout_location_search_limit' => $this->city_location_limit(),
 			'location_region_limit' => max( 3, min( 50, $this->settings->get_int( 'checkout_location_region_limit', 10 ) ) ),
+			'supported_location_countries' => $this->location_country_index instanceof LocationCountryIndexService ? $this->location_country_index->countries() : array(),
 			'resolve_action' => CheckoutLocationAjax::RESOLVE_ACTION,
 			'debug'     => function_exists( 'current_user_can' ) && current_user_can( 'manage_options' ) && $this->settings->get_bool( 'show_checkout_debug_panel', false ),
 			'strings'   => array(

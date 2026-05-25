@@ -24,6 +24,7 @@
 	var lastSearchForceRegionCode = '';
 	var locationStore = {};
 	var locationSeq = 0;
+	var lastCountryCode = '';
 	var hiddenNames = [
 		'wdc_platform_location_id',
 		'wdc_platform_location_fias_id',
@@ -82,6 +83,64 @@
 		return firstUsableField( [ '#shipping_state', 'select[name="shipping_state"]', 'input[name="shipping_state"]', '#billing_state', 'select[name="billing_state"]', 'input[name="billing_state"]' ] );
 	}
 
+	function countryField( prefix ) {
+		return firstUsableField( [ '#' + prefix + '_country', 'select[name="' + prefix + '_country"]', 'input[name="' + prefix + '_country"]' ] );
+	}
+
+	function shippingAddressActive() {
+		var $toggle = $( '#ship-to-different-address-checkbox, input[name="ship_to_different_address"]' ).first();
+		if ( $toggle.length ) {
+			return $toggle.is( ':checked' );
+		}
+		return countryField( 'shipping' ).length && ! countryField( 'billing' ).length;
+	}
+
+	function currentCountryCode() {
+		var $country = shippingAddressActive() ? countryField( 'shipping' ) : countryField( 'billing' );
+		if ( ! $country.length ) {
+			$country = countryField( 'billing' ).length ? countryField( 'billing' ) : countryField( 'shipping' );
+		}
+		return String( $country.val() || '' ).toUpperCase();
+	}
+
+	function supportedLocationCountries() {
+		return Array.isArray( config.supported_location_countries ) ? config.supported_location_countries.map( function ( code ) {
+			return String( code || '' ).toUpperCase();
+		} ) : [];
+	}
+
+	function localDatabaseAvailable() {
+		var country = currentCountryCode();
+		return !! country && supportedLocationCountries().indexOf( country ) !== -1;
+	}
+
+	function handleCountryAvailabilityChanged() {
+		var country = currentCountryCode();
+		var supported = localDatabaseAvailable();
+		if ( lastCountryCode && country !== lastCountryCode ) {
+			lastCountryCode = country;
+			activeSearchSeq = ++searchRequestSeq;
+			lastSearchQuery = '';
+			lastSearchForceRegionCode = '';
+			forceRegionCode = '';
+			if ( pickerOpen ) {
+				closePicker();
+			}
+			clearHidden();
+			explicitSelection = false;
+		}
+		lastCountryCode = country;
+		if ( ! supported ) {
+			window.clearTimeout( autoResolveTimer );
+			activeSearchSeq = ++searchRequestSeq;
+			if ( pickerOpen ) {
+				closePicker();
+			}
+			clearHidden();
+		}
+		return supported;
+	}
+
 	function checkoutForm( $field ) {
 		var $form = $field.closest( 'form.checkout' );
 		return $form.length ? $form : $( 'form.checkout' ).first();
@@ -137,6 +196,10 @@
 	}
 
 	function restoreSelectedNotice() {
+		if ( ! localDatabaseAvailable() ) {
+			clearHidden();
+			return;
+		}
 		var displayName = hiddenValue( 'wdc_platform_location_display_name' );
 		var $field = cityField();
 		if ( displayName && $field.length ) {
@@ -264,6 +327,11 @@
 	function search( query, options ) {
 		options = options || {};
 		query = String( query || '' );
+		if ( ! localDatabaseAvailable() ) {
+			clearHidden();
+			renderMessage( '', 'is-hint' );
+			return;
+		}
 		var requestForceRegionCode = undefined !== options.forceRegionCode ? String( options.forceRegionCode || '' ) : forceRegionCode;
 		if ( ! config.ajax_url ) {
 			debug( 'ajax url missing' );
@@ -295,6 +363,7 @@
 				action: 'wdc_platform_search_locations',
 				nonce: config.nonce,
 				query: query,
+				country_code: currentCountryCode(),
 				limit: config.checkout_location_search_limit || 100,
 				region_limit: config.location_region_limit || 10,
 				force_region_code: requestForceRegionCode
@@ -305,6 +374,11 @@
 				return;
 			}
 			var groups = response && response.data && response.data.groups ? response.data.groups : [];
+			if ( response && response.data && false === response.data.local_database_available ) {
+				clearHidden();
+				renderResults( [], false, response.data.limit || config.checkout_location_search_limit || 100 );
+				return;
+			}
 			debug( 'ajax success groups count', groups.length );
 			debug( 'limit reached', !! ( response && response.data && response.data.limit_reached ) );
 			debug( 'corrected query', response && response.data ? response.data.corrected_query || '' : '' );
@@ -326,6 +400,10 @@
 
 	function scheduleSearch( query ) {
 		window.clearTimeout( timer );
+		if ( ! localDatabaseAvailable() ) {
+			clearHidden();
+			return;
+		}
 		if ( suppressSearch ) {
 			debug( 'search suppressed', 'picker input' );
 			return;
@@ -344,6 +422,10 @@
 
 	function openPicker( $field ) {
 		if ( ! isUsableField( $field ) ) {
+			return;
+		}
+		if ( ! localDatabaseAvailable() ) {
+			clearHidden();
 			return;
 		}
 		if ( pickerOpen && activeCityField === $field[0] ) {
@@ -417,7 +499,9 @@
 		debug( 'fallback city applied' );
 		closePicker();
 		debug( 'picker closed after fallback' );
-		renderSelectedNotice( $field, 'Просим проверить название и внести верный населенный пункт', '', true );
+		if ( localDatabaseAvailable() ) {
+			renderSelectedNotice( $field, 'Просим проверить название и внести верный населенный пункт', '', true );
+		}
 		isSelecting = false;
 		window.setTimeout( function () {
 			debug( 'update_checkout triggered after fallback' );
@@ -469,6 +553,10 @@
 
 	function applySelectedLocation( location, options ) {
 		options = options || {};
+		if ( ! localDatabaseAvailable() || String( location.country_code || currentCountryCode() ).toUpperCase() !== currentCountryCode() ) {
+			clearHidden();
+			return;
+		}
 		var updateCheckout = false !== options.updateCheckout;
 		var updateFields = false !== options.updateFields;
 		var source = options.source || ( false === options.explicit ? 'auto' : 'modal' );
@@ -588,6 +676,9 @@
 		if ( $form.length ) {
 			ensureHiddenFields( $form );
 		}
+		if ( ! handleCountryAvailabilityChanged() ) {
+			return;
+		}
 		restoreSelectedNotice();
 		if ( ! hasSelectedLocation() ) {
 			scheduleAutoResolve();
@@ -599,10 +690,16 @@
 		suppressSearch = false;
 		window.clearTimeout( suppressTimer );
 		debug( 'suppressSearch disabled after updated_checkout' );
-		restoreSelectedNotice();
+		if ( localDatabaseAvailable() ) {
+			restoreSelectedNotice();
+		}
 	}
 
 	function showInvalidNotice() {
+		if ( ! localDatabaseAvailable() ) {
+			clearHidden();
+			return;
+		}
 		renderSelectedNotice( cityField(), 'Просим проверить название и внести верный населенный пункт', '', true );
 	}
 
@@ -612,6 +709,10 @@
 
 	function scheduleAutoResolve() {
 		window.clearTimeout( autoResolveTimer );
+		if ( ! localDatabaseAvailable() ) {
+			clearHidden();
+			return;
+		}
 		if ( explicitSelection || pickerOpen || isSelecting || hasSelectedLocation() ) {
 			return;
 		}
@@ -619,7 +720,7 @@
 	}
 
 	function autoResolve() {
-		if ( ! config.ajax_url || explicitSelection || pickerOpen || isSelecting || hasSelectedLocation() ) {
+		if ( ! config.ajax_url || ! localDatabaseAvailable() || explicitSelection || pickerOpen || isSelecting || hasSelectedLocation() ) {
 			return;
 		}
 		var regionText = checkoutFieldText( stateField() );
@@ -635,11 +736,16 @@
 			data: {
 				action: config.resolve_action || 'wdc_platform_resolve_checkout_location',
 				nonce: config.nonce,
+				country_code: currentCountryCode(),
 				region_text: regionText,
 				city_text: cityText
 			}
 		} ).done( function ( response ) {
 			var body = response && response.data ? response.data : {};
+			if ( false === body.local_database_available ) {
+				clearHidden();
+				return;
+			}
 			if ( response && response.success && 'resolved' === body.status && body.selected ) {
 				if ( hiddenValue( 'wdc_platform_location_fias_id' ) === String( body.selected.fias_id || '' ) ) {
 					restoreSelectedNotice();
@@ -669,6 +775,12 @@
 		if ( ! isSelecting && ! suppressSearch ) {
 			explicitSelection = false;
 			clearHidden();
+			scheduleAutoResolve();
+		}
+	} );
+	$( document.body ).off( 'change.wdcCitySelector', '#shipping_country, select[name="shipping_country"], input[name="shipping_country"], #billing_country, select[name="billing_country"], input[name="billing_country"], #ship-to-different-address-checkbox, input[name="ship_to_different_address"]' );
+	$( document.body ).on( 'change.wdcCitySelector', '#shipping_country, select[name="shipping_country"], input[name="shipping_country"], #billing_country, select[name="billing_country"], input[name="billing_country"], #ship-to-different-address-checkbox, input[name="ship_to_different_address"]', function () {
+		if ( handleCountryAvailabilityChanged() ) {
 			scheduleAutoResolve();
 		}
 	} );

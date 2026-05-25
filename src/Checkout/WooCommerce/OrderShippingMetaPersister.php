@@ -515,6 +515,9 @@ final class OrderShippingMetaPersister {
 		if ( '' === $fias_id ) {
 			return array();
 		}
+		if ( ! $this->local_location_country_supported( $data ) ) {
+			return array();
+		}
 
 		return array(
 			'_wdc_platform_location_fias_id'     => $fias_id,
@@ -602,6 +605,47 @@ final class OrderShippingMetaPersister {
 		}
 
 		return $this->sanitize_checkout_value( $data[ $key ] );
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function local_location_country_supported( array $data ): bool {
+		$country_code = $this->checkout_country_code( $data );
+		if ( '' === $country_code ) {
+			return false;
+		}
+		$index = function_exists( 'get_option' ) ? get_option( 'wdc_location_country_codes', array() ) : array();
+		$countries = is_array( $index['countries'] ?? null ) ? $index['countries'] : ( is_array( $index ) ? $index : array() );
+		$countries = array_values(
+			array_filter(
+				array_map(
+					static fn( mixed $code ): string => strtoupper( trim( (string) $code ) ),
+					$countries
+				),
+				static fn( string $code ): bool => (bool) preg_match( '/^[A-Z]{2}$/', $code )
+			)
+		);
+
+		return in_array( $country_code, $countries, true );
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function checkout_country_code( array $data ): string {
+		$ship_to_different = ! empty( $data['ship_to_different_address'] ) && '0' !== (string) $data['ship_to_different_address'];
+		$key = $ship_to_different ? 'shipping_country' : 'billing_country';
+		$country_code = $this->checkout_string( $data, $key );
+		if ( '' === $country_code ) {
+			$country_code = $this->checkout_string( $data, 'shipping_country' );
+		}
+		if ( '' === $country_code ) {
+			$country_code = $this->checkout_string( $data, 'billing_country' );
+		}
+		$country_code = strtoupper( trim( $country_code ) );
+
+		return preg_match( '/^[A-Z]{2}$/', $country_code ) ? $country_code : '';
 	}
 
 	private function sanitize_checkout_value( mixed $value ): string {
