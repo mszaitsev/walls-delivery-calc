@@ -133,10 +133,13 @@ $group_rule = new Rule(
 		new RuleCondition( null, null, 1, RuleConditionTypes::CITY, RuleOperators::EQ, 'Novosibirsk' ),
 		new RuleCondition( null, null, 1, RuleConditionTypes::PAYMENT_METHOD, RuleOperators::EQ, 'card' ),
 		new RuleCondition( null, null, 2, RuleConditionTypes::COUNTRY, RuleOperators::EQ, 'RU' ),
-	)
+	),
+	array( 1 => 'and', 2 => 'and', 3 => 'and' ),
+	'',
+	'condition_1_or_2_or_3'
 );
 $result = $engine->apply_rules( array( $group_rule ), rules_context() );
-rules_smoke_assert( 50000 === $result->final_price?->get_kopecks(), 'Condition groups must be AND inside group and OR between groups.' );
+rules_smoke_assert( 50000 === $result->final_price?->get_kopecks(), 'Explicit OR expression must combine groups when selected.' );
 
 $result = $engine->apply_rules(
 	array(
@@ -342,10 +345,13 @@ $groups_or_rule = new Rule(
 		new RuleCondition( null, null, 1, RuleConditionTypes::PAYMENT_METHOD, RuleOperators::EQ, 'cash' ),
 		new RuleCondition( null, null, 2, RuleConditionTypes::COUNTRY, RuleOperators::EQ, 'RU' ),
 	),
-	array( 1 => 'and', 2 => 'and', 3 => 'and' )
+	array( 1 => 'and', 2 => 'and', 3 => 'and' ),
+	'',
+	'condition_1_or_2_or_3'
 );
 $result = $engine->apply_rules( array( $groups_or_rule ), rules_context() );
-rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'Default condition_group_expression must combine groups via OR.' );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'Explicit condition_group_expression can combine groups via OR.' );
+rules_smoke_assert( 'condition_1' === Rule::from_array( array( 'name' => 'Default expression' ) )->condition_group_expression, 'Default condition_group_expression must be condition_1.' );
 
 rules_smoke_assert( Rule::DEFAULT_GROUP_EXPRESSION === Rule::normalized_group_expression( 'bad-expression' ), 'Invalid group expression must normalize to default.' );
 

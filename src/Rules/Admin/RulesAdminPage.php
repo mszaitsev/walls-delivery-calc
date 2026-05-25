@@ -41,6 +41,12 @@ final class RulesAdminPage {
 	/** @var array<string,mixed> */
 	private array $simulation_input = array();
 
+	/** @var array<string,mixed> */
+	private array $service_simulation = array();
+
+	/** @var callable|null */
+	private $service_simulation_runner = null;
+
 	private ?RuleAdminContext $context = null;
 
 	public function __construct(
@@ -74,12 +80,17 @@ final class RulesAdminPage {
 
 	public function render_page(): void {
 		$this->context = RuleAdminContext::default();
+		$this->service_simulation_runner = null;
 		$this->render_full_for_current_context();
 	}
 
 	public function render_for_context( RuleAdminContext $context ): void {
 		$this->context = $context;
 		$this->render_full_for_current_context();
+	}
+
+	public function set_service_simulation_runner( ?callable $runner ): void {
+		$this->service_simulation_runner = $runner;
 	}
 
 	public function render_embedded_for_context( RuleAdminContext $context ): void {
@@ -161,6 +172,10 @@ final class RulesAdminPage {
 
 		<?php if ( $this->context()->allow_simulation ) : ?>
 			<?php $this->render_simulation_form(); ?>
+		<?php endif; ?>
+
+		<?php if ( array() !== $this->service_simulation ) : ?>
+			<?php $this->render_service_simulation( $this->service_simulation ); ?>
 		<?php endif; ?>
 
 		<?php if ( $this->simulation instanceof RuleEngineResult ) : ?>
@@ -388,6 +403,11 @@ final class RulesAdminPage {
 	}
 
 	private function render_simulation_form(): void {
+		if ( ! $this->context()->is_default() && is_callable( $this->service_simulation_runner ) ) {
+			$this->render_service_simulation_form();
+			return;
+		}
+
 		$input = $this->simulation_input + $this->default_simulation_input();
 		?>
 		<section class="wdc-rules-card" id="wdc-rules-simulation">
@@ -501,6 +521,14 @@ final class RulesAdminPage {
 
 		if ( 'simulate' === $action ) {
 			$this->simulation_input = $this->sanitize_simulation_input();
+			if ( ! $this->context()->is_default() && is_callable( $this->service_simulation_runner ) ) {
+				$rules = $this->repository->get_rules_for_target( $this->context()->target_type, $this->context()->target_value );
+				if ( array() === $rules ) {
+					$this->errors[] = __( 'Для службы не настроены собственные правила.', 'walls-delivery-calc' );
+				}
+				$this->service_simulation = (array) call_user_func( $this->service_simulation_runner, $this->simulation_input, $rules );
+				return;
+			}
 			$rules = $this->repository->get_rules_for_target( $this->context()->target_type, $this->context()->target_value );
 			if ( array() === $rules && ! $this->context()->is_default() ) {
 				$this->errors[] = __( 'Для службы не настроены собственные правила.', 'walls-delivery-calc' );
@@ -777,11 +805,11 @@ final class RulesAdminPage {
 	}
 
 	private function conditions_summary( Rule $rule ): string {
-		$expression = sprintf( __( 'Условие применения: %s', 'walls-delivery-calc' ), $this->group_expression_label( $rule->condition_group_expression ) );
 		if ( array() === $rule->conditions ) {
-			return $expression . ' | ' . __( 'Без условий', 'walls-delivery-calc' );
+			return __( 'Нет условий', 'walls-delivery-calc' );
 		}
 
+		$expression = sprintf( __( 'Условие применения: %s', 'walls-delivery-calc' ), $this->group_expression_label( $rule->condition_group_expression ) );
 		$groups = array();
 		foreach ( $rule->conditions as $condition ) {
 			$groups[ $condition->condition_group ][] = $this->condition_schema()->condition_summary( $condition );
@@ -834,6 +862,53 @@ final class RulesAdminPage {
 			RuleOperationTypes::MULTIPLY => __( 'Умножить на', 'walls-delivery-calc' ),
 			RuleOperationTypes::DIVIDE   => __( 'Разделить на', 'walls-delivery-calc' ),
 		)[ $value ] ?? $value;
+	}
+
+	private function render_service_simulation_form(): void {
+		$input = $this->simulation_input + array(
+			'country' => 'US',
+			'weight' => 1000,
+			'order_total' => 1000,
+			'date' => ( new DateTimeImmutable() )->format( 'Y-m-d' ),
+		);
+		?>
+		<section class="wdc-rules-card" id="wdc-rules-simulation">
+			<h2><?php echo esc_html__( 'Проверить правила службы', 'walls-delivery-calc' ); ?></h2>
+			<form method="post" class="wdc-simulation-form">
+				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
+				<input type="hidden" name="wdc_rules_action" value="simulate">
+				<div class="wdc-rule-grid">
+					<label><span><?php echo esc_html__( 'Страна назначения', 'walls-delivery-calc' ); ?></span><?php $this->render_select( 'simulation[country]', $this->country_options(), (string) $input['country'] ); ?></label>
+					<label><span><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?></span><input type="number" min="0" name="simulation[weight]" value="<?php echo esc_attr( (string) $input['weight'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Сумма заказа, руб.', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[order_total]" value="<?php echo esc_attr( (string) $input['order_total'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Дата', 'walls-delivery-calc' ); ?></span><input type="date" name="simulation[date]" value="<?php echo esc_attr( (string) $input['date'] ); ?>"></label>
+				</div>
+				<p class="submit"><button class="button button-primary" type="submit"><?php echo esc_html__( 'Симулировать расчет службы', 'walls-delivery-calc' ); ?></button></p>
+			</form>
+		</section>
+		<?php
+	}
+
+	/**
+	 * @param array<string,mixed> $result
+	 */
+	private function render_service_simulation( array $result ): void {
+		?>
+		<section class="wdc-rules-result">
+			<h2><?php echo esc_html__( 'Результат симуляции службы', 'walls-delivery-calc' ); ?></h2>
+			<table class="widefat striped"><tbody>
+				<tr><th><?php echo esc_html__( 'API/base price', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['base_price'] ?? '-' ) ); ?></td></tr>
+				<tr><th><?php echo esc_html__( 'Final price after service rules', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['final_price'] ?? '-' ) ); ?></td></tr>
+				<tr><th><?php echo esc_html__( 'Source/fallback/cache', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['source'] ?? '-' ) ); ?></td></tr>
+				<tr><th><?php echo esc_html__( 'Delivery days', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['delivery_days'] ?? '-' ) ); ?></td></tr>
+			</tbody></table>
+			<?php if ( ! empty( $result['notice'] ) ) : ?><div class="notice notice-info inline"><p><?php echo esc_html( (string) $result['notice'] ); ?></p></div><?php endif; ?>
+			<?php if ( ! empty( $result['audit'] ) && is_array( $result['audit'] ) ) : ?>
+				<h3><?php echo esc_html__( 'Rules audit', 'walls-delivery-calc' ); ?></h3>
+				<pre><?php echo esc_html( (string) wp_json_encode( $result['audit'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) ); ?></pre>
+			<?php endif; ?>
+		</section>
+		<?php
 	}
 
 	private function context(): RuleAdminContext {

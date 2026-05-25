@@ -13,7 +13,7 @@ Each rule contains zero or more `RuleCondition` objects. Conditions belong to on
 The rule stores two levels of condition logic:
 
 - `condition_group_logic` controls logic inside each group. `and` requires every condition in that group, and `or` requires at least one condition in that group.
-- `condition_group_expression` controls how group results are combined. The default is `condition_1_or_2_or_3`, preserving the original group1 OR group2 OR group3 behavior.
+- `condition_group_expression` controls how group results are combined. The default for new rules is `condition_1`.
 
 Supported expressions are `condition_1`, `condition_2`, `condition_3`, every pair joined with `and` or `or`, `condition_1_or_2_or_3`, `condition_1_and_2_and_3`, `condition_1_and_2_or_3` as `(1 AND 2) OR 3`, and `condition_1_or_2_and_3` as `1 OR (2 AND 3)`. Empty groups referenced by an expression evaluate to false. Rules without conditions apply.
 
@@ -47,7 +47,7 @@ Rules can set `stop_processing`. When an applied rule has this flag, `RuleEngine
 
 ## Admin Builder
 
-The rules admin page is a CRUD interface for default rules. It uses the same type-aware condition matrix as the evaluator, shows unit labels beside numeric fields, visually groups condition rows under `Условие 1` through `Условие 3`, saves per-group AND/OR logic, and saves the separate group expression. Operation summaries are Russian text, with `увеличить на` and `уменьшить на`; percentage bases render without an extra space before `%`.
+The rules admin page is a CRUD interface for default rules. It uses the same type-aware condition matrix as the evaluator, shows unit labels beside numeric fields, visually groups condition rows under `Условие 1` through `Условие 3`, saves per-group AND/OR logic, and saves the separate group expression. Operation summaries are Russian text, with `увеличить на` and `уменьшить на`; percentage bases render without an extra space before `%`. Rules without conditions are summarized simply as `Нет условий`, without showing group-expression text.
 
 ## Checkout Integration
 
@@ -67,7 +67,7 @@ All rule mutations verify the current target before editing, deleting, toggling,
 
 Service rule fallback is runtime-only. If a service has enabled service rules, runtime applies them and records `rules_source=service`. If it has no enabled service rules and `use_default_rules_when_no_service_rules` is enabled, runtime applies default rules and records `rules_source=default`. Disabled service rules do not count as own rules for fallback. If fallback is off, runtime records `rules_source=none`.
 
-Simulation is intentionally separated: the default page simulates default rules; a service tab simulates only that service's own enabled rules and does not add default fallback automatically.
+Simulation is intentionally separated: the default page simulates default rules over the administrator-entered delivery price and does not call APIs. A service tab simulates only that service's own enabled rules and does not add default fallback automatically. For Russian Post, service simulation first calls the carrier with destination country, package weight, order total, and date, then applies service rules to the returned base quote and displays base/final price, audit, fallback, source, and cache data.
 # Rule Engine Foundation
 
 Rules now support service-level targeting:

@@ -550,7 +550,7 @@ $logic_rule_id = $repository->save_rule(
 $logic_rule = $repository->get_rule( $logic_rule_id );
 rules_admin_smoke_assert( $logic_rule instanceof Rule && array( 1 => 'and', 2 => 'or', 3 => 'and' ) === $logic_rule->condition_group_logic, 'Rule must store condition_group_logic.' );
 rules_admin_smoke_assert( $logic_rule instanceof Rule && 'condition_1_and_2_or_3' === $logic_rule->condition_group_expression, 'Rule must store condition_group_expression.' );
-rules_admin_smoke_assert( Rule::DEFAULT_GROUP_EXPRESSION === Rule::from_array( array( 'name' => 'Default expression' ) )->condition_group_expression, 'Default condition_group_expression must preserve default OR behavior.' );
+rules_admin_smoke_assert( 'condition_1' === Rule::from_array( array( 'name' => 'Default expression' ) )->condition_group_expression, 'Default condition_group_expression must be condition_1.' );
 rules_admin_smoke_assert( Rule::DEFAULT_GROUP_EXPRESSION === Rule::normalized_group_expression( 'invalid' ), 'Invalid condition_group_expression must normalize to default.' );
 
 $comment_rule_id = $repository->save_rule(
@@ -580,6 +580,9 @@ $admin_reflection = new ReflectionClass( RulesAdminPage::class );
 $admin_page = $admin_reflection->newInstanceWithoutConstructor();
 $operation_summary = $admin_reflection->getMethod( 'operation_summary' );
 $operation_summary->setAccessible( true );
+$conditions_summary = $admin_reflection->getMethod( 'conditions_summary' );
+$conditions_summary->setAccessible( true );
+rules_admin_smoke_assert( 'Нет условий' === $conditions_summary->invoke( $admin_page, new Rule( null, 'No conditions', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 10, RuleOperationBases::RUBLES, false, false ) ), 'No-condition summary must be exactly "Нет условий".' );
 rules_admin_smoke_assert( str_contains( $operation_summary->invoke( $admin_page, new Rule( null, 'Increase percent', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 12.4, RuleOperationBases::PERCENT_OF_ORDER, false, false ) ), 'увеличить на 12.4% от заказа' ), 'Increase summary must contain "увеличить на" and no space before percent.' );
 rules_admin_smoke_assert( str_contains( $operation_summary->invoke( $admin_page, new Rule( null, 'Decrease percent', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 10, RuleOperationBases::PERCENT_OF_DELIVERY, false, false ) ), 'уменьшить на 10% от доставки' ), 'Decrease summary must contain "уменьшить на" and no space before percent.' );
 rules_admin_smoke_assert( 'установить 500 руб.' === $operation_summary->invoke( $admin_page, new Rule( null, 'Equals rub', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::EQUALS, 500, RuleOperationBases::RUBLES, false, false ) ), 'Equals summary must not contain extra "на" and rub values must keep spacing.' );

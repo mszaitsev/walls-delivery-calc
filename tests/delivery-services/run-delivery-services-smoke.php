@@ -287,4 +287,21 @@ wdc_ds_assert( RuleOperationTypes::DECREASE === $copied_rule->operation_type && 
 wdc_ds_assert( 1 === count( $copied_rule->conditions ) && RuleConditionTypes::COUNTRY === $copied_rule->conditions[0]->condition_type && 'RU' === $copied_rule->conditions[0]->value_text, 'Copied rule must preserve conditions.' );
 wdc_ds_assert( 1 === count( $rule_repo->get_all_rules_for_target( RuleRepository::TARGET_DEFAULT, '' ) ), 'Copy default rules must leave default rules unchanged.' );
 
+$delivery_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'render_main_tab' ) && str_contains( $delivery_admin_source, 'render_availability_tab' ) && str_contains( $delivery_admin_source, 'render_calculation_tab' ), 'Delivery service admin must render real main/availability/calculation tabs.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'render_embedded_for_context' ), 'Service rules tab must use embedded reusable rules UI.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'render_russian_post_countries_tab' ) && str_contains( $delivery_admin_source, 'Страны Почты России' ), 'Russian Post countries must be embedded as a service tab.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'save_russian_post_settings' ) && str_contains( $delivery_admin_source, 'DeliveryServiceSettingsRepository' ), 'Russian Post calculation settings must save to delivery service settings storage.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'simulate_service_rules' ) && str_contains( $delivery_admin_source, 'QuoteRequest' ) && str_contains( $delivery_admin_source, 'RussianPostInternationalCarrier' ), 'Russian Post service rules simulation must call the real carrier quote flow.' );
+
+$settings_page_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Admin/SettingsAdminPage.php' );
+wdc_ds_assert( ! str_contains( $settings_page_source, 'russian_post_worldwide_parcel[' ), 'Platform settings page must not render Russian Post service-specific fields.' );
+
+$plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
+wdc_ds_assert( ! str_contains( $plugin_source, 'RussianPostCountriesAdminPage::class )->register()' ), 'Russian Post countries submenu must not be registered separately.' );
+
+$countries_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/RussianPost/Admin/RussianPostCountriesAdminPage.php' );
+wdc_ds_assert( str_contains( $countries_admin_source, 'render_embedded( string $return_url )' ) && str_contains( $countries_admin_source, 'wdc-rp-countries-admin' ), 'Russian Post countries admin must support embedded rendering without a WordPress wrap.' );
+wdc_ds_assert( str_contains( $countries_admin_source, 'hidden_return_field' ) && str_contains( $countries_admin_source, 'redirect_after_post' ) && str_contains( $countries_admin_source, 'wdc_rp_return_url' ), 'Russian Post countries actions must redirect back to the service tab.' );
+
 echo "Delivery services smoke test passed.\n";

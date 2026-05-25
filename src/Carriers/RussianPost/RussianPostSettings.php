@@ -4,6 +4,9 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\RussianPost;
 
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -13,7 +16,9 @@ final class RussianPostSettings {
 	public const TITLE       = 'Почта России — международная доставка';
 
 	public function __construct(
-		private SettingsRepository $settings
+		private SettingsRepository $settings,
+		private ?DeliveryServiceRepository $services = null,
+		private ?DeliveryServiceSettingsRepository $service_settings = null
 	) {
 	}
 
@@ -23,6 +28,11 @@ final class RussianPostSettings {
 	public function all(): array {
 		$settings = $this->settings->all();
 		$service  = is_array( $settings['russian_post_worldwide_parcel'] ?? null ) ? $settings['russian_post_worldwide_parcel'] : array();
+		$delivery_service = $this->services instanceof DeliveryServiceRepository ? $this->services->find_by_service_key( self::SERVICE_KEY ) : null;
+		if ( $delivery_service instanceof DeliveryService && $this->service_settings instanceof DeliveryServiceSettingsRepository && null !== $delivery_service->id ) {
+			$service = array_merge( $service, $this->service_settings->all_settings( (int) $delivery_service->id ) );
+			$service['enabled'] = $delivery_service->enabled;
+		}
 
 		return array_merge(
 			$this->defaults(),

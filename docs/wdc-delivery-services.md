@@ -1,6 +1,6 @@
 # WDC Delivery Services
 
-Version 0.21.0 adds the permanent delivery-service foundation. Version 0.21.1 adds reusable service-specific rules admin on top of the same storage model. The model is intentionally table-based, not a single serialized option, so it can grow to API carriers, fixed-rate services, weight-based services, user-created services, service settings, pickup logic, credentials references, statistics, debug data, and history.
+Version 0.21.0 adds the permanent delivery-service foundation. Version 0.21.1 adds reusable service-specific rules admin on top of the same storage model. Version 0.21.3 turns the service edit screen into real per-tab administration. The model is intentionally table-based, not a single serialized option, so it can grow to API carriers, fixed-rate services, weight-based services, user-created services, service settings, pickup logic, credentials references, statistics, debug data, and history.
 
 ## Tables
 
@@ -37,7 +37,15 @@ No rules or built-in markups are created automatically.
 
 The admin page is `Калькулятор доставок → Службы доставки` (`wdc-delivery-services`). It lists services, availability, countries, rule fallback, rounding, minimum price, sort order, and actions for enable/disable, edit, delete, and future service creation.
 
-The service edit page is `admin.php?page=wdc-delivery-services&service=<service_key>` and exposes the foundation tabs: `Основное`, `Доступность`, `Расчет`, `Правила`.
+The service edit page is `admin.php?page=wdc-delivery-services&service=<service_key>` and exposes real tabs:
+
+- `Основное`: service key, title, carrier key, service type, enabled state, sort order, and default-rule fallback.
+- `Доступность`: availability mode plus the selected/all-except country list. `carrier_directory` services show that availability is driven by the carrier directory. Russian Post also links to its countries tab.
+- `Расчет`: service post-processing (`round_up_to_ruble`, `minimum_price_rub`) and service-specific calculation settings.
+- `Правила`: embedded reusable rules admin for `target_type=service`.
+- `Страны Почты России`: only for `russian_post_worldwide_parcel`; embeds the Russian Post country mapping admin.
+
+Russian Post international service settings now live on the service `Расчет` tab and are saved to `wdc_delivery_service_settings`: API endpoint, country endpoint, origin postcode, object code, ISAVIA flag, timeout, VAT rate, max package weight, fallback controls, cache-until-end-of-day, auto-refresh-countries-if-empty, debug flag, and packaging tiers. The service `enabled` flag is authoritative and is not duplicated as a Russian Post setting.
 
 ## Service Rules
 
@@ -51,3 +59,5 @@ The `Правила` tab embeds the same reusable rules admin controller used by
 If a service has no own rules, the tab shows an empty-state message, a link to default rules, and `Скопировать дефолтные правила`. Copying default rules appends new service-targeted copies to the end of the service list. It preserves names, enabled state, order, action, operation, conditions, group logic/expression, promo flag, stop-processing flag, and comment text, but does not reuse ids or timestamps and does not delete existing service rules.
 
 Service simulation uses only rules from the current service target. It does not automatically mix in default fallback; if the service has no own rules, the simulation reports that own rules are not configured.
+
+For Russian Post the service simulation performs a real service quote first, using destination country, package weight, order total, and calculation date. The screen then shows API/base price, final price after service rules, audit details, source/fallback/cache metadata, and delivery days when available. Default rules page simulation remains a pure rule simulation over the administrator-entered base delivery price and does not call carrier APIs.

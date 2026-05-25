@@ -30,6 +30,10 @@ As of version 0.21.1, only enabled service rules count as service-specific runti
 
 The quote cache key includes `service_key` in addition to carrier, package, destination, total, delivery type, and date. Different services backed by the same carrier no longer share cached quotes.
 
+As of version 0.21.3, Russian Post carrier settings are read from the delivery service settings table rather than the platform settings page. The Russian Post calculation tab writes service-specific endpoints, origin/tariff controls, timeout, VAT, fallback, debug, cache, country-refresh, max-weight, and packaging-tier values. The service row `enabled` state remains the single authoritative enable switch.
+
+Admin simulation has two modes. The default rules page applies rules to the entered delivery price only. The service rules tab performs a real service quote first, then applies enabled service rules only; default fallback is intentionally not mixed into service simulation.
+
 As of version 0.19.0, `russian_post` / `russian_post_worldwide_parcel` is registered as the real “Почта России — международная доставка” carrier. It is international-only, excludes `RU`, uses the new `Package` weight plus shared packaging tiers, and returns a zero-cost manager fallback instead of failing checkout for API errors, missing tariff/price, unsupported country, or overweight.
 
 As of version 0.19.2, Russian Post country support is read from the persistent `wdc_russian_post_country_mappings` table. Checkout does not rely on live country dictionary calls by default. If a destination country has no enabled mapping, the carrier returns its configured fallback/no-rate behavior with `unsupported_country_{code}`.

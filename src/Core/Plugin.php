@@ -143,7 +143,7 @@ final class Plugin {
 		$this->container->register( RuleEvaluator::class, fn(): RuleEvaluator => new RuleEvaluator( $this->container->get( ConditionEvaluator::class ) ) );
 		$this->container->register( RuleEngine::class, fn(): RuleEngine => new RuleEngine( $this->container->get( RuleEvaluator::class ) ) );
 		$this->container->register( RuleSimulator::class, fn(): RuleSimulator => new RuleSimulator( $this->container->get( RuleEngine::class ) ) );
-		$this->container->register( RussianPostSettings::class, fn(): RussianPostSettings => new RussianPostSettings( $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( RussianPostSettings::class, fn(): RussianPostSettings => new RussianPostSettings( $this->container->get( SettingsRepository::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
 		$this->container->register( RussianPostApiClient::class, fn(): RussianPostApiClient => new RussianPostApiClient( $this->container->get( RussianPostSettings::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( RussianPostCountryMappingRepository::class, fn(): RussianPostCountryMappingRepository => new RussianPostCountryMappingRepository() );
 		$this->container->register( RussianPostCountryMappingService::class, fn(): RussianPostCountryMappingService => new RussianPostCountryMappingService( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostApiClient::class ), $this->container->get( Logger::class ) ) );
@@ -356,7 +356,7 @@ final class Plugin {
 		);
 		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ), $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( RussianPostSettings::class ) ) );
 		$this->container->register( RussianPostCountriesAdminPage::class, fn(): RussianPostCountriesAdminPage => new RussianPostCountriesAdminPage( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ) ) );
-		$this->container->register( DeliveryServicesAdminPage::class, fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceCountryRepository::class ), $this->container->get( RulesAdminPage::class ), $this->container->get( RuleRepository::class ) ) );
+		$this->container->register( DeliveryServicesAdminPage::class, fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceCountryRepository::class ), $this->container->get( RulesAdminPage::class ), $this->container->get( RuleRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ), $this->container->get( RussianPostSettings::class ), $this->container->get( RussianPostCountriesAdminPage::class ), $this->container->get( RussianPostInternationalCarrier::class ), $this->container->get( RuleAppliedRateBuilder::class ), $this->container->get( DeliveryServiceManager::class ) ) );
 		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox() );
 	}
 
@@ -388,7 +388,6 @@ final class Plugin {
 			$this->container->get( RulesAdminPage::class )->register();
 			$this->container->get( CheckoutSimulationPage::class )->register();
 			$this->container->get( PickupAdminPage::class )->register();
-			$this->container->get( RussianPostCountriesAdminPage::class )->register();
 			$this->container->get( DeliveryServicesAdminPage::class )->register();
 			$this->container->get( OrderDeliveryMetabox::class )->register();
 		}

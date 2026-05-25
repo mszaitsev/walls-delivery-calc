@@ -8,7 +8,7 @@ use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 
 final class Rule {
-	public const DEFAULT_GROUP_EXPRESSION = 'condition_1_or_2_or_3';
+	public const DEFAULT_GROUP_EXPRESSION = 'condition_1';
 
 	private const GROUP_EXPRESSIONS = array(
 		'condition_1',
