@@ -100,6 +100,7 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 				'carrier_country_id' => (string) $country['carrier_country_id'],
 				'country_name' => (string) ( $country['name'] ?? '' ),
 			),
+			'no_pickup_selection' => true,
 			'package' => $package->to_array(),
 		);
 
@@ -179,6 +180,7 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 					'fallback_text' => $comment,
 					'round_up_applied' => false,
 					'minimum_price_applied' => false,
+					'no_pickup_selection' => true,
 					'package' => $package->to_array(),
 				),
 				$extra

@@ -33,6 +33,10 @@ final class CheckoutValidation {
 			return;
 		}
 
+		if ( $this->rate_skips_pickup_selection( $rate ) ) {
+			return;
+		}
+
 		if ( $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) ) ) {
 			return;
 		}
@@ -62,6 +66,22 @@ final class CheckoutValidation {
 		if ( function_exists( 'wc_add_notice' ) ) {
 			wc_add_notice( __( 'Выберите пункт выдачи.', 'walls-delivery-calc' ), 'error' );
 		}
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function rate_skips_pickup_selection( array $rate ): bool {
+		if ( ! empty( $rate['no_pickup_selection'] ) ) {
+			return true;
+		}
+
+		$meta = $rate['rate_meta'] ?? array();
+		if ( is_array( $meta ) && ! empty( $meta['no_pickup_selection'] ) ) {
+			return true;
+		}
+
+		return false;
 	}
 
 	private function add_city_error( mixed $errors = null ): void {

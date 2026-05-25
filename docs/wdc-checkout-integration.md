@@ -46,6 +46,8 @@ For Russian Post service availability, `carrier_directory` no longer filters out
 
 Russian Post terminal fallback rates carry `fallback=true`, `terminal_fallback=true`, `skip_rules=true`, and `skip_service_post_processing=true`. Checkout skips rule evaluation, service customer comments, minimum price, and ruble rounding for those rates. The fallback text is not duplicated in comments.
 
+As of 0.21.11, Russian Post international keeps `delivery_type=pickup` but does not require a customer-selected pickup point. Its rates carry `no_pickup_selection=true`. Checkout validation and the pickup selector UI both honor that flag: Russian Post passes without a selected pickup point, while other pickup carriers still require one when their rate requires pickup selection.
+
 As of version 0.20.0, `CarrierRegistry` registers the real Russian Post international carrier only. The previous demo carrier toggle and demo pickup provider are test fixtures only and are not registered by `Plugin`.
 
 ## Session persistence

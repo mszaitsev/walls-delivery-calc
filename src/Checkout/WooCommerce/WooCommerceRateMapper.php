@@ -38,6 +38,7 @@ final class WooCommerceRateMapper {
 				'rate_meta'       => $rate->meta,
 				'requires_pickup_point' => $rate->requires_pickup_point,
 				'requires_courier_address' => $rate->requires_courier_address,
+				'no_pickup_selection' => ! empty( $rate->meta['no_pickup_selection'] ),
 				'fallback_used'   => $fallback_used || 'fallback' === $rate->carrier_key,
 			),
 		);

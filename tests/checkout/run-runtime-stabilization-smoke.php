@@ -772,6 +772,27 @@ WC()->session->set( 'chosen_shipping_methods', array( 'demo:courier' ) );
 ( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
 runtime_smoke_assert( array() === $errors->errors, 'Courier rate must ignore stale pickup selection.' );
 
+$validation_session->clear_pickup_selection();
+$validation_session->save_rates(
+	array(
+		'russian_post_worldwide_parcel' => array(
+			'carrier_key'            => 'russian_post',
+			'rate_id'                => 'russian_post_worldwide_parcel',
+			'service_key'            => 'russian_post_worldwide_parcel',
+			'delivery_type'          => DeliveryType::PICKUP,
+			'requires_pickup_point'  => false,
+			'no_pickup_selection'    => true,
+			'rate_meta'              => array(
+				'no_pickup_selection'   => true,
+			),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_worldwide_parcel' ) );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Russian Post international pickup rate must validate without pickup point selection.' );
+
 $repo = new PickupPointRepository();
 $repo->save_many( ( new TestPickupProvider( dirname( __DIR__ ) . '/fixtures/demo/pickup-points-demo.json' ) )->load_points() );
 runtime_smoke_assert( count( $repo->search( 'demo', 'RU', 'Новосибирск' ) ) >= 3, 'Demo pickup search must find Новосибирск.' );
@@ -794,6 +815,40 @@ $renderer->render( $rate );
 $selector_output = (string) ob_get_clean();
 runtime_smoke_assert( ! str_contains( $selector_output, 'wdc_platform_delivery_type' ), 'Delivery type radio must not render.' );
 runtime_smoke_assert( str_contains( $selector_output, 'Выберите пункт выдачи' ), 'Pickup selector label must be Russian.' );
+
+$rp_rate = new class {
+	public function get_meta_data(): array {
+		return array(
+			'carrier_key'           => 'russian_post',
+			'rate_id'               => 'russian_post_worldwide_parcel',
+			'service_key'           => 'russian_post_worldwide_parcel',
+			'delivery_type'         => 'pickup',
+			'requires_pickup_point' => true,
+			'no_pickup_selection'   => true,
+			'rate_meta'             => array(
+				'no_pickup_selection'   => true,
+			),
+		);
+	}
+};
+ob_start();
+$renderer->render( $rp_rate );
+$rp_selector_output = (string) ob_get_clean();
+runtime_smoke_assert( ! str_contains( $rp_selector_output, 'Выберите пункт выдачи' ) && ! str_contains( $rp_selector_output, 'wdc-platform-pickup-point' ), 'Russian Post international must not render pickup selector UI.' );
+
+$pickup_mode_scan = '';
+foreach ( array( '/src', '/tests', '/docs' ) as $scan_dir ) {
+	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . $scan_dir ) );
+	foreach ( $iterator as $scan_file ) {
+		if ( $scan_file->isFile() ) {
+			$pickup_mode_scan .= (string) file_get_contents( $scan_file->getPathname() );
+		}
+	}
+}
+$removed_pickup_mode_key = 'pickup_selection_' . 'mode';
+$removed_pickup_mode_value = 'post_' . 'office';
+runtime_smoke_assert( ! str_contains( $pickup_mode_scan, $removed_pickup_mode_key ), 'Removed pickup selection mode key must not be referenced after cleanup.' );
+runtime_smoke_assert( ! str_contains( $pickup_mode_scan, $removed_pickup_mode_value ), 'Removed technical pickup mode value must not be referenced after cleanup.' );
 
 $sort_session = new CheckoutSessionManager();
 $sort_selector = new CheckoutSortSelector( $sort_session, $settings );

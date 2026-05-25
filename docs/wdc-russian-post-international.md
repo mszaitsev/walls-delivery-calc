@@ -1,6 +1,6 @@
 # WDC Russian Post International Carrier
 
-Version: 0.21.9.
+Version: 0.21.11.
 
 ## Scope
 
@@ -18,7 +18,7 @@ The plugin is fresh-install-only for this runtime generation. Legacy compatibili
 
 The carrier supports only non-RU destinations. `RU` is excluded in `supports_country()` and direct quotes for RU return no ordinary rate.
 
-Russian Post international is exposed as `DeliveryType::PICKUP`. It does not require selecting a pickup point and does not render the old automatic courier-address notice. If the service has a pickup customer comment, that comment is shown for normal Russian Post rates.
+Russian Post international is exposed as `DeliveryType::PICKUP`. It does not require selecting a pickup point and does not render the old automatic courier-address notice. Runtime marks both normal and fallback rates with `no_pickup_selection=true`; this is enough for checkout validation and pickup UI bypass. If the service has a pickup customer comment, that comment is shown for normal Russian Post rates.
 
 ## Pricing
 
@@ -36,6 +36,7 @@ API errors, zero or missing tariff/price, unsupported countries, disabled countr
 - `meta.terminal_fallback = true`
 - `meta.skip_rules = true`
 - `meta.skip_service_post_processing = true`
+- `meta.no_pickup_selection = true`
 - `meta.fallback_reason`
 - safe API/package metadata without secrets
 

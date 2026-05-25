@@ -227,6 +227,8 @@ rp_smoke_assert( $quote->has_available_rates(), 'API success must return a rate.
 rp_smoke_assert( 12000 === $quote->rates[0]->price->get_kopecks(), 'API price without VAT must apply VAT once and return base price without built-in formula.' );
 rp_smoke_assert( false === $quote->rates[0]->meta['api_price_has_vat'], 'No-VAT source price must be marked as without VAT.' );
 rp_smoke_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && ! $quote->rates[0]->requires_courier_address, 'Russian Post international rate must be treated as pickup without courier address notice.' );
+$removed_pickup_mode_key = 'pickup_selection_' . 'mode';
+rp_smoke_assert( ! $quote->rates[0]->requires_pickup_point && ! empty( $quote->rates[0]->meta['no_pickup_selection'] ) && ! array_key_exists( $removed_pickup_mode_key, $quote->rates[0]->meta ), 'Russian Post international rate must bypass explicit pickup point selection with no_pickup_selection only.' );
 $orchestrator_reflection = new ReflectionClass( CheckoutOrchestrator::class );
 $service_rate_method = $orchestrator_reflection->getMethod( 'rate_for_service' );
 $service_rate_method->setAccessible( true );
@@ -258,6 +260,7 @@ rp_smoke_assert( 0 === $quote->rates[0]->price->get_kopecks(), 'Fallback rate mu
 rp_smoke_assert( 'http_status_500' === $quote->rates[0]->meta['fallback_reason'], 'Fallback must keep reason in meta.' );
 rp_smoke_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && 'Стоимость доставки рассчитает менеджер' === $quote->rates[0]->title && array() === $quote->rates[0]->comments && '' === $quote->rates[0]->planned_delivery_comment, 'Russian Post terminal fallback must expose fallback text as title only.' );
 rp_smoke_assert( ! empty( $quote->rates[0]->meta['skip_rules'] ) && ! empty( $quote->rates[0]->meta['skip_service_post_processing'] ) && ! empty( $quote->rates[0]->meta['terminal_fallback'] ), 'Russian Post fallback must request skipped rules and service post-processing.' );
+rp_smoke_assert( ! $quote->rates[0]->requires_pickup_point && ! empty( $quote->rates[0]->meta['no_pickup_selection'] ) && ! array_key_exists( $removed_pickup_mode_key, $quote->rates[0]->meta ), 'Russian Post fallback must bypass explicit pickup point selection with no_pickup_selection only.' );
 
 $fallback_rule = new Rule( null, 'Add 100', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 100, RuleOperationBases::RUBLES, false, false );
 $fallback_comment_rule = new Rule( null, 'Fallback comment', true, 20, 'default', '', RuleActionTypes::ADD_COMMENT, RuleOperationTypes::EQUALS, 0, RuleOperationBases::RUBLES, false, false, array(), array( 1 => 'and', 2 => 'and', 3 => 'and' ), 'Комментарий правила' );
