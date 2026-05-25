@@ -335,7 +335,8 @@ final class Plugin {
 				$this->container->get( GarPlacesCsvImporter::class ),
 				$this->container->get( LocationsSnapshotExporter::class ),
 				$this->container->get( LocationsSnapshotImporter::class ),
-				$this->container->get( DaDataPostcodeClient::class )
+				$this->container->get( DaDataPostcodeClient::class ),
+				$this->container->get( LocationCountryIndexService::class )
 			)
 		);
 		$this->container->register(

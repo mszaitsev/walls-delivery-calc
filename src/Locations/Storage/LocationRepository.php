@@ -551,6 +551,42 @@ final class LocationRepository {
 	}
 
 	/**
+	 * @return array<string,int>
+	 */
+	public function country_counts(): array {
+		if ( property_exists( $this->wpdb, 'country_counts_calls' ) ) {
+			++$this->wpdb->country_counts_calls;
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$counts = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+					continue;
+				}
+				$country = $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) );
+				if ( '' === $country ) {
+					continue;
+				}
+				$counts[ $country ] = ( $counts[ $country ] ?? 0 ) + 1;
+			}
+			ksort( $counts );
+			return $counts;
+		}
+
+		$rows = $this->wpdb->get_results( "SELECT country_code, COUNT(*) AS location_count FROM {$this->table_name()} WHERE active = 1 AND country_code IS NOT NULL AND country_code != '' GROUP BY country_code ORDER BY country_code ASC", ARRAY_A );
+		$counts = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$country = $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) );
+			if ( '' !== $country ) {
+				$counts[ $country ] = max( 0, (int) ( $row['location_count'] ?? 0 ) );
+			}
+		}
+		ksort( $counts );
+		return $counts;
+	}
+
+	/**
 	 * @return array<int,array<string,mixed>>
 	 */
 	public function next_postcode_batch( bool $cities_first, int $limit, int $last_id ): array {

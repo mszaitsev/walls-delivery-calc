@@ -17,10 +17,12 @@ final class LocationCountryIndexService {
 	 * @return array<int,string>
 	 */
 	public function rebuild(): array {
-		$countries = $this->normalize_codes( $this->repository->distinct_country_codes() );
+		$counts = $this->normalize_counts( $this->repository->country_counts() );
+		$countries = $this->normalize_codes( array_keys( $counts ) );
 		$this->update_option(
 			array(
 				'countries'  => $countries,
+				'counts'     => $counts,
 				'stale'      => false,
 				'rebuilt_at' => function_exists( 'current_time' ) ? current_time( 'mysql' ) : '',
 			)
@@ -44,6 +46,30 @@ final class LocationCountryIndexService {
 	public function has_country( string $country_code ): bool {
 		$country_code = $this->normalize_code( $country_code );
 		return '' !== $country_code && in_array( $country_code, $this->countries(), true );
+	}
+
+	/**
+	 * @return array<int,array{country_code:string,country_name:string,count:int}>
+	 */
+	public function countries_with_counts(): array {
+		$index = $this->option();
+		if ( ! array_key_exists( 'countries', $index ) || ! array_key_exists( 'counts', $index ) || ! empty( $index['stale'] ) ) {
+			$this->rebuild();
+			$index = $this->option();
+		}
+
+		$countries = $this->normalize_codes( is_array( $index['countries'] ?? null ) ? $index['countries'] : array() );
+		$counts = $this->normalize_counts( is_array( $index['counts'] ?? null ) ? $index['counts'] : array() );
+		$result = array();
+		foreach ( $countries as $country_code ) {
+			$result[] = array(
+				'country_code' => $country_code,
+				'country_name' => $this->country_name( $country_code ),
+				'count'        => $counts[ $country_code ] ?? 0,
+			);
+		}
+
+		return $result;
 	}
 
 	public function mark_stale(): void {
@@ -108,6 +134,40 @@ final class LocationCountryIndexService {
 
 	private function normalize_code( string $country_code ): string {
 		return self::normalize_code_static( $country_code );
+	}
+
+	/**
+	 * @param array<int|string,mixed> $counts
+	 * @return array<string,int>
+	 */
+	private function normalize_counts( array $counts ): array {
+		$normalized = array();
+		foreach ( $counts as $country_code => $count ) {
+			$country_code = $this->normalize_code( (string) $country_code );
+			if ( '' !== $country_code ) {
+				$normalized[ $country_code ] = max( 0, (int) $count );
+			}
+		}
+		ksort( $normalized );
+		return $normalized;
+	}
+
+	private function country_name( string $country_code ): string {
+		if ( ! function_exists( 'WC' ) ) {
+			return '';
+		}
+
+		$woocommerce = WC();
+		if ( ! is_object( $woocommerce ) || ! isset( $woocommerce->countries ) || ! is_object( $woocommerce->countries ) ) {
+			return '';
+		}
+
+		$countries = $woocommerce->countries->countries ?? array();
+		if ( ! is_array( $countries ) ) {
+			return '';
+		}
+
+		return isset( $countries[ $country_code ] ) ? (string) $countries[ $country_code ] : '';
 	}
 
 	private static function normalize_code_static( string $country_code ): string {

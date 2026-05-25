@@ -17,6 +17,7 @@ use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Import\LocationsSnapshotExporter;
 use WallsShop\WDC\Locations\Import\LocationsSnapshotImporter;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
+use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
 use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
 use WallsShop\WDC\Locations\Postcodes\DaDataPostcodeClient;
@@ -50,7 +51,8 @@ final class LocationsAdminPage {
 		private ?GarPlacesCsvImporter $gar_importer = null,
 		private ?LocationsSnapshotExporter $snapshot_exporter = null,
 		private ?LocationsSnapshotImporter $snapshot_importer = null,
-		private ?DaDataPostcodeClient $postcode_client = null
+		private ?DaDataPostcodeClient $postcode_client = null,
+		private ?LocationCountryIndexService $country_index = null
 	) {
 	}
 
@@ -108,6 +110,7 @@ final class LocationsAdminPage {
 			<?php endif; ?>
 
 			<div class="wdc-locations-summary">
+				<p><strong><?php echo esc_html__( 'Страны в базе:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->country_summary_label() ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'Населенных пунктов:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_all() ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'Регионов/областей:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_regions() ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'ФИАС/ГАР API-токен:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->fias_credentials instanceof FiasCredentials && $this->fias_credentials->has_token() ? 'задан' : 'не задан' ); ?></span></p>
@@ -227,6 +230,34 @@ final class LocationsAdminPage {
 		</div>
 		<?php $this->render_progress_script(); ?>
 		<?php
+	}
+
+	private function country_summary_label(): string {
+		if ( ! $this->country_index instanceof LocationCountryIndexService ) {
+			return __( 'нет данных', 'walls-delivery-calc' );
+		}
+
+		$countries = $this->country_index->countries_with_counts();
+		if ( array() === $countries ) {
+			return __( 'нет данных', 'walls-delivery-calc' );
+		}
+
+		return implode( ', ', array_map( array( $this, 'country_summary_item' ), $countries ) );
+	}
+
+	/**
+	 * @param array{country_code:string,country_name:string,count:int} $country
+	 */
+	private function country_summary_item( array $country ): string {
+		$country_code = strtoupper( trim( (string) ( $country['country_code'] ?? '' ) ) );
+		$country_name = trim( (string) ( $country['country_name'] ?? '' ) );
+		$label = '' !== $country_name ? $country_code . ' ' . $country_name : $country_code;
+
+		return sprintf( '%s (%s)', $label, $this->format_count( (int) ( $country['count'] ?? 0 ) ) );
+	}
+
+	private function format_count( int $count ): string {
+		return function_exists( 'number_format_i18n' ) ? number_format_i18n( $count ) : number_format( $count, 0, '.', ' ' );
 	}
 
 	private function render_location_row( Location $location ): void {

@@ -26,6 +26,31 @@ function update_option( string $key, mixed $value, bool|string $autoload = false
 	return true;
 }
 
+final class WdcLocationsSmokeWooCountries {
+	/** @var array<string,string> */
+	public array $countries = array(
+		'RU' => 'Россия',
+		'BY' => 'Беларусь',
+	);
+}
+
+final class WdcLocationsSmokeWoo {
+	public WdcLocationsSmokeWooCountries $countries;
+
+	public function __construct() {
+		$this->countries = new WdcLocationsSmokeWooCountries();
+	}
+}
+
+function WC(): WdcLocationsSmokeWoo {
+	static $woocommerce = null;
+	if ( null === $woocommerce ) {
+		$woocommerce = new WdcLocationsSmokeWoo();
+	}
+
+	return $woocommerce;
+}
+
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = '';
@@ -44,6 +69,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $missing_tables = array();
 
 		public int $distinct_country_codes_calls = 0;
+
+		public int $country_counts_calls = 0;
 
 		public function prepare( string $query, mixed ...$args ): array {
 			return array(
@@ -243,12 +270,20 @@ $imported = $importer->import_from_json_file( dirname( __DIR__ ) . '/fixtures/de
 locations_smoke_assert( $imported >= 9, sprintf( 'Demo dataset must import the stabilization demo locations, imported %d.', $imported ) );
 $initial_countries = $country_index->rebuild();
 locations_smoke_assert( in_array( 'RU', $initial_countries, true ), 'LocationCountryIndex rebuild returns RU for demo locations: ' . implode( ',', $initial_countries ) );
+$initial_country_option = get_option( LocationCountryIndexService::OPTION, array() );
+locations_smoke_assert( isset( $initial_country_option['counts']['RU'] ) && $initial_country_option['counts']['RU'] >= 1, 'LocationCountryIndex rebuild stores RU count.' );
 locations_smoke_assert( $country_index->has_country( 'RU' ), 'LocationCountryIndex has_country detects RU.' );
 locations_smoke_assert( ! $country_index->has_country( 'PL' ), 'LocationCountryIndex has_country rejects missing PL.' );
 $repository->save( locations_smoke_location( array( 'country_code' => 'BY', 'gar_object_id' => 880001, 'fias_id' => 'fias-by-minsk', 'region_code' => 'BY-MI', 'region_name' => 'Минская', 'place_name' => 'Минск', 'display_name' => 'Минск' ) ) );
 $repository->save( locations_smoke_location( array( 'country_code' => 'KZ', 'gar_object_id' => 880002, 'fias_id' => 'fias-kz-almaty', 'region_code' => 'KZ-ALA', 'region_name' => 'Алматы', 'place_name' => 'Алматы', 'display_name' => 'Алматы' ) ) );
 $multi_countries = $country_index->rebuild();
 locations_smoke_assert( array() === array_diff( array( 'RU', 'BY', 'KZ' ), $multi_countries ), 'LocationCountryIndex rebuild returns RU/BY/KZ when fixtures include them.' );
+$multi_countries_with_counts = $country_index->countries_with_counts();
+$multi_country_counts_by_code = array_column( $multi_countries_with_counts, 'count', 'country_code' );
+$multi_country_names_by_code = array_column( $multi_countries_with_counts, 'country_name', 'country_code' );
+locations_smoke_assert( isset( $multi_country_counts_by_code['BY'] ) && $multi_country_counts_by_code['BY'] >= 1, 'LocationCountryIndex countries_with_counts returns BY count.' );
+locations_smoke_assert( 'Россия' === ( $multi_country_names_by_code['RU'] ?? '' ), 'LocationCountryIndex countries_with_counts uses WooCommerce country names.' );
+locations_smoke_assert( '' === ( $multi_country_names_by_code['KZ'] ?? null ), 'LocationCountryIndex countries_with_counts falls back to empty name when WooCommerce has no name.' );
 locations_smoke_assert( $repository->count_all() > 0, 'Repository count must be greater than zero.' );
 locations_smoke_assert( method_exists( $repository, 'count_regions' ), 'LocationRepository must expose count_regions method.' );
 locations_smoke_assert( $repository->count_regions() >= 5, 'Repository must count unique active regions.' );
@@ -289,14 +324,32 @@ locations_smoke_assert( 'Новосибирск, Красный проспект
 $_SERVER['REQUEST_METHOD'] = 'GET';
 $_GET                      = array();
 $_POST                     = array();
+update_option(
+	LocationCountryIndexService::OPTION,
+	array(
+		'countries'  => array( 'RU', 'BY', 'ZZ' ),
+		'counts'     => array(
+			'RU' => 123,
+			'BY' => 456,
+			'ZZ' => 7,
+		),
+		'stale'      => false,
+		'rebuilt_at' => '2026-05-21 12:00:00',
+	)
+);
 ob_start();
 ( new LocationsAdminPage(
 	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.12.13' ),
 	$repository,
 	$search,
-	$importer
+	$importer,
+	country_index: $country_index
 ) )->render_page();
 $locations_html = (string) ob_get_clean();
+locations_smoke_assert( str_contains( $locations_html, 'Страны в базе:' ), 'Locations admin page must render country summary label.' );
+locations_smoke_assert( str_contains( $locations_html, 'RU Россия (123)' ), 'Locations admin country summary must render RU name and count.' );
+locations_smoke_assert( str_contains( $locations_html, 'BY Беларусь (456)' ), 'Locations admin country summary must render BY name and count.' );
+locations_smoke_assert( str_contains( $locations_html, 'ZZ (7)' ), 'Locations admin country summary must fall back to country code without WooCommerce name.' );
 locations_smoke_assert( str_contains( $locations_html, 'Регионов/областей:' ), 'Locations admin page must render regions counter label.' );
 
 locations_smoke_assert( str_contains( $locations_html, 'Очистить базу населенных пунктов' ), 'Locations admin page must render clear locations button.' );
@@ -322,12 +375,15 @@ $empty_wpdb = new wpdb();
 $empty_repository = new LocationRepository( $empty_wpdb );
 $empty_index = new LocationCountryIndexService( $empty_repository );
 locations_smoke_assert( array() === $empty_index->countries(), 'Empty locations table first countries() call rebuilds and returns empty list.' );
-locations_smoke_assert( 1 === $empty_wpdb->distinct_country_codes_calls, 'Empty locations table first countries() call runs one distinct country lookup.' );
+$empty_country_option = get_option( LocationCountryIndexService::OPTION, array() );
+locations_smoke_assert( isset( $empty_country_option['counts'] ) && array() === $empty_country_option['counts'] && false === $empty_country_option['stale'], 'Empty locations table rebuild stores empty counts with stale=false.' );
+locations_smoke_assert( array() === $empty_index->countries_with_counts(), 'Empty locations table countries_with_counts returns empty list.' );
+locations_smoke_assert( 1 === $empty_wpdb->country_counts_calls, 'Empty locations table first countries() call runs one country counts lookup.' );
 locations_smoke_assert( array() === $empty_index->countries(), 'Empty locations table second countries() call returns cached empty list.' );
-locations_smoke_assert( 1 === $empty_wpdb->distinct_country_codes_calls, 'Empty cached countries() call must not rebuild again.' );
+locations_smoke_assert( 1 === $empty_wpdb->country_counts_calls, 'Empty cached countries() call must not rebuild again.' );
 $empty_index->mark_stale();
 locations_smoke_assert( array() === $empty_index->countries(), 'Marked stale empty country index rebuilds and still returns empty list.' );
-locations_smoke_assert( 2 === $empty_wpdb->distinct_country_codes_calls, 'mark_stale allows the next countries() call to rebuild once.' );
+locations_smoke_assert( 2 === $empty_wpdb->country_counts_calls, 'mark_stale allows the next countries() call to rebuild once.' );
 $alias_clear_index = -1;
 $location_clear_index = -1;
 foreach ( $wpdb->queries as $index => $query ) {
