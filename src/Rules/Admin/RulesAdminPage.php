@@ -11,6 +11,8 @@ use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleAuditEntry;
 use WallsShop\WDC\Rules\Domain\RuleCondition;
@@ -41,10 +43,19 @@ final class RulesAdminPage {
 	/** @var array<string,mixed> */
 	private array $simulation_input = array();
 
+	/** @var array<string,mixed> */
+	private array $service_simulation = array();
+
+	/** @var callable|null */
+	private $service_simulation_runner = null;
+
+	private ?RuleAdminContext $context = null;
+
 	public function __construct(
 		private PluginEnvironment $environment,
 		private RuleRepository $repository,
-		private RuleSimulator $simulator
+		private RuleSimulator $simulator,
+		private ?SettingsRepository $settings = null
 	) {
 	}
 
@@ -59,7 +70,7 @@ final class RulesAdminPage {
 	}
 
 	public function enqueue_assets( string $hook_suffix ): void {
-		if ( ! str_contains( $hook_suffix, self::PAGE_SLUG ) ) {
+		if ( ! str_contains( $hook_suffix, self::PAGE_SLUG ) && ! str_contains( $hook_suffix, 'wdc-delivery-services' ) ) {
 			return;
 		}
 
@@ -71,54 +82,126 @@ final class RulesAdminPage {
 	}
 
 	public function render_page(): void {
+		$this->context = RuleAdminContext::default();
+		$this->service_simulation_runner = null;
+		if ( 'packaging' === $this->current_tab() ) {
+			$this->render_packaging_page();
+			return;
+		}
+		$this->render_full_for_current_context();
+	}
+
+	public function render_for_context( RuleAdminContext $context ): void {
+		$this->context = $context;
+		$this->render_full_for_current_context();
+	}
+
+	public function set_service_simulation_runner( ?callable $runner ): void {
+		$this->service_simulation_runner = $runner;
+	}
+
+	public function render_embedded_for_context( RuleAdminContext $context ): void {
+		$this->context = $context;
 		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return;
 		}
 
+		$data = $this->prepare_current_context_render();
+		?>
+		<div class="wdc-rules-admin wdc-rules-admin-embedded">
+			<?php $this->render_context_body( $data['rules'], $data['edit_rule'] ); ?>
+		</div>
+		<?php
+	}
+
+	private function render_full_for_current_context(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			return;
+		}
+
+		$data = $this->prepare_current_context_render();
+		?>
+		<div class="wrap wdc-rules-admin">
+			<h1><?php echo esc_html( $this->context()->list_title ); ?></h1>
+			<?php $this->render_full_tabs( 'rules' ); ?>
+			<p class="description"><?php echo esc_html( $this->context()->is_default() ? __( 'Эти правила применяются по умолчанию для служб доставки, у которых нет включенных собственных правил.', 'walls-delivery-calc' ) : __( 'Эти правила применяются только для выбранной службы доставки. Симуляция на этой вкладке не подмешивает дефолтные правила.', 'walls-delivery-calc' ) ); ?></p>
+			<?php $this->render_context_body( $data['rules'], $data['edit_rule'] ); ?>
+		</div>
+		<?php
+	}
+
+	private function render_full_tabs( string $active ): void {
+		?>
+		<nav class="nav-tab-wrapper">
+			<a class="nav-tab <?php echo 'rules' === $active ? 'nav-tab-active' : ''; ?>" href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG ) ); ?>"><?php echo esc_html__( 'Правила', 'walls-delivery-calc' ); ?></a>
+			<a class="nav-tab <?php echo 'packaging' === $active ? 'nav-tab-active' : ''; ?>" href="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=packaging' ) ); ?>"><?php echo esc_html__( 'Упаковка', 'walls-delivery-calc' ); ?></a>
+		</nav>
+		<?php
+	}
+
+	private function current_tab(): string {
+		return isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'rules';
+	}
+
+	/**
+	 * @return array{rules:array<int,Rule>,edit_rule:?Rule}
+	 */
+	private function prepare_current_context_render(): array {
 		$this->handle_post();
 		$this->load_simulation_from_request();
 
-		$rules     = $this->repository->get_all_default_rules();
+		$rules     = $this->repository->get_all_rules_for_target( $this->context()->target_type, $this->context()->target_value );
 		$edit_rule = $this->form_rule;
 		if ( null === $edit_rule ) {
 			$edit_id = isset( $_GET['edit_rule'] ) ? absint( wp_unslash( $_GET['edit_rule'] ) ) : 0;
 			if ( $edit_id > 0 ) {
 				$loaded = $this->repository->get_rule( $edit_id );
-				if ( $loaded instanceof Rule && RuleRepository::TARGET_DEFAULT === $loaded->target_type ) {
+				if ( $this->rule_matches_context( $loaded ) ) {
 					$edit_rule = $loaded;
 				}
 			}
 		}
 
+		return array(
+			'rules'     => $rules,
+			'edit_rule' => $edit_rule,
+		);
+	}
+
+	/**
+	 * @param array<int,Rule> $rules
+	 */
+	private function render_context_body( array $rules, ?Rule $edit_rule ): void {
 		?>
-		<div class="wrap wdc-rules-admin">
-			<h1><?php echo esc_html__( 'Правила расчета', 'walls-delivery-calc' ); ?></h1>
-			<p class="description"><?php echo esc_html__( 'Эти правила применяются по умолчанию для транспортных компаний, у которых не настроены собственные правила.', 'walls-delivery-calc' ); ?></p>
+		<?php $this->render_notices(); ?>
 
-			<?php $this->render_notices(); ?>
-
-			<div class="wdc-rules-toolbar">
-				<a class="button button-primary" href="<?php echo esc_url( $this->page_url( array( 'new_rule' => 1 ) ) ); ?>"><?php echo esc_html__( 'Добавить правило', 'walls-delivery-calc' ); ?></a>
-				<a class="button" href="#wdc-rules-simulation"><?php echo esc_html__( 'Проверить правила', 'walls-delivery-calc' ); ?></a>
-			</div>
-
-			<section class="wdc-rules-scope">
-				<strong><?php echo esc_html__( 'Дефолтные правила', 'walls-delivery-calc' ); ?></strong>
-				<span><?php echo esc_html__( 'target_type=default, target_value пустой. Условия внутри группы работают как AND, разные группы как OR.', 'walls-delivery-calc' ); ?></span>
-			</section>
-
-			<?php $this->render_rules_table( $rules ); ?>
-
-			<?php if ( $this->should_show_form( $edit_rule ) ) : ?>
-				<?php $this->render_rule_form( $edit_rule ?? $this->empty_rule() ); ?>
-			<?php endif; ?>
-
-			<?php $this->render_simulation_form(); ?>
-
-			<?php if ( $this->simulation instanceof RuleEngineResult ) : ?>
-				<?php $this->render_simulation( $this->simulation ); ?>
-			<?php endif; ?>
+		<div class="wdc-rules-toolbar">
+			<a class="button button-primary" href="<?php echo esc_url( $this->page_url( array( 'new_rule' => 1 ) ) ); ?>"><?php echo esc_html__( 'Добавить правило', 'walls-delivery-calc' ); ?></a>
+			<a class="button" href="#wdc-rules-simulation"><?php echo esc_html__( 'Проверить правила', 'walls-delivery-calc' ); ?></a>
 		</div>
+
+		<section class="wdc-rules-scope">
+			<strong><?php echo esc_html( $this->context()->list_title ); ?></strong>
+			<span><?php echo esc_html( sprintf( 'target_type=%s, target_value=%s. Условия внутри каждой группы и сочетание групп настраиваются в блоке «Условия применения».', $this->context()->target_type, '' === $this->context()->target_value ? 'empty' : $this->context()->target_value ) ); ?></span>
+		</section>
+
+		<?php $this->render_rules_table( $rules ); ?>
+
+		<?php if ( $this->should_show_form( $edit_rule ) ) : ?>
+			<?php $this->render_rule_form( $edit_rule ?? $this->empty_rule() ); ?>
+		<?php endif; ?>
+
+		<?php if ( $this->context()->allow_simulation ) : ?>
+			<?php $this->render_simulation_form(); ?>
+		<?php endif; ?>
+
+		<?php if ( array() !== $this->service_simulation ) : ?>
+			<?php $this->render_service_simulation( $this->service_simulation ); ?>
+		<?php endif; ?>
+
+		<?php if ( $this->simulation instanceof RuleEngineResult ) : ?>
+			<?php $this->render_simulation( $this->simulation ); ?>
+		<?php endif; ?>
 		<?php
 	}
 
@@ -131,6 +214,7 @@ final class RulesAdminPage {
 			'duplicated' => __( 'Копия правила создана и отключена.', 'walls-delivery-calc' ),
 			'moved'      => __( 'Порядок правил изменен.', 'walls-delivery-calc' ),
 			'simulated'  => __( 'Симуляция завершена.', 'walls-delivery-calc' ),
+			'copied'     => __( 'Дефолтные правила скопированы в службу.', 'walls-delivery-calc' ),
 		);
 
 		if ( isset( $messages[ $notice ] ) ) {
@@ -174,7 +258,7 @@ final class RulesAdminPage {
 			</thead>
 			<tbody>
 				<?php if ( array() === $rules ) : ?>
-					<tr><td colspan="9"><?php echo esc_html__( 'Дефолтные правила пока не созданы.', 'walls-delivery-calc' ); ?></td></tr>
+					<tr><td colspan="9"><?php echo esc_html( $this->context()->empty_message ); ?></td></tr>
 				<?php endif; ?>
 				<?php foreach ( $rules as $index => $rule ) : ?>
 					<tr draggable="true" data-rule-row data-rule-id="<?php echo esc_attr( (string) $rule->id ); ?>">
@@ -182,7 +266,7 @@ final class RulesAdminPage {
 						<td><span class="wdc-drag-handle" aria-hidden="true">↕</span><?php echo esc_html( (string) ( $index + 1 ) ); ?></td>
 						<td>
 							<strong><?php echo esc_html( $rule->name ); ?></strong>
-							<small><?php echo esc_html__( 'Дефолтные правила', 'walls-delivery-calc' ); ?></small>
+							<small><?php echo esc_html( $this->context()->is_default() ? __( 'Дефолтные правила', 'walls-delivery-calc' ) : __( 'Правила службы', 'walls-delivery-calc' ) ); ?></small>
 						</td>
 						<td><?php echo esc_html( $this->conditions_summary( $rule ) ); ?></td>
 						<td><?php echo esc_html( $this->action_label( $rule->action_type ) ); ?></td>
@@ -340,6 +424,11 @@ final class RulesAdminPage {
 	}
 
 	private function render_simulation_form(): void {
+		if ( ! $this->context()->is_default() && is_callable( $this->service_simulation_runner ) ) {
+			$this->render_service_simulation_form();
+			return;
+		}
+
 		$input = $this->simulation_input + $this->default_simulation_input();
 		?>
 		<section class="wdc-rules-card" id="wdc-rules-simulation">
@@ -453,13 +542,32 @@ final class RulesAdminPage {
 
 		if ( 'simulate' === $action ) {
 			$this->simulation_input = $this->sanitize_simulation_input();
-			$this->simulation       = $this->simulator->simulate( $this->repository->get_default_rules(), $this->simulation_context( $this->simulation_input ) );
+			if ( ! $this->context()->is_default() && is_callable( $this->service_simulation_runner ) ) {
+				$rules = $this->repository->get_rules_for_target( $this->context()->target_type, $this->context()->target_value );
+				if ( array() === $rules ) {
+					$this->errors[] = __( 'Для службы не настроены собственные правила.', 'walls-delivery-calc' );
+				}
+				$this->service_simulation = (array) call_user_func( $this->service_simulation_runner, $this->simulation_input, $rules );
+				return;
+			}
+			$rules = $this->repository->get_rules_for_target( $this->context()->target_type, $this->context()->target_value );
+			if ( array() === $rules && ! $this->context()->is_default() ) {
+				$this->errors[] = __( 'Для службы не настроены собственные правила.', 'walls-delivery-calc' );
+				return;
+			}
+			$this->simulation       = $this->simulator->simulate( $rules, $this->simulation_context( $this->simulation_input ) );
 			$token = $this->store_simulation_result();
 			$this->redirect_with_notice( 'simulated', array( 'simulation_token' => $token ) );
 		}
 	}
 
 	private function save_rule_action(): void {
+		$posted_id = isset( $_POST['rule_id'] ) ? absint( wp_unslash( $_POST['rule_id'] ) ) : 0;
+		if ( $posted_id > 0 && ! $this->posted_context_rule() instanceof Rule ) {
+			$this->errors[] = __( 'Правило не принадлежит текущему контексту.', 'walls-delivery-calc' );
+			return;
+		}
+
 		$rule = $this->sanitize_rule_from_post();
 		$this->form_rule = $rule;
 		$this->errors    = array_merge( $this->localized_errors( $rule->validate() ), $this->validate_admin_conditions( $rule ) );
@@ -473,7 +581,7 @@ final class RulesAdminPage {
 	}
 
 	private function delete_rule_action(): void {
-		$rule = $this->posted_default_rule();
+		$rule = $this->posted_context_rule();
 		if ( $rule instanceof Rule ) {
 			$this->repository->delete_rule( (int) $rule->id );
 		}
@@ -482,7 +590,7 @@ final class RulesAdminPage {
 	}
 
 	private function toggle_rule_action(): void {
-		$rule = $this->posted_default_rule();
+		$rule = $this->posted_context_rule();
 		if ( $rule instanceof Rule ) {
 			$data            = $rule->to_array();
 			$data['enabled'] = ! $rule->enabled;
@@ -493,7 +601,7 @@ final class RulesAdminPage {
 	}
 
 	private function duplicate_rule_action(): void {
-		$rule = $this->posted_default_rule();
+		$rule = $this->posted_context_rule();
 		if ( $rule instanceof Rule ) {
 			$data               = $rule->to_array();
 			$data['id']         = null;
@@ -516,12 +624,12 @@ final class RulesAdminPage {
 	}
 
 	private function move_rule_action( string $action ): void {
-		$rule = $this->posted_default_rule();
+		$rule = $this->posted_context_rule();
 		if ( ! $rule instanceof Rule ) {
 			$this->redirect_with_notice( 'moved' );
 		}
 
-		$rules = $this->repository->get_all_default_rules();
+		$rules = $this->repository->get_all_rules_for_target( $this->context()->target_type, $this->context()->target_value );
 		foreach ( $rules as $index => $current ) {
 			if ( $current->id !== $rule->id ) {
 				continue;
@@ -547,7 +655,7 @@ final class RulesAdminPage {
 		$this->redirect_with_notice( 'moved' );
 	}
 
-	private function posted_default_rule(): ?Rule {
+	private function posted_context_rule(): ?Rule {
 		$id = isset( $_POST['rule_id'] ) ? absint( wp_unslash( $_POST['rule_id'] ) ) : 0;
 		if ( $id <= 0 ) {
 			return null;
@@ -555,7 +663,7 @@ final class RulesAdminPage {
 
 		$rule = $this->repository->get_rule( $id );
 
-		return $rule instanceof Rule && RuleRepository::TARGET_DEFAULT === $rule->target_type ? $rule : null;
+		return $this->rule_matches_context( $rule ) ? $rule : null;
 	}
 
 	private function sanitize_rule_from_post(): Rule {
@@ -571,6 +679,12 @@ final class RulesAdminPage {
 
 		if ( RuleActionTypes::CHANGE_DELIVERY_DAYS !== $action_type && in_array( $operation_base, RuleOperationBases::day_bases(), true ) ) {
 			$operation_base = RuleOperationBases::RUBLES;
+		}
+
+		if ( in_array( $operation_type, array( RuleOperationTypes::MULTIPLY, RuleOperationTypes::DIVIDE ), true ) ) {
+			$action_type = RuleActionTypes::CHANGE_PRICE;
+			$operation_base = RuleOperationBases::RUBLES;
+			$operation_value = max( 0.0001, $operation_value );
 		}
 
 		if ( RuleActionTypes::DISABLE_RATE === $action_type ) {
@@ -590,8 +704,8 @@ final class RulesAdminPage {
 			isset( $_POST['name'] ) ? sanitize_text_field( wp_unslash( $_POST['name'] ) ) : '',
 			isset( $_POST['enabled'] ),
 			$this->sort_order_from_post(),
-			RuleRepository::TARGET_DEFAULT,
-			'',
+			$this->context()->target_type,
+			$this->context()->target_value,
 			$action_type,
 			$operation_type,
 			$operation_value,
@@ -695,7 +809,7 @@ final class RulesAdminPage {
 	}
 
 	private function empty_rule(): Rule {
-		return new Rule( null, '', true, $this->next_sort_order(), RuleRepository::TARGET_DEFAULT, '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 0, RuleOperationBases::RUBLES, false, false );
+		return new Rule( null, '', true, $this->next_sort_order(), $this->context()->target_type, $this->context()->target_value, RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::DECREASE, 0, RuleOperationBases::RUBLES, false, false );
 	}
 
 	/**
@@ -712,11 +826,11 @@ final class RulesAdminPage {
 	}
 
 	private function conditions_summary( Rule $rule ): string {
-		$expression = sprintf( __( 'Условие применения: %s', 'walls-delivery-calc' ), $this->group_expression_label( $rule->condition_group_expression ) );
 		if ( array() === $rule->conditions ) {
-			return $expression . ' | ' . __( 'Без условий', 'walls-delivery-calc' );
+			return __( 'Нет условий', 'walls-delivery-calc' );
 		}
 
+		$expression = sprintf( __( 'Условие применения: %s', 'walls-delivery-calc' ), $this->group_expression_label( $rule->condition_group_expression ) );
 		$groups = array();
 		foreach ( $rule->conditions as $condition ) {
 			$groups[ $condition->condition_group ][] = $this->condition_schema()->condition_summary( $condition );
@@ -745,6 +859,8 @@ final class RulesAdminPage {
 			RuleOperationTypes::INCREASE => __( 'увеличить на', 'walls-delivery-calc' ),
 			RuleOperationTypes::DECREASE => __( 'уменьшить на', 'walls-delivery-calc' ),
 			RuleOperationTypes::EQUALS   => __( 'установить', 'walls-delivery-calc' ),
+			RuleOperationTypes::MULTIPLY => __( 'умножить на', 'walls-delivery-calc' ),
+			RuleOperationTypes::DIVIDE   => __( 'разделить на', 'walls-delivery-calc' ),
 		)[ $rule->operation_type ] ?? $this->operation_type_label( $rule->operation_type );
 
 		return trim( $prefix . ' ' . $this->operation_value_label( $rule ) );
@@ -764,7 +880,194 @@ final class RulesAdminPage {
 			RuleOperationTypes::INCREASE => __( 'Увеличить', 'walls-delivery-calc' ),
 			RuleOperationTypes::DECREASE => __( 'Уменьшить', 'walls-delivery-calc' ),
 			RuleOperationTypes::EQUALS   => __( 'Установить', 'walls-delivery-calc' ),
+			RuleOperationTypes::MULTIPLY => __( 'Умножить на', 'walls-delivery-calc' ),
+			RuleOperationTypes::DIVIDE   => __( 'Разделить на', 'walls-delivery-calc' ),
 		)[ $value ] ?? $value;
+	}
+
+	private function render_packaging_page(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			return;
+		}
+		$this->handle_packaging_post();
+		$tiers = $this->settings instanceof SettingsRepository ? $this->settings->get_array( PackagingWeightCalculator::SETTINGS_KEY, array() ) : array();
+		$tiers = is_array( $tiers ) ? array_values( array_filter( $tiers, 'is_array' ) ) : array();
+		?>
+		<div class="wrap wdc-rules-admin">
+			<h1><?php echo esc_html__( 'Дефолтные правила расчета', 'walls-delivery-calc' ); ?></h1>
+			<?php $this->render_full_tabs( 'packaging' ); ?>
+			<?php $this->render_notices(); ?>
+			<form method="post" class="wdc-packaging-form">
+				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
+				<input type="hidden" name="wdc_rules_action" value="save_packaging_tiers">
+				<table class="widefat striped wdc-packaging-tiers">
+					<thead><tr>
+						<th><?php echo esc_html__( 'Вес корзины от, г', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Вес корзины до, г', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Вес упаковки, г', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Действия', 'walls-delivery-calc' ); ?></th>
+					</tr></thead>
+					<tbody>
+						<?php foreach ( array_merge( $tiers, array( array() ) ) as $index => $tier ) : ?>
+							<tr>
+								<td><input type="number" min="0" name="packaging_tiers[<?php echo esc_attr( (string) $index ); ?>][cart_weight_from_g]" value="<?php echo esc_attr( (string) ( $tier['cart_weight_from_g'] ?? '' ) ); ?>"></td>
+								<td><input type="number" min="0" name="packaging_tiers[<?php echo esc_attr( (string) $index ); ?>][cart_weight_to_g]" value="<?php echo esc_attr( (string) ( $tier['cart_weight_to_g'] ?? '' ) ); ?>"></td>
+								<td><input type="number" min="0" name="packaging_tiers[<?php echo esc_attr( (string) $index ); ?>][packaging_weight_g]" value="<?php echo esc_attr( (string) ( $tier['packaging_weight_g'] ?? '' ) ); ?>"></td>
+								<td><button class="button" type="button" data-wdc-remove-packaging-row><?php echo esc_html__( 'Удалить строку', 'walls-delivery-calc' ); ?></button></td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+				<p>
+					<button class="button" type="button" data-wdc-add-packaging-row><?php echo esc_html__( 'Добавить строку', 'walls-delivery-calc' ); ?></button>
+					<button class="button button-primary" type="submit"><?php echo esc_html__( 'Сохранить настройки', 'walls-delivery-calc' ); ?></button>
+				</p>
+			</form>
+			<script>
+				document.addEventListener('click', function(event) {
+					if (event.target && event.target.matches('[data-wdc-remove-packaging-row]')) {
+						event.target.closest('tr').remove();
+					}
+					if (event.target && event.target.matches('[data-wdc-add-packaging-row]')) {
+						var tbody = document.querySelector('.wdc-packaging-tiers tbody');
+						var row = tbody ? tbody.querySelector('tr:last-child') : null;
+						if (!row || !tbody) { return; }
+						var clone = row.cloneNode(true);
+						var index = tbody.querySelectorAll('tr').length;
+						clone.querySelectorAll('input').forEach(function(input) {
+							input.value = '';
+							input.name = input.name.replace(/packaging_tiers\[[0-9]+\]/, 'packaging_tiers[' + index + ']');
+						});
+						tbody.appendChild(clone);
+					}
+				});
+			</script>
+		</div>
+		<?php
+	}
+
+	private function handle_packaging_post(): void {
+		if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) || ! isset( $_POST[ self::NONCE_NAME ] ) ) {
+			return;
+		}
+		if ( ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST[ self::NONCE_NAME ] ) ), self::NONCE_ACTION ) || ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			$this->errors[] = __( 'Недостаточно прав или истек срок nonce.', 'walls-delivery-calc' );
+			return;
+		}
+		$action = isset( $_POST['wdc_rules_action'] ) ? sanitize_key( wp_unslash( $_POST['wdc_rules_action'] ) ) : '';
+		if ( 'save_packaging_tiers' !== $action || ! $this->settings instanceof SettingsRepository ) {
+			return;
+		}
+		$result = $this->sanitize_packaging_tiers( is_array( $_POST['packaging_tiers'] ?? null ) ? wp_unslash( $_POST['packaging_tiers'] ) : array() );
+		if ( array() !== $result['errors'] ) {
+			$this->errors = array_merge( $this->errors, $result['errors'] );
+			return;
+		}
+		$this->settings->set( PackagingWeightCalculator::SETTINGS_KEY, $result['tiers'] );
+	}
+
+	/**
+	 * @param array<int|string,mixed> $rows
+	 * @return array{tiers:array<int,array{cart_weight_from_g:int,cart_weight_to_g:int,packaging_weight_g:int}>,errors:array<int,string>}
+	 */
+	private function sanitize_packaging_tiers( array $rows ): array {
+		$tiers = array();
+		$errors = array();
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$raw = array_map( static fn( mixed $value ): string => trim( (string) $value ), $row );
+			if ( '' === ( $raw['cart_weight_from_g'] ?? '' ) && '' === ( $raw['cart_weight_to_g'] ?? '' ) && '' === ( $raw['packaging_weight_g'] ?? '' ) ) {
+				continue;
+			}
+			if ( '' === ( $raw['cart_weight_from_g'] ?? '' ) || '' === ( $raw['cart_weight_to_g'] ?? '' ) || '' === ( $raw['packaging_weight_g'] ?? '' ) ) {
+				$errors[] = __( 'Все поля строки упаковки обязательны.', 'walls-delivery-calc' );
+				continue;
+			}
+			$tier = array(
+				'cart_weight_from_g' => max( 0, (int) $raw['cart_weight_from_g'] ),
+				'cart_weight_to_g' => max( 0, (int) $raw['cart_weight_to_g'] ),
+				'packaging_weight_g' => max( 0, (int) $raw['packaging_weight_g'] ),
+			);
+			if ( $tier['cart_weight_to_g'] < $tier['cart_weight_from_g'] ) {
+				$errors[] = __( 'Вес корзины до не может быть меньше веса от.', 'walls-delivery-calc' );
+				continue;
+			}
+			$tiers[] = $tier;
+		}
+		usort( $tiers, static fn( array $a, array $b ): int => $a['cart_weight_from_g'] <=> $b['cart_weight_from_g'] );
+		for ( $i = 1; $i < count( $tiers ); ++$i ) {
+			if ( $tiers[ $i ]['cart_weight_from_g'] <= $tiers[ $i - 1 ]['cart_weight_to_g'] ) {
+				$errors[] = __( 'Диапазоны веса упаковки не должны пересекаться.', 'walls-delivery-calc' );
+				break;
+			}
+		}
+
+		return array( 'tiers' => $tiers, 'errors' => $errors );
+	}
+
+	private function render_service_simulation_form(): void {
+		$input = $this->simulation_input + array(
+			'country' => 'US',
+			'weight' => 1000,
+			'order_total' => 1000,
+			'date' => ( new DateTimeImmutable() )->format( 'Y-m-d' ),
+		);
+		?>
+		<section class="wdc-rules-card" id="wdc-rules-simulation">
+			<h2><?php echo esc_html__( 'Проверить правила службы', 'walls-delivery-calc' ); ?></h2>
+			<form method="post" class="wdc-simulation-form">
+				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
+				<input type="hidden" name="wdc_rules_action" value="simulate">
+				<div class="wdc-rule-grid">
+					<label><span><?php echo esc_html__( 'Страна назначения', 'walls-delivery-calc' ); ?></span><?php $this->render_select( 'simulation[country]', $this->country_options(), (string) $input['country'] ); ?></label>
+					<label><span><?php echo esc_html__( 'Вес товаров, г', 'walls-delivery-calc' ); ?></span><input type="number" min="0" name="simulation[weight]" value="<?php echo esc_attr( (string) $input['weight'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Сумма заказа, руб.', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[order_total]" value="<?php echo esc_attr( (string) $input['order_total'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Дата', 'walls-delivery-calc' ); ?></span><input type="date" name="simulation[date]" value="<?php echo esc_attr( (string) $input['date'] ); ?>"></label>
+				</div>
+				<p class="submit"><button class="button button-primary" type="submit"><?php echo esc_html__( 'Симулировать расчет службы', 'walls-delivery-calc' ); ?></button></p>
+			</form>
+		</section>
+		<?php
+	}
+
+	/**
+	 * @param array<string,mixed> $result
+	 */
+	private function render_service_simulation( array $result ): void {
+		?>
+		<section class="wdc-rules-result">
+			<h2><?php echo esc_html__( 'Результат симуляции службы', 'walls-delivery-calc' ); ?></h2>
+			<table class="widefat striped"><tbody>
+				<tr><th><?php echo esc_html__( 'API/base price', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['base_price'] ?? '-' ) ); ?></td></tr>
+				<tr><th><?php echo esc_html__( 'Final price after service rules', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['final_price'] ?? '-' ) ); ?></td></tr>
+				<tr><th><?php echo esc_html__( 'Вес товаров, г', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['products_weight_g'] ?? '-' ) ); ?></td></tr>
+				<tr><th><?php echo esc_html__( 'Вес упаковки, г', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['packaging_weight_g'] ?? '-' ) ); ?></td></tr>
+				<tr><th><?php echo esc_html__( 'Итоговый вес для API, г', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['package_weight_with_packaging_g'] ?? '-' ) ); ?></td></tr>
+				<tr><th><?php echo esc_html__( 'Способ учета упаковки', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['packaging_weight_mode'] ?? '-' ) ); ?></td></tr>
+				<tr><th><?php echo esc_html__( 'Source/fallback/cache', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['source'] ?? '-' ) ); ?></td></tr>
+				<tr><th><?php echo esc_html__( 'Delivery days', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['delivery_days'] ?? '-' ) ); ?></td></tr>
+			</tbody></table>
+			<?php if ( ! empty( $result['notice'] ) ) : ?><div class="notice notice-info inline"><p><?php echo esc_html( (string) $result['notice'] ); ?></p></div><?php endif; ?>
+			<?php if ( ! empty( $result['audit'] ) && is_array( $result['audit'] ) ) : ?>
+				<h3><?php echo esc_html__( 'Rules audit', 'walls-delivery-calc' ); ?></h3>
+				<pre><?php echo esc_html( (string) wp_json_encode( $result['audit'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) ); ?></pre>
+			<?php endif; ?>
+		</section>
+		<?php
+	}
+
+	private function context(): RuleAdminContext {
+		$this->context ??= RuleAdminContext::default();
+
+		return $this->context;
+	}
+
+	private function rule_matches_context( mixed $rule ): bool {
+		return $rule instanceof Rule
+			&& $rule->target_type === $this->context()->target_type
+			&& $rule->target_value === $this->context()->target_value;
 	}
 
 	private function operation_base_label( string $value ): string {
@@ -781,6 +1084,10 @@ final class RulesAdminPage {
 	private function operation_value_label( Rule $rule ): string {
 		$value = $this->format_decimal( $rule->operation_value );
 		$base  = $this->operation_base_label( $rule->operation_base );
+
+		if ( in_array( $rule->operation_type, array( RuleOperationTypes::MULTIPLY, RuleOperationTypes::DIVIDE ), true ) ) {
+			return $value;
+		}
 
 		if ( in_array( $rule->operation_base, array( RuleOperationBases::PERCENT_OF_DELIVERY, RuleOperationBases::PERCENT_OF_ORDER, RuleOperationBases::PERCENT_OF_ORDER_AND_DELIVERY ), true ) ) {
 			return $value . $base;
@@ -839,6 +1146,7 @@ final class RulesAdminPage {
 			'action_type is invalid'                  => __( 'Некорректный тип действия.', 'walls-delivery-calc' ),
 			'operation_type is invalid'               => __( 'Некорректная операция.', 'walls-delivery-calc' ),
 			'operation_base is invalid'               => __( 'Некорректная база операции.', 'walls-delivery-calc' ),
+			'operation_value must be greater than 0'  => __( 'Значение операции должно быть больше нуля.', 'walls-delivery-calc' ),
 			'operation_text is required'              => __( 'Комментарий обязателен для действия "Добавить комментарий".', 'walls-delivery-calc' ),
 			'condition_group must be greater than 0'  => __( 'Группа условия должна быть больше 0.', 'walls-delivery-calc' ),
 			'condition_type is invalid'               => __( 'Некорректный тип условия.', 'walls-delivery-calc' ),
@@ -919,7 +1227,13 @@ final class RulesAdminPage {
 	 * @param array<string,mixed> $args
 	 */
 	private function page_url( array $args = array() ): string {
-		$query = array_merge( array( 'page' => self::PAGE_SLUG ), $args );
+		if ( ! $this->context()->is_default() ) {
+			$separator = str_contains( $this->context()->return_url, '?' ) ? '&' : '?';
+
+			return $this->context()->return_url . ( array() === $args ? '' : $separator . http_build_query( $args ) );
+		}
+
+		$query = array_merge( array( 'page' => $this->context()->page_slug ), $args );
 
 		return admin_url( 'admin.php?' . http_build_query( $query ) );
 	}
@@ -942,7 +1256,7 @@ final class RulesAdminPage {
 		);
 
 		if ( array() !== $ids ) {
-			$this->repository->reorder_default_rules( $ids );
+			$this->repository->reorder_rules_for_target( $this->context()->target_type, $this->context()->target_value, $ids );
 		}
 
 		$this->redirect_with_notice( 'moved' );
@@ -961,7 +1275,7 @@ final class RulesAdminPage {
 	}
 
 	private function next_sort_order(): int {
-		$rules = $this->repository->get_all_default_rules();
+		$rules = $this->repository->get_all_rules_for_target( $this->context()->target_type, $this->context()->target_value );
 		$last  = 0;
 		foreach ( $rules as $rule ) {
 			$last = max( $last, $rule->priority );

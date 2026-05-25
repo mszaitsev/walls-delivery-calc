@@ -1,6 +1,6 @@
 # WDC Russian Post International Carrier
 
-Version: 0.20.0.
+Version: 0.21.12.
 
 ## Scope
 
@@ -18,42 +18,47 @@ The plugin is fresh-install-only for this runtime generation. Legacy compatibili
 
 The carrier supports only non-RU destinations. `RU` is excluded in `supports_country()` and direct quotes for RU return no ordinary rate.
 
-`DeliveryType::COURIER` is used temporarily because the checkout validation/UI currently recognizes courier and pickup as first-class customer flows. The actual service is postal international delivery; the service/tariff metadata keeps `russian_post_worldwide_parcel`.
+Russian Post international is exposed as `DeliveryType::PICKUP`. It does not require selecting a pickup point and does not render the old automatic courier-address notice. Runtime marks both normal and fallback rates with `no_pickup_selection=true`; this is enough for checkout validation and pickup UI bypass. If the service has a pickup customer comment, that comment is shown for normal Russian Post rates.
 
 ## Pricing
 
-Russian Post tariff API prices are normalized before applying the storefront formula:
+Russian Post tariff API prices are normalized to API/VAT base price only. If API response contains VAT fields (`paynds` or `paymoneynds`), the value is treated as already including VAT. If only non-VAT fields (`paymoney` or `pay`) are present, VAT is applied once using the configured VAT rate, default `0.2`.
 
-```text
-ceil((API price with VAT applied) / 0.89 + 200)
-```
-
-If API response contains VAT fields (`paynds` or `paymoneynds`), the value is treated as already including VAT. If only non-VAT fields (`paymoney` or `pay`) are present, VAT is applied once using the configured VAT rate, default `0.2`.
-
-The resulting shipping price is stored as RUB and rounded with `ceil`.
+The old built-in storefront formula `/0.89 + 200` has been removed. Commercial adjustments now belong to service/default rules and service post-processing.
 
 ## Fallback
 
-API errors, missing tariff/price, unsupported countries, and overweight packages do not throw checkout errors. When fallback is enabled, the carrier returns a visible zero-cost rate with:
+API errors, zero or missing tariff/price, unsupported countries, disabled country mappings, and overweight packages do not throw checkout errors. When fallback is enabled, the carrier returns a visible zero-cost terminal fallback rate with:
 
-- title/comment from `fallback_text`, default `Стоимость доставки рассчитает менеджер`
+- customer-facing method title from `fallback_text`, default `Стоимость доставки рассчитает менеджер`
+- empty comments, so the fallback text is not duplicated below the method title
 - `meta.fallback = true`
+- `meta.terminal_fallback = true`
+- `meta.skip_rules = true`
+- `meta.skip_service_post_processing = true`
+- `meta.no_pickup_selection = true`
 - `meta.fallback_reason`
 - safe API/package metadata without secrets
 
-When fallback is disabled, the quote returns no visible rate and the checkout-level fallback can take over if no other carrier has visible rates.
+Terminal fallback rates stay at price `0`: service rules, rule-added comments, service customer comments, minimum price, and ruble rounding are skipped. When fallback is disabled, the quote returns no visible rate and the checkout-level fallback can take over if no other carrier has visible rates.
+
+For the `carrier_directory` delivery-service availability mode, checkout keeps the Russian Post service in the candidate list even when a country mapping is disabled. The carrier then returns its controlled fallback rate and `fallback_reason` such as `unsupported_country_PL`, instead of the generic checkout fallback text.
 
 ## Weight And Packaging
 
 Product weight comes from the new `Package` model. Products without weight contribute `0g`.
 
-Packaging weight is added from the shared `packaging_tiers` setting. The carrier checks `max_package_weight_g` from the Russian Post service settings, not a global limit. Overweight suppresses the ordinary tariff and uses fallback when enabled.
+Packaging weight is added by the shared `PackagingWeightCalculator` before the carrier is called. Russian Post uses `total_weight` mode, so the tariff API receives products weight plus packaging. The carrier checks `max_package_weight_g` from the Russian Post service settings, not a global limit. Overweight suppresses the ordinary tariff and uses fallback when enabled.
 
 ## API, Country Mapping, And Cache
 
-All HTTP requests use the WordPress HTTP API. Runtime settings include tariff endpoint, country dictionary endpoint, API token, timeout, debug flag, service max weight, and fallback text.
+All HTTP requests use the WordPress HTTP API. Runtime settings include tariff endpoint, country dictionary endpoint, timeout, debug flag, service max weight, fallback text, country auto-refresh, cache mode, and VAT rate.
 
-Debug logs include endpoint, sanitized params, raw response, parsed response, cache hit/miss, formula calculation, and fallback reason. Token-like fields are omitted from request params and the shared logger redactor handles sensitive context keys.
+As of 0.21.3, Russian Post international settings are service-specific settings. They are edited at `Службы доставки -> Почта России — международная доставка -> Расчет` and stored in `wdc_delivery_service_settings`. The platform settings page no longer renders or saves Russian Post carrier fields. The service row `enabled` flag is the authoritative on/off switch; it is not duplicated in the Russian Post settings payload.
+
+As of 0.21.6, packaging tiers are global calculator settings on `Правила расчета -> Упаковка`, not Russian Post service settings.
+
+Debug logs include endpoint, sanitized params, raw response, parsed response, cache hit/miss, API base price, and fallback reason. Token-like fields are omitted from request params and the shared logger redactor handles sensitive context keys.
 
 As of 0.19.2, the country directory uses the persistent `wdc_russian_post_country_mappings` table. Runtime returns only rows with `effective_enabled=1`; RU is always excluded. The Russian Post dictionary endpoint is used by the admin refresh flow and optional lazy refresh when `auto_refresh_countries_if_empty` is enabled.
 
@@ -63,10 +68,36 @@ As of 0.19.4, refresh keeps the persistent mapping table WooCommerce-centric. Un
 
 Tariff API results are cached until the end of the current WordPress timezone day. Cache keys include carrier, service, country, request params, and weight.
 
-Country mapping administration lives in `Калькулятор доставок -> Почта России: страны`. See `docs/wdc-russian-post-countries.md`.
+Country mapping administration now lives inside the delivery service screen at `Службы доставки -> Почта России — международная доставка -> Страны Почты России`. The old standalone submenu is no longer registered. See `docs/wdc-russian-post-countries.md`.
 
 ## Rules
 
-Checkout continues to apply rules after the carrier quote. The new shipping method now resolves rules per carrier with `get_rules_for_carrier_with_default_fallback($carrierKey)` when available, otherwise it falls back to default rules.
+Checkout continues to apply rules after the carrier quote. Runtime resolves service rules first and uses default fallback only when the service has no enabled own rules and `use_default_rules_when_no_service_rules` is enabled.
 
-`add_comment` rule text is merged into rate comments and persisted through the existing rate/session/order meta flow. `disable_rate` marks the rate unavailable, so it is hidden before final checkout rates are returned.
+For normal rates, `add_comment` rule text is merged into rate comments and persisted through the existing rate/session/order meta flow. Checkout renders each service/rule comment as its own line. `disable_rate` marks the rate unavailable, so it is hidden before final checkout rates are returned. Terminal fallback rates set `skip_rules=true`, so rule price changes and rule comments do not apply.
+
+The Russian Post service rules simulation calls the carrier first, obtains the real API/base quote, then applies service rules only. It shows base price, final price, audit, fallback/cache metadata, and source details. It does not apply default-rule fallback.
+
+## Order Calculation Data
+
+As of 0.21.12, Russian Post international keeps the WooCommerce shipping item meta visually clean. The only visible shipping-item row is:
+
+- `Способ доставки: международная доставка Почтой России`
+
+Technical values such as `carrier_key`, `service_key`, `rate_id`, `delivery_type`, `rules_source`, `round_up_applied`, `no_pickup_selection`, package data, API diagnostics, and rule audit are stored in the order-level `_wdc_delivery_calculation_data` structure instead of being shown as standard shipping method meta.
+
+The order admin metabox `Калькулятор доставок` reads this structure and shows the customer-support view: service title, destination country, product weight, packaging weight, final API weight, API base price with VAT information, rule formula, final price, and delivery days only when the carrier actually provides them. Russian Post tariff API currently does not return delivery days, so empty/zero delivery time rows are not rendered.
+
+Terminal fallback rates are also saved in `_wdc_delivery_calculation_data`. They keep final price `0`, store `fallback_reason` and `fallback_text`, and do not store a rule formula because fallback bypasses rules and service post-processing.
+# Russian Post International
+
+Russian Post international is now the first delivery service in the delivery-services foundation:
+
+- `service_key`: `russian_post_worldwide_parcel`
+- `carrier_key`: `russian_post`
+- `service_type`: `api`
+- `availability_mode`: `carrier_directory`
+
+The carrier still talks to the Russian Post tariff API and applies VAT when the API response does not already include VAT. The previous built-in commercial formula `/0.89 + 200` has been removed. Markups belong in service/default rules, not in the carrier.
+
+Fallback rates remain zero-price manager-contact rates. Service post-processing keeps fallback zero as zero.

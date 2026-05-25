@@ -16,7 +16,9 @@ final class RuleAuditEntry {
 		public readonly mixed $after_value,
 		public readonly string $operation,
 		public readonly bool $applied,
-		public readonly string $reason = ''
+		public readonly string $reason = '',
+		public readonly float $operation_value = 0.0,
+		public readonly string $operation_base = ''
 	) {
 	}
 
@@ -31,6 +33,8 @@ final class RuleAuditEntry {
 			'before_value' => $this->before_value,
 			'after_value'  => $this->after_value,
 			'operation'    => $this->operation,
+			'operation_value' => $this->operation_value,
+			'operation_base' => $this->operation_base,
 			'applied'      => $this->applied,
 			'reason'       => $this->reason,
 		);
@@ -48,7 +52,9 @@ final class RuleAuditEntry {
 			$data['after_value'] ?? null,
 			(string) ( $data['operation'] ?? '' ),
 			(bool) ( $data['applied'] ?? false ),
-			(string) ( $data['reason'] ?? '' )
+			(string) ( $data['reason'] ?? '' ),
+			(float) ( $data['operation_value'] ?? 0 ),
+			(string) ( $data['operation_base'] ?? '' )
 		);
 	}
 }

@@ -45,13 +45,25 @@ final class CheckoutDeliveryTypeSelector {
 		}
 
 		$rate_id = (string) ( $meta['rate_id'] ?? $this->method_id( $method ) );
-		if ( ! empty( $meta['requires_pickup_point'] ) ) {
+		if ( ! empty( $meta['requires_pickup_point'] ) && ! $this->skip_pickup_selection( $meta ) ) {
 			$this->render_pickup_selector( (string) $meta['carrier_key'], $rate_id );
 		}
+	}
 
-		if ( ! empty( $meta['requires_courier_address'] ) ) {
-			echo '<div class="wdc-courier-notice">' . esc_html__( 'Для курьерской доставки будет использован адрес, указанный в checkout.', 'walls-delivery-calc' ) . '</div>';
+	/**
+	 * @param array<string,mixed> $meta
+	 */
+	private function skip_pickup_selection( array $meta ): bool {
+		if ( ! empty( $meta['no_pickup_selection'] ) ) {
+			return true;
 		}
+
+		$rate_meta = $meta['rate_meta'] ?? array();
+		if ( is_array( $rate_meta ) && ! empty( $rate_meta['no_pickup_selection'] ) ) {
+			return true;
+		}
+
+		return false;
 	}
 
 	private function render_pickup_selector( string $carrier_key, string $rate_id ): void {

@@ -77,6 +77,15 @@ rules_smoke_assert( 65000 === $result->final_price?->get_kopecks(), '+200 RUB mu
 $result = $engine->apply_rules( array( price_rule( '-10%', RuleOperationTypes::DECREASE, 10, RuleOperationBases::PERCENT_OF_DELIVERY ) ), rules_context() );
 rules_smoke_assert( 40500 === $result->final_price?->get_kopecks(), '-10% delivery must produce 405 RUB.' );
 
+$result = $engine->apply_rules( array( price_rule( '*2', RuleOperationTypes::MULTIPLY, 2 ) ), rules_context() );
+rules_smoke_assert( 90000 === $result->final_price?->get_kopecks(), 'multiply must produce 900 RUB.' );
+
+$result = $engine->apply_rules( array( price_rule( '/2', RuleOperationTypes::DIVIDE, 2 ) ), rules_context() );
+rules_smoke_assert( 22500 === $result->final_price?->get_kopecks(), 'divide must produce 225 RUB.' );
+
+$comma_rule = Rule::from_array( array_merge( price_rule( '*1,5', RuleOperationTypes::MULTIPLY, 1.5 )->to_array(), array( 'operation_value' => '1,5' ) ) );
+rules_smoke_assert( 1.5 === $comma_rule->operation_value, 'Comma decimal normalization must hydrate to decimal value.' );
+
 $comment_rule = new Rule( null, 'Add comment', true, 10, 'default', '', RuleActionTypes::ADD_COMMENT, RuleOperationTypes::EQUALS, 0, RuleOperationBases::RUBLES, false, false, array(), array( 1 => 'and', 2 => 'and', 3 => 'and' ), 'Позвонить за час' );
 $result = $engine->apply_rules( array( $comment_rule ), rules_context() );
 rules_smoke_assert( array( 'Позвонить за час' ) === $result->comments, 'add_comment must add operation_text to RuleEngineResult comments.' );
@@ -124,10 +133,13 @@ $group_rule = new Rule(
 		new RuleCondition( null, null, 1, RuleConditionTypes::CITY, RuleOperators::EQ, 'Novosibirsk' ),
 		new RuleCondition( null, null, 1, RuleConditionTypes::PAYMENT_METHOD, RuleOperators::EQ, 'card' ),
 		new RuleCondition( null, null, 2, RuleConditionTypes::COUNTRY, RuleOperators::EQ, 'RU' ),
-	)
+	),
+	array( 1 => 'and', 2 => 'and', 3 => 'and' ),
+	'',
+	'condition_1_or_2_or_3'
 );
 $result = $engine->apply_rules( array( $group_rule ), rules_context() );
-rules_smoke_assert( 50000 === $result->final_price?->get_kopecks(), 'Condition groups must be AND inside group and OR between groups.' );
+rules_smoke_assert( 50000 === $result->final_price?->get_kopecks(), 'Explicit OR expression must combine groups when selected.' );
 
 $result = $engine->apply_rules(
 	array(
@@ -333,10 +345,13 @@ $groups_or_rule = new Rule(
 		new RuleCondition( null, null, 1, RuleConditionTypes::PAYMENT_METHOD, RuleOperators::EQ, 'cash' ),
 		new RuleCondition( null, null, 2, RuleConditionTypes::COUNTRY, RuleOperators::EQ, 'RU' ),
 	),
-	array( 1 => 'and', 2 => 'and', 3 => 'and' )
+	array( 1 => 'and', 2 => 'and', 3 => 'and' ),
+	'',
+	'condition_1_or_2_or_3'
 );
 $result = $engine->apply_rules( array( $groups_or_rule ), rules_context() );
-rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'Default condition_group_expression must combine groups via OR.' );
+rules_smoke_assert( 44000 === $result->final_price?->get_kopecks(), 'Explicit condition_group_expression can combine groups via OR.' );
+rules_smoke_assert( 'condition_1' === Rule::from_array( array( 'name' => 'Default expression' ) )->condition_group_expression, 'Default condition_group_expression must be condition_1.' );
 
 rules_smoke_assert( Rule::DEFAULT_GROUP_EXPRESSION === Rule::normalized_group_expression( 'bad-expression' ), 'Invalid group expression must normalize to default.' );
 

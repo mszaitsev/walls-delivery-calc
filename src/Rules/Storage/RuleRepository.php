@@ -11,6 +11,7 @@ defined( 'ABSPATH' ) || exit;
 final class RuleRepository {
 	public const TARGET_DEFAULT = 'default';
 	public const TARGET_CARRIER = 'carrier';
+	public const TARGET_SERVICE = 'service';
 
 	private \wpdb $wpdb;
 
@@ -114,8 +115,49 @@ final class RuleRepository {
 	/**
 	 * @return array<int,Rule>
 	 */
+	public function get_all_rules_for_target( string $target_type, string $target_value ): array {
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT * FROM {$this->rules_table()} WHERE target_type = %s AND target_value = %s ORDER BY priority ASC, id ASC",
+				$target_type,
+				$target_value
+			),
+			ARRAY_A
+		);
+
+		return $this->rows_to_rules( is_array( $rows ) ? $rows : array() );
+	}
+
+	/**
+	 * @return array<int,Rule>
+	 */
 	public function get_rules_for_carrier_with_default_fallback( string $carrierKey ): array {
 		return $this->get_rules_for_target_or_default( self::TARGET_CARRIER, $carrierKey );
+	}
+
+	/**
+	 * @return array<int,Rule>
+	 */
+	public function get_rules_for_service( string $service_key ): array {
+		return $this->get_rules_for_target( self::TARGET_SERVICE, $service_key );
+	}
+
+	/**
+	 * @return array{rules:array<int,Rule>,source:string}
+	 */
+	public function get_rules_for_service_with_default_fallback( string $service_key, bool $fallback_to_default = true ): array {
+		$service_rules = $this->get_rules_for_service( $service_key );
+		if ( array() !== $service_rules ) {
+			return array( 'rules' => $service_rules, 'source' => 'service' );
+		}
+
+		if ( $fallback_to_default ) {
+			$default_rules = $this->get_default_rules();
+
+			return array( 'rules' => $default_rules, 'source' => array() !== $default_rules ? 'default' : 'none' );
+		}
+
+		return array( 'rules' => array(), 'source' => 'none' );
 	}
 
 	/**
@@ -134,6 +176,13 @@ final class RuleRepository {
 	 * @param array<int,int> $ordered_ids
 	 */
 	public function reorder_default_rules( array $ordered_ids ): void {
+		$this->reorder_rules_for_target( self::TARGET_DEFAULT, '', $ordered_ids );
+	}
+
+	/**
+	 * @param array<int,int> $ordered_ids
+	 */
+	public function reorder_rules_for_target( string $target_type, string $target_value, array $ordered_ids ): void {
 		$position = 10;
 		foreach ( $ordered_ids as $id ) {
 			$id = (int) $id;
@@ -149,10 +198,11 @@ final class RuleRepository {
 				),
 				array(
 					'id'          => $id,
-					'target_type' => self::TARGET_DEFAULT,
+					'target_type' => $target_type,
+					'target_value' => $target_value,
 				),
 				array( '%d', '%s' ),
-				array( '%d', '%s' )
+				array( '%d', '%s', '%s' )
 			);
 			$position += 10;
 		}

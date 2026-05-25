@@ -85,60 +85,6 @@ final class SettingsAdminPage {
 							<th scope="row"><?php echo esc_html__( 'Показывать отладочный блок checkout администраторам', 'walls-delivery-calc' ); ?></th>
 							<td><label><input type="checkbox" name="show_checkout_debug_panel" value="1" <?php checked( ! empty( $values['show_checkout_debug_panel'] ) ); ?>> <?php echo esc_html__( 'Отладка скрыта по умолчанию.', 'walls-delivery-calc' ); ?></label></td>
 						</tr>
-						<tr><th colspan="2"><h2><?php echo esc_html__( 'Почта России — международная доставка', 'walls-delivery-calc' ); ?></h2></th></tr>
-						<?php $rp = $this->russian_post_admin_values( $values ); ?>
-						<tr>
-							<th scope="row"><?php echo esc_html__( 'Включить сервис', 'walls-delivery-calc' ); ?></th>
-							<td><label><input type="checkbox" name="russian_post_worldwide_parcel[enabled]" value="1" <?php checked( ! empty( $rp['enabled'] ) ); ?>> <?php echo esc_html__( 'Показывать международную доставку Почтой России для стран кроме RU.', 'walls-delivery-calc' ); ?></label></td>
-						</tr>
-						<tr>
-							<th scope="row"><label for="wdc_rp_api_endpoint"><?php echo esc_html__( 'API endpoint тарифа', 'walls-delivery-calc' ); ?></label></th>
-							<td><input id="wdc_rp_api_endpoint" class="regular-text" type="url" name="russian_post_worldwide_parcel[api_endpoint]" value="<?php echo esc_attr( (string) ( $rp['api_endpoint'] ?? '' ) ); ?>"></td>
-						</tr>
-						<tr>
-							<th scope="row"><label for="wdc_rp_country_endpoint"><?php echo esc_html__( 'API endpoint стран', 'walls-delivery-calc' ); ?></label></th>
-							<td><input id="wdc_rp_country_endpoint" class="regular-text" type="url" name="russian_post_worldwide_parcel[country_endpoint]" value="<?php echo esc_attr( (string) ( $rp['country_endpoint'] ?? '' ) ); ?>"></td>
-						</tr>
-						<tr>
-							<th scope="row"><label for="wdc_rp_api_token"><?php echo esc_html__( 'API token', 'walls-delivery-calc' ); ?></label></th>
-							<td><input id="wdc_rp_api_token" type="password" name="russian_post_worldwide_parcel[api_token]" value="" placeholder="<?php echo esc_attr( '' !== (string) ( $rp['api_token'] ?? '' ) ? '********' : 'Токен не задан' ); ?>" autocomplete="new-password"><p class="description"><?php echo esc_html__( 'Оставьте пустым, чтобы сохранить текущий токен. Токен не пишется в debug logs.', 'walls-delivery-calc' ); ?></p></td>
-						</tr>
-						<tr>
-							<th scope="row"><label for="wdc_rp_origin_postcode"><?php echo esc_html__( 'Индекс отправления', 'walls-delivery-calc' ); ?></label></th>
-							<td><input id="wdc_rp_origin_postcode" type="text" name="russian_post_worldwide_parcel[origin_postcode]" value="<?php echo esc_attr( (string) ( $rp['origin_postcode'] ?? '630005' ) ); ?>"></td>
-						</tr>
-						<tr>
-							<th scope="row"><label for="wdc_rp_object_code"><?php echo esc_html__( 'Код объекта отправления', 'walls-delivery-calc' ); ?></label></th>
-							<td><input id="wdc_rp_object_code" type="number" name="russian_post_worldwide_parcel[object_code]" value="<?php echo esc_attr( (string) ( $rp['object_code'] ?? 4031 ) ); ?>" min="1" step="1"></td>
-						</tr>
-						<tr>
-							<th scope="row"><label for="wdc_rp_isavia"><?php echo esc_html__( 'Авиадоставка', 'walls-delivery-calc' ); ?></label></th>
-							<td><select id="wdc_rp_isavia" name="russian_post_worldwide_parcel[isavia]"><option value="0" <?php selected( (int) ( $rp['isavia'] ?? 0 ), 0 ); ?>><?php echo esc_html__( 'Нет', 'walls-delivery-calc' ); ?></option><option value="1" <?php selected( (int) ( $rp['isavia'] ?? 0 ), 1 ); ?>><?php echo esc_html__( 'Да', 'walls-delivery-calc' ); ?></option></select></td>
-						</tr>
-						<tr>
-							<th scope="row"><label for="wdc_rp_timeout"><?php echo esc_html__( 'Таймаут API Почты России (сек)', 'walls-delivery-calc' ); ?></label></th>
-							<td><input id="wdc_rp_timeout" type="number" name="russian_post_worldwide_parcel[timeout]" value="<?php echo esc_attr( (string) ( $rp['timeout'] ?? 20 ) ); ?>" min="1" max="60" step="1"></td>
-						</tr>
-						<tr>
-							<th scope="row"><label for="wdc_rp_max_weight"><?php echo esc_html__( 'Максимальный вес сервиса (г)', 'walls-delivery-calc' ); ?></label></th>
-							<td><input id="wdc_rp_max_weight" type="number" name="russian_post_worldwide_parcel[max_package_weight_g]" value="<?php echo esc_attr( (string) ( $rp['max_package_weight_g'] ?? 19990 ) ); ?>" min="1" max="100000" step="1"></td>
-						</tr>
-						<tr>
-							<th scope="row"><?php echo esc_html__( 'Fallback', 'walls-delivery-calc' ); ?></th>
-							<td><label><input type="checkbox" name="russian_post_worldwide_parcel[fallback_enabled]" value="1" <?php checked( ! empty( $rp['fallback_enabled'] ) ); ?>> <?php echo esc_html__( 'Показывать нулевой тариф при ошибке API, отсутствии тарифа или overweight.', 'walls-delivery-calc' ); ?></label><br><input class="regular-text" type="text" name="russian_post_worldwide_parcel[fallback_text]" value="<?php echo esc_attr( (string) ( $rp['fallback_text'] ?? 'Стоимость доставки рассчитает менеджер' ) ); ?>"></td>
-						</tr>
-						<tr>
-							<th scope="row"><?php echo esc_html__( 'Кэш тарифа', 'walls-delivery-calc' ); ?></th>
-							<td><label><input type="checkbox" name="russian_post_worldwide_parcel[cache_until_end_of_day]" value="1" <?php checked( ! empty( $rp['cache_until_end_of_day'] ) ); ?>> <?php echo esc_html__( 'Кэшировать тариф до конца дня по timezone WordPress.', 'walls-delivery-calc' ); ?></label></td>
-						</tr>
-						<tr>
-							<th scope="row"><?php echo esc_html__( 'Автообновление стран', 'walls-delivery-calc' ); ?></th>
-							<td><label><input type="checkbox" name="russian_post_worldwide_parcel[auto_refresh_countries_if_empty]" value="1" <?php checked( ! empty( $rp['auto_refresh_countries_if_empty'] ) ); ?>> <?php echo esc_html__( 'Автоматически обновить справочник стран, если таблица пустая.', 'walls-delivery-calc' ); ?></label></td>
-						</tr>
-						<tr>
-							<th scope="row"><?php echo esc_html__( 'Debug Почты России', 'walls-delivery-calc' ); ?></th>
-							<td><label><input type="checkbox" name="russian_post_worldwide_parcel[debug]" value="1" <?php checked( ! empty( $rp['debug'] ) ); ?>> <?php echo esc_html__( 'Логировать endpoint, параметры без секретов, ответы, cache hit/miss, формулу и fallback reason.', 'walls-delivery-calc' ); ?></label></td>
-						</tr>
 						<tr>
 							<th scope="row"><?php echo esc_html__( 'Подставлять область в поиск населенного пункта на checkout', 'walls-delivery-calc' ); ?></th>
 							<td><label><input type="checkbox" name="include_region_in_checkout_city_picker_query" value="1" <?php checked( ! empty( $values['include_region_in_checkout_city_picker_query'] ) ); ?>> <?php echo esc_html__( 'При открытии выбора населенного пункта использовать область вместе с городом.', 'walls-delivery-calc' ); ?></label></td>
@@ -221,8 +167,6 @@ final class SettingsAdminPage {
 		$dadata_suggestions_timeout = isset( $data['dadata_suggestions_timeout'] ) ? $this->absint( wp_unslash( (string) $data['dadata_suggestions_timeout'] ) ) : 3;
 		$dadata_suggestions_count   = isset( $data['dadata_suggestions_count'] ) ? $this->absint( wp_unslash( (string) $data['dadata_suggestions_count'] ) ) : 10;
 
-		$current = $this->settings->all();
-
 		return array(
 			'enable_new_checkout_shipping' => ! empty( $data['enable_new_checkout_shipping'] ),
 			'checkout_sort_mode'           => $sort_mode,
@@ -237,7 +181,6 @@ final class SettingsAdminPage {
 			'dadata_suggestions_enabled'   => ! empty( $data['dadata_suggestions_enabled'] ),
 			'dadata_suggestions_timeout'   => max( 1, min( 10, $dadata_suggestions_timeout > 0 ? $dadata_suggestions_timeout : 3 ) ),
 			'dadata_suggestions_count'     => max( 3, min( 20, $dadata_suggestions_count > 0 ? $dadata_suggestions_count : 10 ) ),
-			'russian_post_worldwide_parcel' => $this->sanitize_russian_post_settings( is_array( $data['russian_post_worldwide_parcel'] ?? null ) ? $data['russian_post_worldwide_parcel'] : array(), is_array( $current['russian_post_worldwide_parcel'] ?? null ) ? $current['russian_post_worldwide_parcel'] : array() ),
 		);
 	}
 

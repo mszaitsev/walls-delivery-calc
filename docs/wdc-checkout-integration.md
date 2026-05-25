@@ -24,11 +24,35 @@ As of version 0.18.3, checkout runtime reads enabled default rules through `Rule
 
 As of version 0.18.4, rule context carries selected location FIAS ID when available. City conditions are FIAS-only: they compare the selected location FIAS ID with the condition value and do not fall back to city or display-name text. Package dimensions are aggregated from WooCommerce product dimensions using max length, width, and height across cart items, while volume remains total package volume in `cm3` and is converted to cubic meters by the rule evaluator.
 
-As of version 0.19.0, runtime resolves rules per carrier with `RuleRepository::get_rules_for_carrier_with_default_fallback($carrierKey)` when available. Carrier rules can override default rules without changing the rule engine contract. If no carrier-specific rules exist, default rules are applied.
+As of version 0.21.0, runtime resolves rules per service with `RuleRepository::get_rules_for_service_with_default_fallback($serviceKey, $fallback)`. Service rules override default rules. If no service-specific rules exist, default rules are applied only when the service enables default fallback.
+
+As of version 0.21.1, only enabled service rules count as service-specific runtime rules. If a service has only disabled own rules, runtime still falls back to default rules when `use_default_rules_when_no_service_rules` is enabled; otherwise it applies no rules and records `rules_source=none`.
+
+The quote cache key includes `service_key` in addition to carrier, package, destination, total, delivery type, and date. Different services backed by the same carrier no longer share cached quotes.
+
+As of version 0.21.3, Russian Post carrier settings are read from the delivery service settings table rather than the platform settings page. The Russian Post calculation tab writes service-specific endpoints, origin/tariff controls, timeout, VAT, fallback, debug, cache, country-refresh, max-weight, and packaging-tier values. The service row `enabled` state remains the single authoritative enable switch.
+
+Admin simulation has two modes. The default rules page applies rules to the entered delivery price only. The service rules tab performs a real service quote first, then applies enabled service rules only; default fallback is intentionally not mixed into service simulation.
+
+As of version 0.21.6, checkout applies service packaging before calling a carrier. `include_packaging_weight=false` leaves the package unchanged. `total_weight` adds packaging to total package weight. `package_item` adds the `WDC_PACKAGING` virtual item. Quote cache keys, carrier API requests, overweight checks, and rule weight conditions all see the package after this preprocessing.
+
+As of version 0.21.8, service rows can define separate pickup and courier customer comments. For normal rates, checkout prepends the service comment matching `delivery_type` and then appends comments produced by `add_comment` rules. As of 0.21.9, each comment is rendered as its own block line, so service comments and rule-added comments do not visually merge on wide checkout layouts. The old automatic courier checkout notice is not rendered unless equivalent text is explicitly configured as a service or rule comment.
 
 As of version 0.19.0, `russian_post` / `russian_post_worldwide_parcel` is registered as the real “Почта России — международная доставка” carrier. It is international-only, excludes `RU`, uses the new `Package` weight plus shared packaging tiers, and returns a zero-cost manager fallback instead of failing checkout for API errors, missing tariff/price, unsupported country, or overweight.
 
 As of version 0.19.2, Russian Post country support is read from the persistent `wdc_russian_post_country_mappings` table. Checkout does not rely on live country dictionary calls by default. If a destination country has no enabled mapping, the carrier returns its configured fallback/no-rate behavior with `unsupported_country_{code}`.
+
+For Russian Post service availability, `carrier_directory` no longer filters out disabled countries before the carrier runs. This lets Russian Post return a visible zero-cost terminal fallback rate with the configured `fallback_text` as the method title when fallback is enabled; otherwise checkout may fall through to the generic fallback if no visible rates remain.
+
+Russian Post terminal fallback rates carry `fallback=true`, `terminal_fallback=true`, `skip_rules=true`, and `skip_service_post_processing=true`. Checkout skips rule evaluation, service customer comments, minimum price, and ruble rounding for those rates. The fallback text is not duplicated in comments.
+
+As of 0.21.11, Russian Post international keeps `delivery_type=pickup` but does not require a customer-selected pickup point. Its rates carry `no_pickup_selection=true`. Checkout validation and the pickup selector UI both honor that flag: Russian Post passes without a selected pickup point, while other pickup carriers still require one when their rate requires pickup selection.
+
+As of 0.21.12, checkout persists a separate order-level calculation payload in `_wdc_delivery_calculation_data`. This payload is the technical source for support/debug views and contains carrier/service keys, rate id, delivery type, pickup data when selected, destination, package weights, sanitized API data, rule audit/formula, and final result values.
+
+For Russian Post international, standard WooCommerce shipping item meta is intentionally minimal: only `Способ доставки: международная доставка Почтой России` is visible. Technical fields such as `carrier_key`, `service_key`, `rules_source`, `delivery_type`, `no_pickup_selection`, API/package data, and rule audit are hidden from the shipping item and stored in `_wdc_delivery_calculation_data`.
+
+The order admin metabox `Калькулятор доставок` prefers `_wdc_delivery_calculation_data`. For normal Russian Post rates it shows destination country, products/packaging/final API weight, API base price and VAT status, readable rule formula lines, final price, and delivery days only when non-empty. For Russian Post terminal fallback it shows fallback reason/text and final price `0`; rules are not displayed because fallback rates skip rules and service post-processing.
 
 As of version 0.20.0, `CarrierRegistry` registers the real Russian Post international carrier only. The previous demo carrier toggle and demo pickup provider are test fixtures only and are not registered by `Plugin`.
 
@@ -49,9 +73,15 @@ As of version 0.20.0, `CarrierRegistry` registers the real Russian Post internat
 - `_wdc_platform_fallback_used`
 - `_wdc_platform_requires_pickup_point`
 - `_wdc_platform_service_key`
+- `_wdc_platform_service_title`
+- `_wdc_platform_rules_source`
+- `_wdc_platform_round_up_applied`
+- `_wdc_platform_minimum_price_applied`
 - `_wdc_platform_rate_meta`
 
-Russian Post rate metadata includes sanitized API request/response diagnostics, cache metadata, formula inputs/results, package weight data, country mapping, and fallback reason when fallback is used. Secrets and tokens are not stored in the request params.
+Russian Post rate metadata includes sanitized API request/response diagnostics, cache metadata, API base price data, package weight data, country mapping, and fallback reason when fallback is used. Secrets and tokens are not stored in the request params.
+
+`_wdc_platform_*` keys remain for compatibility, but new technical calculation details should be read from `_wdc_delivery_calculation_data`. Raw carrier responses are not copied into that calculation payload; only a sanitized subset such as request params, cache hit, HTTP code, country mapping, API price, package weights, fallback status, and rule audit/formula is saved.
 
 When checkout has an unambiguous local selected location, the order stores only:
 
@@ -107,3 +137,22 @@ Checkout calculation is wrapped in exception handling. Carrier failures are capt
 ## Feature flags
 
 `FeatureFlags::new_shipping_method_enabled()` defaults to false. The setting `enable_new_checkout_shipping` also defaults to false. The new shipping method appears in checkout only when one of those gates is enabled.
+# Checkout Integration
+
+Checkout runtime is service-aware. `DeliveryServiceRegistry` lists active services, resolves their carrier adapter, and `DeliveryServiceManager` checks availability, resolves service rules, and applies service post-processing after the rule engine.
+
+Availability modes:
+
+- `carrier_directory`: uses carrier-specific availability, currently `RussianPostCountryDirectory`.
+- `selected_countries`: allows countries listed in `wdc_delivery_service_countries`.
+- `all_countries`: allows every country.
+- `all_except_selected`: allows every country except listed countries.
+
+Post-processing order after rules:
+
+1. `minimum_price_rub`
+2. `round_up_to_ruble`
+
+Disabled rates are ignored, and zero fallback rates stay zero.
+
+Order/shipping metadata now includes `service_key`, `service_title`, `carrier_key`, `rules_source`, `round_up_applied`, and `minimum_price_applied`.

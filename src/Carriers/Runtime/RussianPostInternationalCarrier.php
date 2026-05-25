@@ -58,7 +58,7 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 			return $this->empty_quote( $request, 'unsupported_country_' . $country_code );
 		}
 
-		$package = $this->package_with_packaging( $request->package );
+		$package = $request->package;
 		if ( $package->get_total_weight_g() > (int) $settings['max_package_weight_g'] ) {
 			return $this->fallback_quote( $request, $package, 'overweight', array( 'max_package_weight_g' => (int) $settings['max_package_weight_g'] ) );
 		}
@@ -79,16 +79,16 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 		if ( null === $price ) {
 			return $this->fallback_quote( $request, $package, 'missing_price', array( 'api_result' => $api_result, 'cache_key' => $cache_key ) );
 		}
+		if ( $price['price_with_vat_rub'] <= 0 ) {
+			return $this->fallback_quote( $request, $package, 'zero_price', array( 'api_result' => $api_result, 'cache_key' => $cache_key ) );
+		}
 
-		$final_rub = (int) ceil( $price['price_with_vat_rub'] / (float) $settings['formula_divider'] + (float) $settings['formula_add_rub'] );
 		$meta = array(
 			'api_price_rub' => $price['api_price_rub'],
 			'api_price_has_vat' => $price['has_vat'],
 			'api_price_with_vat_rub' => $price['price_with_vat_rub'],
 			'vat_rate' => (float) $settings['vat_rate'],
-			'formula_divider' => (float) $settings['formula_divider'],
-			'formula_add_rub' => (float) $settings['formula_add_rub'],
-			'formula_result_rub' => $final_rub,
+			'api_base_price_rub' => $price['price_with_vat_rub'],
 			'cache_key' => $cache_key,
 			'cache_hit' => ! empty( $api_result['cache_hit'] ),
 			'request_url' => (string) ( $api_result['url'] ?? '' ),
@@ -100,10 +100,11 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 				'carrier_country_id' => (string) $country['carrier_country_id'],
 				'country_name' => (string) ( $country['name'] ?? '' ),
 			),
+			'no_pickup_selection' => true,
 			'package' => $package->to_array(),
 		);
 
-		$this->debug( 'Russian Post formula calculated.', $meta );
+		$this->debug( 'Russian Post API base price calculated.', $meta );
 
 		$rate = new DeliveryRate(
 			self::SERVICE_KEY,
@@ -113,9 +114,9 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 			RussianPostSettings::TITLE,
 			$this->transport_type( $api_result['raw']['transtype'] ?? null ),
 			RussianPostSettings::TITLE,
-			DeliveryType::COURIER,
+			DeliveryType::PICKUP,
 			RussianPostSettings::TITLE,
-			Money::from_rubles( $final_rub ),
+			Money::from_rubles( $price['price_with_vat_rub'] ),
 			null,
 			null,
 			DateRange::range( null, null ),
@@ -125,7 +126,7 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 			false,
 			'',
 			false,
-			true,
+			false,
 			$meta
 		);
 
@@ -155,54 +156,38 @@ final class RussianPostInternationalCarrier implements CarrierAdapterInterface {
 			self::SERVICE_KEY,
 			RussianPostSettings::TITLE,
 			'fallback',
-			$comment,
-			DeliveryType::COURIER,
+			RussianPostSettings::TITLE,
+			DeliveryType::PICKUP,
 			$comment,
 			Money::from_rubles( 0 ),
 			null,
 			null,
 			DateRange::range( null, null ),
 			'',
-			$comment,
-			array( $comment ),
+			'',
+			array(),
 			false,
 			'',
 			false,
-			true,
-			array_merge( array( 'fallback' => true, 'fallback_reason' => $reason, 'package' => $package->to_array() ), $extra )
+			false,
+			array_merge(
+				array(
+					'fallback' => true,
+					'terminal_fallback' => true,
+					'skip_rules' => true,
+					'skip_service_post_processing' => true,
+					'fallback_reason' => $reason,
+					'fallback_text' => $comment,
+					'round_up_applied' => false,
+					'minimum_price_applied' => false,
+					'no_pickup_selection' => true,
+					'package' => $package->to_array(),
+				),
+				$extra
+			)
 		);
 
 		return new DeliveryQuote( $this->quote_id( $request, $package ), self::KEY, $request->destination, $package, array( $rate ), true, $reason, $reason, false, 'fallback', $rate->meta );
-	}
-
-	private function package_with_packaging( Package $package ): Package {
-		$packaging = $this->packaging_weight( $package->weight_g );
-		if ( $packaging === $package->packaging_weight_g ) {
-			return $package;
-		}
-
-		return new Package( $package->items, $package->declared_value, $package->cart_total, $package->weight_g, $packaging, $package->weight_g + $packaging, $package->length_cm, $package->width_cm, $package->height_cm, $package->volume_cm3, $package->source );
-	}
-
-	private function packaging_weight( int $weight_g ): int {
-		$settings = $this->settings->all();
-		$tiers = is_array( $settings['packaging_tiers'] ?? null ) ? $settings['packaging_tiers'] : array();
-		$max = 0;
-		foreach ( $tiers as $tier ) {
-			if ( ! is_array( $tier ) ) {
-				continue;
-			}
-
-			$from = max( 0, (int) ( $tier['from_weight_g'] ?? 0 ) );
-			$to = max( 0, (int) ( $tier['to_weight_g'] ?? 0 ) );
-			$value = max( 0, (int) ( $tier['packaging_weight_g'] ?? 0 ) );
-			$max = max( $max, $value );
-			if ( $weight_g >= $from && ( 0 === $to || $weight_g <= $to ) ) {
-				return $value;
-			}
-		}
-
-		return $max;
 	}
 
 	/**

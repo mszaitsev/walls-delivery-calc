@@ -19,6 +19,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Core\Autoloader;
+use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
@@ -27,6 +28,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleCondition;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
@@ -104,6 +106,12 @@ function wp_remote_get( string $url, array $args = array() ): mixed {
 
 	if ( 'no_vat' === $GLOBALS['wdc_rp_remote_mode'] ) {
 		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'paymoney' => 10000, 'transtype' => 2 ) ) );
+	}
+	if ( 'zero' === $GLOBALS['wdc_rp_remote_mode'] ) {
+		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'paynds' => 0, 'transtype' => 2 ) ) );
+	}
+	if ( 'missing_price' === $GLOBALS['wdc_rp_remote_mode'] ) {
+		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'transtype' => 2 ) ) );
 	}
 
 	return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'paynds' => 10000, 'transtype' => 2 ) ) );
@@ -211,17 +219,38 @@ function rp_request( int $item_weight = 1000, string $country = 'US' ): QuoteReq
 
 $settings = rp_settings();
 $carrier = rp_carrier( $settings );
+rp_smoke_assert( ! array_key_exists( 'packaging_tiers', ( new RussianPostSettings( $settings ) )->all() ), 'RussianPostSettings must not expose packaging_tiers as service-specific settings.' );
 
 $GLOBALS['wdc_rp_remote_mode'] = 'no_vat';
 $quote = $carrier->quote( rp_request() );
 rp_smoke_assert( $quote->has_available_rates(), 'API success must return a rate.' );
-rp_smoke_assert( 33500 === $quote->rates[0]->price->get_kopecks(), 'API price without VAT must apply VAT once and formula ceil(price / 0.89 + 200).' );
+rp_smoke_assert( 12000 === $quote->rates[0]->price->get_kopecks(), 'API price without VAT must apply VAT once and return base price without built-in formula.' );
 rp_smoke_assert( false === $quote->rates[0]->meta['api_price_has_vat'], 'No-VAT source price must be marked as without VAT.' );
+rp_smoke_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && ! $quote->rates[0]->requires_courier_address, 'Russian Post international rate must be treated as pickup without courier address notice.' );
+$removed_pickup_mode_key = 'pickup_selection_' . 'mode';
+rp_smoke_assert( ! $quote->rates[0]->requires_pickup_point && ! empty( $quote->rates[0]->meta['no_pickup_selection'] ) && ! array_key_exists( $removed_pickup_mode_key, $quote->rates[0]->meta ), 'Russian Post international rate must bypass explicit pickup point selection with no_pickup_selection only.' );
+$orchestrator_reflection = new ReflectionClass( CheckoutOrchestrator::class );
+$service_rate_method = $orchestrator_reflection->getMethod( 'rate_for_service' );
+$service_rate_method->setAccessible( true );
+$service_rate = $service_rate_method->invoke(
+	$orchestrator_reflection->newInstanceWithoutConstructor(),
+	$quote->rates[0],
+	DeliveryService::from_array(
+		array(
+			'service_key' => RussianPostSettings::SERVICE_KEY,
+			'carrier_key' => RussianPostSettings::CARRIER_KEY,
+			'title' => RussianPostSettings::TITLE,
+			'pickup_customer_comment' => 'Комментарий Почты России для ПВЗ',
+			'courier_customer_comment' => 'Комментарий Почты России для курьера',
+		)
+	)
+);
+rp_smoke_assert( in_array( 'Комментарий Почты России для ПВЗ', $service_rate->comments, true ) && ! in_array( 'Комментарий Почты России для курьера', $service_rate->comments, true ), 'Russian Post international pickup rate must use pickup_customer_comment only.' );
 
 $GLOBALS['wdc_rp_remote_mode'] = 'success';
 $GLOBALS['wdc_rp_transients'] = array();
 $quote = $carrier->quote( rp_request() );
-rp_smoke_assert( 31300 === $quote->rates[0]->price->get_kopecks(), 'API price with VAT must not double VAT.' );
+rp_smoke_assert( 10000 === $quote->rates[0]->price->get_kopecks(), 'API price with VAT must not double VAT and must not add built-in markup.' );
 
 $GLOBALS['wdc_rp_remote_mode'] = 'fail';
 $GLOBALS['wdc_rp_transients'] = array();
@@ -229,11 +258,52 @@ $quote = $carrier->quote( rp_request() );
 rp_smoke_assert( $quote->has_available_rates(), 'API fail must return fallback rate.' );
 rp_smoke_assert( 0 === $quote->rates[0]->price->get_kopecks(), 'Fallback rate must be zero cost.' );
 rp_smoke_assert( 'http_status_500' === $quote->rates[0]->meta['fallback_reason'], 'Fallback must keep reason in meta.' );
+rp_smoke_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && 'Стоимость доставки рассчитает менеджер' === $quote->rates[0]->title && array() === $quote->rates[0]->comments && '' === $quote->rates[0]->planned_delivery_comment, 'Russian Post terminal fallback must expose fallback text as title only.' );
+rp_smoke_assert( ! empty( $quote->rates[0]->meta['skip_rules'] ) && ! empty( $quote->rates[0]->meta['skip_service_post_processing'] ) && ! empty( $quote->rates[0]->meta['terminal_fallback'] ), 'Russian Post fallback must request skipped rules and service post-processing.' );
+rp_smoke_assert( ! $quote->rates[0]->requires_pickup_point && ! empty( $quote->rates[0]->meta['no_pickup_selection'] ) && ! array_key_exists( $removed_pickup_mode_key, $quote->rates[0]->meta ), 'Russian Post fallback must bypass explicit pickup point selection with no_pickup_selection only.' );
 
+$fallback_rule = new Rule( null, 'Add 100', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 100, RuleOperationBases::RUBLES, false, false );
+$fallback_comment_rule = new Rule( null, 'Fallback comment', true, 20, 'default', '', RuleActionTypes::ADD_COMMENT, RuleOperationTypes::EQUALS, 0, RuleOperationBases::RUBLES, false, false, array(), array( 1 => 'and', 2 => 'and', 3 => 'and' ), 'Комментарий правила' );
+$builder = new RuleAppliedRateBuilder( new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) ) );
+$fallback_rate = $quote->rates[0];
+$fallback_request = rp_request();
+$built = $builder->apply( $fallback_rate, new \WallsShop\WDC\Rules\Domain\RuleEvaluationContext( Money::from_rubles( 1000 ), $fallback_rate->price, $fallback_request->package, $fallback_request->destination, $fallback_rate->delivery_type, '', '2026-05-25' ), array( $fallback_rule, $fallback_comment_rule ) );
+rp_smoke_assert( 0 === $built['rate']->price->get_kopecks() && array() === $built['rate']->comments && array() === $built['audit'], 'Rules must not change Russian Post terminal fallback price or comments.' );
+
+$GLOBALS['wdc_rp_remote_mode'] = 'zero';
+$GLOBALS['wdc_rp_transients'] = array();
+$quote = $carrier->quote( rp_request() );
+rp_smoke_assert( $quote->has_available_rates() && 'zero_price' === $quote->rates[0]->meta['fallback_reason'] && 0 === $quote->rates[0]->price->get_kopecks() && array() === $quote->rates[0]->comments, 'API zero price must trigger terminal fallback.' );
+
+$GLOBALS['wdc_rp_remote_mode'] = 'missing_price';
+$GLOBALS['wdc_rp_transients'] = array();
+$quote = $carrier->quote( rp_request() );
+rp_smoke_assert( $quote->has_available_rates() && 'missing_price' === $quote->rates[0]->meta['fallback_reason'] && 0 === $quote->rates[0]->price->get_kopecks() && array() === $quote->rates[0]->comments, 'API missing price must trigger terminal fallback.' );
+
+$fallback_disabled_settings = rp_settings();
+$fallback_disabled_settings->set( 'russian_post_worldwide_parcel', array_merge( $fallback_disabled_settings->all()['russian_post_worldwide_parcel'], array( 'fallback_enabled' => false ) ) );
+$GLOBALS['wdc_rp_remote_mode'] = 'fail';
+$GLOBALS['wdc_rp_transients'] = array();
+$quote = rp_carrier( $fallback_disabled_settings )->quote( rp_request() );
+rp_smoke_assert( ! $quote->has_available_rates() && 'http_status_500' === $quote->error_code, 'When fallback_enabled=false Russian Post must return no visible fallback rate.' );
+
+$settings = rp_settings();
+$carrier = rp_carrier( $settings );
 $GLOBALS['wdc_rp_remote_mode'] = 'success';
 $GLOBALS['wdc_rp_transients'] = array();
 $quote = $carrier->quote( rp_request( 0 ) );
-rp_smoke_assert( 150 === $quote->package->packaging_weight_g && 150 === $quote->package->total_weight_g, 'No-weight product must be 0g plus packaging tier.' );
+rp_smoke_assert( 0 === $quote->package->packaging_weight_g && 0 === $quote->package->total_weight_g, 'Direct carrier quote must not apply global packaging tiers by itself.' );
+
+$settings->set( PackagingWeightCalculator::SETTINGS_KEY, array( array( 'cart_weight_from_g' => 0, 'cart_weight_to_g' => 3000, 'packaging_weight_g' => 250 ) ) );
+$calculator = new PackagingWeightCalculator( $settings );
+$service = DeliveryService::from_array( array( 'service_key' => RussianPostSettings::SERVICE_KEY, 'carrier_key' => RussianPostSettings::CARRIER_KEY, 'include_packaging_weight' => 1, 'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT ) );
+$packaged = $calculator->apply_to_package( rp_request( 1000 )->package, $service );
+$quote = $carrier->quote( new QuoteRequest( 'US', new Address( country_code: 'US', city: 'New York', street: 'Broadway', house: '1', raw_address: 'Broadway 1' ), $packaged->package, 'card', Money::from_rubles( 1000 ), '2026-05-25' ) );
+rp_smoke_assert( 1250 === (int) ( $quote->rates[0]->meta['request_params']['weight'] ?? 0 ), 'Russian Post API must receive products weight plus packaging when service packaging is applied.' );
+$disabled_service = DeliveryService::from_array( array( 'service_key' => RussianPostSettings::SERVICE_KEY, 'carrier_key' => RussianPostSettings::CARRIER_KEY, 'include_packaging_weight' => 0, 'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT ) );
+$packaged = $calculator->apply_to_package( rp_request( 1000 )->package, $disabled_service );
+$quote = $carrier->quote( new QuoteRequest( 'US', new Address( country_code: 'US', city: 'New York', street: 'Broadway', house: '1', raw_address: 'Broadway 1' ), $packaged->package, 'card', Money::from_rubles( 1000 ), '2026-05-25' ) );
+rp_smoke_assert( 1000 === (int) ( $quote->rates[0]->meta['request_params']['weight'] ?? 0 ), 'Russian Post API must receive product weight only when service packaging is disabled.' );
 
 $settings->set( 'russian_post_worldwide_parcel', array_merge( $settings->all()['russian_post_worldwide_parcel'], array( 'max_package_weight_g' => 100 ) ) );
 $quote = rp_carrier( $settings )->quote( rp_request( 1000 ) );
@@ -260,7 +330,7 @@ $orchestrator = new CheckoutOrchestrator( $registry, new RuleAppliedRateBuilder(
 $increase_rule = new Rule( null, 'Add 10', true, 10, 'default', '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 10, RuleOperationBases::RUBLES, false, false );
 $comment_rule = new Rule( null, 'Comment', true, 20, 'default', '', RuleActionTypes::ADD_COMMENT, RuleOperationTypes::EQUALS, 0, RuleOperationBases::RUBLES, false, false, array(), array( 1 => 'and', 2 => 'and', 3 => 'and' ), 'Комментарий правила' );
 $result = $orchestrator->calculate( rp_request(), array( $increase_rule, $comment_rule ), RateSorter::CHEAPEST, false );
-rp_smoke_assert( 32300 === $result->rates[0]->price->get_kopecks(), 'Rules must apply after carrier quote.' );
+rp_smoke_assert( 11000 === $result->rates[0]->price->get_kopecks(), 'Rules must apply after carrier quote.' );
 rp_smoke_assert( in_array( 'Комментарий правила', $result->rates[0]->comments, true ), 'add_comment rule must appear in rate comments.' );
 $disable_rule = new Rule( null, 'Disable US', true, 10, 'default', 'disabled', RuleActionTypes::DISABLE_RATE, RuleOperationTypes::EQUALS, 0, RuleOperationBases::RUBLES, false, false, array( new RuleCondition( null, null, 1, RuleConditionTypes::COUNTRY, RuleOperators::EQ, 'US' ) ) );
 $result = $orchestrator->calculate( rp_request(), array( $disable_rule ), RateSorter::CHEAPEST, false );
@@ -277,9 +347,12 @@ $order = new class {
 ( new OrderShippingMetaPersister( $session ) )->persist( $order, array() );
 rp_smoke_assert( 'russian_post' === $order->meta['_wdc_platform_carrier_key'], 'Order meta must contain carrier_key.' );
 rp_smoke_assert( 'russian_post_worldwide_parcel' === $order->meta['_wdc_platform_rate_id'], 'Order meta must contain rate_id.' );
-rp_smoke_assert( DeliveryType::COURIER === $order->meta['_wdc_platform_delivery_type'], 'Order meta must contain delivery_type.' );
+rp_smoke_assert( DeliveryType::PICKUP === $order->meta['_wdc_platform_delivery_type'], 'Order meta must contain delivery_type.' );
 rp_smoke_assert( 0 === $order->meta['_wdc_platform_requires_pickup_point'], 'Order meta must store requires_pickup_point = 0.' );
 rp_smoke_assert( is_array( $order->meta['_wdc_platform_rate_meta'] ), 'Order meta must contain sanitized rate metadata.' );
+
+$delivery_type_selector_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' );
+rp_smoke_assert( ! str_contains( $delivery_type_selector_source, 'Для курьерской доставки будет использован адрес, указанный в checkout.' ), 'Checkout must not auto-render courier address comment.' );
 
 $GLOBALS['wdc_rp_options'] = array();
 $settings = new SettingsRepository();
@@ -287,19 +360,10 @@ $admin = new SettingsAdminPage( $settings, null, null, null, new RussianPostSett
 ob_start();
 $admin->render_page();
 $rendered = (string) ob_get_clean();
-rp_smoke_assert( str_contains( $rendered, 'name="russian_post_worldwide_parcel[enabled]" value="1" checked="checked"' ), 'Empty saved settings render must use enabled=true Russian Post default.' );
-rp_smoke_assert( str_contains( $rendered, 'value="https://tariff.pochta.ru/v2/calculate/tariff"' ), 'Empty saved settings render must show tariff endpoint default.' );
-rp_smoke_assert( str_contains( $rendered, 'value="https://tariff.pochta.ru/v2/dictionary/country"' ), 'Empty saved settings render must show country endpoint default.' );
-rp_smoke_assert( str_contains( $rendered, 'name="russian_post_worldwide_parcel[origin_postcode]" value="630005"' ), 'Empty saved settings render must show origin postcode default.' );
-rp_smoke_assert( str_contains( $rendered, 'name="russian_post_worldwide_parcel[object_code]" value="4031"' ), 'Empty saved settings render must show object code default.' );
-rp_smoke_assert( str_contains( $rendered, 'name="russian_post_worldwide_parcel[max_package_weight_g]" value="19990"' ), 'Empty saved settings render must show max package weight default.' );
-rp_smoke_assert( str_contains( $rendered, 'name="russian_post_worldwide_parcel[fallback_enabled]" value="1" checked="checked"' ), 'Empty saved settings render must show fallback enabled default.' );
-rp_smoke_assert( str_contains( $rendered, 'value="Стоимость доставки рассчитает менеджер"' ), 'Empty saved settings render must show fallback text default.' );
-rp_smoke_assert( str_contains( $rendered, 'name="russian_post_worldwide_parcel[cache_until_end_of_day]" value="1" checked="checked"' ), 'Empty saved settings render must show cache-until-end-of-day default.' );
+rp_smoke_assert( ! str_contains( $rendered, 'russian_post_worldwide_parcel[' ), 'Platform settings page must not render Russian Post service-specific fields.' );
 
 $sanitized = $admin->sanitize_settings( array( 'checkout_sort_mode' => 'fastest' ) );
-rp_smoke_assert( 'https://tariff.pochta.ru/v2/calculate/tariff' === $sanitized['russian_post_worldwide_parcel']['api_endpoint'], 'Saving unrelated settings must not blank Russian Post tariff endpoint.' );
-rp_smoke_assert( 'https://tariff.pochta.ru/v2/dictionary/country' === $sanitized['russian_post_worldwide_parcel']['country_endpoint'], 'Saving unrelated settings must not blank Russian Post country endpoint.' );
+rp_smoke_assert( ! array_key_exists( 'russian_post_worldwide_parcel', $sanitized ), 'Platform settings sanitize must not write Russian Post service-specific settings.' );
 
 $settings->replace( array( 'russian_post_worldwide_parcel' => array( 'enabled' => false, 'max_package_weight_g' => 12345 ) ) );
 $admin = new SettingsAdminPage( $settings, null, null, null, new RussianPostSettings( $settings ) );
@@ -313,12 +377,6 @@ $sanitized = $admin->sanitize_settings(
 		),
 	)
 );
-rp_smoke_assert( true === $sanitized['russian_post_worldwide_parcel']['enabled'], 'Saved partial settings must accept submitted enabled flag.' );
-rp_smoke_assert( 12345 === $sanitized['russian_post_worldwide_parcel']['max_package_weight_g'], 'Saved partial settings must preserve current service values.' );
-rp_smoke_assert( 'https://tariff.pochta.ru/v2/calculate/tariff' === $sanitized['russian_post_worldwide_parcel']['api_endpoint'], 'Saved partial settings must merge empty tariff endpoint with default.' );
-rp_smoke_assert( 'https://tariff.pochta.ru/v2/dictionary/country' === $sanitized['russian_post_worldwide_parcel']['country_endpoint'], 'Saved partial settings must merge empty country endpoint with default.' );
-rp_smoke_assert( '630005' === $sanitized['russian_post_worldwide_parcel']['origin_postcode'], 'Saved partial settings must merge origin postcode default.' );
-rp_smoke_assert( 4031 === $sanitized['russian_post_worldwide_parcel']['object_code'], 'Saved partial settings must merge object code default.' );
-rp_smoke_assert( 'Стоимость доставки рассчитает менеджер' === $sanitized['russian_post_worldwide_parcel']['fallback_text'], 'Saved partial settings must merge fallback text default.' );
+rp_smoke_assert( ! array_key_exists( 'russian_post_worldwide_parcel', $sanitized ), 'Submitted Russian Post payload must be ignored by platform settings.' );
 
 echo "Russian Post smoke test passed.\n";

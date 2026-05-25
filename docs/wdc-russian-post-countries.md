@@ -1,6 +1,6 @@
 # WDC Russian Post Countries
 
-Version: 0.19.4.
+Version: 0.21.5.
 
 ## Persistent Mapping Table
 
@@ -62,13 +62,15 @@ This makes the default behavior API-driven while still allowing explicit manual 
 
 ## Admin Page
 
-The admin page is:
+The admin UI is embedded in the Russian Post delivery service:
 
-`Калькулятор доставок -> Почта России: страны`
+`Калькулятор доставок -> Службы доставки -> Почта России — международная доставка -> Страны Почты России`
 
-Slug:
+URL:
 
-`wdc-russian-post-countries`
+`admin.php?page=wdc-delivery-services&service=russian_post_worldwide_parcel&tab=russian_post_countries`
+
+The old standalone submenu is no longer registered, and `RussianPostCountriesAdminPage` is embedded-only. It always renders `<div class="wdc-rp-countries-admin">` without its own `.wrap` or duplicate `h1`, and refresh/manual/bulk actions return to the service countries tab.
 
 The page includes:
 

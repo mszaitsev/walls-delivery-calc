@@ -8,7 +8,7 @@ use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
 
 final class Rule {
-	public const DEFAULT_GROUP_EXPRESSION = 'condition_1_or_2_or_3';
+	public const DEFAULT_GROUP_EXPRESSION = 'condition_1';
 
 	private const GROUP_EXPRESSIONS = array(
 		'condition_1',
@@ -91,7 +91,7 @@ final class Rule {
 			(string) ( $data['target_value'] ?? '' ),
 			(string) ( $data['action_type'] ?? '' ),
 			(string) ( $data['operation_type'] ?? RuleOperationTypes::EQUALS ),
-			(float) ( $data['operation_value'] ?? 0 ),
+			(float) str_replace( ',', '.', (string) ( $data['operation_value'] ?? 0 ) ),
 			(string) ( $data['operation_base'] ?? RuleOperationBases::RUBLES ),
 			(bool) ( $data['promo_shipping'] ?? false ),
 			(bool) ( $data['stop_processing'] ?? false ),
@@ -122,6 +122,10 @@ final class Rule {
 
 		if ( ! RuleOperationBases::is_valid( $this->operation_base ) ) {
 			$errors[] = 'operation_base is invalid';
+		}
+
+		if ( in_array( $this->operation_type, array( RuleOperationTypes::MULTIPLY, RuleOperationTypes::DIVIDE ), true ) && $this->operation_value <= 0 ) {
+			$errors[] = 'operation_value must be greater than 0';
 		}
 
 		if ( RuleActionTypes::ADD_COMMENT === $this->action_type && '' === trim( $this->operation_text ) ) {

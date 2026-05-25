@@ -369,6 +369,7 @@ use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
+use WallsShop\WDC\Checkout\Cache\QuoteCache;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
@@ -393,6 +394,7 @@ use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Domain\Quote\DeliveryQuote;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -601,6 +603,19 @@ $checkout_sort_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets
 foreach ( array( '.wdc-platform-pickup-point', 'pickup select changed', 'pickup carrier', 'pickup rate id', 'pickup point code', 'update_checkout triggered after pickup selection' ) as $needle ) {
 	runtime_smoke_assert( str_contains( $checkout_sort_js, $needle ), 'Pickup frontend JS must contain ' . $needle . '.' );
 }
+$delivery_type_selector_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' );
+runtime_smoke_assert( ! str_contains( $delivery_type_selector_source, 'Для курьерской доставки будет использован адрес, указанный в checkout.' ), 'Checkout delivery type selector must not auto-render courier customer comment.' );
+$rate_renderer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutRateRenderer.php' );
+$checkout_rates_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-rates.css' );
+runtime_smoke_assert( str_contains( $rate_renderer_source, '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' ), 'Rate renderer must render comments as block elements, not inline-only spans.' );
+runtime_smoke_assert( str_contains( $checkout_rates_css, '.wdc-platform-delivery-comment' ) && str_contains( $checkout_rates_css, 'flex-basis: 100%' ) && str_contains( $checkout_rates_css, '.wdc-shipping-rate-comment' ) && str_contains( $checkout_rates_css, 'display: block' ), 'Checkout comments CSS must force each service/rule comment onto its own line.' );
+$src_iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . '/src' ) );
+foreach ( $src_iterator as $src_file ) {
+	if ( ! $src_file->isFile() || 'php' !== $src_file->getExtension() ) {
+		continue;
+	}
+	runtime_smoke_assert( ! str_contains( (string) file_get_contents( $src_file->getPathname() ), 'Для курьерской доставки будет использован адрес, указанный в checkout.' ), 'Courier auto-comment text must not exist in src unless explicitly configured.' );
+}
 
 $settings->set( 'enable_new_checkout_shipping', true );
 runtime_smoke_assert( $gate->enabled(), 'Feature gate must be enabled through SettingsRepository.' );
@@ -638,6 +653,16 @@ $fast_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), R
 runtime_smoke_assert( DeliveryType::COURIER === $fast_rates[0]->delivery_type, 'Fastest sort must put courier first.' );
 $cheap_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), RateSorter::CHEAPEST, false )->rates;
 runtime_smoke_assert( DeliveryType::PICKUP === $cheap_rates[0]->delivery_type, 'Cheapest sort must put pickup first.' );
+
+$quote_cache = new QuoteCache();
+$service_cache_key_a = $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_a' );
+$service_cache_key_b = $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_b' );
+runtime_smoke_assert( $service_cache_key_a !== $service_cache_key_b, 'Quote cache key must include service_key.' );
+runtime_smoke_assert( $service_cache_key_a === $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_a' ), 'Quote cache key must remain stable per service.' );
+$quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-a', 'demo', runtime_smoke_request()->destination, runtime_smoke_request()->package ), '', 'service_a' );
+$quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-b', 'demo', runtime_smoke_request()->destination, runtime_smoke_request()->package ), '', 'service_b' );
+runtime_smoke_assert( 'quote-a' === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' )?->quote_id, 'Quote cache hit must stay isolated for service_a.' );
+runtime_smoke_assert( 'quote-b' === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_b' )?->quote_id, 'Quote cache hit must stay isolated for service_b.' );
 
 $settings_page = new SettingsAdminPage( $settings );
 $legacy_location_limit_key = 'location' . '_search' . '_limit';
@@ -699,7 +724,7 @@ ob_start();
 $debug_output = (string) ob_get_clean();
 runtime_smoke_assert( str_contains( $debug_output, 'Отладка checkout WDC' ), 'Debug panel must render when explicitly enabled.' );
 
-runtime_smoke_assert( 'Калькулятор доставок' === $method->method_title, 'Shipping method title must be Russian.' );
+runtime_smoke_assert( 'Калькулятор доставки w.ALL.s' === $method->method_title, 'Shipping method title must be updated.' );
 
 $errors = new class {
 	/** @var array<string,string> */
@@ -747,6 +772,27 @@ WC()->session->set( 'chosen_shipping_methods', array( 'demo:courier' ) );
 ( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
 runtime_smoke_assert( array() === $errors->errors, 'Courier rate must ignore stale pickup selection.' );
 
+$validation_session->clear_pickup_selection();
+$validation_session->save_rates(
+	array(
+		'russian_post_worldwide_parcel' => array(
+			'carrier_key'            => 'russian_post',
+			'rate_id'                => 'russian_post_worldwide_parcel',
+			'service_key'            => 'russian_post_worldwide_parcel',
+			'delivery_type'          => DeliveryType::PICKUP,
+			'requires_pickup_point'  => false,
+			'no_pickup_selection'    => true,
+			'rate_meta'              => array(
+				'no_pickup_selection'   => true,
+			),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_worldwide_parcel' ) );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Russian Post international pickup rate must validate without pickup point selection.' );
+
 $repo = new PickupPointRepository();
 $repo->save_many( ( new TestPickupProvider( dirname( __DIR__ ) . '/fixtures/demo/pickup-points-demo.json' ) )->load_points() );
 runtime_smoke_assert( count( $repo->search( 'demo', 'RU', 'Новосибирск' ) ) >= 3, 'Demo pickup search must find Новосибирск.' );
@@ -769,6 +815,40 @@ $renderer->render( $rate );
 $selector_output = (string) ob_get_clean();
 runtime_smoke_assert( ! str_contains( $selector_output, 'wdc_platform_delivery_type' ), 'Delivery type radio must not render.' );
 runtime_smoke_assert( str_contains( $selector_output, 'Выберите пункт выдачи' ), 'Pickup selector label must be Russian.' );
+
+$rp_rate = new class {
+	public function get_meta_data(): array {
+		return array(
+			'carrier_key'           => 'russian_post',
+			'rate_id'               => 'russian_post_worldwide_parcel',
+			'service_key'           => 'russian_post_worldwide_parcel',
+			'delivery_type'         => 'pickup',
+			'requires_pickup_point' => true,
+			'no_pickup_selection'   => true,
+			'rate_meta'             => array(
+				'no_pickup_selection'   => true,
+			),
+		);
+	}
+};
+ob_start();
+$renderer->render( $rp_rate );
+$rp_selector_output = (string) ob_get_clean();
+runtime_smoke_assert( ! str_contains( $rp_selector_output, 'Выберите пункт выдачи' ) && ! str_contains( $rp_selector_output, 'wdc-platform-pickup-point' ), 'Russian Post international must not render pickup selector UI.' );
+
+$pickup_mode_scan = '';
+foreach ( array( '/src', '/tests', '/docs' ) as $scan_dir ) {
+	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . $scan_dir ) );
+	foreach ( $iterator as $scan_file ) {
+		if ( $scan_file->isFile() ) {
+			$pickup_mode_scan .= (string) file_get_contents( $scan_file->getPathname() );
+		}
+	}
+}
+$removed_pickup_mode_key = 'pickup_selection_' . 'mode';
+$removed_pickup_mode_value = 'post_' . 'office';
+runtime_smoke_assert( ! str_contains( $pickup_mode_scan, $removed_pickup_mode_key ), 'Removed pickup selection mode key must not be referenced after cleanup.' );
+runtime_smoke_assert( ! str_contains( $pickup_mode_scan, $removed_pickup_mode_value ), 'Removed technical pickup mode value must not be referenced after cleanup.' );
 
 $sort_session = new CheckoutSessionManager();
 $sort_selector = new CheckoutSortSelector( $sort_session, $settings );

@@ -9,6 +9,7 @@ use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
@@ -27,7 +28,8 @@ final class ShippingMethodRegistrar {
 		private PluginEnvironment $environment,
 		private Logger $logger,
 		private ?AddressSuggestionSettings $suggestion_settings = null,
-		private ?DaDataTokenPool $token_pool = null
+		private ?DaDataTokenPool $token_pool = null,
+		private ?DeliveryServiceManager $service_manager = null
 	) {
 	}
 
@@ -55,7 +57,8 @@ final class ShippingMethodRegistrar {
 			$this->rule_repository,
 			$this->settings,
 			$this->environment,
-			$this->logger
+			$this->logger,
+			$this->service_manager
 		);
 
 		$methods[ NewShippingMethod::METHOD_ID ] = NewShippingMethod::class;

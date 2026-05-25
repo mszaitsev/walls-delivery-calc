@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Rules\Domain\Rule;
@@ -21,6 +22,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	private static ?WooCommerceRateMapper $configured_rate_mapper = null;
 	private static ?CheckoutSessionManager $configured_session_manager = null;
 	private static ?RuleRepository $configured_rule_repository = null;
+	private static ?DeliveryServiceManager $configured_service_manager = null;
 	private static ?SettingsRepository $configured_settings_repository = null;
 	private static ?PluginEnvironment $configured_environment = null;
 	private static ?Logger $configured_logger = null;
@@ -30,6 +32,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	private WooCommerceRateMapper $rate_mapper;
 	private CheckoutSessionManager $session_manager;
 	private RuleRepository $rule_repository;
+	private ?DeliveryServiceManager $service_manager;
 	private SettingsRepository $settings_repository;
 	private ?PluginEnvironment $environment;
 	private ?Logger $logger;
@@ -42,13 +45,15 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		RuleRepository $rule_repository,
 		SettingsRepository $settings,
 		PluginEnvironment $environment,
-		Logger $logger
+		Logger $logger,
+		?DeliveryServiceManager $service_manager = null
 	): void {
 		self::$configured_orchestrator    = $orchestrator;
 		self::$configured_package_mapper = $package_mapper;
 		self::$configured_rate_mapper    = $rate_mapper;
 		self::$configured_session_manager = $session_manager;
 		self::$configured_rule_repository = $rule_repository;
+		self::$configured_service_manager = $service_manager;
 		self::$configured_settings_repository = $settings;
 		self::$configured_environment    = $environment;
 		self::$configured_logger         = $logger;
@@ -57,10 +62,10 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	public function __construct( int $instance_id = 0 ) {
 		$this->id                 = self::METHOD_ID;
 		$this->instance_id        = $instance_id;
-		$this->method_title       = __( 'Калькулятор доставок', 'walls-delivery-calc' );
+		$this->method_title       = __( 'Калькулятор доставки w.ALL.s', 'walls-delivery-calc' );
 		$this->method_description = __( 'Новая система расчета доставки WDC.', 'walls-delivery-calc' );
 		$this->enabled            = 'yes';
-		$this->title              = __( 'Калькулятор доставок', 'walls-delivery-calc' );
+		$this->title              = __( 'Калькулятор доставки w.ALL.s', 'walls-delivery-calc' );
 		$this->supports           = array( 'shipping-zones', 'instance-settings' );
 
 		$this->orchestrator     = self::$configured_orchestrator ?? $this->fallback_orchestrator();
@@ -68,6 +73,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		$this->rate_mapper      = self::$configured_rate_mapper ?? new WooCommerceRateMapper();
 		$this->session_manager  = self::$configured_session_manager ?? new CheckoutSessionManager();
 		$this->rule_repository  = self::$configured_rule_repository ?? new RuleRepository();
+		$this->service_manager  = self::$configured_service_manager;
 		$this->settings_repository = self::$configured_settings_repository ?? new SettingsRepository();
 		$this->environment      = self::$configured_environment;
 		$this->logger           = self::$configured_logger;
@@ -98,8 +104,15 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 					$mapped['meta_data'],
 					array(
 						'rate_id'                  => $rate->rate_id,
+						'label'                    => $mapped['label'],
+						'cost'                     => $mapped['cost'],
 						'planned_delivery_comment' => $rate->planned_delivery_comment,
+						'delivery_days'            => $rate->delivery_days->to_array(),
 						'fallback_used'            => $result->fallback_used,
+						'service_title'            => $rate->service_name,
+						'rules_source'             => (string) ( $rate->meta['rules_source'] ?? 'none' ),
+						'round_up_applied'         => ! empty( $rate->meta['round_up_applied'] ),
+						'minimum_price_applied'    => ! empty( $rate->meta['minimum_price_applied'] ),
 					)
 				);
 				$stored[ $mapped['id'] ] = $stored_rate;
