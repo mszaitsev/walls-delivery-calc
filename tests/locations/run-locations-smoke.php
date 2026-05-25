@@ -15,6 +15,17 @@ use WallsShop\WDC\Locations\ValueObjects\Location;
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
 
+$GLOBALS['wdc_locations_smoke_options'] = array();
+
+function get_option( string $key, mixed $default = false ): mixed {
+	return array_key_exists( $key, $GLOBALS['wdc_locations_smoke_options'] ) ? $GLOBALS['wdc_locations_smoke_options'][ $key ] : $default;
+}
+
+function update_option( string $key, mixed $value, bool|string $autoload = false ): bool {
+	$GLOBALS['wdc_locations_smoke_options'][ $key ] = $value;
+	return true;
+}
+
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = '';
@@ -31,6 +42,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 		/** @var array<int,string> */
 		public array $missing_tables = array();
+
+		public int $distinct_country_codes_calls = 0;
 
 		public function prepare( string $query, mixed ...$args ): array {
 			return array(
@@ -304,6 +317,17 @@ locations_smoke_assert( $clear_stats['aliases_deleted'] >= 2, 'clear_all must co
 locations_smoke_assert( 0 === $repository->count_all(), 'clear_all must remove local locations.' );
 locations_smoke_assert( 0 === $repository->count_aliases(), 'clear_all must remove local aliases.' );
 locations_smoke_assert( array() === $country_index->rebuild(), 'LocationCountryIndex rebuild returns empty list after clear_all.' );
+unset( $GLOBALS['wdc_locations_smoke_options'][ LocationCountryIndexService::OPTION ] );
+$empty_wpdb = new wpdb();
+$empty_repository = new LocationRepository( $empty_wpdb );
+$empty_index = new LocationCountryIndexService( $empty_repository );
+locations_smoke_assert( array() === $empty_index->countries(), 'Empty locations table first countries() call rebuilds and returns empty list.' );
+locations_smoke_assert( 1 === $empty_wpdb->distinct_country_codes_calls, 'Empty locations table first countries() call runs one distinct country lookup.' );
+locations_smoke_assert( array() === $empty_index->countries(), 'Empty locations table second countries() call returns cached empty list.' );
+locations_smoke_assert( 1 === $empty_wpdb->distinct_country_codes_calls, 'Empty cached countries() call must not rebuild again.' );
+$empty_index->mark_stale();
+locations_smoke_assert( array() === $empty_index->countries(), 'Marked stale empty country index rebuilds and still returns empty list.' );
+locations_smoke_assert( 2 === $empty_wpdb->distinct_country_codes_calls, 'mark_stale allows the next countries() call to rebuild once.' );
 $alias_clear_index = -1;
 $location_clear_index = -1;
 foreach ( $wpdb->queries as $index => $query ) {

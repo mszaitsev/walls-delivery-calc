@@ -1,6 +1,6 @@
 # Walls Delivery Calc
 
-Version: 0.21.15.
+Version: 0.21.16.
 
 Walls Delivery Calc is a WooCommerce delivery calculator plugin. The runtime is now `src/` only: the old `includes/*` legacy bootstrap, shipping method, carriers, API clients, settings, helpers, and cache wrappers have been removed.
 
@@ -51,5 +51,7 @@ Version 0.21.13 extends rule audit entries with operation value/base, so order f
 Version 0.21.14 cleans WooCommerce shipping item meta copied from rate `meta_data` for Russian Post international and stores the actual final rate price in runtime meta after rules and service post-processing.
 
 Version 0.21.15 makes the checkout city picker country-aware. The local location country index is stored in `wdc_location_country_codes`, checkout search/resolve accept `country_code`, supported countries search only their own local rows, and unsupported countries keep normal manual WooCommerce city/state input without modal, auto-resolve, local warning, or stale local location order meta. For RU/BY/KZ, latin city picker text is treated as transliteration or wrong keyboard layout input before database lookup.
+
+Version 0.21.16 treats `wdc_location_country_codes` with `countries=[]` and `stale=false` as a valid initialized empty index, so empty local location tables do not trigger repeated lazy rebuilds on every checkout request.
 
 Version 0.21.6 moves packaging weight into the new `src/` foundation. Global tiers live on `Правила расчета -> Упаковка` as `packaging_weight_tiers`; services choose whether to include packaging and whether to apply it as `total_weight` or a `WDC_PACKAGING` virtual package item. Russian Post international uses final total weight.

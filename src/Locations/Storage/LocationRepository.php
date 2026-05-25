@@ -525,6 +525,10 @@ final class LocationRepository {
 	 * @return array<int,string>
 	 */
 	public function distinct_country_codes(): array {
+		if ( property_exists( $this->wpdb, 'distinct_country_codes_calls' ) ) {
+			++$this->wpdb->distinct_country_codes_calls;
+		}
+
 		if ( $this->has_test_location_rows() ) {
 			$countries = array();
 			foreach ( $this->test_location_rows() as $row ) {

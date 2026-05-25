@@ -34,12 +34,11 @@ final class LocationCountryIndexService {
 	 */
 	public function countries(): array {
 		$index = $this->option();
-		$countries = $this->normalize_codes( is_array( $index['countries'] ?? null ) ? $index['countries'] : ( is_array( $index ) ? $index : array() ) );
-		if ( array() === $countries || ! empty( $index['stale'] ) ) {
+		if ( ! array_key_exists( 'countries', $index ) || ! empty( $index['stale'] ) ) {
 			return $this->rebuild();
 		}
 
-		return $countries;
+		return $this->normalize_codes( is_array( $index['countries'] ) ? $index['countries'] : array() );
 	}
 
 	public function has_country( string $country_code ): bool {
@@ -69,7 +68,7 @@ final class LocationCountryIndexService {
 	 * @return array<string,mixed>
 	 */
 	private function option(): array {
-		$value = function_exists( 'get_option' ) ? get_option( self::OPTION, array() ) : array();
+		$value = function_exists( 'get_option' ) ? get_option( self::OPTION, null ) : null;
 		return is_array( $value ) ? $value : array();
 	}
 
