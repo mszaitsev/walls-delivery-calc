@@ -121,6 +121,7 @@ final class OrderShippingMetaPersister {
 
 		$delivery_type = (string) ( $rate['delivery_type'] ?? '' );
 		if ( $this->is_russian_post_international_rate( $rate ) ) {
+			$this->delete_visible_technical_item_meta( $item );
 			$item->add_meta_data( 'Способ доставки', 'международная доставка Почтой России', true );
 			return;
 		}
@@ -271,11 +272,15 @@ final class OrderShippingMetaPersister {
 	 * @return array<string,mixed>
 	 */
 	private function calculation_result_data( array $rate, array $rate_meta ): array {
+		$is_fallback = ! empty( $rate_meta['fallback'] ) || ! empty( $rate['fallback_used'] );
+		$final_price = $this->nullable_float( $rate_meta['final_price_rub'] ?? null )
+			?? $this->nullable_float( $rate['final_price_rub'] ?? null )
+			?? $this->nullable_float( $rate['cost'] ?? null );
 		$result = array(
-			'final_price_rub'       => $this->nullable_float( $rate['cost'] ?? null ) ?? 0.0,
+			'final_price_rub'       => null !== $final_price ? $final_price : ( $is_fallback ? 0.0 : null ),
 			'round_up_applied'      => ! empty( $rate['round_up_applied'] ) || ! empty( $rate_meta['round_up_applied'] ),
 			'minimum_price_applied' => ! empty( $rate['minimum_price_applied'] ) || ! empty( $rate_meta['minimum_price_applied'] ),
-			'fallback'              => ! empty( $rate_meta['fallback'] ) || ! empty( $rate['fallback_used'] ),
+			'fallback'              => $is_fallback,
 			'fallback_reason'       => (string) ( $rate_meta['fallback_reason'] ?? '' ),
 			'fallback_text'         => (string) ( $rate_meta['fallback_text'] ?? '' ),
 		);
@@ -311,9 +316,19 @@ final class OrderShippingMetaPersister {
 			);
 		}
 
-		$audit = is_array( $rate_meta['rules_audit'] ?? null ) ? array_values( $rate_meta['rules_audit'] ) : array();
+		$audit = is_array( $rate_meta['rules_audit'] ?? null )
+			? array_values( $rate_meta['rules_audit'] )
+			: ( is_array( $rate['rules_audit'] ?? null ) ? array_values( $rate['rules_audit'] ) : array() );
 		$base  = $this->nullable_float( $api['api_base_price_rub'] ?? null ) ?? $this->nullable_float( $rate['cost'] ?? null ) ?? 0.0;
-		$final = $this->nullable_float( $result['final_price_rub'] ?? null ) ?? $base;
+		$final = $this->nullable_float( $result['final_price_rub'] ?? null );
+		$has_price_formula = array() !== $audit || ! empty( $result['round_up_applied'] ) || ! empty( $result['minimum_price_applied'] );
+		if ( null === $final || ! $has_price_formula ) {
+			return array(
+				'rules_source'          => $source,
+				'applied_rules'         => $audit,
+				'formula_visualization' => array(),
+			);
+		}
 
 		return array(
 			'rules_source'          => $source,
@@ -323,10 +338,50 @@ final class OrderShippingMetaPersister {
 				$audit,
 				$final,
 				array(
-					'round_up_applied'      => ! empty( $result['round_up_applied'] ),
-					'minimum_price_applied' => ! empty( $result['minimum_price_applied'] ),
+					'round_up_applied'      => ! empty( $result['round_up_applied'] ) && $final > 0,
+					'minimum_price_applied' => ! empty( $result['minimum_price_applied'] ) && $final > 0,
 				)
 			),
+		);
+	}
+
+	private function delete_visible_technical_item_meta( object $item ): void {
+		if ( ! method_exists( $item, 'delete_meta_data' ) ) {
+			return;
+		}
+
+		foreach ( $this->visible_technical_item_meta_keys() as $key ) {
+			$item->delete_meta_data( $key );
+		}
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function visible_technical_item_meta_keys(): array {
+		return array(
+			'carrier_key',
+			'rate_id',
+			'delivery_type',
+			'crossed_price',
+			'planned_delivery_comment',
+			'comments',
+			'disabled',
+			'disabled_reason',
+			'service_key',
+			'service_title',
+			'rules_source',
+			'round_up_applied',
+			'minimum_price_applied',
+			'final_price_rub',
+			'api_base_price_rub',
+			'api_price_with_vat_rub',
+			'rules_audit',
+			'rate_meta',
+			'requires_pickup_point',
+			'requires_courier_address',
+			'no_pickup_selection',
+			'fallback_used',
 		);
 	}
 

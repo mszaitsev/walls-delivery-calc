@@ -53,11 +53,11 @@ function esc_html( mixed $text ): string { return htmlspecialchars( (string) $te
 function wp_unslash( mixed $value ): mixed { return $value; }
 function sanitize_text_field( mixed $value ): string { return trim( (string) $value ); }
 
-function wdc_order_meta_real_rule_audit(): array {
+function wdc_order_meta_real_rule_audit( float $base_price_rub = 3810.06 ): array {
 	$engine = new RuleEngine( new RuleEvaluator( new ConditionEvaluator() ) );
 	$context = new RuleEvaluationContext(
 		Money::from_rubles( 5000 ),
-		Money::from_rubles( 1200 ),
+		Money::from_rubles( $base_price_rub ),
 		new Package( array(), Money::from_rubles( 5000 ), Money::from_rubles( 5000 ), 1000, 0, 1000 ),
 		new Address( country_code: 'PL', country_name: 'Польша' ),
 		DeliveryType::PICKUP,
@@ -80,7 +80,7 @@ function wdc_order_meta_real_rule_audit(): array {
 		}
 	}
 
-	$formula = ( new RuleFormulaFormatter() )->lines( 1200.0, $audit, $result->final_price->get_rubles() );
+	$formula = ( new RuleFormulaFormatter() )->lines( $base_price_rub, $audit, $result->final_price->get_rubles() );
 	order_meta_smoke_assert( (bool) preg_grep( '/Множитель/u', $formula ), 'Formula must include multiply rule name from real audit.' );
 	order_meta_smoke_assert( (bool) preg_grep( '/Делитель/u', $formula ), 'Formula must include divide rule name from real audit.' );
 	order_meta_smoke_assert( (bool) preg_grep( '/Фикс\\. обработка/u', $formula ), 'Formula must include fixed increase rule name from real audit.' );
@@ -117,15 +117,19 @@ final class WdcOrderMetaSmokeShippingItem {
 	public function add_meta_data( string $key, mixed $value, bool $unique = false ): void {
 		$this->meta[ $key ] = $value;
 	}
+
+	public function delete_meta_data( string $key ): void {
+		unset( $this->meta[ $key ] );
+	}
 }
 
 function wdc_order_meta_rate( array $overrides = array() ): array {
 	$real_audit = wdc_order_meta_real_rule_audit();
 	$rate_meta = array_merge(
 		array(
-			'api_base_price_rub' => 1200.0,
+			'api_base_price_rub' => 3810.06,
 			'api_price_has_vat' => true,
-			'api_price_with_vat_rub' => 1200.0,
+			'api_price_with_vat_rub' => 3810.06,
 			'vat_rate' => 0.2,
 			'request_params' => array( 'object' => 4031, 'country-to' => 616, 'weight' => 1150 ),
 			'cache_hit' => false,
@@ -142,6 +146,7 @@ function wdc_order_meta_rate( array $overrides = array() ): array {
 			'include_packaging_weight' => true,
 			'packaging_weight_mode' => 'total_weight',
 			'no_pickup_selection' => true,
+			'final_price_rub' => 5338.0,
 			'rules_audit' => $real_audit,
 		),
 		$overrides['rate_meta'] ?? array()
@@ -157,7 +162,7 @@ function wdc_order_meta_rate( array $overrides = array() ): array {
 			'rules_source' => 'service',
 			'round_up_applied' => true,
 			'minimum_price_applied' => false,
-			'cost' => '1549',
+			'cost' => '0',
 			'comments' => array(),
 			'rate_meta' => $rate_meta,
 			'fallback_used' => false,
@@ -175,6 +180,9 @@ WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_worldwide_pa
 $order = new WdcOrderMetaSmokeOrder();
 $persister->persist( $order, array() );
 $item = new WdcOrderMetaSmokeShippingItem();
+foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'service_title', 'rules_source', 'round_up_applied', 'no_pickup_selection', 'rate_meta' ) as $technical_key ) {
+	$item->add_meta_data( $technical_key, 'auto copied by WooCommerce', true );
+}
 $persister->persist_shipping_item_meta( $item, 0, array(), $order );
 
 order_meta_smoke_assert( array( 'Способ доставки' => 'международная доставка Почтой России' ) === $item->meta, 'Russian Post visible shipping item meta must only contain delivery method.' );
@@ -189,14 +197,16 @@ order_meta_smoke_assert( ! array_key_exists( 'raw_response', $order->meta['_wdc_
 order_meta_smoke_assert( 'Почта России — международная доставка' === ( $calculation['service_title'] ?? '' ), 'Calculation data must contain service title.' );
 order_meta_smoke_assert( 'PL' === ( $calculation['destination']['country_code'] ?? '' ) && 'Польша' === ( $calculation['destination']['country_name'] ?? '' ), 'Calculation data must contain destination country.' );
 order_meta_smoke_assert( 1000 === ( $calculation['package']['products_weight_g'] ?? 0 ) && 150 === ( $calculation['package']['packaging_weight_g'] ?? 0 ) && 1150 === ( $calculation['package']['final_weight_g'] ?? 0 ), 'Calculation data must contain package weights.' );
-order_meta_smoke_assert( 1200.0 === ( $calculation['api']['api_base_price_rub'] ?? 0.0 ) && 1549.0 === ( $calculation['result']['final_price_rub'] ?? 0.0 ), 'Calculation data must contain API and final prices.' );
+order_meta_smoke_assert( 3810.06 === ( $calculation['api']['api_base_price_rub'] ?? 0.0 ) && 5338.0 === ( $calculation['result']['final_price_rub'] ?? 0.0 ), 'Calculation data must contain API and final prices.' );
 order_meta_smoke_assert( 'service' === ( $calculation['rules']['rules_source'] ?? '' ) && ! empty( $calculation['rules']['applied_rules'] ) && ! empty( $calculation['rules']['formula_visualization'] ), 'Calculation data must contain rules source, audit and formula.' );
+order_meta_smoke_assert( (bool) preg_grep( '/Итог: 5 338 руб\\./u', $calculation['rules']['formula_visualization'] ), 'Formula final line must match actual shipping cost.' );
+order_meta_smoke_assert( ! (bool) preg_grep( '/Округление вверх → 0 руб\\./u', $calculation['rules']['formula_visualization'] ), 'Formula must not render zero rounding for non-fallback rates.' );
 order_meta_smoke_assert( ! isset( $calculation['result']['final_delivery_days_min'], $calculation['result']['final_delivery_days_max'] ), 'Empty Russian Post delivery days must not be saved.' );
 
 ob_start();
 ( new OrderDeliveryMetabox() )->render( $order );
 $html = (string) ob_get_clean();
-foreach ( array( 'Польша (PL)', 'Вес товаров', '1 549 руб.', 'Базовая цена API', 'Правило &quot;Множитель&quot;', 'Правило &quot;Делитель&quot;', 'Правило &quot;Фикс. обработка&quot;' ) as $needle ) {
+foreach ( array( 'Польша (PL)', 'Вес товаров', '5 338 руб.', 'Базовая цена API', 'Правило &quot;Множитель&quot;', 'Правило &quot;Делитель&quot;', 'Правило &quot;Фикс. обработка&quot;' ) as $needle ) {
 	order_meta_smoke_assert( str_contains( $html, $needle ), 'Order metabox must render calculation field: ' . $needle );
 }
 order_meta_smoke_assert( ! str_contains( $html, '0 дн.' ), 'Order metabox must not render empty delivery days.' );

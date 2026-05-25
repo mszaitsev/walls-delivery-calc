@@ -125,6 +125,8 @@ final class CheckoutOrchestrator {
 					array(
 						'rules_source' => $rules_source,
 						'rules_audit'  => $applied['audit'],
+						'final_price_rub' => $processed->price->get_rubles(),
+						'original_price_rub' => $rate->price->get_rubles(),
 					)
 				);
 				$rates[] = $processed;
