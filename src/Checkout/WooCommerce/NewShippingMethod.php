@@ -89,7 +89,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 				)
 			);
 
-			$result = $this->orchestrator->calculate( $request, $this->checkout_rules(), $sort, true );
+			$result = $this->orchestrator->calculate( $request, $this->checkout_rules(), $sort, true, array( $this, 'checkout_rules_for_carrier' ) );
 			$stored = array();
 
 			foreach ( $result->rates as $rate ) {
@@ -157,6 +157,21 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		}
 
 		return array();
+	}
+
+	/**
+	 * @return array<int,Rule>
+	 */
+	public function checkout_rules_for_carrier( string $carrier_key ): array {
+		try {
+			if ( method_exists( $this->rule_repository, 'get_rules_for_carrier_with_default_fallback' ) ) {
+				return $this->rule_repository->get_rules_for_carrier_with_default_fallback( $carrier_key );
+			}
+		} catch ( \Throwable $exception ) {
+			$this->log_exception( $exception );
+		}
+
+		return $this->checkout_rules();
 	}
 
 	private function log_exception( \Throwable $exception ): void {

@@ -9,13 +9,15 @@ use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
 defined( 'ABSPATH' ) || exit;
 
 final class WooCommercePackageMapper {
 	public function __construct(
 		private ?CheckoutAddressRuntime $address_runtime = null,
-		private ?CheckoutSessionManager $session_manager = null
+		private ?CheckoutSessionManager $session_manager = null,
+		private ?SettingsRepository $settings = null
 	) {
 	}
 
@@ -32,9 +34,10 @@ final class WooCommercePackageMapper {
 		$items       = $this->items_from_contents( is_array( $package['contents'] ?? null ) ? $package['contents'] : array() );
 		$weight_g    = (int) round( max( 0.0, (float) ( $package['contents_weight'] ?? 0 ) ) * 1000 );
 
-		$domain_package = Package::from_items( $items, 0, $total, $total );
+		$domain_package = Package::from_items( $items, $this->packaging_weight_g( Package::from_items( $items, 0, $total, $total )->weight_g ), $total, $total );
 		if ( 0 === $domain_package->total_weight_g && $weight_g > 0 ) {
-			$domain_package = new Package( $items, $total, $total, $weight_g, 0, $weight_g, null, null, null, null, 'cart' );
+			$packaging_weight_g = $this->packaging_weight_g( $weight_g );
+			$domain_package = new Package( $items, $total, $total, $weight_g, $packaging_weight_g, $weight_g + $packaging_weight_g, null, null, null, null, 'cart' );
 		}
 
 		return new QuoteRequest(
@@ -166,5 +169,26 @@ final class WooCommercePackageMapper {
 		$context = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->city_context() : array();
 
 		return (string) ( $context['fias_id'] ?? '' );
+	}
+
+	private function packaging_weight_g( int $cart_weight_g ): int {
+		$settings = $this->settings instanceof SettingsRepository ? $this->settings->all() : array();
+		$tiers = is_array( $settings['packaging_tiers'] ?? null ) ? $settings['packaging_tiers'] : array();
+		$max = 0;
+		foreach ( $tiers as $tier ) {
+			if ( ! is_array( $tier ) ) {
+				continue;
+			}
+
+			$from = max( 0, (int) ( $tier['from_weight_g'] ?? 0 ) );
+			$to = max( 0, (int) ( $tier['to_weight_g'] ?? 0 ) );
+			$weight = max( 0, (int) ( $tier['packaging_weight_g'] ?? 0 ) );
+			$max = max( $max, $weight );
+			if ( $cart_weight_g >= $from && ( 0 === $to || $cart_weight_g <= $to ) ) {
+				return $weight;
+			}
+		}
+
+		return $max;
 	}
 }
