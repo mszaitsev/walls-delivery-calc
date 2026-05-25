@@ -11,7 +11,6 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingService;
 defined( 'ABSPATH' ) || exit;
 
 final class RussianPostCountriesAdminPage {
-	public const PAGE_SLUG = 'wdc-russian-post-countries';
 	private const NONCE_ACTION = 'wdc_russian_post_countries';
 	private const NONCE_NAME = 'wdc_russian_post_countries_nonce';
 
@@ -27,27 +26,6 @@ final class RussianPostCountriesAdminPage {
 		private RussianPostCountryMappingRepository $repository,
 		private RussianPostCountryMappingService $service
 	) {
-	}
-
-	public function register(): void {
-		add_action( 'admin_menu', array( $this, 'add_menu_page' ) );
-	}
-
-	public function add_menu_page(): void {
-		add_submenu_page( AdminMenu::MENU_SLUG, esc_html__( 'Почта России: страны', 'walls-delivery-calc' ), esc_html__( 'Почта России: страны', 'walls-delivery-calc' ), AdminMenu::CAPABILITY, self::PAGE_SLUG, array( $this, 'render_page' ) );
-	}
-
-	public function render_page(): void {
-		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
-			return;
-		}
-
-		$this->return_url = admin_url( 'admin.php?page=' . self::PAGE_SLUG );
-		$message = $this->handle_post();
-		if ( '' === $message ) {
-			$message = $this->notice_from_request();
-		}
-		$this->render_body( $message, true );
 	}
 
 	public function render_embedded( string $return_url ): void {
@@ -323,7 +301,7 @@ final class RussianPostCountriesAdminPage {
 		}
 		echo '<p>';
 		for ( $i = 1; $i <= $pages; ++$i ) {
-			$url = add_query_arg( array( 'rp_filter' => $filter, 's' => $search, 'per_page' => $per_page, 'paged' => $i ), $this->return_url ?: admin_url( 'admin.php?page=' . self::PAGE_SLUG ) );
+			$url = add_query_arg( array( 'rp_filter' => $filter, 's' => $search, 'per_page' => $per_page, 'paged' => $i ), $this->return_url ?: admin_url( 'admin.php' ) );
 			echo '<a class="button ' . ( $i === $page ? 'button-primary' : '' ) . '" href="' . esc_url( $url ) . '">' . esc_html( (string) $i ) . '</a> ';
 		}
 		echo '</p>';
@@ -420,10 +398,10 @@ final class RussianPostCountriesAdminPage {
 	 * @return array<string,string>
 	 */
 	private function return_query_args(): array {
-		$url = $this->return_url ?: admin_url( 'admin.php?page=' . self::PAGE_SLUG );
+		$url = $this->return_url ?: admin_url( 'admin.php' );
 		$query = (string) parse_url( $url, PHP_URL_QUERY );
 		parse_str( $query, $args );
 
-		return array_map( 'strval', is_array( $args ) ? $args : array( 'page' => self::PAGE_SLUG ) );
+		return array_map( 'strval', is_array( $args ) ? $args : array() );
 	}
 }

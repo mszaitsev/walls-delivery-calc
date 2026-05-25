@@ -213,13 +213,12 @@ country_smoke_assert( in_array( 'AL', $manual_option_codes, true ), 'Unmatched W
 
 $_SERVER['REQUEST_METHOD'] = 'POST';
 $_POST = array(
-	RussianPostCountriesAdminPage::PAGE_SLUG => RussianPostCountriesAdminPage::PAGE_SLUG,
 	'wdc_russian_post_countries_nonce' => 'nonce',
 	'wdc_rp_country_action' => 'refresh',
 );
 $admin = new RussianPostCountriesAdminPage( $repo, $service );
 ob_start();
-$admin->render_page();
+$admin->render_embedded( 'admin.php?page=wdc-delivery-services&service=russian_post_worldwide_parcel&tab=russian_post_countries' );
 $refresh_html = (string) ob_get_clean();
 $_POST = array();
 $_SERVER['REQUEST_METHOD'] = 'GET';
@@ -271,8 +270,9 @@ country_smoke_assert( 'изменено вручную 25.05.2026' === $repo->fi
 
 $admin = new RussianPostCountriesAdminPage( $repo, $service );
 ob_start();
-$admin->render_page();
+$admin->render_embedded( 'admin.php?page=wdc-delivery-services&service=russian_post_worldwide_parcel&tab=russian_post_countries' );
 $html = (string) ob_get_clean();
+country_smoke_assert( str_contains( $html, 'wdc-rp-countries-admin' ) && ! str_contains( $html, '<div class="wrap">' ) && ! str_contains( $html, '<h1>' ), 'Embedded countries tab renders without standalone wrap or heading.' );
 country_smoke_assert( ! str_contains( $html, '<script>alert(1)</script>' ), 'Admin output escapes or sanitizes country names from API.' );
 country_smoke_assert( str_contains( $html, 'Источник сопоставления' ) && str_contains( $html, '>alias<' ), 'Admin table shows match_source.' );
 country_smoke_assert( ! str_contains( $html, 'ISO2 Почты' ), 'Admin table has no Russian Post ISO2 column.' );

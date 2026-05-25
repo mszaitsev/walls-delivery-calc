@@ -303,5 +303,6 @@ wdc_ds_assert( ! str_contains( $plugin_source, 'RussianPostCountriesAdminPage::c
 $countries_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/RussianPost/Admin/RussianPostCountriesAdminPage.php' );
 wdc_ds_assert( str_contains( $countries_admin_source, 'render_embedded( string $return_url )' ) && str_contains( $countries_admin_source, 'wdc-rp-countries-admin' ), 'Russian Post countries admin must support embedded rendering without a WordPress wrap.' );
 wdc_ds_assert( str_contains( $countries_admin_source, 'hidden_return_field' ) && str_contains( $countries_admin_source, 'redirect_after_post' ) && str_contains( $countries_admin_source, 'wdc_rp_return_url' ), 'Russian Post countries actions must redirect back to the service tab.' );
+wdc_ds_assert( ! str_contains( $countries_admin_source, 'PAGE_SLUG' ) && ! str_contains( $countries_admin_source, 'function register(' ) && ! str_contains( $countries_admin_source, 'function add_menu_page(' ) && ! str_contains( $countries_admin_source, 'function render_page(' ) && ! str_contains( $countries_admin_source, 'wdc-russian-post-countries' ), 'Russian Post countries admin must not expose a standalone admin page surface.' );
 
 echo "Delivery services smoke test passed.\n";
