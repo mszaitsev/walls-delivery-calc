@@ -205,7 +205,7 @@ final class DeliveryServicesAdminPage {
 			<button class="button"><?php echo esc_html__( 'Скопировать дефолтные правила', 'walls-delivery-calc' ); ?></button>
 		</form>
 		<?php
-		$this->rules_admin->render_for_context(
+		$this->rules_admin->render_embedded_for_context(
 			new RuleAdminContext(
 				RuleRepository::TARGET_SERVICE,
 				$service->service_key,

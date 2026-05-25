@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use WallsShop\WDC\Core\Autoloader;
+use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
@@ -35,6 +36,87 @@ if ( ! function_exists( 'current_time' ) ) {
 if ( ! function_exists( '__' ) ) {
 	function __( string $text, string $domain = '' ): string {
 		return $text;
+	}
+}
+
+if ( ! function_exists( 'esc_html__' ) ) {
+	function esc_html__( string $text, string $domain = '' ): string {
+		return $text;
+	}
+}
+
+if ( ! function_exists( 'esc_html' ) ) {
+	function esc_html( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+
+if ( ! function_exists( 'esc_attr' ) ) {
+	function esc_attr( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+
+if ( ! function_exists( 'esc_textarea' ) ) {
+	function esc_textarea( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+
+if ( ! function_exists( 'esc_url' ) ) {
+	function esc_url( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+
+if ( ! function_exists( 'current_user_can' ) ) {
+	function current_user_can( string $capability ): bool {
+		return true;
+	}
+}
+
+if ( ! function_exists( 'admin_url' ) ) {
+	function admin_url( string $path = '' ): string {
+		return 'https://example.test/wp-admin/' . ltrim( $path, '/' );
+	}
+}
+
+if ( ! function_exists( 'trailingslashit' ) ) {
+	function trailingslashit( string $value ): string {
+		return rtrim( $value, '/\\' ) . DIRECTORY_SEPARATOR;
+	}
+}
+
+if ( ! function_exists( 'wp_nonce_field' ) ) {
+	function wp_nonce_field( string $action, string $name, bool $referer = true, bool $display = true ): string {
+		$html = '<input type="hidden" name="' . esc_attr( $name ) . '" value="nonce">';
+		if ( $display ) {
+			echo $html;
+		}
+
+		return $html;
+	}
+}
+
+if ( ! function_exists( 'selected' ) ) {
+	function selected( mixed $selected, mixed $current = true, bool $display = true ): string {
+		$result = (string) $selected === (string) $current ? ' selected="selected"' : '';
+		if ( $display ) {
+			echo $result;
+		}
+
+		return $result;
+	}
+}
+
+if ( ! function_exists( 'disabled' ) ) {
+	function disabled( mixed $disabled, mixed $current = true, bool $display = true ): string {
+		$result = (string) $disabled === (string) $current ? ' disabled="disabled"' : '';
+		if ( $display ) {
+			echo $result;
+		}
+
+		return $result;
 	}
 }
 
@@ -526,6 +608,8 @@ rules_admin_smoke_assert( $sanitized_rule instanceof Rule && RuleRepository::TAR
 $_POST = array();
 
 $admin_page_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Rules/Admin/RulesAdminPage.php' );
+rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'разные группы как OR' ) && ! str_contains( $admin_page_source, 'different groups as OR' ), 'Rules admin scope text must not claim that different groups are always OR.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'Условия внутри каждой группы и сочетание групп настраиваются в блоке «Условия применения».' ), 'Rules admin scope text must point to configurable application conditions.' );
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'Создать демо-правила' ), 'Admin page must not show create demo button.' );
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'Удалить демо-правила' ), 'Admin page must not show delete demo button.' );
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'Приоритет' ), 'Admin UI must not contain priority wording.' );
@@ -533,7 +617,7 @@ rules_admin_smoke_assert( ! str_contains( $admin_page_source, 'name="priority"' 
 rules_admin_smoke_assert( ! str_contains( $admin_page_source, "esc_html__( 'Текст'" ) && ! str_contains( $admin_page_source, "esc_html__( 'Число'" ), 'Admin UI must not expose universal text and number inputs for every condition.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'wdc_rules_action" value="reorder_rules"' ), 'Admin UI must expose a drag-sort reorder action.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'data-rule-row' ), 'Admin table rows must be draggable.' );
-rules_admin_smoke_assert( str_contains( $admin_page_source, 'render_for_context( RuleAdminContext $context )' ), 'Rules admin must expose reusable context rendering.' );
+rules_admin_smoke_assert( str_contains( $admin_page_source, 'render_for_context( RuleAdminContext $context )' ) && str_contains( $admin_page_source, 'render_embedded_for_context( RuleAdminContext $context )' ), 'Rules admin must expose full and embedded reusable context rendering.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'posted_context_rule' ) && str_contains( $admin_page_source, 'rule_matches_context' ), 'Rules admin actions must verify target context.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'get_all_rules_for_target( $this->context()->target_type' ), 'Rules admin list must use target-aware repository methods.' );
 rules_admin_smoke_assert( str_contains( $admin_page_source, 'get_rules_for_target( $this->context()->target_type' ), 'Rules admin simulation must use only current target rules.' );
@@ -561,6 +645,31 @@ rules_admin_smoke_assert( str_contains( $schema_source, "'input'     => 'fias_id
 $delivery_services_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 rules_admin_smoke_assert( str_contains( $delivery_services_admin_source, 'render_rules_tab' ) && str_contains( $delivery_services_admin_source, 'Скопировать дефолтные правила' ), 'Delivery service page must expose service rules tab with copy default rules action.' );
 rules_admin_smoke_assert( str_contains( $delivery_services_admin_source, 'copy_default_rules_to_service' ) && str_contains( $delivery_services_admin_source, "RuleRepository::TARGET_SERVICE" ), 'Copy default rules must create service-targeted copies.' );
+rules_admin_smoke_assert( str_contains( $delivery_services_admin_source, 'render_embedded_for_context' ), 'Delivery service rules tab must use embedded rules rendering.' );
+
+$render_repository = new RuleRepository( new wpdb() );
+$render_page = new RulesAdminPage(
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ), 'https://example.test/wp-content/plugins/wdc/', '0.21.2' ),
+	$render_repository,
+	$simulator
+);
+$_GET = array( 'new_rule' => '1' );
+ob_start();
+$render_page->render_page();
+$full_render = (string) ob_get_clean();
+rules_admin_smoke_assert( str_contains( $full_render, '<div class="wrap wdc-rules-admin">' ), 'Default rules full page render must contain the WordPress wrap.' );
+rules_admin_smoke_assert( str_contains( $full_render, '<h1>' ), 'Default rules full page render must contain a page heading.' );
+
+$_GET = array( 'new_rule' => '1' );
+ob_start();
+$render_page->render_embedded_for_context( new RuleAdminContext( RuleRepository::TARGET_SERVICE, 'service_a', 'wdc-delivery-services', 'admin.php?page=wdc-delivery-services&service=service_a&tab=rules', 'Правила службы: Test', 'Правило службы', 'Для этой службы не настроены собственные правила.', true ) );
+$embedded_render = (string) ob_get_clean();
+rules_admin_smoke_assert( ! str_contains( $embedded_render, '<div class="wrap wdc-rules-admin">' ), 'Embedded service rules render must not contain a nested WordPress wrap.' );
+rules_admin_smoke_assert( ! str_contains( $embedded_render, '<h1>' ), 'Embedded service rules render must not duplicate the page heading.' );
+rules_admin_smoke_assert( str_contains( $embedded_render, 'wdc-rules-table' ), 'Embedded service rules UI must contain the rules table.' );
+rules_admin_smoke_assert( str_contains( $embedded_render, 'wdc-rule-form' ), 'Embedded service rules UI must contain the rule form.' );
+rules_admin_smoke_assert( str_contains( $embedded_render, 'wdc-rules-simulation' ), 'Embedded service rules UI must contain simulation.' );
+$_GET = array();
 
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/rules-admin.js' );
 rules_admin_smoke_assert( str_contains( $js_source, 'appendUnit' ), 'JS must render unit labels next to value controls.' );

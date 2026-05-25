@@ -73,11 +73,48 @@ final class RulesAdminPage {
 	}
 
 	public function render_page(): void {
+		$this->context = RuleAdminContext::default();
+		$this->render_full_for_current_context();
+	}
+
+	public function render_for_context( RuleAdminContext $context ): void {
+		$this->context = $context;
+		$this->render_full_for_current_context();
+	}
+
+	public function render_embedded_for_context( RuleAdminContext $context ): void {
+		$this->context = $context;
 		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			return;
 		}
 
-		$this->context ??= RuleAdminContext::default();
+		$data = $this->prepare_current_context_render();
+		?>
+		<div class="wdc-rules-admin wdc-rules-admin-embedded">
+			<?php $this->render_context_body( $data['rules'], $data['edit_rule'] ); ?>
+		</div>
+		<?php
+	}
+
+	private function render_full_for_current_context(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			return;
+		}
+
+		$data = $this->prepare_current_context_render();
+		?>
+		<div class="wrap wdc-rules-admin">
+			<h1><?php echo esc_html( $this->context()->list_title ); ?></h1>
+			<p class="description"><?php echo esc_html( $this->context()->is_default() ? __( 'Эти правила применяются по умолчанию для служб доставки, у которых нет включенных собственных правил.', 'walls-delivery-calc' ) : __( 'Эти правила применяются только для выбранной службы доставки. Симуляция на этой вкладке не подмешивает дефолтные правила.', 'walls-delivery-calc' ) ); ?></p>
+			<?php $this->render_context_body( $data['rules'], $data['edit_rule'] ); ?>
+		</div>
+		<?php
+	}
+
+	/**
+	 * @return array{rules:array<int,Rule>,edit_rule:?Rule}
+	 */
+	private function prepare_current_context_render(): array {
 		$this->handle_post();
 		$this->load_simulation_from_request();
 
@@ -93,37 +130,42 @@ final class RulesAdminPage {
 			}
 		}
 
+		return array(
+			'rules'     => $rules,
+			'edit_rule' => $edit_rule,
+		);
+	}
+
+	/**
+	 * @param array<int,Rule> $rules
+	 */
+	private function render_context_body( array $rules, ?Rule $edit_rule ): void {
 		?>
-		<div class="wrap wdc-rules-admin">
-			<h1><?php echo esc_html( $this->context()->list_title ); ?></h1>
-			<p class="description"><?php echo esc_html( $this->context()->is_default() ? __( 'Эти правила применяются по умолчанию для служб доставки, у которых нет включенных собственных правил.', 'walls-delivery-calc' ) : __( 'Эти правила применяются только для выбранной службы доставки. Симуляция на этой вкладке не подмешивает дефолтные правила.', 'walls-delivery-calc' ) ); ?></p>
+		<?php $this->render_notices(); ?>
 
-			<?php $this->render_notices(); ?>
-
-			<div class="wdc-rules-toolbar">
-				<a class="button button-primary" href="<?php echo esc_url( $this->page_url( array( 'new_rule' => 1 ) ) ); ?>"><?php echo esc_html__( 'Добавить правило', 'walls-delivery-calc' ); ?></a>
-				<a class="button" href="#wdc-rules-simulation"><?php echo esc_html__( 'Проверить правила', 'walls-delivery-calc' ); ?></a>
-			</div>
-
-			<section class="wdc-rules-scope">
-				<strong><?php echo esc_html( $this->context()->list_title ); ?></strong>
-				<span><?php echo esc_html( sprintf( 'target_type=%s, target_value=%s. Условия внутри группы работают как AND, разные группы как OR.', $this->context()->target_type, '' === $this->context()->target_value ? 'empty' : $this->context()->target_value ) ); ?></span>
-			</section>
-
-			<?php $this->render_rules_table( $rules ); ?>
-
-			<?php if ( $this->should_show_form( $edit_rule ) ) : ?>
-				<?php $this->render_rule_form( $edit_rule ?? $this->empty_rule() ); ?>
-			<?php endif; ?>
-
-			<?php if ( $this->context()->allow_simulation ) : ?>
-				<?php $this->render_simulation_form(); ?>
-			<?php endif; ?>
-
-			<?php if ( $this->simulation instanceof RuleEngineResult ) : ?>
-				<?php $this->render_simulation( $this->simulation ); ?>
-			<?php endif; ?>
+		<div class="wdc-rules-toolbar">
+			<a class="button button-primary" href="<?php echo esc_url( $this->page_url( array( 'new_rule' => 1 ) ) ); ?>"><?php echo esc_html__( 'Добавить правило', 'walls-delivery-calc' ); ?></a>
+			<a class="button" href="#wdc-rules-simulation"><?php echo esc_html__( 'Проверить правила', 'walls-delivery-calc' ); ?></a>
 		</div>
+
+		<section class="wdc-rules-scope">
+			<strong><?php echo esc_html( $this->context()->list_title ); ?></strong>
+			<span><?php echo esc_html( sprintf( 'target_type=%s, target_value=%s. Условия внутри каждой группы и сочетание групп настраиваются в блоке «Условия применения».', $this->context()->target_type, '' === $this->context()->target_value ? 'empty' : $this->context()->target_value ) ); ?></span>
+		</section>
+
+		<?php $this->render_rules_table( $rules ); ?>
+
+		<?php if ( $this->should_show_form( $edit_rule ) ) : ?>
+			<?php $this->render_rule_form( $edit_rule ?? $this->empty_rule() ); ?>
+		<?php endif; ?>
+
+		<?php if ( $this->context()->allow_simulation ) : ?>
+			<?php $this->render_simulation_form(); ?>
+		<?php endif; ?>
+
+		<?php if ( $this->simulation instanceof RuleEngineResult ) : ?>
+			<?php $this->render_simulation( $this->simulation ); ?>
+		<?php endif; ?>
 		<?php
 	}
 
@@ -792,11 +834,6 @@ final class RulesAdminPage {
 			RuleOperationTypes::MULTIPLY => __( 'Умножить на', 'walls-delivery-calc' ),
 			RuleOperationTypes::DIVIDE   => __( 'Разделить на', 'walls-delivery-calc' ),
 		)[ $value ] ?? $value;
-	}
-
-	public function render_for_context( RuleAdminContext $context ): void {
-		$this->context = $context;
-		$this->render_page();
 	}
 
 	private function context(): RuleAdminContext {
