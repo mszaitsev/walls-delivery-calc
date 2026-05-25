@@ -7,6 +7,7 @@ use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Locations\Admin\LocationsAdminPage;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
+use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
@@ -223,9 +224,18 @@ $wpdb = new wpdb();
 $repository = new LocationRepository( $wpdb );
 $importer = new LocationImportService( $repository );
 $search = new LocationSearchService( $repository );
+$country_index = new LocationCountryIndexService( $repository );
 
 $imported = $importer->import_from_json_file( dirname( __DIR__ ) . '/fixtures/demo/locations-demo.json' );
 locations_smoke_assert( $imported >= 9, sprintf( 'Demo dataset must import the stabilization demo locations, imported %d.', $imported ) );
+$initial_countries = $country_index->rebuild();
+locations_smoke_assert( in_array( 'RU', $initial_countries, true ), 'LocationCountryIndex rebuild returns RU for demo locations: ' . implode( ',', $initial_countries ) );
+locations_smoke_assert( $country_index->has_country( 'RU' ), 'LocationCountryIndex has_country detects RU.' );
+locations_smoke_assert( ! $country_index->has_country( 'PL' ), 'LocationCountryIndex has_country rejects missing PL.' );
+$repository->save( locations_smoke_location( array( 'country_code' => 'BY', 'gar_object_id' => 880001, 'fias_id' => 'fias-by-minsk', 'region_code' => 'BY-MI', 'region_name' => 'Минская', 'place_name' => 'Минск', 'display_name' => 'Минск' ) ) );
+$repository->save( locations_smoke_location( array( 'country_code' => 'KZ', 'gar_object_id' => 880002, 'fias_id' => 'fias-kz-almaty', 'region_code' => 'KZ-ALA', 'region_name' => 'Алматы', 'place_name' => 'Алматы', 'display_name' => 'Алматы' ) ) );
+$multi_countries = $country_index->rebuild();
+locations_smoke_assert( array() === array_diff( array( 'RU', 'BY', 'KZ' ), $multi_countries ), 'LocationCountryIndex rebuild returns RU/BY/KZ when fixtures include them.' );
 locations_smoke_assert( $repository->count_all() > 0, 'Repository count must be greater than zero.' );
 locations_smoke_assert( method_exists( $repository, 'count_regions' ), 'LocationRepository must expose count_regions method.' );
 locations_smoke_assert( $repository->count_regions() >= 5, 'Repository must count unique active regions.' );
@@ -293,6 +303,7 @@ locations_smoke_assert( $clear_stats['locations_deleted'] >= 1, 'clear_all must 
 locations_smoke_assert( $clear_stats['aliases_deleted'] >= 2, 'clear_all must count deleted aliases.' );
 locations_smoke_assert( 0 === $repository->count_all(), 'clear_all must remove local locations.' );
 locations_smoke_assert( 0 === $repository->count_aliases(), 'clear_all must remove local aliases.' );
+locations_smoke_assert( array() === $country_index->rebuild(), 'LocationCountryIndex rebuild returns empty list after clear_all.' );
 $alias_clear_index = -1;
 $location_clear_index = -1;
 foreach ( $wpdb->queries as $index => $query ) {

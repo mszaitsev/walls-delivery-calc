@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Locations\Import;
 
 use RuntimeException;
 use SplFileObject;
+use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -76,6 +77,7 @@ final class LocationsSnapshotImporter {
 			++$imported;
 		}
 
+		LocationCountryIndexService::mark_option_stale();
 		return $imported;
 	}
 
@@ -169,6 +171,7 @@ final class LocationsSnapshotImporter {
 			fclose( $handle );
 			if ( $eof ) {
 				$job['phase'] = 'finished';
+				LocationCountryIndexService::mark_option_stale();
 			}
 		} catch ( RuntimeException $exception ) {
 			$job['phase'] = 'failed';

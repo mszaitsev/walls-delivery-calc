@@ -22,11 +22,51 @@ final class KeyboardLayoutTransformer {
 		return $this->swap( $value, array_flip( self::LATIN_TO_CYRILLIC ) );
 	}
 
+	public function latin_to_cyrillic_transliteration( string $value ): string {
+		$lower = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
+		$replacements = array(
+			'shch' => 'щ',
+			'yo' => 'ё',
+			'yu' => 'ю',
+			'ya' => 'я',
+			'zh' => 'ж',
+			'kh' => 'х',
+			'ts' => 'ц',
+			'ch' => 'ч',
+			'sh' => 'ш',
+			'a' => 'а',
+			'b' => 'б',
+			'v' => 'в',
+			'g' => 'г',
+			'd' => 'д',
+			'e' => 'е',
+			'z' => 'з',
+			'i' => 'и',
+			'j' => 'й',
+			'y' => 'ы',
+			'k' => 'к',
+			'l' => 'л',
+			'm' => 'м',
+			'n' => 'н',
+			'o' => 'о',
+			'p' => 'п',
+			'r' => 'р',
+			's' => 'с',
+			't' => 'т',
+			'u' => 'у',
+			'f' => 'ф',
+			'h' => 'х',
+			'c' => 'к',
+		);
+
+		return strtr( $lower, $replacements );
+	}
+
 	/**
 	 * @return array<int,string>
 	 */
 	public function variants( string $query ): array {
-		$variants = array( $query, $this->latin_to_cyrillic_layout( $query ), $this->cyrillic_to_latin_layout( $query ) );
+		$variants = array( $query, $this->latin_to_cyrillic_layout( $query ), $this->latin_to_cyrillic_transliteration( $query ), $this->cyrillic_to_latin_layout( $query ) );
 		$unique   = array();
 
 		foreach ( $variants as $variant ) {

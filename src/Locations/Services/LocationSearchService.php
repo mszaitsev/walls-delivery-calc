@@ -27,8 +27,9 @@ final class LocationSearchService {
 	/**
 	 * @return array<int, Location>
 	 */
-	public function search( string $query, int $limit = 20 ): array {
+	public function search( string $query, int $limit = 20, string $country_code = '' ): array {
 		$original_normalized = $this->normalize( $query );
+		$country_code = $this->normalize_country_code( $country_code );
 		$this->last_search_meta = array(
 			'original_query'   => $query,
 			'corrected_query'  => '',
@@ -41,7 +42,7 @@ final class LocationSearchService {
 			return array();
 		}
 
-		$locations = $this->repository->search( $normalized, max( $limit * 3, 50 ) );
+		$locations = $this->should_skip_raw_latin_search( $query, $country_code ) ? array() : $this->repository->search( $normalized, max( $limit * 3, 50 ), $country_code );
 		$corrected = '';
 		if ( array() === $locations ) {
 			foreach ( $this->keyboard_layout->variants( $query ) as $variant ) {
@@ -50,7 +51,7 @@ final class LocationSearchService {
 					continue;
 				}
 
-				$variant_locations = $this->repository->search( $variant_normalized, max( $limit * 3, 50 ) );
+				$variant_locations = $this->repository->search( $variant_normalized, max( $limit * 3, 50 ), $country_code );
 				if ( array() !== $variant_locations ) {
 					$locations  = $variant_locations;
 					$normalized = $variant_normalized;
@@ -99,16 +100,16 @@ final class LocationSearchService {
 	 * @param array<int,string> $tokens
 	 * @return array<int, Location>
 	 */
-	public function search_by_tokens( array $tokens, int $limit = 300, bool $require_all = false, string $force_region_code = '' ): array {
-		return $this->repository->search_by_tokens( $tokens, $limit, $require_all, $force_region_code );
+	public function search_by_tokens( array $tokens, int $limit = 300, bool $require_all = false, string $force_region_code = '', string $country_code = '' ): array {
+		return $this->repository->search_by_tokens( $tokens, $limit, $require_all, $force_region_code, $country_code );
 	}
 
 	/**
 	 * @param array<int,string> $tokens
 	 * @return array<int, Location>
 	 */
-	public function checkout_hierarchy_candidates( array $tokens, int $limit = 1000, string $force_region_code = '' ): array {
-		return $this->repository->checkout_hierarchy_candidates( $tokens, $limit, $force_region_code );
+	public function checkout_hierarchy_candidates( array $tokens, int $limit = 1000, string $force_region_code = '', string $country_code = '' ): array {
+		return $this->repository->checkout_hierarchy_candidates( $tokens, $limit, $force_region_code, $country_code );
 	}
 
 	/**
@@ -123,6 +124,15 @@ final class LocationSearchService {
 	 */
 	public function last_search_meta(): array {
 		return $this->last_search_meta;
+	}
+
+	private function should_skip_raw_latin_search( string $query, string $country_code ): bool {
+		return in_array( $country_code, array( 'RU', 'BY', 'KZ' ), true ) && (bool) preg_match( '/[A-Za-z]/', $query );
+	}
+
+	private function normalize_country_code( string $country_code ): string {
+		$country_code = strtoupper( trim( $country_code ) );
+		return preg_match( '/^[A-Z]{2}$/', $country_code ) ? $country_code : '';
 	}
 
 	private function rank( Location $location, string $query ): int {

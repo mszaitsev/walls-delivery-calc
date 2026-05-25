@@ -88,7 +88,7 @@ When checkout has an unambiguous local selected location, the order stores only:
 - `_wdc_platform_location_fias_id`
 - `_wdc_platform_location_display_name`
 
-Other local location fields such as region, district, city, place, GAR/KLADR ids, and postcode stay in checkout hidden state only and are not expanded into order meta.
+These keys are saved only when the checkout country is present in the local location country index and the location was actually selected or auto-resolved. Unsupported-country checkouts do not persist stale hidden local location values. Other local location fields such as region, district, city, place, GAR/KLADR ids, and postcode stay in checkout hidden state only and are not expanded into order meta.
 
 ## Checkout City Picker V2
 
@@ -125,6 +125,18 @@ The picker searches only when the modal opens with the initial query or when the
 The modal has a stronger loading state: `Идёт поиск, подождите несколько секунд` plus a CSS spinner. Below the search input, two permanent actions are shown: `Использовать введенное название` applies manual fallback with the current input, and `Очистить название` clears the input, force-region state, and results hint.
 
 The admin `Населенные пункты` search now reuses the same hierarchy-aware exact/prefix logic as checkout. Before hierarchy search, admin search performs exact identifier lookup by `fias_id`, `gar_id`/`gar_object_id`, `kladr_id`, and `postal_code`; if an exact identifier match exists, only those rows are returned.
+
+## Country-aware Local City Picker
+
+As of 0.21.15, checkout enables the local city picker only for countries represented in the local locations table. `LocationCountryIndexService` stores the supported country list in the `wdc_location_country_codes` option as normalized ISO-2 codes. The index is rebuilt from distinct active `wdc_locations.country_code` values after imports, inserts, country-changing updates, and location clears. Postal-code updates, display-name rebuilds, type display mapping, DaData enrichment, and other non-country changes leave the index untouched. If the option is missing, empty, or stale, the service performs one lazy rebuild instead of running a heavy `DISTINCT` on every checkout request.
+
+The frontend receives `supported_location_countries`, derives the active checkout country from shipping country when shipping to another address is active and billing country otherwise, and enables the modal plus auto-resolve only for supported countries. Switching from a supported country such as `RU` to an unsupported country such as `PL`, `DE`, or `US` closes the modal, clears hidden local location fields, cancels auto-resolve, removes notices, and leaves the normal WooCommerce city/state inputs fully manual.
+
+Both checkout location AJAX endpoints accept `country_code`. Unsupported countries return empty search results with `local_database_available=false`; resolve returns `manual_allowed` without searching. Supported countries search and resolve only rows with the same `country_code`, so RU, BY, and KZ rows cannot leak into each other's picker results.
+
+For `RU`, `BY`, and `KZ`, latin letters in picker queries are treated as transliteration or wrong keyboard layout input. The correction path runs before database lookup for latin input in those countries, so raw latin text is not searched directly against the local table. Existing wrong-layout cases such as `yjdjc` and `ghbdtn` continue to use `KeyboardLayoutTransformer`.
+
+The warning `Просим проверить название и внести верный населенный пункт` is shown only when the current country is supported and local auto-resolve/search actually fails or is ambiguous. Unsupported countries never show this warning and never block manual city input.
 
 ## Debug panel
 

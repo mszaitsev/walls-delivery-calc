@@ -32,11 +32,11 @@ final class CheckoutLocationSearch {
 	/**
 	 * @return array<string,mixed>
 	 */
-	public function search_for_picker( string $query, int $limit = 100, int $region_limit = 10, string $force_region_code = '' ): array {
+	public function search_for_picker( string $query, int $limit = 100, int $region_limit = 10, string $force_region_code = '', string $country_code = '' ): array {
 		$parser = $this->parser();
 		$parsed = $parser->parse( $query );
 		if ( '' !== trim( $force_region_code ) ) {
-			$parsed = $this->remove_forced_region_tokens( $parsed, $force_region_code, $parser );
+			$parsed = $this->remove_forced_region_tokens( $parsed, $force_region_code, $parser, $country_code );
 		}
 		$tokens = $parsed['real_tokens'];
 		$limit = max( 10, min( 500, $limit ) );
@@ -45,16 +45,16 @@ final class CheckoutLocationSearch {
 			return array( 'items' => array(), 'groups' => array(), 'total' => 0 );
 		}
 
-		$scored = $this->scored_hierarchy_candidates( $parsed, $parser, $limit, $force_region_code );
+		$scored = $this->should_skip_raw_latin_search( $query, $country_code ) ? array() : $this->scored_hierarchy_candidates( $parsed, $parser, $limit, $force_region_code, $country_code );
 		if ( array() === $scored ) {
-			$this->search_service->search( $query, 1 );
+			$this->search_service->search( $query, 1, $country_code );
 			$meta = $this->search_service->last_search_meta();
 			if ( ! empty( $meta['correction_used'] ) && ! empty( $meta['corrected_query'] ) ) {
 				$corrected = $parser->parse( (string) $meta['corrected_query'] );
 				if ( array() !== $corrected['real_tokens'] ) {
 					$parsed = $corrected;
 					$tokens = $parsed['real_tokens'];
-					$scored = $this->scored_hierarchy_candidates( $parsed, $parser, $limit, $force_region_code );
+					$scored = $this->scored_hierarchy_candidates( $parsed, $parser, $limit, $force_region_code, $country_code );
 				}
 			}
 		}
@@ -77,7 +77,7 @@ final class CheckoutLocationSearch {
 	/**
 	 * @return array{status:string,location:?Location}
 	 */
-	public function resolve_checkout_fields( string $region_text, string $city_text ): array {
+	public function resolve_checkout_fields( string $region_text, string $city_text, string $country_code = '' ): array {
 		$query = trim( $region_text . ' ' . $city_text );
 		$parsed = $this->parser()->parse( $query );
 		$tokens = $parsed['real_tokens'];
@@ -85,7 +85,7 @@ final class CheckoutLocationSearch {
 			return array( 'status' => 'not_found', 'location' => null );
 		}
 
-		$result = $this->search_for_picker( $query, 20, 20 );
+		$result = $this->search_for_picker( $query, 20, 20, '', $country_code );
 		$candidates = array_values(
 			array_filter(
 				$result['items'],
@@ -407,9 +407,9 @@ final class CheckoutLocationSearch {
 	 * @param array{real_tokens:array<int,string>} $parsed
 	 * @return array<int,array{location:Location,score:array<string,mixed>}>
 	 */
-	private function scored_hierarchy_candidates( array $parsed, CheckoutLocationSearchParser $parser, int $limit, string $force_region_code ): array {
+	private function scored_hierarchy_candidates( array $parsed, CheckoutLocationSearchParser $parser, int $limit, string $force_region_code, string $country_code = '' ): array {
 		$tokens = $parsed['real_tokens'];
-		$locations = $this->search_service->checkout_hierarchy_candidates( $tokens, max( $limit * 8, 500 ), $force_region_code );
+		$locations = $this->search_service->checkout_hierarchy_candidates( $tokens, max( $limit * 8, 500 ), $force_region_code, $country_code );
 		$locations = $this->unique_locations( $locations );
 		$scored = array_map(
 			fn( Location $location ): array => array(
@@ -484,8 +484,8 @@ final class CheckoutLocationSearch {
 	 * @param array{query:string,tokens:array<int,string>,real_tokens:array<int,string>,markers:array<string,bool>,has_markers:bool,region_alias_tokens?:array<int,string>} $parsed
 	 * @return array{query:string,tokens:array<int,string>,real_tokens:array<int,string>,markers:array<string,bool>,has_markers:bool,region_alias_tokens?:array<int,string>}
 	 */
-	private function remove_forced_region_tokens( array $parsed, string $force_region_code, CheckoutLocationSearchParser $parser ): array {
-		$candidates = $this->search_service->checkout_hierarchy_candidates( array(), 1, $force_region_code );
+	private function remove_forced_region_tokens( array $parsed, string $force_region_code, CheckoutLocationSearchParser $parser, string $country_code = '' ): array {
+		$candidates = $this->search_service->checkout_hierarchy_candidates( array(), 1, $force_region_code, $country_code );
 		$region = $candidates[0]->region_name ?? '';
 		$region = $parser->normalize( $region );
 		if ( '' === $region ) {
@@ -517,6 +517,11 @@ final class CheckoutLocationSearch {
 			}
 		}
 		return false;
+	}
+
+	private function should_skip_raw_latin_search( string $query, string $country_code ): bool {
+		$country_code = strtoupper( trim( $country_code ) );
+		return in_array( $country_code, array( 'RU', 'BY', 'KZ' ), true ) && (bool) preg_match( '/[A-Za-z]/', $query );
 	}
 
 	/**

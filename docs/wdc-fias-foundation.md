@@ -15,6 +15,10 @@ Key fields:
 
 `LocationRepository` is registered in the core container and provides save, bulk insert, lookup, search, grouped search, and count operations.
 
+`LocationCountryIndexService` maintains the persistent local-country index in the `wdc_location_country_codes` option. The value contains normalized ISO-2 country codes present in active `wdc_locations` rows. The service exposes `rebuild()`, `countries()`, `has_country()`, and `mark_stale()`; missing, empty, or stale options are lazily rebuilt once from `SELECT DISTINCT country_code` instead of being recalculated on every checkout request.
+
+Repository writes that can change the country set mark the index stale: adding locations, bulk upserts/imports, deleting/clearing locations, and changing an existing row's `country_code`. Postal-code updates, display-name rebuilds, type display rule changes, alias regeneration, DaData postcode enrichment, and other normalization tasks do not mark the country index stale because they cannot add or remove represented countries.
+
 ## FIAS/GAR Abstraction
 
 This stage does not download FIAS archives, call GAR APIs, or run a full sync pipeline. The foundation only introduces stable storage and service boundaries.
@@ -69,6 +73,10 @@ Carrier integrations can later map carrier city identifiers or aliases to `wdc_l
 ## Future GAR Changes Sync
 
 A later GAR sync can build on `GarChangesService` by adding a real adapter that checks GAR change feeds, records pending changes, and triggers a controlled import/update process.
+
+## Country-aware Checkout Lookup
+
+As of 0.21.15, checkout passes the selected WooCommerce country into local city search and resolve. The local picker is active only when `LocationCountryIndexService::has_country($countryCode)` is true; otherwise WooCommerce city/state inputs stay manual and no local warning is rendered. Supported-country searches are filtered by `country_code`, so local rows from one country cannot appear while another country is selected. For `RU`, `BY`, and `KZ`, latin query text is treated as transliteration or wrong keyboard layout input and is normalized before database lookup; raw latin lookup for those countries is intentionally skipped.
 
 # GAR CSV Import Note
 
