@@ -39,8 +39,7 @@ final class RuleEvaluator {
 
 		if ( RuleActionTypes::CHANGE_DELIVERY_DAYS === $rule->action_type ) {
 			$unit    = RuleOperationBases::BUSINESS_DAYS === $rule->operation_base ? DateRange::UNIT_BUSINESS_DAYS : DateRange::UNIT_CALENDAR_DAYS;
-			$days    = $this->apply_delivery_days_operation( $context, $rule );
-			$range   = DateRange::single( $days, $unit );
+			$range   = $this->apply_delivery_days_operation( $context, $rule, $unit );
 			$audit[] = new RuleAuditEntry( $rule->id, $rule->name, $rule->action_type, null, $range->to_array(), $rule->operation_type, true, 'Delivery days changed.', $rule->operation_value, $rule->operation_base );
 
 			return new RuleEvaluationResult( true, true, null, $range, array(), false, '', $audit, $rule->stop_processing );
@@ -127,17 +126,26 @@ final class RuleEvaluator {
 		};
 	}
 
-	private function apply_delivery_days_operation( RuleEvaluationContext $context, Rule $rule ): int {
+	private function apply_delivery_days_operation( RuleEvaluationContext $context, Rule $rule, string $unit ): DateRange {
 		$value = max( 0, (int) round( $rule->operation_value ) );
-		$base  = isset( $context->meta['current_delivery_days'] )
-			? max( 0, (int) $context->meta['current_delivery_days'] )
-			: ( isset( $context->meta['original_delivery_days'] ) ? max( 0, (int) $context->meta['original_delivery_days'] ) : 0 );
+		$base_min = isset( $context->meta['current_delivery_min_days'] )
+			? max( 0, (int) $context->meta['current_delivery_min_days'] )
+			: ( isset( $context->meta['current_delivery_days'] )
+				? max( 0, (int) $context->meta['current_delivery_days'] )
+				: ( isset( $context->meta['original_delivery_min_days'] )
+					? max( 0, (int) $context->meta['original_delivery_min_days'] )
+					: ( isset( $context->meta['original_delivery_days'] ) ? max( 0, (int) $context->meta['original_delivery_days'] ) : 0 ) ) );
+		$base_max = isset( $context->meta['current_delivery_max_days'] )
+			? max( 0, (int) $context->meta['current_delivery_max_days'] )
+			: ( isset( $context->meta['original_delivery_max_days'] ) ? max( 0, (int) $context->meta['original_delivery_max_days'] ) : $base_min );
 
-		return match ( $rule->operation_type ) {
-			RuleOperationTypes::INCREASE => $base + $value,
-			RuleOperationTypes::DECREASE => max( 0, $base - $value ),
-			default                      => $value,
+		$values = match ( $rule->operation_type ) {
+			RuleOperationTypes::INCREASE => array( $base_min + $value, $base_max + $value ),
+			RuleOperationTypes::DECREASE => array( max( 0, $base_min - $value ), max( 0, $base_max - $value ) ),
+			default                      => array( $value, $value ),
 		};
+
+		return DateRange::range( $values[0], $values[1], $unit );
 	}
 
 	private function operation_delta( Money $current_price, RuleEvaluationContext $context, Rule $rule ): Money {

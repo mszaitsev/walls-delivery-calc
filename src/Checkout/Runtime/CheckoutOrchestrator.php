@@ -76,6 +76,9 @@ final class CheckoutOrchestrator {
 				$packaging_result = $this->packaging_calculator->apply_to_package( $request->package, $service );
 				$service_request = $this->request_with_package( $request, $packaging_result->package, $packaging_result );
 			}
+			if ( $service instanceof DeliveryService ) {
+				$service_request = $this->request_for_service( $service_request, $service );
+			}
 
 			if ( $cache_enabled && $this->quote_cache instanceof QuoteCache ) {
 				$quote = $this->quote_cache->get( $service_request, $carrier_key, $delivery_type, $service_key );
@@ -270,6 +273,9 @@ final class CheckoutOrchestrator {
 				array(
 					'carrier_key' => $rate->carrier_key,
 					'rate_id'     => $rate->rate_id,
+					'original_delivery_days' => $rate->delivery_days->min_days ?? $rate->delivery_days->max_days ?? null,
+					'original_delivery_min_days' => $rate->delivery_days->min_days,
+					'original_delivery_max_days' => $rate->delivery_days->max_days,
 					'selected_location_fias_id' => (string) ( $request->customer_context['selected_location_fias_id'] ?? $request->destination->fias_id ),
 				)
 			)
@@ -285,6 +291,25 @@ final class CheckoutOrchestrator {
 			$request->order_total,
 			$request->calculation_date,
 			array_merge( $request->customer_context, $packaging->to_meta() )
+		);
+	}
+
+	private function request_for_service( QuoteRequest $request, DeliveryService $service ): QuoteRequest {
+		return new QuoteRequest(
+			$request->country_code,
+			$request->destination,
+			$request->package,
+			$request->payment_method,
+			$request->order_total,
+			$request->calculation_date,
+			array_merge(
+				$request->customer_context,
+				array(
+					'service_key' => $service->service_key,
+					'service_title' => $service->title,
+					'service_carrier_key' => $service->carrier_key,
+				)
+			)
 		);
 	}
 }

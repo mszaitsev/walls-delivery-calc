@@ -39,6 +39,8 @@ final class ShippingMethodRegistrar {
 		add_filter( 'woocommerce_shipping_methods', array( $this, 'register_shipping_method' ) );
 		if ( $this->feature_gate->enabled() ) {
 			add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
+			add_action( 'wp_ajax_wdc_select_domestic_tariff', array( $this, 'select_domestic_tariff' ) );
+			add_action( 'wp_ajax_nopriv_wdc_select_domestic_tariff', array( $this, 'select_domestic_tariff' ) );
 		}
 	}
 
@@ -132,6 +134,30 @@ final class ShippingMethodRegistrar {
 				$this->environment->version(),
 				true
 			);
+			wp_enqueue_style(
+				'wdc-platform-domestic-tariffs',
+				$this->environment->plugin_url() . 'assets/frontend/domestic-tariff-selector.css',
+				array( 'wdc-platform-checkout-rates' ),
+				$this->environment->version()
+			);
+			wp_enqueue_script(
+				'wdc-platform-domestic-tariffs',
+				$this->environment->plugin_url() . 'assets/frontend/domestic-tariff-selector.js',
+				array( 'jquery' ),
+				$this->environment->version(),
+				true
+			);
+			if ( function_exists( 'wp_localize_script' ) ) {
+				wp_localize_script(
+					'wdc-platform-domestic-tariffs',
+					'wdcPlatformDomesticTariffs',
+					array(
+						'ajax_url' => function_exists( 'admin_url' ) ? admin_url( 'admin-ajax.php' ) : '',
+						'nonce' => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( 'wdc_select_domestic_tariff' ) : '',
+						'action' => 'wdc_select_domestic_tariff',
+					)
+				);
+			}
 			if ( $this->suggestions_requested() ) {
 				wp_enqueue_script(
 					'wdc-platform-address-suggestions',
@@ -148,6 +174,27 @@ final class ShippingMethodRegistrar {
 					);
 				}
 			}
+		}
+	}
+
+	public function select_domestic_tariff(): void {
+		if ( function_exists( 'check_ajax_referer' ) ) {
+			check_ajax_referer( 'wdc_select_domestic_tariff', 'nonce' );
+		}
+		$service_key = isset( $_POST['service_key'] ) ? sanitize_key( wp_unslash( $_POST['service_key'] ) ) : '';
+		$object_code = isset( $_POST['object_code'] ) ? sanitize_text_field( wp_unslash( $_POST['object_code'] ) ) : '';
+		$title = isset( $_POST['title'] ) ? sanitize_text_field( wp_unslash( $_POST['title'] ) ) : '';
+		if ( '' !== $service_key && '' !== $object_code ) {
+			$this->session_manager->save_selected_tariff(
+				$service_key,
+				array(
+					'object_code' => $object_code,
+					'title' => $title,
+				)
+			);
+		}
+		if ( function_exists( 'wp_send_json_success' ) ) {
+			wp_send_json_success( array( 'service_key' => $service_key, 'object_code' => $object_code ) );
 		}
 	}
 

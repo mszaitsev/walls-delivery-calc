@@ -113,6 +113,7 @@ final class WdcOrderMetaSmokeOrder {
 
 final class WdcOrderMetaSmokeShippingItem {
 	public array $meta = array();
+	public string $method_title = '';
 
 	public function add_meta_data( string $key, mixed $value, bool $unique = false ): void {
 		$this->meta[ $key ] = $value;
@@ -120,6 +121,10 @@ final class WdcOrderMetaSmokeShippingItem {
 
 	public function delete_meta_data( string $key ): void {
 		unset( $this->meta[ $key ] );
+	}
+
+	public function set_method_title( string $title ): void {
+		$this->method_title = $title;
 	}
 }
 
@@ -203,6 +208,75 @@ order_meta_smoke_assert( (bool) preg_grep( '/Итог: 5 338 руб\\./u', $calc
 order_meta_smoke_assert( ! (bool) preg_grep( '/Округление вверх → 0 руб\\./u', $calculation['rules']['formula_visualization'] ), 'Formula must not render zero rounding for non-fallback rates.' );
 order_meta_smoke_assert( ! isset( $calculation['result']['final_delivery_days_min'], $calculation['result']['final_delivery_days_max'] ), 'Empty Russian Post delivery days must not be saved.' );
 
+$domestic_rate = array(
+	'carrier_key' => 'russian_post_domestic',
+	'rate_id' => 'russian_post_domestic_pickup',
+	'delivery_type' => 'pickup',
+	'service_key' => 'russian_post_domestic_pickup',
+	'service_title' => 'Почта России — до отделения',
+	'tariff_key' => '23030',
+	'tariff_title' => 'Посылка онлайн',
+	'selected_tariff_object' => '23030',
+	'selected_tariff_title' => 'Посылка онлайн',
+	'planned_delivery_comment' => '3 дня',
+	'delivery_days' => array( 'min_days' => 3, 'max_days' => 3, 'unit' => 'calendar_days' ),
+	'domestic_tariff_grouped' => true,
+	'tariff_variants' => array( array( 'object_code' => '23030' ) ),
+	'selected_tariff_rate_id' => 'russian_post_domestic_pickup:23030',
+	'rules_source' => 'service',
+	'round_up_applied' => true,
+	'minimum_price_applied' => false,
+	'no_pickup_selection' => true,
+	'requires_pickup_point' => false,
+	'requires_courier_address' => false,
+	'cost' => '450',
+	'comments' => array(),
+	'rate_meta' => array(
+		'postcode' => '630099',
+		'pay' => 45000,
+		'nds' => 0,
+		'paynds' => 45000,
+		'delivery_min_days' => 1,
+		'delivery_max_days' => 1,
+		'transtype' => 1,
+		'delivery_to' => '630099',
+		'items_summary' => array( array( 'name' => 'base', 'serviceon' => 1 ) ),
+		'package' => array( 'weight_g' => 1000 ),
+		'no_pickup_selection' => true,
+		'final_price_rub' => 450.0,
+		'rules_audit' => array(),
+	),
+);
+$session->save_rates( array( 'russian_post_domestic_pickup' => $domestic_rate ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_domestic_pickup' ) );
+$domestic_order = new WdcOrderMetaSmokeOrder();
+$persister->persist( $domestic_order, array() );
+$domestic_item = new WdcOrderMetaSmokeShippingItem();
+foreach ( array( 'domestic_tariff_grouped', 'tariff_variants', 'selected_tariff_rate_id', 'selected_tariff_object', 'selected_tariff_title', 'rate_meta', 'rules_source', 'round_up_applied', 'minimum_price_applied', 'no_pickup_selection', 'requires_pickup_point', 'requires_courier_address', 'delivery_days', 'request_params', 'items_summary' ) as $technical_key ) {
+	$domestic_item->add_meta_data( $technical_key, 'auto copied by WooCommerce', true );
+}
+$persister->persist_shipping_item_meta( $domestic_item, 0, array(), $domestic_order );
+$domestic_calculation = $domestic_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
+order_meta_smoke_assert( '23030' === ( $domestic_calculation['selected_tariff_object'] ?? '' ) && 'Посылка онлайн' === ( $domestic_calculation['selected_tariff_title'] ?? '' ), 'Domestic order payload must save selected tariff object and title.' );
+order_meta_smoke_assert( 3 === ( $domestic_calculation['result']['final_delivery_days_min'] ?? 0 ) && 3 === ( $domestic_calculation['result']['final_delivery_days_max'] ?? 0 ), 'Domestic order payload must save final delivery min/max after rules.' );
+order_meta_smoke_assert( 1 === ( $domestic_calculation['api']['api_delivery_min_days'] ?? 0 ) && 1 === ( $domestic_calculation['api']['api_delivery_max_days'] ?? 0 ) && '1 день' === ( $domestic_calculation['api']['api_delivery_text'] ?? '' ), 'Domestic order payload must save original API delivery range.' );
+order_meta_smoke_assert( 3 === ( $domestic_calculation['result']['final_delivery_min_days'] ?? 0 ) && 3 === ( $domestic_calculation['result']['final_delivery_max_days'] ?? 0 ) && '3 дня' === ( $domestic_calculation['result']['final_delivery_text'] ?? '' ), 'Domestic order payload must save final delivery range text.' );
+order_meta_smoke_assert( in_array( 'Посылка онлайн', $domestic_item->meta, true ), 'Domestic visible shipping item meta must show selected tariff title.' );
+order_meta_smoke_assert( in_array( '3 дня', $domestic_item->meta, true ), 'Domestic visible shipping item meta must show formatted delivery days.' );
+order_meta_smoke_assert( 'Почта России — до отделения: Посылка онлайн - 3 дня' === $domestic_item->method_title, 'Domestic shipping item method title must include service, selected tariff, and delivery days.' );
+$domestic_visible_blob = wp_json_encode( $domestic_item->meta );
+foreach ( array( 'domestic_tariff_grouped', 'tariff_variants', 'selected_tariff_rate_id', 'selected_tariff_object', 'selected_tariff_title', 'rate_meta', 'rules_source', 'round_up_applied', 'minimum_price_applied', 'no_pickup_selection', 'requires_pickup_point', 'requires_courier_address', 'delivery_days', 'request_params', 'items_summary' ) as $technical_key ) {
+	order_meta_smoke_assert( ! str_contains( (string) $domestic_visible_blob, $technical_key ), 'Domestic technical meta must not be visible in shipping item meta: ' . $technical_key );
+}
+order_meta_smoke_assert( array( 'Способ доставки', 'Тариф', 'Срок доставки' ) === array_keys( $domestic_item->meta ), 'Domestic visible shipping item meta must contain only public rows.' );
+
+ob_start();
+( new OrderDeliveryMetabox() )->render( $domestic_order );
+$domestic_html = (string) ob_get_clean();
+order_meta_smoke_assert( str_contains( $domestic_html, 'Срок по API' ) && str_contains( $domestic_html, '1 день' ) && str_contains( $domestic_html, 'Итоговый срок' ) && str_contains( $domestic_html, '3 дня' ) && ! str_contains( $domestic_html, '3 дн.' ), 'Domestic order metabox must render API and final formatted Russian delivery days.' );
+order_meta_smoke_assert( str_contains( $domestic_html, 'Служба доставки' ) && str_contains( $domestic_html, 'Выбранный тариф' ) && str_contains( $domestic_html, 'Тип доставки' ), 'Domestic order metabox must show public service, tariff, and delivery type labels.' );
+order_meta_smoke_assert( ! str_contains( $domestic_html, 'russian_post_domestic_pickup' ) && ! str_contains( $domestic_html, 'api_price_has_vat' ) && ! str_contains( $domestic_html, 'НДС' ), 'Domestic order metabox must hide technical service key and VAT flag.' );
+
 ob_start();
 ( new OrderDeliveryMetabox() )->render( $order );
 $html = (string) ob_get_clean();
@@ -210,6 +284,7 @@ foreach ( array( 'Польша (PL)', 'Вес товаров', '5 338 руб.', 
 	order_meta_smoke_assert( str_contains( $html, $needle ), 'Order metabox must render calculation field: ' . $needle );
 }
 order_meta_smoke_assert( ! str_contains( $html, '0 дн.' ), 'Order metabox must not render empty delivery days.' );
+order_meta_smoke_assert( ! str_contains( $html, 'НДС' ) && ! str_contains( $html, 'api_price_has_vat' ), 'Order metabox must not render VAT status.' );
 
 $fallback_text = 'Наиболее вероятно, мы не сможем доставить посылку в вашу страну.';
 $fallback_rate = wdc_order_meta_rate(

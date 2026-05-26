@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Orders\Admin;
 
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -60,7 +61,8 @@ final class OrderDeliveryMetabox {
 
 		$rows = array(
 			'Служба доставки' => (string) ( $calculation['service_title'] ?? '' ),
-			'Способ доставки' => $this->shipping_method_label( $calculation ),
+			'Выбранный тариф' => (string) ( $calculation['selected_tariff_title'] ?? '' ),
+			'Тип доставки' => $this->delivery_type_label( (string) ( $calculation['delivery_type'] ?? '' ) ),
 			'Страна назначения' => $this->country_label( $destination ),
 			'Вес товаров' => $this->grams( $package['products_weight_g'] ?? null ),
 			'Вес упаковки' => $this->grams( $package['packaging_weight_g'] ?? null ),
@@ -77,7 +79,10 @@ final class OrderDeliveryMetabox {
 			$rows['Fallback text']   = (string) ( $result['fallback_text'] ?? '' );
 		} else {
 			$rows['Базовая стоимость API'] = $this->rubles( $api['api_base_price_rub'] ?? null );
-			$rows['НДС'] = $this->vat_label( $api );
+			$api_delivery_days = $this->api_delivery_days_label( $api );
+			if ( '' !== $api_delivery_days ) {
+				$rows['Срок по API'] = $api_delivery_days;
+			}
 			$formula = is_array( $rules['formula_visualization'] ?? null ) ? $rules['formula_visualization'] : array();
 			if ( array() !== $formula ) {
 				$rows['Правила расчета'] = $formula;
@@ -87,7 +92,7 @@ final class OrderDeliveryMetabox {
 		$rows['Итоговая стоимость'] = $this->rubles( $result['final_price_rub'] ?? null );
 		$delivery_days = $this->delivery_days_label( $result );
 		if ( '' !== $delivery_days ) {
-			$rows['Срок доставки'] = $delivery_days;
+			$rows['Итоговый срок'] = $delivery_days;
 		}
 
 		$this->render_rows( $rows );
@@ -223,17 +228,6 @@ final class OrderDeliveryMetabox {
 		};
 	}
 
-	/**
-	 * @param array<string,mixed> $calculation
-	 */
-	private function shipping_method_label( array $calculation ): string {
-		if ( 'russian_post_worldwide_parcel' === (string) ( $calculation['service_key'] ?? '' ) ) {
-			return 'международная доставка Почтой России';
-		}
-
-		return (string) ( $calculation['rate_id'] ?? '' );
-	}
-
 	private function country_label( array $destination ): string {
 		$name = trim( (string) ( $destination['country_name'] ?? '' ) );
 		$code = trim( (string) ( $destination['country_code'] ?? '' ) );
@@ -257,34 +251,19 @@ final class OrderDeliveryMetabox {
 	}
 
 	/**
-	 * @param array<string,mixed> $api
-	 */
-	private function vat_label( array $api ): string {
-		if ( ! array_key_exists( 'api_price_has_vat', $api ) && ! array_key_exists( 'vat_rate', $api ) ) {
-			return '';
-		}
-
-		$mode = ! empty( $api['api_price_has_vat'] ) ? 'включен' : 'добавлен';
-		$rate = is_numeric( $api['vat_rate'] ?? null ) ? ', ставка ' . (string) $api['vat_rate'] : '';
-
-		return $mode . $rate;
-	}
-
-	/**
 	 * @param array<string,mixed> $result
 	 */
 	private function delivery_days_label( array $result ): string {
-		$min = $result['final_delivery_days_min'] ?? null;
-		$max = $result['final_delivery_days_max'] ?? null;
-		if ( ! is_numeric( $min ) && ! is_numeric( $max ) ) {
-			return '';
-		}
+		return (string) ( $result['final_delivery_text'] ?? '' )
+			?: DeliveryDaysFormatter::format_values( $result['final_delivery_min_days'] ?? $result['final_delivery_days_min'] ?? null, $result['final_delivery_max_days'] ?? $result['final_delivery_days_max'] ?? null );
+	}
 
-		if ( is_numeric( $min ) && is_numeric( $max ) && (int) $min !== (int) $max ) {
-			return (int) $min . '-' . (int) $max . ' дн.';
-		}
-
-		return (string) (int) ( is_numeric( $min ) ? $min : $max ) . ' дн.';
+	/**
+	 * @param array<string,mixed> $api
+	 */
+	private function api_delivery_days_label( array $api ): string {
+		return (string) ( $api['api_delivery_text'] ?? '' )
+			?: DeliveryDaysFormatter::format_values( $api['api_delivery_min_days'] ?? $api['delivery_min_days'] ?? null, $api['api_delivery_max_days'] ?? $api['delivery_max_days'] ?? null );
 	}
 
 	private function city_summary( object $order ): string {

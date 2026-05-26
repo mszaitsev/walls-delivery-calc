@@ -6,6 +6,9 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\Domain\Common\DateRange;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -98,7 +101,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 			$result = $this->orchestrator->calculate( $request, $this->checkout_rules(), $sort, true, array( $this, 'checkout_rules_for_carrier' ) );
 			$stored = array();
 
-			foreach ( $result->rates as $rate ) {
+			foreach ( $this->rates_for_wc( $result->rates ) as $rate ) {
 				$mapped = $this->rate_mapper->map( $rate, $result->fallback_used );
 				$stored_rate = array_merge(
 					$mapped['meta_data'],
@@ -150,6 +153,123 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 				)
 			);
 		}
+	}
+
+	/**
+	 * @param array<int,DeliveryRate> $rates
+	 * @return array<int,DeliveryRate>
+	 */
+	private function rates_for_wc( array $rates ): array {
+		$grouped = array();
+		$output = array();
+		foreach ( $rates as $rate ) {
+			if ( $rate instanceof DeliveryRate && ! empty( $rate->meta['tariff_selector_group'] ) ) {
+				$grouped[ $rate->service_key ][] = $rate;
+				continue;
+			}
+			$output[] = $rate;
+		}
+		foreach ( $grouped as $service_key => $items ) {
+			$output[] = $this->tariff_selector_rate( $service_key, $items );
+		}
+
+		return $output;
+	}
+
+	/**
+	 * @param array<int,DeliveryRate> $rates
+	 */
+	private function tariff_selector_rate( string $service_key, array $rates ): DeliveryRate {
+		$selected = $this->session_manager->selected_tariff( $service_key );
+		$selected_object = (string) ( $selected['object_code'] ?? '' );
+		$active = $rates[0];
+		$selected_found = false;
+		foreach ( $rates as $rate ) {
+			if ( (string) $rate->tariff_key === $selected_object ) {
+				$active = $rate;
+				$selected_found = true;
+				break;
+			}
+		}
+		$variants = count( $rates ) > 1 ? array_map(
+			fn ( DeliveryRate $rate ): array => array(
+				'rate_id' => $rate->rate_id,
+				'object_code' => $rate->tariff_key,
+				'title' => $rate->tariff_name,
+				'delivery_type' => $rate->delivery_type,
+				'price_rub' => $rate->price->get_rubles(),
+				'cost' => (string) $rate->price->get_rubles(),
+				'crossed_price' => $rate->crossed_price?->to_array(),
+				'delivery_days' => $rate->delivery_days->to_array(),
+				'planned_delivery_comment' => $this->delivery_comment( $rate->delivery_days ),
+				'comments' => $rate->comments,
+				'rate_meta' => $rate->meta,
+			),
+			$rates
+		) : array();
+		if ( ! $selected_found ) {
+			$this->session_manager->save_selected_tariff(
+				$service_key,
+				array(
+					'object_code' => $active->tariff_key,
+					'title' => $active->tariff_name,
+					'delivery_days' => $active->delivery_days->to_array(),
+					'final_price_rub' => $active->price->get_rubles(),
+				)
+			);
+		}
+
+		$method_title = $this->domestic_method_title( $active );
+
+		return new DeliveryRate(
+			$service_key,
+			$active->carrier_key,
+			$active->carrier_name,
+			$service_key,
+			$active->service_name,
+			$active->tariff_key,
+			$active->tariff_name,
+			$active->delivery_type,
+			$method_title,
+			$active->price,
+			$active->original_price,
+			$active->crossed_price,
+			$active->delivery_days,
+			$active->planned_delivery_date,
+			$this->delivery_comment( $active->delivery_days ),
+			$active->comments,
+			$active->disabled,
+			$active->disabled_reason,
+			$active->requires_pickup_point,
+			$active->requires_courier_address,
+			array_merge(
+				$active->meta,
+				array(
+					'tariff_variants' => $variants,
+					'domestic_tariff_grouped' => true,
+					'selected_tariff_object' => $active->tariff_key,
+					'selected_tariff_title' => $active->tariff_name,
+					'selected_tariff_rate_id' => $active->rate_id,
+					'final_price_rub' => $active->price->get_rubles(),
+				)
+			)
+		);
+	}
+
+	private function domestic_method_title( DeliveryRate $rate ): string {
+		$tariff = trim( $rate->tariff_name );
+		if ( '' === $tariff ) {
+			$title = $rate->service_name;
+		} else {
+			$title = $rate->service_name . ': ' . $tariff;
+		}
+		$days = $this->delivery_comment( $rate->delivery_days );
+
+		return '' !== $days ? $title . ' - ' . $days : $title;
+	}
+
+	private function delivery_comment( DateRange $range ): string {
+		return DeliveryDaysFormatter::format( $range );
 	}
 
 	private function sort_mode(): string {

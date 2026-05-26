@@ -13,6 +13,7 @@ final class CheckoutSessionManager {
 	private const PICKUP_CARRIER_KEY = 'wdc_platform_selected_pickup_carrier';
 	private const SORT_MODE_KEY     = 'wdc_platform_checkout_sort_mode';
 	private const RATES_KEY         = 'wdc_platform_rates';
+	private const SELECTED_TARIFFS_KEY = 'wdc_platform_selected_tariffs';
 	private const DEBUG_KEY         = 'wdc_platform_debug';
 	private const NORMALIZED_ADDRESS_KEY = 'wdc_platform_normalized_address';
 	private const SELECTED_CITY_KEY      = 'wdc_platform_selected_city';
@@ -94,6 +95,34 @@ final class CheckoutSessionManager {
 		$rates = $this->get( self::RATES_KEY, array() );
 
 		return is_array( $rates ) ? $rates : array();
+	}
+
+	/**
+	 * @param array<string,mixed> $selection
+	 */
+	public function save_selected_tariff( string $service_key, array $selection ): void {
+		$selected = $this->selected_tariffs();
+		$selected[ $service_key ] = $selection;
+		$this->set( self::SELECTED_TARIFFS_KEY, $selected );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function selected_tariff( string $service_key ): array {
+		$selected = $this->selected_tariffs();
+		$value = $selected[ $service_key ] ?? array();
+
+		return is_array( $value ) ? $value : array();
+	}
+
+	/**
+	 * @return array<string,array<string,mixed>>
+	 */
+	public function selected_tariffs(): array {
+		$selected = $this->get( self::SELECTED_TARIFFS_KEY, array() );
+
+		return is_array( $selected ) ? $selected : array();
 	}
 
 	/**

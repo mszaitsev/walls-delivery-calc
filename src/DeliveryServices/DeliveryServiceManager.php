@@ -21,6 +21,11 @@ final class DeliveryServiceManager {
 
 	public function ensure_builtin_services(): void {
 		$this->services->ensure_russian_post_service();
+		foreach ( $this->services->ensure_russian_post_domestic_services() as $service ) {
+			if ( null !== $service->id ) {
+				$this->countries->replace_countries( (int) $service->id, array( 'RU' ) );
+			}
+		}
 	}
 
 	public function service_available_for_country( DeliveryService $service, string $country_code ): bool {
@@ -99,6 +104,9 @@ final class DeliveryServiceManager {
 	private function carrier_directory_available( DeliveryService $service, string $country_code ): bool {
 		if ( 'russian_post' === $service->carrier_key ) {
 			return 'RU' !== $country_code;
+		}
+		if ( 'russian_post_domestic' === $service->carrier_key ) {
+			return 'RU' === $country_code;
 		}
 
 		return true;

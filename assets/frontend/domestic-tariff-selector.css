@@ -1,0 +1,39 @@
+.wdc-domestic-tariff-selector {
+	display: grid;
+	gap: 6px;
+	margin: 8px 0;
+}
+
+.wdc-domestic-tariff-selector__item {
+	align-items: center;
+	display: grid;
+	gap: 6px;
+	grid-template-columns: 18px minmax(0, 1fr) auto auto;
+	line-height: 1.35;
+	margin: 0;
+}
+
+.wdc-domestic-tariff-selector__item input {
+	margin: 0;
+}
+
+.wdc-domestic-tariff-selector__title {
+	min-width: 0;
+}
+
+.wdc-domestic-tariff-selector__price,
+.wdc-domestic-tariff-selector__days {
+	white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+	.wdc-domestic-tariff-selector__item {
+		grid-template-columns: 18px minmax(0, 1fr);
+	}
+
+	.wdc-domestic-tariff-selector__price,
+	.wdc-domestic-tariff-selector__days {
+		grid-column: 2;
+		white-space: normal;
+	}
+}

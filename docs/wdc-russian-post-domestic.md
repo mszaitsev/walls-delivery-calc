@@ -16,8 +16,6 @@ This document fixes the stage-1 contract for the future domestic Russian Post ca
 
 | Object code | Name |
 | ---: | --- |
-| `27030` | Посылка стандарт |
-| `27020` | Посылка стандарт с ОЦ |
 | `4030` | Посылка нестандартная |
 | `4020` | Посылка нестандартная с ОЦ |
 | `47030` | Посылка 1 класса |
@@ -29,15 +27,17 @@ This document fixes the stage-1 contract for the future domestic Russian Post ca
 | `23020` | Посылка онлайн с ОЦ |
 | `24030` | Курьер онлайн |
 | `24020` | Курьер онлайн с ОЦ |
+| `7030` | EMS |
+| `7020` | EMS с ОЦ |
 
 Declared-value candidates receive `sumoc` in the tariff probe and future API requests:
 
-- `27020`
 - `4020`
 - `47020`
 - `54020`
 - `23020`
 - `24020`
+- `7020`
 
 If Russian Post API documentation or behavior requires `group`, the integration should first observe the response without `group`; when the API returns an error, retry with `group=0` and record that behavior in diagnostics.
 
@@ -99,7 +99,7 @@ php tests/carriers/run-russian-post-domestic-api-probe.php --dry-run
 PowerShell API probe:
 
 ```powershell
-php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=101000 --weight=1000 --objects=27030,27020,4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020
+php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=101000 --weight=1000 --objects=4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020,7030,7020
 ```
 
 Optional parameters:
@@ -113,7 +113,45 @@ The script does not require WooCommerce checkout. It prints sanitized JSON summa
 For local Windows diagnostics only, when PHP fails with `self-signed certificate in certificate chain (19)` and the trust store is not configured, run:
 
 ```powershell
-php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=101000 --weight=1000 --objects=27030,27020,4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020 --insecure
+php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=101000 --weight=1000 --objects=4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020,7030,7020 --insecure
 ```
 
 `--insecure` disables SSL verification only in this test helper and adds a warning to JSON output. Do not use this behavior in production runtime.
+# Почта России — по России
+
+Этап foundation добавляет carrier `russian_post_domestic` и две service:
+
+- `russian_post_domestic_pickup`
+- `russian_post_domestic_courier`
+
+Обе службы доступны только для `RU`, используют локальный город/индекс из checkout context и не рассчитываются без валидного шестизначного `postal_code`. Технический индекс `999999999` считается отсутствующим индексом.
+
+## Tariff variants
+
+Внутренняя модель `DomesticTariffVariant` хранит `object_code`, `title`, `enabled`, `delivery_type`, `requires_declared_value`, `always_available`, weight limits и `sort_order`.
+
+Pickup variants: `4030`, `4020`, `47030`, `47020`, `54020`, `23030`, `23020`.
+
+Courier variants: `24030`, `24020`, `7030`, `7020`, `41030`, `52030`.
+
+Если `insurance_enabled=false`, resolver берет тарифы без объявленной ценности. Если `insurance_enabled=true`, берет declared-value аналоги. `54020` помечен `always_available`.
+
+## API
+
+`RussianPostDomesticApiClient` вызывает `GET /v2/calculate/tariff/delivery`. Runtime всегда передает:
+
+- `object`
+- `from`
+- `to`
+- `weight`
+- `date`
+- `pack=99`
+- `sumoc` только для declared-value variants
+
+В meta сохраняются нормализованные поля `pay`, `nds`, `paynds`, `delivery_min_days`, `delivery_max_days`, `transtype`, `delivery_to`, `items_summary`, request params и cache/debug metadata. Полный raw response в order calculation payload не сохраняется.
+
+Если API отклоняет отдельный object code, carrier пропускает только этот tariff variant и показывает диагностику в debug/simulation: `object_code`, `pack`, request URL, request params, `http_code`, `errorcode`/`errormsg`, decoded body, raw error body и нормализованные error code/message. Deprecated object codes `27030`, `27020`, `28030`, `28020` больше не создаются в defaults, но старые сохраненные строки в `tariff_variants` JSON продолжают загружаться, чтобы администратор мог удалить их вручную.
+
+## Pickup without selector
+
+Pickup variants выставляют `no_pickup_selection=true`. Это означает доставку до почтового отделения по индексу, без выбора ПВЗ в checkout.

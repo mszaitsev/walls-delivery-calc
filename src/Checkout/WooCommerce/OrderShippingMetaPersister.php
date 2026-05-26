@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
 
 defined( 'ABSPATH' ) || exit;
@@ -51,6 +52,8 @@ final class OrderShippingMetaPersister {
 			'_wdc_platform_requires_pickup_point'    => ! empty( $rate['requires_pickup_point'] ) ? 1 : 0,
 			'_wdc_platform_service_key'              => $rate['service_key'] ?? '',
 			'_wdc_platform_service_title'            => $rate['service_title'] ?? '',
+			'_wdc_platform_tariff_object'            => $rate['selected_tariff_object'] ?? $rate['tariff_key'] ?? '',
+			'_wdc_platform_tariff_title'             => $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '',
 			'_wdc_platform_rules_source'             => $rate['rules_source'] ?? 'none',
 			'_wdc_platform_round_up_applied'         => ! empty( $rate['round_up_applied'] ) ? 1 : 0,
 			'_wdc_platform_minimum_price_applied'    => ! empty( $rate['minimum_price_applied'] ) ? 1 : 0,
@@ -120,6 +123,20 @@ final class OrderShippingMetaPersister {
 		}
 
 		$delivery_type = (string) ( $rate['delivery_type'] ?? '' );
+		if ( $this->is_russian_post_domestic_rate( $rate ) ) {
+			$method_title = $this->domestic_method_title( $rate );
+			if ( method_exists( $item, 'set_method_title' ) && '' !== $method_title ) {
+				$item->set_method_title( $method_title );
+			}
+			$this->delete_visible_technical_item_meta( $item );
+			$item->add_meta_data( 'Способ доставки', (string) ( $rate['service_title'] ?? '' ), true );
+			$item->add_meta_data( 'Тариф', (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' ), true );
+			$delivery = $this->delivery_days_label( is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array() );
+			if ( '' !== $delivery ) {
+				$item->add_meta_data( 'Срок доставки', $delivery, true );
+			}
+			return;
+		}
 		if ( $this->is_russian_post_international_rate( $rate ) ) {
 			$this->delete_visible_technical_item_meta( $item );
 			$item->add_meta_data( 'Способ доставки', 'международная доставка Почтой России', true );
@@ -172,6 +189,8 @@ final class OrderShippingMetaPersister {
 				'service_key'   => (string) ( $rate['service_key'] ?? '' ),
 				'service_title' => (string) ( $rate['service_title'] ?? '' ),
 				'rate_id'       => (string) ( $rate['rate_id'] ?? '' ),
+				'selected_tariff_object' => (string) ( $rate['selected_tariff_object'] ?? $rate['tariff_key'] ?? '' ),
+				'selected_tariff_title' => (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' ),
 				'delivery_type' => (string) ( $rate['delivery_type'] ?? '' ),
 				'pickup'        => $this->calculation_pickup_data( $rate ),
 				'destination'   => $destination,
@@ -255,6 +274,22 @@ final class OrderShippingMetaPersister {
 				'api_base_price_rub'      => $this->nullable_float( $rate_meta['api_base_price_rub'] ?? $rate_meta['api_price_with_vat_rub'] ?? null ),
 				'api_price_has_vat'       => array_key_exists( 'api_price_has_vat', $rate_meta ) ? (bool) $rate_meta['api_price_has_vat'] : null,
 				'api_price_with_vat_rub'  => $this->nullable_float( $rate_meta['api_price_with_vat_rub'] ?? null ),
+				'pay'                     => array_key_exists( 'pay', $rate_meta ) ? (int) $rate_meta['pay'] : null,
+				'nds'                     => array_key_exists( 'nds', $rate_meta ) ? (int) $rate_meta['nds'] : null,
+				'paynds'                  => array_key_exists( 'paynds', $rate_meta ) ? (int) $rate_meta['paynds'] : null,
+				'delivery_min_days'       => array_key_exists( 'delivery_min_days', $rate_meta ) ? (int) $rate_meta['delivery_min_days'] : null,
+				'delivery_max_days'       => array_key_exists( 'delivery_max_days', $rate_meta ) ? (int) $rate_meta['delivery_max_days'] : null,
+				'api_delivery_min_days'   => array_key_exists( 'delivery_min_days', $rate_meta ) ? (int) $rate_meta['delivery_min_days'] : null,
+				'api_delivery_max_days'   => array_key_exists( 'delivery_max_days', $rate_meta ) ? (int) $rate_meta['delivery_max_days'] : null,
+				'api_delivery_text'       => $this->delivery_days_label(
+					array(
+						'min_days' => $rate_meta['delivery_min_days'] ?? null,
+						'max_days' => $rate_meta['delivery_max_days'] ?? null,
+					)
+				),
+				'transtype'               => array_key_exists( 'transtype', $rate_meta ) ? (int) $rate_meta['transtype'] : null,
+				'delivery_to'             => (string) ( $rate_meta['delivery_to'] ?? '' ),
+				'items_summary'           => is_array( $rate_meta['items_summary'] ?? null ) ? $rate_meta['items_summary'] : array(),
 				'vat_rate'                => $this->nullable_float( $rate_meta['vat_rate'] ?? null ),
 				'request_params'          => is_array( $rate_meta['request_params'] ?? null ) ? $this->sanitize_request_params( $rate_meta['request_params'] ) : array(),
 				'cache_hit'               => ! empty( $rate_meta['cache_hit'] ),
@@ -290,12 +325,54 @@ final class OrderShippingMetaPersister {
 		$max_days      = $delivery_days['max_days'] ?? $delivery_days['max'] ?? null;
 		if ( is_numeric( $min_days ) && (int) $min_days > 0 ) {
 			$result['final_delivery_days_min'] = (int) $min_days;
+			$result['final_delivery_min_days'] = (int) $min_days;
 		}
 		if ( is_numeric( $max_days ) && (int) $max_days > 0 ) {
 			$result['final_delivery_days_max'] = (int) $max_days;
+			$result['final_delivery_max_days'] = (int) $max_days;
+		}
+		$final_delivery_text = $this->delivery_days_label( $delivery_days );
+		if ( '' !== $final_delivery_text ) {
+			$result['final_delivery_text'] = $final_delivery_text;
 		}
 
 		return array_filter( $result, static fn ( mixed $value ): bool => '' !== $value && null !== $value );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function is_russian_post_domestic_rate( array $rate ): bool {
+		$carrier_key = (string) ( $rate['carrier_key'] ?? '' );
+		$service_key = (string) ( $rate['service_key'] ?? '' );
+
+		return 'russian_post_domestic' === $carrier_key || str_starts_with( $service_key, 'russian_post_domestic_' );
+	}
+
+	/**
+	 * @param array<string,mixed> $delivery_days
+	 */
+	private function delivery_days_label( array $delivery_days ): string {
+		return DeliveryDaysFormatter::format_array( $delivery_days );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function domestic_method_title( array $rate ): string {
+		$service_title = trim( (string) ( $rate['service_title'] ?? '' ) );
+		$tariff_title = trim( (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' ) );
+		if ( '' === $service_title ) {
+			return $tariff_title;
+		}
+		if ( '' === $tariff_title ) {
+			return $service_title;
+		}
+
+		$title = $service_title . ': ' . $tariff_title;
+		$delivery = $this->delivery_days_label( is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array() );
+
+		return '' !== $delivery ? $title . ' - ' . $delivery : $title;
 	}
 
 	/**
@@ -370,14 +447,44 @@ final class OrderShippingMetaPersister {
 			'disabled_reason',
 			'service_key',
 			'service_title',
+			'tariff_key',
+			'tariff_title',
+			'domestic_tariff_grouped',
+			'tariff_variants',
+			'selected_tariff_object',
+			'selected_tariff_title',
+			'selected_tariff_rate_id',
 			'rules_source',
 			'round_up_applied',
 			'minimum_price_applied',
 			'final_price_rub',
 			'api_base_price_rub',
 			'api_price_with_vat_rub',
+			'api_price_has_vat',
+			'delivery_days',
+			'api_delivery_min_days',
+			'api_delivery_max_days',
+			'api_delivery_text',
+			'final_delivery_min_days',
+			'final_delivery_max_days',
+			'final_delivery_text',
 			'rules_audit',
 			'rate_meta',
+			'object_code',
+			'domestic_tariff_variant',
+			'postcode',
+			'pay',
+			'nds',
+			'paynds',
+			'delivery_min_days',
+			'delivery_max_days',
+			'transtype',
+			'delivery_to',
+			'items_summary',
+			'request_params',
+			'http_code',
+			'cache_hit',
+			'package',
 			'requires_pickup_point',
 			'requires_courier_address',
 			'no_pickup_selection',

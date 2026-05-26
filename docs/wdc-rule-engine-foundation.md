@@ -87,3 +87,8 @@ Price operations now include:
 Both accept decimal values, comma or dot input, require values greater than zero, and do not use ruble or percent operation bases.
 
 The delivery service tab can copy default rules into a service. Copies are new `target_type=service` rows with fresh ids, the selected service key, preserved conditions, group logic/expression, operations, promo flags, stop-processing flags, and operation text. Existing service rules remain in place; copied rules are appended after them.
+# Delivery ranges
+
+Rule evaluation now supports delivery ranges through `original_delivery_min_days`, `original_delivery_max_days`, `current_delivery_min_days` and `current_delivery_max_days`. `change_delivery_days` operations shift both ends of the range.
+
+Example: API range `5-6`, rule `+2 calendar_days` results in `7-8`. `business_days` remains supported and is preserved as the resulting `DateRange` unit.

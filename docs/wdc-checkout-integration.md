@@ -168,3 +168,12 @@ Post-processing order after rules:
 Disabled rates are ignored, and zero fallback rates stay zero.
 
 Order/shipping metadata now includes `service_key`, `service_title`, `carrier_key`, `rules_source`, `round_up_applied`, and `minimum_price_applied`.
+# Domestic tariff selector
+
+`russian_post_domestic` keeps the single WooCommerce shipping method (`wdc_platform_delivery`) and collapses domestic tariff variants into one visible service rate. The selected variant controls the rate cost, delivery range and comments.
+
+Domestic method labels use the actual service title, selected tariff title, and final rule-adjusted delivery range: `Почта России — до отделения: Посылка онлайн - 3 дня` or `Почта России — курьером: EMS - 1-2 дня`. The same title is persisted to the WooCommerce shipping item. Delivery days are formatted through the shared Russian plural formatter, so selector rows, labels, visible order meta, and calculation metabox use `1 день`, `3 дня`, `5 дней`, and ranges like `1-3 дня`.
+
+The frontend selector is implemented in `assets/frontend/domestic-tariff-selector.js` and posts the selected `object_code` to the checkout session. After selection it triggers `update_checkout`, so WooCommerce totals refresh and the selected tariff survives checkout recalculation.
+
+For pickup domestic tariffs, `no_pickup_selection=true` skips the pickup point selector because delivery is to the post office associated with the destination postcode.

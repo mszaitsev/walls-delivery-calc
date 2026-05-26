@@ -5,7 +5,10 @@ namespace WallsShop\WDC\DeliveryServices\Admin;
 
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostCountriesAdminPage;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
+use WallsShop\WDC\Carriers\Runtime\RussianPostDomesticCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
@@ -14,6 +17,8 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Common\DateRange;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
@@ -45,7 +50,8 @@ final class DeliveryServicesAdminPage {
 		private ?RussianPostInternationalCarrier $russian_post_carrier = null,
 		private ?RuleAppliedRateBuilder $rule_builder = null,
 		private ?DeliveryServiceManager $manager = null,
-		private ?PackagingWeightCalculator $packaging_calculator = null
+		private ?PackagingWeightCalculator $packaging_calculator = null,
+		private ?RussianPostDomesticCarrier $russian_post_domestic_carrier = null
 	) {
 	}
 
@@ -72,7 +78,7 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
-		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation' ), true ) ) {
+		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs' ), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -80,10 +86,15 @@ final class DeliveryServicesAdminPage {
 				'save_calculation' => $this->sanitize_calculation_data(),
 				default => $this->sanitize_service_data(),
 			};
-			if ( $id > 0 ) {
+			if ( 'save_tariffs' === $action ) {
+				$data = array();
+			}
+			if ( $id > 0 && array() !== $data ) {
 				$this->services->update_service( $id, $data );
 			} else {
-				$id = $this->services->create_service( $data );
+				if ( array() !== $data ) {
+					$id = $this->services->create_service( $data );
+				}
 			}
 			if ( 'save' === $action || 'save_availability' === $action ) {
 				$this->countries->replace_countries( $id, $this->countries_from_post() );
@@ -94,6 +105,12 @@ final class DeliveryServicesAdminPage {
 					$this->save_russian_post_settings( (int) $service->id );
 				}
 			}
+			if ( 'save_tariffs' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
+				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
+				if ( $service instanceof DeliveryService && $this->is_domestic_service( $service ) && null !== $service->id ) {
+					$this->settings->set_setting( (int) $service->id, 'tariff_variants', $this->sanitize_domestic_tariff_variants_from_post(), 'json' );
+				}
+			}
 		}
 
 		if ( 'toggle' === $action ) {
@@ -101,7 +118,10 @@ final class DeliveryServicesAdminPage {
 		}
 
 		if ( 'delete' === $action ) {
-			$this->services->soft_delete_service( (int) $_POST['id'] );
+			$service = $this->services->find_by_id( (int) $_POST['id'] );
+			if ( ! $service instanceof DeliveryService || ! $this->services->is_predefined_service_key( $service->service_key ) ) {
+				$this->services->soft_delete_service( (int) $_POST['id'] );
+			}
 		}
 
 		if ( 'reorder' === $action ) {
@@ -118,11 +138,12 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation' ), true ) ) {
+		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs' ), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'availability',
 				'save_calculation' => 'calculation',
+				'save_tariffs' => 'tariffs',
 				default => 'main',
 			};
 			if ( '' !== $service_key ) {
@@ -199,12 +220,16 @@ final class DeliveryServicesAdminPage {
 									<input type="hidden" name="enabled" value="<?php echo esc_attr( $service->enabled ? '1' : '0' ); ?>">
 									<button class="button"><?php echo esc_html( $service->enabled ? __( 'Выключить', 'walls-delivery-calc' ) : __( 'Включить', 'walls-delivery-calc' ) ); ?></button>
 								</form>
+								<?php if ( ! $this->services->is_predefined_service_key( $service->service_key ) ) : ?>
 								<form method="post" style="display:inline;">
 									<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
 									<input type="hidden" name="wdc_delivery_services_action" value="delete">
 									<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 									<button class="button button-link-delete"><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button>
 								</form>
+								<?php else : ?>
+									<span class="description"><?php echo esc_html__( 'Системная служба', 'walls-delivery-calc' ); ?></span>
+								<?php endif; ?>
 							</td>
 						</tr>
 					<?php endforeach; ?>
@@ -225,6 +250,9 @@ final class DeliveryServicesAdminPage {
 		if ( RussianPostSettings::SERVICE_KEY === $service->service_key ) {
 			$tabs['russian_post_countries'] = 'Страны Почты России';
 		}
+		if ( $this->is_domestic_service( $service ) ) {
+			$tabs['tariffs'] = 'Тарифы';
+		}
 		?>
 		<h2><?php echo esc_html( $service->title ); ?></h2>
 		<nav class="nav-tab-wrapper">
@@ -237,6 +265,7 @@ final class DeliveryServicesAdminPage {
 			'availability' => $this->render_availability_tab( $service ),
 			'calculation' => $this->render_calculation_tab( $service ),
 			'rules' => $this->render_rules_tab( $service ),
+			'tariffs' => $this->render_tariffs_tab( $service ),
 			'russian_post_countries' => $this->render_russian_post_countries_tab( $service ),
 			default => $this->render_main_tab( $service ),
 		};
@@ -329,6 +358,41 @@ final class DeliveryServicesAdminPage {
 		}
 
 		$this->russian_post_countries->render_embedded( $this->service_tab_url( $service, 'russian_post_countries' ) );
+	}
+
+	private function render_tariffs_tab( DeliveryService $service ): void {
+		if ( ! $this->is_domestic_service( $service ) ) {
+			return;
+		}
+		$variants = $this->domestic_tariff_variants( $service );
+		?>
+		<form method="post" style="margin-top:16px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="save_tariffs">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+		<table class="widefat striped">
+			<thead><tr><th>Включен</th><th>Сортировка</th><th>Код object</th><th>Название в checkout</th><th>Тип доставки</th><th>Мин. вес, г</th><th>Макс. вес, г</th><th>Объявленная ценность</th><th>Комментарий администратора</th></tr></thead>
+			<tbody>
+				<?php foreach ( $variants as $variant ) : ?>
+					<tr>
+						<td><input type="checkbox" name="tariff_enabled[<?php echo esc_attr( (string) $variant->object_code ); ?>]" value="1" <?php checked( $variant->enabled ); ?>></td>
+						<td><input class="small-text" name="tariff_sort[<?php echo esc_attr( (string) $variant->object_code ); ?>]" value="<?php echo esc_attr( (string) $variant->sort_order ); ?>"></td>
+						<td><?php echo esc_html( (string) $variant->object_code ); ?></td>
+						<td><input class="regular-text" name="tariff_title[<?php echo esc_attr( (string) $variant->object_code ); ?>]" value="<?php echo esc_attr( $variant->title ); ?>"></td>
+						<td><?php echo esc_html( DeliveryType::COURIER === $variant->delivery_type ? 'Курьер' : 'До отделения' ); ?></td>
+						<td><input class="small-text" type="number" min="0" name="tariff_min_weight_g[<?php echo esc_attr( (string) $variant->object_code ); ?>]" value="<?php echo esc_attr( null === $variant->min_weight_g ? '' : (string) $variant->min_weight_g ); ?>"></td>
+						<td><input class="small-text" type="number" min="0" name="tariff_max_weight_g[<?php echo esc_attr( (string) $variant->object_code ); ?>]" value="<?php echo esc_attr( null === $variant->max_weight_g ? '' : (string) $variant->max_weight_g ); ?>"></td>
+						<td><?php echo esc_html( $variant->requires_declared_value ? ( $variant->always_available ? 'ОЦ, всегда доступен' : 'ОЦ' ) : 'Нет' ); ?></td>
+						<td><input class="regular-text" name="tariff_admin_comment[<?php echo esc_attr( (string) $variant->object_code ); ?>]" value="<?php echo esc_attr( $variant->admin_comment ); ?>"></td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
+		<?php submit_button( __( 'Сохранить тарифы', 'walls-delivery-calc' ) ); ?>
+		</form>
+		<p><?php echo esc_html__( 'Лимиты веса можно оставить пустыми. Расчет использует вес товаров с учетом настроек упаковки службы; pack для API всегда равен 99.', 'walls-delivery-calc' ); ?></p>
+		<?php
 	}
 
 	private function render_rules_tab( DeliveryService $service ): void {
@@ -604,6 +668,65 @@ final class DeliveryServicesAdminPage {
 		return array_merge( $defaults, $saved );
 	}
 
+	/**
+	 * @return array<int,\WallsShop\WDC\Carriers\RussianPost\DomesticTariffVariant>
+	 */
+	private function domestic_tariff_variants( DeliveryService $service ): array {
+		$defaults = ( new RussianPostDomesticTariffVariantResolver() )->defaults();
+		$saved = $this->settings instanceof DeliveryServiceSettingsRepository && null !== $service->id ? $this->settings->get_setting( (int) $service->id, 'tariff_variants', array() ) : array();
+		if ( ! is_array( $saved ) || array() === $saved ) {
+			return $defaults;
+		}
+		$by_code = array();
+		foreach ( $saved as $row ) {
+			if ( is_array( $row ) && isset( $row['object_code'] ) ) {
+				$by_code[ (int) $row['object_code'] ] = $row;
+			}
+		}
+
+		return array_map(
+			static fn ( $variant ) => isset( $by_code[ $variant->object_code ] )
+				? \WallsShop\WDC\Carriers\RussianPost\DomesticTariffVariant::from_array( array_merge( $variant->to_array(), $by_code[ $variant->object_code ] ) )
+				: $variant,
+			$defaults
+		);
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function sanitize_domestic_tariff_variants_from_post(): array {
+		$enabled = is_array( $_POST['tariff_enabled'] ?? null ) ? wp_unslash( $_POST['tariff_enabled'] ) : array();
+		$sort = is_array( $_POST['tariff_sort'] ?? null ) ? wp_unslash( $_POST['tariff_sort'] ) : array();
+		$title = is_array( $_POST['tariff_title'] ?? null ) ? wp_unslash( $_POST['tariff_title'] ) : array();
+		$min_weight = is_array( $_POST['tariff_min_weight_g'] ?? null ) ? wp_unslash( $_POST['tariff_min_weight_g'] ) : array();
+		$max_weight = is_array( $_POST['tariff_max_weight_g'] ?? null ) ? wp_unslash( $_POST['tariff_max_weight_g'] ) : array();
+		$admin_comment = is_array( $_POST['tariff_admin_comment'] ?? null ) ? wp_unslash( $_POST['tariff_admin_comment'] ) : array();
+		return array_map(
+			static function ( $variant ) use ( $enabled, $sort, $title, $min_weight, $max_weight, $admin_comment ): array {
+				$data = $variant->to_array();
+				$code = (string) $variant->object_code;
+				$data['enabled'] = isset( $enabled[ $code ] );
+				$data['sort_order'] = max( 0, (int) ( $sort[ $code ] ?? $variant->sort_order ) );
+				$custom_title = isset( $title[ $code ] ) ? sanitize_text_field( (string) $title[ $code ] ) : $variant->title;
+				$data['title'] = '' !== trim( $custom_title ) ? $custom_title : $variant->title;
+				$data['min_weight_g'] = isset( $min_weight[ $code ] ) && '' !== trim( (string) $min_weight[ $code ] ) ? max( 0, (int) $min_weight[ $code ] ) : null;
+				$data['max_weight_g'] = isset( $max_weight[ $code ] ) && '' !== trim( (string) $max_weight[ $code ] ) ? max( 0, (int) $max_weight[ $code ] ) : null;
+				$data['admin_comment'] = isset( $admin_comment[ $code ] ) ? sanitize_text_field( (string) $admin_comment[ $code ] ) : '';
+
+				return $data;
+			},
+			( new RussianPostDomesticTariffVariantResolver() )->defaults()
+		);
+	}
+
+	private function is_domestic_service( ?DeliveryService $service ): bool {
+		return $service instanceof DeliveryService && (
+			RussianPostDomesticSettings::CARRIER_KEY === $service->carrier_key
+			|| in_array( $service->service_key, array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY, RussianPostDomesticSettings::COURIER_SERVICE_KEY ), true )
+		);
+	}
+
 	private function service_tab_url( DeliveryService $service, string $tab ): string {
 		return $this->service_tab_url_by_key( $service->service_key, $tab );
 	}
@@ -657,6 +780,10 @@ final class DeliveryServicesAdminPage {
 	 * @return array<string,mixed>
 	 */
 	private function simulate_service_rules( DeliveryService $service, array $input, array $rules ): array {
+		if ( $this->is_domestic_service( $service ) ) {
+			return $this->simulate_domestic_service_rules( $service, $input, $rules );
+		}
+
 		if ( RussianPostSettings::SERVICE_KEY !== $service->service_key || ! $this->russian_post_carrier instanceof RussianPostInternationalCarrier || ! $this->rule_builder instanceof RuleAppliedRateBuilder ) {
 			return array( 'notice' => __( 'Симуляция для этой службы пока не поддерживается.', 'walls-delivery-calc' ) );
 		}
@@ -683,7 +810,7 @@ final class DeliveryServicesAdminPage {
 			);
 		}
 
-		$context = new RuleEvaluationContext( Money::from_rubles( $order_total ), $rate->price, $package, $request->destination, $rate->delivery_type, '', $date, array(), array( 'original_delivery_days' => $rate->delivery_days?->min_days ?? 0 ) );
+		$context = new RuleEvaluationContext( Money::from_rubles( $order_total ), $rate->price, $package, $request->destination, $rate->delivery_type, '', $date, array(), array( 'original_delivery_days' => $rate->delivery_days?->min_days ?? 0, 'original_delivery_min_days' => $rate->delivery_days?->min_days, 'original_delivery_max_days' => $rate->delivery_days?->max_days ) );
 		$applied = $this->rule_builder->apply( $rate, $context, $rules );
 		$final = $applied['rate'];
 		$processed = $this->manager instanceof DeliveryServiceManager ? $this->manager->post_process_rate( $final, $service ) : $final;
@@ -700,5 +827,76 @@ final class DeliveryServicesAdminPage {
 			'audit' => $applied['audit'],
 			'notice' => array() === $rules ? __( 'Для службы не настроены собственные правила.', 'walls-delivery-calc' ) : '',
 		);
+	}
+
+	private function simulate_domestic_service_rules( DeliveryService $service, array $input, array $rules ): array {
+		if ( ! $this->russian_post_domestic_carrier instanceof RussianPostDomesticCarrier || ! $this->rule_builder instanceof RuleAppliedRateBuilder ) {
+			return array( 'notice' => __( 'Симуляция domestic-службы пока не поддерживается.', 'walls-delivery-calc' ) );
+		}
+
+		$weight = max( 0, (int) ( $input['weight'] ?? 1000 ) );
+		$order_total = (float) str_replace( ',', '.', (string) ( $input['order_total'] ?? 1000 ) );
+		$date = sanitize_text_field( (string) ( $input['date'] ?? gmdate( 'Y-m-d' ) ) );
+		$postcode = preg_replace( '/\D+/', '', (string) ( $input['postal_code'] ?? '' ) ) ?? '';
+		$city = sanitize_text_field( (string) ( $input['city'] ?? '' ) );
+		$fias_id = sanitize_text_field( (string) ( $input['location_fias_id'] ?? '' ) );
+		$item = new PackageItem( 'SIM', 'Simulation', 1, Money::from_rubles( $order_total ), Money::from_rubles( $order_total ), $weight );
+		$package = Package::from_items( array( $item ), 0, Money::from_rubles( $order_total ), Money::from_rubles( $order_total ) );
+		$packaging = $this->packaging_calculator instanceof PackagingWeightCalculator
+			? $this->packaging_calculator->apply_to_package( $package, $service )
+			: new PackagingApplicationResult( $package->weight_g, 0, $package->get_total_weight_g(), $service->include_packaging_weight, $service->packaging_weight_mode, $package );
+		$package = $packaging->package;
+		$request = new QuoteRequest(
+			'RU',
+			new Address( country_code: 'RU', city: $city, settlement: $city, postcode: $postcode, raw_address: $city, fias_id: $fias_id ),
+			$package,
+			'',
+			Money::from_rubles( $order_total ),
+			$date,
+			array(
+				'service_key' => $service->service_key,
+				'postcode' => $postcode,
+				'fias_id' => $fias_id,
+				'city' => $city,
+			)
+		);
+		$quote = $this->russian_post_domestic_carrier->quote( $request );
+		$rows = array();
+		$audit = array();
+		foreach ( $quote->rates as $rate ) {
+			if ( ! $rate instanceof DeliveryRate ) {
+				continue;
+			}
+			$context = new RuleEvaluationContext( Money::from_rubles( $order_total ), $rate->price, $package, $request->destination, $rate->delivery_type, '', $date, array(), array_merge( $rate->meta, array( 'original_delivery_days' => $rate->delivery_days->min_days ?? $rate->delivery_days->max_days, 'original_delivery_min_days' => $rate->delivery_days->min_days, 'original_delivery_max_days' => $rate->delivery_days->max_days ) ) );
+			$applied = $this->rule_builder->apply( $rate, $context, $rules );
+			$processed = $this->manager instanceof DeliveryServiceManager ? $this->manager->post_process_rate( $applied['rate'], $service ) : $applied['rate'];
+			$rows[] = array(
+				'object_code' => $rate->tariff_key,
+				'title' => $rate->tariff_name,
+				'api_price' => $rate->price->get_rubles() . ' ' . $rate->price->get_currency(),
+				'api_delivery_days' => $this->range_label( $rate->delivery_days ),
+				'final_price' => $processed->price->get_rubles() . ' ' . $processed->price->get_currency(),
+				'final_delivery_days' => $this->range_label( $processed->delivery_days ),
+			);
+			$audit[ $rate->tariff_key ] = $applied['audit'];
+		}
+
+		return array(
+			'tariffs' => $rows,
+			'products_weight_g' => $packaging->original_products_weight_g,
+			'packaging_weight_g' => $packaging->packaging_weight_g,
+			'package_weight_with_packaging_g' => $packaging->final_package_weight_g,
+			'packaging_weight_mode' => $packaging->packaging_weight_mode,
+			'source' => $quote->source . ( '' !== $quote->error_code ? ' / ' . $quote->error_code : '' ),
+			'skipped_tariffs' => is_array( $quote->raw_reference['skipped_tariffs'] ?? null ) ? $quote->raw_reference['skipped_tariffs'] : array(),
+			'audit' => $audit,
+			'notice' => array() === $rows ? ( $quote->error_message ?: $quote->error_code ) : '',
+		);
+	}
+
+	private function range_label( DateRange $range ): string {
+		$label = DeliveryDaysFormatter::format( $range );
+
+		return '' !== $label ? $label : '-';
 	}
 }
