@@ -38,7 +38,7 @@ final class RussianPostPassportPointNormalizer {
 		$type = $this->point_type( (string) ( $item['type'] ?? '' ), $import_type );
 		$identity = self::CARRIER_KEY . '|' . $postcode . '|' . round( (float) $lat, 7 ) . '|' . round( (float) $lng, 7 ) . '|' . $address_full;
 		$source_hash = sha1( $identity );
-		$point_code = '' !== $postcode ? $postcode : $source_hash;
+		$point_code = '' !== $postcode ? $postcode . '-' . substr( $source_hash, 0, 10 ) : $source_hash;
 		$work_time = $this->work_time_string( $item['workTime'] ?? null );
 
 		return array(

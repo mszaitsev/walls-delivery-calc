@@ -22,6 +22,7 @@ function sanitize_key( mixed $value ): string { return preg_replace( '/[^a-z0-9_
 function wp_unslash( mixed $value ): mixed { return $value; }
 function add_query_arg( array $args, string $url ): string { return $url . '?' . http_build_query( $args ); }
 function wp_tempnam( string $filename = '' ): string { return tempnam( sys_get_temp_dir(), 'wdc-rp-' ) ?: ''; }
+function wp_delete_file( string $file ): bool { $GLOBALS['wdc_deleted_files'][] = $file; return @unlink( $file ); }
 function is_wp_error( mixed $value ): bool { return false; }
 function wp_remote_retrieve_response_code( array $response ): int { return (int) ( $response['response']['code'] ?? 0 ); }
 function wp_remote_retrieve_body( array $response ): string { return (string) ( $response['body'] ?? '' ); }
@@ -193,12 +194,28 @@ $item = array(
 );
 $row = $normalizer->normalize( $item, 'PVZ', '2026-05-27 12:00:00' );
 rp_pickup_assert( is_array( $row ) && 'PVZ' === $row['point_type'], 'Normalizer must detect PVZ.' );
+rp_pickup_assert( str_starts_with( (string) $row['point_code'], '630001-' ) && '630001' === $row['postcode'], 'Normalizer must keep postcode separate and make point_code postcode-hash.' );
 rp_pickup_assert( 'Новосибирск, Ленина, 1' === $row['address'], 'Normalizer must prefer addressFias.ads.' );
 rp_pickup_assert( 10000 === $row['weight_limit_grams'] && true === $row['accepts_card'] && false === $row['functionality_checking'], 'Normalizer must map ecom options.' );
 rp_pickup_assert( null === $normalizer->normalize( array( 'address' => array() ), 'OPS' ), 'Normalizer must skip points without coordinates.' );
 rp_pickup_assert( $row['source_hash'] === $normalizer->normalize( $item, 'PVZ', '2026-05-27 12:05:00' )['source_hash'], 'Source hash must be stable.' );
 rp_pickup_assert( 'APS' === $normalizer->normalize( array_merge( $item, array( 'type' => 'Почтомат', 'address' => array( 'index' => '630002' ) ) ), 'ALL' )['point_type'], 'Normalizer must detect APS.' );
 rp_pickup_assert( 'OPS' === $normalizer->normalize( array_merge( $item, array( 'type' => 'ОПС', 'address' => array( 'index' => '630003' ) ) ), 'OPS' )['point_type'], 'Normalizer must detect OPS.' );
+
+$same_postcode_other_point = $normalizer->normalize(
+	array_merge(
+		$item,
+		array(
+			'address' => array( 'index' => '630001', 'region' => 'Новосибирская область', 'place' => 'Новосибирск', 'street' => 'Советская', 'house' => '2' ),
+			'addressFias' => array( 'ads' => 'Новосибирск, Советская, 2' ),
+			'latitude' => 55.2,
+			'longitude' => 82.8,
+		)
+	),
+	'PVZ',
+	'2026-05-27 12:00:00'
+);
+rp_pickup_assert( is_array( $same_postcode_other_point ) && $row['point_code'] !== $same_postcode_other_point['point_code'], 'Points with one postcode must get different point_code values.' );
 
 $repo = new PickupPointRepository( $GLOBALS['wpdb'] );
 $stats = $repo->upsert_passport_batch( 'russian_post', array( $row ) );
@@ -210,6 +227,11 @@ rp_pickup_assert( 1 === $repo->count_active( 'russian_post' ) && array( 'PVZ' =>
 rp_pickup_assert( $repo->find_by_id( 1 ) !== null && count( $repo->search_points( 'russian_post', '630001' ) ) === 1, 'Find/search methods must work.' );
 $GLOBALS['wpdb']->pickup_rows[0]['last_seen_at'] = '2026-05-26 10:00:00';
 rp_pickup_assert( 1 === $repo->mark_missing_inactive( 'russian_post', '2026-05-27 12:00:00' ) && 0 === $repo->count_active( 'russian_post' ), 'Missing points must be marked inactive.' );
+
+$GLOBALS['wpdb']->pickup_rows = array();
+$GLOBALS['wpdb']->insert_id = 0;
+$same_postcode_stats = $repo->upsert_passport_batch( 'russian_post', array( $row, $same_postcode_other_point ) );
+rp_pickup_assert( 2 === $same_postcode_stats['inserted'] && 0 === $same_postcode_stats['updated'] && 2 === count( $GLOBALS['wpdb']->pickup_rows ), 'Two points with one postcode must insert two rows instead of overwriting.' );
 
 $settings = new RussianPostOtpravkaApiSettings( new SettingsRepository(), new EncryptionService() );
 $settings->save_from_admin( array( 'russian_post_otpravka_access_token' => 'token', 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_password' => 'password', 'russian_post_pickup_unload_type' => 'ALL' ) );
@@ -241,6 +263,7 @@ delete_transient( 'wdc_russian_post_pickup_import_lock' );
 $result = $importer->import( 'ALL' );
 rp_pickup_assert( ! empty( $result['success'] ) && 1 === $result['parsed'] && 1 === $result['inserted'], 'Importer must parse ZIP passportElements and insert points.' );
 rp_pickup_assert( '' !== $settings->last_success_at(), 'last_success_at must update only after successful import.' );
+rp_pickup_assert( ! empty( $GLOBALS['wdc_deleted_files'] ) && ! is_file( end( $GLOBALS['wdc_deleted_files'] ) ), 'Importer must delete temporary ZIP file after reading.' );
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 rp_pickup_assert( str_contains( $admin_source, 'russian_post_otpravka_access_token" value=""' ) && str_contains( $admin_source, 'has_access_token()' ), 'Admin must not render AccessToken back into HTML.' );

@@ -70,6 +70,7 @@ final class RussianPostPickupImporter {
 		}
 
 		$this->lock();
+		$temp_file = '';
 		try {
 			$download = $this->client->download_passport_zip( $type );
 			if ( empty( $download['success'] ) ) {
@@ -121,6 +122,7 @@ final class RussianPostPickupImporter {
 
 			return $this->finish( $result, true );
 		} finally {
+			$this->delete_temp_file( $temp_file );
 			$this->unlock();
 		}
 	}
@@ -158,6 +160,17 @@ final class RussianPostPickupImporter {
 			return;
 		}
 		delete_option( self::LOCK_KEY );
+	}
+
+	private function delete_temp_file( string $temp_file ): void {
+		if ( '' === $temp_file || ! is_file( $temp_file ) ) {
+			return;
+		}
+		if ( function_exists( 'wp_delete_file' ) ) {
+			wp_delete_file( $temp_file );
+			return;
+		}
+		@unlink( $temp_file );
 	}
 
 	private function read_first_payload_from_zip( string $temp_file ): string {

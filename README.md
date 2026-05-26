@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.00.
+Version: 0.22.01.
+
+Version 0.22.01 fixes Russian Post pickup import identity and temp-file cleanup: `point_code` is now unique per concrete point even when several objects share one postcode, and imported ZIP files are deleted after reading.
 
 Version 0.22.00 adds the production foundation for a local Russian Post pickup-point directory. It extends `wdc_pickup_points`, adds shared API "Отправка" credentials/client classes, imports `unloading-passport` ZIP data through `RussianPostPickupImporter`, exposes manual import/status on the domestic pickup service tab, and keeps checkout map/REST/selected-point persistence for the next stage.
 

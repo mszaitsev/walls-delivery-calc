@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.00.
+Version: 0.22.01.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 
@@ -10,7 +10,7 @@ The existing `wdc_pickup_points` table is extended by `database/migrations/0021_
 
 New columns store import identity, last-seen state, address parts, FIAS/GAR ids, geohash, JSON snapshots in `LONGTEXT`, e-commerce options, weight/size limits, and payment/service flags. The existing `active` column is used as `is_active`; disappeared points are marked `active=0` and are not physically deleted. `raw_reference` stores the raw imported item JSON snapshot.
 
-Russian Post points use `carrier_key=russian_post` because the directory belongs to the carrier as a whole, not only to `russian_post_domestic`.
+Russian Post points use `carrier_key=russian_post` because the directory belongs to the carrier as a whole, not only to `russian_post_domestic`. `postcode` is stored separately; `point_code` is `postcode . '-' . substr(source_hash, 0, 10)` when a postcode is present, otherwise `source_hash`, so several objects with one postcode do not overwrite each other.
 
 ## API Layer
 
