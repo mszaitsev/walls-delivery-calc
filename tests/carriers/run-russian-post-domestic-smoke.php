@@ -81,9 +81,6 @@ function wp_remote_get( string $url, array $args = array() ): array {
 		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'errorcode' => 42, 'errormsg' => 'bad domestic request' ) ) );
 	}
 	$object = (int) ( $params['object'] ?? 0 );
-	if ( 27030 === $object ) {
-		return array( 'response' => array( 'code' => 400 ), 'body' => json_encode( array( 'errorcode' => 27030, 'errormsg' => 'standard parcel fixture error' ) ) );
-	}
 	return array(
 		'response' => array( 'code' => 200 ),
 		'body' => json_encode(
@@ -163,6 +160,24 @@ $settings->set(
 );
 $postcode_client = new DaDataPostcodeClient( new DaDataTokenPool( $settings, $encryption ), new Logger(), 3 );
 $carrier = new RussianPostDomesticCarrier( $domestic_settings, new RussianPostDomesticApiClient( $domestic_settings, new Logger() ), new RussianPostDomesticTariffVariantResolver(), new Logger(), $postcode_client );
+$default_objects = array_map( static fn( DomesticTariffVariant $variant ): int => $variant->object_code, ( new RussianPostDomesticTariffVariantResolver() )->defaults() );
+rpd_assert( ! array_intersect( array( 27030, 27020, 28030, 28020 ), $default_objects ), 'Deprecated domestic variants must not be created by defaults.' );
+$legacy_settings = $domestic_settings->all( RussianPostDomesticSettings::PICKUP_SERVICE_KEY );
+$legacy_settings['tariff_variants'] = array(
+	DomesticTariffVariant::from_array(
+		array(
+			'object_code' => 27030,
+			'title' => 'Legacy Посылка стандарт',
+			'enabled' => true,
+			'delivery_type' => DeliveryType::PICKUP,
+			'requires_declared_value' => false,
+			'always_available' => false,
+			'sort_order' => 1,
+		)
+	)->to_array(),
+);
+$legacy_variants = ( new RussianPostDomesticTariffVariantResolver() )->variants( $legacy_settings, DeliveryType::PICKUP, 1000 );
+rpd_assert( 1 === count( $legacy_variants ) && 27030 === $legacy_variants[0]->object_code, 'Legacy saved domestic tariff variants must continue to load from service settings JSON.' );
 $item = new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), 1000 );
 $package = Package::from_items( array( $item ), 0, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) );
 $request = new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630099' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY ) );
@@ -171,12 +186,9 @@ $quote = $carrier->quote( $request );
 rpd_assert( $quote->has_available_rates(), 'Domestic pickup quote must return rates when postcode exists.' );
 $objects = array_map( static fn( $rate ): string => $rate->tariff_key, $quote->rates );
 rpd_assert( in_array( '4030', $objects, true ) && in_array( '23030', $objects, true ), 'Non-declared pickup variants must work when insurance is disabled.' );
-rpd_assert( ! in_array( '4020', $objects, true ) && ! in_array( '27020', $objects, true ) && ! in_array( '23020', $objects, true ), 'Declared-value pickup variants must be hidden when insurance is disabled.' );
+rpd_assert( ! in_array( '27030', $objects, true ) && ! in_array( '4020', $objects, true ) && ! in_array( '27020', $objects, true ) && ! in_array( '23020', $objects, true ), 'Deprecated/default-declared pickup variants must be hidden when insurance is disabled.' );
 rpd_assert( in_array( '54020', $objects, true ), '54020 must remain always available.' );
 rpd_assert( 99 === (int) $GLOBALS['wdc_rpd_requests'][0]['pack'], 'Domestic tariff requests must force pack=99.' );
-rpd_assert( 27030 === (int) $GLOBALS['wdc_rpd_requests'][0]['object'] && 99 === (int) $GLOBALS['wdc_rpd_requests'][0]['pack'], '27030 request must force pack=99.' );
-$skipped_27030 = $quote->raw_reference['skipped_tariffs'][0] ?? array();
-rpd_assert( 27030 === (int) ( $skipped_27030['object_code'] ?? 0 ) && 400 === (int) ( $skipped_27030['http_code'] ?? 0 ) && 27030 === (int) ( $skipped_27030['errorcode'] ?? 0 ) && str_contains( (string) ( $skipped_27030['errormsg'] ?? '' ), 'standard parcel fixture error' ) && str_contains( (string) ( $skipped_27030['raw_error_body'] ?? '' ), 'standard parcel fixture error' ) && 99 === (int) ( $skipped_27030['request_params']['pack'] ?? 0 ), 'Skipped 27030 diagnostic must expose object, request params, HTTP/API error body, and pack=99.' );
 rpd_assert( ! isset( $GLOBALS['wdc_rpd_requests'][0]['sumoc'] ), 'Non-declared variants must not send sumoc.' );
 rpd_assert( ! empty( $quote->rates[0]->meta['no_pickup_selection'] ), 'Pickup variants must skip pickup selector.' );
 $item_summary = $quote->rates[0]->meta['items_summary'][0] ?? array();
@@ -186,20 +198,20 @@ $settings->set( 'russian_post_domestic', array_merge( $settings->all()['russian_
 $GLOBALS['wdc_rpd_requests'] = array();
 $quote = $carrier->quote( $request );
 $objects = array_map( static fn( $rate ): string => $rate->tariff_key, $quote->rates );
-rpd_assert( in_array( '4020', $objects, true ) && in_array( '27020', $objects, true ) && in_array( '23020', $objects, true ), 'Declared-value variants must work when insurance is enabled.' );
+rpd_assert( in_array( '4020', $objects, true ) && in_array( '23020', $objects, true ) && ! in_array( '27020', $objects, true ), 'Declared-value variants must work when insurance is enabled and deprecated 27020 must stay out of defaults.' );
 rpd_assert( in_array( '54020', $objects, true ), '54020 must remain available when insurance is enabled.' );
 rpd_assert( isset( $GLOBALS['wdc_rpd_requests'][0]['sumoc'] ), 'Declared-value variants must send sumoc.' );
 
 $settings->set( 'russian_post_domestic', array_merge( $settings->all()['russian_post_domestic'], array( 'insurance_enabled' => false ) ) );
 $courier = $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630099' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::COURIER_SERVICE_KEY ) ) );
 $courier_objects = array_map( static fn( $rate ): string => $rate->tariff_key, $courier->rates );
-rpd_assert( in_array( '41030', $courier_objects, true ) && in_array( '52030', $courier_objects, true ) && in_array( '28030', $courier_objects, true ) && in_array( '7030', $courier_objects, true ), '41030, 52030, 28030, and 7030 must be available without insurance.' );
+rpd_assert( in_array( '41030', $courier_objects, true ) && in_array( '52030', $courier_objects, true ) && in_array( '7030', $courier_objects, true ) && ! in_array( '28030', $courier_objects, true ), '41030, 52030, and 7030 must be available without insurance; deprecated 28030 must stay out of defaults.' );
 rpd_assert( ! in_array( '28020', $courier_objects, true ) && ! in_array( '7020', $courier_objects, true ), 'Declared-value EMS courier variants must be hidden without insurance.' );
 rpd_assert( DeliveryType::COURIER === $courier->rates[0]->delivery_type && $courier->rates[0]->requires_courier_address, 'Courier variants must use courier delivery type.' );
 $settings->set( 'russian_post_domestic', array_merge( $settings->all()['russian_post_domestic'], array( 'insurance_enabled' => true ) ) );
 $courier_insured = $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630099' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::COURIER_SERVICE_KEY ) ) );
 $courier_insured_objects = array_map( static fn( $rate ): string => $rate->tariff_key, $courier_insured->rates );
-rpd_assert( in_array( '28020', $courier_insured_objects, true ) && in_array( '7020', $courier_insured_objects, true ), 'Declared-value EMS courier variants must be available with insurance.' );
+rpd_assert( in_array( '7020', $courier_insured_objects, true ) && ! in_array( '28020', $courier_insured_objects, true ), 'Declared-value EMS courier variants must be available with insurance and deprecated 28020 must stay out of defaults.' );
 $settings->set( 'russian_post_domestic', array_merge( $settings->all()['russian_post_domestic'], array( 'insurance_enabled' => false ) ) );
 
 $GLOBALS['wdc_rpd_requests'] = array();
@@ -212,8 +224,6 @@ rpd_assert( ! $missing->has_available_rates() && 'postcode_required' === $missin
 $api_client = new RussianPostDomesticApiClient( $domestic_settings, new Logger() );
 $api_error = $api_client->calculate_tariff( array( 'object' => 4030, 'from' => '630005', 'to' => '630099', 'weight' => 1000, 'date' => '20260526', 'pack' => 99, 'force_errorcode' => 1 ) );
 rpd_assert( empty( $api_error['success'] ) && 'api_error' === (string) ( $api_error['error_code'] ?? '' ), 'Domestic API client must treat errorcode/errormsg as API errors.' );
-$http_error = $api_client->calculate_tariff( array( 'object' => 27030, 'from' => '630005', 'to' => '630099', 'weight' => 1000, 'date' => '20260526', 'pack' => 99 ) );
-rpd_assert( empty( $http_error['success'] ) && 400 === (int) ( $http_error['http_code'] ?? 0 ) && str_contains( (string) ( $http_error['raw']['raw_body'] ?? '' ), 'standard parcel fixture error' ) && 27030 === (int) ( $http_error['raw']['errorcode'] ?? 0 ), 'Domestic API client must keep raw and decoded HTTP error bodies.' );
 $variant_with_comment = DomesticTariffVariant::from_array( array_merge( ( new RussianPostDomesticTariffVariantResolver() )->defaults()[0]->to_array(), array( 'admin_comment' => 'internal note' ) ) );
 rpd_assert( 'internal note' === $variant_with_comment->admin_comment && 'internal note' === $variant_with_comment->to_array()['admin_comment'], 'Domestic tariff admin_comment must save and load in tariff variant JSON.' );
 rpd_assert( ! array_key_exists( 'admin_comment', $quote->rates[0]->meta['domestic_tariff_variant'] ?? array() ), 'Domestic tariff admin_comment must not be exposed to checkout/order runtime meta.' );

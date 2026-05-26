@@ -61,7 +61,8 @@ final class OrderDeliveryMetabox {
 
 		$rows = array(
 			'Служба доставки' => (string) ( $calculation['service_title'] ?? '' ),
-			'Способ доставки' => $this->shipping_method_label( $calculation ),
+			'Выбранный тариф' => (string) ( $calculation['selected_tariff_title'] ?? '' ),
+			'Тип доставки' => $this->delivery_type_label( (string) ( $calculation['delivery_type'] ?? '' ) ),
 			'Страна назначения' => $this->country_label( $destination ),
 			'Вес товаров' => $this->grams( $package['products_weight_g'] ?? null ),
 			'Вес упаковки' => $this->grams( $package['packaging_weight_g'] ?? null ),
@@ -78,7 +79,6 @@ final class OrderDeliveryMetabox {
 			$rows['Fallback text']   = (string) ( $result['fallback_text'] ?? '' );
 		} else {
 			$rows['Базовая стоимость API'] = $this->rubles( $api['api_base_price_rub'] ?? null );
-			$rows['НДС'] = $this->vat_label( $api );
 			$api_delivery_days = $this->api_delivery_days_label( $api );
 			if ( '' !== $api_delivery_days ) {
 				$rows['Срок по API'] = $api_delivery_days;
@@ -228,17 +228,6 @@ final class OrderDeliveryMetabox {
 		};
 	}
 
-	/**
-	 * @param array<string,mixed> $calculation
-	 */
-	private function shipping_method_label( array $calculation ): string {
-		if ( 'russian_post_worldwide_parcel' === (string) ( $calculation['service_key'] ?? '' ) ) {
-			return 'международная доставка Почтой России';
-		}
-
-		return (string) ( $calculation['rate_id'] ?? '' );
-	}
-
 	private function country_label( array $destination ): string {
 		$name = trim( (string) ( $destination['country_name'] ?? '' ) );
 		$code = trim( (string) ( $destination['country_code'] ?? '' ) );
@@ -259,20 +248,6 @@ final class OrderDeliveryMetabox {
 		$formatted = str_ends_with( $formatted, '.00' ) ? substr( $formatted, 0, -3 ) : $formatted;
 
 		return $formatted . ' руб.';
-	}
-
-	/**
-	 * @param array<string,mixed> $api
-	 */
-	private function vat_label( array $api ): string {
-		if ( ! array_key_exists( 'api_price_has_vat', $api ) && ! array_key_exists( 'vat_rate', $api ) ) {
-			return '';
-		}
-
-		$mode = ! empty( $api['api_price_has_vat'] ) ? 'включен' : 'добавлен';
-		$rate = is_numeric( $api['vat_rate'] ?? null ) ? ', ставка ' . (string) $api['vat_rate'] : '';
-
-		return $mode . $rate;
 	}
 
 	/**

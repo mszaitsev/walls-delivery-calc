@@ -8,11 +8,11 @@ $defaults = array(
 	'sumoc'   => '500000',
 	'pack'    => '99',
 	'packs'   => '',
-	'objects' => '27030,27020,4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020,28030,28020,7030,7020',
+	'objects' => '4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020,7030,7020',
 	'date'    => date( 'Ymd' ),
 );
 
-$declared_value_objects = array( '27020', '4020', '47020', '54020', '23020', '24020' );
+$declared_value_objects = array( '4020', '47020', '54020', '23020', '24020', '7020' );
 $options                = rpd_parse_cli_options( $argv, $defaults );
 $objects                = rpd_parse_objects( $options['objects'] );
 $packs                  = rpd_parse_packs( (string) $options['packs'] );

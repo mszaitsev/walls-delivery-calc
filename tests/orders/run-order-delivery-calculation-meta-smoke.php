@@ -274,6 +274,8 @@ ob_start();
 ( new OrderDeliveryMetabox() )->render( $domestic_order );
 $domestic_html = (string) ob_get_clean();
 order_meta_smoke_assert( str_contains( $domestic_html, 'Срок по API' ) && str_contains( $domestic_html, '1 день' ) && str_contains( $domestic_html, 'Итоговый срок' ) && str_contains( $domestic_html, '3 дня' ) && ! str_contains( $domestic_html, '3 дн.' ), 'Domestic order metabox must render API and final formatted Russian delivery days.' );
+order_meta_smoke_assert( str_contains( $domestic_html, 'Служба доставки' ) && str_contains( $domestic_html, 'Выбранный тариф' ) && str_contains( $domestic_html, 'Тип доставки' ), 'Domestic order metabox must show public service, tariff, and delivery type labels.' );
+order_meta_smoke_assert( ! str_contains( $domestic_html, 'russian_post_domestic_pickup' ) && ! str_contains( $domestic_html, 'api_price_has_vat' ) && ! str_contains( $domestic_html, 'НДС' ), 'Domestic order metabox must hide technical service key and VAT flag.' );
 
 ob_start();
 ( new OrderDeliveryMetabox() )->render( $order );
@@ -282,6 +284,7 @@ foreach ( array( 'Польша (PL)', 'Вес товаров', '5 338 руб.', 
 	order_meta_smoke_assert( str_contains( $html, $needle ), 'Order metabox must render calculation field: ' . $needle );
 }
 order_meta_smoke_assert( ! str_contains( $html, '0 дн.' ), 'Order metabox must not render empty delivery days.' );
+order_meta_smoke_assert( ! str_contains( $html, 'НДС' ) && ! str_contains( $html, 'api_price_has_vat' ), 'Order metabox must not render VAT status.' );
 
 $fallback_text = 'Наиболее вероятно, мы не сможем доставить посылку в вашу страну.';
 $fallback_rate = wdc_order_meta_rate(

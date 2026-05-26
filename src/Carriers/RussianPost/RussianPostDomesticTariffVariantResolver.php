@@ -38,8 +38,6 @@ final class RussianPostDomesticTariffVariantResolver {
 	 */
 	public function defaults(): array {
 		$pickup = array(
-			array( 27030, 'Посылка стандарт', false ),
-			array( 27020, 'Посылка стандарт с объявленной ценностью', true ),
 			array( 4030, 'Посылка нестандартная', false ),
 			array( 4020, 'Посылка нестандартная с объявленной ценностью', true ),
 			array( 47030, 'Посылка 1 класса', false ),
@@ -51,8 +49,6 @@ final class RussianPostDomesticTariffVariantResolver {
 		$courier = array(
 			array( 24030, 'Курьер онлайн', false ),
 			array( 24020, 'Курьер онлайн с объявленной ценностью', true ),
-			array( 28030, 'Посылка курьер EMS', false ),
-			array( 28020, 'Посылка курьер EMS с объявленной ценностью', true ),
 			array( 7030, 'EMS', false ),
 			array( 7020, 'EMS с объявленной ценностью', true ),
 			array( 41030, 'EMS РТ', false ),
