@@ -24,6 +24,8 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticApiClient;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
+use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiClient;
+use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
 use WallsShop\WDC\Carriers\Runtime\RussianPostDomesticCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
 use WallsShop\WDC\Checkout\Address\CheckoutAddressNormalizer;
@@ -97,6 +99,8 @@ use WallsShop\WDC\Locations\Storage\RegionRepository;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Pickup\Admin\PickupAdminPage;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPassportPointNormalizer;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 use WallsShop\WDC\Rules\Admin\RulesAdminPage;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
@@ -155,6 +159,10 @@ final class Plugin {
 		$this->container->register( RussianPostDomesticSettings::class, fn(): RussianPostDomesticSettings => new RussianPostDomesticSettings( $this->container->get( SettingsRepository::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
 		$this->container->register( RussianPostDomesticTariffVariantResolver::class, fn(): RussianPostDomesticTariffVariantResolver => new RussianPostDomesticTariffVariantResolver() );
 		$this->container->register( RussianPostDomesticApiClient::class, fn(): RussianPostDomesticApiClient => new RussianPostDomesticApiClient( $this->container->get( RussianPostDomesticSettings::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( RussianPostOtpravkaApiSettings::class, fn(): RussianPostOtpravkaApiSettings => new RussianPostOtpravkaApiSettings( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ) ) );
+		$this->container->register( RussianPostOtpravkaApiClient::class, fn(): RussianPostOtpravkaApiClient => new RussianPostOtpravkaApiClient( $this->container->get( RussianPostOtpravkaApiSettings::class ) ) );
+		$this->container->register( RussianPostPassportPointNormalizer::class, fn(): RussianPostPassportPointNormalizer => new RussianPostPassportPointNormalizer() );
+		$this->container->register( RussianPostPickupImporter::class, fn(): RussianPostPickupImporter => new RussianPostPickupImporter( $this->container->get( RussianPostOtpravkaApiSettings::class ), $this->container->get( RussianPostOtpravkaApiClient::class ), $this->container->get( PickupPointRepository::class ), $this->container->get( RussianPostPassportPointNormalizer::class ) ) );
 		$this->container->register( RussianPostCountryMappingRepository::class, fn(): RussianPostCountryMappingRepository => new RussianPostCountryMappingRepository() );
 		$this->container->register( RussianPostCountryMappingService::class, fn(): RussianPostCountryMappingService => new RussianPostCountryMappingService( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostApiClient::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( RussianPostCountryDirectory::class, fn(): RussianPostCountryDirectory => new RussianPostCountryDirectory( $this->container->get( RussianPostApiClient::class ), $this->container->get( Logger::class ), $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ), $this->container->get( RussianPostSettings::class ) ) );
@@ -368,12 +376,13 @@ final class Plugin {
 			PickupAdminPage::class,
 			fn(): PickupAdminPage => new PickupAdminPage(
 				$this->environment,
-				$this->container->get( PickupPointRepository::class )
+				$this->container->get( PickupPointRepository::class ),
+				$this->container->get( RussianPostOtpravkaApiSettings::class )
 			)
 		);
 		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ), $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( RussianPostSettings::class ) ) );
 		$this->container->register( RussianPostCountriesAdminPage::class, fn(): RussianPostCountriesAdminPage => new RussianPostCountriesAdminPage( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ) ) );
-		$this->container->register( DeliveryServicesAdminPage::class, fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceCountryRepository::class ), $this->container->get( RulesAdminPage::class ), $this->container->get( RuleRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ), $this->container->get( RussianPostSettings::class ), $this->container->get( RussianPostCountriesAdminPage::class ), $this->container->get( RussianPostInternationalCarrier::class ), $this->container->get( RuleAppliedRateBuilder::class ), $this->container->get( DeliveryServiceManager::class ), $this->container->get( PackagingWeightCalculator::class ), $this->container->get( RussianPostDomesticCarrier::class ) ) );
+		$this->container->register( DeliveryServicesAdminPage::class, fn(): DeliveryServicesAdminPage => new DeliveryServicesAdminPage( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceCountryRepository::class ), $this->container->get( RulesAdminPage::class ), $this->container->get( RuleRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ), $this->container->get( RussianPostSettings::class ), $this->container->get( RussianPostCountriesAdminPage::class ), $this->container->get( RussianPostInternationalCarrier::class ), $this->container->get( RuleAppliedRateBuilder::class ), $this->container->get( DeliveryServiceManager::class ), $this->container->get( PackagingWeightCalculator::class ), $this->container->get( RussianPostDomesticCarrier::class ), $this->container->get( RussianPostOtpravkaApiSettings::class ), $this->container->get( RussianPostPickupImporter::class ), $this->container->get( PickupPointRepository::class ) ) );
 		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox() );
 	}
 
@@ -408,6 +417,7 @@ final class Plugin {
 			$this->container->get( DeliveryServicesAdminPage::class )->register();
 			$this->container->get( OrderDeliveryMetabox::class )->register();
 		}
+		$this->container->get( RussianPostPickupImporter::class )->register();
 	}
 
 	public function boot_modules(): void {

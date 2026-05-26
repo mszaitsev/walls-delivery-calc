@@ -125,6 +125,188 @@ final class PickupPointRepository {
 	}
 
 	/**
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array{inserted:int,updated:int,skipped:int}
+	 */
+	public function upsert_passport_batch( string $carrier_key, array $rows ): array {
+		$carrier_key = trim( $carrier_key );
+		if ( '' === $carrier_key ) {
+			return array( 'inserted' => 0, 'updated' => 0, 'skipped' => count( $rows ) );
+		}
+
+		$stats = array( 'inserted' => 0, 'updated' => 0, 'skipped' => 0 );
+		$now   = function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+		foreach ( array_chunk( $rows, 250 ) as $chunk ) {
+			foreach ( $chunk as $row ) {
+				if ( ! is_array( $row ) ) {
+					++$stats['skipped'];
+					continue;
+				}
+
+				$row['carrier_key'] = $carrier_key;
+				$row                = $this->normalize_passport_row( $row, $now );
+				if ( '' === (string) $row['point_code'] || null === $row['latitude'] || null === $row['longitude'] ) {
+					++$stats['skipped'];
+					continue;
+				}
+
+				$existing = $this->find_row_by_code( $carrier_key, (string) $row['point_code'] );
+				if ( is_array( $existing ) && isset( $existing['id'] ) ) {
+					$this->wpdb->update( $this->table_name(), $row, array( 'id' => (int) $existing['id'] ), $this->passport_formats( $row ), array( '%d' ) );
+					++$stats['updated'];
+					continue;
+				}
+
+				$this->wpdb->insert( $this->table_name(), $row, $this->passport_formats( $row ) );
+				++$stats['inserted'];
+			}
+		}
+
+		return $stats;
+	}
+
+	public function mark_missing_inactive( string $carrier_key, string $run_started_at ): int {
+		$carrier_key     = trim( $carrier_key );
+		$run_started_at  = trim( $run_started_at );
+		if ( '' === $carrier_key || '' === $run_started_at ) {
+			return 0;
+		}
+
+		$result = $this->wpdb->query(
+			$this->wpdb->prepare(
+				"UPDATE {$this->table_name()} SET active = 0, updated_at = %s WHERE active = 1 AND carrier_key = %s AND (last_seen_at IS NULL OR last_seen_at = '' OR last_seen_at < %s)",
+				function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ),
+				$carrier_key,
+				$run_started_at
+			)
+		);
+
+		return is_int( $result ) ? $result : 0;
+	}
+
+	public function count_active( string $carrier_key = '', string $point_type = '' ): int {
+		$where = array( 'active = 1' );
+		$args  = array();
+		if ( '' !== trim( $carrier_key ) ) {
+			$where[] = 'carrier_key = %s';
+			$args[]  = trim( $carrier_key );
+		}
+		if ( '' !== trim( $point_type ) ) {
+			$where[] = 'point_type = %s';
+			$args[]  = strtoupper( trim( $point_type ) );
+		}
+
+		$sql = 'SELECT COUNT(*) FROM ' . $this->table_name() . ' WHERE ' . implode( ' AND ', $where );
+		if ( array() !== $args ) {
+			$sql = $this->wpdb->prepare( $sql, ...$args );
+		}
+
+		return (int) $this->wpdb->get_var( $sql );
+	}
+
+	/**
+	 * @return array<string,int>
+	 */
+	public function count_by_type( string $carrier_key ): array {
+		$carrier_key = trim( $carrier_key );
+		if ( '' === $carrier_key ) {
+			return array();
+		}
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT point_type, COUNT(*) AS total FROM {$this->table_name()} WHERE active = 1 AND carrier_key = %s GROUP BY point_type",
+				$carrier_key
+			),
+			ARRAY_A
+		);
+
+		$result = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$type = strtoupper( trim( (string) ( $row['point_type'] ?? '' ) ) );
+			if ( '' !== $type ) {
+				$result[ $type ] = (int) ( $row['total'] ?? 0 );
+			}
+		}
+
+		return $result;
+	}
+
+	public function find_by_id( int $id ): ?PickupPoint {
+		if ( $id <= 0 ) {
+			return null;
+		}
+
+		$row = $this->wpdb->get_row(
+			$this->wpdb->prepare( "SELECT * FROM {$this->table_name()} WHERE id = %d LIMIT 1", $id ),
+			ARRAY_A
+		);
+
+		return is_array( $row ) ? $this->row_to_point( $row ) : null;
+	}
+
+	/**
+	 * @param array<string,mixed> $filters
+	 * @return array<int,PickupPoint>
+	 */
+	public function find_by_bbox( string $carrier_key, float $min_lng, float $min_lat, float $max_lng, float $max_lat, array $filters = array() ): array {
+		$carrier_key = trim( $carrier_key );
+		if ( '' === $carrier_key ) {
+			return array();
+		}
+
+		$where = array(
+			'active = 1',
+			'carrier_key = %s',
+			'longitude BETWEEN %f AND %f',
+			'latitude BETWEEN %f AND %f',
+		);
+		$args = array( $carrier_key, $min_lng, $max_lng, $min_lat, $max_lat );
+		$this->append_point_filters( $where, $args, $filters );
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				'SELECT * FROM ' . $this->table_name() . ' WHERE ' . implode( ' AND ', $where ) . ' ORDER BY city_name ASC, address ASC LIMIT 500',
+				...$args
+			),
+			ARRAY_A
+		);
+
+		return $this->rows_to_points( is_array( $rows ) ? $rows : array() );
+	}
+
+	/**
+	 * @param array<string,mixed> $filters
+	 * @return array<int,PickupPoint>
+	 */
+	public function search_points( string $carrier_key, string $query, array $filters = array() ): array {
+		$carrier_key = trim( $carrier_key );
+		$query       = trim( $query );
+		if ( '' === $carrier_key || '' === $query ) {
+			return array();
+		}
+
+		$where = array(
+			'active = 1',
+			'carrier_key = %s',
+			'(point_code LIKE %s OR postcode LIKE %s OR city_name LIKE %s OR address LIKE %s)',
+		);
+		$like = '%' . $this->wpdb->esc_like( $query ) . '%';
+		$args = array( $carrier_key, $like, $like, $like, $like );
+		$this->append_point_filters( $where, $args, $filters );
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				'SELECT * FROM ' . $this->table_name() . ' WHERE ' . implode( ' AND ', $where ) . ' ORDER BY city_name ASC, address ASC LIMIT 100',
+				...$args
+			),
+			ARRAY_A
+		);
+
+		return $this->rows_to_points( is_array( $rows ) ? $rows : array() );
+	}
+
+	/**
 	 * @return array<string,mixed>|null
 	 */
 	private function find_row_by_code( string $carrier, string $code ): ?array {
@@ -204,6 +386,151 @@ final class PickupPointRepository {
 	 */
 	private function formats(): array {
 		return array( '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%s', '%s', '%d', '%d', '%s', '%s', '%s' );
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,mixed>
+	 */
+	private function normalize_passport_row( array $row, string $now ): array {
+		$allowed = array(
+			'carrier_key' => '',
+			'point_code' => '',
+			'point_type' => 'OPS',
+			'country_code' => 'RU',
+			'region_name' => '',
+			'city_name' => '',
+			'address' => '',
+			'postcode' => '',
+			'latitude' => null,
+			'longitude' => null,
+			'work_time' => '',
+			'comment' => '',
+			'extra_cost_kopecks' => 0,
+			'active' => 1,
+			'raw_reference' => null,
+			'source_hash' => null,
+			'last_seen_at' => $now,
+			'brand_name' => null,
+			'description' => null,
+			'street' => null,
+			'house' => null,
+			'fias_location_guid' => null,
+			'fias_address_guid' => null,
+			'gar_region_id' => null,
+			'geohash' => null,
+			'work_time_json' => null,
+			'ecom_options_json' => null,
+			'services_json' => null,
+			'phones_json' => null,
+			'images_json' => null,
+			'weight_limit_grams' => null,
+			'size_limit_json' => null,
+			'accepts_cash' => null,
+			'accepts_card' => null,
+			'partial_redemption' => null,
+			'return_available' => null,
+			'fitting_available' => null,
+			'contents_checking' => null,
+			'functionality_checking' => null,
+			'updated_at' => $now,
+			'created_at' => $now,
+		);
+
+		$normalized = array_intersect_key( $row, $allowed ) + $allowed;
+		foreach ( array( 'raw_reference', 'work_time_json', 'ecom_options_json', 'services_json', 'phones_json', 'images_json', 'size_limit_json' ) as $json_key ) {
+			if ( is_array( $normalized[ $json_key ] ) ) {
+				$encoded = wp_json_encode( $normalized[ $json_key ] );
+				$normalized[ $json_key ] = is_string( $encoded ) ? $encoded : null;
+			}
+		}
+		foreach ( array( 'accepts_cash', 'accepts_card', 'partial_redemption', 'return_available', 'fitting_available', 'contents_checking', 'functionality_checking' ) as $bool_key ) {
+			$normalized[ $bool_key ] = null === $normalized[ $bool_key ] ? null : ( ! empty( $normalized[ $bool_key ] ) ? 1 : 0 );
+		}
+		$normalized['point_type'] = strtoupper( trim( (string) $normalized['point_type'] ) );
+		$normalized['active'] = ! empty( $normalized['active'] ) ? 1 : 0;
+		$normalized['extra_cost_kopecks'] = (int) $normalized['extra_cost_kopecks'];
+		$normalized['weight_limit_grams'] = null === $normalized['weight_limit_grams'] ? null : max( 0, (int) $normalized['weight_limit_grams'] );
+		$normalized['latitude'] = null === $normalized['latitude'] || '' === $normalized['latitude'] ? null : (float) $normalized['latitude'];
+		$normalized['longitude'] = null === $normalized['longitude'] || '' === $normalized['longitude'] ? null : (float) $normalized['longitude'];
+
+		return $normalized;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<int,string>
+	 */
+	private function passport_formats( array $row ): array {
+		$formats = array(
+			'carrier_key' => '%s',
+			'point_code' => '%s',
+			'point_type' => '%s',
+			'country_code' => '%s',
+			'region_name' => '%s',
+			'city_name' => '%s',
+			'address' => '%s',
+			'postcode' => '%s',
+			'latitude' => '%f',
+			'longitude' => '%f',
+			'work_time' => '%s',
+			'comment' => '%s',
+			'extra_cost_kopecks' => '%d',
+			'active' => '%d',
+			'raw_reference' => '%s',
+			'source_hash' => '%s',
+			'last_seen_at' => '%s',
+			'brand_name' => '%s',
+			'description' => '%s',
+			'street' => '%s',
+			'house' => '%s',
+			'fias_location_guid' => '%s',
+			'fias_address_guid' => '%s',
+			'gar_region_id' => '%s',
+			'geohash' => '%s',
+			'work_time_json' => '%s',
+			'ecom_options_json' => '%s',
+			'services_json' => '%s',
+			'phones_json' => '%s',
+			'images_json' => '%s',
+			'weight_limit_grams' => '%d',
+			'size_limit_json' => '%s',
+			'accepts_cash' => '%d',
+			'accepts_card' => '%d',
+			'partial_redemption' => '%d',
+			'return_available' => '%d',
+			'fitting_available' => '%d',
+			'contents_checking' => '%d',
+			'functionality_checking' => '%d',
+			'updated_at' => '%s',
+			'created_at' => '%s',
+		);
+
+		return array_values( array_intersect_key( $formats, $row ) );
+	}
+
+	/**
+	 * @param array<int,string> $where
+	 * @param array<int,mixed> $args
+	 * @param array<string,mixed> $filters
+	 */
+	private function append_point_filters( array &$where, array &$args, array $filters ): void {
+		if ( '' !== trim( (string) ( $filters['point_type'] ?? '' ) ) ) {
+			$where[] = 'point_type = %s';
+			$args[]  = strtoupper( trim( (string) $filters['point_type'] ) );
+		}
+		if ( '' !== trim( (string) ( $filters['city'] ?? '' ) ) ) {
+			$where[] = 'city_name LIKE %s';
+			$args[]  = '%' . $this->wpdb->esc_like( trim( (string) $filters['city'] ) ) . '%';
+		}
+		if ( array_key_exists( 'accepts_card', $filters ) ) {
+			$where[] = 'accepts_card = %d';
+			$args[]  = ! empty( $filters['accepts_card'] ) ? 1 : 0;
+		}
+		if ( array_key_exists( 'accepts_cash', $filters ) ) {
+			$where[] = 'accepts_cash = %d';
+			$args[]  = ! empty( $filters['accepts_cash'] ) ? 1 : 0;
+		}
 	}
 
 	private function table_name(): string {

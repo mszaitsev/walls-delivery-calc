@@ -79,6 +79,15 @@ final class SettingsRepository {
 				'cache_until_end_of_day' => true,
 				'debug' => false,
 			),
+			'russian_post_otpravka_access_token' => '',
+			'russian_post_otpravka_login' => '',
+			'russian_post_otpravka_password_encrypted' => '',
+			'russian_post_otpravka_basic_key_encrypted' => '',
+			'russian_post_otpravka_timeout' => 20,
+			'russian_post_pickup_unload_type' => 'ALL',
+			'russian_post_pickup_schedule_enabled' => false,
+			'russian_post_pickup_last_import_result' => array(),
+			'russian_post_pickup_last_success_at' => '',
 			'packaging_weight_tiers'       => array(),
 		);
 	}

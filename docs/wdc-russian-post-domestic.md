@@ -1,6 +1,6 @@
 # Russian Post Domestic Carrier
 
-Version: 0.21.20.
+Version: 0.22.00.
 
 This document fixes the stage-1 contract for the future domestic Russian Post carrier. It is documentation and API diagnostics only; checkout quoting and shipment creation are intentionally not implemented here.
 

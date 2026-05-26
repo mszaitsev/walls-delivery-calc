@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.21.29.
+Version: 0.22.00.
+
+Version 0.22.00 adds the production foundation for a local Russian Post pickup-point directory. It extends `wdc_pickup_points`, adds shared API "Отправка" credentials/client classes, imports `unloading-passport` ZIP data through `RussianPostPickupImporter`, exposes manual import/status on the domestic pickup service tab, and keeps checkout map/REST/selected-point persistence for the next stage.
 
 Version 0.21.29 removes deprecated domestic defaults `27030`, `27020`, `28030`, and `28020` while preserving old saved tariff JSON, and simplifies the order calculation metabox by hiding VAT status and technical service keys.
 
