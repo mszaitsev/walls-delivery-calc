@@ -181,9 +181,11 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		$selected = $this->session_manager->selected_tariff( $service_key );
 		$selected_object = (string) ( $selected['object_code'] ?? '' );
 		$active = $rates[0];
+		$selected_found = false;
 		foreach ( $rates as $rate ) {
 			if ( (string) $rate->tariff_key === $selected_object ) {
 				$active = $rate;
+				$selected_found = true;
 				break;
 			}
 		}
@@ -203,15 +205,17 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 			),
 			$rates
 		);
-		$this->session_manager->save_selected_tariff(
-			$service_key,
-			array(
-				'object_code' => $active->tariff_key,
-				'title' => $active->tariff_name,
-				'delivery_days' => $active->delivery_days->to_array(),
-				'final_price_rub' => $active->price->get_rubles(),
-			)
-		);
+		if ( ! $selected_found ) {
+			$this->session_manager->save_selected_tariff(
+				$service_key,
+				array(
+					'object_code' => $active->tariff_key,
+					'title' => $active->tariff_name,
+					'delivery_days' => $active->delivery_days->to_array(),
+					'final_price_rub' => $active->price->get_rubles(),
+				)
+			);
+		}
 
 		return new DeliveryRate(
 			$service_key,

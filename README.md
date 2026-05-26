@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.21.21.
+Version: 0.21.22.
+
+Version 0.21.22 preserves a valid user-selected Russian Post domestic tariff during repeated checkout recalculations; the first available tariff is saved only as an initial/default fallback.
 
 Version 0.21.21 fixes Russian Post domestic foundation blockers: tariff variant object-code mappings now match the domestic API catalog, postcode fallback can use the existing DaData enrichment path, API item summaries keep nested service/tariff/delivery fields, and API `errorcode`/`errormsg` responses are treated as errors.
 

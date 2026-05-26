@@ -7,12 +7,15 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
 use WallsShop\WDC\Carriers\Runtime\RussianPostDomesticCarrier;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
@@ -34,9 +37,22 @@ defined( 'APP_ENCRYPTION_KEY' ) || define( 'APP_ENCRYPTION_KEY', 'wdc-rpd-postco
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
+if ( ! class_exists( 'WC_Shipping_Method' ) ) {
+	class WC_Shipping_Method {}
+}
+
 $GLOBALS['wdc_rpd_options'] = array();
 $GLOBALS['wdc_rpd_transients'] = array();
 $GLOBALS['wdc_rpd_requests'] = array();
+$GLOBALS['wdc_rpd_wc_session'] = new class {
+	public array $data = array();
+	public function get( string $key, mixed $default = null ): mixed { return $this->data[ $key ] ?? $default; }
+	public function set( string $key, mixed $value ): void { $this->data[ $key ] = $value; }
+};
+$GLOBALS['wdc_rpd_wc'] = new class {
+	public mixed $session;
+	public function __construct() { $this->session = $GLOBALS['wdc_rpd_wc_session']; }
+};
 
 function rpd_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -105,6 +121,7 @@ function wp_remote_post( string $url, array $args = array() ): array {
 }
 function wp_remote_retrieve_response_code( mixed $response ): int { return (int) ( $response['response']['code'] ?? 0 ); }
 function wp_remote_retrieve_body( mixed $response ): string { return (string) ( $response['body'] ?? '' ); }
+function WC(): object { return $GLOBALS['wdc_rpd_wc']; }
 
 $settings = new SettingsRepository();
 $settings->replace(
@@ -187,5 +204,22 @@ $built = $builder->apply(
 	array( $rule )
 );
 rpd_assert( 7 === $built['rate']->delivery_days->min_days && 8 === $built['rate']->delivery_days->max_days && DateRange::UNIT_CALENDAR_DAYS === $built['rate']->delivery_days->unit, 'Delivery ranges must support 5-6 + 2 => 7-8.' );
+
+$session_manager = new CheckoutSessionManager();
+$session_manager->save_selected_tariff( RussianPostDomesticSettings::PICKUP_SERVICE_KEY, array( 'object_code' => '47030', 'title' => 'Посылка 1 класса' ) );
+$method_reflection = new ReflectionClass( NewShippingMethod::class );
+$method = $method_reflection->newInstanceWithoutConstructor();
+$session_property = $method_reflection->getProperty( 'session_manager' );
+$session_property->setAccessible( true );
+$session_property->setValue( $method, $session_manager );
+$selector_method = $method_reflection->getMethod( 'tariff_selector_rate' );
+$selector_method->setAccessible( true );
+$rate_23030 = new DeliveryRate( 'russian_post_domestic_pickup:23030', RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::PICKUP_SERVICE_KEY, RussianPostDomesticSettings::TITLE, '23030', 'Посылка онлайн', DeliveryType::PICKUP, 'Посылка онлайн', Money::from_rubles( 450 ), null, null, DateRange::range( 5, 6 ), '', '5-6 дн.', array(), false, '', false, false, array( 'tariff_selector_group' => true ) );
+$rate_47030 = new DeliveryRate( 'russian_post_domestic_pickup:47030', RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::PICKUP_SERVICE_KEY, RussianPostDomesticSettings::TITLE, '47030', 'Посылка 1 класса', DeliveryType::PICKUP, 'Посылка 1 класса', Money::from_rubles( 659 ), null, null, DateRange::range( 2, 3 ), '', '2-3 дн.', array(), false, '', false, false, array( 'tariff_selector_group' => true ) );
+$selected_rate = $selector_method->invoke( $method, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, array( $rate_23030, $rate_47030 ) );
+rpd_assert( $selected_rate instanceof DeliveryRate && 659.0 === $selected_rate->price->get_rubles() && '47030' === (string) ( $selected_rate->meta['selected_tariff_object'] ?? '' ), 'Selected domestic tariff must drive WC rate cost and selected object.' );
+$selected_rate_again = $selector_method->invoke( $method, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, array( $rate_23030, $rate_47030 ) );
+$selected_session = $session_manager->selected_tariff( RussianPostDomesticSettings::PICKUP_SERVICE_KEY );
+rpd_assert( $selected_rate_again instanceof DeliveryRate && 659.0 === $selected_rate_again->price->get_rubles() && '47030' === (string) ( $selected_session['object_code'] ?? '' ), 'Repeated tariff selector calculation must not reset valid selected tariff to the first variant.' );
 
 echo "Russian Post domestic smoke OK\n";
