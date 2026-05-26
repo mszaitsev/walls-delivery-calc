@@ -213,7 +213,7 @@ final class DeliveryServiceRepository {
 						'carrier_key' => $carrier_key,
 						'service_type' => DeliveryService::TYPE_API,
 						'title' => '' !== trim( $existing->title ) ? $existing->title : $title,
-						'enabled' => $existing->enabled ? 1 : 1,
+						'enabled' => $existing->enabled ? 1 : 0,
 						'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
 						'deleted' => 0,
 					)

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.21.23.
+Version: 0.21.24.
+
+Version 0.21.24 preserves the current enabled state when predefined Russian Post domestic services are upserted, so bootstrap reactivates soft-deleted system rows without undoing a normal admin toggle-off.
 
 Version 0.21.23 protects predefined delivery services from deletion, keeps Russian Post domestic service bootstrap idempotent by service_key, renders domestic service simulation across active tariffs, and labels checkout/order shipping as `Почта России — {тариф}` without duplicating the delivery-days comment under the method.
 

@@ -244,6 +244,34 @@ foreach ( $domestic_services as $domestic_service ) {
 	$services->soft_delete_service( (int) $domestic_service->id );
 	wdc_ds_assert( $services->find_by_service_key( $domestic_service->service_key ) instanceof DeliveryService, 'Predefined domestic service cannot be deleted: ' . $domestic_service->service_key );
 }
+$services->update_service( (int) $domestic_services[0]->id, array( 'enabled' => 0 ) );
+$services->ensure_russian_post_domestic_services();
+$disabled_pickup = $services->find_by_service_key( RussianPostDomesticSettings::PICKUP_SERVICE_KEY );
+wdc_ds_assert( $disabled_pickup instanceof DeliveryService && ! $disabled_pickup->enabled, 'Domestic bootstrap must preserve an intentionally disabled predefined pickup service.' );
+$GLOBALS['wpdb']->services[] = array(
+	'id' => ++$GLOBALS['wpdb']->insert_id,
+	'service_key' => 'russian_post_domestic_soft_deleted_test',
+	'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+	'service_type' => DeliveryService::TYPE_API,
+	'title' => 'Soft deleted predefined',
+	'enabled' => 0,
+	'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+	'use_default_rules_when_no_service_rules' => 1,
+	'round_up_to_ruble' => 1,
+	'minimum_price_rub' => 1.0,
+	'include_packaging_weight' => 1,
+	'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+	'pickup_customer_comment' => '',
+	'courier_customer_comment' => '',
+	'sort_order' => 40,
+	'deleted' => 1,
+	'created_at' => current_time( 'mysql' ),
+	'updated_at' => current_time( 'mysql' ),
+);
+$ensure_builtin = ( new ReflectionClass( DeliveryServiceRepository::class ) )->getMethod( 'ensure_builtin_service' );
+$ensure_builtin->setAccessible( true );
+$reactivated = $ensure_builtin->invoke( $services, 'russian_post_domestic_soft_deleted_test', RussianPostDomesticSettings::CARRIER_KEY, 'Soft deleted predefined', 40 );
+wdc_ds_assert( $reactivated instanceof DeliveryService && $services->find_by_service_key( 'russian_post_domestic_soft_deleted_test' ) instanceof DeliveryService, 'Soft-deleted predefined bootstrap row must be reactivated.' );
 
 $custom_id = $services->create_service( array( 'service_key' => 'fixed_test', 'service_type' => DeliveryService::TYPE_FIXED, 'title' => 'Fixed', 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES ) );
 $services->update_service( $custom_id, array( 'enabled' => 0, 'minimum_price_rub' => '10,5' ) );
