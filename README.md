@@ -1,6 +1,6 @@
 # Walls Delivery Calc
 
-Version: 0.21.17.
+Version: 0.21.20.
 
 Walls Delivery Calc is a WooCommerce delivery calculator plugin. The runtime is now `src/` only: the old `includes/*` legacy bootstrap, shipping method, carriers, API clients, settings, helpers, and cache wrappers have been removed.
 
@@ -55,5 +55,23 @@ Version 0.21.15 makes the checkout city picker country-aware. The local location
 Version 0.21.16 treats `wdc_location_country_codes` with `countries=[]` and `stale=false` as a valid initialized empty index, so empty local location tables do not trigger repeated lazy rebuilds on every checkout request.
 
 Version 0.21.17 extends `wdc_location_country_codes` with cached per-country location counts and shows the country summary on the `Населенные пункты` admin page. Country names come from WooCommerce countries, with country-code fallback when a name is not available.
+
+Version 0.21.18 starts Russian Post domestic carrier preparation. Old demo pickup rows for carrier `demo` are cleaned from the pickup admin page, and `docs/wdc-russian-post-domestic.md` plus `tests/carriers/run-russian-post-domestic-api-probe.php` document and probe domestic tariff candidates.
+
+Version 0.21.19 makes the old demo pickup row cleanup one-time through the `wdc_demo_pickup_cleanup_done` option instead of deleting on every pickup admin page load.
+
+Version 0.21.20 adds `--insecure` to the Russian Post domestic probe for local Windows environments where PHP's trust store is not configured. SSL verification remains enabled by default and the flag must not be used in production runtime.
+
+PowerShell Russian Post domestic probe:
+
+```powershell
+php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=101000 --weight=1000 --objects=27030,27020,4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020
+```
+
+Local Windows probe when PHP reports a self-signed certificate chain and the trust store is not configured:
+
+```powershell
+php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=101000 --weight=1000 --objects=27030,27020,4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020 --insecure
+```
 
 Version 0.21.6 moves packaging weight into the new `src/` foundation. Global tiers live on `Правила расчета -> Упаковка` as `packaging_weight_tiers`; services choose whether to include packaging and whether to apply it as `total_weight` or a `WDC_PACKAGING` virtual package item. Russian Post international uses final total weight.

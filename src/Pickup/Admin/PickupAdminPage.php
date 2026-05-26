@@ -12,6 +12,8 @@ defined( 'ABSPATH' ) || exit;
 
 final class PickupAdminPage {
 	private const PAGE_SLUG = 'wdc-platform-pickup';
+	private const DEMO_CARRIER_KEYS = array( 'demo' );
+	private const DEMO_PICKUP_CLEANUP_OPTION = 'wdc_demo_pickup_cleanup_done';
 
 	public function __construct(
 		private PluginEnvironment $environment,
@@ -32,12 +34,21 @@ final class PickupAdminPage {
 			return;
 		}
 
+		$cleanup_count = null;
+		if ( ! (bool) get_option( self::DEMO_PICKUP_CLEANUP_OPTION, false ) ) {
+			$cleanup_count = $this->repository->delete_by_carrier_keys( self::DEMO_CARRIER_KEYS );
+			update_option( self::DEMO_PICKUP_CLEANUP_OPTION, true, false );
+		}
+
 		$city    = isset( $_GET['pickup_city'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['pickup_city'] ) ) : '';
 		$carrier = isset( $_GET['pickup_carrier'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['pickup_carrier'] ) ) : '';
 		$points  = '' !== trim( $city ) && '' !== trim( $carrier ) ? $this->repository->search( $carrier, 'RU', $city ) : array();
 		$grouped = $this->group_by_city( $points );
 		?>
 		<div class="wrap">
+			<?php if ( null !== $cleanup_count ) : ?>
+				<div class="notice notice-success is-dismissible"><p><?php echo esc_html( sprintf( __( 'Демо-данные ПВЗ очищены: %d', 'walls-delivery-calc' ), $cleanup_count ) ); ?></p></div>
+			<?php endif; ?>
 			<h1><?php echo esc_html__( 'Пункты выдачи заказов', 'walls-delivery-calc' ); ?></h1>
 			<p><strong><?php echo esc_html__( 'Количество ПВЗ:', 'walls-delivery-calc' ); ?></strong> <?php echo esc_html( (string) $this->repository->count_all() ); ?></p>
 
