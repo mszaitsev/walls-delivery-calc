@@ -6,6 +6,8 @@ $defaults = array(
 	'to'      => '101000',
 	'weight'  => '1000',
 	'sumoc'   => '500000',
+	'pack'    => '99',
+	'packs'   => '',
 	'objects' => '27030,27020,4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020,28030,28020,7030,7020',
 	'date'    => date( 'Ymd' ),
 );
@@ -13,6 +15,7 @@ $defaults = array(
 $declared_value_objects = array( '27020', '4020', '47020', '54020', '23020', '24020' );
 $options                = rpd_parse_cli_options( $argv, $defaults );
 $objects                = rpd_parse_objects( $options['objects'] );
+$packs                  = rpd_parse_packs( (string) $options['packs'] );
 
 if ( array() === $objects ) {
 	fwrite( STDERR, "No object codes provided.\n" );
@@ -22,43 +25,48 @@ if ( array() === $objects ) {
 $summaries = array();
 foreach ( $objects as $object ) {
 	$uses_sumoc = in_array( $object, $declared_value_objects, true );
-	$params     = rpd_request_params( $options, $object, $uses_sumoc, false );
-	$url        = rpd_build_url( $params );
+	$pack_list = array() !== $packs ? $packs : array( (string) $options['pack'] );
 
-	if ( $options['dry_run'] ) {
-		$summaries[] = array(
-			'object'     => $object,
-			'dry_run'    => true,
-			'uses_sumoc' => $uses_sumoc,
-			'url'        => $url,
-		);
-		continue;
-	}
+	foreach ( $pack_list as $pack ) {
+		$params = rpd_request_params( $options, $object, $uses_sumoc, false, $pack );
+		$url    = rpd_build_url( $params );
 
-	$summary = rpd_probe_object( $object, $url, (bool) $options['insecure'] );
-	if ( ! $summary['success'] && ! rpd_has_group_param( $url ) ) {
-		$group_url     = rpd_build_url( rpd_request_params( $options, $object, $uses_sumoc, true ) );
-		$group_summary = rpd_probe_object( $object, $group_url, (bool) $options['insecure'] );
-
-		$summary['fallback_group_0'] = array(
-			'attempted' => true,
-			'success'   => $group_summary['success'],
-			'url'       => $group_url,
-			'summary'   => $group_summary,
-		);
-
-		if ( $group_summary['success'] ) {
-			$summary = array_merge(
-				$group_summary,
-				array(
-					'initial_without_group' => $summary,
-					'used_group_0'          => true,
-				)
+		if ( $options['dry_run'] ) {
+			$summaries[] = array(
+				'object'     => $object,
+				'pack'       => $pack,
+				'dry_run'    => true,
+				'uses_sumoc' => $uses_sumoc,
+				'url'        => $url,
 			);
+			continue;
 		}
-	}
 
-	$summaries[] = $summary;
+		$summary = rpd_probe_object( $object, $pack, $url, (bool) $options['insecure'] );
+		if ( ! $summary['success'] && ! rpd_has_group_param( $url ) ) {
+			$group_url     = rpd_build_url( rpd_request_params( $options, $object, $uses_sumoc, true, $pack ) );
+			$group_summary = rpd_probe_object( $object, $pack, $group_url, (bool) $options['insecure'] );
+
+			$summary['fallback_group_0'] = array(
+				'attempted' => true,
+				'success'   => $group_summary['success'],
+				'url'       => $group_url,
+				'summary'   => $group_summary,
+			);
+
+			if ( $group_summary['success'] ) {
+				$summary = array_merge(
+					$group_summary,
+					array(
+						'initial_without_group' => $summary,
+						'used_group_0'          => true,
+					)
+				);
+			}
+		}
+
+		$summaries[] = $summary;
+	}
 }
 
 $output = array(
@@ -104,7 +112,7 @@ function rpd_parse_cli_options( array $argv, array $defaults ): array {
 		}
 	}
 
-	foreach ( array( 'from', 'to', 'weight', 'sumoc' ) as $numeric_key ) {
+	foreach ( array( 'from', 'to', 'weight', 'sumoc', 'pack' ) as $numeric_key ) {
 		$options[ $numeric_key ] = preg_replace( '/\D+/', '', (string) $options[ $numeric_key ] ) ?: $defaults[ $numeric_key ];
 	}
 
@@ -131,10 +139,31 @@ function rpd_parse_objects( string $objects ): array {
 }
 
 /**
+ * @return array<int,string>
+ */
+function rpd_parse_packs( string $packs ): array {
+	if ( '' === trim( $packs ) ) {
+		return array();
+	}
+
+	return array_values(
+		array_unique(
+			array_filter(
+				array_map(
+					static fn ( string $pack ): string => preg_replace( '/\D+/', '', trim( $pack ) ) ?: '',
+					explode( ',', $packs )
+				),
+				static fn ( string $pack ): bool => '' !== $pack
+			)
+		)
+	);
+}
+
+/**
  * @param array<string,mixed> $options
  * @return array<string,string>
  */
-function rpd_request_params( array $options, string $object, bool $uses_sumoc, bool $with_group ): array {
+function rpd_request_params( array $options, string $object, bool $uses_sumoc, bool $with_group, string $pack ): array {
 	$params = array(
 		'json'      => '',
 		'errorcode' => '0',
@@ -143,6 +172,7 @@ function rpd_request_params( array $options, string $object, bool $uses_sumoc, b
 		'to'        => (string) $options['to'],
 		'weight'    => (string) $options['weight'],
 		'date'      => (string) $options['date'],
+		'pack'      => $pack,
 	);
 
 	if ( $uses_sumoc ) {
@@ -168,17 +198,22 @@ function rpd_build_url( array $params ): string {
 	return 'https://tariff.pochta.ru/v2/calculate/tariff/delivery?' . implode( '&', $query );
 }
 
-function rpd_probe_object( string $object, string $url, bool $insecure_ssl ): array {
+function rpd_probe_object( string $object, string $pack, string $url, bool $insecure_ssl ): array {
 	$response = rpd_http_get_json( $url, $insecure_ssl );
 	$data     = is_array( $response['json'] ) ? $response['json'] : array();
 	$errors   = rpd_extract_errors( $data, $response );
 
 	return array(
 		'object'           => $object,
+		'pack'             => $pack,
 		'success'          => 200 <= $response['http_code'] && $response['http_code'] < 300 && array() === $errors,
 		'http_code'        => $response['http_code'],
 		'url'              => $url,
 		'errors'           => $errors,
+		'raw_body'         => $response['body'],
+		'decoded_body'     => $data,
+		'errorcode'        => $data['errorcode'] ?? null,
+		'errormsg'         => $data['errormsg'] ?? null,
 		'pay'              => rpd_first_value( $data, array( 'pay', 'paymoney' ) ),
 		'nds'              => rpd_first_value( $data, array( 'nds', 'ndsrate' ) ),
 		'paynds'           => rpd_first_value( $data, array( 'paynds' ) ),
@@ -195,7 +230,7 @@ function rpd_probe_object( string $object, string $url, bool $insecure_ssl ): ar
 }
 
 /**
- * @return array{http_code:int,json:mixed,error:string}
+ * @return array{http_code:int,json:mixed,error:string,body:string}
  */
 function rpd_http_get_json( string $url, bool $insecure_ssl ): array {
 	$body      = false;
@@ -257,12 +292,13 @@ function rpd_http_get_json( string $url, bool $insecure_ssl ): array {
 		'http_code' => $http_code,
 		'json'      => $json,
 		'error'     => $error,
+		'body'      => false !== $body ? (string) $body : '',
 	);
 }
 
 /**
  * @param array<string,mixed> $data
- * @param array{http_code:int,json:mixed,error:string} $response
+ * @param array{http_code:int,json:mixed,error:string,body:string} $response
  * @return array<int,array<string,mixed>>
  */
 function rpd_extract_errors( array $data, array $response ): array {

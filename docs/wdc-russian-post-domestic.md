@@ -156,7 +156,9 @@ Courier variants: `24030`, `24020`, `28030`, `28020`, `7030`, `7020`, `41030`, `
 
 В meta сохраняются нормализованные поля `pay`, `nds`, `paynds`, `delivery_min_days`, `delivery_max_days`, `transtype`, `delivery_to`, `items_summary`, request params и cache/debug metadata. Полный raw response в order calculation payload не сохраняется.
 
-Если API отклоняет отдельный object code, carrier пропускает только этот tariff variant и показывает диагностику в debug/simulation: `object_code`, request params, `http_code`, `errorcode`/`errormsg` и нормализованные error code/message. Для `27030` runtime передает `pack=99`; если live API для конкретного договора требует дополнительные параметры, нужно фиксировать точный API error и добавлять параметр явно.
+Если API отклоняет отдельный object code, carrier пропускает только этот tariff variant и показывает диагностику в debug/simulation: `object_code`, `pack`, request URL, request params, `http_code`, `errorcode`/`errormsg`, decoded body, raw error body и нормализованные error code/message. Для `27030` runtime передает `pack=99`; если live API для конкретного договора требует дополнительные параметры, нужно фиксировать точный API error и добавлять параметр явно.
+
+`27030` требует отдельной проверки совместимости с `pack=99`: причина определяется по body ответа API, а не по самому факту HTTP 400. Для сравнения package codes используйте probe `--packs=10,11,20,21,30,31,40,41,99`.
 
 ## Pickup without selector
 

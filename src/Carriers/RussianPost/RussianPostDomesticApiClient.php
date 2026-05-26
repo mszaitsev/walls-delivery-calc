@@ -47,10 +47,10 @@ final class RussianPostDomesticApiClient {
 		$body = function_exists( 'wp_remote_retrieve_body' ) ? (string) wp_remote_retrieve_body( $response ) : '';
 		$decoded = json_decode( $body, true );
 		if ( $code < 200 || $code >= 300 ) {
-			return $this->error( 'http_status_' . $code, 'Russian Post domestic API returned HTTP ' . $code . '.', $url, $params, $code, is_array( $decoded ) ? $decoded : array( 'body' => $body ) );
+			return $this->error( 'http_status_' . $code, 'Russian Post domestic API returned HTTP ' . $code . '.', $url, $params, $code, $this->error_payload( $body, $decoded ) );
 		}
 		if ( ! is_array( $decoded ) ) {
-			return $this->error( 'invalid_json', 'Russian Post domestic API returned invalid JSON.', $url, $params, $code, array( 'body' => $body ) );
+			return $this->error( 'invalid_json', 'Russian Post domestic API returned invalid JSON.', $url, $params, $code, $this->error_payload( $body, $decoded ) );
 		}
 		if ( $this->has_api_error( $decoded ) ) {
 			return $this->error( 'api_error', $this->extract_error_message( $decoded ), $url, $params, $code, $decoded );
@@ -186,6 +186,34 @@ final class RussianPostDomesticApiClient {
 		}
 
 		return 'Russian Post domestic API returned an error.';
+	}
+
+	private function extract_error_code( array $response ): string {
+		foreach ( array( 'errorcode', 'code', 'error_code' ) as $key ) {
+			if ( isset( $response[ $key ] ) && is_scalar( $response[ $key ] ) && '' !== trim( (string) $response[ $key ] ) ) {
+				return (string) $response[ $key ];
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function error_payload( string $body, mixed $decoded ): array {
+		$decoded_body = is_array( $decoded ) ? $decoded : array();
+
+		return array_filter(
+			array(
+				'raw_body' => $body,
+				'decoded_body' => $decoded_body,
+				'errorcode' => array() !== $decoded_body ? $this->extract_error_code( $decoded_body ) : '',
+				'errormsg' => array() !== $decoded_body ? $this->extract_error_message( $decoded_body ) : '',
+				'body' => $body,
+			),
+			static fn ( mixed $value ): bool => null !== $value && '' !== $value && array() !== $value
+		);
 	}
 
 	/**

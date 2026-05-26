@@ -82,7 +82,7 @@ function wp_remote_get( string $url, array $args = array() ): array {
 	}
 	$object = (int) ( $params['object'] ?? 0 );
 	if ( 27030 === $object ) {
-		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'errorcode' => 27030, 'errormsg' => 'standard parcel fixture error' ) ) );
+		return array( 'response' => array( 'code' => 400 ), 'body' => json_encode( array( 'errorcode' => 27030, 'errormsg' => 'standard parcel fixture error' ) ) );
 	}
 	return array(
 		'response' => array( 'code' => 200 ),
@@ -176,7 +176,7 @@ rpd_assert( in_array( '54020', $objects, true ), '54020 must remain always avail
 rpd_assert( 99 === (int) $GLOBALS['wdc_rpd_requests'][0]['pack'], 'Domestic tariff requests must force pack=99.' );
 rpd_assert( 27030 === (int) $GLOBALS['wdc_rpd_requests'][0]['object'] && 99 === (int) $GLOBALS['wdc_rpd_requests'][0]['pack'], '27030 request must force pack=99.' );
 $skipped_27030 = $quote->raw_reference['skipped_tariffs'][0] ?? array();
-rpd_assert( 27030 === (int) ( $skipped_27030['object_code'] ?? 0 ) && 27030 === (int) ( $skipped_27030['api_errorcode'] ?? 0 ) && str_contains( (string) ( $skipped_27030['api_errormsg'] ?? '' ), 'standard parcel fixture error' ) && 99 === (int) ( $skipped_27030['request_params']['pack'] ?? 0 ), 'Skipped 27030 diagnostic must expose object, request params, API error, and pack=99.' );
+rpd_assert( 27030 === (int) ( $skipped_27030['object_code'] ?? 0 ) && 400 === (int) ( $skipped_27030['http_code'] ?? 0 ) && 27030 === (int) ( $skipped_27030['errorcode'] ?? 0 ) && str_contains( (string) ( $skipped_27030['errormsg'] ?? '' ), 'standard parcel fixture error' ) && str_contains( (string) ( $skipped_27030['raw_error_body'] ?? '' ), 'standard parcel fixture error' ) && 99 === (int) ( $skipped_27030['request_params']['pack'] ?? 0 ), 'Skipped 27030 diagnostic must expose object, request params, HTTP/API error body, and pack=99.' );
 rpd_assert( ! isset( $GLOBALS['wdc_rpd_requests'][0]['sumoc'] ), 'Non-declared variants must not send sumoc.' );
 rpd_assert( ! empty( $quote->rates[0]->meta['no_pickup_selection'] ), 'Pickup variants must skip pickup selector.' );
 $item_summary = $quote->rates[0]->meta['items_summary'][0] ?? array();
@@ -212,6 +212,8 @@ rpd_assert( ! $missing->has_available_rates() && 'postcode_required' === $missin
 $api_client = new RussianPostDomesticApiClient( $domestic_settings, new Logger() );
 $api_error = $api_client->calculate_tariff( array( 'object' => 4030, 'from' => '630005', 'to' => '630099', 'weight' => 1000, 'date' => '20260526', 'pack' => 99, 'force_errorcode' => 1 ) );
 rpd_assert( empty( $api_error['success'] ) && 'api_error' === (string) ( $api_error['error_code'] ?? '' ), 'Domestic API client must treat errorcode/errormsg as API errors.' );
+$http_error = $api_client->calculate_tariff( array( 'object' => 27030, 'from' => '630005', 'to' => '630099', 'weight' => 1000, 'date' => '20260526', 'pack' => 99 ) );
+rpd_assert( empty( $http_error['success'] ) && 400 === (int) ( $http_error['http_code'] ?? 0 ) && str_contains( (string) ( $http_error['raw']['raw_body'] ?? '' ), 'standard parcel fixture error' ) && 27030 === (int) ( $http_error['raw']['errorcode'] ?? 0 ), 'Domestic API client must keep raw and decoded HTTP error bodies.' );
 $variant_with_comment = DomesticTariffVariant::from_array( array_merge( ( new RussianPostDomesticTariffVariantResolver() )->defaults()[0]->to_array(), array( 'admin_comment' => 'internal note' ) ) );
 rpd_assert( 'internal note' === $variant_with_comment->admin_comment && 'internal note' === $variant_with_comment->to_array()['admin_comment'], 'Domestic tariff admin_comment must save and load in tariff variant JSON.' );
 rpd_assert( ! array_key_exists( 'admin_comment', $quote->rates[0]->meta['domestic_tariff_variant'] ?? array() ), 'Domestic tariff admin_comment must not be exposed to checkout/order runtime meta.' );

@@ -356,11 +356,16 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 				'title' => $variant->title,
 				'reason' => $reason,
 				'request_params' => $params,
+				'request_url' => (string) ( $api_result['url'] ?? '' ),
 				'http_code' => (int) ( $api_result['http_code'] ?? 0 ),
 				'error_code' => (string) ( $api_result['error_code'] ?? '' ),
 				'error_message' => (string) ( $api_result['error_message'] ?? '' ),
+				'errorcode' => $raw['errorcode'] ?? null,
+				'errormsg' => $raw['errormsg'] ?? null,
 				'api_errorcode' => $raw['errorcode'] ?? null,
 				'api_errormsg' => $raw['errormsg'] ?? null,
+				'raw_error_body' => (string) ( $raw['raw_body'] ?? $raw['body'] ?? '' ),
+				'decoded_error_body' => is_array( $raw['decoded_body'] ?? null ) ? $raw['decoded_body'] : array(),
 			),
 			static fn ( mixed $value ): bool => null !== $value && '' !== $value && array() !== $value
 		);

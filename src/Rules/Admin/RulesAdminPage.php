@@ -1076,15 +1076,17 @@ final class RulesAdminPage {
 			<?php if ( ! empty( $result['skipped_tariffs'] ) && is_array( $result['skipped_tariffs'] ) ) : ?>
 				<h3><?php echo esc_html__( 'Пропущенные тарифы', 'walls-delivery-calc' ); ?></h3>
 				<table class="widefat striped">
-					<thead><tr><th><?php echo esc_html__( 'Object code', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Причина', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'HTTP', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'API error', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Request params', 'walls-delivery-calc' ); ?></th></tr></thead>
+					<thead><tr><th><?php echo esc_html__( 'Object code', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Pack', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'HTTP', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Error code', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Error message', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Raw body', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Request params', 'walls-delivery-calc' ); ?></th></tr></thead>
 					<tbody>
 						<?php foreach ( $result['skipped_tariffs'] as $tariff ) : ?>
 							<?php if ( ! is_array( $tariff ) ) { continue; } ?>
 							<tr>
 								<td><?php echo esc_html( (string) ( $tariff['object_code'] ?? '' ) ); ?></td>
-								<td><?php echo esc_html( (string) ( $tariff['reason'] ?? $tariff['error_code'] ?? '' ) ); ?></td>
+								<td><?php echo esc_html( (string) ( $tariff['request_params']['pack'] ?? '' ) ); ?></td>
 								<td><?php echo esc_html( (string) ( $tariff['http_code'] ?? '' ) ); ?></td>
-								<td><?php echo esc_html( trim( (string) ( $tariff['api_errorcode'] ?? '' ) . ' ' . (string) ( $tariff['api_errormsg'] ?? $tariff['error_message'] ?? '' ) ) ); ?></td>
+								<td><?php echo esc_html( (string) ( $tariff['errorcode'] ?? $tariff['api_errorcode'] ?? $tariff['error_code'] ?? '' ) ); ?></td>
+								<td><?php echo esc_html( (string) ( $tariff['errormsg'] ?? $tariff['api_errormsg'] ?? $tariff['error_message'] ?? $tariff['reason'] ?? '' ) ); ?></td>
+								<td><code><?php echo esc_html( (string) ( $tariff['raw_error_body'] ?? '' ) ); ?></code></td>
 								<td><code><?php echo esc_html( (string) wp_json_encode( is_array( $tariff['request_params'] ?? null ) ? $tariff['request_params'] : array(), JSON_UNESCAPED_UNICODE ) ); ?></code></td>
 							</tr>
 						<?php endforeach; ?>
