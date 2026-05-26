@@ -34,7 +34,7 @@ final class CheckoutRateRenderer {
 			echo '<span class="wdc-platform-crossed-price">' . esc_html( $this->format_money( (int) $meta['crossed_price']['amount_kopecks'] ) ) . '</span>';
 		}
 
-		if ( empty( $meta['tariff_variants'] ) && '' !== trim( (string) ( $meta['planned_delivery_comment'] ?? '' ) ) ) {
+		if ( empty( $meta['domestic_tariff_grouped'] ) && empty( $meta['tariff_variants'] ) && '' !== trim( (string) ( $meta['planned_delivery_comment'] ?? '' ) ) ) {
 			echo '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' . esc_html( (string) $meta['planned_delivery_comment'] ) . '</div>';
 		}
 

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.21.25.
+Version: 0.21.26.
+
+Version 0.21.26 keeps Russian Post domestic single-tariff grouped delivery days in the WooCommerce method label, suppresses the separate planned-delivery line for that single-tariff case, and leaves multi-tariff timing only inside selector rows.
 
 Version 0.21.25 gives Russian Post domestic pickup/courier services distinct predefined admin titles, keeps courier availability bootstrapped for RU, uses final rule-adjusted delivery days in checkout and orders, supports internal tariff admin comments, shows per-variant crossed prices, and hides the radio selector when only one tariff is available.
 

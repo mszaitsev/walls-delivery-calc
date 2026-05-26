@@ -8,8 +8,10 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
 use WallsShop\WDC\Carriers\Runtime\RussianPostDomesticCarrier;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\DateRange;
@@ -68,6 +70,8 @@ function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return j
 function add_query_arg( array $params, string $url ): string { return $url . '?' . http_build_query( $params ); }
 function wp_date( string $format ): string { return gmdate( $format, strtotime( '2026-05-26 10:00:00 UTC' ) ); }
 function wp_timezone(): DateTimeZone { return new DateTimeZone( 'Asia/Novosibirsk' ); }
+function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
 function is_wp_error( mixed $value ): bool { return false; }
 function wp_remote_get( string $url, array $args = array() ): array {
 	parse_str( (string) parse_url( $url, PHP_URL_QUERY ), $params );
@@ -230,6 +234,22 @@ $selected_session = $session_manager->selected_tariff( RussianPostDomesticSettin
 rpd_assert( $selected_rate_again instanceof DeliveryRate && 659.0 === $selected_rate_again->price->get_rubles() && '47030' === (string) ( $selected_session['object_code'] ?? '' ), 'Repeated tariff selector calculation must not reset valid selected tariff to the first variant.' );
 $single_rate = $selector_method->invoke( $method, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, array( $rate_23030 ) );
 rpd_assert( array() === ( $single_rate->meta['tariff_variants'] ?? array() ) && RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ': Посылка онлайн' === $single_rate->title, 'Single-tariff domestic service must not expose radio selector variants.' );
+$mapper = new WooCommerceRateMapper();
+$mapped_single_rate = $mapper->map( $single_rate );
+rpd_assert( $single_rate->title . ' - ' . $single_rate->planned_delivery_comment === $mapped_single_rate['label'], 'Single-tariff domestic grouped label must include planned delivery comment.' );
+rpd_assert( true === ( $mapped_single_rate['meta_data']['domestic_tariff_grouped'] ?? false ), 'Single-tariff domestic grouped meta must keep grouped marker for checkout rendering.' );
+$single_wc_rate = new class( $mapped_single_rate['meta_data'] ) {
+	/** @param array<string,mixed> $meta */
+	public function __construct( private array $meta ) {}
+	/** @return array<string,mixed> */
+	public function get_meta_data(): array { return $this->meta; }
+};
+ob_start();
+( new CheckoutRateRenderer( $session_manager ) )->render( $single_wc_rate );
+$single_rate_html = (string) ob_get_clean();
+rpd_assert( ! str_contains( $single_rate_html, 'wdc-platform-delivery-comment' ) && ! str_contains( $single_rate_html, $single_rate->planned_delivery_comment ), 'Single-tariff domestic grouped planned delivery comment must stay in the label only.' );
+$mapped_multi_rate = $mapper->map( $selected_rate );
+rpd_assert( $selected_rate->title === $mapped_multi_rate['label'], 'Multi-tariff domestic grouped label must keep delivery days only in selector rows.' );
 $rates_for_wc = $method_reflection->getMethod( 'rates_for_wc' );
 $rates_for_wc->setAccessible( true );
 $rate_24030 = new DeliveryRate( 'russian_post_domestic_courier:24030', RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::COURIER_SERVICE_KEY, RussianPostDomesticSettings::COURIER_SERVICE_TITLE, '24030', 'Курьер онлайн', DeliveryType::COURIER, 'Курьер онлайн', Money::from_rubles( 800 ), null, null, DateRange::single( 1 ), '', '1 дн.', array(), false, '', false, true, array( 'tariff_selector_group' => true ) );
