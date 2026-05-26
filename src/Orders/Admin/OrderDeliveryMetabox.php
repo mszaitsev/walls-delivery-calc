@@ -79,6 +79,10 @@ final class OrderDeliveryMetabox {
 		} else {
 			$rows['Базовая стоимость API'] = $this->rubles( $api['api_base_price_rub'] ?? null );
 			$rows['НДС'] = $this->vat_label( $api );
+			$api_delivery_days = $this->api_delivery_days_label( $api );
+			if ( '' !== $api_delivery_days ) {
+				$rows['Срок по API'] = $api_delivery_days;
+			}
 			$formula = is_array( $rules['formula_visualization'] ?? null ) ? $rules['formula_visualization'] : array();
 			if ( array() !== $formula ) {
 				$rows['Правила расчета'] = $formula;
@@ -88,7 +92,7 @@ final class OrderDeliveryMetabox {
 		$rows['Итоговая стоимость'] = $this->rubles( $result['final_price_rub'] ?? null );
 		$delivery_days = $this->delivery_days_label( $result );
 		if ( '' !== $delivery_days ) {
-			$rows['Срок доставки'] = $delivery_days;
+			$rows['Итоговый срок'] = $delivery_days;
 		}
 
 		$this->render_rows( $rows );
@@ -275,7 +279,16 @@ final class OrderDeliveryMetabox {
 	 * @param array<string,mixed> $result
 	 */
 	private function delivery_days_label( array $result ): string {
-		return DeliveryDaysFormatter::format_values( $result['final_delivery_days_min'] ?? null, $result['final_delivery_days_max'] ?? null );
+		return (string) ( $result['final_delivery_text'] ?? '' )
+			?: DeliveryDaysFormatter::format_values( $result['final_delivery_min_days'] ?? $result['final_delivery_days_min'] ?? null, $result['final_delivery_max_days'] ?? $result['final_delivery_days_max'] ?? null );
+	}
+
+	/**
+	 * @param array<string,mixed> $api
+	 */
+	private function api_delivery_days_label( array $api ): string {
+		return (string) ( $api['api_delivery_text'] ?? '' )
+			?: DeliveryDaysFormatter::format_values( $api['api_delivery_min_days'] ?? $api['delivery_min_days'] ?? null, $api['api_delivery_max_days'] ?? $api['delivery_max_days'] ?? null );
 	}
 
 	private function city_summary( object $order ): string {

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.21.27.
+Version: 0.21.28.
+
+Version 0.21.28 hides domestic selector/runtime technical keys from visible WooCommerce shipping item meta and stores both original API delivery range and final rule-adjusted delivery range in `_wdc_delivery_calculation_data`.
 
 Version 0.21.27 adds skipped-tariff diagnostics for Russian Post domestic API errors, extends courier variants with EMS object codes `28030`, `28020`, `7030`, and `7020`, formats delivery days with Russian plural forms, and makes domestic checkout/order method titles include service, selected tariff, and delivery range.
 

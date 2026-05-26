@@ -279,6 +279,14 @@ final class OrderShippingMetaPersister {
 				'paynds'                  => array_key_exists( 'paynds', $rate_meta ) ? (int) $rate_meta['paynds'] : null,
 				'delivery_min_days'       => array_key_exists( 'delivery_min_days', $rate_meta ) ? (int) $rate_meta['delivery_min_days'] : null,
 				'delivery_max_days'       => array_key_exists( 'delivery_max_days', $rate_meta ) ? (int) $rate_meta['delivery_max_days'] : null,
+				'api_delivery_min_days'   => array_key_exists( 'delivery_min_days', $rate_meta ) ? (int) $rate_meta['delivery_min_days'] : null,
+				'api_delivery_max_days'   => array_key_exists( 'delivery_max_days', $rate_meta ) ? (int) $rate_meta['delivery_max_days'] : null,
+				'api_delivery_text'       => $this->delivery_days_label(
+					array(
+						'min_days' => $rate_meta['delivery_min_days'] ?? null,
+						'max_days' => $rate_meta['delivery_max_days'] ?? null,
+					)
+				),
 				'transtype'               => array_key_exists( 'transtype', $rate_meta ) ? (int) $rate_meta['transtype'] : null,
 				'delivery_to'             => (string) ( $rate_meta['delivery_to'] ?? '' ),
 				'items_summary'           => is_array( $rate_meta['items_summary'] ?? null ) ? $rate_meta['items_summary'] : array(),
@@ -317,9 +325,15 @@ final class OrderShippingMetaPersister {
 		$max_days      = $delivery_days['max_days'] ?? $delivery_days['max'] ?? null;
 		if ( is_numeric( $min_days ) && (int) $min_days > 0 ) {
 			$result['final_delivery_days_min'] = (int) $min_days;
+			$result['final_delivery_min_days'] = (int) $min_days;
 		}
 		if ( is_numeric( $max_days ) && (int) $max_days > 0 ) {
 			$result['final_delivery_days_max'] = (int) $max_days;
+			$result['final_delivery_max_days'] = (int) $max_days;
+		}
+		$final_delivery_text = $this->delivery_days_label( $delivery_days );
+		if ( '' !== $final_delivery_text ) {
+			$result['final_delivery_text'] = $final_delivery_text;
 		}
 
 		return array_filter( $result, static fn ( mixed $value ): bool => '' !== $value && null !== $value );
@@ -435,17 +449,42 @@ final class OrderShippingMetaPersister {
 			'service_title',
 			'tariff_key',
 			'tariff_title',
+			'domestic_tariff_grouped',
 			'tariff_variants',
 			'selected_tariff_object',
 			'selected_tariff_title',
+			'selected_tariff_rate_id',
 			'rules_source',
 			'round_up_applied',
 			'minimum_price_applied',
 			'final_price_rub',
 			'api_base_price_rub',
 			'api_price_with_vat_rub',
+			'api_price_has_vat',
+			'delivery_days',
+			'api_delivery_min_days',
+			'api_delivery_max_days',
+			'api_delivery_text',
+			'final_delivery_min_days',
+			'final_delivery_max_days',
+			'final_delivery_text',
 			'rules_audit',
 			'rate_meta',
+			'object_code',
+			'domestic_tariff_variant',
+			'postcode',
+			'pay',
+			'nds',
+			'paynds',
+			'delivery_min_days',
+			'delivery_max_days',
+			'transtype',
+			'delivery_to',
+			'items_summary',
+			'request_params',
+			'http_code',
+			'cache_hit',
+			'package',
 			'requires_pickup_point',
 			'requires_courier_address',
 			'no_pickup_selection',
