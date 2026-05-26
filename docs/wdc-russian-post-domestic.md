@@ -1,6 +1,6 @@
 # Russian Post Domestic Carrier
 
-Version: 0.21.19.
+Version: 0.21.20.
 
 This document fixes the stage-1 contract for the future domestic Russian Post carrier. It is documentation and API diagnostics only; checkout quoting and shipment creation are intentionally not implemented here.
 
@@ -106,5 +106,14 @@ Optional parameters:
 
 - `--sumoc=500000`
 - `--date=YYYYMMDD`
+- `--insecure`
 
 The script does not require WooCommerce checkout. It prints sanitized JSON summaries to the console and does not save raw full responses in the repository.
+
+For local Windows diagnostics only, when PHP fails with `self-signed certificate in certificate chain (19)` and the trust store is not configured, run:
+
+```powershell
+php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=101000 --weight=1000 --objects=27030,27020,4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020 --insecure
+```
+
+`--insecure` disables SSL verification only in this test helper and adds a warning to JSON output. Do not use this behavior in production runtime.

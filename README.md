@@ -1,6 +1,6 @@
 # Walls Delivery Calc
 
-Version: 0.21.19.
+Version: 0.21.20.
 
 Walls Delivery Calc is a WooCommerce delivery calculator plugin. The runtime is now `src/` only: the old `includes/*` legacy bootstrap, shipping method, carriers, API clients, settings, helpers, and cache wrappers have been removed.
 
@@ -60,10 +60,18 @@ Version 0.21.18 starts Russian Post domestic carrier preparation. Old demo picku
 
 Version 0.21.19 makes the old demo pickup row cleanup one-time through the `wdc_demo_pickup_cleanup_done` option instead of deleting on every pickup admin page load.
 
+Version 0.21.20 adds `--insecure` to the Russian Post domestic probe for local Windows environments where PHP's trust store is not configured. SSL verification remains enabled by default and the flag must not be used in production runtime.
+
 PowerShell Russian Post domestic probe:
 
 ```powershell
 php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=101000 --weight=1000 --objects=27030,27020,4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020
+```
+
+Local Windows probe when PHP reports a self-signed certificate chain and the trust store is not configured:
+
+```powershell
+php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=101000 --weight=1000 --objects=27030,27020,4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020 --insecure
 ```
 
 Version 0.21.6 moves packaging weight into the new `src/` foundation. Global tiers live on `Правила расчета -> Упаковка` as `packaging_weight_tiers`; services choose whether to include packaging and whether to apply it as `total_weight` or a `WDC_PACKAGING` virtual package item. Russian Post international uses final total weight.

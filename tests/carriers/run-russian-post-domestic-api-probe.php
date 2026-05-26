@@ -35,10 +35,10 @@ foreach ( $objects as $object ) {
 		continue;
 	}
 
-	$summary = rpd_probe_object( $object, $url );
+	$summary = rpd_probe_object( $object, $url, (bool) $options['insecure'] );
 	if ( ! $summary['success'] && ! rpd_has_group_param( $url ) ) {
 		$group_url     = rpd_build_url( rpd_request_params( $options, $object, $uses_sumoc, true ) );
-		$group_summary = rpd_probe_object( $object, $group_url );
+		$group_summary = rpd_probe_object( $object, $group_url, (bool) $options['insecure'] );
 
 		$summary['fallback_group_0'] = array(
 			'attempted' => true,
@@ -61,7 +61,17 @@ foreach ( $objects as $object ) {
 	$summaries[] = $summary;
 }
 
-echo rpd_json( array( 'generated_at' => gmdate( DATE_ATOM ), 'results' => $summaries ) ) . "\n";
+$output = array(
+	'generated_at' => gmdate( DATE_ATOM ),
+	'insecure_ssl' => (bool) $options['insecure'],
+	'results'      => $summaries,
+);
+
+if ( (bool) $options['insecure'] ) {
+	$output['warning'] = 'SSL verification disabled for local API probe only. Do not use in production runtime.';
+}
+
+echo rpd_json( $output ) . "\n";
 
 /**
  * @param array<int,string> $argv
@@ -69,12 +79,17 @@ echo rpd_json( array( 'generated_at' => gmdate( DATE_ATOM ), 'results' => $summa
  * @return array<string,mixed>
  */
 function rpd_parse_cli_options( array $argv, array $defaults ): array {
-	$options            = $defaults;
-	$options['dry_run'] = false;
+	$options             = $defaults;
+	$options['dry_run']  = false;
+	$options['insecure'] = false;
 
 	foreach ( array_slice( $argv, 1 ) as $arg ) {
 		if ( '--dry-run' === $arg ) {
 			$options['dry_run'] = true;
+			continue;
+		}
+		if ( '--insecure' === $arg ) {
+			$options['insecure'] = true;
 			continue;
 		}
 
@@ -153,8 +168,8 @@ function rpd_build_url( array $params ): string {
 	return 'https://tariff.pochta.ru/v2/calculate/tariff/delivery?' . implode( '&', $query );
 }
 
-function rpd_probe_object( string $object, string $url ): array {
-	$response = rpd_http_get_json( $url );
+function rpd_probe_object( string $object, string $url, bool $insecure_ssl ): array {
+	$response = rpd_http_get_json( $url, $insecure_ssl );
 	$data     = is_array( $response['json'] ) ? $response['json'] : array();
 	$errors   = rpd_extract_errors( $data, $response );
 
@@ -182,7 +197,7 @@ function rpd_probe_object( string $object, string $url ): array {
 /**
  * @return array{http_code:int,json:mixed,error:string}
  */
-function rpd_http_get_json( string $url ): array {
+function rpd_http_get_json( string $url, bool $insecure_ssl ): array {
 	$body      = false;
 	$http_code = 0;
 	$error     = '';
@@ -195,7 +210,9 @@ function rpd_http_get_json( string $url ): array {
 				CURLOPT_RETURNTRANSFER => true,
 				CURLOPT_CONNECTTIMEOUT => 10,
 				CURLOPT_TIMEOUT        => 30,
-				CURLOPT_USERAGENT      => 'walls-delivery-calc-russian-post-domestic-probe/0.21.18',
+				CURLOPT_USERAGENT      => 'walls-delivery-calc-russian-post-domestic-probe/0.21.20',
+				CURLOPT_SSL_VERIFYPEER => ! $insecure_ssl,
+				CURLOPT_SSL_VERIFYHOST => $insecure_ssl ? false : 2,
 			)
 		);
 		$body = curl_exec( $ch );
@@ -211,7 +228,11 @@ function rpd_http_get_json( string $url ): array {
 					'method'        => 'GET',
 					'timeout'       => 30,
 					'ignore_errors' => true,
-					'header'        => "User-Agent: walls-delivery-calc-russian-post-domestic-probe/0.21.18\r\n",
+					'header'        => "User-Agent: walls-delivery-calc-russian-post-domestic-probe/0.21.20\r\n",
+				),
+				'ssl'  => array(
+					'verify_peer'      => ! $insecure_ssl,
+					'verify_peer_name' => ! $insecure_ssl,
 				),
 			)
 		);
