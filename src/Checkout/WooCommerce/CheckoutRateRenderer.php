@@ -28,6 +28,8 @@ final class CheckoutRateRenderer {
 
 		echo '<div class="' . esc_attr( implode( ' ', $classes ) ) . '">';
 
+		$this->render_tariff_selector( $meta );
+
 		if ( is_array( $meta['crossed_price'] ?? null ) && isset( $meta['crossed_price']['amount_kopecks'] ) ) {
 			echo '<span class="wdc-platform-crossed-price">' . esc_html( $this->format_money( (int) $meta['crossed_price']['amount_kopecks'] ) ) . '</span>';
 		}
@@ -89,5 +91,42 @@ final class CheckoutRateRenderer {
 		if ( '' !== trim( (string) ( $selection['point_comment'] ?? '' ) ) ) {
 			echo '<span class="wdc-platform-pickup-selected">' . esc_html( (string) $selection['point_comment'] ) . '</span>';
 		}
+	}
+
+	/**
+	 * @param array<string,mixed> $meta
+	 */
+	private function render_tariff_selector( array $meta ): void {
+		$variants = is_array( $meta['tariff_variants'] ?? null ) ? $meta['tariff_variants'] : array();
+		if ( array() === $variants ) {
+			return;
+		}
+		$service_key = (string) ( $meta['service_key'] ?? '' );
+		$selected = (string) ( $meta['selected_tariff_object'] ?? '' );
+		echo '<div class="wdc-domestic-tariff-selector" data-wdc-service-key="' . esc_attr( $service_key ) . '">';
+		foreach ( $variants as $variant ) {
+			if ( ! is_array( $variant ) ) {
+				continue;
+			}
+			$object = (string) ( $variant['object_code'] ?? '' );
+			$title = (string) ( $variant['title'] ?? '' );
+			$comment = (string) ( $variant['planned_delivery_comment'] ?? '' );
+			$price = isset( $variant['price_rub'] ) ? $this->format_rubles( (float) $variant['price_rub'] ) : '';
+			echo '<label class="wdc-domestic-tariff-selector__item">';
+			echo '<input type="radio" name="wdc_domestic_tariff_' . esc_attr( $service_key ) . '" value="' . esc_attr( $object ) . '" data-title="' . esc_attr( $title ) . '" data-price="' . esc_attr( (string) ( $variant['price_rub'] ?? '' ) ) . '" ' . checked( $selected, $object, false ) . '>';
+			echo '<span class="wdc-domestic-tariff-selector__title">' . esc_html( $title ) . '</span>';
+			if ( '' !== $price ) {
+				echo '<span class="wdc-domestic-tariff-selector__price">' . esc_html( $price ) . '</span>';
+			}
+			if ( '' !== $comment ) {
+				echo '<span class="wdc-domestic-tariff-selector__days">' . esc_html( $comment ) . '</span>';
+			}
+			echo '</label>';
+		}
+		echo '</div>';
+	}
+
+	private function format_rubles( float $rubles ): string {
+		return rtrim( rtrim( number_format( $rubles, 2, '.', ' ' ), '0' ), '.' ) . ' руб.';
 	}
 }

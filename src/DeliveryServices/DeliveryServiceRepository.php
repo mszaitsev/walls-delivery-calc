@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\DeliveryServices;
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -119,6 +120,59 @@ final class DeliveryServiceRepository {
 		$created = $this->find_by_service_key( RussianPostSettings::SERVICE_KEY );
 
 		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => RussianPostSettings::SERVICE_KEY ) );
+	}
+
+	/**
+	 * @return array<int,DeliveryService>
+	 */
+	public function ensure_russian_post_domestic_services(): array {
+		return array(
+			$this->ensure_builtin_service(
+				RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+				RussianPostDomesticSettings::CARRIER_KEY,
+				RussianPostDomesticSettings::TITLE,
+				20,
+				'Доставка до почтового отделения по индексу'
+			),
+			$this->ensure_builtin_service(
+				RussianPostDomesticSettings::COURIER_SERVICE_KEY,
+				RussianPostDomesticSettings::CARRIER_KEY,
+				RussianPostDomesticSettings::TITLE,
+				30,
+				''
+			),
+		);
+	}
+
+	private function ensure_builtin_service( string $service_key, string $carrier_key, string $title, int $sort_order, string $pickup_comment = '' ): DeliveryService {
+		$existing = $this->find_by_service_key( $service_key );
+		if ( $existing instanceof DeliveryService ) {
+			return $existing;
+		}
+
+		$id = $this->create_service(
+			array(
+				'service_key' => $service_key,
+				'carrier_key' => $carrier_key,
+				'service_type' => DeliveryService::TYPE_API,
+				'title' => $title,
+				'enabled' => 1,
+				'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+				'use_default_rules_when_no_service_rules' => 1,
+				'round_up_to_ruble' => 1,
+				'minimum_price_rub' => 1,
+				'include_packaging_weight' => 1,
+				'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+				'pickup_customer_comment' => $pickup_comment,
+				'courier_customer_comment' => '',
+				'sort_order' => $sort_order,
+				'deleted' => 0,
+			)
+		);
+
+		$created = $this->find_by_service_key( $service_key );
+
+		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => $service_key, 'carrier_key' => $carrier_key, 'title' => $title ) );
 	}
 
 	/**

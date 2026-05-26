@@ -22,7 +22,8 @@ final class RuleEngine {
 		$current_price       = $context->delivery_price;
 		$crossed_price       = null;
 		$final_delivery_days = null;
-		$current_delivery_days = isset( $context->meta['original_delivery_days'] ) ? (int) $context->meta['original_delivery_days'] : null;
+		$current_delivery_min_days = isset( $context->meta['original_delivery_min_days'] ) ? (int) $context->meta['original_delivery_min_days'] : ( isset( $context->meta['original_delivery_days'] ) ? (int) $context->meta['original_delivery_days'] : null );
+		$current_delivery_max_days = isset( $context->meta['original_delivery_max_days'] ) ? (int) $context->meta['original_delivery_max_days'] : $current_delivery_min_days;
 		$comments            = array();
 		$disabled            = false;
 		$disabled_reason     = '';
@@ -44,7 +45,11 @@ final class RuleEngine {
 				$context->calendar_context,
 				array_merge(
 					$context->meta,
-					null === $current_delivery_days ? array() : array( 'current_delivery_days' => $current_delivery_days )
+					null === $current_delivery_min_days ? array() : array(
+						'current_delivery_days' => $current_delivery_min_days,
+						'current_delivery_min_days' => $current_delivery_min_days,
+						'current_delivery_max_days' => $current_delivery_max_days,
+					)
 				)
 			);
 			$result          = $this->rule_evaluator->evaluate( $rule, $runtime_context );
@@ -61,7 +66,8 @@ final class RuleEngine {
 
 				if ( null !== $result->modified_delivery_days ) {
 					$final_delivery_days = $result->modified_delivery_days;
-					$current_delivery_days = $result->modified_delivery_days->min_days ?? $result->modified_delivery_days->max_days ?? $current_delivery_days;
+					$current_delivery_min_days = $result->modified_delivery_days->min_days ?? $result->modified_delivery_days->max_days ?? $current_delivery_min_days;
+					$current_delivery_max_days = $result->modified_delivery_days->max_days ?? $result->modified_delivery_days->min_days ?? $current_delivery_max_days;
 				}
 
 				$comments = array_merge( $comments, $result->added_comments );

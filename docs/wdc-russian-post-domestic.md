@@ -117,3 +117,39 @@ php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=10
 ```
 
 `--insecure` disables SSL verification only in this test helper and adds a warning to JSON output. Do not use this behavior in production runtime.
+# Почта России — по России
+
+Этап foundation добавляет carrier `russian_post_domestic` и две service:
+
+- `russian_post_domestic_pickup`
+- `russian_post_domestic_courier`
+
+Обе службы доступны только для `RU`, используют локальный город/индекс из checkout context и не рассчитываются без валидного шестизначного `postal_code`. Технический индекс `999999999` считается отсутствующим индексом.
+
+## Tariff variants
+
+Внутренняя модель `DomesticTariffVariant` хранит `object_code`, `title`, `enabled`, `delivery_type`, `requires_declared_value`, `always_available`, weight limits и `sort_order`.
+
+Pickup variants: `27030`, `27020`, `4030`, `4020`, `47030`, `47020`, `54020`, `23030`, `23020`.
+
+Courier variants: `24030`, `24020`, `41030`, `52030`.
+
+Если `insurance_enabled=false`, resolver берет тарифы без объявленной ценности. Если `insurance_enabled=true`, берет declared-value аналоги. `54020` помечен `always_available`.
+
+## API
+
+`RussianPostDomesticApiClient` вызывает `GET /v2/calculate/tariff/delivery`. Runtime всегда передает:
+
+- `object`
+- `from`
+- `to`
+- `weight`
+- `date`
+- `pack=99`
+- `sumoc` только для declared-value variants
+
+В meta сохраняются нормализованные поля `pay`, `nds`, `paynds`, `delivery_min_days`, `delivery_max_days`, `transtype`, `delivery_to`, `items_summary`, request params и cache/debug metadata. Полный raw response в order calculation payload не сохраняется.
+
+## Pickup without selector
+
+Pickup variants выставляют `no_pickup_selection=true`. Это означает доставку до почтового отделения по индексу, без выбора ПВЗ в checkout.

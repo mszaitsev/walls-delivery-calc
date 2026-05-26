@@ -75,3 +75,6 @@ php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=10
 ```
 
 Version 0.21.6 moves packaging weight into the new `src/` foundation. Global tiers live on `Правила расчета -> Упаковка` as `packaging_weight_tiers`; services choose whether to include packaging and whether to apply it as `total_weight` or a `WDC_PACKAGING` virtual package item. Russian Post international uses final total weight.
+# Russian Post domestic foundation
+
+This branch adds the foundation for `russian_post_domestic` with pickup/courier services, domestic tariff variants, `pack=99` tariff requests, declared-value `sumoc`, checkout tariff selector, delivery range rules, selected-tariff session persistence and public order meta for service/tariff/delivery range.

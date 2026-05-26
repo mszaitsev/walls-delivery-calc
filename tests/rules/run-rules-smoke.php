@@ -169,6 +169,9 @@ $context_with_days = RuleEvaluationContext::from_array( array_merge( rules_conte
 $result = $engine->apply_rules( array( $delivery_days_rule ), $context_with_days );
 rules_smoke_assert( 7 === $result->final_delivery_days?->min_days, 'Delivery days increase must use the original delivery days.' );
 rules_smoke_assert( DateRange::UNIT_BUSINESS_DAYS === $result->final_delivery_days?->unit, 'change_delivery_days must support business_days.' );
+$context_with_range = RuleEvaluationContext::from_array( array_merge( rules_context()->to_array(), array( 'meta' => array( 'original_delivery_min_days' => 5, 'original_delivery_max_days' => 6 ) ) ) );
+$result = $engine->apply_rules( array( $delivery_days_rule ), $context_with_range );
+rules_smoke_assert( 7 === $result->final_delivery_days?->min_days && 8 === $result->final_delivery_days?->max_days, 'Delivery day rules must preserve and shift ranges.' );
 
 $calendar_days_rule = Rule::from_array(
 	array(

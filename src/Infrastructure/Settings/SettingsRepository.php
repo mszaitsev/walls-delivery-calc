@@ -64,6 +64,21 @@ final class SettingsRepository {
 				'cache_until_end_of_day'  => true,
 				'auto_refresh_countries_if_empty' => false,
 			),
+			'russian_post_domestic' => array(
+				'enabled' => true,
+				'api_endpoint' => 'https://tariff.pochta.ru/v2/calculate/tariff/delivery',
+				'api_token' => '',
+				'from_postcodes' => array( '630005' ),
+				'default_from_postcode' => '630005',
+				'return_postcode' => '630005',
+				'insurance_enabled' => false,
+				'timeout' => 20,
+				'vat_rate' => 0.2,
+				'fallback_enabled' => false,
+				'fallback_text' => 'Стоимость доставки рассчитает менеджер',
+				'cache_until_end_of_day' => true,
+				'debug' => false,
+			),
 			'packaging_weight_tiers'       => array(),
 		);
 	}

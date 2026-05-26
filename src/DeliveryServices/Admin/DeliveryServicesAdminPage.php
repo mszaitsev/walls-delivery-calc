@@ -5,6 +5,8 @@ namespace WallsShop\WDC\DeliveryServices\Admin;
 
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostCountriesAdminPage;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
@@ -72,7 +74,7 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
-		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation' ), true ) ) {
+		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs' ), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -80,10 +82,15 @@ final class DeliveryServicesAdminPage {
 				'save_calculation' => $this->sanitize_calculation_data(),
 				default => $this->sanitize_service_data(),
 			};
-			if ( $id > 0 ) {
+			if ( 'save_tariffs' === $action ) {
+				$data = array();
+			}
+			if ( $id > 0 && array() !== $data ) {
 				$this->services->update_service( $id, $data );
 			} else {
-				$id = $this->services->create_service( $data );
+				if ( array() !== $data ) {
+					$id = $this->services->create_service( $data );
+				}
 			}
 			if ( 'save' === $action || 'save_availability' === $action ) {
 				$this->countries->replace_countries( $id, $this->countries_from_post() );
@@ -92,6 +99,12 @@ final class DeliveryServicesAdminPage {
 				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
 				if ( $service instanceof DeliveryService && RussianPostSettings::SERVICE_KEY === $service->service_key && null !== $service->id ) {
 					$this->save_russian_post_settings( (int) $service->id );
+				}
+			}
+			if ( 'save_tariffs' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
+				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
+				if ( $service instanceof DeliveryService && $this->is_domestic_service( $service ) && null !== $service->id ) {
+					$this->settings->set_setting( (int) $service->id, 'tariff_variants', $this->sanitize_domestic_tariff_variants_from_post(), 'json' );
 				}
 			}
 		}
@@ -118,11 +131,12 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation' ), true ) ) {
+		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs' ), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'availability',
 				'save_calculation' => 'calculation',
+				'save_tariffs' => 'tariffs',
 				default => 'main',
 			};
 			if ( '' !== $service_key ) {
@@ -225,6 +239,9 @@ final class DeliveryServicesAdminPage {
 		if ( RussianPostSettings::SERVICE_KEY === $service->service_key ) {
 			$tabs['russian_post_countries'] = 'Страны Почты России';
 		}
+		if ( $this->is_domestic_service( $service ) ) {
+			$tabs['tariffs'] = 'Tariffs';
+		}
 		?>
 		<h2><?php echo esc_html( $service->title ); ?></h2>
 		<nav class="nav-tab-wrapper">
@@ -237,6 +254,7 @@ final class DeliveryServicesAdminPage {
 			'availability' => $this->render_availability_tab( $service ),
 			'calculation' => $this->render_calculation_tab( $service ),
 			'rules' => $this->render_rules_tab( $service ),
+			'tariffs' => $this->render_tariffs_tab( $service ),
 			'russian_post_countries' => $this->render_russian_post_countries_tab( $service ),
 			default => $this->render_main_tab( $service ),
 		};
@@ -329,6 +347,39 @@ final class DeliveryServicesAdminPage {
 		}
 
 		$this->russian_post_countries->render_embedded( $this->service_tab_url( $service, 'russian_post_countries' ) );
+	}
+
+	private function render_tariffs_tab( DeliveryService $service ): void {
+		if ( ! $this->is_domestic_service( $service ) ) {
+			return;
+		}
+		$variants = $this->domestic_tariff_variants( $service );
+		?>
+		<form method="post" style="margin-top:16px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="save_tariffs">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+		<table class="widefat striped">
+			<thead><tr><th>Enabled</th><th>Sort</th><th>Object code</th><th>Title</th><th>Delivery type</th><th>Weight limits</th><th>Declared value</th></tr></thead>
+			<tbody>
+				<?php foreach ( $variants as $variant ) : ?>
+					<tr>
+						<td><input type="checkbox" name="tariff_enabled[<?php echo esc_attr( (string) $variant->object_code ); ?>]" value="1" <?php checked( $variant->enabled ); ?>></td>
+						<td><input class="small-text" name="tariff_sort[<?php echo esc_attr( (string) $variant->object_code ); ?>]" value="<?php echo esc_attr( (string) $variant->sort_order ); ?>"></td>
+						<td><?php echo esc_html( (string) $variant->object_code ); ?></td>
+						<td><?php echo esc_html( $variant->title ); ?></td>
+						<td><?php echo esc_html( $variant->delivery_type ); ?></td>
+						<td><?php echo esc_html( trim( (string) ( $variant->min_weight_g ?? '' ) . '-' . (string) ( $variant->max_weight_g ?? '' ), '-' ) ?: '-' ); ?></td>
+						<td><?php echo esc_html( $variant->requires_declared_value ? 'yes' : ( $variant->always_available ? 'always' : 'no' ) ); ?></td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
+		<?php submit_button( __( 'Save tariffs', 'walls-delivery-calc' ) ); ?>
+		</form>
+		<p><?php echo esc_html__( 'Domestic tariffs are resolved inside the service. Declared-value variants follow insurance_enabled; 54020 remains always available.', 'walls-delivery-calc' ); ?></p>
+		<?php
 	}
 
 	private function render_rules_tab( DeliveryService $service ): void {
@@ -602,6 +653,56 @@ final class DeliveryServicesAdminPage {
 		$saved = $this->settings instanceof DeliveryServiceSettingsRepository && null !== $service->id ? $this->settings->all_settings( (int) $service->id ) : array();
 
 		return array_merge( $defaults, $saved );
+	}
+
+	/**
+	 * @return array<int,\WallsShop\WDC\Carriers\RussianPost\DomesticTariffVariant>
+	 */
+	private function domestic_tariff_variants( DeliveryService $service ): array {
+		$defaults = ( new RussianPostDomesticTariffVariantResolver() )->defaults();
+		$saved = $this->settings instanceof DeliveryServiceSettingsRepository && null !== $service->id ? $this->settings->get_setting( (int) $service->id, 'tariff_variants', array() ) : array();
+		if ( ! is_array( $saved ) || array() === $saved ) {
+			return $defaults;
+		}
+		$by_code = array();
+		foreach ( $saved as $row ) {
+			if ( is_array( $row ) && isset( $row['object_code'] ) ) {
+				$by_code[ (int) $row['object_code'] ] = $row;
+			}
+		}
+
+		return array_map(
+			static fn ( $variant ) => isset( $by_code[ $variant->object_code ] )
+				? \WallsShop\WDC\Carriers\RussianPost\DomesticTariffVariant::from_array( array_merge( $variant->to_array(), $by_code[ $variant->object_code ] ) )
+				: $variant,
+			$defaults
+		);
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function sanitize_domestic_tariff_variants_from_post(): array {
+		$enabled = is_array( $_POST['tariff_enabled'] ?? null ) ? wp_unslash( $_POST['tariff_enabled'] ) : array();
+		$sort = is_array( $_POST['tariff_sort'] ?? null ) ? wp_unslash( $_POST['tariff_sort'] ) : array();
+		return array_map(
+			static function ( $variant ) use ( $enabled, $sort ): array {
+				$data = $variant->to_array();
+				$code = (string) $variant->object_code;
+				$data['enabled'] = isset( $enabled[ $code ] );
+				$data['sort_order'] = max( 0, (int) ( $sort[ $code ] ?? $variant->sort_order ) );
+
+				return $data;
+			},
+			( new RussianPostDomesticTariffVariantResolver() )->defaults()
+		);
+	}
+
+	private function is_domestic_service( ?DeliveryService $service ): bool {
+		return $service instanceof DeliveryService && (
+			RussianPostDomesticSettings::CARRIER_KEY === $service->carrier_key
+			|| in_array( $service->service_key, array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY, RussianPostDomesticSettings::COURIER_SERVICE_KEY ), true )
+		);
 	}
 
 	private function service_tab_url( DeliveryService $service, string $tab ): string {

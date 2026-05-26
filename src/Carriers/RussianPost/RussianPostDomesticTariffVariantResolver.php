@@ -1,0 +1,70 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\Carriers\RussianPost;
+
+use WallsShop\WDC\Domain\Quote\DeliveryType;
+
+defined( 'ABSPATH' ) || exit;
+
+final class RussianPostDomesticTariffVariantResolver {
+	/**
+	 * @param array<string,mixed> $settings
+	 * @return array<int,DomesticTariffVariant>
+	 */
+	public function variants( array $settings, string $delivery_type, int $weight_g ): array {
+		$configured = is_array( $settings['tariff_variants'] ?? null ) ? $settings['tariff_variants'] : array();
+		$variants = array() !== $configured
+			? array_map( static fn ( array $row ): DomesticTariffVariant => DomesticTariffVariant::from_array( $row ), array_filter( $configured, 'is_array' ) )
+			: $this->defaults();
+		$insurance_enabled = ! empty( $settings['insurance_enabled'] );
+		$variants = array_values(
+			array_filter(
+				$variants,
+				static fn ( DomesticTariffVariant $variant ): bool =>
+					$variant->enabled
+					&& $variant->delivery_type === $delivery_type
+					&& $variant->supports_weight( $weight_g )
+					&& ( $variant->always_available || $insurance_enabled === $variant->requires_declared_value )
+			)
+		);
+		usort( $variants, static fn ( DomesticTariffVariant $a, DomesticTariffVariant $b ): int => $a->sort_order <=> $b->sort_order ?: $a->object_code <=> $b->object_code );
+
+		return $variants;
+	}
+
+	/**
+	 * @return array<int,DomesticTariffVariant>
+	 */
+	public function defaults(): array {
+		$pickup = array(
+			array( 27030, 'Посылка онлайн с объявленной ценностью', true ),
+			array( 27020, 'Посылка онлайн', false ),
+			array( 4030, 'Посылка нестандартная с объявленной ценностью', true ),
+			array( 4020, 'Посылка нестандартная', false ),
+			array( 47030, 'Посылка 1 класса с объявленной ценностью', true ),
+			array( 47020, 'Посылка 1 класса', false ),
+			array( 54020, 'EMS оптимальное', false, true ),
+			array( 23030, 'Бандероль с объявленной ценностью', true ),
+			array( 23020, 'Бандероль', false ),
+		);
+		$courier = array(
+			array( 24030, 'EMS с объявленной ценностью', true ),
+			array( 24020, 'EMS', false ),
+			array( 41030, 'Курьер онлайн с объявленной ценностью', true ),
+			array( 52030, 'EMS тендер с объявленной ценностью', true ),
+		);
+		$result = array();
+		$sort = 10;
+		foreach ( $pickup as $item ) {
+			$result[] = new DomesticTariffVariant( $item[0], $item[1], true, DeliveryType::PICKUP, $item[2], (bool) ( $item[3] ?? false ), null, null, $sort );
+			$sort += 10;
+		}
+		foreach ( $courier as $item ) {
+			$result[] = new DomesticTariffVariant( $item[0], $item[1], true, DeliveryType::COURIER, $item[2], (bool) ( $item[3] ?? false ), null, null, $sort );
+			$sort += 10;
+		}
+
+		return $result;
+	}
+}

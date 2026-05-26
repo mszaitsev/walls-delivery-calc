@@ -72,3 +72,8 @@ For Russian Post the service simulation performs a real service quote first, usi
 Delivery services can save a structured order calculation payload under `_wdc_delivery_calculation_data`. It contains stable technical data for future carrier support: service/carrier ids, rate id, delivery type, pickup selection when applicable, destination, package weights, sanitized API fields, rule audit/formula, final price, fallback state, and delivery days when non-empty.
 
 For `russian_post_worldwide_parcel`, the normal WooCommerce shipping item meta shows only `Способ доставки: международная доставка Почтой России`. The order metabox `Калькулятор доставок` is the admin-facing place for calculation details: destination country, products/packaging/final API weight, API base price, VAT status, readable rules formula, and final result. Terminal fallback rates save fallback reason/text and final price `0`, but do not show rules because fallback bypasses rules and service post-processing.
+# Delivery services update
+
+Domestic Russian Post foundation adds built-in services for `russian_post_domestic_pickup` and `russian_post_domestic_courier`. Bootstrapping pins both to `RU`; the availability UI is informational for this carrier family.
+
+The service calculation settings continue to own comments, packaging weight inclusion, rounding, minimum price and default-rule fallback. Domestic-specific tariff variants are exposed on a Tariffs foundation tab and resolved at runtime per service.
