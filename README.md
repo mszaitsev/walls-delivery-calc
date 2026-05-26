@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.21.22.
+Version: 0.21.23.
+
+Version 0.21.23 protects predefined delivery services from deletion, keeps Russian Post domestic service bootstrap idempotent by service_key, renders domestic service simulation across active tariffs, and labels checkout/order shipping as `Почта России — {тариф}` without duplicating the delivery-days comment under the method.
 
 Version 0.21.22 preserves a valid user-selected Russian Post domestic tariff during repeated checkout recalculations; the first available tariff is saved only as an initial/default fallback.
 

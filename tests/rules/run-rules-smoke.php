@@ -173,6 +173,23 @@ $context_with_range = RuleEvaluationContext::from_array( array_merge( rules_cont
 $result = $engine->apply_rules( array( $delivery_days_rule ), $context_with_range );
 rules_smoke_assert( 7 === $result->final_delivery_days?->min_days && 8 === $result->final_delivery_days?->max_days, 'Delivery day rules must preserve and shift ranges.' );
 
+$calendar_increase_rule = Rule::from_array(
+	array(
+		'name'            => 'Calendar days +2',
+		'target_type'     => 'default',
+		'action_type'     => RuleActionTypes::CHANGE_DELIVERY_DAYS,
+		'operation_type'  => RuleOperationTypes::INCREASE,
+		'operation_value' => 2,
+		'operation_base'  => RuleOperationBases::CALENDAR_DAYS,
+	)
+);
+$result = $engine->apply_rules( array( $calendar_increase_rule ), RuleEvaluationContext::from_array( array_merge( rules_context()->to_array(), array( 'meta' => array( 'original_delivery_days' => 1 ) ) ) ) );
+rules_smoke_assert( 3 === $result->final_delivery_days?->min_days && 3 === $result->final_delivery_days?->max_days && DateRange::UNIT_CALENDAR_DAYS === $result->final_delivery_days?->unit, '1 calendar day +2 must become 3 calendar days.' );
+$result = $engine->apply_rules( array( $calendar_increase_rule ), RuleEvaluationContext::from_array( array_merge( rules_context()->to_array(), array( 'meta' => array( 'original_delivery_min_days' => 1, 'original_delivery_max_days' => 3 ) ) ) ) );
+rules_smoke_assert( 3 === $result->final_delivery_days?->min_days && 5 === $result->final_delivery_days?->max_days && DateRange::UNIT_CALENDAR_DAYS === $result->final_delivery_days?->unit, '1-3 calendar days +2 must become 3-5 calendar days.' );
+$result = $engine->apply_rules( array( $delivery_days_rule ), RuleEvaluationContext::from_array( array_merge( rules_context()->to_array(), array( 'meta' => array( 'original_delivery_min_days' => 1, 'original_delivery_max_days' => 3 ) ) ) ) );
+rules_smoke_assert( 3 === $result->final_delivery_days?->min_days && 5 === $result->final_delivery_days?->max_days && DateRange::UNIT_BUSINESS_DAYS === $result->final_delivery_days?->unit, '1-3 business days +2 must become 3-5 business days.' );
+
 $calendar_days_rule = Rule::from_array(
 	array(
 		'name'            => 'Calendar days default',

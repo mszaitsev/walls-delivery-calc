@@ -203,6 +203,47 @@ order_meta_smoke_assert( (bool) preg_grep( '/Итог: 5 338 руб\\./u', $calc
 order_meta_smoke_assert( ! (bool) preg_grep( '/Округление вверх → 0 руб\\./u', $calculation['rules']['formula_visualization'] ), 'Formula must not render zero rounding for non-fallback rates.' );
 order_meta_smoke_assert( ! isset( $calculation['result']['final_delivery_days_min'], $calculation['result']['final_delivery_days_max'] ), 'Empty Russian Post delivery days must not be saved.' );
 
+$domestic_rate = array(
+	'carrier_key' => 'russian_post_domestic',
+	'rate_id' => 'russian_post_domestic_pickup',
+	'delivery_type' => 'pickup',
+	'service_key' => 'russian_post_domestic_pickup',
+	'service_title' => 'Почта России — по России',
+	'tariff_key' => '23030',
+	'tariff_title' => 'Посылка онлайн',
+	'selected_tariff_object' => '23030',
+	'selected_tariff_title' => 'Посылка онлайн',
+	'planned_delivery_comment' => '5-6 дн.',
+	'delivery_days' => array( 'min_days' => 5, 'max_days' => 6, 'unit' => 'calendar_days' ),
+	'cost' => '450',
+	'comments' => array(),
+	'rate_meta' => array(
+		'postcode' => '630099',
+		'pay' => 45000,
+		'nds' => 0,
+		'paynds' => 45000,
+		'delivery_min_days' => 5,
+		'delivery_max_days' => 6,
+		'transtype' => 1,
+		'delivery_to' => '630099',
+		'items_summary' => array( array( 'name' => 'base', 'serviceon' => 1 ) ),
+		'package' => array( 'weight_g' => 1000 ),
+		'no_pickup_selection' => true,
+		'final_price_rub' => 450.0,
+		'rules_audit' => array(),
+	),
+);
+$session->save_rates( array( 'russian_post_domestic_pickup' => $domestic_rate ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_domestic_pickup' ) );
+$domestic_order = new WdcOrderMetaSmokeOrder();
+$persister->persist( $domestic_order, array() );
+$domestic_item = new WdcOrderMetaSmokeShippingItem();
+$persister->persist_shipping_item_meta( $domestic_item, 0, array(), $domestic_order );
+$domestic_calculation = $domestic_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
+order_meta_smoke_assert( '23030' === ( $domestic_calculation['selected_tariff_object'] ?? '' ) && 'Посылка онлайн' === ( $domestic_calculation['selected_tariff_title'] ?? '' ), 'Domestic order payload must save selected tariff object and title.' );
+order_meta_smoke_assert( 5 === ( $domestic_calculation['result']['final_delivery_days_min'] ?? 0 ) && 6 === ( $domestic_calculation['result']['final_delivery_days_max'] ?? 0 ), 'Domestic order payload must save delivery min/max.' );
+order_meta_smoke_assert( in_array( 'Посылка онлайн', $domestic_item->meta, true ), 'Domestic visible shipping item meta must show selected tariff title.' );
+
 ob_start();
 ( new OrderDeliveryMetabox() )->render( $order );
 $html = (string) ob_get_clean();

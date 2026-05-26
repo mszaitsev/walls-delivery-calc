@@ -217,6 +217,8 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 			);
 		}
 
+		$method_title = $this->domestic_method_title( $active );
+
 		return new DeliveryRate(
 			$service_key,
 			$active->carrier_key,
@@ -226,7 +228,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 			$active->tariff_key,
 			$active->tariff_name,
 			$active->delivery_type,
-			$active->service_name,
+			$method_title,
 			$active->price,
 			$active->original_price,
 			$active->crossed_price,
@@ -249,6 +251,15 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 				)
 			)
 		);
+	}
+
+	private function domestic_method_title( DeliveryRate $rate ): string {
+		$tariff = trim( $rate->tariff_name );
+		if ( '' === $tariff ) {
+			return $rate->service_name;
+		}
+
+		return 'Почта России — ' . $tariff;
 	}
 
 	private function sort_mode(): string {

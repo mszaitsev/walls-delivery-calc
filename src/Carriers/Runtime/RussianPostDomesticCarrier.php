@@ -103,7 +103,8 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 	 * @return array<string,scalar>
 	 */
 	private function request_params( array $settings, DomesticTariffVariant $variant, string $postcode, Package $package, QuoteRequest $request ): array {
-		$date = function_exists( 'wp_date' ) ? wp_date( 'Ymd' ) : gmdate( 'Ymd' );
+		$calculation_date = preg_match( '/^\d{4}-\d{2}-\d{2}$/', $request->calculation_date ) ? $request->calculation_date : '';
+		$date = '' !== $calculation_date ? str_replace( '-', '', $calculation_date ) : ( function_exists( 'wp_date' ) ? wp_date( 'Ymd' ) : gmdate( 'Ymd' ) );
 		$params = array(
 			'object' => $variant->object_code,
 			'from' => $this->from_postcode( $settings ),

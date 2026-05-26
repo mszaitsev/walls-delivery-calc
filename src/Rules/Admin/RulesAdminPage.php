@@ -765,6 +765,7 @@ final class RulesAdminPage {
 			'order_total'    => isset( $raw['order_total'] ) ? max( 0.0, RuleConditionUiSchema::normalize_decimal_input( $raw['order_total'] ) ) : $defaults['order_total'],
 			'weight'         => isset( $raw['weight'] ) ? max( 0, (int) sanitize_text_field( (string) $raw['weight'] ) ) : $defaults['weight'],
 			'country'        => isset( $raw['country'] ) ? sanitize_text_field( (string) $raw['country'] ) : $defaults['country'],
+			'postal_code'    => isset( $raw['postal_code'] ) ? sanitize_text_field( (string) $raw['postal_code'] ) : $defaults['postal_code'],
 			'city'           => isset( $raw['city'] ) ? sanitize_text_field( (string) $raw['city'] ) : $defaults['city'],
 			'location_fias_id' => isset( $raw['location_fias_id'] ) ? sanitize_text_field( (string) $raw['location_fias_id'] ) : $defaults['location_fias_id'],
 			'delivery_type'  => in_array( (string) ( $raw['delivery_type'] ?? '' ), array_keys( $this->condition_schema()->delivery_type_options() ), true ) ? sanitize_text_field( (string) $raw['delivery_type'] ) : $defaults['delivery_type'],
@@ -1009,7 +1010,10 @@ final class RulesAdminPage {
 
 	private function render_service_simulation_form(): void {
 		$input = $this->simulation_input + array(
-			'country' => 'US',
+			'country' => 'RU',
+			'city' => '',
+			'location_fias_id' => '',
+			'postal_code' => '',
 			'weight' => 1000,
 			'order_total' => 1000,
 			'date' => ( new DateTimeImmutable() )->format( 'Y-m-d' ),
@@ -1021,6 +1025,9 @@ final class RulesAdminPage {
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 				<input type="hidden" name="wdc_rules_action" value="simulate">
 				<div class="wdc-rule-grid">
+					<label><span><?php echo esc_html__( 'Населенный пункт', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[city]" value="<?php echo esc_attr( (string) $input['city'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'FIAS ID', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[location_fias_id]" value="<?php echo esc_attr( (string) $input['location_fias_id'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Индекс', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="numeric" name="simulation[postal_code]" value="<?php echo esc_attr( (string) $input['postal_code'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Страна назначения', 'walls-delivery-calc' ); ?></span><?php $this->render_select( 'simulation[country]', $this->country_options(), (string) $input['country'] ); ?></label>
 					<label><span><?php echo esc_html__( 'Вес товаров, г', 'walls-delivery-calc' ); ?></span><input type="number" min="0" name="simulation[weight]" value="<?php echo esc_attr( (string) $input['weight'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Сумма заказа, руб.', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[order_total]" value="<?php echo esc_attr( (string) $input['order_total'] ); ?>"></label>
@@ -1049,6 +1056,25 @@ final class RulesAdminPage {
 				<tr><th><?php echo esc_html__( 'Source/fallback/cache', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['source'] ?? '-' ) ); ?></td></tr>
 				<tr><th><?php echo esc_html__( 'Delivery days', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $result['delivery_days'] ?? '-' ) ); ?></td></tr>
 			</tbody></table>
+			<?php if ( ! empty( $result['tariffs'] ) && is_array( $result['tariffs'] ) ) : ?>
+				<h3><?php echo esc_html__( 'Активные тарифы', 'walls-delivery-calc' ); ?></h3>
+				<table class="widefat striped">
+					<thead><tr><th><?php echo esc_html__( 'Object code', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Тариф', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'API цена', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'API срок', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Итоговая цена', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Итоговый срок', 'walls-delivery-calc' ); ?></th></tr></thead>
+					<tbody>
+						<?php foreach ( $result['tariffs'] as $tariff ) : ?>
+							<?php if ( ! is_array( $tariff ) ) { continue; } ?>
+							<tr>
+								<td><?php echo esc_html( (string) ( $tariff['object_code'] ?? '' ) ); ?></td>
+								<td><?php echo esc_html( (string) ( $tariff['title'] ?? '' ) ); ?></td>
+								<td><?php echo esc_html( (string) ( $tariff['api_price'] ?? '' ) ); ?></td>
+								<td><?php echo esc_html( (string) ( $tariff['api_delivery_days'] ?? '' ) ); ?></td>
+								<td><?php echo esc_html( (string) ( $tariff['final_price'] ?? '' ) ); ?></td>
+								<td><?php echo esc_html( (string) ( $tariff['final_delivery_days'] ?? '' ) ); ?></td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+			<?php endif; ?>
 			<?php if ( ! empty( $result['notice'] ) ) : ?><div class="notice notice-info inline"><p><?php echo esc_html( (string) $result['notice'] ); ?></p></div><?php endif; ?>
 			<?php if ( ! empty( $result['audit'] ) && is_array( $result['audit'] ) ) : ?>
 				<h3><?php echo esc_html__( 'Rules audit', 'walls-delivery-calc' ); ?></h3>
@@ -1168,6 +1194,7 @@ final class RulesAdminPage {
 			'order_total'    => 1000,
 			'weight'         => 12000,
 			'country'        => 'RU',
+			'postal_code'    => '',
 			'city'           => 'Moscow',
 			'location_fias_id' => '',
 			'delivery_type'  => 'courier',

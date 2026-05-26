@@ -90,6 +90,13 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return true;
 		}
 		public function get_row( string $query, mixed $output = null ): ?array {
+			if ( str_contains( $query, 'wdc_delivery_services' ) && preg_match( '/WHERE id = ([0-9]+)/', $query, $matches ) ) {
+				foreach ( $this->services as $row ) {
+					if ( (int) $row['id'] === (int) $matches[1] ) {
+						return $row;
+					}
+				}
+			}
 			if ( str_contains( $query, 'wdc_rules' ) && preg_match( '/WHERE id = ([0-9]+)/', $query, $matches ) ) {
 				foreach ( $this->rules as $row ) {
 					if ( (int) $row['id'] === (int) $matches[1] ) {
@@ -132,7 +139,11 @@ if ( ! class_exists( 'wpdb' ) ) {
 				return $rows;
 			}
 			if ( str_contains( $query, 'wdc_delivery_services' ) ) {
-				return array_values( array_filter( $this->services, static fn ( array $row ): bool => empty( $row['deleted'] ) ) );
+				$rows = array_values( array_filter( $this->services, static fn ( array $row ): bool => empty( $row['deleted'] ) ) );
+				if ( preg_match( "/service_key = '([^']+)'/", $query, $matches ) ) {
+					$rows = array_values( array_filter( $rows, static fn ( array $row ): bool => (string) $row['service_key'] === $matches[1] ) );
+				}
+				return $rows;
 			}
 			if ( str_contains( $query, 'wdc_delivery_service_settings' ) && preg_match( '/service_id = ([0-9]+)/', $query, $matches ) ) {
 				return array_values( array_filter( $this->settings, static fn ( array $row ): bool => (int) $row['service_id'] === (int) $matches[1] ) );
@@ -179,6 +190,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 function dbDelta( string $sql ): void { $GLOBALS['wdc_db_delta'][] = $sql; }
 
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
@@ -218,6 +230,20 @@ wdc_ds_assert( RussianPostSettings::SERVICE_KEY === $rp->service_key, 'Russian P
 wdc_ds_assert( DeliveryService::AVAILABILITY_CARRIER_DIRECTORY === $rp->availability_mode, 'Russian Post service must use carrier_directory availability.' );
 wdc_ds_assert( true === $rp->include_packaging_weight && DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT === $rp->packaging_weight_mode, 'Russian Post service must default to total_weight packaging.' );
 wdc_ds_assert( array() === $GLOBALS['wpdb']->rules, 'Russian Post bootstrap must not auto-create rules.' );
+$services->ensure_russian_post_service();
+$rp_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => RussianPostSettings::SERVICE_KEY === (string) $row['service_key'] && empty( $row['deleted'] ) ) );
+wdc_ds_assert( 1 === count( $rp_rows ), 'Repeated Russian Post bootstrap must not create duplicate services.' );
+$services->soft_delete_service( (int) $rp->id );
+wdc_ds_assert( $services->find_by_service_key( RussianPostSettings::SERVICE_KEY ) instanceof DeliveryService, 'Predefined Russian Post service cannot be deleted.' );
+$domestic_services = $services->ensure_russian_post_domestic_services();
+$services->ensure_russian_post_domestic_services();
+$domestic_pickup_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) $row['service_key'] && empty( $row['deleted'] ) ) );
+$domestic_courier_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => RussianPostDomesticSettings::COURIER_SERVICE_KEY === (string) $row['service_key'] && empty( $row['deleted'] ) ) );
+wdc_ds_assert( 1 === count( $domestic_pickup_rows ) && 1 === count( $domestic_courier_rows ), 'Repeated domestic bootstrap must not create duplicate pickup/courier services.' );
+foreach ( $domestic_services as $domestic_service ) {
+	$services->soft_delete_service( (int) $domestic_service->id );
+	wdc_ds_assert( $services->find_by_service_key( $domestic_service->service_key ) instanceof DeliveryService, 'Predefined domestic service cannot be deleted: ' . $domestic_service->service_key );
+}
 
 $custom_id = $services->create_service( array( 'service_key' => 'fixed_test', 'service_type' => DeliveryService::TYPE_FIXED, 'title' => 'Fixed', 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES ) );
 $services->update_service( $custom_id, array( 'enabled' => 0, 'minimum_price_rub' => '10,5' ) );
