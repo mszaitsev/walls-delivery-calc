@@ -15,6 +15,7 @@ use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\DateRange;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
@@ -80,6 +81,9 @@ function wp_remote_get( string $url, array $args = array() ): array {
 		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'errorcode' => 42, 'errormsg' => 'bad domestic request' ) ) );
 	}
 	$object = (int) ( $params['object'] ?? 0 );
+	if ( 27030 === $object ) {
+		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'errorcode' => 27030, 'errormsg' => 'standard parcel fixture error' ) ) );
+	}
 	return array(
 		'response' => array( 'code' => 200 ),
 		'body' => json_encode(
@@ -166,10 +170,13 @@ $quote = $carrier->quote( $request );
 
 rpd_assert( $quote->has_available_rates(), 'Domestic pickup quote must return rates when postcode exists.' );
 $objects = array_map( static fn( $rate ): string => $rate->tariff_key, $quote->rates );
-rpd_assert( in_array( '4030', $objects, true ) && in_array( '27030', $objects, true ) && in_array( '23030', $objects, true ), 'Non-declared pickup variants must work when insurance is disabled.' );
+rpd_assert( in_array( '4030', $objects, true ) && in_array( '23030', $objects, true ), 'Non-declared pickup variants must work when insurance is disabled.' );
 rpd_assert( ! in_array( '4020', $objects, true ) && ! in_array( '27020', $objects, true ) && ! in_array( '23020', $objects, true ), 'Declared-value pickup variants must be hidden when insurance is disabled.' );
 rpd_assert( in_array( '54020', $objects, true ), '54020 must remain always available.' );
 rpd_assert( 99 === (int) $GLOBALS['wdc_rpd_requests'][0]['pack'], 'Domestic tariff requests must force pack=99.' );
+rpd_assert( 27030 === (int) $GLOBALS['wdc_rpd_requests'][0]['object'] && 99 === (int) $GLOBALS['wdc_rpd_requests'][0]['pack'], '27030 request must force pack=99.' );
+$skipped_27030 = $quote->raw_reference['skipped_tariffs'][0] ?? array();
+rpd_assert( 27030 === (int) ( $skipped_27030['object_code'] ?? 0 ) && 27030 === (int) ( $skipped_27030['api_errorcode'] ?? 0 ) && str_contains( (string) ( $skipped_27030['api_errormsg'] ?? '' ), 'standard parcel fixture error' ) && 99 === (int) ( $skipped_27030['request_params']['pack'] ?? 0 ), 'Skipped 27030 diagnostic must expose object, request params, API error, and pack=99.' );
 rpd_assert( ! isset( $GLOBALS['wdc_rpd_requests'][0]['sumoc'] ), 'Non-declared variants must not send sumoc.' );
 rpd_assert( ! empty( $quote->rates[0]->meta['no_pickup_selection'] ), 'Pickup variants must skip pickup selector.' );
 $item_summary = $quote->rates[0]->meta['items_summary'][0] ?? array();
@@ -186,8 +193,14 @@ rpd_assert( isset( $GLOBALS['wdc_rpd_requests'][0]['sumoc'] ), 'Declared-value v
 $settings->set( 'russian_post_domestic', array_merge( $settings->all()['russian_post_domestic'], array( 'insurance_enabled' => false ) ) );
 $courier = $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630099' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::COURIER_SERVICE_KEY ) ) );
 $courier_objects = array_map( static fn( $rate ): string => $rate->tariff_key, $courier->rates );
-rpd_assert( in_array( '41030', $courier_objects, true ) && in_array( '52030', $courier_objects, true ), '41030 and 52030 must be available without insurance.' );
+rpd_assert( in_array( '41030', $courier_objects, true ) && in_array( '52030', $courier_objects, true ) && in_array( '28030', $courier_objects, true ) && in_array( '7030', $courier_objects, true ), '41030, 52030, 28030, and 7030 must be available without insurance.' );
+rpd_assert( ! in_array( '28020', $courier_objects, true ) && ! in_array( '7020', $courier_objects, true ), 'Declared-value EMS courier variants must be hidden without insurance.' );
 rpd_assert( DeliveryType::COURIER === $courier->rates[0]->delivery_type && $courier->rates[0]->requires_courier_address, 'Courier variants must use courier delivery type.' );
+$settings->set( 'russian_post_domestic', array_merge( $settings->all()['russian_post_domestic'], array( 'insurance_enabled' => true ) ) );
+$courier_insured = $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630099' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::COURIER_SERVICE_KEY ) ) );
+$courier_insured_objects = array_map( static fn( $rate ): string => $rate->tariff_key, $courier_insured->rates );
+rpd_assert( in_array( '28020', $courier_insured_objects, true ) && in_array( '7020', $courier_insured_objects, true ), 'Declared-value EMS courier variants must be available with insurance.' );
+$settings->set( 'russian_post_domestic', array_merge( $settings->all()['russian_post_domestic'], array( 'insurance_enabled' => false ) ) );
 
 $GLOBALS['wdc_rpd_requests'] = array();
 $enriched = $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '', fias_id: 'fias-nsk' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY ) ) );
@@ -226,17 +239,17 @@ $rate_23030 = new DeliveryRate( 'russian_post_domestic_pickup:23030', RussianPos
 $rate_47030 = new DeliveryRate( 'russian_post_domestic_pickup:47030', RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::PICKUP_SERVICE_KEY, RussianPostDomesticSettings::PICKUP_SERVICE_TITLE, '47030', 'Посылка 1 класса', DeliveryType::PICKUP, 'Посылка 1 класса', Money::from_rubles( 659 ), null, Money::from_rubles( 700 ), DateRange::single( 3 ), '', '2-3 дн.', array(), false, '', false, false, array( 'tariff_selector_group' => true ) );
 $selected_rate = $selector_method->invoke( $method, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, array( $rate_23030, $rate_47030 ) );
 rpd_assert( $selected_rate instanceof DeliveryRate && 659.0 === $selected_rate->price->get_rubles() && '47030' === (string) ( $selected_rate->meta['selected_tariff_object'] ?? '' ), 'Selected domestic tariff must drive WC rate cost and selected object.' );
-rpd_assert( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ': Посылка 1 класса' === $selected_rate->title, 'Domestic grouped method title must include service and selected tariff titles.' );
-rpd_assert( '3 дн.' === (string) ( $selected_rate->meta['tariff_variants'][1]['planned_delivery_comment'] ?? '' ), 'Domestic selector variant row must use final delivery days comment.' );
+rpd_assert( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ': Посылка 1 класса - 3 дня' === $selected_rate->title, 'Domestic grouped method title must include service, selected tariff, and delivery days.' );
+rpd_assert( '3 дня' === (string) ( $selected_rate->meta['tariff_variants'][1]['planned_delivery_comment'] ?? '' ), 'Domestic selector variant row must use final delivery days comment.' );
 rpd_assert( is_array( $selected_rate->meta['tariff_variants'][1]['crossed_price'] ?? null ), 'Domestic selector variant row must keep crossed price per variant.' );
 $selected_rate_again = $selector_method->invoke( $method, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, array( $rate_23030, $rate_47030 ) );
 $selected_session = $session_manager->selected_tariff( RussianPostDomesticSettings::PICKUP_SERVICE_KEY );
 rpd_assert( $selected_rate_again instanceof DeliveryRate && 659.0 === $selected_rate_again->price->get_rubles() && '47030' === (string) ( $selected_session['object_code'] ?? '' ), 'Repeated tariff selector calculation must not reset valid selected tariff to the first variant.' );
 $single_rate = $selector_method->invoke( $method, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, array( $rate_23030 ) );
-rpd_assert( array() === ( $single_rate->meta['tariff_variants'] ?? array() ) && RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ': Посылка онлайн' === $single_rate->title, 'Single-tariff domestic service must not expose radio selector variants.' );
+rpd_assert( array() === ( $single_rate->meta['tariff_variants'] ?? array() ) && RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ': Посылка онлайн - 5-6 дней' === $single_rate->title, 'Single-tariff domestic service must not expose radio selector variants.' );
 $mapper = new WooCommerceRateMapper();
 $mapped_single_rate = $mapper->map( $single_rate );
-rpd_assert( $single_rate->title . ' - ' . $single_rate->planned_delivery_comment === $mapped_single_rate['label'], 'Single-tariff domestic grouped label must include planned delivery comment.' );
+rpd_assert( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ': Посылка онлайн - 5-6 дней' === $mapped_single_rate['label'], 'Single-tariff domestic grouped label must include planned delivery comment.' );
 rpd_assert( true === ( $mapped_single_rate['meta_data']['domestic_tariff_grouped'] ?? false ), 'Single-tariff domestic grouped meta must keep grouped marker for checkout rendering.' );
 $single_wc_rate = new class( $mapped_single_rate['meta_data'] ) {
 	/** @param array<string,mixed> $meta */
@@ -249,12 +262,14 @@ ob_start();
 $single_rate_html = (string) ob_get_clean();
 rpd_assert( ! str_contains( $single_rate_html, 'wdc-platform-delivery-comment' ) && ! str_contains( $single_rate_html, $single_rate->planned_delivery_comment ), 'Single-tariff domestic grouped planned delivery comment must stay in the label only.' );
 $mapped_multi_rate = $mapper->map( $selected_rate );
-rpd_assert( $selected_rate->title === $mapped_multi_rate['label'], 'Multi-tariff domestic grouped label must keep delivery days only in selector rows.' );
+rpd_assert( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ': Посылка 1 класса - 3 дня' === $mapped_multi_rate['label'], 'Multi-tariff domestic grouped label must include selected tariff delivery days.' );
+rpd_assert( '1 день' === DeliveryDaysFormatter::format( DateRange::single( 1 ) ) && '3 дня' === DeliveryDaysFormatter::format( DateRange::single( 3 ) ) && '5 дней' === DeliveryDaysFormatter::format( DateRange::single( 5 ) ) && '21 день' === DeliveryDaysFormatter::format( DateRange::single( 21 ) ), 'Delivery days formatter must use Russian singular/plural forms.' );
+rpd_assert( '1-3 дня' === DeliveryDaysFormatter::format( DateRange::range( 1, 3 ) ) && '3-5 дней' === DeliveryDaysFormatter::format( DateRange::range( 3, 5 ) ), 'Delivery days formatter must use Russian range suffixes.' );
 $rates_for_wc = $method_reflection->getMethod( 'rates_for_wc' );
 $rates_for_wc->setAccessible( true );
 $rate_24030 = new DeliveryRate( 'russian_post_domestic_courier:24030', RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::COURIER_SERVICE_KEY, RussianPostDomesticSettings::COURIER_SERVICE_TITLE, '24030', 'Курьер онлайн', DeliveryType::COURIER, 'Курьер онлайн', Money::from_rubles( 800 ), null, null, DateRange::single( 1 ), '', '1 дн.', array(), false, '', false, true, array( 'tariff_selector_group' => true ) );
 $grouped_rates = $rates_for_wc->invoke( $method, array( $rate_23030, $rate_47030, $rate_24030 ) );
 rpd_assert( 2 === count( $grouped_rates ) && RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $grouped_rates[0]->service_key && RussianPostDomesticSettings::COURIER_SERVICE_KEY === $grouped_rates[1]->service_key, 'Pickup and courier domestic services must become separate grouped checkout methods.' );
-rpd_assert( RussianPostDomesticSettings::COURIER_SERVICE_TITLE . ': Курьер онлайн' === $grouped_rates[1]->title, 'Courier grouped method title must include courier service and tariff titles.' );
+rpd_assert( RussianPostDomesticSettings::COURIER_SERVICE_TITLE . ': Курьер онлайн - 1 день' === $grouped_rates[1]->title, 'Courier grouped method title must include courier service, tariff title, and delivery days.' );
 
 echo "Russian Post domestic smoke OK\n";

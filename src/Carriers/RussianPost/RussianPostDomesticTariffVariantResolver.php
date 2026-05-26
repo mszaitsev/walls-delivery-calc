@@ -51,6 +51,10 @@ final class RussianPostDomesticTariffVariantResolver {
 		$courier = array(
 			array( 24030, 'Курьер онлайн', false ),
 			array( 24020, 'Курьер онлайн с объявленной ценностью', true ),
+			array( 28030, 'Посылка курьер EMS', false ),
+			array( 28020, 'Посылка курьер EMS с объявленной ценностью', true ),
+			array( 7030, 'EMS', false ),
+			array( 7020, 'EMS с объявленной ценностью', true ),
 			array( 41030, 'EMS РТ', false ),
 			array( 52030, 'EMS Тендер обыкновенное', false ),
 		);

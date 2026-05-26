@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.21.26.
+Version: 0.21.27.
+
+Version 0.21.27 adds skipped-tariff diagnostics for Russian Post domestic API errors, extends courier variants with EMS object codes `28030`, `28020`, `7030`, and `7020`, formats delivery days with Russian plural forms, and makes domestic checkout/order method titles include service, selected tariff, and delivery range.
 
 Version 0.21.26 keeps Russian Post domestic single-tariff grouped delivery days in the WooCommerce method label, suppresses the separate planned-delivery line for that single-tariff case, and leaves multi-tariff timing only inside selector rows.
 
@@ -77,13 +79,13 @@ Version 0.21.20 adds `--insecure` to the Russian Post domestic probe for local W
 PowerShell Russian Post domestic probe:
 
 ```powershell
-php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=101000 --weight=1000 --objects=27030,27020,4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020
+php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=101000 --weight=1000 --objects=27030,27020,4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020,28030,28020,7030,7020
 ```
 
 Local Windows probe when PHP reports a self-signed certificate chain and the trust store is not configured:
 
 ```powershell
-php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=101000 --weight=1000 --objects=27030,27020,4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020 --insecure
+php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=101000 --weight=1000 --objects=27030,27020,4030,4020,47030,47020,54020,41030,52030,23030,23020,24030,24020,28030,28020,7030,7020 --insecure
 ```
 
 Version 0.21.6 moves packaging weight into the new `src/` foundation. Global tiers live on `Правила расчета -> Упаковка` as `packaging_weight_tiers`; services choose whether to include packaging and whether to apply it as `total_weight` or a `WDC_PACKAGING` virtual package item. Russian Post international uses final total weight.

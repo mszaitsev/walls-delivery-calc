@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Orders\Admin;
 
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -274,17 +275,7 @@ final class OrderDeliveryMetabox {
 	 * @param array<string,mixed> $result
 	 */
 	private function delivery_days_label( array $result ): string {
-		$min = $result['final_delivery_days_min'] ?? null;
-		$max = $result['final_delivery_days_max'] ?? null;
-		if ( ! is_numeric( $min ) && ! is_numeric( $max ) ) {
-			return '';
-		}
-
-		if ( is_numeric( $min ) && is_numeric( $max ) && (int) $min !== (int) $max ) {
-			return (int) $min . '-' . (int) $max . ' дн.';
-		}
-
-		return (string) (int) ( is_numeric( $min ) ? $min : $max ) . ' дн.';
+		return DeliveryDaysFormatter::format_values( $result['final_delivery_days_min'] ?? null, $result['final_delivery_days_max'] ?? null );
 	}
 
 	private function city_summary( object $order ): string {

@@ -218,7 +218,7 @@ $domestic_rate = array(
 	'tariff_title' => 'Посылка онлайн',
 	'selected_tariff_object' => '23030',
 	'selected_tariff_title' => 'Посылка онлайн',
-	'planned_delivery_comment' => '3 дн.',
+	'planned_delivery_comment' => '3 дня',
 	'delivery_days' => array( 'min_days' => 3, 'max_days' => 3, 'unit' => 'calendar_days' ),
 	'cost' => '450',
 	'comments' => array(),
@@ -248,7 +248,13 @@ $domestic_calculation = $domestic_order->meta[ OrderShippingMetaPersister::CALCU
 order_meta_smoke_assert( '23030' === ( $domestic_calculation['selected_tariff_object'] ?? '' ) && 'Посылка онлайн' === ( $domestic_calculation['selected_tariff_title'] ?? '' ), 'Domestic order payload must save selected tariff object and title.' );
 order_meta_smoke_assert( 3 === ( $domestic_calculation['result']['final_delivery_days_min'] ?? 0 ) && 3 === ( $domestic_calculation['result']['final_delivery_days_max'] ?? 0 ), 'Domestic order payload must save final delivery min/max after rules.' );
 order_meta_smoke_assert( in_array( 'Посылка онлайн', $domestic_item->meta, true ), 'Domestic visible shipping item meta must show selected tariff title.' );
-order_meta_smoke_assert( 'Почта России — до отделения: Посылка онлайн' === $domestic_item->method_title, 'Domestic shipping item method title must include service and selected tariff.' );
+order_meta_smoke_assert( in_array( '3 дня', $domestic_item->meta, true ), 'Domestic visible shipping item meta must show formatted delivery days.' );
+order_meta_smoke_assert( 'Почта России — до отделения: Посылка онлайн - 3 дня' === $domestic_item->method_title, 'Domestic shipping item method title must include service, selected tariff, and delivery days.' );
+
+ob_start();
+( new OrderDeliveryMetabox() )->render( $domestic_order );
+$domestic_html = (string) ob_get_clean();
+order_meta_smoke_assert( str_contains( $domestic_html, '3 дня' ) && ! str_contains( $domestic_html, '3 дн.' ), 'Domestic order metabox must render formatted Russian delivery days.' );
 
 ob_start();
 ( new OrderDeliveryMetabox() )->render( $order );

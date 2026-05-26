@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Checkout\Runtime;
 
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Common\DateRange;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
 use WallsShop\WDC\Rules\Services\RuleEngine;
@@ -60,13 +61,6 @@ final class RuleAppliedRateBuilder {
 	}
 
 	private function delivery_comment( DateRange $range ): string {
-		if ( $range->is_empty() ) {
-			return '';
-		}
-		if ( $range->min_days === $range->max_days ) {
-			return (string) $range->min_days . ' дн.';
-		}
-
-		return (string) $range->min_days . '-' . (string) $range->max_days . ' дн.';
+		return DeliveryDaysFormatter::format( $range );
 	}
 }

@@ -10,6 +10,7 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
 use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
 use WallsShop\WDC\Domain\Carrier\CarrierIdentity;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
@@ -74,24 +75,28 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 		}
 
 		$rates = array();
+		$skipped = array();
 		foreach ( $variants as $variant ) {
 			$params = $this->request_params( $settings, $variant, $postcode, $package, $request );
 			$cache_key = $this->api_cache_key( $service_key, $postcode, $params );
 			$api_result = $this->cached_api_result( $cache_key, $params, $service_key );
 			if ( empty( $api_result['success'] ) || ! is_array( $api_result['parsed'] ?? null ) ) {
-				$this->debug( 'Russian Post domestic variant skipped after API error.', array( 'object' => $variant->object_code, 'api_result' => $api_result ), $service_key );
+				$skipped[] = $this->skipped_variant( $variant, $params, $api_result, 'api_error' );
+				$this->debug( 'Russian Post domestic variant skipped after API error.', array( 'object_code' => $variant->object_code, 'request_params' => $params, 'api_result' => $api_result ), $service_key );
 				continue;
 			}
 			$parsed = $api_result['parsed'];
 			$price_kopecks = $this->price_kopecks( $parsed );
 			if ( null === $price_kopecks || $price_kopecks <= 0 ) {
+				$skipped[] = $this->skipped_variant( $variant, $params, $api_result, 'empty_price' );
+				$this->debug( 'Russian Post domestic variant skipped after empty price.', array( 'object_code' => $variant->object_code, 'request_params' => $params, 'api_result' => $api_result ), $service_key );
 				continue;
 			}
 
 			$rates[] = $this->rate_from_result( $service_key, $delivery_type, $variant, $postcode, $params, $api_result, $parsed, $price_kopecks, $package );
 		}
 
-		return new DeliveryQuote( $this->quote_id( $request, $package, $service_key ), self::KEY, $request->destination, $package, $rates, true, array() === $rates ? 'no_tariffs_available' : '', '', false, 'api', array( 'postcode' => $postcode, 'service_key' => $service_key ) );
+		return new DeliveryQuote( $this->quote_id( $request, $package, $service_key ), self::KEY, $request->destination, $package, $rates, true, array() === $rates ? 'no_tariffs_available' : '', '', false, 'api', array( 'postcode' => $postcode, 'service_key' => $service_key, 'skipped_tariffs' => $skipped ) );
 	}
 
 	private function empty_quote( QuoteRequest $request, string $reason ): DeliveryQuote {
@@ -334,14 +339,31 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 	}
 
 	private function delivery_comment( DateRange $range ): string {
-		if ( $range->is_empty() ) {
-			return '';
-		}
-		if ( $range->min_days === $range->max_days ) {
-			return (string) $range->min_days . ' дн.';
-		}
+		return DeliveryDaysFormatter::format( $range );
+	}
 
-		return (string) $range->min_days . '-' . (string) $range->max_days . ' дн.';
+	/**
+	 * @param array<string,scalar> $params
+	 * @param array<string,mixed>  $api_result
+	 * @return array<string,mixed>
+	 */
+	private function skipped_variant( DomesticTariffVariant $variant, array $params, array $api_result, string $reason ): array {
+		$raw = is_array( $api_result['raw'] ?? null ) ? $api_result['raw'] : array();
+
+		return array_filter(
+			array(
+				'object_code' => $variant->object_code,
+				'title' => $variant->title,
+				'reason' => $reason,
+				'request_params' => $params,
+				'http_code' => (int) ( $api_result['http_code'] ?? 0 ),
+				'error_code' => (string) ( $api_result['error_code'] ?? '' ),
+				'error_message' => (string) ( $api_result['error_message'] ?? '' ),
+				'api_errorcode' => $raw['errorcode'] ?? null,
+				'api_errormsg' => $raw['errormsg'] ?? null,
+			),
+			static fn ( mixed $value ): bool => null !== $value && '' !== $value && array() !== $value
+		);
 	}
 
 	private function quote_id( QuoteRequest $request, Package $package, string $salt ): string {

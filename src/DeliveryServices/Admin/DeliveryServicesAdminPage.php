@@ -17,6 +17,8 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Common\DateRange;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
@@ -886,19 +888,15 @@ final class DeliveryServicesAdminPage {
 			'package_weight_with_packaging_g' => $packaging->final_package_weight_g,
 			'packaging_weight_mode' => $packaging->packaging_weight_mode,
 			'source' => $quote->source . ( '' !== $quote->error_code ? ' / ' . $quote->error_code : '' ),
+			'skipped_tariffs' => is_array( $quote->raw_reference['skipped_tariffs'] ?? null ) ? $quote->raw_reference['skipped_tariffs'] : array(),
 			'audit' => $audit,
 			'notice' => array() === $rows ? ( $quote->error_message ?: $quote->error_code ) : '',
 		);
 	}
 
-	private function range_label( \WallsShop\WDC\Domain\Common\DateRange $range ): string {
-		if ( $range->is_empty() ) {
-			return '-';
-		}
-		if ( $range->min_days === $range->max_days ) {
-			return (string) $range->min_days;
-		}
+	private function range_label( DateRange $range ): string {
+		$label = DeliveryDaysFormatter::format( $range );
 
-		return trim( (string) ( $range->min_days ?? '-' ) . '-' . (string) ( $range->max_days ?? '-' ), '-' );
+		return '' !== $label ? $label : '-';
 	}
 }

@@ -619,8 +619,8 @@ runtime_smoke_assert( str_contains( $rate_renderer_source, "empty( \$meta['domes
 runtime_smoke_assert( str_contains( $rate_renderer_source, 'count( $variants ) < 2' ), 'Domestic tariff selector must not render radio list for a single tariff.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, "wdc-domestic-tariff-selector__crossed-price" ), 'Domestic tariff selector must render per-variant crossed price.' );
 runtime_smoke_assert( str_contains( $rate_mapper_source, "'domestic_tariff_grouped'" ), 'WooCommerce rate meta must expose the domestic grouped marker to checkout rendering.' );
-runtime_smoke_assert( str_contains( $new_shipping_method_source, 'domestic_method_title' ) && str_contains( $new_shipping_method_source, "\$rate->service_name . ': ' . \$tariff" ), 'Domestic grouped method label must include service and selected tariff titles.' );
-runtime_smoke_assert( str_contains( $new_shipping_method_source, '$this->delivery_comment( $rate->delivery_days )' ), 'Domestic selector rows must derive delivery comments from final delivery days.' );
+runtime_smoke_assert( str_contains( $new_shipping_method_source, 'domestic_method_title' ) && str_contains( $new_shipping_method_source, "\$title . ' - ' . \$days" ), 'Domestic grouped method label must include service, selected tariff, and delivery days.' );
+runtime_smoke_assert( str_contains( $new_shipping_method_source, '$this->delivery_comment( $rate->delivery_days )' ) && str_contains( $new_shipping_method_source, 'DeliveryDaysFormatter::format' ), 'Domestic selector rows must derive formatted delivery comments from final delivery days.' );
 runtime_smoke_assert( str_contains( $checkout_rates_css, '.wdc-platform-delivery-comment' ) && str_contains( $checkout_rates_css, 'flex-basis: 100%' ) && str_contains( $checkout_rates_css, '.wdc-shipping-rate-comment' ) && str_contains( $checkout_rates_css, 'display: block' ), 'Checkout comments CSS must force each service/rule comment onto its own line.' );
 $src_iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . '/src' ) );
 foreach ( $src_iterator as $src_file ) {

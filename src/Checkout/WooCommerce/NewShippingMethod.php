@@ -6,6 +6,8 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\Domain\Common\DateRange;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
@@ -257,21 +259,17 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	private function domestic_method_title( DeliveryRate $rate ): string {
 		$tariff = trim( $rate->tariff_name );
 		if ( '' === $tariff ) {
-			return $rate->service_name;
+			$title = $rate->service_name;
+		} else {
+			$title = $rate->service_name . ': ' . $tariff;
 		}
+		$days = $this->delivery_comment( $rate->delivery_days );
 
-		return $rate->service_name . ': ' . $tariff;
+		return '' !== $days ? $title . ' - ' . $days : $title;
 	}
 
-	private function delivery_comment( \WallsShop\WDC\Domain\Common\DateRange $range ): string {
-		if ( $range->is_empty() ) {
-			return '';
-		}
-		if ( $range->min_days === $range->max_days ) {
-			return (string) $range->min_days . ' дн.';
-		}
-
-		return (string) $range->min_days . '-' . (string) $range->max_days . ' дн.';
+	private function delivery_comment( DateRange $range ): string {
+		return DeliveryDaysFormatter::format( $range );
 	}
 
 	private function sort_mode(): string {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
 
 defined( 'ABSPATH' ) || exit;
@@ -338,15 +339,7 @@ final class OrderShippingMetaPersister {
 	 * @param array<string,mixed> $delivery_days
 	 */
 	private function delivery_days_label( array $delivery_days ): string {
-		$min = $delivery_days['min_days'] ?? $delivery_days['min'] ?? null;
-		$max = $delivery_days['max_days'] ?? $delivery_days['max'] ?? null;
-		if ( ! is_numeric( $min ) && ! is_numeric( $max ) ) {
-			return '';
-		}
-		$min = is_numeric( $min ) ? (int) $min : (int) $max;
-		$max = is_numeric( $max ) ? (int) $max : $min;
-
-		return $min === $max ? $min . ' дней' : $min . '-' . $max . ' дней';
+		return DeliveryDaysFormatter::format_array( $delivery_days );
 	}
 
 	/**
@@ -362,7 +355,10 @@ final class OrderShippingMetaPersister {
 			return $service_title;
 		}
 
-		return $service_title . ': ' . $tariff_title;
+		$title = $service_title . ': ' . $tariff_title;
+		$delivery = $this->delivery_days_label( is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array() );
+
+		return '' !== $delivery ? $title . ' - ' . $delivery : $title;
 	}
 
 	/**

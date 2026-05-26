@@ -13,7 +13,7 @@ final class WooCommerceRateMapper {
 	 */
 	public function map( DeliveryRate $rate, bool $fallback_used = false ): array {
 		$label = $rate->title;
-		if ( empty( $rate->meta['tariff_variants'] ) && '' !== trim( $rate->planned_delivery_comment ) ) {
+		if ( empty( $rate->meta['domestic_tariff_grouped'] ) && empty( $rate->meta['tariff_variants'] ) && '' !== trim( $rate->planned_delivery_comment ) ) {
 			$label .= ' - ' . $rate->planned_delivery_comment;
 		}
 

@@ -8,6 +8,7 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\DateRange;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
 use WallsShop\WDC\Domain\Package\PackageItem;
@@ -1072,6 +1073,24 @@ final class RulesAdminPage {
 					</tbody>
 				</table>
 			<?php endif; ?>
+			<?php if ( ! empty( $result['skipped_tariffs'] ) && is_array( $result['skipped_tariffs'] ) ) : ?>
+				<h3><?php echo esc_html__( 'Пропущенные тарифы', 'walls-delivery-calc' ); ?></h3>
+				<table class="widefat striped">
+					<thead><tr><th><?php echo esc_html__( 'Object code', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Причина', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'HTTP', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'API error', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Request params', 'walls-delivery-calc' ); ?></th></tr></thead>
+					<tbody>
+						<?php foreach ( $result['skipped_tariffs'] as $tariff ) : ?>
+							<?php if ( ! is_array( $tariff ) ) { continue; } ?>
+							<tr>
+								<td><?php echo esc_html( (string) ( $tariff['object_code'] ?? '' ) ); ?></td>
+								<td><?php echo esc_html( (string) ( $tariff['reason'] ?? $tariff['error_code'] ?? '' ) ); ?></td>
+								<td><?php echo esc_html( (string) ( $tariff['http_code'] ?? '' ) ); ?></td>
+								<td><?php echo esc_html( trim( (string) ( $tariff['api_errorcode'] ?? '' ) . ' ' . (string) ( $tariff['api_errormsg'] ?? $tariff['error_message'] ?? '' ) ) ); ?></td>
+								<td><code><?php echo esc_html( (string) wp_json_encode( is_array( $tariff['request_params'] ?? null ) ? $tariff['request_params'] : array(), JSON_UNESCAPED_UNICODE ) ); ?></code></td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+			<?php endif; ?>
 			<?php if ( ! empty( $result['notice'] ) ) : ?><div class="notice notice-info inline"><p><?php echo esc_html( (string) $result['notice'] ); ?></p></div><?php endif; ?>
 			<?php if ( ! empty( $result['audit'] ) && is_array( $result['audit'] ) ) : ?>
 				<h3><?php echo esc_html__( 'Rules audit', 'walls-delivery-calc' ); ?></h3>
@@ -1309,17 +1328,7 @@ final class RulesAdminPage {
 	}
 
 	private function date_range_label( DateRange $range ): string {
-		$unit = DateRange::UNIT_BUSINESS_DAYS === $range->unit || DateRange::UNIT_WORKING_DAYS === $range->unit
-			? __( 'раб. дн.', 'walls-delivery-calc' )
-			: __( 'к. дн.', 'walls-delivery-calc' );
-
-		if ( null !== $range->min_days && null !== $range->max_days && $range->min_days !== $range->max_days ) {
-			return sprintf( '%d-%d %s', $range->min_days, $range->max_days, $unit );
-		}
-
-		$days = $range->min_days ?? $range->max_days ?? 0;
-
-		return sprintf( '%d %s', $days, $unit );
+		return DeliveryDaysFormatter::format( $range );
 	}
 
 	private function render_group_logic_fields( Rule $rule ): void {
