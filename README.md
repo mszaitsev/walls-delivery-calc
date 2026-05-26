@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.21.20.
+Version: 0.21.21.
+
+Version 0.21.21 fixes Russian Post domestic foundation blockers: tariff variant object-code mappings now match the domestic API catalog, postcode fallback can use the existing DaData enrichment path, API item summaries keep nested service/tariff/delivery fields, and API `errorcode`/`errormsg` responses are treated as errors.
 
 Walls Delivery Calc is a WooCommerce delivery calculator plugin. The runtime is now `src/` only: the old `includes/*` legacy bootstrap, shipping method, carriers, API clients, settings, helpers, and cache wrappers have been removed.
 

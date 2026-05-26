@@ -18,6 +18,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Locations\Postcodes\DaDataPostcodeClient;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -28,7 +29,8 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 		private RussianPostDomesticSettings $settings,
 		private RussianPostDomesticApiClient $client,
 		private RussianPostDomesticTariffVariantResolver $variants,
-		private Logger $logger
+		private Logger $logger,
+		private ?DaDataPostcodeClient $postcode_client = null
 	) {
 	}
 
@@ -144,6 +146,9 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 			(string) ( $request->customer_context['selected_location_postcode'] ?? '' ),
 			(string) ( $request->customer_context['city_postcode'] ?? '' ),
 		);
+		if ( $this->has_no_index_marker( $candidates ) ) {
+			return '';
+		}
 		foreach ( $candidates as $candidate ) {
 			$postcode = $this->valid_postcode( $candidate );
 			if ( '' !== $postcode ) {
@@ -151,7 +156,46 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 			}
 		}
 
-		return '';
+		return $this->enrich_postcode( $request );
+	}
+
+	/**
+	 * @param array<int,string> $candidates
+	 */
+	private function has_no_index_marker( array $candidates ): bool {
+		foreach ( $candidates as $candidate ) {
+			$digits = preg_replace( '/\D+/', '', $candidate ) ?? '';
+			if ( '999999999' === $digits ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private function enrich_postcode( QuoteRequest $request ): string {
+		if ( ! $this->postcode_client instanceof DaDataPostcodeClient ) {
+			return '';
+		}
+		$fias_id = trim( (string) ( $request->destination->fias_id ?: ( $request->customer_context['selected_location_fias_id'] ?? $request->customer_context['fias_id'] ?? '' ) ) );
+		if ( '' === $fias_id ) {
+			return '';
+		}
+		$city = trim( (string) ( $request->destination->settlement ?: $request->destination->city ?: ( $request->customer_context['city'] ?? $request->customer_context['city_name'] ?? $request->customer_context['display_name'] ?? '' ) ) );
+		$result = $this->postcode_client->find_postal_code(
+			array(
+				'fias_id' => $fias_id,
+				'city_name' => $city,
+				'settlement_name' => (string) ( $request->destination->settlement ?: $city ),
+				'place_name' => (string) ( $request->destination->settlement ?: $city ),
+				'display_name' => $city,
+			)
+		);
+		if ( empty( $result['success'] ) ) {
+			return '';
+		}
+
+		return $this->valid_postcode( (string) ( $result['postal_code'] ?? '' ) );
 	}
 
 	private function valid_postcode( string $postcode ): string {

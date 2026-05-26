@@ -52,8 +52,8 @@ final class RussianPostDomesticApiClient {
 		if ( ! is_array( $decoded ) ) {
 			return $this->error( 'invalid_json', 'Russian Post domestic API returned invalid JSON.', $url, $params, $code, array( 'body' => $body ) );
 		}
-		if ( isset( $decoded['error'] ) || isset( $decoded['errors'] ) ) {
-			return $this->error( 'api_error', 'Russian Post domestic API returned an error.', $url, $params, $code, $decoded );
+		if ( $this->has_api_error( $decoded ) ) {
+			return $this->error( 'api_error', $this->extract_error_message( $decoded ), $url, $params, $code, $decoded );
 		}
 
 		return array(
@@ -115,6 +115,9 @@ final class RussianPostDomesticApiClient {
 			$summary[] = array_filter(
 				array(
 					'name' => (string) ( $item['name'] ?? $item['title'] ?? '' ),
+					'serviceon' => $item['serviceon'] ?? null,
+					'tariff' => $this->tariff_summary( $item['tariff'] ?? array() ),
+					'delivery' => $this->delivery_summary( $item['delivery'] ?? array() ),
 					'pay' => $this->kopecks( $item['pay'] ?? null ),
 					'nds' => $this->kopecks( $item['nds'] ?? null ),
 					'paynds' => $this->kopecks( $item['paynds'] ?? null ),
@@ -124,6 +127,65 @@ final class RussianPostDomesticApiClient {
 		}
 
 		return $summary;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function tariff_summary( mixed $tariff ): array {
+		if ( ! is_array( $tariff ) ) {
+			return array();
+		}
+
+		return array_filter(
+			array(
+				'valnds' => $this->kopecks( $tariff['valnds'] ?? null ),
+			),
+			static fn ( mixed $value ): bool => null !== $value && '' !== $value
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function delivery_summary( mixed $delivery ): array {
+		if ( ! is_array( $delivery ) ) {
+			return array();
+		}
+
+		return array_filter(
+			array(
+				'min' => $this->nullable_int( $delivery['min'] ?? null ),
+				'max' => $this->nullable_int( $delivery['max'] ?? null ),
+			),
+			static fn ( mixed $value ): bool => null !== $value && '' !== $value
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $response
+	 */
+	private function has_api_error( array $response ): bool {
+		if ( isset( $response['error'] ) || isset( $response['errors'] ) ) {
+			return true;
+		}
+		$error_code = $response['errorcode'] ?? null;
+		$error_message = trim( (string) ( $response['errormsg'] ?? '' ) );
+
+		return ( is_numeric( $error_code ) && 0 !== (int) $error_code ) || '' !== $error_message;
+	}
+
+	/**
+	 * @param array<string,mixed> $response
+	 */
+	private function extract_error_message( array $response ): string {
+		foreach ( array( 'errormsg', 'error', 'message', 'error_message' ) as $key ) {
+			if ( isset( $response[ $key ] ) && is_scalar( $response[ $key ] ) && '' !== trim( (string) $response[ $key ] ) ) {
+				return (string) $response[ $key ];
+			}
+		}
+
+		return 'Russian Post domestic API returned an error.';
 	}
 
 	/**
