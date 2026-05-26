@@ -189,8 +189,8 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 				break;
 			}
 		}
-		$variants = array_map(
-			static fn ( DeliveryRate $rate ): array => array(
+		$variants = count( $rates ) > 1 ? array_map(
+			fn ( DeliveryRate $rate ): array => array(
 				'rate_id' => $rate->rate_id,
 				'object_code' => $rate->tariff_key,
 				'title' => $rate->tariff_name,
@@ -199,12 +199,12 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 				'cost' => (string) $rate->price->get_rubles(),
 				'crossed_price' => $rate->crossed_price?->to_array(),
 				'delivery_days' => $rate->delivery_days->to_array(),
-				'planned_delivery_comment' => $rate->planned_delivery_comment,
+				'planned_delivery_comment' => $this->delivery_comment( $rate->delivery_days ),
 				'comments' => $rate->comments,
 				'rate_meta' => $rate->meta,
 			),
 			$rates
-		);
+		) : array();
 		if ( ! $selected_found ) {
 			$this->session_manager->save_selected_tariff(
 				$service_key,
@@ -234,7 +234,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 			$active->crossed_price,
 			$active->delivery_days,
 			$active->planned_delivery_date,
-			$active->planned_delivery_comment,
+			$this->delivery_comment( $active->delivery_days ),
 			$active->comments,
 			$active->disabled,
 			$active->disabled_reason,
@@ -244,6 +244,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 				$active->meta,
 				array(
 					'tariff_variants' => $variants,
+					'domestic_tariff_grouped' => true,
 					'selected_tariff_object' => $active->tariff_key,
 					'selected_tariff_title' => $active->tariff_name,
 					'selected_tariff_rate_id' => $active->rate_id,
@@ -259,7 +260,18 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 			return $rate->service_name;
 		}
 
-		return 'Почта России — ' . $tariff;
+		return $rate->service_name . ': ' . $tariff;
+	}
+
+	private function delivery_comment( \WallsShop\WDC\Domain\Common\DateRange $range ): string {
+		if ( $range->is_empty() ) {
+			return '';
+		}
+		if ( $range->min_days === $range->max_days ) {
+			return (string) $range->min_days . ' дн.';
+		}
+
+		return (string) $range->min_days . '-' . (string) $range->max_days . ' дн.';
 	}
 
 	private function sort_mode(): string {

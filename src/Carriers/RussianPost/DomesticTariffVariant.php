@@ -17,7 +17,8 @@ final class DomesticTariffVariant {
 		public readonly bool $always_available = false,
 		public readonly ?int $min_weight_g = null,
 		public readonly ?int $max_weight_g = null,
-		public readonly int $sort_order = 100
+		public readonly int $sort_order = 100,
+		public readonly string $admin_comment = ''
 	) {
 	}
 
@@ -36,7 +37,8 @@ final class DomesticTariffVariant {
 			(bool) ( $data['always_available'] ?? false ),
 			isset( $data['min_weight_g'] ) && '' !== (string) $data['min_weight_g'] ? max( 0, (int) $data['min_weight_g'] ) : null,
 			isset( $data['max_weight_g'] ) && '' !== (string) $data['max_weight_g'] ? max( 0, (int) $data['max_weight_g'] ) : null,
-			(int) ( $data['sort_order'] ?? 100 )
+			(int) ( $data['sort_order'] ?? 100 ),
+			(string) ( $data['admin_comment'] ?? '' )
 		);
 	}
 
@@ -54,6 +56,7 @@ final class DomesticTariffVariant {
 			'min_weight_g' => $this->min_weight_g,
 			'max_weight_g' => $this->max_weight_g,
 			'sort_order' => $this->sort_order,
+			'admin_comment' => $this->admin_comment,
 		);
 	}
 

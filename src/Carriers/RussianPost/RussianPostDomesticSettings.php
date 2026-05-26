@@ -15,6 +15,8 @@ final class RussianPostDomesticSettings {
 	public const PICKUP_SERVICE_KEY = 'russian_post_domestic_pickup';
 	public const COURIER_SERVICE_KEY = 'russian_post_domestic_courier';
 	public const TITLE = 'Почта России — по России';
+	public const PICKUP_SERVICE_TITLE = 'Почта России — до отделения';
+	public const COURIER_SERVICE_TITLE = 'Почта России — курьером';
 
 	public function __construct(
 		private SettingsRepository $settings,

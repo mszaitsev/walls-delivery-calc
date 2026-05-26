@@ -189,30 +189,37 @@ final class DeliveryServiceRepository {
 			$this->ensure_builtin_service(
 				RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
 				RussianPostDomesticSettings::CARRIER_KEY,
-				RussianPostDomesticSettings::TITLE,
+				RussianPostDomesticSettings::PICKUP_SERVICE_TITLE,
 				20,
-				'Доставка до почтового отделения по индексу'
+				'Доставка до почтового отделения по индексу',
+				array( RussianPostDomesticSettings::TITLE )
 			),
 			$this->ensure_builtin_service(
 				RussianPostDomesticSettings::COURIER_SERVICE_KEY,
 				RussianPostDomesticSettings::CARRIER_KEY,
-				RussianPostDomesticSettings::TITLE,
+				RussianPostDomesticSettings::COURIER_SERVICE_TITLE,
 				30,
-				''
+				'',
+				array( RussianPostDomesticSettings::TITLE )
 			),
 		);
 	}
 
-	private function ensure_builtin_service( string $service_key, string $carrier_key, string $title, int $sort_order, string $pickup_comment = '' ): DeliveryService {
+	/**
+	 * @param array<int,string> $replaceable_titles
+	 */
+	private function ensure_builtin_service( string $service_key, string $carrier_key, string $title, int $sort_order, string $pickup_comment = '', array $replaceable_titles = array() ): DeliveryService {
 		$existing = $this->find_any_by_service_key( $service_key );
 		if ( $existing instanceof DeliveryService ) {
 			if ( null !== $existing->id ) {
+				$existing_title = trim( $existing->title );
+				$should_replace_title = '' === $existing_title || in_array( $existing_title, $replaceable_titles, true );
 				$this->update_service(
 					(int) $existing->id,
 					array(
 						'carrier_key' => $carrier_key,
 						'service_type' => DeliveryService::TYPE_API,
-						'title' => '' !== trim( $existing->title ) ? $existing->title : $title,
+						'title' => $should_replace_title ? $title : $existing->title,
 						'enabled' => $existing->enabled ? 1 : 0,
 						'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
 						'deleted' => 0,
@@ -221,7 +228,9 @@ final class DeliveryServiceRepository {
 				$this->delete_duplicate_active_services( $service_key, (int) $existing->id );
 			}
 
-			return $existing;
+			$updated = $this->find_by_service_key( $service_key );
+
+			return $updated instanceof DeliveryService ? $updated : $existing;
 		}
 
 		$id = $this->create_service(

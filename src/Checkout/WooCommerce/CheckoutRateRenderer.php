@@ -98,7 +98,7 @@ final class CheckoutRateRenderer {
 	 */
 	private function render_tariff_selector( array $meta ): void {
 		$variants = is_array( $meta['tariff_variants'] ?? null ) ? $meta['tariff_variants'] : array();
-		if ( array() === $variants ) {
+		if ( count( $variants ) < 2 ) {
 			return;
 		}
 		$service_key = (string) ( $meta['service_key'] ?? '' );
@@ -112,11 +112,17 @@ final class CheckoutRateRenderer {
 			$title = (string) ( $variant['title'] ?? '' );
 			$comment = (string) ( $variant['planned_delivery_comment'] ?? '' );
 			$price = isset( $variant['price_rub'] ) ? $this->format_rubles( (float) $variant['price_rub'] ) : '';
+			$crossed = is_array( $variant['crossed_price'] ?? null ) && isset( $variant['crossed_price']['amount_kopecks'] )
+				? $this->format_money( (int) $variant['crossed_price']['amount_kopecks'] )
+				: '';
 			echo '<label class="wdc-domestic-tariff-selector__item">';
 			echo '<input type="radio" name="wdc_domestic_tariff_' . esc_attr( $service_key ) . '" value="' . esc_attr( $object ) . '" data-title="' . esc_attr( $title ) . '" data-price="' . esc_attr( (string) ( $variant['price_rub'] ?? '' ) ) . '" ' . checked( $selected, $object, false ) . '>';
 			echo '<span class="wdc-domestic-tariff-selector__title">' . esc_html( $title ) . '</span>';
 			if ( '' !== $price ) {
 				echo '<span class="wdc-domestic-tariff-selector__price">' . esc_html( $price ) . '</span>';
+			}
+			if ( '' !== $crossed ) {
+				echo '<span class="wdc-platform-crossed-price wdc-domestic-tariff-selector__crossed-price">' . esc_html( $crossed ) . '</span>';
 			}
 			if ( '' !== $comment ) {
 				echo '<span class="wdc-domestic-tariff-selector__days">' . esc_html( $comment ) . '</span>';

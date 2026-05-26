@@ -370,7 +370,7 @@ final class DeliveryServicesAdminPage {
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 		<table class="widefat striped">
-			<thead><tr><th>Включен</th><th>Сортировка</th><th>Код object</th><th>Название в checkout</th><th>Тип доставки</th><th>Мин. вес, г</th><th>Макс. вес, г</th><th>Объявленная ценность</th></tr></thead>
+			<thead><tr><th>Включен</th><th>Сортировка</th><th>Код object</th><th>Название в checkout</th><th>Тип доставки</th><th>Мин. вес, г</th><th>Макс. вес, г</th><th>Объявленная ценность</th><th>Комментарий администратора</th></tr></thead>
 			<tbody>
 				<?php foreach ( $variants as $variant ) : ?>
 					<tr>
@@ -382,6 +382,7 @@ final class DeliveryServicesAdminPage {
 						<td><input class="small-text" type="number" min="0" name="tariff_min_weight_g[<?php echo esc_attr( (string) $variant->object_code ); ?>]" value="<?php echo esc_attr( null === $variant->min_weight_g ? '' : (string) $variant->min_weight_g ); ?>"></td>
 						<td><input class="small-text" type="number" min="0" name="tariff_max_weight_g[<?php echo esc_attr( (string) $variant->object_code ); ?>]" value="<?php echo esc_attr( null === $variant->max_weight_g ? '' : (string) $variant->max_weight_g ); ?>"></td>
 						<td><?php echo esc_html( $variant->requires_declared_value ? ( $variant->always_available ? 'ОЦ, всегда доступен' : 'ОЦ' ) : 'Нет' ); ?></td>
+						<td><input class="regular-text" name="tariff_admin_comment[<?php echo esc_attr( (string) $variant->object_code ); ?>]" value="<?php echo esc_attr( $variant->admin_comment ); ?>"></td>
 					</tr>
 				<?php endforeach; ?>
 			</tbody>
@@ -698,8 +699,9 @@ final class DeliveryServicesAdminPage {
 		$title = is_array( $_POST['tariff_title'] ?? null ) ? wp_unslash( $_POST['tariff_title'] ) : array();
 		$min_weight = is_array( $_POST['tariff_min_weight_g'] ?? null ) ? wp_unslash( $_POST['tariff_min_weight_g'] ) : array();
 		$max_weight = is_array( $_POST['tariff_max_weight_g'] ?? null ) ? wp_unslash( $_POST['tariff_max_weight_g'] ) : array();
+		$admin_comment = is_array( $_POST['tariff_admin_comment'] ?? null ) ? wp_unslash( $_POST['tariff_admin_comment'] ) : array();
 		return array_map(
-			static function ( $variant ) use ( $enabled, $sort, $title, $min_weight, $max_weight ): array {
+			static function ( $variant ) use ( $enabled, $sort, $title, $min_weight, $max_weight, $admin_comment ): array {
 				$data = $variant->to_array();
 				$code = (string) $variant->object_code;
 				$data['enabled'] = isset( $enabled[ $code ] );
@@ -708,6 +710,7 @@ final class DeliveryServicesAdminPage {
 				$data['title'] = '' !== trim( $custom_title ) ? $custom_title : $variant->title;
 				$data['min_weight_g'] = isset( $min_weight[ $code ] ) && '' !== trim( (string) $min_weight[ $code ] ) ? max( 0, (int) $min_weight[ $code ] ) : null;
 				$data['max_weight_g'] = isset( $max_weight[ $code ] ) && '' !== trim( (string) $max_weight[ $code ] ) ? max( 0, (int) $max_weight[ $code ] ) : null;
+				$data['admin_comment'] = isset( $admin_comment[ $code ] ) ? sanitize_text_field( (string) $admin_comment[ $code ] ) : '';
 
 				return $data;
 			},

@@ -123,8 +123,12 @@ final class OrderShippingMetaPersister {
 
 		$delivery_type = (string) ( $rate['delivery_type'] ?? '' );
 		if ( $this->is_russian_post_domestic_rate( $rate ) ) {
+			$method_title = $this->domestic_method_title( $rate );
+			if ( method_exists( $item, 'set_method_title' ) && '' !== $method_title ) {
+				$item->set_method_title( $method_title );
+			}
 			$this->delete_visible_technical_item_meta( $item );
-			$item->add_meta_data( 'Способ доставки', 'Почта России — по России', true );
+			$item->add_meta_data( 'Способ доставки', (string) ( $rate['service_title'] ?? '' ), true );
 			$item->add_meta_data( 'Тариф', (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' ), true );
 			$delivery = $this->delivery_days_label( is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array() );
 			if ( '' !== $delivery ) {
@@ -343,6 +347,22 @@ final class OrderShippingMetaPersister {
 		$max = is_numeric( $max ) ? (int) $max : $min;
 
 		return $min === $max ? $min . ' дней' : $min . '-' . $max . ' дней';
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function domestic_method_title( array $rate ): string {
+		$service_title = trim( (string) ( $rate['service_title'] ?? '' ) );
+		$tariff_title = trim( (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' ) );
+		if ( '' === $service_title ) {
+			return $tariff_title;
+		}
+		if ( '' === $tariff_title ) {
+			return $service_title;
+		}
+
+		return $service_title . ': ' . $tariff_title;
 	}
 
 	/**

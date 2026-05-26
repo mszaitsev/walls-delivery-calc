@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.21.24.
+Version: 0.21.25.
+
+Version 0.21.25 gives Russian Post domestic pickup/courier services distinct predefined admin titles, keeps courier availability bootstrapped for RU, uses final rule-adjusted delivery days in checkout and orders, supports internal tariff admin comments, shows per-variant crossed prices, and hides the radio selector when only one tariff is available.
 
 Version 0.21.24 preserves the current enabled state when predefined Russian Post domestic services are upserted, so bootstrap reactivates soft-deleted system rows without undoing a normal admin toggle-off.
 

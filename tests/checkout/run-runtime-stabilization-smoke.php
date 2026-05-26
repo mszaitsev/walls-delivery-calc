@@ -615,8 +615,11 @@ $new_shipping_method_source = (string) file_get_contents( dirname( __DIR__, 2 ) 
 $checkout_rates_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-rates.css' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' ), 'Rate renderer must render comments as block elements, not inline-only spans.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, "empty( \$meta['tariff_variants'] )" ), 'Domestic tariff selector rates must not duplicate planned_delivery_comment below the selector.' );
-runtime_smoke_assert( str_contains( $rate_mapper_source, "empty( \$rate->meta['tariff_variants'] )" ), 'Domestic tariff selector labels must not append planned_delivery_comment to the shipping method label.' );
-runtime_smoke_assert( str_contains( $new_shipping_method_source, 'domestic_method_title' ) && str_contains( $new_shipping_method_source, "'Почта России — ' . \$tariff" ), 'Domestic grouped method label must include the selected tariff title.' );
+runtime_smoke_assert( str_contains( $rate_renderer_source, 'count( $variants ) < 2' ), 'Domestic tariff selector must not render radio list for a single tariff.' );
+runtime_smoke_assert( str_contains( $rate_renderer_source, "wdc-domestic-tariff-selector__crossed-price" ), 'Domestic tariff selector must render per-variant crossed price.' );
+runtime_smoke_assert( str_contains( $rate_mapper_source, "empty( \$rate->meta['domestic_tariff_grouped'] )" ), 'Domestic tariff selector labels must not append planned_delivery_comment to the shipping method label.' );
+runtime_smoke_assert( str_contains( $new_shipping_method_source, 'domestic_method_title' ) && str_contains( $new_shipping_method_source, "\$rate->service_name . ': ' . \$tariff" ), 'Domestic grouped method label must include service and selected tariff titles.' );
+runtime_smoke_assert( str_contains( $new_shipping_method_source, '$this->delivery_comment( $rate->delivery_days )' ), 'Domestic selector rows must derive delivery comments from final delivery days.' );
 runtime_smoke_assert( str_contains( $checkout_rates_css, '.wdc-platform-delivery-comment' ) && str_contains( $checkout_rates_css, 'flex-basis: 100%' ) && str_contains( $checkout_rates_css, '.wdc-shipping-rate-comment' ) && str_contains( $checkout_rates_css, 'display: block' ), 'Checkout comments CSS must force each service/rule comment onto its own line.' );
 $src_iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . '/src' ) );
 foreach ( $src_iterator as $src_file ) {

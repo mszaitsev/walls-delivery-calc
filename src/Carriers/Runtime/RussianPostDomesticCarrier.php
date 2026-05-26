@@ -278,7 +278,7 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 			'selected_tariff_object' => $variant->object_code,
 			'selected_tariff_title' => $variant->title,
 			'object_code' => $variant->object_code,
-			'domestic_tariff_variant' => $variant->to_array(),
+			'domestic_tariff_variant' => $this->public_variant_data( $variant ),
 			'postcode' => $postcode,
 			'pay' => $parsed['pay'] ?? null,
 			'nds' => $parsed['nds'] ?? null,
@@ -321,6 +321,16 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 			DeliveryType::COURIER === $delivery_type,
 			$meta
 		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function public_variant_data( DomesticTariffVariant $variant ): array {
+		$data = $variant->to_array();
+		unset( $data['admin_comment'] );
+
+		return $data;
 	}
 
 	private function delivery_comment( DateRange $range ): string {

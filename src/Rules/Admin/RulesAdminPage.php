@@ -1025,10 +1025,7 @@ final class RulesAdminPage {
 				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 				<input type="hidden" name="wdc_rules_action" value="simulate">
 				<div class="wdc-rule-grid">
-					<label><span><?php echo esc_html__( 'Населенный пункт', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[city]" value="<?php echo esc_attr( (string) $input['city'] ); ?>"></label>
-					<label><span><?php echo esc_html__( 'FIAS ID', 'walls-delivery-calc' ); ?></span><input type="text" name="simulation[location_fias_id]" value="<?php echo esc_attr( (string) $input['location_fias_id'] ); ?>"></label>
-					<label><span><?php echo esc_html__( 'Индекс', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="numeric" name="simulation[postal_code]" value="<?php echo esc_attr( (string) $input['postal_code'] ); ?>"></label>
-					<label><span><?php echo esc_html__( 'Страна назначения', 'walls-delivery-calc' ); ?></span><?php $this->render_select( 'simulation[country]', $this->country_options(), (string) $input['country'] ); ?></label>
+					<label><span><?php echo esc_html__( 'Почтовый индекс назначения', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="numeric" name="simulation[postal_code]" value="<?php echo esc_attr( (string) $input['postal_code'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Вес товаров, г', 'walls-delivery-calc' ); ?></span><input type="number" min="0" name="simulation[weight]" value="<?php echo esc_attr( (string) $input['weight'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Сумма заказа, руб.', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="simulation[order_total]" value="<?php echo esc_attr( (string) $input['order_total'] ); ?>"></label>
 					<label><span><?php echo esc_html__( 'Дата', 'walls-delivery-calc' ); ?></span><input type="date" name="simulation[date]" value="<?php echo esc_attr( (string) $input['date'] ); ?>"></label>

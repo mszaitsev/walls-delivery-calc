@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use WallsShop\WDC\Carriers\RussianPost\DomesticTariffVariant;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticApiClient;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
@@ -194,6 +195,9 @@ rpd_assert( ! $missing->has_available_rates() && 'postcode_required' === $missin
 $api_client = new RussianPostDomesticApiClient( $domestic_settings, new Logger() );
 $api_error = $api_client->calculate_tariff( array( 'object' => 4030, 'from' => '630005', 'to' => '630099', 'weight' => 1000, 'date' => '20260526', 'pack' => 99, 'force_errorcode' => 1 ) );
 rpd_assert( empty( $api_error['success'] ) && 'api_error' === (string) ( $api_error['error_code'] ?? '' ), 'Domestic API client must treat errorcode/errormsg as API errors.' );
+$variant_with_comment = DomesticTariffVariant::from_array( array_merge( ( new RussianPostDomesticTariffVariantResolver() )->defaults()[0]->to_array(), array( 'admin_comment' => 'internal note' ) ) );
+rpd_assert( 'internal note' === $variant_with_comment->admin_comment && 'internal note' === $variant_with_comment->to_array()['admin_comment'], 'Domestic tariff admin_comment must save and load in tariff variant JSON.' );
+rpd_assert( ! array_key_exists( 'admin_comment', $quote->rates[0]->meta['domestic_tariff_variant'] ?? array() ), 'Domestic tariff admin_comment must not be exposed to checkout/order runtime meta.' );
 
 $rule = new Rule( null, '+2 days', true, 10, 'default', '', RuleActionTypes::CHANGE_DELIVERY_DAYS, RuleOperationTypes::INCREASE, 2, RuleOperationBases::CALENDAR_DAYS, false, false );
 $rate = $quote->rates[0];
@@ -214,13 +218,23 @@ $session_property->setAccessible( true );
 $session_property->setValue( $method, $session_manager );
 $selector_method = $method_reflection->getMethod( 'tariff_selector_rate' );
 $selector_method->setAccessible( true );
-$rate_23030 = new DeliveryRate( 'russian_post_domestic_pickup:23030', RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::PICKUP_SERVICE_KEY, RussianPostDomesticSettings::TITLE, '23030', 'Посылка онлайн', DeliveryType::PICKUP, 'Посылка онлайн', Money::from_rubles( 450 ), null, null, DateRange::range( 5, 6 ), '', '5-6 дн.', array(), false, '', false, false, array( 'tariff_selector_group' => true ) );
-$rate_47030 = new DeliveryRate( 'russian_post_domestic_pickup:47030', RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::PICKUP_SERVICE_KEY, RussianPostDomesticSettings::TITLE, '47030', 'Посылка 1 класса', DeliveryType::PICKUP, 'Посылка 1 класса', Money::from_rubles( 659 ), null, null, DateRange::range( 2, 3 ), '', '2-3 дн.', array(), false, '', false, false, array( 'tariff_selector_group' => true ) );
+$rate_23030 = new DeliveryRate( 'russian_post_domestic_pickup:23030', RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::PICKUP_SERVICE_KEY, RussianPostDomesticSettings::PICKUP_SERVICE_TITLE, '23030', 'Посылка онлайн', DeliveryType::PICKUP, 'Посылка онлайн', Money::from_rubles( 450 ), null, null, DateRange::range( 5, 6 ), '', '5-6 дн.', array(), false, '', false, false, array( 'tariff_selector_group' => true ) );
+$rate_47030 = new DeliveryRate( 'russian_post_domestic_pickup:47030', RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::PICKUP_SERVICE_KEY, RussianPostDomesticSettings::PICKUP_SERVICE_TITLE, '47030', 'Посылка 1 класса', DeliveryType::PICKUP, 'Посылка 1 класса', Money::from_rubles( 659 ), null, Money::from_rubles( 700 ), DateRange::single( 3 ), '', '2-3 дн.', array(), false, '', false, false, array( 'tariff_selector_group' => true ) );
 $selected_rate = $selector_method->invoke( $method, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, array( $rate_23030, $rate_47030 ) );
 rpd_assert( $selected_rate instanceof DeliveryRate && 659.0 === $selected_rate->price->get_rubles() && '47030' === (string) ( $selected_rate->meta['selected_tariff_object'] ?? '' ), 'Selected domestic tariff must drive WC rate cost and selected object.' );
-rpd_assert( str_starts_with( $selected_rate->title, 'Почта России — ' ) && str_contains( $selected_rate->title, $selected_rate->tariff_name ), 'Domestic grouped method title must include the selected tariff title.' );
+rpd_assert( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ': Посылка 1 класса' === $selected_rate->title, 'Domestic grouped method title must include service and selected tariff titles.' );
+rpd_assert( '3 дн.' === (string) ( $selected_rate->meta['tariff_variants'][1]['planned_delivery_comment'] ?? '' ), 'Domestic selector variant row must use final delivery days comment.' );
+rpd_assert( is_array( $selected_rate->meta['tariff_variants'][1]['crossed_price'] ?? null ), 'Domestic selector variant row must keep crossed price per variant.' );
 $selected_rate_again = $selector_method->invoke( $method, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, array( $rate_23030, $rate_47030 ) );
 $selected_session = $session_manager->selected_tariff( RussianPostDomesticSettings::PICKUP_SERVICE_KEY );
 rpd_assert( $selected_rate_again instanceof DeliveryRate && 659.0 === $selected_rate_again->price->get_rubles() && '47030' === (string) ( $selected_session['object_code'] ?? '' ), 'Repeated tariff selector calculation must not reset valid selected tariff to the first variant.' );
+$single_rate = $selector_method->invoke( $method, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, array( $rate_23030 ) );
+rpd_assert( array() === ( $single_rate->meta['tariff_variants'] ?? array() ) && RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ': Посылка онлайн' === $single_rate->title, 'Single-tariff domestic service must not expose radio selector variants.' );
+$rates_for_wc = $method_reflection->getMethod( 'rates_for_wc' );
+$rates_for_wc->setAccessible( true );
+$rate_24030 = new DeliveryRate( 'russian_post_domestic_courier:24030', RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::COURIER_SERVICE_KEY, RussianPostDomesticSettings::COURIER_SERVICE_TITLE, '24030', 'Курьер онлайн', DeliveryType::COURIER, 'Курьер онлайн', Money::from_rubles( 800 ), null, null, DateRange::single( 1 ), '', '1 дн.', array(), false, '', false, true, array( 'tariff_selector_group' => true ) );
+$grouped_rates = $rates_for_wc->invoke( $method, array( $rate_23030, $rate_47030, $rate_24030 ) );
+rpd_assert( 2 === count( $grouped_rates ) && RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $grouped_rates[0]->service_key && RussianPostDomesticSettings::COURIER_SERVICE_KEY === $grouped_rates[1]->service_key, 'Pickup and courier domestic services must become separate grouped checkout methods.' );
+rpd_assert( RussianPostDomesticSettings::COURIER_SERVICE_TITLE . ': Курьер онлайн' === $grouped_rates[1]->title, 'Courier grouped method title must include courier service and tariff titles.' );
 
 echo "Russian Post domestic smoke OK\n";

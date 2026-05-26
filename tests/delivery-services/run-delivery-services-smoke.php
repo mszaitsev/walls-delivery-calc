@@ -240,6 +240,14 @@ $services->ensure_russian_post_domestic_services();
 $domestic_pickup_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) $row['service_key'] && empty( $row['deleted'] ) ) );
 $domestic_courier_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => RussianPostDomesticSettings::COURIER_SERVICE_KEY === (string) $row['service_key'] && empty( $row['deleted'] ) ) );
 wdc_ds_assert( 1 === count( $domestic_pickup_rows ) && 1 === count( $domestic_courier_rows ), 'Repeated domestic bootstrap must not create duplicate pickup/courier services.' );
+$domestic_pickup = $services->find_by_service_key( RussianPostDomesticSettings::PICKUP_SERVICE_KEY );
+$domestic_courier = $services->find_by_service_key( RussianPostDomesticSettings::COURIER_SERVICE_KEY );
+wdc_ds_assert( $domestic_pickup instanceof DeliveryService && RussianPostDomesticSettings::PICKUP_SERVICE_TITLE === $domestic_pickup->title, 'Domestic pickup predefined service title must be distinct.' );
+wdc_ds_assert( $domestic_courier instanceof DeliveryService && RussianPostDomesticSettings::COURIER_SERVICE_TITLE === $domestic_courier->title, 'Domestic courier predefined service title must be distinct.' );
+$services->update_service( (int) $domestic_courier->id, array( 'title' => 'Custom courier title' ) );
+$services->ensure_russian_post_domestic_services();
+$custom_title_courier = $services->find_by_service_key( RussianPostDomesticSettings::COURIER_SERVICE_KEY );
+wdc_ds_assert( $custom_title_courier instanceof DeliveryService && 'Custom courier title' === $custom_title_courier->title, 'Domestic bootstrap must not overwrite an admin-customized predefined title.' );
 foreach ( $domestic_services as $domestic_service ) {
 	$services->soft_delete_service( (int) $domestic_service->id );
 	wdc_ds_assert( $services->find_by_service_key( $domestic_service->service_key ) instanceof DeliveryService, 'Predefined domestic service cannot be deleted: ' . $domestic_service->service_key );
@@ -300,6 +308,9 @@ wdc_ds_assert( in_array( 'US', $countries->countries( $custom_id ), true ) && in
 
 $directory = ( new ReflectionClass( WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory::class ) )->newInstanceWithoutConstructor();
 $manager = new DeliveryServiceManager( $services, $countries, new RuleRepository( $GLOBALS['wpdb'] ), $directory );
+$manager->ensure_builtin_services();
+$courier_service = $services->find_by_service_key( RussianPostDomesticSettings::COURIER_SERVICE_KEY );
+wdc_ds_assert( $courier_service instanceof DeliveryService && in_array( 'RU', $countries->countries( (int) $courier_service->id ), true ) && $manager->service_available_for_country( $courier_service, 'RU' ), 'Domestic courier service must bootstrap RU availability.' );
 wdc_ds_assert( $manager->service_available_for_country( $services->find_by_service_key( 'fixed_test' ), 'US' ), 'selected_countries availability must allow listed country.' );
 wdc_ds_assert( ! $manager->service_available_for_country( $services->find_by_service_key( 'fixed_test' ), 'FR' ), 'selected_countries availability must reject unlisted country.' );
 $services->update_service( $custom_id, array( 'availability_mode' => DeliveryService::AVAILABILITY_ALL_COUNTRIES ) );
@@ -391,6 +402,7 @@ wdc_ds_assert( str_contains( $delivery_admin_source, 'render_russian_post_countr
 wdc_ds_assert( str_contains( $delivery_admin_source, 'save_russian_post_settings' ) && str_contains( $delivery_admin_source, 'DeliveryServiceSettingsRepository' ), 'Russian Post calculation settings must save to delivery service settings storage.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'simulate_service_rules' ) && str_contains( $delivery_admin_source, 'QuoteRequest' ) && str_contains( $delivery_admin_source, 'RussianPostInternationalCarrier' ), 'Russian Post service rules simulation must call the real carrier quote flow.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'include_packaging_weight' ) && str_contains( $delivery_admin_source, 'packaging_weight_mode' ) && ! str_contains( $delivery_admin_source, 'rp_packaging_tiers' ), 'Delivery service calculation tab must expose packaging controls and not Russian Post packaging tiers.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'tariff_admin_comment' ) && str_contains( $delivery_admin_source, 'admin_comment' ), 'Domestic tariffs tab must save an internal admin comment.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'Прибавлять к общему весу посылки' ) && str_contains( $delivery_admin_source, 'Добавлять отдельной строкой «Упаковка»' ), 'Packaging mode select must render Russian labels while storing technical values.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'pickup_customer_comment' ) && str_contains( $delivery_admin_source, 'courier_customer_comment' ) && str_contains( $delivery_admin_source, 'Комментарий для покупателя — доставка до ПВЗ' ) && str_contains( $delivery_admin_source, 'Комментарий для покупателя — курьерская доставка' ), 'Delivery service calculation tab must expose pickup/courier customer comments.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'Справочник перевозчика' ) && str_contains( $delivery_admin_source, 'Только выбранные страны' ) && str_contains( $delivery_admin_source, 'Все страны, кроме выбранных' ) && str_contains( $delivery_admin_source, 'AVAILABILITY_CARRIER_DIRECTORY' ), 'Availability select must render Russian labels while storing technical values.' );
@@ -399,6 +411,12 @@ wdc_ds_assert( ! str_contains( $delivery_admin_source, 'Minimum price RUB' ) && 
 
 $settings_page_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Admin/SettingsAdminPage.php' );
 wdc_ds_assert( ! str_contains( $settings_page_source, 'russian_post_worldwide_parcel[' ), 'Platform settings page must not render Russian Post service-specific fields.' );
+
+$rules_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Rules/Admin/RulesAdminPage.php' );
+preg_match( '/private function render_service_simulation_form\(\): void \{(?P<body>.*?)private function render_service_simulation/s', $rules_admin_source, $service_simulation_match );
+$service_simulation_body = (string) ( $service_simulation_match['body'] ?? '' );
+wdc_ds_assert( str_contains( $service_simulation_body, 'postal_code' ) && str_contains( $service_simulation_body, 'Почтовый индекс назначения' ), 'Domestic service simulation form must expose destination postcode.' );
+wdc_ds_assert( ! str_contains( $service_simulation_body, 'name="simulation[location_fias_id]"' ) && ! str_contains( $service_simulation_body, 'name="simulation[city]"' ) && ! str_contains( $service_simulation_body, 'simulation[country]' ), 'Domestic service simulation form must not expose city, FIAS, or country fields.' );
 
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 wdc_ds_assert( ! str_contains( $plugin_source, 'RussianPostCountriesAdminPage::class )->register()' ), 'Russian Post countries submenu must not be registered separately.' );
