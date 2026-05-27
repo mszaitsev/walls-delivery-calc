@@ -23,8 +23,15 @@ function wp_unslash( mixed $value ): mixed { return $value; }
 function add_query_arg( array $args, string $url ): string { return $url . '?' . http_build_query( $args ); }
 function wp_tempnam( string $filename = '' ): string { return tempnam( sys_get_temp_dir(), 'wdc-rp-' ) ?: ''; }
 function wp_delete_file( string $file ): bool { $GLOBALS['wdc_deleted_files'][] = $file; return @unlink( $file ); }
-function is_wp_error( mixed $value ): bool { return false; }
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $message ) {}
+		public function get_error_message(): string { return $this->message; }
+	}
+}
+function is_wp_error( mixed $value ): bool { return $value instanceof WP_Error; }
 function wp_remote_retrieve_response_code( array $response ): int { return (int) ( $response['response']['code'] ?? 0 ); }
+function wp_remote_retrieve_response_message( array $response ): string { return (string) ( $response['response']['message'] ?? '' ); }
 function wp_remote_retrieve_body( array $response ): string { return (string) ( $response['body'] ?? '' ); }
 
 $GLOBALS['wdc_options'] = array();
@@ -248,6 +255,12 @@ $settings->save_from_admin( array( 'russian_post_otpravka_access_token' => '', '
 rp_pickup_assert( $encrypted === get_option( 'wdc_core_settings', array() )[ RussianPostOtpravkaApiSettings::PASSWORD_ENCRYPTED_KEY ], 'Empty secret must preserve existing secret.' );
 $settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_clear_password' => '1' ) );
 rp_pickup_assert( '' === get_option( 'wdc_core_settings', array() )[ RussianPostOtpravkaApiSettings::PASSWORD_ENCRYPTED_KEY ], 'Clear secret must remove saved secret.' );
+$settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_timeout' => '5' ) );
+rp_pickup_assert( 30 === $settings->timeout(), 'Otpravka timeout must sanitize to minimum 30 seconds.' );
+$settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_timeout' => '1200' ) );
+rp_pickup_assert( 900 === $settings->timeout(), 'Otpravka timeout must sanitize to maximum 900 seconds.' );
+$settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_timeout' => '300' ) );
+rp_pickup_assert( 300 === $settings->timeout(), 'Otpravka timeout default target must allow 300 seconds.' );
 
 $state_service = new RussianPostPickupImportStateService();
 $queued_state = $state_service->queue( 'PVZ' );
@@ -262,7 +275,19 @@ $failed_state = $state_service->failed( array( 'type' => 'OPS', 'parsed' => 2, '
 rp_pickup_assert( 'failed' === $failed_state['status'] && 'failed' === $failed_state['stage'] && array( 'failed sample' ) === $failed_state['errors'], 'State service must save failed state.' );
 
 $settings->save_from_admin( array( 'russian_post_otpravka_access_token' => 'token', 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_password' => 'password', 'russian_post_pickup_unload_type' => 'ALL' ) );
-function wp_remote_get( string $url, array $args = array() ): array {
+function wp_remote_get( string $url, array $args = array() ): mixed {
+	if ( 'wp_error' === ( $GLOBALS['rp_http_mode'] ?? '' ) ) {
+		if ( ! empty( $args['stream'] ) && is_string( $args['filename'] ?? null ) ) {
+			file_put_contents( $args['filename'], 'partial zip bytes' );
+		}
+		return new WP_Error( 'cURL error 28: Operation timed out' );
+	}
+	if ( 'http_error' === ( $GLOBALS['rp_http_mode'] ?? '' ) ) {
+		if ( ! empty( $args['stream'] ) && is_string( $args['filename'] ?? null ) ) {
+			file_put_contents( $args['filename'], 'partial zip bytes' );
+		}
+		return array( 'response' => array( 'code' => 504, 'message' => 'Gateway Timeout' ), 'body' => str_repeat( 'timeout-body-', 120 ) );
+	}
 	$zip_file = tempnam( sys_get_temp_dir(), 'wdc-rp-zip-' );
 	$zip = new ZipArchive();
 	$zip->open( $zip_file, ZipArchive::OVERWRITE );
@@ -315,6 +340,18 @@ rp_pickup_assert( '' !== $settings->last_success_at(), 'last_success_at must upd
 rp_pickup_assert( count( $GLOBALS['wdc_deleted_files'] ?? array() ) >= 2 && ! is_file( end( $GLOBALS['wdc_deleted_files'] ) ), 'Importer must delete temporary ZIP and extracted payload files after reading.' );
 rp_pickup_assert( in_array( 'Invalid passport item JSON: Syntax error', $result['errors'], true ), 'Importer must report invalid item JSON without failing the whole import.' );
 
+$GLOBALS['rp_http_mode'] = 'wp_error';
+delete_transient( 'wdc_russian_post_pickup_import_lock' );
+$download_failed = $importer->import( 'ALL' );
+$download_failed_state = $state_service->current();
+rp_pickup_assert( empty( $download_failed['success'] ) && 'failed' === $download_failed_state['status'] && 'failed' === $download_failed_state['stage'], 'Failed download must persist failed state instead of running.' );
+rp_pickup_assert( str_contains( implode( ';', $download_failed_state['errors'] ), 'cURL error 28' ) && ! in_array( $download_failed_state['status'], array( 'queued', 'running' ), true ), 'Failed download must store useful WP_Error diagnostics.' );
+$GLOBALS['rp_http_mode'] = 'http_error';
+delete_transient( 'wdc_russian_post_pickup_import_lock' );
+$http_failed = $importer->import( 'ALL' );
+rp_pickup_assert( empty( $http_failed['success'] ) && str_contains( implode( ';', $http_failed['errors'] ), 'Gateway Timeout' ) && str_contains( implode( ';', $http_failed['errors'] ), 'Body excerpt:' ) && str_contains( implode( ';', $http_failed['errors'] ), 'Temp file size:' ), 'HTTP failed download must store response message, body excerpt, and temp file size.' );
+$GLOBALS['rp_http_mode'] = '';
+
 delete_transient( 'wdc_russian_post_pickup_import_lock' );
 $GLOBALS['wdc_force_schedule_failure'] = true;
 $failed_queue = $importer->queue_background_import( 'PVZ' );
@@ -327,14 +364,22 @@ $queued = $importer->queue_background_import( 'APS' );
 rp_pickup_assert( $queued && 'queued' === $state_service->current()['status'] && 'APS' === $state_service->current()['type'], 'Background import must queue persistent state.' );
 rp_pickup_assert( 1 === count( $GLOBALS['wdc_scheduled_events'] ) && RussianPostPickupImporter::SCHEDULE_HOOK === $GLOBALS['wdc_scheduled_events'][0]['hook'] && array( 'APS' ) === $GLOBALS['wdc_scheduled_events'][0]['args'], 'Background import must schedule a single event with type.' );
 rp_pickup_assert( ! $importer->queue_background_import( 'OPS' ), 'Background import must refuse duplicate queued jobs.' );
+update_option( RussianPostPickupImportStateService::OPTION_NAME, array_merge( $state_service->defaults(), array( 'status' => 'running', 'stage' => 'download', 'last_activity_at' => '2000-01-01 00:00:00', 'type' => 'ALL' ) ), false );
+set_transient( 'wdc_russian_post_pickup_import_lock', 1, 60 );
+rp_pickup_assert( ! $importer->is_locked() && false === get_transient( 'wdc_russian_post_pickup_import_lock' ) && 'failed' === $state_service->current()['status'] && in_array( 'Download stage timed out/stale.', $state_service->current()['errors'], true ), 'Stale download older than 15 minutes must fail state and clear lock.' );
 update_option( RussianPostPickupImportStateService::OPTION_NAME, array_merge( $state_service->defaults(), array( 'status' => 'running', 'stage' => 'parse', 'last_activity_at' => '2000-01-01 00:00:00', 'type' => 'ALL' ) ), false );
 set_transient( 'wdc_russian_post_pickup_import_lock', 1, 60 );
 rp_pickup_assert( ! $importer->is_locked() && false === get_transient( 'wdc_russian_post_pickup_import_lock' ) && 'failed' === $state_service->current()['status'], 'Stale lock recovery must clear old locks and mark state failed.' );
+update_option( RussianPostPickupImportStateService::OPTION_NAME, array_merge( $state_service->defaults(), array( 'status' => 'running', 'stage' => 'upsert', 'last_activity_at' => '2026-05-27 12:00:00', 'type' => 'ALL' ) ), false );
+set_transient( 'wdc_russian_post_pickup_import_lock', 1, 60 );
+$cancelled_state = $importer->reset_stale_or_running_import();
+rp_pickup_assert( false === get_transient( 'wdc_russian_post_pickup_import_lock' ) && 'failed' === $cancelled_state['status'] && in_array( 'Import was manually cancelled/reset by admin.', $cancelled_state['errors'], true ), 'Manual cancel/reset must fail state and clear lock without deleting points.' );
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 rp_pickup_assert( str_contains( $admin_source, 'russian_post_otpravka_access_token" value=""' ) && str_contains( $admin_source, 'has_access_token()' ), 'Admin must not render AccessToken back into HTML.' );
 rp_pickup_assert( str_contains( $admin_source, 'russian_post_otpravka_password" value=""' ) && str_contains( $admin_source, 'has_password()' ), 'Admin must not render password back into HTML.' );
 rp_pickup_assert( str_contains( $admin_source, 'queue_background_import' ) && ! str_contains( $admin_source, '->import( $this->otpravka_settings->unload_type() )' ), 'Admin action must queue import instead of running importer synchronously.' );
+rp_pickup_assert( str_contains( $admin_source, 'reset_russian_post_pickup_import' ) && str_contains( $admin_source, 'reset_stale_or_running_import' ), 'Admin must expose manual cancel/reset action.' );
 rp_pickup_assert( str_contains( $admin_source, 'wp_ajax_wdc_russian_post_pickup_import_status' ) && str_contains( $admin_source, 'ajax_pickup_import_status' ) && str_contains( $admin_source, 'wp_send_json_success' ), 'Admin must expose AJAX status endpoint.' );
 rp_pickup_assert( str_contains( $admin_source, 'disabled( $is_busy )' ), 'Admin run button must be disabled while queued/running.' );
 $admin_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/russian-post-pickup-import.js' );

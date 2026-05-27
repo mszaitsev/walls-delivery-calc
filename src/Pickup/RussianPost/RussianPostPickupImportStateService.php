@@ -9,6 +9,7 @@ final class RussianPostPickupImportStateService {
 	public const OPTION_NAME = 'wdc_russian_post_pickup_import_state';
 	private const MAX_STORED_ERRORS = 10;
 	private const STALE_AFTER_SECONDS = 7200;
+	private const DOWNLOAD_STALE_AFTER_SECONDS = 900;
 
 	/**
 	 * @return array<string,mixed>
@@ -108,14 +109,35 @@ final class RussianPostPickupImportStateService {
 	/**
 	 * @return array<string,mixed>
 	 */
+	public function cancel_by_admin(): array {
+		$state = $this->current();
+		$now = $this->now();
+		$state['status'] = 'failed';
+		$state['stage'] = 'failed';
+		$state['finished_at'] = $now;
+		$state['last_activity_at'] = $now;
+		$errors = is_array( $state['errors'] ?? null ) ? $state['errors'] : array();
+		$errors[] = 'Import was manually cancelled/reset by admin.';
+		$state['errors'] = array_slice( array_map( 'strval', $errors ), 0, self::MAX_STORED_ERRORS );
+		$state['memory_peak'] = max( (int) ( $state['memory_peak'] ?? 0 ), $this->memory_peak() );
+		$this->save( $state );
+
+		return $state;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
 	public function reset_stale_if_needed(): array {
 		$state = $this->current();
 		if ( ! in_array( (string) $state['status'], array( 'queued', 'running' ), true ) ) {
 			return $state;
 		}
 
+		$was_download = 'download' === (string) ( $state['stage'] ?? '' );
 		$last = strtotime( (string) ( $state['last_activity_at'] ?? '' ) );
-		if ( false !== $last && time() - $last < self::STALE_AFTER_SECONDS ) {
+		$stale_after = $was_download ? self::DOWNLOAD_STALE_AFTER_SECONDS : self::STALE_AFTER_SECONDS;
+		if ( false !== $last && time() - $last < $stale_after ) {
 			return $state;
 		}
 
@@ -124,7 +146,7 @@ final class RussianPostPickupImportStateService {
 		$state['finished_at'] = $this->now();
 		$state['last_activity_at'] = $state['finished_at'];
 		$errors = is_array( $state['errors'] ?? null ) ? $state['errors'] : array();
-		$errors[] = 'Previous import lock was stale and has been reset.';
+		$errors[] = $was_download ? 'Download stage timed out/stale.' : 'Previous import lock was stale and has been reset.';
 		$state['errors'] = array_slice( array_map( 'strval', $errors ), 0, self::MAX_STORED_ERRORS );
 		$this->save( $state );
 

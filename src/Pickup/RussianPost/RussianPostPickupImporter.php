@@ -115,7 +115,7 @@ final class RussianPostPickupImporter {
 
 	public function is_locked(): bool {
 		$state = $this->state?->reset_stale_if_needed();
-		if ( is_array( $state ) && 'failed' === (string) ( $state['status'] ?? '' ) && str_contains( implode( ';', array_map( 'strval', is_array( $state['errors'] ?? null ) ? $state['errors'] : array() ) ), 'stale' ) ) {
+		if ( is_array( $state ) && 'failed' === (string) ( $state['status'] ?? '' ) && str_contains( strtolower( implode( ';', array_map( 'strval', is_array( $state['errors'] ?? null ) ? $state['errors'] : array() ) ) ), 'stale' ) ) {
 			$this->unlock();
 			return false;
 		}
@@ -124,6 +124,15 @@ final class RussianPostPickupImporter {
 		}
 
 		return (bool) get_option( self::LOCK_KEY, false );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function reset_stale_or_running_import(): array {
+		$this->unlock();
+
+		return $this->state instanceof RussianPostPickupImportStateService ? $this->state->cancel_by_admin() : array();
 	}
 
 	public function queue_background_import( string $type ): bool {

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.11.
+Version: 0.22.12.
+
+Version 0.22.12 adds timeout-safe diagnostics for Russian Post pickup background import: Otpravka ZIP download timeout defaults to 300 seconds, failed downloads store HTTP/WP error details and a short body excerpt, stale download stages are failed after 15 minutes, and admins can manually cancel/reset a stuck import without deleting imported points.
 
 Version 0.22.11 keeps Russian Post pickup import state honest when a background job cannot be scheduled: `queued` is saved only after the job is actually created, otherwise state becomes `failed` with `Unable to schedule background import job.`.
 

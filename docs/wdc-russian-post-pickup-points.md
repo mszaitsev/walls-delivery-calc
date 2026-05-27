@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.11.
+Version: 0.22.12.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 
@@ -51,6 +51,8 @@ Locking uses `wdc_russian_post_pickup_import_lock` via transients, with an optio
 
 Manual imports from the admin UI now queue a background job instead of running in the HTTP request. The persistent live state is stored in the `wdc_russian_post_pickup_import_state` option with `status`, `stage`, timestamps, counters, first errors, type, and memory peak. The importer updates state before download, after extraction, during batch upserts, before deactivation, and on success/failure. If a queued/running state has no activity for more than 2 hours, stale lock recovery marks it failed and allows a new run with a warning.
 
+The Otpravka passport ZIP download timeout defaults to 300 seconds and is sanitized to 30..900 seconds. Download failures store the HTTP code, WP error message when present, response message/body excerpt up to 1000 characters, and temp file size when available. A running `download` stage with no activity for more than 15 minutes is marked failed with `Download stage timed out/stale.` and the import lock is cleared.
+
 ## Admin
 
 Manual import is available at:
@@ -72,6 +74,8 @@ The tab is shown only for `russian_post_domestic_pickup`. It contains:
 The "run import now" button schedules `wdc_russian_post_pickup_import` through Action Scheduler when available, otherwise through `wp_schedule_single_event(time()+5, ...)`, then redirects back to the tab. The status box polls `admin-ajax.php?action=wdc_russian_post_pickup_import_status` every 3 seconds while the state is `queued` or `running`; polling stops on `success` or `failed`. On the current test import, `ALL` produced 37302 active points.
 
 State becomes `queued` only after the background job is actually scheduled. If scheduling fails, the state is saved as `failed` with `Unable to schedule background import job.`, so the admin screen does not get stuck in a forever-queued state.
+
+The admin tab includes "Отменить / сбросить зависший импорт" while an import is queued/running. It clears `wdc_russian_post_pickup_import_lock` and marks state failed with `Import was manually cancelled/reset by admin.` without deleting already imported points.
 
 The existing `Калькулятор доставок -> ПВЗ` page remains in place and now shows a Russian Post summary with active total, type counts, and last successful import date.
 

@@ -37,7 +37,7 @@ final class RussianPostOtpravkaApiSettings {
 				self::LOGIN_KEY => '',
 				self::PASSWORD_ENCRYPTED_KEY => '',
 				self::BASIC_KEY_ENCRYPTED_KEY => '',
-				self::TIMEOUT_KEY => 20,
+				self::TIMEOUT_KEY => 300,
 				self::PICKUP_UNLOAD_TYPE_KEY => 'ALL',
 				self::PICKUP_SCHEDULE_ENABLED_KEY => false,
 				self::PICKUP_LAST_IMPORT_RESULT_KEY => array(),
@@ -72,7 +72,7 @@ final class RussianPostOtpravkaApiSettings {
 	}
 
 	public function timeout(): int {
-		return max( 1, min( 120, (int) ( $this->values()[ self::TIMEOUT_KEY ] ?? 20 ) ) );
+		return max( 30, min( 900, (int) ( $this->values()[ self::TIMEOUT_KEY ] ?? 300 ) ) );
 	}
 
 	public function unload_type(): string {
@@ -114,7 +114,7 @@ final class RussianPostOtpravkaApiSettings {
 			$values[ self::ACCESS_TOKEN_KEY ] = '';
 		}
 		$values[ self::LOGIN_KEY ] = sanitize_text_field( wp_unslash( $input['russian_post_otpravka_login'] ?? '' ) );
-		$values[ self::TIMEOUT_KEY ] = max( 1, min( 120, (int) ( $input['russian_post_otpravka_timeout'] ?? 20 ) ) );
+		$values[ self::TIMEOUT_KEY ] = max( 30, min( 900, (int) ( $input['russian_post_otpravka_timeout'] ?? 300 ) ) );
 		$type = strtoupper( sanitize_key( wp_unslash( $input['russian_post_pickup_unload_type'] ?? 'ALL' ) ) );
 		$values[ self::PICKUP_UNLOAD_TYPE_KEY ] = in_array( $type, array( 'ALL', 'OPS', 'PVZ', 'APS' ), true ) ? $type : 'ALL';
 		$values[ self::PICKUP_SCHEDULE_ENABLED_KEY ] = ! empty( $input['russian_post_pickup_schedule_enabled'] );
