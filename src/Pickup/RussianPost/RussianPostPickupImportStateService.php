@@ -10,6 +10,7 @@ final class RussianPostPickupImportStateService {
 	private const MAX_STORED_ERRORS = 10;
 	private const STALE_AFTER_SECONDS = 7200;
 	private const DOWNLOAD_STALE_AFTER_SECONDS = 900;
+	private const BATCH_STALE_AFTER_SECONDS = 600;
 
 	/**
 	 * @return array<string,mixed>
@@ -23,13 +24,14 @@ final class RussianPostPickupImportStateService {
 	/**
 	 * @return array<string,mixed>
 	 */
-	public function queue( string $type ): array {
+	public function queue( string $type, string $import_id = '' ): array {
 		$now = $this->now();
 		$state = array_merge(
 			$this->defaults(),
 			array(
 				'status' => 'queued',
 				'stage' => 'queued',
+				'import_id' => '' !== $import_id ? $import_id : $this->new_import_id(),
 				'started_at' => '',
 				'finished_at' => '',
 				'last_activity_at' => $now,
@@ -45,13 +47,14 @@ final class RussianPostPickupImportStateService {
 	/**
 	 * @return array<string,mixed>
 	 */
-	public function start( string $type ): array {
+	public function start( string $type, string $import_id = '' ): array {
 		$now = $this->now();
 		$state = array_merge(
 			$this->defaults(),
 			array(
 				'status' => 'running',
 				'stage' => 'download',
+				'import_id' => '' !== $import_id ? $import_id : $this->new_import_id(),
 				'started_at' => $now,
 				'finished_at' => '',
 				'last_activity_at' => $now,
@@ -80,6 +83,19 @@ final class RussianPostPickupImportStateService {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
+		}
+		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms' ) as $key ) {
+			if ( array_key_exists( $key, $counters ) ) {
+				$state[ $key ] = max( 0, (int) $counters[ $key ] );
+			}
+		}
+		foreach ( array( 'payload_file', 'temp_zip_file', 'import_id', 'type' ) as $key ) {
+			if ( array_key_exists( $key, $counters ) ) {
+				$state[ $key ] = (string) $counters[ $key ];
+			}
+		}
+		if ( array_key_exists( 'parser_completed', $counters ) ) {
+			$state['parser_completed'] = ! empty( $counters['parser_completed'] );
 		}
 		if ( isset( $counters['errors'] ) && is_array( $counters['errors'] ) ) {
 			$state['errors'] = array_slice( array_map( 'strval', $counters['errors'] ), 0, self::MAX_STORED_ERRORS );
@@ -134,9 +150,11 @@ final class RussianPostPickupImportStateService {
 			return $state;
 		}
 
-		$was_download = 'download' === (string) ( $state['stage'] ?? '' );
+		$stage = (string) ( $state['stage'] ?? '' );
+		$was_download = 'download' === $stage;
+		$was_batch = in_array( $stage, array( 'parse', 'upsert' ), true );
 		$last = strtotime( (string) ( $state['last_activity_at'] ?? '' ) );
-		$stale_after = $was_download ? self::DOWNLOAD_STALE_AFTER_SECONDS : self::STALE_AFTER_SECONDS;
+		$stale_after = $was_download ? self::DOWNLOAD_STALE_AFTER_SECONDS : ( $was_batch ? self::BATCH_STALE_AFTER_SECONDS : self::STALE_AFTER_SECONDS );
 		if ( false !== $last && time() - $last < $stale_after ) {
 			return $state;
 		}
@@ -146,7 +164,7 @@ final class RussianPostPickupImportStateService {
 		$state['finished_at'] = $this->now();
 		$state['last_activity_at'] = $state['finished_at'];
 		$errors = is_array( $state['errors'] ?? null ) ? $state['errors'] : array();
-		$errors[] = $was_download ? 'Download stage timed out/stale.' : 'Previous import lock was stale and has been reset.';
+		$errors[] = $was_download ? 'Download stage timed out/stale.' : ( $was_batch ? 'Batch stage timed out/stale.' : 'Previous import lock was stale and has been reset.' );
 		$state['errors'] = array_slice( array_map( 'strval', $errors ), 0, self::MAX_STORED_ERRORS );
 		$this->save( $state );
 
@@ -160,10 +178,20 @@ final class RussianPostPickupImportStateService {
 		return array(
 			'status' => 'idle',
 			'stage' => '',
+			'import_id' => '',
 			'started_at' => '',
 			'finished_at' => '',
 			'last_activity_at' => '',
 			'type' => 'ALL',
+			'payload_file' => '',
+			'temp_zip_file' => '',
+			'payload_offset' => 0,
+			'objects_processed' => 0,
+			'batches_processed' => 0,
+			'current_batch_size' => 0,
+			'last_batch_duration_ms' => 0,
+			'max_batch_duration_ms' => 0,
+			'parser_completed' => false,
 			'downloaded' => 0,
 			'parsed' => 0,
 			'inserted' => 0,
@@ -191,11 +219,18 @@ final class RussianPostPickupImportStateService {
 		foreach ( array( 'downloaded', 'parsed', 'inserted', 'updated', 'deactivated', 'skipped' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
+		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms' ) as $key ) {
+			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
+		}
 		$state['status'] = $status;
 		$state['stage'] = $stage;
 		$state['finished_at'] = (string) ( $result['finished_at'] ?? $this->now() );
 		$state['last_activity_at'] = $state['finished_at'];
 		$state['type'] = $this->normalize_type( (string) ( $result['type'] ?? $state['type'] ?? 'ALL' ) );
+		$state['payload_file'] = (string) ( $result['payload_file'] ?? $state['payload_file'] ?? '' );
+		$state['temp_zip_file'] = (string) ( $result['temp_zip_file'] ?? $state['temp_zip_file'] ?? '' );
+		$state['import_id'] = (string) ( $result['import_id'] ?? $state['import_id'] ?? '' );
+		$state['parser_completed'] = ! empty( $result['parser_completed'] ) || ! empty( $state['parser_completed'] );
 		$state['errors'] = array_slice( array_map( 'strval', is_array( $result['errors'] ?? null ) ? $result['errors'] : array() ), 0, self::MAX_STORED_ERRORS );
 		$state['memory_peak'] = max( (int) ( $state['memory_peak'] ?? 0 ), $this->memory_peak() );
 		$this->save( $state );
@@ -219,5 +254,11 @@ final class RussianPostPickupImportStateService {
 
 	private function memory_peak(): int {
 		return function_exists( 'memory_get_peak_usage' ) ? (int) memory_get_peak_usage( true ) : 0;
+	}
+
+	private function new_import_id(): string {
+		$random = function_exists( 'wp_rand' ) ? (string) wp_rand() : (string) random_int( 1, PHP_INT_MAX );
+
+		return sha1( (string) microtime( true ) . '|' . $random );
 	}
 }

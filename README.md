@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.12.
+Version: 0.22.13.
+
+Version 0.22.13 changes Russian Post pickup import into a resumable background batch pipeline. The init job only downloads/extracts the payload, each batch job parses and upserts 75 objects from the saved payload offset, and finalize deactivates missing points and cleans temp files, so one PHP process no longer writes to MySQL for the whole import.
 
 Version 0.22.12 adds timeout-safe diagnostics for Russian Post pickup background import: Otpravka ZIP download timeout defaults to 300 seconds, failed downloads store HTTP/WP error details and a short body excerpt, stale download stages are failed after 15 minutes, and admins can manually cancel/reset a stuck import without deleting imported points.
 

@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.12.
+Version: 0.22.13.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 
@@ -10,7 +10,7 @@ The existing `wdc_pickup_points` table is extended by `database/migrations/0021_
 
 New columns store import identity, last-seen state, address parts, FIAS/GAR ids, geohash, JSON snapshots in `LONGTEXT`, e-commerce options, weight/size limits, and payment/service flags. The existing `active` column is used as `is_active`; disappeared points are marked `active=0` and are not physically deleted. `raw_reference` stores the raw imported item JSON snapshot.
 
-Russian Post points use `carrier_key=russian_post` because the directory belongs to the carrier as a whole, not only to `russian_post_domestic`. `postcode` is stored separately; `point_code` is `postcode . '-' . substr(source_hash, 0, 10)` when a postcode is present, otherwise `source_hash`, so several objects with one postcode do not overwrite each other.
+Russian Post points use `carrier_key=russian_post` because the directory belongs to the carrier as a whole, not only to `russian_post_domestic`. `postcode` is stored separately; `point_code` is `postcode . '-' . substr(source_hash, 0, 10)` when a postcode is present, otherwise `source_hash`, so several objects with one postcode do not overwrite each other. The migration also adds `idx_carrier_point_code (carrier_key, point_code)` for batch upsert lookups.
 
 ## API Layer
 
@@ -43,15 +43,23 @@ Pickup import classes live in `src/Pickup/RussianPost/`:
 - `RussianPostPickupImporter`
 - `RussianPostPickupImportStateService`
 
-The importer downloads `GET https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=<ALL|OPS|PVZ|APS>` with WordPress HTTP streaming into a temp ZIP file. It extracts the first `.json` or `.txt` file from the ZIP into a second temp payload file, then parses the top-level `passportElements` array object-by-object. Rows are normalized and flushed through `PickupPointRepository` in batches of 250, so the full ALL payload is not held in PHP memory.
+The importer downloads `GET https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=<ALL|OPS|PVZ|APS>` with WordPress HTTP streaming into a temp ZIP file. The import is resumable and split into short background jobs:
+
+- init job `wdc_russian_post_pickup_import_init`: download ZIP, extract the first `.json`/`.txt` payload to a temp file, delete the ZIP, save `payload_file` and `payload_offset=0`, then schedule the first batch;
+- batch job `wdc_russian_post_pickup_import_batch`: open the payload, seek to `payload_offset`, parse up to 75 `passportElements` objects, normalize/upsert only that small batch, save the new byte offset and counters, then schedule the next batch or finalize;
+- finalize job `wdc_russian_post_pickup_import_finalize`: mark missing points inactive, delete the payload temp file, save success state, and unlock.
+
+The parser resumes from the saved byte offset and does not re-read the whole payload from the beginning. The full ALL payload is never decoded at once, and no single PHP process performs the full import.
 
 The import result stores `downloaded`, `parsed`, `inserted`, `updated`, `deactivated`, `skipped`, `errors`, `started_at`, and `finished_at`.
 
 Locking uses `wdc_russian_post_pickup_import_lock` via transients, with an option fallback in non-WP smoke tests, so parallel imports return a readable status instead of running twice.
 
-Manual imports from the admin UI now queue a background job instead of running in the HTTP request. The persistent live state is stored in the `wdc_russian_post_pickup_import_state` option with `status`, `stage`, timestamps, counters, first errors, type, and memory peak. The importer updates state before download, after extraction, during batch upserts, before deactivation, and on success/failure. If a queued/running state has no activity for more than 2 hours, stale lock recovery marks it failed and allows a new run with a warning.
+Manual imports from the admin UI now queue a background job instead of running in the HTTP request. The persistent live state is stored in the `wdc_russian_post_pickup_import_state` option with `status`, `stage`, timestamps, counters, first errors, type, memory peak, `import_id`, `payload_file`, `payload_offset`, `objects_processed`, `batches_processed`, `current_batch_size`, `last_batch_duration_ms`, `max_batch_duration_ms`, and `parser_completed`. The importer updates state before download, after extraction, after every batch upsert, before deactivation, and on success/failure. If a queued/running state has no activity for more than 2 hours, stale lock recovery marks it failed and allows a new run with a warning.
 
-The Otpravka passport ZIP download timeout defaults to 300 seconds and is sanitized to 30..900 seconds. Download failures store the HTTP code, WP error message when present, response message/body excerpt up to 1000 characters, and temp file size when available. A running `download` stage with no activity for more than 15 minutes is marked failed with `Download stage timed out/stale.` and the import lock is cleared.
+The Otpravka passport ZIP download timeout defaults to 300 seconds and is sanitized to 30..900 seconds. Download failures store the HTTP code, WP error message when present, response message/body excerpt up to 1000 characters, and temp file size when available. A running `download` stage with no activity for more than 15 minutes is marked failed with `Download stage timed out/stale.` and the import lock is cleared. A stale `parse`/`upsert` batch older than 10 minutes is marked failed with `Batch stage timed out/stale.`.
+
+`PickupPointRepository::upsert_passport_batch()` now looks up existing rows by `carrier_key + point_code` in one batch query using `IN (...)`, keeps `created_at` unchanged for existing rows, and uses small batch sizes. This reduces sustained write pressure and avoids one long MySQL-heavy request, so frontend/admin/checkout requests can run between import jobs.
 
 ## Admin
 
@@ -71,7 +79,7 @@ The tab is shown only for `russian_post_domestic_pickup`. It contains:
 - active counts for `OPS`, `PVZ`, `APS`;
 - lock status.
 
-The "run import now" button schedules `wdc_russian_post_pickup_import` through Action Scheduler when available, otherwise through `wp_schedule_single_event(time()+5, ...)`, then redirects back to the tab. The status box polls `admin-ajax.php?action=wdc_russian_post_pickup_import_status` every 3 seconds while the state is `queued` or `running`; polling stops on `success` or `failed`. On the current test import, `ALL` produced 37302 active points.
+The "run import now" button schedules the init hook `wdc_russian_post_pickup_import_init` through Action Scheduler when available, otherwise through `wp_schedule_single_event(time()+5, ...)`, then redirects back to the tab. The status box polls `admin-ajax.php?action=wdc_russian_post_pickup_import_status` every 3 seconds while the state is `queued` or `running`; polling stops on `success` or `failed`. On the current test import, `ALL` produced 37302 active points.
 
 State becomes `queued` only after the background job is actually scheduled. If scheduling fails, the state is saved as `failed` with `Unable to schedule background import job.`, so the admin screen does not get stuck in a forever-queued state.
 

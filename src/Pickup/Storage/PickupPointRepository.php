@@ -136,7 +136,8 @@ final class PickupPointRepository {
 
 		$stats = array( 'inserted' => 0, 'updated' => 0, 'skipped' => 0 );
 		$now   = function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
-		foreach ( array_chunk( $rows, 250 ) as $chunk ) {
+		foreach ( array_chunk( $rows, 100 ) as $chunk ) {
+			$normalized_rows = array();
 			foreach ( $chunk as $row ) {
 				if ( ! is_array( $row ) ) {
 					++$stats['skipped'];
@@ -150,8 +151,15 @@ final class PickupPointRepository {
 					continue;
 				}
 
-				$existing = $this->find_row_by_code( $carrier_key, (string) $row['point_code'] );
+				$normalized_rows[] = $row;
+			}
+
+			$existing_by_code = $this->find_rows_by_codes( $carrier_key, array_map( static fn( array $row ): string => (string) $row['point_code'], $normalized_rows ) );
+			foreach ( $normalized_rows as $row ) {
+				$point_code = (string) $row['point_code'];
+				$existing = $existing_by_code[ $point_code ] ?? null;
 				if ( is_array( $existing ) && isset( $existing['id'] ) ) {
+					$row['created_at'] = (string) ( $existing['created_at'] ?? $row['created_at'] ?? $now );
 					$this->wpdb->update( $this->table_name(), $row, array( 'id' => (int) $existing['id'] ), $this->passport_formats( $row ), array( '%d' ) );
 					++$stats['updated'];
 					continue;
@@ -322,6 +330,45 @@ final class PickupPointRepository {
 		);
 
 		return is_array( $row ) ? $row : null;
+	}
+
+	/**
+	 * @param array<int,string> $codes
+	 * @return array<string,array<string,mixed>>
+	 */
+	private function find_rows_by_codes( string $carrier, array $codes ): array {
+		$carrier = trim( $carrier );
+		$codes = array_values(
+			array_unique(
+				array_filter(
+					array_map( static fn( mixed $code ): string => trim( (string) $code ), $codes ),
+					static fn( string $code ): bool => '' !== $code
+				)
+			)
+		);
+		if ( '' === $carrier || array() === $codes ) {
+			return array();
+		}
+
+		$placeholders = implode( ',', array_fill( 0, count( $codes ), '%s' ) );
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT * FROM {$this->table_name()} WHERE carrier_key = %s AND point_code IN ({$placeholders})",
+				$carrier,
+				...$codes
+			),
+			ARRAY_A
+		);
+
+		$by_code = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$code = (string) ( $row['point_code'] ?? '' );
+			if ( '' !== $code ) {
+				$by_code[ $code ] = $row;
+			}
+		}
+
+		return $by_code;
 	}
 
 	/**

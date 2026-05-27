@@ -54,6 +54,7 @@ return static function (): void {
 		'idx_lat_lng' => '(latitude, longitude)',
 		'idx_geohash' => '(geohash)',
 		'idx_carrier_source_hash' => '(carrier_key, source_hash)',
+		'idx_carrier_point_code' => '(carrier_key, point_code)',
 	);
 
 	foreach ( $indexes as $name => $definition ) {
