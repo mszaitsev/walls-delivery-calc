@@ -12,6 +12,7 @@ use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
 use WallsShop\WDC\Carriers\Runtime\RussianPostDomesticCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
+use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
@@ -28,6 +29,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Packaging\PackagingApplicationResult;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPassportPointNormalizer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
@@ -58,13 +60,42 @@ final class DeliveryServicesAdminPage {
 		private ?RussianPostDomesticCarrier $russian_post_domestic_carrier = null,
 		private ?RussianPostOtpravkaApiSettings $otpravka_settings = null,
 		private ?RussianPostPickupImporter $pickup_importer = null,
-		private ?PickupPointRepository $pickup_points = null
+		private ?PickupPointRepository $pickup_points = null,
+		private ?RussianPostPickupImportStateService $pickup_import_state = null,
+		private ?PluginEnvironment $environment = null
 	) {
 	}
 
 	public function register(): void {
 		add_action( 'admin_menu', array( $this, 'add_menu_page' ) );
 		add_action( 'admin_init', array( $this, 'handle_actions' ) );
+		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
+		add_action( 'wp_ajax_wdc_russian_post_pickup_import_status', array( $this, 'ajax_pickup_import_status' ) );
+	}
+
+	public function enqueue_assets(): void {
+		$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : '';
+		$service = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
+		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
+		if ( self::MENU_SLUG !== $page || RussianPostDomesticSettings::PICKUP_SERVICE_KEY !== $service || 'russian_post_pickup' !== $tab ) {
+			return;
+		}
+
+		wp_enqueue_script(
+			'wdc-russian-post-pickup-import-admin',
+			$this->asset_url( 'assets/admin/russian-post-pickup-import.js' ),
+			array(),
+			$this->asset_version(),
+			true
+		);
+		wp_localize_script(
+			'wdc-russian-post-pickup-import-admin',
+			'wdcRussianPostPickupImport',
+			array(
+				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+				'nonce' => wp_create_nonce( 'wdc_russian_post_pickup_import_status' ),
+			)
+		);
 	}
 
 	public function add_menu_page(): void {
@@ -76,6 +107,33 @@ final class DeliveryServicesAdminPage {
 			self::MENU_SLUG,
 			array( $this, 'render_page' )
 		);
+	}
+
+	public function ajax_pickup_import_status(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 );
+		}
+		if ( ! check_ajax_referer( 'wdc_russian_post_pickup_import_status', 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 );
+		}
+
+		wp_send_json_success( $this->pickup_import_state instanceof RussianPostPickupImportStateService ? $this->pickup_import_state->current() : array() );
+	}
+
+	private function asset_url( string $path ): string {
+		if ( $this->environment instanceof PluginEnvironment ) {
+			return $this->environment->plugin_url() . ltrim( $path, '/' );
+		}
+
+		return defined( 'WDC_PLUGIN_URL' ) ? WDC_PLUGIN_URL . ltrim( $path, '/' ) : $path;
+	}
+
+	private function asset_version(): string {
+		if ( $this->environment instanceof PluginEnvironment ) {
+			return $this->environment->version();
+		}
+
+		return defined( 'WDC_VERSION' ) ? WDC_VERSION : '1';
 	}
 
 	public function handle_actions(): void {
@@ -124,7 +182,7 @@ final class DeliveryServicesAdminPage {
 			if ( in_array( $action, array( 'save_russian_post_pickup', 'run_russian_post_pickup_import' ), true ) && $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ) {
 				$this->otpravka_settings->save_from_admin( $_POST );
 				if ( 'run_russian_post_pickup_import' === $action && $this->pickup_importer instanceof RussianPostPickupImporter ) {
-					$this->pickup_importer->import( $this->otpravka_settings->unload_type() );
+					$this->pickup_importer->queue_background_import( $this->otpravka_settings->unload_type() );
 				}
 			}
 		}
@@ -424,6 +482,8 @@ final class DeliveryServicesAdminPage {
 		}
 		$values = $this->otpravka_settings->values();
 		$result = $this->otpravka_settings->last_import_result();
+		$state = $this->pickup_import_state instanceof RussianPostPickupImportStateService ? $this->pickup_import_state->current() : array();
+		$is_busy = in_array( (string) ( $state['status'] ?? 'idle' ), array( 'queued', 'running' ), true );
 		$counts = $this->pickup_points instanceof PickupPointRepository ? $this->pickup_points->count_by_type( RussianPostPassportPointNormalizer::CARRIER_KEY ) : array();
 		$total = $this->pickup_points instanceof PickupPointRepository ? $this->pickup_points->count_active( RussianPostPassportPointNormalizer::CARRIER_KEY ) : 0;
 		$locked = $this->pickup_importer instanceof RussianPostPickupImporter && $this->pickup_importer->is_locked();
@@ -444,6 +504,7 @@ final class DeliveryServicesAdminPage {
 			</table>
 			<h3>Импорт ПВЗ / ОПС</h3>
 			<table class="form-table" role="presentation">
+				<tr><th scope="row">Статус импорта</th><td><div class="wdc-rp-pickup-import-status" data-wdc-rp-pickup-import-status><strong data-wdc-rp-field="status"><?php echo esc_html( (string) ( $state['status'] ?? 'idle' ) ); ?></strong> <span class="spinner <?php echo $is_busy ? 'is-active' : ''; ?>" data-wdc-rp-spinner></span><table class="widefat striped" style="max-width: 760px; margin-top: 8px;"><tbody><?php foreach ( $this->pickup_import_state_rows() as $key => $label ) : ?><tr><th scope="row"><?php echo esc_html( $label ); ?></th><td data-wdc-rp-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $this->pickup_import_state_value( $state, $key ) ); ?></td></tr><?php endforeach; ?></tbody></table><p><button type="button" class="button" data-wdc-rp-refresh-status>Обновить статус</button></p></div></td></tr>
 				<?php $this->select_row( 'russian_post_pickup_unload_type', 'Unload type', (string) ( $values[ RussianPostOtpravkaApiSettings::PICKUP_UNLOAD_TYPE_KEY ] ?? 'ALL' ), array( 'ALL', 'OPS', 'PVZ', 'APS' ) ); ?>
 				<?php $this->checkbox_row( 'russian_post_pickup_schedule_enabled', 'Ежедневный импорт', ! empty( $values[ RussianPostOtpravkaApiSettings::PICKUP_SCHEDULE_ENABLED_KEY ] ) ); ?>
 				<tr><th scope="row">Lock</th><td><?php echo esc_html( $locked ? 'активен' : 'свободен' ); ?></td></tr>
@@ -453,9 +514,44 @@ final class DeliveryServicesAdminPage {
 				<tr><th scope="row">Stats</th><td>started_at: <?php echo esc_html( (string) ( $result['started_at'] ?? '-' ) ); ?>; finished_at: <?php echo esc_html( (string) ( $result['finished_at'] ?? '-' ) ); ?>; inserted: <?php echo esc_html( (string) ( $result['inserted'] ?? 0 ) ); ?>; updated: <?php echo esc_html( (string) ( $result['updated'] ?? 0 ) ); ?>; deactivated: <?php echo esc_html( (string) ( $result['deactivated'] ?? 0 ) ); ?>; skipped: <?php echo esc_html( (string) ( $result['skipped'] ?? 0 ) ); ?>; errors: <?php echo esc_html( implode( '; ', array_map( 'strval', is_array( $result['errors'] ?? null ) ? $result['errors'] : array() ) ) ); ?></td></tr>
 			</table>
 			<?php submit_button( 'Сохранить настройки импорта', 'secondary', 'submit', false ); ?>
-			<button class="button button-primary" type="submit" name="wdc_delivery_services_action" value="run_russian_post_pickup_import">Запустить импорт сейчас</button>
+			<button class="button button-primary" type="submit" name="wdc_delivery_services_action" value="run_russian_post_pickup_import" <?php disabled( $is_busy ); ?>>Запустить импорт сейчас</button>
 		</form>
 		<?php
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private function pickup_import_state_rows(): array {
+		return array(
+			'stage' => 'Stage',
+			'started_at' => 'Started at',
+			'finished_at' => 'Finished at',
+			'last_activity_at' => 'Last activity',
+			'type' => 'Type',
+			'downloaded' => 'Downloaded',
+			'parsed' => 'Parsed',
+			'inserted' => 'Inserted',
+			'updated' => 'Updated',
+			'deactivated' => 'Deactivated',
+			'skipped' => 'Skipped',
+			'errors' => 'Errors',
+			'memory_peak' => 'Memory peak',
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $state
+	 */
+	private function pickup_import_state_value( array $state, string $key ): string {
+		if ( 'errors' === $key ) {
+			return implode( '; ', array_map( 'strval', is_array( $state['errors'] ?? null ) ? $state['errors'] : array() ) );
+		}
+		if ( 'memory_peak' === $key ) {
+			return size_format( max( 0, (int) ( $state[ $key ] ?? 0 ) ) );
+		}
+
+		return (string) ( $state[ $key ] ?? '' );
 	}
 
 	private function render_rules_tab( DeliveryService $service ): void {

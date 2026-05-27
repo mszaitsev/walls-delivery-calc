@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.02.
+Version: 0.22.10.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 
@@ -41,12 +41,15 @@ Pickup import classes live in `src/Pickup/RussianPost/`:
 
 - `RussianPostPassportPointNormalizer`
 - `RussianPostPickupImporter`
+- `RussianPostPickupImportStateService`
 
 The importer downloads `GET https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=<ALL|OPS|PVZ|APS>` with WordPress HTTP streaming into a temp ZIP file. It extracts the first `.json` or `.txt` file from the ZIP into a second temp payload file, then parses the top-level `passportElements` array object-by-object. Rows are normalized and flushed through `PickupPointRepository` in batches of 250, so the full ALL payload is not held in PHP memory.
 
 The import result stores `downloaded`, `parsed`, `inserted`, `updated`, `deactivated`, `skipped`, `errors`, `started_at`, and `finished_at`.
 
 Locking uses `wdc_russian_post_pickup_import_lock` via transients, with an option fallback in non-WP smoke tests, so parallel imports return a readable status instead of running twice.
+
+Manual imports from the admin UI now queue a background job instead of running in the HTTP request. The persistent live state is stored in the `wdc_russian_post_pickup_import_state` option with `status`, `stage`, timestamps, counters, first errors, type, and memory peak. The importer updates state before download, after extraction, during batch upserts, before deactivation, and on success/failure. If a queued/running state has no activity for more than 2 hours, stale lock recovery marks it failed and allows a new run with a warning.
 
 ## Admin
 
@@ -61,9 +64,12 @@ The tab is shown only for `russian_post_domestic_pickup`. It contains:
 - unload type `ALL|OPS|PVZ|APS`;
 - schedule enabled flag;
 - "Запустить импорт сейчас";
+- live import status/progress;
 - last import result;
 - active counts for `OPS`, `PVZ`, `APS`;
 - lock status.
+
+The "run import now" button schedules `wdc_russian_post_pickup_import` through Action Scheduler when available, otherwise through `wp_schedule_single_event(time()+5, ...)`, then redirects back to the tab. The status box polls `admin-ajax.php?action=wdc_russian_post_pickup_import_status` every 3 seconds while the state is `queued` or `running`; polling stops on `success` or `failed`. On the current test import, `ALL` produced 37302 active points.
 
 The existing `Калькулятор доставок -> ПВЗ` page remains in place and now shows a Russian Post summary with active total, type counts, and last successful import date.
 

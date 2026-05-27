@@ -1,8 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.02.
+Version: 0.22.10.
 
-Version 0.22.02 makes Russian Post pickup import memory-safe: ZIP download uses WordPress HTTP streaming, ZIP payload is extracted to a temp file, and `passportElements` is parsed object-by-object with batch upserts instead of decoding the full payload.
+Version 0.22.10 runs Russian Post pickup import in the background from the admin UI. The page returns immediately, stores live state in `wdc_russian_post_pickup_import_state`, and polls progress every 3 seconds while the job is queued or running. Stale queued/running locks older than 2 hours are marked failed so a new import can be started; the current ALL test import produced 37302 active points.
 
 Version 0.22.01 fixes Russian Post pickup import identity and temp-file cleanup: `point_code` is now unique per concrete point even when several objects share one postcode, and imported ZIP files are deleted after reading.
 

@@ -35,6 +35,7 @@ function delete_option( string $key ): bool { unset( $GLOBALS['wdc_options'][ $k
 function set_transient( string $key, mixed $value, int $expiration = 0 ): bool { $GLOBALS['wdc_transients'][ $key ] = $value; return true; }
 function get_transient( string $key ): mixed { return $GLOBALS['wdc_transients'][ $key ] ?? false; }
 function delete_transient( string $key ): bool { unset( $GLOBALS['wdc_transients'][ $key ] ); return true; }
+function wp_schedule_single_event( int $timestamp, string $hook, array $args = array() ): bool { $GLOBALS['wdc_scheduled_events'][] = array( 'timestamp' => $timestamp, 'hook' => $hook, 'args' => $args ); return true; }
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -164,6 +165,7 @@ use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPassportPointNormalizer;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 
@@ -241,6 +243,18 @@ rp_pickup_assert( $encrypted === get_option( 'wdc_core_settings', array() )[ Rus
 $settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_clear_password' => '1' ) );
 rp_pickup_assert( '' === get_option( 'wdc_core_settings', array() )[ RussianPostOtpravkaApiSettings::PASSWORD_ENCRYPTED_KEY ], 'Clear secret must remove saved secret.' );
 
+$state_service = new RussianPostPickupImportStateService();
+$queued_state = $state_service->queue( 'PVZ' );
+rp_pickup_assert( 'queued' === $queued_state['status'] && 'queued' === $queued_state['stage'] && 'PVZ' === $queued_state['type'], 'State service must save queued state.' );
+$running_state = $state_service->start( 'OPS' );
+rp_pickup_assert( 'running' === $running_state['status'] && 'download' === $running_state['stage'] && 'OPS' === $running_state['type'], 'State service must save running state.' );
+$progress_state = $state_service->update( 'upsert', array( 'parsed' => 5, 'inserted' => 3, 'updated' => 1, 'skipped' => 1, 'errors' => array( 'sample error' ) ) );
+rp_pickup_assert( 'running' === $progress_state['status'] && 'upsert' === $progress_state['stage'] && 5 === $progress_state['parsed'] && 3 === $progress_state['inserted'], 'State service must update progress counters.' );
+$success_state = $state_service->success( array( 'type' => 'OPS', 'parsed' => 5, 'inserted' => 3, 'updated' => 1, 'skipped' => 1, 'finished_at' => '2026-05-27 12:01:00', 'errors' => array() ) );
+rp_pickup_assert( 'success' === $success_state['status'] && 'finished' === $success_state['stage'], 'State service must save success state.' );
+$failed_state = $state_service->failed( array( 'type' => 'OPS', 'parsed' => 2, 'finished_at' => '2026-05-27 12:02:00', 'errors' => array( 'failed sample' ) ) );
+rp_pickup_assert( 'failed' === $failed_state['status'] && 'failed' === $failed_state['stage'] && array( 'failed sample' ) === $failed_state['errors'], 'State service must save failed state.' );
+
 $settings->save_from_admin( array( 'russian_post_otpravka_access_token' => 'token', 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_password' => 'password', 'russian_post_pickup_unload_type' => 'ALL' ) );
 function wp_remote_get( string $url, array $args = array() ): array {
 	$zip_file = tempnam( sys_get_temp_dir(), 'wdc-rp-zip-' );
@@ -280,20 +294,37 @@ $items_json = implode(
 $GLOBALS['rp_passport_payload'] = '{"passportElements":[' . $items_json . ',{"latitude":},{"address":{"index":"630001"},"latitude":55.9,"longitude":82.9}],"tail":{"ok":true}}';
 $GLOBALS['wpdb']->pickup_rows = array();
 $GLOBALS['wpdb']->insert_id = 0;
-$importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings ), $repo, $normalizer );
+$GLOBALS['wdc_scheduled_events'] = array();
+$importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings ), $repo, $normalizer, $state_service );
 set_transient( 'wdc_russian_post_pickup_import_lock', 1, 60 );
 $locked_result = $importer->import( 'ALL' );
 rp_pickup_assert( empty( $locked_result['success'] ) && str_contains( implode( ';', $locked_result['errors'] ), 'already running' ), 'Importer must refuse parallel run.' );
 delete_transient( 'wdc_russian_post_pickup_import_lock' );
 $result = $importer->import( 'ALL' );
 rp_pickup_assert( ! empty( $result['success'] ) && 261 === $result['parsed'] && 261 === $result['inserted'] && $result['skipped'] >= 1, 'Importer must stream ZIP passportElements in batches and skip invalid items.' );
+$import_state = $state_service->current();
+rp_pickup_assert( 'success' === $import_state['status'] && 'finished' === $import_state['stage'] && 261 === $import_state['parsed'] && 261 === $import_state['inserted'], 'Importer must persist final success state.' );
 rp_pickup_assert( count( $GLOBALS['wpdb']->pickup_rows ) === 261, 'Streaming import must preserve distinct same-postcode points across batches.' );
 rp_pickup_assert( '' !== $settings->last_success_at(), 'last_success_at must update only after successful import.' );
 rp_pickup_assert( count( $GLOBALS['wdc_deleted_files'] ?? array() ) >= 2 && ! is_file( end( $GLOBALS['wdc_deleted_files'] ) ), 'Importer must delete temporary ZIP and extracted payload files after reading.' );
 rp_pickup_assert( in_array( 'Invalid passport item JSON: Syntax error', $result['errors'], true ), 'Importer must report invalid item JSON without failing the whole import.' );
 
+delete_transient( 'wdc_russian_post_pickup_import_lock' );
+$queued = $importer->queue_background_import( 'APS' );
+rp_pickup_assert( $queued && 'queued' === $state_service->current()['status'] && 'APS' === $state_service->current()['type'], 'Background import must queue persistent state.' );
+rp_pickup_assert( 1 === count( $GLOBALS['wdc_scheduled_events'] ) && RussianPostPickupImporter::SCHEDULE_HOOK === $GLOBALS['wdc_scheduled_events'][0]['hook'] && array( 'APS' ) === $GLOBALS['wdc_scheduled_events'][0]['args'], 'Background import must schedule a single event with type.' );
+rp_pickup_assert( ! $importer->queue_background_import( 'OPS' ), 'Background import must refuse duplicate queued jobs.' );
+update_option( RussianPostPickupImportStateService::OPTION_NAME, array_merge( $state_service->defaults(), array( 'status' => 'running', 'stage' => 'parse', 'last_activity_at' => '2000-01-01 00:00:00', 'type' => 'ALL' ) ), false );
+set_transient( 'wdc_russian_post_pickup_import_lock', 1, 60 );
+rp_pickup_assert( ! $importer->is_locked() && false === get_transient( 'wdc_russian_post_pickup_import_lock' ) && 'failed' === $state_service->current()['status'], 'Stale lock recovery must clear old locks and mark state failed.' );
+
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 rp_pickup_assert( str_contains( $admin_source, 'russian_post_otpravka_access_token" value=""' ) && str_contains( $admin_source, 'has_access_token()' ), 'Admin must not render AccessToken back into HTML.' );
 rp_pickup_assert( str_contains( $admin_source, 'russian_post_otpravka_password" value=""' ) && str_contains( $admin_source, 'has_password()' ), 'Admin must not render password back into HTML.' );
+rp_pickup_assert( str_contains( $admin_source, 'queue_background_import' ) && ! str_contains( $admin_source, '->import( $this->otpravka_settings->unload_type() )' ), 'Admin action must queue import instead of running importer synchronously.' );
+rp_pickup_assert( str_contains( $admin_source, 'wp_ajax_wdc_russian_post_pickup_import_status' ) && str_contains( $admin_source, 'ajax_pickup_import_status' ) && str_contains( $admin_source, 'wp_send_json_success' ), 'Admin must expose AJAX status endpoint.' );
+rp_pickup_assert( str_contains( $admin_source, 'disabled( $is_busy )' ), 'Admin run button must be disabled while queued/running.' );
+$admin_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/russian-post-pickup-import.js' );
+rp_pickup_assert( str_contains( $admin_js, 'setInterval(requestStatus, 3000)' ) && str_contains( $admin_js, 'wdc_russian_post_pickup_import_status' ), 'Admin JS must poll import status every 3 seconds.' );
 
 echo "Russian Post pickup import smoke test passed.\n";

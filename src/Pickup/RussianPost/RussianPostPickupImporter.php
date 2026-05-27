@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Pickup\RussianPost;
 
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiClient;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
+use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -19,7 +20,9 @@ final class RussianPostPickupImporter {
 		private RussianPostOtpravkaApiSettings $settings,
 		private RussianPostOtpravkaApiClient $client,
 		private PickupPointRepository $repository,
-		private RussianPostPassportPointNormalizer $normalizer
+		private RussianPostPassportPointNormalizer $normalizer,
+		private ?RussianPostPickupImportStateService $state = null,
+		private ?ActionScheduler $scheduler = null
 	) {
 	}
 
@@ -28,8 +31,8 @@ final class RussianPostPickupImporter {
 		add_action( 'init', array( $this, 'sync_schedule' ) );
 	}
 
-	public function run_scheduled(): void {
-		$this->import( $this->settings->unload_type() );
+	public function run_scheduled( string $type = '' ): void {
+		$this->import( '' !== trim( $type ) ? $type : $this->settings->unload_type() );
 	}
 
 	public function sync_schedule(): void {
@@ -75,6 +78,8 @@ final class RussianPostPickupImporter {
 		$temp_file = '';
 		$payload_file = '';
 		try {
+			$this->state?->start( $type );
+			$this->state?->update( 'download', $result );
 			$download = $this->client->download_passport_zip( $type );
 			if ( empty( $download['success'] ) ) {
 				$result['errors'][] = (string) ( $download['error'] ?? 'Download failed.' );
@@ -82,18 +87,21 @@ final class RussianPostPickupImporter {
 			}
 			$temp_file = (string) $download['temp_file'];
 			$result['downloaded'] = is_file( $temp_file ) ? (int) filesize( $temp_file ) : 0;
+			$this->state?->update( 'extract', $result );
 
 			$payload_file = $this->extract_first_payload_from_zip( $temp_file );
 			if ( '' === $payload_file ) {
 				$result['errors'][] = 'ZIP does not contain JSON/TXT passport payload.';
 				return $this->finish( $result, false );
 			}
+			$this->state?->update( 'parse', $result );
 
 			if ( ! $this->process_passport_payload_stream( $payload_file, $type, $started, $result ) ) {
 				$result['errors'][] = 'Passport payload does not contain passportElements.';
 				return $this->finish( $result, false );
 			}
 
+			$this->state?->update( 'deactivate', $result );
 			$result['deactivated'] = $this->repository->mark_missing_inactive( RussianPostPassportPointNormalizer::CARRIER_KEY, $started );
 			$result['success'] = true;
 
@@ -106,11 +114,38 @@ final class RussianPostPickupImporter {
 	}
 
 	public function is_locked(): bool {
+		$state = $this->state?->reset_stale_if_needed();
+		if ( is_array( $state ) && 'failed' === (string) ( $state['status'] ?? '' ) && str_contains( implode( ';', array_map( 'strval', is_array( $state['errors'] ?? null ) ? $state['errors'] : array() ) ), 'stale' ) ) {
+			$this->unlock();
+			return false;
+		}
 		if ( function_exists( 'get_transient' ) ) {
 			return false !== get_transient( self::LOCK_KEY );
 		}
 
 		return (bool) get_option( self::LOCK_KEY, false );
+	}
+
+	public function queue_background_import( string $type ): bool {
+		if ( $this->is_locked() ) {
+			return false;
+		}
+
+		$current = $this->state?->reset_stale_if_needed() ?? array();
+		if ( in_array( (string) ( $current['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
+			return false;
+		}
+
+		$type = $this->normalize_type( $type );
+		$this->state?->queue( $type );
+		if ( $this->scheduler instanceof ActionScheduler && null !== $this->scheduler->schedule_single( time() + 5, self::SCHEDULE_HOOK, array( $type ) ) ) {
+			return true;
+		}
+		if ( function_exists( 'wp_schedule_single_event' ) ) {
+			return (bool) wp_schedule_single_event( time() + 5, self::SCHEDULE_HOOK, array( $type ) );
+		}
+
+		return false;
 	}
 
 	/**
@@ -120,6 +155,11 @@ final class RussianPostPickupImporter {
 	private function finish( array $result, bool $success ): array {
 		$result['finished_at'] = function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
 		$this->settings->save_import_result( $result, $success );
+		if ( $success ) {
+			$this->state?->success( $result );
+		} else {
+			$this->state?->failed( $result );
+		}
 
 		return $result;
 	}
@@ -344,6 +384,7 @@ final class RussianPostPickupImporter {
 		$result['updated'] += $upsert['updated'];
 		$result['skipped'] += $upsert['skipped'];
 		$batch = array();
+		$this->state?->update( 'upsert', $result );
 	}
 
 	/**
@@ -354,5 +395,11 @@ final class RussianPostPickupImporter {
 			return;
 		}
 		$result['errors'][] = $message;
+	}
+
+	private function normalize_type( string $type ): string {
+		$type = strtoupper( trim( $type ) );
+
+		return in_array( $type, array( 'ALL', 'OPS', 'PVZ', 'APS' ), true ) ? $type : 'ALL';
 	}
 }
