@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.25.
+Version: 0.22.26.
+
+Version 0.22.26 adds a direct cURL passport ZIP download backend before WordPress HTTP streaming. If cURL fails, import falls back to WP HTTP and stores backend, fallback, cURL errno/error, and first backend diagnostics in state.
 
 Version 0.22.25 makes Russian Post pickup status polling perform stale checks: the AJAX status endpoint now refreshes import state through the importer, so a stuck `running/download` state older than 5 minutes is failed, unlocked, and cleaned up by ordinary status polling.
 

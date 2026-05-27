@@ -84,18 +84,21 @@ final class RussianPostPickupImportStateService {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
 		}
-		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size' ) as $key ) {
+		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno' ) as $key ) {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
 		}
-		foreach ( array( 'payload_file', 'temp_zip_file', 'import_id', 'type', 'staging_table', 'main_table', 'backup_table', 'swap_started_at', 'swap_finished_at', 'download_url', 'download_started_at', 'download_response_message', 'download_error' ) as $key ) {
+		foreach ( array( 'payload_file', 'temp_zip_file', 'import_id', 'type', 'staging_table', 'main_table', 'backup_table', 'swap_started_at', 'swap_finished_at', 'download_url', 'download_started_at', 'download_response_message', 'download_error', 'download_backend', 'first_backend_error', 'curl_error' ) as $key ) {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = (string) $counters[ $key ];
 			}
 		}
 		if ( array_key_exists( 'parser_completed', $counters ) ) {
 			$state['parser_completed'] = ! empty( $counters['parser_completed'] );
+		}
+		if ( array_key_exists( 'fallback_used', $counters ) ) {
+			$state['fallback_used'] = ! empty( $counters['fallback_used'] );
 		}
 		if ( isset( $counters['errors'] ) && is_array( $counters['errors'] ) ) {
 			$state['errors'] = array_slice( array_map( 'strval', $counters['errors'] ), 0, self::MAX_STORED_ERRORS );
@@ -198,6 +201,11 @@ final class RussianPostPickupImportStateService {
 			'download_http_code' => 0,
 			'download_response_message' => '',
 			'download_error' => '',
+			'download_backend' => '',
+			'fallback_used' => false,
+			'first_backend_error' => '',
+			'curl_errno' => 0,
+			'curl_error' => '',
 			'temp_file_size' => 0,
 			'payload_file' => '',
 			'temp_zip_file' => '',
@@ -235,7 +243,7 @@ final class RussianPostPickupImportStateService {
 		foreach ( array( 'downloaded', 'parsed', 'inserted', 'updated', 'deactivated', 'skipped' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
-		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size' ) as $key ) {
+		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
 		$state['status'] = $status;
@@ -255,6 +263,10 @@ final class RussianPostPickupImportStateService {
 		$state['download_started_at'] = (string) ( $result['download_started_at'] ?? $state['download_started_at'] ?? '' );
 		$state['download_response_message'] = (string) ( $result['download_response_message'] ?? $state['download_response_message'] ?? '' );
 		$state['download_error'] = (string) ( $result['download_error'] ?? $state['download_error'] ?? '' );
+		$state['download_backend'] = (string) ( $result['download_backend'] ?? $state['download_backend'] ?? '' );
+		$state['fallback_used'] = ! empty( $result['fallback_used'] ?? $state['fallback_used'] ?? false );
+		$state['first_backend_error'] = (string) ( $result['first_backend_error'] ?? $state['first_backend_error'] ?? '' );
+		$state['curl_error'] = (string) ( $result['curl_error'] ?? $state['curl_error'] ?? '' );
 		$state['parser_completed'] = ! empty( $result['parser_completed'] ) || ! empty( $state['parser_completed'] );
 		$state['errors'] = array_slice( array_map( 'strval', is_array( $result['errors'] ?? null ) ? $result['errors'] : array() ), 0, self::MAX_STORED_ERRORS );
 		$state['memory_peak'] = max( (int) ( $state['memory_peak'] ?? 0 ), $this->memory_peak() );

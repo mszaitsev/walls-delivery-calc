@@ -236,6 +236,32 @@ function wp_remote_get( string $url, array $args = array() ): mixed {
 	return array( 'response' => array( 'code' => 200 ), 'body' => '' );
 }
 
+function rp_write_passport_zip( string $target ): void {
+	$zip_file = tempnam( sys_get_temp_dir(), 'wdc-rp-zip-' );
+	$zip = new ZipArchive();
+	$zip->open( $zip_file, ZipArchive::OVERWRITE );
+	$zip->addFromString( 'passport.json', (string) $GLOBALS['rp_passport_payload'] );
+	$zip->close();
+	copy( $zip_file, $target );
+	unlink( $zip_file );
+}
+
+function rp_curl_success_downloader(): callable {
+	return static function ( string $url, string $type ): array {
+		$temp = wp_tempnam( 'wdc-russian-post-passport.zip' );
+		rp_write_passport_zip( $temp );
+		return array( 'success' => true, 'url' => $url, 'type' => $type, 'http_code' => 200, 'response_message' => '', 'temp_file' => $temp, 'temp_file_size' => filesize( $temp ), 'duration_ms' => 7, 'download_backend' => 'curl', 'curl_errno' => 0, 'curl_error' => '' );
+	};
+}
+
+function rp_curl_failure_downloader( string $message = 'Injected cURL failure', int $errno = 28 ): callable {
+	return static function ( string $url, string $type ) use ( $message, $errno ): array {
+		$temp = wp_tempnam( 'wdc-russian-post-passport.zip' );
+		file_put_contents( $temp, 'partial-curl' );
+		return array( 'success' => false, 'url' => $url, 'type' => $type, 'http_code' => 0, 'error' => $message, 'temp_file' => $temp, 'temp_file_size' => filesize( $temp ), 'duration_ms' => 3, 'download_backend' => 'curl', 'curl_errno' => $errno, 'curl_error' => $message );
+	};
+}
+
 $base_item = array(
 	'address' => array( 'index' => '630001', 'region' => 'НСО', 'place' => 'Новосибирск', 'street' => 'Ленина', 'house' => '1' ),
 	'addressFias' => array( 'ads' => 'Новосибирск, Ленина, 1' ),
@@ -260,13 +286,33 @@ for ( $i = 0; $i < 3; ++$i ) {
 }
 $GLOBALS['rp_passport_payload'] = '{"passportElements":[' . implode( ',', array_map( static fn( array $item ): string => (string) json_encode( $item, JSON_UNESCAPED_UNICODE ), $items ) ) . ']}';
 
+$curl_client = new RussianPostOtpravkaApiClient( $settings, rp_curl_success_downloader() );
+$curl_download = $curl_client->download_passport_zip( 'ALL' );
+rp_pickup_assert( ! empty( $curl_download['success'] ) && 'curl' === $curl_download['download_backend'] && empty( $curl_download['fallback_used'] ) && is_file( (string) $curl_download['temp_file'] ), 'cURL backend success must return download_backend=curl.' );
+$curl_temp = (string) $curl_download['temp_file'];
+$curl_probe = $curl_client->probe_passport_download( 'ALL' );
+rp_pickup_assert( ! empty( $curl_probe['success'] ) && '' === (string) $curl_probe['temp_file'] && ! file_exists( (string) ( $curl_probe['temp_file'] ?? '' ) ), 'Probe must delete temp file after successful download.' );
+wp_delete_file( $curl_temp );
+
+$GLOBALS['rp_http_mode'] = '';
+$fallback_client = new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() );
+$fallback_download = $fallback_client->download_passport_zip( 'ALL' );
+rp_pickup_assert( ! empty( $fallback_download['success'] ) && 'wp_http' === $fallback_download['download_backend'] && ! empty( $fallback_download['fallback_used'] ) && 28 === (int) $fallback_download['curl_errno'] && str_contains( (string) $fallback_download['first_backend_error'], 'Injected cURL failure' ), 'cURL failure must fall back to WP HTTP and keep first backend diagnostic.' );
+wp_delete_file( (string) $fallback_download['temp_file'] );
+
+$GLOBALS['rp_http_mode'] = 'wp_error';
+$both_failed_client = new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader( 'Injected cURL timeout', 28 ) );
+$both_failed = $both_failed_client->download_passport_zip( 'ALL' );
+$GLOBALS['rp_http_mode'] = '';
+rp_pickup_assert( empty( $both_failed['success'] ) && str_contains( (string) $both_failed['error'], 'cURL failed: Injected cURL timeout' ) && str_contains( (string) $both_failed['error'], 'WP HTTP failed:' ) && ! file_exists( (string) ( $both_failed['temp_file'] ?? '' ) ), 'Both backend failure must return combined diagnostic and delete temp files.' );
+
 $main = $repo->main_table();
 $normalized_base = $normalizer->normalize( $base_item, 'PVZ', '2026-05-28 10:00:00' );
 rp_pickup_assert( is_array( $normalized_base ) && "Пн–Пт: 08:00–17:00\nПерерыв: 12:00–13:00\nСб–Вс: выходной" === $normalized_base['work_time'], 'Normalizer must store compact work_time.' );
 rp_pickup_assert( ! array_key_exists( 'raw_reference', $normalized_base ) && ! array_key_exists( 'work_time_json', $normalized_base ), 'Normalizer must not output raw_reference or work_time_json.' );
 $repo->insert_batch( array( $normalized_base ), $main );
 $main_before = count( $GLOBALS['wpdb']->tables[ $main ] );
-$importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings ), $repo, $normalizer, $state_service );
+$importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, $state_service );
 rp_pickup_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/RussianPost/RussianPostPickupImporter.php' ), 'private const BATCH_SIZE = 500' ), 'Importer batch size must be 500.' );
 rp_pickup_assert( $importer->queue_background_import( 'ALL' ), 'Import must queue init job.' );
 $init_event = rp_shift_event( RussianPostPickupImporter::INIT_HOOK );
@@ -274,7 +320,7 @@ $init = $importer->run_import_init( (string) $init_event['args'][0], (string) $i
 $state = $state_service->current();
 rp_pickup_assert( ! empty( $init['success'] ) && '' !== $state['staging_table'] && array_key_exists( $state['staging_table'], $GLOBALS['wpdb']->tables ), 'Init must create staging table.' );
 rp_pickup_assert( $main_before === count( $GLOBALS['wpdb']->tables[ $main ] ), 'Main table must not change during init.' );
-rp_pickup_assert( 200 === (int) $state['download_http_code'] && (int) $state['temp_file_size'] > 0 && '' !== (string) $state['download_url'] && isset( $GLOBALS['rp_last_http_args']['connect_timeout'] ), 'Successful download must store diagnostics and use connect timeout.' );
+rp_pickup_assert( 200 === (int) $state['download_http_code'] && (int) $state['temp_file_size'] > 0 && '' !== (string) $state['download_url'] && isset( $GLOBALS['rp_last_http_args']['connect_timeout'] ) && 'wp_http' === (string) $state['download_backend'] && ! empty( $state['fallback_used'] ) && str_contains( (string) $state['first_backend_error'], 'Injected cURL failure' ), 'Successful fallback download must store backend diagnostics and use connect timeout.' );
 
 $batch_event = rp_shift_event( RussianPostPickupImporter::BATCH_HOOK );
 $batch = $importer->run_import_batch( (string) $batch_event['args'][0], (string) $batch_event['args'][1], (int) $batch_event['args'][2] );
