@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.01.
+Version: 0.22.02.
+
+Version 0.22.02 makes Russian Post pickup import memory-safe: ZIP download uses WordPress HTTP streaming, ZIP payload is extracted to a temp file, and `passportElements` is parsed object-by-object with batch upserts instead of decoding the full payload.
 
 Version 0.22.01 fixes Russian Post pickup import identity and temp-file cleanup: `point_code` is now unique per concrete point even when several objects share one postcode, and imported ZIP files are deleted after reading.
 

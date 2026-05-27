@@ -246,13 +246,38 @@ function wp_remote_get( string $url, array $args = array() ): array {
 	$zip_file = tempnam( sys_get_temp_dir(), 'wdc-rp-zip-' );
 	$zip = new ZipArchive();
 	$zip->open( $zip_file, ZipArchive::OVERWRITE );
-	$zip->addFromString( 'passport.txt', json_encode( array( 'passportElements' => array( $GLOBALS['rp_passport_item'] ) ), JSON_UNESCAPED_UNICODE ) );
+	$zip->addFromString( 'passport.txt', (string) $GLOBALS['rp_passport_payload'] );
 	$zip->close();
-	$body = (string) file_get_contents( $zip_file );
+	if ( ! empty( $args['stream'] ) && is_string( $args['filename'] ?? null ) ) {
+		copy( $zip_file, $args['filename'] );
+		$body = '';
+	} else {
+		$body = (string) file_get_contents( $zip_file );
+	}
 	unlink( $zip_file );
 	return array( 'response' => array( 'code' => 200 ), 'body' => $body );
 }
-$GLOBALS['rp_passport_item'] = $item;
+$stream_items = array();
+for ( $i = 0; $i < 260; ++$i ) {
+	$stream_items[] = array_merge(
+		$item,
+		array(
+			'address' => array( 'index' => '630001', 'region' => 'Новосибирская область', 'place' => 'Новосибирск', 'street' => 'Стрим', 'house' => (string) $i ),
+			'addressFias' => array( 'ads' => 'Новосибирск, Стрим, ' . $i ),
+			'latitude' => 55.0 + ( $i / 10000 ),
+			'longitude' => 82.0 + ( $i / 10000 ),
+			'ecomOptions' => array_merge( $item['ecomOptions'], array( 'getto' => 'nested {braces} and escaped "quotes" #' . $i ) ),
+		)
+	);
+}
+$items_json = implode(
+	',',
+	array_map(
+		static fn( array $stream_item ): string => (string) json_encode( $stream_item, JSON_UNESCAPED_UNICODE ),
+		$stream_items
+	)
+);
+$GLOBALS['rp_passport_payload'] = '{"passportElements":[' . $items_json . ',{"latitude":},{"address":{"index":"630001"},"latitude":55.9,"longitude":82.9}],"tail":{"ok":true}}';
 $GLOBALS['wpdb']->pickup_rows = array();
 $GLOBALS['wpdb']->insert_id = 0;
 $importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings ), $repo, $normalizer );
@@ -261,9 +286,11 @@ $locked_result = $importer->import( 'ALL' );
 rp_pickup_assert( empty( $locked_result['success'] ) && str_contains( implode( ';', $locked_result['errors'] ), 'already running' ), 'Importer must refuse parallel run.' );
 delete_transient( 'wdc_russian_post_pickup_import_lock' );
 $result = $importer->import( 'ALL' );
-rp_pickup_assert( ! empty( $result['success'] ) && 1 === $result['parsed'] && 1 === $result['inserted'], 'Importer must parse ZIP passportElements and insert points.' );
+rp_pickup_assert( ! empty( $result['success'] ) && 261 === $result['parsed'] && 261 === $result['inserted'] && $result['skipped'] >= 1, 'Importer must stream ZIP passportElements in batches and skip invalid items.' );
+rp_pickup_assert( count( $GLOBALS['wpdb']->pickup_rows ) === 261, 'Streaming import must preserve distinct same-postcode points across batches.' );
 rp_pickup_assert( '' !== $settings->last_success_at(), 'last_success_at must update only after successful import.' );
-rp_pickup_assert( ! empty( $GLOBALS['wdc_deleted_files'] ) && ! is_file( end( $GLOBALS['wdc_deleted_files'] ) ), 'Importer must delete temporary ZIP file after reading.' );
+rp_pickup_assert( count( $GLOBALS['wdc_deleted_files'] ?? array() ) >= 2 && ! is_file( end( $GLOBALS['wdc_deleted_files'] ) ), 'Importer must delete temporary ZIP and extracted payload files after reading.' );
+rp_pickup_assert( in_array( 'Invalid passport item JSON: Syntax error', $result['errors'], true ), 'Importer must report invalid item JSON without failing the whole import.' );
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 rp_pickup_assert( str_contains( $admin_source, 'russian_post_otpravka_access_token" value=""' ) && str_contains( $admin_source, 'has_access_token()' ), 'Admin must not render AccessToken back into HTML.' );

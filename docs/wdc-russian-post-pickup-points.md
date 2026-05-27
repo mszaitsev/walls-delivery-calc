@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.01.
+Version: 0.22.02.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 
@@ -42,7 +42,7 @@ Pickup import classes live in `src/Pickup/RussianPost/`:
 - `RussianPostPassportPointNormalizer`
 - `RussianPostPickupImporter`
 
-The importer downloads `GET https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=<ALL|OPS|PVZ|APS>`, reads the first `.json` or `.txt` file in the ZIP, decodes `passportElements`, normalizes rows, skips points without coordinates, upserts rows through `PickupPointRepository`, then marks missing active `russian_post` points inactive.
+The importer downloads `GET https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=<ALL|OPS|PVZ|APS>` with WordPress HTTP streaming into a temp ZIP file. It extracts the first `.json` or `.txt` file from the ZIP into a second temp payload file, then parses the top-level `passportElements` array object-by-object. Rows are normalized and flushed through `PickupPointRepository` in batches of 250, so the full ALL payload is not held in PHP memory.
 
 The import result stores `downloaded`, `parsed`, `inserted`, `updated`, `deactivated`, `skipped`, `errors`, `started_at`, and `finished_at`.
 

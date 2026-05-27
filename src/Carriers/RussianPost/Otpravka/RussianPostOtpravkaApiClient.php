@@ -25,10 +25,17 @@ final class RussianPostOtpravkaApiClient {
 			return array( 'success' => false, 'http_code' => 0, 'body' => '', 'temp_file' => '', 'error' => 'Russian Post Otpravka credentials are incomplete.' );
 		}
 
+		$temp = wp_tempnam( 'wdc-russian-post-passport.zip' );
+		if ( ! is_string( $temp ) || '' === $temp ) {
+			return array( 'success' => false, 'http_code' => 0, 'body' => '', 'temp_file' => '', 'error' => 'Unable to create temporary file.' );
+		}
+
 		$response = wp_remote_get(
 			$url,
 			array(
 				'timeout' => $this->settings->timeout(),
+				'stream' => true,
+				'filename' => $temp,
 				'headers' => array(
 					'Authorization' => 'AccessToken ' . $token,
 					'X-User-Authorization' => 'Basic ' . $basic_key,
@@ -38,25 +45,27 @@ final class RussianPostOtpravkaApiClient {
 		);
 
 		if ( is_wp_error( $response ) ) {
+			$this->delete_temp_file( $temp );
 			return array( 'success' => false, 'http_code' => 0, 'body' => '', 'temp_file' => '', 'error' => $response->get_error_message() );
 		}
 
 		$code = (int) wp_remote_retrieve_response_code( $response );
-		$body = (string) wp_remote_retrieve_body( $response );
-		if ( $code < 200 || $code >= 300 || '' === $body ) {
-			return array( 'success' => false, 'http_code' => $code, 'body' => $body, 'temp_file' => '', 'error' => 'Russian Post Otpravka passport download failed.' );
-		}
-
-		$temp = wp_tempnam( 'wdc-russian-post-passport.zip' );
-		if ( ! is_string( $temp ) || '' === $temp ) {
-			return array( 'success' => false, 'http_code' => $code, 'body' => '', 'temp_file' => '', 'error' => 'Unable to create temporary file.' );
-		}
-
-		$written = file_put_contents( $temp, $body );
-		if ( false === $written ) {
-			return array( 'success' => false, 'http_code' => $code, 'body' => '', 'temp_file' => '', 'error' => 'Unable to write temporary ZIP file.' );
+		if ( $code < 200 || $code >= 300 || ! is_file( $temp ) || 0 === (int) filesize( $temp ) ) {
+			$this->delete_temp_file( $temp );
+			return array( 'success' => false, 'http_code' => $code, 'body' => '', 'temp_file' => '', 'error' => 'Russian Post Otpravka passport download failed.' );
 		}
 
 		return array( 'success' => true, 'http_code' => $code, 'body' => '', 'temp_file' => $temp, 'error' => '' );
+	}
+
+	private function delete_temp_file( string $temp_file ): void {
+		if ( '' === $temp_file || ! is_file( $temp_file ) ) {
+			return;
+		}
+		if ( function_exists( 'wp_delete_file' ) ) {
+			wp_delete_file( $temp_file );
+			return;
+		}
+		@unlink( $temp_file );
 	}
 }

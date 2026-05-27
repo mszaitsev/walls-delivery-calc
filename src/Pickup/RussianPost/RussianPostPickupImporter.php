@@ -12,6 +12,8 @@ defined( 'ABSPATH' ) || exit;
 final class RussianPostPickupImporter {
 	public const SCHEDULE_HOOK = 'wdc_russian_post_pickup_import';
 	private const LOCK_KEY = 'wdc_russian_post_pickup_import_lock';
+	private const BATCH_SIZE = 250;
+	private const MAX_STORED_ERRORS = 10;
 
 	public function __construct(
 		private RussianPostOtpravkaApiSettings $settings,
@@ -71,6 +73,7 @@ final class RussianPostPickupImporter {
 
 		$this->lock();
 		$temp_file = '';
+		$payload_file = '';
 		try {
 			$download = $this->client->download_passport_zip( $type );
 			if ( empty( $download['success'] ) ) {
@@ -80,48 +83,23 @@ final class RussianPostPickupImporter {
 			$temp_file = (string) $download['temp_file'];
 			$result['downloaded'] = is_file( $temp_file ) ? (int) filesize( $temp_file ) : 0;
 
-			$payload = $this->read_first_payload_from_zip( $temp_file );
-			if ( '' === $payload ) {
+			$payload_file = $this->extract_first_payload_from_zip( $temp_file );
+			if ( '' === $payload_file ) {
 				$result['errors'][] = 'ZIP does not contain JSON/TXT passport payload.';
 				return $this->finish( $result, false );
 			}
 
-			$data = json_decode( $payload, true );
-			if ( ! is_array( $data ) ) {
-				$result['errors'][] = 'Passport payload is not valid JSON.';
-				return $this->finish( $result, false );
-			}
-
-			$elements = is_array( $data['passportElements'] ?? null ) ? $data['passportElements'] : $data;
-			if ( ! is_array( $elements ) ) {
+			if ( ! $this->process_passport_payload_stream( $payload_file, $type, $started, $result ) ) {
 				$result['errors'][] = 'Passport payload does not contain passportElements.';
 				return $this->finish( $result, false );
 			}
 
-			$rows = array();
-			foreach ( $elements as $item ) {
-				if ( ! is_array( $item ) ) {
-					++$result['skipped'];
-					continue;
-				}
-				++$result['parsed'];
-				$row = $this->normalizer->normalize( $item, $type, $started );
-				if ( null === $row ) {
-					++$result['skipped'];
-					continue;
-				}
-				$rows[] = $row;
-			}
-
-			$upsert = $this->repository->upsert_passport_batch( RussianPostPassportPointNormalizer::CARRIER_KEY, $rows );
-			$result['inserted'] = $upsert['inserted'];
-			$result['updated'] = $upsert['updated'];
-			$result['skipped'] += $upsert['skipped'];
 			$result['deactivated'] = $this->repository->mark_missing_inactive( RussianPostPassportPointNormalizer::CARRIER_KEY, $started );
 			$result['success'] = true;
 
 			return $this->finish( $result, true );
 		} finally {
+			$this->delete_temp_file( $payload_file );
 			$this->delete_temp_file( $temp_file );
 			$this->unlock();
 		}
@@ -173,7 +151,7 @@ final class RussianPostPickupImporter {
 		@unlink( $temp_file );
 	}
 
-	private function read_first_payload_from_zip( string $temp_file ): string {
+	private function extract_first_payload_from_zip( string $temp_file ): string {
 		if ( ! class_exists( \ZipArchive::class ) || ! is_file( $temp_file ) ) {
 			return '';
 		}
@@ -190,13 +168,191 @@ final class RussianPostPickupImporter {
 				if ( ! str_ends_with( $lower, '.json' ) && ! str_ends_with( $lower, '.txt' ) ) {
 					continue;
 				}
-				$contents = $zip->getFromIndex( $i );
-				return is_string( $contents ) ? $contents : '';
+				$stream = $zip->getStream( $name );
+				if ( ! is_resource( $stream ) ) {
+					return '';
+				}
+				$payload_file = wp_tempnam( 'wdc-russian-post-passport-payload.json' );
+				if ( ! is_string( $payload_file ) || '' === $payload_file ) {
+					fclose( $stream );
+					return '';
+				}
+				$out = fopen( $payload_file, 'wb' );
+				if ( ! is_resource( $out ) ) {
+					fclose( $stream );
+					$this->delete_temp_file( $payload_file );
+					return '';
+				}
+				try {
+					stream_copy_to_stream( $stream, $out );
+				} finally {
+					fclose( $out );
+					fclose( $stream );
+				}
+
+				return $payload_file;
 			}
 		} finally {
 			$zip->close();
 		}
 
 		return '';
+	}
+
+	/**
+	 * @param array<string,mixed> $result
+	 */
+	private function process_passport_payload_stream( string $payload_file, string $type, string $started, array &$result ): bool {
+		$handle = fopen( $payload_file, 'rb' );
+		if ( ! is_resource( $handle ) ) {
+			$this->add_limited_error( $result, 'Unable to open passport payload file.' );
+			return false;
+		}
+
+		$found_array = false;
+		$done = false;
+		$search = '';
+		$object = '';
+		$depth = 0;
+		$in_string = false;
+		$escaped = false;
+		$batch = array();
+
+		try {
+			while ( ! feof( $handle ) && ! $done ) {
+				$chunk = fread( $handle, 8192 );
+				if ( false === $chunk || '' === $chunk ) {
+					continue;
+				}
+
+				if ( ! $found_array ) {
+					$search .= $chunk;
+					if ( preg_match( '/"passportElements"\s*:\s*\[/s', $search, $matches, PREG_OFFSET_CAPTURE ) ) {
+						$found_array = true;
+						$offset = (int) $matches[0][1] + strlen( $matches[0][0] );
+						$chunk = substr( $search, $offset );
+						$search = '';
+					} else {
+						$search = strlen( $search ) > 1048576 ? substr( $search, -1048576 ) : $search;
+						continue;
+					}
+				}
+
+				$length = strlen( $chunk );
+				for ( $i = 0; $i < $length; ++$i ) {
+					$char = $chunk[ $i ];
+					if ( 0 === $depth ) {
+						if ( '{' === $char ) {
+							$object = '{';
+							$depth = 1;
+							$in_string = false;
+							$escaped = false;
+							continue;
+						}
+						if ( ']' === $char ) {
+							$done = true;
+							break;
+						}
+						continue;
+					}
+
+					$object .= $char;
+					if ( $in_string ) {
+						if ( $escaped ) {
+							$escaped = false;
+							continue;
+						}
+						if ( '\\' === $char ) {
+							$escaped = true;
+							continue;
+						}
+						if ( '"' === $char ) {
+							$in_string = false;
+						}
+						continue;
+					}
+
+					if ( '"' === $char ) {
+						$in_string = true;
+						continue;
+					}
+					if ( '{' === $char ) {
+						++$depth;
+						continue;
+					}
+					if ( '}' === $char ) {
+						--$depth;
+						if ( 0 === $depth ) {
+							$this->process_passport_object( $object, $type, $started, $batch, $result );
+							$object = '';
+							if ( count( $batch ) >= self::BATCH_SIZE ) {
+								$this->flush_batch( $batch, $result );
+							}
+						}
+					}
+				}
+			}
+		} finally {
+			fclose( $handle );
+		}
+
+		if ( ! $found_array ) {
+			return false;
+		}
+		if ( '' !== $object ) {
+			++$result['skipped'];
+			$this->add_limited_error( $result, 'Incomplete JSON object in passportElements.' );
+		}
+		$this->flush_batch( $batch, $result );
+
+		return true;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $batch
+	 * @param array<string,mixed> $result
+	 */
+	private function process_passport_object( string $json, string $type, string $started, array &$batch, array &$result ): void {
+		$item = json_decode( $json, true );
+		if ( ! is_array( $item ) ) {
+			++$result['skipped'];
+			$this->add_limited_error( $result, 'Invalid passport item JSON: ' . json_last_error_msg() );
+			return;
+		}
+
+		++$result['parsed'];
+		$row = $this->normalizer->normalize( $item, $type, $started );
+		if ( null === $row ) {
+			++$result['skipped'];
+			return;
+		}
+
+		$batch[] = $row;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $batch
+	 * @param array<string,mixed> $result
+	 */
+	private function flush_batch( array &$batch, array &$result ): void {
+		if ( array() === $batch ) {
+			return;
+		}
+
+		$upsert = $this->repository->upsert_passport_batch( RussianPostPassportPointNormalizer::CARRIER_KEY, $batch );
+		$result['inserted'] += $upsert['inserted'];
+		$result['updated'] += $upsert['updated'];
+		$result['skipped'] += $upsert['skipped'];
+		$batch = array();
+	}
+
+	/**
+	 * @param array<string,mixed> $result
+	 */
+	private function add_limited_error( array &$result, string $message ): void {
+		if ( count( is_array( $result['errors'] ?? null ) ? $result['errors'] : array() ) >= self::MAX_STORED_ERRORS ) {
+			return;
+		}
+		$result['errors'][] = $message;
 	}
 }
