@@ -137,13 +137,27 @@ final class RussianPostPickupImporter {
 		}
 
 		$type = $this->normalize_type( $type );
-		$this->state?->queue( $type );
+		$scheduled = false;
 		if ( $this->scheduler instanceof ActionScheduler && null !== $this->scheduler->schedule_single( time() + 5, self::SCHEDULE_HOOK, array( $type ) ) ) {
+			$scheduled = true;
+		}
+		if ( ! $scheduled && function_exists( 'wp_schedule_single_event' ) ) {
+			$scheduled = (bool) wp_schedule_single_event( time() + 5, self::SCHEDULE_HOOK, array( $type ) );
+		}
+
+		if ( $scheduled ) {
+			$this->state?->queue( $type );
 			return true;
 		}
-		if ( function_exists( 'wp_schedule_single_event' ) ) {
-			return (bool) wp_schedule_single_event( time() + 5, self::SCHEDULE_HOOK, array( $type ) );
-		}
+
+		$now = function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+		$this->state?->failed(
+			array(
+				'type' => $type,
+				'finished_at' => $now,
+				'errors' => array( 'Unable to schedule background import job.' ),
+			)
+		);
 
 		return false;
 	}

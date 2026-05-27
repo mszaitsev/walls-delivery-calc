@@ -35,7 +35,13 @@ function delete_option( string $key ): bool { unset( $GLOBALS['wdc_options'][ $k
 function set_transient( string $key, mixed $value, int $expiration = 0 ): bool { $GLOBALS['wdc_transients'][ $key ] = $value; return true; }
 function get_transient( string $key ): mixed { return $GLOBALS['wdc_transients'][ $key ] ?? false; }
 function delete_transient( string $key ): bool { unset( $GLOBALS['wdc_transients'][ $key ] ); return true; }
-function wp_schedule_single_event( int $timestamp, string $hook, array $args = array() ): bool { $GLOBALS['wdc_scheduled_events'][] = array( 'timestamp' => $timestamp, 'hook' => $hook, 'args' => $args ); return true; }
+function wp_schedule_single_event( int $timestamp, string $hook, array $args = array() ): bool {
+	if ( ! empty( $GLOBALS['wdc_force_schedule_failure'] ) ) {
+		return false;
+	}
+	$GLOBALS['wdc_scheduled_events'][] = array( 'timestamp' => $timestamp, 'hook' => $hook, 'args' => $args );
+	return true;
+}
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -310,6 +316,13 @@ rp_pickup_assert( count( $GLOBALS['wdc_deleted_files'] ?? array() ) >= 2 && ! is
 rp_pickup_assert( in_array( 'Invalid passport item JSON: Syntax error', $result['errors'], true ), 'Importer must report invalid item JSON without failing the whole import.' );
 
 delete_transient( 'wdc_russian_post_pickup_import_lock' );
+$GLOBALS['wdc_force_schedule_failure'] = true;
+$failed_queue = $importer->queue_background_import( 'PVZ' );
+$failed_queue_state = $state_service->current();
+rp_pickup_assert( ! $failed_queue && 'failed' === $failed_queue_state['status'] && 'failed' === $failed_queue_state['stage'] && 'PVZ' === $failed_queue_state['type'], 'Failed background scheduling must persist failed state instead of queued.' );
+rp_pickup_assert( in_array( 'Unable to schedule background import job.', $failed_queue_state['errors'], true ), 'Failed background scheduling must store a readable error.' );
+rp_pickup_assert( 0 === count( $GLOBALS['wdc_scheduled_events'] ), 'Failed background scheduling must not record a scheduled job.' );
+$GLOBALS['wdc_force_schedule_failure'] = false;
 $queued = $importer->queue_background_import( 'APS' );
 rp_pickup_assert( $queued && 'queued' === $state_service->current()['status'] && 'APS' === $state_service->current()['type'], 'Background import must queue persistent state.' );
 rp_pickup_assert( 1 === count( $GLOBALS['wdc_scheduled_events'] ) && RussianPostPickupImporter::SCHEDULE_HOOK === $GLOBALS['wdc_scheduled_events'][0]['hook'] && array( 'APS' ) === $GLOBALS['wdc_scheduled_events'][0]['args'], 'Background import must schedule a single event with type.' );

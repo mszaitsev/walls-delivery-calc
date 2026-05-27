@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.10.
+Version: 0.22.11.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 
@@ -70,6 +70,8 @@ The tab is shown only for `russian_post_domestic_pickup`. It contains:
 - lock status.
 
 The "run import now" button schedules `wdc_russian_post_pickup_import` through Action Scheduler when available, otherwise through `wp_schedule_single_event(time()+5, ...)`, then redirects back to the tab. The status box polls `admin-ajax.php?action=wdc_russian_post_pickup_import_status` every 3 seconds while the state is `queued` or `running`; polling stops on `success` or `failed`. On the current test import, `ALL` produced 37302 active points.
+
+State becomes `queued` only after the background job is actually scheduled. If scheduling fails, the state is saved as `failed` with `Unable to schedule background import job.`, so the admin screen does not get stuck in a forever-queued state.
 
 The existing `Калькулятор доставок -> ПВЗ` page remains in place and now shows a Russian Post summary with active total, type counts, and last successful import date.
 

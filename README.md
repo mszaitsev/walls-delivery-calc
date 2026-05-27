@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.10.
+Version: 0.22.11.
+
+Version 0.22.11 keeps Russian Post pickup import state honest when a background job cannot be scheduled: `queued` is saved only after the job is actually created, otherwise state becomes `failed` with `Unable to schedule background import job.`.
 
 Version 0.22.10 runs Russian Post pickup import in the background from the admin UI. The page returns immediately, stores live state in `wdc_russian_post_pickup_import_state`, and polls progress every 3 seconds while the job is queued or running. Stale queued/running locks older than 2 hours are marked failed so a new import can be started; the current ALL test import produced 37302 active points.
 
