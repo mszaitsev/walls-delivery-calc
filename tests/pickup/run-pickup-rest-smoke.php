@@ -122,9 +122,9 @@ use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->prefix = 'wp_';
 $GLOBALS['wpdb']->pickup_rows = array(
-	array( 'id' => 1, 'carrier_key' => 'russian_post', 'point_code' => '630001-a', 'point_type' => 'OPS', 'brand_name' => 'Почта России', 'address' => 'Ленина, 1', 'city_name' => 'Новосибирск', 'region_name' => 'НСО', 'postcode' => '630001', 'latitude' => 55.01, 'longitude' => 82.91, 'work_time' => '09-18', 'accepts_cash' => 1, 'accepts_card' => 0, 'partial_redemption' => 1, 'return_available' => 1, 'fitting_available' => 0, 'contents_checking' => 1, 'functionality_checking' => 0, 'weight_limit_grams' => 10000, 'ecom_options_json' => '{"cardPayment":false}', 'raw_reference' => '{"secret":"raw"}', 'active' => 1 ),
-	array( 'id' => 2, 'carrier_key' => 'russian_post', 'point_code' => '630002-b', 'point_type' => 'PVZ', 'brand_name' => 'ПВЗ Почты', 'address' => 'Советская, 2', 'city_name' => 'Новосибирск', 'region_name' => 'НСО', 'postcode' => '630002', 'latitude' => 55.02, 'longitude' => 82.92, 'work_time' => '10-19', 'accepts_cash' => 0, 'accepts_card' => 1, 'weight_limit_grams' => 15000, 'ecom_options_json' => '{"cardPayment":true}', 'raw_reference' => '{"big":"raw"}', 'active' => 1 ),
-	array( 'id' => 3, 'carrier_key' => 'russian_post', 'point_code' => '101000-c', 'point_type' => 'APS', 'brand_name' => 'Почтомат', 'address' => 'Тверская, 3', 'city_name' => 'Москва', 'region_name' => 'Москва', 'postcode' => '101000', 'latitude' => 55.76, 'longitude' => 37.61, 'work_time' => '24/7', 'accepts_cash' => 0, 'accepts_card' => 1, 'weight_limit_grams' => 5000, 'ecom_options_json' => '{}', 'raw_reference' => '{"raw":"hidden"}', 'active' => 1 ),
+	array( 'id' => 1, 'carrier_key' => 'russian_post', 'point_code' => '630001-a', 'point_type' => 'OPS', 'brand_name' => 'Почта России', 'address' => 'Ленина, 1', 'city_name' => 'Новосибирск', 'region_name' => 'НСО', 'postcode' => '630001', 'latitude' => 55.01, 'longitude' => 82.91, 'work_time' => '09-18', 'accepts_cash' => 1, 'accepts_card' => 0, 'partial_redemption' => 1, 'return_available' => 1, 'fitting_available' => 0, 'contents_checking' => 1, 'functionality_checking' => 0, 'weight_limit_grams' => 10000, 'ecom_options_json' => '{"cardPayment":false}', 'active' => 1 ),
+	array( 'id' => 2, 'carrier_key' => 'russian_post', 'point_code' => '630002-b', 'point_type' => 'PVZ', 'brand_name' => 'ПВЗ Почты', 'address' => 'Советская, 2', 'city_name' => 'Новосибирск', 'region_name' => 'НСО', 'postcode' => '630002', 'latitude' => 55.02, 'longitude' => 82.92, 'work_time' => '10-19', 'accepts_cash' => 0, 'accepts_card' => 1, 'weight_limit_grams' => 15000, 'ecom_options_json' => '{"cardPayment":true}', 'active' => 1 ),
+	array( 'id' => 3, 'carrier_key' => 'russian_post', 'point_code' => '101000-c', 'point_type' => 'APS', 'brand_name' => 'Почтомат', 'address' => 'Тверская, 3', 'city_name' => 'Москва', 'region_name' => 'Москва', 'postcode' => '101000', 'latitude' => 55.76, 'longitude' => 37.61, 'work_time' => '24/7', 'accepts_cash' => 0, 'accepts_card' => 1, 'weight_limit_grams' => 5000, 'ecom_options_json' => '{}', 'active' => 1 ),
 );
 
 $repo = new RussianPostPickupPointRepository( $GLOBALS['wpdb'] );
@@ -148,8 +148,8 @@ $search = $controller->search( array( 'carrier' => 'russian_post', 'q' => '63000
 pickup_rest_assert( 1 === count( $search ) && 2 === $search[0]['id'], 'search must find by postcode/city/address and clamp limit.' );
 
 $detail = $controller->detail( array( 'id' => 1 ) );
-pickup_rest_assert( 1 === $detail['id'] && '630001-a' === $detail['point_code'] && array( 'cardPayment' => false ) === $detail['ecom_options'], 'detail must return point card fields.' );
-pickup_rest_assert( ! array_key_exists( 'raw_reference', $detail ) && ! array_key_exists( 'raw_json', $detail ) && ! array_key_exists( 'source_hash', $detail ), 'detail must not expose raw/import fields.' );
+pickup_rest_assert( 1 === $detail['id'] && '630001-a' === $detail['point_code'] && '09-18' === $detail['work_time'] && array( 'cardPayment' => false ) === $detail['ecom_options'], 'detail must return point card fields with compact work_time.' );
+pickup_rest_assert( ! array_key_exists( 'raw_reference', $detail ) && ! array_key_exists( 'work_time_json', $detail ) && ! array_key_exists( 'raw_json', $detail ) && ! array_key_exists( 'source_hash', $detail ), 'detail must not expose raw/import fields.' );
 
 $invalid = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => 'bad' ) );
 pickup_rest_assert( $invalid instanceof WP_Error && 'invalid_bbox' === $invalid->get_error_code(), 'invalid bbox must return error.' );

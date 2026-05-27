@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.22.
+Version: 0.22.23.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 
@@ -16,7 +16,13 @@ The generic legacy table `wp_wdc_pickup_points` is no longer used for Russian Po
 DROP TABLE IF EXISTS wp_wdc_pickup_points;
 ```
 
-The Russian Post table stores point identity, address parts, FIAS/GAR ids, geohash, JSON snapshots in `LONGTEXT`, e-commerce options, weight/size limits, payment/service flags, `source_hash`, `raw_reference`, `last_seen_at`, and timestamps. Indexes include `uniq_point_code`, `idx_type_active`, `idx_city_active`, `idx_postcode`, `idx_lat_lng`, `idx_geohash`, and `idx_source_hash`.
+The Russian Post table stores point identity, address parts, FIAS/GAR ids, geohash, compact readable `work_time`, e-commerce options, weight/size limits, payment/service flags, `source_hash`, `last_seen_at`, and timestamps. It no longer stores `raw_reference` or `work_time_json`; fresh imports normalize raw `workTime` during parsing and keep only the compact text needed by REST and the future map. Indexes include `uniq_point_code`, `idx_type_active`, `idx_city_active`, `idx_postcode`, `idx_lat_lng`, `idx_geohash`, and `idx_source_hash`.
+
+Existing test tables are not migrated to the compact schema. To recreate the table before a repeat import, remove it manually:
+
+```sql
+DROP TABLE IF EXISTS wp_wdc_pickup_points_russian_post;
+```
 
 ## API Layer
 
@@ -61,6 +67,8 @@ The parser resumes from the saved byte offset and does not re-read the whole pay
 The current main table remains readable while staging is being built. REST and future checkout map reads always use the main table only. If import fails, staging is dropped and the old main table remains untouched. Full snapshots do not use `mark_missing_inactive`; the swapped main table contains the current snapshot.
 
 If a swap fails after the previous main table has been renamed to backup, the repository attempts to rename backup back to main. A recovered failure still marks the import failed and records a clear message, but leaves the production table restored. If recovery also fails, the backup table is kept for manual repair and is not deleted by failed cleanup.
+
+After a successful swap, the importer runs `ANALYZE TABLE wp_wdc_pickup_points_russian_post` to refresh InnoDB statistics for bbox/search queries and admin tools. Analyze failure is stored as a warning in import errors, but does not turn a successful import into failed.
 
 The import result stores `downloaded`, `parsed`, `inserted`, `updated`, `deactivated`, `skipped`, `errors`, `started_at`, and `finished_at`.
 
@@ -135,7 +143,7 @@ Example:
 
 `GET /wp-json/wdc/v1/points/{id}` returns a safe detail card with `point_code`, address, coordinates, work time, e-commerce options, payment/service flags, and `weight_limit_grams`.
 
-The API validates bbox ranges, clamps limits, sanitizes all query parameters, uses prepared SQL through `RussianPostPickupPointRepository`, and does not expose `raw_reference`, secrets, source hash, temp files, or import state fields.
+The API validates bbox ranges, clamps limits, sanitizes all query parameters, uses prepared SQL through `RussianPostPickupPointRepository`, and does not expose raw snapshots, `work_time_json`, secrets, source hash, temp files, or import state fields.
 
 ## Scheduling
 

@@ -8,6 +8,10 @@ defined( 'ABSPATH' ) || exit;
 final class RussianPostPassportPointNormalizer {
 	public const CARRIER_KEY = 'russian_post';
 
+	public function __construct( private ?RussianPostWorkTimeFormatter $work_time_formatter = null ) {
+		$this->work_time_formatter ??= new RussianPostWorkTimeFormatter();
+	}
+
 	/**
 	 * @param array<string,mixed> $item
 	 * @return array<string,mixed>|null
@@ -39,7 +43,7 @@ final class RussianPostPassportPointNormalizer {
 		$identity = self::CARRIER_KEY . '|' . $postcode . '|' . round( (float) $lat, 7 ) . '|' . round( (float) $lng, 7 ) . '|' . $address_full;
 		$source_hash = sha1( $identity );
 		$point_code = '' !== $postcode ? $postcode . '-' . substr( $source_hash, 0, 10 ) : $source_hash;
-		$work_time = $this->work_time_string( $item['workTime'] ?? null );
+		$work_time = $this->work_time_formatter->format( $item['workTime'] ?? null );
 
 		return array(
 			'carrier_key' => self::CARRIER_KEY,
@@ -55,7 +59,6 @@ final class RussianPostPassportPointNormalizer {
 			'work_time' => $work_time,
 			'comment' => (string) ( $ecom['getto'] ?? '' ),
 			'active' => 1,
-			'raw_reference' => $item,
 			'source_hash' => $source_hash,
 			'last_seen_at' => '' !== $seen_at ? $seen_at : ( function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ) ),
 			'brand_name' => (string) ( $item['brandName'] ?? ( $ecom['brandName'] ?? '' ) ),
@@ -66,7 +69,6 @@ final class RussianPostPassportPointNormalizer {
 			'fias_address_guid' => (string) ( $fias['addGarCode'] ?? '' ),
 			'gar_region_id' => (string) ( $fias['regGarId'] ?? '' ),
 			'geohash' => $this->simple_geohash( (float) $lat, (float) $lng ),
-			'work_time_json' => $item['workTime'] ?? null,
 			'ecom_options_json' => $ecom,
 			'services_json' => $item['services'] ?? null,
 			'phones_json' => $item['phones'] ?? null,
@@ -93,25 +95,6 @@ final class RussianPostPassportPointNormalizer {
 		}
 
 		return 'OPS';
-	}
-
-	private function work_time_string( mixed $work_time ): string {
-		if ( is_string( $work_time ) ) {
-			return $work_time;
-		}
-		if ( ! is_array( $work_time ) || array() === $work_time ) {
-			return '';
-		}
-
-		$first = reset( $work_time );
-		if ( is_string( $first ) ) {
-			return $first;
-		}
-		if ( is_array( $first ) ) {
-			return $this->join_non_empty( array( $first['day'] ?? '', $first['beginWorkTime'] ?? '', $first['endWorkTime'] ?? '' ) );
-		}
-
-		return '';
 	}
 
 	/**

@@ -43,7 +43,6 @@ final class RussianPostPickupPointRepository {
 			brand_name VARCHAR(255) NULL,
 			description TEXT NULL,
 			work_time TEXT NULL,
-			work_time_json LONGTEXT NULL,
 			ecom_options_json LONGTEXT NULL,
 			services_json LONGTEXT NULL,
 			phones_json LONGTEXT NULL,
@@ -59,7 +58,6 @@ final class RussianPostPickupPointRepository {
 			functionality_checking TINYINT(1) NULL,
 			active TINYINT(1) NOT NULL DEFAULT 1,
 			source_hash CHAR(40) NOT NULL,
-			raw_reference LONGTEXT NOT NULL,
 			last_seen_at DATETIME NOT NULL,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL,
@@ -245,6 +243,10 @@ final class RussianPostPickupPointRepository {
 		return array( 'success' => false, 'message' => 'Russian Post pickup table swap finished without a main table.', 'recovered' => false );
 	}
 
+	public function analyze_main_table(): bool {
+		return false !== $this->wpdb->query( 'ANALYZE TABLE ' . $this->main_table() );
+	}
+
 	private function select_rows( array $where, array $args, int $limit ): array {
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
@@ -297,7 +299,6 @@ final class RussianPostPickupPointRepository {
 			'brand_name' => null,
 			'description' => null,
 			'work_time' => null,
-			'work_time_json' => null,
 			'ecom_options_json' => null,
 			'services_json' => null,
 			'phones_json' => null,
@@ -313,13 +314,12 @@ final class RussianPostPickupPointRepository {
 			'functionality_checking' => null,
 			'active' => 1,
 			'source_hash' => '',
-			'raw_reference' => '',
 			'last_seen_at' => $now,
 			'created_at' => $now,
 			'updated_at' => $now,
 		);
 		$row = array_intersect_key( $row, $allowed ) + $allowed;
-		foreach ( array( 'raw_reference', 'work_time_json', 'ecom_options_json', 'services_json', 'phones_json', 'images_json', 'size_limit_json' ) as $json_key ) {
+		foreach ( array( 'ecom_options_json', 'services_json', 'phones_json', 'images_json', 'size_limit_json' ) as $json_key ) {
 			if ( is_array( $row[ $json_key ] ) ) {
 				$encoded = wp_json_encode( $row[ $json_key ] );
 				$row[ $json_key ] = is_string( $encoded ) ? $encoded : '';
@@ -343,11 +343,11 @@ final class RussianPostPickupPointRepository {
 			'region_name' => '%s', 'city_name' => '%s', 'street' => '%s', 'house' => '%s', 'address' => '%s',
 			'fias_location_guid' => '%s', 'fias_address_guid' => '%s', 'gar_region_id' => '%s',
 			'latitude' => '%f', 'longitude' => '%f', 'geohash' => '%s', 'brand_name' => '%s', 'description' => '%s',
-			'work_time' => '%s', 'work_time_json' => '%s', 'ecom_options_json' => '%s', 'services_json' => '%s',
+			'work_time' => '%s', 'ecom_options_json' => '%s', 'services_json' => '%s',
 			'phones_json' => '%s', 'images_json' => '%s', 'weight_limit_grams' => '%d', 'size_limit_json' => '%s',
 			'accepts_cash' => '%d', 'accepts_card' => '%d', 'partial_redemption' => '%d', 'return_available' => '%d',
 			'fitting_available' => '%d', 'contents_checking' => '%d', 'functionality_checking' => '%d',
-			'active' => '%d', 'source_hash' => '%s', 'raw_reference' => '%s', 'last_seen_at' => '%s',
+			'active' => '%d', 'source_hash' => '%s', 'last_seen_at' => '%s',
 			'created_at' => '%s', 'updated_at' => '%s',
 		);
 

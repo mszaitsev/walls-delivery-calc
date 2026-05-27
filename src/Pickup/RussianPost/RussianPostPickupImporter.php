@@ -236,6 +236,9 @@ final class RussianPostPickupImporter {
 			$result['errors'][] = (string) ( $swap['message'] ?? 'Unable to swap Russian Post pickup staging table.' );
 			return $this->fail_pipeline( $result, false );
 		}
+		if ( ! $this->repository->analyze_main_table() ) {
+			$result['errors'][] = 'ANALYZE TABLE for Russian Post pickup main table failed.';
+		}
 		$result['swap_finished_at'] = $this->now();
 		$result['deactivated'] = 0;
 		$result['success'] = true;

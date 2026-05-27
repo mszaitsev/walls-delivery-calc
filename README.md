@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.22.
+Version: 0.22.23.
+
+Version 0.22.23 compacts the Russian Post pickup table before the map stage: fresh tables no longer store `raw_reference` or `work_time_json`, `workTime` is normalized during import into readable `work_time`, and successful finalize runs `ANALYZE TABLE wp_wdc_pickup_points_russian_post`. Existing test tables are not migrated; remove them before reimport with `DROP TABLE IF EXISTS wp_wdc_pickup_points_russian_post;`.
 
 Version 0.22.22 makes the Russian Post pickup table swap recovery-safe: after `RENAME TABLE` the importer verifies that `wdc_pickup_points_russian_post` exists, restores it from backup when possible, keeps backup on unrecovered failure, and records a clear swap error in import state.
 

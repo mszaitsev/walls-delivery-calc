@@ -71,7 +71,10 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public int $insert_id = 0;
 		/** @var array<string,array<int,array<string,mixed>>> */
 		public array $tables = array();
+		/** @var array<int,string> */
+		public array $analyzed_tables = array();
 		public string $rename_mode = '';
+		public bool $fail_analyze = false;
 
 		public function get_charset_collate(): string { return 'DEFAULT CHARSET=utf8mb4'; }
 		public function esc_like( string $text ): string { return addcslashes( $text, '_%\\' ); }
@@ -90,6 +93,10 @@ if ( ! class_exists( 'wpdb' ) ) {
 			if ( preg_match( '/DROP TABLE IF EXISTS ([A-Za-z0-9_]+)/', $query, $m ) ) {
 				unset( $this->tables[ $m[1] ] );
 				return true;
+			}
+			if ( preg_match( '/ANALYZE TABLE ([A-Za-z0-9_]+)/', $query, $m ) ) {
+				$this->analyzed_tables[] = $m[1];
+				return ! $this->fail_analyze;
 			}
 			if ( preg_match( '/RENAME TABLE (.+)$/', trim( $query ), $m ) ) {
 				if ( str_contains( $m[1], ',' ) && in_array( $this->rename_mode, array( 'partial_swap_recover', 'partial_swap_recovery_fails' ), true ) ) {
@@ -174,14 +181,32 @@ use WallsShop\WDC\Pickup\RussianPost\RussianPostPassportPointNormalizer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostWorkTimeFormatter;
 
 $GLOBALS['wpdb'] = new wpdb();
 $repo = new RussianPostPickupPointRepository( $GLOBALS['wpdb'] );
 $migration = require dirname( __DIR__, 2 ) . '/database/migrations/0021_create_russian_post_pickup_points_table.php';
 $migration();
 rp_pickup_assert( array_key_exists( 'wp_wdc_pickup_points_russian_post', $GLOBALS['wpdb']->tables ), 'Migration must create Russian Post carrier-specific table.' );
+$schema = $repo->schema_sql();
+rp_pickup_assert( ! str_contains( $schema, 'raw_reference' ) && ! str_contains( $schema, 'work_time_json' ) && str_contains( $schema, 'work_time TEXT NULL' ), 'Russian Post pickup schema must store compact work_time without raw JSON fields.' );
 
 $normalizer = new RussianPostPassportPointNormalizer();
+$formatter = new RussianPostWorkTimeFormatter();
+$standard_work_time = array(
+	'пн, открыто: 08:00 - 17:00, перерыв: 12:00 - 13:00',
+	'вт, открыто: 08:00 - 17:00, перерыв: 12:00 - 13:00',
+	'ср, открыто: 08:00 - 17:00, перерыв: 12:00 - 13:00',
+	'чт, открыто: 08:00 - 17:00, перерыв: 12:00 - 13:00',
+	'пт, открыто: 08:00 - 17:00, перерыв: 12:00 - 13:00',
+	'сб, выходной',
+	'вс, выходной',
+);
+rp_pickup_assert( "Пн–Пт: 08:00–17:00\nПерерыв: 12:00–13:00\nСб–Вс: выходной" === $formatter->format( $standard_work_time ), 'Formatter must group standard week with break.' );
+rp_pickup_assert( "Пн–Пт: 09:00–18:00\nСб–Вс: выходной" === $formatter->format( array( 'пн, открыто: 09:00 - 18:00', 'вт, открыто: 09:00 - 18:00', 'ср, открыто: 09:00 - 18:00', 'чт, открыто: 09:00 - 18:00', 'пт, открыто: 09:00 - 18:00', 'сб, выходной', 'вс, выходной' ) ), 'Formatter must omit break when absent.' );
+rp_pickup_assert( "Пн–Ср: 08:00–17:00\nПерерыв: 12:00–13:00\nЧт–Пт: 09:00–18:00\nПерерыв: 13:00–14:00\nСб–Вс: выходной" === $formatter->format( array( 'пн, открыто: 08:00 - 17:00, перерыв: 12:00 - 13:00', 'вт, открыто: 08:00 - 17:00, перерыв: 12:00 - 13:00', 'ср, открыто: 08:00 - 17:00, перерыв: 12:00 - 13:00', 'чт, открыто: 09:00 - 18:00, перерыв: 13:00 - 14:00', 'пт, открыто: 09:00 - 18:00, перерыв: 13:00 - 14:00', 'сб, выходной', 'вс, выходной' ) ), 'Formatter must split groups with different breaks.' );
+rp_pickup_assert( "непонятный график\nещё строка" === $formatter->format( array( 'непонятный график', 'ещё строка' ) ), 'Formatter fallback must not fail on unknown format.' );
+rp_pickup_assert( '' === $formatter->format( array() ), 'Formatter must return empty string for empty workTime.' );
 $settings = new RussianPostOtpravkaApiSettings( new SettingsRepository(), new EncryptionService() );
 $settings->save_from_admin( array( 'russian_post_otpravka_access_token' => 'token', 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_password' => 'password', 'russian_post_pickup_unload_type' => 'ALL' ) );
 $state_service = new RussianPostPickupImportStateService();
@@ -208,6 +233,7 @@ $base_item = array(
 	'latitude' => 55.1,
 	'longitude' => 82.9,
 	'type' => 'ПВЗ',
+	'workTime' => $standard_work_time,
 );
 $items = array();
 for ( $i = 0; $i < 3; ++$i ) {
@@ -224,7 +250,10 @@ for ( $i = 0; $i < 3; ++$i ) {
 $GLOBALS['rp_passport_payload'] = '{"passportElements":[' . implode( ',', array_map( static fn( array $item ): string => (string) json_encode( $item, JSON_UNESCAPED_UNICODE ), $items ) ) . ']}';
 
 $main = $repo->main_table();
-$repo->insert_batch( array( $normalizer->normalize( $base_item, 'PVZ', '2026-05-28 10:00:00' ) ), $main );
+$normalized_base = $normalizer->normalize( $base_item, 'PVZ', '2026-05-28 10:00:00' );
+rp_pickup_assert( is_array( $normalized_base ) && "Пн–Пт: 08:00–17:00\nПерерыв: 12:00–13:00\nСб–Вс: выходной" === $normalized_base['work_time'], 'Normalizer must store compact work_time.' );
+rp_pickup_assert( ! array_key_exists( 'raw_reference', $normalized_base ) && ! array_key_exists( 'work_time_json', $normalized_base ), 'Normalizer must not output raw_reference or work_time_json.' );
+$repo->insert_batch( array( $normalized_base ), $main );
 $main_before = count( $GLOBALS['wpdb']->tables[ $main ] );
 $importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings ), $repo, $normalizer, $state_service );
 rp_pickup_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/RussianPost/RussianPostPickupImporter.php' ), 'private const BATCH_SIZE = 500' ), 'Importer batch size must be 500.' );
@@ -246,6 +275,7 @@ $final = $importer->run_import_finalize( (string) $final_event['args'][0], (stri
 $state = $state_service->current();
 rp_pickup_assert( ! empty( $final['success'] ) && 3 === count( $GLOBALS['wpdb']->tables[ $main ] ) && ! array_key_exists( (string) $state['staging_table'], $GLOBALS['wpdb']->tables ), 'Finalize must atomically swap staging to main.' );
 rp_pickup_assert( '' !== (string) $state['swap_started_at'] && '' !== (string) $state['swap_finished_at'], 'State must store swap timestamps.' );
+rp_pickup_assert( in_array( $main, $GLOBALS['wpdb']->analyzed_tables, true ), 'Successful finalize must analyze main table.' );
 
 $main_after_success = $GLOBALS['wpdb']->tables[ $main ];
 $backup_for_direct_swap = $repo->backup_table( 'direct-swap' );
@@ -282,6 +312,18 @@ $recovered_final_state = $state_service->current();
 rp_pickup_assert( empty( $recovered_final['success'] ) && 'failed' === $recovered_final_state['status'] && str_contains( implode( ' ', $recovered_final_state['errors'] ), 'recovered from backup' ) && $main_after_success === $GLOBALS['wpdb']->tables[ $main ], 'Importer finalize must store recovered swap failure message and keep main restored.' );
 $GLOBALS['wpdb']->rename_mode = '';
 unset( $GLOBALS['wpdb']->tables[ $importer_recovery_staging ], $GLOBALS['wpdb']->tables[ $importer_recovery_backup ] );
+
+$analyze_warning_id = 'analyze-warning';
+$analyze_staging = $repo->staging_table( $analyze_warning_id );
+$analyze_backup = $repo->backup_table( $analyze_warning_id );
+$GLOBALS['wpdb']->tables[ $analyze_staging ] = $main_after_success;
+$state_service->start( 'ALL', $analyze_warning_id );
+$state_service->update( 'deactivate', array( 'staging_table' => $analyze_staging, 'main_table' => $main, 'backup_table' => $analyze_backup ) );
+$GLOBALS['wpdb']->fail_analyze = true;
+$analyze_final = $importer->run_import_finalize( $analyze_warning_id, 'ALL' );
+$GLOBALS['wpdb']->fail_analyze = false;
+rp_pickup_assert( ! empty( $analyze_final['success'] ) && str_contains( implode( ' ', $analyze_final['errors'] ), 'ANALYZE TABLE' ), 'Failed ANALYZE must keep import successful and store warning.' );
+$main_after_success = $GLOBALS['wpdb']->tables[ $main ];
 
 $GLOBALS['rp_http_mode'] = 'wp_error';
 delete_transient( 'wdc_russian_post_pickup_import_lock' );
