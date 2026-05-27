@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.20.
+Version: 0.22.21.
+
+Version 0.22.21 moves Russian Post pickup points out of the generic `wdc_pickup_points` table into `wdc_pickup_points_russian_post`. Imports now build a full snapshot in a staging table and atomically swap it into place, REST reads only the carrier-specific main table, and the old `wp_wdc_pickup_points` table can be dropped manually with `DROP TABLE IF EXISTS wp_wdc_pickup_points;`.
 
 Version 0.22.20 adds public read-only REST endpoints for the local pickup database: `GET /wp-json/wdc/v1/points`, `GET /wp-json/wdc/v1/points/search`, and `GET /wp-json/wdc/v1/points/{id}`. The endpoints support carrier/type/limit filters, bbox validation, search, and safe point detail responses without raw import snapshots or secrets.
 

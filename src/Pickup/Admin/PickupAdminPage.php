@@ -7,7 +7,7 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
-use WallsShop\WDC\Pickup\RussianPost\RussianPostPassportPointNormalizer;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -20,6 +20,7 @@ final class PickupAdminPage {
 	public function __construct(
 		private PluginEnvironment $environment,
 		private PickupPointRepository $repository,
+		private ?RussianPostPickupPointRepository $russian_post_repository = null,
 		private ?RussianPostOtpravkaApiSettings $russian_post_settings = null
 	) {
 	}
@@ -55,8 +56,8 @@ final class PickupAdminPage {
 			<h1><?php echo esc_html__( 'Пункты выдачи заказов', 'walls-delivery-calc' ); ?></h1>
 			<p><strong><?php echo esc_html__( 'Количество ПВЗ:', 'walls-delivery-calc' ); ?></strong> <?php echo esc_html( (string) $this->repository->count_all() ); ?></p>
 
-			<?php $rp_counts = $this->repository->count_by_type( RussianPostPassportPointNormalizer::CARRIER_KEY ); ?>
-			<p><strong>Почта России active:</strong> <?php echo esc_html( (string) $this->repository->count_active( RussianPostPassportPointNormalizer::CARRIER_KEY ) ); ?>; OPS: <?php echo esc_html( (string) ( $rp_counts['OPS'] ?? 0 ) ); ?>, PVZ: <?php echo esc_html( (string) ( $rp_counts['PVZ'] ?? 0 ) ); ?>, APS: <?php echo esc_html( (string) ( $rp_counts['APS'] ?? 0 ) ); ?><?php if ( $this->russian_post_settings instanceof RussianPostOtpravkaApiSettings ) : ?>; last import: <?php echo esc_html( $this->russian_post_settings->last_success_at() ?: '-' ); ?><?php endif; ?></p>
+			<?php $rp_counts = $this->russian_post_repository instanceof RussianPostPickupPointRepository ? $this->russian_post_repository->count_by_type() : array(); ?>
+			<p><strong>Почта России active:</strong> <?php echo esc_html( (string) ( $this->russian_post_repository instanceof RussianPostPickupPointRepository ? $this->russian_post_repository->count_active() : 0 ) ); ?>; OPS: <?php echo esc_html( (string) ( $rp_counts['OPS'] ?? 0 ) ); ?>, PVZ: <?php echo esc_html( (string) ( $rp_counts['PVZ'] ?? 0 ) ); ?>, APS: <?php echo esc_html( (string) ( $rp_counts['APS'] ?? 0 ) ); ?><?php if ( $this->russian_post_settings instanceof RussianPostOtpravkaApiSettings ) : ?>; last import: <?php echo esc_html( $this->russian_post_settings->last_success_at() ?: '-' ); ?><?php endif; ?></p>
 
 			<form method="get" style="margin-top: 16px;">
 				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>">

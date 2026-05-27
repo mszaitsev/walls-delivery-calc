@@ -84,12 +84,12 @@ final class RussianPostPickupImportStateService {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
 		}
-		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms' ) as $key ) {
+		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging' ) as $key ) {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
 		}
-		foreach ( array( 'payload_file', 'temp_zip_file', 'import_id', 'type' ) as $key ) {
+		foreach ( array( 'payload_file', 'temp_zip_file', 'import_id', 'type', 'staging_table', 'main_table', 'backup_table', 'swap_started_at', 'swap_finished_at' ) as $key ) {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = (string) $counters[ $key ];
 			}
@@ -183,6 +183,12 @@ final class RussianPostPickupImportStateService {
 			'finished_at' => '',
 			'last_activity_at' => '',
 			'type' => 'ALL',
+			'staging_table' => '',
+			'main_table' => '',
+			'backup_table' => '',
+			'rows_inserted_to_staging' => 0,
+			'swap_started_at' => '',
+			'swap_finished_at' => '',
 			'payload_file' => '',
 			'temp_zip_file' => '',
 			'payload_offset' => 0,
@@ -219,7 +225,7 @@ final class RussianPostPickupImportStateService {
 		foreach ( array( 'downloaded', 'parsed', 'inserted', 'updated', 'deactivated', 'skipped' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
-		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms' ) as $key ) {
+		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
 		$state['status'] = $status;
@@ -230,6 +236,11 @@ final class RussianPostPickupImportStateService {
 		$state['payload_file'] = (string) ( $result['payload_file'] ?? $state['payload_file'] ?? '' );
 		$state['temp_zip_file'] = (string) ( $result['temp_zip_file'] ?? $state['temp_zip_file'] ?? '' );
 		$state['import_id'] = (string) ( $result['import_id'] ?? $state['import_id'] ?? '' );
+		$state['staging_table'] = (string) ( $result['staging_table'] ?? $state['staging_table'] ?? '' );
+		$state['main_table'] = (string) ( $result['main_table'] ?? $state['main_table'] ?? '' );
+		$state['backup_table'] = (string) ( $result['backup_table'] ?? $state['backup_table'] ?? '' );
+		$state['swap_started_at'] = (string) ( $result['swap_started_at'] ?? $state['swap_started_at'] ?? '' );
+		$state['swap_finished_at'] = (string) ( $result['swap_finished_at'] ?? $state['swap_finished_at'] ?? '' );
 		$state['parser_completed'] = ! empty( $result['parser_completed'] ) || ! empty( $state['parser_completed'] );
 		$state['errors'] = array_slice( array_map( 'strval', is_array( $result['errors'] ?? null ) ? $result['errors'] : array() ), 0, self::MAX_STORED_ERRORS );
 		$state['memory_peak'] = max( (int) ( $state['memory_peak'] ?? 0 ), $this->memory_peak() );

@@ -38,6 +38,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public string $prefix = 'wp_';
 		/** @var array<int,array<string,mixed>> */
 		public array $pickup_rows = array();
+		/** @var array<string,array<int,array<string,mixed>>> */
+		public array $tables = array();
 
 		public function prepare( string $query, mixed ...$args ): string {
 			foreach ( $args as $arg ) {
@@ -50,8 +52,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public function esc_like( string $text ): string { return addcslashes( $text, '_%\\' ); }
 
 		public function get_row( string $query, mixed $output = null ): ?array {
+			$rows = $this->rows_for_query( $query );
 			if ( preg_match( '/WHERE id = ([0-9]+)/', $query, $m ) ) {
-				foreach ( $this->pickup_rows as $row ) {
+				foreach ( $rows as $row ) {
 					if ( (int) ( $row['id'] ?? 0 ) === (int) $m[1] ) {
 						return $row;
 					}
@@ -61,7 +64,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 
 		public function get_results( string $query, mixed $output = null ): array {
-			$rows = $this->pickup_rows;
+			$rows = $this->rows_for_query( $query );
 			if ( str_contains( $query, 'active = 1' ) ) {
 				$rows = array_values( array_filter( $rows, static fn( array $row ): bool => 1 === (int) ( $row['active'] ?? 0 ) ) );
 			}
@@ -103,26 +106,36 @@ if ( ! class_exists( 'wpdb' ) ) {
 			}
 			return $rows;
 		}
+
+		private function rows_for_query( string $query ): array {
+			if ( preg_match( '/FROM ([A-Za-z0-9_]+)/', $query, $m ) ) {
+				return $this->tables[ $m[1] ] ?? array();
+			}
+			return $this->pickup_rows;
+		}
 	}
 }
 
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
-use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 
 $GLOBALS['wpdb'] = new wpdb();
+$GLOBALS['wpdb']->prefix = 'wp_';
 $GLOBALS['wpdb']->pickup_rows = array(
 	array( 'id' => 1, 'carrier_key' => 'russian_post', 'point_code' => '630001-a', 'point_type' => 'OPS', 'brand_name' => 'Почта России', 'address' => 'Ленина, 1', 'city_name' => 'Новосибирск', 'region_name' => 'НСО', 'postcode' => '630001', 'latitude' => 55.01, 'longitude' => 82.91, 'work_time' => '09-18', 'accepts_cash' => 1, 'accepts_card' => 0, 'partial_redemption' => 1, 'return_available' => 1, 'fitting_available' => 0, 'contents_checking' => 1, 'functionality_checking' => 0, 'weight_limit_grams' => 10000, 'ecom_options_json' => '{"cardPayment":false}', 'raw_reference' => '{"secret":"raw"}', 'active' => 1 ),
 	array( 'id' => 2, 'carrier_key' => 'russian_post', 'point_code' => '630002-b', 'point_type' => 'PVZ', 'brand_name' => 'ПВЗ Почты', 'address' => 'Советская, 2', 'city_name' => 'Новосибирск', 'region_name' => 'НСО', 'postcode' => '630002', 'latitude' => 55.02, 'longitude' => 82.92, 'work_time' => '10-19', 'accepts_cash' => 0, 'accepts_card' => 1, 'weight_limit_grams' => 15000, 'ecom_options_json' => '{"cardPayment":true}', 'raw_reference' => '{"big":"raw"}', 'active' => 1 ),
 	array( 'id' => 3, 'carrier_key' => 'russian_post', 'point_code' => '101000-c', 'point_type' => 'APS', 'brand_name' => 'Почтомат', 'address' => 'Тверская, 3', 'city_name' => 'Москва', 'region_name' => 'Москва', 'postcode' => '101000', 'latitude' => 55.76, 'longitude' => 37.61, 'work_time' => '24/7', 'accepts_cash' => 0, 'accepts_card' => 1, 'weight_limit_grams' => 5000, 'ecom_options_json' => '{}', 'raw_reference' => '{"raw":"hidden"}', 'active' => 1 ),
-	array( 'id' => 4, 'carrier_key' => 'other', 'point_code' => 'other', 'point_type' => 'PVZ', 'address' => 'Other', 'city_name' => 'Новосибирск', 'latitude' => 55.01, 'longitude' => 82.91, 'active' => 1 ),
 );
 
-$controller = new PickupPointsRestController( new PickupPointRepository( $GLOBALS['wpdb'] ) );
+$repo = new RussianPostPickupPointRepository( $GLOBALS['wpdb'] );
+$GLOBALS['wpdb']->tables = array( $repo->main_table() => $GLOBALS['wpdb']->pickup_rows, 'wp_wdc_pickup_points' => array() );
+$controller = new PickupPointsRestController( $repo );
 $controller->register();
 pickup_rest_assert( 3 === count( $GLOBALS['wdc_rest_routes'] ?? array() ), 'REST controller must register three routes.' );
 
 $bbox = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '82.90,55.00,82.93,55.03' ) );
 pickup_rest_assert( 2 === count( $bbox ) && array( 1, 2 ) === array_column( $bbox, 'id' ), 'bbox must return only points inside requested area.' );
+pickup_rest_assert( array( 'russian_post', 'russian_post' ) === array_column( $bbox, 'carrier' ), 'REST summaries must expose russian_post carrier from the carrier-specific table.' );
 pickup_rest_assert( ! array_key_exists( 'raw_reference', $bbox[0] ), 'summary must not expose raw_reference.' );
 
 $type_filtered = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '0,0,180,90', 'type' => array( 'APS' ) ) );
@@ -140,5 +153,7 @@ pickup_rest_assert( ! array_key_exists( 'raw_reference', $detail ) && ! array_ke
 
 $invalid = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => 'bad' ) );
 pickup_rest_assert( $invalid instanceof WP_Error && 'invalid_bbox' === $invalid->get_error_code(), 'invalid bbox must return error.' );
+$unsupported = $controller->points( array( 'carrier' => 'demo', 'bbox' => '0,0,180,90' ) );
+pickup_rest_assert( array() === $unsupported, 'Unsupported carrier must not read legacy pickup table.' );
 
 echo "Pickup REST smoke test passed.\n";

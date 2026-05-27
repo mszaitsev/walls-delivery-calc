@@ -30,8 +30,8 @@ use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Packaging\PackagingApplicationResult;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
-use WallsShop\WDC\Pickup\RussianPost\RussianPostPassportPointNormalizer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
 use WallsShop\WDC\Rules\Admin\RuleAdminContext;
@@ -61,6 +61,7 @@ final class DeliveryServicesAdminPage {
 		private ?RussianPostOtpravkaApiSettings $otpravka_settings = null,
 		private ?RussianPostPickupImporter $pickup_importer = null,
 		private ?PickupPointRepository $pickup_points = null,
+		private ?RussianPostPickupPointRepository $russian_post_pickup_points = null,
 		private ?RussianPostPickupImportStateService $pickup_import_state = null,
 		private ?PluginEnvironment $environment = null
 	) {
@@ -487,8 +488,8 @@ final class DeliveryServicesAdminPage {
 		$result = $this->otpravka_settings->last_import_result();
 		$state = $this->pickup_import_state instanceof RussianPostPickupImportStateService ? $this->pickup_import_state->current() : array();
 		$is_busy = in_array( (string) ( $state['status'] ?? 'idle' ), array( 'queued', 'running' ), true );
-		$counts = $this->pickup_points instanceof PickupPointRepository ? $this->pickup_points->count_by_type( RussianPostPassportPointNormalizer::CARRIER_KEY ) : array();
-		$total = $this->pickup_points instanceof PickupPointRepository ? $this->pickup_points->count_active( RussianPostPassportPointNormalizer::CARRIER_KEY ) : 0;
+		$counts = $this->russian_post_pickup_points instanceof RussianPostPickupPointRepository ? $this->russian_post_pickup_points->count_by_type() : array();
+		$total = $this->russian_post_pickup_points instanceof RussianPostPickupPointRepository ? $this->russian_post_pickup_points->count_active() : 0;
 		$locked = $this->pickup_importer instanceof RussianPostPickupImporter && $this->pickup_importer->is_locked();
 		?>
 		<form method="post" style="max-width: 960px; margin-top:16px;">
@@ -512,7 +513,7 @@ final class DeliveryServicesAdminPage {
 			<table class="form-table" role="presentation">
 				<tr><th scope="row">Статус импорта</th><td><div class="wdc-rp-pickup-import-status" data-wdc-rp-pickup-import-status><strong data-wdc-rp-field="status"><?php echo esc_html( (string) ( $state['status'] ?? 'idle' ) ); ?></strong> <span class="spinner <?php echo $is_busy ? 'is-active' : ''; ?>" data-wdc-rp-spinner></span><table class="widefat striped" style="max-width: 760px; margin-top: 8px;"><tbody><?php foreach ( $this->pickup_import_state_rows() as $key => $label ) : ?><tr><th scope="row"><?php echo esc_html( $label ); ?></th><td data-wdc-rp-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $this->pickup_import_state_value( $state, $key ) ); ?></td></tr><?php endforeach; ?></tbody></table><p><button type="button" class="button" data-wdc-rp-refresh-status>Обновить статус</button></p></div></td></tr>
 				<?php $this->select_row( 'russian_post_pickup_unload_type', 'Unload type', (string) ( $values[ RussianPostOtpravkaApiSettings::PICKUP_UNLOAD_TYPE_KEY ] ?? 'ALL' ), array( 'ALL', 'OPS', 'PVZ', 'APS' ) ); ?>
-				<?php $this->checkbox_row( 'russian_post_pickup_schedule_enabled', 'Ежедневный импорт', ! empty( $values[ RussianPostOtpravkaApiSettings::PICKUP_SCHEDULE_ENABLED_KEY ] ) ); ?>
+				<?php $this->checkbox_row( 'russian_post_pickup_schedule_enabled', 'Обновлять еженедельно', ! empty( $values[ RussianPostOtpravkaApiSettings::PICKUP_SCHEDULE_ENABLED_KEY ] ) ); ?>
 				<tr><th scope="row">Lock</th><td><?php echo esc_html( $locked ? 'активен' : 'свободен' ); ?></td></tr>
 				<tr><th scope="row">Активные точки</th><td><?php echo esc_html( (string) $total ); ?>; OPS: <?php echo esc_html( (string) ( $counts['OPS'] ?? 0 ) ); ?>, PVZ: <?php echo esc_html( (string) ( $counts['PVZ'] ?? 0 ) ); ?>, APS: <?php echo esc_html( (string) ( $counts['APS'] ?? 0 ) ); ?></td></tr>
 				<tr><th scope="row">Последний успешный импорт</th><td><?php echo esc_html( $this->otpravka_settings->last_success_at() ?: '-' ); ?></td></tr>
@@ -545,12 +546,18 @@ final class DeliveryServicesAdminPage {
 			'updated' => 'Updated',
 			'deactivated' => 'Deactivated',
 			'skipped' => 'Skipped',
+			'rows_inserted_to_staging' => 'Inserted to staging',
 			'objects_processed' => 'Objects processed',
 			'batches_processed' => 'Batches processed',
 			'current_batch_size' => 'Current batch size',
 			'last_batch_duration_ms' => 'Last batch duration, ms',
 			'max_batch_duration_ms' => 'Max batch duration, ms',
 			'payload_offset' => 'Payload offset',
+			'staging_table' => 'Staging table',
+			'main_table' => 'Main table',
+			'backup_table' => 'Backup table',
+			'swap_started_at' => 'Swap started',
+			'swap_finished_at' => 'Swap finished',
 			'errors' => 'Errors',
 			'memory_peak' => 'Memory peak',
 		);

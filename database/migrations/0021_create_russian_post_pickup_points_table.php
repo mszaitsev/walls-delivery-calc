@@ -1,0 +1,11 @@
+<?php
+declare(strict_types=1);
+
+defined( 'ABSPATH' ) || exit;
+
+return static function (): void {
+	global $wpdb;
+
+	$repository = new \WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository( $wpdb );
+	$repository->create_schema_if_needed();
+};

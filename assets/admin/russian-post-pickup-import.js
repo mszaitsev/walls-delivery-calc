@@ -45,12 +45,18 @@
 			'updated',
 			'deactivated',
 			'skipped',
+			'rows_inserted_to_staging',
 			'objects_processed',
 			'batches_processed',
 			'current_batch_size',
 			'last_batch_duration_ms',
 			'max_batch_duration_ms',
 			'payload_offset',
+			'staging_table',
+			'main_table',
+			'backup_table',
+			'swap_started_at',
+			'swap_finished_at',
 			'errors',
 			'memory_peak'
 		].forEach(function (key) {

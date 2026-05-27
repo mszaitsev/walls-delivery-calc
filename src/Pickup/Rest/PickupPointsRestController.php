@@ -3,14 +3,14 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Pickup\Rest;
 
-use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 
 defined( 'ABSPATH' ) || exit;
 
 final class PickupPointsRestController {
 	private const NAMESPACE = 'wdc/v1';
 
-	public function __construct( private PickupPointRepository $repository ) {
+	public function __construct( private RussianPostPickupPointRepository $repository ) {
 	}
 
 	public function register(): void {
@@ -49,13 +49,15 @@ final class PickupPointsRestController {
 
 	public function points( mixed $request ): mixed {
 		$carrier = $this->carrier( $request );
+		if ( 'russian_post' !== $carrier ) {
+			return $this->response( array() );
+		}
 		$bbox = $this->bbox( $request );
 		if ( null === $bbox ) {
 			return $this->error( 'invalid_bbox', 'bbox must be minLng,minLat,maxLng,maxLat.' );
 		}
 
 		$rows = $this->repository->find_rows_by_bbox(
-			$carrier,
 			$bbox['min_lng'],
 			$bbox['min_lat'],
 			$bbox['max_lng'],
@@ -71,12 +73,15 @@ final class PickupPointsRestController {
 
 	public function search( mixed $request ): mixed {
 		$query = trim( $this->param( $request, 'q' ) );
+		$carrier = $this->carrier( $request );
+		if ( 'russian_post' !== $carrier ) {
+			return $this->response( array() );
+		}
 		if ( '' === $query ) {
 			return $this->response( array() );
 		}
 
 		$rows = $this->repository->search_point_rows(
-			$this->carrier( $request ),
 			$query,
 			array(
 				'city' => trim( $this->param( $request, 'city' ) ),
@@ -105,7 +110,7 @@ final class PickupPointsRestController {
 	private function summary( array $row ): array {
 		return array(
 			'id' => (int) ( $row['id'] ?? 0 ),
-			'carrier' => (string) ( $row['carrier_key'] ?? '' ),
+			'carrier' => 'russian_post',
 			'point_type' => (string) ( $row['point_type'] ?? '' ),
 			'title' => $this->title( $row ),
 			'address' => (string) ( $row['address'] ?? '' ),

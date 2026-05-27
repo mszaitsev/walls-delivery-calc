@@ -6,7 +6,6 @@ namespace WallsShop\WDC\Pickup\RussianPost;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiClient;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
 use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
-use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -16,13 +15,13 @@ final class RussianPostPickupImporter {
 	public const BATCH_HOOK = 'wdc_russian_post_pickup_import_batch';
 	public const FINALIZE_HOOK = 'wdc_russian_post_pickup_import_finalize';
 	private const LOCK_KEY = 'wdc_russian_post_pickup_import_lock';
-	private const BATCH_SIZE = 75;
+	private const BATCH_SIZE = 500;
 	private const MAX_STORED_ERRORS = 10;
 
 	public function __construct(
 		private RussianPostOtpravkaApiSettings $settings,
 		private RussianPostOtpravkaApiClient $client,
-		private PickupPointRepository $repository,
+		private RussianPostPickupPointRepository $repository,
 		private RussianPostPassportPointNormalizer $normalizer,
 		private ?RussianPostPickupImportStateService $state = null,
 		private ?ActionScheduler $scheduler = null
@@ -47,7 +46,7 @@ final class RussianPostPickupImporter {
 		}
 		$scheduled = wp_next_scheduled( self::SCHEDULE_HOOK );
 		if ( $this->settings->schedule_enabled() && false === $scheduled ) {
-			wp_schedule_event( time() + ( defined( 'HOUR_IN_SECONDS' ) ? HOUR_IN_SECONDS : 3600 ), 'daily', self::SCHEDULE_HOOK );
+			wp_schedule_event( time() + ( defined( 'HOUR_IN_SECONDS' ) ? HOUR_IN_SECONDS : 3600 ), 'weekly', self::SCHEDULE_HOOK );
 		}
 		if ( ! $this->settings->schedule_enabled() && false !== $scheduled && function_exists( 'wp_clear_scheduled_hook' ) ) {
 			wp_clear_scheduled_hook( self::SCHEDULE_HOOK );
@@ -84,9 +83,17 @@ final class RussianPostPickupImporter {
 		}
 
 		$this->lock();
+		$staging_table = $this->repository->staging_table( $import_id );
+		$main_table = $this->repository->main_table();
+		$backup_table = $this->repository->backup_table( $import_id );
+		$this->repository->drop_table( $staging_table );
+		$this->repository->create_schema_if_needed( $staging_table );
 		$this->state?->start( $type, $import_id );
-		$this->state?->update( 'download', array( 'import_id' => $import_id, 'type' => $type ) );
+		$this->state?->update( 'download', array( 'import_id' => $import_id, 'type' => $type, 'staging_table' => $staging_table, 'main_table' => $main_table, 'backup_table' => $backup_table ) );
 		$result = $this->base_result( $type, $import_id );
+		$result['staging_table'] = $staging_table;
+		$result['main_table'] = $main_table;
+		$result['backup_table'] = $backup_table;
 		$temp_file = '';
 		try {
 			$download = $this->client->download_passport_zip( $type );
@@ -166,7 +173,12 @@ final class RussianPostPickupImporter {
 			$rows[] = $row;
 		}
 
-		$upsert = $this->repository->upsert_passport_batch( RussianPostPassportPointNormalizer::CARRIER_KEY, $rows );
+		$staging_table = (string) ( $state['staging_table'] ?? '' );
+		if ( '' === $staging_table ) {
+			$result['errors'][] = 'Russian Post pickup staging table is missing from import state.';
+			return $this->fail_pipeline( $result );
+		}
+		$upsert = $this->repository->insert_batch( $rows, $staging_table );
 		$duration_ms = (int) round( ( microtime( true ) - $started ) * 1000 );
 		$errors = array_merge( is_array( $state['errors'] ?? null ) ? $state['errors'] : array(), $batch_errors );
 		if ( $duration_ms > 10000 ) {
@@ -176,6 +188,7 @@ final class RussianPostPickupImporter {
 		$result['parsed'] += $parsed;
 		$result['inserted'] += (int) $upsert['inserted'];
 		$result['updated'] += (int) $upsert['updated'];
+		$result['rows_inserted_to_staging'] = (int) ( $state['rows_inserted_to_staging'] ?? 0 ) + (int) $upsert['inserted'];
 		$result['skipped'] += $skipped + (int) $upsert['skipped'];
 		$result['payload_file'] = $payload_file;
 		$result['payload_offset'] = (int) $read['offset'];
@@ -212,12 +225,20 @@ final class RussianPostPickupImporter {
 		}
 
 		$result = $this->state_to_result( $state, $type, $import_id );
+		$result['swap_started_at'] = $this->now();
 		$this->state?->update( 'deactivate', $result );
-		$result['deactivated'] = $this->repository->mark_missing_inactive( RussianPostPassportPointNormalizer::CARRIER_KEY, (string) ( $state['started_at'] ?? $result['started_at'] ) );
+		$staging_table = (string) ( $state['staging_table'] ?? '' );
+		$backup_table = (string) ( $state['backup_table'] ?? $this->repository->backup_table( $import_id ) );
+		if ( '' === $staging_table || ! $this->repository->swap_staging_to_main( $staging_table, $backup_table ) ) {
+			$result['errors'][] = 'Unable to swap Russian Post pickup staging table.';
+			return $this->fail_pipeline( $result, false );
+		}
+		$result['swap_finished_at'] = $this->now();
+		$result['deactivated'] = 0;
 		$result['success'] = true;
 		$result['parser_completed'] = true;
 		$result['finished_at'] = $this->now();
-		$this->cleanup_state_files( $state );
+		$this->cleanup_state_files( $state, false );
 		$this->settings->save_import_result( $result, true );
 		$this->state?->success( $result );
 		$this->unlock();
@@ -245,7 +266,7 @@ final class RussianPostPickupImporter {
 	public function reset_stale_or_running_import(): array {
 		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
 		$this->unlock();
-		$this->cleanup_state_files( $state );
+		$this->cleanup_state_files( $state, true );
 
 		return $this->state instanceof RussianPostPickupImportStateService ? $this->state->cancel_by_admin() : array();
 	}
@@ -311,11 +332,11 @@ final class RussianPostPickupImporter {
 	 * @param array<string,mixed> $result
 	 * @return array<string,mixed>
 	 */
-	private function fail_pipeline( array $result ): array {
+	private function fail_pipeline( array $result, bool $cleanup_tables = true ): array {
 		$result['success'] = false;
 		$result['finished_at'] = $this->now();
 		$state = $this->state instanceof RussianPostPickupImportStateService ? $this->state->current() : array();
-		$this->cleanup_state_files( array_merge( $state, $result ) );
+		$this->cleanup_state_files( array_merge( $state, $result ), $cleanup_tables );
 		$this->settings->save_import_result( $result, false );
 		$this->state?->failed( $result );
 		$this->unlock();
@@ -337,9 +358,12 @@ final class RussianPostPickupImporter {
 	/**
 	 * @param array<string,mixed> $state
 	 */
-	private function cleanup_state_files( array $state ): void {
+	private function cleanup_state_files( array $state, bool $cleanup_tables = true ): void {
 		$this->delete_temp_file( (string) ( $state['temp_zip_file'] ?? '' ) );
 		$this->delete_temp_file( (string) ( $state['payload_file'] ?? '' ) );
+		if ( $cleanup_tables ) {
+			$this->repository->drop_table( (string) ( $state['staging_table'] ?? '' ) );
+		}
 	}
 
 	private function extract_first_payload_from_zip( string $temp_file ): string {
@@ -517,7 +541,13 @@ final class RussianPostPickupImporter {
 			'inserted' => 0,
 			'updated' => 0,
 			'deactivated' => 0,
+			'rows_inserted_to_staging' => 0,
 			'skipped' => 0,
+			'staging_table' => '',
+			'main_table' => $this->repository->main_table(),
+			'backup_table' => '',
+			'swap_started_at' => '',
+			'swap_finished_at' => '',
 			'payload_file' => '',
 			'temp_zip_file' => '',
 			'payload_offset' => 0,
