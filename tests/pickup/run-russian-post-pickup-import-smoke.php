@@ -356,11 +356,23 @@ $http_failed_state = $state_service->current();
 rp_pickup_assert( empty( $http_failed['success'] ) && 500 === (int) $http_failed_state['download_http_code'] && str_contains( implode( ' ', $http_failed_state['errors'] ), 'Internal Server Error' ) && str_contains( implode( ' ', $http_failed_state['errors'] ), 'temporary failure body' ), 'HTTP download failure must store code/message/body excerpt.' );
 $GLOBALS['rp_http_mode'] = '';
 
-$stale_state = array_merge( $state_service->defaults(), array( 'status' => 'running', 'stage' => 'download', 'last_activity_at' => '2000-01-01 00:00:00', 'errors' => array() ) );
+$fresh_state = array_merge( $state_service->defaults(), array( 'status' => 'running', 'stage' => 'download', 'last_activity_at' => date( 'Y-m-d H:i:s' ), 'errors' => array() ) );
+update_option( RussianPostPickupImportStateService::OPTION_NAME, $fresh_state, false );
+set_transient( 'wdc_russian_post_pickup_import_lock', 1, 3600 );
+$fresh_result = $importer->refresh_state_for_status();
+rp_pickup_assert( 'running' === (string) $fresh_result['status'] && false !== get_transient( 'wdc_russian_post_pickup_import_lock' ), 'Fresh running/download status refresh must not reset import.' );
+
+$stale_zip = tempnam( sys_get_temp_dir(), 'wdc-stale-zip-' );
+$stale_payload = tempnam( sys_get_temp_dir(), 'wdc-stale-payload-' );
+$stale_staging = $repo->staging_table( 'stale-download' );
+$GLOBALS['wpdb']->tables[ $stale_staging ] = array( array( 'id' => 1 ) );
+$stale_state = array_merge( $state_service->defaults(), array( 'status' => 'running', 'stage' => 'download', 'last_activity_at' => date( 'Y-m-d H:i:s', time() - 601 ), 'temp_zip_file' => $stale_zip, 'payload_file' => $stale_payload, 'staging_table' => $stale_staging, 'errors' => array() ) );
 update_option( RussianPostPickupImportStateService::OPTION_NAME, $stale_state, false );
 set_transient( 'wdc_russian_post_pickup_import_lock', 1, 3600 );
-$stale_result = $state_service->reset_stale_if_needed();
-rp_pickup_assert( 'failed' === (string) $stale_result['status'] && str_contains( implode( ' ', $stale_result['errors'] ), 'Download stage timed out/stale.' ) && false === get_transient( 'wdc_russian_post_pickup_import_lock' ), 'Stale download older than 5 minutes must fail and unlock.' );
+$stale_result = $importer->refresh_state_for_status();
+rp_pickup_assert( 'failed' === (string) $stale_result['status'] && str_contains( implode( ' ', $stale_result['errors'] ), 'Download stage timed out/stale.' ) && false === get_transient( 'wdc_russian_post_pickup_import_lock' ) && ! file_exists( (string) $stale_zip ) && ! file_exists( (string) $stale_payload ) && ! array_key_exists( $stale_staging, $GLOBALS['wpdb']->tables ), 'Status refresh must fail stale download, unlock, and cleanup files/staging.' );
+$admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
+rp_pickup_assert( str_contains( $admin_source, 'refresh_state_for_status()' ), 'Status AJAX handler must refresh stale state before responding.' );
 
 delete_transient( 'wdc_russian_post_pickup_import_lock' );
 rp_pickup_assert( $importer->queue_background_import( 'ALL' ), 'Cancel test must queue.' );

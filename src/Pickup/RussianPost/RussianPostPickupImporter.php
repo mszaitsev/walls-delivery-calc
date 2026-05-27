@@ -267,17 +267,26 @@ final class RussianPostPickupImporter {
 	}
 
 	public function is_locked(): bool {
-		$state = $this->state?->reset_stale_if_needed();
-		if ( is_array( $state ) && 'failed' === (string) ( $state['status'] ?? '' ) && str_contains( strtolower( implode( ';', array_map( 'strval', is_array( $state['errors'] ?? null ) ? $state['errors'] : array() ) ) ), 'stale' ) ) {
-			$this->cleanup_state_files( $state );
-			$this->unlock();
-			return false;
-		}
+		$this->refresh_state_for_status();
 		if ( function_exists( 'get_transient' ) ) {
 			return false !== get_transient( self::LOCK_KEY );
 		}
 
 		return (bool) get_option( self::LOCK_KEY, false );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function refresh_state_for_status(): array {
+		$state = $this->state?->reset_stale_if_needed() ?? array();
+		if ( is_array( $state ) && 'failed' === (string) ( $state['status'] ?? '' ) && str_contains( strtolower( implode( ';', array_map( 'strval', is_array( $state['errors'] ?? null ) ? $state['errors'] : array() ) ) ), 'stale' ) ) {
+			$this->cleanup_state_files( $state );
+			$this->unlock();
+			$state = $this->state?->current() ?? $state;
+		}
+
+		return is_array( $state ) ? $state : array();
 	}
 
 	/**

@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.24.
+Version: 0.22.25.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 
@@ -72,7 +72,7 @@ After a successful swap, the importer runs `ANALYZE TABLE wp_wdc_pickup_points_r
 
 The import result stores `downloaded`, `parsed`, `inserted`, `updated`, `deactivated`, `skipped`, `errors`, `started_at`, and `finished_at`.
 
-Download diagnostics are stored in the same state/result: `download_url`, `download_started_at`, `download_duration_ms`, `download_http_code`, `download_response_message`, `temp_file_size`, and `download_error`. The Otpravka download timeout defaults to 120 seconds and is clamped to 30..300 seconds; the HTTP request also passes a short connect timeout when supported by WordPress HTTP transports. A download stage with no activity for 5 minutes is marked failed and the lock is cleared on the next status/lock check.
+Download diagnostics are stored in the same state/result: `download_url`, `download_started_at`, `download_duration_ms`, `download_http_code`, `download_response_message`, `temp_file_size`, and `download_error`. The Otpravka download timeout defaults to 120 seconds and is clamped to 30..300 seconds; the HTTP request also passes a short connect timeout when supported by WordPress HTTP transports. A download stage with no activity for 5 minutes is marked failed and the lock is cleared on the next status/lock check. The admin AJAX status endpoint calls `RussianPostPickupImporter::refresh_state_for_status()` before returning state, so ordinary polling also performs stale cleanup and returns the failed state.
 
 Locking uses `wdc_russian_post_pickup_import_lock` via transients, with an option fallback in non-WP smoke tests, so parallel imports return a readable status instead of running twice.
 

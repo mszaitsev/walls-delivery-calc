@@ -118,7 +118,11 @@ final class DeliveryServicesAdminPage {
 			wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 );
 		}
 
-		wp_send_json_success( $this->pickup_import_state instanceof RussianPostPickupImportStateService ? $this->pickup_import_state->current() : array() );
+		$state = $this->pickup_importer instanceof RussianPostPickupImporter
+			? $this->pickup_importer->refresh_state_for_status()
+			: ( $this->pickup_import_state instanceof RussianPostPickupImportStateService ? $this->pickup_import_state->current() : array() );
+
+		wp_send_json_success( $state );
 	}
 
 	private function asset_url( string $path ): string {

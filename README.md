@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.24.
+Version: 0.22.25.
+
+Version 0.22.25 makes Russian Post pickup status polling perform stale checks: the AJAX status endpoint now refreshes import state through the importer, so a stuck `running/download` state older than 5 minutes is failed, unlocked, and cleaned up by ordinary status polling.
 
 Version 0.22.24 improves Russian Post passport download diagnostics: default timeout is now 120 seconds, settings clamp to 30..300 seconds, streamed requests include connect timeout, import state records download URL/start/duration/HTTP/message/temp size/error, and stale download is failed after 5 minutes.
 
