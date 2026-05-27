@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.26.
+Version: 0.22.27.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 
@@ -16,7 +16,7 @@ The generic legacy table `wp_wdc_pickup_points` is no longer used for Russian Po
 DROP TABLE IF EXISTS wp_wdc_pickup_points;
 ```
 
-The Russian Post table stores point identity, address parts, FIAS/GAR ids, geohash, compact readable `work_time`, e-commerce options, weight/size limits, payment/service flags, `source_hash`, `last_seen_at`, and timestamps. It no longer stores `raw_reference` or `work_time_json`; fresh imports normalize raw `workTime` during parsing and keep only the compact text needed by REST and the future map. Indexes include `uniq_point_code`, `idx_type_active`, `idx_city_active`, `idx_postcode`, `idx_lat_lng`, `idx_geohash`, and `idx_source_hash`.
+The Russian Post table stores only the data needed for the map, checkout pickup selection, and future shipment registration: `id`, `point_code`, `point_type`, `postcode`, `country_code`, `region_name`, `city_name`, `street`, `house`, `address`, FIAS/GAR ids, `latitude`, `longitude`, `geohash`, `description`, compact readable `work_time`, `active`, `source_hash`, `last_seen_at`, `created_at`, and `updated_at`. It does not store brand, e-commerce option JSON, services, phones, images, weight or size limits, payment flags, inspection flags, `raw_reference`, or `work_time_json`. Fresh imports normalize raw `workTime` during parsing and keep only the compact text needed by REST and the future map. Indexes include `uniq_point_code`, `idx_type_active`, `idx_city_active`, `idx_postcode`, `idx_lat_lng`, `idx_geohash`, and `idx_source_hash`.
 
 Existing test tables are not migrated to the compact schema. To recreate the table before a repeat import, remove it manually:
 
@@ -143,7 +143,7 @@ Example:
 /wp-json/wdc/v1/points/search?carrier=russian_post&q=630001&city=Новосибирск&type[]=OPS
 ```
 
-`GET /wp-json/wdc/v1/points/{id}` returns a safe detail card with `point_code`, address, coordinates, work time, e-commerce options, payment/service flags, and `weight_limit_grams`.
+`GET /wp-json/wdc/v1/points/{id}` returns a safe detail card with `point_code`, point type, address, postcode, city/region, coordinates, work time, and description.
 
 The API validates bbox ranges, clamps limits, sanitizes all query parameters, uses prepared SQL through `RussianPostPickupPointRepository`, and does not expose raw snapshots, `work_time_json`, secrets, source hash, temp files, or import state fields.
 

@@ -190,6 +190,10 @@ $migration();
 rp_pickup_assert( array_key_exists( 'wp_wdc_pickup_points_russian_post', $GLOBALS['wpdb']->tables ), 'Migration must create Russian Post carrier-specific table.' );
 $schema = $repo->schema_sql();
 rp_pickup_assert( ! str_contains( $schema, 'raw_reference' ) && ! str_contains( $schema, 'work_time_json' ) && str_contains( $schema, 'work_time TEXT NULL' ), 'Russian Post pickup schema must store compact work_time without raw JSON fields.' );
+$removed_fields = array( 'brand_name', 'ecom_options_json', 'services_json', 'phones_json', 'images_json', 'weight_limit_grams', 'size_limit_json', 'accepts_cash', 'accepts_card', 'partial_redemption', 'return_available', 'fitting_available', 'contents_checking', 'functionality_checking', 'raw_reference', 'work_time_json' );
+foreach ( $removed_fields as $removed_field ) {
+	rp_pickup_assert( ! str_contains( $schema, $removed_field ), 'Russian Post pickup schema must not contain removed field: ' . $removed_field );
+}
 
 $normalizer = new RussianPostPassportPointNormalizer();
 $formatter = new RussianPostWorkTimeFormatter();
@@ -310,6 +314,9 @@ $main = $repo->main_table();
 $normalized_base = $normalizer->normalize( $base_item, 'PVZ', '2026-05-28 10:00:00' );
 rp_pickup_assert( is_array( $normalized_base ) && "Пн–Пт: 08:00–17:00\nПерерыв: 12:00–13:00\nСб–Вс: выходной" === $normalized_base['work_time'], 'Normalizer must store compact work_time.' );
 rp_pickup_assert( ! array_key_exists( 'raw_reference', $normalized_base ) && ! array_key_exists( 'work_time_json', $normalized_base ), 'Normalizer must not output raw_reference or work_time_json.' );
+foreach ( $removed_fields as $removed_field ) {
+	rp_pickup_assert( ! array_key_exists( $removed_field, $normalized_base ), 'Normalizer must not output removed field: ' . $removed_field );
+}
 $repo->insert_batch( array( $normalized_base ), $main );
 $main_before = count( $GLOBALS['wpdb']->tables[ $main ] );
 $importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, $state_service );

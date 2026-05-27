@@ -120,8 +120,6 @@ final class PickupPointsRestController {
 			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
 			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
 			'work_time' => (string) ( $row['work_time'] ?? '' ),
-			'accepts_cash' => $this->nullable_bool( $row['accepts_cash'] ?? null ),
-			'accepts_card' => $this->nullable_bool( $row['accepts_card'] ?? null ),
 		);
 	}
 
@@ -132,17 +130,7 @@ final class PickupPointsRestController {
 	private function details( array $row ): array {
 		$detail = $this->summary( $row );
 		$detail['point_code'] = (string) ( $row['point_code'] ?? '' );
-		$detail['ecom_options'] = $this->decode_json_field( $row['ecom_options_json'] ?? null );
-		$detail['payment'] = array(
-			'accepts_cash' => $this->nullable_bool( $row['accepts_cash'] ?? null ),
-			'accepts_card' => $this->nullable_bool( $row['accepts_card'] ?? null ),
-			'partial_redemption' => $this->nullable_bool( $row['partial_redemption'] ?? null ),
-			'return_available' => $this->nullable_bool( $row['return_available'] ?? null ),
-			'fitting_available' => $this->nullable_bool( $row['fitting_available'] ?? null ),
-			'contents_checking' => $this->nullable_bool( $row['contents_checking'] ?? null ),
-			'functionality_checking' => $this->nullable_bool( $row['functionality_checking'] ?? null ),
-		);
-		$detail['weight_limit_grams'] = null !== ( $row['weight_limit_grams'] ?? null ) ? (int) $row['weight_limit_grams'] : null;
+		$detail['description'] = (string) ( $row['description'] ?? '' );
 
 		return $detail;
 	}
@@ -202,22 +190,7 @@ final class PickupPointsRestController {
 	}
 
 	private function title( array $row ): string {
-		$title = trim( (string) ( $row['brand_name'] ?? '' ) );
-		if ( '' !== $title ) {
-			return $title;
-		}
-
 		return trim( (string) ( $row['point_type'] ?? '' ) . ' ' . (string) ( $row['postcode'] ?? '' ) );
-	}
-
-	private function nullable_bool( mixed $value ): ?bool {
-		return null === $value || '' === $value ? null : (bool) (int) $value;
-	}
-
-	private function decode_json_field( mixed $value ): array {
-		$decoded = json_decode( (string) $value, true );
-
-		return is_array( $decoded ) ? $decoded : array();
 	}
 
 	private function param( mixed $request, string $key ): string {

@@ -40,22 +40,8 @@ final class RussianPostPickupPointRepository {
 			latitude DECIMAL(10,7) NOT NULL,
 			longitude DECIMAL(10,7) NOT NULL,
 			geohash VARCHAR(16) NULL,
-			brand_name VARCHAR(255) NULL,
 			description TEXT NULL,
 			work_time TEXT NULL,
-			ecom_options_json LONGTEXT NULL,
-			services_json LONGTEXT NULL,
-			phones_json LONGTEXT NULL,
-			images_json LONGTEXT NULL,
-			weight_limit_grams INT UNSIGNED NULL,
-			size_limit_json LONGTEXT NULL,
-			accepts_cash TINYINT(1) NULL,
-			accepts_card TINYINT(1) NULL,
-			partial_redemption TINYINT(1) NULL,
-			return_available TINYINT(1) NULL,
-			fitting_available TINYINT(1) NULL,
-			contents_checking TINYINT(1) NULL,
-			functionality_checking TINYINT(1) NULL,
 			active TINYINT(1) NOT NULL DEFAULT 1,
 			source_hash CHAR(40) NOT NULL,
 			last_seen_at DATETIME NOT NULL,
@@ -296,22 +282,8 @@ final class RussianPostPickupPointRepository {
 			'latitude' => null,
 			'longitude' => null,
 			'geohash' => null,
-			'brand_name' => null,
 			'description' => null,
 			'work_time' => null,
-			'ecom_options_json' => null,
-			'services_json' => null,
-			'phones_json' => null,
-			'images_json' => null,
-			'weight_limit_grams' => null,
-			'size_limit_json' => null,
-			'accepts_cash' => null,
-			'accepts_card' => null,
-			'partial_redemption' => null,
-			'return_available' => null,
-			'fitting_available' => null,
-			'contents_checking' => null,
-			'functionality_checking' => null,
 			'active' => 1,
 			'source_hash' => '',
 			'last_seen_at' => $now,
@@ -319,20 +291,10 @@ final class RussianPostPickupPointRepository {
 			'updated_at' => $now,
 		);
 		$row = array_intersect_key( $row, $allowed ) + $allowed;
-		foreach ( array( 'ecom_options_json', 'services_json', 'phones_json', 'images_json', 'size_limit_json' ) as $json_key ) {
-			if ( is_array( $row[ $json_key ] ) ) {
-				$encoded = wp_json_encode( $row[ $json_key ] );
-				$row[ $json_key ] = is_string( $encoded ) ? $encoded : '';
-			}
-		}
-		foreach ( array( 'accepts_cash', 'accepts_card', 'partial_redemption', 'return_available', 'fitting_available', 'contents_checking', 'functionality_checking' ) as $bool_key ) {
-			$row[ $bool_key ] = null === $row[ $bool_key ] ? null : ( ! empty( $row[ $bool_key ] ) ? 1 : 0 );
-		}
 		$row['point_type'] = strtoupper( trim( (string) $row['point_type'] ) );
 		$row['active'] = ! empty( $row['active'] ) ? 1 : 0;
 		$row['latitude'] = null === $row['latitude'] || '' === $row['latitude'] ? null : (float) $row['latitude'];
 		$row['longitude'] = null === $row['longitude'] || '' === $row['longitude'] ? null : (float) $row['longitude'];
-		$row['weight_limit_grams'] = null === $row['weight_limit_grams'] ? null : max( 0, (int) $row['weight_limit_grams'] );
 
 		return $row;
 	}
@@ -342,11 +304,8 @@ final class RussianPostPickupPointRepository {
 			'point_code' => '%s', 'point_type' => '%s', 'postcode' => '%s', 'country_code' => '%s',
 			'region_name' => '%s', 'city_name' => '%s', 'street' => '%s', 'house' => '%s', 'address' => '%s',
 			'fias_location_guid' => '%s', 'fias_address_guid' => '%s', 'gar_region_id' => '%s',
-			'latitude' => '%f', 'longitude' => '%f', 'geohash' => '%s', 'brand_name' => '%s', 'description' => '%s',
-			'work_time' => '%s', 'ecom_options_json' => '%s', 'services_json' => '%s',
-			'phones_json' => '%s', 'images_json' => '%s', 'weight_limit_grams' => '%d', 'size_limit_json' => '%s',
-			'accepts_cash' => '%d', 'accepts_card' => '%d', 'partial_redemption' => '%d', 'return_available' => '%d',
-			'fitting_available' => '%d', 'contents_checking' => '%d', 'functionality_checking' => '%d',
+			'latitude' => '%f', 'longitude' => '%f', 'geohash' => '%s', 'description' => '%s',
+			'work_time' => '%s',
 			'active' => '%d', 'source_hash' => '%s', 'last_seen_at' => '%s',
 			'created_at' => '%s', 'updated_at' => '%s',
 		);

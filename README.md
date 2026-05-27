@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.26.
+Version: 0.22.27.
+
+Version 0.22.27 further lightens the Russian Post pickup table for the map stage: fresh schema removes brand, e-commerce JSON, services/phones/images, weight/size limits, and payment/inspection flags. The table now keeps only identity, type, postal/address/FIAS/GAR fields, coordinates, geohash, description, work time, active/source hash, and timestamps. Recreate local test data with `DROP TABLE IF EXISTS wp_wdc_pickup_points_russian_post;` before reimport.
 
 Version 0.22.26 adds a direct cURL passport ZIP download backend before WordPress HTTP streaming. If cURL fails, import falls back to WP HTTP and stores backend, fallback, cURL errno/error, and first backend diagnostics in state.
 
