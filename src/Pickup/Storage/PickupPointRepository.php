@@ -241,6 +241,15 @@ final class PickupPointRepository {
 	}
 
 	public function find_by_id( int $id ): ?PickupPoint {
+		$row = $this->find_row_by_id( $id );
+
+		return is_array( $row ) ? $this->row_to_point( $row ) : null;
+	}
+
+	/**
+	 * @return array<string,mixed>|null
+	 */
+	public function find_row_by_id( int $id ): ?array {
 		if ( $id <= 0 ) {
 			return null;
 		}
@@ -250,7 +259,7 @@ final class PickupPointRepository {
 			ARRAY_A
 		);
 
-		return is_array( $row ) ? $this->row_to_point( $row ) : null;
+		return is_array( $row ) ? $row : null;
 	}
 
 	/**
@@ -258,6 +267,14 @@ final class PickupPointRepository {
 	 * @return array<int,PickupPoint>
 	 */
 	public function find_by_bbox( string $carrier_key, float $min_lng, float $min_lat, float $max_lng, float $max_lat, array $filters = array() ): array {
+		return $this->rows_to_points( $this->find_rows_by_bbox( $carrier_key, $min_lng, $min_lat, $max_lng, $max_lat, $filters ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $filters
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function find_rows_by_bbox( string $carrier_key, float $min_lng, float $min_lat, float $max_lng, float $max_lat, array $filters = array() ): array {
 		$carrier_key = trim( $carrier_key );
 		if ( '' === $carrier_key ) {
 			return array();
@@ -271,16 +288,17 @@ final class PickupPointRepository {
 		);
 		$args = array( $carrier_key, $min_lng, $max_lng, $min_lat, $max_lat );
 		$this->append_point_filters( $where, $args, $filters );
+		$limit = $this->limit_from_filters( $filters, 500, 1000 );
 
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
-				'SELECT * FROM ' . $this->table_name() . ' WHERE ' . implode( ' AND ', $where ) . ' ORDER BY city_name ASC, address ASC LIMIT 500',
-				...$args
+				'SELECT * FROM ' . $this->table_name() . ' WHERE ' . implode( ' AND ', $where ) . ' ORDER BY city_name ASC, address ASC LIMIT %d',
+				...array_merge( $args, array( $limit ) )
 			),
 			ARRAY_A
 		);
 
-		return $this->rows_to_points( is_array( $rows ) ? $rows : array() );
+		return is_array( $rows ) ? $rows : array();
 	}
 
 	/**
@@ -288,6 +306,14 @@ final class PickupPointRepository {
 	 * @return array<int,PickupPoint>
 	 */
 	public function search_points( string $carrier_key, string $query, array $filters = array() ): array {
+		return $this->rows_to_points( $this->search_point_rows( $carrier_key, $query, $filters ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $filters
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function search_point_rows( string $carrier_key, string $query, array $filters = array() ): array {
 		$carrier_key = trim( $carrier_key );
 		$query       = trim( $query );
 		if ( '' === $carrier_key || '' === $query ) {
@@ -301,17 +327,23 @@ final class PickupPointRepository {
 		);
 		$like = '%' . $this->wpdb->esc_like( $query ) . '%';
 		$args = array( $carrier_key, $like, $like, $like, $like );
+		if ( '' !== trim( (string) ( $filters['city'] ?? '' ) ) ) {
+			$where[] = 'city_name LIKE %s';
+			$args[] = '%' . $this->wpdb->esc_like( trim( (string) $filters['city'] ) ) . '%';
+			unset( $filters['city'] );
+		}
 		$this->append_point_filters( $where, $args, $filters );
+		$limit = $this->limit_from_filters( $filters, 50, 100 );
 
 		$rows = $this->wpdb->get_results(
 			$this->wpdb->prepare(
-				'SELECT * FROM ' . $this->table_name() . ' WHERE ' . implode( ' AND ', $where ) . ' ORDER BY city_name ASC, address ASC LIMIT 100',
-				...$args
+				'SELECT * FROM ' . $this->table_name() . ' WHERE ' . implode( ' AND ', $where ) . ' ORDER BY city_name ASC, address ASC LIMIT %d',
+				...array_merge( $args, array( $limit ) )
 			),
 			ARRAY_A
 		);
 
-		return $this->rows_to_points( is_array( $rows ) ? $rows : array() );
+		return is_array( $rows ) ? $rows : array();
 	}
 
 	/**
@@ -562,9 +594,17 @@ final class PickupPointRepository {
 	 * @param array<string,mixed> $filters
 	 */
 	private function append_point_filters( array &$where, array &$args, array $filters ): void {
-		if ( '' !== trim( (string) ( $filters['point_type'] ?? '' ) ) ) {
-			$where[] = 'point_type = %s';
-			$args[]  = strtoupper( trim( (string) $filters['point_type'] ) );
+		$types = $filters['point_types'] ?? $filters['type'] ?? $filters['point_type'] ?? array();
+		$types = is_array( $types ) ? $types : array( $types );
+		$types = array_values(
+			array_filter(
+				array_map( static fn( mixed $type ): string => strtoupper( trim( (string) $type ) ), $types ),
+				static fn( string $type ): bool => in_array( $type, array( 'OPS', 'PVZ', 'APS' ), true )
+			)
+		);
+		if ( array() !== $types ) {
+			$where[] = 'point_type IN (' . implode( ',', array_fill( 0, count( $types ), '%s' ) ) . ')';
+			array_push( $args, ...$types );
 		}
 		if ( '' !== trim( (string) ( $filters['city'] ?? '' ) ) ) {
 			$where[] = 'city_name LIKE %s';
@@ -578,6 +618,15 @@ final class PickupPointRepository {
 			$where[] = 'accepts_cash = %d';
 			$args[]  = ! empty( $filters['accepts_cash'] ) ? 1 : 0;
 		}
+	}
+
+	/**
+	 * @param array<string,mixed> $filters
+	 */
+	private function limit_from_filters( array $filters, int $default, int $max ): int {
+		$limit = (int) ( $filters['limit'] ?? $default );
+
+		return max( 1, min( $max, $limit > 0 ? $limit : $default ) );
 	}
 
 	private function table_name(): string {

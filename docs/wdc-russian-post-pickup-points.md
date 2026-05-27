@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.13.
+Version: 0.22.20.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 
@@ -86,6 +86,45 @@ State becomes `queued` only after the background job is actually scheduled. If s
 The admin tab includes "Отменить / сбросить зависший импорт" while an import is queued/running. It clears `wdc_russian_post_pickup_import_lock` and marks state failed with `Import was manually cancelled/reset by admin.` without deleting already imported points.
 
 The existing `Калькулятор доставок -> ПВЗ` page remains in place and now shows a Russian Post summary with active total, type counts, and last successful import date.
+
+## REST API
+
+The local pickup directory is exposed through public read-only REST endpoints under `wdc/v1`. They read only from `wdc_pickup_points` and do not call Russian Post or any external API.
+
+`GET /wp-json/wdc/v1/points`
+
+Parameters:
+
+- `carrier=russian_post`
+- `bbox=minLng,minLat,maxLng,maxLat`
+- `type[]=OPS|PVZ|APS`
+- `limit`, default `500`, max `1000`
+
+Example:
+
+```text
+/wp-json/wdc/v1/points?carrier=russian_post&bbox=82.80,54.90,83.10,55.20&type[]=PVZ&limit=200
+```
+
+`GET /wp-json/wdc/v1/points/search`
+
+Parameters:
+
+- `q`
+- `carrier=russian_post`
+- `city`
+- `type[]=OPS|PVZ|APS`
+- `limit`, default `50`, max `100`
+
+Example:
+
+```text
+/wp-json/wdc/v1/points/search?carrier=russian_post&q=630001&city=Новосибирск&type[]=OPS
+```
+
+`GET /wp-json/wdc/v1/points/{id}` returns a safe detail card with `point_code`, address, coordinates, work time, e-commerce options, payment/service flags, and `weight_limit_grams`.
+
+The API validates bbox ranges, clamps limits, sanitizes all query parameters, uses prepared SQL through `PickupPointRepository`, and does not expose `raw_reference`, secrets, source hash, temp files, or import state fields.
 
 ## Scheduling
 

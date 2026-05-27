@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.13.
+Version: 0.22.20.
+
+Version 0.22.20 adds public read-only REST endpoints for the local pickup database: `GET /wp-json/wdc/v1/points`, `GET /wp-json/wdc/v1/points/search`, and `GET /wp-json/wdc/v1/points/{id}`. The endpoints support carrier/type/limit filters, bbox validation, search, and safe point detail responses without raw import snapshots or secrets.
 
 Version 0.22.13 changes Russian Post pickup import into a resumable background batch pipeline. The init job only downloads/extracts the payload, each batch job parses and upserts 75 objects from the saved payload offset, and finalize deactivates missing points and cleans temp files, so one PHP process no longer writes to MySQL for the whole import.
 
