@@ -504,7 +504,7 @@ final class DeliveryServicesAdminPage {
 				<?php $this->text_row( 'russian_post_otpravka_login', 'Login', (string) ( $values[ RussianPostOtpravkaApiSettings::LOGIN_KEY ] ?? '' ) ); ?>
 				<tr><th scope="row">Password</th><td><input class="regular-text" type="password" name="russian_post_otpravka_password" value="" placeholder="<?php echo esc_attr( $this->otpravka_settings->has_password() ? 'задано' : 'не задано' ); ?>"><label style="display:block;margin-top:6px;"><input type="checkbox" name="russian_post_otpravka_clear_password" value="1"> очистить сохраненный пароль</label></td></tr>
 				<tr><th scope="row">Basic key</th><td><input class="regular-text" type="password" name="russian_post_otpravka_basic_key" value="" placeholder="<?php echo esc_attr( $this->otpravka_settings->has_basic_key() ? 'задано' : 'не задано' ); ?>"><label style="display:block;margin-top:6px;"><input type="checkbox" name="russian_post_otpravka_clear_basic_key" value="1"> очистить сохраненный Basic key</label></td></tr>
-				<?php $this->text_row( 'russian_post_otpravka_timeout', 'Timeout загрузки, сек.', (string) ( $values[ RussianPostOtpravkaApiSettings::TIMEOUT_KEY ] ?? 300 ) ); ?>
+				<?php $this->text_row( 'russian_post_otpravka_timeout', 'Timeout загрузки, сек.', (string) ( $values[ RussianPostOtpravkaApiSettings::TIMEOUT_KEY ] ?? 120 ) ); ?>
 			</table>
 			<h3>Импорт ПВЗ / ОПС</h3>
 			<?php if ( 'failed' === (string) ( $state['status'] ?? '' ) && '' !== $this->pickup_import_state_value( $state, 'errors' ) ) : ?>
@@ -540,6 +540,13 @@ final class DeliveryServicesAdminPage {
 			'last_activity_at' => 'Last activity',
 			'type' => 'Type',
 			'import_id' => 'Import ID',
+			'download_url' => 'Download URL',
+			'download_started_at' => 'Download started',
+			'download_duration_ms' => 'Download duration, ms',
+			'download_http_code' => 'Download HTTP code',
+			'download_response_message' => 'Download response',
+			'download_error' => 'Download error',
+			'temp_file_size' => 'Temp ZIP size',
 			'downloaded' => 'Downloaded',
 			'parsed' => 'Parsed',
 			'inserted' => 'Inserted',

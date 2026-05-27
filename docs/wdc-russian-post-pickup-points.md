@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.23.
+Version: 0.22.24.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 
@@ -72,11 +72,13 @@ After a successful swap, the importer runs `ANALYZE TABLE wp_wdc_pickup_points_r
 
 The import result stores `downloaded`, `parsed`, `inserted`, `updated`, `deactivated`, `skipped`, `errors`, `started_at`, and `finished_at`.
 
+Download diagnostics are stored in the same state/result: `download_url`, `download_started_at`, `download_duration_ms`, `download_http_code`, `download_response_message`, `temp_file_size`, and `download_error`. The Otpravka download timeout defaults to 120 seconds and is clamped to 30..300 seconds; the HTTP request also passes a short connect timeout when supported by WordPress HTTP transports. A download stage with no activity for 5 minutes is marked failed and the lock is cleared on the next status/lock check.
+
 Locking uses `wdc_russian_post_pickup_import_lock` via transients, with an option fallback in non-WP smoke tests, so parallel imports return a readable status instead of running twice.
 
 Manual imports from the admin UI now queue a background job instead of running in the HTTP request. The persistent live state is stored in the `wdc_russian_post_pickup_import_state` option with `status`, `stage`, timestamps, counters, first errors, type, memory peak, `import_id`, `payload_file`, `payload_offset`, `objects_processed`, `batches_processed`, `current_batch_size`, `last_batch_duration_ms`, `max_batch_duration_ms`, `parser_completed`, `staging_table`, `main_table`, `backup_table`, `rows_inserted_to_staging`, `swap_started_at`, and `swap_finished_at`. The importer updates state before download, after extraction, after every batch insert, before swap, and on success/failure. If a queued/running state has no activity for more than 2 hours, stale lock recovery marks it failed and allows a new run with a warning.
 
-The Otpravka passport ZIP download timeout defaults to 300 seconds and is sanitized to 30..900 seconds. Download failures store the HTTP code, WP error message when present, response message/body excerpt up to 1000 characters, and temp file size when available. A running `download` stage with no activity for more than 15 minutes is marked failed with `Download stage timed out/stale.` and the import lock is cleared. A stale `parse`/`upsert` batch older than 10 minutes is marked failed with `Batch stage timed out/stale.`.
+The Otpravka passport ZIP download timeout defaults to 120 seconds and is sanitized to 30..300 seconds. Download failures store the HTTP code, WP error message when present, response message/body excerpt up to 1000 characters, duration, and temp file size when available. A running `download` stage with no activity for more than 5 minutes is marked failed with `Download stage timed out/stale.` and the import lock is cleared. A stale `parse`/`upsert` batch older than 10 minutes is marked failed with `Batch stage timed out/stale.`.
 
 `RussianPostPickupPointRepository` writes import batches only into staging. This keeps the production table stable and avoids sustained writes against the table read by REST/checkout.
 

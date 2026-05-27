@@ -12,28 +12,31 @@ final class RussianPostOtpravkaApiClient {
 	}
 
 	/**
-	 * @return array{success:bool,http_code:int,body:string,temp_file:string,error:string,temp_file_size:int}
+	 * @return array<string,mixed>
 	 */
 	public function download_passport_zip( string $type = 'ALL' ): array {
 		$type = strtoupper( trim( $type ) );
 		$type = in_array( $type, array( 'ALL', 'OPS', 'PVZ', 'APS' ), true ) ? $type : 'ALL';
-		$url  = add_query_arg( array( 'type' => $type ), self::PASSPORT_ENDPOINT );
+		$url  = $this->passport_url( $type );
+		$started = microtime( true );
 
 		$token     = $this->settings->access_token();
 		$basic_key = $this->settings->basic_key();
 		if ( '' === $token || '' === $basic_key ) {
-			return $this->failure( 0, '', '', 'Russian Post Otpravka credentials are incomplete.', '' );
+			return $this->failure( 0, '', '', 'Russian Post Otpravka credentials are incomplete.', '', 0, $url, $type, $started );
 		}
 
 		$temp = wp_tempnam( 'wdc-russian-post-passport.zip' );
 		if ( ! is_string( $temp ) || '' === $temp ) {
-			return $this->failure( 0, '', '', 'Unable to create temporary file.', '' );
+			return $this->failure( 0, '', '', 'Unable to create temporary file.', '', 0, $url, $type, $started );
 		}
+		$timeout = $this->settings->timeout();
 
 		$response = wp_remote_get(
 			$url,
 			array(
-				'timeout' => $this->settings->timeout(),
+				'timeout' => $timeout,
+				'connect_timeout' => min( 15, $timeout ),
 				'stream' => true,
 				'filename' => $temp,
 				'headers' => array(
@@ -48,22 +51,53 @@ final class RussianPostOtpravkaApiClient {
 			$size = $this->temp_file_size( $temp );
 			$error = $response->get_error_message();
 			$this->delete_temp_file( $temp );
-			return $this->failure( 0, '', '', $error, '', $size );
+			return $this->failure( 0, '', '', $error, '', $size, $url, $type, $started, $error );
 		}
 
 		$code = (int) wp_remote_retrieve_response_code( $response );
+		$message = function_exists( 'wp_remote_retrieve_response_message' ) ? (string) wp_remote_retrieve_response_message( $response ) : '';
 		if ( $code < 200 || $code >= 300 || ! is_file( $temp ) || 0 === (int) filesize( $temp ) ) {
 			$body = function_exists( 'wp_remote_retrieve_body' ) ? (string) wp_remote_retrieve_body( $response ) : '';
-			$message = function_exists( 'wp_remote_retrieve_response_message' ) ? (string) wp_remote_retrieve_response_message( $response ) : '';
 			$size = $this->temp_file_size( $temp );
 			$this->delete_temp_file( $temp );
-			return $this->failure( $code, $message, $this->excerpt( $body ), 'Russian Post Otpravka passport download failed.', '', $size );
+			return $this->failure( $code, $message, $this->excerpt( $body ), 'Russian Post Otpravka passport download failed.', '', $size, $url, $type, $started );
 		}
 
-		return array( 'success' => true, 'http_code' => $code, 'body' => '', 'temp_file' => $temp, 'error' => '', 'temp_file_size' => $this->temp_file_size( $temp ) );
+		return array(
+			'success' => true,
+			'url' => $url,
+			'type' => $type,
+			'http_code' => $code,
+			'response_message' => $message,
+			'body' => '',
+			'body_excerpt' => '',
+			'temp_file' => $temp,
+			'error' => '',
+			'wp_error_message' => '',
+			'temp_file_size' => $this->temp_file_size( $temp ),
+			'duration_ms' => $this->duration_ms( $started ),
+		);
 	}
 
-	private function failure( int $http_code, string $response_message, string $body_excerpt, string $error, string $temp_file = '', int $temp_file_size = 0 ): array {
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function probe_passport_download( string $type = 'ALL' ): array {
+		$result = $this->download_passport_zip( $type );
+		$this->delete_temp_file( (string) ( $result['temp_file'] ?? '' ) );
+		$result['temp_file'] = '';
+
+		return $result;
+	}
+
+	public function passport_url( string $type = 'ALL' ): string {
+		$type = strtoupper( trim( $type ) );
+		$type = in_array( $type, array( 'ALL', 'OPS', 'PVZ', 'APS' ), true ) ? $type : 'ALL';
+
+		return add_query_arg( array( 'type' => $type ), self::PASSPORT_ENDPOINT );
+	}
+
+	private function failure( int $http_code, string $response_message, string $body_excerpt, string $error, string $temp_file = '', int $temp_file_size = 0, string $url = '', string $type = 'ALL', float $started = 0.0, string $wp_error_message = '' ): array {
 		$parts = array( $error );
 		if ( '' !== $response_message ) {
 			$parts[] = 'Response: ' . $response_message;
@@ -77,11 +111,17 @@ final class RussianPostOtpravkaApiClient {
 
 		return array(
 			'success' => false,
+			'url' => $url,
+			'type' => $type,
 			'http_code' => $http_code,
+			'response_message' => $response_message,
 			'body' => $body_excerpt,
+			'body_excerpt' => $body_excerpt,
 			'temp_file' => $temp_file,
 			'error' => implode( ' ', $parts ),
+			'wp_error_message' => $wp_error_message,
 			'temp_file_size' => $temp_file_size,
+			'duration_ms' => $this->duration_ms( $started ),
 		);
 	}
 
@@ -96,6 +136,10 @@ final class RussianPostOtpravkaApiClient {
 
 	private function temp_file_size( string $temp_file ): int {
 		return '' !== $temp_file && is_file( $temp_file ) ? (int) filesize( $temp_file ) : 0;
+	}
+
+	private function duration_ms( float $started ): int {
+		return $started > 0 ? max( 0, (int) round( ( microtime( true ) - $started ) * 1000 ) ) : 0;
 	}
 
 	private function delete_temp_file( string $temp_file ): void {

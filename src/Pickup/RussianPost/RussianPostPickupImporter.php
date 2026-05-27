@@ -89,14 +89,28 @@ final class RussianPostPickupImporter {
 		$this->repository->drop_table( $staging_table );
 		$this->repository->create_schema_if_needed( $staging_table );
 		$this->state?->start( $type, $import_id );
-		$this->state?->update( 'download', array( 'import_id' => $import_id, 'type' => $type, 'staging_table' => $staging_table, 'main_table' => $main_table, 'backup_table' => $backup_table ) );
+		$this->state?->update(
+			'download',
+			array(
+				'import_id' => $import_id,
+				'type' => $type,
+				'staging_table' => $staging_table,
+				'main_table' => $main_table,
+				'backup_table' => $backup_table,
+				'download_url' => $this->client->passport_url( $type ),
+				'download_started_at' => $this->now(),
+			)
+		);
 		$result = $this->base_result( $type, $import_id );
 		$result['staging_table'] = $staging_table;
 		$result['main_table'] = $main_table;
 		$result['backup_table'] = $backup_table;
+		$result['download_url'] = $this->client->passport_url( $type );
+		$result['download_started_at'] = $this->now();
 		$temp_file = '';
 		try {
 			$download = $this->client->download_passport_zip( $type );
+			$result = array_merge( $result, $this->download_result_state( $download ) );
 			if ( empty( $download['success'] ) ) {
 				$result['errors'][] = (string) ( $download['error'] ?? 'Download failed.' );
 				return $this->fail_pipeline( $result );
@@ -543,6 +557,13 @@ final class RussianPostPickupImporter {
 			'import_id' => $import_id,
 			'type' => $type,
 			'downloaded' => 0,
+			'download_url' => '',
+			'download_started_at' => '',
+			'download_duration_ms' => 0,
+			'download_http_code' => 0,
+			'download_response_message' => '',
+			'download_error' => '',
+			'temp_file_size' => 0,
 			'parsed' => 0,
 			'inserted' => 0,
 			'updated' => 0,
@@ -566,6 +587,22 @@ final class RussianPostPickupImporter {
 			'errors' => array(),
 			'started_at' => $this->now(),
 			'finished_at' => '',
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $download
+	 * @return array<string,mixed>
+	 */
+	private function download_result_state( array $download ): array {
+		return array(
+			'download_url' => (string) ( $download['url'] ?? '' ),
+			'download_duration_ms' => (int) ( $download['duration_ms'] ?? 0 ),
+			'download_http_code' => (int) ( $download['http_code'] ?? 0 ),
+			'download_response_message' => (string) ( $download['response_message'] ?? '' ),
+			'download_error' => (string) ( $download['wp_error_message'] ?? ( $download['error'] ?? '' ) ),
+			'temp_file_size' => (int) ( $download['temp_file_size'] ?? 0 ),
+			'downloaded' => (int) ( $download['temp_file_size'] ?? 0 ),
 		);
 	}
 

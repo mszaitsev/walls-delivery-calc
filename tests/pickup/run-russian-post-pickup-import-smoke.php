@@ -209,11 +209,22 @@ rp_pickup_assert( "непонятный график\nещё строка" === $
 rp_pickup_assert( '' === $formatter->format( array() ), 'Formatter must return empty string for empty workTime.' );
 $settings = new RussianPostOtpravkaApiSettings( new SettingsRepository(), new EncryptionService() );
 $settings->save_from_admin( array( 'russian_post_otpravka_access_token' => 'token', 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_password' => 'password', 'russian_post_pickup_unload_type' => 'ALL' ) );
+rp_pickup_assert( 120 === $settings->timeout(), 'Otpravka timeout default must be 120 seconds.' );
+$settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_timeout' => '999' ) );
+rp_pickup_assert( 300 === $settings->timeout(), 'Otpravka timeout max must be 300 seconds.' );
+$settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_timeout' => '1' ) );
+rp_pickup_assert( 30 === $settings->timeout(), 'Otpravka timeout min must be 30 seconds.' );
+$settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_timeout' => '120' ) );
 $state_service = new RussianPostPickupImportStateService();
 
 function wp_remote_get( string $url, array $args = array() ): mixed {
+	$GLOBALS['rp_last_http_args'] = $args;
 	if ( 'wp_error' === ( $GLOBALS['rp_http_mode'] ?? '' ) ) {
 		return new WP_Error( 'cURL error 28: Operation timed out' );
+	}
+	if ( 'http_500' === ( $GLOBALS['rp_http_mode'] ?? '' ) ) {
+		file_put_contents( (string) $args['filename'], 'partial' );
+		return array( 'response' => array( 'code' => 500, 'message' => 'Internal Server Error' ), 'body' => 'temporary failure body' );
 	}
 	$zip_file = tempnam( sys_get_temp_dir(), 'wdc-rp-zip-' );
 	$zip = new ZipArchive();
@@ -263,6 +274,7 @@ $init = $importer->run_import_init( (string) $init_event['args'][0], (string) $i
 $state = $state_service->current();
 rp_pickup_assert( ! empty( $init['success'] ) && '' !== $state['staging_table'] && array_key_exists( $state['staging_table'], $GLOBALS['wpdb']->tables ), 'Init must create staging table.' );
 rp_pickup_assert( $main_before === count( $GLOBALS['wpdb']->tables[ $main ] ), 'Main table must not change during init.' );
+rp_pickup_assert( 200 === (int) $state['download_http_code'] && (int) $state['temp_file_size'] > 0 && '' !== (string) $state['download_url'] && isset( $GLOBALS['rp_last_http_args']['connect_timeout'] ), 'Successful download must store diagnostics and use connect timeout.' );
 
 $batch_event = rp_shift_event( RussianPostPickupImporter::BATCH_HOOK );
 $batch = $importer->run_import_batch( (string) $batch_event['args'][0], (string) $batch_event['args'][1], (int) $batch_event['args'][2] );
@@ -331,7 +343,24 @@ rp_pickup_assert( $importer->queue_background_import( 'ALL' ), 'Failed import te
 $failed_event = rp_shift_event( RussianPostPickupImporter::INIT_HOOK );
 $failed = $importer->run_import_init( (string) $failed_event['args'][0], (string) $failed_event['args'][1] );
 rp_pickup_assert( empty( $failed['success'] ) && $main_after_success === $GLOBALS['wpdb']->tables[ $main ], 'Failed import must not touch main table.' );
+$failed_state = $state_service->current();
+rp_pickup_assert( 'failed' === $failed_state['status'] && false === get_transient( 'wdc_russian_post_pickup_import_lock' ) && str_contains( (string) $failed_state['download_error'], 'cURL error 28' ), 'WP_Error download failure must fail state, clear lock, and store message.' );
 $GLOBALS['rp_http_mode'] = '';
+
+$GLOBALS['rp_http_mode'] = 'http_500';
+delete_transient( 'wdc_russian_post_pickup_import_lock' );
+rp_pickup_assert( $importer->queue_background_import( 'ALL' ), 'HTTP failure test must queue.' );
+$http_failed_event = rp_shift_event( RussianPostPickupImporter::INIT_HOOK );
+$http_failed = $importer->run_import_init( (string) $http_failed_event['args'][0], (string) $http_failed_event['args'][1] );
+$http_failed_state = $state_service->current();
+rp_pickup_assert( empty( $http_failed['success'] ) && 500 === (int) $http_failed_state['download_http_code'] && str_contains( implode( ' ', $http_failed_state['errors'] ), 'Internal Server Error' ) && str_contains( implode( ' ', $http_failed_state['errors'] ), 'temporary failure body' ), 'HTTP download failure must store code/message/body excerpt.' );
+$GLOBALS['rp_http_mode'] = '';
+
+$stale_state = array_merge( $state_service->defaults(), array( 'status' => 'running', 'stage' => 'download', 'last_activity_at' => '2000-01-01 00:00:00', 'errors' => array() ) );
+update_option( RussianPostPickupImportStateService::OPTION_NAME, $stale_state, false );
+set_transient( 'wdc_russian_post_pickup_import_lock', 1, 3600 );
+$stale_result = $state_service->reset_stale_if_needed();
+rp_pickup_assert( 'failed' === (string) $stale_result['status'] && str_contains( implode( ' ', $stale_result['errors'] ), 'Download stage timed out/stale.' ) && false === get_transient( 'wdc_russian_post_pickup_import_lock' ), 'Stale download older than 5 minutes must fail and unlock.' );
 
 delete_transient( 'wdc_russian_post_pickup_import_lock' );
 rp_pickup_assert( $importer->queue_background_import( 'ALL' ), 'Cancel test must queue.' );
