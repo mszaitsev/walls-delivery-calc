@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.21.
+Version: 0.22.22.
+
+Version 0.22.22 makes the Russian Post pickup table swap recovery-safe: after `RENAME TABLE` the importer verifies that `wdc_pickup_points_russian_post` exists, restores it from backup when possible, keeps backup on unrecovered failure, and records a clear swap error in import state.
 
 Version 0.22.21 moves Russian Post pickup points out of the generic `wdc_pickup_points` table into `wdc_pickup_points_russian_post`. Imports now build a full snapshot in a staging table and atomically swap it into place, REST reads only the carrier-specific main table, and the old `wp_wdc_pickup_points` table can be dropped manually with `DROP TABLE IF EXISTS wp_wdc_pickup_points;`.
 

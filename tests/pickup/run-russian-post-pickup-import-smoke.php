@@ -71,6 +71,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public int $insert_id = 0;
 		/** @var array<string,array<int,array<string,mixed>>> */
 		public array $tables = array();
+		public string $rename_mode = '';
 
 		public function get_charset_collate(): string { return 'DEFAULT CHARSET=utf8mb4'; }
 		public function esc_like( string $text ): string { return addcslashes( $text, '_%\\' ); }
@@ -91,15 +92,26 @@ if ( ! class_exists( 'wpdb' ) ) {
 				return true;
 			}
 			if ( preg_match( '/RENAME TABLE (.+)$/', trim( $query ), $m ) ) {
+				if ( str_contains( $m[1], ',' ) && in_array( $this->rename_mode, array( 'partial_swap_recover', 'partial_swap_recovery_fails' ), true ) ) {
+					$parts = explode( ',', $m[1] );
+					$this->rename_part( trim( $parts[0] ) );
+					return true;
+				}
+				if ( 'partial_swap_recovery_fails' === $this->rename_mode && ! str_contains( $m[1], ',' ) ) {
+					return false;
+				}
 				foreach ( explode( ',', $m[1] ) as $part ) {
-					if ( preg_match( '/([A-Za-z0-9_]+) TO ([A-Za-z0-9_]+)/', trim( $part ), $r ) ) {
-						$this->tables[ $r[2] ] = $this->tables[ $r[1] ] ?? array();
-						unset( $this->tables[ $r[1] ] );
-					}
+					$this->rename_part( trim( $part ) );
 				}
 				return true;
 			}
 			return true;
+		}
+		private function rename_part( string $part ): void {
+			if ( preg_match( '/([A-Za-z0-9_]+) TO ([A-Za-z0-9_]+)/', $part, $r ) ) {
+				$this->tables[ $r[2] ] = $this->tables[ $r[1] ] ?? array();
+				unset( $this->tables[ $r[1] ] );
+			}
 		}
 		public function insert( string $table, array $data, array $format = array() ): bool {
 			$this->tables[ $table ] ??= array();
@@ -236,6 +248,41 @@ rp_pickup_assert( ! empty( $final['success'] ) && 3 === count( $GLOBALS['wpdb']-
 rp_pickup_assert( '' !== (string) $state['swap_started_at'] && '' !== (string) $state['swap_finished_at'], 'State must store swap timestamps.' );
 
 $main_after_success = $GLOBALS['wpdb']->tables[ $main ];
+$backup_for_direct_swap = $repo->backup_table( 'direct-swap' );
+$staging_for_direct_swap = $repo->staging_table( 'direct-swap' );
+$successful_staging = $repo->staging_table( 'direct-success' );
+$successful_backup = $repo->backup_table( 'direct-success' );
+$GLOBALS['wpdb']->tables[ $successful_staging ] = array( array( 'id' => 99, 'point_code' => 'swap-ok' ) );
+$swap_ok = $repo->swap_staging_to_main( $successful_staging, $successful_backup );
+rp_pickup_assert( ! empty( $swap_ok['success'] ) && array_key_exists( $main, $GLOBALS['wpdb']->tables ) && ! array_key_exists( $successful_backup, $GLOBALS['wpdb']->tables ), 'Successful swap must promote staging to main and delete backup.' );
+$GLOBALS['wpdb']->tables[ $main ] = $main_after_success;
+$missing_swap = $repo->swap_staging_to_main( $staging_for_direct_swap, $backup_for_direct_swap );
+rp_pickup_assert( empty( $missing_swap['success'] ) && $main_after_success === $GLOBALS['wpdb']->tables[ $main ], 'Missing staging swap must fail without changing main.' );
+$GLOBALS['wpdb']->tables[ $staging_for_direct_swap ] = array( array( 'id' => 100, 'point_code' => 'staging' ) );
+$GLOBALS['wpdb']->rename_mode = 'partial_swap_recover';
+$recovered_swap = $repo->swap_staging_to_main( $staging_for_direct_swap, $backup_for_direct_swap );
+rp_pickup_assert( empty( $recovered_swap['success'] ) && ! empty( $recovered_swap['recovered'] ) && $main_after_success === $GLOBALS['wpdb']->tables[ $main ], 'Failed partial swap must recover main from backup.' );
+$GLOBALS['wpdb']->tables[ $staging_for_direct_swap ] = array( array( 'id' => 101, 'point_code' => 'staging' ) );
+$GLOBALS['wpdb']->rename_mode = 'partial_swap_recovery_fails';
+$failed_recovery_swap = $repo->swap_staging_to_main( $staging_for_direct_swap, $backup_for_direct_swap );
+rp_pickup_assert( empty( $failed_recovery_swap['success'] ) && array_key_exists( $backup_for_direct_swap, $GLOBALS['wpdb']->tables ) && str_contains( (string) $failed_recovery_swap['message'], 'backup recovery failed' ), 'Failed recovery must keep backup and return a useful error.' );
+$GLOBALS['wpdb']->rename_mode = '';
+$GLOBALS['wpdb']->tables[ $main ] = $main_after_success;
+unset( $GLOBALS['wpdb']->tables[ $backup_for_direct_swap ], $GLOBALS['wpdb']->tables[ $staging_for_direct_swap ] );
+
+$importer_recovery_id = 'importer-recover';
+$importer_recovery_staging = $repo->staging_table( $importer_recovery_id );
+$importer_recovery_backup = $repo->backup_table( $importer_recovery_id );
+$GLOBALS['wpdb']->tables[ $importer_recovery_staging ] = array( array( 'id' => 102, 'point_code' => 'staging' ) );
+$state_service->start( 'ALL', $importer_recovery_id );
+$state_service->update( 'deactivate', array( 'staging_table' => $importer_recovery_staging, 'main_table' => $main, 'backup_table' => $importer_recovery_backup ) );
+$GLOBALS['wpdb']->rename_mode = 'partial_swap_recover';
+$recovered_final = $importer->run_import_finalize( $importer_recovery_id, 'ALL' );
+$recovered_final_state = $state_service->current();
+rp_pickup_assert( empty( $recovered_final['success'] ) && 'failed' === $recovered_final_state['status'] && str_contains( implode( ' ', $recovered_final_state['errors'] ), 'recovered from backup' ) && $main_after_success === $GLOBALS['wpdb']->tables[ $main ], 'Importer finalize must store recovered swap failure message and keep main restored.' );
+$GLOBALS['wpdb']->rename_mode = '';
+unset( $GLOBALS['wpdb']->tables[ $importer_recovery_staging ], $GLOBALS['wpdb']->tables[ $importer_recovery_backup ] );
+
 $GLOBALS['rp_http_mode'] = 'wp_error';
 delete_transient( 'wdc_russian_post_pickup_import_lock' );
 rp_pickup_assert( $importer->queue_background_import( 'ALL' ), 'Failed import test must queue.' );

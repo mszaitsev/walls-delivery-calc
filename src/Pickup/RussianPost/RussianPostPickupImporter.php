@@ -229,8 +229,11 @@ final class RussianPostPickupImporter {
 		$this->state?->update( 'deactivate', $result );
 		$staging_table = (string) ( $state['staging_table'] ?? '' );
 		$backup_table = (string) ( $state['backup_table'] ?? $this->repository->backup_table( $import_id ) );
-		if ( '' === $staging_table || ! $this->repository->swap_staging_to_main( $staging_table, $backup_table ) ) {
-			$result['errors'][] = 'Unable to swap Russian Post pickup staging table.';
+		$swap = '' !== $staging_table
+			? $this->repository->swap_staging_to_main( $staging_table, $backup_table )
+			: array( 'success' => false, 'message' => 'Russian Post pickup staging table is missing from import state.', 'recovered' => false );
+		if ( empty( $swap['success'] ) ) {
+			$result['errors'][] = (string) ( $swap['message'] ?? 'Unable to swap Russian Post pickup staging table.' );
 			return $this->fail_pipeline( $result, false );
 		}
 		$result['swap_finished_at'] = $this->now();

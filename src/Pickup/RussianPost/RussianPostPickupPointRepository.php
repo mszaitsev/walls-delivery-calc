@@ -211,24 +211,38 @@ final class RussianPostPickupPointRepository {
 		return (string) $found === $table;
 	}
 
-	public function swap_staging_to_main( string $staging_table, string $backup_table ): bool {
+	/**
+	 * @return array{success:bool,message:string,recovered:bool}
+	 */
+	public function swap_staging_to_main( string $staging_table, string $backup_table ): array {
 		$staging_table = $this->sanitize_table_name( $staging_table );
 		$backup_table = $this->sanitize_table_name( $backup_table );
 		$main_table = $this->main_table();
 		if ( ! $this->table_exists( $staging_table ) ) {
-			return false;
+			return array( 'success' => false, 'message' => 'Russian Post pickup staging table does not exist.', 'recovered' => false );
 		}
 		$this->drop_table( $backup_table );
-		$sql = $this->table_exists( $main_table )
-			? "RENAME TABLE {$main_table} TO {$backup_table}, {$staging_table} TO {$main_table}"
-			: "RENAME TABLE {$staging_table} TO {$main_table}";
+		$main_exists = $this->table_exists( $main_table );
+		$sql = $main_exists ? "RENAME TABLE {$main_table} TO {$backup_table}, {$staging_table} TO {$main_table}" : "RENAME TABLE {$staging_table} TO {$main_table}";
 		$result = $this->wpdb->query( $sql );
 		if ( false === $result ) {
-			return false;
+			return array( 'success' => false, 'message' => 'Russian Post pickup table rename failed.', 'recovered' => false );
 		}
-		$this->drop_table( $backup_table );
+		if ( $this->table_exists( $main_table ) ) {
+			$this->drop_table( $backup_table );
 
-		return true;
+			return array( 'success' => true, 'message' => 'Russian Post pickup staging table was swapped into main table.', 'recovered' => false );
+		}
+		if ( $main_exists && $this->table_exists( $backup_table ) ) {
+			$recovery = $this->wpdb->query( "RENAME TABLE {$backup_table} TO {$main_table}" );
+			if ( false !== $recovery && $this->table_exists( $main_table ) ) {
+				return array( 'success' => false, 'message' => 'Russian Post pickup table swap failed after backup rename; main table was recovered from backup.', 'recovered' => true );
+			}
+
+			return array( 'success' => false, 'message' => 'Russian Post pickup table swap failed and backup recovery failed; backup table was kept.', 'recovered' => false );
+		}
+
+		return array( 'success' => false, 'message' => 'Russian Post pickup table swap finished without a main table.', 'recovered' => false );
 	}
 
 	private function select_rows( array $where, array $args, int $limit ): array {

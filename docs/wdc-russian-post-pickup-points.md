@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.21.
+Version: 0.22.22.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 
@@ -54,11 +54,13 @@ The importer downloads `GET https://otpravka-api.pochta.ru/1.0/unloading-passpor
 
 - init job `wdc_russian_post_pickup_import_init`: create a staging table `wp_wdc_pickup_points_russian_post_staging_<import_id>`, download ZIP, extract the first `.json`/`.txt` payload to a temp file, delete the ZIP, save `payload_file` and `payload_offset=0`, then schedule the first batch;
 - batch job `wdc_russian_post_pickup_import_batch`: open the payload, seek to `payload_offset`, parse up to 500 `passportElements` objects, normalize and insert only that small batch into staging, save the new byte offset and counters, then schedule the next batch or finalize;
-- finalize job `wdc_russian_post_pickup_import_finalize`: atomically swap staging into `wp_wdc_pickup_points_russian_post` with `RENAME TABLE`, delete the backup after successful rename, delete the payload temp file, save success state, and unlock.
+- finalize job `wdc_russian_post_pickup_import_finalize`: atomically swap staging into `wp_wdc_pickup_points_russian_post` with `RENAME TABLE`, verify that main exists, delete the backup only after successful verification, delete the payload temp file, save success state, and unlock.
 
 The parser resumes from the saved byte offset and does not re-read the whole payload from the beginning. The full ALL payload is never decoded at once, and no single PHP process performs the full import.
 
 The current main table remains readable while staging is being built. REST and future checkout map reads always use the main table only. If import fails, staging is dropped and the old main table remains untouched. Full snapshots do not use `mark_missing_inactive`; the swapped main table contains the current snapshot.
+
+If a swap fails after the previous main table has been renamed to backup, the repository attempts to rename backup back to main. A recovered failure still marks the import failed and records a clear message, but leaves the production table restored. If recovery also fails, the backup table is kept for manual repair and is not deleted by failed cleanup.
 
 The import result stores `downloaded`, `parsed`, `inserted`, `updated`, `deactivated`, `skipped`, `errors`, `started_at`, and `finished_at`.
 
