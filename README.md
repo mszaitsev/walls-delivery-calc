@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.24.1.
+Version: 0.24.2.
+
+Version 0.24.2 disables Leaflet's built-in attribution control in the pickup map provider so the standard OpenStreetMap/Leaflet attribution block is not shown in the lower-right corner of the pickup modal. Yandex Maps and the provider abstraction are unchanged.
 
 Version 0.24.1 hardens the Yandex Maps pickup provider while the Yandex JS API is loading asynchronously. Calls to `setCenter()` before map readiness now update a pending center that is replayed after `ymaps.Map` creation, pending markers render after readiness, `clearMarkers()` before readiness clears queued points, viewport sizing runs after map creation, and bbox loading is triggered manually from the final ready center. Yandex API load failures are kept non-fatal and emit a debug `console.warn`.
 

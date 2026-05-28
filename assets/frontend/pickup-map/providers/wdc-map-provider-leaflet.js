@@ -11,7 +11,9 @@
 			return unavailable('Leaflet is not available.');
 		}
 
-		var map = window.L.map(container);
+		var map = window.L.map(container, {
+			attributionControl: false
+		});
 		map.setView([center.lat, center.lng], center.zoom || 11);
 		window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 			attribution: '&copy; OpenStreetMap contributors',
