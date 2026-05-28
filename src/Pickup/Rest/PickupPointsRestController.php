@@ -113,6 +113,10 @@ final class PickupPointsRestController {
 		if ( ! is_array( $row ) || 1 !== (int) ( $row['active'] ?? 0 ) ) {
 			return $this->error( 'not_found', 'Pickup point not found.', 404 );
 		}
+		$types = $this->allowed_types( $request );
+		if ( ! in_array( strtoupper( trim( (string) ( $row['point_type'] ?? '' ) ) ), $types, true ) ) {
+			return $this->error( 'not_found', 'Pickup point not found.', 404 );
+		}
 
 		return $this->response( $this->details( $row ) );
 	}
