@@ -1,10 +1,16 @@
 # Russian Post Pickup Points
 
-Version: 0.25.2.
+Version: 0.25.4.
+
+Version 0.25.4 moves the point details card from the side/bottom panel into the map popup/balloon. Marker clicks and list-row clicks both open the map popup for that point. The popup contains the customer-facing type label, address, work time, clean description when present, and the `Выбрать этот пункт` action. Pressing that popup button confirms the point, dispatches the existing `wdc:point-selected` event, updates the list selected state, and keeps the external confirm button available as a fallback.
+
+The side/bottom panel is no longer the primary details surface; it only shows compact status such as `Выберите пункт на карте или в списке.` or `Выбран: ...`. The visible list remains as navigation beside the map on desktop and below it on mobile, sorted and capped as before, and opens the same popup instead of duplicating the full card.
+
+Leaflet and Yandex now use matching custom HTML marker visuals. Single points render as blue-outlined pins with a white center, a blue tail, and the configured `Название на маркере` inside. Clusters render as blue-outlined white circles with the count, without a tail. Leaflet uses `divIcon` for pins and grid-cluster markers; Yandex uses `ymaps.templateLayoutFactory.createClass` for placemarks and `clusterIconLayout` for cluster circles.
 
 Version 0.25.2 adds pickup type controls for `russian_post_domestic_pickup` on the delivery service page, tab `ПВЗ / ОПС`, block `Типы пунктов выдачи`. OPS, PVZ, and APS each have `Использовать`, `Название на маркере`, and `Название в карточке/списке`.
 
-`Название на маркере` is intentionally short and is used inside Leaflet HTML markers and Yandex `iconCaption`. `Название в карточке/списке` is the customer-facing type name shown in the selected point card and visible list rows. Defaults are OPS `ОПС` / `Отделение Почты России`, PVZ `ПВЗ` / `Пункт выдачи`, and APS `Почтомат` / `Почтомат`.
+`Название на маркере` is intentionally short and is used inside Leaflet/Yandex custom HTML markers. `Название в карточке/списке` is the customer-facing type name shown in the popup card and visible list rows. Defaults are OPS `ОПС` / `Отделение Почты России`, PVZ `ПВЗ` / `Пункт выдачи`, and APS `Почтомат` / `Почтомат`.
 
 At least one type must remain enabled. Saving an all-disabled configuration automatically enables OPS. The Russian Post `/points` and `/points/search` endpoints apply enabled types to map data; when REST also receives `type[]`, the effective filter is the intersection of requested and enabled types.
 
@@ -16,11 +22,11 @@ Version 0.25.0 adds a visible pickup-point list to the checkout modal. On deskto
 
 When the modal has `initialContext.lat/lng`, each point gets a haversine distance from the selected settlement center and the list is sorted by that distance. Distances render as meters below 1 km, for example `450 м`, and as one-decimal kilometers from 1 km, for example `1.2 км`. If the settlement has no usable coordinates, ordering falls back to postcode/address with the original response order as a stable tie-breaker.
 
-Selection is synchronized both ways. Marker clicks select the list row, render the selected card, highlight the marker, and enable the confirm button. List-row clicks call the provider focus method, center/zoom the map on the point, highlight the marker, render the selected card, and enable confirmation. The selected row receives both `active` and `selected` classes.
+Selection is synchronized both ways. Marker clicks preview the point and open the map popup; list-row clicks call the provider focus method, center/zoom the map on the point, and open the same popup. The selected row receives both `active` and `selected` classes only after the popup button confirms the point; previewed rows may receive the softer `preview` class.
 
-The selected card now renders a compact customer-facing Russian Post card: title/postcode, point type (`ОПС`, `ПВЗ`, `Почтомат`), address, work time, and a readable description only when present. Empty fields and technical descriptions such as `0.000000` are suppressed.
+The popup card renders a compact customer-facing Russian Post card: title/postcode, configured point type label, address, work time, and a readable description only when present. Empty fields and technical descriptions such as `0.000000` are suppressed.
 
-Provider adapters now expose the richer selection surface used by `wdc-pickup-map.js`: `renderMarkers(points, options)`, `setActivePoint(pointId)`, and `focusPoint(point)` while keeping the older methods intact. Leaflet renders local HTML `divIcon` markers with type CSS classes and a lightweight screen-grid clusterer; cluster markers are numbered circles and click to fit/zoom the grouped bounds. Yandex renders neutral circle-dot placemarks with type captions, uses `ymaps.Clusterer` for numbered aggregate circles, and avoids the older `islands#blueDeliveryIcon` truck preset.
+Provider adapters now expose the richer selection surface used by `wdc-pickup-map.js`: `renderMarkers(points, options)`, `setActivePoint(pointId)`, `focusPoint(point)`, `openPointPopup(point, html)`, `closePopup()`, and popup select delegation while keeping the older methods intact. Leaflet renders local HTML `divIcon` markers with type CSS classes and a lightweight screen-grid clusterer; cluster markers are numbered circles and click to fit/zoom the grouped bounds. Yandex renders custom HTML placemark layouts, uses `ymaps.Clusterer` for numbered aggregate circles, and avoids standard `islands` marker presets for single pickup points.
 
 ## Pickup Map Providers
 

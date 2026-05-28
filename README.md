@@ -1,6 +1,10 @@
 # Walls Delivery Calc
 
-Version: 0.25.2.
+Version: 0.25.4.
+
+Version 0.25.4 moves the pickup point details into the map popup/balloon. Clicking a marker or list row now opens the point card directly on the map, with address, work time, clean description when available, and the `Выбрать этот пункт` button inside the popup. The side/bottom panel remains as a compact status area, while the external confirm button stays as a compatibility fallback and is enabled only after a confirmed selection.
+
+Single markers and clusters now share a consistent HTML style in Leaflet and Yandex: a white center, thick blue outline, short marker label from settings, and a blue tail for single point pins. Clusters render as numbered circles and still expand/focus on click. The visible list remains a navigation aid beside/below the map; it opens the same popup instead of duplicating the full card.
 
 Version 0.25.2 adds configurable Russian Post pickup point types for `russian_post_domestic_pickup`. In the delivery service admin tab `ПВЗ / ОПС`, the new `Типы пунктов выдачи` block controls OPS, PVZ, and APS independently: whether the type is used, the short marker label, and the longer card/list label. Defaults are OPS `ОПС` / `Отделение Почты России`, PVZ `ПВЗ` / `Пункт выдачи`, and APS `Почтомат` / `Почтомат`. At least one type is always enabled; if an admin disables all three, OPS is restored automatically.
 

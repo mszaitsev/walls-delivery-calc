@@ -12,28 +12,35 @@
 		var destroyed = false;
 		var pendingPoints = [];
 		var pointClickCallback = function () {};
+		var popupSelectCallback = function () {};
 		var ymapsApi = null;
 		var activePointId = null;
 		var placemarkById = {};
+		var pointById = {};
+		var markerLayout = null;
 
 		loadApi(settings.yandexApiKey || '').then(function (ymaps) {
 			if (destroyed) {
 				return;
 			}
 			ymapsApi = ymaps;
+			markerLayout = ymaps.templateLayoutFactory.createClass(
+				'<div class="wdc-map-marker-pin wdc-map-marker-pin--$[properties.wdcType] $[properties.wdcActive]"><span class="wdc-map-marker-pin__inner">$[properties.wdcLabel]</span><span class="wdc-map-marker-pin__tail"></span></div>'
+			);
 			map = new ymaps.Map(container, {
 				center: [pendingCenter.lat, pendingCenter.lng],
 				zoom: pendingCenter.zoom || 11,
 				controls: ['zoomControl']
 			});
 			collection = new ymaps.Clusterer({
-				clusterIconLayout: ymaps.templateLayoutFactory.createClass('<div class="wdc-map-cluster">$[properties.geoObjects.length]</div>'),
-				clusterIconShape: { type: 'Circle', coordinates: [19, 19], radius: 19 },
-				clusterIcons: [{ href: '', size: [38, 38], offset: [-19, -19] }],
+				clusterIconLayout: ymaps.templateLayoutFactory.createClass('<div class="wdc-map-cluster"><span class="wdc-map-cluster__inner">$[properties.geoObjects.length]</span></div>'),
+				clusterIconShape: { type: 'Circle', coordinates: [23, 23], radius: 23 },
+				clusterIcons: [{ href: '', size: [46, 46], offset: [-23, -23] }],
 				groupByCoordinates: false
 			});
 			map.geoObjects.add(collection);
 			map.events.add('boundschange', boundsChanged);
+			document.addEventListener('click', onPopupClick);
 			fitToViewport();
 			if (pendingPoints.length) {
 				renderMarkers(pendingPoints);
@@ -73,13 +80,18 @@
 				var id = pointId(point);
 				var placemark = new ymapsApi.Placemark([point.lat, point.lng], {
 					balloonContent: escapeHtml(point.address || ''),
-					iconCaption: pointMarkerLabel(point)
+					wdcActive: activePointId === id ? 'is-active' : '',
+					wdcLabel: escapeHtml(pointMarkerLabel(point)),
+					wdcType: pointType(point).toLowerCase()
 				}, {
-					preset: activePointId === id ? 'islands#redCircleDotIconWithCaption' : 'islands#darkGreenCircleDotIconWithCaption'
+					iconLayout: markerLayout,
+					iconOffset: [-23, -54],
+					iconShape: { type: 'Circle', coordinates: [23, 23], radius: 23 }
 				});
 				placemark.events.add('click', function () { pointClickCallback(point); });
 				collection.add(placemark);
 				placemarkById[id] = placemark;
+				pointById[id] = point;
 			});
 		}
 
@@ -88,6 +100,7 @@
 				collection.removeAll();
 			}
 			placemarkById = {};
+			pointById = {};
 		}
 
 		return {
@@ -126,6 +139,20 @@
 					map.setBounds(collection.getBounds(), { checkZoomRange: true, zoomMargin: 24 });
 				}
 			},
+			openPointPopup: function (point, html) {
+				var id = pointId(point);
+				var placemark = placemarkById[id];
+				if (!placemark || !placemark.properties || !placemark.balloon) {
+					return;
+				}
+				placemark.properties.set('balloonContent', html);
+				placemark.balloon.open();
+			},
+			closePopup: function () {
+				if (map && map.balloon) {
+					map.balloon.close();
+				}
+			},
 			destroy: function () {
 				destroyed = true;
 				clearMarkers();
@@ -135,9 +162,13 @@
 				}
 				map = null;
 				collection = null;
+				document.removeEventListener('click', onPopupClick);
 			},
 			onPointClick: function (callback) {
 				pointClickCallback = typeof callback === 'function' ? callback : function () {};
+			},
+			onPopupSelect: function (callback) {
+				popupSelectCallback = typeof callback === 'function' ? callback : function () {};
 			},
 			invalidateSize: function () {
 				fitToViewport();
@@ -153,10 +184,22 @@
 		function updateActivePlacemarks() {
 			Object.keys(placemarkById).forEach(function (id) {
 				var placemark = placemarkById[id];
-				if (placemark && placemark.options) {
-					placemark.options.set('preset', activePointId === id ? 'islands#redCircleDotIconWithCaption' : 'islands#darkGreenCircleDotIconWithCaption');
+				if (placemark && placemark.properties) {
+					placemark.properties.set('wdcActive', activePointId === id ? 'is-active' : '');
 				}
 			});
+		}
+
+		function onPopupClick(event) {
+			var button = event.target && event.target.closest ? event.target.closest('[data-wdc-pickup-popup-select]') : null;
+			if (!button) {
+				return;
+			}
+			var id = button.getAttribute('data-wdc-point-id');
+			var point = pointById[id];
+			if (point) {
+				popupSelectCallback(point);
+			}
 		}
 	}
 

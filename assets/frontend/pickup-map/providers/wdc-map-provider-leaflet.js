@@ -6,8 +6,10 @@
 		var center = settings.center || { lat: 55.0302, lng: 82.9204, zoom: 11 };
 		var markers = [];
 		var markerById = {};
+		var pointById = {};
 		var activePointId = null;
 		var pointClickCallback = function () {};
+		var popupSelectCallback = function () {};
 
 		if (!window.L) {
 			return unavailable('Leaflet is not available.');
@@ -31,6 +33,7 @@
 		}
 
 		map.on('moveend zoomend', boundsChanged);
+		map.getContainer().addEventListener('click', onPopupClick);
 
 		return {
 			create: create,
@@ -51,6 +54,16 @@
 				activePointId = options && options.activePointId ? String(options.activePointId) : activePointId;
 				renderClustered(points || []);
 			},
+			openPointPopup: function (point, html) {
+				var marker = markerById[pointId(point)];
+				if (marker && marker.bindPopup) {
+					marker.bindPopup(html, { className: 'wdc-pickup-map-popup', maxWidth: 280 });
+					marker.openPopup();
+				}
+			},
+			closePopup: function () {
+				map.closePopup();
+			},
 			clearMarkers: clearMarkers,
 			fitToMarkers: function () {
 				if (!markers.length) {
@@ -62,10 +75,14 @@
 			destroy: function () {
 				clearMarkers();
 				map.off('moveend zoomend', boundsChanged);
+				map.getContainer().removeEventListener('click', onPopupClick);
 				map.remove();
 			},
 			onPointClick: function (callback) {
 				pointClickCallback = typeof callback === 'function' ? callback : function () {};
+			},
+			onPopupSelect: function (callback) {
+				popupSelectCallback = typeof callback === 'function' ? callback : function () {};
 			},
 			invalidateSize: function () {
 				map.invalidateSize();
@@ -79,9 +96,9 @@
 					var clusterMarker = window.L.marker([cluster.lat, cluster.lng], {
 						icon: window.L.divIcon({
 							className: 'wdc-map-cluster-icon',
-							html: '<span class="wdc-map-cluster">' + cluster.points.length + '</span>',
-							iconSize: [38, 38],
-							iconAnchor: [19, 19]
+							html: '<span class="wdc-map-cluster"><span class="wdc-map-cluster__inner">' + cluster.points.length + '</span></span>',
+							iconSize: [46, 46],
+							iconAnchor: [23, 23]
 						})
 					}).addTo(map);
 					clusterMarker.on('click', function () {
@@ -106,6 +123,7 @@
 					marker._wdcPoint = point;
 					markers.push(marker);
 					markerById[id] = marker;
+					pointById[id] = point;
 				});
 			});
 		}
@@ -114,6 +132,7 @@
 			markers.forEach(function (marker) { marker.remove(); });
 			markers = [];
 			markerById = {};
+			pointById = {};
 		}
 
 		function updateActiveMarkers() {
@@ -134,11 +153,22 @@
 			var type = pointType(point);
 			return window.L.divIcon({
 				className: 'wdc-map-marker-icon',
-				html: '<span class="wdc-map-marker wdc-map-marker--' + type.toLowerCase() + (active ? ' is-active' : '') + '">' + escapeHtml(pointMarkerLabel(point)) + '</span>',
-				iconSize: [34, 34],
-				iconAnchor: [17, 17],
-				popupAnchor: [0, -18]
+				html: '<span class="wdc-map-marker-pin wdc-map-marker-pin--' + type.toLowerCase() + (active ? ' is-active' : '') + '"><span class="wdc-map-marker-pin__inner">' + escapeHtml(pointMarkerLabel(point)) + '</span><span class="wdc-map-marker-pin__tail"></span></span>',
+				iconSize: [46, 54],
+				iconAnchor: [23, 54],
+				popupAnchor: [0, -54]
 			});
+		}
+
+		function onPopupClick(event) {
+			var button = event.target && event.target.closest ? event.target.closest('[data-wdc-pickup-popup-select]') : null;
+			if (!button) {
+				return;
+			}
+			var point = pointById[String(button.getAttribute('data-wdc-point-id') || '')];
+			if (point) {
+				popupSelectCallback(point);
+			}
 		}
 
 		function clusterPoints(points) {
@@ -173,11 +203,14 @@
 			setCenter: function () {},
 			focusPoint: function () {},
 			setActivePoint: function () {},
+			openPointPopup: function () {},
+			closePopup: function () {},
 			renderMarkers: function () {},
 			clearMarkers: function () {},
 			fitToMarkers: function () {},
 			destroy: function () {},
 			onPointClick: function () {},
+			onPopupSelect: function () {},
 			invalidateSize: function () {}
 		};
 	}

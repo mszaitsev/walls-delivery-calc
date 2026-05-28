@@ -51,38 +51,50 @@
 			labels: labels,
 			onBoundsChange: boundsChanged
 		});
-		provider.onPointClick(function (point) { select(point, { focus: false }); });
+		provider.onPointClick(function (point) { preview(point, { focus: false }); });
+		if (provider.onPopupSelect) {
+			provider.onPopupSelect(function (point) { select(point, { focus: false }); });
+		}
 
-		function renderPoint(point) {
+		function renderPointPopup(point, selected) {
 			var rows = [];
 			var title = ['Почта России', point.postal_code || point.postcode || point.point_code || ''].filter(Boolean).join(' ');
 			if (title) {
-				rows.push('<h3 class="wdc-pickup-card__title">' + escapeHtml(title) + '</h3>');
+				rows.push('<h3 class="wdc-pickup-popup__title">' + escapeHtml(title) + '</h3>');
 			}
-			rows.push('<div class="wdc-pickup-card__type">' + escapeHtml(pointTypeLabel(point)) + '</div>');
+			rows.push('<div class="wdc-pickup-popup__type">' + escapeHtml(pointTypeLabel(point)) + '</div>');
 			if (point.address) {
-				rows.push('<div class="wdc-pickup-card__section"><strong>Адрес:</strong><span>' + escapeHtml(point.address) + '</span></div>');
+				rows.push('<div class="wdc-pickup-popup__section"><strong>Адрес:</strong><span>' + escapeHtml(point.address) + '</span></div>');
 			}
 			if (point.work_time) {
-				rows.push('<div class="wdc-pickup-card__section"><strong>График:</strong><span>' + escapeHtml(point.work_time) + '</span></div>');
+				rows.push('<div class="wdc-pickup-popup__section"><strong>График:</strong><span>' + escapeHtml(point.work_time) + '</span></div>');
 			}
 			if (cleanDescription(point.description)) {
-				rows.push('<div class="wdc-pickup-card__section"><strong>Описание:</strong><span>' + escapeHtml(cleanDescription(point.description)) + '</span></div>');
+				rows.push('<div class="wdc-pickup-popup__section"><strong>Описание:</strong><span>' + escapeHtml(cleanDescription(point.description)) + '</span></div>');
 			}
-			return rows.join('');
+			rows.push('<button type="button" class="button button-primary wdc-pickup-popup__select" data-wdc-pickup-popup-select data-wdc-point-id="' + escapeHtml(pointId(point)) + '"' + (selected ? ' disabled' : '') + '>' + escapeHtml(selected ? 'Выбран' : 'Выбрать этот пункт') + '</button>');
+			return '<div class="wdc-pickup-popup">' + rows.join('') + '</div>';
 		}
 
-		function preview(point) {
+		function preview(point, options) {
+			options = options || {};
 			previewPoint = point;
-			card.innerHTML = renderPoint(point);
+			card.textContent = labels.selectPoint || 'Выберите пункт на карте или в списке.';
 			confirmButton.disabled = !selectedPoint || pointId(selectedPoint) !== pointId(point);
+			if (options.focus !== false && provider.focusPoint) {
+				provider.focusPoint(point);
+			}
+			if (provider.openPointPopup) {
+				provider.openPointPopup(point, renderPointPopup(point, selectedPoint && pointId(selectedPoint) === pointId(point)));
+			}
+			renderList(visiblePoints);
 		}
 
 		function select(point, options) {
 			options = options || {};
 			selectedPoint = point;
 			previewPoint = point;
-			card.innerHTML = renderPoint(point);
+			card.textContent = selectedSummary(point);
 			confirmButton.disabled = false;
 			confirmButton.dispatchEvent(new CustomEvent('wdc:point-selected', { detail: point }));
 			if (provider.setActivePoint) {
@@ -90,6 +102,9 @@
 			}
 			if (options.focus !== false && provider.focusPoint) {
 				provider.focusPoint(point);
+			}
+			if (provider.openPointPopup) {
+				provider.openPointPopup(point, renderPointPopup(point, true));
 			}
 			renderList(visiblePoints);
 		}
@@ -106,7 +121,7 @@
 				return;
 			}
 			if (selectedPoint && pointInList(selectedPoint, visiblePoints)) {
-				card.innerHTML = renderPoint(selectedPoint);
+				card.textContent = selectedSummary(selectedPoint);
 				confirmButton.disabled = false;
 				if (provider.setActivePoint) {
 					provider.setActivePoint(pointId(selectedPoint));
@@ -114,7 +129,8 @@
 				return;
 			}
 			if (previewPoint && pointInList(previewPoint, visiblePoints)) {
-				preview(previewPoint);
+				card.textContent = labels.selectPoint || 'Выберите пункт на карте или в списке.';
+				confirmButton.disabled = true;
 				if (provider.setActivePoint) {
 					provider.setActivePoint(null);
 				}
@@ -124,7 +140,7 @@
 			if (provider.setActivePoint) {
 				provider.setActivePoint(null);
 			}
-			card.textContent = labels.selectPoint || 'Выберите пункт на карте.';
+			card.textContent = labels.selectPoint || 'Выберите пункт на карте или в списке.';
 			confirmButton.disabled = true;
 		}
 
@@ -148,7 +164,7 @@
 		function renderListItem(point, index) {
 			var active = selectedPoint && pointId(selectedPoint) === pointId(point);
 			var previewed = !active && previewPoint && pointId(previewPoint) === pointId(point);
-			var parts = [
+			return [
 				'<button type="button" class="wdc-pickup-list__item' + (active ? ' active selected' : '') + (previewed ? ' preview' : '') + '" data-wdc-point-id="' + escapeHtml(pointId(point)) + '">',
 				'<span class="wdc-pickup-list__index">' + (index + 1) + '</span>',
 				'<span class="wdc-pickup-list__content">',
@@ -157,8 +173,7 @@
 				point.work_time ? '<span class="wdc-pickup-list__time">' + escapeHtml(point.work_time) + '</span>' : '',
 				'</span>',
 				'</button>'
-			];
-			return parts.join('');
+			].join('');
 		}
 
 		if (list) {
@@ -169,7 +184,7 @@
 				}
 				var point = findPoint(row.getAttribute('data-wdc-point-id'));
 				if (point) {
-					select(point, { focus: true });
+					preview(point, { focus: true });
 				}
 			});
 		}
@@ -221,11 +236,12 @@
 			var request = initial && window.WDCPickupApi.searchInitial ? window.WDCPickupApi.searchInitial : window.WDCPickupApi.search;
 			return request(query, controller.signal).then(function (points) {
 				if (points[0] && points[0].lat !== null && points[0].lng !== null) {
+					var point = enrichPoints([points[0]])[0];
 					suppressNextMoveLoad = true;
-					provider.setCenter(points[0].lat, points[0].lng, 15);
-					preview(points[0]);
+					provider.setCenter(point.lat, point.lng, 15);
+					preview(point, { focus: false });
 					if (initial) {
-						loadBounds(bboxAround(points[0].lat, points[0].lng));
+						loadBounds(bboxAround(point.lat, point.lng));
 					}
 					return;
 				}
@@ -259,6 +275,9 @@
 					controller.abort();
 				}
 				provider.clearMarkers();
+				if (provider.closePopup) {
+					provider.closePopup();
+				}
 				provider.destroy();
 			}
 		};
@@ -324,6 +343,10 @@
 	function pointInList(point, points) {
 		var id = pointId(point);
 		return points.some(function (item) { return pointId(item) === id; });
+	}
+
+	function selectedSummary(point) {
+		return 'Выбран: ' + [point.postal_code || point.postcode || '', point.address || ''].filter(Boolean).join(', ');
 	}
 
 	function validPointCoordinates(point) {
