@@ -81,6 +81,9 @@
 			previewPoint = point;
 			card.textContent = labels.selectPoint || 'Выберите пункт на карте или в списке.';
 			confirmButton.disabled = !selectedPoint || pointId(selectedPoint) !== pointId(point);
+			if (provider.setActivePoint) {
+				provider.setActivePoint(pointId(point));
+			}
 			if (options.focus !== false && provider.focusPoint) {
 				provider.focusPoint(point);
 			}
@@ -112,7 +115,7 @@
 		function renderMarkers(points, emptyText) {
 			visiblePoints = sortPoints(enrichPoints(points || []));
 			provider.renderMarkers(visiblePoints, {
-				activePointId: selectedPoint ? pointId(selectedPoint) : null
+				activePointId: selectedPoint ? pointId(selectedPoint) : (previewPoint ? pointId(previewPoint) : null)
 			});
 			renderList(visiblePoints);
 			if (!visiblePoints.length) {
