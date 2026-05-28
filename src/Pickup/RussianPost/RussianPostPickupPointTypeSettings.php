@@ -44,7 +44,7 @@ final class RussianPostPickupPointTypeSettings {
 				? ! empty( $settings[ "russian_post_domestic_pickup_type_{$key}_enabled" ] )
 				: $result[ $type ]['enabled'];
 			$result[ $type ]['label'] = $this->label_or_default(
-				$settings[ "russian_post_domestic_pickup_type_{$key}_label" ] ?? ( $settings[ "russian_post_domestic_pickup_type_{$key}_card_label" ] ?? '' ),
+				$settings[ "russian_post_domestic_pickup_type_{$key}_label" ] ?? '',
 				$result[ $type ]['label']
 			);
 		}
@@ -87,11 +87,11 @@ final class RussianPostPickupPointTypeSettings {
 		foreach ( self::TYPES as $type ) {
 			$key = strtolower( $type );
 			$enabled_key = "russian_post_domestic_pickup_type_{$key}_enabled";
-			$card_key = "russian_post_domestic_pickup_type_{$key}_card_label";
+			$label_key = "russian_post_domestic_pickup_type_{$key}_label";
 			$enabled = ! empty( $data[ $enabled_key ] );
 			$any_enabled = $any_enabled || $enabled;
 			$result[ $enabled_key ] = array( 'value' => $enabled, 'format' => 'bool' );
-			$result[ $card_key ] = array( 'value' => $this->label_or_default( $data[ $card_key ] ?? '', $defaults[ $type ]['label'] ), 'format' => 'string' );
+			$result[ $label_key ] = array( 'value' => $this->label_or_default( $data[ $label_key ] ?? '', $defaults[ $type ]['label'] ), 'format' => 'string' );
 		}
 		if ( ! $any_enabled ) {
 			$result['russian_post_domestic_pickup_type_ops_enabled']['value'] = true;

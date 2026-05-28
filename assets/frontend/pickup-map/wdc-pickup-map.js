@@ -130,7 +130,10 @@
 
 		function renderMarkers(points, emptyText) {
 			visiblePoints = sortPoints(enrichPoints(points || []));
-			var activePoint = committedPoint && pointInList(committedPoint, visiblePoints) ? committedPoint : (previewPoint && pointInList(previewPoint, visiblePoints) ? previewPoint : null);
+			if (previewPoint && !pointInList(previewPoint, visiblePoints)) {
+				previewPoint = null;
+			}
+			var activePoint = previewPoint && pointInList(previewPoint, visiblePoints) ? previewPoint : (committedPoint && pointInList(committedPoint, visiblePoints) ? committedPoint : null);
 			provider.renderMarkers(visiblePoints, {
 				activePointId: activePoint ? pointId(activePoint) : null
 			});
@@ -140,17 +143,6 @@
 				confirmButton.disabled = !committedPoint;
 				return;
 			}
-			if (committedPoint && pointInList(committedPoint, visiblePoints)) {
-				card.textContent = selectedSummary(committedPoint);
-				confirmButton.disabled = false;
-				if (provider.setActivePoint) {
-					provider.setActivePoint(pointId(committedPoint));
-				}
-				if (provider.openPointPopup && previewPoint && pointInList(previewPoint, visiblePoints)) {
-					provider.openPointPopup(previewPoint, renderPointPopup(previewPoint, pointId(previewPoint) === pointId(committedPoint)));
-				}
-				return;
-			}
 			if (previewPoint && pointInList(previewPoint, visiblePoints)) {
 				card.textContent = committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Выберите пункт на карте или в списке.');
 				confirmButton.disabled = !committedPoint;
@@ -158,7 +150,15 @@
 					provider.setActivePoint(pointId(previewPoint));
 				}
 				if (provider.openPointPopup) {
-					provider.openPointPopup(previewPoint, renderPointPopup(previewPoint, false));
+					provider.openPointPopup(previewPoint, renderPointPopup(previewPoint, !!(committedPoint && pointId(previewPoint) === pointId(committedPoint))));
+				}
+				return;
+			}
+			if (committedPoint && pointInList(committedPoint, visiblePoints)) {
+				card.textContent = selectedSummary(committedPoint);
+				confirmButton.disabled = false;
+				if (provider.setActivePoint) {
+					provider.setActivePoint(pointId(committedPoint));
 				}
 				return;
 			}
@@ -317,7 +317,7 @@
 			return points.map(function (point, index) {
 				var copy = Object.assign({}, point);
 				copy._wdcOrder = index;
-				copy._wdcCardLabel = pointTypeLabel(copy);
+				copy._wdcTypeLabel = pointTypeLabel(copy);
 				if (hasInitialCoordinates && validPointCoordinates(copy)) {
 					copy.distanceMeters = distanceMeters(initialLat, initialLng, parseFloat(copy.lat), parseFloat(copy.lng));
 					copy.distanceText = formatDistance(copy.distanceMeters);
@@ -407,12 +407,12 @@
 	}
 
 	function pointTypeLabel(point) {
-		if (point && point._wdcCardLabel) {
-			return point._wdcCardLabel;
+		if (point && point._wdcTypeLabel) {
+			return point._wdcTypeLabel;
 		}
 		var type = pickupPointType(point);
 		var config = pickupPointTypeConfig(type);
-		return config.label || config.cardLabel || defaultPointTypeConfig(type).label;
+		return config.label || defaultPointTypeConfig(type).label;
 	}
 
 	function pickupPointType(point) {

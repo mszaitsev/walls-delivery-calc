@@ -607,7 +607,7 @@ final class DeliveryServicesAdminPage {
 						<tr>
 							<th scope="row"><?php echo esc_html( $type ); ?></th>
 							<td><label><input type="checkbox" name="<?php echo esc_attr( "russian_post_domestic_pickup_type_{$key}_enabled" ); ?>" value="1" <?php checked( ! empty( $point_types[ $type ]['enabled'] ) ); ?>> Использовать</label></td>
-							<td><input class="regular-text" type="text" name="<?php echo esc_attr( "russian_post_domestic_pickup_type_{$key}_card_label" ); ?>" value="<?php echo esc_attr( (string) ( $point_types[ $type ]['label'] ?? '' ) ); ?>"></td>
+							<td><input class="regular-text" type="text" name="<?php echo esc_attr( "russian_post_domestic_pickup_type_{$key}_label" ); ?>" value="<?php echo esc_attr( (string) ( $point_types[ $type ]['label'] ?? '' ) ); ?>"></td>
 						</tr>
 					<?php endforeach; ?>
 				</tbody>

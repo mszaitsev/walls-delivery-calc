@@ -1,8 +1,10 @@
 # Russian Post Pickup Points
 
-Version: 0.25.6.
+Version: 0.25.7.
 
-Version 0.25.6 changes pickup type settings to one customer-facing label per type. The `Типы пунктов выдачи` block now shows only `Использовать` and `Название в карточке/баллоне/списке` for OPS, PVZ, and APS. Existing `*_card_label` values are still read as the label for backward compatibility; `*_marker_label` is no longer shown, saved, localized, or used by map providers.
+Version 0.25.7 gives preview state priority over committed selection for map visuals. When `committedPoint = A` and `previewPoint = B`, and both are visible, B owns the active marker and open balloon while A remains the checkout selection and keeps the selected list state. If B disappears after bbox reload, preview is cleared and A becomes active again when visible. Reloads still reopen the balloon automatically when the preview point remains visible.
+
+Version 0.25.6 changes pickup type settings to one customer-facing label per type. The `Типы пунктов выдачи` block now shows only `Использовать` and `Название в карточке/баллоне/списке` for OPS, PVZ, and APS.
 
 Map markers are textless. Single pickup points render as blue pins with a white center and a blue tail, matching the map-style marker reference. Clusters render as white circles with a thicker blue border and a dark count. The frontend still uses the configured type label in the list and balloon card, but never inside the marker itself.
 

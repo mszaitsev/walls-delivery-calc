@@ -1,8 +1,10 @@
 # Walls Delivery Calc
 
-Version: 0.25.6.
+Version: 0.25.7.
 
-Version 0.25.6 simplifies pickup type labels and tightens the map selection flow. Admin settings now keep one type name per OPS/PVZ/APS entry: `Название в карточке/баллоне/списке`. The old marker-label fields are no longer shown or saved; existing `card_label` values remain compatible and are exposed to the frontend as `pickupPointTypes.*.label`.
+Version 0.25.7 makes preview state the visual source of truth. If the customer has already committed point A but opens point B, point B owns the active marker, open balloon, and preview row while checkout remains committed to A. If B leaves the current bbox, preview is cleared and the active marker falls back to committed point A when it is visible.
+
+Version 0.25.6 simplifies pickup type labels and tightens the map selection flow. Admin settings now keep one type name per OPS/PVZ/APS entry: `Название в карточке/баллоне/списке`, exposed to the frontend as `pickupPointTypes.*.label`.
 
 Map pins are now textless blue pins with a white center, while clusters are white circles with a thick blue border and dark count. Opening a marker or list row creates a preview: the marker and row are highlighted and the balloon stays open, but checkout is not updated. The customer commits the point through `Выбрать этот пункт` in the balloon or `Выбрать` in the list row; both paths dispatch `wdc:point-selected` and save the point immediately without requiring the footer button. The footer button remains only as a fallback for an already committed point.
 
