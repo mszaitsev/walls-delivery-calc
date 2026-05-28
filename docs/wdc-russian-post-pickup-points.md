@@ -1,6 +1,30 @@
 # Russian Post Pickup Points
 
-Version: 0.23.12.
+Version: 0.24.2.
+
+## Pickup Map Providers
+
+Version 0.24.2 disables Leaflet's built-in attribution control in the pickup provider with `attributionControl: false`, removing the standard lower-right attribution block from the pickup modal. Yandex Maps behavior is unchanged.
+
+Version 0.24.1 hardens the Yandex provider's async startup. `setCenter()` before Yandex API readiness updates `pendingCenter`, queued markers render after `ymaps.Map` is created, `clearMarkers()` before readiness clears queued marker data, `fitToViewport()` runs after creation, and `boundsChanged()` is called manually once the map is ready so bbox loading starts from the actual final center.
+
+Version 0.24.0 makes the checkout pickup modal map provider configurable in `Калькулятор доставок -> Настройки -> Карта ПВЗ`.
+
+Available providers:
+
+- `OpenStreetMap / Leaflet`, the default and backward-compatible fallback.
+- `Яндекс.Карты`, enabled by selecting the provider and entering a Yandex Maps API key.
+
+The Yandex Maps API key is used only when `Яндекс.Карты` is selected. The saved key is not rendered back into the admin HTML field; an empty input keeps the existing key, and the `Очистить ключ Яндекс.Карт` checkbox removes it.
+
+Frontend map code now goes through provider adapters in `assets/frontend/pickup-map/providers/`:
+
+- `wdc-map-provider-leaflet.js`
+- `wdc-map-provider-yandex.js`
+
+Both adapters expose `create(container, options)`, `setCenter(lat, lng, zoom)`, `renderMarkers(points)`, `clearMarkers()`, `fitToMarkers()`, `destroy()`, `onPointClick(callback)`, and `invalidateSize()`. `wdc-pickup-map.js` owns pickup REST loading, selected-card rendering, search, and request cancellation, while provider files own map-specific markers, viewport changes, cleanup, and size invalidation.
+
+Asset loading is provider-specific. Leaflet mode enqueues local `assets/vendor/leaflet/leaflet.css`, `assets/vendor/leaflet/leaflet.js`, and the Leaflet provider adapter. Yandex mode does not enqueue Leaflet; it enqueues the Yandex provider adapter, which loads `api-maps.yandex.ru` only when the localized config says a Yandex key is present. If Yandex is selected without a key, checkout does not break and the modal shows: `Для Яндекс.Карт не задан API key. Выберите OpenStreetMap или укажите ключ в настройках.`
 
 ## Location Coordinates
 

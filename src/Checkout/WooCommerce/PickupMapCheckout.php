@@ -5,13 +5,15 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
 defined( 'ABSPATH' ) || exit;
 
 final class PickupMapCheckout {
 	public function __construct(
 		private CheckoutSessionManager $session_manager,
-		private PluginEnvironment $environment
+		private PluginEnvironment $environment,
+		private ?SettingsRepository $settings = null
 	) {
 	}
 
@@ -32,12 +34,21 @@ final class PickupMapCheckout {
 
 		$base = $this->environment->plugin_url();
 		$version = $this->environment->version();
-		wp_enqueue_style( 'wdc-leaflet', $base . 'assets/vendor/leaflet/leaflet.css', array(), '1.9.4' );
-		wp_enqueue_script( 'wdc-leaflet', $base . 'assets/vendor/leaflet/leaflet.js', array(), '1.9.4', true );
-		wp_enqueue_style( 'wdc-pickup-map', $base . 'assets/frontend/pickup-map/wdc-pickup-map.css', array( 'wdc-leaflet' ), $version );
+		$provider = $this->map_provider();
+		$provider_handle = 'wdc-map-provider-' . $provider;
+
+		if ( 'leaflet' === $provider ) {
+			wp_enqueue_style( 'wdc-leaflet', $base . 'assets/vendor/leaflet/leaflet.css', array(), '1.9.4' );
+			wp_enqueue_script( 'wdc-leaflet', $base . 'assets/vendor/leaflet/leaflet.js', array(), '1.9.4', true );
+			wp_enqueue_script( $provider_handle, $base . 'assets/frontend/pickup-map/providers/wdc-map-provider-leaflet.js', array( 'wdc-leaflet' ), $version, true );
+		} else {
+			wp_enqueue_script( $provider_handle, $base . 'assets/frontend/pickup-map/providers/wdc-map-provider-yandex.js', array(), $version, true );
+		}
+
+		wp_enqueue_style( 'wdc-pickup-map', $base . 'assets/frontend/pickup-map/wdc-pickup-map.css', array(), $version );
 		wp_enqueue_script( 'wdc-pickup-api', $base . 'assets/frontend/pickup-map/wdc-pickup-api.js', array(), $version, true );
 		wp_enqueue_script( 'wdc-pickup-modal', $base . 'assets/frontend/pickup-map/wdc-pickup-modal.js', array(), $version, true );
-		wp_enqueue_script( 'wdc-pickup-map', $base . 'assets/frontend/pickup-map/wdc-pickup-map.js', array( 'wdc-leaflet', 'wdc-pickup-api' ), $version, true );
+		wp_enqueue_script( 'wdc-pickup-map', $base . 'assets/frontend/pickup-map/wdc-pickup-map.js', array( $provider_handle, 'wdc-pickup-api' ), $version, true );
 		wp_enqueue_script( 'wdc-pickup-checkout', $base . 'assets/frontend/pickup-map/wdc-pickup-checkout.js', array( 'wdc-pickup-api', 'wdc-pickup-modal', 'wdc-pickup-map' ), $version, true );
 
 		if ( function_exists( 'wp_localize_script' ) ) {
@@ -50,6 +61,9 @@ final class PickupMapCheckout {
 					'carrier'          => 'russian_post',
 					'shippingMethodId' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
 					'initialContext'   => $this->initial_context(),
+					'mapProvider'      => $provider,
+					'yandexApiKeyPresent' => $this->has_yandex_api_key(),
+					'yandexApiKey'     => 'yandex' === $provider && $this->has_yandex_api_key() ? $this->yandex_api_key() : '',
 					'labels'           => array(
 						'choose'            => 'Выбрать пункт выдачи',
 						'change'            => 'Изменить пункт выдачи',
@@ -61,6 +75,9 @@ final class PickupMapCheckout {
 						'selectPoint'       => 'Выберите пункт на карте.',
 						'notSelected'       => 'Пункт выдачи не выбран.',
 						'error'             => 'Не удалось загрузить пункты выдачи.',
+					),
+					'errors'           => array(
+						'yandexApiKeyMissing' => 'Для Яндекс.Карт не задан API key. Выберите OpenStreetMap или укажите ключ в настройках.',
 					),
 				)
 			);
@@ -153,5 +170,19 @@ final class PickupMapCheckout {
 		}
 
 		return $lat >= -90.0 && $lat <= 90.0 && $lng >= -180.0 && $lng <= 180.0;
+	}
+
+	private function map_provider(): string {
+		$provider = $this->settings instanceof SettingsRepository ? $this->settings->get_string( 'pickup_map_provider', 'leaflet' ) : 'leaflet';
+
+		return 'yandex' === $provider ? 'yandex' : 'leaflet';
+	}
+
+	private function yandex_api_key(): string {
+		return $this->settings instanceof SettingsRepository ? trim( $this->settings->get_string( 'pickup_map_yandex_api_key', '' ) ) : '';
+	}
+
+	private function has_yandex_api_key(): bool {
+		return '' !== $this->yandex_api_key();
 	}
 }

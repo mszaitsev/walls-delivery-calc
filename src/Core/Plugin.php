@@ -285,7 +285,7 @@ final class Plugin {
 		$this->container->register( CheckoutValidation::class, fn(): CheckoutValidation => new CheckoutValidation( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutAddressValidation::class ) ) );
 		$this->container->register( CheckoutSortSelector::class, fn(): CheckoutSortSelector => new CheckoutSortSelector( $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( OrderShippingMetaPersister::class, fn(): OrderShippingMetaPersister => new OrderShippingMetaPersister( $this->container->get( CheckoutSessionManager::class ) ) );
-		$this->container->register( PickupMapCheckout::class, fn(): PickupMapCheckout => new PickupMapCheckout( $this->container->get( CheckoutSessionManager::class ), $this->environment ) );
+		$this->container->register( PickupMapCheckout::class, fn(): PickupMapCheckout => new PickupMapCheckout( $this->container->get( CheckoutSessionManager::class ), $this->environment, $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( PickupPointOrderDisplay::class, fn(): PickupPointOrderDisplay => new PickupPointOrderDisplay() );
 		$this->container->register( CheckoutDebugPanel::class, fn(): CheckoutDebugPanel => new CheckoutDebugPanel( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutFeatureGate::class ) ) );
 		$this->container->register( CheckoutAddressRenderer::class, fn(): CheckoutAddressRenderer => new CheckoutAddressRenderer( $this->container->get( CheckoutSessionManager::class ) ) );

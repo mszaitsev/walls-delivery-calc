@@ -97,6 +97,25 @@ final class SettingsAdminPage {
 							<th scope="row"><label for="wdc_checkout_location_region_limit"><?php echo esc_html__( 'Максимум вариантов в одной области', 'walls-delivery-calc' ); ?></label></th>
 							<td><input id="wdc_checkout_location_region_limit" type="number" name="checkout_location_region_limit" value="<?php echo esc_attr( (string) ( $values['checkout_location_region_limit'] ?? 10 ) ); ?>" min="3" max="50" step="1"></td>
 						</tr>
+						<tr><th colspan="2"><h2><?php echo esc_html__( 'Карта ПВЗ', 'walls-delivery-calc' ); ?></h2></th></tr>
+						<tr>
+							<th scope="row"><label for="wdc_pickup_map_provider"><?php echo esc_html__( 'Провайдер карты', 'walls-delivery-calc' ); ?></label></th>
+							<td>
+								<select id="wdc_pickup_map_provider" name="pickup_map_provider">
+									<option value="leaflet" <?php selected( (string) ( $values['pickup_map_provider'] ?? 'leaflet' ), 'leaflet' ); ?>><?php echo esc_html__( 'OpenStreetMap / Leaflet', 'walls-delivery-calc' ); ?></option>
+									<option value="yandex" <?php selected( (string) ( $values['pickup_map_provider'] ?? 'leaflet' ), 'yandex' ); ?>><?php echo esc_html__( 'Яндекс.Карты', 'walls-delivery-calc' ); ?></option>
+								</select>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="wdc_pickup_map_yandex_api_key"><?php echo esc_html__( 'API key Яндекс.Карт', 'walls-delivery-calc' ); ?></label></th>
+							<td>
+								<input id="wdc_pickup_map_yandex_api_key" class="regular-text" type="password" name="pickup_map_yandex_api_key" value="" placeholder="<?php echo esc_attr( $this->yandex_api_key_placeholder( $values ) ); ?>" autocomplete="new-password">
+								<p class="description"><?php echo esc_html__( 'Ключ Яндекс.Карт используется только если выбран провайдер Яндекс.Карты.', 'walls-delivery-calc' ); ?></p>
+								<p class="description"><?php echo esc_html__( 'Оставьте поле пустым, чтобы сохранить текущий ключ без изменений.', 'walls-delivery-calc' ); ?></p>
+								<p><label><input type="checkbox" name="clear_pickup_map_yandex_api_key" value="1"> <?php echo esc_html__( 'Очистить ключ Яндекс.Карт', 'walls-delivery-calc' ); ?></label></p>
+							</td>
+						</tr>
 						<tr><th colspan="2"><h2><?php echo esc_html__( 'ФИАС/ГАР', 'walls-delivery-calc' ); ?></h2></th></tr>
 						<tr><th colspan="2"><p><?php echo esc_html__( 'Интеграция с ФИАС/ГАР подготовлена. Runtime-нормализация через реальный API временно отключена.', 'walls-delivery-calc' ); ?></p></th></tr>
 						<tr>
@@ -158,6 +177,10 @@ final class SettingsAdminPage {
 		if ( ! in_array( $sort_mode, array( RateSorter::CHEAPEST, RateSorter::FASTEST ), true ) ) {
 			$sort_mode = RateSorter::CHEAPEST;
 		}
+		$map_provider = isset( $data['pickup_map_provider'] ) ? sanitize_key( wp_unslash( (string) $data['pickup_map_provider'] ) ) : 'leaflet';
+		if ( ! in_array( $map_provider, array( 'leaflet', 'yandex' ), true ) ) {
+			$map_provider = 'leaflet';
+		}
 
 		$checkout_location_limit    = isset( $data['checkout_location_search_limit'] ) ? $this->absint( wp_unslash( (string) $data['checkout_location_search_limit'] ) ) : 100;
 		$checkout_region_limit      = isset( $data['checkout_location_region_limit'] ) ? $this->absint( wp_unslash( (string) $data['checkout_location_region_limit'] ) ) : 10;
@@ -167,7 +190,7 @@ final class SettingsAdminPage {
 		$dadata_suggestions_timeout = isset( $data['dadata_suggestions_timeout'] ) ? $this->absint( wp_unslash( (string) $data['dadata_suggestions_timeout'] ) ) : 3;
 		$dadata_suggestions_count   = isset( $data['dadata_suggestions_count'] ) ? $this->absint( wp_unslash( (string) $data['dadata_suggestions_count'] ) ) : 10;
 
-		return array(
+		$settings = array(
 			'enable_new_checkout_shipping' => ! empty( $data['enable_new_checkout_shipping'] ),
 			'checkout_sort_mode'           => $sort_mode,
 			'show_checkout_debug_panel'    => ! empty( $data['show_checkout_debug_panel'] ),
@@ -181,7 +204,19 @@ final class SettingsAdminPage {
 			'dadata_suggestions_enabled'   => ! empty( $data['dadata_suggestions_enabled'] ),
 			'dadata_suggestions_timeout'   => max( 1, min( 10, $dadata_suggestions_timeout > 0 ? $dadata_suggestions_timeout : 3 ) ),
 			'dadata_suggestions_count'     => max( 3, min( 20, $dadata_suggestions_count > 0 ? $dadata_suggestions_count : 10 ) ),
+			'pickup_map_provider'          => $map_provider,
 		);
+
+		if ( ! empty( $data['clear_pickup_map_yandex_api_key'] ) ) {
+			$settings['pickup_map_yandex_api_key'] = '';
+		} elseif ( array_key_exists( 'pickup_map_yandex_api_key', $data ) ) {
+			$yandex_api_key = trim( wp_unslash( (string) $data['pickup_map_yandex_api_key'] ) );
+			if ( '' !== $yandex_api_key ) {
+				$settings['pickup_map_yandex_api_key'] = sanitize_text_field( $yandex_api_key );
+			}
+		}
+
+		return $settings;
 	}
 
 	/**
@@ -353,6 +388,13 @@ final class SettingsAdminPage {
 
 	private function fias_token_placeholder(): string {
 		return $this->fias_credentials instanceof FiasCredentials && $this->fias_credentials->has_token() ? '********' : 'Токен не задан';
+	}
+
+	/**
+	 * @param array<string,mixed> $values
+	 */
+	private function yandex_api_key_placeholder( array $values ): string {
+		return '' !== trim( (string) ( $values['pickup_map_yandex_api_key'] ?? '' ) ) ? '********' : 'Ключ не задан';
 	}
 
 	private function fias_token_status(): string {
