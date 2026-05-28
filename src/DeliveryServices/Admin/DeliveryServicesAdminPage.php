@@ -32,6 +32,7 @@ use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
 use WallsShop\WDC\Rules\Admin\RuleAdminContext;
@@ -63,7 +64,8 @@ final class DeliveryServicesAdminPage {
 		private ?PickupPointRepository $pickup_points = null,
 		private ?RussianPostPickupPointRepository $russian_post_pickup_points = null,
 		private ?RussianPostPickupImportStateService $pickup_import_state = null,
-		private ?PluginEnvironment $environment = null
+		private ?PluginEnvironment $environment = null,
+		private ?RussianPostPickupPointTypeSettings $pickup_point_type_settings = null
 	) {
 	}
 
@@ -186,6 +188,7 @@ final class DeliveryServicesAdminPage {
 			}
 			if ( in_array( $action, array( 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import' ), true ) && $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ) {
 				$this->otpravka_settings->save_from_admin( $_POST );
+				$this->save_russian_post_pickup_type_settings( $id );
 				if ( 'run_russian_post_pickup_import' === $action && $this->pickup_importer instanceof RussianPostPickupImporter ) {
 					$this->pickup_importer->queue_background_import( $this->otpravka_settings->unload_type() );
 				}
@@ -576,6 +579,7 @@ final class DeliveryServicesAdminPage {
 		$is_busy = in_array( (string) ( $state['status'] ?? 'idle' ), array( 'queued', 'running' ), true );
 		$counts = $this->russian_post_pickup_points instanceof RussianPostPickupPointRepository ? $this->russian_post_pickup_points->count_by_type() : array();
 		$total = $this->russian_post_pickup_points instanceof RussianPostPickupPointRepository ? $this->russian_post_pickup_points->count_active() : 0;
+		$point_types = $this->pickup_point_type_settings instanceof RussianPostPickupPointTypeSettings ? $this->pickup_point_type_settings->all() : RussianPostPickupPointTypeSettings::defaults();
 		$locked = $this->pickup_importer instanceof RussianPostPickupImporter && $this->pickup_importer->is_locked();
 		$schedule_enabled = ! empty( $values[ RussianPostOtpravkaApiSettings::PICKUP_SCHEDULE_ENABLED_KEY ] );
 		$next_schedule = $schedule_enabled && function_exists( 'wp_next_scheduled' ) ? wp_next_scheduled( RussianPostPickupImporter::SCHEDULE_HOOK ) : false;
@@ -592,6 +596,22 @@ final class DeliveryServicesAdminPage {
 				<?php $this->text_row( 'russian_post_otpravka_login', 'Логин', (string) ( $values[ RussianPostOtpravkaApiSettings::LOGIN_KEY ] ?? '' ) ); ?>
 				<tr><th scope="row">Пароль</th><td><input class="regular-text" type="password" name="russian_post_otpravka_password" value="" placeholder="<?php echo esc_attr( $this->otpravka_settings->has_password() ? 'задано' : 'не задано' ); ?>"><label style="display:block;margin-top:6px;"><input type="checkbox" name="russian_post_otpravka_clear_password" value="1"> очистить сохраненный пароль</label></td></tr>
 				<tr><th scope="row">Таймаут загрузки, сек.</th><td><input class="regular-text" name="russian_post_otpravka_timeout" value="<?php echo esc_attr( (string) ( $values[ RussianPostOtpravkaApiSettings::TIMEOUT_KEY ] ?? 120 ) ); ?>"><p class="description">Используется только при автоматическом скачивании архива через API. Для ручной загрузки ZIP/TXT не применяется.</p></td></tr>
+			</table>
+			<h3>Типы пунктов выдачи</h3>
+			<p class="description">Отключенные типы не попадают в REST-ответы карты. Если выключить все типы, OPS будет включен автоматически.</p>
+			<table class="widefat striped" style="max-width: 960px;">
+				<thead><tr><th>Тип</th><th>Использовать</th><th>Название на маркере</th><th>Название в карточке/списке</th></tr></thead>
+				<tbody>
+					<?php foreach ( RussianPostPickupPointTypeSettings::TYPES as $type ) : ?>
+						<?php $key = strtolower( $type ); ?>
+						<tr>
+							<th scope="row"><?php echo esc_html( $type ); ?></th>
+							<td><label><input type="checkbox" name="<?php echo esc_attr( "russian_post_domestic_pickup_type_{$key}_enabled" ); ?>" value="1" <?php checked( ! empty( $point_types[ $type ]['enabled'] ) ); ?>> Использовать</label></td>
+							<td><input class="regular-text" type="text" name="<?php echo esc_attr( "russian_post_domestic_pickup_type_{$key}_marker_label" ); ?>" value="<?php echo esc_attr( (string) ( $point_types[ $type ]['markerLabel'] ?? '' ) ); ?>"></td>
+							<td><input class="regular-text" type="text" name="<?php echo esc_attr( "russian_post_domestic_pickup_type_{$key}_card_label" ); ?>" value="<?php echo esc_attr( (string) ( $point_types[ $type ]['cardLabel'] ?? '' ) ); ?>"></td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
 			</table>
 			<h3>Импорт ПВЗ / ОПС</h3>
 			<?php if ( 'failed' === (string) ( $state['status'] ?? '' ) && '' !== $this->pickup_import_state_value( $state, 'errors' ) ) : ?>
@@ -1040,6 +1060,16 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		}
 
 		foreach ( $this->sanitize_russian_post_settings_from_post() as $key => $data ) {
+			$this->settings->set_setting( $service_id, $key, $data['value'], $data['format'] );
+		}
+	}
+
+	private function save_russian_post_pickup_type_settings( int $service_id ): void {
+		if ( $service_id <= 0 || ! $this->settings instanceof DeliveryServiceSettingsRepository ) {
+			return;
+		}
+		$type_settings = $this->pickup_point_type_settings ?? new RussianPostPickupPointTypeSettings();
+		foreach ( $type_settings->sanitize_admin_values( $_POST ) as $key => $data ) {
 			$this->settings->set_setting( $service_id, $key, $data['value'], $data['format'] );
 		}
 	}

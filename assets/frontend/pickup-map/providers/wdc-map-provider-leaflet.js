@@ -134,7 +134,7 @@
 			var type = pointType(point);
 			return window.L.divIcon({
 				className: 'wdc-map-marker-icon',
-				html: '<span class="wdc-map-marker wdc-map-marker--' + type.toLowerCase() + (active ? ' is-active' : '') + '">' + escapeHtml(pointTypeLabel(type)) + '</span>',
+				html: '<span class="wdc-map-marker wdc-map-marker--' + type.toLowerCase() + (active ? ' is-active' : '') + '">' + escapeHtml(pointMarkerLabel(point)) + '</span>',
 				iconSize: [34, 34],
 				iconAnchor: [17, 17],
 				popupAnchor: [0, -18]
@@ -197,7 +197,11 @@
 		return type === 'PVZ' || type === 'APS' ? type : 'OPS';
 	}
 
-	function pointTypeLabel(type) {
+	function pointMarkerLabel(point) {
+		if (point && point._wdcMarkerLabel) {
+			return point._wdcMarkerLabel;
+		}
+		var type = pointType(point);
 		if (type === 'APS') {
 			return 'Почтомат';
 		}

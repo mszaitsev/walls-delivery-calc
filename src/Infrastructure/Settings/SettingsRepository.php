@@ -89,6 +89,15 @@ final class SettingsRepository {
 			'russian_post_pickup_last_success_at' => '',
 			'pickup_map_provider' => 'leaflet',
 			'pickup_map_yandex_api_key' => '',
+			'russian_post_domestic_pickup_type_ops_enabled' => true,
+			'russian_post_domestic_pickup_type_ops_marker_label' => 'ОПС',
+			'russian_post_domestic_pickup_type_ops_card_label' => 'Отделение Почты России',
+			'russian_post_domestic_pickup_type_pvz_enabled' => true,
+			'russian_post_domestic_pickup_type_pvz_marker_label' => 'ПВЗ',
+			'russian_post_domestic_pickup_type_pvz_card_label' => 'Пункт выдачи',
+			'russian_post_domestic_pickup_type_aps_enabled' => true,
+			'russian_post_domestic_pickup_type_aps_marker_label' => 'Почтомат',
+			'russian_post_domestic_pickup_type_aps_card_label' => 'Почтомат',
 			'packaging_weight_tiers'       => array(),
 		);
 	}

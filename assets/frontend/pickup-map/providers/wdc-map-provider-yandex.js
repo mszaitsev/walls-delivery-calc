@@ -73,7 +73,7 @@
 				var id = pointId(point);
 				var placemark = new ymapsApi.Placemark([point.lat, point.lng], {
 					balloonContent: escapeHtml(point.address || ''),
-					iconCaption: pointTypeLabel(pointType(point))
+					iconCaption: pointMarkerLabel(point)
 				}, {
 					preset: activePointId === id ? 'islands#redCircleDotIconWithCaption' : 'islands#darkGreenCircleDotIconWithCaption'
 				});
@@ -211,7 +211,11 @@
 		return type === 'PVZ' || type === 'APS' ? type : 'OPS';
 	}
 
-	function pointTypeLabel(type) {
+	function pointMarkerLabel(point) {
+		if (point && point._wdcMarkerLabel) {
+			return point._wdcMarkerLabel;
+		}
+		var type = pointType(point);
 		if (type === 'APS') {
 			return 'Почтомат';
 		}

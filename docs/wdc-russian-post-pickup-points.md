@@ -1,6 +1,12 @@
 # Russian Post Pickup Points
 
-Version: 0.25.1.
+Version: 0.25.2.
+
+Version 0.25.2 adds pickup type controls for `russian_post_domestic_pickup` on the delivery service page, tab `ПВЗ / ОПС`, block `Типы пунктов выдачи`. OPS, PVZ, and APS each have `Использовать`, `Название на маркере`, and `Название в карточке/списке`.
+
+`Название на маркере` is intentionally short and is used inside Leaflet HTML markers and Yandex `iconCaption`. `Название в карточке/списке` is the customer-facing type name shown in the selected point card and visible list rows. Defaults are OPS `ОПС` / `Отделение Почты России`, PVZ `ПВЗ` / `Пункт выдачи`, and APS `Почтомат` / `Почтомат`.
+
+At least one type must remain enabled. Saving an all-disabled configuration automatically enables OPS. The Russian Post `/points` and `/points/search` endpoints apply enabled types to map data; when REST also receives `type[]`, the effective filter is the intersection of requested and enabled types.
 
 Version 0.25.1 separates preview state from confirmed pickup selection. The initial search fallback can render a point card and a soft list preview, but only an explicit marker or list-row click sets `selectedPoint`, enables the confirm button, highlights the row with `active selected`, and dispatches `wdc:point-selected`.
 

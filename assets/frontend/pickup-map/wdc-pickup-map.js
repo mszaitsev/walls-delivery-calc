@@ -267,6 +267,8 @@
 			return points.map(function (point, index) {
 				var copy = Object.assign({}, point);
 				copy._wdcOrder = index;
+				copy._wdcCardLabel = pointTypeLabel(copy);
+				copy._wdcMarkerLabel = pointTypeMarkerLabel(copy);
 				if (hasInitialCoordinates && validPointCoordinates(copy)) {
 					copy.distanceMeters = distanceMeters(initialLat, initialLng, parseFloat(copy.lat), parseFloat(copy.lng));
 					copy.distanceText = formatDistance(copy.distanceMeters);
@@ -352,14 +354,41 @@
 	}
 
 	function pointTypeLabel(point) {
+		if (point && point._wdcCardLabel) {
+			return point._wdcCardLabel;
+		}
+		var type = pickupPointType(point);
+		var config = pickupPointTypeConfig(type);
+		return config.cardLabel || defaultPointTypeConfig(type).cardLabel;
+	}
+
+	function pointTypeMarkerLabel(point) {
+		if (point && point._wdcMarkerLabel) {
+			return point._wdcMarkerLabel;
+		}
+		var type = pickupPointType(point);
+		var config = pickupPointTypeConfig(type);
+		return config.markerLabel || defaultPointTypeConfig(type).markerLabel;
+	}
+
+	function pickupPointType(point) {
 		var type = String(point.point_type || point.type || '').toUpperCase();
-		if (type === 'APS') {
-			return 'Почтомат';
-		}
+		return type === 'PVZ' || type === 'APS' ? type : 'OPS';
+	}
+
+	function pickupPointTypeConfig(type) {
+		var types = window.wdcPickupCheckout && window.wdcPickupCheckout.pickupPointTypes;
+		return types && types[type] ? types[type] : defaultPointTypeConfig(type);
+	}
+
+	function defaultPointTypeConfig(type) {
 		if (type === 'PVZ') {
-			return 'ПВЗ';
+			return { enabled: true, markerLabel: 'ПВЗ', cardLabel: 'Пункт выдачи' };
 		}
-		return 'ОПС';
+		if (type === 'APS') {
+			return { enabled: true, markerLabel: 'Почтомат', cardLabel: 'Почтомат' };
+		}
+		return { enabled: true, markerLabel: 'ОПС', cardLabel: 'Отделение Почты России' };
 	}
 
 	function cleanDescription(value) {

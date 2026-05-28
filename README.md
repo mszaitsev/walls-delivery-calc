@@ -1,6 +1,10 @@
 # Walls Delivery Calc
 
-Version: 0.25.1.
+Version: 0.25.2.
+
+Version 0.25.2 adds configurable Russian Post pickup point types for `russian_post_domestic_pickup`. In the delivery service admin tab `ПВЗ / ОПС`, the new `Типы пунктов выдачи` block controls OPS, PVZ, and APS independently: whether the type is used, the short marker label, and the longer card/list label. Defaults are OPS `ОПС` / `Отделение Почты России`, PVZ `ПВЗ` / `Пункт выдачи`, and APS `Почтомат` / `Почтомат`. At least one type is always enabled; if an admin disables all three, OPS is restored automatically.
+
+The public Russian Post `/points` and `/points/search` endpoints now filter results by enabled pickup types. Explicit REST `type[]` filters are intersected with enabled types, so requesting a disabled type returns an empty list. Checkout localizes `pickupPointTypes` to the map frontend; list/card text uses `cardLabel`, while Leaflet and Yandex marker captions use `markerLabel`.
 
 Version 0.25.1 keeps initial search results as preview-only. `initialSearch()` may show the first found point in the card and softly mark it in the list, but it no longer enables confirmation or dispatches `wdc:point-selected` until the customer explicitly clicks a marker or list row.
 

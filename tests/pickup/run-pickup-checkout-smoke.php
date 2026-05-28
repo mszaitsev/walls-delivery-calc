@@ -11,6 +11,7 @@ use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController;
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
@@ -198,18 +199,21 @@ $root = dirname( __DIR__, 2 );
 $environment = new PluginEnvironment( $root . '/walls-delivery-calc.php', $root, 'https://example.test/wp-content/plugins/walls-delivery-calc/', '0.24.0' );
 $map_settings = new SettingsRepository();
 $map_settings->replace( array_merge( $map_settings->defaults(), array( 'pickup_map_provider' => 'leaflet' ) ) );
+$point_type_settings = new RussianPostPickupPointTypeSettings( $map_settings );
 $GLOBALS['wdc_pickup_checkout_enqueued_styles'] = array();
 $GLOBALS['wdc_pickup_checkout_enqueued_scripts'] = array();
 $GLOBALS['wdc_pickup_checkout_localized'] = array();
-( new PickupMapCheckout( $session, $environment, $map_settings ) )->enqueue_assets();
+( new PickupMapCheckout( $session, $environment, $map_settings, $point_type_settings ) )->enqueue_assets();
 pickup_checkout_assert( isset( $GLOBALS['wdc_pickup_checkout_enqueued_scripts']['wdc-leaflet'], $GLOBALS['wdc_pickup_checkout_enqueued_styles']['wdc-leaflet'], $GLOBALS['wdc_pickup_checkout_enqueued_scripts']['wdc-map-provider-leaflet'] ), 'Leaflet provider must enqueue Leaflet assets and Leaflet provider adapter.' );
 pickup_checkout_assert( ! isset( $GLOBALS['wdc_pickup_checkout_enqueued_scripts']['wdc-map-provider-yandex'] ), 'Leaflet provider must not enqueue the Yandex adapter.' );
+$localized_leaflet = $GLOBALS['wdc_pickup_checkout_localized']['wdc-pickup-checkout']['wdcPickupCheckout'] ?? array();
+pickup_checkout_assert( 'ОПС' === (string) ( $localized_leaflet['pickupPointTypes']['OPS']['markerLabel'] ?? '' ) && 'Отделение Почты России' === (string) ( $localized_leaflet['pickupPointTypes']['OPS']['cardLabel'] ?? '' ) && true === (bool) ( $localized_leaflet['pickupPointTypes']['PVZ']['enabled'] ?? false ) && true === (bool) ( $localized_leaflet['pickupPointTypes']['APS']['enabled'] ?? false ), 'JS localization must include default pickupPointTypes labels and enabled flags.' );
 
 $map_settings->replace( array_merge( $map_settings->defaults(), array( 'pickup_map_provider' => 'yandex', 'pickup_map_yandex_api_key' => 'test-yandex-key' ) ) );
 $GLOBALS['wdc_pickup_checkout_enqueued_styles'] = array();
 $GLOBALS['wdc_pickup_checkout_enqueued_scripts'] = array();
 $GLOBALS['wdc_pickup_checkout_localized'] = array();
-( new PickupMapCheckout( $session, $environment, $map_settings ) )->enqueue_assets();
+( new PickupMapCheckout( $session, $environment, $map_settings, $point_type_settings ) )->enqueue_assets();
 $localized_map = $GLOBALS['wdc_pickup_checkout_localized']['wdc-pickup-checkout']['wdcPickupCheckout'] ?? array();
 pickup_checkout_assert( isset( $GLOBALS['wdc_pickup_checkout_enqueued_scripts']['wdc-map-provider-yandex'] ) && ! isset( $GLOBALS['wdc_pickup_checkout_enqueued_scripts']['wdc-leaflet'], $GLOBALS['wdc_pickup_checkout_enqueued_styles']['wdc-leaflet'] ), 'Yandex provider must enqueue the Yandex adapter without Leaflet assets.' );
 pickup_checkout_assert( 'yandex' === (string) ( $localized_map['mapProvider'] ?? '' ) && true === (bool) ( $localized_map['yandexApiKeyPresent'] ?? false ) && 'test-yandex-key' === (string) ( $localized_map['yandexApiKey'] ?? '' ), 'Yandex provider config must localize provider, key-present flag, and key when selected.' );
@@ -217,7 +221,7 @@ pickup_checkout_assert( 'yandex' === (string) ( $localized_map['mapProvider'] ??
 $map_settings->replace( array_merge( $map_settings->defaults(), array( 'pickup_map_provider' => 'yandex', 'pickup_map_yandex_api_key' => '' ) ) );
 $GLOBALS['wdc_pickup_checkout_enqueued_scripts'] = array();
 $GLOBALS['wdc_pickup_checkout_localized'] = array();
-( new PickupMapCheckout( $session, $environment, $map_settings ) )->enqueue_assets();
+( new PickupMapCheckout( $session, $environment, $map_settings, $point_type_settings ) )->enqueue_assets();
 $missing_key_map = $GLOBALS['wdc_pickup_checkout_localized']['wdc-pickup-checkout']['wdcPickupCheckout'] ?? array();
 pickup_checkout_assert( 'yandex' === (string) ( $missing_key_map['mapProvider'] ?? '' ) && false === (bool) ( $missing_key_map['yandexApiKeyPresent'] ?? true ) && '' === (string) ( $missing_key_map['yandexApiKey'] ?? 'not-empty' ) && str_contains( (string) ( $missing_key_map['errors']['yandexApiKeyMissing'] ?? '' ), 'API key' ), 'Yandex without API key must localize a false flag, no key, and a readable error.' );
 
@@ -251,6 +255,9 @@ pickup_checkout_assert( array() === $errors->errors, 'validation must pass when 
 
 $settings_source = file_get_contents( $root . '/src/Infrastructure/Settings/SettingsRepository.php' ) ?: '';
 pickup_checkout_assert( str_contains( $settings_source, "'pickup_map_provider' => 'leaflet'" ), 'Default pickup map provider must be leaflet.' );
+pickup_checkout_assert( str_contains( $settings_source, "'russian_post_domestic_pickup_type_ops_enabled' => true" ) && str_contains( $settings_source, "'russian_post_domestic_pickup_type_pvz_enabled' => true" ) && str_contains( $settings_source, "'russian_post_domestic_pickup_type_aps_enabled' => true" ), 'Default pickup point type settings must enable OPS/PVZ/APS.' );
+$point_type_source = file_get_contents( $root . '/src/Pickup/RussianPost/RussianPostPickupPointTypeSettings.php' ) ?: '';
+pickup_checkout_assert( str_contains( $point_type_source, "'ОПС'" ) && str_contains( $point_type_source, "'Отделение Почты России'" ) && str_contains( $point_type_source, "\$result['OPS']['enabled'] = true" ), 'Pickup type settings must provide labels and auto-enable OPS when all types are disabled.' );
 $settings_admin = new SettingsAdminPage( new SettingsRepository() );
 $empty_key_settings = $settings_admin->sanitize_settings( array( 'pickup_map_provider' => 'yandex', 'pickup_map_yandex_api_key' => '' ) );
 pickup_checkout_assert( 'yandex' === $empty_key_settings['pickup_map_provider'] && ! array_key_exists( 'pickup_map_yandex_api_key', $empty_key_settings ), 'Empty Yandex key input must not overwrite a saved key.' );
@@ -267,6 +274,7 @@ pickup_checkout_assert( str_contains( $map_checkout_source, 'map_provider()' ) &
 pickup_checkout_assert( str_contains( $map_checkout_source, 'providers/wdc-map-provider-leaflet.js' ), 'Leaflet provider script must be enqueued.' );
 pickup_checkout_assert( str_contains( $map_checkout_source, "if ( 'leaflet' === \$provider )" ) && str_contains( $map_checkout_source, 'providers/wdc-map-provider-yandex.js' ), 'Yandex provider must enqueue from the non-Leaflet branch.' );
 pickup_checkout_assert( str_contains( $map_checkout_source, "'yandex' === \$provider && \$this->has_yandex_api_key()" ) && str_contains( $map_checkout_source, "'yandexApiKeyPresent'" ), 'Yandex key must be localized only when Yandex is selected and the key exists.' );
+pickup_checkout_assert( str_contains( $map_checkout_source, "'pickupPointTypes'" ) && str_contains( $map_checkout_source, 'pickup_point_types()' ), 'Pickup map checkout must localize pickupPointTypes.' );
 pickup_checkout_assert( str_contains( $map_checkout_source, 'Для Яндекс.Карт не задан API key' ), 'Frontend config must include a clear missing Yandex API key error.' );
 pickup_checkout_assert( file_exists( $root . '/assets/vendor/leaflet/leaflet.css' ) && file_exists( $root . '/assets/vendor/leaflet/leaflet.js' ), 'Leaflet assets must exist under assets/vendor/leaflet.' );
 $checkout_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' ) ?: '';
@@ -323,6 +331,7 @@ pickup_checkout_assert( strpos( $map_js, "CustomEvent('wdc:point-selected'" ) > 
 pickup_checkout_assert( str_contains( $map_js, 'provider.onPointClick(function (point) { select(point, { focus: false }); });' ) && str_contains( $map_js, 'select(point, { focus: true });' ), 'Marker and list clicks must be the explicit selection paths.' );
 pickup_checkout_assert( str_contains( $map_js, 'preview(points[0])' ) && ! str_contains( $map_js, 'preview(points[0], false)' ), 'Initial search must render only a preview card.' );
 pickup_checkout_assert( str_contains( $map_js, "' preview'" ) && str_contains( $map_js, "var active = selectedPoint" ), 'Preview row may be soft-highlighted, but active/selected classes must depend on selectedPoint.' );
+pickup_checkout_assert( str_contains( $map_js, 'copy._wdcCardLabel = pointTypeLabel(copy)' ) && str_contains( $map_js, 'copy._wdcMarkerLabel = pointTypeMarkerLabel(copy)' ) && str_contains( $map_js, 'config.cardLabel' ) && str_contains( $map_js, 'config.markerLabel' ), 'Frontend must derive card/list label from cardLabel and marker label from markerLabel.' );
 pickup_checkout_assert( str_contains( $map_js, 'if (hasInitialCoordinates)' ) && str_contains( $map_js, 'loadBounds(bboxAround(initialLat, initialLng))' ), 'Map JS must load bbox immediately when initial coordinates exist.' );
 pickup_checkout_assert( str_contains( $map_js, '55.0302' ) && str_contains( $map_js, '82.9204' ) && ! str_contains( $map_js, '} else if (!hasInitialQuery) {' ), 'Map JS must always set a safe fallback center when initial coordinates are missing.' );
 pickup_checkout_assert( str_contains( $map_js, 'else if (hasInitialQuery)' ) && str_contains( $map_js, 'initialSearch(String(context.query))' ), 'Map JS must run initial search before bbox loading when only an initial query exists.' );
@@ -336,9 +345,11 @@ $yandex_provider_js = file_get_contents( $root . '/assets/frontend/pickup-map/pr
 pickup_checkout_assert( str_contains( $leaflet_provider_js, 'window.L.map' ) && str_contains( $leaflet_provider_js, "map.on('moveend zoomend', boundsChanged)" ) && str_contains( $leaflet_provider_js, 'pointClickCallback(point)' ), 'Leaflet provider must keep map, bbox loading, and marker click flow.' );
 pickup_checkout_assert( str_contains( $leaflet_provider_js, 'attributionControl: false' ), 'Leaflet provider must disable the standard attribution control.' );
 pickup_checkout_assert( str_contains( $leaflet_provider_js, 'window.L.divIcon' ) && str_contains( $leaflet_provider_js, 'wdc-map-marker--' ) && str_contains( $leaflet_provider_js, 'setActivePoint' ) && str_contains( $leaflet_provider_js, 'focusPoint' ), 'Leaflet provider must support custom markers and active/focus abstraction.' );
+pickup_checkout_assert( str_contains( $leaflet_provider_js, 'pointMarkerLabel(point)' ) && str_contains( $leaflet_provider_js, 'point._wdcMarkerLabel' ), 'Leaflet marker text must use markerLabel from enriched points.' );
 pickup_checkout_assert( str_contains( $leaflet_provider_js, 'clusterPoints(points)' ) && str_contains( $leaflet_provider_js, 'wdc-map-cluster' ) && str_contains( $leaflet_provider_js, 'map.fitBounds' ), 'Leaflet provider must render grid clusters with counts and zoom/focus on click.' );
 pickup_checkout_assert( str_contains( $yandex_provider_js, 'api-maps.yandex.ru/2.1/' ) && str_contains( $yandex_provider_js, 'new ymaps.Map' ) && str_contains( $yandex_provider_js, 'new ymapsApi.Placemark' ) && str_contains( $yandex_provider_js, 'pointClickCallback(point)' ), 'Yandex provider must load API, create map, render placemarks, and pass marker clicks.' );
 pickup_checkout_assert( str_contains( $yandex_provider_js, 'new ymaps.Clusterer' ) && str_contains( $yandex_provider_js, 'clusterIconLayout' ) && str_contains( $yandex_provider_js, 'iconCaption' ) && ! str_contains( $yandex_provider_js, 'islands#blueDeliveryIcon' ), 'Yandex provider must use Clusterer, marker captions, and avoid the delivery-truck icon.' );
+pickup_checkout_assert( str_contains( $yandex_provider_js, 'iconCaption: pointMarkerLabel(point)' ) && str_contains( $yandex_provider_js, 'point._wdcMarkerLabel' ), 'Yandex marker iconCaption must use markerLabel from enriched points.' );
 pickup_checkout_assert( str_contains( $yandex_provider_js, 'setActivePoint' ) && str_contains( $yandex_provider_js, 'focusPoint' ) && str_contains( $yandex_provider_js, 'updateActivePlacemarks' ), 'Yandex provider must support active/focus abstraction.' );
 pickup_checkout_assert( str_contains( $yandex_provider_js, 'var pendingCenter = normalizeCenter' ) && str_contains( $yandex_provider_js, 'pendingCenterChanged = true' ) && str_contains( $yandex_provider_js, 'map.setCenter([pendingCenter.lat, pendingCenter.lng]' ), 'Yandex setCenter before API readiness must be stored and applied after map creation.' );
 pickup_checkout_assert( str_contains( $yandex_provider_js, 'if (pendingPoints.length)' ) && str_contains( $yandex_provider_js, 'renderMarkers(pendingPoints)' ), 'Yandex renderMarkers before readiness must render queued points after map creation.' );

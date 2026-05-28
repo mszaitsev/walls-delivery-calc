@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -13,7 +14,8 @@ final class PickupMapCheckout {
 	public function __construct(
 		private CheckoutSessionManager $session_manager,
 		private PluginEnvironment $environment,
-		private ?SettingsRepository $settings = null
+		private ?SettingsRepository $settings = null,
+		private ?RussianPostPickupPointTypeSettings $point_type_settings = null
 	) {
 	}
 
@@ -62,6 +64,7 @@ final class PickupMapCheckout {
 					'shippingMethodId' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
 					'initialContext'   => $this->initial_context(),
 					'mapProvider'      => $provider,
+					'pickupPointTypes' => $this->pickup_point_types(),
 					'yandexApiKeyPresent' => $this->has_yandex_api_key(),
 					'yandexApiKey'     => 'yandex' === $provider && $this->has_yandex_api_key() ? $this->yandex_api_key() : '',
 					'labels'           => array(
@@ -184,5 +187,14 @@ final class PickupMapCheckout {
 
 	private function has_yandex_api_key(): bool {
 		return '' !== $this->yandex_api_key();
+	}
+
+	/**
+	 * @return array<string,array{enabled:bool,markerLabel:string,cardLabel:string}>
+	 */
+	private function pickup_point_types(): array {
+		$type_settings = $this->point_type_settings ?? new RussianPostPickupPointTypeSettings( $this->settings );
+
+		return $type_settings->all();
 	}
 }
