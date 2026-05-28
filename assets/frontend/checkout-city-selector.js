@@ -615,6 +615,17 @@
 		setHidden( 'wdc_platform_location_selected_source', source );
 		explicitSelection = true === options.explicit;
 		debug( 'hidden fields set' );
+		document.body.dispatchEvent( new CustomEvent( 'wdc:location-selected', {
+			detail: {
+				location_id: location.id || '',
+				postcode: location.postal_code || '',
+				display_name: location.display_name || label || '',
+				region_name: location.region_name || '',
+				lat: location.lat || location.latitude || '',
+				lng: location.lng || location.longitude || '',
+				country_code: location.country_code || 'RU'
+			}
+		} ) );
 
 		if ( updateCheckout || true === options.explicit ) {
 			resultsBox().empty();

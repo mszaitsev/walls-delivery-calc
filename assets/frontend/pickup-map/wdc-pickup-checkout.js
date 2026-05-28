@@ -23,36 +23,43 @@
 	}
 
 	function openModal(container, method) {
-		var modal = window.WDCPickupModal.create(labels);
-		var confirmButton = modal.root.querySelector('[data-wdc-confirm]');
-		var search = modal.root.querySelector('[data-wdc-search]');
-		var context = withPrefetch(initialContext());
-		debug('open initialContext', context);
-		var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
+		var baseContext = initialContext();
+		var contextPromise = baseContext.query && !validCoordinate(baseContext.lat, baseContext.lng)
+			? refreshCheckoutContextOnce(700).then(function (freshContext) { return freshContext || baseContext; })
+			: Promise.resolve(baseContext);
 
-		function close() {
-			map.destroy();
-			modal.destroy();
-		}
+		contextPromise.then(function (resolvedContext) {
+			var modal = window.WDCPickupModal.create(labels);
+			var confirmButton = modal.root.querySelector('[data-wdc-confirm]');
+			var search = modal.root.querySelector('[data-wdc-search]');
+			var context = withPrefetch(resolvedContext);
+			debug('openModal context', context);
+			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
 
-		modal.root.addEventListener('wdc:close', close);
-		search.addEventListener('change', function () {
-			if (search.value.trim()) {
-				map.search(search.value.trim());
+			function close() {
+				map.destroy();
+				modal.destroy();
 			}
-		});
-		confirmButton.addEventListener('click', function () {
-			var point = map.selected();
-			if (!point) {
-				return;
-			}
-			confirmButton.disabled = true;
-			window.WDCPickupApi.save(point.id, method).then(function (response) {
-				applySelection(container, response.pickup_point || {});
-				close();
-				triggerCheckoutUpdate();
-			}).catch(function () {
-				confirmButton.disabled = false;
+
+			modal.root.addEventListener('wdc:close', close);
+			search.addEventListener('change', function () {
+				if (search.value.trim()) {
+					map.search(search.value.trim());
+				}
+			});
+			confirmButton.addEventListener('click', function () {
+				var point = map.selected();
+				if (!point) {
+					return;
+				}
+				confirmButton.disabled = true;
+				window.WDCPickupApi.save(point.id, method).then(function (response) {
+					applySelection(container, response.pickup_point || {});
+					close();
+					triggerCheckoutUpdate();
+				}).catch(function () {
+					confirmButton.disabled = false;
+				});
 			});
 		});
 	}
@@ -228,20 +235,36 @@
 	}
 
 	function refreshCheckoutContext() {
-		if (!window.WDCPickupApi || !window.WDCPickupApi.state) {
-			schedulePrefetch();
-			return;
-		}
-		window.WDCPickupApi.state().then(function (state) {
-			var context = contextFromState(state && state.city_context);
-			if (context.query || validCoordinate(context.lat, context.lng)) {
-				updateCurrentContext(context);
-				applyContextToHidden(context);
-			}
+		refreshCheckoutContextOnce().then(function () {
 			schedulePrefetch();
 		}).catch(function () {
 			schedulePrefetch();
 		});
+	}
+
+	function refreshCheckoutContextOnce(timeout) {
+		if (!window.WDCPickupApi || !window.WDCPickupApi.state) {
+			return Promise.resolve(null);
+		}
+		var stateRequest = window.WDCPickupApi.state().then(function (state) {
+			var context = contextFromState(state && state.city_context);
+			debug('refreshCheckoutContextOnce result', context);
+			if (context.query || validCoordinate(context.lat, context.lng)) {
+				updateCurrentContext(context);
+				applyContextToHidden(context);
+				return context;
+			}
+			return null;
+		}).catch(function () { return null; });
+		if (!timeout) {
+			return stateRequest;
+		}
+		return Promise.race([
+			stateRequest,
+			new Promise(function (resolve) {
+				window.setTimeout(function () { resolve(null); }, timeout);
+			})
+		]);
 	}
 
 	function contextFromState(context) {
@@ -257,6 +280,23 @@
 			region_name: context.region_name || '',
 			query: query,
 			country_code: context.country_code || 'RU'
+		};
+	}
+
+	function contextFromLocationDetail(detail) {
+		detail = detail || {};
+		var postcode = String(detail.postcode || '').trim();
+		var displayName = String(detail.display_name || '').trim();
+		var query = [postcode, displayName].filter(Boolean).join(' ').trim();
+		return {
+			lat: detail.lat || '',
+			lng: detail.lng || '',
+			postcode: postcode,
+			display_name: displayName,
+			region_name: detail.region_name || '',
+			query: query,
+			country_code: detail.country_code || 'RU',
+			location_id: detail.location_id || ''
 		};
 	}
 
@@ -368,6 +408,15 @@
 		if (event.target.matches('input[name^="shipping_method"]')) {
 			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 		}
+	});
+	document.body.addEventListener('wdc:location-selected', function (event) {
+		var context = contextFromLocationDetail(event.detail || {});
+		debug('wdc:location-selected detail', event.detail || {});
+		invalidatePrefetch();
+		updateCurrentContext(context);
+		applyContextToHidden(context);
+		resetSelection();
+		schedulePrefetch();
 	});
 	document.addEventListener('DOMContentLoaded', boot);
 	if (window.jQuery) {
