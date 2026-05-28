@@ -1,6 +1,18 @@
 # Russian Post Pickup Points
 
-Version: 0.24.2.
+Version: 0.25.0.
+
+## Pickup Map UX
+
+Version 0.25.0 adds a visible pickup-point list to the checkout modal. On desktop the map and list sit side by side; on mobile the map is above the list to avoid horizontal crowding. Every bbox response refreshes map markers and the list. The list is capped to the first 100 sorted points for DOM performance, while all returned points remain available to the map marker/cluster layer.
+
+When the modal has `initialContext.lat/lng`, each point gets a haversine distance from the selected settlement center and the list is sorted by that distance. Distances render as meters below 1 km, for example `450 м`, and as one-decimal kilometers from 1 km, for example `1.2 км`. If the settlement has no usable coordinates, ordering falls back to postcode/address with the original response order as a stable tie-breaker.
+
+Selection is synchronized both ways. Marker clicks select the list row, render the selected card, highlight the marker, and enable the confirm button. List-row clicks call the provider focus method, center/zoom the map on the point, highlight the marker, render the selected card, and enable confirmation. The selected row receives both `active` and `selected` classes.
+
+The selected card now renders a compact customer-facing Russian Post card: title/postcode, point type (`ОПС`, `ПВЗ`, `Почтомат`), address, work time, and a readable description only when present. Empty fields and technical descriptions such as `0.000000` are suppressed.
+
+Provider adapters now expose the richer selection surface used by `wdc-pickup-map.js`: `renderMarkers(points, options)`, `setActivePoint(pointId)`, and `focusPoint(point)` while keeping the older methods intact. Leaflet renders local HTML `divIcon` markers with type CSS classes and a lightweight screen-grid clusterer; cluster markers are numbered circles and click to fit/zoom the grouped bounds. Yandex renders neutral circle-dot placemarks with type captions, uses `ymaps.Clusterer` for numbered aggregate circles, and avoids the older `islands#blueDeliveryIcon` truck preset.
 
 ## Pickup Map Providers
 
@@ -22,7 +34,7 @@ Frontend map code now goes through provider adapters in `assets/frontend/pickup-
 - `wdc-map-provider-leaflet.js`
 - `wdc-map-provider-yandex.js`
 
-Both adapters expose `create(container, options)`, `setCenter(lat, lng, zoom)`, `renderMarkers(points)`, `clearMarkers()`, `fitToMarkers()`, `destroy()`, `onPointClick(callback)`, and `invalidateSize()`. `wdc-pickup-map.js` owns pickup REST loading, selected-card rendering, search, and request cancellation, while provider files own map-specific markers, viewport changes, cleanup, and size invalidation.
+Both adapters expose `create(container, options)`, `setCenter(lat, lng, zoom)`, `renderMarkers(points, options)`, `setActivePoint(pointId)`, `focusPoint(point)`, `clearMarkers()`, `fitToMarkers()`, `destroy()`, `onPointClick(callback)`, and `invalidateSize()`. `wdc-pickup-map.js` owns pickup REST loading, visible-list sorting, selected-card rendering, search, and request cancellation, while provider files own map-specific markers, clusters, viewport changes, cleanup, and size invalidation.
 
 Asset loading is provider-specific. Leaflet mode enqueues local `assets/vendor/leaflet/leaflet.css`, `assets/vendor/leaflet/leaflet.js`, and the Leaflet provider adapter. Yandex mode does not enqueue Leaflet; it enqueues the Yandex provider adapter, which loads `api-maps.yandex.ru` only when the localized config says a Yandex key is present. If Yandex is selected without a key, checkout does not break and the modal shows: `Для Яндекс.Карт не задан API key. Выберите OpenStreetMap или укажите ключ в настройках.`
 

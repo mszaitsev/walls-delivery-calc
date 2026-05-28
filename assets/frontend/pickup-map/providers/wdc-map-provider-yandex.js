@@ -13,6 +13,8 @@
 		var pendingPoints = [];
 		var pointClickCallback = function () {};
 		var ymapsApi = null;
+		var activePointId = null;
+		var placemarkById = {};
 
 		loadApi(settings.yandexApiKey || '').then(function (ymaps) {
 			if (destroyed) {
@@ -24,7 +26,12 @@
 				zoom: pendingCenter.zoom || 11,
 				controls: ['zoomControl']
 			});
-			collection = new ymaps.GeoObjectCollection();
+			collection = new ymaps.Clusterer({
+				clusterIconLayout: ymaps.templateLayoutFactory.createClass('<div class="wdc-map-cluster">$[properties.geoObjects.length]</div>'),
+				clusterIconShape: { type: 'Circle', coordinates: [19, 19], radius: 19 },
+				clusterIcons: [{ href: '', size: [38, 38], offset: [-19, -19] }],
+				groupByCoordinates: false
+			});
 			map.geoObjects.add(collection);
 			map.events.add('boundschange', boundsChanged);
 			fitToViewport();
@@ -52,8 +59,9 @@
 			settings.onBoundsChange([bounds[0][1], bounds[0][0], bounds[1][1], bounds[1][0]].join(','));
 		}
 
-		function renderMarkers(points) {
+		function renderMarkers(points, options) {
 			pendingPoints = points || [];
+			activePointId = options && options.activePointId ? String(options.activePointId) : activePointId;
 			if (!map || !collection || !ymapsApi) {
 				return;
 			}
@@ -62,13 +70,16 @@
 				if (point.lat === null || point.lng === null) {
 					return;
 				}
+				var id = pointId(point);
 				var placemark = new ymapsApi.Placemark([point.lat, point.lng], {
-					balloonContent: escapeHtml(point.address || '')
+					balloonContent: escapeHtml(point.address || ''),
+					iconCaption: pointTypeLabel(pointType(point))
 				}, {
-					preset: 'islands#blueDeliveryIcon'
+					preset: activePointId === id ? 'islands#redCircleDotIconWithCaption' : 'islands#darkGreenCircleDotIconWithCaption'
 				});
 				placemark.events.add('click', function () { pointClickCallback(point); });
 				collection.add(placemark);
+				placemarkById[id] = placemark;
 			});
 		}
 
@@ -76,6 +87,7 @@
 			if (collection) {
 				collection.removeAll();
 			}
+			placemarkById = {};
 		}
 
 		return {
@@ -88,13 +100,29 @@
 					pendingCenterChanged = true;
 				}
 			},
+			focusPoint: function (point) {
+				if (!point || point.lat === null || point.lng === null) {
+					return;
+				}
+				pendingCenter = normalizeCenter({ lat: point.lat, lng: point.lng, zoom: Math.max(pendingCenter.zoom || 11, 15) });
+				if (map) {
+					map.setCenter([pendingCenter.lat, pendingCenter.lng], pendingCenter.zoom);
+					boundsChanged();
+				} else {
+					pendingCenterChanged = true;
+				}
+			},
+			setActivePoint: function (pointId) {
+				activePointId = pointId ? String(pointId) : null;
+				updateActivePlacemarks();
+			},
 			renderMarkers: renderMarkers,
 			clearMarkers: function () {
 				pendingPoints = [];
 				clearMarkers();
 			},
 			fitToMarkers: function () {
-				if (map && collection && collection.getLength()) {
+				if (map && collection && Object.keys(placemarkById).length) {
 					map.setBounds(collection.getBounds(), { checkZoomRange: true, zoomMargin: 24 });
 				}
 			},
@@ -120,6 +148,15 @@
 			if (map && map.container && map.container.fitToViewport) {
 				map.container.fitToViewport();
 			}
+		}
+
+		function updateActivePlacemarks() {
+			Object.keys(placemarkById).forEach(function (id) {
+				var placemark = placemarkById[id];
+				if (placemark && placemark.options) {
+					placemark.options.set('preset', activePointId === id ? 'islands#redCircleDotIconWithCaption' : 'islands#darkGreenCircleDotIconWithCaption');
+				}
+			});
 		}
 	}
 
@@ -163,6 +200,25 @@
 			lng: isNaN(lng) ? 82.9204 : lng,
 			zoom: parseInt(center.zoom || 11, 10) || 11
 		};
+	}
+
+	function pointId(point) {
+		return String(point && (point.id || point.point_code || point.postcode || point.address) || '');
+	}
+
+	function pointType(point) {
+		var type = String(point.point_type || point.type || 'OPS').toUpperCase();
+		return type === 'PVZ' || type === 'APS' ? type : 'OPS';
+	}
+
+	function pointTypeLabel(type) {
+		if (type === 'APS') {
+			return 'Почтомат';
+		}
+		if (type === 'PVZ') {
+			return 'ПВЗ';
+		}
+		return 'ОПС';
 	}
 
 	function debugEnabled() {

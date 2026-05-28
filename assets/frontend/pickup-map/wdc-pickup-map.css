@@ -69,12 +69,119 @@
 
 .wdc-pickup-modal__body {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) 320px;
+	grid-template-columns: minmax(420px, 1fr) 360px;
 	min-height: 0;
 }
 
+.wdc-pickup-modal__map-pane,
 .wdc-pickup-modal__map {
+	min-width: 0;
 	min-height: 420px;
+}
+
+.wdc-pickup-modal__map-pane {
+	display: grid;
+}
+
+.wdc-pickup-modal__map {
+	height: 100%;
+}
+
+.wdc-pickup-modal__side {
+	display: grid;
+	grid-template-rows: minmax(160px, 1fr) auto;
+	min-width: 0;
+	min-height: 0;
+	border-left: 1px solid #e5e7eb;
+	background: #f8fafc;
+}
+
+.wdc-pickup-modal__list {
+	min-height: 0;
+	overflow: auto;
+	padding: 12px;
+}
+
+.wdc-pickup-list__meta {
+	margin-bottom: 8px;
+	color: #64748b;
+	font-size: 12px;
+}
+
+.wdc-pickup-list__items {
+	display: grid;
+	gap: 8px;
+}
+
+.wdc-pickup-list__item {
+	display: grid;
+	grid-template-columns: 28px minmax(0, 1fr);
+	gap: 10px;
+	width: 100%;
+	padding: 10px;
+	border: 1px solid #d8dee6;
+	border-radius: 6px;
+	background: #fff;
+	color: #1f2937;
+	text-align: left;
+	cursor: pointer;
+}
+
+.wdc-pickup-list__item:hover,
+.wdc-pickup-list__item:focus {
+	border-color: #94a3b8;
+	outline: none;
+}
+
+.wdc-pickup-list__item.active,
+.wdc-pickup-list__item.selected {
+	border-color: #2563eb;
+	background: #eff6ff;
+	box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.wdc-pickup-list__index {
+	display: inline-grid;
+	place-items: center;
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	background: #e2e8f0;
+	color: #334155;
+	font-size: 12px;
+	font-weight: 700;
+}
+
+.wdc-pickup-list__content,
+.wdc-pickup-list__headline {
+	display: grid;
+	gap: 3px;
+	min-width: 0;
+}
+
+.wdc-pickup-list__headline {
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: start;
+}
+
+.wdc-pickup-list__headline em {
+	color: #2563eb;
+	font-size: 12px;
+	font-style: normal;
+	font-weight: 700;
+	white-space: nowrap;
+}
+
+.wdc-pickup-list__address,
+.wdc-pickup-list__time {
+	color: #475569;
+	font-size: 13px;
+	line-height: 1.35;
+	overflow-wrap: anywhere;
+}
+
+.wdc-pickup-list__empty {
+	color: #64748b;
 }
 
 .wdc-pickup-modal__card {
@@ -82,8 +189,79 @@
 	align-content: start;
 	gap: 8px;
 	padding: 16px;
-	overflow: auto;
-	border-left: 1px solid #e5e7eb;
+	border-top: 1px solid #e5e7eb;
+	background: #fff;
+	overflow-wrap: anywhere;
+}
+
+.wdc-pickup-card__title {
+	margin: 0;
+	font-size: 18px;
+	line-height: 1.25;
+}
+
+.wdc-pickup-card__type {
+	color: #2563eb;
+	font-weight: 700;
+}
+
+.wdc-pickup-card__section {
+	display: grid;
+	gap: 3px;
+}
+
+.wdc-pickup-card__section strong {
+	color: #334155;
+}
+
+.wdc-map-marker-icon,
+.wdc-map-cluster-icon {
+	background: transparent;
+	border: 0;
+}
+
+.wdc-map-marker {
+	display: inline-grid;
+	place-items: center;
+	min-width: 34px;
+	height: 34px;
+	padding: 0 7px;
+	border: 2px solid #fff;
+	border-radius: 999px;
+	background: #2563eb;
+	color: #fff;
+	box-shadow: 0 2px 8px rgba(15, 23, 42, 0.28);
+	font-size: 10px;
+	font-weight: 800;
+	line-height: 1;
+	white-space: nowrap;
+}
+
+.wdc-map-marker--pvz {
+	background: #0f766e;
+}
+
+.wdc-map-marker--aps {
+	background: #7c3aed;
+}
+
+.wdc-map-marker.is-active {
+	background: #dc2626;
+	transform: scale(1.12);
+}
+
+.wdc-map-cluster {
+	display: inline-grid;
+	place-items: center;
+	width: 38px;
+	height: 38px;
+	border: 2px solid #fff;
+	border-radius: 50%;
+	background: #f97316;
+	color: #fff;
+	box-shadow: 0 2px 10px rgba(15, 23, 42, 0.3);
+	font-size: 14px;
+	font-weight: 800;
 }
 
 @media (max-width: 768px) {
@@ -93,12 +271,17 @@
 
 	.wdc-pickup-modal__body {
 		grid-template-columns: 1fr;
-		grid-template-rows: minmax(320px, 1fr) auto;
+		grid-template-rows: minmax(300px, 46vh) minmax(240px, 1fr);
+	}
+
+	.wdc-pickup-modal__side {
+		grid-template-rows: minmax(150px, 1fr) auto;
+		border-left: 0;
+		border-top: 1px solid #e5e7eb;
 	}
 
 	.wdc-pickup-modal__card {
-		max-height: 34vh;
-		border-left: 0;
-		border-top: 1px solid #e5e7eb;
+		max-height: 28vh;
+		overflow: auto;
 	}
 }

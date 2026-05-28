@@ -1,6 +1,10 @@
 # Walls Delivery Calc
 
-Version: 0.24.2.
+Version: 0.25.0.
+
+Version 0.25.0 improves the Russian Post pickup modal UX. The map now has a neighboring visible-point list on desktop and a stacked map/list layout on mobile. Bbox loads refresh the list, which shows up to the first 100 points with index, point type, address, work time, and distance from the selected city center when `initialContext` has coordinates. Distance sorting uses haversine meters; without coordinates the list falls back to stable postcode/address ordering.
+
+Selecting a marker or list row keeps the map, list, selected card, and confirm button in sync. The selected card shows only customer-readable fields, suppresses empty values and technical zero descriptions, and the selected list row receives `active selected`. Leaflet now uses local `divIcon` markers and a small frontend grid clusterer with numbered circles and click-to-fit behavior. Yandex uses `ymaps.Clusterer`, neutral circle-dot placemarks with type captions, active-point highlighting, and no delivery-truck preset.
 
 Version 0.24.2 disables Leaflet's built-in attribution control in the pickup map provider so the standard OpenStreetMap/Leaflet attribution block is not shown in the lower-right corner of the pickup modal. Yandex Maps and the provider abstraction are unchanged.
 
