@@ -287,11 +287,30 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 
-		$this->pickup_importer->queue_background_import_from_zip(
+		$queued = $this->pickup_importer->queue_background_import_from_zip(
 			$target,
 			$this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ? $this->otpravka_settings->unload_type() : 'ALL',
 			$original_name
 		);
+		if ( ! $queued ) {
+			$target_size = is_file( $target ) ? (int) filesize( $target ) : 0;
+			if ( is_file( $target ) ) {
+				if ( function_exists( 'wp_delete_file' ) ) {
+					wp_delete_file( $target );
+				} else {
+					@unlink( $target );
+				}
+			}
+			$this->pickup_import_state?->failed(
+				array(
+					'source' => 'uploaded_zip',
+					'temp_zip_file' => $target,
+					'original_upload_name' => $original_name,
+					'uploaded_file_size' => $target_size,
+					'errors' => array( 'Unable to queue ZIP import. Another import may be running.' ),
+				)
+			);
+		}
 	}
 
 	public function render_page(): void {

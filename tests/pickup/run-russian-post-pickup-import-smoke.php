@@ -19,10 +19,14 @@ function current_time( string $type ): string { return '2026-05-28 12:00:00'; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
 function sanitize_key( mixed $value ): string { return preg_replace( '/[^a-z0-9_\\-]/', '', strtolower( (string) $value ) ) ?? ''; }
+function sanitize_file_name( mixed $value ): string { return preg_replace( '/[^A-Za-z0-9._-]/', '', basename( (string) $value ) ) ?: 'upload.zip'; }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function add_query_arg( array $args, string $url ): string { return $url . '?' . http_build_query( $args ); }
 function wp_tempnam( string $filename = '' ): string { return tempnam( sys_get_temp_dir(), 'wdc-rp-' ) ?: ''; }
 function wp_delete_file( string $file ): bool { $GLOBALS['wdc_deleted_files'][] = $file; return @unlink( $file ); }
+function wp_upload_dir(): array { return array( 'basedir' => sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-uploads' ); }
+function wp_mkdir_p( string $dir ): bool { return is_dir( $dir ) || mkdir( $dir, 0755, true ); }
+function wp_unique_filename( string $dir, string $filename ): string { return $filename; }
 function is_wp_error( mixed $value ): bool { return $value instanceof WP_Error; }
 function wp_remote_retrieve_response_code( array $response ): int { return (int) ( $response['response']['code'] ?? 0 ); }
 function wp_remote_retrieve_response_message( array $response ): string { return (string) ( $response['response']['message'] ?? '' ); }
@@ -175,6 +179,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiClient;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
+use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPassportPointNormalizer;
@@ -369,6 +374,36 @@ rp_pickup_assert( $importer->queue_background_import_from_zip( $cancel_uploaded_
 $importer->reset_stale_or_running_import();
 rp_pickup_assert( ! file_exists( $cancel_uploaded_zip ) && false === get_transient( 'wdc_russian_post_pickup_import_lock' ), 'Cancel/reset must delete queued uploaded ZIP and unlock.' );
 $GLOBALS['wdc_scheduled_events'] = array();
+
+$admin_reflection = new ReflectionClass( DeliveryServicesAdminPage::class );
+$admin_page = $admin_reflection->newInstanceWithoutConstructor();
+foreach ( array( 'pickup_importer' => $importer, 'pickup_import_state' => $state_service, 'otpravka_settings' => $settings ) as $property => $value ) {
+	$ref_property = $admin_reflection->getProperty( $property );
+	$ref_property->setAccessible( true );
+	$ref_property->setValue( $admin_page, $value );
+}
+$upload_handler = $admin_reflection->getMethod( 'handle_russian_post_pickup_zip_upload' );
+$upload_handler->setAccessible( true );
+
+$upload_tmp_locked = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-admin-locked-' . uniqid() . '.zip';
+rp_write_passport_zip( $upload_tmp_locked );
+set_transient( 'wdc_russian_post_pickup_import_lock', 1, 3600 );
+$_FILES['russian_post_pickup_zip'] = array( 'name' => 'locked.zip', 'tmp_name' => $upload_tmp_locked, 'error' => UPLOAD_ERR_OK );
+$upload_handler->invoke( $admin_page );
+$locked_upload_state = $state_service->current();
+$locked_target = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-uploads' . DIRECTORY_SEPARATOR . 'wdc-imports' . DIRECTORY_SEPARATOR . 'locked.zip';
+rp_pickup_assert( ! file_exists( $upload_tmp_locked ) && ! file_exists( $locked_target ) && 'failed' === (string) $locked_upload_state['status'] && str_contains( implode( ' ', $locked_upload_state['errors'] ), 'Unable to queue ZIP import. Another import may be running.' ), 'Active lock + admin ZIP upload must delete stored file and save failed state.' );
+delete_transient( 'wdc_russian_post_pickup_import_lock' );
+
+$upload_tmp_success = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-admin-success-' . uniqid() . '.zip';
+rp_write_passport_zip( $upload_tmp_success );
+$_FILES['russian_post_pickup_zip'] = array( 'name' => 'success.zip', 'tmp_name' => $upload_tmp_success, 'error' => UPLOAD_ERR_OK );
+$upload_handler->invoke( $admin_page );
+$success_upload_state = $state_service->current();
+rp_pickup_assert( 'queued' === (string) $success_upload_state['status'] && 'uploaded_zip' === (string) $success_upload_state['source'] && is_file( (string) $success_upload_state['temp_zip_file'] ), 'Successful admin ZIP upload must keep file for init job.' );
+$importer->reset_stale_or_running_import();
+$GLOBALS['wdc_scheduled_events'] = array();
+unset( $_FILES['russian_post_pickup_zip'] );
 
 delete_transient( 'wdc_russian_post_pickup_import_lock' );
 $invalid_uploaded_zip = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-invalid-' . uniqid() . '.zip';

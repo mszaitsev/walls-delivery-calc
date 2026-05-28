@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.28.
+Version: 0.22.29.
+
+Version 0.22.29 fixes cleanup for failed manual ZIP import queueing: if the uploaded file is already stored but the background import cannot be queued because another import is running, the uploaded ZIP is deleted and state records `Unable to queue ZIP import. Another import may be running.`
 
 Version 0.22.28 adds a production-safe manual ZIP import path for Russian Post pickup points. Admins can download `unloading-passport` outside WordPress, upload the ZIP on the "ПВЗ / ОПС" tab, and process it through the same resumable background staging pipeline without relying on WordPress HTTP/Action Scheduler for the large download step. Import state now records `source=api_download|uploaded_zip`, uploaded filename, uploaded size, and temp ZIP path; cleanup removes uploaded ZIPs on extract, finalize, fail, cancel, or stale reset.
 
