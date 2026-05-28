@@ -5,9 +5,13 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Checkout\WooCommerce\PickupMapCheckout;
+use WallsShop\WDC\Admin\SettingsAdminPage;
+use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController;
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
@@ -33,7 +37,31 @@ function rest_ensure_response( mixed $data ): mixed { return $data; }
 function __return_true(): bool { return true; }
 function __( string $text, string $domain = '' ): string { return $text; }
 function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
 function wp_verify_nonce( string $nonce, string $action ): bool { return 'nonce' === $nonce && 'wp_rest' === $action; }
+function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['wdc_pickup_checkout_options'][ $key ] ?? $default; }
+function update_option( string $key, mixed $value, bool|string|null $autoload = null ): bool { $GLOBALS['wdc_pickup_checkout_options'][ $key ] = $value; return true; }
+function trailingslashit( string $value ): string { return rtrim( $value, '/\\' ) . '/'; }
+function is_checkout(): bool { return true; }
+function rest_url( string $path = '' ): string { return '/wp-json/' . ltrim( $path, '/' ); }
+function wp_create_nonce( string $action ): string { return 'nonce'; }
+function wp_enqueue_style( string $handle, string $src = '', array $deps = array(), string|bool|null $ver = false ): void { $GLOBALS['wdc_pickup_checkout_enqueued_styles'][ $handle ] = compact( 'src', 'deps', 'ver' ); }
+function wp_enqueue_script( string $handle, string $src = '', array $deps = array(), string|bool|null $ver = false, bool $in_footer = false ): void { $GLOBALS['wdc_pickup_checkout_enqueued_scripts'][ $handle ] = compact( 'src', 'deps', 'ver', 'in_footer' ); }
+function wp_localize_script( string $handle, string $object_name, array $l10n ): void { $GLOBALS['wdc_pickup_checkout_localized'][ $handle ][ $object_name ] = $l10n; }
+function checked( mixed $checked, mixed $current = true, bool $display = true ): string {
+	$result = (string) $checked === (string) $current ? ' checked="checked"' : '';
+	if ( $display ) {
+		echo $result;
+	}
+	return $result;
+}
+function selected( mixed $selected, mixed $current = true, bool $display = true ): string {
+	$result = (string) $selected === (string) $current ? ' selected="selected"' : '';
+	if ( $display ) {
+		echo $result;
+	}
+	return $result;
+}
 function register_rest_route( string $namespace, string $route, array $args ): bool {
 	$GLOBALS['wdc_pickup_checkout_routes'][] = compact( 'namespace', 'route', 'args' );
 	return true;
@@ -166,6 +194,33 @@ $rate = array(
 $session->save_rates( array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY => $rate ) );
 WC()->session->set( 'chosen_shipping_methods', array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ) );
 
+$root = dirname( __DIR__, 2 );
+$environment = new PluginEnvironment( $root . '/walls-delivery-calc.php', $root, 'https://example.test/wp-content/plugins/walls-delivery-calc/', '0.24.0' );
+$map_settings = new SettingsRepository();
+$map_settings->replace( array_merge( $map_settings->defaults(), array( 'pickup_map_provider' => 'leaflet' ) ) );
+$GLOBALS['wdc_pickup_checkout_enqueued_styles'] = array();
+$GLOBALS['wdc_pickup_checkout_enqueued_scripts'] = array();
+$GLOBALS['wdc_pickup_checkout_localized'] = array();
+( new PickupMapCheckout( $session, $environment, $map_settings ) )->enqueue_assets();
+pickup_checkout_assert( isset( $GLOBALS['wdc_pickup_checkout_enqueued_scripts']['wdc-leaflet'], $GLOBALS['wdc_pickup_checkout_enqueued_styles']['wdc-leaflet'], $GLOBALS['wdc_pickup_checkout_enqueued_scripts']['wdc-map-provider-leaflet'] ), 'Leaflet provider must enqueue Leaflet assets and Leaflet provider adapter.' );
+pickup_checkout_assert( ! isset( $GLOBALS['wdc_pickup_checkout_enqueued_scripts']['wdc-map-provider-yandex'] ), 'Leaflet provider must not enqueue the Yandex adapter.' );
+
+$map_settings->replace( array_merge( $map_settings->defaults(), array( 'pickup_map_provider' => 'yandex', 'pickup_map_yandex_api_key' => 'test-yandex-key' ) ) );
+$GLOBALS['wdc_pickup_checkout_enqueued_styles'] = array();
+$GLOBALS['wdc_pickup_checkout_enqueued_scripts'] = array();
+$GLOBALS['wdc_pickup_checkout_localized'] = array();
+( new PickupMapCheckout( $session, $environment, $map_settings ) )->enqueue_assets();
+$localized_map = $GLOBALS['wdc_pickup_checkout_localized']['wdc-pickup-checkout']['wdcPickupCheckout'] ?? array();
+pickup_checkout_assert( isset( $GLOBALS['wdc_pickup_checkout_enqueued_scripts']['wdc-map-provider-yandex'] ) && ! isset( $GLOBALS['wdc_pickup_checkout_enqueued_scripts']['wdc-leaflet'], $GLOBALS['wdc_pickup_checkout_enqueued_styles']['wdc-leaflet'] ), 'Yandex provider must enqueue the Yandex adapter without Leaflet assets.' );
+pickup_checkout_assert( 'yandex' === (string) ( $localized_map['mapProvider'] ?? '' ) && true === (bool) ( $localized_map['yandexApiKeyPresent'] ?? false ) && 'test-yandex-key' === (string) ( $localized_map['yandexApiKey'] ?? '' ), 'Yandex provider config must localize provider, key-present flag, and key when selected.' );
+
+$map_settings->replace( array_merge( $map_settings->defaults(), array( 'pickup_map_provider' => 'yandex', 'pickup_map_yandex_api_key' => '' ) ) );
+$GLOBALS['wdc_pickup_checkout_enqueued_scripts'] = array();
+$GLOBALS['wdc_pickup_checkout_localized'] = array();
+( new PickupMapCheckout( $session, $environment, $map_settings ) )->enqueue_assets();
+$missing_key_map = $GLOBALS['wdc_pickup_checkout_localized']['wdc-pickup-checkout']['wdcPickupCheckout'] ?? array();
+pickup_checkout_assert( 'yandex' === (string) ( $missing_key_map['mapProvider'] ?? '' ) && false === (bool) ( $missing_key_map['yandexApiKeyPresent'] ?? true ) && '' === (string) ( $missing_key_map['yandexApiKey'] ?? 'not-empty' ) && str_contains( (string) ( $missing_key_map['errors']['yandexApiKeyMissing'] ?? '' ), 'API key' ), 'Yandex without API key must localize a false flag, no key, and a readable error.' );
+
 $order = new WdcPickupCheckoutOrder();
 $persister = new OrderShippingMetaPersister( $session );
 $persister->persist( $order, array() );
@@ -194,13 +249,25 @@ $errors = new WdcPickupCheckoutErrors();
 ( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
 pickup_checkout_assert( array() === $errors->errors, 'validation must pass when pickup selection exists.' );
 
-$root = dirname( __DIR__, 2 );
+$settings_source = file_get_contents( $root . '/src/Infrastructure/Settings/SettingsRepository.php' ) ?: '';
+pickup_checkout_assert( str_contains( $settings_source, "'pickup_map_provider' => 'leaflet'" ), 'Default pickup map provider must be leaflet.' );
+$settings_admin = new SettingsAdminPage( new SettingsRepository() );
+$empty_key_settings = $settings_admin->sanitize_settings( array( 'pickup_map_provider' => 'yandex', 'pickup_map_yandex_api_key' => '' ) );
+pickup_checkout_assert( 'yandex' === $empty_key_settings['pickup_map_provider'] && ! array_key_exists( 'pickup_map_yandex_api_key', $empty_key_settings ), 'Empty Yandex key input must not overwrite a saved key.' );
+$new_key_settings = $settings_admin->sanitize_settings( array( 'pickup_map_provider' => 'yandex', 'pickup_map_yandex_api_key' => 'new-key' ) );
+pickup_checkout_assert( 'new-key' === (string) $new_key_settings['pickup_map_yandex_api_key'], 'Non-empty Yandex key input must be saved.' );
+$clear_key_settings = $settings_admin->sanitize_settings( array( 'pickup_map_provider' => 'yandex', 'pickup_map_yandex_api_key' => '', 'clear_pickup_map_yandex_api_key' => '1' ) );
+pickup_checkout_assert( '' === (string) $clear_key_settings['pickup_map_yandex_api_key'], 'Clear checkbox must clear the saved Yandex key.' );
 $validation_source = file_get_contents( $root . '/src/Checkout/WooCommerce/CheckoutValidation.php' ) ?: '';
 foreach ( array( 'Р’', 'Рµ', 'С‹', 'СЊ' ) as $mojibake ) {
 	pickup_checkout_assert( ! str_contains( $validation_source, $mojibake ), 'CheckoutValidation.php must not contain mojibake marker ' . $mojibake . '.' );
 }
 $map_checkout_source = file_get_contents( $root . '/src/Checkout/WooCommerce/PickupMapCheckout.php' ) ?: '';
-pickup_checkout_assert( str_contains( $map_checkout_source, 'assets/vendor/leaflet/leaflet.css' ) && str_contains( $map_checkout_source, 'assets/vendor/leaflet/leaflet.js' ), 'Leaflet enqueue URL must point to assets/vendor/leaflet.' );
+pickup_checkout_assert( str_contains( $map_checkout_source, 'map_provider()' ) && str_contains( $map_checkout_source, 'assets/vendor/leaflet/leaflet.css' ) && str_contains( $map_checkout_source, 'assets/vendor/leaflet/leaflet.js' ), 'Leaflet provider must enqueue Leaflet assets from assets/vendor/leaflet.' );
+pickup_checkout_assert( str_contains( $map_checkout_source, 'providers/wdc-map-provider-leaflet.js' ), 'Leaflet provider script must be enqueued.' );
+pickup_checkout_assert( str_contains( $map_checkout_source, "if ( 'leaflet' === \$provider )" ) && str_contains( $map_checkout_source, 'providers/wdc-map-provider-yandex.js' ), 'Yandex provider must enqueue from the non-Leaflet branch.' );
+pickup_checkout_assert( str_contains( $map_checkout_source, "'yandex' === \$provider && \$this->has_yandex_api_key()" ) && str_contains( $map_checkout_source, "'yandexApiKeyPresent'" ), 'Yandex key must be localized only when Yandex is selected and the key exists.' );
+pickup_checkout_assert( str_contains( $map_checkout_source, 'Для Яндекс.Карт не задан API key' ), 'Frontend config must include a clear missing Yandex API key error.' );
 pickup_checkout_assert( file_exists( $root . '/assets/vendor/leaflet/leaflet.css' ) && file_exists( $root . '/assets/vendor/leaflet/leaflet.js' ), 'Leaflet assets must exist under assets/vendor/leaflet.' );
 $checkout_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' ) ?: '';
 $city_selector_js = file_get_contents( $root . '/assets/frontend/checkout-city-selector.js' ) ?: '';
@@ -241,15 +308,22 @@ pickup_checkout_assert( str_contains( $checkout_js, 'prefetchController.abort()'
 pickup_checkout_assert( str_contains( $checkout_js, 'prefetchCache = null' ) && str_contains( $checkout_js, 'invalidatePrefetch' ), 'Prefetch cache must invalidate on destination changes.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'var context = withPrefetch(resolvedContext)' ) && str_contains( $checkout_js, 'preloadedPoints: prefetchCache.points' ), 'Open modal must pass cached preloaded points to the map.' );
 $map_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.js' ) ?: '';
-pickup_checkout_assert( str_contains( $map_js, 'if (hasInitialCoordinates)' ) && str_contains( $map_js, 'loadBounds();' ), 'Map JS must load bbox immediately when initial coordinates exist.' );
-pickup_checkout_assert( str_contains( $map_js, 'map.setView([55.0302, 82.9204], 11)' ) && ! str_contains( $map_js, '} else if (!hasInitialQuery) {' ), 'Map JS must always set a safe fallback center when initial coordinates are missing.' );
+pickup_checkout_assert( str_contains( $map_js, 'WDCPickupMapProviders' ) && str_contains( $map_js, 'providerFactory.create' ), 'wdc-pickup-map.js must use provider abstraction.' );
+pickup_checkout_assert( ! str_contains( $map_js, 'window.L' ) && ! str_contains( $map_js, 'L.map' ), 'wdc-pickup-map.js must not use Leaflet directly.' );
+pickup_checkout_assert( str_contains( $map_js, 'if (hasInitialCoordinates)' ) && str_contains( $map_js, 'loadBounds(bboxAround(initialLat, initialLng))' ), 'Map JS must load bbox immediately when initial coordinates exist.' );
+pickup_checkout_assert( str_contains( $map_js, '55.0302' ) && str_contains( $map_js, '82.9204' ) && ! str_contains( $map_js, '} else if (!hasInitialQuery) {' ), 'Map JS must always set a safe fallback center when initial coordinates are missing.' );
 pickup_checkout_assert( str_contains( $map_js, 'else if (hasInitialQuery)' ) && str_contains( $map_js, 'initialSearch(String(context.query))' ), 'Map JS must run initial search before bbox loading when only an initial query exists.' );
 pickup_checkout_assert( ! str_contains( $map_js, "loadBounds();\n\t\t\tif (!hasInitialCoordinates && context.query)" ), 'Map JS must not load the Novosibirsk bbox before initial query search.' );
 pickup_checkout_assert( str_contains( $map_js, 'preview(points[0], false)' ), 'Initial search preview must not enable final pickup confirmation.' );
 pickup_checkout_assert( str_contains( $map_js, 'hasPreloadedPoints = preloadedPoints.length > 0' ) && str_contains( $map_js, 'renderMarkers(preloadedPoints' ), 'Map JS must render preloaded points immediately.' );
 pickup_checkout_assert( str_contains( $map_js, "if (hasPreloadedPoints) {\n\t\t\t\treturn;" ), 'Preloaded startup must invalidate map size without calling initial loadBounds.' );
-pickup_checkout_assert( str_contains( $map_js, "map.on('moveend zoomend', debouncedLoad)" ) && str_contains( $map_js, 'loadBounds();' ), 'Manual moveend/zoomend must still call loadBounds after open.' );
+pickup_checkout_assert( str_contains( $map_js, 'onBoundsChange' ) && str_contains( $map_js, 'loadBounds(bbox)' ), 'Manual provider bounds changes must still call loadBounds after open.' );
 pickup_checkout_assert( str_contains( $map_js, 'centerLat' ) && str_contains( $map_js, 'centerLng' ), 'Map JS must support preloaded map center coordinates.' );
+$leaflet_provider_js = file_get_contents( $root . '/assets/frontend/pickup-map/providers/wdc-map-provider-leaflet.js' ) ?: '';
+$yandex_provider_js = file_get_contents( $root . '/assets/frontend/pickup-map/providers/wdc-map-provider-yandex.js' ) ?: '';
+pickup_checkout_assert( str_contains( $leaflet_provider_js, 'window.L.map' ) && str_contains( $leaflet_provider_js, "map.on('moveend zoomend', boundsChanged)" ) && str_contains( $leaflet_provider_js, 'pointClickCallback(point)' ), 'Leaflet provider must keep map, bbox loading, and marker click flow.' );
+pickup_checkout_assert( str_contains( $yandex_provider_js, 'api-maps.yandex.ru/2.1/' ) && str_contains( $yandex_provider_js, 'new ymaps.Map' ) && str_contains( $yandex_provider_js, 'new window.ymaps.Placemark' ) && str_contains( $yandex_provider_js, 'pointClickCallback(point)' ), 'Yandex provider must load API, create map, render placemarks, and pass marker clicks.' );
+pickup_checkout_assert( str_contains( $map_js, 'yandexApiKeyPresent' ) && str_contains( $map_js, 'Для Яндекс.Карт не задан API key' ), 'Yandex without API key must show a clear modal error and skip provider creation.' );
 $api_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-api.js' ) ?: '';
 pickup_checkout_assert( str_contains( $api_js, 'searchInitial' ) && str_contains( $api_js, 'limit=10' ), 'Pickup API must expose a small-limit initial search.' );
 pickup_checkout_assert( str_contains( $api_js, 'Array.isArray(data)' ), 'Pickup API must normalize point responses to arrays.' );

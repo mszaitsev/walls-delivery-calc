@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.23.12.
+Version: 0.24.0.
+
+Version 0.24.0 adds a pickup map provider architecture for the checkout pickup-point modal. Admin settings now choose between the default OpenStreetMap / Leaflet map and Yandex Maps, store a Yandex Maps API key without rendering it back into the settings field, preserve the saved key when the input is empty, and expose a clear-key checkbox. Checkout enqueues Leaflet assets only for the Leaflet provider; for Yandex it enqueues the Yandex provider adapter and loads the Yandex JS API only when the provider is selected and a key is present. If Yandex is selected without a key, checkout continues and the modal shows a Russian setup error instead of trying to load the API.
 
 Version 0.23.12 simplifies the DaData coordinate batch query to `postal_code + display_name` only, so rows like `186752, респ Карелия, г Сортавала, поселок Уусикюля` are sent without duplicated region/city/place fragments. Coordinate batch JSON now includes explicit skip counters: `skipped_empty_query`, `skipped_no_dadata_success`, `skipped_no_coordinates`, `skipped_invalid_coordinates`, plus `last_skip_reason` and `last_dadata_message`.
 

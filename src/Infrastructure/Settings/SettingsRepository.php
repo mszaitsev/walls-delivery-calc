@@ -87,6 +87,8 @@ final class SettingsRepository {
 			'russian_post_pickup_schedule_enabled' => false,
 			'russian_post_pickup_last_import_result' => array(),
 			'russian_post_pickup_last_success_at' => '',
+			'pickup_map_provider' => 'leaflet',
+			'pickup_map_yandex_api_key' => '',
 			'packaging_weight_tiers'       => array(),
 		);
 	}

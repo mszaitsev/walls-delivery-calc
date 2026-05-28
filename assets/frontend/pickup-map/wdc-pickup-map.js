@@ -11,13 +11,10 @@
 	}
 
 	function createMap(element, card, confirmButton, labels, initialContext) {
-		if (!window.L) {
-			card.textContent = 'Leaflet is not available.';
-			return { destroy: function () {} };
-		}
-
+		var config = window.wdcPickupCheckout || {};
+		var providerName = normalizeProvider(config.mapProvider || 'leaflet');
+		var providerFactory = window.WDCPickupMapProviders && window.WDCPickupMapProviders[providerName];
 		var selected = null;
-		var markers = [];
 		var controller = null;
 		var suppressNextMoveLoad = false;
 		var context = initialContext || {};
@@ -27,21 +24,29 @@
 		var initialLng = parseFloat(context.centerLng || context.lng || (preloadedPoints[0] && preloadedPoints[0].lng));
 		var hasInitialCoordinates = !isNaN(initialLat) && !isNaN(initialLng);
 		var hasInitialQuery = !!(context.query && String(context.query).trim());
-		var map = window.L.map(element);
-		if (hasInitialCoordinates) {
-			map.setView([initialLat, initialLng], 13);
-		} else {
-			map.setView([55.0302, 82.9204], 11);
-		}
-		window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-			attribution: '&copy; OpenStreetMap contributors',
-			maxZoom: 19
-		}).addTo(map);
+		var provider = null;
 
-		function clearMarkers() {
-			markers.forEach(function (marker) { marker.remove(); });
-			markers = [];
+		if ('yandex' === providerName && !config.yandexApiKeyPresent) {
+			card.textContent = (config.errors && config.errors.yandexApiKeyMissing) || 'Для Яндекс.Карт не задан API key. Выберите OpenStreetMap или укажите ключ в настройках.';
+			return noopMap();
 		}
+
+		if (!providerFactory || typeof providerFactory.create !== 'function') {
+			card.textContent = labels.error || 'Map provider is not available.';
+			return noopMap();
+		}
+
+		function boundsChanged(bbox) {
+			debouncedLoad(bbox);
+		}
+
+		provider = providerFactory.create(element, {
+			center: hasInitialCoordinates ? { lat: initialLat, lng: initialLng, zoom: 13 } : { lat: 55.0302, lng: 82.9204, zoom: 11 },
+			yandexApiKey: config.yandexApiKey || '',
+			labels: labels,
+			onBoundsChange: boundsChanged
+		});
+		provider.onPointClick(function (point) { select(point); });
 
 		function renderPoint(point) {
 			var parts = [
@@ -68,26 +73,18 @@
 		}
 
 		function renderMarkers(points, emptyText) {
-			clearMarkers();
+			provider.renderMarkers(points);
 			if (!points.length) {
 				card.textContent = emptyText || labels.empty || '';
 				return;
 			}
-			points.forEach(function (point) {
-				if (point.lat === null || point.lng === null) {
-					return;
-				}
-				var marker = window.L.marker([point.lat, point.lng]).addTo(map);
-				marker.bindPopup(escapeHtml(point.address || ''));
-				marker.on('click', function () { select(point); });
-				markers.push(marker);
-			});
 			card.textContent = labels.selectPoint || 'Выберите пункт на карте.';
 		}
 
-		function loadBounds() {
-			var bounds = map.getBounds();
-			var bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()].join(',');
+		function loadBounds(bbox) {
+			if (!bbox) {
+				return;
+			}
 			if (controller) {
 				controller.abort();
 			}
@@ -102,14 +99,13 @@
 			});
 		}
 
-		var debouncedLoad = debounce(function () {
+		var debouncedLoad = debounce(function (bbox) {
 			if (suppressNextMoveLoad) {
 				suppressNextMoveLoad = false;
 				return;
 			}
-			loadBounds();
+			loadBounds(bbox);
 		}, 250);
-		map.on('moveend zoomend', debouncedLoad);
 
 		if (hasPreloadedPoints) {
 			renderMarkers(preloadedPoints, labels.empty || '');
@@ -133,10 +129,10 @@
 			return request(query, controller.signal).then(function (points) {
 				if (points[0] && points[0].lat !== null && points[0].lng !== null) {
 					suppressNextMoveLoad = true;
-					map.setView([points[0].lat, points[0].lng], 15);
+					provider.setCenter(points[0].lat, points[0].lng, 15);
 					preview(points[0], false);
 					if (initial) {
-						loadBounds();
+						loadBounds(bboxAround(points[0].lat, points[0].lng));
 					}
 					return;
 				}
@@ -149,38 +145,53 @@
 		}
 
 		setTimeout(function () {
-			map.invalidateSize();
+			provider.invalidateSize();
 			if (hasPreloadedPoints) {
 				return;
 			}
 			if (hasInitialCoordinates) {
-				loadBounds();
+				loadBounds(bboxAround(initialLat, initialLng));
 			} else if (hasInitialQuery) {
 				initialSearch(String(context.query));
 			} else {
-				loadBounds();
+				loadBounds(bboxAround(55.0302, 82.9204));
 			}
 		}, 50);
 
 		return {
-			map: map,
 			selected: function () { return selected; },
 			search: search,
 			destroy: function () {
 				if (controller) {
 					controller.abort();
 				}
-				clearMarkers();
-				map.off('moveend zoomend', debouncedLoad);
-				map.remove();
+				provider.clearMarkers();
+				provider.destroy();
 			}
 		};
+	}
+
+	function normalizeProvider(provider) {
+		return 'yandex' === provider ? 'yandex' : 'leaflet';
+	}
+
+	function bboxAround(lat, lng) {
+		var spread = 0.12;
+		return [lng - spread, lat - spread, lng + spread, lat + spread].join(',');
 	}
 
 	function escapeHtml(value) {
 		return String(value || '').replace(/[&<>"']/g, function (char) {
 			return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char];
 		});
+	}
+
+	function noopMap() {
+		return {
+			selected: function () { return null; },
+			search: function () { return Promise.resolve(); },
+			destroy: function () {}
+		};
 	}
 
 	window.WDCPickupMap = { create: createMap };
