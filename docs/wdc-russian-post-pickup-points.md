@@ -1,8 +1,10 @@
 # Russian Post Pickup Points
 
-Version: 0.23.2.
+Version: 0.23.3.
 
 ## Checkout Map Fixes
+
+Version 0.23.3 fixes stale startup context after WooCommerce `updated_checkout`. The frontend no longer trusts only the page-load localized `window.wdcPickupCheckout.initialContext`; every modal open recomputes context from current DOM hidden city picker fields first, visible checkout fields second, and localized config last. This keeps the map on the newly selected city after AJAX recalculation without a full page reload.
 
 Version 0.23.2 prevents the modal from loading the Novosibirsk bbox before resolving the checkout destination. Startup order is now: saved RU `city_context` coordinates, then an initial `/points/search` by postcode/city or selected location display name, then the Novosibirsk fallback only when no coordinates and no query are available. Initial search centers the map and may show a preview card, but it does not confirm a pickup point; confirmation still requires an explicit marker click and button press.
 

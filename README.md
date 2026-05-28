@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.23.2.
+Version: 0.23.3.
+
+Version 0.23.3 makes the pickup map initial context DOM-first after WooCommerce AJAX checkout updates. Each modal open now rereads current city picker hidden `lat/lng/postcode/display_name` fields, then visible checkout postcode/city/country fields, and uses the localized `window.wdcPickupCheckout.initialContext` only as a stale-safe fallback.
 
 Version 0.23.2 fixes the pickup map startup path for checkout cities without saved coordinates. The modal now uses saved RU city coordinates immediately when they exist; otherwise it runs the initial local pickup search by postcode/city before any bbox load, centers on the first found point as a preview only, and falls back to Novosibirsk only when there is no usable city query. City picker selection/resolve can enrich missing local city coordinates through DaData once, save them to the locations table, and carry `lat/lng` in checkout `city_context`; if DaData returns no coordinates, checkout continues with the search fallback.
 

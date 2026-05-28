@@ -76,33 +76,58 @@
 
 	function initialContext() {
 		var config = (window.wdcPickupCheckout && window.wdcPickupCheckout.initialContext) || {};
-		var context = {
+		var configContext = {
 			lat: config.lat || '',
 			lng: config.lng || '',
 			query: config.query || ''
 		};
 		var fieldContext = contextFromFields();
+		if (fieldContext.countryBlocked) {
+			return {};
+		}
 		return {
-			lat: context.lat || fieldContext.lat,
-			lng: context.lng || fieldContext.lng,
-			query: fieldContext.query || context.query
+			lat: fieldContext.lat || configContext.lat,
+			lng: fieldContext.lng || configContext.lng,
+			query: fieldContext.query || configContext.query
 		};
 	}
 
 	function contextFromFields() {
 		var country = fieldValue('shipping_country') || fieldValue('billing_country');
 		if (country && country.toUpperCase() !== 'RU') {
-			return {};
+			return { countryBlocked: true };
 		}
-		var postcode = fieldValue('shipping_postcode') || fieldValue('billing_postcode');
-		var city = fieldValue('shipping_city') || fieldValue('billing_city');
-		var query = [postcode, city].filter(Boolean).join(' ').trim();
-		return query ? { query: query } : {};
+		var hiddenLat = fieldValue('wdc_platform_location_lat');
+		var hiddenLng = fieldValue('wdc_platform_location_lng');
+		var hiddenPostcode = fieldValue('wdc_platform_location_postcode');
+		var hiddenDisplay = fieldValue('wdc_platform_location_display_name');
+		var hiddenRegion = fieldValue('wdc_platform_location_region_name');
+		var postcode = hiddenPostcode || fieldValue('shipping_postcode') || fieldValue('billing_postcode');
+		var city = hiddenDisplay || fieldValue('shipping_city') || fieldValue('billing_city');
+		var query = [postcode, city || hiddenRegion].filter(Boolean).join(' ').trim();
+		var context = query ? { query: query } : {};
+		if (validCoordinate(hiddenLat, hiddenLng)) {
+			context.lat = hiddenLat;
+			context.lng = hiddenLng;
+		}
+		return context;
 	}
 
 	function fieldValue(name) {
 		var field = document.querySelector('[name="' + name + '"]');
 		return field ? String(field.value || '').trim() : '';
+	}
+
+	function validCoordinate(lat, lng) {
+		var parsedLat = parseFloat(lat);
+		var parsedLng = parseFloat(lng);
+		if (isNaN(parsedLat) || isNaN(parsedLng)) {
+			return false;
+		}
+		if (Math.abs(parsedLat) < 0.000001 && Math.abs(parsedLng) < 0.000001) {
+			return false;
+		}
+		return parsedLat >= -90 && parsedLat <= 90 && parsedLng >= -180 && parsedLng <= 180;
 	}
 
 	function toggleForMethod(container) {
