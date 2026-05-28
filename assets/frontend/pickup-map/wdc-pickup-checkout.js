@@ -109,8 +109,9 @@
 		if (fieldContext.countryBlocked) {
 			return {};
 		}
-		var runtimeContext = contextMatches(fieldContext, currentContext) ? currentContext : {};
-		var localizedContext = contextMatches(fieldContext, configContext) ? configContext : {};
+		var runtimeContext = sameDestination(fieldContext, currentContext) ? currentContext : {};
+		var localizedContext = sameDestination(fieldContext, configContext) ? configContext : {};
+		var latSource = validCoordinate(fieldContext.lat, fieldContext.lng) ? 'fields' : (validCoordinate(runtimeContext.lat, runtimeContext.lng) ? 'currentContext' : (validCoordinate(localizedContext.lat, localizedContext.lng) ? 'localized' : 'none'));
 		var result = {
 			lat: fieldContext.lat || runtimeContext.lat || localizedContext.lat,
 			lng: fieldContext.lng || runtimeContext.lng || localizedContext.lng,
@@ -118,6 +119,8 @@
 			postcode: fieldContext.postcode || runtimeContext.postcode || localizedContext.postcode || '',
 			display_name: fieldContext.display_name || runtimeContext.display_name || localizedContext.display_name || ''
 		};
+		debug('sameDestination field/current', sameDestination(fieldContext, currentContext));
+		debug('chosen lat/lng source', latSource);
 		debug('initialContext selected source', fieldContext.query ? 'fields' : (runtimeContext.query ? 'current' : (localizedContext.query ? 'localized' : 'fallback')), result);
 		return result;
 	}
@@ -172,14 +175,32 @@
 	}
 
 	function contextMatches(fieldContext, cachedContext) {
-		if (!cachedContext || !Object.keys(cachedContext).length) {
+		return sameDestination(fieldContext, cachedContext);
+	}
+
+	function sameDestination(a, b) {
+		if (!a || !b) {
 			return false;
 		}
-		var fieldFingerprint = destinationFingerprint(fieldContext);
-		if (!fieldFingerprint) {
+		var aPostcode = normalizeText(a.postcode || '');
+		var bPostcode = normalizeText(b.postcode || '');
+		if (aPostcode && bPostcode && aPostcode === bPostcode) {
 			return true;
 		}
-		return fieldFingerprint === destinationFingerprint(cachedContext);
+		var aName = normalizedDestinationName(a);
+		var bName = normalizedDestinationName(b);
+		if (!aName || !bName) {
+			return false;
+		}
+		return aName === bName || containsDestinationName(aName, bName) || containsDestinationName(bName, aName);
+	}
+
+	function normalizedDestinationName(context) {
+		return normalizeText(context.display_name || context.query || '');
+	}
+
+	function containsDestinationName(haystack, needle) {
+		return !!(needle && haystack && (' ' + haystack.replace(/[,;]/g, ' ') + ' ').indexOf(' ' + needle + ' ') !== -1);
 	}
 
 	function destinationFingerprint(context) {
