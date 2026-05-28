@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.23.1.
+Version: 0.23.2.
+
+Version 0.23.2 fixes the pickup map startup path for checkout cities without saved coordinates. The modal now uses saved RU city coordinates immediately when they exist; otherwise it runs the initial local pickup search by postcode/city before any bbox load, centers on the first found point as a preview only, and falls back to Novosibirsk only when there is no usable city query. City picker selection/resolve can enrich missing local city coordinates through DaData once, save them to the locations table, and carry `lat/lng` in checkout `city_context`; if DaData returns no coordinates, checkout continues with the search fallback.
 
 Version 0.23.1 fixes checkout-map blockers before browser testing: `CheckoutValidation.php` now uses readable Russian validation strings, Leaflet is loaded from the single local `assets/vendor/leaflet/` copy, all checkout state endpoints including `GET /checkout/state` require a REST nonce, the map starts from the current checkout city/postcode or saved city coordinates when possible, and switching shipping methods no longer clears the selected pickup point. Pickup selection is reset only when city/country/postcode changes.
 

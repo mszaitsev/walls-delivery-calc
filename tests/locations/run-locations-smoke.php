@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
+use WallsShop\WDC\Checkout\Locations\LocationCoordinateEnricher;
 use WallsShop\WDC\Locations\Admin\LocationsAdminPage;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
@@ -239,6 +241,32 @@ function wp_nonce_field( string $action, string $name ): void {
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
+final class WdcLocationsSmokeSuggestionClient implements AddressSuggestionClientInterface {
+	public int $calls = 0;
+
+	public function __construct(
+		private ?float $lat = 55.7558000,
+		private ?float $lng = 37.6173000
+	) {
+	}
+
+	public function suggest( string $stage, string $query, array $context = array() ): array {
+		++$this->calls;
+		$data = array();
+		if ( null !== $this->lat && null !== $this->lng ) {
+			$data = array(
+				'geo_lat' => (string) $this->lat,
+				'geo_lon' => (string) $this->lng,
+			);
+		}
+
+		return array(
+			'success' => true,
+			'suggestions' => array( array( 'data' => $data ) ),
+		);
+	}
+}
+
 function locations_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
 		throw new RuntimeException( $message );
@@ -287,6 +315,22 @@ locations_smoke_assert( '' === ( $multi_country_names_by_code['KZ'] ?? null ), '
 locations_smoke_assert( $repository->count_all() > 0, 'Repository count must be greater than zero.' );
 locations_smoke_assert( method_exists( $repository, 'count_regions' ), 'LocationRepository must expose count_regions method.' );
 locations_smoke_assert( $repository->count_regions() >= 5, 'Repository must count unique active regions.' );
+locations_smoke_assert( method_exists( $repository, 'update_coordinates' ), 'LocationRepository must expose update_coordinates method.' );
+
+$coordinate_id = $repository->save( locations_smoke_location( array( 'gar_object_id' => 881001, 'fias_id' => 'fias-coordinate-test', 'region_code' => '77', 'region_name' => 'Москва', 'place_name' => 'Москва', 'display_name' => 'Москва', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$coordinate_client = new WdcLocationsSmokeSuggestionClient( 55.7558000, 37.6173000 );
+$coordinate_enricher = new LocationCoordinateEnricher( $repository, $coordinate_client );
+$enriched_location = $coordinate_enricher->enrich( array( 'id' => $coordinate_id, 'country_code' => 'RU', 'display_name' => 'Москва' ) );
+locations_smoke_assert( 1 === $coordinate_client->calls, 'Selected city without usable coordinates must trigger DaData enrichment once.' );
+locations_smoke_assert( 55.7558000 === (float) $enriched_location['lat'] && 37.6173000 === (float) $enriched_location['lng'], 'DaData enrichment must add lat/lng to city context payload.' );
+locations_smoke_assert( 55.7558000 === (float) $wpdb->rows[ $coordinate_id ]['latitude'] && 37.6173000 === (float) $wpdb->rows[ $coordinate_id ]['longitude'], 'DaData enrichment must save coordinates in the location repository.' );
+$no_coordinate_id = $repository->save( locations_smoke_location( array( 'gar_object_id' => 881002, 'fias_id' => 'fias-coordinate-empty', 'region_code' => '77', 'region_name' => 'Москва', 'place_name' => 'Пусто', 'display_name' => 'Пусто', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$no_coordinate_client = new WdcLocationsSmokeSuggestionClient( null, null );
+$no_coordinate_enricher = new LocationCoordinateEnricher( $repository, $no_coordinate_client );
+$not_enriched_location = $no_coordinate_enricher->enrich( array( 'id' => $no_coordinate_id, 'country_code' => 'RU', 'display_name' => 'Пусто', 'latitude' => 0.0, 'longitude' => 0.0 ) );
+locations_smoke_assert( 1 === $no_coordinate_client->calls && ! isset( $not_enriched_location['lat'], $not_enriched_location['lng'] ), 'Missing DaData coordinates must not crash checkout enrichment and must leave search fallback available.' );
+$address_runtime_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Address/CheckoutAddressRuntime.php' );
+locations_smoke_assert( str_contains( $address_runtime_source, 'LocationCoordinateEnricher' ) && str_contains( $address_runtime_source, "\$context['lat']" ) && str_contains( $address_runtime_source, "\$context['lng']" ), 'Checkout city_context must receive enriched lat/lng coordinates.' );
 
 $novos = $search->search( 'новос' );
 locations_smoke_assert( count( $novos ) > 0, 'Search "новос" must return results.' );

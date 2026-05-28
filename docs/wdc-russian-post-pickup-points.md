@@ -1,8 +1,14 @@
 # Russian Post Pickup Points
 
-Version: 0.23.1.
+Version: 0.23.2.
 
 ## Checkout Map Fixes
+
+Version 0.23.2 prevents the modal from loading the Novosibirsk bbox before resolving the checkout destination. Startup order is now: saved RU `city_context` coordinates, then an initial `/points/search` by postcode/city or selected location display name, then the Novosibirsk fallback only when no coordinates and no query are available. Initial search centers the map and may show a preview card, but it does not confirm a pickup point; confirmation still requires an explicit marker click and button press.
+
+When the checkout city picker selects or resolves a local location without usable coordinates, checkout address runtime asks the existing DaData suggestion client for city coordinates, stores `geo_lat/geo_lon` through `LocationRepository::update_coordinates()`, and saves `lat/lng` into the WooCommerce session `city_context`. This enrichment runs during city selection/resolve, not when the map opens. If DaData has no coordinates or the request fails, checkout does not fail; the map uses the initial search fallback.
+
+Checkout state endpoints remain nonce-protected: `GET /wp-json/wdc/v1/checkout/state`, `POST /wp-json/wdc/v1/checkout/pickup-point`, and `DELETE /wp-json/wdc/v1/checkout/pickup-point` all require `X-WP-Nonce`. Changing city, country, or postcode resets pickup selection; switching shipping methods only hides or shows the UI and keeps the saved selection in session.
 
 Version 0.23.1 keeps one Leaflet copy at `assets/vendor/leaflet/` and enqueues `assets/vendor/leaflet/leaflet.css` plus `assets/vendor/leaflet/leaflet.js`.
 

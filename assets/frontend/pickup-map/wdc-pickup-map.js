@@ -19,11 +19,18 @@
 		var selected = null;
 		var markers = [];
 		var controller = null;
+		var suppressNextMoveLoad = false;
 		var context = initialContext || {};
 		var initialLat = parseFloat(context.lat);
 		var initialLng = parseFloat(context.lng);
 		var hasInitialCoordinates = !isNaN(initialLat) && !isNaN(initialLng);
-		var map = window.L.map(element).setView(hasInitialCoordinates ? [initialLat, initialLng] : [55.0302, 82.9204], hasInitialCoordinates ? 13 : 11);
+		var hasInitialQuery = !!(context.query && String(context.query).trim());
+		var map = window.L.map(element);
+		if (hasInitialCoordinates) {
+			map.setView([initialLat, initialLng], 13);
+		} else if (!hasInitialQuery) {
+			map.setView([55.0302, 82.9204], 11);
+		}
 		window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 			attribution: '&copy; OpenStreetMap contributors',
 			maxZoom: 19
@@ -89,27 +96,56 @@
 			});
 		}
 
-		var debouncedLoad = debounce(loadBounds, 250);
+		var debouncedLoad = debounce(function () {
+			if (suppressNextMoveLoad) {
+				suppressNextMoveLoad = false;
+				return;
+			}
+			loadBounds();
+		}, 250);
 		map.on('moveend zoomend', debouncedLoad);
 
 		function search(query) {
+			return runSearch(query, false);
+		}
+
+		function initialSearch(query) {
+			return runSearch(query, true);
+		}
+
+		function runSearch(query, initial) {
 			if (controller) {
 				controller.abort();
 			}
 			controller = new AbortController();
-			window.WDCPickupApi.search(query, controller.signal).then(function (points) {
+			card.textContent = labels.loading || 'Loading...';
+			var request = initial && window.WDCPickupApi.searchInitial ? window.WDCPickupApi.searchInitial : window.WDCPickupApi.search;
+			return request(query, controller.signal).then(function (points) {
 				if (points[0] && points[0].lat !== null && points[0].lng !== null) {
+					suppressNextMoveLoad = true;
 					map.setView([points[0].lat, points[0].lng], 15);
 					preview(points[0], false);
+					if (initial) {
+						loadBounds();
+					}
+					return;
 				}
-			}).catch(function () {});
+				card.textContent = labels.notFound || labels.empty || '';
+			}).catch(function (error) {
+				if (error.name !== 'AbortError') {
+					card.textContent = labels.error || 'Error';
+				}
+			});
 		}
 
 		setTimeout(function () {
 			map.invalidateSize();
-			loadBounds();
-			if (!hasInitialCoordinates && context.query) {
-				search(String(context.query));
+			if (hasInitialCoordinates) {
+				loadBounds();
+			} else if (hasInitialQuery) {
+				initialSearch(String(context.query));
+			} else {
+				loadBounds();
 			}
 		}, 50);
 

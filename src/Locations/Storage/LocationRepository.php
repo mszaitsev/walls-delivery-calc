@@ -693,6 +693,33 @@ final class LocationRepository {
 		return true;
 	}
 
+	public function update_coordinates( int $location_id, float $latitude, float $longitude ): bool {
+		if ( $location_id <= 0 || $latitude < -90.0 || $latitude > 90.0 || $longitude < -180.0 || $longitude > 180.0 ) {
+			return false;
+		}
+
+		$data = array(
+			'latitude'   => $latitude,
+			'longitude'  => $longitude,
+			'updated_at' => current_time( 'mysql' ),
+		);
+		if ( $this->has_test_location_rows() ) {
+			$property = $this->test_location_rows_property();
+			if ( ! isset( $this->wpdb->{$property}[ $location_id ] ) ) {
+				return false;
+			}
+			$this->wpdb->{$property}[ $location_id ] = array_merge( $this->wpdb->{$property}[ $location_id ], $data );
+			return true;
+		}
+
+		$result = $this->wpdb->update( $this->table_name(), $data, array( 'id' => $location_id ), array( '%f', '%f', '%s' ), array( '%d' ) );
+		if ( false === $result ) {
+			$this->throw_sql_error( 'Location coordinates update failed' );
+		}
+
+		return true;
+	}
+
 	public function clear_postal_code_marker( string $marker = '999999999' ): int {
 		if ( $this->has_test_location_rows() ) {
 			$property = $this->test_location_rows_property();

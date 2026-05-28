@@ -32,6 +32,8 @@
 		'wdc_platform_location_kladr_id',
 		'wdc_platform_location_display_name',
 		'wdc_platform_location_postcode',
+		'wdc_platform_location_lat',
+		'wdc_platform_location_lng',
 		'wdc_platform_location_region_code',
 		'wdc_platform_location_region_name',
 		'wdc_platform_location_region_type',
@@ -599,6 +601,8 @@
 		setHidden( 'wdc_platform_location_kladr_id', location.kladr_id );
 		setHidden( 'wdc_platform_location_display_name', location.display_name || label );
 		setHidden( 'wdc_platform_location_postcode', location.postal_code );
+		setHidden( 'wdc_platform_location_lat', location.lat || location.latitude );
+		setHidden( 'wdc_platform_location_lng', location.lng || location.longitude );
 		setHidden( 'wdc_platform_location_region_code', location.region_code );
 		setHidden( 'wdc_platform_location_region_name', location.region_name );
 		setHidden( 'wdc_platform_location_region_type', location.region_type );

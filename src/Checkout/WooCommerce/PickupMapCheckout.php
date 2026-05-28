@@ -45,20 +45,21 @@ final class PickupMapCheckout {
 				'wdc-pickup-checkout',
 				'wdcPickupCheckout',
 				array(
-					'restUrl' => function_exists( 'rest_url' ) ? rest_url( 'wdc/v1/' ) : '/wp-json/wdc/v1/',
-					'nonce' => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( 'wp_rest' ) : '',
-					'carrier' => 'russian_post',
+					'restUrl'          => function_exists( 'rest_url' ) ? rest_url( 'wdc/v1/' ) : '/wp-json/wdc/v1/',
+					'nonce'            => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( 'wp_rest' ) : '',
+					'carrier'          => 'russian_post',
 					'shippingMethodId' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
-					'initialContext' => $this->initial_context(),
-					'labels' => array(
-						'choose' => 'Выбрать пункт выдачи',
-						'change' => 'Изменить пункт выдачи',
-						'confirm' => 'Выбрать этот пункт',
+					'initialContext'   => $this->initial_context(),
+					'labels'           => array(
+						'choose'            => 'Выбрать пункт выдачи',
+						'change'            => 'Изменить пункт выдачи',
+						'confirm'           => 'Выбрать этот пункт',
 						'searchPlaceholder' => 'Адрес или индекс',
-						'empty' => 'Переместите карту или воспользуйтесь поиском.',
-						'loading' => 'Загрузка пунктов выдачи...',
-						'notSelected' => 'Пункт выдачи не выбран.',
-						'error' => 'Не удалось загрузить пункты выдачи.',
+						'empty'             => 'Переместите карту или воспользуйтесь поиском.',
+						'loading'           => 'Загрузка пунктов выдачи...',
+						'notFound'          => 'Пункты выдачи рядом с выбранным населенным пунктом не найдены. Попробуйте поиск по адресу или индексу.',
+						'notSelected'       => 'Пункт выдачи не выбран.',
+						'error'             => 'Не удалось загрузить пункты выдачи.',
 					),
 				)
 			);
@@ -80,15 +81,31 @@ final class PickupMapCheckout {
 	 */
 	private function initial_context(): array {
 		$context = $this->session_manager->city_context();
+		$selected_city = $this->session_manager->selected_city();
+		if ( array() !== $selected_city ) {
+			foreach ( $selected_city as $key => $value ) {
+				if ( ! array_key_exists( $key, $context ) || '' === (string) $context[ $key ] || null === $context[ $key ] ) {
+					$context[ $key ] = $value;
+				}
+			}
+		}
+
+		if ( 'RU' !== strtoupper( (string) ( $context['country_code'] ?? 'RU' ) ) ) {
+			return array();
+		}
+
 		$lat = $this->numeric_context_value( $context, array( 'lat', 'latitude' ) );
 		$lng = $this->numeric_context_value( $context, array( 'lng', 'lon', 'longitude' ) );
-		$query = trim( implode( ' ', array_filter( array( (string) ( $context['postcode'] ?? '' ), (string) ( $context['city_name'] ?? $context['settlement_name'] ?? $context['display_name'] ?? '' ) ) ) ) );
+		if ( ! $this->has_usable_coordinates( $lat, $lng ) ) {
+			$lat = null;
+			$lng = null;
+		}
 
 		return array_filter(
 			array(
-				'lat' => $lat,
-				'lng' => $lng,
-				'query' => $query,
+				'lat'   => $lat,
+				'lng'   => $lng,
+				'query' => $this->initial_query( $context ),
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value
 		);
@@ -106,5 +123,34 @@ final class PickupMapCheckout {
 		}
 
 		return null;
+	}
+
+	/**
+	 * @param array<string,mixed> $context
+	 */
+	private function initial_query( array $context ): string {
+		$postcode = (string) ( $context['postcode'] ?? $context['postal_code'] ?? '' );
+		$city = (string) ( $context['city_name'] ?? $context['settlement_name'] ?? $context['place_name'] ?? '' );
+		$display = (string) ( $context['display_name'] ?? '' );
+		$query = trim( implode( ' ', array_filter( array( $postcode, $city ) ) ) );
+		if ( '' !== $query ) {
+			return $query;
+		}
+		if ( '' !== trim( $display ) ) {
+			return trim( $display );
+		}
+
+		return trim( $this->session_manager->fallback_city() );
+	}
+
+	private function has_usable_coordinates( ?float $lat, ?float $lng ): bool {
+		if ( null === $lat || null === $lng ) {
+			return false;
+		}
+		if ( abs( $lat ) < 0.000001 && abs( $lng ) < 0.000001 ) {
+			return false;
+		}
+
+		return $lat >= -90.0 && $lat <= 90.0 && $lng >= -180.0 && $lng <= 180.0;
 	}
 }

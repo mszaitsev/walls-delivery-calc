@@ -18,10 +18,13 @@
 
 	window.WDCPickupApi = {
 		points: function (bbox, signal) {
-			return request('points?carrier=russian_post&limit=500&bbox=' + encodeURIComponent(bbox), { signal: signal });
+			return request('points?carrier=russian_post&limit=500&bbox=' + encodeURIComponent(bbox), { signal: signal }).then(normalizePoints);
 		},
 		search: function (query, signal) {
-			return request('points/search?carrier=russian_post&limit=25&q=' + encodeURIComponent(query), { signal: signal });
+			return request('points/search?carrier=russian_post&limit=25&q=' + encodeURIComponent(query), { signal: signal }).then(normalizePoints);
+		},
+		searchInitial: function (query, signal) {
+			return request('points/search?carrier=russian_post&limit=10&q=' + encodeURIComponent(query), { signal: signal }).then(normalizePoints);
 		},
 		save: function (pointId, shippingMethodId) {
 			return request('checkout/pickup-point', {
@@ -36,4 +39,8 @@
 			return request('checkout/state');
 		}
 	};
+
+	function normalizePoints(data) {
+		return Array.isArray(data) ? data : [];
+	}
 })(window);

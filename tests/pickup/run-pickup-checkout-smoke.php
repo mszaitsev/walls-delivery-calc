@@ -203,6 +203,14 @@ pickup_checkout_assert( ! str_contains( $checkout_js, "input[name^=\"shipping_me
 pickup_checkout_assert( str_contains( $checkout_js, 'billing_postcode' ) && str_contains( $checkout_js, 'shipping_postcode' ), 'JS must reset pickup on city/country/postcode changes.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'contextFromFields' ) && str_contains( $checkout_js, 'shipping_city' ) && str_contains( $checkout_js, 'shipping_postcode' ), 'JS must form initial map query from checkout city/postcode.' );
 $map_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.js' ) ?: '';
-pickup_checkout_assert( str_contains( $map_js, 'hasInitialCoordinates ? [initialLat, initialLng]' ) && str_contains( $map_js, 'context.query' ), 'Map JS must support initial coordinates and initial query.' );
+pickup_checkout_assert( str_contains( $map_js, 'if (hasInitialCoordinates)' ) && str_contains( $map_js, 'loadBounds();' ), 'Map JS must load bbox immediately when initial coordinates exist.' );
+pickup_checkout_assert( str_contains( $map_js, 'else if (hasInitialQuery)' ) && str_contains( $map_js, 'initialSearch(String(context.query))' ), 'Map JS must run initial search before bbox loading when only an initial query exists.' );
+pickup_checkout_assert( ! str_contains( $map_js, "loadBounds();\n\t\t\tif (!hasInitialCoordinates && context.query)" ), 'Map JS must not load the Novosibirsk bbox before initial query search.' );
+pickup_checkout_assert( str_contains( $map_js, 'preview(points[0], false)' ), 'Initial search preview must not enable final pickup confirmation.' );
+$api_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-api.js' ) ?: '';
+pickup_checkout_assert( str_contains( $api_js, 'searchInitial' ) && str_contains( $api_js, 'limit=10' ), 'Pickup API must expose a small-limit initial search.' );
+pickup_checkout_assert( str_contains( $api_js, 'Array.isArray(data)' ), 'Pickup API must normalize point responses to arrays.' );
+pickup_checkout_assert( str_contains( $map_checkout_source, 'selected_city()' ) && str_contains( $map_checkout_source, 'fallback_city()' ), 'Initial map context must use selected city/session fallback query sources.' );
+pickup_checkout_assert( str_contains( $map_checkout_source, 'has_usable_coordinates' ) && str_contains( $map_checkout_source, "'RU'" ), 'Initial map context must validate coordinates and only pass RU context.' );
 
 echo "Pickup checkout smoke test passed.\n";
