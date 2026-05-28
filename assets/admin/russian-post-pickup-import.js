@@ -66,6 +66,8 @@
 			'extracted_payload_file',
 			'extracted_payload_size',
 			'extract_error',
+			'payload_file',
+			'payload_size',
 			'downloaded',
 			'parsed',
 			'inserted',

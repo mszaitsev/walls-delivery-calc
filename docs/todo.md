@@ -12,8 +12,8 @@
   - Action Scheduler interaction
   - background download stability
   - PHP ZipArchive/zip extension behavior on LocalWP and production Linux/VDS
+  - manual TXT/JSON payload import on LocalWP/Windows as the final fallback path
 - При необходимости:
   - доработать retry/backoff;
   - добавить CLI import mode;
   - добавить chunked streamed download.
-  - добавить импорт из уже распакованного JSON/TXT как fallback для окружений без стабильного ZipArchive.

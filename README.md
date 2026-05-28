@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.31.
+Version: 0.22.32.
+
+Version 0.22.32 unifies manual Russian Post pickup imports into one ZIP/TXT/JSON upload. The fallback chain is now automatic cURL download, automatic WP HTTP download, manual ZIP upload, then manual TXT/JSON payload upload. TXT/JSON uploads skip download and ZIP extract entirely and enter the resumable batch pipeline at `stage=parse`.
 
 Version 0.22.31 fixes the extracted ZIP payload path safety check on Windows: paths are normalized before comparison, Windows drive/path case is handled case-insensitively, and boundary checks prevent sibling paths like `/tmp/base2` from passing as inside `/tmp/base`.
 

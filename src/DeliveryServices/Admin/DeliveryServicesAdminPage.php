@@ -148,7 +148,7 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
-		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' ), true ) ) {
+		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' ), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -159,7 +159,7 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_tariffs' === $action ) {
 				$data = array();
 			}
-			if ( in_array( $action, array( 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' ), true ) ) {
+			if ( in_array( $action, array( 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' ), true ) ) {
 				$data = array();
 			}
 			if ( $id > 0 && array() !== $data ) {
@@ -184,13 +184,13 @@ final class DeliveryServicesAdminPage {
 					$this->settings->set_setting( (int) $service->id, 'tariff_variants', $this->sanitize_domestic_tariff_variants_from_post(), 'json' );
 				}
 			}
-			if ( in_array( $action, array( 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_zip_import' ), true ) && $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ) {
+			if ( in_array( $action, array( 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import' ), true ) && $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ) {
 				$this->otpravka_settings->save_from_admin( $_POST );
 				if ( 'run_russian_post_pickup_import' === $action && $this->pickup_importer instanceof RussianPostPickupImporter ) {
 					$this->pickup_importer->queue_background_import( $this->otpravka_settings->unload_type() );
 				}
-				if ( 'upload_russian_post_pickup_zip_import' === $action && $this->pickup_importer instanceof RussianPostPickupImporter ) {
-					$this->handle_russian_post_pickup_zip_upload();
+				if ( in_array( $action, array( 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import' ), true ) && $this->pickup_importer instanceof RussianPostPickupImporter ) {
+					$this->handle_russian_post_pickup_file_upload();
 				}
 			}
 			if ( 'reset_russian_post_pickup_import' === $action && $this->pickup_importer instanceof RussianPostPickupImporter ) {
@@ -223,13 +223,13 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' ), true ) ) {
+		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' ), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'availability',
 				'save_calculation' => 'calculation',
 				'save_tariffs' => 'tariffs',
-				'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' => 'russian_post_pickup',
+				'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' => 'russian_post_pickup',
 				default => 'main',
 			};
 			if ( '' !== $service_key ) {
@@ -242,32 +242,33 @@ final class DeliveryServicesAdminPage {
 		exit;
 	}
 
-	private function handle_russian_post_pickup_zip_upload(): void {
+	private function handle_russian_post_pickup_file_upload(): void {
 		if ( ! $this->pickup_importer instanceof RussianPostPickupImporter ) {
 			return;
 		}
-		$file = $_FILES['russian_post_pickup_zip'] ?? null;
+		$file = $_FILES['russian_post_pickup_file'] ?? ( $_FILES['russian_post_pickup_zip'] ?? null );
 		if ( ! is_array( $file ) || UPLOAD_ERR_OK !== (int) ( $file['error'] ?? UPLOAD_ERR_NO_FILE ) ) {
 			$this->pickup_import_state?->failed(
 				array(
-					'source' => 'uploaded_zip',
+					'source' => 'uploaded_file',
 					'type' => $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ? $this->otpravka_settings->unload_type() : 'ALL',
-					'errors' => array( 'ZIP upload failed or no file was selected.' ),
+					'errors' => array( 'Pickup import file upload failed or no file was selected.' ),
 				)
 			);
 			return;
 		}
 
 		$original_name = sanitize_file_name( (string) ( $file['name'] ?? 'russian-post-passport.zip' ) );
-		if ( ! str_ends_with( strtolower( $original_name ), '.zip' ) ) {
-			$this->pickup_import_state?->failed( array( 'source' => 'uploaded_zip', 'original_upload_name' => $original_name, 'errors' => array( 'Only ZIP files are allowed for Russian Post pickup import.' ) ) );
+		$extension = strtolower( pathinfo( $original_name, PATHINFO_EXTENSION ) );
+		if ( ! in_array( $extension, array( 'zip', 'txt', 'json' ), true ) ) {
+			$this->pickup_import_state?->failed( array( 'source' => 'uploaded_file', 'original_upload_name' => $original_name, 'errors' => array( 'Only ZIP, TXT, or JSON files are allowed for Russian Post pickup import.' ) ) );
 			return;
 		}
 		$tmp_name = (string) ( $file['tmp_name'] ?? '' );
 		if ( function_exists( 'wp_check_filetype_and_ext' ) && '' !== $tmp_name ) {
-			$checked = wp_check_filetype_and_ext( $tmp_name, $original_name, array( 'zip' => 'application/zip' ) );
-			if ( empty( $checked['ext'] ) || 'zip' !== (string) $checked['ext'] ) {
-				$this->pickup_import_state?->failed( array( 'source' => 'uploaded_zip', 'original_upload_name' => $original_name, 'errors' => array( 'Uploaded file failed ZIP type validation.' ) ) );
+			$checked = wp_check_filetype_and_ext( $tmp_name, $original_name, array( 'zip' => 'application/zip', 'txt' => 'text/plain', 'json' => 'application/json' ) );
+			if ( empty( $checked['ext'] ) || ! in_array( (string) $checked['ext'], array( 'zip', 'txt', 'json' ), true ) ) {
+				$this->pickup_import_state?->failed( array( 'source' => 'uploaded_file', 'original_upload_name' => $original_name, 'errors' => array( 'Uploaded file failed ZIP/TXT/JSON type validation.' ) ) );
 				return;
 			}
 		}
@@ -283,15 +284,14 @@ final class DeliveryServicesAdminPage {
 		$target = rtrim( $base_dir, '/\\' ) . DIRECTORY_SEPARATOR . $filename;
 		$moved = '' !== $tmp_name && is_uploaded_file( $tmp_name ) ? move_uploaded_file( $tmp_name, $target ) : ( '' !== $tmp_name && is_file( $tmp_name ) && @rename( $tmp_name, $target ) );
 		if ( ! $moved || ! is_file( $target ) ) {
-			$this->pickup_import_state?->failed( array( 'source' => 'uploaded_zip', 'original_upload_name' => $original_name, 'errors' => array( 'Unable to store uploaded ZIP file.' ) ) );
+			$this->pickup_import_state?->failed( array( 'source' => 'uploaded_file', 'original_upload_name' => $original_name, 'errors' => array( 'Unable to store uploaded pickup import file.' ) ) );
 			return;
 		}
 
-		$queued = $this->pickup_importer->queue_background_import_from_zip(
-			$target,
-			$this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ? $this->otpravka_settings->unload_type() : 'ALL',
-			$original_name
-		);
+		$type = $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ? $this->otpravka_settings->unload_type() : 'ALL';
+		$queued = 'zip' === $extension
+			? $this->pickup_importer->queue_background_import_from_zip( $target, $type, $original_name )
+			: $this->pickup_importer->queue_background_import_from_payload( $target, $type, $original_name );
 		if ( ! $queued ) {
 			$target_size = is_file( $target ) ? (int) filesize( $target ) : 0;
 			if ( is_file( $target ) ) {
@@ -303,14 +303,20 @@ final class DeliveryServicesAdminPage {
 			}
 			$this->pickup_import_state?->failed(
 				array(
-					'source' => 'uploaded_zip',
-					'temp_zip_file' => $target,
+					'source' => 'zip' === $extension ? 'uploaded_zip' : 'uploaded_payload',
+					'temp_zip_file' => 'zip' === $extension ? $target : '',
+					'payload_file' => 'zip' === $extension ? '' : $target,
+					'payload_size' => 'zip' === $extension ? 0 : $target_size,
 					'original_upload_name' => $original_name,
 					'uploaded_file_size' => $target_size,
-					'errors' => array( 'Unable to queue ZIP import. Another import may be running.' ),
+					'errors' => array( 'Unable to queue pickup import. Another import may be running.' ),
 				)
 			);
 		}
+	}
+
+	private function handle_russian_post_pickup_zip_upload(): void {
+		$this->handle_russian_post_pickup_file_upload();
 	}
 
 	public function render_page(): void {
@@ -605,9 +611,9 @@ final class DeliveryServicesAdminPage {
 			<?php if ( $is_busy ) : ?>
 				<button class="button" type="submit" name="wdc_delivery_services_action" value="reset_russian_post_pickup_import">Отменить / сбросить зависший импорт</button>
 			<?php endif; ?>
-			<h3 style="margin-top:24px;">Импорт из ZIP-файла</h3>
-			<p class="description">ZIP можно скачать из API Отправка: <code>https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=ALL</code>. После загрузки файл будет обработан тем же background batch pipeline. Этот режим рекомендуется для LocalWP и окружений, где автоматическая загрузка через WordPress HTTP нестабильна.</p>
-			<p><input type="file" name="russian_post_pickup_zip" accept=".zip"> <button class="button button-primary" type="submit" name="wdc_delivery_services_action" value="upload_russian_post_pickup_zip_import" <?php disabled( $is_busy ); ?>>Загрузить ZIP и начать импорт</button></p>
+			<h3 style="margin-top:24px;">Импорт из ZIP/TXT-файла</h3>
+			<p class="description">Можно загрузить ZIP, скачанный из API Отправка: <code>https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=ALL</code>. Если ZIP extract не работает в локальной среде, распакуйте ZIP вручную и загрузите .txt/.json файл с <code>passportElements</code>. Файл будет обработан тем же background batch pipeline.</p>
+			<p><input type="file" name="russian_post_pickup_file" accept=".zip,.txt,.json"> <button class="button button-primary" type="submit" name="wdc_delivery_services_action" value="upload_russian_post_pickup_file_import" <?php disabled( $is_busy ); ?>>Загрузить ZIP/TXT и начать импорт</button></p>
 			<details style="max-width: 760px; margin-top: 8px;">
 				<summary>PowerShell: скачать ZIP вручную</summary>
 				<pre style="white-space: pre-wrap; background:#f6f7f7; padding:12px; border:1px solid #dcdcde;"><code># === НАСТРОЙКИ ===
@@ -632,7 +638,11 @@ Invoke-WebRequest `
       "Accept"               = "application/octet-stream"
   } `
   -OutFile $OutFile `
-  -TimeoutSec 300</code></pre>
+  -TimeoutSec 300
+
+# === РАСПАКОВКА, ЕСЛИ НУЖЕН TXT/JSON FALLBACK ===
+Expand-Archive -Path "D:\russian-post-passport-all.zip" -DestinationPath "D:\russian-post-passport-all"
+Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			</details>
 		</form>
 		<?php
@@ -676,6 +686,8 @@ Invoke-WebRequest `
 			'extracted_payload_file' => 'Payload file',
 			'extracted_payload_size' => 'Payload size',
 			'extract_error' => 'Extract error',
+			'payload_file' => 'Payload file',
+			'payload_size' => 'Payload size',
 			'downloaded' => 'Downloaded',
 			'parsed' => 'Parsed',
 			'inserted' => 'Inserted',

@@ -86,8 +86,9 @@ final class RussianPostPickupImporter {
 		$staging_table = $this->repository->staging_table( $import_id );
 		$main_table = $this->repository->main_table();
 		$backup_table = $this->repository->backup_table( $import_id );
-		$source = 'uploaded_zip' === (string) ( $state['source'] ?? '' ) ? 'uploaded_zip' : 'api_download';
+		$source = in_array( (string) ( $state['source'] ?? '' ), array( 'uploaded_zip', 'uploaded_payload' ), true ) ? (string) $state['source'] : 'api_download';
 		$uploaded_zip = (string) ( $state['temp_zip_file'] ?? '' );
+		$uploaded_payload = (string) ( $state['payload_file'] ?? '' );
 		$original_upload_name = (string) ( $state['original_upload_name'] ?? '' );
 		$uploaded_file_size = max( 0, (int) ( $state['uploaded_file_size'] ?? 0 ) );
 		$this->repository->drop_table( $staging_table );
@@ -102,6 +103,26 @@ final class RussianPostPickupImporter {
 		$result['uploaded_file_size'] = $uploaded_file_size;
 		$temp_file = '';
 		try {
+			if ( 'uploaded_payload' === $source ) {
+				$payload_size = is_file( $uploaded_payload ) ? (int) filesize( $uploaded_payload ) : 0;
+				if ( '' === $uploaded_payload || 0 >= $payload_size ) {
+					$result['payload_file'] = $uploaded_payload;
+					$result['payload_size'] = $payload_size;
+					$result['errors'][] = 'Uploaded TXT/JSON payload file is missing or empty.';
+					return $this->fail_pipeline( $result );
+				}
+				$result['payload_file'] = $uploaded_payload;
+				$result['payload_size'] = $payload_size;
+				$result['payload_offset'] = 0;
+				$this->state?->update( 'parse', $result );
+				if ( ! $this->schedule_single( self::BATCH_HOOK, array( $import_id, $type, 0 ) ) ) {
+					$result['errors'][] = 'Unable to schedule background import batch job.';
+					return $this->fail_pipeline( $result );
+				}
+
+				return array( 'success' => true, 'import_id' => $import_id, 'payload_file' => $uploaded_payload );
+			}
+
 			if ( 'uploaded_zip' === $source ) {
 				$temp_file = $uploaded_zip;
 				$result['temp_zip_file'] = $temp_file;
@@ -166,6 +187,7 @@ final class RussianPostPickupImporter {
 
 			$payload_file = (string) $extract['payload_file'];
 			$result['payload_file'] = $payload_file;
+			$result['payload_size'] = is_file( $payload_file ) ? (int) filesize( $payload_file ) : 0;
 			$result['payload_offset'] = 0;
 			$this->state?->update( 'parse', $result );
 			if ( ! $this->schedule_single( self::BATCH_HOOK, array( $import_id, $type, 0 ) ) ) {
@@ -425,6 +447,73 @@ final class RussianPostPickupImporter {
 			)
 		);
 		$this->delete_temp_file( $zip_file );
+
+		return false;
+	}
+
+	public function queue_background_import_from_payload( string $payload_file, string $type = 'ALL', string $original_upload_name = '' ): bool {
+		if ( $this->is_locked() ) {
+			return false;
+		}
+
+		$current = $this->state?->reset_stale_if_needed() ?? array();
+		if ( in_array( (string) ( $current['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
+			return false;
+		}
+
+		$type = $this->normalize_type( $type );
+		$payload_file = trim( $payload_file );
+		$file_size = '' !== $payload_file && is_file( $payload_file ) ? (int) filesize( $payload_file ) : 0;
+		$lower = strtolower( $payload_file );
+		$import_id = sha1( (string) microtime( true ) . '|uploaded_payload|' . $type . '|' . ( function_exists( 'wp_rand' ) ? (string) wp_rand() : (string) random_int( 1, PHP_INT_MAX ) ) );
+		if ( 0 >= $file_size || ( ! str_ends_with( $lower, '.txt' ) && ! str_ends_with( $lower, '.json' ) ) ) {
+			$this->state?->failed(
+				array(
+					'type' => $type,
+					'import_id' => $import_id,
+					'source' => 'uploaded_payload',
+					'payload_file' => $payload_file,
+					'payload_size' => $file_size,
+					'original_upload_name' => $original_upload_name,
+					'uploaded_file_size' => $file_size,
+					'finished_at' => $this->now(),
+					'errors' => array( 'Uploaded TXT/JSON payload file is missing, empty, or has an invalid extension.' ),
+				)
+			);
+			$this->delete_temp_file( $payload_file );
+			return false;
+		}
+
+		if ( $this->schedule_single( self::INIT_HOOK, array( $import_id, $type ) ) ) {
+			$this->state?->queue(
+				$type,
+				$import_id,
+				array(
+					'source' => 'uploaded_payload',
+					'payload_file' => $payload_file,
+					'payload_size' => $file_size,
+					'original_upload_name' => $original_upload_name,
+					'uploaded_file_size' => $file_size,
+				)
+			);
+			$this->lock();
+			return true;
+		}
+
+		$this->state?->failed(
+			array(
+				'type' => $type,
+				'import_id' => $import_id,
+				'source' => 'uploaded_payload',
+				'payload_file' => $payload_file,
+				'payload_size' => $file_size,
+				'original_upload_name' => $original_upload_name,
+				'uploaded_file_size' => $file_size,
+				'finished_at' => $this->now(),
+				'errors' => array( 'Unable to schedule background import job.' ),
+			)
+		);
+		$this->delete_temp_file( $payload_file );
 
 		return false;
 	}
@@ -823,6 +912,7 @@ final class RussianPostPickupImporter {
 			'swap_started_at' => '',
 			'swap_finished_at' => '',
 			'payload_file' => '',
+			'payload_size' => 0,
 			'temp_zip_file' => '',
 			'payload_offset' => 0,
 			'objects_processed' => 0,

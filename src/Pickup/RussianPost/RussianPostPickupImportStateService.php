@@ -40,13 +40,16 @@ final class RussianPostPickupImportStateService {
 				'errors' => array(),
 			)
 		);
-		foreach ( array( 'source', 'temp_zip_file', 'original_upload_name' ) as $key ) {
+		foreach ( array( 'source', 'temp_zip_file', 'payload_file', 'original_upload_name' ) as $key ) {
 			if ( array_key_exists( $key, $context ) ) {
 				$state[ $key ] = (string) $context[ $key ];
 			}
 		}
-		if ( array_key_exists( 'uploaded_file_size', $context ) ) {
-			$state['uploaded_file_size'] = max( 0, (int) $context['uploaded_file_size'] );
+		foreach ( array( 'uploaded_file_size', 'payload_size' ) as $key ) {
+			if ( ! array_key_exists( $key, $context ) ) {
+				continue;
+			}
+			$state[ $key ] = max( 0, (int) $context[ $key ] );
 		}
 		$this->save( $state );
 
@@ -93,7 +96,7 @@ final class RussianPostPickupImportStateService {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
 		}
-		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
+		foreach ( array( 'payload_offset', 'payload_size', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
@@ -238,6 +241,7 @@ final class RussianPostPickupImportStateService {
 			'extracted_payload_entry_name' => '',
 			'extracted_payload_entry_index' => 0,
 			'payload_file' => '',
+			'payload_size' => 0,
 			'temp_zip_file' => '',
 			'payload_offset' => 0,
 			'objects_processed' => 0,
@@ -273,7 +277,7 @@ final class RussianPostPickupImportStateService {
 		foreach ( array( 'downloaded', 'parsed', 'inserted', 'updated', 'deactivated', 'skipped' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
-		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
+		foreach ( array( 'payload_offset', 'payload_size', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
 		$state['status'] = $status;

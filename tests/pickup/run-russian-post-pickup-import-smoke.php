@@ -389,28 +389,69 @@ foreach ( array( 'pickup_importer' => $importer, 'pickup_import_state' => $state
 	$ref_property->setAccessible( true );
 	$ref_property->setValue( $admin_page, $value );
 }
-$upload_handler = $admin_reflection->getMethod( 'handle_russian_post_pickup_zip_upload' );
+$upload_handler = $admin_reflection->getMethod( 'handle_russian_post_pickup_file_upload' );
 $upload_handler->setAccessible( true );
 
 $upload_tmp_locked = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-admin-locked-' . uniqid() . '.zip';
 rp_write_passport_zip( $upload_tmp_locked );
 set_transient( 'wdc_russian_post_pickup_import_lock', 1, 3600 );
-$_FILES['russian_post_pickup_zip'] = array( 'name' => 'locked.zip', 'tmp_name' => $upload_tmp_locked, 'error' => UPLOAD_ERR_OK );
+$_FILES['russian_post_pickup_file'] = array( 'name' => 'locked.txt', 'tmp_name' => $upload_tmp_locked, 'error' => UPLOAD_ERR_OK );
 $upload_handler->invoke( $admin_page );
 $locked_upload_state = $state_service->current();
-$locked_target = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-uploads' . DIRECTORY_SEPARATOR . 'wdc-imports' . DIRECTORY_SEPARATOR . 'locked.zip';
-rp_pickup_assert( ! file_exists( $upload_tmp_locked ) && ! file_exists( $locked_target ) && 'failed' === (string) $locked_upload_state['status'] && str_contains( implode( ' ', $locked_upload_state['errors'] ), 'Unable to queue ZIP import. Another import may be running.' ), 'Active lock + admin ZIP upload must delete stored file and save failed state.' );
+$locked_target = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-uploads' . DIRECTORY_SEPARATOR . 'wdc-imports' . DIRECTORY_SEPARATOR . 'locked.txt';
+rp_pickup_assert( ! file_exists( $upload_tmp_locked ) && ! file_exists( $locked_target ) && 'failed' === (string) $locked_upload_state['status'] && str_contains( implode( ' ', $locked_upload_state['errors'] ), 'Unable to queue pickup import. Another import may be running.' ), 'Active lock + admin payload upload must delete stored file and save failed state.' );
 delete_transient( 'wdc_russian_post_pickup_import_lock' );
 
 $upload_tmp_success = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-admin-success-' . uniqid() . '.zip';
 rp_write_passport_zip( $upload_tmp_success );
-$_FILES['russian_post_pickup_zip'] = array( 'name' => 'success.zip', 'tmp_name' => $upload_tmp_success, 'error' => UPLOAD_ERR_OK );
+$_FILES['russian_post_pickup_file'] = array( 'name' => 'success.zip', 'tmp_name' => $upload_tmp_success, 'error' => UPLOAD_ERR_OK );
 $upload_handler->invoke( $admin_page );
 $success_upload_state = $state_service->current();
-rp_pickup_assert( 'queued' === (string) $success_upload_state['status'] && 'uploaded_zip' === (string) $success_upload_state['source'] && is_file( (string) $success_upload_state['temp_zip_file'] ), 'Successful admin ZIP upload must keep file for init job.' );
+rp_pickup_assert( 'queued' === (string) $success_upload_state['status'] && 'uploaded_zip' === (string) $success_upload_state['source'] && is_file( (string) $success_upload_state['temp_zip_file'] ), 'Admin .zip upload must route to ZIP queue and keep file for init job.' );
 $importer->reset_stale_or_running_import();
 $GLOBALS['wdc_scheduled_events'] = array();
-unset( $_FILES['russian_post_pickup_zip'] );
+
+$upload_tmp_txt = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-admin-payload-' . uniqid() . '.txt';
+file_put_contents( $upload_tmp_txt, (string) $GLOBALS['rp_passport_payload'] );
+$_FILES['russian_post_pickup_file'] = array( 'name' => 'payload.txt', 'tmp_name' => $upload_tmp_txt, 'error' => UPLOAD_ERR_OK );
+$upload_handler->invoke( $admin_page );
+$txt_upload_state = $state_service->current();
+rp_pickup_assert( 'queued' === (string) $txt_upload_state['status'] && 'uploaded_payload' === (string) $txt_upload_state['source'] && is_file( (string) $txt_upload_state['payload_file'] ), 'Admin .txt upload must route to payload queue and keep file for init job.' );
+$txt_init_event = rp_shift_event( RussianPostPickupImporter::INIT_HOOK );
+$txt_init = $importer->run_import_init( (string) $txt_init_event['args'][0], (string) $txt_init_event['args'][1] );
+$txt_state = $state_service->current();
+rp_pickup_assert( ! empty( $txt_init['success'] ) && 'uploaded_payload' === (string) $txt_state['source'] && 'parse' === (string) $txt_state['stage'] && '' === (string) $txt_state['download_backend'] && '' === (string) $txt_state['extract_backend'] && (int) $txt_state['payload_size'] > 0, 'Uploaded payload init must skip download/extract and schedule batch.' );
+$txt_batch_event = rp_shift_event( RussianPostPickupImporter::BATCH_HOOK );
+$txt_batch = $importer->run_import_batch( (string) $txt_batch_event['args'][0], (string) $txt_batch_event['args'][1], (int) $txt_batch_event['args'][2] );
+$txt_finalize_event = rp_shift_event( RussianPostPickupImporter::FINALIZE_HOOK );
+$txt_final = $importer->run_import_finalize( (string) $txt_finalize_event['args'][0], (string) $txt_finalize_event['args'][1] );
+rp_pickup_assert( ! empty( $txt_batch['success'] ) && ! empty( $txt_final['success'] ) && ! file_exists( (string) $txt_state['payload_file'] ), 'Uploaded payload batch/staging/swap must work and cleanup payload on finalize.' );
+
+delete_transient( 'wdc_russian_post_pickup_import_lock' );
+$GLOBALS['wdc_scheduled_events'] = array();
+$upload_tmp_json = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-admin-payload-' . uniqid() . '.json';
+file_put_contents( $upload_tmp_json, (string) $GLOBALS['rp_passport_payload'] );
+$_FILES['russian_post_pickup_file'] = array( 'name' => 'payload.json', 'tmp_name' => $upload_tmp_json, 'error' => UPLOAD_ERR_OK );
+$upload_handler->invoke( $admin_page );
+$json_upload_state = $state_service->current();
+rp_pickup_assert( 'queued' === (string) $json_upload_state['status'] && 'uploaded_payload' === (string) $json_upload_state['source'] && str_ends_with( (string) $json_upload_state['payload_file'], '.json' ), 'Admin .json upload must route to payload queue.' );
+$importer->reset_stale_or_running_import();
+$GLOBALS['wdc_scheduled_events'] = array();
+
+$upload_tmp_invalid_ext = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-admin-invalid-' . uniqid() . '.csv';
+file_put_contents( $upload_tmp_invalid_ext, 'bad' );
+$_FILES['russian_post_pickup_file'] = array( 'name' => 'payload.csv', 'tmp_name' => $upload_tmp_invalid_ext, 'error' => UPLOAD_ERR_OK );
+$upload_handler->invoke( $admin_page );
+$invalid_ext_state = $state_service->current();
+rp_pickup_assert( 'failed' === (string) $invalid_ext_state['status'] && str_contains( implode( ' ', $invalid_ext_state['errors'] ), 'Only ZIP, TXT, or JSON files are allowed' ) && file_exists( $upload_tmp_invalid_ext ), 'Invalid extension must fail before storing uploaded file.' );
+@unlink( $upload_tmp_invalid_ext );
+unset( $_FILES['russian_post_pickup_file'] );
+
+delete_transient( 'wdc_russian_post_pickup_import_lock' );
+$missing_payload = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-missing-' . uniqid() . '.json';
+rp_pickup_assert( ! $importer->queue_background_import_from_payload( $missing_payload, 'ALL', 'missing.json' ), 'Missing uploaded payload must fail queue.' );
+$missing_payload_state = $state_service->current();
+rp_pickup_assert( 'failed' === (string) $missing_payload_state['status'] && str_contains( implode( ' ', $missing_payload_state['errors'] ), 'Uploaded TXT/JSON payload file is missing' ), 'Missing payload must save failed state.' );
 
 delete_transient( 'wdc_russian_post_pickup_import_lock' );
 $invalid_uploaded_zip = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-invalid-' . uniqid() . '.zip';
@@ -544,6 +585,6 @@ $importer->sync_schedule();
 rp_pickup_assert( ! isset( $GLOBALS['wdc_recurring_events'][ RussianPostPickupImporter::SCHEDULE_HOOK ] ), 'Schedule disabled must clear weekly import.' );
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
-rp_pickup_assert( str_contains( $admin_source, 'rows_inserted_to_staging' ) && str_contains( $admin_source, 'staging_table' ) && str_contains( $admin_source, 'upload_russian_post_pickup_zip_import' ) && str_contains( $admin_source, 'ВАШ_ACCESS_TOKEN' ), 'Admin status output must include staging metrics and manual ZIP upload instructions.' );
+rp_pickup_assert( str_contains( $admin_source, 'rows_inserted_to_staging' ) && str_contains( $admin_source, 'staging_table' ) && str_contains( $admin_source, 'upload_russian_post_pickup_file_import' ) && str_contains( $admin_source, 'accept=".zip,.txt,.json"' ) && str_contains( $admin_source, 'ВАШ_ACCESS_TOKEN' ) && str_contains( $admin_source, 'Expand-Archive' ), 'Admin status output must include staging metrics and unified ZIP/TXT/JSON upload instructions.' );
 
 echo "Russian Post pickup import smoke test passed.\n";
