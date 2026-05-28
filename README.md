@@ -1,14 +1,20 @@
 # Walls Delivery Calc
 
-Version: 0.25.4.
+Version: 0.25.6.
+
+Version 0.25.6 simplifies pickup type labels and tightens the map selection flow. Admin settings now keep one type name per OPS/PVZ/APS entry: `Название в карточке/баллоне/списке`. The old marker-label fields are no longer shown or saved; existing `card_label` values remain compatible and are exposed to the frontend as `pickupPointTypes.*.label`.
+
+Map pins are now textless blue pins with a white center, while clusters are white circles with a thick blue border and dark count. Opening a marker or list row creates a preview: the marker and row are highlighted and the balloon stays open, but checkout is not updated. The customer commits the point through `Выбрать этот пункт` in the balloon or `Выбрать` in the list row; both paths dispatch `wdc:point-selected` and save the point immediately without requiring the footer button. The footer button remains only as a fallback for an already committed point.
+
+Balloon state now survives bbox reloads and normal map movement when the preview/committed point is still present in the visible point set. Dragging or zooming does not close the balloon; clicking empty map space closes only the preview popup and keeps any committed checkout point intact.
 
 Version 0.25.4 moves the pickup point details into the map popup/balloon. Clicking a marker or list row now opens the point card directly on the map, with address, work time, clean description when available, and the `Выбрать этот пункт` button inside the popup. The side/bottom panel remains as a compact status area, while the external confirm button stays as a compatibility fallback and is enabled only after a confirmed selection.
 
 Single markers and clusters now share a consistent HTML style in Leaflet and Yandex: a white center, thick blue outline, short marker label from settings, and a blue tail for single point pins. Clusters render as numbered circles and still expand/focus on click. The visible list remains a navigation aid beside/below the map; it opens the same popup instead of duplicating the full card.
 
-Version 0.25.2 adds configurable Russian Post pickup point types for `russian_post_domestic_pickup`. In the delivery service admin tab `ПВЗ / ОПС`, the new `Типы пунктов выдачи` block controls OPS, PVZ, and APS independently: whether the type is used, the short marker label, and the longer card/list label. Defaults are OPS `ОПС` / `Отделение Почты России`, PVZ `ПВЗ` / `Пункт выдачи`, and APS `Почтомат` / `Почтомат`. At least one type is always enabled; if an admin disables all three, OPS is restored automatically.
+Version 0.25.2 adds configurable Russian Post pickup point types for `russian_post_domestic_pickup`. In the delivery service admin tab `ПВЗ / ОПС`, the `Типы пунктов выдачи` block controls OPS, PVZ, and APS independently: whether the type is used and the customer-facing type label. Current defaults are OPS `Отделение Почты России`, PVZ `Пункт выдачи`, and APS `Почтомат`. At least one type is always enabled; if an admin disables all three, OPS is restored automatically.
 
-The public Russian Post `/points` and `/points/search` endpoints now filter results by enabled pickup types. Explicit REST `type[]` filters are intersected with enabled types, so requesting a disabled type returns an empty list. Checkout localizes `pickupPointTypes` to the map frontend; list/card text uses `cardLabel`, while Leaflet and Yandex marker captions use `markerLabel`.
+The public Russian Post `/points` and `/points/search` endpoints now filter results by enabled pickup types. Explicit REST `type[]` filters are intersected with enabled types, so requesting a disabled type returns an empty list. Checkout localizes `pickupPointTypes` to the map frontend; list/card/balloon text uses `label`, and markers stay textless.
 
 Version 0.25.1 keeps initial search results as preview-only. `initialSearch()` may show the first found point in the card and softly mark it in the list, but it no longer enables confirmation or dispatches `wdc:point-selected` until the customer explicitly clicks a marker or list row.
 

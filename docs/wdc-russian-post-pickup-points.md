@@ -1,6 +1,14 @@
 # Russian Post Pickup Points
 
-Version: 0.25.4.
+Version: 0.25.6.
+
+Version 0.25.6 changes pickup type settings to one customer-facing label per type. The `Типы пунктов выдачи` block now shows only `Использовать` and `Название в карточке/баллоне/списке` for OPS, PVZ, and APS. Existing `*_card_label` values are still read as the label for backward compatibility; `*_marker_label` is no longer shown, saved, localized, or used by map providers.
+
+Map markers are textless. Single pickup points render as blue pins with a white center and a blue tail, matching the map-style marker reference. Clusters render as white circles with a thicker blue border and a dark count. The frontend still uses the configured type label in the list and balloon card, but never inside the marker itself.
+
+The map state is now explicitly split into preview and committed selection. Marker clicks and list-row clicks set `previewPoint`, highlight the marker and list row, and open the balloon without dispatching `wdc:point-selected`. The balloon `Выбрать этот пункт` button and the list-row `Выбрать` button set `committedPoint`, dispatch `wdc:point-selected`, update the compact status, and save the point to checkout immediately. The footer confirm button remains a fallback for a committed point, not a required second step.
+
+Balloon state is resilient during map movement. Bbox reloads re-render markers and reopen the balloon when the preview or committed point is still part of the new visible point set. Dragging, zooming, and bounds changes do not close the balloon. Clicking empty map space closes only the preview popup and keeps the committed checkout point.
 
 Version 0.25.4 moves the point details card from the side/bottom panel into the map popup/balloon. Marker clicks and list-row clicks both open the map popup for that point. The popup contains the customer-facing type label, address, work time, clean description when present, and the `Выбрать этот пункт` action. Pressing that popup button confirms the point, dispatches the existing `wdc:point-selected` event, updates the list selected state, and keeps the external confirm button available as a fallback.
 
@@ -8,9 +16,9 @@ The side/bottom panel is no longer the primary details surface; it only shows co
 
 Leaflet and Yandex now use matching custom HTML marker visuals. Single points render as blue-outlined pins with a white center, a blue tail, and the configured `Название на маркере` inside. Clusters render as blue-outlined white circles with the count, without a tail. Leaflet uses `divIcon` for pins and grid-cluster markers; Yandex uses `ymaps.templateLayoutFactory.createClass` for placemarks and `clusterIconLayout` for cluster circles.
 
-Version 0.25.2 adds pickup type controls for `russian_post_domestic_pickup` on the delivery service page, tab `ПВЗ / ОПС`, block `Типы пунктов выдачи`. OPS, PVZ, and APS each have `Использовать`, `Название на маркере`, and `Название в карточке/списке`.
+Version 0.25.2 adds pickup type controls for `russian_post_domestic_pickup` on the delivery service page, tab `ПВЗ / ОПС`, block `Типы пунктов выдачи`. OPS, PVZ, and APS currently have `Использовать` and `Название в карточке/баллоне/списке`.
 
-`Название на маркере` is intentionally short and is used inside Leaflet/Yandex custom HTML markers. `Название в карточке/списке` is the customer-facing type name shown in the popup card and visible list rows. Defaults are OPS `ОПС` / `Отделение Почты России`, PVZ `ПВЗ` / `Пункт выдачи`, and APS `Почтомат` / `Почтомат`.
+`Название в карточке/баллоне/списке` is the customer-facing type name shown in the popup card and visible list rows. Defaults are OPS `Отделение Почты России`, PVZ `Пункт выдачи`, and APS `Почтомат`; markers do not render text.
 
 At least one type must remain enabled. Saving an all-disabled configuration automatically enables OPS. The Russian Post `/points` and `/points/search` endpoints apply enabled types to map data; when REST also receives `type[]`, the effective filter is the intersection of requested and enabled types.
 

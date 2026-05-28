@@ -10,6 +10,7 @@
 		var activePointId = null;
 		var pointClickCallback = function () {};
 		var popupSelectCallback = function () {};
+		var mapClickCallback = function () {};
 
 		if (!window.L) {
 			return unavailable('Leaflet is not available.');
@@ -33,6 +34,7 @@
 		}
 
 		map.on('moveend zoomend', boundsChanged);
+		map.on('click', mapClicked);
 		map.getContainer().addEventListener('click', onPopupClick);
 
 		return {
@@ -75,6 +77,7 @@
 			destroy: function () {
 				clearMarkers();
 				map.off('moveend zoomend', boundsChanged);
+				map.off('click', mapClicked);
 				map.getContainer().removeEventListener('click', onPopupClick);
 				map.remove();
 			},
@@ -83,6 +86,9 @@
 			},
 			onPopupSelect: function (callback) {
 				popupSelectCallback = typeof callback === 'function' ? callback : function () {};
+			},
+			onMapClick: function (callback) {
+				mapClickCallback = typeof callback === 'function' ? callback : function () {};
 			},
 			invalidateSize: function () {
 				map.invalidateSize();
@@ -101,7 +107,10 @@
 							iconAnchor: [23, 23]
 						})
 					}).addTo(map);
-					clusterMarker.on('click', function () {
+					clusterMarker.on('click', function (event) {
+						if (event && event.originalEvent && window.L.DomEvent) {
+							window.L.DomEvent.stop(event.originalEvent);
+						}
 						map.fitBounds(window.L.latLngBounds(cluster.points.map(function (point) {
 							return [point.lat, point.lng];
 						})), { padding: [32, 32], maxZoom: Math.max(map.getZoom() + 1, 15) });
@@ -118,7 +127,12 @@
 						icon: pointIcon(point, activePointId === id)
 					}).addTo(map);
 					marker.bindPopup(escapeHtml(point.address || ''));
-					marker.on('click', function () { pointClickCallback(point); });
+					marker.on('click', function (event) {
+						if (event && event.originalEvent && window.L.DomEvent) {
+							window.L.DomEvent.stop(event.originalEvent);
+						}
+						pointClickCallback(point);
+					});
 					marker._wdcPointId = id;
 					marker._wdcPoint = point;
 					markers.push(marker);
@@ -153,11 +167,15 @@
 			var type = pointType(point);
 			return window.L.divIcon({
 				className: 'wdc-map-marker-icon',
-				html: '<span class="wdc-map-marker-pin wdc-map-marker-pin--' + type.toLowerCase() + (active ? ' is-active' : '') + '"><span class="wdc-map-marker-pin__inner">' + escapeHtml(pointMarkerLabel(point)) + '</span><span class="wdc-map-marker-pin__tail"></span></span>',
-				iconSize: [46, 54],
-				iconAnchor: [23, 54],
-				popupAnchor: [0, -54]
+				html: '<span class="wdc-map-marker-pin wdc-map-marker-pin--' + type.toLowerCase() + (active ? ' is-active' : '') + '"><span class="wdc-map-marker-pin__inner"></span><span class="wdc-map-marker-pin__tail"></span></span>',
+				iconSize: [42, 59],
+				iconAnchor: [21, 59],
+				popupAnchor: [0, -59]
 			});
+		}
+
+		function mapClicked() {
+			mapClickCallback();
 		}
 
 		function onPopupClick(event) {
@@ -211,6 +229,7 @@
 			destroy: function () {},
 			onPointClick: function () {},
 			onPopupSelect: function () {},
+			onMapClick: function () {},
 			invalidateSize: function () {}
 		};
 	}
@@ -228,20 +247,6 @@
 	function pointType(point) {
 		var type = String(point.point_type || point.type || 'OPS').toUpperCase();
 		return type === 'PVZ' || type === 'APS' ? type : 'OPS';
-	}
-
-	function pointMarkerLabel(point) {
-		if (point && point._wdcMarkerLabel) {
-			return point._wdcMarkerLabel;
-		}
-		var type = pointType(point);
-		if (type === 'APS') {
-			return 'Почтомат';
-		}
-		if (type === 'PVZ') {
-			return 'ПВЗ';
-		}
-		return 'ОПС';
 	}
 
 	window.WDCPickupMapProviders = window.WDCPickupMapProviders || {};

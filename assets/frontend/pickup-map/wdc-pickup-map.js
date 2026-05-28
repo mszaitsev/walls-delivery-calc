@@ -18,7 +18,7 @@
 		var providerFactory = window.WDCPickupMapProviders && window.WDCPickupMapProviders[providerName];
 		var list = findList(element, card);
 		var previewPoint = null;
-		var selectedPoint = null;
+		var committedPoint = null;
 		var controller = null;
 		var suppressNextMoveLoad = false;
 		var context = initialContext || {};
@@ -53,7 +53,10 @@
 		});
 		provider.onPointClick(function (point) { preview(point, { focus: false }); });
 		if (provider.onPopupSelect) {
-			provider.onPopupSelect(function (point) { select(point, { focus: false }); });
+			provider.onPopupSelect(function (point) { commit(point, { focus: false }); });
+		}
+		if (provider.onMapClick) {
+			provider.onMapClick(function () { closePreview(); });
 		}
 
 		function renderPointPopup(point, selected) {
@@ -79,8 +82,8 @@
 		function preview(point, options) {
 			options = options || {};
 			previewPoint = point;
-			card.textContent = labels.selectPoint || 'Выберите пункт на карте или в списке.';
-			confirmButton.disabled = !selectedPoint || pointId(selectedPoint) !== pointId(point);
+			card.textContent = committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Выберите пункт на карте или в списке.');
+			confirmButton.disabled = !committedPoint;
 			if (provider.setActivePoint) {
 				provider.setActivePoint(pointId(point));
 			}
@@ -88,14 +91,14 @@
 				provider.focusPoint(point);
 			}
 			if (provider.openPointPopup) {
-				provider.openPointPopup(point, renderPointPopup(point, selectedPoint && pointId(selectedPoint) === pointId(point)));
+				provider.openPointPopup(point, renderPointPopup(point, committedPoint && pointId(committedPoint) === pointId(point)));
 			}
 			renderList(visiblePoints);
 		}
 
-		function select(point, options) {
+		function commit(point, options) {
 			options = options || {};
-			selectedPoint = point;
+			committedPoint = point;
 			previewPoint = point;
 			card.textContent = selectedSummary(point);
 			confirmButton.disabled = false;
@@ -112,39 +115,58 @@
 			renderList(visiblePoints);
 		}
 
+		function closePreview() {
+			previewPoint = null;
+			if (provider.closePopup) {
+				provider.closePopup();
+			}
+			if (provider.setActivePoint) {
+				provider.setActivePoint(committedPoint ? pointId(committedPoint) : null);
+			}
+			card.textContent = committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Выберите пункт на карте или в списке.');
+			confirmButton.disabled = !committedPoint;
+			renderList(visiblePoints);
+		}
+
 		function renderMarkers(points, emptyText) {
 			visiblePoints = sortPoints(enrichPoints(points || []));
+			var activePoint = committedPoint && pointInList(committedPoint, visiblePoints) ? committedPoint : (previewPoint && pointInList(previewPoint, visiblePoints) ? previewPoint : null);
 			provider.renderMarkers(visiblePoints, {
-				activePointId: selectedPoint ? pointId(selectedPoint) : (previewPoint ? pointId(previewPoint) : null)
+				activePointId: activePoint ? pointId(activePoint) : null
 			});
 			renderList(visiblePoints);
 			if (!visiblePoints.length) {
-				card.textContent = emptyText || labels.empty || '';
-				confirmButton.disabled = !selectedPoint;
+				card.textContent = committedPoint ? selectedSummary(committedPoint) : (emptyText || labels.empty || '');
+				confirmButton.disabled = !committedPoint;
 				return;
 			}
-			if (selectedPoint && pointInList(selectedPoint, visiblePoints)) {
-				card.textContent = selectedSummary(selectedPoint);
+			if (committedPoint && pointInList(committedPoint, visiblePoints)) {
+				card.textContent = selectedSummary(committedPoint);
 				confirmButton.disabled = false;
 				if (provider.setActivePoint) {
-					provider.setActivePoint(pointId(selectedPoint));
+					provider.setActivePoint(pointId(committedPoint));
+				}
+				if (provider.openPointPopup && previewPoint && pointInList(previewPoint, visiblePoints)) {
+					provider.openPointPopup(previewPoint, renderPointPopup(previewPoint, pointId(previewPoint) === pointId(committedPoint)));
 				}
 				return;
 			}
 			if (previewPoint && pointInList(previewPoint, visiblePoints)) {
-				card.textContent = labels.selectPoint || 'Выберите пункт на карте или в списке.';
-				confirmButton.disabled = true;
+				card.textContent = committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Выберите пункт на карте или в списке.');
+				confirmButton.disabled = !committedPoint;
 				if (provider.setActivePoint) {
-					provider.setActivePoint(null);
+					provider.setActivePoint(pointId(previewPoint));
+				}
+				if (provider.openPointPopup) {
+					provider.openPointPopup(previewPoint, renderPointPopup(previewPoint, false));
 				}
 				return;
 			}
-			selectedPoint = null;
 			if (provider.setActivePoint) {
 				provider.setActivePoint(null);
 			}
-			card.textContent = labels.selectPoint || 'Выберите пункт на карте или в списке.';
-			confirmButton.disabled = true;
+			card.textContent = committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Выберите пункт на карте или в списке.');
+			confirmButton.disabled = !committedPoint;
 		}
 
 		function renderList(points) {
@@ -165,17 +187,19 @@
 		}
 
 		function renderListItem(point, index) {
-			var active = selectedPoint && pointId(selectedPoint) === pointId(point);
-			var previewed = !active && previewPoint && pointId(previewPoint) === pointId(point);
+			var selected = committedPoint && pointId(committedPoint) === pointId(point);
+			var previewed = previewPoint && pointId(previewPoint) === pointId(point);
+			var active = selected || previewed;
 			return [
-				'<button type="button" class="wdc-pickup-list__item' + (active ? ' active selected' : '') + (previewed ? ' preview' : '') + '" data-wdc-point-id="' + escapeHtml(pointId(point)) + '">',
+				'<div role="button" tabindex="0" class="wdc-pickup-list__item' + (active ? ' active' : '') + (selected ? ' selected' : '') + (previewed ? ' preview' : '') + '" data-wdc-point-id="' + escapeHtml(pointId(point)) + '">',
 				'<span class="wdc-pickup-list__index">' + (index + 1) + '</span>',
 				'<span class="wdc-pickup-list__content">',
 				'<span class="wdc-pickup-list__headline"><strong>' + escapeHtml(pointTypeLabel(point)) + '</strong>' + (point.distanceText ? '<em>' + escapeHtml(point.distanceText) + '</em>' : '') + '</span>',
 				point.address ? '<span class="wdc-pickup-list__address">' + escapeHtml(point.address) + '</span>' : '',
 				point.work_time ? '<span class="wdc-pickup-list__time">' + escapeHtml(point.work_time) + '</span>' : '',
+				'<span class="wdc-pickup-list__actions"><button type="button" class="button button-small wdc-pickup-list__select" data-wdc-pickup-list-select' + (selected ? ' disabled' : '') + '>' + escapeHtml(selected ? 'Выбран' : 'Выбрать') + '</button></span>',
 				'</span>',
-				'</button>'
+				'</div>'
 			].join('');
 		}
 
@@ -187,6 +211,10 @@
 				}
 				var point = findPoint(row.getAttribute('data-wdc-point-id'));
 				if (point) {
+					if (event.target.closest('[data-wdc-pickup-list-select]')) {
+						commit(point, { focus: true });
+						return;
+					}
 					preview(point, { focus: true });
 				}
 			});
@@ -271,7 +299,7 @@
 		}, 50);
 
 		return {
-			selected: function () { return selectedPoint; },
+			selected: function () { return committedPoint; },
 			search: search,
 			destroy: function () {
 				if (controller) {
@@ -290,7 +318,6 @@
 				var copy = Object.assign({}, point);
 				copy._wdcOrder = index;
 				copy._wdcCardLabel = pointTypeLabel(copy);
-				copy._wdcMarkerLabel = pointTypeMarkerLabel(copy);
 				if (hasInitialCoordinates && validPointCoordinates(copy)) {
 					copy.distanceMeters = distanceMeters(initialLat, initialLng, parseFloat(copy.lat), parseFloat(copy.lng));
 					copy.distanceText = formatDistance(copy.distanceMeters);
@@ -385,16 +412,7 @@
 		}
 		var type = pickupPointType(point);
 		var config = pickupPointTypeConfig(type);
-		return config.cardLabel || defaultPointTypeConfig(type).cardLabel;
-	}
-
-	function pointTypeMarkerLabel(point) {
-		if (point && point._wdcMarkerLabel) {
-			return point._wdcMarkerLabel;
-		}
-		var type = pickupPointType(point);
-		var config = pickupPointTypeConfig(type);
-		return config.markerLabel || defaultPointTypeConfig(type).markerLabel;
+		return config.label || config.cardLabel || defaultPointTypeConfig(type).label;
 	}
 
 	function pickupPointType(point) {
@@ -409,12 +427,12 @@
 
 	function defaultPointTypeConfig(type) {
 		if (type === 'PVZ') {
-			return { enabled: true, markerLabel: 'ПВЗ', cardLabel: 'Пункт выдачи' };
+			return { enabled: true, label: 'Пункт выдачи' };
 		}
 		if (type === 'APS') {
-			return { enabled: true, markerLabel: 'Почтомат', cardLabel: 'Почтомат' };
+			return { enabled: true, label: 'Почтомат' };
 		}
-		return { enabled: true, markerLabel: 'ОПС', cardLabel: 'Отделение Почты России' };
+		return { enabled: true, label: 'Отделение Почты России' };
 	}
 
 	function cleanDescription(value) {

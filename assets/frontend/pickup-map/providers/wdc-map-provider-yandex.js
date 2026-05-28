@@ -13,6 +13,7 @@
 		var pendingPoints = [];
 		var pointClickCallback = function () {};
 		var popupSelectCallback = function () {};
+		var mapClickCallback = function () {};
 		var ymapsApi = null;
 		var activePointId = null;
 		var placemarkById = {};
@@ -25,7 +26,7 @@
 			}
 			ymapsApi = ymaps;
 			markerLayout = ymaps.templateLayoutFactory.createClass(
-				'<div class="wdc-map-marker-pin wdc-map-marker-pin--$[properties.wdcType] $[properties.wdcActive]"><span class="wdc-map-marker-pin__inner">$[properties.wdcLabel]</span><span class="wdc-map-marker-pin__tail"></span></div>'
+				'<div class="wdc-map-marker-pin wdc-map-marker-pin--$[properties.wdcType] $[properties.wdcActive]"><span class="wdc-map-marker-pin__inner"></span><span class="wdc-map-marker-pin__tail"></span></div>'
 			);
 			map = new ymaps.Map(container, {
 				center: [pendingCenter.lat, pendingCenter.lng],
@@ -40,6 +41,7 @@
 			});
 			map.geoObjects.add(collection);
 			map.events.add('boundschange', boundsChanged);
+			map.events.add('click', mapClicked);
 			document.addEventListener('click', onPopupClick);
 			fitToViewport();
 			if (pendingPoints.length) {
@@ -81,12 +83,11 @@
 				var placemark = new ymapsApi.Placemark([point.lat, point.lng], {
 					balloonContent: escapeHtml(point.address || ''),
 					wdcActive: activePointId === id ? 'is-active' : '',
-					wdcLabel: escapeHtml(pointMarkerLabel(point)),
 					wdcType: pointType(point).toLowerCase()
 				}, {
 					iconLayout: markerLayout,
-					iconOffset: [-23, -54],
-					iconShape: { type: 'Circle', coordinates: [23, 23], radius: 23 }
+					iconOffset: [-21, -59],
+					iconShape: { type: 'Circle', coordinates: [21, 21], radius: 21 }
 				});
 				placemark.events.add('click', function () { pointClickCallback(point); });
 				collection.add(placemark);
@@ -158,6 +159,7 @@
 				clearMarkers();
 				if (map) {
 					map.events.remove('boundschange', boundsChanged);
+					map.events.remove('click', mapClicked);
 					map.destroy();
 				}
 				map = null;
@@ -169,6 +171,9 @@
 			},
 			onPopupSelect: function (callback) {
 				popupSelectCallback = typeof callback === 'function' ? callback : function () {};
+			},
+			onMapClick: function (callback) {
+				mapClickCallback = typeof callback === 'function' ? callback : function () {};
 			},
 			invalidateSize: function () {
 				fitToViewport();
@@ -200,6 +205,10 @@
 			if (point) {
 				popupSelectCallback(point);
 			}
+		}
+
+		function mapClicked() {
+			mapClickCallback();
 		}
 	}
 
@@ -252,20 +261,6 @@
 	function pointType(point) {
 		var type = String(point.point_type || point.type || 'OPS').toUpperCase();
 		return type === 'PVZ' || type === 'APS' ? type : 'OPS';
-	}
-
-	function pointMarkerLabel(point) {
-		if (point && point._wdcMarkerLabel) {
-			return point._wdcMarkerLabel;
-		}
-		var type = pointType(point);
-		if (type === 'APS') {
-			return 'Почтомат';
-		}
-		if (type === 'PVZ') {
-			return 'ПВЗ';
-		}
-		return 'ОПС';
 	}
 
 	function debugEnabled() {

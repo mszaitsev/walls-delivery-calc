@@ -137,15 +137,16 @@
 }
 
 .wdc-pickup-list__item.active,
-.wdc-pickup-list__item.selected {
+.wdc-pickup-list__item.preview {
 	border-color: #2563eb;
 	background: #eff6ff;
 	box-shadow: inset 3px 0 0 #2563eb;
 }
 
-.wdc-pickup-list__item.preview {
-	border-color: #cbd5e1;
-	background: #f8fafc;
+.wdc-pickup-list__item.selected {
+	border-color: #0877c5;
+	background: #e0f2fe;
+	box-shadow: inset 3px 0 0 #0877c5;
 }
 
 .wdc-pickup-list__index {
@@ -186,6 +187,16 @@
 	font-size: 13px;
 	line-height: 1.35;
 	overflow-wrap: anywhere;
+}
+
+.wdc-pickup-list__actions {
+	display: flex;
+	justify-content: flex-start;
+	margin-top: 4px;
+}
+
+.wdc-pickup-list__select {
+	pointer-events: auto;
 }
 
 .wdc-pickup-list__empty {
@@ -234,26 +245,22 @@
 	position: relative;
 	display: inline-grid;
 	place-items: center;
-	width: 46px;
-	height: 46px;
-	border: 5px solid var(--wdc-map-primary, #1e9af0);
+	width: 42px;
+	height: 42px;
+	border: 0;
 	border-radius: 50%;
-	background: var(--wdc-map-bg, #fff);
-	color: var(--wdc-map-primary, #1e9af0);
-	box-shadow: 0 4px 14px rgba(15, 23, 42, 0.25);
+	background: var(--wdc-map-primary, #1e9af0);
+	box-shadow: 0 5px 14px rgba(15, 23, 42, 0.32);
 	transform-origin: center bottom;
 }
 
 .wdc-map-marker-pin__inner {
 	display: block;
-	max-width: 32px;
-	overflow: hidden;
-	font-size: 10px;
-	font-weight: 800;
-	line-height: 1.05;
-	text-align: center;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	background: var(--wdc-map-bg, #fff);
+	box-shadow: inset 0 0 0 1px rgba(8, 119, 197, 0.12);
 }
 
 .wdc-map-marker-pin__tail {
@@ -262,16 +269,15 @@
 	bottom: -14px;
 	width: 0;
 	height: 0;
-	border-top: 16px solid var(--wdc-map-primary, #1e9af0);
+	border-top: 17px solid var(--wdc-map-primary, #1e9af0);
 	border-right: 9px solid transparent;
 	border-left: 9px solid transparent;
 	transform: translateX(-50%);
 }
 
 .wdc-map-marker-pin.is-active {
-	border-color: var(--wdc-map-primary-dark, #0877c5);
-	color: var(--wdc-map-primary-dark, #0877c5);
-	box-shadow: 0 6px 18px rgba(30, 154, 240, 0.36);
+	background: var(--wdc-map-primary-dark, #0877c5);
+	box-shadow: 0 7px 20px rgba(30, 154, 240, 0.42);
 	transform: scale(1.08);
 }
 
@@ -314,10 +320,10 @@
 	place-items: center;
 	width: 46px;
 	height: 46px;
-	border: 5px solid var(--wdc-map-primary, #1e9af0);
+	border: 7px solid var(--wdc-map-primary, #1e9af0);
 	border-radius: 50%;
 	background: var(--wdc-map-bg, #fff);
-	color: var(--wdc-map-primary, #1e9af0);
+	color: #111827;
 	box-shadow: 0 4px 14px rgba(15, 23, 42, 0.24);
 }
 

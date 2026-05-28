@@ -22,18 +22,18 @@ final class RussianPostPickupPointTypeSettings {
 	}
 
 	/**
-	 * @return array<string,array{enabled:bool,markerLabel:string,cardLabel:string}>
+	 * @return array<string,array{enabled:bool,label:string}>
 	 */
 	public static function defaults(): array {
 		return array(
-			'OPS' => array( 'enabled' => true, 'markerLabel' => 'ОПС', 'cardLabel' => 'Отделение Почты России' ),
-			'PVZ' => array( 'enabled' => true, 'markerLabel' => 'ПВЗ', 'cardLabel' => 'Пункт выдачи' ),
-			'APS' => array( 'enabled' => true, 'markerLabel' => 'Почтомат', 'cardLabel' => 'Почтомат' ),
+			'OPS' => array( 'enabled' => true, 'label' => 'Отделение Почты России' ),
+			'PVZ' => array( 'enabled' => true, 'label' => 'Пункт выдачи' ),
+			'APS' => array( 'enabled' => true, 'label' => 'Почтомат' ),
 		);
 	}
 
 	/**
-	 * @return array<string,array{enabled:bool,markerLabel:string,cardLabel:string}>
+	 * @return array<string,array{enabled:bool,label:string}>
 	 */
 	public function all(): array {
 		$settings = $this->stored_settings();
@@ -43,13 +43,9 @@ final class RussianPostPickupPointTypeSettings {
 			$result[ $type ]['enabled'] = array_key_exists( "russian_post_domestic_pickup_type_{$key}_enabled", $settings )
 				? ! empty( $settings[ "russian_post_domestic_pickup_type_{$key}_enabled" ] )
 				: $result[ $type ]['enabled'];
-			$result[ $type ]['markerLabel'] = $this->label_or_default(
-				$settings[ "russian_post_domestic_pickup_type_{$key}_marker_label" ] ?? '',
-				$result[ $type ]['markerLabel']
-			);
-			$result[ $type ]['cardLabel'] = $this->label_or_default(
-				$settings[ "russian_post_domestic_pickup_type_{$key}_card_label" ] ?? '',
-				$result[ $type ]['cardLabel']
+			$result[ $type ]['label'] = $this->label_or_default(
+				$settings[ "russian_post_domestic_pickup_type_{$key}_label" ] ?? ( $settings[ "russian_post_domestic_pickup_type_{$key}_card_label" ] ?? '' ),
+				$result[ $type ]['label']
 			);
 		}
 		if ( array() === $this->enabled_types_from_config( $result ) ) {
@@ -91,13 +87,11 @@ final class RussianPostPickupPointTypeSettings {
 		foreach ( self::TYPES as $type ) {
 			$key = strtolower( $type );
 			$enabled_key = "russian_post_domestic_pickup_type_{$key}_enabled";
-			$marker_key = "russian_post_domestic_pickup_type_{$key}_marker_label";
 			$card_key = "russian_post_domestic_pickup_type_{$key}_card_label";
 			$enabled = ! empty( $data[ $enabled_key ] );
 			$any_enabled = $any_enabled || $enabled;
 			$result[ $enabled_key ] = array( 'value' => $enabled, 'format' => 'bool' );
-			$result[ $marker_key ] = array( 'value' => $this->label_or_default( $data[ $marker_key ] ?? '', $defaults[ $type ]['markerLabel'] ), 'format' => 'string' );
-			$result[ $card_key ] = array( 'value' => $this->label_or_default( $data[ $card_key ] ?? '', $defaults[ $type ]['cardLabel'] ), 'format' => 'string' );
+			$result[ $card_key ] = array( 'value' => $this->label_or_default( $data[ $card_key ] ?? '', $defaults[ $type ]['label'] ), 'format' => 'string' );
 		}
 		if ( ! $any_enabled ) {
 			$result['russian_post_domestic_pickup_type_ops_enabled']['value'] = true;
@@ -131,7 +125,7 @@ final class RussianPostPickupPointTypeSettings {
 	}
 
 	/**
-	 * @param array<string,array{enabled:bool,markerLabel:string,cardLabel:string}> $config
+	 * @param array<string,array{enabled:bool,label:string}> $config
 	 * @return array<int,string>
 	 */
 	private function enabled_types_from_config( array $config ): array {

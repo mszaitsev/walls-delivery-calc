@@ -190,7 +190,7 @@ final class PickupMapCheckout {
 	}
 
 	/**
-	 * @return array<string,array{enabled:bool,markerLabel:string,cardLabel:string}>
+	 * @return array<string,array{enabled:bool,label:string}>
 	 */
 	private function pickup_point_types(): array {
 		$type_settings = $this->point_type_settings ?? new RussianPostPickupPointTypeSettings( $this->settings );

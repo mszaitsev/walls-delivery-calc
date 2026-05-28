@@ -35,10 +35,27 @@
 			var context = withPrefetch(resolvedContext);
 			debug('openModal context', context);
 			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
+			var savingPoint = false;
 
 			function close() {
 				map.destroy();
 				modal.destroy();
+			}
+
+			function savePoint(point) {
+				if (!point || savingPoint) {
+					return;
+				}
+				savingPoint = true;
+				confirmButton.disabled = true;
+				window.WDCPickupApi.save(point.id, method).then(function (response) {
+					applySelection(container, response.pickup_point || {});
+					close();
+					triggerCheckoutUpdate();
+				}).catch(function () {
+					savingPoint = false;
+					confirmButton.disabled = false;
+				});
 			}
 
 			modal.root.addEventListener('wdc:close', close);
@@ -47,19 +64,11 @@
 					map.search(search.value.trim());
 				}
 			});
+			confirmButton.addEventListener('wdc:point-selected', function (event) {
+				savePoint(event.detail || map.selected());
+			});
 			confirmButton.addEventListener('click', function () {
-				var point = map.selected();
-				if (!point) {
-					return;
-				}
-				confirmButton.disabled = true;
-				window.WDCPickupApi.save(point.id, method).then(function (response) {
-					applySelection(container, response.pickup_point || {});
-					close();
-					triggerCheckoutUpdate();
-				}).catch(function () {
-					confirmButton.disabled = false;
-				});
+				savePoint(map.selected());
 			});
 		});
 	}

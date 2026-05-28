@@ -600,15 +600,14 @@ final class DeliveryServicesAdminPage {
 			<h3>Типы пунктов выдачи</h3>
 			<p class="description">Отключенные типы не попадают в REST-ответы карты. Если выключить все типы, OPS будет включен автоматически.</p>
 			<table class="widefat striped" style="max-width: 960px;">
-				<thead><tr><th>Тип</th><th>Использовать</th><th>Название на маркере</th><th>Название в карточке/списке</th></tr></thead>
+				<thead><tr><th>Тип</th><th>Использовать</th><th>Название в карточке/баллоне/списке</th></tr></thead>
 				<tbody>
 					<?php foreach ( RussianPostPickupPointTypeSettings::TYPES as $type ) : ?>
 						<?php $key = strtolower( $type ); ?>
 						<tr>
 							<th scope="row"><?php echo esc_html( $type ); ?></th>
 							<td><label><input type="checkbox" name="<?php echo esc_attr( "russian_post_domestic_pickup_type_{$key}_enabled" ); ?>" value="1" <?php checked( ! empty( $point_types[ $type ]['enabled'] ) ); ?>> Использовать</label></td>
-							<td><input class="regular-text" type="text" name="<?php echo esc_attr( "russian_post_domestic_pickup_type_{$key}_marker_label" ); ?>" value="<?php echo esc_attr( (string) ( $point_types[ $type ]['markerLabel'] ?? '' ) ); ?>"></td>
-							<td><input class="regular-text" type="text" name="<?php echo esc_attr( "russian_post_domestic_pickup_type_{$key}_card_label" ); ?>" value="<?php echo esc_attr( (string) ( $point_types[ $type ]['cardLabel'] ?? '' ) ); ?>"></td>
+							<td><input class="regular-text" type="text" name="<?php echo esc_attr( "russian_post_domestic_pickup_type_{$key}_card_label" ); ?>" value="<?php echo esc_attr( (string) ( $point_types[ $type ]['label'] ?? '' ) ); ?>"></td>
 						</tr>
 					<?php endforeach; ?>
 				</tbody>
