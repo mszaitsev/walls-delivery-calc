@@ -32,8 +32,8 @@ final class PickupMapCheckout {
 
 		$base = $this->environment->plugin_url();
 		$version = $this->environment->version();
-		wp_enqueue_style( 'wdc-leaflet', $base . 'assets/frontend/pickup-map/leaflet/leaflet.css', array(), '1.9.4' );
-		wp_enqueue_script( 'wdc-leaflet', $base . 'assets/frontend/pickup-map/leaflet/leaflet.js', array(), '1.9.4', true );
+		wp_enqueue_style( 'wdc-leaflet', $base . 'assets/vendor/leaflet/leaflet.css', array(), '1.9.4' );
+		wp_enqueue_script( 'wdc-leaflet', $base . 'assets/vendor/leaflet/leaflet.js', array(), '1.9.4', true );
 		wp_enqueue_style( 'wdc-pickup-map', $base . 'assets/frontend/pickup-map/wdc-pickup-map.css', array( 'wdc-leaflet' ), $version );
 		wp_enqueue_script( 'wdc-pickup-api', $base . 'assets/frontend/pickup-map/wdc-pickup-api.js', array(), $version, true );
 		wp_enqueue_script( 'wdc-pickup-modal', $base . 'assets/frontend/pickup-map/wdc-pickup-modal.js', array(), $version, true );
@@ -49,6 +49,7 @@ final class PickupMapCheckout {
 					'nonce' => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( 'wp_rest' ) : '',
 					'carrier' => 'russian_post',
 					'shippingMethodId' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+					'initialContext' => $this->initial_context(),
 					'labels' => array(
 						'choose' => 'Выбрать пункт выдачи',
 						'change' => 'Изменить пункт выдачи',
@@ -72,5 +73,38 @@ final class PickupMapCheckout {
 		}
 
 		return false;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function initial_context(): array {
+		$context = $this->session_manager->city_context();
+		$lat = $this->numeric_context_value( $context, array( 'lat', 'latitude' ) );
+		$lng = $this->numeric_context_value( $context, array( 'lng', 'lon', 'longitude' ) );
+		$query = trim( implode( ' ', array_filter( array( (string) ( $context['postcode'] ?? '' ), (string) ( $context['city_name'] ?? $context['settlement_name'] ?? $context['display_name'] ?? '' ) ) ) ) );
+
+		return array_filter(
+			array(
+				'lat' => $lat,
+				'lng' => $lng,
+				'query' => $query,
+			),
+			static fn( mixed $value ): bool => null !== $value && '' !== $value
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $context
+	 * @param array<int,string>  $keys
+	 */
+	private function numeric_context_value( array $context, array $keys ): ?float {
+		foreach ( $keys as $key ) {
+			if ( isset( $context[ $key ] ) && is_numeric( $context[ $key ] ) ) {
+				return (float) $context[ $key ];
+			}
+		}
+
+		return null;
 	}
 }

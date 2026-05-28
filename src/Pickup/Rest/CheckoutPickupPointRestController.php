@@ -45,7 +45,7 @@ final class CheckoutPickupPointRestController {
 			array(
 				'methods' => 'GET',
 				'callback' => array( $this, 'state' ),
-				'permission_callback' => '__return_true',
+				'permission_callback' => array( $this, 'check_nonce' ),
 			)
 		);
 	}

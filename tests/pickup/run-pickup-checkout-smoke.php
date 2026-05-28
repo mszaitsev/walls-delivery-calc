@@ -139,6 +139,10 @@ $session = new CheckoutSessionManager();
 $state_controller = new CheckoutPickupPointRestController( $repo, $session );
 $state_controller->register();
 pickup_checkout_assert( 2 === count( $GLOBALS['wdc_pickup_checkout_routes'] ?? array() ), 'checkout REST routes must register.' );
+$state_route = array_values( array_filter( $GLOBALS['wdc_pickup_checkout_routes'], static fn( array $route ): bool => '/checkout/state' === $route['route'] ) )[0] ?? array();
+pickup_checkout_assert( is_array( $state_route['args'] ?? null ) && is_callable( $state_route['args']['permission_callback'] ?? null ), 'checkout state GET must register a nonce permission callback.' );
+pickup_checkout_assert( false === $state_controller->check_nonce( new WdcPickupCheckoutRequest( array() ) ), 'checkout state GET without nonce must be forbidden.' );
+pickup_checkout_assert( true === $state_controller->check_nonce( new WdcPickupCheckoutRequest( array(), array( 'X-WP-Nonce' => 'nonce' ) ) ), 'checkout state GET with nonce must be authorized.' );
 
 $saved = $state_controller->save( new WdcPickupCheckoutRequest( array( 'point_id' => 10, 'shipping_method_id' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY ), array( 'X-WP-Nonce' => 'nonce' ) ) );
 pickup_checkout_assert( '630001-a' === $saved['pickup_point']['point_code'], 'checkout state save must return selected point.' );
@@ -179,8 +183,26 @@ pickup_checkout_assert( isset( $errors->errors['wdc_pickup_required'] ), 'valida
 pickup_checkout_assert( 'Выберите пункт выдачи Почты России.' === $errors->errors['wdc_pickup_required'], 'validation must use Russian Post pickup error.' );
 
 $session->save_pickup_selection( array( 'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY, 'rate_id' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY, 'point_code' => '630001-a' ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_domestic_courier' ) );
+pickup_checkout_assert( '630001-a' === $session->pickup_selection()['point_code'], 'selected pickup must survive a shipping method switch in session.' );
+WC()->session->set( 'chosen_shipping_methods', array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ) );
 $errors = new WdcPickupCheckoutErrors();
 ( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
 pickup_checkout_assert( array() === $errors->errors, 'validation must pass when pickup selection exists.' );
+
+$root = dirname( __DIR__, 2 );
+$validation_source = file_get_contents( $root . '/src/Checkout/WooCommerce/CheckoutValidation.php' ) ?: '';
+foreach ( array( 'Р’', 'Рµ', 'С‹', 'СЊ' ) as $mojibake ) {
+	pickup_checkout_assert( ! str_contains( $validation_source, $mojibake ), 'CheckoutValidation.php must not contain mojibake marker ' . $mojibake . '.' );
+}
+$map_checkout_source = file_get_contents( $root . '/src/Checkout/WooCommerce/PickupMapCheckout.php' ) ?: '';
+pickup_checkout_assert( str_contains( $map_checkout_source, 'assets/vendor/leaflet/leaflet.css' ) && str_contains( $map_checkout_source, 'assets/vendor/leaflet/leaflet.js' ), 'Leaflet enqueue URL must point to assets/vendor/leaflet.' );
+pickup_checkout_assert( file_exists( $root . '/assets/vendor/leaflet/leaflet.css' ) && file_exists( $root . '/assets/vendor/leaflet/leaflet.js' ), 'Leaflet assets must exist under assets/vendor/leaflet.' );
+$checkout_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' ) ?: '';
+pickup_checkout_assert( ! str_contains( $checkout_js, "input[name^=\"shipping_method\"]')) {\n\t\t\tresetSelection();" ), 'JS must not reset pickup on shipping method change.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'billing_postcode' ) && str_contains( $checkout_js, 'shipping_postcode' ), 'JS must reset pickup on city/country/postcode changes.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'contextFromFields' ) && str_contains( $checkout_js, 'shipping_city' ) && str_contains( $checkout_js, 'shipping_postcode' ), 'JS must form initial map query from checkout city/postcode.' );
+$map_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.js' ) ?: '';
+pickup_checkout_assert( str_contains( $map_js, 'hasInitialCoordinates ? [initialLat, initialLng]' ) && str_contains( $map_js, 'context.query' ), 'Map JS must support initial coordinates and initial query.' );
 
 echo "Pickup checkout smoke test passed.\n";

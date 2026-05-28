@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.23.0.
+Version: 0.23.1.
+
+Version 0.23.1 fixes checkout-map blockers before browser testing: `CheckoutValidation.php` now uses readable Russian validation strings, Leaflet is loaded from the single local `assets/vendor/leaflet/` copy, all checkout state endpoints including `GET /checkout/state` require a REST nonce, the map starts from the current checkout city/postcode or saved city coordinates when possible, and switching shipping methods no longer clears the selected pickup point. Pickup selection is reset only when city/country/postcode changes.
 
 Version 0.23.0 starts the checkout MVP for Russian Post domestic pickup points. The checkout now renders a "Выбрать пункт выдачи" control for `russian_post_domestic_pickup`, opens a mobile-friendly Leaflet/OpenStreetMap modal, loads points only by map bbox through `/wp-json/wdc/v1/points`, stores the selected point in WooCommerce session through `/wp-json/wdc/v1/checkout/pickup-point`, validates the required pickup selection server-side, and saves HPOS-safe pickup meta/snapshot on the order and shipping item.
 

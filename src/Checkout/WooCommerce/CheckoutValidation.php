@@ -64,7 +64,7 @@ final class CheckoutValidation {
 	private function add_pickup_error( mixed $errors = null, array $rate = array() ): void {
 		$message = RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) ( $rate['service_key'] ?? '' )
 			? __( 'Выберите пункт выдачи Почты России.', 'walls-delivery-calc' )
-			: __( 'Р’С‹Р±РµСЂРёС‚Рµ РїСѓРЅРєС‚ РІС‹РґР°С‡Рё.', 'walls-delivery-calc' );
+			: __( 'Выберите пункт выдачи.', 'walls-delivery-calc' );
 		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
 			$errors->add( 'wdc_pickup_required', $message );
 			return;
@@ -93,12 +93,12 @@ final class CheckoutValidation {
 
 	private function add_city_error( mixed $errors = null ): void {
 		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
-			$errors->add( 'wdc_city_required', __( 'Р’РІРµРґРёС‚Рµ РЅР°СЃРµР»РµРЅРЅС‹Р№ РїСѓРЅРєС‚.', 'walls-delivery-calc' ) );
+			$errors->add( 'wdc_city_required', __( 'Введите населенный пункт.', 'walls-delivery-calc' ) );
 			return;
 		}
 
 		if ( function_exists( 'wc_add_notice' ) ) {
-			wc_add_notice( __( 'Р’РІРµРґРёС‚Рµ РЅР°СЃРµР»РµРЅРЅС‹Р№ РїСѓРЅРєС‚.', 'walls-delivery-calc' ), 'error' );
+			wc_add_notice( __( 'Введите населенный пункт.', 'walls-delivery-calc' ), 'error' );
 		}
 	}
 

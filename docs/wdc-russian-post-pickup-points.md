@@ -1,6 +1,16 @@
 # Russian Post Pickup Points
 
-Version: 0.23.0.
+Version: 0.23.1.
+
+## Checkout Map Fixes
+
+Version 0.23.1 keeps one Leaflet copy at `assets/vendor/leaflet/` and enqueues `assets/vendor/leaflet/leaflet.css` plus `assets/vendor/leaflet/leaflet.js`.
+
+Checkout state is private checkout state now: `GET /wp-json/wdc/v1/checkout/state`, `POST /wp-json/wdc/v1/checkout/pickup-point`, and `DELETE /wp-json/wdc/v1/checkout/pickup-point` all require the WordPress REST nonce in `X-WP-Nonce`. The public point directory endpoints remain public: `/points`, `/points/search`, and `/points/{id}`.
+
+When the modal opens, the map chooses its initial viewport in this order: saved checkout city coordinates from session context, current RU checkout postcode/city fields, then the Novosibirsk fallback. If only postcode/city is available, the frontend searches the local point endpoint and centers on the first found point without confirming it automatically; the customer must still click a marker and press "Выбрать этот пункт".
+
+Pickup reset is destination-driven. Changing city, country, or postcode clears the selected pickup point and UI. Switching between shipping methods only hides or shows the pickup block; it does not clear session selection, so returning to `russian_post_domestic_pickup` restores the chosen point. Server-side validation remains responsible for blocking checkout when the active pickup rate has no valid selection.
 
 ## Checkout Map MVP
 

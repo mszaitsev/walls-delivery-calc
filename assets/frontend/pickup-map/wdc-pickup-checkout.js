@@ -22,7 +22,7 @@
 		var modal = window.WDCPickupModal.create(labels);
 		var confirmButton = modal.root.querySelector('[data-wdc-confirm]');
 		var search = modal.root.querySelector('[data-wdc-search]');
-		var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels);
+		var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, initialContext());
 
 		function close() {
 			map.destroy();
@@ -74,6 +74,37 @@
 		return checked ? checked.value.replace(/^wdc_platform:/, '') : '';
 	}
 
+	function initialContext() {
+		var config = (window.wdcPickupCheckout && window.wdcPickupCheckout.initialContext) || {};
+		var context = {
+			lat: config.lat || '',
+			lng: config.lng || '',
+			query: config.query || ''
+		};
+		var fieldContext = contextFromFields();
+		return {
+			lat: context.lat || fieldContext.lat,
+			lng: context.lng || fieldContext.lng,
+			query: fieldContext.query || context.query
+		};
+	}
+
+	function contextFromFields() {
+		var country = fieldValue('shipping_country') || fieldValue('billing_country');
+		if (country && country.toUpperCase() !== 'RU') {
+			return {};
+		}
+		var postcode = fieldValue('shipping_postcode') || fieldValue('billing_postcode');
+		var city = fieldValue('shipping_city') || fieldValue('billing_city');
+		var query = [postcode, city].filter(Boolean).join(' ').trim();
+		return query ? { query: query } : {};
+	}
+
+	function fieldValue(name) {
+		var field = document.querySelector('[name="' + name + '"]');
+		return field ? String(field.value || '').trim() : '';
+	}
+
 	function toggleForMethod(container) {
 		var method = currentShippingMethod();
 		activeMethod = method || activeMethod;
@@ -92,8 +123,12 @@
 	}
 
 	document.addEventListener('change', function (event) {
-		if (event.target.matches('input[name^="shipping_method"], #billing_city, #shipping_city, #billing_country, #shipping_country')) {
+		if (event.target.matches('#billing_city, #shipping_city, #billing_country, #shipping_country, #billing_postcode, #shipping_postcode, [name="billing_city"], [name="shipping_city"], [name="billing_country"], [name="shipping_country"], [name="billing_postcode"], [name="shipping_postcode"]')) {
 			resetSelection();
+			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
+			return;
+		}
+		if (event.target.matches('input[name^="shipping_method"]')) {
 			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 		}
 	});

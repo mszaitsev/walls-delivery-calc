@@ -10,7 +10,7 @@
 		};
 	}
 
-	function createMap(element, card, confirmButton, labels) {
+	function createMap(element, card, confirmButton, labels, initialContext) {
 		if (!window.L) {
 			card.textContent = 'Leaflet is not available.';
 			return { destroy: function () {} };
@@ -19,7 +19,11 @@
 		var selected = null;
 		var markers = [];
 		var controller = null;
-		var map = window.L.map(element).setView([55.0302, 82.9204], 11);
+		var context = initialContext || {};
+		var initialLat = parseFloat(context.lat);
+		var initialLng = parseFloat(context.lng);
+		var hasInitialCoordinates = !isNaN(initialLat) && !isNaN(initialLng);
+		var map = window.L.map(element).setView(hasInitialCoordinates ? [initialLat, initialLng] : [55.0302, 82.9204], hasInitialCoordinates ? 13 : 11);
 		window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 			attribution: '&copy; OpenStreetMap contributors',
 			maxZoom: 19
@@ -41,11 +45,17 @@
 			return parts.join('');
 		}
 
-		function select(point) {
+		function preview(point, allowConfirm) {
 			selected = point;
 			card.innerHTML = renderPoint(point);
-			confirmButton.disabled = false;
-			confirmButton.dispatchEvent(new CustomEvent('wdc:point-selected', { detail: point }));
+			confirmButton.disabled = !allowConfirm;
+			if (allowConfirm) {
+				confirmButton.dispatchEvent(new CustomEvent('wdc:point-selected', { detail: point }));
+			}
+		}
+
+		function select(point) {
+			preview(point, true);
 		}
 
 		function loadBounds() {
@@ -81,26 +91,32 @@
 
 		var debouncedLoad = debounce(loadBounds, 250);
 		map.on('moveend zoomend', debouncedLoad);
+
+		function search(query) {
+			if (controller) {
+				controller.abort();
+			}
+			controller = new AbortController();
+			window.WDCPickupApi.search(query, controller.signal).then(function (points) {
+				if (points[0] && points[0].lat !== null && points[0].lng !== null) {
+					map.setView([points[0].lat, points[0].lng], 15);
+					preview(points[0], false);
+				}
+			}).catch(function () {});
+		}
+
 		setTimeout(function () {
 			map.invalidateSize();
 			loadBounds();
+			if (!hasInitialCoordinates && context.query) {
+				search(String(context.query));
+			}
 		}, 50);
 
 		return {
 			map: map,
 			selected: function () { return selected; },
-			search: function (query) {
-				if (controller) {
-					controller.abort();
-				}
-				controller = new AbortController();
-				window.WDCPickupApi.search(query, controller.signal).then(function (points) {
-					if (points[0] && points[0].lat !== null && points[0].lng !== null) {
-						map.setView([points[0].lat, points[0].lng], 15);
-						select(points[0]);
-					}
-				}).catch(function () {});
-			},
+			search: search,
 			destroy: function () {
 				if (controller) {
 					controller.abort();
