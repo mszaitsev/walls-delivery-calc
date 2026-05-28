@@ -106,7 +106,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 			}
 			if ( str_contains( $query, 'wdc_delivery_services' ) && preg_match( "/service_key = '([^']+)'/", $query, $matches ) ) {
 				foreach ( $this->services as $row ) {
-					if ( $row['service_key'] === $matches[1] && empty( $row['deleted'] ) ) {
+					if ( $row['service_key'] === $matches[1] && ( str_contains( $query, 'ORDER BY deleted ASC' ) || empty( $row['deleted'] ) ) ) {
 						return $row;
 					}
 				}
@@ -280,6 +280,8 @@ $ensure_builtin = ( new ReflectionClass( DeliveryServiceRepository::class ) )->g
 $ensure_builtin->setAccessible( true );
 $reactivated = $ensure_builtin->invoke( $services, 'russian_post_domestic_soft_deleted_test', RussianPostDomesticSettings::CARRIER_KEY, 'Soft deleted predefined', 40 );
 wdc_ds_assert( $reactivated instanceof DeliveryService && $services->find_by_service_key( 'russian_post_domestic_soft_deleted_test' ) instanceof DeliveryService, 'Soft-deleted predefined bootstrap row must be reactivated.' );
+$reactivated_row = $services->find_by_service_key( 'russian_post_domestic_soft_deleted_test' );
+wdc_ds_assert( $reactivated_row instanceof DeliveryService && ! $reactivated_row->enabled, 'Soft-deleted predefined bootstrap row must not be forced enabled.' );
 
 $custom_id = $services->create_service( array( 'service_key' => 'fixed_test', 'service_type' => DeliveryService::TYPE_FIXED, 'title' => 'Fixed', 'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES ) );
 $services->update_service( $custom_id, array( 'enabled' => 0, 'minimum_price_rub' => '10,5' ) );

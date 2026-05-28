@@ -1,6 +1,61 @@
 # Walls Delivery Calc
 
-Version: 0.21.29.
+Version: 0.22.33.
+
+Version 0.22.33 polishes the Russian Post pickup import admin tab: the live status block is collapsible and starts collapsed, its summary shows status/stage/parsed/inserted, weekly scheduling shows the next planned run or a Russian warning, the ready Basic key field is removed, and the tab/status labels are localized in Russian. The Otpravka Basic authorization header is computed from Login + Password.
+
+Version 0.22.32 unifies manual Russian Post pickup imports into one ZIP/TXT/JSON upload. The fallback chain is now automatic cURL download, automatic WP HTTP download, manual ZIP upload, then manual TXT/JSON payload upload. TXT/JSON uploads skip download and ZIP extract entirely and enter the resumable batch pipeline at `stage=parse`.
+
+Version 0.22.31 fixes the extracted ZIP payload path safety check on Windows: paths are normalized before comparison, Windows drive/path case is handled case-insensitively, and boundary checks prevent sibling paths like `/tmp/base2` from passing as inside `/tmp/base`.
+
+Version 0.22.30 makes manual ZIP extract fail-fast and diagnosable. Import state/status now records `extract_*` fields, ZipArchive availability, payload entry name/index/size, and extract errors. ZIP payloads are extracted with `ZipArchive::extractTo()` into a temp directory and copied stream-to-stream into the resumable payload file. A stale `extract` stage older than 5 minutes fails, unlocks, and cleans temp files/staging.
+
+Version 0.22.29 fixes cleanup for failed manual ZIP import queueing: if the uploaded file is already stored but the background import cannot be queued because another import is running, the uploaded ZIP is deleted and state records `Unable to queue ZIP import. Another import may be running.`
+
+Version 0.22.28 adds a production-safe manual ZIP import path for Russian Post pickup points. Admins can download `unloading-passport` outside WordPress, upload the ZIP on the "ПВЗ / ОПС" tab, and process it through the same resumable background staging pipeline without relying on WordPress HTTP/Action Scheduler for the large download step. Import state now records `source=api_download|uploaded_zip`, uploaded filename, uploaded size, and temp ZIP path; cleanup removes uploaded ZIPs on extract, finalize, fail, cancel, or stale reset.
+
+Manual ZIP downloads can use this PowerShell template with placeholder credentials:
+
+```powershell
+$AccessToken = "ВАШ_ACCESS_TOKEN"
+$Login = "ВАШ_LOGIN"
+$Password = "ВАШ_PASSWORD"
+$BasicAuth = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$Login`:$Password"))
+$OutFile = "D:\russian-post-passport-all.zip"
+Invoke-WebRequest `
+  -Uri "https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=ALL" `
+  -Headers @{ "Authorization" = "AccessToken $AccessToken"; "X-User-Authorization" = "Basic $BasicAuth"; "Accept" = "application/octet-stream" } `
+  -OutFile $OutFile `
+  -TimeoutSec 300
+```
+
+Version 0.22.27 further lightens the Russian Post pickup table for the map stage: fresh schema removes brand, e-commerce JSON, services/phones/images, weight/size limits, and payment/inspection flags. The table now keeps only identity, type, postal/address/FIAS/GAR fields, coordinates, geohash, description, work time, active/source hash, and timestamps. Recreate local test data with `DROP TABLE IF EXISTS wp_wdc_pickup_points_russian_post;` before reimport.
+
+Version 0.22.26 adds a direct cURL passport ZIP download backend before WordPress HTTP streaming. If cURL fails, import falls back to WP HTTP and stores backend, fallback, cURL errno/error, and first backend diagnostics in state.
+
+Version 0.22.25 makes Russian Post pickup status polling perform stale checks: the AJAX status endpoint now refreshes import state through the importer, so a stuck `running/download` state older than 5 minutes is failed, unlocked, and cleaned up by ordinary status polling.
+
+Version 0.22.24 improves Russian Post passport download diagnostics: default timeout is now 120 seconds, settings clamp to 30..300 seconds, streamed requests include connect timeout, import state records download URL/start/duration/HTTP/message/temp size/error, and stale download is failed after 5 minutes.
+
+Version 0.22.23 compacts the Russian Post pickup table before the map stage: fresh tables no longer store `raw_reference` or `work_time_json`, `workTime` is normalized during import into readable `work_time`, and successful finalize runs `ANALYZE TABLE wp_wdc_pickup_points_russian_post`. Existing test tables are not migrated; remove them before reimport with `DROP TABLE IF EXISTS wp_wdc_pickup_points_russian_post;`.
+
+Version 0.22.22 makes the Russian Post pickup table swap recovery-safe: after `RENAME TABLE` the importer verifies that `wdc_pickup_points_russian_post` exists, restores it from backup when possible, keeps backup on unrecovered failure, and records a clear swap error in import state.
+
+Version 0.22.21 moves Russian Post pickup points out of the generic `wdc_pickup_points` table into `wdc_pickup_points_russian_post`. Imports now build a full snapshot in a staging table and atomically swap it into place, REST reads only the carrier-specific main table, and the old `wp_wdc_pickup_points` table can be dropped manually with `DROP TABLE IF EXISTS wp_wdc_pickup_points;`.
+
+Version 0.22.20 adds public read-only REST endpoints for the local pickup database: `GET /wp-json/wdc/v1/points`, `GET /wp-json/wdc/v1/points/search`, and `GET /wp-json/wdc/v1/points/{id}`. The endpoints support carrier/type/limit filters, bbox validation, search, and safe point detail responses without raw import snapshots or secrets.
+
+Version 0.22.13 changes Russian Post pickup import into a resumable background batch pipeline. The init job only downloads/extracts the payload, each batch job parses and upserts 75 objects from the saved payload offset, and finalize deactivates missing points and cleans temp files, so one PHP process no longer writes to MySQL for the whole import.
+
+Version 0.22.12 adds timeout-safe diagnostics for Russian Post pickup background import: Otpravka ZIP download timeout defaults to 300 seconds, failed downloads store HTTP/WP error details and a short body excerpt, stale download stages are failed after 15 minutes, and admins can manually cancel/reset a stuck import without deleting imported points.
+
+Version 0.22.11 keeps Russian Post pickup import state honest when a background job cannot be scheduled: `queued` is saved only after the job is actually created, otherwise state becomes `failed` with `Unable to schedule background import job.`.
+
+Version 0.22.10 runs Russian Post pickup import in the background from the admin UI. The page returns immediately, stores live state in `wdc_russian_post_pickup_import_state`, and polls progress every 3 seconds while the job is queued or running. Stale queued/running locks older than 2 hours are marked failed so a new import can be started; the current ALL test import produced 37302 active points.
+
+Version 0.22.01 fixes Russian Post pickup import identity and temp-file cleanup: `point_code` is now unique per concrete point even when several objects share one postcode, and imported ZIP files are deleted after reading.
+
+Version 0.22.00 adds the production foundation for a local Russian Post pickup-point directory. It extends `wdc_pickup_points`, adds shared API "Отправка" credentials/client classes, imports `unloading-passport` ZIP data through `RussianPostPickupImporter`, exposes manual import/status on the domestic pickup service tab, and keeps checkout map/REST/selected-point persistence for the next stage.
 
 Version 0.21.29 removes deprecated domestic defaults `27030`, `27020`, `28030`, and `28020` while preserving old saved tariff JSON, and simplifies the order calculation metabox by hiding VAT status and technical service keys.
 
