@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.24.0.
+Version: 0.24.1.
+
+Version 0.24.1 hardens the Yandex Maps pickup provider while the Yandex JS API is loading asynchronously. Calls to `setCenter()` before map readiness now update a pending center that is replayed after `ymaps.Map` creation, pending markers render after readiness, `clearMarkers()` before readiness clears queued points, viewport sizing runs after map creation, and bbox loading is triggered manually from the final ready center. Yandex API load failures are kept non-fatal and emit a debug `console.warn`.
 
 Version 0.24.0 adds a pickup map provider architecture for the checkout pickup-point modal. Admin settings now choose between the default OpenStreetMap / Leaflet map and Yandex Maps, store a Yandex Maps API key without rendering it back into the settings field, preserve the saved key when the input is empty, and expose a clear-key checkbox. Checkout enqueues Leaflet assets only for the Leaflet provider; for Yandex it enqueues the Yandex provider adapter and loads the Yandex JS API only when the provider is selected and a key is present. If Yandex is selected without a key, checkout continues and the modal shows a Russian setup error instead of trying to load the API.
 

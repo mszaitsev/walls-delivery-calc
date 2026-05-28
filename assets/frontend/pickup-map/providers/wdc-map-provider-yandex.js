@@ -5,29 +5,41 @@
 
 	function create(container, options) {
 		var settings = options || {};
-		var center = settings.center || { lat: 55.0302, lng: 82.9204, zoom: 11 };
+		var pendingCenter = normalizeCenter(settings.center || { lat: 55.0302, lng: 82.9204, zoom: 11 });
+		var pendingCenterChanged = false;
 		var map = null;
 		var collection = null;
 		var destroyed = false;
 		var pendingPoints = [];
 		var pointClickCallback = function () {};
+		var ymapsApi = null;
 
 		loadApi(settings.yandexApiKey || '').then(function (ymaps) {
 			if (destroyed) {
 				return;
 			}
+			ymapsApi = ymaps;
 			map = new ymaps.Map(container, {
-				center: [center.lat, center.lng],
-				zoom: center.zoom || 11,
+				center: [pendingCenter.lat, pendingCenter.lng],
+				zoom: pendingCenter.zoom || 11,
 				controls: ['zoomControl']
 			});
 			collection = new ymaps.GeoObjectCollection();
 			map.geoObjects.add(collection);
 			map.events.add('boundschange', boundsChanged);
+			fitToViewport();
 			if (pendingPoints.length) {
 				renderMarkers(pendingPoints);
 			}
-		}).catch(function () {});
+			if (pendingCenterChanged) {
+				map.setCenter([pendingCenter.lat, pendingCenter.lng], pendingCenter.zoom || map.getZoom());
+			}
+			boundsChanged();
+		}).catch(function (error) {
+			if (debugEnabled() && window.console && typeof window.console.warn === 'function') {
+				window.console.warn('WDC pickup Yandex map failed to load.', error);
+			}
+		});
 
 		function boundsChanged() {
 			if (!map || typeof settings.onBoundsChange !== 'function') {
@@ -42,7 +54,7 @@
 
 		function renderMarkers(points) {
 			pendingPoints = points || [];
-			if (!map || !collection || !window.ymaps) {
+			if (!map || !collection || !ymapsApi) {
 				return;
 			}
 			clearMarkers();
@@ -50,7 +62,7 @@
 				if (point.lat === null || point.lng === null) {
 					return;
 				}
-				var placemark = new window.ymaps.Placemark([point.lat, point.lng], {
+				var placemark = new ymapsApi.Placemark([point.lat, point.lng], {
 					balloonContent: escapeHtml(point.address || '')
 				}, {
 					preset: 'islands#blueDeliveryIcon'
@@ -68,9 +80,12 @@
 
 		return {
 			setCenter: function (lat, lng, zoom) {
-				center = { lat: lat, lng: lng, zoom: zoom || center.zoom || 11 };
+				pendingCenter = normalizeCenter({ lat: lat, lng: lng, zoom: zoom || pendingCenter.zoom || 11 });
 				if (map) {
-					map.setCenter([lat, lng], zoom || map.getZoom());
+					map.setCenter([pendingCenter.lat, pendingCenter.lng], pendingCenter.zoom || map.getZoom());
+					boundsChanged();
+				} else {
+					pendingCenterChanged = true;
 				}
 			},
 			renderMarkers: renderMarkers,
@@ -97,11 +112,15 @@
 				pointClickCallback = typeof callback === 'function' ? callback : function () {};
 			},
 			invalidateSize: function () {
-				if (map && map.container && map.container.fitToViewport) {
-					map.container.fitToViewport();
-				}
+				fitToViewport();
 			}
 		};
+
+		function fitToViewport() {
+			if (map && map.container && map.container.fitToViewport) {
+				map.container.fitToViewport();
+			}
+		}
 	}
 
 	function loadApi(apiKey) {
@@ -134,6 +153,20 @@
 		return String(value || '').replace(/[&<>"']/g, function (char) {
 			return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char];
 		});
+	}
+
+	function normalizeCenter(center) {
+		var lat = parseFloat(center.lat);
+		var lng = parseFloat(center.lng);
+		return {
+			lat: isNaN(lat) ? 55.0302 : lat,
+			lng: isNaN(lng) ? 82.9204 : lng,
+			zoom: parseInt(center.zoom || 11, 10) || 11
+		};
+	}
+
+	function debugEnabled() {
+		return !!(window.wdcPickupCheckout && window.wdcPickupCheckout.debug);
 	}
 
 	window.WDCPickupMapProviders = window.WDCPickupMapProviders || {};

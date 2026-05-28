@@ -1,8 +1,10 @@
 # Russian Post Pickup Points
 
-Version: 0.24.0.
+Version: 0.24.1.
 
 ## Pickup Map Providers
+
+Version 0.24.1 hardens the Yandex provider's async startup. `setCenter()` before Yandex API readiness updates `pendingCenter`, queued markers render after `ymaps.Map` is created, `clearMarkers()` before readiness clears queued marker data, `fitToViewport()` runs after creation, and `boundsChanged()` is called manually once the map is ready so bbox loading starts from the actual final center.
 
 Version 0.24.0 makes the checkout pickup modal map provider configurable in `Калькулятор доставок -> Настройки -> Карта ПВЗ`.
 
