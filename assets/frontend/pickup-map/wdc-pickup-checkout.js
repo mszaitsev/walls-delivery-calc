@@ -134,13 +134,14 @@
 		var hiddenRegion = fieldValue('wdc_platform_location_region_name');
 		var visiblePostcode = fieldValue('shipping_postcode') || fieldValue('billing_postcode');
 		var visibleCity = fieldValue('shipping_city') || fieldValue('billing_city');
-		var postcode = hiddenPostcode || visiblePostcode;
-		var city = hiddenDisplay || visibleCity;
+		var visibleDestinationChanged = !!(visibleCity && hiddenDisplay && normalizeText(visibleCity) !== normalizeText(hiddenDisplay));
+		var postcode = visibleDestinationChanged ? (visiblePostcode || hiddenPostcode) : (hiddenPostcode || visiblePostcode);
+		var city = visibleDestinationChanged ? visibleCity : (hiddenDisplay || visibleCity);
 		var query = [postcode, city || hiddenRegion].filter(Boolean).join(' ').trim();
 		var context = query ? { query: query } : {};
 		context.postcode = postcode;
 		context.display_name = city || hiddenRegion;
-		if (validCoordinate(hiddenLat, hiddenLng)) {
+		if (!visibleDestinationChanged && validCoordinate(hiddenLat, hiddenLng)) {
 			context.lat = hiddenLat;
 			context.lng = hiddenLng;
 		}
