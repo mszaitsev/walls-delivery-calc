@@ -27,6 +27,7 @@
 		var confirmButton = modal.root.querySelector('[data-wdc-confirm]');
 		var search = modal.root.querySelector('[data-wdc-search]');
 		var context = withPrefetch(initialContext());
+		debug('open initialContext', context);
 		var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
 
 		function close() {
@@ -88,6 +89,8 @@
 			query: config.query || ''
 		};
 		var fieldContext = contextFromFields();
+		debug('contextFromFields', fieldContext);
+		debug('currentContext', currentContext);
 		if (fieldContext.countryBlocked) {
 			return {};
 		}
@@ -112,8 +115,10 @@
 		var hiddenPostcode = fieldValue('wdc_platform_location_postcode');
 		var hiddenDisplay = fieldValue('wdc_platform_location_display_name');
 		var hiddenRegion = fieldValue('wdc_platform_location_region_name');
-		var postcode = hiddenPostcode || fieldValue('shipping_postcode') || fieldValue('billing_postcode');
-		var city = hiddenDisplay || fieldValue('shipping_city') || fieldValue('billing_city');
+		var visiblePostcode = fieldValue('shipping_postcode') || fieldValue('billing_postcode');
+		var visibleCity = fieldValue('shipping_city') || fieldValue('billing_city');
+		var postcode = hiddenPostcode || visiblePostcode;
+		var city = hiddenDisplay || visibleCity;
 		var query = [postcode, city || hiddenRegion].filter(Boolean).join(' ').trim();
 		var context = query ? { query: query } : {};
 		context.postcode = postcode;
@@ -123,6 +128,12 @@
 			context.lng = hiddenLng;
 		}
 		return context;
+	}
+
+	function debug() {
+		if (window.wdcPickupCheckout && window.wdcPickupCheckout.debug && window.console && window.console.log) {
+			window.console.log.apply(window.console, ['wdc pickup:'].concat(Array.prototype.slice.call(arguments)));
+		}
 	}
 
 	function fieldValue(name) {
@@ -302,6 +313,7 @@
 
 	function withPrefetch(context) {
 		var key = cacheKey(context);
+		debug('prefetch cache key', key);
 		if (prefetchCache && prefetchCache.key === key && Array.isArray(prefetchCache.points) && prefetchCache.points.length) {
 			return Object.assign({}, context, {
 				preloadedPoints: prefetchCache.points,

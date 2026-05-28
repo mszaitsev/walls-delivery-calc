@@ -30,7 +30,7 @@
 		var map = window.L.map(element);
 		if (hasInitialCoordinates) {
 			map.setView([initialLat, initialLng], 13);
-		} else if (!hasInitialQuery) {
+		} else {
 			map.setView([55.0302, 82.9204], 11);
 		}
 		window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
