@@ -359,6 +359,7 @@ $uploaded_init_event = rp_shift_event( RussianPostPickupImporter::INIT_HOOK );
 $uploaded_init = $importer->run_import_init( (string) $uploaded_init_event['args'][0], (string) $uploaded_init_event['args'][1] );
 $uploaded_state = $state_service->current();
 rp_pickup_assert( ! empty( $uploaded_init['success'] ) && 'uploaded_zip' === (string) $uploaded_state['source'] && '' === (string) $uploaded_state['download_backend'] && '' === (string) $uploaded_state['download_url'] && ! file_exists( $uploaded_zip ) && '' !== (string) $uploaded_state['payload_file'], 'Uploaded ZIP init must skip API download, extract payload, and delete uploaded ZIP.' );
+rp_pickup_assert( ! empty( $uploaded_state['extract_success'] ) && ! empty( $uploaded_state['ziparchive_available'] ) && (int) $uploaded_state['extract_zip_size'] > 0 && 'passport.json' === (string) $uploaded_state['extracted_payload_entry_name'] && (int) $uploaded_state['extracted_payload_size'] > 0, 'Uploaded ZIP init must store extract diagnostics.' );
 $uploaded_batch_event = rp_shift_event( RussianPostPickupImporter::BATCH_HOOK );
 $uploaded_batch = $importer->run_import_batch( (string) $uploaded_batch_event['args'][0], (string) $uploaded_batch_event['args'][1], (int) $uploaded_batch_event['args'][2] );
 $uploaded_finalize_event = rp_shift_event( RussianPostPickupImporter::FINALIZE_HOOK );
@@ -412,7 +413,19 @@ rp_pickup_assert( $importer->queue_background_import_from_zip( $invalid_uploaded
 $invalid_event = rp_shift_event( RussianPostPickupImporter::INIT_HOOK );
 $invalid_result = $importer->run_import_init( (string) $invalid_event['args'][0], (string) $invalid_event['args'][1] );
 $invalid_state = $state_service->current();
-rp_pickup_assert( empty( $invalid_result['success'] ) && 'failed' === (string) $invalid_state['status'] && ! file_exists( $invalid_uploaded_zip ) && str_contains( implode( ' ', $invalid_state['errors'] ), 'ZIP does not contain JSON/TXT passport payload.' ), 'Invalid uploaded ZIP must fail state and delete uploaded file.' );
+rp_pickup_assert( empty( $invalid_result['success'] ) && 'failed' === (string) $invalid_state['status'] && ! file_exists( $invalid_uploaded_zip ) && str_contains( implode( ' ', $invalid_state['errors'] ), 'Unable to open ZIP archive' ) && '' !== (string) $invalid_state['extract_error'], 'Invalid uploaded ZIP must fail state with open diagnostic and delete uploaded file.' );
+
+delete_transient( 'wdc_russian_post_pickup_import_lock' );
+$GLOBALS['wdc_scheduled_events'] = array();
+$unavailable_zip = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-nozip-' . uniqid() . '.zip';
+rp_write_passport_zip( $unavailable_zip );
+$GLOBALS['wdc_rp_force_ziparchive_unavailable'] = true;
+rp_pickup_assert( $importer->queue_background_import_from_zip( $unavailable_zip, 'ALL', 'nozip.zip' ), 'ZipArchive unavailable test must queue.' );
+$unavailable_event = rp_shift_event( RussianPostPickupImporter::INIT_HOOK );
+$unavailable_result = $importer->run_import_init( (string) $unavailable_event['args'][0], (string) $unavailable_event['args'][1] );
+$unavailable_state = $state_service->current();
+unset( $GLOBALS['wdc_rp_force_ziparchive_unavailable'] );
+rp_pickup_assert( empty( $unavailable_result['success'] ) && 'failed' === (string) $unavailable_state['status'] && empty( $unavailable_state['ziparchive_available'] ) && str_contains( implode( ' ', $unavailable_state['errors'] ), 'PHP ZipArchive extension is not available.' ) && false === get_transient( 'wdc_russian_post_pickup_import_lock' ) && ! file_exists( $unavailable_zip ) && ! array_key_exists( (string) $unavailable_state['staging_table'], $GLOBALS['wpdb']->tables ), 'ZipArchive unavailable must fail state, clear lock, and cleanup.' );
 
 $backup_for_direct_swap = $repo->backup_table( 'direct-swap' );
 $staging_for_direct_swap = $repo->staging_table( 'direct-swap' );
@@ -495,6 +508,16 @@ update_option( RussianPostPickupImportStateService::OPTION_NAME, $stale_state, f
 set_transient( 'wdc_russian_post_pickup_import_lock', 1, 3600 );
 $stale_result = $importer->refresh_state_for_status();
 rp_pickup_assert( 'failed' === (string) $stale_result['status'] && str_contains( implode( ' ', $stale_result['errors'] ), 'Download stage timed out/stale.' ) && false === get_transient( 'wdc_russian_post_pickup_import_lock' ) && ! file_exists( (string) $stale_zip ) && ! file_exists( (string) $stale_payload ) && ! array_key_exists( $stale_staging, $GLOBALS['wpdb']->tables ), 'Status refresh must fail stale download, unlock, and cleanup files/staging.' );
+
+$stale_extract_zip = tempnam( sys_get_temp_dir(), 'wdc-stale-extract-zip-' );
+$stale_extract_payload = tempnam( sys_get_temp_dir(), 'wdc-stale-extract-payload-' );
+$stale_extract_staging = $repo->staging_table( 'stale-extract' );
+$GLOBALS['wpdb']->tables[ $stale_extract_staging ] = array( array( 'id' => 2 ) );
+$stale_extract_state = array_merge( $state_service->defaults(), array( 'status' => 'running', 'stage' => 'extract', 'last_activity_at' => date( 'Y-m-d H:i:s', time() - 601 ), 'temp_zip_file' => $stale_extract_zip, 'payload_file' => $stale_extract_payload, 'staging_table' => $stale_extract_staging, 'errors' => array() ) );
+update_option( RussianPostPickupImportStateService::OPTION_NAME, $stale_extract_state, false );
+set_transient( 'wdc_russian_post_pickup_import_lock', 1, 3600 );
+$stale_extract_result = $importer->refresh_state_for_status();
+rp_pickup_assert( 'failed' === (string) $stale_extract_result['status'] && str_contains( implode( ' ', $stale_extract_result['errors'] ), 'Extract stage timed out/stale.' ) && false === get_transient( 'wdc_russian_post_pickup_import_lock' ) && ! file_exists( (string) $stale_extract_zip ) && ! file_exists( (string) $stale_extract_payload ) && ! array_key_exists( $stale_extract_staging, $GLOBALS['wpdb']->tables ), 'Status refresh must fail stale extract, unlock, and cleanup files/staging.' );
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 rp_pickup_assert( str_contains( $admin_source, 'refresh_state_for_status()' ), 'Status AJAX handler must refresh stale state before responding.' );
 

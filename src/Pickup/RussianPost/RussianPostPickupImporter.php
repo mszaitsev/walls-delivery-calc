@@ -138,14 +138,33 @@ final class RussianPostPickupImporter {
 				$this->state?->update( 'extract', $result );
 			}
 
-			$payload_file = $this->extract_first_payload_from_zip( $temp_file );
+			$extract_started = microtime( true );
+			$result = array_merge(
+				$result,
+				array(
+					'extract_started_at' => $this->now(),
+					'extract_zip_file' => $temp_file,
+					'extract_zip_size' => is_file( $temp_file ) ? (int) filesize( $temp_file ) : 0,
+					'ziparchive_available' => $this->ziparchive_available(),
+					'extract_backend' => 'ziparchive',
+					'extract_duration_ms' => 0,
+					'extract_error' => '',
+					'extract_success' => false,
+				)
+			);
+			$this->state?->update( 'extract', $result );
+			$extract = $this->extract_first_payload_from_zip( $temp_file );
+			$extract['extract_duration_ms'] = (int) round( ( microtime( true ) - $extract_started ) * 1000 );
+			$result = array_merge( $result, $extract );
 			$this->delete_temp_file( $temp_file );
 			$temp_file = '';
-			if ( '' === $payload_file ) {
-				$result['errors'][] = 'ZIP does not contain JSON/TXT passport payload.';
+			$this->state?->update( 'extract', $result );
+			if ( empty( $extract['success'] ) ) {
+				$result['errors'][] = (string) ( $extract['extract_error'] ?? 'ZIP does not contain JSON/TXT passport payload.' );
 				return $this->fail_pipeline( $result );
 			}
 
+			$payload_file = (string) $extract['payload_file'];
 			$result['payload_file'] = $payload_file;
 			$result['payload_offset'] = 0;
 			$this->state?->update( 'parse', $result );
@@ -470,21 +489,45 @@ final class RussianPostPickupImporter {
 	private function cleanup_state_files( array $state, bool $cleanup_tables = true ): void {
 		$this->delete_temp_file( (string) ( $state['temp_zip_file'] ?? '' ) );
 		$this->delete_temp_file( (string) ( $state['payload_file'] ?? '' ) );
+		$this->delete_temp_file( (string) ( $state['extracted_payload_file'] ?? '' ) );
 		if ( $cleanup_tables ) {
 			$this->repository->drop_table( (string) ( $state['staging_table'] ?? '' ) );
 		}
 	}
 
-	private function extract_first_payload_from_zip( string $temp_file ): string {
-		if ( ! class_exists( \ZipArchive::class ) || ! is_file( $temp_file ) ) {
-			return '';
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function extract_first_payload_from_zip( string $temp_file ): array {
+		$result = array(
+			'success' => false,
+			'payload_file' => '',
+			'extracted_payload_file' => '',
+			'extracted_payload_size' => 0,
+			'extracted_payload_entry_name' => '',
+			'extracted_payload_entry_index' => 0,
+			'extract_success' => false,
+			'extract_error' => '',
+			'ziparchive_available' => $this->ziparchive_available(),
+			'extract_backend' => 'ziparchive',
+		);
+		if ( ! $this->ziparchive_available() ) {
+			$result['extract_error'] = 'PHP ZipArchive extension is not available.';
+			return $result;
+		}
+		if ( ! is_file( $temp_file ) ) {
+			$result['extract_error'] = 'ZIP file is missing before extract.';
+			return $result;
 		}
 
 		$zip = new \ZipArchive();
-		if ( true !== $zip->open( $temp_file ) ) {
-			return '';
+		$open = $zip->open( $temp_file );
+		if ( true !== $open ) {
+			$result['extract_error'] = 'Unable to open ZIP archive. ZipArchive code: ' . (string) $open . ' (' . $this->zip_error_label( (int) $open ) . ').';
+			return $result;
 		}
 
+		$temp_dir = '';
 		try {
 			for ( $i = 0; $i < $zip->numFiles; ++$i ) {
 				$name = (string) $zip->getNameIndex( $i );
@@ -492,35 +535,112 @@ final class RussianPostPickupImporter {
 				if ( ! str_ends_with( $lower, '.json' ) && ! str_ends_with( $lower, '.txt' ) ) {
 					continue;
 				}
-				$stream = $zip->getStream( $name );
-				if ( ! is_resource( $stream ) ) {
-					return '';
+				if ( str_contains( $name, '..' ) ) {
+					$result['extract_error'] = 'ZIP payload entry path is unsafe.';
+					return $result;
+				}
+				$temp_dir = rtrim( sys_get_temp_dir(), '/\\' ) . DIRECTORY_SEPARATOR . 'wdc-rp-extract-' . sha1( uniqid( '', true ) );
+				if ( ! is_dir( $temp_dir ) && ! @mkdir( $temp_dir, 0700, true ) ) {
+					$result['extract_error'] = 'Unable to create temp extract directory.';
+					return $result;
+				}
+				if ( true !== $zip->extractTo( $temp_dir, $name ) ) {
+					$result['extract_error'] = 'ZipArchive::extractTo failed for payload entry.';
+					return $result;
+				}
+				$source_file = $temp_dir . DIRECTORY_SEPARATOR . str_replace( array( '/', '\\' ), DIRECTORY_SEPARATOR, $name );
+				$source_real = realpath( $source_file );
+				$temp_real = realpath( $temp_dir );
+				if ( false === $source_real || false === $temp_real || ! str_starts_with( $source_real, $temp_real ) || ! is_file( $source_real ) ) {
+					$result['extract_error'] = 'Extracted payload file is missing or unsafe.';
+					return $result;
 				}
 				$payload_file = wp_tempnam( 'wdc-russian-post-passport-payload.json' );
 				if ( ! is_string( $payload_file ) || '' === $payload_file ) {
-					fclose( $stream );
-					return '';
+					$result['extract_error'] = 'Unable to create temp payload file.';
+					return $result;
 				}
+				$in = fopen( $source_real, 'rb' );
 				$out = fopen( $payload_file, 'wb' );
-				if ( ! is_resource( $out ) ) {
-					fclose( $stream );
+				if ( ! is_resource( $in ) || ! is_resource( $out ) ) {
+					if ( is_resource( $in ) ) {
+						fclose( $in );
+					}
+					if ( is_resource( $out ) ) {
+						fclose( $out );
+					}
 					$this->delete_temp_file( $payload_file );
-					return '';
+					$result['extract_error'] = 'Unable to copy extracted payload file.';
+					return $result;
 				}
 				try {
-					stream_copy_to_stream( $stream, $out );
+					stream_copy_to_stream( $in, $out );
 				} finally {
 					fclose( $out );
-					fclose( $stream );
+					fclose( $in );
 				}
 
-				return $payload_file;
+				$result['success'] = true;
+				$result['payload_file'] = $payload_file;
+				$result['extracted_payload_file'] = $payload_file;
+				$result['extracted_payload_size'] = is_file( $payload_file ) ? (int) filesize( $payload_file ) : 0;
+				$result['extracted_payload_entry_name'] = $name;
+				$result['extracted_payload_entry_index'] = $i;
+				$result['extract_success'] = true;
+				return $result;
 			}
+			$result['extract_error'] = 'ZIP does not contain JSON/TXT passport payload.';
+			return $result;
 		} finally {
 			$zip->close();
+			if ( '' !== $temp_dir ) {
+				$this->delete_temp_dir( $temp_dir );
+			}
 		}
+	}
 
-		return '';
+	private function ziparchive_available(): bool {
+		return class_exists( \ZipArchive::class ) && empty( $GLOBALS['wdc_rp_force_ziparchive_unavailable'] );
+	}
+
+	private function zip_error_label( int $code ): string {
+		if ( ! class_exists( \ZipArchive::class ) ) {
+			return 'ZipArchive unavailable';
+		}
+		$labels = array(
+			\ZipArchive::ER_EXISTS => 'ER_EXISTS',
+			\ZipArchive::ER_INCONS => 'ER_INCONS',
+			\ZipArchive::ER_INVAL => 'ER_INVAL',
+			\ZipArchive::ER_MEMORY => 'ER_MEMORY',
+			\ZipArchive::ER_NOENT => 'ER_NOENT',
+			\ZipArchive::ER_NOZIP => 'ER_NOZIP',
+			\ZipArchive::ER_OPEN => 'ER_OPEN',
+			\ZipArchive::ER_READ => 'ER_READ',
+			\ZipArchive::ER_SEEK => 'ER_SEEK',
+		);
+
+		return $labels[ $code ] ?? 'UNKNOWN';
+	}
+
+	private function delete_temp_dir( string $dir ): void {
+		if ( '' === $dir || ! is_dir( $dir ) ) {
+			return;
+		}
+		$items = scandir( $dir );
+		if ( false !== $items ) {
+			foreach ( $items as $item ) {
+				if ( '.' === $item || '..' === $item ) {
+					continue;
+				}
+				$path = $dir . DIRECTORY_SEPARATOR . $item;
+				if ( is_dir( $path ) ) {
+					$this->delete_temp_dir( $path );
+				} else {
+					$this->delete_temp_file( $path );
+				}
+			}
+		}
+		@rmdir( $dir );
 	}
 
 	/**
@@ -661,6 +781,18 @@ final class RussianPostPickupImporter {
 			'curl_errno' => 0,
 			'curl_error' => '',
 			'temp_file_size' => 0,
+			'extract_started_at' => '',
+			'extract_zip_file' => '',
+			'extract_zip_size' => 0,
+			'ziparchive_available' => false,
+			'extract_backend' => '',
+			'extract_duration_ms' => 0,
+			'extract_error' => '',
+			'extract_success' => false,
+			'extracted_payload_file' => '',
+			'extracted_payload_size' => 0,
+			'extracted_payload_entry_name' => '',
+			'extracted_payload_entry_index' => 0,
 			'parsed' => 0,
 			'inserted' => 0,
 			'updated' => 0,

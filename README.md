@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.29.
+Version: 0.22.30.
+
+Version 0.22.30 makes manual ZIP extract fail-fast and diagnosable. Import state/status now records `extract_*` fields, ZipArchive availability, payload entry name/index/size, and extract errors. ZIP payloads are extracted with `ZipArchive::extractTo()` into a temp directory and copied stream-to-stream into the resumable payload file. A stale `extract` stage older than 5 minutes fails, unlocks, and cleans temp files/staging.
 
 Version 0.22.29 fixes cleanup for failed manual ZIP import queueing: if the uploaded file is already stored but the background import cannot be queued because another import is running, the uploaded ZIP is deleted and state records `Unable to queue ZIP import. Another import may be running.`
 

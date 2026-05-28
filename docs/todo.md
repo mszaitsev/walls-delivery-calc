@@ -11,7 +11,9 @@
   - SSL behavior
   - Action Scheduler interaction
   - background download stability
+  - PHP ZipArchive/zip extension behavior on LocalWP and production Linux/VDS
 - При необходимости:
   - доработать retry/backoff;
   - добавить CLI import mode;
   - добавить chunked streamed download.
+  - добавить импорт из уже распакованного JSON/TXT как fallback для окружений без стабильного ZipArchive.

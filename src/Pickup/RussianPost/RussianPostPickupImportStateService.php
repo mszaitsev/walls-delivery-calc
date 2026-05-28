@@ -10,6 +10,7 @@ final class RussianPostPickupImportStateService {
 	private const MAX_STORED_ERRORS = 10;
 	private const STALE_AFTER_SECONDS = 7200;
 	private const DOWNLOAD_STALE_AFTER_SECONDS = 300;
+	private const EXTRACT_STALE_AFTER_SECONDS = 300;
 	private const BATCH_STALE_AFTER_SECONDS = 600;
 
 	/**
@@ -92,12 +93,12 @@ final class RussianPostPickupImportStateService {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
 		}
-		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size' ) as $key ) {
+		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
 		}
-		foreach ( array( 'payload_file', 'temp_zip_file', 'import_id', 'type', 'source', 'original_upload_name', 'staging_table', 'main_table', 'backup_table', 'swap_started_at', 'swap_finished_at', 'download_url', 'download_started_at', 'download_response_message', 'download_error', 'download_backend', 'first_backend_error', 'curl_error' ) as $key ) {
+		foreach ( array( 'payload_file', 'temp_zip_file', 'import_id', 'type', 'source', 'original_upload_name', 'staging_table', 'main_table', 'backup_table', 'swap_started_at', 'swap_finished_at', 'download_url', 'download_started_at', 'download_response_message', 'download_error', 'download_backend', 'first_backend_error', 'curl_error', 'extract_started_at', 'extract_zip_file', 'extract_backend', 'extract_error', 'extracted_payload_file', 'extracted_payload_entry_name' ) as $key ) {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = (string) $counters[ $key ];
 			}
@@ -107,6 +108,11 @@ final class RussianPostPickupImportStateService {
 		}
 		if ( array_key_exists( 'fallback_used', $counters ) ) {
 			$state['fallback_used'] = ! empty( $counters['fallback_used'] );
+		}
+		foreach ( array( 'ziparchive_available', 'extract_success' ) as $key ) {
+			if ( array_key_exists( $key, $counters ) ) {
+				$state[ $key ] = ! empty( $counters[ $key ] );
+			}
 		}
 		if ( isset( $counters['errors'] ) && is_array( $counters['errors'] ) ) {
 			$state['errors'] = array_slice( array_map( 'strval', $counters['errors'] ), 0, self::MAX_STORED_ERRORS );
@@ -163,9 +169,10 @@ final class RussianPostPickupImportStateService {
 
 		$stage = (string) ( $state['stage'] ?? '' );
 		$was_download = 'download' === $stage;
+		$was_extract = 'extract' === $stage;
 		$was_batch = in_array( $stage, array( 'parse', 'upsert' ), true );
 		$last = strtotime( (string) ( $state['last_activity_at'] ?? '' ) );
-		$stale_after = $was_download ? self::DOWNLOAD_STALE_AFTER_SECONDS : ( $was_batch ? self::BATCH_STALE_AFTER_SECONDS : self::STALE_AFTER_SECONDS );
+		$stale_after = $was_download ? self::DOWNLOAD_STALE_AFTER_SECONDS : ( $was_extract ? self::EXTRACT_STALE_AFTER_SECONDS : ( $was_batch ? self::BATCH_STALE_AFTER_SECONDS : self::STALE_AFTER_SECONDS ) );
 		if ( false !== $last && time() - $last < $stale_after ) {
 			return $state;
 		}
@@ -175,7 +182,7 @@ final class RussianPostPickupImportStateService {
 		$state['finished_at'] = $this->now();
 		$state['last_activity_at'] = $state['finished_at'];
 		$errors = is_array( $state['errors'] ?? null ) ? $state['errors'] : array();
-		$errors[] = $was_download ? 'Download stage timed out/stale. API download is unstable in this environment. Use manual ZIP upload import.' : ( $was_batch ? 'Batch stage timed out/stale.' : 'Previous import lock was stale and has been reset.' );
+		$errors[] = $was_download ? 'Download stage timed out/stale. API download is unstable in this environment. Use manual ZIP upload import.' : ( $was_extract ? 'Extract stage timed out/stale. Check PHP ZipArchive extension or use extracted JSON/TXT import.' : ( $was_batch ? 'Batch stage timed out/stale.' : 'Previous import lock was stale and has been reset.' ) );
 		$state['errors'] = array_slice( array_map( 'strval', $errors ), 0, self::MAX_STORED_ERRORS );
 		$this->save( $state );
 		if ( function_exists( 'delete_transient' ) ) {
@@ -218,6 +225,18 @@ final class RussianPostPickupImportStateService {
 			'curl_errno' => 0,
 			'curl_error' => '',
 			'temp_file_size' => 0,
+			'extract_started_at' => '',
+			'extract_zip_file' => '',
+			'extract_zip_size' => 0,
+			'ziparchive_available' => false,
+			'extract_backend' => '',
+			'extract_duration_ms' => 0,
+			'extract_error' => '',
+			'extract_success' => false,
+			'extracted_payload_file' => '',
+			'extracted_payload_size' => 0,
+			'extracted_payload_entry_name' => '',
+			'extracted_payload_entry_index' => 0,
 			'payload_file' => '',
 			'temp_zip_file' => '',
 			'payload_offset' => 0,
@@ -254,7 +273,7 @@ final class RussianPostPickupImportStateService {
 		foreach ( array( 'downloaded', 'parsed', 'inserted', 'updated', 'deactivated', 'skipped' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
-		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size' ) as $key ) {
+		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
 		$state['status'] = $status;
@@ -280,6 +299,11 @@ final class RussianPostPickupImportStateService {
 		$state['fallback_used'] = ! empty( $result['fallback_used'] ?? $state['fallback_used'] ?? false );
 		$state['first_backend_error'] = (string) ( $result['first_backend_error'] ?? $state['first_backend_error'] ?? '' );
 		$state['curl_error'] = (string) ( $result['curl_error'] ?? $state['curl_error'] ?? '' );
+		foreach ( array( 'extract_started_at', 'extract_zip_file', 'extract_backend', 'extract_error', 'extracted_payload_file', 'extracted_payload_entry_name' ) as $key ) {
+			$state[ $key ] = (string) ( $result[ $key ] ?? $state[ $key ] ?? '' );
+		}
+		$state['ziparchive_available'] = ! empty( $result['ziparchive_available'] ?? $state['ziparchive_available'] ?? false );
+		$state['extract_success'] = ! empty( $result['extract_success'] ?? $state['extract_success'] ?? false );
 		$state['parser_completed'] = ! empty( $result['parser_completed'] ) || ! empty( $state['parser_completed'] );
 		$state['errors'] = array_slice( array_map( 'strval', is_array( $result['errors'] ?? null ) ? $result['errors'] : array() ), 0, self::MAX_STORED_ERRORS );
 		$state['memory_peak'] = max( (int) ( $state['memory_peak'] ?? 0 ), $this->memory_peak() );
