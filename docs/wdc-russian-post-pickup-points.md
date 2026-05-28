@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.30.
+Version: 0.22.31.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 

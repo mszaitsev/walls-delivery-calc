@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.30.
+Version: 0.22.31.
+
+Version 0.22.31 fixes the extracted ZIP payload path safety check on Windows: paths are normalized before comparison, Windows drive/path case is handled case-insensitively, and boundary checks prevent sibling paths like `/tmp/base2` from passing as inside `/tmp/base`.
 
 Version 0.22.30 makes manual ZIP extract fail-fast and diagnosable. Import state/status now records `extract_*` fields, ZipArchive availability, payload entry name/index/size, and extract errors. ZIP payloads are extracted with `ZipArchive::extractTo()` into a temp directory and copied stream-to-stream into the resumable payload file. A stale `extract` stage older than 5 minutes fails, unlocks, and cleans temp files/staging.
 

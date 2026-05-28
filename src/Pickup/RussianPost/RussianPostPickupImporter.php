@@ -551,7 +551,7 @@ final class RussianPostPickupImporter {
 				$source_file = $temp_dir . DIRECTORY_SEPARATOR . str_replace( array( '/', '\\' ), DIRECTORY_SEPARATOR, $name );
 				$source_real = realpath( $source_file );
 				$temp_real = realpath( $temp_dir );
-				if ( false === $source_real || false === $temp_real || ! str_starts_with( $source_real, $temp_real ) || ! is_file( $source_real ) ) {
+				if ( false === $source_real || false === $temp_real || ! $this->is_path_inside( $source_real, $temp_real ) || ! is_file( $source_real ) ) {
 					$result['extract_error'] = 'Extracted payload file is missing or unsafe.';
 					return $result;
 				}
@@ -601,6 +601,24 @@ final class RussianPostPickupImporter {
 
 	private function ziparchive_available(): bool {
 		return class_exists( \ZipArchive::class ) && empty( $GLOBALS['wdc_rp_force_ziparchive_unavailable'] );
+	}
+
+	private function is_path_inside( string $path, string $base ): bool {
+		$path = rtrim( str_replace( '\\', '/', $path ), '/' );
+		$base = rtrim( str_replace( '\\', '/', $base ), '/' );
+		if ( $this->is_windows_path( $path ) || $this->is_windows_path( $base ) ) {
+			$path = strtolower( $path );
+			$base = strtolower( $base );
+		}
+		if ( '' === $path || '' === $base ) {
+			return false;
+		}
+
+		return $path === $base || str_starts_with( $path, $base . '/' );
+	}
+
+	private function is_windows_path( string $path ): bool {
+		return 1 === preg_match( '/^[a-zA-Z]:[\\\\\\/]/', $path ) || str_contains( $path, '\\' );
 	}
 
 	private function zip_error_label( int $code ): string {
