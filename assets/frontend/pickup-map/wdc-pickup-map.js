@@ -21,8 +21,9 @@
 		var controller = null;
 		var suppressNextMoveLoad = false;
 		var context = initialContext || {};
-		var initialLat = parseFloat(context.lat);
-		var initialLng = parseFloat(context.lng);
+		var preloadedPoints = Array.isArray(context.preloadedPoints) ? context.preloadedPoints : [];
+		var initialLat = parseFloat(context.centerLat || context.lat || (preloadedPoints[0] && preloadedPoints[0].lat));
+		var initialLng = parseFloat(context.centerLng || context.lng || (preloadedPoints[0] && preloadedPoints[0].lng));
 		var hasInitialCoordinates = !isNaN(initialLat) && !isNaN(initialLng);
 		var hasInitialQuery = !!(context.query && String(context.query).trim());
 		var map = window.L.map(element);
@@ -65,6 +66,24 @@
 			preview(point, true);
 		}
 
+		function renderMarkers(points, emptyText) {
+			clearMarkers();
+			if (!points.length) {
+				card.textContent = emptyText || labels.empty || '';
+				return;
+			}
+			points.forEach(function (point) {
+				if (point.lat === null || point.lng === null) {
+					return;
+				}
+				var marker = window.L.marker([point.lat, point.lng]).addTo(map);
+				marker.bindPopup(escapeHtml(point.address || ''));
+				marker.on('click', function () { select(point); });
+				markers.push(marker);
+			});
+			card.textContent = labels.selectPoint || 'Выберите пункт на карте.';
+		}
+
 		function loadBounds() {
 			var bounds = map.getBounds();
 			var bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()].join(',');
@@ -74,21 +93,7 @@
 			controller = new AbortController();
 			card.textContent = labels.loading || 'Loading...';
 			window.WDCPickupApi.points(bbox, controller.signal).then(function (points) {
-				clearMarkers();
-				if (!points.length) {
-					card.textContent = labels.empty || '';
-					return;
-				}
-				points.forEach(function (point) {
-					if (point.lat === null || point.lng === null) {
-						return;
-					}
-					var marker = window.L.marker([point.lat, point.lng]).addTo(map);
-					marker.bindPopup(escapeHtml(point.address || ''));
-					marker.on('click', function () { select(point); });
-					markers.push(marker);
-				});
-				card.textContent = labels.empty || '';
+				renderMarkers(points, labels.empty || '');
 			}).catch(function (error) {
 				if (error.name !== 'AbortError') {
 					card.textContent = labels.error || 'Error';
@@ -104,6 +109,10 @@
 			loadBounds();
 		}, 250);
 		map.on('moveend zoomend', debouncedLoad);
+
+		if (preloadedPoints.length) {
+			renderMarkers(preloadedPoints, labels.empty || '');
+		}
 
 		function search(query) {
 			return runSearch(query, false);

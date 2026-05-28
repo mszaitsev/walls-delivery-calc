@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.23.3.
+Version: 0.23.4.
+
+Version 0.23.4 keeps enriched city coordinates live on checkout after WooCommerce AJAX recalculation. After `updated_checkout`, the pickup frontend reads fresh checkout `city_context` from the nonce-protected checkout state endpoint, updates city picker hidden `lat/lng` fields, and prefetches the starting Russian Post pickup bbox for the active RU pickup method. When the modal opens, cached `preloadedPoints` render markers immediately while normal bbox refresh remains active.
 
 Version 0.23.3 makes the pickup map initial context DOM-first after WooCommerce AJAX checkout updates. Each modal open now rereads current city picker hidden `lat/lng/postcode/display_name` fields, then visible checkout postcode/city/country fields, and uses the localized `window.wdcPickupCheckout.initialContext` only as a stale-safe fallback.
 

@@ -109,7 +109,34 @@ final class CheckoutPickupPointRestController {
 		unset( $request );
 		$point = $this->session_manager->checkout_pickup_point();
 
-		return $this->response( array( 'pickup_point' => array() !== $point ? $point : null ) );
+		return $this->response(
+			array(
+				'pickup_point' => array() !== $point ? $point : null,
+				'city_context' => $this->city_context(),
+			)
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>|null
+	 */
+	private function city_context(): ?array {
+		$context = $this->session_manager->city_context();
+		if ( array() === $context ) {
+			return null;
+		}
+
+		return array_filter(
+			array(
+				'lat'          => $context['lat'] ?? $context['latitude'] ?? null,
+				'lng'          => $context['lng'] ?? $context['longitude'] ?? null,
+				'postcode'     => $context['postcode'] ?? $context['postal_code'] ?? '',
+				'display_name' => $context['display_name'] ?? $context['city_name'] ?? $context['settlement_name'] ?? '',
+				'region_name'  => $context['region_name'] ?? '',
+				'country_code' => $context['country_code'] ?? 'RU',
+			),
+			static fn( mixed $value ): bool => null !== $value && '' !== $value
+		);
 	}
 
 	/**

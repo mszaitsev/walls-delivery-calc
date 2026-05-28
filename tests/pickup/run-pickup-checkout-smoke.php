@@ -148,6 +148,10 @@ $saved = $state_controller->save( new WdcPickupCheckoutRequest( array( 'point_id
 pickup_checkout_assert( '630001-a' === $saved['pickup_point']['point_code'], 'checkout state save must return selected point.' );
 pickup_checkout_assert( '630001-a' === $session->checkout_pickup_point()['point_code'], 'selection must be stored in WC session wdc_pickup_point.' );
 pickup_checkout_assert( '630001-a' === $state_controller->state()['pickup_point']['point_code'], 'checkout state GET must return current pickup selection.' );
+$session->save_city_context( array( 'lat' => 56.0106, 'lng' => 92.8526, 'postcode' => '660000', 'display_name' => 'Красноярск', 'region_name' => 'Красноярский край', 'country_code' => 'RU' ) );
+$state = $state_controller->state();
+pickup_checkout_assert( 56.0106 === (float) $state['city_context']['lat'] && 92.8526 === (float) $state['city_context']['lng'], 'checkout state GET must expose enriched city_context lat/lng.' );
+pickup_checkout_assert( 'Красноярск' === (string) $state['city_context']['display_name'], 'checkout state GET must expose enriched city display_name.' );
 
 $rate = array(
 	'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
@@ -203,17 +207,27 @@ pickup_checkout_assert( ! str_contains( $checkout_js, "input[name^=\"shipping_me
 pickup_checkout_assert( str_contains( $checkout_js, 'billing_postcode' ) && str_contains( $checkout_js, 'shipping_postcode' ), 'JS must reset pickup on city/country/postcode changes.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'contextFromFields' ) && str_contains( $checkout_js, 'shipping_city' ) && str_contains( $checkout_js, 'shipping_postcode' ), 'JS must form initial map query from checkout city/postcode.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'WDCPickupMap.create' ) && str_contains( $checkout_js, 'initialContext()' ), 'Next modal open must recompute initial context instead of reusing a cached value.' );
-pickup_checkout_assert( str_contains( $checkout_js, 'lat: fieldContext.lat || configContext.lat' ) && str_contains( $checkout_js, 'lng: fieldContext.lng || configContext.lng' ), 'Initial context must prefer DOM hidden coordinates over localized config coordinates.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'lat: fieldContext.lat || runtimeContext.lat || localizedContext.lat' ) && str_contains( $checkout_js, 'lng: fieldContext.lng || runtimeContext.lng || localizedContext.lng' ), 'Initial context must prefer DOM hidden coordinates, then fresh runtime context, then localized config.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'wdc_platform_location_lat' ) && str_contains( $checkout_js, 'wdc_platform_location_lng' ), 'Initial context must read city picker hidden lat/lng fields.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'wdc_platform_location_postcode' ) && str_contains( $checkout_js, 'wdc_platform_location_display_name' ), 'Initial context query must use hidden postcode/display_name fields.' );
-pickup_checkout_assert( str_contains( $checkout_js, 'var postcode = hiddenPostcode || fieldValue' ) && str_contains( $checkout_js, 'query: fieldContext.query || configContext.query' ), 'Initial context must use hidden query first and localized config only as fallback.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'var runtimeContext = contextMatches(fieldContext, currentContext)' ) && str_contains( $checkout_js, 'var localizedContext = contextMatches(fieldContext, configContext)' ), 'Initial context must not use stale current/localized coordinates when DOM destination changed.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'var postcode = hiddenPostcode || fieldValue' ) && str_contains( $checkout_js, 'query: fieldContext.query || runtimeContext.query || localizedContext.query' ), 'Initial context must use hidden query first and localized config only as fallback.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'countryBlocked' ) && str_contains( $checkout_js, "country.toUpperCase() !== 'RU'" ), 'Initial context must ignore non-RU checkout destinations.' );
-pickup_checkout_assert( str_contains( $checkout_js, "window.jQuery(document.body).on('updated_checkout', boot)" ), 'updated_checkout must only boot containers; the next open recomputes context from DOM.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'refreshCheckoutContext' ) && str_contains( $checkout_js, "window.jQuery(document.body).on('updated_checkout'" ), 'updated_checkout must refresh server city_context and then prefetch pickup points.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'applyContextToHidden' ) && str_contains( $checkout_js, 'window.WDCPickupApi.state()' ), 'Frontend must update hidden fields from checkout state city_context after DaData enrichment.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'prefetchInitialPoints' ) && str_contains( $checkout_js, 'bboxAround' ) && str_contains( $checkout_js, 'searchInitial(context.query' ), 'Frontend must prefetch search to bbox when initial coordinates are unavailable.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'isPickupMethodActive' ) && str_contains( $checkout_js, 'russian_post_domestic_pickup' ), 'Prefetch must run only for the active Russian Post pickup method.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'hasPickupBlock' ) && str_contains( $checkout_js, '[data-wdc-pickup-checkout]' ), 'Prefetch must require a pickup checkout block.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'prefetchController.abort()' ) && str_contains( $checkout_js, 'setTimeout(prefetchInitialPoints, 400)' ), 'Prefetch must debounce and abort stale requests.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'prefetchCache = null' ) && str_contains( $checkout_js, 'invalidatePrefetch' ), 'Prefetch cache must invalidate on destination changes.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'withPrefetch(initialContext())' ) && str_contains( $checkout_js, 'preloadedPoints: prefetchCache.points' ), 'Open modal must pass cached preloaded points to the map.' );
 $map_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.js' ) ?: '';
 pickup_checkout_assert( str_contains( $map_js, 'if (hasInitialCoordinates)' ) && str_contains( $map_js, 'loadBounds();' ), 'Map JS must load bbox immediately when initial coordinates exist.' );
 pickup_checkout_assert( str_contains( $map_js, 'else if (hasInitialQuery)' ) && str_contains( $map_js, 'initialSearch(String(context.query))' ), 'Map JS must run initial search before bbox loading when only an initial query exists.' );
 pickup_checkout_assert( ! str_contains( $map_js, "loadBounds();\n\t\t\tif (!hasInitialCoordinates && context.query)" ), 'Map JS must not load the Novosibirsk bbox before initial query search.' );
 pickup_checkout_assert( str_contains( $map_js, 'preview(points[0], false)' ), 'Initial search preview must not enable final pickup confirmation.' );
+pickup_checkout_assert( str_contains( $map_js, 'preloadedPoints' ) && str_contains( $map_js, 'renderMarkers(preloadedPoints' ), 'Map JS must render preloaded points immediately.' );
+pickup_checkout_assert( str_contains( $map_js, 'centerLat' ) && str_contains( $map_js, 'centerLng' ), 'Map JS must support preloaded map center coordinates.' );
 $api_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-api.js' ) ?: '';
 pickup_checkout_assert( str_contains( $api_js, 'searchInitial' ) && str_contains( $api_js, 'limit=10' ), 'Pickup API must expose a small-limit initial search.' );
 pickup_checkout_assert( str_contains( $api_js, 'Array.isArray(data)' ), 'Pickup API must normalize point responses to arrays.' );

@@ -1,8 +1,12 @@
 # Russian Post Pickup Points
 
-Version: 0.23.3.
+Version: 0.23.4.
 
 ## Checkout Map Fixes
+
+Version 0.23.4 updates checkout DOM state after DaData coordinate enrichment without a page reload. The existing nonce-protected `GET /wp-json/wdc/v1/checkout/state` response includes `city_context`; after WooCommerce `updated_checkout`, frontend code refreshes that context, writes fresh `wdc_platform_location_lat/lng/postcode/display_name` hidden fields, and stores a runtime `currentContext`.
+
+The frontend also prefetches the initial pickup points after `updated_checkout` when `russian_post_domestic_pickup` is active for an RU destination. If coordinates are known it loads a small bbox around them; otherwise it searches by the current query, then loads a bbox around the first result. The cache key is based on context coordinates/query/postcode/display name and is cleared on destination changes, so old-city points are not reused. The map accepts `initialContext.preloadedPoints` and renders those markers immediately on modal open before the usual bbox refresh completes.
 
 Version 0.23.3 fixes stale startup context after WooCommerce `updated_checkout`. The frontend no longer trusts only the page-load localized `window.wdcPickupCheckout.initialContext`; every modal open recomputes context from current DOM hidden city picker fields first, visible checkout fields second, and localized config last. This keeps the map on the newly selected city after AJAX recalculation without a full page reload.
 
