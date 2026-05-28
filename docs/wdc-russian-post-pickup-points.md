@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.27.
+Version: 0.22.28.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 
@@ -56,9 +56,14 @@ Pickup import classes live in `src/Pickup/RussianPost/`:
 - `RussianPostPickupImportStateService`
 - `RussianPostPickupPointRepository`
 
-The importer downloads `GET https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=<ALL|OPS|PVZ|APS>` with WordPress HTTP streaming into a temp ZIP file. The import is resumable and split into short background jobs:
+The importer supports two source modes:
 
-- init job `wdc_russian_post_pickup_import_init`: create a staging table `wp_wdc_pickup_points_russian_post_staging_<import_id>`, download ZIP, extract the first `.json`/`.txt` payload to a temp file, delete the ZIP, save `payload_file` and `payload_offset=0`, then schedule the first batch;
+1. API download import: WordPress downloads `GET https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=<ALL|OPS|PVZ|APS>` into a temp ZIP file.
+2. Manual uploaded ZIP import: an administrator downloads the ZIP outside WordPress and uploads it on the admin tab. This is recommended for LocalWP or WordPress HTTP/Action Scheduler environments where long background downloads are unstable.
+
+Both modes use the same resumable background jobs:
+
+- init job `wdc_russian_post_pickup_import_init`: create a staging table `wp_wdc_pickup_points_russian_post_staging_<import_id>`, download ZIP for `source=api_download` or use the stored uploaded ZIP for `source=uploaded_zip`, extract the first `.json`/`.txt` payload to a temp file, delete the ZIP, save `payload_file` and `payload_offset=0`, then schedule the first batch;
 - batch job `wdc_russian_post_pickup_import_batch`: open the payload, seek to `payload_offset`, parse up to 500 `passportElements` objects, normalize and insert only that small batch into staging, save the new byte offset and counters, then schedule the next batch or finalize;
 - finalize job `wdc_russian_post_pickup_import_finalize`: atomically swap staging into `wp_wdc_pickup_points_russian_post` with `RENAME TABLE`, verify that main exists, delete the backup only after successful verification, delete the payload temp file, save success state, and unlock.
 
@@ -76,9 +81,9 @@ Download diagnostics are stored in the same state/result: `download_url`, `downl
 
 Locking uses `wdc_russian_post_pickup_import_lock` via transients, with an option fallback in non-WP smoke tests, so parallel imports return a readable status instead of running twice.
 
-Manual imports from the admin UI now queue a background job instead of running in the HTTP request. The persistent live state is stored in the `wdc_russian_post_pickup_import_state` option with `status`, `stage`, timestamps, counters, first errors, type, memory peak, `import_id`, `payload_file`, `payload_offset`, `objects_processed`, `batches_processed`, `current_batch_size`, `last_batch_duration_ms`, `max_batch_duration_ms`, `parser_completed`, `staging_table`, `main_table`, `backup_table`, `rows_inserted_to_staging`, `swap_started_at`, and `swap_finished_at`. The importer updates state before download, after extraction, after every batch insert, before swap, and on success/failure. If a queued/running state has no activity for more than 2 hours, stale lock recovery marks it failed and allows a new run with a warning.
+Manual imports from the admin UI now queue a background job instead of running in the HTTP request. The persistent live state is stored in the `wdc_russian_post_pickup_import_state` option with `status`, `stage`, timestamps, counters, first errors, type, memory peak, `source`, `temp_zip_file`, `original_upload_name`, `uploaded_file_size`, `import_id`, `payload_file`, `payload_offset`, `objects_processed`, `batches_processed`, `current_batch_size`, `last_batch_duration_ms`, `max_batch_duration_ms`, `parser_completed`, `staging_table`, `main_table`, `backup_table`, `rows_inserted_to_staging`, `swap_started_at`, and `swap_finished_at`. The importer updates state before download or uploaded ZIP extraction, after extraction, after every batch insert, before swap, and on success/failure. If a queued/running state has no activity for more than 2 hours, stale lock recovery marks it failed and allows a new run with a warning.
 
-The Otpravka passport ZIP download timeout defaults to 120 seconds and is sanitized to 30..300 seconds. Download failures store the HTTP code, WP error message when present, response message/body excerpt up to 1000 characters, duration, and temp file size when available. A running `download` stage with no activity for more than 5 minutes is marked failed with `Download stage timed out/stale.` and the import lock is cleared. A stale `parse`/`upsert` batch older than 10 minutes is marked failed with `Batch stage timed out/stale.`.
+The Otpravka passport ZIP download timeout defaults to 120 seconds and is sanitized to 30..300 seconds. Download failures store the HTTP code, WP error message when present, response message/body excerpt up to 1000 characters, duration, and temp file size when available. A running `download` stage with no activity for more than 5 minutes is marked failed with `Download stage timed out/stale.` and the import lock is cleared. The stale download error also recommends manual ZIP upload for unstable environments. A stale `parse`/`upsert` batch older than 10 minutes is marked failed with `Batch stage timed out/stale.`.
 
 `RussianPostPickupPointRepository` writes import batches only into staging. This keeps the production table stable and avoids sustained writes against the table read by REST/checkout.
 
@@ -95,16 +100,45 @@ The tab is shown only for `russian_post_domestic_pickup`. It contains:
 - unload type `ALL|OPS|PVZ|APS`;
 - weekly update flag;
 - "Запустить импорт сейчас";
+- "Загрузить ZIP и начать импорт";
 - live import status/progress;
 - last import result;
 - active counts for `OPS`, `PVZ`, `APS`;
 - lock status.
 
-The "run import now" button schedules the init hook `wdc_russian_post_pickup_import_init` through Action Scheduler when available, otherwise through `wp_schedule_single_event(time()+5, ...)`, then redirects back to the tab. The status box polls `admin-ajax.php?action=wdc_russian_post_pickup_import_status` every 3 seconds while the state is `queued` or `running`; polling stops on `success` or `failed`. The status output includes parsed rows, rows inserted to staging, skipped rows, batch metrics, staging/main table names, swap timestamps, and errors. On the current test import, `ALL` produced 37302 active points.
+The "run import now" button schedules the init hook `wdc_russian_post_pickup_import_init` through Action Scheduler when available, otherwise through `wp_schedule_single_event(time()+5, ...)`, then redirects back to the tab. The "Загрузить ZIP и начать импорт" button stores the uploaded `.zip` under `uploads/wdc-imports/`, records `source=uploaded_zip`, `original_upload_name`, `uploaded_file_size`, and `temp_zip_file`, then schedules the same init hook. The init job skips API download for uploaded ZIP imports, extracts the payload, deletes the ZIP, and continues with normal batches. The status box polls `admin-ajax.php?action=wdc_russian_post_pickup_import_status` every 3 seconds while the state is `queued` or `running`; polling stops on `success` or `failed`. The status output includes source, upload filename/size, parsed rows, rows inserted to staging, skipped rows, batch metrics, staging/main table names, swap timestamps, and errors. On the current test import, `ALL` produced 37302 active points.
 
 State becomes `queued` only after the background job is actually scheduled. If scheduling fails, the state is saved as `failed` with `Unable to schedule background import job.`, so the admin screen does not get stuck in a forever-queued state.
 
-The admin tab includes "Отменить / сбросить зависший импорт" while an import is queued/running. It clears `wdc_russian_post_pickup_import_lock`, drops the staging table, removes temp files, and marks state failed with `Import was manually cancelled/reset by admin.` without touching the main table.
+The admin tab includes "Отменить / сбросить зависший импорт" while an import is queued/running. It clears `wdc_russian_post_pickup_import_lock`, drops the staging table, removes temp files including uploaded ZIPs and extracted payloads, and marks state failed with `Import was manually cancelled/reset by admin.` without touching the main table.
+
+Manual PowerShell download template shown in admin:
+
+```powershell
+# === НАСТРОЙКИ ===
+$AccessToken = "ВАШ_ACCESS_TOKEN"
+$Login       = "ВАШ_LOGIN"
+$Password    = "ВАШ_PASSWORD"
+
+# === BASIC KEY ===
+$BasicKey = [Convert]::ToBase64String(
+    [Text.Encoding]::UTF8.GetBytes("$Login`:$Password")
+)
+
+# === КУДА СОХРАНИТЬ ===
+$OutFile = "D:\russian-post-passport-all.zip"
+
+# === СКАЧИВАНИЕ ===
+Invoke-WebRequest `
+  -Uri "https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=ALL" `
+  -Headers @{
+      "Authorization"        = "AccessToken $AccessToken"
+      "X-User-Authorization" = "Basic $BasicKey"
+      "Accept"               = "application/octet-stream"
+  } `
+  -OutFile $OutFile `
+  -TimeoutSec 300
+```
 
 The existing `Калькулятор доставок -> ПВЗ` page remains in place and now shows a Russian Post summary with active total, type counts, and last successful import date.
 

@@ -148,7 +148,7 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
-		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'reset_russian_post_pickup_import' ), true ) ) {
+		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' ), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -159,7 +159,7 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_tariffs' === $action ) {
 				$data = array();
 			}
-			if ( in_array( $action, array( 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'reset_russian_post_pickup_import' ), true ) ) {
+			if ( in_array( $action, array( 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' ), true ) ) {
 				$data = array();
 			}
 			if ( $id > 0 && array() !== $data ) {
@@ -184,10 +184,13 @@ final class DeliveryServicesAdminPage {
 					$this->settings->set_setting( (int) $service->id, 'tariff_variants', $this->sanitize_domestic_tariff_variants_from_post(), 'json' );
 				}
 			}
-			if ( in_array( $action, array( 'save_russian_post_pickup', 'run_russian_post_pickup_import' ), true ) && $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ) {
+			if ( in_array( $action, array( 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_zip_import' ), true ) && $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ) {
 				$this->otpravka_settings->save_from_admin( $_POST );
 				if ( 'run_russian_post_pickup_import' === $action && $this->pickup_importer instanceof RussianPostPickupImporter ) {
 					$this->pickup_importer->queue_background_import( $this->otpravka_settings->unload_type() );
+				}
+				if ( 'upload_russian_post_pickup_zip_import' === $action && $this->pickup_importer instanceof RussianPostPickupImporter ) {
+					$this->handle_russian_post_pickup_zip_upload();
 				}
 			}
 			if ( 'reset_russian_post_pickup_import' === $action && $this->pickup_importer instanceof RussianPostPickupImporter ) {
@@ -220,13 +223,13 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'reset_russian_post_pickup_import' ), true ) ) {
+		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' ), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'availability',
 				'save_calculation' => 'calculation',
 				'save_tariffs' => 'tariffs',
-				'save_russian_post_pickup', 'run_russian_post_pickup_import', 'reset_russian_post_pickup_import' => 'russian_post_pickup',
+				'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' => 'russian_post_pickup',
 				default => 'main',
 			};
 			if ( '' !== $service_key ) {
@@ -237,6 +240,58 @@ final class DeliveryServicesAdminPage {
 
 		wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG ) );
 		exit;
+	}
+
+	private function handle_russian_post_pickup_zip_upload(): void {
+		if ( ! $this->pickup_importer instanceof RussianPostPickupImporter ) {
+			return;
+		}
+		$file = $_FILES['russian_post_pickup_zip'] ?? null;
+		if ( ! is_array( $file ) || UPLOAD_ERR_OK !== (int) ( $file['error'] ?? UPLOAD_ERR_NO_FILE ) ) {
+			$this->pickup_import_state?->failed(
+				array(
+					'source' => 'uploaded_zip',
+					'type' => $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ? $this->otpravka_settings->unload_type() : 'ALL',
+					'errors' => array( 'ZIP upload failed or no file was selected.' ),
+				)
+			);
+			return;
+		}
+
+		$original_name = sanitize_file_name( (string) ( $file['name'] ?? 'russian-post-passport.zip' ) );
+		if ( ! str_ends_with( strtolower( $original_name ), '.zip' ) ) {
+			$this->pickup_import_state?->failed( array( 'source' => 'uploaded_zip', 'original_upload_name' => $original_name, 'errors' => array( 'Only ZIP files are allowed for Russian Post pickup import.' ) ) );
+			return;
+		}
+		$tmp_name = (string) ( $file['tmp_name'] ?? '' );
+		if ( function_exists( 'wp_check_filetype_and_ext' ) && '' !== $tmp_name ) {
+			$checked = wp_check_filetype_and_ext( $tmp_name, $original_name, array( 'zip' => 'application/zip' ) );
+			if ( empty( $checked['ext'] ) || 'zip' !== (string) $checked['ext'] ) {
+				$this->pickup_import_state?->failed( array( 'source' => 'uploaded_zip', 'original_upload_name' => $original_name, 'errors' => array( 'Uploaded file failed ZIP type validation.' ) ) );
+				return;
+			}
+		}
+
+		$uploads = function_exists( 'wp_upload_dir' ) ? wp_upload_dir() : array();
+		$base_dir = is_array( $uploads ) && ! empty( $uploads['basedir'] ) ? rtrim( (string) $uploads['basedir'], '/\\' ) . DIRECTORY_SEPARATOR . 'wdc-imports' : sys_get_temp_dir();
+		if ( function_exists( 'wp_mkdir_p' ) ) {
+			wp_mkdir_p( $base_dir );
+		} elseif ( ! is_dir( $base_dir ) ) {
+			@mkdir( $base_dir, 0755, true );
+		}
+		$filename = function_exists( 'wp_unique_filename' ) ? wp_unique_filename( $base_dir, $original_name ) : uniqid( 'russian-post-passport-', true ) . '.zip';
+		$target = rtrim( $base_dir, '/\\' ) . DIRECTORY_SEPARATOR . $filename;
+		$moved = '' !== $tmp_name && is_uploaded_file( $tmp_name ) ? move_uploaded_file( $tmp_name, $target ) : ( '' !== $tmp_name && is_file( $tmp_name ) && @rename( $tmp_name, $target ) );
+		if ( ! $moved || ! is_file( $target ) ) {
+			$this->pickup_import_state?->failed( array( 'source' => 'uploaded_zip', 'original_upload_name' => $original_name, 'errors' => array( 'Unable to store uploaded ZIP file.' ) ) );
+			return;
+		}
+
+		$this->pickup_importer->queue_background_import_from_zip(
+			$target,
+			$this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ? $this->otpravka_settings->unload_type() : 'ALL',
+			$original_name
+		);
 	}
 
 	public function render_page(): void {
@@ -490,13 +545,15 @@ final class DeliveryServicesAdminPage {
 		}
 		$values = $this->otpravka_settings->values();
 		$result = $this->otpravka_settings->last_import_result();
-		$state = $this->pickup_import_state instanceof RussianPostPickupImportStateService ? $this->pickup_import_state->current() : array();
+		$state = $this->pickup_importer instanceof RussianPostPickupImporter
+			? $this->pickup_importer->refresh_state_for_status()
+			: ( $this->pickup_import_state instanceof RussianPostPickupImportStateService ? $this->pickup_import_state->current() : array() );
 		$is_busy = in_array( (string) ( $state['status'] ?? 'idle' ), array( 'queued', 'running' ), true );
 		$counts = $this->russian_post_pickup_points instanceof RussianPostPickupPointRepository ? $this->russian_post_pickup_points->count_by_type() : array();
 		$total = $this->russian_post_pickup_points instanceof RussianPostPickupPointRepository ? $this->russian_post_pickup_points->count_active() : 0;
 		$locked = $this->pickup_importer instanceof RussianPostPickupImporter && $this->pickup_importer->is_locked();
 		?>
-		<form method="post" style="max-width: 960px; margin-top:16px;">
+		<form method="post" enctype="multipart/form-data" style="max-width: 960px; margin-top:16px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
 			<input type="hidden" name="wdc_delivery_services_action" value="save_russian_post_pickup">
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
@@ -529,6 +586,35 @@ final class DeliveryServicesAdminPage {
 			<?php if ( $is_busy ) : ?>
 				<button class="button" type="submit" name="wdc_delivery_services_action" value="reset_russian_post_pickup_import">Отменить / сбросить зависший импорт</button>
 			<?php endif; ?>
+			<h3 style="margin-top:24px;">Импорт из ZIP-файла</h3>
+			<p class="description">ZIP можно скачать из API Отправка: <code>https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=ALL</code>. После загрузки файл будет обработан тем же background batch pipeline. Этот режим рекомендуется для LocalWP и окружений, где автоматическая загрузка через WordPress HTTP нестабильна.</p>
+			<p><input type="file" name="russian_post_pickup_zip" accept=".zip"> <button class="button button-primary" type="submit" name="wdc_delivery_services_action" value="upload_russian_post_pickup_zip_import" <?php disabled( $is_busy ); ?>>Загрузить ZIP и начать импорт</button></p>
+			<details style="max-width: 760px; margin-top: 8px;">
+				<summary>PowerShell: скачать ZIP вручную</summary>
+				<pre style="white-space: pre-wrap; background:#f6f7f7; padding:12px; border:1px solid #dcdcde;"><code># === НАСТРОЙКИ ===
+$AccessToken = "ВАШ_ACCESS_TOKEN"
+$Login       = "ВАШ_LOGIN"
+$Password    = "ВАШ_PASSWORD"
+
+# === BASIC KEY ===
+$BasicKey = [Convert]::ToBase64String(
+    [Text.Encoding]::UTF8.GetBytes("$Login`:$Password")
+)
+
+# === КУДА СОХРАНИТЬ ===
+$OutFile = "D:\russian-post-passport-all.zip"
+
+# === СКАЧИВАНИЕ ===
+Invoke-WebRequest `
+  -Uri "https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=ALL" `
+  -Headers @{
+      "Authorization"        = "AccessToken $AccessToken"
+      "X-User-Authorization" = "Basic $BasicKey"
+      "Accept"               = "application/octet-stream"
+  } `
+  -OutFile $OutFile `
+  -TimeoutSec 300</code></pre>
+			</details>
 		</form>
 		<?php
 	}
@@ -543,6 +629,9 @@ final class DeliveryServicesAdminPage {
 			'finished_at' => 'Finished at',
 			'last_activity_at' => 'Last activity',
 			'type' => 'Type',
+			'source' => 'Source',
+			'original_upload_name' => 'Original upload name',
+			'uploaded_file_size' => 'Uploaded file size',
 			'import_id' => 'Import ID',
 			'download_url' => 'Download URL',
 			'download_started_at' => 'Download started',

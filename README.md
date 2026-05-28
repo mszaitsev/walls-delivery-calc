@@ -1,6 +1,23 @@
 # Walls Delivery Calc
 
-Version: 0.22.27.
+Version: 0.22.28.
+
+Version 0.22.28 adds a production-safe manual ZIP import path for Russian Post pickup points. Admins can download `unloading-passport` outside WordPress, upload the ZIP on the "ПВЗ / ОПС" tab, and process it through the same resumable background staging pipeline without relying on WordPress HTTP/Action Scheduler for the large download step. Import state now records `source=api_download|uploaded_zip`, uploaded filename, uploaded size, and temp ZIP path; cleanup removes uploaded ZIPs on extract, finalize, fail, cancel, or stale reset.
+
+Manual ZIP downloads can use this PowerShell template with placeholder credentials:
+
+```powershell
+$AccessToken = "ВАШ_ACCESS_TOKEN"
+$Login = "ВАШ_LOGIN"
+$Password = "ВАШ_PASSWORD"
+$BasicKey = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$Login`:$Password"))
+$OutFile = "D:\russian-post-passport-all.zip"
+Invoke-WebRequest `
+  -Uri "https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=ALL" `
+  -Headers @{ "Authorization" = "AccessToken $AccessToken"; "X-User-Authorization" = "Basic $BasicKey"; "Accept" = "application/octet-stream" } `
+  -OutFile $OutFile `
+  -TimeoutSec 300
+```
 
 Version 0.22.27 further lightens the Russian Post pickup table for the map stage: fresh schema removes brand, e-commerce JSON, services/phones/images, weight/size limits, and payment/inspection flags. The table now keeps only identity, type, postal/address/FIAS/GAR fields, coordinates, geohash, description, work time, active/source hash, and timestamps. Recreate local test data with `DROP TABLE IF EXISTS wp_wdc_pickup_points_russian_post;` before reimport.
 

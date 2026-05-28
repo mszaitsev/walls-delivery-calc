@@ -86,40 +86,57 @@ final class RussianPostPickupImporter {
 		$staging_table = $this->repository->staging_table( $import_id );
 		$main_table = $this->repository->main_table();
 		$backup_table = $this->repository->backup_table( $import_id );
+		$source = 'uploaded_zip' === (string) ( $state['source'] ?? '' ) ? 'uploaded_zip' : 'api_download';
+		$uploaded_zip = (string) ( $state['temp_zip_file'] ?? '' );
+		$original_upload_name = (string) ( $state['original_upload_name'] ?? '' );
+		$uploaded_file_size = max( 0, (int) ( $state['uploaded_file_size'] ?? 0 ) );
 		$this->repository->drop_table( $staging_table );
 		$this->repository->create_schema_if_needed( $staging_table );
 		$this->state?->start( $type, $import_id );
-		$this->state?->update(
-			'download',
-			array(
-				'import_id' => $import_id,
-				'type' => $type,
-				'staging_table' => $staging_table,
-				'main_table' => $main_table,
-				'backup_table' => $backup_table,
-				'download_url' => $this->client->passport_url( $type ),
-				'download_started_at' => $this->now(),
-			)
-		);
 		$result = $this->base_result( $type, $import_id );
 		$result['staging_table'] = $staging_table;
 		$result['main_table'] = $main_table;
 		$result['backup_table'] = $backup_table;
-		$result['download_url'] = $this->client->passport_url( $type );
-		$result['download_started_at'] = $this->now();
+		$result['source'] = $source;
+		$result['original_upload_name'] = $original_upload_name;
+		$result['uploaded_file_size'] = $uploaded_file_size;
 		$temp_file = '';
 		try {
-			$download = $this->client->download_passport_zip( $type );
-			$result = array_merge( $result, $this->download_result_state( $download ) );
-			if ( empty( $download['success'] ) ) {
-				$result['errors'][] = (string) ( $download['error'] ?? 'Download failed.' );
-				return $this->fail_pipeline( $result );
-			}
+			if ( 'uploaded_zip' === $source ) {
+				$temp_file = $uploaded_zip;
+				$result['temp_zip_file'] = $temp_file;
+				$result['downloaded'] = is_file( $temp_file ) ? (int) filesize( $temp_file ) : $uploaded_file_size;
+				$result['temp_file_size'] = $result['downloaded'];
+				if ( '' === $temp_file || ! is_file( $temp_file ) || 0 >= (int) filesize( $temp_file ) ) {
+					$result['errors'][] = 'Uploaded ZIP file is missing or empty.';
+					return $this->fail_pipeline( $result );
+				}
+				$this->state?->update( 'extract', $result );
+			} else {
+				$result['download_url'] = $this->client->passport_url( $type );
+				$result['download_started_at'] = $this->now();
+				$this->state?->update(
+					'download',
+					array_merge(
+						$result,
+						array(
+							'download_url' => $result['download_url'],
+							'download_started_at' => $result['download_started_at'],
+						)
+					)
+				);
+				$download = $this->client->download_passport_zip( $type );
+				$result = array_merge( $result, $this->download_result_state( $download ) );
+				if ( empty( $download['success'] ) ) {
+					$result['errors'][] = (string) ( $download['error'] ?? 'Download failed.' );
+					return $this->fail_pipeline( $result );
+				}
 
-			$temp_file = (string) $download['temp_file'];
-			$result['downloaded'] = is_file( $temp_file ) ? (int) filesize( $temp_file ) : (int) ( $download['temp_file_size'] ?? 0 );
-			$result['temp_zip_file'] = $temp_file;
-			$this->state?->update( 'extract', $result );
+				$temp_file = (string) $download['temp_file'];
+				$result['downloaded'] = is_file( $temp_file ) ? (int) filesize( $temp_file ) : (int) ( $download['temp_file_size'] ?? 0 );
+				$result['temp_zip_file'] = $temp_file;
+				$this->state?->update( 'extract', $result );
+			}
 
 			$payload_file = $this->extract_first_payload_from_zip( $temp_file );
 			$this->delete_temp_file( $temp_file );
@@ -313,7 +330,7 @@ final class RussianPostPickupImporter {
 		$type = $this->normalize_type( $type );
 		$import_id = sha1( (string) microtime( true ) . '|' . $type . '|' . ( function_exists( 'wp_rand' ) ? (string) wp_rand() : (string) random_int( 1, PHP_INT_MAX ) ) );
 		if ( $this->schedule_single( self::INIT_HOOK, array( $import_id, $type ) ) ) {
-			$this->state?->queue( $type, $import_id );
+			$this->state?->queue( $type, $import_id, array( 'source' => 'api_download' ) );
 			$this->lock();
 			return true;
 		}
@@ -326,6 +343,69 @@ final class RussianPostPickupImporter {
 				'errors' => array( 'Unable to schedule background import job.' ),
 			)
 		);
+
+		return false;
+	}
+
+	public function queue_background_import_from_zip( string $zip_file, string $type = 'ALL', string $original_upload_name = '' ): bool {
+		if ( $this->is_locked() ) {
+			return false;
+		}
+
+		$current = $this->state?->reset_stale_if_needed() ?? array();
+		if ( in_array( (string) ( $current['status'] ?? '' ), array( 'queued', 'running' ), true ) ) {
+			return false;
+		}
+
+		$type = $this->normalize_type( $type );
+		$zip_file = trim( $zip_file );
+		$file_size = '' !== $zip_file && is_file( $zip_file ) ? (int) filesize( $zip_file ) : 0;
+		$import_id = sha1( (string) microtime( true ) . '|uploaded_zip|' . $type . '|' . ( function_exists( 'wp_rand' ) ? (string) wp_rand() : (string) random_int( 1, PHP_INT_MAX ) ) );
+		if ( 0 >= $file_size || ! str_ends_with( strtolower( $zip_file ), '.zip' ) ) {
+			$this->state?->failed(
+				array(
+					'type' => $type,
+					'import_id' => $import_id,
+					'source' => 'uploaded_zip',
+					'temp_zip_file' => $zip_file,
+					'original_upload_name' => $original_upload_name,
+					'uploaded_file_size' => $file_size,
+					'finished_at' => $this->now(),
+					'errors' => array( 'Uploaded ZIP file is missing, empty, or has an invalid extension.' ),
+				)
+			);
+			$this->delete_temp_file( $zip_file );
+			return false;
+		}
+
+		if ( $this->schedule_single( self::INIT_HOOK, array( $import_id, $type ) ) ) {
+			$this->state?->queue(
+				$type,
+				$import_id,
+				array(
+					'source' => 'uploaded_zip',
+					'temp_zip_file' => $zip_file,
+					'original_upload_name' => $original_upload_name,
+					'uploaded_file_size' => $file_size,
+				)
+			);
+			$this->lock();
+			return true;
+		}
+
+		$this->state?->failed(
+			array(
+				'type' => $type,
+				'import_id' => $import_id,
+				'source' => 'uploaded_zip',
+				'temp_zip_file' => $zip_file,
+				'original_upload_name' => $original_upload_name,
+				'uploaded_file_size' => $file_size,
+				'finished_at' => $this->now(),
+				'errors' => array( 'Unable to schedule background import job.' ),
+			)
+		);
+		$this->delete_temp_file( $zip_file );
 
 		return false;
 	}
@@ -565,6 +645,9 @@ final class RussianPostPickupImporter {
 			'success' => false,
 			'import_id' => $import_id,
 			'type' => $type,
+			'source' => 'api_download',
+			'original_upload_name' => '',
+			'uploaded_file_size' => 0,
 			'downloaded' => 0,
 			'download_url' => '',
 			'download_started_at' => '',

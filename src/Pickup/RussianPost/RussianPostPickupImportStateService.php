@@ -24,7 +24,7 @@ final class RussianPostPickupImportStateService {
 	/**
 	 * @return array<string,mixed>
 	 */
-	public function queue( string $type, string $import_id = '' ): array {
+	public function queue( string $type, string $import_id = '', array $context = array() ): array {
 		$now = $this->now();
 		$state = array_merge(
 			$this->defaults(),
@@ -39,6 +39,14 @@ final class RussianPostPickupImportStateService {
 				'errors' => array(),
 			)
 		);
+		foreach ( array( 'source', 'temp_zip_file', 'original_upload_name' ) as $key ) {
+			if ( array_key_exists( $key, $context ) ) {
+				$state[ $key ] = (string) $context[ $key ];
+			}
+		}
+		if ( array_key_exists( 'uploaded_file_size', $context ) ) {
+			$state['uploaded_file_size'] = max( 0, (int) $context['uploaded_file_size'] );
+		}
 		$this->save( $state );
 
 		return $state;
@@ -84,12 +92,12 @@ final class RussianPostPickupImportStateService {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
 		}
-		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno' ) as $key ) {
+		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size' ) as $key ) {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
 		}
-		foreach ( array( 'payload_file', 'temp_zip_file', 'import_id', 'type', 'staging_table', 'main_table', 'backup_table', 'swap_started_at', 'swap_finished_at', 'download_url', 'download_started_at', 'download_response_message', 'download_error', 'download_backend', 'first_backend_error', 'curl_error' ) as $key ) {
+		foreach ( array( 'payload_file', 'temp_zip_file', 'import_id', 'type', 'source', 'original_upload_name', 'staging_table', 'main_table', 'backup_table', 'swap_started_at', 'swap_finished_at', 'download_url', 'download_started_at', 'download_response_message', 'download_error', 'download_backend', 'first_backend_error', 'curl_error' ) as $key ) {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = (string) $counters[ $key ];
 			}
@@ -167,7 +175,7 @@ final class RussianPostPickupImportStateService {
 		$state['finished_at'] = $this->now();
 		$state['last_activity_at'] = $state['finished_at'];
 		$errors = is_array( $state['errors'] ?? null ) ? $state['errors'] : array();
-		$errors[] = $was_download ? 'Download stage timed out/stale.' : ( $was_batch ? 'Batch stage timed out/stale.' : 'Previous import lock was stale and has been reset.' );
+		$errors[] = $was_download ? 'Download stage timed out/stale. API download is unstable in this environment. Use manual ZIP upload import.' : ( $was_batch ? 'Batch stage timed out/stale.' : 'Previous import lock was stale and has been reset.' );
 		$state['errors'] = array_slice( array_map( 'strval', $errors ), 0, self::MAX_STORED_ERRORS );
 		$this->save( $state );
 		if ( function_exists( 'delete_transient' ) ) {
@@ -189,6 +197,9 @@ final class RussianPostPickupImportStateService {
 			'finished_at' => '',
 			'last_activity_at' => '',
 			'type' => 'ALL',
+			'source' => 'api_download',
+			'original_upload_name' => '',
+			'uploaded_file_size' => 0,
 			'staging_table' => '',
 			'main_table' => '',
 			'backup_table' => '',
@@ -243,7 +254,7 @@ final class RussianPostPickupImportStateService {
 		foreach ( array( 'downloaded', 'parsed', 'inserted', 'updated', 'deactivated', 'skipped' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
-		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno' ) as $key ) {
+		foreach ( array( 'payload_offset', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
 		$state['status'] = $status;
@@ -251,6 +262,8 @@ final class RussianPostPickupImportStateService {
 		$state['finished_at'] = (string) ( $result['finished_at'] ?? $this->now() );
 		$state['last_activity_at'] = $state['finished_at'];
 		$state['type'] = $this->normalize_type( (string) ( $result['type'] ?? $state['type'] ?? 'ALL' ) );
+		$state['source'] = (string) ( $result['source'] ?? $state['source'] ?? 'api_download' );
+		$state['original_upload_name'] = (string) ( $result['original_upload_name'] ?? $state['original_upload_name'] ?? '' );
 		$state['payload_file'] = (string) ( $result['payload_file'] ?? $state['payload_file'] ?? '' );
 		$state['temp_zip_file'] = (string) ( $result['temp_zip_file'] ?? $state['temp_zip_file'] ?? '' );
 		$state['import_id'] = (string) ( $result['import_id'] ?? $state['import_id'] ?? '' );

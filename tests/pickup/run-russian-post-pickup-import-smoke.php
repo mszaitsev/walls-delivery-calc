@@ -343,6 +343,42 @@ rp_pickup_assert( '' !== (string) $state['swap_started_at'] && '' !== (string) $
 rp_pickup_assert( in_array( $main, $GLOBALS['wpdb']->analyzed_tables, true ), 'Successful finalize must analyze main table.' );
 
 $main_after_success = $GLOBALS['wpdb']->tables[ $main ];
+delete_transient( 'wdc_russian_post_pickup_import_lock' );
+$uploaded_zip = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-uploaded-' . uniqid() . '.zip';
+rp_write_passport_zip( $uploaded_zip );
+$uploaded_size = filesize( $uploaded_zip );
+rp_pickup_assert( $importer->queue_background_import_from_zip( $uploaded_zip, 'ALL', 'passport-all.zip' ), 'Uploaded ZIP import must queue.' );
+$uploaded_state = $state_service->current();
+rp_pickup_assert( 'queued' === (string) $uploaded_state['status'] && 'uploaded_zip' === (string) $uploaded_state['source'] && 'passport-all.zip' === (string) $uploaded_state['original_upload_name'] && $uploaded_size === (int) $uploaded_state['uploaded_file_size'], 'Uploaded ZIP queue must store source/name/size state.' );
+$uploaded_init_event = rp_shift_event( RussianPostPickupImporter::INIT_HOOK );
+$uploaded_init = $importer->run_import_init( (string) $uploaded_init_event['args'][0], (string) $uploaded_init_event['args'][1] );
+$uploaded_state = $state_service->current();
+rp_pickup_assert( ! empty( $uploaded_init['success'] ) && 'uploaded_zip' === (string) $uploaded_state['source'] && '' === (string) $uploaded_state['download_backend'] && '' === (string) $uploaded_state['download_url'] && ! file_exists( $uploaded_zip ) && '' !== (string) $uploaded_state['payload_file'], 'Uploaded ZIP init must skip API download, extract payload, and delete uploaded ZIP.' );
+$uploaded_batch_event = rp_shift_event( RussianPostPickupImporter::BATCH_HOOK );
+$uploaded_batch = $importer->run_import_batch( (string) $uploaded_batch_event['args'][0], (string) $uploaded_batch_event['args'][1], (int) $uploaded_batch_event['args'][2] );
+$uploaded_finalize_event = rp_shift_event( RussianPostPickupImporter::FINALIZE_HOOK );
+$uploaded_final = $importer->run_import_finalize( (string) $uploaded_finalize_event['args'][0], (string) $uploaded_finalize_event['args'][1] );
+$uploaded_state = $state_service->current();
+rp_pickup_assert( ! empty( $uploaded_batch['success'] ) && ! empty( $uploaded_final['success'] ) && 'success' === (string) $uploaded_state['status'] && 3 === count( $GLOBALS['wpdb']->tables[ $main ] ), 'Uploaded ZIP batch/staging/swap pipeline must work.' );
+$main_after_success = $GLOBALS['wpdb']->tables[ $main ];
+
+delete_transient( 'wdc_russian_post_pickup_import_lock' );
+$cancel_uploaded_zip = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-cancel-' . uniqid() . '.zip';
+rp_write_passport_zip( $cancel_uploaded_zip );
+rp_pickup_assert( $importer->queue_background_import_from_zip( $cancel_uploaded_zip, 'ALL', 'cancel.zip' ), 'Uploaded ZIP cancel test must queue.' );
+$importer->reset_stale_or_running_import();
+rp_pickup_assert( ! file_exists( $cancel_uploaded_zip ) && false === get_transient( 'wdc_russian_post_pickup_import_lock' ), 'Cancel/reset must delete queued uploaded ZIP and unlock.' );
+$GLOBALS['wdc_scheduled_events'] = array();
+
+delete_transient( 'wdc_russian_post_pickup_import_lock' );
+$invalid_uploaded_zip = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-rp-invalid-' . uniqid() . '.zip';
+file_put_contents( $invalid_uploaded_zip, 'not a zip' );
+rp_pickup_assert( $importer->queue_background_import_from_zip( $invalid_uploaded_zip, 'ALL', 'invalid.zip' ), 'Invalid uploaded ZIP must still queue so init can fail cleanly.' );
+$invalid_event = rp_shift_event( RussianPostPickupImporter::INIT_HOOK );
+$invalid_result = $importer->run_import_init( (string) $invalid_event['args'][0], (string) $invalid_event['args'][1] );
+$invalid_state = $state_service->current();
+rp_pickup_assert( empty( $invalid_result['success'] ) && 'failed' === (string) $invalid_state['status'] && ! file_exists( $invalid_uploaded_zip ) && str_contains( implode( ' ', $invalid_state['errors'] ), 'ZIP does not contain JSON/TXT passport payload.' ), 'Invalid uploaded ZIP must fail state and delete uploaded file.' );
+
 $backup_for_direct_swap = $repo->backup_table( 'direct-swap' );
 $staging_for_direct_swap = $repo->staging_table( 'direct-swap' );
 $successful_staging = $repo->staging_table( 'direct-success' );
@@ -444,6 +480,6 @@ $importer->sync_schedule();
 rp_pickup_assert( ! isset( $GLOBALS['wdc_recurring_events'][ RussianPostPickupImporter::SCHEDULE_HOOK ] ), 'Schedule disabled must clear weekly import.' );
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
-rp_pickup_assert( str_contains( $admin_source, 'rows_inserted_to_staging' ) && str_contains( $admin_source, 'staging_table' ), 'Admin status output must include staging metrics.' );
+rp_pickup_assert( str_contains( $admin_source, 'rows_inserted_to_staging' ) && str_contains( $admin_source, 'staging_table' ) && str_contains( $admin_source, 'upload_russian_post_pickup_zip_import' ) && str_contains( $admin_source, 'ВАШ_ACCESS_TOKEN' ), 'Admin status output must include staging metrics and manual ZIP upload instructions.' );
 
 echo "Russian Post pickup import smoke test passed.\n";
