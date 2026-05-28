@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.32.
+Version: 0.22.33.
+
+Version 0.22.33 polishes the Russian Post pickup import admin tab: the live status block is collapsible and starts collapsed, its summary shows status/stage/parsed/inserted, weekly scheduling shows the next planned run or a Russian warning, the ready Basic key field is removed, and the tab/status labels are localized in Russian. The Otpravka Basic authorization header is computed from Login + Password.
 
 Version 0.22.32 unifies manual Russian Post pickup imports into one ZIP/TXT/JSON upload. The fallback chain is now automatic cURL download, automatic WP HTTP download, manual ZIP upload, then manual TXT/JSON payload upload. TXT/JSON uploads skip download and ZIP extract entirely and enter the resumable batch pipeline at `stage=parse`.
 
@@ -18,11 +20,11 @@ Manual ZIP downloads can use this PowerShell template with placeholder credentia
 $AccessToken = "ВАШ_ACCESS_TOKEN"
 $Login = "ВАШ_LOGIN"
 $Password = "ВАШ_PASSWORD"
-$BasicKey = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$Login`:$Password"))
+$BasicAuth = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$Login`:$Password"))
 $OutFile = "D:\russian-post-passport-all.zip"
 Invoke-WebRequest `
   -Uri "https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=ALL" `
-  -Headers @{ "Authorization" = "AccessToken $AccessToken"; "X-User-Authorization" = "Basic $BasicKey"; "Accept" = "application/octet-stream" } `
+  -Headers @{ "Authorization" = "AccessToken $AccessToken"; "X-User-Authorization" = "Basic $BasicAuth"; "Accept" = "application/octet-stream" } `
   -OutFile $OutFile `
   -TimeoutSec 300
 ```

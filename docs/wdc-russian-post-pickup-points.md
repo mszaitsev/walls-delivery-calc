@@ -1,6 +1,6 @@
 # Russian Post Pickup Points
 
-Version: 0.22.32.
+Version: 0.22.33.
 
 This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
 
@@ -38,14 +38,13 @@ Stored settings:
 - `russian_post_otpravka_access_token`
 - `russian_post_otpravka_login`
 - `russian_post_otpravka_password_encrypted`
-- `russian_post_otpravka_basic_key_encrypted`
 - `russian_post_otpravka_timeout`
 - `russian_post_pickup_unload_type`
 - `russian_post_pickup_schedule_enabled`
 - `russian_post_pickup_last_import_result`
 - `russian_post_pickup_last_success_at`
 
-Secret fields are not rendered back into HTML. Empty secret inputs preserve existing values; clear checkboxes remove saved values.
+Secret fields are not rendered back into HTML. Empty secret inputs preserve existing values; clear checkboxes remove saved values. The `X-User-Authorization` Basic value is computed from Login + Password when the Otpravka client makes a request; it is not stored or edited as a separate credential.
 
 ## Import
 
@@ -105,18 +104,18 @@ Manual import is available at:
 
 The tab is shown only for `russian_post_domestic_pickup`. It contains:
 
-- shared API "Отправка" credentials;
-- timeout;
+- shared API "Отправка" credentials: AccessToken, Login, Password;
+- Russian-labeled automatic download timeout;
 - unload type `ALL|OPS|PVZ|APS`;
-- weekly update flag;
+- weekly update flag with the next scheduled run time when enabled;
 - "Запустить импорт сейчас";
 - "Загрузить ZIP/TXT и начать импорт";
-- live import status/progress;
+- collapsible live import status/progress;
 - last import result;
 - active counts for `OPS`, `PVZ`, `APS`;
 - lock status.
 
-The "run import now" button schedules the init hook `wdc_russian_post_pickup_import_init` through Action Scheduler when available, otherwise through `wp_schedule_single_event(time()+5, ...)`, then redirects back to the tab. The "Загрузить ZIP/TXT и начать импорт" button stores one uploaded `.zip`, `.txt`, or `.json` file under `uploads/wdc-imports/`, records `original_upload_name` and `uploaded_file_size`, then chooses the processing path by extension: `.zip` uses `source=uploaded_zip` and ZIP extract; `.txt`/`.json` use `source=uploaded_payload` and go directly to the batch parser. The status box polls `admin-ajax.php?action=wdc_russian_post_pickup_import_status` every 3 seconds while the state is `queued` or `running`; polling stops on `success` or `failed`. The status output includes source, upload filename/size, payload path/size, parsed rows, rows inserted to staging, skipped rows, batch metrics, staging/main table names, swap timestamps, and errors. On the current test import, `ALL` produced 37302 active points.
+The "run import now" button schedules the init hook `wdc_russian_post_pickup_import_init` through Action Scheduler when available, otherwise through `wp_schedule_single_event(time()+5, ...)`, then redirects back to the tab. The "Загрузить ZIP/TXT и начать импорт" button stores one uploaded `.zip`, `.txt`, or `.json` file under `uploads/wdc-imports/`, records `original_upload_name` and `uploaded_file_size`, then chooses the processing path by extension: `.zip` uses `source=uploaded_zip` and ZIP extract; `.txt`/`.json` use `source=uploaded_payload` and go directly to the batch parser. The status box is collapsed by default: its summary shows status, stage, parsed rows, and inserted rows, and the JSON-like status table is visible only after expanding. It polls `admin-ajax.php?action=wdc_russian_post_pickup_import_status` every 3 seconds while the state is `queued` or `running`; polling stops on `success` or `failed`. Source/status/stage labels and common errors are shown in Russian in the admin UI. The status output includes source, upload filename/size, payload path/size, parsed rows, rows inserted to staging, skipped rows, batch metrics, staging/main table names, swap timestamps, and errors. On the current test import, `ALL` produced 37302 active points.
 
 If a ZIP upload is stored successfully but the background import cannot be queued, for example because another import is already locked/running, the admin handler deletes the uploaded ZIP immediately and saves failed state with `Unable to queue ZIP import. Another import may be running.`
 
@@ -132,8 +131,8 @@ $AccessToken = "ВАШ_ACCESS_TOKEN"
 $Login       = "ВАШ_LOGIN"
 $Password    = "ВАШ_PASSWORD"
 
-# === BASIC KEY ===
-$BasicKey = [Convert]::ToBase64String(
+# === АВТОРИЗАЦИЯ ДЛЯ X-USER-AUTHORIZATION ===
+$BasicAuth = [Convert]::ToBase64String(
     [Text.Encoding]::UTF8.GetBytes("$Login`:$Password")
 )
 
@@ -145,7 +144,7 @@ Invoke-WebRequest `
   -Uri "https://otpravka-api.pochta.ru/1.0/unloading-passport/zip?type=ALL" `
   -Headers @{
       "Authorization"        = "AccessToken $AccessToken"
-      "X-User-Authorization" = "Basic $BasicKey"
+      "X-User-Authorization" = "Basic $BasicAuth"
       "Accept"               = "application/octet-stream"
   } `
   -OutFile $OutFile `

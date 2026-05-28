@@ -218,6 +218,9 @@ rp_pickup_assert( "непонятный график\nещё строка" === $
 rp_pickup_assert( '' === $formatter->format( array() ), 'Formatter must return empty string for empty workTime.' );
 $settings = new RussianPostOtpravkaApiSettings( new SettingsRepository(), new EncryptionService() );
 $settings->save_from_admin( array( 'russian_post_otpravka_access_token' => 'token', 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_password' => 'password', 'russian_post_pickup_unload_type' => 'ALL' ) );
+rp_pickup_assert( base64_encode( 'login:password' ) === $settings->basic_key(), 'Otpravka Basic authorization key must be computed from login and password.' );
+$settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_password' => '', 'russian_post_otpravka_' . 'basic_key' => 'legacy-ready-key' ) );
+rp_pickup_assert( base64_encode( 'login:password' ) === $settings->basic_key(), 'Legacy ready authorization input must not override login/password credentials.' );
 rp_pickup_assert( 120 === $settings->timeout(), 'Otpravka timeout default must be 120 seconds.' );
 $settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_otpravka_timeout' => '999' ) );
 rp_pickup_assert( 300 === $settings->timeout(), 'Otpravka timeout max must be 300 seconds.' );
@@ -580,11 +583,20 @@ rp_pickup_assert( ! array_key_exists( $cancel_state['staging_table'], $GLOBALS['
 $settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login', 'russian_post_pickup_schedule_enabled' => '1' ) );
 $importer->sync_schedule();
 rp_pickup_assert( 'weekly' === ( $GLOBALS['wdc_recurring_events'][ RussianPostPickupImporter::SCHEDULE_HOOK ]['recurrence'] ?? '' ), 'Schedule enabled must create weekly import.' );
+rp_pickup_assert( false !== wp_next_scheduled( RussianPostPickupImporter::SCHEDULE_HOOK ), 'Schedule enabled must expose next scheduled import timestamp.' );
 $settings->save_from_admin( array( 'russian_post_otpravka_login' => 'login' ) );
 $importer->sync_schedule();
 rp_pickup_assert( ! isset( $GLOBALS['wdc_recurring_events'][ RussianPostPickupImporter::SCHEDULE_HOOK ] ), 'Schedule disabled must clear weekly import.' );
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 rp_pickup_assert( str_contains( $admin_source, 'rows_inserted_to_staging' ) && str_contains( $admin_source, 'staging_table' ) && str_contains( $admin_source, 'upload_russian_post_pickup_file_import' ) && str_contains( $admin_source, 'accept=".zip,.txt,.json"' ) && str_contains( $admin_source, 'ВАШ_ACCESS_TOKEN' ) && str_contains( $admin_source, 'Expand-Archive' ), 'Admin status output must include staging metrics and unified ZIP/TXT/JSON upload instructions.' );
+rp_pickup_assert( str_contains( $admin_source, '<details><summary data-wdc-rp-status-summary>' ) && str_contains( $admin_source, 'data-wdc-rp-status="' ) && str_contains( $admin_source, 'Статус: %s; этап: %s; обработано: %d; записано: %d' ), 'Admin import status block must render collapsible status markup with compact summary.' );
+rp_pickup_assert( str_contains( $admin_source, 'wp_next_scheduled( RussianPostPickupImporter::SCHEDULE_HOOK )' ) && str_contains( $admin_source, 'Расписание включено, но следующий запуск пока не запланирован.' ), 'Admin UI must show next scheduled weekly import or a warning when missing.' );
+rp_pickup_assert( str_contains( $admin_source, 'Таймаут загрузки, сек.' ) && str_contains( $admin_source, 'Используется только при автоматическом скачивании архива через API. Для ручной загрузки ZIP/TXT не применяется.' ), 'Admin timeout field must keep Russian label/help and remain visible.' );
+rp_pickup_assert( ! str_contains( $admin_source, 'russian_post_otpravka_basic_key' ) && ! str_contains( $admin_source, 'Basic key' ) && ! str_contains( $admin_source, 'BasicKey' ), 'Admin UI must not render a Basic key field.' );
+rp_pickup_assert( str_contains( $admin_source, 'Автоматическая загрузка из API' ) && str_contains( $admin_source, 'Загруженный ZIP' ) && str_contains( $admin_source, 'Загруженный TXT/JSON' ), 'Admin status values must be localized.' );
+
+$js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/russian-post-pickup-import.js' );
+rp_pickup_assert( str_contains( $js_source, 'data-wdc-rp-status-summary' ) && str_contains( $js_source, 'Автоматическая загрузка из API' ) && str_contains( $js_source, 'Не удалось поставить импорт в очередь. Возможно, уже выполняется другой импорт.' ), 'Status polling JS must update the collapsed summary and render localized status values/messages.' );
 
 echo "Russian Post pickup import smoke test passed.\n";

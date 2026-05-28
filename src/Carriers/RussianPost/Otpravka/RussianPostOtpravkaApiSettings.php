@@ -12,7 +12,6 @@ final class RussianPostOtpravkaApiSettings {
 	public const ACCESS_TOKEN_KEY = 'russian_post_otpravka_access_token';
 	public const LOGIN_KEY = 'russian_post_otpravka_login';
 	public const PASSWORD_ENCRYPTED_KEY = 'russian_post_otpravka_password_encrypted';
-	public const BASIC_KEY_ENCRYPTED_KEY = 'russian_post_otpravka_basic_key_encrypted';
 	public const TIMEOUT_KEY = 'russian_post_otpravka_timeout';
 	public const PICKUP_UNLOAD_TYPE_KEY = 'russian_post_pickup_unload_type';
 	public const PICKUP_SCHEDULE_ENABLED_KEY = 'russian_post_pickup_schedule_enabled';
@@ -36,7 +35,6 @@ final class RussianPostOtpravkaApiSettings {
 				self::ACCESS_TOKEN_KEY => '',
 				self::LOGIN_KEY => '',
 				self::PASSWORD_ENCRYPTED_KEY => '',
-				self::BASIC_KEY_ENCRYPTED_KEY => '',
 				self::TIMEOUT_KEY => 120,
 				self::PICKUP_UNLOAD_TYPE_KEY => 'ALL',
 				self::PICKUP_SCHEDULE_ENABLED_KEY => false,
@@ -60,11 +58,6 @@ final class RussianPostOtpravkaApiSettings {
 	}
 
 	public function basic_key(): string {
-		$configured = $this->decrypt_secret( self::BASIC_KEY_ENCRYPTED_KEY );
-		if ( '' !== $configured ) {
-			return $configured;
-		}
-
 		$login    = $this->login();
 		$password = $this->password();
 
@@ -93,10 +86,6 @@ final class RussianPostOtpravkaApiSettings {
 		return '' !== $this->access_token();
 	}
 
-	public function has_basic_key(): bool {
-		return '' !== (string) ( $this->values()[ self::BASIC_KEY_ENCRYPTED_KEY ] ?? '' );
-	}
-
 	public function encryption_ready(): bool {
 		return $this->encryption->has_configured_key() || true;
 	}
@@ -122,16 +111,9 @@ final class RussianPostOtpravkaApiSettings {
 		if ( ! empty( $input['russian_post_otpravka_clear_password'] ) ) {
 			$values[ self::PASSWORD_ENCRYPTED_KEY ] = '';
 		}
-		if ( ! empty( $input['russian_post_otpravka_clear_basic_key'] ) ) {
-			$values[ self::BASIC_KEY_ENCRYPTED_KEY ] = '';
-		}
 		$password = trim( (string) wp_unslash( $input['russian_post_otpravka_password'] ?? '' ) );
 		if ( '' !== $password ) {
 			$values[ self::PASSWORD_ENCRYPTED_KEY ] = $this->encryption->encrypt( $password );
-		}
-		$basic_key = trim( (string) wp_unslash( $input['russian_post_otpravka_basic_key'] ?? '' ) );
-		if ( '' !== $basic_key ) {
-			$values[ self::BASIC_KEY_ENCRYPTED_KEY ] = $this->encryption->encrypt( $basic_key );
 		}
 
 		$this->settings->replace( $values );
