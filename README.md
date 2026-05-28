@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.25.0.
+Version: 0.25.1.
+
+Version 0.25.1 keeps initial search results as preview-only. `initialSearch()` may show the first found point in the card and softly mark it in the list, but it no longer enables confirmation or dispatches `wdc:point-selected` until the customer explicitly clicks a marker or list row.
 
 Version 0.25.0 improves the Russian Post pickup modal UX. The map now has a neighboring visible-point list on desktop and a stacked map/list layout on mobile. Bbox loads refresh the list, which shows up to the first 100 points with index, point type, address, work time, and distance from the selected city center when `initialContext` has coordinates. Distance sorting uses haversine meters; without coordinates the list falls back to stable postcode/address ordering.
 

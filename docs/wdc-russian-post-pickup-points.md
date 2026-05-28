@@ -1,6 +1,8 @@
 # Russian Post Pickup Points
 
-Version: 0.25.0.
+Version: 0.25.1.
+
+Version 0.25.1 separates preview state from confirmed pickup selection. The initial search fallback can render a point card and a soft list preview, but only an explicit marker or list-row click sets `selectedPoint`, enables the confirm button, highlights the row with `active selected`, and dispatches `wdc:point-selected`.
 
 ## Pickup Map UX
 

@@ -140,6 +140,11 @@
 	box-shadow: inset 3px 0 0 #2563eb;
 }
 
+.wdc-pickup-list__item.preview {
+	border-color: #cbd5e1;
+	background: #f8fafc;
+}
+
 .wdc-pickup-list__index {
 	display: inline-grid;
 	place-items: center;

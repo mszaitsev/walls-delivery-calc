@@ -17,7 +17,8 @@
 		var providerName = normalizeProvider(config.mapProvider || 'leaflet');
 		var providerFactory = window.WDCPickupMapProviders && window.WDCPickupMapProviders[providerName];
 		var list = findList(element, card);
-		var selected = null;
+		var previewPoint = null;
+		var selectedPoint = null;
 		var controller = null;
 		var suppressNextMoveLoad = false;
 		var context = initialContext || {};
@@ -71,18 +72,19 @@
 			return rows.join('');
 		}
 
-		function preview(point, allowConfirm) {
-			selected = point;
+		function preview(point) {
+			previewPoint = point;
 			card.innerHTML = renderPoint(point);
-			confirmButton.disabled = !allowConfirm;
-			if (allowConfirm) {
-				confirmButton.dispatchEvent(new CustomEvent('wdc:point-selected', { detail: point }));
-			}
+			confirmButton.disabled = !selectedPoint || pointId(selectedPoint) !== pointId(point);
 		}
 
 		function select(point, options) {
 			options = options || {};
-			preview(point, true);
+			selectedPoint = point;
+			previewPoint = point;
+			card.innerHTML = renderPoint(point);
+			confirmButton.disabled = false;
+			confirmButton.dispatchEvent(new CustomEvent('wdc:point-selected', { detail: point }));
 			if (provider.setActivePoint) {
 				provider.setActivePoint(pointId(point));
 			}
@@ -95,21 +97,30 @@
 		function renderMarkers(points, emptyText) {
 			visiblePoints = sortPoints(enrichPoints(points || []));
 			provider.renderMarkers(visiblePoints, {
-				activePointId: selected ? pointId(selected) : null
+				activePointId: selectedPoint ? pointId(selectedPoint) : null
 			});
 			renderList(visiblePoints);
 			if (!visiblePoints.length) {
 				card.textContent = emptyText || labels.empty || '';
+				confirmButton.disabled = !selectedPoint;
 				return;
 			}
-			if (selected && pointInList(selected, visiblePoints)) {
-				preview(selected, true);
+			if (selectedPoint && pointInList(selectedPoint, visiblePoints)) {
+				card.innerHTML = renderPoint(selectedPoint);
+				confirmButton.disabled = false;
 				if (provider.setActivePoint) {
-					provider.setActivePoint(pointId(selected));
+					provider.setActivePoint(pointId(selectedPoint));
 				}
 				return;
 			}
-			selected = null;
+			if (previewPoint && pointInList(previewPoint, visiblePoints)) {
+				preview(previewPoint);
+				if (provider.setActivePoint) {
+					provider.setActivePoint(null);
+				}
+				return;
+			}
+			selectedPoint = null;
 			if (provider.setActivePoint) {
 				provider.setActivePoint(null);
 			}
@@ -135,9 +146,10 @@
 		}
 
 		function renderListItem(point, index) {
-			var active = selected && pointId(selected) === pointId(point);
+			var active = selectedPoint && pointId(selectedPoint) === pointId(point);
+			var previewed = !active && previewPoint && pointId(previewPoint) === pointId(point);
 			var parts = [
-				'<button type="button" class="wdc-pickup-list__item' + (active ? ' active selected' : '') + '" data-wdc-point-id="' + escapeHtml(pointId(point)) + '">',
+				'<button type="button" class="wdc-pickup-list__item' + (active ? ' active selected' : '') + (previewed ? ' preview' : '') + '" data-wdc-point-id="' + escapeHtml(pointId(point)) + '">',
 				'<span class="wdc-pickup-list__index">' + (index + 1) + '</span>',
 				'<span class="wdc-pickup-list__content">',
 				'<span class="wdc-pickup-list__headline"><strong>' + escapeHtml(pointTypeLabel(point)) + '</strong>' + (point.distanceText ? '<em>' + escapeHtml(point.distanceText) + '</em>' : '') + '</span>',
@@ -211,7 +223,7 @@
 				if (points[0] && points[0].lat !== null && points[0].lng !== null) {
 					suppressNextMoveLoad = true;
 					provider.setCenter(points[0].lat, points[0].lng, 15);
-					preview(points[0], false);
+					preview(points[0]);
 					if (initial) {
 						loadBounds(bboxAround(points[0].lat, points[0].lng));
 					}
@@ -240,7 +252,7 @@
 		}, 50);
 
 		return {
-			selected: function () { return selected; },
+			selected: function () { return selectedPoint; },
 			search: search,
 			destroy: function () {
 				if (controller) {
