@@ -60,6 +60,8 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutSortSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Checkout\WooCommerce\PickupMapCheckout;
+use WallsShop\WDC\Checkout\WooCommerce\PickupPointOrderDisplay;
 use WallsShop\WDC\Checkout\WooCommerce\PickupPointRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\ShippingMethodRegistrar;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
@@ -103,6 +105,7 @@ use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPassportPointNormalizer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
+use WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController;
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 use WallsShop\WDC\Rules\Admin\RulesAdminPage;
@@ -150,6 +153,7 @@ final class Plugin {
 		$this->container->register( PickupPointRepository::class, fn(): PickupPointRepository => new PickupPointRepository() );
 		$this->container->register( RussianPostPickupPointRepository::class, fn(): RussianPostPickupPointRepository => new RussianPostPickupPointRepository() );
 		$this->container->register( PickupPointsRestController::class, fn(): PickupPointsRestController => new PickupPointsRestController( $this->container->get( RussianPostPickupPointRepository::class ) ) );
+		$this->container->register( CheckoutPickupPointRestController::class, fn(): CheckoutPickupPointRestController => new CheckoutPickupPointRestController( $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( RuleRepository::class, fn(): RuleRepository => new RuleRepository() );
 		$this->container->register( DeliveryServiceRepository::class, fn(): DeliveryServiceRepository => new DeliveryServiceRepository() );
 		$this->container->register( DeliveryServiceSettingsRepository::class, fn(): DeliveryServiceSettingsRepository => new DeliveryServiceSettingsRepository() );
@@ -276,6 +280,8 @@ final class Plugin {
 		$this->container->register( CheckoutValidation::class, fn(): CheckoutValidation => new CheckoutValidation( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutAddressValidation::class ) ) );
 		$this->container->register( CheckoutSortSelector::class, fn(): CheckoutSortSelector => new CheckoutSortSelector( $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( OrderShippingMetaPersister::class, fn(): OrderShippingMetaPersister => new OrderShippingMetaPersister( $this->container->get( CheckoutSessionManager::class ) ) );
+		$this->container->register( PickupMapCheckout::class, fn(): PickupMapCheckout => new PickupMapCheckout( $this->container->get( CheckoutSessionManager::class ), $this->environment ) );
+		$this->container->register( PickupPointOrderDisplay::class, fn(): PickupPointOrderDisplay => new PickupPointOrderDisplay() );
 		$this->container->register( CheckoutDebugPanel::class, fn(): CheckoutDebugPanel => new CheckoutDebugPanel( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutFeatureGate::class ) ) );
 		$this->container->register( CheckoutAddressRenderer::class, fn(): CheckoutAddressRenderer => new CheckoutAddressRenderer( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( LocationSearchService::class, fn(): LocationSearchService => new LocationSearchService( $this->container->get( LocationRepository::class ) ) );
@@ -431,6 +437,8 @@ final class Plugin {
 			$this->container->get( CheckoutAddressRenderer::class )->register();
 			$this->container->get( CheckoutValidation::class )->register();
 			$this->container->get( OrderShippingMetaPersister::class )->register();
+			$this->container->get( PickupMapCheckout::class )->register();
+			$this->container->get( PickupPointOrderDisplay::class )->register();
 			$this->container->get( CheckoutDebugPanel::class )->register();
 		}
 
@@ -448,6 +456,7 @@ final class Plugin {
 		}
 		$this->container->get( RussianPostPickupImporter::class )->register();
 		add_action( 'rest_api_init', array( $this->container->get( PickupPointsRestController::class ), 'register' ) );
+		add_action( 'rest_api_init', array( $this->container->get( CheckoutPickupPointRestController::class ), 'register' ) );
 	}
 
 	public function boot_modules(): void {

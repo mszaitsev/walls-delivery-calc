@@ -190,7 +190,7 @@ rpd_assert( ! in_array( '27030', $objects, true ) && ! in_array( '4020', $object
 rpd_assert( in_array( '54020', $objects, true ), '54020 must remain always available.' );
 rpd_assert( 99 === (int) $GLOBALS['wdc_rpd_requests'][0]['pack'], 'Domestic tariff requests must force pack=99.' );
 rpd_assert( ! isset( $GLOBALS['wdc_rpd_requests'][0]['sumoc'] ), 'Non-declared variants must not send sumoc.' );
-rpd_assert( ! empty( $quote->rates[0]->meta['no_pickup_selection'] ), 'Pickup variants must skip pickup selector.' );
+rpd_assert( $quote->rates[0]->requires_pickup_point && empty( $quote->rates[0]->meta['no_pickup_selection'] ), 'Pickup variants must require checkout pickup selection.' );
 $item_summary = $quote->rates[0]->meta['items_summary'][0] ?? array();
 rpd_assert( 1 === (int) ( $item_summary['serviceon'] ?? 0 ) && 1234 === (int) ( $item_summary['tariff']['valnds'] ?? 0 ) && 2 === (int) ( $item_summary['delivery']['min'] ?? 0 ) && 4 === (int) ( $item_summary['delivery']['max'] ?? 0 ), 'Domestic items summary must include serviceon, tariff.valnds, and delivery min/max.' );
 

@@ -196,6 +196,9 @@ final class OrderDeliveryMetabox {
 			$rows['Адрес ПВЗ']    = $this->order_meta( $order, '_wdc_platform_pickup_address' );
 			$rows['Режим работы'] = $this->order_meta( $order, '_wdc_platform_pickup_work_time' );
 			$rows['Комментарий']  = $this->order_meta( $order, '_wdc_platform_pickup_comment' );
+			$rows['ID ПВЗ']       = $this->order_meta( $order, '_wdc_pickup_point_id' );
+			$rows['Индекс ПВЗ']   = $this->order_meta( $order, '_wdc_pickup_point_postcode' );
+			$rows['Тип ПВЗ']      = $this->order_meta( $order, '_wdc_pickup_point_type' );
 		} elseif ( 'courier' === $delivery_type ) {
 			$rows['Адрес доставки'] = $this->shipping_address( $order );
 		}

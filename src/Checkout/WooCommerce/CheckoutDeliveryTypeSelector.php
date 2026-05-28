@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
@@ -46,6 +47,10 @@ final class CheckoutDeliveryTypeSelector {
 
 		$rate_id = (string) ( $meta['rate_id'] ?? $this->method_id( $method ) );
 		if ( ! empty( $meta['requires_pickup_point'] ) && ! $this->skip_pickup_selection( $meta ) ) {
+			if ( RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) ( $meta['service_key'] ?? '' ) ) {
+				$this->render_russian_post_pickup_map_selector( $rate_id );
+				return;
+			}
 			$this->render_pickup_selector( (string) $meta['carrier_key'], $rate_id );
 		}
 	}
@@ -89,6 +94,25 @@ final class CheckoutDeliveryTypeSelector {
 			}
 		}
 
+		echo '</div>';
+	}
+
+	private function render_russian_post_pickup_map_selector( string $rate_id ): void {
+		$selection = $this->session_manager->checkout_pickup_point();
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$has_selection = array() !== $selection && '' !== trim( (string) ( $selection['point_code'] ?? '' ) );
+
+		echo '<div class="wdc-rp-pickup-checkout" data-wdc-pickup-checkout data-shipping-method-id="' . esc_attr( $rate_id ) . '">';
+		echo '<input type="hidden" name="wdc_platform_pickup_rate_id" value="' . esc_attr( $rate_id ) . '">';
+		echo '<input type="hidden" name="wdc_platform_pickup_carrier" value="' . esc_attr( RussianPostDomesticSettings::CARRIER_KEY ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_point_id" data-wdc-pickup-point-id value="' . esc_attr( (string) ( $selection['id'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_point_code" data-wdc-pickup-point-code value="' . esc_attr( (string) ( $selection['point_code'] ?? '' ) ) . '">';
+		echo '<button type="button" class="button wdc-rp-pickup-checkout__button" data-wdc-pickup-open>' . esc_html( $has_selection ? 'Изменить пункт выдачи' : 'Выбрать пункт выдачи' ) . '</button>';
+		echo '<div class="wdc-rp-pickup-checkout__selection" data-wdc-pickup-selection ' . ( $has_selection ? '' : 'hidden' ) . '>';
+		echo '<strong data-wdc-pickup-address>' . esc_html( (string) ( $selection['address'] ?? '' ) ) . '</strong>';
+		echo '<span data-wdc-pickup-postcode>' . esc_html( (string) ( $selection['postcode'] ?? '' ) ) . '</span>';
+		echo '<span data-wdc-pickup-work-time>' . esc_html( (string) ( $snapshot['work_time'] ?? '' ) ) . '</span>';
+		echo '</div>';
 		echo '</div>';
 	}
 

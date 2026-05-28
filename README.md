@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.22.33.
+Version: 0.23.0.
+
+Version 0.23.0 starts the checkout MVP for Russian Post domestic pickup points. The checkout now renders a "Выбрать пункт выдачи" control for `russian_post_domestic_pickup`, opens a mobile-friendly Leaflet/OpenStreetMap modal, loads points only by map bbox through `/wp-json/wdc/v1/points`, stores the selected point in WooCommerce session through `/wp-json/wdc/v1/checkout/pickup-point`, validates the required pickup selection server-side, and saves HPOS-safe pickup meta/snapshot on the order and shipping item.
 
 Version 0.22.33 polishes the Russian Post pickup import admin tab: the live status block is collapsible and starts collapsed, its summary shows status/stage/parsed/inserted, weekly scheduling shows the next planned run or a Russian warning, the ready Basic key field is removed, and the tab/status labels are localized in Russian. The Otpravka Basic authorization header is computed from Login + Password.
 

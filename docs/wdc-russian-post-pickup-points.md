@@ -1,8 +1,34 @@
 # Russian Post Pickup Points
 
-Version: 0.22.33.
+Version: 0.23.0.
 
-This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
+## Checkout Map MVP
+
+Version 0.23.0 adds the first production checkout map for `russian_post_domestic_pickup`.
+
+Frontend assets live in `assets/frontend/pickup-map/`:
+
+- `wdc-pickup-api.js` wraps REST calls;
+- `wdc-pickup-modal.js` owns overlay, ESC close, focus trap, and destroy lifecycle;
+- `wdc-pickup-map.js` owns Leaflet/OpenStreetMap map state, bbox loading, debounce, markers, selected-card rendering, and request aborts;
+- `wdc-pickup-checkout.js` connects the modal to WooCommerce checkout fields, hides pickup UI for courier methods, resets selection on shipping/country/city changes, and updates checkout after save;
+- `wdc-pickup-map.css` styles the fullscreen/mobile modal and selected-point block.
+
+Leaflet is enqueued from local `assets/vendor/leaflet/` paths, not from a CDN. The map uses OpenStreetMap tiles. Points are never preloaded into hidden fields, DOM, session storage, or local storage; every map movement schedules a debounced 250 ms `GET /wp-json/wdc/v1/points?carrier=russian_post&bbox=minLng,minLat,maxLng,maxLat&limit=500`, and an `AbortController` cancels stale bbox/search requests.
+
+Checkout state endpoints:
+
+- `POST /wp-json/wdc/v1/checkout/pickup-point` with `{ point_id, shipping_method_id }`: checks the REST nonce, validates `russian_post_domestic_pickup`, verifies that the point exists and is active, and stores a structured `wdc_pickup_point` selection in WC session.
+- `DELETE /wp-json/wdc/v1/checkout/pickup-point`: clears the checkout pickup selection.
+- `GET /wp-json/wdc/v1/checkout/state`: returns the current selected point or `null`.
+
+Session state stores `id`, `point_code`, `point_type`, `postcode`, `address`, `lat`, `lng`, and a compact `snapshot` of the point at selection time. The legacy internal pickup selection key is also populated so existing checkout validation and order persistence paths can use the selected Russian Post point without loading the full directory.
+
+WooCommerce validation now requires a saved pickup point for `russian_post_domestic_pickup` and returns `Выберите пункт выдачи Почты России.` when the user tries to place an order without a point. This is a server-side checkout hook and cannot be bypassed by disabling JavaScript.
+
+Order persistence is HPOS-safe and uses WooCommerce order/item APIs. Orders receive `_wdc_pickup_point_id`, `_wdc_pickup_point_code`, `_wdc_pickup_point_type`, `_wdc_pickup_point_address`, `_wdc_pickup_point_postcode`, and `_wdc_pickup_point_snapshot` JSON. Shipping item meta includes `Пункт выдачи`, `Индекс ПВЗ`, and `Тип ПВЗ`. The selected point is displayed on the admin order delivery metabox, thank-you/order details, and customer/admin emails.
+
+The current scope covers the local Russian Post pickup directory, public point REST, and the checkout map/selection MVP. Shipment registration, labels, tracking statuses, multicarrier pickup maps, and advanced clustering are still out of scope.
 
 ## Storage
 

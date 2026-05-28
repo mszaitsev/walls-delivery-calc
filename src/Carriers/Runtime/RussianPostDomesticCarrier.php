@@ -299,7 +299,6 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 			'api_base_price_rub' => $price_kopecks / 100,
 			'api_price_with_vat_rub' => $price_kopecks / 100,
 			'api_price_has_vat' => null !== ( $parsed['paynds'] ?? null ),
-			'no_pickup_selection' => DeliveryType::PICKUP === $delivery_type,
 			'package' => $package->to_array(),
 		);
 
@@ -322,7 +321,7 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 			array(),
 			false,
 			'',
-			false,
+			DeliveryType::PICKUP === $delivery_type,
 			DeliveryType::COURIER === $delivery_type,
 			$meta
 		);
