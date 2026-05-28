@@ -77,10 +77,18 @@
 
 	function resetSelection() {
 		invalidatePrefetch();
-		window.WDCPickupApi.reset().catch(function () {});
+		resetPickupSelectionOnServer();
+		clearPickupSelectionUi();
+	}
+
+	function clearPickupSelectionUi() {
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
 			applySelection(container, {});
 		});
+	}
+
+	function resetPickupSelectionOnServer() {
+		return window.WDCPickupApi.reset().catch(function () {});
 	}
 
 	function currentShippingMethod() {
@@ -103,13 +111,15 @@
 		}
 		var runtimeContext = contextMatches(fieldContext, currentContext) ? currentContext : {};
 		var localizedContext = contextMatches(fieldContext, configContext) ? configContext : {};
-		return {
+		var result = {
 			lat: fieldContext.lat || runtimeContext.lat || localizedContext.lat,
 			lng: fieldContext.lng || runtimeContext.lng || localizedContext.lng,
 			query: fieldContext.query || runtimeContext.query || localizedContext.query,
 			postcode: fieldContext.postcode || runtimeContext.postcode || localizedContext.postcode || '',
 			display_name: fieldContext.display_name || runtimeContext.display_name || localizedContext.display_name || ''
 		};
+		debug('initialContext selected source', fieldContext.query ? 'fields' : (runtimeContext.query ? 'current' : (localizedContext.query ? 'localized' : 'fallback')), result);
+		return result;
 	}
 
 	function contextFromFields() {
@@ -249,7 +259,7 @@
 		var stateRequest = window.WDCPickupApi.state().then(function (state) {
 			var context = contextFromState(state && state.city_context);
 			debug('refreshCheckoutContextOnce result', context);
-			if (context.query || validCoordinate(context.lat, context.lng)) {
+			if ((context.query || validCoordinate(context.lat, context.lng)) && stateContextMatchesCurrentDestination(context)) {
 				updateCurrentContext(context);
 				applyContextToHidden(context);
 				return context;
@@ -298,6 +308,11 @@
 			country_code: detail.country_code || 'RU',
 			location_id: detail.location_id || ''
 		};
+	}
+
+	function stateContextMatchesCurrentDestination(context) {
+		var fieldContext = contextFromFields();
+		return contextMatches(fieldContext, context) || contextMatches(currentContext, context);
 	}
 
 	function schedulePrefetch() {
@@ -415,7 +430,8 @@
 		invalidatePrefetch();
 		updateCurrentContext(context);
 		applyContextToHidden(context);
-		resetSelection();
+		resetPickupSelectionOnServer();
+		clearPickupSelectionUi();
 		schedulePrefetch();
 	});
 	document.addEventListener('DOMContentLoaded', boot);
