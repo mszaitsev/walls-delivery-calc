@@ -22,6 +22,7 @@
 		var suppressNextMoveLoad = false;
 		var context = initialContext || {};
 		var preloadedPoints = Array.isArray(context.preloadedPoints) ? context.preloadedPoints : [];
+		var hasPreloadedPoints = preloadedPoints.length > 0;
 		var initialLat = parseFloat(context.centerLat || context.lat || (preloadedPoints[0] && preloadedPoints[0].lat));
 		var initialLng = parseFloat(context.centerLng || context.lng || (preloadedPoints[0] && preloadedPoints[0].lng));
 		var hasInitialCoordinates = !isNaN(initialLat) && !isNaN(initialLng);
@@ -110,7 +111,7 @@
 		}, 250);
 		map.on('moveend zoomend', debouncedLoad);
 
-		if (preloadedPoints.length) {
+		if (hasPreloadedPoints) {
 			renderMarkers(preloadedPoints, labels.empty || '');
 		}
 
@@ -149,6 +150,9 @@
 
 		setTimeout(function () {
 			map.invalidateSize();
+			if (hasPreloadedPoints) {
+				return;
+			}
 			if (hasInitialCoordinates) {
 				loadBounds();
 			} else if (hasInitialQuery) {

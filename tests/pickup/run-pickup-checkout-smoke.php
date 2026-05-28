@@ -226,7 +226,9 @@ pickup_checkout_assert( str_contains( $map_js, 'if (hasInitialCoordinates)' ) &&
 pickup_checkout_assert( str_contains( $map_js, 'else if (hasInitialQuery)' ) && str_contains( $map_js, 'initialSearch(String(context.query))' ), 'Map JS must run initial search before bbox loading when only an initial query exists.' );
 pickup_checkout_assert( ! str_contains( $map_js, "loadBounds();\n\t\t\tif (!hasInitialCoordinates && context.query)" ), 'Map JS must not load the Novosibirsk bbox before initial query search.' );
 pickup_checkout_assert( str_contains( $map_js, 'preview(points[0], false)' ), 'Initial search preview must not enable final pickup confirmation.' );
-pickup_checkout_assert( str_contains( $map_js, 'preloadedPoints' ) && str_contains( $map_js, 'renderMarkers(preloadedPoints' ), 'Map JS must render preloaded points immediately.' );
+pickup_checkout_assert( str_contains( $map_js, 'hasPreloadedPoints = preloadedPoints.length > 0' ) && str_contains( $map_js, 'renderMarkers(preloadedPoints' ), 'Map JS must render preloaded points immediately.' );
+pickup_checkout_assert( str_contains( $map_js, "if (hasPreloadedPoints) {\n\t\t\t\treturn;" ), 'Preloaded startup must invalidate map size without calling initial loadBounds.' );
+pickup_checkout_assert( str_contains( $map_js, "map.on('moveend zoomend', debouncedLoad)" ) && str_contains( $map_js, 'loadBounds();' ), 'Manual moveend/zoomend must still call loadBounds after open.' );
 pickup_checkout_assert( str_contains( $map_js, 'centerLat' ) && str_contains( $map_js, 'centerLng' ), 'Map JS must support preloaded map center coordinates.' );
 $api_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-api.js' ) ?: '';
 pickup_checkout_assert( str_contains( $api_js, 'searchInitial' ) && str_contains( $api_js, 'limit=10' ), 'Pickup API must expose a small-limit initial search.' );
