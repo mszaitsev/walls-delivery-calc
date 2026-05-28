@@ -1,6 +1,14 @@
 # Russian Post Pickup Points
 
-Version: 0.23.4.
+Version: 0.23.11.
+
+## Location Coordinates
+
+Version 0.23.11 adds a mass coordinate fill tool on the locations admin page, `?page=wdc-platform-locations`. The former "Заполнение почтовых индексов через DaData" block is now "Заполнение информации через DaData" and shows both postal-code and coordinate counters, including "координаты есть" and "координат нет".
+
+The new "Получить координаты через DaData" button uses the same AJAX batch/progress pattern as "Получить индексы через DaData": start creates a job state, step requests process small batches, and the JSON status includes `status`, `phase`, `started_at`, `finished_at`, `processed`, `updated`, `skipped`, `failed`, `errors`, `last_id`, `cursor`, and `current_batch`. Missing coordinates are rows where `latitude` or `longitude` is NULL or exactly `0.0000000`; existing valid coordinates are not overwritten.
+
+The batch starts with city rows (`place_type` city markers such as `г` / `г.`), then continues through the remaining RU locations. For each row it builds a DaData city query from postcode, region/district, display name, city/settlement/place fields, reads `geo_lat` and `geo_lon`, and persists them with the HPOS-independent local location repository method `LocationRepository::update_coordinates()`. This prepares stable city coordinates for the checkout pickup map so the map can start near the selected city without adding broader frontend search logic.
 
 ## Checkout Map Fixes
 

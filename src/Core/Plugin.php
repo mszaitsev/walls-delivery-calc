@@ -79,6 +79,7 @@ use WallsShop\WDC\Infrastructure\Queue\ActionScheduler;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Admin\LocationsAdminPage;
+use WallsShop\WDC\Locations\Coordinates\LocationCoordinatesDadataBatchUpdater;
 use WallsShop\WDC\Locations\Fias\FiasCredentials;
 use WallsShop\WDC\Locations\Fias\FiasEndpoints;
 use WallsShop\WDC\Locations\Fias\FiasHttpClient;
@@ -231,6 +232,7 @@ final class Plugin {
 		$this->container->register( AddressSuggestionService::class, fn(): AddressSuggestionService => new AddressSuggestionService( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( AddressSuggestionClientInterface::class ), $this->container->get( AddressSuggestionNormalizer::class ) ) );
 		$this->container->register( AddressSuggestionAjax::class, fn(): AddressSuggestionAjax => new AddressSuggestionAjax( $this->container->get( AddressSuggestionService::class ), $this->container->get( DaDataTokenPool::class ) ) );
 		$this->container->register( LocationCoordinateEnricher::class, fn(): LocationCoordinateEnricher => new LocationCoordinateEnricher( $this->container->get( LocationRepository::class ), $this->container->get( AddressSuggestionClientInterface::class ) ) );
+		$this->container->register( LocationCoordinatesDadataBatchUpdater::class, fn(): LocationCoordinatesDadataBatchUpdater => new LocationCoordinatesDadataBatchUpdater( $this->container->get( LocationRepository::class ), $this->container->get( AddressSuggestionClientInterface::class ) ) );
 		$this->container->register( FallbackAddressNormalizer::class, fn(): FallbackAddressNormalizer => new FallbackAddressNormalizer() );
 		$this->container->register(
 			CheckoutAddressNormalizer::class,
@@ -368,6 +370,7 @@ final class Plugin {
 				$this->container->get( LocationsSnapshotExporter::class ),
 				$this->container->get( LocationsSnapshotImporter::class ),
 				$this->container->get( DaDataPostcodeClient::class ),
+				$this->container->get( LocationCoordinatesDadataBatchUpdater::class ),
 				$this->container->get( LocationCountryIndexService::class )
 			)
 		);

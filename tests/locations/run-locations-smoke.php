@@ -7,6 +7,7 @@ use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\Locations\LocationCoordinateEnricher;
 use WallsShop\WDC\Locations\Admin\LocationsAdminPage;
+use WallsShop\WDC\Locations\Coordinates\LocationCoordinatesDadataBatchUpdater;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
 use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
@@ -267,6 +268,31 @@ final class WdcLocationsSmokeSuggestionClient implements AddressSuggestionClient
 	}
 }
 
+final class WdcLocationsSmokeQueuedSuggestionClient implements AddressSuggestionClientInterface {
+	public int $calls = 0;
+
+	/**
+	 * @param array<int,mixed> $responses
+	 */
+	public function __construct( private array $responses ) {
+	}
+
+	public function suggest( string $stage, string $query, array $context = array() ): array {
+		$response = $this->responses[ $this->calls ] ?? array(
+			'success' => true,
+			'suggestions' => array(),
+		);
+		++$this->calls;
+		if ( $response instanceof Throwable ) {
+			throw $response;
+		}
+		return is_array( $response ) ? $response : array(
+			'success' => true,
+			'suggestions' => array(),
+		);
+	}
+}
+
 function locations_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
 		throw new RuntimeException( $message );
@@ -332,6 +358,54 @@ locations_smoke_assert( 1 === $no_coordinate_client->calls && ! isset( $not_enri
 $address_runtime_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Address/CheckoutAddressRuntime.php' );
 locations_smoke_assert( str_contains( $address_runtime_source, 'LocationCoordinateEnricher' ) && str_contains( $address_runtime_source, "\$context['lat']" ) && str_contains( $address_runtime_source, "\$context['lng']" ), 'Checkout city_context must receive enriched lat/lng coordinates.' );
 
+$coordinates_wpdb = new wpdb();
+$coordinates_repository = new LocationRepository( $coordinates_wpdb );
+$city_missing_id = $coordinates_repository->save( locations_smoke_location( array( 'gar_object_id' => 882001, 'fias_id' => 'fias-coord-city', 'region_code' => '38', 'region_name' => 'Иркутская', 'place_type' => 'г', 'place_name' => 'Иркутск', 'display_name' => 'Иркутск', 'latitude' => null, 'longitude' => null ) ) );
+$valid_coordinates_id = $coordinates_repository->save( locations_smoke_location( array( 'gar_object_id' => 882002, 'fias_id' => 'fias-coord-valid', 'region_code' => '54', 'region_name' => 'Новосибирская', 'place_type' => 'г', 'place_name' => 'Новосибирск', 'display_name' => 'Новосибирск', 'latitude' => 55.0302, 'longitude' => 82.9204 ) ) );
+$other_missing_id = $coordinates_repository->save( locations_smoke_location( array( 'gar_object_id' => 882003, 'fias_id' => 'fias-coord-other', 'region_code' => '42', 'region_name' => 'Кемеровская', 'place_type' => 'село', 'place_name' => 'Тест', 'display_name' => 'Тест', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$coordinates_repository->save( locations_smoke_location( array( 'country_code' => 'BY', 'gar_object_id' => 882004, 'fias_id' => 'fias-coord-by', 'region_code' => 'BY-MI', 'region_name' => 'Минская', 'place_type' => 'г', 'place_name' => 'Минск', 'display_name' => 'Минск', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+locations_smoke_assert( 2 === $coordinates_repository->count_locations_missing_coordinates(), 'Missing coordinates counter must include NULL and 0.0000000 RU coordinates only.' );
+locations_smoke_assert( 1 === $coordinates_repository->count_locations_with_coordinates(), 'Coordinates present counter must exclude NULL/zero and non-RU rows.' );
+$missing_cities = $coordinates_repository->find_locations_missing_coordinates( 10, 0, 'cities' );
+$missing_others = $coordinates_repository->find_locations_missing_coordinates( 10, 0, 'others' );
+locations_smoke_assert( 1 === count( $missing_cities ) && $city_missing_id === (int) $missing_cities[0]['id'], 'Missing coordinates city phase must select city rows first.' );
+locations_smoke_assert( 1 === count( $missing_others ) && $other_missing_id === (int) $missing_others[0]['id'], 'Missing coordinates others phase must select non-city rows after cities.' );
+locations_smoke_assert( ! in_array( $valid_coordinates_id, array_map( static fn( array $row ): int => (int) $row['id'], $coordinates_repository->find_locations_missing_coordinates( 10, 0, 'all' ) ), true ), 'Existing valid coordinates must not be selected for coordinate fill.' );
+locations_smoke_assert( $coordinates_repository->update_coordinates( $city_missing_id, 52.286348, 104.280679 ) && 52.286348 === (float) $coordinates_wpdb->rows[ $city_missing_id ]['latitude'], 'update_coordinates must save latitude/longitude after columns exist.' );
+
+$batch_wpdb = new wpdb();
+$batch_repository = new LocationRepository( $batch_wpdb );
+$batch_success_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883001, 'fias_id' => 'fias-batch-success', 'region_name' => 'Иркутская', 'place_type' => 'г', 'place_name' => 'Иркутск', 'display_name' => 'Иркутск', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$batch_skipped_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883002, 'fias_id' => 'fias-batch-empty', 'region_name' => 'Томская', 'place_type' => 'г', 'place_name' => 'Пусто', 'display_name' => 'Пусто', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$batch_failed_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883003, 'fias_id' => 'fias-batch-error', 'region_name' => 'Красноярский', 'place_type' => 'г', 'place_name' => 'Ошибка', 'display_name' => 'Ошибка', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$batch_client = new WdcLocationsSmokeQueuedSuggestionClient(
+	array(
+		array( 'success' => true, 'suggestions' => array( array( 'data' => array( 'geo_lat' => '52.286348', 'geo_lon' => '104.280679' ) ) ) ),
+		array( 'success' => true, 'suggestions' => array() ),
+		new RuntimeException( 'DaData temporary error.' ),
+	)
+);
+$batch_updater = new LocationCoordinatesDadataBatchUpdater( $batch_repository, $batch_client );
+$batch_job = $batch_updater->step(
+	array(
+		'phase' => 'running',
+		'status' => 'running',
+		'processed' => 0,
+		'updated' => 0,
+		'skipped' => 0,
+		'failed' => 0,
+		'errors' => 0,
+		'last_id' => 0,
+		'cursor' => 0,
+		'current_priority' => 'cities',
+		'started_at' => current_time( 'mysql' ),
+	),
+	10
+);
+locations_smoke_assert( 3 === $batch_job['processed'] && 1 === $batch_job['updated'] && 1 === $batch_job['skipped'] && 1 === $batch_job['failed'] && 1 === $batch_job['errors'], 'Coordinate batch updater must update, skip empty DaData responses, and continue after one error.' );
+locations_smoke_assert( 52.286348 === (float) $batch_wpdb->rows[ $batch_success_id ]['latitude'] && 104.280679 === (float) $batch_wpdb->rows[ $batch_success_id ]['longitude'], 'Coordinate batch updater must persist valid DaData coordinates.' );
+locations_smoke_assert( $batch_skipped_id > 0 && $batch_failed_id > 0 && (int) $batch_job['cursor'] >= $batch_failed_id, 'Coordinate batch updater must advance cursor through current batch.' );
+
 $novos = $search->search( 'новос' );
 locations_smoke_assert( count( $novos ) > 0, 'Search "новос" must return results.' );
 locations_smoke_assert( '' !== $novos[0]->display_name, 'Search result display_name must be present.' );
@@ -395,6 +469,8 @@ locations_smoke_assert( str_contains( $locations_html, 'RU Россия (123)' )
 locations_smoke_assert( str_contains( $locations_html, 'BY Беларусь (456)' ), 'Locations admin country summary must render BY name and count.' );
 locations_smoke_assert( str_contains( $locations_html, 'ZZ (7)' ), 'Locations admin country summary must fall back to country code without WooCommerce name.' );
 locations_smoke_assert( str_contains( $locations_html, 'Регионов/областей:' ), 'Locations admin page must render regions counter label.' );
+locations_smoke_assert( str_contains( $locations_html, 'Заполнение информации через DaData' ), 'Locations admin DaData block must use the shared information fill heading.' );
+locations_smoke_assert( str_contains( $locations_html, 'Получить координаты через DaData' ) && str_contains( $locations_html, 'координат нет:' ), 'Locations admin page must render coordinate fill button and counters.' );
 
 locations_smoke_assert( str_contains( $locations_html, 'Очистить базу населенных пунктов' ), 'Locations admin page must render clear locations button.' );
 locations_smoke_assert( str_contains( $locations_html, 'Импорт GAR/ФИАС CSV' ), 'Locations admin page must render GAR CSV import section.' );

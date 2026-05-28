@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.23.4.
+Version: 0.23.11.
+
+Version 0.23.11 adds an admin DaData coordinate fill action for locations. On `?page=wdc-platform-locations`, the DaData block is now "Заполнение информации через DaData" and includes "Получить координаты через DaData"; it batch-processes RU locations whose `latitude/longitude` are NULL or `0.0000000`, starts with city rows, and stores valid `geo_lat/geo_lon` through `LocationRepository::update_coordinates()`. This keeps the checkout pickup map dependent on prepared local city coordinates instead of extra frontend search complexity.
 
 Version 0.23.4 keeps enriched city coordinates live on checkout after WooCommerce AJAX recalculation. After `updated_checkout`, the pickup frontend reads fresh checkout `city_context` from the nonce-protected checkout state endpoint, updates city picker hidden `lat/lng` fields, and prefetches the starting Russian Post pickup bbox for the active RU pickup method. When the modal opens, cached `preloadedPoints` render markers immediately while normal bbox refresh remains active.
 
