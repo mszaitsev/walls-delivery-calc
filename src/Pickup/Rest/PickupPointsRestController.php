@@ -120,6 +120,7 @@ final class PickupPointsRestController {
 			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
 			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
 			'work_time' => (string) ( $row['work_time'] ?? '' ),
+			'description' => (string) ( $row['description'] ?? '' ),
 		);
 	}
 

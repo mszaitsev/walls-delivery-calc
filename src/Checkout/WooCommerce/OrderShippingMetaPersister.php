@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
 
@@ -91,6 +92,12 @@ final class OrderShippingMetaPersister {
 			$map['_wdc_platform_pickup_address']   = $pickup['point_address'] ?? '';
 			$map['_wdc_platform_pickup_comment']   = $pickup['point_comment'] ?? '';
 			$map['_wdc_platform_pickup_work_time'] = $pickup['point_work_time'] ?? '';
+			$map['_wdc_pickup_point_id']           = $pickup['point_id'] ?? '';
+			$map['_wdc_pickup_point_code']         = $pickup['point_code'] ?? '';
+			$map['_wdc_pickup_point_type']         = $pickup['point_type'] ?? '';
+			$map['_wdc_pickup_point_address']      = $pickup['point_address'] ?? '';
+			$map['_wdc_pickup_point_postcode']     = $pickup['point_postcode'] ?? '';
+			$map['_wdc_pickup_point_snapshot']     = function_exists( 'wp_json_encode' ) ? wp_json_encode( is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : $pickup, JSON_UNESCAPED_UNICODE ) : json_encode( is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : $pickup );
 			$this->set_pickup_shipping_address( $order, $pickup, $address );
 		}
 
@@ -132,6 +139,15 @@ final class OrderShippingMetaPersister {
 			$item->add_meta_data( 'Способ доставки', (string) ( $rate['service_title'] ?? '' ), true );
 			$item->add_meta_data( 'Тариф', (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' ), true );
 			$delivery = $this->delivery_days_label( is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array() );
+			$pickup = $this->session_manager->pickup_selection();
+			if (
+				RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) ( $rate['service_key'] ?? '' )
+				&& $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) )
+			) {
+				$item->add_meta_data( 'Пункт выдачи', (string) ( $pickup['point_address'] ?? '' ), true );
+				$item->add_meta_data( 'Индекс ПВЗ', (string) ( $pickup['point_postcode'] ?? '' ), true );
+				$item->add_meta_data( 'Тип ПВЗ', (string) ( $pickup['point_type'] ?? '' ), true );
+			}
 			if ( '' !== $delivery ) {
 				$item->add_meta_data( 'Срок доставки', $delivery, true );
 			}
@@ -544,7 +560,11 @@ final class OrderShippingMetaPersister {
 		$this->call_order_setter( $order, 'set_shipping_address_1', (string) ( $pickup['point_address'] ?? '' ) );
 		$this->call_order_setter( $order, 'set_shipping_address_2', '' !== (string) ( $pickup['point_code'] ?? '' ) ? 'Код ПВЗ: ' . (string) $pickup['point_code'] : '' );
 		$this->call_order_setter( $order, 'set_shipping_city', is_object( $address ) ? (string) ( $address->settlement ?: $address->city ) : '' );
-		$this->call_order_setter( $order, 'set_shipping_postcode', is_object( $address ) ? (string) $address->postcode : '' );
+		$postcode = (string) ( $pickup['point_postcode'] ?? '' );
+		if ( '' === $postcode && is_object( $address ) ) {
+			$postcode = (string) $address->postcode;
+		}
+		$this->call_order_setter( $order, 'set_shipping_postcode', $postcode );
 		$this->call_order_setter( $order, 'set_shipping_country', is_object( $address ) && '' !== (string) $address->country_code ? (string) $address->country_code : 'RU' );
 	}
 

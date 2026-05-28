@@ -1,8 +1,68 @@
 # Russian Post Pickup Points
 
-Version: 0.22.33.
+Version: 0.23.12.
 
-This stage adds the production foundation for a local Russian Post pickup-point directory. It does not add a checkout map, REST endpoint, checkout modal, required pickup selection, order pickup persistence, shipment registration, labels, or tracking statuses.
+## Location Coordinates
+
+Version 0.23.12 keeps the coordinate-fill DaData query intentionally small: only `postal_code` and `display_name` are joined. If `postal_code` is empty, the query is just `display_name`; if `display_name` is empty, the row is skipped as `empty_query`. The batch no longer appends `region_name`, `district_name`, `city_name`, `settlement_name`, or `place_name` as separate fragments.
+
+Coordinate-fill status now explains skipped rows with `skipped_empty_query`, `skipped_no_dadata_success`, `skipped_no_coordinates`, and `skipped_invalid_coordinates`. The aggregate `skipped` counter still increases, and the job records `last_skip_reason` plus `last_dadata_message` for the latest skipped DaData case.
+
+Version 0.23.11 adds a mass coordinate fill tool on the locations admin page, `?page=wdc-platform-locations`. The former "Заполнение почтовых индексов через DaData" block is now "Заполнение информации через DaData" and shows both postal-code and coordinate counters, including "координаты есть" and "координат нет".
+
+The new "Получить координаты через DaData" button uses the same AJAX batch/progress pattern as "Получить индексы через DaData": start creates a job state, step requests process small batches, and the JSON status includes `status`, `phase`, `started_at`, `finished_at`, `processed`, `updated`, `skipped`, `failed`, `errors`, `last_id`, `cursor`, and `current_batch`. Missing coordinates are rows where `latitude` or `longitude` is NULL or exactly `0.0000000`; existing valid coordinates are not overwritten.
+
+The batch starts with city rows (`place_type` city markers such as `г` / `г.`), then continues through the remaining RU locations. For each row it builds a DaData city query from postcode, region/district, display name, city/settlement/place fields, reads `geo_lat` and `geo_lon`, and persists them with the HPOS-independent local location repository method `LocationRepository::update_coordinates()`. This prepares stable city coordinates for the checkout pickup map so the map can start near the selected city without adding broader frontend search logic.
+
+## Checkout Map Fixes
+
+Version 0.23.4 updates checkout DOM state after DaData coordinate enrichment without a page reload. The existing nonce-protected `GET /wp-json/wdc/v1/checkout/state` response includes `city_context`; after WooCommerce `updated_checkout`, frontend code refreshes that context, writes fresh `wdc_platform_location_lat/lng/postcode/display_name` hidden fields, and stores a runtime `currentContext`.
+
+The frontend also prefetches the initial pickup points after `updated_checkout` when `russian_post_domestic_pickup` is active for an RU destination. If coordinates are known it loads a small bbox around them; otherwise it searches by the current query, then loads a bbox around the first result. The cache key is based on context coordinates/query/postcode/display name and is cleared on destination changes, so old-city points are not reused. The map accepts `initialContext.preloadedPoints` and renders those markers immediately on modal open before the usual bbox refresh completes.
+
+Version 0.23.3 fixes stale startup context after WooCommerce `updated_checkout`. The frontend no longer trusts only the page-load localized `window.wdcPickupCheckout.initialContext`; every modal open recomputes context from current DOM hidden city picker fields first, visible checkout fields second, and localized config last. This keeps the map on the newly selected city after AJAX recalculation without a full page reload.
+
+Version 0.23.2 prevents the modal from loading the Novosibirsk bbox before resolving the checkout destination. Startup order is now: saved RU `city_context` coordinates, then an initial `/points/search` by postcode/city or selected location display name, then the Novosibirsk fallback only when no coordinates and no query are available. Initial search centers the map and may show a preview card, but it does not confirm a pickup point; confirmation still requires an explicit marker click and button press.
+
+When the checkout city picker selects or resolves a local location without usable coordinates, checkout address runtime asks the existing DaData suggestion client for city coordinates, stores `geo_lat/geo_lon` through `LocationRepository::update_coordinates()`, and saves `lat/lng` into the WooCommerce session `city_context`. This enrichment runs during city selection/resolve, not when the map opens. If DaData has no coordinates or the request fails, checkout does not fail; the map uses the initial search fallback.
+
+Checkout state endpoints remain nonce-protected: `GET /wp-json/wdc/v1/checkout/state`, `POST /wp-json/wdc/v1/checkout/pickup-point`, and `DELETE /wp-json/wdc/v1/checkout/pickup-point` all require `X-WP-Nonce`. Changing city, country, or postcode resets pickup selection; switching shipping methods only hides or shows the UI and keeps the saved selection in session.
+
+Version 0.23.1 keeps one Leaflet copy at `assets/vendor/leaflet/` and enqueues `assets/vendor/leaflet/leaflet.css` plus `assets/vendor/leaflet/leaflet.js`.
+
+Checkout state is private checkout state now: `GET /wp-json/wdc/v1/checkout/state`, `POST /wp-json/wdc/v1/checkout/pickup-point`, and `DELETE /wp-json/wdc/v1/checkout/pickup-point` all require the WordPress REST nonce in `X-WP-Nonce`. The public point directory endpoints remain public: `/points`, `/points/search`, and `/points/{id}`.
+
+When the modal opens, the map chooses its initial viewport in this order: saved checkout city coordinates from session context, current RU checkout postcode/city fields, then the Novosibirsk fallback. If only postcode/city is available, the frontend searches the local point endpoint and centers on the first found point without confirming it automatically; the customer must still click a marker and press "Выбрать этот пункт".
+
+Pickup reset is destination-driven. Changing city, country, or postcode clears the selected pickup point and UI. Switching between shipping methods only hides or shows the pickup block; it does not clear session selection, so returning to `russian_post_domestic_pickup` restores the chosen point. Server-side validation remains responsible for blocking checkout when the active pickup rate has no valid selection.
+
+## Checkout Map MVP
+
+Version 0.23.0 adds the first production checkout map for `russian_post_domestic_pickup`.
+
+Frontend assets live in `assets/frontend/pickup-map/`:
+
+- `wdc-pickup-api.js` wraps REST calls;
+- `wdc-pickup-modal.js` owns overlay, ESC close, focus trap, and destroy lifecycle;
+- `wdc-pickup-map.js` owns Leaflet/OpenStreetMap map state, bbox loading, debounce, markers, selected-card rendering, and request aborts;
+- `wdc-pickup-checkout.js` connects the modal to WooCommerce checkout fields, hides pickup UI for courier methods, resets selection on shipping/country/city changes, and updates checkout after save;
+- `wdc-pickup-map.css` styles the fullscreen/mobile modal and selected-point block.
+
+Leaflet is enqueued from local `assets/vendor/leaflet/` paths, not from a CDN. The map uses OpenStreetMap tiles. Points are never preloaded into hidden fields, DOM, session storage, or local storage; every map movement schedules a debounced 250 ms `GET /wp-json/wdc/v1/points?carrier=russian_post&bbox=minLng,minLat,maxLng,maxLat&limit=500`, and an `AbortController` cancels stale bbox/search requests.
+
+Checkout state endpoints:
+
+- `POST /wp-json/wdc/v1/checkout/pickup-point` with `{ point_id, shipping_method_id }`: checks the REST nonce, validates `russian_post_domestic_pickup`, verifies that the point exists and is active, and stores a structured `wdc_pickup_point` selection in WC session.
+- `DELETE /wp-json/wdc/v1/checkout/pickup-point`: clears the checkout pickup selection.
+- `GET /wp-json/wdc/v1/checkout/state`: returns the current selected point or `null`.
+
+Session state stores `id`, `point_code`, `point_type`, `postcode`, `address`, `lat`, `lng`, and a compact `snapshot` of the point at selection time. The legacy internal pickup selection key is also populated so existing checkout validation and order persistence paths can use the selected Russian Post point without loading the full directory.
+
+WooCommerce validation now requires a saved pickup point for `russian_post_domestic_pickup` and returns `Выберите пункт выдачи Почты России.` when the user tries to place an order without a point. This is a server-side checkout hook and cannot be bypassed by disabling JavaScript.
+
+Order persistence is HPOS-safe and uses WooCommerce order/item APIs. Orders receive `_wdc_pickup_point_id`, `_wdc_pickup_point_code`, `_wdc_pickup_point_type`, `_wdc_pickup_point_address`, `_wdc_pickup_point_postcode`, and `_wdc_pickup_point_snapshot` JSON. Shipping item meta includes `Пункт выдачи`, `Индекс ПВЗ`, and `Тип ПВЗ`. The selected point is displayed on the admin order delivery metabox, thank-you/order details, and customer/admin emails.
+
+The current scope covers the local Russian Post pickup directory, public point REST, and the checkout map/selection MVP. Shipment registration, labels, tracking statuses, multicarrier pickup maps, and advanced clustering are still out of scope.
 
 ## Storage
 

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Checkout\Validation\CheckoutAddressValidation;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 
@@ -41,7 +42,7 @@ final class CheckoutValidation {
 			return;
 		}
 
-		$this->add_pickup_error( $errors );
+		$this->add_pickup_error( $errors, $rate );
 	}
 
 	private function validate_city( string $delivery_type, array $data, mixed $errors = null ): void {
@@ -57,14 +58,20 @@ final class CheckoutValidation {
 		$this->add_city_error( $errors );
 	}
 
-	private function add_pickup_error( mixed $errors = null ): void {
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function add_pickup_error( mixed $errors = null, array $rate = array() ): void {
+		$message = RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) ( $rate['service_key'] ?? '' )
+			? __( 'Выберите пункт выдачи Почты России.', 'walls-delivery-calc' )
+			: __( 'Выберите пункт выдачи.', 'walls-delivery-calc' );
 		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
-			$errors->add( 'wdc_pickup_required', __( 'Выберите пункт выдачи.', 'walls-delivery-calc' ) );
+			$errors->add( 'wdc_pickup_required', $message );
 			return;
 		}
 
 		if ( function_exists( 'wc_add_notice' ) ) {
-			wc_add_notice( __( 'Выберите пункт выдачи.', 'walls-delivery-calc' ), 'error' );
+			wc_add_notice( $message, 'error' );
 		}
 	}
 

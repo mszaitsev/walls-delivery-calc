@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\Address;
 
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
+use WallsShop\WDC\Checkout\Locations\LocationCoordinateEnricher;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
@@ -15,7 +16,8 @@ final class CheckoutAddressRuntime {
 	public function __construct(
 		private CheckoutAddressNormalizer $normalizer,
 		private CheckoutCityResolver $city_resolver,
-		private CheckoutSessionManager $session_manager
+		private CheckoutSessionManager $session_manager,
+		private ?LocationCoordinateEnricher $coordinate_enricher = null
 	) {
 	}
 
@@ -43,6 +45,7 @@ final class CheckoutAddressRuntime {
 
 		$selected = $this->selected_location_from_context( $context );
 		if ( array() !== $selected ) {
+			$selected = $this->enrich_location_coordinates( $selected );
 			$this->session_manager->save_city_context( $this->city_context_from_location( $selected ) );
 			$this->session_manager->save_selected_city( $selected );
 			$this->session_manager->save_fallback_city( '' );
@@ -56,6 +59,7 @@ final class CheckoutAddressRuntime {
 		$location = $this->city_resolver->resolve_city( (string) $context['city'] );
 		if ( $location instanceof Location ) {
 			$location_data = $location->to_array();
+			$location_data = $this->enrich_location_coordinates( $location_data );
 			$context['region_name'] = (string) ( $location_data['region_name'] ?? '' );
 			$context['region_code'] = (string) ( $location_data['region_code'] ?? '' );
 			if ( '' === (string) ( $context['postcode'] ?? '' ) ) {
@@ -67,8 +71,8 @@ final class CheckoutAddressRuntime {
 		$result   = $this->normalizer->normalize( $raw, $context );
 
 		if ( $location instanceof Location ) {
-			$this->session_manager->save_selected_city( $location->to_array() );
-			$this->session_manager->save_city_context( $this->city_context_from_location( $location->to_array() ) );
+			$this->session_manager->save_selected_city( $location_data );
+			$this->session_manager->save_city_context( $this->city_context_from_location( $location_data ) );
 		} else {
 			$this->session_manager->save_selected_city( array() );
 			$this->session_manager->save_city_context( $this->manual_city_context( $context ) );
@@ -137,8 +141,11 @@ final class CheckoutAddressRuntime {
 			'selected_location_id'  => $this->value( $checkoutData, 'wdc_platform_location_id', 'wdc_platform_location_id', '' ),
 			'selected_fias_id'      => $this->value( $checkoutData, 'wdc_platform_location_fias_id', 'wdc_platform_location_fias_id', '' ),
 			'selected_gar_id'       => $this->value( $checkoutData, 'wdc_platform_location_gar_id', 'wdc_platform_location_gar_id', '' ),
+			'selected_gar_object_id' => $this->value( $checkoutData, 'wdc_platform_location_gar_object_id', 'wdc_platform_location_gar_object_id', '' ),
 			'selected_display_name' => $this->value( $checkoutData, 'wdc_platform_location_display_name', 'wdc_platform_location_display_name', '' ),
 			'selected_region_name'  => $this->value( $checkoutData, 'wdc_platform_location_region_name', 'wdc_platform_location_region_name', '' ),
+			'selected_lat'          => $this->value( $checkoutData, 'wdc_platform_location_lat', 'wdc_platform_location_lat', '' ),
+			'selected_lng'          => $this->value( $checkoutData, 'wdc_platform_location_lng', 'wdc_platform_location_lng', '' ),
 		);
 	}
 
@@ -155,6 +162,7 @@ final class CheckoutAddressRuntime {
 			'id'              => $context['selected_location_id'],
 			'fias_id'         => $context['selected_fias_id'],
 			'gar_id'          => $context['selected_gar_id'],
+			'gar_object_id'   => $context['selected_gar_object_id'],
 			'country_code'    => $context['country_code'],
 			'region_name'     => $context['selected_region_name'],
 			'region_code'     => '',
@@ -163,6 +171,8 @@ final class CheckoutAddressRuntime {
 			'settlement_type' => 'город',
 			'display_name'    => $context['selected_display_name'],
 			'postal_code'     => $context['postcode'],
+			'latitude'        => $context['selected_lat'],
+			'longitude'       => $context['selected_lng'],
 			'active'          => true,
 			'source'          => 'local_db',
 			'is_manual_city'  => false,
@@ -174,7 +184,7 @@ final class CheckoutAddressRuntime {
 	 * @return array<string,mixed>
 	 */
 	private function city_context_from_location( array $location ): array {
-		return array(
+		$context = array(
 			'location_id'     => (string) ( $location['id'] ?? '' ),
 			'city_name'       => (string) ( $location['city_name'] ?? '' ),
 			'settlement_name' => (string) ( $location['settlement_name'] ?? '' ),
@@ -187,6 +197,16 @@ final class CheckoutAddressRuntime {
 			'source'          => 'local_db',
 			'is_manual_city'  => false,
 		);
+		$lat = $this->numeric_value( $location['latitude'] ?? $location['lat'] ?? null );
+		$lng = $this->numeric_value( $location['longitude'] ?? $location['lng'] ?? null );
+		if ( $this->has_usable_coordinates( $lat, $lng ) ) {
+			$context['lat'] = $lat;
+			$context['lng'] = $lng;
+			$context['latitude'] = $lat;
+			$context['longitude'] = $lng;
+		}
+
+		return $context;
 	}
 
 	/**
@@ -253,6 +273,33 @@ final class CheckoutAddressRuntime {
 				)
 			)
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $location
+	 * @return array<string,mixed>
+	 */
+	private function enrich_location_coordinates( array $location ): array {
+		if ( ! $this->coordinate_enricher instanceof LocationCoordinateEnricher ) {
+			return $location;
+		}
+
+		return $this->coordinate_enricher->enrich( $location );
+	}
+
+	private function numeric_value( mixed $value ): ?float {
+		return is_numeric( $value ) ? (float) $value : null;
+	}
+
+	private function has_usable_coordinates( ?float $lat, ?float $lng ): bool {
+		if ( null === $lat || null === $lng ) {
+			return false;
+		}
+		if ( abs( $lat ) < 0.000001 && abs( $lng ) < 0.000001 ) {
+			return false;
+		}
+
+		return $lat >= -90.0 && $lat <= 90.0 && $lng >= -180.0 && $lng <= 180.0;
 	}
 
 	private function clear_shipping_rate_cache(): void {

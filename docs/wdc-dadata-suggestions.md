@@ -1,5 +1,15 @@
 # WDC DaData Suggestions 0.14.14
 
+## Coordinate Query Diagnostics 0.23.12
+
+The location coordinate fill query is now built only from `postal_code` and `display_name`. Rows with an empty `display_name` are skipped before the DaData request. The job status includes reason-specific skip counters: `skipped_empty_query`, `skipped_no_dadata_success`, `skipped_no_coordinates`, and `skipped_invalid_coordinates`; `last_skip_reason` and `last_dadata_message` make the latest skipped row readable in the admin JSON output.
+
+## Location Coordinate Fill 0.23.11
+
+The locations admin page also uses the configured DaData suggestion client for a controlled maintenance batch: "Получить координаты через DaData" on `?page=wdc-platform-locations`. It processes only RU locations with missing coordinates (`latitude`/`longitude` NULL or `0.0000000`), starts from city rows (`г` / `г.` place types), and then continues with the remaining settlements.
+
+Each batch uses small AJAX `start`/`step` requests and persists valid DaData `geo_lat` / `geo_lon` values through `LocationRepository::update_coordinates()`. Existing valid coordinates are not overwritten; empty DaData responses are counted as skipped, and single-row errors are counted without stopping the whole job.
+
 DaData используется только для визуальных подсказок адреса в checkout. Постфактум-нормализация адреса через DaData удалена из runtime pipeline.
 
 ## Токены И Лимиты

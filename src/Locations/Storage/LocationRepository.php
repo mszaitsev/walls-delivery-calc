@@ -508,6 +508,45 @@ final class LocationRepository {
 		return (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$this->table_name()} WHERE postal_code IS NULL OR postal_code = ''" );
 	}
 
+	public function count_locations_with_coordinates(): int {
+		if ( $this->has_test_location_rows() ) {
+			return count(
+				array_filter(
+					$this->test_location_rows(),
+					fn( array $row ): bool => $this->is_ru_location_row( $row ) && ! $this->location_missing_coordinates_row( $row )
+				)
+			);
+		}
+
+		return (int) $this->wpdb->get_var(
+			"SELECT COUNT(*) FROM {$this->table_name()}
+			WHERE active = 1
+				AND (country_code = 'RU' OR country_code IS NULL OR country_code = '')
+				AND latitude IS NOT NULL
+				AND longitude IS NOT NULL
+				AND latitude != 0
+				AND longitude != 0"
+		);
+	}
+
+	public function count_locations_missing_coordinates(): int {
+		if ( $this->has_test_location_rows() ) {
+			return count(
+				array_filter(
+					$this->test_location_rows(),
+					fn( array $row ): bool => $this->is_ru_location_row( $row ) && $this->location_missing_coordinates_row( $row )
+				)
+			);
+		}
+
+		return (int) $this->wpdb->get_var(
+			"SELECT COUNT(*) FROM {$this->table_name()}
+			WHERE active = 1
+				AND (country_code = 'RU' OR country_code IS NULL OR country_code = '')
+				AND (latitude IS NULL OR longitude IS NULL OR latitude = 0 OR longitude = 0)"
+		);
+	}
+
 	public function count_technical_no_index_marker(): int {
 		if ( $this->has_test_location_rows() ) {
 			return count(
@@ -667,6 +706,61 @@ final class LocationRepository {
 		return is_array( $rows ) ? $rows : array();
 	}
 
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function find_locations_missing_coordinates( int $limit, int $after_id = 0, string $priority = 'all' ): array {
+		$limit = max( 1, min( 20, $limit ) );
+		$priority = in_array( $priority, array( 'cities', 'others', 'all' ), true ) ? $priority : 'all';
+
+		if ( $this->has_test_location_rows() ) {
+			$rows = array_values(
+				array_filter(
+					$this->test_location_rows(),
+					function ( array $row ) use ( $after_id, $priority ): bool {
+						if ( (int) ( $row['id'] ?? 0 ) <= $after_id || ! $this->is_ru_location_row( $row ) || ! $this->location_missing_coordinates_row( $row ) ) {
+							return false;
+						}
+						if ( 'cities' === $priority ) {
+							return $this->is_city_location_row( $row );
+						}
+						if ( 'others' === $priority ) {
+							return ! $this->is_city_location_row( $row );
+						}
+						return true;
+					}
+				)
+			);
+			usort( $rows, static fn( array $a, array $b ): int => (int) ( $a['id'] ?? 0 ) <=> (int) ( $b['id'] ?? 0 ) );
+			return array_slice( $rows, 0, $limit );
+		}
+
+		$priority_sql = '';
+		if ( 'cities' === $priority ) {
+			$priority_sql = " AND (place_type IN ('Рі', 'Рі.', 'г', 'г.') OR city_type IN ('Рі', 'Рі.', 'г', 'г.'))";
+		} elseif ( 'others' === $priority ) {
+			$priority_sql = " AND (place_type IS NULL OR place_type NOT IN ('Рі', 'Рі.', 'г', 'г.')) AND (city_type IS NULL OR city_type NOT IN ('Рі', 'Рі.', 'г', 'г.'))";
+		}
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT * FROM {$this->table_name()}
+				WHERE id > %d
+					AND active = 1
+					AND (country_code = 'RU' OR country_code IS NULL OR country_code = '')
+					AND (latitude IS NULL OR longitude IS NULL OR latitude = 0 OR longitude = 0)
+					{$priority_sql}
+				ORDER BY id ASC
+				LIMIT %d",
+				$after_id,
+				$limit
+			),
+			ARRAY_A
+		);
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
 	public function update_postal_code( int $location_id, string $postal_code ): bool {
 		if ( $location_id <= 0 ) {
 			return false;
@@ -688,6 +782,33 @@ final class LocationRepository {
 		$result = $this->wpdb->update( $this->table_name(), $data, array( 'id' => $location_id ), array( '%s', '%s' ), array( '%d' ) );
 		if ( false === $result ) {
 			$this->throw_sql_error( 'Location postal_code update failed' );
+		}
+
+		return true;
+	}
+
+	public function update_coordinates( int $location_id, float $latitude, float $longitude ): bool {
+		if ( $location_id <= 0 || $latitude < -90.0 || $latitude > 90.0 || $longitude < -180.0 || $longitude > 180.0 ) {
+			return false;
+		}
+
+		$data = array(
+			'latitude'   => $latitude,
+			'longitude'  => $longitude,
+			'updated_at' => current_time( 'mysql' ),
+		);
+		if ( $this->has_test_location_rows() ) {
+			$property = $this->test_location_rows_property();
+			if ( ! isset( $this->wpdb->{$property}[ $location_id ] ) ) {
+				return false;
+			}
+			$this->wpdb->{$property}[ $location_id ] = array_merge( $this->wpdb->{$property}[ $location_id ], $data );
+			return true;
+		}
+
+		$result = $this->wpdb->update( $this->table_name(), $data, array( 'id' => $location_id ), array( '%f', '%f', '%s' ), array( '%d' ) );
+		if ( false === $result ) {
+			$this->throw_sql_error( 'Location coordinates update failed' );
 		}
 
 		return true;
@@ -1211,6 +1332,37 @@ final class LocationRepository {
 
 	private function has_test_location_rows(): bool {
 		return property_exists( $this->wpdb, 'locations' ) || property_exists( $this->wpdb, 'rows' ) || property_exists( $this->wpdb, 'location_rows' );
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function location_missing_coordinates_row( array $row ): bool {
+		$latitude = $row['latitude'] ?? null;
+		$longitude = $row['longitude'] ?? null;
+		return ! is_numeric( $latitude )
+			|| ! is_numeric( $longitude )
+			|| 0.0 === (float) $latitude
+			|| 0.0 === (float) $longitude;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function is_ru_location_row( array $row ): bool {
+		if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+			return false;
+		}
+		$country = $this->normalize_country_code( (string) ( $row['country_code'] ?? '' ) );
+		return '' === $country || 'RU' === $country;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function is_city_location_row( array $row ): bool {
+		return in_array( (string) ( $row['place_type'] ?? '' ), array( 'Рі', 'Рі.', 'г', 'г.' ), true )
+			|| in_array( (string) ( $row['city_type'] ?? '' ), array( 'Рі', 'Рі.', 'г', 'г.' ), true );
 	}
 
 	/**

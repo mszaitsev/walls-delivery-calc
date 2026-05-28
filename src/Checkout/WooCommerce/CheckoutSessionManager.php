@@ -10,6 +10,7 @@ defined( 'ABSPATH' ) || exit;
 final class CheckoutSessionManager {
 	private const DELIVERY_TYPE_KEY = 'wdc_platform_selected_delivery_type';
 	private const PICKUP_SELECTION_KEY = 'wdc_platform_pickup_selection';
+	private const CHECKOUT_PICKUP_POINT_KEY = 'wdc_pickup_point';
 	private const PICKUP_CARRIER_KEY = 'wdc_platform_selected_pickup_carrier';
 	private const SORT_MODE_KEY     = 'wdc_platform_checkout_sort_mode';
 	private const RATES_KEY         = 'wdc_platform_rates';
@@ -52,7 +53,24 @@ final class CheckoutSessionManager {
 
 	public function clear_pickup_selection(): void {
 		$this->set( self::PICKUP_SELECTION_KEY, array() );
+		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, array() );
 		$this->set( self::PICKUP_CARRIER_KEY, '' );
+	}
+
+	/**
+	 * @param array<string,mixed> $selection
+	 */
+	public function save_checkout_pickup_point( array $selection ): void {
+		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, $selection );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function checkout_pickup_point(): array {
+		$selection = $this->get( self::CHECKOUT_PICKUP_POINT_KEY, array() );
+
+		return is_array( $selection ) ? $selection : array();
 	}
 
 	public function pickup_selection_matches( string $carrierKey, string $rateId ): bool {

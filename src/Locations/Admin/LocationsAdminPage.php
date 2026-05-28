@@ -20,6 +20,7 @@ use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
 use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
+use WallsShop\WDC\Locations\Coordinates\LocationCoordinatesDadataBatchUpdater;
 use WallsShop\WDC\Locations\Postcodes\DaDataPostcodeClient;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
@@ -36,6 +37,7 @@ final class LocationsAdminPage {
 	private const DISPLAY_RULES_OPTION = 'wdc_location_type_display_rules';
 	private const DISPLAY_REBUILD_JOB_OPTION = 'wdc_locations_display_name_rebuild_job';
 	private const DADATA_POSTCODE_JOB_OPTION = 'wdc_dadata_postcode_fill_job';
+	private const DADATA_COORDINATES_JOB_OPTION = 'wdc_dadata_coordinates_fill_job';
 	private const DADATA_POSTCODE_MARKER = '999999999';
 
 	public function __construct(
@@ -52,6 +54,7 @@ final class LocationsAdminPage {
 		private ?LocationsSnapshotExporter $snapshot_exporter = null,
 		private ?LocationsSnapshotImporter $snapshot_importer = null,
 		private ?DaDataPostcodeClient $postcode_client = null,
+		private ?LocationCoordinatesDadataBatchUpdater $coordinates_updater = null,
 		private ?LocationCountryIndexService $country_index = null
 	) {
 	}
@@ -77,6 +80,10 @@ final class LocationsAdminPage {
 		add_action( 'wp_ajax_wdc_dadata_postcode_fill_status', array( $this, 'ajax_dadata_postcode_fill_status' ) );
 		add_action( 'wp_ajax_wdc_dadata_postcode_fill_cancel', array( $this, 'ajax_dadata_postcode_fill_cancel' ) );
 		add_action( 'wp_ajax_wdc_dadata_postcode_clear_markers', array( $this, 'ajax_dadata_postcode_clear_markers' ) );
+		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_start', array( $this, 'ajax_dadata_coordinates_fill_start' ) );
+		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_step', array( $this, 'ajax_dadata_coordinates_fill_step' ) );
+		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_status', array( $this, 'ajax_dadata_coordinates_fill_status' ) );
+		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_cancel', array( $this, 'ajax_dadata_coordinates_fill_cancel' ) );
 	}
 
 	public function add_menu_page(): void {
@@ -122,16 +129,27 @@ final class LocationsAdminPage {
 			</div>
 
 			<div class="wdc-locations-import wdc-dadata-postcode-fill">
-				<h2><?php echo esc_html__( 'Заполнение почтовых индексов через DaData', 'walls-delivery-calc' ); ?></h2>
+				<h2><?php echo esc_html__( 'Заполнение информации через DaData', 'walls-delivery-calc' ); ?></h2>
 				<div class="wdc-locations-summary">
 					<p><strong><?php echo esc_html__( 'Всего населенных пунктов:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_all() ); ?></span></p>
 					<p><strong><?php echo esc_html__( 'postal_code заполнен:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_with_postal_code() ); ?></span></p>
 					<p><strong><?php echo esc_html__( 'postal_code отсутствует:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_without_postal_code() ); ?></span></p>
+					<p><strong><?php echo esc_html__( 'координаты есть:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_locations_with_coordinates() ); ?></span></p>
+					<p><strong><?php echo esc_html__( 'координат нет:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_locations_missing_coordinates() ); ?></span></p>
 					<p><strong><?php echo esc_html__( 'technical no-index marker count:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_technical_no_index_marker() ); ?></span></p>
 				</div>
 				<button class="button button-primary" type="button" id="wdc-dadata-postcode-fill-start"><?php echo esc_html__( 'Получить индексы через DaData', 'walls-delivery-calc' ); ?></button>
+				<button class="button button-secondary" type="button" id="wdc-dadata-coordinates-fill-start"><?php echo esc_html__( 'Получить координаты через DaData', 'walls-delivery-calc' ); ?></button>
 				<button class="button button-secondary" type="button" id="wdc-dadata-postcode-clear-markers"><?php echo esc_html__( 'Удалить технические значения 999999999', 'walls-delivery-calc' ); ?></button>
 				<div id="wdc-dadata-postcode-progress" class="wdc-progress" hidden>
+					<progress value="0" max="100"></progress>
+					<p class="wdc-progress-summary"></p>
+					<details open>
+						<summary><?php echo esc_html__( 'JSON status', 'walls-delivery-calc' ); ?></summary>
+						<pre></pre>
+					</details>
+				</div>
+				<div id="wdc-dadata-coordinates-progress" class="wdc-progress" hidden>
 					<progress value="0" max="100"></progress>
 					<p class="wdc-progress-summary"></p>
 					<details open>
@@ -427,11 +445,11 @@ final class LocationsAdminPage {
 				box.hidden = false;
 				const progress = box.querySelector('progress');
 				const text = box.querySelector('pre');
-				const total = Number(job.rows_total_estimated || job.total_rows || job.stage_rows || 1);
-				const done = Number(job.processed_rows || job.rows_exported || job.imported || job.rows_read || 0);
+				const total = Number(job.rows_total_estimated || job.total_rows || job.stage_rows || job.total || 1);
+				const done = Number(job.processed_rows || job.rows_exported || job.imported || job.rows_read || job.processed || 0);
 				progress.value = Math.min(100, Math.round(done / Math.max(1, total) * 100));
 				const summary = box.querySelector('.wdc-progress-summary');
-				if (summary) summary.textContent = 'phase: ' + (job.phase || '') + ', processed: ' + (job.processed || done || 0) + ' / ' + (job.total || total || 0) + ', updated: ' + (job.updated || 0) + ', marked_no_index: ' + (job.marked_no_index || 0) + ', skipped: ' + (job.skipped || 0) + ', errors: ' + (job.errors || 0) + ', consecutive_errors: ' + (job.consecutive_errors || 0) + ', priority: ' + (job.current_priority || '') + ', aliases: ' + (job.aliases_updated || 0);
+				if (summary) summary.textContent = 'status: ' + (job.status || job.phase || '') + ', phase: ' + (job.phase || '') + ', processed: ' + (job.processed || done || 0) + ' / ' + (job.total || total || 0) + ', updated: ' + (job.updated || 0) + ', marked_no_index: ' + (job.marked_no_index || 0) + ', skipped: ' + (job.skipped || 0) + ', failed: ' + (job.failed || 0) + ', errors: ' + (job.errors || 0) + ', consecutive_errors: ' + (job.consecutive_errors || 0) + ', priority: ' + (job.current_priority || '') + ', skip_reason: ' + (job.last_skip_reason || '') + ', aliases: ' + (job.aliases_updated || 0);
 				text.textContent = JSON.stringify(job, null, 2);
 			}
 			function loop(action, box, delay) {
@@ -495,6 +513,11 @@ final class LocationsAdminPage {
 			if (postcodeStart) postcodeStart.addEventListener('click', function(){
 				const box = document.getElementById('wdc-dadata-postcode-progress');
 				post('wdc_dadata_postcode_fill_start').then(resp => { render(box, resp.data); loop('wdc_dadata_postcode_fill_step', box, 2000 + Math.floor(Math.random() * 2001)); });
+			});
+			const coordinatesStart = document.getElementById('wdc-dadata-coordinates-fill-start');
+			if (coordinatesStart) coordinatesStart.addEventListener('click', function(){
+				const box = document.getElementById('wdc-dadata-coordinates-progress');
+				post('wdc_dadata_coordinates_fill_start').then(resp => { render(box, resp.data); loop('wdc_dadata_coordinates_fill_step', box, 2000 + Math.floor(Math.random() * 2001)); });
 			});
 			const postcodeClear = document.getElementById('wdc-dadata-postcode-clear-markers');
 			if (postcodeClear) postcodeClear.addEventListener('click', function(){
@@ -848,6 +871,70 @@ final class LocationsAdminPage {
 		$this->send_json( $job );
 	}
 
+	public function ajax_dadata_coordinates_fill_start(): void {
+		$this->guard_ajax();
+		$existing = $this->get_option( self::DADATA_COORDINATES_JOB_OPTION, array() );
+		if ( is_array( $existing ) && 'running' === (string) ( $existing['phase'] ?? '' ) ) {
+			$this->send_json( $existing );
+		}
+
+		$job = array(
+			'job_id'           => md5( 'dadata-coordinates-' . microtime( true ) ),
+			'phase'            => 'running',
+			'status'           => 'running',
+			'total'            => $this->repository->count_locations_missing_coordinates(),
+			'processed'        => 0,
+			'updated'          => 0,
+			'skipped'          => 0,
+			'skipped_empty_query' => 0,
+			'skipped_no_dadata_success' => 0,
+			'skipped_no_coordinates' => 0,
+			'skipped_invalid_coordinates' => 0,
+			'failed'           => 0,
+			'errors'           => 0,
+			'last_id'          => 0,
+			'cursor'           => 0,
+			'current_priority' => 'cities',
+			'current_batch'    => array(),
+			'started_at'       => current_time( 'mysql' ),
+			'finished_at'      => '',
+			'updated_at'       => current_time( 'mysql' ),
+			'last_error'       => '',
+			'last_skip_reason' => '',
+			'last_dadata_message' => '',
+			'last_location_id' => 0,
+			'last_place_name'  => '',
+			'last_query'       => '',
+		);
+		$this->update_option( self::DADATA_COORDINATES_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	public function ajax_dadata_coordinates_fill_step(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::DADATA_COORDINATES_JOB_OPTION, array() );
+		$job = is_array( $job ) ? $this->step_dadata_coordinates_job( $job ) : $this->dadata_coordinates_failed_job( 'DaData coordinates fill job is unavailable.' );
+		$this->update_option( self::DADATA_COORDINATES_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	public function ajax_dadata_coordinates_fill_status(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::DADATA_COORDINATES_JOB_OPTION, array( 'phase' => 'idle', 'status' => 'idle' ) );
+		$this->send_json( is_array( $job ) ? $job : array( 'phase' => 'idle', 'status' => 'idle' ) );
+	}
+
+	public function ajax_dadata_coordinates_fill_cancel(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::DADATA_COORDINATES_JOB_OPTION, array() );
+		$job = is_array( $job ) ? $job : array();
+		$job['phase'] = 'canceled';
+		$job['status'] = 'canceled';
+		$job['updated_at'] = current_time( 'mysql' );
+		$this->update_option( self::DADATA_COORDINATES_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
 	public function ajax_dadata_postcode_clear_markers(): void {
 		$this->guard_ajax();
 		$cleared = $this->repository->clear_postal_code_marker( self::DADATA_POSTCODE_MARKER );
@@ -976,6 +1063,49 @@ final class LocationsAdminPage {
 		$job['last_error'] = $message;
 		$job['errors'] = (int) ( $job['errors'] ?? 0 ) + 1;
 		$job['consecutive_errors'] = (int) ( $job['consecutive_errors'] ?? 0 ) + 1;
+		$job['updated_at'] = current_time( 'mysql' );
+		return $job;
+	}
+
+	/**
+	 * @param array<string,mixed> $job
+	 * @return array<string,mixed>
+	 */
+	private function step_dadata_coordinates_job( array $job ): array {
+		if ( ! $this->coordinates_updater instanceof LocationCoordinatesDadataBatchUpdater ) {
+			return $this->fail_dadata_coordinates_job( $job, 'DaData coordinates updater is unavailable.' );
+		}
+
+		return $this->coordinates_updater->step( $job, random_int( 10, 20 ) );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function dadata_coordinates_failed_job( string $message ): array {
+		return array(
+			'phase' => 'failed',
+			'status' => 'failed',
+			'processed' => 0,
+			'updated' => 0,
+			'skipped' => 0,
+			'failed' => 1,
+			'errors' => 1,
+			'last_error' => $message,
+			'updated_at' => current_time( 'mysql' ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $job
+	 * @return array<string,mixed>
+	 */
+	private function fail_dadata_coordinates_job( array $job, string $message ): array {
+		$job['phase'] = 'failed';
+		$job['status'] = 'failed';
+		$job['last_error'] = $message;
+		$job['failed'] = (int) ( $job['failed'] ?? 0 ) + 1;
+		$job['errors'] = (int) ( $job['errors'] ?? 0 ) + 1;
 		$job['updated_at'] = current_time( 'mysql' );
 		return $job;
 	}
