@@ -449,7 +449,7 @@ final class LocationsAdminPage {
 				const done = Number(job.processed_rows || job.rows_exported || job.imported || job.rows_read || job.processed || 0);
 				progress.value = Math.min(100, Math.round(done / Math.max(1, total) * 100));
 				const summary = box.querySelector('.wdc-progress-summary');
-				if (summary) summary.textContent = 'status: ' + (job.status || job.phase || '') + ', phase: ' + (job.phase || '') + ', processed: ' + (job.processed || done || 0) + ' / ' + (job.total || total || 0) + ', updated: ' + (job.updated || 0) + ', marked_no_index: ' + (job.marked_no_index || 0) + ', skipped: ' + (job.skipped || 0) + ', failed: ' + (job.failed || 0) + ', errors: ' + (job.errors || 0) + ', consecutive_errors: ' + (job.consecutive_errors || 0) + ', priority: ' + (job.current_priority || '') + ', aliases: ' + (job.aliases_updated || 0);
+				if (summary) summary.textContent = 'status: ' + (job.status || job.phase || '') + ', phase: ' + (job.phase || '') + ', processed: ' + (job.processed || done || 0) + ' / ' + (job.total || total || 0) + ', updated: ' + (job.updated || 0) + ', marked_no_index: ' + (job.marked_no_index || 0) + ', skipped: ' + (job.skipped || 0) + ', failed: ' + (job.failed || 0) + ', errors: ' + (job.errors || 0) + ', consecutive_errors: ' + (job.consecutive_errors || 0) + ', priority: ' + (job.current_priority || '') + ', skip_reason: ' + (job.last_skip_reason || '') + ', aliases: ' + (job.aliases_updated || 0);
 				text.textContent = JSON.stringify(job, null, 2);
 			}
 			function loop(action, box, delay) {
@@ -886,6 +886,10 @@ final class LocationsAdminPage {
 			'processed'        => 0,
 			'updated'          => 0,
 			'skipped'          => 0,
+			'skipped_empty_query' => 0,
+			'skipped_no_dadata_success' => 0,
+			'skipped_no_coordinates' => 0,
+			'skipped_invalid_coordinates' => 0,
 			'failed'           => 0,
 			'errors'           => 0,
 			'last_id'          => 0,
@@ -896,6 +900,8 @@ final class LocationsAdminPage {
 			'finished_at'      => '',
 			'updated_at'       => current_time( 'mysql' ),
 			'last_error'       => '',
+			'last_skip_reason' => '',
+			'last_dadata_message' => '',
 			'last_location_id' => 0,
 			'last_place_name'  => '',
 			'last_query'       => '',

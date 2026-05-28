@@ -1,8 +1,12 @@
 # Russian Post Pickup Points
 
-Version: 0.23.11.
+Version: 0.23.12.
 
 ## Location Coordinates
+
+Version 0.23.12 keeps the coordinate-fill DaData query intentionally small: only `postal_code` and `display_name` are joined. If `postal_code` is empty, the query is just `display_name`; if `display_name` is empty, the row is skipped as `empty_query`. The batch no longer appends `region_name`, `district_name`, `city_name`, `settlement_name`, or `place_name` as separate fragments.
+
+Coordinate-fill status now explains skipped rows with `skipped_empty_query`, `skipped_no_dadata_success`, `skipped_no_coordinates`, and `skipped_invalid_coordinates`. The aggregate `skipped` counter still increases, and the job records `last_skip_reason` plus `last_dadata_message` for the latest skipped DaData case.
 
 Version 0.23.11 adds a mass coordinate fill tool on the locations admin page, `?page=wdc-platform-locations`. The former "Заполнение почтовых индексов через DaData" block is now "Заполнение информации через DaData" and shows both postal-code and coordinate counters, including "координаты есть" and "координат нет".
 

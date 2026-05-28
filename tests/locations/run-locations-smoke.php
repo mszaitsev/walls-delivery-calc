@@ -270,6 +270,8 @@ final class WdcLocationsSmokeSuggestionClient implements AddressSuggestionClient
 
 final class WdcLocationsSmokeQueuedSuggestionClient implements AddressSuggestionClientInterface {
 	public int $calls = 0;
+	/** @var array<int,string> */
+	public array $queries = array();
 
 	/**
 	 * @param array<int,mixed> $responses
@@ -278,6 +280,7 @@ final class WdcLocationsSmokeQueuedSuggestionClient implements AddressSuggestion
 	}
 
 	public function suggest( string $stage, string $query, array $context = array() ): array {
+		$this->queries[] = $query;
 		$response = $this->responses[ $this->calls ] ?? array(
 			'success' => true,
 			'suggestions' => array(),
@@ -375,13 +378,19 @@ locations_smoke_assert( $coordinates_repository->update_coordinates( $city_missi
 
 $batch_wpdb = new wpdb();
 $batch_repository = new LocationRepository( $batch_wpdb );
-$batch_success_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883001, 'fias_id' => 'fias-batch-success', 'region_name' => 'Иркутская', 'place_type' => 'г', 'place_name' => 'Иркутск', 'display_name' => 'Иркутск', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
-$batch_skipped_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883002, 'fias_id' => 'fias-batch-empty', 'region_name' => 'Томская', 'place_type' => 'г', 'place_name' => 'Пусто', 'display_name' => 'Пусто', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
-$batch_failed_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883003, 'fias_id' => 'fias-batch-error', 'region_name' => 'Красноярский', 'place_type' => 'г', 'place_name' => 'Ошибка', 'display_name' => 'Ошибка', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$batch_success_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883001, 'fias_id' => 'fias-batch-success', 'region_name' => 'Иркутская', 'place_type' => 'г', 'place_name' => 'Не должен попасть в query', 'display_name' => 'г Иркутск', 'postal_code' => '664000', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$batch_empty_query_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883002, 'fias_id' => 'fias-batch-empty-query', 'region_name' => 'Томская', 'place_type' => 'г', 'place_name' => 'Пустое имя', 'display_name' => '', 'postal_code' => '634000', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$batch_wpdb->rows[ $batch_empty_query_id ]['display_name'] = '';
+$batch_no_success_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883003, 'fias_id' => 'fias-batch-no-success', 'region_name' => 'Карелия', 'place_type' => 'г', 'place_name' => 'Сортавала', 'display_name' => 'респ Карелия, г Сортавала, поселок Уусикюля', 'postal_code' => '186752', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$batch_no_coordinates_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883004, 'fias_id' => 'fias-batch-empty', 'region_name' => 'Томская', 'place_type' => 'г', 'place_name' => 'Пусто', 'display_name' => 'Пусто', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$batch_invalid_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883005, 'fias_id' => 'fias-batch-invalid', 'region_name' => 'Саха', 'place_type' => 'г', 'place_name' => 'Нерюнгри', 'display_name' => 'респ Саха (Якутия), Нерюнгринский р-н, г Нерюнгри', 'postal_code' => '678960', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$batch_failed_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883006, 'fias_id' => 'fias-batch-error', 'region_name' => 'Красноярский', 'place_type' => 'г', 'place_name' => 'Ошибка', 'display_name' => 'Ошибка', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
 $batch_client = new WdcLocationsSmokeQueuedSuggestionClient(
 	array(
 		array( 'success' => true, 'suggestions' => array( array( 'data' => array( 'geo_lat' => '52.286348', 'geo_lon' => '104.280679' ) ) ) ),
+		array( 'success' => false, 'error_message' => 'DaData rejected query.' ),
 		array( 'success' => true, 'suggestions' => array() ),
+		array( 'success' => true, 'suggestions' => array( array( 'data' => array( 'geo_lat' => '0', 'geo_lon' => '0' ) ) ) ),
 		new RuntimeException( 'DaData temporary error.' ),
 	)
 );
@@ -402,9 +411,13 @@ $batch_job = $batch_updater->step(
 	),
 	10
 );
-locations_smoke_assert( 3 === $batch_job['processed'] && 1 === $batch_job['updated'] && 1 === $batch_job['skipped'] && 1 === $batch_job['failed'] && 1 === $batch_job['errors'], 'Coordinate batch updater must update, skip empty DaData responses, and continue after one error.' );
+locations_smoke_assert( 6 === $batch_job['processed'] && 1 === $batch_job['updated'] && 4 === $batch_job['skipped'] && 1 === $batch_job['failed'] && 1 === $batch_job['errors'], 'Coordinate batch updater must update, skip explainable DaData responses, and continue after one error.' );
+locations_smoke_assert( 1 === $batch_job['skipped_empty_query'] && 1 === $batch_job['skipped_no_dadata_success'] && 1 === $batch_job['skipped_no_coordinates'] && 1 === $batch_job['skipped_invalid_coordinates'], 'Coordinate batch updater must expose per-reason skipped counters.' );
 locations_smoke_assert( 52.286348 === (float) $batch_wpdb->rows[ $batch_success_id ]['latitude'] && 104.280679 === (float) $batch_wpdb->rows[ $batch_success_id ]['longitude'], 'Coordinate batch updater must persist valid DaData coordinates.' );
-locations_smoke_assert( $batch_skipped_id > 0 && $batch_failed_id > 0 && (int) $batch_job['cursor'] >= $batch_failed_id, 'Coordinate batch updater must advance cursor through current batch.' );
+locations_smoke_assert( array( '664000, г Иркутск', '186752, респ Карелия, г Сортавала, поселок Уусикюля', 'Пусто', '678960, респ Саха (Якутия), Нерюнгринский р-н, г Нерюнгри', 'Ошибка' ) === $batch_client->queries, 'Coordinate DaData query must use only postal_code plus display_name.' );
+locations_smoke_assert( ! str_contains( implode( ' | ', $batch_client->queries ), 'Не должен попасть в query' ), 'Coordinate DaData query must not append place_name/region fields separately.' );
+locations_smoke_assert( 'invalid_coordinates' === $batch_job['last_skip_reason'] || '' !== (string) $batch_job['last_error'], 'Coordinate batch updater must keep last skip/error diagnostics in job state.' );
+locations_smoke_assert( $batch_empty_query_id > 0 && $batch_no_success_id > 0 && $batch_no_coordinates_id > 0 && $batch_invalid_id > 0 && $batch_failed_id > 0 && (int) $batch_job['cursor'] >= $batch_failed_id, 'Coordinate batch updater must advance cursor through current batch.' );
 
 $novos = $search->search( 'новос' );
 locations_smoke_assert( count( $novos ) > 0, 'Search "новос" must return results.' );

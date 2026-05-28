@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.23.11.
+Version: 0.23.12.
+
+Version 0.23.12 simplifies the DaData coordinate batch query to `postal_code + display_name` only, so rows like `186752, респ Карелия, г Сортавала, поселок Уусикюля` are sent without duplicated region/city/place fragments. Coordinate batch JSON now includes explicit skip counters: `skipped_empty_query`, `skipped_no_dadata_success`, `skipped_no_coordinates`, `skipped_invalid_coordinates`, plus `last_skip_reason` and `last_dadata_message`.
 
 Version 0.23.11 adds an admin DaData coordinate fill action for locations. On `?page=wdc-platform-locations`, the DaData block is now "Заполнение информации через DaData" and includes "Получить координаты через DaData"; it batch-processes RU locations whose `latitude/longitude` are NULL or `0.0000000`, starts with city rows, and stores valid `geo_lat/geo_lon` through `LocationRepository::update_coordinates()`. This keeps the checkout pickup map dependent on prepared local city coordinates instead of extra frontend search complexity.
 

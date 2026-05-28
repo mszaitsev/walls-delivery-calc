@@ -26,6 +26,9 @@ final class LocationCoordinatesDadataBatchUpdater {
 		}
 
 		$limit = max( 1, min( 20, $limit ) );
+		foreach ( array( 'skipped_empty_query', 'skipped_no_dadata_success', 'skipped_no_coordinates', 'skipped_invalid_coordinates' ) as $counter ) {
+			$job[ $counter ] = (int) ( $job[ $counter ] ?? 0 );
+		}
 		$priority = (string) ( $job['current_priority'] ?? 'cities' );
 		$batch = $this->repository->find_locations_missing_coordinates( $limit, (int) ( $job['last_id'] ?? 0 ), $priority );
 
@@ -52,17 +55,19 @@ final class LocationCoordinatesDadataBatchUpdater {
 			$job['last_location_id'] = $location_id;
 			$job['last_place_name'] = (string) ( $location['display_name'] ?? $location['place_name'] ?? $location['city_name'] ?? '' );
 			$job['last_query'] = $this->query_for_location( $location );
+			$job['last_skip_reason'] = '';
+			$job['last_dadata_message'] = '';
 			$job['last_id'] = max( (int) ( $job['last_id'] ?? 0 ), $location_id );
 			$job['cursor'] = (int) $job['last_id'];
 
-			if ( $location_id <= 0 || '' === trim( (string) $job['last_query'] ) ) {
-				$job['skipped'] = (int) ( $job['skipped'] ?? 0 ) + 1;
+			if ( $location_id <= 0 ) {
+				$this->skip( $job, 'empty_query', 'Location id is empty.' );
 				continue;
 			}
 
 			$job['processed'] = (int) ( $job['processed'] ?? 0 ) + 1;
 			try {
-				$coordinates = $this->coordinates_for_location( $location );
+				$result = $this->coordinates_for_location( $location );
 			} catch ( Throwable $exception ) {
 				$job['failed'] = (int) ( $job['failed'] ?? 0 ) + 1;
 				$job['errors'] = (int) ( $job['errors'] ?? 0 ) + 1;
@@ -70,12 +75,12 @@ final class LocationCoordinatesDadataBatchUpdater {
 				continue;
 			}
 
-			if ( null === $coordinates ) {
-				$job['skipped'] = (int) ( $job['skipped'] ?? 0 ) + 1;
+			if ( 'skipped' === (string) $result['status'] ) {
+				$this->skip( $job, (string) $result['reason'], (string) $result['message'] );
 				continue;
 			}
 
-			if ( $this->repository->update_coordinates( $location_id, $coordinates['lat'], $coordinates['lng'] ) ) {
+			if ( $this->repository->update_coordinates( $location_id, (float) $result['lat'], (float) $result['lng'] ) ) {
 				$job['updated'] = (int) ( $job['updated'] ?? 0 ) + 1;
 			} else {
 				$job['failed'] = (int) ( $job['failed'] ?? 0 ) + 1;
@@ -91,20 +96,25 @@ final class LocationCoordinatesDadataBatchUpdater {
 
 	/**
 	 * @param array<string,mixed> $location
-	 * @return array{lat:float,lng:float}|null
+	 * @return array{status:string,lat:?float,lng:?float,reason:string,message:string}
 	 */
-	private function coordinates_for_location( array $location ): ?array {
+	private function coordinates_for_location( array $location ): array {
 		$query = $this->query_for_location( $location );
 		if ( '' === $query ) {
-			return null;
+			return $this->skipped_result( 'empty_query', 'Location display_name is empty.' );
 		}
 
 		$response = $this->client->suggest( 'city', $query, array( 'country_code' => 'RU' ) );
 		if ( empty( $response['success'] ) ) {
-			return null;
+			return $this->skipped_result( 'no_dadata_success', $this->dadata_message( $response ) );
 		}
 
-		foreach ( (array) ( $response['suggestions'] ?? array() ) as $suggestion ) {
+		$suggestions = (array) ( $response['suggestions'] ?? array() );
+		if ( array() === $suggestions ) {
+			return $this->skipped_result( 'no_coordinates', $this->dadata_message( $response ) );
+		}
+
+		foreach ( $suggestions as $suggestion ) {
 			if ( ! is_array( $suggestion ) ) {
 				continue;
 			}
@@ -113,29 +123,65 @@ final class LocationCoordinatesDadataBatchUpdater {
 			$lng = isset( $data['geo_lon'] ) ? (float) $data['geo_lon'] : 0.0;
 			if ( $lat >= -90.0 && $lat <= 90.0 && $lng >= -180.0 && $lng <= 180.0 && 0.0 !== $lat && 0.0 !== $lng ) {
 				return array(
+					'status' => 'updated',
 					'lat' => $lat,
 					'lng' => $lng,
+					'reason' => '',
+					'message' => '',
 				);
 			}
 		}
 
-		return null;
+		return $this->skipped_result( 'invalid_coordinates', $this->dadata_message( $response ) );
 	}
 
 	/**
 	 * @param array<string,mixed> $location
 	 */
 	private function query_for_location( array $location ): string {
-		$parts = array(
-			(string) ( $location['postal_code'] ?? '' ),
-			(string) ( $location['region_name'] ?? '' ),
-			(string) ( $location['district_name'] ?? '' ),
-			(string) ( $location['display_name'] ?? '' ),
-			(string) ( $location['city_name'] ?? '' ),
-			(string) ( $location['settlement_name'] ?? '' ),
-			(string) ( $location['place_name'] ?? '' ),
+		$display_name = trim( (string) ( $location['display_name'] ?? '' ) );
+		if ( '' === $display_name ) {
+			return '';
+		}
+
+		$postal_code = trim( (string) ( $location['postal_code'] ?? '' ) );
+		return '' !== $postal_code ? $postal_code . ', ' . $display_name : $display_name;
+	}
+
+	/**
+	 * @param array<string,mixed> $job
+	 */
+	private function skip( array &$job, string $reason, string $message = '' ): void {
+		$reason = in_array( $reason, array( 'empty_query', 'no_dadata_success', 'no_coordinates', 'invalid_coordinates' ), true ) ? $reason : 'no_coordinates';
+		$job['skipped'] = (int) ( $job['skipped'] ?? 0 ) + 1;
+		$job[ 'skipped_' . $reason ] = (int) ( $job[ 'skipped_' . $reason ] ?? 0 ) + 1;
+		$job['last_skip_reason'] = $reason;
+		$job['last_dadata_message'] = $message;
+	}
+
+	/**
+	 * @return array{status:string,lat:?float,lng:?float,reason:string,message:string}
+	 */
+	private function skipped_result( string $reason, string $message = '' ): array {
+		return array(
+			'status' => 'skipped',
+			'lat' => null,
+			'lng' => null,
+			'reason' => $reason,
+			'message' => $message,
 		);
-		$parts = array_values( array_unique( array_filter( array_map( 'trim', $parts ) ) ) );
-		return trim( implode( ', ', $parts ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $response
+	 */
+	private function dadata_message( array $response ): string {
+		foreach ( array( 'error_message', 'message', 'error_code', 'reason' ) as $key ) {
+			if ( isset( $response[ $key ] ) && '' !== trim( (string) $response[ $key ] ) ) {
+				return trim( (string) $response[ $key ] );
+			}
+		}
+
+		return '';
 	}
 }
