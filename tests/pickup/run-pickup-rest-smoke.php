@@ -18,6 +18,7 @@ function pickup_rest_assert( bool $condition, string $message ): void {
 function sanitize_key( mixed $value ): string { return preg_replace( '/[^a-z0-9_\\-]/', '', strtolower( (string) $value ) ) ?? ''; }
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
+function wp_verify_nonce( string $nonce, string $action ): bool { return 'nonce' === $nonce && 'wp_rest' === $action; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
 function is_wp_error( mixed $value ): bool { return false; }
 function wp_remote_retrieve_response_code( array $response ): int { return (int) ( $response['response']['code'] ?? 0 ); }
@@ -40,7 +41,14 @@ if ( ! class_exists( 'WP_Error' ) ) {
 		public function __construct( public string $code, public string $message, public array $data = array() ) {}
 		public function get_error_code(): string { return $this->code; }
 		public function get_error_message(): string { return $this->message; }
+		public function get_error_data(): array { return $this->data; }
 	}
+}
+
+final class WdcPickupRestRequest {
+	public function __construct( private array $params = array(), private array $headers = array() ) {}
+	public function get_param( string $key ): mixed { return $this->params[ $key ] ?? ''; }
+	public function get_header( string $key ): string { return (string) ( $this->headers[ $key ] ?? '' ); }
 }
 
 if ( ! class_exists( 'wpdb' ) ) {
@@ -178,6 +186,14 @@ $controller = new PickupPointsRestController( $repo, $type_settings, $address_se
 $controller->register();
 pickup_rest_assert( 4 === count( $GLOBALS['wdc_rest_routes'] ?? array() ), 'REST controller must register four routes including address search.' );
 pickup_rest_assert( array( 'OPS', 'PVZ', 'APS' ) === $type_settings->enabled_types(), 'Pickup type defaults must enable OPS/PVZ/APS.' );
+$route_by_path = array();
+foreach ( $GLOBALS['wdc_rest_routes'] as $route ) {
+	$route_by_path[ $route['route'] ] = $route;
+}
+$forbidden = $route_by_path['/points/address-search']['args']['permission_callback']( new WdcPickupRestRequest() );
+pickup_rest_assert( $forbidden instanceof WP_Error && 'wdc_forbidden' === $forbidden->get_error_code() && 403 === (int) ( $forbidden->get_error_data()['status'] ?? 0 ), 'Address search without REST nonce must return 403.' );
+pickup_rest_assert( true === $route_by_path['/points/address-search']['args']['permission_callback']( new WdcPickupRestRequest( headers: array( 'X-WP-Nonce' => 'nonce' ) ) ), 'Address search with valid REST nonce must be allowed.' );
+pickup_rest_assert( '__return_true' === $route_by_path['/points']['args']['permission_callback'] && '__return_true' === $route_by_path['/points/search']['args']['permission_callback'] && '__return_true' === $route_by_path['/points/(?P<id>\\d+)']['args']['permission_callback'], 'Read-only pickup endpoints must remain public.' );
 
 $bbox = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '82.90,55.00,82.93,55.03' ) );
 pickup_rest_assert( 2 === count( $bbox ) && array( 1, 2 ) === array_column( $bbox, 'id' ), 'bbox must return only points inside requested area.' );

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.26.0.
+Version: 0.26.1.
+
+Version 0.26.1 protects `GET /wdc/v1/points/address-search` with the WordPress REST nonce because the endpoint can spend DaData token quota. The checkout frontend already sends `X-WP-Nonce`; missing or invalid nonce now returns `wdc_forbidden` with HTTP 403. Public read-only pickup endpoints `/points`, `/points/search`, and `/points/{id}` remain public.
 
 Version 0.26.0 adds address search above the Russian Post pickup map through `GET /wdc/v1/points/address-search`. Address queries use the existing `AddressSuggestionClientInterface` / `DaDataSuggestionClient` and shared `DaDataTokenPool`, so token rotation, daily counters, exhausted-token flags, and daily limits remain centralized. Results are cached for 24 hours by `query + location_id + country_code`, so repeated address searches do not spend DaData limits again.
 

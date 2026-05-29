@@ -48,7 +48,7 @@ final class PickupPointsRestController {
 			array(
 				'methods' => 'GET',
 				'callback' => array( $this, 'address_search' ),
-				'permission_callback' => '__return_true',
+				'permission_callback' => array( $this, 'check_nonce' ),
 			)
 		);
 		register_rest_route(
@@ -60,6 +60,21 @@ final class PickupPointsRestController {
 				'permission_callback' => '__return_true',
 			)
 		);
+	}
+
+	public function check_nonce( mixed $request ): bool|object {
+		$nonce = '';
+		if ( is_object( $request ) && method_exists( $request, 'get_header' ) ) {
+			$nonce = (string) $request->get_header( 'X-WP-Nonce' );
+		}
+		if ( '' === $nonce && isset( $_SERVER['HTTP_X_WP_NONCE'] ) ) {
+			$nonce = (string) wp_unslash( $_SERVER['HTTP_X_WP_NONCE'] );
+		}
+		if ( '' !== $nonce && function_exists( 'wp_verify_nonce' ) && wp_verify_nonce( $nonce, 'wp_rest' ) ) {
+			return true;
+		}
+
+		return $this->error( 'wdc_forbidden', 'REST nonce is missing or invalid.', 403 );
 	}
 
 	public function points( mixed $request ): mixed {
