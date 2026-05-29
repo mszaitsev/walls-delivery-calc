@@ -88,6 +88,7 @@ final class PickupAddressSearchService {
 		$exact = $this->points->find_rows_by_postcode( $postcode, array( 'point_types' => $types, 'limit' => 50 ) );
 		if ( array() !== $exact ) {
 			$anchor = $this->average_point( $exact );
+			$nearest = $this->points->find_nearest_rows( $anchor['lat'], $anchor['lng'], array( 'point_types' => $types, 'limit' => 50 ) );
 			return array(
 				'search_type' => 'postcode',
 				'address_search_available' => $this->token_pool->has_available_token(),
@@ -96,7 +97,7 @@ final class PickupAddressSearchService {
 					'lat' => $anchor['lat'],
 					'lng' => $anchor['lng'],
 				),
-				'points' => array_map( fn( array $row ): array => $this->point_summary( $row ), $exact ),
+				'points' => array_map( fn( array $row ): array => $this->point_summary( $row ), $nearest ),
 			);
 		}
 

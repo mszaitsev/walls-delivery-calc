@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.26.1.
+Version: 0.26.2.
+
+Version 0.26.2 refines the pickup address search row: opening the modal now focuses the close button instead of the search input, the search field has a decorative magnifier and an explicit "Искать адрес" button, and Enter triggers the same search action. After address/postcode search the frontend now loads a bbox around the found point, while postcode exact matches return nearest pickup points around the postcode anchor instead of leaving the list stuck on only the exact row.
 
 Version 0.26.1 protects `GET /wdc/v1/points/address-search` with the WordPress REST nonce because the endpoint can spend DaData token quota. The checkout frontend already sends `X-WP-Nonce`; missing or invalid nonce now returns `wdc_forbidden` with HTTP 403. Public read-only pickup endpoints `/points`, `/points/search`, and `/points/{id}` remain public.
 

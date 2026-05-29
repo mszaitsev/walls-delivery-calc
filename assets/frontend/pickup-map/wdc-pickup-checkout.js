@@ -32,6 +32,7 @@
 			var modal = window.WDCPickupModal.create(labels);
 			var confirmButton = modal.root.querySelector('[data-wdc-confirm]');
 			var search = modal.root.querySelector('[data-wdc-search]');
+			var searchSubmit = modal.root.querySelector('[data-wdc-search-submit]');
 			var context = withPrefetch(resolvedContext);
 			debug('openModal context', context);
 			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
@@ -59,9 +60,16 @@
 			}
 
 			modal.root.addEventListener('wdc:close', close);
-			search.addEventListener('change', function () {
+			function runAddressSearch() {
 				if (search.value.trim()) {
 					map.search(search.value.trim());
+				}
+			}
+			search.addEventListener('change', runAddressSearch);
+			search.addEventListener('keydown', function (event) {
+				if (event.key === 'Enter') {
+					event.preventDefault();
+					runAddressSearch();
 				}
 			});
 			search.addEventListener('input', function () {
@@ -69,6 +77,9 @@
 					search.value = search.value.replace(/\D+/g, '').slice(0, 6);
 				}
 			});
+			if (searchSubmit) {
+				searchSubmit.addEventListener('click', runAddressSearch);
+			}
 			confirmButton.addEventListener('wdc:point-selected', function (event) {
 				savePoint(event.detail || map.selected());
 			});

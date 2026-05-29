@@ -67,6 +67,30 @@
 	min-width: 0;
 }
 
+.wdc-pickup-search {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.wdc-pickup-search__icon {
+	flex: 0 0 auto;
+	color: #64748b;
+	font-size: 16px;
+	line-height: 1;
+}
+
+.wdc-pickup-search .wdc-pickup-modal__search {
+	width: 100%;
+}
+
+.wdc-pickup-search__button {
+	flex: 0 0 auto;
+	white-space: nowrap;
+}
+
 .wdc-pickup-modal__close {
 	width: 36px;
 	height: 36px;
@@ -436,5 +460,14 @@
 
 	.wdc-pickup-modal__card {
 		max-height: none;
+	}
+
+	.wdc-pickup-search {
+		gap: 6px;
+	}
+
+	.wdc-pickup-search__button {
+		padding-right: 8px;
+		padding-left: 8px;
 	}
 }

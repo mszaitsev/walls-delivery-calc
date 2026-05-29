@@ -328,6 +328,7 @@
 					if (visiblePoints[0]) {
 						preview(visiblePoints[0], { focus: false, initial: true });
 					}
+					loadBounds(bboxAround(searchAddress.lat, searchAddress.lng));
 					return;
 				}
 				card.textContent = result && result.error_code === 'dadata_api_failed' ? (labels.dadataError || 'Ошибка DaData') : (labels.addressNotFound || labels.notFound || '');

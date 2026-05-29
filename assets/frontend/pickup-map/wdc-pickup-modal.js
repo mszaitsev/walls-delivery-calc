@@ -14,7 +14,11 @@
 			'<div class="wdc-pickup-modal__overlay" data-wdc-close></div>',
 			'<div class="wdc-pickup-modal__dialog" role="dialog" aria-modal="true">',
 			'<header class="wdc-pickup-modal__header">',
+			'<div class="wdc-pickup-search">',
+			'<span class="wdc-pickup-search__icon" aria-hidden="true">🔍</span>',
 			'<input class="wdc-pickup-modal__search" type="search" data-wdc-search placeholder="' + (labels.searchPlaceholder || '') + '">',
+			'<button type="button" class="button wdc-pickup-search__button" data-wdc-search-submit>Искать адрес</button>',
+			'</div>',
 			'<button type="button" class="wdc-pickup-modal__close" data-wdc-close aria-label="Close">×</button>',
 			'</header>',
 			'<main class="wdc-pickup-modal__body">',
@@ -72,9 +76,9 @@
 		});
 		document.addEventListener('keydown', onKeydown);
 		setTimeout(function () {
-			var first = focusable(root)[0];
-			if (first) {
-				first.focus();
+			var close = root.querySelector('button[data-wdc-close]');
+			if (close && close.focus) {
+				close.focus();
 			}
 		}, 0);
 
