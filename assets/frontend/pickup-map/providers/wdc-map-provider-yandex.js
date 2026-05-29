@@ -19,6 +19,7 @@
 		var placemarkById = {};
 		var pointById = {};
 		var markerLayout = null;
+		var maxClusterZoom = 17;
 
 		loadApi(settings.yandexApiKey || '').then(function (ymaps) {
 			if (destroyed) {
@@ -75,6 +76,7 @@
 				return;
 			}
 			clearMarkers();
+			var useClusterer = map.getZoom() < maxClusterZoom;
 			pendingPoints.forEach(function (point) {
 				if (point.lat === null || point.lng === null) {
 					return;
@@ -85,12 +87,18 @@
 					wdcActive: activePointId === id ? 'is-active' : '',
 					wdcType: pointType(point).toLowerCase()
 				}, {
+					balloonAutoPan: true,
+					balloonAutoPanMargin: 24,
 					iconLayout: markerLayout,
 					iconOffset: [-21, -59],
 					iconShape: { type: 'Circle', coordinates: [21, 21], radius: 21 }
 				});
 				placemark.events.add('click', function () { pointClickCallback(point); });
-				collection.add(placemark);
+				if (useClusterer) {
+					collection.add(placemark);
+				} else {
+					map.geoObjects.add(placemark);
+				}
 				placemarkById[id] = placemark;
 				pointById[id] = point;
 			});
@@ -99,6 +107,11 @@
 		function clearMarkers() {
 			if (collection) {
 				collection.removeAll();
+			}
+			if (map) {
+				Object.keys(placemarkById).forEach(function (id) {
+					map.geoObjects.remove(placemarkById[id]);
+				});
 			}
 			placemarkById = {};
 			pointById = {};

@@ -11,6 +11,7 @@
 		var pointClickCallback = function () {};
 		var popupSelectCallback = function () {};
 		var mapClickCallback = function () {};
+		var maxClusterZoom = 17;
 
 		if (!window.L) {
 			return unavailable('Leaflet is not available.');
@@ -59,7 +60,13 @@
 			openPointPopup: function (point, html) {
 				var marker = markerById[pointId(point)];
 				if (marker && marker.bindPopup) {
-					marker.bindPopup(html, { className: 'wdc-pickup-map-popup', maxWidth: 280 });
+					marker.bindPopup(html, {
+						autoPan: true,
+						autoPanPadding: [24, 24],
+						className: 'wdc-pickup-map-popup',
+						keepInView: true,
+						maxWidth: 280
+					});
 					marker.openPopup();
 				}
 			},
@@ -168,9 +175,9 @@
 			return window.L.divIcon({
 				className: 'wdc-map-marker-icon',
 				html: '<span class="wdc-map-marker-pin wdc-map-marker-pin--' + type.toLowerCase() + (active ? ' is-active' : '') + '"><span class="wdc-map-marker-pin__inner"></span><span class="wdc-map-marker-pin__tail"></span></span>',
-				iconSize: [42, 59],
-				iconAnchor: [21, 59],
-				popupAnchor: [0, -59]
+				iconSize: [38, 53],
+				iconAnchor: [19, 53],
+				popupAnchor: [0, -53]
 			});
 		}
 
@@ -190,6 +197,13 @@
 		}
 
 		function clusterPoints(points) {
+			if (map.getZoom() >= maxClusterZoom) {
+				return points.filter(function (point) {
+					return point.lat !== null && point.lng !== null;
+				}).map(function (point) {
+					return { points: [point], lat: parseFloat(point.lat), lng: parseFloat(point.lng) };
+				});
+			}
 			var cells = {};
 			var size = 64;
 			points.forEach(function (point) {

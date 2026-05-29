@@ -17,6 +17,7 @@
 		var providerName = normalizeProvider(config.mapProvider || 'leaflet');
 		var providerFactory = window.WDCPickupMapProviders && window.WDCPickupMapProviders[providerName];
 		var list = findList(element, card);
+		var listSelectButton = createListSelectButton(list);
 		var previewPoint = null;
 		var committedPoint = null;
 		var controller = null;
@@ -58,6 +59,13 @@
 		if (provider.onMapClick) {
 			provider.onMapClick(function () { closePreview(); });
 		}
+		if (listSelectButton) {
+			listSelectButton.addEventListener('click', function () {
+				if (previewPoint && !(committedPoint && pointId(previewPoint) === pointId(committedPoint))) {
+					commit(previewPoint, { focus: false, ensureVisible: true });
+				}
+			});
+		}
 
 		function renderPointPopup(point, selected) {
 			var rows = [];
@@ -90,10 +98,12 @@
 			if (options.focus !== false && provider.focusPoint) {
 				provider.focusPoint(point);
 			}
-			if (provider.openPointPopup) {
-				provider.openPointPopup(point, renderPointPopup(point, committedPoint && pointId(committedPoint) === pointId(point)));
-			}
 			renderList(visiblePoints);
+			updateListSelectButton();
+			if (provider.openPointPopup) {
+				provider.openPointPopup(point, renderPointPopup(point, committedPoint && pointId(committedPoint) === pointId(point)), { ensureVisible: !!options.ensureVisible });
+			}
+			scrollListRowIntoView(point);
 		}
 
 		function commit(point, options) {
@@ -109,10 +119,12 @@
 			if (options.focus !== false && provider.focusPoint) {
 				provider.focusPoint(point);
 			}
-			if (provider.openPointPopup) {
-				provider.openPointPopup(point, renderPointPopup(point, true));
-			}
 			renderList(visiblePoints);
+			updateListSelectButton();
+			if (provider.openPointPopup) {
+				provider.openPointPopup(point, renderPointPopup(point, true), { ensureVisible: !!options.ensureVisible });
+			}
+			scrollListRowIntoView(point);
 		}
 
 		function closePreview() {
@@ -126,6 +138,7 @@
 			card.textContent = committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Выберите пункт на карте или в списке.');
 			confirmButton.disabled = !committedPoint;
 			renderList(visiblePoints);
+			updateListSelectButton();
 		}
 
 		function renderMarkers(points, emptyText) {
@@ -138,6 +151,7 @@
 				activePointId: activePoint ? pointId(activePoint) : null
 			});
 			renderList(visiblePoints);
+			updateListSelectButton();
 			if (!visiblePoints.length) {
 				card.textContent = committedPoint ? selectedSummary(committedPoint) : (emptyText || labels.empty || '');
 				confirmButton.disabled = !committedPoint;
@@ -150,8 +164,9 @@
 					provider.setActivePoint(pointId(previewPoint));
 				}
 				if (provider.openPointPopup) {
-					provider.openPointPopup(previewPoint, renderPointPopup(previewPoint, !!(committedPoint && pointId(previewPoint) === pointId(committedPoint))));
+					provider.openPointPopup(previewPoint, renderPointPopup(previewPoint, !!(committedPoint && pointId(previewPoint) === pointId(committedPoint))), { ensureVisible: true });
 				}
+				scrollListRowIntoView(previewPoint);
 				return;
 			}
 			if (committedPoint && pointInList(committedPoint, visiblePoints)) {
@@ -167,6 +182,7 @@
 			}
 			card.textContent = committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Выберите пункт на карте или в списке.');
 			confirmButton.disabled = !committedPoint;
+			updateListSelectButton();
 		}
 
 		function renderList(points) {
@@ -197,7 +213,6 @@
 				'<span class="wdc-pickup-list__headline"><strong>' + escapeHtml(pointTypeLabel(point)) + '</strong>' + (point.distanceText ? '<em>' + escapeHtml(point.distanceText) + '</em>' : '') + '</span>',
 				point.address ? '<span class="wdc-pickup-list__address">' + escapeHtml(point.address) + '</span>' : '',
 				point.work_time ? '<span class="wdc-pickup-list__time">' + escapeHtml(point.work_time) + '</span>' : '',
-				'<span class="wdc-pickup-list__actions"><button type="button" class="button button-small wdc-pickup-list__select" data-wdc-pickup-list-select' + (selected ? ' disabled' : '') + '>' + escapeHtml(selected ? 'Выбран' : 'Выбрать') + '</button></span>',
 				'</span>',
 				'</div>'
 			].join('');
@@ -211,11 +226,7 @@
 				}
 				var point = findPoint(row.getAttribute('data-wdc-point-id'));
 				if (point) {
-					if (event.target.closest('[data-wdc-pickup-list-select]')) {
-						commit(point, { focus: true });
-						return;
-					}
-					preview(point, { focus: true });
+					preview(point, { focus: false, ensureVisible: true });
 				}
 			});
 		}
@@ -350,6 +361,45 @@
 		function findPoint(id) {
 			return visiblePoints.filter(function (point) { return pointId(point) === id; })[0] || null;
 		}
+
+		function updateListSelectButton() {
+			if (!listSelectButton) {
+				return;
+			}
+			if (previewPoint && committedPoint && pointId(previewPoint) === pointId(committedPoint)) {
+				listSelectButton.disabled = true;
+				listSelectButton.textContent = 'Пункт выбран';
+				return;
+			}
+			if (previewPoint) {
+				listSelectButton.disabled = false;
+				listSelectButton.textContent = 'Выбрать этот пункт';
+				return;
+			}
+			listSelectButton.disabled = true;
+			listSelectButton.textContent = committedPoint ? 'Пункт выбран' : 'Выберите пункт';
+		}
+
+		function scrollListRowIntoView(point) {
+			var row = findListRow(pointId(point));
+			if (!row || !list) {
+				return;
+			}
+			row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+		}
+
+		function findListRow(id) {
+			if (!list) {
+				return null;
+			}
+			var rows = list.querySelectorAll('[data-wdc-point-id]');
+			for (var i = 0; i < rows.length; i++) {
+				if (rows[i].getAttribute('data-wdc-point-id') === id) {
+					return rows[i];
+				}
+			}
+			return null;
+		}
 	}
 
 	function normalizeProvider(provider) {
@@ -364,6 +414,17 @@
 	function findList(element, card) {
 		var root = element && element.closest ? element.closest('.wdc-pickup-modal__dialog') : null;
 		return root ? root.querySelector('[data-wdc-list]') : (card.parentNode ? card.parentNode.querySelector('[data-wdc-list]') : null);
+	}
+
+	function createListSelectButton(list) {
+		if (!list || !list.parentNode) {
+			return null;
+		}
+		var footer = document.createElement('div');
+		footer.className = 'wdc-pickup-list-footer';
+		footer.innerHTML = '<button type="button" class="button button-primary wdc-pickup-list-footer__select" data-wdc-pickup-list-confirm disabled>Выберите пункт</button>';
+		list.parentNode.insertBefore(footer, list.nextSibling);
+		return footer.querySelector('[data-wdc-pickup-list-confirm]');
 	}
 
 	function pointId(point) {
