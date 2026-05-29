@@ -23,7 +23,7 @@
 			'</section>',
 			'<aside class="wdc-pickup-modal__side">',
 			'<div class="wdc-pickup-modal__list" data-wdc-list></div>',
-			'<div class="wdc-pickup-modal__card" data-wdc-card>' + (labels.notSelected || '') + '</div>',
+			'<div class="wdc-pickup-modal__card" data-wdc-card aria-live="polite">' + (labels.notSelected || '') + '</div>',
 			'</aside>',
 			'</main>',
 			'<footer class="wdc-pickup-modal__footer">',

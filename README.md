@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.25.8.
+Version: 0.25.10.
+
+Version 0.25.10 removes the temporary Leaflet `bindPopup(address)` used during marker creation; Leaflet popups are now bound only when `openPointPopup(point, html)` receives the full card HTML. The compact status and old modal footer confirm controls are visually hidden, leaving only the shared list footer button in the visible list area. Active-row scrolling now computes row and container rectangles with `getBoundingClientRect()` and scrolls only the list container.
 
 Version 0.25.8 refines pickup map ergonomics. Single pins keep the blue marker/white center shape but use a slimmer visual ring, closer to cluster weight. Per-row `Выбрать` buttons were removed from the side list; the list now has one shared footer button, `Выбрать этот пункт`, enabled only for an uncommitted preview point. The balloon button remains the primary selection action.
 

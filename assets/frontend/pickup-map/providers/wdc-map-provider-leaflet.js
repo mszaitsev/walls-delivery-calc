@@ -133,7 +133,6 @@
 					var marker = window.L.marker([point.lat, point.lng], {
 						icon: pointIcon(point, activePointId === id)
 					}).addTo(map);
-					marker.bindPopup(escapeHtml(point.address || ''));
 					marker.on('click', function (event) {
 						if (event && event.originalEvent && window.L.DomEvent) {
 							window.L.DomEvent.stop(event.originalEvent);
@@ -246,12 +245,6 @@
 			onMapClick: function () {},
 			invalidateSize: function () {}
 		};
-	}
-
-	function escapeHtml(value) {
-		return String(value || '').replace(/[&<>"']/g, function (char) {
-			return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char];
-		});
 	}
 
 	function pointId(point) {

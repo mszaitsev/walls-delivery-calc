@@ -50,9 +50,15 @@
 }
 
 .wdc-pickup-modal__footer {
-	justify-content: flex-end;
-	border-top: 1px solid #e5e7eb;
-	border-bottom: 0;
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	border: 0;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	clip-path: inset(50%);
+	white-space: nowrap;
 }
 
 .wdc-pickup-modal__search {
@@ -207,15 +213,15 @@
 }
 
 .wdc-pickup-modal__card {
-	display: grid;
-	align-content: start;
-	gap: 8px;
-	padding: 16px;
-	border-top: 1px solid #e5e7eb;
-	background: #fff;
-	color: #475569;
-	font-size: 13px;
-	overflow-wrap: anywhere;
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	border: 0;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	clip-path: inset(50%);
+	white-space: nowrap;
 }
 
 .wdc-pickup-card__title {
@@ -396,7 +402,6 @@
 	}
 
 	.wdc-pickup-modal__card {
-		max-height: 28vh;
-		overflow: auto;
+		max-height: none;
 	}
 }

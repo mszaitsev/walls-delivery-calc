@@ -389,8 +389,10 @@
 			if (!container) {
 				return;
 			}
-			var rowTop = rowOffsetTop(row, container);
-			var rowBottom = rowTop + row.offsetHeight;
+			var rowRect = row.getBoundingClientRect();
+			var containerRect = container.getBoundingClientRect();
+			var rowTop = rowRect.top - containerRect.top + container.scrollTop;
+			var rowBottom = rowRect.bottom - containerRect.top + container.scrollTop;
 			var visibleTop = container.scrollTop;
 			var visibleBottom = visibleTop + container.clientHeight;
 			var nextTop = null;
@@ -423,28 +425,20 @@
 		}
 
 		function scrollContainerForList(start) {
+			var fallback = null;
 			var node = start;
 			while (node && node !== document.body) {
-				if (node.scrollHeight > node.clientHeight) {
-					return node;
-				}
 				if (node.classList && (node.classList.contains('wdc-pickup-modal__list') || node.classList.contains('wdc-pickup-modal__side'))) {
+					fallback = fallback || node;
+				}
+				if (node.scrollHeight > node.clientHeight) {
 					return node;
 				}
 				node = node.parentNode;
 			}
-			return start;
+			return fallback || start;
 		}
 
-		function rowOffsetTop(row, container) {
-			var top = 0;
-			var node = row;
-			while (node && node !== container) {
-				top += node.offsetTop || 0;
-				node = node.offsetParent;
-			}
-			return top;
-		}
 	}
 
 	function normalizeProvider(provider) {

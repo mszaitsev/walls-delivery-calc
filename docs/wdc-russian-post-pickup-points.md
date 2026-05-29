@@ -1,10 +1,12 @@
 # Russian Post Pickup Points
 
-Version: 0.25.8.
+Version: 0.25.10.
+
+Version 0.25.10 removes the temporary Leaflet address-only popup from marker creation. Leaflet binds popups only in `openPointPopup(point, html)`, where the full pickup card HTML and auto-pan options are available. The compact status and old fallback confirm button remain technical event/status surfaces only and are visually hidden, so the customer sees a single shared list footer button plus the balloon action. Active-row scrolling now uses `getBoundingClientRect()` against the list scroll container and never calls `scrollIntoView()`, preventing checkout page scroll jumps.
 
 Version 0.25.8 removes per-row select buttons from the visible pickup list. Rows are now navigation only: clicking a row opens the point balloon and marks it as preview without changing checkout. A single sticky/shared list footer button, `Выбрать этот пункт`, confirms the current preview point; it is disabled before preview and changes to a selected/choose prompt when appropriate. The balloon button continues to confirm immediately.
 
-When a marker opens a preview, the side list scrolls its matching row into view with `scrollIntoView({ behavior: 'smooth', block: 'nearest' })`. List-row preview no longer calls the provider focus/center method, so the map does not jump to the point. Leaflet opens popups with `autoPan`, `keepInView`, and padding; Yandex placemarks use balloon auto-pan, so the map only nudges when the balloon would be outside the viewport.
+When a marker opens a preview, the side list scrolls its matching row into view inside the list container only. List-row preview no longer calls the provider focus/center method, so the map does not jump to the point. Leaflet opens popups with `autoPan`, `keepInView`, and padding; Yandex placemarks use balloon auto-pan, so the map only nudges when the balloon would be outside the viewport.
 
 Cluster behavior now has a high-zoom escape hatch. Leaflet's grid clustering returns individual points at zoom 17 and above. Yandex uses `ymaps.Clusterer` below zoom 17 and adds placemarks directly at zoom 17+, keeping nearby points selectable on the map; when coordinates are identical, the list remains the reliable selection path.
 
