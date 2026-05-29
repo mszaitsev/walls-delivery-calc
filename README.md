@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.25.12.
+Version: 0.25.13.
+
+Version 0.25.13 separates popup close sources: empty map clicks call `markPopupManuallyClosed('map_click')` and close the popup, while provider `popupclose`/`balloonclose` callbacks call `markPopupManuallyClosed('popup_close')` without calling `closePopup()` again.
 
 Version 0.25.12 makes balloon restore respectful of explicit user close. A committed point still opens automatically on the first visible render, and marker/list clicks always reopen the balloon, but closing the balloon or clicking empty map space sets `popupManuallyClosed`; bbox reloads, drags, moves, and zooms keep the active marker/list row without reopening the popup. Leaflet clustering now uses a 64px grid and disables clusters only at zoom 18+, while Yandex uses `gridSize: 80` and also keeps Clusterer enabled through zoom 17.
 

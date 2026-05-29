@@ -1,6 +1,8 @@
 # Russian Post Pickup Points
 
-Version: 0.25.12.
+Version: 0.25.13.
+
+Version 0.25.13 avoids duplicate popup close calls. Empty map clicks still mark the popup as manually closed and call provider `closePopup()`, but provider `popupclose`/`balloonclose` events only mark the state because the popup is already closed.
 
 Version 0.25.12 adds an explicit manual-close state for the map balloon. The popup opens on first visible render for a committed point, on marker click, and on list-card click. If the customer closes it with the balloon control or clicks empty map space, `popupManuallyClosed` prevents bbox reloads from reopening it; the active marker and list row can remain highlighted until another marker/list action resets the flag.
 

@@ -59,10 +59,10 @@
 			provider.onPopupSelect(function (point) { commit(point, { focus: false }); });
 		}
 		if (provider.onMapClick) {
-			provider.onMapClick(function () { markPopupManuallyClosed(); });
+			provider.onMapClick(function () { markPopupManuallyClosed('map_click'); });
 		}
 		if (provider.onPopupClose) {
-			provider.onPopupClose(function () { markPopupManuallyClosed(); });
+			provider.onPopupClose(function () { markPopupManuallyClosed('popup_close'); });
 		}
 		if (listSelectButton) {
 			listSelectButton.addEventListener('click', function () {
@@ -136,9 +136,9 @@
 			scrollListRowIntoView(point);
 		}
 
-		function markPopupManuallyClosed() {
+		function markPopupManuallyClosed(source) {
 			popupManuallyClosed = true;
-			if (provider.closePopup) {
+			if (source === 'map_click' && provider.closePopup) {
 				provider.closePopup();
 			}
 			if (provider.setActivePoint) {
