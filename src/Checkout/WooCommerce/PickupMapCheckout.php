@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -13,7 +14,8 @@ final class PickupMapCheckout {
 	public function __construct(
 		private CheckoutSessionManager $session_manager,
 		private PluginEnvironment $environment,
-		private ?SettingsRepository $settings = null
+		private ?SettingsRepository $settings = null,
+		private ?RussianPostPickupPointTypeSettings $point_type_settings = null
 	) {
 	}
 
@@ -62,6 +64,7 @@ final class PickupMapCheckout {
 					'shippingMethodId' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
 					'initialContext'   => $this->initial_context(),
 					'mapProvider'      => $provider,
+					'pickupPointTypes' => $this->pickup_point_types(),
 					'yandexApiKeyPresent' => $this->has_yandex_api_key(),
 					'yandexApiKey'     => 'yandex' === $provider && $this->has_yandex_api_key() ? $this->yandex_api_key() : '',
 					'labels'           => array(
@@ -124,8 +127,37 @@ final class PickupMapCheckout {
 				'lat'   => $lat,
 				'lng'   => $lng,
 				'query' => $this->initial_query( $context ),
+				'selectedPoint' => $this->selected_point_context(),
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>|null
+	 */
+	private function selected_point_context(): ?array {
+		$selection = $this->session_manager->checkout_pickup_point();
+		if ( array() === $selection || '' === trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
+			return null;
+		}
+
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+
+		return array_filter(
+			array(
+				'id' => $selection['id'] ?? $snapshot['id'] ?? null,
+				'point_code' => $selection['point_code'] ?? $snapshot['point_code'] ?? null,
+				'point_type' => $selection['point_type'] ?? $snapshot['point_type'] ?? null,
+				'postcode' => $selection['postcode'] ?? $snapshot['postcode'] ?? null,
+				'address' => $selection['address'] ?? $snapshot['address'] ?? null,
+				'lat' => $selection['lat'] ?? $snapshot['lat'] ?? null,
+				'lng' => $selection['lng'] ?? $snapshot['lng'] ?? null,
+				'work_time' => $selection['work_time'] ?? $snapshot['work_time'] ?? null,
+				'description' => $selection['description'] ?? $snapshot['description'] ?? null,
+				'snapshot' => $snapshot,
+			),
+			static fn( mixed $value ): bool => null !== $value && '' !== $value && array() !== $value
 		);
 	}
 
@@ -184,5 +216,14 @@ final class PickupMapCheckout {
 
 	private function has_yandex_api_key(): bool {
 		return '' !== $this->yandex_api_key();
+	}
+
+	/**
+	 * @return array<string,array{enabled:bool,label:string}>
+	 */
+	private function pickup_point_types(): array {
+		$type_settings = $this->point_type_settings ?? new RussianPostPickupPointTypeSettings( $this->settings );
+
+		return $type_settings->all();
 	}
 }

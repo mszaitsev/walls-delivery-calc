@@ -18,6 +18,8 @@ function sanitize_key( mixed $value ): string { return preg_replace( '/[^a-z0-9_
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
+function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['wdc_pickup_rest_options'][ $key ] ?? $default; }
+function update_option( string $key, mixed $value, bool|string|null $autoload = null ): bool { $GLOBALS['wdc_pickup_rest_options'][ $key ] = $value; return true; }
 function rest_ensure_response( mixed $data ): mixed { return $data; }
 function __return_true(): bool { return true; }
 function register_rest_route( string $namespace, string $route, array $args ): bool {
@@ -118,6 +120,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->prefix = 'wp_';
@@ -129,9 +133,12 @@ $GLOBALS['wpdb']->pickup_rows = array(
 
 $repo = new RussianPostPickupPointRepository( $GLOBALS['wpdb'] );
 $GLOBALS['wpdb']->tables = array( $repo->main_table() => $GLOBALS['wpdb']->pickup_rows, 'wp_wdc_pickup_points' => array() );
-$controller = new PickupPointsRestController( $repo );
+$settings = new SettingsRepository();
+$type_settings = new RussianPostPickupPointTypeSettings( $settings );
+$controller = new PickupPointsRestController( $repo, $type_settings );
 $controller->register();
 pickup_rest_assert( 3 === count( $GLOBALS['wdc_rest_routes'] ?? array() ), 'REST controller must register three routes.' );
+pickup_rest_assert( array( 'OPS', 'PVZ', 'APS' ) === $type_settings->enabled_types(), 'Pickup type defaults must enable OPS/PVZ/APS.' );
 
 $bbox = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '82.90,55.00,82.93,55.03' ) );
 pickup_rest_assert( 2 === count( $bbox ) && array( 1, 2 ) === array_column( $bbox, 'id' ), 'bbox must return only points inside requested area.' );
@@ -143,6 +150,31 @@ foreach ( $removed_fields as $removed_field ) {
 
 $type_filtered = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '0,0,180,90', 'type' => array( 'APS' ) ) );
 pickup_rest_assert( 1 === count( $type_filtered ) && 3 === $type_filtered[0]['id'], 'type filter must work.' );
+
+$disabled_pvz = $settings->all();
+$disabled_pvz['russian_post_domestic_pickup_type_pvz_enabled'] = false;
+update_option( 'wdc_core_settings', $disabled_pvz, false );
+$without_pvz = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '0,0,180,90' ) );
+pickup_rest_assert( array( 1, 3 ) === array_column( $without_pvz, 'id' ), 'Disabled PVZ must be excluded from /points.' );
+$requested_disabled_pvz = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '0,0,180,90', 'type' => array( 'PVZ' ) ) );
+pickup_rest_assert( array() === $requested_disabled_pvz, 'Requested PVZ must return empty when PVZ is disabled.' );
+$requested_enabled_ops = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '0,0,180,90', 'type' => array( 'OPS' ) ) );
+pickup_rest_assert( 1 === count( $requested_enabled_ops ) && 1 === $requested_enabled_ops[0]['id'], 'Requested OPS must return OPS when OPS is enabled.' );
+$detail_ops_enabled = $controller->detail( array( 'id' => 1 ) );
+pickup_rest_assert( is_array( $detail_ops_enabled ) && 1 === $detail_ops_enabled['id'], 'detail OPS must be available when OPS is enabled.' );
+$detail_pvz_disabled = $controller->detail( array( 'id' => 2 ) );
+pickup_rest_assert( $detail_pvz_disabled instanceof WP_Error && 'not_found' === $detail_pvz_disabled->get_error_code(), 'detail PVZ must return 404 when PVZ is disabled.' );
+$all_disabled = $settings->all();
+$all_disabled['russian_post_domestic_pickup_type_ops_enabled'] = false;
+$all_disabled['russian_post_domestic_pickup_type_pvz_enabled'] = false;
+$all_disabled['russian_post_domestic_pickup_type_aps_enabled'] = false;
+update_option( 'wdc_core_settings', $all_disabled, false );
+pickup_rest_assert( array( 'OPS' ) === $type_settings->enabled_types(), 'All pickup types disabled must automatically re-enable OPS.' );
+update_option( 'wdc_core_settings', array(), false );
+$detail_pvz_enabled = $controller->detail( array( 'id' => 2 ) );
+pickup_rest_assert( is_array( $detail_pvz_enabled ) && 2 === $detail_pvz_enabled['id'], 'detail PVZ must be available when PVZ is enabled.' );
+$detail_pvz_requested_ops = $controller->detail( array( 'id' => 2, 'type' => array( 'OPS' ) ) );
+pickup_rest_assert( $detail_pvz_requested_ops instanceof WP_Error && 'not_found' === $detail_pvz_requested_ops->get_error_code(), 'detail PVZ with type[]=OPS must return 404.' );
 
 $limited = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '0,0,180,90', 'limit' => '1' ) );
 pickup_rest_assert( 1 === count( $limited ), 'limit must clamp result count.' );

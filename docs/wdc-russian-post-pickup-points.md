@@ -1,6 +1,58 @@
 # Russian Post Pickup Points
 
-Version: 0.24.2.
+Version: 0.25.13.
+
+Version 0.25.13 avoids duplicate popup close calls. Empty map clicks still mark the popup as manually closed and call provider `closePopup()`, but provider `popupclose`/`balloonclose` events only mark the state because the popup is already closed.
+
+Version 0.25.12 adds an explicit manual-close state for the map balloon. The popup opens on first visible render for a committed point, on marker click, and on list-card click. If the customer closes it with the balloon control or clicks empty map space, `popupManuallyClosed` prevents bbox reloads from reopening it; the active marker and list row can remain highlighted until another marker/list action resets the flag.
+
+Clustering is wider so overlapping pins aggregate sooner. Leaflet now clusters through zoom 17 with a 64px grid and shows individual pins only at zoom 18+. Yandex uses `ymaps.Clusterer` through zoom 17 with `gridSize: 80`, then bypasses the Clusterer at zoom 18+.
+
+Version 0.25.11 makes marker color depend only on preview/active state. Normal single pins remain blue; the active preview pin is red in both Leaflet and Yandex. A previously saved checkout point is localized as `initialContext.selectedPoint`, then becomes `previewPoint` when it is present in the current visible point set, so reopening the map highlights the saved point without firing `wdc:point-selected`.
+
+Version 0.25.10 removes the temporary Leaflet address-only popup from marker creation. Leaflet binds popups only in `openPointPopup(point, html)`, where the full pickup card HTML and auto-pan options are available. The compact status and old fallback confirm button remain technical event/status surfaces only and are visually hidden, so the customer sees a single shared list footer button plus the balloon action. Active-row scrolling now uses `getBoundingClientRect()` against the list scroll container and never calls `scrollIntoView()`, preventing checkout page scroll jumps.
+
+Version 0.25.8 removes per-row select buttons from the visible pickup list. Rows are now navigation only: clicking a row opens the point balloon and marks it as preview without changing checkout. A single sticky/shared list footer button, `Выбрать этот пункт`, confirms the current preview point; it is disabled before preview and changes to a selected/choose prompt when appropriate. The balloon button continues to confirm immediately.
+
+When a marker opens a preview, the side list scrolls its matching row into view inside the list container only. List-row preview no longer calls the provider focus/center method, so the map does not jump to the point. Leaflet opens popups with `autoPan`, `keepInView`, and padding; Yandex placemarks use balloon auto-pan, so the map only nudges when the balloon would be outside the viewport.
+
+Cluster behavior now has a high-zoom escape hatch. Leaflet's grid clustering returns individual points at zoom 18 and above. Yandex uses `ymaps.Clusterer` below zoom 18 and adds placemarks directly at zoom 18+, keeping nearby points selectable on the map; when coordinates are identical, the list remains the reliable selection path.
+
+Version 0.25.7 gives preview state priority over committed selection for map visuals. When `committedPoint = A` and `previewPoint = B`, and both are visible, B owns the active marker and open balloon while A remains the checkout selection and keeps the selected list state. If B disappears after bbox reload, preview is cleared; in 0.25.11 a visible committed point is promoted back into preview instead of receiving a separate committed marker color. Reloads still reopen the balloon automatically when the preview point remains visible.
+
+Version 0.25.6 changes pickup type settings to one customer-facing label per type. The `Типы пунктов выдачи` block now shows only `Использовать` and `Название в карточке/баллоне/списке` for OPS, PVZ, and APS.
+
+Map markers are textless. Single pickup points render as blue pins with a white center and a blue tail, matching the map-style marker reference. Clusters render as white circles with a thicker blue border and a dark count. The frontend still uses the configured type label in the list and balloon card, but never inside the marker itself.
+
+The map state is now explicitly split into preview and committed selection. Marker clicks and list-row clicks set `previewPoint`, highlight the marker and list row, and open the balloon without dispatching `wdc:point-selected`. The balloon `Выбрать этот пункт` button and the shared list footer button set `committedPoint`, dispatch `wdc:point-selected`, update the compact status, and save the point to checkout immediately. The modal footer confirm button remains a fallback for a committed point, not a required second step.
+
+Balloon state is resilient during map movement. Bbox reloads re-render markers and reopen the balloon when the preview or committed point is still part of the new visible point set. Dragging, zooming, and bounds changes do not close the balloon. Clicking empty map space closes only the preview popup and keeps the committed checkout point.
+
+Version 0.25.4 moves the point details card from the side/bottom panel into the map popup/balloon. Marker clicks and list-row clicks both open the map popup for that point. The popup contains the customer-facing type label, address, work time, clean description when present, and the `Выбрать этот пункт` action. Pressing that popup button confirms the point, dispatches the existing `wdc:point-selected` event, updates the list selected state, and keeps the external confirm button available as a fallback.
+
+The side/bottom panel is no longer the primary details surface; it only shows compact status such as `Выберите пункт на карте или в списке.` or `Выбран: ...`. The visible list remains as navigation beside the map on desktop and below it on mobile, sorted and capped as before, and opens the same popup instead of duplicating the full card.
+
+Leaflet and Yandex now use matching custom HTML marker visuals. Single points render as textless blue pins with a white center and a blue tail. Clusters render as blue-outlined white circles with the count, without a tail. Leaflet uses `divIcon` for pins and grid-cluster markers; Yandex uses `ymaps.templateLayoutFactory.createClass` for placemarks and `clusterIconLayout` for cluster circles.
+
+Version 0.25.2 adds pickup type controls for `russian_post_domestic_pickup` on the delivery service page, tab `ПВЗ / ОПС`, block `Типы пунктов выдачи`. OPS, PVZ, and APS currently have `Использовать` and `Название в карточке/баллоне/списке`.
+
+`Название в карточке/баллоне/списке` is the customer-facing type name shown in the popup card and visible list rows. Defaults are OPS `Отделение Почты России`, PVZ `Пункт выдачи`, and APS `Почтомат`; markers do not render text.
+
+At least one type must remain enabled. Saving an all-disabled configuration automatically enables OPS. The Russian Post `/points` and `/points/search` endpoints apply enabled types to map data; when REST also receives `type[]`, the effective filter is the intersection of requested and enabled types.
+
+Version 0.25.1 separates preview state from confirmed pickup selection. The initial search fallback can render a point card and a soft list preview, but only an explicit marker or list-row click sets `selectedPoint`, enables the confirm button, highlights the row with `active selected`, and dispatches `wdc:point-selected`.
+
+## Pickup Map UX
+
+Version 0.25.0 adds a visible pickup-point list to the checkout modal. On desktop the map and list sit side by side; on mobile the map is above the list to avoid horizontal crowding. Every bbox response refreshes map markers and the list. The list is capped to the first 100 sorted points for DOM performance, while all returned points remain available to the map marker/cluster layer.
+
+When the modal has `initialContext.lat/lng`, each point gets a haversine distance from the selected settlement center and the list is sorted by that distance. Distances render as meters below 1 km, for example `450 м`, and as one-decimal kilometers from 1 km, for example `1.2 км`. If the settlement has no usable coordinates, ordering falls back to postcode/address with the original response order as a stable tie-breaker.
+
+Selection is synchronized both ways. Marker clicks preview the point and open the map popup; list-row clicks call the provider focus method, center/zoom the map on the point, and open the same popup. The selected row receives both `active` and `selected` classes only after the popup button confirms the point; previewed rows may receive the softer `preview` class.
+
+The popup card renders a compact customer-facing Russian Post card: title/postcode, configured point type label, address, work time, and a readable description only when present. Empty fields and technical descriptions such as `0.000000` are suppressed.
+
+Provider adapters now expose the richer selection surface used by `wdc-pickup-map.js`: `renderMarkers(points, options)`, `setActivePoint(pointId)`, `focusPoint(point)`, `openPointPopup(point, html)`, `closePopup()`, and popup select delegation while keeping the older methods intact. Leaflet renders local HTML `divIcon` markers with type CSS classes and a lightweight screen-grid clusterer; cluster markers are numbered circles and click to fit/zoom the grouped bounds. Yandex renders custom HTML placemark layouts, uses `ymaps.Clusterer` for numbered aggregate circles, and avoids standard `islands` marker presets for single pickup points.
 
 ## Pickup Map Providers
 
@@ -22,7 +74,7 @@ Frontend map code now goes through provider adapters in `assets/frontend/pickup-
 - `wdc-map-provider-leaflet.js`
 - `wdc-map-provider-yandex.js`
 
-Both adapters expose `create(container, options)`, `setCenter(lat, lng, zoom)`, `renderMarkers(points)`, `clearMarkers()`, `fitToMarkers()`, `destroy()`, `onPointClick(callback)`, and `invalidateSize()`. `wdc-pickup-map.js` owns pickup REST loading, selected-card rendering, search, and request cancellation, while provider files own map-specific markers, viewport changes, cleanup, and size invalidation.
+Both adapters expose `create(container, options)`, `setCenter(lat, lng, zoom)`, `renderMarkers(points, options)`, `setActivePoint(pointId)`, `focusPoint(point)`, `clearMarkers()`, `fitToMarkers()`, `destroy()`, `onPointClick(callback)`, and `invalidateSize()`. `wdc-pickup-map.js` owns pickup REST loading, visible-list sorting, selected-card rendering, search, and request cancellation, while provider files own map-specific markers, clusters, viewport changes, cleanup, and size invalidation.
 
 Asset loading is provider-specific. Leaflet mode enqueues local `assets/vendor/leaflet/leaflet.css`, `assets/vendor/leaflet/leaflet.js`, and the Leaflet provider adapter. Yandex mode does not enqueue Leaflet; it enqueues the Yandex provider adapter, which loads `api-maps.yandex.ru` only when the localized config says a Yandex key is present. If Yandex is selected without a key, checkout does not break and the modal shows: `Для Яндекс.Карт не задан API key. Выберите OpenStreetMap или укажите ключ в настройках.`
 

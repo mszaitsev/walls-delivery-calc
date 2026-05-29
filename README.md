@@ -1,6 +1,40 @@
 # Walls Delivery Calc
 
-Version: 0.24.2.
+Version: 0.25.13.
+
+Version 0.25.13 separates popup close sources: empty map clicks call `markPopupManuallyClosed('map_click')` and close the popup, while provider `popupclose`/`balloonclose` callbacks call `markPopupManuallyClosed('popup_close')` without calling `closePopup()` again.
+
+Version 0.25.12 makes balloon restore respectful of explicit user close. A committed point still opens automatically on the first visible render, and marker/list clicks always reopen the balloon, but closing the balloon or clicking empty map space sets `popupManuallyClosed`; bbox reloads, drags, moves, and zooms keep the active marker/list row without reopening the popup. Leaflet clustering now uses a 64px grid and disables clusters only at zoom 18+, while Yandex uses `gridSize: 80` and also keeps Clusterer enabled through zoom 17.
+
+Version 0.25.11 changes pickup marker color semantics: normal single markers stay blue, while the current preview/active marker is red. `committedPoint` no longer has its own marker color and does not directly drive active marker rendering; when a previously saved checkout point appears in visible/preloaded points, the map promotes it to `previewPoint`, highlights the marker/list row, and may reopen the balloon without dispatching `wdc:point-selected`.
+
+Version 0.25.10 removes the temporary Leaflet `bindPopup(address)` used during marker creation; Leaflet popups are now bound only when `openPointPopup(point, html)` receives the full card HTML. The compact status and old modal footer confirm controls are visually hidden, leaving only the shared list footer button in the visible list area. Active-row scrolling now computes row and container rectangles with `getBoundingClientRect()` and scrolls only the list container.
+
+Version 0.25.8 refines pickup map ergonomics. Single pins keep the blue marker/white center shape but use a slimmer visual ring, closer to cluster weight. Per-row `Выбрать` buttons were removed from the side list; the list now has one shared footer button, `Выбрать этот пункт`, enabled only for an uncommitted preview point. The balloon button remains the primary selection action.
+
+Marker clicks scroll the side/mobile list to the active row. List-row clicks open the same balloon without hard-centering the map; providers rely on popup/balloon auto-pan to nudge only when the balloon would be clipped. Since 0.25.12, Leaflet grid clustering stops at zoom 18+, and the Yandex provider bypasses `Clusterer` at zoom 18+, so only the final zoom levels render close points as individual pins.
+
+Version 0.25.7 makes preview state the visual source of truth. If the customer has already committed point A but opens point B, point B owns the active marker, open balloon, and preview row while checkout remains committed to A. If B leaves the current bbox, preview is cleared; in 0.25.11 a visible committed point is promoted back into preview instead of getting a separate committed marker color.
+
+Version 0.25.6 simplifies pickup type labels and tightens the map selection flow. Admin settings now keep one type name per OPS/PVZ/APS entry: `Название в карточке/баллоне/списке`, exposed to the frontend as `pickupPointTypes.*.label`.
+
+Map pins are now textless blue pins with a white center, while clusters are white circles with a thick blue border and dark count. Opening a marker or list row creates a preview: the marker and row are highlighted and the balloon stays open, but checkout is not updated. The customer commits the point through `Выбрать этот пункт` in the balloon or through the shared list footer button; both paths dispatch `wdc:point-selected` and save the point immediately. The modal footer button remains only as a fallback for an already committed point.
+
+Balloon state now survives bbox reloads and normal map movement when the preview/committed point is still present in the visible point set. Dragging or zooming does not close the balloon; clicking empty map space closes only the preview popup and keeps any committed checkout point intact.
+
+Version 0.25.4 moves the pickup point details into the map popup/balloon. Clicking a marker or list row now opens the point card directly on the map, with address, work time, clean description when available, and the `Выбрать этот пункт` button inside the popup. The side/bottom panel remains as a compact status area, while the external confirm button stays as a compatibility fallback and is enabled only after a confirmed selection.
+
+Single markers and clusters now share a consistent HTML style in Leaflet and Yandex: a white center, thick blue outline, short marker label from settings, and a blue tail for single point pins. Clusters render as numbered circles and still expand/focus on click. The visible list remains a navigation aid beside/below the map; it opens the same popup instead of duplicating the full card.
+
+Version 0.25.2 adds configurable Russian Post pickup point types for `russian_post_domestic_pickup`. In the delivery service admin tab `ПВЗ / ОПС`, the `Типы пунктов выдачи` block controls OPS, PVZ, and APS independently: whether the type is used and the customer-facing type label. Current defaults are OPS `Отделение Почты России`, PVZ `Пункт выдачи`, and APS `Почтомат`. At least one type is always enabled; if an admin disables all three, OPS is restored automatically.
+
+The public Russian Post `/points` and `/points/search` endpoints now filter results by enabled pickup types. Explicit REST `type[]` filters are intersected with enabled types, so requesting a disabled type returns an empty list. Checkout localizes `pickupPointTypes` to the map frontend; list/card/balloon text uses `label`, and markers stay textless.
+
+Version 0.25.1 keeps initial search results as preview-only. `initialSearch()` may show the first found point in the card and softly mark it in the list, but it no longer enables confirmation or dispatches `wdc:point-selected` until the customer explicitly clicks a marker or list row.
+
+Version 0.25.0 improves the Russian Post pickup modal UX. The map now has a neighboring visible-point list on desktop and a stacked map/list layout on mobile. Bbox loads refresh the list, which shows up to the first 100 points with index, point type, address, work time, and distance from the selected city center when `initialContext` has coordinates. Distance sorting uses haversine meters; without coordinates the list falls back to stable postcode/address ordering.
+
+Selecting a marker or list row keeps the map, list, selected card, and confirm button in sync. The selected card shows only customer-readable fields, suppresses empty values and technical zero descriptions, and the selected list row receives `active selected`. Leaflet now uses local `divIcon` markers and a small frontend grid clusterer with numbered circles and click-to-fit behavior. Yandex uses `ymaps.Clusterer`, neutral circle-dot placemarks with type captions, active-point highlighting, and no delivery-truck preset.
 
 Version 0.24.2 disables Leaflet's built-in attribution control in the pickup map provider so the standard OpenStreetMap/Leaflet attribution block is not shown in the lower-right corner of the pickup modal. Yandex Maps and the provider abstraction are unchanged.
 

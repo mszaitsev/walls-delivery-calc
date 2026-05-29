@@ -4,13 +4,17 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Pickup\Rest;
 
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 
 defined( 'ABSPATH' ) || exit;
 
 final class PickupPointsRestController {
 	private const NAMESPACE = 'wdc/v1';
 
-	public function __construct( private RussianPostPickupPointRepository $repository ) {
+	public function __construct(
+		private RussianPostPickupPointRepository $repository,
+		private ?RussianPostPickupPointTypeSettings $type_settings = null
+	) {
 	}
 
 	public function register(): void {
@@ -57,13 +61,18 @@ final class PickupPointsRestController {
 			return $this->error( 'invalid_bbox', 'bbox must be minLng,minLat,maxLng,maxLat.' );
 		}
 
+		$types = $this->allowed_types( $request );
+		if ( array() === $types ) {
+			return $this->response( array() );
+		}
+
 		$rows = $this->repository->find_rows_by_bbox(
 			$bbox['min_lng'],
 			$bbox['min_lat'],
 			$bbox['max_lng'],
 			$bbox['max_lat'],
 			array(
-				'point_types' => $this->types( $request ),
+				'point_types' => $types,
 				'limit' => $this->limit( $request, 500, 1000 ),
 			)
 		);
@@ -81,11 +90,16 @@ final class PickupPointsRestController {
 			return $this->response( array() );
 		}
 
+		$types = $this->allowed_types( $request );
+		if ( array() === $types ) {
+			return $this->response( array() );
+		}
+
 		$rows = $this->repository->search_point_rows(
 			$query,
 			array(
 				'city' => trim( $this->param( $request, 'city' ) ),
-				'point_types' => $this->types( $request ),
+				'point_types' => $types,
 				'limit' => $this->limit( $request, 50, 100 ),
 			)
 		);
@@ -97,6 +111,10 @@ final class PickupPointsRestController {
 		$id = (int) $this->param( $request, 'id' );
 		$row = $this->repository->find_row_by_id( $id );
 		if ( ! is_array( $row ) || 1 !== (int) ( $row['active'] ?? 0 ) ) {
+			return $this->error( 'not_found', 'Pickup point not found.', 404 );
+		}
+		$types = $this->allowed_types( $request );
+		if ( ! in_array( strtoupper( trim( (string) ( $row['point_type'] ?? '' ) ) ), $types, true ) ) {
 			return $this->error( 'not_found', 'Pickup point not found.', 404 );
 		}
 
@@ -176,6 +194,16 @@ final class PickupPointsRestController {
 				static fn( string $type ): bool => in_array( $type, array( 'OPS', 'PVZ', 'APS' ), true )
 			)
 		);
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function allowed_types( mixed $request ): array {
+		$requested = $this->types( $request );
+		$type_settings = $this->type_settings ?? new RussianPostPickupPointTypeSettings();
+
+		return $type_settings->allowed_types( $requested );
 	}
 
 	private function carrier( mixed $request ): string {
