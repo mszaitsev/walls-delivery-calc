@@ -10,6 +10,8 @@ use WallsShop\WDC\Locations\Storage\LocationRepository;
 defined( 'ABSPATH' ) || exit;
 
 final class LocationCoordinatesDadataBatchUpdater {
+	private const DADATA_LIMITS_EXHAUSTED_MESSAGE = 'Суточные лимиты DaData исчерпаны. Повторите запуск позже.';
+
 	public function __construct(
 		private LocationRepository $repository,
 		private AddressSuggestionClientInterface $client
@@ -80,6 +82,11 @@ final class LocationCoordinatesDadataBatchUpdater {
 				continue;
 			}
 
+			if ( 'stopped' === (string) $result['status'] ) {
+				$this->stop_for_dadata_limits( $job, (string) $result['reason'], (string) $result['message'] );
+				break;
+			}
+
 			if ( $this->repository->update_coordinates( $location_id, (float) $result['lat'], (float) $result['lng'] ) ) {
 				$job['updated'] = (int) ( $job['updated'] ?? 0 ) + 1;
 			} else {
@@ -106,6 +113,10 @@ final class LocationCoordinatesDadataBatchUpdater {
 
 		$response = $this->client->suggest( 'city', $query, array( 'country_code' => 'RU' ) );
 		if ( empty( $response['success'] ) ) {
+			if ( 'dadata_daily_limit_exhausted' === (string) ( $response['error_code'] ?? '' ) ) {
+				return $this->stopped_result( 'daily_limit_exhausted', self::DADATA_LIMITS_EXHAUSTED_MESSAGE );
+			}
+
 			return $this->skipped_result( 'no_dadata_success', $this->dadata_message( $response ) );
 		}
 
@@ -160,11 +171,40 @@ final class LocationCoordinatesDadataBatchUpdater {
 	}
 
 	/**
+	 * @param array<string,mixed> $job
+	 */
+	private function stop_for_dadata_limits( array &$job, string $reason, string $message ): void {
+		$job['phase'] = 'finished';
+		$job['status'] = 'finished';
+		$job['reason'] = $reason;
+		$job['stopped_reason'] = $reason;
+		$job['tokens_exhausted'] = true;
+		$job['last_error'] = $message;
+		$job['message'] = $message;
+		$job['last_dadata_message'] = $message;
+		$job['finished_at'] = current_time( 'mysql' );
+		$job['current_batch'] = array();
+	}
+
+	/**
 	 * @return array{status:string,lat:?float,lng:?float,reason:string,message:string}
 	 */
 	private function skipped_result( string $reason, string $message = '' ): array {
 		return array(
 			'status' => 'skipped',
+			'lat' => null,
+			'lng' => null,
+			'reason' => $reason,
+			'message' => $message,
+		);
+	}
+
+	/**
+	 * @return array{status:string,lat:?float,lng:?float,reason:string,message:string}
+	 */
+	private function stopped_result( string $reason, string $message ): array {
+		return array(
+			'status' => 'stopped',
 			'lat' => null,
 			'lng' => null,
 			'reason' => $reason,

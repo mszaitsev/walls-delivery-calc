@@ -1,5 +1,11 @@
 # WDC DaData Suggestions 0.14.14
 
+## Coordinate Batch Limits And Reset 0.25.14
+
+The admin coordinate batch now treats `dadata_daily_limit_exhausted` from the shared DaData suggestion client as a terminal stop, not as `skipped_no_dadata_success`. When all configured DaData tokens are exhausted for the current day, the job stops immediately, keeps already processed progress, and writes `phase/status=finished`, `stopped_reason=daily_limit_exhausted`, `tokens_exhausted=true`, and the readable message "Суточные лимиты DaData исчерпаны. Повторите запуск позже." A later `step` poll does not resume the batch; the operator must start it again manually after limits are available.
+
+The locations settings DaData block includes "Обнулить задачу координат". This AJAX action requires the same nonce and capability checks as the other DaData actions, refuses to reset a running coordinate job, and deletes only the coordinate batch progress option. It does not remove saved `latitude` / `longitude` values and does not touch the postcode/index DaData job. After reset, the next coordinate start scans the missing-coordinate set from the beginning, while rows with already valid coordinates remain excluded by the repository query.
+
 ## Coordinate Query Diagnostics 0.23.12
 
 The location coordinate fill query is now built only from `postal_code` and `display_name`. Rows with an empty `display_name` are skipped before the DaData request. The job status includes reason-specific skip counters: `skipped_empty_query`, `skipped_no_dadata_success`, `skipped_no_coordinates`, and `skipped_invalid_coordinates`; `last_skip_reason` and `last_dadata_message` make the latest skipped row readable in the admin JSON output.

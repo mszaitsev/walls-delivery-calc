@@ -81,6 +81,20 @@
 	max-width: 520px;
 }
 
+.wdc-dadata-actions {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin: 12px 0;
+}
+
+.wdc-dadata-action-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
 .wdc-progress pre {
 	max-height: 280px;
 	overflow: auto;
