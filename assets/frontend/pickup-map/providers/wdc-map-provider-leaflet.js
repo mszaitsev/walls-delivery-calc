@@ -5,6 +5,7 @@
 		var settings = options || {};
 		var center = settings.center || { lat: 55.0302, lng: 82.9204, zoom: 11 };
 		var markers = [];
+		var searchMarker = null;
 		var markerById = {};
 		var pointById = {};
 		var activePointId = null;
@@ -61,6 +62,7 @@
 				clearMarkers();
 				activePointId = options && Object.prototype.hasOwnProperty.call(options, 'activePointId') ? (options.activePointId ? String(options.activePointId) : null) : activePointId;
 				renderClustered(points || []);
+				renderSearchMarker(options && options.searchMarker);
 				suppressPopupClose = false;
 			},
 			openPointPopup: function (point, html) {
@@ -163,9 +165,29 @@
 
 		function clearMarkers() {
 			markers.forEach(function (marker) { marker.remove(); });
+			if (searchMarker) {
+				searchMarker.remove();
+			}
 			markers = [];
+			searchMarker = null;
 			markerById = {};
 			pointById = {};
+		}
+
+		function renderSearchMarker(marker) {
+			if (!marker || marker.lat === null || marker.lng === null) {
+				return;
+			}
+			searchMarker = window.L.marker([marker.lat, marker.lng], {
+				icon: window.L.divIcon({
+					className: 'wdc-map-marker-icon',
+					html: '<span class="wdc-map-marker-pin wdc-map-marker-pin--search"><span class="wdc-map-marker-pin__inner"></span><span class="wdc-map-marker-pin__tail"></span></span>',
+					iconSize: [38, 53],
+					iconAnchor: [19, 53],
+					popupAnchor: [0, -53]
+				}),
+				interactive: false
+			}).addTo(map);
 		}
 
 		function updateActiveMarkers() {

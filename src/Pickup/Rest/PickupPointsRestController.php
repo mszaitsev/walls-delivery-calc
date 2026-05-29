@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Pickup\Rest;
 
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
+use WallsShop\WDC\Pickup\Search\PickupAddressSearchService;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -13,7 +14,8 @@ final class PickupPointsRestController {
 
 	public function __construct(
 		private RussianPostPickupPointRepository $repository,
-		private ?RussianPostPickupPointTypeSettings $type_settings = null
+		private ?RussianPostPickupPointTypeSettings $type_settings = null,
+		private ?PickupAddressSearchService $address_search = null
 	) {
 	}
 
@@ -37,6 +39,15 @@ final class PickupPointsRestController {
 			array(
 				'methods' => 'GET',
 				'callback' => array( $this, 'search' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+		register_rest_route(
+			self::NAMESPACE,
+			'/points/address-search',
+			array(
+				'methods' => 'GET',
+				'callback' => array( $this, 'address_search' ),
 				'permission_callback' => '__return_true',
 			)
 		);
@@ -78,6 +89,42 @@ final class PickupPointsRestController {
 		);
 
 		return $this->response( array_map( fn( array $row ): array => $this->summary( $row ), $rows ) );
+	}
+
+	public function address_search( mixed $request ): mixed {
+		if ( ! $this->address_search instanceof PickupAddressSearchService ) {
+			return $this->error( 'address_search_unavailable', 'Address search is unavailable.', 503 );
+		}
+		$carrier = $this->carrier( $request );
+		if ( 'russian_post' !== $carrier ) {
+			return $this->response( array() );
+		}
+
+		$query = trim( $this->param( $request, 'query' ) );
+		if ( '' === $query ) {
+			$query = trim( $this->param( $request, 'q' ) );
+		}
+
+		$types = $this->allowed_types( $request );
+		if ( array() === $types ) {
+			return $this->response(
+				array(
+					'address_search_available' => true,
+					'points' => array(),
+				)
+			);
+		}
+
+		return $this->response(
+			$this->address_search->search(
+				$query,
+				array(
+					'location_id' => (int) $this->param( $request, 'location_id' ),
+					'country_code' => strtoupper( $this->param( $request, 'country_code' ) ?: 'RU' ),
+					'point_types' => $types,
+				)
+			)
+		);
 	}
 
 	public function search( mixed $request ): mixed {

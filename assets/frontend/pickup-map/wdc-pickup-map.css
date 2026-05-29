@@ -118,6 +118,29 @@
 	font-size: 12px;
 }
 
+.wdc-pickup-list__found {
+	display: grid;
+	gap: 4px;
+	margin-bottom: 10px;
+	padding: 10px;
+	border: 1px solid #fecaca;
+	border-radius: 6px;
+	background: #fef2f2;
+	color: #1f2937;
+	font-size: 13px;
+	line-height: 1.35;
+}
+
+.wdc-pickup-list__found span {
+	overflow-wrap: anywhere;
+}
+
+.wdc-pickup-list__found em {
+	color: #b91c1c;
+	font-style: normal;
+	font-weight: 700;
+}
+
 .wdc-pickup-list__items {
 	display: grid;
 	gap: 8px;
@@ -291,7 +314,16 @@
 	transform: scale(1.08);
 }
 
+.wdc-map-marker-pin--search {
+	background: var(--wdc-map-active, #e02424);
+	box-shadow: 0 6px 18px rgba(224, 36, 36, 0.38);
+}
+
 .wdc-map-marker-pin.is-active .wdc-map-marker-pin__tail {
+	border-top-color: var(--wdc-map-active, #e02424);
+}
+
+.wdc-map-marker-pin--search .wdc-map-marker-pin__tail {
 	border-top-color: var(--wdc-map-active, #e02424);
 }
 

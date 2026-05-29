@@ -1,6 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.25.14.
+Version: 0.26.0.
+
+Version 0.26.0 adds address search above the Russian Post pickup map through `GET /wdc/v1/points/address-search`. Address queries use the existing `AddressSuggestionClientInterface` / `DaDataSuggestionClient` and shared `DaDataTokenPool`, so token rotation, daily counters, exhausted-token flags, and daily limits remain centralized. Results are cached for 24 hours by `query + location_id + country_code`, so repeated address searches do not spend DaData limits again.
+
+Six-digit postcode searches bypass DaData completely and continue to work even when all DaData tokens are exhausted. The backend first returns pickup points with the exact postcode, then can fall back to coordinates of a local location with that postal code, and only then reports a not-found state. When address tokens are unavailable, the endpoint returns `address_search_available=false`; the frontend switches the search field to numeric-only mode with placeholder "Сейчас работает поиск только по почтовому индексу".
+
+Successful address search recenters the map on the found address, adds a separate red search marker that is not selectable as a pickup point, reloads/sorts nearby pickup points by distance from the found address, and shows a compact "Найден адрес" block above the list with the nearest pickup distance.
 
 Version 0.25.14 stops the admin DaData coordinate batch as soon as the shared token pool reports `dadata_daily_limit_exhausted`. The job keeps progress already written before the stop, records `stopped_reason=daily_limit_exhausted`, `tokens_exhausted=true`, and the message "Суточные лимиты DaData исчерпаны. Повторите запуск позже.", and it does not continue automatically on later step polls.
 

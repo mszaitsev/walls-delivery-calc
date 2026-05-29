@@ -17,6 +17,7 @@
 		var mapClickCallback = function () {};
 		var ymapsApi = null;
 		var activePointId = null;
+		var searchPlacemark = null;
 		var placemarkById = {};
 		var pointById = {};
 		var markerLayout = null;
@@ -107,6 +108,7 @@
 				placemarkById[id] = placemark;
 				pointById[id] = point;
 			});
+			renderSearchMarker(options && options.searchMarker);
 			suppressPopupClose = false;
 		}
 
@@ -118,9 +120,29 @@
 				Object.keys(placemarkById).forEach(function (id) {
 					map.geoObjects.remove(placemarkById[id]);
 				});
+				if (searchPlacemark) {
+					map.geoObjects.remove(searchPlacemark);
+				}
 			}
+			searchPlacemark = null;
 			placemarkById = {};
 			pointById = {};
+		}
+
+		function renderSearchMarker(marker) {
+			if (!map || !ymapsApi || !marker || marker.lat === null || marker.lng === null) {
+				return;
+			}
+			searchPlacemark = new ymapsApi.Placemark([marker.lat, marker.lng], {
+				wdcActive: '',
+				wdcType: 'search'
+			}, {
+				iconLayout: markerLayout,
+				iconOffset: [-21, -59],
+				iconShape: { type: 'Circle', coordinates: [21, 21], radius: 21 },
+				interactiveZIndex: false
+			});
+			map.geoObjects.add(searchPlacemark);
 		}
 
 		return {

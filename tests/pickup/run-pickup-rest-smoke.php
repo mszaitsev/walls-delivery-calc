@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
+defined( 'APP_ENCRYPTION_KEY' ) || define( 'APP_ENCRYPTION_KEY', 'pickup-address-search-test-key' );
 
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
@@ -18,6 +19,13 @@ function sanitize_key( mixed $value ): string { return preg_replace( '/[^a-z0-9_
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
+function is_wp_error( mixed $value ): bool { return false; }
+function wp_remote_retrieve_response_code( array $response ): int { return (int) ( $response['response']['code'] ?? 0 ); }
+function wp_remote_retrieve_body( array $response ): string { return (string) ( $response['body'] ?? '' ); }
+function wp_remote_post( string $url, array $args = array() ): array {
+	$GLOBALS['wdc_pickup_rest_http_requests'][] = array( 'url' => $url, 'args' => $args );
+	return array_shift( $GLOBALS['wdc_pickup_rest_http_queue'] ) ?: array( 'response' => array( 'code' => 200 ), 'body' => wp_json_encode( array( 'suggestions' => array() ), JSON_UNESCAPED_UNICODE ) );
+}
 function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['wdc_pickup_rest_options'][ $key ] ?? $default; }
 function update_option( string $key, mixed $value, bool|string|null $autoload = null ): bool { $GLOBALS['wdc_pickup_rest_options'][ $key ] = $value; return true; }
 function rest_ensure_response( mixed $data ): mixed { return $data; }
@@ -73,6 +81,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 			if ( preg_match( "/carrier_key = '([^']+)'/", $query, $m ) ) {
 				$rows = array_values( array_filter( $rows, static fn( array $row ): bool => (string) ( $row['carrier_key'] ?? '' ) === $m[1] ) );
 			}
+			if ( preg_match( "/postcode = '([^']+)'/", $query, $m ) ) {
+				$rows = array_values( array_filter( $rows, static fn( array $row ): bool => (string) ( $row['postcode'] ?? '' ) === $m[1] ) );
+			}
 			if ( preg_match( '/longitude BETWEEN ([0-9.\\-]+) AND ([0-9.\\-]+)/', $query, $m ) ) {
 				$min = (float) $m[1];
 				$max = (float) $m[2];
@@ -121,9 +132,18 @@ if ( ! class_exists( 'wpdb' ) ) {
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
+use WallsShop\WDC\Pickup\Search\PickupAddressSearchService;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
+use WallsShop\WDC\Checkout\AddressSuggestions\DaDataSuggestionClient;
+use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
 $GLOBALS['wpdb'] = new wpdb();
+$GLOBALS['wdc_pickup_rest_http_requests'] = array();
+$GLOBALS['wdc_pickup_rest_http_queue'] = array();
 $GLOBALS['wpdb']->prefix = 'wp_';
 $GLOBALS['wpdb']->pickup_rows = array(
 	array( 'id' => 1, 'carrier_key' => 'russian_post', 'point_code' => '630001-a', 'point_type' => 'OPS', 'address' => 'Ленина, 1', 'city_name' => 'Новосибирск', 'region_name' => 'НСО', 'postcode' => '630001', 'latitude' => 55.01, 'longitude' => 82.91, 'work_time' => '09-18', 'active' => 1 ),
@@ -135,9 +155,28 @@ $repo = new RussianPostPickupPointRepository( $GLOBALS['wpdb'] );
 $GLOBALS['wpdb']->tables = array( $repo->main_table() => $GLOBALS['wpdb']->pickup_rows, 'wp_wdc_pickup_points' => array() );
 $settings = new SettingsRepository();
 $type_settings = new RussianPostPickupPointTypeSettings( $settings );
-$controller = new PickupPointsRestController( $repo, $type_settings );
+$encryption = new EncryptionService();
+$token_pool = new DaDataTokenPool( $settings, $encryption );
+$settings->replace(
+	array(
+		'dadata_suggestions_enabled' => true,
+		'dadata_suggestions_tokens' => array(
+			array(
+				'id' => 'pickup-address-token',
+				'encrypted_token' => $encryption->encrypt( 'secret-token' ),
+				'masked_token' => '********oken',
+				'daily_limit' => 2,
+				'enabled' => true,
+			),
+		),
+	)
+);
+$address_settings = new AddressSuggestionSettings( $settings, $encryption, $token_pool );
+$address_client = new DaDataSuggestionClient( $address_settings, $token_pool, new Logger() );
+$address_search = new PickupAddressSearchService( $repo, $address_client, $token_pool, $address_settings );
+$controller = new PickupPointsRestController( $repo, $type_settings, $address_search );
 $controller->register();
-pickup_rest_assert( 3 === count( $GLOBALS['wdc_rest_routes'] ?? array() ), 'REST controller must register three routes.' );
+pickup_rest_assert( 4 === count( $GLOBALS['wdc_rest_routes'] ?? array() ), 'REST controller must register four routes including address search.' );
 pickup_rest_assert( array( 'OPS', 'PVZ', 'APS' ) === $type_settings->enabled_types(), 'Pickup type defaults must enable OPS/PVZ/APS.' );
 
 $bbox = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '82.90,55.00,82.93,55.03' ) );
@@ -181,6 +220,51 @@ pickup_rest_assert( 1 === count( $limited ), 'limit must clamp result count.' );
 
 $search = $controller->search( array( 'carrier' => 'russian_post', 'q' => '630002', 'city' => 'Новосибирск', 'limit' => '1000' ) );
 pickup_rest_assert( 1 === count( $search ) && 2 === $search[0]['id'], 'search must find by postcode/city/address and clamp limit.' );
+
+$settings->replace(
+	array(
+		'dadata_suggestions_enabled' => true,
+		'dadata_suggestions_tokens' => array(
+			array(
+				'id' => 'pickup-address-token',
+				'encrypted_token' => $encryption->encrypt( 'secret-token' ),
+				'masked_token' => '********oken',
+				'daily_limit' => 2,
+				'enabled' => true,
+			),
+		),
+	)
+);
+$GLOBALS['wdc_pickup_rest_http_queue'][] = array(
+	'response' => array( 'code' => 200 ),
+	'body' => wp_json_encode(
+		array(
+			'suggestions' => array(
+				array(
+					'value' => 'г Новосибирск, ул Ленина, д 15',
+					'unrestricted_value' => '630099, Новосибирская обл, г Новосибирск, ул Ленина, д 15',
+					'data' => array( 'geo_lat' => '55.012', 'geo_lon' => '82.915' ),
+				),
+			),
+		),
+		JSON_UNESCAPED_UNICODE
+	),
+);
+$address_result = $controller->address_search( array( 'carrier' => 'russian_post', 'query' => 'Ленина 15', 'country_code' => 'RU' ) );
+pickup_rest_assert( 'address' === $address_result['search_type'] && true === $address_result['address_search_available'] && 55.012 === (float) $address_result['address']['lat'], 'Address search must return DaData coordinates.' );
+pickup_rest_assert( 1 === count( $GLOBALS['wdc_pickup_rest_http_requests'] ?? array() ) && 1 === $token_pool->usage_today( 'pickup-address-token' ), 'Address search must use DaDataSuggestionClient and increment shared token usage.' );
+$cached_address_result = $controller->address_search( array( 'carrier' => 'russian_post', 'query' => 'Ленина 15', 'country_code' => 'RU' ) );
+pickup_rest_assert( 1 === count( $GLOBALS['wdc_pickup_rest_http_requests'] ?? array() ) && 1 === $token_pool->usage_today( 'pickup-address-token' ) && $cached_address_result['address'] === $address_result['address'], 'Address search cache must avoid repeated DaData usage.' );
+$postcode_result = $controller->address_search( array( 'carrier' => 'russian_post', 'query' => '630002', 'country_code' => 'RU' ) );
+pickup_rest_assert( 'postcode' === $postcode_result['search_type'] && 1 === count( $postcode_result['points'] ) && 2 === $postcode_result['points'][0]['id'] && 1 === count( $GLOBALS['wdc_pickup_rest_http_requests'] ?? array() ), 'Six-digit postcode search must not call DaData.' );
+$GLOBALS['wdc_pickup_rest_http_queue'][] = array(
+	'response' => array( 'code' => 200 ),
+	'body' => wp_json_encode( array( 'suggestions' => array( array( 'value' => 'Маркса 7', 'data' => array( 'geo_lat' => '55.03', 'geo_lon' => '82.93' ) ) ) ), JSON_UNESCAPED_UNICODE ),
+);
+$controller->address_search( array( 'carrier' => 'russian_post', 'query' => 'Маркса 7', 'country_code' => 'RU' ) );
+$exhausted = $controller->address_search( array( 'carrier' => 'russian_post', 'query' => 'Красный проспект', 'country_code' => 'RU' ) );
+pickup_rest_assert( false === $exhausted['address_search_available'], 'Exhausted DaData token pool must disable address search.' );
+pickup_rest_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Search/PickupAddressSearchService.php' ), 'AddressSuggestionClientInterface' ), 'Address search service must depend on the existing DaData client interface.' );
 
 $detail = $controller->detail( array( 'id' => 1 ) );
 pickup_rest_assert( 1 === $detail['id'] && '630001-a' === $detail['point_code'] && '09-18' === $detail['work_time'], 'detail must return minimal point card fields with compact work_time.' );

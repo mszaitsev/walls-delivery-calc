@@ -29,6 +29,8 @@
 		var initialLat = parseFloat(context.centerLat || context.lat || (preloadedPoints[0] && preloadedPoints[0].lat));
 		var initialLng = parseFloat(context.centerLng || context.lng || (preloadedPoints[0] && preloadedPoints[0].lng));
 		var hasInitialCoordinates = !isNaN(initialLat) && !isNaN(initialLng);
+		var distanceOrigin = hasInitialCoordinates ? { lat: initialLat, lng: initialLng } : null;
+		var searchAddress = null;
 		var hasInitialQuery = !!(context.query && String(context.query).trim());
 		var provider = null;
 		var visiblePoints = [];
@@ -166,7 +168,8 @@
 				}
 			}
 			provider.renderMarkers(visiblePoints, {
-				activePointId: previewPoint ? pointId(previewPoint) : null
+				activePointId: previewPoint ? pointId(previewPoint) : null,
+				searchMarker: searchAddress
 			});
 			renderList(visiblePoints);
 			updateListSelectButton();
@@ -204,7 +207,9 @@
 				return;
 			}
 			var shown = points.slice(0, LIST_LIMIT);
+			var nearest = shown[0] && shown[0].distanceText ? shown[0].distanceText : '';
 			list.innerHTML = [
+				searchAddress ? '<div class="wdc-pickup-list__found"><strong>Найден адрес:</strong><span>' + escapeHtml(searchAddress.value || '') + '</span>' + (nearest ? '<em>Ближайший ПВЗ: ' + escapeHtml(nearest) + '</em>' : '') + '</div>' : '',
 				'<div class="wdc-pickup-list__meta">' + escapeHtml(listMeta(points.length, shown.length)) + '</div>',
 				'<div class="wdc-pickup-list__items">',
 				shown.map(renderListItem).join(''),
@@ -285,22 +290,50 @@
 			}
 			controller = new AbortController();
 			card.textContent = labels.loading || 'Loading...';
-			var request = initial && window.WDCPickupApi.searchInitial ? window.WDCPickupApi.searchInitial : window.WDCPickupApi.search;
-			return request(query, controller.signal).then(function (points) {
-				if (points[0] && points[0].lat !== null && points[0].lng !== null) {
-					var point = enrichPoints([points[0]])[0];
-					suppressNextMoveLoad = true;
-					provider.setCenter(point.lat, point.lng, 15);
-					preview(point, { focus: false, initial: true });
-					if (initial) {
+			if (initial) {
+				var initialRequest = window.WDCPickupApi.searchInitial || window.WDCPickupApi.search;
+				return initialRequest(query, controller.signal).then(function (points) {
+					if (points[0] && points[0].lat !== null && points[0].lng !== null) {
+						var point = enrichPoints([points[0]])[0];
+						suppressNextMoveLoad = true;
+						provider.setCenter(point.lat, point.lng, 15);
+						preview(point, { focus: false, initial: true });
 						loadBounds(bboxAround(point.lat, point.lng));
+						return;
+					}
+					card.textContent = labels.notFound || labels.empty || '';
+				}).catch(function (error) {
+					if (error.name !== 'AbortError') {
+						card.textContent = labels.error || 'Error';
+					}
+				});
+			}
+			if (!window.WDCPickupApi.addressSearch) {
+				return Promise.resolve();
+			}
+			return window.WDCPickupApi.addressSearch(query, context, controller.signal).then(function (result) {
+				if (result && result.address_search_available === false) {
+					setPostcodeOnlyMode();
+					if (!result.address) {
+						card.textContent = labels.postcodeOnly || 'Поиск доступен только по индексу';
+						return;
+					}
+				}
+				if (result && result.address && result.address.lat !== null && result.address.lng !== null) {
+					searchAddress = normalizeAddressMarker(result.address);
+					distanceOrigin = { lat: parseFloat(searchAddress.lat), lng: parseFloat(searchAddress.lng) };
+					suppressNextMoveLoad = true;
+					provider.setCenter(searchAddress.lat, searchAddress.lng, 15);
+					renderMarkers(Array.isArray(result.points) ? result.points : [], labels.empty || '');
+					if (visiblePoints[0]) {
+						preview(visiblePoints[0], { focus: false, initial: true });
 					}
 					return;
 				}
-				card.textContent = labels.notFound || labels.empty || '';
+				card.textContent = result && result.error_code === 'dadata_api_failed' ? (labels.dadataError || 'Ошибка DaData') : (labels.addressNotFound || labels.notFound || '');
 			}).catch(function (error) {
 				if (error.name !== 'AbortError') {
-					card.textContent = labels.error || 'Error';
+					card.textContent = labels.dadataError || labels.error || 'Ошибка DaData';
 				}
 			});
 		}
@@ -339,8 +372,8 @@
 				var copy = Object.assign({}, point);
 				copy._wdcOrder = index;
 				copy._wdcTypeLabel = pointTypeLabel(copy);
-				if (hasInitialCoordinates && validPointCoordinates(copy)) {
-					copy.distanceMeters = distanceMeters(initialLat, initialLng, parseFloat(copy.lat), parseFloat(copy.lng));
+				if (distanceOrigin && validPointCoordinates(copy)) {
+					copy.distanceMeters = distanceMeters(distanceOrigin.lat, distanceOrigin.lng, parseFloat(copy.lat), parseFloat(copy.lng));
 					copy.distanceText = formatDistance(copy.distanceMeters);
 				}
 				return copy;
@@ -349,7 +382,7 @@
 
 		function sortPoints(points) {
 			return points.slice().sort(function (a, b) {
-				if (hasInitialCoordinates) {
+				if (distanceOrigin) {
 					var aDistance = typeof a.distanceMeters === 'number' ? a.distanceMeters : Infinity;
 					var bDistance = typeof b.distanceMeters === 'number' ? b.distanceMeters : Infinity;
 					if (aDistance !== bDistance) {
@@ -458,6 +491,30 @@
 
 	function normalizeProvider(provider) {
 		return 'yandex' === provider ? 'yandex' : 'leaflet';
+	}
+
+	function normalizeAddressMarker(address) {
+		return {
+			id: 'search-address',
+			type: 'search',
+			value: String(address.value || ''),
+			lat: parseFloat(address.lat),
+			lng: parseFloat(address.lng)
+		};
+	}
+
+	function setPostcodeOnlyMode() {
+		var input = document.querySelector('[data-wdc-search]');
+		if (!input || input.dataset.wdcPostcodeOnly) {
+			return;
+		}
+		input.dataset.wdcPostcodeOnly = '1';
+		input.placeholder = 'Сейчас работает поиск только по почтовому индексу';
+		input.inputMode = 'numeric';
+		input.pattern = '\\d*';
+		input.addEventListener('input', function () {
+			input.value = input.value.replace(/\D+/g, '').slice(0, 6);
+		});
 	}
 
 	function bboxAround(lat, lng) {

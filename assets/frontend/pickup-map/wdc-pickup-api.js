@@ -26,6 +26,19 @@
 		searchInitial: function (query, signal) {
 			return request('points/search?carrier=russian_post&limit=10&q=' + encodeURIComponent(query), { signal: signal }).then(normalizePoints);
 		},
+		addressSearch: function (query, context, signal) {
+			context = context || {};
+			var params = new URLSearchParams();
+			params.set('carrier', 'russian_post');
+			params.set('query', query);
+			if (context.location_id) {
+				params.set('location_id', context.location_id);
+			}
+			if (context.country_code) {
+				params.set('country_code', context.country_code);
+			}
+			return request('points/address-search?' + params.toString(), { signal: signal });
+		},
 		save: function (pointId, shippingMethodId) {
 			return request('checkout/pickup-point', {
 				method: 'POST',

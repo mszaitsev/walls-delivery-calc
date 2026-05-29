@@ -154,6 +154,49 @@ final class RussianPostPickupPointRepository {
 	}
 
 	/**
+	 * @param array<string,mixed> $filters
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function find_rows_by_postcode( string $postcode, array $filters = array() ): array {
+		$postcode = preg_replace( '/\D+/', '', $postcode ) ?? '';
+		if ( '' === $postcode ) {
+			return array();
+		}
+		$where = array( 'active = 1', 'postcode = %s' );
+		$args = array( $postcode );
+		$this->append_filters( $where, $args, $filters );
+		$limit = $this->limit_from_filters( $filters, 50, 100 );
+
+		return $this->select_rows( $where, $args, $limit );
+	}
+
+	/**
+	 * @param array<string,mixed> $filters
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function find_nearest_rows( float $lat, float $lng, array $filters = array() ): array {
+		if ( $lat < -90.0 || $lat > 90.0 || $lng < -180.0 || $lng > 180.0 ) {
+			return array();
+		}
+		$where = array( 'active = 1' );
+		$args = array();
+		$this->append_filters( $where, $args, $filters );
+		$limit = $this->limit_from_filters( $filters, 50, 100 );
+		$rows = $this->select_rows( $where, $args, 1000 );
+		foreach ( $rows as &$row ) {
+			$row['distance_meters'] = $this->distance_meters( $lat, $lng, (float) ( $row['latitude'] ?? 0 ), (float) ( $row['longitude'] ?? 0 ) );
+		}
+		unset( $row );
+		usort(
+			$rows,
+			static fn( array $a, array $b ): int => (int) ( $a['distance_meters'] ?? PHP_INT_MAX ) <=> (int) ( $b['distance_meters'] ?? PHP_INT_MAX )
+				?: strcmp( (string) ( $a['postcode'] ?? '' ) . (string) ( $a['address'] ?? '' ), (string) ( $b['postcode'] ?? '' ) . (string) ( $b['address'] ?? '' ) )
+		);
+
+		return array_slice( $rows, 0, $limit );
+	}
+
+	/**
 	 * @return array<string,mixed>|null
 	 */
 	public function find_row_by_id( int $id ): ?array {
@@ -243,6 +286,15 @@ final class RussianPostPickupPointRepository {
 		);
 
 		return is_array( $rows ) ? $rows : array();
+	}
+
+	private function distance_meters( float $from_lat, float $from_lng, float $to_lat, float $to_lng ): int {
+		$earth = 6371000;
+		$d_lat = deg2rad( $to_lat - $from_lat );
+		$d_lng = deg2rad( $to_lng - $from_lng );
+		$a = sin( $d_lat / 2 ) ** 2 + cos( deg2rad( $from_lat ) ) * cos( deg2rad( $to_lat ) ) * sin( $d_lng / 2 ) ** 2;
+
+		return (int) round( $earth * 2 * atan2( sqrt( $a ), sqrt( 1 - $a ) ) );
 	}
 
 	private function append_filters( array &$where, array &$args, array $filters ): void {

@@ -121,6 +121,37 @@ final class LocationRepository {
 		return $this->find_one( 'kladr_id', trim( $kladr_id ), '%s' );
 	}
 
+	public function find_first_by_postal_code( string $postal_code ): ?Location {
+		$postal_code = preg_replace( '/\D+/', '', $postal_code ) ?? '';
+		if ( '' === $postal_code ) {
+			return null;
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 === (int) ( $row['active'] ?? 1 ) && $postal_code === (string) ( $row['postal_code'] ?? '' ) ) {
+					return $this->row_to_location( $this->join_region_for_test_double( $row ) );
+				}
+			}
+			return null;
+		}
+
+		$row = $this->wpdb->get_row(
+			$this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.active = 1 AND l.postal_code = %s
+				ORDER BY CASE WHEN l.latitude IS NOT NULL AND l.longitude IS NOT NULL AND l.latitude != 0 AND l.longitude != 0 THEN 0 ELSE 1 END ASC, l.display_name ASC
+				LIMIT 1",
+				$postal_code
+			),
+			ARRAY_A
+		);
+
+		return is_array( $row ) ? $this->row_to_location( $row ) : null;
+	}
+
 	public function find_by_gar_id( string $gar_id ): ?Location {
 		$id = is_numeric( $gar_id ) ? (int) $gar_id : 0;
 		return $id > 0 ? $this->find_by_gar_object_id( $id ) : $this->find_one( 'gar_id', trim( $gar_id ), '%s' );

@@ -633,5 +633,8 @@ locations_smoke_assert( str_contains( $locations_admin_source, 'CheckoutLocation
 $repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Storage/LocationRepository.php' );
 locations_smoke_assert( ! str_contains( $repository_source, 'pickup' ) && ! str_contains( $repository_source, 'rules' ) && ! str_contains( $repository_source, 'calendar' ) && ! str_contains( $repository_source, 'options' ), 'clear_all must not target pickup/rules/calendar/settings storage.' );
 locations_smoke_assert( str_contains( $repository_source, 'find_exact_admin_identifier_matches' ) && str_contains( $repository_source, 'postal_code' ), 'LocationRepository must expose exact admin identifier lookup.' );
+locations_smoke_assert( str_contains( $repository_source, 'find_first_by_postal_code' ), 'LocationRepository must expose postcode lookup for pickup address-search fallback.' );
+$dadata_client_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/AddressSuggestions/DaDataSuggestionClient.php' );
+locations_smoke_assert( str_contains( $dadata_client_source, 'location_fias_id' ) && str_contains( $dadata_client_source, 'restrict_value' ), 'DaData address search must support current-location filters.' );
 
 echo "Locations smoke test passed.\n";
