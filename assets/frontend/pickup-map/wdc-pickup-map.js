@@ -246,8 +246,13 @@
 			});
 		}
 
-		function loadBounds(bbox) {
+		function loadBounds(bbox, options) {
+			options = options || {};
 			if (!bbox) {
+				return;
+			}
+			if (!options.force && suppressNextMoveLoad) {
+				suppressNextMoveLoad = false;
 				return;
 			}
 			if (controller) {
@@ -257,6 +262,9 @@
 			card.textContent = labels.loading || 'Loading...';
 			window.WDCPickupApi.points(bbox, controller.signal).then(function (points) {
 				renderMarkers(points, labels.empty || '');
+				if (options.previewNearest && visiblePoints[0]) {
+					preview(visiblePoints[0], { focus: false, initial: true });
+				}
 			}).catch(function (error) {
 				if (error.name !== 'AbortError') {
 					card.textContent = labels.error || 'Error';
@@ -265,10 +273,6 @@
 		}
 
 		var debouncedLoad = debounce(function (bbox) {
-			if (suppressNextMoveLoad) {
-				suppressNextMoveLoad = false;
-				return;
-			}
 			loadBounds(bbox);
 		}, 250);
 
@@ -298,7 +302,7 @@
 						suppressNextMoveLoad = true;
 						provider.setCenter(point.lat, point.lng, 15);
 						preview(point, { focus: false, initial: true });
-						loadBounds(bboxAround(point.lat, point.lng));
+						loadBounds(bboxAround(point.lat, point.lng), { force: true });
 						return;
 					}
 					card.textContent = labels.notFound || labels.empty || '';
@@ -320,15 +324,7 @@
 					}
 				}
 				if (result && result.address && result.address.lat !== null && result.address.lng !== null) {
-					searchAddress = normalizeAddressMarker(result.address);
-					distanceOrigin = { lat: parseFloat(searchAddress.lat), lng: parseFloat(searchAddress.lng) };
-					suppressNextMoveLoad = true;
-					provider.setCenter(searchAddress.lat, searchAddress.lng, 15);
-					renderMarkers(Array.isArray(result.points) ? result.points : [], labels.empty || '');
-					if (visiblePoints[0]) {
-						preview(visiblePoints[0], { focus: false, initial: true });
-					}
-					loadBounds(bboxAround(searchAddress.lat, searchAddress.lng));
+					applySearchResult(result);
 					return;
 				}
 				card.textContent = result && result.error_code === 'dadata_api_failed' ? (labels.dadataError || 'Ошибка DaData') : (labels.addressNotFound || labels.notFound || '');
@@ -336,6 +332,22 @@
 				if (error.name !== 'AbortError') {
 					card.textContent = labels.dadataError || labels.error || 'Ошибка DaData';
 				}
+			});
+		}
+
+		function applySearchResult(result) {
+			searchAddress = normalizeAddressMarker(result.address);
+			distanceOrigin = { lat: parseFloat(searchAddress.lat), lng: parseFloat(searchAddress.lng) };
+			suppressNextMoveLoad = true;
+			provider.setCenter(searchAddress.lat, searchAddress.lng, 15);
+			provider.renderMarkers(visiblePoints, {
+				activePointId: previewPoint ? pointId(previewPoint) : null,
+				searchMarker: searchAddress
+			});
+			loadBounds(bboxAround(searchAddress.lat, searchAddress.lng), {
+				force: true,
+				preserveSearchAddress: true,
+				previewNearest: true
 			});
 		}
 

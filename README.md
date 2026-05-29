@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.26.2.
+Version: 0.26.3.
+
+Version 0.26.3 makes the post-search pickup map refresh deterministic. Successful address/postcode search now applies the red search marker immediately, updates the distance origin, recenters the map, and then forces a bbox load around the found point as the source of truth for visible pickup points. The narrow `address-search` response points are no longer rendered as the final list state, so the side list and map are replaced by nearby bbox results instead of getting stuck on exact postcode rows or stale previous-city data.
 
 Version 0.26.2 refines the pickup address search row: opening the modal now focuses the close button instead of the search input, the search field has a decorative magnifier and an explicit "Искать адрес" button, and Enter triggers the same search action. After address/postcode search the frontend now loads a bbox around the found point, while postcode exact matches return nearest pickup points around the postcode anchor instead of leaving the list stuck on only the exact row.
 
