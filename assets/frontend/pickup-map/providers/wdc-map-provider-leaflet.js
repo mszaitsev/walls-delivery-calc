@@ -10,8 +10,11 @@
 		var activePointId = null;
 		var pointClickCallback = function () {};
 		var popupSelectCallback = function () {};
+		var popupCloseCallback = function () {};
 		var mapClickCallback = function () {};
-		var maxClusterZoom = 17;
+		var maxClusterZoom = 18;
+		var clusterCellSize = 64;
+		var suppressPopupClose = false;
 
 		if (!window.L) {
 			return unavailable('Leaflet is not available.');
@@ -36,6 +39,7 @@
 
 		map.on('moveend zoomend', boundsChanged);
 		map.on('click', mapClicked);
+		map.on('popupclose', popupClosed);
 		map.getContainer().addEventListener('click', onPopupClick);
 
 		return {
@@ -53,13 +57,16 @@
 				updateActiveMarkers();
 			},
 			renderMarkers: function (points, options) {
+				suppressPopupClose = true;
 				clearMarkers();
-				activePointId = options && options.activePointId ? String(options.activePointId) : activePointId;
+				activePointId = options && Object.prototype.hasOwnProperty.call(options, 'activePointId') ? (options.activePointId ? String(options.activePointId) : null) : activePointId;
 				renderClustered(points || []);
+				suppressPopupClose = false;
 			},
 			openPointPopup: function (point, html) {
 				var marker = markerById[pointId(point)];
 				if (marker && marker.bindPopup) {
+					suppressPopupClose = true;
 					marker.bindPopup(html, {
 						autoPan: true,
 						autoPanPadding: [24, 24],
@@ -68,6 +75,7 @@
 						maxWidth: 280
 					});
 					marker.openPopup();
+					suppressPopupClose = false;
 				}
 			},
 			closePopup: function () {
@@ -82,9 +90,11 @@
 				map.fitBounds(group.getBounds(), { padding: [24, 24] });
 			},
 			destroy: function () {
+				suppressPopupClose = true;
 				clearMarkers();
 				map.off('moveend zoomend', boundsChanged);
 				map.off('click', mapClicked);
+				map.off('popupclose', popupClosed);
 				map.getContainer().removeEventListener('click', onPopupClick);
 				map.remove();
 			},
@@ -93,6 +103,9 @@
 			},
 			onPopupSelect: function (callback) {
 				popupSelectCallback = typeof callback === 'function' ? callback : function () {};
+			},
+			onPopupClose: function (callback) {
+				popupCloseCallback = typeof callback === 'function' ? callback : function () {};
 			},
 			onMapClick: function (callback) {
 				mapClickCallback = typeof callback === 'function' ? callback : function () {};
@@ -184,6 +197,12 @@
 			mapClickCallback();
 		}
 
+		function popupClosed() {
+			if (!suppressPopupClose) {
+				popupCloseCallback();
+			}
+		}
+
 		function onPopupClick(event) {
 			var button = event.target && event.target.closest ? event.target.closest('[data-wdc-pickup-popup-select]') : null;
 			if (!button) {
@@ -204,13 +223,12 @@
 				});
 			}
 			var cells = {};
-			var size = 64;
 			points.forEach(function (point) {
 				if (point.lat === null || point.lng === null) {
 					return;
 				}
 				var projected = map.latLngToLayerPoint([point.lat, point.lng]);
-				var key = Math.floor(projected.x / size) + ':' + Math.floor(projected.y / size);
+				var key = Math.floor(projected.x / clusterCellSize) + ':' + Math.floor(projected.y / clusterCellSize);
 				if (!cells[key]) {
 					cells[key] = [];
 				}
@@ -242,6 +260,7 @@
 			destroy: function () {},
 			onPointClick: function () {},
 			onPopupSelect: function () {},
+			onPopupClose: function () {},
 			onMapClick: function () {},
 			invalidateSize: function () {}
 		};

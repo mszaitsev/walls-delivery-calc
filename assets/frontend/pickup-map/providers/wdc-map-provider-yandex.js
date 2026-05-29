@@ -13,13 +13,15 @@
 		var pendingPoints = [];
 		var pointClickCallback = function () {};
 		var popupSelectCallback = function () {};
+		var popupCloseCallback = function () {};
 		var mapClickCallback = function () {};
 		var ymapsApi = null;
 		var activePointId = null;
 		var placemarkById = {};
 		var pointById = {};
 		var markerLayout = null;
-		var maxClusterZoom = 17;
+		var maxClusterZoom = 18;
+		var suppressPopupClose = false;
 
 		loadApi(settings.yandexApiKey || '').then(function (ymaps) {
 			if (destroyed) {
@@ -38,6 +40,7 @@
 				clusterIconLayout: ymaps.templateLayoutFactory.createClass('<div class="wdc-map-cluster"><span class="wdc-map-cluster__inner">$[properties.geoObjects.length]</span></div>'),
 				clusterIconShape: { type: 'Circle', coordinates: [23, 23], radius: 23 },
 				clusterIcons: [{ href: '', size: [46, 46], offset: [-23, -23] }],
+				gridSize: 80,
 				groupByCoordinates: false
 			});
 			map.geoObjects.add(collection);
@@ -71,10 +74,11 @@
 
 		function renderMarkers(points, options) {
 			pendingPoints = points || [];
-			activePointId = options && options.activePointId ? String(options.activePointId) : activePointId;
+			activePointId = options && Object.prototype.hasOwnProperty.call(options, 'activePointId') ? (options.activePointId ? String(options.activePointId) : null) : activePointId;
 			if (!map || !collection || !ymapsApi) {
 				return;
 			}
+			suppressPopupClose = true;
 			clearMarkers();
 			var useClusterer = map.getZoom() < maxClusterZoom;
 			pendingPoints.forEach(function (point) {
@@ -94,6 +98,7 @@
 					iconShape: { type: 'Circle', coordinates: [21, 21], radius: 21 }
 				});
 				placemark.events.add('click', function () { pointClickCallback(point); });
+				placemark.events.add('balloonclose', popupClosed);
 				if (useClusterer) {
 					collection.add(placemark);
 				} else {
@@ -102,6 +107,7 @@
 				placemarkById[id] = placemark;
 				pointById[id] = point;
 			});
+			suppressPopupClose = false;
 		}
 
 		function clearMarkers() {
@@ -146,7 +152,9 @@
 			renderMarkers: renderMarkers,
 			clearMarkers: function () {
 				pendingPoints = [];
+				suppressPopupClose = true;
 				clearMarkers();
+				suppressPopupClose = false;
 			},
 			fitToMarkers: function () {
 				if (map && collection && Object.keys(placemarkById).length) {
@@ -159,8 +167,10 @@
 				if (!placemark || !placemark.properties || !placemark.balloon) {
 					return;
 				}
+				suppressPopupClose = true;
 				placemark.properties.set('balloonContent', html);
 				placemark.balloon.open();
+				suppressPopupClose = false;
 			},
 			closePopup: function () {
 				if (map && map.balloon) {
@@ -169,6 +179,7 @@
 			},
 			destroy: function () {
 				destroyed = true;
+				suppressPopupClose = true;
 				clearMarkers();
 				if (map) {
 					map.events.remove('boundschange', boundsChanged);
@@ -184,6 +195,9 @@
 			},
 			onPopupSelect: function (callback) {
 				popupSelectCallback = typeof callback === 'function' ? callback : function () {};
+			},
+			onPopupClose: function (callback) {
+				popupCloseCallback = typeof callback === 'function' ? callback : function () {};
 			},
 			onMapClick: function (callback) {
 				mapClickCallback = typeof callback === 'function' ? callback : function () {};
@@ -222,6 +236,12 @@
 
 		function mapClicked() {
 			mapClickCallback();
+		}
+
+		function popupClosed() {
+			if (!suppressPopupClose) {
+				popupCloseCallback();
+			}
 		}
 	}
 

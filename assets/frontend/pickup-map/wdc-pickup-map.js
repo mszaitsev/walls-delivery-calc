@@ -32,6 +32,7 @@
 		var hasInitialQuery = !!(context.query && String(context.query).trim());
 		var provider = null;
 		var visiblePoints = [];
+		var popupManuallyClosed = false;
 
 		if ('yandex' === providerName && !config.yandexApiKeyPresent) {
 			card.textContent = (config.errors && config.errors.yandexApiKeyMissing) || 'Для Яндекс.Карт не задан API key. Выберите OpenStreetMap или укажите ключ в настройках.';
@@ -53,12 +54,15 @@
 			labels: labels,
 			onBoundsChange: boundsChanged
 		});
-		provider.onPointClick(function (point) { preview(point, { focus: false }); });
+		provider.onPointClick(function (point) { preview(point, { focus: false, userAction: true }); });
 		if (provider.onPopupSelect) {
 			provider.onPopupSelect(function (point) { commit(point, { focus: false }); });
 		}
 		if (provider.onMapClick) {
-			provider.onMapClick(function () { closePreview(); });
+			provider.onMapClick(function () { markPopupManuallyClosed(); });
+		}
+		if (provider.onPopupClose) {
+			provider.onPopupClose(function () { markPopupManuallyClosed(); });
 		}
 		if (listSelectButton) {
 			listSelectButton.addEventListener('click', function () {
@@ -91,6 +95,9 @@
 		function preview(point, options) {
 			options = options || {};
 			previewPoint = point;
+			if (options.userAction || options.initial) {
+				popupManuallyClosed = false;
+			}
 			card.textContent = committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Выберите пункт на карте или в списке.');
 			confirmButton.disabled = !committedPoint;
 			if (provider.setActivePoint) {
@@ -101,7 +108,7 @@
 			}
 			renderList(visiblePoints);
 			updateListSelectButton();
-			if (provider.openPointPopup) {
+			if (provider.openPointPopup && !popupManuallyClosed) {
 				provider.openPointPopup(point, renderPointPopup(point, committedPoint && pointId(committedPoint) === pointId(point)), { ensureVisible: !!options.ensureVisible });
 			}
 			scrollListRowIntoView(point);
@@ -111,6 +118,7 @@
 			options = options || {};
 			committedPoint = point;
 			previewPoint = point;
+			popupManuallyClosed = false;
 			card.textContent = selectedSummary(point);
 			confirmButton.disabled = false;
 			confirmButton.dispatchEvent(new CustomEvent('wdc:point-selected', { detail: point }));
@@ -128,13 +136,13 @@
 			scrollListRowIntoView(point);
 		}
 
-		function closePreview() {
-			previewPoint = null;
+		function markPopupManuallyClosed() {
+			popupManuallyClosed = true;
 			if (provider.closePopup) {
 				provider.closePopup();
 			}
 			if (provider.setActivePoint) {
-				provider.setActivePoint(null);
+				provider.setActivePoint(previewPoint ? pointId(previewPoint) : null);
 			}
 			card.textContent = committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Выберите пункт на карте или в списке.');
 			confirmButton.disabled = !committedPoint;
@@ -144,8 +152,12 @@
 
 		function renderMarkers(points, emptyText) {
 			visiblePoints = sortPoints(enrichPoints(points || []));
+			var previewLeftVisiblePoints = previewPoint && !pointInList(previewPoint, visiblePoints);
 			if (previewPoint && !pointInList(previewPoint, visiblePoints)) {
 				previewPoint = null;
+			}
+			if (previewLeftVisiblePoints && committedPoint && pointInList(committedPoint, visiblePoints)) {
+				popupManuallyClosed = true;
 			}
 			if (!previewPoint && committedPoint) {
 				previewPoint = matchingPoint(committedPoint, visiblePoints);
@@ -169,7 +181,7 @@
 				if (provider.setActivePoint) {
 					provider.setActivePoint(pointId(previewPoint));
 				}
-				if (provider.openPointPopup) {
+				if (provider.openPointPopup && !popupManuallyClosed) {
 					provider.openPointPopup(previewPoint, renderPointPopup(previewPoint, !!(committedPoint && pointId(previewPoint) === pointId(committedPoint))), { ensureVisible: true });
 				}
 				scrollListRowIntoView(previewPoint);
@@ -224,7 +236,7 @@
 				}
 				var point = findPoint(row.getAttribute('data-wdc-point-id'));
 				if (point) {
-					preview(point, { focus: false, ensureVisible: true });
+					preview(point, { focus: false, ensureVisible: true, userAction: true });
 				}
 			});
 		}
@@ -279,7 +291,7 @@
 					var point = enrichPoints([points[0]])[0];
 					suppressNextMoveLoad = true;
 					provider.setCenter(point.lat, point.lng, 15);
-					preview(point, { focus: false });
+					preview(point, { focus: false, initial: true });
 					if (initial) {
 						loadBounds(bboxAround(point.lat, point.lng));
 					}

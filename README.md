@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.25.11.
+Version: 0.25.12.
+
+Version 0.25.12 makes balloon restore respectful of explicit user close. A committed point still opens automatically on the first visible render, and marker/list clicks always reopen the balloon, but closing the balloon or clicking empty map space sets `popupManuallyClosed`; bbox reloads, drags, moves, and zooms keep the active marker/list row without reopening the popup. Leaflet clustering now uses a 64px grid and disables clusters only at zoom 18+, while Yandex uses `gridSize: 80` and also keeps Clusterer enabled through zoom 17.
 
 Version 0.25.11 changes pickup marker color semantics: normal single markers stay blue, while the current preview/active marker is red. `committedPoint` no longer has its own marker color and does not directly drive active marker rendering; when a previously saved checkout point appears in visible/preloaded points, the map promotes it to `previewPoint`, highlights the marker/list row, and may reopen the balloon without dispatching `wdc:point-selected`.
 
@@ -8,7 +10,7 @@ Version 0.25.10 removes the temporary Leaflet `bindPopup(address)` used during m
 
 Version 0.25.8 refines pickup map ergonomics. Single pins keep the blue marker/white center shape but use a slimmer visual ring, closer to cluster weight. Per-row `Выбрать` buttons were removed from the side list; the list now has one shared footer button, `Выбрать этот пункт`, enabled only for an uncommitted preview point. The balloon button remains the primary selection action.
 
-Marker clicks scroll the side/mobile list to the active row. List-row clicks open the same balloon without hard-centering the map; providers rely on popup/balloon auto-pan to nudge only when the balloon would be clipped. Leaflet grid clustering now stops at zoom 17+, and the Yandex provider bypasses `Clusterer` at zoom 17+, so strongly zoomed points render as individual pins even when close together.
+Marker clicks scroll the side/mobile list to the active row. List-row clicks open the same balloon without hard-centering the map; providers rely on popup/balloon auto-pan to nudge only when the balloon would be clipped. Since 0.25.12, Leaflet grid clustering stops at zoom 18+, and the Yandex provider bypasses `Clusterer` at zoom 18+, so only the final zoom levels render close points as individual pins.
 
 Version 0.25.7 makes preview state the visual source of truth. If the customer has already committed point A but opens point B, point B owns the active marker, open balloon, and preview row while checkout remains committed to A. If B leaves the current bbox, preview is cleared; in 0.25.11 a visible committed point is promoted back into preview instead of getting a separate committed marker color.
 

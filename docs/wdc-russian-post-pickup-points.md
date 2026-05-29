@@ -1,6 +1,10 @@
 # Russian Post Pickup Points
 
-Version: 0.25.11.
+Version: 0.25.12.
+
+Version 0.25.12 adds an explicit manual-close state for the map balloon. The popup opens on first visible render for a committed point, on marker click, and on list-card click. If the customer closes it with the balloon control or clicks empty map space, `popupManuallyClosed` prevents bbox reloads from reopening it; the active marker and list row can remain highlighted until another marker/list action resets the flag.
+
+Clustering is wider so overlapping pins aggregate sooner. Leaflet now clusters through zoom 17 with a 64px grid and shows individual pins only at zoom 18+. Yandex uses `ymaps.Clusterer` through zoom 17 with `gridSize: 80`, then bypasses the Clusterer at zoom 18+.
 
 Version 0.25.11 makes marker color depend only on preview/active state. Normal single pins remain blue; the active preview pin is red in both Leaflet and Yandex. A previously saved checkout point is localized as `initialContext.selectedPoint`, then becomes `previewPoint` when it is present in the current visible point set, so reopening the map highlights the saved point without firing `wdc:point-selected`.
 
@@ -10,7 +14,7 @@ Version 0.25.8 removes per-row select buttons from the visible pickup list. Rows
 
 When a marker opens a preview, the side list scrolls its matching row into view inside the list container only. List-row preview no longer calls the provider focus/center method, so the map does not jump to the point. Leaflet opens popups with `autoPan`, `keepInView`, and padding; Yandex placemarks use balloon auto-pan, so the map only nudges when the balloon would be outside the viewport.
 
-Cluster behavior now has a high-zoom escape hatch. Leaflet's grid clustering returns individual points at zoom 17 and above. Yandex uses `ymaps.Clusterer` below zoom 17 and adds placemarks directly at zoom 17+, keeping nearby points selectable on the map; when coordinates are identical, the list remains the reliable selection path.
+Cluster behavior now has a high-zoom escape hatch. Leaflet's grid clustering returns individual points at zoom 18 and above. Yandex uses `ymaps.Clusterer` below zoom 18 and adds placemarks directly at zoom 18+, keeping nearby points selectable on the map; when coordinates are identical, the list remains the reliable selection path.
 
 Version 0.25.7 gives preview state priority over committed selection for map visuals. When `committedPoint = A` and `previewPoint = B`, and both are visible, B owns the active marker and open balloon while A remains the checkout selection and keeps the selected list state. If B disappears after bbox reload, preview is cleared; in 0.25.11 a visible committed point is promoted back into preview instead of receiving a separate committed marker color. Reloads still reopen the balloon automatically when the preview point remains visible.
 
