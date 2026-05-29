@@ -385,7 +385,28 @@
 			if (!row || !list) {
 				return;
 			}
-			row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+			var container = scrollContainerForList(list);
+			if (!container) {
+				return;
+			}
+			var rowTop = rowOffsetTop(row, container);
+			var rowBottom = rowTop + row.offsetHeight;
+			var visibleTop = container.scrollTop;
+			var visibleBottom = visibleTop + container.clientHeight;
+			var nextTop = null;
+			if (rowTop < visibleTop) {
+				nextTop = Math.max(0, rowTop - 12);
+			} else if (rowBottom > visibleBottom) {
+				nextTop = Math.max(0, rowBottom - container.clientHeight + 12);
+			}
+			if (nextTop === null || Math.abs(nextTop - container.scrollTop) < 1) {
+				return;
+			}
+			if (typeof container.scrollTo === 'function') {
+				container.scrollTo({ top: nextTop, behavior: 'smooth' });
+				return;
+			}
+			container.scrollTop = nextTop;
 		}
 
 		function findListRow(id) {
@@ -399,6 +420,30 @@
 				}
 			}
 			return null;
+		}
+
+		function scrollContainerForList(start) {
+			var node = start;
+			while (node && node !== document.body) {
+				if (node.scrollHeight > node.clientHeight) {
+					return node;
+				}
+				if (node.classList && (node.classList.contains('wdc-pickup-modal__list') || node.classList.contains('wdc-pickup-modal__side'))) {
+					return node;
+				}
+				node = node.parentNode;
+			}
+			return start;
+		}
+
+		function rowOffsetTop(row, container) {
+			var top = 0;
+			var node = row;
+			while (node && node !== container) {
+				top += node.offsetTop || 0;
+				node = node.offsetParent;
+			}
+			return top;
 		}
 	}
 
