@@ -1,6 +1,10 @@
 # Walls Delivery Calc
 
-Version: 0.25.13.
+Version: 0.25.14.
+
+Version 0.25.14 stops the admin DaData coordinate batch as soon as the shared token pool reports `dadata_daily_limit_exhausted`. The job keeps progress already written before the stop, records `stopped_reason=daily_limit_exhausted`, `tokens_exhausted=true`, and the message "Суточные лимиты DaData исчерпаны. Повторите запуск позже.", and it does not continue automatically on later step polls.
+
+The locations settings DaData block now groups actions into two rows: index fill plus technical-marker cleanup, then coordinate fill plus "Обнулить задачу координат". The reset action deletes only the coordinate batch progress option, leaves saved latitude/longitude values untouched, does not affect the postcode/index batch state, and the next coordinate start again scans the full missing-coordinate set while still skipping rows with valid coordinates.
 
 Version 0.25.13 separates popup close sources: empty map clicks call `markPopupManuallyClosed('map_click')` and close the popup, while provider `popupclose`/`balloonclose` callbacks call `markPopupManuallyClosed('popup_close')` without calling `closePopup()` again.
 

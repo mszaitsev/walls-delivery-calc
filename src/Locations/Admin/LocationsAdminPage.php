@@ -84,6 +84,7 @@ final class LocationsAdminPage {
 		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_step', array( $this, 'ajax_dadata_coordinates_fill_step' ) );
 		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_status', array( $this, 'ajax_dadata_coordinates_fill_status' ) );
 		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_cancel', array( $this, 'ajax_dadata_coordinates_fill_cancel' ) );
+		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_reset', array( $this, 'ajax_dadata_coordinates_fill_reset' ) );
 	}
 
 	public function add_menu_page(): void {
@@ -138,9 +139,16 @@ final class LocationsAdminPage {
 					<p><strong><?php echo esc_html__( 'координат нет:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_locations_missing_coordinates() ); ?></span></p>
 					<p><strong><?php echo esc_html__( 'technical no-index marker count:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_technical_no_index_marker() ); ?></span></p>
 				</div>
-				<button class="button button-primary" type="button" id="wdc-dadata-postcode-fill-start"><?php echo esc_html__( 'Получить индексы через DaData', 'walls-delivery-calc' ); ?></button>
-				<button class="button button-secondary" type="button" id="wdc-dadata-coordinates-fill-start"><?php echo esc_html__( 'Получить координаты через DaData', 'walls-delivery-calc' ); ?></button>
-				<button class="button button-secondary" type="button" id="wdc-dadata-postcode-clear-markers"><?php echo esc_html__( 'Удалить технические значения 999999999', 'walls-delivery-calc' ); ?></button>
+				<div class="wdc-dadata-actions">
+					<div class="wdc-dadata-action-row">
+						<button class="button button-primary" type="button" id="wdc-dadata-postcode-fill-start"><?php echo esc_html__( 'Получить индексы через DaData', 'walls-delivery-calc' ); ?></button>
+						<button class="button button-secondary" type="button" id="wdc-dadata-postcode-clear-markers"><?php echo esc_html__( 'Удалить технические значения 999999999', 'walls-delivery-calc' ); ?></button>
+					</div>
+					<div class="wdc-dadata-action-row">
+						<button class="button button-secondary" type="button" id="wdc-dadata-coordinates-fill-start"><?php echo esc_html__( 'Получить координаты через DaData', 'walls-delivery-calc' ); ?></button>
+						<button class="button button-secondary" type="button" id="wdc-dadata-coordinates-fill-reset"><?php echo esc_html__( 'Обнулить задачу координат', 'walls-delivery-calc' ); ?></button>
+					</div>
+				</div>
 				<div id="wdc-dadata-postcode-progress" class="wdc-progress" hidden>
 					<progress value="0" max="100"></progress>
 					<p class="wdc-progress-summary"></p>
@@ -518,6 +526,12 @@ final class LocationsAdminPage {
 			if (coordinatesStart) coordinatesStart.addEventListener('click', function(){
 				const box = document.getElementById('wdc-dadata-coordinates-progress');
 				post('wdc_dadata_coordinates_fill_start').then(resp => { render(box, resp.data); loop('wdc_dadata_coordinates_fill_step', box, 2000 + Math.floor(Math.random() * 2001)); });
+			});
+			const coordinatesReset = document.getElementById('wdc-dadata-coordinates-fill-reset');
+			if (coordinatesReset) coordinatesReset.addEventListener('click', function(){
+				if (!window.confirm('<?php echo esc_js( __( 'Обнулить прогресс задачи координат? Уже записанные координаты в базе не удаляются.', 'walls-delivery-calc' ) ); ?>')) return;
+				const box = document.getElementById('wdc-dadata-coordinates-progress');
+				post('wdc_dadata_coordinates_fill_reset').then(resp => { render(box, resp.data); });
 			});
 			const postcodeClear = document.getElementById('wdc-dadata-postcode-clear-markers');
 			if (postcodeClear) postcodeClear.addEventListener('click', function(){
@@ -933,6 +947,33 @@ final class LocationsAdminPage {
 		$job['updated_at'] = current_time( 'mysql' );
 		$this->update_option( self::DADATA_COORDINATES_JOB_OPTION, $job );
 		$this->send_json( $job );
+	}
+
+	public function ajax_dadata_coordinates_fill_reset(): void {
+		$this->guard_ajax();
+		$existing = $this->get_option( self::DADATA_COORDINATES_JOB_OPTION, array() );
+		if ( is_array( $existing ) && 'running' === (string) ( $existing['phase'] ?? '' ) ) {
+			$existing['last_error'] = __( 'Остановите текущую задачу перед обнулением.', 'walls-delivery-calc' );
+			$existing['message'] = $existing['last_error'];
+			$existing['updated_at'] = current_time( 'mysql' );
+			$this->send_json( $existing, false );
+			return;
+		}
+
+		$this->delete_option( self::DADATA_COORDINATES_JOB_OPTION );
+		$this->send_json(
+			array(
+				'phase' => 'idle',
+				'status' => 'idle',
+				'processed' => 0,
+				'updated' => 0,
+				'skipped' => 0,
+				'failed' => 0,
+				'errors' => 0,
+				'message' => __( 'Прогресс задачи координат обнулен. Уже записанные координаты не удалялись.', 'walls-delivery-calc' ),
+				'updated_at' => current_time( 'mysql' ),
+			)
+		);
 	}
 
 	public function ajax_dadata_postcode_clear_markers(): void {

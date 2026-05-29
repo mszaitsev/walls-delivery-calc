@@ -29,6 +29,11 @@ function update_option( string $key, mixed $value, bool|string $autoload = false
 	return true;
 }
 
+function delete_option( string $key ): bool {
+	unset( $GLOBALS['wdc_locations_smoke_options'][ $key ] );
+	return true;
+}
+
 final class WdcLocationsSmokeWooCountries {
 	/** @var array<string,string> */
 	public array $countries = array(
@@ -419,6 +424,42 @@ locations_smoke_assert( ! str_contains( implode( ' | ', $batch_client->queries )
 locations_smoke_assert( 'invalid_coordinates' === $batch_job['last_skip_reason'] || '' !== (string) $batch_job['last_error'], 'Coordinate batch updater must keep last skip/error diagnostics in job state.' );
 locations_smoke_assert( $batch_empty_query_id > 0 && $batch_no_success_id > 0 && $batch_no_coordinates_id > 0 && $batch_invalid_id > 0 && $batch_failed_id > 0 && (int) $batch_job['cursor'] >= $batch_failed_id, 'Coordinate batch updater must advance cursor through current batch.' );
 
+$limit_wpdb = new wpdb();
+$limit_repository = new LocationRepository( $limit_wpdb );
+$limit_updated_id = $limit_repository->save( locations_smoke_location( array( 'gar_object_id' => 884001, 'fias_id' => 'fias-limit-updated', 'region_name' => 'Limit test', 'place_type' => 'г', 'place_name' => 'First', 'display_name' => 'First', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$limit_stopped_id = $limit_repository->save( locations_smoke_location( array( 'gar_object_id' => 884002, 'fias_id' => 'fias-limit-stopped', 'region_name' => 'Limit test', 'place_type' => 'г', 'place_name' => 'Limit', 'display_name' => 'Limit', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$limit_untouched_id = $limit_repository->save( locations_smoke_location( array( 'gar_object_id' => 884003, 'fias_id' => 'fias-limit-untouched', 'region_name' => 'Limit test', 'place_type' => 'г', 'place_name' => 'Third', 'display_name' => 'Third', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$limit_client = new WdcLocationsSmokeQueuedSuggestionClient(
+	array(
+		array( 'success' => true, 'suggestions' => array( array( 'data' => array( 'geo_lat' => '54.983333', 'geo_lon' => '82.900000' ) ) ) ),
+		array( 'success' => false, 'error_code' => 'dadata_daily_limit_exhausted', 'error_message' => 'All DaData tokens are exhausted for today.' ),
+		array( 'success' => true, 'suggestions' => array( array( 'data' => array( 'geo_lat' => '55.000000', 'geo_lon' => '83.000000' ) ) ) ),
+	)
+);
+$limit_updater = new LocationCoordinatesDadataBatchUpdater( $limit_repository, $limit_client );
+$limit_job = $limit_updater->step(
+	array(
+		'phase' => 'running',
+		'status' => 'running',
+		'processed' => 0,
+		'updated' => 0,
+		'skipped' => 0,
+		'failed' => 0,
+		'errors' => 0,
+		'last_id' => 0,
+		'cursor' => 0,
+		'current_priority' => 'cities',
+		'started_at' => current_time( 'mysql' ),
+	),
+	10
+);
+locations_smoke_assert( 2 === $limit_job['processed'] && 1 === $limit_job['updated'] && 0 === $limit_job['skipped'] && 2 === $limit_client->calls, 'Coordinate batch must stop immediately when all DaData daily limits are exhausted.' );
+locations_smoke_assert( 'finished' === $limit_job['phase'] && 'daily_limit_exhausted' === (string) $limit_job['stopped_reason'] && ! empty( $limit_job['tokens_exhausted'] ), 'Coordinate exhausted limit must be recorded as a terminal non-running job state.' );
+locations_smoke_assert( 54.983333 === (float) $limit_wpdb->rows[ $limit_updated_id ]['latitude'], 'Coordinate exhausted limit must preserve progress saved before the stop.' );
+locations_smoke_assert( 0.0 === (float) $limit_wpdb->rows[ $limit_stopped_id ]['latitude'] && 0.0 === (float) $limit_wpdb->rows[ $limit_untouched_id ]['latitude'], 'Coordinate exhausted limit must not update or skip the stopped and remaining rows.' );
+$limit_job_after_repeat = $limit_updater->step( $limit_job, 10 );
+locations_smoke_assert( 2 === $limit_client->calls && $limit_job_after_repeat === $limit_job, 'Coordinate exhausted state must not continue automatically on the next step.' );
+
 $novos = $search->search( 'новос' );
 locations_smoke_assert( count( $novos ) > 0, 'Search "новос" must return results.' );
 locations_smoke_assert( '' !== $novos[0]->display_name, 'Search result display_name must be present.' );
@@ -484,6 +525,7 @@ locations_smoke_assert( str_contains( $locations_html, 'ZZ (7)' ), 'Locations ad
 locations_smoke_assert( str_contains( $locations_html, 'Регионов/областей:' ), 'Locations admin page must render regions counter label.' );
 locations_smoke_assert( str_contains( $locations_html, 'Заполнение информации через DaData' ), 'Locations admin DaData block must use the shared information fill heading.' );
 locations_smoke_assert( str_contains( $locations_html, 'Получить координаты через DaData' ) && str_contains( $locations_html, 'координат нет:' ), 'Locations admin page must render coordinate fill button and counters.' );
+locations_smoke_assert( str_contains( $locations_html, 'Обнулить задачу координат' ) && str_contains( $locations_html, 'wdc_dadata_coordinates_fill_reset' ), 'Locations admin page must render coordinate reset button and AJAX action.' );
 
 locations_smoke_assert( str_contains( $locations_html, 'Очистить базу населенных пунктов' ), 'Locations admin page must render clear locations button.' );
 locations_smoke_assert( str_contains( $locations_html, 'Импорт GAR/ФИАС CSV' ), 'Locations admin page must render GAR CSV import section.' );
@@ -491,6 +533,35 @@ locations_smoke_assert( str_contains( $locations_html, 'Экспорт / имп�
 locations_smoke_assert( ! str_contains( $locations_html, 'Импортировать демо-данные' ), 'Locations admin page must not render demo import button.' );
 locations_smoke_assert( ! str_contains( $locations_html, 'Import prepared FIAS dataset' ), 'Locations admin page must not render prepared FIAS import button.' );
 locations_smoke_assert( str_contains( $locations_html, 'Удалить все населенные пункты и алиасы из локальной базы WDC?' ), 'Locations admin page must render JS confirmation.' );
+
+$reset_wpdb = new wpdb();
+$reset_repository = new LocationRepository( $reset_wpdb );
+$reset_importer = new LocationImportService( $reset_repository );
+$reset_search = new LocationSearchService( $reset_repository );
+$reset_coordinate_id = $reset_repository->save( locations_smoke_location( array( 'gar_object_id' => 885001, 'fias_id' => 'fias-reset-coordinates', 'region_name' => 'Reset test', 'place_type' => 'г', 'place_name' => 'Saved', 'display_name' => 'Saved', 'latitude' => 56.0, 'longitude' => 84.0 ) ) );
+update_option(
+	'wdc_dadata_coordinates_fill_job',
+	array(
+		'phase' => 'finished',
+		'status' => 'finished',
+		'processed' => 12,
+		'updated' => 7,
+		'skipped' => 3,
+	)
+);
+$_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
+ob_start();
+( new LocationsAdminPage(
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.25.14' ),
+	$reset_repository,
+	$reset_search,
+	$reset_importer
+) )->ajax_dadata_coordinates_fill_reset();
+$reset_json = (string) ob_get_clean();
+$reset_payload = json_decode( $reset_json, true );
+locations_smoke_assert( is_array( $reset_payload ) && ! empty( $reset_payload['success'] ) && 'idle' === (string) ( $reset_payload['data']['phase'] ?? '' ), 'Coordinate reset AJAX must return idle status.' );
+locations_smoke_assert( ! array_key_exists( 'wdc_dadata_coordinates_fill_job', $GLOBALS['wdc_locations_smoke_options'] ), 'Coordinate reset AJAX must delete only the coordinate job option.' );
+locations_smoke_assert( 56.0 === (float) $reset_wpdb->rows[ $reset_coordinate_id ]['latitude'] && 84.0 === (float) $reset_wpdb->rows[ $reset_coordinate_id ]['longitude'], 'Coordinate reset AJAX must not delete saved coordinates.' );
 
 locations_smoke_assert( method_exists( $repository, 'clear_all' ), 'LocationRepository must expose clear_all method.' );
 $repository->save_aliases( 1, array( 'Alias one', 'Alias two' ) );
