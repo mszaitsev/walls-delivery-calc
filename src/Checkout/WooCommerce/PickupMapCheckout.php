@@ -127,8 +127,37 @@ final class PickupMapCheckout {
 				'lat'   => $lat,
 				'lng'   => $lng,
 				'query' => $this->initial_query( $context ),
+				'selectedPoint' => $this->selected_point_context(),
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>|null
+	 */
+	private function selected_point_context(): ?array {
+		$selection = $this->session_manager->checkout_pickup_point();
+		if ( array() === $selection || '' === trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
+			return null;
+		}
+
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+
+		return array_filter(
+			array(
+				'id' => $selection['id'] ?? $snapshot['id'] ?? null,
+				'point_code' => $selection['point_code'] ?? $snapshot['point_code'] ?? null,
+				'point_type' => $selection['point_type'] ?? $snapshot['point_type'] ?? null,
+				'postcode' => $selection['postcode'] ?? $snapshot['postcode'] ?? null,
+				'address' => $selection['address'] ?? $snapshot['address'] ?? null,
+				'lat' => $selection['lat'] ?? $snapshot['lat'] ?? null,
+				'lng' => $selection['lng'] ?? $snapshot['lng'] ?? null,
+				'work_time' => $selection['work_time'] ?? $snapshot['work_time'] ?? null,
+				'description' => $selection['description'] ?? $snapshot['description'] ?? null,
+				'snapshot' => $snapshot,
+			),
+			static fn( mixed $value ): bool => null !== $value && '' !== $value && array() !== $value
 		);
 	}
 

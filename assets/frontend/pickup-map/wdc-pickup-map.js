@@ -17,12 +17,13 @@
 		var providerName = normalizeProvider(config.mapProvider || 'leaflet');
 		var providerFactory = window.WDCPickupMapProviders && window.WDCPickupMapProviders[providerName];
 		var list = findList(element, card);
-		var listSelectButton = createListSelectButton(list);
-		var previewPoint = null;
-		var committedPoint = null;
 		var controller = null;
 		var suppressNextMoveLoad = false;
 		var context = initialContext || {};
+		var initialSelectedPoint = normalizeInitialSelectedPoint(context.selectedPoint || context.selectedPickupPoint);
+		var listSelectButton = createListSelectButton(list);
+		var previewPoint = initialSelectedPoint;
+		var committedPoint = initialSelectedPoint;
 		var preloadedPoints = Array.isArray(context.preloadedPoints) ? context.preloadedPoints : [];
 		var hasPreloadedPoints = preloadedPoints.length > 0;
 		var initialLat = parseFloat(context.centerLat || context.lat || (preloadedPoints[0] && preloadedPoints[0].lat));
@@ -133,7 +134,7 @@
 				provider.closePopup();
 			}
 			if (provider.setActivePoint) {
-				provider.setActivePoint(committedPoint ? pointId(committedPoint) : null);
+				provider.setActivePoint(null);
 			}
 			card.textContent = committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Выберите пункт на карте или в списке.');
 			confirmButton.disabled = !committedPoint;
@@ -146,9 +147,14 @@
 			if (previewPoint && !pointInList(previewPoint, visiblePoints)) {
 				previewPoint = null;
 			}
-			var activePoint = previewPoint && pointInList(previewPoint, visiblePoints) ? previewPoint : (committedPoint && pointInList(committedPoint, visiblePoints) ? committedPoint : null);
+			if (!previewPoint && committedPoint) {
+				previewPoint = matchingPoint(committedPoint, visiblePoints);
+				if (previewPoint) {
+					committedPoint = previewPoint;
+				}
+			}
 			provider.renderMarkers(visiblePoints, {
-				activePointId: activePoint ? pointId(activePoint) : null
+				activePointId: previewPoint ? pointId(previewPoint) : null
 			});
 			renderList(visiblePoints);
 			updateListSelectButton();
@@ -167,14 +173,6 @@
 					provider.openPointPopup(previewPoint, renderPointPopup(previewPoint, !!(committedPoint && pointId(previewPoint) === pointId(committedPoint))), { ensureVisible: true });
 				}
 				scrollListRowIntoView(previewPoint);
-				return;
-			}
-			if (committedPoint && pointInList(committedPoint, visiblePoints)) {
-				card.textContent = selectedSummary(committedPoint);
-				confirmButton.disabled = false;
-				if (provider.setActivePoint) {
-					provider.setActivePoint(pointId(committedPoint));
-				}
 				return;
 			}
 			if (provider.setActivePoint) {
@@ -205,7 +203,7 @@
 		function renderListItem(point, index) {
 			var selected = committedPoint && pointId(committedPoint) === pointId(point);
 			var previewed = previewPoint && pointId(previewPoint) === pointId(point);
-			var active = selected || previewed;
+			var active = previewed;
 			return [
 				'<div role="button" tabindex="0" class="wdc-pickup-list__item' + (active ? ' active' : '') + (selected ? ' selected' : '') + (previewed ? ' preview' : '') + '" data-wdc-point-id="' + escapeHtml(pointId(point)) + '">',
 				'<span class="wdc-pickup-list__index">' + (index + 1) + '</span>',
@@ -362,6 +360,11 @@
 			return visiblePoints.filter(function (point) { return pointId(point) === id; })[0] || null;
 		}
 
+		function matchingPoint(point, points) {
+			var id = pointId(point);
+			return points.filter(function (item) { return pointId(item) === id; })[0] || null;
+		}
+
 		function updateListSelectButton() {
 			if (!listSelectButton) {
 				return;
@@ -473,6 +476,24 @@
 	function pointInList(point, points) {
 		var id = pointId(point);
 		return points.some(function (item) { return pointId(item) === id; });
+	}
+
+	function normalizeInitialSelectedPoint(point) {
+		if (!point || typeof point !== 'object') {
+			return null;
+		}
+		var snapshot = point.snapshot && typeof point.snapshot === 'object' ? point.snapshot : {};
+		var normalized = Object.assign({}, snapshot, point);
+		normalized.id = normalized.id || snapshot.id;
+		normalized.point_code = normalized.point_code || snapshot.point_code;
+		normalized.point_type = normalized.point_type || snapshot.point_type;
+		normalized.postcode = normalized.postcode || normalized.postal_code || snapshot.postcode;
+		normalized.address = normalized.address || snapshot.address;
+		normalized.lat = normalized.lat !== undefined && normalized.lat !== null ? normalized.lat : snapshot.lat;
+		normalized.lng = normalized.lng !== undefined && normalized.lng !== null ? normalized.lng : snapshot.lng;
+		normalized.work_time = normalized.work_time || snapshot.work_time;
+		normalized.description = normalized.description || snapshot.description;
+		return pointId(normalized) ? normalized : null;
 	}
 
 	function selectedSummary(point) {

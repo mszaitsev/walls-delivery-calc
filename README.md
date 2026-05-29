@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.25.10.
+Version: 0.25.11.
+
+Version 0.25.11 changes pickup marker color semantics: normal single markers stay blue, while the current preview/active marker is red. `committedPoint` no longer has its own marker color and does not directly drive active marker rendering; when a previously saved checkout point appears in visible/preloaded points, the map promotes it to `previewPoint`, highlights the marker/list row, and may reopen the balloon without dispatching `wdc:point-selected`.
 
 Version 0.25.10 removes the temporary Leaflet `bindPopup(address)` used during marker creation; Leaflet popups are now bound only when `openPointPopup(point, html)` receives the full card HTML. The compact status and old modal footer confirm controls are visually hidden, leaving only the shared list footer button in the visible list area. Active-row scrolling now computes row and container rectangles with `getBoundingClientRect()` and scrolls only the list container.
 
@@ -8,7 +10,7 @@ Version 0.25.8 refines pickup map ergonomics. Single pins keep the blue marker/w
 
 Marker clicks scroll the side/mobile list to the active row. List-row clicks open the same balloon without hard-centering the map; providers rely on popup/balloon auto-pan to nudge only when the balloon would be clipped. Leaflet grid clustering now stops at zoom 17+, and the Yandex provider bypasses `Clusterer` at zoom 17+, so strongly zoomed points render as individual pins even when close together.
 
-Version 0.25.7 makes preview state the visual source of truth. If the customer has already committed point A but opens point B, point B owns the active marker, open balloon, and preview row while checkout remains committed to A. If B leaves the current bbox, preview is cleared and the active marker falls back to committed point A when it is visible.
+Version 0.25.7 makes preview state the visual source of truth. If the customer has already committed point A but opens point B, point B owns the active marker, open balloon, and preview row while checkout remains committed to A. If B leaves the current bbox, preview is cleared; in 0.25.11 a visible committed point is promoted back into preview instead of getting a separate committed marker color.
 
 Version 0.25.6 simplifies pickup type labels and tightens the map selection flow. Admin settings now keep one type name per OPS/PVZ/APS entry: `Название в карточке/баллоне/списке`, exposed to the frontend as `pickupPointTypes.*.label`.
 

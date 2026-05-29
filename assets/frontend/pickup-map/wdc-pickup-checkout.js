@@ -75,6 +75,7 @@
 
 	function applySelection(container, point) {
 		var snapshot = point.snapshot || {};
+		var selectedPoint = normalizeSelectedPoint(point);
 		container.querySelector('[data-wdc-pickup-point-id]').value = point.id || '';
 		container.querySelector('[data-wdc-pickup-point-code]').value = point.point_code || '';
 		container.querySelector('[data-wdc-pickup-address]').textContent = point.address || '';
@@ -82,6 +83,13 @@
 		container.querySelector('[data-wdc-pickup-work-time]').textContent = snapshot.work_time || '';
 		container.querySelector('[data-wdc-pickup-selection]').hidden = !point.point_code;
 		container.querySelector('[data-wdc-pickup-open]').textContent = point.point_code ? labels.change : labels.choose;
+		if (!window.wdcPickupCheckout) {
+			window.wdcPickupCheckout = {};
+		}
+		window.wdcPickupCheckout.selectedPickupPoint = selectedPoint;
+		if (window.wdcPickupCheckout.initialContext) {
+			window.wdcPickupCheckout.initialContext.selectedPoint = selectedPoint;
+		}
 	}
 
 	function resetSelection() {
@@ -110,7 +118,8 @@
 		var configContext = {
 			lat: config.lat || '',
 			lng: config.lng || '',
-			query: config.query || ''
+			query: config.query || '',
+			selectedPoint: config.selectedPoint || (window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint) || null
 		};
 		var fieldContext = contextFromFields();
 		debug('contextFromFields', fieldContext);
@@ -126,7 +135,8 @@
 			lng: fieldContext.lng || runtimeContext.lng || localizedContext.lng,
 			query: fieldContext.query || runtimeContext.query || localizedContext.query,
 			postcode: fieldContext.postcode || runtimeContext.postcode || localizedContext.postcode || '',
-			display_name: fieldContext.display_name || runtimeContext.display_name || localizedContext.display_name || ''
+			display_name: fieldContext.display_name || runtimeContext.display_name || localizedContext.display_name || '',
+			selectedPoint: localizedContext.selectedPoint || runtimeContext.selectedPoint || null
 		};
 		debug('sameDestination field/current', sameDestination(fieldContext, currentContext));
 		debug('chosen lat/lng source', latSource);
@@ -321,6 +331,23 @@
 			region_name: context.region_name || '',
 			query: query,
 			country_code: context.country_code || 'RU'
+		};
+	}
+
+	function normalizeSelectedPoint(point) {
+		point = point || {};
+		var snapshot = point.snapshot || {};
+		return {
+			id: point.id || snapshot.id || '',
+			point_code: point.point_code || snapshot.point_code || '',
+			point_type: point.point_type || snapshot.point_type || '',
+			postcode: point.postcode || snapshot.postcode || '',
+			address: point.address || snapshot.address || '',
+			lat: point.lat !== undefined && point.lat !== null ? point.lat : snapshot.lat,
+			lng: point.lng !== undefined && point.lng !== null ? point.lng : snapshot.lng,
+			work_time: point.work_time || snapshot.work_time || '',
+			description: point.description || snapshot.description || '',
+			snapshot: snapshot
 		};
 	}
 

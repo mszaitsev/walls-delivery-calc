@@ -1,6 +1,8 @@
 # Russian Post Pickup Points
 
-Version: 0.25.10.
+Version: 0.25.11.
+
+Version 0.25.11 makes marker color depend only on preview/active state. Normal single pins remain blue; the active preview pin is red in both Leaflet and Yandex. A previously saved checkout point is localized as `initialContext.selectedPoint`, then becomes `previewPoint` when it is present in the current visible point set, so reopening the map highlights the saved point without firing `wdc:point-selected`.
 
 Version 0.25.10 removes the temporary Leaflet address-only popup from marker creation. Leaflet binds popups only in `openPointPopup(point, html)`, where the full pickup card HTML and auto-pan options are available. The compact status and old fallback confirm button remain technical event/status surfaces only and are visually hidden, so the customer sees a single shared list footer button plus the balloon action. Active-row scrolling now uses `getBoundingClientRect()` against the list scroll container and never calls `scrollIntoView()`, preventing checkout page scroll jumps.
 
@@ -10,7 +12,7 @@ When a marker opens a preview, the side list scrolls its matching row into view 
 
 Cluster behavior now has a high-zoom escape hatch. Leaflet's grid clustering returns individual points at zoom 17 and above. Yandex uses `ymaps.Clusterer` below zoom 17 and adds placemarks directly at zoom 17+, keeping nearby points selectable on the map; when coordinates are identical, the list remains the reliable selection path.
 
-Version 0.25.7 gives preview state priority over committed selection for map visuals. When `committedPoint = A` and `previewPoint = B`, and both are visible, B owns the active marker and open balloon while A remains the checkout selection and keeps the selected list state. If B disappears after bbox reload, preview is cleared and A becomes active again when visible. Reloads still reopen the balloon automatically when the preview point remains visible.
+Version 0.25.7 gives preview state priority over committed selection for map visuals. When `committedPoint = A` and `previewPoint = B`, and both are visible, B owns the active marker and open balloon while A remains the checkout selection and keeps the selected list state. If B disappears after bbox reload, preview is cleared; in 0.25.11 a visible committed point is promoted back into preview instead of receiving a separate committed marker color. Reloads still reopen the balloon automatically when the preview point remains visible.
 
 Version 0.25.6 changes pickup type settings to one customer-facing label per type. The `Типы пунктов выдачи` block now shows only `Использовать` and `Название в карточке/баллоне/списке` for OPS, PVZ, and APS.
 
