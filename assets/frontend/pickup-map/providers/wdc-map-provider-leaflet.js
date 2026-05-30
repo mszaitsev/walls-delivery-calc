@@ -178,16 +178,48 @@
 			if (!marker || marker.lat === null || marker.lng === null) {
 				return;
 			}
+			var shift = searchMarkerShift(marker);
 			searchMarker = window.L.marker([marker.lat, marker.lng], {
 				icon: window.L.divIcon({
-					className: 'wdc-map-marker-icon',
-					html: '<span class="wdc-map-marker-pin wdc-map-marker-pin--search"><span class="wdc-map-marker-pin__inner"></span><span class="wdc-map-marker-pin__tail"></span></span>',
-					iconSize: [38, 53],
-					iconAnchor: [19, 53],
-					popupAnchor: [0, -53]
+					className: 'wdc-map-search-icon',
+					html: '<span class="wdc-map-search-pin' + shift.className + '"><span class="wdc-map-search-pin__dot"></span><span class="wdc-map-search-pin__tail"></span></span>',
+					iconSize: [30, 44],
+					iconAnchor: [15, 44],
+					popupAnchor: [0, -44]
 				}),
-				interactive: false
+				interactive: false,
+				zIndexOffset: -100
 			}).addTo(map);
+		}
+
+		function searchMarkerShift(marker) {
+			var nearest = nearestScreenPoint(marker);
+			if (!nearest || nearest.distance >= 34) {
+				return { className: '', offset: 0 };
+			}
+			var direction = nearest.searchPoint.x < nearest.point.x ? 'left' : 'right';
+			return {
+				className: ' is-overlapping is-shift-' + direction
+			};
+		}
+
+		function nearestScreenPoint(marker) {
+			var searchPoint = map.latLngToContainerPoint([marker.lat, marker.lng]);
+			var nearest = null;
+			Object.keys(pointById).forEach(function (id) {
+				var point = pointById[id];
+				if (!point || point.lat === null || point.lng === null) {
+					return;
+				}
+				var pointScreen = map.latLngToContainerPoint([point.lat, point.lng]);
+				var dx = searchPoint.x - pointScreen.x;
+				var dy = searchPoint.y - pointScreen.y;
+				var distance = Math.sqrt(dx * dx + dy * dy);
+				if (!nearest || distance < nearest.distance) {
+					nearest = { distance: distance, searchPoint: searchPoint, point: pointScreen };
+				}
+			});
+			return nearest;
 		}
 
 		function updateActiveMarkers() {

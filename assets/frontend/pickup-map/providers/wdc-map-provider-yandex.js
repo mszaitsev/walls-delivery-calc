@@ -21,6 +21,7 @@
 		var placemarkById = {};
 		var pointById = {};
 		var markerLayout = null;
+		var searchMarkerLayout = null;
 		var maxClusterZoom = 18;
 		var suppressPopupClose = false;
 
@@ -31,6 +32,9 @@
 			ymapsApi = ymaps;
 			markerLayout = ymaps.templateLayoutFactory.createClass(
 				'<div class="wdc-map-marker-pin wdc-map-marker-pin--$[properties.wdcType] $[properties.wdcActive]"><span class="wdc-map-marker-pin__inner"></span><span class="wdc-map-marker-pin__tail"></span></div>'
+			);
+			searchMarkerLayout = ymaps.templateLayoutFactory.createClass(
+				'<div class="wdc-map-search-pin $[properties.wdcShift]"><span class="wdc-map-search-pin__dot"></span><span class="wdc-map-search-pin__tail"></span></div>'
 			);
 			map = new ymaps.Map(container, {
 				center: [pendingCenter.lat, pendingCenter.lng],
@@ -133,16 +137,40 @@
 			if (!map || !ymapsApi || !marker || marker.lat === null || marker.lng === null) {
 				return;
 			}
+			var shift = searchMarkerShift(marker);
 			searchPlacemark = new ymapsApi.Placemark([marker.lat, marker.lng], {
-				wdcActive: '',
-				wdcType: 'search'
+				wdcShift: shift.className
 			}, {
-				iconLayout: markerLayout,
-				iconOffset: [-21, -59],
-				iconShape: { type: 'Circle', coordinates: [21, 21], radius: 21 },
-				interactiveZIndex: false
+				iconLayout: searchMarkerLayout || markerLayout,
+				iconOffset: [-15, -44],
+				iconShape: { type: 'Circle', coordinates: [15, 15], radius: 15 },
+				interactiveZIndex: false,
+				zIndex: 10
 			});
 			map.geoObjects.add(searchPlacemark);
+		}
+
+		function searchMarkerShift(marker) {
+			var nearest = nearestGeoDistanceMeters(marker);
+			if (nearest === null || nearest >= 40) {
+				return { className: '', offset: 0 };
+			}
+			return { className: 'is-overlapping is-shift-right' };
+		}
+
+		function nearestGeoDistanceMeters(marker) {
+			var nearest = null;
+			Object.keys(pointById).forEach(function (id) {
+				var point = pointById[id];
+				if (!point || point.lat === null || point.lng === null) {
+					return;
+				}
+				var distance = distanceMeters(parseFloat(marker.lat), parseFloat(marker.lng), parseFloat(point.lat), parseFloat(point.lng));
+				if (nearest === null || distance < nearest) {
+					nearest = distance;
+				}
+			});
+			return nearest;
 		}
 
 		return {
@@ -316,6 +344,16 @@
 	function pointType(point) {
 		var type = String(point.point_type || point.type || 'OPS').toUpperCase();
 		return type === 'PVZ' || type === 'APS' ? type : 'OPS';
+	}
+
+	function distanceMeters(fromLat, fromLng, toLat, toLng) {
+		var earth = 6371000;
+		var dLat = (toLat - fromLat) * Math.PI / 180;
+		var dLng = (toLng - fromLng) * Math.PI / 180;
+		var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+			Math.cos(fromLat * Math.PI / 180) * Math.cos(toLat * Math.PI / 180) *
+			Math.sin(dLng / 2) * Math.sin(dLng / 2);
+		return earth * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 	}
 
 	function debugEnabled() {

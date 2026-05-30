@@ -346,8 +346,7 @@
 			});
 			loadBounds(bboxAround(searchAddress.lat, searchAddress.lng), {
 				force: true,
-				preserveSearchAddress: true,
-				previewNearest: true
+				preserveSearchAddress: true
 			});
 		}
 
