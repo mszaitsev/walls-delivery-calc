@@ -1,6 +1,6 @@
 # Walls Delivery Calc
 
-Version: 0.26.6.
+Version: 0.26.7.
 
 Version 0.26.4 changes the pickup address search marker into a distinct red pin, separate from pickup point flag markers. Address/postcode search no longer auto-previews or opens the nearest pickup point after the forced bbox load; it only sorts the list by distance from the search marker. Provider adapters detect close visual overlap between the search pin and pickup markers, shift the search pin sideways without changing its coordinates, and keep it below pickup markers/non-interactive so nearby pickup markers remain clickable.
 
