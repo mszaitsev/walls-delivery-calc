@@ -45,6 +45,12 @@
 				body: JSON.stringify({ point_id: pointId, shipping_method_id: shippingMethodId })
 			});
 		},
+		resolveLocation: function (point, checkoutContext) {
+			return request('checkout/pickup-point/resolve-location', {
+				method: 'POST',
+				body: JSON.stringify({ point: point || {}, checkout_context: checkoutContext || {} })
+			});
+		},
 		reset: function () {
 			return request('checkout/pickup-point', { method: 'DELETE' });
 		},

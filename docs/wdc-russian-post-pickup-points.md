@@ -1,6 +1,12 @@
 # Russian Post Pickup Points
 
-Version: 0.26.0.
+Version: 0.27.0.
+
+Version 0.27.0 protects checkout from stale pickup tariffs when a Russian Post pickup point belongs to another locality. During pickup commit, the frontend sends the point and current checkout context to `POST /wp-json/wdc/v1/checkout/pickup-point/resolve-location` with the REST nonce. The backend resolves the point against the local locations table only; it does not spend DaData quota.
+
+Different locality detection uses FIAS/GUID first (`wdc_platform_location_fias_id` versus `fias_location_guid`), then normalized region plus city/settlement, and postal code only as the last fallback. If a different local location is resolved, the map modal shows a confirmation: the customer is warned that the checkout locality will change and delivery cost will be recalculated. Confirming updates hidden location fields and WooCommerce city/postcode/country/state fields, suppresses the automatic pickup reset for that controlled change, saves the selected pickup point, and triggers WooCommerce checkout recalculation. Cancelling keeps the modal, preview, checkout destination, and saved pickup point unchanged.
+
+If the endpoint cannot resolve a local location for the pickup point, it returns `location=null` and the frontend keeps the previous save behavior for this MVP.
 
 Version 0.26.0 adds checkout pickup address search above the map. The modal search field now calls `GET /wp-json/wdc/v1/points/address-search` with `query`, optional `location_id`, and `country_code`. Free-form address, street, house, and postal-index queries are accepted. Address queries are resolved through DaData, then the map moves to the resolved coordinates and the pickup list is rebuilt from nearest points.
 

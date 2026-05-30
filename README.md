@@ -1,6 +1,10 @@
 # Walls Delivery Calc
 
-Version: 0.26.10.
+Version: 0.27.0.
+
+Version 0.27.0 adds cross-location protection for Russian Post pickup selection in checkout. If a customer commits a pickup point from another locality, the checkout compares the current destination and pickup point by FIAS/GUID first, then by normalized region plus city/settlement, and only then by postal code. For a different local pickup destination the map modal shows an in-modal confirmation, warns that the shipping cost will be recalculated, updates the checkout location fields only after confirmation, saves the pickup point, and triggers WooCommerce `update_checkout`. Cancelling leaves the map open and does not change the checkout destination or saved pickup point.
+
+The new nonce-protected `POST /wp-json/wdc/v1/checkout/pickup-point/resolve-location` endpoint resolves a pickup point to a local checkout-compatible location without calling DaData. It uses the local locations table by `location_id` when available, then postal code plus city/region matching, then normalized city/region search, and finally postal code as a safe fallback. If no local location is found, checkout keeps the previous behavior and saves the pickup point without running the cross-location flow.
 
 Version 0.26.4 changes the pickup address search marker into a distinct red pin, separate from pickup point flag markers. Address/postcode search no longer auto-previews or opens the nearest pickup point after the forced bbox load; it only sorts the list by distance from the search marker. Provider adapters detect close visual overlap between the search pin and pickup markers, shift the search pin sideways without changing its coordinates, and keep it below pickup markers/non-interactive so nearby pickup markers remain clickable.
 

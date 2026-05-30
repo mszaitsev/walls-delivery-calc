@@ -41,6 +41,43 @@
 	box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
 }
 
+.wdc-pickup-location-confirm {
+	position: absolute;
+	inset: 0;
+	z-index: 5;
+	display: grid;
+	place-items: center;
+	padding: 20px;
+	background: rgba(17, 24, 39, 0.42);
+}
+
+.wdc-pickup-location-confirm__panel {
+	width: min(460px, 100%);
+	padding: 20px;
+	border-radius: 8px;
+	background: #fff;
+	box-shadow: 0 18px 45px rgba(15, 23, 42, 0.28);
+}
+
+.wdc-pickup-location-confirm__panel h3 {
+	margin: 0 0 10px;
+	font-size: 18px;
+	line-height: 1.35;
+}
+
+.wdc-pickup-location-confirm__panel p {
+	margin: 0;
+	line-height: 1.5;
+}
+
+.wdc-pickup-location-confirm__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	justify-content: flex-end;
+	margin-top: 18px;
+}
+
 .wdc-pickup-modal__header,
 .wdc-pickup-modal__footer {
 	display: flex;
@@ -388,11 +425,11 @@
 }
 
 .wdc-map-search-pin.is-shift-right {
-	transform: translateX(15px) translateY(-10px);
+	transform: translateX(38px) translateY(-10px);
 }
 
 .wdc-map-search-pin.is-shift-left {
-	transform: translateX(-15px) translateY(-10px);
+	transform: translateX(-38px) translateY(-10px);
 }
 
 .wdc-map-marker {

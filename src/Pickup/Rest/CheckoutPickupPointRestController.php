@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Pickup\Rest;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Pickup\Services\PickupPointLocationResolver;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -14,7 +15,8 @@ final class CheckoutPickupPointRestController {
 
 	public function __construct(
 		private RussianPostPickupPointRepository $repository,
-		private CheckoutSessionManager $session_manager
+		private CheckoutSessionManager $session_manager,
+		private ?PickupPointLocationResolver $location_resolver = null
 	) {
 	}
 
@@ -45,6 +47,15 @@ final class CheckoutPickupPointRestController {
 			array(
 				'methods' => 'GET',
 				'callback' => array( $this, 'state' ),
+				'permission_callback' => array( $this, 'check_nonce' ),
+			)
+		);
+		register_rest_route(
+			self::NAMESPACE,
+			'/checkout/pickup-point/resolve-location',
+			array(
+				'methods' => 'POST',
+				'callback' => array( $this, 'resolve_location' ),
 				'permission_callback' => array( $this, 'check_nonce' ),
 			)
 		);
@@ -117,6 +128,40 @@ final class CheckoutPickupPointRestController {
 		);
 	}
 
+	public function resolve_location( mixed $request ): mixed {
+		if ( ! $this->location_resolver instanceof PickupPointLocationResolver ) {
+			return $this->response(
+				array(
+					'requires_location_change' => false,
+					'location' => null,
+					'message' => 'Pickup point location resolver is unavailable.',
+				)
+			);
+		}
+
+		$point = $this->array_param( $request, 'point' );
+		if ( array() === $point ) {
+			$point_id = (int) $this->param( $request, 'point_id' );
+			if ( $point_id > 0 ) {
+				$row = $this->repository->find_row_by_id( $point_id );
+				if ( is_array( $row ) ) {
+					$point = $this->point_payload_from_row( $row );
+				}
+			}
+		}
+
+		if ( array() === $point ) {
+			return $this->error( 'invalid_point', 'Pickup point payload is required.', 400 );
+		}
+
+		$checkout_context = $this->array_param( $request, 'checkout_context' );
+		if ( array() === $checkout_context ) {
+			$checkout_context = $this->session_manager->city_context();
+		}
+
+		return $this->response( $this->location_resolver->resolve( $point, $checkout_context ) );
+	}
+
 	/**
 	 * @return array<string,mixed>|null
 	 */
@@ -132,10 +177,31 @@ final class CheckoutPickupPointRestController {
 				'lng'          => $context['lng'] ?? $context['longitude'] ?? null,
 				'postcode'     => $context['postcode'] ?? $context['postal_code'] ?? '',
 				'display_name' => $context['display_name'] ?? $context['city_name'] ?? $context['settlement_name'] ?? '',
+				'city_name'    => $context['city_name'] ?? $context['settlement_name'] ?? $context['display_name'] ?? '',
 				'region_name'  => $context['region_name'] ?? '',
 				'country_code' => $context['country_code'] ?? 'RU',
+				'location_id'  => $context['location_id'] ?? '',
+				'fias_id'      => $context['fias_id'] ?? '',
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,mixed>
+	 */
+	private function point_payload_from_row( array $row ): array {
+		return array(
+			'id' => (int) ( $row['id'] ?? 0 ),
+			'postal_code' => (string) ( $row['postcode'] ?? '' ),
+			'postcode' => (string) ( $row['postcode'] ?? '' ),
+			'city' => (string) ( $row['city_name'] ?? '' ),
+			'region' => (string) ( $row['region_name'] ?? '' ),
+			'address' => (string) ( $row['address'] ?? '' ),
+			'fias_location_guid' => (string) ( $row['fias_location_guid'] ?? '' ),
+			'lat' => $row['latitude'] ?? null,
+			'lng' => $row['longitude'] ?? null,
 		);
 	}
 
@@ -152,6 +218,7 @@ final class CheckoutPickupPointRestController {
 			'address' => (string) ( $row['address'] ?? '' ),
 			'city' => (string) ( $row['city_name'] ?? '' ),
 			'region' => (string) ( $row['region_name'] ?? '' ),
+			'fias_location_guid' => (string) ( $row['fias_location_guid'] ?? '' ),
 			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
 			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
 			'work_time' => (string) ( $row['work_time'] ?? '' ),
@@ -194,6 +261,20 @@ final class CheckoutPickupPointRestController {
 		}
 
 		return is_array( $value ) ? '' : sanitize_text_field( wp_unslash( (string) $value ) );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function array_param( mixed $request, string $key ): array {
+		$value = array();
+		if ( is_array( $request ) ) {
+			$value = $request[ $key ] ?? array();
+		} elseif ( is_object( $request ) && method_exists( $request, 'get_param' ) ) {
+			$value = $request->get_param( $key );
+		}
+
+		return is_array( $value ) ? $value : array();
 	}
 
 	private function header( mixed $request, string $key ): string {

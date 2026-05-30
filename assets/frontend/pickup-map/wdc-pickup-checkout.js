@@ -7,6 +7,7 @@
 	var prefetchTimer = 0;
 	var prefetchController = null;
 	var prefetchCache = null;
+	var suppressNextDestinationReset = false;
 
 	function init(container) {
 		if (container.dataset.wdcPickupReady) {
@@ -43,19 +44,57 @@
 				modal.destroy();
 			}
 
-			function savePoint(point) {
+			function commitPoint(point) {
 				if (!point || savingPoint) {
+					return Promise.resolve(false);
+				}
+				savingPoint = true;
+				confirmButton.disabled = true;
+				return window.WDCPickupApi.save(point.id, method).then(function (response) {
+					applySelection(container, response.pickup_point || {});
+					close();
+					triggerCheckoutUpdate();
+					return true;
+				}).catch(function () {
+					savingPoint = false;
+					confirmButton.disabled = false;
+					return false;
+				});
+			}
+
+			function savePoint(point) {
+				point = point || map.selected();
+				if (!point || savingPoint) {
+					return;
+				}
+				var checkoutContext = contextFromFields();
+				if (pointMatchesDestinationQuick(point, checkoutContext) || !window.WDCPickupApi.resolveLocation) {
+					commitPoint(point);
 					return;
 				}
 				savingPoint = true;
 				confirmButton.disabled = true;
-				window.WDCPickupApi.save(point.id, method).then(function (response) {
-					applySelection(container, response.pickup_point || {});
-					close();
-					triggerCheckoutUpdate();
+				window.WDCPickupApi.resolveLocation(pointPayload(point), checkoutContext).then(function (response) {
+					if (!response || !response.requires_location_change || !response.location) {
+						savingPoint = false;
+						confirmButton.disabled = false;
+						commitPoint(point);
+						return;
+					}
+					showLocationChangeConfirm(modal.root, response.location).then(function (confirmed) {
+						if (!confirmed) {
+							savingPoint = false;
+							confirmButton.disabled = false;
+							return;
+						}
+						applyConfirmedPickupLocationChange(response.location);
+						savingPoint = false;
+						commitPoint(point);
+					});
 				}).catch(function () {
 					savingPoint = false;
 					confirmButton.disabled = false;
+					commitPoint(point);
 				});
 			}
 
@@ -152,7 +191,10 @@
 			query: fieldContext.query || runtimeContext.query || localizedContext.query,
 			postcode: fieldContext.postcode || runtimeContext.postcode || localizedContext.postcode || '',
 			display_name: fieldContext.display_name || runtimeContext.display_name || localizedContext.display_name || '',
-			location_id: runtimeContext.location_id || localizedContext.location_id || '',
+			location_id: fieldContext.location_id || runtimeContext.location_id || localizedContext.location_id || '',
+			fias_id: fieldContext.fias_id || runtimeContext.fias_id || localizedContext.fias_id || '',
+			city_name: fieldContext.city_name || runtimeContext.city_name || localizedContext.city_name || '',
+			region_name: fieldContext.region_name || runtimeContext.region_name || localizedContext.region_name || '',
 			country_code: fieldContext.country_code || runtimeContext.country_code || localizedContext.country_code || 'RU',
 			selectedPoint: localizedContext.selectedPoint || runtimeContext.selectedPoint || null
 		};
@@ -173,6 +215,8 @@
 		var hiddenDisplay = fieldValue('wdc_platform_location_display_name');
 		var hiddenRegion = fieldValue('wdc_platform_location_region_name');
 		var hiddenLocationId = fieldValue('wdc_platform_location_id');
+		var hiddenFiasId = fieldValue('wdc_platform_location_fias_id');
+		var hiddenCity = fieldValue('wdc_platform_location_city_name') || fieldValue('wdc_platform_location_place_name');
 		var visiblePostcode = fieldValue('shipping_postcode') || fieldValue('billing_postcode');
 		var visibleCity = fieldValue('shipping_city') || fieldValue('billing_city');
 		var visibleDestinationChanged = !!(visibleCity && hiddenDisplay && normalizeText(visibleCity) !== normalizeText(hiddenDisplay));
@@ -184,6 +228,9 @@
 		context.display_name = city || hiddenRegion;
 		context.country_code = country || 'RU';
 		context.location_id = hiddenLocationId;
+		context.fias_id = hiddenFiasId;
+		context.city_name = visibleDestinationChanged ? visibleCity : (hiddenCity || hiddenDisplay || visibleCity);
+		context.region_name = hiddenRegion;
 		if (!visibleDestinationChanged && validCoordinate(hiddenLat, hiddenLng)) {
 			context.lat = hiddenLat;
 			context.lng = hiddenLng;
@@ -221,6 +268,11 @@
 	function sameDestination(a, b) {
 		if (!a || !b) {
 			return false;
+		}
+		var aFias = normalizeGuid(a.fias_id || '');
+		var bFias = normalizeGuid(b.fias_id || '');
+		if (aFias && bFias) {
+			return aFias === bFias;
 		}
 		var aPostcode = normalizeText(a.postcode || '');
 		var bPostcode = normalizeText(b.postcode || '');
@@ -296,6 +348,8 @@
 		setHiddenValue('wdc_platform_location_display_name', context.display_name || '');
 		setHiddenValue('wdc_platform_location_region_name', context.region_name || '');
 		setHiddenValue('wdc_platform_location_id', context.location_id || '');
+		setHiddenValue('wdc_platform_location_fias_id', context.fias_id || '');
+		setHiddenValue('wdc_platform_location_city_name', context.city_name || context.display_name || '');
 	}
 
 	function setHiddenValue(name, value) {
@@ -355,7 +409,9 @@
 			region_name: context.region_name || '',
 			query: query,
 			country_code: context.country_code || 'RU',
-			location_id: context.location_id || ''
+			location_id: context.location_id || '',
+			fias_id: context.fias_id || '',
+			city_name: context.city_name || displayName
 		};
 	}
 
@@ -389,8 +445,127 @@
 			region_name: detail.region_name || '',
 			query: query,
 			country_code: detail.country_code || 'RU',
-			location_id: detail.location_id || ''
+			location_id: detail.location_id || detail.id || '',
+			fias_id: detail.fias_id || '',
+			city_name: detail.city_name || displayName
 		};
+	}
+
+	function pointPayload(point) {
+		point = point || {};
+		return {
+			id: point.id || '',
+			location_id: point.location_id || '',
+			postal_code: point.postal_code || point.postcode || '',
+			postcode: point.postcode || point.postal_code || '',
+			city: point.city || point.city_name || '',
+			region: point.region || point.region_name || '',
+			address: point.address || '',
+			fias_location_guid: point.fias_location_guid || point.fias_id || '',
+			lat: point.lat || '',
+			lng: point.lng || ''
+		};
+	}
+
+	function pointMatchesDestinationQuick(point, checkoutContext) {
+		var checkoutFias = normalizeGuid(checkoutContext && checkoutContext.fias_id);
+		var pointFias = normalizeGuid(point && (point.fias_location_guid || point.fias_id));
+		if (checkoutFias && pointFias) {
+			return checkoutFias === pointFias;
+		}
+		var checkoutRegion = normalizeText(checkoutContext && checkoutContext.region_name);
+		var checkoutCity = normalizeText((checkoutContext && (checkoutContext.city_name || checkoutContext.display_name)) || '');
+		var pointRegion = normalizeText(point && (point.region || point.region_name));
+		var pointCity = normalizeText(point && (point.city || point.city_name));
+		if (checkoutRegion && checkoutCity && pointRegion && pointCity) {
+			return checkoutRegion === pointRegion && (checkoutCity === pointCity || containsDestinationName(checkoutCity, pointCity) || containsDestinationName(pointCity, checkoutCity));
+		}
+		var checkoutPostcode = normalizeText(checkoutContext && checkoutContext.postcode);
+		var pointPostcode = normalizeText(point && (point.postal_code || point.postcode));
+		return !!(checkoutPostcode && pointPostcode && checkoutPostcode === pointPostcode);
+	}
+
+	function normalizeGuid(value) {
+		return String(value || '').replace(/[^a-f0-9]/gi, '').toLowerCase();
+	}
+
+	function showLocationChangeConfirm(root, location) {
+		return new Promise(function (resolve) {
+			var city = location.city_name || location.display_name || location.postal_code || '';
+			var dialog = document.createElement('div');
+			dialog.className = 'wdc-pickup-location-confirm';
+			dialog.innerHTML = [
+				'<div class="wdc-pickup-location-confirm__panel" role="alertdialog" aria-modal="true">',
+				'<h3>Пункт выдачи в другом населенном пункте</h3>',
+				'<p>Вы выбрали пункт выдачи не в текущем населенном пункте оформления заказа. Мы изменим населенный пункт на «' + escapeHtml(city) + '» и пересчитаем стоимость доставки.</p>',
+				'<div class="wdc-pickup-location-confirm__actions">',
+				'<button type="button" class="button button-primary" data-wdc-location-confirm>Пересчитать и выбрать</button>',
+				'<button type="button" class="button" data-wdc-location-cancel>Отмена</button>',
+				'</div>',
+				'</div>'
+			].join('');
+			root.appendChild(dialog);
+			function finish(value) {
+				dialog.remove();
+				resolve(value);
+			}
+			dialog.querySelector('[data-wdc-location-confirm]').addEventListener('click', function () { finish(true); });
+			dialog.querySelector('[data-wdc-location-cancel]').addEventListener('click', function () { finish(false); });
+			dialog.querySelector('[data-wdc-location-cancel]').focus();
+		});
+	}
+
+	function applyConfirmedPickupLocationChange(location) {
+		var context = contextFromResolvedLocation(location);
+		suppressNextDestinationReset = true;
+		updateCurrentContext(context);
+		applyContextToHidden(context);
+		setCheckoutFieldValue('shipping_country', context.country_code || 'RU');
+		setCheckoutFieldValue('billing_country', context.country_code || 'RU');
+		setCheckoutFieldValue(fieldExists('shipping_city') ? 'shipping_city' : 'billing_city', context.city_name || context.display_name || '');
+		setCheckoutFieldValue(fieldExists('shipping_postcode') ? 'shipping_postcode' : 'billing_postcode', context.postcode || '');
+		if (context.region_name) {
+			setCheckoutFieldValue(fieldExists('shipping_state') ? 'shipping_state' : 'billing_state', context.region_name);
+		}
+		window.setTimeout(function () { suppressNextDestinationReset = false; }, 0);
+	}
+
+	function contextFromResolvedLocation(location) {
+		location = location || {};
+		var postcode = String(location.postal_code || location.postcode || '').trim();
+		var city = String(location.city_name || location.display_name || '').trim();
+		var query = [postcode, city].filter(Boolean).join(' ').trim();
+		return {
+			lat: location.lat || location.latitude || '',
+			lng: location.lng || location.longitude || '',
+			postcode: postcode,
+			display_name: location.display_name || city,
+			city_name: city,
+			region_name: location.region_name || '',
+			query: query,
+			country_code: location.country_code || 'RU',
+			location_id: location.location_id || location.id || '',
+			fias_id: location.fias_id || ''
+		};
+	}
+
+	function fieldExists(name) {
+		return !!document.querySelector('[name="' + name + '"]');
+	}
+
+	function setCheckoutFieldValue(name, value) {
+		var field = document.querySelector('[name="' + name + '"]');
+		if (!field || field.value === String(value || '')) {
+			return;
+		}
+		field.value = String(value || '');
+		field.dispatchEvent(new Event('change', { bubbles: true }));
+	}
+
+	function escapeHtml(value) {
+		return String(value || '').replace(/[&<>"']/g, function (char) {
+			return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char];
+		});
 	}
 
 	function stateContextMatchesCurrentDestination(context) {
@@ -499,6 +674,10 @@
 	document.addEventListener('change', function (event) {
 		if (event.target.matches('#billing_city, #shipping_city, #billing_country, #shipping_country, #billing_postcode, #shipping_postcode, [name="billing_city"], [name="shipping_city"], [name="billing_country"], [name="shipping_country"], [name="billing_postcode"], [name="shipping_postcode"]')) {
 			invalidatePrefetch();
+			if (suppressNextDestinationReset) {
+				document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
+				return;
+			}
 			resetSelection();
 			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 			return;
@@ -513,6 +692,10 @@
 		invalidatePrefetch();
 		updateCurrentContext(context);
 		applyContextToHidden(context);
+		if (suppressNextDestinationReset) {
+			schedulePrefetch();
+			return;
+		}
 		resetPickupSelectionOnServer();
 		clearPickupSelectionUi();
 		schedulePrefetch();
