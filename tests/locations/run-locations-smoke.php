@@ -395,59 +395,89 @@ $resume_wpdb->insert_id = 29;
 $resume_repository->save( locations_smoke_location( array( 'gar_object_id' => 882105, 'fias_id' => 'fias-resume-30', 'region_name' => 'Resume test', 'place_name' => 'Thirty', 'display_name' => 'Thirty', 'latitude' => 57.0, 'longitude' => 84.0 ) ) );
 $resume_wpdb->insert_id = 30;
 $resume_missing_after_id = $resume_repository->save( locations_smoke_location( array( 'gar_object_id' => 882106, 'fias_id' => 'fias-resume-after', 'region_name' => 'Resume test', 'place_name' => 'After', 'display_name' => 'After', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
-locations_smoke_assert( 30 === $resume_repository->find_last_id_with_coordinates(), 'find_last_id_with_coordinates must return the greatest id with usable coordinates.' );
-locations_smoke_assert( 1 === $resume_repository->count_locations_missing_coordinates_after( 30 ), 'Missing coordinates after resume id must count only rows with id greater than resume id.' );
-$resume_batch = $resume_repository->find_locations_missing_coordinates( 10, 30, 'all' );
+$resume_batch = $resume_repository->find_locations_missing_coordinates( 10, 0, 'all' );
 $resume_batch_ids = array_map( static fn( array $row ): int => (int) $row['id'], $resume_batch );
-locations_smoke_assert( array( $resume_missing_after_id ) === $resume_batch_ids, 'Missing coordinates batch after resume id must exclude empty rows before and at the resume boundary.' );
-locations_smoke_assert( ! in_array( $resume_missing_before_id, $resume_batch_ids, true ) && ! in_array( $resume_missing_inside_id, $resume_batch_ids, true ), 'Missing coordinates before the last coordinate id must not be selected.' );
+locations_smoke_assert( array( $resume_missing_before_id, $resume_missing_inside_id, $resume_missing_after_id ) === $resume_batch_ids, 'Missing coordinates batch from start must include empty rows before and after valid coordinates.' );
 
 $resume_search = new LocationSearchService( $resume_repository );
 $resume_importer = new LocationImportService( $resume_repository );
 $_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
 ob_start();
 ( new LocationsAdminPage(
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.7' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.9' ),
 	$resume_repository,
 	$resume_search,
 	$resume_importer
 ) )->ajax_dadata_coordinates_fill_start();
 $resume_start_payload = json_decode( (string) ob_get_clean(), true );
 $resume_start_job = is_array( $resume_start_payload ) ? (array) ( $resume_start_payload['data'] ?? array() ) : array();
-locations_smoke_assert( 30 === (int) ( $resume_start_job['resume_after_id'] ?? 0 ) && 'after_last_coordinate' === (string) ( $resume_start_job['resume_strategy'] ?? '' ), 'Coordinate batch start must store resume_after_id from the last row with coordinates.' );
-locations_smoke_assert( 1 === (int) ( $resume_start_job['total'] ?? 0 ), 'Coordinate batch start total must count only missing rows after resume_after_id.' );
-$resume_client = new WdcLocationsSmokeQueuedSuggestionClient( array( array( 'success' => true, 'suggestions' => array( array( 'data' => array( 'geo_lat' => '58.000000', 'geo_lon' => '85.000000' ) ) ) ) ) );
+locations_smoke_assert( 0 === (int) ( $resume_start_job['resume_after_id'] ?? -1 ) && 'from_start_missing_only' === (string) ( $resume_start_job['resume_strategy'] ?? '' ), 'Coordinate batch start must use from-start missing-only strategy.' );
+locations_smoke_assert( 0 === (int) ( $resume_start_job['last_id'] ?? -1 ) && 0 === (int) ( $resume_start_job['cursor'] ?? -1 ), 'Coordinate batch start must begin from id 0.' );
+locations_smoke_assert( 3 === (int) ( $resume_start_job['total'] ?? 0 ), 'Coordinate batch start total must count all missing coordinates across the database.' );
+$resume_client = new WdcLocationsSmokeQueuedSuggestionClient(
+	array(
+		array( 'success' => true, 'suggestions' => array( array( 'data' => array( 'geo_lat' => '58.000000', 'geo_lon' => '85.000000' ) ) ) ),
+		array( 'success' => true, 'suggestions' => array( array( 'data' => array( 'geo_lat' => '59.000000', 'geo_lon' => '86.000000' ) ) ) ),
+		array( 'success' => true, 'suggestions' => array( array( 'data' => array( 'geo_lat' => '60.000000', 'geo_lon' => '87.000000' ) ) ) ),
+	)
+);
 $resume_step_job = ( new LocationCoordinatesDadataBatchUpdater( $resume_repository, $resume_client ) )->step( $resume_start_job, 10 );
-locations_smoke_assert( in_array( $resume_missing_after_id, (array) ( $resume_step_job['current_batch'] ?? array() ), true ), 'Coordinate batch step must include missing rows after resume_after_id.' );
-locations_smoke_assert( 0.0 === (float) $resume_wpdb->rows[ $resume_missing_before_id ]['latitude'] && null === $resume_wpdb->rows[ $resume_missing_inside_id ]['latitude'], 'Coordinate batch step must leave missing rows before resume_after_id untouched.' );
-locations_smoke_assert( 58.0 === (float) $resume_wpdb->rows[ $resume_missing_after_id ]['latitude'], 'Coordinate batch step must update missing rows after resume_after_id.' );
+locations_smoke_assert( in_array( $resume_missing_before_id, (array) ( $resume_step_job['current_batch'] ?? array() ), true ) && in_array( $resume_missing_after_id, (array) ( $resume_step_job['current_batch'] ?? array() ), true ), 'Coordinate batch step must include missing rows from the beginning and end of the table.' );
+locations_smoke_assert( 58.0 === (float) $resume_wpdb->rows[ $resume_missing_before_id ]['latitude'] && 59.0 === (float) $resume_wpdb->rows[ $resume_missing_inside_id ]['latitude'] && 60.0 === (float) $resume_wpdb->rows[ $resume_missing_after_id ]['latitude'], 'Coordinate batch step must update all missing rows while skipping valid coordinates.' );
+locations_smoke_assert( 55.0 === (float) $resume_wpdb->rows[10]['latitude'] && 57.0 === (float) $resume_wpdb->rows[30]['latitude'], 'Coordinate batch step must not modify rows that already have valid coordinates.' );
 
-$GLOBALS['wdc_locations_smoke_options']['wdc_dadata_coordinates_fill_job']['phase'] = 'finished';
+update_option(
+	'wdc_dadata_postcode_fill_job',
+	array(
+		'phase' => 'running',
+		'status' => 'running',
+		'processed' => 4,
+	)
+);
+update_option(
+	'wdc_dadata_coordinates_fill_job',
+	array(
+		'phase' => 'running',
+		'status' => 'running',
+		'processed' => 99,
+		'updated' => 88,
+		'last_id' => 999,
+		'cursor' => 999,
+		'current_batch' => array( 999 ),
+	)
+);
 $_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
 ob_start();
 ( new LocationsAdminPage(
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.7' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.9' ),
 	$resume_repository,
 	$resume_search,
 	$resume_importer
 ) )->ajax_dadata_coordinates_fill_reset();
-json_decode( (string) ob_get_clean(), true );
+$resume_reset_json = (string) ob_get_clean();
+$resume_reset_payload = json_decode( $resume_reset_json, true );
+locations_smoke_assert( ! empty( $resume_reset_payload['success'] ) && 'idle' === (string) ( $resume_reset_payload['data']['phase'] ?? '' ), 'Coordinate reset must stop a running job and return idle.' );
+locations_smoke_assert( ! str_contains( $resume_reset_json, 'Остановите текущую задачу' ), 'Coordinate reset must not return the old stop-before-reset error.' );
 locations_smoke_assert( ! array_key_exists( 'wdc_dadata_coordinates_fill_job', $GLOBALS['wdc_locations_smoke_options'] ), 'Coordinate reset must clear job state before the next start.' );
+locations_smoke_assert( isset( $GLOBALS['wdc_locations_smoke_options']['wdc_dadata_postcode_fill_job'] ) && 'running' === (string) $GLOBALS['wdc_locations_smoke_options']['wdc_dadata_postcode_fill_job']['phase'], 'Coordinate reset must not touch DaData postcode job state.' );
+$resume_reset_missing_id = $resume_repository->save( locations_smoke_location( array( 'gar_object_id' => 882107, 'fias_id' => 'fias-reset-new-missing', 'region_name' => 'Resume test', 'place_name' => 'New missing', 'display_name' => 'New missing', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+locations_smoke_assert( 60.0 === (float) $resume_wpdb->rows[ $resume_missing_after_id ]['latitude'] && 87.0 === (float) $resume_wpdb->rows[ $resume_missing_after_id ]['longitude'], 'Coordinate reset must not delete coordinates already saved in the locations table.' );
 $_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
 ob_start();
 ( new LocationsAdminPage(
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.7' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.9' ),
 	$resume_repository,
 	$resume_search,
 	$resume_importer
 ) )->ajax_dadata_coordinates_fill_start();
 $resume_restart_payload = json_decode( (string) ob_get_clean(), true );
-locations_smoke_assert( 31 === (int) ( $resume_restart_payload['data']['resume_after_id'] ?? 0 ), 'Coordinate batch start after reset must recompute resume_after_id from current database coordinates.' );
+locations_smoke_assert( 0 === (int) ( $resume_restart_payload['data']['resume_after_id'] ?? -1 ) && 'from_start_missing_only' === (string) ( $resume_restart_payload['data']['resume_strategy'] ?? '' ), 'Coordinate batch start after reset must keep resume_after_id at 0.' );
+locations_smoke_assert( 0 === (int) ( $resume_restart_payload['data']['last_id'] ?? -1 ) && 0 === (int) ( $resume_restart_payload['data']['cursor'] ?? -1 ) && array() === (array) ( $resume_restart_payload['data']['current_batch'] ?? array( 999 ) ), 'Coordinate batch start after reset must not continue old cursor or current batch.' );
+locations_smoke_assert( 1 === (int) ( $resume_restart_payload['data']['total'] ?? 0 ) && $resume_reset_missing_id > 0, 'Coordinate batch start after reset must count current missing rows from the beginning.' );
 
 $from_start_wpdb = new wpdb();
 $from_start_repository = new LocationRepository( $from_start_wpdb );
 $from_start_missing_id = $from_start_repository->save( locations_smoke_location( array( 'gar_object_id' => 882201, 'fias_id' => 'fias-from-start', 'region_name' => 'Resume test', 'place_name' => 'From start', 'display_name' => 'From start', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
-locations_smoke_assert( 0 === $from_start_repository->find_last_id_with_coordinates(), 'Coordinate resume id must be 0 when no coordinates exist.' );
 locations_smoke_assert( array( $from_start_missing_id ) === array_map( static fn( array $row ): int => (int) $row['id'], $from_start_repository->find_locations_missing_coordinates( 10, 0, 'all' ) ), 'Coordinate batch must start from the beginning when no coordinates exist.' );
 
 $nothing_after_wpdb = new wpdb();
@@ -459,13 +489,13 @@ $nothing_after_repository->save( locations_smoke_location( array( 'gar_object_id
 $_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
 ob_start();
 ( new LocationsAdminPage(
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.7' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.9' ),
 	$nothing_after_repository,
 	new LocationSearchService( $nothing_after_repository ),
 	new LocationImportService( $nothing_after_repository )
 ) )->ajax_dadata_coordinates_fill_start();
 $nothing_after_payload = json_decode( (string) ob_get_clean(), true );
-locations_smoke_assert( ! empty( $nothing_after_payload['success'] ) && 'finished' === (string) ( $nothing_after_payload['data']['phase'] ?? '' ) && 0 === (int) ( $nothing_after_payload['data']['total'] ?? -1 ), 'Coordinate batch start must finish immediately when no missing rows exist after the last coordinate row.' );
+locations_smoke_assert( ! empty( $nothing_after_payload['success'] ) && 'running' === (string) ( $nothing_after_payload['data']['phase'] ?? '' ) && 1 === (int) ( $nothing_after_payload['data']['total'] ?? -1 ), 'Coordinate batch start must include missing rows before valid coordinate rows.' );
 
 $batch_wpdb = new wpdb();
 $batch_repository = new LocationRepository( $batch_wpdb );
@@ -473,7 +503,7 @@ $batch_success_id = $batch_repository->save( locations_smoke_location( array( 'g
 $batch_empty_query_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883002, 'fias_id' => 'fias-batch-empty-query', 'region_name' => 'Томская', 'place_type' => 'г', 'place_name' => 'Пустое имя', 'display_name' => '', 'postal_code' => '634000', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
 $batch_wpdb->rows[ $batch_empty_query_id ]['display_name'] = '';
 $batch_no_success_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883003, 'fias_id' => 'fias-batch-no-success', 'region_name' => 'Карелия', 'place_type' => 'г', 'place_name' => 'Сортавала', 'display_name' => 'респ Карелия, г Сортавала, поселок Уусикюля', 'postal_code' => '186752', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
-$batch_no_coordinates_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883004, 'fias_id' => 'fias-batch-empty', 'region_name' => 'Томская', 'place_type' => 'г', 'place_name' => 'Пусто', 'display_name' => 'Пусто', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
+$batch_no_coordinates_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883004, 'fias_id' => 'fias-batch-empty', 'region_name' => 'Томская', 'place_type' => 'г', 'place_name' => 'Пусто', 'display_name' => 'Пусто', 'postal_code' => '999999999', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
 $batch_invalid_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883005, 'fias_id' => 'fias-batch-invalid', 'region_name' => 'Саха', 'place_type' => 'г', 'place_name' => 'Нерюнгри', 'display_name' => 'респ Саха (Якутия), Нерюнгринский р-н, г Нерюнгри', 'postal_code' => '678960', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
 $batch_failed_id = $batch_repository->save( locations_smoke_location( array( 'gar_object_id' => 883006, 'fias_id' => 'fias-batch-error', 'region_name' => 'Красноярский', 'place_type' => 'г', 'place_name' => 'Ошибка', 'display_name' => 'Ошибка', 'latitude' => 0.0, 'longitude' => 0.0 ) ) );
 $batch_client = new WdcLocationsSmokeQueuedSuggestionClient(
@@ -505,7 +535,7 @@ $batch_job = $batch_updater->step(
 locations_smoke_assert( 6 === $batch_job['processed'] && 1 === $batch_job['updated'] && 4 === $batch_job['skipped'] && 1 === $batch_job['failed'] && 1 === $batch_job['errors'], 'Coordinate batch updater must update, skip explainable DaData responses, and continue after one error.' );
 locations_smoke_assert( 1 === $batch_job['skipped_empty_query'] && 1 === $batch_job['skipped_no_dadata_success'] && 1 === $batch_job['skipped_no_coordinates'] && 1 === $batch_job['skipped_invalid_coordinates'], 'Coordinate batch updater must expose per-reason skipped counters.' );
 locations_smoke_assert( 52.286348 === (float) $batch_wpdb->rows[ $batch_success_id ]['latitude'] && 104.280679 === (float) $batch_wpdb->rows[ $batch_success_id ]['longitude'], 'Coordinate batch updater must persist valid DaData coordinates.' );
-locations_smoke_assert( array( '664000, г Иркутск', '186752, респ Карелия, г Сортавала, поселок Уусикюля', 'Пусто', '678960, респ Саха (Якутия), Нерюнгринский р-н, г Нерюнгри', 'Ошибка' ) === $batch_client->queries, 'Coordinate DaData query must use only postal_code plus display_name.' );
+locations_smoke_assert( array( '664000, г Иркутск', '186752, респ Карелия, г Сортавала, поселок Уусикюля', 'Пусто', '678960, респ Саха (Якутия), Нерюнгринский р-н, г Нерюнгри', 'Ошибка' ) === $batch_client->queries, 'Coordinate DaData query must use postal_code only when it is present and not the 999999999 marker.' );
 locations_smoke_assert( ! str_contains( implode( ' | ', $batch_client->queries ), 'Не должен попасть в query' ), 'Coordinate DaData query must not append place_name/region fields separately.' );
 locations_smoke_assert( 'invalid_coordinates' === $batch_job['last_skip_reason'] || '' !== (string) $batch_job['last_error'], 'Coordinate batch updater must keep last skip/error diagnostics in job state.' );
 locations_smoke_assert( $batch_empty_query_id > 0 && $batch_no_success_id > 0 && $batch_no_coordinates_id > 0 && $batch_invalid_id > 0 && $batch_failed_id > 0 && (int) $batch_job['cursor'] >= $batch_failed_id, 'Coordinate batch updater must advance cursor through current batch.' );
@@ -648,6 +678,25 @@ $reset_payload = json_decode( $reset_json, true );
 locations_smoke_assert( is_array( $reset_payload ) && ! empty( $reset_payload['success'] ) && 'idle' === (string) ( $reset_payload['data']['phase'] ?? '' ), 'Coordinate reset AJAX must return idle status.' );
 locations_smoke_assert( ! array_key_exists( 'wdc_dadata_coordinates_fill_job', $GLOBALS['wdc_locations_smoke_options'] ), 'Coordinate reset AJAX must delete only the coordinate job option.' );
 locations_smoke_assert( 56.0 === (float) $reset_wpdb->rows[ $reset_coordinate_id ]['latitude'] && 84.0 === (float) $reset_wpdb->rows[ $reset_coordinate_id ]['longitude'], 'Coordinate reset AJAX must not delete saved coordinates.' );
+update_option(
+	'wdc_dadata_coordinates_fill_job',
+	array(
+		'phase' => 'canceled',
+		'status' => 'canceled',
+		'processed' => 2,
+	)
+);
+$_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
+ob_start();
+( new LocationsAdminPage(
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.9' ),
+	$reset_repository,
+	$reset_search,
+	$reset_importer
+) )->ajax_dadata_coordinates_fill_reset();
+$reset_canceled_payload = json_decode( (string) ob_get_clean(), true );
+locations_smoke_assert( is_array( $reset_canceled_payload ) && ! empty( $reset_canceled_payload['success'] ) && 'idle' === (string) ( $reset_canceled_payload['data']['phase'] ?? '' ), 'Coordinate reset AJAX must also reset canceled jobs to idle.' );
+locations_smoke_assert( ! array_key_exists( 'wdc_dadata_coordinates_fill_job', $GLOBALS['wdc_locations_smoke_options'] ), 'Coordinate reset AJAX must delete canceled coordinate job state.' );
 
 locations_smoke_assert( method_exists( $repository, 'clear_all' ), 'LocationRepository must expose clear_all method.' );
 $repository->save_aliases( 1, array( 'Alias one', 'Alias two' ) );

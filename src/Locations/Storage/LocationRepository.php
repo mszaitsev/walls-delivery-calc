@@ -561,51 +561,20 @@ final class LocationRepository {
 	}
 
 	public function count_locations_missing_coordinates(): int {
-		return $this->count_locations_missing_coordinates_after( 0 );
-	}
-
-	public function count_locations_missing_coordinates_after( int $after_id ): int {
-		$after_id = max( 0, $after_id );
-
 		if ( $this->has_test_location_rows() ) {
 			return count(
 				array_filter(
 					$this->test_location_rows(),
-					fn( array $row ): bool => (int) ( $row['id'] ?? 0 ) > $after_id && $this->is_ru_location_row( $row ) && $this->location_missing_coordinates_row( $row )
+					fn( array $row ): bool => $this->is_ru_location_row( $row ) && $this->location_missing_coordinates_row( $row )
 				)
 			);
 		}
 
 		return (int) $this->wpdb->get_var(
-			$this->wpdb->prepare(
-				"SELECT COUNT(*) FROM {$this->table_name()}
-				WHERE id > %d
-					AND active = 1
-					AND (country_code = 'RU' OR country_code IS NULL OR country_code = '')
-					AND (latitude IS NULL OR longitude IS NULL OR latitude = 0 OR longitude = 0)",
-				$after_id
-			)
-		);
-	}
-
-	public function find_last_id_with_coordinates(): int {
-		if ( $this->has_test_location_rows() ) {
-			$last_id = 0;
-			foreach ( $this->test_location_rows() as $row ) {
-				if ( ! $this->location_missing_coordinates_row( $row ) ) {
-					$last_id = max( $last_id, (int) ( $row['id'] ?? 0 ) );
-				}
-			}
-
-			return $last_id;
-		}
-
-		return (int) $this->wpdb->get_var(
-			"SELECT COALESCE(MAX(id), 0) FROM {$this->table_name()}
-			WHERE latitude IS NOT NULL
-				AND longitude IS NOT NULL
-				AND latitude != 0
-				AND longitude != 0"
+			"SELECT COUNT(*) FROM {$this->table_name()}
+			WHERE active = 1
+				AND (country_code = 'RU' OR country_code IS NULL OR country_code = '')
+				AND (latitude IS NULL OR longitude IS NULL OR latitude = 0 OR longitude = 0)"
 		);
 	}
 

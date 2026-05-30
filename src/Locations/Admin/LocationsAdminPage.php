@@ -457,7 +457,7 @@ final class LocationsAdminPage {
 				const done = Number(job.processed_rows || job.rows_exported || job.imported || job.rows_read || job.processed || 0);
 				progress.value = Math.min(100, Math.round(done / Math.max(1, total) * 100));
 				const summary = box.querySelector('.wdc-progress-summary');
-				if (summary) summary.textContent = 'status: ' + (job.status || job.phase || '') + ', phase: ' + (job.phase || '') + ', processed: ' + (job.processed || done || 0) + ' / ' + (job.total || total || 0) + ', updated: ' + (job.updated || 0) + ', marked_no_index: ' + (job.marked_no_index || 0) + ', skipped: ' + (job.skipped || 0) + ', failed: ' + (job.failed || 0) + ', errors: ' + (job.errors || 0) + ', consecutive_errors: ' + (job.consecutive_errors || 0) + ', priority: ' + (job.current_priority || '') + ', started_after_id: ' + (job.resume_after_id || 0) + ', skip_reason: ' + (job.last_skip_reason || '') + ', aliases: ' + (job.aliases_updated || 0);
+				if (summary) summary.textContent = 'status: ' + (job.status || job.phase || '') + ', phase: ' + (job.phase || '') + ', processed: ' + (job.processed || done || 0) + ' / ' + (job.total || total || 0) + ', updated: ' + (job.updated || 0) + ', marked_no_index: ' + (job.marked_no_index || 0) + ', skipped: ' + (job.skipped || 0) + ', failed: ' + (job.failed || 0) + ', errors: ' + (job.errors || 0) + ', consecutive_errors: ' + (job.consecutive_errors || 0) + ', priority: ' + (job.current_priority || '') + ', mode: ' + (job.resume_strategy || '') + ', skip_reason: ' + (job.last_skip_reason || '') + ', aliases: ' + (job.aliases_updated || 0);
 				text.textContent = JSON.stringify(job, null, 2);
 			}
 			function loop(action, box, delay) {
@@ -893,15 +893,15 @@ final class LocationsAdminPage {
 			return;
 		}
 
-		$resume_after_id = $this->repository->find_last_id_with_coordinates();
-		$total = $this->repository->count_locations_missing_coordinates_after( $resume_after_id );
+		$resume_after_id = 0;
+		$total = $this->repository->count_locations_missing_coordinates();
 		$now = current_time( 'mysql' );
 		$job = array(
 			'job_id'           => md5( 'dadata-coordinates-' . microtime( true ) ),
 			'phase'            => $total > 0 ? 'running' : 'finished',
 			'status'           => $total > 0 ? 'running' : 'finished',
 			'resume_after_id'  => $resume_after_id,
-			'resume_strategy'  => 'after_last_coordinate',
+			'resume_strategy'  => 'from_start_missing_only',
 			'total'            => $total,
 			'processed'        => 0,
 			'updated'          => 0,
@@ -927,7 +927,7 @@ final class LocationsAdminPage {
 			'last_query'       => '',
 		);
 		if ( 0 === $total ) {
-			$job['message'] = __( 'Нет населенных пунктов без координат после последней заполненной строки.', 'walls-delivery-calc' );
+			$job['message'] = __( 'Нет населенных пунктов без координат.', 'walls-delivery-calc' );
 		}
 		$this->update_option( self::DADATA_COORDINATES_JOB_OPTION, $job );
 		$this->send_json( $job );
@@ -960,15 +960,6 @@ final class LocationsAdminPage {
 
 	public function ajax_dadata_coordinates_fill_reset(): void {
 		$this->guard_ajax();
-		$existing = $this->get_option( self::DADATA_COORDINATES_JOB_OPTION, array() );
-		if ( is_array( $existing ) && 'running' === (string) ( $existing['phase'] ?? '' ) ) {
-			$existing['last_error'] = __( 'Остановите текущую задачу перед обнулением.', 'walls-delivery-calc' );
-			$existing['message'] = $existing['last_error'];
-			$existing['updated_at'] = current_time( 'mysql' );
-			$this->send_json( $existing, false );
-			return;
-		}
-
 		$this->delete_option( self::DADATA_COORDINATES_JOB_OPTION );
 		$this->send_json(
 			array(

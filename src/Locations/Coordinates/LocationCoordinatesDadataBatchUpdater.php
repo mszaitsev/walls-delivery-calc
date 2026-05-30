@@ -31,16 +31,15 @@ final class LocationCoordinatesDadataBatchUpdater {
 		foreach ( array( 'skipped_empty_query', 'skipped_no_dadata_success', 'skipped_no_coordinates', 'skipped_invalid_coordinates' ) as $counter ) {
 			$job[ $counter ] = (int) ( $job[ $counter ] ?? 0 );
 		}
-		$resume_after_id = max( 0, (int) ( $job['resume_after_id'] ?? 0 ) );
 		$priority = (string) ( $job['current_priority'] ?? 'cities' );
-		$batch = $this->repository->find_locations_missing_coordinates( $limit, max( $resume_after_id, (int) ( $job['last_id'] ?? 0 ) ), $priority );
+		$batch = $this->repository->find_locations_missing_coordinates( $limit, (int) ( $job['last_id'] ?? 0 ), $priority );
 
 		if ( array() === $batch && 'cities' === $priority ) {
 			$job['current_priority'] = 'others';
-			$job['last_id'] = $resume_after_id;
-			$job['cursor'] = $resume_after_id;
+			$job['last_id'] = 0;
+			$job['cursor'] = 0;
 			$priority = 'others';
-			$batch = $this->repository->find_locations_missing_coordinates( $limit, $resume_after_id, $priority );
+			$batch = $this->repository->find_locations_missing_coordinates( $limit, 0, $priority );
 		}
 
 		if ( array() === $batch ) {
@@ -157,6 +156,9 @@ final class LocationCoordinatesDadataBatchUpdater {
 		}
 
 		$postal_code = trim( (string) ( $location['postal_code'] ?? '' ) );
+		if ( '999999999' === $postal_code ) {
+			$postal_code = '';
+		}
 		return '' !== $postal_code ? $postal_code . ', ' . $display_name : $display_name;
 	}
 
