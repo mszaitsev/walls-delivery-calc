@@ -1,4 +1,21 @@
-# WDC DaData Suggestions 0.14.14
+# WDC DaData Suggestions 0.26.0
+
+## Pickup Address Search 0.26.0
+
+The Russian Post pickup map uses the existing DaData suggestion stack for address-to-coordinate lookup. `PickupAddressSearchService` depends on `AddressSuggestionClientInterface`; in production that resolves to `DaDataSuggestionClient`, backed by the shared `DaDataTokenPool`.
+
+Non-cached address searches therefore use the same daily token pool as checkout address suggestions:
+
+- `DaDataTokenPool::next_available_token()` selects an enabled token with remaining daily quota;
+- `DaDataSuggestionClient` increments usage after every actual HTTP attempt;
+- quota/limit responses mark the current token exhausted and rotate to the next one;
+- when all tokens are exhausted, the endpoint returns `address_search_available=false`.
+
+The pickup endpoint caches successful address results for 24 hours under a key derived from normalized `query`, `location_id`, and `country_code`. A cache hit returns the resolved address and nearby points without making a DaData request or increasing usage counters.
+
+If the query is exactly six digits, pickup search bypasses DaData entirely. It first searches local Russian Post pickup points by postcode, then falls back to a local location row with the same postal code and saved coordinates. This postcode fallback is intentionally independent from DaData so it works even after the daily suggestion limits are exhausted.
+
+When the checkout has a selected local settlement, its `location_id` / country context is sent to the endpoint. The DaData request adds the corresponding FIAS/KLADR location filter and `restrict_value` where possible, so a query like "Ленина 15" is resolved inside the current city instead of across all Russia.
 
 ## Coordinate Batch Limits And Reset 0.25.14
 

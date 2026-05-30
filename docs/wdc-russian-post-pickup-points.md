@@ -1,6 +1,18 @@
 # Russian Post Pickup Points
 
-Version: 0.25.13.
+Version: 0.26.0.
+
+Version 0.26.0 adds checkout pickup address search above the map. The modal search field now calls `GET /wp-json/wdc/v1/points/address-search` with `query`, optional `location_id`, and `country_code`. Free-form address, street, house, and postal-index queries are accepted. Address queries are resolved through DaData, then the map moves to the resolved coordinates and the pickup list is rebuilt from nearest points.
+
+DaData address search is not a separate HTTP client. It uses the existing `AddressSuggestionClientInterface` implementation (`DaDataSuggestionClient`) and the shared `DaDataTokenPool`, so every non-cached address request participates in the same token rotation, daily usage counters, exhausted-token tracking, and daily limits as checkout DaData suggestions and location coordinate enrichment. If a checkout location is known, its id/country context is sent to the endpoint and the DaData request uses location filters/restricted value where possible.
+
+Address-search results are cached for 24 hours by normalized query plus `location_id` and country code. Cache hits return coordinates and nearest points without calling DaData and without increasing token counters.
+
+Six-digit postcode search is handled locally and never calls DaData. The backend first returns active pickup points with that exact postcode. If none exist, it can use the coordinates of a local location row with the same postal code and return nearest pickup points around that location. If neither exists, the endpoint returns a normal not-found payload. This postcode path remains available when all DaData tokens are exhausted.
+
+When no DaData token is available for address search, the endpoint returns `address_search_available=false`. The frontend changes the search input placeholder to "Сейчас работает поиск только по почтовому индексу", limits input to digits, and shows "Поиск доступен только по индексу". Exactly six digits still run the local postcode search.
+
+Successful address search renders a separate red `search` marker at the found address. Pickup markers remain blue unless previewed/active, and the search marker never participates in pickup selection. Distances in the list are recalculated from the found address, not from the selected city center, and the list shows a compact "Найден адрес" block with the nearest pickup distance.
 
 Version 0.25.13 avoids duplicate popup close calls. Empty map clicks still mark the popup as manually closed and call provider `closePopup()`, but provider `popupclose`/`balloonclose` events only mark the state because the popup is already closed.
 

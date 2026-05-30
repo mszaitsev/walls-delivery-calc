@@ -32,6 +32,7 @@
 			var modal = window.WDCPickupModal.create(labels);
 			var confirmButton = modal.root.querySelector('[data-wdc-confirm]');
 			var search = modal.root.querySelector('[data-wdc-search]');
+			var searchSubmit = modal.root.querySelector('[data-wdc-search-submit]');
 			var context = withPrefetch(resolvedContext);
 			debug('openModal context', context);
 			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
@@ -59,11 +60,26 @@
 			}
 
 			modal.root.addEventListener('wdc:close', close);
-			search.addEventListener('change', function () {
+			function runAddressSearch() {
 				if (search.value.trim()) {
 					map.search(search.value.trim());
 				}
+			}
+			search.addEventListener('change', runAddressSearch);
+			search.addEventListener('keydown', function (event) {
+				if (event.key === 'Enter') {
+					event.preventDefault();
+					runAddressSearch();
+				}
 			});
+			search.addEventListener('input', function () {
+				if (search.dataset.wdcPostcodeOnly) {
+					search.value = search.value.replace(/\D+/g, '').slice(0, 6);
+				}
+			});
+			if (searchSubmit) {
+				searchSubmit.addEventListener('click', runAddressSearch);
+			}
 			confirmButton.addEventListener('wdc:point-selected', function (event) {
 				savePoint(event.detail || map.selected());
 			});
@@ -136,6 +152,8 @@
 			query: fieldContext.query || runtimeContext.query || localizedContext.query,
 			postcode: fieldContext.postcode || runtimeContext.postcode || localizedContext.postcode || '',
 			display_name: fieldContext.display_name || runtimeContext.display_name || localizedContext.display_name || '',
+			location_id: runtimeContext.location_id || localizedContext.location_id || '',
+			country_code: fieldContext.country_code || runtimeContext.country_code || localizedContext.country_code || 'RU',
 			selectedPoint: localizedContext.selectedPoint || runtimeContext.selectedPoint || null
 		};
 		debug('sameDestination field/current', sameDestination(fieldContext, currentContext));
@@ -154,6 +172,7 @@
 		var hiddenPostcode = fieldValue('wdc_platform_location_postcode');
 		var hiddenDisplay = fieldValue('wdc_platform_location_display_name');
 		var hiddenRegion = fieldValue('wdc_platform_location_region_name');
+		var hiddenLocationId = fieldValue('wdc_platform_location_id');
 		var visiblePostcode = fieldValue('shipping_postcode') || fieldValue('billing_postcode');
 		var visibleCity = fieldValue('shipping_city') || fieldValue('billing_city');
 		var visibleDestinationChanged = !!(visibleCity && hiddenDisplay && normalizeText(visibleCity) !== normalizeText(hiddenDisplay));
@@ -163,6 +182,8 @@
 		var context = query ? { query: query } : {};
 		context.postcode = postcode;
 		context.display_name = city || hiddenRegion;
+		context.country_code = country || 'RU';
+		context.location_id = hiddenLocationId;
 		if (!visibleDestinationChanged && validCoordinate(hiddenLat, hiddenLng)) {
 			context.lat = hiddenLat;
 			context.lng = hiddenLng;
@@ -229,6 +250,7 @@
 		return [
 			context.postcode || '',
 			context.display_name || '',
+			context.location_id || '',
 			context.query || ''
 		].map(normalizeText).filter(Boolean).join('|');
 	}
@@ -242,6 +264,7 @@
 			coordinateKey(context.lng),
 			normalizeText(context.postcode || ''),
 			normalizeText(context.display_name || ''),
+			normalizeText(context.location_id || ''),
 			normalizeText(context.query || '')
 		].join('|');
 	}
@@ -272,6 +295,7 @@
 		setHiddenValue('wdc_platform_location_postcode', context.postcode || '');
 		setHiddenValue('wdc_platform_location_display_name', context.display_name || '');
 		setHiddenValue('wdc_platform_location_region_name', context.region_name || '');
+		setHiddenValue('wdc_platform_location_id', context.location_id || '');
 	}
 
 	function setHiddenValue(name, value) {
@@ -330,7 +354,8 @@
 			display_name: displayName,
 			region_name: context.region_name || '',
 			query: query,
-			country_code: context.country_code || 'RU'
+			country_code: context.country_code || 'RU',
+			location_id: context.location_id || ''
 		};
 	}
 

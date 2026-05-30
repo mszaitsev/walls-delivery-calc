@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Pickup\Rest;
 
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
+use WallsShop\WDC\Pickup\Search\PickupAddressSearchService;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -13,7 +14,8 @@ final class PickupPointsRestController {
 
 	public function __construct(
 		private RussianPostPickupPointRepository $repository,
-		private ?RussianPostPickupPointTypeSettings $type_settings = null
+		private ?RussianPostPickupPointTypeSettings $type_settings = null,
+		private ?PickupAddressSearchService $address_search = null
 	) {
 	}
 
@@ -42,6 +44,15 @@ final class PickupPointsRestController {
 		);
 		register_rest_route(
 			self::NAMESPACE,
+			'/points/address-search',
+			array(
+				'methods' => 'GET',
+				'callback' => array( $this, 'address_search' ),
+				'permission_callback' => array( $this, 'check_nonce' ),
+			)
+		);
+		register_rest_route(
+			self::NAMESPACE,
 			'/points/(?P<id>\d+)',
 			array(
 				'methods' => 'GET',
@@ -49,6 +60,21 @@ final class PickupPointsRestController {
 				'permission_callback' => '__return_true',
 			)
 		);
+	}
+
+	public function check_nonce( mixed $request ): bool|object {
+		$nonce = '';
+		if ( is_object( $request ) && method_exists( $request, 'get_header' ) ) {
+			$nonce = (string) $request->get_header( 'X-WP-Nonce' );
+		}
+		if ( '' === $nonce && isset( $_SERVER['HTTP_X_WP_NONCE'] ) ) {
+			$nonce = (string) wp_unslash( $_SERVER['HTTP_X_WP_NONCE'] );
+		}
+		if ( '' !== $nonce && function_exists( 'wp_verify_nonce' ) && wp_verify_nonce( $nonce, 'wp_rest' ) ) {
+			return true;
+		}
+
+		return $this->error( 'wdc_forbidden', 'REST nonce is missing or invalid.', 403 );
 	}
 
 	public function points( mixed $request ): mixed {
@@ -78,6 +104,42 @@ final class PickupPointsRestController {
 		);
 
 		return $this->response( array_map( fn( array $row ): array => $this->summary( $row ), $rows ) );
+	}
+
+	public function address_search( mixed $request ): mixed {
+		if ( ! $this->address_search instanceof PickupAddressSearchService ) {
+			return $this->error( 'address_search_unavailable', 'Address search is unavailable.', 503 );
+		}
+		$carrier = $this->carrier( $request );
+		if ( 'russian_post' !== $carrier ) {
+			return $this->response( array() );
+		}
+
+		$query = trim( $this->param( $request, 'query' ) );
+		if ( '' === $query ) {
+			$query = trim( $this->param( $request, 'q' ) );
+		}
+
+		$types = $this->allowed_types( $request );
+		if ( array() === $types ) {
+			return $this->response(
+				array(
+					'address_search_available' => true,
+					'points' => array(),
+				)
+			);
+		}
+
+		return $this->response(
+			$this->address_search->search(
+				$query,
+				array(
+					'location_id' => (int) $this->param( $request, 'location_id' ),
+					'country_code' => strtoupper( $this->param( $request, 'country_code' ) ?: 'RU' ),
+					'point_types' => $types,
+				)
+			)
+		);
 	}
 
 	public function search( mixed $request ): mixed {

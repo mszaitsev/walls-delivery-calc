@@ -1,6 +1,20 @@
 # Walls Delivery Calc
 
-Version: 0.25.14.
+Version: 0.26.6.
+
+Version 0.26.4 changes the pickup address search marker into a distinct red pin, separate from pickup point flag markers. Address/postcode search no longer auto-previews or opens the nearest pickup point after the forced bbox load; it only sorts the list by distance from the search marker. Provider adapters detect close visual overlap between the search pin and pickup markers, shift the search pin sideways without changing its coordinates, and keep it below pickup markers/non-interactive so nearby pickup markers remain clickable.
+
+Version 0.26.3 makes the post-search pickup map refresh deterministic. Successful address/postcode search now applies the red search marker immediately, updates the distance origin, recenters the map, and then forces a bbox load around the found point as the source of truth for visible pickup points. The narrow `address-search` response points are no longer rendered as the final list state, so the side list and map are replaced by nearby bbox results instead of getting stuck on exact postcode rows or stale previous-city data.
+
+Version 0.26.2 refines the pickup address search row: opening the modal now focuses the close button instead of the search input, the search field has a decorative magnifier and an explicit "Искать адрес" button, and Enter triggers the same search action. After address/postcode search the frontend now loads a bbox around the found point, while postcode exact matches return nearest pickup points around the postcode anchor instead of leaving the list stuck on only the exact row.
+
+Version 0.26.1 protects `GET /wdc/v1/points/address-search` with the WordPress REST nonce because the endpoint can spend DaData token quota. The checkout frontend already sends `X-WP-Nonce`; missing or invalid nonce now returns `wdc_forbidden` with HTTP 403. Public read-only pickup endpoints `/points`, `/points/search`, and `/points/{id}` remain public.
+
+Version 0.26.0 adds address search above the Russian Post pickup map through `GET /wdc/v1/points/address-search`. Address queries use the existing `AddressSuggestionClientInterface` / `DaDataSuggestionClient` and shared `DaDataTokenPool`, so token rotation, daily counters, exhausted-token flags, and daily limits remain centralized. Results are cached for 24 hours by `query + location_id + country_code`, so repeated address searches do not spend DaData limits again.
+
+Six-digit postcode searches bypass DaData completely and continue to work even when all DaData tokens are exhausted. The backend first returns pickup points with the exact postcode, then can fall back to coordinates of a local location with that postal code, and only then reports a not-found state. When address tokens are unavailable, the endpoint returns `address_search_available=false`; the frontend switches the search field to numeric-only mode with placeholder "Сейчас работает поиск только по почтовому индексу".
+
+Successful address search recenters the map on the found address, adds a separate red search marker that is not selectable as a pickup point, reloads/sorts nearby pickup points by distance from the found address, and shows a compact "Найден адрес" block above the list with the nearest pickup distance.
 
 Version 0.25.14 stops the admin DaData coordinate batch as soon as the shared token pool reports `dadata_daily_limit_exhausted`. The job keeps progress already written before the stop, records `stopped_reason=daily_limit_exhausted`, `tokens_exhausted=true`, and the message "Суточные лимиты DaData исчерпаны. Повторите запуск позже.", and it does not continue automatically on later step polls.
 
