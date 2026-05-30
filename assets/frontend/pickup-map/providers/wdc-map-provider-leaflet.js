@@ -24,6 +24,8 @@
 		var map = window.L.map(container, {
 			attributionControl: false
 		});
+		map.createPane('wdcSearchMarkerPane');
+		map.getPane('wdcSearchMarkerPane').style.zIndex = 550;
 		map.setView([center.lat, center.lng], center.zoom || 11);
 		window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 			attribution: '&copy; OpenStreetMap contributors',
@@ -180,6 +182,7 @@
 			}
 			var shift = searchMarkerShift(marker);
 			searchMarker = window.L.marker([marker.lat, marker.lng], {
+				pane: 'wdcSearchMarkerPane',
 				icon: window.L.divIcon({
 					className: 'wdc-map-search-icon',
 					html: '<span class="wdc-map-search-pin' + shift.className + '"><span class="wdc-map-search-pin__dot"></span><span class="wdc-map-search-pin__tail"></span></span>',
