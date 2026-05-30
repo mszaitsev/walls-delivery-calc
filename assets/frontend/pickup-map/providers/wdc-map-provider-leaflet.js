@@ -185,10 +185,10 @@
 				pane: 'wdcSearchMarkerPane',
 				icon: window.L.divIcon({
 					className: 'wdc-map-search-icon',
-					html: '<span class="wdc-map-search-pin' + shift.className + '"><span class="wdc-map-search-pin__dot"></span><span class="wdc-map-search-pin__tail"></span></span>',
-					iconSize: [30, 44],
-					iconAnchor: [15, 44],
-					popupAnchor: [0, -44]
+					html: '<span class="wdc-map-search-pin wdc-map-search-pin--push' + shift.className + '"><span class="wdc-map-search-pin__head"></span><span class="wdc-map-search-pin__needle"></span></span>',
+					iconSize: [38, 58],
+					iconAnchor: [19, 58],
+					popupAnchor: [0, -58]
 				}),
 				interactive: false,
 				zIndexOffset: -100

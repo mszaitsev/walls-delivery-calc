@@ -34,7 +34,7 @@
 				'<div class="wdc-map-marker-pin wdc-map-marker-pin--$[properties.wdcType] $[properties.wdcActive]"><span class="wdc-map-marker-pin__inner"></span><span class="wdc-map-marker-pin__tail"></span></div>'
 			);
 			searchMarkerLayout = ymaps.templateLayoutFactory.createClass(
-				'<div class="wdc-map-search-pin $[properties.wdcShift]"><span class="wdc-map-search-pin__dot"></span><span class="wdc-map-search-pin__tail"></span></div>'
+				'<div class="wdc-map-search-pin wdc-map-search-pin--push $[properties.wdcShift]"><span class="wdc-map-search-pin__head"></span><span class="wdc-map-search-pin__needle"></span></div>'
 			);
 			map = new ymaps.Map(container, {
 				center: [pendingCenter.lat, pendingCenter.lng],
@@ -142,8 +142,8 @@
 				wdcShift: shift.className
 			}, {
 				iconLayout: searchMarkerLayout || markerLayout,
-				iconOffset: [-15, -44],
-				iconShape: { type: 'Circle', coordinates: [15, 15], radius: 15 },
+				iconOffset: [-19, -58],
+				iconShape: { type: 'Circle', coordinates: [19, 14], radius: 18 },
 				interactiveZIndex: false,
 				zIndex: 10
 			});
