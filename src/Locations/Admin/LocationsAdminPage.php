@@ -892,6 +892,23 @@ final class LocationsAdminPage {
 			$this->send_json( $existing );
 			return;
 		}
+		if ( is_array( $existing ) && $this->is_dadata_coordinates_limit_exhausted_job( $existing ) ) {
+			$now = current_time( 'mysql' );
+			$existing['phase'] = 'running';
+			$existing['status'] = 'running';
+			$existing['reason'] = '';
+			$existing['stopped_reason'] = '';
+			$existing['tokens_exhausted'] = false;
+			$existing['last_error'] = '';
+			$existing['message'] = '';
+			$existing['last_dadata_message'] = '';
+			$existing['current_batch'] = array();
+			$existing['resumed_at'] = $now;
+			$existing['updated_at'] = $now;
+			$this->update_option( self::DADATA_COORDINATES_JOB_OPTION, $existing );
+			$this->send_json( $existing );
+			return;
+		}
 
 		$resume_after_id = 0;
 		$total = $this->repository->count_locations_missing_coordinates();
@@ -1149,6 +1166,21 @@ final class LocationsAdminPage {
 		$job['errors'] = (int) ( $job['errors'] ?? 0 ) + 1;
 		$job['updated_at'] = current_time( 'mysql' );
 		return $job;
+	}
+
+	/**
+	 * @param array<string,mixed> $job
+	 */
+	private function is_dadata_coordinates_limit_exhausted_job( array $job ): bool {
+		$phase = (string) ( $job['phase'] ?? '' );
+		$status = (string) ( $job['status'] ?? '' );
+		if ( 'finished' !== $phase && 'finished' !== $status ) {
+			return false;
+		}
+
+		return 'daily_limit_exhausted' === (string) ( $job['reason'] ?? '' )
+			|| 'daily_limit_exhausted' === (string) ( $job['stopped_reason'] ?? '' )
+			|| ! empty( $job['tokens_exhausted'] );
 	}
 
 	/**

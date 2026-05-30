@@ -54,6 +54,7 @@ final class LocationCoordinatesDadataBatchUpdater {
 		$job['current_batch'] = array_map( static fn( array $row ): int => (int) ( $row['id'] ?? 0 ), $batch );
 		foreach ( $batch as $location ) {
 			$location_id = (int) ( $location['id'] ?? 0 );
+			$previous_last_id = (int) ( $job['last_id'] ?? 0 );
 			$job['last_location_id'] = $location_id;
 			$job['last_place_name'] = (string) ( $location['display_name'] ?? $location['place_name'] ?? $location['city_name'] ?? '' );
 			$job['last_query'] = $this->query_for_location( $location );
@@ -83,6 +84,8 @@ final class LocationCoordinatesDadataBatchUpdater {
 			}
 
 			if ( 'stopped' === (string) $result['status'] ) {
+				$job['last_id'] = $previous_last_id;
+				$job['cursor'] = $previous_last_id;
 				$this->stop_for_dadata_limits( $job, (string) $result['reason'], (string) $result['message'] );
 				break;
 			}

@@ -404,7 +404,7 @@ $resume_importer = new LocationImportService( $resume_repository );
 $_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
 ob_start();
 ( new LocationsAdminPage(
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.9' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.10' ),
 	$resume_repository,
 	$resume_search,
 	$resume_importer
@@ -449,7 +449,7 @@ update_option(
 $_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
 ob_start();
 ( new LocationsAdminPage(
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.9' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.10' ),
 	$resume_repository,
 	$resume_search,
 	$resume_importer
@@ -465,7 +465,7 @@ locations_smoke_assert( 60.0 === (float) $resume_wpdb->rows[ $resume_missing_aft
 $_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
 ob_start();
 ( new LocationsAdminPage(
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.9' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.10' ),
 	$resume_repository,
 	$resume_search,
 	$resume_importer
@@ -489,7 +489,7 @@ $nothing_after_repository->save( locations_smoke_location( array( 'gar_object_id
 $_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
 ob_start();
 ( new LocationsAdminPage(
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.9' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.10' ),
 	$nothing_after_repository,
 	new LocationSearchService( $nothing_after_repository ),
 	new LocationImportService( $nothing_after_repository )
@@ -571,10 +571,65 @@ $limit_job = $limit_updater->step(
 );
 locations_smoke_assert( 2 === $limit_job['processed'] && 1 === $limit_job['updated'] && 0 === $limit_job['skipped'] && 2 === $limit_client->calls, 'Coordinate batch must stop immediately when all DaData daily limits are exhausted.' );
 locations_smoke_assert( 'finished' === $limit_job['phase'] && 'daily_limit_exhausted' === (string) $limit_job['stopped_reason'] && ! empty( $limit_job['tokens_exhausted'] ), 'Coordinate exhausted limit must be recorded as a terminal non-running job state.' );
+locations_smoke_assert( $limit_updated_id === (int) $limit_job['last_id'] && $limit_updated_id === (int) $limit_job['cursor'], 'Coordinate exhausted limit must keep cursor on the previous processed id so the stopped row is retried.' );
 locations_smoke_assert( 54.983333 === (float) $limit_wpdb->rows[ $limit_updated_id ]['latitude'], 'Coordinate exhausted limit must preserve progress saved before the stop.' );
 locations_smoke_assert( 0.0 === (float) $limit_wpdb->rows[ $limit_stopped_id ]['latitude'] && 0.0 === (float) $limit_wpdb->rows[ $limit_untouched_id ]['latitude'], 'Coordinate exhausted limit must not update or skip the stopped and remaining rows.' );
 $limit_job_after_repeat = $limit_updater->step( $limit_job, 10 );
 locations_smoke_assert( 2 === $limit_client->calls && $limit_job_after_repeat === $limit_job, 'Coordinate exhausted state must not continue automatically on the next step.' );
+$limit_resume_client = new WdcLocationsSmokeQueuedSuggestionClient(
+	array(
+		array( 'success' => true, 'suggestions' => array( array( 'data' => array( 'geo_lat' => '55.000000', 'geo_lon' => '83.000000' ) ) ) ),
+	)
+);
+$limit_resume_job = $limit_job;
+$limit_resume_job['phase'] = 'running';
+$limit_resume_job['status'] = 'running';
+$limit_resume_job['reason'] = '';
+$limit_resume_job['stopped_reason'] = '';
+$limit_resume_job['tokens_exhausted'] = false;
+$limit_resume_job['current_batch'] = array();
+$limit_resume_result = ( new LocationCoordinatesDadataBatchUpdater( $limit_repository, $limit_resume_client ) )->step( $limit_resume_job, 1 );
+locations_smoke_assert( array( $limit_stopped_id ) === (array) ( $limit_resume_result['current_batch'] ?? array() ) && 55.0 === (float) $limit_wpdb->rows[ $limit_stopped_id ]['latitude'], 'Coordinate resumed batch must retry the row that hit daily limit exhaustion.' );
+
+$limit_admin_repository = new LocationRepository( new wpdb() );
+$limit_admin_search = new LocationSearchService( $limit_admin_repository );
+$limit_admin_importer = new LocationImportService( $limit_admin_repository );
+update_option(
+	'wdc_dadata_coordinates_fill_job',
+	array(
+		'phase' => 'finished',
+		'status' => 'finished',
+		'reason' => 'daily_limit_exhausted',
+		'stopped_reason' => 'daily_limit_exhausted',
+		'tokens_exhausted' => true,
+		'processed' => 12,
+		'updated' => 7,
+		'skipped' => 2,
+		'failed' => 1,
+		'errors' => 1,
+		'last_id' => 100,
+		'cursor' => 100,
+		'current_priority' => 'others',
+		'current_batch' => array( 101 ),
+		'total' => 200,
+		'message' => 'All DaData tokens are exhausted for today.',
+		'last_error' => 'All DaData tokens are exhausted for today.',
+	)
+);
+$_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
+ob_start();
+( new LocationsAdminPage(
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.10' ),
+	$limit_admin_repository,
+	$limit_admin_search,
+	$limit_admin_importer
+) )->ajax_dadata_coordinates_fill_start();
+$limit_admin_resume_payload = json_decode( (string) ob_get_clean(), true );
+$limit_admin_resume_job = is_array( $limit_admin_resume_payload ) ? (array) ( $limit_admin_resume_payload['data'] ?? array() ) : array();
+locations_smoke_assert( 'running' === (string) ( $limit_admin_resume_job['phase'] ?? '' ) && 'running' === (string) ( $limit_admin_resume_job['status'] ?? '' ), 'Coordinate start must resume a job stopped by daily limits.' );
+locations_smoke_assert( 100 === (int) ( $limit_admin_resume_job['last_id'] ?? 0 ) && 100 === (int) ( $limit_admin_resume_job['cursor'] ?? 0 ) && 'others' === (string) ( $limit_admin_resume_job['current_priority'] ?? '' ), 'Coordinate start after daily limits must preserve cursor and priority.' );
+locations_smoke_assert( empty( $limit_admin_resume_job['tokens_exhausted'] ) && '' === (string) ( $limit_admin_resume_job['reason'] ?? '' ) && '' === (string) ( $limit_admin_resume_job['stopped_reason'] ?? '' ) && '' === (string) ( $limit_admin_resume_job['message'] ?? '' ), 'Coordinate start after daily limits must clear limit diagnostics.' );
+locations_smoke_assert( array() === (array) ( $limit_admin_resume_job['current_batch'] ?? array( 101 ) ) && 12 === (int) ( $limit_admin_resume_job['processed'] ?? 0 ), 'Coordinate start after daily limits must clear current batch while preserving progress counters.' );
 
 $novos = $search->search( 'новос' );
 locations_smoke_assert( count( $novos ) > 0, 'Search "новос" must return results.' );
@@ -689,7 +744,7 @@ update_option(
 $_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
 ob_start();
 ( new LocationsAdminPage(
-	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.9' ),
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.26.10' ),
 	$reset_repository,
 	$reset_search,
 	$reset_importer
