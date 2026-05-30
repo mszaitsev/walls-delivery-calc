@@ -388,11 +388,11 @@
 }
 
 .wdc-map-search-pin.is-shift-right {
-	transform: translateX(38px);
+	transform: translateX(15px) translateY(-10px);
 }
 
 .wdc-map-search-pin.is-shift-left {
-	transform: translateX(-38px);
+	transform: translateX(-15px) translateY(-10px);
 }
 
 .wdc-map-marker {
