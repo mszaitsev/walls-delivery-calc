@@ -1,6 +1,8 @@
 # Russian Post Pickup Points
 
-Version: 0.27.0.
+Version: 0.27.1.
+
+Version 0.27.1 fixes pickup location resolution priority: a Russian Post pickup point `fias_location_guid` is now resolved to `locations.fias_id` before any postal-code/city fallback. The lookup normalizes GUIDs on both sides, so values with or without dashes match. If FIAS points to one local location but the postal code could match another, the FIAS location wins.
 
 Version 0.27.0 protects checkout from stale pickup tariffs when a Russian Post pickup point belongs to another locality. During pickup commit, the frontend sends the point and current checkout context to `POST /wp-json/wdc/v1/checkout/pickup-point/resolve-location` with the REST nonce. The backend resolves the point against the local locations table only; it does not spend DaData quota.
 

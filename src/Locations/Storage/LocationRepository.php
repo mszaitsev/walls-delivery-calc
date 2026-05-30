@@ -114,7 +114,46 @@ final class LocationRepository {
 	}
 
 	public function find_by_fias_id( string $fias_id ): ?Location {
-		return $this->find_one( 'fias_id', trim( $fias_id ), '%s' );
+		$fias_id = trim( $fias_id );
+		$normalized = $this->normalize_guid( $fias_id );
+		if ( '' === $normalized ) {
+			return null;
+		}
+
+		$exact = $this->find_one( 'fias_id', $fias_id, '%s' );
+		if ( $exact instanceof Location ) {
+			return $exact;
+		}
+		if ( $normalized !== $fias_id ) {
+			$exact = $this->find_one( 'fias_id', $normalized, '%s' );
+			if ( $exact instanceof Location ) {
+				return $exact;
+			}
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 === (int) ( $row['active'] ?? 1 ) && $normalized === $this->normalize_guid( (string) ( $row['fias_id'] ?? '' ) ) ) {
+					return $this->row_to_location( $this->join_region_for_test_double( $row ) );
+				}
+			}
+			return null;
+		}
+
+		$row = $this->wpdb->get_row(
+			$this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.active = 1
+					AND LOWER(REPLACE(REPLACE(REPLACE(REPLACE(l.fias_id, '-', ''), '{', ''), '}', ''), ' ', '')) = %s
+				LIMIT 1",
+				$normalized
+			),
+			ARRAY_A
+		);
+
+		return is_array( $row ) ? $this->row_to_location( $row ) : null;
 	}
 
 	public function find_by_kladr_id( string $kladr_id ): ?Location {
@@ -1341,6 +1380,10 @@ final class LocationRepository {
 
 	private function normalize_query( string $query ): string {
 		return Location::normalize_search_text( $query );
+	}
+
+	private function normalize_guid( string $value ): string {
+		return strtolower( preg_replace( '/[^a-f0-9]/i', '', $value ) ?? '' );
 	}
 
 	private function normalize_country_code( string $country_code ): string {

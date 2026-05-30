@@ -81,6 +81,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
 		public array $tables = array();
+		public array $locations = array();
 		public function prepare( string $query, mixed ...$args ): string {
 			foreach ( $args as $arg ) {
 				$value = is_int( $arg ) || is_float( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'";
@@ -170,9 +171,9 @@ $GLOBALS['wpdb']->tables[ $repo->main_table() ] = array(
 $GLOBALS['wpdb']->tables[ $repo->main_table() ][0]['fias_location_guid'] = '11111111-1111-1111-1111-111111111111';
 $GLOBALS['wpdb']->tables[ $repo->main_table() ][] = array( 'id' => 11, 'point_code' => '660000-b', 'point_type' => 'PVZ', 'postcode' => '660000', 'address' => 'Krasnoyarsk, 2', 'city_name' => 'Krasnoyarsk', 'region_name' => 'Krasnoyarsk krai', 'fias_location_guid' => '22222222-2222-2222-2222-222222222222', 'latitude' => 56.01, 'longitude' => 92.85, 'work_time' => '10-19', 'description' => 'PVZ', 'active' => 1 );
 $location_repo = new LocationRepository( $GLOBALS['wpdb'] );
-$GLOBALS['wpdb']->tables[ $GLOBALS['wpdb']->prefix . 'wdc_locations' ] = array(
+$GLOBALS['wpdb']->locations = array(
 	array( 'id' => 100, 'fias_id' => '11111111-1111-1111-1111-111111111111', 'gar_id' => '100', 'gar_object_id' => 100, 'country_code' => 'RU', 'region_name' => 'NSO', 'region_code' => '54', 'city_name' => 'Novosibirsk', 'settlement_name' => 'Novosibirsk', 'display_name' => 'Novosibirsk', 'postal_code' => '630001', 'latitude' => 55.01, 'longitude' => 82.91, 'active' => 1 ),
-	array( 'id' => 101, 'fias_id' => '22222222-2222-2222-2222-222222222222', 'gar_id' => '101', 'gar_object_id' => 101, 'country_code' => 'RU', 'region_name' => 'Krasnoyarsk krai', 'region_code' => '24', 'city_name' => 'Krasnoyarsk', 'settlement_name' => 'Krasnoyarsk', 'display_name' => 'Krasnoyarsk', 'postal_code' => '660000', 'latitude' => 56.01, 'longitude' => 92.85, 'active' => 1 ),
+	array( 'id' => 101, 'fias_id' => '22222222222222222222222222222222', 'gar_id' => '101', 'gar_object_id' => 101, 'country_code' => 'RU', 'region_name' => 'Krasnoyarsk krai', 'region_code' => '24', 'city_name' => 'Krasnoyarsk', 'settlement_name' => 'Krasnoyarsk', 'display_name' => 'Krasnoyarsk', 'postal_code' => '660000', 'latitude' => 56.01, 'longitude' => 92.85, 'active' => 1 ),
 );
 
 $points_controller = new PickupPointsRestController( $repo );
@@ -185,6 +186,9 @@ $state_controller->register();
 pickup_checkout_assert( 3 === count( $GLOBALS['wdc_pickup_checkout_routes'] ?? array() ), 'checkout REST routes must register.' );
 $state_route = array_values( array_filter( $GLOBALS['wdc_pickup_checkout_routes'], static fn( array $route ): bool => '/checkout/state' === $route['route'] ) )[0] ?? array();
 pickup_checkout_assert( is_array( $state_route['args'] ?? null ) && is_callable( $state_route['args']['permission_callback'] ?? null ), 'checkout state GET must register a nonce permission callback.' );
+$resolve_route = array_values( array_filter( $GLOBALS['wdc_pickup_checkout_routes'], static fn( array $route ): bool => '/checkout/pickup-point/resolve-location' === $route['route'] ) )[0] ?? array();
+pickup_checkout_assert( false === $resolve_route['args']['permission_callback']( new WdcPickupCheckoutRequest( array() ) ), 'resolve-location endpoint without nonce must be forbidden.' );
+pickup_checkout_assert( true === $resolve_route['args']['permission_callback']( new WdcPickupCheckoutRequest( array(), array( 'X-WP-Nonce' => 'nonce' ) ) ), 'resolve-location endpoint with nonce must be authorized.' );
 pickup_checkout_assert( false === $state_controller->check_nonce( new WdcPickupCheckoutRequest( array() ) ), 'checkout state GET without nonce must be forbidden.' );
 pickup_checkout_assert( true === $state_controller->check_nonce( new WdcPickupCheckoutRequest( array(), array( 'X-WP-Nonce' => 'nonce' ) ) ), 'checkout state GET with nonce must be authorized.' );
 
@@ -202,8 +206,14 @@ $state = $state_controller->state();
 pickup_checkout_assert( '101' === (string) $state['city_context']['location_id'] && '22222222-2222-2222-2222-222222222222' === (string) $state['city_context']['fias_id'], 'checkout state GET must expose local location identity for pickup cross-location checks.' );
 $same_resolve = $state_controller->resolve_location( new WdcPickupCheckoutRequest( array( 'point' => array( 'postal_code' => '660000', 'city' => 'Krasnoyarsk', 'region' => 'Krasnoyarsk krai', 'fias_location_guid' => '22222222-2222-2222-2222-222222222222' ), 'checkout_context' => $state['city_context'] ), array( 'X-WP-Nonce' => 'nonce' ) ) );
 pickup_checkout_assert( false === $same_resolve['requires_location_change'] && '101' === (string) $same_resolve['location']['id'], 'resolve-location endpoint must return no change for the same FIAS location.' );
+$fias_priority_resolve = $state_controller->resolve_location( new WdcPickupCheckoutRequest( array( 'point' => array( 'postal_code' => '660000', 'city' => 'Krasnoyarsk', 'region' => 'Krasnoyarsk krai', 'fias_location_guid' => '11111111-1111-1111-1111-111111111111' ), 'checkout_context' => $state['city_context'] ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_checkout_assert( '100' === (string) $fias_priority_resolve['location']['id'], 'resolve-location endpoint must prefer pickup fias_location_guid over a conflicting postal_code match.' );
+$point_id_resolve = $state_controller->resolve_location( new WdcPickupCheckoutRequest( array( 'point_id' => 10, 'checkout_context' => $state['city_context'] ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_checkout_assert( true === $point_id_resolve['requires_location_change'] && '100' === (string) $point_id_resolve['location']['id'], 'resolve-location endpoint must use fias_location_guid from point_id row payload.' );
 $different_resolve = $state_controller->resolve_location( new WdcPickupCheckoutRequest( array( 'point' => array( 'postal_code' => '630001', 'city' => 'Novosibirsk', 'region' => 'NSO', 'fias_location_guid' => '11111111-1111-1111-1111-111111111111' ), 'checkout_context' => $state['city_context'] ), array( 'X-WP-Nonce' => 'nonce' ) ) );
-pickup_checkout_assert( true === $different_resolve['requires_location_change'] && '100' === (string) $different_resolve['location']['id'], 'resolve-location endpoint must detect another FIAS location and find it by postal_code/city.' );
+pickup_checkout_assert( true === $different_resolve['requires_location_change'] && '100' === (string) $different_resolve['location']['id'], 'resolve-location endpoint must detect another FIAS location and find it by pickup fias_location_guid.' );
+$fallback_resolve = $state_controller->resolve_location( new WdcPickupCheckoutRequest( array( 'point' => array( 'postal_code' => '630001', 'city' => 'Novosibirsk', 'region' => 'NSO' ), 'checkout_context' => $state['city_context'] ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_checkout_assert( true === $fallback_resolve['requires_location_change'] && '100' === (string) $fallback_resolve['location']['id'], 'resolve-location endpoint must still fall back to postal_code/city when pickup FIAS is missing.' );
 $missing_resolve = $state_controller->resolve_location( new WdcPickupCheckoutRequest( array( 'point' => array( 'postal_code' => '999999', 'city' => 'Missing' ), 'checkout_context' => $state['city_context'] ), array( 'X-WP-Nonce' => 'nonce' ) ) );
 pickup_checkout_assert( false === $missing_resolve['requires_location_change'] && null === $missing_resolve['location'], 'resolve-location endpoint must safely return location=null when local location is not found.' );
 

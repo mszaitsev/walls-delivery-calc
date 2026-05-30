@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.27.0.
+Version: 0.27.1.
+
+Version 0.27.1 makes pickup point FIAS/GUID resolution the primary local-location lookup path. `PickupPointLocationResolver` now resolves `fias_location_guid` against `locations.fias_id` before postal-code matching, and `LocationRepository::find_by_fias_id()` compares normalized GUIDs so dashed and non-dashed values match. This keeps a pickup point tied to its FIAS locality even when its postal code could also match another local row.
 
 Version 0.27.0 adds cross-location protection for Russian Post pickup selection in checkout. If a customer commits a pickup point from another locality, the checkout compares the current destination and pickup point by FIAS/GUID first, then by normalized region plus city/settlement, and only then by postal code. For a different local pickup destination the map modal shows an in-modal confirmation, warns that the shipping cost will be recalculated, updates the checkout location fields only after confirmation, saves the pickup point, and triggers WooCommerce `update_checkout`. Cancelling leaves the map open and does not change the checkout destination or saved pickup point.
 

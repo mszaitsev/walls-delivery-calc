@@ -48,6 +48,14 @@ final class PickupPointLocationResolver {
 			}
 		}
 
+		$point_fias = $this->guid( $point['fias_location_guid'] ?? $point['fias_id'] ?? '' );
+		if ( '' !== $point_fias ) {
+			$location = $this->locations->find_by_fias_id( $point_fias );
+			if ( $location instanceof Location ) {
+				return $location;
+			}
+		}
+
 		$postcode = $this->postcode( $point['postal_code'] ?? $point['postcode'] ?? '' );
 		$city = $this->text( $point['city'] ?? $point['city_name'] ?? '' );
 		$region = $this->text( $point['region'] ?? $point['region_name'] ?? '' );
