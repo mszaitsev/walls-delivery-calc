@@ -1,19 +1,57 @@
 .wdc-rp-pickup-checkout {
-	margin: 12px 0 0 28px;
+	box-sizing: border-box;
+	width: 100%;
+	margin: 12px 0 0;
 }
 
 .wdc-rp-pickup-checkout__button {
 	margin-bottom: 8px;
 }
 
+.wdc-rp-pickup-checkout [hidden],
+.wdc-rp-pickup-checkout .wdc-is-hidden {
+	display: none !important;
+}
+
 .wdc-rp-pickup-checkout__selection {
 	display: grid;
 	gap: 4px;
-	max-width: 520px;
+	box-sizing: border-box;
+	width: 100%;
+	max-width: none;
 	padding: 10px 12px;
 	border: 1px solid #d6d9dd;
 	border-radius: 6px;
 	background: #fff;
+}
+
+.wdc-pickup-point-card {
+	box-sizing: border-box;
+	width: 100%;
+	max-width: none;
+	box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+
+.wdc-pickup-point-card__title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.wdc-pickup-point-card__accent {
+	background: #16a34a;
+	box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.14);
+}
+
+.wdc-pickup-point-card__address,
+.wdc-pickup-point-card__work-time {
+	overflow-wrap: anywhere;
+	word-break: normal;
+}
+
+.wdc-pickup-point-card__change {
+	width: 100%;
+	text-align: center;
 }
 
 .wdc-pickup-modal {

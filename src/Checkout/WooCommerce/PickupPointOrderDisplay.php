@@ -3,11 +3,20 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
+
 defined( 'ABSPATH' ) || exit;
 
 final class PickupPointOrderDisplay {
+	public function __construct(
+		private ?PickupPointCardRenderer $card_renderer = null,
+		private ?SettingsRepository $settings = null
+	) {
+		$this->card_renderer ??= new PickupPointCardRenderer();
+	}
+
 	public function register(): void {
-		add_action( 'woocommerce_thankyou', array( $this, 'render_by_order_id' ), 20 );
 		add_action( 'woocommerce_order_details_after_order_table', array( $this, 'render' ), 20 );
 		add_action( 'woocommerce_email_after_order_table', array( $this, 'render_email' ), 20, 4 );
 	}
@@ -22,17 +31,8 @@ final class PickupPointOrderDisplay {
 	}
 
 	public function render_email( mixed $order, mixed $sent_to_admin = false, mixed $plain_text = false, mixed $email = null ): void {
-		unset( $sent_to_admin, $email );
-		if ( ! is_object( $order ) ) {
-			return;
-		}
-		if ( $plain_text ) {
-			$point = $this->point( $order );
-			if ( array() !== $point ) {
-				echo "\nПункт выдачи Почты России: " . esc_html( $point['address'] ) . "\n";
-				echo 'Индекс ПВЗ: ' . esc_html( $point['postcode'] ) . "\n";
-				echo 'Тип ПВЗ: ' . esc_html( $point['type'] ) . "\n";
-			}
+		unset( $sent_to_admin );
+		if ( ! is_object( $order ) || $plain_text || ! $this->email_enabled( $email ) ) {
 			return;
 		}
 
@@ -48,40 +48,61 @@ final class PickupPointOrderDisplay {
 			return;
 		}
 
-		echo '<section class="wdc-order-pickup-point"><h2>Пункт выдачи Почты России</h2><table class="shop_table shop_table_responsive"><tbody>';
-		$this->row( 'Адрес', $point['address'] );
-		$this->row( 'Индекс', $point['postcode'] );
-		$this->row( 'Тип', $point['type'] );
-		$this->row( 'Код', $point['code'] );
-		echo '</tbody></table></section>';
+		echo '<section class="wdc-order-pickup-point"><h2>' . esc_html( __( 'Пункт выдачи', 'walls-delivery-calc' ) ) . '</h2>';
+		echo $this->card_renderer->render( $point );
+		echo '</section>';
 	}
 
 	/**
-	 * @return array<string,string>
+	 * @return array<string,mixed>
 	 */
 	private function point( object $order ): array {
 		if ( ! method_exists( $order, 'get_meta' ) ) {
 			return array();
 		}
 		$address = trim( (string) $order->get_meta( '_wdc_pickup_point_address', true ) );
-		$code = trim( (string) $order->get_meta( '_wdc_pickup_point_code', true ) );
+		$code    = trim( (string) $order->get_meta( '_wdc_pickup_point_code', true ) );
 		if ( '' === $address && '' === $code ) {
 			return array();
 		}
 
 		return array(
-			'address' => $address,
-			'postcode' => trim( (string) $order->get_meta( '_wdc_pickup_point_postcode', true ) ),
-			'type' => trim( (string) $order->get_meta( '_wdc_pickup_point_type', true ) ),
-			'code' => $code,
+			'address'         => $address,
+			'postcode'        => trim( (string) $order->get_meta( '_wdc_pickup_point_postcode', true ) ),
+			'type'            => trim( (string) $order->get_meta( '_wdc_pickup_point_type', true ) ),
+			'code'            => $code,
+			'carrier_key'     => trim( (string) $order->get_meta( '_wdc_platform_carrier_key', true ) ),
+			'service_key'     => trim( (string) $order->get_meta( '_wdc_platform_service_key', true ) ),
+			'rate_id'         => trim( (string) $order->get_meta( '_wdc_platform_rate_id', true ) ),
+			'point_work_time' => trim( (string) $order->get_meta( '_wdc_platform_pickup_work_time', true ) ),
+			'snapshot'        => $this->snapshot( $order ),
 		);
 	}
 
-	private function row( string $label, string $value ): void {
-		if ( '' === trim( $value ) ) {
-			return;
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function snapshot( object $order ): array {
+		if ( ! method_exists( $order, 'get_meta' ) ) {
+			return array();
 		}
+		$raw = (string) $order->get_meta( '_wdc_pickup_point_snapshot', true );
+		if ( '' === trim( $raw ) ) {
+			return array();
+		}
+		$decoded = json_decode( $raw, true );
 
-		echo '<tr><th>' . esc_html( $label ) . '</th><td>' . esc_html( $value ) . '</td></tr>';
+		return is_array( $decoded ) ? $decoded : array();
+	}
+
+	private function email_enabled( mixed $email ): bool {
+		$email_id = is_object( $email ) && isset( $email->id ) ? (string) $email->id : '';
+		if ( '' === $email_id || ! $this->settings instanceof SettingsRepository ) {
+			return false;
+		}
+		$enabled = $this->settings->get_array( 'pickup_email_card_enabled_emails', array() );
+		$enabled = array_map( 'strval', $enabled );
+
+		return in_array( $email_id, $enabled, true );
 	}
 }

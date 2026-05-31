@@ -1,6 +1,18 @@
 # Walls Delivery Calc
 
-Version: 0.27.15.
+Version: 0.28.5.
+
+Version 0.28.5 clears the selected pickup point when the customer manually changes the checkout locality through the city selector. Cross-location pickup selection remains protected by a one-shot controlled location-change flag, so a confirmed pickup map locality change can recalculate checkout and save the pending pickup point without being cleared by the location event.
+
+Version 0.28.4 hardens selected pickup UI toggling against theme button styles. Hidden checkout pickup controls now get the hidden attribute, `wdc-is-hidden`, `aria-hidden`, inline `display:none`, and a scoped CSS override so the primary choose button cannot remain visible while the selected pickup card is shown.
+
+Version 0.28.3 removes the legacy selected pickup summary that was printed under checkout rate comments, leaving only the shared selected pickup card. The initial "Выбрать пункт выдачи" button stays hidden while a point is selected and returns when the selection is cleared.
+
+Version 0.28.2 refines the selected pickup point card: the accent is now green, the card shows one full pickup address instead of a separate postcode/city line plus address, and checkout/email card sizing uses full container width with safer wrapping on mobile.
+
+Version 0.28.1 makes the shared pickup point card renderer accept both checkout/order arrays and PickupPoint objects, and avoids duplicate selected pickup cards on the thank-you page by using a single order-details hook for customer order rendering.
+
+Version 0.28.0 adds a shared pickup point card renderer for checkout, the order thank-you page, and customer emails. The checkout selected-point UI now updates the same card after map selection, order details reuse that renderer, and email output is controlled by a dynamic WooCommerce email-class setting that includes custom emails from extensions such as WooCommerce Order Status Manager.
 
 Version 0.27.15 trims temporary checkout pickup diagnostics for production. Backend validation and pickup clear logs now keep only compact method, point-presence, pass/fail, and restore-status fields, while detailed frontend context logs move behind `window.wdcPickupCheckout.deepDebug`.
 

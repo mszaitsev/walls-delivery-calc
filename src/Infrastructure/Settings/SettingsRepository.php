@@ -95,6 +95,7 @@ final class SettingsRepository {
 			'russian_post_domestic_pickup_type_pvz_label' => 'Пункт выдачи',
 			'russian_post_domestic_pickup_type_aps_enabled' => true,
 			'russian_post_domestic_pickup_type_aps_label' => 'Почтомат',
+			'pickup_email_card_enabled_emails' => array(),
 			'packaging_weight_tiers'       => array(),
 		);
 	}

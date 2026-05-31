@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -15,8 +16,10 @@ final class CheckoutDeliveryTypeSelector {
 	public function __construct(
 		private CheckoutSessionManager $session_manager,
 		private PickupPointRepository $repository,
-		private PickupPointRenderer $renderer
+		private PickupPointRenderer $renderer,
+		private ?PickupPointCardRenderer $card_renderer = null
 	) {
+		$this->card_renderer ??= new PickupPointCardRenderer();
 	}
 
 	public function register(): void {
@@ -99,7 +102,6 @@ final class CheckoutDeliveryTypeSelector {
 
 	private function render_russian_post_pickup_map_selector( string $rate_id ): void {
 		$selection = $this->session_manager->checkout_pickup_point();
-		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
 		$has_selection = array() !== $selection && '' !== trim( (string) ( $selection['point_code'] ?? '' ) );
 
 		echo '<div class="wdc-rp-pickup-checkout" data-wdc-pickup-checkout data-shipping-method-id="' . esc_attr( $rate_id ) . '">';
@@ -107,12 +109,19 @@ final class CheckoutDeliveryTypeSelector {
 		echo '<input type="hidden" name="wdc_platform_pickup_carrier" value="' . esc_attr( RussianPostDomesticSettings::CARRIER_KEY ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_point_id" data-wdc-pickup-point-id value="' . esc_attr( (string) ( $selection['id'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_point_code" data-wdc-pickup-point-code value="' . esc_attr( (string) ( $selection['point_code'] ?? '' ) ) . '">';
-		echo '<button type="button" class="button wdc-rp-pickup-checkout__button" data-wdc-pickup-open>' . esc_html( $has_selection ? 'Изменить пункт выдачи' : 'Выбрать пункт выдачи' ) . '</button>';
-		echo '<div class="wdc-rp-pickup-checkout__selection" data-wdc-pickup-selection ' . ( $has_selection ? '' : 'hidden' ) . '>';
-		echo '<strong data-wdc-pickup-address>' . esc_html( (string) ( $selection['address'] ?? '' ) ) . '</strong>';
-		echo '<span data-wdc-pickup-postcode>' . esc_html( (string) ( $selection['postcode'] ?? '' ) ) . '</span>';
-		echo '<span data-wdc-pickup-work-time>' . esc_html( (string) ( $snapshot['work_time'] ?? '' ) ) . '</span>';
-		echo '</div>';
+		$empty_button_class = 'button wdc-rp-pickup-checkout__button' . ( $has_selection ? ' wdc-is-hidden' : '' );
+		echo '<button type="button" class="' . esc_attr( $empty_button_class ) . '" data-wdc-pickup-open data-wdc-pickup-empty-open aria-hidden="' . esc_attr( $has_selection ? 'true' : 'false' ) . '"' . ( $has_selection ? ' hidden style="display:none;"' : '' ) . '>' . esc_html( __( 'Выбрать пункт выдачи', 'walls-delivery-calc' ) ) . '</button>';
+		echo $this->card_renderer->render(
+			array_merge(
+				$selection,
+				array(
+					'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+					'rate_id'     => $rate_id,
+				)
+			),
+			true,
+			! $has_selection
+		);
 		echo '</div>';
 	}
 

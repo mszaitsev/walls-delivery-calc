@@ -103,6 +103,7 @@ use WallsShop\WDC\Locations\Storage\RegionRepository;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Pickup\Admin\PickupAdminPage;
+use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
@@ -279,20 +280,22 @@ final class Plugin {
 		);
 		$this->container->register( NewShippingMethod::class, fn(): NewShippingMethod => new NewShippingMethod() );
 		$this->container->register( PickupPointRenderer::class, fn(): PickupPointRenderer => new PickupPointRenderer() );
+		$this->container->register( PickupPointCardRenderer::class, fn(): PickupPointCardRenderer => new PickupPointCardRenderer() );
 		$this->container->register( CheckoutRateRenderer::class, fn(): CheckoutRateRenderer => new CheckoutRateRenderer( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register(
 			CheckoutDeliveryTypeSelector::class,
 			fn(): CheckoutDeliveryTypeSelector => new CheckoutDeliveryTypeSelector(
 				$this->container->get( CheckoutSessionManager::class ),
 				$this->container->get( PickupPointRepository::class ),
-				$this->container->get( PickupPointRenderer::class )
+				$this->container->get( PickupPointRenderer::class ),
+				$this->container->get( PickupPointCardRenderer::class )
 			)
 		);
 		$this->container->register( CheckoutValidation::class, fn(): CheckoutValidation => new CheckoutValidation( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutAddressValidation::class ), $this->container->get( RussianPostPickupPointRepository::class ) ) );
 		$this->container->register( CheckoutSortSelector::class, fn(): CheckoutSortSelector => new CheckoutSortSelector( $this->container->get( CheckoutSessionManager::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( OrderShippingMetaPersister::class, fn(): OrderShippingMetaPersister => new OrderShippingMetaPersister( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( PickupMapCheckout::class, fn(): PickupMapCheckout => new PickupMapCheckout( $this->container->get( CheckoutSessionManager::class ), $this->environment, $this->container->get( SettingsRepository::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ) ) );
-		$this->container->register( PickupPointOrderDisplay::class, fn(): PickupPointOrderDisplay => new PickupPointOrderDisplay() );
+		$this->container->register( PickupPointOrderDisplay::class, fn(): PickupPointOrderDisplay => new PickupPointOrderDisplay( $this->container->get( PickupPointCardRenderer::class ), $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( CheckoutDebugPanel::class, fn(): CheckoutDebugPanel => new CheckoutDebugPanel( $this->container->get( CheckoutSessionManager::class ), $this->container->get( CheckoutFeatureGate::class ) ) );
 		$this->container->register( CheckoutAddressRenderer::class, fn(): CheckoutAddressRenderer => new CheckoutAddressRenderer( $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register( LocationSearchService::class, fn(): LocationSearchService => new LocationSearchService( $this->container->get( LocationRepository::class ) ) );

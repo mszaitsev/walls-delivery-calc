@@ -116,6 +116,11 @@ final class SettingsAdminPage {
 								<p><label><input type="checkbox" name="clear_pickup_map_yandex_api_key" value="1"> <?php echo esc_html__( 'Очистить ключ Яндекс.Карт', 'walls-delivery-calc' ); ?></label></p>
 							</td>
 						</tr>
+						<tr><th colspan="2"><h2><?php echo esc_html__( 'ПВЗ → Email уведомления', 'walls-delivery-calc' ); ?></h2></th></tr>
+						<tr>
+							<th scope="row"><?php echo esc_html__( 'Показывать информацию о ПВЗ в письмах', 'walls-delivery-calc' ); ?></th>
+							<td><?php $this->render_pickup_email_settings( $values ); ?></td>
+						</tr>
 						<tr><th colspan="2"><h2><?php echo esc_html__( 'ФИАС/ГАР', 'walls-delivery-calc' ); ?></h2></th></tr>
 						<tr><th colspan="2"><p><?php echo esc_html__( 'Интеграция с ФИАС/ГАР подготовлена. Runtime-нормализация через реальный API временно отключена.', 'walls-delivery-calc' ); ?></p></th></tr>
 						<tr>
@@ -205,6 +210,7 @@ final class SettingsAdminPage {
 			'dadata_suggestions_timeout'   => max( 1, min( 10, $dadata_suggestions_timeout > 0 ? $dadata_suggestions_timeout : 3 ) ),
 			'dadata_suggestions_count'     => max( 3, min( 20, $dadata_suggestions_count > 0 ? $dadata_suggestions_count : 10 ) ),
 			'pickup_map_provider'          => $map_provider,
+			'pickup_email_card_enabled_emails' => $this->sanitize_pickup_email_ids( $data['pickup_email_card_enabled_emails'] ?? array() ),
 		);
 
 		if ( ! empty( $data['clear_pickup_map_yandex_api_key'] ) ) {
@@ -313,6 +319,75 @@ final class SettingsAdminPage {
 		$token_message .= $this->handle_dadata_tokens( $_POST );
 
 		return __( 'Настройки сохранены.', 'walls-delivery-calc' ) . $token_message;
+	}
+
+	/**
+	 * @param array<string,mixed> $values
+	 */
+	private function render_pickup_email_settings( array $values ): void {
+		$emails  = $this->available_email_options();
+		$enabled = array_map( 'strval', is_array( $values['pickup_email_card_enabled_emails'] ?? null ) ? $values['pickup_email_card_enabled_emails'] : array() );
+		if ( array() === $emails ) {
+			echo '<p class="description">' . esc_html__( 'Email-классы WooCommerce пока недоступны.', 'walls-delivery-calc' ) . '</p>';
+			return;
+		}
+
+		foreach ( $emails as $id => $title ) {
+			echo '<label style="display:block;margin:0 0 6px;">';
+			echo '<input type="checkbox" name="pickup_email_card_enabled_emails[]" value="' . esc_attr( $id ) . '" ' . checked( in_array( $id, $enabled, true ), true, false ) . '> ';
+			echo esc_html( $title . ' (' . $id . ')' );
+			echo '</label>';
+		}
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	public function available_email_options(): array {
+		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! method_exists( WC(), 'mailer' ) ) {
+			return array();
+		}
+		$mailer = WC()->mailer();
+		if ( ! is_object( $mailer ) || ! method_exists( $mailer, 'get_emails' ) ) {
+			return array();
+		}
+		$emails = $mailer->get_emails();
+		if ( ! is_array( $emails ) ) {
+			return array();
+		}
+
+		$options = array();
+		foreach ( $emails as $email ) {
+			if ( ! is_object( $email ) || ! isset( $email->id ) ) {
+				continue;
+			}
+			$id = sanitize_key( (string) $email->id );
+			if ( '' === $id ) {
+				continue;
+			}
+			$title = isset( $email->title ) && is_scalar( $email->title ) ? (string) $email->title : $id;
+			$options[ $id ] = $title;
+		}
+
+		return $options;
+	}
+
+	/**
+	 * @param mixed $value
+	 * @return array<int,string>
+	 */
+	private function sanitize_pickup_email_ids( mixed $value ): array {
+		$posted = is_array( $value ) ? $value : array();
+		$allowed = array_keys( $this->available_email_options() );
+		$result = array();
+		foreach ( $posted as $email_id ) {
+			$email_id = sanitize_key( wp_unslash( (string) $email_id ) );
+			if ( '' !== $email_id && in_array( $email_id, $allowed, true ) ) {
+				$result[] = $email_id;
+			}
+		}
+
+		return array_values( array_unique( $result ) );
 	}
 
 	private function render_dadata_tokens_table(): void {
