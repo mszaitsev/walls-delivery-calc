@@ -317,6 +317,50 @@ pickup_checkout_assert( array() === $errors->errors, 'validation must pass when 
 pickup_checkout_assert( RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':rail' === (string) ( $session->pickup_selection()['rate_id'] ?? '' ), 'validation must normalize platform-prefixed selected rates before refreshing pickup selection rate_id.' );
 
 $session->clear_pickup_selection();
+$session->save_rates( array() );
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ), 'wdc_pickup_point_id' => '770', 'wdc_pickup_point_code' => '987846-c3287ee67a' ), $errors );
+pickup_checkout_assert( array() === $errors->errors, 'validation must pass with bare Russian Post pickup POST method, hidden point fields, empty session selection, and empty saved rates.' );
+pickup_checkout_assert( '987846-c3287ee67a' === (string) ( $session->pickup_selection()['point_code'] ?? '' ) && RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) ( $session->pickup_selection()['rate_id'] ?? '' ), 'validation must create a synthetic pickup rate and save the posted hidden point as the pickup selection.' );
+pickup_checkout_assert( '987846-c3287ee67a' === (string) ( $session->checkout_pickup_point()['point_code'] ?? '' ), 'synthetic-rate restore must save checkout pickup point state from hidden fields.' );
+
+$session->clear_pickup_selection();
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ), 'wdc_pickup_point_id' => '10', 'wdc_pickup_point_code' => '630001-a' ), $errors );
+pickup_checkout_assert( array() === $errors->errors && 'Ленина, 1' === (string) ( $session->pickup_selection()['point_address'] ?? '' ), 'validation must restore posted pickup selection by id even when selected_rate resolves only to a synthetic pickup rate.' );
+
+$session->clear_pickup_selection();
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ), 'wdc_pickup_point_id' => '999999', 'wdc_pickup_point_code' => '630001-a' ), $errors );
+pickup_checkout_assert( array() === $errors->errors && 10 === (int) ( $session->pickup_selection()['point_id'] ?? 0 ), 'validation must fall back to restoring the posted pickup selection by point_code when posted point_id is invalid.' );
+
+$session->clear_pickup_selection();
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ), 'wdc_pickup_point_id' => '999999', 'wdc_pickup_point_code' => '987846-c3287ee67a' ), $errors );
+pickup_checkout_assert( array() === $errors->errors && '987846-c3287ee67a' === (string) ( $session->pickup_selection()['point_code'] ?? '' ), 'validation must accept a minimal posted point selection when saved rates are empty and repository lookup misses.' );
+
+$session->clear_pickup_selection();
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ) ), $errors );
+pickup_checkout_assert( 'Выберите пункт выдачи Почты России.' === (string) ( $errors->errors['wdc_pickup_required'] ?? '' ), 'validation must fail for a synthetic Russian Post pickup rate when neither session nor posted point exists.' );
+
+$session->clear_pickup_selection();
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( 'russian_post_domestic_courier' ) ), $errors );
+pickup_checkout_assert( ! isset( $errors->errors['wdc_pickup_required'] ), 'validation must not require a pickup point when POST selected method is not Russian Post pickup.' );
+
+$session->save_rates(
+	array(
+		RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':tariff_a' => array(
+			'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+			'rate_id' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':tariff_a',
+			'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+			'delivery_type' => 'pickup',
+			'requires_pickup_point' => true,
+		),
+	)
+);
+$session->clear_pickup_selection();
 WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_domestic_courier' ) );
 $errors = new WdcPickupCheckoutErrors();
 ( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':air' ), 'wdc_pickup_point_id' => '10', 'wdc_pickup_point_code' => '630001-a' ), $errors );

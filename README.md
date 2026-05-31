@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.27.12.
+Version: 0.27.13.
+
+Version 0.27.13 makes checkout POST hidden pickup fields authoritative during Russian Post pickup validation. When WooCommerce posts the bare `russian_post_domestic_pickup` method without saved rates, validation builds a synthetic pickup rate, restores the point from posted id/code, and accepts a minimal saved selection even when the pickup repository has no matching row.
 
 Version 0.27.12 stops same-city pickup saves from triggering WooCommerce `update_checkout`. Selecting a Russian Post pickup point for the current checkout destination still saves through REST, applies the selected point UI, and closes the map, while cross-location pickup selection continues to recalculate checkout before saving the pending point.
 

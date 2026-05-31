@@ -24,13 +24,26 @@ final class CheckoutValidation {
 
 	public function validate( mixed $data = array(), mixed $errors = null ): void {
 		$data = is_array( $data ) ? $data : array();
+		$chosen_methods = $this->chosen_shipping_methods( $data );
+		$chosen_rate_id = $this->first_chosen_shipping_method( $chosen_methods );
+		$chosen_rate_id_normalized = $this->session_manager->normalize_rate_id( $chosen_rate_id );
 		$rate = $this->selected_rate( $data );
+		$selected_rate_found = array() !== $rate;
+		$synthetic_rate_created = false;
+		if ( array() === $rate && $this->session_manager->is_russian_post_pickup_family( $chosen_rate_id ) ) {
+			$rate = $this->synthetic_russian_post_pickup_rate( $chosen_rate_id );
+			$synthetic_rate_created = true;
+		}
 		$this->debug_validation(
 			'wdc_checkout_validation_start',
 			array(
-				'chosen_shipping_methods' => $this->chosen_shipping_methods( $data ),
+				'chosen_shipping_methods' => $chosen_methods,
+				'chosen_rate_id' => $chosen_rate_id,
+				'chosen_rate_id_normalized' => $chosen_rate_id_normalized,
 				'posted_point_id' => max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) ),
 				'posted_point_code' => $this->posted_string( $data, 'wdc_pickup_point_code' ),
+				'selected_rate_found' => $selected_rate_found,
+				'synthetic_rate_created' => $synthetic_rate_created,
 				'selected_rate' => $this->rate_debug_context( $rate ),
 				'session_pickup_selection' => $this->session_manager->pickup_selection(),
 			)
@@ -55,6 +68,7 @@ final class CheckoutValidation {
 		$matches_before_restore = $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $selected_rate_id );
 		if ( $matches_before_restore ) {
 			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
+			$this->debug_validation( 'wdc_pickup_validation_passed', array( 'reason' => 'session_match', 'selected_rate_id' => $selected_rate_id ) );
 			return;
 		}
 		$this->debug_validation(
@@ -67,17 +81,17 @@ final class CheckoutValidation {
 		);
 
 		$restored = $this->restore_posted_pickup_selection( $data, $rate );
-		$matches_after_restore = $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $selected_rate_id );
-		if ( $restored && $matches_after_restore ) {
+		if ( $restored ) {
 			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
-			$this->debug_validation( 'wdc_pickup_restore_from_post_success', array( 'selected_rate_id' => $selected_rate_id, 'session_pickup_selection' => $this->session_manager->pickup_selection() ) );
+			$this->debug_validation( 'wdc_pickup_restore_from_post_success', array( 'pass_reason' => 'restored_from_post', 'selected_rate_id' => $selected_rate_id, 'session_pickup_selection' => $this->session_manager->pickup_selection() ) );
 			return;
 		}
 
+		$matches_after_restore = $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $selected_rate_id );
 		$this->debug_validation(
 			'wdc_pickup_validation_failed',
 			array(
-				'reason' => $restored ? 'restored_selection_did_not_match' : 'no_session_or_posted_pickup',
+				'reason' => 'no_session_no_post_point',
 				'restore_result' => $restored,
 				'matches_after_restore' => $matches_after_restore,
 				'session_pickup_selection' => $this->session_manager->pickup_selection(),
@@ -172,19 +186,27 @@ final class CheckoutValidation {
 						return $this->with_selected_rate_id( $rate, $rate_id );
 					}
 				}
-				return $this->with_selected_rate_id(
-					array(
-						'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
-						'rate_id' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
-						'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
-						'delivery_type' => DeliveryType::PICKUP,
-					),
-					$rate_id
-				);
 			}
 		}
 
 		return array();
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function synthetic_russian_post_pickup_rate( string $selected_rate_id ): array {
+		$normalized = $this->session_manager->normalize_rate_id( $selected_rate_id );
+		$rate_id = '' !== $normalized ? $normalized : RussianPostDomesticSettings::PICKUP_SERVICE_KEY;
+
+		return array(
+			'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+			'rate_id' => $rate_id,
+			'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+			'delivery_type' => DeliveryType::PICKUP,
+			'_selected_rate_id' => $rate_id,
+			'_synthetic' => true,
+		);
 	}
 
 	/**
@@ -202,37 +224,53 @@ final class CheckoutValidation {
 	 * @param array<string,mixed> $rate
 	 */
 	private function restore_posted_pickup_selection( array $data, array $rate ): bool {
+		$point_id   = max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) );
+		$point_code = $this->posted_string( $data, 'wdc_pickup_point_code' );
 		$this->debug_validation(
 			'wdc_pickup_restore_from_post_attempt',
 			array(
-				'posted_point_id' => max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) ),
-				'posted_point_code' => $this->posted_string( $data, 'wdc_pickup_point_code' ),
+				'posted_point_id' => $point_id,
+				'posted_point_code' => $point_code,
 				'selected_rate_id' => $this->selected_rate_id( $rate ),
 				'rate' => $this->rate_debug_context( $rate ),
 			)
 		);
-		if ( RussianPostDomesticSettings::CARRIER_KEY !== (string) ( $rate['carrier_key'] ?? '' )
-			|| ! $this->session_manager->is_russian_post_pickup_family( $this->selected_rate_id( $rate ) )
-		) {
-			$this->debug_validation( 'wdc_pickup_restore_from_post_failed', array( 'reason' => 'unsupported_rate', 'rate' => $this->rate_debug_context( $rate ) ) );
-			return false;
-		}
-
-		$point_id   = max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) );
-		$point_code = $this->posted_string( $data, 'wdc_pickup_point_code' );
 		if ( $point_id <= 0 && '' === $point_code ) {
 			$this->debug_validation( 'wdc_pickup_restore_from_post_failed', array( 'reason' => 'posted_point_missing' ) );
 			return false;
 		}
 
 		$selection = $point_id > 0 ? $this->selection_from_pickup_row( $point_id ) : array();
+		$this->debug_validation(
+			'wdc_pickup_restore_lookup_by_id',
+			array(
+				'posted_point_id' => $point_id,
+				'success' => array() !== $selection,
+			)
+		);
 		if ( array() === $selection && '' !== $point_code ) {
 			$selection = $this->selection_from_pickup_code( $point_code );
+			$this->debug_validation(
+				'wdc_pickup_restore_lookup_by_code',
+				array(
+					'posted_point_code' => $point_code,
+					'success' => array() !== $selection,
+				)
+			);
 		}
+		$minimal_restore_used = false;
 		if ( array() === $selection ) {
+			$minimal_restore_used = true;
 			$selection = array(
 				'point_id' => $point_id,
 				'point_code' => $point_code,
+				'point_type' => '',
+				'point_address' => '',
+				'point_postcode' => '',
+				'snapshot' => array(
+					'id' => $point_id,
+					'point_code' => $point_code,
+				),
 			);
 		}
 
@@ -245,10 +283,18 @@ final class CheckoutValidation {
 		}
 
 		$selection['carrier_key'] = RussianPostDomesticSettings::CARRIER_KEY;
-		$selection['rate_id'] = $this->selected_rate_id( $rate );
+		$selection['rate_id'] = $this->selected_rate_id( $rate ) ?: RussianPostDomesticSettings::PICKUP_SERVICE_KEY;
 		$selection['selected_at'] = gmdate( 'c' );
 		$this->session_manager->save_pickup_selection( $selection );
 		$this->session_manager->save_checkout_pickup_point( $this->checkout_pickup_point_from_selection( $selection ) );
+		$this->debug_validation(
+			'wdc_pickup_restore_from_post_saved',
+			array(
+				'pass_reason' => $minimal_restore_used ? 'restored_minimal' : 'restored_from_post',
+				'minimal_restore_used' => $minimal_restore_used,
+				'session_pickup_selection' => $this->session_manager->pickup_selection(),
+			)
+		);
 
 		return true;
 	}
@@ -377,6 +423,7 @@ final class CheckoutValidation {
 			'service_key' => (string) ( $rate['service_key'] ?? '' ),
 			'carrier_key' => (string) ( $rate['carrier_key'] ?? '' ),
 			'delivery_type' => (string) ( $rate['delivery_type'] ?? '' ),
+			'synthetic' => ! empty( $rate['_synthetic'] ),
 		);
 	}
 
@@ -428,5 +475,19 @@ final class CheckoutValidation {
 		}
 
 		return array();
+	}
+
+	/**
+	 * @param array<int,string> $chosen_methods
+	 */
+	private function first_chosen_shipping_method( array $chosen_methods ): string {
+		foreach ( $chosen_methods as $method ) {
+			$method = trim( (string) $method );
+			if ( '' !== $method ) {
+				return $method;
+			}
+		}
+
+		return '';
 	}
 }
