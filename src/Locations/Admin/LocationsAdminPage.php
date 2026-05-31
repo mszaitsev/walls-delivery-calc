@@ -1134,7 +1134,7 @@ final class LocationsAdminPage {
 			return $this->fail_dadata_coordinates_job( $job, 'DaData coordinates updater is unavailable.' );
 		}
 
-		return $this->coordinates_updater->step( $job, random_int( 10, 20 ) );
+		return $this->coordinates_updater->step( $job, random_int( 20, 30 ) );
 	}
 
 	/**

@@ -1,6 +1,24 @@
 # Walls Delivery Calc
 
-Version: 0.27.6.
+Version: 0.27.15.
+
+Version 0.27.15 trims temporary checkout pickup diagnostics for production. Backend validation and pickup clear logs now keep only compact method, point-presence, pass/fail, and restore-status fields, while detailed frontend context logs move behind `window.wdcPickupCheckout.deepDebug`.
+
+Version 0.27.14 registers an early WooCommerce checkout-process preloader for Russian Post pickup selections. Checkout submit POST hidden fields now restore the pickup session before later validation hooks run, and debug logs include checkout validation registration plus preload start/success/skipped messages.
+
+Version 0.27.13 makes checkout POST hidden pickup fields authoritative during Russian Post pickup validation. When WooCommerce posts the bare `russian_post_domestic_pickup` method without saved rates, validation builds a synthetic pickup rate, restores the point from posted id/code, and accepts a minimal saved selection even when the pickup repository has no matching row.
+
+Version 0.27.12 stops same-city pickup saves from triggering WooCommerce `update_checkout`. Selecting a Russian Post pickup point for the current checkout destination still saves through REST, applies the selected point UI, and closes the map, while cross-location pickup selection continues to recalculate checkout before saving the pending point.
+
+Version 0.27.11 makes checkout validation resilient when WooCommerce posts the bare `russian_post_domestic_pickup` method id. Validation now resolves bare pickup family selections to saved family rates, falls back to a minimal Russian Post pickup rate when needed, restores posted pickup points by id or point code, saves minimal checkout pickup state even without repository details, and logs each validation decision when debug is enabled.
+
+Version 0.27.10 prevents late checkout city-selector events from clearing Russian Post pickup selections. The frontend now recognizes same-location `wdc:location-selected` events by location id, FIAS id, or normalized city/postcode, extends the place-order reset guard for late checkout events, and checkout validation reads posted `shipping_method[0]` before falling back to WooCommerce session state.
+
+Version 0.27.9 adds reason-coded pickup reset diagnostics and hardens checkout submit against WooCommerce recalculation payloads that omit `shipping_method`. Address runtime now falls back to `chosen_shipping_methods`, refuses automatic pickup clears while the active method family is `russian_post_domestic_pickup`, and frontend `updated_checkout` skips context refresh during place order. The pickup CSS remains scoped away from WooCommerce button and loader pseudo-elements.
+
+Version 0.27.8 hardens Russian Post pickup selection persistence around WooCommerce checkout recalculation. Pickup selections are now matched and refreshed by the `russian_post_domestic_pickup` method family, address recalculation preserves the point during same-family tariff switches, and frontend reset functions are guarded during place order while `updated_checkout` restores hidden fields from the selected point.
+
+Version 0.27.7 preserves the selected Russian Post pickup point during checkout submit and when switching tariff suffixes inside `russian_post_domestic_pickup`. Checkout validation now accepts the saved pickup point by method family, can restore the selection from submitted hidden pickup fields, and the frontend only clears pickup state after a real destination or carrier change.
 
 Version 0.27.6 synchronizes the pickup map context after a confirmed cross-location save. Once WooCommerce recalculates and the pending pickup point is saved, the frontend rebuilds the map context from the resolved location plus actual checkout fields, updates `currentContext`, `window.wdcPickupCheckout.currentContext`, `initialContext`, and the selected pickup point, then clears and restarts pickup prefetch for the new locality. `contextFromFields()` now treats city-selector formatted city values such as `г Новосибирск` as matching the hidden locality instead of discarding hidden coordinates, and prefetch cache keys include FIAS so old-city points cannot be reused.
 

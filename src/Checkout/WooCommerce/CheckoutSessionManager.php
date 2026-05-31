@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 
 defined( 'ABSPATH' ) || exit;
@@ -51,10 +52,29 @@ final class CheckoutSessionManager {
 		return (string) $this->get( self::PICKUP_CARRIER_KEY, '' );
 	}
 
-	public function clear_pickup_selection(): void {
+	public function clear_pickup_selection( string $reason = '' ): void {
+		$this->log_pickup_selection_clear( $reason ?: 'manual_clear', false );
 		$this->set( self::PICKUP_SELECTION_KEY, array() );
 		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, array() );
 		$this->set( self::PICKUP_CARRIER_KEY, '' );
+	}
+
+	public function clear_pickup_selection_if_allowed( string $reason, string $currentRateId = '' ): bool {
+		if ( '' !== $currentRateId && $this->is_russian_post_pickup_family( $currentRateId ) && $this->has_valid_pickup_selection() ) {
+			$this->log_pickup_selection_clear( $reason, true, $currentRateId );
+			return false;
+		}
+
+		$this->clear_pickup_selection( $reason );
+
+		return true;
+	}
+
+	public function has_valid_pickup_selection(): bool {
+		$selection = $this->pickup_selection();
+
+		return array() !== $selection
+			&& ( '' !== trim( (string) ( $selection['point_code'] ?? '' ) ) || '' !== trim( (string) ( $selection['point_id'] ?? '' ) ) );
 	}
 
 	/**
@@ -75,7 +95,7 @@ final class CheckoutSessionManager {
 
 	public function pickup_selection_matches( string $carrierKey, string $rateId ): bool {
 		$selection = $this->pickup_selection();
-		if ( array() === $selection || '' === trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
+		if ( array() === $selection || ( '' === trim( (string) ( $selection['point_code'] ?? '' ) ) && '' === trim( (string) ( $selection['point_id'] ?? '' ) ) ) ) {
 			return false;
 		}
 
@@ -88,7 +108,59 @@ final class CheckoutSessionManager {
 			return true;
 		}
 
-		return $this->normalize_rate_id( $selection_rate_id ) === $this->normalize_rate_id( $rateId );
+		$selection_rate_id = $this->normalize_rate_id( $selection_rate_id );
+		$rateId            = $this->normalize_rate_id( $rateId );
+		if ( $selection_rate_id === $rateId ) {
+			return true;
+		}
+
+		return RussianPostDomesticSettings::CARRIER_KEY === trim( $carrierKey )
+			&& $this->is_same_pickup_family( $selection_rate_id, $rateId );
+	}
+
+	public function update_pickup_selection_rate_id( string $rateId ): void {
+		$selection = $this->pickup_selection();
+		if ( array() === $selection ) {
+			return;
+		}
+
+		$selection['rate_id'] = $this->normalize_rate_id( $rateId );
+		$this->save_pickup_selection( $selection );
+	}
+
+	public function normalize_rate_id( string $rate_id ): string {
+		$rate_id = trim( $rate_id );
+		$prefix = NewShippingMethod::METHOD_ID . ':';
+		if ( str_starts_with( $rate_id, $prefix ) ) {
+			$rate_id = substr( $rate_id, strlen( $prefix ) );
+		}
+
+		$platform_prefix = 'wdc_platform:';
+		if ( str_starts_with( $rate_id, $platform_prefix ) ) {
+			return substr( $rate_id, strlen( $platform_prefix ) );
+		}
+
+		return $rate_id;
+	}
+
+	public function shipping_method_family( string $rate_id ): string {
+		$rate_id = $this->normalize_rate_id( $rate_id );
+		if ( $this->is_russian_post_pickup_family( $rate_id ) ) {
+			return RussianPostDomesticSettings::PICKUP_SERVICE_KEY;
+		}
+
+		return $rate_id;
+	}
+
+	public function is_russian_post_pickup_family( string $rate_id ): bool {
+		$rate_id = $this->normalize_rate_id( $rate_id );
+		return RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $rate_id
+			|| str_starts_with( $rate_id, RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':' );
+	}
+
+	public function is_same_pickup_family( string $oldRateId, string $newRateId ): bool {
+		return RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $this->shipping_method_family( $oldRateId )
+			&& RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $this->shipping_method_family( $newRateId );
 	}
 
 	public function save_sort_mode( string $sort_mode ): void {
@@ -240,6 +312,38 @@ final class CheckoutSessionManager {
 		return $default;
 	}
 
+	private function log_pickup_selection_clear( string $reason, bool $blocked, string $currentRateId = '' ): void {
+		if ( ! $this->debug_logging_enabled() ) {
+			return;
+		}
+
+		$currentRateId = $this->normalize_rate_id( $currentRateId );
+		$context = array(
+			'reason' => $reason,
+			'blocked' => $blocked,
+			'current_rate_id' => $currentRateId,
+			'current_rate_family' => $this->shipping_method_family( $currentRateId ),
+			'session_has_pickup' => $this->has_valid_pickup_selection(),
+		);
+		if ( function_exists( 'wc_get_logger' ) ) {
+			wc_get_logger()->debug( $blocked ? 'clear_pickup_selection_blocked' : 'clear_pickup_selection', array_merge( $context, array( 'source' => 'walls-delivery-calc' ) ) );
+			return;
+		}
+
+		if ( function_exists( 'error_log' ) ) {
+			$encoded = function_exists( 'wp_json_encode' ) ? wp_json_encode( $context ) : json_encode( $context );
+			error_log( '[walls-delivery-calc] debug: ' . ( $blocked ? 'clear_pickup_selection_blocked' : 'clear_pickup_selection' ) . ' ' . ( false !== $encoded ? $encoded : '' ) );
+		}
+	}
+
+	private function debug_logging_enabled(): bool {
+		if ( defined( 'WDC_PICKUP_DEBUG' ) && WDC_PICKUP_DEBUG ) {
+			return true;
+		}
+
+		return defined( 'WP_DEBUG' ) && WP_DEBUG;
+	}
+
 	private function session(): mixed {
 		if ( function_exists( 'WC' ) && is_object( WC() ) && isset( WC()->session ) ) {
 			return WC()->session;
@@ -248,12 +352,4 @@ final class CheckoutSessionManager {
 		return null;
 	}
 
-	private function normalize_rate_id( string $rate_id ): string {
-		$prefix = NewShippingMethod::METHOD_ID . ':';
-		if ( str_starts_with( $rate_id, $prefix ) ) {
-			return substr( $rate_id, strlen( $prefix ) );
-		}
-
-		return $rate_id;
-	}
 }

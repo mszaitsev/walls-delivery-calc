@@ -208,6 +208,20 @@ final class RussianPostPickupPointRepository {
 		return is_array( $row ) ? $row : null;
 	}
 
+	/**
+	 * @return array<string,mixed>|null
+	 */
+	public function find_row_by_point_code( string $point_code ): ?array {
+		$point_code = trim( $point_code );
+		if ( '' === $point_code ) {
+			return null;
+		}
+
+		$row = $this->wpdb->get_row( $this->wpdb->prepare( 'SELECT * FROM ' . $this->main_table() . ' WHERE point_code = %s LIMIT 1', $point_code ), ARRAY_A );
+
+		return is_array( $row ) ? $row : null;
+	}
+
 	public function main_table(): string {
 		return $this->wpdb->prefix . 'wdc_pickup_points_russian_post';
 	}

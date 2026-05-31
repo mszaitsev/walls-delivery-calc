@@ -9,6 +9,10 @@
 	var prefetchCache = null;
 	var suppressNextDestinationReset = false;
 	var suppressDestinationResetTimer = 0;
+	var isPlacingOrder = false;
+	var placeOrderGuardTimer = 0;
+	var placeOrderResetGuardUntil = 0;
+	var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function init(container) {
 		if (container.dataset.wdcPickupReady) {
@@ -18,6 +22,7 @@
 		var method = container.getAttribute('data-shipping-method-id') || (window.wdcPickupCheckout && window.wdcPickupCheckout.shippingMethodId) || '';
 		var openButton = container.querySelector('[data-wdc-pickup-open]');
 		activeMethod = currentShippingMethod() || method;
+		rememberDestinationFingerprint();
 		toggleForMethod(container);
 		if (openButton) {
 			openButton.addEventListener('click', function () { openModal(container, activeMethod || method); });
@@ -36,7 +41,7 @@
 			var search = modal.root.querySelector('[data-wdc-search]');
 			var searchSubmit = modal.root.querySelector('[data-wdc-search-submit]');
 			var context = withPrefetch(resolvedContext);
-			debug('openModal context', context);
+			debugDeep('openModal context', context);
 			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
 			var savingPoint = false;
 			var loadingText = '';
@@ -73,7 +78,7 @@
 				return window.WDCPickupApi.save(point.id, shippingMethodId || method).then(function (response) {
 					applySelection(container, response.pickup_point || {});
 					close();
-					if (options.updateCheckoutAfterSave !== false) {
+					if (true === options.updateCheckoutAfterSave) {
 						triggerCheckoutUpdate();
 					}
 					return true;
@@ -92,14 +97,14 @@
 				setLoading('Сохраняем пункт выдачи...');
 				var checkoutContext = contextFromFields();
 				if (pointMatchesDestinationQuick(point, checkoutContext) || !window.WDCPickupApi.resolveLocation) {
-					commitPoint(point);
+					commitPoint(point, method, { updateCheckoutAfterSave: false });
 					return;
 				}
 				setLoading('Проверяем населенный пункт...');
 				window.WDCPickupApi.resolveLocation(pointPayload(point), checkoutContext).then(function (response) {
 					if (!response || !response.requires_location_change || !response.location) {
 						clearLoading();
-						commitPoint(point);
+						commitPoint(point, method, { updateCheckoutAfterSave: false });
 						return;
 					}
 					clearLoading();
@@ -112,7 +117,7 @@
 					});
 				}).catch(function () {
 					clearLoading();
-					commitPoint(point);
+					commitPoint(point, method, { updateCheckoutAfterSave: false });
 				});
 			}
 
@@ -126,7 +131,7 @@
 					boot();
 					var currentMethod = currentShippingMethod();
 					if (!isPickupRateValue(currentMethod)) {
-						resetPickupSelectionOnServer();
+						resetPickupSelectionOnServer('cross_location_method_unavailable');
 						showCheckoutNotice('После пересчета выбранный способ доставки стал недоступен. Выберите другой способ доставки.');
 						disableDestinationResetSuppression();
 						return;
@@ -197,27 +202,60 @@
 		if (window.wdcPickupCheckout.initialContext) {
 			window.wdcPickupCheckout.initialContext.selectedPoint = selectedPoint;
 		}
+		if (selectedPoint && selectedPoint.point_code) {
+			rememberDestinationFingerprint();
+		}
 	}
 
-	function resetSelection() {
+	function resetSelection(reason) {
+		debug('resetSelection called', { reason: reason || '', isPlacingOrder: isPlacingOrder, guardActive: placeOrderResetGuardActive() });
+		if (isPickupResetGuarded()) {
+			return;
+		}
 		invalidatePrefetch();
-		resetPickupSelectionOnServer();
-		clearPickupSelectionUi();
+		resetPickupSelectionOnServer(reason || 'reset_selection');
+		clearPickupSelectionUi(reason || 'reset_selection');
 	}
 
-	function clearPickupSelectionUi() {
+	function clearPickupSelectionUi(reason) {
+		debug('clearPickupSelectionUi called', { reason: reason || '', isPlacingOrder: isPlacingOrder, guardActive: placeOrderResetGuardActive() });
+		if (isPickupResetGuarded()) {
+			return;
+		}
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
 			applySelection(container, {});
 		});
 	}
 
-	function resetPickupSelectionOnServer() {
+	function resetPickupSelectionOnServer(reason) {
+		debug('resetPickupSelectionOnServer called', { reason: reason || '', isPlacingOrder: isPlacingOrder, guardActive: placeOrderResetGuardActive() });
+		if (isPickupResetGuarded()) {
+			return Promise.resolve(false);
+		}
 		return window.WDCPickupApi.reset().catch(function () {});
 	}
 
 	function currentShippingMethod() {
 		var checked = document.querySelector('input[name^="shipping_method"]:checked');
-		return checked ? checked.value.replace(/^wdc_platform:/, '') : '';
+		return checked ? normalizeShippingMethod(checked.value) : '';
+	}
+
+	function normalizeShippingMethod(value) {
+		return String(value || '').replace(/^wdc_platform:/, '');
+	}
+
+	function shippingMethodFamily(value) {
+		var method = normalizeShippingMethod(value);
+		if (method.indexOf('russian_post_domestic_pickup') === 0) {
+			return 'russian_post_domestic_pickup';
+		}
+
+		return method;
+	}
+
+	function isSamePickupMethodFamily(oldMethod, newMethod) {
+		return shippingMethodFamily(oldMethod) === 'russian_post_domestic_pickup'
+			&& shippingMethodFamily(newMethod) === 'russian_post_domestic_pickup';
 	}
 
 	function initialContext() {
@@ -229,8 +267,8 @@
 			selectedPoint: config.selectedPoint || (window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint) || null
 		};
 		var fieldContext = contextFromFields();
-		debug('contextFromFields', fieldContext);
-		debug('currentContext', currentContext);
+		debugDeep('contextFromFields', fieldContext);
+		debugDeep('currentContext', currentContext);
 		if (fieldContext.countryBlocked) {
 			return {};
 		}
@@ -250,9 +288,9 @@
 			country_code: fieldContext.country_code || runtimeContext.country_code || localizedContext.country_code || 'RU',
 			selectedPoint: localizedContext.selectedPoint || runtimeContext.selectedPoint || null
 		};
-		debug('sameDestination field/current', sameDestination(fieldContext, currentContext));
-		debug('chosen lat/lng source', latSource);
-		debug('initialContext selected source', fieldContext.query ? 'fields' : (runtimeContext.query ? 'current' : (localizedContext.query ? 'localized' : 'fallback')), result);
+		debugDeep('sameDestination field/current', sameDestination(fieldContext, currentContext));
+		debugDeep('chosen lat/lng source', latSource);
+		debugDeep('initialContext selected source', fieldContext.query ? 'fields' : (runtimeContext.query ? 'current' : (localizedContext.query ? 'localized' : 'fallback')), result);
 		return result;
 	}
 
@@ -314,6 +352,12 @@
 		}
 	}
 
+	function debugDeep() {
+		if (window.wdcPickupCheckout && window.wdcPickupCheckout.deepDebug) {
+			debug.apply(null, arguments);
+		}
+	}
+
 	function fieldValue(name) {
 		var field = document.querySelector('[name="' + name + '"]');
 		return field ? String(field.value || '').trim() : '';
@@ -357,6 +401,31 @@
 		return aName === bName || containsDestinationName(aName, bName) || containsDestinationName(bName, aName);
 	}
 
+	function sameLocationContext(oldContext, newContext) {
+		if (!oldContext || !newContext) {
+			return false;
+		}
+		var oldLocationId = normalizeText(oldContext.location_id || '');
+		var newLocationId = normalizeText(newContext.location_id || '');
+		if (oldLocationId && newLocationId) {
+			return oldLocationId === newLocationId;
+		}
+		var oldFias = normalizeGuid(oldContext.fias_id || '');
+		var newFias = normalizeGuid(newContext.fias_id || '');
+		if (oldFias && newFias) {
+			return oldFias === newFias;
+		}
+		var oldPostcode = normalizeText(oldContext.postcode || '');
+		var newPostcode = normalizeText(newContext.postcode || '');
+		var oldName = normalizeText(oldContext.display_name || oldContext.city_name || oldContext.query || '');
+		var newName = normalizeText(newContext.display_name || newContext.city_name || newContext.query || '');
+		if (oldPostcode && newPostcode && oldPostcode === newPostcode && oldName && newName && oldName === newName) {
+			return true;
+		}
+
+		return destinationFingerprint(oldContext) === destinationFingerprint(newContext);
+	}
+
 	function normalizedDestinationName(context) {
 		return normalizeText(context.display_name || context.query || '');
 	}
@@ -370,11 +439,18 @@
 			return '';
 		}
 		return [
+			context.country_code || '',
 			context.postcode || '',
 			context.display_name || '',
+			context.city_name || '',
 			context.location_id || '',
+			context.fias_id || '',
 			context.query || ''
 		].map(normalizeText).filter(Boolean).join('|');
+	}
+
+	function rememberDestinationFingerprint(context) {
+		lastDestinationFingerprint = destinationFingerprint(context || contextFromFields());
 	}
 
 	function cacheKey(context) {
@@ -425,9 +501,10 @@
 		window.wdcPickupCheckout.currentContext = context;
 		window.wdcPickupCheckout.initialContext = Object.assign({}, window.wdcPickupCheckout.initialContext || {}, context);
 		window.wdcPickupCheckout.selectedPickupPoint = selectedPoint;
+		rememberDestinationFingerprint(context);
 		invalidatePrefetch();
 		schedulePrefetch();
-		debug('syncPickupContextAfterLocationChange', context);
+		debugDeep('syncPickupContextAfterLocationChange', context);
 	}
 
 	function applyContextToHidden(context) {
@@ -478,7 +555,7 @@
 		}
 		var stateRequest = window.WDCPickupApi.state().then(function (state) {
 			var context = contextFromState(state && state.city_context);
-			debug('refreshCheckoutContextOnce result', context);
+			debugDeep('refreshCheckoutContextOnce result', context);
 			if ((context.query || validCoordinate(context.lat, context.lng)) && stateContextMatchesCurrentDestination(context)) {
 				updateCurrentContext(context);
 				applyContextToHidden(context);
@@ -937,7 +1014,7 @@
 
 	function withPrefetch(context) {
 		var key = cacheKey(context);
-		debug('prefetch cache key', key);
+		debugDeep('prefetch cache key', key);
 		if (prefetchCache && prefetchCache.key === key && Array.isArray(prefetchCache.points) && prefetchCache.points.length) {
 			return Object.assign({}, context, {
 				preloadedPoints: prefetchCache.points,
@@ -962,13 +1039,13 @@
 
 	function isPickupMethodActive() {
 		var method = currentShippingMethod();
-		return method && method.indexOf('russian_post_domestic_pickup') === 0;
+		return shippingMethodFamily(method) === 'russian_post_domestic_pickup';
 	}
 
 	function toggleForMethod(container) {
 		var method = currentShippingMethod();
 		activeMethod = method || activeMethod;
-		var visible = !method || method.indexOf('russian_post_domestic_pickup') === 0;
+		var visible = !method || shippingMethodFamily(method) === 'russian_post_domestic_pickup';
 		container.hidden = !visible;
 	}
 
@@ -982,39 +1059,145 @@
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init);
 	}
 
+	function selectedPickupPointId() {
+		var selected = window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint;
+		if (selected && selected.id) {
+			return selected.id;
+		}
+		var field = document.querySelector('[data-wdc-pickup-point-id]');
+		return field ? field.value : '';
+	}
+
+	function syncSelectedPickupRate(method) {
+		var pointId = selectedPickupPointId();
+		if (!pointId || !window.WDCPickupApi || !window.WDCPickupApi.save) {
+			return;
+		}
+		window.WDCPickupApi.save(pointId, method).catch(function () {});
+	}
+
+	function beginPlaceOrder() {
+		isPlacingOrder = true;
+		window.clearTimeout(placeOrderGuardTimer);
+		placeOrderResetGuardUntil = Date.now() + 3000;
+		debug('place order guard active');
+	}
+
+	function endPlaceOrder() {
+		isPlacingOrder = false;
+		debug('place order guard released');
+		rememberDestinationFingerprint();
+	}
+
+	function releasePlaceOrderGuardSoon() {
+		window.clearTimeout(placeOrderGuardTimer);
+		placeOrderResetGuardUntil = Date.now() + 2000;
+		placeOrderGuardTimer = window.setTimeout(function () {
+			isPlacingOrder = false;
+			placeOrderResetGuardUntil = 0;
+			rememberDestinationFingerprint();
+			debug('place order guard released');
+		}, 2000);
+	}
+
+	function placeOrderResetGuardActive() {
+		return Date.now() < placeOrderResetGuardUntil;
+	}
+
+	function isPickupResetGuarded() {
+		return isPlacingOrder || placeOrderResetGuardActive();
+	}
+
+	function restoreSelectedPickupUi() {
+		var selected = window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint;
+		if (!selected || !selected.point_code || shippingMethodFamily(currentShippingMethod()) !== 'russian_post_domestic_pickup') {
+			return;
+		}
+		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
+			applySelection(container, selected);
+		});
+	}
+
 	document.addEventListener('change', function (event) {
 		if (event.target.matches('#billing_city, #shipping_city, #billing_country, #shipping_country, #billing_postcode, #shipping_postcode, [name="billing_city"], [name="shipping_city"], [name="billing_country"], [name="shipping_country"], [name="billing_postcode"], [name="shipping_postcode"]')) {
 			invalidatePrefetch();
-			if (suppressNextDestinationReset) {
+			var newFingerprint = destinationFingerprint(contextFromFields());
+			if (isPickupResetGuarded() || suppressNextDestinationReset || newFingerprint === lastDestinationFingerprint) {
 				document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 				return;
 			}
-			resetSelection();
+			lastDestinationFingerprint = newFingerprint;
+			resetSelection('destination_changed');
 			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 			return;
 		}
 		if (event.target.matches('input[name^="shipping_method"]')) {
+			var previousMethod = activeMethod;
+			var nextMethod = currentShippingMethod() || normalizeShippingMethod(event.target.value);
+			var previousFamily = shippingMethodFamily(previousMethod);
+			var nextFamily = shippingMethodFamily(nextMethod);
+			debug('shipping method change', {
+				previousMethod: previousMethod,
+				nextMethod: nextMethod,
+				previousFamily: previousFamily,
+				nextFamily: nextFamily,
+				isPlacingOrder: isPlacingOrder
+			});
+			if (isSamePickupMethodFamily(previousMethod, nextMethod)) {
+				activeMethod = nextMethod;
+				syncSelectedPickupRate(nextMethod);
+				document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
+				return;
+			}
+			activeMethod = nextMethod;
+			if (!isPickupResetGuarded() && previousFamily === 'russian_post_domestic_pickup' && nextFamily !== 'russian_post_domestic_pickup') {
+				resetSelection('method_family_changed');
+			}
 			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 		}
 	});
 	document.body.addEventListener('wdc:location-selected', function (event) {
 		var context = contextFromLocationDetail(event.detail || {});
-		debug('wdc:location-selected detail', event.detail || {});
+		debugDeep('wdc:location-selected detail', event.detail || {});
 		invalidatePrefetch();
+		var previousContext = Object.assign({}, currentContext || {});
+		var fieldContext = contextFromFields();
+		var sameLocation = sameLocationContext(previousContext, context) || sameLocationContext(fieldContext, context);
 		updateCurrentContext(context);
 		applyContextToHidden(context);
-		if (suppressNextDestinationReset) {
+		var newFingerprint = destinationFingerprint(context);
+		if (isPickupResetGuarded() || suppressNextDestinationReset || sameLocation || newFingerprint === lastDestinationFingerprint) {
+			rememberDestinationFingerprint(context);
 			schedulePrefetch();
 			return;
 		}
-		resetPickupSelectionOnServer();
-		clearPickupSelectionUi();
+		lastDestinationFingerprint = newFingerprint;
+		resetPickupSelectionOnServer('location_selected');
+		clearPickupSelectionUi('location_selected');
 		schedulePrefetch();
 	});
 	document.addEventListener('DOMContentLoaded', boot);
+	document.addEventListener('click', function (event) {
+		if (event.target && event.target.matches('#place_order, [name="woocommerce_checkout_place_order"]')) {
+			beginPlaceOrder();
+		}
+	});
+	document.addEventListener('submit', function (event) {
+		if (event.target && event.target.matches('form.checkout')) {
+			beginPlaceOrder();
+		}
+	}, true);
 	if (window.jQuery) {
+		window.jQuery(document.body).on('checkout_place_order', beginPlaceOrder);
+		window.jQuery(document.body).on('checkout_error', releasePlaceOrderGuardSoon);
 		window.jQuery(document.body).on('updated_checkout', function () {
 			boot();
+			restoreSelectedPickupUi();
+			if (isPlacingOrder) {
+				debug('updated_checkout skipped context refresh during place order');
+				releasePlaceOrderGuardSoon();
+				return;
+			}
 			refreshCheckoutContext();
 		});
 	}

@@ -39,7 +39,14 @@ final class CheckoutAddressRuntime {
 
 		if ( '' !== $this->session_manager->address_fingerprint() && $fingerprint !== $this->session_manager->address_fingerprint() ) {
 			$this->session_manager->clear_normalized_address();
-			$this->session_manager->clear_pickup_selection();
+			$current_rate_id = $this->selected_shipping_method_from_checkout_data( $checkoutData );
+			if ( $this->posted_destination_conflicts_with_pickup( $context, $this->session_manager->pickup_selection() ) ) {
+				$this->session_manager->clear_pickup_selection( 'destination_changed' );
+			} elseif ( $this->should_preserve_pickup_selection_for_rate_switch( $checkoutData, $context, $current_rate_id ) ) {
+				$this->session_manager->update_pickup_selection_rate_id( $this->selected_shipping_method_from_checkout_data( $checkoutData ) );
+			} else {
+				$this->session_manager->clear_pickup_selection_if_allowed( 'address_fingerprint_changed', $current_rate_id );
+			}
 			$this->clear_shipping_rate_cache();
 		}
 
@@ -110,6 +117,85 @@ final class CheckoutAddressRuntime {
 		}
 
 		return $data;
+	}
+
+	/**
+	 * @param array<string,mixed> $checkoutData
+	 */
+	private function should_preserve_pickup_selection_for_rate_switch( array $checkoutData, array $context, string $current_rate_id ): bool {
+		$selection = $this->session_manager->pickup_selection();
+		if ( array() === $selection || ( '' === trim( (string) ( $selection['point_code'] ?? '' ) ) && '' === trim( (string) ( $selection['point_id'] ?? '' ) ) ) ) {
+			return false;
+		}
+
+		$old_rate_id = (string) ( $selection['rate_id'] ?? '' );
+		$new_rate_id = $current_rate_id;
+		if ( '' === $new_rate_id ) {
+			return false;
+		}
+
+		if ( '' === $old_rate_id ) {
+			return $this->session_manager->is_russian_post_pickup_family( $new_rate_id );
+		}
+
+		return $this->session_manager->is_same_pickup_family( $old_rate_id, $new_rate_id );
+	}
+
+	/**
+	 * @param array<string,mixed> $checkoutData
+	 */
+	private function selected_shipping_method_from_checkout_data( array $checkoutData ): string {
+		$value = $checkoutData['shipping_method'] ?? '';
+		if ( is_array( $value ) ) {
+			$value = reset( $value );
+		}
+
+		if ( ( ! is_scalar( $value ) || '' === trim( (string) $value ) )
+			&& function_exists( 'WC' ) && is_object( WC() ) && isset( WC()->session ) && is_object( WC()->session ) && method_exists( WC()->session, 'get' )
+		) {
+			$chosen = WC()->session->get( 'chosen_shipping_methods', array() );
+			if ( is_array( $chosen ) ) {
+				$value = reset( $chosen );
+			}
+		}
+
+		if ( ! is_scalar( $value ) ) {
+			return '';
+		}
+
+		return $this->session_manager->normalize_rate_id( (string) $value );
+	}
+
+	/**
+	 * @param array<string,string> $context
+	 * @param array<string,mixed> $selection
+	 */
+	private function posted_destination_conflicts_with_pickup( array $context, array $selection ): bool {
+		$posted_fias = $this->normalized_guid( (string) ( $context['selected_fias_id'] ?? '' ) );
+		$selection_snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$point_fias = $this->normalized_guid( (string) ( $selection_snapshot['fias_location_guid'] ?? $selection['fias_location_guid'] ?? '' ) );
+		if ( '' !== $posted_fias && '' !== $point_fias ) {
+			return $posted_fias !== $point_fias;
+		}
+
+		$posted_city = $this->normalized_text( (string) ( $context['selected_display_name'] ?? $context['city'] ?? '' ) );
+		$point_city = $this->normalized_text( (string) ( $selection_snapshot['city'] ?? $selection['city'] ?? '' ) );
+		if ( '' !== $posted_city && '' !== $point_city && ! str_contains( $posted_city, $point_city ) && ! str_contains( $point_city, $posted_city ) ) {
+			return true;
+		}
+
+		$posted_postcode = $this->normalized_text( (string) ( $context['postcode'] ?? '' ) );
+		$point_postcode = $this->normalized_text( (string) ( $selection_snapshot['postcode'] ?? $selection['point_postcode'] ?? '' ) );
+		return '' !== $posted_postcode && '' !== $point_postcode && $posted_postcode !== $point_postcode && '' === $posted_city && '' === $point_city;
+	}
+
+	private function normalized_guid( string $value ): string {
+		return strtolower( str_replace( '-', '', trim( $value ) ) );
+	}
+
+	private function normalized_text( string $value ): string {
+		$value = trim( $value );
+		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
 	}
 
 	/**
