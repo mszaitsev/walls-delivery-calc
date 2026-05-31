@@ -111,6 +111,7 @@ use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
 use WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController;
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
 use WallsShop\WDC\Pickup\Search\PickupAddressSearchService;
+use WallsShop\WDC\Pickup\Services\PickupPointLocationResolver;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 use WallsShop\WDC\Rules\Admin\RulesAdminPage;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
@@ -157,7 +158,8 @@ final class Plugin {
 		$this->container->register( PickupPointRepository::class, fn(): PickupPointRepository => new PickupPointRepository() );
 		$this->container->register( RussianPostPickupPointRepository::class, fn(): RussianPostPickupPointRepository => new RussianPostPickupPointRepository() );
 		$this->container->register( RussianPostPickupPointTypeSettings::class, fn(): RussianPostPickupPointTypeSettings => new RussianPostPickupPointTypeSettings( $this->container->get( SettingsRepository::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
-		$this->container->register( CheckoutPickupPointRestController::class, fn(): CheckoutPickupPointRestController => new CheckoutPickupPointRestController( $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( CheckoutSessionManager::class ) ) );
+		$this->container->register( PickupPointLocationResolver::class, fn(): PickupPointLocationResolver => new PickupPointLocationResolver( $this->container->get( LocationRepository::class ) ) );
+		$this->container->register( CheckoutPickupPointRestController::class, fn(): CheckoutPickupPointRestController => new CheckoutPickupPointRestController( $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( CheckoutSessionManager::class ), $this->container->get( PickupPointLocationResolver::class ) ) );
 		$this->container->register( RuleRepository::class, fn(): RuleRepository => new RuleRepository() );
 		$this->container->register( DeliveryServiceRepository::class, fn(): DeliveryServiceRepository => new DeliveryServiceRepository() );
 		$this->container->register( DeliveryServiceSettingsRepository::class, fn(): DeliveryServiceSettingsRepository => new DeliveryServiceSettingsRepository() );

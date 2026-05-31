@@ -11,8 +11,10 @@ use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController;
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Pickup\Services\PickupPointLocationResolver;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
@@ -79,6 +81,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
 		public array $tables = array();
+		public array $locations = array();
 		public function prepare( string $query, mixed ...$args ): string {
 			foreach ( $args as $arg ) {
 				$value = is_int( $arg ) || is_float( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'";
@@ -92,6 +95,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 				if ( preg_match( '/WHERE id = ([0-9]+)/', $query, $m ) && (int) $row['id'] === (int) $m[1] ) {
 					return $row;
 				}
+				if ( preg_match( "/l.postal_code = '([^']+)'/", $query, $m ) && (string) ( $row['postal_code'] ?? '' ) === $m[1] ) {
+					return $row;
+				}
 			}
 			return null;
 		}
@@ -99,6 +105,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 			$rows = $this->rows_for_query( $query );
 			if ( str_contains( $query, 'active = 1' ) ) {
 				$rows = array_values( array_filter( $rows, static fn( array $row ): bool => 1 === (int) ( $row['active'] ?? 0 ) ) );
+			}
+			if ( preg_match( "/l.country_code = '([^']+)'/", $query, $m ) ) {
+				$rows = array_values( array_filter( $rows, static fn( array $row ): bool => (string) ( $row['country_code'] ?? '' ) === $m[1] ) );
 			}
 			if ( preg_match( '/longitude BETWEEN ([0-9.\\-]+) AND ([0-9.\\-]+)/', $query, $m ) ) {
 				$rows = array_values( array_filter( $rows, static fn( array $row ): bool => (float) $row['longitude'] >= (float) $m[1] && (float) $row['longitude'] <= (float) $m[2] ) );
@@ -159,17 +168,27 @@ $repo = new RussianPostPickupPointRepository( $GLOBALS['wpdb'] );
 $GLOBALS['wpdb']->tables[ $repo->main_table() ] = array(
 	array( 'id' => 10, 'point_code' => '630001-a', 'point_type' => 'OPS', 'postcode' => '630001', 'address' => 'Ленина, 1', 'city_name' => 'Новосибирск', 'region_name' => 'НСО', 'latitude' => 55.01, 'longitude' => 82.91, 'work_time' => '09-18', 'description' => 'ОПС', 'active' => 1 ),
 );
+$GLOBALS['wpdb']->tables[ $repo->main_table() ][0]['fias_location_guid'] = '11111111-1111-1111-1111-111111111111';
+$GLOBALS['wpdb']->tables[ $repo->main_table() ][] = array( 'id' => 11, 'point_code' => '660000-b', 'point_type' => 'PVZ', 'postcode' => '660000', 'address' => 'Krasnoyarsk, 2', 'city_name' => 'Krasnoyarsk', 'region_name' => 'Krasnoyarsk krai', 'fias_location_guid' => '22222222-2222-2222-2222-222222222222', 'latitude' => 56.01, 'longitude' => 92.85, 'work_time' => '10-19', 'description' => 'PVZ', 'active' => 1 );
+$location_repo = new LocationRepository( $GLOBALS['wpdb'] );
+$GLOBALS['wpdb']->locations = array(
+	array( 'id' => 100, 'fias_id' => '11111111-1111-1111-1111-111111111111', 'gar_id' => '100', 'gar_object_id' => 100, 'country_code' => 'RU', 'region_name' => 'Новосибирская', 'region_type' => 'область', 'region_code' => '54', 'city_name' => 'Новосибирск', 'city_type' => 'г', 'place_name' => 'Новосибирск', 'place_type' => 'г', 'display_name' => 'Новосибирская область, г Новосибирск', 'postal_code' => '630001', 'latitude' => 55.01, 'longitude' => 82.91, 'active' => 1 ),
+	array( 'id' => 101, 'fias_id' => '22222222222222222222222222222222', 'gar_id' => '101', 'gar_object_id' => 101, 'country_code' => 'RU', 'region_name' => 'Krasnoyarsk krai', 'region_code' => '24', 'city_name' => 'Krasnoyarsk', 'settlement_name' => 'Krasnoyarsk', 'display_name' => 'Krasnoyarsk', 'postal_code' => '660000', 'latitude' => 56.01, 'longitude' => 92.85, 'active' => 1 ),
+);
 
 $points_controller = new PickupPointsRestController( $repo );
 $bbox = $points_controller->points( array( 'carrier' => 'russian_post', 'bbox' => '82.9,55,83,56' ) );
 pickup_checkout_assert( 1 === count( $bbox ), 'bbox endpoint must return active points.' );
 
 $session = new CheckoutSessionManager();
-$state_controller = new CheckoutPickupPointRestController( $repo, $session );
+$state_controller = new CheckoutPickupPointRestController( $repo, $session, new PickupPointLocationResolver( $location_repo ) );
 $state_controller->register();
-pickup_checkout_assert( 2 === count( $GLOBALS['wdc_pickup_checkout_routes'] ?? array() ), 'checkout REST routes must register.' );
+pickup_checkout_assert( 3 === count( $GLOBALS['wdc_pickup_checkout_routes'] ?? array() ), 'checkout REST routes must register.' );
 $state_route = array_values( array_filter( $GLOBALS['wdc_pickup_checkout_routes'], static fn( array $route ): bool => '/checkout/state' === $route['route'] ) )[0] ?? array();
 pickup_checkout_assert( is_array( $state_route['args'] ?? null ) && is_callable( $state_route['args']['permission_callback'] ?? null ), 'checkout state GET must register a nonce permission callback.' );
+$resolve_route = array_values( array_filter( $GLOBALS['wdc_pickup_checkout_routes'], static fn( array $route ): bool => '/checkout/pickup-point/resolve-location' === $route['route'] ) )[0] ?? array();
+pickup_checkout_assert( false === $resolve_route['args']['permission_callback']( new WdcPickupCheckoutRequest( array() ) ), 'resolve-location endpoint without nonce must be forbidden.' );
+pickup_checkout_assert( true === $resolve_route['args']['permission_callback']( new WdcPickupCheckoutRequest( array(), array( 'X-WP-Nonce' => 'nonce' ) ) ), 'resolve-location endpoint with nonce must be authorized.' );
 pickup_checkout_assert( false === $state_controller->check_nonce( new WdcPickupCheckoutRequest( array() ) ), 'checkout state GET without nonce must be forbidden.' );
 pickup_checkout_assert( true === $state_controller->check_nonce( new WdcPickupCheckoutRequest( array(), array( 'X-WP-Nonce' => 'nonce' ) ) ), 'checkout state GET with nonce must be authorized.' );
 
@@ -181,6 +200,24 @@ $session->save_city_context( array( 'lat' => 56.0106, 'lng' => 92.8526, 'postcod
 $state = $state_controller->state();
 pickup_checkout_assert( 56.0106 === (float) $state['city_context']['lat'] && 92.8526 === (float) $state['city_context']['lng'], 'checkout state GET must expose enriched city_context lat/lng.' );
 pickup_checkout_assert( 'Красноярск' === (string) $state['city_context']['display_name'], 'checkout state GET must expose enriched city display_name.' );
+
+$session->save_city_context( array( 'location_id' => '101', 'fias_id' => '22222222-2222-2222-2222-222222222222', 'lat' => 56.0106, 'lng' => 92.8526, 'postcode' => '660000', 'display_name' => 'Krasnoyarsk', 'region_name' => 'Krasnoyarsk krai', 'country_code' => 'RU' ) );
+$state = $state_controller->state();
+pickup_checkout_assert( '101' === (string) $state['city_context']['location_id'] && '22222222-2222-2222-2222-222222222222' === (string) $state['city_context']['fias_id'], 'checkout state GET must expose local location identity for pickup cross-location checks.' );
+$same_resolve = $state_controller->resolve_location( new WdcPickupCheckoutRequest( array( 'point' => array( 'postal_code' => '660000', 'city' => 'Krasnoyarsk', 'region' => 'Krasnoyarsk krai', 'fias_location_guid' => '22222222-2222-2222-2222-222222222222' ), 'checkout_context' => $state['city_context'] ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_checkout_assert( false === $same_resolve['requires_location_change'] && '101' === (string) $same_resolve['location']['id'], 'resolve-location endpoint must return no change for the same FIAS location.' );
+$fias_priority_resolve = $state_controller->resolve_location( new WdcPickupCheckoutRequest( array( 'point' => array( 'postal_code' => '660000', 'city' => 'Krasnoyarsk', 'region' => 'Krasnoyarsk krai', 'fias_location_guid' => '11111111-1111-1111-1111-111111111111' ), 'checkout_context' => $state['city_context'] ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_checkout_assert( '100' === (string) $fias_priority_resolve['location']['id'], 'resolve-location endpoint must prefer pickup fias_location_guid over a conflicting postal_code match.' );
+$point_id_resolve = $state_controller->resolve_location( new WdcPickupCheckoutRequest( array( 'point_id' => 10, 'checkout_context' => $state['city_context'] ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_checkout_assert( true === $point_id_resolve['requires_location_change'] && '100' === (string) $point_id_resolve['location']['id'], 'resolve-location endpoint must use fias_location_guid from point_id row payload.' );
+$different_resolve = $state_controller->resolve_location( new WdcPickupCheckoutRequest( array( 'point' => array( 'postal_code' => '630001', 'city' => 'Novosibirsk', 'region' => 'NSO', 'fias_location_guid' => '11111111-1111-1111-1111-111111111111' ), 'checkout_context' => $state['city_context'] ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_checkout_assert( true === $different_resolve['requires_location_change'] && '100' === (string) $different_resolve['location']['id'], 'resolve-location endpoint must detect another FIAS location and find it by pickup fias_location_guid.' );
+pickup_checkout_assert( '11111111-1111-1111-1111-111111111111' === (string) ( $different_resolve['location']['fias_id'] ?? '' ) && '100' === (string) ( $different_resolve['location']['gar_object_id'] ?? '' ) && '54' === (string) ( $different_resolve['location']['region_code'] ?? '' ) && 'область' === (string) ( $different_resolve['location']['region_type'] ?? '' ) && 'г' === (string) ( $different_resolve['location']['city_type'] ?? '' ) && 'г' === (string) ( $different_resolve['location']['place_type'] ?? '' ), 'resolve-location payload must include full location identity and type fields for checkout formatting.' );
+pickup_checkout_assert( 'Новосибирская область' === (string) ( $different_resolve['location']['state_value'] ?? '' ) && 'г Новосибирск' === (string) ( $different_resolve['location']['city_value'] ?? '' ), 'resolve-location payload must include city selector compatible state_value and city_value.' );
+$fallback_resolve = $state_controller->resolve_location( new WdcPickupCheckoutRequest( array( 'point' => array( 'postal_code' => '630001', 'city' => 'Novosibirsk', 'region' => 'NSO' ), 'checkout_context' => $state['city_context'] ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_checkout_assert( true === $fallback_resolve['requires_location_change'] && '100' === (string) $fallback_resolve['location']['id'], 'resolve-location endpoint must still fall back to postal_code/city when pickup FIAS is missing.' );
+$missing_resolve = $state_controller->resolve_location( new WdcPickupCheckoutRequest( array( 'point' => array( 'postal_code' => '999999', 'city' => 'Missing' ), 'checkout_context' => $state['city_context'] ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_checkout_assert( false === $missing_resolve['requires_location_change'] && null === $missing_resolve['location'], 'resolve-location endpoint must safely return location=null when local location is not found.' );
 
 $rate = array(
 	'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
@@ -299,16 +336,39 @@ pickup_checkout_assert( str_contains( $checkout_js, 'var runtimeContext = sameDe
 pickup_checkout_assert( str_contains( $checkout_js, 'function sameDestination(a, b)' ) && str_contains( $checkout_js, 'aPostcode && bPostcode && aPostcode === bPostcode' ), 'sameDestination must treat matching non-empty postcode as the strongest match.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'containsDestinationName(aName, bName)' ) && str_contains( $checkout_js, 'containsDestinationName(bName, aName)' ), 'sameDestination must allow short city display names to match region-qualified display names.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'var latSource = validCoordinate(fieldContext.lat, fieldContext.lng)' ) && str_contains( $checkout_js, 'chosen lat/lng source' ), 'Initial context must debug the chosen coordinate source.' );
-pickup_checkout_assert( str_contains( $checkout_js, 'var visibleDestinationChanged = !!(visibleCity && hiddenDisplay && normalizeText(visibleCity) !== normalizeText(hiddenDisplay))' ), 'contextFromFields must detect visible city changes against stale hidden display.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'var visibleDestinationChanged = !!(visibleCity && hiddenDisplay && !destinationTextMatches(visibleCity, hiddenDisplay) && !destinationTextMatches(visibleCity, hiddenCity))' ), 'contextFromFields must detect stale hidden destinations without rejecting city-selector formatted visible city values.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'var city = visibleDestinationChanged ? visibleCity : (hiddenDisplay || visibleCity)' ), 'contextFromFields must prefer visible city when hidden display belongs to the old destination.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'var postcode = visibleDestinationChanged ? (visiblePostcode || hiddenPostcode) : (hiddenPostcode || visiblePostcode)' ), 'contextFromFields must prefer visible postcode when visible city changed.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'if (!visibleDestinationChanged && validCoordinate(hiddenLat, hiddenLng))' ), 'contextFromFields must not use old hidden lat/lng when visible city changed.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'query: fieldContext.query || runtimeContext.query || localizedContext.query' ), 'Initial context must use hidden/visible query first and localized config only as fallback.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'debug(' ) && str_contains( $checkout_js, 'prefetch cache key' ), 'Pickup checkout JS must expose debug context logs behind config.debug.' );
 pickup_checkout_assert( str_contains( $city_selector_js, "CustomEvent( 'wdc:location-selected'" ) && str_contains( $city_selector_js, 'display_name: location.display_name || label ||' ), 'City selector must dispatch wdc:location-selected with display_name even when coordinates are empty.' );
+pickup_checkout_assert( str_contains( $city_selector_js, 'fias_id: location.fias_id ||' ) && str_contains( $city_selector_js, 'gar_object_id: location.gar_object_id || location.gar_id ||' ) && str_contains( $city_selector_js, 'kladr_id: location.kladr_id ||' ), 'City selector location-selected detail must include local identity fields used by pickup quick checks.' );
+pickup_checkout_assert( str_contains( $city_selector_js, 'region_type: location.region_type ||' ) && str_contains( $city_selector_js, 'city_type: location.city_type ||' ) && str_contains( $city_selector_js, 'place_type: location.place_type ||' ) && str_contains( $city_selector_js, 'city_value: city' ), 'City selector location-selected detail must include full formatted location context.' );
+pickup_checkout_assert( str_contains( $city_selector_js, 'window.WDCCheckoutCitySelector.applyLocation' ) && str_contains( $city_selector_js, 'applySelectedLocation( location || {}, options || {} )' ), 'City selector must expose a minimal applyLocation API for pickup-confirmed locality changes.' );
 pickup_checkout_assert( str_contains( $checkout_js, "document.body.addEventListener('wdc:location-selected'" ) && str_contains( $checkout_js, 'contextFromLocationDetail' ), 'Pickup JS must listen for city selector location events.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'var query = [postcode, displayName].filter(Boolean).join' ), 'Location-selected context must create a non-empty city query from postcode/display_name.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'fias_id: detail.fias_id ||' ) && str_contains( $checkout_js, 'city_value: detail.city_value || detail.settlement_name || detail.city_name || displayName' ), 'Pickup location-selected context must preserve FIAS and formatted city values.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'function clearPickupSelectionUi()' ) && str_contains( $checkout_js, 'function resetPickupSelectionOnServer()' ), 'Pickup reset must split UI clear and server reset.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'resolveLocation(pointPayload(point), checkoutContext)' ) && str_contains( $checkout_js, 'showLocationChangeConfirm' ) && str_contains( $checkout_js, 'applyConfirmedPickupLocationChange' ), 'Pickup checkout JS must resolve and confirm cross-location pickup selection.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'function setLoading(message)' ) && str_contains( $checkout_js, 'wdc-pickup-modal-loading' ) && str_contains( $checkout_js, 'setModalSelectButtonsDisabled' ), 'Pickup save must show modal loading and disable select buttons immediately.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'clearLoading();' ) && str_contains( $checkout_js, 'Не удалось сохранить пункт выдачи' ), 'Pickup save errors must clear loading and keep the modal open with a notice.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'function runCrossLocationSelection(point, location)' ) && str_contains( $checkout_js, 'enableDestinationResetSuppression(60000)' ) && str_contains( $checkout_js, 'var updatedCheckout = waitForUpdatedCheckout(60000)' ) && str_contains( $checkout_js, 'updatedCheckout.then(function ()' ) && str_contains( $checkout_js, 'window.WDCPickupApi.save(point.id, currentMethod)' ), 'Cross-location flow must close the map, wait for updated_checkout, then save the pending point.' );
+$cross_flow_source = substr( $checkout_js, strpos( $checkout_js, 'function runCrossLocationSelection(point, location)' ), 1400 );
+pickup_checkout_assert( false !== strpos( $cross_flow_source, 'applyConfirmedPickupLocationChange(location);' ) && strpos( $cross_flow_source, 'applyConfirmedPickupLocationChange(location);' ) < strpos( $cross_flow_source, 'close();' ) && strpos( $cross_flow_source, 'close();' ) < strpos( $cross_flow_source, 'var updatedCheckout = waitForUpdatedCheckout(60000)' ) && strpos( $cross_flow_source, 'var updatedCheckout = waitForUpdatedCheckout(60000)' ) < strpos( $cross_flow_source, 'triggerCheckoutUpdate();' ) && strpos( $cross_flow_source, 'triggerCheckoutUpdate();' ) < strpos( $cross_flow_source, 'updatedCheckout.then(function ()' ) && strpos( $cross_flow_source, 'updatedCheckout.then(function ()' ) < strpos( $cross_flow_source, 'window.WDCPickupApi.save(point.id, currentMethod)' ), 'Cross-location flow must update destination, close the modal, listen for updated_checkout, update checkout, then save the selected pickup point.' );
+pickup_checkout_assert( str_contains( $cross_flow_source, 'boot();' ) && str_contains( $cross_flow_source, 'var currentMethod = currentShippingMethod();' ) && str_contains( $cross_flow_source, 'document.querySelector(\'[data-wdc-pickup-checkout]\')' ) && str_contains( $cross_flow_source, 'applySelection(actualContainer' ), 'Cross-location save must use the current shipping method and fresh checkout container after WooCommerce rerender.' );
+pickup_checkout_assert( str_contains( $cross_flow_source, 'var savedPoint = response.pickup_point || {}' ) && str_contains( $cross_flow_source, 'syncPickupContextAfterLocationChange(location, savedPoint)' ), 'Cross-location save must synchronize map context after the pending point is saved.' );
+pickup_checkout_assert( ! str_contains( $checkout_js, 'selectCheapestPickupRate' ) && ! str_contains( $checkout_js, 'rateCost(' ) && ! str_contains( $checkout_js, 'rateLabelText' ) && ! str_contains( $checkout_js, 'parsePrice' ) && ! str_contains( $checkout_js, 'Пересчитываем тариф' ), 'Cross-location frontend must no longer choose the cheapest pickup rate or wait for a second shipping-rate recalculation.' );
+pickup_checkout_assert( 1 === substr_count( $cross_flow_source, 'waitForUpdatedCheckout(' ), 'Cross-location flow must wait for only one updated_checkout event.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'function showCheckoutNotice(message)' ) && str_contains( $checkout_js, 'Не удалось дождаться пересчета доставки. Выберите пункт выдачи еще раз.' ) && str_contains( $checkout_js, 'После пересчета выбранный способ доставки стал недоступен' ) && str_contains( $checkout_js, 'resetPickupSelectionOnServer();' ), 'Cross-location flow must show checkout notices and avoid saving the point when recalculation times out or pickup method disappears.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'enableDestinationResetSuppression(60000)' ) && str_contains( $checkout_js, 'disableDestinationResetSuppression' ) && str_contains( $checkout_js, 'suppressDestinationResetTimer' ) && ! str_contains( $checkout_js, 'setTimeout(function () { suppressNextDestinationReset = false; }, 0)' ), 'Confirmed cross-location pickup flow must suppress destination reset until checkout recalculation, save, timeout, or error.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'window.WDCCheckoutCitySelector.applyLocation(location, { updateCheckout: false, explicit: true, source: \'pickup\', updateFields: true })' ) && str_contains( $checkout_js, 'context.city_value || context.settlement_name || context.city_name || context.display_name' ) && str_contains( $checkout_js, 'function setCheckoutStateField(name, context)' ), 'Confirmed cross-location pickup flow must apply the resolved location through city-selector formatting rules with a fallback.' );
+pickup_checkout_assert( str_contains( $checkout_js, "setHiddenValue('wdc_platform_location_region_type'" ) && str_contains( $checkout_js, "setHiddenValue('wdc_platform_location_city_type'" ) && str_contains( $checkout_js, "setHiddenValue('wdc_platform_location_place_type'" ) && str_contains( $checkout_js, "setHiddenValue('wdc_platform_location_gar_object_id'" ), 'Confirmed cross-location pickup fallback must write the same hidden location fields as the city selector.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'function syncPickupContextAfterLocationChange(location, savedPoint)' ) && str_contains( $checkout_js, 'var fieldContext = contextFromFields();' ) && str_contains( $checkout_js, 'var selectedPoint = normalizeSelectedPoint(savedPoint || {})' ) && str_contains( $checkout_js, 'context.selectedPoint = selectedPoint' ), 'Cross-location context sync must rebuild context from resolved location and actual checkout fields while preserving selected point.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'window.wdcPickupCheckout.currentContext = context' ) && str_contains( $checkout_js, 'window.wdcPickupCheckout.initialContext = Object.assign({}, window.wdcPickupCheckout.initialContext || {}, context)' ) && str_contains( $checkout_js, 'window.wdcPickupCheckout.selectedPickupPoint = selectedPoint' ), 'Cross-location context sync must update currentContext, initialContext, and selectedPickupPoint globals for the next map open.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'invalidatePrefetch();' ) && str_contains( $checkout_js, 'schedulePrefetch();' ) && str_contains( $checkout_js, 'normalizeGuid(context.fias_id || \'\')' ), 'Cross-location context sync must clear old prefetch data and rebuild cache keys with the new FIAS/location context.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'var checkoutFias = normalizeGuid(checkoutContext && checkoutContext.fias_id)' ) && str_contains( $checkout_js, 'var pointFias = normalizeGuid(point && (point.fias_location_guid || point.fias_id))' ) && str_contains( $checkout_js, "quickMatchReason: checkoutFias === pointFias ? 'same_fias' : 'different_fias'" ), 'Pickup quick check must compare normalized checkout FIAS and pickup fias_location_guid before fallback matching.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'if (pointMatchesDestinationQuick(point, checkoutContext) || !window.WDCPickupApi.resolveLocation)' ) && str_contains( $checkout_js, 'commitPoint(point);' ), 'Same-FIAS pickup points must save immediately without resolve-location confirm flow.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'updateCurrentContext(context)' ) && str_contains( $checkout_js, 'applyContextToHidden(context)' ) && str_contains( $checkout_js, 'resetPickupSelectionOnServer();' ) && str_contains( $checkout_js, 'clearPickupSelectionUi();' ), 'Location-selected event must keep currentContext while resetting pickup selection.' );
 pickup_checkout_assert( ! str_contains( $checkout_js, "debug('wdc:location-selected detail', event.detail || {});\n\t\tinvalidatePrefetch();\n\t\tupdateCurrentContext(context);\n\t\tapplyContextToHidden(context);\n\t\tresetSelection();" ), 'Location-selected event must not call broad resetSelection after setting context.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'stateContextMatchesCurrentDestination' ) && str_contains( $checkout_js, 'contextMatches(currentContext, context)' ), 'State refresh must ignore empty or stale old-city context.' );
@@ -353,6 +413,7 @@ pickup_checkout_assert( false !== $apply_start && false !== $startup_start && ! 
 pickup_checkout_assert( ! str_contains( $map_js, 'visiblePoints.push(searchAddress)' ) && ! str_contains( $map_js, 'points.push(searchAddress)' ), 'Search marker must stay separate from pickup point list data.' );
 pickup_checkout_assert( str_contains( $map_js, 'setPostcodeOnlyMode' ) && str_contains( $map_js, 'Сейчас работает поиск только по почтовому индексу' ) && str_contains( $map_js, "input.value.replace(/\\D+/g, '').slice(0, 6)" ), 'Frontend must switch the search input to postcode-only mode when DaData limits are exhausted.' );
 pickup_checkout_assert( str_contains( $map_css, '.wdc-pickup-search' ) && str_contains( $map_css, '.wdc-pickup-search__icon' ) && str_contains( $map_css, '.wdc-pickup-search__button' ), 'Pickup search row must style icon, input, and submit button.' );
+pickup_checkout_assert( str_contains( $map_css, '.wdc-pickup-modal-loading' ) && str_contains( $map_css, '.wdc-pickup-modal-loading__spinner' ) && str_contains( $map_css, '@keyframes wdc-pickup-spin' ) && str_contains( $map_css, '.wdc-pickup-modal-notice' ), 'Pickup modal must style loading overlay, spinner, and error notice.' );
 pickup_checkout_assert( str_contains( $map_js, 'var aKey = String(a.postal_code || a.postcode || \'\') + \'|\'' ) && str_contains( $map_js, 'return a._wdcOrder - b._wdcOrder' ), 'Map list must use stable postcode/address ordering without coordinates.' );
 pickup_checkout_assert( str_contains( $map_js, "text === '0.000000'" ) && str_contains( $map_js, 'cleanDescription(point.description)' ), 'Selected card must suppress technical zero descriptions.' );
 pickup_checkout_assert( str_contains( $map_js, 'provider.setActivePoint(pointId(point))' ) && str_contains( $map_js, 'provider.focusPoint(point)' ), 'Map and list preview/commit must synchronize active marker and provider focus.' );
