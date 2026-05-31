@@ -5,11 +5,13 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Checkout\WooCommerce\PickupPointOrderDisplay;
 use WallsShop\WDC\Checkout\WooCommerce\PickupMapCheckout;
 use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController;
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
+use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\Services\PickupPointLocationResolver;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
@@ -136,6 +138,17 @@ $GLOBALS['wdc_pickup_checkout_session'] = new class {
 $GLOBALS['wdc_pickup_checkout_wc'] = new class {
 	public mixed $session;
 	public function __construct() { $this->session = $GLOBALS['wdc_pickup_checkout_session']; }
+	public function mailer(): object {
+		return new class {
+			public function get_emails(): array {
+				return array(
+					'WC_Email_New_Order' => (object) array( 'id' => 'new_order', 'title' => 'New order' ),
+					'WC_Email_Customer_Processing_Order' => (object) array( 'id' => 'customer_processing_order', 'title' => 'Processing order' ),
+					'WC_Email_OSM_Custom' => (object) array( 'id' => 'wc_order_status_manager_custom_status', 'title' => 'Custom status' ),
+				);
+			}
+		};
+	}
 };
 function WC(): object { return $GLOBALS['wdc_pickup_checkout_wc']; }
 
@@ -153,6 +166,7 @@ final class WdcPickupCheckoutErrors {
 final class WdcPickupCheckoutOrder {
 	public array $meta = array();
 	public function update_meta_data( string $key, mixed $value ): void { $this->meta[ $key ] = $value; }
+	public function get_meta( string $key, bool $single = true ): mixed { return $this->meta[ $key ] ?? ''; }
 	public function set_shipping_address_1( string $value ): void {}
 	public function set_shipping_address_2( string $value ): void {}
 	public function set_shipping_city( string $value ): void {}
@@ -274,6 +288,33 @@ $persister = new OrderShippingMetaPersister( $session );
 $persister->persist( $order, array() );
 pickup_checkout_assert( '10' === (string) $order->meta['_wdc_pickup_point_id'], 'order meta must save pickup point id.' );
 pickup_checkout_assert( str_contains( (string) $order->meta['_wdc_pickup_point_snapshot'], '630001-a' ), 'order meta must save snapshot JSON.' );
+$card_renderer = new PickupPointCardRenderer();
+$card_html = $card_renderer->render(
+	array(
+		'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+		'postcode' => '650068',
+		'city' => 'Кемерово',
+		'address' => 'ул. Ленина, 15',
+		'point_work_time' => 'Пн-Пт 09:00–20:00',
+	),
+	true
+);
+pickup_checkout_assert( str_contains( $card_html, 'Отделение Почты России' ) && str_contains( $card_html, '650068, г Кемерово' ) && str_contains( $card_html, 'ул. Ленина, 15' ) && str_contains( $card_html, 'Пн-Пт 09:00–20:00' ) && str_contains( $card_html, 'Изменить пункт выдачи' ), 'Pickup point card renderer must render title, city line, address, work time, and checkout change button.' );
+$card_without_time = $card_renderer->render( array( 'postcode' => '650068', 'address' => 'ул. Ленина, 15' ) );
+pickup_checkout_assert( str_contains( $card_without_time, 'data-wdc-pickup-work-time-block hidden' ) && ! str_contains( $card_without_time, 'Изменить пункт выдачи' ), 'Pickup point card renderer must hide empty work time and keep the change button checkout-only.' );
+$order_display = new PickupPointOrderDisplay( $card_renderer, $map_settings );
+ob_start();
+$order_display->render( $order );
+$thank_you_html = ob_get_clean() ?: '';
+pickup_checkout_assert( str_contains( $thank_you_html, 'wdc-pickup-point-card' ) && str_contains( $thank_you_html, 'Пункт выдачи' ) && str_contains( $thank_you_html, '630001' ), 'Thank You page pickup block must use the shared card renderer.' );
+$map_settings->replace( array_merge( $map_settings->defaults(), array( 'pickup_email_card_enabled_emails' => array( 'customer_processing_order' ) ) ) );
+ob_start();
+$order_display->render_email( $order, false, false, (object) array( 'id' => 'customer_processing_order' ) );
+$selected_email_html = ob_get_clean() ?: '';
+ob_start();
+$order_display->render_email( $order, false, false, (object) array( 'id' => 'new_order' ) );
+$unselected_email_html = ob_get_clean() ?: '';
+pickup_checkout_assert( str_contains( $selected_email_html, 'wdc-pickup-point-card' ) && '' === $unselected_email_html, 'Email pickup card must render only for selected WooCommerce email IDs.' );
 
 $item = new WdcPickupCheckoutItem();
 $persister->persist_shipping_item_meta( $item );
@@ -425,6 +466,7 @@ WC()->session->set( 'chosen_shipping_methods', array( RussianPostDomesticSetting
 
 $settings_source = file_get_contents( $root . '/src/Infrastructure/Settings/SettingsRepository.php' ) ?: '';
 pickup_checkout_assert( str_contains( $settings_source, "'pickup_map_provider' => 'leaflet'" ), 'Default pickup map provider must be leaflet.' );
+pickup_checkout_assert( str_contains( $settings_source, "'pickup_email_card_enabled_emails' => array()" ), 'Settings repository must define pickup_email_card_enabled_emails as an array default.' );
 pickup_checkout_assert( str_contains( $settings_source, "'russian_post_domestic_pickup_type_ops_enabled' => true" ) && str_contains( $settings_source, "'russian_post_domestic_pickup_type_pvz_enabled' => true" ) && str_contains( $settings_source, "'russian_post_domestic_pickup_type_aps_enabled' => true" ), 'Default pickup point type settings must enable OPS/PVZ/APS.' );
 $point_type_source = file_get_contents( $root . '/src/Pickup/RussianPost/RussianPostPickupPointTypeSettings.php' ) ?: '';
 $old_short_key = implode( '_', array( 'marker', 'label' ) );
@@ -433,6 +475,10 @@ pickup_checkout_assert( str_contains( $point_type_source, "'label' => 'Отде�
 $type_settings_values = ( new RussianPostPickupPointTypeSettings( new SettingsRepository() ) )->sanitize_admin_values( array( 'russian_post_domestic_pickup_type_ops_enabled' => '1', 'russian_post_domestic_pickup_type_ops_label' => 'Новое название' ) );
 pickup_checkout_assert( 'Новое название' === (string) $type_settings_values['russian_post_domestic_pickup_type_ops_label']['value'] && ! array_key_exists( "russian_post_domestic_pickup_type_ops_{$old_short_key}", $type_settings_values ) && ! array_key_exists( "russian_post_domestic_pickup_type_ops_{$old_long_key}", $type_settings_values ), 'Admin save must keep only enabled and label keys for each type.' );
 $settings_admin = new SettingsAdminPage( new SettingsRepository() );
+$email_options = $settings_admin->available_email_options();
+pickup_checkout_assert( isset( $email_options['new_order'], $email_options['customer_processing_order'], $email_options['wc_order_status_manager_custom_status'] ), 'Email settings must be built dynamically from WC()->mailer()->get_emails(), including custom Order Status Manager IDs.' );
+$email_settings = $settings_admin->sanitize_settings( array( 'pickup_email_card_enabled_emails' => array( 'new_order', 'wc_order_status_manager_custom_status', 'missing_email' ) ) );
+pickup_checkout_assert( array( 'new_order', 'wc_order_status_manager_custom_status' ) === $email_settings['pickup_email_card_enabled_emails'], 'Pickup email setting must keep only existing WooCommerce email IDs.' );
 $empty_key_settings = $settings_admin->sanitize_settings( array( 'pickup_map_provider' => 'yandex', 'pickup_map_yandex_api_key' => '' ) );
 pickup_checkout_assert( 'yandex' === $empty_key_settings['pickup_map_provider'] && ! array_key_exists( 'pickup_map_yandex_api_key', $empty_key_settings ), 'Empty Yandex key input must not overwrite a saved key.' );
 $new_key_settings = $settings_admin->sanitize_settings( array( 'pickup_map_provider' => 'yandex', 'pickup_map_yandex_api_key' => 'new-key' ) );
@@ -469,6 +515,11 @@ pickup_checkout_assert( str_contains( $address_runtime_source, 'should_preserve_
 pickup_checkout_assert( str_contains( $address_runtime_source, "WC()->session->get( 'chosen_shipping_methods'" ) && str_contains( $address_runtime_source, 'posted_destination_conflicts_with_pickup' ), 'Address runtime must fall back to WooCommerce chosen_shipping_methods and only treat an explicit conflicting destination as a real pickup reset.' );
 $delivery_type_selector_source = file_get_contents( $root . '/src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' ) ?: '';
 pickup_checkout_assert( str_contains( $delivery_type_selector_source, 'name="wdc_pickup_point_id"' ) && str_contains( $delivery_type_selector_source, 'name="wdc_pickup_point_code"' ), 'Checkout pickup block hidden inputs must submit selected point id and code names.' );
+pickup_checkout_assert( str_contains( $delivery_type_selector_source, 'PickupPointCardRenderer' ) && str_contains( $delivery_type_selector_source, '$this->card_renderer->render' ), 'Checkout pickup selected-point block must use the shared pickup card renderer.' );
+$order_display_source = file_get_contents( $root . '/src/Checkout/WooCommerce/PickupPointOrderDisplay.php' ) ?: '';
+pickup_checkout_assert( str_contains( $order_display_source, 'PickupPointCardRenderer' ) && str_contains( $order_display_source, '$this->card_renderer->render' ) && str_contains( $order_display_source, 'pickup_email_card_enabled_emails' ), 'Thank You page and email pickup blocks must use the shared pickup card renderer and email setting.' );
+$card_renderer_source = file_get_contents( $root . '/src/Pickup/Presentation/PickupPointCardRenderer.php' ) ?: '';
+pickup_checkout_assert( str_contains( $card_renderer_source, 'final class PickupPointCardRenderer' ) && str_contains( $card_renderer_source, 'point_work_time' ) && str_contains( $card_renderer_source, 'snapshot' ) && str_contains( $card_renderer_source, 'Отделение Почты России' ), 'Shared pickup point card renderer must normalize checkout/order snapshots and Russian Post titles.' );
 $map_checkout_source = file_get_contents( $root . '/src/Checkout/WooCommerce/PickupMapCheckout.php' ) ?: '';
 pickup_checkout_assert( str_contains( $map_checkout_source, 'map_provider()' ) && str_contains( $map_checkout_source, 'assets/vendor/leaflet/leaflet.css' ) && str_contains( $map_checkout_source, 'assets/vendor/leaflet/leaflet.js' ), 'Leaflet provider must enqueue Leaflet assets from assets/vendor/leaflet.' );
 pickup_checkout_assert( str_contains( $map_checkout_source, 'providers/wdc-map-provider-leaflet.js' ), 'Leaflet provider script must be enqueued.' );
@@ -495,6 +546,7 @@ pickup_checkout_assert( str_contains( $checkout_js, 'billing_postcode' ) && str_
 pickup_checkout_assert( str_contains( $checkout_js, 'contextFromFields' ) && str_contains( $checkout_js, 'shipping_city' ) && str_contains( $checkout_js, 'shipping_postcode' ), 'JS must form initial map query from checkout city/postcode.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'WDCPickupMap.create' ) && str_contains( $checkout_js, 'initialContext()' ), 'Next modal open must recompute initial context instead of reusing a cached value.' );
 pickup_checkout_assert( str_contains( $checkout_js, "confirmButton.addEventListener('wdc:point-selected'" ) && str_contains( $checkout_js, 'savePoint(event.detail || map.selected())' ) && str_contains( $checkout_js, 'function savePoint(point)' ), 'Popup/list selection event must save the pickup point immediately without a second footer click.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'selectedPointCityLine(point)' ) && str_contains( $checkout_js, '[data-wdc-pickup-card]' ) && str_contains( $checkout_js, '[data-wdc-pickup-empty-open]' ) && str_contains( $checkout_js, 'cityWithType' ), 'Checkout JS must update the shared selected-point card after pickup selection without a page reload.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'window.wdcPickupCheckout.selectedPickupPoint = selectedPoint' ) && str_contains( $checkout_js, 'selectedPoint: config.selectedPoint' ) && str_contains( $checkout_js, 'function normalizeSelectedPoint(point)' ), 'Checkout JS must keep the saved pickup point available for the next map open.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'lat: fieldContext.lat || runtimeContext.lat || localizedContext.lat' ) && str_contains( $checkout_js, 'lng: fieldContext.lng || runtimeContext.lng || localizedContext.lng' ), 'Initial context must prefer DOM hidden coordinates, then fresh runtime context, then localized config.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'wdc_platform_location_lat' ) && str_contains( $checkout_js, 'wdc_platform_location_lng' ), 'Initial context must read city picker hidden lat/lng fields.' );

@@ -20,13 +20,12 @@
 		}
 		container.dataset.wdcPickupReady = '1';
 		var method = container.getAttribute('data-shipping-method-id') || (window.wdcPickupCheckout && window.wdcPickupCheckout.shippingMethodId) || '';
-		var openButton = container.querySelector('[data-wdc-pickup-open]');
 		activeMethod = currentShippingMethod() || method;
 		rememberDestinationFingerprint();
 		toggleForMethod(container);
-		if (openButton) {
+		container.querySelectorAll('[data-wdc-pickup-open]').forEach(function (openButton) {
 			openButton.addEventListener('click', function () { openModal(container, activeMethod || method); });
-		}
+		});
 	}
 
 	function openModal(container, method) {
@@ -190,11 +189,20 @@
 		var selectedPoint = normalizeSelectedPoint(point);
 		container.querySelector('[data-wdc-pickup-point-id]').value = point.id || '';
 		container.querySelector('[data-wdc-pickup-point-code]').value = point.point_code || '';
-		container.querySelector('[data-wdc-pickup-address]').textContent = point.address || '';
-		container.querySelector('[data-wdc-pickup-postcode]').textContent = point.postcode || '';
-		container.querySelector('[data-wdc-pickup-work-time]').textContent = snapshot.work_time || '';
-		container.querySelector('[data-wdc-pickup-selection]').hidden = !point.point_code;
-		container.querySelector('[data-wdc-pickup-open]').textContent = point.point_code ? labels.change : labels.choose;
+		setText(container, '[data-wdc-pickup-title]', selectedPointTitle(point));
+		setText(container, '[data-wdc-pickup-city]', selectedPointCityLine(point));
+		setText(container, '[data-wdc-pickup-address]', point.address || '');
+		setText(container, '[data-wdc-pickup-work-time]', point.point_work_time || point.work_time || snapshot.work_time || '');
+		var workTimeBlock = container.querySelector('[data-wdc-pickup-work-time-block]');
+		if (workTimeBlock) {
+			workTimeBlock.hidden = !(point.point_work_time || point.work_time || snapshot.work_time);
+		}
+		container.querySelectorAll('[data-wdc-pickup-card]').forEach(function (card) {
+			card.hidden = !point.point_code;
+		});
+		container.querySelectorAll('[data-wdc-pickup-empty-open]').forEach(function (button) {
+			button.hidden = !!point.point_code;
+		});
 		if (!window.wdcPickupCheckout) {
 			window.wdcPickupCheckout = {};
 		}
@@ -205,6 +213,40 @@
 		if (selectedPoint && selectedPoint.point_code) {
 			rememberDestinationFingerprint();
 		}
+	}
+
+	function setText(container, selector, value) {
+		var element = container.querySelector(selector);
+		if (element) {
+			element.textContent = value || '';
+		}
+	}
+
+	function selectedPointTitle(point) {
+		var config = window.wdcPickupCheckout || {};
+		var carrier = String(point.carrier || point.carrier_key || config.carrier || '').trim();
+		var rateId = String(point.rate_id || point.shipping_method_id || config.shippingMethodId || '').trim();
+		if (carrier === 'russian_post' || carrier === 'russian_post_domestic' || rateId.indexOf('russian_post_domestic_pickup') === 0) {
+			return 'Отделение Почты России';
+		}
+		return 'Пункт выдачи';
+	}
+
+	function selectedPointCityLine(point) {
+		var snapshot = point.snapshot || {};
+		var postcode = String(point.postcode || point.point_postcode || snapshot.postcode || '').trim();
+		var city = cityWithType(String(point.city || point.city_name || snapshot.city || snapshot.city_name || '').trim());
+		if (postcode && city) {
+			return postcode + ', ' + city;
+		}
+		return postcode || city;
+	}
+
+	function cityWithType(city) {
+		if (!city || /^(г|город|п|пос|с|д|рп|пгт)\.?\s+/i.test(city)) {
+			return city;
+		}
+		return 'г ' + city;
 	}
 
 	function resetSelection(reason) {

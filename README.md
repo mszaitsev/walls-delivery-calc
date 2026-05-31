@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.27.15.
+Version: 0.28.0.
+
+Version 0.28.0 adds a shared pickup point card renderer for checkout, the order thank-you page, and customer emails. The checkout selected-point UI now updates the same card after map selection, order details reuse that renderer, and email output is controlled by a dynamic WooCommerce email-class setting that includes custom emails from extensions such as WooCommerce Order Status Manager.
 
 Version 0.27.15 trims temporary checkout pickup diagnostics for production. Backend validation and pickup clear logs now keep only compact method, point-presence, pass/fail, and restore-status fields, while detailed frontend context logs move behind `window.wdcPickupCheckout.deepDebug`.
 
