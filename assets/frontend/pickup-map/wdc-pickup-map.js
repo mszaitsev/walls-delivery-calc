@@ -35,6 +35,9 @@
 		var provider = null;
 		var visiblePoints = [];
 		var popupManuallyClosed = false;
+		var userLocation = null;
+		var originStatus = '';
+		var originStatusType = '';
 
 		if ('yandex' === providerName && !config.yandexApiKeyPresent) {
 			card.textContent = (config.errors && config.errors.yandexApiKeyMissing) || 'Для Яндекс.Карт не задан API key. Выберите OpenStreetMap или укажите ключ в настройках.';
@@ -169,7 +172,7 @@
 			}
 			provider.renderMarkers(visiblePoints, {
 				activePointId: previewPoint ? pointId(previewPoint) : null,
-				searchMarker: searchAddress
+				searchMarker: activeOriginMarker()
 			});
 			renderList(visiblePoints);
 			updateListSelectButton();
@@ -203,12 +206,16 @@
 				return;
 			}
 			if (!points.length) {
-				list.innerHTML = '<div class="wdc-pickup-list__empty">' + escapeHtml(labels.empty || '') + '</div>';
+				list.innerHTML = [
+					originStatus ? '<div class="wdc-pickup-list__status' + (originStatusType === 'error' ? ' is-error' : '') + '">' + escapeHtml(originStatus) + '</div>' : '',
+					'<div class="wdc-pickup-list__empty">' + escapeHtml(labels.empty || '') + '</div>'
+				].join('');
 				return;
 			}
 			var shown = points.slice(0, LIST_LIMIT);
 			var nearest = shown[0] && shown[0].distanceText ? shown[0].distanceText : '';
 			list.innerHTML = [
+				originStatus ? '<div class="wdc-pickup-list__status' + (originStatusType === 'error' ? ' is-error' : '') + '">' + escapeHtml(originStatus) + '</div>' : '',
 				searchAddress ? '<div class="wdc-pickup-list__found"><strong>Найден адрес:</strong><span>' + escapeHtml(searchAddress.value || '') + '</span>' + (nearest ? '<em>Ближайший ПВЗ: ' + escapeHtml(nearest) + '</em>' : '') + '</div>' : '',
 				'<div class="wdc-pickup-list__meta">' + escapeHtml(listMeta(points.length, shown.length)) + '</div>',
 				'<div class="wdc-pickup-list__items">',
@@ -337,12 +344,15 @@
 
 		function applySearchResult(result) {
 			searchAddress = normalizeAddressMarker(result.address);
+			userLocation = null;
+			originStatus = '';
+			originStatusType = '';
 			distanceOrigin = { lat: parseFloat(searchAddress.lat), lng: parseFloat(searchAddress.lng) };
 			suppressNextMoveLoad = true;
 			provider.setCenter(searchAddress.lat, searchAddress.lng, 15);
 			provider.renderMarkers(visiblePoints, {
 				activePointId: previewPoint ? pointId(previewPoint) : null,
-				searchMarker: searchAddress
+				searchMarker: activeOriginMarker()
 			});
 			loadBounds(bboxAround(searchAddress.lat, searchAddress.lng), {
 				force: true,
@@ -367,6 +377,8 @@
 		return {
 			selected: function () { return committedPoint; },
 			search: search,
+			setStatus: setStatus,
+			useUserLocation: useUserLocation,
 			destroy: function () {
 				if (controller) {
 					controller.abort();
@@ -499,6 +511,39 @@
 			return fallback || start;
 		}
 
+		function useUserLocation(lat, lng) {
+			lat = parseFloat(lat);
+			lng = parseFloat(lng);
+			if (isNaN(lat) || isNaN(lng)) {
+				setStatus('Не удалось определить местоположение. Используйте поиск адреса.', 'error');
+				return;
+			}
+			searchAddress = null;
+			userLocation = normalizeUserLocationMarker({ lat: lat, lng: lng });
+			distanceOrigin = { lat: lat, lng: lng };
+			originStatus = 'Показаны ближайшие пункты к вашему местоположению';
+			originStatusType = '';
+			suppressNextMoveLoad = true;
+			provider.setCenter(lat, lng, 15);
+			provider.renderMarkers(visiblePoints, {
+				activePointId: previewPoint ? pointId(previewPoint) : null,
+				searchMarker: activeOriginMarker()
+			});
+			renderList(visiblePoints);
+			loadBounds(bboxAround(lat, lng), { force: true });
+		}
+
+		function setStatus(message, type) {
+			originStatus = String(message || '');
+			originStatusType = type === 'error' ? 'error' : '';
+			card.textContent = originStatus || (committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Выберите пункт на карте или в списке.'));
+			renderList(visiblePoints);
+		}
+
+		function activeOriginMarker() {
+			return userLocation || searchAddress;
+		}
+
 	}
 
 	function normalizeProvider(provider) {
@@ -512,6 +557,16 @@
 			value: String(address.value || ''),
 			lat: parseFloat(address.lat),
 			lng: parseFloat(address.lng)
+		};
+	}
+
+	function normalizeUserLocationMarker(location) {
+		return {
+			id: 'user-location',
+			type: 'geolocation',
+			value: '',
+			lat: parseFloat(location.lat),
+			lng: parseFloat(location.lng)
 		};
 	}
 

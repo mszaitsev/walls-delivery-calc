@@ -11,6 +11,7 @@
 		var collection = null;
 		var destroyed = false;
 		var pendingPoints = [];
+		var pendingSearchMarker = null;
 		var pointClickCallback = function () {};
 		var popupSelectCallback = function () {};
 		var popupCloseCallback = function () {};
@@ -53,7 +54,7 @@
 			map.events.add('click', mapClicked);
 			document.addEventListener('click', onPopupClick);
 			fitToViewport();
-			if (pendingPoints.length) {
+			if (pendingPoints.length || pendingSearchMarker) {
 				renderMarkers(pendingPoints);
 			}
 			if (pendingCenterChanged) {
@@ -79,6 +80,9 @@
 
 		function renderMarkers(points, options) {
 			pendingPoints = points || [];
+			if (options && Object.prototype.hasOwnProperty.call(options, 'searchMarker')) {
+				pendingSearchMarker = options.searchMarker || null;
+			}
 			activePointId = options && Object.prototype.hasOwnProperty.call(options, 'activePointId') ? (options.activePointId ? String(options.activePointId) : null) : activePointId;
 			if (!map || !collection || !ymapsApi) {
 				return;
@@ -112,7 +116,7 @@
 				placemarkById[id] = placemark;
 				pointById[id] = point;
 			});
-			renderSearchMarker(options && options.searchMarker);
+			renderSearchMarker(options && Object.prototype.hasOwnProperty.call(options, 'searchMarker') ? options.searchMarker : pendingSearchMarker);
 			suppressPopupClose = false;
 		}
 
@@ -202,6 +206,7 @@
 			renderMarkers: renderMarkers,
 			clearMarkers: function () {
 				pendingPoints = [];
+				pendingSearchMarker = null;
 				suppressPopupClose = true;
 				clearMarkers();
 				suppressPopupClose = false;

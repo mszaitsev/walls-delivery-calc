@@ -42,6 +42,7 @@
 			var confirmButton = modal.root.querySelector('[data-wdc-confirm]');
 			var search = modal.root.querySelector('[data-wdc-search]');
 			var searchSubmit = modal.root.querySelector('[data-wdc-search-submit]');
+			var geolocationButton = modal.root.querySelector('[data-wdc-geolocation]');
 			var context = withPrefetch(resolvedContext);
 			debugDeep('openModal context', context);
 			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
@@ -178,12 +179,58 @@
 			if (searchSubmit) {
 				searchSubmit.addEventListener('click', runAddressSearch);
 			}
+			setupGeolocationButton();
 			confirmButton.addEventListener('wdc:point-selected', function (event) {
 				savePoint(event.detail || map.selected());
 			});
 			confirmButton.addEventListener('click', function () {
 				savePoint(map.selected());
 			});
+
+			function setupGeolocationButton() {
+				if (!geolocationButton) {
+					return;
+				}
+				if (!window.navigator || !window.navigator.geolocation) {
+					geolocationButton.hidden = true;
+					geolocationButton.disabled = true;
+					geolocationButton.title = 'Геолокация не поддерживается браузером.';
+					return;
+				}
+				geolocationButton.hidden = false;
+				resetGeolocationButton();
+				geolocationButton.addEventListener('click', function () {
+					geolocationButton.disabled = true;
+					geolocationButton.classList.add('is-loading');
+					geolocationButton.title = 'Определяем местоположение...';
+					geolocationButton.innerHTML = '<span aria-hidden="true">...</span>';
+					if (map.setStatus) {
+						map.setStatus('Определяем местоположение...');
+					}
+					window.navigator.geolocation.getCurrentPosition(function (position) {
+						resetGeolocationButton();
+						if (map.useUserLocation) {
+							map.useUserLocation(position.coords.latitude, position.coords.longitude);
+						}
+					}, function (error) {
+						resetGeolocationButton();
+						if (map.setStatus) {
+							map.setStatus(geolocationErrorMessage(error), 'error');
+						}
+					}, {
+						enableHighAccuracy: true,
+						timeout: 10000,
+						maximumAge: 300000
+					});
+				});
+			}
+
+			function resetGeolocationButton() {
+				geolocationButton.disabled = false;
+				geolocationButton.classList.remove('is-loading');
+				geolocationButton.title = 'Определить моё местоположение';
+				geolocationButton.innerHTML = '<span aria-hidden="true" class="wdc-pickup-map__locate-icon"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 11.4 20.2 3.8 12.6 20l-2.1-7.1L4 11.4Z"></path></svg></span>';
+			}
 		});
 	}
 
@@ -226,6 +273,19 @@
 		} else {
 			element.style.removeProperty('display');
 		}
+	}
+
+	function geolocationErrorMessage(error) {
+		if (error && error.code === 1) {
+			return 'Браузер не дал доступ к местоположению. Разрешите доступ или используйте поиск адреса.';
+		}
+		if (error && error.code === 2) {
+			return 'Не удалось определить местоположение. Используйте поиск адреса.';
+		}
+		if (error && error.code === 3) {
+			return 'Не удалось определить местоположение за отведенное время. Используйте поиск адреса.';
+		}
+		return 'Не удалось определить местоположение. Используйте поиск адреса.';
 	}
 
 	function setText(container, selector, value) {
