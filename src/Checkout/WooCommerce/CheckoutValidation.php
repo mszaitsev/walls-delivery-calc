@@ -24,7 +24,7 @@ final class CheckoutValidation {
 
 	public function validate( mixed $data = array(), mixed $errors = null ): void {
 		$data = is_array( $data ) ? $data : array();
-		$rate = $this->selected_rate();
+		$rate = $this->selected_rate( $data );
 		if ( array() === $rate ) {
 			return;
 		}
@@ -116,9 +116,9 @@ final class CheckoutValidation {
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function selected_rate(): array {
+	private function selected_rate( array $data = array() ): array {
 		$rates = $this->session_manager->rates();
-		foreach ( $this->chosen_shipping_methods() as $rate_id ) {
+		foreach ( $this->chosen_shipping_methods( $data ) as $rate_id ) {
 			if ( isset( $rates[ $rate_id ] ) ) {
 				return $this->with_selected_rate_id( $rates[ $rate_id ], $rate_id );
 			}
@@ -267,7 +267,17 @@ final class CheckoutValidation {
 	/**
 	 * @return array<int,string>
 	 */
-	private function chosen_shipping_methods(): array {
+	private function chosen_shipping_methods( array $data = array() ): array {
+		$posted = $data['shipping_method'] ?? array();
+		if ( is_array( $posted ) ) {
+			$posted = array_filter( array_map( 'strval', $posted ), static fn( string $value ): bool => '' !== trim( $value ) );
+			if ( array() !== $posted ) {
+				return array_values( $posted );
+			}
+		} elseif ( is_scalar( $posted ) && '' !== trim( (string) $posted ) ) {
+			return array( (string) $posted );
+		}
+
 		if ( function_exists( 'WC' ) && is_object( WC() ) && isset( WC()->session ) && is_object( WC()->session ) && method_exists( WC()->session, 'get' ) ) {
 			$chosen = WC()->session->get( 'chosen_shipping_methods', array() );
 

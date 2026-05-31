@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.27.9.
+Version: 0.27.10.
+
+Version 0.27.10 prevents late checkout city-selector events from clearing Russian Post pickup selections. The frontend now recognizes same-location `wdc:location-selected` events by location id, FIAS id, or normalized city/postcode, extends the place-order reset guard for late checkout events, and checkout validation reads posted `shipping_method[0]` before falling back to WooCommerce session state.
 
 Version 0.27.9 adds reason-coded pickup reset diagnostics and hardens checkout submit against WooCommerce recalculation payloads that omit `shipping_method`. Address runtime now falls back to `chosen_shipping_methods`, refuses automatic pickup clears while the active method family is `russian_post_domestic_pickup`, and frontend `updated_checkout` skips context refresh during place order. The pickup CSS remains scoped away from WooCommerce button and loader pseudo-elements.
 
