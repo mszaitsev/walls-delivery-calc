@@ -41,7 +41,7 @@
 			var search = modal.root.querySelector('[data-wdc-search]');
 			var searchSubmit = modal.root.querySelector('[data-wdc-search-submit]');
 			var context = withPrefetch(resolvedContext);
-			debug('openModal context', context);
+			debugDeep('openModal context', context);
 			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
 			var savingPoint = false;
 			var loadingText = '';
@@ -267,8 +267,8 @@
 			selectedPoint: config.selectedPoint || (window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint) || null
 		};
 		var fieldContext = contextFromFields();
-		debug('contextFromFields', fieldContext);
-		debug('currentContext', currentContext);
+		debugDeep('contextFromFields', fieldContext);
+		debugDeep('currentContext', currentContext);
 		if (fieldContext.countryBlocked) {
 			return {};
 		}
@@ -288,9 +288,9 @@
 			country_code: fieldContext.country_code || runtimeContext.country_code || localizedContext.country_code || 'RU',
 			selectedPoint: localizedContext.selectedPoint || runtimeContext.selectedPoint || null
 		};
-		debug('sameDestination field/current', sameDestination(fieldContext, currentContext));
-		debug('chosen lat/lng source', latSource);
-		debug('initialContext selected source', fieldContext.query ? 'fields' : (runtimeContext.query ? 'current' : (localizedContext.query ? 'localized' : 'fallback')), result);
+		debugDeep('sameDestination field/current', sameDestination(fieldContext, currentContext));
+		debugDeep('chosen lat/lng source', latSource);
+		debugDeep('initialContext selected source', fieldContext.query ? 'fields' : (runtimeContext.query ? 'current' : (localizedContext.query ? 'localized' : 'fallback')), result);
 		return result;
 	}
 
@@ -349,6 +349,12 @@
 	function debug() {
 		if (window.wdcPickupCheckout && window.wdcPickupCheckout.debug && window.console && window.console.log) {
 			window.console.log.apply(window.console, ['wdc pickup:'].concat(Array.prototype.slice.call(arguments)));
+		}
+	}
+
+	function debugDeep() {
+		if (window.wdcPickupCheckout && window.wdcPickupCheckout.deepDebug) {
+			debug.apply(null, arguments);
 		}
 	}
 
@@ -498,7 +504,7 @@
 		rememberDestinationFingerprint(context);
 		invalidatePrefetch();
 		schedulePrefetch();
-		debug('syncPickupContextAfterLocationChange', context);
+		debugDeep('syncPickupContextAfterLocationChange', context);
 	}
 
 	function applyContextToHidden(context) {
@@ -549,7 +555,7 @@
 		}
 		var stateRequest = window.WDCPickupApi.state().then(function (state) {
 			var context = contextFromState(state && state.city_context);
-			debug('refreshCheckoutContextOnce result', context);
+			debugDeep('refreshCheckoutContextOnce result', context);
 			if ((context.query || validCoordinate(context.lat, context.lng)) && stateContextMatchesCurrentDestination(context)) {
 				updateCurrentContext(context);
 				applyContextToHidden(context);
@@ -1008,7 +1014,7 @@
 
 	function withPrefetch(context) {
 		var key = cacheKey(context);
-		debug('prefetch cache key', key);
+		debugDeep('prefetch cache key', key);
 		if (prefetchCache && prefetchCache.key === key && Array.isArray(prefetchCache.points) && prefetchCache.points.length) {
 			return Object.assign({}, context, {
 				preloadedPoints: prefetchCache.points,
@@ -1152,7 +1158,7 @@
 	});
 	document.body.addEventListener('wdc:location-selected', function (event) {
 		var context = contextFromLocationDetail(event.detail || {});
-		debug('wdc:location-selected detail', event.detail || {});
+		debugDeep('wdc:location-selected detail', event.detail || {});
 		invalidatePrefetch();
 		var previousContext = Object.assign({}, currentContext || {});
 		var fieldContext = contextFromFields();

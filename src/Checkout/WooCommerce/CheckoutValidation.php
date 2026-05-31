@@ -31,11 +31,11 @@ final class CheckoutValidation {
 		$this->debug_validation(
 			'wdc_pickup_preload_from_post_start',
 			array(
-				'chosen_shipping_methods' => $chosen_methods,
 				'chosen_rate_id' => $chosen_rate_id,
-				'chosen_rate_id_normalized' => $this->session_manager->normalize_rate_id( $chosen_rate_id ),
-				'posted_point_id' => max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) ),
-				'posted_point_code' => $this->posted_string( $data, 'wdc_pickup_point_code' ),
+				'chosen_rate_family' => $this->session_manager->shipping_method_family( $chosen_rate_id ),
+				'posted_point_id_present' => max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) ) > 0,
+				'posted_point_code_present' => '' !== $this->posted_string( $data, 'wdc_pickup_point_code' ),
+				'session_has_pickup' => $this->session_manager->has_valid_pickup_selection(),
 			)
 		);
 
@@ -57,7 +57,8 @@ final class CheckoutValidation {
 			array(
 				'reason' => $restored ? 'restored_from_post' : 'restore_failed',
 				'chosen_rate_id' => $chosen_rate_id,
-				'session_pickup_selection' => $this->session_manager->pickup_selection(),
+				'chosen_rate_family' => $this->session_manager->shipping_method_family( $chosen_rate_id ),
+				'session_has_pickup' => $this->session_manager->has_valid_pickup_selection(),
 			)
 		);
 	}
@@ -77,19 +78,17 @@ final class CheckoutValidation {
 		$this->debug_validation(
 			'wdc_checkout_validation_start',
 			array(
-				'chosen_shipping_methods' => $chosen_methods,
 				'chosen_rate_id' => $chosen_rate_id,
-				'chosen_rate_id_normalized' => $chosen_rate_id_normalized,
-				'posted_point_id' => max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) ),
-				'posted_point_code' => $this->posted_string( $data, 'wdc_pickup_point_code' ),
+				'chosen_rate_family' => $this->session_manager->shipping_method_family( $chosen_rate_id_normalized ),
+				'posted_point_id_present' => max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) ) > 0,
+				'posted_point_code_present' => '' !== $this->posted_string( $data, 'wdc_pickup_point_code' ),
 				'selected_rate_found' => $selected_rate_found,
 				'synthetic_rate_created' => $synthetic_rate_created,
-				'selected_rate' => $this->rate_debug_context( $rate ),
-				'session_pickup_selection' => $this->session_manager->pickup_selection(),
+				'session_has_pickup' => $this->session_manager->has_valid_pickup_selection(),
 			)
 		);
 		if ( array() === $rate ) {
-			$this->debug_validation( 'wdc_pickup_validation_failed', array( 'reason' => 'selected_rate_missing' ) );
+			$this->debug_validation( 'wdc_pickup_validation_failed', $this->validation_failure_context( 'selected_rate_missing', $data, $chosen_rate_id, '' ) );
 			return;
 		}
 
@@ -111,30 +110,29 @@ final class CheckoutValidation {
 			$this->debug_validation( 'wdc_pickup_validation_passed', array( 'reason' => 'session_match', 'selected_rate_id' => $selected_rate_id ) );
 			return;
 		}
-		$this->debug_validation(
-			'wdc_pickup_validation_session_match_failed',
-			array(
-				'selected_rate_id' => $selected_rate_id,
-				'carrier_key' => (string) ( $rate['carrier_key'] ?? '' ),
-				'session_pickup_selection' => $this->session_manager->pickup_selection(),
-			)
-		);
-
 		$restored = $this->restore_posted_pickup_selection( $data, $rate );
 		if ( $restored ) {
 			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
-			$this->debug_validation( 'wdc_pickup_restore_from_post_success', array( 'pass_reason' => 'restored_from_post', 'selected_rate_id' => $selected_rate_id, 'session_pickup_selection' => $this->session_manager->pickup_selection() ) );
+			$this->debug_validation(
+				'wdc_pickup_restore_from_post_success',
+				array(
+					'pass_reason' => 'restored_from_post',
+					'selected_rate_id' => $selected_rate_id,
+					'session_has_pickup' => $this->session_manager->has_valid_pickup_selection(),
+				)
+			);
 			return;
 		}
 
 		$matches_after_restore = $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $selected_rate_id );
 		$this->debug_validation(
 			'wdc_pickup_validation_failed',
-			array(
-				'reason' => 'no_session_no_post_point',
-				'restore_result' => $restored,
-				'matches_after_restore' => $matches_after_restore,
-				'session_pickup_selection' => $this->session_manager->pickup_selection(),
+			array_merge(
+				$this->validation_failure_context( 'no_session_no_post_point', $data, $chosen_rate_id, $selected_rate_id ),
+				array(
+					'restore_result' => $restored,
+					'matches_after_restore' => $matches_after_restore,
+				)
 			)
 		);
 		$this->add_pickup_error( $errors, $rate );
@@ -269,10 +267,9 @@ final class CheckoutValidation {
 		$this->debug_validation(
 			'wdc_pickup_restore_from_post_attempt',
 			array(
-				'posted_point_id' => $point_id,
-				'posted_point_code' => $point_code,
+				'posted_point_id_present' => $point_id > 0,
+				'posted_point_code_present' => '' !== $point_code,
 				'selected_rate_id' => $this->selected_rate_id( $rate ),
-				'rate' => $this->rate_debug_context( $rate ),
 			)
 		);
 		if ( $point_id <= 0 && '' === $point_code ) {
@@ -284,7 +281,7 @@ final class CheckoutValidation {
 		$this->debug_validation(
 			'wdc_pickup_restore_lookup_by_id',
 			array(
-				'posted_point_id' => $point_id,
+				'posted_point_id_present' => $point_id > 0,
 				'success' => array() !== $selection,
 			)
 		);
@@ -293,7 +290,7 @@ final class CheckoutValidation {
 			$this->debug_validation(
 				'wdc_pickup_restore_lookup_by_code',
 				array(
-					'posted_point_code' => $point_code,
+					'posted_point_code_present' => '' !== $point_code,
 					'success' => array() !== $selection,
 				)
 			);
@@ -332,7 +329,8 @@ final class CheckoutValidation {
 			array(
 				'pass_reason' => $minimal_restore_used ? 'restored_minimal' : 'restored_from_post',
 				'minimal_restore_used' => $minimal_restore_used,
-				'session_pickup_selection' => $this->session_manager->pickup_selection(),
+				'selected_rate_id' => (string) $selection['rate_id'],
+				'session_has_pickup' => $this->session_manager->has_valid_pickup_selection(),
 			)
 		);
 
@@ -453,17 +451,18 @@ final class CheckoutValidation {
 	}
 
 	/**
-	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $data
 	 * @return array<string,mixed>
 	 */
-	private function rate_debug_context( array $rate ): array {
+	private function validation_failure_context( string $reason, array $data, string $chosen_rate_id, string $selected_rate_id ): array {
 		return array(
-			'rate_id' => (string) ( $rate['rate_id'] ?? '' ),
-			'selected_rate_id' => (string) ( $rate['_selected_rate_id'] ?? '' ),
-			'service_key' => (string) ( $rate['service_key'] ?? '' ),
-			'carrier_key' => (string) ( $rate['carrier_key'] ?? '' ),
-			'delivery_type' => (string) ( $rate['delivery_type'] ?? '' ),
-			'synthetic' => ! empty( $rate['_synthetic'] ),
+			'reason' => $reason,
+			'chosen_rate_id' => $chosen_rate_id,
+			'chosen_rate_family' => $this->session_manager->shipping_method_family( $chosen_rate_id ),
+			'selected_rate_id' => $selected_rate_id,
+			'session_has_pickup' => $this->session_manager->has_valid_pickup_selection(),
+			'posted_point_id_present' => max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) ) > 0,
+			'posted_point_code_present' => '' !== $this->posted_string( $data, 'wdc_pickup_point_code' ),
 		);
 	}
 

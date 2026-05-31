@@ -317,22 +317,22 @@ final class CheckoutSessionManager {
 			return;
 		}
 
-		$selection = $this->pickup_selection();
+		$currentRateId = $this->normalize_rate_id( $currentRateId );
 		$context = array(
 			'reason' => $reason,
 			'blocked' => $blocked,
-			'current_rate_id' => $this->normalize_rate_id( $currentRateId ),
-			'selection_rate_id' => $this->normalize_rate_id( (string) ( $selection['rate_id'] ?? '' ) ),
-			'has_point' => $this->has_valid_pickup_selection(),
+			'current_rate_id' => $currentRateId,
+			'current_rate_family' => $this->shipping_method_family( $currentRateId ),
+			'session_has_pickup' => $this->has_valid_pickup_selection(),
 		);
 		if ( function_exists( 'wc_get_logger' ) ) {
-			wc_get_logger()->debug( 'Pickup selection clear requested.', array_merge( $context, array( 'source' => 'walls-delivery-calc' ) ) );
+			wc_get_logger()->debug( $blocked ? 'clear_pickup_selection_blocked' : 'clear_pickup_selection', array_merge( $context, array( 'source' => 'walls-delivery-calc' ) ) );
 			return;
 		}
 
 		if ( function_exists( 'error_log' ) ) {
 			$encoded = function_exists( 'wp_json_encode' ) ? wp_json_encode( $context ) : json_encode( $context );
-			error_log( '[walls-delivery-calc] debug: Pickup selection clear requested. ' . ( false !== $encoded ? $encoded : '' ) );
+			error_log( '[walls-delivery-calc] debug: ' . ( $blocked ? 'clear_pickup_selection_blocked' : 'clear_pickup_selection' ) . ' ' . ( false !== $encoded ? $encoded : '' ) );
 		}
 	}
 

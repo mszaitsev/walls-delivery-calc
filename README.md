@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.27.14.
+Version: 0.27.15.
+
+Version 0.27.15 trims temporary checkout pickup diagnostics for production. Backend validation and pickup clear logs now keep only compact method, point-presence, pass/fail, and restore-status fields, while detailed frontend context logs move behind `window.wdcPickupCheckout.deepDebug`.
 
 Version 0.27.14 registers an early WooCommerce checkout-process preloader for Russian Post pickup selections. Checkout submit POST hidden fields now restore the pickup session before later validation hooks run, and debug logs include checkout validation registration plus preload start/success/skipped messages.
 
