@@ -2,10 +2,13 @@
 declare(strict_types=1);
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\PickupPointOrderDisplay;
+use WallsShop\WDC\Checkout\WooCommerce\PickupPointRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\PickupMapCheckout;
 use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Admin\SettingsAdminPage;
@@ -284,6 +287,17 @@ $GLOBALS['wdc_pickup_checkout_localized'] = array();
 $missing_key_map = $GLOBALS['wdc_pickup_checkout_localized']['wdc-pickup-checkout']['wdcPickupCheckout'] ?? array();
 pickup_checkout_assert( 'yandex' === (string) ( $missing_key_map['mapProvider'] ?? '' ) && false === (bool) ( $missing_key_map['yandexApiKeyPresent'] ?? true ) && '' === (string) ( $missing_key_map['yandexApiKey'] ?? 'not-empty' ) && str_contains( (string) ( $missing_key_map['errors']['yandexApiKeyMissing'] ?? '' ), 'API key' ), 'Yandex without API key must localize a false flag, no key, and a readable error.' );
 
+$pickup_method = (object) array( 'meta_data' => $rate );
+$checkout_selector = new CheckoutDeliveryTypeSelector( $session, new WallsShop\WDC\Pickup\Storage\PickupPointRepository( $GLOBALS['wpdb'] ), new PickupPointRenderer(), new PickupPointCardRenderer() );
+ob_start();
+$checkout_selector->render( $pickup_method );
+$selected_checkout_html = ob_get_clean() ?: '';
+pickup_checkout_assert( str_contains( $selected_checkout_html, 'data-wdc-pickup-empty-open hidden' ) && str_contains( $selected_checkout_html, 'data-wdc-pickup-card' ) && ! str_contains( $selected_checkout_html, 'data-wdc-pickup-card hidden' ) && str_contains( $selected_checkout_html, 'Изменить пункт выдачи' ), 'Selected pickup checkout UI must hide the primary choose button and show the card change button.' );
+ob_start();
+( new CheckoutRateRenderer( $session ) )->render( $pickup_method );
+$rate_html = ob_get_clean() ?: '';
+pickup_checkout_assert( ! str_contains( $rate_html, 'wdc-platform-pickup-selected' ) && ! str_contains( $rate_html, 'Ленина, 1' ) && ! str_contains( $rate_html, '09-18' ), 'Checkout rate renderer must not output the legacy selected pickup summary after rate comments.' );
+
 $order = new WdcPickupCheckoutOrder();
 $persister = new OrderShippingMetaPersister( $session );
 $persister->persist( $order, array() );
@@ -341,6 +355,10 @@ pickup_checkout_assert( '630001' === (string) ( $item->meta['Индекс ПВЗ
 $state_controller->delete();
 pickup_checkout_assert( array() === $session->checkout_pickup_point(), 'reset must clear checkout pickup point.' );
 pickup_checkout_assert( null === $state_controller->state()['pickup_point'], 'checkout state GET must return null after reset.' );
+ob_start();
+$checkout_selector->render( $pickup_method );
+$empty_checkout_html = ob_get_clean() ?: '';
+pickup_checkout_assert( str_contains( $empty_checkout_html, 'data-wdc-pickup-empty-open ' ) && ! str_contains( $empty_checkout_html, 'data-wdc-pickup-empty-open hidden' ) && str_contains( $empty_checkout_html, 'data-wdc-pickup-card hidden' ), 'Empty pickup checkout UI must show the primary choose button and keep the card hidden.' );
 
 $errors = new WdcPickupCheckoutErrors();
 ( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
@@ -533,6 +551,8 @@ pickup_checkout_assert( str_contains( $address_runtime_source, "WC()->session->g
 $delivery_type_selector_source = file_get_contents( $root . '/src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' ) ?: '';
 pickup_checkout_assert( str_contains( $delivery_type_selector_source, 'name="wdc_pickup_point_id"' ) && str_contains( $delivery_type_selector_source, 'name="wdc_pickup_point_code"' ), 'Checkout pickup block hidden inputs must submit selected point id and code names.' );
 pickup_checkout_assert( str_contains( $delivery_type_selector_source, 'PickupPointCardRenderer' ) && str_contains( $delivery_type_selector_source, '$this->card_renderer->render' ), 'Checkout pickup selected-point block must use the shared pickup card renderer.' );
+$rate_renderer_source = file_get_contents( $root . '/src/Checkout/WooCommerce/CheckoutRateRenderer.php' ) ?: '';
+pickup_checkout_assert( ! str_contains( $rate_renderer_source, 'wdc-platform-pickup-selected' ) && ! str_contains( $rate_renderer_source, 'render_selected_pickup' ) && ! str_contains( $rate_renderer_source, 'point_address' ), 'Checkout rate renderer must not contain the legacy selected pickup summary/address block.' );
 $order_display_source = file_get_contents( $root . '/src/Checkout/WooCommerce/PickupPointOrderDisplay.php' ) ?: '';
 pickup_checkout_assert( str_contains( $order_display_source, 'PickupPointCardRenderer' ) && str_contains( $order_display_source, '$this->card_renderer->render' ) && str_contains( $order_display_source, 'pickup_email_card_enabled_emails' ), 'Thank You page and email pickup blocks must use the shared pickup card renderer and email setting.' );
 $card_renderer_source = file_get_contents( $root . '/src/Pickup/Presentation/PickupPointCardRenderer.php' ) ?: '';
@@ -564,6 +584,7 @@ pickup_checkout_assert( str_contains( $checkout_js, 'contextFromFields' ) && str
 pickup_checkout_assert( str_contains( $checkout_js, 'WDCPickupMap.create' ) && str_contains( $checkout_js, 'initialContext()' ), 'Next modal open must recompute initial context instead of reusing a cached value.' );
 pickup_checkout_assert( str_contains( $checkout_js, "confirmButton.addEventListener('wdc:point-selected'" ) && str_contains( $checkout_js, 'savePoint(event.detail || map.selected())' ) && str_contains( $checkout_js, 'function savePoint(point)' ), 'Popup/list selection event must save the pickup point immediately without a second footer click.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'selectedPointAddress(point)' ) && str_contains( $checkout_js, '[data-wdc-pickup-title-text]' ) && ! str_contains( $checkout_js, 'selectedPointCityLine(point)' ) && ! str_contains( $checkout_js, '[data-wdc-pickup-city]' ) && str_contains( $checkout_js, '[data-wdc-pickup-card]' ) && str_contains( $checkout_js, '[data-wdc-pickup-empty-open]' ) && str_contains( $checkout_js, 'cityWithType' ), 'Checkout JS must update the shared selected-point card address after pickup selection without relying on a separate city line.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'card.hidden = !point.point_code' ) && str_contains( $checkout_js, 'button.hidden = !!point.point_code' ) && str_contains( $checkout_js, "applySelection(container, {})" ), 'Checkout JS applySelection must toggle card/primary button and clear paths must call applySelection with an empty point.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'window.wdcPickupCheckout.selectedPickupPoint = selectedPoint' ) && str_contains( $checkout_js, 'selectedPoint: config.selectedPoint' ) && str_contains( $checkout_js, 'function normalizeSelectedPoint(point)' ), 'Checkout JS must keep the saved pickup point available for the next map open.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'lat: fieldContext.lat || runtimeContext.lat || localizedContext.lat' ) && str_contains( $checkout_js, 'lng: fieldContext.lng || runtimeContext.lng || localizedContext.lng' ), 'Initial context must prefer DOM hidden coordinates, then fresh runtime context, then localized config.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'wdc_platform_location_lat' ) && str_contains( $checkout_js, 'wdc_platform_location_lng' ), 'Initial context must read city picker hidden lat/lng fields.' );

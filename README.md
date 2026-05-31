@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.28.2.
+Version: 0.28.3.
+
+Version 0.28.3 removes the legacy selected pickup summary that was printed under checkout rate comments, leaving only the shared selected pickup card. The initial "Выбрать пункт выдачи" button stays hidden while a point is selected and returns when the selection is cleared.
 
 Version 0.28.2 refines the selected pickup point card: the accent is now green, the card shows one full pickup address instead of a separate postcode/city line plus address, and checkout/email card sizing uses full container width with safer wrapping on mobile.
 
