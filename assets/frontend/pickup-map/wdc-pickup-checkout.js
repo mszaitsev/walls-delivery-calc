@@ -1136,7 +1136,8 @@
 			boot();
 			restoreSelectedPickupUi();
 			if (isPlacingOrder) {
-				endPlaceOrder();
+				debug('updated_checkout skipped context refresh during place order');
+				return;
 			}
 			refreshCheckoutContext();
 		});

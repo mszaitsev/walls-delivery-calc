@@ -111,7 +111,7 @@ final class CheckoutPickupPointRestController {
 
 	public function delete( mixed $request = null ): mixed {
 		unset( $request );
-		$this->session_manager->clear_pickup_selection();
+		$this->session_manager->clear_pickup_selection( 'rest_reset' );
 
 		return $this->response( array( 'pickup_point' => null ) );
 	}

@@ -52,10 +52,29 @@ final class CheckoutSessionManager {
 		return (string) $this->get( self::PICKUP_CARRIER_KEY, '' );
 	}
 
-	public function clear_pickup_selection(): void {
+	public function clear_pickup_selection( string $reason = '' ): void {
+		$this->log_pickup_selection_clear( $reason ?: 'manual_clear', false );
 		$this->set( self::PICKUP_SELECTION_KEY, array() );
 		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, array() );
 		$this->set( self::PICKUP_CARRIER_KEY, '' );
+	}
+
+	public function clear_pickup_selection_if_allowed( string $reason, string $currentRateId = '' ): bool {
+		if ( '' !== $currentRateId && $this->is_russian_post_pickup_family( $currentRateId ) && $this->has_valid_pickup_selection() ) {
+			$this->log_pickup_selection_clear( $reason, true, $currentRateId );
+			return false;
+		}
+
+		$this->clear_pickup_selection( $reason );
+
+		return true;
+	}
+
+	public function has_valid_pickup_selection(): bool {
+		$selection = $this->pickup_selection();
+
+		return array() !== $selection
+			&& ( '' !== trim( (string) ( $selection['point_code'] ?? '' ) ) || '' !== trim( (string) ( $selection['point_id'] ?? '' ) ) );
 	}
 
 	/**
@@ -291,6 +310,38 @@ final class CheckoutSessionManager {
 		}
 
 		return $default;
+	}
+
+	private function log_pickup_selection_clear( string $reason, bool $blocked, string $currentRateId = '' ): void {
+		if ( ! $this->debug_logging_enabled() ) {
+			return;
+		}
+
+		$selection = $this->pickup_selection();
+		$context = array(
+			'reason' => $reason,
+			'blocked' => $blocked,
+			'current_rate_id' => $this->normalize_rate_id( $currentRateId ),
+			'selection_rate_id' => $this->normalize_rate_id( (string) ( $selection['rate_id'] ?? '' ) ),
+			'has_point' => $this->has_valid_pickup_selection(),
+		);
+		if ( function_exists( 'wc_get_logger' ) ) {
+			wc_get_logger()->debug( 'Pickup selection clear requested.', array_merge( $context, array( 'source' => 'walls-delivery-calc' ) ) );
+			return;
+		}
+
+		if ( function_exists( 'error_log' ) ) {
+			$encoded = function_exists( 'wp_json_encode' ) ? wp_json_encode( $context ) : json_encode( $context );
+			error_log( '[walls-delivery-calc] debug: Pickup selection clear requested. ' . ( false !== $encoded ? $encoded : '' ) );
+		}
+	}
+
+	private function debug_logging_enabled(): bool {
+		if ( defined( 'WDC_PICKUP_DEBUG' ) && WDC_PICKUP_DEBUG ) {
+			return true;
+		}
+
+		return defined( 'WP_DEBUG' ) && WP_DEBUG;
 	}
 
 	private function session(): mixed {

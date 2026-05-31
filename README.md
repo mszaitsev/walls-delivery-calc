@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.27.8.
+Version: 0.27.9.
+
+Version 0.27.9 adds reason-coded pickup reset diagnostics and hardens checkout submit against WooCommerce recalculation payloads that omit `shipping_method`. Address runtime now falls back to `chosen_shipping_methods`, refuses automatic pickup clears while the active method family is `russian_post_domestic_pickup`, and frontend `updated_checkout` skips context refresh during place order. The pickup CSS remains scoped away from WooCommerce button and loader pseudo-elements.
 
 Version 0.27.8 hardens Russian Post pickup selection persistence around WooCommerce checkout recalculation. Pickup selections are now matched and refreshed by the `russian_post_domestic_pickup` method family, address recalculation preserves the point during same-family tariff switches, and frontend reset functions are guarded during place order while `updated_checkout` restores hidden fields from the selected point.
 
