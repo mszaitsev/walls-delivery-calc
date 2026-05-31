@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.28.1.
+Version: 0.28.2.
+
+Version 0.28.2 refines the selected pickup point card: the accent is now green, the card shows one full pickup address instead of a separate postcode/city line plus address, and checkout/email card sizing uses full container width with safer wrapping on mobile.
 
 Version 0.28.1 makes the shared pickup point card renderer accept both checkout/order arrays and PickupPoint objects, and avoids duplicate selected pickup cards on the thank-you page by using a single order-details hook for customer order rendering.
 

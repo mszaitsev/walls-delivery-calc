@@ -19,10 +19,9 @@ final class PickupPointCardRenderer {
 		$parts     = array();
 
 		$parts[] = '<div class="' . esc_attr( $classes ) . '" data-wdc-pickup-selection data-wdc-pickup-card' . $hidden_attr . ' style="' . esc_attr( $this->card_style() ) . '">';
-		$parts[] = '<div class="wdc-pickup-point-card__title" data-wdc-pickup-title style="' . esc_attr( $this->title_style() ) . '">' . esc_html( $data['title'] ) . '</div>';
+		$parts[] = '<div class="wdc-pickup-point-card__title" data-wdc-pickup-title style="' . esc_attr( $this->title_style() ) . '"><span class="wdc-pickup-point-card__accent" aria-hidden="true" style="' . esc_attr( $this->accent_style() ) . '"></span><span data-wdc-pickup-title-text>' . esc_html( $data['title'] ) . '</span></div>';
 		$parts[] = '<div class="wdc-pickup-point-card__body" style="' . esc_attr( $this->body_style() ) . '">';
-		$parts[] = '<div class="wdc-pickup-point-card__city" data-wdc-pickup-city style="' . esc_attr( $this->line_style() ) . '">' . esc_html( $data['city_line'] ) . '</div>';
-		$parts[] = '<div class="wdc-pickup-point-card__address" data-wdc-pickup-address style="' . esc_attr( $this->address_style() ) . '">' . esc_html( $data['address'] ) . '</div>';
+		$parts[] = '<div class="wdc-pickup-point-card__address" data-wdc-pickup-address style="' . esc_attr( $this->address_style() ) . '">' . esc_html( $data['address_line'] ) . '</div>';
 		$parts[] = '<div class="wdc-pickup-point-card__work-time" data-wdc-pickup-work-time-block' . ( '' === $work_time ? ' hidden' : '' ) . ' style="' . esc_attr( $this->work_time_style() ) . '">';
 		$parts[] = '<span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Время работы:', 'walls-delivery-calc' ) ) . '</span>';
 		$parts[] = '<span data-wdc-pickup-work-time>' . esc_html( $work_time ) . '</span>';
@@ -40,7 +39,7 @@ final class PickupPointCardRenderer {
 
 	/**
 	 * @param array<string,mixed>|object $point
-	 * @return array{title:string,city_line:string,address:string,work_time:string}
+	 * @return array{title:string,address_line:string,work_time:string}
 	 */
 	public function normalize( array|object $point ): array {
 		$point    = $this->point_to_array( $point );
@@ -55,8 +54,7 @@ final class PickupPointCardRenderer {
 
 		return array(
 			'title'     => $this->is_russian_post( $carrier, $rate_id, $service ) ? __( 'Отделение Почты России', 'walls-delivery-calc' ) : __( 'Пункт выдачи', 'walls-delivery-calc' ),
-			'city_line' => $this->city_line( $postcode, $city ),
-			'address'   => $address,
+			'address_line' => '' !== $address ? $address : $this->city_line( $postcode, $city ),
 			'work_time' => $work_time,
 		);
 	}
@@ -107,11 +105,15 @@ final class PickupPointCardRenderer {
 	}
 
 	private function card_style(): string {
-		return 'box-sizing:border-box;max-width:520px;margin:10px 0;padding:14px 16px;border:1px solid #d9e2ec;border-radius:8px;background:#fff;color:#1f2937;font-family:Arial,sans-serif;line-height:1.45;';
+		return 'box-sizing:border-box;width:100%;max-width:none;margin:10px 0;padding:14px 16px;border:1px solid #d9e2ec;border-radius:8px;background:#fff;color:#1f2937;font-family:Arial,sans-serif;line-height:1.45;';
 	}
 
 	private function title_style(): string {
-		return 'margin:0 0 10px;font-size:16px;font-weight:700;color:#111827;';
+		return 'display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:16px;font-weight:700;color:#111827;';
+	}
+
+	private function accent_style(): string {
+		return 'display:inline-block;flex:0 0 auto;width:10px;height:10px;border-radius:50%;background:#16a34a;box-shadow:0 0 0 4px rgba(22,163,74,0.14);';
 	}
 
 	private function body_style(): string {
@@ -123,7 +125,7 @@ final class PickupPointCardRenderer {
 	}
 
 	private function address_style(): string {
-		return 'margin:0 0 10px;color:#111827;';
+		return 'margin:0 0 10px;color:#111827;overflow-wrap:anywhere;word-break:normal;';
 	}
 
 	private function work_time_style(): string {

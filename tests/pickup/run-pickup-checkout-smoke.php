@@ -295,16 +295,19 @@ $card_html = $card_renderer->render(
 		'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
 		'postcode' => '650068',
 		'city' => 'Кемерово',
-		'address' => 'ул. Ленина, 15',
+		'address' => '650068 обл. Кемеровская Кемерово г. Ленина ул., д. 15',
 		'point_work_time' => 'Пн-Пт 09:00–20:00',
 	),
 	true
 );
-pickup_checkout_assert( str_contains( $card_html, 'Отделение Почты России' ) && str_contains( $card_html, '650068, г Кемерово' ) && str_contains( $card_html, 'ул. Ленина, 15' ) && str_contains( $card_html, 'Пн-Пт 09:00–20:00' ) && str_contains( $card_html, 'Изменить пункт выдачи' ), 'Pickup point card renderer must render title, city line, address, work time, and checkout change button.' );
+pickup_checkout_assert( str_contains( $card_html, 'Отделение Почты России' ) && str_contains( $card_html, '650068 обл. Кемеровская Кемерово г. Ленина ул., д. 15' ) && ! str_contains( $card_html, '650068, г Кемерово' ) && 1 === substr_count( $card_html, '650068' ) && ! str_contains( $card_html, 'data-wdc-pickup-city' ) && str_contains( $card_html, 'Пн-Пт 09:00–20:00' ) && str_contains( $card_html, 'Изменить пункт выдачи' ), 'Pickup point card renderer must render one full address line without a separate postcode/city line.' );
+pickup_checkout_assert( str_contains( $card_html, '#16a34a' ) && ! str_contains( $card_html, '#e02424' ) && str_contains( $card_html, 'width:100%' ) && str_contains( $card_html, 'max-width:none' ), 'Pickup point card renderer must use a green accent and full-width responsive inline styles.' );
+$fallback_card = $card_renderer->render( array( 'postcode' => '650068', 'city' => 'Кемерово', 'address' => '' ) );
+pickup_checkout_assert( str_contains( $fallback_card, '650068, г Кемерово' ), 'Pickup point card renderer must fall back to postcode plus city when full address is empty.' );
 $card_without_time = $card_renderer->render( array( 'postcode' => '650068', 'address' => 'ул. Ленина, 15' ) );
 pickup_checkout_assert( str_contains( $card_without_time, 'data-wdc-pickup-work-time-block hidden' ) && ! str_contains( $card_without_time, 'Изменить пункт выдачи' ), 'Pickup point card renderer must hide empty work time and keep the change button checkout-only.' );
 $point_object_card = $card_renderer->render( new PickupPoint( 'demo', 'demo-1', 'ул. Ленина, 15', 'Кемерово', '', '650068', null, null, 'unknown', 'Пн-Пт 09:00–20:00' ) );
-pickup_checkout_assert( str_contains( $point_object_card, 'Пункт выдачи' ) && str_contains( $point_object_card, '650068, г Кемерово' ) && str_contains( $point_object_card, 'ул. Ленина, 15' ), 'Pickup point card renderer must accept PickupPoint objects without TypeError.' );
+pickup_checkout_assert( str_contains( $point_object_card, 'Пункт выдачи' ) && ! str_contains( $point_object_card, '650068, г Кемерово' ) && str_contains( $point_object_card, 'ул. Ленина, 15' ), 'Pickup point card renderer must accept PickupPoint objects without TypeError and avoid address duplication.' );
 $order_display = new PickupPointOrderDisplay( $card_renderer, $map_settings );
 unset( $GLOBALS['wdc_pickup_checkout_actions']['woocommerce_thankyou'], $GLOBALS['wdc_pickup_checkout_actions']['woocommerce_order_details_after_order_table'], $GLOBALS['wdc_pickup_checkout_actions']['woocommerce_email_after_order_table'] );
 $order_display->register();
@@ -320,7 +323,7 @@ pickup_checkout_assert( 1 === substr_count( $thank_you_hook_html, 'data-wdc-pick
 ob_start();
 $order_display->render( $order );
 $thank_you_html = ob_get_clean() ?: '';
-pickup_checkout_assert( str_contains( $thank_you_html, 'wdc-pickup-point-card' ) && str_contains( $thank_you_html, 'Пункт выдачи' ) && str_contains( $thank_you_html, '630001' ), 'Thank You page pickup block must use the shared card renderer.' );
+pickup_checkout_assert( str_contains( $thank_you_html, 'wdc-pickup-point-card' ) && str_contains( $thank_you_html, 'data-wdc-pickup-address' ) && ! str_contains( $thank_you_html, 'data-wdc-pickup-city' ), 'Thank You page pickup block must use the shared single-address card renderer.' );
 $map_settings->replace( array_merge( $map_settings->defaults(), array( 'pickup_email_card_enabled_emails' => array( 'customer_processing_order' ) ) ) );
 ob_start();
 $order_display->render_email( $order, false, false, (object) array( 'id' => 'customer_processing_order' ) );
@@ -560,7 +563,7 @@ pickup_checkout_assert( str_contains( $checkout_js, 'billing_postcode' ) && str_
 pickup_checkout_assert( str_contains( $checkout_js, 'contextFromFields' ) && str_contains( $checkout_js, 'shipping_city' ) && str_contains( $checkout_js, 'shipping_postcode' ), 'JS must form initial map query from checkout city/postcode.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'WDCPickupMap.create' ) && str_contains( $checkout_js, 'initialContext()' ), 'Next modal open must recompute initial context instead of reusing a cached value.' );
 pickup_checkout_assert( str_contains( $checkout_js, "confirmButton.addEventListener('wdc:point-selected'" ) && str_contains( $checkout_js, 'savePoint(event.detail || map.selected())' ) && str_contains( $checkout_js, 'function savePoint(point)' ), 'Popup/list selection event must save the pickup point immediately without a second footer click.' );
-pickup_checkout_assert( str_contains( $checkout_js, 'selectedPointCityLine(point)' ) && str_contains( $checkout_js, '[data-wdc-pickup-card]' ) && str_contains( $checkout_js, '[data-wdc-pickup-empty-open]' ) && str_contains( $checkout_js, 'cityWithType' ), 'Checkout JS must update the shared selected-point card after pickup selection without a page reload.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'selectedPointAddress(point)' ) && str_contains( $checkout_js, '[data-wdc-pickup-title-text]' ) && ! str_contains( $checkout_js, 'selectedPointCityLine(point)' ) && ! str_contains( $checkout_js, '[data-wdc-pickup-city]' ) && str_contains( $checkout_js, '[data-wdc-pickup-card]' ) && str_contains( $checkout_js, '[data-wdc-pickup-empty-open]' ) && str_contains( $checkout_js, 'cityWithType' ), 'Checkout JS must update the shared selected-point card address after pickup selection without relying on a separate city line.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'window.wdcPickupCheckout.selectedPickupPoint = selectedPoint' ) && str_contains( $checkout_js, 'selectedPoint: config.selectedPoint' ) && str_contains( $checkout_js, 'function normalizeSelectedPoint(point)' ), 'Checkout JS must keep the saved pickup point available for the next map open.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'lat: fieldContext.lat || runtimeContext.lat || localizedContext.lat' ) && str_contains( $checkout_js, 'lng: fieldContext.lng || runtimeContext.lng || localizedContext.lng' ), 'Initial context must prefer DOM hidden coordinates, then fresh runtime context, then localized config.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'wdc_platform_location_lat' ) && str_contains( $checkout_js, 'wdc_platform_location_lng' ), 'Initial context must read city picker hidden lat/lng fields.' );
@@ -634,6 +637,7 @@ $map_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map
 $modal_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-modal.js' ) ?: '';
 $map_css = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.css' ) ?: '';
 $api_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-api.js' ) ?: '';
+pickup_checkout_assert( str_contains( $map_css, '.wdc-pickup-point-card' ) && str_contains( $map_css, 'width: 100%' ) && str_contains( $map_css, 'max-width: none' ) && str_contains( $map_css, '.wdc-pickup-point-card__accent' ) && str_contains( $map_css, '#16a34a' ) && str_contains( $map_css, 'overflow-wrap: anywhere' ) && str_contains( $map_css, 'word-break: normal' ) && ! str_contains( $map_css, '.wdc-pickup-point-card__title::before' ), 'Selected pickup card CSS must be full-width, wrap long addresses, and use the green accent instead of a red pseudo-icon.' );
 pickup_checkout_assert( ! str_contains( $modal_js, 'autofocus' ) && ! str_contains( $checkout_js, 'search.focus' ) && str_contains( $modal_js, "button[data-wdc-close]" ), 'Opening the pickup modal must not autofocus the address search input.' );
 pickup_checkout_assert( str_contains( $modal_js, 'wdc-pickup-search__icon' ) && str_contains( $modal_js, 'aria-hidden="true">🔍</span>' ), 'Pickup modal search template must render a decorative magnifier icon.' );
 pickup_checkout_assert( str_contains( $modal_js, 'data-wdc-search-submit' ) && str_contains( $modal_js, 'Искать адрес' ), 'Pickup modal search template must render an explicit address search button.' );

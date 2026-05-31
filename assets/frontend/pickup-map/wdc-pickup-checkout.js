@@ -189,9 +189,8 @@
 		var selectedPoint = normalizeSelectedPoint(point);
 		container.querySelector('[data-wdc-pickup-point-id]').value = point.id || '';
 		container.querySelector('[data-wdc-pickup-point-code]').value = point.point_code || '';
-		setText(container, '[data-wdc-pickup-title]', selectedPointTitle(point));
-		setText(container, '[data-wdc-pickup-city]', selectedPointCityLine(point));
-		setText(container, '[data-wdc-pickup-address]', point.address || '');
+		setText(container, '[data-wdc-pickup-title-text]', selectedPointTitle(point));
+		setText(container, '[data-wdc-pickup-address]', selectedPointAddress(point));
 		setText(container, '[data-wdc-pickup-work-time]', point.point_work_time || point.work_time || snapshot.work_time || '');
 		var workTimeBlock = container.querySelector('[data-wdc-pickup-work-time-block]');
 		if (workTimeBlock) {
@@ -232,8 +231,12 @@
 		return 'Пункт выдачи';
 	}
 
-	function selectedPointCityLine(point) {
+	function selectedPointAddress(point) {
 		var snapshot = point.snapshot || {};
+		var address = String(point.address || point.point_address || snapshot.address || '').trim();
+		if (address) {
+			return address;
+		}
 		var postcode = String(point.postcode || point.point_postcode || snapshot.postcode || '').trim();
 		var city = cityWithType(String(point.city || point.city_name || snapshot.city || snapshot.city_name || '').trim());
 		if (postcode && city) {
