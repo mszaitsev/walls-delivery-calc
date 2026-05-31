@@ -40,13 +40,16 @@ final class CheckoutValidation {
 			return;
 		}
 
-		if ( $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) ) ) {
+		$selected_rate_id = $this->selected_rate_id( $rate );
+		if ( $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $selected_rate_id ) ) {
+			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
 			return;
 		}
 
 		if ( $this->restore_posted_pickup_selection( $data, $rate )
-			&& $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) )
+			&& $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $selected_rate_id )
 		) {
+			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
 			return;
 		}
 
@@ -117,19 +120,19 @@ final class CheckoutValidation {
 		$rates = $this->session_manager->rates();
 		foreach ( $this->chosen_shipping_methods() as $rate_id ) {
 			if ( isset( $rates[ $rate_id ] ) ) {
-				return $rates[ $rate_id ];
+				return $this->with_selected_rate_id( $rates[ $rate_id ], $rate_id );
 			}
 
 			if ( str_starts_with( $rate_id, NewShippingMethod::METHOD_ID . ':' ) ) {
 				$normalized = substr( $rate_id, strlen( NewShippingMethod::METHOD_ID . ':' ) );
 				if ( isset( $rates[ $normalized ] ) ) {
-					return $rates[ $normalized ];
+					return $this->with_selected_rate_id( $rates[ $normalized ], $rate_id );
 				}
 			}
 
 			foreach ( $rates as $rate ) {
-				if ( is_array( $rate ) && $this->same_russian_post_pickup_family( $rate_id, (string) ( $rate['rate_id'] ?? '' ) ) ) {
-					return $rate;
+				if ( is_array( $rate ) && $this->session_manager->is_same_pickup_family( $rate_id, (string) ( $rate['rate_id'] ?? '' ) ) ) {
+					return $this->with_selected_rate_id( $rate, $rate_id );
 				}
 			}
 		}
@@ -138,12 +141,22 @@ final class CheckoutValidation {
 	}
 
 	/**
+	 * @param array<string,mixed> $rate
+	 * @return array<string,mixed>
+	 */
+	private function with_selected_rate_id( array $rate, string $selected_rate_id ): array {
+		$rate['_selected_rate_id'] = $this->session_manager->normalize_rate_id( $selected_rate_id );
+
+		return $rate;
+	}
+
+	/**
 	 * @param array<string,mixed> $data
 	 * @param array<string,mixed> $rate
 	 */
 	private function restore_posted_pickup_selection( array $data, array $rate ): bool {
 		if ( RussianPostDomesticSettings::CARRIER_KEY !== (string) ( $rate['carrier_key'] ?? '' )
-			|| ! $this->is_russian_post_pickup_family( (string) ( $rate['rate_id'] ?? '' ) )
+			|| ! $this->session_manager->is_russian_post_pickup_family( $this->selected_rate_id( $rate ) )
 		) {
 			return false;
 		}
@@ -171,7 +184,7 @@ final class CheckoutValidation {
 		}
 
 		$selection['carrier_key'] = RussianPostDomesticSettings::CARRIER_KEY;
-		$selection['rate_id'] = (string) ( $rate['rate_id'] ?? '' );
+		$selection['rate_id'] = $this->selected_rate_id( $rate );
 		$selection['selected_at'] = gmdate( 'c' );
 		$this->session_manager->save_pickup_selection( $selection );
 		if ( array() !== ( $selection['snapshot'] ?? array() ) ) {
@@ -244,23 +257,11 @@ final class CheckoutValidation {
 		return function_exists( 'sanitize_text_field' ) ? sanitize_text_field( (string) $value ) : trim( strip_tags( (string) $value ) );
 	}
 
-	private function same_russian_post_pickup_family( string $left, string $right ): bool {
-		return $this->is_russian_post_pickup_family( $this->normalize_rate_id( $left ) )
-			&& $this->is_russian_post_pickup_family( $this->normalize_rate_id( $right ) );
-	}
-
-	private function is_russian_post_pickup_family( string $rate_id ): bool {
-		return RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $rate_id
-			|| str_starts_with( $rate_id, RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':' );
-	}
-
-	private function normalize_rate_id( string $rate_id ): string {
-		$prefix = NewShippingMethod::METHOD_ID . ':';
-		if ( str_starts_with( $rate_id, $prefix ) ) {
-			return substr( $rate_id, strlen( $prefix ) );
-		}
-
-		return $rate_id;
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function selected_rate_id( array $rate ): string {
+		return $this->session_manager->normalize_rate_id( (string) ( $rate['_selected_rate_id'] ?? $rate['rate_id'] ?? '' ) );
 	}
 
 	/**

@@ -76,7 +76,7 @@ final class CheckoutSessionManager {
 
 	public function pickup_selection_matches( string $carrierKey, string $rateId ): bool {
 		$selection = $this->pickup_selection();
-		if ( array() === $selection || '' === trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
+		if ( array() === $selection || ( '' === trim( (string) ( $selection['point_code'] ?? '' ) ) && '' === trim( (string) ( $selection['point_id'] ?? '' ) ) ) ) {
 			return false;
 		}
 
@@ -96,8 +96,52 @@ final class CheckoutSessionManager {
 		}
 
 		return RussianPostDomesticSettings::CARRIER_KEY === trim( $carrierKey )
-			&& $this->is_russian_post_pickup_family( $selection_rate_id )
-			&& $this->is_russian_post_pickup_family( $rateId );
+			&& $this->is_same_pickup_family( $selection_rate_id, $rateId );
+	}
+
+	public function update_pickup_selection_rate_id( string $rateId ): void {
+		$selection = $this->pickup_selection();
+		if ( array() === $selection ) {
+			return;
+		}
+
+		$selection['rate_id'] = $this->normalize_rate_id( $rateId );
+		$this->save_pickup_selection( $selection );
+	}
+
+	public function normalize_rate_id( string $rate_id ): string {
+		$rate_id = trim( $rate_id );
+		$prefix = NewShippingMethod::METHOD_ID . ':';
+		if ( str_starts_with( $rate_id, $prefix ) ) {
+			$rate_id = substr( $rate_id, strlen( $prefix ) );
+		}
+
+		$platform_prefix = 'wdc_platform:';
+		if ( str_starts_with( $rate_id, $platform_prefix ) ) {
+			return substr( $rate_id, strlen( $platform_prefix ) );
+		}
+
+		return $rate_id;
+	}
+
+	public function shipping_method_family( string $rate_id ): string {
+		$rate_id = $this->normalize_rate_id( $rate_id );
+		if ( $this->is_russian_post_pickup_family( $rate_id ) ) {
+			return RussianPostDomesticSettings::PICKUP_SERVICE_KEY;
+		}
+
+		return $rate_id;
+	}
+
+	public function is_russian_post_pickup_family( string $rate_id ): bool {
+		$rate_id = $this->normalize_rate_id( $rate_id );
+		return RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $rate_id
+			|| str_starts_with( $rate_id, RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':' );
+	}
+
+	public function is_same_pickup_family( string $oldRateId, string $newRateId ): bool {
+		return RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $this->shipping_method_family( $oldRateId )
+			&& RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $this->shipping_method_family( $newRateId );
 	}
 
 	public function save_sort_mode( string $sort_mode ): void {
@@ -257,17 +301,4 @@ final class CheckoutSessionManager {
 		return null;
 	}
 
-	private function normalize_rate_id( string $rate_id ): string {
-		$prefix = NewShippingMethod::METHOD_ID . ':';
-		if ( str_starts_with( $rate_id, $prefix ) ) {
-			return substr( $rate_id, strlen( $prefix ) );
-		}
-
-		return $rate_id;
-	}
-
-	private function is_russian_post_pickup_family( string $rate_id ): bool {
-		return RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $rate_id
-			|| str_starts_with( $rate_id, RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':' );
-	}
 }

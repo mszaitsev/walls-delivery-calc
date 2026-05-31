@@ -39,7 +39,11 @@ final class CheckoutAddressRuntime {
 
 		if ( '' !== $this->session_manager->address_fingerprint() && $fingerprint !== $this->session_manager->address_fingerprint() ) {
 			$this->session_manager->clear_normalized_address();
-			$this->session_manager->clear_pickup_selection();
+			if ( $this->should_preserve_pickup_selection_for_rate_switch( $checkoutData ) ) {
+				$this->session_manager->update_pickup_selection_rate_id( $this->selected_shipping_method_from_checkout_data( $checkoutData ) );
+			} else {
+				$this->session_manager->clear_pickup_selection();
+			}
 			$this->clear_shipping_rate_cache();
 		}
 
@@ -110,6 +114,44 @@ final class CheckoutAddressRuntime {
 		}
 
 		return $data;
+	}
+
+	/**
+	 * @param array<string,mixed> $checkoutData
+	 */
+	private function should_preserve_pickup_selection_for_rate_switch( array $checkoutData ): bool {
+		$selection = $this->session_manager->pickup_selection();
+		if ( array() === $selection || ( '' === trim( (string) ( $selection['point_code'] ?? '' ) ) && '' === trim( (string) ( $selection['point_id'] ?? '' ) ) ) ) {
+			return false;
+		}
+
+		$old_rate_id = (string) ( $selection['rate_id'] ?? '' );
+		$new_rate_id = $this->selected_shipping_method_from_checkout_data( $checkoutData );
+		if ( '' === $new_rate_id ) {
+			return false;
+		}
+
+		if ( '' === $old_rate_id ) {
+			return $this->session_manager->is_russian_post_pickup_family( $new_rate_id );
+		}
+
+		return $this->session_manager->is_same_pickup_family( $old_rate_id, $new_rate_id );
+	}
+
+	/**
+	 * @param array<string,mixed> $checkoutData
+	 */
+	private function selected_shipping_method_from_checkout_data( array $checkoutData ): string {
+		$value = $checkoutData['shipping_method'] ?? '';
+		if ( is_array( $value ) ) {
+			$value = reset( $value );
+		}
+
+		if ( ! is_scalar( $value ) ) {
+			return '';
+		}
+
+		return $this->session_manager->normalize_rate_id( (string) $value );
 	}
 
 	/**

@@ -129,7 +129,7 @@
 					boot();
 					var currentMethod = currentShippingMethod();
 					if (!isPickupRateValue(currentMethod)) {
-						resetPickupSelectionOnServer();
+						resetPickupSelectionOnServer('cross_location_method_unavailable');
 						showCheckoutNotice('После пересчета выбранный способ доставки стал недоступен. Выберите другой способ доставки.');
 						disableDestinationResetSuppression();
 						return;
@@ -205,19 +205,31 @@
 		}
 	}
 
-	function resetSelection() {
+	function resetSelection(reason) {
+		debug('resetSelection called', { reason: reason || '', isPlacingOrder: isPlacingOrder });
+		if (isPlacingOrder) {
+			return;
+		}
 		invalidatePrefetch();
-		resetPickupSelectionOnServer();
-		clearPickupSelectionUi();
+		resetPickupSelectionOnServer(reason || 'reset_selection');
+		clearPickupSelectionUi(reason || 'reset_selection');
 	}
 
-	function clearPickupSelectionUi() {
+	function clearPickupSelectionUi(reason) {
+		debug('clearPickupSelectionUi called', { reason: reason || '', isPlacingOrder: isPlacingOrder });
+		if (isPlacingOrder) {
+			return;
+		}
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
 			applySelection(container, {});
 		});
 	}
 
-	function resetPickupSelectionOnServer() {
+	function resetPickupSelectionOnServer(reason) {
+		debug('resetPickupSelectionOnServer called', { reason: reason || '', isPlacingOrder: isPlacingOrder });
+		if (isPlacingOrder) {
+			return Promise.resolve(false);
+		}
 		return window.WDCPickupApi.reset().catch(function () {});
 	}
 
@@ -1033,11 +1045,23 @@
 
 	function beginPlaceOrder() {
 		isPlacingOrder = true;
+		debug('place order guard active');
 	}
 
 	function endPlaceOrder() {
 		isPlacingOrder = false;
+		debug('place order guard released');
 		rememberDestinationFingerprint();
+	}
+
+	function restoreSelectedPickupUi() {
+		var selected = window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint;
+		if (!selected || !selected.point_code || shippingMethodFamily(currentShippingMethod()) !== 'russian_post_domestic_pickup') {
+			return;
+		}
+		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
+			applySelection(container, selected);
+		});
 	}
 
 	document.addEventListener('change', function (event) {
@@ -1049,13 +1073,22 @@
 				return;
 			}
 			lastDestinationFingerprint = newFingerprint;
-			resetSelection();
+			resetSelection('destination_changed');
 			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 			return;
 		}
 		if (event.target.matches('input[name^="shipping_method"]')) {
 			var previousMethod = activeMethod;
 			var nextMethod = currentShippingMethod() || normalizeShippingMethod(event.target.value);
+			var previousFamily = shippingMethodFamily(previousMethod);
+			var nextFamily = shippingMethodFamily(nextMethod);
+			debug('shipping method change', {
+				previousMethod: previousMethod,
+				nextMethod: nextMethod,
+				previousFamily: previousFamily,
+				nextFamily: nextFamily,
+				isPlacingOrder: isPlacingOrder
+			});
 			if (isSamePickupMethodFamily(previousMethod, nextMethod)) {
 				activeMethod = nextMethod;
 				syncSelectedPickupRate(nextMethod);
@@ -1063,8 +1096,8 @@
 				return;
 			}
 			activeMethod = nextMethod;
-			if (!isPlacingOrder && shippingMethodFamily(previousMethod) === 'russian_post_domestic_pickup' && shippingMethodFamily(nextMethod) !== 'russian_post_domestic_pickup') {
-				resetSelection();
+			if (!isPlacingOrder && previousFamily === 'russian_post_domestic_pickup' && nextFamily !== 'russian_post_domestic_pickup') {
+				resetSelection('method_family_changed');
 			}
 			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 		}
@@ -1081,8 +1114,8 @@
 			return;
 		}
 		lastDestinationFingerprint = newFingerprint;
-		resetPickupSelectionOnServer();
-		clearPickupSelectionUi();
+		resetPickupSelectionOnServer('location_selected');
+		clearPickupSelectionUi('location_selected');
 		schedulePrefetch();
 	});
 	document.addEventListener('DOMContentLoaded', boot);
@@ -1101,6 +1134,7 @@
 		window.jQuery(document.body).on('checkout_error', endPlaceOrder);
 		window.jQuery(document.body).on('updated_checkout', function () {
 			boot();
+			restoreSelectedPickupUi();
 			if (isPlacingOrder) {
 				endPlaceOrder();
 			}

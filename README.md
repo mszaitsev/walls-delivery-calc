@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.27.7.
+Version: 0.27.8.
+
+Version 0.27.8 hardens Russian Post pickup selection persistence around WooCommerce checkout recalculation. Pickup selections are now matched and refreshed by the `russian_post_domestic_pickup` method family, address recalculation preserves the point during same-family tariff switches, and frontend reset functions are guarded during place order while `updated_checkout` restores hidden fields from the selected point.
 
 Version 0.27.7 preserves the selected Russian Post pickup point during checkout submit and when switching tariff suffixes inside `russian_post_domestic_pickup`. Checkout validation now accepts the saved pickup point by method family, can restore the selection from submitted hidden pickup fields, and the frontend only clears pickup state after a real destination or carrier change.
 
