@@ -1,6 +1,8 @@
 # Russian Post Pickup Points
 
-Version: 0.27.2.
+Version: 0.27.3.
+
+Version 0.27.3 makes the final pickup save wait for the shipping-rate recalculation when cross-location checkout has to switch rates. `selectCheapestPickupRate()` returns both the method id and a `changed` flag. If the cheapest pickup rate was already selected, the pending pickup point is saved after the locality recalculation. If another pickup rate had to be selected, the frontend waits for the second `updated_checkout` before saving; on timeout it leaves the point unsaved and shows a retry warning.
 
 Version 0.27.2 keeps a selected cross-location pickup point after checkout recalculation. After the customer confirms the locality change, the frontend updates checkout destination fields, waits for WooCommerce `updated_checkout`, selects the cheapest available Russian Post pickup rate for `russian_post_domestic_pickup` when the old rate is no longer present, and then saves the pending pickup point. The modal shows loading states during checking, recalculation, and saving. If no pickup rate is available after recalculation, the point is not saved and the customer sees a warning in the modal.
 

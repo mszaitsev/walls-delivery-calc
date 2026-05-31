@@ -124,25 +124,40 @@
 				triggerCheckoutUpdate();
 				updatedCheckout.then(function () {
 					boot();
-					var selectedMethod = selectCheapestPickupRate();
-					if (!selectedMethod) {
+					var selectedRate = selectCheapestPickupRate();
+					if (!selectedRate.methodId) {
 						resetPickupSelectionOnServer();
 						showModalNotice(modal.root, 'После пересчета выбранный способ доставки стал недоступен. Выберите другой способ доставки.');
 						clearLoading();
 						disableDestinationResetSuppression();
 						return;
 					}
-					setLoading('Сохраняем пункт выдачи...');
-					commitPoint(point, selectedMethod, { updateCheckoutAfterSave: false, message: 'Сохраняем пункт выдачи...' }).then(function (saved) {
-						if (!saved) {
-							disableDestinationResetSuppression();
-							return;
-						}
+					if (!selectedRate.changed) {
+						commitCrossLocationPoint(point, selectedRate.methodId);
+						return;
+					}
+					setLoading('Пересчитываем тариф...');
+					waitForUpdatedCheckout(12000).then(function () {
+						commitCrossLocationPoint(point, selectedRate.methodId);
+					}).catch(function () {
+						showModalNotice(modal.root, 'Не удалось завершить пересчет доставки. Попробуйте выбрать пункт выдачи еще раз.');
+						clearLoading();
 						disableDestinationResetSuppression();
 					});
 				}).catch(function () {
 					showModalNotice(modal.root, 'Не удалось дождаться пересчета доставки. Попробуйте выбрать пункт еще раз.');
 					clearLoading();
+					disableDestinationResetSuppression();
+				});
+			}
+
+			function commitCrossLocationPoint(point, selectedMethod) {
+				setLoading('Сохраняем пункт выдачи...');
+				commitPoint(point, selectedMethod, { updateCheckoutAfterSave: false, message: 'Сохраняем пункт выдачи...' }).then(function (saved) {
+					if (!saved) {
+						disableDestinationResetSuppression();
+						return;
+					}
 					disableDestinationResetSuppression();
 				});
 			}
@@ -706,17 +721,21 @@
 			return !input.disabled && isPickupRateValue(input.value || '');
 		});
 		if (!rates.length) {
-			return '';
+			return { methodId: '', changed: false };
 		}
 		rates.sort(function (a, b) {
 			return rateCost(a) - rateCost(b);
 		});
 		var selected = rates[0];
+		var changed = !selected.checked;
 		if (!selected.checked) {
 			selected.checked = true;
 			selected.dispatchEvent(new Event('change', { bubbles: true }));
 		}
-		return normalizeShippingMethodValue(selected.value || '');
+		return {
+			methodId: normalizeShippingMethodValue(selected.value || ''),
+			changed: changed
+		};
 	}
 
 	function isPickupRateValue(value) {
