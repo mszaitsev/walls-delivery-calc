@@ -17,7 +17,6 @@ final class PickupPointOrderDisplay {
 	}
 
 	public function register(): void {
-		add_action( 'woocommerce_thankyou', array( $this, 'render_by_order_id' ), 20 );
 		add_action( 'woocommerce_order_details_after_order_table', array( $this, 'render' ), 20 );
 		add_action( 'woocommerce_email_after_order_table', array( $this, 'render_email' ), 20, 4 );
 	}

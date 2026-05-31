@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.28.0.
+Version: 0.28.1.
+
+Version 0.28.1 makes the shared pickup point card renderer accept both checkout/order arrays and PickupPoint objects, and avoids duplicate selected pickup cards on the thank-you page by using a single order-details hook for customer order rendering.
 
 Version 0.28.0 adds a shared pickup point card renderer for checkout, the order thank-you page, and customer emails. The checkout selected-point UI now updates the same card after map selection, order details reuse that renderer, and email output is controlled by a dynamic WooCommerce email-class setting that includes custom emails from extensions such as WooCommerce Order Status Manager.
 

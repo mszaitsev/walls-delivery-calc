@@ -7,6 +7,7 @@ use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\PickupPointOrderDisplay;
 use WallsShop\WDC\Checkout\WooCommerce\PickupMapCheckout;
+use WallsShop\WDC\Domain\Pickup\PickupPoint;
 use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController;
@@ -302,7 +303,20 @@ $card_html = $card_renderer->render(
 pickup_checkout_assert( str_contains( $card_html, 'Отделение Почты России' ) && str_contains( $card_html, '650068, г Кемерово' ) && str_contains( $card_html, 'ул. Ленина, 15' ) && str_contains( $card_html, 'Пн-Пт 09:00–20:00' ) && str_contains( $card_html, 'Изменить пункт выдачи' ), 'Pickup point card renderer must render title, city line, address, work time, and checkout change button.' );
 $card_without_time = $card_renderer->render( array( 'postcode' => '650068', 'address' => 'ул. Ленина, 15' ) );
 pickup_checkout_assert( str_contains( $card_without_time, 'data-wdc-pickup-work-time-block hidden' ) && ! str_contains( $card_without_time, 'Изменить пункт выдачи' ), 'Pickup point card renderer must hide empty work time and keep the change button checkout-only.' );
+$point_object_card = $card_renderer->render( new PickupPoint( 'demo', 'demo-1', 'ул. Ленина, 15', 'Кемерово', '', '650068', null, null, 'unknown', 'Пн-Пт 09:00–20:00' ) );
+pickup_checkout_assert( str_contains( $point_object_card, 'Пункт выдачи' ) && str_contains( $point_object_card, '650068, г Кемерово' ) && str_contains( $point_object_card, 'ул. Ленина, 15' ), 'Pickup point card renderer must accept PickupPoint objects without TypeError.' );
 $order_display = new PickupPointOrderDisplay( $card_renderer, $map_settings );
+unset( $GLOBALS['wdc_pickup_checkout_actions']['woocommerce_thankyou'], $GLOBALS['wdc_pickup_checkout_actions']['woocommerce_order_details_after_order_table'], $GLOBALS['wdc_pickup_checkout_actions']['woocommerce_email_after_order_table'] );
+$order_display->register();
+pickup_checkout_assert( empty( $GLOBALS['wdc_pickup_checkout_actions']['woocommerce_thankyou'] ?? array() ) && 1 === count( $GLOBALS['wdc_pickup_checkout_actions']['woocommerce_order_details_after_order_table'] ?? array() ), 'Order pickup card must register a single customer order-details hook to avoid thank-you duplicates.' );
+ob_start();
+foreach ( array( 'woocommerce_thankyou', 'woocommerce_order_details_after_order_table' ) as $hook ) {
+	foreach ( $GLOBALS['wdc_pickup_checkout_actions'][ $hook ] ?? array() as $action ) {
+		call_user_func( $action['callback'], $order );
+	}
+}
+$thank_you_hook_html = ob_get_clean() ?: '';
+pickup_checkout_assert( 1 === substr_count( $thank_you_hook_html, 'data-wdc-pickup-card' ), 'Thank You page hook flow must output the pickup card exactly once.' );
 ob_start();
 $order_display->render( $order );
 $thank_you_html = ob_get_clean() ?: '';

@@ -9,9 +9,9 @@ defined( 'ABSPATH' ) || exit;
 
 final class PickupPointCardRenderer {
 	/**
-	 * @param array<string,mixed> $point
+	 * @param array<string,mixed>|object $point
 	 */
-	public function render( array $point, bool $include_change_button = false, bool $hidden = false ): string {
+	public function render( array|object $point, bool $include_change_button = false, bool $hidden = false ): string {
 		$data      = $this->normalize( $point );
 		$work_time = $data['work_time'];
 		$classes   = 'wdc-pickup-point-card' . ( $include_change_button ? ' wdc-pickup-point-card--checkout' : '' );
@@ -39,10 +39,11 @@ final class PickupPointCardRenderer {
 	}
 
 	/**
-	 * @param array<string,mixed> $point
+	 * @param array<string,mixed>|object $point
 	 * @return array{title:string,city_line:string,address:string,work_time:string}
 	 */
-	public function normalize( array $point ): array {
+	public function normalize( array|object $point ): array {
+		$point    = $this->point_to_array( $point );
 		$snapshot = is_array( $point['snapshot'] ?? null ) ? $point['snapshot'] : array();
 		$carrier  = trim( (string) ( $point['carrier'] ?? $point['carrier_key'] ?? $snapshot['carrier'] ?? $snapshot['carrier_key'] ?? '' ) );
 		$rate_id  = trim( (string) ( $point['rate_id'] ?? $point['shipping_method_id'] ?? $snapshot['rate_id'] ?? '' ) );
@@ -58,6 +59,24 @@ final class PickupPointCardRenderer {
 			'address'   => $address,
 			'work_time' => $work_time,
 		);
+	}
+
+	/**
+	 * @param array<string,mixed>|object $point
+	 * @return array<string,mixed>
+	 */
+	private function point_to_array( array|object $point ): array {
+		if ( is_array( $point ) ) {
+			return $point;
+		}
+		if ( method_exists( $point, 'to_array' ) ) {
+			$data = $point->to_array();
+			if ( is_array( $data ) ) {
+				return $data;
+			}
+		}
+
+		return get_object_vars( $point );
 	}
 
 	private function is_russian_post( string $carrier, string $rate_id, string $service ): bool {
