@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.27.3.
+Version: 0.27.4.
+
+Version 0.27.4 simplifies cross-location Russian Post pickup selection. After the customer confirms a pickup point in another locality, the map closes immediately, checkout destination fields are updated, WooCommerce recalculates once, and the pickup point is saved only after `updated_checkout` using the current selected `russian_post_domestic_pickup` method and the freshly rendered checkout block. The cross-location wait timeout is now 60 seconds; if recalculation times out or the current method is no longer a pickup method, the point is not saved and checkout shows a notice. Frontend rate switching and cheapest-rate selection were removed from this flow.
 
 Version 0.27.3 waits for a second WooCommerce `updated_checkout` when the cross-location flow has to switch to another available Russian Post pickup rate. The frontend now records whether `selectCheapestPickupRate()` changed the selected radio; unchanged rates save the pending pickup point immediately after the locality recalculation, while changed rates wait for the shipping-rate recalculation before saving. If that second recalculation times out, the pickup point is not saved and the modal asks the customer to try again.
 

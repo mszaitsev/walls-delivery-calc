@@ -117,47 +117,33 @@
 			}
 
 			function runCrossLocationSelection(point, location) {
-				setLoading('Пересчитываем доставку...');
-				enableDestinationResetSuppression();
+				enableDestinationResetSuppression(60000);
 				applyConfirmedPickupLocationChange(location);
-				var updatedCheckout = waitForUpdatedCheckout(12000);
+				close();
+				var updatedCheckout = waitForUpdatedCheckout(60000);
 				triggerCheckoutUpdate();
 				updatedCheckout.then(function () {
 					boot();
-					var selectedRate = selectCheapestPickupRate();
-					if (!selectedRate.methodId) {
+					var currentMethod = currentShippingMethod();
+					if (!isPickupRateValue(currentMethod)) {
 						resetPickupSelectionOnServer();
-						showModalNotice(modal.root, 'После пересчета выбранный способ доставки стал недоступен. Выберите другой способ доставки.');
-						clearLoading();
+						showCheckoutNotice('После пересчета выбранный способ доставки стал недоступен. Выберите другой способ доставки.');
 						disableDestinationResetSuppression();
 						return;
 					}
-					if (!selectedRate.changed) {
-						commitCrossLocationPoint(point, selectedRate.methodId);
-						return;
-					}
-					setLoading('Пересчитываем тариф...');
-					waitForUpdatedCheckout(12000).then(function () {
-						commitCrossLocationPoint(point, selectedRate.methodId);
+					window.WDCPickupApi.save(point.id, currentMethod).then(function (response) {
+						boot();
+						var actualContainer = document.querySelector('[data-wdc-pickup-checkout]');
+						if (actualContainer) {
+							applySelection(actualContainer, response.pickup_point || {});
+						}
+						disableDestinationResetSuppression();
 					}).catch(function () {
-						showModalNotice(modal.root, 'Не удалось завершить пересчет доставки. Попробуйте выбрать пункт выдачи еще раз.');
-						clearLoading();
+						showCheckoutNotice('Не удалось сохранить пункт выдачи. Выберите пункт выдачи еще раз.');
 						disableDestinationResetSuppression();
 					});
 				}).catch(function () {
-					showModalNotice(modal.root, 'Не удалось дождаться пересчета доставки. Попробуйте выбрать пункт еще раз.');
-					clearLoading();
-					disableDestinationResetSuppression();
-				});
-			}
-
-			function commitCrossLocationPoint(point, selectedMethod) {
-				setLoading('Сохраняем пункт выдачи...');
-				commitPoint(point, selectedMethod, { updateCheckoutAfterSave: false, message: 'Сохраняем пункт выдачи...' }).then(function (saved) {
-					if (!saved) {
-						disableDestinationResetSuppression();
-						return;
-					}
+					showCheckoutNotice('Не удалось дождаться пересчета доставки. Выберите пункт выдачи еще раз.');
 					disableDestinationResetSuppression();
 				});
 			}
@@ -684,6 +670,27 @@
 		notice.textContent = message || '';
 	}
 
+	function showCheckoutNotice(message) {
+		var notice = document.createElement('div');
+		notice.className = 'woocommerce-error wdc-pickup-checkout-notice';
+		notice.setAttribute('role', 'alert');
+		notice.textContent = message || '';
+		var wrapper = document.querySelector('.woocommerce-NoticeGroup-checkout') || document.querySelector('.woocommerce-notices-wrapper');
+		if (wrapper) {
+			wrapper.innerHTML = '';
+			wrapper.appendChild(notice);
+			return;
+		}
+		var checkoutForm = document.querySelector('form.checkout');
+		if (checkoutForm && checkoutForm.parentNode) {
+			checkoutForm.parentNode.insertBefore(notice, checkoutForm);
+			return;
+		}
+		if (document.body) {
+			document.body.insertBefore(notice, document.body.firstChild);
+		}
+	}
+
 	function waitForUpdatedCheckout(timeout) {
 		return new Promise(function (resolve, reject) {
 			var done = false;
@@ -716,28 +723,6 @@
 		});
 	}
 
-	function selectCheapestPickupRate() {
-		var rates = Array.prototype.slice.call(document.querySelectorAll('input[name^="shipping_method"]')).filter(function (input) {
-			return !input.disabled && isPickupRateValue(input.value || '');
-		});
-		if (!rates.length) {
-			return { methodId: '', changed: false };
-		}
-		rates.sort(function (a, b) {
-			return rateCost(a) - rateCost(b);
-		});
-		var selected = rates[0];
-		var changed = !selected.checked;
-		if (!selected.checked) {
-			selected.checked = true;
-			selected.dispatchEvent(new Event('change', { bubbles: true }));
-		}
-		return {
-			methodId: normalizeShippingMethodValue(selected.value || ''),
-			changed: changed
-		};
-	}
-
 	function isPickupRateValue(value) {
 		value = String(value || '');
 		return value.indexOf('russian_post_domestic_pickup') !== -1;
@@ -747,57 +732,10 @@
 		return String(value || '').replace(/^wdc_platform:/, '');
 	}
 
-	function rateCost(input) {
-		var candidates = [
-			input.getAttribute('data-cost') || '',
-			input.dataset ? (input.dataset.cost || input.dataset.rateCost || '') : '',
-			rateCostFromValue(input.value || ''),
-			rateLabelText(input)
-		];
-		for (var i = 0; i < candidates.length; i++) {
-			var parsed = parsePrice(candidates[i]);
-			if (isFinite(parsed)) {
-				return parsed;
-			}
-		}
-		return Number.MAX_SAFE_INTEGER;
-	}
-
-	function rateLabelText(input) {
-		var label = input.closest ? input.closest('li, tr, label') : null;
-		if (label) {
-			return label.textContent || '';
-		}
-		if (input.id) {
-			label = document.querySelector('label[for="' + input.id.replace(/"/g, '\\"') + '"]');
-			if (label) {
-				return label.textContent || '';
-			}
-		}
-		return '';
-	}
-
-	function rateCostFromValue(value) {
-		var match = String(value || '').match(/(?:cost|price|amount)[=:]([0-9]+(?:[.,][0-9]{1,2})?)/i);
-		return match ? match[1] : '';
-	}
-
-	function parsePrice(value) {
-		value = String(value || '').replace(/\s+/g, ' ');
-		if (/free|бесплат/i.test(value)) {
-			return 0;
-		}
-		var matches = value.match(/\d+(?:[.,]\d{1,2})?/g);
-		if (!matches || !matches.length) {
-			return NaN;
-		}
-		return parseFloat(matches[matches.length - 1].replace(',', '.'));
-	}
-
-	function enableDestinationResetSuppression() {
+	function enableDestinationResetSuppression(timeout) {
 		suppressNextDestinationReset = true;
 		window.clearTimeout(suppressDestinationResetTimer);
-		suppressDestinationResetTimer = window.setTimeout(disableDestinationResetSuppression, 15000);
+		suppressDestinationResetTimer = window.setTimeout(disableDestinationResetSuppression, timeout || 15000);
 	}
 
 	function disableDestinationResetSuppression() {
