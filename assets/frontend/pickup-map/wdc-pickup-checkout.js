@@ -194,13 +194,13 @@
 		setText(container, '[data-wdc-pickup-work-time]', point.point_work_time || point.work_time || snapshot.work_time || '');
 		var workTimeBlock = container.querySelector('[data-wdc-pickup-work-time-block]');
 		if (workTimeBlock) {
-			workTimeBlock.hidden = !(point.point_work_time || point.work_time || snapshot.work_time);
+			setHidden(workTimeBlock, !(point.point_work_time || point.work_time || snapshot.work_time));
 		}
 		container.querySelectorAll('[data-wdc-pickup-card]').forEach(function (card) {
-			card.hidden = !point.point_code;
+			setHidden(card, !point.point_code);
 		});
 		container.querySelectorAll('[data-wdc-pickup-empty-open]').forEach(function (button) {
-			button.hidden = !!point.point_code;
+			setHidden(button, !!point.point_code);
 		});
 		if (!window.wdcPickupCheckout) {
 			window.wdcPickupCheckout = {};
@@ -211,6 +211,17 @@
 		}
 		if (selectedPoint && selectedPoint.point_code) {
 			rememberDestinationFingerprint();
+		}
+	}
+
+	function setHidden(element, hidden) {
+		element.hidden = hidden;
+		element.classList.toggle('wdc-is-hidden', hidden);
+		element.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+		if (hidden) {
+			element.style.display = 'none';
+		} else {
+			element.style.removeProperty('display');
 		}
 	}
 

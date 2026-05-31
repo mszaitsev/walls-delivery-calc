@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.28.3.
+Version: 0.28.4.
+
+Version 0.28.4 hardens selected pickup UI toggling against theme button styles. Hidden checkout pickup controls now get the hidden attribute, `wdc-is-hidden`, `aria-hidden`, inline `display:none`, and a scoped CSS override so the primary choose button cannot remain visible while the selected pickup card is shown.
 
 Version 0.28.3 removes the legacy selected pickup summary that was printed under checkout rate comments, leaving only the shared selected pickup card. The initial "Выбрать пункт выдачи" button stays hidden while a point is selected and returns when the selection is cleared.
 

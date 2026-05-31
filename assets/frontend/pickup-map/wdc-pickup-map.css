@@ -8,6 +8,11 @@
 	margin-bottom: 8px;
 }
 
+.wdc-rp-pickup-checkout [hidden],
+.wdc-rp-pickup-checkout .wdc-is-hidden {
+	display: none !important;
+}
+
 .wdc-rp-pickup-checkout__selection {
 	display: grid;
 	gap: 4px;

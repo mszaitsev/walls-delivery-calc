@@ -14,11 +14,11 @@ final class PickupPointCardRenderer {
 	public function render( array|object $point, bool $include_change_button = false, bool $hidden = false ): string {
 		$data      = $this->normalize( $point );
 		$work_time = $data['work_time'];
-		$classes   = 'wdc-pickup-point-card' . ( $include_change_button ? ' wdc-pickup-point-card--checkout' : '' );
+		$classes   = 'wdc-pickup-point-card' . ( $include_change_button ? ' wdc-pickup-point-card--checkout' : '' ) . ( $hidden ? ' wdc-is-hidden' : '' );
 		$hidden_attr = $hidden ? ' hidden' : '';
 		$parts     = array();
 
-		$parts[] = '<div class="' . esc_attr( $classes ) . '" data-wdc-pickup-selection data-wdc-pickup-card' . $hidden_attr . ' style="' . esc_attr( $this->card_style() ) . '">';
+		$parts[] = '<div class="' . esc_attr( $classes ) . '" data-wdc-pickup-selection data-wdc-pickup-card aria-hidden="' . esc_attr( $hidden ? 'true' : 'false' ) . '"' . $hidden_attr . ' style="' . esc_attr( $this->card_style( $hidden ) ) . '">';
 		$parts[] = '<div class="wdc-pickup-point-card__title" data-wdc-pickup-title style="' . esc_attr( $this->title_style() ) . '"><span class="wdc-pickup-point-card__accent" aria-hidden="true" style="' . esc_attr( $this->accent_style() ) . '"></span><span data-wdc-pickup-title-text>' . esc_html( $data['title'] ) . '</span></div>';
 		$parts[] = '<div class="wdc-pickup-point-card__body" style="' . esc_attr( $this->body_style() ) . '">';
 		$parts[] = '<div class="wdc-pickup-point-card__address" data-wdc-pickup-address style="' . esc_attr( $this->address_style() ) . '">' . esc_html( $data['address_line'] ) . '</div>';
@@ -104,8 +104,8 @@ final class PickupPointCardRenderer {
 		return 'г ' . $city;
 	}
 
-	private function card_style(): string {
-		return 'box-sizing:border-box;width:100%;max-width:none;margin:10px 0;padding:14px 16px;border:1px solid #d9e2ec;border-radius:8px;background:#fff;color:#1f2937;font-family:Arial,sans-serif;line-height:1.45;';
+	private function card_style( bool $hidden = false ): string {
+		return ( $hidden ? 'display:none;' : '' ) . 'box-sizing:border-box;width:100%;max-width:none;margin:10px 0;padding:14px 16px;border:1px solid #d9e2ec;border-radius:8px;background:#fff;color:#1f2937;font-family:Arial,sans-serif;line-height:1.45;';
 	}
 
 	private function title_style(): string {
