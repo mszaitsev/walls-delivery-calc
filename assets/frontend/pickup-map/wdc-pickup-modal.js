@@ -18,6 +18,7 @@
 			'<span class="wdc-pickup-search__icon" aria-hidden="true">🔍</span>',
 			'<input class="wdc-pickup-modal__search" type="search" data-wdc-search placeholder="' + (labels.searchPlaceholder || '') + '">',
 			'<button type="button" class="button wdc-pickup-search__button" data-wdc-search-submit>Искать адрес</button>',
+			'<button type="button" class="button wdc-pickup-search__geo" data-wdc-geolocation hidden>Моё местоположение</button>',
 			'</div>',
 			'<button type="button" class="wdc-pickup-modal__close" data-wdc-close aria-label="Close">×</button>',
 			'</header>',

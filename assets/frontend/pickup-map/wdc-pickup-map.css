@@ -212,9 +212,14 @@
 	width: 100%;
 }
 
-.wdc-pickup-search__button {
+.wdc-pickup-search__button,
+.wdc-pickup-search__geo {
 	flex: 0 0 auto;
 	white-space: nowrap;
+}
+
+.wdc-pickup-search__geo[hidden] {
+	display: none !important;
 }
 
 .wdc-pickup-modal__close {
@@ -289,6 +294,23 @@
 	color: #b91c1c;
 	font-style: normal;
 	font-weight: 700;
+}
+
+.wdc-pickup-list__status {
+	margin-bottom: 10px;
+	padding: 10px;
+	border: 1px solid #bfdbfe;
+	border-radius: 6px;
+	background: #eff6ff;
+	color: #1e3a8a;
+	font-size: 13px;
+	line-height: 1.35;
+}
+
+.wdc-pickup-list__status.is-error {
+	border-color: #fecaca;
+	background: #fef2f2;
+	color: #991b1b;
 }
 
 .wdc-pickup-list__items {
@@ -521,6 +543,40 @@
 	transform: translateX(-38px) translateY(-10px);
 }
 
+.wdc-map-user-icon {
+	background: transparent;
+	border: 0;
+	pointer-events: none;
+}
+
+.wdc-map-user-marker {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 34px;
+	padding: 0 9px 0 4px;
+	border: 2px solid #fff;
+	border-radius: 999px;
+	background: #2563eb;
+	color: #fff;
+	box-shadow: 0 6px 16px rgba(37, 99, 235, 0.32);
+	font-size: 12px;
+	font-weight: 700;
+	line-height: 1;
+	white-space: nowrap;
+}
+
+.wdc-map-user-marker__dot {
+	display: block;
+	width: 18px;
+	height: 18px;
+	border: 3px solid rgba(255, 255, 255, 0.82);
+	border-radius: 50%;
+	background: #60a5fa;
+	box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.2);
+}
+
 .wdc-map-marker {
 	display: inline-grid;
 	place-items: center;
@@ -636,7 +692,8 @@
 		gap: 6px;
 	}
 
-	.wdc-pickup-search__button {
+	.wdc-pickup-search__button,
+	.wdc-pickup-search__geo {
 		padding-right: 8px;
 		padding-left: 8px;
 	}

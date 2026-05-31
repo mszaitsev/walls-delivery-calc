@@ -11,6 +11,7 @@
 		var collection = null;
 		var destroyed = false;
 		var pendingPoints = [];
+		var pendingSearchMarker = null;
 		var pointClickCallback = function () {};
 		var popupSelectCallback = function () {};
 		var popupCloseCallback = function () {};
@@ -22,6 +23,7 @@
 		var pointById = {};
 		var markerLayout = null;
 		var searchMarkerLayout = null;
+		var userMarkerLayout = null;
 		var maxClusterZoom = 18;
 		var suppressPopupClose = false;
 
@@ -35,6 +37,9 @@
 			);
 			searchMarkerLayout = ymaps.templateLayoutFactory.createClass(
 				'<div class="wdc-map-search-pin wdc-map-search-pin--push $[properties.wdcShift]"><span class="wdc-map-search-pin__head"></span><span class="wdc-map-search-pin__needle"></span></div>'
+			);
+			userMarkerLayout = ymaps.templateLayoutFactory.createClass(
+				'<div class="wdc-map-user-marker"><span class="wdc-map-user-marker__dot"></span><span class="wdc-map-user-marker__label">Вы здесь</span></div>'
 			);
 			map = new ymaps.Map(container, {
 				center: [pendingCenter.lat, pendingCenter.lng],
@@ -53,7 +58,7 @@
 			map.events.add('click', mapClicked);
 			document.addEventListener('click', onPopupClick);
 			fitToViewport();
-			if (pendingPoints.length) {
+			if (pendingPoints.length || pendingSearchMarker) {
 				renderMarkers(pendingPoints);
 			}
 			if (pendingCenterChanged) {
@@ -79,6 +84,9 @@
 
 		function renderMarkers(points, options) {
 			pendingPoints = points || [];
+			if (options && Object.prototype.hasOwnProperty.call(options, 'searchMarker')) {
+				pendingSearchMarker = options.searchMarker || null;
+			}
 			activePointId = options && Object.prototype.hasOwnProperty.call(options, 'activePointId') ? (options.activePointId ? String(options.activePointId) : null) : activePointId;
 			if (!map || !collection || !ymapsApi) {
 				return;
@@ -112,7 +120,7 @@
 				placemarkById[id] = placemark;
 				pointById[id] = point;
 			});
-			renderSearchMarker(options && options.searchMarker);
+			renderSearchMarker(options && Object.prototype.hasOwnProperty.call(options, 'searchMarker') ? options.searchMarker : pendingSearchMarker);
 			suppressPopupClose = false;
 		}
 
@@ -137,6 +145,10 @@
 			if (!map || !ymapsApi || !marker || marker.lat === null || marker.lng === null) {
 				return;
 			}
+			if (marker.type === 'geolocation') {
+				renderUserLocationMarker(marker);
+				return;
+			}
 			var shift = searchMarkerShift(marker);
 			searchPlacemark = new ymapsApi.Placemark([marker.lat, marker.lng], {
 				wdcShift: shift.className
@@ -146,6 +158,18 @@
 				iconShape: { type: 'Circle', coordinates: [19, 14], radius: 18 },
 				interactiveZIndex: false,
 				zIndex: 10
+			});
+			map.geoObjects.add(searchPlacemark);
+		}
+
+		function renderUserLocationMarker(location) {
+			searchPlacemark = new ymapsApi.Placemark([location.lat, location.lng], {}, {
+				iconLayout: userMarkerLayout || markerLayout,
+				iconOffset: [-17, -17],
+				iconShape: { type: 'Circle', coordinates: [17, 17], radius: 17 },
+				interactivityModel: 'default#transparent',
+				interactiveZIndex: false,
+				zIndex: 120
 			});
 			map.geoObjects.add(searchPlacemark);
 		}
@@ -202,6 +226,7 @@
 			renderMarkers: renderMarkers,
 			clearMarkers: function () {
 				pendingPoints = [];
+				pendingSearchMarker = null;
 				suppressPopupClose = true;
 				clearMarkers();
 				suppressPopupClose = false;

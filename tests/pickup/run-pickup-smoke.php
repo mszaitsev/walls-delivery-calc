@@ -510,4 +510,11 @@ $courier_rates = $orchestrator->calculate_rates( pickup_smoke_request( DeliveryT
 pickup_smoke_assert( 2 === count( $pickup_rates ), 'Orchestrator must not filter rates by pickup delivery type.' );
 pickup_smoke_assert( 2 === count( $courier_rates ), 'Orchestrator must not filter rates by courier delivery type.' );
 
+$root = dirname( __DIR__, 2 );
+$modal_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-modal.js' ) ?: '';
+$checkout_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' ) ?: '';
+$map_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.js' ) ?: '';
+pickup_smoke_assert( str_contains( $modal_js, 'data-wdc-geolocation' ) && str_contains( $checkout_js, 'window.navigator.geolocation.getCurrentPosition' ), 'Pickup frontend must expose a geolocation button wired to browser geolocation.' );
+pickup_smoke_assert( str_contains( $map_js, 'function useUserLocation(lat, lng)' ) && str_contains( $map_js, 'loadBounds(bboxAround(lat, lng), { force: true })' ) && str_contains( $map_js, 'searchAddress = null' ), 'Pickup geolocation must load nearby points from bbox without keeping the address marker active.' );
+
 echo "Pickup foundation smoke test passed.\n";
