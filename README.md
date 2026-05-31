@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.28.4.
+Version: 0.28.5.
+
+Version 0.28.5 clears the selected pickup point when the customer manually changes the checkout locality through the city selector. Cross-location pickup selection remains protected by a one-shot controlled location-change flag, so a confirmed pickup map locality change can recalculate checkout and save the pending pickup point without being cleared by the location event.
 
 Version 0.28.4 hardens selected pickup UI toggling against theme button styles. Hidden checkout pickup controls now get the hidden attribute, `wdc-is-hidden`, `aria-hidden`, inline `display:none`, and a scoped CSS override so the primary choose button cannot remain visible while the selected pickup card is shown.
 

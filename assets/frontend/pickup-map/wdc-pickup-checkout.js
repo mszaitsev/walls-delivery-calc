@@ -1,14 +1,17 @@
 (function (window, document) {
 	'use strict';
 
-	var labels = (window.wdcPickupCheckout && window.wdcPickupCheckout.labels) || {};
+	var checkoutConfig = window.wdcPickupCheckout || {};
+	var labels = checkoutConfig.labels || {};
 	var activeMethod = '';
-	var currentContext = (window.wdcPickupCheckout && window.wdcPickupCheckout.currentContext) || {};
+	var currentContext = checkoutConfig.currentContext || checkoutConfig.initialContext || {};
 	var prefetchTimer = 0;
 	var prefetchController = null;
 	var prefetchCache = null;
 	var suppressNextDestinationReset = false;
 	var suppressDestinationResetTimer = 0;
+	var suppressPickupResetOnNextLocationSelected = false;
+	var suppressPickupResetOnNextLocationSelectedTimer = 0;
 	var isPlacingOrder = false;
 	var placeOrderGuardTimer = 0;
 	var placeOrderResetGuardUntil = 0;
@@ -799,6 +802,7 @@
 		var context = contextFromResolvedLocation(location);
 		updateCurrentContext(context);
 		if (window.WDCCheckoutCitySelector && typeof window.WDCCheckoutCitySelector.applyLocation === 'function') {
+			beginControlledLocationChange();
 			window.WDCCheckoutCitySelector.applyLocation(location, { updateCheckout: false, explicit: true, source: 'pickup', updateFields: true });
 			updateCurrentContext(contextFromFields());
 			return;
@@ -1012,6 +1016,18 @@
 		suppressDestinationResetTimer = 0;
 	}
 
+	function beginControlledLocationChange() {
+		suppressPickupResetOnNextLocationSelected = true;
+		window.clearTimeout(suppressPickupResetOnNextLocationSelectedTimer);
+		suppressPickupResetOnNextLocationSelectedTimer = window.setTimeout(consumeControlledLocationChange, 5000);
+	}
+
+	function consumeControlledLocationChange() {
+		suppressPickupResetOnNextLocationSelected = false;
+		window.clearTimeout(suppressPickupResetOnNextLocationSelectedTimer);
+		suppressPickupResetOnNextLocationSelectedTimer = 0;
+	}
+
 	function stateContextMatchesCurrentDestination(context) {
 		var fieldContext = contextFromFields();
 		return contextMatches(fieldContext, context) || contextMatches(currentContext, context);
@@ -1218,18 +1234,25 @@
 		invalidatePrefetch();
 		var previousContext = Object.assign({}, currentContext || {});
 		var fieldContext = contextFromFields();
-		var sameLocation = sameLocationContext(previousContext, context) || sameLocationContext(fieldContext, context);
+		var previousHasIdentity = !!destinationFingerprint(previousContext);
+		var sameLocation = sameLocationContext(previousContext, context) || (!previousHasIdentity && !selectedPickupPointId() && sameLocationContext(fieldContext, context));
 		updateCurrentContext(context);
 		applyContextToHidden(context);
 		var newFingerprint = destinationFingerprint(context);
-		if (isPickupResetGuarded() || suppressNextDestinationReset || sameLocation || newFingerprint === lastDestinationFingerprint) {
+		if (suppressPickupResetOnNextLocationSelected) {
+			consumeControlledLocationChange();
+			rememberDestinationFingerprint(context);
+			schedulePrefetch();
+			return;
+		}
+		if (isPickupResetGuarded() || sameLocation || newFingerprint === lastDestinationFingerprint) {
 			rememberDestinationFingerprint(context);
 			schedulePrefetch();
 			return;
 		}
 		lastDestinationFingerprint = newFingerprint;
-		resetPickupSelectionOnServer('location_selected');
-		clearPickupSelectionUi('location_selected');
+		resetPickupSelectionOnServer('location_changed');
+		clearPickupSelectionUi('location_changed');
 		schedulePrefetch();
 	});
 	document.addEventListener('DOMContentLoaded', boot);
