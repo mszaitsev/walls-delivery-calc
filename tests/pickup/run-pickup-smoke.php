@@ -514,7 +514,10 @@ $root = dirname( __DIR__, 2 );
 $modal_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-modal.js' ) ?: '';
 $checkout_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' ) ?: '';
 $map_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.js' ) ?: '';
-pickup_smoke_assert( str_contains( $modal_js, 'data-wdc-geolocation' ) && str_contains( $checkout_js, 'window.navigator.geolocation.getCurrentPosition' ), 'Pickup frontend must expose a geolocation button wired to browser geolocation.' );
+$leaflet_provider_js = file_get_contents( $root . '/assets/frontend/pickup-map/providers/wdc-map-provider-leaflet.js' ) ?: '';
+$yandex_provider_js = file_get_contents( $root . '/assets/frontend/pickup-map/providers/wdc-map-provider-yandex.js' ) ?: '';
+pickup_smoke_assert( str_contains( $modal_js, 'wdc-pickup-map__locate' ) && str_contains( $modal_js, 'data-wdc-geolocation' ) && str_contains( $checkout_js, 'window.navigator.geolocation.getCurrentPosition' ), 'Pickup frontend must expose a map overlay geolocation button wired to browser geolocation.' );
 pickup_smoke_assert( str_contains( $map_js, 'function useUserLocation(lat, lng)' ) && str_contains( $map_js, 'loadBounds(bboxAround(lat, lng), { force: true })' ) && str_contains( $map_js, 'searchAddress = null' ), 'Pickup geolocation must load nearby points from bbox without keeping the address marker active.' );
+pickup_smoke_assert( ! str_contains( $leaflet_provider_js . $yandex_provider_js, 'wdc-map-user-marker' ) && str_contains( $leaflet_provider_js . $yandex_provider_js, 'wdc-map-search-pin--push' ), 'Pickup geolocation origin must reuse the red search push-pin instead of the old blue user marker.' );
 
 echo "Pickup foundation smoke test passed.\n";

@@ -23,7 +23,6 @@
 		var pointById = {};
 		var markerLayout = null;
 		var searchMarkerLayout = null;
-		var userMarkerLayout = null;
 		var maxClusterZoom = 18;
 		var suppressPopupClose = false;
 
@@ -37,9 +36,6 @@
 			);
 			searchMarkerLayout = ymaps.templateLayoutFactory.createClass(
 				'<div class="wdc-map-search-pin wdc-map-search-pin--push $[properties.wdcShift]"><span class="wdc-map-search-pin__head"></span><span class="wdc-map-search-pin__needle"></span></div>'
-			);
-			userMarkerLayout = ymaps.templateLayoutFactory.createClass(
-				'<div class="wdc-map-user-marker"><span class="wdc-map-user-marker__dot"></span><span class="wdc-map-user-marker__label">Вы здесь</span></div>'
 			);
 			map = new ymaps.Map(container, {
 				center: [pendingCenter.lat, pendingCenter.lng],
@@ -145,10 +141,6 @@
 			if (!map || !ymapsApi || !marker || marker.lat === null || marker.lng === null) {
 				return;
 			}
-			if (marker.type === 'geolocation') {
-				renderUserLocationMarker(marker);
-				return;
-			}
 			var shift = searchMarkerShift(marker);
 			searchPlacemark = new ymapsApi.Placemark([marker.lat, marker.lng], {
 				wdcShift: shift.className
@@ -158,18 +150,6 @@
 				iconShape: { type: 'Circle', coordinates: [19, 14], radius: 18 },
 				interactiveZIndex: false,
 				zIndex: 10
-			});
-			map.geoObjects.add(searchPlacemark);
-		}
-
-		function renderUserLocationMarker(location) {
-			searchPlacemark = new ymapsApi.Placemark([location.lat, location.lng], {}, {
-				iconLayout: userMarkerLayout || markerLayout,
-				iconOffset: [-17, -17],
-				iconShape: { type: 'Circle', coordinates: [17, 17], radius: 17 },
-				interactivityModel: 'default#transparent',
-				interactiveZIndex: false,
-				zIndex: 120
 			});
 			map.geoObjects.add(searchPlacemark);
 		}

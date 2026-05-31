@@ -180,10 +180,6 @@
 			if (!marker || marker.lat === null || marker.lng === null) {
 				return;
 			}
-			if (marker.type === 'geolocation') {
-				renderUserLocationMarker(marker);
-				return;
-			}
 			var shift = searchMarkerShift(marker);
 			searchMarker = window.L.marker([marker.lat, marker.lng], {
 				pane: 'wdcSearchMarkerPane',
@@ -196,19 +192,6 @@
 				}),
 				interactive: false,
 				zIndexOffset: -100
-			}).addTo(map);
-		}
-
-		function renderUserLocationMarker(location) {
-			searchMarker = window.L.marker([location.lat, location.lng], {
-				icon: window.L.divIcon({
-					className: 'wdc-map-user-icon',
-					html: '<span class="wdc-map-user-marker"><span class="wdc-map-user-marker__dot"></span><span class="wdc-map-user-marker__label">Вы здесь</span></span>',
-					iconSize: [82, 34],
-					iconAnchor: [17, 17]
-				}),
-				interactive: false,
-				zIndexOffset: 50
 			}).addTo(map);
 		}
 

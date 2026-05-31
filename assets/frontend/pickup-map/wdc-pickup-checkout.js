@@ -198,21 +198,22 @@
 					return;
 				}
 				geolocationButton.hidden = false;
+				resetGeolocationButton();
 				geolocationButton.addEventListener('click', function () {
 					geolocationButton.disabled = true;
-					geolocationButton.textContent = 'Определяем...';
+					geolocationButton.classList.add('is-loading');
+					geolocationButton.title = 'Определяем местоположение...';
+					geolocationButton.innerHTML = '<span aria-hidden="true">...</span>';
 					if (map.setStatus) {
 						map.setStatus('Определяем местоположение...');
 					}
 					window.navigator.geolocation.getCurrentPosition(function (position) {
-						geolocationButton.disabled = false;
-						geolocationButton.textContent = 'Моё местоположение';
+						resetGeolocationButton();
 						if (map.useUserLocation) {
 							map.useUserLocation(position.coords.latitude, position.coords.longitude);
 						}
 					}, function (error) {
-						geolocationButton.disabled = false;
-						geolocationButton.textContent = 'Моё местоположение';
+						resetGeolocationButton();
 						if (map.setStatus) {
 							map.setStatus(geolocationErrorMessage(error), 'error');
 						}
@@ -222,6 +223,13 @@
 						maximumAge: 300000
 					});
 				});
+			}
+
+			function resetGeolocationButton() {
+				geolocationButton.disabled = false;
+				geolocationButton.classList.remove('is-loading');
+				geolocationButton.title = 'Определить моё местоположение';
+				geolocationButton.innerHTML = '<span aria-hidden="true">⌖</span>';
 			}
 		});
 	}

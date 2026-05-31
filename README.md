@@ -1,8 +1,10 @@
 # Walls Delivery Calc
 
-Version: 0.29.0.
+Version: 0.29.1.
 
-Version 0.29.0 adds a browser geolocation helper to the pickup map. The "Моё местоположение" button centers the map on the customer's current coordinates, loads nearby pickup points, and sorts the list by distance from that temporary user marker without changing checkout destination fields, locality, cross-location flow, or tariffs.
+Version 0.29.1 moves the pickup map geolocation action from the search row into a round map overlay control and renders the geolocation origin with the same red push-pin marker used by address search.
+
+Version 0.29.0 adds a browser geolocation helper to the pickup map. The geolocation action centers the map on the customer's current coordinates, loads nearby pickup points, and sorts the list by distance from that temporary origin without changing checkout destination fields, locality, cross-location flow, or tariffs.
 
 Version 0.28.5 clears the selected pickup point when the customer manually changes the checkout locality through the city selector. Cross-location pickup selection remains protected by a one-shot controlled location-change flag, so a confirmed pickup map locality change can recalculate checkout and save the pending pickup point without being cleared by the location event.
 

@@ -564,7 +564,7 @@
 		return {
 			id: 'user-location',
 			type: 'geolocation',
-			value: 'Вы здесь',
+			value: '',
 			lat: parseFloat(location.lat),
 			lng: parseFloat(location.lng)
 		};

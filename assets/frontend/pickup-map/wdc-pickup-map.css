@@ -212,14 +212,9 @@
 	width: 100%;
 }
 
-.wdc-pickup-search__button,
-.wdc-pickup-search__geo {
+.wdc-pickup-search__button {
 	flex: 0 0 auto;
 	white-space: nowrap;
-}
-
-.wdc-pickup-search__geo[hidden] {
-	display: none !important;
 }
 
 .wdc-pickup-modal__close {
@@ -245,11 +240,53 @@
 }
 
 .wdc-pickup-modal__map-pane {
+	position: relative;
 	display: grid;
 }
 
 .wdc-pickup-modal__map {
 	height: 100%;
+}
+
+.wdc-pickup-map__locate {
+	position: absolute;
+	right: 16px;
+	bottom: 16px;
+	z-index: 650;
+	display: inline-grid;
+	place-items: center;
+	width: 44px;
+	height: 44px;
+	padding: 0;
+	border: 1px solid #d8dee6;
+	border-radius: 50%;
+	background: #fff;
+	color: #1f2937;
+	box-shadow: 0 8px 24px rgba(15, 23, 42, 0.22);
+	font-size: 22px;
+	font-weight: 700;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.wdc-pickup-map__locate:hover,
+.wdc-pickup-map__locate:focus {
+	border-color: #94a3b8;
+	outline: none;
+	box-shadow: 0 10px 26px rgba(15, 23, 42, 0.28);
+}
+
+.wdc-pickup-map__locate[hidden] {
+	display: none !important;
+}
+
+.wdc-pickup-map__locate:disabled {
+	cursor: default;
+	opacity: 0.72;
+}
+
+.wdc-pickup-map__locate.is-loading span {
+	transform: translateY(-3px);
 }
 
 .wdc-pickup-modal__side {
@@ -543,40 +580,6 @@
 	transform: translateX(-38px) translateY(-10px);
 }
 
-.wdc-map-user-icon {
-	background: transparent;
-	border: 0;
-	pointer-events: none;
-}
-
-.wdc-map-user-marker {
-	position: relative;
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	height: 34px;
-	padding: 0 9px 0 4px;
-	border: 2px solid #fff;
-	border-radius: 999px;
-	background: #2563eb;
-	color: #fff;
-	box-shadow: 0 6px 16px rgba(37, 99, 235, 0.32);
-	font-size: 12px;
-	font-weight: 700;
-	line-height: 1;
-	white-space: nowrap;
-}
-
-.wdc-map-user-marker__dot {
-	display: block;
-	width: 18px;
-	height: 18px;
-	border: 3px solid rgba(255, 255, 255, 0.82);
-	border-radius: 50%;
-	background: #60a5fa;
-	box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.2);
-}
-
 .wdc-map-marker {
 	display: inline-grid;
 	place-items: center;
@@ -692,8 +695,7 @@
 		gap: 6px;
 	}
 
-	.wdc-pickup-search__button,
-	.wdc-pickup-search__geo {
+	.wdc-pickup-search__button {
 		padding-right: 8px;
 		padding-left: 8px;
 	}
