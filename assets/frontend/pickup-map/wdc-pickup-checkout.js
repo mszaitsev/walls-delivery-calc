@@ -8,6 +8,7 @@
 	var prefetchController = null;
 	var prefetchCache = null;
 	var suppressNextDestinationReset = false;
+	var suppressDestinationResetTimer = 0;
 
 	function init(container) {
 		if (container.dataset.wdcPickupReady) {
@@ -38,26 +39,47 @@
 			debug('openModal context', context);
 			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
 			var savingPoint = false;
+			var loadingText = '';
 
 			function close() {
 				map.destroy();
 				modal.destroy();
 			}
 
-			function commitPoint(point) {
-				if (!point || savingPoint) {
+			function setLoading(message) {
+				savingPoint = true;
+				loadingText = message || 'Сохраняем пункт выдачи...';
+				confirmButton.disabled = true;
+				setModalLoading(modal.root, loadingText);
+				setModalSelectButtonsDisabled(modal.root, true, loadingText);
+			}
+
+			function clearLoading() {
+				savingPoint = false;
+				loadingText = '';
+				confirmButton.disabled = false;
+				clearModalLoading(modal.root);
+				setModalSelectButtonsDisabled(modal.root, false, '');
+			}
+
+			function commitPoint(point, shippingMethodId, options) {
+				options = options || {};
+				if (!point) {
 					return Promise.resolve(false);
 				}
-				savingPoint = true;
-				confirmButton.disabled = true;
-				return window.WDCPickupApi.save(point.id, method).then(function (response) {
+				if (!savingPoint) {
+					setLoading(options.message || 'Сохраняем пункт выдачи...');
+				}
+				return window.WDCPickupApi.save(point.id, shippingMethodId || method).then(function (response) {
 					applySelection(container, response.pickup_point || {});
 					close();
-					triggerCheckoutUpdate();
+					if (options.updateCheckoutAfterSave !== false) {
+						triggerCheckoutUpdate();
+					}
 					return true;
 				}).catch(function () {
-					savingPoint = false;
-					confirmButton.disabled = false;
+					clearLoading();
+					showModalNotice(modal.root, 'Не удалось сохранить пункт выдачи. Попробуйте еще раз.');
 					return false;
 				});
 			}
@@ -67,34 +89,61 @@
 				if (!point || savingPoint) {
 					return;
 				}
+				setLoading('Сохраняем пункт выдачи...');
 				var checkoutContext = contextFromFields();
 				if (pointMatchesDestinationQuick(point, checkoutContext) || !window.WDCPickupApi.resolveLocation) {
 					commitPoint(point);
 					return;
 				}
-				savingPoint = true;
-				confirmButton.disabled = true;
+				setLoading('Проверяем населенный пункт...');
 				window.WDCPickupApi.resolveLocation(pointPayload(point), checkoutContext).then(function (response) {
 					if (!response || !response.requires_location_change || !response.location) {
-						savingPoint = false;
-						confirmButton.disabled = false;
+						clearLoading();
 						commitPoint(point);
 						return;
 					}
+					clearLoading();
 					showLocationChangeConfirm(modal.root, response.location).then(function (confirmed) {
 						if (!confirmed) {
-							savingPoint = false;
-							confirmButton.disabled = false;
+							clearLoading();
 							return;
 						}
-						applyConfirmedPickupLocationChange(response.location);
-						savingPoint = false;
-						commitPoint(point);
+						runCrossLocationSelection(point, response.location);
 					});
 				}).catch(function () {
-					savingPoint = false;
-					confirmButton.disabled = false;
+					clearLoading();
 					commitPoint(point);
+				});
+			}
+
+			function runCrossLocationSelection(point, location) {
+				setLoading('Пересчитываем доставку...');
+				enableDestinationResetSuppression();
+				applyConfirmedPickupLocationChange(location);
+				var updatedCheckout = waitForUpdatedCheckout(12000);
+				triggerCheckoutUpdate();
+				updatedCheckout.then(function () {
+					boot();
+					var selectedMethod = selectCheapestPickupRate();
+					if (!selectedMethod) {
+						resetPickupSelectionOnServer();
+						showModalNotice(modal.root, 'После пересчета выбранный способ доставки стал недоступен. Выберите другой способ доставки.');
+						clearLoading();
+						disableDestinationResetSuppression();
+						return;
+					}
+					setLoading('Сохраняем пункт выдачи...');
+					commitPoint(point, selectedMethod, { updateCheckoutAfterSave: false, message: 'Сохраняем пункт выдачи...' }).then(function (saved) {
+						if (!saved) {
+							disableDestinationResetSuppression();
+							return;
+						}
+						disableDestinationResetSuppression();
+					});
+				}).catch(function () {
+					showModalNotice(modal.root, 'Не удалось дождаться пересчета доставки. Попробуйте выбрать пункт еще раз.');
+					clearLoading();
+					disableDestinationResetSuppression();
 				});
 			}
 
@@ -505,19 +554,25 @@
 				'</div>'
 			].join('');
 			root.appendChild(dialog);
+			var confirm = dialog.querySelector('[data-wdc-location-confirm]');
+			var cancel = dialog.querySelector('[data-wdc-location-cancel]');
 			function finish(value) {
+				if (value && confirm && cancel) {
+					confirm.disabled = true;
+					cancel.disabled = true;
+					confirm.textContent = 'Пересчитываем...';
+				}
 				dialog.remove();
 				resolve(value);
 			}
-			dialog.querySelector('[data-wdc-location-confirm]').addEventListener('click', function () { finish(true); });
-			dialog.querySelector('[data-wdc-location-cancel]').addEventListener('click', function () { finish(false); });
-			dialog.querySelector('[data-wdc-location-cancel]').focus();
+			confirm.addEventListener('click', function () { finish(true); });
+			cancel.addEventListener('click', function () { finish(false); });
+			cancel.focus();
 		});
 	}
 
 	function applyConfirmedPickupLocationChange(location) {
 		var context = contextFromResolvedLocation(location);
-		suppressNextDestinationReset = true;
 		updateCurrentContext(context);
 		applyContextToHidden(context);
 		setCheckoutFieldValue('shipping_country', context.country_code || 'RU');
@@ -527,7 +582,6 @@
 		if (context.region_name) {
 			setCheckoutFieldValue(fieldExists('shipping_state') ? 'shipping_state' : 'billing_state', context.region_name);
 		}
-		window.setTimeout(function () { suppressNextDestinationReset = false; }, 0);
 	}
 
 	function contextFromResolvedLocation(location) {
@@ -566,6 +620,171 @@
 		return String(value || '').replace(/[&<>"']/g, function (char) {
 			return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char];
 		});
+	}
+
+	function setModalLoading(root, message) {
+		var overlay = root.querySelector('[data-wdc-pickup-loading]');
+		if (!overlay) {
+			overlay = document.createElement('div');
+			overlay.className = 'wdc-pickup-modal-loading';
+			overlay.setAttribute('data-wdc-pickup-loading', '1');
+			overlay.innerHTML = '<div class="wdc-pickup-modal-loading__panel" role="status" aria-live="polite"><span class="wdc-pickup-modal-loading__spinner" aria-hidden="true"></span><span data-wdc-pickup-loading-text></span></div>';
+			root.appendChild(overlay);
+		}
+		overlay.querySelector('[data-wdc-pickup-loading-text]').textContent = message || 'Сохраняем пункт выдачи...';
+	}
+
+	function clearModalLoading(root) {
+		var overlay = root.querySelector('[data-wdc-pickup-loading]');
+		if (overlay) {
+			overlay.remove();
+		}
+	}
+
+	function setModalSelectButtonsDisabled(root, disabled, text) {
+		root.querySelectorAll('[data-wdc-pickup-popup-select], [data-wdc-pickup-list-confirm], [data-wdc-confirm]').forEach(function (button) {
+			if (!button.dataset.wdcOriginalText) {
+				button.dataset.wdcOriginalText = button.textContent || '';
+			}
+			button.disabled = !!disabled;
+			if (disabled && text) {
+				button.textContent = text;
+			} else if (!disabled && button.dataset.wdcOriginalText) {
+				button.textContent = button.dataset.wdcOriginalText;
+				delete button.dataset.wdcOriginalText;
+			}
+		});
+	}
+
+	function showModalNotice(root, message) {
+		var notice = root.querySelector('[data-wdc-pickup-notice]');
+		if (!notice) {
+			notice = document.createElement('div');
+			notice.className = 'wdc-pickup-modal-notice';
+			notice.setAttribute('data-wdc-pickup-notice', '1');
+			notice.setAttribute('role', 'alert');
+			var dialog = root.querySelector('.wdc-pickup-modal__dialog') || root;
+			dialog.appendChild(notice);
+		}
+		notice.textContent = message || '';
+	}
+
+	function waitForUpdatedCheckout(timeout) {
+		return new Promise(function (resolve, reject) {
+			var done = false;
+			var timer = window.setTimeout(function () {
+				if (done) {
+					return;
+				}
+				done = true;
+				if (window.jQuery) {
+					window.jQuery(document.body).off('updated_checkout.wdcPickupPending', handler);
+				}
+				reject(new Error('updated_checkout timeout'));
+			}, timeout || 12000);
+			function handler() {
+				if (done) {
+					return;
+				}
+				done = true;
+				window.clearTimeout(timer);
+				if (window.jQuery) {
+					window.jQuery(document.body).off('updated_checkout.wdcPickupPending', handler);
+				}
+				resolve();
+			}
+			if (window.jQuery) {
+				window.jQuery(document.body).one('updated_checkout.wdcPickupPending', handler);
+			} else {
+				window.setTimeout(handler, 800);
+			}
+		});
+	}
+
+	function selectCheapestPickupRate() {
+		var rates = Array.prototype.slice.call(document.querySelectorAll('input[name^="shipping_method"]')).filter(function (input) {
+			return !input.disabled && isPickupRateValue(input.value || '');
+		});
+		if (!rates.length) {
+			return '';
+		}
+		rates.sort(function (a, b) {
+			return rateCost(a) - rateCost(b);
+		});
+		var selected = rates[0];
+		if (!selected.checked) {
+			selected.checked = true;
+			selected.dispatchEvent(new Event('change', { bubbles: true }));
+		}
+		return normalizeShippingMethodValue(selected.value || '');
+	}
+
+	function isPickupRateValue(value) {
+		value = String(value || '');
+		return value.indexOf('russian_post_domestic_pickup') !== -1;
+	}
+
+	function normalizeShippingMethodValue(value) {
+		return String(value || '').replace(/^wdc_platform:/, '');
+	}
+
+	function rateCost(input) {
+		var candidates = [
+			input.getAttribute('data-cost') || '',
+			input.dataset ? (input.dataset.cost || input.dataset.rateCost || '') : '',
+			rateCostFromValue(input.value || ''),
+			rateLabelText(input)
+		];
+		for (var i = 0; i < candidates.length; i++) {
+			var parsed = parsePrice(candidates[i]);
+			if (isFinite(parsed)) {
+				return parsed;
+			}
+		}
+		return Number.MAX_SAFE_INTEGER;
+	}
+
+	function rateLabelText(input) {
+		var label = input.closest ? input.closest('li, tr, label') : null;
+		if (label) {
+			return label.textContent || '';
+		}
+		if (input.id) {
+			label = document.querySelector('label[for="' + input.id.replace(/"/g, '\\"') + '"]');
+			if (label) {
+				return label.textContent || '';
+			}
+		}
+		return '';
+	}
+
+	function rateCostFromValue(value) {
+		var match = String(value || '').match(/(?:cost|price|amount)[=:]([0-9]+(?:[.,][0-9]{1,2})?)/i);
+		return match ? match[1] : '';
+	}
+
+	function parsePrice(value) {
+		value = String(value || '').replace(/\s+/g, ' ');
+		if (/free|бесплат/i.test(value)) {
+			return 0;
+		}
+		var matches = value.match(/\d+(?:[.,]\d{1,2})?/g);
+		if (!matches || !matches.length) {
+			return NaN;
+		}
+		return parseFloat(matches[matches.length - 1].replace(',', '.'));
+	}
+
+	function enableDestinationResetSuppression() {
+		suppressNextDestinationReset = true;
+		window.clearTimeout(suppressDestinationResetTimer);
+		suppressDestinationResetTimer = window.setTimeout(disableDestinationResetSuppression, 15000);
+	}
+
+	function disableDestinationResetSuppression() {
+		suppressNextDestinationReset = false;
+		window.clearTimeout(suppressDestinationResetTimer);
+		suppressDestinationResetTimer = 0;
 	}
 
 	function stateContextMatchesCurrentDestination(context) {

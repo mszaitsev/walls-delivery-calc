@@ -1,6 +1,8 @@
 # Russian Post Pickup Points
 
-Version: 0.27.1.
+Version: 0.27.2.
+
+Version 0.27.2 keeps a selected cross-location pickup point after checkout recalculation. After the customer confirms the locality change, the frontend updates checkout destination fields, waits for WooCommerce `updated_checkout`, selects the cheapest available Russian Post pickup rate for `russian_post_domestic_pickup` when the old rate is no longer present, and then saves the pending pickup point. The modal shows loading states during checking, recalculation, and saving. If no pickup rate is available after recalculation, the point is not saved and the customer sees a warning in the modal.
 
 Version 0.27.1 fixes pickup location resolution priority: a Russian Post pickup point `fias_location_guid` is now resolved to `locations.fias_id` before any postal-code/city fallback. The lookup normalizes GUIDs on both sides, so values with or without dashes match. If FIAS points to one local location but the postal code could match another, the FIAS location wins.
 

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.27.1.
+Version: 0.27.2.
+
+Version 0.27.2 improves cross-location pickup selection UX and persistence. The pickup modal now shows a loading overlay and disables select buttons while the point is being checked, saved, or delivery is recalculating. For pickup points in another locality, checkout now runs a controlled flow: update destination fields, wait for WooCommerce `updated_checkout`, select the cheapest available `russian_post_domestic_pickup` rate if the previous rate disappeared, and only then save the pending pickup point. If no pickup rate remains available after recalculation, the modal shows a warning and does not save the point.
 
 Version 0.27.1 makes pickup point FIAS/GUID resolution the primary local-location lookup path. `PickupPointLocationResolver` now resolves `fias_location_guid` against `locations.fias_id` before postal-code matching, and `LocationRepository::find_by_fias_id()` compares normalized GUIDs so dashed and non-dashed values match. This keeps a pickup point tied to its FIAS locality even when its postal code could also match another local row.
 
