@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.27.5.
+Version: 0.27.6.
+
+Version 0.27.6 synchronizes the pickup map context after a confirmed cross-location save. Once WooCommerce recalculates and the pending pickup point is saved, the frontend rebuilds the map context from the resolved location plus actual checkout fields, updates `currentContext`, `window.wdcPickupCheckout.currentContext`, `initialContext`, and the selected pickup point, then clears and restarts pickup prefetch for the new locality. `contextFromFields()` now treats city-selector formatted city values such as `г Новосибирск` as matching the hidden locality instead of discarding hidden coordinates, and prefetch cache keys include FIAS so old-city points cannot be reused.
 
 Version 0.27.5 keeps checkout locality formatting identical between the city selector and Russian Post pickup map. The city selector now includes the full location context in `wdc:location-selected`, including FIAS/GAR/KLADR ids and region/city/place type fields. Cross-location pickup confirmation applies the resolved location through the same city selector rules, so visible city/state and hidden fields match an ordinary city-picker selection. The pickup quick check now preserves FIAS from location events and logs the FIAS-first match reason in debug mode, preventing same-FIAS pickup points from falling through to less reliable string matching.
 

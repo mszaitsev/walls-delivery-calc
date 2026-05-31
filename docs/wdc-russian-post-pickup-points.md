@@ -1,6 +1,8 @@
 # Russian Post Pickup Points
 
-Version: 0.27.5.
+Version: 0.27.6.
+
+Version 0.27.6 refreshes the map startup context after a cross-location pickup save. After `updated_checkout` and the successful pending point save, the frontend rebuilds context from the resolved location and current checkout DOM fields, stores it in both runtime `currentContext` and localized `window.wdcPickupCheckout.initialContext`, keeps the selected pickup point attached, invalidates old prefetch data, and schedules a new prefetch for the new locality. The next "Изменить пункт выдачи" open therefore starts from the confirmed locality instead of an old or fallback city. Prefetch keys now include FIAS, and field context matching accepts city-selector formatted values like `г Новосибирск` as the same hidden location.
 
 Version 0.27.5 aligns pickup-driven locality changes with the checkout city selector. `wdc:location-selected` now carries the full location identity and formatting context, including `fias_id`, GAR/KLADR ids, region/city/place type fields, `state_value`, and `city_value`. When a cross-location pickup point is confirmed, the pickup frontend applies the resolved location through the city selector API when available, with a matching fallback that writes the same hidden fields and visible city/state values. The resolve-location response now includes the same formatting fields. Same-locality quick checks keep FIAS first, so equal checkout `fias_id` and pickup `fias_location_guid` save the point without showing the cross-location confirmation.
 

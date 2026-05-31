@@ -134,9 +134,11 @@
 					window.WDCPickupApi.save(point.id, currentMethod).then(function (response) {
 						boot();
 						var actualContainer = document.querySelector('[data-wdc-pickup-checkout]');
+						var savedPoint = response.pickup_point || {};
 						if (actualContainer) {
-							applySelection(actualContainer, response.pickup_point || {});
+							applySelection(actualContainer, savedPoint);
 						}
+						syncPickupContextAfterLocationChange(location, savedPoint);
 						disableDestinationResetSuppression();
 					}).catch(function () {
 						showCheckoutNotice('Не удалось сохранить пункт выдачи. Выберите пункт выдачи еще раз.');
@@ -269,7 +271,7 @@
 		var hiddenCity = fieldValue('wdc_platform_location_city_name') || fieldValue('wdc_platform_location_place_name');
 		var visiblePostcode = fieldValue('shipping_postcode') || fieldValue('billing_postcode');
 		var visibleCity = fieldValue('shipping_city') || fieldValue('billing_city');
-		var visibleDestinationChanged = !!(visibleCity && hiddenDisplay && normalizeText(visibleCity) !== normalizeText(hiddenDisplay));
+		var visibleDestinationChanged = !!(visibleCity && hiddenDisplay && !destinationTextMatches(visibleCity, hiddenDisplay) && !destinationTextMatches(visibleCity, hiddenCity));
 		var postcode = visibleDestinationChanged ? (visiblePostcode || hiddenPostcode) : (hiddenPostcode || visiblePostcode);
 		var city = visibleDestinationChanged ? visibleCity : (hiddenDisplay || visibleCity);
 		var query = [postcode, city || hiddenRegion].filter(Boolean).join(' ').trim();
@@ -295,6 +297,15 @@
 			context.lng = hiddenLng;
 		}
 		return context;
+	}
+
+	function destinationTextMatches(a, b) {
+		var aName = normalizeText(a || '');
+		var bName = normalizeText(b || '');
+		if (!aName || !bName) {
+			return false;
+		}
+		return aName === bName || containsDestinationName(aName, bName) || containsDestinationName(bName, aName);
 	}
 
 	function debug() {
@@ -376,6 +387,7 @@
 			normalizeText(context.postcode || ''),
 			normalizeText(context.display_name || ''),
 			normalizeText(context.location_id || ''),
+			normalizeGuid(context.fias_id || ''),
 			normalizeText(context.query || '')
 		].join('|');
 	}
@@ -395,6 +407,27 @@
 			window.wdcPickupCheckout = {};
 		}
 		window.wdcPickupCheckout.currentContext = currentContext;
+	}
+
+	function syncPickupContextAfterLocationChange(location, savedPoint) {
+		var resolvedContext = contextFromResolvedLocation(location);
+		var fieldContext = contextFromFields();
+		if (fieldContext.countryBlocked) {
+			return;
+		}
+		var selectedPoint = normalizeSelectedPoint(savedPoint || {});
+		var context = Object.assign({}, resolvedContext, fieldContext);
+		context.selectedPoint = selectedPoint;
+		updateCurrentContext(context);
+		if (!window.wdcPickupCheckout) {
+			window.wdcPickupCheckout = {};
+		}
+		window.wdcPickupCheckout.currentContext = context;
+		window.wdcPickupCheckout.initialContext = Object.assign({}, window.wdcPickupCheckout.initialContext || {}, context);
+		window.wdcPickupCheckout.selectedPickupPoint = selectedPoint;
+		invalidatePrefetch();
+		schedulePrefetch();
+		debug('syncPickupContextAfterLocationChange', context);
 	}
 
 	function applyContextToHidden(context) {
@@ -475,11 +508,22 @@
 			postcode: postcode,
 			display_name: displayName,
 			region_name: context.region_name || '',
+			region_code: context.region_code || '',
+			region_type: context.region_type || '',
+			district_name: context.district_name || '',
+			district_type: context.district_type || '',
 			query: query,
 			country_code: context.country_code || 'RU',
 			location_id: context.location_id || '',
 			fias_id: context.fias_id || '',
-			city_name: context.city_name || displayName
+			gar_object_id: context.gar_object_id || context.gar_id || '',
+			kladr_id: context.kladr_id || '',
+			city_name: context.city_name || context.city_value || displayName,
+			city_type: context.city_type || '',
+			place_name: context.place_name || context.settlement_name || '',
+			place_type: context.place_type || '',
+			city_value: context.city_value || context.settlement_name || context.city_name || displayName,
+			state_value: context.state_value || context.region_name || ''
 		};
 	}
 
