@@ -251,7 +251,7 @@
 .wdc-pickup-map__locate {
 	position: absolute;
 	right: 16px;
-	bottom: 16px;
+	bottom: 32px;
 	z-index: 650;
 	display: inline-grid;
 	place-items: center;
@@ -267,6 +267,17 @@
 	font-weight: 700;
 	line-height: 1;
 	cursor: pointer;
+}
+
+.wdc-pickup-map__locate-icon,
+.wdc-pickup-map__locate-icon svg {
+	display: block;
+	width: 23px;
+	height: 23px;
+}
+
+.wdc-pickup-map__locate-icon svg {
+	fill: #374151;
 }
 
 .wdc-pickup-map__locate:hover,

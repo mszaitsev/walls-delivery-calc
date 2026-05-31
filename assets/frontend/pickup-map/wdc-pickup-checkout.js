@@ -229,7 +229,7 @@
 				geolocationButton.disabled = false;
 				geolocationButton.classList.remove('is-loading');
 				geolocationButton.title = 'Определить моё местоположение';
-				geolocationButton.innerHTML = '<span aria-hidden="true">⌖</span>';
+				geolocationButton.innerHTML = '<span aria-hidden="true" class="wdc-pickup-map__locate-icon"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 11.4 20.2 3.8 12.6 20l-2.1-7.1L4 11.4Z"></path></svg></span>';
 			}
 		});
 	}

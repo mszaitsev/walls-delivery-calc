@@ -24,7 +24,7 @@
 			'<main class="wdc-pickup-modal__body">',
 			'<section class="wdc-pickup-modal__map-pane">',
 			'<div class="wdc-pickup-modal__map" data-wdc-map></div>',
-			'<button type="button" class="wdc-pickup-map__locate" data-wdc-geolocation title="Определить моё местоположение" aria-label="Определить моё местоположение" hidden><span aria-hidden="true">⌖</span></button>',
+			'<button type="button" class="wdc-pickup-map__locate" data-wdc-geolocation title="Определить моё местоположение" aria-label="Определить моё местоположение" hidden><span aria-hidden="true" class="wdc-pickup-map__locate-icon"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 11.4 20.2 3.8 12.6 20l-2.1-7.1L4 11.4Z"></path></svg></span></button>',
 			'</section>',
 			'<aside class="wdc-pickup-modal__side">',
 			'<div class="wdc-pickup-modal__list" data-wdc-list></div>',

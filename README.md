@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.29.1.
+Version: 0.29.2.
+
+Version 0.29.2 updates the pickup map geolocation control icon to a dark navigation arrow and raises the overlay button above map attribution.
 
 Version 0.29.1 moves the pickup map geolocation action from the search row into a round map overlay control and renders the geolocation origin with the same red push-pin marker used by address search.
 
