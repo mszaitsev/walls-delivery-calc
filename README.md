@@ -1,6 +1,10 @@
 # Walls Delivery Calc
 
-Version: 0.27.10.
+Version: 0.27.12.
+
+Version 0.27.12 stops same-city pickup saves from triggering WooCommerce `update_checkout`. Selecting a Russian Post pickup point for the current checkout destination still saves through REST, applies the selected point UI, and closes the map, while cross-location pickup selection continues to recalculate checkout before saving the pending point.
+
+Version 0.27.11 makes checkout validation resilient when WooCommerce posts the bare `russian_post_domestic_pickup` method id. Validation now resolves bare pickup family selections to saved family rates, falls back to a minimal Russian Post pickup rate when needed, restores posted pickup points by id or point code, saves minimal checkout pickup state even without repository details, and logs each validation decision when debug is enabled.
 
 Version 0.27.10 prevents late checkout city-selector events from clearing Russian Post pickup selections. The frontend now recognizes same-location `wdc:location-selected` events by location id, FIAS id, or normalized city/postcode, extends the place-order reset guard for late checkout events, and checkout validation reads posted `shipping_method[0]` before falling back to WooCommerce session state.
 

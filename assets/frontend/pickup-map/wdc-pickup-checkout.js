@@ -78,7 +78,7 @@
 				return window.WDCPickupApi.save(point.id, shippingMethodId || method).then(function (response) {
 					applySelection(container, response.pickup_point || {});
 					close();
-					if (options.updateCheckoutAfterSave !== false) {
+					if (true === options.updateCheckoutAfterSave) {
 						triggerCheckoutUpdate();
 					}
 					return true;
@@ -97,14 +97,14 @@
 				setLoading('Сохраняем пункт выдачи...');
 				var checkoutContext = contextFromFields();
 				if (pointMatchesDestinationQuick(point, checkoutContext) || !window.WDCPickupApi.resolveLocation) {
-					commitPoint(point);
+					commitPoint(point, method, { updateCheckoutAfterSave: false });
 					return;
 				}
 				setLoading('Проверяем населенный пункт...');
 				window.WDCPickupApi.resolveLocation(pointPayload(point), checkoutContext).then(function (response) {
 					if (!response || !response.requires_location_change || !response.location) {
 						clearLoading();
-						commitPoint(point);
+						commitPoint(point, method, { updateCheckoutAfterSave: false });
 						return;
 					}
 					clearLoading();
@@ -117,7 +117,7 @@
 					});
 				}).catch(function () {
 					clearLoading();
-					commitPoint(point);
+					commitPoint(point, method, { updateCheckoutAfterSave: false });
 				});
 			}
 

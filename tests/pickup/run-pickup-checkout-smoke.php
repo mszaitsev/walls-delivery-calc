@@ -95,6 +95,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 				if ( preg_match( '/WHERE id = ([0-9]+)/', $query, $m ) && (int) $row['id'] === (int) $m[1] ) {
 					return $row;
 				}
+				if ( preg_match( "/WHERE point_code = '([^']+)'/", $query, $m ) && (string) ( $row['point_code'] ?? '' ) === $m[1] ) {
+					return $row;
+				}
 				if ( preg_match( "/l.postal_code = '([^']+)'/", $query, $m ) && (string) ( $row['postal_code'] ?? '' ) === $m[1] ) {
 					return $row;
 				}
@@ -288,6 +291,17 @@ pickup_checkout_assert( 'Выберите пункт выдачи Почты Р�
 $session->save_pickup_selection( array( 'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY, 'rate_id' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY, 'point_code' => '630001-a' ) );
 WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_domestic_courier' ) );
 pickup_checkout_assert( '630001-a' === $session->pickup_selection()['point_code'], 'selected pickup must survive a shipping method switch in session.' );
+$session->save_rates(
+	array(
+		RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':tariff_a' => array(
+			'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+			'rate_id' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':tariff_a',
+			'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+			'delivery_type' => 'pickup',
+			'requires_pickup_point' => true,
+		),
+	)
+);
 $session->save_pickup_selection( array( 'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY, 'rate_id' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':air', 'point_code' => '630001-a' ) );
 WC()->session->set( 'chosen_shipping_methods', array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':ground' ) );
 $errors = new WdcPickupCheckoutErrors();
@@ -308,6 +322,26 @@ $errors = new WdcPickupCheckoutErrors();
 ( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':air' ), 'wdc_pickup_point_id' => '10', 'wdc_pickup_point_code' => '630001-a' ), $errors );
 pickup_checkout_assert( array() === $errors->errors, 'validation must restore Russian Post pickup selection from submitted hidden point fields and posted shipping_method[0] when the session is empty.' );
 pickup_checkout_assert( '630001-a' === (string) ( $session->pickup_selection()['point_code'] ?? '' ) && RussianPostDomesticSettings::PICKUP_SERVICE_KEY === substr( (string) ( $session->pickup_selection()['rate_id'] ?? '' ), 0, strlen( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ) ), 'restored hidden pickup selection must be saved back to the checkout session.' );
+pickup_checkout_assert( '630001-a' === (string) ( $session->checkout_pickup_point()['point_code'] ?? '' ), 'restored hidden pickup selection must save checkout pickup point state.' );
+
+$session->clear_pickup_selection();
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ), 'wdc_pickup_point_code' => '630001-a' ), $errors );
+pickup_checkout_assert( array() === $errors->errors && 10 === (int) ( $session->pickup_selection()['point_id'] ?? 0 ), 'validation must restore Russian Post pickup selection by posted point_code when point_id is missing.' );
+
+$session->clear_pickup_selection();
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ), 'wdc_pickup_point_id' => '999999', 'wdc_pickup_point_code' => '987846-c3287ee67a' ), $errors );
+pickup_checkout_assert( array() === $errors->errors && '987846-c3287ee67a' === (string) ( $session->pickup_selection()['point_code'] ?? '' ), 'validation must accept a minimal posted point selection when repository lookup misses but point_code was posted.' );
+pickup_checkout_assert( $session->pickup_selection_matches( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::PICKUP_SERVICE_KEY ), 'minimal restored pickup selection must match the selected Russian Post pickup family.' );
+pickup_checkout_assert( '987846-c3287ee67a' === (string) ( $session->checkout_pickup_point()['point_code'] ?? '' ), 'minimal restored pickup selection must save checkout pickup point state.' );
+
+$session->clear_pickup_selection();
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ) ), $errors );
+pickup_checkout_assert( 'Выберите пункт выдачи Почты России.' === (string) ( $errors->errors['wdc_pickup_required'] ?? '' ), 'validation must still fail for pickup family when neither session nor posted point exists.' );
+
+$session->save_pickup_selection( array( 'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY, 'rate_id' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY, 'point_code' => '630001-a' ) );
 pickup_checkout_assert( false === $session->clear_pickup_selection_if_allowed( 'automatic_recalculation', RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':air' ), 'automatic clear must be blocked while an active Russian Post pickup family method has a saved point.' );
 pickup_checkout_assert( '630001-a' === (string) ( $session->pickup_selection()['point_code'] ?? '' ), 'blocked automatic clear must keep the pickup selection.' );
 pickup_checkout_assert( true === $session->clear_pickup_selection_if_allowed( 'method_family_changed', 'russian_post_domestic_courier' ), 'automatic clear must be allowed after switching away from the Russian Post pickup family.' );
@@ -336,6 +370,8 @@ foreach ( array( 'Р’', 'Рµ', 'С‹', 'СЊ' ) as $mojibake ) {
 	pickup_checkout_assert( ! str_contains( $validation_source, $mojibake ), 'CheckoutValidation.php must not contain mojibake marker ' . $mojibake . '.' );
 }
 pickup_checkout_assert( str_contains( $validation_source, 'update_pickup_selection_rate_id( $selected_rate_id )' ) && str_contains( $validation_source, "['_selected_rate_id']" ) && str_contains( $validation_source, '$data[\'shipping_method\']' ), 'Checkout validation must pass same-family pickup selections, read posted shipping_method, and refresh the stored rate_id to the selected rate suffix.' );
+pickup_checkout_assert( str_contains( $validation_source, 'wdc_checkout_validation_start' ) && str_contains( $validation_source, 'wdc_pickup_restore_from_post_attempt' ) && str_contains( $validation_source, 'wdc_pickup_restore_from_post_success' ) && str_contains( $validation_source, 'wdc_pickup_validation_failed' ), 'Checkout validation must log detailed pickup validation decisions when debug is enabled.' );
+pickup_checkout_assert( str_contains( $validation_source, 'find_row_by_point_code' ) && str_contains( $validation_source, 'checkout_pickup_point_from_selection' ) && str_contains( $validation_source, 'is_russian_post_pickup_rate' ), 'Checkout validation must restore posted pickup points by id/code and resolve bare Russian Post pickup rates by family.' );
 $session_source = file_get_contents( $root . '/src/Checkout/WooCommerce/CheckoutSessionManager.php' ) ?: '';
 pickup_checkout_assert( str_contains( $session_source, 'function shipping_method_family' ) && str_contains( $session_source, 'function is_same_pickup_family' ) && str_contains( $session_source, 'wdc_platform:' ), 'Checkout session manager must normalize platform-prefixed rate ids and compare Russian Post pickup method family.' );
 pickup_checkout_assert( str_contains( $session_source, 'function clear_pickup_selection( string $reason' ) && str_contains( $session_source, 'function clear_pickup_selection_if_allowed' ) && str_contains( $session_source, 'log_pickup_selection_clear' ), 'Checkout session manager must log pickup clear reasons and block automatic clears for active pickup family selections.' );
@@ -402,6 +438,7 @@ pickup_checkout_assert( str_contains( $cross_flow_source, 'boot();' ) && str_con
 pickup_checkout_assert( str_contains( $cross_flow_source, 'var savedPoint = response.pickup_point || {}' ) && str_contains( $cross_flow_source, 'syncPickupContextAfterLocationChange(location, savedPoint)' ), 'Cross-location save must synchronize map context after the pending point is saved.' );
 pickup_checkout_assert( ! str_contains( $checkout_js, 'selectCheapestPickupRate' ) && ! str_contains( $checkout_js, 'rateCost(' ) && ! str_contains( $checkout_js, 'rateLabelText' ) && ! str_contains( $checkout_js, 'parsePrice' ) && ! str_contains( $checkout_js, 'Пересчитываем тариф' ), 'Cross-location frontend must no longer choose the cheapest pickup rate or wait for a second shipping-rate recalculation.' );
 pickup_checkout_assert( 1 === substr_count( $cross_flow_source, 'waitForUpdatedCheckout(' ), 'Cross-location flow must wait for only one updated_checkout event.' );
+pickup_checkout_assert( str_contains( $cross_flow_source, 'triggerCheckoutUpdate();' ), 'Cross-location flow must still trigger checkout recalculation before saving the pending point.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'function showCheckoutNotice(message)' ) && str_contains( $checkout_js, 'Не удалось дождаться пересчета доставки. Выберите пункт выдачи еще раз.' ) && str_contains( $checkout_js, 'После пересчета выбранный способ доставки стал недоступен' ) && str_contains( $checkout_js, "resetPickupSelectionOnServer('cross_location_method_unavailable')" ), 'Cross-location flow must show checkout notices and avoid saving the point when recalculation times out or pickup method disappears.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'enableDestinationResetSuppression(60000)' ) && str_contains( $checkout_js, 'disableDestinationResetSuppression' ) && str_contains( $checkout_js, 'suppressDestinationResetTimer' ) && ! str_contains( $checkout_js, 'setTimeout(function () { suppressNextDestinationReset = false; }, 0)' ), 'Confirmed cross-location pickup flow must suppress destination reset until checkout recalculation, save, timeout, or error.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'window.WDCCheckoutCitySelector.applyLocation(location, { updateCheckout: false, explicit: true, source: \'pickup\', updateFields: true })' ) && str_contains( $checkout_js, 'context.city_value || context.settlement_name || context.city_name || context.display_name' ) && str_contains( $checkout_js, 'function setCheckoutStateField(name, context)' ), 'Confirmed cross-location pickup flow must apply the resolved location through city-selector formatting rules with a fallback.' );
@@ -410,7 +447,13 @@ pickup_checkout_assert( str_contains( $checkout_js, 'function syncPickupContextA
 pickup_checkout_assert( str_contains( $checkout_js, 'window.wdcPickupCheckout.currentContext = context' ) && str_contains( $checkout_js, 'window.wdcPickupCheckout.initialContext = Object.assign({}, window.wdcPickupCheckout.initialContext || {}, context)' ) && str_contains( $checkout_js, 'window.wdcPickupCheckout.selectedPickupPoint = selectedPoint' ), 'Cross-location context sync must update currentContext, initialContext, and selectedPickupPoint globals for the next map open.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'invalidatePrefetch();' ) && str_contains( $checkout_js, 'schedulePrefetch();' ) && str_contains( $checkout_js, 'normalizeGuid(context.fias_id || \'\')' ), 'Cross-location context sync must clear old prefetch data and rebuild cache keys with the new FIAS/location context.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'var checkoutFias = normalizeGuid(checkoutContext && checkoutContext.fias_id)' ) && str_contains( $checkout_js, 'var pointFias = normalizeGuid(point && (point.fias_location_guid || point.fias_id))' ) && str_contains( $checkout_js, "quickMatchReason: checkoutFias === pointFias ? 'same_fias' : 'different_fias'" ), 'Pickup quick check must compare normalized checkout FIAS and pickup fias_location_guid before fallback matching.' );
-pickup_checkout_assert( str_contains( $checkout_js, 'if (pointMatchesDestinationQuick(point, checkoutContext) || !window.WDCPickupApi.resolveLocation)' ) && str_contains( $checkout_js, 'commitPoint(point);' ), 'Same-FIAS pickup points must save immediately without resolve-location confirm flow.' );
+$commit_source = substr( $checkout_js, strpos( $checkout_js, 'function commitPoint(point, shippingMethodId, options)' ), 800 );
+$save_point_source = substr( $checkout_js, strpos( $checkout_js, 'function savePoint(point)' ), strpos( $checkout_js, 'function runCrossLocationSelection(point, location)' ) - strpos( $checkout_js, 'function savePoint(point)' ) );
+pickup_checkout_assert( str_contains( $commit_source, 'window.WDCPickupApi.save(point.id, shippingMethodId || method)' ) && str_contains( $commit_source, 'applySelection(container, response.pickup_point || {})' ) && str_contains( $commit_source, 'close();' ), 'Same-city save must still call REST save, apply the selected point UI, and close the modal.' );
+pickup_checkout_assert( str_contains( $commit_source, 'if (true === options.updateCheckoutAfterSave)' ) && ! str_contains( $commit_source, 'options.updateCheckoutAfterSave !== false' ), 'commitPoint must only trigger checkout update when updateCheckoutAfterSave is explicitly true.' );
+pickup_checkout_assert( str_contains( $save_point_source, 'if (pointMatchesDestinationQuick(point, checkoutContext) || !window.WDCPickupApi.resolveLocation)' ) && str_contains( $save_point_source, 'commitPoint(point, method, { updateCheckoutAfterSave: false });' ), 'Same-FIAS pickup points must save immediately without resolve-location confirm flow or checkout recalculation.' );
+pickup_checkout_assert( 3 === substr_count( $save_point_source, 'commitPoint(point, method, { updateCheckoutAfterSave: false });' ), 'Same-city quick match, resolve-location no-change, and resolve-location fallback must all save without update_checkout.' );
+pickup_checkout_assert( ! str_contains( $save_point_source, 'triggerCheckoutUpdate();' ) && ! str_contains( $save_point_source, 'commitPoint(point);' ), 'Same-city savePoint flow must not trigger WooCommerce update_checkout directly or through default commitPoint options.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'updateCurrentContext(context)' ) && str_contains( $checkout_js, 'applyContextToHidden(context)' ) && str_contains( $checkout_js, "resetPickupSelectionOnServer('location_selected')" ) && str_contains( $checkout_js, "clearPickupSelectionUi('location_selected')" ), 'Location-selected event must keep currentContext while resetting pickup selection.' );
 pickup_checkout_assert( ! str_contains( $checkout_js, "debug('wdc:location-selected detail', event.detail || {});\n\t\tinvalidatePrefetch();\n\t\tupdateCurrentContext(context);\n\t\tapplyContextToHidden(context);\n\t\tresetSelection();" ), 'Location-selected event must not call broad resetSelection after setting context.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'stateContextMatchesCurrentDestination' ) && str_contains( $checkout_js, 'contextMatches(currentContext, context)' ), 'State refresh must ignore empty or stale old-city context.' );
