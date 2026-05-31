@@ -1,6 +1,8 @@
 # Russian Post Pickup Points
 
-Version: 0.27.4.
+Version: 0.27.5.
+
+Version 0.27.5 aligns pickup-driven locality changes with the checkout city selector. `wdc:location-selected` now carries the full location identity and formatting context, including `fias_id`, GAR/KLADR ids, region/city/place type fields, `state_value`, and `city_value`. When a cross-location pickup point is confirmed, the pickup frontend applies the resolved location through the city selector API when available, with a matching fallback that writes the same hidden fields and visible city/state values. The resolve-location response now includes the same formatting fields. Same-locality quick checks keep FIAS first, so equal checkout `fias_id` and pickup `fias_location_guid` save the point without showing the cross-location confirmation.
 
 Version 0.27.4 moves cross-location pickup persistence out of the map modal. When the customer confirms a pickup point from another locality, the modal closes immediately, destination fields are updated, and WooCommerce performs one checkout recalculation. Only after `updated_checkout` does the frontend save the pending point, using the current selected `russian_post_domestic_pickup` shipping method and the newly rendered checkout block. The timeout for that recalculation is 60 seconds. If it times out, or the selected method after recalculation is no longer a pickup method, the point is left unsaved and checkout shows a notice. The frontend no longer switches to the cheapest pickup rate; tariff selection stays with WooCommerce/plugin shipping logic.
 

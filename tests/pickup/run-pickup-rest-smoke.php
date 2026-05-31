@@ -290,6 +290,9 @@ pickup_rest_assert( 1 === $detail['id'] && '630001-a' === $detail['point_code'] 
 foreach ( $removed_fields as $removed_field ) {
 	pickup_rest_assert( ! array_key_exists( $removed_field, $detail ), 'detail must not expose removed field: ' . $removed_field );
 }
+$resolver_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Services/PickupPointLocationResolver.php' );
+pickup_rest_assert( str_contains( $resolver_source, "'city_value' => \$formatter->format_checkout_city_value( \$location )" ) && str_contains( $resolver_source, "'state_value' => \$formatter->format_checkout_state_value( \$location )" ), 'Resolve-location payload must expose city selector compatible city/state values.' );
+pickup_rest_assert( str_contains( $resolver_source, "'region_type' => \$location->region_type" ) && str_contains( $resolver_source, "'city_type' => \$location->city_type" ) && str_contains( $resolver_source, "'place_type' => \$location->resolved_place_type()" ), 'Resolve-location payload must expose full location type fields.' );
 
 $invalid = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => 'bad' ) );
 pickup_rest_assert( $invalid instanceof WP_Error && 'invalid_bbox' === $invalid->get_error_code(), 'invalid bbox must return error.' );

@@ -281,6 +281,15 @@
 		context.fias_id = hiddenFiasId;
 		context.city_name = visibleDestinationChanged ? visibleCity : (hiddenCity || hiddenDisplay || visibleCity);
 		context.region_name = hiddenRegion;
+		context.region_code = fieldValue('wdc_platform_location_region_code');
+		context.region_type = fieldValue('wdc_platform_location_region_type');
+		context.district_name = fieldValue('wdc_platform_location_district_name');
+		context.district_type = fieldValue('wdc_platform_location_district_type');
+		context.city_type = fieldValue('wdc_platform_location_city_type');
+		context.place_name = fieldValue('wdc_platform_location_place_name');
+		context.place_type = fieldValue('wdc_platform_location_place_type');
+		context.gar_object_id = fieldValue('wdc_platform_location_gar_object_id');
+		context.kladr_id = fieldValue('wdc_platform_location_kladr_id');
 		if (!visibleDestinationChanged && validCoordinate(hiddenLat, hiddenLng)) {
 			context.lat = hiddenLat;
 			context.lng = hiddenLng;
@@ -397,9 +406,18 @@
 		setHiddenValue('wdc_platform_location_postcode', context.postcode || '');
 		setHiddenValue('wdc_platform_location_display_name', context.display_name || '');
 		setHiddenValue('wdc_platform_location_region_name', context.region_name || '');
+		setHiddenValue('wdc_platform_location_region_code', context.region_code || '');
+		setHiddenValue('wdc_platform_location_region_type', context.region_type || '');
+		setHiddenValue('wdc_platform_location_district_name', context.district_name || '');
+		setHiddenValue('wdc_platform_location_district_type', context.district_type || '');
 		setHiddenValue('wdc_platform_location_id', context.location_id || '');
 		setHiddenValue('wdc_platform_location_fias_id', context.fias_id || '');
+		setHiddenValue('wdc_platform_location_gar_object_id', context.gar_object_id || context.gar_id || '');
+		setHiddenValue('wdc_platform_location_kladr_id', context.kladr_id || '');
 		setHiddenValue('wdc_platform_location_city_name', context.city_name || context.display_name || '');
+		setHiddenValue('wdc_platform_location_city_type', context.city_type || '');
+		setHiddenValue('wdc_platform_location_place_name', context.place_name || context.settlement_name || '');
+		setHiddenValue('wdc_platform_location_place_type', context.place_type || '');
 	}
 
 	function setHiddenValue(name, value) {
@@ -497,7 +515,18 @@
 			country_code: detail.country_code || 'RU',
 			location_id: detail.location_id || detail.id || '',
 			fias_id: detail.fias_id || '',
-			city_name: detail.city_name || displayName
+			gar_object_id: detail.gar_object_id || detail.gar_id || '',
+			kladr_id: detail.kladr_id || '',
+			region_code: detail.region_code || '',
+			region_type: detail.region_type || '',
+			district_name: detail.district_name || '',
+			district_type: detail.district_type || '',
+			city_name: detail.city_name || detail.city_value || displayName,
+			city_type: detail.city_type || '',
+			place_name: detail.place_name || detail.settlement_name || '',
+			place_type: detail.place_type || '',
+			city_value: detail.city_value || detail.settlement_name || detail.city_name || displayName,
+			state_value: detail.state_value || detail.region_name || ''
 		};
 	}
 
@@ -521,6 +550,11 @@
 		var checkoutFias = normalizeGuid(checkoutContext && checkoutContext.fias_id);
 		var pointFias = normalizeGuid(point && (point.fias_location_guid || point.fias_id));
 		if (checkoutFias && pointFias) {
+			debug('pointMatchesDestinationQuick', {
+				checkoutFias: checkoutFias,
+				pointFias: pointFias,
+				quickMatchReason: checkoutFias === pointFias ? 'same_fias' : 'different_fias'
+			});
 			return checkoutFias === pointFias;
 		}
 		var checkoutRegion = normalizeText(checkoutContext && checkoutContext.region_name);
@@ -528,11 +562,23 @@
 		var pointRegion = normalizeText(point && (point.region || point.region_name));
 		var pointCity = normalizeText(point && (point.city || point.city_name));
 		if (checkoutRegion && checkoutCity && pointRegion && pointCity) {
-			return checkoutRegion === pointRegion && (checkoutCity === pointCity || containsDestinationName(checkoutCity, pointCity) || containsDestinationName(pointCity, checkoutCity));
+			var sameCityRegion = checkoutRegion === pointRegion && (checkoutCity === pointCity || containsDestinationName(checkoutCity, pointCity) || containsDestinationName(pointCity, checkoutCity));
+			debug('pointMatchesDestinationQuick', {
+				checkoutFias: checkoutFias,
+				pointFias: pointFias,
+				quickMatchReason: sameCityRegion ? 'same_region_city' : 'different_region_city'
+			});
+			return sameCityRegion;
 		}
 		var checkoutPostcode = normalizeText(checkoutContext && checkoutContext.postcode);
 		var pointPostcode = normalizeText(point && (point.postal_code || point.postcode));
-		return !!(checkoutPostcode && pointPostcode && checkoutPostcode === pointPostcode);
+		var samePostcode = !!(checkoutPostcode && pointPostcode && checkoutPostcode === pointPostcode);
+		debug('pointMatchesDestinationQuick', {
+			checkoutFias: checkoutFias,
+			pointFias: pointFias,
+			quickMatchReason: samePostcode ? 'same_postcode' : 'no_match'
+		});
+		return samePostcode;
 	}
 
 	function normalizeGuid(value) {
@@ -575,33 +621,78 @@
 	function applyConfirmedPickupLocationChange(location) {
 		var context = contextFromResolvedLocation(location);
 		updateCurrentContext(context);
+		if (window.WDCCheckoutCitySelector && typeof window.WDCCheckoutCitySelector.applyLocation === 'function') {
+			window.WDCCheckoutCitySelector.applyLocation(location, { updateCheckout: false, explicit: true, source: 'pickup', updateFields: true });
+			updateCurrentContext(contextFromFields());
+			return;
+		}
 		applyContextToHidden(context);
 		setCheckoutFieldValue('shipping_country', context.country_code || 'RU');
 		setCheckoutFieldValue('billing_country', context.country_code || 'RU');
-		setCheckoutFieldValue(fieldExists('shipping_city') ? 'shipping_city' : 'billing_city', context.city_name || context.display_name || '');
+		setCheckoutFieldValue(fieldExists('shipping_city') ? 'shipping_city' : 'billing_city', context.city_value || context.settlement_name || context.city_name || context.display_name || '');
 		setCheckoutFieldValue(fieldExists('shipping_postcode') ? 'shipping_postcode' : 'billing_postcode', context.postcode || '');
-		if (context.region_name) {
-			setCheckoutFieldValue(fieldExists('shipping_state') ? 'shipping_state' : 'billing_state', context.region_name);
+		if (context.state_value || context.region_name || context.region_code) {
+			setCheckoutStateField(fieldExists('shipping_state') ? 'shipping_state' : 'billing_state', context);
 		}
 	}
 
 	function contextFromResolvedLocation(location) {
 		location = location || {};
 		var postcode = String(location.postal_code || location.postcode || '').trim();
-		var city = String(location.city_name || location.display_name || '').trim();
+		var city = String(location.city_value || location.settlement_name || location.city_name || location.display_name || '').trim();
 		var query = [postcode, city].filter(Boolean).join(' ').trim();
 		return {
 			lat: location.lat || location.latitude || '',
 			lng: location.lng || location.longitude || '',
 			postcode: postcode,
 			display_name: location.display_name || city,
-			city_name: city,
+			city_name: location.city_name || city,
+			city_value: city,
+			state_value: location.state_value || location.region_name || '',
 			region_name: location.region_name || '',
+			region_code: location.region_code || '',
+			region_type: location.region_type || '',
+			district_name: location.district_name || '',
+			district_type: location.district_type || '',
+			city_type: location.city_type || '',
+			place_name: location.place_name || location.settlement_name || '',
+			place_type: location.place_type || '',
+			gar_object_id: location.gar_object_id || location.gar_id || '',
+			gar_id: location.gar_id || location.gar_object_id || '',
+			kladr_id: location.kladr_id || '',
+			settlement_name: location.settlement_name || '',
 			query: query,
 			country_code: location.country_code || 'RU',
 			location_id: location.location_id || location.id || '',
 			fias_id: location.fias_id || ''
 		};
+	}
+
+	function setCheckoutStateField(name, context) {
+		var field = document.querySelector('[name="' + name + '"]');
+		var regionCode = context.region_code || '';
+		var regionName = context.state_value || context.region_name || '';
+		if (!field) {
+			return;
+		}
+		if (field.tagName && field.tagName.toLowerCase() === 'select') {
+			if (regionCode && field.querySelector('option[value="' + cssEscape(regionCode) + '"]')) {
+				setCheckoutFieldValue(name, regionCode);
+				return;
+			}
+			if (regionName && field.querySelector('option[value="' + cssEscape(regionName) + '"]')) {
+				setCheckoutFieldValue(name, regionName);
+			}
+			return;
+		}
+		setCheckoutFieldValue(name, regionName || regionCode);
+	}
+
+	function cssEscape(value) {
+		if (window.CSS && typeof window.CSS.escape === 'function') {
+			return window.CSS.escape(String(value || ''));
+		}
+		return String(value || '').replace(/"/g, '\\"');
 	}
 
 	function fieldExists(name) {

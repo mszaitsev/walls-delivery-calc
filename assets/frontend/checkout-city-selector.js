@@ -618,9 +618,23 @@
 		document.body.dispatchEvent( new CustomEvent( 'wdc:location-selected', {
 			detail: {
 				location_id: location.id || '',
+				fias_id: location.fias_id || '',
+				gar_object_id: location.gar_object_id || location.gar_id || '',
+				gar_id: location.gar_id || location.gar_object_id || '',
+				kladr_id: location.kladr_id || '',
 				postcode: location.postal_code || '',
 				display_name: location.display_name || label || '',
+				region_code: location.region_code || '',
 				region_name: location.region_name || '',
+				region_type: location.region_type || '',
+				district_name: location.district_name || '',
+				district_type: location.district_type || '',
+				city_name: location.city_name || '',
+				city_type: location.city_type || '',
+				place_name: location.place_name || location.settlement_name || '',
+				place_type: location.place_type || '',
+				state_value: location.state_value || location.region_name || '',
+				city_value: city,
 				lat: location.lat || location.latitude || '',
 				lng: location.lng || location.longitude || '',
 				country_code: location.country_code || 'RU'
@@ -646,6 +660,11 @@
 			debug( 'suppressSearch disabled by timeout' );
 		}, 1000 );
 	}
+
+	window.WDCCheckoutCitySelector = window.WDCCheckoutCitySelector || {};
+	window.WDCCheckoutCitySelector.applyLocation = function ( location, options ) {
+		applySelectedLocation( location || {}, options || {} );
+	};
 
 	function handleExternalCityChanged( event ) {
 		var $field = $( event.target );

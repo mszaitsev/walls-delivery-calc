@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Pickup\Services;
 
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
@@ -149,20 +150,40 @@ final class PickupPointLocationResolver {
 	 * @return array<string,mixed>
 	 */
 	private function location_payload( Location $location ): array {
+		$formatter = $this->formatter();
 		return array(
 			'id' => $location->id,
 			'location_id' => $location->id,
 			'fias_id' => $location->fias_id,
+			'gar_object_id' => $location->gar_object_id,
+			'gar_id' => $location->gar_id,
+			'kladr_id' => $location->kladr_id,
 			'country_code' => '' !== $location->country_code ? $location->country_code : 'RU',
 			'display_name' => $location->resolved_display_name(),
+			'option_label' => $formatter->format_checkout_location_option( $location ),
+			'state_value' => $formatter->format_checkout_state_value( $location ),
+			'city_value' => $formatter->format_checkout_city_value( $location ),
 			'region_name' => $location->region_name,
 			'region_code' => $location->region_code,
-			'city_name' => '' !== $location->resolved_place_name() ? $location->resolved_place_name() : $location->city_name,
+			'region_type' => $location->region_type,
+			'district_name' => $location->district_name,
+			'district_type' => $location->district_type,
+			'city_name' => $location->city_name,
+			'city_type' => $location->city_type,
+			'place_name' => $location->resolved_place_name(),
+			'place_type' => $location->resolved_place_type(),
+			'settlement_name' => $location->settlement_name,
+			'settlement_type' => $location->settlement_type,
 			'postal_code' => $location->postal_code,
 			'postcode' => $location->postal_code,
 			'lat' => $location->latitude,
 			'lng' => $location->longitude,
 		);
+	}
+
+	private function formatter(): LocationDisplayNameFormatter {
+		$rules = function_exists( 'get_option' ) ? get_option( 'wdc_location_type_display_rules', array() ) : array();
+		return LocationDisplayNameFormatter::from_rules( is_array( $rules ) ? $rules : array() );
 	}
 
 	private function same_normalized( string $needle, string $haystack ): bool {

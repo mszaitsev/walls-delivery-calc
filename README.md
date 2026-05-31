@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.27.4.
+Version: 0.27.5.
+
+Version 0.27.5 keeps checkout locality formatting identical between the city selector and Russian Post pickup map. The city selector now includes the full location context in `wdc:location-selected`, including FIAS/GAR/KLADR ids and region/city/place type fields. Cross-location pickup confirmation applies the resolved location through the same city selector rules, so visible city/state and hidden fields match an ordinary city-picker selection. The pickup quick check now preserves FIAS from location events and logs the FIAS-first match reason in debug mode, preventing same-FIAS pickup points from falling through to less reliable string matching.
 
 Version 0.27.4 simplifies cross-location Russian Post pickup selection. After the customer confirms a pickup point in another locality, the map closes immediately, checkout destination fields are updated, WooCommerce recalculates once, and the pickup point is saved only after `updated_checkout` using the current selected `russian_post_domestic_pickup` method and the freshly rendered checkout block. The cross-location wait timeout is now 60 seconds; if recalculation times out or the current method is no longer a pickup method, the point is not saved and checkout shows a notice. Frontend rate switching and cheapest-rate selection were removed from this flow.
 
