@@ -288,10 +288,18 @@ pickup_checkout_assert( 'Выберите пункт выдачи Почты Р�
 $session->save_pickup_selection( array( 'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY, 'rate_id' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY, 'point_code' => '630001-a' ) );
 WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_domestic_courier' ) );
 pickup_checkout_assert( '630001-a' === $session->pickup_selection()['point_code'], 'selected pickup must survive a shipping method switch in session.' );
-WC()->session->set( 'chosen_shipping_methods', array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ) );
+WC()->session->set( 'chosen_shipping_methods', array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':ground' ) );
 $errors = new WdcPickupCheckoutErrors();
 ( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
-pickup_checkout_assert( array() === $errors->errors, 'validation must pass when pickup selection exists.' );
+pickup_checkout_assert( array() === $errors->errors, 'validation must pass when pickup selection exists and the selected Russian Post pickup rate suffix changed.' );
+
+$session->clear_pickup_selection();
+WC()->session->set( 'chosen_shipping_methods', array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':air' ) );
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'wdc_pickup_point_id' => '10', 'wdc_pickup_point_code' => '630001-a' ), $errors );
+pickup_checkout_assert( array() === $errors->errors, 'validation must restore Russian Post pickup selection from submitted hidden point fields when the session is empty.' );
+pickup_checkout_assert( '630001-a' === (string) ( $session->pickup_selection()['point_code'] ?? '' ) && RussianPostDomesticSettings::PICKUP_SERVICE_KEY === substr( (string) ( $session->pickup_selection()['rate_id'] ?? '' ), 0, strlen( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ) ), 'restored hidden pickup selection must be saved back to the checkout session.' );
+WC()->session->set( 'chosen_shipping_methods', array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ) );
 
 $settings_source = file_get_contents( $root . '/src/Infrastructure/Settings/SettingsRepository.php' ) ?: '';
 pickup_checkout_assert( str_contains( $settings_source, "'pickup_map_provider' => 'leaflet'" ), 'Default pickup map provider must be leaflet.' );
@@ -324,6 +332,9 @@ pickup_checkout_assert( file_exists( $root . '/assets/vendor/leaflet/leaflet.css
 $checkout_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' ) ?: '';
 $city_selector_js = file_get_contents( $root . '/assets/frontend/checkout-city-selector.js' ) ?: '';
 pickup_checkout_assert( ! str_contains( $checkout_js, "input[name^=\"shipping_method\"]')) {\n\t\t\tresetSelection();" ), 'JS must not reset pickup on shipping method change.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'var isPlacingOrder = false' ) && str_contains( $checkout_js, 'checkout_place_order' ) && str_contains( $checkout_js, 'checkout_error' ), 'JS must guard pickup reset during place_order lifecycle and clear the guard after checkout errors.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'function shippingMethodFamily(value)' ) && str_contains( $checkout_js, 'function isSamePickupMethodFamily(oldMethod, newMethod)' ) && str_contains( $checkout_js, 'syncSelectedPickupRate(nextMethod)' ), 'JS must preserve Russian Post pickup selection when switching rate suffixes inside the same pickup method family.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'var lastDestinationFingerprint' ) && str_contains( $checkout_js, 'newFingerprint === lastDestinationFingerprint' ) && str_contains( $checkout_js, 'rememberDestinationFingerprint();' ), 'JS must only reset pickup after a real destination fingerprint change.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'billing_postcode' ) && str_contains( $checkout_js, 'shipping_postcode' ), 'JS must reset pickup on city/country/postcode changes.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'contextFromFields' ) && str_contains( $checkout_js, 'shipping_city' ) && str_contains( $checkout_js, 'shipping_postcode' ), 'JS must form initial map query from checkout city/postcode.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'WDCPickupMap.create' ) && str_contains( $checkout_js, 'initialContext()' ), 'Next modal open must recompute initial context instead of reusing a cached value.' );

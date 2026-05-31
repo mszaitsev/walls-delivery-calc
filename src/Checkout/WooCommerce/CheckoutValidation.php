@@ -6,13 +6,15 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Checkout\Validation\CheckoutAddressValidation;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 
 defined( 'ABSPATH' ) || exit;
 
 final class CheckoutValidation {
 	public function __construct(
 		private CheckoutSessionManager $session_manager,
-		private ?CheckoutAddressValidation $address_validation = null
+		private ?CheckoutAddressValidation $address_validation = null,
+		private ?RussianPostPickupPointRepository $pickup_repository = null
 	) {
 	}
 
@@ -39,6 +41,12 @@ final class CheckoutValidation {
 		}
 
 		if ( $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) ) ) {
+			return;
+		}
+
+		if ( $this->restore_posted_pickup_selection( $data, $rate )
+			&& $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) )
+		) {
 			return;
 		}
 
@@ -118,9 +126,141 @@ final class CheckoutValidation {
 					return $rates[ $normalized ];
 				}
 			}
+
+			foreach ( $rates as $rate ) {
+				if ( is_array( $rate ) && $this->same_russian_post_pickup_family( $rate_id, (string) ( $rate['rate_id'] ?? '' ) ) ) {
+					return $rate;
+				}
+			}
 		}
 
 		return array();
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 * @param array<string,mixed> $rate
+	 */
+	private function restore_posted_pickup_selection( array $data, array $rate ): bool {
+		if ( RussianPostDomesticSettings::CARRIER_KEY !== (string) ( $rate['carrier_key'] ?? '' )
+			|| ! $this->is_russian_post_pickup_family( (string) ( $rate['rate_id'] ?? '' ) )
+		) {
+			return false;
+		}
+
+		$point_id   = max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) );
+		$point_code = $this->posted_string( $data, 'wdc_pickup_point_code' );
+		if ( $point_id <= 0 && '' === $point_code ) {
+			return false;
+		}
+
+		$selection = $point_id > 0 ? $this->selection_from_pickup_row( $point_id ) : array();
+		if ( array() === $selection ) {
+			$selection = array(
+				'point_id' => $point_id,
+				'point_code' => $point_code,
+			);
+		}
+
+		if ( '' === (string) ( $selection['point_code'] ?? '' ) ) {
+			$selection['point_code'] = $point_code;
+		}
+
+		if ( '' === (string) ( $selection['point_code'] ?? '' ) ) {
+			return false;
+		}
+
+		$selection['carrier_key'] = RussianPostDomesticSettings::CARRIER_KEY;
+		$selection['rate_id'] = (string) ( $rate['rate_id'] ?? '' );
+		$selection['selected_at'] = gmdate( 'c' );
+		$this->session_manager->save_pickup_selection( $selection );
+		if ( array() !== ( $selection['snapshot'] ?? array() ) ) {
+			$this->session_manager->save_checkout_pickup_point(
+				array(
+					'id' => $selection['point_id'] ?? 0,
+					'point_code' => $selection['point_code'] ?? '',
+					'point_type' => $selection['point_type'] ?? '',
+					'postcode' => $selection['point_postcode'] ?? '',
+					'address' => $selection['point_address'] ?? '',
+					'lat' => $selection['lat'] ?? null,
+					'lng' => $selection['lng'] ?? null,
+					'snapshot' => $selection['snapshot'],
+				)
+			);
+		}
+
+		return true;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function selection_from_pickup_row( int $point_id ): array {
+		$repository = $this->pickup_repository ?? new RussianPostPickupPointRepository();
+		$row = $repository->find_row_by_id( $point_id );
+		if ( ! is_array( $row ) || 1 !== (int) ( $row['active'] ?? 0 ) ) {
+			return array();
+		}
+
+		$snapshot = array(
+			'id' => (int) ( $row['id'] ?? 0 ),
+			'point_code' => (string) ( $row['point_code'] ?? '' ),
+			'point_type' => (string) ( $row['point_type'] ?? '' ),
+			'postcode' => (string) ( $row['postcode'] ?? '' ),
+			'address' => (string) ( $row['address'] ?? '' ),
+			'city' => (string) ( $row['city_name'] ?? '' ),
+			'region' => (string) ( $row['region_name'] ?? '' ),
+			'fias_location_guid' => (string) ( $row['fias_location_guid'] ?? '' ),
+			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
+			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
+			'work_time' => (string) ( $row['work_time'] ?? '' ),
+			'description' => (string) ( $row['description'] ?? '' ),
+		);
+
+		return array(
+			'point_id' => $snapshot['id'],
+			'point_code' => $snapshot['point_code'],
+			'point_type' => $snapshot['point_type'],
+			'point_address' => $snapshot['address'],
+			'point_postcode' => $snapshot['postcode'],
+			'point_comment' => $snapshot['description'],
+			'point_work_time' => $snapshot['work_time'],
+			'lat' => $snapshot['lat'],
+			'lng' => $snapshot['lng'],
+			'snapshot' => $snapshot,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function posted_string( array $data, string $key ): string {
+		$value = $data[ $key ] ?? '';
+		if ( is_array( $value ) ) {
+			return '';
+		}
+
+		$value = function_exists( 'wp_unslash' ) ? wp_unslash( $value ) : $value;
+		return function_exists( 'sanitize_text_field' ) ? sanitize_text_field( (string) $value ) : trim( strip_tags( (string) $value ) );
+	}
+
+	private function same_russian_post_pickup_family( string $left, string $right ): bool {
+		return $this->is_russian_post_pickup_family( $this->normalize_rate_id( $left ) )
+			&& $this->is_russian_post_pickup_family( $this->normalize_rate_id( $right ) );
+	}
+
+	private function is_russian_post_pickup_family( string $rate_id ): bool {
+		return RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $rate_id
+			|| str_starts_with( $rate_id, RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':' );
+	}
+
+	private function normalize_rate_id( string $rate_id ): string {
+		$prefix = NewShippingMethod::METHOD_ID . ':';
+		if ( str_starts_with( $rate_id, $prefix ) ) {
+			return substr( $rate_id, strlen( $prefix ) );
+		}
+
+		return $rate_id;
 	}
 
 	/**

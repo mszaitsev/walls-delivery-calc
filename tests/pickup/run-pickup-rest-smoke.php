@@ -233,6 +233,9 @@ pickup_rest_assert( is_array( $detail_pvz_enabled ) && 2 === $detail_pvz_enabled
 $detail_pvz_requested_ops = $controller->detail( array( 'id' => 2, 'type' => array( 'OPS' ) ) );
 pickup_rest_assert( $detail_pvz_requested_ops instanceof WP_Error && 'not_found' === $detail_pvz_requested_ops->get_error_code(), 'detail PVZ with type[]=OPS must return 404.' );
 
+$checkout_pickup_controller_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' ) ?: '';
+pickup_rest_assert( str_contains( $checkout_pickup_controller_source, "str_starts_with( \$method_id, RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':' )" ), 'Checkout pickup point REST save must accept Russian Post pickup rate suffixes without clearing the selected point.' );
+
 $limited = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '0,0,180,90', 'limit' => '1' ) );
 pickup_rest_assert( 1 === count( $limited ), 'limit must clamp result count.' );
 

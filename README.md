@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.27.6.
+Version: 0.27.7.
+
+Version 0.27.7 preserves the selected Russian Post pickup point during checkout submit and when switching tariff suffixes inside `russian_post_domestic_pickup`. Checkout validation now accepts the saved pickup point by method family, can restore the selection from submitted hidden pickup fields, and the frontend only clears pickup state after a real destination or carrier change.
 
 Version 0.27.6 synchronizes the pickup map context after a confirmed cross-location save. Once WooCommerce recalculates and the pending pickup point is saved, the frontend rebuilds the map context from the resolved location plus actual checkout fields, updates `currentContext`, `window.wdcPickupCheckout.currentContext`, `initialContext`, and the selected pickup point, then clears and restarts pickup prefetch for the new locality. `contextFromFields()` now treats city-selector formatted city values such as `г Новосибирск` as matching the hidden locality instead of discarding hidden coordinates, and prefetch cache keys include FIAS so old-city points cannot be reused.
 

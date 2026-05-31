@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 
 defined( 'ABSPATH' ) || exit;
@@ -88,7 +89,15 @@ final class CheckoutSessionManager {
 			return true;
 		}
 
-		return $this->normalize_rate_id( $selection_rate_id ) === $this->normalize_rate_id( $rateId );
+		$selection_rate_id = $this->normalize_rate_id( $selection_rate_id );
+		$rateId            = $this->normalize_rate_id( $rateId );
+		if ( $selection_rate_id === $rateId ) {
+			return true;
+		}
+
+		return RussianPostDomesticSettings::CARRIER_KEY === trim( $carrierKey )
+			&& $this->is_russian_post_pickup_family( $selection_rate_id )
+			&& $this->is_russian_post_pickup_family( $rateId );
 	}
 
 	public function save_sort_mode( string $sort_mode ): void {
@@ -255,5 +264,10 @@ final class CheckoutSessionManager {
 		}
 
 		return $rate_id;
+	}
+
+	private function is_russian_post_pickup_family( string $rate_id ): bool {
+		return RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $rate_id
+			|| str_starts_with( $rate_id, RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':' );
 	}
 }
