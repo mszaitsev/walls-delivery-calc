@@ -19,7 +19,47 @@ final class CheckoutValidation {
 	}
 
 	public function register(): void {
+		add_action( 'woocommerce_checkout_process', array( $this, 'preload_from_post' ), 5, 0 );
 		add_action( 'woocommerce_after_checkout_validation', array( $this, 'validate' ), 20, 2 );
+		$this->debug_validation( 'wdc_checkout_validation_registered' );
+	}
+
+	public function preload_from_post(): void {
+		$data = $this->posted_checkout_data();
+		$chosen_methods = $this->chosen_shipping_methods( $data );
+		$chosen_rate_id = $this->first_chosen_shipping_method( $chosen_methods );
+		$this->debug_validation(
+			'wdc_pickup_preload_from_post_start',
+			array(
+				'chosen_shipping_methods' => $chosen_methods,
+				'chosen_rate_id' => $chosen_rate_id,
+				'chosen_rate_id_normalized' => $this->session_manager->normalize_rate_id( $chosen_rate_id ),
+				'posted_point_id' => max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) ),
+				'posted_point_code' => $this->posted_string( $data, 'wdc_pickup_point_code' ),
+			)
+		);
+
+		if ( ! $this->session_manager->is_russian_post_pickup_family( $chosen_rate_id ) ) {
+			$this->debug_validation( 'wdc_pickup_preload_from_post_skipped', array( 'reason' => 'not_pickup_family', 'chosen_rate_id' => $chosen_rate_id ) );
+			return;
+		}
+
+		$point_id = max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) );
+		$point_code = $this->posted_string( $data, 'wdc_pickup_point_code' );
+		if ( $point_id <= 0 && '' === $point_code ) {
+			$this->debug_validation( 'wdc_pickup_preload_from_post_skipped', array( 'reason' => 'posted_point_missing' ) );
+			return;
+		}
+
+		$restored = $this->restore_posted_pickup_selection( $data, $this->synthetic_russian_post_pickup_rate( $chosen_rate_id ) );
+		$this->debug_validation(
+			$restored ? 'wdc_pickup_preload_from_post_success' : 'wdc_pickup_preload_from_post_skipped',
+			array(
+				'reason' => $restored ? 'restored_from_post' : 'restore_failed',
+				'chosen_rate_id' => $chosen_rate_id,
+				'session_pickup_selection' => $this->session_manager->pickup_selection(),
+			)
+		);
 	}
 
 	public function validate( mixed $data = array(), mixed $errors = null ): void {
@@ -475,6 +515,22 @@ final class CheckoutValidation {
 		}
 
 		return array();
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function posted_checkout_data(): array {
+		if ( ! isset( $_POST ) || ! is_array( $_POST ) ) {
+			return array();
+		}
+
+		$data = array();
+		foreach ( $_POST as $key => $value ) {
+			$data[ (string) $key ] = function_exists( 'wp_unslash' ) ? wp_unslash( $value ) : $value;
+		}
+
+		return $data;
 	}
 
 	/**

@@ -51,6 +51,7 @@ function wp_create_nonce( string $action ): string { return 'nonce'; }
 function wp_enqueue_style( string $handle, string $src = '', array $deps = array(), string|bool|null $ver = false ): void { $GLOBALS['wdc_pickup_checkout_enqueued_styles'][ $handle ] = compact( 'src', 'deps', 'ver' ); }
 function wp_enqueue_script( string $handle, string $src = '', array $deps = array(), string|bool|null $ver = false, bool $in_footer = false ): void { $GLOBALS['wdc_pickup_checkout_enqueued_scripts'][ $handle ] = compact( 'src', 'deps', 'ver', 'in_footer' ); }
 function wp_localize_script( string $handle, string $object_name, array $l10n ): void { $GLOBALS['wdc_pickup_checkout_localized'][ $handle ][ $object_name ] = $l10n; }
+function add_action( string $hook, mixed $callback, int $priority = 10, int $accepted_args = 1 ): void { $GLOBALS['wdc_pickup_checkout_actions'][ $hook ][] = compact( 'callback', 'priority', 'accepted_args' ); }
 function checked( mixed $checked, mixed $current = true, bool $display = true ): string {
 	$result = (string) $checked === (string) $current ? ' checked="checked"' : '';
 	if ( $display ) {
@@ -318,6 +319,35 @@ pickup_checkout_assert( RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':rail
 
 $session->clear_pickup_selection();
 $session->save_rates( array() );
+$GLOBALS['wdc_pickup_checkout_actions'] = array();
+$registered_validation = new CheckoutValidation( $session, null, $repo );
+$registered_validation->register();
+pickup_checkout_assert( isset( $GLOBALS['wdc_pickup_checkout_actions']['woocommerce_checkout_process'], $GLOBALS['wdc_pickup_checkout_actions']['woocommerce_after_checkout_validation'] ), 'CheckoutValidation::register must attach both the early checkout_process preloader and after_checkout_validation validator.' );
+pickup_checkout_assert( 5 === (int) $GLOBALS['wdc_pickup_checkout_actions']['woocommerce_checkout_process'][0]['priority'], 'Checkout pickup preloader must run early in woocommerce_checkout_process.' );
+pickup_checkout_assert( 20 === (int) $GLOBALS['wdc_pickup_checkout_actions']['woocommerce_after_checkout_validation'][0]['priority'], 'CheckoutValidation::validate must remain attached to woocommerce_after_checkout_validation priority 20.' );
+$_POST = array(
+	'shipping_method' => array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ),
+	'wdc_pickup_point_id' => '19971',
+	'wdc_pickup_point_code' => '650068-c46a3008bd',
+);
+$registered_validation->preload_from_post();
+pickup_checkout_assert( '650068-c46a3008bd' === (string) ( $session->pickup_selection()['point_code'] ?? '' ), 'woocommerce_checkout_process preloader must restore pickup selection from checkout POST before after_checkout_validation.' );
+pickup_checkout_assert( '650068-c46a3008bd' === (string) ( $session->checkout_pickup_point()['point_code'] ?? '' ), 'preloader must save checkout pickup point state from checkout POST.' );
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ), 'wdc_pickup_point_id' => '770', 'wdc_pickup_point_code' => '987846-c3287ee67a' ), $errors );
+pickup_checkout_assert( array() === $errors->errors, 'validation must pass after the preloader restored POST pickup selection with empty saved rates.' );
+
+$session->clear_pickup_selection();
+$_POST = array(
+	'shipping_method' => array( 'russian_post_domestic_courier' ),
+	'wdc_pickup_point_id' => '19971',
+	'wdc_pickup_point_code' => '650068-c46a3008bd',
+);
+$registered_validation->preload_from_post();
+pickup_checkout_assert( array() === $session->pickup_selection(), 'preloader must skip non-pickup selected shipping methods even when hidden pickup fields are posted.' );
+
+$session->clear_pickup_selection();
+$_POST = array();
 $errors = new WdcPickupCheckoutErrors();
 ( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY ), 'wdc_pickup_point_id' => '770', 'wdc_pickup_point_code' => '987846-c3287ee67a' ), $errors );
 pickup_checkout_assert( array() === $errors->errors, 'validation must pass with bare Russian Post pickup POST method, hidden point fields, empty session selection, and empty saved rates.' );
@@ -414,8 +444,20 @@ foreach ( array( 'Р’', 'Рµ', 'С‹', 'СЊ' ) as $mojibake ) {
 	pickup_checkout_assert( ! str_contains( $validation_source, $mojibake ), 'CheckoutValidation.php must not contain mojibake marker ' . $mojibake . '.' );
 }
 pickup_checkout_assert( str_contains( $validation_source, 'update_pickup_selection_rate_id( $selected_rate_id )' ) && str_contains( $validation_source, "['_selected_rate_id']" ) && str_contains( $validation_source, '$data[\'shipping_method\']' ), 'Checkout validation must pass same-family pickup selections, read posted shipping_method, and refresh the stored rate_id to the selected rate suffix.' );
-pickup_checkout_assert( str_contains( $validation_source, 'wdc_checkout_validation_start' ) && str_contains( $validation_source, 'wdc_pickup_restore_from_post_attempt' ) && str_contains( $validation_source, 'wdc_pickup_restore_from_post_success' ) && str_contains( $validation_source, 'wdc_pickup_validation_failed' ), 'Checkout validation must log detailed pickup validation decisions when debug is enabled.' );
-pickup_checkout_assert( str_contains( $validation_source, 'find_row_by_point_code' ) && str_contains( $validation_source, 'checkout_pickup_point_from_selection' ) && str_contains( $validation_source, 'is_russian_post_pickup_rate' ), 'Checkout validation must restore posted pickup points by id/code and resolve bare Russian Post pickup rates by family.' );
+pickup_checkout_assert( str_contains( $validation_source, 'wdc_checkout_validation_registered' ) && str_contains( $validation_source, 'wdc_checkout_validation_start' ) && str_contains( $validation_source, 'wdc_pickup_preload_from_post_start' ) && str_contains( $validation_source, 'wdc_pickup_preload_from_post_success' ) && str_contains( $validation_source, 'wdc_pickup_restore_from_post_attempt' ) && str_contains( $validation_source, 'wdc_pickup_restore_from_post_success' ) && str_contains( $validation_source, 'wdc_pickup_validation_failed' ), 'Checkout validation must log registration, preloader, and detailed pickup validation decisions when debug is enabled.' );
+pickup_checkout_assert( str_contains( $validation_source, 'add_action( \'woocommerce_checkout_process\'' ) && str_contains( $validation_source, 'function preload_from_post()' ) && str_contains( $validation_source, 'posted_checkout_data()' ), 'Checkout validation must register an early checkout_process preloader that reads checkout POST.' );
+pickup_checkout_assert( str_contains( $validation_source, 'find_row_by_point_code' ) && str_contains( $validation_source, 'checkout_pickup_point_from_selection' ) && str_contains( $validation_source, 'synthetic_russian_post_pickup_rate' ), 'Checkout validation must restore posted pickup points by id/code and resolve bare Russian Post pickup rates by family.' );
+$pickup_error_sources = array();
+foreach ( new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $root . '/src', FilesystemIterator::SKIP_DOTS ) ) as $source_file ) {
+	if ( ! $source_file->isFile() || 'php' !== $source_file->getExtension() ) {
+		continue;
+	}
+	$source = file_get_contents( $source_file->getPathname() ) ?: '';
+	if ( str_contains( $source, 'Выберите пункт выдачи Почты России.' ) ) {
+		$pickup_error_sources[] = str_replace( '\\', '/', substr( $source_file->getPathname(), strlen( $root ) + 1 ) );
+	}
+}
+pickup_checkout_assert( array( 'src/Checkout/WooCommerce/CheckoutValidation.php' ) === $pickup_error_sources, 'Russian Post pickup required checkout error must only be emitted by CheckoutValidation.' );
 $session_source = file_get_contents( $root . '/src/Checkout/WooCommerce/CheckoutSessionManager.php' ) ?: '';
 pickup_checkout_assert( str_contains( $session_source, 'function shipping_method_family' ) && str_contains( $session_source, 'function is_same_pickup_family' ) && str_contains( $session_source, 'wdc_platform:' ), 'Checkout session manager must normalize platform-prefixed rate ids and compare Russian Post pickup method family.' );
 pickup_checkout_assert( str_contains( $session_source, 'function clear_pickup_selection( string $reason' ) && str_contains( $session_source, 'function clear_pickup_selection_if_allowed' ) && str_contains( $session_source, 'log_pickup_selection_clear' ), 'Checkout session manager must log pickup clear reasons and block automatic clears for active pickup family selections.' );

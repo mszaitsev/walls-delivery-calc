@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.27.13.
+Version: 0.27.14.
+
+Version 0.27.14 registers an early WooCommerce checkout-process preloader for Russian Post pickup selections. Checkout submit POST hidden fields now restore the pickup session before later validation hooks run, and debug logs include checkout validation registration plus preload start/success/skipped messages.
 
 Version 0.27.13 makes checkout POST hidden pickup fields authoritative during Russian Post pickup validation. When WooCommerce posts the bare `russian_post_domestic_pickup` method without saved rates, validation builds a synthetic pickup rate, restores the point from posted id/code, and accepts a minimal saved selection even when the pickup repository has no matching row.
 
