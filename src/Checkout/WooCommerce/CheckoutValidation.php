@@ -94,6 +94,10 @@ final class CheckoutValidation {
 
 		$delivery_type = (string) ( $rate['delivery_type'] ?? '' );
 		$this->validate_city( $delivery_type, $data, $errors );
+		if ( $this->is_courier_rate( $rate ) ) {
+			$this->validate_courier_address( $data, $errors );
+			return;
+		}
 
 		if ( DeliveryType::PICKUP !== $delivery_type ) {
 			return;
@@ -192,6 +196,40 @@ final class CheckoutValidation {
 
 		if ( function_exists( 'wc_add_notice' ) ) {
 			wc_add_notice( __( 'Введите населенный пункт.', 'walls-delivery-calc' ), 'error' );
+		}
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function validate_courier_address( array $data, mixed $errors = null ): void {
+		if ( '' !== $this->checkout_address_1( $data ) ) {
+			return;
+		}
+
+		$this->add_courier_address_error( $errors );
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function checkout_address_1( array $data ): string {
+		$use_shipping = '' !== $this->posted_string( $data, 'ship_to_different_address' )
+			|| ( ! array_key_exists( 'billing_address_1', $data ) && array_key_exists( 'shipping_address_1', $data ) );
+		$field = $use_shipping ? 'shipping_address_1' : 'billing_address_1';
+
+		return $this->posted_string( $data, $field );
+	}
+
+	private function add_courier_address_error( mixed $errors = null ): void {
+		$message = __( 'Для доставки курьером необходимо заполнить адрес.', 'walls-delivery-calc' );
+		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
+			$errors->add( 'wdc_courier_address_required', $message );
+			return;
+		}
+
+		if ( function_exists( 'wc_add_notice' ) ) {
+			wc_add_notice( $message, 'error' );
 		}
 	}
 
@@ -448,6 +486,15 @@ final class CheckoutValidation {
 			&& RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) ( $rate['service_key'] ?? '' )
 			&& DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' )
 			&& $this->session_manager->is_russian_post_pickup_family( (string) ( $rate['rate_id'] ?? '' ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function is_courier_rate( array $rate ): bool {
+		return CourierRateSupport::is_courier_meta( $rate )
+			|| DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' )
+			|| ! empty( $rate['requires_courier_address'] );
 	}
 
 	/**

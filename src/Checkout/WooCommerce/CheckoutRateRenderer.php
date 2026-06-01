@@ -43,6 +43,7 @@ final class CheckoutRateRenderer {
 		echo '<div class="' . esc_attr( implode( ' ', $classes ) ) . '">';
 
 		$this->render_tariff_selector( $meta );
+		$this->render_courier_address_summary( $meta );
 
 		if ( empty( $meta['domestic_tariff_grouped'] ) && empty( $meta['tariff_variants'] ) && '' !== trim( (string) ( $meta['planned_delivery_comment'] ?? '' ) ) ) {
 			echo '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' . esc_html( (string) $meta['planned_delivery_comment'] ) . '</div>';
@@ -79,6 +80,87 @@ final class CheckoutRateRenderer {
 	private function format_money( int $kopecks ): string {
 		return rtrim( rtrim( number_format( $kopecks / 100, 2, '.', ' ' ), '0' ), '.' ) . ' руб.';
 	}
+
+	/**
+	 * @param array<string,mixed> $meta
+	 */
+	private function render_courier_address_summary( array $meta ): void {
+		if ( ! CourierRateSupport::is_courier_meta( $meta ) ) {
+			return;
+		}
+
+		$field = $this->checkout_address_field();
+		$prefix = str_starts_with( $field, 'shipping_' ) ? 'shipping' : 'billing';
+		$address_1 = $this->posted_value( $prefix . '_address_1' );
+		$has_address_1 = '' !== trim( $address_1 );
+		$address = $has_address_1 ? $this->format_address_parts( $this->checkout_address_parts( $prefix ) ) : '';
+		$hidden_value = $has_address_1 ? '' : ' hidden';
+		$hidden_warning = $has_address_1 ? ' hidden' : '';
+
+		echo '<div class="wdc-courier-address-summary" data-wdc-courier-address-summary data-address-field="' . esc_attr( $field ) . '">';
+		echo '<div class="wdc-courier-address-summary__title">' . esc_html__( 'Доставка курьером по адресу:', 'walls-delivery-calc' ) . '</div>';
+		echo '<div class="wdc-courier-address-summary__value"' . $hidden_value . '>' . esc_html( $address ) . '</div>';
+		echo '<div class="wdc-courier-address-summary__warning"' . $hidden_warning . '>';
+		echo esc_html__( 'Для доставки курьером необходимо ', 'walls-delivery-calc' );
+		echo '<a href="#' . esc_attr( $field ) . '">' . esc_html__( 'заполнить адрес', 'walls-delivery-calc' ) . '</a>.';
+		echo '</div>';
+		echo '</div>';
+	}
+
+	private function checkout_address_field(): string {
+		$ship_to_different = $this->posted_value( 'ship_to_different_address' );
+		if ( '' !== trim( $ship_to_different ) ) {
+			return 'shipping_address_1';
+		}
+
+		if ( $this->posted_has( 'billing_address_1' ) ) {
+			return 'billing_address_1';
+		}
+
+		return $this->posted_has( 'shipping_address_1' ) ? 'shipping_address_1' : 'billing_address_1';
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function checkout_address_parts( string $prefix ): array {
+		return array(
+			$this->posted_value( $prefix . '_postcode' ),
+			$this->posted_value( $prefix . '_city' ),
+			$this->posted_value( $prefix . '_address_1' ),
+		);
+	}
+
+	/**
+	 * @param array<int,string> $parts
+	 */
+	private function format_address_parts( array $parts ): string {
+		$parts = array_values( array_filter( array_map( static fn ( string $part ): string => trim( $part ), $parts ), static fn ( string $part ): bool => '' !== $part ) );
+
+		return implode( ', ', $parts );
+	}
+
+	private function posted_value( string $key ): string {
+		if ( isset( $_POST[ $key ] ) && ! is_array( $_POST[ $key ] ) ) {
+			$value = function_exists( 'wp_unslash' ) ? wp_unslash( $_POST[ $key ] ) : $_POST[ $key ];
+			return function_exists( 'sanitize_text_field' ) ? sanitize_text_field( (string) $value ) : trim( strip_tags( (string) $value ) );
+		}
+
+		if ( function_exists( 'WC' ) && is_object( WC() ) && method_exists( WC(), 'checkout' ) ) {
+			$checkout = WC()->checkout();
+			if ( is_object( $checkout ) && method_exists( $checkout, 'get_value' ) ) {
+				$value = $checkout->get_value( $key );
+				return is_scalar( $value ) ? trim( (string) $value ) : '';
+			}
+		}
+
+		return '';
+	}
+
+	private function posted_has( string $key ): bool {
+		return isset( $_POST ) && is_array( $_POST ) && array_key_exists( $key, $_POST );
+	}
+
 	/**
 	 * @param array<string,mixed> $meta
 	 */

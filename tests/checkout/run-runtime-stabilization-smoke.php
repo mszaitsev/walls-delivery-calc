@@ -389,6 +389,7 @@ use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDebugPanel;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutDeliveryTypeSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutFeatureGate;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutRateRenderer;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSortSelector;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
@@ -401,8 +402,10 @@ use WallsShop\WDC\Core\FeatureFlags;
 use WallsShop\WDC\Core\Plugin;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\DeliveryQuote;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
@@ -650,6 +653,7 @@ $registrar->enqueue_assets();
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-normalization'] ), 'Address normalization script must not enqueue.' );
 runtime_smoke_assert( ! isset( $GLOBALS['wdc_test_scripts']['wdc-platform-address-suggestions'] ), 'Address suggestions script must not enqueue when DaData suggestions are disabled.' );
 runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-city-selector'] ), 'Local city selector script must enqueue when DaData suggestions are disabled.' );
+runtime_smoke_assert( isset( $GLOBALS['wdc_test_scripts']['wdc-platform-courier-address-summary'] ), 'Courier address summary script must enqueue for checkout.' );
 
 $GLOBALS['wdc_test_scripts'] = array();
 $GLOBALS['wdc_test_styles'] = array();
@@ -679,6 +683,95 @@ $fast_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), R
 runtime_smoke_assert( DeliveryType::COURIER === $fast_rates[0]->delivery_type, 'Fastest sort must put courier first.' );
 $cheap_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), RateSorter::CHEAPEST, false )->rates;
 runtime_smoke_assert( DeliveryType::PICKUP === $cheap_rates[0]->delivery_type, 'Cheapest sort must put pickup first.' );
+$mapped_courier = ( new WooCommerceRateMapper() )->map( $fast_rates[0] );
+runtime_smoke_assert( true === ( $mapped_courier['meta_data']['is_courier'] ?? false ), 'WDC courier rate must expose is_courier meta.' );
+runtime_smoke_assert( DeliveryType::COURIER === ( $mapped_courier['meta_data']['wdc_delivery_kind'] ?? '' ), 'WDC courier rate must expose delivery kind courier.' );
+$mapped_pickup = ( new WooCommerceRateMapper() )->map( $cheap_rates[0] );
+runtime_smoke_assert( false === ( $mapped_pickup['meta_data']['is_courier'] ?? true ), 'Pickup rate must not be marked as courier.' );
+
+$explicit_meta_courier_rate = new DeliveryRate(
+	'demo:meta-courier',
+	'demo',
+	'Demo',
+	'meta',
+	'Meta courier',
+	'meta',
+	'Meta courier',
+	DeliveryType::UNKNOWN,
+	'Meta courier',
+	Money::from_rubles( 100 ),
+	null,
+	null,
+	DateRange::single( 1 ),
+	meta: array( 'service_kind' => DeliveryType::COURIER )
+);
+$mapped_meta_courier = ( new WooCommerceRateMapper() )->map( $explicit_meta_courier_rate );
+runtime_smoke_assert( true === ( $mapped_meta_courier['meta_data']['is_courier'] ?? false ), 'Explicit courier meta must mark WDC rate as courier.' );
+
+$_POST = array(
+	'billing_postcode'  => '630000',
+	'billing_city'      => 'г Новосибирск',
+	'billing_state'     => 'Новосибирская область',
+	'billing_address_1' => 'ул. Советская, д. 99',
+);
+$renderer = new CheckoutRateRenderer();
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $mapped_courier['meta_data'] ) );
+$courier_summary_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $courier_summary_output, 'wdc-courier-address-summary' ), 'Courier summary block must render inside WDC courier rate meta.' );
+runtime_smoke_assert( str_contains( $courier_summary_output, 'Доставка курьером по адресу:' ), 'Courier summary title must render.' );
+runtime_smoke_assert( str_contains( $courier_summary_output, '630000, г Новосибирск, ул. Советская, д. 99' ), 'Courier summary must render postcode, city, and address.' );
+runtime_smoke_assert( ! str_contains( $courier_summary_output, 'Новосибирская область' ), 'Courier summary must not include region.' );
+
+$_POST = array(
+        'billing_postcode'  => '630091',
+        'billing_city'      => 'г Новосибирск',
+        'billing_address_1' => '',
+);
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $mapped_courier['meta_data'] ) );
+$empty_courier_summary_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $empty_courier_summary_output, 'Для доставки курьером необходимо' ), 'Empty courier address must render warning.' );
+runtime_smoke_assert( str_contains( $empty_courier_summary_output, 'href="#billing_address_1"' ), 'Empty courier address warning must link to billing address field.' );
+runtime_smoke_assert( str_contains( $empty_courier_summary_output, 'заполнить адрес' ), 'Empty courier address warning link text must be Russian.' );
+runtime_smoke_assert( ! str_contains( $empty_courier_summary_output, '>630091, г Новосибирск<' ), 'Courier summary must not show postcode and city as address when address line 1 is empty.' );
+
+$_POST = array(
+        'billing_city'       => 'г Новосибирск',
+        'billing_address_1'  => '',
+        'shipping_city'      => 'г Томск',
+        'shipping_address_1' => 'ул. Shipping, д. 1',
+);
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $mapped_courier['meta_data'] ) );
+$billing_preferred_summary_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $billing_preferred_summary_output, 'href="#billing_address_1"' ), 'PHP courier summary must keep billing address when billing field exists and ship-to-different is not posted.' );
+runtime_smoke_assert( ! str_contains( $billing_preferred_summary_output, 'ул. Shipping, д. 1' ), 'PHP courier summary must not use filled shipping address without ship-to-different.' );
+
+$_POST = array(
+        'shipping_city'      => 'г Томск',
+        'shipping_address_1' => 'ул. Shipping, д. 1',
+);
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $mapped_courier['meta_data'] ) );
+$shipping_fallback_summary_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $shipping_fallback_summary_output, 'г Томск, ул. Shipping, д. 1' ), 'PHP courier summary must fall back to shipping when billing address field is absent.' );
+
+$_POST = array(
+        'ship_to_different_address' => '1',
+        'billing_city'              => 'г Новосибирск',
+        'billing_address_1'         => 'ул. Billing, д. 1',
+        'shipping_city'             => 'г Томск',
+        'shipping_address_1'        => 'ул. Shipping, д. 1',
+);
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $mapped_courier['meta_data'] ) );
+$shipping_selected_summary_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $shipping_selected_summary_output, 'г Томск, ул. Shipping, д. 1' ), 'PHP courier summary must use shipping when ship-to-different is posted.' );
+ob_start();
+$renderer->render( new WdcRuntimeSmokeRate( $mapped_pickup['meta_data'] ) );
+$pickup_summary_output = (string) ob_get_clean();
+runtime_smoke_assert( ! str_contains( $pickup_summary_output, 'wdc-courier-address-summary' ), 'Courier summary block must not render inside pickup rate.' );
 
 $quote_cache = new QuoteCache();
 $service_cache_key_a = $quote_cache->cache_key( runtime_smoke_request(), 'demo', '', 'service_a' );
@@ -796,7 +889,26 @@ $validation_session->save_rates(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'demo:courier' ) );
 ( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
-runtime_smoke_assert( array() === $errors->errors, 'Courier rate must ignore stale pickup selection.' );
+runtime_smoke_assert( 'Для доставки курьером необходимо заполнить адрес.' === ( $errors->errors['wdc_courier_address_required'] ?? '' ), 'Courier validation must fail when address is empty.' );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'billing_postcode' => '630091', 'billing_city' => 'г Новосибирск', 'billing_address_1' => '', 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( 'Для доставки курьером необходимо заполнить адрес.' === ( $errors->errors['wdc_courier_address_required'] ?? '' ), 'Courier validation must fail when only postcode and city are filled.' );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск', 'billing_address_1' => 'ул. Советская, д. 99' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Courier validation must pass when address is filled and ignore stale pickup selection.' );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск', 'billing_address_1' => '', 'shipping_address_1' => 'ул. Shipping, д. 1' ), $errors );
+runtime_smoke_assert( 'Для доставки курьером необходимо заполнить адрес.' === ( $errors->errors['wdc_courier_address_required'] ?? '' ), 'Courier validation must not use filled shipping address when billing field exists and ship-to-different is absent.' );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_address_1' => 'ул. Shipping, д. 1' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Courier validation must fall back to shipping when billing address field is absent.' );
+$errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск', 'ship_to_different_address' => '1', 'billing_address_1' => '', 'shipping_address_1' => 'ул. Shipping, д. 1' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'Courier validation must use shipping when ship-to-different is posted.' );
+$errors->errors = array();
+WC()->session->set( 'chosen_shipping_methods', array() );
+( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( array() === $errors->errors, 'No-shipping checkout must not require address.' );
 
 $validation_session->clear_pickup_selection();
 $validation_session->save_rates(
@@ -898,6 +1010,12 @@ $sort_two_output = (string) ob_get_clean();
 runtime_smoke_assert( str_contains( $sort_two_output, 'wdc-checkout-sort-row' ) && str_contains( $sort_two_output, 'wdc_platform_checkout_sort_mode' ), 'Sort selector must render only when two or more WDC rates are available.' );
 $checkout_sort_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-sort.js' );
 runtime_smoke_assert( str_contains( $checkout_sort_js, 'function relocateSortControl()' ) && str_contains( $checkout_sort_js, 'prependTo( $shippingCell )' ) && str_contains( $checkout_sort_js, 'updated_checkout' ), 'Checkout sort JS must move the selector into the shipping row before the methods list.' );
+$courier_address_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/courier-address-summary.js' );
+foreach ( array( 'billing_address_1', 'shipping_address_1', 'billing_postcode', 'shipping_postcode', 'billing_city', 'shipping_city', 'updated_checkout', 'input[name^="shipping_method"]', 'required = required', 'aria-required', 'data-wdc-courier-address-summary', 'wdcCourierAddressSummary', 'addressParts', '.join(\', \')', 'target.focus()', 'selectedItem.contains(summary)', 'shipToDifferent && shipToDifferent.checked', '!billingAddress && shippingAddress', 'marker.getAttribute(\'data-wdc-added\') === \'true\'', 'var address1 = value(addressField)', 'var hasAddress1 = address1 !== \'\'', 'valueNode.textContent = hasAddress1 ? address : \'\'', 'valueNode.hidden = !hasAddress1', 'warningNode.hidden = hasAddress1' ) as $needle ) {
+        runtime_smoke_assert( str_contains( $courier_address_js, $needle ), 'Courier address summary JS must contain ' . $needle . '.' );
+}
+runtime_smoke_assert( ! str_contains( $courier_address_js, "value('shipping_address_1') !== ''" ), 'Courier address summary JS must not switch to shipping only because shipping address has a value.' );
+runtime_smoke_assert( ! str_contains( $courier_address_js, '} else if (!required && marker) {' ), 'Courier address summary JS must not remove native WooCommerce required markers.' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 $registrar_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/ShippingMethodRegistrar.php' );
 runtime_smoke_assert( ! str_contains( $plugin_source, 'CheckoutAddressRenderer::class )->register()' ) && ! str_contains( $registrar_source, 'address-normalization.css' ), 'Visible checkout address-check block and its frontend CSS must not be registered by default.' );

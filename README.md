@@ -1,6 +1,12 @@
 # Walls Delivery Calc
 
-Version: 0.30.7.
+Version: 0.31.2.
+
+Version 0.31.2 fixes courier checkout address summaries when only postcode and city are filled. The courier summary now treats `address_1` as the required address signal, keeps the warning visible until address line 1 is filled, and only then shows the formatted `{postcode}, {city}, {address_1}` line.
+
+Version 0.31.1 keeps courier checkout address required markers scoped to WDC-added markers and aligns billing/shipping address selection between PHP and frontend JS. Shipping address is now used only when `ship_to_different_address` is selected/present or when billing address is absent and shipping address exists, not merely because a hidden shipping address field has a value.
+
+Version 0.31.0 adds courier checkout address handling for WDC rates. Courier rates now expose normalized courier meta, the selected courier shipping method shows the customer's `{postcode}, {city}, {address}` summary or a linked warning to fill the address, the address field becomes required only while courier delivery is selected, and checkout validation rejects courier orders without address line 1 while pickup/no-shipping flows remain unaffected.
 
 Version 0.30.7 brings the same force-reopen behavior to the Leaflet/OpenStreetMap pickup map: active marker popup opens now always unbind/rebind before opening, popup close refreshes the active marker state, and side-list clicks use the same direct popup reopen path as marker clicks without committing a point.
 

@@ -128,6 +128,13 @@ final class ShippingMethodRegistrar {
 				$this->environment->version(),
 				true
 			);
+			wp_enqueue_script(
+				'wdc-platform-courier-address-summary',
+				$this->environment->plugin_url() . 'assets/frontend/courier-address-summary.js',
+				array( 'jquery' ),
+				$this->environment->version(),
+				true
+			);
 			wp_enqueue_style(
 				'wdc-platform-domestic-tariffs',
 				$this->environment->plugin_url() . 'assets/frontend/domestic-tariff-selector.css',
