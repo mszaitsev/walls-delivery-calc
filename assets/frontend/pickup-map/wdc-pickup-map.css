@@ -276,7 +276,7 @@
 .wdc-pickup-map__locate {
 	position: absolute;
 	right: 16px;
-	bottom: 72px;
+	bottom: 32px;
 	z-index: 650;
 	display: inline-grid;
 	place-items: center;
