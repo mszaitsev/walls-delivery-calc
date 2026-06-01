@@ -108,7 +108,12 @@
 					iconOffset: [-21, -59],
 					iconShape: { type: 'Circle', coordinates: [21, 21], radius: 21 }
 				});
-				placemark.events.add('click', function () { pointClickCallback(point); });
+				placemark.events.add('click', function (event) {
+					if (event && typeof event.stopPropagation === 'function') {
+						event.stopPropagation();
+					}
+					pointClickCallback(point);
+				});
 				placemark.events.add('balloonclose', popupClosed);
 				if (useClusterer) {
 					collection.add(placemark);

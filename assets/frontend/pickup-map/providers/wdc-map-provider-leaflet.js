@@ -156,6 +156,8 @@
 					}).addTo(map);
 					marker.on('click', function (event) {
 						if (event && event.originalEvent && window.L.DomEvent) {
+							window.L.DomEvent.preventDefault(event.originalEvent);
+							window.L.DomEvent.stopPropagation(event.originalEvent);
 							window.L.DomEvent.stop(event.originalEvent);
 						}
 						pointClickCallback(point);

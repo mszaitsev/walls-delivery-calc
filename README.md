@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.30.2.
+Version: 0.30.3.
+
+Version 0.30.3 fixes the last checkout polish regressions: WDC nested rate separators now render as an explicit stable `title - days: price` text flow, and pickup marker clicks are protected from the map-click close path so clicking an already-active marker reopens its popup/balloon after a manual close in both Leaflet and Yandex providers.
 
 Version 0.30.2 tightens the final checkout polish: WDC nested rate text now renders as `{title} - {days}: {price} {old price}` without extra spacing, pickup popup/list select buttons use rounded scoped styling, and clicking an active pickup marker after closing its popup reopens the preview balloon without selecting the point.
 

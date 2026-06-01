@@ -42,7 +42,7 @@
 }
 
 .wdc-domestic-tariff-selector__days::before {
-	content: "- ";
+	content: " - ";
 }
 
 .wdc-domestic-tariff-selector__price::before {

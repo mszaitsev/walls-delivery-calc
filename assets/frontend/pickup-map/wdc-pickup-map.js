@@ -35,6 +35,7 @@
 		var provider = null;
 		var visiblePoints = [];
 		var popupManuallyClosed = false;
+		var suppressNextMapClick = false;
 		var userLocation = null;
 		var originStatus = '';
 		var originStatusType = '';
@@ -59,12 +60,22 @@
 			labels: labels,
 			onBoundsChange: boundsChanged
 		});
-		provider.onPointClick(function (point) { preview(point, { focus: false, forcePopup: true, userAction: true }); });
+		provider.onPointClick(function (point) {
+			suppressNextMapClick = true;
+			preview(point, { focus: false, forcePopup: true, userAction: true });
+			window.setTimeout(function () { suppressNextMapClick = false; }, 0);
+		});
 		if (provider.onPopupSelect) {
 			provider.onPopupSelect(function (point) { commit(point, { focus: false }); });
 		}
 		if (provider.onMapClick) {
-			provider.onMapClick(function () { markPopupManuallyClosed('map_click'); });
+			provider.onMapClick(function () {
+				if (suppressNextMapClick) {
+					suppressNextMapClick = false;
+					return;
+				}
+				markPopupManuallyClosed('map_click');
+			});
 		}
 		if (provider.onPopupClose) {
 			provider.onPopupClose(function () { markPopupManuallyClosed('popup_close'); });
