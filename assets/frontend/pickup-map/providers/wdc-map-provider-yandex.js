@@ -95,24 +95,8 @@
 					return;
 				}
 				var id = pointId(point);
-				var placemark = new ymapsApi.Placemark([point.lat, point.lng], {
-					balloonContent: escapeHtml(point.address || ''),
-					wdcActive: activePointId === id ? 'is-active' : '',
-					wdcType: pointType(point).toLowerCase()
-				}, {
-					balloonAutoPan: true,
-					balloonAutoPanMargin: 24,
-					iconLayout: markerLayout,
-					iconOffset: [-21, -59],
-					iconShape: { type: 'Circle', coordinates: [21, 21], radius: 21 }
-				});
-				placemark.events.add('click', function () { pointClickCallback(point); });
-				placemark.events.add('balloonclose', popupClosed);
-				if (useClusterer) {
-					collection.add(placemark);
-				} else {
-					map.geoObjects.add(placemark);
-				}
+				var placemark = createPickupPlacemark(point, id);
+				addPickupPlacemark(placemark, useClusterer);
 				placemarkById[id] = placemark;
 				pointById[id] = point;
 			});
@@ -222,10 +206,12 @@
 				if (!placemark || !placemark.properties || !placemark.balloon) {
 					return;
 				}
+				activePointId = id;
+				updateActivePlacemarks();
 				suppressPopupClose = true;
 				placemark.properties.set('balloonContent', html);
 				placemark.balloon.open();
-				suppressPopupClose = false;
+				window.setTimeout(function () { suppressPopupClose = false; }, 0);
 			},
 			closePopup: function () {
 				if (map && map.balloon) {
@@ -277,6 +263,68 @@
 			});
 		}
 
+		function createPickupPlacemark(point, id) {
+			var placemark = new ymapsApi.Placemark([point.lat, point.lng], {
+				balloonContent: escapeHtml(point.address || ''),
+				wdcActive: activePointId === id ? 'is-active' : '',
+				wdcType: pointType(point).toLowerCase()
+			}, {
+				balloonAutoPan: true,
+				balloonAutoPanMargin: 24,
+				balloonOffset: [0, -58],
+				hideIconOnBalloonOpen: false,
+				iconLayout: markerLayout,
+				iconOffset: [-21, -59],
+				iconShape: { type: 'Circle', coordinates: [21, 21], radius: 21 }
+			});
+			placemark.events.add('click', function (event) {
+				if (event && typeof event.stopPropagation === 'function') {
+					event.stopPropagation();
+				}
+				debugLog('yandex placemark click');
+				pointClickCallback(point);
+			});
+			placemark.events.add('balloonclose', popupClosed);
+			return placemark;
+		}
+
+		function addPickupPlacemark(placemark, useClusterer) {
+			if (useClusterer) {
+				collection.add(placemark);
+			} else {
+				map.geoObjects.add(placemark);
+			}
+		}
+
+		function refreshActivePlacemarkAfterBalloonClose() {
+			var id = activePointId;
+			var point = id ? pointById[id] : null;
+			if (!id || !point || !map || !ymapsApi) {
+				return;
+			}
+			window.setTimeout(function () {
+				var oldPlacemark = placemarkById[id];
+				if (!oldPlacemark || !pointById[id]) {
+					return;
+				}
+				debugLog('yandex active placemark recreated after balloon close');
+				if (map.balloon) {
+					map.balloon.close();
+				}
+				if (collection) {
+					collection.remove(oldPlacemark);
+				}
+				map.geoObjects.remove(oldPlacemark);
+				activePointId = id;
+				var replacement = createPickupPlacemark(point, id);
+				addPickupPlacemark(replacement, map.getZoom() < maxClusterZoom);
+				placemarkById[id] = replacement;
+				pointById[id] = point;
+				updateActivePlacemarks();
+				debugLog('yandex active placemark refreshed after balloon close');
+			}, 0);
+		}
+
 		function onPopupClick(event) {
 			var button = event.target && event.target.closest ? event.target.closest('[data-wdc-pickup-popup-select]') : null;
 			if (!button) {
@@ -294,8 +342,10 @@
 		}
 
 		function popupClosed() {
+			debugLog('yandex balloon close');
 			if (!suppressPopupClose) {
 				popupCloseCallback();
+				refreshActivePlacemarkAfterBalloonClose();
 			}
 		}
 	}
@@ -363,6 +413,12 @@
 
 	function debugEnabled() {
 		return !!(window.wdcPickupCheckout && window.wdcPickupCheckout.debug);
+	}
+
+	function debugLog(message) {
+		if (debugEnabled() && window.console && typeof window.console.debug === 'function') {
+			window.console.debug('wdc pickup: ' + message);
+		}
 	}
 
 	window.WDCPickupMapProviders = window.WDCPickupMapProviders || {};

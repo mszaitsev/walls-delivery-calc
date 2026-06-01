@@ -31,6 +31,10 @@ final class CheckoutSortSelector {
 	}
 
 	public function render(): void {
+		if ( $this->wdc_rates_count() < 2 ) {
+			return;
+		}
+
 		$current = $this->current_sort_mode();
 
 		echo '<tr class="wdc-checkout-sort-row"><th>' . esc_html__( 'Сортировка доставки', 'walls-delivery-calc' ) . '</th><td>';
@@ -79,5 +83,63 @@ final class CheckoutSortSelector {
 				$session->set( $key, null );
 			}
 		}
+	}
+
+	private function wdc_rates_count(): int {
+		$count = 0;
+		foreach ( $this->shipping_packages() as $package ) {
+			if ( ! is_array( $package ) ) {
+				continue;
+			}
+			$rates = is_array( $package['rates'] ?? null ) ? $package['rates'] : array();
+			foreach ( $rates as $rate ) {
+				if ( array() !== $this->rate_meta( $rate ) ) {
+					$count++;
+				}
+			}
+		}
+
+		return $count;
+	}
+
+	/**
+	 * @return array<int|string,mixed>
+	 */
+	private function shipping_packages(): array {
+		if ( function_exists( 'WC' ) && is_object( WC() ) && method_exists( WC(), 'shipping' ) && is_object( WC()->shipping() ) && method_exists( WC()->shipping(), 'get_packages' ) ) {
+			$packages = WC()->shipping()->get_packages();
+			return is_array( $packages ) ? $packages : array();
+		}
+
+		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! isset( WC()->session ) || ! is_object( WC()->session ) ) {
+			return array();
+		}
+
+		$packages = array();
+		for ( $index = 0; $index < 20; $index++ ) {
+			$package = method_exists( WC()->session, 'get' ) ? WC()->session->get( 'shipping_for_package_' . $index ) : null;
+			if ( is_array( $package ) ) {
+				$packages[] = $package;
+			}
+		}
+
+		return $packages;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function rate_meta( mixed $rate ): array {
+		if ( is_object( $rate ) && method_exists( $rate, 'get_meta_data' ) ) {
+			$meta = $rate->get_meta_data();
+		} elseif ( is_object( $rate ) && isset( $rate->meta_data ) ) {
+			$meta = $rate->meta_data;
+		} elseif ( is_array( $rate ) && isset( $rate['meta_data'] ) ) {
+			$meta = $rate['meta_data'];
+		} else {
+			$meta = array();
+		}
+
+		return is_array( $meta ) && isset( $meta['carrier_key'] ) ? $meta : array();
 	}
 }

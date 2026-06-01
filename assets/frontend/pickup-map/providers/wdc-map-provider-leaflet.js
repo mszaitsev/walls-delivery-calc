@@ -67,19 +67,33 @@
 				renderSearchMarker(options && options.searchMarker);
 				suppressPopupClose = false;
 			},
-			openPointPopup: function (point, html) {
-				var marker = markerById[pointId(point)];
+			openPointPopup: function (point, html, options) {
+				var id = pointId(point);
+				var marker = markerById[id];
 				if (marker && marker.bindPopup) {
+					activePointId = id;
+					updateActiveMarkers();
 					suppressPopupClose = true;
+					if (options && options.forceReopen) {
+						debugLog('leaflet popup force reopen');
+					}
+					if (marker.closePopup) {
+						marker.closePopup();
+					}
+					if (marker.unbindPopup) {
+						marker.unbindPopup();
+						debugLog('leaflet marker popup unbound/rebound');
+					}
 					marker.bindPopup(html, {
 						autoPan: true,
 						autoPanPadding: [24, 24],
 						className: 'wdc-pickup-map-popup',
 						keepInView: true,
-						maxWidth: 280
+						maxWidth: 280,
+						offset: window.L.point(0, -5)
 					});
 					marker.openPopup();
-					suppressPopupClose = false;
+					window.setTimeout(function () { suppressPopupClose = false; }, 0);
 				}
 			},
 			closePopup: function () {
@@ -152,8 +166,11 @@
 					}).addTo(map);
 					marker.on('click', function (event) {
 						if (event && event.originalEvent && window.L.DomEvent) {
+							window.L.DomEvent.preventDefault(event.originalEvent);
+							window.L.DomEvent.stopPropagation(event.originalEvent);
 							window.L.DomEvent.stop(event.originalEvent);
 						}
+						debugLog('leaflet marker click');
 						pointClickCallback(point);
 					});
 					marker._wdcPointId = id;
@@ -246,7 +263,7 @@
 				html: '<span class="wdc-map-marker-pin wdc-map-marker-pin--' + type.toLowerCase() + (active ? ' is-active' : '') + '"><span class="wdc-map-marker-pin__inner"></span><span class="wdc-map-marker-pin__tail"></span></span>',
 				iconSize: [38, 53],
 				iconAnchor: [19, 53],
-				popupAnchor: [0, -53]
+				popupAnchor: [0, -58]
 			});
 		}
 
@@ -255,9 +272,29 @@
 		}
 
 		function popupClosed() {
+			debugLog('leaflet popup close');
 			if (!suppressPopupClose) {
 				popupCloseCallback();
+				refreshActiveMarkerAfterPopupClose();
 			}
+		}
+
+		function refreshActiveMarkerAfterPopupClose() {
+			var id = activePointId;
+			var marker = id ? markerById[id] : null;
+			if (!marker) {
+				return;
+			}
+			window.setTimeout(function () {
+				if (markerById[id] !== marker) {
+					return;
+				}
+				if (marker.unbindPopup) {
+					marker.unbindPopup();
+					debugLog('leaflet marker popup unbound/rebound');
+				}
+				updateActiveMarkers();
+			}, 0);
 		}
 
 		function onPopupClick(event) {
@@ -330,6 +367,16 @@
 	function pointType(point) {
 		var type = String(point.point_type || point.type || 'OPS').toUpperCase();
 		return type === 'PVZ' || type === 'APS' ? type : 'OPS';
+	}
+
+	function debugEnabled() {
+		return !!(window.wdcPickupCheckout && window.wdcPickupCheckout.debug);
+	}
+
+	function debugLog(message) {
+		if (debugEnabled() && window.console && typeof window.console.debug === 'function') {
+			window.console.debug('wdc pickup: ' + message);
+		}
 	}
 
 	window.WDCPickupMapProviders = window.WDCPickupMapProviders || {};

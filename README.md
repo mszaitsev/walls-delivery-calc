@@ -1,6 +1,22 @@
 # Walls Delivery Calc
 
-Version: 0.29.2.
+Version: 0.30.7.
+
+Version 0.30.7 brings the same force-reopen behavior to the Leaflet/OpenStreetMap pickup map: active marker popup opens now always unbind/rebind before opening, popup close refreshes the active marker state, and side-list clicks use the same direct popup reopen path as marker clicks without committing a point.
+
+Version 0.30.6 fixes the Yandex-only pickup map edge case where closing a balloon with its X could leave the Yandex events pane intercepting clicks on the still-active marker. The Yandex provider now recreates the active placemark after a real balloon close, preserving active state and click handlers so the next marker click opens the balloon again.
+
+Version 0.30.5 simplifies the two stubborn checkout fixes: WDC domestic tariff labels now build one text line in PHP (`title - days: `) before the styled current price, avoiding flex-separated separator spans entirely, and pickup marker clicks use a direct `openPointPreviewFromMarker` path that clears manual-close state and imperatively reopens the popup every time.
+
+Version 0.30.4 makes WDC nested tariff separators part of the PHP markup instead of CSS pseudo-content, so empty days/prices do not leave stray punctuation. Pickup marker clicks now explicitly clear the manual popup-close flag and providers suppress close events during the reopen tick, so closing a popup with its X no longer blocks reopening it by clicking the active marker.
+
+Version 0.30.3 fixes the last checkout polish regressions: WDC nested rate separators now render as an explicit stable `title - days: price` text flow, and pickup marker clicks are protected from the map-click close path so clicking an already-active marker reopens its popup/balloon after a manual close in both Leaflet and Yandex providers.
+
+Version 0.30.2 tightens the final checkout polish: WDC nested rate text now renders as `{title} - {days}: {price} {old price}` without extra spacing, pickup popup/list select buttons use rounded scoped styling, and clicking an active pickup marker after closing its popup reopens the preview balloon without selecting the point.
+
+Version 0.30.1 polishes checkout UI details after the 0.30.0 split: the city picker modal now uses rounded checkout-style controls, WDC nested rate rows keep title, days, price, and crossed price in natural inline order, the pickup map search bar is a single rounded control with the submit action inside it, and active pickup markers stay visible/red while their popup opens above the marker.
+
+Version 0.30.0 moves WDC checkout shipping UI ownership into the main plugin. WDC now styles its own shipping methods, nested domestic rate choices, crossed prices, pickup card/button states, and checkout pickup modals, while `walls-invoice-payment.php` keeps the shared checkout layout, payment flow, ordinary third-party shipping method cards, and eshoplogistic `wc_esl_*` pickup duplication. The visible checkout address-check block is no longer rendered by default, and delivery sorting is shown inside the shipping area only when at least two WDC rates are available.
 
 Version 0.29.2 updates the pickup map geolocation control icon to a dark navigation arrow and raises the overlay button above map attribution.
 

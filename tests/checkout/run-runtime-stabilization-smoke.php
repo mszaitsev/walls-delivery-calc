@@ -348,6 +348,16 @@ final class WdcRuntimeSmokeWooCommerce {
 	}
 }
 
+final class WdcRuntimeSmokeRate {
+	/** @param array<string,mixed> $meta */
+	public function __construct( private array $meta ) {}
+
+	/** @return array<string,mixed> */
+	public function get_meta_data(): array {
+		return $this->meta;
+	}
+}
+
 if ( ! function_exists( 'WC' ) ) {
 	function WC(): WdcRuntimeSmokeWooCommerce {
 		static $wc = null;
@@ -600,6 +610,9 @@ runtime_smoke_assert( ! str_contains( $city_selector_js, 'update_checkout trigge
 $city_selector_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-city-selector.css' );
 foreach ( array( 'max-width: 1300px', 'column-count: 2', 'break-inside: avoid', '@media (max-width: 900px)', 'column-count: 1', 'width: 100%', 'min-width: 0', 'position: fixed' ) as $needle ) {
 	runtime_smoke_assert( str_contains( $city_selector_css, $needle ), 'City selector CSS must contain ' . $needle . '.' );
+}
+foreach ( array( '.wdc-city-picker-search', 'min-height: 50px', 'border: 1px solid #d5d5d5', 'border-radius: 12px', '.wdc-city-picker-use-manual', 'border-radius: 10px', '.wdc-city-picker-close', 'appearance: none', 'box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.18)', '.wdc-city-picker-region', 'background: #eef1f3', 'border-bottom: 1px solid #d8dee6' ) as $needle ) {
+	runtime_smoke_assert( str_contains( $city_selector_css, $needle ), 'City selector CSS must style the polished modal control: ' . $needle . '.' );
 }
 runtime_smoke_assert( ! str_contains( $city_selector_css, 'grid-template-columns: repeat(2' ), 'Desktop city selector CSS must not use equal-height grid columns.' );
 
@@ -869,6 +882,25 @@ WC()->session->set( 'shipping_for_package_0', array( 'cached' => true ) );
 $sort_selector->capture_update_order_review( 'wdc_platform_checkout_sort_mode=fastest' );
 runtime_smoke_assert( RateSorter::FASTEST === $sort_session->selected_sort_mode(), 'Sort selector must save fastest in session.' );
 runtime_smoke_assert( null === WC()->session->get( 'shipping_for_package_0' ), 'Sort selector must clear WooCommerce shipping cache when sort changes.' );
+ob_start();
+$sort_selector->render();
+$sort_zero_output = (string) ob_get_clean();
+runtime_smoke_assert( '' === $sort_zero_output, 'Sort selector must not render when there are no WDC rates.' );
+WC()->session->set( 'shipping_for_package_0', array( 'rates' => array( new WdcRuntimeSmokeRate( array( 'carrier_key' => 'russian_post' ) ) ) ) );
+ob_start();
+$sort_selector->render();
+$sort_one_output = (string) ob_get_clean();
+runtime_smoke_assert( '' === $sort_one_output, 'Sort selector must not render when there is only one WDC rate.' );
+WC()->session->set( 'shipping_for_package_0', array( 'rates' => array( new WdcRuntimeSmokeRate( array( 'carrier_key' => 'russian_post' ) ), new WdcRuntimeSmokeRate( array( 'carrier_key' => 'fallback' ) ) ) ) );
+ob_start();
+$sort_selector->render();
+$sort_two_output = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $sort_two_output, 'wdc-checkout-sort-row' ) && str_contains( $sort_two_output, 'wdc_platform_checkout_sort_mode' ), 'Sort selector must render only when two or more WDC rates are available.' );
+$checkout_sort_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-sort.js' );
+runtime_smoke_assert( str_contains( $checkout_sort_js, 'function relocateSortControl()' ) && str_contains( $checkout_sort_js, 'prependTo( $shippingCell )' ) && str_contains( $checkout_sort_js, 'updated_checkout' ), 'Checkout sort JS must move the selector into the shipping row before the methods list.' );
+$plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
+$registrar_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/ShippingMethodRegistrar.php' );
+runtime_smoke_assert( ! str_contains( $plugin_source, 'CheckoutAddressRenderer::class )->register()' ) && ! str_contains( $registrar_source, 'address-normalization.css' ), 'Visible checkout address-check block and its frontend CSS must not be registered by default.' );
 
 $fallback_rate = ( new FallbackRateFactory() )->create();
 runtime_smoke_assert( 'Нет видимых доступных вариантов доставки, обратитесь к менеджеру магазина' === $fallback_rate->title, 'Fallback rate label must be Russian.' );

@@ -35,6 +35,7 @@
 		var provider = null;
 		var visiblePoints = [];
 		var popupManuallyClosed = false;
+		var suppressNextMapClick = false;
 		var userLocation = null;
 		var originStatus = '';
 		var originStatusType = '';
@@ -59,12 +60,22 @@
 			labels: labels,
 			onBoundsChange: boundsChanged
 		});
-		provider.onPointClick(function (point) { preview(point, { focus: false, userAction: true }); });
+		provider.onPointClick(function (point) {
+			suppressNextMapClick = true;
+			openPointPreviewFromMarker(point);
+			window.setTimeout(function () { suppressNextMapClick = false; }, 0);
+		});
 		if (provider.onPopupSelect) {
 			provider.onPopupSelect(function (point) { commit(point, { focus: false }); });
 		}
 		if (provider.onMapClick) {
-			provider.onMapClick(function () { markPopupManuallyClosed('map_click'); });
+			provider.onMapClick(function () {
+				if (suppressNextMapClick) {
+					suppressNextMapClick = false;
+					return;
+				}
+				markPopupManuallyClosed('map_click');
+			});
 		}
 		if (provider.onPopupClose) {
 			provider.onPopupClose(function () { markPopupManuallyClosed('popup_close'); });
@@ -97,10 +108,30 @@
 			return '<div class="wdc-pickup-popup">' + rows.join('') + '</div>';
 		}
 
+		function openPointPreviewFromMarker(point) {
+			var selected = committedPoint && pointId(committedPoint) === pointId(point);
+			popupManuallyClosed = false;
+			previewPoint = point;
+			card.textContent = committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Р’С‹Р±РµСЂРёС‚Рµ РїСѓРЅРєС‚ РЅР° РєР°СЂС‚Рµ РёР»Рё РІ СЃРїРёСЃРєРµ.');
+			confirmButton.disabled = !committedPoint;
+			if (provider.setActivePoint) {
+				provider.setActivePoint(pointId(point));
+			}
+			renderList(visiblePoints);
+			updateListSelectButton();
+			if (provider.openPointPopup) {
+				provider.openPointPopup(point, renderPointPopup(point, selected), { ensureVisible: false, forceReopen: true });
+			}
+			scrollListRowIntoView(point);
+		}
+
 		function preview(point, options) {
 			options = options || {};
 			previewPoint = point;
 			if (options.userAction || options.initial) {
+				popupManuallyClosed = false;
+			}
+			if (options.forcePopup) {
 				popupManuallyClosed = false;
 			}
 			card.textContent = committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Выберите пункт на карте или в списке.');
@@ -113,7 +144,7 @@
 			}
 			renderList(visiblePoints);
 			updateListSelectButton();
-			if (provider.openPointPopup && !popupManuallyClosed) {
+			if (provider.openPointPopup && (!popupManuallyClosed || options.forcePopup)) {
 				provider.openPointPopup(point, renderPointPopup(point, committedPoint && pointId(committedPoint) === pointId(point)), { ensureVisible: !!options.ensureVisible });
 			}
 			scrollListRowIntoView(point);
@@ -248,7 +279,7 @@
 				}
 				var point = findPoint(row.getAttribute('data-wdc-point-id'));
 				if (point) {
-					preview(point, { focus: false, ensureVisible: true, userAction: true });
+					openPointPreviewFromMarker(point);
 				}
 			});
 		}
