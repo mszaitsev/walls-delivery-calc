@@ -27,17 +27,10 @@
 		var shippingAddress = field('shipping_address_1');
 		var shipToDifferent = field('ship_to_different_address');
 		var billingAddress = field('billing_address_1');
-		if (shipToDifferent) {
-			return shipToDifferent.checked ? 'shipping' : 'billing';
-		}
-		if (isVisible(shippingAddress) && !isVisible(billingAddress)) {
+		if (shipToDifferent && shipToDifferent.checked) {
 			return 'shipping';
 		}
-		if (isVisible(shippingAddress) && value('shipping_address_1') !== '') {
-			return 'shipping';
-		}
-
-		if (summary && summary.getAttribute('data-address-field') === 'shipping_address_1' && isVisible(shippingAddress)) {
+		if (!billingAddress && shippingAddress) {
 			return 'shipping';
 		}
 
@@ -125,7 +118,7 @@
 			marker.textContent = '*';
 			label.appendChild(document.createTextNode(' '));
 			label.appendChild(marker);
-		} else if (!required && marker) {
+		} else if (!required && marker && marker.getAttribute('data-wdc-added') === 'true') {
 			marker.remove();
 		}
 	}

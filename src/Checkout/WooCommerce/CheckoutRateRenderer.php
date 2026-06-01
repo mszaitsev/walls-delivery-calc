@@ -111,11 +111,11 @@ final class CheckoutRateRenderer {
 			return 'shipping_address_1';
 		}
 
-		if ( $this->posted_has( 'billing_address_1' ) || '' !== $this->posted_value( 'billing_address_1' ) ) {
+		if ( $this->posted_has( 'billing_address_1' ) ) {
 			return 'billing_address_1';
 		}
 
-		return $this->posted_has( 'shipping_address_1' ) || '' !== $this->posted_value( 'shipping_address_1' ) ? 'shipping_address_1' : 'billing_address_1';
+		return $this->posted_has( 'shipping_address_1' ) ? 'shipping_address_1' : 'billing_address_1';
 	}
 
 	/**

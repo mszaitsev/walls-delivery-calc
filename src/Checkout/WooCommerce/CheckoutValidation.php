@@ -215,7 +215,7 @@ final class CheckoutValidation {
 	 */
 	private function checkout_address_1( array $data ): string {
 		$use_shipping = '' !== $this->posted_string( $data, 'ship_to_different_address' )
-			|| ( ! array_key_exists( 'billing_address_1', $data ) && '' !== $this->posted_string( $data, 'shipping_address_1' ) );
+			|| ( ! array_key_exists( 'billing_address_1', $data ) && array_key_exists( 'shipping_address_1', $data ) );
 		$field = $use_shipping ? 'shipping_address_1' : 'billing_address_1';
 
 		return $this->posted_string( $data, $field );

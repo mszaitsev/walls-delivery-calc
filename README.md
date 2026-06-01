@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.31.0.
+Version: 0.31.1.
+
+Version 0.31.1 keeps courier checkout address required markers scoped to WDC-added markers and aligns billing/shipping address selection between PHP and frontend JS. Shipping address is now used only when `ship_to_different_address` is selected/present or when billing address is absent and shipping address exists, not merely because a hidden shipping address field has a value.
 
 Version 0.31.0 adds courier checkout address handling for WDC rates. Courier rates now expose normalized courier meta, the selected courier shipping method shows the customer's `{postcode}, {city}, {address}` summary or a linked warning to fill the address, the address field becomes required only while courier delivery is selected, and checkout validation rejects courier orders without address line 1 while pickup/no-shipping flows remain unaffected.
 
