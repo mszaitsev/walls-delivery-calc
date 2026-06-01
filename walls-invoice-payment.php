@@ -3,7 +3,7 @@
  * Plugin Name: Оплата по счету от ИП/ООО
  * Plugin URI: https://walls-shop.ru/
  * Description: Способ оплаты WooCommerce с проверкой ИНН через Dadata и оформлением заказа в статусе «Ожидает оплату».
- * Version: 1.1.52
+ * Version: 1.1.53
  * Author: Михаил Зайцев
  * Text Domain: walls-invoice-payment
  */
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 
 /* === ВЕРСИЯ ПЛАГИНА === */
 if (!defined('WALLS_INVOICE_PAYMENT_VERSION')) {
-    define('WALLS_INVOICE_PAYMENT_VERSION', '1.1.52');
+define('WALLS_INVOICE_PAYMENT_VERSION', '1.1.53');
 }
 
 define('WALLS_INVOICE_PAYMENT_GATEWAY_ID', 'invoice_ip_ooo');
@@ -1162,7 +1162,7 @@ $inline_css = <<<'CSS'
 }
 
 /* Нативную radio скрываем */
-.woocommerce-checkout ul#shipping_method input[type="radio"] {
+.woocommerce-checkout ul#shipping_method > li > input[type="radio"] {
     position: absolute !important;
     left: 0 !important;
     top: 0 !important;
@@ -1326,9 +1326,9 @@ $inline_css = <<<'CSS'
 }
 
 /* Кнопки выбора ПВЗ и т.п. */
-.woocommerce-checkout ul#shipping_method button,
-.woocommerce-checkout ul#shipping_method .button,
-.woocommerce-checkout ul#shipping_method a.button {
+.woocommerce-checkout ul#shipping_method button:not([hidden]),
+.woocommerce-checkout ul#shipping_method .button:not([hidden]),
+.woocommerce-checkout ul#shipping_method a.button:not([hidden]) {
     display: inline-flex !important;
     align-items: center;
     justify-content: center;
@@ -1351,17 +1351,17 @@ $inline_css = <<<'CSS'
     margin-right: auto !important;
 }
 
-.woocommerce-checkout ul#shipping_method button:hover,
-.woocommerce-checkout ul#shipping_method .button:hover,
-.woocommerce-checkout ul#shipping_method a.button:hover {
+.woocommerce-checkout ul#shipping_method button:not([hidden]):hover,
+.woocommerce-checkout ul#shipping_method .button:not([hidden]):hover,
+.woocommerce-checkout ul#shipping_method a.button:not([hidden]):hover {
     background: #ebebeb;
     border-color: #bdbdbd;
     box-shadow: 0 2px 6px rgba(0,0,0,0.08);
 }
 
-.woocommerce-checkout ul#shipping_method button:active,
-.woocommerce-checkout ul#shipping_method .button:active,
-.woocommerce-checkout ul#shipping_method a.button:active {
+.woocommerce-checkout ul#shipping_method button:not([hidden]):active,
+.woocommerce-checkout ul#shipping_method .button:not([hidden]):active,
+.woocommerce-checkout ul#shipping_method a.button:not([hidden]):active {
     transform: translateY(1px);
 }
 

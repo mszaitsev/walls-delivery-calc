@@ -2,7 +2,7 @@
 .wdc-pickup-selector,
 .wdc-courier-notice,
 .wdc-pickup-info {
-	margin: 8px 0 0 28px;
+	margin: 8px 22px 14px;
 	max-width: 520px;
 }
 
@@ -22,6 +22,7 @@
 .wdc-pickup-info {
 	padding: 8px 10px;
 	border-left: 3px solid #2271b1;
+	border-radius: 6px;
 	background: #f6f7f7;
 }
 

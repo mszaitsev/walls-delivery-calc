@@ -450,7 +450,6 @@ final class Plugin {
 			$this->container->get( CheckoutDeliveryTypeSelector::class )->register();
 			$this->container->get( CheckoutSortSelector::class )->register();
 			$this->container->get( CheckoutAddressRuntime::class )->register();
-			$this->container->get( CheckoutAddressRenderer::class )->register();
 			$this->container->get( CheckoutValidation::class )->register();
 			$this->container->get( OrderShippingMetaPersister::class )->register();
 			$this->container->get( PickupMapCheckout::class )->register();

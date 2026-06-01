@@ -12,7 +12,21 @@ final class CheckoutRateRenderer {
 	}
 
 	public function register(): void {
+		add_filter( 'woocommerce_cart_shipping_method_full_label', array( $this, 'append_crossed_price_to_label' ), 10, 2 );
 		add_action( 'woocommerce_after_shipping_rate', array( $this, 'render' ), 10, 2 );
+	}
+
+	public function append_crossed_price_to_label( string $label, mixed $method ): string {
+		$meta = $this->meta( $method );
+		if ( array() === $meta || ! isset( $meta['carrier_key'] ) ) {
+			return $label;
+		}
+
+		if ( ! is_array( $meta['crossed_price'] ?? null ) || ! isset( $meta['crossed_price']['amount_kopecks'] ) ) {
+			return $label;
+		}
+
+		return $label . ' <span class="wdc-platform-crossed-price wdc-platform-crossed-price--inline">' . esc_html( $this->format_money( (int) $meta['crossed_price']['amount_kopecks'] ) ) . '</span>';
 	}
 
 	public function render( mixed $method, int|string $index = 0 ): void {
@@ -29,10 +43,6 @@ final class CheckoutRateRenderer {
 		echo '<div class="' . esc_attr( implode( ' ', $classes ) ) . '">';
 
 		$this->render_tariff_selector( $meta );
-
-		if ( is_array( $meta['crossed_price'] ?? null ) && isset( $meta['crossed_price']['amount_kopecks'] ) ) {
-			echo '<span class="wdc-platform-crossed-price">' . esc_html( $this->format_money( (int) $meta['crossed_price']['amount_kopecks'] ) ) . '</span>';
-		}
 
 		if ( empty( $meta['domestic_tariff_grouped'] ) && empty( $meta['tariff_variants'] ) && '' !== trim( (string) ( $meta['planned_delivery_comment'] ?? '' ) ) ) {
 			echo '<div class="wdc-platform-delivery-comment wdc-shipping-rate-comment">' . esc_html( (string) $meta['planned_delivery_comment'] ) . '</div>';
@@ -94,14 +104,14 @@ final class CheckoutRateRenderer {
 			echo '<label class="wdc-domestic-tariff-selector__item">';
 			echo '<input type="radio" name="wdc_domestic_tariff_' . esc_attr( $service_key ) . '" value="' . esc_attr( $object ) . '" data-title="' . esc_attr( $title ) . '" data-price="' . esc_attr( (string) ( $variant['price_rub'] ?? '' ) ) . '" ' . checked( $selected, $object, false ) . '>';
 			echo '<span class="wdc-domestic-tariff-selector__title">' . esc_html( $title ) . '</span>';
+			if ( '' !== $comment ) {
+				echo '<span class="wdc-domestic-tariff-selector__days">' . esc_html( $comment ) . '</span>';
+			}
 			if ( '' !== $price ) {
 				echo '<span class="wdc-domestic-tariff-selector__price">' . esc_html( $price ) . '</span>';
 			}
 			if ( '' !== $crossed ) {
 				echo '<span class="wdc-platform-crossed-price wdc-domestic-tariff-selector__crossed-price">' . esc_html( $crossed ) . '</span>';
-			}
-			if ( '' !== $comment ) {
-				echo '<span class="wdc-domestic-tariff-selector__days">' . esc_html( $comment ) . '</span>';
 			}
 			echo '</label>';
 		}

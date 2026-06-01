@@ -4,7 +4,7 @@ Version: 0.28.5.
 
 Version 0.28.5 clears stale checkout pickup selection when the customer manually changes the city through the checkout city selector, while protecting the controlled cross-location pickup flow with a one-shot suppression flag.
 
-Known checkout styling conflict: when the external plugin "Оплата по счету от ИП/ООО" is enabled, its CSS/JS may override the primary pickup button hiding rules. Without that plugin WDC hides the button correctly. Revisit this during the final unified checkout styling pass.
+As of WDC 0.30.0, the checkout pickup UI is styled by WDC itself. The external plugin "Оплата по счету от ИП/ООО" keeps the shared checkout layout and eshoplogistic-specific behavior, while WDC owns `russian_post_domestic_pickup` cards, nested rate controls, crossed prices, and hidden selected-pickup button states.
 
 Version 0.27.6 refreshes the map startup context after a cross-location pickup save. After `updated_checkout` and the successful pending point save, the frontend rebuilds context from the resolved location and current checkout DOM fields, stores it in both runtime `currentContext` and localized `window.wdcPickupCheckout.initialContext`, keeps the selected pickup point attached, invalidates old prefetch data, and schedules a new prefetch for the new locality. The next "Изменить пункт выдачи" open therefore starts from the confirmed locality instead of an old or fallback city. Prefetch keys now include FIAS, and field context matching accepts city-selector formatted values like `г Новосибирск` as the same hidden location.
 
