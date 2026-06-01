@@ -211,6 +211,12 @@
 	align-items: center;
 	gap: 8px;
 	min-width: 0;
+	min-height: 50px;
+	padding: 4px;
+	border: 1px solid #d5d5d5;
+	border-radius: 12px;
+	background: #fff;
+	box-sizing: border-box;
 }
 
 .wdc-pickup-search__icon {
@@ -225,24 +231,40 @@
 
 .wdc-pickup-search .wdc-pickup-modal__search {
 	width: 100%;
+	min-height: 40px;
 	padding-left: 34px;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	outline: none;
+	box-sizing: border-box;
 }
 
 .wdc-pickup-search__button {
 	flex: 0 0 auto;
+	min-height: 40px;
+	padding: 0 14px;
+	border-radius: 10px;
 	white-space: nowrap;
 }
 
 .wdc-pickup-modal__close {
+	display: inline-grid;
+	place-items: center;
 	width: 36px;
 	height: 36px;
+	padding: 0;
 	border: 1px solid #d8dee6;
-	border-radius: 8px;
+	border-radius: 10px;
 	background: #fff;
 	color: #334155;
 	font-size: 24px;
 	line-height: 1;
 	cursor: pointer;
+	appearance: none;
+	-webkit-appearance: none;
+	box-sizing: border-box;
 }
 
 .wdc-pickup-modal__close:hover,
@@ -276,7 +298,7 @@
 .wdc-pickup-map__locate {
 	position: absolute;
 	right: 16px;
-	bottom: 32px;
+	bottom: 36px;
 	z-index: 650;
 	display: inline-grid;
 	place-items: center;

@@ -611,6 +611,9 @@ $city_selector_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/asset
 foreach ( array( 'max-width: 1300px', 'column-count: 2', 'break-inside: avoid', '@media (max-width: 900px)', 'column-count: 1', 'width: 100%', 'min-width: 0', 'position: fixed' ) as $needle ) {
 	runtime_smoke_assert( str_contains( $city_selector_css, $needle ), 'City selector CSS must contain ' . $needle . '.' );
 }
+foreach ( array( '.wdc-city-picker-search', 'min-height: 50px', 'border: 1px solid #d5d5d5', 'border-radius: 12px', '.wdc-city-picker-use-manual', 'border-radius: 10px', '.wdc-city-picker-close', 'appearance: none', 'box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.18)', '.wdc-city-picker-region', 'background: #eef1f3', 'border-bottom: 1px solid #d8dee6' ) as $needle ) {
+	runtime_smoke_assert( str_contains( $city_selector_css, $needle ), 'City selector CSS must style the polished modal control: ' . $needle . '.' );
+}
 runtime_smoke_assert( ! str_contains( $city_selector_css, 'grid-template-columns: repeat(2' ), 'Desktop city selector CSS must not use equal-height grid columns.' );
 
 $checkout_sort_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-sort.js' );

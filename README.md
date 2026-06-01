@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.30.0.
+Version: 0.30.1.
+
+Version 0.30.1 polishes checkout UI details after the 0.30.0 split: the city picker modal now uses rounded checkout-style controls, WDC nested rate rows keep title, days, price, and crossed price in natural inline order, the pickup map search bar is a single rounded control with the submit action inside it, and active pickup markers stay visible/red while their popup opens above the marker.
 
 Version 0.30.0 moves WDC checkout shipping UI ownership into the main plugin. WDC now styles its own shipping methods, nested domestic rate choices, crossed prices, pickup card/button states, and checkout pickup modals, while `walls-invoice-payment.php` keeps the shared checkout layout, payment flow, ordinary third-party shipping method cards, and eshoplogistic `wc_esl_*` pickup duplication. The visible checkout address-check block is no longer rendered by default, and delivery sorting is shown inside the shipping area only when at least two WDC rates are available.
 

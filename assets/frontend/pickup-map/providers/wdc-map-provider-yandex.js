@@ -102,6 +102,8 @@
 				}, {
 					balloonAutoPan: true,
 					balloonAutoPanMargin: 24,
+					balloonOffset: [0, -58],
+					hideIconOnBalloonOpen: false,
 					iconLayout: markerLayout,
 					iconOffset: [-21, -59],
 					iconShape: { type: 'Circle', coordinates: [21, 21], radius: 21 }
@@ -222,6 +224,8 @@
 				if (!placemark || !placemark.properties || !placemark.balloon) {
 					return;
 				}
+				activePointId = id;
+				updateActivePlacemarks();
 				suppressPopupClose = true;
 				placemark.properties.set('balloonContent', html);
 				placemark.balloon.open();

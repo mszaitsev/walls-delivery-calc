@@ -68,15 +68,19 @@
 				suppressPopupClose = false;
 			},
 			openPointPopup: function (point, html) {
-				var marker = markerById[pointId(point)];
+				var id = pointId(point);
+				var marker = markerById[id];
 				if (marker && marker.bindPopup) {
+					activePointId = id;
+					updateActiveMarkers();
 					suppressPopupClose = true;
 					marker.bindPopup(html, {
 						autoPan: true,
 						autoPanPadding: [24, 24],
 						className: 'wdc-pickup-map-popup',
 						keepInView: true,
-						maxWidth: 280
+						maxWidth: 280,
+						offset: window.L.point(0, -5)
 					});
 					marker.openPopup();
 					suppressPopupClose = false;
@@ -246,7 +250,7 @@
 				html: '<span class="wdc-map-marker-pin wdc-map-marker-pin--' + type.toLowerCase() + (active ? ' is-active' : '') + '"><span class="wdc-map-marker-pin__inner"></span><span class="wdc-map-marker-pin__tail"></span></span>',
 				iconSize: [38, 53],
 				iconAnchor: [19, 53],
-				popupAnchor: [0, -53]
+				popupAnchor: [0, -58]
 			});
 		}
 
