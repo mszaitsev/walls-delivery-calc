@@ -47,6 +47,50 @@
 	color: #334155;
 }
 
+.wdc-courier-address-summary {
+	box-sizing: border-box;
+	flex-basis: 100%;
+	width: 100%;
+	margin: 4px 0 2px;
+	padding: 12px 14px;
+	border: 1px solid #e2e8f0;
+	border-radius: 12px;
+	background: #f8fafc;
+	color: #0f172a;
+	overflow-wrap: anywhere;
+}
+
+.wdc-courier-address-summary[hidden],
+.wdc-courier-address-summary__value[hidden],
+.wdc-courier-address-summary__warning[hidden] {
+	display: none !important;
+}
+
+.wdc-courier-address-summary__title {
+	margin: 0 0 4px;
+	font-size: 12px;
+	font-weight: 700;
+	line-height: 1.35;
+	color: #334155;
+}
+
+.wdc-courier-address-summary__value,
+.wdc-courier-address-summary__warning {
+	font-size: 13px;
+	line-height: 1.45;
+}
+
+.wdc-courier-address-summary__warning {
+	color: #92400e;
+}
+
+.wdc-courier-address-summary__warning a {
+	color: #b45309;
+	font-weight: 600;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
 .wdc-rate-comment,
 .wdc-shipping-rate-comment {
 	display: block;
@@ -118,5 +162,9 @@
 
 	.wdc-checkout-sort-inline {
 		justify-content: flex-start;
+	}
+
+	.wdc-courier-address-summary {
+		padding: 10px 12px;
 	}
 }

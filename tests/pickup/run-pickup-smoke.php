@@ -462,7 +462,10 @@ $session->save_rates(
 WC()->session->set( 'chosen_shipping_methods', array( NewShippingMethod::METHOD_ID . ':demo:courier' ) );
 $errors = new WdcPickupSmokeErrors();
 ( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
-pickup_smoke_assert( ! $errors->has_errors(), 'Validation must pass for courier with stale pickup selection.' );
+pickup_smoke_assert( $errors->has_errors(), 'Validation must fail for courier without address.' );
+$errors = new WdcPickupSmokeErrors();
+( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск', 'billing_address_1' => 'ул. Советская, д. 99' ), $errors );
+pickup_smoke_assert( ! $errors->has_errors(), 'Validation must pass for courier with address and stale pickup selection.' );
 $order = new WdcPickupSmokeOrder();
 $persister = new OrderShippingMetaPersister( $session );
 $persister->persist( $order );

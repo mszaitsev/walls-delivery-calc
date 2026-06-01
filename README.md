@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.30.7.
+Version: 0.31.0.
+
+Version 0.31.0 adds courier checkout address handling for WDC rates. Courier rates now expose normalized courier meta, the selected courier shipping method shows the customer's `{postcode}, {city}, {address}` summary or a linked warning to fill the address, the address field becomes required only while courier delivery is selected, and checkout validation rejects courier orders without address line 1 while pickup/no-shipping flows remain unaffected.
 
 Version 0.30.7 brings the same force-reopen behavior to the Leaflet/OpenStreetMap pickup map: active marker popup opens now always unbind/rebind before opening, popup close refreshes the active marker state, and side-list clicks use the same direct popup reopen path as marker clicks without committing a point.
 
