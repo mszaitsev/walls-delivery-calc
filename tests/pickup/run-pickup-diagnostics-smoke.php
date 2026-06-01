@@ -203,16 +203,24 @@ pickup_diagnostics_assert( array() === $GLOBALS['wpdb']->queries, 'Migration 002
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->schema_return_mode = 'array';
 $GLOBALS['wpdb']->existing_tables[ $locations_table ] = true;
-$GLOBALS['wpdb']->columns[ $locations_table ]['postal_code'] = true;
 $GLOBALS['wpdb']->columns[ $locations_table ]['postcode'] = true;
 $migration_0023();
-pickup_diagnostics_assert( empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postcode'] ) && ! empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postal_code'] ), 'Migration 0023 must drop only legacy postcode and keep postal_code.' );
+pickup_diagnostics_assert( empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postcode'] ) && ! empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postal_code'] ), 'Migration 0023 must create postal_code for old schemas before dropping legacy postcode.' );
+$old_schema_queries = implode( "\n", $GLOBALS['wpdb']->queries );
+pickup_diagnostics_assert( str_contains( $old_schema_queries, 'ADD COLUMN postal_code' ) && str_contains( $old_schema_queries, 'UPDATE wp_wdc_locations SET postal_code = postcode' ) && str_contains( $old_schema_queries, 'DROP COLUMN postcode' ), 'Migration 0023 must add postal_code, preserve postcode values, then drop legacy postcode.' );
 
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->existing_tables[ $locations_table ] = true;
+$GLOBALS['wpdb']->columns[ $locations_table ]['postal_code'] = true;
 $GLOBALS['wpdb']->columns[ $locations_table ]['postcode'] = true;
 $migration_0023();
-pickup_diagnostics_assert( ! empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postcode'] ), 'Migration 0023 must not drop postcode when canonical postal_code is absent.' );
+pickup_diagnostics_assert( empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postcode'] ) && ! empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postal_code'] ), 'Migration 0023 must drop postcode when postal_code and postcode both exist.' );
+
+$GLOBALS['wpdb'] = new wpdb();
+$GLOBALS['wpdb']->existing_tables[ $locations_table ] = true;
+$GLOBALS['wpdb']->columns[ $locations_table ]['postal_code'] = true;
+$migration_0023();
+pickup_diagnostics_assert( ! empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postal_code'] ) && ! str_contains( implode( "\n", $GLOBALS['wpdb']->queries ), 'DROP COLUMN postcode' ), 'Migration 0023 must do nothing destructive when only postal_code exists.' );
 
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->locations = array(
@@ -284,6 +292,8 @@ pickup_diagnostics_assert( str_contains( $locations_by_postcode_source, 'postal_
 
 $locations_migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0002_create_locations_table.php' );
 pickup_diagnostics_assert( str_contains( $locations_migration_source, 'postal_code varchar' ) && ! str_contains( $locations_migration_source, 'postcode varchar' ), 'fresh locations schema must create postal_code instead of legacy postcode.' );
+$coordinate_enricher_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Locations/LocationCoordinateEnricher.php' );
+pickup_diagnostics_assert( ! str_contains( $coordinate_enricher_source, "\$location['postcode']" ) && ! str_contains( $coordinate_enricher_source, 'locations.postcode' ) && ! str_contains( $coordinate_enricher_source, 'l.postcode' ), 'Location code must not expect legacy locations.postcode.' );
 
 $location_repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Storage/LocationRepository.php' );
 $gar_import_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/GarPlacesCsvImporter.php' );

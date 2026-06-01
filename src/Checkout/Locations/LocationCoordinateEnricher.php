@@ -108,7 +108,7 @@ final class LocationCoordinateEnricher {
 				' ',
 				array_filter(
 					array(
-						(string) ( $location['postal_code'] ?? $location['postcode'] ?? '' ),
+						(string) ( $location['postal_code'] ?? '' ),
 						(string) ( $location['display_name'] ?? '' ),
 						(string) ( $location['city_name'] ?? '' ),
 						(string) ( $location['settlement_name'] ?? $location['place_name'] ?? '' ),
