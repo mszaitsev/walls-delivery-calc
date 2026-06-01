@@ -20,7 +20,7 @@ return static function (): void {
 		settlement_name varchar(255) NOT NULL DEFAULT '',
 		settlement_type varchar(64) NOT NULL DEFAULT '',
 		display_name varchar(512) NOT NULL DEFAULT '',
-		postcode varchar(32) NOT NULL DEFAULT '',
+		postal_code varchar(32) NOT NULL DEFAULT '',
 		latitude decimal(10,7) NULL,
 		longitude decimal(10,7) NULL,
 		searchable_text longtext NOT NULL,
@@ -32,7 +32,7 @@ return static function (): void {
 		KEY region_name (region_name),
 		KEY city_name (city_name),
 		KEY settlement_name (settlement_name),
-		KEY postcode (postcode),
+		KEY postal_code (postal_code),
 		KEY active (active)
 	) {$charset_collate}";
 

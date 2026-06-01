@@ -45,6 +45,17 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $russian_post_pickup_rows = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $locations = array();
+		/** @var array<string,bool> */
+		public array $existing_tables = array();
+		/** @var array<string,array<string,bool>> */
+		public array $columns = array();
+		/** @var array<string,array<string,bool>> */
+		public array $indexes = array();
+		/** @var array<int,string> */
+		public array $queries = array();
+		public int $suppress_errors_calls = 0;
+		public string $schema_return_mode = 'string';
+		public string $last_error = '';
 
 		public function get_charset_collate(): string {
 			return 'DEFAULT CHARSET=utf8mb4';
@@ -62,7 +73,13 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return $query;
 		}
 
-		public function get_row( string $query, mixed $output = null ): ?array {
+		public function get_row( string $query, mixed $output = null ): mixed {
+			if ( preg_match( "/SHOW COLUMNS FROM ([A-Za-z0-9_]+) LIKE '([^']+)'/", $query, $m ) ) {
+				return ! empty( $this->columns[ $m[1] ][ $m[2] ] ) ? $this->schema_row( $m[2], 'Field' ) : null;
+			}
+			if ( preg_match( "/SHOW INDEX FROM ([A-Za-z0-9_]+) WHERE Key_name = '([^']+)'/", $query, $m ) ) {
+				return ! empty( $this->indexes[ $m[1] ][ $m[2] ] ) ? $this->schema_row( $m[2], 'Key_name' ) : null;
+			}
 			if ( preg_match( '/WHERE l?\.?id = ([0-9]+)/', $query, $m ) ) {
 				foreach ( $this->locations as $row ) {
 					if ( (int) ( $row['id'] ?? 0 ) === (int) $m[1] ) {
@@ -84,12 +101,64 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return array();
 		}
 
-		public function get_var( string $query ): int {
+		public function get_var( string $query ): mixed {
+			if ( preg_match( "/SHOW TABLES LIKE '([^']+)'/", $query, $m ) ) {
+				return ! empty( $this->existing_tables[ $m[1] ] ) ? $m[1] : null;
+			}
+			if ( preg_match( "/SHOW COLUMNS FROM ([A-Za-z0-9_]+) LIKE '([^']+)'/", $query, $m ) ) {
+				return ! empty( $this->columns[ $m[1] ][ $m[2] ] ) ? $this->schema_value( $m[2], 'Field' ) : null;
+			}
+			if ( preg_match( "/SHOW INDEX FROM ([A-Za-z0-9_]+) WHERE Key_name = '([^']+)'/", $query, $m ) ) {
+				return ! empty( $this->indexes[ $m[1] ][ $m[2] ] ) ? $this->schema_value( $m[2], 'Key_name' ) : null;
+			}
+
 			return 0;
+		}
+
+		public function query( string $query ): int|bool {
+			$this->queries[] = $query;
+			if ( preg_match( '/ALTER TABLE ([A-Za-z0-9_]+) ADD COLUMN ([A-Za-z0-9_]+)/', $query, $m ) ) {
+				$this->columns[ $m[1] ][ $m[2] ] = true;
+				return true;
+			}
+			if ( preg_match( '/ALTER TABLE ([A-Za-z0-9_]+) ADD KEY ([A-Za-z0-9_]+)/', $query, $m ) ) {
+				$this->indexes[ $m[1] ][ $m[2] ] = true;
+				return true;
+			}
+			if ( preg_match( '/ALTER TABLE ([A-Za-z0-9_]+) DROP COLUMN ([A-Za-z0-9_]+)/', $query, $m ) ) {
+				unset( $this->columns[ $m[1] ][ $m[2] ] );
+				return true;
+			}
+
+			return true;
 		}
 
 		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
 			return true;
+		}
+
+		public function suppress_errors( bool $suppress = true ): bool {
+			++$this->suppress_errors_calls;
+			return false;
+		}
+
+		private function schema_value( string $value, string $key ): mixed {
+			if ( 'object' === $this->schema_return_mode ) {
+				return (object) array( $key => $value );
+			}
+			if ( 'array' === $this->schema_return_mode ) {
+				return array( $key => $value );
+			}
+
+			return $value;
+		}
+
+		private function schema_row( string $value, string $key ): mixed {
+			if ( 'object' === $this->schema_return_mode ) {
+				return (object) array( $key => $value );
+			}
+
+			return array( $key => $value );
 		}
 	}
 }
@@ -97,6 +166,53 @@ if ( ! class_exists( 'wpdb' ) ) {
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupDiagnosticsService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+
+$GLOBALS['wpdb'] = new wpdb();
+
+$migration_0022 = require dirname( __DIR__, 2 ) . '/database/migrations/0022_add_russian_post_pickup_location_id.php';
+$migration_0023 = require dirname( __DIR__, 2 ) . '/database/migrations/0023_drop_unused_locations_postcode.php';
+$pickup_table = 'wp_wdc_pickup_points_russian_post';
+$locations_table = 'wp_wdc_locations';
+
+$migration_0022();
+pickup_diagnostics_assert( array() === $GLOBALS['wpdb']->queries, 'Migration 0022 must do nothing safely if Russian Post pickup table is missing.' );
+pickup_diagnostics_assert( 0 === $GLOBALS['wpdb']->suppress_errors_calls, 'Migration 0022 must not call suppress_errors().' );
+
+$GLOBALS['wpdb'] = new wpdb();
+$GLOBALS['wpdb']->existing_tables[ $pickup_table ] = true;
+$migration_0022();
+pickup_diagnostics_assert( ! empty( $GLOBALS['wpdb']->columns[ $pickup_table ]['location_id'] ), 'Migration 0022 must add location_id if column is absent.' );
+pickup_diagnostics_assert( ! empty( $GLOBALS['wpdb']->indexes[ $pickup_table ]['idx_location_id'] ), 'Migration 0022 must add idx_location_id if index is absent.' );
+
+$GLOBALS['wpdb'] = new wpdb();
+$GLOBALS['wpdb']->existing_tables[ $pickup_table ] = true;
+$GLOBALS['wpdb']->columns[ $pickup_table ]['location_id'] = true;
+$migration_0022();
+$add_column_queries = array_values( array_filter( $GLOBALS['wpdb']->queries, static fn( string $query ): bool => str_contains( $query, 'ADD COLUMN location_id' ) ) );
+pickup_diagnostics_assert( array() === $add_column_queries, 'Migration 0022 must skip ADD COLUMN when location_id exists.' );
+pickup_diagnostics_assert( ! empty( $GLOBALS['wpdb']->indexes[ $pickup_table ]['idx_location_id'] ), 'Migration 0022 must still add idx_location_id when column exists and index is absent.' );
+
+$GLOBALS['wpdb'] = new wpdb();
+$GLOBALS['wpdb']->schema_return_mode = 'object';
+$GLOBALS['wpdb']->existing_tables[ $pickup_table ] = true;
+$GLOBALS['wpdb']->columns[ $pickup_table ]['location_id'] = true;
+$GLOBALS['wpdb']->indexes[ $pickup_table ]['idx_location_id'] = true;
+$migration_0022();
+pickup_diagnostics_assert( array() === $GLOBALS['wpdb']->queries, 'Migration 0022 must skip ADD KEY when idx_location_id exists and handle object-like SHOW results.' );
+
+$GLOBALS['wpdb'] = new wpdb();
+$GLOBALS['wpdb']->schema_return_mode = 'array';
+$GLOBALS['wpdb']->existing_tables[ $locations_table ] = true;
+$GLOBALS['wpdb']->columns[ $locations_table ]['postal_code'] = true;
+$GLOBALS['wpdb']->columns[ $locations_table ]['postcode'] = true;
+$migration_0023();
+pickup_diagnostics_assert( empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postcode'] ) && ! empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postal_code'] ), 'Migration 0023 must drop only legacy postcode and keep postal_code.' );
+
+$GLOBALS['wpdb'] = new wpdb();
+$GLOBALS['wpdb']->existing_tables[ $locations_table ] = true;
+$GLOBALS['wpdb']->columns[ $locations_table ]['postcode'] = true;
+$migration_0023();
+pickup_diagnostics_assert( ! empty( $GLOBALS['wpdb']->columns[ $locations_table ]['postcode'] ), 'Migration 0023 must not drop postcode when canonical postal_code is absent.' );
 
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->locations = array(
@@ -161,5 +277,26 @@ pickup_diagnostics_assert( 0 === (int) $GLOBALS['wpdb']->russian_post_pickup_row
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Admin/PickupAdminPage.php' );
 pickup_diagnostics_assert( str_contains( $admin_source, "wp_verify_nonce" ) && str_contains( $admin_source, "current_user_can( 'manage_options' )" ) && str_contains( $admin_source, 'method="post"' ), 'admin rebind action must require POST, nonce, and manage_options capability.' );
+
+$diagnostics_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/RussianPost/RussianPostPickupDiagnosticsService.php' );
+$locations_by_postcode_source = substr( $diagnostics_source, (int) strpos( $diagnostics_source, 'private function locations_by_postcode' ), 1200 );
+pickup_diagnostics_assert( str_contains( $locations_by_postcode_source, 'postal_code' ) && ! str_contains( $locations_by_postcode_source, 'WHERE active = 1 AND postcode' ), 'diagnostics locations_by_postcode must use canonical locations.postal_code.' );
+
+$locations_migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0002_create_locations_table.php' );
+pickup_diagnostics_assert( str_contains( $locations_migration_source, 'postal_code varchar' ) && ! str_contains( $locations_migration_source, 'postcode varchar' ), 'fresh locations schema must create postal_code instead of legacy postcode.' );
+
+$location_repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Storage/LocationRepository.php' );
+$gar_import_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/GarPlacesCsvImporter.php' );
+$fias_import_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/FiasImportManager.php' );
+$snapshot_exporter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/LocationsSnapshotExporter.php' );
+$snapshot_importer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/LocationsSnapshotImporter.php' );
+pickup_diagnostics_assert(
+	str_contains( $location_repository_source, 'bulk_save_aliases' )
+	&& str_contains( $gar_import_source, 'bulk_save_aliases' )
+	&& str_contains( $fias_import_source, 'save_aliases' )
+	&& str_contains( $snapshot_exporter_source, "'wdc_location_aliases'" )
+	&& str_contains( $snapshot_importer_source, "'wdc_location_aliases'" ),
+	'audit must document actual wdc_location_aliases usage by imports, repository, and snapshots.'
+);
 
 echo "Pickup diagnostics smoke test passed.\n";
