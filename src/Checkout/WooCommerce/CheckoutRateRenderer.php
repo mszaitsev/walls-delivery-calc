@@ -101,20 +101,24 @@ final class CheckoutRateRenderer {
 			$crossed = is_array( $variant['crossed_price'] ?? null ) && isset( $variant['crossed_price']['amount_kopecks'] )
 				? $this->format_money( (int) $variant['crossed_price']['amount_kopecks'] )
 				: '';
-			echo '<label class="wdc-domestic-tariff-selector__item">';
-			echo '<input type="radio" name="wdc_domestic_tariff_' . esc_attr( $service_key ) . '" value="' . esc_attr( $object ) . '" data-title="' . esc_attr( $title ) . '" data-price="' . esc_attr( (string) ( $variant['price_rub'] ?? '' ) ) . '" ' . checked( $selected, $object, false ) . '>';
-			echo '<span class="wdc-domestic-tariff-selector__title">' . esc_html( $title ) . '</span>';
+			$line = $title;
 			if ( '' !== $comment ) {
-				echo '<span class="wdc-domestic-tariff-selector__separator" aria-hidden="true"> - </span>';
-				echo '<span class="wdc-domestic-tariff-selector__days">' . esc_html( $comment ) . '</span>';
+				$line .= ' - ' . $comment;
 			}
 			if ( '' !== $price ) {
-				echo '<span class="wdc-domestic-tariff-selector__separator" aria-hidden="true">: </span>';
+				$line .= ': ';
+			}
+			echo '<label class="wdc-domestic-tariff-selector__item">';
+			echo '<input type="radio" name="wdc_domestic_tariff_' . esc_attr( $service_key ) . '" value="' . esc_attr( $object ) . '" data-title="' . esc_attr( $title ) . '" data-price="' . esc_attr( (string) ( $variant['price_rub'] ?? '' ) ) . '" ' . checked( $selected, $object, false ) . '>';
+			echo '<span class="wdc-domestic-tariff-selector__line">';
+			echo '<span class="wdc-domestic-tariff-selector__line-text">' . esc_html( $line ) . '</span>';
+			if ( '' !== $price ) {
 				echo '<span class="wdc-domestic-tariff-selector__price">' . esc_html( $price ) . '</span>';
 			}
 			if ( '' !== $crossed ) {
-				echo '<span class="wdc-platform-crossed-price wdc-domestic-tariff-selector__crossed-price">' . esc_html( $crossed ) . '</span>';
+				echo ' <span class="wdc-platform-crossed-price wdc-domestic-tariff-selector__crossed-price">' . esc_html( $crossed ) . '</span>';
 			}
+			echo '</span>';
 			echo '</label>';
 		}
 		echo '</div>';

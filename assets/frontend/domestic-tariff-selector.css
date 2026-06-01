@@ -9,7 +9,7 @@
 	align-items: center;
 	display: flex;
 	flex-wrap: wrap;
-	gap: 4px 0;
+	gap: 4px 8px;
 	line-height: 1.35;
 	margin: 0;
 	padding: 10px 12px;
@@ -24,7 +24,7 @@
 	flex: 0 0 auto;
 	width: 18px !important;
 	height: 18px !important;
-	margin: 0 8px 0 0 !important;
+	margin: 0 !important;
 	opacity: 1 !important;
 	pointer-events: auto !important;
 	clip: auto !important;
@@ -34,9 +34,14 @@
 	-moz-appearance: radio !important;
 }
 
-.wdc-domestic-tariff-selector__title {
-	flex: 0 1 auto;
+.wdc-domestic-tariff-selector__line {
+	display: block;
+	flex: 1 1 220px;
 	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.wdc-domestic-tariff-selector__line-text {
 	font-weight: 600;
 	overflow-wrap: anywhere;
 }
@@ -46,11 +51,8 @@
 	font-weight: 700;
 }
 
-.wdc-domestic-tariff-selector__separator,
 .wdc-domestic-tariff-selector__price,
-.wdc-domestic-tariff-selector__days,
 .wdc-domestic-tariff-selector__crossed-price {
-	flex: 0 0 auto;
 	white-space: nowrap;
 }
 
@@ -63,10 +65,9 @@
 		align-items: flex-start;
 	}
 
-	.wdc-domestic-tariff-selector__title,
-	.wdc-domestic-tariff-selector__separator,
+	.wdc-domestic-tariff-selector__line,
+	.wdc-domestic-tariff-selector__line-text,
 	.wdc-domestic-tariff-selector__price,
-	.wdc-domestic-tariff-selector__days,
 	.wdc-domestic-tariff-selector__crossed-price {
 		flex-basis: auto;
 		white-space: normal;

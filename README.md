@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.30.4.
+Version: 0.30.5.
+
+Version 0.30.5 simplifies the two stubborn checkout fixes: WDC domestic tariff labels now build one text line in PHP (`title - days: `) before the styled current price, avoiding flex-separated separator spans entirely, and pickup marker clicks use a direct `openPointPreviewFromMarker` path that clears manual-close state and imperatively reopens the popup every time.
 
 Version 0.30.4 makes WDC nested tariff separators part of the PHP markup instead of CSS pseudo-content, so empty days/prices do not leave stray punctuation. Pickup marker clicks now explicitly clear the manual popup-close flag and providers suppress close events during the reopen tick, so closing a popup with its X no longer blocks reopening it by clicking the active marker.
 

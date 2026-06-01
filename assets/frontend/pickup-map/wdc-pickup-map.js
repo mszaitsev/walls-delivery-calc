@@ -62,8 +62,7 @@
 		});
 		provider.onPointClick(function (point) {
 			suppressNextMapClick = true;
-			popupManuallyClosed = false;
-			preview(point, { focus: false, forcePopup: true, userAction: true });
+			openPointPreviewFromMarker(point);
 			window.setTimeout(function () { suppressNextMapClick = false; }, 0);
 		});
 		if (provider.onPopupSelect) {
@@ -107,6 +106,23 @@
 			}
 			rows.push('<button type="button" class="button button-primary wdc-pickup-popup__select" data-wdc-pickup-popup-select data-wdc-point-id="' + escapeHtml(pointId(point)) + '"' + (selected ? ' disabled' : '') + '>' + escapeHtml(selected ? 'Выбран' : 'Выбрать этот пункт') + '</button>');
 			return '<div class="wdc-pickup-popup">' + rows.join('') + '</div>';
+		}
+
+		function openPointPreviewFromMarker(point) {
+			var selected = committedPoint && pointId(committedPoint) === pointId(point);
+			popupManuallyClosed = false;
+			previewPoint = point;
+			card.textContent = committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Р’С‹Р±РµСЂРёС‚Рµ РїСѓРЅРєС‚ РЅР° РєР°СЂС‚Рµ РёР»Рё РІ СЃРїРёСЃРєРµ.');
+			confirmButton.disabled = !committedPoint;
+			if (provider.setActivePoint) {
+				provider.setActivePoint(pointId(point));
+			}
+			renderList(visiblePoints);
+			updateListSelectButton();
+			if (provider.openPointPopup) {
+				provider.openPointPopup(point, renderPointPopup(point, selected), { ensureVisible: false, forceReopen: true });
+			}
+			scrollListRowIntoView(point);
 		}
 
 		function preview(point, options) {
