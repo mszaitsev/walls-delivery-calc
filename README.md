@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.30.5.
+Version: 0.30.6.
+
+Version 0.30.6 fixes the Yandex-only pickup map edge case where closing a balloon with its X could leave the Yandex events pane intercepting clicks on the still-active marker. The Yandex provider now recreates the active placemark after a real balloon close, preserving active state and click handlers so the next marker click opens the balloon again.
 
 Version 0.30.5 simplifies the two stubborn checkout fixes: WDC domestic tariff labels now build one text line in PHP (`title - days: `) before the styled current price, avoiding flex-separated separator spans entirely, and pickup marker clicks use a direct `openPointPreviewFromMarker` path that clears manual-close state and imperatively reopens the popup every time.
 
