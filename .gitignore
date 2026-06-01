@@ -15,4 +15,3 @@ vendor/
 !assets/vendor/leaflet/
 !assets/vendor/leaflet/**
 wp-config.php
-walls-invoice-payment.php
