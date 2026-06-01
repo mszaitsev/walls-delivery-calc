@@ -263,11 +263,12 @@ pickup_diagnostics_assert( 1 === $summary['missing_address'], 'summary must catc
 pickup_diagnostics_assert( 1 === $summary['missing_city'], 'summary must catch empty city.' );
 pickup_diagnostics_assert( 1 === $summary['missing_region'], 'summary must catch empty region.' );
 pickup_diagnostics_assert( 3 === $summary['missing_location'], 'summary must catch missing location_id.' );
-pickup_diagnostics_assert( 1 === $summary['suspicious_coordinates'], 'summary must catch pickup point farther than threshold from location.' );
+pickup_diagnostics_assert( null === $summary['suspicious_coordinates'] && 'filter_only' === $summary['suspicious_coordinates_note'], 'summary must not calculate expensive suspicious coordinates on default diagnostics page.' );
 
 $all = $service->list_problematic( 'all_problematic', 1, 100 );
 $all_codes = array_column( $all['items'], 'point_code' );
 pickup_diagnostics_assert( ! in_array( 'OK-1', $all_codes, true ), 'normal pickup point must not be listed as problematic.' );
+pickup_diagnostics_assert( ! in_array( 'FAR', $all_codes, true ), 'all_problematic must not include suspicious-only rows by default.' );
 pickup_diagnostics_assert( in_array( 'MISS-COORD', array_column( $service->list_problematic( 'missing_coordinates', 1, 50 )['items'], 'point_code' ), true ), 'list_problematic must respect missing_coordinates filter.' );
 pickup_diagnostics_assert( in_array( 'FAR', array_column( $service->list_problematic( 'suspicious_coordinates', 1, 50 )['items'], 'point_code' ), true ), 'list_problematic must respect suspicious_coordinates filter.' );
 pickup_diagnostics_assert( 2 === count( $service->list_problematic( 'all_problematic', 1, 2 )['items'] ) && 2 === count( $service->list_problematic( 'all_problematic', 2, 2 )['items'] ), 'list_problematic must paginate.' );
@@ -287,6 +288,16 @@ $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup
 pickup_diagnostics_assert( str_contains( $admin_source, "wp_verify_nonce" ) && str_contains( $admin_source, "current_user_can( 'manage_options' )" ) && str_contains( $admin_source, 'method="post"' ), 'admin rebind action must require POST, nonce, and manage_options capability.' );
 
 $diagnostics_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/RussianPost/RussianPostPickupDiagnosticsService.php' );
+$summary_source = substr( $diagnostics_source, (int) strpos( $diagnostics_source, 'public function summary' ), 1400 );
+pickup_diagnostics_assert( ! str_contains( $summary_source, 'count_joined_problem_sql' ) && ! str_contains( $summary_source, 'count_suspicious_sql' ) && str_contains( $summary_source, "'suspicious_coordinates' => null" ), 'summary() must use cheap counters only and skip joined suspicious count.' );
+$problem_where_source = substr( $diagnostics_source, (int) strpos( $diagnostics_source, 'private function problem_where_sql' ), 2400 );
+pickup_diagnostics_assert( str_contains( $problem_where_source, 'default => $cheap' ), 'all_problematic WHERE must use cheap checks only.' );
+$suspicious_where_source = substr( $problem_where_source, (int) strpos( $problem_where_source, "'suspicious_coordinates'" ), 420 );
+pickup_diagnostics_assert( str_contains( $suspicious_where_source, 'distance_sql' ), 'suspicious_coordinates filter must contain distance SQL.' );
+$count_problem_source = substr( $diagnostics_source, (int) strpos( $diagnostics_source, 'private function count_problem_sql' ), 700 );
+pickup_diagnostics_assert( ! str_contains( $count_problem_source, 'all_problematic' ) && ! str_contains( $count_problem_source, 'count_joined_problem_sql' ), 'list all_problematic must use cheap WHERE count only.' );
+$select_source = substr( $diagnostics_source, (int) strpos( $diagnostics_source, 'private function select_sql' ), 700 );
+pickup_diagnostics_assert( str_contains( $select_source, 'NULL AS distance_to_location_km' ) && str_contains( $select_source, 'if ( ! $with_location_distance )' ), 'default diagnostics page must list with cheap select only.' );
 $locations_by_postcode_source = substr( $diagnostics_source, (int) strpos( $diagnostics_source, 'private function locations_by_postcode' ), 1200 );
 pickup_diagnostics_assert( str_contains( $locations_by_postcode_source, 'postal_code' ) && ! str_contains( $locations_by_postcode_source, 'WHERE active = 1 AND postcode' ), 'diagnostics locations_by_postcode must use canonical locations.postal_code.' );
 

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.32.1.
+Version: 0.32.2.
+
+Version 0.32.2 makes the Russian Post pickup diagnostics page fast to open on large pickup tables. The initial summary now uses only cheap counters, `all_problematic` excludes the expensive suspicious-coordinate distance check, and suspicious coordinates are evaluated only when the dedicated filter is selected.
 
 Version 0.32.1 makes the Russian Post pickup diagnostics schema migrations production-safe. Migration `0022` now checks table, column, and index presence before altering the pickup table, and migration `0023` removes only the unused legacy `wdc_locations.postcode` column when the canonical `wdc_locations.postal_code` column is present. `wdc_locations.postal_code` is preserved for checkout fallback lookup, pickup diagnostics/rebind, DaData enrichment, and admin/search tooling; it may be empty when GAR/FIAS source data has no postal index. `wp_wdc_location_aliases` is not a runtime checkout dependency, but it is used by FIAS/GAR import, display-name rebuild, snapshot export/import, and full locations cleanup as a generated alternate-name store.
 

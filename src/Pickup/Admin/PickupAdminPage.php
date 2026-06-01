@@ -145,11 +145,15 @@ final class PickupAdminPage {
 			<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:16px 0;">
 				<?php foreach ( $this->summary_labels() as $key => $label ) : ?>
 					<div style="background:#fff;border:1px solid #ccd0d4;padding:12px;">
-						<strong style="display:block;font-size:20px;"><?php echo esc_html( (string) ( $summary[ $key ] ?? 0 ) ); ?></strong>
+						<strong style="display:block;font-size:20px;"><?php echo esc_html( null === ( $summary[ $key ] ?? null ) ? __( 'по фильтру', 'walls-delivery-calc' ) : (string) ( $summary[ $key ] ?? 0 ) ); ?></strong>
 						<span><?php echo esc_html( $label ); ?></span>
 					</div>
 				<?php endforeach; ?>
 			</div>
+			<p class="description"><?php echo esc_html__( 'Подозрительные координаты считаются только при выборе одноименного фильтра.', 'walls-delivery-calc' ); ?></p>
+			<?php if ( 'suspicious_coordinates' === $list['problem'] ) : ?>
+				<div class="notice notice-warning"><p><?php echo esc_html__( 'Фильтр подозрительных координат выполняет сопоставление с населенными пунктами и может быть тяжелее остальных проверок.', 'walls-delivery-calc' ); ?></p></div>
+			<?php endif; ?>
 
 			<form method="get" style="margin:16px 0;display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
 				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>">

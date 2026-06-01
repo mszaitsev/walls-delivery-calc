@@ -60,7 +60,7 @@ final class RussianPostPickupDiagnosticsService {
 	}
 
 	/**
-	 * @return array<string,int|float|string>
+	 * @return array<string,int|float|string|null>
 	 */
 	public function summary(): array {
 		if ( $this->has_test_rows() ) {
@@ -79,7 +79,8 @@ final class RussianPostPickupDiagnosticsService {
 			'missing_city' => $this->count_where( "(city_name IS NULL OR TRIM(city_name) = '')" ),
 			'missing_region' => $this->count_where( "(region_name IS NULL OR TRIM(region_name) = '')" ),
 			'missing_location' => $this->count_where( '(location_id IS NULL OR location_id = 0)' ),
-			'suspicious_coordinates' => $this->count_suspicious_sql(),
+			'suspicious_coordinates' => null,
+			'suspicious_coordinates_note' => 'filter_only',
 			'suspicious_threshold_km' => $this->suspicious_threshold_km,
 		);
 	}
@@ -97,17 +98,22 @@ final class RussianPostPickupDiagnosticsService {
 		}
 
 		$where = $this->problem_where_sql( $problem );
-		$total = $this->count_problem_sql( $problem );
+		$total = 'suspicious_coordinates' === $problem ? 0 : $this->count_problem_sql( $problem );
 		$offset = ( $page - 1 ) * $per_page;
+		$select_sql = 'suspicious_coordinates' === $problem ? $this->select_sql( true ) : $this->select_sql( false );
 		$sql = $this->wpdb->prepare(
-			$this->select_sql() . " WHERE {$where} ORDER BY rp.updated_at DESC, rp.id ASC LIMIT %d OFFSET %d",
+			$select_sql . " WHERE {$where} ORDER BY rp.updated_at DESC, rp.id ASC LIMIT %d OFFSET %d",
 			$per_page,
 			$offset
 		);
 		$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+		$rows = is_array( $rows ) ? $rows : array();
+		if ( 'suspicious_coordinates' === $problem ) {
+			$total = $offset + count( $rows ) + ( count( $rows ) === $per_page ? $per_page : 0 );
+		}
 
 		return array(
-			'items' => array_map( fn( array $row ): array => $this->decorate_row( $row ), is_array( $rows ) ? $rows : array() ),
+			'items' => array_map( fn( array $row ): array => $this->decorate_row( $row ), $rows ),
 			'total' => $total,
 			'page' => $page,
 			'per_page' => $per_page,
@@ -134,8 +140,9 @@ final class RussianPostPickupDiagnosticsService {
 				}
 				fputcsv( $handle, $csv_row, ',', '"', '' );
 			}
+			$item_count = count( $result['items'] );
 			++$page;
-		} while ( ( $page - 1 ) * 100 < $result['total'] );
+		} while ( $item_count === 100 && ( 'suspicious_coordinates' === $problem || ( $page - 1 ) * 100 < $result['total'] ) );
 
 		rewind( $handle );
 		$csv = stream_get_contents( $handle );
@@ -185,21 +192,15 @@ final class RussianPostPickupDiagnosticsService {
 	}
 
 	private function count_problem_sql( string $problem ): int {
-		return in_array( $problem, array( 'suspicious_coordinates', 'all_problematic' ), true )
-			? $this->count_joined_problem_sql( $problem )
-			: (int) $this->wpdb->get_var( 'SELECT COUNT(*) FROM ' . $this->pickup_repository->main_table() . ' rp WHERE ' . $this->problem_where_sql( $problem ) );
+		return (int) $this->wpdb->get_var( 'SELECT COUNT(*) FROM ' . $this->pickup_repository->main_table() . ' rp WHERE ' . $this->problem_where_sql( $problem ) );
 	}
 
-	private function count_suspicious_sql(): int {
-		return $this->count_joined_problem_sql( 'suspicious_coordinates' );
-	}
-
-	private function count_joined_problem_sql( string $problem ): int {
-		return (int) $this->wpdb->get_var( 'SELECT COUNT(*) FROM (' . $this->select_sql() . ' WHERE ' . $this->problem_where_sql( $problem ) . ') wdc_pickup_diagnostics' );
-	}
-
-	private function select_sql(): string {
+	private function select_sql( bool $with_location_distance ): string {
 		$pickup = $this->pickup_repository->main_table();
+		if ( ! $with_location_distance ) {
+			return "SELECT rp.*, NULL AS matched_location_id, NULL AS location_latitude, NULL AS location_longitude, NULL AS distance_to_location_km FROM {$pickup} rp";
+		}
+
 		$locations = $this->wpdb->prefix . 'wdc_locations';
 		$distance = $this->distance_sql();
 
@@ -226,7 +227,7 @@ final class RussianPostPickupDiagnosticsService {
 		$missing_city = "(rp.city_name IS NULL OR TRIM(rp.city_name) = '')";
 		$missing_region = "(rp.region_name IS NULL OR TRIM(rp.region_name) = '')";
 		$missing_location = '(rp.location_id IS NULL OR rp.location_id = 0)';
-		$suspicious = '(rp.latitude IS NOT NULL AND rp.longitude IS NOT NULL AND rp.latitude != 0 AND rp.longitude != 0 AND l.latitude IS NOT NULL AND l.longitude IS NOT NULL AND l.latitude != 0 AND l.longitude != 0 AND ' . $this->distance_sql() . ' > ' . (float) $this->suspicious_threshold_km . ')';
+		$cheap = '(' . implode( ' OR ', array( $missing_coordinates, $zero_coordinates, $missing_fias, $missing_postal_code, $dummy_postal_code, $missing_address, $missing_city, $missing_region, $missing_location ) ) . ')';
 
 		return match ( $problem ) {
 			'missing_coordinates' => $missing_coordinates,
@@ -238,8 +239,8 @@ final class RussianPostPickupDiagnosticsService {
 			'missing_city' => $missing_city,
 			'missing_region' => $missing_region,
 			'missing_location' => $missing_location,
-			'suspicious_coordinates' => $suspicious,
-			default => '(' . implode( ' OR ', array( $missing_coordinates, $zero_coordinates, $missing_fias, $missing_postal_code, $dummy_postal_code, $missing_address, $missing_city, $missing_region, $missing_location, $suspicious ) ) . ')',
+			'suspicious_coordinates' => '(rp.latitude IS NOT NULL AND rp.longitude IS NOT NULL AND rp.latitude != 0 AND rp.longitude != 0 AND l.latitude IS NOT NULL AND l.longitude IS NOT NULL AND l.latitude != 0 AND l.longitude != 0 AND ' . $this->distance_sql() . ' > ' . (float) $this->suspicious_threshold_km . ')',
+			default => $cheap,
 		};
 	}
 
@@ -489,7 +490,7 @@ final class RussianPostPickupDiagnosticsService {
 	}
 
 	/**
-	 * @return array<string,int|float|string>
+	 * @return array<string,int|float|string|null>
 	 */
 	private function summary_from_test_rows(): array {
 		$rows = $this->wpdb->russian_post_pickup_rows;
@@ -507,7 +508,8 @@ final class RussianPostPickupDiagnosticsService {
 			'missing_city' => $count( static fn( array $row ): bool => '' === trim( (string) ( $row['city_name'] ?? '' ) ) ),
 			'missing_region' => $count( static fn( array $row ): bool => '' === trim( (string) ( $row['region_name'] ?? '' ) ) ),
 			'missing_location' => $count( static fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) <= 0 ),
-			'suspicious_coordinates' => $count( fn( array $row ): bool => in_array( 'suspicious_coordinates', $this->problem_flags( $this->decorate_test_row( $row ) ), true ) ),
+			'suspicious_coordinates' => null,
+			'suspicious_coordinates_note' => 'filter_only',
 			'suspicious_threshold_km' => $this->suspicious_threshold_km,
 		);
 	}
@@ -521,7 +523,7 @@ final class RussianPostPickupDiagnosticsService {
 			array_filter(
 				$rows,
 				static fn( array $row ): bool => 'all_problematic' === $problem
-					? array() !== ( $row['problem_flags'] ?? array() )
+					? array() !== array_values( array_diff( $row['problem_flags'] ?? array(), array( 'suspicious_coordinates' ) ) )
 					: in_array( $problem, $row['problem_flags'] ?? array(), true )
 			)
 		);
