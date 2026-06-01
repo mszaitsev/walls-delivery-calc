@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.31.2.
+Version: 0.32.0.
+
+Version 0.32.0 adds an admin diagnostics screen for the Russian Post pickup-point database. The page shows quality counters, problem filters, paginated problematic rows, CSV export, suspicious coordinate checks against matched locations, and a guarded location rebind dry-run/apply action.
 
 Version 0.31.2 fixes courier checkout address summaries when only postcode and city are filled. The courier summary now treats `address_1` as the required address signal, keeps the warning visible until address line 1 is filled, and only then shows the formatted `{postcode}, {city}, {address_1}` line.
 

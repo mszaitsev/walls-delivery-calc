@@ -105,6 +105,7 @@ use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Pickup\Admin\PickupAdminPage;
 use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupDiagnosticsService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPassportPointNormalizer;
@@ -158,6 +159,7 @@ final class Plugin {
 		$this->container->register( RegionRepository::class, fn(): RegionRepository => new RegionRepository() );
 		$this->container->register( PickupPointRepository::class, fn(): PickupPointRepository => new PickupPointRepository() );
 		$this->container->register( RussianPostPickupPointRepository::class, fn(): RussianPostPickupPointRepository => new RussianPostPickupPointRepository() );
+		$this->container->register( RussianPostPickupDiagnosticsService::class, fn(): RussianPostPickupDiagnosticsService => new RussianPostPickupDiagnosticsService( $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( RussianPostPickupPointTypeSettings::class, fn(): RussianPostPickupPointTypeSettings => new RussianPostPickupPointTypeSettings( $this->container->get( SettingsRepository::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
 		$this->container->register( PickupPointLocationResolver::class, fn(): PickupPointLocationResolver => new PickupPointLocationResolver( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( CheckoutPickupPointRestController::class, fn(): CheckoutPickupPointRestController => new CheckoutPickupPointRestController( $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( CheckoutSessionManager::class ), $this->container->get( PickupPointLocationResolver::class ) ) );
@@ -405,7 +407,8 @@ final class Plugin {
 				$this->environment,
 				$this->container->get( PickupPointRepository::class ),
 				$this->container->get( RussianPostPickupPointRepository::class ),
-				$this->container->get( RussianPostOtpravkaApiSettings::class )
+				$this->container->get( RussianPostOtpravkaApiSettings::class ),
+				$this->container->get( RussianPostPickupDiagnosticsService::class )
 			)
 		);
 		$this->container->register( SettingsAdminPage::class, fn(): SettingsAdminPage => new SettingsAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( FiasCredentials::class ), $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( RussianPostSettings::class ) ) );
