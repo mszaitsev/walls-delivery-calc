@@ -165,6 +165,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupDiagnosticsService;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupLocationResolver;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 
 $GLOBALS['wpdb'] = new wpdb();
@@ -228,6 +229,8 @@ $GLOBALS['wpdb']->locations = array(
 	array( 'id' => 2, 'fias_id' => '22222222-2222-2222-2222-222222222222', 'postal_code' => '620000', 'region_name' => 'Sverdlovsk region', 'city_name' => 'Ekaterinburg', 'settlement_name' => 'Ekaterinburg', 'display_name' => 'Ekaterinburg', 'latitude' => 56.8389, 'longitude' => 60.6057, 'active' => 1, 'country_code' => 'RU', 'searchable_text' => 'Sverdlovsk region Ekaterinburg' ),
 	array( 'id' => 3, 'fias_id' => '33333333-3333-3333-3333-333333333333', 'postal_code' => '123456', 'region_name' => 'Ambiguous region', 'city_name' => 'One', 'settlement_name' => 'One', 'display_name' => 'One', 'latitude' => 55.0, 'longitude' => 83.0, 'active' => 1, 'country_code' => 'RU', 'searchable_text' => 'Ambiguous region One' ),
 	array( 'id' => 4, 'fias_id' => '44444444-4444-4444-4444-444444444444', 'postal_code' => '123456', 'region_name' => 'Ambiguous region', 'city_name' => 'Two', 'settlement_name' => 'Two', 'display_name' => 'Two', 'latitude' => 55.1, 'longitude' => 83.1, 'active' => 1, 'country_code' => 'RU', 'searchable_text' => 'Ambiguous region Two' ),
+	array( 'id' => 5, 'fias_id' => '55555555-5555-5555-5555-555555555555', 'postal_code' => '555555', 'region_name' => 'Twin region', 'city_name' => 'Twin', 'settlement_name' => 'Twin', 'display_name' => 'Twin', 'latitude' => 55.2, 'longitude' => 83.2, 'active' => 1, 'country_code' => 'RU', 'searchable_text' => 'Twin region Twin' ),
+	array( 'id' => 6, 'fias_id' => '66666666-6666-6666-6666-666666666666', 'postal_code' => '666666', 'region_name' => 'Twin region', 'city_name' => 'Twin', 'settlement_name' => 'Twin', 'display_name' => 'Twin duplicate', 'latitude' => 55.3, 'longitude' => 83.3, 'active' => 1, 'country_code' => 'RU', 'searchable_text' => 'Twin region Twin duplicate' ),
 );
 $GLOBALS['wpdb']->russian_post_pickup_rows = array(
 	array( 'id' => 1, 'point_code' => 'OK-1', 'postcode' => '630000', 'region_name' => 'Novosibirsk region', 'city_name' => 'Novosibirsk', 'address' => 'Lenina 1', 'fias_location_guid' => '11111111-1111-1111-1111-111111111111', 'location_id' => 1, 'latitude' => 55.031, 'longitude' => 82.921, 'active' => 1, 'updated_at' => '2026-06-02 10:00:00', 'last_seen_at' => '2026-06-02 09:00:00' ),
@@ -246,10 +249,28 @@ $GLOBALS['wpdb']->russian_post_pickup_rows = array(
 	array( 'id' => 14, 'point_code' => 'INACTIVE', 'postcode' => '630000', 'region_name' => 'Novosibirsk region', 'city_name' => 'Novosibirsk', 'address' => 'L', 'fias_location_guid' => '11111111-1111-1111-1111-111111111111', 'location_id' => 1, 'latitude' => 55.03, 'longitude' => 82.92, 'active' => 0 ),
 );
 
+$resolver = new RussianPostPickupLocationResolver( new LocationRepository( $GLOBALS['wpdb'] ), $GLOBALS['wpdb'] );
+pickup_diagnostics_assert( 1 === $resolver->resolve_location_id_for_pickup_row( array( 'fias_location_guid' => '11111111111111111111111111111111', 'postcode' => '123456', 'region_name' => 'Ambiguous region', 'city_name' => 'One' ) ), 'resolver must match dashed/non-dashed FIAS and prefer it over conflicting postal_code.' );
+pickup_diagnostics_assert( 2 === $resolver->resolve_location_id_for_pickup_row( array( 'fias_location_guid' => '', 'postcode' => '620000', 'region_name' => '', 'city_name' => '' ) ), 'resolver must fall back to unique postal_code.' );
+pickup_diagnostics_assert( 'ambiguous' === $resolver->resolve( array( 'fias_location_guid' => '', 'postcode' => '123456', 'region_name' => '', 'city_name' => '' ) )['status'], 'resolver must leave ambiguous postal_code unresolved.' );
+pickup_diagnostics_assert( 2 === $resolver->resolve_location_id_for_pickup_row( array( 'fias_location_guid' => '', 'postcode' => '', 'region_name' => 'Sverdlovsk region', 'city_name' => 'Ekaterinburg' ) ), 'resolver must fall back to unique region+city.' );
+pickup_diagnostics_assert( 'ambiguous' === $resolver->resolve( array( 'fias_location_guid' => '', 'postcode' => '', 'region_name' => 'Twin region', 'city_name' => 'Twin' ) )['status'], 'resolver must leave ambiguous region+city unresolved.' );
+pickup_diagnostics_assert( null === $resolver->resolve_location_id_for_pickup_row( array( 'fias_location_guid' => '', 'postcode' => '000000', 'region_name' => 'Nowhere', 'city_name' => 'None' ) ), 'resolver must return null when no strategy matches.' );
+$cache_resolver = new RussianPostPickupLocationResolver( new LocationRepository( $GLOBALS['wpdb'] ), $GLOBALS['wpdb'] );
+$cache_resolver->resolve_location_id_for_pickup_row( array( 'fias_location_guid' => '11111111-1111-1111-1111-111111111111' ) );
+$cache_resolver->resolve_location_id_for_pickup_row( array( 'fias_location_guid' => '11111111111111111111111111111111' ) );
+$cache_resolver->resolve_location_id_for_pickup_row( array( 'postcode' => '620000' ) );
+$cache_resolver->resolve_location_id_for_pickup_row( array( 'postcode' => '620000' ) );
+$cache_resolver->resolve_location_id_for_pickup_row( array( 'region_name' => 'Sverdlovsk region', 'city_name' => 'Ekaterinburg' ) );
+$cache_resolver->resolve_location_id_for_pickup_row( array( 'region_name' => 'Sverdlovsk region', 'city_name' => 'Ekaterinburg' ) );
+$cache_stats = $cache_resolver->cache_stats();
+pickup_diagnostics_assert( 1 === $cache_stats['fias_queries'] && 1 === $cache_stats['postal_queries'] && 1 === $cache_stats['region_city_queries'] && $cache_stats['cache_hits'] >= 3, 'resolver must cache repeated FIAS/postal/region-city lookups.' );
+
 $service = new RussianPostPickupDiagnosticsService(
 	new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ),
 	new LocationRepository( $GLOBALS['wpdb'] ),
-	$GLOBALS['wpdb']
+	$GLOBALS['wpdb'],
+	location_resolver: new RussianPostPickupLocationResolver( new LocationRepository( $GLOBALS['wpdb'] ), $GLOBALS['wpdb'] )
 );
 
 $summary = $service->summary();

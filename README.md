@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.32.3.
+Version: 0.32.4.
+
+Version 0.32.4 resolves local `wdc_locations` matches during Russian Post pickup import before staging inserts, so fresh `wdc_pickup_points_russian_post` rows can receive `location_id` immediately. A shared cached `RussianPostPickupLocationResolver` now handles FIAS, unique postal-code, and unique region+city matching for both importer and diagnostics rebind, and import state records location match counters.
 
 Version 0.32.3 makes the locations admin page fast to open on large `wdc_locations` tables. The default `wdc-platform-locations` render now uses a lightweight total counter and defers country, alias, postal-code, coordinate, and technical-marker counters until the admin explicitly requests detailed counters. Fresh installs and updates also include an idempotent `idx_active_country_code (active, country_code)` index for common active/country filters while preserving `postal_code`.
 

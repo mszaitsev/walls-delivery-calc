@@ -24,7 +24,8 @@ final class RussianPostPickupImporter {
 		private RussianPostPickupPointRepository $repository,
 		private RussianPostPassportPointNormalizer $normalizer,
 		private ?RussianPostPickupImportStateService $state = null,
-		private ?ActionScheduler $scheduler = null
+		private ?ActionScheduler $scheduler = null,
+		private ?RussianPostPickupLocationResolver $location_resolver = null
 	) {
 	}
 
@@ -229,6 +230,7 @@ final class RussianPostPickupImporter {
 		$batch_errors = array();
 		$parsed = 0;
 		$skipped = 0;
+		$location_stats = $this->empty_location_match_stats();
 		foreach ( $read['objects'] as $json ) {
 			$item = json_decode( $json, true );
 			if ( ! is_array( $item ) ) {
@@ -241,6 +243,13 @@ final class RussianPostPickupImporter {
 			if ( null === $row ) {
 				++$skipped;
 				continue;
+			}
+			if ( $this->location_resolver instanceof RussianPostPickupLocationResolver ) {
+				$match = $this->location_resolver->resolve( $row );
+				$this->increment_location_match_stats( $location_stats, $match );
+				if ( 'unique' === $match['status'] && (int) ( $match['location_id'] ?? 0 ) > 0 ) {
+					$row['location_id'] = (int) $match['location_id'];
+				}
 			}
 			$rows[] = $row;
 		}
@@ -260,6 +269,9 @@ final class RussianPostPickupImporter {
 		$result['parsed'] += $parsed;
 		$result['inserted'] += (int) $upsert['inserted'];
 		$result['updated'] += (int) $upsert['updated'];
+		foreach ( $location_stats as $key => $value ) {
+			$result[ $key ] = (int) ( $result[ $key ] ?? 0 ) + $value;
+		}
 		$result['rows_inserted_to_staging'] = (int) ( $state['rows_inserted_to_staging'] ?? 0 ) + (int) $upsert['inserted'];
 		$result['skipped'] += $skipped + (int) $upsert['skipped'];
 		$result['payload_file'] = $payload_file;
@@ -905,6 +917,11 @@ final class RussianPostPickupImporter {
 			'updated' => 0,
 			'deactivated' => 0,
 			'rows_inserted_to_staging' => 0,
+			'location_matched_fias' => 0,
+			'location_matched_postal_code' => 0,
+			'location_matched_region_city' => 0,
+			'location_match_no_match' => 0,
+			'location_match_ambiguous' => 0,
 			'skipped' => 0,
 			'staging_table' => '',
 			'main_table' => $this->repository->main_table(),
@@ -963,6 +980,42 @@ final class RussianPostPickupImporter {
 		$result['import_id'] = $import_id;
 
 		return $result;
+	}
+
+	/**
+	 * @return array<string,int>
+	 */
+	private function empty_location_match_stats(): array {
+		return array(
+			'location_matched_fias' => 0,
+			'location_matched_postal_code' => 0,
+			'location_matched_region_city' => 0,
+			'location_match_no_match' => 0,
+			'location_match_ambiguous' => 0,
+		);
+	}
+
+	/**
+	 * @param array<string,int> $stats
+	 * @param array{status:string,strategy:string,location_id:int|null,location:mixed} $match
+	 */
+	private function increment_location_match_stats( array &$stats, array $match ): void {
+		if ( 'ambiguous' === (string) ( $match['status'] ?? '' ) ) {
+			++$stats['location_match_ambiguous'];
+			return;
+		}
+		if ( 'unique' !== (string) ( $match['status'] ?? '' ) ) {
+			++$stats['location_match_no_match'];
+			return;
+		}
+
+		$key = match ( (string) ( $match['strategy'] ?? '' ) ) {
+			'fias' => 'location_matched_fias',
+			'postal_code' => 'location_matched_postal_code',
+			'region_city' => 'location_matched_region_city',
+			default => 'location_match_no_match',
+		};
+		++$stats[ $key ];
 	}
 
 	private function now(): string {

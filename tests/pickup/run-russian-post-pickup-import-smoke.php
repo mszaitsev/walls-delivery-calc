@@ -75,6 +75,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public int $insert_id = 0;
 		/** @var array<string,array<int,array<string,mixed>>> */
 		public array $tables = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $locations = array();
 		/** @var array<int,string> */
 		public array $analyzed_tables = array();
 		public string $rename_mode = '';
@@ -182,14 +184,20 @@ use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPassportPointNormalizer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImporter;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupLocationResolver;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostWorkTimeFormatter;
 
 $GLOBALS['wpdb'] = new wpdb();
 $repo = new RussianPostPickupPointRepository( $GLOBALS['wpdb'] );
+$GLOBALS['wpdb']->locations = array(
+	array( 'id' => 501, 'fias_id' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'postal_code' => '630001', 'region_name' => 'РќРЎРћ', 'city_name' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє', 'settlement_name' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє', 'display_name' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє', 'active' => 1, 'country_code' => 'RU', 'searchable_text' => 'РќРЎРћ РќРѕРІРѕСЃРёР±РёСЂСЃРє' ),
+);
+$pickup_location_resolver = new RussianPostPickupLocationResolver( new LocationRepository( $GLOBALS['wpdb'] ), $GLOBALS['wpdb'] );
 $migration = require dirname( __DIR__, 2 ) . '/database/migrations/0021_create_russian_post_pickup_points_table.php';
 $migration();
 rp_pickup_assert( array_key_exists( 'wp_wdc_pickup_points_russian_post', $GLOBALS['wpdb']->tables ), 'Migration must create Russian Post carrier-specific table.' );
@@ -284,6 +292,7 @@ $base_item = array(
 	'type' => 'ПВЗ',
 	'workTime' => $standard_work_time,
 );
+$base_item['addressFias']['locationGarCode'] = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 $items = array();
 for ( $i = 0; $i < 3; ++$i ) {
 	$items[] = array_merge(
@@ -296,6 +305,10 @@ for ( $i = 0; $i < 3; ++$i ) {
 		)
 	);
 }
+foreach ( $items as &$item ) {
+	$item['addressFias']['locationGarCode'] = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+}
+unset( $item );
 $GLOBALS['rp_passport_payload'] = '{"passportElements":[' . implode( ',', array_map( static fn( array $item ): string => (string) json_encode( $item, JSON_UNESCAPED_UNICODE ), $items ) ) . ']}';
 
 $curl_client = new RussianPostOtpravkaApiClient( $settings, rp_curl_success_downloader() );
@@ -327,7 +340,7 @@ foreach ( $removed_fields as $removed_field ) {
 }
 $repo->insert_batch( array( $normalized_base ), $main );
 $main_before = count( $GLOBALS['wpdb']->tables[ $main ] );
-$importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, $state_service );
+$importer = new RussianPostPickupImporter( $settings, new RussianPostOtpravkaApiClient( $settings, rp_curl_failure_downloader() ), $repo, $normalizer, $state_service, null, $pickup_location_resolver );
 rp_pickup_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/RussianPost/RussianPostPickupImporter.php' ), 'private const BATCH_SIZE = 500' ), 'Importer batch size must be 500.' );
 $importer_reflection = new ReflectionClass( RussianPostPickupImporter::class );
 $path_inside = $importer_reflection->getMethod( 'is_path_inside' );
@@ -348,6 +361,7 @@ $batch = $importer->run_import_batch( (string) $batch_event['args'][0], (string)
 $state = $state_service->current();
 rp_pickup_assert( ! empty( $batch['success'] ) && 3 === count( $GLOBALS['wpdb']->tables[ $state['staging_table'] ] ) && $main_before === count( $GLOBALS['wpdb']->tables[ $main ] ), 'Batch must write only to staging, not main.' );
 rp_pickup_assert( 3 === (int) $state['rows_inserted_to_staging'], 'State must track rows inserted to staging.' );
+rp_pickup_assert( 3 === (int) $state['location_matched_fias'] && 0 === (int) $state['location_match_no_match'] && 501 === (int) $GLOBALS['wpdb']->tables[ $state['staging_table'] ][0]['location_id'], 'Import batch must resolve and store Russian Post pickup location_id before staging insert.' );
 
 $final_event = rp_shift_event( RussianPostPickupImporter::FINALIZE_HOOK );
 $final = $importer->run_import_finalize( (string) $final_event['args'][0], (string) $final_event['args'][1] );
@@ -355,6 +369,7 @@ $state = $state_service->current();
 rp_pickup_assert( ! empty( $final['success'] ) && 3 === count( $GLOBALS['wpdb']->tables[ $main ] ) && ! array_key_exists( (string) $state['staging_table'], $GLOBALS['wpdb']->tables ), 'Finalize must atomically swap staging to main.' );
 rp_pickup_assert( '' !== (string) $state['swap_started_at'] && '' !== (string) $state['swap_finished_at'], 'State must store swap timestamps.' );
 rp_pickup_assert( in_array( $main, $GLOBALS['wpdb']->analyzed_tables, true ), 'Successful finalize must analyze main table.' );
+rp_pickup_assert( 501 === (int) $GLOBALS['wpdb']->tables[ $main ][0]['location_id'], 'Final imported Russian Post pickup rows must keep resolved location_id after staging swap.' );
 
 $main_after_success = $GLOBALS['wpdb']->tables[ $main ];
 delete_transient( 'wdc_russian_post_pickup_import_lock' );

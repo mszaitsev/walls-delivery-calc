@@ -52,11 +52,13 @@ final class RussianPostPickupDiagnosticsService {
 		private RussianPostPickupPointRepository $pickup_repository,
 		private LocationRepository $location_repository,
 		?\wpdb $db = null,
-		private float $suspicious_threshold_km = self::DEFAULT_THRESHOLD_KM
+		private float $suspicious_threshold_km = self::DEFAULT_THRESHOLD_KM,
+		private ?RussianPostPickupLocationResolver $location_resolver = null
 	) {
 		global $wpdb;
 
 		$this->wpdb = $db ?? $wpdb;
+		$this->location_resolver ??= new RussianPostPickupLocationResolver( $this->location_repository, $this->wpdb );
 	}
 
 	/**
@@ -341,7 +343,7 @@ final class RussianPostPickupDiagnosticsService {
 				continue;
 			}
 
-			$candidate = $this->resolve_rebind_candidate( $row );
+			$candidate = $this->location_resolver->resolve( $row );
 			if ( 'none' === $candidate['status'] ) {
 				++$skipped['no_match'];
 				continue;
@@ -351,8 +353,8 @@ final class RussianPostPickupDiagnosticsService {
 				continue;
 			}
 
-			$location = $candidate['location'];
-			if ( ! $location instanceof Location || null === $location->id || $location->id <= 0 || $location->id === $current_location_id ) {
+			$location_id = (int) ( $candidate['location_id'] ?? 0 );
+			if ( $location_id <= 0 || $location_id === $current_location_id ) {
 				++$skipped['not_safe_scope'];
 				continue;
 			}
@@ -362,11 +364,11 @@ final class RussianPostPickupDiagnosticsService {
 				'point_id' => (int) ( $row['id'] ?? 0 ),
 				'point_code' => (string) ( $row['point_code'] ?? '' ),
 				'from_location_id' => $current_location_id,
-				'to_location_id' => $location->id,
+				'to_location_id' => $location_id,
 				'strategy' => $candidate['strategy'],
 			);
 
-			if ( $apply && $this->update_location_id( (int) ( $row['id'] ?? 0 ), $location->id ) ) {
+			if ( $apply && $this->update_location_id( (int) ( $row['id'] ?? 0 ), $location_id ) ) {
 				++$updated;
 			}
 		}
