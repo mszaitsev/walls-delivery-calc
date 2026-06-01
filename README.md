@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.31.1.
+Version: 0.31.2.
+
+Version 0.31.2 fixes courier checkout address summaries when only postcode and city are filled. The courier summary now treats `address_1` as the required address signal, keeps the warning visible until address line 1 is filled, and only then shows the formatted `{postcode}, {city}, {address_1}` line.
 
 Version 0.31.1 keeps courier checkout address required markers scoped to WDC-added markers and aligns billing/shipping address selection between PHP and frontend JS. Shipping address is now used only when `ship_to_different_address` is selected/present or when billing address is absent and shipping address exists, not merely because a hidden shipping address field has a value.
 

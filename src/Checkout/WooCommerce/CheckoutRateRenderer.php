@@ -90,10 +90,12 @@ final class CheckoutRateRenderer {
 		}
 
 		$field = $this->checkout_address_field();
-		$parts = $this->checkout_address_parts( str_starts_with( $field, 'shipping_' ) ? 'shipping' : 'billing' );
-		$address = $this->format_address_parts( $parts );
-		$hidden_value = '' === $address ? ' hidden' : '';
-		$hidden_warning = '' !== $address ? ' hidden' : '';
+		$prefix = str_starts_with( $field, 'shipping_' ) ? 'shipping' : 'billing';
+		$address_1 = $this->posted_value( $prefix . '_address_1' );
+		$has_address_1 = '' !== trim( $address_1 );
+		$address = $has_address_1 ? $this->format_address_parts( $this->checkout_address_parts( $prefix ) ) : '';
+		$hidden_value = $has_address_1 ? '' : ' hidden';
+		$hidden_warning = $has_address_1 ? ' hidden' : '';
 
 		echo '<div class="wdc-courier-address-summary" data-wdc-courier-address-summary data-address-field="' . esc_attr( $field ) . '">';
 		echo '<div class="wdc-courier-address-summary__title">' . esc_html__( 'Доставка курьером по адресу:', 'walls-delivery-calc' ) . '</div>';

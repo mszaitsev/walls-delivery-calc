@@ -724,6 +724,7 @@ runtime_smoke_assert( str_contains( $courier_summary_output, '630000, г Нов�
 runtime_smoke_assert( ! str_contains( $courier_summary_output, 'Новосибирская область' ), 'Courier summary must not include region.' );
 
 $_POST = array(
+        'billing_postcode'  => '630091',
         'billing_city'      => 'г Новосибирск',
         'billing_address_1' => '',
 );
@@ -733,6 +734,7 @@ $empty_courier_summary_output = (string) ob_get_clean();
 runtime_smoke_assert( str_contains( $empty_courier_summary_output, 'Для доставки курьером необходимо' ), 'Empty courier address must render warning.' );
 runtime_smoke_assert( str_contains( $empty_courier_summary_output, 'href="#billing_address_1"' ), 'Empty courier address warning must link to billing address field.' );
 runtime_smoke_assert( str_contains( $empty_courier_summary_output, 'заполнить адрес' ), 'Empty courier address warning link text must be Russian.' );
+runtime_smoke_assert( ! str_contains( $empty_courier_summary_output, '>630091, г Новосибирск<' ), 'Courier summary must not show postcode and city as address when address line 1 is empty.' );
 
 $_POST = array(
         'billing_city'       => 'г Новосибирск',
@@ -889,6 +891,9 @@ WC()->session->set( 'chosen_shipping_methods', array( 'demo:courier' ) );
 ( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
 runtime_smoke_assert( 'Для доставки курьером необходимо заполнить адрес.' === ( $errors->errors['wdc_courier_address_required'] ?? '' ), 'Courier validation must fail when address is empty.' );
 $errors->errors = array();
+( new CheckoutValidation( $validation_session ) )->validate( array( 'billing_postcode' => '630091', 'billing_city' => 'г Новосибирск', 'billing_address_1' => '', 'shipping_city' => 'Новосибирск' ), $errors );
+runtime_smoke_assert( 'Для доставки курьером необходимо заполнить адрес.' === ( $errors->errors['wdc_courier_address_required'] ?? '' ), 'Courier validation must fail when only postcode and city are filled.' );
+$errors->errors = array();
 ( new CheckoutValidation( $validation_session ) )->validate( array( 'shipping_city' => 'Новосибирск', 'billing_address_1' => 'ул. Советская, д. 99' ), $errors );
 runtime_smoke_assert( array() === $errors->errors, 'Courier validation must pass when address is filled and ignore stale pickup selection.' );
 $errors->errors = array();
@@ -1006,7 +1011,7 @@ runtime_smoke_assert( str_contains( $sort_two_output, 'wdc-checkout-sort-row' ) 
 $checkout_sort_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-sort.js' );
 runtime_smoke_assert( str_contains( $checkout_sort_js, 'function relocateSortControl()' ) && str_contains( $checkout_sort_js, 'prependTo( $shippingCell )' ) && str_contains( $checkout_sort_js, 'updated_checkout' ), 'Checkout sort JS must move the selector into the shipping row before the methods list.' );
 $courier_address_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/courier-address-summary.js' );
-foreach ( array( 'billing_address_1', 'shipping_address_1', 'billing_postcode', 'shipping_postcode', 'billing_city', 'shipping_city', 'updated_checkout', 'input[name^="shipping_method"]', 'required = required', 'aria-required', 'data-wdc-courier-address-summary', 'wdcCourierAddressSummary', 'addressParts', '.join(\', \')', 'target.focus()', 'selectedItem.contains(summary)', 'shipToDifferent && shipToDifferent.checked', '!billingAddress && shippingAddress', 'marker.getAttribute(\'data-wdc-added\') === \'true\'' ) as $needle ) {
+foreach ( array( 'billing_address_1', 'shipping_address_1', 'billing_postcode', 'shipping_postcode', 'billing_city', 'shipping_city', 'updated_checkout', 'input[name^="shipping_method"]', 'required = required', 'aria-required', 'data-wdc-courier-address-summary', 'wdcCourierAddressSummary', 'addressParts', '.join(\', \')', 'target.focus()', 'selectedItem.contains(summary)', 'shipToDifferent && shipToDifferent.checked', '!billingAddress && shippingAddress', 'marker.getAttribute(\'data-wdc-added\') === \'true\'', 'var address1 = value(addressField)', 'var hasAddress1 = address1 !== \'\'', 'valueNode.textContent = hasAddress1 ? address : \'\'', 'valueNode.hidden = !hasAddress1', 'warningNode.hidden = hasAddress1' ) as $needle ) {
         runtime_smoke_assert( str_contains( $courier_address_js, $needle ), 'Courier address summary JS must contain ' . $needle . '.' );
 }
 runtime_smoke_assert( ! str_contains( $courier_address_js, "value('shipping_address_1') !== ''" ), 'Courier address summary JS must not switch to shipping only because shipping address has a value.' );

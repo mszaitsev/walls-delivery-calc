@@ -64,6 +64,8 @@
 	function updateSummary(summary) {
 		var prefix = activePrefix(summary);
 		var addressField = prefix + '_address_1';
+		var address1 = value(addressField);
+		var hasAddress1 = address1 !== '';
 		var address = addressParts(prefix).join(', ');
 		var valueNode = summary.querySelector('.wdc-courier-address-summary__value');
 		var warningNode = summary.querySelector('.wdc-courier-address-summary__warning');
@@ -74,11 +76,11 @@
 			warningLink.setAttribute('href', '#' + addressField);
 		}
 		if (valueNode) {
-			valueNode.textContent = address;
-			valueNode.hidden = address === '';
+			valueNode.textContent = hasAddress1 ? address : '';
+			valueNode.hidden = !hasAddress1;
 		}
 		if (warningNode) {
-			warningNode.hidden = address !== '';
+			warningNode.hidden = hasAddress1;
 		}
 	}
 
