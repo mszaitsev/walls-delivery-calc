@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.30.6.
+Version: 0.30.7.
+
+Version 0.30.7 brings the same force-reopen behavior to the Leaflet/OpenStreetMap pickup map: active marker popup opens now always unbind/rebind before opening, popup close refreshes the active marker state, and side-list clicks use the same direct popup reopen path as marker clicks without committing a point.
 
 Version 0.30.6 fixes the Yandex-only pickup map edge case where closing a balloon with its X could leave the Yandex events pane intercepting clicks on the still-active marker. The Yandex provider now recreates the active placemark after a real balloon close, preserving active state and click handlers so the next marker click opens the balloon again.
 

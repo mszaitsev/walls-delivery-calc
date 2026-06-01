@@ -67,13 +67,23 @@
 				renderSearchMarker(options && options.searchMarker);
 				suppressPopupClose = false;
 			},
-			openPointPopup: function (point, html) {
+			openPointPopup: function (point, html, options) {
 				var id = pointId(point);
 				var marker = markerById[id];
 				if (marker && marker.bindPopup) {
 					activePointId = id;
 					updateActiveMarkers();
 					suppressPopupClose = true;
+					if (options && options.forceReopen) {
+						debugLog('leaflet popup force reopen');
+					}
+					if (marker.closePopup) {
+						marker.closePopup();
+					}
+					if (marker.unbindPopup) {
+						marker.unbindPopup();
+						debugLog('leaflet marker popup unbound/rebound');
+					}
 					marker.bindPopup(html, {
 						autoPan: true,
 						autoPanPadding: [24, 24],
@@ -160,6 +170,7 @@
 							window.L.DomEvent.stopPropagation(event.originalEvent);
 							window.L.DomEvent.stop(event.originalEvent);
 						}
+						debugLog('leaflet marker click');
 						pointClickCallback(point);
 					});
 					marker._wdcPointId = id;
@@ -261,9 +272,29 @@
 		}
 
 		function popupClosed() {
+			debugLog('leaflet popup close');
 			if (!suppressPopupClose) {
 				popupCloseCallback();
+				refreshActiveMarkerAfterPopupClose();
 			}
+		}
+
+		function refreshActiveMarkerAfterPopupClose() {
+			var id = activePointId;
+			var marker = id ? markerById[id] : null;
+			if (!marker) {
+				return;
+			}
+			window.setTimeout(function () {
+				if (markerById[id] !== marker) {
+					return;
+				}
+				if (marker.unbindPopup) {
+					marker.unbindPopup();
+					debugLog('leaflet marker popup unbound/rebound');
+				}
+				updateActiveMarkers();
+			}, 0);
 		}
 
 		function onPopupClick(event) {
@@ -336,6 +367,16 @@
 	function pointType(point) {
 		var type = String(point.point_type || point.type || 'OPS').toUpperCase();
 		return type === 'PVZ' || type === 'APS' ? type : 'OPS';
+	}
+
+	function debugEnabled() {
+		return !!(window.wdcPickupCheckout && window.wdcPickupCheckout.debug);
+	}
+
+	function debugLog(message) {
+		if (debugEnabled() && window.console && typeof window.console.debug === 'function') {
+			window.console.debug('wdc pickup: ' + message);
+		}
 	}
 
 	window.WDCPickupMapProviders = window.WDCPickupMapProviders || {};

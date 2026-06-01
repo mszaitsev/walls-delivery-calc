@@ -279,7 +279,7 @@
 				}
 				var point = findPoint(row.getAttribute('data-wdc-point-id'));
 				if (point) {
-					preview(point, { focus: false, ensureVisible: true, userAction: true });
+					openPointPreviewFromMarker(point);
 				}
 			});
 		}
