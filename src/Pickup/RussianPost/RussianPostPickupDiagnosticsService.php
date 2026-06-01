@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Pickup\RussianPost;
 
 use WallsShop\WDC\Locations\Storage\LocationRepository;
-use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -383,70 +382,6 @@ final class RussianPostPickupDiagnosticsService {
 		);
 	}
 
-	/**
-	 * @param array<string,mixed> $row
-	 * @return array{status:string,strategy:string,location:Location|null}
-	 */
-	private function resolve_rebind_candidate( array $row ): array {
-		$fias = trim( (string) ( $row['fias_location_guid'] ?? '' ) );
-		if ( '' !== $fias ) {
-			$location = $this->location_repository->find_by_fias_id( $fias );
-			if ( $location instanceof Location ) {
-				return array( 'status' => 'unique', 'strategy' => 'fias_location_guid', 'location' => $location );
-			}
-		}
-
-		$postcode = preg_replace( '/\D+/', '', (string) ( $row['postcode'] ?? '' ) ) ?? '';
-		if ( '' !== $postcode && '999999999' !== $postcode ) {
-			$candidates = $this->locations_by_postcode( $postcode );
-			if ( 1 === count( $candidates ) ) {
-				return array( 'status' => 'unique', 'strategy' => 'postal_code', 'location' => $candidates[0] );
-			}
-			if ( count( $candidates ) > 1 ) {
-				return array( 'status' => 'ambiguous', 'strategy' => 'postal_code', 'location' => null );
-			}
-		}
-
-		$tokens = array_values( array_filter( array( trim( (string) ( $row['region_name'] ?? '' ) ), trim( (string) ( $row['city_name'] ?? '' ) ) ) ) );
-		if ( array() !== $tokens ) {
-			$candidates = $this->location_repository->search_by_tokens( $tokens, 20, true, '', 'RU' );
-			$candidates = array_values(
-				array_filter(
-					$candidates,
-					fn( Location $location ): bool => $this->same_normalized( (string) ( $row['region_name'] ?? '' ), $location->region_name )
-						&& $this->same_normalized( (string) ( $row['city_name'] ?? '' ), $location->resolved_place_name() . ' ' . $location->city_name . ' ' . $location->display_name )
-				)
-			);
-			if ( 1 === count( $candidates ) ) {
-				return array( 'status' => 'unique', 'strategy' => 'region_city', 'location' => $candidates[0] );
-			}
-			if ( count( $candidates ) > 1 ) {
-				return array( 'status' => 'ambiguous', 'strategy' => 'region_city', 'location' => null );
-			}
-		}
-
-		return array( 'status' => 'none', 'strategy' => '', 'location' => null );
-	}
-
-	/**
-	 * @return array<int,Location>
-	 */
-	private function locations_by_postcode( string $postcode ): array {
-		if ( property_exists( $this->wpdb, 'locations' ) && is_array( $this->wpdb->locations ) ) {
-			$rows = array_values( array_filter( $this->wpdb->locations, static fn( array $row ): bool => 1 === (int) ( $row['active'] ?? 1 ) && $postcode === (string) ( $row['postal_code'] ?? '' ) ) );
-
-			return array_map( static fn( array $row ): Location => Location::from_array( $row ), $rows );
-		}
-
-		$locations = $this->wpdb->prefix . 'wdc_locations';
-		$rows = $this->wpdb->get_results(
-			$this->wpdb->prepare( "SELECT * FROM {$locations} WHERE active = 1 AND postal_code = %s LIMIT 2", $postcode ),
-			ARRAY_A
-		);
-
-		return array_map( static fn( array $row ): Location => Location::from_array( $row ), is_array( $rows ) ? $rows : array() );
-	}
-
 	private function update_location_id( int $point_id, int $location_id ): bool {
 		if ( $point_id <= 0 || $location_id <= 0 ) {
 			return false;
@@ -472,20 +407,6 @@ final class RussianPostPickupDiagnosticsService {
 		return false !== $result;
 	}
 
-	private function same_normalized( string $needle, string $haystack ): bool {
-		$needle = $this->normalize_text( $needle );
-		$haystack = $this->normalize_text( $haystack );
-
-		return '' !== $needle && '' !== $haystack && ( $needle === $haystack || str_contains( $haystack, $needle ) );
-	}
-
-	private function normalize_text( string $value ): string {
-		$value = str_replace( array( 'ё', 'Ё' ), array( 'е', 'Е' ), $value );
-		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
-		$value = preg_replace( '/[^a-zа-я0-9]+/u', ' ', $value ) ?? $value;
-
-		return trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
-	}
 
 	private function has_test_rows(): bool {
 		return property_exists( $this->wpdb, 'russian_post_pickup_rows' ) && is_array( $this->wpdb->russian_post_pickup_rows );
