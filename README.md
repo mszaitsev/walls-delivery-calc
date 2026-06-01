@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.30.3.
+Version: 0.30.4.
+
+Version 0.30.4 makes WDC nested tariff separators part of the PHP markup instead of CSS pseudo-content, so empty days/prices do not leave stray punctuation. Pickup marker clicks now explicitly clear the manual popup-close flag and providers suppress close events during the reopen tick, so closing a popup with its X no longer blocks reopening it by clicking the active marker.
 
 Version 0.30.3 fixes the last checkout polish regressions: WDC nested rate separators now render as an explicit stable `title - days: price` text flow, and pickup marker clicks are protected from the map-click close path so clicking an already-active marker reopens its popup/balloon after a manual close in both Leaflet and Yandex providers.
 

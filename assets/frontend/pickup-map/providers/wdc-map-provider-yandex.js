@@ -234,7 +234,7 @@
 				suppressPopupClose = true;
 				placemark.properties.set('balloonContent', html);
 				placemark.balloon.open();
-				suppressPopupClose = false;
+				window.setTimeout(function () { suppressPopupClose = false; }, 0);
 			},
 			closePopup: function () {
 				if (map && map.balloon) {

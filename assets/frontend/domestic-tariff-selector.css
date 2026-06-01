@@ -41,19 +41,12 @@
 	overflow-wrap: anywhere;
 }
 
-.wdc-domestic-tariff-selector__days::before {
-	content: " - ";
-}
-
-.wdc-domestic-tariff-selector__price::before {
-	content: ": ";
-}
-
 .wdc-domestic-tariff-selector__price {
 	color: #dc2626;
 	font-weight: 700;
 }
 
+.wdc-domestic-tariff-selector__separator,
 .wdc-domestic-tariff-selector__price,
 .wdc-domestic-tariff-selector__days,
 .wdc-domestic-tariff-selector__crossed-price {
@@ -71,6 +64,7 @@
 	}
 
 	.wdc-domestic-tariff-selector__title,
+	.wdc-domestic-tariff-selector__separator,
 	.wdc-domestic-tariff-selector__price,
 	.wdc-domestic-tariff-selector__days,
 	.wdc-domestic-tariff-selector__crossed-price {

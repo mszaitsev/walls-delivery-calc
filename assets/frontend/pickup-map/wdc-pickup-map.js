@@ -62,6 +62,7 @@
 		});
 		provider.onPointClick(function (point) {
 			suppressNextMapClick = true;
+			popupManuallyClosed = false;
 			preview(point, { focus: false, forcePopup: true, userAction: true });
 			window.setTimeout(function () { suppressNextMapClick = false; }, 0);
 		});
@@ -112,6 +113,9 @@
 			options = options || {};
 			previewPoint = point;
 			if (options.userAction || options.initial) {
+				popupManuallyClosed = false;
+			}
+			if (options.forcePopup) {
 				popupManuallyClosed = false;
 			}
 			card.textContent = committedPoint ? selectedSummary(committedPoint) : (labels.selectPoint || 'Выберите пункт на карте или в списке.');

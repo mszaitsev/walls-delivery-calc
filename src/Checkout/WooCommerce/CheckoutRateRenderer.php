@@ -105,9 +105,11 @@ final class CheckoutRateRenderer {
 			echo '<input type="radio" name="wdc_domestic_tariff_' . esc_attr( $service_key ) . '" value="' . esc_attr( $object ) . '" data-title="' . esc_attr( $title ) . '" data-price="' . esc_attr( (string) ( $variant['price_rub'] ?? '' ) ) . '" ' . checked( $selected, $object, false ) . '>';
 			echo '<span class="wdc-domestic-tariff-selector__title">' . esc_html( $title ) . '</span>';
 			if ( '' !== $comment ) {
+				echo '<span class="wdc-domestic-tariff-selector__separator" aria-hidden="true"> - </span>';
 				echo '<span class="wdc-domestic-tariff-selector__days">' . esc_html( $comment ) . '</span>';
 			}
 			if ( '' !== $price ) {
+				echo '<span class="wdc-domestic-tariff-selector__separator" aria-hidden="true">: </span>';
 				echo '<span class="wdc-domestic-tariff-selector__price">' . esc_html( $price ) . '</span>';
 			}
 			if ( '' !== $crossed ) {

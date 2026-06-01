@@ -83,7 +83,7 @@
 						offset: window.L.point(0, -5)
 					});
 					marker.openPopup();
-					suppressPopupClose = false;
+					window.setTimeout(function () { suppressPopupClose = false; }, 0);
 				}
 			},
 			closePopup: function () {
