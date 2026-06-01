@@ -9,7 +9,7 @@
 	align-items: center;
 	display: flex;
 	flex-wrap: wrap;
-	gap: 4px 8px;
+	gap: 4px 0;
 	line-height: 1.35;
 	margin: 0;
 	padding: 10px 12px;
@@ -24,7 +24,7 @@
 	flex: 0 0 auto;
 	width: 18px !important;
 	height: 18px !important;
-	margin: 0 !important;
+	margin: 0 8px 0 0 !important;
 	opacity: 1 !important;
 	pointer-events: auto !important;
 	clip: auto !important;
@@ -59,6 +59,10 @@
 .wdc-domestic-tariff-selector__crossed-price {
 	flex: 0 0 auto;
 	white-space: nowrap;
+}
+
+.wdc-domestic-tariff-selector__crossed-price {
+	margin-left: 6px;
 }
 
 @media (max-width: 520px) {

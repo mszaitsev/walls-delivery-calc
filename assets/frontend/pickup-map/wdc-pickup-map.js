@@ -59,7 +59,7 @@
 			labels: labels,
 			onBoundsChange: boundsChanged
 		});
-		provider.onPointClick(function (point) { preview(point, { focus: false, userAction: true }); });
+		provider.onPointClick(function (point) { preview(point, { focus: false, forcePopup: true, userAction: true }); });
 		if (provider.onPopupSelect) {
 			provider.onPopupSelect(function (point) { commit(point, { focus: false }); });
 		}
@@ -113,7 +113,7 @@
 			}
 			renderList(visiblePoints);
 			updateListSelectButton();
-			if (provider.openPointPopup && !popupManuallyClosed) {
+			if (provider.openPointPopup && (!popupManuallyClosed || options.forcePopup)) {
 				provider.openPointPopup(point, renderPointPopup(point, committedPoint && pointId(committedPoint) === pointId(point)), { ensureVisible: !!options.ensureVisible });
 			}
 			scrollListRowIntoView(point);

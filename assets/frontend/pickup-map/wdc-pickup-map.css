@@ -500,7 +500,16 @@
 
 .wdc-pickup-list-footer__select {
 	width: 100%;
+	min-height: 42px;
+	padding: 0 14px;
+	border-radius: 10px;
 	text-align: center;
+}
+
+.wdc-pickup-list-footer__select:hover,
+.wdc-pickup-list-footer__select:focus {
+	outline: none;
+	box-shadow: 0 0 0 3px rgba(8, 119, 197, 0.16);
 }
 
 .wdc-pickup-modal__card {
@@ -726,7 +735,16 @@
 .wdc-pickup-popup__select {
 	width: 100%;
 	margin-top: 4px;
+	min-height: 40px;
+	padding: 0 14px;
+	border-radius: 10px;
 	text-align: center;
+}
+
+.wdc-pickup-popup__select:hover,
+.wdc-pickup-popup__select:focus {
+	outline: none;
+	box-shadow: 0 0 0 3px rgba(8, 119, 197, 0.16);
 }
 
 @media (max-width: 768px) {

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.30.1.
+Version: 0.30.2.
+
+Version 0.30.2 tightens the final checkout polish: WDC nested rate text now renders as `{title} - {days}: {price} {old price}` without extra spacing, pickup popup/list select buttons use rounded scoped styling, and clicking an active pickup marker after closing its popup reopens the preview balloon without selecting the point.
 
 Version 0.30.1 polishes checkout UI details after the 0.30.0 split: the city picker modal now uses rounded checkout-style controls, WDC nested rate rows keep title, days, price, and crossed price in natural inline order, the pickup map search bar is a single rounded control with the submit action inside it, and active pickup markers stay visible/red while their popup opens above the marker.
 
