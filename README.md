@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Version: 0.32.2.
+Version: 0.32.3.
+
+Version 0.32.3 makes the locations admin page fast to open on large `wdc_locations` tables. The default `wdc-platform-locations` render now uses a lightweight total counter and defers country, alias, postal-code, coordinate, and technical-marker counters until the admin explicitly requests detailed counters. Fresh installs and updates also include an idempotent `idx_active_country_code (active, country_code)` index for common active/country filters while preserving `postal_code`.
 
 Version 0.32.2 makes the Russian Post pickup diagnostics page fast to open on large pickup tables. The initial summary now uses only cheap counters, `all_problematic` excludes the expensive suspicious-coordinate distance check, and suspicious coordinates are evaluated only when the dedicated filter is selected.
 

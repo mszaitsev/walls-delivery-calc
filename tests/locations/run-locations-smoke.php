@@ -74,6 +74,12 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $queries = array();
 
 		/** @var array<int,string> */
+		public array $get_var_queries = array();
+
+		/** @var array<int,string> */
+		public array $get_results_queries = array();
+
+		/** @var array<int,string> */
 		public array $missing_tables = array();
 
 		public int $distinct_country_codes_calls = 0;
@@ -122,6 +128,10 @@ if ( ! class_exists( 'wpdb' ) ) {
 					return $row;
 				}
 
+				if ( str_contains( $query, 'WHERE gar_object_id =' ) && (int) $row['gar_object_id'] === (int) $value ) {
+					return $row;
+				}
+
 				if ( str_contains( $query, 'WHERE fias_id =' ) && (string) $row['fias_id'] === $value ) {
 					return $row;
 				}
@@ -135,6 +145,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 
 		public function get_results( array $prepared, string $output ): array {
+			$this->get_results_queries[] = (string) ( $prepared['query'] ?? '' );
 			$query = trim( (string) $prepared['args'][0], '%' );
 			$limit = (int) ( $prepared['args'][1] ?? 20 );
 			$rows = array_filter(
@@ -148,6 +159,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 
 		public function get_var( mixed $query ): int {
+			$this->get_var_queries[] = is_array( $query ) ? (string) ( $query['query'] ?? '' ) : (string) $query;
+
 			if ( is_array( $query ) && str_contains( (string) $query['query'], 'SHOW TABLES LIKE' ) ) {
 				$table = (string) ( $query['args'][0] ?? '' );
 				return in_array( $table, $this->missing_tables, true ) ? 0 : 1;
@@ -680,6 +693,31 @@ update_option(
 		'rebuilt_at' => '2026-05-21 12:00:00',
 	)
 );
+$wpdb->get_var_queries = array();
+$wpdb->get_results_queries = array();
+$wpdb->country_counts_calls = 0;
+unset( $GLOBALS['wdc_locations_smoke_options']['wdc_locations_display_name_rebuild_job'], $GLOBALS['wdc_locations_smoke_options']['wdc_dadata_coordinates_fill_job'] );
+ob_start();
+( new LocationsAdminPage(
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.12.13' ),
+	$repository,
+	$search,
+	$importer,
+	country_index: $country_index
+) )->render_page();
+$locations_default_html = (string) ob_get_clean();
+locations_smoke_assert( str_contains( $locations_default_html, 'wdc_locations_deep_counts=1' ), 'Locations admin default page must render an explicit deep counters link.' );
+locations_smoke_assert( ! str_contains( $locations_default_html, 'RU Р РѕСЃСЃРёСЏ (123)' ), 'Locations admin default page must not calculate country summary counts.' );
+locations_smoke_assert( ! str_contains( $locations_default_html, 'РєРѕРѕСЂРґРёРЅР°С‚ РЅРµС‚:' ), 'Locations admin default page must not calculate coordinate counters.' );
+locations_smoke_assert( array() === $wpdb->get_results_queries, 'Opening locations admin without search must not call paginated/full location search.' );
+$default_get_var_sql = implode( "\n", $wpdb->get_var_queries );
+locations_smoke_assert( ! str_contains( $default_get_var_sql, 'wdc_location_aliases' ), 'Opening locations admin without deep counts must not count aliases.' );
+locations_smoke_assert( ! str_contains( $default_get_var_sql, 'postal_code IS NULL' ) && ! str_contains( $default_get_var_sql, 'postal_code IS NOT NULL' ), 'Opening locations admin without deep counts must not run postal_code fill counters.' );
+locations_smoke_assert( ! str_contains( $default_get_var_sql, 'latitude IS NULL' ) && ! str_contains( $default_get_var_sql, 'latitude IS NOT NULL' ), 'Opening locations admin without deep counts must not run coordinate counters.' );
+locations_smoke_assert( 0 === $wpdb->country_counts_calls, 'Opening locations admin without deep counts must not rebuild/load country count index.' );
+locations_smoke_assert( ! array_key_exists( 'wdc_locations_display_name_rebuild_job', $GLOBALS['wdc_locations_smoke_options'] ), 'Opening locations admin must not trigger display-name/alias rebuild jobs.' );
+locations_smoke_assert( ! array_key_exists( 'wdc_dadata_coordinates_fill_job', $GLOBALS['wdc_locations_smoke_options'] ), 'Opening locations admin must not trigger coordinate jobs.' );
+$_GET = array( 'wdc_locations_deep_counts' => '1' );
 ob_start();
 ( new LocationsAdminPage(
 	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.12.13' ),
@@ -820,10 +858,18 @@ locations_smoke_assert( 0 === $admin_repository->count_all() && 0 === $admin_rep
 $locations_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Admin/LocationsAdminPage.php' );
 locations_smoke_assert( str_contains( $locations_admin_source, 'wp_verify_nonce' ) && str_contains( $locations_admin_source, 'current_user_can( AdminMenu::CAPABILITY' ), 'Admin clear action must require nonce and capability.' );
 locations_smoke_assert( str_contains( $locations_admin_source, 'CheckoutLocationSearch' ) && str_contains( $locations_admin_source, 'search_paginated( $query' ), 'Locations admin page must use hierarchy-aware search.' );
+locations_smoke_assert( str_contains( $locations_admin_source, 'should_show_deep_counts' ) && str_contains( $locations_admin_source, 'count_with_postal_code()' ), 'Locations admin must keep expensive counters behind an explicit deep-counts request.' );
 $repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Storage/LocationRepository.php' );
 locations_smoke_assert( ! str_contains( $repository_source, 'pickup' ) && ! str_contains( $repository_source, 'rules' ) && ! str_contains( $repository_source, 'calendar' ) && ! str_contains( $repository_source, 'options' ), 'clear_all must not target pickup/rules/calendar/settings storage.' );
 locations_smoke_assert( str_contains( $repository_source, 'find_exact_admin_identifier_matches' ) && str_contains( $repository_source, 'postal_code' ), 'LocationRepository must expose exact admin identifier lookup.' );
 locations_smoke_assert( str_contains( $repository_source, 'find_first_by_postal_code' ), 'LocationRepository must expose postcode lookup for pickup address-search fallback.' );
+$locations_schema_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0002_create_locations_table.php' );
+locations_smoke_assert( str_contains( $locations_schema_source, 'KEY country_code (country_code)' ) && str_contains( $locations_schema_source, 'KEY active (active)' ) && str_contains( $locations_schema_source, 'KEY postal_code (postal_code)' ), 'Fresh locations schema must keep country_code, active, and postal_code indexes.' );
+locations_smoke_assert( str_contains( $locations_schema_source, 'KEY idx_active_country_code (active, country_code)' ), 'Fresh locations schema must include the active/country_code compound index.' );
+$locations_index_migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0024_add_locations_active_country_index.php' );
+locations_smoke_assert( str_contains( $locations_index_migration_source, 'SHOW TABLES LIKE' ) && str_contains( $locations_index_migration_source, 'SHOW COLUMNS' ) && str_contains( $locations_index_migration_source, 'SHOW INDEX' ) && str_contains( $locations_index_migration_source, 'ADD KEY idx_active_country_code' ), '0024 must add the active/country_code index idempotently.' );
+$locations_postcode_migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0023_drop_unused_locations_postcode.php' );
+locations_smoke_assert( str_contains( $locations_postcode_migration_source, 'DROP COLUMN postcode' ) && str_contains( $locations_postcode_migration_source, 'postal_code' ), '0023 must remove only legacy postcode after preserving postal_code.' );
 $dadata_client_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/AddressSuggestions/DaDataSuggestionClient.php' );
 locations_smoke_assert( str_contains( $dadata_client_source, 'location_fias_id' ) && str_contains( $dadata_client_source, 'restrict_value' ), 'DaData address search must support current-location filters.' );
 

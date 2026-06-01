@@ -33,7 +33,8 @@ return static function (): void {
 		KEY city_name (city_name),
 		KEY settlement_name (settlement_name),
 		KEY postal_code (postal_code),
-		KEY active (active)
+		KEY active (active),
+		KEY idx_active_country_code (active, country_code)
 	) {$charset_collate}";
 
 	require_once ABSPATH . 'wp-admin/includes/upgrade.php';
