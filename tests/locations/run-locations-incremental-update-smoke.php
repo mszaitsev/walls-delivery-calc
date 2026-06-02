@@ -233,6 +233,54 @@ incremental_smoke_assert( array_any( $db->wdc_incremental_tables['wdc_locations'
 incremental_smoke_assert( isset( $db->wdc_incremental_tables[ $prepared['previous_alias_table'] ] ), 'Atomic swap must leave old aliases intact.' );
 incremental_smoke_assert( count( $db->wdc_incremental_tables['wdc_location_aliases'] ) > 0, 'Atomic swap must promote candidate aliases.' );
 
+$fallback_db = incremental_seed_db();
+$fallback_db->wdc_incremental_tables['wdc_locations'][4] = incremental_location_row( 4, '', 2001, 'Gar removed', '620001' );
+$fallback_db->wdc_incremental_tables['wdc_locations'][5] = incremental_location_row( 5, '', 2003, 'Gar old', '620003' );
+$fallback_db->wdc_incremental_tables['wdc_locations'][5]['latitude'] = 56.838011;
+$fallback_db->wdc_incremental_tables['wdc_locations'][5]['longitude'] = 60.597465;
+$fallback_stage = 'wdc_locations_update_staging_fallback1';
+$fallback_db->wdc_incremental_tables[ $fallback_stage ] = array(
+	1 => incremental_location_row( 1, 'fias-a', 1001, 'Город A', '630001' ),
+	2 => incremental_location_row( 2, 'fias-b', 1002, 'Город B updated', '630222' ),
+	3 => incremental_location_row( 3, 'fias-new', 1009, 'Fias new', '630009' ),
+	4 => incremental_location_row( 4, '', 2002, 'Gar new', '620002' ),
+	5 => incremental_location_row( 5, '', 2003, 'Gar updated', '620333' ),
+);
+$fallback_service = incremental_service_with_db( $fallback_db );
+$fallback_job = $fallback_service->build_diff(
+	array(
+		'phase' => 'diff',
+		'staging_table' => $fallback_stage,
+	)
+);
+incremental_smoke_assert( 2 === (int) $fallback_job['new_count'], 'Diff must detect NEW rows by both fias_id and gar_object_id.' );
+incremental_smoke_assert( 2 === (int) $fallback_job['removed_count'], 'Diff must detect REMOVED rows by both fias_id and gar_object_id.' );
+incremental_smoke_assert( 2 === (int) $fallback_job['changed_count'], 'Diff must detect CHANGED rows by both fias_id and gar_object_id.' );
+incremental_smoke_assert( array_any( $fallback_job['samples']['new'], static fn( array $row ): bool => 'f:fias-new' === $row['key'] ), 'NEW detection by fias_id must be sampled.' );
+incremental_smoke_assert( array_any( $fallback_job['samples']['new'], static fn( array $row ): bool => 'g:2002' === $row['key'] ), 'NEW detection by gar_object_id must be sampled.' );
+incremental_smoke_assert( array_any( $fallback_job['samples']['removed'], static fn( array $row ): bool => 'f:fias-c' === $row['key'] ), 'REMOVED detection by fias_id must be sampled.' );
+incremental_smoke_assert( array_any( $fallback_job['samples']['removed'], static fn( array $row ): bool => 'g:2001' === $row['key'] ), 'REMOVED detection by gar_object_id must be sampled.' );
+incremental_smoke_assert( array_any( $fallback_job['samples']['changed'], static fn( array $row ): bool => 'f:fias-b' === $row['key'] ), 'CHANGED detection by fias_id must be sampled.' );
+incremental_smoke_assert( array_any( $fallback_job['samples']['changed'], static fn( array $row ): bool => 'g:2003' === $row['key'] ), 'CHANGED detection by gar_object_id must be sampled.' );
+$fallback_job['candidate_table'] = 'wdc_locations_candidate_fallback1';
+$fallback_job['candidate_alias_table'] = 'wdc_location_aliases_candidate_fallback1';
+$fallback_prepared = $fallback_service->prepare_candidate(
+	$fallback_job,
+	array(
+		'new' => array( 'f:fias-new', 'g:2002' ),
+		'removed' => array(),
+		'changed' => array( 'f:fias-b', 'g:2003' ),
+	)
+);
+$fallback_candidate = $fallback_db->wdc_incremental_tables[ $fallback_prepared['candidate_table'] ];
+incremental_smoke_assert( array_any( $fallback_candidate, static fn( array $row ): bool => 'fias-b' === $row['fias_id'] && 'Город B updated' === $row['display_name'] && '630222' === $row['postal_code'] ), 'apply_changed_rows must update selected fias_id rows.' );
+incremental_smoke_assert( array_any( $fallback_candidate, static fn( array $row ): bool => '' === $row['fias_id'] && 2003 === (int) $row['gar_object_id'] && 'Gar updated' === $row['display_name'] && '620333' === $row['postal_code'] ), 'apply_changed_rows must update selected gar_object_id rows.' );
+incremental_smoke_assert( array_any( $fallback_candidate, static fn( array $row ): bool => '' === $row['fias_id'] && 2003 === (int) $row['gar_object_id'] && 56.838011 === (float) $row['latitude'] && 60.597465 === (float) $row['longitude'] ), 'apply_changed_rows by gar_object_id must preserve latitude/longitude.' );
+incremental_smoke_assert( array_any( $fallback_candidate, static fn( array $row ): bool => '' === $row['fias_id'] && 2002 === (int) $row['gar_object_id'] && null === $row['latitude'] && null === $row['longitude'] ), 'NEW gar_object_id rows may import with null coordinates.' );
+$incremental_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/LocationIncrementalUpdateService.php' );
+incremental_smoke_assert( ! str_contains( $incremental_source, 'join_condition' ), 'Diff SQL contract must not use the old OR join_condition helper.' );
+incremental_smoke_assert( ! preg_match( '/JOIN[^\\n]+\\sOR\\s/i', $incremental_source ), 'Diff SQL contract must not contain OR in JOIN clauses.' );
+
 $invalid_db = incremental_seed_db();
 $invalid_db->wdc_incremental_tables['wdc_locations'][4] = incremental_location_row( 4, 'fias-a', 9999, 'Duplicate FIAS', '630009' );
 $invalid_job = incremental_service_with_db( $invalid_db )->prepare_candidate(
@@ -305,6 +353,8 @@ $cleanup_result = $cleanup_service->cleanup_temporary_tables();
 $dropped = $cleanup_result['dropped'];
 sort( $dropped );
 incremental_smoke_assert( $temporary_names === $dropped, 'cleanup_temporary_tables must drop only whitelisted temporary tables.' );
+incremental_smoke_assert( count( $cleanup_result['dropped'] ) > 0 && (int) ( $cleanup_result['debug']['dropped'] ?? 0 ) > 0, 'cleanup_temporary_tables must report dropped count for UI.' );
+incremental_smoke_assert( isset( $cleanup_result['debug']['found'], $cleanup_result['debug']['whitelisted'], $cleanup_result['debug']['elapsed_ms'] ), 'cleanup_temporary_tables must expose debug timing.' );
 incremental_smoke_assert( ! isset( $cleanup_db->wdc_incremental_tables['wp_wdc_locations_update_staging_abcd1234'], $cleanup_db->wdc_incremental_tables['wp_wdc_locations_candidate_abcd1234'], $cleanup_db->wdc_incremental_tables['wp_wdc_location_aliases_candidate_abcd1234'] ), 'cleanup_temporary_tables must remove staging/candidate tables.' );
 incremental_smoke_assert( isset( $cleanup_db->wdc_incremental_tables['wp_wdc_locations'], $cleanup_db->wdc_incremental_tables['wp_wdc_location_aliases'] ), 'cleanup_temporary_tables must not remove current tables.' );
 incremental_smoke_assert( isset( $cleanup_db->wdc_incremental_tables['wp_wdc_locations_previous_abcd1234'], $cleanup_db->wdc_incremental_tables['wp_wdc_location_aliases_previous_abcd1234'] ), 'cleanup_temporary_tables must not remove previous tables.' );
@@ -315,6 +365,7 @@ incremental_smoke_assert( is_array( get_option( 'wdc_locations_incremental_updat
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Admin/LocationsAdminPage.php' );
 incremental_smoke_assert( str_contains( $admin_source, 'wp_ajax_wdc_locations_incremental_update_cleanup_list' ) && str_contains( $admin_source, 'wp_ajax_wdc_locations_incremental_update_cleanup_drop' ), 'Admin cleanup actions must be registered as AJAX POST actions.' );
 incremental_smoke_assert( str_contains( $admin_source, 'ajax_incremental_update_cleanup_list' ) && str_contains( $admin_source, 'ajax_incremental_update_cleanup_drop' ) && str_contains( $admin_source, '$this->guard_ajax();' ), 'Admin cleanup actions must require nonce and capability guard.' );
+incremental_smoke_assert( str_contains( $admin_source, 'dropped_count' ) && str_contains( $admin_source, 'Временные таблицы не найдены.' ), 'Admin cleanup UI must receive dropped count and empty-list message.' );
 
 @unlink( $csv );
 echo "Locations incremental update smoke passed\n";

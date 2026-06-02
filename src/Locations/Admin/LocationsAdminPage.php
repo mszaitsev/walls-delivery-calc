@@ -637,7 +637,23 @@ final class LocationsAdminPage {
 				if (!box) return;
 				box.hidden = false;
 				const text = box.querySelector('pre');
-				text.textContent = JSON.stringify(payload || {}, null, 2);
+				payload = payload || {};
+				if (payload.phase === 'cleanup_list' && Number(payload.tables_found || 0) === 0) {
+					text.textContent = 'Временные таблицы не найдены.\n\n' + JSON.stringify(payload, null, 2);
+					return;
+				}
+				if (payload.phase === 'cleanup_finished') {
+					const lines = [
+						'Удалено таблиц: ' + Number(payload.dropped_count || 0),
+						'Dropped: ' + safeText(payload.dropped || []),
+						'Skipped: ' + safeText(payload.skipped || []),
+						'Errors: ' + safeText(payload.errors || []),
+						'Debug: ' + safeText(payload.debug || {})
+					];
+					text.textContent = lines.join('\n') + '\n\n' + JSON.stringify(payload, null, 2);
+					return;
+				}
+				text.textContent = JSON.stringify(payload, null, 2);
 			}
 			const garStart = document.getElementById('wdc-gar-import-start');
 			if (garStart) garStart.addEventListener('click', function(){
@@ -676,13 +692,19 @@ final class LocationsAdminPage {
 			const incrementalCleanupList = document.getElementById('wdc-incremental-cleanup-list');
 			if (incrementalCleanupList) incrementalCleanupList.addEventListener('click', function(){
 				const box = document.getElementById('wdc-incremental-cleanup-result');
+				renderCleanup(box, {phase:'cleanup_loading', message:'Проверяем временные таблицы...'});
 				post('wdc_locations_incremental_update_cleanup_list').then(resp => { renderCleanup(box, resp.data); });
 			});
 			const incrementalCleanupDrop = document.getElementById('wdc-incremental-cleanup-drop');
 			if (incrementalCleanupDrop) incrementalCleanupDrop.addEventListener('click', function(){
 				if (!window.confirm('<?php echo esc_js( __( 'Удалить временные staging/candidate таблицы инкрементального обновления? Боевые таблицы затронуты не будут.', 'walls-delivery-calc' ) ); ?>')) return;
 				const box = document.getElementById('wdc-incremental-cleanup-result');
-				post('wdc_locations_incremental_update_cleanup_drop').then(resp => { renderCleanup(box, resp.data); });
+				incrementalCleanupDrop.disabled = true;
+				renderCleanup(box, {phase:'cleanup_running', message:'Удаляем временные таблицы...'});
+				post('wdc_locations_incremental_update_cleanup_drop').then(resp => {
+					renderCleanup(box, resp.data);
+					post('wdc_locations_incremental_update_cleanup_list').then(listResp => { renderCleanup(box, Object.assign({after_cleanup:true}, listResp.data || {})); });
+				}).finally(() => { incrementalCleanupDrop.disabled = false; });
 			});
 			const exportStart = document.getElementById('wdc-snapshot-export-start');
 			if (exportStart) exportStart.addEventListener('click', function(){
@@ -1017,6 +1039,7 @@ final class LocationsAdminPage {
 				'skipped' => $result['skipped'] ?? array(),
 				'errors' => $result['errors'] ?? array(),
 				'active_job_cleared' => (bool) ( $result['active_job_cleared'] ?? false ),
+				'debug' => $result['debug'] ?? array(),
 			)
 		);
 	}

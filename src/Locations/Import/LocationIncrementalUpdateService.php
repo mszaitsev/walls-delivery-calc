@@ -183,9 +183,9 @@ final class LocationIncrementalUpdateService {
 
 		$job['current_count'] = $this->count_table( $current );
 		$job['staging_count'] = $this->count_table( $stage );
-		$job['new_count'] = $this->count_rows( "SELECT COUNT(*) FROM {$stage} s LEFT JOIN {$current} c ON {$this->join_condition( 's', 'c' )} WHERE {$this->key_condition( 's' )} AND c.id IS NULL" );
-		$job['removed_count'] = $this->count_rows( "SELECT COUNT(*) FROM {$current} c LEFT JOIN {$stage} s ON {$this->join_condition( 's', 'c' )} WHERE {$this->key_condition( 'c' )} AND s.id IS NULL" );
-		$job['changed_count'] = $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON {$this->join_condition( 's', 'c' )} WHERE {$this->changed_condition( 's', 'c' )}" );
+		$job['new_count'] = $this->new_count( $stage, $current );
+		$job['removed_count'] = $this->removed_count( $stage, $current );
+		$job['changed_count'] = $this->changed_count( $stage, $current );
 		$job['samples'] = $this->diff_samples( $stage, $current );
 		$job['phase'] = 'analysis';
 		$job['updated_at'] = $this->now();
@@ -281,25 +281,7 @@ final class LocationIncrementalUpdateService {
 			return $this->memory_list_temporary_tables();
 		}
 
-		$tables = array();
-		foreach ( $this->temporary_table_patterns() as $type => $pattern ) {
-			foreach ( $this->show_tables_like( $pattern ) as $table ) {
-				$table = (string) $table;
-				if ( ! $this->temporary_table_type( $table ) ) {
-					continue;
-				}
-				$tables[ $table ] = array(
-					'table' => $table,
-					'type' => $type,
-					'rows_count' => $this->count_table( $table ),
-					'created_hint' => $this->created_hint_from_table( $table ),
-					'safe_to_drop' => true,
-				);
-			}
-		}
-		ksort( $tables );
-
-		return array_values( $tables );
+		return $this->discover_temporary_tables( true )['tables'];
 	}
 
 	/**
@@ -310,8 +292,22 @@ final class LocationIncrementalUpdateService {
 			return $this->memory_cleanup_temporary_tables();
 		}
 
-		$result = array( 'dropped' => array(), 'skipped' => array(), 'errors' => array(), 'active_job_cleared' => false );
-		foreach ( $this->list_temporary_tables() as $row ) {
+		$started = microtime( true );
+		$discovery = $this->discover_temporary_tables( false );
+		$result = array(
+			'dropped' => array(),
+			'skipped' => $discovery['skipped'],
+			'errors' => array(),
+			'active_job_cleared' => false,
+			'debug' => array(
+				'found' => $discovery['found'],
+				'whitelisted' => count( $discovery['tables'] ),
+				'dropped' => 0,
+				'skipped' => count( $discovery['skipped'] ),
+				'elapsed_ms' => 0,
+			),
+		);
+		foreach ( $discovery['tables'] as $row ) {
 			$table = (string) $row['table'];
 			if ( ! $this->temporary_table_type( $table ) ) {
 				$result['skipped'][] = $table;
@@ -325,6 +321,9 @@ final class LocationIncrementalUpdateService {
 			}
 		}
 		$result['active_job_cleared'] = $this->delete_option( self::ACTIVE_JOB_OPTION );
+		$result['debug']['dropped'] = count( $result['dropped'] );
+		$result['debug']['skipped'] = count( $result['skipped'] );
+		$result['debug']['elapsed_ms'] = (int) round( ( microtime( true ) - $started ) * 1000 );
 
 		return $result;
 	}
@@ -615,10 +614,19 @@ final class LocationIncrementalUpdateService {
 			}
 			$assignments[] = "c.{$column} = s.{$column}";
 		}
-		$this->query_or_fail(
-			"UPDATE {$candidate} c INNER JOIN {$stage} s ON {$this->join_condition( 's', 'c' )} SET " . implode( ', ', $assignments ) . ' WHERE ' . $this->key_in_condition( 's', $keys ),
-			'Unable to apply selected changed locations.'
-		);
+		$parsed = $this->parse_keys( $keys );
+		if ( array() !== $parsed['fias'] ) {
+			$this->query_or_fail(
+				"UPDATE {$candidate} c INNER JOIN {$stage} s ON c.fias_id = s.fias_id SET " . implode( ', ', $assignments ) . ' WHERE ' . $this->fias_in_condition( 's', $parsed['fias'] ),
+				'Unable to apply selected changed locations by fias_id.'
+			);
+		}
+		if ( array() !== $parsed['gar'] ) {
+			$this->query_or_fail(
+				"UPDATE {$candidate} c INNER JOIN {$stage} s ON c.gar_object_id = s.gar_object_id SET " . implode( ', ', $assignments ) . ' WHERE ' . $this->empty_fias_condition( 's' ) . ' AND ' . $this->empty_fias_condition( 'c' ) . ' AND ' . $this->gar_in_condition( 's', $parsed['gar'] ),
+				'Unable to apply selected changed locations by gar_id.'
+			);
+		}
 	}
 
 	/**
@@ -711,9 +719,9 @@ final class LocationIncrementalUpdateService {
 	 */
 	private function diff_samples( string $stage, string $current ): array {
 		return array(
-			'new' => $this->sample_rows( "SELECT IF(s.fias_id IS NOT NULL AND s.fias_id != '', CONCAT('f:', s.fias_id), CONCAT('g:', s.gar_object_id)) AS `key`, s.fias_id, s.gar_object_id, s.display_name, s.postal_code FROM {$stage} s LEFT JOIN {$current} c ON {$this->join_condition( 's', 'c' )} WHERE {$this->key_condition( 's' )} AND c.id IS NULL ORDER BY s.display_name ASC LIMIT 100" ),
-			'removed' => $this->sample_rows( "SELECT IF(c.fias_id IS NOT NULL AND c.fias_id != '', CONCAT('f:', c.fias_id), CONCAT('g:', c.gar_object_id)) AS `key`, c.fias_id, c.gar_object_id, c.display_name, c.postal_code FROM {$current} c LEFT JOIN {$stage} s ON {$this->join_condition( 's', 'c' )} WHERE {$this->key_condition( 'c' )} AND s.id IS NULL ORDER BY c.display_name ASC LIMIT 100" ),
-			'changed' => $this->sample_rows( "SELECT IF(s.fias_id IS NOT NULL AND s.fias_id != '', CONCAT('f:', s.fias_id), CONCAT('g:', s.gar_object_id)) AS `key`, s.fias_id, s.gar_object_id, c.display_name AS old_display_name, s.display_name AS new_display_name, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON {$this->join_condition( 's', 'c' )} WHERE {$this->changed_condition( 's', 'c' )} ORDER BY s.display_name ASC LIMIT 100" ),
+			'new' => $this->sample_rows( $this->new_samples_sql( $stage, $current ) ),
+			'removed' => $this->sample_rows( $this->removed_samples_sql( $stage, $current ) ),
+			'changed' => $this->sample_rows( $this->changed_samples_sql( $stage, $current ) ),
 		);
 	}
 
@@ -725,12 +733,48 @@ final class LocationIncrementalUpdateService {
 		return is_array( $rows ) ? $rows : array();
 	}
 
-	private function join_condition( string $stage_alias, string $current_alias ): string {
-		return "(({$stage_alias}.fias_id IS NOT NULL AND {$stage_alias}.fias_id != '' AND {$stage_alias}.fias_id = {$current_alias}.fias_id) OR (({$stage_alias}.fias_id IS NULL OR {$stage_alias}.fias_id = '') AND {$stage_alias}.gar_object_id > 0 AND {$stage_alias}.gar_object_id = {$current_alias}.gar_object_id))";
+	private function new_count( string $stage, string $current ): int {
+		return $this->count_rows( "SELECT COUNT(*) FROM {$stage} s WHERE {$this->has_fias_condition( 's' )} AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE c.fias_id = s.fias_id)" )
+			+ $this->count_rows( "SELECT COUNT(*) FROM {$stage} s WHERE {$this->empty_fias_condition( 's' )} AND s.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE c.gar_object_id = s.gar_object_id)" );
 	}
 
-	private function key_condition( string $alias ): string {
-		return "(({$alias}.fias_id IS NOT NULL AND {$alias}.fias_id != '') OR {$alias}.gar_object_id > 0)";
+	private function removed_count( string $stage, string $current ): int {
+		return $this->count_rows( "SELECT COUNT(*) FROM {$current} c WHERE {$this->has_fias_condition( 'c' )} AND NOT EXISTS (SELECT 1 FROM {$stage} s WHERE s.fias_id = c.fias_id)" )
+			+ $this->count_rows( "SELECT COUNT(*) FROM {$current} c WHERE {$this->empty_fias_condition( 'c' )} AND c.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$stage} s WHERE s.gar_object_id = c.gar_object_id)" );
+	}
+
+	private function changed_count( string $stage, string $current ): int {
+		return $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$this->changed_condition( 's', 'c' )}" )
+			+ $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition( 's' )} AND {$this->empty_fias_condition( 'c' )} AND s.gar_object_id > 0 AND {$this->changed_condition( 's', 'c' )}" );
+	}
+
+	private function new_samples_sql( string $stage, string $current ): string {
+		return "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, s.display_name, s.postal_code FROM {$stage} s WHERE {$this->has_fias_condition( 's' )} AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE c.fias_id = s.fias_id)
+			UNION ALL
+			SELECT CONCAT('g:', s.gar_object_id) AS `key`, s.fias_id, s.gar_object_id, s.display_name, s.postal_code FROM {$stage} s WHERE {$this->empty_fias_condition( 's' )} AND s.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE c.gar_object_id = s.gar_object_id)
+			LIMIT 100";
+	}
+
+	private function removed_samples_sql( string $stage, string $current ): string {
+		return "SELECT CONCAT('f:', c.fias_id) AS `key`, c.fias_id, c.gar_object_id, c.display_name, c.postal_code FROM {$current} c WHERE {$this->has_fias_condition( 'c' )} AND NOT EXISTS (SELECT 1 FROM {$stage} s WHERE s.fias_id = c.fias_id)
+			UNION ALL
+			SELECT CONCAT('g:', c.gar_object_id) AS `key`, c.fias_id, c.gar_object_id, c.display_name, c.postal_code FROM {$current} c WHERE {$this->empty_fias_condition( 'c' )} AND c.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$stage} s WHERE s.gar_object_id = c.gar_object_id)
+			LIMIT 100";
+	}
+
+	private function changed_samples_sql( string $stage, string $current ): string {
+		return "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name AS old_display_name, s.display_name AS new_display_name, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$this->changed_condition( 's', 'c' )}
+			UNION ALL
+			SELECT CONCAT('g:', s.gar_object_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name AS old_display_name, s.display_name AS new_display_name, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition( 's' )} AND {$this->empty_fias_condition( 'c' )} AND s.gar_object_id > 0 AND {$this->changed_condition( 's', 'c' )}
+			LIMIT 100";
+	}
+
+	private function has_fias_condition( string $alias ): string {
+		return "{$alias}.fias_id IS NOT NULL AND {$alias}.fias_id != ''";
+	}
+
+	private function empty_fias_condition( string $alias ): string {
+		return "({$alias}.fias_id IS NULL OR {$alias}.fias_id = '')";
 	}
 
 	private function changed_condition( string $stage_alias, string $current_alias ): string {
@@ -746,15 +790,9 @@ final class LocationIncrementalUpdateService {
 	 * @param array<int,string> $keys
 	 */
 	private function key_in_condition( string $alias, array $keys ): string {
-		$fias = array();
-		$gar = array();
-		foreach ( $keys as $key ) {
-			if ( str_starts_with( $key, 'f:' ) ) {
-				$fias[] = substr( $key, 2 );
-			} elseif ( str_starts_with( $key, 'g:' ) ) {
-				$gar[] = (int) substr( $key, 2 );
-			}
-		}
+		$parsed = $this->parse_keys( $keys );
+		$fias = $parsed['fias'];
+		$gar = $parsed['gar'];
 		$prefix = '' !== $alias ? $alias . '.' : '';
 		$parts = array();
 		if ( array() !== $fias ) {
@@ -768,6 +806,46 @@ final class LocationIncrementalUpdateService {
 		}
 
 		return $this->wpdb->prepare( '(' . implode( ' OR ', $parts ) . ')', ...array_merge( $fias, $gar ) );
+	}
+
+	/**
+	 * @param array<int,string> $keys
+	 * @return array{fias:array<int,string>,gar:array<int,int>}
+	 */
+	private function parse_keys( array $keys ): array {
+		$fias = array();
+		$gar = array();
+		foreach ( $keys as $key ) {
+			if ( str_starts_with( $key, 'f:' ) ) {
+				$fias[] = substr( $key, 2 );
+			} elseif ( str_starts_with( $key, 'g:' ) ) {
+				$gar[] = (int) substr( $key, 2 );
+			}
+		}
+
+		return array( 'fias' => array_values( array_unique( $fias ) ), 'gar' => array_values( array_unique( array_filter( $gar ) ) ) );
+	}
+
+	/**
+	 * @param array<int,string> $fias_ids
+	 */
+	private function fias_in_condition( string $alias, array $fias_ids ): string {
+		if ( array() === $fias_ids ) {
+			return '1 = 0';
+		}
+
+		return $this->wpdb->prepare( "{$alias}.fias_id IN (" . implode( ', ', array_fill( 0, count( $fias_ids ), '%s' ) ) . ')', ...$fias_ids );
+	}
+
+	/**
+	 * @param array<int,int> $gar_ids
+	 */
+	private function gar_in_condition( string $alias, array $gar_ids ): string {
+		if ( array() === $gar_ids ) {
+			return '1 = 0';
+		}
+
+		return $this->wpdb->prepare( "{$alias}.gar_object_id IN (" . implode( ', ', array_fill( 0, count( $gar_ids ), '%d' ) ) . ')', ...$gar_ids );
 	}
 
 	/**
@@ -823,6 +901,36 @@ final class LocationIncrementalUpdateService {
 		}
 
 		return $tables;
+	}
+
+	/**
+	 * @return array{tables:array<int,array{table:string,type:string,rows_count:int,created_hint:string,safe_to_drop:bool}>,found:int,skipped:array<int,string>}
+	 */
+	private function discover_temporary_tables( bool $with_counts ): array {
+		$tables = array();
+		$skipped = array();
+		$found = 0;
+		foreach ( $this->temporary_table_patterns() as $pattern ) {
+			foreach ( $this->show_tables_like( $pattern ) as $table ) {
+				++$found;
+				$table = (string) $table;
+				$type = $this->temporary_table_type( $table );
+				if ( '' === $type ) {
+					$skipped[] = $table;
+					continue;
+				}
+				$tables[ $table ] = array(
+					'table' => $table,
+					'type' => $type,
+					'rows_count' => $with_counts ? $this->count_table( $table ) : -1,
+					'created_hint' => $this->created_hint_from_table( $table ),
+					'safe_to_drop' => true,
+				);
+			}
+		}
+		ksort( $tables );
+
+		return array( 'tables' => array_values( $tables ), 'found' => $found, 'skipped' => array_values( array_unique( $skipped ) ) );
 	}
 
 	/**
@@ -967,7 +1075,8 @@ final class LocationIncrementalUpdateService {
 	 * @return array{dropped:array<int,string>,skipped:array<int,string>,errors:array<int,string>,active_job_cleared:bool}
 	 */
 	private function memory_cleanup_temporary_tables(): array {
-		$result = array( 'dropped' => array(), 'skipped' => array(), 'errors' => array(), 'active_job_cleared' => false );
+		$started = microtime( true );
+		$result = array( 'dropped' => array(), 'skipped' => array(), 'errors' => array(), 'active_job_cleared' => false, 'debug' => array( 'found' => 0, 'whitelisted' => 0, 'dropped' => 0, 'skipped' => 0, 'elapsed_ms' => 0 ) );
 		foreach ( array_keys( $this->wpdb->wdc_incremental_tables ) as $table ) {
 			if ( '' === $this->temporary_table_type( (string) $table ) ) {
 				if ( str_contains( (string) $table, 'wdc_locations_' ) || str_contains( (string) $table, 'wdc_location_aliases_' ) ) {
@@ -975,10 +1084,15 @@ final class LocationIncrementalUpdateService {
 				}
 				continue;
 			}
+			++$result['debug']['found'];
+			++$result['debug']['whitelisted'];
 			unset( $this->wpdb->wdc_incremental_tables[ $table ] );
 			$result['dropped'][] = (string) $table;
 		}
 		$result['active_job_cleared'] = $this->delete_option( self::ACTIVE_JOB_OPTION );
+		$result['debug']['dropped'] = count( $result['dropped'] );
+		$result['debug']['skipped'] = count( $result['skipped'] );
+		$result['debug']['elapsed_ms'] = (int) round( ( microtime( true ) - $started ) * 1000 );
 
 		return $result;
 	}
