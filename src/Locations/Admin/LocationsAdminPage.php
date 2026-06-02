@@ -73,6 +73,8 @@ final class LocationsAdminPage {
 		add_action( 'wp_ajax_wdc_locations_incremental_update_step', array( $this, 'ajax_incremental_update_step' ) );
 		add_action( 'wp_ajax_wdc_locations_incremental_update_prepare', array( $this, 'ajax_incremental_update_prepare' ) );
 		add_action( 'wp_ajax_wdc_locations_incremental_update_apply', array( $this, 'ajax_incremental_update_apply' ) );
+		add_action( 'wp_ajax_wdc_locations_incremental_update_cleanup_list', array( $this, 'ajax_incremental_update_cleanup_list' ) );
+		add_action( 'wp_ajax_wdc_locations_incremental_update_cleanup_drop', array( $this, 'ajax_incremental_update_cleanup_drop' ) );
 		add_action( 'wp_ajax_wdc_locations_snapshot_export_start', array( $this, 'ajax_snapshot_export_start' ) );
 		add_action( 'wp_ajax_wdc_locations_snapshot_export_step', array( $this, 'ajax_snapshot_export_step' ) );
 		add_action( 'wp_ajax_wdc_locations_snapshot_import_start', array( $this, 'ajax_snapshot_import_start' ) );
@@ -216,6 +218,13 @@ final class LocationsAdminPage {
 				<button class="button button-primary" type="button" id="wdc-incremental-update-start"><?php echo esc_html__( 'Загрузить новый GAR CSV', 'walls-delivery-calc' ); ?></button>
 				<button class="button button-secondary" type="button" id="wdc-incremental-update-prepare" hidden><?php echo esc_html__( 'Подготовить обновленную базу', 'walls-delivery-calc' ); ?></button>
 				<button class="button button-primary" type="button" id="wdc-incremental-update-apply" hidden><?php echo esc_html__( 'Применить новую базу', 'walls-delivery-calc' ); ?></button>
+				<div class="wdc-incremental-update-cleanup">
+					<h3><?php echo esc_html__( 'Очистка временных таблиц', 'walls-delivery-calc' ); ?></h3>
+					<p class="description"><?php echo esc_html__( 'Удаляет только staging/candidate таблицы незавершенного обновления. Боевые, previous и backup таблицы не удаляются.', 'walls-delivery-calc' ); ?></p>
+					<button class="button button-secondary" type="button" id="wdc-incremental-cleanup-list"><?php echo esc_html__( 'Проверить временные таблицы', 'walls-delivery-calc' ); ?></button>
+					<button class="button button-secondary" type="button" id="wdc-incremental-cleanup-drop"><?php echo esc_html__( 'Удалить временные таблицы', 'walls-delivery-calc' ); ?></button>
+					<div id="wdc-incremental-cleanup-result" class="wdc-progress" hidden><pre></pre></div>
+				</div>
 				<div id="wdc-incremental-update-progress" class="wdc-progress" hidden>
 					<progress value="0" max="100"></progress>
 					<div class="wdc-incremental-update-analysis"></div>
@@ -624,6 +633,12 @@ final class LocationsAdminPage {
 				});
 				return data;
 			}
+			function renderCleanup(box, payload) {
+				if (!box) return;
+				box.hidden = false;
+				const text = box.querySelector('pre');
+				text.textContent = JSON.stringify(payload || {}, null, 2);
+			}
 			const garStart = document.getElementById('wdc-gar-import-start');
 			if (garStart) garStart.addEventListener('click', function(){
 				if (!window.confirm('<?php echo esc_js( __( 'Импорт заменит локальную базу населенных пунктов. Продолжить?', 'walls-delivery-calc' ) ); ?>')) return;
@@ -657,6 +672,17 @@ final class LocationsAdminPage {
 				if (!window.confirm('<?php echo esc_js( __( 'Применить candidate через атомарную замену таблиц locations и aliases?', 'walls-delivery-calc' ) ); ?>')) return;
 				const box = document.getElementById('wdc-incremental-update-progress');
 				post('wdc_locations_incremental_update_apply').then(resp => { renderIncrementalAnalysis(box, resp.data); });
+			});
+			const incrementalCleanupList = document.getElementById('wdc-incremental-cleanup-list');
+			if (incrementalCleanupList) incrementalCleanupList.addEventListener('click', function(){
+				const box = document.getElementById('wdc-incremental-cleanup-result');
+				post('wdc_locations_incremental_update_cleanup_list').then(resp => { renderCleanup(box, resp.data); });
+			});
+			const incrementalCleanupDrop = document.getElementById('wdc-incremental-cleanup-drop');
+			if (incrementalCleanupDrop) incrementalCleanupDrop.addEventListener('click', function(){
+				if (!window.confirm('<?php echo esc_js( __( 'Удалить временные staging/candidate таблицы инкрементального обновления? Боевые таблицы затронуты не будут.', 'walls-delivery-calc' ) ); ?>')) return;
+				const box = document.getElementById('wdc-incremental-cleanup-result');
+				post('wdc_locations_incremental_update_cleanup_drop').then(resp => { renderCleanup(box, resp.data); });
 			});
 			const exportStart = document.getElementById('wdc-snapshot-export-start');
 			if (exportStart) exportStart.addEventListener('click', function(){
@@ -957,6 +983,42 @@ final class LocationsAdminPage {
 		$job = is_array( $job ) && $this->incremental_update instanceof LocationIncrementalUpdateService ? $this->incremental_update->apply_candidate( $job ) : array( 'phase' => 'failed', 'errors' => array( 'Incremental update job is unavailable.' ) );
 		$this->update_option( self::INCREMENTAL_UPDATE_JOB_OPTION, $job );
 		$this->send_json( $job );
+	}
+
+	public function ajax_incremental_update_cleanup_list(): void {
+		$this->guard_ajax();
+		if ( ! $this->incremental_update instanceof LocationIncrementalUpdateService ) {
+			$this->send_json( array( 'phase' => 'failed', 'errors' => array( 'Incremental update service is unavailable.' ) ) );
+		}
+		$tables = $this->incremental_update->list_temporary_tables();
+		$this->send_json(
+			array(
+				'phase' => 'cleanup_list',
+				'tables_found' => count( $tables ),
+				'tables' => $tables,
+			)
+		);
+	}
+
+	public function ajax_incremental_update_cleanup_drop(): void {
+		$this->guard_ajax();
+		if ( ! $this->incremental_update instanceof LocationIncrementalUpdateService ) {
+			$this->send_json( array( 'phase' => 'failed', 'errors' => array( 'Incremental update service is unavailable.' ) ) );
+		}
+		$result = $this->incremental_update->cleanup_temporary_tables();
+		if ( ! (bool) ( $result['active_job_cleared'] ?? false ) ) {
+			$result['active_job_cleared'] = $this->delete_option( self::INCREMENTAL_UPDATE_JOB_OPTION );
+		}
+		$this->send_json(
+			array(
+				'phase' => 'cleanup_finished',
+				'dropped_count' => count( $result['dropped'] ?? array() ),
+				'dropped' => $result['dropped'] ?? array(),
+				'skipped' => $result['skipped'] ?? array(),
+				'errors' => $result['errors'] ?? array(),
+				'active_job_cleared' => (bool) ( $result['active_job_cleared'] ?? false ),
+			)
+		);
 	}
 
 	public function ajax_snapshot_export_start(): void {

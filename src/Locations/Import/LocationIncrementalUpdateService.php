@@ -12,6 +12,7 @@ use WallsShop\WDC\Locations\ValueObjects\Location;
 defined( 'ABSPATH' ) || exit;
 
 final class LocationIncrementalUpdateService {
+	private const ACTIVE_JOB_OPTION = 'wdc_locations_incremental_update_job';
 	private const CSV_BATCH_SIZE = 1000;
 	private const ALIAS_BATCH_SIZE = 500;
 	private const MAX_COUNT_DELTA_RATIO = 0.20;
@@ -270,6 +271,62 @@ final class LocationIncrementalUpdateService {
 		LocationCountryIndexService::mark_option_stale();
 
 		return $job;
+	}
+
+	/**
+	 * @return array<int,array{table:string,type:string,rows_count:int,created_hint:string,safe_to_drop:bool}>
+	 */
+	public function list_temporary_tables(): array {
+		if ( $this->is_memory_db() ) {
+			return $this->memory_list_temporary_tables();
+		}
+
+		$tables = array();
+		foreach ( $this->temporary_table_patterns() as $type => $pattern ) {
+			foreach ( $this->show_tables_like( $pattern ) as $table ) {
+				$table = (string) $table;
+				if ( ! $this->temporary_table_type( $table ) ) {
+					continue;
+				}
+				$tables[ $table ] = array(
+					'table' => $table,
+					'type' => $type,
+					'rows_count' => $this->count_table( $table ),
+					'created_hint' => $this->created_hint_from_table( $table ),
+					'safe_to_drop' => true,
+				);
+			}
+		}
+		ksort( $tables );
+
+		return array_values( $tables );
+	}
+
+	/**
+	 * @return array{dropped:array<int,string>,skipped:array<int,string>,errors:array<int,string>,active_job_cleared:bool}
+	 */
+	public function cleanup_temporary_tables(): array {
+		if ( $this->is_memory_db() ) {
+			return $this->memory_cleanup_temporary_tables();
+		}
+
+		$result = array( 'dropped' => array(), 'skipped' => array(), 'errors' => array(), 'active_job_cleared' => false );
+		foreach ( $this->list_temporary_tables() as $row ) {
+			$table = (string) $row['table'];
+			if ( ! $this->temporary_table_type( $table ) ) {
+				$result['skipped'][] = $table;
+				continue;
+			}
+			try {
+				$this->query_or_fail( "DROP TABLE IF EXISTS {$table}", 'Unable to drop temporary incremental update table.' );
+				$result['dropped'][] = $table;
+			} catch ( RuntimeException $exception ) {
+				$result['errors'][] = $table . ': ' . $exception->getMessage();
+			}
+		}
+		$result['active_job_cleared'] = $this->delete_option( self::ACTIVE_JOB_OPTION );
+
+		return $result;
 	}
 
 	/**
@@ -745,6 +802,65 @@ final class LocationIncrementalUpdateService {
 		return (int) $this->wpdb->get_var( $sql );
 	}
 
+	/**
+	 * @return array<int,string>
+	 */
+	private function show_tables_like( string $pattern ): array {
+		$prepared = $this->wpdb->prepare( 'SHOW TABLES LIKE %s', $pattern );
+		if ( method_exists( $this->wpdb, 'get_col' ) ) {
+			$rows = $this->wpdb->get_col( $prepared );
+			return is_array( $rows ) ? array_map( 'strval', $rows ) : array();
+		}
+		$rows = $this->wpdb->get_results( $prepared, ARRAY_A );
+		$tables = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			if ( is_array( $row ) ) {
+				$value = reset( $row );
+				if ( false !== $value ) {
+					$tables[] = (string) $value;
+				}
+			}
+		}
+
+		return $tables;
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private function temporary_table_patterns(): array {
+		$prefix = $this->wpdb->prefix;
+		return array(
+			'staging' => $prefix . 'wdc_locations_update_staging_%',
+			'candidate' => $prefix . 'wdc_locations_candidate_%',
+			'candidate_alias' => $prefix . 'wdc_location_aliases_candidate_%',
+		);
+	}
+
+	private function temporary_table_type( string $table ): string {
+		$prefix = preg_quote( $this->wpdb->prefix, '/' );
+		$patterns = array(
+			'staging' => '/^' . $prefix . 'wdc_locations_update_staging_[a-z0-9]{8,40}$/',
+			'candidate' => '/^' . $prefix . 'wdc_locations_candidate_[a-z0-9]{8,40}$/',
+			'candidate_alias' => '/^' . $prefix . 'wdc_location_aliases_candidate_[a-z0-9]{8,40}$/',
+		);
+		foreach ( $patterns as $type => $pattern ) {
+			if ( preg_match( $pattern, $table ) ) {
+				return $type;
+			}
+		}
+
+		return '';
+	}
+
+	private function created_hint_from_table( string $table ): string {
+		if ( preg_match( '/_([a-z0-9]{8,40})$/', $table, $match ) ) {
+			return $match[1];
+		}
+
+		return '';
+	}
+
 	private function ensure_table( string $table ): void {
 		$result = $this->wpdb->get_var( $this->wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
 		if ( in_array( $result, array( null, '', 0, '0' ), true ) ) {
@@ -816,8 +932,55 @@ final class LocationIncrementalUpdateService {
 		}
 	}
 
+	private function delete_option( string $key ): bool {
+		return function_exists( 'delete_option' ) ? delete_option( $key ) : false;
+	}
+
 	private function is_memory_db(): bool {
 		return property_exists( $this->wpdb, 'wdc_incremental_tables' );
+	}
+
+	/**
+	 * @return array<int,array{table:string,type:string,rows_count:int,created_hint:string,safe_to_drop:bool}>
+	 */
+	private function memory_list_temporary_tables(): array {
+		$tables = array();
+		foreach ( array_keys( $this->wpdb->wdc_incremental_tables ) as $table ) {
+			$type = $this->temporary_table_type( (string) $table );
+			if ( '' === $type ) {
+				continue;
+			}
+			$tables[] = array(
+				'table' => (string) $table,
+				'type' => $type,
+				'rows_count' => count( $this->wpdb->wdc_incremental_tables[ $table ] ?? array() ),
+				'created_hint' => $this->created_hint_from_table( (string) $table ),
+				'safe_to_drop' => true,
+			);
+		}
+		usort( $tables, static fn( array $a, array $b ): int => strcmp( $a['table'], $b['table'] ) );
+
+		return $tables;
+	}
+
+	/**
+	 * @return array{dropped:array<int,string>,skipped:array<int,string>,errors:array<int,string>,active_job_cleared:bool}
+	 */
+	private function memory_cleanup_temporary_tables(): array {
+		$result = array( 'dropped' => array(), 'skipped' => array(), 'errors' => array(), 'active_job_cleared' => false );
+		foreach ( array_keys( $this->wpdb->wdc_incremental_tables ) as $table ) {
+			if ( '' === $this->temporary_table_type( (string) $table ) ) {
+				if ( str_contains( (string) $table, 'wdc_locations_' ) || str_contains( (string) $table, 'wdc_location_aliases_' ) ) {
+					$result['skipped'][] = (string) $table;
+				}
+				continue;
+			}
+			unset( $this->wpdb->wdc_incremental_tables[ $table ] );
+			$result['dropped'][] = (string) $table;
+		}
+		$result['active_job_cleared'] = $this->delete_option( self::ACTIVE_JOB_OPTION );
+
+		return $result;
 	}
 
 	/**

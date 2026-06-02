@@ -8,6 +8,7 @@ use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
+$GLOBALS['wdc_incremental_smoke_options'] = array();
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -48,8 +49,19 @@ function current_time( string $type ): string {
 	return '2026-06-02 12:00:00';
 }
 
+function get_option( string $key, mixed $default = false ): mixed {
+	return array_key_exists( $key, $GLOBALS['wdc_incremental_smoke_options'] ) ? $GLOBALS['wdc_incremental_smoke_options'][ $key ] : $default;
+}
+
 function update_option( string $key, mixed $value, bool|string $autoload = false ): bool {
+	$GLOBALS['wdc_incremental_smoke_options'][ $key ] = $value;
 	return true;
+}
+
+function delete_option( string $key ): bool {
+	$exists = array_key_exists( $key, $GLOBALS['wdc_incremental_smoke_options'] );
+	unset( $GLOBALS['wdc_incremental_smoke_options'][ $key ] );
+	return $exists;
 }
 
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
@@ -256,6 +268,53 @@ $invalid_job = incremental_service_with_db( $invalid_db )->prepare_candidate(
 	array()
 );
 incremental_smoke_assert( in_array( 'Candidate contains rows with empty fias_id.', $invalid_job['validation']['errors'], true ), 'Validation must catch empty fias_id.' );
+
+$cleanup_db = new wpdb();
+$cleanup_db->prefix = 'wp_';
+$cleanup_db->wdc_incremental_tables = array(
+	'wp_wdc_locations' => array( 1 => array( 'id' => 1 ) ),
+	'wp_wdc_location_aliases' => array( 1 => array( 'id' => 1 ) ),
+	'wp_wdc_locations_update_staging_abcd1234' => array( 1 => array( 'id' => 1 ), 2 => array( 'id' => 2 ) ),
+	'wp_wdc_locations_candidate_abcd1234' => array( 1 => array( 'id' => 1 ) ),
+	'wp_wdc_location_aliases_candidate_abcd1234' => array( 1 => array( 'id' => 1 ), 2 => array( 'id' => 2 ), 3 => array( 'id' => 3 ) ),
+	'wp_wdc_locations_previous_abcd1234' => array( 1 => array( 'id' => 1 ) ),
+	'wp_wdc_location_aliases_previous_abcd1234' => array( 1 => array( 'id' => 1 ) ),
+	'wp_wdc_locations_backup_20260602' => array( 1 => array( 'id' => 1 ) ),
+	'wp_wdc_pickup_points_russian_post_staging_abcd1234' => array( 1 => array( 'id' => 1 ) ),
+);
+$cleanup_service = incremental_service_with_db( $cleanup_db );
+$temporary_tables = $cleanup_service->list_temporary_tables();
+$temporary_names = array_map( static fn( array $row ): string => $row['table'], $temporary_tables );
+sort( $temporary_names );
+incremental_smoke_assert(
+	array(
+		'wp_wdc_location_aliases_candidate_abcd1234',
+		'wp_wdc_locations_candidate_abcd1234',
+		'wp_wdc_locations_update_staging_abcd1234',
+	) === $temporary_names,
+	'list_temporary_tables must find only staging/candidate/candidate_alias tables.'
+);
+incremental_smoke_assert( 2 === (int) ( $temporary_tables[2]['rows_count'] ?? 0 ) || 2 === (int) ( $temporary_tables[0]['rows_count'] ?? 0 ), 'list_temporary_tables must include rows_count.' );
+incremental_smoke_assert( ! in_array( 'wp_wdc_locations', $temporary_names, true ) && ! in_array( 'wp_wdc_location_aliases', $temporary_names, true ), 'list_temporary_tables must not include current tables.' );
+incremental_smoke_assert( ! in_array( 'wp_wdc_locations_previous_abcd1234', $temporary_names, true ) && ! in_array( 'wp_wdc_location_aliases_previous_abcd1234', $temporary_names, true ), 'list_temporary_tables must not include previous tables.' );
+incremental_smoke_assert( ! in_array( 'wp_wdc_locations_backup_20260602', $temporary_names, true ), 'list_temporary_tables must not include backup tables.' );
+
+update_option( 'wdc_locations_incremental_update_job', array( 'phase' => 'analysis' ) );
+update_option( 'wdc_locations_incremental_update_last_apply', array( 'applied_at' => '2026-06-02 12:00:00' ) );
+$cleanup_result = $cleanup_service->cleanup_temporary_tables();
+$dropped = $cleanup_result['dropped'];
+sort( $dropped );
+incremental_smoke_assert( $temporary_names === $dropped, 'cleanup_temporary_tables must drop only whitelisted temporary tables.' );
+incremental_smoke_assert( ! isset( $cleanup_db->wdc_incremental_tables['wp_wdc_locations_update_staging_abcd1234'], $cleanup_db->wdc_incremental_tables['wp_wdc_locations_candidate_abcd1234'], $cleanup_db->wdc_incremental_tables['wp_wdc_location_aliases_candidate_abcd1234'] ), 'cleanup_temporary_tables must remove staging/candidate tables.' );
+incremental_smoke_assert( isset( $cleanup_db->wdc_incremental_tables['wp_wdc_locations'], $cleanup_db->wdc_incremental_tables['wp_wdc_location_aliases'] ), 'cleanup_temporary_tables must not remove current tables.' );
+incremental_smoke_assert( isset( $cleanup_db->wdc_incremental_tables['wp_wdc_locations_previous_abcd1234'], $cleanup_db->wdc_incremental_tables['wp_wdc_location_aliases_previous_abcd1234'] ), 'cleanup_temporary_tables must not remove previous tables.' );
+incremental_smoke_assert( isset( $cleanup_db->wdc_incremental_tables['wp_wdc_locations_backup_20260602'] ), 'cleanup_temporary_tables must not remove backup tables.' );
+incremental_smoke_assert( true === $cleanup_result['active_job_cleared'] && false === get_option( 'wdc_locations_incremental_update_job', false ), 'cleanup_temporary_tables must clear active incomplete job state.' );
+incremental_smoke_assert( is_array( get_option( 'wdc_locations_incremental_update_last_apply', array() ) ), 'cleanup_temporary_tables must not clear last_apply metadata.' );
+
+$admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Admin/LocationsAdminPage.php' );
+incremental_smoke_assert( str_contains( $admin_source, 'wp_ajax_wdc_locations_incremental_update_cleanup_list' ) && str_contains( $admin_source, 'wp_ajax_wdc_locations_incremental_update_cleanup_drop' ), 'Admin cleanup actions must be registered as AJAX POST actions.' );
+incremental_smoke_assert( str_contains( $admin_source, 'ajax_incremental_update_cleanup_list' ) && str_contains( $admin_source, 'ajax_incremental_update_cleanup_drop' ) && str_contains( $admin_source, '$this->guard_ajax();' ), 'Admin cleanup actions must require nonce and capability guard.' );
 
 @unlink( $csv );
 echo "Locations incremental update smoke passed\n";
