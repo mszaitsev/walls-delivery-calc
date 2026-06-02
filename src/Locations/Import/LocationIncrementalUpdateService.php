@@ -15,6 +15,7 @@ final class LocationIncrementalUpdateService {
 	private const ACTIVE_JOB_OPTION = 'wdc_locations_incremental_update_job';
 	private const CSV_BATCH_SIZE = 1000;
 	private const ALIAS_BATCH_SIZE = 500;
+	private const APPROVAL_PAGE_SIZE = 100;
 	private const MAX_COUNT_DELTA_RATIO = 0.20;
 
 	/** @var array<int,string> */
@@ -94,7 +95,6 @@ final class LocationIncrementalUpdateService {
 		'city_name',
 		'settlement_name',
 		'settlement_type',
-		'display_name',
 		'postal_code',
 		'active',
 	);
@@ -140,6 +140,7 @@ final class LocationIncrementalUpdateService {
 			'previous_table'         => $this->previous_table( $token ),
 			'previous_alias_table'   => $this->previous_alias_table( $token ),
 			'validation'             => array(),
+			'approval'               => array(),
 			'errors'                 => array(),
 			'started_at'             => $this->now(),
 			'updated_at'             => $this->now(),
@@ -158,6 +159,10 @@ final class LocationIncrementalUpdateService {
 
 			if ( 'diff' === (string) ( $job['phase'] ?? '' ) ) {
 				return $this->build_diff( $job );
+			}
+
+			if ( 'analysis' === (string) ( $job['phase'] ?? '' ) ) {
+				return $this->refresh_approval_view( $job );
 			}
 		} catch ( \Throwable $exception ) {
 			$job['phase'] = 'failed';
@@ -186,7 +191,9 @@ final class LocationIncrementalUpdateService {
 		$job['new_count'] = $this->new_count( $stage, $current );
 		$job['removed_count'] = $this->removed_count( $stage, $current );
 		$job['changed_count'] = $this->changed_count( $stage, $current );
-		$job['samples'] = $this->diff_samples( $stage, $current );
+		$diff = $this->diff_samples( $stage, $current, 0 );
+		$job['samples'] = array_map( fn( array $rows ): array => array_slice( $rows, 0, self::APPROVAL_PAGE_SIZE ), $diff );
+		$job['approval'] = $this->create_approval_state( $diff );
 		$job['phase'] = 'analysis';
 		$job['updated_at'] = $this->now();
 
@@ -202,6 +209,8 @@ final class LocationIncrementalUpdateService {
 		if ( $this->is_memory_db() ) {
 			return $this->memory_prepare_candidate( $job, $selected );
 		}
+
+		$selected = $this->selection_for_candidate( $job, $selected );
 
 		$current = $this->locations_table();
 		$stage = $this->table_name( (string) ( $job['staging_table'] ?? '' ) );
@@ -222,6 +231,43 @@ final class LocationIncrementalUpdateService {
 		$job['phase'] = empty( $validation['errors'] ) ? 'candidate_ready' : 'candidate_failed';
 		$job['updated_at'] = $this->now();
 
+		return $job;
+	}
+
+	/**
+	 * @param array<string,mixed> $job
+	 * @param array<int,string> $checked_keys
+	 * @return array<string,mixed>
+	 */
+	public function approve_current_page( array $job, array $checked_keys ): array {
+		if ( empty( $job['approval'] ) || ! is_array( $job['approval'] ) ) {
+			$job['phase'] = 'failed';
+			$job['errors'][] = 'Approval state is unavailable.';
+			return $job;
+		}
+
+		$type = $this->approval_type_from_phase( (string) ( $job['phase'] ?? '' ) );
+		if ( '' === $type ) {
+			return $job;
+		}
+
+		$approval = $job['approval'];
+		$checked = array_flip( $this->sanitize_keys( $checked_keys ) );
+		$rows = is_array( $approval['current_rows'] ?? null ) ? $approval['current_rows'] : array();
+		foreach ( $rows as $row ) {
+			$key = (string) ( $row['key'] ?? '' );
+			if ( '' === $key ) {
+				continue;
+			}
+			$bucket = isset( $checked[ $key ] ) ? 'approved' : 'rejected';
+			$approval[ $type ][ $bucket ][] = $key;
+			$approval[ $type ][ $bucket ] = array_values( array_unique( $approval[ $type ][ $bucket ] ) );
+		}
+
+		$approval[ $type ]['offset'] = min( (int) ( $approval[ $type ]['total'] ?? 0 ), (int) ( $approval[ $type ]['offset'] ?? 0 ) + (int) ( $approval['page_size'] ?? self::APPROVAL_PAGE_SIZE ) );
+		$job['approval'] = $approval;
+		$job = $this->refresh_approval_view( $job );
+		$job['updated_at'] = $this->now();
 		return $job;
 	}
 
@@ -609,7 +655,7 @@ final class LocationIncrementalUpdateService {
 		}
 		$assignments = array();
 		foreach ( $this->location_columns as $column ) {
-			if ( in_array( $column, array( 'created_at', 'latitude', 'longitude' ), true ) ) {
+			if ( in_array( $column, array( 'created_at', 'display_name', 'searchable_text', 'latitude', 'longitude' ), true ) ) {
 				continue;
 			}
 			$assignments[] = "c.{$column} = s.{$column}";
@@ -627,6 +673,111 @@ final class LocationIncrementalUpdateService {
 				'Unable to apply selected changed locations by gar_id.'
 			);
 		}
+	}
+
+	/**
+	 * @param array<string,array<int,array<string,mixed>>> $diff
+	 * @return array<string,mixed>
+	 */
+	private function create_approval_state( array $diff ): array {
+		$approval = array(
+			'page_size' => self::APPROVAL_PAGE_SIZE,
+			'current_type' => 'new',
+			'current_page' => 1,
+			'current_rows' => array(),
+			'stats' => array(),
+		);
+		foreach ( array( 'new', 'removed', 'changed' ) as $type ) {
+			$items = array_values( $diff[ $type ] ?? array() );
+			$approval[ $type ] = array(
+				'items' => $items,
+				'keys' => array_values( array_filter( array_map( static fn( array $row ): string => (string) ( $row['key'] ?? '' ), $items ) ) ),
+				'approved' => array(),
+				'rejected' => array(),
+				'offset' => 0,
+				'total' => count( $items ),
+			);
+		}
+
+		return $approval;
+	}
+
+	/**
+	 * @param array<string,mixed> $job
+	 * @return array<string,mixed>
+	 */
+	private function refresh_approval_view( array $job ): array {
+		$approval = is_array( $job['approval'] ?? null ) ? $job['approval'] : array();
+		$page_size = max( 1, (int) ( $approval['page_size'] ?? self::APPROVAL_PAGE_SIZE ) );
+		$current = '';
+		foreach ( array( 'new', 'removed', 'changed' ) as $type ) {
+			$total = (int) ( $approval[ $type ]['total'] ?? 0 );
+			$offset = (int) ( $approval[ $type ]['offset'] ?? 0 );
+			if ( $offset < $total ) {
+				$current = $type;
+				break;
+			}
+		}
+
+		if ( '' === $current ) {
+			$approval['current_type'] = '';
+			$approval['current_page'] = 0;
+			$approval['current_rows'] = array();
+			$job['phase'] = 'approval_complete';
+		} else {
+			$offset = (int) ( $approval[ $current ]['offset'] ?? 0 );
+			$items = is_array( $approval[ $current ]['items'] ?? null ) ? $approval[ $current ]['items'] : array();
+			$approval['current_type'] = $current;
+			$approval['current_page'] = (int) floor( $offset / $page_size ) + 1;
+			$approval['current_rows'] = array_slice( $items, $offset, $page_size );
+			$job['phase'] = 'approving_' . $current;
+		}
+
+		$stats = array();
+		foreach ( array( 'new', 'removed', 'changed' ) as $type ) {
+			$total = (int) ( $approval[ $type ]['total'] ?? 0 );
+			$approved = count( is_array( $approval[ $type ]['approved'] ?? null ) ? $approval[ $type ]['approved'] : array() );
+			$rejected = count( is_array( $approval[ $type ]['rejected'] ?? null ) ? $approval[ $type ]['rejected'] : array() );
+			$offset = (int) ( $approval[ $type ]['offset'] ?? 0 );
+			$stats[ $type ] = array(
+				'total' => $total,
+				'approved' => $approved,
+				'rejected' => $rejected,
+				'processed' => min( $total, $offset ),
+				'pages' => (int) ceil( $total / $page_size ),
+			);
+		}
+		$approval['stats'] = $stats;
+		$job['approval'] = $approval;
+
+		return $job;
+	}
+
+	private function approval_type_from_phase( string $phase ): string {
+		return match ( $phase ) {
+			'approving_new' => 'new',
+			'approving_removed' => 'removed',
+			'approving_changed' => 'changed',
+			default => '',
+		};
+	}
+
+	/**
+	 * @param array<string,mixed> $job
+	 * @param array<string,array<int,string>> $selected
+	 * @return array<string,array<int,string>>
+	 */
+	private function selection_for_candidate( array $job, array $selected ): array {
+		if ( empty( $job['approval'] ) || ! is_array( $job['approval'] ) ) {
+			return $selected;
+		}
+
+		$approval = $job['approval'];
+		return array(
+			'new' => $this->sanitize_keys( is_array( $approval['new']['approved'] ?? null ) ? $approval['new']['approved'] : array() ),
+			'removed' => $this->sanitize_keys( is_array( $approval['removed']['approved'] ?? null ) ? $approval['removed']['approved'] : array() ),
+			'changed' => $this->sanitize_keys( is_array( $approval['changed']['approved'] ?? null ) ? $approval['changed']['approved'] : array() ),
+		);
 	}
 
 	/**
@@ -717,11 +868,11 @@ final class LocationIncrementalUpdateService {
 	/**
 	 * @return array<string,array<int,array<string,mixed>>>
 	 */
-	private function diff_samples( string $stage, string $current ): array {
+	private function diff_samples( string $stage, string $current, int $limit = 100 ): array {
 		return array(
-			'new' => $this->sample_rows( $this->new_samples_sql( $stage, $current ) ),
-			'removed' => $this->sample_rows( $this->removed_samples_sql( $stage, $current ) ),
-			'changed' => $this->sample_rows( $this->changed_samples_sql( $stage, $current ) ),
+			'new' => $this->sample_rows( $this->new_samples_sql( $stage, $current, $limit ) ),
+			'removed' => $this->sample_rows( $this->removed_samples_sql( $stage, $current, $limit ) ),
+			'changed' => $this->sample_rows( $this->changed_samples_sql( $stage, $current, $limit ) ),
 		);
 	}
 
@@ -748,25 +899,25 @@ final class LocationIncrementalUpdateService {
 			+ $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition( 's' )} AND {$this->empty_fias_condition( 'c' )} AND s.gar_object_id > 0 AND {$this->changed_condition( 's', 'c' )}" );
 	}
 
-	private function new_samples_sql( string $stage, string $current ): string {
-		return "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, s.display_name, s.postal_code FROM {$stage} s WHERE {$this->has_fias_condition( 's' )} AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE c.fias_id = s.fias_id)
+	private function new_samples_sql( string $stage, string $current, int $limit = 100 ): string {
+		$sql = "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, s.display_name, s.postal_code FROM {$stage} s WHERE {$this->has_fias_condition( 's' )} AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE c.fias_id = s.fias_id)
 			UNION ALL
-			SELECT CONCAT('g:', s.gar_object_id) AS `key`, s.fias_id, s.gar_object_id, s.display_name, s.postal_code FROM {$stage} s WHERE {$this->empty_fias_condition( 's' )} AND s.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE {$this->empty_fias_condition( 'c' )} AND c.gar_object_id = s.gar_object_id)
-			LIMIT 100";
+			SELECT CONCAT('g:', s.gar_object_id) AS `key`, s.fias_id, s.gar_object_id, s.display_name, s.postal_code FROM {$stage} s WHERE {$this->empty_fias_condition( 's' )} AND s.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE {$this->empty_fias_condition( 'c' )} AND c.gar_object_id = s.gar_object_id)";
+		return $limit > 0 ? $sql . ' LIMIT ' . (int) $limit : $sql;
 	}
 
-	private function removed_samples_sql( string $stage, string $current ): string {
-		return "SELECT CONCAT('f:', c.fias_id) AS `key`, c.fias_id, c.gar_object_id, c.display_name, c.postal_code FROM {$current} c WHERE {$this->has_fias_condition( 'c' )} AND NOT EXISTS (SELECT 1 FROM {$stage} s WHERE s.fias_id = c.fias_id)
+	private function removed_samples_sql( string $stage, string $current, int $limit = 100 ): string {
+		$sql = "SELECT CONCAT('f:', c.fias_id) AS `key`, c.fias_id, c.gar_object_id, c.display_name, c.postal_code FROM {$current} c WHERE {$this->has_fias_condition( 'c' )} AND NOT EXISTS (SELECT 1 FROM {$stage} s WHERE s.fias_id = c.fias_id)
 			UNION ALL
-			SELECT CONCAT('g:', c.gar_object_id) AS `key`, c.fias_id, c.gar_object_id, c.display_name, c.postal_code FROM {$current} c WHERE {$this->empty_fias_condition( 'c' )} AND c.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$stage} s WHERE {$this->empty_fias_condition( 's' )} AND s.gar_object_id = c.gar_object_id)
-			LIMIT 100";
+			SELECT CONCAT('g:', c.gar_object_id) AS `key`, c.fias_id, c.gar_object_id, c.display_name, c.postal_code FROM {$current} c WHERE {$this->empty_fias_condition( 'c' )} AND c.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$stage} s WHERE {$this->empty_fias_condition( 's' )} AND s.gar_object_id = c.gar_object_id)";
+		return $limit > 0 ? $sql . ' LIMIT ' . (int) $limit : $sql;
 	}
 
-	private function changed_samples_sql( string $stage, string $current ): string {
-		return "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name AS old_display_name, s.display_name AS new_display_name, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$this->changed_condition( 's', 'c' )}
+	private function changed_samples_sql( string $stage, string $current, int $limit = 100 ): string {
+		$sql = "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$this->changed_condition( 's', 'c' )}
 			UNION ALL
-			SELECT CONCAT('g:', s.gar_object_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name AS old_display_name, s.display_name AS new_display_name, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition( 's' )} AND {$this->empty_fias_condition( 'c' )} AND s.gar_object_id > 0 AND {$this->changed_condition( 's', 'c' )}
-			LIMIT 100";
+			SELECT CONCAT('g:', s.gar_object_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition( 's' )} AND {$this->empty_fias_condition( 'c' )} AND s.gar_object_id > 0 AND {$this->changed_condition( 's', 'c' )}";
+		return $limit > 0 ? $sql . ' LIMIT ' . (int) $limit : $sql;
 	}
 
 	private function has_fias_condition( string $alias ): string {
@@ -1161,7 +1312,8 @@ final class LocationIncrementalUpdateService {
 		$job['new_count'] = count( $diff['new'] );
 		$job['removed_count'] = count( $diff['removed'] );
 		$job['changed_count'] = count( $diff['changed'] );
-		$job['samples'] = $diff;
+		$job['samples'] = array_map( fn( array $rows ): array => array_slice( $rows, 0, self::APPROVAL_PAGE_SIZE ), $diff );
+		$job['approval'] = $this->create_approval_state( $diff );
 		$job['phase'] = 'analysis';
 		return $job;
 	}
@@ -1247,6 +1399,7 @@ final class LocationIncrementalUpdateService {
 	 * @return array<string,mixed>
 	 */
 	private function memory_prepare_candidate( array $job, array $selected ): array {
+		$selected = $this->selection_for_candidate( $job, $selected );
 		$current_table = $this->locations_table();
 		$current = $this->wpdb->wdc_incremental_tables[ $current_table ] ?? array();
 		$stage = $this->wpdb->wdc_incremental_tables[ (string) $job['staging_table'] ] ?? array();
@@ -1277,6 +1430,8 @@ final class LocationIncrementalUpdateService {
 					$next = array_merge( $row, $stage_by_key[ $key ] );
 					$next['id'] = $id;
 					$next['created_at'] = $row['created_at'] ?? $next['created_at'];
+					$next['display_name'] = $row['display_name'] ?? $next['display_name'];
+					$next['searchable_text'] = $row['searchable_text'] ?? $next['searchable_text'];
 					$next['latitude'] = $row['latitude'] ?? null;
 					$next['longitude'] = $row['longitude'] ?? null;
 					$candidate[ $id ] = $next;
