@@ -236,6 +236,8 @@ incremental_smoke_assert( count( $db->wdc_incremental_tables['wdc_location_alias
 $fallback_db = incremental_seed_db();
 $fallback_db->wdc_incremental_tables['wdc_locations'][4] = incremental_location_row( 4, '', 2001, 'Gar removed', '620001' );
 $fallback_db->wdc_incremental_tables['wdc_locations'][5] = incremental_location_row( 5, '', 2003, 'Gar old', '620003' );
+$fallback_db->wdc_incremental_tables['wdc_locations'][6] = incremental_location_row( 6, 'fias-current-gar-conflict', 2004, 'Current filled fias same gar', '620004' );
+$fallback_db->wdc_incremental_tables['wdc_locations'][7] = incremental_location_row( 7, '', 2005, 'Current empty fias same gar', '620005' );
 $fallback_db->wdc_incremental_tables['wdc_locations'][5]['latitude'] = 56.838011;
 $fallback_db->wdc_incremental_tables['wdc_locations'][5]['longitude'] = 60.597465;
 $fallback_stage = 'wdc_locations_update_staging_fallback1';
@@ -245,6 +247,8 @@ $fallback_db->wdc_incremental_tables[ $fallback_stage ] = array(
 	3 => incremental_location_row( 3, 'fias-new', 1009, 'Fias new', '630009' ),
 	4 => incremental_location_row( 4, '', 2002, 'Gar new', '620002' ),
 	5 => incremental_location_row( 5, '', 2003, 'Gar updated', '620333' ),
+	6 => incremental_location_row( 6, '', 2004, 'Staging empty fias same gar', '620444' ),
+	7 => incremental_location_row( 7, 'fias-staging-gar-conflict', 2005, 'Staging filled fias same gar', '620555' ),
 );
 $fallback_service = incremental_service_with_db( $fallback_db );
 $fallback_job = $fallback_service->build_diff(
@@ -253,15 +257,18 @@ $fallback_job = $fallback_service->build_diff(
 		'staging_table' => $fallback_stage,
 	)
 );
-incremental_smoke_assert( 2 === (int) $fallback_job['new_count'], 'Diff must detect NEW rows by both fias_id and gar_object_id.' );
-incremental_smoke_assert( 2 === (int) $fallback_job['removed_count'], 'Diff must detect REMOVED rows by both fias_id and gar_object_id.' );
+incremental_smoke_assert( 4 === (int) $fallback_job['new_count'], 'Diff must detect NEW rows by fias_id, gar_object_id, and gar fallback conflicts.' );
+incremental_smoke_assert( 4 === (int) $fallback_job['removed_count'], 'Diff must detect REMOVED rows by fias_id, gar_object_id, and gar fallback conflicts.' );
 incremental_smoke_assert( 2 === (int) $fallback_job['changed_count'], 'Diff must detect CHANGED rows by both fias_id and gar_object_id.' );
 incremental_smoke_assert( array_any( $fallback_job['samples']['new'], static fn( array $row ): bool => 'f:fias-new' === $row['key'] ), 'NEW detection by fias_id must be sampled.' );
 incremental_smoke_assert( array_any( $fallback_job['samples']['new'], static fn( array $row ): bool => 'g:2002' === $row['key'] ), 'NEW detection by gar_object_id must be sampled.' );
+incremental_smoke_assert( array_any( $fallback_job['samples']['new'], static fn( array $row ): bool => 'g:2004' === $row['key'] ), 'Staging empty fias row must be NEW when current has same gar_object_id with filled fias_id.' );
 incremental_smoke_assert( array_any( $fallback_job['samples']['removed'], static fn( array $row ): bool => 'f:fias-c' === $row['key'] ), 'REMOVED detection by fias_id must be sampled.' );
 incremental_smoke_assert( array_any( $fallback_job['samples']['removed'], static fn( array $row ): bool => 'g:2001' === $row['key'] ), 'REMOVED detection by gar_object_id must be sampled.' );
+incremental_smoke_assert( array_any( $fallback_job['samples']['removed'], static fn( array $row ): bool => 'g:2005' === $row['key'] ), 'Current empty fias row must be REMOVED when staging has same gar_object_id with filled fias_id.' );
 incremental_smoke_assert( array_any( $fallback_job['samples']['changed'], static fn( array $row ): bool => 'f:fias-b' === $row['key'] ), 'CHANGED detection by fias_id must be sampled.' );
 incremental_smoke_assert( array_any( $fallback_job['samples']['changed'], static fn( array $row ): bool => 'g:2003' === $row['key'] ), 'CHANGED detection by gar_object_id must be sampled.' );
+incremental_smoke_assert( ! array_any( $fallback_job['samples']['changed'], static fn( array $row ): bool => in_array( $row['key'], array( 'g:2004', 'g:2005' ), true ) ), 'CHANGED gar fallback must only match when fias_id is empty on both sides.' );
 $fallback_job['candidate_table'] = 'wdc_locations_candidate_fallback1';
 $fallback_job['candidate_alias_table'] = 'wdc_location_aliases_candidate_fallback1';
 $fallback_prepared = $fallback_service->prepare_candidate(
@@ -280,6 +287,8 @@ incremental_smoke_assert( array_any( $fallback_candidate, static fn( array $row 
 $incremental_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/LocationIncrementalUpdateService.php' );
 incremental_smoke_assert( ! str_contains( $incremental_source, 'join_condition' ), 'Diff SQL contract must not use the old OR join_condition helper.' );
 incremental_smoke_assert( ! preg_match( '/JOIN[^\\n]+\\sOR\\s/i', $incremental_source ), 'Diff SQL contract must not contain OR in JOIN clauses.' );
+incremental_smoke_assert( str_contains( $incremental_source, "NOT EXISTS (SELECT 1 FROM {\$current} c WHERE {\$this->empty_fias_condition( 'c' )} AND c.gar_object_id = s.gar_object_id)" ), 'NEW gar fallback SQL must require empty fias_id on the current table.' );
+incremental_smoke_assert( str_contains( $incremental_source, "NOT EXISTS (SELECT 1 FROM {\$stage} s WHERE {\$this->empty_fias_condition( 's' )} AND s.gar_object_id = c.gar_object_id)" ), 'REMOVED gar fallback SQL must require empty fias_id on the staging table.' );
 
 $invalid_db = incremental_seed_db();
 $invalid_db->wdc_incremental_tables['wdc_locations'][4] = incremental_location_row( 4, 'fias-a', 9999, 'Duplicate FIAS', '630009' );

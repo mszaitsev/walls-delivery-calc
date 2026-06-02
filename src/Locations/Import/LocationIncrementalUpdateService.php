@@ -735,12 +735,12 @@ final class LocationIncrementalUpdateService {
 
 	private function new_count( string $stage, string $current ): int {
 		return $this->count_rows( "SELECT COUNT(*) FROM {$stage} s WHERE {$this->has_fias_condition( 's' )} AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE c.fias_id = s.fias_id)" )
-			+ $this->count_rows( "SELECT COUNT(*) FROM {$stage} s WHERE {$this->empty_fias_condition( 's' )} AND s.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE c.gar_object_id = s.gar_object_id)" );
+			+ $this->count_rows( "SELECT COUNT(*) FROM {$stage} s WHERE {$this->empty_fias_condition( 's' )} AND s.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE {$this->empty_fias_condition( 'c' )} AND c.gar_object_id = s.gar_object_id)" );
 	}
 
 	private function removed_count( string $stage, string $current ): int {
 		return $this->count_rows( "SELECT COUNT(*) FROM {$current} c WHERE {$this->has_fias_condition( 'c' )} AND NOT EXISTS (SELECT 1 FROM {$stage} s WHERE s.fias_id = c.fias_id)" )
-			+ $this->count_rows( "SELECT COUNT(*) FROM {$current} c WHERE {$this->empty_fias_condition( 'c' )} AND c.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$stage} s WHERE s.gar_object_id = c.gar_object_id)" );
+			+ $this->count_rows( "SELECT COUNT(*) FROM {$current} c WHERE {$this->empty_fias_condition( 'c' )} AND c.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$stage} s WHERE {$this->empty_fias_condition( 's' )} AND s.gar_object_id = c.gar_object_id)" );
 	}
 
 	private function changed_count( string $stage, string $current ): int {
@@ -751,14 +751,14 @@ final class LocationIncrementalUpdateService {
 	private function new_samples_sql( string $stage, string $current ): string {
 		return "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, s.display_name, s.postal_code FROM {$stage} s WHERE {$this->has_fias_condition( 's' )} AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE c.fias_id = s.fias_id)
 			UNION ALL
-			SELECT CONCAT('g:', s.gar_object_id) AS `key`, s.fias_id, s.gar_object_id, s.display_name, s.postal_code FROM {$stage} s WHERE {$this->empty_fias_condition( 's' )} AND s.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE c.gar_object_id = s.gar_object_id)
+			SELECT CONCAT('g:', s.gar_object_id) AS `key`, s.fias_id, s.gar_object_id, s.display_name, s.postal_code FROM {$stage} s WHERE {$this->empty_fias_condition( 's' )} AND s.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$current} c WHERE {$this->empty_fias_condition( 'c' )} AND c.gar_object_id = s.gar_object_id)
 			LIMIT 100";
 	}
 
 	private function removed_samples_sql( string $stage, string $current ): string {
 		return "SELECT CONCAT('f:', c.fias_id) AS `key`, c.fias_id, c.gar_object_id, c.display_name, c.postal_code FROM {$current} c WHERE {$this->has_fias_condition( 'c' )} AND NOT EXISTS (SELECT 1 FROM {$stage} s WHERE s.fias_id = c.fias_id)
 			UNION ALL
-			SELECT CONCAT('g:', c.gar_object_id) AS `key`, c.fias_id, c.gar_object_id, c.display_name, c.postal_code FROM {$current} c WHERE {$this->empty_fias_condition( 'c' )} AND c.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$stage} s WHERE s.gar_object_id = c.gar_object_id)
+			SELECT CONCAT('g:', c.gar_object_id) AS `key`, c.fias_id, c.gar_object_id, c.display_name, c.postal_code FROM {$current} c WHERE {$this->empty_fias_condition( 'c' )} AND c.gar_object_id > 0 AND NOT EXISTS (SELECT 1 FROM {$stage} s WHERE {$this->empty_fias_condition( 's' )} AND s.gar_object_id = c.gar_object_id)
 			LIMIT 100";
 	}
 
