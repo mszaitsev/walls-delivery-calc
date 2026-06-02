@@ -40,6 +40,7 @@ use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataSuggestionClient;
 use WallsShop\WDC\Checkout\Admin\CheckoutSimulationPage;
+use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\Checkout\Cache\QuoteCache;
 use WallsShop\WDC\Checkout\Locations\CheckoutCityResolver;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
@@ -206,6 +207,7 @@ final class Plugin {
 		$this->container->register( DeliveryServiceRegistry::class, fn(): DeliveryServiceRegistry => new DeliveryServiceRegistry( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( CarrierRegistry::class ) ) );
 		$this->container->register( DeliveryServiceManager::class, fn(): DeliveryServiceManager => new DeliveryServiceManager( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceCountryRepository::class ), $this->container->get( RuleRepository::class ), $this->container->get( RussianPostCountryDirectory::class ) ) );
 		$this->container->register( QuoteCache::class, fn(): QuoteCache => new QuoteCache() );
+		$this->container->register( DeliveryQuoteCacheManager::class, fn(): DeliveryQuoteCacheManager => new DeliveryQuoteCacheManager( $this->container->get( QuoteCache::class ) ) );
 		$this->container->register( RateSorter::class, fn(): RateSorter => new RateSorter() );
 		$this->container->register( FallbackRateFactory::class, fn(): FallbackRateFactory => new FallbackRateFactory() );
 		$this->container->register( RuleAppliedRateBuilder::class, fn(): RuleAppliedRateBuilder => new RuleAppliedRateBuilder( $this->container->get( RuleEngine::class ) ) );
@@ -361,7 +363,8 @@ final class Plugin {
 			fn(): AdminMenu => new AdminMenu(
 				$this->environment,
 				$this->container->get( FeatureFlags::class ),
-				$this->container->get( RequirementsChecker::class )
+				$this->container->get( RequirementsChecker::class ),
+				$this->container->get( DeliveryQuoteCacheManager::class )
 			)
 		);
 		$this->container->register(
