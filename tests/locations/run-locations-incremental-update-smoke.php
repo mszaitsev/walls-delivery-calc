@@ -151,6 +151,8 @@ function incremental_seed_db(): wpdb {
 		2 => incremental_location_row( 2, 'fias-b', 1002, 'Город B', '630002' ),
 		3 => incremental_location_row( 3, 'fias-c', 1003, 'Город C', '630003' ),
 	);
+	$db->wdc_incremental_tables['wdc_locations'][2]['latitude'] = 55.030199;
+	$db->wdc_incremental_tables['wdc_locations'][2]['longitude'] = 82.92043;
 	$db->wdc_incremental_tables['wdc_location_aliases'] = array(
 		1 => array( 'id' => 1, 'location_id' => 1, 'alias' => 'Город A', 'alias_normalized' => 'город a', 'source' => 'gar_import', 'created_at' => '2026-05-01 00:00:00' ),
 	);
@@ -185,6 +187,8 @@ $filtered = $service->prepare_candidate(
 );
 $filtered_rows = $db->wdc_incremental_tables[ $filtered['candidate_table'] ];
 incremental_smoke_assert( isset( $filtered_rows[2] ) && 'Город B updated' === $filtered_rows[2]['display_name'], 'Checkbox filtering must apply selected CHANGED rows.' );
+incremental_smoke_assert( isset( $filtered_rows[2] ) && '630222' === $filtered_rows[2]['postal_code'], 'Selected CHANGED row must update postal_code.' );
+incremental_smoke_assert( isset( $filtered_rows[2] ) && 55.030199 === (float) $filtered_rows[2]['latitude'] && 82.92043 === (float) $filtered_rows[2]['longitude'], 'Selected CHANGED row must keep existing coordinates.' );
 incremental_smoke_assert( 3 === count( $filtered_rows ) && array_any( $filtered_rows, static fn( array $row ): bool => 'fias-c' === $row['fias_id'] ) && ! array_any( $filtered_rows, static fn( array $row ): bool => 'fias-d' === $row['fias_id'] ), 'Checkbox filtering must respect unselected NEW and REMOVED rows.' );
 
 $db = incremental_seed_db();
@@ -205,6 +209,8 @@ incremental_smoke_assert( 3 === count( $candidate ), 'Candidate table must conta
 incremental_smoke_assert( array_any( $candidate, static fn( array $row ): bool => 'fias-d' === $row['fias_id'] ), 'Candidate table must contain selected NEW row.' );
 incremental_smoke_assert( ! array_any( $candidate, static fn( array $row ): bool => 'fias-c' === $row['fias_id'] ), 'Candidate table must omit selected REMOVED row.' );
 incremental_smoke_assert( array_any( $candidate, static fn( array $row ): bool => 'fias-b' === $row['fias_id'] && '630222' === $row['postal_code'] ), 'Candidate table must contain selected CHANGED values.' );
+incremental_smoke_assert( array_any( $candidate, static fn( array $row ): bool => 'fias-b' === $row['fias_id'] && 55.030199 === (float) $row['latitude'] && 82.92043 === (float) $row['longitude'] ), 'Candidate CHANGED row must preserve old latitude/longitude.' );
+incremental_smoke_assert( array_any( $candidate, static fn( array $row ): bool => 'fias-d' === $row['fias_id'] && null === $row['latitude'] && null === $row['longitude'] ), 'Candidate NEW row may import with null latitude/longitude.' );
 incremental_smoke_assert( count( $db->wdc_incremental_tables[ $prepared['candidate_alias_table'] ] ) > 0, 'Aliases candidate rebuild must create aliases.' );
 incremental_smoke_assert( 3 === count( $db->wdc_incremental_tables['wdc_locations'] ), 'Current table must not be modified before final confirm.' );
 

@@ -553,7 +553,7 @@ final class LocationIncrementalUpdateService {
 		}
 		$assignments = array();
 		foreach ( $this->location_columns as $column ) {
-			if ( in_array( $column, array( 'created_at' ), true ) ) {
+			if ( in_array( $column, array( 'created_at', 'latitude', 'longitude' ), true ) ) {
 				continue;
 			}
 			$assignments[] = "c.{$column} = s.{$column}";
@@ -997,9 +997,11 @@ final class LocationIncrementalUpdateService {
 		foreach ( $this->sanitize_keys( $selected['changed'] ?? array() ) as $key ) {
 			foreach ( $candidate as $id => $row ) {
 				if ( $this->memory_key( $row ) === $key && isset( $stage_by_key[ $key ] ) ) {
-					$next = $stage_by_key[ $key ];
+					$next = array_merge( $row, $stage_by_key[ $key ] );
 					$next['id'] = $id;
 					$next['created_at'] = $row['created_at'] ?? $next['created_at'];
+					$next['latitude'] = $row['latitude'] ?? null;
+					$next['longitude'] = $row['longitude'] ?? null;
 					$candidate[ $id ] = $next;
 				}
 			}
