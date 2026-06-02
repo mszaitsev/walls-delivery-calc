@@ -108,8 +108,11 @@ final class LocationsAdminPage {
 		$query   = isset( $_GET['location_query'] ) ? sanitize_text_field( wp_unslash( $_GET['location_query'] ) ) : '';
 		$search_page = isset( $_GET['location_search_page'] ) ? max( 1, (int) $_GET['location_search_page'] ) : 1;
 		$per_page = isset( $_GET['location_per_page'] ) ? (int) $_GET['location_per_page'] : 20;
+		$show_deep_counts = $this->should_show_deep_counts();
+		$total_locations = $this->repository->count_all();
 		$paginated = '' !== trim( $query ) ? ( new CheckoutLocationSearch( $this->search_service ) )->search_paginated( $query, $search_page, $per_page ) : array( 'items' => array(), 'total' => 0, 'page' => 1, 'per_page' => 20, 'total_pages' => 0 );
 		$grouped = $this->group_locations_by_region( $paginated['items'] );
+		$deep_counts_url = $this->deep_counts_url( $query, $search_page, $per_page );
 		?>
 		<div class="wrap wdc-locations-admin">
 			<h1><?php echo esc_html__( 'Населенные пункты', 'walls-delivery-calc' ); ?></h1>
@@ -118,26 +121,33 @@ final class LocationsAdminPage {
 			<?php endif; ?>
 
 			<div class="wdc-locations-summary">
-				<p><strong><?php echo esc_html__( 'Страны в базе:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->country_summary_label() ); ?></span></p>
-				<p><strong><?php echo esc_html__( 'Населенных пунктов:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_all() ); ?></span></p>
-				<p><strong><?php echo esc_html__( 'Регионов/областей:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_regions() ); ?></span></p>
+				<p><strong><?php echo esc_html__( 'Страны в базе:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $show_deep_counts ? $this->country_summary_label() : __( 'по запросу', 'walls-delivery-calc' ) ); ?></span></p>
+				<p><strong><?php echo esc_html__( 'Населенных пунктов:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $total_locations ); ?></span></p>
+				<p><strong><?php echo esc_html__( 'Регионов/областей:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $show_deep_counts ? (string) $this->repository->count_regions() : __( 'по запросу', 'walls-delivery-calc' ) ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'ФИАС/ГАР API-токен:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->fias_credentials instanceof FiasCredentials && $this->fias_credentials->has_token() ? 'задан' : 'не задан' ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'Runtime-нормализация:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html__( 'временно отключена до проверки API', 'walls-delivery-calc' ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'Источник населенных пунктов:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html__( 'локальная база', 'walls-delivery-calc' ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'FIAS limiter:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->limiter_label() ); ?></span></p>
 				<p><strong><?php echo esc_html__( 'GAR sync:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $this->gar_status_label() ); ?></span></p>
-				<p><strong><?php echo esc_html__( 'Aliases:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_aliases() ); ?></span></p>
+				<p><strong><?php echo esc_html__( 'Aliases:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( $show_deep_counts ? (string) $this->repository->count_aliases() : __( 'по запросу', 'walls-delivery-calc' ) ); ?></span></p>
+				<?php if ( ! $show_deep_counts ) : ?>
+					<p><a class="button" href="<?php echo esc_attr( $deep_counts_url ); ?>"><?php echo esc_html__( 'Показать подробные счетчики', 'walls-delivery-calc' ); ?></a></p>
+				<?php endif; ?>
 			</div>
 
 			<div class="wdc-locations-import wdc-dadata-postcode-fill">
 				<h2><?php echo esc_html__( 'Заполнение информации через DaData', 'walls-delivery-calc' ); ?></h2>
 				<div class="wdc-locations-summary">
-					<p><strong><?php echo esc_html__( 'Всего населенных пунктов:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_all() ); ?></span></p>
-					<p><strong><?php echo esc_html__( 'postal_code заполнен:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_with_postal_code() ); ?></span></p>
-					<p><strong><?php echo esc_html__( 'postal_code отсутствует:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_without_postal_code() ); ?></span></p>
-					<p><strong><?php echo esc_html__( 'координаты есть:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_locations_with_coordinates() ); ?></span></p>
-					<p><strong><?php echo esc_html__( 'координат нет:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_locations_missing_coordinates() ); ?></span></p>
-					<p><strong><?php echo esc_html__( 'technical no-index marker count:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_technical_no_index_marker() ); ?></span></p>
+					<p><strong><?php echo esc_html__( 'Всего населенных пунктов:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $total_locations ); ?></span></p>
+					<?php if ( $show_deep_counts ) : ?>
+						<p><strong><?php echo esc_html__( 'postal_code заполнен:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_with_postal_code() ); ?></span></p>
+						<p><strong><?php echo esc_html__( 'postal_code отсутствует:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_without_postal_code() ); ?></span></p>
+						<p><strong><?php echo esc_html__( 'координаты есть:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_locations_with_coordinates() ); ?></span></p>
+						<p><strong><?php echo esc_html__( 'координат нет:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_locations_missing_coordinates() ); ?></span></p>
+						<p><strong><?php echo esc_html__( 'technical no-index marker count:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_technical_no_index_marker() ); ?></span></p>
+					<?php else : ?>
+						<p class="description"><?php echo esc_html__( 'Подробные счетчики postal_code, координат и technical marker считаются только по запросу.', 'walls-delivery-calc' ); ?></p>
+					<?php endif; ?>
 				</div>
 				<div class="wdc-dadata-actions">
 					<div class="wdc-dadata-action-row">
@@ -256,6 +266,24 @@ final class LocationsAdminPage {
 		</div>
 		<?php $this->render_progress_script(); ?>
 		<?php
+	}
+
+	private function should_show_deep_counts(): bool {
+		return isset( $_GET['wdc_locations_deep_counts'] ) && '1' === sanitize_key( (string) wp_unslash( $_GET['wdc_locations_deep_counts'] ) );
+	}
+
+	private function deep_counts_url( string $query, int $search_page, int $per_page ): string {
+		$params = array(
+			'page'                      => self::PAGE_SLUG,
+			'wdc_locations_deep_counts' => '1',
+		);
+		if ( '' !== trim( $query ) ) {
+			$params['location_query']       = $query;
+			$params['location_search_page'] = (string) max( 1, $search_page );
+			$params['location_per_page']    = (string) $per_page;
+		}
+
+		return '?' . http_build_query( $params, '', '&' );
 	}
 
 	private function country_summary_label(): string {

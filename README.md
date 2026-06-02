@@ -1,6 +1,16 @@
 # Walls Delivery Calc
 
-Version: 0.31.2.
+Version: 0.32.4.
+
+Version 0.32.4 resolves local `wdc_locations` matches during Russian Post pickup import before staging inserts, so fresh `wdc_pickup_points_russian_post` rows can receive `location_id` immediately. A shared cached `RussianPostPickupLocationResolver` now handles FIAS, unique postal-code, and unique region+city matching for both importer and diagnostics rebind, and import state records location match counters.
+
+Version 0.32.3 makes the locations admin page fast to open on large `wdc_locations` tables. The default `wdc-platform-locations` render now uses a lightweight total counter and defers country, alias, postal-code, coordinate, and technical-marker counters until the admin explicitly requests detailed counters. Fresh installs and updates also include an idempotent `idx_active_country_code (active, country_code)` index for common active/country filters while preserving `postal_code`.
+
+Version 0.32.2 makes the Russian Post pickup diagnostics page fast to open on large pickup tables. The initial summary now uses only cheap counters, `all_problematic` excludes the expensive suspicious-coordinate distance check, and suspicious coordinates are evaluated only when the dedicated filter is selected.
+
+Version 0.32.1 makes the Russian Post pickup diagnostics schema migrations production-safe. Migration `0022` now checks table, column, and index presence before altering the pickup table, and migration `0023` removes only the unused legacy `wdc_locations.postcode` column when the canonical `wdc_locations.postal_code` column is present. `wdc_locations.postal_code` is preserved for checkout fallback lookup, pickup diagnostics/rebind, DaData enrichment, and admin/search tooling; it may be empty when GAR/FIAS source data has no postal index. `wp_wdc_location_aliases` is not a runtime checkout dependency, but it is used by FIAS/GAR import, display-name rebuild, snapshot export/import, and full locations cleanup as a generated alternate-name store.
+
+Version 0.32.0 adds an admin diagnostics screen for the Russian Post pickup-point database. The page shows quality counters, problem filters, paginated problematic rows, CSV export, suspicious coordinate checks against matched locations, and a guarded location rebind dry-run/apply action.
 
 Version 0.31.2 fixes courier checkout address summaries when only postcode and city are filled. The courier summary now treats `address_1` as the required address signal, keeps the warning visible until address line 1 is filled, and only then shows the formatted `{postcode}, {city}, {address_1}` line.
 

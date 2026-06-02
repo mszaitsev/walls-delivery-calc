@@ -37,6 +37,7 @@ final class RussianPostPickupPointRepository {
 			fias_location_guid VARCHAR(64) NULL,
 			fias_address_guid VARCHAR(64) NULL,
 			gar_region_id VARCHAR(64) NULL,
+			location_id BIGINT UNSIGNED NULL,
 			latitude DECIMAL(10,7) NOT NULL,
 			longitude DECIMAL(10,7) NOT NULL,
 			geohash VARCHAR(16) NULL,
@@ -52,6 +53,7 @@ final class RussianPostPickupPointRepository {
 			KEY idx_type_active (point_type, active),
 			KEY idx_city_active (city_name, active),
 			KEY idx_postcode (postcode),
+			KEY idx_location_id (location_id),
 			KEY idx_lat_lng (latitude, longitude),
 			KEY idx_geohash (geohash),
 			KEY idx_source_hash (source_hash)
@@ -345,6 +347,7 @@ final class RussianPostPickupPointRepository {
 			'fias_location_guid' => null,
 			'fias_address_guid' => null,
 			'gar_region_id' => null,
+			'location_id' => null,
 			'latitude' => null,
 			'longitude' => null,
 			'geohash' => null,
@@ -359,6 +362,7 @@ final class RussianPostPickupPointRepository {
 		$row = array_intersect_key( $row, $allowed ) + $allowed;
 		$row['point_type'] = strtoupper( trim( (string) $row['point_type'] ) );
 		$row['active'] = ! empty( $row['active'] ) ? 1 : 0;
+		$row['location_id'] = null === $row['location_id'] || '' === $row['location_id'] ? null : max( 0, (int) $row['location_id'] );
 		$row['latitude'] = null === $row['latitude'] || '' === $row['latitude'] ? null : (float) $row['latitude'];
 		$row['longitude'] = null === $row['longitude'] || '' === $row['longitude'] ? null : (float) $row['longitude'];
 
@@ -370,7 +374,7 @@ final class RussianPostPickupPointRepository {
 			'point_code' => '%s', 'point_type' => '%s', 'postcode' => '%s', 'country_code' => '%s',
 			'region_name' => '%s', 'city_name' => '%s', 'street' => '%s', 'house' => '%s', 'address' => '%s',
 			'fias_location_guid' => '%s', 'fias_address_guid' => '%s', 'gar_region_id' => '%s',
-			'latitude' => '%f', 'longitude' => '%f', 'geohash' => '%s', 'description' => '%s',
+			'location_id' => '%d', 'latitude' => '%f', 'longitude' => '%f', 'geohash' => '%s', 'description' => '%s',
 			'work_time' => '%s',
 			'active' => '%d', 'source_hash' => '%s', 'last_seen_at' => '%s',
 			'created_at' => '%s', 'updated_at' => '%s',

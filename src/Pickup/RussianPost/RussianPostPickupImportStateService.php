@@ -91,7 +91,7 @@ final class RussianPostPickupImportStateService {
 		$state['last_activity_at'] = $this->now();
 		$state['memory_peak'] = max( (int) ( $state['memory_peak'] ?? 0 ), $this->memory_peak() );
 
-		foreach ( array( 'downloaded', 'parsed', 'inserted', 'updated', 'deactivated', 'skipped' ) as $key ) {
+		foreach ( array( 'downloaded', 'parsed', 'inserted', 'updated', 'deactivated', 'skipped', 'location_matched_fias', 'location_matched_postal_code', 'location_matched_region_city', 'location_match_no_match', 'location_match_ambiguous' ) as $key ) {
 			if ( array_key_exists( $key, $counters ) ) {
 				$state[ $key ] = max( 0, (int) $counters[ $key ] );
 			}
@@ -256,6 +256,11 @@ final class RussianPostPickupImportStateService {
 			'updated' => 0,
 			'deactivated' => 0,
 			'skipped' => 0,
+			'location_matched_fias' => 0,
+			'location_matched_postal_code' => 0,
+			'location_matched_region_city' => 0,
+			'location_match_no_match' => 0,
+			'location_match_ambiguous' => 0,
 			'errors' => array(),
 			'memory_peak' => 0,
 		);
@@ -274,7 +279,7 @@ final class RussianPostPickupImportStateService {
 	 */
 	private function finish( string $status, string $stage, array $result ): array {
 		$state = $this->current();
-		foreach ( array( 'downloaded', 'parsed', 'inserted', 'updated', 'deactivated', 'skipped' ) as $key ) {
+		foreach ( array( 'downloaded', 'parsed', 'inserted', 'updated', 'deactivated', 'skipped', 'location_matched_fias', 'location_matched_postal_code', 'location_matched_region_city', 'location_match_no_match', 'location_match_ambiguous' ) as $key ) {
 			$state[ $key ] = max( 0, (int) ( $result[ $key ] ?? $state[ $key ] ?? 0 ) );
 		}
 		foreach ( array( 'payload_offset', 'payload_size', 'objects_processed', 'batches_processed', 'current_batch_size', 'last_batch_duration_ms', 'max_batch_duration_ms', 'rows_inserted_to_staging', 'download_duration_ms', 'download_http_code', 'temp_file_size', 'curl_errno', 'uploaded_file_size', 'extract_duration_ms', 'extract_zip_size', 'extracted_payload_size', 'extracted_payload_entry_index' ) as $key ) {
