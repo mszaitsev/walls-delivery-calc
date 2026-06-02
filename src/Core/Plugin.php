@@ -406,8 +406,6 @@ final class Plugin {
 		$this->container->register(
 			PickupAdminPage::class,
 			fn(): PickupAdminPage => new PickupAdminPage(
-				$this->environment,
-				$this->container->get( PickupPointRepository::class ),
 				$this->container->get( RussianPostPickupPointRepository::class ),
 				$this->container->get( RussianPostOtpravkaApiSettings::class ),
 				$this->container->get( RussianPostPickupDiagnosticsService::class )

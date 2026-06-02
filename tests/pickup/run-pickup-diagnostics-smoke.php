@@ -307,6 +307,15 @@ pickup_diagnostics_assert( 0 === (int) $GLOBALS['wpdb']->russian_post_pickup_row
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Admin/PickupAdminPage.php' );
 pickup_diagnostics_assert( str_contains( $admin_source, "wp_verify_nonce" ) && str_contains( $admin_source, "current_user_can( 'manage_options' )" ) && str_contains( $admin_source, 'method="post"' ), 'admin rebind action must require POST, nonce, and manage_options capability.' );
+pickup_diagnostics_assert( ! str_contains( $admin_source, 'pickup_carrier' ) && ! str_contains( $admin_source, 'pickup_city' ) && ! str_contains( $admin_source, 'group_by_city' ), 'admin pickup page must not render legacy carrier key + city search.' );
+pickup_diagnostics_assert( ! str_contains( $admin_source, 'DEMO_PICKUP' ) && ! str_contains( $admin_source, 'delete_by_carrier_keys' ) && ! str_contains( $admin_source, 'count_all()' ), 'admin pickup page must not run legacy demo cleanup or generic pickup count.' );
+pickup_diagnostics_assert( str_contains( $admin_source, 'wdc_pickup_view=diagnostics' ) && str_contains( $admin_source, 'RussianPostPickupDiagnosticsService' ), 'admin pickup page must keep diagnostics link.' );
+pickup_diagnostics_assert( str_contains( $admin_source, 'count_by_type()' ) && str_contains( $admin_source, 'count_active()' ) && str_contains( $admin_source, 'last_success_at()' ), 'admin pickup page must keep Russian Post status summary.' );
+
+$pickup_rest_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/PickupPointsRestController.php' );
+$pickup_repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Storage/PickupPointRepository.php' );
+pickup_diagnostics_assert( str_contains( $pickup_rest_source, '/points/search' ) && str_contains( $pickup_rest_source, 'search_point_rows' ), 'frontend pickup REST search endpoint must remain wired to repository search.' );
+pickup_diagnostics_assert( str_contains( $pickup_repository_source, 'public function search_point_rows' ) && str_contains( $pickup_repository_source, 'public function find_rows_by_bbox' ), 'pickup repository map/search methods must remain available.' );
 
 $diagnostics_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/RussianPost/RussianPostPickupDiagnosticsService.php' );
 $summary_source = substr( $diagnostics_source, (int) strpos( $diagnostics_source, 'public function summary' ), 1400 );
