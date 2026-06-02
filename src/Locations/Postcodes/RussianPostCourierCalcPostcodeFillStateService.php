@@ -83,6 +83,12 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 		$job['last_location_id'] = $location_id;
 		$job['last_postal_code'] = $base_postal_code;
 		$job['last_id'] = max( (int) ( $job['last_id'] ?? 0 ), $location_id );
+		if ( '' === $base_postal_code ) {
+			++$job['skipped'];
+			$job['last_error'] = 'invalid_or_marker_postal_code';
+			$job['updated_at'] = current_time( 'mysql' );
+			return $this->finish_location( $job, $location_id );
+		}
 
 		$candidates = is_array( $job['current_candidates'] ?? null ) && array() !== $job['current_candidates']
 			? array_values( array_map( 'strval', $job['current_candidates'] ) )

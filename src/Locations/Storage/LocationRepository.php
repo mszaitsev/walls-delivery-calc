@@ -884,6 +884,7 @@ final class LocationRepository {
 							(int) ( $row['id'] ?? 0 ) <= $after_id
 							|| ! $this->is_ru_location_row( $row )
 							|| '' === trim( (string) ( $row['postal_code'] ?? '' ) )
+							|| '999999999' === trim( (string) ( $row['postal_code'] ?? '' ) )
 							|| '' !== trim( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) )
 						) {
 							return false;
@@ -910,6 +911,7 @@ final class LocationRepository {
 					AND country_code = 'RU'
 					AND postal_code IS NOT NULL
 					AND postal_code != ''
+					AND postal_code != '999999999'
 					AND (russianpost_courier_calc_postal_code IS NULL OR russianpost_courier_calc_postal_code = '')
 					{$type_sql}
 				ORDER BY id ASC

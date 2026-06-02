@@ -845,6 +845,39 @@ locations_smoke_assert( '630099' === (string) $rp_wpdb->rows[ $rp_city_id ]['rus
 locations_smoke_assert( (int) ( $rp_job['step_probes'] ?? 0 ) <= RussianPostCourierCalcPostcodeFillStateService::MAX_PROBES_PER_STEP, 'Russian Post courier postcode fill step must not exceed probe request limit.' );
 $rp_job = $rp_service->step( $rp_job );
 locations_smoke_assert( '630777' === (string) $rp_wpdb->rows[ $rp_settlement_id ]['russianpost_courier_calc_postal_code'], 'Russian Post courier postcode fill must use fias_location_guid fallback candidates.' );
+
+$rp_marker_wpdb = new wpdb();
+$rp_marker_repository = new LocationRepository( $rp_marker_wpdb );
+$rp_marker_id = $rp_marker_repository->save( locations_smoke_location( array( 'gar_object_id' => 886101, 'fias_id' => 'fias-rp-marker', 'region_name' => 'Marker', 'country_code' => 'RU', 'city_type' => 'Рі', 'place_type' => 'Рі', 'place_name' => 'Marker', 'display_name' => 'Marker', 'postal_code' => '999999999' ) ) );
+$rp_normal_id = $rp_marker_repository->save( locations_smoke_location( array( 'gar_object_id' => 886102, 'fias_id' => 'fias-rp-normal', 'region_name' => 'Normal', 'country_code' => 'RU', 'city_type' => 'Рі', 'place_type' => 'Рі', 'place_name' => 'Normal', 'display_name' => 'Normal', 'postal_code' => '630100' ) ) );
+$rp_marker_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_marker_repository, new RussianPostCourierTariffProbeService( new Logger() ), $rp_marker_wpdb );
+$marker_next = $rp_marker_repository->next_russianpost_courier_calc_postcode_location( 0, 'cities' );
+locations_smoke_assert( is_array( $marker_next ) && $rp_normal_id === (int) ( $marker_next['id'] ?? 0 ), 'Russian Post courier postcode queue must skip locations with postal_code=999999999.' );
+$GLOBALS['wdc_locations_probe_requests'] = array();
+$forced_marker_job = $rp_marker_service->step(
+	array(
+		'phase' => 'running',
+		'status' => 'running',
+		'step_probes' => 0,
+		'probes' => 0,
+		'processed' => 0,
+		'skipped' => 0,
+		'failed' => 0,
+		'updated' => 0,
+		'bulk_updated' => 0,
+		'last_id' => 0,
+		'candidate_offset' => 0,
+		'current_priority' => 'cities',
+		'current_location' => $rp_marker_wpdb->rows[ $rp_marker_id ],
+		'current_candidates' => array(),
+	)
+);
+locations_smoke_assert( 0 === count( $GLOBALS['wdc_locations_probe_requests'] ) && 1 === (int) ( $forced_marker_job['skipped'] ?? 0 ), 'Russian Post courier postcode fill must not probe postal_code=999999999.' );
+$marker_updated = $rp_marker_repository->update_russianpost_courier_calc_postal_code_for_postal_code( '999999999', '630100', true );
+locations_smoke_assert( 0 === $marker_updated && '' === (string) ( $rp_marker_wpdb->rows[ $rp_marker_id ]['russianpost_courier_calc_postal_code'] ?? '' ), 'Russian Post courier postcode update helper must ignore postal_code=999999999.' );
+$normal_updated = $rp_marker_repository->update_russianpost_courier_calc_postal_code_for_postal_code( '630100', '630101', true );
+locations_smoke_assert( 1 === $normal_updated && '630101' === (string) $rp_marker_wpdb->rows[ $rp_normal_id ]['russianpost_courier_calc_postal_code'], 'Russian Post courier postcode update helper must still update normal postal_code values.' );
+
 update_option( 'wdc_russianpost_courier_calc_postcode_fill_job', $rp_job );
 $_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
 ob_start();
