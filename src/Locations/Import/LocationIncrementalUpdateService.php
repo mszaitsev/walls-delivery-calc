@@ -89,10 +89,10 @@ final class LocationIncrementalUpdateService {
 
 	/** @var array<int,string> */
 	private array $diff_fields = array(
-		'country_code',
 		'region_name',
 		'region_code',
 		'city_name',
+		'city_type',
 		'settlement_name',
 		'settlement_type',
 		'postal_code',
@@ -132,6 +132,7 @@ final class LocationIncrementalUpdateService {
 			'new_count'              => 0,
 			'removed_count'          => 0,
 			'changed_count'          => 0,
+			'changed_by_field'       => array(),
 			'candidate_count'        => 0,
 			'candidate_aliases'      => 0,
 			'staging_table'          => $this->staging_table( $token ),
@@ -191,6 +192,7 @@ final class LocationIncrementalUpdateService {
 		$job['new_count'] = $this->new_count( $stage, $current );
 		$job['removed_count'] = $this->removed_count( $stage, $current );
 		$job['changed_count'] = $this->changed_count( $stage, $current );
+		$job['changed_by_field'] = $this->changed_by_field_counts( $stage, $current );
 		$job['samples'] = $this->diff_samples( $stage, $current );
 		$job['approval'] = $this->create_approval_state( $job );
 		$job['phase'] = 'analysis';
@@ -654,7 +656,7 @@ final class LocationIncrementalUpdateService {
 		}
 		$assignments = array();
 		foreach ( $this->location_columns as $column ) {
-			if ( in_array( $column, array( 'created_at', 'display_name', 'searchable_text', 'latitude', 'longitude' ), true ) ) {
+			if ( ! in_array( $column, $this->diff_fields, true ) ) {
 				continue;
 			}
 			$assignments[] = "c.{$column} = s.{$column}";
@@ -914,6 +916,20 @@ final class LocationIncrementalUpdateService {
 	}
 
 	/**
+	 * @return array<string,int>
+	 */
+	private function changed_by_field_counts( string $stage, string $current ): array {
+		$result = array();
+		foreach ( $this->diff_fields as $field ) {
+			$field_condition = $this->field_changed_condition( $field, 's', 'c' );
+			$result[ $field ] = $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$field_condition}" )
+				+ $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition( 's' )} AND {$this->empty_fias_condition( 'c' )} AND s.gar_object_id > 0 AND {$field_condition}" );
+		}
+
+		return $result;
+	}
+
+	/**
 	 * @return array<int,array<string,mixed>>
 	 */
 	private function list_new_rows( string $stage, string $current, int $offset, int $limit ): array {
@@ -955,9 +971,10 @@ final class LocationIncrementalUpdateService {
 	}
 
 	private function changed_samples_sql( string $stage, string $current, int $limit = 100 ): string {
-		$sql = "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$this->changed_condition( 's', 'c' )}
+		$diff_json = $this->changed_diff_json_object( 's', 'c' );
+		$sql = "SELECT CONCAT('f:', s.fias_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name, {$diff_json} AS changes, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$this->changed_condition( 's', 'c' )}
 			UNION ALL
-			SELECT CONCAT('g:', s.gar_object_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition( 's' )} AND {$this->empty_fias_condition( 'c' )} AND s.gar_object_id > 0 AND {$this->changed_condition( 's', 'c' )}";
+			SELECT CONCAT('g:', s.gar_object_id) AS `key`, s.fias_id, s.gar_object_id, c.display_name, {$diff_json} AS changes, c.postal_code AS old_postal_code, s.postal_code AS new_postal_code FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition( 's' )} AND {$this->empty_fias_condition( 'c' )} AND s.gar_object_id > 0 AND {$this->changed_condition( 's', 'c' )}";
 		return $limit > 0 ? $sql . ' LIMIT ' . (int) $limit : $sql;
 	}
 
@@ -972,10 +989,31 @@ final class LocationIncrementalUpdateService {
 	private function changed_condition( string $stage_alias, string $current_alias ): string {
 		$parts = array();
 		foreach ( $this->diff_fields as $field ) {
-			$parts[] = "COALESCE(CAST({$stage_alias}.{$field} AS CHAR), '') != COALESCE(CAST({$current_alias}.{$field} AS CHAR), '')";
+			$parts[] = $this->field_changed_condition( $field, $stage_alias, $current_alias );
 		}
 
 		return '(' . implode( ' OR ', $parts ) . ')';
+	}
+
+	private function field_changed_condition( string $field, string $stage_alias, string $current_alias ): string {
+		return $this->normalized_sql_value( $stage_alias, $field ) . ' != ' . $this->normalized_sql_value( $current_alias, $field );
+	}
+
+	private function normalized_sql_value( string $alias, string $field ): string {
+		if ( 'active' === $field ) {
+			return "CAST(COALESCE(NULLIF(TRIM(CAST({$alias}.{$field} AS CHAR)), ''), '0') AS UNSIGNED)";
+		}
+
+		return "COALESCE(NULLIF(TRIM(CAST({$alias}.{$field} AS CHAR)), ''), '')";
+	}
+
+	private function changed_diff_json_object( string $stage_alias, string $current_alias ): string {
+		$parts = array();
+		foreach ( $this->diff_fields as $field ) {
+			$parts[] = "'{$field}', IF({$this->field_changed_condition( $field, $stage_alias, $current_alias )}, JSON_OBJECT('old', {$this->normalized_sql_value( $current_alias, $field )}, 'new', {$this->normalized_sql_value( $stage_alias, $field )}), NULL)";
+		}
+
+		return 'JSON_OBJECT(' . implode( ', ', $parts ) . ')';
 	}
 
 	/**
@@ -1353,6 +1391,7 @@ final class LocationIncrementalUpdateService {
 		$job['new_count'] = count( $diff['new'] );
 		$job['removed_count'] = count( $diff['removed'] );
 		$job['changed_count'] = count( $diff['changed'] );
+		$job['changed_by_field'] = $this->memory_changed_by_field_counts( $diff['changed'] );
 		$job['samples'] = array_map( fn( array $rows ): array => array_slice( $rows, 0, self::APPROVAL_PAGE_SIZE ), $diff );
 		$job['approval'] = $this->create_approval_state( $job );
 		$job['phase'] = 'analysis';
@@ -1426,12 +1465,43 @@ final class LocationIncrementalUpdateService {
 	private function memory_changed_fields( array $old, array $new ): array {
 		$changes = array();
 		foreach ( $this->diff_fields as $field ) {
-			if ( (string) ( $old[ $field ] ?? '' ) !== (string) ( $new[ $field ] ?? '' ) ) {
-				$changes[ $field ] = array( 'old' => (string) ( $old[ $field ] ?? '' ), 'new' => (string) ( $new[ $field ] ?? '' ) );
+			$old_value = $this->memory_normalized_value( $old, $field );
+			$new_value = $this->memory_normalized_value( $new, $field );
+			if ( $old_value !== $new_value ) {
+				$changes[ $field ] = array( 'old' => $old_value, 'new' => $new_value );
 			}
 		}
 
 		return $changes;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function memory_normalized_value( array $row, string $field ): string {
+		if ( 'active' === $field ) {
+			$value = trim( (string) ( $row[ $field ] ?? '0' ) );
+			return (string) (int) ( '' === $value ? 0 : $value );
+		}
+
+		return trim( (string) ( $row[ $field ] ?? '' ) );
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $changed
+	 * @return array<string,int>
+	 */
+	private function memory_changed_by_field_counts( array $changed ): array {
+		$result = array_fill_keys( $this->diff_fields, 0 );
+		foreach ( $changed as $row ) {
+			foreach ( is_array( $row['changes'] ?? null ) ? $row['changes'] : array() as $field => $change ) {
+				if ( array_key_exists( (string) $field, $result ) ) {
+					++$result[ (string) $field ];
+				}
+			}
+		}
+
+		return $result;
 	}
 
 	/**

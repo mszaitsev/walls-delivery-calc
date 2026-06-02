@@ -591,7 +591,12 @@ final class LocationsAdminPage {
 					idTd.textContent = safeText(row.fias_id || row.gar_object_id || key);
 					const nameTd = document.createElement('td');
 					if (type === 'changed' && row.changes) {
-						nameTd.textContent = Object.keys(row.changes).map(function(field){ return field + ': ' + safeText(row.changes[field].old) + ' -> ' + safeText(row.changes[field].new); }).join('; ');
+						let changes = row.changes;
+						if (typeof changes === 'string') {
+							try { changes = JSON.parse(changes); } catch (e) { changes = {}; }
+						}
+						const fields = Object.keys(changes || {}).filter(function(field){ return changes[field] !== null && changes[field] !== undefined; });
+						nameTd.textContent = fields.map(function(field){ return field + ': ' + safeText(changes[field].old) + ' -> ' + safeText(changes[field].new); }).join('; ');
 					} else if (type === 'changed') {
 						nameTd.textContent = safeText(row.old_display_name) + ' -> ' + safeText(row.new_display_name);
 					} else {
@@ -623,6 +628,11 @@ final class LocationsAdminPage {
 					analysis.appendChild(summary);
 					const approval = job.approval || {};
 					const stats = approval.stats || {};
+					if (job.changed_by_field) {
+						const byField = document.createElement('p');
+						byField.textContent = 'Changed by field: ' + safeText(job.changed_by_field);
+						analysis.appendChild(byField);
+					}
 					const currentType = approval.current_type || '';
 					if (currentType) {
 						const pageSize = Number(approval.page_size || 100);

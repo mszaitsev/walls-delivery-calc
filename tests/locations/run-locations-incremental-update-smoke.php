@@ -216,6 +216,36 @@ incremental_smoke_assert( isset( $filtered_rows[2] ) && 55.030199 === (float) $f
 incremental_smoke_assert( 3 === count( $filtered_rows ) && array_any( $filtered_rows, static fn( array $row ): bool => 'fias-c' === $row['fias_id'] ) && ! array_any( $filtered_rows, static fn( array $row ): bool => 'fias-d' === $row['fias_id'] ), 'Prepare candidate must use approved changes and ignore rejected or ad-hoc selected rows.' );
 incremental_smoke_assert( $approval_snapshot['approval'] === $approval_snapshot['approval'], 'Approval state must be stored in the job and survive page refresh.' );
 
+$normalization_db = incremental_seed_db();
+$normalization_db->wdc_incremental_tables['wdc_locations'][1]['city_name'] = null;
+$normalization_stage = 'wdc_locations_update_staging_norm1';
+$normalization_db->wdc_incremental_tables[ $normalization_stage ] = array(
+	1 => $normalization_db->wdc_incremental_tables['wdc_locations'][1],
+	2 => $normalization_db->wdc_incremental_tables['wdc_locations'][2],
+	3 => $normalization_db->wdc_incremental_tables['wdc_locations'][3],
+);
+$normalization_db->wdc_incremental_tables[ $normalization_stage ][1]['city_name'] = '';
+$normalization_db->wdc_incremental_tables[ $normalization_stage ][1]['display_name'] = 'Display name only diff';
+$normalization_db->wdc_incremental_tables[ $normalization_stage ][1]['updated_at'] = '2026-06-02 00:00:00';
+$normalization_db->wdc_incremental_tables[ $normalization_stage ][1]['active'] = '1';
+$normalization_db->wdc_incremental_tables[ $normalization_stage ][2]['postal_code'] = '630222';
+$normalization_db->wdc_incremental_tables[ $normalization_stage ][2]['display_name'] = 'Another display name only diff';
+$normalization_db->wdc_incremental_tables[ $normalization_stage ][3]['settlement_type'] = ' ' . $normalization_db->wdc_incremental_tables['wdc_locations'][3]['settlement_type'] . ' ';
+$normalization_job = incremental_service_with_db( $normalization_db )->build_diff(
+	array(
+		'phase' => 'diff',
+		'staging_table' => $normalization_stage,
+	)
+);
+incremental_smoke_assert( 1 === (int) $normalization_job['changed_count'], 'Only real postal_code diff must be counted as CHANGED after normalization.' );
+incremental_smoke_assert( array_any( $normalization_job['samples']['changed'], static fn( array $row ): bool => 'f:fias-b' === $row['key'] && isset( $row['changes']['postal_code'] ) ), 'Changed sample must show the exact postal_code diff field.' );
+incremental_smoke_assert( 1 === (int) $normalization_job['changed_by_field']['postal_code'], 'changed_by_field must count postal_code changes.' );
+foreach ( array( 'region_name', 'region_code', 'city_name', 'city_type', 'settlement_name', 'settlement_type', 'active' ) as $field ) {
+	incremental_smoke_assert( 0 === (int) ( $normalization_job['changed_by_field'][ $field ] ?? 0 ), $field . ' must not be counted when values differ only by NULL/empty/trim/type normalization.' );
+}
+incremental_smoke_assert( ! array_key_exists( 'display_name', $normalization_job['changed_by_field'] ), 'display_name must not participate in CHANGED counters.' );
+incremental_smoke_assert( ! array_key_exists( 'updated_at', $normalization_job['changed_by_field'] ), 'updated_at must not participate in CHANGED counters.' );
+
 $queue_db = incremental_seed_db();
 $queue_stage = 'wdc_locations_update_staging_queue1';
 $queue_db->wdc_incremental_tables[ $queue_stage ] = array();
