@@ -1383,7 +1383,8 @@ final class LocationRepository {
 	}
 
 	private function normalize_guid( string $value ): string {
-		return strtolower( preg_replace( '/[^a-f0-9]/i', '', $value ) ?? '' );
+		$normalized = strtolower( preg_replace( '/[^a-f0-9]/i', '', $value ) ?? '' );
+		return 32 === strlen( $normalized ) ? $normalized : '';
 	}
 
 	private function normalize_country_code( string $country_code ): string {

@@ -40,6 +40,16 @@ final class LocationCoordinatesDadataBatchUpdater {
 			$job['cursor'] = 0;
 			$priority = 'others';
 			$batch = $this->repository->find_locations_missing_coordinates( $limit, 0, $priority );
+		} elseif ( 'cities' === $priority && count( $batch ) < $limit ) {
+			$last_batch_id = 0;
+			foreach ( $batch as $row ) {
+				$last_batch_id = max( $last_batch_id, (int) ( $row['id'] ?? 0 ) );
+			}
+			$others = $this->repository->find_locations_missing_coordinates( $limit - count( $batch ), $last_batch_id, 'all' );
+			if ( array() !== $others ) {
+				$batch = array_merge( $batch, $others );
+				$job['current_priority'] = 'others';
+			}
 		}
 
 		if ( array() === $batch ) {

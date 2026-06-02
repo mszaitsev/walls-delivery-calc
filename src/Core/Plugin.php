@@ -90,6 +90,7 @@ use WallsShop\WDC\Locations\Gar\GarSyncManager;
 use WallsShop\WDC\Locations\Import\FiasImportManager;
 use WallsShop\WDC\Locations\Import\GarPlacesCsvImporter;
 use WallsShop\WDC\Locations\Import\LocationImportService;
+use WallsShop\WDC\Locations\Import\LocationIncrementalUpdateService;
 use WallsShop\WDC\Locations\Import\LocationsSnapshotExporter;
 use WallsShop\WDC\Locations\Import\LocationsSnapshotImporter;
 use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
@@ -307,6 +308,7 @@ final class Plugin {
 		$this->container->register( LocationImportService::class, fn(): LocationImportService => new LocationImportService( $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( LocationAliasGenerator::class, fn(): LocationAliasGenerator => new LocationAliasGenerator() );
 		$this->container->register( GarPlacesCsvImporter::class, fn(): GarPlacesCsvImporter => new GarPlacesCsvImporter( $this->container->get( LocationRepository::class ), $this->container->get( RegionRepository::class ), $this->container->get( LocationAliasGenerator::class ) ) );
+		$this->container->register( LocationIncrementalUpdateService::class, fn(): LocationIncrementalUpdateService => new LocationIncrementalUpdateService( $this->container->get( LocationAliasGenerator::class ) ) );
 		$this->container->register( LocationsSnapshotExporter::class, fn(): LocationsSnapshotExporter => new LocationsSnapshotExporter() );
 		$this->container->register( LocationsSnapshotImporter::class, fn(): LocationsSnapshotImporter => new LocationsSnapshotImporter() );
 		$this->container->register( FiasImportManager::class, fn(): FiasImportManager => new FiasImportManager( $this->environment, $this->container->get( LocationRepository::class ), $this->container->get( LocationAliasGenerator::class ), $this->container->get( ActionScheduler::class ) ) );
@@ -384,7 +386,8 @@ final class Plugin {
 				$this->container->get( LocationsSnapshotImporter::class ),
 				$this->container->get( DaDataPostcodeClient::class ),
 				$this->container->get( LocationCoordinatesDadataBatchUpdater::class ),
-				$this->container->get( LocationCountryIndexService::class )
+				$this->container->get( LocationCountryIndexService::class ),
+				$this->container->get( LocationIncrementalUpdateService::class )
 			)
 		);
 		$this->container->register(

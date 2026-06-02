@@ -14,6 +14,7 @@ use WallsShop\WDC\Locations\Gar\GarSyncManager;
 use WallsShop\WDC\Locations\Import\FiasImportManager;
 use WallsShop\WDC\Locations\Import\GarPlacesCsvImporter;
 use WallsShop\WDC\Locations\Import\LocationImportService;
+use WallsShop\WDC\Locations\Import\LocationIncrementalUpdateService;
 use WallsShop\WDC\Locations\Import\LocationsSnapshotExporter;
 use WallsShop\WDC\Locations\Import\LocationsSnapshotImporter;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
@@ -32,6 +33,7 @@ final class LocationsAdminPage {
 	private const NONCE_ACTION = 'wdc_locations_admin';
 	private const NONCE_NAME = 'wdc_locations_nonce';
 	private const GAR_JOB_OPTION = 'wdc_gar_import_job';
+	private const INCREMENTAL_UPDATE_JOB_OPTION = 'wdc_locations_incremental_update_job';
 	private const SNAPSHOT_EXPORT_JOB_OPTION = 'wdc_locations_snapshot_export_job';
 	private const SNAPSHOT_IMPORT_JOB_OPTION = 'wdc_locations_snapshot_import_job';
 	private const DISPLAY_RULES_OPTION = 'wdc_location_type_display_rules';
@@ -55,7 +57,8 @@ final class LocationsAdminPage {
 		private ?LocationsSnapshotImporter $snapshot_importer = null,
 		private ?DaDataPostcodeClient $postcode_client = null,
 		private ?LocationCoordinatesDadataBatchUpdater $coordinates_updater = null,
-		private ?LocationCountryIndexService $country_index = null
+		private ?LocationCountryIndexService $country_index = null,
+		private ?LocationIncrementalUpdateService $incremental_update = null
 	) {
 	}
 
@@ -66,6 +69,13 @@ final class LocationsAdminPage {
 		add_action( 'wp_ajax_wdc_gar_import_step', array( $this, 'ajax_gar_import_step' ) );
 		add_action( 'wp_ajax_wdc_gar_import_status', array( $this, 'ajax_gar_import_status' ) );
 		add_action( 'wp_ajax_wdc_gar_import_cancel', array( $this, 'ajax_gar_import_cancel' ) );
+		add_action( 'wp_ajax_wdc_locations_incremental_update_start', array( $this, 'ajax_incremental_update_start' ) );
+		add_action( 'wp_ajax_wdc_locations_incremental_update_step', array( $this, 'ajax_incremental_update_step' ) );
+		add_action( 'wp_ajax_wdc_locations_incremental_update_approve_page', array( $this, 'ajax_incremental_update_approve_page' ) );
+		add_action( 'wp_ajax_wdc_locations_incremental_update_prepare', array( $this, 'ajax_incremental_update_prepare' ) );
+		add_action( 'wp_ajax_wdc_locations_incremental_update_apply', array( $this, 'ajax_incremental_update_apply' ) );
+		add_action( 'wp_ajax_wdc_locations_incremental_update_cleanup_list', array( $this, 'ajax_incremental_update_cleanup_list' ) );
+		add_action( 'wp_ajax_wdc_locations_incremental_update_cleanup_drop', array( $this, 'ajax_incremental_update_cleanup_drop' ) );
 		add_action( 'wp_ajax_wdc_locations_snapshot_export_start', array( $this, 'ajax_snapshot_export_start' ) );
 		add_action( 'wp_ajax_wdc_locations_snapshot_export_step', array( $this, 'ajax_snapshot_export_step' ) );
 		add_action( 'wp_ajax_wdc_locations_snapshot_import_start', array( $this, 'ajax_snapshot_import_start' ) );
@@ -192,6 +202,36 @@ final class LocationsAdminPage {
 				<button class="button button-primary" type="button" id="wdc-gar-import-start"><?php echo esc_html__( 'Начать импорт', 'walls-delivery-calc' ); ?></button>
 				<button class="button button-secondary" type="submit" name="wdc_locations_action" value="clear_all" onclick="return window.confirm('<?php echo esc_js( __( 'Удалить все населенные пункты и алиасы из локальной базы WDC?', 'walls-delivery-calc' ) ); ?>');"><?php echo esc_html__( 'Очистить базу населенных пунктов', 'walls-delivery-calc' ); ?></button>
 				<div id="wdc-gar-import-progress" class="wdc-progress" hidden><progress value="0" max="100"></progress><pre></pre></div>
+			</form>
+
+			<form id="wdc-incremental-update-form" class="wdc-locations-import" method="post" enctype="multipart/form-data">
+				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
+				<h2><?php echo esc_html__( 'Обновление базы населенных пунктов', 'walls-delivery-calc' ); ?></h2>
+				<label>
+					<span><?php echo esc_html__( 'Новый gar_places.csv', 'walls-delivery-calc' ); ?></span>
+					<input type="file" name="wdc_gar_places_update_csv" accept=".csv,text/csv">
+				</label>
+				<label>
+					<span><?php echo esc_html__( 'Путь к CSV на сервере', 'walls-delivery-calc' ); ?></span>
+					<input type="text" name="wdc_gar_places_update_path" placeholder="/path/to/gar_places.csv">
+				</label>
+				<p class="description"><?php echo esc_html__( 'CSV загружается в staging-копию. Текущие wp_wdc_locations и wp_wdc_location_aliases не меняются до финального подтверждения.', 'walls-delivery-calc' ); ?></p>
+				<button class="button button-primary" type="button" id="wdc-incremental-update-start"><?php echo esc_html__( 'Загрузить новый GAR CSV', 'walls-delivery-calc' ); ?></button>
+				<button class="button button-secondary" type="button" id="wdc-incremental-update-approve-page" hidden><?php echo esc_html__( 'Подтвердить эту страницу', 'walls-delivery-calc' ); ?></button>
+				<button class="button button-secondary" type="button" id="wdc-incremental-update-prepare" hidden><?php echo esc_html__( 'Подготовить обновленную базу', 'walls-delivery-calc' ); ?></button>
+				<button class="button button-primary" type="button" id="wdc-incremental-update-apply" hidden><?php echo esc_html__( 'Применить новую базу', 'walls-delivery-calc' ); ?></button>
+				<div class="wdc-incremental-update-cleanup">
+					<h3><?php echo esc_html__( 'Очистка временных таблиц', 'walls-delivery-calc' ); ?></h3>
+					<p class="description"><?php echo esc_html__( 'Удаляет только staging/candidate таблицы незавершенного обновления. Боевые, previous и backup таблицы не удаляются.', 'walls-delivery-calc' ); ?></p>
+					<button class="button button-secondary" type="button" id="wdc-incremental-cleanup-list"><?php echo esc_html__( 'Проверить временные таблицы', 'walls-delivery-calc' ); ?></button>
+					<button class="button button-secondary" type="button" id="wdc-incremental-cleanup-drop"><?php echo esc_html__( 'Удалить временные таблицы', 'walls-delivery-calc' ); ?></button>
+					<div id="wdc-incremental-cleanup-result" class="wdc-progress" hidden><pre></pre></div>
+				</div>
+				<div id="wdc-incremental-update-progress" class="wdc-progress" hidden>
+					<progress value="0" max="100"></progress>
+					<div class="wdc-incremental-update-analysis"></div>
+					<pre></pre>
+				</div>
 			</form>
 
 			<form id="wdc-snapshot-form" class="wdc-locations-import" method="post" enctype="multipart/form-data">
@@ -521,12 +561,180 @@ final class LocationsAdminPage {
 				table.appendChild(tbody);
 				return table;
 			}
+			function incrementalKey(row) {
+				if (row && row.key) return row.key;
+				if (row && row.fias_id) return 'f:' + row.fias_id;
+				if (row && row.gar_object_id) return 'g:' + row.gar_object_id;
+				return '';
+			}
+			function renderIncrementalTable(title, type, rows) {
+				const details = document.createElement('details');
+				details.open = true;
+				const summary = document.createElement('summary');
+				summary.textContent = title + ' (' + (rows || []).length + ')';
+				details.appendChild(summary);
+				const table = document.createElement('table');
+				table.className = 'widefat striped';
+				const tbody = document.createElement('tbody');
+				(rows || []).forEach(function(row){
+					const key = incrementalKey(row);
+					if (!key) return;
+					const tr = document.createElement('tr');
+					const checkTd = document.createElement('td');
+					const checkbox = document.createElement('input');
+					checkbox.type = 'checkbox';
+					checkbox.checked = true;
+					checkbox.setAttribute('data-wdc-incremental-key', key);
+					checkbox.setAttribute('data-wdc-incremental-type', type);
+					checkTd.appendChild(checkbox);
+					const idTd = document.createElement('td');
+					idTd.textContent = safeText(row.fias_id || row.gar_object_id || key);
+					const nameTd = document.createElement('td');
+					if (type === 'changed' && row.changes) {
+						let changes = row.changes;
+						if (typeof changes === 'string') {
+							try { changes = JSON.parse(changes); } catch (e) { changes = {}; }
+						}
+						const fields = Object.keys(changes || {}).filter(function(field){ return changes[field] !== null && changes[field] !== undefined; });
+						nameTd.textContent = fields.map(function(field){ return field + ': ' + safeText(changes[field].old) + ' -> ' + safeText(changes[field].new); }).join('; ');
+					} else if (type === 'changed') {
+						nameTd.textContent = safeText(row.old_display_name) + ' -> ' + safeText(row.new_display_name);
+					} else {
+						nameTd.textContent = safeText(row.display_name);
+					}
+					const postTd = document.createElement('td');
+					postTd.textContent = safeText(row.postal_code || row.new_postal_code || row.old_postal_code);
+					tr.appendChild(checkTd);
+					tr.appendChild(idTd);
+					tr.appendChild(nameTd);
+					tr.appendChild(postTd);
+					tbody.appendChild(tr);
+				});
+				table.appendChild(tbody);
+				details.appendChild(table);
+				return details;
+			}
+			function renderIncrementalAnalysis(box, job) {
+				render(box, job);
+				const analysis = box ? box.querySelector('.wdc-incremental-update-analysis') : null;
+				const approve = document.getElementById('wdc-incremental-update-approve-page');
+				const prepare = document.getElementById('wdc-incremental-update-prepare');
+				const apply = document.getElementById('wdc-incremental-update-apply');
+				if (!analysis || !job) return;
+				while (analysis.firstChild) analysis.removeChild(analysis.firstChild);
+				if (job.phase === 'approving_new' || job.phase === 'approving_removed' || job.phase === 'approving_changed' || job.phase === 'approval_complete' || job.phase === 'candidate_ready' || job.phase === 'candidate_failed' || job.phase === 'applied') {
+					const summary = document.createElement('p');
+					summary.textContent = 'Текущая база: ' + safeText(job.current_count) + '; Новый GAR: ' + safeText(job.staging_count) + '; Новых: ' + safeText(job.new_count) + '; Удаляемых: ' + safeText(job.removed_count) + '; Измененных: ' + safeText(job.changed_count) + '; Candidate: ' + safeText(job.candidate_count || '');
+					analysis.appendChild(summary);
+					const approval = job.approval || {};
+					const stats = approval.stats || {};
+					if (job.changed_by_field) {
+						const byField = document.createElement('p');
+						byField.textContent = 'Changed by field: ' + safeText(job.changed_by_field);
+						analysis.appendChild(byField);
+					}
+					const currentType = approval.current_type || '';
+					if (currentType) {
+						const pageSize = Number(approval.page_size || 100);
+						const currentStats = stats[currentType] || {};
+						const progress = document.createElement('p');
+						progress.textContent = 'Текущая категория: ' + currentType.toUpperCase() + '; Страница: ' + safeText(approval.current_page) + ' из ' + safeText(currentStats.pages || 0) + '; Строк: ' + pageSize + '; Прогресс: ' + safeText(currentStats.processed || 0) + ' / ' + safeText(currentStats.total || 0);
+						analysis.appendChild(progress);
+						analysis.appendChild(renderIncrementalTable(currentType.toUpperCase(), currentType, approval.current_rows || []));
+					} else {
+						const totals = document.createElement('p');
+						totals.textContent = 'NEW: ' + safeText(stats.new || {}) + '; REMOVED: ' + safeText(stats.removed || {}) + '; CHANGED: ' + safeText(stats.changed || {});
+						analysis.appendChild(totals);
+					}
+				}
+				if (approve) approve.hidden = !(job.phase === 'approving_new' || job.phase === 'approving_removed' || job.phase === 'approving_changed');
+				if (prepare) prepare.hidden = job.phase !== 'approval_complete';
+				if (apply) apply.hidden = job.phase !== 'candidate_ready';
+			}
+			function collectIncrementalSelection() {
+				const data = new FormData();
+				document.querySelectorAll('[data-wdc-incremental-key]:checked').forEach(function(input){
+					data.append('selected[' + input.getAttribute('data-wdc-incremental-type') + '][]', input.getAttribute('data-wdc-incremental-key'));
+				});
+				return data;
+			}
+			function renderCleanup(box, payload) {
+				if (!box) return;
+				box.hidden = false;
+				const text = box.querySelector('pre');
+				payload = payload || {};
+				if (payload.phase === 'cleanup_list' && Number(payload.tables_found || 0) === 0) {
+					text.textContent = 'Временные таблицы не найдены.\n\n' + JSON.stringify(payload, null, 2);
+					return;
+				}
+				if (payload.phase === 'cleanup_finished') {
+					const lines = [
+						'Удалено таблиц: ' + Number(payload.dropped_count || 0),
+						'Dropped: ' + safeText(payload.dropped || []),
+						'Skipped: ' + safeText(payload.skipped || []),
+						'Errors: ' + safeText(payload.errors || []),
+						'Debug: ' + safeText(payload.debug || {})
+					];
+					text.textContent = lines.join('\n') + '\n\n' + JSON.stringify(payload, null, 2);
+					return;
+				}
+				text.textContent = JSON.stringify(payload, null, 2);
+			}
 			const garStart = document.getElementById('wdc-gar-import-start');
 			if (garStart) garStart.addEventListener('click', function(){
 				if (!window.confirm('<?php echo esc_js( __( 'Импорт заменит локальную базу населенных пунктов. Продолжить?', 'walls-delivery-calc' ) ); ?>')) return;
 				const form = document.getElementById('wdc-gar-import-form');
 				const box = document.getElementById('wdc-gar-import-progress');
 				post('wdc_gar_import_start', new FormData(form)).then(resp => { render(box, resp.data); loop('wdc_gar_import_step', box); });
+			});
+			const incrementalStart = document.getElementById('wdc-incremental-update-start');
+			if (incrementalStart) incrementalStart.addEventListener('click', function(){
+				const form = document.getElementById('wdc-incremental-update-form');
+				const box = document.getElementById('wdc-incremental-update-progress');
+				post('wdc_locations_incremental_update_start', new FormData(form)).then(resp => {
+					renderIncrementalAnalysis(box, resp.data);
+					const poll = function(){
+						post('wdc_locations_incremental_update_step').then(stepResp => {
+							const job = stepResp && stepResp.data ? stepResp.data : {};
+							renderIncrementalAnalysis(box, job);
+							if (job.phase === 'staging' || job.phase === 'diff' || job.phase === 'analysis') window.setTimeout(poll, 250);
+						});
+					};
+					poll();
+				});
+			});
+			const incrementalPrepare = document.getElementById('wdc-incremental-update-prepare');
+			const incrementalApprove = document.getElementById('wdc-incremental-update-approve-page');
+			if (incrementalApprove) incrementalApprove.addEventListener('click', function(){
+				const box = document.getElementById('wdc-incremental-update-progress');
+				post('wdc_locations_incremental_update_approve_page', collectIncrementalSelection()).then(resp => { renderIncrementalAnalysis(box, resp.data); });
+			});
+			if (incrementalPrepare) incrementalPrepare.addEventListener('click', function(){
+				const box = document.getElementById('wdc-incremental-update-progress');
+				post('wdc_locations_incremental_update_prepare').then(resp => { renderIncrementalAnalysis(box, resp.data); });
+			});
+			const incrementalApply = document.getElementById('wdc-incremental-update-apply');
+			if (incrementalApply) incrementalApply.addEventListener('click', function(){
+				if (!window.confirm('<?php echo esc_js( __( 'Применить candidate через атомарную замену таблиц locations и aliases?', 'walls-delivery-calc' ) ); ?>')) return;
+				const box = document.getElementById('wdc-incremental-update-progress');
+				post('wdc_locations_incremental_update_apply').then(resp => { renderIncrementalAnalysis(box, resp.data); });
+			});
+			const incrementalCleanupList = document.getElementById('wdc-incremental-cleanup-list');
+			if (incrementalCleanupList) incrementalCleanupList.addEventListener('click', function(){
+				const box = document.getElementById('wdc-incremental-cleanup-result');
+				renderCleanup(box, {phase:'cleanup_loading', message:'Проверяем временные таблицы...'});
+				post('wdc_locations_incremental_update_cleanup_list').then(resp => { renderCleanup(box, resp.data); });
+			});
+			const incrementalCleanupDrop = document.getElementById('wdc-incremental-cleanup-drop');
+			if (incrementalCleanupDrop) incrementalCleanupDrop.addEventListener('click', function(){
+				if (!window.confirm('<?php echo esc_js( __( 'Удалить временные staging/candidate таблицы инкрементального обновления? Боевые таблицы затронуты не будут.', 'walls-delivery-calc' ) ); ?>')) return;
+				const box = document.getElementById('wdc-incremental-cleanup-result');
+				incrementalCleanupDrop.disabled = true;
+				renderCleanup(box, {phase:'cleanup_running', message:'Удаляем временные таблицы...'});
+				post('wdc_locations_incremental_update_cleanup_drop').then(resp => {
+					renderCleanup(box, resp.data);
+					post('wdc_locations_incremental_update_cleanup_list').then(listResp => { renderCleanup(box, Object.assign({after_cleanup:true}, listResp.data || {})); });
+				}).finally(() => { incrementalCleanupDrop.disabled = false; });
 			});
 			const exportStart = document.getElementById('wdc-snapshot-export-start');
 			if (exportStart) exportStart.addEventListener('click', function(){
@@ -692,6 +900,28 @@ final class LocationsAdminPage {
 	}
 
 	/**
+	 * @param mixed $raw
+	 * @return array<string,array<int,string>>
+	 */
+	private function sanitize_incremental_selection( mixed $raw ): array {
+		$result = array( 'new' => array(), 'removed' => array(), 'changed' => array() );
+		if ( ! is_array( $raw ) ) {
+			return $result;
+		}
+		foreach ( $result as $type => $values ) {
+			foreach ( is_array( $raw[ $type ] ?? null ) ? $raw[ $type ] : array() as $value ) {
+				$key = sanitize_text_field( wp_unslash( (string) $value ) );
+				if ( preg_match( '/^f:[A-Za-z0-9\\-]{1,64}$/', $key ) || preg_match( '/^g:[0-9]{1,20}$/', $key ) ) {
+					$result[ $type ][] = $key;
+				}
+			}
+			$result[ $type ] = array_values( array_unique( $result[ $type ] ) );
+		}
+
+		return $result;
+	}
+
+	/**
 	 * @return array<string,array<string,array{display:string,position:string}>>
 	 */
 	private function type_display_rules(): array {
@@ -766,6 +996,92 @@ final class LocationsAdminPage {
 		$this->guard_ajax();
 		$this->delete_option( self::GAR_JOB_OPTION );
 		$this->send_json( array( 'phase' => 'idle', 'cancelled' => true ) );
+	}
+
+	public function ajax_incremental_update_start(): void {
+		$this->guard_ajax();
+		if ( ! $this->incremental_update instanceof LocationIncrementalUpdateService ) {
+			$this->send_json( array( 'phase' => 'failed', 'errors' => array( 'Incremental update service is unavailable.' ) ) );
+		}
+		$path = isset( $_POST['wdc_gar_places_update_path'] ) ? sanitize_text_field( wp_unslash( (string) $_POST['wdc_gar_places_update_path'] ) ) : '';
+		if ( '' === $path ) {
+			$path = $this->persist_upload( 'wdc_gar_places_update_csv', 'wdc-imports', 'gar_places-update.csv' );
+		}
+		$job = $this->incremental_update->create_job( $path );
+		$this->update_option( self::INCREMENTAL_UPDATE_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	public function ajax_incremental_update_step(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::INCREMENTAL_UPDATE_JOB_OPTION, array() );
+		$job = is_array( $job ) && $this->incremental_update instanceof LocationIncrementalUpdateService ? $this->incremental_update->step_job( $job ) : array( 'phase' => 'failed', 'errors' => array( 'Incremental update job is unavailable.' ) );
+		$this->update_option( self::INCREMENTAL_UPDATE_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	public function ajax_incremental_update_approve_page(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::INCREMENTAL_UPDATE_JOB_OPTION, array() );
+		$selected = $this->sanitize_incremental_selection( $_POST['selected'] ?? array() );
+		$checked = array_merge( $selected['new'], $selected['removed'], $selected['changed'] );
+		$job = is_array( $job ) && $this->incremental_update instanceof LocationIncrementalUpdateService ? $this->incremental_update->approve_current_page( $job, $checked ) : array( 'phase' => 'failed', 'errors' => array( 'Incremental update job is unavailable.' ) );
+		$this->update_option( self::INCREMENTAL_UPDATE_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	public function ajax_incremental_update_prepare(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::INCREMENTAL_UPDATE_JOB_OPTION, array() );
+		$selected = $this->sanitize_incremental_selection( $_POST['selected'] ?? array() );
+		$job = is_array( $job ) && $this->incremental_update instanceof LocationIncrementalUpdateService ? $this->incremental_update->prepare_candidate( $job, $selected ) : array( 'phase' => 'failed', 'errors' => array( 'Incremental update job is unavailable.' ) );
+		$this->update_option( self::INCREMENTAL_UPDATE_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	public function ajax_incremental_update_apply(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::INCREMENTAL_UPDATE_JOB_OPTION, array() );
+		$job = is_array( $job ) && $this->incremental_update instanceof LocationIncrementalUpdateService ? $this->incremental_update->apply_candidate( $job ) : array( 'phase' => 'failed', 'errors' => array( 'Incremental update job is unavailable.' ) );
+		$this->update_option( self::INCREMENTAL_UPDATE_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	public function ajax_incremental_update_cleanup_list(): void {
+		$this->guard_ajax();
+		if ( ! $this->incremental_update instanceof LocationIncrementalUpdateService ) {
+			$this->send_json( array( 'phase' => 'failed', 'errors' => array( 'Incremental update service is unavailable.' ) ) );
+		}
+		$tables = $this->incremental_update->list_temporary_tables();
+		$this->send_json(
+			array(
+				'phase' => 'cleanup_list',
+				'tables_found' => count( $tables ),
+				'tables' => $tables,
+			)
+		);
+	}
+
+	public function ajax_incremental_update_cleanup_drop(): void {
+		$this->guard_ajax();
+		if ( ! $this->incremental_update instanceof LocationIncrementalUpdateService ) {
+			$this->send_json( array( 'phase' => 'failed', 'errors' => array( 'Incremental update service is unavailable.' ) ) );
+		}
+		$result = $this->incremental_update->cleanup_temporary_tables();
+		if ( ! (bool) ( $result['active_job_cleared'] ?? false ) ) {
+			$result['active_job_cleared'] = $this->delete_option( self::INCREMENTAL_UPDATE_JOB_OPTION );
+		}
+		$this->send_json(
+			array(
+				'phase' => 'cleanup_finished',
+				'dropped_count' => count( $result['dropped'] ?? array() ),
+				'dropped' => $result['dropped'] ?? array(),
+				'skipped' => $result['skipped'] ?? array(),
+				'errors' => $result['errors'] ?? array(),
+				'active_job_cleared' => (bool) ( $result['active_job_cleared'] ?? false ),
+				'debug' => $result['debug'] ?? array(),
+			)
+		);
 	}
 
 	public function ajax_snapshot_export_start(): void {
