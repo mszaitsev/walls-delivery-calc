@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use WallsShop\WDC\Carriers\RussianPost\DomesticTariffVariant;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostCourierTariffProbeService;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticApiClient;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
@@ -26,6 +27,7 @@ use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Postcodes\DaDataPostcodeClient;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleEvaluationContext;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
@@ -43,6 +45,19 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 if ( ! class_exists( 'WC_Shipping_Method' ) ) {
 	class WC_Shipping_Method {}
+}
+if ( ! class_exists( 'WP_Error' ) ) {
+	class WP_Error {
+		public function __construct( private string $message ) {}
+		public function get_error_message(): string { return $this->message; }
+	}
+}
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $prefix = '';
+		/** @var array<int,array<string,mixed>> */
+		public array $rows = array();
+	}
 }
 
 $GLOBALS['wdc_rpd_options'] = array();
@@ -73,10 +88,23 @@ function wp_date( string $format ): string { return gmdate( $format, strtotime( 
 function wp_timezone(): DateTimeZone { return new DateTimeZone( 'Asia/Novosibirsk' ); }
 function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
 function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
-function is_wp_error( mixed $value ): bool { return false; }
-function wp_remote_get( string $url, array $args = array() ): array {
+function is_wp_error( mixed $value ): bool { return $value instanceof WP_Error; }
+function wp_remote_get( string $url, array $args = array() ): mixed {
 	parse_str( (string) parse_url( $url, PHP_URL_QUERY ), $params );
 	$GLOBALS['wdc_rpd_requests'][] = $params;
+	if ( isset( $params['mailtype'] ) ) {
+		$to = (string) ( $params['to'] ?? '' );
+		if ( '630201' === $to ) {
+			return new WP_Error( 'probe transport failed' );
+		}
+		if ( '630202' === $to ) {
+			return array( 'response' => array( 'code' => 200 ), 'body' => 'not-json' );
+		}
+		if ( '630203' === $to ) {
+			return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'errorcode' => 2007, 'errormsg' => 'no courier delivery' ) ) );
+		}
+		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'paynds' => 12345, 'pay' => 12000 ) ) );
+	}
 	if ( ! empty( $params['force_errorcode'] ) ) {
 		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'errorcode' => 42, 'errormsg' => 'bad domestic request' ) ) );
 	}
@@ -213,6 +241,31 @@ $courier_insured = $carrier->quote( new QuoteRequest( 'RU', new Address( country
 $courier_insured_objects = array_map( static fn( $rate ): string => $rate->tariff_key, $courier_insured->rates );
 rpd_assert( in_array( '7020', $courier_insured_objects, true ) && ! in_array( '28020', $courier_insured_objects, true ), 'Declared-value EMS courier variants must be available with insurance and deprecated 28020 must stay out of defaults.' );
 $settings->set( 'russian_post_domestic', array_merge( $settings->all()['russian_post_domestic'], array( 'insurance_enabled' => false ) ) );
+
+$probe = new RussianPostCourierTariffProbeService( new Logger() );
+$probe_success = $probe->probe( '630200' );
+rpd_assert( ! empty( $probe_success['success'] ) && '630200' === $probe_success['postal_code'], 'Russian Post courier tariff probe must accept successful price JSON.' );
+$probe_wp_error = $probe->probe( '630201' );
+rpd_assert( empty( $probe_wp_error['success'] ) && 'http_error' === $probe_wp_error['error_code'], 'Russian Post courier tariff probe must treat WP_Error as failure.' );
+$probe_invalid_json = $probe->probe( '630202' );
+rpd_assert( empty( $probe_invalid_json['success'] ) && 'invalid_json' === $probe_invalid_json['error_code'], 'Russian Post courier tariff probe must treat invalid JSON as failure.' );
+$probe_2007 = $probe->probe( '630203' );
+rpd_assert( empty( $probe_2007['success'] ) && '2007' === $probe_2007['error_code'], 'Russian Post courier tariff probe must treat error 2007 as failure.' );
+
+$location_db = new wpdb();
+$location_db->rows = array(
+	10 => array( 'id' => 10, 'active' => 1, 'country_code' => 'RU', 'postal_code' => '630000', 'russianpost_courier_calc_postal_code' => '630099' ),
+);
+$carrier_with_locations = new RussianPostDomesticCarrier( $domestic_settings, new RussianPostDomesticApiClient( $domestic_settings, new Logger() ), new RussianPostDomesticTariffVariantResolver(), new Logger(), $postcode_client, new LocationRepository( $location_db ) );
+$GLOBALS['wdc_rpd_transients'] = array();
+$GLOBALS['wdc_rpd_requests'] = array();
+$technical_courier = $carrier_with_locations->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630000' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::COURIER_SERVICE_KEY, 'selected_location_id' => 10 ) ) );
+rpd_assert( $technical_courier->has_available_rates() && '630099' === (string) ( $GLOBALS['wdc_rpd_requests'][0]['to'] ?? '' ), 'Domestic courier tariff request must use russianpost_courier_calc_postal_code when present.' );
+rpd_assert( '630000' === $technical_courier->destination->postcode && '630000' === (string) ( $technical_courier->raw_reference['postcode'] ?? '' ), 'Domestic courier technical postcode must not change visible destination postcode.' );
+$GLOBALS['wdc_rpd_requests'] = array();
+$GLOBALS['wdc_rpd_transients'] = array();
+$technical_pickup = $carrier_with_locations->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630000' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY, 'selected_location_id' => 10 ) ) );
+rpd_assert( $technical_pickup->has_available_rates() && '630000' === (string) ( $GLOBALS['wdc_rpd_requests'][0]['to'] ?? '' ), 'Domestic pickup tariff request must ignore russianpost courier technical postcode.' );
 
 $GLOBALS['wdc_rpd_requests'] = array();
 $enriched = $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '', fias_id: 'fias-nsk' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY ) ) );

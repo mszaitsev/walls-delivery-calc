@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostCourierTariffProbeService;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\Locations\LocationCoordinateEnricher;
@@ -10,10 +11,12 @@ use WallsShop\WDC\Locations\Admin\LocationsAdminPage;
 use WallsShop\WDC\Locations\Coordinates\LocationCoordinatesDadataBatchUpdater;
 use WallsShop\WDC\Locations\Import\LocationImportService;
 use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
+use WallsShop\WDC\Locations\Postcodes\RussianPostCourierCalcPostcodeFillStateService;
 use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
@@ -69,6 +72,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 
 		/** @var array<int, array<string,mixed>> */
 		public array $alias_rows = array();
+
+		/** @var array<int, array<string,mixed>> */
+		public array $russian_post_pickup_rows = array();
 
 		/** @var array<int,string> */
 		public array $queries = array();
@@ -231,6 +237,35 @@ function esc_attr( mixed $text ): string {
 
 function esc_js( mixed $text ): string {
 	return addslashes( (string) $text );
+}
+
+function add_query_arg( array $params, string $url ): string {
+	return $url . '?' . http_build_query( $params );
+}
+
+function is_wp_error( mixed $value ): bool {
+	return false;
+}
+
+function wp_remote_retrieve_response_code( mixed $response ): int {
+	return (int) ( $response['response']['code'] ?? 0 );
+}
+
+function wp_remote_retrieve_body( mixed $response ): string {
+	return (string) ( $response['body'] ?? '' );
+}
+
+function wp_remote_get( string $url, array $args = array() ): array {
+	parse_str( (string) parse_url( $url, PHP_URL_QUERY ), $params );
+	$GLOBALS['wdc_locations_probe_requests'][] = $params;
+	$to = (string) ( $params['to'] ?? '' );
+
+	return array(
+		'response' => array( 'code' => 200 ),
+		'body' => in_array( $to, $GLOBALS['wdc_locations_probe_success_postcodes'] ?? array(), true )
+			? json_encode( array( 'paynds' => 12345, 'pay' => 12000 ) )
+			: json_encode( array( 'errorcode' => 2007, 'errormsg' => 'no courier delivery' ) ),
+	);
 }
 
 function current_user_can( string $capability ): bool {
@@ -791,6 +826,49 @@ $reset_canceled_payload = json_decode( (string) ob_get_clean(), true );
 locations_smoke_assert( is_array( $reset_canceled_payload ) && ! empty( $reset_canceled_payload['success'] ) && 'idle' === (string) ( $reset_canceled_payload['data']['phase'] ?? '' ), 'Coordinate reset AJAX must also reset canceled jobs to idle.' );
 locations_smoke_assert( ! array_key_exists( 'wdc_dadata_coordinates_fill_job', $GLOBALS['wdc_locations_smoke_options'] ), 'Coordinate reset AJAX must delete canceled coordinate job state.' );
 
+$rp_wpdb = new wpdb();
+$rp_repository = new LocationRepository( $rp_wpdb );
+$rp_city_id = $rp_repository->save( locations_smoke_location( array( 'gar_object_id' => 886001, 'fias_id' => 'fias-rp-city', 'region_name' => 'Новосибирская', 'country_code' => 'RU', 'city_type' => 'г', 'place_type' => 'г', 'place_name' => 'Новосибирск', 'display_name' => 'г Новосибирск', 'postal_code' => '630000' ) ) );
+$rp_duplicate_id = $rp_repository->save( locations_smoke_location( array( 'gar_object_id' => 886002, 'fias_id' => 'fias-rp-city-copy', 'region_name' => 'Новосибирская', 'country_code' => 'RU', 'city_type' => 'г', 'place_type' => 'г', 'place_name' => 'Новосибирск copy', 'display_name' => 'г Новосибирск copy', 'postal_code' => '630000' ) ) );
+$rp_settlement_id = $rp_repository->save( locations_smoke_location( array( 'gar_object_id' => 886003, 'fias_id' => 'fias-rp-village', 'region_name' => 'Новосибирская', 'country_code' => 'RU', 'place_type' => 'село', 'place_name' => 'Гусиный Брод', 'display_name' => 'село Гусиный Брод', 'postal_code' => '630555' ) ) );
+$rp_wpdb->russian_post_pickup_rows = array(
+	array( 'active' => 1, 'location_id' => $rp_city_id, 'fias_location_guid' => 'ignored', 'postcode' => '630099' ),
+	array( 'active' => 1, 'location_id' => 0, 'fias_location_guid' => 'fias-rp-village', 'postcode' => '630777' ),
+);
+$GLOBALS['wdc_locations_probe_requests'] = array();
+$GLOBALS['wdc_locations_probe_success_postcodes'] = array( '630099', '630777' );
+$rp_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_repository, new RussianPostCourierTariffProbeService( new Logger() ), $rp_wpdb );
+$rp_job = $rp_service->create_job();
+$rp_job = $rp_service->step( $rp_job );
+locations_smoke_assert( $rp_city_id === (int) ( $GLOBALS['wdc_locations_probe_requests'][0]['to'] === '630000' ? $rp_city_id : 0 ), 'Russian Post courier postcode fill must probe city base postcode first.' );
+locations_smoke_assert( '630099' === (string) $rp_wpdb->rows[ $rp_city_id ]['russianpost_courier_calc_postal_code'] && '630099' === (string) $rp_wpdb->rows[ $rp_duplicate_id ]['russianpost_courier_calc_postal_code'], 'Russian Post courier postcode fill must save first successful candidate for all empty rows with same postal_code.' );
+locations_smoke_assert( (int) ( $rp_job['step_probes'] ?? 0 ) <= RussianPostCourierCalcPostcodeFillStateService::MAX_PROBES_PER_STEP, 'Russian Post courier postcode fill step must not exceed probe request limit.' );
+$rp_job = $rp_service->step( $rp_job );
+locations_smoke_assert( '630777' === (string) $rp_wpdb->rows[ $rp_settlement_id ]['russianpost_courier_calc_postal_code'], 'Russian Post courier postcode fill must use fias_location_guid fallback candidates.' );
+update_option( 'wdc_russianpost_courier_calc_postcode_fill_job', $rp_job );
+$_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
+ob_start();
+( new LocationsAdminPage(
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.33.0' ),
+	$rp_repository,
+	new LocationSearchService( $rp_repository ),
+	new LocationImportService( $rp_repository ),
+	russianpost_courier_calc_postcode_fill: $rp_service
+) )->ajax_russianpost_courier_calc_postcode_fill_reset();
+$rp_reset_payload = json_decode( (string) ob_get_clean(), true );
+locations_smoke_assert( is_array( $rp_reset_payload ) && ! empty( $rp_reset_payload['success'] ) && '630099' === (string) $rp_wpdb->rows[ $rp_city_id ]['russianpost_courier_calc_postal_code'], 'Russian Post courier postcode reset must not clear filled values.' );
+$_POST = array( 'wdc_locations_nonce' => 'test-nonce' );
+ob_start();
+( new LocationsAdminPage(
+	new PluginEnvironment( __FILE__, dirname( __DIR__, 2 ) . '/', 'http://example.test/wp-content/plugins/walls-delivery-calc/', '0.33.0' ),
+	$rp_repository,
+	new LocationSearchService( $rp_repository ),
+	new LocationImportService( $rp_repository ),
+	russianpost_courier_calc_postcode_fill: $rp_service
+) )->ajax_russianpost_courier_calc_postcode_fill_clear_all();
+$rp_clear_payload = json_decode( (string) ob_get_clean(), true );
+locations_smoke_assert( is_array( $rp_clear_payload ) && ! empty( $rp_clear_payload['success'] ) && '' === (string) $rp_wpdb->rows[ $rp_city_id ]['russianpost_courier_calc_postal_code'] && '' === (string) $rp_wpdb->rows[ $rp_settlement_id ]['russianpost_courier_calc_postal_code'], 'Russian Post courier postcode clear all must clear filled values and return success.' );
+
 locations_smoke_assert( method_exists( $repository, 'clear_all' ), 'LocationRepository must expose clear_all method.' );
 $repository->save_aliases( 1, array( 'Alias one', 'Alias two' ) );
 locations_smoke_assert( $repository->count_aliases() > 0, 'Test fixture must contain aliases before clear_all.' );
@@ -866,8 +944,11 @@ locations_smoke_assert( str_contains( $repository_source, 'find_first_by_postal_
 $locations_schema_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0002_create_locations_table.php' );
 locations_smoke_assert( str_contains( $locations_schema_source, 'KEY country_code (country_code)' ) && str_contains( $locations_schema_source, 'KEY active (active)' ) && str_contains( $locations_schema_source, 'KEY postal_code (postal_code)' ), 'Fresh locations schema must keep country_code, active, and postal_code indexes.' );
 locations_smoke_assert( str_contains( $locations_schema_source, 'KEY idx_active_country_code (active, country_code)' ), 'Fresh locations schema must include the active/country_code compound index.' );
+locations_smoke_assert( str_contains( $locations_schema_source, 'russianpost_courier_calc_postal_code varchar(32) NOT NULL DEFAULT' ) && str_contains( $locations_schema_source, 'KEY postal_code_rp_courier_calc' ), 'Fresh locations schema must include Russian Post courier calc postcode column and compound index.' );
 $locations_index_migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0024_add_locations_active_country_index.php' );
 locations_smoke_assert( str_contains( $locations_index_migration_source, 'SHOW TABLES LIKE' ) && str_contains( $locations_index_migration_source, 'SHOW COLUMNS' ) && str_contains( $locations_index_migration_source, 'SHOW INDEX' ) && str_contains( $locations_index_migration_source, 'ADD KEY idx_active_country_code' ), '0024 must add the active/country_code index idempotently.' );
+$locations_rp_courier_migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0025_add_locations_russianpost_courier_calc_postal_code.php' );
+locations_smoke_assert( str_contains( $locations_rp_courier_migration_source, 'SHOW TABLES LIKE' ) && str_contains( $locations_rp_courier_migration_source, 'SHOW COLUMNS' ) && str_contains( $locations_rp_courier_migration_source, 'SHOW INDEX' ) && str_contains( $locations_rp_courier_migration_source, 'ADD COLUMN russianpost_courier_calc_postal_code' ), '0025 must add Russian Post courier calc postcode column idempotently.' );
 $locations_postcode_migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0023_drop_unused_locations_postcode.php' );
 locations_smoke_assert( str_contains( $locations_postcode_migration_source, 'DROP COLUMN postcode' ) && str_contains( $locations_postcode_migration_source, 'postal_code' ), '0023 must remove only legacy postcode after preserving postal_code.' );
 $dadata_client_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/AddressSuggestions/DaDataSuggestionClient.php' );

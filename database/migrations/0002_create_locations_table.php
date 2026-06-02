@@ -21,6 +21,7 @@ return static function (): void {
 		settlement_type varchar(64) NOT NULL DEFAULT '',
 		display_name varchar(512) NOT NULL DEFAULT '',
 		postal_code varchar(32) NOT NULL DEFAULT '',
+		russianpost_courier_calc_postal_code varchar(32) NOT NULL DEFAULT '',
 		latitude decimal(10,7) NULL,
 		longitude decimal(10,7) NULL,
 		searchable_text longtext NOT NULL,
@@ -33,6 +34,7 @@ return static function (): void {
 		KEY city_name (city_name),
 		KEY settlement_name (settlement_name),
 		KEY postal_code (postal_code),
+		KEY postal_code_rp_courier_calc (postal_code, russianpost_courier_calc_postal_code),
 		KEY active (active),
 		KEY idx_active_country_code (active, country_code)
 	) {$charset_collate}";

@@ -20,6 +20,7 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingService;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostApiClient;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostCourierTariffProbeService;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticApiClient;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
@@ -95,6 +96,7 @@ use WallsShop\WDC\Locations\Import\LocationsSnapshotExporter;
 use WallsShop\WDC\Locations\Import\LocationsSnapshotImporter;
 use WallsShop\WDC\Locations\Normalization\FallbackAddressNormalizer;
 use WallsShop\WDC\Locations\Postcodes\DaDataPostcodeClient;
+use WallsShop\WDC\Locations\Postcodes\RussianPostCourierCalcPostcodeFillStateService;
 use WallsShop\WDC\Locations\Services\GarChangesService;
 use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
@@ -180,6 +182,7 @@ final class Plugin {
 		$this->container->register( RussianPostDomesticSettings::class, fn(): RussianPostDomesticSettings => new RussianPostDomesticSettings( $this->container->get( SettingsRepository::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
 		$this->container->register( RussianPostDomesticTariffVariantResolver::class, fn(): RussianPostDomesticTariffVariantResolver => new RussianPostDomesticTariffVariantResolver() );
 		$this->container->register( RussianPostDomesticApiClient::class, fn(): RussianPostDomesticApiClient => new RussianPostDomesticApiClient( $this->container->get( RussianPostDomesticSettings::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( RussianPostCourierTariffProbeService::class, fn(): RussianPostCourierTariffProbeService => new RussianPostCourierTariffProbeService( $this->container->get( Logger::class ) ) );
 		$this->container->register( RussianPostOtpravkaApiSettings::class, fn(): RussianPostOtpravkaApiSettings => new RussianPostOtpravkaApiSettings( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ) ) );
 		$this->container->register( RussianPostOtpravkaApiClient::class, fn(): RussianPostOtpravkaApiClient => new RussianPostOtpravkaApiClient( $this->container->get( RussianPostOtpravkaApiSettings::class ) ) );
 		$this->container->register( RussianPostPassportPointNormalizer::class, fn(): RussianPostPassportPointNormalizer => new RussianPostPassportPointNormalizer() );
@@ -189,7 +192,7 @@ final class Plugin {
 		$this->container->register( RussianPostCountryMappingService::class, fn(): RussianPostCountryMappingService => new RussianPostCountryMappingService( $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostApiClient::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( RussianPostCountryDirectory::class, fn(): RussianPostCountryDirectory => new RussianPostCountryDirectory( $this->container->get( RussianPostApiClient::class ), $this->container->get( Logger::class ), $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ), $this->container->get( RussianPostSettings::class ) ) );
 		$this->container->register( RussianPostInternationalCarrier::class, fn(): RussianPostInternationalCarrier => new RussianPostInternationalCarrier( $this->container->get( RussianPostSettings::class ), $this->container->get( RussianPostApiClient::class ), $this->container->get( RussianPostCountryDirectory::class ), $this->container->get( Logger::class ) ) );
-		$this->container->register( RussianPostDomesticCarrier::class, fn(): RussianPostDomesticCarrier => new RussianPostDomesticCarrier( $this->container->get( RussianPostDomesticSettings::class ), $this->container->get( RussianPostDomesticApiClient::class ), $this->container->get( RussianPostDomesticTariffVariantResolver::class ), $this->container->get( Logger::class ), $this->container->get( DaDataPostcodeClient::class ) ) );
+		$this->container->register( RussianPostDomesticCarrier::class, fn(): RussianPostDomesticCarrier => new RussianPostDomesticCarrier( $this->container->get( RussianPostDomesticSettings::class ), $this->container->get( RussianPostDomesticApiClient::class ), $this->container->get( RussianPostDomesticTariffVariantResolver::class ), $this->container->get( Logger::class ), $this->container->get( DaDataPostcodeClient::class ), $this->container->get( LocationRepository::class ) ) );
 		$this->container->register(
 			CarrierRegistry::class,
 			function (): CarrierRegistry {
@@ -238,6 +241,7 @@ final class Plugin {
 		$this->container->register( AddressSuggestionNormalizer::class, fn(): AddressSuggestionNormalizer => new AddressSuggestionNormalizer() );
 		$this->container->register( DaDataSuggestionClient::class, fn(): DaDataSuggestionClient => new DaDataSuggestionClient( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( DaDataPostcodeClient::class, fn(): DaDataPostcodeClient => new DaDataPostcodeClient( $this->container->get( DaDataTokenPool::class ), $this->container->get( Logger::class ), $this->container->get( AddressSuggestionSettings::class )->timeout() ) );
+		$this->container->register( RussianPostCourierCalcPostcodeFillStateService::class, fn(): RussianPostCourierCalcPostcodeFillStateService => new RussianPostCourierCalcPostcodeFillStateService( $this->container->get( LocationRepository::class ), $this->container->get( RussianPostCourierTariffProbeService::class ) ) );
 		$this->container->register( AddressSuggestionClientInterface::class, fn(): AddressSuggestionClientInterface => $this->container->get( DaDataSuggestionClient::class ) );
 		$this->container->register( AddressSuggestionService::class, fn(): AddressSuggestionService => new AddressSuggestionService( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( AddressSuggestionClientInterface::class ), $this->container->get( AddressSuggestionNormalizer::class ) ) );
 		$this->container->register( AddressSuggestionAjax::class, fn(): AddressSuggestionAjax => new AddressSuggestionAjax( $this->container->get( AddressSuggestionService::class ), $this->container->get( DaDataTokenPool::class ) ) );
@@ -387,7 +391,8 @@ final class Plugin {
 				$this->container->get( DaDataPostcodeClient::class ),
 				$this->container->get( LocationCoordinatesDadataBatchUpdater::class ),
 				$this->container->get( LocationCountryIndexService::class ),
-				$this->container->get( LocationIncrementalUpdateService::class )
+				$this->container->get( LocationIncrementalUpdateService::class ),
+				$this->container->get( RussianPostCourierCalcPostcodeFillStateService::class )
 			)
 		);
 		$this->container->register(

@@ -52,6 +52,7 @@ final class WooCommercePackageMapper {
 					'source'         => 'woocommerce_checkout',
 					'normalized_address' => $address->normalized,
 					'fallback_address'   => $address->fallback,
+					'selected_location_id' => $this->selected_location_id(),
 					'selected_location_fias_id' => $this->selected_location_fias_id( $address ),
 				),
 				$customer_context
@@ -168,6 +169,17 @@ final class WooCommercePackageMapper {
 		$context = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->city_context() : array();
 
 		return (string) ( $context['fias_id'] ?? '' );
+	}
+
+	private function selected_location_id(): string {
+		$city = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->selected_city() : array();
+		if ( '' !== trim( (string) ( $city['id'] ?? '' ) ) ) {
+			return (string) $city['id'];
+		}
+
+		$context = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->city_context() : array();
+
+		return (string) ( $context['location_id'] ?? $context['id'] ?? '' );
 	}
 
 }

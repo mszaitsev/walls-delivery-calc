@@ -578,6 +578,19 @@ final class LocationRepository {
 		return (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$this->table_name()} WHERE postal_code IS NULL OR postal_code = ''" );
 	}
 
+	public function count_with_russianpost_courier_calc_postal_code(): int {
+		if ( $this->has_test_location_rows() ) {
+			return count(
+				array_filter(
+					$this->test_location_rows(),
+					static fn( array $row ): bool => '' !== trim( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) )
+				)
+			);
+		}
+
+		return (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$this->table_name()} WHERE russianpost_courier_calc_postal_code IS NOT NULL AND russianpost_courier_calc_postal_code != ''" );
+	}
+
 	public function count_locations_with_coordinates(): int {
 		if ( $this->has_test_location_rows() ) {
 			return count(
@@ -855,6 +868,147 @@ final class LocationRepository {
 		}
 
 		return true;
+	}
+
+	/**
+	 * @return array<string,mixed>|null
+	 */
+	public function next_russianpost_courier_calc_postcode_location( int $after_id = 0, string $priority = 'cities' ): ?array {
+		$priority = 'others' === $priority ? 'others' : 'cities';
+		if ( $this->has_test_location_rows() ) {
+			$rows = array_values(
+				array_filter(
+					$this->test_location_rows(),
+					function ( array $row ) use ( $after_id, $priority ): bool {
+						if (
+							(int) ( $row['id'] ?? 0 ) <= $after_id
+							|| ! $this->is_ru_location_row( $row )
+							|| '' === trim( (string) ( $row['postal_code'] ?? '' ) )
+							|| '' !== trim( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) )
+						) {
+							return false;
+						}
+
+						return 'cities' === $priority ? $this->is_city_location_row( $row ) : ! $this->is_city_location_row( $row );
+					}
+				)
+			);
+			usort( $rows, static fn( array $a, array $b ): int => (int) ( $a['id'] ?? 0 ) <=> (int) ( $b['id'] ?? 0 ) );
+			return $rows[0] ?? null;
+		}
+
+		$type_sql = 'cities' === $priority
+			? "AND (place_type IN ('г', 'г.') OR city_type IN ('г', 'г.') OR settlement_type IN ('г', 'г.'))"
+			: "AND (place_type IS NULL OR place_type NOT IN ('г', 'г.')) AND (city_type IS NULL OR city_type NOT IN ('г', 'г.')) AND (settlement_type IS NULL OR settlement_type NOT IN ('г', 'г.'))";
+
+		$row = $this->wpdb->get_row(
+			$this->wpdb->prepare(
+				"SELECT *
+				FROM {$this->table_name()}
+				WHERE id > %d
+					AND active = 1
+					AND country_code = 'RU'
+					AND postal_code IS NOT NULL
+					AND postal_code != ''
+					AND (russianpost_courier_calc_postal_code IS NULL OR russianpost_courier_calc_postal_code = '')
+					{$type_sql}
+				ORDER BY id ASC
+				LIMIT 1",
+				$after_id
+			),
+			ARRAY_A
+		);
+
+		return is_array( $row ) ? $row : null;
+	}
+
+	public function update_russianpost_courier_calc_postal_code_for_postal_code( string $postal_code, string $calc_postal_code, bool $only_empty = true ): int {
+		$postal_code = $this->valid_six_digit_postcode( $postal_code );
+		$calc_postal_code = $this->valid_six_digit_postcode( $calc_postal_code );
+		if ( '' === $postal_code || '' === $calc_postal_code ) {
+			return 0;
+		}
+
+		$data = array(
+			'russianpost_courier_calc_postal_code' => $calc_postal_code,
+			'updated_at' => current_time( 'mysql' ),
+		);
+		if ( $this->has_test_location_rows() ) {
+			$property = $this->test_location_rows_property();
+			$count = 0;
+			foreach ( $this->wpdb->{$property} as $id => $row ) {
+				if ( $postal_code !== (string) ( $row['postal_code'] ?? '' ) ) {
+					continue;
+				}
+				if ( $only_empty && '' !== trim( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) ) ) {
+					continue;
+				}
+				$this->wpdb->{$property}[ $id ] = array_merge( $this->wpdb->{$property}[ $id ], $data );
+				++$count;
+			}
+			return $count;
+		}
+
+		$where = "postal_code = %s";
+		$args = array( current_time( 'mysql' ), $calc_postal_code, $postal_code );
+		if ( $only_empty ) {
+			$where .= " AND (russianpost_courier_calc_postal_code IS NULL OR russianpost_courier_calc_postal_code = '')";
+		}
+		$result = $this->wpdb->query(
+			$this->wpdb->prepare(
+				"UPDATE {$this->table_name()} SET updated_at = %s, russianpost_courier_calc_postal_code = %s WHERE {$where}",
+				...$args
+			)
+		);
+		if ( false === $result ) {
+			$this->throw_sql_error( 'Russian Post courier calc postal_code update failed' );
+		}
+
+		return (int) $result;
+	}
+
+	public function clear_russianpost_courier_calc_postal_codes(): int {
+		if ( $this->has_test_location_rows() ) {
+			$property = $this->test_location_rows_property();
+			$count = 0;
+			foreach ( $this->wpdb->{$property} as $id => $row ) {
+				if ( '' === trim( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) ) ) {
+					continue;
+				}
+				$this->wpdb->{$property}[ $id ]['russianpost_courier_calc_postal_code'] = '';
+				$this->wpdb->{$property}[ $id ]['updated_at'] = current_time( 'mysql' );
+				++$count;
+			}
+			return $count;
+		}
+
+		$result = $this->wpdb->query( $this->wpdb->prepare( "UPDATE {$this->table_name()} SET russianpost_courier_calc_postal_code = '', updated_at = %s WHERE russianpost_courier_calc_postal_code IS NOT NULL AND russianpost_courier_calc_postal_code != ''", current_time( 'mysql' ) ) );
+		if ( false === $result ) {
+			$this->throw_sql_error( 'Russian Post courier calc postal_code clear failed' );
+		}
+
+		return (int) $result;
+	}
+
+	public function resolve_russianpost_courier_calc_postal_code( int $location_id, string $postal_code ): string {
+		$postal_code = $this->valid_six_digit_postcode( $postal_code );
+		if ( $location_id > 0 ) {
+			$row = $this->find_russianpost_courier_calc_postcode_row_by_id( $location_id );
+			$value = $this->valid_six_digit_postcode( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		if ( '' !== $postal_code ) {
+			$row = $this->find_russianpost_courier_calc_postcode_row_by_postal_code( $postal_code );
+			$value = $this->valid_six_digit_postcode( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		return $postal_code;
 	}
 
 	public function update_coordinates( int $location_id, float $latitude, float $longitude ): bool {
@@ -1271,6 +1425,7 @@ final class LocationRepository {
 			'place_level'            => max( 0, $location->place_level ),
 			'display_name'           => $display,
 			'postal_code'            => $location->postal_code,
+			'russianpost_courier_calc_postal_code' => $location->russianpost_courier_calc_postal_code,
 			'okato'                  => $location->okato,
 			'oktmo'                  => $location->oktmo,
 			'latitude'               => $location->latitude,
@@ -1286,7 +1441,7 @@ final class LocationRepository {
 	 * @return array<int,string>
 	 */
 	private function formats( bool $with_created_at = true ): array {
-		$formats = array( '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%f', '%f', '%s', '%d' );
+		$formats = array( '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%s', '%d' );
 		if ( $with_created_at ) {
 			$formats[] = '%s';
 		}
@@ -1392,6 +1547,74 @@ final class LocationRepository {
 		return preg_match( '/^[A-Z]{2}$/', $country_code ) ? $country_code : '';
 	}
 
+	private function valid_six_digit_postcode( string $postcode ): string {
+		$postcode = preg_replace( '/\D+/', '', $postcode ) ?? '';
+		if ( '' === $postcode || '999999999' === $postcode ) {
+			return '';
+		}
+
+		return preg_match( '/^\d{6}$/', $postcode ) ? $postcode : '';
+	}
+
+	/**
+	 * @return array<string,mixed>|null
+	 */
+	private function find_russianpost_courier_calc_postcode_row_by_id( int $location_id ): ?array {
+		if ( $location_id <= 0 ) {
+			return null;
+		}
+		if ( $this->has_test_location_rows() ) {
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 === (int) ( $row['active'] ?? 1 ) && $location_id === (int) ( $row['id'] ?? 0 ) ) {
+					return $row;
+				}
+			}
+			return null;
+		}
+
+		$row = $this->wpdb->get_row(
+			$this->wpdb->prepare(
+				"SELECT russianpost_courier_calc_postal_code FROM {$this->table_name()} WHERE active = 1 AND id = %d LIMIT 1",
+				$location_id
+			),
+			ARRAY_A
+		);
+
+		return is_array( $row ) ? $row : null;
+	}
+
+	/**
+	 * @return array<string,mixed>|null
+	 */
+	private function find_russianpost_courier_calc_postcode_row_by_postal_code( string $postal_code ): ?array {
+		$postal_code = $this->valid_six_digit_postcode( $postal_code );
+		if ( '' === $postal_code ) {
+			return null;
+		}
+		if ( $this->has_test_location_rows() ) {
+			foreach ( $this->test_location_rows() as $row ) {
+				if (
+					1 === (int) ( $row['active'] ?? 1 )
+					&& $postal_code === (string) ( $row['postal_code'] ?? '' )
+					&& '' !== trim( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) )
+				) {
+					return $row;
+				}
+			}
+			return null;
+		}
+
+		$row = $this->wpdb->get_row(
+			$this->wpdb->prepare(
+				"SELECT russianpost_courier_calc_postal_code FROM {$this->table_name()} WHERE active = 1 AND postal_code = %s AND russianpost_courier_calc_postal_code IS NOT NULL AND russianpost_courier_calc_postal_code != '' LIMIT 1",
+				$postal_code
+			),
+			ARRAY_A
+		);
+
+		return is_array( $row ) ? $row : null;
+	}
+
 	/**
 	 * @param array<string,mixed> $row
 	 */
@@ -1436,6 +1659,13 @@ final class LocationRepository {
 	 * @param array<string,mixed> $row
 	 */
 	private function is_city_location_row( array $row ): bool {
+		if (
+			in_array( (string) ( $row['place_type'] ?? '' ), array( 'г', 'г.' ), true )
+			|| in_array( (string) ( $row['city_type'] ?? '' ), array( 'г', 'г.' ), true )
+			|| in_array( (string) ( $row['settlement_type'] ?? '' ), array( 'г', 'г.' ), true )
+		) {
+			return true;
+		}
 		return in_array( (string) ( $row['place_type'] ?? '' ), array( 'Рі', 'Рі.', 'г', 'г.' ), true )
 			|| in_array( (string) ( $row['city_type'] ?? '' ), array( 'Рі', 'Рі.', 'г', 'г.' ), true );
 	}
