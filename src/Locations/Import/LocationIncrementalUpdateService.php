@@ -191,9 +191,8 @@ final class LocationIncrementalUpdateService {
 		$job['new_count'] = $this->new_count( $stage, $current );
 		$job['removed_count'] = $this->removed_count( $stage, $current );
 		$job['changed_count'] = $this->changed_count( $stage, $current );
-		$diff = $this->diff_samples( $stage, $current, 0 );
-		$job['samples'] = array_map( fn( array $rows ): array => array_slice( $rows, 0, self::APPROVAL_PAGE_SIZE ), $diff );
-		$job['approval'] = $this->create_approval_state( $diff );
+		$job['samples'] = $this->diff_samples( $stage, $current );
+		$job['approval'] = $this->create_approval_state( $job );
 		$job['phase'] = 'analysis';
 		$job['updated_at'] = $this->now();
 
@@ -676,10 +675,10 @@ final class LocationIncrementalUpdateService {
 	}
 
 	/**
-	 * @param array<string,array<int,array<string,mixed>>> $diff
+	 * @param array<string,mixed> $job
 	 * @return array<string,mixed>
 	 */
-	private function create_approval_state( array $diff ): array {
+	private function create_approval_state( array $job ): array {
 		$approval = array(
 			'page_size' => self::APPROVAL_PAGE_SIZE,
 			'current_type' => 'new',
@@ -688,14 +687,11 @@ final class LocationIncrementalUpdateService {
 			'stats' => array(),
 		);
 		foreach ( array( 'new', 'removed', 'changed' ) as $type ) {
-			$items = array_values( $diff[ $type ] ?? array() );
 			$approval[ $type ] = array(
-				'items' => $items,
-				'keys' => array_values( array_filter( array_map( static fn( array $row ): string => (string) ( $row['key'] ?? '' ), $items ) ) ),
 				'approved' => array(),
 				'rejected' => array(),
 				'offset' => 0,
-				'total' => count( $items ),
+				'total' => (int) ( $job[ $type . '_count' ] ?? 0 ),
 			);
 		}
 
@@ -726,10 +722,9 @@ final class LocationIncrementalUpdateService {
 			$job['phase'] = 'approval_complete';
 		} else {
 			$offset = (int) ( $approval[ $current ]['offset'] ?? 0 );
-			$items = is_array( $approval[ $current ]['items'] ?? null ) ? $approval[ $current ]['items'] : array();
 			$approval['current_type'] = $current;
 			$approval['current_page'] = (int) floor( $offset / $page_size ) + 1;
-			$approval['current_rows'] = array_slice( $items, $offset, $page_size );
+			$approval['current_rows'] = $this->list_approval_rows( $job, $current, $offset, $page_size );
 			$job['phase'] = 'approving_' . $current;
 		}
 
@@ -751,6 +746,25 @@ final class LocationIncrementalUpdateService {
 		$job['approval'] = $approval;
 
 		return $job;
+	}
+
+	/**
+	 * @param array<string,mixed> $job
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function list_approval_rows( array $job, string $type, int $offset, int $limit ): array {
+		if ( $this->is_memory_db() ) {
+			return $this->memory_list_approval_rows( $job, $type, $offset, $limit );
+		}
+
+		$current = $this->locations_table();
+		$stage = $this->table_name( (string) ( $job['staging_table'] ?? '' ) );
+		return match ( $type ) {
+			'new' => $this->list_new_rows( $stage, $current, $offset, $limit ),
+			'removed' => $this->list_removed_rows( $stage, $current, $offset, $limit ),
+			'changed' => $this->list_changed_rows( $stage, $current, $offset, $limit ),
+			default => array(),
+		};
 	}
 
 	private function approval_type_from_phase( string $phase ): string {
@@ -870,9 +884,9 @@ final class LocationIncrementalUpdateService {
 	 */
 	private function diff_samples( string $stage, string $current, int $limit = 100 ): array {
 		return array(
-			'new' => $this->sample_rows( $this->new_samples_sql( $stage, $current, $limit ) ),
-			'removed' => $this->sample_rows( $this->removed_samples_sql( $stage, $current, $limit ) ),
-			'changed' => $this->sample_rows( $this->changed_samples_sql( $stage, $current, $limit ) ),
+			'new' => $this->list_new_rows( $stage, $current, 0, $limit ),
+			'removed' => $this->list_removed_rows( $stage, $current, 0, $limit ),
+			'changed' => $this->list_changed_rows( $stage, $current, 0, $limit ),
 		);
 	}
 
@@ -897,6 +911,33 @@ final class LocationIncrementalUpdateService {
 	private function changed_count( string $stage, string $current ): int {
 		return $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON c.fias_id = s.fias_id WHERE {$this->has_fias_condition( 's' )} AND {$this->changed_condition( 's', 'c' )}" )
 			+ $this->count_rows( "SELECT COUNT(*) FROM {$stage} s INNER JOIN {$current} c ON c.gar_object_id = s.gar_object_id WHERE {$this->empty_fias_condition( 's' )} AND {$this->empty_fias_condition( 'c' )} AND s.gar_object_id > 0 AND {$this->changed_condition( 's', 'c' )}" );
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function list_new_rows( string $stage, string $current, int $offset, int $limit ): array {
+		return $this->sample_rows( $this->paged_sql( $this->new_samples_sql( $stage, $current, 0 ), $offset, $limit ) );
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function list_removed_rows( string $stage, string $current, int $offset, int $limit ): array {
+		return $this->sample_rows( $this->paged_sql( $this->removed_samples_sql( $stage, $current, 0 ), $offset, $limit ) );
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function list_changed_rows( string $stage, string $current, int $offset, int $limit ): array {
+		return $this->sample_rows( $this->paged_sql( $this->changed_samples_sql( $stage, $current, 0 ), $offset, $limit ) );
+	}
+
+	private function paged_sql( string $sql, int $offset, int $limit ): string {
+		$offset = max( 0, $offset );
+		$limit = max( 1, $limit );
+		return $sql . ' ORDER BY `key` ASC LIMIT ' . $offset . ', ' . $limit;
 	}
 
 	private function new_samples_sql( string $stage, string $current, int $limit = 100 ): string {
@@ -1313,7 +1354,7 @@ final class LocationIncrementalUpdateService {
 		$job['removed_count'] = count( $diff['removed'] );
 		$job['changed_count'] = count( $diff['changed'] );
 		$job['samples'] = array_map( fn( array $rows ): array => array_slice( $rows, 0, self::APPROVAL_PAGE_SIZE ), $diff );
-		$job['approval'] = $this->create_approval_state( $diff );
+		$job['approval'] = $this->create_approval_state( $job );
 		$job['phase'] = 'analysis';
 		return $job;
 	}
@@ -1391,6 +1432,19 @@ final class LocationIncrementalUpdateService {
 		}
 
 		return $changes;
+	}
+
+	/**
+	 * @param array<string,mixed> $job
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function memory_list_approval_rows( array $job, string $type, int $offset, int $limit ): array {
+		$current = $this->wpdb->wdc_incremental_tables[ $this->locations_table() ] ?? array();
+		$stage = $this->wpdb->wdc_incremental_tables[ (string) ( $job['staging_table'] ?? '' ) ] ?? array();
+		$diff = $this->memory_diff( $current, $stage );
+		$rows = array_values( $diff[ $type ] ?? array() );
+		usort( $rows, static fn( array $a, array $b ): int => strcmp( (string) ( $a['key'] ?? '' ), (string) ( $b['key'] ?? '' ) ) );
+		return array_slice( $rows, max( 0, $offset ), max( 1, $limit ) );
 	}
 
 	/**

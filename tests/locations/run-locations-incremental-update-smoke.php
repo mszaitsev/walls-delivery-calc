@@ -224,7 +224,7 @@ $display_only['display_name'] = 'Display only GAR variant';
 $display_only['searchable_text'] = 'display only gar variant';
 $queue_db->wdc_incremental_tables[ $queue_stage ][1] = $display_only;
 $queue_db->wdc_incremental_tables[ $queue_stage ][2] = incremental_location_row( 2, 'fias-b', 1002, 'Город B', '630222' );
-for ( $i = 0; $i < 101; ++$i ) {
+for ( $i = 0; $i < 917; ++$i ) {
 	$id = 10 + $i;
 	$key = 'fias-queue-new-' . $i;
 	$queue_db->wdc_incremental_tables[ $queue_stage ][ $id ] = incremental_location_row( $id, $key, 5000 + $i, 'Queue new ' . $i, '640' . str_pad( (string) $i, 3, '0', STR_PAD_LEFT ) );
@@ -239,28 +239,42 @@ $queue_job = $queue_service->build_diff(
 	)
 );
 $queue_job = $queue_service->step_job( $queue_job );
-incremental_smoke_assert( 101 === (int) $queue_job['new_count'], 'Approval queue NEW count must include all rows, not only the first page.' );
+incremental_smoke_assert( 917 === (int) $queue_job['new_count'], 'Approval queue NEW count must include all rows, not only the first page.' );
 incremental_smoke_assert( 1 === (int) $queue_job['removed_count'], 'Approval queue REMOVED count must be available.' );
 incremental_smoke_assert( 1 === (int) $queue_job['changed_count'], 'display_name-only diff must be ignored while postal_code diff is counted.' );
 incremental_smoke_assert( 'approving_new' === $queue_job['phase'] && 100 === count( $queue_job['approval']['current_rows'] ), 'Approval queue must start with the first NEW page.' );
+incremental_smoke_assert( 10 === (int) $queue_job['approval']['stats']['new']['pages'], '917 NEW rows must create 10 approval pages.' );
+incremental_smoke_assert( 917 === (int) $queue_job['approval']['stats']['new']['total'], 'Approval total must come from new_count.' );
+incremental_smoke_assert( 100 === count( $queue_job['samples']['new'] ?? array() ), 'Samples must stay limited to the first 100 rows.' );
+incremental_smoke_assert( ! isset( $queue_job['approval']['new']['items'] ) && ! isset( $queue_job['approval']['new']['keys'] ), 'Approval state must not store full diff items or keys.' );
+incremental_smoke_assert( count( $queue_job['approval']['current_rows'] ) <= (int) $queue_job['approval']['page_size'], 'Approval job state must keep only the current page of diff rows.' );
 $first_page_keys = array_map( static fn( array $row ): string => (string) $row['key'], $queue_job['approval']['current_rows'] );
 $queue_job = $queue_service->approve_current_page( $queue_job, $first_page_keys );
-incremental_smoke_assert( 'approving_new' === $queue_job['phase'] && 2 === (int) $queue_job['approval']['current_page'] && 1 === count( $queue_job['approval']['current_rows'] ), 'Approval queue must move between NEW pages.' );
+incremental_smoke_assert( 'approving_new' === $queue_job['phase'] && 2 === (int) $queue_job['approval']['current_page'] && 100 === count( $queue_job['approval']['current_rows'] ), 'Approval queue must move to the second NEW page.' );
+incremental_smoke_assert( 100 === count( $queue_job['approval']['new']['approved'] ), 'Approved keys must be saved between pages.' );
+$second_page_keys = array_map( static fn( array $row ): string => (string) $row['key'], $queue_job['approval']['current_rows'] );
+incremental_smoke_assert( array() === array_values( array_intersect( $first_page_keys, $second_page_keys ) ), 'Approval page 2 must show the next 100 rows, not the first page again.' );
 $rejected_new_key = (string) $queue_job['approval']['current_rows'][0]['key'];
 $refreshed_queue_job = $queue_job;
-$queue_job = $queue_service->approve_current_page( $queue_job, array() );
+$queue_job = $queue_service->approve_current_page( $queue_job, array_slice( $second_page_keys, 1 ) );
+incremental_smoke_assert( 199 === count( $queue_job['approval']['new']['approved'] ) && 1 === count( $queue_job['approval']['new']['rejected'] ), 'Approved and rejected keys must persist after page 2.' );
+while ( 'approving_new' === (string) $queue_job['phase'] ) {
+	$current_keys = array_map( static fn( array $row ): string => (string) $row['key'], $queue_job['approval']['current_rows'] );
+	$queue_job = $queue_service->approve_current_page( $queue_job, $current_keys );
+}
 incremental_smoke_assert( 'approving_removed' === $queue_job['phase'], 'Approval queue must move from NEW to REMOVED after all NEW pages.' );
 $queue_job = $queue_service->approve_current_page( $queue_job, array() );
 incremental_smoke_assert( 'approving_changed' === $queue_job['phase'], 'Approval queue must move from REMOVED to CHANGED.' );
 $queue_job = $queue_service->approve_current_page( $queue_job, array( 'f:fias-b' ) );
 incremental_smoke_assert( 'approval_complete' === $queue_job['phase'], 'Approval queue must enter approval_complete.' );
-incremental_smoke_assert( 100 === (int) $queue_job['approval']['stats']['new']['approved'] && 1 === (int) $queue_job['approval']['stats']['new']['rejected'], 'Approval stats must track checked and unchecked NEW rows.' );
+incremental_smoke_assert( 916 === (int) $queue_job['approval']['stats']['new']['approved'] && 1 === (int) $queue_job['approval']['stats']['new']['rejected'], 'Approval stats must track checked and unchecked NEW rows across all 917 rows.' );
 incremental_smoke_assert( 0 === (int) $queue_job['approval']['stats']['removed']['approved'] && 1 === (int) $queue_job['approval']['stats']['removed']['rejected'], 'Approval stats must track rejected REMOVED rows.' );
 incremental_smoke_assert( 1 === (int) $queue_job['approval']['stats']['changed']['approved'], 'Approval stats must track approved CHANGED rows.' );
-incremental_smoke_assert( $refreshed_queue_job['approval']['current_page'] === 2 && 1 === count( $refreshed_queue_job['approval']['current_rows'] ), 'Approval state must survive page refresh.' );
+incremental_smoke_assert( $refreshed_queue_job['approval']['current_page'] === 2 && 100 === count( $refreshed_queue_job['approval']['current_rows'] ), 'Approval state must survive page refresh.' );
 $queue_prepared = $queue_service->prepare_candidate( $queue_job, array() );
 $queue_candidate = $queue_db->wdc_incremental_tables[ $queue_prepared['candidate_table'] ];
 incremental_smoke_assert( ! array_any( $queue_candidate, static fn( array $row ): bool => $rejected_new_key === ( '' !== (string) $row['fias_id'] ? 'f:' . $row['fias_id'] : 'g:' . $row['gar_object_id'] ) ), 'Rejected NEW rows must not enter candidate.' );
+incremental_smoke_assert( 916 === count( array_filter( $queue_candidate, static fn( array $row ): bool => str_starts_with( (string) $row['fias_id'], 'fias-queue-new-' ) ) ), 'All approved NEW rows from 917-row queue must be processed.' );
 incremental_smoke_assert( array_any( $queue_candidate, static fn( array $row ): bool => 'fias-c' === $row['fias_id'] ), 'Rejected REMOVED rows must remain in candidate.' );
 incremental_smoke_assert( array_any( $queue_candidate, static fn( array $row ): bool => 'fias-b' === $row['fias_id'] && '630222' === $row['postal_code'] && 'Город B' === $row['display_name'] ), 'Approved CHANGED rows must update compared fields and preserve display_name.' );
 
