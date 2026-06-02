@@ -254,17 +254,33 @@ rpd_assert( empty( $probe_2007['success'] ) && '2007' === $probe_2007['error_cod
 
 $location_db = new wpdb();
 $location_db->rows = array(
-	10 => array( 'id' => 10, 'active' => 1, 'country_code' => 'RU', 'postal_code' => '630000', 'russianpost_courier_calc_postal_code' => '630099' ),
+	10 => array( 'id' => 10, 'active' => 1, 'country_code' => 'RU', 'postal_code' => '630000', 'russianpost_courier_calc_postal_code' => '630005' ),
 );
 $carrier_with_locations = new RussianPostDomesticCarrier( $domestic_settings, new RussianPostDomesticApiClient( $domestic_settings, new Logger() ), new RussianPostDomesticTariffVariantResolver(), new Logger(), $postcode_client, new LocationRepository( $location_db ) );
 $GLOBALS['wdc_rpd_transients'] = array();
 $GLOBALS['wdc_rpd_requests'] = array();
-$technical_courier = $carrier_with_locations->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630000' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::COURIER_SERVICE_KEY, 'selected_location_id' => 10 ) ) );
-rpd_assert( $technical_courier->has_available_rates() && '630099' === (string) ( $GLOBALS['wdc_rpd_requests'][0]['to'] ?? '' ), 'Domestic courier tariff request must use russianpost_courier_calc_postal_code when present.' );
-rpd_assert( '630000' === $technical_courier->destination->postcode && '630000' === (string) ( $technical_courier->raw_reference['postcode'] ?? '' ), 'Domestic courier technical postcode must not change visible destination postcode.' );
+$technical_courier = $carrier_with_locations->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630109' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::COURIER_SERVICE_KEY, 'selected_location_id' => 10 ) ) );
+rpd_assert( $technical_courier->has_available_rates() && '630109' === (string) ( $GLOBALS['wdc_rpd_requests'][0]['to'] ?? '' ), 'Domestic courier tariff request must use checkout postcode when selected_location_id points to a different base postcode mapping.' );
+rpd_assert( '630109' === $technical_courier->destination->postcode && '630109' === (string) ( $technical_courier->raw_reference['postcode'] ?? '' ), 'Domestic courier technical postcode must not change visible checkout postcode.' );
+
+$mapped_checkout_db = new wpdb();
+$mapped_checkout_db->rows = array(
+	10 => array( 'id' => 10, 'active' => 1, 'country_code' => 'RU', 'postal_code' => '630000', 'russianpost_courier_calc_postal_code' => '630109' ),
+);
+$carrier_with_checkout_mapping = new RussianPostDomesticCarrier( $domestic_settings, new RussianPostDomesticApiClient( $domestic_settings, new Logger() ), new RussianPostDomesticTariffVariantResolver(), new Logger(), $postcode_client, new LocationRepository( $mapped_checkout_db ) );
 $GLOBALS['wdc_rpd_requests'] = array();
 $GLOBALS['wdc_rpd_transients'] = array();
-$technical_pickup = $carrier_with_locations->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630000' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY, 'selected_location_id' => 10 ) ) );
+$mapped_checkout_courier = $carrier_with_checkout_mapping->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630000' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::COURIER_SERVICE_KEY, 'selected_location_id' => 10 ) ) );
+rpd_assert( $mapped_checkout_courier->has_available_rates() && '630109' === (string) ( $GLOBALS['wdc_rpd_requests'][0]['to'] ?? '' ), 'Domestic courier tariff request must use mapping for the actual checkout postcode when present.' );
+
+$GLOBALS['wdc_rpd_requests'] = array();
+$GLOBALS['wdc_rpd_transients'] = array();
+$unmapped_checkout_courier = $carrier_with_checkout_mapping->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Moscow', postcode: '101000' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::COURIER_SERVICE_KEY, 'selected_location_id' => 10 ) ) );
+rpd_assert( $unmapped_checkout_courier->has_available_rates() && '101000' === (string) ( $GLOBALS['wdc_rpd_requests'][0]['to'] ?? '' ), 'Domestic courier tariff request must fall back to checkout postcode when no mapping exists.' );
+
+$GLOBALS['wdc_rpd_requests'] = array();
+$GLOBALS['wdc_rpd_transients'] = array();
+$technical_pickup = $carrier_with_checkout_mapping->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630000' ), $package, 'card', Money::from_rubles( 1000 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY, 'selected_location_id' => 10 ) ) );
 rpd_assert( $technical_pickup->has_available_rates() && '630000' === (string) ( $GLOBALS['wdc_rpd_requests'][0]['to'] ?? '' ), 'Domestic pickup tariff request must ignore russianpost courier technical postcode.' );
 
 $GLOBALS['wdc_rpd_requests'] = array();

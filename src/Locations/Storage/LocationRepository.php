@@ -990,16 +990,8 @@ final class LocationRepository {
 		return (int) $result;
 	}
 
-	public function resolve_russianpost_courier_calc_postal_code( int $location_id, string $postal_code ): string {
+	public function resolve_russianpost_courier_calc_postal_code_for_checkout_postcode( string $postal_code ): string {
 		$postal_code = $this->valid_six_digit_postcode( $postal_code );
-		if ( $location_id > 0 ) {
-			$row = $this->find_russianpost_courier_calc_postcode_row_by_id( $location_id );
-			$value = $this->valid_six_digit_postcode( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) );
-			if ( '' !== $value ) {
-				return $value;
-			}
-		}
-
 		if ( '' !== $postal_code ) {
 			$row = $this->find_russianpost_courier_calc_postcode_row_by_postal_code( $postal_code );
 			$value = $this->valid_six_digit_postcode( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) );
@@ -1554,33 +1546,6 @@ final class LocationRepository {
 		}
 
 		return preg_match( '/^\d{6}$/', $postcode ) ? $postcode : '';
-	}
-
-	/**
-	 * @return array<string,mixed>|null
-	 */
-	private function find_russianpost_courier_calc_postcode_row_by_id( int $location_id ): ?array {
-		if ( $location_id <= 0 ) {
-			return null;
-		}
-		if ( $this->has_test_location_rows() ) {
-			foreach ( $this->test_location_rows() as $row ) {
-				if ( 1 === (int) ( $row['active'] ?? 1 ) && $location_id === (int) ( $row['id'] ?? 0 ) ) {
-					return $row;
-				}
-			}
-			return null;
-		}
-
-		$row = $this->wpdb->get_row(
-			$this->wpdb->prepare(
-				"SELECT russianpost_courier_calc_postal_code FROM {$this->table_name()} WHERE active = 1 AND id = %d LIMIT 1",
-				$location_id
-			),
-			ARRAY_A
-		);
-
-		return is_array( $row ) ? $row : null;
 	}
 
 	/**

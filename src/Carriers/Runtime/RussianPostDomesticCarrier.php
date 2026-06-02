@@ -69,7 +69,7 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 		if ( '' === $display_postcode ) {
 			return $this->empty_quote( $request, 'postcode_required' );
 		}
-		$postcode = DeliveryType::COURIER === $delivery_type ? $this->resolve_russianpost_courier_calc_postal_code( $request, $display_postcode ) : $display_postcode;
+		$postcode = DeliveryType::COURIER === $delivery_type ? $this->resolve_russianpost_courier_calc_postal_code( $display_postcode ) : $display_postcode;
 
 		$package = $request->package;
 		$variants = $this->variants->variants( $settings, $delivery_type, $package->get_total_weight_g() );
@@ -216,13 +216,12 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 		return preg_match( '/^\d{6}$/', $postcode ) ? $postcode : '';
 	}
 
-	private function resolve_russianpost_courier_calc_postal_code( QuoteRequest $request, string $postal_code ): string {
+	private function resolve_russianpost_courier_calc_postal_code( string $postal_code ): string {
 		if ( ! $this->locations instanceof LocationRepository ) {
 			return $postal_code;
 		}
 
-		$location_id = (int) ( $request->customer_context['selected_location_id'] ?? $request->customer_context['location_id'] ?? $request->customer_context['wdc_platform_location_id'] ?? 0 );
-		$resolved = $this->locations->resolve_russianpost_courier_calc_postal_code( $location_id, $postal_code );
+		$resolved = $this->locations->resolve_russianpost_courier_calc_postal_code_for_checkout_postcode( $postal_code );
 
 		return '' !== $resolved ? $resolved : $postal_code;
 	}
