@@ -95,7 +95,6 @@ final class LocationIncrementalUpdateService {
 		'city_type',
 		'settlement_name',
 		'settlement_type',
-		'postal_code',
 		'active',
 	);
 
@@ -1003,6 +1002,11 @@ final class LocationIncrementalUpdateService {
 		if ( 'active' === $field ) {
 			return "CAST(COALESCE(NULLIF(TRIM(CAST({$alias}.{$field} AS CHAR)), ''), '0') AS UNSIGNED)";
 		}
+		if ( in_array( $field, array( 'city_type', 'settlement_type' ), true ) ) {
+			$value = "LOWER(COALESCE(NULLIF(TRIM(CAST({$alias}.{$field} AS CHAR)), ''), ''))";
+			$value = "REPLACE(REPLACE(REPLACE({$value}, '  ', ' '), '  ', ' '), '  ', ' ')";
+			return "TRIM(TRAILING '.' FROM {$value})";
+		}
 
 		return "COALESCE(NULLIF(TRIM(CAST({$alias}.{$field} AS CHAR)), ''), '')";
 	}
@@ -1483,6 +1487,11 @@ final class LocationIncrementalUpdateService {
 			$value = trim( (string) ( $row[ $field ] ?? '0' ) );
 			return (string) (int) ( '' === $value ? 0 : $value );
 		}
+		if ( in_array( $field, array( 'city_type', 'settlement_type' ), true ) ) {
+			$value = preg_replace( '/\s+/u', ' ', trim( (string) ( $row[ $field ] ?? '' ) ) ) ?? '';
+			$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
+			return rtrim( $value, '.' );
+		}
 
 		return trim( (string) ( $row[ $field ] ?? '' ) );
 	}
@@ -1551,13 +1560,11 @@ final class LocationIncrementalUpdateService {
 		foreach ( $this->sanitize_keys( $selected['changed'] ?? array() ) as $key ) {
 			foreach ( $candidate as $id => $row ) {
 				if ( $this->memory_key( $row ) === $key && isset( $stage_by_key[ $key ] ) ) {
-					$next = array_merge( $row, $stage_by_key[ $key ] );
+					$next = $row;
+					foreach ( $this->diff_fields as $field ) {
+						$next[ $field ] = $stage_by_key[ $key ][ $field ] ?? $next[ $field ] ?? null;
+					}
 					$next['id'] = $id;
-					$next['created_at'] = $row['created_at'] ?? $next['created_at'];
-					$next['display_name'] = $row['display_name'] ?? $next['display_name'];
-					$next['searchable_text'] = $row['searchable_text'] ?? $next['searchable_text'];
-					$next['latitude'] = $row['latitude'] ?? null;
-					$next['longitude'] = $row['longitude'] ?? null;
 					$candidate[ $id ] = $next;
 				}
 			}

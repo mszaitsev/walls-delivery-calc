@@ -188,19 +188,18 @@ $job = $service->step_job( $job );
 incremental_smoke_assert( 'approving_new' === $job['phase'], 'Analysis must transition to approval queue.' );
 incremental_smoke_assert( 1 === (int) $job['new_count'], 'NEW detection must find one new location.' );
 incremental_smoke_assert( 1 === (int) $job['removed_count'], 'REMOVED detection must find one removed location.' );
-incremental_smoke_assert( 1 === (int) $job['changed_count'], 'CHANGED detection must find one changed location.' );
+incremental_smoke_assert( 0 === (int) $job['changed_count'], 'Postal-code-only diff must not create CHANGED rows.' );
 incremental_smoke_assert( 0 === count( array_filter( $job['samples']['changed'], static fn( array $row ): bool => 'f:fias-a' === (string) $row['key'] ) ), 'Unchanged rows must be ignored.' );
 
 $approval_snapshot = $job;
 $job = $service->approve_current_page( $job, array() );
 incremental_smoke_assert( 'approving_removed' === $job['phase'], 'Approval queue must move from NEW to REMOVED.' );
 $job = $service->approve_current_page( $job, array() );
-incremental_smoke_assert( 'approving_changed' === $job['phase'], 'Approval queue must move from REMOVED to CHANGED.' );
-$job = $service->approve_current_page( $job, array( 'f:fias-b' ) );
+incremental_smoke_assert( 'approval_complete' === $job['phase'], 'Approval queue must skip CHANGED when only postal_code differs.' );
 incremental_smoke_assert( 'approval_complete' === $job['phase'], 'Approval queue must finish after CHANGED.' );
 incremental_smoke_assert( 0 === (int) $job['approval']['stats']['new']['approved'] && 1 === (int) $job['approval']['stats']['new']['rejected'], 'Unchecked NEW rows must be rejected.' );
 incremental_smoke_assert( 0 === (int) $job['approval']['stats']['removed']['approved'] && 1 === (int) $job['approval']['stats']['removed']['rejected'], 'Unchecked REMOVED rows must be rejected.' );
-incremental_smoke_assert( 1 === (int) $job['approval']['stats']['changed']['approved'] && 0 === (int) $job['approval']['stats']['changed']['rejected'], 'Checked CHANGED rows must be approved.' );
+incremental_smoke_assert( 0 === (int) $job['approval']['stats']['changed']['approved'] && 0 === (int) $job['approval']['stats']['changed']['rejected'], 'No CHANGED approvals are needed for postal_code-only diffs.' );
 $filtered = $service->prepare_candidate(
 	$job,
 	array(
@@ -211,36 +210,58 @@ $filtered = $service->prepare_candidate(
 );
 $filtered_rows = $db->wdc_incremental_tables[ $filtered['candidate_table'] ];
 incremental_smoke_assert( isset( $filtered_rows[2] ) && 'Город B' === $filtered_rows[2]['display_name'], 'Selected CHANGED row must keep existing display_name.' );
-incremental_smoke_assert( isset( $filtered_rows[2] ) && '630222' === $filtered_rows[2]['postal_code'], 'Selected CHANGED row must update postal_code.' );
+incremental_smoke_assert( isset( $filtered_rows[2] ) && '630002' === $filtered_rows[2]['postal_code'], 'Postal_code must be preserved from current table for existing rows.' );
 incremental_smoke_assert( isset( $filtered_rows[2] ) && 55.030199 === (float) $filtered_rows[2]['latitude'] && 82.92043 === (float) $filtered_rows[2]['longitude'], 'Selected CHANGED row must keep existing coordinates.' );
 incremental_smoke_assert( 3 === count( $filtered_rows ) && array_any( $filtered_rows, static fn( array $row ): bool => 'fias-c' === $row['fias_id'] ) && ! array_any( $filtered_rows, static fn( array $row ): bool => 'fias-d' === $row['fias_id'] ), 'Prepare candidate must use approved changes and ignore rejected or ad-hoc selected rows.' );
 incremental_smoke_assert( $approval_snapshot['approval'] === $approval_snapshot['approval'], 'Approval state must be stored in the job and survive page refresh.' );
 
 $normalization_db = incremental_seed_db();
 $normalization_db->wdc_incremental_tables['wdc_locations'][1]['city_name'] = null;
+$normalization_db->wdc_incremental_tables['wdc_locations'][1]['city_type'] = 'г';
+$normalization_db->wdc_incremental_tables['wdc_locations'][2]['settlement_type'] = 'х';
+$normalization_db->wdc_incremental_tables['wdc_locations'][4] = incremental_location_row( 4, 'fias-type-real', 3004, 'Type real', '630004' );
+$normalization_db->wdc_incremental_tables['wdc_locations'][4]['settlement_type'] = 'с';
+$normalization_db->wdc_incremental_tables['wdc_locations'][5] = incremental_location_row( 5, 'fias-city-real', 3005, 'City real', '630005' );
+$normalization_db->wdc_incremental_tables['wdc_locations'][5]['city_name'] = 'Old City';
+$normalization_db->wdc_incremental_tables['wdc_locations'][6] = incremental_location_row( 6, 'fias-settlement-real', 3006, 'Settlement real', '630006' );
+$normalization_db->wdc_incremental_tables['wdc_locations'][6]['settlement_name'] = 'Old Settlement';
 $normalization_stage = 'wdc_locations_update_staging_norm1';
 $normalization_db->wdc_incremental_tables[ $normalization_stage ] = array(
 	1 => $normalization_db->wdc_incremental_tables['wdc_locations'][1],
 	2 => $normalization_db->wdc_incremental_tables['wdc_locations'][2],
 	3 => $normalization_db->wdc_incremental_tables['wdc_locations'][3],
+	4 => $normalization_db->wdc_incremental_tables['wdc_locations'][4],
+	5 => $normalization_db->wdc_incremental_tables['wdc_locations'][5],
+	6 => $normalization_db->wdc_incremental_tables['wdc_locations'][6],
 );
 $normalization_db->wdc_incremental_tables[ $normalization_stage ][1]['city_name'] = '';
+$normalization_db->wdc_incremental_tables[ $normalization_stage ][1]['city_type'] = ' г. ';
 $normalization_db->wdc_incremental_tables[ $normalization_stage ][1]['display_name'] = 'Display name only diff';
 $normalization_db->wdc_incremental_tables[ $normalization_stage ][1]['updated_at'] = '2026-06-02 00:00:00';
 $normalization_db->wdc_incremental_tables[ $normalization_stage ][1]['active'] = '1';
 $normalization_db->wdc_incremental_tables[ $normalization_stage ][2]['postal_code'] = '630222';
 $normalization_db->wdc_incremental_tables[ $normalization_stage ][2]['display_name'] = 'Another display name only diff';
-$normalization_db->wdc_incremental_tables[ $normalization_stage ][3]['settlement_type'] = ' ' . $normalization_db->wdc_incremental_tables['wdc_locations'][3]['settlement_type'] . ' ';
+$normalization_db->wdc_incremental_tables[ $normalization_stage ][2]['settlement_type'] = ' х. ';
+$normalization_db->wdc_incremental_tables[ $normalization_stage ][3]['settlement_type'] = ' ' . $normalization_db->wdc_incremental_tables['wdc_locations'][3]['settlement_type'] . '. ';
+$normalization_db->wdc_incremental_tables[ $normalization_stage ][4]['settlement_type'] = 'п';
+$normalization_db->wdc_incremental_tables[ $normalization_stage ][5]['city_name'] = 'New City';
+$normalization_db->wdc_incremental_tables[ $normalization_stage ][6]['settlement_name'] = 'New Settlement';
 $normalization_job = incremental_service_with_db( $normalization_db )->build_diff(
 	array(
 		'phase' => 'diff',
 		'staging_table' => $normalization_stage,
 	)
 );
-incremental_smoke_assert( 1 === (int) $normalization_job['changed_count'], 'Only real postal_code diff must be counted as CHANGED after normalization.' );
-incremental_smoke_assert( array_any( $normalization_job['samples']['changed'], static fn( array $row ): bool => 'f:fias-b' === $row['key'] && isset( $row['changes']['postal_code'] ) ), 'Changed sample must show the exact postal_code diff field.' );
-incremental_smoke_assert( 1 === (int) $normalization_job['changed_by_field']['postal_code'], 'changed_by_field must count postal_code changes.' );
-foreach ( array( 'region_name', 'region_code', 'city_name', 'city_type', 'settlement_name', 'settlement_type', 'active' ) as $field ) {
+incremental_smoke_assert( 3 === (int) $normalization_job['changed_count'], 'Only real city_name, settlement_name, and normalized-real settlement_type diffs must be counted as CHANGED.' );
+incremental_smoke_assert( array_any( $normalization_job['samples']['changed'], static fn( array $row ): bool => 'f:fias-type-real' === $row['key'] && isset( $row['changes']['settlement_type'] ) ), 'Changed sample must show the exact settlement_type diff field.' );
+incremental_smoke_assert( array_any( $normalization_job['samples']['changed'], static fn( array $row ): bool => 'f:fias-city-real' === $row['key'] && isset( $row['changes']['city_name'] ) ), 'Changed sample must show the exact city_name diff field.' );
+incremental_smoke_assert( array_any( $normalization_job['samples']['changed'], static fn( array $row ): bool => 'f:fias-settlement-real' === $row['key'] && isset( $row['changes']['settlement_name'] ) ), 'Changed sample must show the exact settlement_name diff field.' );
+incremental_smoke_assert( ! array_any( $normalization_job['samples']['changed'], static fn( array $row ): bool => isset( $row['changes']['postal_code'] ) || ( isset( $row['changes']['settlement_type'] ) && 'f:fias-b' === $row['key'] ) || isset( $row['changes']['city_type'] ) ), 'UI changes must not show postal_code or normalized-equal type diffs.' );
+incremental_smoke_assert( ! array_key_exists( 'postal_code', $normalization_job['changed_by_field'] ), 'postal_code must not participate in CHANGED counters.' );
+incremental_smoke_assert( 1 === (int) $normalization_job['changed_by_field']['city_name'], 'changed_by_field must count real city_name changes.' );
+incremental_smoke_assert( 1 === (int) $normalization_job['changed_by_field']['settlement_name'], 'changed_by_field must count real settlement_name changes.' );
+incremental_smoke_assert( 1 === (int) $normalization_job['changed_by_field']['settlement_type'], 'changed_by_field must count only normalized-real settlement_type changes.' );
+foreach ( array( 'region_name', 'region_code', 'city_type', 'active' ) as $field ) {
 	incremental_smoke_assert( 0 === (int) ( $normalization_job['changed_by_field'][ $field ] ?? 0 ), $field . ' must not be counted when values differ only by NULL/empty/trim/type normalization.' );
 }
 incremental_smoke_assert( ! array_key_exists( 'display_name', $normalization_job['changed_by_field'] ), 'display_name must not participate in CHANGED counters.' );
@@ -254,6 +275,7 @@ $display_only['display_name'] = 'Display only GAR variant';
 $display_only['searchable_text'] = 'display only gar variant';
 $queue_db->wdc_incremental_tables[ $queue_stage ][1] = $display_only;
 $queue_db->wdc_incremental_tables[ $queue_stage ][2] = incremental_location_row( 2, 'fias-b', 1002, 'Город B', '630222' );
+$queue_db->wdc_incremental_tables[ $queue_stage ][2]['city_name'] = 'Queue Changed City';
 for ( $i = 0; $i < 917; ++$i ) {
 	$id = 10 + $i;
 	$key = 'fias-queue-new-' . $i;
@@ -271,7 +293,7 @@ $queue_job = $queue_service->build_diff(
 $queue_job = $queue_service->step_job( $queue_job );
 incremental_smoke_assert( 917 === (int) $queue_job['new_count'], 'Approval queue NEW count must include all rows, not only the first page.' );
 incremental_smoke_assert( 1 === (int) $queue_job['removed_count'], 'Approval queue REMOVED count must be available.' );
-incremental_smoke_assert( 1 === (int) $queue_job['changed_count'], 'display_name-only diff must be ignored while postal_code diff is counted.' );
+incremental_smoke_assert( 1 === (int) $queue_job['changed_count'], 'display_name/postal_code diffs must be ignored while city_name diff is counted.' );
 incremental_smoke_assert( 'approving_new' === $queue_job['phase'] && 100 === count( $queue_job['approval']['current_rows'] ), 'Approval queue must start with the first NEW page.' );
 incremental_smoke_assert( 10 === (int) $queue_job['approval']['stats']['new']['pages'], '917 NEW rows must create 10 approval pages.' );
 incremental_smoke_assert( 917 === (int) $queue_job['approval']['stats']['new']['total'], 'Approval total must come from new_count.' );
@@ -306,7 +328,7 @@ $queue_candidate = $queue_db->wdc_incremental_tables[ $queue_prepared['candidate
 incremental_smoke_assert( ! array_any( $queue_candidate, static fn( array $row ): bool => $rejected_new_key === ( '' !== (string) $row['fias_id'] ? 'f:' . $row['fias_id'] : 'g:' . $row['gar_object_id'] ) ), 'Rejected NEW rows must not enter candidate.' );
 incremental_smoke_assert( 916 === count( array_filter( $queue_candidate, static fn( array $row ): bool => str_starts_with( (string) $row['fias_id'], 'fias-queue-new-' ) ) ), 'All approved NEW rows from 917-row queue must be processed.' );
 incremental_smoke_assert( array_any( $queue_candidate, static fn( array $row ): bool => 'fias-c' === $row['fias_id'] ), 'Rejected REMOVED rows must remain in candidate.' );
-incremental_smoke_assert( array_any( $queue_candidate, static fn( array $row ): bool => 'fias-b' === $row['fias_id'] && '630222' === $row['postal_code'] && 'Город B' === $row['display_name'] ), 'Approved CHANGED rows must update compared fields and preserve display_name.' );
+incremental_smoke_assert( array_any( $queue_candidate, static fn( array $row ): bool => 'fias-b' === $row['fias_id'] && '630002' === $row['postal_code'] && 'Queue Changed City' === $row['city_name'] ), 'Approved CHANGED rows must update compared fields and preserve postal_code.' );
 
 $db = incremental_seed_db();
 $service = incremental_service_with_db( $db );
@@ -315,7 +337,6 @@ $job = $service->step_job( $job );
 $job = $service->step_job( $job );
 $job = $service->approve_current_page( $job, array( 'f:fias-d' ) );
 $job = $service->approve_current_page( $job, array( 'f:fias-c' ) );
-$job = $service->approve_current_page( $job, array( 'f:fias-b' ) );
 $prepared = $service->prepare_candidate(
 	$job,
 	array()
@@ -325,7 +346,7 @@ $candidate = $db->wdc_incremental_tables[ $prepared['candidate_table'] ];
 incremental_smoke_assert( 3 === count( $candidate ), 'Candidate table must contain expected row count.' );
 incremental_smoke_assert( array_any( $candidate, static fn( array $row ): bool => 'fias-d' === $row['fias_id'] ), 'Candidate table must contain selected NEW row.' );
 incremental_smoke_assert( ! array_any( $candidate, static fn( array $row ): bool => 'fias-c' === $row['fias_id'] ), 'Candidate table must omit selected REMOVED row.' );
-incremental_smoke_assert( array_any( $candidate, static fn( array $row ): bool => 'fias-b' === $row['fias_id'] && 'Город B' === $row['display_name'] && '630222' === $row['postal_code'] ), 'Candidate table must contain selected CHANGED values while preserving display_name.' );
+incremental_smoke_assert( array_any( $candidate, static fn( array $row ): bool => 'fias-b' === $row['fias_id'] && '630002' === $row['postal_code'] ), 'Candidate table must preserve postal_code for existing rows.' );
 incremental_smoke_assert( array_any( $candidate, static fn( array $row ): bool => 'fias-b' === $row['fias_id'] && 55.030199 === (float) $row['latitude'] && 82.92043 === (float) $row['longitude'] ), 'Candidate CHANGED row must preserve old latitude/longitude.' );
 incremental_smoke_assert( array_any( $candidate, static fn( array $row ): bool => 'fias-d' === $row['fias_id'] && null === $row['latitude'] && null === $row['longitude'] ), 'Candidate NEW row may import with null latitude/longitude.' );
 incremental_smoke_assert( count( $db->wdc_incremental_tables[ $prepared['candidate_alias_table'] ] ) > 0, 'Aliases candidate rebuild must create aliases.' );
@@ -355,6 +376,8 @@ $fallback_db->wdc_incremental_tables[ $fallback_stage ] = array(
 	6 => incremental_location_row( 6, '', 2004, 'Staging empty fias same gar', '620444' ),
 	7 => incremental_location_row( 7, 'fias-staging-gar-conflict', 2005, 'Staging filled fias same gar', '620555' ),
 );
+$fallback_db->wdc_incremental_tables[ $fallback_stage ][2]['city_name'] = 'Fallback Changed City';
+$fallback_db->wdc_incremental_tables[ $fallback_stage ][5]['settlement_name'] = 'Gar updated settlement';
 $fallback_service = incremental_service_with_db( $fallback_db );
 $fallback_job = $fallback_service->build_diff(
 	array(
@@ -388,8 +411,8 @@ $fallback_prepared = $fallback_service->prepare_candidate(
 	)
 );
 $fallback_candidate = $fallback_db->wdc_incremental_tables[ $fallback_prepared['candidate_table'] ];
-incremental_smoke_assert( array_any( $fallback_candidate, static fn( array $row ): bool => 'fias-b' === $row['fias_id'] && 'Город B' === $row['display_name'] && '630222' === $row['postal_code'] ), 'apply_changed_rows must update selected fias_id rows without replacing display_name.' );
-incremental_smoke_assert( array_any( $fallback_candidate, static fn( array $row ): bool => '' === $row['fias_id'] && 2003 === (int) $row['gar_object_id'] && 'Gar old' === $row['display_name'] && '620333' === $row['postal_code'] ), 'apply_changed_rows must update selected gar_object_id rows without replacing display_name.' );
+incremental_smoke_assert( array_any( $fallback_candidate, static fn( array $row ): bool => 'fias-b' === $row['fias_id'] && 'Fallback Changed City' === $row['city_name'] && '630002' === $row['postal_code'] ), 'apply_changed_rows must update selected fias_id rows without replacing postal_code.' );
+incremental_smoke_assert( array_any( $fallback_candidate, static fn( array $row ): bool => '' === $row['fias_id'] && 2003 === (int) $row['gar_object_id'] && 'Gar updated settlement' === $row['settlement_name'] && '620003' === $row['postal_code'] ), 'apply_changed_rows must update selected gar_object_id rows without replacing postal_code.' );
 incremental_smoke_assert( array_any( $fallback_candidate, static fn( array $row ): bool => '' === $row['fias_id'] && 2003 === (int) $row['gar_object_id'] && 56.838011 === (float) $row['latitude'] && 60.597465 === (float) $row['longitude'] ), 'apply_changed_rows by gar_object_id must preserve latitude/longitude.' );
 incremental_smoke_assert( array_any( $fallback_candidate, static fn( array $row ): bool => '' === $row['fias_id'] && 2002 === (int) $row['gar_object_id'] && null === $row['latitude'] && null === $row['longitude'] ), 'NEW gar_object_id rows may import with null coordinates.' );
 $incremental_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Locations/Import/LocationIncrementalUpdateService.php' );
