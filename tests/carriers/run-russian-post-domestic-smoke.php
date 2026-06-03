@@ -101,7 +101,20 @@ function wp_remote_get( string $url, array $args = array() ): mixed {
 			return array( 'response' => array( 'code' => 200 ), 'body' => 'not-json' );
 		}
 		if ( '630203' === $to ) {
-			return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'errorcode' => 2007, 'errormsg' => 'no courier delivery' ) ) );
+			return array( 'response' => array( 'code' => 400 ), 'body' => json_encode( array( 'errors' => array( array( 'code' => 2007, 'msg' => 'no courier delivery' ) ) ) ) );
+		}
+		if ( '630204' === $to ) {
+			return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'pay' => 12000 ) ) );
+		}
+		if ( in_array( $to, array( '630205', '630206', '630207', '630208' ), true ) ) {
+			$codes = array( '630205' => 2005, '630206' => 2008, '630207' => 2009, '630208' => 2010 );
+			return array( 'response' => array( 'code' => 400 ), 'body' => json_encode( array( 'errors' => array( array( 'code' => $codes[ $to ], 'msg' => 'courier unavailable ' . $codes[ $to ] ) ) ) ) );
+		}
+		if ( '630209' === $to ) {
+			return array( 'response' => array( 'code' => 400 ), 'body' => json_encode( array( 'errors' => array( array( 'code' => 9999, 'msg' => 'unexpected tariff error' ) ) ) ) );
+		}
+		if ( '630210' === $to ) {
+			return array( 'response' => array( 'code' => 500 ), 'body' => json_encode( array( 'message' => 'server failed' ) ) );
 		}
 		return array( 'response' => array( 'code' => 200 ), 'body' => json_encode( array( 'paynds' => 12345, 'pay' => 12000 ) ) );
 	}
@@ -244,13 +257,23 @@ $settings->set( 'russian_post_domestic', array_merge( $settings->all()['russian_
 
 $probe = new RussianPostCourierTariffProbeService( new Logger() );
 $probe_success = $probe->probe( '630200' );
-rpd_assert( ! empty( $probe_success['success'] ) && '630200' === $probe_success['postal_code'], 'Russian Post courier tariff probe must accept successful price JSON.' );
+rpd_assert( ! empty( $probe_success['success'] ) && empty( $probe_success['unavailable'] ) && empty( $probe_success['api_error'] ) && 12345 === (int) ( $probe_success['paynds'] ?? 0 ) && '630200' === $probe_success['postal_code'], 'Russian Post courier tariff probe must accept successful paynds JSON.' );
 $probe_wp_error = $probe->probe( '630201' );
-rpd_assert( empty( $probe_wp_error['success'] ) && 'http_error' === $probe_wp_error['error_code'], 'Russian Post courier tariff probe must treat WP_Error as failure.' );
+rpd_assert( empty( $probe_wp_error['success'] ) && ! empty( $probe_wp_error['api_error'] ) && 'http_error' === $probe_wp_error['error_code'], 'Russian Post courier tariff probe must treat WP_Error as API error.' );
 $probe_invalid_json = $probe->probe( '630202' );
-rpd_assert( empty( $probe_invalid_json['success'] ) && 'invalid_json' === $probe_invalid_json['error_code'], 'Russian Post courier tariff probe must treat invalid JSON as failure.' );
+rpd_assert( empty( $probe_invalid_json['success'] ) && ! empty( $probe_invalid_json['api_error'] ) && 'invalid_json' === $probe_invalid_json['error_code'], 'Russian Post courier tariff probe must treat invalid JSON as API error.' );
 $probe_2007 = $probe->probe( '630203' );
-rpd_assert( empty( $probe_2007['success'] ) && '2007' === $probe_2007['error_code'], 'Russian Post courier tariff probe must treat error 2007 as failure.' );
+rpd_assert( empty( $probe_2007['success'] ) && ! empty( $probe_2007['unavailable'] ) && empty( $probe_2007['api_error'] ) && '2007' === $probe_2007['error_code'], 'Russian Post courier tariff probe must treat HTTP 400 error 2007 as normal unavailable.' );
+$probe_no_paynds = $probe->probe( '630204' );
+rpd_assert( empty( $probe_no_paynds['success'] ) && ! empty( $probe_no_paynds['api_error'] ) && 'empty_price' === $probe_no_paynds['error_code'], 'Russian Post courier tariff probe must treat HTTP 200 without paynds as API error.' );
+foreach ( array( '630205' => '2005', '630206' => '2008', '630207' => '2009', '630208' => '2010' ) as $postcode => $error_code ) {
+	$probe_unavailable = $probe->probe( (string) $postcode );
+	rpd_assert( empty( $probe_unavailable['success'] ) && ! empty( $probe_unavailable['unavailable'] ) && empty( $probe_unavailable['api_error'] ) && $error_code === (string) ( $probe_unavailable['error_code'] ?? '' ), 'Russian Post courier tariff probe must treat HTTP 400 error ' . $error_code . ' as normal unavailable.' );
+}
+$probe_unexpected_400 = $probe->probe( '630209' );
+rpd_assert( empty( $probe_unexpected_400['success'] ) && empty( $probe_unexpected_400['unavailable'] ) && ! empty( $probe_unexpected_400['api_error'] ) && '9999' === (string) ( $probe_unexpected_400['error_code'] ?? '' ), 'Russian Post courier tariff probe must treat unexpected HTTP 400 error code as API error.' );
+$probe_500 = $probe->probe( '630210' );
+rpd_assert( empty( $probe_500['success'] ) && ! empty( $probe_500['api_error'] ) && 'http_status_500' === (string) ( $probe_500['error_code'] ?? '' ), 'Russian Post courier tariff probe must treat HTTP 500 as API error.' );
 
 $location_db = new wpdb();
 $location_db->rows = array(

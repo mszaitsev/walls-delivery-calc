@@ -259,12 +259,18 @@ function wp_remote_get( string $url, array $args = array() ): array {
 	parse_str( (string) parse_url( $url, PHP_URL_QUERY ), $params );
 	$GLOBALS['wdc_locations_probe_requests'][] = $params;
 	$to = (string) ( $params['to'] ?? '' );
+	if ( in_array( $to, $GLOBALS['wdc_locations_probe_api_error_postcodes'] ?? array(), true ) ) {
+		return array(
+			'response' => array( 'code' => 400 ),
+			'body' => json_encode( array( 'errors' => array( array( 'code' => 9999, 'msg' => 'unexpected tariff error' ) ) ) ),
+		);
+	}
 
 	return array(
-		'response' => array( 'code' => 200 ),
+		'response' => array( 'code' => in_array( $to, $GLOBALS['wdc_locations_probe_success_postcodes'] ?? array(), true ) ? 200 : 400 ),
 		'body' => in_array( $to, $GLOBALS['wdc_locations_probe_success_postcodes'] ?? array(), true )
 			? json_encode( array( 'paynds' => 12345, 'pay' => 12000 ) )
-			: json_encode( array( 'errorcode' => 2007, 'errormsg' => 'no courier delivery' ) ),
+			: json_encode( array( 'errors' => array( array( 'code' => 2007, 'msg' => 'no courier delivery' ) ) ) ),
 	);
 }
 
@@ -845,6 +851,44 @@ locations_smoke_assert( '630099' === (string) $rp_wpdb->rows[ $rp_city_id ]['rus
 locations_smoke_assert( (int) ( $rp_job['step_probes'] ?? 0 ) <= RussianPostCourierCalcPostcodeFillStateService::MAX_PROBES_PER_STEP, 'Russian Post courier postcode fill step must not exceed probe request limit.' );
 $rp_job = $rp_service->step( $rp_job );
 locations_smoke_assert( '630777' === (string) $rp_wpdb->rows[ $rp_settlement_id ]['russianpost_courier_calc_postal_code'], 'Russian Post courier postcode fill must use fias_location_guid fallback candidates.' );
+locations_smoke_assert( 0 === (int) ( $rp_job['failed'] ?? 0 ) && 0 === (int) ( $rp_job['errors'] ?? 0 ) && 0 === (int) ( $rp_job['consecutive_errors'] ?? 0 ), 'Russian Post courier postcode fill must not count unavailable candidates as failed/errors.' );
+
+$rp_sequence_wpdb = new wpdb();
+$rp_sequence_repository = new LocationRepository( $rp_sequence_wpdb );
+$rp_sequence_id = $rp_sequence_repository->save( locations_smoke_location( array( 'gar_object_id' => 886201, 'fias_id' => 'fias-rp-sequence', 'region_name' => 'Sequence', 'country_code' => 'RU', 'city_type' => 'г', 'place_type' => 'г', 'place_name' => 'Sequence', 'display_name' => 'Sequence', 'postal_code' => '640000' ) ) );
+$rp_sequence_wpdb->russian_post_pickup_rows = array(
+	array( 'active' => 1, 'location_id' => $rp_sequence_id, 'fias_location_guid' => '', 'postcode' => '640001' ),
+	array( 'active' => 1, 'location_id' => $rp_sequence_id, 'fias_location_guid' => '', 'postcode' => '640002' ),
+);
+$GLOBALS['wdc_locations_probe_requests'] = array();
+$GLOBALS['wdc_locations_probe_success_postcodes'] = array( '640002' );
+$GLOBALS['wdc_locations_probe_api_error_postcodes'] = array();
+$rp_sequence_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_sequence_repository, new RussianPostCourierTariffProbeService( new Logger() ), $rp_sequence_wpdb );
+$rp_sequence_job = $rp_sequence_service->step( $rp_sequence_service->create_job() );
+locations_smoke_assert( '640002' === (string) $rp_sequence_wpdb->rows[ $rp_sequence_id ]['russianpost_courier_calc_postal_code'] && 0 === (int) ( $rp_sequence_job['failed'] ?? 0 ), 'Russian Post courier postcode fill must save first successful candidate after unavailable candidates.' );
+
+$rp_unavailable_wpdb = new wpdb();
+$rp_unavailable_repository = new LocationRepository( $rp_unavailable_wpdb );
+$rp_unavailable_id = $rp_unavailable_repository->save( locations_smoke_location( array( 'gar_object_id' => 886211, 'fias_id' => 'fias-rp-unavailable', 'region_name' => 'Unavailable', 'country_code' => 'RU', 'city_type' => 'г', 'place_type' => 'г', 'place_name' => 'Unavailable', 'display_name' => 'Unavailable', 'postal_code' => '650000' ) ) );
+$rp_after_unavailable_id = $rp_unavailable_repository->save( locations_smoke_location( array( 'gar_object_id' => 886212, 'fias_id' => 'fias-rp-after-unavailable', 'region_name' => 'Unavailable', 'country_code' => 'RU', 'city_type' => 'г', 'place_type' => 'г', 'place_name' => 'After', 'display_name' => 'After', 'postal_code' => '650100' ) ) );
+$GLOBALS['wdc_locations_probe_requests'] = array();
+$GLOBALS['wdc_locations_probe_success_postcodes'] = array( '650100' );
+$GLOBALS['wdc_locations_probe_api_error_postcodes'] = array();
+$rp_unavailable_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_unavailable_repository, new RussianPostCourierTariffProbeService( new Logger() ), $rp_unavailable_wpdb );
+$rp_unavailable_job = $rp_unavailable_service->step( $rp_unavailable_service->create_job() );
+locations_smoke_assert( 1 === (int) ( $rp_unavailable_job['marked_no_index'] ?? 0 ) && 0 === (int) ( $rp_unavailable_job['failed'] ?? 0 ) && '' === (string) ( $rp_unavailable_wpdb->rows[ $rp_unavailable_id ]['russianpost_courier_calc_postal_code'] ?? '' ), 'Russian Post courier postcode fill must treat all-unavailable candidates as no-index, not failed.' );
+$rp_unavailable_job = $rp_unavailable_service->step( $rp_unavailable_job );
+locations_smoke_assert( '650100' === (string) $rp_unavailable_wpdb->rows[ $rp_after_unavailable_id ]['russianpost_courier_calc_postal_code'], 'Russian Post courier postcode fill must continue to next location after all candidates are unavailable.' );
+
+$rp_api_error_wpdb = new wpdb();
+$rp_api_error_repository = new LocationRepository( $rp_api_error_wpdb );
+$rp_api_error_repository->save( locations_smoke_location( array( 'gar_object_id' => 886221, 'fias_id' => 'fias-rp-api-error', 'region_name' => 'ApiError', 'country_code' => 'RU', 'city_type' => 'г', 'place_type' => 'г', 'place_name' => 'ApiError', 'display_name' => 'ApiError', 'postal_code' => '660000' ) ) );
+$GLOBALS['wdc_locations_probe_requests'] = array();
+$GLOBALS['wdc_locations_probe_success_postcodes'] = array();
+$GLOBALS['wdc_locations_probe_api_error_postcodes'] = array( '660000' );
+$rp_api_error_service = new RussianPostCourierCalcPostcodeFillStateService( $rp_api_error_repository, new RussianPostCourierTariffProbeService( new Logger() ), $rp_api_error_wpdb );
+$rp_api_error_job = $rp_api_error_service->step( $rp_api_error_service->create_job() );
+locations_smoke_assert( 1 === (int) ( $rp_api_error_job['failed'] ?? 0 ) && 1 === (int) ( $rp_api_error_job['errors'] ?? 0 ) && 1 === (int) ( $rp_api_error_job['consecutive_errors'] ?? 0 ), 'Russian Post courier postcode fill must increment failed/errors/consecutive_errors for API errors.' );
 
 $rp_marker_wpdb = new wpdb();
 $rp_marker_repository = new LocationRepository( $rp_marker_wpdb );

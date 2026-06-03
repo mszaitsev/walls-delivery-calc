@@ -11,6 +11,7 @@ final class RussianPostCourierTariffProbeService {
 	private const ENDPOINT = 'https://tariff.pochta.ru/v2/calculate/tariff';
 	private const FROM_POSTCODE = '630005';
 	private const MIN_REQUEST_INTERVAL_MICROSECONDS = 250000;
+	private const UNAVAILABLE_ERROR_CODES = array( '2005', '2007', '2008', '2009', '2010' );
 
 	private float $last_request_at = 0.0;
 
@@ -18,15 +19,15 @@ final class RussianPostCourierTariffProbeService {
 	}
 
 	/**
-	 * @return array{success:bool,postal_code:string,error_code:string,error_message:string,raw:array|string|null}
+	 * @return array{success:bool,unavailable:bool,api_error:bool,failed:bool,http_code:int|null,postal_code:string,paynds:int|null,error_code:string,error_message:string,raw:array|string|null}
 	 */
 	public function probe( string $to_postal_code ): array {
 		$postal_code = $this->valid_postcode( $to_postal_code );
 		if ( '' === $postal_code ) {
-			return $this->result( false, $to_postal_code, 'invalid_postal_code', 'Postal code must contain exactly 6 digits.', null );
+			return $this->result( false, true, null, $to_postal_code, null, 'invalid_postal_code', 'Postal code must contain exactly 6 digits.', null );
 		}
 		if ( ! function_exists( 'wp_remote_get' ) ) {
-			return $this->result( false, $postal_code, 'wp_http_unavailable', 'WordPress HTTP API is unavailable.', null );
+			return $this->result( false, true, null, $postal_code, null, 'wp_http_unavailable', 'WordPress HTTP API is unavailable.', null );
 		}
 
 		$this->throttle();
@@ -53,26 +54,40 @@ final class RussianPostCourierTariffProbeService {
 
 		if ( function_exists( 'is_wp_error' ) && is_wp_error( $response ) ) {
 			$message = method_exists( $response, 'get_error_message' ) ? $response->get_error_message() : 'HTTP request failed.';
-			return $this->result( false, $postal_code, 'http_error', $message, null );
+			return $this->result( false, true, null, $postal_code, null, 'http_error', $message, null );
 		}
 
 		$code = function_exists( 'wp_remote_retrieve_response_code' ) ? (int) wp_remote_retrieve_response_code( $response ) : 0;
 		$body = function_exists( 'wp_remote_retrieve_body' ) ? (string) wp_remote_retrieve_body( $response ) : '';
 		$decoded = json_decode( $body, true );
-		if ( $code < 200 || $code >= 300 ) {
-			return $this->result( false, $postal_code, 'http_status_' . $code, 'Russian Post tariff API returned HTTP ' . $code . '.', is_array( $decoded ) ? $decoded : $body );
-		}
 		if ( ! is_array( $decoded ) ) {
-			return $this->result( false, $postal_code, 'invalid_json', 'Russian Post tariff API returned invalid JSON.', $body );
+			return $this->result( false, true, $code, $postal_code, null, 'invalid_json', 'Russian Post tariff API returned invalid JSON.', $body );
+		}
+		if ( 400 === $code ) {
+			if ( $this->has_api_error( $decoded ) ) {
+				$error_code = $this->extract_error_code( $decoded ) ?: 'api_error';
+				$message = $this->extract_error_message( $decoded );
+				if ( in_array( $error_code, self::UNAVAILABLE_ERROR_CODES, true ) ) {
+					return $this->result( false, false, $code, $postal_code, null, $error_code, $message, $decoded, true );
+				}
+
+				return $this->result( false, true, $code, $postal_code, null, $error_code, $message, $decoded );
+			}
+
+			return $this->result( false, true, $code, $postal_code, null, 'http_status_400', 'Russian Post tariff API returned HTTP 400 without a recognized API error.', $decoded );
+		}
+		if ( 200 !== $code ) {
+			return $this->result( false, true, $code, $postal_code, null, 'http_status_' . $code, 'Russian Post tariff API returned HTTP ' . $code . '.', $decoded );
 		}
 		if ( $this->has_api_error( $decoded ) ) {
-			return $this->result( false, $postal_code, $this->extract_error_code( $decoded ) ?: 'api_error', $this->extract_error_message( $decoded ), $decoded );
+			return $this->result( false, true, $code, $postal_code, null, $this->extract_error_code( $decoded ) ?: 'api_error', $this->extract_error_message( $decoded ), $decoded );
 		}
-		if ( ! $this->has_price( $decoded ) ) {
-			return $this->result( false, $postal_code, 'empty_price', 'Russian Post tariff API returned no price.', $decoded );
+		$paynds = $this->paynds( $decoded );
+		if ( null === $paynds ) {
+			return $this->result( false, true, $code, $postal_code, null, 'empty_price', 'Russian Post tariff API returned no paynds price.', $decoded );
 		}
 
-		return $this->result( true, $postal_code, '', '', $decoded );
+		return $this->result( true, false, $code, $postal_code, $paynds, '', '', $decoded );
 	}
 
 	private function throttle(): void {
@@ -127,20 +142,22 @@ final class RussianPostCourierTariffProbeService {
 	/**
 	 * @param array<string,mixed> $response
 	 */
-	private function has_price( array $response ): bool {
-		foreach ( array( 'paynds', 'pay', 'paymoneynds', 'paymoney' ) as $key ) {
-			if ( isset( $response[ $key ] ) && is_numeric( $response[ $key ] ) && (int) $response[ $key ] > 0 ) {
-				return true;
-			}
+	private function paynds( array $response ): ?int {
+		if ( isset( $response['paynds'] ) && is_numeric( $response['paynds'] ) && (int) $response['paynds'] > 0 ) {
+			return (int) $response['paynds'];
 		}
 
-		return false;
+		return null;
 	}
 
 	/**
 	 * @param array<string,mixed> $response
 	 */
 	private function extract_error_code( array $response ): string {
+		$nested = $this->first_error_item( $response );
+		if ( array() !== $nested && isset( $nested['code'] ) && is_scalar( $nested['code'] ) ) {
+			return (string) $nested['code'];
+		}
 		foreach ( array( 'errorcode', 'code', 'error_code' ) as $key ) {
 			if ( isset( $response[ $key ] ) && is_scalar( $response[ $key ] ) ) {
 				return (string) $response[ $key ];
@@ -154,6 +171,14 @@ final class RussianPostCourierTariffProbeService {
 	 * @param array<string,mixed> $response
 	 */
 	private function extract_error_message( array $response ): string {
+		$nested = $this->first_error_item( $response );
+		if ( array() !== $nested ) {
+			foreach ( array( 'msg', 'message', 'error_message', 'error' ) as $key ) {
+				if ( isset( $nested[ $key ] ) && is_scalar( $nested[ $key ] ) && '' !== trim( (string) $nested[ $key ] ) ) {
+					return (string) $nested[ $key ];
+				}
+			}
+		}
 		foreach ( array( 'errormsg', 'message', 'error_message', 'error' ) as $key ) {
 			if ( isset( $response[ $key ] ) && is_scalar( $response[ $key ] ) && '' !== trim( (string) $response[ $key ] ) ) {
 				return (string) $response[ $key ];
@@ -164,16 +189,38 @@ final class RussianPostCourierTariffProbeService {
 	}
 
 	/**
-	 * @return array{success:bool,postal_code:string,error_code:string,error_message:string,raw:array|string|null}
+	 * @param array<string,mixed> $response
+	 * @return array<string,mixed>
 	 */
-	private function result( bool $success, string $postal_code, string $error_code, string $error_message, array|string|null $raw ): array {
-		if ( ! $success ) {
+	private function first_error_item( array $response ): array {
+		foreach ( array( 'errors', 'error' ) as $key ) {
+			if ( isset( $response[ $key ] ) && is_array( $response[ $key ] ) ) {
+				$first = reset( $response[ $key ] );
+				if ( is_array( $first ) ) {
+					return $first;
+				}
+			}
+		}
+
+		return array();
+	}
+
+	/**
+	 * @return array{success:bool,unavailable:bool,api_error:bool,failed:bool,http_code:int|null,postal_code:string,paynds:int|null,error_code:string,error_message:string,raw:array|string|null}
+	 */
+	private function result( bool $success, bool $api_error, ?int $http_code, string $postal_code, ?int $paynds, string $error_code, string $error_message, array|string|null $raw, bool $unavailable = false ): array {
+		if ( ! $success && $api_error ) {
 			$this->logger->debug( 'Russian Post courier tariff probe failed.', array( 'postal_code' => $postal_code, 'error_code' => $error_code, 'error_message' => $error_message ) );
 		}
 
 		return array(
 			'success' => $success,
+			'unavailable' => $unavailable,
+			'api_error' => $api_error,
+			'failed' => $api_error,
+			'http_code' => $http_code,
 			'postal_code' => $this->valid_postcode( $postal_code ),
+			'paynds' => $paynds,
 			'error_code' => $error_code,
 			'error_message' => $error_message,
 			'raw' => $raw,

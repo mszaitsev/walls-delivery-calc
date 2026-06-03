@@ -38,8 +38,10 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 			'updated' => 0,
 			'bulk_updated' => 0,
 			'skipped' => 0,
+			'marked_no_index' => 0,
 			'failed' => 0,
 			'errors' => 0,
+			'consecutive_errors' => 0,
 			'probes' => 0,
 			'step_probes' => 0,
 			'last_id' => 0,
@@ -96,6 +98,7 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 		$job['current_candidates'] = $candidates;
 		$offset = max( 0, (int) ( $job['candidate_offset'] ?? 0 ) );
 		$found = '';
+		$api_error = false;
 
 		while ( $offset < count( $candidates ) && (int) $job['step_probes'] < self::MAX_PROBES_PER_STEP ) {
 			$candidate = $this->valid_postcode( (string) $candidates[ $offset ] );
@@ -109,11 +112,21 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 			$result = $this->probe->probe( $candidate );
 			if ( ! empty( $result['success'] ) ) {
 				$found = $candidate;
+				$job['consecutive_errors'] = 0;
 				break;
 			}
 
 			$job['last_error'] = (string) ( $result['error_message'] ?? '' );
 			$job['last_error_code'] = (string) ( $result['error_code'] ?? '' );
+			if ( ! empty( $result['api_error'] ) ) {
+				$api_error = true;
+				++$job['failed'];
+				++$job['errors'];
+				++$job['consecutive_errors'];
+				break;
+			}
+
+			$job['consecutive_errors'] = 0;
 		}
 
 		$job['candidate_offset'] = $offset;
@@ -123,8 +136,10 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 			$job['bulk_updated'] = (int) ( $job['bulk_updated'] ?? 0 ) + $updated;
 			$job['last_success_postal_code'] = $found;
 			$job = $this->finish_location( $job, $location_id );
+		} elseif ( $api_error ) {
+			$job = $this->finish_location( $job, $location_id );
 		} elseif ( $offset >= count( $candidates ) ) {
-			++$job['failed'];
+			++$job['marked_no_index'];
 			$job = $this->finish_location( $job, $location_id );
 		}
 
@@ -153,6 +168,7 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 				AND country_code = 'RU'
 				AND postal_code IS NOT NULL
 				AND postal_code != ''
+				AND postal_code != '999999999'
 				AND (russianpost_courier_calc_postal_code IS NULL OR russianpost_courier_calc_postal_code = '')"
 		);
 	}

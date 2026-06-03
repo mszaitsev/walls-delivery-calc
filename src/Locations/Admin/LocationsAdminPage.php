@@ -1423,6 +1423,7 @@ final class LocationsAdminPage {
 				'skipped' => 0,
 				'failed' => 0,
 				'errors' => 0,
+				'consecutive_errors' => 0,
 				'message' => __( 'Прогресс задачи индексов курьерской Почты обнулен. Уже заполненные значения не очищались.', 'walls-delivery-calc' ),
 				'updated_at' => current_time( 'mysql' ),
 			)
@@ -1577,6 +1578,7 @@ final class LocationsAdminPage {
 			'skipped' => 0,
 			'failed' => 1,
 			'errors' => 1,
+			'consecutive_errors' => 1,
 			'last_error' => $message,
 			'updated_at' => current_time( 'mysql' ),
 		);
