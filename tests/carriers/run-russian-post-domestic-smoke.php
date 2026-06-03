@@ -92,6 +92,7 @@ function is_wp_error( mixed $value ): bool { return $value instanceof WP_Error; 
 function wp_remote_get( string $url, array $args = array() ): mixed {
 	parse_str( (string) parse_url( $url, PHP_URL_QUERY ), $params );
 	$GLOBALS['wdc_rpd_requests'][] = $params;
+	$GLOBALS['wdc_rpd_request_urls'][] = $url;
 	if ( isset( $params['mailtype'] ) ) {
 		$to = (string) ( $params['to'] ?? '' );
 		if ( '630201' === $to ) {
@@ -256,7 +257,14 @@ rpd_assert( in_array( '7020', $courier_insured_objects, true ) && ! in_array( '2
 $settings->set( 'russian_post_domestic', array_merge( $settings->all()['russian_post_domestic'], array( 'insurance_enabled' => false ) ) );
 
 $probe = new RussianPostCourierTariffProbeService( new Logger() );
+$GLOBALS['wdc_rpd_request_urls'] = array();
 $probe_success = $probe->probe( '630200' );
+$probe_success_url = (string) ( $GLOBALS['wdc_rpd_request_urls'][0] ?? '' );
+$probe_success_query = (string) parse_url( $probe_success_url, PHP_URL_QUERY );
+parse_str( $probe_success_query, $probe_success_params );
+rpd_assert( str_contains( $probe_success_url, '/v2/calculate/tariff?json&mailtype=24' ) && ! str_contains( $probe_success_url, '?html' ) && ! str_contains( $probe_success_url, 'json=' ), 'Russian Post courier tariff probe must call the explicit bare ?json endpoint.' );
+rpd_assert( '24' === (string) ( $probe_success_params['mailtype'] ?? '' ) && '3' === (string) ( $probe_success_params['mailctg'] ?? '' ) && '1' === (string) ( $probe_success_params['directctg'] ?? '' ) && '630005' === (string) ( $probe_success_params['from'] ?? '' ) && '630200' === (string) ( $probe_success_params['to'] ?? '' ) && '1000' === (string) ( $probe_success_params['weight'] ?? '' ) && '1000' === (string) ( $probe_success_params['weightpay'] ?? '' ), 'Russian Post courier tariff probe URL must include required tariff parameters.' );
+rpd_assert( preg_match( '/^\d{8}$/', (string) ( $probe_success_params['date'] ?? '' ) ) === 1 && preg_match( '/^\d{4}$/', (string) ( $probe_success_params['time'] ?? '' ) ) === 1, 'Russian Post courier tariff probe must use YYYYMMDD date and HHMM JSON time.' );
 rpd_assert( ! empty( $probe_success['success'] ) && empty( $probe_success['unavailable'] ) && empty( $probe_success['api_error'] ) && 12345 === (int) ( $probe_success['paynds'] ?? 0 ) && '630200' === $probe_success['postal_code'], 'Russian Post courier tariff probe must accept successful paynds JSON.' );
 $probe_wp_error = $probe->probe( '630201' );
 rpd_assert( empty( $probe_wp_error['success'] ) && ! empty( $probe_wp_error['api_error'] ) && 'http_error' === $probe_wp_error['error_code'], 'Russian Post courier tariff probe must treat WP_Error as API error.' );

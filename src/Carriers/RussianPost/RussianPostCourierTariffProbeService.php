@@ -42,7 +42,7 @@ final class RussianPostCourierTariffProbeService {
 			'from' => self::FROM_POSTCODE,
 			'to' => $postal_code,
 		);
-		$url = function_exists( 'add_query_arg' ) ? add_query_arg( $params, self::ENDPOINT ) : self::ENDPOINT . '?' . http_build_query( $params );
+		$url = $this->build_url( $params );
 		$response = wp_remote_get(
 			$url,
 			array(
@@ -88,6 +88,13 @@ final class RussianPostCourierTariffProbeService {
 		}
 
 		return $this->result( true, false, $code, $postal_code, $paynds, '', '', $decoded );
+	}
+
+	/**
+	 * @param array<string,int|string> $params
+	 */
+	private function build_url( array $params ): string {
+		return self::ENDPOINT . '?json&' . http_build_query( $params );
 	}
 
 	private function throttle(): void {
