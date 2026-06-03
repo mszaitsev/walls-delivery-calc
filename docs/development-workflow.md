@@ -135,9 +135,9 @@ docs/development-roadmap
 - профильный документ области, например `docs/wdc-checkout-integration.md`, `docs/wdc-russian-post-domestic.md`, `docs/wdc-russian-post-pickup-points.md`, `docs/wdc-rule-engine-foundation.md`, `docs/wdc-delivery-calendar.md`;
 - `docs/wdc-current-code-map.md` - если добавлены, удалены или существенно изменены модули;
 - `docs/wdc-migration-plan.md` - если изменился порядок этапов, риски или стратегия перехода;
-- `docs/todo.md` - если закрыт или появился технический остаток;
+- `docs/project-status.md` - обязательно после каждой завершенной задачи: обновить готовность блоков, технические остатки, roadmap и список несоответствий;
+- `docs/todo.md` - не является основным источником задач; используется только как указатель на `docs/project-status.md`, если отдельный локальный TODO не согласован явно;
 - `README.md` - если изменились runtime-требования, публичное поведение или важные команды проверки;
-- `docs/project-status.md` - после его создания, при каждом изменении статуса готовности блоков.
 
 ## 9. Merge
 

@@ -1,6 +1,6 @@
 # Архитектурный аудит Walls Delivery Calc
 
-Archived/not-runtime as of 0.20.0: this document describes the pre-removal legacy `includes/*` architecture for historical context only. Current runtime is `src/` only.
+> Historical audit: this document describes the early legacy `includes/*` architecture and is kept as migration history. It is not the current runtime baseline. Current implementation lives in `src/`, and the актуальный статус проекта, готовность блоков и roadmap ведутся в `docs/project-status.md`.
 
 ## Краткое резюме
 
