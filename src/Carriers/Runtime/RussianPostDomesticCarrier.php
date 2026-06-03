@@ -20,6 +20,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Locations\Postcodes\DaDataPostcodeClient;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -31,7 +32,8 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 		private RussianPostDomesticApiClient $client,
 		private RussianPostDomesticTariffVariantResolver $variants,
 		private Logger $logger,
-		private ?DaDataPostcodeClient $postcode_client = null
+		private ?DaDataPostcodeClient $postcode_client = null,
+		private ?LocationRepository $locations = null
 	) {
 	}
 
@@ -63,10 +65,11 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 			return $this->empty_quote( $request, 'service_disabled' );
 		}
 
-		$postcode = $this->resolve_postcode( $request );
-		if ( '' === $postcode ) {
+		$display_postcode = $this->resolve_postcode( $request );
+		if ( '' === $display_postcode ) {
 			return $this->empty_quote( $request, 'postcode_required' );
 		}
+		$postcode = DeliveryType::COURIER === $delivery_type ? $this->resolve_russianpost_courier_calc_postal_code( $display_postcode ) : $display_postcode;
 
 		$package = $request->package;
 		$variants = $this->variants->variants( $settings, $delivery_type, $package->get_total_weight_g() );
@@ -96,7 +99,7 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 			$rates[] = $this->rate_from_result( $service_key, $delivery_type, $variant, $postcode, $params, $api_result, $parsed, $price_kopecks, $package );
 		}
 
-		return new DeliveryQuote( $this->quote_id( $request, $package, $service_key ), self::KEY, $request->destination, $package, $rates, true, array() === $rates ? 'no_tariffs_available' : '', '', false, 'api', array( 'postcode' => $postcode, 'service_key' => $service_key, 'skipped_tariffs' => $skipped ) );
+		return new DeliveryQuote( $this->quote_id( $request, $package, $service_key ), self::KEY, $request->destination, $package, $rates, true, array() === $rates ? 'no_tariffs_available' : '', '', false, 'api', array( 'postcode' => $display_postcode, 'tariff_postcode' => $postcode, 'service_key' => $service_key, 'skipped_tariffs' => $skipped ) );
 	}
 
 	private function empty_quote( QuoteRequest $request, string $reason ): DeliveryQuote {
@@ -211,6 +214,16 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 		}
 
 		return preg_match( '/^\d{6}$/', $postcode ) ? $postcode : '';
+	}
+
+	private function resolve_russianpost_courier_calc_postal_code( string $postal_code ): string {
+		if ( ! $this->locations instanceof LocationRepository ) {
+			return $postal_code;
+		}
+
+		$resolved = $this->locations->resolve_russianpost_courier_calc_postal_code_for_checkout_postcode( $postal_code );
+
+		return '' !== $resolved ? $resolved : $postal_code;
 	}
 
 	/**

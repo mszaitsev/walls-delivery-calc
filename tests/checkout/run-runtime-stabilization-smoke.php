@@ -24,6 +24,29 @@ if ( ! function_exists( 'update_option' ) ) {
 	}
 }
 
+if ( ! function_exists( 'delete_option' ) ) {
+	function delete_option( string $key ): bool {
+		unset( $GLOBALS['wdc_test_options'][ $key ] );
+		if ( isset( $GLOBALS['wpdb'] ) && property_exists( $GLOBALS['wpdb'], 'options' ) && is_array( $GLOBALS['wpdb']->options ) ) {
+			unset( $GLOBALS['wpdb']->options[ $key ] );
+		}
+		return true;
+	}
+}
+
+if ( ! function_exists( 'delete_transient' ) ) {
+	function delete_transient( string $key ): bool {
+		$deleted = false;
+		foreach ( array( '_transient_' . $key, '_transient_timeout_' . $key ) as $option ) {
+			if ( isset( $GLOBALS['wpdb'] ) && property_exists( $GLOBALS['wpdb'], 'options' ) && is_array( $GLOBALS['wpdb']->options ) && array_key_exists( $option, $GLOBALS['wpdb']->options ) ) {
+				unset( $GLOBALS['wpdb']->options[ $option ] );
+				$deleted = true;
+			}
+		}
+		return $deleted;
+	}
+}
+
 if ( ! function_exists( 'add_action' ) ) {
 	function add_action( string $hook, mixed $callback, int $priority = 10, int $accepted_args = 1 ): void {
 		$GLOBALS['wdc_test_actions'][ $hook ][] = array( $callback, $priority, $accepted_args );
@@ -73,6 +96,9 @@ if ( ! function_exists( 'is_admin' ) ) {
 
 if ( ! function_exists( 'current_user_can' ) ) {
 	function current_user_can( string $capability ): bool {
+		if ( in_array( $capability, $GLOBALS['wdc_test_denied_capabilities'] ?? array(), true ) ) {
+			return false;
+		}
 		return in_array( $capability, array( 'manage_options', 'manage_woocommerce' ), true );
 	}
 }
@@ -203,6 +229,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $rule_rows = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $rule_condition_rows = array();
+		/** @var array<string,mixed> */
+		public array $options = array();
 
 		public function esc_like( string $text ): string {
 			return addcslashes( $text, '_%\\' );
@@ -379,6 +407,7 @@ use WallsShop\WDC\Admin\SettingsAdminPage;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
+use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\Checkout\Cache\QuoteCache;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
@@ -401,6 +430,7 @@ use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\Core\FeatureFlags;
 use WallsShop\WDC\Core\Plugin;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\Core\RequirementsChecker;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
@@ -782,6 +812,53 @@ $quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-a'
 $quote_cache->set( runtime_smoke_request(), 'demo', new DeliveryQuote( 'quote-b', 'demo', runtime_smoke_request()->destination, runtime_smoke_request()->package ), '', 'service_b' );
 runtime_smoke_assert( 'quote-a' === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' )?->quote_id, 'Quote cache hit must stay isolated for service_a.' );
 runtime_smoke_assert( 'quote-b' === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_b' )?->quote_id, 'Quote cache hit must stay isolated for service_b.' );
+
+$GLOBALS['wpdb']->options = array(
+	'_transient_wdc_rp_domestic_aaa' => 'domestic',
+	'_transient_timeout_wdc_rp_domestic_aaa' => 123,
+	'_transient_wdc_rp_tariff_bbb' => 'international',
+	'_transient_timeout_wdc_rp_tariff_bbb' => 456,
+	'_transient_wdc_pickup_search_ccc' => 'pickup',
+	'_transient_timeout_wdc_pickup_search_ccc' => 789,
+	'_transient_dadata_ddd' => 'dadata',
+	'_transient_foreign_quote' => 'foreign',
+);
+$quote_cache_manager = new DeliveryQuoteCacheManager( $quote_cache, $GLOBALS['wpdb'] );
+$deleted_quote_cache = $quote_cache_manager->clear_all_quote_cache();
+runtime_smoke_assert( 2 === $deleted_quote_cache, 'DeliveryQuoteCacheManager must return the number of deleted quote/tariff transient keys.' );
+runtime_smoke_assert( ! array_key_exists( '_transient_wdc_rp_domestic_aaa', $GLOBALS['wpdb']->options ) && ! array_key_exists( '_transient_wdc_rp_tariff_bbb', $GLOBALS['wpdb']->options ), 'DeliveryQuoteCacheManager must delete WDC Russian Post quote/tariff cache transients.' );
+runtime_smoke_assert( array_key_exists( '_transient_wdc_pickup_search_ccc', $GLOBALS['wpdb']->options ) && array_key_exists( '_transient_dadata_ddd', $GLOBALS['wpdb']->options ) && array_key_exists( '_transient_foreign_quote', $GLOBALS['wpdb']->options ), 'DeliveryQuoteCacheManager must leave pickup, DaData, and foreign transients untouched.' );
+runtime_smoke_assert( null === $quote_cache->get( runtime_smoke_request(), 'demo', '', 'service_a' ), 'DeliveryQuoteCacheManager must invalidate runtime quote memory namespace.' );
+
+$admin_menu = new AdminMenu( runtime_smoke_environment(), new FeatureFlags(), new RequirementsChecker( runtime_smoke_environment() ), $quote_cache_manager );
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_POST = array();
+ob_start();
+$admin_menu->render_page();
+$overview_html = (string) ob_get_clean();
+runtime_smoke_assert( str_contains( $overview_html, 'wdc_overview_action' ) && str_contains( $overview_html, 'clear_delivery_quote_cache' ) && str_contains( $overview_html, 'Очистить кеш тарифов доставки' ), 'Overview page must render delivery quote cache clear button.' );
+
+$GLOBALS['wpdb']->options['_transient_wdc_rp_domestic_admin'] = 'admin-cache';
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_POST = array( 'wdc_overview_action' => 'clear_delivery_quote_cache', 'wdc_clear_delivery_quote_cache_nonce' => 'bad' );
+ob_start();
+$admin_menu->render_page();
+$invalid_nonce_html = (string) ob_get_clean();
+runtime_smoke_assert( array_key_exists( '_transient_wdc_rp_domestic_admin', $GLOBALS['wpdb']->options ) && ! str_contains( $invalid_nonce_html, 'Удалено записей' ), 'Overview cache clear action must require a valid nonce.' );
+
+$GLOBALS['wdc_test_denied_capabilities'] = array( AdminMenu::CAPABILITY );
+$_POST = array( 'wdc_overview_action' => 'clear_delivery_quote_cache', 'wdc_clear_delivery_quote_cache_nonce' => wp_create_nonce( 'wdc_clear_delivery_quote_cache' ) );
+ob_start();
+$admin_menu->render_page();
+$denied_capability_html = (string) ob_get_clean();
+unset( $GLOBALS['wdc_test_denied_capabilities'] );
+runtime_smoke_assert( array_key_exists( '_transient_wdc_rp_domestic_admin', $GLOBALS['wpdb']->options ) && '' === $denied_capability_html, 'Overview cache clear action must require admin capability.' );
+
+$_POST = array( 'wdc_overview_action' => 'clear_delivery_quote_cache', 'wdc_clear_delivery_quote_cache_nonce' => wp_create_nonce( 'wdc_clear_delivery_quote_cache' ) );
+ob_start();
+$admin_menu->render_page();
+$clear_success_html = (string) ob_get_clean();
+runtime_smoke_assert( ! array_key_exists( '_transient_wdc_rp_domestic_admin', $GLOBALS['wpdb']->options ) && str_contains( $clear_success_html, 'Кеш тарифов доставки очищен' ) && str_contains( $clear_success_html, 'Удалено записей: 1' ), 'Overview cache clear action must render success notice after clear.' );
 
 $settings_page = new SettingsAdminPage( $settings );
 $legacy_location_limit_key = 'location' . '_search' . '_limit';

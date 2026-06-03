@@ -23,6 +23,7 @@ use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
 use WallsShop\WDC\Locations\Coordinates\LocationCoordinatesDadataBatchUpdater;
 use WallsShop\WDC\Locations\Postcodes\DaDataPostcodeClient;
+use WallsShop\WDC\Locations\Postcodes\RussianPostCourierCalcPostcodeFillStateService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
@@ -40,6 +41,7 @@ final class LocationsAdminPage {
 	private const DISPLAY_REBUILD_JOB_OPTION = 'wdc_locations_display_name_rebuild_job';
 	private const DADATA_POSTCODE_JOB_OPTION = 'wdc_dadata_postcode_fill_job';
 	private const DADATA_COORDINATES_JOB_OPTION = 'wdc_dadata_coordinates_fill_job';
+	private const RUSSIANPOST_COURIER_CALC_POSTCODE_JOB_OPTION = 'wdc_russianpost_courier_calc_postcode_fill_job';
 	private const DADATA_POSTCODE_MARKER = '999999999';
 
 	public function __construct(
@@ -58,7 +60,8 @@ final class LocationsAdminPage {
 		private ?DaDataPostcodeClient $postcode_client = null,
 		private ?LocationCoordinatesDadataBatchUpdater $coordinates_updater = null,
 		private ?LocationCountryIndexService $country_index = null,
-		private ?LocationIncrementalUpdateService $incremental_update = null
+		private ?LocationIncrementalUpdateService $incremental_update = null,
+		private ?RussianPostCourierCalcPostcodeFillStateService $russianpost_courier_calc_postcode_fill = null
 	) {
 	}
 
@@ -95,6 +98,11 @@ final class LocationsAdminPage {
 		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_status', array( $this, 'ajax_dadata_coordinates_fill_status' ) );
 		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_cancel', array( $this, 'ajax_dadata_coordinates_fill_cancel' ) );
 		add_action( 'wp_ajax_wdc_dadata_coordinates_fill_reset', array( $this, 'ajax_dadata_coordinates_fill_reset' ) );
+		add_action( 'wp_ajax_wdc_russianpost_courier_calc_postcode_fill_start', array( $this, 'ajax_russianpost_courier_calc_postcode_fill_start' ) );
+		add_action( 'wp_ajax_wdc_russianpost_courier_calc_postcode_fill_step', array( $this, 'ajax_russianpost_courier_calc_postcode_fill_step' ) );
+		add_action( 'wp_ajax_wdc_russianpost_courier_calc_postcode_fill_status', array( $this, 'ajax_russianpost_courier_calc_postcode_fill_status' ) );
+		add_action( 'wp_ajax_wdc_russianpost_courier_calc_postcode_fill_reset', array( $this, 'ajax_russianpost_courier_calc_postcode_fill_reset' ) );
+		add_action( 'wp_ajax_wdc_russianpost_courier_calc_postcode_fill_clear_all', array( $this, 'ajax_russianpost_courier_calc_postcode_fill_clear_all' ) );
 	}
 
 	public function add_menu_page(): void {
@@ -154,6 +162,7 @@ final class LocationsAdminPage {
 						<p><strong><?php echo esc_html__( 'postal_code отсутствует:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_without_postal_code() ); ?></span></p>
 						<p><strong><?php echo esc_html__( 'координаты есть:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_locations_with_coordinates() ); ?></span></p>
 						<p><strong><?php echo esc_html__( 'координат нет:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_locations_missing_coordinates() ); ?></span></p>
+						<p><strong><?php echo esc_html__( 'Индексы для курьерской Почты России:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_with_russianpost_courier_calc_postal_code() ); ?></span></p>
 						<p><strong><?php echo esc_html__( 'technical no-index marker count:', 'walls-delivery-calc' ); ?></strong> <span><?php echo esc_html( (string) $this->repository->count_technical_no_index_marker() ); ?></span></p>
 					<?php else : ?>
 						<p class="description"><?php echo esc_html__( 'Подробные счетчики postal_code, координат и technical marker считаются только по запросу.', 'walls-delivery-calc' ); ?></p>
@@ -168,6 +177,11 @@ final class LocationsAdminPage {
 						<button class="button button-secondary" type="button" id="wdc-dadata-coordinates-fill-start"><?php echo esc_html__( 'Получить координаты через DaData', 'walls-delivery-calc' ); ?></button>
 						<button class="button button-secondary" type="button" id="wdc-dadata-coordinates-fill-reset"><?php echo esc_html__( 'Обнулить задачу координат', 'walls-delivery-calc' ); ?></button>
 					</div>
+					<div class="wdc-dadata-action-row">
+						<button class="button button-secondary" type="button" id="wdc-russianpost-courier-calc-postcode-fill-start"><?php echo esc_html__( 'Подобрать индексы для курьерской Почты России', 'walls-delivery-calc' ); ?></button>
+						<button class="button button-secondary" type="button" id="wdc-russianpost-courier-calc-postcode-fill-reset"><?php echo esc_html__( 'Обнулить задачу индексов курьерской Почты', 'walls-delivery-calc' ); ?></button>
+						<button class="button button-secondary" type="button" id="wdc-russianpost-courier-calc-postcode-fill-clear-all"><?php echo esc_html__( 'Очистить все индексы курьерской Почты', 'walls-delivery-calc' ); ?></button>
+					</div>
 				</div>
 				<div id="wdc-dadata-postcode-progress" class="wdc-progress" hidden>
 					<progress value="0" max="100"></progress>
@@ -178,6 +192,14 @@ final class LocationsAdminPage {
 					</details>
 				</div>
 				<div id="wdc-dadata-coordinates-progress" class="wdc-progress" hidden>
+					<progress value="0" max="100"></progress>
+					<p class="wdc-progress-summary"></p>
+					<details open>
+						<summary><?php echo esc_html__( 'JSON status', 'walls-delivery-calc' ); ?></summary>
+						<pre></pre>
+					</details>
+				</div>
+				<div id="wdc-russianpost-courier-calc-postcode-progress" class="wdc-progress" hidden>
 					<progress value="0" max="100"></progress>
 					<p class="wdc-progress-summary"></p>
 					<details open>
@@ -774,6 +796,22 @@ final class LocationsAdminPage {
 				const box = document.getElementById('wdc-dadata-postcode-progress');
 				post('wdc_dadata_postcode_clear_markers').then(resp => { render(box, resp.data); });
 			});
+			const rpCourierPostcodeStart = document.getElementById('wdc-russianpost-courier-calc-postcode-fill-start');
+			if (rpCourierPostcodeStart) rpCourierPostcodeStart.addEventListener('click', function(){
+				const box = document.getElementById('wdc-russianpost-courier-calc-postcode-progress');
+				post('wdc_russianpost_courier_calc_postcode_fill_start').then(resp => { render(box, resp.data); loop('wdc_russianpost_courier_calc_postcode_fill_step', box, 1200); });
+			});
+			const rpCourierPostcodeReset = document.getElementById('wdc-russianpost-courier-calc-postcode-fill-reset');
+			if (rpCourierPostcodeReset) rpCourierPostcodeReset.addEventListener('click', function(){
+				const box = document.getElementById('wdc-russianpost-courier-calc-postcode-progress');
+				post('wdc_russianpost_courier_calc_postcode_fill_reset').then(resp => { render(box, resp.data); });
+			});
+			const rpCourierPostcodeClear = document.getElementById('wdc-russianpost-courier-calc-postcode-fill-clear-all');
+			if (rpCourierPostcodeClear) rpCourierPostcodeClear.addEventListener('click', function(){
+				if (!window.confirm('<?php echo esc_js( __( 'Очистить все технические индексы курьерской Почты России и сбросить прогресс задачи?', 'walls-delivery-calc' ) ); ?>')) return;
+				const box = document.getElementById('wdc-russianpost-courier-calc-postcode-progress');
+				post('wdc_russianpost_courier_calc_postcode_fill_clear_all').then(resp => { render(box, resp.data); });
+			});
 			document.addEventListener('click', function(event){
 				const button = event.target.closest('.wdc-location-details-toggle');
 				if (!button) return;
@@ -1337,6 +1375,78 @@ final class LocationsAdminPage {
 		);
 	}
 
+	public function ajax_russianpost_courier_calc_postcode_fill_start(): void {
+		$this->guard_ajax();
+		if ( ! $this->russianpost_courier_calc_postcode_fill instanceof RussianPostCourierCalcPostcodeFillStateService ) {
+			$this->send_json( $this->russianpost_courier_calc_postcode_failed_job( 'Russian Post courier calc postcode fill service is unavailable.' ) );
+			return;
+		}
+
+		$existing = $this->get_option( self::RUSSIANPOST_COURIER_CALC_POSTCODE_JOB_OPTION, array() );
+		if ( is_array( $existing ) && 'running' === (string) ( $existing['phase'] ?? '' ) ) {
+			$this->send_json( $existing );
+			return;
+		}
+
+		$job = $this->russianpost_courier_calc_postcode_fill->create_job();
+		$this->update_option( self::RUSSIANPOST_COURIER_CALC_POSTCODE_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	public function ajax_russianpost_courier_calc_postcode_fill_step(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::RUSSIANPOST_COURIER_CALC_POSTCODE_JOB_OPTION, array() );
+		if ( ! $this->russianpost_courier_calc_postcode_fill instanceof RussianPostCourierCalcPostcodeFillStateService || ! is_array( $job ) ) {
+			$job = $this->russianpost_courier_calc_postcode_failed_job( 'Russian Post courier calc postcode fill job is unavailable.' );
+		} else {
+			$job = $this->russianpost_courier_calc_postcode_fill->step( $job );
+		}
+		$this->update_option( self::RUSSIANPOST_COURIER_CALC_POSTCODE_JOB_OPTION, $job );
+		$this->send_json( $job );
+	}
+
+	public function ajax_russianpost_courier_calc_postcode_fill_status(): void {
+		$this->guard_ajax();
+		$job = $this->get_option( self::RUSSIANPOST_COURIER_CALC_POSTCODE_JOB_OPTION, array( 'phase' => 'idle', 'status' => 'idle' ) );
+		$this->send_json( is_array( $job ) ? $job : array( 'phase' => 'idle', 'status' => 'idle' ) );
+	}
+
+	public function ajax_russianpost_courier_calc_postcode_fill_reset(): void {
+		$this->guard_ajax();
+		$this->delete_option( self::RUSSIANPOST_COURIER_CALC_POSTCODE_JOB_OPTION );
+		$this->send_json(
+			array(
+				'phase' => 'idle',
+				'status' => 'idle',
+				'processed' => 0,
+				'updated' => 0,
+				'skipped' => 0,
+				'failed' => 0,
+				'errors' => 0,
+				'consecutive_errors' => 0,
+				'message' => __( 'Прогресс задачи индексов курьерской Почты обнулен. Уже заполненные значения не очищались.', 'walls-delivery-calc' ),
+				'updated_at' => current_time( 'mysql' ),
+			)
+		);
+	}
+
+	public function ajax_russianpost_courier_calc_postcode_fill_clear_all(): void {
+		$this->guard_ajax();
+		$this->delete_option( self::RUSSIANPOST_COURIER_CALC_POSTCODE_JOB_OPTION );
+		$cleared = $this->repository->clear_russianpost_courier_calc_postal_codes();
+		$this->send_json(
+			array(
+				'phase' => 'finished',
+				'status' => 'finished',
+				'cleared' => $cleared,
+				'processed' => $cleared,
+				'updated' => $cleared,
+				'message' => sprintf( __( 'Очищено технических индексов курьерской Почты: %d.', 'walls-delivery-calc' ), $cleared ),
+				'updated_at' => current_time( 'mysql' ),
+			)
+		);
+	}
+
 	public function ajax_dadata_postcode_clear_markers(): void {
 		$this->guard_ajax();
 		$cleared = $this->repository->clear_postal_code_marker( self::DADATA_POSTCODE_MARKER );
@@ -1451,6 +1561,24 @@ final class LocationsAdminPage {
 			'errors' => 1,
 			'consecutive_errors' => 1,
 			'tokens_exhausted' => false,
+			'last_error' => $message,
+			'updated_at' => current_time( 'mysql' ),
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function russianpost_courier_calc_postcode_failed_job( string $message ): array {
+		return array(
+			'phase' => 'failed',
+			'status' => 'failed',
+			'processed' => 0,
+			'updated' => 0,
+			'skipped' => 0,
+			'failed' => 1,
+			'errors' => 1,
+			'consecutive_errors' => 1,
 			'last_error' => $message,
 			'updated_at' => current_time( 'mysql' ),
 		);

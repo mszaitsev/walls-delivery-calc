@@ -37,7 +37,8 @@ final class Location {
 		public readonly int $place_level = 0,
 		public readonly string $okato = '',
 		public readonly string $oktmo = '',
-		public readonly string $postal_code = ''
+		public readonly string $postal_code = '',
+		public readonly string $russianpost_courier_calc_postal_code = ''
 	) {
 	}
 
@@ -72,6 +73,7 @@ final class Location {
 			'place_level'            => $this->place_level,
 			'display_name'           => $this->resolved_display_name(),
 			'postal_code'            => $this->postal_code,
+			'russianpost_courier_calc_postal_code' => $this->russianpost_courier_calc_postal_code,
 			'okato'                  => $this->okato,
 			'oktmo'                  => $this->oktmo,
 			'latitude'               => $this->latitude,
@@ -87,6 +89,7 @@ final class Location {
 		$place_name      = (string) ( $data['place_name'] ?? $data['settlement_name'] ?? $data['city_name'] ?? '' );
 		$place_type      = (string) ( $data['place_type'] ?? $data['settlement_type'] ?? '' );
 		$postal_code     = (string) ( $data['postal_code'] ?? '' );
+		$russianpost_courier_calc_postal_code = (string) ( $data['russianpost_courier_calc_postal_code'] ?? '' );
 		$gar_object_id   = self::int_value( $data['gar_object_id'] ?? $data['gar_id'] ?? 0 );
 		$settlement_name = (string) ( $data['settlement_name'] ?? $place_name );
 		$settlement_type = (string) ( $data['settlement_type'] ?? $place_type );
@@ -122,7 +125,8 @@ final class Location {
 			self::int_value( $data['place_level'] ?? 0 ),
 			(string) ( $data['okato'] ?? '' ),
 			(string) ( $data['oktmo'] ?? '' ),
-			$postal_code
+			$postal_code,
+			$russianpost_courier_calc_postal_code
 		);
 	}
 
