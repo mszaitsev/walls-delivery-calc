@@ -206,20 +206,10 @@
 - Был устаревшим: описывал legacy `includes/...`.
 - Должен описывать текущий runtime `src/...`, `database/migrations`, `assets` и `tests`.
 
-### `docs/wdc-architecture-audit.md`
-
-- Документ описывает ранний аудит legacy-архитектуры.
-- Должен считаться historical audit. Актуальный baseline ведется в этом документе.
-
 ### `docs/walls-delivery-calc-tech-spec.md`
 
 - Документ является целевым ТЗ, а не статусом готовности.
 - Фактический статус реализации ведется в `docs/project-status.md`.
-
-### `docs/todo.md`
-
-- Локальный TODO по импорту ПВЗ Почты России перенесен в раздел "Текущие технические остатки".
-- `docs/todo.md` больше не должен быть отдельным источником задач.
 
 ## Roadmap
 
