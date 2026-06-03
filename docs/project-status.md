@@ -203,8 +203,7 @@
 
 ### `docs/wdc-current-code-map.md`
 
-- Был устаревшим: описывал legacy `includes/...`.
-- Должен описывать текущий runtime `src/...`, `database/migrations`, `assets` и `tests`.
+- Этот документ является навигационной картой текущей кодовой базы.
 
 ### `docs/walls-delivery-calc-tech-spec.md`
 
