@@ -1,160 +1,502 @@
 # Карта текущего кода Walls Delivery Calc
 
-Archived/not-runtime as of 0.20.0: this map describes the old legacy `includes/*` runtime and is kept only as migration history. Current runtime is `src/` only.
+Актуальный baseline: версия `0.33.8`, runtime находится в `src/`. Старый runtime `includes/...` больше не является текущей структурой проекта. Исторический аудит legacy-структуры сохранен в `docs/wdc-architecture-audit.md`.
+
+Единый статус готовности проекта ведется в `docs/project-status.md`.
 
 ## Сводная таблица
 
-| Путь | Назначение | Ключевые классы/функции | Хуки | Связи | Решение |
-|---|---|---|---|---|---|
-| `walls-delivery-calc.php` | Основной файл плагина, константы, запуск singleton | `wdc_plugin()`, `WDC_VERSION` | нет прямых hooks | подключает `includes/class-wdc-plugin.php` | оставить, позже адаптировать bootstrap |
-| `includes/class-wdc-plugin.php` | Bootstrap, загрузка зависимостей, регистрация WooCommerce/admin hooks | `WDC_Plugin` | `plugins_loaded`, `woocommerce_shipping_init`, `woocommerce_shipping_methods` | подключает все классы через `require_once`; создает logger/settings/order_meta/admin | перенести в core platform |
-| `includes/shipping-methods/class-wdc-shipping-method.php` | WooCommerce shipping method для classic checkout | `WDC_Shipping_Method`, `calculate_shipping()`, `add_quote_rates()` | methods вызываются WooCommerce после регистрации | напрямую создает `WDC_Russian_Post_Carrier`; использует `WDC_Settings`, `WDC_Logger` | изолировать, позже заменить adapter-aware shipping method |
-| `includes/carriers/interface-wdc-carrier.php` | Контракт carrier adapter | `WDC_Carrier_Interface` | нет | используется `WDC_Russian_Post_Carrier` | оставить как прототип, перенести и расширить |
-| `includes/class-wdc-carrier-registry.php` | Реестр carrier/service definitions | `WDC_Carrier_Registry` | нет | используется carrier, settings, order meta, quote normalizer | перенести, но расширить модель |
-| `includes/carriers/russian-post/class-wdc-russian-post-carrier.php` | Текущий расчет международной Почты России | `WDC_Russian_Post_Carrier::get_quote()` | нет | использует settings, normalizer, weight calculator, cache, API, location mapper, logger | сохранить как legacy adapter, изолировать |
-| `includes/carriers/russian-post/class-wdc-russian-post-api.php` | HTTP-клиент tariff API Почты России | `WDC_Russian_Post_API::calculate_tariff()` | нет | вызывается carrier и countries checker | перенести в adapter layer, добавить redaction/retry позже |
-| `includes/carriers/russian-post/class-wdc-russian-post-countries.php` | Справочник стран Почты России, mapping и cache | `WDC_Russian_Post_Countries` | нет | использует `WDC_Cache`, `WDC_Settings`, `WDC_Logger`, `WDC_Russian_Post_API` | сохранить частично, изолировать от admin UI |
-| `includes/class-wdc-location-mapper.php` | Маппинг локаций WooCommerce -> carrier IDs | `WDC_Location_Mapper::map_country()`, `map_city()` | нет | использует countries client и registry | перенести как adapter-facing service |
-| `includes/class-wdc-country-mapper.php` | Пустой placeholder | `WDC_Country_Mapper` | нет | нет фактической логики | заменить или удалить позже |
-| `includes/class-wdc-weight-calculator.php` | Расчет веса товаров и упаковки | `WDC_Weight_Calculator::calculate_package_weight()` | нет | используется Russian Post carrier | сохранить, перенести в domain/calculation layer |
-| `includes/class-wdc-quote-normalizer.php` | Нормализованный формат quote/rate и fallback quote | `WDC_Quote_Normalizer` | нет | используется carrier и indirectly shipping method | сохранить идею, заменить hardcoded Russian Post defaults |
-| `includes/class-wdc-settings.php` | Настройки, дефолты, sanitization, legacy migration | `WDC_Settings` | нет | используется почти всеми сервисами | сохранить частично, переработать schema |
-| `includes/class-wdc-order-meta.php` | Сохранение расчета в заказ, metabox заказа | `WDC_Order_Meta` | `woocommerce_checkout_create_order_shipping_item`, `add_meta_boxes_woocommerce_page_wc-orders`, `add_meta_boxes_shop_order` | читает shipping item meta, пишет order meta через WooCommerce CRUD | перенести, разделить persistence/schema/rendering |
-| `includes/class-wdc-admin.php` | Админская страница настроек и country overrides | `WDC_Admin` | `admin_menu`, `admin_init` | использует settings, logger, Russian Post countries | изолировать, позже разбить по страницам/controllers |
-| `includes/class-wdc-cache.php` | Transient cache abstraction | `WDC_Cache` | нет | используется carrier/countries | оставить, расширить versioning/invalidation |
-| `includes/class-wdc-logger.php` | Обертка над WooCommerce logger/error_log | `WDC_Logger` | нет | используется сервисами | оставить, добавить redaction |
+| Зона | Назначение | Ключевые файлы |
+| --- | --- | --- |
+| `walls-delivery-calc.php` | WordPress plugin entrypoint, version constants, запуск core platform. | `walls-delivery-calc.php`, `src/Core/bootstrap.php` |
+| `src/Core` | Autoloading, DI container, plugin wiring, feature flags, environment, requirements. | `Plugin.php`, `Container.php`, `Autoloader.php`, `FeatureFlags.php` |
+| `src/Infrastructure` | Database migrations, logging, queue abstraction, settings, encryption. | `MigrationManager.php`, `Logger.php`, `ActionScheduler.php`, `SettingsRepository.php`, `EncryptionService.php` |
+| `src/WooCommerce` | HPOS compatibility declaration. | `HPOSCompatibility.php` |
+| `src/Domain` | Framework-independent delivery domain model. | `Address`, `Calendar`, `Carrier`, `Common`, `Package`, `Pickup`, `Quote`, `Shipment`, `Status` |
+| `src/Calendar` | Calendar storage, generation, admin UI, planned delivery date calculation. | `CalendarService.php`, `DeliveryDateCalculator.php`, `CalendarAdminPage.php` |
+| `src/Locations` | FIAS/GAR locations, imports, aliases, search, snapshots, enrichment helpers. | `LocationRepository.php`, `GarSyncManager.php`, `GarPlacesCsvImporter.php`, `LocationsAdminPage.php` |
+| `src/Checkout` | Checkout runtime, WooCommerce shipping method integration, city/address/pickup UX, cache, sorting, validation. | `CheckoutOrchestrator.php`, `NewShippingMethod.php`, `ShippingMethodRegistrar.php`, `OrderShippingMetaPersister.php` |
+| `src/Rules` | Rule Engine, rule storage, conditions/actions, admin builder and simulator. | `RuleEngine.php`, `RuleEvaluator.php`, `RuleRepository.php`, `RulesAdminPage.php` |
+| `src/Carriers` | Carrier adapter interface, registry, Russian Post runtime and API clients. | `CarrierAdapterInterface.php`, `CarrierRegistry.php`, `RussianPostDomesticCarrier.php`, `RussianPostInternationalCarrier.php` |
+| `src/DeliveryServices` | Delivery service definitions, service settings/countries, admin management. | `DeliveryServiceManager.php`, `DeliveryServiceRegistry.php`, `DeliveryServicesAdminPage.php` |
+| `src/Pickup` | Pickup domain runtime, Russian Post pickup import/diagnostics, REST endpoints. | `RussianPostPickupImporter.php`, `RussianPostPickupPointRepository.php`, `PickupPointsRestController.php` |
+| `src/Orders` | Admin order delivery metabox. | `OrderDeliveryMetabox.php` |
+| `src/Packaging` | Packaging weight calculation. | `PackagingWeightCalculator.php` |
+| `database/migrations` | Versioned database schema changes. | `0001...0025` |
+| `assets` | Admin and checkout CSS/JS, pickup map, vendor Leaflet. | `assets/admin`, `assets/frontend`, `assets/vendor/leaflet` |
+| `tests` | Standalone smoke tests for domain/runtime/admin flows. | `tests/*/run-*.php` |
 
-## Подробности по значимым файлам
+## Root
 
 ### `walls-delivery-calc.php`
 
-- Назначение: WordPress plugin header, constants, bootstrap.
-- Ключевое: `define( 'WDC_VERSION', '0.3.0' )`.
-- Связи: требует `includes/class-wdc-plugin.php`.
-- Комментарий: оставить как минимальный entrypoint. При новой архитектуре добавить autoload/bootstrap container, но не менять версию без релизного решения.
+- Defines plugin metadata and `WDC_VERSION`.
+- Current version: `0.33.8`.
+- Requires `src/Core/bootstrap.php`.
+- Calls `wdc_bootstrap_core_platform()`.
 
-### `includes/class-wdc-plugin.php`
+### `uninstall.php`
 
-- Назначение: главный singleton и ручная загрузка всех зависимостей.
-- Ключевые методы: `instance()`, `init()`, `load_shipping_method()`, `register_shipping_method()`, `load_dependencies()`.
-- Хуки:
-  - `plugins_loaded`;
-  - `woocommerce_shipping_init`;
-  - `woocommerce_shipping_methods`.
-- Связи: создает `WDC_Logger`, `WDC_Settings`, `WDC_Order_Meta`, `WDC_Admin`.
-- Комментарий: перенести в слой core platform. Сейчас это одновременно bootstrap и service wiring.
+- Cleanup entrypoint for plugin uninstall.
+- Current cleanup behavior is documented in `docs/wdc-legacy-uninstall-cleanup.md`.
 
-### `includes/shipping-methods/class-wdc-shipping-method.php`
+## Core Platform
 
-- Назначение: WooCommerce shipping method.
-- Ключевые методы: `calculate_shipping()`, `add_quote_rates()`, `build_rate_meta_data()`, `build_compact_raw_meta()`.
-- Хуки: напрямую не регистрирует, вызывается WooCommerce как registered shipping method.
-- Связи: жестко создает `WDC_Russian_Post_Carrier`; строит shipping rate meta для `WDC_Order_Meta`.
-- Комментарий: требует изоляции. В новой архитектуре shipping method должен получать rates от orchestrator/rule engine/carrier adapters, а не знать конкретную Почту России.
+### `src/Core/bootstrap.php`
 
-### `includes/carriers/interface-wdc-carrier.php`
+- Registers `WallsShop\WDC\` autoloading from `src/`.
+- Creates `PluginEnvironment`.
+- Instantiates and registers `Plugin`.
 
-- Назначение: минимальный contract adapter.
-- Ключевые методы: `get_id()`, `get_title()`, `get_services()`, `get_quote()`.
-- Комментарий: можно сохранить как основу, но будущий контракт должен учитывать capabilities, pickup points, shipment creation, calendars, statuses, errors и idempotency.
+### `src/Core/Plugin.php`
 
-### `includes/class-wdc-carrier-registry.php`
+- Main runtime composition root.
+- Registers services in the container.
+- Wires admin pages, checkout integration, locations, calendar, rules, carriers, delivery services, pickup controllers, migrations, and background hooks.
+- Registers Russian Post domestic and international carriers in `CarrierRegistry`.
 
-- Назначение: hardcoded registry Почты России.
-- Ключевое: carrier `russian_post`, service `russian_post_worldwide_parcel`, direction `international_export`.
-- Комментарий: сохранить идею registry, но заменить на расширяемую schema/config provider.
+### `src/Core/Container.php`
 
-### `includes/carriers/russian-post/class-wdc-russian-post-carrier.php`
+- Lightweight service container used by the plugin runtime.
 
-- Назначение: расчет тарифа международной Почты России.
-- Ключевые методы: `get_quote()`, `fallback()`, `build_request_params()`, `get_cached_api_result()`, `extract_price_kop()`.
-- Связи: `WDC_Russian_Post_API`, `WDC_Russian_Post_Countries` через mapper, `WDC_Cache`, `WDC_Weight_Calculator`, `WDC_Quote_Normalizer`.
-- Комментарий: оставить как legacy behavior. Любые изменения опасны без golden tests по текущим тарифам/fallback.
+### `src/Core/FeatureFlags.php`
 
-### `includes/carriers/russian-post/class-wdc-russian-post-api.php`
+- Holds runtime feature gates used by checkout and platform modules.
 
-- Назначение: вызов `https://tariff.pochta.ru/v2/calculate/tariff`.
-- Ключевые методы: `calculate_tariff()`, `extract_api_error_message()`.
-- Комментарий: перенести в adapter infrastructure; добавить retry/timeout config/redacted logging позже.
+### `src/Core/RequirementsChecker.php`
 
-### `includes/carriers/russian-post/class-wdc-russian-post-countries.php`
+- Checks runtime requirements such as WooCommerce availability/version.
 
-- Назначение: загрузка, нормализация и кеширование справочника стран Почты России.
-- Ключевые методы: `get_countries()`, `refresh_countries()`, `get_country_by_wc_code()`, `rebuild_cached_effective_countries()`, `check_country_tariff_availability()`.
-- Связи: settings country overrides, WooCommerce country list, transient cache, tariff API probe.
-- Комментарий: полезная логика, но слишком много responsibilities: API client, normalization, diagnostics, override application. Разделить позже.
+## Infrastructure, Settings, Repositories, Migrations
 
-### `includes/class-wdc-location-mapper.php`
+### `src/Infrastructure/Settings/SettingsRepository.php`
 
-- Назначение: country/city mapper facade.
-- Ключевые методы: `map_country()`, `map_city()`.
-- Комментарий: city mapping placeholder. Для ФИАС/ГАР и ПВЗ понадобится отдельная модель адреса и нормализации.
+- Central option/settings access layer.
+- Used by Russian Post settings, delivery services, checkout feature gates, locations, DaData, and packaging.
 
-### `includes/class-wdc-country-mapper.php`
+### `src/Infrastructure/Security/EncryptionService.php`
 
-- Назначение: placeholder без логики.
-- Комментарий: требует решения: либо удалить после переноса, либо наполнить как часть location domain.
+- Handles encryption/decryption for secret settings such as API credentials.
 
-### `includes/class-wdc-weight-calculator.php`
+### `src/Infrastructure/Logging`
 
-- Назначение: расчет веса корзины и упаковки.
-- Ключевые методы: `calculate_package_weight()`, `find_packaging_weight()`.
-- Связи: WooCommerce product object via `get_weight()`.
-- Комментарий: переиспользовать, но учесть единицы веса WooCommerce и будущие правила упаковки.
+- `Logger.php` provides logging abstraction.
+- `LogRedactor.php` redacts sensitive data before logging.
 
-### `includes/class-wdc-quote-normalizer.php`
+### `src/Infrastructure/Queue/ActionScheduler.php`
 
-- Назначение: нормальная shape quote/rate и fallback.
-- Ключевые методы: `get_default_quote()`, `get_default_rate()`, `normalize_quote()`, `create_fallback_quote()`.
-- Комментарий: идея полезная, но текущие defaults жестко Russian Post-specific.
+- Wraps Action Scheduler / WP Cron style scheduling for background jobs.
 
-### `includes/class-wdc-settings.php`
+### `src/Infrastructure/Database/MigrationManager.php`
 
-- Назначение: option storage, defaults, sanitization.
-- Ключевые методы: `get_defaults()`, `get()`, `update()`, `sanitize()`.
-- Хранилище: option `wdc_settings`.
-- Комментарий: сохранить как compatibility layer; новую config schema лучше версионировать.
+- Runs migration files from `database/migrations`.
+- Current migrations cover calendars, locations, aliases, GAR changes/imports, rules, Russian Post country mappings, delivery services, Russian Post pickup points, and location indexes/fields.
 
-### `includes/class-wdc-order-meta.php`
+### Repository zones
 
-- Назначение: persist shipping calculation to order meta and render metabox.
-- Ключевые методы: `save_shipping_item_meta()`, `build_order_meta()`, `render_meta_box()`.
-- Хуки:
-  - `woocommerce_checkout_create_order_shipping_item`;
-  - `add_meta_boxes_woocommerce_page_wc-orders`;
-  - `add_meta_boxes_shop_order`.
-- Комментарий: HPOS-friendly по CRUD, но schema hardcoded. Нужно разделить writer, reader, renderer, schema definitions.
+- `src/Calendar/Storage/CalendarRepository.php`
+- `src/Locations/Storage/LocationRepository.php`
+- `src/Locations/Storage/RegionRepository.php`
+- `src/Pickup/Storage/PickupPointRepository.php`
+- `src/Pickup/RussianPost/RussianPostPickupPointRepository.php`
+- `src/Rules/Storage/RuleRepository.php`
+- `src/DeliveryServices/*Repository.php`
+- `src/Carriers/RussianPost/RussianPostCountryMappingRepository.php`
 
-### `includes/class-wdc-admin.php`
+## Domain
 
-- Назначение: WooCommerce submenu settings page.
-- Ключевые методы: `handle_save()`, `render_page()`, tab render methods, bulk country override methods.
-- Хуки:
-  - `admin_menu`;
-  - `admin_init`.
-- Безопасность: capability `manage_options`, nonce `wdc_save_settings`.
-- Комментарий: сохранить admin use cases, но разбить controller/view/assets.
+`src/Domain` is the framework-independent model layer.
 
-### `includes/class-wdc-cache.php`
+- `Address`: address data and normalization result.
+- `Calendar`: calendar day and planned delivery date.
+- `Carrier`: carrier identity and capabilities.
+- `Common`: money, date ranges, delivery days formatter.
+- `Package`: package, package items, shipment places.
+- `Pickup`: pickup point and pickup selection.
+- `Quote`: quote request, delivery quote/rate/type.
+- `Shipment`: shipment and shipment creation request/result baseline.
+- `Status`: delivery status, status event, status mapping baseline.
 
-- Назначение: transient wrapper.
-- Ключевые методы: `get()`, `set()`, `delete()`, `get_seconds_until_end_of_day()`.
-- Комментарий: оставить, добавить namespaces/versioned keys при миграции.
+Shipment and status domain classes exist, but runtime creation/tracking/status synchronization is not implemented yet.
 
-### `includes/class-wdc-logger.php`
+## Calendar
 
-- Назначение: логирование через WooCommerce logger.
-- Ключевые методы: `log()`.
-- Комментарий: оставить, но добавить redaction PII/API payload и уровни событий.
+Key files:
 
-## Отдельно: отсутствующие элементы
+- `src/Calendar/CalendarTypes.php`
+- `src/Calendar/Services/CalendarService.php`
+- `src/Calendar/Services/DeliveryDateCalculator.php`
+- `src/Calendar/Services/DeliveryDateFormatter.php`
+- `src/Calendar/Services/TimezoneService.php`
+- `src/Calendar/Services/YearGenerator.php`
+- `src/Calendar/Services/CalendarScheduler.php`
+- `src/Calendar/Admin/CalendarAdminPage.php`
 
-- Composer/autoload: отсутствует.
-- Namespaces: отсутствуют.
-- PSR-4 структура: отсутствует.
-- Frontend enqueue: отсутствует.
-- AJAX/REST: отсутствует.
-- Migrations/custom tables: отсутствуют.
-- Activation/deactivation hooks: отсутствуют.
-- WooCommerce Blocks checkout support: отсутствует.
-- HPOS compatibility declaration: отсутствует.
+Responsibilities:
+
+- Generate and edit calendar days.
+- Separate shop processing calendar from carrier/RU calendar.
+- Calculate handoff date and planned delivery date/range.
+- Schedule next-year generation.
+
+## Locations, FIAS/GAR, DaData
+
+### Locations
+
+Key files:
+
+- `src/Locations/Admin/LocationsAdminPage.php`
+- `src/Locations/Storage/LocationRepository.php`
+- `src/Locations/Storage/RegionRepository.php`
+- `src/Locations/Services/LocationSearchService.php`
+- `src/Locations/Services/LocationDisplayNameFormatter.php`
+- `src/Locations/Services/LocationCountryIndexService.php`
+- `src/Locations/Services/KeyboardLayoutTransformer.php`
+
+Responsibilities:
+
+- Local settlement/city storage.
+- Search and checkout lookup.
+- Admin import/cleanup/snapshot tooling.
+- Display-name and alias management.
+
+### FIAS/GAR
+
+Key files:
+
+- `src/Locations/Fias/*`
+- `src/Locations/Gar/GarChangesClient.php`
+- `src/Locations/Gar/GarSyncManager.php`
+- `src/Locations/Import/FiasImportManager.php`
+- `src/Locations/Import/GarPlacesCsvImporter.php`
+- `src/Locations/Import/LocationImportService.php`
+- `src/Locations/Import/LocationIncrementalUpdateService.php`
+- `src/Locations/Import/LocationsSnapshotExporter.php`
+- `src/Locations/Import/LocationsSnapshotImporter.php`
+
+Responsibilities:
+
+- Prepared FIAS/GAR imports.
+- GAR change checks.
+- CSV imports.
+- Snapshot export/import.
+- Incremental updates.
+
+### DaData
+
+Key files:
+
+- `src/Checkout/AddressSuggestions/*`
+- `src/Locations/Postcodes/DaDataPostcodeClient.php`
+- `src/Locations/Coordinates/LocationCoordinatesDadataBatchUpdater.php`
+
+Responsibilities:
+
+- Checkout address suggestions.
+- Token pool and daily usage limits.
+- Postcode and coordinate enrichment.
+- Pickup address search support.
+
+## Checkout Runtime
+
+### Runtime pipeline
+
+Key files:
+
+- `src/Checkout/Runtime/CheckoutOrchestrator.php`
+- `src/Checkout/Runtime/CarrierExecutionGuard.php`
+- `src/Checkout/Runtime/FallbackRateFactory.php`
+- `src/Checkout/Runtime/RuleAppliedRateBuilder.php`
+- `src/Checkout/Runtime/CheckoutCalculationResult.php`
+- `src/Checkout/Runtime/CheckoutLogger.php`
+- `src/Checkout/Cache/QuoteCache.php`
+- `src/Checkout/Cache/DeliveryQuoteCacheManager.php`
+- `src/Checkout/Sorting/RateSorter.php`
+
+Responsibilities:
+
+- Map WooCommerce package/destination into a quote request.
+- Execute registered carriers.
+- Apply delivery services and Rule Engine.
+- Cache quotes.
+- Sort rates.
+- Build fallback rates.
+
+### WooCommerce checkout integration
+
+Key files:
+
+- `src/Checkout/WooCommerce/ShippingMethodRegistrar.php`
+- `src/Checkout/WooCommerce/NewShippingMethod.php`
+- `src/Checkout/WooCommerce/WooCommercePackageMapper.php`
+- `src/Checkout/WooCommerce/WooCommerceRateMapper.php`
+- `src/Checkout/WooCommerce/OrderShippingMetaPersister.php`
+- `src/Checkout/WooCommerce/CheckoutSessionManager.php`
+- `src/Checkout/WooCommerce/CheckoutValidation.php`
+- `src/Checkout/WooCommerce/CheckoutSortSelector.php`
+- `src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php`
+- `src/Checkout/WooCommerce/CheckoutRateRenderer.php`
+- `src/Checkout/WooCommerce/CheckoutAddressRenderer.php`
+- `src/Checkout/WooCommerce/PickupMapCheckout.php`
+- `src/Checkout/WooCommerce/PickupPointRenderer.php`
+- `src/Checkout/WooCommerce/PickupPointOrderDisplay.php`
+- `src/Checkout/WooCommerce/CourierRateSupport.php`
+
+Responsibilities:
+
+- Register WooCommerce shipping method.
+- Enqueue checkout assets.
+- Render WDC rates, sorting, delivery type controls, courier address summary, pickup UI.
+- Persist shipping calculation snapshot to order/order item meta using WooCommerce APIs.
+- Validate pickup selection and courier address requirements.
+
+### Checkout locations and address runtime
+
+Key files:
+
+- `src/Checkout/Locations/*`
+- `src/Checkout/Address/*`
+- `src/Checkout/AddressSuggestions/*`
+- `src/Checkout/Admin/CheckoutSimulationPage.php`
+
+Responsibilities:
+
+- Local city picker/search/resolve.
+- Address normalization runtime.
+- DaData suggestions.
+- Admin simulation page.
+
+## Rules
+
+Key files:
+
+- `src/Rules/Domain/*`
+- `src/Rules/Services/ConditionEvaluator.php`
+- `src/Rules/Services/RuleEvaluator.php`
+- `src/Rules/Services/RuleEngine.php`
+- `src/Rules/Services/RuleSimulator.php`
+- `src/Rules/Services/RuleFormulaFormatter.php`
+- `src/Rules/Storage/RuleRepository.php`
+- `src/Rules/Admin/RulesAdminPage.php`
+
+Responsibilities:
+
+- Store and evaluate rules.
+- Support condition groups and expressions.
+- Modify delivery price and delivery days.
+- Disable rates and stop processing.
+- Produce audit trail.
+- Provide admin CRUD/simulation UI.
+
+## Carriers
+
+### Carrier contract and registry
+
+Key files:
+
+- `src/Carriers/Contracts/CarrierAdapterInterface.php`
+- `src/Carriers/Registry/CarrierRegistry.php`
+- `src/Carriers/Runtime/CarrierRuntimeContext.php`
+
+Current registered carriers:
+
+- `RussianPostDomesticCarrier`
+- `RussianPostInternationalCarrier`
+
+No CDEK, DPD, Yandex Delivery, PEK, Energia, Aerogruz, or Jet adapters are present in the current code.
+
+### Russian Post
+
+Key files:
+
+- `src/Carriers/Runtime/RussianPostDomesticCarrier.php`
+- `src/Carriers/Runtime/RussianPostInternationalCarrier.php`
+- `src/Carriers/RussianPost/RussianPostApiClient.php`
+- `src/Carriers/RussianPost/RussianPostDomesticApiClient.php`
+- `src/Carriers/RussianPost/RussianPostSettings.php`
+- `src/Carriers/RussianPost/RussianPostDomesticSettings.php`
+- `src/Carriers/RussianPost/RussianPostCountryDirectory.php`
+- `src/Carriers/RussianPost/RussianPostCountryMappingService.php`
+- `src/Carriers/RussianPost/RussianPostCountryMappingRepository.php`
+- `src/Carriers/RussianPost/RussianPostDomesticTariffVariantResolver.php`
+- `src/Carriers/RussianPost/RussianPostCourierTariffProbeService.php`
+- `src/Carriers/RussianPost/Otpravka/RussianPostOtpravkaApiSettings.php`
+- `src/Carriers/RussianPost/Otpravka/RussianPostOtpravkaApiClient.php`
+- `src/Carriers/RussianPost/Admin/RussianPostCountriesAdminPage.php`
+
+Responsibilities:
+
+- Domestic and international rate calculation.
+- Country mapping and country availability.
+- Domestic tariff variants.
+- Courier tariff probing.
+- Shared Otpravka credentials/client foundation for pickup import and future shipment operations.
+
+## Delivery Services
+
+Key files:
+
+- `src/DeliveryServices/DeliveryService.php`
+- `src/DeliveryServices/DeliveryServiceManager.php`
+- `src/DeliveryServices/DeliveryServiceRegistry.php`
+- `src/DeliveryServices/DeliveryServiceRepository.php`
+- `src/DeliveryServices/DeliveryServiceSettingsRepository.php`
+- `src/DeliveryServices/DeliveryServiceCountryRepository.php`
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php`
+
+Responsibilities:
+
+- Store service definitions and service-specific settings.
+- Configure enabled services, countries, comments, packaging behavior, and service rules.
+- Provide admin UI for delivery services and Russian Post pickup import controls.
+
+The layer supports current Russian Post services. A full manual/fixed pseudo-carrier lifecycle is not complete yet.
+
+## Pickup
+
+### Generic pickup baseline
+
+Key files:
+
+- `src/Domain/Pickup/*`
+- `src/Pickup/Storage/PickupPointRepository.php`
+- `src/Pickup/Services/PickupPointLocationResolver.php`
+- `src/Pickup/Presentation/PickupPointCardRenderer.php`
+- `src/Pickup/Admin/PickupAdminPage.php`
+
+### Russian Post pickup
+
+Key files:
+
+- `src/Pickup/RussianPost/RussianPostPickupImporter.php`
+- `src/Pickup/RussianPost/RussianPostPickupImportStateService.php`
+- `src/Pickup/RussianPost/RussianPostPickupPointRepository.php`
+- `src/Pickup/RussianPost/RussianPostPassportPointNormalizer.php`
+- `src/Pickup/RussianPost/RussianPostPickupDiagnosticsService.php`
+- `src/Pickup/RussianPost/RussianPostPickupLocationResolver.php`
+- `src/Pickup/RussianPost/RussianPostPickupPointTypeSettings.php`
+- `src/Pickup/RussianPost/RussianPostWorkTimeFormatter.php`
+- `src/Pickup/Search/PickupAddressSearchService.php`
+
+Responsibilities:
+
+- Import Russian Post passport pickup data.
+- Maintain import state and diagnostics.
+- Store compact Russian Post pickup rows in a carrier-specific table.
+- Resolve pickup points to local checkout locations.
+- Support address/postcode search for pickup map.
+
+### Pickup REST
+
+Key files:
+
+- `src/Pickup/Rest/PickupPointsRestController.php`
+- `src/Pickup/Rest/CheckoutPickupPointRestController.php`
+
+Endpoints:
+
+- Public read-only pickup directory/search/detail endpoints.
+- Nonce-protected checkout pickup selection/state endpoints.
+
+## Admin
+
+Admin pages are split across modules:
+
+- `src/Admin/AdminMenu.php`
+- `src/Admin/AdminNotices.php`
+- `src/Admin/SettingsAdminPage.php`
+- `src/Calendar/Admin/CalendarAdminPage.php`
+- `src/Locations/Admin/LocationsAdminPage.php`
+- `src/Rules/Admin/RulesAdminPage.php`
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php`
+- `src/Pickup/Admin/PickupAdminPage.php`
+- `src/Checkout/Admin/CheckoutSimulationPage.php`
+- `src/Orders/Admin/OrderDeliveryMetabox.php`
+
+Responsibilities:
+
+- WDC menu and overview/settings.
+- Calendar editing.
+- Locations import/search/cleanup/snapshots.
+- Rules CRUD and simulation.
+- Delivery services and Russian Post pickup import controls.
+- Pickup summary.
+- Checkout simulation.
+- Order delivery metabox.
+
+Order admin recalculation is not fully implemented yet.
+
+## Assets
+
+### Admin assets
+
+- `assets/admin/calendar-admin.css`
+- `assets/admin/calendar-admin.js`
+- `assets/admin/checkout-simulation.css`
+- `assets/admin/locations-admin.css`
+- `assets/admin/rules-admin.css`
+- `assets/admin/rules-admin.js`
+- `assets/admin/russian-post-pickup-import.js`
+
+### Frontend checkout assets
+
+- `assets/frontend/checkout-address-suggestions.css`
+- `assets/frontend/checkout-address-suggestions.js`
+- `assets/frontend/checkout-city-selector.css`
+- `assets/frontend/checkout-city-selector.js`
+- `assets/frontend/checkout-rates.css`
+- `assets/frontend/checkout-sort.js`
+- `assets/frontend/courier-address-summary.js`
+- `assets/frontend/domestic-tariff-selector.css`
+- `assets/frontend/domestic-tariff-selector.js`
+- `assets/frontend/pickup-foundation.css`
+
+### Pickup map assets
+
+- `assets/frontend/pickup-map/wdc-pickup-api.js`
+- `assets/frontend/pickup-map/wdc-pickup-modal.js`
+- `assets/frontend/pickup-map/wdc-pickup-map.js`
+- `assets/frontend/pickup-map/wdc-pickup-checkout.js`
+- `assets/frontend/pickup-map/wdc-pickup-map.css`
+- `assets/frontend/pickup-map/providers/wdc-map-provider-leaflet.js`
+- `assets/frontend/pickup-map/providers/wdc-map-provider-yandex.js`
+- `assets/vendor/leaflet/*`
+
+## Tests
+
+Standalone smoke tests are stored under `tests/`.
+
+Main coverage areas:
+
+- `tests/domain`
+- `tests/calendar`
+- `tests/fias`
+- `tests/locations`
+- `tests/address`
+- `tests/checkout`
+- `tests/rules`
+- `tests/carriers`
+- `tests/delivery-services`
+- `tests/pickup`
+- `tests/orders`
+- `tests/packaging`
+- `tests/runtime`
+
+Representative commands:
+
+```powershell
+php tests/domain/run-domain-smoke.php
+php tests/calendar/run-calendar-smoke.php
+php tests/checkout/run-checkout-smoke.php
+php tests/pickup/run-russian-post-pickup-import-smoke.php
+php tests/runtime/run-no-legacy-smoke.php
+```
+
+## Не реализовано в текущем runtime
+
+- CDEK, DPD, Yandex Delivery, PEK, Energia, Aerogruz, Jet adapters.
+- Shipment runtime for creating carrier shipments.
+- Carrier labels, acts, documents, and tracking status polling.
+- Automatic WooCommerce status changes based on delivery status.
+- Full order admin recalculation workflow.
+- Production monitoring/status dashboard.
