@@ -73,6 +73,7 @@ final class OrderShipmentDraftFactory {
 				'order_num' => $order_number,
 				'postoffice_code' => $this->from_postcode( $service_key ),
 				'pickup_point_code' => $this->meta_string( $order, '_wdc_pickup_point_code' ),
+				'pickup_point_postcode' => $this->meta_string( $order, '_wdc_pickup_point_postcode' ),
 				'calculation_data' => $this->calculation_data( $order ),
 			)
 		);

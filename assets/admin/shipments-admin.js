@@ -80,13 +80,19 @@
       isEcom = false;
     }
     if (deliveryType !== 'pickup' || isEcom) return;
+    const pickupIndex = normalizePickupDestinationIndex(pickupCode && pickupCode.value ? pickupCode.value : '');
     const parts = [
-      pickupCode && pickupCode.value ? pickupCode.value : postcode && postcode.value ? postcode.value : '',
+      pickupIndex || (postcode && postcode.value ? normalizePickupDestinationIndex(postcode.value) : ''),
       region ? region.value : '',
       city ? city.value : '',
       'до востребования'
     ].filter((value) => String(value || '').trim() !== '');
     address.value = parts.join(', ');
+  }
+
+  function normalizePickupDestinationIndex(value) {
+    const match = String(value || '').trim().match(/^(\d{6})/);
+    return match ? match[1] : '';
   }
 
   function schedulePreview(form) {

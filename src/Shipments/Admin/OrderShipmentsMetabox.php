@@ -87,9 +87,10 @@ final class OrderShipmentsMetabox {
 		$meta = is_array( $request['meta'] ?? null ) ? $request['meta'] : array();
 		$settings = is_array( $request['services'] ?? null ) ? $request['services'] : array();
 		$pickup_code = (string) ( $request['pickup_point']['point_code'] ?? $meta['pickup_point_code'] ?? '' );
+		$pickup_destination_index = $this->pickup_destination_index( $pickup_code, (string) ( $address['postcode'] ?? '' ), $meta );
 		$region = (string) ( $address['region_name'] ?? '' );
 		$city = (string) ( $address['settlement'] ?? $address['city'] ?? '' );
-		$pickup_demand_address = implode( ', ', array_filter( array( (string) ( $address['postcode'] ?? $pickup_code ), $region, $city, 'до востребования' ), static fn ( string $value ): bool => '' !== trim( $value ) ) );
+		$pickup_demand_address = implode( ', ', array_filter( array( $pickup_destination_index, $region, $city, 'до востребования' ), static fn ( string $value ): bool => '' !== trim( $value ) ) );
 		$display_address = DeliveryType::PICKUP === (string) ( $request['delivery_type'] ?? '' ) ? $pickup_demand_address : (string) ( $address['raw_address'] ?? '' );
 		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
 		$has_created = in_array( (string) ( $shipment['status'] ?? '' ), array( 'created', 'registered' ), true );
@@ -226,5 +227,21 @@ final class OrderShipmentsMetabox {
 		$order_id = is_object( $post_or_order ) && isset( $post_or_order->ID ) ? (int) $post_or_order->ID : 0;
 
 		return $order_id > 0 && function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+	}
+
+	/**
+	 * @param array<string,mixed> $meta
+	 */
+	private function pickup_destination_index( string $pickup_code, string $postcode, array $meta ): string {
+		$explicit = preg_replace( '/\D+/', '', (string) ( $meta['pickup_point_postcode'] ?? $meta['pickup_postcode'] ?? '' ) ) ?? '';
+		if ( 1 === preg_match( '/^\d{6}$/', $explicit ) ) {
+			return $explicit;
+		}
+		if ( 1 === preg_match( '/^(\d{6})/', trim( $pickup_code ), $matches ) ) {
+			return (string) $matches[1];
+		}
+		$postcode = preg_replace( '/\D+/', '', $postcode ) ?? '';
+
+		return 1 === preg_match( '/^\d{6}$/', $postcode ) ? $postcode : '';
 	}
 }

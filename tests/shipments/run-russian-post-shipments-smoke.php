@@ -10,6 +10,7 @@ use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Domain\Pickup\PickupPointSelection;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
+use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostCreateRequestBuilder;
@@ -146,6 +147,49 @@ $ecom_request = new ShipmentCreateRequest(
 $ecom_payload = $builder->build( $ecom_request );
 shipments_smoke_assert( '630001' === $ecom_payload[0]['ecom-data']['delivery-point-index'], 'ECOM pickup must use ecom-data delivery-point-index.' );
 shipments_smoke_assert( ! array_key_exists( 'address-type-to', $ecom_payload[0] ) && ! array_key_exists( 'index-to', $ecom_payload[0] ), 'ECOM pickup must not include normal address schema.' );
+
+$pickup_code_with_suffix = new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, '630091-53b5939ce9', 'Новосибирск, тестовый ПВЗ', '2026-06-04 10:00:00' );
+$pickup_suffix_request = new ShipmentCreateRequest(
+	$request->order_id,
+	$request->carrier_key,
+	DeliveryType::PICKUP,
+	$request->rate_id,
+	$request->recipient_address,
+	$pickup_code_with_suffix,
+	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ) ),
+	$request->declared_value,
+	false,
+	$request->services,
+	$request->recipient,
+	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '23030' )
+);
+$pickup_suffix_payload = $builder->build( $pickup_suffix_request );
+shipments_smoke_assert( '630091' === $pickup_suffix_payload[0]['index-to'], 'Normal pickup must extract 6-digit index from pickup point code with suffix.' );
+
+$ecom_suffix_request = new ShipmentCreateRequest(
+	$request->order_id,
+	$request->carrier_key,
+	DeliveryType::PICKUP,
+	$request->rate_id,
+	$request->recipient_address,
+	$pickup_code_with_suffix,
+	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ) ),
+	$request->declared_value,
+	false,
+	$request->services,
+	$request->recipient,
+	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '54020', 'tariff_is_ecom' => true )
+);
+$ecom_suffix_payload = $builder->build( $ecom_suffix_request );
+shipments_smoke_assert( '630091-53b5939ce9' === $ecom_suffix_payload[0]['ecom-data']['delivery-point-index'], 'ECOM pickup must keep full delivery-point-index code.' );
+
+$metabox_reflection = new ReflectionClass( OrderShipmentsMetabox::class );
+$metabox = $metabox_reflection->newInstanceWithoutConstructor();
+$pickup_destination_index = $metabox_reflection->getMethod( 'pickup_destination_index' );
+$pickup_destination_index->setAccessible( true );
+$ui_index = $pickup_destination_index->invoke( $metabox, '630091-53b5939ce9', '630001', array() );
+$ui_demand_address = implode( ', ', array_filter( array( $ui_index, 'Новосибирская область', 'Новосибирск', 'до востребования' ) ) );
+shipments_smoke_assert( '630091, Новосибирская область, Новосибирск, до востребования' === $ui_demand_address, 'Admin pickup demand address must use normalized 6-digit destination index.' );
 
 $goods_request = new ShipmentCreateRequest(
 	$request->order_id,

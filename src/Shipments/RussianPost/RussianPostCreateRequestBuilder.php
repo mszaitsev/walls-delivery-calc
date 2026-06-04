@@ -86,7 +86,7 @@ final class RussianPostCreateRequestBuilder {
 					$payload['ecom-data'] = array( 'delivery-point-index' => $pickup_code );
 				} elseif ( ! $is_ecom ) {
 					$payload['address-type-to'] = 'DEMAND';
-					$payload['index-to'] = $pickup_code ?: $request->recipient_address->postcode;
+					$payload['index-to'] = $this->pickup_destination_index( $request, $pickup_code );
 					$payload['region-to'] = $request->recipient_address->region_name;
 					$payload['place-to'] = $this->place_to( $request );
 				}
@@ -167,6 +167,9 @@ final class RussianPostCreateRequestBuilder {
 				$errors[] = 'Код ПВЗ/почтомата обязателен.';
 			}
 			if ( empty( $request->meta['tariff_is_ecom'] ) ) {
+				if ( '' === trim( $this->pickup_destination_index( $request, $pickup_code ) ) ) {
+					$errors[] = 'Индекс получателя обязателен.';
+				}
 				if ( '' === trim( $request->recipient_address->region_name ) ) {
 					$errors[] = 'Регион получателя обязателен для обычного ПВЗ/ОПС.';
 				}
@@ -243,5 +246,20 @@ final class RussianPostCreateRequestBuilder {
 
 	private function place_to( ShipmentCreateRequest $request ): string {
 		return trim( $request->recipient_address->settlement ) ?: trim( $request->recipient_address->city );
+	}
+
+	private function pickup_destination_index( ShipmentCreateRequest $request, string $pickup_code = '' ): string {
+		$explicit = preg_replace( '/\D+/', '', (string) ( $request->meta['pickup_point_postcode'] ?? $request->meta['pickup_postcode'] ?? '' ) ) ?? '';
+		if ( 1 === preg_match( '/^\d{6}$/', $explicit ) ) {
+			return $explicit;
+		}
+
+		if ( 1 === preg_match( '/^(\d{6})/', trim( $pickup_code ), $matches ) ) {
+			return (string) $matches[1];
+		}
+
+		$postcode = preg_replace( '/\D+/', '', $request->recipient_address->postcode ) ?? '';
+
+		return 1 === preg_match( '/^\d{6}$/', $postcode ) ? $postcode : '';
 	}
 }
