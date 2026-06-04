@@ -11,6 +11,7 @@ use WallsShop\WDC\Domain\Pickup\PickupPointSelection;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
+use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostCreateRequestBuilder;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentProductMapper;
 
@@ -39,6 +40,35 @@ if ( ! function_exists( 'wp_unslash' ) ) {
 function shipments_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
 		throw new RuntimeException( $message );
+	}
+}
+
+class ShipmentsSmokeOrder {
+	public function __construct( private array $data, private array $meta = array() ) {
+	}
+
+	public function get_shipping_postcode(): string {
+		return (string) ( $this->data['postcode'] ?? '' );
+	}
+
+	public function get_shipping_state(): string {
+		return (string) ( $this->data['state'] ?? '' );
+	}
+
+	public function get_shipping_city(): string {
+		return (string) ( $this->data['city'] ?? '' );
+	}
+
+	public function get_shipping_address_1(): string {
+		return (string) ( $this->data['address_1'] ?? '' );
+	}
+
+	public function get_shipping_address_2(): string {
+		return (string) ( $this->data['address_2'] ?? '' );
+	}
+
+	public function get_meta( string $key, bool $single = true ): mixed {
+		return $this->meta[ $key ] ?? '';
 	}
 }
 
@@ -147,5 +177,51 @@ $settings = ShipmentServiceSettings::sanitize_from_post(
 );
 shipments_smoke_assert( 60 === $settings['shelf_life_days_default']['value'], 'Shelf life must clamp to 15..60.' );
 shipments_smoke_assert( true === $settings['send_goods_items']['value'], 'send_goods_items must sanitize as bool.' );
+
+$factory_reflection = new ReflectionClass( OrderShipmentDraftFactory::class );
+$factory = $factory_reflection->newInstanceWithoutConstructor();
+$shipping_address = $factory_reflection->getMethod( 'shipping_address' );
+$shipping_address->setAccessible( true );
+
+$full_address = $shipping_address->invoke(
+	$factory,
+	new ShipmentsSmokeOrder(
+		array(
+			'postcode' => '630005',
+			'state' => 'Новосибирская область',
+			'city' => 'Новосибирск',
+			'address_1' => 'ул. Ленина 15',
+			'address_2' => 'кв. 23',
+		)
+	)
+);
+shipments_smoke_assert( '630005, Новосибирская область, Новосибирск, ул. Ленина 15, кв. 23' === $full_address, 'Courier raw-address must include postcode, state, city and address lines.' );
+
+$short_address = $shipping_address->invoke(
+	$factory,
+	new ShipmentsSmokeOrder(
+		array(
+			'postcode' => '630005',
+			'city' => 'Новосибирск',
+			'address_1' => 'ул. Ленина 15',
+		)
+	)
+);
+shipments_smoke_assert( '630005, Новосибирск, ул. Ленина 15' === $short_address, 'Courier raw-address must skip empty state/address_2 fragments.' );
+
+$fallback_region_address = $shipping_address->invoke(
+	$factory,
+	new ShipmentsSmokeOrder(
+		array(
+			'postcode' => '630005',
+			'city' => 'Новосибирск',
+			'address_1' => 'ул. Ленина 15',
+		),
+		array(
+			'_wdc_platform_city_display_name' => 'Новосибирск — Новосибирская область',
+		)
+	)
+);
+shipments_smoke_assert( '630005, Новосибирская область, Новосибирск, ул. Ленина 15' === $fallback_region_address, 'Courier raw-address must use WDC location metadata when shipping state is empty.' );
 
 echo "Russian Post shipments smoke OK\n";

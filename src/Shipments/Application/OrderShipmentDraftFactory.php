@@ -316,14 +316,62 @@ final class OrderShipmentDraftFactory {
 	private function shipping_address( object $order ): string {
 		$parts = array();
 		foreach ( array( 'get_shipping_postcode', 'get_shipping_city', 'get_shipping_address_1', 'get_shipping_address_2' ) as $method ) {
-			if ( method_exists( $order, $method ) ) {
-				$value = trim( (string) $order->{$method}() );
-				if ( '' !== $value ) {
-					$parts[] = $value;
-				}
+			if ( ! method_exists( $order, $method ) ) {
+				continue;
+			}
+			$value = trim( (string) $order->{$method}() );
+			if ( '' !== $value ) {
+				$parts[ $method ] = $value;
 			}
 		}
 
-		return implode( ', ', $parts );
+		return implode(
+			', ',
+			array_values(
+				array_filter(
+					array(
+						$parts['get_shipping_postcode'] ?? '',
+						$this->shipping_region( $order ),
+						$parts['get_shipping_city'] ?? '',
+						$parts['get_shipping_address_1'] ?? '',
+						$parts['get_shipping_address_2'] ?? '',
+					),
+					static fn ( string $value ): bool => '' !== trim( $value )
+				)
+			)
+		);
+	}
+
+	private function shipping_region( object $order ): string {
+		if ( method_exists( $order, 'get_shipping_state' ) ) {
+			$state = trim( (string) $order->get_shipping_state() );
+			if ( '' !== $state ) {
+				return $state;
+			}
+		}
+
+		foreach ( array( '_wdc_platform_region_name', '_wdc_platform_location_region_name' ) as $key ) {
+			$value = $this->meta_string( $order, $key );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		$calculation = $this->calculation_data( $order );
+		$destination = is_array( $calculation['destination'] ?? null ) ? $calculation['destination'] : array();
+		foreach ( array( 'region_name', 'region', 'state', 'state_name' ) as $key ) {
+			$value = trim( (string) ( $destination[ $key ] ?? '' ) );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		$display = $this->meta_string( $order, '_wdc_platform_city_display_name' );
+		if ( str_contains( $display, '—' ) ) {
+			$parts = array_map( 'trim', explode( '—', $display, 2 ) );
+			return (string) ( $parts[1] ?? '' );
+		}
+
+		return '';
 	}
 }
