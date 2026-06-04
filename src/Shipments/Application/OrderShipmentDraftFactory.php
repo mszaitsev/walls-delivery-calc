@@ -304,18 +304,15 @@ final class OrderShipmentDraftFactory {
 			}
 		}
 
-		$calculation = $this->calculation_data( $order );
-		foreach ( array( 'destination', 'recipient', 'location', 'pickup_point', 'pickup' ) as $section ) {
-			$source = is_array( $calculation[ $section ] ?? null ) ? $calculation[ $section ] : array();
-			foreach ( array( 'settlement', 'settlement_name', 'city', 'city_name', 'place', 'place_name' ) as $key ) {
-				$value = trim( (string) ( $source[ $key ] ?? '' ) );
-				if ( '' !== $value ) {
-					return $value;
-				}
+		if ( method_exists( $order, 'get_billing_city' ) ) {
+			$city = trim( (string) $order->get_billing_city() );
+			if ( '' !== $city ) {
+				return $city;
 			}
 		}
-		foreach ( array( 'settlement', 'settlement_name', 'city', 'city_name', 'place', 'place_name' ) as $key ) {
-			$value = trim( (string) ( $calculation[ $key ] ?? '' ) );
+
+		foreach ( array( '_shipping_city', '_billing_city' ) as $key ) {
+			$value = $this->meta_string( $order, $key );
 			if ( '' !== $value ) {
 				return $value;
 			}
@@ -330,11 +327,34 @@ final class OrderShipmentDraftFactory {
 			}
 		}
 
-		foreach ( array( '_wdc_pickup_point_city', '_wdc_pickup_city', '_wdc_platform_city', '_wdc_platform_settlement' ) as $key ) {
+		foreach ( array( '_wdc_platform_city', '_wdc_platform_settlement', '_wdc_pickup_point_city', '_wdc_pickup_city' ) as $key ) {
 			$value = $this->meta_string( $order, $key );
 			if ( '' !== $value ) {
 				return $value;
 			}
+		}
+
+		$calculation = $this->calculation_data( $order );
+		foreach ( array( 'destination', 'recipient', 'location', 'pickup_point', 'pickup' ) as $section ) {
+			$source = is_array( $calculation[ $section ] ?? null ) ? $calculation[ $section ] : array();
+			foreach ( array( 'city', 'city_name', 'settlement', 'settlement_name', 'place', 'place_name' ) as $key ) {
+				$value = trim( (string) ( $source[ $key ] ?? '' ) );
+				if ( '' !== $value ) {
+					return $value;
+				}
+			}
+		}
+
+		return $this->city_from_pickup_address( $this->meta_string( $order, '_wdc_pickup_point_address' ) );
+	}
+
+	private function city_from_pickup_address( string $address ): string {
+		$parts = array_values( array_filter( array_map( 'trim', explode( ',', $address ) ), static fn ( string $value ): bool => '' !== $value ) );
+		if ( count( $parts ) >= 3 && 1 === preg_match( '/^\d{6}$/', preg_replace( '/\D+/', '', $parts[0] ) ?? '' ) ) {
+			return $parts[2];
+		}
+		if ( count( $parts ) >= 2 ) {
+			return $parts[1];
 		}
 
 		return '';

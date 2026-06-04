@@ -70,6 +70,10 @@ class ShipmentsSmokeOrder {
 		return (string) ( $this->data['city'] ?? '' );
 	}
 
+	public function get_billing_city(): string {
+		return (string) ( $this->data['billing_city'] ?? '' );
+	}
+
 	public function get_shipping_address_1(): string {
 		return (string) ( $this->data['address_1'] ?? '' );
 	}
@@ -244,6 +248,22 @@ $missing_phone = new ShipmentCreateRequest(
 );
 shipments_smoke_assert( in_array( 'Телефон получателя обязателен.', $builder->validate( $missing_phone ), true ), 'Phone validation must use digit-only normalized value.' );
 
+$missing_tariff = new ShipmentCreateRequest(
+	$request->order_id,
+	$request->carrier_key,
+	$request->delivery_type,
+	$request->rate_id,
+	$request->recipient_address,
+	$request->pickup_point,
+	$request->places,
+	$request->declared_value,
+	false,
+	$request->services,
+	$request->recipient,
+	array( 'order_num' => '123', 'postoffice_code' => '630005' )
+);
+shipments_smoke_assert( in_array( 'Выберите тариф для создания отправления.', $builder->validate( $missing_tariff ), true ), 'Builder validation must reject empty tariff_object.' );
+
 $settings = ShipmentServiceSettings::sanitize_from_post(
 	array(
 		'shelf_life_days_default' => '90',
@@ -289,6 +309,14 @@ $city_from_display = $recipient_city->invoke(
 	)
 );
 shipments_smoke_assert( 'Новосибирск' === $city_from_display, 'Recipient city fallback must use _wdc_platform_city_display_name without region suffix.' );
+
+$city_from_billing = $recipient_city->invoke(
+	$factory,
+	new ShipmentsSmokeOrder(
+		array( 'city' => '', 'billing_city' => 'Искитим' )
+	)
+);
+shipments_smoke_assert( 'Искитим' === $city_from_billing, 'Recipient city fallback must use billing city.' );
 
 $city_from_calculation = $recipient_city->invoke(
 	$factory,
@@ -362,9 +390,11 @@ $declared_value_method->setAccessible( true );
 $insurance_1000 = $declared_value_method->invoke( $factory, array( 'declared_value_rub' => '1000' ) );
 $insurance_2500 = $declared_value_method->invoke( $factory, array( 'declared_value_rub' => '2500' ) );
 $insurance_spaced = $declared_value_method->invoke( $factory, array( 'declared_value_rub' => '2 500 руб.' ) );
+$insurance_decimal = $declared_value_method->invoke( $factory, array( 'declared_value_rub' => '12,5' ) );
 shipments_smoke_assert( 100000 === $insurance_1000->get_kopecks(), 'Insurance 1000 rub must become 100000 kopecks.' );
 shipments_smoke_assert( 250000 === $insurance_2500->get_kopecks(), 'Insurance 2500 rub must become 250000 kopecks.' );
 shipments_smoke_assert( 250000 === $insurance_spaced->get_kopecks(), 'Insurance rub input must be cleaned to integer digits on backend.' );
+shipments_smoke_assert( 12500 === $insurance_decimal->get_kopecks(), 'Insurance 12,5 rub safety fallback must become 125 rub / 12500 kopecks.' );
 
 shipments_smoke_assert( 1 === count( $pickup_suffix_payload ), 'Normal pickup payload built from one submitted place must contain one order object.' );
 
