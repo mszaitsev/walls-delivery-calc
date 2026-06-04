@@ -318,6 +318,42 @@ $city_from_billing = $recipient_city->invoke(
 );
 shipments_smoke_assert( 'Искитим' === $city_from_billing, 'Recipient city fallback must use billing city.' );
 
+$city_from_shipping_meta = $recipient_city->invoke(
+	$factory,
+	new ShipmentsSmokeOrder(
+		array( 'city' => '', 'billing_city' => '' ),
+		array( '_shipping_city' => 'г Бердск' )
+	)
+);
+shipments_smoke_assert( 'г Бердск' === $city_from_shipping_meta, 'Recipient city fallback must use _shipping_city meta.' );
+
+$city_from_billing_meta = $recipient_city->invoke(
+	$factory,
+	new ShipmentsSmokeOrder(
+		array( 'city' => '', 'billing_city' => '' ),
+		array( '_billing_city' => 'г Бердск' )
+	)
+);
+shipments_smoke_assert( 'г Бердск' === $city_from_billing_meta, 'Recipient city fallback must use _billing_city meta.' );
+
+$city_from_pickup_address_plain = $recipient_city->invoke(
+	$factory,
+	new ShipmentsSmokeOrder(
+		array( 'city' => '', 'billing_city' => '' ),
+		array( '_wdc_pickup_point_address' => '633010 обл. Новосибирская Бердск г. Ленина ул., д. 67' )
+	)
+);
+shipments_smoke_assert( 'г Бердск' === $city_from_pickup_address_plain, 'Recipient city fallback must parse city from Russian Post pickup address without commas.' );
+
+$city_from_pickup_address_comma = $recipient_city->invoke(
+	$factory,
+	new ShipmentsSmokeOrder(
+		array( 'city' => '', 'billing_city' => '' ),
+		array( '_wdc_pickup_point_address' => '633010, Новосибирская область, г Бердск, ул. Ленина, д. 67' )
+	)
+);
+shipments_smoke_assert( 'г Бердск' === $city_from_pickup_address_comma, 'Recipient city fallback must parse city from comma-separated pickup address.' );
+
 $city_from_calculation = $recipient_city->invoke(
 	$factory,
 	new ShipmentsSmokeOrder(

@@ -44,7 +44,7 @@ final class OrderShipmentDraftFactory {
 		$order_number = $this->order_number( $order );
 		$settings['shelf_life_days'] = (int) ( $settings[ ShipmentServiceSettings::SHELF_LIFE_DAYS_DEFAULT ] ?? 30 );
 		$settings['combine_goods_items'] = ! empty( $settings[ ShipmentServiceSettings::COMBINE_GOODS_ITEMS_DEFAULT ] );
-		$settings['combined_goods_name_template'] = (string) ( $settings[ ShipmentServiceSettings::COMBINED_GOODS_NAME_TEMPLATE ] ?? 'Товары по заказу {order_number}' );
+		$settings['combined_goods_name_template'] = (string) ( $settings[ ShipmentServiceSettings::COMBINED_GOODS_NAME_TEMPLATE ] ?? 'Р В Р’В Р РЋРЎвЂєР В Р’В Р РЋРІР‚СћР В Р’В Р В РІР‚В Р В Р’В Р вЂ™Р’В°Р В Р Р‹Р В РІР‚С™Р В Р Р‹Р Р†Р вЂљРІвЂћвЂ“ Р В Р’В Р РЋРІР‚вЂќР В Р’В Р РЋРІР‚Сћ Р В Р’В Р вЂ™Р’В·Р В Р’В Р вЂ™Р’В°Р В Р’В Р РЋРІР‚СњР В Р’В Р вЂ™Р’В°Р В Р’В Р вЂ™Р’В·Р В Р Р‹Р РЋРІР‚Сљ {order_number}' );
 		$settings['combined_goods_name'] = str_replace( '{order_number}', $order_number, $settings['combined_goods_name_template'] );
 		$tariff_object = $this->meta_string( $order, '_wdc_platform_tariff_object' );
 		$tariff = $this->tariff_for_service_object( $service, $tariff_object );
@@ -183,7 +183,7 @@ final class OrderShipmentDraftFactory {
 			$weight_g = is_object( $product ) && method_exists( $product, 'get_weight' ) ? (int) round( (float) str_replace( ',', '.', (string) $product->get_weight() ) * 1000 ) : 0;
 			$items[] = new PackageItem(
 				is_object( $product ) && method_exists( $product, 'get_sku' ) ? (string) $product->get_sku() : '',
-				method_exists( $item, 'get_name' ) ? (string) $item->get_name() : 'Товар',
+				method_exists( $item, 'get_name' ) ? (string) $item->get_name() : 'Р В Р’В Р РЋРЎвЂєР В Р’В Р РЋРІР‚СћР В Р’В Р В РІР‚В Р В Р’В Р вЂ™Р’В°Р В Р Р‹Р В РІР‚С™',
 				$qty,
 				Money::from_rubles( $qty > 0 ? $total / $qty : $total ),
 				Money::from_rubles( $total ),
@@ -298,39 +298,70 @@ final class OrderShipmentDraftFactory {
 
 	private function recipient_city( object $order ): string {
 		if ( method_exists( $order, 'get_shipping_city' ) ) {
-			$city = trim( (string) $order->get_shipping_city() );
+			$city = $this->normalize_city_fragment( (string) $order->get_shipping_city() );
 			if ( '' !== $city ) {
 				return $city;
 			}
 		}
 
 		if ( method_exists( $order, 'get_billing_city' ) ) {
-			$city = trim( (string) $order->get_billing_city() );
+			$city = $this->normalize_city_fragment( (string) $order->get_billing_city() );
 			if ( '' !== $city ) {
 				return $city;
 			}
 		}
 
 		foreach ( array( '_shipping_city', '_billing_city' ) as $key ) {
-			$value = $this->meta_string( $order, $key );
-			if ( '' !== $value ) {
-				return $value;
+			$city = $this->normalize_city_fragment( $this->meta_string( $order, $key ) );
+			if ( '' !== $city ) {
+				return $city;
 			}
 		}
 
 		$display = $this->meta_string( $order, '_wdc_platform_city_display_name' );
 		if ( '' !== $display ) {
-			$parts = preg_split( '/\s+[—-]\s+/u', $display, 2 ) ?: array();
-			$city = trim( (string) ( $parts[0] ?? $display ) );
+			$city_source = $display;
+			foreach ( array( ' - ', ' — ', ' вЂ” ', ' РІР‚вЂСњ ', 'РІР‚вЂСњ', 'вЂ”' ) as $separator ) {
+				$position = strpos( $city_source, $separator );
+				if ( false !== $position ) {
+					$city_source = substr( $city_source, 0, $position );
+					break;
+				}
+			}
+			foreach ( array( ' РѕР±Р»Р°СЃС‚СЊ', ' РєСЂР°Р№', ' СЂРµСЃРїСѓР±Р»РёРєР°' ) as $region_suffix ) {
+				$position = strpos( $city_source, $region_suffix );
+				if ( false !== $position ) {
+					$before_region = trim( substr( $city_source, 0, $position ) );
+					$tokens = preg_split( '/\s+/', $before_region ) ?: array();
+					if ( count( $tokens ) > 1 ) {
+						array_pop( $tokens );
+						array_pop( $tokens );
+						$city_source = implode( ' ', $tokens );
+					}
+					break;
+				}
+			}
+			$tokens = preg_split( '/\s+/', trim( $city_source ) ) ?: array();
+			while ( count( $tokens ) > 1 ) {
+				$last_token = (string) end( $tokens );
+				if ( ! str_contains( $last_token, 'Ђ' ) && ! str_contains( $last_token, 'РІ' ) && ! str_contains( $last_token, 'Р ' ) ) {
+					break;
+				}
+				array_pop( $tokens );
+			}
+			if ( array() !== $tokens ) {
+				$city_source = implode( ' ', $tokens );
+			}
+			$city = $this->normalize_city_fragment( $city_source );
 			if ( '' !== $city ) {
 				return $city;
 			}
 		}
 
 		foreach ( array( '_wdc_platform_city', '_wdc_platform_settlement', '_wdc_pickup_point_city', '_wdc_pickup_city' ) as $key ) {
-			$value = $this->meta_string( $order, $key );
-			if ( '' !== $value ) {
-				return $value;
+			$city = $this->normalize_city_fragment( $this->meta_string( $order, $key ) );
+			if ( '' !== $city ) {
+				return $city;
 			}
 		}
 
@@ -338,9 +369,9 @@ final class OrderShipmentDraftFactory {
 		foreach ( array( 'destination', 'recipient', 'location', 'pickup_point', 'pickup' ) as $section ) {
 			$source = is_array( $calculation[ $section ] ?? null ) ? $calculation[ $section ] : array();
 			foreach ( array( 'city', 'city_name', 'settlement', 'settlement_name', 'place', 'place_name' ) as $key ) {
-				$value = trim( (string) ( $source[ $key ] ?? '' ) );
-				if ( '' !== $value ) {
-					return $value;
+				$city = $this->normalize_city_fragment( (string) ( $source[ $key ] ?? '' ) );
+				if ( '' !== $city ) {
+					return $city;
 				}
 			}
 		}
@@ -351,15 +382,62 @@ final class OrderShipmentDraftFactory {
 	private function city_from_pickup_address( string $address ): string {
 		$parts = array_values( array_filter( array_map( 'trim', explode( ',', $address ) ), static fn ( string $value ): bool => '' !== $value ) );
 		if ( count( $parts ) >= 3 && 1 === preg_match( '/^\d{6}$/', preg_replace( '/\D+/', '', $parts[0] ) ?? '' ) ) {
-			return $parts[2];
+			return $this->normalize_city_fragment( $parts[2] );
 		}
-		if ( count( $parts ) >= 2 ) {
-			return $parts[1];
+		if ( count( $parts ) >= 3 ) {
+			return $this->normalize_city_fragment( $parts[1] );
+		}
+
+		$normalized = trim( preg_replace( '/^\s*\d{6}\s*/u', '', $address ) ?? $address );
+		if ( '' === $normalized ) {
+			return '';
+		}
+
+		if ( 1 === preg_match( '/(?:^|\s)([\p{L}\-]+)\s+\x{0433}\./u', $normalized, $match ) ) {
+			return $this->normalize_city_fragment( $match[1] . ' ' . json_decode( '"\u0433."' ) );
+		}
+
+		if ( 1 === preg_match( '/(?:^|\s)\x{0433}\.?\s*([\p{L}\-]+)/u', $normalized, $match ) ) {
+			return $this->normalize_city_fragment( json_decode( '"\u0433 "' ) . $match[1] );
 		}
 
 		return '';
 	}
 
+	private function normalize_city_fragment( string $value ): string {
+		$city = trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
+		$city = trim( $city, " \t\n\r\0\x0B,." );
+		if ( '' === $city ) {
+			return '';
+		}
+		if ( 1 === preg_match( '/^(.+?)\s+\x{0433}\.?$/u', $city, $match ) ) {
+			return json_decode( '"\u0433 "' ) . trim( (string) $match[1] );
+		}
+		if ( 1 === preg_match( '/^\x{0433}\.?\s*(.+)$/u', $city, $match ) ) {
+			return json_decode( '"\u0433 "' ) . trim( (string) $match[1] );
+		}
+
+		return $city;
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	public function recipient_city_debug( object $order ): array {
+		$shipping_method = method_exists( $order, 'get_shipping_city' ) ? $this->normalize_city_fragment( (string) $order->get_shipping_city() ) : '';
+		$billing_method = method_exists( $order, 'get_billing_city' ) ? $this->normalize_city_fragment( (string) $order->get_billing_city() ) : '';
+		$meta_shipping = $this->normalize_city_fragment( $this->meta_string( $order, '_shipping_city' ) );
+		$meta_billing = $this->normalize_city_fragment( $this->meta_string( $order, '_billing_city' ) );
+		$pickup_parse = $this->city_from_pickup_address( $this->meta_string( $order, '_wdc_pickup_point_address' ) );
+
+		return array(
+			'shipping_method_result' => '' !== $shipping_method ? 'filled' : 'empty',
+			'billing_method_result' => '' !== $billing_method ? 'filled' : 'empty',
+			'meta_shipping_city' => '' !== $meta_shipping ? 'filled' : 'empty',
+			'meta_billing_city' => '' !== $meta_billing ? 'filled' : 'empty',
+			'pickup_address_parse' => '' !== $pickup_parse ? 'filled' : 'empty',
+		);
+	}
 	/**
 	 * @return array<string,mixed>
 	 */
@@ -524,10 +602,24 @@ final class OrderShipmentDraftFactory {
 		}
 
 		$display = $this->meta_string( $order, '_wdc_platform_city_display_name' );
-		if ( str_contains( $display, '—' ) ) {
-			$parts = array_map( 'trim', explode( '—', $display, 2 ) );
-			return (string) ( $parts[1] ?? '' );
+		foreach ( array( ' - ', ' РІР‚вЂќ ', ' Р Р†Р вЂљРІР‚Сњ ', 'Р В Р вЂ Р В РІР‚С™Р Р†Р вЂљРЎСљ' ) as $separator ) {
+			$position = strpos( $display, $separator );
+			if ( false !== $position ) {
+				return trim( substr( $display, $position + strlen( $separator ) ) );
+			}
 		}
+		foreach ( array( ' область', ' край', ' республика' ) as $region_suffix ) {
+			$position = strpos( $display, $region_suffix );
+			if ( false !== $position ) {
+				$before_region = trim( substr( $display, 0, $position ) );
+				$tokens = preg_split( '/\s+/', $before_region ) ?: array();
+				$region_name = (string) end( $tokens );
+				if ( '' !== $region_name ) {
+					return $region_name . $region_suffix;
+				}
+			}
+		}
+
 
 		return '';
 	}
@@ -538,6 +630,8 @@ final class OrderShipmentDraftFactory {
 			return '';
 		}
 
-		return 1 === preg_match( '/^Код\s+ПВЗ/iu', $address_2 ) ? '' : $address_2;
+		$pickup_marker = (string) json_decode( '"\u041a\u043e\u0434 \u041f\u0412\u0417"' );
+
+		return str_starts_with( $address_2, $pickup_marker ) ? '' : $address_2;
 	}
 }

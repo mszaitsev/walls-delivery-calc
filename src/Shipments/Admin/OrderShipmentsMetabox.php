@@ -69,6 +69,33 @@ final class OrderShipmentsMetabox {
 	}
 
 	public function render( mixed $post_or_order ): void {
+		try {
+			$this->render_inner( $post_or_order );
+		} catch ( \Throwable $exception ) {
+			$order_id = 0;
+			try {
+				$order = $this->resolve_order( $post_or_order );
+				$order_id = is_object( $order ) && method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
+			} catch ( \Throwable ) {
+				$order_id = 0;
+			}
+
+			error_log(
+				sprintf(
+					'[walls-delivery-calc] shipments metabox render failed. order_id=%d class=%s message=%s location=%s:%d',
+					$order_id,
+					$exception::class,
+					$exception->getMessage(),
+					$exception->getFile(),
+					$exception->getLine()
+				)
+			);
+
+			echo '<div class="notice notice-error inline"><p>' . esc_html__( 'Не удалось подготовить блок отправлений. Подробности записаны в журнал ошибок.', 'walls-delivery-calc' ) . '</p></div>';
+		}
+	}
+
+	private function render_inner( mixed $post_or_order ): void {
 		$order = $this->resolve_order( $post_or_order );
 		if ( ! is_object( $order ) ) {
 			echo '<p>' . esc_html__( 'Заказ не найден.', 'walls-delivery-calc' ) . '</p>';
@@ -90,14 +117,11 @@ final class OrderShipmentsMetabox {
 		$pickup_destination_index = $this->pickup_destination_index( $pickup_code, (string) ( $address['postcode'] ?? '' ), $meta );
 		$region = (string) ( $address['region_name'] ?? '' );
 		$city = (string) ( $address['settlement'] ?? $address['city'] ?? '' );
-		$city_debug = implode(
-			'; ',
-			array(
-				'city=' . $city,
-				'calculation_data=' . ( is_array( $meta['calculation_data'] ?? null ) ? 'yes' : 'no' ),
-				'pickup_address=' . ( '' !== (string) ( $request['pickup_point']['point_address'] ?? '' ) ? 'yes' : 'no' ),
-			)
-		);
+		$city_debug_parts = array( 'city=' . ( '' !== $city ? 'filled' : 'empty' ) );
+		foreach ( $this->drafts->recipient_city_debug( $order ) as $key => $value ) {
+			$city_debug_parts[] = $key . '=' . $value;
+		}
+		$city_debug = implode( '; ', $city_debug_parts );
 		$pickup_demand_address = implode( ', ', array_filter( array( $pickup_destination_index, $region, $city, 'до востребования' ), static fn ( string $value ): bool => '' !== trim( $value ) ) );
 		$display_address = DeliveryType::PICKUP === (string) ( $request['delivery_type'] ?? '' ) ? $pickup_demand_address : (string) ( $address['raw_address'] ?? '' );
 		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
@@ -117,6 +141,7 @@ final class OrderShipmentsMetabox {
 			$selected_tariff_object = (string) ( $selected_service_tariffs[0]['object_code'] ?? '' );
 		}
 		$has_selected_service_tariffs = array() !== $selected_service_tariffs;
+		$tariff_message_hidden_attr = $has_selected_service_tariffs ? ' hidden' : '';
 		$has_created = in_array( (string) ( $shipment['status'] ?? '' ), array( 'created', 'registered' ), true );
 		?>
 		<div class="wdc-shipments-metabox" data-wdc-shipments-metabox>
@@ -171,7 +196,7 @@ final class OrderShipmentsMetabox {
 										<option value="<?php echo esc_attr( $tariff_object ); ?>" <?php selected( $selected_tariff_object, $tariff_object ); ?>><?php echo esc_html( (string) ( $tariff['title'] ?? $tariff_object ) ); ?></option>
 									<?php endforeach; ?>
 								</select></label>
-								<p class="description" data-wdc-tariff-message <?php hidden( $has_selected_service_tariffs ); ?>><?php echo esc_html__( 'Для выбранной службы доставки нет включенных тарифов. Включите тариф на странице настроек службы доставки.', 'walls-delivery-calc' ); ?></p>
+								<p class="description" data-wdc-tariff-message<?php echo $tariff_message_hidden_attr; ?>><?php echo esc_html__( 'Для выбранной службы доставки нет включенных тарифов. Включите тариф на странице настроек службы доставки.', 'walls-delivery-calc' ); ?></p>
 								<label><?php echo esc_html__( 'Индекс места приема', 'walls-delivery-calc' ); ?><select name="postoffice_code">
 									<?php foreach ( $postoffice_codes as $code ) : ?>
 										<option value="<?php echo esc_attr( (string) $code ); ?>" <?php selected( (string) ( $meta['postoffice_code'] ?? '' ), (string) $code ); ?>><?php echo esc_html( (string) $code ); ?></option>
