@@ -1,5 +1,26 @@
 (function () {
   const timers = new WeakMap();
+  const formSelector = '[data-wdc-shipment-form], .wdc-shipment-form';
+
+  function findShipmentForm(element) {
+    if (!element || !element.closest) return null;
+    const direct = element.closest(formSelector);
+    if (direct) return direct;
+    const nativeForm = element.closest('form');
+    if (nativeForm) return nativeForm;
+    const modal = element.closest('[data-wdc-shipment-modal], .wdc-shipment-modal');
+    if (modal) return modal.querySelector('form');
+    const box = element.closest('[data-wdc-shipments-metabox]');
+    return box ? box.querySelector('form') : null;
+  }
+
+  function findPlacesContainer(element) {
+    if (!element || !element.closest) return null;
+    const direct = element.closest('[data-wdc-places]');
+    if (direct) return direct;
+    const box = element.closest('[data-wdc-shipments-metabox]');
+    return box ? box.querySelector('[data-wdc-places]') : null;
+  }
 
   function requestPreview(form) {
     const preview = form.querySelector('[data-wdc-shipment-preview]');
@@ -160,7 +181,7 @@
       const modal = box && box.querySelector('[data-wdc-shipment-modal]');
       if (modal) {
         modal.hidden = false;
-        initializeForm(modal.querySelector('[data-wdc-shipment-form]'), true);
+        initializeForm(findShipmentForm(modal), true);
       }
       return;
     }
@@ -174,8 +195,9 @@
 
     const add = event.target.closest('[data-wdc-add-place]');
     if (add) {
-      const form = add.closest('form');
-      const container = form.querySelector('[data-wdc-places]');
+      const form = findShipmentForm(add);
+      const container = findPlacesContainer(add);
+      if (!container) return;
       const first = container.querySelector('[data-wdc-place]');
       if (!first) return;
       const clone = first.cloneNode(true);
@@ -185,19 +207,25 @@
       container.appendChild(clone);
       renumberPlaces(container);
       updateRemoveButtons(container);
-      schedulePreview(form);
+      if (form) schedulePreview(form);
       return;
     }
 
     const remove = event.target.closest('[data-wdc-remove-place]');
     if (remove) {
-      const container = remove.closest('[data-wdc-places]');
-      if (container.querySelectorAll('[data-wdc-place]').length > 1) {
-        remove.closest('[data-wdc-place]').remove();
-        renumberPlaces(container);
+      const container = findPlacesContainer(remove);
+      if (!container) return;
+      const rows = container.querySelectorAll('[data-wdc-place]');
+      if (rows.length <= 1) {
         updateRemoveButtons(container);
+        return;
       }
-      requestPreview(remove.closest('form'));
+      const row = remove.closest('[data-wdc-place]');
+      if (row) row.remove();
+      renumberPlaces(container);
+      updateRemoveButtons(container);
+      const form = findShipmentForm(remove) || findShipmentForm(container);
+      if (form) requestPreview(form);
       return;
     }
 
@@ -210,37 +238,44 @@
   });
 
   document.addEventListener('input', function (event) {
-    const form = event.target.closest('[data-wdc-shipment-form]');
-    if (form) {
-      if (event.target.matches('[data-wdc-integer-input]')) {
-        cleanIntegerInput(event.target);
+    if (event.target.matches('[data-wdc-integer-input]')) {
+      cleanIntegerInput(event.target);
+      const integerForm = findShipmentForm(event.target);
+      if (integerForm) {
+        updateDemandAddress(integerForm);
+        schedulePreview(integerForm);
       }
+      return;
+    }
+    const form = findShipmentForm(event.target);
+    if (form) {
       updateDemandAddress(form);
       schedulePreview(form);
     }
   });
 
   document.addEventListener('keydown', function (event) {
-    const form = event.target.closest('[data-wdc-shipment-form]');
-    if (!form || !event.target.matches('[data-wdc-integer-input]')) return;
+    if (!event.target.matches('[data-wdc-integer-input]')) return;
     if (['.', ',', '-', '+', 'e', 'E', ' '].includes(event.key)) {
       event.preventDefault();
     }
   });
 
   document.addEventListener('paste', function (event) {
-    const form = event.target.closest('[data-wdc-shipment-form]');
-    if (!form || !event.target.matches('[data-wdc-integer-input]')) return;
+    if (!event.target.matches('[data-wdc-integer-input]')) return;
     event.preventDefault();
     const clipboard = event.clipboardData || window.clipboardData;
     const text = clipboard && clipboard.getData ? clipboard.getData('text') : '';
     event.target.value = String(text || '').replace(/\D+/g, '');
-    updateDemandAddress(form);
-    schedulePreview(form);
+    const form = findShipmentForm(event.target);
+    if (form) {
+      updateDemandAddress(form);
+      schedulePreview(form);
+    }
   });
 
   document.addEventListener('change', function (event) {
-    const form = event.target.closest('[data-wdc-shipment-form]');
+    const form = findShipmentForm(event.target);
     if (!form) return;
     if (event.target.matches('[data-wdc-service-select]')) {
       updateTariffOptions(form);
@@ -250,7 +285,7 @@
   });
 
   document.addEventListener('submit', function (event) {
-    const form = event.target.closest('[data-wdc-shipment-form]');
+    const form = findShipmentForm(event.target);
     if (!form) return;
     event.preventDefault();
     const errors = form.querySelector('[data-wdc-shipment-errors]');
@@ -281,7 +316,12 @@
       });
   });
 
-  document.querySelectorAll('[data-wdc-shipment-form]').forEach((form) => {
+  const forms = new Set(document.querySelectorAll(formSelector));
+  document.querySelectorAll('[data-wdc-shipments-metabox]').forEach((box) => {
+    const form = findShipmentForm(box);
+    if (form) forms.add(form);
+  });
+  forms.forEach((form) => {
     initializeForm(form, false);
   });
 })();
