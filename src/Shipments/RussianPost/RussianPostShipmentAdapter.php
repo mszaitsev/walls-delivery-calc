@@ -47,6 +47,18 @@ final class RussianPostShipmentAdapter implements ShipmentCarrierAdapterInterfac
 			return new ShipmentCreateResult( false, error_code: 'validation_error', error_message: $e->getMessage() );
 		}
 
+		$order_nums = $this->payload_order_nums( $orders );
+		$this->log_create_attempt( $request, $orders, $order_nums );
+		$unexpected_order_nums = $this->unexpected_order_nums( $request, $order_nums );
+		if ( array() !== $unexpected_order_nums ) {
+			$this->log_blocked_order_nums( $request, $orders, $order_nums, $unexpected_order_nums );
+			return new ShipmentCreateResult(
+				false,
+				error_code: 'shipment_order_num_mismatch',
+				error_message: 'Payload contains order-num values that do not belong to the current shipment request.'
+			);
+		}
+
 		$response = $this->client->create_backlog_orders( $orders );
 		$errors = is_array( $response['errors'] ?? null ) ? $response['errors'] : array();
 		$normalized_errors = $this->normalized_errors( $errors );
@@ -144,6 +156,86 @@ final class RussianPostShipmentAdapter implements ShipmentCarrierAdapterInterfac
 				'duration_ms' => (int) ( $response['duration_ms'] ?? 0 ),
 			)
 		);
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $orders
+	 * @return array<int,string>
+	 */
+	private function payload_order_nums( array $orders ): array {
+		return array_values(
+			array_map(
+				static fn ( array $row ): string => (string) ( $row['order-num'] ?? '' ),
+				$orders
+			)
+		);
+	}
+
+	/**
+	 * @param array<int,string> $order_nums
+	 * @return array<int,string>
+	 */
+	private function unexpected_order_nums( ShipmentCreateRequest $request, array $order_nums ): array {
+		$expected = $this->request_order_num( $request );
+
+		return array_values(
+			array_filter(
+				$order_nums,
+				static fn ( string $order_num ): bool => $order_num !== $expected && 1 !== preg_match( '/^' . preg_quote( $expected, '/' ) . '-\d+$/', $order_num )
+			)
+		);
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $orders
+	 * @param array<int,string> $order_nums
+	 */
+	private function log_create_attempt( ShipmentCreateRequest $request, array $orders, array $order_nums ): void {
+		if ( ! $this->logger instanceof Logger ) {
+			return;
+		}
+		$this->logger->info(
+			'Russian Post shipment create payload prepared',
+			array(
+				'order_id' => $request->order_id,
+				'request_order_id' => $request->order_id,
+				'order_num' => $this->request_order_num( $request ),
+				'payload_rows' => count( $orders ),
+				'order_nums' => $order_nums,
+				'method' => 'PUT',
+				'path' => '/2.0/user/backlog',
+			)
+		);
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $orders
+	 * @param array<int,string> $order_nums
+	 * @param array<int,string> $unexpected_order_nums
+	 */
+	private function log_blocked_order_nums( ShipmentCreateRequest $request, array $orders, array $order_nums, array $unexpected_order_nums ): void {
+		if ( ! $this->logger instanceof Logger ) {
+			return;
+		}
+		$this->logger->error(
+			'Russian Post shipment create blocked because payload contains unexpected order-num values',
+			array(
+				'order_id' => $request->order_id,
+				'request_order_id' => $request->order_id,
+				'order_num' => $this->request_order_num( $request ),
+				'payload_rows' => count( $orders ),
+				'order_nums' => $order_nums,
+				'unexpected_order_nums' => $unexpected_order_nums,
+				'method' => 'PUT',
+				'path' => '/2.0/user/backlog',
+			)
+		);
+	}
+
+	private function request_order_num( ShipmentCreateRequest $request ): string {
+		$order_num = trim( (string) ( $request->meta['order_num'] ?? '' ) );
+
+		return '' !== $order_num ? $order_num : (string) $request->order_id;
 	}
 
 	/**

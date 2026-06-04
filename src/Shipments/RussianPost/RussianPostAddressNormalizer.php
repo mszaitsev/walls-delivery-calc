@@ -118,10 +118,11 @@ final class RussianPostAddressNormalizer {
 			}
 			$parts[] = match ( $key ) {
 				'location' => 'мкр ' . $value,
-				'street' => 'ул. ' . $value,
+				'house' => 'д. ' . $value,
+				'slash' => '/ ' . $value,
+				'letter' => 'лит ' . $value,
 				'building' => 'стр. ' . $value,
 				'corpus' => 'корп. ' . $value,
-				'room' => 'кв/оф. ' . $value,
 				default => $value,
 			};
 		}

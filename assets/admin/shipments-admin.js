@@ -2,15 +2,18 @@
   const timers = new WeakMap();
   const formSelector = '[data-wdc-shipment-form], .wdc-shipment-form';
 
-  function findShipmentForm(element) {
+  function findShipmentContainer(element) {
     if (!element || !element.closest) return null;
     const direct = element.closest(formSelector);
     if (direct) return direct;
     const modal = element.closest('[data-wdc-shipment-modal], .wdc-shipment-modal');
-    if (modal) return modal.querySelector(formSelector) || modal.querySelector('form');
+    if (modal) return modal.querySelector(formSelector);
     const box = element.closest('[data-wdc-shipments-metabox]');
-    if (box) return box.querySelector(formSelector) || box.querySelector('form');
-    return element.closest('form');
+    return box ? box.querySelector(formSelector) : null;
+  }
+
+  function findShipmentForm(element) {
+    return findShipmentContainer(element);
   }
 
   function findPlacesContainer(element) {

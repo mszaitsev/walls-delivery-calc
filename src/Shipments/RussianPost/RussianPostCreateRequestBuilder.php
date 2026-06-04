@@ -70,8 +70,6 @@ final class RussianPostCreateRequestBuilder {
 				$payload['insr-value'] = $place->declared_value->get_kopecks();
 			}
 			if ( DeliveryType::COURIER === $request->delivery_type ) {
-				$payload['courier'] = true;
-				$payload['delivery-to-door'] = true;
 				$normalized = is_array( $request->meta['normalized_address'] ?? null ) ? $request->meta['normalized_address'] : array();
 				$fields = is_array( $normalized['fields'] ?? null ) ? $normalized['fields'] : array();
 				if ( ! empty( $normalized['success'] ) && array() !== $fields ) {

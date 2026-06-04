@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Shipments\Application;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Shipments\Contracts\ShipmentCarrierAdapterInterface;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -17,7 +18,8 @@ final class ShipmentCreationService {
 	 */
 	public function __construct(
 		private OrderShipmentRepository $repository,
-		private array $adapters
+		private array $adapters,
+		private ?Logger $logger = null
 	) {
 	}
 
@@ -43,6 +45,16 @@ final class ShipmentCreationService {
 	}
 
 	public function create( object $order, ShipmentCreateRequest $request ): ShipmentCreateResult {
+		$order_id = $this->order_id( $order );
+		if ( $order_id > 0 && $request->order_id !== $order_id ) {
+			$this->log_order_mismatch( $order_id, $request );
+			return new ShipmentCreateResult(
+				false,
+				error_code: 'shipment_order_mismatch',
+				error_message: 'ID заказа в запросе отправления не совпадает с текущим заказом WooCommerce.'
+			);
+		}
+
 		if ( $this->repository->has_created_for_carrier( $order, $request->carrier_key ) ) {
 			$existing = $this->repository->find_by_carrier( $order, $request->carrier_key );
 			return new ShipmentCreateResult(
@@ -119,6 +131,26 @@ final class ShipmentCreationService {
 		}
 
 		return null;
+	}
+
+	private function order_id( object $order ): int {
+		return method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
+	}
+
+	private function log_order_mismatch( int $order_id, ShipmentCreateRequest $request ): void {
+		if ( ! $this->logger instanceof Logger ) {
+			return;
+		}
+		$this->logger->error(
+			'Shipment create blocked because WooCommerce order id and request order_id differ.',
+			array(
+				'order_id' => $order_id,
+				'request_order_id' => $request->order_id,
+				'order_num' => (string) ( $request->meta['order_num'] ?? $request->order_id ),
+				'carrier_key' => $request->carrier_key,
+				'service_key' => (string) ( $request->meta['service_key'] ?? $request->rate_id ),
+			)
+		);
 	}
 
 	private function add_order_note( object $order, string $message ): void {

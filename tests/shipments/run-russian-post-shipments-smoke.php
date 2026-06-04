@@ -10,12 +10,16 @@ use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Domain\Pickup\PickupPointSelection;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
+use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
+use WallsShop\WDC\Shipments\Contracts\ShipmentCarrierAdapterInterface;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostCreateRequestBuilder;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentProductMapper;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
+use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 
@@ -59,6 +63,10 @@ class ShipmentsSmokeOrder {
 	public function __construct( private array $data, private array $meta = array() ) {
 	}
 
+	public function get_id(): int {
+		return (int) ( $this->data['id'] ?? 0 );
+	}
+
 	public function get_shipping_postcode(): string {
 		return (string) ( $this->data['postcode'] ?? '' );
 	}
@@ -85,6 +93,27 @@ class ShipmentsSmokeOrder {
 
 	public function get_meta( string $key, bool $single = true ): mixed {
 		return $this->meta[ $key ] ?? '';
+	}
+}
+
+final class ShipmentsSmokeAdapter implements ShipmentCarrierAdapterInterface {
+	public bool $called = false;
+
+	public function carrier_key(): string {
+		return RussianPostDomesticSettings::CARRIER_KEY;
+	}
+
+	public function supports( ShipmentCreateRequest $request ): bool {
+		return true;
+	}
+
+	public function build_safe_payload_preview( ShipmentCreateRequest $request ): array {
+		return array();
+	}
+
+	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult {
+		$this->called = true;
+		return new ShipmentCreateResult( true );
 	}
 }
 
@@ -124,6 +153,7 @@ $request = new ShipmentCreateRequest(
 $payload = $builder->build( $request );
 shipments_smoke_assert( 2 === count( $payload ), 'MMO payload must create one order object per place.' );
 shipments_smoke_assert( true === $payload[0]['add-to-mmo'] && '123' === $payload[0]['group-name'], 'MMO fields must be set.' );
+shipments_smoke_assert( array( '123-1', '123-2' ) === array_column( $payload, 'order-num' ), 'MMO order-num values must belong to the current order only.' );
 shipments_smoke_assert( 'ONLINE_PARCEL' === $payload[0]['mail-type'], 'Object 23030 must map to ONLINE_PARCEL.' );
 shipments_smoke_assert( 'ORDINARY' === $payload[0]['mail-category'], 'Ordinary parcel/courier/EMS variants must use ORDINARY category.' );
 shipments_smoke_assert( ! array_key_exists( 'goods', $payload[0] ), 'goods must not be sent when disabled.' );
@@ -212,7 +242,7 @@ $goods_request = new ShipmentCreateRequest(
 	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '24030', 'allow_failed_normalization_preview' => true )
 );
 $goods_payload = $builder->build( $goods_request );
-shipments_smoke_assert( true === $goods_payload[0]['courier'] && true === $goods_payload[0]['delivery-to-door'], 'Courier flags must be set.' );
+shipments_smoke_assert( ! array_key_exists( 'courier', $goods_payload[0] ) && ! array_key_exists( 'delivery-to-door', $goods_payload[0] ), 'Courier payload must not include courier or delivery-to-door flags.' );
 shipments_smoke_assert( 643 === $goods_payload[0]['mail-direct'] && 'DEFAULT' === $goods_payload[0]['address-type-to'], 'Courier payload must set domestic mail-direct and DEFAULT address type.' );
 shipments_smoke_assert( '630099' === $goods_payload[0]['index-to'] && 'Новосибирская область' === $goods_payload[0]['region-to'] && 'Новосибирск' === $goods_payload[0]['place-to'] && ! isset( $goods_payload[0]['ecom-data'] ), 'Courier payload must include address fields and omit ecom-data.' );
 shipments_smoke_assert( ! array_key_exists( 'raw-address', $goods_payload[0] ), 'Courier fallback payload must not include raw-address.' );
@@ -236,6 +266,8 @@ $normalized_snapshot = $normalizer->normalize_row(
 	'630099, Новосибирская область, Новосибирск, Красный проспект 1'
 );
 shipments_smoke_assert( ! empty( $normalized_snapshot['success'] ), 'GOOD + VALIDATED clean-address result must be accepted.' );
+shipments_smoke_assert( str_contains( (string) $normalized_snapshot['display'], 'Красный проспект' ) && ! str_contains( (string) $normalized_snapshot['display'], 'ул. Красный проспект' ), 'Normalized address display must not prefix street with ul.' );
+shipments_smoke_assert( str_contains( (string) $normalized_snapshot['display'], '23' ) && ! str_contains( (string) $normalized_snapshot['display'], 'кв/оф. 23' ), 'Normalized address display must not prefix room.' );
 $normalized_request = new ShipmentCreateRequest(
 	$request->order_id,
 	$request->carrier_key,
@@ -333,6 +365,27 @@ $failed_preview_request = new ShipmentCreateRequest(
 );
 $failed_preview_payload = $builder->build( $failed_preview_request );
 shipments_smoke_assert( '630099' === $failed_preview_payload[0]['index-to'] && ! array_key_exists( 'raw-address', $failed_preview_payload[0] ), 'Failed courier normalization preview must use safe fallback without raw-address.' );
+
+$guard_adapter = new ShipmentsSmokeAdapter();
+$creation_service = new ShipmentCreationService( new OrderShipmentRepository(), array( $guard_adapter ) );
+$wrong_order_result = $creation_service->create(
+	new ShipmentsSmokeOrder( array( 'id' => 935 ) ),
+	new ShipmentCreateRequest(
+		936,
+		$request->carrier_key,
+		DeliveryType::PICKUP,
+		$request->rate_id,
+		$request->recipient_address,
+		$request->pickup_point,
+		array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ) ),
+		$request->declared_value,
+		false,
+		$request->services,
+		$request->recipient,
+		array( 'order_num' => '936', 'postoffice_code' => '630005', 'tariff_object' => '23030', 'pickup_point_found' => true )
+	)
+);
+shipments_smoke_assert( ! $wrong_order_result->success && 'shipment_order_mismatch' === $wrong_order_result->error_code && ! $guard_adapter->called, 'Shipment creation service must block wrong order_id before API adapter call.' );
 
 $missing_pickup = new ShipmentCreateRequest(
 	$request->order_id,
