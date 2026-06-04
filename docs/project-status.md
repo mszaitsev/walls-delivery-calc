@@ -4,15 +4,15 @@
 
 - Версия / baseline проекта: `0.33.8`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
-- Последнее обновление статуса: 2026-06-03.
-- Общий процент готовности: примерно 62%.
-- Следующий рекомендуемый этап: Russian Post Shipments Foundation.
+- Последнее обновление статуса: 2026-06-04.
+- Общий процент готовности: примерно 66%.
+- Следующий рекомендуемый этап: Russian Post shipment statuses/documents/cancellation.
 
 ## Краткое резюме
 
 Проект уже имеет рабочую платформу расчета доставки для WooCommerce: core bootstrap, DI container, миграции, checkout runtime, календарь доставки, Rule Engine, локальную базу ФИАС/ГАР, DaData-подсказки и обогащение, Почту России для внутренних/международных расчетов и полноценный слой ПВЗ Почты России с импортом, REST API и checkout map.
 
-При этом проект еще не закрывает полный carrier lifecycle из ТЗ: создание отправлений, документы ТК, статусы, трекинг, автоматическое изменение WooCommerce-статусов и остальные ТК пока не реализованы.
+При этом проект еще не закрывает полный carrier lifecycle из ТЗ: ручное создание отправлений Почты России реализовано первым foundation-этапом, но документы ТК, статусы, трекинг, автоматическое изменение WooCommerce-статусов и остальные ТК пока не реализованы.
 
 ## Готовность по блокам
 
@@ -31,8 +31,8 @@
 | Russian Post Pickup Points | done | 85% | Import pipeline, compact table, REST API, checkout map, order persistence. |
 | Multicarrier Pickup Layer | partial | 35% | Generic domain/storage exists, but production checkout map is Russian Post-specific. |
 | Order Admin Recalculation | partial | 30% | Order delivery metabox exists; full recalculation/replacement workflow is missing. |
-| Shipment Domain | partial | 35% | Domain objects exist; runtime flow is not implemented. |
-| Shipment Runtime | not-started | 0% | No shipment creation service/UI/API flow yet. |
+| Shipment Domain | partial | 55% | Domain objects exist and are used by the manual shipment creation runtime. |
+| Shipment Runtime | partial | 35% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments; statuses/documents/cancellation are pending. |
 | Tracking / Documents / Status Sync | not-started | 0% | No tracking polling, labels, acts, documents, or status sync runtime. |
 | WooCommerce Status Mapping | not-started | 0% | Domain baseline exists, but no automatic WooCommerce order status changes. |
 | CDEK | planned | 0% | Planned carrier stage; no adapter found in code. |
@@ -59,7 +59,7 @@
 ### Domain Model
 
 - `src/Domain` contains framework-independent value objects and entities for address normalization, calendar dates, carriers, money, packages, pickup selection, quotes, shipments, and delivery statuses.
-- Shipment/status domain classes are present, but their runtime lifecycle is not complete.
+- Shipment/status domain classes are present. The first runtime uses shipment create requests/results for manual Russian Post shipment creation from the WooCommerce order admin.
 
 ### Delivery Calendar
 

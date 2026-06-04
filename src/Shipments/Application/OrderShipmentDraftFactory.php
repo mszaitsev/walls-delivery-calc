@@ -1,0 +1,329 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\Shipments\Application;
+
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\Domain\Address\Address;
+use WallsShop\WDC\Domain\Common\Money;
+use WallsShop\WDC\Domain\Package\PackageItem;
+use WallsShop\WDC\Domain\Package\ShipmentPlace;
+use WallsShop\WDC\Domain\Pickup\PickupPointSelection;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
+
+defined( 'ABSPATH' ) || exit;
+
+final class OrderShipmentDraftFactory {
+	public function __construct(
+		private DeliveryServiceRepository $services,
+		private ShipmentServiceSettings $shipment_settings,
+		private ?RussianPostDomesticSettings $domestic_settings = null
+	) {
+	}
+
+	public function create_request_from_order( object $order ): ShipmentCreateRequest {
+		$service_key = $this->meta_string( $order, '_wdc_platform_service_key' );
+		if ( '' === $service_key ) {
+			$service_key = $this->meta_string( $order, '_wdc_platform_rate_id' );
+		}
+		if ( '' === $service_key || ! in_array( $service_key, array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY, RussianPostDomesticSettings::COURIER_SERVICE_KEY ), true ) ) {
+			$service_key = RussianPostDomesticSettings::PICKUP_SERVICE_KEY;
+		}
+		$service = $this->services->find_by_service_key( $service_key );
+		$delivery_type = RussianPostDomesticSettings::service_delivery_type( $service_key );
+		$items = $this->order_items( $order );
+		$weight = $this->default_weight_g( $order, $items );
+		$declared_value = Money::from_kopecks( 0 );
+		$place = new ShipmentPlace( 1, $weight, 20, 20, 10, $declared_value, $items );
+		$settings = $this->shipment_settings->for_service( $service );
+		$order_number = $this->order_number( $order );
+		$settings['shelf_life_days'] = (int) ( $settings[ ShipmentServiceSettings::SHELF_LIFE_DAYS_DEFAULT ] ?? 30 );
+		$settings['combine_goods_items'] = ! empty( $settings[ ShipmentServiceSettings::COMBINE_GOODS_ITEMS_DEFAULT ] );
+		$settings['combined_goods_name_template'] = (string) ( $settings[ ShipmentServiceSettings::COMBINED_GOODS_NAME_TEMPLATE ] ?? 'Товары по заказу {order_number}' );
+		$settings['combined_goods_name'] = str_replace( '{order_number}', $order_number, $settings['combined_goods_name_template'] );
+
+		return new ShipmentCreateRequest(
+			order_id: $this->order_id( $order ),
+			carrier_key: RussianPostDomesticSettings::CARRIER_KEY,
+			delivery_type: $delivery_type,
+			rate_id: $service_key,
+			recipient_address: $this->recipient_address( $order, $delivery_type ),
+			pickup_point: DeliveryType::PICKUP === $delivery_type ? $this->pickup_point( $order ) : null,
+			places: array( $place ),
+			declared_value: $declared_value,
+			services: $settings,
+			recipient: array(
+				'name' => $this->recipient_name( $order ),
+				'phone' => $this->phone( $order ),
+				'email' => $this->email( $order ),
+			),
+			meta: array(
+				'service_key' => $service_key,
+				'service_title' => $service instanceof DeliveryService ? $service->title : $this->meta_string( $order, '_wdc_platform_service_title' ),
+				'tariff_object' => $this->meta_string( $order, '_wdc_platform_tariff_object' ),
+				'tariff_title' => $this->meta_string( $order, '_wdc_platform_tariff_title' ),
+				'order_num' => $order_number,
+				'postoffice_code' => $this->from_postcode( $service_key ),
+				'pickup_point_code' => $this->meta_string( $order, '_wdc_pickup_point_code' ),
+				'calculation_data' => $this->calculation_data( $order ),
+			)
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function draft_array( object $order ): array {
+		$request = $this->create_request_from_order( $order );
+		$services = array_values(
+			array_filter(
+				$this->services->list_active(),
+				static fn ( DeliveryService $service ): bool => RussianPostDomesticSettings::CARRIER_KEY === $service->carrier_key
+			)
+		);
+
+		return array(
+			'request' => $request->to_array(),
+			'services' => array_map(
+				static fn ( DeliveryService $service ): array => array(
+					'service_key' => $service->service_key,
+					'title' => $service->title,
+					'delivery_type' => RussianPostDomesticSettings::service_delivery_type( $service->service_key ),
+				),
+				$services
+			),
+		);
+	}
+
+	public function create_request_from_admin_data( object $order, array $data ): ShipmentCreateRequest {
+		$base = $this->create_request_from_order( $order );
+		$service_key = sanitize_key( wp_unslash( $data['service_key'] ?? $base->rate_id ) );
+		$service = $this->services->find_by_service_key( $service_key );
+		$delivery_type = RussianPostDomesticSettings::service_delivery_type( $service_key );
+		$places = array();
+		$place_rows = is_array( $data['places'] ?? null ) ? $data['places'] : array();
+		foreach ( $place_rows as $index => $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$places[] = new ShipmentPlace(
+				$index + 1,
+				max( 0, (int) ( $row['weight_g'] ?? 0 ) ),
+				max( 0, (int) ( $row['length_cm'] ?? 0 ) ),
+				max( 0, (int) ( $row['width_cm'] ?? 0 ) ),
+				max( 0, (int) ( $row['height_cm'] ?? 0 ) ),
+				Money::from_kopecks( max( 0, (int) ( $row['declared_value_kopecks'] ?? 0 ) ) ),
+				0 === $index ? ( $base->places[0]->items ?? array() ) : array()
+			);
+		}
+		$settings = $this->shipment_settings->for_service( $service );
+		$settings['shelf_life_days'] = max( 15, min( 60, (int) ( $data['shelf_life_days'] ?? $settings[ ShipmentServiceSettings::SHELF_LIFE_DAYS_DEFAULT ] ?? 30 ) ) );
+		$settings['send_goods_items'] = ! empty( $data['send_goods_items'] ) && ! empty( $settings[ ShipmentServiceSettings::SEND_GOODS_ITEMS ] );
+		$settings['combine_goods_items'] = ! empty( $data['combine_goods_items'] );
+		$settings['combined_goods_name'] = sanitize_text_field( wp_unslash( $data['combined_goods_name'] ?? $settings[ ShipmentServiceSettings::COMBINED_GOODS_NAME_TEMPLATE ] ?? '' ) );
+
+		return new ShipmentCreateRequest(
+			$base->order_id,
+			$base->carrier_key,
+			$delivery_type,
+			$service_key,
+			$this->address_from_admin_data( $base->recipient_address, $data, $delivery_type ),
+			DeliveryType::PICKUP === $delivery_type ? $this->pickup_from_admin_data( $base->pickup_point, $data ) : null,
+			array() !== $places ? $places : $base->places,
+			$base->declared_value,
+			false,
+			$settings,
+			array(
+				'name' => sanitize_text_field( wp_unslash( $data['recipient_name'] ?? $base->recipient['name'] ?? '' ) ),
+				'phone' => sanitize_text_field( wp_unslash( $data['recipient_phone'] ?? $base->recipient['phone'] ?? '' ) ),
+				'email' => sanitize_email( wp_unslash( $data['recipient_email'] ?? $base->recipient['email'] ?? '' ) ),
+			),
+			array_merge(
+				$base->meta,
+				array(
+					'service_key' => $service_key,
+					'service_title' => $service instanceof DeliveryService ? $service->title : (string) ( $base->meta['service_title'] ?? '' ),
+					'tariff_object' => sanitize_text_field( wp_unslash( $data['tariff_object'] ?? $base->meta['tariff_object'] ?? '' ) ),
+					'postoffice_code' => preg_replace( '/\D+/', '', (string) wp_unslash( $data['postoffice_code'] ?? $base->meta['postoffice_code'] ?? '' ) ) ?: '',
+				)
+			)
+		);
+	}
+
+	/**
+	 * @return array<int,PackageItem>
+	 */
+	private function order_items( object $order ): array {
+		if ( ! method_exists( $order, 'get_items' ) ) {
+			return array();
+		}
+		$items = array();
+		foreach ( $order->get_items() as $item ) {
+			if ( ! is_object( $item ) ) {
+				continue;
+			}
+			$product = method_exists( $item, 'get_product' ) ? $item->get_product() : null;
+			$qty = method_exists( $item, 'get_quantity' ) ? max( 1, (int) $item->get_quantity() ) : 1;
+			$total = method_exists( $item, 'get_total' ) ? (float) $item->get_total() : 0.0;
+			$weight_g = is_object( $product ) && method_exists( $product, 'get_weight' ) ? (int) round( (float) str_replace( ',', '.', (string) $product->get_weight() ) * 1000 ) : 0;
+			$items[] = new PackageItem(
+				is_object( $product ) && method_exists( $product, 'get_sku' ) ? (string) $product->get_sku() : '',
+				method_exists( $item, 'get_name' ) ? (string) $item->get_name() : 'Товар',
+				$qty,
+				Money::from_rubles( $qty > 0 ? $total / $qty : $total ),
+				Money::from_rubles( $total ),
+				$weight_g
+			);
+		}
+
+		return $items;
+	}
+
+	private function default_weight_g( object $order, array $items ): int {
+		$calculation = $this->calculation_data( $order );
+		$package = is_array( $calculation['package'] ?? null ) ? $calculation['package'] : array();
+		$weight = (int) ( $package['package_weight_with_packaging_g'] ?? $package['final_weight_g'] ?? $package['products_weight_g'] ?? 0 );
+		if ( $weight > 0 ) {
+			return $weight;
+		}
+		$total = 0;
+		foreach ( $items as $item ) {
+			$total += $item instanceof PackageItem ? $item->get_total_weight_g() : 0;
+		}
+
+		return max( 1, $total ?: 1000 );
+	}
+
+	private function recipient_address( object $order, string $delivery_type ): Address {
+		$postcode = $this->meta_string( $order, '_wdc_pickup_point_postcode' ) ?: $this->meta_string( $order, '_wdc_platform_resolved_postcode' );
+		if ( DeliveryType::COURIER === $delivery_type && method_exists( $order, 'get_shipping_postcode' ) ) {
+			$postcode = (string) $order->get_shipping_postcode() ?: $postcode;
+		}
+
+		return new Address(
+			country_code: method_exists( $order, 'get_shipping_country' ) ? (string) $order->get_shipping_country() : 'RU',
+			city: method_exists( $order, 'get_shipping_city' ) ? (string) $order->get_shipping_city() : $this->meta_string( $order, '_wdc_platform_city_display_name' ),
+			postcode: $postcode,
+			street: method_exists( $order, 'get_shipping_address_1' ) ? (string) $order->get_shipping_address_1() : '',
+			apartment: method_exists( $order, 'get_shipping_address_2' ) ? (string) $order->get_shipping_address_2() : '',
+			raw_address: $this->shipping_address( $order ),
+			fias_id: $this->meta_string( $order, '_wdc_platform_fias_id' ),
+			gar_id: $this->meta_string( $order, '_wdc_platform_gar_id' )
+		);
+	}
+
+	private function address_from_admin_data( Address $base, array $data, string $delivery_type ): Address {
+		return new Address(
+			country_code: $base->country_code ?: 'RU',
+			city: sanitize_text_field( wp_unslash( $data['city'] ?? $base->city ) ),
+			postcode: preg_replace( '/\D+/', '', (string) wp_unslash( $data['postcode'] ?? $base->postcode ) ) ?: '',
+			raw_address: sanitize_text_field( wp_unslash( $data['raw_address'] ?? $base->raw_address ) ),
+			fias_id: $base->fias_id,
+			gar_id: $base->gar_id
+		);
+	}
+
+	private function pickup_point( object $order ): ?PickupPointSelection {
+		$code = $this->meta_string( $order, '_wdc_pickup_point_code' );
+		if ( '' === $code ) {
+			return null;
+		}
+
+		return new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, $code, $this->meta_string( $order, '_wdc_pickup_point_address' ), $this->now() );
+	}
+
+	private function pickup_from_admin_data( ?PickupPointSelection $base, array $data ): ?PickupPointSelection {
+		$code = sanitize_text_field( wp_unslash( $data['pickup_point_code'] ?? $base?->point_code ?? '' ) );
+		if ( '' === $code ) {
+			return null;
+		}
+
+		return new PickupPointSelection(
+			RussianPostDomesticSettings::CARRIER_KEY,
+			RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+			$code,
+			sanitize_text_field( wp_unslash( $data['pickup_point_address'] ?? $base?->point_address ?? '' ) ),
+			$base?->selected_at ?: $this->now()
+		);
+	}
+
+	private function meta_string( object $order, string $key ): string {
+		if ( ! method_exists( $order, 'get_meta' ) ) {
+			return '';
+		}
+		$value = $order->get_meta( $key, true );
+
+		return is_scalar( $value ) ? trim( (string) $value ) : '';
+	}
+
+	private function calculation_data( object $order ): array {
+		if ( ! method_exists( $order, 'get_meta' ) ) {
+			return array();
+		}
+		$value = $order->get_meta( '_wdc_delivery_calculation_data', true );
+		if ( is_string( $value ) ) {
+			$decoded = json_decode( $value, true );
+			return is_array( $decoded ) ? $decoded : array();
+		}
+
+		return is_array( $value ) ? $value : array();
+	}
+
+	private function from_postcode( string $service_key ): string {
+		$settings = $this->domestic_settings instanceof RussianPostDomesticSettings ? $this->domestic_settings->all( $service_key ) : array();
+
+		return preg_replace( '/\D+/', '', (string) ( $settings['default_from_postcode'] ?? $settings['return_postcode'] ?? '630005' ) ) ?: '630005';
+	}
+
+	private function now(): string {
+		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+	}
+
+	private function order_id( object $order ): int {
+		return method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
+	}
+
+	private function order_number( object $order ): string {
+		return method_exists( $order, 'get_order_number' ) ? (string) $order->get_order_number() : (string) $this->order_id( $order );
+	}
+
+	private function recipient_name( object $order ): string {
+		$parts = array();
+		foreach ( array( 'get_shipping_first_name', 'get_shipping_last_name' ) as $method ) {
+			if ( method_exists( $order, $method ) ) {
+				$parts[] = (string) $order->{$method}();
+			}
+		}
+		$name = trim( implode( ' ', $parts ) );
+		if ( '' !== $name ) {
+			return $name;
+		}
+
+		return trim( ( method_exists( $order, 'get_billing_first_name' ) ? (string) $order->get_billing_first_name() : '' ) . ' ' . ( method_exists( $order, 'get_billing_last_name' ) ? (string) $order->get_billing_last_name() : '' ) );
+	}
+
+	private function phone( object $order ): string {
+		return method_exists( $order, 'get_billing_phone' ) ? (string) $order->get_billing_phone() : '';
+	}
+
+	private function email( object $order ): string {
+		return method_exists( $order, 'get_billing_email' ) ? (string) $order->get_billing_email() : '';
+	}
+
+	private function shipping_address( object $order ): string {
+		$parts = array();
+		foreach ( array( 'get_shipping_postcode', 'get_shipping_city', 'get_shipping_address_1', 'get_shipping_address_2' ) as $method ) {
+			if ( method_exists( $order, $method ) ) {
+				$value = trim( (string) $order->{$method}() );
+				if ( '' !== $value ) {
+					$parts[] = $value;
+				}
+			}
+		}
+
+		return implode( ', ', $parts );
+	}
+}

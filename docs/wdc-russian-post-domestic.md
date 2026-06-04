@@ -58,6 +58,20 @@ The future checkout calculation should use the default from index. Later, order 
 
 Pickup remains a platform mechanism and must not depend on test/demo fixtures.
 
+## Shipment Creation Foundation
+
+The first shipment runtime uses the saved domestic service and selected tariff object from WooCommerce order meta as defaults for a manual admin flow. A manager opens the order metabox `Отправления`, reviews recipient, delivery type, pickup/address and parcel places, then creates a Russian Post Otpravka backlog order.
+
+Object-code to Otpravka product mapping is handled in `src/Shipments/RussianPost/RussianPostShipmentProductMapper.php`. Multiple places are allowed only for MMO-compatible products: `ECOM_MARKETPLACE`, `EMS_RT`, `EMS_TENDER`, `ONLINE_COURIER`, and `ONLINE_PARCEL`. For MMO the payload sends one backlog object per place with `add-to-mmo=true` and `group-name` equal to the WooCommerce order number.
+
+The runtime calls:
+
+```text
+PUT /2.0/user/backlog
+```
+
+through the shared Otpravka client. API credentials remain in the existing encrypted/redacted settings keys and are edited primarily on `WDC -> Перевозчики -> Почта России`.
+
 ## Russian Post Tariff API
 
 The domestic carrier should call:

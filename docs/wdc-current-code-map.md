@@ -110,6 +110,20 @@
 - API clients, settings, country mapping, tariff variants, courier probing и Otpravka client foundation Почты России;
 - admin page стран Почты России.
 
+## Shipments
+
+Расположение:
+`src/Shipments`, `assets/admin/shipments-admin.*`
+
+Ответственность:
+
+- carrier-neutral contract for shipment creation adapters;
+- manual WooCommerce order admin metabox `Отправления`;
+- safe draft creation from HPOS-compatible WooCommerce order APIs and saved WDC order meta;
+- Russian Post Otpravka `PUT /2.0/user/backlog` payload building and response normalization;
+- order meta storage for shipment state, safe request/response snapshots, barcode/result ids and last safe error;
+- `WDC -> Перевозчики` page for shared carrier credentials.
+
 ## Pickup Points
 
 Расположение:

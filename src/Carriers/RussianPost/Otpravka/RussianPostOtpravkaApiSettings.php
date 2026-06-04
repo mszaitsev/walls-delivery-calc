@@ -102,8 +102,12 @@ final class RussianPostOtpravkaApiSettings {
 		if ( ! empty( $input['russian_post_otpravka_clear_access_token'] ) ) {
 			$values[ self::ACCESS_TOKEN_KEY ] = '';
 		}
-		$values[ self::LOGIN_KEY ] = sanitize_text_field( wp_unslash( $input['russian_post_otpravka_login'] ?? '' ) );
-		$values[ self::TIMEOUT_KEY ] = max( 30, min( 300, (int) ( $input['russian_post_otpravka_timeout'] ?? 120 ) ) );
+		if ( array_key_exists( 'russian_post_otpravka_login', $input ) ) {
+			$values[ self::LOGIN_KEY ] = sanitize_text_field( wp_unslash( $input['russian_post_otpravka_login'] ?? '' ) );
+		}
+		if ( array_key_exists( 'russian_post_otpravka_timeout', $input ) ) {
+			$values[ self::TIMEOUT_KEY ] = max( 30, min( 300, (int) ( $input['russian_post_otpravka_timeout'] ?? 120 ) ) );
+		}
 		$type = strtoupper( sanitize_key( wp_unslash( $input['russian_post_pickup_unload_type'] ?? 'ALL' ) ) );
 		$values[ self::PICKUP_UNLOAD_TYPE_KEY ] = in_array( $type, array( 'ALL', 'OPS', 'PVZ', 'APS' ), true ) ? $type : 'ALL';
 		$values[ self::PICKUP_SCHEDULE_ENABLED_KEY ] = ! empty( $input['russian_post_pickup_schedule_enabled'] );

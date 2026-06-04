@@ -40,6 +40,7 @@ use WallsShop\WDC\Rules\Admin\RulesAdminPage;
 use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleCondition;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
+use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -178,6 +179,9 @@ final class DeliveryServicesAdminPage {
 				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
 				if ( $service instanceof DeliveryService && RussianPostSettings::SERVICE_KEY === $service->service_key && null !== $service->id ) {
 					$this->save_russian_post_settings( (int) $service->id );
+				}
+				if ( $service instanceof DeliveryService && $this->is_domestic_service( $service ) && null !== $service->id ) {
+					$this->save_shipment_service_settings( (int) $service->id, $service->service_key );
 				}
 			}
 			if ( 'save_tariffs' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
@@ -453,9 +457,19 @@ final class DeliveryServicesAdminPage {
 			<input type="hidden" name="wdc_delivery_services_action" value="save_main">
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 			<table class="form-table" role="presentation">
-				<?php $this->text_row( 'service_key', __( 'Service key', 'walls-delivery-calc' ), $service->service_key ); ?>
+				<?php if ( $this->services->is_predefined_service_key( $service->service_key ) ) : ?>
+					<?php $this->readonly_row( 'service_key', __( 'Service key', 'walls-delivery-calc' ), $service->service_key ); ?>
+					<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+				<?php else : ?>
+					<?php $this->text_row( 'service_key', __( 'Service key', 'walls-delivery-calc' ), $service->service_key ); ?>
+				<?php endif; ?>
 				<?php $this->text_row( 'title', __( 'Название', 'walls-delivery-calc' ), $service->title ); ?>
-				<?php $this->text_row( 'carrier_key', __( 'Carrier key', 'walls-delivery-calc' ), $service->carrier_key ); ?>
+				<?php if ( $this->services->is_predefined_service_key( $service->service_key ) ) : ?>
+					<?php $this->readonly_row( 'carrier_key', __( 'Carrier key', 'walls-delivery-calc' ), $service->carrier_key ); ?>
+					<input type="hidden" name="carrier_key" value="<?php echo esc_attr( $service->carrier_key ); ?>">
+				<?php else : ?>
+					<?php $this->text_row( 'carrier_key', __( 'Carrier key', 'walls-delivery-calc' ), $service->carrier_key ); ?>
+				<?php endif; ?>
 				<?php $this->select_row( 'service_type', __( 'Тип', 'walls-delivery-calc' ), $service->service_type, array( DeliveryService::TYPE_API, DeliveryService::TYPE_FIXED, DeliveryService::TYPE_WEIGHT_BASED ) ); ?>
 				<?php $this->text_row( 'sort_order', __( 'Sort order', 'walls-delivery-calc' ), (string) $service->sort_order ); ?>
 				<?php $this->checkbox_row( 'enabled', __( 'Включена', 'walls-delivery-calc' ), $service->enabled ); ?>
@@ -489,6 +503,9 @@ final class DeliveryServicesAdminPage {
 
 	private function render_calculation_tab( DeliveryService $service ): void {
 		$rp = RussianPostSettings::SERVICE_KEY === $service->service_key ? $this->russian_post_values( $service ) : array();
+		$shipment = $this->is_domestic_service( $service )
+			? ( new ShipmentServiceSettings( $this->settings ) )->for_service( $service )
+			: array();
 		?>
 		<form method="post" style="max-width: 860px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
@@ -517,6 +534,15 @@ final class DeliveryServicesAdminPage {
 					<?php $this->checkbox_row( 'rp_cache_until_end_of_day', __( 'Кэш до конца дня', 'walls-delivery-calc' ), ! empty( $rp['cache_until_end_of_day'] ) ); ?>
 					<?php $this->checkbox_row( 'rp_auto_refresh_countries_if_empty', __( 'Автообновление стран, если пусто', 'walls-delivery-calc' ), ! empty( $rp['auto_refresh_countries_if_empty'] ) ); ?>
 					<?php $this->checkbox_row( 'rp_debug', __( 'Debug Почты России', 'walls-delivery-calc' ), ! empty( $rp['debug'] ) ); ?>
+				<?php endif; ?>
+				<?php if ( $this->is_domestic_service( $service ) ) : ?>
+					<tr><th colspan="2"><h3><?php echo esc_html__( 'Отправления', 'walls-delivery-calc' ); ?></h3></th></tr>
+					<?php if ( RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $service->service_key ) : ?>
+						<?php $this->text_row( ShipmentServiceSettings::SHELF_LIFE_DAYS_DEFAULT, __( 'Срок хранения по умолчанию, дней', 'walls-delivery-calc' ), (string) ( $shipment[ ShipmentServiceSettings::SHELF_LIFE_DAYS_DEFAULT ] ?? 30 ) ); ?>
+					<?php endif; ?>
+					<?php $this->checkbox_row( ShipmentServiceSettings::SEND_GOODS_ITEMS, __( 'Передавать состав вложения goods.items', 'walls-delivery-calc' ), ! empty( $shipment[ ShipmentServiceSettings::SEND_GOODS_ITEMS ] ) ); ?>
+					<?php $this->checkbox_row( ShipmentServiceSettings::COMBINE_GOODS_ITEMS_DEFAULT, __( 'По умолчанию объединять товары в одну строку', 'walls-delivery-calc' ), ! empty( $shipment[ ShipmentServiceSettings::COMBINE_GOODS_ITEMS_DEFAULT ] ) ); ?>
+					<?php $this->text_row( ShipmentServiceSettings::COMBINED_GOODS_NAME_TEMPLATE, __( 'Шаблон названия объединенной строки', 'walls-delivery-calc' ), (string) ( $shipment[ ShipmentServiceSettings::COMBINED_GOODS_NAME_TEMPLATE ] ?? 'Товары по заказу {order_number}' ) ); ?>
 				<?php endif; ?>
 			</table>
 			<?php submit_button( __( 'Сохранить расчет', 'walls-delivery-calc' ) ); ?>
@@ -590,12 +616,8 @@ final class DeliveryServicesAdminPage {
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 			<h3>API Отправка Почты России</h3>
-			<p class="description">Эти реквизиты используются для выгрузки ПВЗ/ОПС и позже будут использоваться для регистрации посылок в личном кабинете Почты России.</p>
+			<div class="notice notice-info inline"><p><?php echo esc_html__( 'Реквизиты API Отправка теперь редактируются на странице WDC → Перевозчики → Почта России. Эта вкладка управляет импортом ПВЗ/ОПС и использует уже сохраненные реквизиты.', 'walls-delivery-calc' ); ?> <a href="<?php echo esc_url( admin_url( 'admin.php?page=wdc-carriers' ) ); ?>"><?php echo esc_html__( 'Открыть настройки перевозчиков', 'walls-delivery-calc' ); ?></a></p></div>
 			<table class="form-table" role="presentation">
-				<tr><th scope="row">AccessToken</th><td><input class="regular-text" type="password" name="russian_post_otpravka_access_token" value="" placeholder="<?php echo esc_attr( $this->otpravka_settings->has_access_token() ? 'задано' : 'не задано' ); ?>"><label style="display:block;margin-top:6px;"><input type="checkbox" name="russian_post_otpravka_clear_access_token" value="1"> очистить сохраненный AccessToken</label></td></tr>
-				<?php $this->text_row( 'russian_post_otpravka_login', 'Логин', (string) ( $values[ RussianPostOtpravkaApiSettings::LOGIN_KEY ] ?? '' ) ); ?>
-				<tr><th scope="row">Пароль</th><td><input class="regular-text" type="password" name="russian_post_otpravka_password" value="" placeholder="<?php echo esc_attr( $this->otpravka_settings->has_password() ? 'задано' : 'не задано' ); ?>"><label style="display:block;margin-top:6px;"><input type="checkbox" name="russian_post_otpravka_clear_password" value="1"> очистить сохраненный пароль</label></td></tr>
-				<tr><th scope="row">Таймаут загрузки, сек.</th><td><input class="regular-text" name="russian_post_otpravka_timeout" value="<?php echo esc_attr( (string) ( $values[ RussianPostOtpravkaApiSettings::TIMEOUT_KEY ] ?? 120 ) ); ?>"><p class="description">Используется только при автоматическом скачивании архива через API. Для ручной загрузки ZIP/TXT не применяется.</p></td></tr>
 			</table>
 			<h3>Типы пунктов выдачи</h3>
 			<p class="description">Отключенные типы не попадают в REST-ответы карты. Если выключить все типы, OPS будет включен автоматически.</p>
@@ -923,6 +945,15 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		<?php
 	}
 
+	private function readonly_row( string $name, string $label, string $value ): void {
+		?>
+		<tr>
+			<th scope="row"><?php echo esc_html( $label ); ?></th>
+			<td><code><?php echo esc_html( $value ); ?></code><p class="description"><?php echo esc_html__( 'Техническое поле системной службы, не редактируется.', 'walls-delivery-calc' ); ?></p></td>
+		</tr>
+		<?php
+	}
+
 	private function textarea_row( string $name, string $label, string $value ): void {
 		?>
 		<tr>
@@ -1069,6 +1100,15 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		}
 		$type_settings = $this->pickup_point_type_settings ?? new RussianPostPickupPointTypeSettings();
 		foreach ( $type_settings->sanitize_admin_values( $_POST ) as $key => $data ) {
+			$this->settings->set_setting( $service_id, $key, $data['value'], $data['format'] );
+		}
+	}
+
+	private function save_shipment_service_settings( int $service_id, string $service_key ): void {
+		if ( ! $this->settings instanceof DeliveryServiceSettingsRepository ) {
+			return;
+		}
+		foreach ( ShipmentServiceSettings::sanitize_from_post( $_POST, $service_key ) as $key => $data ) {
 			$this->settings->set_setting( $service_id, $key, $data['value'], $data['format'] );
 		}
 	}
