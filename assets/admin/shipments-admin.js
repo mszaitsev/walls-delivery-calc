@@ -6,12 +6,11 @@
     if (!element || !element.closest) return null;
     const direct = element.closest(formSelector);
     if (direct) return direct;
-    const nativeForm = element.closest('form');
-    if (nativeForm) return nativeForm;
     const modal = element.closest('[data-wdc-shipment-modal], .wdc-shipment-modal');
-    if (modal) return modal.querySelector('form');
+    if (modal) return modal.querySelector(formSelector) || modal.querySelector('form');
     const box = element.closest('[data-wdc-shipments-metabox]');
-    return box ? box.querySelector('form') : null;
+    if (box) return box.querySelector(formSelector) || box.querySelector('form');
+    return element.closest('form');
   }
 
   function findPlacesContainer(element) {
@@ -22,10 +21,20 @@
     return box ? box.querySelector('[data-wdc-places]') : null;
   }
 
+  function collectShipmentData(container) {
+    const data = new FormData();
+    container.querySelectorAll('input, select, textarea').forEach((field) => {
+      if (!field.name || field.disabled) return;
+      if ((field.type === 'checkbox' || field.type === 'radio') && !field.checked) return;
+      data.append(field.name, field.value);
+    });
+    return data;
+  }
+
   function requestPreview(form) {
     const preview = form.querySelector('[data-wdc-shipment-preview]');
     const errors = form.querySelector('[data-wdc-shipment-errors]');
-    const data = new FormData(form);
+    const data = collectShipmentData(form);
     data.append('action', window.wdcShipmentsAdmin.previewAction);
     data.append('nonce', window.wdcShipmentsAdmin.nonce);
     fetch(window.wdcShipmentsAdmin.ajaxUrl, {
@@ -60,7 +69,7 @@
     const service = form.querySelector('[data-wdc-service-select]');
     const tariff = form.querySelector('[data-wdc-tariff-select]');
     const message = form.querySelector('[data-wdc-tariff-message]');
-    const submit = form.querySelector('button[type="submit"]');
+    const submit = form.querySelector('[data-wdc-create-shipment]');
     if (!service || !tariff) return;
     const selectedOption = service.options[service.selectedIndex];
     let tariffs = [];
@@ -234,6 +243,39 @@
       const box = pickupMap.closest('section');
       const message = box && box.querySelector('[data-wdc-admin-pickup-map-message]');
       if (message) message.hidden = false;
+      return;
+    }
+
+    const create = event.target.closest('[data-wdc-create-shipment]');
+    if (create) {
+      const form = findShipmentForm(create);
+      if (!form) return;
+      const errors = form.querySelector('[data-wdc-shipment-errors]');
+      if (errors) errors.textContent = '';
+      const data = collectShipmentData(form);
+      data.append('action', window.wdcShipmentsAdmin.createAction);
+      data.append('nonce', window.wdcShipmentsAdmin.nonce);
+      fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: data
+      })
+        .then((response) => response.json())
+        .then((payload) => {
+          if (!payload || !payload.success) {
+            throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РѕС‚РїСЂР°РІР»РµРЅРёРµ.');
+          }
+          if (errors) {
+            errors.textContent = payload.data.message + ' Barcode: ' + (payload.data.tracking_number || '-') + '. Result ID: ' + (payload.data.external_id || '-');
+          }
+          const preview = form.querySelector('[data-wdc-shipment-preview]');
+          if (preview && payload.data.preview) {
+            preview.textContent = JSON.stringify(payload.data.preview || {}, null, 2);
+          }
+        })
+        .catch((error) => {
+          if (errors) errors.textContent = error.message;
+        });
     }
   });
 
@@ -282,38 +324,6 @@
     }
     updateDemandAddress(form);
     schedulePreview(form);
-  });
-
-  document.addEventListener('submit', function (event) {
-    const form = findShipmentForm(event.target);
-    if (!form) return;
-    event.preventDefault();
-    const errors = form.querySelector('[data-wdc-shipment-errors]');
-    if (errors) errors.textContent = '';
-    const data = new FormData(form);
-    data.append('action', window.wdcShipmentsAdmin.createAction);
-    data.append('nonce', window.wdcShipmentsAdmin.nonce);
-    fetch(window.wdcShipmentsAdmin.ajaxUrl, {
-      method: 'POST',
-      credentials: 'same-origin',
-      body: data
-    })
-      .then((response) => response.json())
-      .then((payload) => {
-        if (!payload || !payload.success) {
-          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось создать отправление.');
-        }
-        if (errors) {
-          errors.textContent = payload.data.message + ' Barcode: ' + (payload.data.tracking_number || '-') + '. Result ID: ' + (payload.data.external_id || '-');
-        }
-        const preview = form.querySelector('[data-wdc-shipment-preview]');
-        if (preview && payload.data.preview) {
-          preview.textContent = JSON.stringify(payload.data.preview || {}, null, 2);
-        }
-      })
-      .catch((error) => {
-        if (errors) errors.textContent = error.message;
-      });
   });
 
   const forms = new Set(document.querySelectorAll(formSelector));

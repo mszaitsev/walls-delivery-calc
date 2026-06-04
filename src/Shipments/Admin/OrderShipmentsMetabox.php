@@ -136,7 +136,7 @@ final class OrderShipmentsMetabox {
 				<div class="wdc-shipment-modal__dialog" role="dialog" aria-modal="true" aria-label="<?php echo esc_attr__( 'Подготовка отправления', 'walls-delivery-calc' ); ?>">
 					<button type="button" class="wdc-shipment-modal__close" data-wdc-close-shipment-modal aria-label="<?php echo esc_attr__( 'Закрыть', 'walls-delivery-calc' ); ?>">×</button>
 					<h2><?php echo esc_html__( 'Подготовка отправления', 'walls-delivery-calc' ); ?></h2>
-					<form id="wdc-shipment-form-<?php echo esc_attr( (string) $order_id ); ?>" class="wdc-shipment-form" data-wdc-shipment-form="1">
+					<div id="wdc-shipment-form-<?php echo esc_attr( (string) $order_id ); ?>" class="wdc-shipment-form" data-wdc-shipment-form="1" role="group">
 						<input type="hidden" name="order_id" value="<?php echo esc_attr( (string) $order_id ); ?>">
 						<div class="wdc-shipment-grid">
 							<section>
@@ -205,9 +205,9 @@ final class OrderShipmentsMetabox {
 							<h3><?php echo esc_html__( 'Проверка', 'walls-delivery-calc' ); ?></h3>
 							<div class="wdc-shipment-errors" data-wdc-shipment-errors></div>
 							<pre class="wdc-shipment-preview" data-wdc-shipment-preview><?php echo esc_html( wp_json_encode( $safe_preview, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) ?: '{}' ); ?></pre>
-							<button type="submit" class="button button-primary"><?php echo esc_html__( 'Создать отправление', 'walls-delivery-calc' ); ?></button>
+							<button type="button" class="button button-primary" data-wdc-create-shipment><?php echo esc_html__( 'Создать отправление', 'walls-delivery-calc' ); ?></button>
 						</section>
-					</form>
+					</div>
 				</div>
 			</div>
 		</div>
