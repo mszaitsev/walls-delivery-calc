@@ -119,10 +119,10 @@ final class OrderShipmentDraftFactory {
 			}
 			$places[] = new ShipmentPlace(
 				$index + 1,
-				max( 0, (int) ( $row['weight_g'] ?? 0 ) ),
-				max( 0, (int) ( $row['length_cm'] ?? 0 ) ),
-				max( 0, (int) ( $row['width_cm'] ?? 0 ) ),
-				max( 0, (int) ( $row['height_cm'] ?? 0 ) ),
+				$this->whole_number_from_place_row( $row, 'weight_g' ),
+				$this->whole_number_from_place_row( $row, 'length_cm' ),
+				$this->whole_number_from_place_row( $row, 'width_cm' ),
+				$this->whole_number_from_place_row( $row, 'height_cm' ),
 				$this->declared_value_from_place_row( $row ),
 				0 === $index ? ( $base->places[0]->items ?? array() ) : array()
 			);
@@ -218,7 +218,7 @@ final class OrderShipmentDraftFactory {
 		return new Address(
 			country_code: method_exists( $order, 'get_shipping_country' ) ? (string) $order->get_shipping_country() : 'RU',
 			region_name: $this->shipping_region( $order ),
-			city: method_exists( $order, 'get_shipping_city' ) ? (string) $order->get_shipping_city() : $this->meta_string( $order, '_wdc_platform_city_display_name' ),
+			city: $this->recipient_city( $order ),
 			postcode: $postcode,
 			street: method_exists( $order, 'get_shipping_address_1' ) ? (string) $order->get_shipping_address_1() : '',
 			apartment: method_exists( $order, 'get_shipping_address_2' ) ? (string) $order->get_shipping_address_2() : '',
@@ -270,6 +270,9 @@ final class OrderShipmentDraftFactory {
 	private function tariffs_for_service( DeliveryService $service ): array {
 		$settings = $this->domestic_settings instanceof RussianPostDomesticSettings ? $this->domestic_settings->all( $service->service_key ) : array();
 		$variants = is_array( $settings['tariff_variants'] ?? null ) ? $settings['tariff_variants'] : array();
+		if ( is_array( $variants['value'] ?? null ) ) {
+			$variants = $variants['value'];
+		}
 		if ( array() === $variants ) {
 			$variants = array_map( static fn ( object $variant ): array => method_exists( $variant, 'to_array' ) ? $variant->to_array() : array(), ( new \WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver() )->defaults() );
 		}
@@ -293,6 +296,50 @@ final class OrderShipmentDraftFactory {
 		return $tariffs;
 	}
 
+	private function recipient_city( object $order ): string {
+		if ( method_exists( $order, 'get_shipping_city' ) ) {
+			$city = trim( (string) $order->get_shipping_city() );
+			if ( '' !== $city ) {
+				return $city;
+			}
+		}
+
+		$calculation = $this->calculation_data( $order );
+		foreach ( array( 'destination', 'recipient', 'location', 'pickup_point', 'pickup' ) as $section ) {
+			$source = is_array( $calculation[ $section ] ?? null ) ? $calculation[ $section ] : array();
+			foreach ( array( 'settlement', 'settlement_name', 'city', 'city_name', 'place', 'place_name' ) as $key ) {
+				$value = trim( (string) ( $source[ $key ] ?? '' ) );
+				if ( '' !== $value ) {
+					return $value;
+				}
+			}
+		}
+		foreach ( array( 'settlement', 'settlement_name', 'city', 'city_name', 'place', 'place_name' ) as $key ) {
+			$value = trim( (string) ( $calculation[ $key ] ?? '' ) );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		$display = $this->meta_string( $order, '_wdc_platform_city_display_name' );
+		if ( '' !== $display ) {
+			$parts = preg_split( '/\s+[—-]\s+/u', $display, 2 ) ?: array();
+			$city = trim( (string) ( $parts[0] ?? $display ) );
+			if ( '' !== $city ) {
+				return $city;
+			}
+		}
+
+		foreach ( array( '_wdc_pickup_point_city', '_wdc_pickup_city', '_wdc_platform_city', '_wdc_platform_settlement' ) as $key ) {
+			$value = $this->meta_string( $order, $key );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		return '';
+	}
+
 	/**
 	 * @return array<string,mixed>
 	 */
@@ -314,11 +361,19 @@ final class OrderShipmentDraftFactory {
 	 */
 	private function declared_value_from_place_row( array $row ): Money {
 		if ( array_key_exists( 'declared_value_rub', $row ) ) {
-			$rubles = trim( (string) $row['declared_value_rub'] );
-			return Money::from_kopecks( 1 === preg_match( '/^\d+$/', $rubles ) ? max( 0, (int) $rubles ) * 100 : 0 );
+			return Money::from_kopecks( $this->whole_number_from_place_row( $row, 'declared_value_rub' ) * 100 );
 		}
 
-		return Money::from_kopecks( max( 0, (int) ( $row['declared_value_kopecks'] ?? 0 ) ) );
+		return Money::from_kopecks( $this->whole_number_from_place_row( $row, 'declared_value_kopecks' ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function whole_number_from_place_row( array $row, string $key ): int {
+		$value = preg_replace( '/\D+/', '', (string) ( $row[ $key ] ?? '' ) ) ?? '';
+
+		return '' !== $value ? max( 0, (int) $value ) : 0;
 	}
 
 	private function meta_string( object $order, string $key ): string {

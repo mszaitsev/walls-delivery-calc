@@ -258,6 +258,47 @@ shipments_smoke_assert( true === $settings['send_goods_items']['value'], 'send_g
 
 $factory_reflection = new ReflectionClass( OrderShipmentDraftFactory::class );
 $factory = $factory_reflection->newInstanceWithoutConstructor();
+foreach ( array( 'domestic_settings', 'otpravka_settings' ) as $property_name ) {
+	$property = $factory_reflection->getProperty( $property_name );
+	$property->setAccessible( true );
+	$property->setValue( $factory, null );
+}
+
+$tariffs_for_service = $factory_reflection->getMethod( 'tariffs_for_service' );
+$tariffs_for_service->setAccessible( true );
+$pickup_tariffs = $tariffs_for_service->invoke(
+	$factory,
+	new \WallsShop\WDC\DeliveryServices\DeliveryService(
+		1,
+		RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+		RussianPostDomesticSettings::CARRIER_KEY,
+		'api',
+		'Почта России до отделения'
+	)
+);
+shipments_smoke_assert( array() !== $pickup_tariffs, 'Draft factory must expose enabled tariffs for selected Russian Post pickup service.' );
+shipments_smoke_assert( '4030' === (string) ( $pickup_tariffs[0]['object_code'] ?? '' ), 'Draft tariff list must fall back to default enabled domestic tariff variants.' );
+
+$recipient_city = $factory_reflection->getMethod( 'recipient_city' );
+$recipient_city->setAccessible( true );
+$city_from_display = $recipient_city->invoke(
+	$factory,
+	new ShipmentsSmokeOrder(
+		array( 'city' => '' ),
+		array( '_wdc_platform_city_display_name' => 'Новосибирск — Новосибирская область' )
+	)
+);
+shipments_smoke_assert( 'Новосибирск' === $city_from_display, 'Recipient city fallback must use _wdc_platform_city_display_name without region suffix.' );
+
+$city_from_calculation = $recipient_city->invoke(
+	$factory,
+	new ShipmentsSmokeOrder(
+		array( 'city' => '' ),
+		array( '_wdc_delivery_calculation_data' => array( 'destination' => array( 'settlement' => 'Бердск' ) ) )
+	)
+);
+shipments_smoke_assert( 'Бердск' === $city_from_calculation, 'Recipient city fallback must use settlement/city from WDC calculation data.' );
+
 $shipping_address = $factory_reflection->getMethod( 'shipping_address' );
 $shipping_address->setAccessible( true );
 
@@ -320,7 +361,11 @@ $declared_value_method = $factory_reflection->getMethod( 'declared_value_from_pl
 $declared_value_method->setAccessible( true );
 $insurance_1000 = $declared_value_method->invoke( $factory, array( 'declared_value_rub' => '1000' ) );
 $insurance_2500 = $declared_value_method->invoke( $factory, array( 'declared_value_rub' => '2500' ) );
+$insurance_spaced = $declared_value_method->invoke( $factory, array( 'declared_value_rub' => '2 500 руб.' ) );
 shipments_smoke_assert( 100000 === $insurance_1000->get_kopecks(), 'Insurance 1000 rub must become 100000 kopecks.' );
 shipments_smoke_assert( 250000 === $insurance_2500->get_kopecks(), 'Insurance 2500 rub must become 250000 kopecks.' );
+shipments_smoke_assert( 250000 === $insurance_spaced->get_kopecks(), 'Insurance rub input must be cleaned to integer digits on backend.' );
+
+shipments_smoke_assert( 1 === count( $pickup_suffix_payload ), 'Normal pickup payload built from one submitted place must contain one order object.' );
 
 echo "Russian Post shipments smoke OK\n";

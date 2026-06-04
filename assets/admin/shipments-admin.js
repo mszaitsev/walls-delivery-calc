@@ -38,6 +38,8 @@
   function updateTariffOptions(form) {
     const service = form.querySelector('[data-wdc-service-select]');
     const tariff = form.querySelector('[data-wdc-tariff-select]');
+    const message = form.querySelector('[data-wdc-tariff-message]');
+    const submit = form.querySelector('button[type="submit"]');
     if (!service || !tariff) return;
     const selectedOption = service.options[service.selectedIndex];
     let tariffs = [];
@@ -59,6 +61,10 @@
       tariff.options[0].selected = true;
     }
     tariff.dataset.selectedTariff = tariff.value;
+    const hasTariffs = tariff.options.length > 0;
+    tariff.disabled = !hasTariffs;
+    if (message) message.hidden = hasTariffs;
+    if (submit) submit.disabled = !hasTariffs;
   }
 
   function updateDemandAddress(form) {
@@ -113,6 +119,18 @@
     });
   }
 
+  function updateRemoveButtons(container) {
+    const rows = container.querySelectorAll('[data-wdc-place]');
+    rows.forEach((row) => {
+      const button = row.querySelector('[data-wdc-remove-place]');
+      if (button) button.disabled = rows.length <= 1;
+    });
+  }
+
+  function cleanIntegerInput(input) {
+    input.value = String(input.value || '').replace(/\D+/g, '');
+  }
+
   document.addEventListener('click', function (event) {
     const open = event.target.closest('[data-wdc-open-shipment-modal]');
     if (open) {
@@ -141,6 +159,7 @@
       });
       container.appendChild(clone);
       renumberPlaces(container);
+      updateRemoveButtons(container);
       schedulePreview(form);
       return;
     }
@@ -151,6 +170,7 @@
       if (container.querySelectorAll('[data-wdc-place]').length > 1) {
         remove.closest('[data-wdc-place]').remove();
         renumberPlaces(container);
+        updateRemoveButtons(container);
       }
       requestPreview(remove.closest('form'));
       return;
@@ -168,11 +188,30 @@
     const form = event.target.closest('[data-wdc-shipment-form]');
     if (form) {
       if (event.target.matches('input[type="number"]')) {
-        event.target.value = event.target.value.replace(/[^\d]/g, '');
+        cleanIntegerInput(event.target);
       }
       updateDemandAddress(form);
       schedulePreview(form);
     }
+  });
+
+  document.addEventListener('keydown', function (event) {
+    const form = event.target.closest('[data-wdc-shipment-form]');
+    if (!form || !event.target.matches('input[type="number"]')) return;
+    if (['.', ',', '-', '+', 'e', 'E', ' '].includes(event.key)) {
+      event.preventDefault();
+    }
+  });
+
+  document.addEventListener('paste', function (event) {
+    const form = event.target.closest('[data-wdc-shipment-form]');
+    if (!form || !event.target.matches('input[type="number"]')) return;
+    event.preventDefault();
+    const clipboard = event.clipboardData || window.clipboardData;
+    const text = clipboard && clipboard.getData ? clipboard.getData('text') : '';
+    event.target.value = String(text || '').replace(/\D+/g, '');
+    updateDemandAddress(form);
+    schedulePreview(form);
   });
 
   document.addEventListener('change', function (event) {
@@ -220,5 +259,10 @@
   document.querySelectorAll('[data-wdc-shipment-form]').forEach((form) => {
     updateTariffOptions(form);
     updateDemandAddress(form);
+    const container = form.querySelector('[data-wdc-places]');
+    if (container) {
+      renumberPlaces(container);
+      updateRemoveButtons(container);
+    }
   });
 })();

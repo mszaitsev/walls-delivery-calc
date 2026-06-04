@@ -152,6 +152,9 @@ final class RussianPostCreateRequestBuilder {
 		if ( '' === trim( (string) ( $request->meta['postoffice_code'] ?? $request->meta['from_postcode'] ?? '' ) ) ) {
 			$errors[] = 'Индекс места приема обязателен.';
 		}
+		if ( '' === trim( (string) ( $request->meta['tariff_object'] ?? $request->meta['selected_tariff_object'] ?? '' ) ) ) {
+			$errors[] = 'Выберите тариф для создания отправления.';
+		}
 		if ( DeliveryType::COURIER === $request->delivery_type && '' === trim( $request->recipient_address->raw_address . $request->recipient_address->street ) ) {
 			$errors[] = 'Адрес курьерской доставки обязателен.';
 		}
