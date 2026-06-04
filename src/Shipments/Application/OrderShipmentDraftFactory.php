@@ -120,7 +120,7 @@ final class OrderShipmentDraftFactory {
 			);
 		}
 		$settings = $this->shipment_settings->for_service( $service );
-		$settings['shelf_life_days'] = max( 15, min( 60, (int) ( $data['shelf_life_days'] ?? $settings[ ShipmentServiceSettings::SHELF_LIFE_DAYS_DEFAULT ] ?? 30 ) ) );
+		$settings['shelf_life_days'] = max( 15, min( 60, (int) ( $settings[ ShipmentServiceSettings::SHELF_LIFE_DAYS_DEFAULT ] ?? 30 ) ) );
 		$settings['send_goods_items'] = ! empty( $data['send_goods_items'] ) && ! empty( $settings[ ShipmentServiceSettings::SEND_GOODS_ITEMS ] );
 		$settings['combine_goods_items'] = ! empty( $data['combine_goods_items'] );
 		$settings['combined_goods_name'] = sanitize_text_field( wp_unslash( $data['combined_goods_name'] ?? $settings[ ShipmentServiceSettings::COMBINED_GOODS_NAME_TEMPLATE ] ?? '' ) );

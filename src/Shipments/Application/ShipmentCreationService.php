@@ -57,7 +57,7 @@ final class ShipmentCreationService {
 			return new ShipmentCreateResult( false, error_code: 'unsupported_carrier', error_message: 'Для выбранной службы нет адаптера создания отправлений.' );
 		}
 
-		$preview = $adapter->build_safe_payload_preview( $request );
+		$preview = $this->safe_preview( $request );
 		$result = $adapter->create( $request );
 		$now = $this->now();
 		if ( ! $result->success ) {

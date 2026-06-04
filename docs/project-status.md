@@ -32,7 +32,7 @@
 | Multicarrier Pickup Layer | partial | 35% | Generic domain/storage exists, but production checkout map is Russian Post-specific. |
 | Order Admin Recalculation | partial | 30% | Order delivery metabox exists; full recalculation/replacement workflow is missing. |
 | Shipment Domain | partial | 55% | Domain objects exist and are used by the manual shipment creation runtime. |
-| Shipment Runtime | partial | 35% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments; statuses/documents/cancellation are pending. |
+| Shipment Runtime | partial | 38% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments with server-side payload preview; statuses/documents/cancellation/admin pickup map are pending. |
 | Tracking / Documents / Status Sync | not-started | 0% | No tracking polling, labels, acts, documents, or status sync runtime. |
 | WooCommerce Status Mapping | not-started | 0% | Domain baseline exists, but no automatic WooCommerce order status changes. |
 | CDEK | planned | 0% | Planned carrier stage; no adapter found in code. |
@@ -156,10 +156,11 @@
 
 ### Shipment Runtime
 
-- Создание отправлений в ТК.
-- UI/action для отправки заказа в ТК.
-- Несколько грузомест в runtime.
-- Idempotent shipment creation and persistence.
+- Статусы отправлений.
+- Документы/ярлыки/партии/Ф103.
+- Отмена отправлений.
+- Автосинхронизация.
+- Полноценный выбор ПВЗ на карте в админской модалке.
 
 ### Carrier Documents
 
@@ -199,6 +200,11 @@
 - Сохранить manual TXT/JSON payload import на LocalWP/Windows как final fallback path.
 - При необходимости добавить retry/backoff, CLI import mode, chunked streamed download.
 
+### Russian Post shipments
+
+- Админская карта выбора ПВЗ пока не подключена; в модалке показывается явное inline-сообщение, а код ПВЗ можно скорректировать вручную.
+- Распределение товаров по грузоместам в UI пока базовое: товары заказа попадают в первое место, детальное распределение остается отдельным этапом.
+
 ## Несоответствия документации и кода
 
 ### `docs/wdc-current-code-map.md`
@@ -212,14 +218,7 @@
 
 ## Roadmap
 
-### 1. Russian Post Shipments Foundation
-
-- Рекомендуемая ветка: `feature/russian-post-shipments`.
-- Что входит: shipment service, order admin action/form, Otpravka create shipment, package snapshot, order note, shipment state persistence.
-- Зависимости: текущие Russian Post domestic/international, delivery services, order meta, Otpravka credentials.
-- Обновить документы: `docs/walls-delivery-calc-tech-spec.md`, `docs/wdc-russian-post-domestic.md`, `docs/wdc-russian-post-international.md`, `docs/wdc-current-code-map.md`, `docs/project-status.md`.
-
-### 2. Tracking, Documents And Status Sync
+### 1. Tracking, Documents And Status Sync
 
 - Рекомендуемая ветка: `feature/russian-post-status-documents`.
 - Что входит: tracking number, status polling, labels/docs, acts, status mapping, background sync.

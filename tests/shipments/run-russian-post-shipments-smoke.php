@@ -64,7 +64,7 @@ $request = new ShipmentCreateRequest(
 	),
 	recipient: array(
 		'name' => 'Иванов Иван Иванович',
-		'phone' => '+79990000000',
+		'phone' => '+7 (999) 000-00-00',
 		'email' => 'buyer@example.test',
 	),
 	meta: array(
@@ -78,8 +78,11 @@ $payload = $builder->build( $request );
 shipments_smoke_assert( 2 === count( $payload ), 'MMO payload must create one order object per place.' );
 shipments_smoke_assert( true === $payload[0]['add-to-mmo'] && '123' === $payload[0]['group-name'], 'MMO fields must be set.' );
 shipments_smoke_assert( 'ONLINE_PARCEL' === $payload[0]['mail-type'], 'Object 23030 must map to ONLINE_PARCEL.' );
+shipments_smoke_assert( 'ORDINARY' === $payload[0]['mail-category'], 'Ordinary parcel/courier/EMS variants must use ORDINARY category.' );
 shipments_smoke_assert( ! array_key_exists( 'goods', $payload[0] ), 'goods must not be sent when disabled.' );
 shipments_smoke_assert( '630001' === $payload[0]['ecom-data']['delivery-point-index'], 'Pickup code must become ecom-data delivery-point-index.' );
+shipments_smoke_assert( ! array_key_exists( 'index-to', $payload[0] ), 'Pickup/ecom payload must not include recipient index-to.' );
+shipments_smoke_assert( '79990000000' === $payload[0]['tel-address'], 'tel-address must be digit-only.' );
 shipments_smoke_assert( '630005' === $payload[0]['postoffice-code'], 'Postoffice code must be present.' );
 
 $goods_request = new ShipmentCreateRequest(
@@ -98,7 +101,40 @@ $goods_request = new ShipmentCreateRequest(
 );
 $goods_payload = $builder->build( $goods_request );
 shipments_smoke_assert( true === $goods_payload[0]['courier'] && true === $goods_payload[0]['delivery-to-door'], 'Courier flags must be set.' );
+shipments_smoke_assert( '630099' === $goods_payload[0]['index-to'] && ! isset( $goods_payload[0]['ecom-data'] ), 'Courier payload must include index-to and omit ecom-data.' );
 shipments_smoke_assert( isset( $goods_payload[0]['goods']['items'][0] ), 'goods.items must be present when enabled.' );
+
+$missing_pickup = new ShipmentCreateRequest(
+	$request->order_id,
+	$request->carrier_key,
+	DeliveryType::PICKUP,
+	$request->rate_id,
+	$request->recipient_address,
+	null,
+	$request->places,
+	$request->declared_value,
+	false,
+	$request->services,
+	$request->recipient,
+	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '23030' )
+);
+shipments_smoke_assert( in_array( 'Код ПВЗ/почтомата обязателен.', $builder->validate( $missing_pickup ), true ), 'Pickup validation must require delivery-point-index.' );
+
+$missing_phone = new ShipmentCreateRequest(
+	$request->order_id,
+	$request->carrier_key,
+	$request->delivery_type,
+	$request->rate_id,
+	$request->recipient_address,
+	$request->pickup_point,
+	$request->places,
+	$request->declared_value,
+	false,
+	$request->services,
+	array( 'name' => 'Иванов Иван', 'phone' => '++ --', 'email' => '' ),
+	$request->meta
+);
+shipments_smoke_assert( in_array( 'Телефон получателя обязателен.', $builder->validate( $missing_phone ), true ), 'Phone validation must use digit-only normalized value.' );
 
 $settings = ShipmentServiceSettings::sanitize_from_post(
 	array(

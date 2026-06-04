@@ -64,6 +64,8 @@ The first shipment runtime uses the saved domestic service and selected tariff o
 
 Object-code to Otpravka product mapping is handled in `src/Shipments/RussianPost/RussianPostShipmentProductMapper.php`. Multiple places are allowed only for MMO-compatible products: `ECOM_MARKETPLACE`, `EMS_RT`, `EMS_TENDER`, `ONLINE_COURIER`, and `ONLINE_PARCEL`. For MMO the payload sends one backlog object per place with `add-to-mmo=true` and `group-name` equal to the WooCommerce order number.
 
+Plain parcel/courier/EMS shipment variants use Otpravka `mail-category=ORDINARY`; declared-value variants use `WITH_DECLARED_VALUE`. Pickup/ecom shipment payloads send `ecom-data.delivery-point-index` and intentionally omit recipient address fields such as `index-to`; courier payloads send `index-to`, `raw-address`, `courier=true`, and `delivery-to-door=true`.
+
 The runtime calls:
 
 ```text

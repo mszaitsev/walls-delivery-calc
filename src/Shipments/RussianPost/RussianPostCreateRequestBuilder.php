@@ -36,6 +36,7 @@ final class RussianPostCreateRequestBuilder {
 		$combine_goods = ! empty( $request->services['combine_goods_items'] );
 		$combined_name = trim( (string) ( $request->services['combined_goods_name'] ?? '' ) ) ?: str_replace( '{order_number}', $order_num, (string) ( $request->services['combined_goods_name_template'] ?? 'Товары по заказу {order_number}' ) );
 		$result = array();
+		$phone = $this->normalize_phone( (string) ( $request->recipient['phone'] ?? '' ) );
 
 		foreach ( $request->places as $index => $place ) {
 			$payload = array(
@@ -50,7 +51,7 @@ final class RussianPostCreateRequestBuilder {
 				),
 				'postoffice-code' => (string) ( $request->meta['postoffice_code'] ?? $request->meta['from_postcode'] ?? '' ),
 				'recipient-name' => (string) ( $request->recipient['name'] ?? '' ),
-				'tel-address' => (string) ( $request->recipient['phone'] ?? '' ),
+				'tel-address' => $phone,
 				'payment' => 0,
 				'compulsory-payment' => 0,
 				'delivery-with-cod' => false,
@@ -70,13 +71,15 @@ final class RussianPostCreateRequestBuilder {
 				$payload['courier'] = true;
 				$payload['delivery-to-door'] = true;
 				$payload['index-to'] = $request->recipient_address->postcode;
-				$payload['raw-address'] = $request->recipient_address->raw_address ?: implode( ', ', array_filter( array( $request->recipient_address->city, $request->recipient_address->street, $request->recipient_address->house, $request->recipient_address->apartment ) ) );
+				$raw_address = $request->recipient_address->raw_address ?: implode( ', ', array_filter( array( $request->recipient_address->city, $request->recipient_address->street, $request->recipient_address->house, $request->recipient_address->apartment ) ) );
+				if ( '' !== trim( $raw_address ) ) {
+					$payload['raw-address'] = $raw_address;
+				}
 			} else {
 				$pickup_code = $request->pickup_point?->point_code ?? (string) ( $request->meta['pickup_point_code'] ?? '' );
 				if ( '' !== $pickup_code ) {
 					$payload['ecom-data'] = array( 'delivery-point-index' => $pickup_code );
 				}
-				$payload['index-to'] = $request->recipient_address->postcode;
 				$shelf_life_days = (int) ( $request->services['shelf_life_days'] ?? 30 );
 				$payload['shelf-life-days'] = max( 15, min( 60, $shelf_life_days ) );
 			}
@@ -130,10 +133,11 @@ final class RussianPostCreateRequestBuilder {
 		if ( $total_weight > self::MAX_MMO_WEIGHT_G ) {
 			$errors[] = 'Общий вес ММО не должен превышать 300 кг.';
 		}
-		foreach ( array( 'name' => 'ФИО получателя', 'phone' => 'Телефон получателя' ) as $key => $label ) {
-			if ( '' === trim( (string) ( $request->recipient[ $key ] ?? '' ) ) ) {
-				$errors[] = $label . ' обязательно.';
-			}
+		if ( '' === trim( (string) ( $request->recipient['name'] ?? '' ) ) ) {
+			$errors[] = 'ФИО получателя обязательно.';
+		}
+		if ( '' === $this->normalize_phone( (string) ( $request->recipient['phone'] ?? '' ) ) ) {
+			$errors[] = 'Телефон получателя обязателен.';
 		}
 		if ( '' === trim( (string) ( $request->meta['postoffice_code'] ?? $request->meta['from_postcode'] ?? '' ) ) ) {
 			$errors[] = 'Индекс места приема обязателен.';
@@ -141,8 +145,18 @@ final class RussianPostCreateRequestBuilder {
 		if ( DeliveryType::COURIER === $request->delivery_type && '' === trim( $request->recipient_address->raw_address . $request->recipient_address->street ) ) {
 			$errors[] = 'Адрес курьерской доставки обязателен.';
 		}
+		if ( DeliveryType::PICKUP === $request->delivery_type ) {
+			$pickup_code = $request->pickup_point?->point_code ?? (string) ( $request->meta['pickup_point_code'] ?? '' );
+			if ( '' === trim( $pickup_code ) ) {
+				$errors[] = 'Код ПВЗ/почтомата обязателен.';
+			}
+		}
 
 		return array_values( array_unique( $errors ) );
+	}
+
+	private function normalize_phone( string $phone ): string {
+		return preg_replace( '/\D+/', '', $phone ) ?? '';
 	}
 
 	/**

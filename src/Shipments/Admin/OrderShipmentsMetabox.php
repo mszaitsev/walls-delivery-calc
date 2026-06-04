@@ -15,6 +15,7 @@ defined( 'ABSPATH' ) || exit;
 final class OrderShipmentsMetabox {
 	private const NONCE_ACTION = 'wdc_shipments_admin';
 	private const AJAX_CREATE = 'wdc_create_shipment';
+	private const AJAX_PREVIEW = 'wdc_preview_shipment';
 
 	public function __construct(
 		private OrderShipmentRepository $repository,
@@ -30,6 +31,7 @@ final class OrderShipmentsMetabox {
 		add_action( 'add_meta_boxes', array( $this, 'add_meta_box' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_action( 'wp_ajax_' . self::AJAX_CREATE, array( $this, 'ajax_create' ) );
+		add_action( 'wp_ajax_' . self::AJAX_PREVIEW, array( $this, 'ajax_preview' ) );
 	}
 
 	public function add_meta_box(): void {
@@ -60,6 +62,7 @@ final class OrderShipmentsMetabox {
 				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 				'nonce' => wp_create_nonce( self::NONCE_ACTION ),
 				'createAction' => self::AJAX_CREATE,
+				'previewAction' => self::AJAX_PREVIEW,
 			)
 		);
 	}
@@ -114,6 +117,7 @@ final class OrderShipmentsMetabox {
 								<label><?php echo esc_html__( 'Текущий ПВЗ', 'walls-delivery-calc' ); ?><input name="pickup_point_code" value="<?php echo esc_attr( (string) ( $request['pickup_point']['point_code'] ?? $meta['pickup_point_code'] ?? '' ) ); ?>"></label>
 								<label><?php echo esc_html__( 'Адрес ПВЗ', 'walls-delivery-calc' ); ?><input name="pickup_point_address" value="<?php echo esc_attr( (string) ( $request['pickup_point']['point_address'] ?? '' ) ); ?>"></label>
 								<button type="button" class="button" data-wdc-admin-pickup-map><?php echo esc_html__( 'Выбрать другой ПВЗ на карте', 'walls-delivery-calc' ); ?></button>
+								<p class="description" data-wdc-admin-pickup-map-message hidden><?php echo esc_html__( 'Выбор ПВЗ на карте будет подключен отдельным этапом; сейчас код ПВЗ можно скорректировать вручную.', 'walls-delivery-calc' ); ?></p>
 							</section>
 							<section>
 								<h3><?php echo esc_html__( 'Доставка', 'walls-delivery-calc' ); ?></h3>
@@ -124,7 +128,6 @@ final class OrderShipmentsMetabox {
 								</select></label>
 								<label><?php echo esc_html__( 'Тариф/object', 'walls-delivery-calc' ); ?><input name="tariff_object" value="<?php echo esc_attr( (string) ( $meta['tariff_object'] ?? '' ) ); ?>"></label>
 								<label><?php echo esc_html__( 'Индекс места приема', 'walls-delivery-calc' ); ?><input name="postoffice_code" value="<?php echo esc_attr( (string) ( $meta['postoffice_code'] ?? '' ) ); ?>"></label>
-								<label><?php echo esc_html__( 'Срок хранения, дней', 'walls-delivery-calc' ); ?><input type="number" min="15" max="60" name="shelf_life_days" value="<?php echo esc_attr( (string) ( $settings['shelf_life_days'] ?? 30 ) ); ?>"></label>
 							</section>
 						</div>
 						<section>
@@ -186,6 +189,21 @@ final class OrderShipmentsMetabox {
 				'preview' => $preview,
 			)
 		);
+	}
+
+	public function ajax_preview(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
+		}
+		$order_id = (int) ( $_POST['order_id'] ?? 0 );
+		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+		if ( ! is_object( $order ) ) {
+			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
+		}
+		$request = $this->drafts->create_request_from_admin_data( $order, $_POST );
+		$preview = $this->creation->safe_preview( $request );
+
+		wp_send_json_success( array( 'preview' => $preview ) );
 	}
 
 	private function resolve_order( mixed $post_or_order ): ?object {

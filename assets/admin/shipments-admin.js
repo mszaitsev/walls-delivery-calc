@@ -1,17 +1,48 @@
 (function () {
-  function serialize(form) {
-    return new FormData(form);
+  const timers = new WeakMap();
+
+  function requestPreview(form) {
+    const preview = form.querySelector('[data-wdc-shipment-preview]');
+    const errors = form.querySelector('[data-wdc-shipment-errors]');
+    const data = new FormData(form);
+    data.append('action', window.wdcShipmentsAdmin.previewAction);
+    data.append('nonce', window.wdcShipmentsAdmin.nonce);
+    fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: data
+    })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (!payload || !payload.success) {
+          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось обновить предпросмотр.');
+        }
+        if (preview) {
+          preview.textContent = JSON.stringify(payload.data.preview || {}, null, 2);
+        }
+        if (errors && payload.data.preview && payload.data.preview.errors && payload.data.preview.errors.length) {
+          errors.textContent = payload.data.preview.errors.join('; ');
+        } else if (errors && errors.dataset.previewWarning === '1') {
+          errors.textContent = '';
+          delete errors.dataset.previewWarning;
+        }
+      })
+      .catch((error) => {
+        if (errors) {
+          errors.dataset.previewWarning = '1';
+          errors.textContent = 'Предпросмотр временно не обновлен: ' + error.message;
+        }
+      });
   }
 
-  function updatePreview(form) {
-    const data = {};
-    new FormData(form).forEach((value, key) => {
-      data[key] = value;
-    });
-    const preview = form.querySelector('[data-wdc-shipment-preview]');
-    if (preview) {
-      preview.textContent = JSON.stringify(data, null, 2);
+  function schedulePreview(form) {
+    const previous = timers.get(form);
+    if (previous) {
+      window.clearTimeout(previous);
     }
+    timers.set(form, window.setTimeout(function () {
+      requestPreview(form);
+    }, 400));
   }
 
   function renumberPlaces(container) {
@@ -50,7 +81,7 @@
       });
       container.appendChild(clone);
       renumberPlaces(container);
-      updatePreview(form);
+      schedulePreview(form);
       return;
     }
 
@@ -61,19 +92,21 @@
         remove.closest('[data-wdc-place]').remove();
         renumberPlaces(container);
       }
-      updatePreview(remove.closest('form'));
+      schedulePreview(remove.closest('form'));
       return;
     }
 
     const pickupMap = event.target.closest('[data-wdc-admin-pickup-map]');
     if (pickupMap) {
-      alert('Выбор ПВЗ на карте в админке будет подключен к общей карте отдельным этапом. Сейчас код ПВЗ можно скорректировать вручную.');
+      const box = pickupMap.closest('section');
+      const message = box && box.querySelector('[data-wdc-admin-pickup-map-message]');
+      if (message) message.hidden = false;
     }
   });
 
   document.addEventListener('input', function (event) {
     const form = event.target.closest('[data-wdc-shipment-form]');
-    if (form) updatePreview(form);
+    if (form) schedulePreview(form);
   });
 
   document.addEventListener('submit', function (event) {
@@ -82,7 +115,7 @@
     event.preventDefault();
     const errors = form.querySelector('[data-wdc-shipment-errors]');
     if (errors) errors.textContent = '';
-    const data = serialize(form);
+    const data = new FormData(form);
     data.append('action', window.wdcShipmentsAdmin.createAction);
     data.append('nonce', window.wdcShipmentsAdmin.nonce);
     fetch(window.wdcShipmentsAdmin.ajaxUrl, {

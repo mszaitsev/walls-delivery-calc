@@ -17,7 +17,7 @@ Version 0.34.0 adds the first shipment runtime foundation. The scope is intentio
 - `src/Shipments/Application/ShipmentServiceSettings.php` owns per-service shipment settings.
 - `src/Shipments/Storage/OrderShipmentRepository.php` stores shipment state in order meta through WooCommerce CRUD.
 - `src/Shipments/RussianPost/*` maps domestic tariff object codes, builds safe backlog payloads and normalizes create responses.
-- `src/Shipments/Admin/OrderShipmentsMetabox.php` renders the order metabox and AJAX create action.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` renders the order metabox plus AJAX preview/create actions.
 - `src/Shipments/Admin/CarriersAdminPage.php` adds `WDC -> Перевозчики -> Почта России`.
 - `assets/admin/shipments-admin.js` and `assets/admin/shipments-admin.css` provide the admin modal behavior.
 
@@ -29,7 +29,11 @@ The adapter builds an array of backlog order objects. For one place it sends one
 - `group-name=<WooCommerce order number>`;
 - per-place `mass` and `dimension`.
 
-The builder fills `order-num`, `mail-type`, `mail-category`, `postoffice-code`, recipient fields, `payment=0`, `compulsory-payment=0`, `delivery-with-cod=false`, `payment-method=CASHLESS`, and `notice-payment-method=CASHLESS`. Pickup shipments use `ecom-data.delivery-point-index` when a pickup code exists. Courier shipments use `courier=true`, `delivery-to-door=true` and `raw-address`.
+The builder fills `order-num`, `mail-type`, `mail-category`, `postoffice-code`, recipient fields, `payment=0`, `compulsory-payment=0`, `delivery-with-cod=false`, `payment-method=CASHLESS`, and `notice-payment-method=CASHLESS`. Ordinary parcel/courier/EMS variants use `mail-category=ORDINARY`; declared-value variants use `WITH_DECLARED_VALUE`.
+
+Pickup/ecom shipments use `ecom-data.delivery-point-index` and do not send recipient address fields such as `index-to`, `street-to`, `house-to`, or `raw-address`. Courier shipments use `courier=true`, `delivery-to-door=true`, `index-to`, and `raw-address` when available.
+
+`tel-address` is normalized to digits only before payload creation. If the normalized phone is empty, validation returns `Телефон получателя обязателен.`
 
 `dimension-type` and `prepaid-amount` are not sent by default. `goods` is omitted unless service setting `send_goods_items=true`.
 
@@ -73,3 +77,9 @@ php tests/shipments/run-russian-post-shipments-smoke.php
 ```
 
 The smoke test covers Russian Post backlog payload building, MMO normalization, goods omission/enabling, courier flags and service setting sanitization without real API credentials.
+
+## Admin Preview And Known Debt
+
+The preparation modal renders a safe server-side API payload preview. Field changes, service/tariff changes and place add/remove actions refresh the preview through debounced AJAX; if preview refresh temporarily fails, the old preview stays visible and the UI shows a warning.
+
+The admin pickup map is intentionally left for a separate stage. The current button shows an inline message: `Выбор ПВЗ на карте будет подключен отдельным этапом; сейчас код ПВЗ можно скорректировать вручную.` The existing checkout pickup map is not reused here yet to avoid changing checkout frontend behavior in this stage.
