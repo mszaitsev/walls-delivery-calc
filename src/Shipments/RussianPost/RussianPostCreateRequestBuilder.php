@@ -166,8 +166,8 @@ final class RussianPostCreateRequestBuilder {
 		if ( DeliveryType::COURIER === $request->delivery_type && '' === trim( $this->place_to( $request ) ) ) {
 			$errors[] = 'Населенный пункт получателя обязателен.';
 		}
-		if ( DeliveryType::COURIER === $request->delivery_type && ! empty( $request->meta['normalization_required'] ) && empty( $request->meta['normalization_attempted'] ) ) {
-			$errors[] = 'Process courier address before creating shipment.';
+		if ( DeliveryType::COURIER === $request->delivery_type && empty( $request->meta['allow_failed_normalization_preview'] ) && true !== ( $request->meta['normalization_valid'] ?? false ) ) {
+			$errors[] = 'Адрес курьерской доставки нужно успешно обработать через Почту России перед созданием отправления.';
 		}
 		if ( DeliveryType::PICKUP === $request->delivery_type ) {
 			$pickup_code = $request->pickup_point?->point_code ?? (string) ( $request->meta['pickup_point_code'] ?? '' );

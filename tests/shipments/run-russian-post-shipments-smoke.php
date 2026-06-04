@@ -209,7 +209,7 @@ $goods_request = new ShipmentCreateRequest(
 	false,
 	array( 'send_goods_items' => true, 'combine_goods_items' => true, 'combined_goods_name' => 'Товары по заказу 123' ),
 	$request->recipient,
-	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '24030' )
+	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '24030', 'allow_failed_normalization_preview' => true )
 );
 $goods_payload = $builder->build( $goods_request );
 shipments_smoke_assert( true === $goods_payload[0]['courier'] && true === $goods_payload[0]['delivery-to-door'], 'Courier flags must be set.' );
@@ -255,6 +255,7 @@ $normalized_request = new ShipmentCreateRequest(
 		'normalized_address' => $normalized_snapshot,
 		'normalization_required' => true,
 		'normalization_attempted' => true,
+		'normalization_valid' => true,
 	)
 );
 $normalized_payload = $builder->build( $normalized_request );
@@ -280,7 +281,58 @@ $changed_address_request = new ShipmentCreateRequest(
 		'normalization_attempted' => false,
 	)
 );
-shipments_smoke_assert( in_array( 'Process courier address before creating shipment.', $builder->validate( $changed_address_request ), true ), 'Courier create must be blocked when original address changed before re-normalization.' );
+$normalization_error = 'Адрес курьерской доставки нужно успешно обработать через Почту России перед созданием отправления.';
+shipments_smoke_assert( in_array( $normalization_error, $builder->validate( $changed_address_request ), true ), 'Courier create must be blocked when original address changed before re-normalization.' );
+
+$failed_snapshot = $normalizer->normalize_row(
+	array(
+		'quality-code' => 'UNDEF_01',
+		'validation-code' => 'NOT_VALIDATED',
+		'index' => '630099',
+		'region' => 'Новосибирская область',
+		'place' => 'Новосибирск',
+	),
+	'630099, Новосибирская область, Новосибирск'
+);
+$failed_normalization_request = new ShipmentCreateRequest(
+	$request->order_id,
+	$request->carrier_key,
+	DeliveryType::COURIER,
+	RussianPostDomesticSettings::COURIER_SERVICE_KEY,
+	new Address( country_code: 'RU', region_name: 'Новосибирская область', city: 'Новосибирск', postcode: '630099' ),
+	null,
+	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ) ),
+	Money::from_kopecks( 0 ),
+	false,
+	array( 'send_goods_items' => false ),
+	$request->recipient,
+	array(
+		'order_num' => '123',
+		'postoffice_code' => '630005',
+		'tariff_object' => '24030',
+		'normalized_address' => $failed_snapshot,
+		'normalization_required' => true,
+		'normalization_attempted' => true,
+		'normalization_valid' => false,
+	)
+);
+shipments_smoke_assert( in_array( $normalization_error, $builder->validate( $failed_normalization_request ), true ), 'Courier create must be blocked when normalization failed.' );
+$failed_preview_request = new ShipmentCreateRequest(
+	$failed_normalization_request->order_id,
+	$failed_normalization_request->carrier_key,
+	$failed_normalization_request->delivery_type,
+	$failed_normalization_request->rate_id,
+	$failed_normalization_request->recipient_address,
+	$failed_normalization_request->pickup_point,
+	$failed_normalization_request->places,
+	$failed_normalization_request->declared_value,
+	$failed_normalization_request->insurance_enabled,
+	$failed_normalization_request->services,
+	$failed_normalization_request->recipient,
+	array_merge( $failed_normalization_request->meta, array( 'allow_failed_normalization_preview' => true ) )
+);
+$failed_preview_payload = $builder->build( $failed_preview_request );
+shipments_smoke_assert( '630099' === $failed_preview_payload[0]['index-to'] && ! array_key_exists( 'raw-address', $failed_preview_payload[0] ), 'Failed courier normalization preview must use safe fallback without raw-address.' );
 
 $missing_pickup = new ShipmentCreateRequest(
 	$request->order_id,

@@ -109,7 +109,10 @@ final class OrderShipmentsMetabox {
 		$shipment = $this->repository->find_by_carrier( $order, RussianPostDomesticSettings::CARRIER_KEY );
 		$error = $this->repository->last_error( $order );
 		$draft = $this->drafts->draft_array( $order );
-		$safe_preview = $this->creation->safe_preview( $this->drafts->create_request_from_order( $order ) );
+		$safe_preview = array(
+			'status' => 'preview_pending',
+			'message' => 'Предпросмотр будет загружен после открытия модалки.',
+		);
 		$request = is_array( $draft['request'] ?? null ) ? $draft['request'] : array();
 		$services = is_array( $draft['services'] ?? null ) ? $draft['services'] : array();
 		$postoffice_codes = is_array( $draft['postoffice_codes'] ?? null ) ? $draft['postoffice_codes'] : array( '630005' );
@@ -148,7 +151,7 @@ final class OrderShipmentsMetabox {
 		$normalized_address = is_array( $meta['normalized_address'] ?? null ) ? $meta['normalized_address'] : array();
 		$normalized_display = (string) ( $normalized_address['display'] ?? '' );
 		$normalized_status = array() !== $normalized_address
-			? ( ! empty( $normalized_address['success'] ) ? 'Адрес обработан Почтой России.' : 'Адрес не подтвержден Почтой России; preview использует только индекс, регион и населенный пункт.' )
+			? ( ! empty( $normalized_address['success'] ) ? 'Адрес обработан Почтой России.' : 'Адрес не подтвержден Почтой России, создание отправления заблокировано.' )
 			: 'Адрес нужно обработать перед созданием отправления.';
 		$normalized_json = wp_json_encode( $normalized_address, JSON_UNESCAPED_UNICODE ) ?: '';
 		$has_created = in_array( (string) ( $shipment['status'] ?? '' ), array( 'created', 'registered' ), true );
@@ -175,8 +178,8 @@ final class OrderShipmentsMetabox {
 						<div class="wdc-shipment-grid">
 							<section>
 								<h3><?php echo esc_html__( 'Получатель', 'walls-delivery-calc' ); ?></h3>
-								<label><?php echo esc_html__( 'Р¤РРћ', 'walls-delivery-calc' ); ?><input name="recipient_name" value="<?php echo esc_attr( (string) ( $recipient['name'] ?? '' ) ); ?>"></label>
-								<label><?php echo esc_html__( 'РўРµР»РµС„РѕРЅ', 'walls-delivery-calc' ); ?><input name="recipient_phone" value="<?php echo esc_attr( (string) ( $recipient['phone'] ?? '' ) ); ?>"></label>
+								<label><?php echo esc_html__( 'ФИО', 'walls-delivery-calc' ); ?><input name="recipient_name" value="<?php echo esc_attr( (string) ( $recipient['name'] ?? '' ) ); ?>"></label>
+								<label><?php echo esc_html__( 'Телефон', 'walls-delivery-calc' ); ?><input name="recipient_phone" value="<?php echo esc_attr( (string) ( $recipient['phone'] ?? '' ) ); ?>"></label>
 								<label>Email<input name="recipient_email" value="<?php echo esc_attr( (string) ( $recipient['email'] ?? '' ) ); ?>"></label>
 								<div data-wdc-pickup-section <?php echo DeliveryType::PICKUP === $delivery_type ? '' : 'hidden'; ?>>
 									<input type="hidden" name="pickup_point_code" value="<?php echo esc_attr( $pickup_code ); ?>">
@@ -290,7 +293,7 @@ final class OrderShipmentsMetabox {
 		if ( ! is_object( $order ) ) {
 			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
 		}
-		$request = $this->drafts->create_request_from_admin_data( $order, $_POST );
+		$request = $this->preview_request( $this->drafts->create_request_from_admin_data( $order, $_POST ) );
 		$preview = $this->creation->safe_preview( $request );
 
 		wp_send_json_success( array( 'preview' => $preview ) );
@@ -330,6 +333,23 @@ final class OrderShipmentsMetabox {
 		$order_id = is_object( $post_or_order ) && isset( $post_or_order->ID ) ? (int) $post_or_order->ID : 0;
 
 		return $order_id > 0 && function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+	}
+
+	private function preview_request( \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest $request ): \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest {
+		return new \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest(
+			$request->order_id,
+			$request->carrier_key,
+			$request->delivery_type,
+			$request->rate_id,
+			$request->recipient_address,
+			$request->pickup_point,
+			$request->places,
+			$request->declared_value,
+			$request->insurance_enabled,
+			$request->services,
+			$request->recipient,
+			array_merge( $request->meta, array( 'allow_failed_normalization_preview' => true ) )
+		);
 	}
 
 	/**

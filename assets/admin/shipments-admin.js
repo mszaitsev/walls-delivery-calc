@@ -132,7 +132,7 @@
       courierReady = false;
       try {
         const snapshot = JSON.parse(normalizedJson && normalizedJson.value ? normalizedJson.value : '{}');
-        courierReady = Object.keys(snapshot).length > 0;
+        courierReady = snapshot && snapshot.success === true;
       } catch (error) {
         courierReady = false;
       }
@@ -263,7 +263,7 @@
           const snapshot = payload.data.normalized_address || {};
           if (snapshotInput) snapshotInput.value = JSON.stringify(snapshot);
           if (display) display.value = snapshot.display || '';
-          if (status) status.textContent = snapshot.success ? 'Адрес обработан Почтой России.' : (snapshot.message || 'Адрес не подтвержден Почтой России.');
+          if (status) status.textContent = snapshot.success ? 'Адрес обработан Почтой России.' : 'Адрес не подтвержден Почтой России, создание отправления заблокировано.';
           updateCreateAvailability(form);
           requestPreview(form);
         })
@@ -291,7 +291,7 @@
         .then((response) => response.json())
         .then((payload) => {
           if (!payload || !payload.success) {
-            throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РѕС‚РїСЂР°РІР»РµРЅРёРµ.');
+            throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось создать отправление.');
           }
           if (errors) {
             errors.textContent = payload.data.message + ' Barcode: ' + (payload.data.tracking_number || '-') + '. Result ID: ' + (payload.data.external_id || '-');

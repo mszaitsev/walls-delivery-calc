@@ -46,7 +46,7 @@ final class OrderShipmentDraftFactory {
 		$order_number = $this->order_number( $order );
 		$settings['shelf_life_days'] = (int) ( $settings[ ShipmentServiceSettings::SHELF_LIFE_DAYS_DEFAULT ] ?? 30 );
 		$settings['combine_goods_items'] = ! empty( $settings[ ShipmentServiceSettings::COMBINE_GOODS_ITEMS_DEFAULT ] );
-		$settings['combined_goods_name_template'] = (string) ( $settings[ ShipmentServiceSettings::COMBINED_GOODS_NAME_TEMPLATE ] ?? 'Р В Р’В Р РЋРЎвЂєР В Р’В Р РЋРІР‚СћР В Р’В Р В РІР‚В Р В Р’В Р вЂ™Р’В°Р В Р Р‹Р В РІР‚С™Р В Р Р‹Р Р†Р вЂљРІвЂћвЂ“ Р В Р’В Р РЋРІР‚вЂќР В Р’В Р РЋРІР‚Сћ Р В Р’В Р вЂ™Р’В·Р В Р’В Р вЂ™Р’В°Р В Р’В Р РЋРІР‚СњР В Р’В Р вЂ™Р’В°Р В Р’В Р вЂ™Р’В·Р В Р Р‹Р РЋРІР‚Сљ {order_number}' );
+		$settings['combined_goods_name_template'] = (string) ( $settings[ ShipmentServiceSettings::COMBINED_GOODS_NAME_TEMPLATE ] ?? 'Товары по заказу {order_number}' );
 		$settings['combined_goods_name'] = str_replace( '{order_number}', $order_number, $settings['combined_goods_name_template'] );
 		$tariff_object = $this->meta_string( $order, '_wdc_platform_tariff_object' );
 		$tariff = $this->tariff_for_service_object( $service, $tariff_object );
@@ -85,7 +85,7 @@ final class OrderShipmentDraftFactory {
 				'courier_original_hash' => $this->original_address_hash( $original_address ),
 				'normalized_address' => $normalized_address,
 				'normalization_required' => DeliveryType::COURIER === $delivery_type,
-				'normalization_valid' => ! empty( $normalized_address['success'] ),
+				'normalization_valid' => DeliveryType::COURIER === $delivery_type && ! empty( $normalized_address['success'] ) && (string) ( $normalized_address['original_hash'] ?? '' ) === $this->original_address_hash( $original_address ),
 				'normalization_attempted' => DeliveryType::COURIER === $delivery_type && array() !== $normalized_address,
 				'calculation_data' => $this->calculation_data( $order ),
 			)
@@ -204,7 +204,7 @@ final class OrderShipmentDraftFactory {
 			$weight_g = is_object( $product ) && method_exists( $product, 'get_weight' ) ? (int) round( (float) str_replace( ',', '.', (string) $product->get_weight() ) * 1000 ) : 0;
 			$items[] = new PackageItem(
 				is_object( $product ) && method_exists( $product, 'get_sku' ) ? (string) $product->get_sku() : '',
-				method_exists( $item, 'get_name' ) ? (string) $item->get_name() : 'Р В Р’В Р РЋРЎвЂєР В Р’В Р РЋРІР‚СћР В Р’В Р В РІР‚В Р В Р’В Р вЂ™Р’В°Р В Р Р‹Р В РІР‚С™',
+				method_exists( $item, 'get_name' ) ? (string) $item->get_name() : 'Товар',
 				$qty,
 				Money::from_rubles( $qty > 0 ? $total / $qty : $total ),
 				Money::from_rubles( $total ),
