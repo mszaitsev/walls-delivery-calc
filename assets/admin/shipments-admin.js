@@ -69,7 +69,6 @@
     const service = form.querySelector('[data-wdc-service-select]');
     const tariff = form.querySelector('[data-wdc-tariff-select]');
     const message = form.querySelector('[data-wdc-tariff-message]');
-    const submit = form.querySelector('[data-wdc-create-shipment]');
     if (!service || !tariff) return;
     const selectedOption = service.options[service.selectedIndex];
     let tariffs = [];
@@ -96,7 +95,7 @@
     const hasTariffs = tariff.options.length > 0;
     tariff.disabled = !hasTariffs;
     if (message) message.hidden = hasTariffs;
-    if (submit) submit.disabled = !hasTariffs;
+    updateCreateAvailability(form);
     if (!hasTariffs && window.console && typeof window.console.warn === 'function') {
       window.console.warn('WDC shipments: no enabled tariffs for selected service.', {
         service_key: serviceKey,
@@ -105,38 +104,40 @@
     }
   }
 
-  function updateDemandAddress(form) {
+  function selectedDeliveryType(form) {
     const service = form.querySelector('[data-wdc-service-select]');
-    const tariff = form.querySelector('[data-wdc-tariff-select]');
-    const address = form.querySelector('[data-wdc-raw-address]');
-    const pickupCode = form.querySelector('[data-wdc-pickup-code]');
-    const postcode = form.querySelector('[data-wdc-postcode]');
-    const region = form.querySelector('[data-wdc-region]');
-    const city = form.querySelector('[data-wdc-city]');
-    if (!service || !tariff || !address) return;
-    const deliveryType = service.options[service.selectedIndex] ? service.options[service.selectedIndex].dataset.deliveryType : '';
-    let isEcom = false;
-    try {
-      const tariffs = JSON.parse(service.options[service.selectedIndex] ? service.options[service.selectedIndex].dataset.tariffs || '[]' : '[]');
-      const current = tariffs.find((item) => String(item.object_code || '') === String(tariff.value || ''));
-      isEcom = !!(current && current.is_ecom);
-    } catch (error) {
-      isEcom = false;
-    }
-    if (deliveryType !== 'pickup' || isEcom) return;
-    const pickupIndex = normalizePickupDestinationIndex(pickupCode && pickupCode.value ? pickupCode.value : '');
-    const parts = [
-      pickupIndex || (postcode && postcode.value ? normalizePickupDestinationIndex(postcode.value) : ''),
-      region ? region.value : '',
-      city ? city.value : '',
-      'до востребования'
-    ].filter((value) => String(value || '').trim() !== '');
-    address.value = parts.join(', ');
+    const option = service && service.options[service.selectedIndex] ? service.options[service.selectedIndex] : null;
+    return option ? option.dataset.deliveryType || '' : '';
   }
 
-  function normalizePickupDestinationIndex(value) {
-    const match = String(value || '').trim().match(/^(\d{6})/);
-    return match ? match[1] : '';
+  function updateScenarioSections(form) {
+    const deliveryType = selectedDeliveryType(form);
+    const pickup = form.querySelector('[data-wdc-pickup-section]');
+    const courier = form.querySelector('[data-wdc-courier-section]');
+    if (pickup) pickup.hidden = deliveryType !== 'pickup';
+    if (courier) courier.hidden = deliveryType !== 'courier';
+    updateCreateAvailability(form);
+  }
+
+  function updateCreateAvailability(form) {
+    const submit = form.querySelector('[data-wdc-create-shipment]');
+    if (!submit) return;
+    const tariff = form.querySelector('[data-wdc-tariff-select]');
+    const hasTariffs = !!(tariff && !tariff.disabled && tariff.options.length);
+    const deliveryType = selectedDeliveryType(form);
+    const pickupMissing = deliveryType === 'pickup' && !!form.querySelector('[data-wdc-pickup-warning]');
+    const normalizedJson = form.querySelector('[data-wdc-normalized-address-json]');
+    let courierReady = true;
+    if (deliveryType === 'courier') {
+      courierReady = false;
+      try {
+        const snapshot = JSON.parse(normalizedJson && normalizedJson.value ? normalizedJson.value : '{}');
+        courierReady = Object.keys(snapshot).length > 0;
+      } catch (error) {
+        courierReady = false;
+      }
+    }
+    submit.disabled = !hasTariffs || pickupMissing || !courierReady;
   }
 
   function schedulePreview(form) {
@@ -172,7 +173,7 @@
   function initializeForm(form, refreshPreview) {
     if (!form) return;
     updateTariffOptions(form);
-    updateDemandAddress(form);
+    updateScenarioSections(form);
     const container = form.querySelector('[data-wdc-places]');
     if (container) {
       renumberPlaces(container);
@@ -238,11 +239,38 @@
       return;
     }
 
-    const pickupMap = event.target.closest('[data-wdc-admin-pickup-map]');
-    if (pickupMap) {
-      const box = pickupMap.closest('section');
-      const message = box && box.querySelector('[data-wdc-admin-pickup-map-message]');
-      if (message) message.hidden = false;
+    const normalize = event.target.closest('[data-wdc-normalize-address]');
+    if (normalize) {
+      const form = findShipmentForm(normalize);
+      if (!form) return;
+      const status = form.querySelector('[data-wdc-normalized-status]');
+      const display = form.querySelector('[data-wdc-normalized-address-display]');
+      const snapshotInput = form.querySelector('[data-wdc-normalized-address-json]');
+      const data = collectShipmentData(form);
+      data.append('action', window.wdcShipmentsAdmin.normalizeAddressAction);
+      data.append('nonce', window.wdcShipmentsAdmin.nonce);
+      if (status) status.textContent = 'Обработка адреса...';
+      fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: data
+      })
+        .then((response) => response.json())
+        .then((payload) => {
+          if (!payload || !payload.success) {
+            throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось обработать адрес.');
+          }
+          const snapshot = payload.data.normalized_address || {};
+          if (snapshotInput) snapshotInput.value = JSON.stringify(snapshot);
+          if (display) display.value = snapshot.display || '';
+          if (status) status.textContent = snapshot.success ? 'Адрес обработан Почтой России.' : (snapshot.message || 'Адрес не подтвержден Почтой России.');
+          updateCreateAvailability(form);
+          requestPreview(form);
+        })
+        .catch((error) => {
+          if (status) status.textContent = error.message;
+          updateCreateAvailability(form);
+        });
       return;
     }
 
@@ -280,18 +308,32 @@
   });
 
   document.addEventListener('input', function (event) {
+    if (event.target.matches('[data-wdc-courier-original-address]')) {
+      const form = findShipmentForm(event.target);
+      if (form) {
+        const snapshotInput = form.querySelector('[data-wdc-normalized-address-json]');
+        const display = form.querySelector('[data-wdc-normalized-address-display]');
+        const status = form.querySelector('[data-wdc-normalized-status]');
+        if (snapshotInput) snapshotInput.value = '';
+        if (display) display.value = '';
+        if (status) status.textContent = 'Адрес изменен, нужно обработать адрес заново.';
+        updateCreateAvailability(form);
+        schedulePreview(form);
+      }
+      return;
+    }
     if (event.target.matches('[data-wdc-integer-input]')) {
       cleanIntegerInput(event.target);
       const integerForm = findShipmentForm(event.target);
       if (integerForm) {
-        updateDemandAddress(integerForm);
+        updateScenarioSections(integerForm);
         schedulePreview(integerForm);
       }
       return;
     }
     const form = findShipmentForm(event.target);
     if (form) {
-      updateDemandAddress(form);
+      updateScenarioSections(form);
       schedulePreview(form);
     }
   });
@@ -311,7 +353,7 @@
     event.target.value = String(text || '').replace(/\D+/g, '');
     const form = findShipmentForm(event.target);
     if (form) {
-      updateDemandAddress(form);
+      updateScenarioSections(form);
       schedulePreview(form);
     }
   });
@@ -322,7 +364,7 @@
     if (event.target.matches('[data-wdc-service-select]')) {
       updateTariffOptions(form);
     }
-    updateDemandAddress(form);
+    updateScenarioSections(form);
     schedulePreview(form);
   });
 
@@ -335,3 +377,4 @@
     initializeForm(form, false);
   });
 })();
+

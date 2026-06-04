@@ -9,6 +9,7 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
+use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -17,12 +18,14 @@ final class OrderShipmentsMetabox {
 	private const NONCE_ACTION = 'wdc_shipments_admin';
 	private const AJAX_CREATE = 'wdc_create_shipment';
 	private const AJAX_PREVIEW = 'wdc_preview_shipment';
+	private const AJAX_NORMALIZE_ADDRESS = 'wdc_normalize_shipment_address';
 
 	public function __construct(
 		private OrderShipmentRepository $repository,
 		private OrderShipmentDraftFactory $drafts,
 		private ShipmentCreationService $creation,
 		private DeliveryServiceRepository $services,
+		private ?RussianPostAddressNormalizer $address_normalizer = null,
 		private string $plugin_url = '',
 		private string $version = '1'
 	) {
@@ -33,6 +36,7 @@ final class OrderShipmentsMetabox {
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_action( 'wp_ajax_' . self::AJAX_CREATE, array( $this, 'ajax_create' ) );
 		add_action( 'wp_ajax_' . self::AJAX_PREVIEW, array( $this, 'ajax_preview' ) );
+		add_action( 'wp_ajax_' . self::AJAX_NORMALIZE_ADDRESS, array( $this, 'ajax_normalize_address' ) );
 	}
 
 	public function add_meta_box(): void {
@@ -64,6 +68,7 @@ final class OrderShipmentsMetabox {
 				'nonce' => wp_create_nonce( self::NONCE_ACTION ),
 				'createAction' => self::AJAX_CREATE,
 				'previewAction' => self::AJAX_PREVIEW,
+				'normalizeAddressAction' => self::AJAX_NORMALIZE_ADDRESS,
 			)
 		);
 	}
@@ -117,13 +122,7 @@ final class OrderShipmentsMetabox {
 		$pickup_destination_index = $this->pickup_destination_index( $pickup_code, (string) ( $address['postcode'] ?? '' ), $meta );
 		$region = (string) ( $address['region_name'] ?? '' );
 		$city = (string) ( $address['settlement'] ?? $address['city'] ?? '' );
-		$city_debug_parts = array( 'city=' . ( '' !== $city ? 'filled' : 'empty' ) );
-		foreach ( $this->drafts->recipient_city_debug( $order ) as $key => $value ) {
-			$city_debug_parts[] = $key . '=' . $value;
-		}
-		$city_debug = implode( '; ', $city_debug_parts );
 		$pickup_demand_address = implode( ', ', array_filter( array( $pickup_destination_index, $region, $city, 'до востребования' ), static fn ( string $value ): bool => '' !== trim( $value ) ) );
-		$display_address = DeliveryType::PICKUP === (string) ( $request['delivery_type'] ?? '' ) ? $pickup_demand_address : (string) ( $address['raw_address'] ?? '' );
 		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
 		$selected_service_key = (string) ( $request['rate_id'] ?? $meta['service_key'] ?? '' );
 		if ( '' === $selected_service_key && array() !== $services ) {
@@ -142,6 +141,16 @@ final class OrderShipmentsMetabox {
 		}
 		$has_selected_service_tariffs = array() !== $selected_service_tariffs;
 		$tariff_message_hidden_attr = $has_selected_service_tariffs ? ' hidden' : '';
+		$delivery_type = (string) ( $request['delivery_type'] ?? DeliveryType::PICKUP );
+		$pickup_point_found = ! empty( $meta['pickup_point_found'] );
+		$pickup_address = (string) ( $address['raw_address'] ?? '' );
+		$courier_original_address = (string) ( $meta['courier_original_address'] ?? '' );
+		$normalized_address = is_array( $meta['normalized_address'] ?? null ) ? $meta['normalized_address'] : array();
+		$normalized_display = (string) ( $normalized_address['display'] ?? '' );
+		$normalized_status = array() !== $normalized_address
+			? ( ! empty( $normalized_address['success'] ) ? 'Адрес обработан Почтой России.' : 'Адрес не подтвержден Почтой России; preview использует только индекс, регион и населенный пункт.' )
+			: 'Адрес нужно обработать перед созданием отправления.';
+		$normalized_json = wp_json_encode( $normalized_address, JSON_UNESCAPED_UNICODE ) ?: '';
 		$has_created = in_array( (string) ( $shipment['status'] ?? '' ), array( 'created', 'registered' ), true );
 		?>
 		<div class="wdc-shipments-metabox" data-wdc-shipments-metabox>
@@ -166,17 +175,24 @@ final class OrderShipmentsMetabox {
 						<div class="wdc-shipment-grid">
 							<section>
 								<h3><?php echo esc_html__( 'Получатель', 'walls-delivery-calc' ); ?></h3>
-								<label><?php echo esc_html__( 'ФИО', 'walls-delivery-calc' ); ?><input name="recipient_name" value="<?php echo esc_attr( (string) ( $recipient['name'] ?? '' ) ); ?>"></label>
-								<label><?php echo esc_html__( 'Телефон', 'walls-delivery-calc' ); ?><input name="recipient_phone" value="<?php echo esc_attr( (string) ( $recipient['phone'] ?? '' ) ); ?>"></label>
+								<label><?php echo esc_html__( 'Р¤РРћ', 'walls-delivery-calc' ); ?><input name="recipient_name" value="<?php echo esc_attr( (string) ( $recipient['name'] ?? '' ) ); ?>"></label>
+								<label><?php echo esc_html__( 'РўРµР»РµС„РѕРЅ', 'walls-delivery-calc' ); ?><input name="recipient_phone" value="<?php echo esc_attr( (string) ( $recipient['phone'] ?? '' ) ); ?>"></label>
 								<label>Email<input name="recipient_email" value="<?php echo esc_attr( (string) ( $recipient['email'] ?? '' ) ); ?>"></label>
-								<label><?php echo esc_html__( 'Индекс', 'walls-delivery-calc' ); ?><input name="postcode" value="<?php echo esc_attr( (string) ( $address['postcode'] ?? '' ) ); ?>" data-wdc-postcode></label>
-								<label><?php echo esc_html__( 'Регион', 'walls-delivery-calc' ); ?><input name="region_name" value="<?php echo esc_attr( $region ); ?>" data-wdc-region></label>
-								<label><?php echo esc_html__( 'Населенный пункт', 'walls-delivery-calc' ); ?><input name="city" value="<?php echo esc_attr( $city ); ?>" data-wdc-city data-city-debug="<?php echo esc_attr( $city_debug ); ?>"></label>
-								<label><?php echo esc_html__( 'Адрес', 'walls-delivery-calc' ); ?><textarea name="raw_address" rows="2" data-wdc-raw-address><?php echo esc_textarea( $display_address ); ?></textarea></label>
-								<label><?php echo esc_html__( 'Текущий ПВЗ', 'walls-delivery-calc' ); ?><input name="pickup_point_code" value="<?php echo esc_attr( $pickup_code ); ?>" data-wdc-pickup-code></label>
-								<label><?php echo esc_html__( 'Адрес ПВЗ', 'walls-delivery-calc' ); ?><input name="pickup_point_address" value="<?php echo esc_attr( (string) ( $request['pickup_point']['point_address'] ?? '' ) ); ?>"></label>
-								<button type="button" class="button" data-wdc-admin-pickup-map><?php echo esc_html__( 'Выбрать другой ПВЗ на карте', 'walls-delivery-calc' ); ?></button>
-								<p class="description" data-wdc-admin-pickup-map-message hidden><?php echo esc_html__( 'Выбор ПВЗ на карте будет подключен отдельным этапом; сейчас код ПВЗ можно скорректировать вручную.', 'walls-delivery-calc' ); ?></p>
+								<div data-wdc-pickup-section <?php echo DeliveryType::PICKUP === $delivery_type ? '' : 'hidden'; ?>>
+									<input type="hidden" name="pickup_point_code" value="<?php echo esc_attr( $pickup_code ); ?>">
+									<p><strong><?php echo esc_html__( 'Индекс выбранного ПВЗ / ОПС', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-pickup-index><?php echo esc_html( $pickup_destination_index ); ?></span></p>
+									<p><strong><?php echo esc_html__( 'Адрес ПВЗ / ОПС', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-pickup-address><?php echo esc_html( '' !== $pickup_address ? $pickup_address : '-' ); ?></span></p>
+									<?php if ( ! $pickup_point_found ) : ?>
+										<p class="description wdc-shipment-warning" data-wdc-pickup-warning><?php echo esc_html__( 'ПВЗ/ОПС не найден в справочнике Почты России. Создание отправления заблокировано до выбора корректного ПВЗ.', 'walls-delivery-calc' ); ?></p>
+									<?php endif; ?>
+								</div>
+								<div data-wdc-courier-section <?php echo DeliveryType::COURIER === $delivery_type ? '' : 'hidden'; ?>>
+									<label><?php echo esc_html__( 'Оригинальный адрес покупателя', 'walls-delivery-calc' ); ?><textarea name="courier_original_address" rows="3" data-wdc-courier-original-address><?php echo esc_textarea( $courier_original_address ); ?></textarea></label>
+									<button type="button" class="button" data-wdc-normalize-address><?php echo esc_html__( 'Обработать адрес', 'walls-delivery-calc' ); ?></button>
+									<input type="hidden" name="normalized_address_json" value="<?php echo esc_attr( $normalized_json ); ?>" data-wdc-normalized-address-json>
+									<p class="description" data-wdc-normalized-status><?php echo esc_html( $normalized_status ); ?></p>
+									<label><?php echo esc_html__( 'Нормализованный адрес Почты России', 'walls-delivery-calc' ); ?><textarea rows="3" readonly data-wdc-normalized-address-display><?php echo esc_textarea( $normalized_display ); ?></textarea></label>
+								</div>
 							</section>
 							<section>
 								<h3><?php echo esc_html__( 'Доставка', 'walls-delivery-calc' ); ?></h3>
@@ -278,6 +294,33 @@ final class OrderShipmentsMetabox {
 		$preview = $this->creation->safe_preview( $request );
 
 		wp_send_json_success( array( 'preview' => $preview ) );
+	}
+
+	public function ajax_normalize_address(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
+		}
+		$order_id = (int) ( $_POST['order_id'] ?? 0 );
+		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+		if ( ! is_object( $order ) ) {
+			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
+		}
+		if ( ! $this->address_normalizer instanceof RussianPostAddressNormalizer ) {
+			wp_send_json_error( array( 'message' => __( 'Нормализация адреса недоступна.', 'walls-delivery-calc' ) ), 500 );
+		}
+
+		$original_address = sanitize_text_field( wp_unslash( $_POST['courier_original_address'] ?? $_POST['original_address'] ?? '' ) );
+		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
+		$result = $this->address_normalizer->normalize( $order_id, $original_address );
+		$result['order_id'] = $order_id;
+		$result['service_key'] = $service_key;
+
+		if ( method_exists( $order, 'update_meta_data' ) && method_exists( $order, 'save' ) ) {
+			$order->update_meta_data( '_wdc_shipment_rp_clean_address', $result );
+			$order->save();
+		}
+
+		wp_send_json_success( array( 'normalized_address' => $result ) );
 	}
 
 	private function resolve_order( mixed $post_or_order ): ?object {

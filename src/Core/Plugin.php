@@ -132,6 +132,7 @@ use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostCreateRequestBuilder;
+use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentAdapter;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentProductMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
@@ -199,8 +200,9 @@ final class Plugin {
 		$this->container->register( ShipmentServiceSettings::class, fn(): ShipmentServiceSettings => new ShipmentServiceSettings( $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
 		$this->container->register( RussianPostShipmentProductMapper::class, fn(): RussianPostShipmentProductMapper => new RussianPostShipmentProductMapper() );
 		$this->container->register( RussianPostCreateRequestBuilder::class, fn(): RussianPostCreateRequestBuilder => new RussianPostCreateRequestBuilder( $this->container->get( RussianPostShipmentProductMapper::class ) ) );
+		$this->container->register( RussianPostAddressNormalizer::class, fn(): RussianPostAddressNormalizer => new RussianPostAddressNormalizer( $this->container->get( RussianPostOtpravkaApiClient::class ) ) );
 		$this->container->register( RussianPostShipmentAdapter::class, fn(): RussianPostShipmentAdapter => new RussianPostShipmentAdapter( $this->container->get( RussianPostOtpravkaApiClient::class ), $this->container->get( RussianPostCreateRequestBuilder::class ), $this->container->get( Logger::class ) ) );
-		$this->container->register( OrderShipmentDraftFactory::class, fn(): OrderShipmentDraftFactory => new OrderShipmentDraftFactory( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ShipmentServiceSettings::class ), $this->container->get( RussianPostDomesticSettings::class ), $this->container->get( RussianPostOtpravkaApiSettings::class ) ) );
+		$this->container->register( OrderShipmentDraftFactory::class, fn(): OrderShipmentDraftFactory => new OrderShipmentDraftFactory( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ShipmentServiceSettings::class ), $this->container->get( RussianPostDomesticSettings::class ), $this->container->get( RussianPostOtpravkaApiSettings::class ), $this->container->get( RussianPostPickupPointRepository::class ) ) );
 		$this->container->register( ShipmentCreationService::class, fn(): ShipmentCreationService => new ShipmentCreationService( $this->container->get( OrderShipmentRepository::class ), array( $this->container->get( RussianPostShipmentAdapter::class ) ) ) );
 		$this->container->register( RussianPostPassportPointNormalizer::class, fn(): RussianPostPassportPointNormalizer => new RussianPostPassportPointNormalizer() );
 		$this->container->register( RussianPostPickupImportStateService::class, fn(): RussianPostPickupImportStateService => new RussianPostPickupImportStateService() );
@@ -466,7 +468,7 @@ final class Plugin {
 			)
 		);
 		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox() );
-		$this->container->register( OrderShipmentsMetabox::class, fn(): OrderShipmentsMetabox => new OrderShipmentsMetabox( $this->container->get( OrderShipmentRepository::class ), $this->container->get( OrderShipmentDraftFactory::class ), $this->container->get( ShipmentCreationService::class ), $this->container->get( DeliveryServiceRepository::class ), $this->environment->plugin_url(), $this->environment->version() ) );
+		$this->container->register( OrderShipmentsMetabox::class, fn(): OrderShipmentsMetabox => new OrderShipmentsMetabox( $this->container->get( OrderShipmentRepository::class ), $this->container->get( OrderShipmentDraftFactory::class ), $this->container->get( ShipmentCreationService::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( RussianPostAddressNormalizer::class ), $this->environment->plugin_url(), $this->environment->version() ) );
 	}
 
 	private function register_hooks(): void {

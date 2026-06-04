@@ -15,6 +15,7 @@ use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostCreateRequestBuilder;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentProductMapper;
+use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 
@@ -116,6 +117,7 @@ $request = new ShipmentCreateRequest(
 		'order_num' => '123',
 		'postoffice_code' => '630005',
 		'tariff_object' => '23030',
+		'pickup_point_found' => true,
 	)
 );
 
@@ -146,7 +148,7 @@ $ecom_request = new ShipmentCreateRequest(
 	false,
 	$request->services,
 	$request->recipient,
-	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '54020', 'tariff_is_ecom' => true )
+	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '54020', 'tariff_is_ecom' => true, 'pickup_point_found' => true )
 );
 $ecom_payload = $builder->build( $ecom_request );
 shipments_smoke_assert( '630001' === $ecom_payload[0]['ecom-data']['delivery-point-index'], 'ECOM pickup must use ecom-data delivery-point-index.' );
@@ -165,7 +167,7 @@ $pickup_suffix_request = new ShipmentCreateRequest(
 	false,
 	$request->services,
 	$request->recipient,
-	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '23030' )
+	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '23030', 'pickup_point_found' => true )
 );
 $pickup_suffix_payload = $builder->build( $pickup_suffix_request );
 shipments_smoke_assert( '630091' === $pickup_suffix_payload[0]['index-to'], 'Normal pickup must extract 6-digit index from pickup point code with suffix.' );
@@ -182,7 +184,7 @@ $ecom_suffix_request = new ShipmentCreateRequest(
 	false,
 	$request->services,
 	$request->recipient,
-	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '54020', 'tariff_is_ecom' => true )
+	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '54020', 'tariff_is_ecom' => true, 'pickup_point_found' => true )
 );
 $ecom_suffix_payload = $builder->build( $ecom_suffix_request );
 shipments_smoke_assert( '630091-53b5939ce9' === $ecom_suffix_payload[0]['ecom-data']['delivery-point-index'], 'ECOM pickup must keep full delivery-point-index code.' );
@@ -213,8 +215,72 @@ $goods_payload = $builder->build( $goods_request );
 shipments_smoke_assert( true === $goods_payload[0]['courier'] && true === $goods_payload[0]['delivery-to-door'], 'Courier flags must be set.' );
 shipments_smoke_assert( 643 === $goods_payload[0]['mail-direct'] && 'DEFAULT' === $goods_payload[0]['address-type-to'], 'Courier payload must set domestic mail-direct and DEFAULT address type.' );
 shipments_smoke_assert( '630099' === $goods_payload[0]['index-to'] && 'Новосибирская область' === $goods_payload[0]['region-to'] && 'Новосибирск' === $goods_payload[0]['place-to'] && ! isset( $goods_payload[0]['ecom-data'] ), 'Courier payload must include address fields and omit ecom-data.' );
-shipments_smoke_assert( '630099, Новосибирская область, Новосибирск, Красный проспект 1' === $goods_payload[0]['raw-address'], 'Courier payload must include raw-address.' );
+shipments_smoke_assert( ! array_key_exists( 'raw-address', $goods_payload[0] ), 'Courier fallback payload must not include raw-address.' );
 shipments_smoke_assert( isset( $goods_payload[0]['goods']['items'][0] ), 'goods.items must be present when enabled.' );
+
+$normalizer_reflection = new ReflectionClass( RussianPostAddressNormalizer::class );
+$normalizer = $normalizer_reflection->newInstanceWithoutConstructor();
+$normalized_snapshot = $normalizer->normalize_row(
+	array(
+		'quality-code' => 'GOOD',
+		'validation-code' => 'VALIDATED',
+		'index' => '630099',
+		'region' => 'Новосибирская область',
+		'area' => '',
+		'place' => 'Новосибирск',
+		'street' => 'Красный проспект',
+		'house' => '1',
+		'room' => '23',
+		'address-type' => 'DEFAULT',
+	),
+	'630099, Новосибирская область, Новосибирск, Красный проспект 1'
+);
+shipments_smoke_assert( ! empty( $normalized_snapshot['success'] ), 'GOOD + VALIDATED clean-address result must be accepted.' );
+$normalized_request = new ShipmentCreateRequest(
+	$request->order_id,
+	$request->carrier_key,
+	DeliveryType::COURIER,
+	RussianPostDomesticSettings::COURIER_SERVICE_KEY,
+	new Address( country_code: 'RU', region_name: 'Новосибирская область', city: 'Новосибирск', postcode: '630099' ),
+	null,
+	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ) ),
+	Money::from_kopecks( 0 ),
+	false,
+	array( 'send_goods_items' => false ),
+	$request->recipient,
+	array(
+		'order_num' => '123',
+		'postoffice_code' => '630005',
+		'tariff_object' => '24030',
+		'normalized_address' => $normalized_snapshot,
+		'normalization_required' => true,
+		'normalization_attempted' => true,
+	)
+);
+$normalized_payload = $builder->build( $normalized_request );
+shipments_smoke_assert( 'Новосибирская область' === $normalized_payload[0]['region-to'] && 'Красный проспект' === $normalized_payload[0]['street-to'] && '23' === $normalized_payload[0]['room-to'], 'Courier normalized payload must use clean-address fields.' );
+
+$changed_address_request = new ShipmentCreateRequest(
+	$request->order_id,
+	$request->carrier_key,
+	DeliveryType::COURIER,
+	RussianPostDomesticSettings::COURIER_SERVICE_KEY,
+	new Address( country_code: 'RU', region_name: 'Новосибирская область', city: 'Новосибирск', postcode: '630099', street: 'Красный проспект 2' ),
+	null,
+	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ) ),
+	Money::from_kopecks( 0 ),
+	false,
+	array( 'send_goods_items' => false ),
+	$request->recipient,
+	array(
+		'order_num' => '123',
+		'postoffice_code' => '630005',
+		'tariff_object' => '24030',
+		'normalization_required' => true,
+		'normalization_attempted' => false,
+	)
+);
+shipments_smoke_assert( in_array( 'Process courier address before creating shipment.', $builder->validate( $changed_address_request ), true ), 'Courier create must be blocked when original address changed before re-normalization.' );
 
 $missing_pickup = new ShipmentCreateRequest(
 	$request->order_id,
@@ -228,7 +294,7 @@ $missing_pickup = new ShipmentCreateRequest(
 	false,
 	$request->services,
 	$request->recipient,
-	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '23030' )
+	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '23030', 'pickup_point_found' => true )
 );
 shipments_smoke_assert( in_array( 'Код ПВЗ/почтомата обязателен.', $builder->validate( $missing_pickup ), true ), 'Pickup validation must require delivery-point-index.' );
 
@@ -299,70 +365,6 @@ $pickup_tariffs = $tariffs_for_service->invoke(
 shipments_smoke_assert( array() !== $pickup_tariffs, 'Draft factory must expose enabled tariffs for selected Russian Post pickup service.' );
 shipments_smoke_assert( '4030' === (string) ( $pickup_tariffs[0]['object_code'] ?? '' ), 'Draft tariff list must fall back to default enabled domestic tariff variants.' );
 
-$recipient_city = $factory_reflection->getMethod( 'recipient_city' );
-$recipient_city->setAccessible( true );
-$city_from_display = $recipient_city->invoke(
-	$factory,
-	new ShipmentsSmokeOrder(
-		array( 'city' => '' ),
-		array( '_wdc_platform_city_display_name' => 'Новосибирск — Новосибирская область' )
-	)
-);
-shipments_smoke_assert( 'Новосибирск' === $city_from_display, 'Recipient city fallback must use _wdc_platform_city_display_name without region suffix.' );
-
-$city_from_billing = $recipient_city->invoke(
-	$factory,
-	new ShipmentsSmokeOrder(
-		array( 'city' => '', 'billing_city' => 'Искитим' )
-	)
-);
-shipments_smoke_assert( 'Искитим' === $city_from_billing, 'Recipient city fallback must use billing city.' );
-
-$city_from_shipping_meta = $recipient_city->invoke(
-	$factory,
-	new ShipmentsSmokeOrder(
-		array( 'city' => '', 'billing_city' => '' ),
-		array( '_shipping_city' => 'г Бердск' )
-	)
-);
-shipments_smoke_assert( 'г Бердск' === $city_from_shipping_meta, 'Recipient city fallback must use _shipping_city meta.' );
-
-$city_from_billing_meta = $recipient_city->invoke(
-	$factory,
-	new ShipmentsSmokeOrder(
-		array( 'city' => '', 'billing_city' => '' ),
-		array( '_billing_city' => 'г Бердск' )
-	)
-);
-shipments_smoke_assert( 'г Бердск' === $city_from_billing_meta, 'Recipient city fallback must use _billing_city meta.' );
-
-$city_from_pickup_address_plain = $recipient_city->invoke(
-	$factory,
-	new ShipmentsSmokeOrder(
-		array( 'city' => '', 'billing_city' => '' ),
-		array( '_wdc_pickup_point_address' => '633010 обл. Новосибирская Бердск г. Ленина ул., д. 67' )
-	)
-);
-shipments_smoke_assert( 'г Бердск' === $city_from_pickup_address_plain, 'Recipient city fallback must parse city from Russian Post pickup address without commas.' );
-
-$city_from_pickup_address_comma = $recipient_city->invoke(
-	$factory,
-	new ShipmentsSmokeOrder(
-		array( 'city' => '', 'billing_city' => '' ),
-		array( '_wdc_pickup_point_address' => '633010, Новосибирская область, г Бердск, ул. Ленина, д. 67' )
-	)
-);
-shipments_smoke_assert( 'г Бердск' === $city_from_pickup_address_comma, 'Recipient city fallback must parse city from comma-separated pickup address.' );
-
-$city_from_calculation = $recipient_city->invoke(
-	$factory,
-	new ShipmentsSmokeOrder(
-		array( 'city' => '' ),
-		array( '_wdc_delivery_calculation_data' => array( 'destination' => array( 'settlement' => 'Бердск' ) ) )
-	)
-);
-shipments_smoke_assert( 'Бердск' === $city_from_calculation, 'Recipient city fallback must use settlement/city from WDC calculation data.' );
-
 $shipping_address = $factory_reflection->getMethod( 'shipping_address' );
 $shipping_address->setAccessible( true );
 
@@ -391,21 +393,6 @@ $short_address = $shipping_address->invoke(
 	)
 );
 shipments_smoke_assert( '630005, Новосибирск, ул. Ленина 15' === $short_address, 'Courier raw-address must skip empty state/address_2 fragments.' );
-
-$fallback_region_address = $shipping_address->invoke(
-	$factory,
-	new ShipmentsSmokeOrder(
-		array(
-			'postcode' => '630005',
-			'city' => 'Новосибирск',
-			'address_1' => 'ул. Ленина 15',
-		),
-		array(
-			'_wdc_platform_city_display_name' => 'Новосибирск — Новосибирская область',
-		)
-	)
-);
-shipments_smoke_assert( '630005, Новосибирская область, Новосибирск, ул. Ленина 15' === $fallback_region_address, 'Courier raw-address must use WDC location metadata when shipping state is empty.' );
 
 $pickup_code_address = $shipping_address->invoke(
 	$factory,

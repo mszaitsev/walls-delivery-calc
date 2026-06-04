@@ -72,13 +72,18 @@ final class RussianPostCreateRequestBuilder {
 			if ( DeliveryType::COURIER === $request->delivery_type ) {
 				$payload['courier'] = true;
 				$payload['delivery-to-door'] = true;
-				$payload['address-type-to'] = 'DEFAULT';
-				$payload['index-to'] = $request->recipient_address->postcode;
-				$payload['region-to'] = $request->recipient_address->region_name;
-				$payload['place-to'] = $this->place_to( $request );
-				$raw_address = $request->recipient_address->raw_address ?: implode( ', ', array_filter( array( $request->recipient_address->city, $request->recipient_address->street, $request->recipient_address->house, $request->recipient_address->apartment ) ) );
-				if ( '' !== trim( $raw_address ) ) {
-					$payload['raw-address'] = $raw_address;
+				$normalized = is_array( $request->meta['normalized_address'] ?? null ) ? $request->meta['normalized_address'] : array();
+				$fields = is_array( $normalized['fields'] ?? null ) ? $normalized['fields'] : array();
+				if ( ! empty( $normalized['success'] ) && array() !== $fields ) {
+					foreach ( $fields as $field_key => $field_value ) {
+						$payload[ (string) $field_key ] = $field_value;
+					}
+					$payload['address-type-to'] = (string) ( $payload['address-type-to'] ?? 'DEFAULT' );
+				} else {
+					$payload['address-type-to'] = 'DEFAULT';
+					$payload['index-to'] = $request->recipient_address->postcode;
+					$payload['region-to'] = $request->recipient_address->region_name;
+					$payload['place-to'] = $this->place_to( $request );
 				}
 			} else {
 				$pickup_code = $request->pickup_point?->point_code ?? (string) ( $request->meta['pickup_point_code'] ?? '' );
@@ -155,19 +160,22 @@ final class RussianPostCreateRequestBuilder {
 		if ( '' === trim( (string) ( $request->meta['tariff_object'] ?? $request->meta['selected_tariff_object'] ?? '' ) ) ) {
 			$errors[] = 'Выберите тариф для создания отправления.';
 		}
-		if ( DeliveryType::COURIER === $request->delivery_type && '' === trim( $request->recipient_address->raw_address . $request->recipient_address->street ) ) {
-			$errors[] = 'Адрес курьерской доставки обязателен.';
-		}
 		if ( DeliveryType::COURIER === $request->delivery_type && '' === trim( $request->recipient_address->postcode ) ) {
 			$errors[] = 'Индекс получателя обязателен.';
 		}
 		if ( DeliveryType::COURIER === $request->delivery_type && '' === trim( $this->place_to( $request ) ) ) {
 			$errors[] = 'Населенный пункт получателя обязателен.';
 		}
+		if ( DeliveryType::COURIER === $request->delivery_type && ! empty( $request->meta['normalization_required'] ) && empty( $request->meta['normalization_attempted'] ) ) {
+			$errors[] = 'Process courier address before creating shipment.';
+		}
 		if ( DeliveryType::PICKUP === $request->delivery_type ) {
 			$pickup_code = $request->pickup_point?->point_code ?? (string) ( $request->meta['pickup_point_code'] ?? '' );
 			if ( '' === trim( $pickup_code ) ) {
 				$errors[] = 'Код ПВЗ/почтомата обязателен.';
+			}
+			if ( empty( $request->meta['pickup_point_found'] ) ) {
+				$errors[] = 'Selected pickup point was not found in Russian Post pickup directory.';
 			}
 			if ( empty( $request->meta['tariff_is_ecom'] ) ) {
 				if ( '' === trim( $this->pickup_destination_index( $request, $pickup_code ) ) ) {

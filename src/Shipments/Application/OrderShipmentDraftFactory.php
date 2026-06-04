@@ -14,6 +14,7 @@ use WallsShop\WDC\Domain\Package\ShipmentPlace;
 use WallsShop\WDC\Domain\Pickup\PickupPointSelection;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -22,7 +23,8 @@ final class OrderShipmentDraftFactory {
 		private DeliveryServiceRepository $services,
 		private ShipmentServiceSettings $shipment_settings,
 		private ?RussianPostDomesticSettings $domestic_settings = null,
-		private ?RussianPostOtpravkaApiSettings $otpravka_settings = null
+		private ?RussianPostOtpravkaApiSettings $otpravka_settings = null,
+		private ?RussianPostPickupPointRepository $pickup_points = null
 	) {
 	}
 
@@ -48,13 +50,16 @@ final class OrderShipmentDraftFactory {
 		$settings['combined_goods_name'] = str_replace( '{order_number}', $order_number, $settings['combined_goods_name_template'] );
 		$tariff_object = $this->meta_string( $order, '_wdc_platform_tariff_object' );
 		$tariff = $this->tariff_for_service_object( $service, $tariff_object );
+		$pickup_row = DeliveryType::PICKUP === $delivery_type ? $this->pickup_point_row( $order ) : null;
+		$original_address = DeliveryType::COURIER === $delivery_type ? $this->shipping_address( $order ) : '';
+		$normalized_address = DeliveryType::COURIER === $delivery_type ? $this->cached_normalized_address( $order, $service_key, $original_address ) : array();
 
 		return new ShipmentCreateRequest(
 			order_id: $this->order_id( $order ),
 			carrier_key: RussianPostDomesticSettings::CARRIER_KEY,
 			delivery_type: $delivery_type,
 			rate_id: $service_key,
-			recipient_address: $this->recipient_address( $order, $delivery_type ),
+			recipient_address: $this->recipient_address( $order, $delivery_type, $pickup_row, $normalized_address ),
 			pickup_point: DeliveryType::PICKUP === $delivery_type ? $this->pickup_point( $order ) : null,
 			places: array( $place ),
 			declared_value: $declared_value,
@@ -74,6 +79,14 @@ final class OrderShipmentDraftFactory {
 				'postoffice_code' => $this->from_postcode( $service_key ),
 				'pickup_point_code' => $this->meta_string( $order, '_wdc_pickup_point_code' ),
 				'pickup_point_postcode' => $this->meta_string( $order, '_wdc_pickup_point_postcode' ),
+				'pickup_point_found' => is_array( $pickup_row ),
+				'pickup_point_row' => is_array( $pickup_row ) ? $this->safe_pickup_row( $pickup_row ) : array(),
+				'courier_original_address' => $original_address,
+				'courier_original_hash' => $this->original_address_hash( $original_address ),
+				'normalized_address' => $normalized_address,
+				'normalization_required' => DeliveryType::COURIER === $delivery_type,
+				'normalization_valid' => ! empty( $normalized_address['success'] ),
+				'normalization_attempted' => DeliveryType::COURIER === $delivery_type && array() !== $normalized_address,
 				'calculation_data' => $this->calculation_data( $order ),
 			)
 		);
@@ -134,13 +147,15 @@ final class OrderShipmentDraftFactory {
 		$settings['combined_goods_name'] = sanitize_text_field( wp_unslash( $data['combined_goods_name'] ?? $settings[ ShipmentServiceSettings::COMBINED_GOODS_NAME_TEMPLATE ] ?? '' ) );
 		$tariff_object = sanitize_text_field( wp_unslash( $data['tariff_object'] ?? $base->meta['tariff_object'] ?? '' ) );
 		$tariff = $this->tariff_for_service_object( $service, $tariff_object );
+		$original_address = sanitize_text_field( wp_unslash( $data['courier_original_address'] ?? $base->meta['courier_original_address'] ?? '' ) );
+		$normalized_address = $this->normalized_address_from_admin_data( $data, $original_address, $service_key );
 
 		return new ShipmentCreateRequest(
 			$base->order_id,
 			$base->carrier_key,
 			$delivery_type,
 			$service_key,
-			$this->address_from_admin_data( $base->recipient_address, $data, $delivery_type ),
+			$this->address_from_admin_data( $base->recipient_address, $data, $delivery_type, $base->meta, $normalized_address, $original_address ),
 			DeliveryType::PICKUP === $delivery_type ? $this->pickup_from_admin_data( $base->pickup_point, $data ) : null,
 			array() !== $places ? $places : $base->places,
 			$base->declared_value,
@@ -160,6 +175,12 @@ final class OrderShipmentDraftFactory {
 					'tariff_title' => (string) ( $tariff['title'] ?? $base->meta['tariff_title'] ?? '' ),
 					'tariff_is_ecom' => ! empty( $tariff['is_ecom'] ),
 					'postoffice_code' => preg_replace( '/\D+/', '', (string) wp_unslash( $data['postoffice_code'] ?? $base->meta['postoffice_code'] ?? '' ) ) ?: '',
+					'courier_original_address' => $original_address,
+					'courier_original_hash' => $this->original_address_hash( $original_address ),
+					'normalized_address' => $normalized_address,
+					'normalization_required' => DeliveryType::COURIER === $delivery_type,
+					'normalization_valid' => DeliveryType::COURIER === $delivery_type && ! empty( $normalized_address['success'] ) && (string) ( $normalized_address['original_hash'] ?? '' ) === $this->original_address_hash( $original_address ),
+					'normalization_attempted' => DeliveryType::COURIER === $delivery_type && array() !== $normalized_address,
 				)
 			)
 		);
@@ -209,16 +230,37 @@ final class OrderShipmentDraftFactory {
 		return max( 1, $total ?: 1000 );
 	}
 
-	private function recipient_address( object $order, string $delivery_type ): Address {
-		$postcode = $this->meta_string( $order, '_wdc_pickup_point_postcode' ) ?: $this->meta_string( $order, '_wdc_platform_resolved_postcode' );
-		if ( DeliveryType::COURIER === $delivery_type && method_exists( $order, 'get_shipping_postcode' ) ) {
-			$postcode = (string) $order->get_shipping_postcode() ?: $postcode;
+	private function recipient_address( object $order, string $delivery_type, ?array $pickup_row = null, array $normalized_address = array() ): Address {
+		if ( DeliveryType::PICKUP === $delivery_type ) {
+			$row = is_array( $pickup_row ) ? $pickup_row : array();
+
+			return new Address(
+				country_code: 'RU',
+				region_name: (string) ( $row['region_name'] ?? '' ),
+				city: (string) ( $row['city_name'] ?? '' ),
+				postcode: preg_replace( '/\D+/', '', (string) ( $row['postcode'] ?? $this->meta_string( $order, '_wdc_pickup_point_postcode' ) ) ) ?: '',
+				raw_address: (string) ( $row['address'] ?? '' )
+			);
+		}
+
+		$fields = ! empty( $normalized_address['success'] ) && is_array( $normalized_address['fields'] ?? null ) ? $normalized_address['fields'] : array();
+		$postcode = (string) ( $fields['index-to'] ?? '' );
+		if ( '' === $postcode && method_exists( $order, 'get_shipping_postcode' ) ) {
+			$postcode = (string) $order->get_shipping_postcode();
+		}
+		$region = (string) ( $fields['region-to'] ?? '' );
+		if ( '' === $region ) {
+			$region = method_exists( $order, 'get_shipping_state' ) ? (string) $order->get_shipping_state() : '';
+		}
+		$city = (string) ( $fields['place-to'] ?? '' );
+		if ( '' === $city ) {
+			$city = method_exists( $order, 'get_shipping_city' ) ? (string) $order->get_shipping_city() : '';
 		}
 
 		return new Address(
 			country_code: method_exists( $order, 'get_shipping_country' ) ? (string) $order->get_shipping_country() : 'RU',
-			region_name: $this->shipping_region( $order ),
-			city: $this->recipient_city( $order ),
+			region_name: $region,
+			city: $city,
 			postcode: $postcode,
 			street: method_exists( $order, 'get_shipping_address_1' ) ? (string) $order->get_shipping_address_1() : '',
 			apartment: method_exists( $order, 'get_shipping_address_2' ) ? (string) $order->get_shipping_address_2() : '',
@@ -228,13 +270,18 @@ final class OrderShipmentDraftFactory {
 		);
 	}
 
-	private function address_from_admin_data( Address $base, array $data, string $delivery_type ): Address {
+	private function address_from_admin_data( Address $base, array $data, string $delivery_type, array $base_meta = array(), array $normalized_address = array(), string $original_address = '' ): Address {
+		if ( DeliveryType::PICKUP === $delivery_type ) {
+			return $base;
+		}
+		$fields = ! empty( $normalized_address['success'] ) && is_array( $normalized_address['fields'] ?? null ) ? $normalized_address['fields'] : array();
+
 		return new Address(
 			country_code: $base->country_code ?: 'RU',
-			region_name: sanitize_text_field( wp_unslash( $data['region_name'] ?? $data['region_to'] ?? $base->region_name ) ),
-			city: sanitize_text_field( wp_unslash( $data['city'] ?? $base->city ) ),
-			postcode: preg_replace( '/\D+/', '', (string) wp_unslash( $data['postcode'] ?? $base->postcode ) ) ?: '',
-			raw_address: sanitize_text_field( wp_unslash( $data['raw_address'] ?? $base->raw_address ) ),
+			region_name: sanitize_text_field( wp_unslash( $fields['region-to'] ?? $base->region_name ) ),
+			city: sanitize_text_field( wp_unslash( $fields['place-to'] ?? $base->city ) ),
+			postcode: preg_replace( '/\D+/', '', (string) wp_unslash( $fields['index-to'] ?? $base->postcode ) ) ?: '',
+			raw_address: ! empty( $normalized_address['success'] ) ? (string) ( $normalized_address['display'] ?? '' ) : '',
 			fias_id: $base->fias_id,
 			gar_id: $base->gar_id
 		);
@@ -262,6 +309,98 @@ final class OrderShipmentDraftFactory {
 			sanitize_text_field( wp_unslash( $data['pickup_point_address'] ?? $base?->point_address ?? '' ) ),
 			$base?->selected_at ?: $this->now()
 		);
+	}
+
+	/**
+	 * @return array<string,mixed>|null
+	 */
+	private function pickup_point_row( object $order ): ?array {
+		if ( ! $this->pickup_points instanceof RussianPostPickupPointRepository ) {
+			return null;
+		}
+		$code = $this->meta_string( $order, '_wdc_pickup_point_code' );
+		if ( '' !== $code ) {
+			$row = $this->pickup_points->find_row_by_point_code( $code );
+			if ( is_array( $row ) ) {
+				return $row;
+			}
+		}
+		$postcode = preg_replace( '/\D+/', '', $this->meta_string( $order, '_wdc_pickup_point_postcode' ) ) ?: '';
+		if ( '' !== $postcode ) {
+			$rows = $this->pickup_points->find_rows_by_postcode( $postcode, array( 'limit' => 1 ) );
+			if ( is_array( $rows[0] ?? null ) ) {
+				return $rows[0];
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,mixed>
+	 */
+	private function safe_pickup_row( array $row ): array {
+		return array(
+			'point_code' => (string) ( $row['point_code'] ?? '' ),
+			'postcode' => (string) ( $row['postcode'] ?? '' ),
+			'region_name' => (string) ( $row['region_name'] ?? '' ),
+			'city_name' => (string) ( $row['city_name'] ?? '' ),
+			'address' => (string) ( $row['address'] ?? '' ),
+		);
+	}
+
+	private function original_address_hash( string $original_address ): string {
+		return hash( 'sha256', trim( $original_address ) );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function cached_normalized_address( object $order, string $service_key, string $original_address ): array {
+		if ( ! method_exists( $order, 'get_meta' ) ) {
+			return array();
+		}
+		$value = $order->get_meta( '_wdc_shipment_rp_clean_address', true );
+		$snapshot = is_array( $value ) ? $value : array();
+		if ( array() === $snapshot ) {
+			return array();
+		}
+		if ( (int) ( $snapshot['order_id'] ?? 0 ) !== $this->order_id( $order ) ) {
+			return array();
+		}
+		if ( (string) ( $snapshot['service_key'] ?? '' ) !== $service_key ) {
+			return array();
+		}
+		if ( (string) ( $snapshot['original_hash'] ?? '' ) !== $this->original_address_hash( $original_address ) ) {
+			return array();
+		}
+		$expires_at = strtotime( (string) ( $snapshot['expires_at'] ?? '' ) );
+		if ( false !== $expires_at && $expires_at < time() ) {
+			return array();
+		}
+
+		return $snapshot;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function normalized_address_from_admin_data( array $data, string $original_address, string $service_key ): array {
+		$json = (string) wp_unslash( $data['normalized_address_json'] ?? '' );
+		$decoded = '' !== trim( $json ) ? json_decode( $json, true ) : array();
+		$snapshot = is_array( $decoded ) ? $decoded : array();
+		if ( array() === $snapshot ) {
+			return array();
+		}
+		if ( (string) ( $snapshot['service_key'] ?? $service_key ) !== $service_key ) {
+			return array();
+		}
+		if ( (string) ( $snapshot['original_hash'] ?? '' ) !== $this->original_address_hash( $original_address ) ) {
+			return array();
+		}
+
+		return $snapshot;
 	}
 
 	/**
@@ -296,148 +435,6 @@ final class OrderShipmentDraftFactory {
 		return $tariffs;
 	}
 
-	private function recipient_city( object $order ): string {
-		if ( method_exists( $order, 'get_shipping_city' ) ) {
-			$city = $this->normalize_city_fragment( (string) $order->get_shipping_city() );
-			if ( '' !== $city ) {
-				return $city;
-			}
-		}
-
-		if ( method_exists( $order, 'get_billing_city' ) ) {
-			$city = $this->normalize_city_fragment( (string) $order->get_billing_city() );
-			if ( '' !== $city ) {
-				return $city;
-			}
-		}
-
-		foreach ( array( '_shipping_city', '_billing_city' ) as $key ) {
-			$city = $this->normalize_city_fragment( $this->meta_string( $order, $key ) );
-			if ( '' !== $city ) {
-				return $city;
-			}
-		}
-
-		$display = $this->meta_string( $order, '_wdc_platform_city_display_name' );
-		if ( '' !== $display ) {
-			$city_source = $display;
-			foreach ( array( ' - ', ' — ', ' вЂ” ', ' РІР‚вЂСњ ', 'РІР‚вЂСњ', 'вЂ”' ) as $separator ) {
-				$position = strpos( $city_source, $separator );
-				if ( false !== $position ) {
-					$city_source = substr( $city_source, 0, $position );
-					break;
-				}
-			}
-			foreach ( array( ' РѕР±Р»Р°СЃС‚СЊ', ' РєСЂР°Р№', ' СЂРµСЃРїСѓР±Р»РёРєР°' ) as $region_suffix ) {
-				$position = strpos( $city_source, $region_suffix );
-				if ( false !== $position ) {
-					$before_region = trim( substr( $city_source, 0, $position ) );
-					$tokens = preg_split( '/\s+/', $before_region ) ?: array();
-					if ( count( $tokens ) > 1 ) {
-						array_pop( $tokens );
-						array_pop( $tokens );
-						$city_source = implode( ' ', $tokens );
-					}
-					break;
-				}
-			}
-			$tokens = preg_split( '/\s+/', trim( $city_source ) ) ?: array();
-			while ( count( $tokens ) > 1 ) {
-				$last_token = (string) end( $tokens );
-				if ( ! str_contains( $last_token, 'Ђ' ) && ! str_contains( $last_token, 'РІ' ) && ! str_contains( $last_token, 'Р ' ) ) {
-					break;
-				}
-				array_pop( $tokens );
-			}
-			if ( array() !== $tokens ) {
-				$city_source = implode( ' ', $tokens );
-			}
-			$city = $this->normalize_city_fragment( $city_source );
-			if ( '' !== $city ) {
-				return $city;
-			}
-		}
-
-		foreach ( array( '_wdc_platform_city', '_wdc_platform_settlement', '_wdc_pickup_point_city', '_wdc_pickup_city' ) as $key ) {
-			$city = $this->normalize_city_fragment( $this->meta_string( $order, $key ) );
-			if ( '' !== $city ) {
-				return $city;
-			}
-		}
-
-		$calculation = $this->calculation_data( $order );
-		foreach ( array( 'destination', 'recipient', 'location', 'pickup_point', 'pickup' ) as $section ) {
-			$source = is_array( $calculation[ $section ] ?? null ) ? $calculation[ $section ] : array();
-			foreach ( array( 'city', 'city_name', 'settlement', 'settlement_name', 'place', 'place_name' ) as $key ) {
-				$city = $this->normalize_city_fragment( (string) ( $source[ $key ] ?? '' ) );
-				if ( '' !== $city ) {
-					return $city;
-				}
-			}
-		}
-
-		return $this->city_from_pickup_address( $this->meta_string( $order, '_wdc_pickup_point_address' ) );
-	}
-
-	private function city_from_pickup_address( string $address ): string {
-		$parts = array_values( array_filter( array_map( 'trim', explode( ',', $address ) ), static fn ( string $value ): bool => '' !== $value ) );
-		if ( count( $parts ) >= 3 && 1 === preg_match( '/^\d{6}$/', preg_replace( '/\D+/', '', $parts[0] ) ?? '' ) ) {
-			return $this->normalize_city_fragment( $parts[2] );
-		}
-		if ( count( $parts ) >= 3 ) {
-			return $this->normalize_city_fragment( $parts[1] );
-		}
-
-		$normalized = trim( preg_replace( '/^\s*\d{6}\s*/u', '', $address ) ?? $address );
-		if ( '' === $normalized ) {
-			return '';
-		}
-
-		if ( 1 === preg_match( '/(?:^|\s)([\p{L}\-]+)\s+\x{0433}\./u', $normalized, $match ) ) {
-			return $this->normalize_city_fragment( $match[1] . ' ' . json_decode( '"\u0433."' ) );
-		}
-
-		if ( 1 === preg_match( '/(?:^|\s)\x{0433}\.?\s*([\p{L}\-]+)/u', $normalized, $match ) ) {
-			return $this->normalize_city_fragment( json_decode( '"\u0433 "' ) . $match[1] );
-		}
-
-		return '';
-	}
-
-	private function normalize_city_fragment( string $value ): string {
-		$city = trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
-		$city = trim( $city, " \t\n\r\0\x0B,." );
-		if ( '' === $city ) {
-			return '';
-		}
-		if ( 1 === preg_match( '/^(.+?)\s+\x{0433}\.?$/u', $city, $match ) ) {
-			return json_decode( '"\u0433 "' ) . trim( (string) $match[1] );
-		}
-		if ( 1 === preg_match( '/^\x{0433}\.?\s*(.+)$/u', $city, $match ) ) {
-			return json_decode( '"\u0433 "' ) . trim( (string) $match[1] );
-		}
-
-		return $city;
-	}
-
-	/**
-	 * @return array<string,string>
-	 */
-	public function recipient_city_debug( object $order ): array {
-		$shipping_method = method_exists( $order, 'get_shipping_city' ) ? $this->normalize_city_fragment( (string) $order->get_shipping_city() ) : '';
-		$billing_method = method_exists( $order, 'get_billing_city' ) ? $this->normalize_city_fragment( (string) $order->get_billing_city() ) : '';
-		$meta_shipping = $this->normalize_city_fragment( $this->meta_string( $order, '_shipping_city' ) );
-		$meta_billing = $this->normalize_city_fragment( $this->meta_string( $order, '_billing_city' ) );
-		$pickup_parse = $this->city_from_pickup_address( $this->meta_string( $order, '_wdc_pickup_point_address' ) );
-
-		return array(
-			'shipping_method_result' => '' !== $shipping_method ? 'filled' : 'empty',
-			'billing_method_result' => '' !== $billing_method ? 'filled' : 'empty',
-			'meta_shipping_city' => '' !== $meta_shipping ? 'filled' : 'empty',
-			'meta_billing_city' => '' !== $meta_billing ? 'filled' : 'empty',
-			'pickup_address_parse' => '' !== $pickup_parse ? 'filled' : 'empty',
-		);
-	}
 	/**
 	 * @return array<string,mixed>
 	 */
@@ -549,79 +546,21 @@ final class OrderShipmentDraftFactory {
 	}
 
 	private function shipping_address( object $order ): string {
-		$parts = array();
-		foreach ( array( 'get_shipping_postcode', 'get_shipping_city', 'get_shipping_address_1', 'get_shipping_address_2' ) as $method ) {
-			if ( ! method_exists( $order, $method ) ) {
-				continue;
-			}
-			$value = trim( (string) $order->{$method}() );
-			if ( '' !== $value ) {
-				$parts[ $method ] = $value;
-			}
-		}
-
 		return implode(
 			', ',
 			array_values(
 				array_filter(
 					array(
-						$parts['get_shipping_postcode'] ?? '',
-						$this->shipping_region( $order ),
-						$parts['get_shipping_city'] ?? '',
-						$parts['get_shipping_address_1'] ?? '',
-						$this->address_2_for_raw_address( $parts['get_shipping_address_2'] ?? '' ),
+						method_exists( $order, 'get_shipping_postcode' ) ? trim( (string) $order->get_shipping_postcode() ) : '',
+						method_exists( $order, 'get_shipping_state' ) ? trim( (string) $order->get_shipping_state() ) : '',
+						method_exists( $order, 'get_shipping_city' ) ? trim( (string) $order->get_shipping_city() ) : '',
+						method_exists( $order, 'get_shipping_address_1' ) ? trim( (string) $order->get_shipping_address_1() ) : '',
+						$this->address_2_for_raw_address( method_exists( $order, 'get_shipping_address_2' ) ? (string) $order->get_shipping_address_2() : '' ),
 					),
 					static fn ( string $value ): bool => '' !== trim( $value )
 				)
 			)
 		);
-	}
-
-	private function shipping_region( object $order ): string {
-		if ( method_exists( $order, 'get_shipping_state' ) ) {
-			$state = trim( (string) $order->get_shipping_state() );
-			if ( '' !== $state ) {
-				return $state;
-			}
-		}
-
-		foreach ( array( '_wdc_platform_region_name', '_wdc_platform_location_region_name' ) as $key ) {
-			$value = $this->meta_string( $order, $key );
-			if ( '' !== $value ) {
-				return $value;
-			}
-		}
-
-		$calculation = $this->calculation_data( $order );
-		$destination = is_array( $calculation['destination'] ?? null ) ? $calculation['destination'] : array();
-		foreach ( array( 'region_name', 'region', 'state', 'state_name' ) as $key ) {
-			$value = trim( (string) ( $destination[ $key ] ?? '' ) );
-			if ( '' !== $value ) {
-				return $value;
-			}
-		}
-
-		$display = $this->meta_string( $order, '_wdc_platform_city_display_name' );
-		foreach ( array( ' - ', ' РІР‚вЂќ ', ' Р Р†Р вЂљРІР‚Сњ ', 'Р В Р вЂ Р В РІР‚С™Р Р†Р вЂљРЎСљ' ) as $separator ) {
-			$position = strpos( $display, $separator );
-			if ( false !== $position ) {
-				return trim( substr( $display, $position + strlen( $separator ) ) );
-			}
-		}
-		foreach ( array( ' область', ' край', ' республика' ) as $region_suffix ) {
-			$position = strpos( $display, $region_suffix );
-			if ( false !== $position ) {
-				$before_region = trim( substr( $display, 0, $position ) );
-				$tokens = preg_split( '/\s+/', $before_region ) ?: array();
-				$region_name = (string) end( $tokens );
-				if ( '' !== $region_name ) {
-					return $region_name . $region_suffix;
-				}
-			}
-		}
-
-
-		return '';
 	}
 
 	private function address_2_for_raw_address( string $address_2 ): string {
