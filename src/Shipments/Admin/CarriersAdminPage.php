@@ -45,6 +45,7 @@ final class CarriersAdminPage {
 			return;
 		}
 		$values = $this->otpravka_settings->values();
+		$postoffice_codes = $this->otpravka_settings->postoffice_codes();
 		?>
 		<div class="wrap">
 			<h1><?php echo esc_html__( 'Перевозчики', 'walls-delivery-calc' ); ?></h1>
@@ -62,9 +63,43 @@ final class CarriersAdminPage {
 					<tr><th scope="row"><label for="russian_post_otpravka_login"><?php echo esc_html__( 'Логин', 'walls-delivery-calc' ); ?></label></th><td><input class="regular-text" id="russian_post_otpravka_login" name="russian_post_otpravka_login" value="<?php echo esc_attr( (string) ( $values[ RussianPostOtpravkaApiSettings::LOGIN_KEY ] ?? '' ) ); ?>"></td></tr>
 					<tr><th scope="row"><?php echo esc_html__( 'Пароль', 'walls-delivery-calc' ); ?></th><td><input class="regular-text" type="password" name="russian_post_otpravka_password" value="" placeholder="<?php echo esc_attr( $this->otpravka_settings->has_password() ? 'задано' : 'не задано' ); ?>"><label style="display:block;margin-top:6px;"><input type="checkbox" name="russian_post_otpravka_clear_password" value="1"> <?php echo esc_html__( 'очистить сохраненный пароль', 'walls-delivery-calc' ); ?></label></td></tr>
 					<tr><th scope="row"><label for="russian_post_otpravka_timeout"><?php echo esc_html__( 'Таймаут API, сек.', 'walls-delivery-calc' ); ?></label></th><td><input class="small-text" id="russian_post_otpravka_timeout" name="russian_post_otpravka_timeout" type="number" min="30" max="300" value="<?php echo esc_attr( (string) ( $values[ RussianPostOtpravkaApiSettings::TIMEOUT_KEY ] ?? 120 ) ); ?>"></td></tr>
+					<tr>
+						<th scope="row"><?php echo esc_html__( 'Индексы места приема', 'walls-delivery-calc' ); ?></th>
+						<td>
+							<div data-wdc-postoffice-codes>
+								<?php foreach ( $postoffice_codes as $code ) : ?>
+									<p data-wdc-postoffice-code-row><input class="small-text" name="<?php echo esc_attr( RussianPostOtpravkaApiSettings::POSTOFFICE_CODES_KEY ); ?>[]" pattern="\d{6}" maxlength="6" value="<?php echo esc_attr( $code ); ?>"> <button type="button" class="button" data-wdc-remove-postoffice-code><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button></p>
+								<?php endforeach; ?>
+							</div>
+							<p><button type="button" class="button" data-wdc-add-postoffice-code><?php echo esc_html__( 'Добавить индекс', 'walls-delivery-calc' ); ?></button></p>
+							<p class="description"><?php echo esc_html__( 'Используются в модалке создания отправления как postoffice-code. Допустимы только 6 цифр; если список пуст, применяется 630005.', 'walls-delivery-calc' ); ?></p>
+						</td>
+					</tr>
 				</table>
 				<?php submit_button( __( 'Сохранить Почту России', 'walls-delivery-calc' ) ); ?>
 			</form>
+			<script>
+			(function () {
+				var root = document.querySelector('[data-wdc-postoffice-codes]');
+				if (!root) return;
+				document.addEventListener('click', function (event) {
+					var add = event.target.closest('[data-wdc-add-postoffice-code]');
+					if (add) {
+						var row = document.createElement('p');
+						row.setAttribute('data-wdc-postoffice-code-row', '');
+						row.innerHTML = '<input class="small-text" name="<?php echo esc_js( RussianPostOtpravkaApiSettings::POSTOFFICE_CODES_KEY ); ?>[]" pattern="\\d{6}" maxlength="6" value=""> <button type="button" class="button" data-wdc-remove-postoffice-code><?php echo esc_js( __( 'Удалить', 'walls-delivery-calc' ) ); ?></button>';
+						root.appendChild(row);
+						row.querySelector('input').focus();
+						return;
+					}
+					var remove = event.target.closest('[data-wdc-remove-postoffice-code]');
+					if (remove) {
+						var row = remove.closest('[data-wdc-postoffice-code-row]');
+						if (row && root.querySelectorAll('[data-wdc-postoffice-code-row]').length > 1) row.remove();
+					}
+				});
+			})();
+			</script>
 		</div>
 		<?php
 	}

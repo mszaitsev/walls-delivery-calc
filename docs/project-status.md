@@ -32,7 +32,7 @@
 | Multicarrier Pickup Layer | partial | 35% | Generic domain/storage exists, but production checkout map is Russian Post-specific. |
 | Order Admin Recalculation | partial | 30% | Order delivery metabox exists; full recalculation/replacement workflow is missing. |
 | Shipment Domain | partial | 55% | Domain objects exist and are used by the manual shipment creation runtime. |
-| Shipment Runtime | partial | 38% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments with server-side payload preview; statuses/documents/cancellation/admin pickup map are pending. |
+| Shipment Runtime | partial | 42% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments with server-side payload preview, tariff select, postoffice-code select and visible AJAX result diagnostics; statuses/documents/cancellation/admin pickup map are pending. |
 | Tracking / Documents / Status Sync | not-started | 0% | No tracking polling, labels, acts, documents, or status sync runtime. |
 | WooCommerce Status Mapping | not-started | 0% | Domain baseline exists, but no automatic WooCommerce order status changes. |
 | CDEK | planned | 0% | Planned carrier stage; no adapter found in code. |
@@ -204,6 +204,11 @@
 
 - Админская карта выбора ПВЗ пока не подключена; в модалке показывается явное inline-сообщение, а код ПВЗ можно скорректировать вручную.
 - Распределение товаров по грузоместам в UI пока базовое: товары заказа попадают в первое место, детальное распределение остается отдельным этапом.
+- Domestic shipment payloads now use `mail-direct=643`.
+- Обычный pickup/ОПС для Почты России создается через `address-type-to=DEMAND`, `index-to`, `region-to`, `place-to` без `ecom-data`.
+- ECOM-сценарий включается настройкой тарифа `is_ecom` во вкладке `Тарифы`; object `54020` не включает `ecom-data` сам по себе.
+- Индексы места приема настраиваются на `WDC -> Перевозчики -> Почта России`, default `630005`, и выбираются в модалке как `postoffice-code`.
+- После AJAX create модалка показывает barcode/result-id или нормализованные ошибки API Почты; страница не перезагружается автоматически.
 
 ## Несоответствия документации и кода
 

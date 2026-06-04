@@ -18,7 +18,8 @@ final class DomesticTariffVariant {
 		public readonly ?int $min_weight_g = null,
 		public readonly ?int $max_weight_g = null,
 		public readonly int $sort_order = 100,
-		public readonly string $admin_comment = ''
+		public readonly string $admin_comment = '',
+		public readonly bool $is_ecom = false
 	) {
 	}
 
@@ -38,7 +39,8 @@ final class DomesticTariffVariant {
 			isset( $data['min_weight_g'] ) && '' !== (string) $data['min_weight_g'] ? max( 0, (int) $data['min_weight_g'] ) : null,
 			isset( $data['max_weight_g'] ) && '' !== (string) $data['max_weight_g'] ? max( 0, (int) $data['max_weight_g'] ) : null,
 			(int) ( $data['sort_order'] ?? 100 ),
-			(string) ( $data['admin_comment'] ?? '' )
+			(string) ( $data['admin_comment'] ?? '' ),
+			(bool) ( $data['is_ecom'] ?? $data['ecom'] ?? false )
 		);
 	}
 
@@ -57,6 +59,7 @@ final class DomesticTariffVariant {
 			'max_weight_g' => $this->max_weight_g,
 			'sort_order' => $this->sort_order,
 			'admin_comment' => $this->admin_comment,
+			'is_ecom' => $this->is_ecom,
 		);
 	}
 

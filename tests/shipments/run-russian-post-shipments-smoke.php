@@ -36,6 +36,16 @@ if ( ! function_exists( 'wp_unslash' ) ) {
 		return $value;
 	}
 }
+if ( ! function_exists( 'sanitize_key' ) ) {
+	function sanitize_key( mixed $value ): string {
+		return strtolower( preg_replace( '/[^a-zA-Z0-9_\\-]/', '', (string) $value ) ?? '' );
+	}
+}
+if ( ! function_exists( 'sanitize_email' ) ) {
+	function sanitize_email( mixed $value ): string {
+		return trim( (string) $value );
+	}
+}
 
 function shipments_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -79,7 +89,7 @@ $request = new ShipmentCreateRequest(
 	carrier_key: RussianPostDomesticSettings::CARRIER_KEY,
 	delivery_type: DeliveryType::PICKUP,
 	rate_id: RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
-	recipient_address: new Address( country_code: 'RU', city: 'Новосибирск', postcode: '630001', raw_address: 'Новосибирск' ),
+	recipient_address: new Address( country_code: 'RU', region_name: 'Новосибирская область', city: 'Новосибирск', postcode: '630001', raw_address: 'Новосибирск' ),
 	pickup_point: new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, '630001', 'Новосибирск, тестовый ПВЗ', '2026-06-04 10:00:00' ),
 	places: array(
 		new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ),
@@ -110,17 +120,39 @@ shipments_smoke_assert( true === $payload[0]['add-to-mmo'] && '123' === $payload
 shipments_smoke_assert( 'ONLINE_PARCEL' === $payload[0]['mail-type'], 'Object 23030 must map to ONLINE_PARCEL.' );
 shipments_smoke_assert( 'ORDINARY' === $payload[0]['mail-category'], 'Ordinary parcel/courier/EMS variants must use ORDINARY category.' );
 shipments_smoke_assert( ! array_key_exists( 'goods', $payload[0] ), 'goods must not be sent when disabled.' );
-shipments_smoke_assert( '630001' === $payload[0]['ecom-data']['delivery-point-index'], 'Pickup code must become ecom-data delivery-point-index.' );
-shipments_smoke_assert( ! array_key_exists( 'index-to', $payload[0] ), 'Pickup/ecom payload must not include recipient index-to.' );
+shipments_smoke_assert( 643 === $payload[0]['mail-direct'], 'Domestic Russian Post payload must set mail-direct=643.' );
+shipments_smoke_assert( 'DEMAND' === $payload[0]['address-type-to'], 'Normal pickup/OPS payload must use DEMAND address type.' );
+shipments_smoke_assert( '630001' === $payload[0]['index-to'], 'Normal pickup/OPS payload must include selected destination index.' );
+shipments_smoke_assert( 'Новосибирская область' === $payload[0]['region-to'], 'Normal pickup/OPS payload must include region-to.' );
+shipments_smoke_assert( 'Новосибирск' === $payload[0]['place-to'], 'Normal pickup/OPS payload must include place-to.' );
+shipments_smoke_assert( ! array_key_exists( 'ecom-data', $payload[0] ), 'Normal pickup/OPS payload must not include ecom-data.' );
 shipments_smoke_assert( '79990000000' === $payload[0]['tel-address'], 'tel-address must be digit-only.' );
 shipments_smoke_assert( '630005' === $payload[0]['postoffice-code'], 'Postoffice code must be present.' );
+
+$ecom_request = new ShipmentCreateRequest(
+	$request->order_id,
+	$request->carrier_key,
+	DeliveryType::PICKUP,
+	$request->rate_id,
+	$request->recipient_address,
+	$request->pickup_point,
+	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ) ),
+	$request->declared_value,
+	false,
+	$request->services,
+	$request->recipient,
+	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '54020', 'tariff_is_ecom' => true )
+);
+$ecom_payload = $builder->build( $ecom_request );
+shipments_smoke_assert( '630001' === $ecom_payload[0]['ecom-data']['delivery-point-index'], 'ECOM pickup must use ecom-data delivery-point-index.' );
+shipments_smoke_assert( ! array_key_exists( 'address-type-to', $ecom_payload[0] ) && ! array_key_exists( 'index-to', $ecom_payload[0] ), 'ECOM pickup must not include normal address schema.' );
 
 $goods_request = new ShipmentCreateRequest(
 	$request->order_id,
 	$request->carrier_key,
 	DeliveryType::COURIER,
 	RussianPostDomesticSettings::COURIER_SERVICE_KEY,
-	new Address( country_code: 'RU', city: 'Новосибирск', postcode: '630099', raw_address: '630099, Новосибирск, Красный проспект 1' ),
+	new Address( country_code: 'RU', region_name: 'Новосибирская область', city: 'Новосибирск', postcode: '630099', raw_address: '630099, Новосибирская область, Новосибирск, Красный проспект 1' ),
 	null,
 	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 10000 ), array( $item ) ) ),
 	Money::from_kopecks( 10000 ),
@@ -131,7 +163,9 @@ $goods_request = new ShipmentCreateRequest(
 );
 $goods_payload = $builder->build( $goods_request );
 shipments_smoke_assert( true === $goods_payload[0]['courier'] && true === $goods_payload[0]['delivery-to-door'], 'Courier flags must be set.' );
-shipments_smoke_assert( '630099' === $goods_payload[0]['index-to'] && ! isset( $goods_payload[0]['ecom-data'] ), 'Courier payload must include index-to and omit ecom-data.' );
+shipments_smoke_assert( 643 === $goods_payload[0]['mail-direct'] && 'DEFAULT' === $goods_payload[0]['address-type-to'], 'Courier payload must set domestic mail-direct and DEFAULT address type.' );
+shipments_smoke_assert( '630099' === $goods_payload[0]['index-to'] && 'Новосибирская область' === $goods_payload[0]['region-to'] && 'Новосибирск' === $goods_payload[0]['place-to'] && ! isset( $goods_payload[0]['ecom-data'] ), 'Courier payload must include address fields and omit ecom-data.' );
+shipments_smoke_assert( '630099, Новосибирская область, Новосибирск, Красный проспект 1' === $goods_payload[0]['raw-address'], 'Courier payload must include raw-address.' );
 shipments_smoke_assert( isset( $goods_payload[0]['goods']['items'][0] ), 'goods.items must be present when enabled.' );
 
 $missing_pickup = new ShipmentCreateRequest(
@@ -223,5 +257,26 @@ $fallback_region_address = $shipping_address->invoke(
 	)
 );
 shipments_smoke_assert( '630005, Новосибирская область, Новосибирск, ул. Ленина 15' === $fallback_region_address, 'Courier raw-address must use WDC location metadata when shipping state is empty.' );
+
+$pickup_code_address = $shipping_address->invoke(
+	$factory,
+	new ShipmentsSmokeOrder(
+		array(
+			'postcode' => '630005',
+			'state' => 'Новосибирская область',
+			'city' => 'Новосибирск',
+			'address_1' => 'ул. Ленина 15',
+			'address_2' => 'Код ПВЗ 630001',
+		)
+	)
+);
+shipments_smoke_assert( '630005, Новосибирская область, Новосибирск, ул. Ленина 15' === $pickup_code_address, 'Courier raw-address must skip address_2 when it starts with pickup code marker.' );
+
+$declared_value_method = $factory_reflection->getMethod( 'declared_value_from_place_row' );
+$declared_value_method->setAccessible( true );
+$insurance_1000 = $declared_value_method->invoke( $factory, array( 'declared_value_rub' => '1000' ) );
+$insurance_2500 = $declared_value_method->invoke( $factory, array( 'declared_value_rub' => '2500' ) );
+shipments_smoke_assert( 100000 === $insurance_1000->get_kopecks(), 'Insurance 1000 rub must become 100000 kopecks.' );
+shipments_smoke_assert( 250000 === $insurance_2500->get_kopecks(), 'Insurance 2500 rub must become 250000 kopecks.' );
 
 echo "Russian Post shipments smoke OK\n";

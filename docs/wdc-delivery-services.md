@@ -78,6 +78,6 @@ For `russian_post_worldwide_parcel`, the normal WooCommerce shipping item meta s
 
 Domestic Russian Post foundation adds built-in services for `russian_post_domestic_pickup` and `russian_post_domestic_courier`. Bootstrapping pins both to `RU`; the availability UI is informational for this carrier family.
 
-The service calculation settings continue to own comments, packaging weight inclusion, rounding, minimum price and default-rule fallback. Domestic-specific tariff variants are exposed on a Tariffs foundation tab and resolved at runtime per service.
+The service calculation settings continue to own comments, packaging weight inclusion, rounding, minimum price and default-rule fallback. Domestic-specific tariff variants are exposed on a Tariffs foundation tab and resolved at runtime per service. Each domestic Russian Post tariff variant also stores an `is_ecom` flag; shipment creation uses this setting to decide whether pickup payloads use `ecom-data.delivery-point-index` or the normal OPS `DEMAND` address schema.
 
 Russian Post domestic service simulation calls every enabled variant for the service and shows active tariffs plus skipped API variants. Skipped rows include `object_code`, sanitized request params, HTTP status, and API `errorcode`/`errormsg`, which is useful when one tariff is rejected while the rest of the service still calculates.

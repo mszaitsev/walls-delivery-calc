@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Shipments\Admin;
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
@@ -79,11 +80,17 @@ final class OrderShipmentsMetabox {
 		$safe_preview = $this->creation->safe_preview( $this->drafts->create_request_from_order( $order ) );
 		$request = is_array( $draft['request'] ?? null ) ? $draft['request'] : array();
 		$services = is_array( $draft['services'] ?? null ) ? $draft['services'] : array();
+		$postoffice_codes = is_array( $draft['postoffice_codes'] ?? null ) ? $draft['postoffice_codes'] : array( '630005' );
 		$recipient = is_array( $request['recipient'] ?? null ) ? $request['recipient'] : array();
 		$address = is_array( $request['recipient_address'] ?? null ) ? $request['recipient_address'] : array();
 		$place = is_array( $request['places'][0] ?? null ) ? $request['places'][0] : array();
 		$meta = is_array( $request['meta'] ?? null ) ? $request['meta'] : array();
 		$settings = is_array( $request['services'] ?? null ) ? $request['services'] : array();
+		$pickup_code = (string) ( $request['pickup_point']['point_code'] ?? $meta['pickup_point_code'] ?? '' );
+		$region = (string) ( $address['region_name'] ?? '' );
+		$city = (string) ( $address['settlement'] ?? $address['city'] ?? '' );
+		$pickup_demand_address = implode( ', ', array_filter( array( (string) ( $address['postcode'] ?? $pickup_code ), $region, $city, 'до востребования' ), static fn ( string $value ): bool => '' !== trim( $value ) ) );
+		$display_address = DeliveryType::PICKUP === (string) ( $request['delivery_type'] ?? '' ) ? $pickup_demand_address : (string) ( $address['raw_address'] ?? '' );
 		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
 		$has_created = in_array( (string) ( $shipment['status'] ?? '' ), array( 'created', 'registered' ), true );
 		?>
@@ -112,9 +119,11 @@ final class OrderShipmentsMetabox {
 								<label><?php echo esc_html__( 'ФИО', 'walls-delivery-calc' ); ?><input name="recipient_name" value="<?php echo esc_attr( (string) ( $recipient['name'] ?? '' ) ); ?>"></label>
 								<label><?php echo esc_html__( 'Телефон', 'walls-delivery-calc' ); ?><input name="recipient_phone" value="<?php echo esc_attr( (string) ( $recipient['phone'] ?? '' ) ); ?>"></label>
 								<label>Email<input name="recipient_email" value="<?php echo esc_attr( (string) ( $recipient['email'] ?? '' ) ); ?>"></label>
-								<label><?php echo esc_html__( 'Индекс', 'walls-delivery-calc' ); ?><input name="postcode" value="<?php echo esc_attr( (string) ( $address['postcode'] ?? '' ) ); ?>"></label>
-								<label><?php echo esc_html__( 'Адрес', 'walls-delivery-calc' ); ?><textarea name="raw_address" rows="2"><?php echo esc_textarea( (string) ( $address['raw_address'] ?? '' ) ); ?></textarea></label>
-								<label><?php echo esc_html__( 'Текущий ПВЗ', 'walls-delivery-calc' ); ?><input name="pickup_point_code" value="<?php echo esc_attr( (string) ( $request['pickup_point']['point_code'] ?? $meta['pickup_point_code'] ?? '' ) ); ?>"></label>
+								<label><?php echo esc_html__( 'Индекс', 'walls-delivery-calc' ); ?><input name="postcode" value="<?php echo esc_attr( (string) ( $address['postcode'] ?? '' ) ); ?>" data-wdc-postcode></label>
+								<label><?php echo esc_html__( 'Регион', 'walls-delivery-calc' ); ?><input name="region_name" value="<?php echo esc_attr( $region ); ?>" data-wdc-region></label>
+								<label><?php echo esc_html__( 'Населенный пункт', 'walls-delivery-calc' ); ?><input name="city" value="<?php echo esc_attr( $city ); ?>" data-wdc-city></label>
+								<label><?php echo esc_html__( 'Адрес', 'walls-delivery-calc' ); ?><textarea name="raw_address" rows="2" data-wdc-raw-address><?php echo esc_textarea( $display_address ); ?></textarea></label>
+								<label><?php echo esc_html__( 'Текущий ПВЗ', 'walls-delivery-calc' ); ?><input name="pickup_point_code" value="<?php echo esc_attr( $pickup_code ); ?>" data-wdc-pickup-code></label>
 								<label><?php echo esc_html__( 'Адрес ПВЗ', 'walls-delivery-calc' ); ?><input name="pickup_point_address" value="<?php echo esc_attr( (string) ( $request['pickup_point']['point_address'] ?? '' ) ); ?>"></label>
 								<button type="button" class="button" data-wdc-admin-pickup-map><?php echo esc_html__( 'Выбрать другой ПВЗ на карте', 'walls-delivery-calc' ); ?></button>
 								<p class="description" data-wdc-admin-pickup-map-message hidden><?php echo esc_html__( 'Выбор ПВЗ на карте будет подключен отдельным этапом; сейчас код ПВЗ можно скорректировать вручную.', 'walls-delivery-calc' ); ?></p>
@@ -123,22 +132,26 @@ final class OrderShipmentsMetabox {
 								<h3><?php echo esc_html__( 'Доставка', 'walls-delivery-calc' ); ?></h3>
 								<label><?php echo esc_html__( 'Служба доставки', 'walls-delivery-calc' ); ?><select name="service_key" data-wdc-service-select>
 									<?php foreach ( $services as $service ) : ?>
-										<option value="<?php echo esc_attr( (string) $service['service_key'] ); ?>" data-delivery-type="<?php echo esc_attr( (string) $service['delivery_type'] ); ?>" <?php selected( (string) $request['rate_id'], (string) $service['service_key'] ); ?>><?php echo esc_html( (string) $service['title'] ); ?></option>
+										<option value="<?php echo esc_attr( (string) $service['service_key'] ); ?>" data-delivery-type="<?php echo esc_attr( (string) $service['delivery_type'] ); ?>" data-tariffs="<?php echo esc_attr( wp_json_encode( $service['tariffs'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '[]' ); ?>" <?php selected( (string) $request['rate_id'], (string) $service['service_key'] ); ?>><?php echo esc_html( (string) $service['title'] ); ?></option>
 									<?php endforeach; ?>
 								</select></label>
-								<label><?php echo esc_html__( 'Тариф/object', 'walls-delivery-calc' ); ?><input name="tariff_object" value="<?php echo esc_attr( (string) ( $meta['tariff_object'] ?? '' ) ); ?>"></label>
-								<label><?php echo esc_html__( 'Индекс места приема', 'walls-delivery-calc' ); ?><input name="postoffice_code" value="<?php echo esc_attr( (string) ( $meta['postoffice_code'] ?? '' ) ); ?>"></label>
+								<label><?php echo esc_html__( 'Тариф', 'walls-delivery-calc' ); ?><select name="tariff_object" data-wdc-tariff-select data-selected-tariff="<?php echo esc_attr( (string) ( $meta['tariff_object'] ?? '' ) ); ?>"></select></label>
+								<label><?php echo esc_html__( 'Индекс места приема', 'walls-delivery-calc' ); ?><select name="postoffice_code">
+									<?php foreach ( $postoffice_codes as $code ) : ?>
+										<option value="<?php echo esc_attr( (string) $code ); ?>" <?php selected( (string) ( $meta['postoffice_code'] ?? '' ), (string) $code ); ?>><?php echo esc_html( (string) $code ); ?></option>
+									<?php endforeach; ?>
+								</select></label>
 							</section>
 						</div>
 						<section>
 							<h3><?php echo esc_html__( 'Грузоместа', 'walls-delivery-calc' ); ?></h3>
 							<div data-wdc-places>
 								<div class="wdc-place-row" data-wdc-place>
-									<input type="number" min="1" name="places[0][weight_g]" value="<?php echo esc_attr( (string) ( $place['weight_g'] ?? 1000 ) ); ?>" placeholder="<?php echo esc_attr__( 'вес, г', 'walls-delivery-calc' ); ?>">
-									<input type="number" min="1" name="places[0][length_cm]" value="<?php echo esc_attr( (string) ( $place['length_cm'] ?? 20 ) ); ?>" placeholder="<?php echo esc_attr__( 'длина, см', 'walls-delivery-calc' ); ?>">
-									<input type="number" min="1" name="places[0][width_cm]" value="<?php echo esc_attr( (string) ( $place['width_cm'] ?? 20 ) ); ?>" placeholder="<?php echo esc_attr__( 'ширина, см', 'walls-delivery-calc' ); ?>">
-									<input type="number" min="1" name="places[0][height_cm]" value="<?php echo esc_attr( (string) ( $place['height_cm'] ?? 10 ) ); ?>" placeholder="<?php echo esc_attr__( 'высота, см', 'walls-delivery-calc' ); ?>">
-									<input type="number" min="0" name="places[0][declared_value_kopecks]" value="<?php echo esc_attr( (string) ( $place['declared_value']['amount_kopecks'] ?? 0 ) ); ?>" placeholder="<?php echo esc_attr__( 'ОЦ, коп.', 'walls-delivery-calc' ); ?>">
+									<label><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?><input type="number" min="1" step="1" inputmode="numeric" name="places[0][weight_g]" value="<?php echo esc_attr( (string) ( $place['weight_g'] ?? 1000 ) ); ?>"></label>
+									<label><?php echo esc_html__( 'Длина, см', 'walls-delivery-calc' ); ?><input type="number" min="1" step="1" inputmode="numeric" name="places[0][length_cm]" value="<?php echo esc_attr( (string) ( $place['length_cm'] ?? 20 ) ); ?>"></label>
+									<label><?php echo esc_html__( 'Ширина, см', 'walls-delivery-calc' ); ?><input type="number" min="1" step="1" inputmode="numeric" name="places[0][width_cm]" value="<?php echo esc_attr( (string) ( $place['width_cm'] ?? 20 ) ); ?>"></label>
+									<label><?php echo esc_html__( 'Высота, см', 'walls-delivery-calc' ); ?><input type="number" min="1" step="1" inputmode="numeric" name="places[0][height_cm]" value="<?php echo esc_attr( (string) ( $place['height_cm'] ?? 10 ) ); ?>"></label>
+									<label><?php echo esc_html__( 'Страховка, руб.', 'walls-delivery-calc' ); ?><input type="number" min="0" step="1" inputmode="numeric" name="places[0][declared_value_rub]" value="<?php echo esc_attr( (string) ( (int) ( $place['declared_value']['amount_kopecks'] ?? 0 ) / 100 ) ); ?>"></label>
 									<button type="button" class="button" data-wdc-remove-place><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button>
 								</div>
 							</div>

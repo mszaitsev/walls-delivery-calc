@@ -5,7 +5,7 @@ Version 0.34.0 adds the first shipment runtime foundation. The scope is intentio
 ## Scope
 
 - Shipments are never created automatically.
-- A manager opens the WooCommerce order admin metabox `Отправления`, checks the draft, edits recipient, service, tariff object, pickup/address and parcel places, then clicks `Создать отправление`.
+- A manager opens the WooCommerce order admin metabox `Отправления`, checks the draft, edits recipient, service, tariff, pickup/address, postoffice-code and parcel places, then clicks `Создать отправление`.
 - The first adapter calls Russian Post Otpravka `PUT /2.0/user/backlog`.
 - Status sync, documents, batches, F103, cancellation and automatic polling are not included in this stage.
 
@@ -31,9 +31,19 @@ The adapter builds an array of backlog order objects. For one place it sends one
 
 The builder fills `order-num`, `mail-type`, `mail-category`, `postoffice-code`, recipient fields, `payment=0`, `compulsory-payment=0`, `delivery-with-cod=false`, `payment-method=CASHLESS`, and `notice-payment-method=CASHLESS`. Ordinary parcel/courier/EMS variants use `mail-category=ORDINARY`; declared-value variants use `WITH_DECLARED_VALUE`.
 
-Pickup/ecom shipments use `ecom-data.delivery-point-index` and do not send recipient address fields such as `index-to`, `street-to`, `house-to`, or `raw-address`. Courier shipments use `courier=true`, `delivery-to-door=true`, `index-to`, and `raw-address` when available.
+Domestic Russian Post shipment payloads always send `mail-direct=643`.
+
+Normal pickup/OPS shipments are not treated as ECOM by default. They send `address-type-to=DEMAND`, `index-to`, `region-to`, and `place-to`; `ecom-data` is omitted. In the admin modal the human-readable address is shown as `{index}, {region}, {place}, до востребования`.
+
+ECOM pickup shipments use `ecom-data.delivery-point-index` and omit the normal recipient address schema unless a future API/product explicitly requires it. The ECOM decision comes from the per-tariff `is_ecom` setting in Delivery Services, not from a hard-coded object code. Object `54020` still maps to `ECOM_MARKETPLACE`, but it only uses `ecom-data` when the tariff setting is enabled.
+
+Courier shipments use `address-type-to=DEFAULT`, `courier=true`, `delivery-to-door=true`, `index-to`, `region-to`, `place-to`, and `raw-address`. If a manager did not enter a custom raw address, it is assembled from `shipping_postcode`, `shipping_state`, `shipping_city`, `shipping_address_1`, and `shipping_address_2`; `shipping_address_2` is skipped when it starts with `Код ПВЗ`.
 
 `tel-address` is normalized to digits only before payload creation. If the normalized phone is empty, validation returns `Телефон получателя обязателен.`
+
+The admin parcel-place UI accepts only integer values. Insurance is entered in rubles and converted before payload creation to Otpravka kopecks: `1000` rub -> `insr-value=100000`.
+
+Postoffice acceptance indices are configured on `WDC -> Перевозчики -> Почта России`. The default list contains `630005`; each configured value must be a 6-digit index and is used in the modal select for `postoffice-code`.
 
 `dimension-type` and `prepaid-amount` are not sent by default. `goods` is omitted unless service setting `send_goods_items=true`.
 

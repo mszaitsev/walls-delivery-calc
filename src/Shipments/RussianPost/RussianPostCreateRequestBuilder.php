@@ -30,6 +30,7 @@ final class RussianPostCreateRequestBuilder {
 		$service_key = (string) ( $request->meta['service_key'] ?? $request->rate_id );
 		$object_code = (string) ( $request->meta['tariff_object'] ?? $request->meta['selected_tariff_object'] ?? '' );
 		$product = $this->products->by_object_code( $object_code, $request->delivery_type );
+		$is_ecom = DeliveryType::PICKUP === $request->delivery_type && ! empty( $request->meta['tariff_is_ecom'] );
 		$is_mmo = count( $request->places ) > 1;
 		$order_num = $this->order_num( $request );
 		$send_goods = ! empty( $request->services['send_goods_items'] );
@@ -43,6 +44,7 @@ final class RussianPostCreateRequestBuilder {
 				'order-num' => $is_mmo ? $order_num . '-' . ( $index + 1 ) : $order_num,
 				'mail-type' => $product['mail_type'],
 				'mail-category' => $product['mail_category'],
+				'mail-direct' => 643,
 				'mass' => $place->weight_g,
 				'dimension' => array(
 					'length' => $place->length_cm,
@@ -70,15 +72,23 @@ final class RussianPostCreateRequestBuilder {
 			if ( DeliveryType::COURIER === $request->delivery_type ) {
 				$payload['courier'] = true;
 				$payload['delivery-to-door'] = true;
+				$payload['address-type-to'] = 'DEFAULT';
 				$payload['index-to'] = $request->recipient_address->postcode;
+				$payload['region-to'] = $request->recipient_address->region_name;
+				$payload['place-to'] = $this->place_to( $request );
 				$raw_address = $request->recipient_address->raw_address ?: implode( ', ', array_filter( array( $request->recipient_address->city, $request->recipient_address->street, $request->recipient_address->house, $request->recipient_address->apartment ) ) );
 				if ( '' !== trim( $raw_address ) ) {
 					$payload['raw-address'] = $raw_address;
 				}
 			} else {
 				$pickup_code = $request->pickup_point?->point_code ?? (string) ( $request->meta['pickup_point_code'] ?? '' );
-				if ( '' !== $pickup_code ) {
+				if ( $is_ecom && '' !== $pickup_code ) {
 					$payload['ecom-data'] = array( 'delivery-point-index' => $pickup_code );
+				} elseif ( ! $is_ecom ) {
+					$payload['address-type-to'] = 'DEMAND';
+					$payload['index-to'] = $pickup_code ?: $request->recipient_address->postcode;
+					$payload['region-to'] = $request->recipient_address->region_name;
+					$payload['place-to'] = $this->place_to( $request );
 				}
 				$shelf_life_days = (int) ( $request->services['shelf_life_days'] ?? 30 );
 				$payload['shelf-life-days'] = max( 15, min( 60, $shelf_life_days ) );
@@ -145,10 +155,24 @@ final class RussianPostCreateRequestBuilder {
 		if ( DeliveryType::COURIER === $request->delivery_type && '' === trim( $request->recipient_address->raw_address . $request->recipient_address->street ) ) {
 			$errors[] = 'Адрес курьерской доставки обязателен.';
 		}
+		if ( DeliveryType::COURIER === $request->delivery_type && '' === trim( $request->recipient_address->postcode ) ) {
+			$errors[] = 'Индекс получателя обязателен.';
+		}
+		if ( DeliveryType::COURIER === $request->delivery_type && '' === trim( $this->place_to( $request ) ) ) {
+			$errors[] = 'Населенный пункт получателя обязателен.';
+		}
 		if ( DeliveryType::PICKUP === $request->delivery_type ) {
 			$pickup_code = $request->pickup_point?->point_code ?? (string) ( $request->meta['pickup_point_code'] ?? '' );
 			if ( '' === trim( $pickup_code ) ) {
 				$errors[] = 'Код ПВЗ/почтомата обязателен.';
+			}
+			if ( empty( $request->meta['tariff_is_ecom'] ) ) {
+				if ( '' === trim( $request->recipient_address->region_name ) ) {
+					$errors[] = 'Регион получателя обязателен для обычного ПВЗ/ОПС.';
+				}
+				if ( '' === trim( $this->place_to( $request ) ) ) {
+					$errors[] = 'Населенный пункт получателя обязателен для обычного ПВЗ/ОПС.';
+				}
 			}
 		}
 
@@ -215,5 +239,9 @@ final class RussianPostCreateRequestBuilder {
 		$order_num = trim( (string) ( $request->meta['order_num'] ?? '' ) );
 
 		return '' !== $order_num ? $order_num : (string) $request->order_id;
+	}
+
+	private function place_to( ShipmentCreateRequest $request ): string {
+		return trim( $request->recipient_address->settlement ) ?: trim( $request->recipient_address->city );
 	}
 }

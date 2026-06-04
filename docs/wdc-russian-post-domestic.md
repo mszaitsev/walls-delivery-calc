@@ -64,7 +64,13 @@ The first shipment runtime uses the saved domestic service and selected tariff o
 
 Object-code to Otpravka product mapping is handled in `src/Shipments/RussianPost/RussianPostShipmentProductMapper.php`. Multiple places are allowed only for MMO-compatible products: `ECOM_MARKETPLACE`, `EMS_RT`, `EMS_TENDER`, `ONLINE_COURIER`, and `ONLINE_PARCEL`. For MMO the payload sends one backlog object per place with `add-to-mmo=true` and `group-name` equal to the WooCommerce order number.
 
-Plain parcel/courier/EMS shipment variants use Otpravka `mail-category=ORDINARY`; declared-value variants use `WITH_DECLARED_VALUE`. Pickup/ecom shipment payloads send `ecom-data.delivery-point-index` and intentionally omit recipient address fields such as `index-to`; courier payloads send `index-to`, `raw-address`, `courier=true`, and `delivery-to-door=true`.
+Plain parcel/courier/EMS shipment variants use Otpravka `mail-category=ORDINARY`; declared-value variants use `WITH_DECLARED_VALUE`. Domestic shipment payloads send `mail-direct=643`.
+
+Normal pickup/OPS shipment payloads are not ECOM. They use `address-type-to=DEMAND` with `index-to`, `region-to`, and `place-to`; `ecom-data` is not sent. The corresponding human-readable admin address is `{index}, {region}, {place}, до востребования`.
+
+ECOM shipment payloads are enabled by a per-tariff `is_ecom` setting in Delivery Services. For these tariffs the shipment builder sends `ecom-data.delivery-point-index` and omits the normal pickup address schema unless a future product requires additional fields. Object `54020` maps to `ECOM_MARKETPLACE`, but using `ecom-data` is still controlled by the tariff setting.
+
+Courier payloads use `address-type-to=DEFAULT`, `index-to`, `region-to`, `place-to`, `raw-address`, `courier=true`, and `delivery-to-door=true`. `raw-address` is assembled from WooCommerce shipping postcode, state, city, address line 1 and address line 2; address line 2 is skipped when it starts with `Код ПВЗ`.
 
 The runtime calls:
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Application;
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Address\Address;
@@ -20,7 +21,8 @@ final class OrderShipmentDraftFactory {
 	public function __construct(
 		private DeliveryServiceRepository $services,
 		private ShipmentServiceSettings $shipment_settings,
-		private ?RussianPostDomesticSettings $domestic_settings = null
+		private ?RussianPostDomesticSettings $domestic_settings = null,
+		private ?RussianPostOtpravkaApiSettings $otpravka_settings = null
 	) {
 	}
 
@@ -44,6 +46,8 @@ final class OrderShipmentDraftFactory {
 		$settings['combine_goods_items'] = ! empty( $settings[ ShipmentServiceSettings::COMBINE_GOODS_ITEMS_DEFAULT ] );
 		$settings['combined_goods_name_template'] = (string) ( $settings[ ShipmentServiceSettings::COMBINED_GOODS_NAME_TEMPLATE ] ?? 'Товары по заказу {order_number}' );
 		$settings['combined_goods_name'] = str_replace( '{order_number}', $order_number, $settings['combined_goods_name_template'] );
+		$tariff_object = $this->meta_string( $order, '_wdc_platform_tariff_object' );
+		$tariff = $this->tariff_for_service_object( $service, $tariff_object );
 
 		return new ShipmentCreateRequest(
 			order_id: $this->order_id( $order ),
@@ -63,8 +67,9 @@ final class OrderShipmentDraftFactory {
 			meta: array(
 				'service_key' => $service_key,
 				'service_title' => $service instanceof DeliveryService ? $service->title : $this->meta_string( $order, '_wdc_platform_service_title' ),
-				'tariff_object' => $this->meta_string( $order, '_wdc_platform_tariff_object' ),
-				'tariff_title' => $this->meta_string( $order, '_wdc_platform_tariff_title' ),
+				'tariff_object' => $tariff_object,
+				'tariff_title' => (string) ( $tariff['title'] ?? $this->meta_string( $order, '_wdc_platform_tariff_title' ) ),
+				'tariff_is_ecom' => ! empty( $tariff['is_ecom'] ),
 				'order_num' => $order_number,
 				'postoffice_code' => $this->from_postcode( $service_key ),
 				'pickup_point_code' => $this->meta_string( $order, '_wdc_pickup_point_code' ),
@@ -88,13 +93,15 @@ final class OrderShipmentDraftFactory {
 		return array(
 			'request' => $request->to_array(),
 			'services' => array_map(
-				static fn ( DeliveryService $service ): array => array(
+				fn ( DeliveryService $service ): array => array(
 					'service_key' => $service->service_key,
 					'title' => $service->title,
 					'delivery_type' => RussianPostDomesticSettings::service_delivery_type( $service->service_key ),
+					'tariffs' => $this->tariffs_for_service( $service ),
 				),
 				$services
 			),
+			'postoffice_codes' => $this->postoffice_codes(),
 		);
 	}
 
@@ -115,7 +122,7 @@ final class OrderShipmentDraftFactory {
 				max( 0, (int) ( $row['length_cm'] ?? 0 ) ),
 				max( 0, (int) ( $row['width_cm'] ?? 0 ) ),
 				max( 0, (int) ( $row['height_cm'] ?? 0 ) ),
-				Money::from_kopecks( max( 0, (int) ( $row['declared_value_kopecks'] ?? 0 ) ) ),
+				$this->declared_value_from_place_row( $row ),
 				0 === $index ? ( $base->places[0]->items ?? array() ) : array()
 			);
 		}
@@ -124,6 +131,8 @@ final class OrderShipmentDraftFactory {
 		$settings['send_goods_items'] = ! empty( $data['send_goods_items'] ) && ! empty( $settings[ ShipmentServiceSettings::SEND_GOODS_ITEMS ] );
 		$settings['combine_goods_items'] = ! empty( $data['combine_goods_items'] );
 		$settings['combined_goods_name'] = sanitize_text_field( wp_unslash( $data['combined_goods_name'] ?? $settings[ ShipmentServiceSettings::COMBINED_GOODS_NAME_TEMPLATE ] ?? '' ) );
+		$tariff_object = sanitize_text_field( wp_unslash( $data['tariff_object'] ?? $base->meta['tariff_object'] ?? '' ) );
+		$tariff = $this->tariff_for_service_object( $service, $tariff_object );
 
 		return new ShipmentCreateRequest(
 			$base->order_id,
@@ -146,7 +155,9 @@ final class OrderShipmentDraftFactory {
 				array(
 					'service_key' => $service_key,
 					'service_title' => $service instanceof DeliveryService ? $service->title : (string) ( $base->meta['service_title'] ?? '' ),
-					'tariff_object' => sanitize_text_field( wp_unslash( $data['tariff_object'] ?? $base->meta['tariff_object'] ?? '' ) ),
+					'tariff_object' => $tariff_object,
+					'tariff_title' => (string) ( $tariff['title'] ?? $base->meta['tariff_title'] ?? '' ),
+					'tariff_is_ecom' => ! empty( $tariff['is_ecom'] ),
 					'postoffice_code' => preg_replace( '/\D+/', '', (string) wp_unslash( $data['postoffice_code'] ?? $base->meta['postoffice_code'] ?? '' ) ) ?: '',
 				)
 			)
@@ -205,6 +216,7 @@ final class OrderShipmentDraftFactory {
 
 		return new Address(
 			country_code: method_exists( $order, 'get_shipping_country' ) ? (string) $order->get_shipping_country() : 'RU',
+			region_name: $this->shipping_region( $order ),
 			city: method_exists( $order, 'get_shipping_city' ) ? (string) $order->get_shipping_city() : $this->meta_string( $order, '_wdc_platform_city_display_name' ),
 			postcode: $postcode,
 			street: method_exists( $order, 'get_shipping_address_1' ) ? (string) $order->get_shipping_address_1() : '',
@@ -218,6 +230,7 @@ final class OrderShipmentDraftFactory {
 	private function address_from_admin_data( Address $base, array $data, string $delivery_type ): Address {
 		return new Address(
 			country_code: $base->country_code ?: 'RU',
+			region_name: sanitize_text_field( wp_unslash( $data['region_name'] ?? $data['region_to'] ?? $base->region_name ) ),
 			city: sanitize_text_field( wp_unslash( $data['city'] ?? $base->city ) ),
 			postcode: preg_replace( '/\D+/', '', (string) wp_unslash( $data['postcode'] ?? $base->postcode ) ) ?: '',
 			raw_address: sanitize_text_field( wp_unslash( $data['raw_address'] ?? $base->raw_address ) ),
@@ -250,6 +263,63 @@ final class OrderShipmentDraftFactory {
 		);
 	}
 
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function tariffs_for_service( DeliveryService $service ): array {
+		$settings = $this->domestic_settings instanceof RussianPostDomesticSettings ? $this->domestic_settings->all( $service->service_key ) : array();
+		$variants = is_array( $settings['tariff_variants'] ?? null ) ? $settings['tariff_variants'] : array();
+		if ( array() === $variants ) {
+			$variants = array_map( static fn ( object $variant ): array => method_exists( $variant, 'to_array' ) ? $variant->to_array() : array(), ( new \WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver() )->defaults() );
+		}
+		$delivery_type = RussianPostDomesticSettings::service_delivery_type( $service->service_key );
+		$tariffs = array();
+		foreach ( $variants as $variant ) {
+			if ( ! is_array( $variant ) || empty( $variant['enabled'] ) || (string) ( $variant['delivery_type'] ?? '' ) !== $delivery_type ) {
+				continue;
+			}
+			$object_code = (string) ( $variant['object_code'] ?? '' );
+			if ( '' === $object_code ) {
+				continue;
+			}
+			$tariffs[] = array(
+				'object_code' => $object_code,
+				'title' => (string) ( $variant['title'] ?? $object_code ),
+				'is_ecom' => ! empty( $variant['is_ecom'] ) || ! empty( $variant['ecom'] ),
+			);
+		}
+
+		return $tariffs;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function tariff_for_service_object( ?DeliveryService $service, string $object_code ): array {
+		if ( ! $service instanceof DeliveryService ) {
+			return array();
+		}
+		foreach ( $this->tariffs_for_service( $service ) as $tariff ) {
+			if ( $object_code === (string) ( $tariff['object_code'] ?? '' ) ) {
+				return $tariff;
+			}
+		}
+
+		return array();
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function declared_value_from_place_row( array $row ): Money {
+		if ( array_key_exists( 'declared_value_rub', $row ) ) {
+			$rubles = trim( (string) $row['declared_value_rub'] );
+			return Money::from_kopecks( 1 === preg_match( '/^\d+$/', $rubles ) ? max( 0, (int) $rubles ) * 100 : 0 );
+		}
+
+		return Money::from_kopecks( max( 0, (int) ( $row['declared_value_kopecks'] ?? 0 ) ) );
+	}
+
 	private function meta_string( object $order, string $key ): string {
 		if ( ! method_exists( $order, 'get_meta' ) ) {
 			return '';
@@ -273,9 +343,20 @@ final class OrderShipmentDraftFactory {
 	}
 
 	private function from_postcode( string $service_key ): string {
+		$codes = $this->postoffice_codes();
+		if ( array() !== $codes ) {
+			return $codes[0];
+		}
 		$settings = $this->domestic_settings instanceof RussianPostDomesticSettings ? $this->domestic_settings->all( $service_key ) : array();
 
 		return preg_replace( '/\D+/', '', (string) ( $settings['default_from_postcode'] ?? $settings['return_postcode'] ?? '630005' ) ) ?: '630005';
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function postoffice_codes(): array {
+		return $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ? $this->otpravka_settings->postoffice_codes() : array( '630005' );
 	}
 
 	private function now(): string {
@@ -334,7 +415,7 @@ final class OrderShipmentDraftFactory {
 						$this->shipping_region( $order ),
 						$parts['get_shipping_city'] ?? '',
 						$parts['get_shipping_address_1'] ?? '',
-						$parts['get_shipping_address_2'] ?? '',
+						$this->address_2_for_raw_address( $parts['get_shipping_address_2'] ?? '' ),
 					),
 					static fn ( string $value ): bool => '' !== trim( $value )
 				)
@@ -373,5 +454,14 @@ final class OrderShipmentDraftFactory {
 		}
 
 		return '';
+	}
+
+	private function address_2_for_raw_address( string $address_2 ): string {
+		$address_2 = trim( $address_2 );
+		if ( '' === $address_2 ) {
+			return '';
+		}
+
+		return 1 === preg_match( '/^Код\s+ПВЗ/iu', $address_2 ) ? '' : $address_2;
 	}
 }
