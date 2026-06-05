@@ -1,13 +1,15 @@
 # WDC Shipments Foundation
 
-Version 0.34.0 adds the first shipment runtime foundation. The scope is intentionally manual and carrier-neutral, with Russian Post as the first adapter.
+Version 0.34.0 adds the first shipment runtime foundation and an admin-only Russian Post OPS/PVZ selector for shipment drafts. The scope is intentionally manual and carrier-neutral, with Russian Post as the first adapter.
 
 ## Scope
 
 - Shipments are never created automatically.
 - A manager opens the WooCommerce order admin metabox `Отправления`, checks the draft, edits recipient, service, tariff, pickup/address, postoffice-code and parcel places, then clicks `Создать отправление`.
 - The first adapter calls Russian Post Otpravka `PUT /2.0/user/backlog`.
+- For `Почта России -> ПВЗ/ОПС`, a manager can choose another local Russian Post pickup point inside the shipment modal. The selection is used only for the shipment draft/preview/create request.
 - Status sync, documents, batches, F103, cancellation and automatic polling are not included in this stage.
+- Checkout, tariff calculation, the saved order delivery method and WooCommerce order meta are not changed by the admin pickup selector.
 
 ## Code
 
@@ -17,9 +19,10 @@ Version 0.34.0 adds the first shipment runtime foundation. The scope is intentio
 - `src/Shipments/Application/ShipmentServiceSettings.php` owns per-service shipment settings.
 - `src/Shipments/Storage/OrderShipmentRepository.php` stores shipment state in order meta through WooCommerce CRUD.
 - `src/Shipments/RussianPost/*` maps domestic tariff object codes, builds safe backlog payloads and normalizes create responses.
-- `src/Shipments/Admin/OrderShipmentsMetabox.php` renders the order metabox plus AJAX preview/create actions.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` renders the order metabox plus AJAX preview/create/search actions.
 - `src/Shipments/Admin/CarriersAdminPage.php` adds `WDC -> Перевозчики -> Почта России`.
 - `assets/admin/shipments-admin.js` and `assets/admin/shipments-admin.css` provide the admin modal behavior.
+- `assets/frontend/pickup-map/providers/*` and the configured Leaflet/Yandex provider are reused for the admin pickup selector; no second map stack is introduced.
 
 ## Russian Post Payload
 
@@ -88,8 +91,10 @@ php tests/shipments/run-russian-post-shipments-smoke.php
 
 The smoke test covers Russian Post backlog payload building, MMO normalization, goods omission/enabling, courier flags and service setting sanitization without real API credentials.
 
-## Admin Preview And Known Debt
+## Admin Preview And Pickup Selector
 
 The preparation modal renders a safe server-side API payload preview. Field changes, service/tariff changes and place add/remove actions refresh the preview through debounced AJAX; if preview refresh temporarily fails, the old preview stays visible and the UI shows a warning.
 
-The admin pickup map is intentionally left for a separate stage. The current button shows an inline message: `Выбор ПВЗ на карте будет подключен отдельным этапом; сейчас код ПВЗ можно скорректировать вручную.` The existing checkout pickup map is not reused here yet to avoid changing checkout frontend behavior in this stage.
+The pickup section shows the selected OPS/PVZ index and address plus `Выбрать другой ПВЗ`. The picker opens as a second modal above the shipment modal, searches local `wp_wdc_pickup_points_russian_post` rows by `postcode`, `city_name` and `address` through `wdc_search_russian_post_pickup_points`, renders found points on the configured map provider, and shows a table with index, city, address and choose action.
+
+Selecting a point updates only shipment draft fields: `pickup_point_code`, `pickup_point_postcode`, `pickup_point_found`, `pickup_point_row`, `recipient_address` and the visible pickup index/address. It immediately calls `requestPreview(form)` so the preview/create payload uses the selected point. The selector does not write WooCommerce order meta and does not change checkout or tariff state.

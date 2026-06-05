@@ -154,13 +154,14 @@ final class OrderShipmentDraftFactory {
 		$settings['combined_goods_name'] = sanitize_text_field( wp_unslash( $data['combined_goods_name'] ?? $settings[ ShipmentServiceSettings::COMBINED_GOODS_NAME_TEMPLATE ] ?? '' ) );
 		$original_address = sanitize_text_field( wp_unslash( $data['courier_original_address'] ?? $base->meta['courier_original_address'] ?? '' ) );
 		$normalized_address = $this->normalized_address_from_admin_data( $data, $original_address, $service_key );
+		$admin_pickup_row = DeliveryType::PICKUP === $delivery_type ? $this->pickup_row_from_admin_data( $data, $base->meta ) : array();
 
 		return new ShipmentCreateRequest(
 			$base->order_id,
 			$base->carrier_key,
 			$delivery_type,
 			$service_key,
-			$this->address_from_admin_data( $base->recipient_address, $data, $delivery_type, $base->meta, $normalized_address, $original_address ),
+			$this->address_from_admin_data( $base->recipient_address, $data, $delivery_type, $base->meta, $normalized_address, $original_address, $admin_pickup_row ),
 			DeliveryType::PICKUP === $delivery_type ? $this->pickup_from_admin_data( $base->pickup_point, $data ) : null,
 			array() !== $places ? $places : $base->places,
 			$base->declared_value,
@@ -187,6 +188,10 @@ final class OrderShipmentDraftFactory {
 					'normalization_required' => DeliveryType::COURIER === $delivery_type,
 					'normalization_valid' => DeliveryType::COURIER === $delivery_type && ! empty( $normalized_address['success'] ) && (string) ( $normalized_address['original_hash'] ?? '' ) === $this->original_address_hash( $original_address ),
 					'normalization_attempted' => DeliveryType::COURIER === $delivery_type && array() !== $normalized_address,
+					'pickup_point_code' => DeliveryType::PICKUP === $delivery_type ? (string) ( $admin_pickup_row['point_code'] ?? $base->meta['pickup_point_code'] ?? '' ) : (string) ( $base->meta['pickup_point_code'] ?? '' ),
+					'pickup_point_postcode' => DeliveryType::PICKUP === $delivery_type ? (string) ( $admin_pickup_row['postcode'] ?? $base->meta['pickup_point_postcode'] ?? '' ) : (string) ( $base->meta['pickup_point_postcode'] ?? '' ),
+					'pickup_point_found' => DeliveryType::PICKUP === $delivery_type ? array() !== $admin_pickup_row : ! empty( $base->meta['pickup_point_found'] ),
+					'pickup_point_row' => DeliveryType::PICKUP === $delivery_type ? $this->safe_pickup_row( $admin_pickup_row ) : (array) ( $base->meta['pickup_point_row'] ?? array() ),
 				)
 			)
 		);
@@ -291,9 +296,19 @@ final class OrderShipmentDraftFactory {
 		);
 	}
 
-	private function address_from_admin_data( Address $base, array $data, string $delivery_type, array $base_meta = array(), array $normalized_address = array(), string $original_address = '' ): Address {
+	private function address_from_admin_data( Address $base, array $data, string $delivery_type, array $base_meta = array(), array $normalized_address = array(), string $original_address = '', array $pickup_row = array() ): Address {
 		if ( DeliveryType::PICKUP === $delivery_type ) {
-			return $base;
+			if ( array() === $pickup_row ) {
+				return $base;
+			}
+
+			return new Address(
+				country_code: 'RU',
+				region_name: (string) ( $pickup_row['region_name'] ?? $base->region_name ),
+				city: (string) ( $pickup_row['city_name'] ?? $base->city ),
+				postcode: preg_replace( '/\D+/', '', (string) ( $pickup_row['postcode'] ?? $base->postcode ) ) ?: '',
+				raw_address: (string) ( $pickup_row['address'] ?? $base->raw_address )
+			);
 		}
 		$fields = ! empty( $normalized_address['success'] ) && is_array( $normalized_address['fields'] ?? null ) ? $normalized_address['fields'] : array();
 
@@ -333,6 +348,43 @@ final class OrderShipmentDraftFactory {
 	}
 
 	/**
+	 * @param array<string,mixed> $data
+	 * @param array<string,mixed> $base_meta
+	 * @return array<string,mixed>
+	 */
+	private function pickup_row_from_admin_data( array $data, array $base_meta ): array {
+		$point_code = sanitize_text_field( wp_unslash( $data['pickup_point_code'] ?? $base_meta['pickup_point_code'] ?? '' ) );
+		$postcode = preg_replace( '/\D+/', '', (string) wp_unslash( $data['pickup_point_postcode'] ?? $base_meta['pickup_point_postcode'] ?? '' ) ) ?: '';
+		$address = sanitize_text_field( wp_unslash( $data['pickup_point_address'] ?? '' ) );
+		$city = sanitize_text_field( wp_unslash( $data['pickup_point_city'] ?? '' ) );
+		$region = sanitize_text_field( wp_unslash( $data['pickup_point_region'] ?? '' ) );
+		$latitude = is_numeric( $data['pickup_point_lat'] ?? null ) ? (float) $data['pickup_point_lat'] : null;
+		$longitude = is_numeric( $data['pickup_point_lng'] ?? null ) ? (float) $data['pickup_point_lng'] : null;
+		if ( '' === $address && is_array( $base_meta['pickup_point_row'] ?? null ) ) {
+			$address = (string) ( $base_meta['pickup_point_row']['address'] ?? '' );
+		}
+		if ( '' === $city && is_array( $base_meta['pickup_point_row'] ?? null ) ) {
+			$city = (string) ( $base_meta['pickup_point_row']['city_name'] ?? '' );
+		}
+		if ( '' === $region && is_array( $base_meta['pickup_point_row'] ?? null ) ) {
+			$region = (string) ( $base_meta['pickup_point_row']['region_name'] ?? '' );
+		}
+		if ( '' === $point_code || '' === $postcode || '' === $address ) {
+			return array();
+		}
+
+		return array(
+			'point_code' => $point_code,
+			'postcode' => $postcode,
+			'region_name' => $region,
+			'city_name' => $city,
+			'address' => $address,
+			'latitude' => $latitude,
+			'longitude' => $longitude,
+		);
+	}
+
+	/**
 	 * @return array<string,mixed>|null
 	 */
 	private function pickup_point_row( object $order ): ?array {
@@ -362,12 +414,18 @@ final class OrderShipmentDraftFactory {
 	 * @return array<string,mixed>
 	 */
 	private function safe_pickup_row( array $row ): array {
+		if ( array() === $row ) {
+			return array();
+		}
+
 		return array(
 			'point_code' => (string) ( $row['point_code'] ?? '' ),
 			'postcode' => (string) ( $row['postcode'] ?? '' ),
 			'region_name' => (string) ( $row['region_name'] ?? '' ),
 			'city_name' => (string) ( $row['city_name'] ?? '' ),
 			'address' => (string) ( $row['address'] ?? '' ),
+			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
+			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
 		);
 	}
 

@@ -11,6 +11,8 @@ use WallsShop\WDC\Domain\Pickup\PickupPointSelection;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
@@ -50,6 +52,56 @@ if ( ! function_exists( 'sanitize_key' ) ) {
 if ( ! function_exists( 'sanitize_email' ) ) {
 	function sanitize_email( mixed $value ): string {
 		return trim( (string) $value );
+	}
+}
+if ( ! defined( 'ARRAY_A' ) ) {
+	define( 'ARRAY_A', 'ARRAY_A' );
+}
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $prefix = 'wp_';
+		public array $russian_post_pickup_rows = array();
+		public array $delivery_service_rows = array();
+
+		public function prepare( string $query, mixed ...$args ): string {
+			foreach ( $args as $arg ) {
+				$value = is_numeric( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'";
+				$query = preg_replace( '/%[dfs]/', $value, $query, 1 ) ?? $query;
+			}
+
+			return $query;
+		}
+
+		public function esc_like( string $text ): string {
+			return addcslashes( $text, '_%\\' );
+		}
+
+		public function get_results( string $query, mixed $output = null ): array {
+			if ( str_contains( $query, 'wdc_delivery_services' ) ) {
+				return $this->delivery_service_rows;
+			}
+
+			return $this->russian_post_pickup_rows;
+		}
+
+		public function get_row( string $query, mixed $output = null ): ?array {
+			if ( str_contains( $query, 'wdc_delivery_services' ) ) {
+				foreach ( $this->delivery_service_rows as $row ) {
+					if ( str_contains( $query, "'" . (string) ( $row['service_key'] ?? '' ) . "'" ) ) {
+						return $row;
+					}
+				}
+			}
+			if ( str_contains( $query, 'wdc_pickup_points_russian_post' ) ) {
+				foreach ( $this->russian_post_pickup_rows as $row ) {
+					if ( str_contains( $query, "'" . (string) ( $row['point_code'] ?? '' ) . "'" ) ) {
+						return $row;
+					}
+				}
+			}
+
+			return null;
+		}
 	}
 }
 
@@ -95,6 +147,10 @@ class ShipmentsSmokeOrder {
 		return $this->meta[ $key ] ?? '';
 	}
 
+	public function meta_snapshot(): array {
+		return $this->meta;
+	}
+
 	public function get_items(): array {
 		return $this->items;
 	}
@@ -136,6 +192,8 @@ final class ShipmentsSmokeProduct {
 
 final class ShipmentsSmokeAdapter implements ShipmentCarrierAdapterInterface {
 	public bool $called = false;
+	public ?ShipmentCreateRequest $preview_request = null;
+	public ?ShipmentCreateRequest $created_request = null;
 
 	public function carrier_key(): string {
 		return RussianPostDomesticSettings::CARRIER_KEY;
@@ -146,11 +204,13 @@ final class ShipmentsSmokeAdapter implements ShipmentCarrierAdapterInterface {
 	}
 
 	public function build_safe_payload_preview( ShipmentCreateRequest $request ): array {
-		return array();
+		$this->preview_request = $request;
+		return array( 'delivery-point-index' => $request->pickup_point?->point_code );
 	}
 
 	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult {
 		$this->called = true;
+		$this->created_request = $request;
 		return new ShipmentCreateResult( true );
 	}
 }
@@ -653,6 +713,109 @@ shipments_smoke_assert( 100000 === $insurance_1000->get_kopecks(), 'Insurance 10
 shipments_smoke_assert( 250000 === $insurance_2500->get_kopecks(), 'Insurance 2500 rub must become 250000 kopecks.' );
 shipments_smoke_assert( 250000 === $insurance_spaced->get_kopecks(), 'Insurance rub input must be cleaned to integer digits on backend.' );
 shipments_smoke_assert( 12500 === $insurance_decimal->get_kopecks(), 'Insurance 12,5 rub safety fallback must become 125 rub / 12500 kopecks.' );
+
+$pickup_wpdb = new wpdb();
+$pickup_wpdb->delivery_service_rows = array(
+	array(
+		'id' => 77,
+		'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+		'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+		'service_type' => 'api',
+		'title' => 'Почта России до ПВЗ',
+		'enabled' => 1,
+		'deleted' => 0,
+	),
+);
+$pickup_wpdb->russian_post_pickup_rows = array(
+	array(
+		'id' => 1,
+		'point_code' => '630001-old',
+		'point_type' => 'OPS',
+		'postcode' => '630001',
+		'region_name' => 'Новосибирская область',
+		'city_name' => 'Новосибирск',
+		'address' => 'Старый адрес ПВЗ',
+		'latitude' => '55.0100000',
+		'longitude' => '82.9200000',
+		'active' => 1,
+	),
+	array(
+		'id' => 2,
+		'point_code' => '630099-new',
+		'point_type' => 'OPS',
+		'postcode' => '630099',
+		'region_name' => 'Новосибирская область',
+		'city_name' => 'Новосибирск',
+		'address' => 'Красный проспект, 1',
+		'latitude' => '55.0300000',
+		'longitude' => '82.9300000',
+		'active' => 1,
+	),
+);
+$pickup_repository = new RussianPostPickupPointRepository( $pickup_wpdb );
+$admin_search_results = $pickup_repository->search_admin_pickup_rows( 'Красный', array( 'limit' => 10 ) );
+shipments_smoke_assert( 1 === count( $admin_search_results ) && '630099-new' === $admin_search_results[0]['point_code'], 'Admin pickup search must return matching Russian Post pickup rows.' );
+
+$draft_factory = new OrderShipmentDraftFactory(
+	new DeliveryServiceRepository( $pickup_wpdb ),
+	new ShipmentServiceSettings(),
+	null,
+	null,
+	$pickup_repository
+);
+$shipment_order = new ShipmentsSmokeOrder(
+	array(
+		'id' => 9001,
+		'postcode' => '630001',
+		'state' => 'Новосибирская область',
+		'city' => 'Новосибирск',
+		'address_1' => 'ул. Покупателя 5',
+	),
+	array(
+		'_wdc_platform_service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+		'_wdc_platform_tariff_object' => '23030',
+		'_wdc_pickup_point_code' => '630001-old',
+		'_wdc_pickup_point_postcode' => '630001',
+		'_wdc_pickup_point_address' => 'Старый адрес ПВЗ',
+	),
+	array( new ShipmentsSmokeOrderItem( 'Товар', 1, 1000.0, new ShipmentsSmokeProduct( 'SKU-NEW', '0.5' ) ) )
+);
+$before_meta = $shipment_order->meta_snapshot();
+$selected_pickup_data = array(
+	'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+	'tariff_object' => '23030',
+	'postoffice_code' => '630005',
+	'recipient_name' => 'Иванов Иван',
+	'recipient_phone' => '+7 999 000 00 00',
+	'recipient_email' => 'manager@example.test',
+	'pickup_point_code' => '630099-new',
+	'pickup_point_postcode' => '630099',
+	'pickup_point_address' => 'Красный проспект, 1',
+	'pickup_point_city' => 'Новосибирск',
+	'pickup_point_region' => 'Новосибирская область',
+	'pickup_point_lat' => '55.0300000',
+	'pickup_point_lng' => '82.9300000',
+	'places' => array(
+		array( 'weight_g' => '1000', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ),
+	),
+);
+$selected_request = $draft_factory->create_request_from_admin_data( $shipment_order, $selected_pickup_data );
+shipments_smoke_assert( '630099-new' === $selected_request->pickup_point?->point_code, 'Admin pickup selection must update shipment draft pickup code.' );
+shipments_smoke_assert( '630099' === $selected_request->recipient_address->postcode && 'Красный проспект, 1' === $selected_request->recipient_address->raw_address, 'Admin pickup selection must update draft recipient address.' );
+shipments_smoke_assert( '630099' === (string) ( $selected_request->meta['pickup_point_postcode'] ?? '' ) && ! empty( $selected_request->meta['pickup_point_found'] ), 'Admin pickup selection must update draft pickup meta only.' );
+shipments_smoke_assert( 55.03 === (float) ( $selected_request->meta['pickup_point_row']['lat'] ?? 0.0 ) && 82.93 === (float) ( $selected_request->meta['pickup_point_row']['lng'] ?? 0.0 ), 'Admin pickup selection must keep pickup coordinates in draft row.' );
+
+$selected_payload = $builder->build( $selected_request );
+shipments_smoke_assert( '630099' === (string) ( $selected_payload[0]['index-to'] ?? '' ), 'Shipment preview/build payload must use selected pickup postcode.' );
+shipments_smoke_assert( '630099-new' === $selected_request->pickup_point?->point_code, 'Shipment create request must keep selected pickup point code.' );
+
+$selected_adapter = new ShipmentsSmokeAdapter();
+$selected_creation_service = new ShipmentCreationService( new OrderShipmentRepository(), array( $selected_adapter ) );
+$selected_preview = $selected_creation_service->safe_preview( $selected_request );
+shipments_smoke_assert( '630099-new' === (string) ( $selected_preview['delivery-point-index'] ?? '' ) && $selected_adapter->preview_request instanceof ShipmentCreateRequest, 'Preview after admin pickup selection must receive selected pickup draft.' );
+$selected_result = $selected_creation_service->create( $shipment_order, $selected_request );
+shipments_smoke_assert( $selected_result->success && $selected_adapter->created_request instanceof ShipmentCreateRequest && '630099-new' === $selected_adapter->created_request->pickup_point?->point_code, 'Shipment creation must receive selected pickup draft.' );
+shipments_smoke_assert( $before_meta === $shipment_order->meta_snapshot(), 'Admin pickup selection must not mutate WooCommerce order meta.' );
 
 shipments_smoke_assert( 1 === count( $pickup_suffix_payload ), 'Normal pickup payload built from one submitted place must contain one order object.' );
 

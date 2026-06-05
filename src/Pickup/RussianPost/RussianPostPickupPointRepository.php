@@ -159,6 +159,52 @@ final class RussianPostPickupPointRepository {
 	 * @param array<string,mixed> $filters
 	 * @return array<int,array<string,mixed>>
 	 */
+	public function search_admin_pickup_rows( string $query, array $filters = array() ): array {
+		$query = trim( $query );
+		if ( '' === $query ) {
+			return array();
+		}
+		$limit = $this->limit_from_filters( $filters, 50, 100 );
+
+		if ( property_exists( $this->wpdb, 'russian_post_pickup_rows' ) && is_array( $this->wpdb->russian_post_pickup_rows ) ) {
+			$needle = function_exists( 'mb_strtolower' ) ? mb_strtolower( $query ) : strtolower( $query );
+			$rows = array_values(
+				array_filter(
+					$this->wpdb->russian_post_pickup_rows,
+					static function ( array $row ) use ( $needle ): bool {
+						if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+							return false;
+						}
+						foreach ( array( 'postcode', 'city_name', 'address' ) as $key ) {
+							$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( (string) ( $row[ $key ] ?? '' ) ) : strtolower( (string) ( $row[ $key ] ?? '' ) );
+							if ( '' !== $needle && false !== strpos( $value, $needle ) ) {
+								return true;
+							}
+						}
+
+						return false;
+					}
+				)
+			);
+			usort(
+				$rows,
+				static fn( array $a, array $b ): int => strcmp( (string) ( $a['city_name'] ?? '' ) . (string) ( $a['address'] ?? '' ), (string) ( $b['city_name'] ?? '' ) . (string) ( $b['address'] ?? '' ) )
+			);
+
+			return array_slice( $rows, 0, $limit );
+		}
+
+		$where = array( 'active = 1', '(postcode LIKE %s OR city_name LIKE %s OR address LIKE %s)' );
+		$like = '%' . $this->wpdb->esc_like( $query ) . '%';
+		$args = array( $like, $like, $like );
+
+		return $this->select_rows( $where, $args, $limit );
+	}
+
+	/**
+	 * @param array<string,mixed> $filters
+	 * @return array<int,array<string,mixed>>
+	 */
 	public function find_rows_by_postcode( string $postcode, array $filters = array() ): array {
 		$postcode = preg_replace( '/\D+/', '', $postcode ) ?? '';
 		if ( '' === $postcode ) {

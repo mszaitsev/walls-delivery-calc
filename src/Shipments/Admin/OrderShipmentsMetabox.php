@@ -7,6 +7,9 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
@@ -19,6 +22,7 @@ final class OrderShipmentsMetabox {
 	private const AJAX_CREATE = 'wdc_create_shipment';
 	private const AJAX_PREVIEW = 'wdc_preview_shipment';
 	private const AJAX_NORMALIZE_ADDRESS = 'wdc_normalize_shipment_address';
+	private const AJAX_SEARCH_PICKUP_POINTS = 'wdc_search_russian_post_pickup_points';
 
 	public function __construct(
 		private OrderShipmentRepository $repository,
@@ -37,6 +41,7 @@ final class OrderShipmentsMetabox {
 		add_action( 'wp_ajax_' . self::AJAX_CREATE, array( $this, 'ajax_create' ) );
 		add_action( 'wp_ajax_' . self::AJAX_PREVIEW, array( $this, 'ajax_preview' ) );
 		add_action( 'wp_ajax_' . self::AJAX_NORMALIZE_ADDRESS, array( $this, 'ajax_normalize_address' ) );
+		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PICKUP_POINTS, array( $this, 'ajax_search_pickup_points' ) );
 	}
 
 	public function add_meta_box(): void {
@@ -58,8 +63,18 @@ final class OrderShipmentsMetabox {
 		if ( ! in_array( $id, array( 'shop_order', 'woocommerce_page_wc-orders' ), true ) ) {
 			return;
 		}
-		wp_enqueue_style( 'wdc-shipments-admin', $this->plugin_url . 'assets/admin/shipments-admin.css', array(), $this->version );
-		wp_enqueue_script( 'wdc-shipments-admin', $this->plugin_url . 'assets/admin/shipments-admin.js', array(), $this->version, true );
+		$provider = $this->map_provider();
+		$provider_handle = 'wdc-map-provider-' . $provider;
+		if ( 'leaflet' === $provider ) {
+			wp_enqueue_style( 'wdc-leaflet', $this->plugin_url . 'assets/vendor/leaflet/leaflet.css', array(), '1.9.4' );
+			wp_enqueue_script( 'wdc-leaflet', $this->plugin_url . 'assets/vendor/leaflet/leaflet.js', array(), '1.9.4', true );
+			wp_enqueue_script( $provider_handle, $this->plugin_url . 'assets/frontend/pickup-map/providers/wdc-map-provider-leaflet.js', array( 'wdc-leaflet' ), $this->version, true );
+		} else {
+			wp_enqueue_script( $provider_handle, $this->plugin_url . 'assets/frontend/pickup-map/providers/wdc-map-provider-yandex.js', array(), $this->version, true );
+		}
+		wp_enqueue_style( 'wdc-pickup-map', $this->plugin_url . 'assets/frontend/pickup-map/wdc-pickup-map.css', array(), $this->version );
+		wp_enqueue_style( 'wdc-shipments-admin', $this->plugin_url . 'assets/admin/shipments-admin.css', array( 'wdc-pickup-map' ), $this->version );
+		wp_enqueue_script( 'wdc-shipments-admin', $this->plugin_url . 'assets/admin/shipments-admin.js', array( $provider_handle ), $this->version, true );
 		wp_localize_script(
 			'wdc-shipments-admin',
 			'wdcShipmentsAdmin',
@@ -69,6 +84,11 @@ final class OrderShipmentsMetabox {
 				'createAction' => self::AJAX_CREATE,
 				'previewAction' => self::AJAX_PREVIEW,
 				'normalizeAddressAction' => self::AJAX_NORMALIZE_ADDRESS,
+				'searchPickupPointsAction' => self::AJAX_SEARCH_PICKUP_POINTS,
+				'mapProvider' => $provider,
+				'yandexApiKeyPresent' => '' !== $this->yandex_api_key(),
+				'yandexApiKey' => 'yandex' === $provider ? $this->yandex_api_key() : '',
+				'pickupPointTypes' => ( new RussianPostPickupPointTypeSettings( new SettingsRepository() ) )->all(),
 			)
 		);
 	}
@@ -195,8 +215,15 @@ final class OrderShipmentsMetabox {
 								<label>Email<input name="recipient_email" value="<?php echo esc_attr( (string) ( $recipient['email'] ?? '' ) ); ?>"></label>
 								<div data-wdc-pickup-section <?php echo DeliveryType::PICKUP === $delivery_type ? '' : 'hidden'; ?>>
 									<input type="hidden" name="pickup_point_code" value="<?php echo esc_attr( $pickup_code ); ?>">
+									<input type="hidden" name="pickup_point_postcode" value="<?php echo esc_attr( $pickup_destination_index ); ?>" data-wdc-pickup-postcode-field>
+									<input type="hidden" name="pickup_point_address" value="<?php echo esc_attr( $pickup_address ); ?>" data-wdc-pickup-address-field>
+									<input type="hidden" name="pickup_point_city" value="<?php echo esc_attr( $city ); ?>" data-wdc-pickup-city-field>
+									<input type="hidden" name="pickup_point_region" value="<?php echo esc_attr( $region ); ?>" data-wdc-pickup-region-field>
+									<input type="hidden" name="pickup_point_lat" value="" data-wdc-pickup-lat-field>
+									<input type="hidden" name="pickup_point_lng" value="" data-wdc-pickup-lng-field>
 									<p><strong><?php echo esc_html__( 'Индекс выбранного ПВЗ / ОПС', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-pickup-index><?php echo esc_html( $pickup_destination_index ); ?></span></p>
 									<p><strong><?php echo esc_html__( 'Адрес ПВЗ / ОПС', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-pickup-address><?php echo esc_html( '' !== $pickup_address ? $pickup_address : '-' ); ?></span></p>
+									<p><button type="button" class="button" data-wdc-open-pickup-picker><?php echo esc_html__( 'Выбрать другой ПВЗ', 'walls-delivery-calc' ); ?></button></p>
 									<?php if ( ! $pickup_point_found ) : ?>
 										<p class="description wdc-shipment-warning" data-wdc-pickup-warning><?php echo esc_html__( 'ПВЗ/ОПС не найден в справочнике Почты России. Создание отправления заблокировано до выбора корректного ПВЗ.', 'walls-delivery-calc' ); ?></p>
 									<?php endif; ?>
@@ -339,6 +366,22 @@ final class OrderShipmentsMetabox {
 		wp_send_json_success( array( 'normalized_address' => $result ) );
 	}
 
+	public function ajax_search_pickup_points(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
+		}
+
+		$query = sanitize_text_field( wp_unslash( $_POST['query'] ?? '' ) );
+		$limit = max( 1, min( 100, (int) ( $_POST['limit'] ?? 50 ) ) );
+		$rows = ( new RussianPostPickupPointRepository() )->search_admin_pickup_rows( $query, array( 'limit' => $limit ) );
+
+		wp_send_json_success(
+			array(
+				'points' => array_map( array( $this, 'pickup_point_ajax_row' ), $rows ),
+			)
+		);
+	}
+
 	private function resolve_order( mixed $post_or_order ): ?object {
 		if ( is_object( $post_or_order ) && method_exists( $post_or_order, 'get_id' ) && method_exists( $post_or_order, 'get_meta' ) ) {
 			return $post_or_order;
@@ -379,5 +422,31 @@ final class OrderShipmentsMetabox {
 		$postcode = preg_replace( '/\D+/', '', $postcode ) ?? '';
 
 		return 1 === preg_match( '/^\d{6}$/', $postcode ) ? $postcode : '';
+	}
+
+	private function map_provider(): string {
+		$provider = ( new SettingsRepository() )->get_string( 'pickup_map_provider', 'leaflet' );
+
+		return 'yandex' === $provider ? 'yandex' : 'leaflet';
+	}
+
+	private function yandex_api_key(): string {
+		return trim( ( new SettingsRepository() )->get_string( 'pickup_map_yandex_api_key', '' ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,mixed>
+	 */
+	private function pickup_point_ajax_row( array $row ): array {
+		return array(
+			'point_code' => (string) ( $row['point_code'] ?? '' ),
+			'postcode' => (string) ( $row['postcode'] ?? '' ),
+			'region_name' => (string) ( $row['region_name'] ?? '' ),
+			'city_name' => (string) ( $row['city_name'] ?? '' ),
+			'address' => (string) ( $row['address'] ?? '' ),
+			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
+			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
+		);
 	}
 }

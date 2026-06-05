@@ -68,6 +68,8 @@ Plain parcel/courier/EMS shipment variants use Otpravka `mail-category=ORDINARY`
 
 Normal pickup/OPS shipment payloads are not ECOM. They use `address-type-to=DEMAND` with `index-to`, `region-to`, and `place-to`; `ecom-data` is not sent. The corresponding human-readable admin address is `{index}, {region}, {place}, до востребования`.
 
+In the WooCommerce order admin shipment modal, managers may choose another Russian Post OPS/PVZ from the local `wp_wdc_pickup_points_russian_post` table. The selector searches `postcode`, `city_name` and `address`, reuses the configured Leaflet/Yandex pickup map provider, and updates only the shipment draft/preview/create request. It does not recalculate checkout tariffs, change the saved order delivery method, or write WooCommerce order meta.
+
 ECOM shipment payloads are enabled by a per-tariff `is_ecom` setting in Delivery Services. For these tariffs the shipment builder sends `ecom-data.delivery-point-index` and omits the normal pickup address schema unless a future product requires additional fields. Object `54020` maps to `ECOM_MARKETPLACE`, but using `ecom-data` is still controlled by the tariff setting.
 
 Courier payloads use `address-type-to=DEFAULT`, `index-to`, `region-to`, `place-to`, `raw-address`, `courier=true`, and `delivery-to-door=true`. `raw-address` is assembled from WooCommerce shipping postcode, state, city, address line 1 and address line 2; address line 2 is skipped when it starts with `Код ПВЗ`.
