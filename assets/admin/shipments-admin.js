@@ -142,12 +142,14 @@
     const visible = !!(tariff && tariff.has_declared_value);
     form.querySelectorAll('[data-wdc-declared-value-field]').forEach((field, index) => {
       field.hidden = !visible;
+      field.style.display = visible ? '' : 'none';
       field.querySelectorAll('input').forEach((input) => {
-        input.disabled = !visible;
         if (!visible) {
+          input.disabled = true;
           input.value = '';
           return;
         }
+        input.disabled = false;
         if (index === 0 && !input.value && field.dataset.defaultDeclaredValueRub) {
           input.value = String(field.dataset.defaultDeclaredValueRub);
         }

@@ -11,6 +11,13 @@
   display: none;
 }
 
+.wdc-shipment-form [hidden],
+.wdc-shipment-modal [hidden],
+.wdc-place-field[hidden],
+[data-wdc-declared-value-field][hidden] {
+  display: none !important;
+}
+
 .wdc-shipment-modal {
   position: fixed;
   inset: 0;
