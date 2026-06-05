@@ -74,6 +74,8 @@ final class RussianPostDomesticApiClient {
 		$delivery = is_array( $raw['delivery'] ?? null ) ? $raw['delivery'] : array();
 
 		return array(
+			'id' => $this->nullable_int( $raw['id'] ?? null ),
+			'name' => (string) ( $raw['name'] ?? '' ),
 			'pay' => $this->kopecks( $raw['pay'] ?? $raw['paymoney'] ?? null ),
 			'nds' => $this->kopecks( $raw['nds'] ?? null ),
 			'paynds' => $this->kopecks( $raw['paynds'] ?? $raw['paymoneynds'] ?? null ),

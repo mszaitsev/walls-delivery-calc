@@ -14,6 +14,7 @@ use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\DeliveryQuote;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
@@ -72,13 +73,17 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 		$postcode = DeliveryType::COURIER === $delivery_type ? $this->resolve_russianpost_courier_calc_postal_code( $display_postcode ) : $display_postcode;
 
 		$package = $request->package;
+		$variant_diagnostics = $this->variants->diagnostics( $settings, $delivery_type, $package->get_total_weight_g() );
+		$skipped = $this->filtered_variants( $variant_diagnostics );
+		if ( array() !== $skipped ) {
+			$this->debug( 'Russian Post domestic tariff variants filtered before API call.', array( 'service_key' => $service_key, 'postcode' => $postcode, 'skipped_tariffs' => $skipped ), $service_key );
+		}
 		$variants = $this->variants->variants( $settings, $delivery_type, $package->get_total_weight_g() );
 		if ( array() === $variants ) {
-			return $this->empty_quote( $request, 'no_enabled_tariffs' );
+			return new DeliveryQuote( $this->quote_id( $request, $package, 'no_enabled_tariffs' ), self::KEY, $request->destination, $package, array(), false, 'no_enabled_tariffs', 'no_enabled_tariffs', false, 'api', array( 'postcode' => $display_postcode, 'tariff_postcode' => $postcode, 'service_key' => $service_key, 'skipped_tariffs' => $skipped, 'variant_diagnostics' => $variant_diagnostics ) );
 		}
 
 		$rates = array();
-		$skipped = array();
 		foreach ( $variants as $variant ) {
 			$params = $this->request_params( $settings, $variant, $postcode, $package, $request );
 			$cache_key = $this->api_cache_key( $service_key, $postcode, $params );
@@ -99,7 +104,7 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 			$rates[] = $this->rate_from_result( $service_key, $delivery_type, $variant, $postcode, $params, $api_result, $parsed, $price_kopecks, $package );
 		}
 
-		return new DeliveryQuote( $this->quote_id( $request, $package, $service_key ), self::KEY, $request->destination, $package, $rates, true, array() === $rates ? 'no_tariffs_available' : '', '', false, 'api', array( 'postcode' => $display_postcode, 'tariff_postcode' => $postcode, 'service_key' => $service_key, 'skipped_tariffs' => $skipped ) );
+		return new DeliveryQuote( $this->quote_id( $request, $package, $service_key ), self::KEY, $request->destination, $package, $rates, true, array() === $rates ? 'no_tariffs_available' : '', '', false, 'api', array( 'postcode' => $display_postcode, 'tariff_postcode' => $postcode, 'service_key' => $service_key, 'skipped_tariffs' => $skipped, 'variant_diagnostics' => $variant_diagnostics ) );
 	}
 
 	private function empty_quote( QuoteRequest $request, string $reason ): DeliveryQuote {
@@ -122,10 +127,22 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 			'pack' => 99,
 		);
 		if ( $variant->requires_declared_value ) {
-			$params['sumoc'] = max( 1, $request->order_total->get_kopecks() );
+			$params['sumoc'] = max( 1, $this->declared_value_kopecks( $package, $request ) );
 		}
 
 		return $params;
+	}
+
+	private function declared_value_kopecks( Package $package, QuoteRequest $request ): int {
+		$total = 0;
+		foreach ( $package->get_items() as $item ) {
+			if ( ! $item instanceof PackageItem ) {
+				continue;
+			}
+			$total += $item->total_price->get_kopecks();
+		}
+
+		return $total > 0 ? $total : $request->order_total->get_kopecks();
 	}
 
 	/**
@@ -355,6 +372,19 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 	}
 
 	/**
+	 * @param array<int,array<string,mixed>> $diagnostics
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function filtered_variants( array $diagnostics ): array {
+		return array_values(
+			array_filter(
+				$diagnostics,
+				static fn ( array $row ): bool => 'included' !== (string) ( $row['reason'] ?? '' )
+			)
+		);
+	}
+
+	/**
 	 * @param array<string,scalar> $params
 	 * @param array<string,mixed>  $api_result
 	 * @return array<string,mixed>
@@ -367,9 +397,24 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 				'object_code' => $variant->object_code,
 				'title' => $variant->title,
 				'reason' => $reason,
+				'requires_declared_value' => $variant->requires_declared_value,
+				'sumoc' => $params['sumoc'] ?? null,
 				'request_params' => $params,
 				'request_url' => (string) ( $api_result['url'] ?? '' ),
 				'http_code' => (int) ( $api_result['http_code'] ?? 0 ),
+				'success' => ! empty( $api_result['success'] ),
+				'parsed' => is_array( $api_result['parsed'] ?? null ) ? array_intersect_key(
+					$api_result['parsed'],
+					array(
+						'id' => true,
+						'name' => true,
+						'pay' => true,
+						'paynds' => true,
+						'nds' => true,
+						'delivery_min_days' => true,
+						'delivery_max_days' => true,
+					)
+				) : array(),
 				'error_code' => (string) ( $api_result['error_code'] ?? '' ),
 				'error_message' => (string) ( $api_result['error_message'] ?? '' ),
 				'errorcode' => $raw['errorcode'] ?? null,
