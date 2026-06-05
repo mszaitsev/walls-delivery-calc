@@ -4,15 +4,15 @@
 
 - Версия / baseline проекта: `0.33.8`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
-- Последнее обновление статуса: 2026-06-03.
-- Общий процент готовности: примерно 62%.
-- Следующий рекомендуемый этап: Russian Post Shipments Foundation.
+- Последнее обновление статуса: 2026-06-04.
+- Общий процент готовности: примерно 66%.
+- Следующий рекомендуемый этап: Russian Post shipment statuses/documents/cancellation.
 
 ## Краткое резюме
 
 Проект уже имеет рабочую платформу расчета доставки для WooCommerce: core bootstrap, DI container, миграции, checkout runtime, календарь доставки, Rule Engine, локальную базу ФИАС/ГАР, DaData-подсказки и обогащение, Почту России для внутренних/международных расчетов и полноценный слой ПВЗ Почты России с импортом, REST API и checkout map.
 
-При этом проект еще не закрывает полный carrier lifecycle из ТЗ: создание отправлений, документы ТК, статусы, трекинг, автоматическое изменение WooCommerce-статусов и остальные ТК пока не реализованы.
+При этом проект еще не закрывает полный carrier lifecycle из ТЗ: ручное создание отправлений Почты России реализовано первым foundation-этапом, но документы ТК, статусы, трекинг, автоматическое изменение WooCommerce-статусов и остальные ТК пока не реализованы.
 
 ## Готовность по блокам
 
@@ -31,8 +31,8 @@
 | Russian Post Pickup Points | done | 85% | Import pipeline, compact table, REST API, checkout map, order persistence. |
 | Multicarrier Pickup Layer | partial | 35% | Generic domain/storage exists, but production checkout map is Russian Post-specific. |
 | Order Admin Recalculation | partial | 30% | Order delivery metabox exists; full recalculation/replacement workflow is missing. |
-| Shipment Domain | partial | 35% | Domain objects exist; runtime flow is not implemented. |
-| Shipment Runtime | not-started | 0% | No shipment creation service/UI/API flow yet. |
+| Shipment Domain | partial | 55% | Domain objects exist and are used by the manual shipment creation runtime. |
+| Shipment Runtime | partial | 42% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments with server-side payload preview, tariff select, postoffice-code select and visible AJAX result diagnostics; statuses/documents/cancellation/admin pickup map are pending. |
 | Tracking / Documents / Status Sync | not-started | 0% | No tracking polling, labels, acts, documents, or status sync runtime. |
 | WooCommerce Status Mapping | not-started | 0% | Domain baseline exists, but no automatic WooCommerce order status changes. |
 | CDEK | planned | 0% | Planned carrier stage; no adapter found in code. |
@@ -59,7 +59,7 @@
 ### Domain Model
 
 - `src/Domain` contains framework-independent value objects and entities for address normalization, calendar dates, carriers, money, packages, pickup selection, quotes, shipments, and delivery statuses.
-- Shipment/status domain classes are present, but their runtime lifecycle is not complete.
+- Shipment/status domain classes are present. The first runtime uses shipment create requests/results for manual Russian Post shipment creation from the WooCommerce order admin.
 
 ### Delivery Calendar
 
@@ -156,10 +156,11 @@
 
 ### Shipment Runtime
 
-- Создание отправлений в ТК.
-- UI/action для отправки заказа в ТК.
-- Несколько грузомест в runtime.
-- Idempotent shipment creation and persistence.
+- Статусы отправлений.
+- Документы/ярлыки/партии/Ф103.
+- Отмена отправлений.
+- Автосинхронизация.
+- Полноценный выбор ПВЗ на карте в админской модалке.
 
 ### Carrier Documents
 
@@ -199,6 +200,16 @@
 - Сохранить manual TXT/JSON payload import на LocalWP/Windows как final fallback path.
 - При необходимости добавить retry/backoff, CLI import mode, chunked streamed download.
 
+### Russian Post shipments
+
+- Админская карта выбора ПВЗ пока не подключена; в модалке показывается явное inline-сообщение, а код ПВЗ можно скорректировать вручную.
+- Распределение товаров по грузоместам в UI пока базовое: товары заказа попадают в первое место, детальное распределение остается отдельным этапом.
+- Domestic shipment payloads now use `mail-direct=643`.
+- Обычный pickup/ОПС для Почты России создается через `address-type-to=DEMAND`, `index-to`, `region-to`, `place-to` без `ecom-data`.
+- ECOM-сценарий включается настройкой тарифа `is_ecom` во вкладке `Тарифы`; object `54020` не включает `ecom-data` сам по себе.
+- Индексы места приема настраиваются на `WDC -> Перевозчики -> Почта России`, default `630005`, и выбираются в модалке как `postoffice-code`.
+- После AJAX create модалка показывает barcode/result-id или нормализованные ошибки API Почты; страница не перезагружается автоматически.
+
 ## Несоответствия документации и кода
 
 ### `docs/wdc-current-code-map.md`
@@ -212,14 +223,7 @@
 
 ## Roadmap
 
-### 1. Russian Post Shipments Foundation
-
-- Рекомендуемая ветка: `feature/russian-post-shipments`.
-- Что входит: shipment service, order admin action/form, Otpravka create shipment, package snapshot, order note, shipment state persistence.
-- Зависимости: текущие Russian Post domestic/international, delivery services, order meta, Otpravka credentials.
-- Обновить документы: `docs/walls-delivery-calc-tech-spec.md`, `docs/wdc-russian-post-domestic.md`, `docs/wdc-russian-post-international.md`, `docs/wdc-current-code-map.md`, `docs/project-status.md`.
-
-### 2. Tracking, Documents And Status Sync
+### 1. Tracking, Documents And Status Sync
 
 - Рекомендуемая ветка: `feature/russian-post-status-documents`.
 - Что входит: tracking number, status polling, labels/docs, acts, status mapping, background sync.

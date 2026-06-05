@@ -236,6 +236,54 @@ rpd_assert( $quote->rates[0]->requires_pickup_point && empty( $quote->rates[0]->
 $item_summary = $quote->rates[0]->meta['items_summary'][0] ?? array();
 rpd_assert( 1 === (int) ( $item_summary['serviceon'] ?? 0 ) && 1234 === (int) ( $item_summary['tariff']['valnds'] ?? 0 ) && 2 === (int) ( $item_summary['delivery']['min'] ?? 0 ) && 4 === (int) ( $item_summary['delivery']['max'] ?? 0 ), 'Domestic items summary must include serviceon, tariff.valnds, and delivery min/max.' );
 
+$configured_tariffs = array(
+	DomesticTariffVariant::from_array(
+		array(
+			'object_code' => 23020,
+			'title' => 'Посылка онлайн с объявленной ценностью',
+			'enabled' => true,
+			'delivery_type' => DeliveryType::PICKUP,
+			'requires_declared_value' => true,
+			'sort_order' => 1,
+		)
+	)->to_array(),
+	DomesticTariffVariant::from_array(
+		array(
+			'object_code' => 23030,
+			'title' => 'Посылка онлайн',
+			'enabled' => true,
+			'delivery_type' => DeliveryType::PICKUP,
+			'requires_declared_value' => false,
+			'sort_order' => 2,
+		)
+	)->to_array(),
+	DomesticTariffVariant::from_array(
+		array(
+			'object_code' => 47030,
+			'title' => 'Посылка 1 класса',
+			'enabled' => true,
+			'delivery_type' => DeliveryType::PICKUP,
+			'requires_declared_value' => false,
+			'sort_order' => 3,
+		)
+	)->to_array(),
+);
+$configured_settings = array_merge( $settings->all()['russian_post_domestic'], array( 'insurance_enabled' => false, 'tariff_variants' => $configured_tariffs ) );
+$configured_variants = ( new RussianPostDomesticTariffVariantResolver() )->variants( $configured_settings, DeliveryType::PICKUP, 1000 );
+$configured_objects = array_map( static fn ( DomesticTariffVariant $variant ): int => $variant->object_code, $configured_variants );
+rpd_assert( in_array( 23020, $configured_objects, true ), 'Explicitly enabled declared-value tariff must not be hidden when insurance_enabled=false.' );
+rpd_assert( in_array( 47030, $configured_objects, true ), 'Explicitly enabled 47030 tariff must not be filtered when weight matches.' );
+$settings->set( 'russian_post_domestic', $configured_settings );
+$GLOBALS['wdc_rpd_requests'] = array();
+$GLOBALS['wdc_rpd_transients'] = array();
+$configured_package = Package::from_items( array( new PackageItem( 'SKU', 'Item', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), 1000 ) ), 0, Money::from_rubles( 1500 ), Money::from_rubles( 1000 ) );
+$configured_quote = $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Novosibirsk', postcode: '630099' ), $configured_package, 'card', Money::from_rubles( 1500 ), '2026-05-26', array( 'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY ) ) );
+$configured_quote_objects = array_map( static fn( $rate ): string => $rate->tariff_key, $configured_quote->rates );
+rpd_assert( in_array( '23020', $configured_quote_objects, true ) && in_array( '23030', $configured_quote_objects, true ) && in_array( '47030', $configured_quote_objects, true ), 'Explicitly configured pickup tariffs must all be quoted when API returns prices.' );
+rpd_assert( '23020' === (string) ( $GLOBALS['wdc_rpd_requests'][0]['object'] ?? '' ) && isset( $GLOBALS['wdc_rpd_requests'][0]['sumoc'] ) && 100000 === (int) $GLOBALS['wdc_rpd_requests'][0]['sumoc'], '23020 request params must include sumoc from package item totals.' );
+rpd_assert( '23030' === (string) ( $GLOBALS['wdc_rpd_requests'][1]['object'] ?? '' ) && ! isset( $GLOBALS['wdc_rpd_requests'][1]['sumoc'] ), '23030 request params must not include sumoc.' );
+$settings->set( 'russian_post_domestic', array_merge( $settings->all()['russian_post_domestic'], array( 'insurance_enabled' => false, 'tariff_variants' => array() ) ) );
+
 $settings->set( 'russian_post_domestic', array_merge( $settings->all()['russian_post_domestic'], array( 'insurance_enabled' => true ) ) );
 $GLOBALS['wdc_rpd_requests'] = array();
 $quote = $carrier->quote( $request );

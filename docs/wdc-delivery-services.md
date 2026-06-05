@@ -52,6 +52,8 @@ As of 0.21.6, packaging tiers are no longer Russian Post service settings. They 
 
 As of 0.21.8, the service `Расчет` tab also stores `pickup_customer_comment` and `courier_customer_comment` in `wdc_delivery_services`. Empty values are allowed. At checkout, a normal pickup/courier rate receives the matching service comment first, then rule-added comments are appended. As of 0.21.9, each checkout comment is rendered as a separate block line rather than relying on inline spans.
 
+Russian Post domestic services now also expose shipment settings on the same `Расчет` tab. System services show `service_key` and `carrier_key` as read-only technical fields. For `russian_post_domestic_pickup`, `shelf_life_days_default` is clamped to 15..60 and defaults to 30. Both domestic services support `send_goods_items`, `combine_goods_items_default`, and `combined_goods_name_template`; `goods` is omitted from the shipment payload unless `send_goods_items=true`.
+
 ## Service Rules
 
 The `Правила` tab embeds the same reusable rules admin controller used by the default `Правила расчета` page, but with a service context:
@@ -76,6 +78,6 @@ For `russian_post_worldwide_parcel`, the normal WooCommerce shipping item meta s
 
 Domestic Russian Post foundation adds built-in services for `russian_post_domestic_pickup` and `russian_post_domestic_courier`. Bootstrapping pins both to `RU`; the availability UI is informational for this carrier family.
 
-The service calculation settings continue to own comments, packaging weight inclusion, rounding, minimum price and default-rule fallback. Domestic-specific tariff variants are exposed on a Tariffs foundation tab and resolved at runtime per service.
+The service calculation settings continue to own comments, packaging weight inclusion, rounding, minimum price and default-rule fallback. Domestic-specific tariff variants are exposed on a Tariffs foundation tab and resolved at runtime per service. Each domestic Russian Post tariff variant also stores an `is_ecom` flag; shipment creation uses this setting to decide whether pickup payloads use `ecom-data.delivery-point-index` or the normal OPS `DEMAND` address schema.
 
 Russian Post domestic service simulation calls every enabled variant for the service and shows active tariffs plus skipped API variants. Skipped rows include `object_code`, sanitized request params, HTTP status, and API `errorcode`/`errormsg`, which is useful when one tariff is rejected while the rest of the service still calculates.

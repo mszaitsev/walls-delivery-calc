@@ -7,6 +7,8 @@ defined( 'ABSPATH' ) || exit;
 
 final class RussianPostOtpravkaApiClient {
 	private const PASSPORT_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/unloading-passport/zip';
+	private const BACKLOG_ENDPOINT = 'https://otpravka-api.pochta.ru/2.0/user/backlog';
+	private const CLEAN_ADDRESS_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/clean/address';
 
 	public function __construct( private RussianPostOtpravkaApiSettings $settings, private mixed $curl_downloader = null ) {
 	}
@@ -55,6 +57,128 @@ final class RussianPostOtpravkaApiClient {
 		}
 
 		return $wp;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $orders
+	 * @return array<string,mixed>
+	 */
+	public function create_backlog_orders( array $orders ): array {
+		$started = microtime( true );
+		$token = $this->settings->access_token();
+		$basic_key = $this->settings->basic_key();
+		if ( '' === $token || '' === $basic_key ) {
+			return array(
+				'success' => false,
+				'http_code' => 0,
+				'orders' => array(),
+				'errors' => array(),
+				'error_code' => 'credentials',
+				'error_message' => 'Russian Post Otpravka credentials are incomplete.',
+				'duration_ms' => $this->duration_ms( $started ),
+			);
+		}
+
+		$response = wp_remote_request(
+			self::BACKLOG_ENDPOINT,
+			array(
+				'method' => 'PUT',
+				'timeout' => $this->settings->timeout(),
+				'headers' => array(
+					'Authorization' => 'AccessToken ' . $token,
+					'X-User-Authorization' => 'Basic ' . $basic_key,
+					'Content-Type' => 'application/json;charset=UTF-8',
+				),
+				'body' => wp_json_encode( array_values( $orders ), JSON_UNESCAPED_UNICODE ),
+			)
+		);
+
+		if ( is_wp_error( $response ) ) {
+			return array(
+				'success' => false,
+				'http_code' => 0,
+				'orders' => array(),
+				'errors' => array(),
+				'error_code' => 'wp_http_error',
+				'error_message' => $response->get_error_message(),
+				'duration_ms' => $this->duration_ms( $started ),
+			);
+		}
+
+		$code = (int) wp_remote_retrieve_response_code( $response );
+		$body = (string) wp_remote_retrieve_body( $response );
+		$decoded = json_decode( $body, true );
+		$data = is_array( $decoded ) ? $decoded : array();
+		$errors = is_array( $data['errors'] ?? null ) ? $data['errors'] : array();
+		$orders_result = is_array( $data['orders'] ?? null ) ? $data['orders'] : array();
+
+		return array(
+			'success' => $code >= 200 && $code < 300 && array() === $errors,
+			'http_code' => $code,
+			'orders' => $orders_result,
+			'errors' => $errors,
+			'error_code' => $code >= 200 && $code < 300 ? '' : 'http_' . $code,
+			'error_message' => $code >= 200 && $code < 300 ? '' : $this->excerpt( $body ),
+			'duration_ms' => $this->duration_ms( $started ),
+		);
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $addresses
+	 * @return array<string,mixed>
+	 */
+	public function clean_address( array $addresses ): array {
+		$started = microtime( true );
+		$token = $this->settings->access_token();
+		$basic_key = $this->settings->basic_key();
+		if ( '' === $token || '' === $basic_key ) {
+			return array(
+				'success' => false,
+				'http_code' => 0,
+				'addresses' => array(),
+				'error_code' => 'credentials',
+				'error_message' => 'Russian Post Otpravka credentials are incomplete.',
+				'duration_ms' => $this->duration_ms( $started ),
+			);
+		}
+
+		$response = wp_remote_post(
+			self::CLEAN_ADDRESS_ENDPOINT,
+			array(
+				'timeout' => $this->settings->timeout(),
+				'headers' => array(
+					'Authorization' => 'AccessToken ' . $token,
+					'X-User-Authorization' => 'Basic ' . $basic_key,
+					'Content-Type' => 'application/json;charset=UTF-8',
+				),
+				'body' => wp_json_encode( array_values( $addresses ), JSON_UNESCAPED_UNICODE ),
+			)
+		);
+
+		if ( is_wp_error( $response ) ) {
+			return array(
+				'success' => false,
+				'http_code' => 0,
+				'addresses' => array(),
+				'error_code' => 'wp_http_error',
+				'error_message' => $response->get_error_message(),
+				'duration_ms' => $this->duration_ms( $started ),
+			);
+		}
+
+		$code = (int) wp_remote_retrieve_response_code( $response );
+		$body = (string) wp_remote_retrieve_body( $response );
+		$decoded = json_decode( $body, true );
+		$addresses_result = is_array( $decoded ) ? $decoded : array();
+
+		return array(
+			'success' => $code >= 200 && $code < 300 && is_array( $decoded ),
+			'http_code' => $code,
+			'addresses' => $addresses_result,
+			'error_code' => $code >= 200 && $code < 300 ? '' : 'http_' . $code,
+			'error_message' => $code >= 200 && $code < 300 ? '' : $this->excerpt( $body ),
+			'duration_ms' => $this->duration_ms( $started ),
+		);
 	}
 
 	/**
