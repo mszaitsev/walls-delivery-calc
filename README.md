@@ -1,8 +1,10 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.33.8.
+Current plugin version: 0.34.0.
 
 Current implementation status and roadmap are maintained in `docs/project-status.md`. Historical release notes below may not cover every intermediate 0.33.x change.
+
+Version 0.34.0 adds an admin-only Russian Post pickup point selector inside the shipment preparation modal. Managers can search local `wdc_pickup_points_russian_post` rows, pick an OPS/PVZ on the existing configured map stack, and refresh the shipment draft/preview without changing checkout, tariff calculation, saved delivery method, or WooCommerce order meta.
 
 Version 0.32.4 resolves local `wdc_locations` matches during Russian Post pickup import before staging inserts, so fresh `wdc_pickup_points_russian_post` rows can receive `location_id` immediately. A shared cached `RussianPostPickupLocationResolver` now handles FIAS, unique postal-code, and unique region+city matching for both importer and diagnostics rebind, and import state records location match counters.
 

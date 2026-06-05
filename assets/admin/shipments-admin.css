@@ -109,9 +109,131 @@
   margin-bottom: 8px;
 }
 
+.wdc-admin-pickup-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 100001;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 28px 16px;
+  overflow: auto;
+}
+
+.wdc-admin-pickup-picker__overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.wdc-admin-pickup-picker__dialog {
+  position: relative;
+  z-index: 1;
+  width: min(980px, 100%);
+  padding: 18px;
+  background: #fff;
+  color: #1d2327;
+  border: 1px solid #c3c4c7;
+  box-shadow: 0 16px 56px rgba(0, 0, 0, 0.32);
+}
+
+.wdc-admin-pickup-picker__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  background: transparent;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wdc-admin-pickup-picker__search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin: 8px 0 10px;
+}
+
+.wdc-admin-pickup-picker__search input {
+  width: 100%;
+}
+
+.wdc-admin-pickup-picker__status {
+  min-height: 20px;
+  margin-bottom: 8px;
+  color: #646970;
+}
+
+.wdc-admin-pickup-picker__map {
+  height: 420px;
+  min-height: 420px;
+  border: 1px solid #dcdcde;
+  background: #f6f7f7;
+}
+
+.wdc-admin-pickup-picker__selected {
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid #dcdcde;
+  background: #f6f7f7;
+}
+
+.wdc-admin-pickup-picker__selected-grid {
+  display: grid;
+  grid-template-columns: 120px 180px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.wdc-admin-pickup-picker__selected-grid span,
+.wdc-admin-pickup-picker__table td {
+  overflow-wrap: anywhere;
+}
+
+.wdc-admin-pickup-picker__selected-grid strong {
+  display: block;
+  color: #646970;
+  font-size: 12px;
+}
+
+.wdc-admin-pickup-picker__list {
+  max-height: 260px;
+  overflow: auto;
+}
+
+.wdc-admin-pickup-picker__table tr.is-active td {
+  background: #e7f3ff;
+}
+
+.wdc-admin-pickup-picker__table th:first-child,
+.wdc-admin-pickup-picker__table td:first-child {
+  width: 110px;
+}
+
+.wdc-admin-pickup-picker__table th:nth-child(2),
+.wdc-admin-pickup-picker__table td:nth-child(2) {
+  width: 180px;
+}
+
+.wdc-admin-pickup-picker__table th:last-child,
+.wdc-admin-pickup-picker__table td:last-child {
+  width: 120px;
+  text-align: right;
+}
+
 @media (max-width: 782px) {
   .wdc-shipment-grid,
-  .wdc-place-row {
+  .wdc-place-row,
+  .wdc-admin-pickup-picker__search,
+  .wdc-admin-pickup-picker__selected-grid {
     grid-template-columns: 1fr;
+  }
+
+  .wdc-admin-pickup-picker__map {
+    height: 320px;
+    min-height: 320px;
   }
 }

@@ -2,9 +2,9 @@
 
 ## Общий статус
 
-- Версия / baseline проекта: `0.33.8`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.34.0`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
-- Последнее обновление статуса: 2026-06-04.
+- Последнее обновление статуса: 2026-06-05.
 - Общий процент готовности: примерно 66%.
 - Следующий рекомендуемый этап: Russian Post shipment statuses/documents/cancellation.
 
@@ -28,11 +28,11 @@
 | Checkout UX | partial | 70% | City picker, sorting, tariff selector, courier address summary, pickup map; browser storage TTL and full UX stabilization remain. |
 | Russian Post Domestic | done | 80% | Domestic runtime, tariff variants, API client, pickup/courier services. |
 | Russian Post International | done | 75% | International runtime, country mapping, API/fallback pricing. |
-| Russian Post Pickup Points | done | 85% | Import pipeline, compact table, REST API, checkout map, order persistence. |
+| Russian Post Pickup Points | done | 88% | Import pipeline, compact table, REST API, checkout map, order persistence, and admin shipment-modal local pickup search. |
 | Multicarrier Pickup Layer | partial | 35% | Generic domain/storage exists, but production checkout map is Russian Post-specific. |
 | Order Admin Recalculation | partial | 30% | Order delivery metabox exists; full recalculation/replacement workflow is missing. |
 | Shipment Domain | partial | 55% | Domain objects exist and are used by the manual shipment creation runtime. |
-| Shipment Runtime | partial | 42% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments with server-side payload preview, tariff select, postoffice-code select and visible AJAX result diagnostics; statuses/documents/cancellation/admin pickup map are pending. |
+| Shipment Runtime | partial | 45% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments with server-side payload preview, tariff select, postoffice-code select, admin-only pickup map selector and visible AJAX result diagnostics; statuses/documents/cancellation are pending. |
 | Tracking / Documents / Status Sync | not-started | 0% | No tracking polling, labels, acts, documents, or status sync runtime. |
 | WooCommerce Status Mapping | not-started | 0% | Domain baseline exists, but no automatic WooCommerce order status changes. |
 | CDEK | planned | 0% | Planned carrier stage; no adapter found in code. |
@@ -50,7 +50,7 @@
 
 ### Core Platform
 
-- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.33.8`.
+- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.34.0`.
 - `src/Core/bootstrap.php` wires the autoloader and plugin runtime.
 - `src/Core/Plugin.php` registers services and hooks through a DI container.
 - `src/Infrastructure/Settings`, `src/Infrastructure/Logging`, `src/Infrastructure/Security`, `src/Infrastructure/Queue`, and `src/Infrastructure/Database` provide settings, logging, encryption, background scheduling, and migrations.
@@ -101,6 +101,7 @@
 - `src/Pickup/RussianPost` includes importer, import state, diagnostics, passport point normalizer, point repository, location resolver, type settings, and work-time formatter.
 - `src/Pickup/Rest` exposes pickup point directory and checkout selection state endpoints.
 - `assets/frontend/pickup-map` contains the checkout map, modal, API wrapper, checkout integration, and Leaflet/Yandex provider adapters.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` reuses the configured pickup map provider in the shipment modal for admin-only Russian Post OPS/PVZ search; the selection updates only the shipment draft/preview.
 - Migration `0021_create_russian_post_pickup_points_table.php` creates the carrier-specific Russian Post pickup table; `0022` links points to local locations.
 - Selected pickup data is persisted in checkout session, order meta, shipping item meta, order details, emails, and admin metabox.
 
@@ -160,7 +161,7 @@
 - Документы/ярлыки/партии/Ф103.
 - Отмена отправлений.
 - Автосинхронизация.
-- Полноценный выбор ПВЗ на карте в админской модалке.
+- Shipment statuses, documents, cancellation and automatic sync remain pending.
 
 ### Carrier Documents
 

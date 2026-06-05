@@ -121,6 +121,7 @@
 - manual WooCommerce order admin metabox `Отправления`;
 - safe draft creation from HPOS-compatible WooCommerce order APIs and saved WDC order meta;
 - Russian Post Otpravka `PUT /2.0/user/backlog` payload building and response normalization;
+- admin-only Russian Post OPS/PVZ selector inside the shipment modal; it updates the shipment draft and preview without saving WooCommerce order meta;
 - order meta storage for shipment state, safe request/response snapshots, barcode/result ids and last safe error;
 - `WDC -> Перевозчики` page for shared carrier credentials.
 
@@ -135,6 +136,7 @@
 - import ПВЗ Почты России, import state, diagnostics, normalization, type settings и work-time formatting;
 - поиск адресов для ПВЗ;
 - REST controllers для directory/search/detail ПВЗ и checkout pickup selection state;
+- `RussianPostPickupPointRepository::search_admin_pickup_rows()` searches local Russian Post pickup rows by postcode, city and address for the shipment modal;
 - admin summary page для ПВЗ.
 
 ## Orders
