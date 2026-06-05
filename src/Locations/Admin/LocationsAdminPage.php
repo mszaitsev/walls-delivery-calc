@@ -1165,7 +1165,7 @@ final class LocationsAdminPage {
 		$this->guard_ajax();
 		$id = isset( $_POST['location_id'] ) ? (int) $_POST['location_id'] : 0;
 		$row = $this->repository->find_raw_by_id( $id );
-		$fields = array( 'id', 'gar_object_id', 'fias_id', 'gar_id', 'kladr_id', 'country_code', 'region_name', 'region_code', 'region_type', 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level', 'city_name', 'city_type', 'city_fias_id', 'city_kladr_id', 'settlement_name', 'settlement_type', 'place_name', 'place_type', 'place_level', 'display_name', 'searchable_text', 'postal_code', 'okato', 'oktmo', 'latitude', 'longitude', 'active', 'created_at', 'updated_at' );
+		$fields = array( 'id', 'gar_object_id', 'fias_id', 'gar_id', 'kladr_id', 'country_code', 'region_name', 'region_code', 'region_type', 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level', 'city_name', 'city_type', 'city_fias_id', 'city_kladr_id', 'settlement_name', 'settlement_type', 'place_name', 'place_type', 'place_level', 'display_name', 'searchable_text', 'postal_code', 'russianpost_courier_calc_postal_code', 'okato', 'oktmo', 'latitude', 'longitude', 'active', 'created_at', 'updated_at' );
 		$data = array();
 		foreach ( $fields as $field ) {
 			$data[ $field ] = isset( $row[ $field ] ) ? (string) $row[ $field ] : '';
