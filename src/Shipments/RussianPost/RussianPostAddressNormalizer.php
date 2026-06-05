@@ -23,7 +23,7 @@ final class RussianPostAddressNormalizer {
 			return array(
 				'success' => false,
 				'status' => 'empty',
-				'message' => 'Original address is empty.',
+				'message' => 'Оригинальный адрес пуст.',
 				'original_hash' => $this->original_hash( $original_address ),
 			);
 		}
@@ -42,7 +42,7 @@ final class RussianPostAddressNormalizer {
 		$result['http_code'] = (int) ( $response['http_code'] ?? 0 );
 		$result['duration_ms'] = (int) ( $response['duration_ms'] ?? 0 );
 		if ( empty( $response['success'] ) && '' === (string) ( $result['message'] ?? '' ) ) {
-			$result['message'] = (string) ( $response['error_message'] ?? 'Russian Post address normalization failed.' );
+			$result['message'] = (string) ( $response['error_message'] ?? 'Не удалось обработать адрес через Почту России.' );
 		}
 
 		return $result;
@@ -69,7 +69,7 @@ final class RussianPostAddressNormalizer {
 			'original_hash' => $this->original_hash( $original_address ),
 			'normalized_at' => function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ),
 			'expires_at' => gmdate( 'Y-m-d H:i:s', time() + ( defined( 'DAY_IN_SECONDS' ) ? DAY_IN_SECONDS : 86400 ) ),
-			'message' => $success ? '' : 'Address was not confirmed by Russian Post.',
+			'message' => $success ? '' : 'Адрес не подтвержден Почтой России.',
 		);
 	}
 
@@ -118,8 +118,10 @@ final class RussianPostAddressNormalizer {
 			}
 			$parts[] = match ( $key ) {
 				'location' => 'мкр ' . $value,
+				'house' => 'д. ' . $value,
 				'slash' => '/ ' . $value,
 				'letter' => 'лит ' . $value,
+				'building' => 'стр. ' . $value,
 				'corpus' => 'корп. ' . $value,
 				default => $value,
 			};

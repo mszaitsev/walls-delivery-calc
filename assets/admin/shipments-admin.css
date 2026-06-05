@@ -66,9 +66,26 @@
 
 .wdc-place-row {
   display: grid;
-  grid-template-columns: repeat(5, minmax(90px, 1fr)) auto;
+  grid-template-columns: repeat(5, 96px) auto;
   gap: 8px;
+  align-items: end;
+  justify-content: start;
   margin-bottom: 8px;
+}
+
+.wdc-place-row__title {
+  grid-column: 1 / -1;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.wdc-shipment-modal .wdc-place-field {
+  width: 96px;
+  margin-bottom: 0;
+}
+
+.wdc-shipment-modal .wdc-place-field input {
+  width: 96px;
 }
 
 .wdc-shipment-preview {

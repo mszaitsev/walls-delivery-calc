@@ -7,7 +7,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class RussianPostShipmentProductMapper {
 	/**
-	 * @return array{mail_type:string,mail_category:string,product:string,mmo_allowed:bool}
+	 * @return array{mail_type:string,mail_category:string,product:string,mmo_allowed:bool,has_declared_value:bool}
 	 */
 	public function by_object_code( string|int $object_code, string $delivery_type = '' ): array {
 		$code = (string) $object_code;
@@ -33,6 +33,7 @@ final class RussianPostShipmentProductMapper {
 			'mail_category' => $row[1],
 			'product' => $row[2],
 			'mmo_allowed' => (bool) $row[3],
+			'has_declared_value' => str_contains( (string) $row[1], 'DECLARED_VALUE' ),
 		);
 	}
 }

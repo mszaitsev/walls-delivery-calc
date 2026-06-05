@@ -246,7 +246,45 @@ shipments_smoke_assert( ! array_key_exists( 'courier', $goods_payload[0] ) && ! 
 shipments_smoke_assert( 643 === $goods_payload[0]['mail-direct'] && 'DEFAULT' === $goods_payload[0]['address-type-to'], 'Courier payload must set domestic mail-direct and DEFAULT address type.' );
 shipments_smoke_assert( '630099' === $goods_payload[0]['index-to'] && 'Новосибирская область' === $goods_payload[0]['region-to'] && 'Новосибирск' === $goods_payload[0]['place-to'] && ! isset( $goods_payload[0]['ecom-data'] ), 'Courier payload must include address fields and omit ecom-data.' );
 shipments_smoke_assert( ! array_key_exists( 'raw-address', $goods_payload[0] ), 'Courier fallback payload must not include raw-address.' );
+shipments_smoke_assert( ! array_key_exists( 'insr-value', $goods_payload[0] ), 'Ordinary courier tariff must ignore declared value input.' );
 shipments_smoke_assert( isset( $goods_payload[0]['goods']['items'][0] ), 'goods.items must be present when enabled.' );
+
+$declared_value_request = new ShipmentCreateRequest(
+	$request->order_id,
+	$request->carrier_key,
+	DeliveryType::COURIER,
+	RussianPostDomesticSettings::COURIER_SERVICE_KEY,
+	$goods_request->recipient_address,
+	null,
+	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 100000 ), array( $item ) ) ),
+	Money::from_kopecks( 100000 ),
+	false,
+	array( 'send_goods_items' => false ),
+	$request->recipient,
+	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '24020', 'allow_failed_normalization_preview' => true )
+);
+$declared_value_payload = $builder->build( $declared_value_request );
+shipments_smoke_assert( 100000 === $declared_value_payload[0]['insr-value'], 'Declared-value tariff must pass insurance in kopecks.' );
+
+$empty_place_request = new ShipmentCreateRequest(
+	$request->order_id,
+	$request->carrier_key,
+	DeliveryType::PICKUP,
+	$request->rate_id,
+	$request->recipient_address,
+	$request->pickup_point,
+	array( new ShipmentPlace( 1, 0, 0, 0, 0, Money::from_kopecks( 0 ), array( $item ) ) ),
+	$request->declared_value,
+	false,
+	$request->services,
+	$request->recipient,
+	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '23030', 'pickup_point_found' => true )
+);
+$empty_place_errors = $builder->validate( $empty_place_request );
+shipments_smoke_assert( in_array( 'Место 1: вес обязателен.', $empty_place_errors, true ), 'Empty place validation must require weight in Russian.' );
+shipments_smoke_assert( in_array( 'Место 1: длина обязательна.', $empty_place_errors, true ), 'Empty place validation must require length in Russian.' );
+shipments_smoke_assert( in_array( 'Место 1: ширина обязательна.', $empty_place_errors, true ), 'Empty place validation must require width in Russian.' );
+shipments_smoke_assert( in_array( 'Место 1: высота обязательна.', $empty_place_errors, true ), 'Empty place validation must require height in Russian.' );
 
 $normalizer_reflection = new ReflectionClass( RussianPostAddressNormalizer::class );
 $normalizer = $normalizer_reflection->newInstanceWithoutConstructor();
@@ -469,6 +507,10 @@ $pickup_tariffs = $tariffs_for_service->invoke(
 );
 shipments_smoke_assert( array() !== $pickup_tariffs, 'Draft factory must expose enabled tariffs for selected Russian Post pickup service.' );
 shipments_smoke_assert( '4030' === (string) ( $pickup_tariffs[0]['object_code'] ?? '' ), 'Draft tariff list must fall back to default enabled domestic tariff variants.' );
+shipments_smoke_assert( array_key_exists( 'has_declared_value', $pickup_tariffs[0] ), 'Draft tariff list must expose declared-value flag for admin UI.' );
+shipments_smoke_assert( false === (bool) ( $pickup_tariffs[0]['has_declared_value'] ?? true ), 'Ordinary pickup tariff must not require declared-value UI.' );
+$declared_tariff_rows = array_values( array_filter( $pickup_tariffs, static fn ( array $row ): bool => '23020' === (string) ( $row['object_code'] ?? '' ) ) );
+shipments_smoke_assert( array() !== $declared_tariff_rows && ! empty( $declared_tariff_rows[0]['has_declared_value'] ), 'Declared-value pickup tariff must expose declared-value UI flag.' );
 
 $shipping_address = $factory_reflection->getMethod( 'shipping_address' );
 $shipping_address->setAccessible( true );

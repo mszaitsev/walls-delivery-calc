@@ -55,7 +55,7 @@ final class RussianPostShipmentAdapter implements ShipmentCarrierAdapterInterfac
 			return new ShipmentCreateResult(
 				false,
 				error_code: 'shipment_order_num_mismatch',
-				error_message: 'Payload contains order-num values that do not belong to the current shipment request.'
+				error_message: 'Payload содержит order-num другого заказа. Создание отправления заблокировано.'
 			);
 		}
 
@@ -101,7 +101,7 @@ final class RussianPostShipmentAdapter implements ShipmentCarrierAdapterInterfac
 			return implode( '; ', array_map( static fn ( mixed $error ): string => is_array( $error ) ? (string) ( $error['msg'] ?? $error['message'] ?? $error['description'] ?? ( function_exists( 'wp_json_encode' ) ? wp_json_encode( $error ) : json_encode( $error ) ) ) : (string) $error, $errors ) );
 		}
 
-		return (string) ( $response['error_message'] ?? 'Russian Post backlog request failed.' );
+		return (string) ( $response['error_message'] ?? 'Не удалось создать отправление в Почте России.' );
 	}
 
 	/**

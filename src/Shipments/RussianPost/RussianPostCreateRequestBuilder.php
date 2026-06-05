@@ -27,7 +27,6 @@ final class RussianPostCreateRequestBuilder {
 			throw new \InvalidArgumentException( implode( '; ', $errors ) );
 		}
 
-		$service_key = (string) ( $request->meta['service_key'] ?? $request->rate_id );
 		$object_code = (string) ( $request->meta['tariff_object'] ?? $request->meta['selected_tariff_object'] ?? '' );
 		$product = $this->products->by_object_code( $object_code, $request->delivery_type );
 		$is_ecom = DeliveryType::PICKUP === $request->delivery_type && ! empty( $request->meta['tariff_is_ecom'] );
@@ -36,8 +35,8 @@ final class RussianPostCreateRequestBuilder {
 		$send_goods = ! empty( $request->services['send_goods_items'] );
 		$combine_goods = ! empty( $request->services['combine_goods_items'] );
 		$combined_name = trim( (string) ( $request->services['combined_goods_name'] ?? '' ) ) ?: str_replace( '{order_number}', $order_num, (string) ( $request->services['combined_goods_name_template'] ?? 'Товары по заказу {order_number}' ) );
-		$result = array();
 		$phone = $this->normalize_phone( (string) ( $request->recipient['phone'] ?? '' ) );
+		$result = array();
 
 		foreach ( $request->places as $index => $place ) {
 			$payload = array(
@@ -60,32 +59,22 @@ final class RussianPostCreateRequestBuilder {
 				'payment-method' => 'CASHLESS',
 				'notice-payment-method' => 'CASHLESS',
 			);
+
 			if ( '' !== (string) ( $request->recipient['email'] ?? '' ) ) {
 				$payload['mail-address'] = (string) $request->recipient['email'];
 			}
-			$name_parts = $this->split_name( (string) ( $request->recipient['name'] ?? '' ) );
-			$payload = array_merge( $payload, $name_parts );
 
-			if ( $place->declared_value->get_kopecks() > 0 ) {
+			$payload = array_merge( $payload, $this->split_name( (string) ( $request->recipient['name'] ?? '' ) ) );
+
+			if ( ! empty( $product['has_declared_value'] ) && $place->declared_value->get_kopecks() > 0 ) {
 				$payload['insr-value'] = $place->declared_value->get_kopecks();
 			}
+
 			if ( DeliveryType::COURIER === $request->delivery_type ) {
-				$normalized = is_array( $request->meta['normalized_address'] ?? null ) ? $request->meta['normalized_address'] : array();
-				$fields = is_array( $normalized['fields'] ?? null ) ? $normalized['fields'] : array();
-				if ( ! empty( $normalized['success'] ) && array() !== $fields ) {
-					foreach ( $fields as $field_key => $field_value ) {
-						$payload[ (string) $field_key ] = $field_value;
-					}
-					$payload['address-type-to'] = (string) ( $payload['address-type-to'] ?? 'DEFAULT' );
-				} else {
-					$payload['address-type-to'] = 'DEFAULT';
-					$payload['index-to'] = $request->recipient_address->postcode;
-					$payload['region-to'] = $request->recipient_address->region_name;
-					$payload['place-to'] = $this->place_to( $request );
-				}
+				$payload = array_merge( $payload, $this->courier_address_fields( $request ) );
 			} else {
 				$pickup_code = $request->pickup_point?->point_code ?? (string) ( $request->meta['pickup_point_code'] ?? '' );
-				if ( $is_ecom && '' !== $pickup_code ) {
+				if ( $is_ecom && '' !== trim( $pickup_code ) ) {
 					$payload['ecom-data'] = array( 'delivery-point-index' => $pickup_code );
 				} elseif ( ! $is_ecom ) {
 					$payload['address-type-to'] = 'DEMAND';
@@ -93,16 +82,20 @@ final class RussianPostCreateRequestBuilder {
 					$payload['region-to'] = $request->recipient_address->region_name;
 					$payload['place-to'] = $this->place_to( $request );
 				}
+
 				$shelf_life_days = (int) ( $request->services['shelf_life_days'] ?? 30 );
 				$payload['shelf-life-days'] = max( 15, min( 60, $shelf_life_days ) );
 			}
+
 			if ( $is_mmo ) {
 				$payload['add-to-mmo'] = true;
 				$payload['group-name'] = $order_num;
 			}
+
 			if ( $send_goods ) {
 				$payload['goods'] = array( 'items' => $this->goods_items( $place, $combine_goods, $combined_name ) );
 			}
+
 			$result[] = array_filter(
 				$payload,
 				static fn ( mixed $value ): bool => ! ( is_string( $value ) && '' === trim( $value ) )
@@ -118,11 +111,13 @@ final class RussianPostCreateRequestBuilder {
 	public function validate( ShipmentCreateRequest $request ): array {
 		$errors = array();
 		$places = $request->places;
+
 		if ( array() === $places ) {
 			$errors[] = 'Добавьте хотя бы одно грузоместо.';
 		}
+
 		if ( count( $places ) > 1 ) {
-			if ( count( $places ) < 2 || count( $places ) > 50 ) {
+			if ( count( $places ) > 50 ) {
 				$errors[] = 'Для ММО должно быть от 2 до 50 мест.';
 			}
 			$product = $this->products->by_object_code( (string) ( $request->meta['tariff_object'] ?? '' ), $request->delivery_type );
@@ -130,22 +125,23 @@ final class RussianPostCreateRequestBuilder {
 				$errors[] = 'Выбранный тариф не поддерживает ММО.';
 			}
 		}
+
 		$total_weight = 0;
-		foreach ( $places as $place ) {
+		foreach ( $places as $index => $place ) {
 			if ( ! $place instanceof ShipmentPlace ) {
 				continue;
 			}
 			$total_weight += $place->weight_g;
-			foreach ( $place->validate() as $error ) {
-				$errors[] = $error;
-			}
+			$errors = array_merge( $errors, $this->place_errors( $place, $index + 1 ) );
 			if ( $place->weight_g > self::MAX_PLACE_WEIGHT_G ) {
 				$errors[] = 'Вес одного места не должен превышать 31,5 кг.';
 			}
 		}
+
 		if ( $total_weight > self::MAX_MMO_WEIGHT_G ) {
 			$errors[] = 'Общий вес ММО не должен превышать 300 кг.';
 		}
+
 		if ( '' === trim( (string) ( $request->recipient['name'] ?? '' ) ) ) {
 			$errors[] = 'ФИО получателя обязательно.';
 		}
@@ -158,22 +154,26 @@ final class RussianPostCreateRequestBuilder {
 		if ( '' === trim( (string) ( $request->meta['tariff_object'] ?? $request->meta['selected_tariff_object'] ?? '' ) ) ) {
 			$errors[] = 'Выберите тариф для создания отправления.';
 		}
-		if ( DeliveryType::COURIER === $request->delivery_type && '' === trim( $request->recipient_address->postcode ) ) {
-			$errors[] = 'Индекс получателя обязателен.';
+
+		if ( DeliveryType::COURIER === $request->delivery_type ) {
+			if ( '' === trim( $request->recipient_address->postcode ) ) {
+				$errors[] = 'Индекс получателя обязателен.';
+			}
+			if ( '' === trim( $this->place_to( $request ) ) ) {
+				$errors[] = 'Населенный пункт получателя обязателен.';
+			}
+			if ( empty( $request->meta['allow_failed_normalization_preview'] ) && true !== ( $request->meta['normalization_valid'] ?? false ) ) {
+				$errors[] = 'Адрес курьерской доставки нужно успешно обработать через Почту России перед созданием отправления.';
+			}
 		}
-		if ( DeliveryType::COURIER === $request->delivery_type && '' === trim( $this->place_to( $request ) ) ) {
-			$errors[] = 'Населенный пункт получателя обязателен.';
-		}
-		if ( DeliveryType::COURIER === $request->delivery_type && empty( $request->meta['allow_failed_normalization_preview'] ) && true !== ( $request->meta['normalization_valid'] ?? false ) ) {
-			$errors[] = 'Адрес курьерской доставки нужно успешно обработать через Почту России перед созданием отправления.';
-		}
+
 		if ( DeliveryType::PICKUP === $request->delivery_type ) {
 			$pickup_code = $request->pickup_point?->point_code ?? (string) ( $request->meta['pickup_point_code'] ?? '' );
 			if ( '' === trim( $pickup_code ) ) {
 				$errors[] = 'Код ПВЗ/почтомата обязателен.';
 			}
 			if ( empty( $request->meta['pickup_point_found'] ) ) {
-				$errors[] = 'Selected pickup point was not found in Russian Post pickup directory.';
+				$errors[] = 'Выбранный ПВЗ/ОПС не найден в справочнике Почты России.';
 			}
 			if ( empty( $request->meta['tariff_is_ecom'] ) ) {
 				if ( '' === trim( $this->pickup_destination_index( $request, $pickup_code ) ) ) {
@@ -219,13 +219,11 @@ final class RussianPostCreateRequestBuilder {
 	 */
 	private function goods_items( ShipmentPlace $place, bool $combine, string $combined_name ): array {
 		if ( $combine || array() === $place->items ) {
-			$value = $place->declared_value->get_kopecks() > 0 ? $place->declared_value->get_kopecks() : 0;
-
 			return array(
 				array(
 					'description' => $combined_name,
 					'quantity' => 1,
-					'value' => $value,
+					'value' => $place->declared_value->get_kopecks() > 0 ? $place->declared_value->get_kopecks() : 0,
 				),
 			);
 		}
@@ -257,6 +255,30 @@ final class RussianPostCreateRequestBuilder {
 		return trim( $request->recipient_address->settlement ) ?: trim( $request->recipient_address->city );
 	}
 
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function courier_address_fields( ShipmentCreateRequest $request ): array {
+		$normalized = is_array( $request->meta['normalized_address'] ?? null ) ? $request->meta['normalized_address'] : array();
+		$fields = is_array( $normalized['fields'] ?? null ) ? $normalized['fields'] : array();
+		if ( ! empty( $normalized['success'] ) && array() !== $fields ) {
+			$result = array();
+			foreach ( $fields as $field_key => $field_value ) {
+				$result[ (string) $field_key ] = $field_value;
+			}
+			$result['address-type-to'] = (string) ( $result['address-type-to'] ?? 'DEFAULT' );
+
+			return $result;
+		}
+
+		return array(
+			'address-type-to' => 'DEFAULT',
+			'index-to' => $request->recipient_address->postcode,
+			'region-to' => $request->recipient_address->region_name,
+			'place-to' => $this->place_to( $request ),
+		);
+	}
+
 	private function pickup_destination_index( ShipmentCreateRequest $request, string $pickup_code = '' ): string {
 		$explicit = preg_replace( '/\D+/', '', (string) ( $request->meta['pickup_point_postcode'] ?? $request->meta['pickup_postcode'] ?? '' ) ) ?? '';
 		if ( 1 === preg_match( '/^\d{6}$/', $explicit ) ) {
@@ -268,7 +290,32 @@ final class RussianPostCreateRequestBuilder {
 		}
 
 		$postcode = preg_replace( '/\D+/', '', $request->recipient_address->postcode ) ?? '';
-
 		return 1 === preg_match( '/^\d{6}$/', $postcode ) ? $postcode : '';
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function place_errors( ShipmentPlace $place, int $visible_index ): array {
+		$label = 'Место ' . $visible_index . ': ';
+		$errors = array();
+
+		if ( $place->place_number <= 0 ) {
+			$errors[] = $label . 'номер места должен быть больше 0.';
+		}
+		if ( $place->weight_g <= 0 ) {
+			$errors[] = $label . 'вес обязателен.';
+		}
+		if ( $place->length_cm <= 0 ) {
+			$errors[] = $label . 'длина обязательна.';
+		}
+		if ( $place->width_cm <= 0 ) {
+			$errors[] = $label . 'ширина обязательна.';
+		}
+		if ( $place->height_cm <= 0 ) {
+			$errors[] = $label . 'высота обязательна.';
+		}
+
+		return $errors;
 	}
 }

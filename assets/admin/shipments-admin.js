@@ -28,6 +28,7 @@
     const data = new FormData();
     container.querySelectorAll('input, select, textarea').forEach((field) => {
       if (!field.name || field.disabled) return;
+      if (field.closest('[data-wdc-declared-value-field][hidden]')) return;
       if ((field.type === 'checkbox' || field.type === 'radio') && !field.checked) return;
       data.append(field.name, field.value);
     });
@@ -98,6 +99,7 @@
     const hasTariffs = tariff.options.length > 0;
     tariff.disabled = !hasTariffs;
     if (message) message.hidden = hasTariffs;
+    updateDeclaredValueFields(form);
     updateCreateAvailability(form);
     if (!hasTariffs && window.console && typeof window.console.warn === 'function') {
       window.console.warn('WDC shipments: no enabled tariffs for selected service.', {
@@ -120,6 +122,31 @@
     if (pickup) pickup.hidden = deliveryType !== 'pickup';
     if (courier) courier.hidden = deliveryType !== 'courier';
     updateCreateAvailability(form);
+  }
+
+  function selectedTariff(form) {
+    const service = form.querySelector('[data-wdc-service-select]');
+    const tariff = form.querySelector('[data-wdc-tariff-select]');
+    if (!service || !tariff) return null;
+    const option = service.options[service.selectedIndex] || null;
+    try {
+      const tariffs = JSON.parse(option ? option.dataset.tariffs || '[]' : '[]');
+      return tariffs.find((item) => String(item.object_code || '') === String(tariff.value || '')) || null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function updateDeclaredValueFields(form) {
+    const tariff = selectedTariff(form);
+    const visible = !!(tariff && tariff.has_declared_value);
+    form.querySelectorAll('[data-wdc-declared-value-field]').forEach((field) => {
+      field.hidden = !visible;
+      field.querySelectorAll('input').forEach((input) => {
+        input.disabled = !visible;
+        if (!visible) input.value = '';
+      });
+    });
   }
 
   function updateCreateAvailability(form) {
@@ -155,6 +182,8 @@
 
   function renumberPlaces(container) {
     container.querySelectorAll('[data-wdc-place]').forEach((row, index) => {
+      const title = row.querySelector('[data-wdc-place-title]');
+      if (title) title.textContent = 'Место ' + (index + 1);
       row.querySelectorAll('input').forEach((input) => {
         input.name = input.name.replace(/places\[\d+\]/, 'places[' + index + ']');
       });
@@ -215,11 +244,12 @@
       if (!first) return;
       const clone = first.cloneNode(true);
       clone.querySelectorAll('input').forEach((input) => {
-        if (input.name.includes('declared_value')) input.value = '0';
+        input.value = '';
       });
       container.appendChild(clone);
       renumberPlaces(container);
       updateRemoveButtons(container);
+      if (form) updateDeclaredValueFields(form);
       if (form) schedulePreview(form);
       return;
     }
@@ -366,6 +396,9 @@
     if (!form) return;
     if (event.target.matches('[data-wdc-service-select]')) {
       updateTariffOptions(form);
+    }
+    if (event.target.matches('[data-wdc-tariff-select]')) {
+      updateDeclaredValueFields(form);
     }
     updateScenarioSections(form);
     schedulePreview(form);
