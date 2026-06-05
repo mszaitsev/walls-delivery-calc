@@ -74,11 +74,12 @@ final class RussianPostCreateRequestBuilder {
 				$payload = array_merge( $payload, $this->courier_address_fields( $request ) );
 			} else {
 				$pickup_code = $request->pickup_point?->point_code ?? (string) ( $request->meta['pickup_point_code'] ?? '' );
-				if ( $is_ecom && '' !== trim( $pickup_code ) ) {
-					$payload['ecom-data'] = array( 'delivery-point-index' => $pickup_code );
+				$delivery_point_index = $this->pickup_destination_index( $request, $pickup_code, ! $is_ecom );
+				if ( $is_ecom && '' !== $delivery_point_index ) {
+					$payload['ecom-data'] = array( 'delivery-point-index' => $delivery_point_index );
 				} elseif ( ! $is_ecom ) {
 					$payload['address-type-to'] = 'DEMAND';
-					$payload['index-to'] = $this->pickup_destination_index( $request, $pickup_code );
+					$payload['index-to'] = $delivery_point_index;
 					$payload['region-to'] = $request->recipient_address->region_name;
 					$payload['place-to'] = $this->place_to( $request );
 				}
@@ -169,16 +170,18 @@ final class RussianPostCreateRequestBuilder {
 
 		if ( DeliveryType::PICKUP === $request->delivery_type ) {
 			$pickup_code = $request->pickup_point?->point_code ?? (string) ( $request->meta['pickup_point_code'] ?? '' );
+			$is_ecom = ! empty( $request->meta['tariff_is_ecom'] );
+			$delivery_point_index = $this->pickup_destination_index( $request, $pickup_code, ! $is_ecom );
 			if ( '' === trim( $pickup_code ) ) {
 				$errors[] = 'Код ПВЗ/почтомата обязателен.';
 			}
 			if ( empty( $request->meta['pickup_point_found'] ) ) {
 				$errors[] = 'Выбранный ПВЗ/ОПС не найден в справочнике Почты России.';
 			}
+			if ( '' === trim( $delivery_point_index ) ) {
+				$errors[] = 'Индекс выбранного ПВЗ/ОПС обязателен.';
+			}
 			if ( empty( $request->meta['tariff_is_ecom'] ) ) {
-				if ( '' === trim( $this->pickup_destination_index( $request, $pickup_code ) ) ) {
-					$errors[] = 'Индекс получателя обязателен.';
-				}
 				if ( '' === trim( $request->recipient_address->region_name ) ) {
 					$errors[] = 'Регион получателя обязателен для обычного ПВЗ/ОПС.';
 				}
@@ -279,7 +282,7 @@ final class RussianPostCreateRequestBuilder {
 		);
 	}
 
-	private function pickup_destination_index( ShipmentCreateRequest $request, string $pickup_code = '' ): string {
+	private function pickup_destination_index( ShipmentCreateRequest $request, string $pickup_code = '', bool $allow_recipient_fallback = true ): string {
 		$explicit = preg_replace( '/\D+/', '', (string) ( $request->meta['pickup_point_postcode'] ?? $request->meta['pickup_postcode'] ?? '' ) ) ?? '';
 		if ( 1 === preg_match( '/^\d{6}$/', $explicit ) ) {
 			return $explicit;
@@ -287,6 +290,10 @@ final class RussianPostCreateRequestBuilder {
 
 		if ( 1 === preg_match( '/^(\d{6})/', trim( $pickup_code ), $matches ) ) {
 			return (string) $matches[1];
+		}
+
+		if ( ! $allow_recipient_fallback ) {
+			return '';
 		}
 
 		$postcode = preg_replace( '/\D+/', '', $request->recipient_address->postcode ) ?? '';

@@ -255,7 +255,40 @@ $ecom_suffix_request = new ShipmentCreateRequest(
 	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '54020', 'tariff_is_ecom' => true, 'pickup_point_found' => true )
 );
 $ecom_suffix_payload = $builder->build( $ecom_suffix_request );
-shipments_smoke_assert( '630091-53b5939ce9' === $ecom_suffix_payload[0]['ecom-data']['delivery-point-index'], 'ECOM pickup must keep full delivery-point-index code.' );
+shipments_smoke_assert( '630091' === $ecom_suffix_payload[0]['ecom-data']['delivery-point-index'], 'ECOM pickup must use normalized 6-digit delivery-point-index.' );
+
+$ecom_postcode_request = new ShipmentCreateRequest(
+	$request->order_id,
+	$request->carrier_key,
+	DeliveryType::PICKUP,
+	$request->rate_id,
+	$request->recipient_address,
+	new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, '660017-b26bfdca98', 'Красноярск, тестовый ПВЗ', '2026-06-04 10:00:00' ),
+	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ) ),
+	$request->declared_value,
+	false,
+	$request->services,
+	$request->recipient,
+	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '54020', 'tariff_is_ecom' => true, 'pickup_point_found' => true, 'pickup_point_postcode' => '660017' )
+);
+$ecom_postcode_payload = $builder->build( $ecom_postcode_request );
+shipments_smoke_assert( '660017' === $ecom_postcode_payload[0]['ecom-data']['delivery-point-index'], 'ECOM pickup must prefer saved 6-digit pickup postcode.' );
+
+$invalid_ecom_index_request = new ShipmentCreateRequest(
+	$request->order_id,
+	$request->carrier_key,
+	DeliveryType::PICKUP,
+	$request->rate_id,
+	$request->recipient_address,
+	new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, 'bad-pickup-code', 'Тестовый ПВЗ', '2026-06-04 10:00:00' ),
+	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ) ),
+	$request->declared_value,
+	false,
+	$request->services,
+	$request->recipient,
+	array( 'order_num' => '123', 'postoffice_code' => '630005', 'tariff_object' => '54020', 'tariff_is_ecom' => true, 'pickup_point_found' => true )
+);
+shipments_smoke_assert( in_array( 'Индекс выбранного ПВЗ/ОПС обязателен.', $builder->validate( $invalid_ecom_index_request ), true ), 'ECOM pickup validation must require 6-digit pickup index.' );
 
 $metabox_reflection = new ReflectionClass( OrderShipmentsMetabox::class );
 $metabox = $metabox_reflection->newInstanceWithoutConstructor();

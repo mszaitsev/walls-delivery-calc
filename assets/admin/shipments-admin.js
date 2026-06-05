@@ -54,10 +54,11 @@
         if (preview) {
           preview.textContent = JSON.stringify(payload.data.preview || {}, null, 2);
         }
-        if (errors && payload.data.preview && payload.data.preview.errors && payload.data.preview.errors.length) {
-          errors.textContent = payload.data.preview.errors.join('; ');
-        } else if (errors && errors.dataset.previewWarning === '1') {
-          errors.textContent = '';
+        if (errors) {
+          const previewErrors = payload.data.preview && Array.isArray(payload.data.preview.errors)
+            ? payload.data.preview.errors
+            : [];
+          errors.textContent = previewErrors.length ? previewErrors.join('; ') : '';
           delete errors.dataset.previewWarning;
         }
       })
