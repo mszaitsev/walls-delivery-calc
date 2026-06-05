@@ -151,7 +151,11 @@ final class OrderShipmentsMetabox {
 		}
 		$has_selected_service_tariffs = array() !== $selected_service_tariffs;
 		$tariff_message_hidden_attr = $has_selected_service_tariffs ? ' hidden' : '';
-		$calculated_weight_placeholder = (string) max( 1, (int) ( $place['weight_g'] ?? 1000 ) );
+		$calculated_weight_g = max( 0, (int) ( $place['weight_g'] ?? 0 ) );
+		$weight_label = $calculated_weight_g > 0 ? sprintf( __( 'Вес, г (%d)', 'walls-delivery-calc' ), $calculated_weight_g ) : __( 'Вес, г', 'walls-delivery-calc' );
+		$default_declared_value_rub = max( 0, (int) ( $meta['default_declared_value_rub'] ?? 0 ) );
+		$default_declared_value_attr = $default_declared_value_rub > 0 ? (string) $default_declared_value_rub : '';
+		$declared_value_initial = $selected_tariff_has_declared_value ? $default_declared_value_attr : '';
 		$delivery_type = (string) ( $request['delivery_type'] ?? DeliveryType::PICKUP );
 		$pickup_point_found = ! empty( $meta['pickup_point_found'] );
 		$pickup_address = (string) ( $address['raw_address'] ?? '' );
@@ -236,11 +240,11 @@ final class OrderShipmentsMetabox {
 							<div data-wdc-places>
 								<div class="wdc-place-row" data-wdc-place>
 									<div class="wdc-place-row__title" data-wdc-place-title><?php echo esc_html__( 'Место 1', 'walls-delivery-calc' ); ?></div>
-									<label class="wdc-place-field"><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][weight_g]" value="" placeholder="<?php echo esc_attr( $calculated_weight_placeholder ); ?>"></label>
+									<label class="wdc-place-field"><?php echo esc_html( $weight_label ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][weight_g]" value="" placeholder="<?php echo esc_attr__( 'г', 'walls-delivery-calc' ); ?>"></label>
 									<label class="wdc-place-field"><?php echo esc_html__( 'Длина, см', 'walls-delivery-calc' ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][length_cm]" value="" placeholder="<?php echo esc_attr__( 'см', 'walls-delivery-calc' ); ?>"></label>
 									<label class="wdc-place-field"><?php echo esc_html__( 'Ширина, см', 'walls-delivery-calc' ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][width_cm]" value="" placeholder="<?php echo esc_attr__( 'см', 'walls-delivery-calc' ); ?>"></label>
 									<label class="wdc-place-field"><?php echo esc_html__( 'Высота, см', 'walls-delivery-calc' ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][height_cm]" value="" placeholder="<?php echo esc_attr__( 'см', 'walls-delivery-calc' ); ?>"></label>
-									<label class="wdc-place-field" data-wdc-declared-value-field <?php echo $selected_tariff_has_declared_value ? '' : 'hidden'; ?>><?php echo esc_html__( 'Страховка, руб.', 'walls-delivery-calc' ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][declared_value_rub]" value=""></label>
+									<label class="wdc-place-field" data-wdc-declared-value-field data-default-declared-value-rub="<?php echo esc_attr( $default_declared_value_attr ); ?>" <?php echo $selected_tariff_has_declared_value ? '' : 'hidden'; ?>><?php echo esc_html__( 'Страховка, руб.', 'walls-delivery-calc' ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][declared_value_rub]" value="<?php echo esc_attr( $declared_value_initial ); ?>" <?php disabled( ! $selected_tariff_has_declared_value ); ?>></label>
 									<button type="button" class="button" data-wdc-remove-place disabled><?php echo esc_html__( 'Удалить', 'walls-delivery-calc' ); ?></button>
 								</div>
 							</div>

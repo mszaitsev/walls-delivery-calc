@@ -41,6 +41,7 @@ final class OrderShipmentDraftFactory {
 		$delivery_type = RussianPostDomesticSettings::service_delivery_type( $service_key );
 		$items = $this->order_items( $order );
 		$weight = $this->default_weight_g( $order, $items );
+		$default_declared_value_rub = $this->default_declared_value_rub( $items );
 		$declared_value = Money::from_kopecks( 0 );
 		$place = new ShipmentPlace( 1, $weight, 0, 0, 0, $declared_value, $items );
 		$settings = $this->shipment_settings->for_service( $service );
@@ -77,6 +78,7 @@ final class OrderShipmentDraftFactory {
 				'tariff_title' => (string) ( $tariff['title'] ?? $this->meta_string( $order, '_wdc_platform_tariff_title' ) ),
 				'tariff_is_ecom' => ! empty( $tariff['is_ecom'] ),
 				'tariff_has_declared_value' => ! empty( $tariff['has_declared_value'] ),
+				'default_declared_value_rub' => $default_declared_value_rub,
 				'order_num' => $order_number,
 				'postoffice_code' => $this->from_postcode( $service_key ),
 				'pickup_point_code' => $this->meta_string( $order, '_wdc_pickup_point_code' ),
@@ -232,6 +234,21 @@ final class OrderShipmentDraftFactory {
 		}
 
 		return max( 1, $total ?: 1000 );
+	}
+
+	/**
+	 * @param array<int,PackageItem> $items
+	 */
+	private function default_declared_value_rub( array $items ): int {
+		$total_kopecks = 0;
+		foreach ( $items as $item ) {
+			if ( ! $item instanceof PackageItem ) {
+				continue;
+			}
+			$total_kopecks += $item->total_price->get_kopecks();
+		}
+
+		return max( 0, (int) round( $total_kopecks / 100 ) );
 	}
 
 	private function recipient_address( object $order, string $delivery_type, ?array $pickup_row = null, array $normalized_address = array() ): Address {

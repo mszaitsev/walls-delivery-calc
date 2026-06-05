@@ -60,7 +60,7 @@ function shipments_smoke_assert( bool $condition, string $message ): void {
 }
 
 class ShipmentsSmokeOrder {
-	public function __construct( private array $data, private array $meta = array() ) {
+	public function __construct( private array $data, private array $meta = array(), private array $items = array() ) {
 	}
 
 	public function get_id(): int {
@@ -93,6 +93,44 @@ class ShipmentsSmokeOrder {
 
 	public function get_meta( string $key, bool $single = true ): mixed {
 		return $this->meta[ $key ] ?? '';
+	}
+
+	public function get_items(): array {
+		return $this->items;
+	}
+}
+
+final class ShipmentsSmokeOrderItem {
+	public function __construct( private string $name, private int $quantity, private float $total, private object $product ) {
+	}
+
+	public function get_product(): object {
+		return $this->product;
+	}
+
+	public function get_quantity(): int {
+		return $this->quantity;
+	}
+
+	public function get_total(): float {
+		return $this->total;
+	}
+
+	public function get_name(): string {
+		return $this->name;
+	}
+}
+
+final class ShipmentsSmokeProduct {
+	public function __construct( private string $sku = '', private string $weight = '' ) {
+	}
+
+	public function get_sku(): string {
+		return $this->sku;
+	}
+
+	public function get_weight(): string {
+		return $this->weight;
 	}
 }
 
@@ -492,6 +530,23 @@ foreach ( array( 'domestic_settings', 'otpravka_settings' ) as $property_name ) 
 	$property->setAccessible( true );
 	$property->setValue( $factory, null );
 }
+
+$order_items_method = $factory_reflection->getMethod( 'order_items' );
+$order_items_method->setAccessible( true );
+$default_declared_value_rub_method = $factory_reflection->getMethod( 'default_declared_value_rub' );
+$default_declared_value_rub_method->setAccessible( true );
+$discounted_items = $order_items_method->invoke(
+	$factory,
+	new ShipmentsSmokeOrder(
+		array(),
+		array(),
+		array(
+			new ShipmentsSmokeOrderItem( 'Товар 1', 1, 1000.0, new ShipmentsSmokeProduct( 'SKU-1', '0.5' ) ),
+			new ShipmentsSmokeOrderItem( 'Товар 2', 2, 1500.0, new ShipmentsSmokeProduct( 'SKU-2', '0.25' ) ),
+		)
+	)
+);
+shipments_smoke_assert( 2500 === $default_declared_value_rub_method->invoke( $factory, $discounted_items ), 'Default declared value must use order item totals after discounts.' );
 
 $tariffs_for_service = $factory_reflection->getMethod( 'tariffs_for_service' );
 $tariffs_for_service->setAccessible( true );

@@ -140,11 +140,17 @@
   function updateDeclaredValueFields(form) {
     const tariff = selectedTariff(form);
     const visible = !!(tariff && tariff.has_declared_value);
-    form.querySelectorAll('[data-wdc-declared-value-field]').forEach((field) => {
+    form.querySelectorAll('[data-wdc-declared-value-field]').forEach((field, index) => {
       field.hidden = !visible;
       field.querySelectorAll('input').forEach((input) => {
         input.disabled = !visible;
-        if (!visible) input.value = '';
+        if (!visible) {
+          input.value = '';
+          return;
+        }
+        if (index === 0 && !input.value && field.dataset.defaultDeclaredValueRub) {
+          input.value = String(field.dataset.defaultDeclaredValueRub);
+        }
       });
     });
   }
