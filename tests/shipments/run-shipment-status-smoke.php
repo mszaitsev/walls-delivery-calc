@@ -281,6 +281,9 @@ shipment_status_smoke_assert( true === $updated['success'], 'Known latest operat
 shipment_status_smoke_assert( DeliveryStatus::DELIVERED === $saved['universal_status_code'], 'Service must save universal_status_code.' );
 shipment_status_smoke_assert( 'Вручение — Вручение адресату' === $saved['carrier_status_title'], 'Service must save carrier status title.' );
 shipment_status_smoke_assert( 'доставлен' === $updated['status']['shipment_status_label'], 'Service UI payload must expose Russian universal label.' );
+shipment_status_smoke_assert( '' !== (string) ( $saved['tracking_checked_at'] ?? '' ) && 1 === preg_match( '/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/', (string) $saved['tracking_checked_at'] ), 'tracking_checked_at must be stored in Y-m-d H:i:s format.' );
+shipment_status_smoke_assert( (string) $saved['tracking_checked_at'] === (string) ( $updated['status']['tracking_checked_at'] ?? '' ), 'Status payload must expose saved tracking_checked_at.' );
+shipment_status_smoke_assert( '2026-06-06T10:00:00+07:00' === (string) ( $saved['carrier_operation_date'] ?? '' ) && '2026-06-06T10:00:00+07:00' === (string) ( $updated['status']['carrier_operation_date'] ?? '' ), 'carrier_operation_date must stay unchanged from Russian Post API.' );
 shipment_status_smoke_assert( ! array_key_exists( 'backlog_order_id', $updated['status'] ), 'Status update payload must not expose backlog_order_id.' );
 shipment_status_smoke_assert( ! array_key_exists( 'russian_post_tracking_login', $saved ) && ! array_key_exists( 'russian_post_tracking_password_encrypted', $saved ), 'Credentials must not be saved in order meta.' );
 
@@ -356,8 +359,10 @@ try {
 }
 
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
+$status_service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/ShipmentStatusUpdateService.php' );
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
 $adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/RussianPost/RussianPostShipmentAdapter.php' );
+shipment_status_smoke_assert( str_contains( $status_service_source, 'Asia/Novosibirsk' ) && str_contains( $status_service_source, '7 * $hour' ), 'tracking_checked_at helper must use Asia/Novosibirsk with a GMT+7 fallback.' );
 shipment_status_smoke_assert( str_contains( $metabox_source, 'data-wdc-update-shipment-status' ) && str_contains( $metabox_source, '$show_update = $has_created &&' ) && str_contains( $js_source, 'updateButton.hidden = !hasTracking' ), 'Metabox update button must be visible only when tracking exists.' );
 shipment_status_smoke_assert( ! str_contains( $metabox_source, 'data-wdc-status-plugin' ) && str_contains( $metabox_source, 'data-wdc-status-carrier' ), 'Metabox status block must render carrier status without duplicating plugin status.' );
 shipment_status_smoke_assert( ! str_contains( $metabox_source, 'Result ID' ) && ! str_contains( $js_source, 'Result ID' ), 'Result ID must not be shown in metabox or JS create result.' );

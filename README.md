@@ -1,6 +1,12 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.37.5.
+Current plugin version: 0.38.2.
+
+Version 0.38.2 stores the manager-facing shipment status check timestamp `tracking_checked_at` in the Novosibirsk timezone (`Asia/Novosibirsk`, GMT+7). Russian Post carrier operation timestamps (`carrier_operation_date`) remain unchanged from the API response.
+
+Version 0.38.1 tightens shipment status autosync before site testing. Autosync services are explicitly registered in the plugin container, default WooCommerce order statuses are now `wc-processing` and `wc-on-hold` only, and the `WDC -> Statuses` page saves only the autosync enabled flag plus selected order statuses instead of materializing all default settings into `wdc_core_settings`. `wc-completed` can still be enabled manually by an administrator.
+
+Version 0.38.0 adds universal shipment status autosync. The new `WDC -> Statuses` admin page stores autosync settings, WooCommerce order statuses to scan, manual run controls, and last-run diagnostics. WP Cron uses hook `wdc_shipment_status_autosync`, custom schedule `wdc_every_6_hours` with a 6-hour interval, and a shared 30-minute lock `wdc_shipment_status_autosync_lock`. The autosync service dispatches by `carrier_key`; currently `russian_post_domestic` calls the same `ShipmentStatusUpdateService::update_russian_post()` pipeline as the order metabox `Update status` button.
 
 Version 0.37.5 updates Russian Post foundation documentation to match the current unified domestic service, tariff calculation, shipment payloads, address normalization, manual tracking attachment fallback, and intentionally manual documents workflow. No business logic changed.
 

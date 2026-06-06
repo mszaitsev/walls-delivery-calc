@@ -96,12 +96,16 @@ final class SettingsRepository {
 			'russian_post_domestic_point_type_aps_enabled' => true,
 			'russian_post_domestic_point_type_aps_label' => 'Почтомат',
 			'pickup_email_card_enabled_emails' => array(),
+			'shipment_status_autosync_enabled' => true,
+			'shipment_status_autosync_order_statuses' => array( 'wc-processing', 'wc-on-hold' ),
+			'shipment_status_autosync_last_run' => array(),
 			'packaging_weight_tiers'       => array(),
 		);
 	}
 
 	public function set( string $key, mixed $value ): bool {
-		$settings = $this->all();
+		$stored = get_option( self::OPTION_NAME, array() );
+		$settings = is_array( $stored ) ? $stored : array();
 		$settings[ $key ] = $value;
 
 		return $this->replace( $settings );
