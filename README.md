@@ -1,8 +1,10 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.36.0.
+Current plugin version: 0.36.1.
 
 Current implementation status and roadmap are maintained in `docs/project-status.md`. Historical release notes below may not cover every intermediate 0.33.x change.
+
+Version 0.36.1 corrects the Russian Post tracking status mapping: selected pickup operations including `8:2`, `12:1..12:31`, and `42:1..42:30` now map to `ready_for_pickup` / `ожидает самовывоза из ПВЗ/постамата`, while `8:15` and `8:18` map to `handed_to_courier` / `передан курьеру`. Unknown operation/attribute pairs still map to `unknown` / `не определён`.
 
 Version 0.36.0 adds manual Russian Post tracking status refresh from the WooCommerce order metabox `Отправления`. The existing `Обновить статус` button calls `wdc_update_shipment_status`, reads Tracking API login/password from the unified domestic service `API / Credentials` tab, requests `getOperationHistory` through SOAP 1.2, maps the latest operation with the bundled table from `status pocha.xlsx`, and stores both the universal plugin status and raw Russian Post operation details in `_wdc_shipments`. Unknown Russian Post operation/attribute pairs become `unknown` / `не определён`. Automatic polling/synchronization is not included in this step.
 

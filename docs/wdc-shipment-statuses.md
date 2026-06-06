@@ -1,6 +1,6 @@
 # WDC Shipment Statuses
 
-Version: 0.36.0.
+Version: 0.36.1.
 
 ## Universal Status Model
 
@@ -44,6 +44,14 @@ They are separate from Otpravka AccessToken/login/password and from the Tariff A
 
 `src/Shipments/RussianPost/RussianPostTrackingStatusMapper.php` contains the fixed mapping generated from the attached `status pocha.xlsx` table. Runtime does not read Excel.
 
+Version 0.36.1 corrects the first mapping import for Russian Post pickup/courier operations:
+
+- `8:2` and related pickup operations `8:9`, `8:10`, `8:14`, `8:27`, `8:28`, `8:33`, `8:35`, `8:42`, `8:43`, `8:56`, `8:57`, `8:58`, `8:59` map to `ready_for_pickup` / `ожидает самовывоза из ПВЗ/постамата`;
+- `12:1..12:31` map to `ready_for_pickup` / `ожидает самовывоза из ПВЗ/постамата`;
+- `42:1..42:30` map to `ready_for_pickup` / `ожидает самовывоза из ПВЗ/постамата`;
+- `8:15` and `8:18` map to `handed_to_courier` / `передан курьеру`;
+- unknown operation/attribute pairs remain `unknown` / `не определён`.
+
 Mapping key:
 
 - `operation_type_id`;
@@ -77,4 +85,4 @@ The status block shows:
 - `Проверено`;
 - `Barcode`.
 
-Automatic polling/synchronization is not part of version 0.36.0.
+Automatic polling/synchronization is not part of version 0.36.1.

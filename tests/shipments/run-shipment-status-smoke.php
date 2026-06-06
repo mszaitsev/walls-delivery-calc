@@ -202,7 +202,35 @@ shipment_status_smoke_assert( true === $known['carrier_status_is_terminal'], 'Kn
 
 $unknown = $mapper->map_record( array( 'operation_type_id' => '999', 'operation_attr_id' => '999', 'operation_type_name' => 'Новая операция', 'operation_attr_name' => 'Новый атрибут' ) );
 shipment_status_smoke_assert( DeliveryStatus::UNKNOWN === $unknown['universal_status_code'], 'Unknown pair must map to unknown.' );
+shipment_status_smoke_assert( 'не определён' === $unknown['universal_status_label'], 'Unknown pair must expose Russian unknown label.' );
 shipment_status_smoke_assert( 'Новая операция — Новый атрибут' === $unknown['carrier_status_title'], 'Unknown pair must keep carrier raw status.' );
+
+$mapping_cases = array(
+	'8:2' => array( DeliveryStatus::READY_FOR_PICKUP, 'ожидает самовывоза из ПВЗ/постамата' ),
+	'8:9' => array( DeliveryStatus::READY_FOR_PICKUP, 'ожидает самовывоза из ПВЗ/постамата' ),
+	'8:59' => array( DeliveryStatus::READY_FOR_PICKUP, 'ожидает самовывоза из ПВЗ/постамата' ),
+	'12:1' => array( DeliveryStatus::READY_FOR_PICKUP, 'ожидает самовывоза из ПВЗ/постамата' ),
+	'12:31' => array( DeliveryStatus::READY_FOR_PICKUP, 'ожидает самовывоза из ПВЗ/постамата' ),
+	'42:1' => array( DeliveryStatus::READY_FOR_PICKUP, 'ожидает самовывоза из ПВЗ/постамата' ),
+	'42:30' => array( DeliveryStatus::READY_FOR_PICKUP, 'ожидает самовывоза из ПВЗ/постамата' ),
+	'8:15' => array( DeliveryStatus::HANDED_TO_COURIER, 'передан курьеру' ),
+	'8:18' => array( DeliveryStatus::HANDED_TO_COURIER, 'передан курьеру' ),
+	'999:999' => array( DeliveryStatus::UNKNOWN, 'не определён' ),
+);
+foreach ( $mapping_cases as $pair => $expected ) {
+	[ $operation_type_id, $operation_attr_id ] = explode( ':', $pair, 2 );
+	$mapped = $mapper->map_record(
+		array(
+			'operation_type_id' => $operation_type_id,
+			'operation_type_name' => 'Тестовая операция',
+			'operation_attr_id' => $operation_attr_id,
+			'operation_attr_name' => 'Тестовый атрибут',
+		)
+	);
+	shipment_status_smoke_assert( $expected[0] === $mapped['universal_status_code'], $pair . ' must map to ' . $expected[0] . '.' );
+	shipment_status_smoke_assert( $expected[1] === $mapped['universal_status_label'], $pair . ' must expose label ' . $expected[1] . '.' );
+	shipment_status_smoke_assert( false === $mapped['carrier_status_is_terminal'], $pair . ' must stay non-terminal.' );
+}
 
 $GLOBALS['wdc_status_smoke_http_body'] = shipment_status_smoke_envelope(
 	shipment_status_smoke_record( '2026-06-05T10:00:00+07:00', '1', 'Прием', '1', 'Единичный' )

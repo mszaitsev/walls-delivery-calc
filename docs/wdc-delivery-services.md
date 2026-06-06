@@ -9,6 +9,8 @@ The unified service `russian_post_domestic` owns Russian Post Tracking API crede
 
 These credentials are separate from Otpravka AccessToken/login/password and from the Tariff API token. Manual shipment status refresh reads only the Tracking credentials and does not store credentials in order meta. The `Статусы / Mapping` tab may keep diagnostic JSON/future override UI, but the main Russian Post status mapping is fixed in code from `status pocha.xlsx`.
 
+Version 0.36.1 corrects that code mapping: selected pickup operations such as `8:2`, ranges `12:1..12:31` and `42:1..42:30` map to `ready_for_pickup` / `ожидает самовывоза из ПВЗ/постамата`; `8:15` and `8:18` map to `handed_to_courier` / `передан курьеру`; unknown pairs remain `unknown` / `не определён`.
+
 Version 0.22.00 adds the Russian Post pickup-point passport import foundation on top of the existing pickup table. Version 0.21.0 adds the permanent delivery-service foundation. Version 0.21.1 adds reusable service-specific rules admin on top of the same storage model. Version 0.21.3 turns the service edit screen into real per-tab administration. Version 0.21.8 adds delivery-type customer comments. Version 0.21.9 makes checkout comments render as separate lines and translates service admin select labels. Version 0.21.12 moves technical order calculation data into `_wdc_delivery_calculation_data` and keeps Russian Post shipping item meta visually clean. The model is intentionally table-based, not a single serialized option, so it can grow to API carriers, fixed-rate services, weight-based services, user-created services, service settings, pickup logic, credentials references, statistics, debug data, and history.
 
 ## Tables
