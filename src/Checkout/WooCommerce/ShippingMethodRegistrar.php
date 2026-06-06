@@ -8,8 +8,10 @@ use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
@@ -183,11 +185,16 @@ final class ShippingMethodRegistrar {
 			check_ajax_referer( 'wdc_select_domestic_tariff', 'nonce' );
 		}
 		$service_key = isset( $_POST['service_key'] ) ? sanitize_key( wp_unslash( $_POST['service_key'] ) ) : '';
+		$checkout_group_id = isset( $_POST['checkout_group_id'] ) ? sanitize_text_field( wp_unslash( $_POST['checkout_group_id'] ) ) : '';
+		$delivery_type = isset( $_POST['delivery_type'] ) ? RussianPostDomesticSettings::normalize_delivery_type( sanitize_key( wp_unslash( $_POST['delivery_type'] ) ) ) : DeliveryType::PICKUP;
 		$object_code = isset( $_POST['object_code'] ) ? sanitize_text_field( wp_unslash( $_POST['object_code'] ) ) : '';
 		$title = isset( $_POST['title'] ) ? sanitize_text_field( wp_unslash( $_POST['title'] ) ) : '';
+		if ( RussianPostDomesticSettings::SERVICE_KEY === $service_key ) {
+			$checkout_group_id = RussianPostDomesticSettings::checkout_group_id( $delivery_type );
+		}
 		if ( '' !== $service_key && '' !== $object_code ) {
 			$this->session_manager->save_selected_tariff(
-				$service_key,
+				'' !== $checkout_group_id ? $checkout_group_id : $service_key,
 				array(
 					'object_code' => $object_code,
 					'title' => $title,
@@ -195,7 +202,7 @@ final class ShippingMethodRegistrar {
 			);
 		}
 		if ( function_exists( 'wp_send_json_success' ) ) {
-			wp_send_json_success( array( 'service_key' => $service_key, 'object_code' => $object_code ) );
+			wp_send_json_success( array( 'service_key' => $service_key, 'checkout_group_id' => $checkout_group_id, 'delivery_type' => $delivery_type, 'object_code' => $object_code ) );
 		}
 	}
 

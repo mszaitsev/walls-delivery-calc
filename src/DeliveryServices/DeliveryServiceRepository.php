@@ -106,8 +106,7 @@ final class DeliveryServiceRepository {
 			$service_key,
 			array(
 				RussianPostSettings::SERVICE_KEY,
-				RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
-				RussianPostDomesticSettings::COURIER_SERVICE_KEY,
+				RussianPostDomesticSettings::SERVICE_KEY,
 			),
 			true
 		);
@@ -184,24 +183,14 @@ final class DeliveryServiceRepository {
 	/**
 	 * @return array<int,DeliveryService>
 	 */
-	public function ensure_russian_post_domestic_services(): array {
-		return array(
-			$this->ensure_builtin_service(
-				RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
-				RussianPostDomesticSettings::CARRIER_KEY,
-				RussianPostDomesticSettings::PICKUP_SERVICE_TITLE,
-				20,
-				'Доставка до почтового отделения по индексу',
-				array( RussianPostDomesticSettings::TITLE )
-			),
-			$this->ensure_builtin_service(
-				RussianPostDomesticSettings::COURIER_SERVICE_KEY,
-				RussianPostDomesticSettings::CARRIER_KEY,
-				RussianPostDomesticSettings::COURIER_SERVICE_TITLE,
-				30,
-				'',
-				array( RussianPostDomesticSettings::TITLE )
-			),
+	public function ensure_russian_post_domestic_service(): DeliveryService {
+		return $this->ensure_builtin_service(
+			RussianPostDomesticSettings::SERVICE_KEY,
+			RussianPostDomesticSettings::CARRIER_KEY,
+			RussianPostDomesticSettings::TITLE,
+			20,
+			'Доставка до почтового отделения по индексу',
+			array( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE, RussianPostDomesticSettings::COURIER_SERVICE_TITLE )
 		);
 	}
 

@@ -52,7 +52,7 @@ As of 0.21.6, packaging tiers are no longer Russian Post service settings. They 
 
 As of 0.21.8, the service `Расчет` tab also stores `pickup_customer_comment` and `courier_customer_comment` in `wdc_delivery_services`. Empty values are allowed. At checkout, a normal pickup/courier rate receives the matching service comment first, then rule-added comments are appended. As of 0.21.9, each checkout comment is rendered as a separate block line rather than relying on inline spans.
 
-Russian Post domestic services now also expose shipment settings on the same `Расчет` tab. System services show `service_key` and `carrier_key` as read-only technical fields. For `russian_post_domestic_pickup`, `shelf_life_days_default` is clamped to 15..60 and defaults to 30. Both domestic services support `send_goods_items`, `combine_goods_items_default`, and `combined_goods_name_template`; `goods` is omitted from the shipment payload unless `send_goods_items=true`.
+The unified Russian Post domestic service exposes shipment settings on the `Отправления` tab. System services show `service_key` and `carrier_key` as read-only technical fields. `shelf_life_days_default` is clamped to 15..60 and defaults to 30. The service supports `send_goods_items`, `combine_goods_items_default`, and `combined_goods_name_template`; `goods` is omitted from the shipment payload unless `send_goods_items=true`.
 
 ## Service Rules
 
@@ -76,8 +76,15 @@ Delivery services can save a structured order calculation payload under `_wdc_de
 For `russian_post_worldwide_parcel`, the normal WooCommerce shipping item meta shows only `Способ доставки: международная доставка Почтой России`. The order metabox `Калькулятор доставок` is the admin-facing place for calculation details: destination country, products/packaging/final API weight, API base price, readable rules formula, and final result. Terminal fallback rates save fallback reason/text and final price `0`, but do not show rules because fallback bypasses rules and service post-processing.
 # Delivery services update
 
-Domestic Russian Post foundation adds built-in services for `russian_post_domestic_pickup` and `russian_post_domestic_courier`. Bootstrapping pins both to `RU`; the availability UI is informational for this carrier family.
+As of 0.35.0, domestic Russian Post has one built-in delivery service:
 
-The service calculation settings continue to own comments, packaging weight inclusion, rounding, minimum price and default-rule fallback. Domestic-specific tariff variants are exposed on a Tariffs foundation tab and resolved at runtime per service. Each domestic Russian Post tariff variant also stores an `is_ecom` flag; shipment creation uses this setting to decide whether pickup payloads use `ecom-data.delivery-point-index` or the normal OPS `DEMAND` address schema.
+- `carrier_key=russian_post_domestic`
+- `service_key=russian_post_domestic`
 
-Russian Post domestic service simulation calls every enabled variant for the service and shows active tariffs plus skipped API variants. Skipped rows include `object_code`, sanitized request params, HTTP status, and API `errorcode`/`errormsg`, which is useful when one tariff is rejected while the rest of the service still calculates.
+Bootstrapping pins it to `RU` and no longer creates pickup/courier service rows. Pickup and courier remain separate checkout groups through `delivery_type`, not separate service settings contexts.
+
+The domestic service has these tabs: `Основные`, `Доступность`, `Расчет`, `Тарифы`, `ПВЗ / ОПС`, `API / Credentials`, `Отправления`, `Статусы / Mapping`, `Диагностика`. The former carrier credentials page is removed from the menu and the UI.
+
+Domestic tariff variants are exposed on the unified `Тарифы` tab. One list stores pickup and courier rows with `delivery_type`, `enabled`, `is_ecom`, declared-value flag, weight limits, custom titles and sort order. Shipment creation uses `is_ecom` to decide whether pickup payloads use `ecom-data.delivery-point-index` or the normal OPS `DEMAND` address schema.
+
+Russian Post domestic service simulation calls every enabled variant for the selected delivery type context and shows active tariffs plus skipped API variants. Skipped rows include `object_code`, sanitized request params, HTTP status, and API `errorcode`/`errormsg`, which is useful when one tariff is rejected while the rest of the service still calculates.

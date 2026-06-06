@@ -123,7 +123,7 @@
 - Russian Post Otpravka `PUT /2.0/user/backlog` payload building and response normalization;
 - admin-only Russian Post OPS/PVZ selector inside the shipment modal; it updates the shipment draft and preview without saving WooCommerce order meta;
 - order meta storage for shipment state, safe request/response snapshots, barcode/result ids and last safe error;
-- `WDC -> Перевозчики` page for shared carrier credentials.
+- Russian Post domestic credentials and postoffice codes are edited in `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials`.
 
 ## Pickup Points
 

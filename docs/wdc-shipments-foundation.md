@@ -1,11 +1,11 @@
 # WDC Shipments Foundation
 
-Version 0.34.0 adds the first shipment runtime foundation and an admin-only Russian Post OPS/PVZ selector for shipment drafts. The scope is intentionally manual and carrier-neutral, with Russian Post as the first adapter.
+Version 0.35.0 keeps the manual shipment runtime foundation on the unified Russian Post domestic service. Version 0.34.0 added the admin-only Russian Post OPS/PVZ selector for shipment drafts. The scope is intentionally manual and carrier-neutral, with Russian Post as the first adapter.
 
 ## Scope
 
 - Shipments are never created automatically.
-- A manager opens the WooCommerce order admin metabox `Отправления`, checks the draft, edits recipient, service, tariff, pickup/address, postoffice-code and parcel places, then clicks `Создать отправление`.
+- A manager opens the WooCommerce order admin metabox `Отправления`, checks the draft, edits recipient, delivery scenario (`pickup` or `courier`), tariff, pickup/address, postoffice-code and parcel places, then clicks `Создать отправление`.
 - The first adapter calls Russian Post Otpravka `PUT /2.0/user/backlog`.
 - For `Почта России -> ПВЗ/ОПС`, a manager can choose another local Russian Post pickup point inside the shipment modal. The selection is used only for the shipment draft/preview/create request.
 - Status sync, documents, batches, F103, cancellation and automatic polling are not included in this stage.
@@ -20,7 +20,6 @@ Version 0.34.0 adds the first shipment runtime foundation and an admin-only Russ
 - `src/Shipments/Storage/OrderShipmentRepository.php` stores shipment state in order meta through WooCommerce CRUD.
 - `src/Shipments/RussianPost/*` maps domestic tariff object codes, builds safe backlog payloads and normalizes create responses.
 - `src/Shipments/Admin/OrderShipmentsMetabox.php` renders the order metabox plus AJAX preview/create/search actions.
-- `src/Shipments/Admin/CarriersAdminPage.php` adds `WDC -> Перевозчики -> Почта России`.
 - `assets/admin/shipments-admin.js` and `assets/admin/shipments-admin.css` provide the admin modal behavior.
 - `assets/frontend/pickup-map/providers/*` and the configured Leaflet/Yandex provider are reused for the admin pickup selector; no second map stack is introduced.
 
@@ -46,7 +45,7 @@ Courier shipments use `address-type-to=DEFAULT`, `courier=true`, `delivery-to-do
 
 The admin parcel-place UI accepts only integer values. Insurance is entered in rubles and converted before payload creation to Otpravka kopecks: `1000` rub -> `insr-value=100000`.
 
-Postoffice acceptance indices are configured on `WDC -> Перевозчики -> Почта России`. The default list contains `630005`; each configured value must be a 6-digit index and is used in the modal select for `postoffice-code`.
+Postoffice acceptance indices are configured on `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials`. The default list contains `630005`; each configured value must be a 6-digit index and is used in the modal select for `postoffice-code`.
 
 `dimension-type` and `prepaid-amount` are not sent by default. `goods` is omitted unless service setting `send_goods_items=true`.
 
@@ -65,18 +64,19 @@ Failed creation stores `_wdc_shipment_last_error` with safe error code/message a
 
 ## Settings
 
-`WDC -> Перевозчики -> Почта России` is now the primary editing location for Otpravka credentials:
+`WDC -> Службы доставки -> Почта России по РФ -> API / Credentials` is the editing location for Otpravka credentials:
 
 - AccessToken;
 - login;
 - password;
-- timeout.
+- timeout;
+- postoffice codes.
 
-The old pickup import tab no longer renders credential inputs and links to the carriers page. Existing option keys are preserved.
+Tracking login/password fields are also prepared here for future status polling; this stage stores them only and does not call the Tracking API.
 
-Domestic Russian Post services expose shipment settings on the service `Расчет` tab:
+Domestic Russian Post exposes shipment settings on the service `Отправления` tab:
 
-- `shelf_life_days_default` for pickup, clamped to 15..60, default 30;
+- `shelf_life_days_default`, clamped to 15..60, default 30;
 - `send_goods_items`, default false;
 - `combine_goods_items_default`, default true;
 - `combined_goods_name_template`, default `Товары по заказу {order_number}`.

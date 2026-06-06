@@ -3,6 +3,10 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Carriers\RussianPost\Otpravka;
 
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
@@ -14,6 +18,8 @@ final class RussianPostOtpravkaApiSettings {
 	public const PASSWORD_ENCRYPTED_KEY = 'russian_post_otpravka_password_encrypted';
 	public const TIMEOUT_KEY = 'russian_post_otpravka_timeout';
 	public const POSTOFFICE_CODES_KEY = 'russian_post_otpravka_postoffice_codes';
+	public const TRACKING_LOGIN_KEY = 'russian_post_tracking_login';
+	public const TRACKING_PASSWORD_ENCRYPTED_KEY = 'russian_post_tracking_password_encrypted';
 	public const PICKUP_UNLOAD_TYPE_KEY = 'russian_post_pickup_unload_type';
 	public const PICKUP_SCHEDULE_ENABLED_KEY = 'russian_post_pickup_schedule_enabled';
 	public const PICKUP_LAST_IMPORT_RESULT_KEY = 'russian_post_pickup_last_import_result';
@@ -21,7 +27,9 @@ final class RussianPostOtpravkaApiSettings {
 
 	public function __construct(
 		private SettingsRepository $settings,
-		private EncryptionService $encryption
+		private EncryptionService $encryption,
+		private ?DeliveryServiceRepository $services = null,
+		private ?DeliveryServiceSettingsRepository $service_settings = null
 	) {
 	}
 
@@ -29,8 +37,6 @@ final class RussianPostOtpravkaApiSettings {
 	 * @return array<string,mixed>
 	 */
 	public function values(): array {
-		$values = $this->settings->all();
-
 		return array_merge(
 			array(
 				self::ACCESS_TOKEN_KEY => '',
@@ -38,12 +44,14 @@ final class RussianPostOtpravkaApiSettings {
 				self::PASSWORD_ENCRYPTED_KEY => '',
 				self::TIMEOUT_KEY => 120,
 				self::POSTOFFICE_CODES_KEY => array( '630005' ),
+				self::TRACKING_LOGIN_KEY => '',
+				self::TRACKING_PASSWORD_ENCRYPTED_KEY => '',
 				self::PICKUP_UNLOAD_TYPE_KEY => 'ALL',
 				self::PICKUP_SCHEDULE_ENABLED_KEY => false,
 				self::PICKUP_LAST_IMPORT_RESULT_KEY => array(),
 				self::PICKUP_LAST_SUCCESS_AT_KEY => '',
 			),
-			$values
+			$this->stored_values()
 		);
 	}
 
@@ -105,6 +113,10 @@ final class RussianPostOtpravkaApiSettings {
 		return '' !== (string) ( $this->values()[ self::PASSWORD_ENCRYPTED_KEY ] ?? '' );
 	}
 
+	public function has_tracking_password(): bool {
+		return '' !== (string) ( $this->values()[ self::TRACKING_PASSWORD_ENCRYPTED_KEY ] ?? '' );
+	}
+
 	public function has_access_token(): bool {
 		return '' !== $this->access_token();
 	}
@@ -130,6 +142,9 @@ final class RussianPostOtpravkaApiSettings {
 		}
 		if ( array_key_exists( 'russian_post_otpravka_timeout', $input ) ) {
 			$values[ self::TIMEOUT_KEY ] = max( 30, min( 300, (int) ( $input['russian_post_otpravka_timeout'] ?? 120 ) ) );
+		}
+		if ( array_key_exists( self::TRACKING_LOGIN_KEY, $input ) ) {
+			$values[ self::TRACKING_LOGIN_KEY ] = sanitize_text_field( wp_unslash( $input[ self::TRACKING_LOGIN_KEY ] ?? '' ) );
 		}
 		if ( array_key_exists( self::POSTOFFICE_CODES_KEY, $input ) ) {
 			$raw_codes = is_array( $input[ self::POSTOFFICE_CODES_KEY ] ) ? wp_unslash( $input[ self::POSTOFFICE_CODES_KEY ] ) : preg_split( '/[\s,;]+/', (string) wp_unslash( $input[ self::POSTOFFICE_CODES_KEY ] ) );
@@ -157,12 +172,19 @@ final class RussianPostOtpravkaApiSettings {
 		if ( ! empty( $input['russian_post_otpravka_clear_password'] ) ) {
 			$values[ self::PASSWORD_ENCRYPTED_KEY ] = '';
 		}
+		if ( ! empty( $input['russian_post_tracking_clear_password'] ) ) {
+			$values[ self::TRACKING_PASSWORD_ENCRYPTED_KEY ] = '';
+		}
 		$password = trim( (string) wp_unslash( $input['russian_post_otpravka_password'] ?? '' ) );
 		if ( '' !== $password ) {
 			$values[ self::PASSWORD_ENCRYPTED_KEY ] = $this->encryption->encrypt( $password );
 		}
+		$tracking_password = trim( (string) wp_unslash( $input['russian_post_tracking_password'] ?? '' ) );
+		if ( '' !== $tracking_password ) {
+			$values[ self::TRACKING_PASSWORD_ENCRYPTED_KEY ] = $this->encryption->encrypt( $tracking_password );
+		}
 
-		$this->settings->replace( $values );
+		$this->replace_values( $values );
 	}
 
 	/**
@@ -175,7 +197,7 @@ final class RussianPostOtpravkaApiSettings {
 			$values[ self::PICKUP_LAST_SUCCESS_AT_KEY ] = (string) ( $result['finished_at'] ?? ( function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ) ) );
 		}
 
-		$this->settings->replace( $values );
+		$this->replace_values( $values );
 	}
 
 	/**
@@ -198,5 +220,56 @@ final class RussianPostOtpravkaApiSettings {
 		}
 
 		return (string) ( $this->encryption->decrypt( $encrypted ) ?? '' );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function stored_values(): array {
+		$service = $this->service();
+		if ( $service instanceof DeliveryService && null !== $service->id && $this->service_settings instanceof DeliveryServiceSettingsRepository ) {
+			return $this->service_settings->all_settings( (int) $service->id );
+		}
+
+		return array();
+	}
+
+	/**
+	 * @param array<string,mixed> $values
+	 */
+	private function replace_values( array $values ): void {
+		$service = $this->service();
+		if ( $service instanceof DeliveryService && null !== $service->id && $this->service_settings instanceof DeliveryServiceSettingsRepository ) {
+			foreach ( $this->setting_formats() as $key => $format ) {
+				if ( array_key_exists( $key, $values ) ) {
+					$this->service_settings->set_setting( (int) $service->id, $key, $values[ $key ], $format );
+				}
+			}
+		}
+	}
+
+	private function service(): ?DeliveryService {
+		return $this->services instanceof DeliveryServiceRepository
+			? $this->services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY )
+			: null;
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private function setting_formats(): array {
+		return array(
+			self::ACCESS_TOKEN_KEY => 'string',
+			self::LOGIN_KEY => 'string',
+			self::PASSWORD_ENCRYPTED_KEY => 'string',
+			self::TIMEOUT_KEY => 'number',
+			self::POSTOFFICE_CODES_KEY => 'json',
+			self::TRACKING_LOGIN_KEY => 'string',
+			self::TRACKING_PASSWORD_ENCRYPTED_KEY => 'string',
+			self::PICKUP_UNLOAD_TYPE_KEY => 'string',
+			self::PICKUP_SCHEDULE_ENABLED_KEY => 'bool',
+			self::PICKUP_LAST_IMPORT_RESULT_KEY => 'json',
+			self::PICKUP_LAST_SUCCESS_AT_KEY => 'string',
+		);
 	}
 }

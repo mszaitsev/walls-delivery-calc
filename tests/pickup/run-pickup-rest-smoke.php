@@ -209,7 +209,7 @@ $type_filtered = $controller->points( array( 'carrier' => 'russian_post', 'bbox'
 pickup_rest_assert( 1 === count( $type_filtered ) && 3 === $type_filtered[0]['id'], 'type filter must work.' );
 
 $disabled_pvz = $settings->all();
-$disabled_pvz['russian_post_domestic_pickup_type_pvz_enabled'] = false;
+$disabled_pvz['russian_post_domestic_point_type_pvz_enabled'] = false;
 update_option( 'wdc_core_settings', $disabled_pvz, false );
 $without_pvz = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '0,0,180,90' ) );
 pickup_rest_assert( array( 1, 3 ) === array_column( $without_pvz, 'id' ), 'Disabled PVZ must be excluded from /points.' );
@@ -222,9 +222,9 @@ pickup_rest_assert( is_array( $detail_ops_enabled ) && 1 === $detail_ops_enabled
 $detail_pvz_disabled = $controller->detail( array( 'id' => 2 ) );
 pickup_rest_assert( $detail_pvz_disabled instanceof WP_Error && 'not_found' === $detail_pvz_disabled->get_error_code(), 'detail PVZ must return 404 when PVZ is disabled.' );
 $all_disabled = $settings->all();
-$all_disabled['russian_post_domestic_pickup_type_ops_enabled'] = false;
-$all_disabled['russian_post_domestic_pickup_type_pvz_enabled'] = false;
-$all_disabled['russian_post_domestic_pickup_type_aps_enabled'] = false;
+$all_disabled['russian_post_domestic_point_type_ops_enabled'] = false;
+$all_disabled['russian_post_domestic_point_type_pvz_enabled'] = false;
+$all_disabled['russian_post_domestic_point_type_aps_enabled'] = false;
 update_option( 'wdc_core_settings', $all_disabled, false );
 pickup_rest_assert( array( 'OPS' ) === $type_settings->enabled_types(), 'All pickup types disabled must automatically re-enable OPS.' );
 update_option( 'wdc_core_settings', array(), false );
@@ -234,7 +234,7 @@ $detail_pvz_requested_ops = $controller->detail( array( 'id' => 2, 'type' => arr
 pickup_rest_assert( $detail_pvz_requested_ops instanceof WP_Error && 'not_found' === $detail_pvz_requested_ops->get_error_code(), 'detail PVZ with type[]=OPS must return 404.' );
 
 $checkout_pickup_controller_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' ) ?: '';
-pickup_rest_assert( str_contains( $checkout_pickup_controller_source, "str_starts_with( \$method_id, RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':' )" ), 'Checkout pickup point REST save must accept Russian Post pickup rate suffixes without clearing the selected point.' );
+pickup_rest_assert( str_contains( $checkout_pickup_controller_source, 'RussianPostDomesticSettings::is_pickup_rate_id' ), 'Checkout pickup point REST save must accept Russian Post pickup group ids without clearing the selected point.' );
 
 $limited = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '0,0,180,90', 'limit' => '1' ) );
 pickup_rest_assert( 1 === count( $limited ), 'limit must clamp result count.' );

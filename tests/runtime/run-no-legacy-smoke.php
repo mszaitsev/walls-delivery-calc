@@ -16,7 +16,7 @@ no_legacy_smoke_assert( is_readable( $root . '/walls-delivery-calc.php' ), 'Main
 $runtime_paths = array(
 	$root . '/walls-delivery-calc.php',
 	$root . '/src',
-	$root . '/database/migrations',
+	$root . '/assets',
 );
 
 $forbidden = array(
@@ -25,6 +25,9 @@ $forbidden = array(
 	'/new\s+\\\\?WDC_[A-Za-z0-9_]+/i' => 'runtime must not instantiate WDC_* legacy classes',
 	'/WDC_Plugin|WDC_Shipping_Method|WDC_Russian_Post|WDC_Settings|WDC_Cache|WDC_Logger|WDC_Order_Meta|WDC_Weight_Calculator|WDC_Quote_Normalizer/' => 'runtime must not reference removed WDC_* classes',
 	'/database\/demo|database\\\\demo/i' => 'runtime must not reference database/demo fixtures',
+	'/russian_post_domestic_pickup|russian_post_domestic_courier/' => 'runtime must not reference legacy Russian Post domestic service keys',
+	'/PICKUP_SERVICE_KEY|COURIER_SERVICE_KEY|service_delivery_type/' => 'runtime must not reference legacy Russian Post domestic service-key helpers',
+	'/wdc-carriers|CarriersAdminPage/' => 'runtime must not expose the removed carriers admin page',
 );
 
 $files = array();
@@ -36,7 +39,7 @@ foreach ( $runtime_paths as $path ) {
 
 	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $path, FilesystemIterator::SKIP_DOTS ) );
 	foreach ( $iterator as $file ) {
-		if ( $file->isFile() && 'php' === strtolower( $file->getExtension() ) ) {
+		if ( $file->isFile() && in_array( strtolower( $file->getExtension() ), array( 'php', 'js' ), true ) ) {
 			$files[] = $file->getPathname();
 		}
 	}

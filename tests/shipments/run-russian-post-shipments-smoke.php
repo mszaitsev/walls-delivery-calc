@@ -221,9 +221,9 @@ $request = new ShipmentCreateRequest(
 	order_id: 123,
 	carrier_key: RussianPostDomesticSettings::CARRIER_KEY,
 	delivery_type: DeliveryType::PICKUP,
-	rate_id: RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+	rate_id: RussianPostDomesticSettings::checkout_group_id( DeliveryType::PICKUP ),
 	recipient_address: new Address( country_code: 'RU', region_name: 'Новосибирская область', city: 'Новосибирск', postcode: '630001', raw_address: 'Новосибирск' ),
-	pickup_point: new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, '630001', 'Новосибирск, тестовый ПВЗ', '2026-06-04 10:00:00' ),
+	pickup_point: new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::SERVICE_KEY, '630001', 'Новосибирск, тестовый ПВЗ', '2026-06-04 10:00:00' ),
 	places: array(
 		new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ),
 		new ShipmentPlace( 2, 1300, 21, 20, 10, Money::from_kopecks( 0 ), array( $item ) ),
@@ -282,7 +282,7 @@ $ecom_payload = $builder->build( $ecom_request );
 shipments_smoke_assert( '630001' === $ecom_payload[0]['ecom-data']['delivery-point-index'], 'ECOM pickup must use ecom-data delivery-point-index.' );
 shipments_smoke_assert( ! array_key_exists( 'address-type-to', $ecom_payload[0] ) && ! array_key_exists( 'index-to', $ecom_payload[0] ), 'ECOM pickup must not include normal address schema.' );
 
-$pickup_code_with_suffix = new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, '630091-53b5939ce9', 'Новосибирск, тестовый ПВЗ', '2026-06-04 10:00:00' );
+$pickup_code_with_suffix = new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::SERVICE_KEY, '630091-53b5939ce9', 'Новосибирск, тестовый ПВЗ', '2026-06-04 10:00:00' );
 $pickup_suffix_request = new ShipmentCreateRequest(
 	$request->order_id,
 	$request->carrier_key,
@@ -323,7 +323,7 @@ $ecom_postcode_request = new ShipmentCreateRequest(
 	DeliveryType::PICKUP,
 	$request->rate_id,
 	$request->recipient_address,
-	new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, '660017-b26bfdca98', 'Красноярск, тестовый ПВЗ', '2026-06-04 10:00:00' ),
+	new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::SERVICE_KEY, '660017-b26bfdca98', 'Красноярск, тестовый ПВЗ', '2026-06-04 10:00:00' ),
 	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ) ),
 	$request->declared_value,
 	false,
@@ -340,7 +340,7 @@ $invalid_ecom_index_request = new ShipmentCreateRequest(
 	DeliveryType::PICKUP,
 	$request->rate_id,
 	$request->recipient_address,
-	new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, 'bad-pickup-code', 'Тестовый ПВЗ', '2026-06-04 10:00:00' ),
+	new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::SERVICE_KEY, 'bad-pickup-code', 'Тестовый ПВЗ', '2026-06-04 10:00:00' ),
 	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ) ),
 	$request->declared_value,
 	false,
@@ -362,7 +362,7 @@ $goods_request = new ShipmentCreateRequest(
 	$request->order_id,
 	$request->carrier_key,
 	DeliveryType::COURIER,
-	RussianPostDomesticSettings::COURIER_SERVICE_KEY,
+	RussianPostDomesticSettings::checkout_group_id( DeliveryType::COURIER ),
 	new Address( country_code: 'RU', region_name: 'Новосибирская область', city: 'Новосибирск', postcode: '630099', raw_address: '630099, Новосибирская область, Новосибирск, Красный проспект 1' ),
 	null,
 	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 10000 ), array( $item ) ) ),
@@ -384,7 +384,7 @@ $declared_value_request = new ShipmentCreateRequest(
 	$request->order_id,
 	$request->carrier_key,
 	DeliveryType::COURIER,
-	RussianPostDomesticSettings::COURIER_SERVICE_KEY,
+	RussianPostDomesticSettings::checkout_group_id( DeliveryType::COURIER ),
 	$goods_request->recipient_address,
 	null,
 	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 100000 ), array( $item ) ) ),
@@ -441,7 +441,7 @@ $normalized_request = new ShipmentCreateRequest(
 	$request->order_id,
 	$request->carrier_key,
 	DeliveryType::COURIER,
-	RussianPostDomesticSettings::COURIER_SERVICE_KEY,
+	RussianPostDomesticSettings::checkout_group_id( DeliveryType::COURIER ),
 	new Address( country_code: 'RU', region_name: 'Новосибирская область', city: 'Новосибирск', postcode: '630099' ),
 	null,
 	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ) ),
@@ -466,7 +466,7 @@ $changed_address_request = new ShipmentCreateRequest(
 	$request->order_id,
 	$request->carrier_key,
 	DeliveryType::COURIER,
-	RussianPostDomesticSettings::COURIER_SERVICE_KEY,
+	RussianPostDomesticSettings::checkout_group_id( DeliveryType::COURIER ),
 	new Address( country_code: 'RU', region_name: 'Новосибирская область', city: 'Новосибирск', postcode: '630099', street: 'Красный проспект 2' ),
 	null,
 	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ) ),
@@ -499,7 +499,7 @@ $failed_normalization_request = new ShipmentCreateRequest(
 	$request->order_id,
 	$request->carrier_key,
 	DeliveryType::COURIER,
-	RussianPostDomesticSettings::COURIER_SERVICE_KEY,
+	RussianPostDomesticSettings::checkout_group_id( DeliveryType::COURIER ),
 	new Address( country_code: 'RU', region_name: 'Новосибирская область', city: 'Новосибирск', postcode: '630099' ),
 	null,
 	array( new ShipmentPlace( 1, 1200, 20, 20, 10, Money::from_kopecks( 0 ), array( $item ) ) ),
@@ -611,7 +611,7 @@ $settings = ShipmentServiceSettings::sanitize_from_post(
 		'combine_goods_items_default' => '',
 		'combined_goods_name_template' => 'Заказ {order_number}',
 	),
-	RussianPostDomesticSettings::PICKUP_SERVICE_KEY
+	RussianPostDomesticSettings::SERVICE_KEY
 );
 shipments_smoke_assert( 60 === $settings['shelf_life_days_default']['value'], 'Shelf life must clamp to 15..60.' );
 shipments_smoke_assert( true === $settings['send_goods_items']['value'], 'send_goods_items must sanitize as bool.' );
@@ -647,11 +647,12 @@ $pickup_tariffs = $tariffs_for_service->invoke(
 	$factory,
 	new \WallsShop\WDC\DeliveryServices\DeliveryService(
 		1,
-		RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+		RussianPostDomesticSettings::SERVICE_KEY,
 		RussianPostDomesticSettings::CARRIER_KEY,
 		'api',
 		'Почта России до отделения'
-	)
+	),
+	DeliveryType::PICKUP
 );
 shipments_smoke_assert( array() !== $pickup_tariffs, 'Draft factory must expose enabled tariffs for selected Russian Post pickup service.' );
 shipments_smoke_assert( '4030' === (string) ( $pickup_tariffs[0]['object_code'] ?? '' ), 'Draft tariff list must fall back to default enabled domestic tariff variants.' );
@@ -718,7 +719,7 @@ $pickup_wpdb = new wpdb();
 $pickup_wpdb->delivery_service_rows = array(
 	array(
 		'id' => 77,
-		'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+		'service_key' => RussianPostDomesticSettings::SERVICE_KEY,
 		'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
 		'service_type' => 'api',
 		'title' => 'Почта России до ПВЗ',
@@ -772,7 +773,8 @@ $shipment_order = new ShipmentsSmokeOrder(
 		'address_1' => 'ул. Покупателя 5',
 	),
 	array(
-		'_wdc_platform_service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+		'_wdc_platform_service_key' => RussianPostDomesticSettings::SERVICE_KEY,
+		'_wdc_platform_delivery_type' => DeliveryType::PICKUP,
 		'_wdc_platform_tariff_object' => '23030',
 		'_wdc_pickup_point_code' => '630001-old',
 		'_wdc_pickup_point_postcode' => '630001',
@@ -782,7 +784,8 @@ $shipment_order = new ShipmentsSmokeOrder(
 );
 $before_meta = $shipment_order->meta_snapshot();
 $selected_pickup_data = array(
-	'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+	'service_key' => RussianPostDomesticSettings::SERVICE_KEY,
+	'delivery_type' => DeliveryType::PICKUP,
 	'tariff_object' => '23030',
 	'postoffice_code' => '630005',
 	'recipient_name' => 'Иванов Иван',

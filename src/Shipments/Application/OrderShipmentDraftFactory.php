@@ -30,15 +30,9 @@ final class OrderShipmentDraftFactory {
 	}
 
 	public function create_request_from_order( object $order ): ShipmentCreateRequest {
-		$service_key = $this->meta_string( $order, '_wdc_platform_service_key' );
-		if ( '' === $service_key ) {
-			$service_key = $this->meta_string( $order, '_wdc_platform_rate_id' );
-		}
-		if ( '' === $service_key || ! in_array( $service_key, array( RussianPostDomesticSettings::PICKUP_SERVICE_KEY, RussianPostDomesticSettings::COURIER_SERVICE_KEY ), true ) ) {
-			$service_key = RussianPostDomesticSettings::PICKUP_SERVICE_KEY;
-		}
+		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
+		$delivery_type = $this->delivery_type_from_order( $order );
 		$service = $this->services->find_by_service_key( $service_key );
-		$delivery_type = RussianPostDomesticSettings::service_delivery_type( $service_key );
 		$items = $this->order_items( $order );
 		$weight = $this->default_weight_g( $order, $items );
 		$default_declared_value_rub = $this->default_declared_value_rub( $items );
@@ -51,7 +45,7 @@ final class OrderShipmentDraftFactory {
 		$settings['combined_goods_name_template'] = (string) ( $settings[ ShipmentServiceSettings::COMBINED_GOODS_NAME_TEMPLATE ] ?? 'Товары по заказу {order_number}' );
 		$settings['combined_goods_name'] = str_replace( '{order_number}', $order_number, $settings['combined_goods_name_template'] );
 		$tariff_object = $this->meta_string( $order, '_wdc_platform_tariff_object' );
-		$tariff = $this->tariff_for_service_object( $service, $tariff_object );
+		$tariff = $this->tariff_for_service_object( $service, $tariff_object, $delivery_type );
 		$pickup_row = DeliveryType::PICKUP === $delivery_type ? $this->pickup_point_row( $order ) : null;
 		$original_address = DeliveryType::COURIER === $delivery_type ? $this->shipping_address( $order ) : '';
 		$normalized_address = DeliveryType::COURIER === $delivery_type ? $this->cached_normalized_address( $order, $service_key, $original_address ) : array();
@@ -60,7 +54,7 @@ final class OrderShipmentDraftFactory {
 			order_id: $this->order_id( $order ),
 			carrier_key: RussianPostDomesticSettings::CARRIER_KEY,
 			delivery_type: $delivery_type,
-			rate_id: $service_key,
+			rate_id: RussianPostDomesticSettings::checkout_group_id( $delivery_type ),
 			recipient_address: $this->recipient_address( $order, $delivery_type, $pickup_row, $normalized_address ),
 			pickup_point: DeliveryType::PICKUP === $delivery_type ? $this->pickup_point( $order ) : null,
 			places: array( $place ),
@@ -73,6 +67,7 @@ final class OrderShipmentDraftFactory {
 			),
 			meta: array(
 				'service_key' => $service_key,
+				'delivery_type' => $delivery_type,
 				'service_title' => $service instanceof DeliveryService ? $service->title : $this->meta_string( $order, '_wdc_platform_service_title' ),
 				'tariff_object' => $tariff_object,
 				'tariff_title' => (string) ( $tariff['title'] ?? $this->meta_string( $order, '_wdc_platform_tariff_title' ) ),
@@ -101,35 +96,34 @@ final class OrderShipmentDraftFactory {
 	 */
 	public function draft_array( object $order ): array {
 		$request = $this->create_request_from_order( $order );
-		$services = array_values(
-			array_filter(
-				$this->services->list_active(),
-				static fn ( DeliveryService $service ): bool => RussianPostDomesticSettings::CARRIER_KEY === $service->carrier_key
-			)
-		);
+		$service = $this->services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
+		$service_variants = array();
+		if ( $service instanceof DeliveryService ) {
+			foreach ( array( DeliveryType::PICKUP, DeliveryType::COURIER ) as $delivery_type ) {
+				$service_variants[] = array(
+					'service_key' => $service->service_key,
+					'group_id' => RussianPostDomesticSettings::checkout_group_id( $delivery_type ),
+					'title' => DeliveryType::COURIER === $delivery_type ? RussianPostDomesticSettings::COURIER_SERVICE_TITLE : RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ' / ОПС',
+					'delivery_type' => $delivery_type,
+					'tariffs' => $this->tariffs_for_service( $service, $delivery_type ),
+				);
+			}
+		}
 
 		return array(
 			'request' => $request->to_array(),
-			'services' => array_map(
-				fn ( DeliveryService $service ): array => array(
-					'service_key' => $service->service_key,
-					'title' => $service->title,
-					'delivery_type' => RussianPostDomesticSettings::service_delivery_type( $service->service_key ),
-					'tariffs' => $this->tariffs_for_service( $service ),
-				),
-				$services
-			),
+			'services' => $service_variants,
 			'postoffice_codes' => $this->postoffice_codes(),
 		);
 	}
 
 	public function create_request_from_admin_data( object $order, array $data ): ShipmentCreateRequest {
 		$base = $this->create_request_from_order( $order );
-		$service_key = sanitize_key( wp_unslash( $data['service_key'] ?? $base->rate_id ) );
+		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
 		$service = $this->services->find_by_service_key( $service_key );
-		$delivery_type = RussianPostDomesticSettings::service_delivery_type( $service_key );
+		$delivery_type = RussianPostDomesticSettings::normalize_delivery_type( sanitize_key( wp_unslash( $data['delivery_type'] ?? $base->delivery_type ) ) );
 		$tariff_object = sanitize_text_field( wp_unslash( $data['tariff_object'] ?? $base->meta['tariff_object'] ?? '' ) );
-		$tariff = $this->tariff_for_service_object( $service, $tariff_object );
+		$tariff = $this->tariff_for_service_object( $service, $tariff_object, $delivery_type );
 		$tariff_has_declared_value = ! empty( $tariff['has_declared_value'] );
 		$places = array();
 		$place_rows = is_array( $data['places'] ?? null ) ? $data['places'] : array();
@@ -160,7 +154,7 @@ final class OrderShipmentDraftFactory {
 			$base->order_id,
 			$base->carrier_key,
 			$delivery_type,
-			$service_key,
+			RussianPostDomesticSettings::checkout_group_id( $delivery_type ),
 			$this->address_from_admin_data( $base->recipient_address, $data, $delivery_type, $base->meta, $normalized_address, $original_address, $admin_pickup_row ),
 			DeliveryType::PICKUP === $delivery_type ? $this->pickup_from_admin_data( $base->pickup_point, $data ) : null,
 			array() !== $places ? $places : $base->places,
@@ -176,6 +170,7 @@ final class OrderShipmentDraftFactory {
 				$base->meta,
 				array(
 					'service_key' => $service_key,
+					'delivery_type' => $delivery_type,
 					'service_title' => $service instanceof DeliveryService ? $service->title : (string) ( $base->meta['service_title'] ?? '' ),
 					'tariff_object' => $tariff_object,
 					'tariff_title' => (string) ( $tariff['title'] ?? $base->meta['tariff_title'] ?? '' ),
@@ -329,7 +324,7 @@ final class OrderShipmentDraftFactory {
 			return null;
 		}
 
-		return new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::PICKUP_SERVICE_KEY, $code, $this->meta_string( $order, '_wdc_pickup_point_address' ), $this->now() );
+		return new PickupPointSelection( RussianPostDomesticSettings::CARRIER_KEY, RussianPostDomesticSettings::SERVICE_KEY, $code, $this->meta_string( $order, '_wdc_pickup_point_address' ), $this->now() );
 	}
 
 	private function pickup_from_admin_data( ?PickupPointSelection $base, array $data ): ?PickupPointSelection {
@@ -340,7 +335,7 @@ final class OrderShipmentDraftFactory {
 
 		return new PickupPointSelection(
 			RussianPostDomesticSettings::CARRIER_KEY,
-			RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+			RussianPostDomesticSettings::SERVICE_KEY,
 			$code,
 			sanitize_text_field( wp_unslash( $data['pickup_point_address'] ?? $base?->point_address ?? '' ) ),
 			$base?->selected_at ?: $this->now()
@@ -485,7 +480,7 @@ final class OrderShipmentDraftFactory {
 	/**
 	 * @return array<int,array<string,mixed>>
 	 */
-	private function tariffs_for_service( DeliveryService $service ): array {
+	private function tariffs_for_service( DeliveryService $service, string $delivery_type ): array {
 		$settings = $this->domestic_settings instanceof RussianPostDomesticSettings ? $this->domestic_settings->all( $service->service_key ) : array();
 		$variants = is_array( $settings['tariff_variants'] ?? null ) ? $settings['tariff_variants'] : array();
 		if ( is_array( $variants['value'] ?? null ) ) {
@@ -494,7 +489,6 @@ final class OrderShipmentDraftFactory {
 		if ( array() === $variants ) {
 			$variants = array_map( static fn ( object $variant ): array => method_exists( $variant, 'to_array' ) ? $variant->to_array() : array(), ( new \WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver() )->defaults() );
 		}
-		$delivery_type = RussianPostDomesticSettings::service_delivery_type( $service->service_key );
 		$mapper = new RussianPostShipmentProductMapper();
 		$tariffs = array();
 		foreach ( $variants as $variant ) {
@@ -519,11 +513,11 @@ final class OrderShipmentDraftFactory {
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function tariff_for_service_object( ?DeliveryService $service, string $object_code ): array {
+	private function tariff_for_service_object( ?DeliveryService $service, string $object_code, string $delivery_type ): array {
 		if ( ! $service instanceof DeliveryService ) {
 			return array();
 		}
-		foreach ( $this->tariffs_for_service( $service ) as $tariff ) {
+		foreach ( $this->tariffs_for_service( $service, $delivery_type ) as $tariff ) {
 			if ( $object_code === (string) ( $tariff['object_code'] ?? '' ) ) {
 				return $tariff;
 			}
@@ -559,6 +553,16 @@ final class OrderShipmentDraftFactory {
 		$value = $order->get_meta( $key, true );
 
 		return is_scalar( $value ) ? trim( (string) $value ) : '';
+	}
+
+	private function delivery_type_from_order( object $order ): string {
+		$delivery_type = $this->meta_string( $order, '_wdc_platform_delivery_type' );
+		if ( '' !== $delivery_type ) {
+			return RussianPostDomesticSettings::normalize_delivery_type( $delivery_type );
+		}
+		$rate_id_delivery_type = RussianPostDomesticSettings::delivery_type_from_rate_id( $this->meta_string( $order, '_wdc_platform_rate_id' ) );
+
+		return '' !== $rate_id_delivery_type ? $rate_id_delivery_type : DeliveryType::PICKUP;
 	}
 
 	private function calculation_data( object $order ): array {

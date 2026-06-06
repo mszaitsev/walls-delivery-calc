@@ -250,8 +250,7 @@ final class CheckoutPickupPointRestController {
 	}
 
 	private function is_supported_shipping_method( string $method_id ): bool {
-		return RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $method_id
-			|| str_starts_with( $method_id, RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':' );
+		return RussianPostDomesticSettings::is_pickup_rate_id( $method_id );
 	}
 
 	private function normalize_shipping_method_id( string $method_id ): string {

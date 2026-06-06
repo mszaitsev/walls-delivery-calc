@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
 
 defined( 'ABSPATH' ) || exit;
@@ -141,7 +142,7 @@ final class OrderShippingMetaPersister {
 			$delivery = $this->delivery_days_label( is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array() );
 			$pickup = $this->session_manager->pickup_selection();
 			if (
-				RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) ( $rate['service_key'] ?? '' )
+				DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' )
 				&& $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) )
 			) {
 				$item->add_meta_data( 'Пункт выдачи', (string) ( $pickup['point_address'] ?? '' ), true );

@@ -55,8 +55,8 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 	}
 
 	public function quote( QuoteRequest $request ): DeliveryQuote {
-		$service_key = (string) ( $request->customer_context['service_key'] ?? RussianPostDomesticSettings::PICKUP_SERVICE_KEY );
-		$delivery_type = RussianPostDomesticSettings::service_delivery_type( $service_key );
+		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
+		$delivery_type = RussianPostDomesticSettings::normalize_delivery_type( (string) ( $request->customer_context['delivery_type'] ?? DeliveryType::PICKUP ) );
 		$settings = $this->settings->all( $service_key );
 
 		if ( ! $this->supports_country( $request->country_code ?: $request->destination->country_code ) ) {
@@ -104,7 +104,7 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 			$rates[] = $this->rate_from_result( $service_key, $delivery_type, $variant, $postcode, $params, $api_result, $parsed, $price_kopecks, $package );
 		}
 
-		return new DeliveryQuote( $this->quote_id( $request, $package, $service_key ), self::KEY, $request->destination, $package, $rates, true, array() === $rates ? 'no_tariffs_available' : '', '', false, 'api', array( 'postcode' => $display_postcode, 'tariff_postcode' => $postcode, 'service_key' => $service_key, 'skipped_tariffs' => $skipped, 'variant_diagnostics' => $variant_diagnostics ) );
+		return new DeliveryQuote( $this->quote_id( $request, $package, $service_key . ':' . $delivery_type ), self::KEY, $request->destination, $package, $rates, true, array() === $rates ? 'no_tariffs_available' : '', '', false, 'api', array( 'postcode' => $display_postcode, 'tariff_postcode' => $postcode, 'service_key' => $service_key, 'delivery_type' => $delivery_type, 'skipped_tariffs' => $skipped, 'variant_diagnostics' => $variant_diagnostics ) );
 	}
 
 	private function empty_quote( QuoteRequest $request, string $reason ): DeliveryQuote {
@@ -333,7 +333,7 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 		);
 
 		return new DeliveryRate(
-			$service_key . ':' . $variant->object_code,
+			RussianPostDomesticSettings::rate_id( $delivery_type, $variant->object_code ),
 			self::KEY,
 			'Почта России',
 			$service_key,

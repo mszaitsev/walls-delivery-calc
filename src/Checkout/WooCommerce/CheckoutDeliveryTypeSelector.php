@@ -50,7 +50,7 @@ final class CheckoutDeliveryTypeSelector {
 
 		$rate_id = (string) ( $meta['rate_id'] ?? $this->method_id( $method ) );
 		if ( ! empty( $meta['requires_pickup_point'] ) && ! $this->skip_pickup_selection( $meta ) ) {
-			if ( RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) ( $meta['service_key'] ?? '' ) ) {
+			if ( RussianPostDomesticSettings::CARRIER_KEY === (string) ( $meta['carrier_key'] ?? '' ) && \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP === (string) ( $meta['delivery_type'] ?? '' ) ) {
 				$this->render_russian_post_pickup_map_selector( $rate_id );
 				return;
 			}

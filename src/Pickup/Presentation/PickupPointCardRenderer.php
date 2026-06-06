@@ -82,9 +82,8 @@ final class PickupPointCardRenderer {
 			return true;
 		}
 
-		return RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $service
-			|| RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $rate_id
-			|| str_starts_with( $rate_id, RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':' );
+		return RussianPostDomesticSettings::SERVICE_KEY === $service
+			|| RussianPostDomesticSettings::is_pickup_rate_id( $rate_id );
 	}
 
 	private function city_line( string $postcode, string $city ): string {

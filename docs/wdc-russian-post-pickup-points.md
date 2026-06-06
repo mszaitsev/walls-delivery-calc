@@ -1,6 +1,8 @@
 # Russian Post Pickup Points
 
-Version: 0.28.5.
+Version: 0.35.0.
+
+As of WDC 0.35.0, Russian Post pickup checkout belongs to the unified domestic service `russian_post_domestic`. The active pickup shipping family/rate group is `russian_post_domestic:pickup`; concrete tariff rates look like `russian_post_domestic:pickup:23030`. Older release notes below may mention the historical pickup service key, but the current runtime no longer uses it. Pickup point type settings are stored as `russian_post_domestic_point_type_{ops,pvz,aps}_{enabled,label}` in the unified service settings context.
 
 Version 0.28.5 clears stale checkout pickup selection when the customer manually changes the city through the checkout city selector, while protecting the controlled cross-location pickup flow with a one-shot suppression flag.
 

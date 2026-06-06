@@ -159,7 +159,7 @@ final class CheckoutValidation {
 	 * @param array<string,mixed> $rate
 	 */
 	private function add_pickup_error( mixed $errors = null, array $rate = array() ): void {
-		$message = RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) ( $rate['service_key'] ?? '' )
+		$message = RussianPostDomesticSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? '' )
 			? __( 'Выберите пункт выдачи Почты России.', 'walls-delivery-calc' )
 			: __( 'Выберите пункт выдачи.', 'walls-delivery-calc' );
 		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
@@ -273,12 +273,12 @@ final class CheckoutValidation {
 	 */
 	private function synthetic_russian_post_pickup_rate( string $selected_rate_id ): array {
 		$normalized = $this->session_manager->normalize_rate_id( $selected_rate_id );
-		$rate_id = '' !== $normalized ? $normalized : RussianPostDomesticSettings::PICKUP_SERVICE_KEY;
+		$rate_id = '' !== $normalized ? $normalized : RussianPostDomesticSettings::checkout_group_id( DeliveryType::PICKUP );
 
 		return array(
 			'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
 			'rate_id' => $rate_id,
-			'service_key' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+			'service_key' => RussianPostDomesticSettings::SERVICE_KEY,
 			'delivery_type' => DeliveryType::PICKUP,
 			'_selected_rate_id' => $rate_id,
 			'_synthetic' => true,
@@ -358,7 +358,7 @@ final class CheckoutValidation {
 		}
 
 		$selection['carrier_key'] = RussianPostDomesticSettings::CARRIER_KEY;
-		$selection['rate_id'] = $this->selected_rate_id( $rate ) ?: RussianPostDomesticSettings::PICKUP_SERVICE_KEY;
+		$selection['rate_id'] = $this->selected_rate_id( $rate ) ?: RussianPostDomesticSettings::checkout_group_id( DeliveryType::PICKUP );
 		$selection['selected_at'] = gmdate( 'c' );
 		$this->session_manager->save_pickup_selection( $selection );
 		$this->session_manager->save_checkout_pickup_point( $this->checkout_pickup_point_from_selection( $selection ) );
@@ -483,7 +483,7 @@ final class CheckoutValidation {
 	 */
 	private function is_russian_post_pickup_rate( array $rate ): bool {
 		return RussianPostDomesticSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? '' )
-			&& RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) ( $rate['service_key'] ?? '' )
+			&& RussianPostDomesticSettings::SERVICE_KEY === (string) ( $rate['service_key'] ?? '' )
 			&& DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' )
 			&& $this->session_manager->is_russian_post_pickup_family( (string) ( $rate['rate_id'] ?? '' ) );
 	}

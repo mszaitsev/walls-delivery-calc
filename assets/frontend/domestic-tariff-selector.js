@@ -18,6 +18,8 @@
 			action: data.action,
 			nonce: data.nonce || '',
 			service_key: wrapper.data('wdc-service-key') || '',
+			checkout_group_id: wrapper.data('wdc-checkout-group-id') || '',
+			delivery_type: wrapper.data('wdc-delivery-type') || '',
 			object_code: input.val() || '',
 			title: input.data('title') || ''
 		}).always(function () {

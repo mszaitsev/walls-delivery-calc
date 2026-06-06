@@ -146,21 +146,21 @@ final class CheckoutSessionManager {
 	public function shipping_method_family( string $rate_id ): string {
 		$rate_id = $this->normalize_rate_id( $rate_id );
 		if ( $this->is_russian_post_pickup_family( $rate_id ) ) {
-			return RussianPostDomesticSettings::PICKUP_SERVICE_KEY;
+			return RussianPostDomesticSettings::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP );
 		}
 
 		return $rate_id;
 	}
 
 	public function is_russian_post_pickup_family( string $rate_id ): bool {
-		$rate_id = $this->normalize_rate_id( $rate_id );
-		return RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $rate_id
-			|| str_starts_with( $rate_id, RussianPostDomesticSettings::PICKUP_SERVICE_KEY . ':' );
+		return RussianPostDomesticSettings::is_pickup_rate_id( $this->normalize_rate_id( $rate_id ) );
 	}
 
 	public function is_same_pickup_family( string $oldRateId, string $newRateId ): bool {
-		return RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $this->shipping_method_family( $oldRateId )
-			&& RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $this->shipping_method_family( $newRateId );
+		$pickup_family = RussianPostDomesticSettings::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP );
+
+		return $pickup_family === $this->shipping_method_family( $oldRateId )
+			&& $pickup_family === $this->shipping_method_family( $newRateId );
 	}
 
 	public function save_sort_mode( string $sort_mode ): void {

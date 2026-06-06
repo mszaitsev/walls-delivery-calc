@@ -6,14 +6,14 @@ namespace WallsShop\WDC\Carriers\RussianPost;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
 defined( 'ABSPATH' ) || exit;
 
 final class RussianPostDomesticSettings {
 	public const CARRIER_KEY = 'russian_post_domestic';
-	public const PICKUP_SERVICE_KEY = 'russian_post_domestic_pickup';
-	public const COURIER_SERVICE_KEY = 'russian_post_domestic_courier';
+	public const SERVICE_KEY = 'russian_post_domestic';
 	public const TITLE = 'Почта России — по России';
 	public const PICKUP_SERVICE_TITLE = 'Почта России — до отделения';
 	public const COURIER_SERVICE_TITLE = 'Почта России — курьером';
@@ -52,7 +52,7 @@ final class RussianPostDomesticSettings {
 	public function all( string $service_key = '' ): array {
 		$settings = $this->settings->all();
 		$stored = is_array( $settings[ self::CARRIER_KEY ] ?? null ) ? $settings[ self::CARRIER_KEY ] : array();
-		$service = $this->service_for_key( $service_key );
+		$service = $this->service_for_key( $service_key ?: self::SERVICE_KEY );
 		if ( $service instanceof DeliveryService && null !== $service->id && $this->service_settings instanceof DeliveryServiceSettingsRepository ) {
 			$stored = array_merge( $stored, $this->service_settings->all_settings( (int) $service->id ) );
 			$stored['enabled'] = $service->enabled;
@@ -69,8 +69,46 @@ final class RussianPostDomesticSettings {
 		return ! empty( $this->all( $service_key )['debug'] );
 	}
 
-	public static function service_delivery_type( string $service_key ): string {
-		return self::COURIER_SERVICE_KEY === $service_key ? \WallsShop\WDC\Domain\Quote\DeliveryType::COURIER : \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP;
+	public static function normalize_delivery_type( string $delivery_type ): string {
+		return DeliveryType::COURIER === $delivery_type ? DeliveryType::COURIER : DeliveryType::PICKUP;
+	}
+
+	public static function checkout_group_id( string $delivery_type ): string {
+		return self::SERVICE_KEY . ':' . self::normalize_delivery_type( $delivery_type );
+	}
+
+	public static function rate_id( string $delivery_type, int|string $object_code ): string {
+		return self::checkout_group_id( $delivery_type ) . ':' . preg_replace( '/\D+/', '', (string) $object_code );
+	}
+
+	public static function delivery_type_from_rate_id( string $rate_id ): string {
+		$rate_id = self::strip_wc_method_prefix( $rate_id );
+		foreach ( array( DeliveryType::PICKUP, DeliveryType::COURIER ) as $delivery_type ) {
+			$group_id = self::checkout_group_id( $delivery_type );
+			if ( $rate_id === $group_id || str_starts_with( $rate_id, $group_id . ':' ) ) {
+				return $delivery_type;
+			}
+		}
+
+		return DeliveryType::PICKUP;
+	}
+
+	public static function is_pickup_rate_id( string $rate_id ): bool {
+		$rate_id = self::strip_wc_method_prefix( $rate_id );
+		$group_id = self::checkout_group_id( DeliveryType::PICKUP );
+
+		return $rate_id === $group_id || str_starts_with( $rate_id, $group_id . ':' );
+	}
+
+	public static function strip_wc_method_prefix( string $rate_id ): string {
+		$rate_id = trim( $rate_id );
+		foreach ( array( 'wdc_platform_delivery:', 'wdc_platform:' ) as $prefix ) {
+			if ( str_starts_with( $rate_id, $prefix ) ) {
+				return substr( $rate_id, strlen( $prefix ) );
+			}
+		}
+
+		return $rate_id;
 	}
 
 	private function service_for_key( string $service_key ): ?DeliveryService {

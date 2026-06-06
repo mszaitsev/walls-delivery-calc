@@ -30,6 +30,7 @@ final class OrderShipmentsMetabox {
 		private ShipmentCreationService $creation,
 		private DeliveryServiceRepository $services,
 		private ?RussianPostAddressNormalizer $address_normalizer = null,
+		private ?RussianPostPickupPointTypeSettings $pickup_point_type_settings = null,
 		private string $plugin_url = '',
 		private string $version = '1'
 	) {
@@ -88,7 +89,7 @@ final class OrderShipmentsMetabox {
 				'mapProvider' => $provider,
 				'yandexApiKeyPresent' => '' !== $this->yandex_api_key(),
 				'yandexApiKey' => 'yandex' === $provider ? $this->yandex_api_key() : '',
-				'pickupPointTypes' => ( new RussianPostPickupPointTypeSettings( new SettingsRepository() ) )->all(),
+				'pickupPointTypes' => ( $this->pickup_point_type_settings ?? new RussianPostPickupPointTypeSettings( new SettingsRepository() ) )->all(),
 			)
 		);
 	}
@@ -147,14 +148,14 @@ final class OrderShipmentsMetabox {
 		$city = (string) ( $address['settlement'] ?? $address['city'] ?? '' );
 		$pickup_demand_address = implode( ', ', array_filter( array( $pickup_destination_index, $region, $city, 'до востребования' ), static fn ( string $value ): bool => '' !== trim( $value ) ) );
 		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
-		$selected_service_key = (string) ( $request['rate_id'] ?? $meta['service_key'] ?? '' );
-		if ( '' === $selected_service_key && array() !== $services ) {
-			$selected_service_key = (string) ( $services[0]['service_key'] ?? '' );
+		$selected_delivery_type = RussianPostDomesticSettings::normalize_delivery_type( (string) ( $request['delivery_type'] ?? $meta['delivery_type'] ?? DeliveryType::PICKUP ) );
+		if ( '' === $selected_delivery_type && array() !== $services ) {
+			$selected_delivery_type = (string) ( $services[0]['delivery_type'] ?? DeliveryType::PICKUP );
 		}
 		$selected_tariff_object = (string) ( $meta['tariff_object'] ?? '' );
 		$selected_service_tariffs = array();
 		foreach ( $services as $service ) {
-			if ( $selected_service_key === (string) ( $service['service_key'] ?? '' ) ) {
+			if ( $selected_delivery_type === (string) ( $service['delivery_type'] ?? '' ) ) {
 				$selected_service_tariffs = is_array( $service['tariffs'] ?? null ) ? $service['tariffs'] : array();
 				break;
 			}
@@ -176,7 +177,7 @@ final class OrderShipmentsMetabox {
 		$default_declared_value_rub = max( 0, (int) ( $meta['default_declared_value_rub'] ?? 0 ) );
 		$default_declared_value_attr = $default_declared_value_rub > 0 ? (string) $default_declared_value_rub : '';
 		$declared_value_initial = $selected_tariff_has_declared_value ? $default_declared_value_attr : '';
-		$delivery_type = (string) ( $request['delivery_type'] ?? DeliveryType::PICKUP );
+		$delivery_type = $selected_delivery_type;
 		$pickup_point_found = ! empty( $meta['pickup_point_found'] );
 		$pickup_address = (string) ( $address['raw_address'] ?? '' );
 		$courier_original_address = (string) ( $meta['courier_original_address'] ?? '' );
@@ -238,9 +239,10 @@ final class OrderShipmentsMetabox {
 							</section>
 							<section>
 								<h3><?php echo esc_html__( 'Доставка', 'walls-delivery-calc' ); ?></h3>
-								<label><?php echo esc_html__( 'Служба доставки', 'walls-delivery-calc' ); ?><select name="service_key" data-wdc-service-select>
+								<input type="hidden" name="service_key" value="<?php echo esc_attr( RussianPostDomesticSettings::SERVICE_KEY ); ?>">
+								<label><?php echo esc_html__( 'Сценарий доставки', 'walls-delivery-calc' ); ?><select name="delivery_type" data-wdc-service-select>
 									<?php foreach ( $services as $service ) : ?>
-										<option value="<?php echo esc_attr( (string) $service['service_key'] ); ?>" data-delivery-type="<?php echo esc_attr( (string) $service['delivery_type'] ); ?>" data-tariffs="<?php echo esc_attr( wp_json_encode( $service['tariffs'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '[]' ); ?>" <?php selected( $selected_service_key, (string) $service['service_key'] ); ?>><?php echo esc_html( (string) $service['title'] ); ?></option>
+										<option value="<?php echo esc_attr( (string) $service['delivery_type'] ); ?>" data-service-key="<?php echo esc_attr( (string) $service['service_key'] ); ?>" data-delivery-type="<?php echo esc_attr( (string) $service['delivery_type'] ); ?>" data-tariffs="<?php echo esc_attr( wp_json_encode( $service['tariffs'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '[]' ); ?>" <?php selected( $selected_delivery_type, (string) $service['delivery_type'] ); ?>><?php echo esc_html( (string) $service['title'] ); ?></option>
 									<?php endforeach; ?>
 								</select></label>
 								<label><?php echo esc_html__( 'Тариф', 'walls-delivery-calc' ); ?><select name="tariff_object" data-wdc-tariff-select data-selected-tariff="<?php echo esc_attr( $selected_tariff_object ); ?>" <?php disabled( ! $has_selected_service_tariffs ); ?>>

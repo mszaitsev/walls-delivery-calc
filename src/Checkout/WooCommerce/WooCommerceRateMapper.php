@@ -37,6 +37,7 @@ final class WooCommerceRateMapper {
 				'disabled_reason' => $rate->disabled_reason,
 				'service_key'     => $rate->service_key,
 				'service_title'   => $rate->service_name,
+				'checkout_group_id' => (string) ( $rate->meta['checkout_group_id'] ?? '' ),
 				'rules_source'    => (string) ( $rate->meta['rules_source'] ?? 'none' ),
 				'round_up_applied' => ! empty( $rate->meta['round_up_applied'] ),
 				'minimum_price_applied' => ! empty( $rate->meta['minimum_price_applied'] ),

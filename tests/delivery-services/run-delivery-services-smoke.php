@@ -235,27 +235,23 @@ $rp_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( a
 wdc_ds_assert( 1 === count( $rp_rows ), 'Repeated Russian Post bootstrap must not create duplicate services.' );
 $services->soft_delete_service( (int) $rp->id );
 wdc_ds_assert( $services->find_by_service_key( RussianPostSettings::SERVICE_KEY ) instanceof DeliveryService, 'Predefined Russian Post service cannot be deleted.' );
-$domestic_services = $services->ensure_russian_post_domestic_services();
-$services->ensure_russian_post_domestic_services();
-$domestic_pickup_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) $row['service_key'] && empty( $row['deleted'] ) ) );
-$domestic_courier_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => RussianPostDomesticSettings::COURIER_SERVICE_KEY === (string) $row['service_key'] && empty( $row['deleted'] ) ) );
-wdc_ds_assert( 1 === count( $domestic_pickup_rows ) && 1 === count( $domestic_courier_rows ), 'Repeated domestic bootstrap must not create duplicate pickup/courier services.' );
-$domestic_pickup = $services->find_by_service_key( RussianPostDomesticSettings::PICKUP_SERVICE_KEY );
-$domestic_courier = $services->find_by_service_key( RussianPostDomesticSettings::COURIER_SERVICE_KEY );
-wdc_ds_assert( $domestic_pickup instanceof DeliveryService && RussianPostDomesticSettings::PICKUP_SERVICE_TITLE === $domestic_pickup->title, 'Domestic pickup predefined service title must be distinct.' );
-wdc_ds_assert( $domestic_courier instanceof DeliveryService && RussianPostDomesticSettings::COURIER_SERVICE_TITLE === $domestic_courier->title, 'Domestic courier predefined service title must be distinct.' );
-$services->update_service( (int) $domestic_courier->id, array( 'title' => 'Custom courier title' ) );
-$services->ensure_russian_post_domestic_services();
-$custom_title_courier = $services->find_by_service_key( RussianPostDomesticSettings::COURIER_SERVICE_KEY );
-wdc_ds_assert( $custom_title_courier instanceof DeliveryService && 'Custom courier title' === $custom_title_courier->title, 'Domestic bootstrap must not overwrite an admin-customized predefined title.' );
-foreach ( $domestic_services as $domestic_service ) {
-	$services->soft_delete_service( (int) $domestic_service->id );
-	wdc_ds_assert( $services->find_by_service_key( $domestic_service->service_key ) instanceof DeliveryService, 'Predefined domestic service cannot be deleted: ' . $domestic_service->service_key );
-}
-$services->update_service( (int) $domestic_services[0]->id, array( 'enabled' => 0 ) );
-$services->ensure_russian_post_domestic_services();
-$disabled_pickup = $services->find_by_service_key( RussianPostDomesticSettings::PICKUP_SERVICE_KEY );
-wdc_ds_assert( $disabled_pickup instanceof DeliveryService && ! $disabled_pickup->enabled, 'Domestic bootstrap must preserve an intentionally disabled predefined pickup service.' );
+$domestic_service = $services->ensure_russian_post_domestic_service();
+$services->ensure_russian_post_domestic_service();
+$domestic_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => RussianPostDomesticSettings::SERVICE_KEY === (string) $row['service_key'] && empty( $row['deleted'] ) ) );
+$legacy_domestic_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => in_array( (string) $row['service_key'], array( 'russian_post_domestic_pickup', 'russian_post_domestic_courier' ), true ) && empty( $row['deleted'] ) ) );
+wdc_ds_assert( 1 === count( $domestic_rows ) && array() === $legacy_domestic_rows, 'Repeated domestic bootstrap must create one unified domestic service and no legacy pickup/courier services.' );
+$domestic = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
+wdc_ds_assert( $domestic instanceof DeliveryService && RussianPostDomesticSettings::TITLE === $domestic->title && RussianPostDomesticSettings::CARRIER_KEY === $domestic->carrier_key, 'Unified domestic predefined service must have canonical title and carrier key.' );
+$services->update_service( (int) $domestic->id, array( 'title' => 'Custom domestic title' ) );
+$services->ensure_russian_post_domestic_service();
+$custom_title_domestic = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
+wdc_ds_assert( $custom_title_domestic instanceof DeliveryService && 'Custom domestic title' === $custom_title_domestic->title, 'Domestic bootstrap must not overwrite an admin-customized predefined title.' );
+$services->soft_delete_service( (int) $domestic_service->id );
+wdc_ds_assert( $services->find_by_service_key( $domestic_service->service_key ) instanceof DeliveryService, 'Predefined domestic service cannot be deleted: ' . $domestic_service->service_key );
+$services->update_service( (int) $domestic_service->id, array( 'enabled' => 0 ) );
+$services->ensure_russian_post_domestic_service();
+$disabled_domestic = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
+wdc_ds_assert( $disabled_domestic instanceof DeliveryService && ! $disabled_domestic->enabled, 'Domestic bootstrap must preserve an intentionally disabled predefined service.' );
 $GLOBALS['wpdb']->services[] = array(
 	'id' => ++$GLOBALS['wpdb']->insert_id,
 	'service_key' => 'russian_post_domestic_soft_deleted_test',
@@ -311,8 +307,8 @@ wdc_ds_assert( in_array( 'US', $countries->countries( $custom_id ), true ) && in
 $directory = ( new ReflectionClass( WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory::class ) )->newInstanceWithoutConstructor();
 $manager = new DeliveryServiceManager( $services, $countries, new RuleRepository( $GLOBALS['wpdb'] ), $directory );
 $manager->ensure_builtin_services();
-$courier_service = $services->find_by_service_key( RussianPostDomesticSettings::COURIER_SERVICE_KEY );
-wdc_ds_assert( $courier_service instanceof DeliveryService && in_array( 'RU', $countries->countries( (int) $courier_service->id ), true ) && $manager->service_available_for_country( $courier_service, 'RU' ), 'Domestic courier service must bootstrap RU availability.' );
+$unified_domestic_service = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
+wdc_ds_assert( $unified_domestic_service instanceof DeliveryService && in_array( 'RU', $countries->countries( (int) $unified_domestic_service->id ), true ) && $manager->service_available_for_country( $unified_domestic_service, 'RU' ), 'Unified domestic service must bootstrap RU availability.' );
 wdc_ds_assert( $manager->service_available_for_country( $services->find_by_service_key( 'fixed_test' ), 'US' ), 'selected_countries availability must allow listed country.' );
 wdc_ds_assert( ! $manager->service_available_for_country( $services->find_by_service_key( 'fixed_test' ), 'FR' ), 'selected_countries availability must reject unlisted country.' );
 $services->update_service( $custom_id, array( 'availability_mode' => DeliveryService::AVAILABILITY_ALL_COUNTRIES ) );
