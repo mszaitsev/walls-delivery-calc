@@ -2,11 +2,11 @@
 
 ## Общий статус
 
-- Версия / baseline проекта: `0.35.2`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.36.2`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
 - Последнее обновление статуса: 2026-06-06.
 - Общий процент готовности: примерно 66%.
-- Следующий рекомендуемый этап: Russian Post shipment statuses/documents/cancellation.
+- Текущий этап 0.36.2: после успешного создания отправления модалка закрывается, показывается toast, запускается первое автообновление статуса через `wdc_update_shipment_status`; mapping операций без атрибута использует fallback `type:-`, поэтому `28:-` дает `создан в ТК`, `46:-` дает `отменён`. UI метабокса показывает русские статусы и не выводит Result ID.
 
 ## Краткое резюме
 
@@ -32,8 +32,8 @@
 | Multicarrier Pickup Layer | partial | 35% | Generic domain/storage exists, but production checkout map is Russian Post-specific. |
 | Order Admin Recalculation | partial | 30% | Order delivery metabox exists; full recalculation/replacement workflow is missing. |
 | Shipment Domain | partial | 55% | Domain objects exist and are used by the manual shipment creation runtime. |
-| Shipment Runtime | partial | 45% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments with server-side payload preview, tariff select, postoffice-code select, admin-only pickup map selector and visible AJAX result diagnostics; statuses/documents/cancellation are pending. |
-| Tracking / Documents / Status Sync | not-started | 0% | No tracking polling, labels, acts, documents, or status sync runtime. |
+| Shipment Runtime | partial | 55% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments and can manually refresh Russian Post tracking status from the existing shipment metabox button; documents/cancellation remain pending. |
+| Tracking / Documents / Status Sync | partial | 15% | Manual Russian Post Tracking API lookup is implemented for one shipment at a time; automatic polling, labels, acts and documents are not included yet. |
 | WooCommerce Status Mapping | not-started | 0% | Domain baseline exists, but no automatic WooCommerce order status changes. |
 | CDEK | planned | 0% | Planned carrier stage; no adapter found in code. |
 | DPD | planned | 0% | Planned carrier stage; no adapter found in code. |
@@ -213,7 +213,7 @@
 - ECOM-сценарий включается настройкой тарифа `is_ecom` во вкладке `Тарифы`; object `54020` не включает `ecom-data` сам по себе.
 - Индексы места приема для регистрации отправлений настраиваются на `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials`, default `630005`, не смешиваются с расчетными `from_postcodes` и выбираются в модалке как `postoffice-code`.
 - `default_from_postcode` редактируется рядом с индексами места приема, но остается прежним service setting и также используется расчетом тарифа как fallback origin index.
-- После AJAX create модалка показывает barcode/result-id или нормализованные ошибки API Почты; страница не перезагружается автоматически.
+- После AJAX create модалка закрывается, показывает toast с barcode, автоматически запускает первое обновление статуса, а возможная ошибка автообновления статуса показывается предупреждением и не отменяет успешное создание.
 
 ## Несоответствия документации и кода
 

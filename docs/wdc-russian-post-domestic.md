@@ -2,6 +2,21 @@
 
 Version: 0.22.00.
 
+## Tracking Statuses 0.36.2
+
+Manual status refresh is available in the WooCommerce order metabox `Отправления` for created Russian Post domestic shipments with a barcode. The existing `Обновить статус` button calls AJAX action `wdc_update_shipment_status`, then `RussianPostTrackingApiClient` requests `getOperationHistory` from `https://tracking.russianpost.ru/rtm34` using SOAP 1.2.
+
+Tracking credentials are edited on the unified domestic service tab `API / Credentials`:
+
+- `russian_post_tracking_login`;
+- `russian_post_tracking_password_encrypted`.
+
+They are not the Otpravka AccessToken/login/password and not the Tariff API token. The latest `historyRecord` is selected by `OperDate`, mapped by operation type/attribute through `RussianPostTrackingStatusMapper`, and saved in `_wdc_shipments`. Unknown operation/attribute pairs are saved as `unknown` / `не определён` while preserving the raw Russian Post operation and attribute names. Automatic polling is not part of 0.36.2.
+
+The 0.36.1 mapping correction moves `8:2` and related pickup operations, all `12:1..12:31`, and all `42:1..42:30` to `ready_for_pickup` / `ожидает самовывоза из ПВЗ/постамата`. Pairs `8:15` and `8:18` map to `handed_to_courier` / `передан курьеру`. Unknown pairs remain `unknown` / `не определён`.
+
+The 0.36.2 mapping fallback treats empty, absent, `0`, and `-` attributes as compatible with `type:-` mappings when no exact pair exists. Russian Post operation `28` without an attribute maps to `created_in_carrier` / `создан в ТК`; operation `46` without an attribute maps to `cancelled` / `отменён`. After successful shipment creation, the order metabox closes the preparation modal, shows a 10-second toast, and starts the first status refresh automatically. Otpravka `result-id` is not stored in shipment state and is not shown in the metabox because follow-up status calls use the barcode.
+
 This document fixes the stage-1 contract for the future domestic Russian Post carrier. It is documentation and API diagnostics only; checkout quoting and shipment creation are intentionally not implemented here.
 
 ## Carrier Scope

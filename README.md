@@ -1,8 +1,14 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.35.2.
+Current plugin version: 0.36.2.
 
 Current implementation status and roadmap are maintained in `docs/project-status.md`. Historical release notes below may not cover every intermediate 0.33.x change.
+
+Version 0.36.2 polishes the manual shipment status flow. After a successful Russian Post shipment create, the preparation modal closes, a 10-second admin toast confirms creation, and WDC automatically runs the first `wdc_update_shipment_status` request; if that status refresh fails, creation remains successful and the metabox shows a Russian warning. Russian Post tracking operations without attributes now fall back from `type:0`/empty attr to `type:-`, so `28:-` maps to `created_in_carrier` / `создан в ТК` and `46:-` maps to `cancelled` / `отменён`. The metabox shows Russian status labels and no longer displays or stores Otpravka `result-id` in shipment state.
+
+Version 0.36.1 corrects the Russian Post tracking status mapping: selected pickup operations including `8:2`, `12:1..12:31`, and `42:1..42:30` now map to `ready_for_pickup` / `ожидает самовывоза из ПВЗ/постамата`, while `8:15` and `8:18` map to `handed_to_courier` / `передан курьеру`. Unknown operation/attribute pairs still map to `unknown` / `не определён`.
+
+Version 0.36.0 adds manual Russian Post tracking status refresh from the WooCommerce order metabox `Отправления`. The existing `Обновить статус` button calls `wdc_update_shipment_status`, reads Tracking API login/password from the unified domestic service `API / Credentials` tab, requests `getOperationHistory` through SOAP 1.2, maps the latest operation with the bundled table from `status pocha.xlsx`, and stores both the universal plugin status and raw Russian Post operation details in `_wdc_shipments`. Unknown Russian Post operation/attribute pairs become `unknown` / `не определён`. Automatic polling/synchronization is not included in this step.
 
 Version 0.35.2 further cleans up unified Russian Post domestic checkout/order data. The `Расчет` tab now labels tariff origin/return indices as calculation-only fields, while `default_from_postcode` moved to `API / Credentials` next to postoffice acceptance indices. The Tariff API token field remains because the domestic tariff client sends it as `Authorization: Bearer ...` when configured. Visible domestic shipping item meta now contains only `Срок доставки`; pickup code/type/postcode/address live in `_wdc_delivery_calculation_data.pickup`, and pickup code is no longer written to `shipping_address_2`.
 

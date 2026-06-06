@@ -7,6 +7,58 @@
   text-align: center;
 }
 
+.wdc-shipment-status {
+  margin: 10px 0;
+  padding: 8px 10px;
+  border: 1px solid #dcdcde;
+  background: #f6f7f7;
+}
+
+.wdc-shipment-status p {
+  margin: 4px 0;
+}
+
+.wdc-shipment-status-message {
+  min-height: 20px;
+  margin: 8px 0;
+}
+
+.wdc-shipment-status-message[data-status="success"] {
+  color: #008a20;
+}
+
+.wdc-shipment-status-message[data-status="warning"] {
+  color: #996800;
+}
+
+.wdc-shipment-status-message[data-status="error"] {
+  color: #b32d2e;
+}
+
+.wdc-shipment-toast {
+  position: fixed;
+  top: 48px;
+  right: 20px;
+  z-index: 100002;
+  max-width: min(420px, calc(100vw - 40px));
+  padding: 12px 14px;
+  border: 1px solid #00a32a;
+  background: #edfaef;
+  color: #1d2327;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  white-space: pre-line;
+}
+
+.wdc-shipment-toast[data-status="warning"] {
+  border-color: #dba617;
+  background: #fcf9e8;
+}
+
+.wdc-shipment-toast[data-status="error"] {
+  border-color: #d63638;
+  background: #fcf0f1;
+}
+
 .wdc-shipment-modal[hidden] {
   display: none;
 }
