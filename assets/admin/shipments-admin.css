@@ -7,6 +7,10 @@
   text-align: center;
 }
 
+.wdc-shipments-metabox [hidden] {
+  display: none !important;
+}
+
 .wdc-copy-tracking-icon {
   display: inline;
   padding: 0 2px;

@@ -287,6 +287,12 @@
     }
   }
 
+  function setVisible(element, visible) {
+    if (!element) return;
+    element.hidden = !visible;
+    element.style.display = visible ? '' : 'none';
+  }
+
   function updateShipmentButtons(box, state) {
     if (!box) return;
     const hasTracking = !!(state && state.hasTracking);
@@ -297,23 +303,23 @@
     const cancelButton = box.querySelector('[data-wdc-cancel-shipment]');
     const removeButton = box.querySelector('[data-wdc-remove-shipment-from-order]');
     if (openButton) {
-      openButton.hidden = hasTracking;
+      setVisible(openButton, !hasTracking);
       openButton.disabled = hasTracking;
     }
     if (updateButton) {
-      updateButton.hidden = !hasTracking;
+      setVisible(updateButton, hasTracking);
       updateButton.disabled = !hasTracking;
     }
     if (manualButton) {
-      manualButton.hidden = hasTracking;
+      setVisible(manualButton, !hasTracking);
       manualButton.disabled = hasTracking;
     }
     if (cancelButton) {
-      cancelButton.hidden = !canCancel;
+      setVisible(cancelButton, canCancel);
       cancelButton.disabled = !canCancel;
     }
     if (removeButton) {
-      removeButton.hidden = !hasTracking || canCancel;
+      setVisible(removeButton, hasTracking && !canCancel);
       removeButton.disabled = !hasTracking || canCancel;
     }
   }

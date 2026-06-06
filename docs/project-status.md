@@ -1,10 +1,10 @@
 # Project Status
 
-0.37.3 note: Russian Post order metabox now hides inactive action buttons instead of showing disabled controls. The copy action uses the stable `🗐` symbol. Primary state shows preparation/manual tracking; cancellable operation `28 / Присвоение идентификатора` shows update/cancel; non-cancellable tracked shipments show update/remove.
+0.37.4 note: Russian Post order metabox action hiding is hardened against WooCommerce/WordPress admin CSS. The CSS rule `.wdc-shipments-metabox [hidden] { display: none !important; }` and JS `setVisible()` helper keep hidden buttons visually hidden and out of keyboard flow.
 
 ## Общий статус
 
-- Версия / baseline проекта: `0.37.3`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.37.4`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
 - Последнее обновление статуса: 2026-06-06.
 - Общий процент готовности: примерно 66%.

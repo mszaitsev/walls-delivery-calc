@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.37.3.
+Current plugin version: 0.37.4.
+
+Version 0.37.4 hardens shipment metabox action hiding against WooCommerce/WordPress admin CSS. Hidden action buttons now match both `.wdc-shipments-metabox [hidden] { display: none !important; }` and a JS `setVisible()` helper that sets `hidden` plus inline `display:none`.
 
 Version 0.37.3 tightens the Russian Post shipment metabox controls: inactive actions are hidden instead of shown disabled, so the primary state only shows preparation/manual tracking, operation `28` shows update/cancel, and non-cancellable tracked shipments show update/remove. The tracking copy control now uses the stable `🗐` symbol instead of inline SVG.
 
