@@ -7,6 +7,25 @@
   text-align: center;
 }
 
+.wdc-copy-tracking-button.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  min-height: 22px;
+  height: 22px;
+  padding: 0;
+  margin-left: 4px;
+  vertical-align: middle;
+  line-height: 1;
+}
+
+.wdc-copy-tracking-button svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
 .wdc-shipment-status {
   margin: 10px 0;
   padding: 8px 10px;

@@ -26,6 +26,7 @@ final class OrderShipmentsMetabox {
 	private const AJAX_PREVIEW = 'wdc_preview_shipment';
 	private const AJAX_UPDATE_STATUS = 'wdc_update_shipment_status';
 	private const AJAX_CANCEL = 'wdc_cancel_shipment';
+	private const AJAX_REMOVE_FROM_ORDER = 'wdc_remove_shipment_from_order';
 	private const AJAX_ATTACH_TRACKING = 'wdc_attach_shipment_tracking_number';
 	private const AJAX_NORMALIZE_ADDRESS = 'wdc_normalize_shipment_address';
 	private const AJAX_SEARCH_PICKUP_POINTS = 'wdc_search_russian_post_pickup_points';
@@ -51,6 +52,7 @@ final class OrderShipmentsMetabox {
 		add_action( 'wp_ajax_' . self::AJAX_PREVIEW, array( $this, 'ajax_preview' ) );
 		add_action( 'wp_ajax_' . self::AJAX_UPDATE_STATUS, array( $this, 'ajax_update_status' ) );
 		add_action( 'wp_ajax_' . self::AJAX_CANCEL, array( $this, 'ajax_cancel' ) );
+		add_action( 'wp_ajax_' . self::AJAX_REMOVE_FROM_ORDER, array( $this, 'ajax_remove_from_order' ) );
 		add_action( 'wp_ajax_' . self::AJAX_ATTACH_TRACKING, array( $this, 'ajax_attach_tracking' ) );
 		add_action( 'wp_ajax_' . self::AJAX_NORMALIZE_ADDRESS, array( $this, 'ajax_normalize_address' ) );
 		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PICKUP_POINTS, array( $this, 'ajax_search_pickup_points' ) );
@@ -97,6 +99,7 @@ final class OrderShipmentsMetabox {
 				'previewAction' => self::AJAX_PREVIEW,
 				'updateStatusAction' => self::AJAX_UPDATE_STATUS,
 				'cancelAction' => self::AJAX_CANCEL,
+				'removeFromOrderAction' => self::AJAX_REMOVE_FROM_ORDER,
 				'attachTrackingAction' => self::AJAX_ATTACH_TRACKING,
 				'normalizeAddressAction' => self::AJAX_NORMALIZE_ADDRESS,
 				'searchPickupPointsAction' => self::AJAX_SEARCH_PICKUP_POINTS,
@@ -206,11 +209,13 @@ final class OrderShipmentsMetabox {
 		$backlog_order_id = trim( (string) ( $shipment['backlog_order_id'] ?? '' ) );
 		$status_payload = $this->status_updates->status_payload( $shipment );
 		$can_cancel = $this->can_cancel_shipment( $shipment );
+		$show_cancel = $has_created && $can_cancel;
+		$show_remove = $has_created && '' !== $barcode && ! $can_cancel;
 		?>
 		<div class="wdc-shipments-metabox" data-wdc-shipments-metabox>
 			<p><strong><?php echo esc_html__( 'Служба', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $meta['service_title'] ?? $request['rate_id'] ?? '-' ) ); ?></p>
 			<p><strong><?php echo esc_html__( 'Статус посылки', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-shipment-summary-status><?php echo esc_html( $this->shipment_status_label( $shipment ) ); ?></span></p>
-			<p data-wdc-tracking-row <?php echo '' === $barcode ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Отслеживание', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-tracking-number><?php echo esc_html( $barcode ); ?></span> <button type="button" class="button button-small wdc-copy-tracking-button" data-wdc-copy-tracking data-tracking-number="<?php echo esc_attr( $barcode ); ?>" aria-label="<?php echo esc_attr__( 'Копировать номер отслеживания', 'walls-delivery-calc' ); ?>" title="<?php echo esc_attr__( 'Копировать', 'walls-delivery-calc' ); ?>" <?php disabled( '' === $barcode ); ?>><i class="fa-light fa-copy" aria-hidden="true"></i><span class="screen-reader-text"><?php echo esc_html__( 'Копировать номер отслеживания', 'walls-delivery-calc' ); ?></span></button> <span class="description" data-wdc-copy-tracking-status></span></p>
+			<p data-wdc-tracking-row <?php echo '' === $barcode ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Отслеживание', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-tracking-number><?php echo esc_html( $barcode ); ?></span> <button type="button" class="button button-small wdc-copy-tracking-button" data-wdc-copy-tracking data-tracking-number="<?php echo esc_attr( $barcode ); ?>" aria-label="<?php echo esc_attr__( 'Копировать номер отслеживания', 'walls-delivery-calc' ); ?>" title="<?php echo esc_attr__( 'Копировать', 'walls-delivery-calc' ); ?>" <?php disabled( '' === $barcode ); ?>><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7a3 3 0 0 1 3-3h7a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-1v-2h1a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-7a1 1 0 0 0-1 1v1H8V7Z" fill="currentColor"/><path d="M5 9h7a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3v-7a3 3 0 0 1 3-3Zm0 2a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-7a1 1 0 0 0-1-1H5Z" fill="currentColor"/></svg><span class="screen-reader-text"><?php echo esc_html__( 'Копировать номер отслеживания', 'walls-delivery-calc' ); ?></span></button> <span class="description" data-wdc-copy-tracking-status></span></p>
 			<p data-wdc-updated-row <?php echo '' === (string) ( $shipment['updated_at'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Обновлено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-updated-at><?php echo esc_html( (string) ( $shipment['updated_at'] ?? '' ) ); ?></span></p>
 			<?php $this->render_status_block( $status_payload ); ?>
 			<span data-wdc-backlog-order-id hidden><?php echo esc_html( $backlog_order_id ); ?></span>
@@ -220,7 +225,8 @@ final class OrderShipmentsMetabox {
 				<button type="button" class="button button-primary" data-wdc-open-shipment-modal <?php disabled( $has_created ); ?>><?php echo esc_html__( 'Подготовить отправление', 'walls-delivery-calc' ); ?></button>
 				<button type="button" class="button" data-wdc-update-shipment-status data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( RussianPostDomesticSettings::CARRIER_KEY ); ?>" <?php disabled( ! $has_created || '' === $barcode ); ?>><?php echo esc_html__( 'Обновить статус', 'walls-delivery-calc' ); ?></button>
 				<button type="button" class="button" data-wdc-open-manual-tracking <?php disabled( $has_created ); ?>><?php echo esc_html__( 'Внести отслеживание вручную', 'walls-delivery-calc' ); ?></button>
-				<button type="button" class="button" data-wdc-cancel-shipment data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( RussianPostDomesticSettings::CARRIER_KEY ); ?>" <?php disabled( ! $can_cancel ); ?>><?php echo esc_html__( 'Отменить отправление', 'walls-delivery-calc' ); ?></button>
+				<button type="button" class="button" data-wdc-cancel-shipment data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( RussianPostDomesticSettings::CARRIER_KEY ); ?>" <?php echo $show_cancel ? '' : 'hidden'; ?> <?php disabled( ! $can_cancel ); ?>><?php echo esc_html__( 'Отменить отправление', 'walls-delivery-calc' ); ?></button>
+				<button type="button" class="button" data-wdc-remove-shipment-from-order data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( RussianPostDomesticSettings::CARRIER_KEY ); ?>" <?php echo $show_remove ? '' : 'hidden'; ?> <?php disabled( ! $show_remove ); ?>><?php echo esc_html__( 'Удалить из заказа', 'walls-delivery-calc' ); ?></button>
 			</p>
 			<div class="wdc-manual-tracking" data-wdc-manual-tracking-form hidden>
 				<label><?php echo esc_html__( 'Номер отслеживания', 'walls-delivery-calc' ); ?><input type="text" data-wdc-manual-tracking-input autocomplete="off"></label>
@@ -415,6 +421,33 @@ final class OrderShipmentsMetabox {
 		wp_send_json_success(
 			array(
 				'message' => (string) ( $result['message'] ?? __( 'Отправление отменено.', 'walls-delivery-calc' ) ),
+				'status' => is_array( $result['status'] ?? null ) ? $result['status'] : array(),
+			)
+		);
+	}
+
+	public function ajax_remove_from_order(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
+		}
+		$order_id = (int) ( $_POST['order_id'] ?? 0 );
+		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+		if ( ! is_object( $order ) || $order_id <= 0 ) {
+			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
+		}
+		if ( ! $this->backlog instanceof ShipmentBacklogService ) {
+			wp_send_json_error( array( 'message' => __( 'Не удалось удалить данные отправления.', 'walls-delivery-calc' ) ), 500 );
+		}
+
+		$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
+		$result = $this->backlog->remove_from_order( $order, $shipment_key );
+		if ( ! (bool) ( $result['success'] ?? false ) ) {
+			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось удалить данные отправления.', 'walls-delivery-calc' ) ) ), 400 );
+		}
+
+		wp_send_json_success(
+			array(
+				'message' => (string) ( $result['message'] ?? __( 'Данные отправления удалены из заказа.', 'walls-delivery-calc' ) ),
 				'status' => is_array( $result['status'] ?? null ) ? $result['status'] : array(),
 			)
 		);

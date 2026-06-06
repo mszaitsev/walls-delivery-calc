@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.37.1.
+Current plugin version: 0.37.2.
+
+Version 0.37.2 polishes the Russian Post order metabox UX. The tracking copy button now uses a compact inline SVG icon instead of Font Awesome, so it stays stable when icon fonts are unavailable. Shipments that can still be cancelled in Russian Post show `Отменить отправление`; shipments that already cannot be cancelled in Russian Post show `Удалить из заказа`, which clears WooCommerce shipment state without calling Russian Post.
 
 Version 0.37.1 updates manual Russian Post tracking attachment. Managers now enter a tracking number rather than a SHPI-specific label; WDC normalizes it, searches `GET /1.0/backlog/search?query={barcode}` first, and falls back to `GET /1.0/shipment/search?query={barcode}` when the shipment has already left backlog. If shipment search returns no internal id, WDC still saves barcode/tracking number and runs Tracking API by barcode; cancellation stays disabled until `backlog_order_id` exists. The tracking copy control is now a compact accessible `fa-light fa-copy` icon button.
 

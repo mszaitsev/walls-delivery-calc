@@ -55,6 +55,30 @@ final class ShipmentBacklogService {
 	/**
 	 * @return array<string,mixed>
 	 */
+	public function remove_from_order( object $order, string $shipment_key = RussianPostDomesticSettings::CARRIER_KEY ): array {
+		if ( RussianPostDomesticSettings::CARRIER_KEY !== $shipment_key ) {
+			return $this->failure( 'Можно удалить только отправление Почты России.' );
+		}
+
+		$shipment = $this->repository->find_by_carrier( $order, $shipment_key );
+		$barcode = trim( (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
+		if ( array() === $shipment || '' === $barcode ) {
+			return $this->failure( 'В заказе нет отправления для удаления.' );
+		}
+
+		$this->repository->delete_for_carrier( $order, $shipment_key );
+		$this->add_order_note( $order, 'Данные отправления Почты России удалены из заказа без отмены в Почте России.' );
+
+		return array(
+			'success' => true,
+			'message' => 'Данные отправления удалены из заказа.',
+			'status' => $this->status_updates->status_payload( array() ),
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
 	public function attach_tracking_number( object $order, string $barcode, string $shipment_key = RussianPostDomesticSettings::CARRIER_KEY ): array {
 		if ( RussianPostDomesticSettings::CARRIER_KEY !== $shipment_key ) {
 			return $this->failure( 'Можно внести только номер отслеживания Почты России.' );

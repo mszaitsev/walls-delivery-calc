@@ -295,10 +295,18 @@
     const updateButton = box.querySelector('[data-wdc-update-shipment-status]');
     const manualButton = box.querySelector('[data-wdc-open-manual-tracking]');
     const cancelButton = box.querySelector('[data-wdc-cancel-shipment]');
+    const removeButton = box.querySelector('[data-wdc-remove-shipment-from-order]');
     if (openButton) openButton.disabled = hasTracking;
     if (updateButton) updateButton.disabled = !hasTracking;
     if (manualButton) manualButton.disabled = hasTracking;
-    if (cancelButton) cancelButton.disabled = !canCancel;
+    if (cancelButton) {
+      cancelButton.hidden = !canCancel;
+      cancelButton.disabled = !canCancel;
+    }
+    if (removeButton) {
+      removeButton.hidden = !hasTracking || canCancel;
+      removeButton.disabled = !hasTracking || canCancel;
+    }
   }
 
   function resetShipmentUi(box) {
@@ -419,6 +427,35 @@
         }
         resetShipmentUi(box);
         showShipmentToast(box, payload.data.message || 'Отправление отменено.', 'success');
+        return payload;
+      })
+      .catch((error) => {
+        showShipmentToast(box, error.message, 'error');
+        if (button) button.disabled = false;
+        throw error;
+      });
+  }
+
+  function requestShipmentRemoveFromOrder(button) {
+    const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
+    const data = new FormData();
+    data.append('action', window.wdcShipmentsAdmin.removeFromOrderAction || 'wdc_remove_shipment_from_order');
+    data.append('nonce', window.wdcShipmentsAdmin.nonce);
+    data.append('order_id', button && button.dataset ? button.dataset.orderId || '' : '');
+    data.append('shipment_key', button && button.dataset ? button.dataset.shipmentKey || 'russian_post_domestic' : 'russian_post_domestic');
+    if (button) button.disabled = true;
+    return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: data
+    })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (!payload || !payload.success) {
+          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось удалить данные отправления.');
+        }
+        resetShipmentUi(box);
+        showShipmentToast(box, payload.data.message || 'Данные отправления удалены из заказа.', 'success');
         return payload;
       })
       .catch((error) => {
@@ -840,6 +877,12 @@
     const cancelShipment = event.target.closest('[data-wdc-cancel-shipment]');
     if (cancelShipment) {
       requestShipmentCancel(cancelShipment).catch(function () {});
+      return;
+    }
+
+    const removeShipmentFromOrder = event.target.closest('[data-wdc-remove-shipment-from-order]');
+    if (removeShipmentFromOrder) {
+      requestShipmentRemoveFromOrder(removeShipmentFromOrder).catch(function () {});
       return;
     }
 

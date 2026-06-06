@@ -1,6 +1,6 @@
 # WDC Russian Post Shipments
 
-Version: 0.37.1.
+Version: 0.37.2.
 
 Russian Post shipment creation stores two identifiers:
 
@@ -34,3 +34,9 @@ Manual tracking attachment in 0.37.1:
 - returned `id`, when present, is saved as `backlog_order_id`;
 - if shipment search returns barcode but no `id`, WDC still saves tracking and runs Tracking API by barcode;
 - cancellation remains disabled when `backlog_order_id` is absent.
+
+Admin actions in 0.37.2:
+
+- `Отменить отправление` calls Russian Post `DELETE /1.0/backlog`, then clears WooCommerce shipment state. It is available only for operation `28 / Присвоение идентификатора` with saved `backlog_order_id`.
+- `Удалить из заказа` clears only WooCommerce `_wdc_shipments` state and does not call Russian Post. It is shown when a shipment has tracking but is not eligible for Russian Post cancellation, including when status was not refreshed yet.
+- the tracking copy button uses an inline SVG icon, not Font Awesome.

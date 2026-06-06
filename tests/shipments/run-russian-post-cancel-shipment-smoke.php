@@ -53,6 +53,7 @@ if ( ! function_exists( 'wp_remote_retrieve_body' ) ) {
 if ( ! function_exists( 'wp_remote_request' ) ) {
 	function wp_remote_request( string $url, array $args = array() ): array {
 		$GLOBALS['wdc_cancel_smoke_last_request'] = array( 'url' => $url, 'args' => $args );
+		$GLOBALS['wdc_cancel_smoke_request_count'] = (int) ( $GLOBALS['wdc_cancel_smoke_request_count'] ?? 0 ) + 1;
 		return array(
 			'response' => array( 'code' => (int) ( $GLOBALS['wdc_cancel_smoke_request_code'] ?? 200 ) ),
 			'body' => (string) ( $GLOBALS['wdc_cancel_smoke_request_body'] ?? '{"result-ids":[2285075494],"errors":[]}' ),
@@ -214,11 +215,22 @@ $failed_cancel = $backlog_service->cancel_russian_post( $failed_cancel_order );
 $failed_cancel_meta = $failed_cancel_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPostDomesticSettings::CARRIER_KEY ] ?? array();
 russian_post_cancel_smoke_assert( false === $failed_cancel['success'] && '80080822636218' === (string) ( $failed_cancel_meta['barcode'] ?? '' ), 'Failed cancel must keep shipment state.' );
 
+$remove_order = new RussianPostCancelSmokeOrder( 5, array( OrderShipmentRepository::META_KEY => array( RussianPostDomesticSettings::CARRIER_KEY => array( 'status' => 'created', 'barcode' => '80080822636218', 'tracking_number' => '80080822636218', 'carrier_operation_type_id' => '1' ) ) ) );
+$request_count_before_remove = (int) ( $GLOBALS['wdc_cancel_smoke_request_count'] ?? 0 );
+$remove = $backlog_service->remove_from_order( $remove_order );
+$remove_meta = $remove_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ] ?? array();
+russian_post_cancel_smoke_assert( true === $remove['success'] && ! isset( $remove_meta[ RussianPostDomesticSettings::CARRIER_KEY ] ), 'remove_from_order must clear shipment state.' );
+russian_post_cancel_smoke_assert( $request_count_before_remove === (int) ( $GLOBALS['wdc_cancel_smoke_request_count'] ?? 0 ), 'remove_from_order must not call Otpravka API.' );
+russian_post_cancel_smoke_assert( str_contains( (string) ( $remove['message'] ?? '' ), 'Данные отправления удалены' ), 'remove_from_order must return success message.' );
+
+$missing_remove = $backlog_service->remove_from_order( new RussianPostCancelSmokeOrder( 6 ) );
+russian_post_cancel_smoke_assert( false === $missing_remove['success'] && str_contains( $missing_remove['message'], 'В заказе нет отправления' ), 'remove_from_order without shipment must fail in Russian.' );
+
 $GLOBALS['wdc_cancel_smoke_backlog_get_body'] = '[{"id":2285075494,"barcode":"80080822636218"}]';
 $GLOBALS['wdc_cancel_smoke_shipment_get_body'] = '[{"id":999,"barcode":"80080822636218"}]';
 $GLOBALS['wdc_cancel_smoke_get_calls'] = array();
 $GLOBALS['wdc_cancel_smoke_post_body'] = russian_post_cancel_smoke_envelope();
-$attach_order = new RussianPostCancelSmokeOrder( 5 );
+$attach_order = new RussianPostCancelSmokeOrder( 7 );
 $attach = $backlog_service->attach_tracking_number( $attach_order, ' 8008 0822636218 ' );
 $attach_state = $attach_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPostDomesticSettings::CARRIER_KEY ] ?? array();
 russian_post_cancel_smoke_assert( true === $attach['success'] && '80080822636218' === (string) ( $attach_state['barcode'] ?? '' ), 'Manual attach must normalize and save barcode.' );
@@ -231,7 +243,7 @@ russian_post_cancel_smoke_assert( isset( $GLOBALS['wdc_cancel_smoke_last_post'] 
 $GLOBALS['wdc_cancel_smoke_backlog_get_body'] = '[]';
 $GLOBALS['wdc_cancel_smoke_shipment_get_body'] = '[{"id":2285075496,"barcode":"80080822636220"}]';
 $GLOBALS['wdc_cancel_smoke_get_calls'] = array();
-$shipment_attach_order = new RussianPostCancelSmokeOrder( 6 );
+$shipment_attach_order = new RussianPostCancelSmokeOrder( 8 );
 $shipment_attach = $backlog_service->attach_tracking_number( $shipment_attach_order, ' 8008 0822636220 ' );
 $shipment_attach_state = $shipment_attach_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPostDomesticSettings::CARRIER_KEY ] ?? array();
 russian_post_cancel_smoke_assert( true === $shipment_attach['success'] && '80080822636220' === (string) ( $shipment_attach_state['tracking_number'] ?? '' ), 'Manual attach must save tracking_number when shipment search found a result.' );
@@ -240,7 +252,7 @@ russian_post_cancel_smoke_assert( 1 === count( array_filter( $GLOBALS['wdc_cance
 
 $GLOBALS['wdc_cancel_smoke_backlog_get_body'] = '[]';
 $GLOBALS['wdc_cancel_smoke_shipment_get_body'] = '[{"barcode":"80080822636221"}]';
-$shipment_attach_without_id_order = new RussianPostCancelSmokeOrder( 7 );
+$shipment_attach_without_id_order = new RussianPostCancelSmokeOrder( 9 );
 $shipment_attach_without_id = $backlog_service->attach_tracking_number( $shipment_attach_without_id_order, '80080822636221' );
 $shipment_attach_without_id_state = $shipment_attach_without_id_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPostDomesticSettings::CARRIER_KEY ] ?? array();
 russian_post_cancel_smoke_assert( true === $shipment_attach_without_id['success'] && '80080822636221' === (string) ( $shipment_attach_without_id_state['barcode'] ?? '' ), 'Manual attach must save tracking when shipment search has no id.' );
@@ -248,22 +260,28 @@ russian_post_cancel_smoke_assert( ! isset( $shipment_attach_without_id_state['ba
 
 $GLOBALS['wdc_cancel_smoke_backlog_get_body'] = '[]';
 $GLOBALS['wdc_cancel_smoke_shipment_get_body'] = '[]';
-$empty_attach = $backlog_service->attach_tracking_number( new RussianPostCancelSmokeOrder( 8 ), '80080822636218' );
+$empty_attach = $backlog_service->attach_tracking_number( new RussianPostCancelSmokeOrder( 10 ), '80080822636218' );
 russian_post_cancel_smoke_assert( false === $empty_attach['success'] && str_contains( $empty_attach['message'], 'не найдено' ), 'Manual attach empty search must fail in Russian.' );
 
 $GLOBALS['wdc_cancel_smoke_backlog_get_body'] = '[{"id":1},{"id":2}]';
 $GLOBALS['wdc_cancel_smoke_shipment_get_body'] = '[]';
-$ambiguous_attach = $backlog_service->attach_tracking_number( new RussianPostCancelSmokeOrder( 9 ), '80080822636218' );
+$ambiguous_attach = $backlog_service->attach_tracking_number( new RussianPostCancelSmokeOrder( 11 ), '80080822636218' );
 russian_post_cancel_smoke_assert( false === $ambiguous_attach['success'] && str_contains( $ambiguous_attach['message'], 'несколько' ), 'Manual attach ambiguous search must fail in Russian.' );
 
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
+$css_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.css' );
 russian_post_cancel_smoke_assert( ! str_contains( $metabox_source, 'Скачать документы' ), 'Russian Post documents button must be absent.' );
 russian_post_cancel_smoke_assert( ! str_contains( $metabox_source, 'Статус WDC' ) && str_contains( $metabox_source, 'Статус посылки' ), 'Metabox must rename WDC status label.' );
 russian_post_cancel_smoke_assert( ! str_contains( $metabox_source, '<strong>ШПИ:</strong>' ) && str_contains( $metabox_source, 'Отслеживание' ), 'Metabox must rename tracking label.' );
 russian_post_cancel_smoke_assert( ! str_contains( $metabox_source, 'Внести ШПИ вручную' ) && str_contains( $metabox_source, 'Внести отслеживание вручную' ), 'Metabox must rename manual tracking button.' );
 russian_post_cancel_smoke_assert( ! str_contains( $metabox_source, 'ШПИ / barcode' ) && str_contains( $metabox_source, 'Номер отслеживания' ), 'Metabox must rename manual tracking input label.' );
-russian_post_cancel_smoke_assert( str_contains( $metabox_source, 'data-wdc-copy-tracking' ) && str_contains( $metabox_source, 'aria-label="' ) && str_contains( $metabox_source, 'fa-light fa-copy' ) && str_contains( $js_source, 'copyText' ), 'Metabox must provide accessible icon copy tracking button.' );
+russian_post_cancel_smoke_assert( str_contains( $metabox_source, 'data-wdc-copy-tracking' ) && str_contains( $metabox_source, 'aria-label="' ) && str_contains( $metabox_source, '<svg width="14" height="14"' ) && ! str_contains( $metabox_source, 'fa-light fa-copy' ) && str_contains( $js_source, 'copyText' ), 'Metabox must provide accessible inline SVG copy tracking button without Font Awesome dependency.' );
+russian_post_cancel_smoke_assert( str_contains( $css_source, '.wdc-copy-tracking-button.button' ) && str_contains( $css_source, 'inline-flex' ) && str_contains( $css_source, 'height: 22px' ), 'Copy tracking button must have compact CSS.' );
+russian_post_cancel_smoke_assert( str_contains( $metabox_source, 'data-wdc-remove-shipment-from-order' ) && str_contains( $metabox_source, 'Удалить из заказа' ), 'Metabox must provide remove-from-order button.' );
+russian_post_cancel_smoke_assert( str_contains( $metabox_source, '$show_cancel = $has_created && $can_cancel' ) && str_contains( $metabox_source, '$show_remove = $has_created &&' ), 'Metabox must split cancel and remove button visibility.' );
+russian_post_cancel_smoke_assert( str_contains( $js_source, 'requestShipmentRemoveFromOrder' ) && str_contains( $js_source, 'resetShipmentUi(box)' ) && str_contains( $js_source, 'removeFromOrderAction' ), 'JS must remove shipment from order and reset UI on success.' );
+russian_post_cancel_smoke_assert( str_contains( $js_source, 'removeButton.hidden = !hasTracking || canCancel' ), 'JS must show remove button only when tracking exists and cancel is unavailable.' );
 russian_post_cancel_smoke_assert( ! str_contains( $js_source, 'ШПИ сохранен' ) && ! str_contains( $js_source, 'Не удалось сохранить ШПИ' ), 'Manual attach JS messages must use tracking number wording.' );
 russian_post_cancel_smoke_assert( ! str_contains( $metabox_source, 'data-wdc-status-plugin' ) && ! str_contains( $metabox_source, 'data-wdc-status-barcode' ), 'Status block must not duplicate plugin status or barcode.' );
 russian_post_cancel_smoke_assert( ! str_contains( $metabox_source, 'Backlog ID' ) && ! str_contains( $metabox_source, 'Служебные данные' ), 'Backlog ID must not be visible.' );
