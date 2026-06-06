@@ -250,33 +250,52 @@ $domestic_rate = array(
 	),
 );
 $session->save_rates( array( 'russian_post_domestic:pickup' => $domestic_rate ) );
+$session->save_pickup_selection(
+	array(
+		'carrier_key' => 'russian_post_domestic',
+		'rate_id' => 'russian_post_domestic:pickup',
+		'point_code' => '644007-207ab64011',
+		'point_type' => 'OPS',
+		'point_name' => 'ОПС 644007',
+		'point_address' => 'Омск, Ленина, 1',
+		'point_postcode' => '644007',
+		'snapshot' => array(
+			'point_code' => '644007-207ab64011',
+			'point_type' => 'OPS',
+			'postcode' => '644007',
+			'address' => 'Омск, Ленина, 1',
+		),
+	)
+);
 WC()->session->set( 'chosen_shipping_methods', array( 'russian_post_domestic:pickup' ) );
 $domestic_order = new WdcOrderMetaSmokeOrder();
 $persister->persist( $domestic_order, array() );
 $domestic_item = new WdcOrderMetaSmokeShippingItem();
-foreach ( array( 'wdc_delivery_kind', 'delivery_kind', 'checkout_group_id', 'domestic_tariff_grouped', 'tariff_variants', 'selected_tariff_rate_id', 'selected_tariff_object', 'selected_tariff_title', 'rate_meta', 'rules_source', 'round_up_applied', 'minimum_price_applied', 'no_pickup_selection', 'requires_pickup_point', 'requires_courier_address', 'delivery_days', 'request_params', 'items_summary' ) as $technical_key ) {
+foreach ( array( 'Способ доставки', 'Тариф', 'Пункт выдачи', 'Индекс ПВЗ', 'Тип ПВЗ', 'wdc_delivery_kind', 'delivery_kind', 'checkout_group_id', 'domestic_tariff_grouped', 'tariff_variants', 'selected_tariff_rate_id', 'selected_tariff_object', 'selected_tariff_title', 'rate_meta', 'rules_source', 'round_up_applied', 'minimum_price_applied', 'no_pickup_selection', 'requires_pickup_point', 'requires_courier_address', 'delivery_days', 'request_params', 'items_summary' ) as $technical_key ) {
 	$domestic_item->add_meta_data( $technical_key, 'auto copied by WooCommerce', true );
 }
 $persister->persist_shipping_item_meta( $domestic_item, 0, array(), $domestic_order );
 $domestic_calculation = $domestic_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
 order_meta_smoke_assert( '23030' === ( $domestic_calculation['selected_tariff_object'] ?? '' ) && 'Посылка онлайн' === ( $domestic_calculation['selected_tariff_title'] ?? '' ), 'Domestic order payload must save selected tariff object and title.' );
+order_meta_smoke_assert( '644007-207ab64011' === ( $domestic_calculation['pickup']['point_code'] ?? '' ) && 'OPS' === ( $domestic_calculation['pickup']['point_type'] ?? '' ) && '644007' === ( $domestic_calculation['pickup']['point_postcode'] ?? '' ) && 'Омск, Ленина, 1' === ( $domestic_calculation['pickup']['point_address'] ?? '' ), 'Domestic order payload must save pickup point code, type, postcode and address in calculation data.' );
+order_meta_smoke_assert( ! isset( $domestic_order->shipping['address_2'] ) || '' === (string) $domestic_order->shipping['address_2'], 'Domestic pickup order must not write pickup code into shipping_address_2.' );
 order_meta_smoke_assert( 3 === ( $domestic_calculation['result']['final_delivery_days_min'] ?? 0 ) && 3 === ( $domestic_calculation['result']['final_delivery_days_max'] ?? 0 ), 'Domestic order payload must save final delivery min/max after rules.' );
 order_meta_smoke_assert( 1 === ( $domestic_calculation['api']['api_delivery_min_days'] ?? 0 ) && 1 === ( $domestic_calculation['api']['api_delivery_max_days'] ?? 0 ) && '1 день' === ( $domestic_calculation['api']['api_delivery_text'] ?? '' ), 'Domestic order payload must save original API delivery range.' );
 order_meta_smoke_assert( 3 === ( $domestic_calculation['result']['final_delivery_min_days'] ?? 0 ) && 3 === ( $domestic_calculation['result']['final_delivery_max_days'] ?? 0 ) && '3 дня' === ( $domestic_calculation['result']['final_delivery_text'] ?? '' ), 'Domestic order payload must save final delivery range text.' );
-order_meta_smoke_assert( in_array( 'Посылка онлайн', $domestic_item->meta, true ), 'Domestic visible shipping item meta must show selected tariff title.' );
-order_meta_smoke_assert( in_array( '3 дня', $domestic_item->meta, true ), 'Domestic visible shipping item meta must show formatted delivery days.' );
+order_meta_smoke_assert( ! in_array( 'Посылка онлайн', $domestic_item->meta, true ) && in_array( '3 дня', $domestic_item->meta, true ), 'Domestic visible shipping item meta must show only formatted delivery days.' );
 order_meta_smoke_assert( 'Почта России до отделения, Посылка онлайн - 3 дня' === $domestic_item->method_title, 'Domestic shipping item method title must include configured method title, selected tariff, and delivery days.' );
 $domestic_visible_blob = wp_json_encode( $domestic_item->meta );
-foreach ( array( 'wdc_delivery_kind', 'delivery_kind', 'checkout_group_id', 'domestic_tariff_grouped', 'tariff_variants', 'selected_tariff_rate_id', 'selected_tariff_object', 'selected_tariff_title', 'rate_meta', 'rules_source', 'round_up_applied', 'minimum_price_applied', 'no_pickup_selection', 'requires_pickup_point', 'requires_courier_address', 'delivery_days', 'request_params', 'items_summary' ) as $technical_key ) {
+foreach ( array( 'Способ доставки', 'Тариф', 'Пункт выдачи', 'Индекс ПВЗ', 'Тип ПВЗ', 'wdc_delivery_kind', 'delivery_kind', 'checkout_group_id', 'domestic_tariff_grouped', 'tariff_variants', 'selected_tariff_rate_id', 'selected_tariff_object', 'selected_tariff_title', 'rate_meta', 'rules_source', 'round_up_applied', 'minimum_price_applied', 'no_pickup_selection', 'requires_pickup_point', 'requires_courier_address', 'delivery_days', 'request_params', 'items_summary' ) as $technical_key ) {
 	order_meta_smoke_assert( ! str_contains( (string) $domestic_visible_blob, $technical_key ), 'Domestic technical meta must not be visible in shipping item meta: ' . $technical_key );
 }
-order_meta_smoke_assert( array( 'Способ доставки', 'Тариф', 'Срок доставки' ) === array_keys( $domestic_item->meta ), 'Domestic visible shipping item meta must contain only public rows.' );
+order_meta_smoke_assert( array( 'Срок доставки' ) === array_keys( $domestic_item->meta ), 'Domestic visible shipping item meta must contain only delivery days.' );
 
 ob_start();
 ( new OrderDeliveryMetabox() )->render( $domestic_order );
 $domestic_html = (string) ob_get_clean();
 order_meta_smoke_assert( str_contains( $domestic_html, 'Срок по API' ) && str_contains( $domestic_html, '1 день' ) && str_contains( $domestic_html, 'Итоговый срок' ) && str_contains( $domestic_html, '3 дня' ) && ! str_contains( $domestic_html, '3 дн.' ), 'Domestic order metabox must render API and final formatted Russian delivery days.' );
 order_meta_smoke_assert( str_contains( $domestic_html, 'Служба доставки' ) && str_contains( $domestic_html, 'Выбранный тариф' ) && str_contains( $domestic_html, 'Тип доставки' ), 'Domestic order metabox must show public service, tariff, and delivery type labels.' );
+order_meta_smoke_assert( strpos( $domestic_html, 'Тип ПВЗ' ) > strpos( $domestic_html, 'Код ПВЗ' ) && str_contains( $domestic_html, 'OPS' ), 'Domestic order metabox must show pickup type under pickup code.' );
 order_meta_smoke_assert( ! str_contains( $domestic_html, 'russian_post_domestic:pickup' ) && ! str_contains( $domestic_html, 'api_price_has_vat' ) && ! str_contains( $domestic_html, 'НДС' ), 'Domestic order metabox must hide technical rate id and VAT flag.' );
 
 ob_start();

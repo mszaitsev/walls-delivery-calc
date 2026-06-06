@@ -544,9 +544,8 @@ final class DeliveryServicesAdminPage {
 				<?php $this->textarea_row( 'courier_customer_comment', __( 'Комментарий для покупателя — курьерская доставка', 'walls-delivery-calc' ), $service->courier_customer_comment ); ?>
 				<?php if ( $this->is_domestic_service( $service ) ) : ?>
 					<tr><th colspan="2"><h3><?php echo esc_html__( 'Почта России по РФ', 'walls-delivery-calc' ); ?></h3></th></tr>
-					<?php $this->text_row( 'rp_from_postcodes', __( 'Индексы отделений для отправки', 'walls-delivery-calc' ), implode( ',', is_array( $domestic['from_postcodes'] ?? null ) ? $domestic['from_postcodes'] : array() ) ); ?>
-					<?php $this->text_row( 'rp_default_from_postcode', __( 'Индекс отправления по умолчанию', 'walls-delivery-calc' ), (string) ( $domestic['default_from_postcode'] ?? '' ) ); ?>
-					<?php $this->text_row( 'rp_return_postcode', __( 'Индекс возврата', 'walls-delivery-calc' ), (string) ( $domestic['return_postcode'] ?? '' ) ); ?>
+					<?php $this->text_row( 'rp_from_postcodes', __( 'Индекс отправки для расчета доставки', 'walls-delivery-calc' ), implode( ',', is_array( $domestic['from_postcodes'] ?? null ) ? $domestic['from_postcodes'] : array() ) ); ?>
+					<?php $this->text_row( 'rp_return_postcode', __( 'Индекс возврата для расчета доставки', 'walls-delivery-calc' ), (string) ( $domestic['return_postcode'] ?? '' ) ); ?>
 					<?php $this->checkbox_row( 'rp_insurance_enabled', __( 'Использовать тарифы с объявленной ценностью', 'walls-delivery-calc' ), ! empty( $domestic['insurance_enabled'] ) ); ?>
 					<?php $this->text_row( 'rp_timeout', __( 'Таймаут API, сек', 'walls-delivery-calc' ), (string) ( $domestic['timeout'] ?? 20 ) ); ?>
 					<?php $this->text_row( 'rp_vat_rate', __( 'Ставка НДС', 'walls-delivery-calc' ), (string) ( $domestic['vat_rate'] ?? 0.2 ) ); ?>
@@ -601,7 +600,7 @@ final class DeliveryServicesAdminPage {
 			<h3>Tariff API</h3>
 			<table class="form-table" role="presentation">
 				<?php $this->text_row( 'rp_api_endpoint', __( 'Tariff API endpoint', 'walls-delivery-calc' ), (string) ( $domestic['api_endpoint'] ?? '' ) ); ?>
-				<?php $this->text_row( 'rp_api_token', __( 'Tariff API token', 'walls-delivery-calc' ), (string) ( $domestic['api_token'] ?? '' ) ); ?>
+				<?php $this->text_row( 'rp_api_token', __( 'Tariff API token, если выдан Почтой', 'walls-delivery-calc' ), (string) ( $domestic['api_token'] ?? '' ) ); ?>
 			</table>
 			<h3>Otpravka API</h3>
 			<table class="form-table" role="presentation">
@@ -616,6 +615,7 @@ final class DeliveryServicesAdminPage {
 						<p class="description"><?php echo esc_html__( 'Один индекс на строку или через запятую; используются в модалке отправления как postoffice-code и не смешиваются с индексами расчета тарифа.', 'walls-delivery-calc' ); ?></p>
 					</td>
 				</tr>
+				<?php $this->text_row( 'rp_default_from_postcode', __( 'Индекс отправления по умолчанию', 'walls-delivery-calc' ), (string) ( $domestic['default_from_postcode'] ?? '' ) ); ?>
 			</table>
 			<h3>Tracking API</h3>
 			<table class="form-table" role="presentation">
@@ -1329,7 +1329,6 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 
 		return array(
 			'from_postcodes' => array( 'value' => $postcodes, 'format' => 'json' ),
-			'default_from_postcode' => array( 'value' => $string( 'rp_default_from_postcode', $postcodes[0] ), 'format' => 'string' ),
 			'return_postcode' => array( 'value' => $string( 'rp_return_postcode', $postcodes[0] ), 'format' => 'string' ),
 			'insurance_enabled' => array( 'value' => isset( $_POST['rp_insurance_enabled'] ), 'format' => 'bool' ),
 			'timeout' => array( 'value' => max( 1, min( 60, $int( 'rp_timeout', 20 ) ) ), 'format' => 'number' ),
@@ -1365,6 +1364,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		return array(
 			'api_endpoint' => array( 'value' => $url( 'rp_api_endpoint', 'https://tariff.pochta.ru/v2/calculate/tariff/delivery' ), 'format' => 'string' ),
 			'api_token' => array( 'value' => $string( 'rp_api_token', '' ), 'format' => 'string' ),
+			'default_from_postcode' => array( 'value' => $string( 'rp_default_from_postcode', '630005' ), 'format' => 'string' ),
 		);
 	}
 

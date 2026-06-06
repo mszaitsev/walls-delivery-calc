@@ -352,8 +352,7 @@ pickup_checkout_assert( str_contains( $selected_email_html, 'wdc-pickup-point-ca
 
 $item = new WdcPickupCheckoutItem();
 $persister->persist_shipping_item_meta( $item );
-pickup_checkout_assert( 'Ленина, 1' === (string) ( $item->meta['Пункт выдачи'] ?? '' ), 'shipping item meta must save pickup address.' );
-pickup_checkout_assert( '630001' === (string) ( $item->meta['Индекс ПВЗ'] ?? '' ), 'shipping item meta must save pickup postcode.' );
+pickup_checkout_assert( ! array_key_exists( 'Пункт выдачи', $item->meta ) && ! array_key_exists( 'Индекс ПВЗ', $item->meta ) && ! array_key_exists( 'Тип ПВЗ', $item->meta ), 'shipping item meta must not expose pickup address, postcode, or type.' );
 
 $state_controller->delete();
 pickup_checkout_assert( array() === $session->checkout_pickup_point(), 'reset must clear checkout pickup point.' );

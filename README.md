@@ -1,8 +1,10 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.35.1.
+Current plugin version: 0.35.2.
 
 Current implementation status and roadmap are maintained in `docs/project-status.md`. Historical release notes below may not cover every intermediate 0.33.x change.
+
+Version 0.35.2 further cleans up unified Russian Post domestic checkout/order data. The `Расчет` tab now labels tariff origin/return indices as calculation-only fields, while `default_from_postcode` moved to `API / Credentials` next to postoffice acceptance indices. The Tariff API token field remains because the domestic tariff client sends it as `Authorization: Bearer ...` when configured. Visible domestic shipping item meta now contains only `Срок доставки`; pickup code/type/postcode/address live in `_wdc_delivery_calculation_data.pickup`, and pickup code is no longer written to `shipping_address_2`.
 
 Version 0.35.1 cleans up the unified Russian Post domestic service UI and checkout metadata. The domestic service keeps availability and configurable pickup/courier method titles on `Основные`, keeps tariff calculation indices on `Расчет`, and keeps Tariff API endpoint/token plus Otpravka/Tracking credentials on `API / Credentials`. WooCommerce shipping item meta no longer shows technical `wdc_delivery_kind`, `delivery_kind`, or `checkout_group_id`; shipment creation uses hidden WDC order meta and `_wdc_delivery_calculation_data`.
 

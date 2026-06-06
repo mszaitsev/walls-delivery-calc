@@ -702,7 +702,7 @@ $pickup_code_address = $shipping_address->invoke(
 		)
 	)
 );
-shipments_smoke_assert( '630005, Новосибирская область, Новосибирск, ул. Ленина 15' === $pickup_code_address, 'Courier raw-address must skip address_2 when it starts with pickup code marker.' );
+shipments_smoke_assert( '630005, Новосибирская область, Новосибирск, ул. Ленина 15, Код ПВЗ 630001' === $pickup_code_address, 'Courier raw-address must treat address_2 as a normal address fragment; pickup code is no longer written there by checkout.' );
 
 $declared_value_method = $factory_reflection->getMethod( 'declared_value_from_place_row' );
 $declared_value_method->setAccessible( true );

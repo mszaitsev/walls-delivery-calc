@@ -640,7 +640,7 @@ final class OrderShipmentDraftFactory {
 						method_exists( $order, 'get_shipping_state' ) ? trim( (string) $order->get_shipping_state() ) : '',
 						method_exists( $order, 'get_shipping_city' ) ? trim( (string) $order->get_shipping_city() ) : '',
 						method_exists( $order, 'get_shipping_address_1' ) ? trim( (string) $order->get_shipping_address_1() ) : '',
-						$this->address_2_for_raw_address( method_exists( $order, 'get_shipping_address_2' ) ? (string) $order->get_shipping_address_2() : '' ),
+						method_exists( $order, 'get_shipping_address_2' ) ? trim( (string) $order->get_shipping_address_2() ) : '',
 					),
 					static fn ( string $value ): bool => '' !== trim( $value )
 				)
@@ -648,14 +648,4 @@ final class OrderShipmentDraftFactory {
 		);
 	}
 
-	private function address_2_for_raw_address( string $address_2 ): string {
-		$address_2 = trim( $address_2 );
-		if ( '' === $address_2 ) {
-			return '';
-		}
-
-		$pickup_marker = (string) json_decode( '"\u041a\u043e\u0434 \u041f\u0412\u0417"' );
-
-		return str_starts_with( $address_2, $pickup_marker ) ? '' : $address_2;
-	}
 }

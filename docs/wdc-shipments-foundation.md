@@ -1,6 +1,6 @@
 # WDC Shipments Foundation
 
-Version 0.35.1 keeps the manual shipment runtime foundation on the unified Russian Post domestic service and removes the need for visible technical WooCommerce shipping item meta. Version 0.34.0 added the admin-only Russian Post OPS/PVZ selector for shipment drafts. The scope is intentionally manual and carrier-neutral, with Russian Post as the first adapter.
+Version 0.35.2 keeps the manual shipment runtime foundation on the unified Russian Post domestic service and removes the need for visible technical WooCommerce shipping item meta or pickup-code data in `shipping_address_2`. Version 0.34.0 added the admin-only Russian Post OPS/PVZ selector for shipment drafts. The scope is intentionally manual and carrier-neutral, with Russian Post as the first adapter.
 
 ## Scope
 
@@ -39,13 +39,13 @@ Normal pickup/OPS shipments are not treated as ECOM by default. They send `addre
 
 ECOM pickup shipments use `ecom-data.delivery-point-index` and omit the normal recipient address schema unless a future API/product explicitly requires it. The ECOM decision comes from the per-tariff `is_ecom` setting in Delivery Services, not from a hard-coded object code. Object `54020` still maps to `ECOM_MARKETPLACE`, but it only uses `ecom-data` when the tariff setting is enabled.
 
-Courier shipments use `address-type-to=DEFAULT`, `courier=true`, `delivery-to-door=true`, `index-to`, `region-to`, `place-to`, and `raw-address`. If a manager did not enter a custom raw address, it is assembled from `shipping_postcode`, `shipping_state`, `shipping_city`, `shipping_address_1`, and `shipping_address_2`; `shipping_address_2` is skipped when it starts with `Код ПВЗ`.
+Courier shipments use `address-type-to=DEFAULT`, `courier=true`, `delivery-to-door=true`, `index-to`, `region-to`, `place-to`, and `raw-address`. If a manager did not enter a custom raw address, it is assembled from `shipping_postcode`, `shipping_state`, `shipping_city`, `shipping_address_1`, and `shipping_address_2`. Pickup checkout no longer writes `Код ПВЗ` into `shipping_address_2`.
 
 `tel-address` is normalized to digits only before payload creation. If the normalized phone is empty, validation returns `Телефон получателя обязателен.`
 
 The admin parcel-place UI accepts only integer values. Insurance is entered in rubles and converted before payload creation to Otpravka kopecks: `1000` rub -> `insr-value=100000`.
 
-Postoffice acceptance indices are configured on `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials` as `Индексы места приема для регистрации отправлений`. The default list contains `630005`; each configured value must be a 6-digit index and is used in the modal select for `postoffice-code`. These indices are separate from tariff calculation `from_postcodes` on `Расчет`.
+Postoffice acceptance indices are configured on `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials` as `Индексы места приема для регистрации отправлений`. The default list contains `630005`; each configured value must be a 6-digit index and is used in the modal select for `postoffice-code`. These indices are separate from tariff calculation `from_postcodes` on `Расчет`. `default_from_postcode` is edited on the same tab after the postoffice-code list while retaining its existing storage key.
 
 `dimension-type` and `prepaid-amount` are not sent by default. `goods` is omitted unless service setting `send_goods_items=true`.
 
@@ -76,7 +76,7 @@ Failed creation stores `_wdc_shipment_last_error` with safe error code/message a
 
 Tracking login/password fields are also prepared here for future status polling; this stage stores them only and does not call the Tracking API.
 
-Shipment drafts read delivery type, selected tariff and service key from hidden WDC order meta and `_wdc_delivery_calculation_data`; they do not depend on visible shipping item meta such as `wdc_delivery_kind`, `delivery_kind`, or `checkout_group_id`.
+Shipment drafts read delivery type, selected tariff, service key and pickup point data from hidden WDC order meta and `_wdc_delivery_calculation_data`; they do not depend on visible shipping item meta such as `wdc_delivery_kind`, `delivery_kind`, `checkout_group_id`, `Пункт выдачи`, `Индекс ПВЗ`, or `Тип ПВЗ`. Pickup point type is shown in the WooCommerce order metabox `Калькулятор доставок` under `Код ПВЗ`.
 
 Domestic Russian Post exposes shipment settings on the service `Отправления` tab:
 

@@ -2,7 +2,7 @@
 
 ## Общий статус
 
-- Версия / baseline проекта: `0.35.1`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.35.2`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
 - Последнее обновление статуса: 2026-06-06.
 - Общий процент готовности: примерно 66%.
@@ -26,7 +26,7 @@
 | Rule Engine | done | 85% | Conditions, groups, audit trail, price/days mutations, admin builder, simulation. |
 | Checkout Rates | done | 80% | WooCommerce shipping method, orchestrator, cache, sorting, rules, order meta persistence. |
 | Checkout UX | partial | 70% | City picker, sorting, tariff selector, courier address summary, pickup map; browser storage TTL and full UX stabilization remain. |
-| Russian Post Domestic | done | 87% | Domestic runtime, unified `russian_post_domestic` service settings context, delivery-type split for pickup/courier groups, configurable method titles, cleaned visible order shipping meta, tariff variants, API client and one-way migration from the previous two-service model. |
+| Russian Post Domestic | done | 88% | Domestic runtime, unified `russian_post_domestic` service settings context, delivery-type split for pickup/courier groups, configurable method titles, visible domestic shipping item meta reduced to delivery days only, tariff variants, API client and one-way migration from the previous two-service model. |
 | Russian Post International | done | 75% | International runtime, country mapping, API/fallback pricing. |
 | Russian Post Pickup Points | done | 88% | Import pipeline, compact table, REST API, checkout map, order persistence, and admin shipment-modal local pickup search. |
 | Multicarrier Pickup Layer | partial | 35% | Generic domain/storage exists, but production checkout map is Russian Post-specific. |
@@ -50,7 +50,7 @@
 
 ### Core Platform
 
-- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.35.1`.
+- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.35.2`.
 - `src/Core/bootstrap.php` wires the autoloader and plugin runtime.
 - `src/Core/Plugin.php` registers services and hooks through a DI container.
 - `src/Infrastructure/Settings`, `src/Infrastructure/Logging`, `src/Infrastructure/Security`, `src/Infrastructure/Queue`, and `src/Infrastructure/Database` provide settings, logging, encryption, background scheduling, and migrations.
@@ -97,6 +97,7 @@
 - `src/DeliveryServices` provides service definitions/settings/countries/admin management used by Russian Post services.
 - Domestic Russian Post settings use only `service_key=russian_post_domestic` as source of truth. Migration `0026_unify_russian_post_domestic_service.php` copies old domestic settings/tariffs/countries/credentials into that unified service, then physically deletes `russian_post_domestic_pickup` and `russian_post_domestic_courier` rows plus their settings, country rows, and service-rule bindings. Backward compatibility with old domestic service keys is intentionally not supported.
 - Domestic Russian Post admin cleanup in `0.35.1`: availability lives on `Основные`, Tariff API endpoint/token live on `API / Credentials`, tariff calculation indices stay on `Расчет`, pickup/courier checkout method titles are configurable on `Основные`, and technical shipping item meta is hidden from WooCommerce order item display.
+- Domestic Russian Post cleanup in `0.35.2`: calculation index labels now clarify tariff calculation usage, `default_from_postcode` is edited in `API / Credentials`, Tariff API token remains because the tariff client uses it as a bearer token when configured, visible domestic shipping item meta contains only `Срок доставки`, pickup point code/type/postcode/address are stored in `_wdc_delivery_calculation_data.pickup`, and pickup code is no longer written to `shipping_address_2`.
 
 ### Russian Post Pickup Points
 
@@ -211,6 +212,7 @@
 - Обычный pickup/ОПС для Почты России создается через `address-type-to=DEMAND`, `index-to`, `region-to`, `place-to` без `ecom-data`.
 - ECOM-сценарий включается настройкой тарифа `is_ecom` во вкладке `Тарифы`; object `54020` не включает `ecom-data` сам по себе.
 - Индексы места приема для регистрации отправлений настраиваются на `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials`, default `630005`, не смешиваются с расчетными `from_postcodes` и выбираются в модалке как `postoffice-code`.
+- `default_from_postcode` редактируется рядом с индексами места приема, но остается прежним service setting и также используется расчетом тарифа как fallback origin index.
 - После AJAX create модалка показывает barcode/result-id или нормализованные ошибки API Почты; страница не перезагружается автоматически.
 
 ## Несоответствия документации и кода

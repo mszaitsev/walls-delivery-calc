@@ -137,18 +137,7 @@ final class OrderShippingMetaPersister {
 				$item->set_method_title( $method_title );
 			}
 			$this->delete_visible_technical_item_meta( $item );
-			$item->add_meta_data( 'Способ доставки', (string) ( $rate['service_title'] ?? '' ), true );
-			$item->add_meta_data( 'Тариф', (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' ), true );
 			$delivery = $this->delivery_days_label( is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array() );
-			$pickup = $this->session_manager->pickup_selection();
-			if (
-				DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' )
-				&& $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) )
-			) {
-				$item->add_meta_data( 'Пункт выдачи', (string) ( $pickup['point_address'] ?? '' ), true );
-				$item->add_meta_data( 'Индекс ПВЗ', (string) ( $pickup['point_postcode'] ?? '' ), true );
-				$item->add_meta_data( 'Тип ПВЗ', (string) ( $pickup['point_type'] ?? '' ), true );
-			}
 			if ( '' !== $delivery ) {
 				$item->add_meta_data( 'Срок доставки', $delivery, true );
 			}
@@ -236,8 +225,10 @@ final class OrderShippingMetaPersister {
 
 		return array(
 			'point_code'    => (string) ( $pickup['point_code'] ?? '' ),
+			'point_type'    => (string) ( $pickup['point_type'] ?? '' ),
 			'point_name'    => (string) ( $pickup['point_name'] ?? '' ),
 			'point_address' => (string) ( $pickup['point_address'] ?? '' ),
+			'point_postcode' => (string) ( $pickup['point_postcode'] ?? '' ),
 			'point_raw'     => $pickup,
 		);
 	}
@@ -474,6 +465,11 @@ final class OrderShippingMetaPersister {
 			'delivery_kind',
 			'checkout_group_id',
 			'is_courier',
+			'Способ доставки',
+			'Тариф',
+			'Пункт выдачи',
+			'Индекс ПВЗ',
+			'Тип ПВЗ',
 			'crossed_price',
 			'planned_delivery_comment',
 			'comments',
@@ -576,7 +572,6 @@ final class OrderShippingMetaPersister {
 	private function set_pickup_shipping_address( object $order, array $pickup, mixed $address_result ): void {
 		$address = is_object( $address_result ) && isset( $address_result->address ) ? $address_result->address : null;
 		$this->call_order_setter( $order, 'set_shipping_address_1', (string) ( $pickup['point_address'] ?? '' ) );
-		$this->call_order_setter( $order, 'set_shipping_address_2', '' !== (string) ( $pickup['point_code'] ?? '' ) ? 'Код ПВЗ: ' . (string) $pickup['point_code'] : '' );
 		$this->call_order_setter( $order, 'set_shipping_city', is_object( $address ) ? (string) ( $address->settlement ?: $address->city ) : '' );
 		$postcode = (string) ( $pickup['point_postcode'] ?? '' );
 		if ( '' === $postcode && is_object( $address ) ) {

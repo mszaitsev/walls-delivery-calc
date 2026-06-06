@@ -59,7 +59,7 @@
 - выбор города/локации, нормализация адреса и подсказки адресов;
 - кеширование quote, сортировка rates, fallback rates и сборка rates с примененными правилами;
 - инструменты симуляции checkout для admin diagnostics.
-- domestic Russian Post checkout method labels use service settings `pickup_method_title`/`courier_method_title`; technical shipping item meta is kept out of visible WooCommerce order item rows while hidden WDC order meta/calculation data remains available.
+- domestic Russian Post checkout method labels use service settings `pickup_method_title`/`courier_method_title`; visible domestic shipping item meta contains only delivery days, while hidden WDC order meta/calculation data stores service, tariff, delivery type and pickup point code/type/postcode/address.
 
 ## Calendar
 
@@ -125,6 +125,7 @@
 - admin-only Russian Post OPS/PVZ selector inside the shipment modal; it updates the shipment draft and preview without saving WooCommerce order meta;
 - order meta storage for shipment state, safe request/response snapshots, barcode/result ids and last safe error;
 - Russian Post domestic Tariff API endpoint/token, Otpravka credentials, Tracking placeholders and postoffice acceptance indices are edited in `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials`.
+- `default_from_postcode` is edited beside postoffice acceptance indices but remains the tariff fallback origin setting; pickup codes are not written to `shipping_address_2`.
 
 ## Pickup Points
 

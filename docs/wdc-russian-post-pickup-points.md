@@ -172,7 +172,7 @@ Session state stores `id`, `point_code`, `point_type`, `postcode`, `address`, `l
 
 WooCommerce validation now requires a saved pickup point for `russian_post_domestic_pickup` and returns `Выберите пункт выдачи Почты России.` when the user tries to place an order without a point. This is a server-side checkout hook and cannot be bypassed by disabling JavaScript.
 
-Order persistence is HPOS-safe and uses WooCommerce order/item APIs. Orders receive `_wdc_pickup_point_id`, `_wdc_pickup_point_code`, `_wdc_pickup_point_type`, `_wdc_pickup_point_address`, `_wdc_pickup_point_postcode`, and `_wdc_pickup_point_snapshot` JSON. Shipping item meta includes `Пункт выдачи`, `Индекс ПВЗ`, and `Тип ПВЗ`. The selected point is displayed on the admin order delivery metabox, thank-you/order details, and customer/admin emails.
+Order persistence is HPOS-safe and uses WooCommerce order/item APIs. Orders receive `_wdc_pickup_point_id`, `_wdc_pickup_point_code`, `_wdc_pickup_point_type`, `_wdc_pickup_point_address`, `_wdc_pickup_point_postcode`, and `_wdc_pickup_point_snapshot` JSON. For Russian Post domestic orders, visible shipping item meta is kept to delivery days only; pickup code/type/postcode/address live in `_wdc_delivery_calculation_data.pickup`. The selected point is displayed on the admin order delivery metabox, thank-you/order details, and customer/admin emails.
 
 The current scope covers the local Russian Post pickup directory, public point REST, and the checkout map/selection MVP. Shipment registration, labels, tracking statuses, multicarrier pickup maps, and advanced clustering are still out of scope.
 

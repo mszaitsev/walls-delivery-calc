@@ -411,7 +411,7 @@ $persister->persist_shipping_item_meta( $shipping_item, 0, array(), $order );
 pickup_smoke_assert( 'demo-nsk-001' === ( $order->meta['_wdc_platform_pickup_code'] ?? '' ), 'Order meta must save pickup code.' );
 pickup_smoke_assert( isset( $order->meta['_wdc_platform_pickup_address'], $order->meta['_wdc_platform_pickup_comment'], $order->meta['_wdc_platform_pickup_work_time'] ), 'Order meta must save pickup details.' );
 pickup_smoke_assert( 'Красный проспект, 25' === ( $order->shipping['address_1'] ?? '' ), 'Pickup order must write pickup address to shipping address_1.' );
-pickup_smoke_assert( 'Код ПВЗ: demo-nsk-001' === ( $order->shipping['address_2'] ?? '' ), 'Pickup order must write pickup code to shipping address_2.' );
+pickup_smoke_assert( ! isset( $order->shipping['address_2'] ) || '' === (string) $order->shipping['address_2'], 'Pickup order must not write pickup code to shipping address_2.' );
 pickup_smoke_assert( 'Новосибирск' === ( $order->shipping['city'] ?? '' ), 'Pickup order must write normalized city to shipping city.' );
 pickup_smoke_assert( '630000' === ( $order->shipping['postcode'] ?? '' ), 'Pickup order must write resolved postcode to shipping postcode.' );
 pickup_smoke_assert( 'demo-nsk-001' === ( $shipping_item->meta['Код ПВЗ'] ?? '' ), 'Pickup shipping item meta must save pickup code.' );
