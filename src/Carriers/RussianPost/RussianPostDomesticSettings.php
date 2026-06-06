@@ -50,11 +50,10 @@ final class RussianPostDomesticSettings {
 	 * @return array<string,mixed>
 	 */
 	public function all( string $service_key = '' ): array {
-		$settings = $this->settings->all();
-		$stored = is_array( $settings[ self::CARRIER_KEY ] ?? null ) ? $settings[ self::CARRIER_KEY ] : array();
+		$stored = array();
 		$service = $this->service_for_key( $service_key ?: self::SERVICE_KEY );
 		if ( $service instanceof DeliveryService && null !== $service->id && $this->service_settings instanceof DeliveryServiceSettingsRepository ) {
-			$stored = array_merge( $stored, $this->service_settings->all_settings( (int) $service->id ) );
+			$stored = $this->service_settings->all_settings( (int) $service->id );
 			$stored['enabled'] = $service->enabled;
 		}
 
