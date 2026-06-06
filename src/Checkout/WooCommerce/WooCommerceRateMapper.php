@@ -16,9 +16,6 @@ final class WooCommerceRateMapper {
 		if ( empty( $rate->meta['domestic_tariff_grouped'] ) && empty( $rate->meta['tariff_variants'] ) && '' !== trim( $rate->planned_delivery_comment ) ) {
 			$label .= ' - ' . $rate->planned_delivery_comment;
 		}
-		$delivery_kind = CourierRateSupport::delivery_kind_for_rate( $rate );
-		$is_courier   = CourierRateSupport::is_courier_rate( $rate );
-
 		return array(
 			'id'        => $rate->rate_id,
 			'label'     => $label,
@@ -27,9 +24,6 @@ final class WooCommerceRateMapper {
 				'carrier_key'     => $rate->carrier_key,
 				'rate_id'         => $rate->rate_id,
 				'delivery_type'   => $rate->delivery_type,
-				'wdc_delivery_kind' => $delivery_kind,
-				'delivery_kind'   => $delivery_kind,
-				'is_courier'      => $is_courier,
 				'crossed_price'   => $rate->crossed_price?->to_array(),
 				'planned_delivery_comment' => $rate->planned_delivery_comment,
 				'comments'        => $rate->comments,
@@ -37,7 +31,6 @@ final class WooCommerceRateMapper {
 				'disabled_reason' => $rate->disabled_reason,
 				'service_key'     => $rate->service_key,
 				'service_title'   => $rate->service_name,
-				'checkout_group_id' => (string) ( $rate->meta['checkout_group_id'] ?? '' ),
 				'rules_source'    => (string) ( $rate->meta['rules_source'] ?? 'none' ),
 				'round_up_applied' => ! empty( $rate->meta['round_up_applied'] ),
 				'minimum_price_applied' => ! empty( $rate->meta['minimum_price_applied'] ),

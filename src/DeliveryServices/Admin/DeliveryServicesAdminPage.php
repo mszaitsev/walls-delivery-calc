@@ -172,8 +172,14 @@ final class DeliveryServicesAdminPage {
 					$id = $this->services->create_service( $data );
 				}
 			}
-			if ( 'save' === $action || 'save_availability' === $action ) {
+			if ( in_array( $action, array( 'save', 'save_main', 'save_availability' ), true ) ) {
 				$this->countries->replace_countries( $id, $this->countries_from_post() );
+			}
+			if ( 'save_main' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
+				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
+				if ( $service instanceof DeliveryService && $this->is_domestic_service( $service ) && null !== $service->id ) {
+					$this->save_russian_post_domestic_main_settings( (int) $service->id );
+				}
 			}
 			if ( 'save_calculation' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
 				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
@@ -217,6 +223,10 @@ final class DeliveryServicesAdminPage {
 			}
 			if ( 'save_api_credentials' === $action && $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ) {
 				$this->otpravka_settings->save_from_admin( $_POST );
+				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
+				if ( $service instanceof DeliveryService && $this->is_domestic_service( $service ) && null !== $service->id && $this->settings instanceof DeliveryServiceSettingsRepository ) {
+					$this->save_russian_post_domestic_api_settings( (int) $service->id );
+				}
 			}
 		}
 
@@ -248,7 +258,7 @@ final class DeliveryServicesAdminPage {
 		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping' ), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
-				'save_availability' => 'availability',
+				'save_availability' => 'main',
 				'save_calculation' => 'calculation',
 				'save_tariffs' => 'tariffs',
 				'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' => 'russian_post_pickup',
@@ -431,7 +441,6 @@ final class DeliveryServicesAdminPage {
 		$current_tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'main';
 		$tabs = array(
 			'main' => 'Основное',
-			'availability' => 'Доступность',
 			'calculation' => 'Расчет',
 			'rules' => 'Правила',
 		);
@@ -455,7 +464,6 @@ final class DeliveryServicesAdminPage {
 		</nav>
 		<?php
 		match ( $current_tab ) {
-			'availability' => $this->render_availability_tab( $service ),
 			'calculation' => $this->render_calculation_tab( $service ),
 			'rules' => $this->render_rules_tab( $service ),
 			'tariffs' => $this->render_tariffs_tab( $service ),
@@ -473,6 +481,7 @@ final class DeliveryServicesAdminPage {
 	}
 
 	private function render_main_tab( DeliveryService $service ): void {
+		$domestic = $this->is_domestic_service( $service ) ? $this->russian_post_domestic_values( $service ) : array();
 		?>
 		<form method="post" style="max-width: 760px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
@@ -496,29 +505,23 @@ final class DeliveryServicesAdminPage {
 				<?php $this->text_row( 'sort_order', __( 'Sort order', 'walls-delivery-calc' ), (string) $service->sort_order ); ?>
 				<?php $this->checkbox_row( 'enabled', __( 'Включена', 'walls-delivery-calc' ), $service->enabled ); ?>
 				<?php $this->checkbox_row( 'use_default_rules_when_no_service_rules', __( 'Fallback на default rules', 'walls-delivery-calc' ), $service->use_default_rules_when_no_service_rules ); ?>
-			</table>
-			<?php submit_button( __( 'Сохранить службу', 'walls-delivery-calc' ) ); ?>
-		</form>
-		<?php
-	}
-
-	private function render_availability_tab( DeliveryService $service ): void {
-		?>
-		<form method="post" style="max-width: 760px;">
-			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
-			<input type="hidden" name="wdc_delivery_services_action" value="save_availability">
-			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
-			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
-			<table class="form-table" role="presentation">
+				<tr><th colspan="2"><h3><?php echo esc_html__( 'Доступность', 'walls-delivery-calc' ); ?></h3></th></tr>
 				<?php $this->select_assoc_row( 'availability_mode', __( 'Доступность', 'walls-delivery-calc' ), $service->availability_mode, $this->availability_mode_options() ); ?>
 				<?php if ( DeliveryService::AVAILABILITY_CARRIER_DIRECTORY === $service->availability_mode ) : ?>
 					<tr><th scope="row"><?php echo esc_html__( 'Справочник перевозчика', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html__( 'Доступность определяется справочником перевозчика.', 'walls-delivery-calc' ); ?> <?php if ( RussianPostSettings::SERVICE_KEY === $service->service_key ) : ?><a class="button" href="<?php echo esc_url( $this->service_tab_url( $service, 'russian_post_countries' ) ); ?>"><?php echo esc_html__( 'Открыть страны Почты России', 'walls-delivery-calc' ); ?></a><?php endif; ?></td></tr>
 				<?php endif; ?>
-				<?php if ( in_array( $service->availability_mode, array( DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, DeliveryService::AVAILABILITY_ALL_EXCEPT_SELECTED ), true ) ) : ?>
+				<?php if ( $this->is_domestic_service( $service ) ) : ?>
+					<tr><th scope="row"><?php echo esc_html__( 'Страны', 'walls-delivery-calc' ); ?></th><td><code>RU</code><p class="description"><?php echo esc_html__( 'Почта России по РФ доступна только для России.', 'walls-delivery-calc' ); ?></p><input type="hidden" name="countries" value="RU"></td></tr>
+					<tr><th colspan="2"><h3><?php echo esc_html__( 'Названия способов доставки', 'walls-delivery-calc' ); ?></h3></th></tr>
+					<?php $this->text_row( 'pickup_method_title', __( 'Название варианта до ПВЗ / ОПС', 'walls-delivery-calc' ), (string) ( $domestic['pickup_method_title'] ?? RussianPostDomesticSettings::PICKUP_SERVICE_TITLE ) ); ?>
+					<?php $this->text_row( 'courier_method_title', __( 'Название варианта курьером', 'walls-delivery-calc' ), (string) ( $domestic['courier_method_title'] ?? RussianPostDomesticSettings::COURIER_SERVICE_TITLE ) ); ?>
+				<?php elseif ( in_array( $service->availability_mode, array( DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, DeliveryService::AVAILABILITY_ALL_EXCEPT_SELECTED ), true ) ) : ?>
 					<?php $this->text_row( 'countries', __( 'Countries', 'walls-delivery-calc' ), implode( ',', $this->countries->countries( (int) $service->id ) ) ); ?>
+				<?php else : ?>
+					<input type="hidden" name="countries" value="<?php echo esc_attr( implode( ',', $this->countries->countries( (int) $service->id ) ) ); ?>">
 				<?php endif; ?>
 			</table>
-			<?php submit_button( __( 'Сохранить доступность', 'walls-delivery-calc' ) ); ?>
+			<?php submit_button( __( 'Сохранить службу', 'walls-delivery-calc' ) ); ?>
 		</form>
 		<?php
 	}
@@ -541,9 +544,7 @@ final class DeliveryServicesAdminPage {
 				<?php $this->textarea_row( 'courier_customer_comment', __( 'Комментарий для покупателя — курьерская доставка', 'walls-delivery-calc' ), $service->courier_customer_comment ); ?>
 				<?php if ( $this->is_domestic_service( $service ) ) : ?>
 					<tr><th colspan="2"><h3><?php echo esc_html__( 'Почта России по РФ', 'walls-delivery-calc' ); ?></h3></th></tr>
-					<?php $this->text_row( 'rp_api_endpoint', __( 'API endpoint тарифа', 'walls-delivery-calc' ), (string) ( $domestic['api_endpoint'] ?? '' ) ); ?>
-					<?php $this->text_row( 'rp_api_token', __( 'API token тарифа', 'walls-delivery-calc' ), (string) ( $domestic['api_token'] ?? '' ) ); ?>
-					<?php $this->text_row( 'rp_from_postcodes', __( 'Индексы отправления', 'walls-delivery-calc' ), implode( ',', is_array( $domestic['from_postcodes'] ?? null ) ? $domestic['from_postcodes'] : array() ) ); ?>
+					<?php $this->text_row( 'rp_from_postcodes', __( 'Индексы отделений для отправки', 'walls-delivery-calc' ), implode( ',', is_array( $domestic['from_postcodes'] ?? null ) ? $domestic['from_postcodes'] : array() ) ); ?>
 					<?php $this->text_row( 'rp_default_from_postcode', __( 'Индекс отправления по умолчанию', 'walls-delivery-calc' ), (string) ( $domestic['default_from_postcode'] ?? '' ) ); ?>
 					<?php $this->text_row( 'rp_return_postcode', __( 'Индекс возврата', 'walls-delivery-calc' ), (string) ( $domestic['return_postcode'] ?? '' ) ); ?>
 					<?php $this->checkbox_row( 'rp_insurance_enabled', __( 'Использовать тарифы с объявленной ценностью', 'walls-delivery-calc' ), ! empty( $domestic['insurance_enabled'] ) ); ?>
@@ -589,6 +590,7 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 		$values = $this->otpravka_settings->values();
+		$domestic = $this->russian_post_domestic_values( $service );
 		$postoffice_codes = $this->otpravka_settings->postoffice_codes();
 		?>
 		<form method="post" style="max-width: 860px;">
@@ -596,6 +598,11 @@ final class DeliveryServicesAdminPage {
 			<input type="hidden" name="wdc_delivery_services_action" value="save_api_credentials">
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<h3>Tariff API</h3>
+			<table class="form-table" role="presentation">
+				<?php $this->text_row( 'rp_api_endpoint', __( 'Tariff API endpoint', 'walls-delivery-calc' ), (string) ( $domestic['api_endpoint'] ?? '' ) ); ?>
+				<?php $this->text_row( 'rp_api_token', __( 'Tariff API token', 'walls-delivery-calc' ), (string) ( $domestic['api_token'] ?? '' ) ); ?>
+			</table>
 			<h3>Otpravka API</h3>
 			<table class="form-table" role="presentation">
 				<tr><th scope="row">AccessToken</th><td><input class="regular-text" type="password" name="russian_post_otpravka_access_token" value="" placeholder="<?php echo esc_attr( $this->otpravka_settings->has_access_token() ? 'задано' : 'не задано' ); ?>"><label style="display:block;margin-top:6px;"><input type="checkbox" name="russian_post_otpravka_clear_access_token" value="1"> <?php echo esc_html__( 'очистить сохраненный AccessToken', 'walls-delivery-calc' ); ?></label></td></tr>
@@ -603,10 +610,10 @@ final class DeliveryServicesAdminPage {
 				<tr><th scope="row"><?php echo esc_html__( 'Пароль', 'walls-delivery-calc' ); ?></th><td><input class="regular-text" type="password" name="russian_post_otpravka_password" value="" placeholder="<?php echo esc_attr( $this->otpravka_settings->has_password() ? 'задано' : 'не задано' ); ?>"><label style="display:block;margin-top:6px;"><input type="checkbox" name="russian_post_otpravka_clear_password" value="1"> <?php echo esc_html__( 'очистить сохраненный пароль', 'walls-delivery-calc' ); ?></label></td></tr>
 				<?php $this->text_row( 'russian_post_otpravka_timeout', __( 'Таймаут API, сек.', 'walls-delivery-calc' ), (string) ( $values[ RussianPostOtpravkaApiSettings::TIMEOUT_KEY ] ?? 120 ) ); ?>
 				<tr>
-					<th scope="row"><?php echo esc_html__( 'Индексы места приема', 'walls-delivery-calc' ); ?></th>
+					<th scope="row"><?php echo esc_html__( 'Индексы места приема для регистрации отправлений', 'walls-delivery-calc' ); ?></th>
 					<td>
 						<textarea class="large-text" rows="3" name="<?php echo esc_attr( RussianPostOtpravkaApiSettings::POSTOFFICE_CODES_KEY ); ?>"><?php echo esc_textarea( implode( "\n", $postoffice_codes ) ); ?></textarea>
-						<p class="description"><?php echo esc_html__( 'Один индекс на строку или через запятую; используются как postoffice-code.', 'walls-delivery-calc' ); ?></p>
+						<p class="description"><?php echo esc_html__( 'Один индекс на строку или через запятую; используются в модалке отправления как postoffice-code и не смешиваются с индексами расчета тарифа.', 'walls-delivery-calc' ); ?></p>
 					</td>
 				</tr>
 			</table>
@@ -1144,6 +1151,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			'title' => sanitize_text_field( wp_unslash( $_POST['title'] ?? '' ) ),
 			'carrier_key' => sanitize_key( wp_unslash( $_POST['carrier_key'] ?? '' ) ),
 			'service_type' => sanitize_key( wp_unslash( $_POST['service_type'] ?? DeliveryService::TYPE_FIXED ) ),
+			'availability_mode' => sanitize_key( wp_unslash( $_POST['availability_mode'] ?? DeliveryService::AVAILABILITY_SELECTED_COUNTRIES ) ),
 			'sort_order' => (int) ( $_POST['sort_order'] ?? 100 ),
 			'enabled' => isset( $_POST['enabled'] ) ? 1 : 0,
 			'use_default_rules_when_no_service_rules' => isset( $_POST['use_default_rules_when_no_service_rules'] ) ? 1 : 0,
@@ -1225,6 +1233,26 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		}
 	}
 
+	private function save_russian_post_domestic_main_settings( int $service_id ): void {
+		if ( ! $this->settings instanceof DeliveryServiceSettingsRepository ) {
+			return;
+		}
+
+		foreach ( $this->sanitize_russian_post_domestic_main_settings_from_post() as $key => $data ) {
+			$this->settings->set_setting( $service_id, $key, $data['value'], $data['format'] );
+		}
+	}
+
+	private function save_russian_post_domestic_api_settings( int $service_id ): void {
+		if ( ! $this->settings instanceof DeliveryServiceSettingsRepository ) {
+			return;
+		}
+
+		foreach ( $this->sanitize_russian_post_domestic_api_settings_from_post() as $key => $data ) {
+			$this->settings->set_setting( $service_id, $key, $data['value'], $data['format'] );
+		}
+	}
+
 	private function save_russian_post_pickup_type_settings( int $service_id ): void {
 		if ( $service_id <= 0 || ! $this->settings instanceof DeliveryServiceSettingsRepository ) {
 			return;
@@ -1286,7 +1314,6 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		$number = static fn ( string $key, float $default = 0 ): float => (float) str_replace( ',', '.', (string) wp_unslash( $_POST[ $key ] ?? (string) $default ) );
 		$int = static fn ( string $key, int $default = 0 ): int => max( 0, (int) ( $_POST[ $key ] ?? $default ) );
 		$string = static fn ( string $key, string $default = '' ): string => sanitize_text_field( wp_unslash( $_POST[ $key ] ?? $default ) );
-		$url = static fn ( string $key, string $default = '' ): string => function_exists( 'esc_url_raw' ) ? esc_url_raw( (string) wp_unslash( $_POST[ $key ] ?? $default ) ) : filter_var( (string) wp_unslash( $_POST[ $key ] ?? $default ), FILTER_SANITIZE_URL );
 		$postcodes_raw = preg_split( '/[\s,;]+/', (string) wp_unslash( $_POST['rp_from_postcodes'] ?? '' ) ) ?: array();
 		$postcodes = array_values(
 			array_unique(
@@ -1301,8 +1328,6 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		}
 
 		return array(
-			'api_endpoint' => array( 'value' => $url( 'rp_api_endpoint', 'https://tariff.pochta.ru/v2/calculate/tariff/delivery' ), 'format' => 'string' ),
-			'api_token' => array( 'value' => $string( 'rp_api_token', '' ), 'format' => 'string' ),
 			'from_postcodes' => array( 'value' => $postcodes, 'format' => 'json' ),
 			'default_from_postcode' => array( 'value' => $string( 'rp_default_from_postcode', $postcodes[0] ), 'format' => 'string' ),
 			'return_postcode' => array( 'value' => $string( 'rp_return_postcode', $postcodes[0] ), 'format' => 'string' ),
@@ -1313,6 +1338,33 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			'fallback_text' => array( 'value' => $string( 'rp_fallback_text', 'Стоимость доставки рассчитает менеджер' ), 'format' => 'string' ),
 			'cache_until_end_of_day' => array( 'value' => isset( $_POST['rp_cache_until_end_of_day'] ), 'format' => 'bool' ),
 			'debug' => array( 'value' => isset( $_POST['rp_debug'] ), 'format' => 'bool' ),
+		);
+	}
+
+	/**
+	 * @return array<string,array{value:mixed,format:string}>
+	 */
+	private function sanitize_russian_post_domestic_main_settings_from_post(): array {
+		$string = static fn ( string $key, string $default = '' ): string => sanitize_text_field( wp_unslash( $_POST[ $key ] ?? $default ) );
+		$pickup_title = trim( $string( 'pickup_method_title', RussianPostDomesticSettings::PICKUP_SERVICE_TITLE ) );
+		$courier_title = trim( $string( 'courier_method_title', RussianPostDomesticSettings::COURIER_SERVICE_TITLE ) );
+
+		return array(
+			'pickup_method_title' => array( 'value' => '' !== $pickup_title ? $pickup_title : RussianPostDomesticSettings::PICKUP_SERVICE_TITLE, 'format' => 'string' ),
+			'courier_method_title' => array( 'value' => '' !== $courier_title ? $courier_title : RussianPostDomesticSettings::COURIER_SERVICE_TITLE, 'format' => 'string' ),
+		);
+	}
+
+	/**
+	 * @return array<string,array{value:mixed,format:string}>
+	 */
+	private function sanitize_russian_post_domestic_api_settings_from_post(): array {
+		$string = static fn ( string $key, string $default = '' ): string => sanitize_text_field( wp_unslash( $_POST[ $key ] ?? $default ) );
+		$url = static fn ( string $key, string $default = '' ): string => function_exists( 'esc_url_raw' ) ? esc_url_raw( (string) wp_unslash( $_POST[ $key ] ?? $default ) ) : filter_var( (string) wp_unslash( $_POST[ $key ] ?? $default ), FILTER_SANITIZE_URL );
+
+		return array(
+			'api_endpoint' => array( 'value' => $url( 'rp_api_endpoint', 'https://tariff.pochta.ru/v2/calculate/tariff/delivery' ), 'format' => 'string' ),
+			'api_token' => array( 'value' => $string( 'rp_api_token', '' ), 'format' => 'string' ),
 		);
 	}
 
@@ -1362,6 +1414,8 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		$defaults = array(
 			'api_endpoint' => 'https://tariff.pochta.ru/v2/calculate/tariff/delivery',
 			'api_token' => '',
+			'pickup_method_title' => RussianPostDomesticSettings::PICKUP_SERVICE_TITLE,
+			'courier_method_title' => RussianPostDomesticSettings::COURIER_SERVICE_TITLE,
 			'from_postcodes' => array( '630005' ),
 			'default_from_postcode' => '630005',
 			'return_postcode' => '630005',

@@ -253,6 +253,8 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 					'tariff_variants' => $variants,
 					'domestic_tariff_grouped' => true,
 					'checkout_group_id' => $group_id,
+					'pickup_method_title' => (string) ( $active->meta['pickup_method_title'] ?? RussianPostDomesticSettings::PICKUP_SERVICE_TITLE ),
+					'courier_method_title' => (string) ( $active->meta['courier_method_title'] ?? RussianPostDomesticSettings::COURIER_SERVICE_TITLE ),
 					'selected_tariff_object' => $active->tariff_key,
 					'selected_tariff_title' => $active->tariff_name,
 					'selected_tariff_rate_id' => $active->rate_id,
@@ -264,12 +266,17 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 
 	private function domestic_method_title( DeliveryRate $rate ): string {
 		if ( RussianPostDomesticSettings::CARRIER_KEY === $rate->carrier_key ) {
-			$prefix = DeliveryType::COURIER === $rate->delivery_type
-				? RussianPostDomesticSettings::COURIER_SERVICE_TITLE
-				: RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ' / ОПС';
+			$prefix = $this->domestic_method_prefix( $rate );
+			$tariff = trim( $rate->tariff_name );
 			$days = $this->delivery_comment( $rate->delivery_days );
 
-			return '' !== $days ? $prefix . ' - ' . $days : $prefix;
+			if ( '' === $tariff ) {
+				return $prefix;
+			}
+
+			$rate_label = '' !== $days ? $tariff . ' - ' . $days : $tariff;
+
+			return $prefix . ', ' . $rate_label;
 		}
 		$tariff = trim( $rate->tariff_name );
 		if ( '' === $tariff ) {
@@ -280,6 +287,14 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		$days = $this->delivery_comment( $rate->delivery_days );
 
 		return '' !== $days ? $title . ' - ' . $days : $title;
+	}
+
+	private function domestic_method_prefix( DeliveryRate $rate ): string {
+		$key = DeliveryType::COURIER === $rate->delivery_type ? 'courier_method_title' : 'pickup_method_title';
+		$default = DeliveryType::COURIER === $rate->delivery_type ? RussianPostDomesticSettings::COURIER_SERVICE_TITLE : RussianPostDomesticSettings::PICKUP_SERVICE_TITLE;
+		$title = trim( (string) ( $rate->meta[ $key ] ?? '' ) );
+
+		return '' !== $title ? $title : $default;
 	}
 
 	private function delivery_comment( DateRange $range ): string {

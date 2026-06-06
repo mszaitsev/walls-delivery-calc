@@ -101,7 +101,7 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 				continue;
 			}
 
-			$rates[] = $this->rate_from_result( $service_key, $delivery_type, $variant, $postcode, $params, $api_result, $parsed, $price_kopecks, $package );
+			$rates[] = $this->rate_from_result( $service_key, $delivery_type, $variant, $postcode, $params, $api_result, $parsed, $price_kopecks, $package, $settings );
 		}
 
 		return new DeliveryQuote( $this->quote_id( $request, $package, $service_key . ':' . $delivery_type ), self::KEY, $request->destination, $package, $rates, true, array() === $rates ? 'no_tariffs_available' : '', '', false, 'api', array( 'postcode' => $display_postcode, 'tariff_postcode' => $postcode, 'service_key' => $service_key, 'delivery_type' => $delivery_type, 'skipped_tariffs' => $skipped, 'variant_diagnostics' => $variant_diagnostics ) );
@@ -304,12 +304,14 @@ final class RussianPostDomesticCarrier implements CarrierAdapterInterface {
 	 * @param array<string,mixed>  $api_result
 	 * @param array<string,mixed>  $parsed
 	 */
-	private function rate_from_result( string $service_key, string $delivery_type, DomesticTariffVariant $variant, string $postcode, array $params, array $api_result, array $parsed, int $price_kopecks, Package $package ): DeliveryRate {
+	private function rate_from_result( string $service_key, string $delivery_type, DomesticTariffVariant $variant, string $postcode, array $params, array $api_result, array $parsed, int $price_kopecks, Package $package, array $settings ): DeliveryRate {
 		$min = is_numeric( $parsed['delivery_min_days'] ?? null ) ? (int) $parsed['delivery_min_days'] : null;
 		$max = is_numeric( $parsed['delivery_max_days'] ?? null ) ? (int) $parsed['delivery_max_days'] : $min;
 		$range = DateRange::range( $min, $max, DateRange::UNIT_CALENDAR_DAYS );
 		$meta = array(
 			'tariff_selector_group' => true,
+			'pickup_method_title' => (string) ( $settings['pickup_method_title'] ?? RussianPostDomesticSettings::PICKUP_SERVICE_TITLE ),
+			'courier_method_title' => (string) ( $settings['courier_method_title'] ?? RussianPostDomesticSettings::COURIER_SERVICE_TITLE ),
 			'selected_tariff_object' => $variant->object_code,
 			'selected_tariff_title' => $variant->title,
 			'object_code' => $variant->object_code,

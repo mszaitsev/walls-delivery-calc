@@ -471,17 +471,17 @@ $rate_23030 = new DeliveryRate( RussianPostDomesticSettings::rate_id( DeliveryTy
 $rate_47030 = new DeliveryRate( RussianPostDomesticSettings::rate_id( DeliveryType::PICKUP, '47030' ), RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::SERVICE_KEY, RussianPostDomesticSettings::TITLE, '47030', 'Посылка 1 класса', DeliveryType::PICKUP, 'Посылка 1 класса', Money::from_rubles( 659 ), null, Money::from_rubles( 700 ), DateRange::single( 3 ), '', '2-3 дн.', array(), false, '', false, false, array( 'tariff_selector_group' => true ) );
 $selected_rate = $selector_method->invoke( $method, $pickup_group_id, array( $rate_23030, $rate_47030 ) );
 rpd_assert( $selected_rate instanceof DeliveryRate && 659.0 === $selected_rate->price->get_rubles() && '47030' === (string) ( $selected_rate->meta['selected_tariff_object'] ?? '' ), 'Selected domestic tariff must drive WC rate cost and selected object.' );
-rpd_assert( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ' / ОПС - 3 дня' === $selected_rate->title, 'Domestic grouped method title must include pickup group and delivery days.' );
+rpd_assert( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ', Посылка 1 класса - 3 дня' === $selected_rate->title, 'Domestic grouped method title must include configured pickup title, selected tariff and delivery days.' );
 rpd_assert( '3 дня' === (string) ( $selected_rate->meta['tariff_variants'][1]['planned_delivery_comment'] ?? '' ), 'Domestic selector variant row must use final delivery days comment.' );
 rpd_assert( is_array( $selected_rate->meta['tariff_variants'][1]['crossed_price'] ?? null ), 'Domestic selector variant row must keep crossed price per variant.' );
 $selected_rate_again = $selector_method->invoke( $method, $pickup_group_id, array( $rate_23030, $rate_47030 ) );
 $selected_session = $session_manager->selected_tariff( $pickup_group_id );
 rpd_assert( $selected_rate_again instanceof DeliveryRate && 659.0 === $selected_rate_again->price->get_rubles() && '47030' === (string) ( $selected_session['object_code'] ?? '' ), 'Repeated tariff selector calculation must not reset valid selected tariff to the first variant.' );
 $single_rate = $selector_method->invoke( $method, $pickup_group_id, array( $rate_23030 ) );
-rpd_assert( array() === ( $single_rate->meta['tariff_variants'] ?? array() ) && RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ' / ОПС - 5-6 дней' === $single_rate->title, 'Single-tariff domestic service must not expose radio selector variants.' );
+rpd_assert( array() === ( $single_rate->meta['tariff_variants'] ?? array() ) && RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ', Посылка онлайн - 5-6 дней' === $single_rate->title, 'Single-tariff domestic service must not expose radio selector variants.' );
 $mapper = new WooCommerceRateMapper();
 $mapped_single_rate = $mapper->map( $single_rate );
-rpd_assert( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ' / ОПС - 5-6 дней' === $mapped_single_rate['label'], 'Single-tariff domestic grouped label must include planned delivery comment.' );
+rpd_assert( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ', Посылка онлайн - 5-6 дней' === $mapped_single_rate['label'], 'Single-tariff domestic grouped label must include selected tariff and planned delivery comment.' );
 rpd_assert( true === ( $mapped_single_rate['meta_data']['domestic_tariff_grouped'] ?? false ), 'Single-tariff domestic grouped meta must keep grouped marker for checkout rendering.' );
 $single_wc_rate = new class( $mapped_single_rate['meta_data'] ) {
 	/** @param array<string,mixed> $meta */
@@ -494,7 +494,7 @@ ob_start();
 $single_rate_html = (string) ob_get_clean();
 rpd_assert( ! str_contains( $single_rate_html, 'wdc-platform-delivery-comment' ) && ! str_contains( $single_rate_html, $single_rate->planned_delivery_comment ), 'Single-tariff domestic grouped planned delivery comment must stay in the label only.' );
 $mapped_multi_rate = $mapper->map( $selected_rate );
-rpd_assert( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ' / ОПС - 3 дня' === $mapped_multi_rate['label'], 'Multi-tariff domestic grouped label must include selected tariff delivery days.' );
+rpd_assert( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ', Посылка 1 класса - 3 дня' === $mapped_multi_rate['label'], 'Multi-tariff domestic grouped label must include configured method title, selected tariff and delivery days.' );
 rpd_assert( '1 день' === DeliveryDaysFormatter::format( DateRange::single( 1 ) ) && '3 дня' === DeliveryDaysFormatter::format( DateRange::single( 3 ) ) && '5 дней' === DeliveryDaysFormatter::format( DateRange::single( 5 ) ) && '21 день' === DeliveryDaysFormatter::format( DateRange::single( 21 ) ), 'Delivery days formatter must use Russian singular/plural forms.' );
 rpd_assert( '1-3 дня' === DeliveryDaysFormatter::format( DateRange::range( 1, 3 ) ) && '3-5 дней' === DeliveryDaysFormatter::format( DateRange::range( 3, 5 ) ), 'Delivery days formatter must use Russian range suffixes.' );
 $rates_for_wc = $method_reflection->getMethod( 'rates_for_wc' );
@@ -502,6 +502,6 @@ $rates_for_wc->setAccessible( true );
 $rate_24030 = new DeliveryRate( RussianPostDomesticSettings::rate_id( DeliveryType::COURIER, '24030' ), RussianPostDomesticSettings::CARRIER_KEY, 'Почта России', RussianPostDomesticSettings::SERVICE_KEY, RussianPostDomesticSettings::TITLE, '24030', 'Курьер онлайн', DeliveryType::COURIER, 'Курьер онлайн', Money::from_rubles( 800 ), null, null, DateRange::single( 1 ), '', '1 дн.', array(), false, '', false, true, array( 'tariff_selector_group' => true ) );
 $grouped_rates = $rates_for_wc->invoke( $method, array( $rate_23030, $rate_47030, $rate_24030 ) );
 rpd_assert( 2 === count( $grouped_rates ) && RussianPostDomesticSettings::SERVICE_KEY === $grouped_rates[0]->service_key && RussianPostDomesticSettings::SERVICE_KEY === $grouped_rates[1]->service_key && $pickup_group_id === $grouped_rates[0]->rate_id && $courier_group_id === $grouped_rates[1]->rate_id, 'Pickup and courier domestic checkout groups must share one service key and separate group ids.' );
-rpd_assert( RussianPostDomesticSettings::COURIER_SERVICE_TITLE . ' - 1 день' === $grouped_rates[1]->title, 'Courier grouped method title must include courier group and delivery days.' );
+rpd_assert( RussianPostDomesticSettings::COURIER_SERVICE_TITLE . ', Курьер онлайн - 1 день' === $grouped_rates[1]->title, 'Courier grouped method title must include configured courier title, selected tariff and delivery days.' );
 
 echo "Russian Post domestic smoke OK\n";

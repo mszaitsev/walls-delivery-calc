@@ -363,7 +363,7 @@ final class OrderShippingMetaPersister {
 		$carrier_key = (string) ( $rate['carrier_key'] ?? '' );
 		$service_key = (string) ( $rate['service_key'] ?? '' );
 
-		return 'russian_post_domestic' === $carrier_key || str_starts_with( $service_key, 'russian_post_domestic_' );
+		return RussianPostDomesticSettings::CARRIER_KEY === $carrier_key || RussianPostDomesticSettings::SERVICE_KEY === $service_key;
 	}
 
 	/**
@@ -377,7 +377,7 @@ final class OrderShippingMetaPersister {
 	 * @param array<string,mixed> $rate
 	 */
 	private function domestic_method_title( array $rate ): string {
-		$service_title = trim( (string) ( $rate['service_title'] ?? '' ) );
+		$service_title = $this->domestic_method_prefix( $rate );
 		$tariff_title = trim( (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' ) );
 		if ( '' === $service_title ) {
 			return $tariff_title;
@@ -386,10 +386,23 @@ final class OrderShippingMetaPersister {
 			return $service_title;
 		}
 
-		$title = $service_title . ': ' . $tariff_title;
 		$delivery = $this->delivery_days_label( is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array() );
+		$rate_label = '' !== $delivery ? $tariff_title . ' - ' . $delivery : $tariff_title;
 
-		return '' !== $delivery ? $title . ' - ' . $delivery : $title;
+		return $service_title . ', ' . $rate_label;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function domestic_method_prefix( array $rate ): string {
+		$rate_meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
+		$delivery_type = (string) ( $rate['delivery_type'] ?? '' );
+		$key = DeliveryType::COURIER === $delivery_type ? 'courier_method_title' : 'pickup_method_title';
+		$default = DeliveryType::COURIER === $delivery_type ? RussianPostDomesticSettings::COURIER_SERVICE_TITLE : RussianPostDomesticSettings::PICKUP_SERVICE_TITLE;
+		$title = trim( (string) ( $rate[ $key ] ?? $rate_meta[ $key ] ?? '' ) );
+
+		return '' !== $title ? $title : $default;
 	}
 
 	/**
@@ -457,6 +470,10 @@ final class OrderShippingMetaPersister {
 			'carrier_key',
 			'rate_id',
 			'delivery_type',
+			'wdc_delivery_kind',
+			'delivery_kind',
+			'checkout_group_id',
+			'is_courier',
 			'crossed_price',
 			'planned_delivery_comment',
 			'comments',

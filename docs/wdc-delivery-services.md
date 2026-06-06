@@ -40,8 +40,7 @@ The admin page is `Калькулятор доставок → Службы до
 
 The service edit page is `admin.php?page=wdc-delivery-services&service=<service_key>` and exposes real tabs:
 
-- `Основное`: service key, title, carrier key, service type, enabled state, sort order, and default-rule fallback.
-- `Доступность`: availability mode plus the selected/all-except country list. The admin shows Russian labels (`Справочник перевозчика`, `Только выбранные страны`, `Все страны`, `Все страны, кроме выбранных`) while storing the technical values. `carrier_directory` services show that availability is driven by the carrier directory. Russian Post also links to its countries tab.
+- `Основное`: service key, title, carrier key, service type, enabled state, sort order, default-rule fallback, availability mode and selected/all-except country list. The admin shows Russian labels (`Справочник перевозчика`, `Только выбранные страны`, `Все страны`, `Все страны, кроме выбранных`) while storing the technical values. `carrier_directory` services show that availability is driven by the carrier directory. Russian Post also links to its countries tab.
 - `Расчет`: service post-processing (`round_up_to_ruble`, `minimum_price_rub`) and service-specific calculation settings. The visible labels use Russian wording such as `Минимальная цена, руб.` and `Ставка НДС`.
 - `Правила`: embedded reusable rules admin for `target_type=service`.
 - `Страны Почты России`: only for `russian_post_worldwide_parcel`; embeds the Russian Post country mapping admin.
@@ -76,7 +75,7 @@ Delivery services can save a structured order calculation payload under `_wdc_de
 For `russian_post_worldwide_parcel`, the normal WooCommerce shipping item meta shows only `Способ доставки: международная доставка Почтой России`. The order metabox `Калькулятор доставок` is the admin-facing place for calculation details: destination country, products/packaging/final API weight, API base price, readable rules formula, and final result. Terminal fallback rates save fallback reason/text and final price `0`, but do not show rules because fallback bypasses rules and service post-processing.
 # Delivery services update
 
-As of 0.35.0, domestic Russian Post has one built-in delivery service:
+As of 0.35.1, domestic Russian Post has one built-in delivery service:
 
 - `carrier_key=russian_post_domestic`
 - `service_key=russian_post_domestic`
@@ -85,7 +84,13 @@ Bootstrapping pins it to `RU` and no longer creates pickup/courier service rows.
 
 Migration `0026_unify_russian_post_domestic_service.php` is a one-way cleanup migration for the old domestic Russian Post model. It copies service settings, tariff variants, countries, point type settings, Otpravka/tracking credentials and shipment settings into `service_key=russian_post_domestic`, then physically deletes the old `russian_post_domestic_pickup` and `russian_post_domestic_courier` service rows plus their service settings, country rows and service-rule bindings. The source of truth after the migration is only the unified service; backward compatibility with the old domestic service keys is intentionally not supported.
 
-The domestic service has these tabs: `Основные`, `Доступность`, `Расчет`, `Тарифы`, `ПВЗ / ОПС`, `API / Credentials`, `Отправления`, `Статусы / Mapping`, `Диагностика`. The former carrier credentials page is removed from the menu and the UI.
+The domestic service has these tabs: `Основные`, `Расчет`, `Тарифы`, `ПВЗ / ОПС`, `API / Credentials`, `Отправления`, `Статусы / Mapping`, `Диагностика`. The former carrier credentials page is removed from the menu and the UI.
+
+As of 0.35.1, the old separate `Доступность` tab is folded into `Основные`. The main tab saves enabled/title/system keys, `availability_mode`, country availability, and the customer-facing domestic method titles `pickup_method_title` and `courier_method_title`. For `russian_post_domestic`, availability is pinned to `RU`, and the configurable method-title defaults are `Почта России до отделения` and `Почта России до двери`.
+
+The domestic `Расчет` tab keeps calculation behavior: from postcodes, default from postcode, return postcode, insurance, timeout/cache/debug, packaging weight, rounding, minimum price and fallback settings. Tariff API endpoint and token moved to `API / Credentials`, next to Otpravka and Tracking credentials. `russian_post_otpravka_postoffice_codes` remains separate from tariff `from_postcodes`; it is the list of acceptance postoffice indices used by the shipment modal as `postoffice-code`.
+
+Checkout labels for grouped domestic rates use `{pickup_method_title|courier_method_title}, {tariff title - delivery days}`. If delivery days are absent, only the method title and tariff title are shown; if the tariff title is absent, only the method title is shown. Technical WooCommerce shipping item meta such as `wdc_delivery_kind`, `delivery_kind`, and `checkout_group_id` is not visible on orders; hidden order meta and `_wdc_delivery_calculation_data` remain the source for shipment creation.
 
 Domestic tariff variants are exposed on the unified `Тарифы` tab. One list stores pickup and courier rows with `delivery_type`, `enabled`, `is_ecom`, declared-value flag, weight limits, custom titles and sort order. Shipment creation uses `is_ecom` to decide whether pickup payloads use `ecom-data.delivery-point-index` or the normal OPS `DEMAND` address schema.
 

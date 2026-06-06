@@ -59,6 +59,7 @@
 - выбор города/локации, нормализация адреса и подсказки адресов;
 - кеширование quote, сортировка rates, fallback rates и сборка rates с примененными правилами;
 - инструменты симуляции checkout для admin diagnostics.
+- domestic Russian Post checkout method labels use service settings `pickup_method_title`/`courier_method_title`; technical shipping item meta is kept out of visible WooCommerce order item rows while hidden WDC order meta/calculation data remains available.
 
 ## Calendar
 
@@ -123,7 +124,7 @@
 - Russian Post Otpravka `PUT /2.0/user/backlog` payload building and response normalization;
 - admin-only Russian Post OPS/PVZ selector inside the shipment modal; it updates the shipment draft and preview without saving WooCommerce order meta;
 - order meta storage for shipment state, safe request/response snapshots, barcode/result ids and last safe error;
-- Russian Post domestic credentials and postoffice codes are edited in `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials`.
+- Russian Post domestic Tariff API endpoint/token, Otpravka credentials, Tracking placeholders and postoffice acceptance indices are edited in `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials`.
 
 ## Pickup Points
 
@@ -162,6 +163,7 @@
 - admin page сервисов доставки;
 - данные сервисов, используемые checkout и расчетом carrier rates.
 - unified Russian Post domestic service `russian_post_domestic`; old `russian_post_domestic_pickup`/`russian_post_domestic_courier` rows are physically removed by migration `0026`, and no backward compatibility layer for those keys remains.
+- domestic Russian Post availability is edited on `Основные`; the separate availability tab is no longer part of the service edit UI.
 
 ## Packaging
 

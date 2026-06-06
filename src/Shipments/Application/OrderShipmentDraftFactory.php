@@ -103,7 +103,7 @@ final class OrderShipmentDraftFactory {
 				$service_variants[] = array(
 					'service_key' => $service->service_key,
 					'group_id' => RussianPostDomesticSettings::checkout_group_id( $delivery_type ),
-					'title' => DeliveryType::COURIER === $delivery_type ? RussianPostDomesticSettings::COURIER_SERVICE_TITLE : RussianPostDomesticSettings::PICKUP_SERVICE_TITLE . ' / ОПС',
+					'title' => DeliveryType::COURIER === $delivery_type ? RussianPostDomesticSettings::COURIER_SERVICE_TITLE : RussianPostDomesticSettings::PICKUP_SERVICE_TITLE,
 					'delivery_type' => $delivery_type,
 					'tariffs' => $this->tariffs_for_service( $service, $delivery_type ),
 				);

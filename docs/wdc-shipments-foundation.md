@@ -1,6 +1,6 @@
 # WDC Shipments Foundation
 
-Version 0.35.0 keeps the manual shipment runtime foundation on the unified Russian Post domestic service. Version 0.34.0 added the admin-only Russian Post OPS/PVZ selector for shipment drafts. The scope is intentionally manual and carrier-neutral, with Russian Post as the first adapter.
+Version 0.35.1 keeps the manual shipment runtime foundation on the unified Russian Post domestic service and removes the need for visible technical WooCommerce shipping item meta. Version 0.34.0 added the admin-only Russian Post OPS/PVZ selector for shipment drafts. The scope is intentionally manual and carrier-neutral, with Russian Post as the first adapter.
 
 ## Scope
 
@@ -45,7 +45,7 @@ Courier shipments use `address-type-to=DEFAULT`, `courier=true`, `delivery-to-do
 
 The admin parcel-place UI accepts only integer values. Insurance is entered in rubles and converted before payload creation to Otpravka kopecks: `1000` rub -> `insr-value=100000`.
 
-Postoffice acceptance indices are configured on `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials`. The default list contains `630005`; each configured value must be a 6-digit index and is used in the modal select for `postoffice-code`.
+Postoffice acceptance indices are configured on `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials` as `Индексы места приема для регистрации отправлений`. The default list contains `630005`; each configured value must be a 6-digit index and is used in the modal select for `postoffice-code`. These indices are separate from tariff calculation `from_postcodes` on `Расчет`.
 
 `dimension-type` and `prepaid-amount` are not sent by default. `goods` is omitted unless service setting `send_goods_items=true`.
 
@@ -64,8 +64,10 @@ Failed creation stores `_wdc_shipment_last_error` with safe error code/message a
 
 ## Settings
 
-`WDC -> Службы доставки -> Почта России по РФ -> API / Credentials` is the editing location for Otpravka credentials:
+`WDC -> Службы доставки -> Почта России по РФ -> API / Credentials` is the editing location for Tariff API and Otpravka credentials:
 
+- Tariff API endpoint;
+- Tariff API token;
 - AccessToken;
 - login;
 - password;
@@ -73,6 +75,8 @@ Failed creation stores `_wdc_shipment_last_error` with safe error code/message a
 - postoffice codes.
 
 Tracking login/password fields are also prepared here for future status polling; this stage stores them only and does not call the Tracking API.
+
+Shipment drafts read delivery type, selected tariff and service key from hidden WDC order meta and `_wdc_delivery_calculation_data`; they do not depend on visible shipping item meta such as `wdc_delivery_kind`, `delivery_kind`, or `checkout_group_id`.
 
 Domestic Russian Post exposes shipment settings on the service `Отправления` tab:
 

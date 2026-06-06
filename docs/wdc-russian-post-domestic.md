@@ -143,7 +143,7 @@ php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=10
 `--insecure` disables SSL verification only in this test helper and adds a warning to JSON output. Do not use this behavior in production runtime.
 # Почта России — по России
 
-As of WDC 0.35.0, Russian Post domestic uses one carrier and one delivery service settings context:
+As of WDC 0.35.1, Russian Post domestic uses one carrier and one delivery service settings context:
 
 - `carrier_key`: `russian_post_domestic`
 - `service_key`: `russian_post_domestic`
@@ -189,16 +189,19 @@ All domestic Russian Post settings live on `admin.php?page=wdc-delivery-services
 
 Tabs:
 
-- `Основные`: canonical service identity, enabled state and service-level defaults.
-- `Доступность`: RU availability.
-- `Расчет`: tariff API endpoint/token/cache/timeout, from/default/return postcodes, insurance and calculation diagnostics.
+- `Основные`: canonical service identity, enabled state, RU availability and configurable checkout method titles `pickup_method_title`/`courier_method_title`.
+- `Расчет`: from/default/return postcodes, insurance, timeout/cache/debug, packaging weight, rounding, minimum price and fallback settings.
 - `Тарифы`: one merged tariff list with `delivery_type`, enabled state, ECOM flag, declared-value flag, weight limits, custom titles and sort order.
 - `ПВЗ / ОПС`: point type settings, local pickup import state and pickup diagnostics.
-- `API / Credentials`: Otpravka AccessToken/login/password/timeout/postoffice codes plus stored-only tracking login/password fields.
+- `API / Credentials`: Tariff API endpoint/token, Otpravka AccessToken/login/password/timeout, postoffice acceptance indices, plus stored-only tracking login/password fields.
 - `Отправления`: `shelf_life_days_default`, `send_goods_items`, `combine_goods_items_default`, `combined_goods_name_template`.
 - `Статусы / Mapping`: stored-only placeholder for future status mapping, polling defaults and WooCommerce status sync settings.
 - `Диагностика`: service/settings/PVZ quick diagnostics.
 
-`WDC -> Перевозчики` is no longer registered. Otpravka credentials and postoffice codes are edited only inside the domestic delivery service. The unified service settings table is the only runtime source of truth for domestic Russian Post settings.
+`WDC -> Перевозчики` is no longer registered. Tariff API endpoint/token, Otpravka credentials and postoffice codes are edited only inside the domestic delivery service. The unified service settings table is the only runtime source of truth for domestic Russian Post settings.
+
+`from_postcodes` and `default_from_postcode` are tariff calculation origin indices. `russian_post_otpravka_postoffice_codes` is a separate Otpravka/shipment setting used by the order shipment modal as the selectable `postoffice-code`.
+
+Checkout method labels are built from the configured method title plus the selected tariff title and delivery days, for example `Почта России до отделения, Посылка онлайн - 7 дней` or `Почта России до двери, Курьер онлайн`. Visible WooCommerce shipping item meta stays public-only; technical values such as delivery type, selected tariff and service key are stored in hidden WDC order meta and `_wdc_delivery_calculation_data`.
 
 Migration `0026_unify_russian_post_domestic_service.php` creates/activates the unified service, copies old service settings and carrier credentials into the service settings table, merges tariff variants by `delivery_type:object_code`, copies pickup type settings to `russian_post_domestic_point_type_*`, and pins RU availability. After the data is copied, it physically deletes the old `russian_post_domestic_pickup` and `russian_post_domestic_courier` service rows, their `wdc_delivery_service_settings` rows, `wdc_delivery_service_countries` rows, and service-rule bindings/conditions. Backward compatibility with old domestic service keys is intentionally not supported.

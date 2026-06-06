@@ -665,7 +665,7 @@ runtime_smoke_assert( str_contains( $rate_renderer_source, "empty( \$meta['domes
 runtime_smoke_assert( str_contains( $rate_renderer_source, 'count( $variants ) < 2' ), 'Domestic tariff selector must not render radio list for a single tariff.' );
 runtime_smoke_assert( str_contains( $rate_renderer_source, "wdc-domestic-tariff-selector__crossed-price" ), 'Domestic tariff selector must render per-variant crossed price.' );
 runtime_smoke_assert( str_contains( $rate_mapper_source, "'domestic_tariff_grouped'" ), 'WooCommerce rate meta must expose the domestic grouped marker to checkout rendering.' );
-runtime_smoke_assert( str_contains( $new_shipping_method_source, 'domestic_method_title' ) && str_contains( $new_shipping_method_source, "\$title . ' - ' . \$days" ), 'Domestic grouped method label must include service, selected tariff, and delivery days.' );
+runtime_smoke_assert( str_contains( $new_shipping_method_source, 'domestic_method_title' ) && str_contains( $new_shipping_method_source, "\$prefix . ', ' . \$rate_label" ), 'Domestic grouped method label must use configured method title, selected tariff, and delivery days.' );
 runtime_smoke_assert( str_contains( $new_shipping_method_source, '$this->delivery_comment( $rate->delivery_days )' ) && str_contains( $new_shipping_method_source, 'DeliveryDaysFormatter::format' ), 'Domestic selector rows must derive formatted delivery comments from final delivery days.' );
 runtime_smoke_assert( str_contains( $checkout_rates_css, '.wdc-platform-delivery-comment' ) && str_contains( $checkout_rates_css, 'flex-basis: 100%' ) && str_contains( $checkout_rates_css, '.wdc-shipping-rate-comment' ) && str_contains( $checkout_rates_css, 'display: block' ), 'Checkout comments CSS must force each service/rule comment onto its own line.' );
 $src_iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . '/src' ) );
@@ -714,10 +714,10 @@ runtime_smoke_assert( DeliveryType::COURIER === $fast_rates[0]->delivery_type, '
 $cheap_rates = $demo_orchestrator->calculate( runtime_smoke_request(), array(), RateSorter::CHEAPEST, false )->rates;
 runtime_smoke_assert( DeliveryType::PICKUP === $cheap_rates[0]->delivery_type, 'Cheapest sort must put pickup first.' );
 $mapped_courier = ( new WooCommerceRateMapper() )->map( $fast_rates[0] );
-runtime_smoke_assert( true === ( $mapped_courier['meta_data']['is_courier'] ?? false ), 'WDC courier rate must expose is_courier meta.' );
-runtime_smoke_assert( DeliveryType::COURIER === ( $mapped_courier['meta_data']['wdc_delivery_kind'] ?? '' ), 'WDC courier rate must expose delivery kind courier.' );
+runtime_smoke_assert( DeliveryType::COURIER === ( $mapped_courier['meta_data']['delivery_type'] ?? '' ), 'WDC courier rate must keep delivery_type in technical rate meta.' );
+runtime_smoke_assert( ! array_key_exists( 'is_courier', $mapped_courier['meta_data'] ) && ! array_key_exists( 'wdc_delivery_kind', $mapped_courier['meta_data'] ) && ! array_key_exists( 'delivery_kind', $mapped_courier['meta_data'] ), 'WDC courier rate must not expose visible courier helper meta.' );
 $mapped_pickup = ( new WooCommerceRateMapper() )->map( $cheap_rates[0] );
-runtime_smoke_assert( false === ( $mapped_pickup['meta_data']['is_courier'] ?? true ), 'Pickup rate must not be marked as courier.' );
+runtime_smoke_assert( DeliveryType::PICKUP === ( $mapped_pickup['meta_data']['delivery_type'] ?? '' ) && ! array_key_exists( 'is_courier', $mapped_pickup['meta_data'] ), 'Pickup rate must keep delivery_type without visible courier helper meta.' );
 
 $explicit_meta_courier_rate = new DeliveryRate(
 	'demo:meta-courier',
@@ -736,7 +736,7 @@ $explicit_meta_courier_rate = new DeliveryRate(
 	meta: array( 'service_kind' => DeliveryType::COURIER )
 );
 $mapped_meta_courier = ( new WooCommerceRateMapper() )->map( $explicit_meta_courier_rate );
-runtime_smoke_assert( true === ( $mapped_meta_courier['meta_data']['is_courier'] ?? false ), 'Explicit courier meta must mark WDC rate as courier.' );
+runtime_smoke_assert( DeliveryType::UNKNOWN === ( $mapped_meta_courier['meta_data']['delivery_type'] ?? '' ) && ! array_key_exists( 'is_courier', $mapped_meta_courier['meta_data'] ), 'Explicit courier helper meta must stay out of visible WooCommerce rate meta.' );
 
 $_POST = array(
 	'billing_postcode'  => '630000',

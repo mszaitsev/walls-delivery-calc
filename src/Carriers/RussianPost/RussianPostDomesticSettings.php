@@ -15,8 +15,8 @@ final class RussianPostDomesticSettings {
 	public const CARRIER_KEY = 'russian_post_domestic';
 	public const SERVICE_KEY = 'russian_post_domestic';
 	public const TITLE = 'Почта России — по России';
-	public const PICKUP_SERVICE_TITLE = 'Почта России — до отделения';
-	public const COURIER_SERVICE_TITLE = 'Почта России — курьером';
+	public const PICKUP_SERVICE_TITLE = 'Почта России до отделения';
+	public const COURIER_SERVICE_TITLE = 'Почта России до двери';
 
 	public function __construct(
 		private SettingsRepository $settings,
@@ -33,6 +33,8 @@ final class RussianPostDomesticSettings {
 			'enabled' => true,
 			'api_endpoint' => 'https://tariff.pochta.ru/v2/calculate/tariff/delivery',
 			'api_token' => '',
+			'pickup_method_title' => self::PICKUP_SERVICE_TITLE,
+			'courier_method_title' => self::COURIER_SERVICE_TITLE,
 			'from_postcodes' => array( '630005' ),
 			'default_from_postcode' => '630005',
 			'return_postcode' => '630005',
