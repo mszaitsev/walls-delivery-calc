@@ -96,6 +96,9 @@ final class SettingsRepository {
 			'russian_post_domestic_point_type_aps_enabled' => true,
 			'russian_post_domestic_point_type_aps_label' => 'Почтомат',
 			'pickup_email_card_enabled_emails' => array(),
+			'shipment_status_autosync_enabled' => true,
+			'shipment_status_autosync_order_statuses' => array( 'wc-processing', 'wc-on-hold', 'wc-completed' ),
+			'shipment_status_autosync_last_run' => array(),
 			'packaging_weight_tiers'       => array(),
 		);
 	}

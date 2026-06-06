@@ -1,6 +1,39 @@
 # WDC Shipment Statuses
 
-Version: 0.37.1.
+Version: 0.38.0.
+
+## Autosync
+
+Version 0.38.0 adds a separate `WDC -> Статусы` admin page for shipment status synchronization. The page is intentionally separate from `WDC -> Службы доставки` and from Russian Post settings.
+
+Tabs:
+
+- `Основные`: enables/disables autosync, shows the fixed 6-hour interval, and stores selected WooCommerce order statuses from `wc_get_order_statuses()`. Custom WooCommerce statuses, including statuses from WooCommerce Order Status Manager, are preserved as `wc-*` status keys.
+- `Соответствие статусов`: placeholder for a later WooCommerce order-status transition stage. Version 0.38.0 does not automatically change WooCommerce order statuses.
+- `Диагностика`: shows the last run timestamps, trigger type, duration, order/shipment counters, per-carrier updates, skip reasons, up to 20 error samples, and the manual `Запустить синхронизацию сейчас` action.
+
+WP Cron:
+
+- hook: `wdc_shipment_status_autosync`;
+- schedule: `wdc_every_6_hours`;
+- interval: `6 * HOUR_IN_SECONDS`;
+- disabled autosync returns early in the handler, but the cron event is not removed.
+
+Lock:
+
+- key: `wdc_shipment_status_autosync_lock`;
+- TTL: 30 minutes;
+- scope: all delivery services/carriers, so concurrent carrier status refreshes do not overlap.
+
+Runtime service:
+
+- class: `ShipmentStatusAutoSyncService`;
+- order selection: `wc_get_orders()` by selected WooCommerce order statuses only, with no shipment-age filter and no order limit;
+- shipment source: order meta `_wdc_shipments`;
+- required shipment fields: `carrier_key` and `tracking_number` or `barcode`;
+- terminal universal statuses skipped: `delivered`, `returned_to_sender`, `cancelled`, `rejected`;
+- `unknown` is non-terminal and continues to be refreshed;
+- dispatch: `carrier_key -> updater`, currently `russian_post_domestic -> ShipmentStatusUpdateService::update_russian_post()`.
 
 ## Universal Status Model
 
@@ -93,6 +126,6 @@ The metabox shows `Статус посылки` above the carrier status block a
 
 Cancellation is allowed only when the latest Russian Post operation is `28 / Присвоение идентификатора`; it uses `backlog_order_id` through `DELETE /1.0/backlog` and clears shipment state on success.
 
-Automatic polling/synchronization is not part of version 0.37.1.
+Automatic polling/synchronization is available since version 0.38.0 through `WDC -> Статусы`; the metabox button remains the manual per-order control.
 
 0.37.1 manual tracking attachment note: WDC searches `GET /1.0/backlog/search?query={barcode}` first and falls back to `GET /1.0/shipment/search?query={barcode}`. Tracking status refresh continues to use barcode. Cancellation continues to use hidden `backlog_order_id` and is disabled when shipment search does not return an internal id. The manual attach UI uses the wording `Номер отслеживания`, and the tracking copy action is a compact accessible icon button.

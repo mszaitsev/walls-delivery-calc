@@ -1,6 +1,6 @@
 # Russian Post Domestic Carrier
 
-Version: 0.37.6.
+Version: 0.38.0.
 
 ## 1. Overview
 
@@ -12,7 +12,7 @@ Russian Post domestic is the current RU-only carrier/service runtime for checkou
 - Delivery types: `pickup` and `courier`
 - Checkout group ids: `russian_post_domestic:pickup`, `russian_post_domestic:courier`
 - Concrete rate ids: `russian_post_domestic:pickup:{object_code}`, `russian_post_domestic:courier:{object_code}`
-- Current documented version: `0.37.6`
+- Current documented version: `0.38.0`
 
 Cash on delivery / mandatory payment is not used. Insurance is represented by declared value; in Russian Post Tariff API terms this means tariff variants that require `sumoc`.
 
@@ -57,10 +57,11 @@ Tabs:
 - `ПВЗ / ОПС`: point type settings, local pickup import state, and pickup diagnostics.
 - `API / Credentials`: Tariff API endpoint/token, Otpravka AccessToken/login/password/timeout, postoffice acceptance indices, default from postcode for shipment registration, plus tracking login/password fields used separately by status refresh.
 - `Отправления`: `shelf_life_days_default`, `send_goods_items`, `combine_goods_items_default`, `combined_goods_name_template`.
-- `Статусы / Mapping`: stored status mapping/polling/WooCommerce sync settings; Russian Post operation mapping used by current manual refresh is bundled in code.
 - `Диагностика`: service/settings/PVZ quick diagnostics.
 
 `WDC -> Перевозчики` is no longer registered. Tariff API endpoint/token, Otpravka credentials and postoffice codes are edited only inside the domestic delivery service. The unified service settings table is the only runtime source of truth for domestic Russian Post settings.
+
+Shipment status autosync settings are not stored inside Russian Post domestic settings. They live on the separate `WDC -> Статусы` page. For Russian Post domestic shipments, autosync dispatches `carrier_key=russian_post_domestic` to the existing `ShipmentStatusUpdateService::update_russian_post()` status refresh pipeline.
 
 Important index settings:
 
@@ -299,7 +300,7 @@ The current mapping includes:
 - `8:15` and `8:18` -> `handed_to_courier` / `передан курьеру`
 - no-attribute fallback through `type:-`, including operation `28:-` -> `created_in_carrier` / `создан в ТК` and `46:-` -> `cancelled` / `отменён`
 
-Automatic polling is not included in the current manual workflow.
+Automatic status polling is available since 0.38.0 through the universal `WDC -> Статусы` autosync service. It reuses the existing Russian Post status refresh pipeline and does not create shipments, cancel shipments, change WooCommerce order statuses, or generate documents.
 
 Full universal status and mapping documentation lives in `docs/wdc-shipment-statuses.md`.
 

@@ -1,14 +1,16 @@
 # Project Status
 
+0.38.0 note: universal shipment status autosync is implemented through `ShipmentStatusAutoSyncService`, `WDC -> Статусы`, WP Cron hook `wdc_shipment_status_autosync`, schedule `wdc_every_6_hours`, and lock `wdc_shipment_status_autosync_lock`. The first dispatcher target is `russian_post_domestic`, which reuses `ShipmentStatusUpdateService::update_russian_post()`.
+
 0.37.5 note: Russian Post foundation documentation now matches the current unified domestic service, Tariff API requests, tariff variants, shipment modal/payload rules, address normalization, manual tracking fallback and manual documents workflow. Runtime business logic is unchanged.
 
 ## Общий статус
 
-- Версия / baseline проекта: `0.37.5`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.38.0`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
 - Последнее обновление статуса: 2026-06-07.
 - Общий процент готовности: примерно 66%.
-- Текущий этап 0.37.5: документация Russian Post foundation приведена к текущему runtime. Документы/ярлыки Почты России в плагине не скачиваются, партия/Ф103/документы оформляются вручную в ЛК Почты. В метабоксе `Отправления` добавлены отмена backlog-отправления через `DELETE /1.0/backlog` только на статусе `Присвоение идентификатора`, локальное `Удалить из заказа` без обращения к Почте России для отправлений, которые нельзя отменить в Почте, ручное внесение номера отслеживания через `GET /1.0/backlog/search` с fallback на `GET /1.0/shipment/search`, и копирование номера отслеживания встроенной SVG-иконкой.
+- Текущий этап 0.38.0: добавлена универсальная автосинхронизация статусов отправлений. Настройки, ручной запуск и диагностика вынесены на отдельную страницу `WDC -> Статусы`; cron не привязан к Почте России и dispatch выполняется по `carrier_key`.
 
 ## Краткое резюме
 
@@ -52,7 +54,7 @@
 
 ### Core Platform
 
-- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.37.5`.
+- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.38.0`.
 - `src/Core/bootstrap.php` wires the autoloader and plugin runtime.
 - `src/Core/Plugin.php` registers services and hooks through a DI container.
 - `src/Infrastructure/Settings`, `src/Infrastructure/Logging`, `src/Infrastructure/Security`, `src/Infrastructure/Queue`, and `src/Infrastructure/Database` provide settings, logging, encryption, background scheduling, and migrations.

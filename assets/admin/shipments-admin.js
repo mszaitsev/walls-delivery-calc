@@ -308,6 +308,7 @@
     }
     if (updateButton) {
       setVisible(updateButton, hasTracking);
+      updateButton.hidden = !hasTracking;
       updateButton.disabled = !hasTracking;
     }
     if (manualButton) {

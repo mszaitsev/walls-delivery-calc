@@ -1,6 +1,8 @@
 # WDC Russian Post Shipments
 
-Version: 0.37.5.
+Version: 0.38.0.
+
+Version 0.38.0 adds automatic status refresh for Russian Post domestic shipments through the universal `WDC -> Статусы` autosync page. Cron and manual bulk runs use `ShipmentStatusAutoSyncService`, then dispatch `carrier_key=russian_post_domestic` to the same `ShipmentStatusUpdateService::update_russian_post()` code path used by the order metabox status button. The Russian Post shipment creation/cancellation pipeline is unchanged.
 
 Russian Post shipment creation stores two identifiers:
 

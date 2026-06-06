@@ -1,6 +1,6 @@
 # Карта текущего кода
 
-## Shipment Statuses 0.37.0
+## Shipment Statuses 0.38.0
 
 - `src/Domain/Status/DeliveryStatus.php` defines the carrier-neutral shipment status model: `created_in_carrier`, `in_transit`, `ready_for_pickup`, `handed_to_courier`, `delivered`, `returning_to_sender`, `returned_to_sender`, `cancelled`, `rejected`, `unknown`, with Russian UI labels.
 - `src/Carriers/RussianPost/Tracking/RussianPostTrackingApiClient.php` calls Russian Post Tracking API `getOperationHistory` over SOAP 1.2 with `wp_remote_post`. It uses only `russian_post_tracking_login` and `russian_post_tracking_password_encrypted` from the unified domestic service settings.
@@ -10,6 +10,9 @@
 - The 0.36.1 mapping correction maps selected pickup operations including `8:2`, `12:1..12:31`, and `42:1..42:30` to `ready_for_pickup`, and maps `8:15` plus `8:18` to `handed_to_courier`.
 - The 0.36.2 mapper fallback treats empty, absent, `0`, and `-` attributes as compatible with `type:-` mappings when no exact `type:attr` key exists. This covers Russian Post operations `28:-` (`создан в ТК`) and `46:-` (`отменён`).
 - `src/Shipments/Application/ShipmentStatusUpdateService.php` updates `_wdc_shipments` for the Russian Post domestic shipment and saves universal status fields plus raw carrier operation fields.
+- `src/Shipments/Application/ShipmentStatusAutoSyncService.php` scans WooCommerce orders by selected order statuses, reads `_wdc_shipments`, skips terminal universal statuses and missing tracking numbers, collects diagnostics, and dispatches by `carrier_key`.
+- `src/Shipments/Application/ShipmentStatusAutoSyncCron.php` registers WP Cron hook `wdc_shipment_status_autosync`, schedule `wdc_every_6_hours`, and keeps the event scheduled even when autosync is disabled.
+- `src/Shipments/Admin/ShipmentStatusesAdminPage.php` renders `WDC -> Статусы` with main settings, a status-mapping placeholder, diagnostics, and the manual run action.
 - `src/Shipments/Admin/OrderShipmentsMetabox.php` exposes AJAX action `wdc_update_shipment_status` on the existing `Обновить статус` button. `assets/admin/shipments-admin.js` updates the status block without reloading the order page, closes the create modal after success, shows a local 10-second toast, and starts the first status refresh automatically.
 
 ## Назначение
@@ -131,6 +134,7 @@
 Ответственность:
 
 - carrier-neutral contract for shipment creation adapters;
+- universal shipment status autosync service, cron scheduler, status settings admin page, manual run, diagnostics, shared lock, and `carrier_key -> updater` dispatch;
 - manual WooCommerce order admin metabox `Отправления`;
 - safe draft creation from HPOS-compatible WooCommerce order APIs and saved WDC order meta;
 - Russian Post Otpravka `PUT /2.0/user/backlog` payload building and response normalization;
