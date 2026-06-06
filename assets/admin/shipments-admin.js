@@ -262,7 +262,8 @@
     });
   }
 
-  function showShipmentToast(box, text, type) {
+  function showShipmentToast(box, text, type, options) {
+    const settings = Object.assign({ append: false }, options || {});
     const host = box || document.body;
     let toast = host.querySelector ? host.querySelector('[data-wdc-shipment-toast]') : null;
     if (!toast) {
@@ -274,7 +275,11 @@
     const previous = toastTimers.get(toast);
     if (previous) window.clearTimeout(previous);
     toast.dataset.status = type || 'success';
-    toast.textContent = text;
+    if (settings.append && !toast.hidden && toast.textContent) {
+      toast.textContent = toast.textContent + '\n' + text;
+    } else {
+      toast.textContent = text;
+    }
     toast.hidden = false;
     toastTimers.set(toast, window.setTimeout(function () {
       toast.hidden = true;
@@ -311,7 +316,7 @@
           message.textContent = payload.data.message || 'Статус отправления обновлен.';
         }
         if (settings.auto) {
-          showShipmentToast(box, 'Статус отправления обновлен.', 'success');
+          showShipmentToast(box, 'Статус отправления обновлен.', 'success', { append: true });
         }
         return payload;
       })
@@ -323,7 +328,7 @@
             : error.message;
         }
         if (settings.auto) {
-          showShipmentToast(box, 'Отправление создано, но статус пока не обновлен: ' + error.message, 'warning');
+          showShipmentToast(box, 'Отправление создано, но статус пока не обновлен: ' + error.message, 'warning', { append: true });
           return null;
         }
         throw error;
