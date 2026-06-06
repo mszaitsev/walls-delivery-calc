@@ -16,6 +16,7 @@ function wdc_ds_assert( bool $condition, string $message ): void {
 
 function current_time( string $type ): string { return '2026-05-25 12:00:00'; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
+function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_options'][ $option ] ?? $default; }
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -89,6 +90,28 @@ if ( ! class_exists( 'wpdb' ) ) {
 			);
 			return true;
 		}
+		public function replace( string $table, array $data, array $format = array() ): bool {
+			$rows =& $this->rows_for_table( $table );
+			foreach ( $rows as $index => $row ) {
+				if (
+					str_contains( $table, 'wdc_delivery_service_settings' )
+					&& (int) ( $row['service_id'] ?? 0 ) === (int) ( $data['service_id'] ?? 0 )
+					&& (string) ( $row['setting_key'] ?? '' ) === (string) ( $data['setting_key'] ?? '' )
+				) {
+					$rows[ $index ] = array_merge( $row, $data );
+					return true;
+				}
+				if (
+					str_contains( $table, 'wdc_delivery_service_countries' )
+					&& (int) ( $row['service_id'] ?? 0 ) === (int) ( $data['service_id'] ?? 0 )
+					&& (string) ( $row['country_code'] ?? '' ) === (string) ( $data['country_code'] ?? '' )
+				) {
+					$rows[ $index ] = array_merge( $row, $data );
+					return true;
+				}
+			}
+			return $this->insert( $table, $data, $format );
+		}
 		public function get_row( string $query, mixed $output = null ): ?array {
 			if ( str_contains( $query, 'wdc_delivery_services' ) && preg_match( '/WHERE id = ([0-9]+)/', $query, $matches ) ) {
 				foreach ( $this->services as $row ) {
@@ -121,6 +144,9 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return null;
 		}
 		public function get_var( string $query ): mixed {
+			if ( preg_match( "/SHOW TABLES LIKE '([^']+)'/", $query, $matches ) ) {
+				return $matches[1];
+			}
 			if ( str_contains( $query, 'wdc_delivery_service_settings' ) && preg_match( "/service_id = ([0-9]+).*setting_key = '([^']+)'/", $query, $matches ) ) {
 				foreach ( $this->settings as $row ) {
 					if ( (int) $row['service_id'] === (int) $matches[1] && $row['setting_key'] === $matches[2] ) {
@@ -165,6 +191,16 @@ if ( ! class_exists( 'wpdb' ) ) {
 			return array();
 		}
 		public function get_col( string $query ): array {
+			if ( str_contains( $query, 'wdc_rules' ) ) {
+				$rows = $this->rules;
+				if ( preg_match( "/target_type = '([^']+)'/", $query, $matches ) ) {
+					$rows = array_values( array_filter( $rows, static fn ( array $row ): bool => (string) ( $row['target_type'] ?? '' ) === $matches[1] ) );
+				}
+				if ( preg_match( "/target_value = '([^']+)'/", $query, $matches ) ) {
+					$rows = array_values( array_filter( $rows, static fn ( array $row ): bool => (string) ( $row['target_value'] ?? '' ) === $matches[1] ) );
+				}
+				return array_values( array_map( static fn ( array $row ): int => (int) $row['id'], $rows ) );
+			}
 			if ( preg_match( '/service_id = ([0-9]+)/', $query, $matches ) ) {
 				return array_values( array_map( static fn ( array $row ): string => $row['country_code'], array_filter( $this->countries, static fn ( array $row ): bool => (int) $row['service_id'] === (int) $matches[1] ) ) );
 			}
@@ -235,27 +271,23 @@ $rp_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( a
 wdc_ds_assert( 1 === count( $rp_rows ), 'Repeated Russian Post bootstrap must not create duplicate services.' );
 $services->soft_delete_service( (int) $rp->id );
 wdc_ds_assert( $services->find_by_service_key( RussianPostSettings::SERVICE_KEY ) instanceof DeliveryService, 'Predefined Russian Post service cannot be deleted.' );
-$domestic_services = $services->ensure_russian_post_domestic_services();
-$services->ensure_russian_post_domestic_services();
-$domestic_pickup_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) $row['service_key'] && empty( $row['deleted'] ) ) );
-$domestic_courier_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => RussianPostDomesticSettings::COURIER_SERVICE_KEY === (string) $row['service_key'] && empty( $row['deleted'] ) ) );
-wdc_ds_assert( 1 === count( $domestic_pickup_rows ) && 1 === count( $domestic_courier_rows ), 'Repeated domestic bootstrap must not create duplicate pickup/courier services.' );
-$domestic_pickup = $services->find_by_service_key( RussianPostDomesticSettings::PICKUP_SERVICE_KEY );
-$domestic_courier = $services->find_by_service_key( RussianPostDomesticSettings::COURIER_SERVICE_KEY );
-wdc_ds_assert( $domestic_pickup instanceof DeliveryService && RussianPostDomesticSettings::PICKUP_SERVICE_TITLE === $domestic_pickup->title, 'Domestic pickup predefined service title must be distinct.' );
-wdc_ds_assert( $domestic_courier instanceof DeliveryService && RussianPostDomesticSettings::COURIER_SERVICE_TITLE === $domestic_courier->title, 'Domestic courier predefined service title must be distinct.' );
-$services->update_service( (int) $domestic_courier->id, array( 'title' => 'Custom courier title' ) );
-$services->ensure_russian_post_domestic_services();
-$custom_title_courier = $services->find_by_service_key( RussianPostDomesticSettings::COURIER_SERVICE_KEY );
-wdc_ds_assert( $custom_title_courier instanceof DeliveryService && 'Custom courier title' === $custom_title_courier->title, 'Domestic bootstrap must not overwrite an admin-customized predefined title.' );
-foreach ( $domestic_services as $domestic_service ) {
-	$services->soft_delete_service( (int) $domestic_service->id );
-	wdc_ds_assert( $services->find_by_service_key( $domestic_service->service_key ) instanceof DeliveryService, 'Predefined domestic service cannot be deleted: ' . $domestic_service->service_key );
-}
-$services->update_service( (int) $domestic_services[0]->id, array( 'enabled' => 0 ) );
-$services->ensure_russian_post_domestic_services();
-$disabled_pickup = $services->find_by_service_key( RussianPostDomesticSettings::PICKUP_SERVICE_KEY );
-wdc_ds_assert( $disabled_pickup instanceof DeliveryService && ! $disabled_pickup->enabled, 'Domestic bootstrap must preserve an intentionally disabled predefined pickup service.' );
+$domestic_service = $services->ensure_russian_post_domestic_service();
+$services->ensure_russian_post_domestic_service();
+$domestic_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => RussianPostDomesticSettings::SERVICE_KEY === (string) $row['service_key'] && empty( $row['deleted'] ) ) );
+$legacy_domestic_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => in_array( (string) $row['service_key'], array( 'russian_post_domestic_pickup', 'russian_post_domestic_courier' ), true ) && empty( $row['deleted'] ) ) );
+wdc_ds_assert( 1 === count( $domestic_rows ) && array() === $legacy_domestic_rows, 'Repeated domestic bootstrap must create one unified domestic service and no legacy pickup/courier services.' );
+$domestic = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
+wdc_ds_assert( $domestic instanceof DeliveryService && RussianPostDomesticSettings::TITLE === $domestic->title && RussianPostDomesticSettings::CARRIER_KEY === $domestic->carrier_key, 'Unified domestic predefined service must have canonical title and carrier key.' );
+$services->update_service( (int) $domestic->id, array( 'title' => 'Custom domestic title' ) );
+$services->ensure_russian_post_domestic_service();
+$custom_title_domestic = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
+wdc_ds_assert( $custom_title_domestic instanceof DeliveryService && 'Custom domestic title' === $custom_title_domestic->title, 'Domestic bootstrap must not overwrite an admin-customized predefined title.' );
+$services->soft_delete_service( (int) $domestic_service->id );
+wdc_ds_assert( $services->find_by_service_key( $domestic_service->service_key ) instanceof DeliveryService, 'Predefined domestic service cannot be deleted: ' . $domestic_service->service_key );
+$services->update_service( (int) $domestic_service->id, array( 'enabled' => 0 ) );
+$services->ensure_russian_post_domestic_service();
+$disabled_domestic = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
+wdc_ds_assert( $disabled_domestic instanceof DeliveryService && ! $disabled_domestic->enabled, 'Domestic bootstrap must preserve an intentionally disabled predefined service.' );
 $GLOBALS['wpdb']->services[] = array(
 	'id' => ++$GLOBALS['wpdb']->insert_id,
 	'service_key' => 'russian_post_domestic_soft_deleted_test',
@@ -311,8 +343,8 @@ wdc_ds_assert( in_array( 'US', $countries->countries( $custom_id ), true ) && in
 $directory = ( new ReflectionClass( WallsShop\WDC\Carriers\RussianPost\RussianPostCountryDirectory::class ) )->newInstanceWithoutConstructor();
 $manager = new DeliveryServiceManager( $services, $countries, new RuleRepository( $GLOBALS['wpdb'] ), $directory );
 $manager->ensure_builtin_services();
-$courier_service = $services->find_by_service_key( RussianPostDomesticSettings::COURIER_SERVICE_KEY );
-wdc_ds_assert( $courier_service instanceof DeliveryService && in_array( 'RU', $countries->countries( (int) $courier_service->id ), true ) && $manager->service_available_for_country( $courier_service, 'RU' ), 'Domestic courier service must bootstrap RU availability.' );
+$unified_domestic_service = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
+wdc_ds_assert( $unified_domestic_service instanceof DeliveryService && in_array( 'RU', $countries->countries( (int) $unified_domestic_service->id ), true ) && $manager->service_available_for_country( $unified_domestic_service, 'RU' ), 'Unified domestic service must bootstrap RU availability.' );
 wdc_ds_assert( $manager->service_available_for_country( $services->find_by_service_key( 'fixed_test' ), 'US' ), 'selected_countries availability must allow listed country.' );
 wdc_ds_assert( ! $manager->service_available_for_country( $services->find_by_service_key( 'fixed_test' ), 'FR' ), 'selected_countries availability must reject unlisted country.' );
 $services->update_service( $custom_id, array( 'availability_mode' => DeliveryService::AVAILABILITY_ALL_COUNTRIES ) );
@@ -397,11 +429,152 @@ wdc_ds_assert( RuleOperationTypes::DECREASE === $copied_rule->operation_type && 
 wdc_ds_assert( 1 === count( $copied_rule->conditions ) && RuleConditionTypes::COUNTRY === $copied_rule->conditions[0]->condition_type && 'RU' === $copied_rule->conditions[0]->value_text, 'Copied rule must preserve conditions.' );
 wdc_ds_assert( 1 === count( $rule_repo->get_all_rules_for_target( RuleRepository::TARGET_DEFAULT, '' ) ), 'Copy default rules must leave default rules unchanged.' );
 
+$old_pickup_service_id = ++$GLOBALS['wpdb']->insert_id;
+$old_courier_service_id = ++$GLOBALS['wpdb']->insert_id;
+$GLOBALS['wpdb']->services[] = array(
+	'id' => $old_pickup_service_id,
+	'service_key' => 'russian_post_domestic_pickup',
+	'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+	'service_type' => DeliveryService::TYPE_API,
+	'title' => 'Почта России до ПВЗ / ОПС',
+	'enabled' => 1,
+	'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+	'use_default_rules_when_no_service_rules' => 1,
+	'round_up_to_ruble' => 1,
+	'minimum_price_rub' => 1.0,
+	'include_packaging_weight' => 1,
+	'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+	'pickup_customer_comment' => 'legacy pickup',
+	'courier_customer_comment' => '',
+	'sort_order' => 20,
+	'deleted' => 0,
+	'created_at' => current_time( 'mysql' ),
+	'updated_at' => current_time( 'mysql' ),
+);
+$GLOBALS['wpdb']->services[] = array(
+	'id' => $old_courier_service_id,
+	'service_key' => 'russian_post_domestic_courier',
+	'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+	'service_type' => DeliveryService::TYPE_API,
+	'title' => 'Почта России курьером',
+	'enabled' => 1,
+	'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+	'use_default_rules_when_no_service_rules' => 1,
+	'round_up_to_ruble' => 1,
+	'minimum_price_rub' => 1.0,
+	'include_packaging_weight' => 1,
+	'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+	'pickup_customer_comment' => '',
+	'courier_customer_comment' => 'legacy courier',
+	'sort_order' => 21,
+	'deleted' => 0,
+	'created_at' => current_time( 'mysql' ),
+	'updated_at' => current_time( 'mysql' ),
+);
+$GLOBALS['wpdb']->settings[] = array(
+	'id' => ++$GLOBALS['wpdb']->insert_id,
+	'service_id' => $old_pickup_service_id,
+	'setting_key' => 'tariff_variants',
+	'setting_value' => wp_json_encode(
+		array(
+			array(
+				'object_code' => '23030',
+				'delivery_type' => DeliveryType::PICKUP,
+				'enabled' => true,
+				'is_ecom' => true,
+				'requires_declared_value' => true,
+				'title' => 'Pickup legacy tariff',
+			),
+		),
+		JSON_UNESCAPED_UNICODE
+	),
+	'value_format' => 'json',
+	'autoload' => 0,
+	'updated_at' => current_time( 'mysql' ),
+);
+$GLOBALS['wpdb']->settings[] = array(
+	'id' => ++$GLOBALS['wpdb']->insert_id,
+	'service_id' => $old_pickup_service_id,
+	'setting_key' => 'russian_post_point_type_ops_enabled',
+	'setting_value' => '1',
+	'value_format' => 'bool',
+	'autoload' => 0,
+	'updated_at' => current_time( 'mysql' ),
+);
+$GLOBALS['wpdb']->settings[] = array(
+	'id' => ++$GLOBALS['wpdb']->insert_id,
+	'service_id' => $old_courier_service_id,
+	'setting_key' => 'tariff_variants',
+	'setting_value' => wp_json_encode(
+		array(
+			array(
+				'object_code' => '24030',
+				'delivery_type' => DeliveryType::COURIER,
+				'enabled' => false,
+				'is_ecom' => false,
+				'requires_declared_value' => false,
+				'title' => 'Courier legacy tariff',
+			),
+		),
+		JSON_UNESCAPED_UNICODE
+	),
+	'value_format' => 'json',
+	'autoload' => 0,
+	'updated_at' => current_time( 'mysql' ),
+);
+$GLOBALS['wpdb']->settings[] = array(
+	'id' => ++$GLOBALS['wpdb']->insert_id,
+	'service_id' => $old_courier_service_id,
+	'setting_key' => 'shelf_life_days_default',
+	'setting_value' => '15',
+	'value_format' => 'int',
+	'autoload' => 0,
+	'updated_at' => current_time( 'mysql' ),
+);
+$GLOBALS['wpdb']->countries[] = array( 'id' => ++$GLOBALS['wpdb']->insert_id, 'service_id' => $old_pickup_service_id, 'country_code' => 'RU', 'created_at' => current_time( 'mysql' ) );
+$GLOBALS['wpdb']->countries[] = array( 'id' => ++$GLOBALS['wpdb']->insert_id, 'service_id' => $old_courier_service_id, 'country_code' => 'RU', 'created_at' => current_time( 'mysql' ) );
+$GLOBALS['wpdb']->rules[] = array( 'id' => 501, 'name' => 'Legacy pickup rule', 'enabled' => 1, 'priority' => 1, 'target_type' => RuleRepository::TARGET_SERVICE, 'target_value' => 'russian_post_domestic_pickup', 'action_type' => RuleActionTypes::CHANGE_PRICE, 'operation_type' => RuleOperationTypes::INCREASE, 'operation_value' => 1, 'operation_base' => RuleOperationBases::RUBLES, 'operation_text' => '', 'promo_shipping' => 0, 'stop_processing' => 0, 'condition_group_logic' => '[]', 'condition_group_expression' => Rule::DEFAULT_GROUP_EXPRESSION );
+$GLOBALS['wpdb']->rules[] = array( 'id' => 502, 'name' => 'Legacy courier rule', 'enabled' => 1, 'priority' => 1, 'target_type' => RuleRepository::TARGET_SERVICE, 'target_value' => 'russian_post_domestic_courier', 'action_type' => RuleActionTypes::CHANGE_PRICE, 'operation_type' => RuleOperationTypes::INCREASE, 'operation_value' => 1, 'operation_base' => RuleOperationBases::RUBLES, 'operation_text' => '', 'promo_shipping' => 0, 'stop_processing' => 0, 'condition_group_logic' => '[]', 'condition_group_expression' => Rule::DEFAULT_GROUP_EXPRESSION );
+$GLOBALS['wpdb']->conditions[] = array( 'id' => 501, 'rule_id' => 501, 'condition_group' => 1, 'condition_type' => RuleConditionTypes::COUNTRY, 'operator' => RuleOperators::EQ, 'value_text' => 'RU', 'value_number' => null, 'value_json' => '{}' );
+$GLOBALS['wpdb']->conditions[] = array( 'id' => 502, 'rule_id' => 502, 'condition_group' => 1, 'condition_type' => RuleConditionTypes::COUNTRY, 'operator' => RuleOperators::EQ, 'value_text' => 'RU', 'value_number' => null, 'value_json' => '{}' );
+$GLOBALS['wdc_options']['wdc_core_settings'] = array(
+	'russian_post_otpravka_access_token' => 'token-from-core',
+	'russian_post_tracking_login' => 'tracking-login',
+);
+
+$migration_0026 = require dirname( __DIR__, 2 ) . '/database/migrations/0026_unify_russian_post_domestic_service.php';
+$migration_0026();
+$migration_0026();
+
+$legacy_after_migration = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => in_array( (string) $row['service_key'], array( 'russian_post_domestic_pickup', 'russian_post_domestic_courier' ), true ) ) );
+wdc_ds_assert( array() === $legacy_after_migration, 'Migration 0026 must physically delete legacy Russian Post domestic service rows.' );
+wdc_ds_assert( array() === array_values( array_filter( $GLOBALS['wpdb']->settings, static fn ( array $row ): bool => in_array( (int) $row['service_id'], array( $old_pickup_service_id, $old_courier_service_id ), true ) ) ), 'Migration 0026 must physically delete legacy Russian Post domestic settings rows.' );
+wdc_ds_assert( array() === array_values( array_filter( $GLOBALS['wpdb']->countries, static fn ( array $row ): bool => in_array( (int) $row['service_id'], array( $old_pickup_service_id, $old_courier_service_id ), true ) ) ), 'Migration 0026 must physically delete legacy Russian Post domestic country rows.' );
+wdc_ds_assert( array() === array_values( array_filter( $GLOBALS['wpdb']->rules, static fn ( array $row ): bool => in_array( (string) $row['target_value'], array( 'russian_post_domestic_pickup', 'russian_post_domestic_courier' ), true ) ) ), 'Migration 0026 must delete rule bindings for legacy Russian Post domestic services.' );
+wdc_ds_assert( array() === array_values( array_filter( $GLOBALS['wpdb']->conditions, static fn ( array $row ): bool => in_array( (int) $row['rule_id'], array( 501, 502 ), true ) ) ), 'Migration 0026 must delete rule conditions for legacy Russian Post domestic services.' );
+
+$migrated_domestic = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
+wdc_ds_assert( $migrated_domestic instanceof DeliveryService, 'Migration 0026 must keep unified Russian Post domestic service.' );
+$migrated_settings = $settings->all_settings( (int) $migrated_domestic->id );
+$migrated_tariffs = is_array( $migrated_settings['tariff_variants'] ?? null ) ? $migrated_settings['tariff_variants'] : array();
+$migrated_tariff_keys = array_map( static fn ( array $variant ): string => (string) ( $variant['delivery_type'] ?? '' ) . ':' . (string) ( $variant['object_code'] ?? '' ), $migrated_tariffs );
+wdc_ds_assert( in_array( 'pickup:23030', $migrated_tariff_keys, true ) && in_array( 'courier:24030', $migrated_tariff_keys, true ), 'Migration 0026 must merge pickup and courier tariff variants into unified service settings.' );
+wdc_ds_assert( '1' === (string) ( $migrated_settings['russian_post_domestic_point_type_ops_enabled'] ?? '' ), 'Migration 0026 must migrate Russian Post point type settings to unified keys.' );
+wdc_ds_assert( '15' === (string) ( $migrated_settings['shelf_life_days_default'] ?? '' ), 'Migration 0026 must preserve shipment settings in unified service settings.' );
+wdc_ds_assert( 'token-from-core' === (string) ( $migrated_settings['russian_post_otpravka_access_token'] ?? '' ) && 'tracking-login' === (string) ( $migrated_settings['russian_post_tracking_login'] ?? '' ), 'Migration 0026 must copy Russian Post credentials into unified service settings.' );
+wdc_ds_assert( in_array( 'RU', $countries->countries( (int) $migrated_domestic->id ), true ), 'Migration 0026 must keep RU country on unified Russian Post domestic service.' );
+wdc_ds_assert( null === $services->find_by_service_key( 'russian_post_domestic_pickup' ) && null === $services->find_by_service_key( 'russian_post_domestic_courier' ), 'Runtime repository must not find legacy Russian Post domestic service keys after migration 0026.' );
+
 $delivery_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
-wdc_ds_assert( str_contains( $delivery_admin_source, 'render_main_tab' ) && str_contains( $delivery_admin_source, 'render_availability_tab' ) && str_contains( $delivery_admin_source, 'render_calculation_tab' ), 'Delivery service admin must render real main/availability/calculation tabs.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'render_main_tab' ) && ! str_contains( $delivery_admin_source, 'render_availability_tab' ) && str_contains( $delivery_admin_source, 'render_calculation_tab' ), 'Delivery service admin must render availability fields inside main tab and not expose a separate availability tab.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, "'save_availability' => 'main'" ) && str_contains( $delivery_admin_source, 'sanitize_availability_data' ), 'Legacy availability save action must redirect to main while preserving backend save handling.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'render_embedded_for_context' ), 'Service rules tab must use embedded reusable rules UI.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'render_russian_post_countries_tab' ) && str_contains( $delivery_admin_source, 'Страны Почты России' ), 'Russian Post countries must be embedded as a service tab.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'save_russian_post_settings' ) && str_contains( $delivery_admin_source, 'DeliveryServiceSettingsRepository' ), 'Russian Post calculation settings must save to delivery service settings storage.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'save_russian_post_domestic_api_settings' ) && str_contains( $delivery_admin_source, 'Tariff API endpoint' ) && str_contains( $delivery_admin_source, 'Tariff API token, если выдан Почтой' ), 'Domestic tariff API endpoint/token must save from API / Credentials because the client uses Authorization when token is configured.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'Индекс отправки для расчета доставки' ) && str_contains( $delivery_admin_source, 'Индекс возврата для расчета доставки' ) && ! str_contains( $delivery_admin_source, 'Индексы отделений для отправки' ), 'Domestic calculation index labels must clarify tariff calculation usage.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, "'default_from_postcode' => array( 'value' => \$string( 'rp_default_from_postcode'" ) && strpos( $delivery_admin_source, 'POSTOFFICE_CODES_KEY' ) < strpos( $delivery_admin_source, 'rp_default_from_postcode' ), 'default_from_postcode must save from API / Credentials after postoffice codes.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'pickup_method_title' ) && str_contains( $delivery_admin_source, 'courier_method_title' ) && str_contains( $delivery_admin_source, 'Название варианта до ПВЗ / ОПС' ), 'Domestic pickup/courier method titles must be configurable on the main tab.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'simulate_service_rules' ) && str_contains( $delivery_admin_source, 'QuoteRequest' ) && str_contains( $delivery_admin_source, 'RussianPostInternationalCarrier' ), 'Russian Post service rules simulation must call the real carrier quote flow.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'include_packaging_weight' ) && str_contains( $delivery_admin_source, 'packaging_weight_mode' ) && ! str_contains( $delivery_admin_source, 'rp_packaging_tiers' ), 'Delivery service calculation tab must expose packaging controls and not Russian Post packaging tiers.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'tariff_admin_comment' ) && str_contains( $delivery_admin_source, 'admin_comment' ), 'Domestic tariffs tab must save an internal admin comment.' );

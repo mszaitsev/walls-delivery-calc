@@ -15,6 +15,7 @@
 	var isPlacingOrder = false;
 	var placeOrderGuardTimer = 0;
 	var placeOrderResetGuardUntil = 0;
+	var russianPostPickupFamily = 'russian_post_domestic:pickup';
 	var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function init(container) {
@@ -299,7 +300,7 @@
 		var config = window.wdcPickupCheckout || {};
 		var carrier = String(point.carrier || point.carrier_key || config.carrier || '').trim();
 		var rateId = String(point.rate_id || point.shipping_method_id || config.shippingMethodId || '').trim();
-		if (carrier === 'russian_post' || carrier === 'russian_post_domestic' || rateId.indexOf('russian_post_domestic_pickup') === 0) {
+		if (carrier === 'russian_post' || carrier === 'russian_post_domestic' || rateId.indexOf(russianPostPickupFamily) === 0) {
 			return 'Отделение Почты России';
 		}
 		return 'Пункт выдачи';
@@ -365,16 +366,16 @@
 
 	function shippingMethodFamily(value) {
 		var method = normalizeShippingMethod(value);
-		if (method.indexOf('russian_post_domestic_pickup') === 0) {
-			return 'russian_post_domestic_pickup';
+		if (method.indexOf(russianPostPickupFamily) === 0) {
+			return russianPostPickupFamily;
 		}
 
 		return method;
 	}
 
 	function isSamePickupMethodFamily(oldMethod, newMethod) {
-		return shippingMethodFamily(oldMethod) === 'russian_post_domestic_pickup'
-			&& shippingMethodFamily(newMethod) === 'russian_post_domestic_pickup';
+		return shippingMethodFamily(oldMethod) === russianPostPickupFamily
+			&& shippingMethodFamily(newMethod) === russianPostPickupFamily;
 	}
 
 	function initialContext() {
@@ -1057,7 +1058,7 @@
 
 	function isPickupRateValue(value) {
 		value = String(value || '');
-		return value.indexOf('russian_post_domestic_pickup') !== -1;
+		return value.indexOf(russianPostPickupFamily) !== -1;
 	}
 
 	function normalizeShippingMethodValue(value) {
@@ -1171,13 +1172,13 @@
 
 	function isPickupMethodActive() {
 		var method = currentShippingMethod();
-		return shippingMethodFamily(method) === 'russian_post_domestic_pickup';
+		return shippingMethodFamily(method) === russianPostPickupFamily;
 	}
 
 	function toggleForMethod(container) {
 		var method = currentShippingMethod();
 		activeMethod = method || activeMethod;
-		var visible = !method || shippingMethodFamily(method) === 'russian_post_domestic_pickup';
+		var visible = !method || shippingMethodFamily(method) === russianPostPickupFamily;
 		container.hidden = !visible;
 	}
 
@@ -1242,7 +1243,7 @@
 
 	function restoreSelectedPickupUi() {
 		var selected = window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint;
-		if (!selected || !selected.point_code || shippingMethodFamily(currentShippingMethod()) !== 'russian_post_domestic_pickup') {
+		if (!selected || !selected.point_code || shippingMethodFamily(currentShippingMethod()) !== russianPostPickupFamily) {
 			return;
 		}
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
@@ -1282,7 +1283,7 @@
 				return;
 			}
 			activeMethod = nextMethod;
-			if (!isPickupResetGuarded() && previousFamily === 'russian_post_domestic_pickup' && nextFamily !== 'russian_post_domestic_pickup') {
+			if (!isPickupResetGuarded() && previousFamily === russianPostPickupFamily && nextFamily !== russianPostPickupFamily) {
 				resetSelection('method_family_changed');
 			}
 			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);

@@ -80,7 +80,7 @@ The runtime calls:
 PUT /2.0/user/backlog
 ```
 
-through the shared Otpravka client. API credentials remain in the existing encrypted/redacted settings keys and are edited primarily on `WDC -> Перевозчики -> Почта России`.
+through the shared Otpravka client. API credentials are edited on the unified domestic delivery service tab `API / Credentials`.
 
 ## Russian Post Tariff API
 
@@ -143,12 +143,19 @@ php tests/carriers/run-russian-post-domestic-api-probe.php --from=630005 --to=10
 `--insecure` disables SSL verification only in this test helper and adds a warning to JSON output. Do not use this behavior in production runtime.
 # Почта России — по России
 
-Этап foundation добавляет carrier `russian_post_domestic` и две service:
+As of WDC 0.35.2, Russian Post domestic uses one carrier and one delivery service settings context:
 
-- `russian_post_domestic_pickup`
-- `russian_post_domestic_courier`
+- `carrier_key`: `russian_post_domestic`
+- `service_key`: `russian_post_domestic`
 
-Обе службы доступны только для `RU`, используют локальный город/индекс из checkout context и не рассчитываются без валидного шестизначного `postal_code`. Технический индекс `999999999` считается отсутствующим индексом.
+Pickup/OPS and courier are no longer separate services. Runtime separation is done through `delivery_type=pickup|courier`. Checkout still renders two visible groups:
+
+- `russian_post_domestic:pickup` -> `Почта России до ПВЗ / ОПС`
+- `russian_post_domestic:courier` -> `Почта России курьером`
+
+Concrete tariff rates extend the group id with the object code, for example `russian_post_domestic:pickup:23030` and `russian_post_domestic:courier:24030`. Order meta for new orders stores `_wdc_platform_service_key=russian_post_domestic`, `_wdc_platform_delivery_type`, and `_wdc_platform_tariff_object`.
+
+The service is available only for `RU`, uses the local city/postcode from checkout context and does not calculate without a valid six-digit `postal_code`. Technical postcode `999999999` is treated as missing.
 
 ## Tariff variants
 
@@ -174,8 +181,27 @@ Courier variants: `24030`, `24020`, `7030`, `7020`, `41030`, `52030`.
 
 В meta сохраняются нормализованные поля `pay`, `nds`, `paynds`, `delivery_min_days`, `delivery_max_days`, `transtype`, `delivery_to`, `items_summary`, request params и cache/debug metadata. Полный raw response в order calculation payload не сохраняется.
 
-Если API отклоняет отдельный object code, carrier пропускает только этот tariff variant и показывает диагностику в debug/simulation: `object_code`, `pack`, request URL, request params, `http_code`, `errorcode`/`errormsg`, decoded body, raw error body и нормализованные error code/message. Deprecated object codes `27030`, `27020`, `28030`, `28020` больше не создаются в defaults, но старые сохраненные строки в `tariff_variants` JSON продолжают загружаться, чтобы администратор мог удалить их вручную.
+Если API отклоняет отдельный object code, carrier пропускает только этот tariff variant и показывает диагностику в debug/simulation: `object_code`, `pack`, request URL, request params, `http_code`, `errorcode`/`errormsg`, decoded body, raw error body и нормализованные error code/message. Deprecated object codes `27030`, `27020`, `28030`, `28020` больше не создаются в defaults.
 
-## Pickup without selector
+## Unified Service Settings
 
-Pickup variants выставляют `no_pickup_selection=true`. Это означает доставку до почтового отделения по индексу, без выбора ПВЗ в checkout.
+All domestic Russian Post settings live on `admin.php?page=wdc-delivery-services&service=russian_post_domestic`.
+
+Tabs:
+
+- `Основные`: canonical service identity, enabled state, RU availability and configurable checkout method titles `pickup_method_title`/`courier_method_title`.
+- `Расчет`: tariff calculation origin/return postcodes, insurance, timeout/cache/debug, packaging weight, rounding, minimum price and fallback settings.
+- `Тарифы`: one merged tariff list with `delivery_type`, enabled state, ECOM flag, declared-value flag, weight limits, custom titles and sort order.
+- `ПВЗ / ОПС`: point type settings, local pickup import state and pickup diagnostics.
+- `API / Credentials`: Tariff API endpoint/token, Otpravka AccessToken/login/password/timeout, postoffice acceptance indices, default from postcode, plus stored-only tracking login/password fields.
+- `Отправления`: `shelf_life_days_default`, `send_goods_items`, `combine_goods_items_default`, `combined_goods_name_template`.
+- `Статусы / Mapping`: stored-only placeholder for future status mapping, polling defaults and WooCommerce status sync settings.
+- `Диагностика`: service/settings/PVZ quick diagnostics.
+
+`WDC -> Перевозчики` is no longer registered. Tariff API endpoint/token, Otpravka credentials and postoffice codes are edited only inside the domestic delivery service. The unified service settings table is the only runtime source of truth for domestic Russian Post settings.
+
+`from_postcodes` is labeled `Индекс отправки для расчета доставки`; `return_postcode` is labeled `Индекс возврата для расчета доставки`. `default_from_postcode` is edited on `API / Credentials` beside the postoffice acceptance list, but keeps the same storage key and is still used by tariff calculation as a fallback origin index. `russian_post_otpravka_postoffice_codes` is a separate Otpravka/shipment setting used by the order shipment modal as the selectable `postoffice-code`.
+
+Checkout method labels are built from the configured method title plus the selected tariff title and delivery days, for example `Почта России до отделения, Посылка онлайн - 7 дней` or `Почта России до двери, Курьер онлайн`. Visible domestic WooCommerce shipping item meta contains only `Срок доставки`. Technical values such as delivery type, selected tariff, service key and pickup point code/type/postcode/address are stored in hidden WDC order meta and `_wdc_delivery_calculation_data`. Pickup code is not written to `shipping_address_2`; shipment creation reads pickup data from WDC meta/calculation data.
+
+Migration `0026_unify_russian_post_domestic_service.php` creates/activates the unified service, copies old service settings and carrier credentials into the service settings table, merges tariff variants by `delivery_type:object_code`, copies pickup type settings to `russian_post_domestic_point_type_*`, and pins RU availability. After the data is copied, it physically deletes the old `russian_post_domestic_pickup` and `russian_post_domestic_courier` service rows, their `wdc_delivery_service_settings` rows, `wdc_delivery_service_countries` rows, and service-rule bindings/conditions. Backward compatibility with old domestic service keys is intentionally not supported.

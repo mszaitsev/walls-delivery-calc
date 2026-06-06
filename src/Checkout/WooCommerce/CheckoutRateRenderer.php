@@ -170,8 +170,11 @@ final class CheckoutRateRenderer {
 			return;
 		}
 		$service_key = (string) ( $meta['service_key'] ?? '' );
+		$rate_meta = is_array( $meta['rate_meta'] ?? null ) ? $meta['rate_meta'] : array();
+		$checkout_group_id = (string) ( $meta['checkout_group_id'] ?? $rate_meta['checkout_group_id'] ?? $meta['rate_id'] ?? $service_key );
+		$delivery_type = (string) ( $meta['delivery_type'] ?? '' );
 		$selected = (string) ( $meta['selected_tariff_object'] ?? '' );
-		echo '<div class="wdc-domestic-tariff-selector" data-wdc-service-key="' . esc_attr( $service_key ) . '">';
+		echo '<div class="wdc-domestic-tariff-selector" data-wdc-service-key="' . esc_attr( $service_key ) . '" data-wdc-checkout-group-id="' . esc_attr( $checkout_group_id ) . '" data-wdc-delivery-type="' . esc_attr( $delivery_type ) . '">';
 		foreach ( $variants as $variant ) {
 			if ( ! is_array( $variant ) ) {
 				continue;
@@ -191,7 +194,7 @@ final class CheckoutRateRenderer {
 				$line .= ': ';
 			}
 			echo '<label class="wdc-domestic-tariff-selector__item">';
-			echo '<input type="radio" name="wdc_domestic_tariff_' . esc_attr( $service_key ) . '" value="' . esc_attr( $object ) . '" data-title="' . esc_attr( $title ) . '" data-price="' . esc_attr( (string) ( $variant['price_rub'] ?? '' ) ) . '" ' . checked( $selected, $object, false ) . '>';
+			echo '<input type="radio" name="wdc_domestic_tariff_' . esc_attr( $checkout_group_id ) . '" value="' . esc_attr( $object ) . '" data-title="' . esc_attr( $title ) . '" data-price="' . esc_attr( (string) ( $variant['price_rub'] ?? '' ) ) . '" ' . checked( $selected, $object, false ) . '>';
 			echo '<span class="wdc-domestic-tariff-selector__line">';
 			echo '<span class="wdc-domestic-tariff-selector__line-text">' . esc_html( $line ) . '</span>';
 			if ( '' !== $price ) {

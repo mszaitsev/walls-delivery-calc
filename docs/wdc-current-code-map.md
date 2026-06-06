@@ -59,6 +59,7 @@
 - выбор города/локации, нормализация адреса и подсказки адресов;
 - кеширование quote, сортировка rates, fallback rates и сборка rates с примененными правилами;
 - инструменты симуляции checkout для admin diagnostics.
+- domestic Russian Post checkout method labels use service settings `pickup_method_title`/`courier_method_title`; visible domestic shipping item meta contains only delivery days, while hidden WDC order meta/calculation data stores service, tariff, delivery type and pickup point code/type/postcode/address.
 
 ## Calendar
 
@@ -123,7 +124,8 @@
 - Russian Post Otpravka `PUT /2.0/user/backlog` payload building and response normalization;
 - admin-only Russian Post OPS/PVZ selector inside the shipment modal; it updates the shipment draft and preview without saving WooCommerce order meta;
 - order meta storage for shipment state, safe request/response snapshots, barcode/result ids and last safe error;
-- `WDC -> Перевозчики` page for shared carrier credentials.
+- Russian Post domestic Tariff API endpoint/token, Otpravka credentials, Tracking placeholders and postoffice acceptance indices are edited in `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials`.
+- `default_from_postcode` is edited beside postoffice acceptance indices but remains the tariff fallback origin setting; pickup codes are not written to `shipping_address_2`.
 
 ## Pickup Points
 
@@ -161,6 +163,8 @@
 - настройки сервисов, стран, комментариев и packaging-related configuration;
 - admin page сервисов доставки;
 - данные сервисов, используемые checkout и расчетом carrier rates.
+- unified Russian Post domestic service `russian_post_domestic`; old `russian_post_domestic_pickup`/`russian_post_domestic_courier` rows are physically removed by migration `0026`, and no backward compatibility layer for those keys remains.
+- domestic Russian Post availability is edited on `Основные`; the separate availability tab is no longer part of the service edit UI.
 
 ## Packaging
 
@@ -196,6 +200,7 @@
 - версионированные изменения схемы для calendar, locations, aliases, GAR imports, rules, pickup points, delivery services и carrier support tables;
 - migration files, загружаемые через `src/Infrastructure/Database/MigrationManager.php`;
 - история схемы plugin-managed database tables.
+- migration `0026_unify_russian_post_domestic_service.php` copies the previous Russian Post domestic settings/tariffs/countries/credentials into `service_key=russian_post_domestic`, then physically deletes old pickup/courier service rows, related service settings/countries, and service-rule bindings.
 
 ## Assets
 

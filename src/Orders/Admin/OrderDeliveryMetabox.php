@@ -71,6 +71,7 @@ final class OrderDeliveryMetabox {
 
 		if ( array() !== $pickup ) {
 			$rows['Код ПВЗ']   = (string) ( $pickup['point_code'] ?? '' );
+			$rows['Тип ПВЗ']   = (string) ( $pickup['point_type'] ?? '' );
 			$rows['Адрес ПВЗ'] = (string) ( $pickup['point_address'] ?? '' );
 		}
 

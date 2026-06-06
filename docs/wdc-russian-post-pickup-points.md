@@ -1,6 +1,8 @@
 # Russian Post Pickup Points
 
-Version: 0.28.5.
+Version: 0.35.0.
+
+As of WDC 0.35.0, Russian Post pickup checkout belongs to the unified domestic service `russian_post_domestic`. The active pickup shipping family/rate group is `russian_post_domestic:pickup`; concrete tariff rates look like `russian_post_domestic:pickup:23030`. Older release notes below may mention the historical pickup service key, but the current runtime no longer uses it. Pickup point type settings are stored as `russian_post_domestic_point_type_{ops,pvz,aps}_{enabled,label}` in the unified service settings context.
 
 Version 0.28.5 clears stale checkout pickup selection when the customer manually changes the city through the checkout city selector, while protecting the controlled cross-location pickup flow with a one-shot suppression flag.
 
@@ -170,7 +172,7 @@ Session state stores `id`, `point_code`, `point_type`, `postcode`, `address`, `l
 
 WooCommerce validation now requires a saved pickup point for `russian_post_domestic_pickup` and returns `Выберите пункт выдачи Почты России.` when the user tries to place an order without a point. This is a server-side checkout hook and cannot be bypassed by disabling JavaScript.
 
-Order persistence is HPOS-safe and uses WooCommerce order/item APIs. Orders receive `_wdc_pickup_point_id`, `_wdc_pickup_point_code`, `_wdc_pickup_point_type`, `_wdc_pickup_point_address`, `_wdc_pickup_point_postcode`, and `_wdc_pickup_point_snapshot` JSON. Shipping item meta includes `Пункт выдачи`, `Индекс ПВЗ`, and `Тип ПВЗ`. The selected point is displayed on the admin order delivery metabox, thank-you/order details, and customer/admin emails.
+Order persistence is HPOS-safe and uses WooCommerce order/item APIs. Orders receive `_wdc_pickup_point_id`, `_wdc_pickup_point_code`, `_wdc_pickup_point_type`, `_wdc_pickup_point_address`, `_wdc_pickup_point_postcode`, and `_wdc_pickup_point_snapshot` JSON. For Russian Post domestic orders, visible shipping item meta is kept to delivery days only; pickup code/type/postcode/address live in `_wdc_delivery_calculation_data.pickup`. The selected point is displayed on the admin order delivery metabox, thank-you/order details, and customer/admin emails.
 
 The current scope covers the local Russian Post pickup directory, public point REST, and the checkout map/selection MVP. Shipment registration, labels, tracking statuses, multicarrier pickup maps, and advanced clustering are still out of scope.
 

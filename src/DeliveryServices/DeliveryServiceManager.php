@@ -21,10 +21,9 @@ final class DeliveryServiceManager {
 
 	public function ensure_builtin_services(): void {
 		$this->services->ensure_russian_post_service();
-		foreach ( $this->services->ensure_russian_post_domestic_services() as $service ) {
-			if ( null !== $service->id ) {
-				$this->countries->replace_countries( (int) $service->id, array( 'RU' ) );
-			}
+		$service = $this->services->ensure_russian_post_domestic_service();
+		if ( null !== $service->id ) {
+			$this->countries->replace_countries( (int) $service->id, array( 'RU' ) );
 		}
 	}
 

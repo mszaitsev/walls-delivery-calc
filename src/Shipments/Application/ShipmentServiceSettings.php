@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Shipments\Application;
 
-use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
 
@@ -23,13 +22,11 @@ final class ShipmentServiceSettings {
 	 */
 	public static function defaults( string $service_key = '' ): array {
 		$defaults = array(
+			self::SHELF_LIFE_DAYS_DEFAULT => 30,
 			self::SEND_GOODS_ITEMS => false,
 			self::COMBINE_GOODS_ITEMS_DEFAULT => true,
 			self::COMBINED_GOODS_NAME_TEMPLATE => 'Товары по заказу {order_number}',
 		);
-		if ( RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $service_key ) {
-			$defaults[ self::SHELF_LIFE_DAYS_DEFAULT ] = 30;
-		}
 
 		return $defaults;
 	}
@@ -56,13 +53,11 @@ final class ShipmentServiceSettings {
 	 */
 	public static function sanitize_from_post( array $post, string $service_key ): array {
 		$result = array(
+			self::SHELF_LIFE_DAYS_DEFAULT => array( 'value' => max( 15, min( 60, (int) ( $post[ self::SHELF_LIFE_DAYS_DEFAULT ] ?? 30 ) ) ), 'format' => 'number' ),
 			self::SEND_GOODS_ITEMS => array( 'value' => ! empty( $post[ self::SEND_GOODS_ITEMS ] ), 'format' => 'bool' ),
 			self::COMBINE_GOODS_ITEMS_DEFAULT => array( 'value' => ! empty( $post[ self::COMBINE_GOODS_ITEMS_DEFAULT ] ), 'format' => 'bool' ),
 			self::COMBINED_GOODS_NAME_TEMPLATE => array( 'value' => sanitize_text_field( wp_unslash( $post[ self::COMBINED_GOODS_NAME_TEMPLATE ] ?? self::defaults()[ self::COMBINED_GOODS_NAME_TEMPLATE ] ) ), 'format' => 'string' ),
 		);
-		if ( RussianPostDomesticSettings::PICKUP_SERVICE_KEY === $service_key ) {
-			$result[ self::SHELF_LIFE_DAYS_DEFAULT ] = array( 'value' => max( 15, min( 60, (int) ( $post[ self::SHELF_LIFE_DAYS_DEFAULT ] ?? 30 ) ) ), 'format' => 'number' );
-		}
 
 		return $result;
 	}

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\Runtime;
 
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Checkout\Cache\QuoteCache;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
@@ -68,7 +69,7 @@ final class CheckoutOrchestrator {
 			$service = $entry['service'];
 			$carrier_key   = $carrier->get_identity()->key;
 			$service_key   = $service instanceof DeliveryService ? $service->service_key : '';
-			$delivery_type = '';
+			$delivery_type = (string) ( $entry['delivery_type'] ?? '' );
 			$quote         = null;
 			$service_request = $request;
 			$packaging_result = null;
@@ -77,7 +78,7 @@ final class CheckoutOrchestrator {
 				$service_request = $this->request_with_package( $request, $packaging_result->package, $packaging_result );
 			}
 			if ( $service instanceof DeliveryService ) {
-				$service_request = $this->request_for_service( $service_request, $service );
+				$service_request = $this->request_for_service( $service_request, $service, $delivery_type );
 			}
 
 			if ( $cache_enabled && $this->quote_cache instanceof QuoteCache ) {
@@ -157,7 +158,7 @@ final class CheckoutOrchestrator {
 	}
 
 	/**
-	 * @return array<int,array{carrier:object,service:?DeliveryService}>|null
+	 * @return array<int,array{carrier:object,service:?DeliveryService,delivery_type?:string}>|null
 	 */
 	private function service_entries_for_country( string $country_code ): ?array {
 		if ( ! $this->service_registry instanceof DeliveryServiceRegistry || ! $this->service_manager instanceof DeliveryServiceManager ) {
@@ -176,6 +177,11 @@ final class CheckoutOrchestrator {
 			}
 			$carrier = $this->service_registry->carrier_for( $service );
 			if ( null !== $carrier ) {
+				if ( RussianPostDomesticSettings::SERVICE_KEY === $service->service_key ) {
+					$entries[] = array( 'carrier' => $carrier, 'service' => $service, 'delivery_type' => DeliveryType::PICKUP );
+					$entries[] = array( 'carrier' => $carrier, 'service' => $service, 'delivery_type' => DeliveryType::COURIER );
+					continue;
+				}
 				$entries[] = array( 'carrier' => $carrier, 'service' => $service );
 			}
 		}
@@ -294,7 +300,16 @@ final class CheckoutOrchestrator {
 		);
 	}
 
-	private function request_for_service( QuoteRequest $request, DeliveryService $service ): QuoteRequest {
+	private function request_for_service( QuoteRequest $request, DeliveryService $service, string $delivery_type = '' ): QuoteRequest {
+		$context = array(
+			'service_key' => $service->service_key,
+			'service_title' => $service->title,
+			'service_carrier_key' => $service->carrier_key,
+		);
+		if ( '' !== $delivery_type ) {
+			$context['delivery_type'] = $delivery_type;
+		}
+
 		return new QuoteRequest(
 			$request->country_code,
 			$request->destination,
@@ -304,11 +319,7 @@ final class CheckoutOrchestrator {
 			$request->calculation_date,
 			array_merge(
 				$request->customer_context,
-				array(
-					'service_key' => $service->service_key,
-					'service_title' => $service->title,
-					'service_carrier_key' => $service->carrier_key,
-				)
+				$context
 			)
 		);
 	}

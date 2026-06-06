@@ -5,10 +5,12 @@ namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -164,13 +166,16 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		$output = array();
 		foreach ( $rates as $rate ) {
 			if ( $rate instanceof DeliveryRate && ! empty( $rate->meta['tariff_selector_group'] ) ) {
-				$grouped[ $rate->service_key ][] = $rate;
+				$group_id = RussianPostDomesticSettings::CARRIER_KEY === $rate->carrier_key
+					? RussianPostDomesticSettings::checkout_group_id( $rate->delivery_type )
+					: $rate->service_key;
+				$grouped[ $group_id ][] = $rate;
 				continue;
 			}
 			$output[] = $rate;
 		}
-		foreach ( $grouped as $service_key => $items ) {
-			$output[] = $this->tariff_selector_rate( $service_key, $items );
+		foreach ( $grouped as $group_id => $items ) {
+			$output[] = $this->tariff_selector_rate( $group_id, $items );
 		}
 
 		return $output;
@@ -179,8 +184,8 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	/**
 	 * @param array<int,DeliveryRate> $rates
 	 */
-	private function tariff_selector_rate( string $service_key, array $rates ): DeliveryRate {
-		$selected = $this->session_manager->selected_tariff( $service_key );
+	private function tariff_selector_rate( string $group_id, array $rates ): DeliveryRate {
+		$selected = $this->session_manager->selected_tariff( $group_id );
 		$selected_object = (string) ( $selected['object_code'] ?? '' );
 		$active = $rates[0];
 		$selected_found = false;
@@ -209,7 +214,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		) : array();
 		if ( ! $selected_found ) {
 			$this->session_manager->save_selected_tariff(
-				$service_key,
+				$group_id,
 				array(
 					'object_code' => $active->tariff_key,
 					'title' => $active->tariff_name,
@@ -222,10 +227,10 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		$method_title = $this->domestic_method_title( $active );
 
 		return new DeliveryRate(
-			$service_key,
+			$group_id,
 			$active->carrier_key,
 			$active->carrier_name,
-			$service_key,
+			$active->service_key,
 			$active->service_name,
 			$active->tariff_key,
 			$active->tariff_name,
@@ -247,6 +252,9 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 				array(
 					'tariff_variants' => $variants,
 					'domestic_tariff_grouped' => true,
+					'checkout_group_id' => $group_id,
+					'pickup_method_title' => (string) ( $active->meta['pickup_method_title'] ?? RussianPostDomesticSettings::PICKUP_SERVICE_TITLE ),
+					'courier_method_title' => (string) ( $active->meta['courier_method_title'] ?? RussianPostDomesticSettings::COURIER_SERVICE_TITLE ),
 					'selected_tariff_object' => $active->tariff_key,
 					'selected_tariff_title' => $active->tariff_name,
 					'selected_tariff_rate_id' => $active->rate_id,
@@ -257,6 +265,19 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	}
 
 	private function domestic_method_title( DeliveryRate $rate ): string {
+		if ( RussianPostDomesticSettings::CARRIER_KEY === $rate->carrier_key ) {
+			$prefix = $this->domestic_method_prefix( $rate );
+			$tariff = trim( $rate->tariff_name );
+			$days = $this->delivery_comment( $rate->delivery_days );
+
+			if ( '' === $tariff ) {
+				return $prefix;
+			}
+
+			$rate_label = '' !== $days ? $tariff . ' - ' . $days : $tariff;
+
+			return $prefix . ', ' . $rate_label;
+		}
 		$tariff = trim( $rate->tariff_name );
 		if ( '' === $tariff ) {
 			$title = $rate->service_name;
@@ -266,6 +287,14 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		$days = $this->delivery_comment( $rate->delivery_days );
 
 		return '' !== $days ? $title . ' - ' . $days : $title;
+	}
+
+	private function domestic_method_prefix( DeliveryRate $rate ): string {
+		$key = DeliveryType::COURIER === $rate->delivery_type ? 'courier_method_title' : 'pickup_method_title';
+		$default = DeliveryType::COURIER === $rate->delivery_type ? RussianPostDomesticSettings::COURIER_SERVICE_TITLE : RussianPostDomesticSettings::PICKUP_SERVICE_TITLE;
+		$title = trim( (string) ( $rate->meta[ $key ] ?? '' ) );
+
+		return '' !== $title ? $title : $default;
 	}
 
 	private function delivery_comment( DateRange $range ): string {

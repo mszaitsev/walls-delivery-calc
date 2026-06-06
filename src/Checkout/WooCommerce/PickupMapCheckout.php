@@ -60,8 +60,8 @@ final class PickupMapCheckout {
 				array(
 					'restUrl'          => function_exists( 'rest_url' ) ? rest_url( 'wdc/v1/' ) : '/wp-json/wdc/v1/',
 					'nonce'            => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( 'wp_rest' ) : '',
-					'carrier'          => 'russian_post',
-					'shippingMethodId' => RussianPostDomesticSettings::PICKUP_SERVICE_KEY,
+					'carrier'          => RussianPostDomesticSettings::CARRIER_KEY,
+					'shippingMethodId' => RussianPostDomesticSettings::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP ),
 					'initialContext'   => $this->initial_context(),
 					'mapProvider'      => $provider,
 					'pickupPointTypes' => $this->pickup_point_types(),
@@ -93,7 +93,11 @@ final class PickupMapCheckout {
 
 	private function has_domestic_pickup_rate(): bool {
 		foreach ( $this->session_manager->rates() as $rate ) {
-			if ( RussianPostDomesticSettings::PICKUP_SERVICE_KEY === (string) ( $rate['service_key'] ?? '' ) ) {
+			if (
+				RussianPostDomesticSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? '' )
+				&& \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' )
+				&& ! empty( $rate['requires_pickup_point'] )
+			) {
 				return true;
 			}
 		}
