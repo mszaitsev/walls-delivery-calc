@@ -159,6 +159,15 @@ final class ShipmentStatusUpdateService {
 	}
 
 	private function now(): string {
-		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+		return $this->novosibirsk_now();
+	}
+
+	private function novosibirsk_now(): string {
+		try {
+			return ( new \DateTimeImmutable( 'now', new \DateTimeZone( 'Asia/Novosibirsk' ) ) )->format( 'Y-m-d H:i:s' );
+		} catch ( \Throwable ) {
+			$hour = defined( 'HOUR_IN_SECONDS' ) ? HOUR_IN_SECONDS : 3600;
+			return gmdate( 'Y-m-d H:i:s', time() + 7 * $hour );
+		}
 	}
 }

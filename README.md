@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.38.1.
+Current plugin version: 0.38.2.
+
+Version 0.38.2 stores the manager-facing shipment status check timestamp `tracking_checked_at` in the Novosibirsk timezone (`Asia/Novosibirsk`, GMT+7). Russian Post carrier operation timestamps (`carrier_operation_date`) remain unchanged from the API response.
 
 Version 0.38.1 tightens shipment status autosync before site testing. Autosync services are explicitly registered in the plugin container, default WooCommerce order statuses are now `wc-processing` and `wc-on-hold` only, and the `WDC -> Statuses` page saves only the autosync enabled flag plus selected order statuses instead of materializing all default settings into `wdc_core_settings`. `wc-completed` can still be enabled manually by an administrator.
 

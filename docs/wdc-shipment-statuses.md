@@ -1,6 +1,8 @@
 # WDC Shipment Statuses
 
-Version: 0.38.1.
+Version: 0.38.2.
+
+Version 0.38.2 stores and shows `tracking_checked_at` / `Проверено` for managers in `Asia/Novosibirsk` (GMT+7) with the existing `Y-m-d H:i:s` format. `carrier_operation_date` is carrier data from Russian Post Tracking API and remains unchanged, without timezone conversion.
 
 Version 0.38.1 defaults autosync order statuses to:
 
