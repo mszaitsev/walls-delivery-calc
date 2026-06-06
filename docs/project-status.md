@@ -26,7 +26,7 @@
 | Rule Engine | done | 85% | Conditions, groups, audit trail, price/days mutations, admin builder, simulation. |
 | Checkout Rates | done | 80% | WooCommerce shipping method, orchestrator, cache, sorting, rules, order meta persistence. |
 | Checkout UX | partial | 70% | City picker, sorting, tariff selector, courier address summary, pickup map; browser storage TTL and full UX stabilization remain. |
-| Russian Post Domestic | done | 86% | Domestic runtime, unified `russian_post_domestic` service settings context, delivery-type split for pickup/courier groups, tariff variants, API client and migration from the previous two-service model. |
+| Russian Post Domestic | done | 86% | Domestic runtime, unified `russian_post_domestic` service settings context, delivery-type split for pickup/courier groups, tariff variants, API client and one-way migration from the previous two-service model. |
 | Russian Post International | done | 75% | International runtime, country mapping, API/fallback pricing. |
 | Russian Post Pickup Points | done | 88% | Import pipeline, compact table, REST API, checkout map, order persistence, and admin shipment-modal local pickup search. |
 | Multicarrier Pickup Layer | partial | 35% | Generic domain/storage exists, but production checkout map is Russian Post-specific. |
@@ -95,6 +95,7 @@
 - `src/Carriers/Runtime/RussianPostDomesticCarrier.php` and `src/Carriers/Runtime/RussianPostInternationalCarrier.php` are registered in `CarrierRegistry`.
 - `src/Carriers/RussianPost` includes tariff API clients/settings, country mapping/directory, domestic tariff variants, courier tariff probing, and Otpravka credentials/client foundation.
 - `src/DeliveryServices` provides service definitions/settings/countries/admin management used by Russian Post services.
+- Domestic Russian Post settings use only `service_key=russian_post_domestic` as source of truth. Migration `0026_unify_russian_post_domestic_service.php` copies old domestic settings/tariffs/countries/credentials into that unified service, then physically deletes `russian_post_domestic_pickup` and `russian_post_domestic_courier` rows plus their settings, country rows, and service-rule bindings. Backward compatibility with old domestic service keys is intentionally not supported.
 
 ### Russian Post Pickup Points
 

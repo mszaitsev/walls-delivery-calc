@@ -199,6 +199,6 @@ Tabs:
 - `Статусы / Mapping`: stored-only placeholder for future status mapping, polling defaults and WooCommerce status sync settings.
 - `Диагностика`: service/settings/PVZ quick diagnostics.
 
-`WDC -> Перевозчики` is no longer registered. Otpravka credentials and postoffice codes are edited only inside the domestic delivery service.
+`WDC -> Перевозчики` is no longer registered. Otpravka credentials and postoffice codes are edited only inside the domestic delivery service. The unified service settings table is the only runtime source of truth for domestic Russian Post settings.
 
-Migration `0026_unify_russian_post_domestic_service.php` creates/activates the unified service, copies old service settings and carrier credentials into the service settings table, merges tariff variants by `delivery_type:object_code`, copies pickup type settings to `russian_post_domestic_point_type_*`, pins RU availability and soft-deletes old domestic service rows.
+Migration `0026_unify_russian_post_domestic_service.php` creates/activates the unified service, copies old service settings and carrier credentials into the service settings table, merges tariff variants by `delivery_type:object_code`, copies pickup type settings to `russian_post_domestic_point_type_*`, and pins RU availability. After the data is copied, it physically deletes the old `russian_post_domestic_pickup` and `russian_post_domestic_courier` service rows, their `wdc_delivery_service_settings` rows, `wdc_delivery_service_countries` rows, and service-rule bindings/conditions. Backward compatibility with old domestic service keys is intentionally not supported.

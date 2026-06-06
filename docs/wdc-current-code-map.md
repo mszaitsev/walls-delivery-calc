@@ -161,6 +161,7 @@
 - настройки сервисов, стран, комментариев и packaging-related configuration;
 - admin page сервисов доставки;
 - данные сервисов, используемые checkout и расчетом carrier rates.
+- unified Russian Post domestic service `russian_post_domestic`; old `russian_post_domestic_pickup`/`russian_post_domestic_courier` rows are physically removed by migration `0026`, and no backward compatibility layer for those keys remains.
 
 ## Packaging
 
@@ -196,6 +197,7 @@
 - версионированные изменения схемы для calendar, locations, aliases, GAR imports, rules, pickup points, delivery services и carrier support tables;
 - migration files, загружаемые через `src/Infrastructure/Database/MigrationManager.php`;
 - история схемы plugin-managed database tables.
+- migration `0026_unify_russian_post_domestic_service.php` copies the previous Russian Post domestic settings/tariffs/countries/credentials into `service_key=russian_post_domestic`, then physically deletes old pickup/courier service rows, related service settings/countries, and service-rule bindings.
 
 ## Assets
 

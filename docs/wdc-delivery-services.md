@@ -83,6 +83,8 @@ As of 0.35.0, domestic Russian Post has one built-in delivery service:
 
 Bootstrapping pins it to `RU` and no longer creates pickup/courier service rows. Pickup and courier remain separate checkout groups through `delivery_type`, not separate service settings contexts.
 
+Migration `0026_unify_russian_post_domestic_service.php` is a one-way cleanup migration for the old domestic Russian Post model. It copies service settings, tariff variants, countries, point type settings, Otpravka/tracking credentials and shipment settings into `service_key=russian_post_domestic`, then physically deletes the old `russian_post_domestic_pickup` and `russian_post_domestic_courier` service rows plus their service settings, country rows and service-rule bindings. The source of truth after the migration is only the unified service; backward compatibility with the old domestic service keys is intentionally not supported.
+
 The domestic service has these tabs: `Основные`, `Доступность`, `Расчет`, `Тарифы`, `ПВЗ / ОПС`, `API / Credentials`, `Отправления`, `Статусы / Mapping`, `Диагностика`. The former carrier credentials page is removed from the menu and the UI.
 
 Domestic tariff variants are exposed on the unified `Тарифы` tab. One list stores pickup and courier rows with `delivery_type`, `enabled`, `is_ecom`, declared-value flag, weight limits, custom titles and sort order. Shipment creation uses `is_ecom` to decide whether pickup payloads use `ecom-data.delivery-point-index` or the normal OPS `DEMAND` address schema.

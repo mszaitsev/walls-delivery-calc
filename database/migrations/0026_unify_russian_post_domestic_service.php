@@ -205,13 +205,45 @@ return static function (): void {
 		}
 	}
 
+	$old_service_ids = array_values(
+		array_filter(
+			array_map(
+				static fn ( ?array $service ): int => is_array( $service ) ? (int) ( $service['id'] ?? 0 ) : 0,
+				array( $pickup, $courier )
+			),
+			static fn ( int $service_id ): bool => $service_id > 0
+		)
+	);
+	foreach ( $old_service_ids as $old_service_id ) {
+		$wpdb->delete( $settings_table, array( 'service_id' => $old_service_id ), array( '%d' ) );
+		if ( $table_exists( $countries_table ) ) {
+			$wpdb->delete( $countries_table, array( 'service_id' => $old_service_id ), array( '%d' ) );
+		}
+	}
+
+	$rules_table = $wpdb->prefix . 'wdc_rules';
+	$conditions_table = $wpdb->prefix . 'wdc_rule_conditions';
+	if ( $table_exists( $rules_table ) ) {
+		$old_rule_ids = array();
+		foreach ( array( $old_pickup_key, $old_courier_key ) as $old_key ) {
+			$ids = $wpdb->get_col( $wpdb->prepare( "SELECT id FROM {$rules_table} WHERE target_type = %s AND target_value = %s", 'service', $old_key ) );
+			foreach ( is_array( $ids ) ? $ids : array() as $id ) {
+				$old_rule_ids[] = (int) $id;
+			}
+		}
+		if ( $table_exists( $conditions_table ) ) {
+			foreach ( array_values( array_unique( $old_rule_ids ) ) as $rule_id ) {
+				if ( $rule_id > 0 ) {
+					$wpdb->delete( $conditions_table, array( 'rule_id' => $rule_id ), array( '%d' ) );
+				}
+			}
+		}
+		foreach ( array( $old_pickup_key, $old_courier_key ) as $old_key ) {
+			$wpdb->delete( $rules_table, array( 'target_type' => 'service', 'target_value' => $old_key ), array( '%s', '%s' ) );
+		}
+	}
+
 	foreach ( array( $old_pickup_key, $old_courier_key ) as $old_key ) {
-		$wpdb->update(
-			$services_table,
-			array( 'enabled' => 0, 'deleted' => 1, 'updated_at' => $now ),
-			array( 'service_key' => $old_key ),
-			array( '%d', '%d', '%s' ),
-			array( '%s' )
-		);
+		$wpdb->delete( $services_table, array( 'service_key' => $old_key ), array( '%s' ) );
 	}
 };
