@@ -57,6 +57,18 @@ final class OrderShipmentRepository {
 		$order->save();
 	}
 
+	public function delete_for_carrier( object $order, string $carrier_key ): void {
+		if ( ! method_exists( $order, 'update_meta_data' ) || ! method_exists( $order, 'save' ) ) {
+			return;
+		}
+
+		$shipments = $this->all_for_order( $order );
+		unset( $shipments[ $carrier_key ] );
+		$order->update_meta_data( self::META_KEY, $shipments );
+		$order->update_meta_data( self::LAST_ERROR_META_KEY, '' );
+		$order->save();
+	}
+
 	/**
 	 * @param array<string,mixed> $error
 	 */

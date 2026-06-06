@@ -106,7 +106,20 @@ final class ShipmentStatusUpdateService {
 			'carrier_operation_index' => (string) ( $shipment['carrier_operation_index'] ?? '' ),
 			'tracking_checked_at' => (string) ( $shipment['tracking_checked_at'] ?? '' ),
 			'carrier_status_is_terminal' => ! empty( $shipment['carrier_status_is_terminal'] ),
+			'can_cancel' => $this->can_cancel( $shipment ),
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 */
+	private function can_cancel( array $shipment ): bool {
+		$barcode = trim( (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
+
+		return '' !== $barcode
+			&& (int) ( $shipment['backlog_order_id'] ?? 0 ) > 0
+			&& in_array( (string) ( $shipment['status'] ?? '' ), array( 'created', 'registered' ), true )
+			&& ( '28' === (string) ( $shipment['carrier_operation_type_id'] ?? '' ) || 'Присвоение идентификатора' === (string) ( $shipment['carrier_operation_type_name'] ?? '' ) );
 	}
 
 	/**

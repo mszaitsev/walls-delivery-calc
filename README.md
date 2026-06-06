@@ -1,10 +1,14 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.36.2.
+Current plugin version: 0.37.0.
 
 Current implementation status and roadmap are maintained in `docs/project-status.md`. Historical release notes below may not cover every intermediate 0.33.x change.
 
-Version 0.36.2 polishes the manual shipment status flow. After a successful Russian Post shipment create, the preparation modal closes, a 10-second admin toast confirms creation, and WDC automatically runs the first `wdc_update_shipment_status` request; if that status refresh fails, creation remains successful and the metabox shows a Russian warning. Russian Post tracking operations without attributes now fall back from `type:0`/empty attr to `type:-`, so `28:-` maps to `created_in_carrier` / `создан в ТК` and `46:-` maps to `cancelled` / `отменён`. The metabox shows Russian status labels and no longer displays or stores Otpravka `result-id` in shipment state.
+Version 0.37.0 finishes the Russian Post shipment cleanup for the current manual workflow. The order metabox no longer shows a documents/download placeholder because labels, batches, F103 and Russian Post documents are prepared manually in the Russian Post account. Managers can cancel a just-created backlog shipment while Russian Post still reports `Присвоение идентификатора`; cancellation uses `DELETE /1.0/backlog` with `backlog_order_id`. Managers can also attach a manually created shipment by entering ШПИ; WDC searches `GET /1.0/backlog/search`, saves barcode plus `backlog_order_id`, then tries the first Tracking API status refresh. Tracking still uses barcode/ШПИ, not `backlog_order_id`.
+
+Version 0.36.4 stores Russian Post Otpravka create-response `result-id` as the explicit technical shipment-state field `backlog_order_id`. Barcode/ШПИ remains the manager-facing tracking identifier and is used for Tracking API status refreshes; in 0.37.0 `backlog_order_id` is kept hidden and used for internal backlog operations such as cancellation, not in customer-facing output, emails, account pages, public tracking blocks, or shipment toasts.
+
+Version 0.36.2 polishes the manual shipment status flow. After a successful Russian Post shipment create, the preparation modal closes, a 10-second admin toast confirms creation, and WDC automatically runs the first `wdc_update_shipment_status` request; if that status refresh fails, creation remains successful and the metabox shows a Russian warning. Russian Post tracking operations without attributes now fall back from `type:0`/empty attr to `type:-`, so `28:-` maps to `created_in_carrier` / `создан в ТК` and `46:-` maps to `cancelled` / `отменён`. The metabox shows Russian status labels and uses barcode/ШПИ as the primary shipment identifier.
 
 Version 0.36.1 corrects the Russian Post tracking status mapping: selected pickup operations including `8:2`, `12:1..12:31`, and `42:1..42:30` now map to `ready_for_pickup` / `ожидает самовывоза из ПВЗ/постамата`, while `8:15` and `8:18` map to `handed_to_courier` / `передан курьеру`. Unknown operation/attribute pairs still map to `unknown` / `не определён`.
 

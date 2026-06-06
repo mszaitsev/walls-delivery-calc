@@ -211,7 +211,40 @@ final class ShipmentsSmokeAdapter implements ShipmentCarrierAdapterInterface {
 	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult {
 		$this->called = true;
 		$this->created_request = $request;
-		return new ShipmentCreateResult( true );
+		return new ShipmentCreateResult(
+			true,
+			external_id: '2285075494',
+			tracking_number: '80080822636218',
+			backlog_order_id: '2285075494',
+			raw_reference: array(
+				'orders' => array( array( 'barcode' => '80080822636218' ) ),
+				'barcodes' => array( '80080822636218' ),
+				'group_name' => '123',
+			)
+		);
+	}
+}
+
+final class ShipmentsSmokePersistedOrder {
+	public int $save_count = 0;
+
+	public function __construct( private int $id, private array $meta = array() ) {
+	}
+
+	public function get_id(): int {
+		return $this->id;
+	}
+
+	public function get_meta( string $key, bool $single = true ): mixed {
+		return $this->meta[ $key ] ?? '';
+	}
+
+	public function update_meta_data( string $key, mixed $value ): void {
+		$this->meta[ $key ] = $value;
+	}
+
+	public function save(): void {
+		$this->save_count++;
 	}
 }
 
@@ -555,6 +588,17 @@ $wrong_order_result = $creation_service->create(
 	)
 );
 shipments_smoke_assert( ! $wrong_order_result->success && 'shipment_order_mismatch' === $wrong_order_result->error_code && ! $guard_adapter->called, 'Shipment creation service must block wrong order_id before API adapter call.' );
+
+$persisted_order = new ShipmentsSmokePersistedOrder( 123 );
+$persisted_adapter = new ShipmentsSmokeAdapter();
+$persisted_service = new ShipmentCreationService( new OrderShipmentRepository(), array( $persisted_adapter ) );
+$persisted_result = $persisted_service->create( $persisted_order, $request );
+$persisted_shipments = $persisted_order->get_meta( OrderShipmentRepository::META_KEY, true );
+$persisted_shipment = is_array( $persisted_shipments ) ? ( $persisted_shipments[ RussianPostDomesticSettings::CARRIER_KEY ] ?? array() ) : array();
+shipments_smoke_assert( $persisted_result->success && 1 === $persisted_order->save_count, 'Successful shipment create must save shipment state.' );
+shipments_smoke_assert( '80080822636218' === (string) ( $persisted_shipment['barcode'] ?? '' ) && '80080822636218' === (string) ( $persisted_shipment['tracking_number'] ?? '' ), 'Successful shipment create must save barcode as the main tracking identifier.' );
+shipments_smoke_assert( 2285075494 === (int) ( $persisted_shipment['backlog_order_id'] ?? 0 ), 'Successful shipment create must save result-id as backlog_order_id.' );
+shipments_smoke_assert( ! isset( $persisted_shipment['response_snapshot']['orders'][0]['result-id'] ) && ! isset( $persisted_shipment['response_snapshot']['orders'][0]['result_id'] ), 'Successful shipment response snapshot must not keep result-id when backlog_order_id is saved separately.' );
 
 $missing_pickup = new ShipmentCreateRequest(
 	$request->order_id,

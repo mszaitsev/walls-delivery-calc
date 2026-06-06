@@ -1,6 +1,6 @@
 # WDC Shipment Statuses
 
-Version: 0.36.2.
+Version: 0.37.0.
 
 ## Universal Status Model
 
@@ -87,8 +87,10 @@ The status block shows:
 - `Статус Почты России`;
 - `Последняя операция`;
 - `Проверено`;
-- `Barcode`.
+- `ШПИ` / `Barcode`.
 
-The metabox shows Russian labels for both the creation/status summary and the universal delivery status. Otpravka `result-id` is not shown and is not stored in shipment state because status refresh uses barcode/ШПИ.
+The metabox shows `Статус посылки` above the carrier status block and `Отслеживание` for barcode/ШПИ with a copy action. The grey carrier block no longer duplicates plugin status or barcode; it shows Russian Post status, latest operation and checked time. Barcode/ШПИ remains the main tracking identifier and status refresh uses it for Tracking API requests. Otpravka `result-id` is stored separately as hidden `backlog_order_id` for internal API operations; it is not included in status payloads, status toasts, customer output, emails, account pages, or public tracking blocks.
 
-Automatic polling/synchronization is not part of version 0.36.2.
+Cancellation is allowed only when the latest Russian Post operation is `28 / Присвоение идентификатора`; it uses `backlog_order_id` through `DELETE /1.0/backlog` and clears shipment state on success.
+
+Automatic polling/synchronization is not part of version 0.37.0.

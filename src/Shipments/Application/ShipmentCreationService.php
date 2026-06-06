@@ -89,6 +89,7 @@ final class ShipmentCreationService {
 		}
 
 		$raw = $result->raw_reference;
+		$backlog_order_id = trim( $result->backlog_order_id );
 		$shipment = array(
 			'carrier_key' => $request->carrier_key,
 			'service_key' => (string) ( $request->meta['service_key'] ?? $request->rate_id ),
@@ -106,6 +107,9 @@ final class ShipmentCreationService {
 			'created_at' => $now,
 			'updated_at' => $now,
 		);
+		if ( '' !== $backlog_order_id ) {
+			$shipment['backlog_order_id'] = ctype_digit( $backlog_order_id ) ? (int) $backlog_order_id : $backlog_order_id;
+		}
 		$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
 		$this->add_order_note(
 			$order,

@@ -250,16 +250,77 @@
     if (!box || !status) return;
     const fields = {
       '[data-wdc-shipment-summary-status]': status.shipment_status_label || status.universal_status_label || 'создано',
-      '[data-wdc-status-plugin]': status.universal_status_label || 'не определён',
       '[data-wdc-status-carrier]': status.carrier_status_title || '-',
       '[data-wdc-status-operation]': operationSummary(status),
       '[data-wdc-status-checked]': status.tracking_checked_at || '-',
-      '[data-wdc-status-barcode]': status.barcode || '-'
+      '[data-wdc-tracking-number]': status.barcode || ''
     };
     Object.keys(fields).forEach((selector) => {
       const element = box.querySelector(selector);
       if (element) element.textContent = fields[selector];
     });
+    updateShipmentButtons(box, {
+      hasTracking: !!status.barcode,
+      canCancel: !!status.can_cancel
+    });
+    setTrackingDisplay(box, status.barcode || '');
+  }
+
+  function renderShipmentTechnicalInfo(box, data) {
+    if (!box || !data) return;
+    const backlogOrderId = String(data.backlog_order_id || '').trim();
+    const value = box.querySelector('[data-wdc-backlog-order-id]');
+    if (value) value.textContent = backlogOrderId;
+  }
+
+  function setTrackingDisplay(box, trackingNumber) {
+    if (!box) return;
+    const value = String(trackingNumber || '').trim();
+    const row = box.querySelector('[data-wdc-tracking-row]');
+    const number = box.querySelector('[data-wdc-tracking-number]');
+    const copy = box.querySelector('[data-wdc-copy-tracking]');
+    if (number) number.textContent = value;
+    if (row) row.hidden = !value;
+    if (copy) {
+      copy.disabled = !value;
+      copy.dataset.trackingNumber = value;
+    }
+  }
+
+  function updateShipmentButtons(box, state) {
+    if (!box) return;
+    const hasTracking = !!(state && state.hasTracking);
+    const canCancel = !!(state && state.canCancel);
+    const openButton = box.querySelector('[data-wdc-open-shipment-modal]');
+    const updateButton = box.querySelector('[data-wdc-update-shipment-status]');
+    const manualButton = box.querySelector('[data-wdc-open-manual-tracking]');
+    const cancelButton = box.querySelector('[data-wdc-cancel-shipment]');
+    if (openButton) openButton.disabled = hasTracking;
+    if (updateButton) updateButton.disabled = !hasTracking;
+    if (manualButton) manualButton.disabled = hasTracking;
+    if (cancelButton) cancelButton.disabled = !canCancel;
+  }
+
+  function resetShipmentUi(box) {
+    if (!box) return;
+    const fields = {
+      '[data-wdc-shipment-summary-status]': 'не создано',
+      '[data-wdc-status-carrier]': '-',
+      '[data-wdc-status-operation]': '-',
+      '[data-wdc-status-checked]': '-',
+      '[data-wdc-updated-at]': '',
+      '[data-wdc-backlog-order-id]': ''
+    };
+    Object.keys(fields).forEach((selector) => {
+      const element = box.querySelector(selector);
+      if (element) element.textContent = fields[selector];
+    });
+    setTrackingDisplay(box, '');
+    const updatedRow = box.querySelector('[data-wdc-updated-row]');
+    if (updatedRow) updatedRow.hidden = true;
+    updateShipmentButtons(box, { hasTracking: false, canCancel: false });
+    const manualForm = box.querySelector('[data-wdc-manual-tracking-form]');
+    if (manualForm) manualForm.hidden = true;
   }
 
   function showShipmentToast(box, text, type, options) {
@@ -336,6 +397,102 @@
       .finally(() => {
         if (button) button.disabled = false;
       });
+  }
+
+  function requestShipmentCancel(button) {
+    const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
+    const data = new FormData();
+    data.append('action', window.wdcShipmentsAdmin.cancelAction);
+    data.append('nonce', window.wdcShipmentsAdmin.nonce);
+    data.append('order_id', button && button.dataset ? button.dataset.orderId || '' : '');
+    data.append('shipment_key', button && button.dataset ? button.dataset.shipmentKey || 'russian_post_domestic' : 'russian_post_domestic');
+    if (button) button.disabled = true;
+    return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: data
+    })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (!payload || !payload.success) {
+          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось отменить отправление.');
+        }
+        resetShipmentUi(box);
+        showShipmentToast(box, payload.data.message || 'Отправление отменено.', 'success');
+        return payload;
+      })
+      .catch((error) => {
+        showShipmentToast(box, error.message, 'error');
+        if (button) button.disabled = false;
+        throw error;
+      });
+  }
+
+  function requestAttachTracking(button) {
+    const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
+    const form = box && box.querySelector('[data-wdc-manual-tracking-form]');
+    const input = form && form.querySelector('[data-wdc-manual-tracking-input]');
+    const data = new FormData();
+    data.append('action', window.wdcShipmentsAdmin.attachTrackingAction);
+    data.append('nonce', window.wdcShipmentsAdmin.nonce);
+    data.append('order_id', button && button.dataset ? button.dataset.orderId || '' : '');
+    data.append('shipment_key', button && button.dataset ? button.dataset.shipmentKey || 'russian_post_domestic' : 'russian_post_domestic');
+    data.append('barcode', input ? input.value || '' : '');
+    if (button) button.disabled = true;
+    return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: data
+    })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (!payload || !payload.success) {
+          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось сохранить ШПИ.');
+        }
+        if (form) form.hidden = true;
+        if (input) input.value = '';
+        renderShipmentStatus(box, payload.data.status || {});
+        renderShipmentTechnicalInfo(box, payload.data || {});
+        setTrackingDisplay(box, payload.data.tracking_number || payload.data.status && payload.data.status.barcode || '');
+        updateShipmentButtons(box, {
+          hasTracking: !!(payload.data.tracking_number || payload.data.status && payload.data.status.barcode),
+          canCancel: !!(payload.data.status && payload.data.status.can_cancel)
+        });
+        showShipmentToast(box, payload.data.warning || payload.data.message || 'ШПИ сохранен.', payload.data.warning ? 'warning' : 'success');
+        return payload;
+      })
+      .catch((error) => {
+        showShipmentToast(box, error.message, 'error');
+        throw error;
+      })
+      .finally(() => {
+        if (button) button.disabled = false;
+      });
+  }
+
+  function copyText(text) {
+    const value = String(text || '');
+    if (!value) return Promise.reject(new Error('Нет номера для копирования.'));
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(value);
+    }
+    return new Promise((resolve, reject) => {
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.setAttribute('readonly', 'readonly');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        ok ? resolve() : reject(new Error('Не удалось скопировать номер.'));
+      } catch (error) {
+        document.body.removeChild(textarea);
+        reject(error);
+      }
+    });
   }
 
   function normalizePickupPoint(point) {
@@ -680,6 +837,50 @@
       return;
     }
 
+    const cancelShipment = event.target.closest('[data-wdc-cancel-shipment]');
+    if (cancelShipment) {
+      requestShipmentCancel(cancelShipment).catch(function () {});
+      return;
+    }
+
+    const openManualTracking = event.target.closest('[data-wdc-open-manual-tracking]');
+    if (openManualTracking) {
+      const box = openManualTracking.closest('[data-wdc-shipments-metabox]');
+      const form = box && box.querySelector('[data-wdc-manual-tracking-form]');
+      const input = form && form.querySelector('[data-wdc-manual-tracking-input]');
+      if (form) form.hidden = false;
+      if (input) input.focus();
+      return;
+    }
+
+    const closeManualTracking = event.target.closest('[data-wdc-cancel-manual-tracking]');
+    if (closeManualTracking) {
+      const form = closeManualTracking.closest('[data-wdc-manual-tracking-form]');
+      if (form) form.hidden = true;
+      return;
+    }
+
+    const attachTracking = event.target.closest('[data-wdc-attach-tracking]');
+    if (attachTracking) {
+      requestAttachTracking(attachTracking).catch(function () {});
+      return;
+    }
+
+    const copyTracking = event.target.closest('[data-wdc-copy-tracking]');
+    if (copyTracking) {
+      const box = copyTracking.closest('[data-wdc-shipments-metabox]');
+      const status = box && box.querySelector('[data-wdc-copy-tracking-status]');
+      copyText(copyTracking.dataset.trackingNumber || '').then(() => {
+        if (status) status.textContent = 'Скопировано';
+        window.setTimeout(function () {
+          if (status) status.textContent = '';
+        }, 1500);
+      }).catch((error) => {
+        if (status) status.textContent = error.message;
+      });
+      return;
+    }
+
     const create = event.target.closest('[data-wdc-create-shipment]');
     if (create) {
       const form = findShipmentForm(create);
@@ -712,12 +913,17 @@
           if (box && payload.data.status) {
             renderShipmentStatus(box, payload.data.status);
           }
+          renderShipmentTechnicalInfo(box, payload.data || {});
           const openButton = box && box.querySelector('[data-wdc-open-shipment-modal]');
           if (openButton) openButton.disabled = true;
           const updateButton = box && box.querySelector('[data-wdc-update-shipment-status]');
           if (updateButton) {
             updateButton.disabled = !(payload.data.tracking_number || payload.data.status && payload.data.status.barcode);
           }
+          updateShipmentButtons(box, {
+            hasTracking: !!(payload.data.tracking_number || payload.data.status && payload.data.status.barcode),
+            canCancel: !!(payload.data.status && payload.data.status.can_cancel)
+          });
           showShipmentToast(box, (payload.data.message || 'Отправление создано.') + ' Barcode: ' + (payload.data.tracking_number || '-'), 'success');
           if (updateButton && !updateButton.disabled) {
             requestShipmentStatus(updateButton, { auto: true });
