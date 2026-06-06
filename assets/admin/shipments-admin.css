@@ -7,23 +7,22 @@
   text-align: center;
 }
 
-.wdc-copy-tracking-button.button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  min-height: 22px;
-  height: 22px;
-  padding: 0;
+.wdc-copy-tracking-icon {
+  display: inline;
+  padding: 0 2px;
   margin-left: 4px;
-  vertical-align: middle;
+  border: 0;
+  background: transparent;
+  color: #2271b1;
+  font-size: 15px;
   line-height: 1;
+  vertical-align: baseline;
+  cursor: pointer;
 }
 
-.wdc-copy-tracking-button svg {
-  display: block;
-  width: 14px;
-  height: 14px;
+.wdc-copy-tracking-icon:disabled {
+  color: #a7aaad;
+  cursor: default;
 }
 
 .wdc-shipment-status {

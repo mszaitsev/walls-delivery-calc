@@ -1,10 +1,10 @@
 # Project Status
 
-0.37.2 note: Russian Post order metabox now uses a compact inline SVG copy icon and separates two cleanup actions. `Отменить отправление` cancels in Russian Post through `DELETE /1.0/backlog` and is available only for operation `28 / Присвоение идентификатора` with `backlog_order_id`. `Удалить из заказа` clears WooCommerce shipment state without calling Russian Post when the shipment has tracking but cannot be cancelled in Russian Post.
+0.37.3 note: Russian Post order metabox now hides inactive action buttons instead of showing disabled controls. The copy action uses the stable `🗐` symbol. Primary state shows preparation/manual tracking; cancellable operation `28 / Присвоение идентификатора` shows update/cancel; non-cancellable tracked shipments show update/remove.
 
 ## Общий статус
 
-- Версия / baseline проекта: `0.37.2`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.37.3`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
 - Последнее обновление статуса: 2026-06-06.
 - Общий процент готовности: примерно 66%.

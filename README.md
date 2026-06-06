@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.37.2.
+Current plugin version: 0.37.3.
+
+Version 0.37.3 tightens the Russian Post shipment metabox controls: inactive actions are hidden instead of shown disabled, so the primary state only shows preparation/manual tracking, operation `28` shows update/cancel, and non-cancellable tracked shipments show update/remove. The tracking copy control now uses the stable `🗐` symbol instead of inline SVG.
 
 Version 0.37.2 polishes the Russian Post order metabox UX. The tracking copy button now uses a compact inline SVG icon instead of Font Awesome, so it stays stable when icon fonts are unavailable. Shipments that can still be cancelled in Russian Post show `Отменить отправление`; shipments that already cannot be cancelled in Russian Post show `Удалить из заказа`, which clears WooCommerce shipment state without calling Russian Post.
 

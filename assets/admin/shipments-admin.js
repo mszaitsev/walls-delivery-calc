@@ -296,9 +296,18 @@
     const manualButton = box.querySelector('[data-wdc-open-manual-tracking]');
     const cancelButton = box.querySelector('[data-wdc-cancel-shipment]');
     const removeButton = box.querySelector('[data-wdc-remove-shipment-from-order]');
-    if (openButton) openButton.disabled = hasTracking;
-    if (updateButton) updateButton.disabled = !hasTracking;
-    if (manualButton) manualButton.disabled = hasTracking;
+    if (openButton) {
+      openButton.hidden = hasTracking;
+      openButton.disabled = hasTracking;
+    }
+    if (updateButton) {
+      updateButton.hidden = !hasTracking;
+      updateButton.disabled = !hasTracking;
+    }
+    if (manualButton) {
+      manualButton.hidden = hasTracking;
+      manualButton.disabled = hasTracking;
+    }
     if (cancelButton) {
       cancelButton.hidden = !canCancel;
       cancelButton.disabled = !canCancel;
