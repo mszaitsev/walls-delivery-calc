@@ -12,6 +12,7 @@ use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
+use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -21,6 +22,7 @@ final class OrderShipmentsMetabox {
 	private const NONCE_ACTION = 'wdc_shipments_admin';
 	private const AJAX_CREATE = 'wdc_create_shipment';
 	private const AJAX_PREVIEW = 'wdc_preview_shipment';
+	private const AJAX_UPDATE_STATUS = 'wdc_update_shipment_status';
 	private const AJAX_NORMALIZE_ADDRESS = 'wdc_normalize_shipment_address';
 	private const AJAX_SEARCH_PICKUP_POINTS = 'wdc_search_russian_post_pickup_points';
 
@@ -29,6 +31,7 @@ final class OrderShipmentsMetabox {
 		private OrderShipmentDraftFactory $drafts,
 		private ShipmentCreationService $creation,
 		private DeliveryServiceRepository $services,
+		private ShipmentStatusUpdateService $status_updates,
 		private ?RussianPostAddressNormalizer $address_normalizer = null,
 		private ?RussianPostPickupPointTypeSettings $pickup_point_type_settings = null,
 		private string $plugin_url = '',
@@ -41,6 +44,7 @@ final class OrderShipmentsMetabox {
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_action( 'wp_ajax_' . self::AJAX_CREATE, array( $this, 'ajax_create' ) );
 		add_action( 'wp_ajax_' . self::AJAX_PREVIEW, array( $this, 'ajax_preview' ) );
+		add_action( 'wp_ajax_' . self::AJAX_UPDATE_STATUS, array( $this, 'ajax_update_status' ) );
 		add_action( 'wp_ajax_' . self::AJAX_NORMALIZE_ADDRESS, array( $this, 'ajax_normalize_address' ) );
 		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PICKUP_POINTS, array( $this, 'ajax_search_pickup_points' ) );
 	}
@@ -84,6 +88,7 @@ final class OrderShipmentsMetabox {
 				'nonce' => wp_create_nonce( self::NONCE_ACTION ),
 				'createAction' => self::AJAX_CREATE,
 				'previewAction' => self::AJAX_PREVIEW,
+				'updateStatusAction' => self::AJAX_UPDATE_STATUS,
 				'normalizeAddressAction' => self::AJAX_NORMALIZE_ADDRESS,
 				'searchPickupPointsAction' => self::AJAX_SEARCH_PICKUP_POINTS,
 				'mapProvider' => $provider,
@@ -188,17 +193,21 @@ final class OrderShipmentsMetabox {
 			: 'Адрес нужно обработать перед созданием отправления.';
 		$normalized_json = wp_json_encode( $normalized_address, JSON_UNESCAPED_UNICODE ) ?: '';
 		$has_created = in_array( (string) ( $shipment['status'] ?? '' ), array( 'created', 'registered' ), true );
+		$barcode = trim( (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
+		$status_payload = $this->status_updates->status_payload( $shipment );
 		?>
 		<div class="wdc-shipments-metabox" data-wdc-shipments-metabox>
 			<p><strong><?php echo esc_html__( 'Служба', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $meta['service_title'] ?? $request['rate_id'] ?? '-' ) ); ?></p>
 			<p><strong><?php echo esc_html__( 'Статус WDC', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $shipment['status'] ?? __( 'не создано', 'walls-delivery-calc' ) ) ); ?></p>
-			<?php if ( '' !== (string) ( $shipment['tracking_number'] ?? '' ) ) : ?><p><strong>Barcode:</strong> <?php echo esc_html( (string) $shipment['tracking_number'] ); ?></p><?php endif; ?>
+			<?php if ( '' !== $barcode ) : ?><p><strong>Barcode:</strong> <?php echo esc_html( $barcode ); ?></p><?php endif; ?>
 			<?php if ( '' !== (string) ( $shipment['external_id'] ?? '' ) ) : ?><p><strong>Result ID:</strong> <?php echo esc_html( (string) $shipment['external_id'] ); ?></p><?php endif; ?>
 			<?php if ( '' !== (string) ( $shipment['updated_at'] ?? '' ) ) : ?><p><strong><?php echo esc_html__( 'Обновлено', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) $shipment['updated_at'] ); ?></p><?php endif; ?>
+			<?php $this->render_status_block( $status_payload ); ?>
 			<?php if ( array() !== $error && ! $has_created ) : ?><div class="notice notice-error inline"><p><?php echo esc_html( (string) ( $error['error_message'] ?? '' ) ); ?></p></div><?php endif; ?>
+			<div class="wdc-shipment-status-message" data-wdc-shipment-status-message></div>
 			<p class="wdc-shipments-actions">
 				<button type="button" class="button button-primary" data-wdc-open-shipment-modal <?php disabled( $has_created ); ?>><?php echo esc_html__( 'Подготовить отправление', 'walls-delivery-calc' ); ?></button>
-				<button type="button" class="button" disabled><?php echo esc_html__( 'Обновить статус', 'walls-delivery-calc' ); ?></button>
+				<button type="button" class="button" data-wdc-update-shipment-status data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( RussianPostDomesticSettings::CARRIER_KEY ); ?>" <?php disabled( ! $has_created || '' === $barcode ); ?>><?php echo esc_html__( 'Обновить статус', 'walls-delivery-calc' ); ?></button>
 				<button type="button" class="button" disabled><?php echo esc_html__( 'Скачать документы', 'walls-delivery-calc' ); ?></button>
 				<button type="button" class="button" disabled><?php echo esc_html__( 'Отменить отправление', 'walls-delivery-calc' ); ?></button>
 			</p>
@@ -341,6 +350,30 @@ final class OrderShipmentsMetabox {
 		wp_send_json_success( array( 'preview' => $preview ) );
 	}
 
+	public function ajax_update_status(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
+		}
+		$order_id = (int) ( $_POST['order_id'] ?? 0 );
+		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+		if ( ! is_object( $order ) ) {
+			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
+		}
+
+		$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
+		$result = $this->status_updates->update_russian_post( $order, $shipment_key );
+		if ( ! (bool) ( $result['success'] ?? false ) ) {
+			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось получить статус Почты России.', 'walls-delivery-calc' ) ) ), 400 );
+		}
+
+		wp_send_json_success(
+			array(
+				'message' => (string) ( $result['message'] ?? __( 'Статус отправления обновлен.', 'walls-delivery-calc' ) ),
+				'status' => is_array( $result['status'] ?? null ) ? $result['status'] : array(),
+			)
+		);
+	}
+
 	public function ajax_normalize_address(): void {
 		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
@@ -408,6 +441,37 @@ final class OrderShipmentsMetabox {
 			$request->recipient,
 			array_merge( $request->meta, array( 'allow_failed_normalization_preview' => true ) )
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $status
+	 */
+	private function render_status_block( array $status ): void {
+		?>
+		<div class="wdc-shipment-status" data-wdc-shipment-status-block>
+			<p><strong><?php echo esc_html__( 'Статус в плагине', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-plugin><?php echo esc_html( (string) ( $status['universal_status_label'] ?? '' ) ?: 'не определён' ); ?></span></p>
+			<p><strong><?php echo esc_html__( 'Статус Почты России', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-carrier><?php echo esc_html( (string) ( $status['carrier_status_title'] ?? '' ) ?: '-' ); ?></span></p>
+			<p><strong><?php echo esc_html__( 'Последняя операция', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-operation><?php echo esc_html( $this->operation_summary( $status ) ); ?></span></p>
+			<p><strong><?php echo esc_html__( 'Проверено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-checked><?php echo esc_html( (string) ( $status['tracking_checked_at'] ?? '' ) ?: '-' ); ?></span></p>
+			<p><strong>Barcode:</strong> <span data-wdc-status-barcode><?php echo esc_html( (string) ( $status['barcode'] ?? '' ) ?: '-' ); ?></span></p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * @param array<string,mixed> $status
+	 */
+	private function operation_summary( array $status ): string {
+		$parts = array_filter(
+			array(
+				(string) ( $status['carrier_operation_date'] ?? '' ),
+				(string) ( $status['carrier_operation_address'] ?? '' ),
+				(string) ( $status['carrier_operation_index'] ?? '' ),
+			),
+			static fn ( string $value ): bool => '' !== trim( $value )
+		);
+
+		return array() !== $parts ? implode( ', ', $parts ) : '-';
 	}
 
 	/**

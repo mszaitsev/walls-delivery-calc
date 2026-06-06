@@ -6,7 +6,7 @@
 - Базовая ветка: `develop`.
 - Последнее обновление статуса: 2026-06-06.
 - Общий процент готовности: примерно 66%.
-- Следующий рекомендуемый этап: Russian Post shipment statuses/documents/cancellation.
+- Текущий этап 0.36.0: ручное обновление статуса отправления Почты России из метабокса `Отправления` реализовано; документы/ярлыки/отмена и автоматическая синхронизация остаются отдельными этапами.
 
 ## Краткое резюме
 
@@ -32,8 +32,8 @@
 | Multicarrier Pickup Layer | partial | 35% | Generic domain/storage exists, but production checkout map is Russian Post-specific. |
 | Order Admin Recalculation | partial | 30% | Order delivery metabox exists; full recalculation/replacement workflow is missing. |
 | Shipment Domain | partial | 55% | Domain objects exist and are used by the manual shipment creation runtime. |
-| Shipment Runtime | partial | 45% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments with server-side payload preview, tariff select, postoffice-code select, admin-only pickup map selector and visible AJAX result diagnostics; statuses/documents/cancellation are pending. |
-| Tracking / Documents / Status Sync | not-started | 0% | No tracking polling, labels, acts, documents, or status sync runtime. |
+| Shipment Runtime | partial | 55% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments and can manually refresh Russian Post tracking status from the existing shipment metabox button; documents/cancellation remain pending. |
+| Tracking / Documents / Status Sync | partial | 15% | Manual Russian Post Tracking API lookup is implemented for one shipment at a time; automatic polling, labels, acts and documents are not included yet. |
 | WooCommerce Status Mapping | not-started | 0% | Domain baseline exists, but no automatic WooCommerce order status changes. |
 | CDEK | planned | 0% | Planned carrier stage; no adapter found in code. |
 | DPD | planned | 0% | Planned carrier stage; no adapter found in code. |

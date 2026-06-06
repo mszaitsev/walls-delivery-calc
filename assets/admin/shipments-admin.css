@@ -7,6 +7,30 @@
   text-align: center;
 }
 
+.wdc-shipment-status {
+  margin: 10px 0;
+  padding: 8px 10px;
+  border: 1px solid #dcdcde;
+  background: #f6f7f7;
+}
+
+.wdc-shipment-status p {
+  margin: 4px 0;
+}
+
+.wdc-shipment-status-message {
+  min-height: 20px;
+  margin: 8px 0;
+}
+
+.wdc-shipment-status-message[data-status="success"] {
+  color: #008a20;
+}
+
+.wdc-shipment-status-message[data-status="error"] {
+  color: #b32d2e;
+}
+
 .wdc-shipment-modal[hidden] {
   display: none;
 }

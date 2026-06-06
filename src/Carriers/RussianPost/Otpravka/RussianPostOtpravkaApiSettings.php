@@ -117,6 +117,14 @@ final class RussianPostOtpravkaApiSettings {
 		return '' !== (string) ( $this->values()[ self::TRACKING_PASSWORD_ENCRYPTED_KEY ] ?? '' );
 	}
 
+	public function tracking_login(): string {
+		return trim( (string) ( $this->values()[ self::TRACKING_LOGIN_KEY ] ?? '' ) );
+	}
+
+	public function tracking_password(): string {
+		return $this->decrypt_secret( self::TRACKING_PASSWORD_ENCRYPTED_KEY );
+	}
+
 	public function has_access_token(): bool {
 		return '' !== $this->access_token();
 	}
