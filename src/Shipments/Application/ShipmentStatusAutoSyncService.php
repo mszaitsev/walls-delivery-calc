@@ -171,6 +171,7 @@ final class ShipmentStatusAutoSyncService {
 			$result = $this->dispatch( $carrier_key, $order, (string) $shipment_key );
 			if ( ! empty( $result['success'] ) ) {
 				++$stats['shipments_updated'];
+				$this->collect_order_status_mapping_result( $stats, $result, $this->order_id( $order ), $carrier_key );
 				continue;
 			}
 
@@ -227,6 +228,27 @@ final class ShipmentStatusAutoSyncService {
 		$stats['error_samples'] = array_slice( $stats['error_samples'], -20 );
 	}
 
+	/**
+	 * @param array<string,mixed> $stats
+	 * @param array<string,mixed> $result
+	 */
+	private function collect_order_status_mapping_result( array &$stats, array $result, int $order_id, string $carrier_key ): void {
+		$mapping = is_array( $result['order_status_mapping'] ?? null ) ? $result['order_status_mapping'] : array();
+		$status = (string) ( $mapping['status'] ?? '' );
+		if ( 'changed' === $status ) {
+			++$stats['order_statuses_changed'];
+			return;
+		}
+		if ( 'error' === $status ) {
+			++$stats['order_status_change_errors'];
+			$this->add_error_sample( $stats, $order_id, $carrier_key, 'Order status mapping: ' . (string) ( $mapping['message'] ?? 'WooCommerce order status change failed.' ) );
+			return;
+		}
+		if ( 'skipped' === $status ) {
+			++$stats['order_statuses_skipped'];
+		}
+	}
+
 	private function save_diagnostics( array $stats ): void {
 		$this->settings->set( self::DIAGNOSTICS_KEY, $stats );
 	}
@@ -269,6 +291,9 @@ final class ShipmentStatusAutoSyncService {
 			'shipments_updated' => 0,
 			'shipments_skipped' => 0,
 			'shipments_failed' => 0,
+			'order_statuses_changed' => 0,
+			'order_statuses_skipped' => 0,
+			'order_status_change_errors' => 0,
 			'updates_by_carrier' => array(),
 			'skip_reasons' => array(),
 			'error_samples' => array(),

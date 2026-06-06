@@ -99,6 +99,8 @@ final class SettingsRepository {
 			'shipment_status_autosync_enabled' => true,
 			'shipment_status_autosync_order_statuses' => array( 'wc-processing', 'wc-on-hold' ),
 			'shipment_status_autosync_last_run' => array(),
+			'shipment_status_order_status_mapping_enabled' => false,
+			'shipment_status_order_status_mapping' => array(),
 			'packaging_weight_tiers'       => array(),
 		);
 	}

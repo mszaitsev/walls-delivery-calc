@@ -1,6 +1,8 @@
 # WDC Russian Post Shipments
 
-Version: 0.38.0.
+Version: 0.39.0.
+
+Version 0.39.0 can automatically change WooCommerce order statuses after a Russian Post shipment refresh, but the mapping is not Russian-Post-specific. Russian Post Tracking API operations are first mapped to WDC universal shipment statuses, then `ShipmentOrderStatusMappingService` applies the shared `shipment_status_order_status_mapping` from `WDC -> Статусы -> Соответствие статусов` when the global checkbox is enabled. The available target order statuses come from `wc_get_order_statuses()`, including custom WooCommerce Order Status Manager statuses.
 
 Version 0.38.0 adds automatic status refresh for Russian Post domestic shipments through the universal `WDC -> Статусы` autosync page. Cron and manual bulk runs use `ShipmentStatusAutoSyncService`, then dispatch `carrier_key=russian_post_domestic` to the same `ShipmentStatusUpdateService::update_russian_post()` code path used by the order metabox status button. The Russian Post shipment creation/cancellation pipeline is unchanged.
 

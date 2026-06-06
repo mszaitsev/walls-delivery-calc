@@ -1,5 +1,7 @@
 # Project Status
 
+0.39.0 note: universal shipment status to WooCommerce order status mapping is implemented. The `WDC -> Статусы -> Соответствие статусов` tab now stores a disabled-by-default global enable flag and `shipment_status_order_status_mapping`, reads available WooCommerce statuses through `wc_get_order_statuses()` including custom statuses, and applies mapping through `ShipmentOrderStatusMappingService` immediately after shipment status is saved by `ShipmentStatusUpdateService`. Autosync diagnostics include order status changed/skipped/error counters.
+
 0.38.2 note: `tracking_checked_at` for the shipment metabox manager UI is now stored in `Asia/Novosibirsk` / GMT+7. `carrier_operation_date` is still saved exactly as returned by Russian Post Tracking API and is not converted.
 
 0.38.1 note: shipment status autosync defaults and settings persistence were tightened before site testing. `ShipmentStatusAutoSyncService` and `ShipmentStatusAutoSyncCron` are explicitly registered in the container, default order statuses are `wc-processing` and `wc-on-hold`, and the Statuses page persists only autosync keys through targeted saves. `wc-completed` can be enabled manually.
@@ -10,11 +12,11 @@
 
 ## Общий статус
 
-- Версия / baseline проекта: `0.38.2`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.39.0`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
 - Последнее обновление статуса: 2026-06-07.
 - Общий процент готовности: примерно 66%.
-- Текущий этап 0.38.2: время `Проверено` в метабоксе отправлений фиксируется для менеджера в часовом поясе Новосибирска; автосинхронизация продолжает использовать тот же status update service.
+- Текущий этап 0.39.0: после сохранения universal shipment status может применяться общий mapping в статус WooCommerce order; mapping выключен по умолчанию.
 
 ## Краткое резюме
 
@@ -58,7 +60,7 @@
 
 ### Core Platform
 
-- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.38.2`.
+- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.39.0`.
 - `src/Core/bootstrap.php` wires the autoloader and plugin runtime.
 - `src/Core/Plugin.php` registers services and hooks through a DI container.
 - `src/Infrastructure/Settings`, `src/Infrastructure/Logging`, `src/Infrastructure/Security`, `src/Infrastructure/Queue`, and `src/Infrastructure/Database` provide settings, logging, encryption, background scheduling, and migrations.

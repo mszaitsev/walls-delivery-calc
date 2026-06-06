@@ -9,10 +9,11 @@
 - `src/Shipments/RussianPost/RussianPostTrackingStatusMapper.php` contains the code-fixed mapping generated from `status pocha.xlsx`. Unknown operation/attribute pairs map to `unknown` / `не определён`.
 - The 0.36.1 mapping correction maps selected pickup operations including `8:2`, `12:1..12:31`, and `42:1..42:30` to `ready_for_pickup`, and maps `8:15` plus `8:18` to `handed_to_courier`.
 - The 0.36.2 mapper fallback treats empty, absent, `0`, and `-` attributes as compatible with `type:-` mappings when no exact `type:attr` key exists. This covers Russian Post operations `28:-` (`создан в ТК`) and `46:-` (`отменён`).
-- `src/Shipments/Application/ShipmentStatusUpdateService.php` updates `_wdc_shipments` for the Russian Post domestic shipment and saves universal status fields plus raw carrier operation fields.
-- `src/Shipments/Application/ShipmentStatusAutoSyncService.php` scans WooCommerce orders by selected order statuses, reads `_wdc_shipments`, skips terminal universal statuses and missing tracking numbers, collects diagnostics, and dispatches by `carrier_key`.
+- `src/Shipments/Application/ShipmentStatusUpdateService.php` updates `_wdc_shipments` for the Russian Post domestic shipment, saves universal status fields plus raw carrier operation fields, and then invokes order status mapping through `ShipmentOrderStatusMappingService`.
+- `src/Shipments/Application/ShipmentOrderStatusMappingService.php` reads `shipment_status_order_status_mapping_enabled` and `shipment_status_order_status_mapping`, validates target statuses against `wc_get_order_statuses()`, updates WooCommerce orders with `update_status()`, and adds a private WDC order note on successful automatic changes.
+- `src/Shipments/Application/ShipmentStatusAutoSyncService.php` scans WooCommerce orders by selected order statuses, reads `_wdc_shipments`, skips terminal universal statuses and missing tracking numbers, collects diagnostics including order status mapping counters, and dispatches by `carrier_key`.
 - `src/Shipments/Application/ShipmentStatusAutoSyncCron.php` registers WP Cron hook `wdc_shipment_status_autosync`, schedule `wdc_every_6_hours`, and keeps the event scheduled even when autosync is disabled.
-- `src/Shipments/Admin/ShipmentStatusesAdminPage.php` renders `WDC -> Статусы` with main settings, a status-mapping placeholder, diagnostics, and the manual run action.
+- `src/Shipments/Admin/ShipmentStatusesAdminPage.php` renders `WDC -> Статусы` with main autosync settings, universal shipment status to WooCommerce order status mapping, diagnostics, and the manual run action.
 - `src/Shipments/Admin/OrderShipmentsMetabox.php` exposes AJAX action `wdc_update_shipment_status` on the existing `Обновить статус` button. `assets/admin/shipments-admin.js` updates the status block without reloading the order page, closes the create modal after success, shows a local 10-second toast, and starts the first status refresh automatically.
 
 ## Назначение
@@ -134,7 +135,7 @@
 Ответственность:
 
 - carrier-neutral contract for shipment creation adapters;
-- universal shipment status autosync service, cron scheduler, status settings admin page, manual run, diagnostics, shared lock, and `carrier_key -> updater` dispatch;
+- universal shipment status autosync service, cron scheduler, status settings admin page, order status mapping service, manual run, diagnostics, shared lock, and `carrier_key -> updater` dispatch;
 - manual WooCommerce order admin metabox `Отправления`;
 - safe draft creation from HPOS-compatible WooCommerce order APIs and saved WDC order meta;
 - Russian Post Otpravka `PUT /2.0/user/backlog` payload building and response normalization;

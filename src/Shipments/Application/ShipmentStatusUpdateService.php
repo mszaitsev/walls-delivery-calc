@@ -14,7 +14,8 @@ final class ShipmentStatusUpdateService {
 	public function __construct(
 		private OrderShipmentRepository $repository,
 		private RussianPostTrackingApiClient $tracking_client,
-		private RussianPostTrackingStatusMapper $mapper
+		private RussianPostTrackingStatusMapper $mapper,
+		private ?ShipmentOrderStatusMappingService $order_status_mapping = null
 	) {
 	}
 
@@ -63,6 +64,9 @@ final class ShipmentStatusUpdateService {
 		}
 
 		$this->repository->save_for_carrier( $order, $shipment_key, $updated );
+		$order_status_mapping = $this->order_status_mapping instanceof ShipmentOrderStatusMappingService
+			? $this->order_status_mapping->apply( $order, $updated, (string) ( $status_fields['universal_status_code'] ?? '' ) )
+			: array( 'status' => 'skipped', 'changed' => false, 'reason' => 'service_unavailable' );
 		$this->add_order_note(
 			$order,
 			sprintf(
@@ -78,6 +82,7 @@ final class ShipmentStatusUpdateService {
 			'message' => 'Статус отправления обновлен.',
 			'shipment' => $updated,
 			'status' => $this->status_payload( $updated ),
+			'order_status_mapping' => $order_status_mapping,
 			'tracking_response' => array(
 				'http_code' => (int) ( $response['http_code'] ?? 0 ),
 				'barcode' => $barcode,

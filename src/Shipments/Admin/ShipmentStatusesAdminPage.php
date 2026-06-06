@@ -4,7 +4,9 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Admin;
 
 use WallsShop\WDC\Admin\AdminMenu;
+use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
 
 defined( 'ABSPATH' ) || exit;
@@ -17,7 +19,8 @@ final class ShipmentStatusesAdminPage {
 
 	public function __construct(
 		private SettingsRepository $settings,
-		private ShipmentStatusAutoSyncService $auto_sync
+		private ShipmentStatusAutoSyncService $auto_sync,
+		private ShipmentOrderStatusMappingService $order_status_mapping
 	) {
 	}
 
@@ -59,7 +62,7 @@ final class ShipmentStatusesAdminPage {
 			</nav>
 			<?php
 			if ( 'mapping' === $tab ) {
-				$this->render_mapping_tab();
+				$this->render_order_mapping_tab();
 			} elseif ( 'diagnostics' === $tab ) {
 				$this->render_diagnostics_tab();
 			} else {
@@ -100,8 +103,46 @@ final class ShipmentStatusesAdminPage {
 		<?php
 	}
 
-	private function render_mapping_tab(): void {
-		echo '<p>' . esc_html__( 'Автоматическое изменение статусов заказов WooCommerce будет реализовано отдельным этапом.', 'walls-delivery-calc' ) . '</p>';
+	private function render_order_mapping_tab(): void {
+		$mapping = $this->order_status_mapping->mapping();
+		$order_statuses = $this->order_status_mapping->woo_order_statuses();
+		?>
+		<form method="post">
+			<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
+			<input type="hidden" name="wdc_statuses_action" value="save_mapping">
+			<table class="form-table" role="presentation">
+				<tbody>
+					<tr>
+						<th scope="row"><?php echo esc_html__( 'Автоматическое изменение статусов заказов', 'walls-delivery-calc' ); ?></th>
+						<td>
+							<label><input type="checkbox" name="<?php echo esc_attr( ShipmentOrderStatusMappingService::ENABLED_KEY ); ?>" value="1" <?php checked( $this->order_status_mapping->enabled() ); ?>> <?php echo esc_html__( 'Включить автоматическое изменение статусов заказов', 'walls-delivery-calc' ); ?></label>
+							<p class="description"><?php echo esc_html__( 'Если выключено, WDC не меняет статусы заказов, даже если соответствия заполнены.', 'walls-delivery-calc' ); ?></p>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+			<table class="widefat striped" style="max-width: 960px;">
+				<thead>
+					<tr>
+						<th><?php echo esc_html__( 'Статус отправления', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Новый статус заказа', 'walls-delivery-calc' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ( DeliveryStatus::all() as $shipment_status ) : ?>
+						<tr>
+							<td>
+								<strong><?php echo esc_html( DeliveryStatus::label( $shipment_status ) ); ?></strong>
+								<br><code><?php echo esc_html( $shipment_status ); ?></code>
+							</td>
+							<td><?php $this->render_mapping_select( $shipment_status, (string) ( $mapping[ $shipment_status ] ?? '' ), $order_statuses ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+			<?php submit_button( __( 'Сохранить соответствия', 'walls-delivery-calc' ) ); ?>
+		</form>
+		<?php
 	}
 
 	private function render_diagnostics_tab(): void {
@@ -126,6 +167,13 @@ final class ShipmentStatusesAdminPage {
 			</tbody>
 		</table>
 		<h2><?php echo esc_html__( 'Ошибки (до 20 последних)', 'walls-delivery-calc' ); ?></h2>
+		<table class="widefat striped" style="max-width: 760px; margin-top: 12px;">
+			<tbody>
+				<?php $this->row( __( 'Статусов заказов изменено', 'walls-delivery-calc' ), (string) (int) ( $stats['order_statuses_changed'] ?? 0 ) ); ?>
+				<?php $this->row( __( 'Изменений статусов заказов пропущено', 'walls-delivery-calc' ), (string) (int) ( $stats['order_statuses_skipped'] ?? 0 ) ); ?>
+				<?php $this->row( __( 'Ошибок изменения статусов заказов', 'walls-delivery-calc' ), (string) (int) ( $stats['order_status_change_errors'] ?? 0 ) ); ?>
+			</tbody>
+		</table>
 		<?php $this->render_error_samples( is_array( $stats['error_samples'] ?? null ) ? $stats['error_samples'] : array() ); ?>
 		<h2><?php echo esc_html__( 'Пропуски по причинам', 'walls-delivery-calc' ); ?></h2>
 		<?php $this->render_key_value_table( is_array( $stats['skip_reasons'] ?? null ) ? $stats['skip_reasons'] : array() ); ?>
@@ -151,6 +199,24 @@ final class ShipmentStatusesAdminPage {
 		}
 	}
 
+	/**
+	 * @param array<string,string> $order_statuses
+	 */
+	private function render_mapping_select( string $shipment_status, string $selected_status, array $order_statuses ): void {
+		if ( array() === $order_statuses ) {
+			echo '<p class="description">' . esc_html__( 'Статусы WooCommerce пока недоступны.', 'walls-delivery-calc' ) . '</p>';
+			return;
+		}
+
+		echo '<select name="' . esc_attr( ShipmentOrderStatusMappingService::MAPPING_KEY ) . '[' . esc_attr( $shipment_status ) . ']">';
+		echo '<option value="">' . esc_html__( 'Не менять', 'walls-delivery-calc' ) . '</option>';
+		foreach ( $order_statuses as $status_key => $status_label ) {
+			$status_key = (string) $status_key;
+			echo '<option value="' . esc_attr( $status_key ) . '" ' . selected( $selected_status, $status_key, false ) . '>' . esc_html( (string) $status_label . ' (' . $status_key . ')' ) . '</option>';
+		}
+		echo '</select>';
+	}
+
 	private function handle_post(): string {
 		if ( 'POST' !== (string) ( $_SERVER['REQUEST_METHOD'] ?? 'GET' ) || ! isset( $_POST[ self::NONCE_NAME ] ) ) {
 			return '';
@@ -169,6 +235,23 @@ final class ShipmentStatusesAdminPage {
 				(int) ( $stats['shipments_updated'] ?? 0 ),
 				(int) ( $stats['shipments_failed'] ?? 0 )
 			);
+		}
+
+		if ( 'save_mapping' === $action ) {
+			$mapping = isset( $_POST[ ShipmentOrderStatusMappingService::MAPPING_KEY ] ) && is_array( $_POST[ ShipmentOrderStatusMappingService::MAPPING_KEY ] )
+				? $this->order_status_mapping->sanitize_mapping( wp_unslash( $_POST[ ShipmentOrderStatusMappingService::MAPPING_KEY ] ) )
+				: array();
+
+			$this->settings->set(
+				ShipmentOrderStatusMappingService::ENABLED_KEY,
+				! empty( $_POST[ ShipmentOrderStatusMappingService::ENABLED_KEY ] )
+			);
+			$this->settings->set(
+				ShipmentOrderStatusMappingService::MAPPING_KEY,
+				$mapping
+			);
+
+			return __( 'Соответствия статусов сохранены.', 'walls-delivery-calc' );
 		}
 
 		if ( 'save_settings' !== $action ) {
