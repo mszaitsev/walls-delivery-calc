@@ -62,7 +62,7 @@ No Elasticsearch, Meilisearch, external API, REST endpoint, AJAX endpoint, or fr
 
 The existing domain `Address` model is reused and not duplicated.
 
-## Future Checkout Integration
+## Checkout Integration Roadmap
 
 Checkout can later depend on `LocationSearchService` and `AddressNormalizerInterface`, but this stage intentionally avoids WooCommerce field overrides, REST API, AJAX autocomplete, and runtime shipping orchestration.
 

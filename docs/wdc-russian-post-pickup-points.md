@@ -6,17 +6,17 @@ As of WDC 0.35.0, Russian Post pickup checkout belongs to the unified domestic s
 
 Version 0.28.5 clears stale checkout pickup selection when the customer manually changes the city through the checkout city selector, while protecting the controlled cross-location pickup flow with a one-shot suppression flag.
 
-As of WDC 0.30.0, the checkout pickup UI is styled by WDC itself. The external plugin "Оплата по счету от ИП/ООО" keeps the shared checkout layout and eshoplogistic-specific behavior, while WDC owns `russian_post_domestic_pickup` cards, nested rate controls, crossed prices, and hidden selected-pickup button states.
+As of WDC 0.30.0, the checkout pickup UI is styled by WDC itself. The external plugin "Оплата по счету от ИП/ООО" keeps the shared checkout layout and eshoplogistic-specific behavior, while WDC owns Russian Post pickup cards, nested rate controls, crossed prices, and hidden selected-pickup button states.
 
 Version 0.27.6 refreshes the map startup context after a cross-location pickup save. After `updated_checkout` and the successful pending point save, the frontend rebuilds context from the resolved location and current checkout DOM fields, stores it in both runtime `currentContext` and localized `window.wdcPickupCheckout.initialContext`, keeps the selected pickup point attached, invalidates old prefetch data, and schedules a new prefetch for the new locality. The next "Изменить пункт выдачи" open therefore starts from the confirmed locality instead of an old or fallback city. Prefetch keys now include FIAS, and field context matching accepts city-selector formatted values like `г Новосибирск` as the same hidden location.
 
 Version 0.27.5 aligns pickup-driven locality changes with the checkout city selector. `wdc:location-selected` now carries the full location identity and formatting context, including `fias_id`, GAR/KLADR ids, region/city/place type fields, `state_value`, and `city_value`. When a cross-location pickup point is confirmed, the pickup frontend applies the resolved location through the city selector API when available, with a matching fallback that writes the same hidden fields and visible city/state values. The resolve-location response now includes the same formatting fields. Same-locality quick checks keep FIAS first, so equal checkout `fias_id` and pickup `fias_location_guid` save the point without showing the cross-location confirmation.
 
-Version 0.27.4 moves cross-location pickup persistence out of the map modal. When the customer confirms a pickup point from another locality, the modal closes immediately, destination fields are updated, and WooCommerce performs one checkout recalculation. Only after `updated_checkout` does the frontend save the pending point, using the current selected `russian_post_domestic_pickup` shipping method and the newly rendered checkout block. The timeout for that recalculation is 60 seconds. If it times out, or the selected method after recalculation is no longer a pickup method, the point is left unsaved and checkout shows a notice. The frontend no longer switches to the cheapest pickup rate; tariff selection stays with WooCommerce/plugin shipping logic.
+Version 0.27.4 moves cross-location pickup persistence out of the map modal. When the customer confirms a pickup point from another locality, the modal closes immediately, destination fields are updated, and WooCommerce performs one checkout recalculation. Only after `updated_checkout` does the frontend save the pending point, using the current selected Russian Post pickup shipping method and the newly rendered checkout block. The timeout for that recalculation is 60 seconds. If it times out, or the selected method after recalculation is no longer a pickup method, the point is left unsaved and checkout shows a notice. The frontend no longer switches to the cheapest pickup rate; tariff selection stays with WooCommerce/plugin shipping logic.
 
 Version 0.27.3 makes the final pickup save wait for the shipping-rate recalculation when cross-location checkout has to switch rates. `selectCheapestPickupRate()` returns both the method id and a `changed` flag. If the cheapest pickup rate was already selected, the pending pickup point is saved after the locality recalculation. If another pickup rate had to be selected, the frontend waits for the second `updated_checkout` before saving; on timeout it leaves the point unsaved and shows a retry warning.
 
-Version 0.27.2 keeps a selected cross-location pickup point after checkout recalculation. After the customer confirms the locality change, the frontend updates checkout destination fields, waits for WooCommerce `updated_checkout`, selects the cheapest available Russian Post pickup rate for `russian_post_domestic_pickup` when the old rate is no longer present, and then saves the pending pickup point. The modal shows loading states during checking, recalculation, and saving. If no pickup rate is available after recalculation, the point is not saved and the customer sees a warning in the modal.
+Version 0.27.2 keeps a selected cross-location pickup point after checkout recalculation. After the customer confirms the locality change, the frontend updates checkout destination fields, waits for WooCommerce `updated_checkout`, selects the cheapest available Russian Post pickup rate when the old rate is no longer present, and then saves the pending pickup point. The modal shows loading states during checking, recalculation, and saving. If no pickup rate is available after recalculation, the point is not saved and the customer sees a warning in the modal.
 
 Version 0.27.1 fixes pickup location resolution priority: a Russian Post pickup point `fias_location_guid` is now resolved to `locations.fias_id` before any postal-code/city fallback. The lookup normalizes GUIDs on both sides, so values with or without dashes match. If FIAS points to one local location but the postal code could match another, the FIAS location wins.
 
@@ -70,7 +70,7 @@ The side/bottom panel is no longer the primary details surface; it only shows co
 
 Leaflet and Yandex now use matching custom HTML marker visuals. Single points render as textless blue pins with a white center and a blue tail. Clusters render as blue-outlined white circles with the count, without a tail. Leaflet uses `divIcon` for pins and grid-cluster markers; Yandex uses `ymaps.templateLayoutFactory.createClass` for placemarks and `clusterIconLayout` for cluster circles.
 
-Version 0.25.2 adds pickup type controls for `russian_post_domestic_pickup` on the delivery service page, tab `ПВЗ / ОПС`, block `Типы пунктов выдачи`. OPS, PVZ, and APS currently have `Использовать` and `Название в карточке/баллоне/списке`.
+Version 0.25.2 adds pickup type controls for the domestic Russian Post pickup flow on the delivery service page, tab `ПВЗ / ОПС`, block `Типы пунктов выдачи`. OPS, PVZ, and APS currently have `Использовать` and `Название в карточке/баллоне/списке`.
 
 `Название в карточке/баллоне/списке` is the customer-facing type name shown in the popup card and visible list rows. Defaults are OPS `Отделение Почты России`, PVZ `Пункт выдачи`, and APS `Почтомат`; markers do not render text.
 
@@ -130,7 +130,7 @@ The batch starts with city rows (`place_type` city markers such as `г` / `г.`)
 
 Version 0.23.4 updates checkout DOM state after DaData coordinate enrichment without a page reload. The existing nonce-protected `GET /wp-json/wdc/v1/checkout/state` response includes `city_context`; after WooCommerce `updated_checkout`, frontend code refreshes that context, writes fresh `wdc_platform_location_lat/lng/postcode/display_name` hidden fields, and stores a runtime `currentContext`.
 
-The frontend also prefetches the initial pickup points after `updated_checkout` when `russian_post_domestic_pickup` is active for an RU destination. If coordinates are known it loads a small bbox around them; otherwise it searches by the current query, then loads a bbox around the first result. The cache key is based on context coordinates/query/postcode/display name and is cleared on destination changes, so old-city points are not reused. The map accepts `initialContext.preloadedPoints` and renders those markers immediately on modal open before the usual bbox refresh completes.
+The frontend also prefetches the initial pickup points after `updated_checkout` when the Russian Post pickup group is active for an RU destination. If coordinates are known it loads a small bbox around them; otherwise it searches by the current query, then loads a bbox around the first result. The cache key is based on context coordinates/query/postcode/display name and is cleared on destination changes, so old-city points are not reused. The map accepts `initialContext.preloadedPoints` and renders those markers immediately on modal open before the usual bbox refresh completes.
 
 Version 0.23.3 fixes stale startup context after WooCommerce `updated_checkout`. The frontend no longer trusts only the page-load localized `window.wdcPickupCheckout.initialContext`; every modal open recomputes context from current DOM hidden city picker fields first, visible checkout fields second, and localized config last. This keeps the map on the newly selected city after AJAX recalculation without a full page reload.
 
@@ -146,11 +146,11 @@ Checkout state is private checkout state now: `GET /wp-json/wdc/v1/checkout/stat
 
 When the modal opens, the map chooses its initial viewport in this order: saved checkout city coordinates from session context, current RU checkout postcode/city fields, then the Novosibirsk fallback. If only postcode/city is available, the frontend searches the local point endpoint and centers on the first found point without confirming it automatically; the customer must still click a marker and press "Выбрать этот пункт".
 
-Pickup reset is destination-driven. Changing city, country, or postcode clears the selected pickup point and UI. Switching between shipping methods only hides or shows the pickup block; it does not clear session selection, so returning to `russian_post_domestic_pickup` restores the chosen point. Server-side validation remains responsible for blocking checkout when the active pickup rate has no valid selection.
+Pickup reset is destination-driven. Changing city, country, or postcode clears the selected pickup point and UI. Switching between shipping methods only hides or shows the pickup block; it does not clear session selection, so returning to the Russian Post pickup group restores the chosen point. Server-side validation remains responsible for blocking checkout when the active pickup rate has no valid selection.
 
 ## Checkout Map MVP
 
-Version 0.23.0 adds the first production checkout map for `russian_post_domestic_pickup`.
+Version 0.23.0 adds the first production checkout map for Russian Post pickup.
 
 Frontend assets live in `assets/frontend/pickup-map/`:
 
@@ -164,13 +164,13 @@ Leaflet is enqueued from local `assets/vendor/leaflet/` paths, not from a CDN. T
 
 Checkout state endpoints:
 
-- `POST /wp-json/wdc/v1/checkout/pickup-point` with `{ point_id, shipping_method_id }`: checks the REST nonce, validates `russian_post_domestic_pickup`, verifies that the point exists and is active, and stores a structured `wdc_pickup_point` selection in WC session.
+- `POST /wp-json/wdc/v1/checkout/pickup-point` with `{ point_id, shipping_method_id }`: checks the REST nonce, validates the Russian Post pickup group, verifies that the point exists and is active, and stores a structured `wdc_pickup_point` selection in WC session.
 - `DELETE /wp-json/wdc/v1/checkout/pickup-point`: clears the checkout pickup selection.
 - `GET /wp-json/wdc/v1/checkout/state`: returns the current selected point or `null`.
 
 Session state stores `id`, `point_code`, `point_type`, `postcode`, `address`, `lat`, `lng`, and a compact `snapshot` of the point at selection time. The legacy internal pickup selection key is also populated so existing checkout validation and order persistence paths can use the selected Russian Post point without loading the full directory.
 
-WooCommerce validation now requires a saved pickup point for `russian_post_domestic_pickup` and returns `Выберите пункт выдачи Почты России.` when the user tries to place an order without a point. This is a server-side checkout hook and cannot be bypassed by disabling JavaScript.
+WooCommerce validation now requires a saved pickup point for the Russian Post pickup group and returns `Выберите пункт выдачи Почты России.` when the user tries to place an order without a point. This is a server-side checkout hook and cannot be bypassed by disabling JavaScript.
 
 Order persistence is HPOS-safe and uses WooCommerce order/item APIs. Orders receive `_wdc_pickup_point_id`, `_wdc_pickup_point_code`, `_wdc_pickup_point_type`, `_wdc_pickup_point_address`, `_wdc_pickup_point_postcode`, and `_wdc_pickup_point_snapshot` JSON. For Russian Post domestic orders, visible shipping item meta is kept to delivery days only; pickup code/type/postcode/address live in `_wdc_delivery_calculation_data.pickup`. The selected point is displayed on the admin order delivery metabox, thank-you/order details, and customer/admin emails.
 
@@ -248,7 +248,7 @@ Both modes use the same resumable background jobs:
 
 The parser resumes from the saved byte offset and does not re-read the whole payload from the beginning. The full ALL payload is never decoded at once, and no single PHP process performs the full import.
 
-The current main table remains readable while staging is being built. REST and future checkout map reads always use the main table only. If import fails, staging is dropped and the old main table remains untouched. Full snapshots do not use `mark_missing_inactive`; the swapped main table contains the current snapshot.
+The current main table remains readable while staging is being built. REST and checkout map reads always use the main table only. If import fails, staging is dropped and the old main table remains untouched. Full snapshots do not use `mark_missing_inactive`; the swapped main table contains the current snapshot.
 
 If a swap fails after the previous main table has been renamed to backup, the repository attempts to rename backup back to main. A recovered failure still marks the import failed and records a clear message, but leaves the production table restored. If recovery also fails, the backup table is kept for manual repair and is not deleted by failed cleanup.
 
@@ -274,7 +274,7 @@ Manual import is available at:
 
 `Службы доставки -> Почта России — по России / pickup service -> ПВЗ / ОПС`
 
-The tab is shown only for `russian_post_domestic_pickup`. It contains:
+The tab is shown on the unified domestic Russian Post service. It contains:
 
 - shared API "Отправка" credentials: AccessToken, Login, Password;
 - Russian-labeled automatic download timeout;
