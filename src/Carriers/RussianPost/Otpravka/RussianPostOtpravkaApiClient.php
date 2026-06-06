@@ -10,6 +10,7 @@ final class RussianPostOtpravkaApiClient {
 	private const BACKLOG_ENDPOINT = 'https://otpravka-api.pochta.ru/2.0/user/backlog';
 	private const BACKLOG_DELETE_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/backlog';
 	private const BACKLOG_SEARCH_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/backlog/search';
+	private const SHIPMENT_SEARCH_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/shipment/search';
 	private const CLEAN_ADDRESS_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/clean/address';
 
 	public function __construct( private RussianPostOtpravkaApiSettings $settings, private mixed $curl_downloader = null ) {
@@ -174,6 +175,20 @@ final class RussianPostOtpravkaApiClient {
 	 * @return array<string,mixed>
 	 */
 	public function search_backlog_by_barcode( string $barcode ): array {
+		return $this->search_by_barcode( $barcode, self::BACKLOG_SEARCH_ENDPOINT );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function search_shipment_by_barcode( string $barcode ): array {
+		return $this->search_by_barcode( $barcode, self::SHIPMENT_SEARCH_ENDPOINT );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function search_by_barcode( string $barcode, string $endpoint ): array {
 		$started = microtime( true );
 		$barcode = strtoupper( preg_replace( '/\s+/', '', trim( $barcode ) ) ?? '' );
 		if ( '' === $barcode ) {
@@ -182,7 +197,7 @@ final class RussianPostOtpravkaApiClient {
 				'http_code' => 0,
 				'orders' => array(),
 				'error_code' => 'empty_barcode',
-				'error_message' => 'Укажите ШПИ.',
+				'error_message' => 'Укажите номер отслеживания.',
 				'duration_ms' => $this->duration_ms( $started ),
 			);
 		}
@@ -192,7 +207,7 @@ final class RussianPostOtpravkaApiClient {
 			return $credentials + array( 'orders' => array() );
 		}
 
-		$url = add_query_arg( array( 'query' => $barcode ), self::BACKLOG_SEARCH_ENDPOINT );
+		$url = add_query_arg( array( 'query' => $barcode ), $endpoint );
 		$response = wp_remote_get(
 			$url,
 			array(

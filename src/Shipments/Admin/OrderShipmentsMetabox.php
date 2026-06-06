@@ -210,7 +210,7 @@ final class OrderShipmentsMetabox {
 		<div class="wdc-shipments-metabox" data-wdc-shipments-metabox>
 			<p><strong><?php echo esc_html__( 'Служба', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $meta['service_title'] ?? $request['rate_id'] ?? '-' ) ); ?></p>
 			<p><strong><?php echo esc_html__( 'Статус посылки', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-shipment-summary-status><?php echo esc_html( $this->shipment_status_label( $shipment ) ); ?></span></p>
-			<p data-wdc-tracking-row <?php echo '' === $barcode ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Отслеживание', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-tracking-number><?php echo esc_html( $barcode ); ?></span> <button type="button" class="button button-small" data-wdc-copy-tracking data-tracking-number="<?php echo esc_attr( $barcode ); ?>" <?php disabled( '' === $barcode ); ?>><?php echo esc_html__( 'Копировать', 'walls-delivery-calc' ); ?></button> <span class="description" data-wdc-copy-tracking-status></span></p>
+			<p data-wdc-tracking-row <?php echo '' === $barcode ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Отслеживание', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-tracking-number><?php echo esc_html( $barcode ); ?></span> <button type="button" class="button button-small wdc-copy-tracking-button" data-wdc-copy-tracking data-tracking-number="<?php echo esc_attr( $barcode ); ?>" aria-label="<?php echo esc_attr__( 'Копировать номер отслеживания', 'walls-delivery-calc' ); ?>" title="<?php echo esc_attr__( 'Копировать', 'walls-delivery-calc' ); ?>" <?php disabled( '' === $barcode ); ?>><i class="fa-light fa-copy" aria-hidden="true"></i><span class="screen-reader-text"><?php echo esc_html__( 'Копировать номер отслеживания', 'walls-delivery-calc' ); ?></span></button> <span class="description" data-wdc-copy-tracking-status></span></p>
 			<p data-wdc-updated-row <?php echo '' === (string) ( $shipment['updated_at'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Обновлено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-updated-at><?php echo esc_html( (string) ( $shipment['updated_at'] ?? '' ) ); ?></span></p>
 			<?php $this->render_status_block( $status_payload ); ?>
 			<span data-wdc-backlog-order-id hidden><?php echo esc_html( $backlog_order_id ); ?></span>
@@ -219,11 +219,11 @@ final class OrderShipmentsMetabox {
 			<p class="wdc-shipments-actions">
 				<button type="button" class="button button-primary" data-wdc-open-shipment-modal <?php disabled( $has_created ); ?>><?php echo esc_html__( 'Подготовить отправление', 'walls-delivery-calc' ); ?></button>
 				<button type="button" class="button" data-wdc-update-shipment-status data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( RussianPostDomesticSettings::CARRIER_KEY ); ?>" <?php disabled( ! $has_created || '' === $barcode ); ?>><?php echo esc_html__( 'Обновить статус', 'walls-delivery-calc' ); ?></button>
-				<button type="button" class="button" data-wdc-open-manual-tracking <?php disabled( $has_created ); ?>><?php echo esc_html__( 'Внести ШПИ вручную', 'walls-delivery-calc' ); ?></button>
+				<button type="button" class="button" data-wdc-open-manual-tracking <?php disabled( $has_created ); ?>><?php echo esc_html__( 'Внести отслеживание вручную', 'walls-delivery-calc' ); ?></button>
 				<button type="button" class="button" data-wdc-cancel-shipment data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( RussianPostDomesticSettings::CARRIER_KEY ); ?>" <?php disabled( ! $can_cancel ); ?>><?php echo esc_html__( 'Отменить отправление', 'walls-delivery-calc' ); ?></button>
 			</p>
 			<div class="wdc-manual-tracking" data-wdc-manual-tracking-form hidden>
-				<label><?php echo esc_html__( 'ШПИ / barcode', 'walls-delivery-calc' ); ?><input type="text" data-wdc-manual-tracking-input autocomplete="off"></label>
+				<label><?php echo esc_html__( 'Номер отслеживания', 'walls-delivery-calc' ); ?><input type="text" data-wdc-manual-tracking-input autocomplete="off"></label>
 				<p>
 					<button type="button" class="button button-primary" data-wdc-attach-tracking data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( RussianPostDomesticSettings::CARRIER_KEY ); ?>"><?php echo esc_html__( 'Найти и сохранить', 'walls-delivery-calc' ); ?></button>
 					<button type="button" class="button" data-wdc-cancel-manual-tracking><?php echo esc_html__( 'Отмена', 'walls-delivery-calc' ); ?></button>
@@ -437,12 +437,12 @@ final class OrderShipmentsMetabox {
 		$barcode = sanitize_text_field( wp_unslash( $_POST['barcode'] ?? '' ) );
 		$result = $this->backlog->attach_tracking_number( $order, $barcode, $shipment_key );
 		if ( ! (bool) ( $result['success'] ?? false ) ) {
-			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось сохранить ШПИ.', 'walls-delivery-calc' ) ) ), 400 );
+			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось сохранить номер отслеживания.', 'walls-delivery-calc' ) ) ), 400 );
 		}
 
 		wp_send_json_success(
 			array(
-				'message' => (string) ( $result['message'] ?? __( 'ШПИ сохранен.', 'walls-delivery-calc' ) ),
+				'message' => (string) ( $result['message'] ?? __( 'Номер отслеживания сохранен.', 'walls-delivery-calc' ) ),
 				'warning' => (string) ( $result['warning'] ?? '' ),
 				'tracking_number' => (string) ( $result['tracking_number'] ?? '' ),
 				'backlog_order_id' => (string) ( $result['backlog_order_id'] ?? '' ),

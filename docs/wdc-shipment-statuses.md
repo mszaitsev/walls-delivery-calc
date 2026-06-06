@@ -1,6 +1,6 @@
 # WDC Shipment Statuses
 
-Version: 0.37.0.
+Version: 0.37.1.
 
 ## Universal Status Model
 
@@ -93,4 +93,6 @@ The metabox shows `Статус посылки` above the carrier status block a
 
 Cancellation is allowed only when the latest Russian Post operation is `28 / Присвоение идентификатора`; it uses `backlog_order_id` through `DELETE /1.0/backlog` and clears shipment state on success.
 
-Automatic polling/synchronization is not part of version 0.37.0.
+Automatic polling/synchronization is not part of version 0.37.1.
+
+0.37.1 manual tracking attachment note: WDC searches `GET /1.0/backlog/search?query={barcode}` first and falls back to `GET /1.0/shipment/search?query={barcode}`. Tracking status refresh continues to use barcode. Cancellation continues to use hidden `backlog_order_id` and is disabled when shipment search does not return an internal id. The manual attach UI uses the wording `Номер отслеживания`, and the tracking copy action is a compact accessible icon button.

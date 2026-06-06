@@ -57,12 +57,12 @@ final class ShipmentBacklogService {
 	 */
 	public function attach_tracking_number( object $order, string $barcode, string $shipment_key = RussianPostDomesticSettings::CARRIER_KEY ): array {
 		if ( RussianPostDomesticSettings::CARRIER_KEY !== $shipment_key ) {
-			return $this->failure( 'Можно внести только ШПИ Почты России.' );
+			return $this->failure( 'Можно внести только номер отслеживания Почты России.' );
 		}
 
 		$barcode = $this->normalize_barcode( $barcode );
 		if ( '' === $barcode ) {
-			return $this->failure( 'Укажите ШПИ.' );
+			return $this->failure( 'Укажите номер отслеживания.' );
 		}
 
 		$existing = $this->repository->find_by_carrier( $order, $shipment_key );
@@ -70,22 +70,14 @@ final class ShipmentBacklogService {
 			return $this->failure( 'По заказу уже создано отправление.' );
 		}
 
-		$search = $this->otpravka_client->search_backlog_by_barcode( $barcode );
-		if ( ! (bool) ( $search['success'] ?? false ) ) {
-			$message = (string) ( $search['error_message'] ?? '' );
-			return $this->failure( '' !== $message ? $message : 'Не удалось найти отправление в Почте России.', $search );
+		$lookup = $this->lookup_tracking_number( $barcode );
+		if ( ! (bool) ( $lookup['success'] ?? false ) ) {
+			return $this->failure( (string) $lookup['message'], is_array( $lookup['raw'] ?? null ) ? $lookup['raw'] : array() );
 		}
 
-		$orders = is_array( $search['orders'] ?? null ) ? $search['orders'] : array();
-		$selected = $this->select_search_result( $orders, $barcode );
-		if ( null === $selected ) {
-			return $this->failure( array() === $orders ? 'Отправление с таким ШПИ не найдено в Почте России.' : 'Найдено несколько отправлений, уточните ШПИ.', $search );
-		}
-
+		$selected = is_array( $lookup['selected'] ?? null ) ? $lookup['selected'] : array();
+		$source_lookup = (string) ( $lookup['source_lookup'] ?? '' );
 		$backlog_order_id = (int) ( $selected['id'] ?? $selected['result-id'] ?? $selected['result_id'] ?? 0 );
-		if ( $backlog_order_id <= 0 ) {
-			return $this->failure( 'Почта России не вернула внутренний ID отправления.', $search );
-		}
 
 		$now = $this->now();
 		$shipment = array(
@@ -95,34 +87,37 @@ final class ShipmentBacklogService {
 			'service_title' => 'Почта России',
 			'barcode' => $barcode,
 			'tracking_number' => $barcode,
-			'backlog_order_id' => $backlog_order_id,
 			'status' => 'created',
 			'source' => 'manual_tracking_attach',
+			'source_lookup' => $source_lookup,
 			'response_snapshot' => $this->safe_search_snapshot( $selected ),
 			'created_at' => $now,
 			'updated_at' => $now,
 		);
+		if ( $backlog_order_id > 0 ) {
+			$shipment['backlog_order_id'] = $backlog_order_id;
+		}
 
 		$this->repository->save_for_carrier( $order, $shipment_key, $shipment );
-		$this->add_order_note( $order, 'ШПИ Почты России внесен вручную: ' . $barcode . '.' );
+		$this->add_order_note( $order, 'Номер отслеживания Почты России внесен вручную: ' . $barcode . '.' );
 
 		$status_update = $this->status_updates->update_russian_post( $order, $shipment_key );
 		if ( ! (bool) ( $status_update['success'] ?? false ) ) {
 			return array(
 				'success' => true,
-				'message' => 'ШПИ сохранен.',
-				'warning' => 'ШПИ сохранен, но статус пока не обновлен: ' . (string) ( $status_update['message'] ?? 'не удалось получить статус.' ),
+				'message' => 'Номер отслеживания сохранен.',
+				'warning' => 'Номер отслеживания сохранен, но статус пока не обновлен: ' . (string) ( $status_update['message'] ?? 'не удалось получить статус.' ),
 				'tracking_number' => $barcode,
-				'backlog_order_id' => (string) $backlog_order_id,
+				'backlog_order_id' => $backlog_order_id > 0 ? (string) $backlog_order_id : '',
 				'status' => $this->status_updates->status_payload( $this->repository->find_by_carrier( $order, $shipment_key ) ),
 			);
 		}
 
 		return array(
 			'success' => true,
-			'message' => 'ШПИ сохранен, статус обновлен.',
+			'message' => 'Номер отслеживания сохранен, статус обновлен.',
 			'tracking_number' => $barcode,
-			'backlog_order_id' => (string) $backlog_order_id,
+			'backlog_order_id' => $backlog_order_id > 0 ? (string) $backlog_order_id : '',
 			'status' => is_array( $status_update['status'] ?? null ) ? $status_update['status'] : $this->status_updates->status_payload( $this->repository->find_by_carrier( $order, $shipment_key ) ),
 		);
 	}
@@ -141,7 +136,7 @@ final class ShipmentBacklogService {
 		$barcode = trim( (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
 		$backlog_order_id = (int) ( $shipment['backlog_order_id'] ?? 0 );
 		if ( array() === $shipment || '' === $barcode || $backlog_order_id <= 0 ) {
-			return 'У отправления нет ШПИ или внутреннего ID Почты России.';
+			return 'У отправления нет номера отслеживания или внутреннего ID Почты России.';
 		}
 		if ( ! in_array( (string) ( $shipment['status'] ?? '' ), array( 'created', 'registered' ), true ) ) {
 			return 'Отправление уже не находится в созданном состоянии.';
@@ -164,6 +159,66 @@ final class ShipmentBacklogService {
 
 	private function normalize_barcode( string $barcode ): string {
 		return strtoupper( preg_replace( '/\s+/', '', trim( $barcode ) ) ?? '' );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function lookup_tracking_number( string $barcode ): array {
+		$backlog_search = $this->otpravka_client->search_backlog_by_barcode( $barcode );
+		if ( ! (bool) ( $backlog_search['success'] ?? false ) ) {
+			$message = (string) ( $backlog_search['error_message'] ?? '' );
+			return array(
+				'success' => false,
+				'message' => '' !== $message ? $message : 'Не удалось найти отправление в Почте России.',
+				'raw' => $backlog_search,
+			);
+		}
+
+		$backlog_orders = is_array( $backlog_search['orders'] ?? null ) ? $backlog_search['orders'] : array();
+		$backlog_selected = $this->select_search_result( $backlog_orders, $barcode );
+		if ( null !== $backlog_selected ) {
+			return array(
+				'success' => true,
+				'selected' => $backlog_selected,
+				'source_lookup' => 'backlog_search',
+				'raw' => $backlog_search,
+			);
+		}
+		if ( array() !== $backlog_orders ) {
+			return array(
+				'success' => false,
+				'message' => 'Найдено несколько отправлений, уточните номер отслеживания.',
+				'raw' => $backlog_search,
+			);
+		}
+
+		$shipment_search = $this->otpravka_client->search_shipment_by_barcode( $barcode );
+		if ( ! (bool) ( $shipment_search['success'] ?? false ) ) {
+			$message = (string) ( $shipment_search['error_message'] ?? '' );
+			return array(
+				'success' => false,
+				'message' => '' !== $message ? $message : 'Не удалось найти отправление в Почте России.',
+				'raw' => $shipment_search,
+			);
+		}
+
+		$shipment_orders = is_array( $shipment_search['orders'] ?? null ) ? $shipment_search['orders'] : array();
+		$shipment_selected = $this->select_search_result( $shipment_orders, $barcode );
+		if ( null !== $shipment_selected ) {
+			return array(
+				'success' => true,
+				'selected' => $shipment_selected,
+				'source_lookup' => 'shipment_search',
+				'raw' => $shipment_search,
+			);
+		}
+
+		return array(
+			'success' => false,
+			'message' => array() === $shipment_orders ? 'Отправление с таким номером отслеживания не найдено в Почте России.' : 'Найдено несколько отправлений, уточните номер отслеживания.',
+			'raw' => $shipment_search,
+		);
 	}
 
 	/**

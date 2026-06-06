@@ -447,7 +447,7 @@
       .then((response) => response.json())
       .then((payload) => {
         if (!payload || !payload.success) {
-          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось сохранить ШПИ.');
+          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось сохранить номер отслеживания.');
         }
         if (form) form.hidden = true;
         if (input) input.value = '';
@@ -458,7 +458,7 @@
           hasTracking: !!(payload.data.tracking_number || payload.data.status && payload.data.status.barcode),
           canCancel: !!(payload.data.status && payload.data.status.can_cancel)
         });
-        showShipmentToast(box, payload.data.warning || payload.data.message || 'ШПИ сохранен.', payload.data.warning ? 'warning' : 'success');
+        showShipmentToast(box, payload.data.warning || payload.data.message || 'Номер отслеживания сохранен.', payload.data.warning ? 'warning' : 'success');
         return payload;
       })
       .catch((error) => {

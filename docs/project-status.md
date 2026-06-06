@@ -1,12 +1,14 @@
 # Project Status
 
+0.37.1 note: manual Russian Post tracking attachment now searches `GET /1.0/backlog/search?query={barcode}` first and falls back to `GET /1.0/shipment/search?query={barcode}`. Tracking uses barcode/tracking number; cancellation uses hidden `backlog_order_id` and stays disabled when shipment search does not return an id. Russian Post documents/labels remain manual in the Russian Post account.
+
 ## Общий статус
 
-- Версия / baseline проекта: `0.37.0`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.37.1`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
 - Последнее обновление статуса: 2026-06-06.
 - Общий процент готовности: примерно 66%.
-- Текущий этап 0.37.0: документы/ярлыки Почты России в плагине не скачиваются, партия/Ф103/документы оформляются вручную в ЛК Почты. В метабоксе `Отправления` добавлены отмена backlog-отправления через `DELETE /1.0/backlog` только на статусе `Присвоение идентификатора`, ручное внесение ШПИ через `GET /1.0/backlog/search`, и копирование номера отслеживания. Tracking API работает по barcode/ШПИ, отмена работает по `backlog_order_id`, сам `backlog_order_id` хранится технически и визуально не выводится.
+- Текущий этап 0.37.1: документы/ярлыки Почты России в плагине не скачиваются, партия/Ф103/документы оформляются вручную в ЛК Почты. В метабоксе `Отправления` добавлены отмена backlog-отправления через `DELETE /1.0/backlog` только на статусе `Присвоение идентификатора`, ручное внесение номера отслеживания через `GET /1.0/backlog/search` с fallback на `GET /1.0/shipment/search`, и копирование номера отслеживания иконкой. Tracking API работает по barcode/номеру отслеживания, отмена работает по `backlog_order_id`, сам `backlog_order_id` хранится технически и визуально не выводится.
 
 ## Краткое резюме
 

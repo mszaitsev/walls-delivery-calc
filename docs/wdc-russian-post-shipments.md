@@ -1,6 +1,6 @@
 # WDC Russian Post Shipments
 
-Version: 0.37.0.
+Version: 0.37.1.
 
 Russian Post shipment creation stores two identifiers:
 
@@ -24,3 +24,13 @@ Manual ШПИ attachment:
 - returned `id` is saved as `backlog_order_id`;
 - state source is `manual_tracking_attach`;
 - WDC attempts the first Tracking API status refresh after saving.
+
+Manual tracking attachment in 0.37.1:
+
+- first lookup: `GET /1.0/backlog/search?query={barcode}`;
+- fallback lookup when backlog search is empty: `GET /1.0/shipment/search?query={barcode}`;
+- state source is `manual_tracking_attach`;
+- state lookup source is `backlog_search` or `shipment_search`;
+- returned `id`, when present, is saved as `backlog_order_id`;
+- if shipment search returns barcode but no `id`, WDC still saves tracking and runs Tracking API by barcode;
+- cancellation remains disabled when `backlog_order_id` is absent.
