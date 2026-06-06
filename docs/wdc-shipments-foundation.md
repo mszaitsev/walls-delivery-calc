@@ -42,9 +42,9 @@ Domestic Russian Post shipment payloads always send `mail-direct=643`.
 
 Normal pickup/OPS shipments are not treated as ECOM by default. They send `address-type-to=DEMAND`, `index-to`, `region-to`, and `place-to`; `ecom-data` is omitted. In the admin modal the human-readable address is shown as `{index}, {region}, {place}, до востребования`.
 
-ECOM pickup shipments use `ecom-data.delivery-point-index` and omit the normal recipient address schema unless a future API/product explicitly requires it. The ECOM decision comes from the per-tariff `is_ecom` setting in Delivery Services, not from a hard-coded object code. Object `54020` still maps to `ECOM_MARKETPLACE`, but it only uses `ecom-data` when the tariff setting is enabled.
+ECOM pickup shipments use `ecom-data.delivery-point-index` and omit the normal recipient address schema unless a later Russian Post product explicitly requires it. The ECOM decision comes from the per-tariff `is_ecom` setting in Delivery Services, not from a hard-coded object code. Object `54020` still maps to `ECOM_MARKETPLACE`, but it only uses `ecom-data` when the tariff setting is enabled.
 
-Courier shipments use `address-type-to=DEFAULT`, `courier=true`, `delivery-to-door=true`, `index-to`, `region-to`, `place-to`, and `raw-address`. If a manager did not enter a custom raw address, it is assembled from `shipping_postcode`, `shipping_state`, `shipping_city`, `shipping_address_1`, and `shipping_address_2`. Pickup checkout no longer writes `Код ПВЗ` into `shipping_address_2`.
+Courier shipments use normalized Russian Post address fields from `RussianPostAddressNormalizer`: `address-type-to`, `index-to`, `region-to`, `area-to`, `place-to`, `location-to`, `street-to`, `house-to`, `slash-to`, `letter-to`, `building-to`, `corpus-to`, `room-to`, and `num-address-type-to`. The modal shows the original shipping address and requires the manager to run `Обработать адрес`; successful creation is blocked until a valid normalization result matches the original-address hash. If the address changes, the cached normalized payload is cleared. Failed normalization may be shown in preview fallback, but it is not accepted for create.
 
 `tel-address` is normalized to digits only before payload creation. If the normalized phone is empty, validation returns `Телефон получателя обязателен.`
 
@@ -80,7 +80,7 @@ Credentials are never stored in order meta.
 
 Otpravka `result-id` is parsed as part of the create API response and saved separately as `backlog_order_id`. It is not used as the primary shipment identifier: barcode/ШПИ remains the tracking number shown to managers and used by the Tracking API. In 0.37.0 `backlog_order_id` is used by cancellation (`DELETE /1.0/backlog`) and kept hidden in the metabox. It is not shown to customers, emails, account pages, public tracking blocks, or toasts.
 
-Manual attachment saves shipment state with `source=manual_tracking_attach`, entered barcode/ШПИ, returned `backlog_order_id`, status `created`, timestamps and a minimal safe response snapshot.
+Manual attachment saves shipment state with `source=manual_tracking_attach`, entered barcode/ШПИ, lookup source (`backlog_search` or `shipment_search`), returned `backlog_order_id` when present, status `created`, timestamps and a minimal safe response snapshot. Lookup uses `GET /1.0/backlog/search?query={barcode}` first and falls back to `GET /1.0/shipment/search?query={barcode}`.
 
 In 0.37.2 the metabox has two cleanup actions:
 
@@ -99,7 +99,8 @@ Failed creation stores `_wdc_shipment_last_error` with safe error code/message a
 - login;
 - password;
 - timeout;
-- postoffice codes.
+- postoffice codes;
+- default postoffice/from index for shipment registration.
 
 Tracking login/password fields are used by manual status refresh:
 
@@ -133,6 +134,8 @@ The status smoke also covers no-attribute fallback through `type:-`, including o
 ## Admin Preview And Pickup Selector
 
 The preparation modal renders a safe server-side API payload preview. Field changes, service/tariff changes and place add/remove actions refresh the preview through debounced AJAX; if preview refresh temporarily fails, the old preview stays visible and the UI shows a warning.
+
+The shipment modal is intentionally compact for manual preparation: parcel/place inputs accept integer-only values, the calculated order weight is shown in the weight label instead of being written into the editable value, and the declared-value field is shown only for tariffs whose shipment product has declared value. Place rows are compact, support add/remove for MMO-capable products, and feed both the preview and final Otpravka backlog payload. After a successful create the modal closes, the metabox shows the tracking number/toast, and the first status update starts automatically.
 
 The pickup section shows the selected OPS/PVZ index and address plus `Выбрать другой ПВЗ`. The picker opens as a second modal above the shipment modal, searches local `wp_wdc_pickup_points_russian_post` rows by `postcode`, `city_name` and `address` through `wdc_search_russian_post_pickup_points`, renders found points on the configured map provider, and shows a table with index, city, address and choose action.
 

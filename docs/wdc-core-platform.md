@@ -76,7 +76,7 @@ Legacy settings are not migrated; this runtime generation is fresh-install-only.
 
 Key material comes from `WDC_SECRET_KEY` when defined. Otherwise it falls back to WordPress salts.
 
-This service is reserved for future API credentials.
+This service is reserved for later API credentials.
 
 ## Migration System
 

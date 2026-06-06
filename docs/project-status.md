@@ -1,20 +1,20 @@
 # Project Status
 
-0.37.4 note: Russian Post order metabox action hiding is hardened against WooCommerce/WordPress admin CSS. The CSS rule `.wdc-shipments-metabox [hidden] { display: none !important; }` and JS `setVisible()` helper keep hidden buttons visually hidden and out of keyboard flow.
+0.37.5 note: Russian Post foundation documentation now matches the current unified domestic service, Tariff API requests, tariff variants, shipment modal/payload rules, address normalization, manual tracking fallback and manual documents workflow. Runtime business logic is unchanged.
 
 ## Общий статус
 
-- Версия / baseline проекта: `0.37.4`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.37.5`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
-- Последнее обновление статуса: 2026-06-06.
+- Последнее обновление статуса: 2026-06-07.
 - Общий процент готовности: примерно 66%.
-- Текущий этап 0.37.2: документы/ярлыки Почты России в плагине не скачиваются, партия/Ф103/документы оформляются вручную в ЛК Почты. В метабоксе `Отправления` добавлены отмена backlog-отправления через `DELETE /1.0/backlog` только на статусе `Присвоение идентификатора`, локальное `Удалить из заказа` без обращения к Почте России для отправлений, которые нельзя отменить в Почте, ручное внесение номера отслеживания через `GET /1.0/backlog/search` с fallback на `GET /1.0/shipment/search`, и копирование номера отслеживания встроенной SVG-иконкой.
+- Текущий этап 0.37.5: документация Russian Post foundation приведена к текущему runtime. Документы/ярлыки Почты России в плагине не скачиваются, партия/Ф103/документы оформляются вручную в ЛК Почты. В метабоксе `Отправления` добавлены отмена backlog-отправления через `DELETE /1.0/backlog` только на статусе `Присвоение идентификатора`, локальное `Удалить из заказа` без обращения к Почте России для отправлений, которые нельзя отменить в Почте, ручное внесение номера отслеживания через `GET /1.0/backlog/search` с fallback на `GET /1.0/shipment/search`, и копирование номера отслеживания встроенной SVG-иконкой.
 
 ## Краткое резюме
 
 Проект уже имеет рабочую платформу расчета доставки для WooCommerce: core bootstrap, DI container, миграции, checkout runtime, календарь доставки, Rule Engine, локальную базу ФИАС/ГАР, DaData-подсказки и обогащение, Почту России для внутренних/международных расчетов и полноценный слой ПВЗ Почты России с импортом, REST API и checkout map.
 
-При этом проект еще не закрывает полный carrier lifecycle из ТЗ: ручное создание отправлений Почты России реализовано первым foundation-этапом, но документы ТК, статусы, трекинг, автоматическое изменение WooCommerce-статусов и остальные ТК пока не реализованы.
+При этом проект еще не закрывает полный carrier lifecycle из ТЗ: ручное создание отправлений Почты России, ручное обновление статуса, отмена backlog-отправления и ручное привязывание трекинга реализованы, но автоматический polling, генерация документов/ярлыков, автоматическое изменение WooCommerce-статусов и остальные ТК пока не реализованы.
 
 ## Готовность по блокам
 
@@ -34,8 +34,8 @@
 | Multicarrier Pickup Layer | partial | 35% | Generic domain/storage exists, but production checkout map is Russian Post-specific. |
 | Order Admin Recalculation | partial | 30% | Order delivery metabox exists; full recalculation/replacement workflow is missing. |
 | Shipment Domain | partial | 55% | Domain objects exist and are used by the manual shipment creation runtime. |
-| Shipment Runtime | partial | 55% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments and can manually refresh Russian Post tracking status from the existing shipment metabox button; documents/cancellation remain pending. |
-| Tracking / Documents / Status Sync | partial | 15% | Manual Russian Post Tracking API lookup is implemented for one shipment at a time; automatic polling, labels, acts and documents are not included yet. |
+| Shipment Runtime | partial | 65% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments, runs the first status refresh, supports manual status refresh, backlog cancellation, local remove-from-order and manual tracking attachment. |
+| Tracking / Documents / Status Sync | partial | 25% | Manual Russian Post Tracking API lookup is implemented for one shipment at a time; automatic polling, labels, acts and plugin-generated documents are not included. |
 | WooCommerce Status Mapping | not-started | 0% | Domain baseline exists, but no automatic WooCommerce order status changes. |
 | CDEK | planned | 0% | Planned carrier stage; no adapter found in code. |
 | DPD | planned | 0% | Planned carrier stage; no adapter found in code. |
@@ -52,7 +52,7 @@
 
 ### Core Platform
 
-- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.35.2`.
+- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.37.5`.
 - `src/Core/bootstrap.php` wires the autoloader and plugin runtime.
 - `src/Core/Plugin.php` registers services and hooks through a DI container.
 - `src/Infrastructure/Settings`, `src/Infrastructure/Logging`, `src/Infrastructure/Security`, `src/Infrastructure/Queue`, and `src/Infrastructure/Database` provide settings, logging, encryption, background scheduling, and migrations.
@@ -97,7 +97,7 @@
 - `src/Carriers/Runtime/RussianPostDomesticCarrier.php` and `src/Carriers/Runtime/RussianPostInternationalCarrier.php` are registered in `CarrierRegistry`.
 - `src/Carriers/RussianPost` includes tariff API clients/settings, country mapping/directory, domestic tariff variants, courier tariff probing, and Otpravka credentials/client foundation.
 - `src/DeliveryServices` provides service definitions/settings/countries/admin management used by Russian Post services.
-- Domestic Russian Post settings use only `service_key=russian_post_domestic` as source of truth. Migration `0026_unify_russian_post_domestic_service.php` copies old domestic settings/tariffs/countries/credentials into that unified service, then physically deletes `russian_post_domestic_pickup` and `russian_post_domestic_courier` rows plus their settings, country rows, and service-rule bindings. Backward compatibility with old domestic service keys is intentionally not supported.
+- Historical migration note: Domestic Russian Post settings use only `service_key=russian_post_domestic` as source of truth. Migration `0026_unify_russian_post_domestic_service.php` copies old domestic settings/tariffs/countries/credentials into that unified service, then physically deletes `russian_post_domestic_pickup` and `russian_post_domestic_courier` rows plus their settings, country rows, and service-rule bindings. Backward compatibility with old domestic service keys is intentionally not supported.
 - Domestic Russian Post admin cleanup in `0.35.1`: availability lives on `Основные`, Tariff API endpoint/token live on `API / Credentials`, tariff calculation indices stay on `Расчет`, pickup/courier checkout method titles are configurable on `Основные`, and technical shipping item meta is hidden from WooCommerce order item display.
 - Domestic Russian Post cleanup in `0.35.2`: calculation index labels now clarify tariff calculation usage, `default_from_postcode` is edited in `API / Credentials`, Tariff API token remains because the tariff client uses it as a bearer token when configured, visible domestic shipping item meta contains only `Срок доставки`, pickup point code/type/postcode/address are stored in `_wdc_delivery_calculation_data.pickup`, and pickup code is no longer written to `shipping_address_2`.
 
@@ -162,11 +162,10 @@
 
 ### Shipment Runtime
 
-- Статусы отправлений.
-- Документы/ярлыки/партии/Ф103.
-- Отмена отправлений.
-- Автосинхронизация.
-- Shipment statuses, documents, cancellation and automatic sync remain pending.
+- Документы/ярлыки/партии/Ф103 в плагине не генерируются; менеджер оформляет их вручную в ЛК Почты России.
+- Автосинхронизация статусов.
+- Автоматическое изменение WooCommerce-статуса заказа по статусу доставки.
+- Интеграции отправлений для остальных ТК.
 
 ### Carrier Documents
 
