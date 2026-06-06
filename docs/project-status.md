@@ -1,16 +1,18 @@
 # Project Status
 
+0.38.1 note: shipment status autosync defaults and settings persistence were tightened before site testing. `ShipmentStatusAutoSyncService` and `ShipmentStatusAutoSyncCron` are explicitly registered in the container, default order statuses are `wc-processing` and `wc-on-hold`, and the Statuses page persists only autosync keys through targeted saves. `wc-completed` can be enabled manually.
+
 0.38.0 note: universal shipment status autosync is implemented through `ShipmentStatusAutoSyncService`, `WDC -> Статусы`, WP Cron hook `wdc_shipment_status_autosync`, schedule `wdc_every_6_hours`, and lock `wdc_shipment_status_autosync_lock`. The first dispatcher target is `russian_post_domestic`, which reuses `ShipmentStatusUpdateService::update_russian_post()`.
 
 0.37.5 note: Russian Post foundation documentation now matches the current unified domestic service, Tariff API requests, tariff variants, shipment modal/payload rules, address normalization, manual tracking fallback and manual documents workflow. Runtime business logic is unchanged.
 
 ## Общий статус
 
-- Версия / baseline проекта: `0.38.0`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.38.1`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
 - Последнее обновление статуса: 2026-06-07.
 - Общий процент готовности: примерно 66%.
-- Текущий этап 0.38.0: добавлена универсальная автосинхронизация статусов отправлений. Настройки, ручной запуск и диагностика вынесены на отдельную страницу `WDC -> Статусы`; cron не привязан к Почте России и dispatch выполняется по `carrier_key`.
+- Текущий этап 0.38.1: автосинхронизация статусов отправлений подготовлена к тестированию на сайте. Настройки, ручной запуск и диагностика вынесены на отдельную страницу `WDC -> Статусы`; cron не привязан к Почте России и dispatch выполняется по `carrier_key`.
 
 ## Краткое резюме
 
@@ -54,7 +56,7 @@
 
 ### Core Platform
 
-- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.38.0`.
+- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.38.1`.
 - `src/Core/bootstrap.php` wires the autoloader and plugin runtime.
 - `src/Core/Plugin.php` registers services and hooks through a DI container.
 - `src/Infrastructure/Settings`, `src/Infrastructure/Logging`, `src/Infrastructure/Security`, `src/Infrastructure/Queue`, and `src/Infrastructure/Database` provide settings, logging, encryption, background scheduling, and migrations.

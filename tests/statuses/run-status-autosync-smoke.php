@@ -106,7 +106,11 @@ if ( ! function_exists( 'get_option' ) ) {
 	function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['wdc_status_autosync_options'][ $key ] ?? $default; }
 }
 if ( ! function_exists( 'update_option' ) ) {
-	function update_option( string $key, mixed $value, bool|string|null $autoload = null ): bool { $GLOBALS['wdc_status_autosync_options'][ $key ] = $value; return true; }
+	function update_option( string $key, mixed $value, bool|string|null $autoload = null ): bool {
+		$GLOBALS['wdc_status_autosync_update_calls'][] = array( 'key' => $key, 'value' => $value );
+		$GLOBALS['wdc_status_autosync_options'][ $key ] = $value;
+		return true;
+	}
 }
 if ( ! function_exists( 'current_time' ) ) {
 	function current_time( string $type ): string { return '2026-06-07 10:00:00'; }
@@ -147,6 +151,15 @@ $GLOBALS['wdc_status_autosync_transients'] = array();
 $GLOBALS['wdc_status_autosync_events'] = array();
 $GLOBALS['wdc_status_autosync_actions'] = array();
 $GLOBALS['wdc_status_autosync_filters'] = array();
+$GLOBALS['wdc_status_autosync_update_calls'] = array();
+
+$plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
+$settings_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Infrastructure/Settings/SettingsRepository.php' );
+$admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/ShipmentStatusesAdminPage.php' );
+status_autosync_assert( str_contains( $plugin_source, '$this->container->register( ShipmentStatusAutoSyncService::class' ) && str_contains( $plugin_source, '$this->container->get( SettingsRepository::class )' ) && str_contains( $plugin_source, '$this->container->get( OrderShipmentRepository::class )' ) && str_contains( $plugin_source, '$this->container->get( ShipmentStatusUpdateService::class )' ), 'Plugin container must explicitly register ShipmentStatusAutoSyncService dependencies.' );
+status_autosync_assert( str_contains( $plugin_source, '$this->container->register( ShipmentStatusAutoSyncCron::class' ) && str_contains( $plugin_source, '$this->container->get( ShipmentStatusAutoSyncService::class )' ), 'Plugin container must explicitly register ShipmentStatusAutoSyncCron dependency.' );
+status_autosync_assert( ! str_contains( $admin_source, '$this->settings->replace(' ) && str_contains( $admin_source, '$this->settings->set(' ), 'Statuses settings page must use targeted settings saves instead of replace(all()+...).' );
+status_autosync_assert( ! str_contains( $settings_source, '$settings = $this->all();' ), 'SettingsRepository::set() must not persist merged defaults.' );
 
 $settings = new SettingsRepository();
 $repository = new OrderShipmentRepository();
@@ -164,6 +177,8 @@ $service = new ShipmentStatusAutoSyncService(
 
 status_autosync_assert( true === $service->enabled(), 'Autosync must be enabled by default.' );
 status_autosync_assert( in_array( 'wc-processing', $service->selected_order_statuses(), true ), 'Default selected statuses must include processing.' );
+status_autosync_assert( array( 'wc-processing', 'wc-on-hold' ) === $service->default_order_statuses(), 'Default selected statuses must be processing and on-hold only.' );
+status_autosync_assert( ! in_array( 'wc-completed', $service->default_order_statuses(), true ), 'Default selected statuses must not include completed.' );
 
 $cron = new ShipmentStatusAutoSyncCron( $service );
 $schedule = $cron->add_schedule( array() );
@@ -276,5 +291,22 @@ $manual_html = ob_get_clean();
 $manual_stats = $settings->get_array( ShipmentStatusAutoSyncService::DIAGNOSTICS_KEY );
 status_autosync_assert( 'manual' === (string) $manual_stats['trigger_type'], 'Manual run must execute the same autosync service.' );
 status_autosync_assert( str_contains( $manual_html, 'Обработано заказов' ) && str_contains( $manual_html, 'Запустить синхронизацию сейчас' ), 'Manual run result and diagnostics button must render.' );
+
+$GLOBALS['wdc_status_autosync_options']['wdc_core_settings'] = array( 'unrelated_existing_key' => 'keep' );
+$GLOBALS['wdc_status_autosync_update_calls'] = array();
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_POST = array(
+	'wdc_statuses_action' => 'save_settings',
+	'wdc_shipment_statuses_nonce' => 'nonce',
+	ShipmentStatusAutoSyncService::ORDER_STATUSES_KEY => array( 'wc-processing', 'wc-custom-shipping' ),
+);
+$_GET = array( 'tab' => 'main' );
+ob_start();
+$page->render_page();
+ob_end_clean();
+$saved_settings = $GLOBALS['wdc_status_autosync_options']['wdc_core_settings'];
+status_autosync_assert( 2 === count( $GLOBALS['wdc_status_autosync_update_calls'] ), 'Status settings save must persist exactly two targeted settings.' );
+status_autosync_assert( false === $saved_settings[ ShipmentStatusAutoSyncService::ENABLED_KEY ] && array( 'wc-processing', 'wc-custom-shipping' ) === $saved_settings[ ShipmentStatusAutoSyncService::ORDER_STATUSES_KEY ], 'Status settings page must save enabled and selected statuses through set().' );
+status_autosync_assert( array( 'unrelated_existing_key', ShipmentStatusAutoSyncService::ENABLED_KEY, ShipmentStatusAutoSyncService::ORDER_STATUSES_KEY ) === array_keys( $saved_settings ), 'Status settings save must not materialize every default setting into the option.' );
 
 echo "Status autosync smoke passed\n";

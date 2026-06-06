@@ -114,7 +114,7 @@ final class ShipmentStatusAutoSyncService {
 	 * @return array<int,string>
 	 */
 	public function default_order_statuses(): array {
-		return array( 'wc-processing', 'wc-on-hold', 'wc-completed' );
+		return array( 'wc-processing', 'wc-on-hold' );
 	}
 
 	/**

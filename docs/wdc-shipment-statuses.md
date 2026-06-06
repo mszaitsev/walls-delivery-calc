@@ -1,6 +1,13 @@
 # WDC Shipment Statuses
 
-Version: 0.38.0.
+Version: 0.38.1.
+
+Version 0.38.1 defaults autosync order statuses to:
+
+- `wc-processing`
+- `wc-on-hold`
+
+`wc-completed` is not selected by default because completed orders are usually closed. Administrators can enable it manually on `WDC -> Статусы` when a shop workflow needs continued tracking after completion.
 
 ## Autosync
 

@@ -180,14 +180,13 @@ final class ShipmentStatusesAdminPage {
 			: array();
 		$statuses = array_values( array_unique( array_filter( $statuses ) ) );
 
-		$this->settings->replace(
-			array_merge(
-				$this->settings->all(),
-				array(
-					ShipmentStatusAutoSyncService::ENABLED_KEY => ! empty( $_POST[ ShipmentStatusAutoSyncService::ENABLED_KEY ] ),
-					ShipmentStatusAutoSyncService::ORDER_STATUSES_KEY => $statuses,
-				)
-			)
+		$this->settings->set(
+			ShipmentStatusAutoSyncService::ENABLED_KEY,
+			! empty( $_POST[ ShipmentStatusAutoSyncService::ENABLED_KEY ] )
+		);
+		$this->settings->set(
+			ShipmentStatusAutoSyncService::ORDER_STATUSES_KEY,
+			$statuses
 		);
 
 		return __( 'Настройки статусов сохранены.', 'walls-delivery-calc' );
