@@ -1,6 +1,6 @@
 # WDC Shipment Statuses
 
-Version: 0.36.1.
+Version: 0.36.2.
 
 ## Universal Status Model
 
@@ -52,6 +52,8 @@ Version 0.36.1 corrects the first mapping import for Russian Post pickup/courier
 - `8:15` and `8:18` map to `handed_to_courier` / `передан курьеру`;
 - unknown operation/attribute pairs remain `unknown` / `не определён`.
 
+Version 0.36.2 adds the no-attribute fallback: if an exact `operation_type_id:operation_attr_id` key is absent, the mapper tries `operation_type_id:-`. Empty, absent, `0`, and `-` attributes therefore share the same no-attribute mapping. This maps Russian Post `28:0`/`28:''`/`28:-` to `created_in_carrier` / `создан в ТК`, and `46:0`/`46:''`/`46:-` to `cancelled` / `отменён`. Unknown no-attribute operations still map to `unknown` / `не определён`.
+
 Mapping key:
 
 - `operation_type_id`;
@@ -71,6 +73,8 @@ The raw Russian Post status is always preserved:
 
 The WooCommerce order metabox `Отправления` uses the existing `Обновить статус` button. The button is enabled only when the shipment is created and has a barcode.
 
+After a successful shipment create, the preparation modal closes, WDC shows a local success toast for 10 seconds, and the first status refresh starts automatically through the same `wdc_update_shipment_status` action. If that automatic refresh fails, creation remains successful and the metabox shows `Отправление создано, но статус пока не обновлен: ...`.
+
 AJAX action:
 
 ```text
@@ -85,4 +89,6 @@ The status block shows:
 - `Проверено`;
 - `Barcode`.
 
-Automatic polling/synchronization is not part of version 0.36.1.
+The metabox shows Russian labels for both the creation/status summary and the universal delivery status. Otpravka `result-id` is not shown and is not stored in shipment state because status refresh uses barcode/ШПИ.
+
+Automatic polling/synchronization is not part of version 0.36.2.

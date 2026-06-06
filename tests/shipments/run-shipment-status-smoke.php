@@ -215,7 +215,13 @@ $mapping_cases = array(
 	'42:30' => array( DeliveryStatus::READY_FOR_PICKUP, 'ожидает самовывоза из ПВЗ/постамата' ),
 	'8:15' => array( DeliveryStatus::HANDED_TO_COURIER, 'передан курьеру' ),
 	'8:18' => array( DeliveryStatus::HANDED_TO_COURIER, 'передан курьеру' ),
+	'28:0' => array( DeliveryStatus::CREATED_IN_CARRIER, 'создан в ТК' ),
+	'28:' => array( DeliveryStatus::CREATED_IN_CARRIER, 'создан в ТК' ),
+	'28:-' => array( DeliveryStatus::CREATED_IN_CARRIER, 'создан в ТК' ),
+	'46:0' => array( DeliveryStatus::CANCELLED, 'отменён' ),
+	'46:' => array( DeliveryStatus::CANCELLED, 'отменён' ),
 	'999:999' => array( DeliveryStatus::UNKNOWN, 'не определён' ),
+	'999:' => array( DeliveryStatus::UNKNOWN, 'не определён' ),
 );
 foreach ( $mapping_cases as $pair => $expected ) {
 	[ $operation_type_id, $operation_attr_id ] = explode( ':', $pair, 2 );
@@ -274,6 +280,7 @@ $saved = $order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPo
 shipment_status_smoke_assert( true === $updated['success'], 'Known latest operation must update shipment.' );
 shipment_status_smoke_assert( DeliveryStatus::DELIVERED === $saved['universal_status_code'], 'Service must save universal_status_code.' );
 shipment_status_smoke_assert( 'Вручение — Вручение адресату' === $saved['carrier_status_title'], 'Service must save carrier status title.' );
+shipment_status_smoke_assert( 'доставлен' === $updated['status']['shipment_status_label'], 'Service UI payload must expose Russian universal label.' );
 shipment_status_smoke_assert( ! array_key_exists( 'russian_post_tracking_login', $saved ) && ! array_key_exists( 'russian_post_tracking_password_encrypted', $saved ), 'Credentials must not be saved in order meta.' );
 
 $GLOBALS['wdc_status_smoke_http_body'] = shipment_status_smoke_envelope( shipment_status_smoke_record( '2026-06-06T10:00:00+07:00', '999', 'Новая операция', '999', 'Новый атрибут' ) );
@@ -282,6 +289,20 @@ $status_service->update_russian_post( $unknown_order );
 $unknown_saved = $unknown_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPostDomesticSettings::CARRIER_KEY ];
 shipment_status_smoke_assert( DeliveryStatus::UNKNOWN === $unknown_saved['universal_status_code'], 'Unknown latest operation must save unknown.' );
 shipment_status_smoke_assert( 'Новая операция — Новый атрибут' === $unknown_saved['carrier_status_title'], 'Unknown latest operation must keep carrier status.' );
+
+$GLOBALS['wdc_status_smoke_http_body'] = shipment_status_smoke_envelope( shipment_status_smoke_record( '2026-06-06T10:00:00+07:00', '28', 'Присвоение идентификатора', '0', '' ) );
+$created_in_carrier_order = new ShipmentStatusSmokeOrder( 13, array( OrderShipmentRepository::META_KEY => array( RussianPostDomesticSettings::CARRIER_KEY => array( 'status' => 'created', 'tracking_number' => '12345678901234' ) ) ) );
+$created_in_carrier = $status_service->update_russian_post( $created_in_carrier_order );
+$created_in_carrier_saved = $created_in_carrier_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPostDomesticSettings::CARRIER_KEY ];
+shipment_status_smoke_assert( DeliveryStatus::CREATED_IN_CARRIER === $created_in_carrier_saved['universal_status_code'], 'Operation 28 without attr must save created_in_carrier.' );
+shipment_status_smoke_assert( 'создан в ТК' === $created_in_carrier['status']['shipment_status_label'], 'Operation 28 without attr must expose Russian created label.' );
+
+$GLOBALS['wdc_status_smoke_http_body'] = shipment_status_smoke_envelope( shipment_status_smoke_record( '2026-06-06T10:00:00+07:00', '46', 'Отмена присвоения идентификатора', '0', '' ) );
+$cancelled_order = new ShipmentStatusSmokeOrder( 14, array( OrderShipmentRepository::META_KEY => array( RussianPostDomesticSettings::CARRIER_KEY => array( 'status' => 'created', 'tracking_number' => '12345678901234' ) ) ) );
+$cancelled = $status_service->update_russian_post( $cancelled_order );
+$cancelled_saved = $cancelled_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPostDomesticSettings::CARRIER_KEY ];
+shipment_status_smoke_assert( DeliveryStatus::CANCELLED === $cancelled_saved['universal_status_code'], 'Operation 46 without attr must save cancelled.' );
+shipment_status_smoke_assert( 'отменён' === $cancelled['status']['shipment_status_label'], 'Operation 46 without attr must expose Russian cancelled label.' );
 
 $GLOBALS['wdc_status_smoke_orders'] = array( 11 => $order );
 $metabox = new OrderShipmentsMetabox(
@@ -314,8 +335,16 @@ try {
 
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
+$adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/RussianPost/RussianPostShipmentAdapter.php' );
 shipment_status_smoke_assert( str_contains( $metabox_source, 'data-wdc-update-shipment-status' ) && str_contains( $metabox_source, "disabled( ! \$has_created || '' === \$barcode )" ), 'Metabox update button must be active only when barcode exists.' );
 shipment_status_smoke_assert( str_contains( $metabox_source, 'data-wdc-status-plugin' ) && str_contains( $metabox_source, 'data-wdc-status-carrier' ), 'Metabox must render both status fields.' );
+shipment_status_smoke_assert( ! str_contains( $metabox_source, 'Result ID' ) && ! str_contains( $js_source, 'Result ID' ), 'Result ID must not be shown in metabox or JS create result.' );
+shipment_status_smoke_assert( ! str_contains( $adapter_source, "'result_ids'" ), 'Adapter success raw reference must not save result-id list in shipment state.' );
+shipment_status_smoke_assert( str_contains( $metabox_source, 'shipment_status_label' ) && str_contains( $metabox_source, 'создано' ) && str_contains( $metabox_source, 'не определено' ), 'Metabox must expose Russian shipment status labels.' );
 shipment_status_smoke_assert( str_contains( $js_source, 'renderShipmentStatus' ) && str_contains( $js_source, 'updateStatusAction' ), 'Admin JS must update status block from AJAX response.' );
+shipment_status_smoke_assert( str_contains( $js_source, 'showShipmentToast' ) && str_contains( $js_source, '10000' ), 'Admin JS must show auto-hiding shipment toast.' );
+shipment_status_smoke_assert( str_contains( $js_source, 'modal.hidden = true' ), 'Admin JS must close shipment modal after successful create.' );
+shipment_status_smoke_assert( str_contains( $js_source, 'requestShipmentStatus(updateButton, { auto: true })' ), 'Admin JS must trigger automatic first status update after create.' );
+shipment_status_smoke_assert( str_contains( $js_source, 'Отправление создано, но статус пока не обновлен:' ), 'Admin JS must warn when automatic first status update fails.' );
 
 echo "Shipment status smoke test passed.\n";

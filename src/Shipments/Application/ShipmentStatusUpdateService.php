@@ -94,6 +94,7 @@ final class ShipmentStatusUpdateService {
 			'barcode' => (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ),
 			'universal_status_code' => (string) ( $shipment['universal_status_code'] ?? '' ),
 			'universal_status_label' => (string) ( $shipment['universal_status_label'] ?? '' ),
+			'shipment_status_label' => $this->shipment_status_label( $shipment ),
 			'carrier_status_title' => (string) ( $shipment['carrier_status_title'] ?? '' ),
 			'carrier_status_description' => (string) ( $shipment['carrier_status_description'] ?? '' ),
 			'carrier_operation_type_id' => (string) ( $shipment['carrier_operation_type_id'] ?? '' ),
@@ -124,6 +125,24 @@ final class ShipmentStatusUpdateService {
 		if ( method_exists( $order, 'add_order_note' ) ) {
 			$order->add_order_note( $message );
 		}
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 */
+	private function shipment_status_label( array $shipment ): string {
+		$universal_label = trim( (string) ( $shipment['universal_status_label'] ?? '' ) );
+		if ( '' !== $universal_label ) {
+			return $universal_label;
+		}
+
+		return match ( (string) ( $shipment['status'] ?? '' ) ) {
+			'created' => 'создано',
+			'registered' => 'зарегистрировано',
+			'failed' => 'ошибка',
+			'', 'draft' => 'не создано',
+			default => 'не определено',
+		};
 	}
 
 	private function now(): string {

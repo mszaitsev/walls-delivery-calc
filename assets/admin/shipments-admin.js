@@ -1,5 +1,6 @@
 (function () {
   const timers = new WeakMap();
+  const toastTimers = new WeakMap();
   const formSelector = '[data-wdc-shipment-form], .wdc-shipment-form';
 
   function findShipmentContainer(element) {
@@ -248,6 +249,7 @@
   function renderShipmentStatus(box, status) {
     if (!box || !status) return;
     const fields = {
+      '[data-wdc-shipment-summary-status]': status.shipment_status_label || status.universal_status_label || 'создано',
       '[data-wdc-status-plugin]': status.universal_status_label || 'не определён',
       '[data-wdc-status-carrier]': status.carrier_status_title || '-',
       '[data-wdc-status-operation]': operationSummary(status),
@@ -258,6 +260,77 @@
       const element = box.querySelector(selector);
       if (element) element.textContent = fields[selector];
     });
+  }
+
+  function showShipmentToast(box, text, type) {
+    const host = box || document.body;
+    let toast = host.querySelector ? host.querySelector('[data-wdc-shipment-toast]') : null;
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.className = 'wdc-shipment-toast';
+      toast.setAttribute('data-wdc-shipment-toast', '1');
+      host.appendChild(toast);
+    }
+    const previous = toastTimers.get(toast);
+    if (previous) window.clearTimeout(previous);
+    toast.dataset.status = type || 'success';
+    toast.textContent = text;
+    toast.hidden = false;
+    toastTimers.set(toast, window.setTimeout(function () {
+      toast.hidden = true;
+    }, 10000));
+  }
+
+  function requestShipmentStatus(button, options) {
+    const settings = Object.assign({ auto: false }, options || {});
+    const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
+    const message = box && box.querySelector('[data-wdc-shipment-status-message]');
+    const data = new FormData();
+    data.append('action', window.wdcShipmentsAdmin.updateStatusAction);
+    data.append('nonce', window.wdcShipmentsAdmin.nonce);
+    data.append('order_id', button && button.dataset ? button.dataset.orderId || '' : '');
+    data.append('shipment_key', button && button.dataset ? button.dataset.shipmentKey || 'russian_post_domestic' : 'russian_post_domestic');
+    if (button) button.disabled = true;
+    if (message) {
+      message.dataset.status = '';
+      message.textContent = settings.auto ? 'Первое обновление статуса...' : 'Обновление статуса...';
+    }
+    return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: data
+    })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (!payload || !payload.success) {
+          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось получить статус Почты России.');
+        }
+        renderShipmentStatus(box, payload.data.status || {});
+        if (message) {
+          message.dataset.status = 'success';
+          message.textContent = payload.data.message || 'Статус отправления обновлен.';
+        }
+        if (settings.auto) {
+          showShipmentToast(box, 'Статус отправления обновлен.', 'success');
+        }
+        return payload;
+      })
+      .catch((error) => {
+        if (message) {
+          message.dataset.status = settings.auto ? 'warning' : 'error';
+          message.textContent = settings.auto
+            ? 'Отправление создано, но статус пока не обновлен: ' + error.message
+            : error.message;
+        }
+        if (settings.auto) {
+          showShipmentToast(box, 'Отправление создано, но статус пока не обновлен: ' + error.message, 'warning');
+          return null;
+        }
+        throw error;
+      })
+      .finally(() => {
+        if (button) button.disabled = false;
+      });
   }
 
   function normalizePickupPoint(point) {
@@ -598,43 +671,7 @@
 
     const updateStatus = event.target.closest('[data-wdc-update-shipment-status]');
     if (updateStatus) {
-      const box = updateStatus.closest('[data-wdc-shipments-metabox]');
-      const message = box && box.querySelector('[data-wdc-shipment-status-message]');
-      const data = new FormData();
-      data.append('action', window.wdcShipmentsAdmin.updateStatusAction);
-      data.append('nonce', window.wdcShipmentsAdmin.nonce);
-      data.append('order_id', updateStatus.dataset.orderId || '');
-      data.append('shipment_key', updateStatus.dataset.shipmentKey || 'russian_post_domestic');
-      updateStatus.disabled = true;
-      if (message) {
-        message.dataset.status = '';
-        message.textContent = 'Обновление статуса...';
-      }
-      fetch(window.wdcShipmentsAdmin.ajaxUrl, {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: data
-      })
-        .then((response) => response.json())
-        .then((payload) => {
-          if (!payload || !payload.success) {
-            throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось получить статус Почты России.');
-          }
-          renderShipmentStatus(box, payload.data.status || {});
-          if (message) {
-            message.dataset.status = 'success';
-            message.textContent = payload.data.message || 'Статус отправления обновлен.';
-          }
-        })
-        .catch((error) => {
-          if (message) {
-            message.dataset.status = 'error';
-            message.textContent = error.message;
-          }
-        })
-        .finally(() => {
-          updateStatus.disabled = false;
-        });
+      requestShipmentStatus(updateStatus).catch(function () {});
       return;
     }
 
@@ -657,12 +694,28 @@
           if (!payload || !payload.success) {
             throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось создать отправление.');
           }
+          const box = create.closest('[data-wdc-shipments-metabox]');
+          const modal = create.closest('[data-wdc-shipment-modal]');
           if (errors) {
-            errors.textContent = payload.data.message + ' Barcode: ' + (payload.data.tracking_number || '-') + '. Result ID: ' + (payload.data.external_id || '-');
+            errors.textContent = '';
           }
           const preview = form.querySelector('[data-wdc-shipment-preview]');
           if (preview && payload.data.preview) {
             preview.textContent = JSON.stringify(payload.data.preview || {}, null, 2);
+          }
+          if (modal) modal.hidden = true;
+          if (box && payload.data.status) {
+            renderShipmentStatus(box, payload.data.status);
+          }
+          const openButton = box && box.querySelector('[data-wdc-open-shipment-modal]');
+          if (openButton) openButton.disabled = true;
+          const updateButton = box && box.querySelector('[data-wdc-update-shipment-status]');
+          if (updateButton) {
+            updateButton.disabled = !(payload.data.tracking_number || payload.data.status && payload.data.status.barcode);
+          }
+          showShipmentToast(box, (payload.data.message || 'Отправление создано.') + ' Barcode: ' + (payload.data.tracking_number || '-'), 'success');
+          if (updateButton && !updateButton.disabled) {
+            requestShipmentStatus(updateButton, { auto: true });
           }
         })
         .catch((error) => {

@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Shipments\Admin;
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
@@ -198,9 +199,8 @@ final class OrderShipmentsMetabox {
 		?>
 		<div class="wdc-shipments-metabox" data-wdc-shipments-metabox>
 			<p><strong><?php echo esc_html__( 'Служба', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $meta['service_title'] ?? $request['rate_id'] ?? '-' ) ); ?></p>
-			<p><strong><?php echo esc_html__( 'Статус WDC', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $shipment['status'] ?? __( 'не создано', 'walls-delivery-calc' ) ) ); ?></p>
+			<p><strong><?php echo esc_html__( 'Статус WDC', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-shipment-summary-status><?php echo esc_html( $this->shipment_status_label( $shipment ) ); ?></span></p>
 			<?php if ( '' !== $barcode ) : ?><p><strong>Barcode:</strong> <?php echo esc_html( $barcode ); ?></p><?php endif; ?>
-			<?php if ( '' !== (string) ( $shipment['external_id'] ?? '' ) ) : ?><p><strong>Result ID:</strong> <?php echo esc_html( (string) $shipment['external_id'] ); ?></p><?php endif; ?>
 			<?php if ( '' !== (string) ( $shipment['updated_at'] ?? '' ) ) : ?><p><strong><?php echo esc_html__( 'Обновлено', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) $shipment['updated_at'] ); ?></p><?php endif; ?>
 			<?php $this->render_status_block( $status_payload ); ?>
 			<?php if ( array() !== $error && ! $has_created ) : ?><div class="notice notice-error inline"><p><?php echo esc_html( (string) ( $error['error_message'] ?? '' ) ); ?></p></div><?php endif; ?>
@@ -329,7 +329,7 @@ final class OrderShipmentsMetabox {
 			array(
 				'message' => __( 'Отправление создано.', 'walls-delivery-calc' ),
 				'tracking_number' => $result->tracking_number,
-				'external_id' => $result->external_id,
+				'status' => $this->status_updates->status_payload( $this->repository->find_by_carrier( $order, RussianPostDomesticSettings::CARRIER_KEY ) ),
 				'preview' => $preview,
 			)
 		);
@@ -456,6 +456,24 @@ final class OrderShipmentsMetabox {
 			<p><strong>Barcode:</strong> <span data-wdc-status-barcode><?php echo esc_html( (string) ( $status['barcode'] ?? '' ) ?: '-' ); ?></span></p>
 		</div>
 		<?php
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 */
+	private function shipment_status_label( array $shipment ): string {
+		$universal = (string) ( $shipment['universal_status_code'] ?? '' );
+		if ( '' !== $universal && DeliveryStatus::is_valid( $universal ) ) {
+			return DeliveryStatus::label( $universal );
+		}
+
+		return match ( (string) ( $shipment['status'] ?? '' ) ) {
+			'created' => 'создано',
+			'registered' => 'зарегистрировано',
+			'failed' => 'ошибка',
+			'', 'draft' => 'не создано',
+			default => 'не определено',
+		};
 	}
 
 	/**

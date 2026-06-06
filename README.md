@@ -1,8 +1,10 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.36.1.
+Current plugin version: 0.36.2.
 
 Current implementation status and roadmap are maintained in `docs/project-status.md`. Historical release notes below may not cover every intermediate 0.33.x change.
+
+Version 0.36.2 polishes the manual shipment status flow. After a successful Russian Post shipment create, the preparation modal closes, a 10-second admin toast confirms creation, and WDC automatically runs the first `wdc_update_shipment_status` request; if that status refresh fails, creation remains successful and the metabox shows a Russian warning. Russian Post tracking operations without attributes now fall back from `type:0`/empty attr to `type:-`, so `28:-` maps to `created_in_carrier` / `создан в ТК` and `46:-` maps to `cancelled` / `отменён`. The metabox shows Russian status labels and no longer displays or stores Otpravka `result-id` in shipment state.
 
 Version 0.36.1 corrects the Russian Post tracking status mapping: selected pickup operations including `8:2`, `12:1..12:31`, and `42:1..42:30` now map to `ready_for_pickup` / `ожидает самовывоза из ПВЗ/постамата`, while `8:15` and `8:18` map to `handed_to_courier` / `передан курьеру`. Unknown operation/attribute pairs still map to `unknown` / `не определён`.
 

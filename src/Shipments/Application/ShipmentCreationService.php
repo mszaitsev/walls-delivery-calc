@@ -60,7 +60,7 @@ final class ShipmentCreationService {
 			return new ShipmentCreateResult(
 				false,
 				error_code: 'shipment_already_created',
-				error_message: 'По заказу уже создано отправление: ' . (string) ( $existing['tracking_number'] ?? $existing['barcode'] ?? $existing['external_id'] ?? '' ),
+				error_message: 'По заказу уже создано отправление: ' . (string) ( $existing['tracking_number'] ?? $existing['barcode'] ?? '' ),
 				raw_reference: array( 'existing' => $existing )
 			);
 		}
@@ -101,8 +101,6 @@ final class ShipmentCreationService {
 			'barcode' => $result->tracking_number,
 			'tracking_number' => $result->tracking_number,
 			'order_num' => (string) ( $request->meta['order_num'] ?? $request->order_id ),
-			'result_id' => $result->external_id,
-			'external_id' => $result->external_id,
 			'group_name' => (string) ( $raw['group_name'] ?? '' ),
 			'status' => 'created',
 			'created_at' => $now,
@@ -112,9 +110,8 @@ final class ShipmentCreationService {
 		$this->add_order_note(
 			$order,
 			sprintf(
-				'Отправление Почты России создано. Barcode: %s. Result ID: %s. Мест: %d%s',
+				'Отправление Почты России создано. Barcode: %s. Мест: %d%s',
 				$result->tracking_number,
-				$result->external_id,
 				count( $request->places ),
 				'' !== (string) ( $raw['group_name'] ?? '' ) ? '. ММО group-name: ' . (string) $raw['group_name'] : ''
 			)

@@ -74,19 +74,31 @@ final class RussianPostShipmentAdapter implements ShipmentCarrierAdapterInterfac
 
 		$orders_result = is_array( $response['orders'] ?? null ) ? array_values( $response['orders'] ) : array();
 		$first = is_array( $orders_result[0] ?? null ) ? $orders_result[0] : array();
+		$safe_orders_result = array_map( array( $this, 'safe_success_order_result' ), $orders_result );
 
 		return new ShipmentCreateResult(
 			true,
 			external_id: (string) ( $first['result-id'] ?? $first['result_id'] ?? '' ),
 			tracking_number: (string) ( $first['barcode'] ?? '' ),
 			raw_reference: array(
-				'orders' => $orders_result,
+				'orders' => $safe_orders_result,
 				'barcodes' => array_values( array_filter( array_map( static fn ( mixed $row ): string => is_array( $row ) ? (string) ( $row['barcode'] ?? '' ) : '', $orders_result ) ) ),
-				'result_ids' => array_values( array_filter( array_map( static fn ( mixed $row ): string => is_array( $row ) ? (string) ( $row['result-id'] ?? $row['result_id'] ?? '' ) : '', $orders_result ) ) ),
 				'group_name' => (string) ( $first['group-name'] ?? $first['group_name'] ?? '' ),
 				'http_code' => (int) ( $response['http_code'] ?? 0 ),
 			)
 		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function safe_success_order_result( mixed $row ): array {
+		if ( ! is_array( $row ) ) {
+			return array();
+		}
+		unset( $row['result-id'], $row['result_id'] );
+
+		return $row;
 	}
 
 	/**

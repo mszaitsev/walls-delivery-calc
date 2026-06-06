@@ -1,6 +1,6 @@
 # WDC Shipments Foundation
 
-Version 0.36.0 adds manual Russian Post tracking status refresh from the existing `Обновить статус` button in the order metabox. Version 0.35.2 keeps the manual shipment runtime foundation on the unified Russian Post domestic service and removes the need for visible technical WooCommerce shipping item meta or pickup-code data in `shipping_address_2`. Version 0.34.0 added the admin-only Russian Post OPS/PVZ selector for shipment drafts. The scope is intentionally manual and carrier-neutral, with Russian Post as the first adapter.
+Version 0.36.2 closes the shipment preparation modal after successful create, shows a 10-second toast, and automatically runs the first Russian Post status refresh. Version 0.36.0 added manual Russian Post tracking status refresh from the existing `Обновить статус` button in the order metabox. Version 0.35.2 keeps the manual shipment runtime foundation on the unified Russian Post domestic service and removes the need for visible technical WooCommerce shipping item meta or pickup-code data in `shipping_address_2`. Version 0.34.0 added the admin-only Russian Post OPS/PVZ selector for shipment drafts. The scope is intentionally manual and carrier-neutral, with Russian Post as the first adapter.
 
 ## Scope
 
@@ -8,7 +8,7 @@ Version 0.36.0 adds manual Russian Post tracking status refresh from the existin
 - A manager opens the WooCommerce order admin metabox `Отправления`, checks the draft, edits recipient, delivery scenario (`pickup` or `courier`), tariff, pickup/address, postoffice-code and parcel places, then clicks `Создать отправление`.
 - The first adapter calls Russian Post Otpravka `PUT /2.0/user/backlog`.
 - For `Почта России -> ПВЗ/ОПС`, a manager can choose another local Russian Post pickup point inside the shipment modal. The selection is used only for the shipment draft/preview/create request.
-- Manual Russian Post status refresh is included for created shipments with barcode; documents, batches, F103, cancellation and automatic polling are not included in this stage.
+- Manual Russian Post status refresh is included for created shipments with barcode. The first refresh runs automatically after successful create; documents, batches, F103, cancellation and background polling are not included in this stage.
 - Checkout, tariff calculation, the saved order delivery method and WooCommerce order meta are not changed by the admin pickup selector.
 
 ## Code
@@ -59,7 +59,7 @@ Successful creation stores `_wdc_shipments` on the order with:
 - places snapshot;
 - safe request preview without headers/secrets;
 - normalized response snapshot without raw headers;
-- barcode/tracking number, order number, result id, group name;
+- barcode/tracking number, order number, group name;
 - status `created`, `created_at`, `updated_at`.
 
 Manual status refresh extends the same shipment state with:
@@ -73,6 +73,8 @@ Manual status refresh extends the same shipment state with:
 - `tracking_checked_at`, `tracking_raw_snapshot`.
 
 Credentials are never stored in order meta.
+
+Otpravka `result-id` is parsed as part of the create API response, but it is not saved into shipment state and is not shown in the metabox because later status refreshes use barcode/ШПИ.
 
 Failed creation stores `_wdc_shipment_last_error` with safe error code/message and adds a short order note. If a Russian Post shipment is already `created` or `registered`, repeat creation is blocked.
 
@@ -114,6 +116,8 @@ php tests/shipments/run-shipment-status-smoke.php
 ```
 
 The smoke tests cover Russian Post backlog payload building, status mapping, SOAP parsing/fault/empty-history handling, shipment status persistence, AJAX response shape and metabox/JS status UI wiring without real API credentials.
+
+The status smoke also covers no-attribute fallback through `type:-`, including operation `28` -> `создан в ТК` and operation `46` -> `отменён`.
 
 ## Admin Preview And Pickup Selector
 

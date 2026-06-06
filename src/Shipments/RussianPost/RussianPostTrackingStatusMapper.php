@@ -511,7 +511,7 @@ final class RussianPostTrackingStatusMapper {
 		$type_id = $this->normalize_id( (string) ( $record['operation_type_id'] ?? '' ) );
 		$attr_id = $this->normalize_id( (string) ( $record['operation_attr_id'] ?? '' ) );
 		$key = $type_id . ':' . $attr_id;
-		$mapped = self::MAP[ $key ] ?? array( 'status' => DeliveryStatus::UNKNOWN, 'terminal' => false );
+		$mapped = self::MAP[ $key ] ?? self::MAP[ $type_id . ':-' ] ?? array( 'status' => DeliveryStatus::UNKNOWN, 'terminal' => false );
 		$status = DeliveryStatus::is_valid( (string) $mapped['status'] ) ? (string) $mapped['status'] : DeliveryStatus::UNKNOWN;
 		$type_name = trim( (string) ( $record['operation_type_name'] ?? '' ) );
 		$attr_name = trim( (string) ( $record['operation_attr_name'] ?? '' ) );
