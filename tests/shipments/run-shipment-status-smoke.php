@@ -281,7 +281,29 @@ shipment_status_smoke_assert( true === $updated['success'], 'Known latest operat
 shipment_status_smoke_assert( DeliveryStatus::DELIVERED === $saved['universal_status_code'], 'Service must save universal_status_code.' );
 shipment_status_smoke_assert( 'Вручение — Вручение адресату' === $saved['carrier_status_title'], 'Service must save carrier status title.' );
 shipment_status_smoke_assert( 'доставлен' === $updated['status']['shipment_status_label'], 'Service UI payload must expose Russian universal label.' );
+shipment_status_smoke_assert( ! array_key_exists( 'backlog_order_id', $updated['status'] ), 'Status update payload must not expose backlog_order_id.' );
 shipment_status_smoke_assert( ! array_key_exists( 'russian_post_tracking_login', $saved ) && ! array_key_exists( 'russian_post_tracking_password_encrypted', $saved ), 'Credentials must not be saved in order meta.' );
+
+$backlog_status_order = new ShipmentStatusSmokeOrder(
+	15,
+	array(
+		OrderShipmentRepository::META_KEY => array(
+			RussianPostDomesticSettings::CARRIER_KEY => array(
+				'status' => 'created',
+				'tracking_number' => '12345678901234',
+				'barcode' => '12345678901234',
+				'backlog_order_id' => 2285075494,
+			),
+		),
+	)
+);
+$GLOBALS['wdc_status_smoke_http_body'] = shipment_status_smoke_envelope( shipment_status_smoke_record( '2026-06-06T10:00:00+07:00', '28', 'Присвоение идентификатора', '0', '' ) );
+$backlog_status = $status_service->update_russian_post( $backlog_status_order );
+$backlog_status_saved = $backlog_status_order->meta_snapshot()[ OrderShipmentRepository::META_KEY ][ RussianPostDomesticSettings::CARRIER_KEY ];
+shipment_status_smoke_assert( true === $backlog_status['success'], 'Status update must keep working when backlog_order_id exists in shipment state.' );
+shipment_status_smoke_assert( '12345678901234' === (string) ( $backlog_status['status']['barcode'] ?? '' ), 'Status update payload must continue using barcode.' );
+shipment_status_smoke_assert( 2285075494 === (int) ( $backlog_status_saved['backlog_order_id'] ?? 0 ), 'Status update must preserve backlog_order_id in shipment state.' );
+shipment_status_smoke_assert( ! array_key_exists( 'backlog_order_id', $backlog_status['status'] ), 'Status update AJAX payload must not include backlog_order_id.' );
 
 $GLOBALS['wdc_status_smoke_http_body'] = shipment_status_smoke_envelope( shipment_status_smoke_record( '2026-06-06T10:00:00+07:00', '999', 'Новая операция', '999', 'Новый атрибут' ) );
 $unknown_order = new ShipmentStatusSmokeOrder( 12, array( OrderShipmentRepository::META_KEY => array( RussianPostDomesticSettings::CARRIER_KEY => array( 'status' => 'created', 'tracking_number' => '12345678901234' ) ) ) );
@@ -336,9 +358,12 @@ try {
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
 $adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/RussianPost/RussianPostShipmentAdapter.php' );
-shipment_status_smoke_assert( str_contains( $metabox_source, 'data-wdc-update-shipment-status' ) && str_contains( $metabox_source, "disabled( ! \$has_created || '' === \$barcode )" ), 'Metabox update button must be active only when barcode exists.' );
-shipment_status_smoke_assert( str_contains( $metabox_source, 'data-wdc-status-plugin' ) && str_contains( $metabox_source, 'data-wdc-status-carrier' ), 'Metabox must render both status fields.' );
+shipment_status_smoke_assert( str_contains( $metabox_source, 'data-wdc-update-shipment-status' ) && str_contains( $metabox_source, '$show_update = $has_created &&' ) && str_contains( $js_source, 'updateButton.hidden = !hasTracking' ), 'Metabox update button must be visible only when tracking exists.' );
+shipment_status_smoke_assert( ! str_contains( $metabox_source, 'data-wdc-status-plugin' ) && str_contains( $metabox_source, 'data-wdc-status-carrier' ), 'Metabox status block must render carrier status without duplicating plugin status.' );
 shipment_status_smoke_assert( ! str_contains( $metabox_source, 'Result ID' ) && ! str_contains( $js_source, 'Result ID' ), 'Result ID must not be shown in metabox or JS create result.' );
+shipment_status_smoke_assert( ! str_contains( $metabox_source, 'Backlog ID' ) && str_contains( $metabox_source, 'data-wdc-backlog-order-id' ), 'Metabox must keep backlog_order_id hidden.' );
+shipment_status_smoke_assert( str_contains( $js_source, 'renderShipmentTechnicalInfo' ) && str_contains( $js_source, 'data-wdc-backlog-order-id' ), 'Admin JS must update hidden backlog id after shipment create.' );
+shipment_status_smoke_assert( str_contains( $js_source, "' Barcode: '" ) && ! str_contains( $js_source, "' Backlog ID: '" ), 'Shipment toast must show barcode and not backlog_order_id.' );
 shipment_status_smoke_assert( ! str_contains( $adapter_source, "'result_ids'" ), 'Adapter success raw reference must not save result-id list in shipment state.' );
 shipment_status_smoke_assert( str_contains( $metabox_source, 'shipment_status_label' ) && str_contains( $metabox_source, 'создано' ) && str_contains( $metabox_source, 'не определено' ), 'Metabox must expose Russian shipment status labels.' );
 shipment_status_smoke_assert( str_contains( $js_source, 'renderShipmentStatus' ) && str_contains( $js_source, 'updateStatusAction' ), 'Admin JS must update status block from AJAX response.' );

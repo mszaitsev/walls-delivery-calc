@@ -1,6 +1,6 @@
 # WDC Shipments Foundation
 
-Version 0.36.2 closes the shipment preparation modal after successful create, shows a 10-second toast, and automatically runs the first Russian Post status refresh. Version 0.36.0 added manual Russian Post tracking status refresh from the existing `Обновить статус` button in the order metabox. Version 0.35.2 keeps the manual shipment runtime foundation on the unified Russian Post domestic service and removes the need for visible technical WooCommerce shipping item meta or pickup-code data in `shipping_address_2`. Version 0.34.0 added the admin-only Russian Post OPS/PVZ selector for shipment drafts. The scope is intentionally manual and carrier-neutral, with Russian Post as the first adapter.
+Version 0.37.2 separates Russian Post cancellation from local WooCommerce shipment removal and uses an inline SVG tracking-copy icon. Version 0.37.0 adds Russian Post backlog cancellation and manual ШПИ attachment while keeping documents/labels outside the plugin workflow. Version 0.36.4 stores Russian Post Otpravka `result-id` as the explicit technical shipment-state field `backlog_order_id` while keeping barcode/ШПИ as the primary tracking identifier. Version 0.36.2 closes the shipment preparation modal after successful create, shows a 10-second toast, and automatically runs the first Russian Post status refresh. Version 0.36.0 added manual Russian Post tracking status refresh from the existing `Обновить статус` button in the order metabox. Version 0.35.2 keeps the manual shipment runtime foundation on the unified Russian Post domestic service and removes the need for visible technical WooCommerce shipping item meta or pickup-code data in `shipping_address_2`. Version 0.34.0 added the admin-only Russian Post OPS/PVZ selector for shipment drafts. The scope is intentionally manual and carrier-neutral, with Russian Post as the first adapter.
 
 ## Scope
 
@@ -8,7 +8,10 @@ Version 0.36.2 closes the shipment preparation modal after successful create, sh
 - A manager opens the WooCommerce order admin metabox `Отправления`, checks the draft, edits recipient, delivery scenario (`pickup` or `courier`), tariff, pickup/address, postoffice-code and parcel places, then clicks `Создать отправление`.
 - The first adapter calls Russian Post Otpravka `PUT /2.0/user/backlog`.
 - For `Почта России -> ПВЗ/ОПС`, a manager can choose another local Russian Post pickup point inside the shipment modal. The selection is used only for the shipment draft/preview/create request.
-- Manual Russian Post status refresh is included for created shipments with barcode. The first refresh runs automatically after successful create; documents, batches, F103, cancellation and background polling are not included in this stage.
+- Manual Russian Post status refresh is included for created shipments with barcode. The first refresh runs automatically after successful create; background polling is not included in this stage.
+- Russian Post cancellation is included for backlog shipments that are still at operation `28 / Присвоение идентификатора`.
+- Manual ШПИ attachment is included for shipments created manually in the Russian Post account.
+- Russian Post labels, batches, F103 and documents are not created or downloaded in WDC; managers prepare them manually in the Russian Post account.
 - Checkout, tariff calculation, the saved order delivery method and WooCommerce order meta are not changed by the admin pickup selector.
 
 ## Code
@@ -60,6 +63,7 @@ Successful creation stores `_wdc_shipments` on the order with:
 - safe request preview without headers/secrets;
 - normalized response snapshot without raw headers;
 - barcode/tracking number, order number, group name;
+- `backlog_order_id`, parsed from Otpravka `result-id` and reserved for internal Otpravka backlog operations such as cancellation;
 - status `created`, `created_at`, `updated_at`.
 
 Manual status refresh extends the same shipment state with:
@@ -74,7 +78,14 @@ Manual status refresh extends the same shipment state with:
 
 Credentials are never stored in order meta.
 
-Otpravka `result-id` is parsed as part of the create API response, but it is not saved into shipment state and is not shown in the metabox because later status refreshes use barcode/ШПИ.
+Otpravka `result-id` is parsed as part of the create API response and saved separately as `backlog_order_id`. It is not used as the primary shipment identifier: barcode/ШПИ remains the tracking number shown to managers and used by the Tracking API. In 0.37.0 `backlog_order_id` is used by cancellation (`DELETE /1.0/backlog`) and kept hidden in the metabox. It is not shown to customers, emails, account pages, public tracking blocks, or toasts.
+
+Manual attachment saves shipment state with `source=manual_tracking_attach`, entered barcode/ШПИ, returned `backlog_order_id`, status `created`, timestamps and a minimal safe response snapshot.
+
+In 0.37.2 the metabox has two cleanup actions:
+
+- `Отменить отправление` cancels in Russian Post through `DELETE /1.0/backlog` and then clears shipment state. It is available only when the latest Russian Post operation is `28 / Присвоение идентификатора` and `backlog_order_id` exists.
+- `Удалить из заказа` clears only WooCommerce shipment state through `OrderShipmentRepository::delete_for_carrier()` and does not call Russian Post. It is used when a shipment already cannot be cancelled in Russian Post or when the status has not been refreshed yet.
 
 Failed creation stores `_wdc_shipment_last_error` with safe error code/message and adds a short order note. If a Russian Post shipment is already `created` or `registered`, repeat creation is blocked.
 

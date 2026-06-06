@@ -2,7 +2,7 @@
 
 Version: 0.22.00.
 
-## Tracking Statuses 0.36.2
+## Tracking Statuses 0.37.1
 
 Manual status refresh is available in the WooCommerce order metabox `Отправления` for created Russian Post domestic shipments with a barcode. The existing `Обновить статус` button calls AJAX action `wdc_update_shipment_status`, then `RussianPostTrackingApiClient` requests `getOperationHistory` from `https://tracking.russianpost.ru/rtm34` using SOAP 1.2.
 
@@ -15,7 +15,17 @@ They are not the Otpravka AccessToken/login/password and not the Tariff API toke
 
 The 0.36.1 mapping correction moves `8:2` and related pickup operations, all `12:1..12:31`, and all `42:1..42:30` to `ready_for_pickup` / `ожидает самовывоза из ПВЗ/постамата`. Pairs `8:15` and `8:18` map to `handed_to_courier` / `передан курьеру`. Unknown pairs remain `unknown` / `не определён`.
 
-The 0.36.2 mapping fallback treats empty, absent, `0`, and `-` attributes as compatible with `type:-` mappings when no exact pair exists. Russian Post operation `28` without an attribute maps to `created_in_carrier` / `создан в ТК`; operation `46` without an attribute maps to `cancelled` / `отменён`. After successful shipment creation, the order metabox closes the preparation modal, shows a 10-second toast, and starts the first status refresh automatically. Otpravka `result-id` is not stored in shipment state and is not shown in the metabox because follow-up status calls use the barcode.
+The 0.36.2 mapping fallback treats empty, absent, `0`, and `-` attributes as compatible with `type:-` mappings when no exact pair exists. Russian Post operation `28` without an attribute maps to `created_in_carrier` / `создан в ТК`; operation `46` without an attribute maps to `cancelled` / `отменён`. After successful shipment creation, the order metabox closes the preparation modal, shows a 10-second toast with barcode, and starts the first status refresh automatically.
+
+Version 0.36.4 stores Otpravka create-response `result-id` as `backlog_order_id` in `_wdc_shipments`. Barcode/ШПИ is still the primary shipment identifier and is used by the Tracking API (`getOperationHistory`). The success raw response snapshot remains safe and does not need to keep `result-id` because the value is stored explicitly. In 0.37.0 `backlog_order_id` is kept hidden and used for internal Otpravka operations such as cancellation; it is not shown to customers, emails, account pages, public tracking blocks, toasts, or status-refresh messages.
+
+Version 0.37.0 keeps Russian Post documents out of the plugin workflow: labels, batches, F103 and documents are prepared manually in the Russian Post account. WDC does not call Forms API, does not create batches, and does not show a disabled document-download placeholder.
+
+Version 0.37.1 extends manual tracking attachment with a fallback lookup. WDC searches `GET /1.0/backlog/search?query={barcode}` first, then `GET /1.0/shipment/search?query={barcode}` when backlog search returns no rows. The saved state records `source_lookup=backlog_search` or `source_lookup=shipment_search`. If shipment search returns barcode but no `id`, WDC still saves tracking and runs Tracking API by barcode; cancellation remains disabled because `DELETE /1.0/backlog` requires `backlog_order_id`.
+
+Cancellation uses Otpravka `DELETE /1.0/backlog` with a JSON array body such as `[2285075494]`. The id is `backlog_order_id`, not barcode. Cancellation is enabled only when shipment state has barcode and `backlog_order_id`, and the latest Russian Post operation is `28 / Присвоение идентификатора`. On success WDC clears the shipment state so the manager can create or attach a shipment again.
+
+Manual attachment uses `GET /1.0/backlog/search?query={barcode}`. The manager enters ШПИ, WDC normalizes it, searches backlog, saves barcode plus returned `id` as `backlog_order_id`, marks `source=manual_tracking_attach`, and attempts the first Tracking API refresh. Tracking still uses barcode/ШПИ.
 
 This document fixes the stage-1 contract for the future domestic Russian Post carrier. It is documentation and API diagnostics only; checkout quoting and shipment creation are intentionally not implemented here.
 

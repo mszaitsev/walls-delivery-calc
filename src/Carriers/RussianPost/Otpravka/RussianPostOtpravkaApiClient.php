@@ -8,6 +8,9 @@ defined( 'ABSPATH' ) || exit;
 final class RussianPostOtpravkaApiClient {
 	private const PASSPORT_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/unloading-passport/zip';
 	private const BACKLOG_ENDPOINT = 'https://otpravka-api.pochta.ru/2.0/user/backlog';
+	private const BACKLOG_DELETE_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/backlog';
+	private const BACKLOG_SEARCH_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/backlog/search';
+	private const SHIPMENT_SEARCH_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/shipment/search';
 	private const CLEAN_ADDRESS_ENDPOINT = 'https://otpravka-api.pochta.ru/1.0/clean/address';
 
 	public function __construct( private RussianPostOtpravkaApiSettings $settings, private mixed $curl_downloader = null ) {
@@ -117,6 +120,131 @@ final class RussianPostOtpravkaApiClient {
 			'http_code' => $code,
 			'orders' => $orders_result,
 			'errors' => $errors,
+			'error_code' => $code >= 200 && $code < 300 ? '' : 'http_' . $code,
+			'error_message' => $code >= 200 && $code < 300 ? '' : $this->excerpt( $body ),
+			'duration_ms' => $this->duration_ms( $started ),
+		);
+	}
+
+	/**
+	 * @param array<int,int|string> $ids
+	 * @return array<string,mixed>
+	 */
+	public function delete_backlog_orders( array $ids ): array {
+		$started = microtime( true );
+		$ids = array_values(
+			array_filter(
+				array_map( static fn ( mixed $id ): int => (int) $id, $ids ),
+				static fn ( int $id ): bool => $id > 0
+			)
+		);
+		if ( array() === $ids ) {
+			return array(
+				'success' => false,
+				'http_code' => 0,
+				'result_ids' => array(),
+				'errors' => array(),
+				'error_code' => 'empty_ids',
+				'error_message' => 'Не указан внутренний ID отправления Почты России.',
+				'duration_ms' => $this->duration_ms( $started ),
+				'request_body' => '[]',
+			);
+		}
+
+		$credentials = $this->credentials_result( $started );
+		if ( array() !== $credentials ) {
+			return $credentials + array( 'result_ids' => array(), 'errors' => array(), 'request_body' => wp_json_encode( $ids ) ?: '[]' );
+		}
+
+		$body = wp_json_encode( $ids, JSON_UNESCAPED_UNICODE );
+		$body = is_string( $body ) ? $body : '[' . implode( ',', $ids ) . ']';
+		$response = wp_remote_request(
+			self::BACKLOG_DELETE_ENDPOINT,
+			array(
+				'method' => 'DELETE',
+				'timeout' => $this->settings->timeout(),
+				'headers' => $this->json_headers(),
+				'body' => $body,
+			)
+		);
+
+		return $this->backlog_mutation_result( $response, $started, $ids, $body );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function search_backlog_by_barcode( string $barcode ): array {
+		return $this->search_by_barcode( $barcode, self::BACKLOG_SEARCH_ENDPOINT );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function search_shipment_by_barcode( string $barcode ): array {
+		return $this->search_by_barcode( $barcode, self::SHIPMENT_SEARCH_ENDPOINT );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function search_by_barcode( string $barcode, string $endpoint ): array {
+		$started = microtime( true );
+		$barcode = strtoupper( preg_replace( '/\s+/', '', trim( $barcode ) ) ?? '' );
+		if ( '' === $barcode ) {
+			return array(
+				'success' => false,
+				'http_code' => 0,
+				'orders' => array(),
+				'error_code' => 'empty_barcode',
+				'error_message' => 'Укажите номер отслеживания.',
+				'duration_ms' => $this->duration_ms( $started ),
+			);
+		}
+
+		$credentials = $this->credentials_result( $started );
+		if ( array() !== $credentials ) {
+			return $credentials + array( 'orders' => array() );
+		}
+
+		$url = add_query_arg( array( 'query' => $barcode ), $endpoint );
+		$response = wp_remote_get(
+			$url,
+			array(
+				'timeout' => $this->settings->timeout(),
+				'headers' => $this->json_headers(),
+			)
+		);
+		if ( is_wp_error( $response ) ) {
+			return array(
+				'success' => false,
+				'http_code' => 0,
+				'orders' => array(),
+				'error_code' => 'wp_http_error',
+				'error_message' => $response->get_error_message(),
+				'duration_ms' => $this->duration_ms( $started ),
+			);
+		}
+
+		$code = (int) wp_remote_retrieve_response_code( $response );
+		$body = (string) wp_remote_retrieve_body( $response );
+		$decoded = json_decode( $body, true );
+		if ( ! is_array( $decoded ) ) {
+			return array(
+				'success' => false,
+				'http_code' => $code,
+				'orders' => array(),
+				'error_code' => 'json_parse_error',
+				'error_message' => 'Не удалось разобрать ответ Почты России.',
+				'body_excerpt' => $this->excerpt( $body ),
+				'duration_ms' => $this->duration_ms( $started ),
+			);
+		}
+
+		return array(
+			'success' => $code >= 200 && $code < 300,
+			'http_code' => $code,
+			'orders' => array_values( $decoded ),
 			'error_code' => $code >= 200 && $code < 300 ? '' : 'http_' . $code,
 			'error_message' => $code >= 200 && $code < 300 ? '' : $this->excerpt( $body ),
 			'duration_ms' => $this->duration_ms( $started ),
@@ -394,6 +522,110 @@ final class RussianPostOtpravkaApiClient {
 		}
 
 		return substr( $body, 0, 1000 );
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private function json_headers(): array {
+		return array(
+			'Authorization' => 'AccessToken ' . $this->settings->access_token(),
+			'X-User-Authorization' => 'Basic ' . $this->settings->basic_key(),
+			'Content-Type' => 'application/json;charset=UTF-8',
+			'Accept' => 'application/json',
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function credentials_result( float $started ): array {
+		if ( '' !== $this->settings->access_token() && '' !== $this->settings->basic_key() ) {
+			return array();
+		}
+
+		return array(
+			'success' => false,
+			'http_code' => 0,
+			'error_code' => 'credentials',
+			'error_message' => 'Не заполнены учетные данные Почты России.',
+			'duration_ms' => $this->duration_ms( $started ),
+		);
+	}
+
+	/**
+	 * @param array<int,int> $requested_ids
+	 * @return array<string,mixed>
+	 */
+	private function backlog_mutation_result( mixed $response, float $started, array $requested_ids, string $request_body ): array {
+		if ( is_wp_error( $response ) ) {
+			return array(
+				'success' => false,
+				'http_code' => 0,
+				'result_ids' => array(),
+				'errors' => array(),
+				'error_code' => 'wp_http_error',
+				'error_message' => $response->get_error_message(),
+				'duration_ms' => $this->duration_ms( $started ),
+				'request_body' => $request_body,
+			);
+		}
+
+		$code = (int) wp_remote_retrieve_response_code( $response );
+		$body = (string) wp_remote_retrieve_body( $response );
+		$decoded = json_decode( $body, true );
+		if ( ! is_array( $decoded ) ) {
+			return array(
+				'success' => false,
+				'http_code' => $code,
+				'result_ids' => array(),
+				'errors' => array(),
+				'error_code' => 'json_parse_error',
+				'error_message' => 'Не удалось разобрать ответ Почты России.',
+				'body_excerpt' => $this->excerpt( $body ),
+				'duration_ms' => $this->duration_ms( $started ),
+				'request_body' => $request_body,
+			);
+		}
+
+		$result_ids = array_values( array_map( static fn ( mixed $id ): int => (int) $id, is_array( $decoded['result-ids'] ?? null ) ? $decoded['result-ids'] : array() ) );
+		$errors = is_array( $decoded['errors'] ?? null ) ? $decoded['errors'] : array();
+		$missing = array_values( array_diff( $requested_ids, $result_ids ) );
+		$success = $code >= 200 && $code < 300 && array() === $errors && array() === $missing;
+
+		return array(
+			'success' => $success,
+			'http_code' => $code,
+			'result_ids' => $result_ids,
+			'errors' => $errors,
+			'error_code' => $success ? '' : ( array() !== $errors ? 'russian_post_backlog_error' : ( $code >= 200 && $code < 300 ? 'missing_result_id' : 'http_' . $code ) ),
+			'error_message' => $success ? '' : $this->backlog_error_message( $errors, $body, $missing ),
+			'duration_ms' => $this->duration_ms( $started ),
+			'request_body' => $request_body,
+		);
+	}
+
+	/**
+	 * @param array<int,mixed> $errors
+	 * @param array<int,int> $missing
+	 */
+	private function backlog_error_message( array $errors, string $body, array $missing ): string {
+		if ( array() !== $errors ) {
+			return implode(
+				'; ',
+				array_map(
+					static fn ( mixed $error ): string => is_array( $error )
+						? trim( (string) ( $error['error-code'] ?? $error['code'] ?? '' ) . ' ' . (string) ( $error['error-details'] ?? $error['details'] ?? $error['message'] ?? '' ) )
+						: (string) $error,
+					$errors
+				)
+			);
+		}
+		if ( array() !== $missing ) {
+			return 'Почта России не подтвердила удаление отправления.';
+		}
+
+		return $this->excerpt( $body );
 	}
 
 	private function temp_file_size( string $temp_file ): int {

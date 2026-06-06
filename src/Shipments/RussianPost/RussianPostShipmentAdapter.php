@@ -80,6 +80,7 @@ final class RussianPostShipmentAdapter implements ShipmentCarrierAdapterInterfac
 			true,
 			external_id: (string) ( $first['result-id'] ?? $first['result_id'] ?? '' ),
 			tracking_number: (string) ( $first['barcode'] ?? '' ),
+			backlog_order_id: (string) ( $first['result-id'] ?? $first['result_id'] ?? '' ),
 			raw_reference: array(
 				'orders' => $safe_orders_result,
 				'barcodes' => array_values( array_filter( array_map( static fn ( mixed $row ): string => is_array( $row ) ? (string) ( $row['barcode'] ?? '' ) : '', $orders_result ) ) ),

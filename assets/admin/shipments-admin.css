@@ -7,6 +7,28 @@
   text-align: center;
 }
 
+.wdc-shipments-metabox [hidden] {
+  display: none !important;
+}
+
+.wdc-copy-tracking-icon {
+  display: inline;
+  padding: 0 2px;
+  margin-left: 4px;
+  border: 0;
+  background: transparent;
+  color: #2271b1;
+  font-size: 15px;
+  line-height: 1;
+  vertical-align: baseline;
+  cursor: pointer;
+}
+
+.wdc-copy-tracking-icon:disabled {
+  color: #a7aaad;
+  cursor: default;
+}
+
 .wdc-shipment-status {
   margin: 10px 0;
   padding: 8px 10px;

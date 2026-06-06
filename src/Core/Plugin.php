@@ -129,6 +129,7 @@ use WallsShop\WDC\Rules\Services\RuleSimulator;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
+use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
@@ -209,6 +210,7 @@ final class Plugin {
 		$this->container->register( OrderShipmentDraftFactory::class, fn(): OrderShipmentDraftFactory => new OrderShipmentDraftFactory( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ShipmentServiceSettings::class ), $this->container->get( RussianPostDomesticSettings::class ), $this->container->get( RussianPostOtpravkaApiSettings::class ), $this->container->get( RussianPostPickupPointRepository::class ) ) );
 		$this->container->register( ShipmentCreationService::class, fn(): ShipmentCreationService => new ShipmentCreationService( $this->container->get( OrderShipmentRepository::class ), array( $this->container->get( RussianPostShipmentAdapter::class ) ), $this->container->get( Logger::class ) ) );
 		$this->container->register( ShipmentStatusUpdateService::class, fn(): ShipmentStatusUpdateService => new ShipmentStatusUpdateService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( RussianPostTrackingApiClient::class ), $this->container->get( RussianPostTrackingStatusMapper::class ) ) );
+		$this->container->register( ShipmentBacklogService::class, fn(): ShipmentBacklogService => new ShipmentBacklogService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( RussianPostOtpravkaApiClient::class ), $this->container->get( ShipmentStatusUpdateService::class ) ) );
 		$this->container->register( RussianPostPassportPointNormalizer::class, fn(): RussianPostPassportPointNormalizer => new RussianPostPassportPointNormalizer() );
 		$this->container->register( RussianPostPickupImportStateService::class, fn(): RussianPostPickupImportStateService => new RussianPostPickupImportStateService() );
 		$this->container->register( RussianPostPickupImporter::class, fn(): RussianPostPickupImporter => new RussianPostPickupImporter( $this->container->get( RussianPostOtpravkaApiSettings::class ), $this->container->get( RussianPostOtpravkaApiClient::class ), $this->container->get( RussianPostPickupPointRepository::class ), $this->container->get( RussianPostPassportPointNormalizer::class ), $this->container->get( RussianPostPickupImportStateService::class ), $this->container->get( ActionScheduler::class ), $this->container->get( RussianPostPickupLocationResolver::class ) ) );
@@ -472,7 +474,7 @@ final class Plugin {
 			)
 		);
 		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox() );
-		$this->container->register( OrderShipmentsMetabox::class, fn(): OrderShipmentsMetabox => new OrderShipmentsMetabox( $this->container->get( OrderShipmentRepository::class ), $this->container->get( OrderShipmentDraftFactory::class ), $this->container->get( ShipmentCreationService::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ShipmentStatusUpdateService::class ), $this->container->get( RussianPostAddressNormalizer::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ), $this->environment->plugin_url(), $this->environment->version() ) );
+		$this->container->register( OrderShipmentsMetabox::class, fn(): OrderShipmentsMetabox => new OrderShipmentsMetabox( $this->container->get( OrderShipmentRepository::class ), $this->container->get( OrderShipmentDraftFactory::class ), $this->container->get( ShipmentCreationService::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ShipmentStatusUpdateService::class ), $this->container->get( ShipmentBacklogService::class ), $this->container->get( RussianPostAddressNormalizer::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ), $this->environment->plugin_url(), $this->environment->version() ) );
 	}
 
 	private function register_hooks(): void {
