@@ -1,6 +1,8 @@
 # WDC Russian Post Shipments
 
-Version: 0.39.2.
+Version: 0.39.4.
+
+Version 0.39.4 shows the actual Russian Post shipment price in the WooCommerce order metabox `Отправления` when the value is available from manual tracking attach. The source is `GET /1.0/backlog/search?query={barcode}`: WDC stores `total-rate-wo-vat + total-vat` as `russian_post_actual_cost_kopecks`, `russian_post_actual_cost_rub`, and `russian_post_actual_cost_source=backlog_search`, then renders `Цена` after `Отслеживание`. The value is compared with the checkout `Базовая стоимость API` from `_wdc_delivery_calculation_data`; up to 3% over base is normal/green, more than 3% is warning/red, and missing base cost is neutral.
 
 Version 0.39.2 removes the WooCommerce order note for ordinary Russian Post shipment status refreshes. Tracking refresh still saves the latest universal and carrier status into `_wdc_shipments` and updates the order metabox, but it does not add a note such as "Статус отправления Почты России обновлен". A note is created only if WDC automatically changes the WooCommerce order status through universal status mapping, and that note uses the compact `Посылка {barcode}` format.
 
@@ -31,6 +33,8 @@ Manual tracking attachment:
 - state source is `manual_tracking_attach`;
 - state lookup source is `backlog_search` or `shipment_search`;
 - returned `id`, when present, is saved as `backlog_order_id`;
+- when `backlog_search` returns `total-rate-wo-vat` and `total-vat`, their sum is saved as the actual shipment cost in kopecks/rubles and shown as `Цена`;
+- `shipment_search` fallback does not provide this price; in that case the price row is omitted;
 - if shipment search returns barcode but no `id`, WDC still saves tracking and runs Tracking API by barcode;
 - cancellation remains disabled when `backlog_order_id` is absent.
 

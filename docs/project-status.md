@@ -1,5 +1,7 @@
 # Project Status
 
+0.39.4 note: the WooCommerce order shipment metabox now shows the real Russian Post shipment price when manual tracking attach finds the parcel through `GET /1.0/backlog/search?query={barcode}`. WDC stores `total-rate-wo-vat + total-vat` from that response in `_wdc_shipments`, formats it as `Цена: {amount} руб.`, and compares it with the checkout `Базовая стоимость API` from `_wdc_delivery_calculation_data`; up to 3% over base is ok/green, more than 3% is warning/red, and missing base cost is neutral.
+
 0.39.3 note: the Russian Post courier calculation postcode fill tool on `WDC -> Локации` now runs each backend step as sequential rate-limited probes at about 6 requests/sec. Steps are capped at 18 probes or 3 seconds, the browser waits only a short delay before the next single AJAX step, and job JSON includes target/actual RPS and step timing diagnostics. No parallel AJAX requests or concurrent backend jobs are used.
 
 0.39.2 note: successful shipment status refreshes no longer create WooCommerce order notes. WDC creates an order note only when automatic order status mapping changes the WooCommerce order status, using the compact format `Посылка {barcode}`, `Статус: {universal status}.`, `Статус заказа изменён:`, `{from_status} → {target_status}`.
@@ -18,11 +20,11 @@
 
 ## Общий статус
 
-- Версия / baseline проекта: `0.39.3`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.39.4`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
-- Последнее обновление статуса: 2026-06-07.
+- Последнее обновление статуса: 2026-06-08.
 - Общий процент готовности: примерно 66%.
-- Текущий этап 0.39.3: подбор индексов курьерской Почты России выполняется последовательными probes с target speed около 6/sec, лимитами 18 probes / 3 sec на backend step и без параллельных AJAX-запросов.
+- Текущий этап 0.39.4: в метабоксе `Отправления` показывается фактическая стоимость Почты России из `backlog/search` и сравнивается с checkout-строкой `Базовая стоимость API` с допустимым порогом +3%.
 
 ## Краткое резюме
 
@@ -232,6 +234,7 @@
 - Кнопка `Скачать документы` удалена из метабокса: печатные формы, партии и Ф103 не реализуются в WDC на этом этапе и выполняются вручную в личном кабинете Почты России.
 - Отмена отправления доступна только при наличии barcode + `backlog_order_id` и последней операции Почты России `28 / Присвоение идентификатора`; успешная отмена очищает shipment state и снова разрешает подготовку/ручной ввод ШПИ.
 - Ручное внесение ШПИ нормализует номер, ищет backlog order id через `GET /1.0/backlog/search?query={barcode}`, сохраняет state с `source=manual_tracking_attach` и запускает первый status refresh.
+- Если `backlog/search` возвращает `total-rate-wo-vat` и `total-vat`, WDC сохраняет их сумму в копейках как фактическую стоимость отправления, показывает строку `Цена` после `Отслеживание` и подсвечивает ее зеленым/красным/нейтральным цветом относительно checkout `Базовая стоимость API`; превышение до 3% включительно считается нормальным.
 
 ## Несоответствия документации и кода
 

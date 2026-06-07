@@ -29,6 +29,18 @@
   cursor: default;
 }
 
+.wdc-shipment-price-ok {
+  color: #008a20;
+}
+
+.wdc-shipment-price-warning {
+  color: #b32d2e;
+}
+
+.wdc-shipment-price-neutral {
+  color: #646970;
+}
+
 .wdc-shipment-status {
   margin: 10px 0;
   padding: 8px 10px;

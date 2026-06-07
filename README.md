@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.39.3.
+Current plugin version: 0.39.4.
+
+Version 0.39.4 shows the real registered Russian Post shipment cost in the WooCommerce order metabox `Отправления`. Manual tracking attach reads `total-rate-wo-vat + total-vat` from `GET /1.0/backlog/search?query={barcode}`, stores the value in `_wdc_shipments` as Russian Post actual cost fields, and renders `Цена: {amount} руб.` after the tracking number. The price is compared with `_wdc_delivery_calculation_data.api.api_base_price_rub` / the order metabox `Калькулятор доставок` row `Базовая стоимость API`: up to 3% over base is green/ok, more than 3% is red/warning, and missing base cost is neutral.
 
 Version 0.39.3 speeds up the `WDC -> Locations` action `Подобрать индексы для курьерской Почты России`. A single backend AJAX step now performs sequential Russian Post probes at a target of about 6 requests/sec, up to 18 probes or 3 seconds per step, with no parallel AJAX requests and no concurrent job writes. The job JSON exposes `target_rps`, `step_duration_ms`, `step_probes`, `last_probe_duration_ms`, `actual_step_rps`, `max_probes_per_step`, and `max_step_seconds`.
 

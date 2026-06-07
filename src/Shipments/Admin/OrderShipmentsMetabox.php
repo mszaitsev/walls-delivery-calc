@@ -207,7 +207,10 @@ final class OrderShipmentsMetabox {
 		$has_created = in_array( (string) ( $shipment['status'] ?? '' ), array( 'created', 'registered' ), true );
 		$barcode = trim( (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
 		$backlog_order_id = trim( (string) ( $shipment['backlog_order_id'] ?? '' ) );
-		$status_payload = $this->status_updates->status_payload( $shipment );
+		$status_payload = $this->status_updates->status_payload( $shipment, $order );
+		$price_label = (string) ( $status_payload['actual_cost_label'] ?? '' );
+		$price_compare_status = (string) ( $status_payload['actual_cost_compare_status'] ?? '' );
+		$price_compare_message = (string) ( $status_payload['actual_cost_compare_message'] ?? '' );
 		$can_cancel = $this->can_cancel_shipment( $shipment );
 		$show_primary_actions = ! $has_created;
 		$show_update = $has_created && '' !== $barcode;
@@ -218,6 +221,7 @@ final class OrderShipmentsMetabox {
 			<p><strong><?php echo esc_html__( 'Служба', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $meta['service_title'] ?? $request['rate_id'] ?? '-' ) ); ?></p>
 			<p><strong><?php echo esc_html__( 'Статус посылки', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-shipment-summary-status><?php echo esc_html( $this->shipment_status_label( $shipment ) ); ?></span></p>
 			<p data-wdc-tracking-row <?php echo '' === $barcode ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Отслеживание', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-tracking-number><?php echo esc_html( $barcode ); ?></span> <button type="button" class="wdc-copy-tracking-icon" data-wdc-copy-tracking data-tracking-number="<?php echo esc_attr( $barcode ); ?>" aria-label="<?php echo esc_attr__( 'Копировать номер отслеживания', 'walls-delivery-calc' ); ?>" title="<?php echo esc_attr__( 'Копировать', 'walls-delivery-calc' ); ?>" <?php disabled( '' === $barcode ); ?>>🗐</button> <span class="description" data-wdc-copy-tracking-status></span></p>
+			<p data-wdc-shipment-price-row class="<?php echo esc_attr( $this->shipment_price_class( $price_compare_status ) ); ?>" title="<?php echo esc_attr( $price_compare_message ); ?>" <?php echo '' === $price_label ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Цена', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-shipment-price-label><?php echo esc_html( $price_label ); ?></span></p>
 			<p data-wdc-updated-row <?php echo '' === (string) ( $shipment['updated_at'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Обновлено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-updated-at><?php echo esc_html( (string) ( $shipment['updated_at'] ?? '' ) ); ?></span></p>
 			<?php $this->render_status_block( $status_payload ); ?>
 			<span data-wdc-backlog-order-id hidden><?php echo esc_html( $backlog_order_id ); ?></span>
@@ -356,7 +360,7 @@ final class OrderShipmentsMetabox {
 				'message' => __( 'Отправление создано.', 'walls-delivery-calc' ),
 				'tracking_number' => $result->tracking_number,
 				'backlog_order_id' => $result->backlog_order_id,
-				'status' => $this->status_updates->status_payload( $this->repository->find_by_carrier( $order, RussianPostDomesticSettings::CARRIER_KEY ) ),
+				'status' => $this->status_updates->status_payload( $this->repository->find_by_carrier( $order, RussianPostDomesticSettings::CARRIER_KEY ), $order ),
 				'preview' => $preview,
 			)
 		);
@@ -616,6 +620,14 @@ final class OrderShipmentsMetabox {
 		);
 
 		return array() !== $parts ? implode( ', ', $parts ) : '-';
+	}
+
+	private function shipment_price_class( string $compare_status ): string {
+		return match ( $compare_status ) {
+			'ok' => 'wdc-shipment-price-ok',
+			'warning' => 'wdc-shipment-price-warning',
+			default => 'wdc-shipment-price-neutral',
+		};
 	}
 
 	/**

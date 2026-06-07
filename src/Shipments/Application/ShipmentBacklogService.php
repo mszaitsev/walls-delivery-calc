@@ -118,6 +118,10 @@ final class ShipmentBacklogService {
 			'created_at' => $now,
 			'updated_at' => $now,
 		);
+		$actual_cost = $this->actual_cost_fields( $selected, $source_lookup );
+		if ( array() !== $actual_cost ) {
+			$shipment = array_merge( $shipment, $actual_cost );
+		}
 		if ( $backlog_order_id > 0 ) {
 			$shipment['backlog_order_id'] = $backlog_order_id;
 		}
@@ -133,7 +137,7 @@ final class ShipmentBacklogService {
 				'warning' => 'Номер отслеживания сохранен, но статус пока не обновлен: ' . (string) ( $status_update['message'] ?? 'не удалось получить статус.' ),
 				'tracking_number' => $barcode,
 				'backlog_order_id' => $backlog_order_id > 0 ? (string) $backlog_order_id : '',
-				'status' => $this->status_updates->status_payload( $this->repository->find_by_carrier( $order, $shipment_key ) ),
+				'status' => $this->status_updates->status_payload( $this->repository->find_by_carrier( $order, $shipment_key ), $order ),
 			);
 		}
 
@@ -142,7 +146,7 @@ final class ShipmentBacklogService {
 			'message' => 'Номер отслеживания сохранен, статус обновлен.',
 			'tracking_number' => $barcode,
 			'backlog_order_id' => $backlog_order_id > 0 ? (string) $backlog_order_id : '',
-			'status' => is_array( $status_update['status'] ?? null ) ? $status_update['status'] : $this->status_updates->status_payload( $this->repository->find_by_carrier( $order, $shipment_key ) ),
+			'status' => is_array( $status_update['status'] ?? null ) ? $status_update['status'] : $this->status_updates->status_payload( $this->repository->find_by_carrier( $order, $shipment_key ), $order ),
 		);
 	}
 
@@ -281,6 +285,33 @@ final class ShipmentBacklogService {
 		}
 
 		return false;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,mixed>
+	 */
+	private function actual_cost_fields( array $row, string $source_lookup ): array {
+		if ( 'backlog_search' !== $source_lookup ) {
+			return array();
+		}
+		if ( ! array_key_exists( 'total-rate-wo-vat', $row ) || ! array_key_exists( 'total-vat', $row ) ) {
+			return array();
+		}
+		if ( ! is_numeric( $row['total-rate-wo-vat'] ) || ! is_numeric( $row['total-vat'] ) ) {
+			return array();
+		}
+
+		$cost_kopecks = max( 0, (int) $row['total-rate-wo-vat'] ) + max( 0, (int) $row['total-vat'] );
+		if ( $cost_kopecks <= 0 ) {
+			return array();
+		}
+
+		return array(
+			'russian_post_actual_cost_kopecks' => $cost_kopecks,
+			'russian_post_actual_cost_rub' => round( $cost_kopecks / 100, 2 ),
+			'russian_post_actual_cost_source' => 'backlog_search',
+		);
 	}
 
 	/**
