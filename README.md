@@ -1,6 +1,10 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.38.2.
+Current plugin version: 0.39.1.
+
+Version 0.39.1 fixes autosync handling for terminal shipment statuses after order status mapping was added. Terminal shipments such as `delivered`, `returned_to_sender`, `cancelled`, and `rejected` are still not polled again through the carrier Tracking API, but autosync now applies `shipment_status_order_status_mapping` to the already saved universal status and records `terminal_status_no_tracking_update` plus order-status mapping diagnostics.
+
+Version 0.39.0 adds automatic WooCommerce order status changes from universal shipment statuses. `WDC -> Statuses -> Status mapping` now has an explicit disabled-by-default checkbox plus a universal shipment status to WooCommerce order status table sourced from `wc_get_order_statuses()`, so standard and WooCommerce Order Status Manager custom statuses are supported. The mapping is stored in `shipment_status_order_status_mapping`; empty rows mean "do nothing". `ShipmentOrderStatusMappingService` runs after `ShipmentStatusUpdateService` saves the updated shipment status, so manual refreshes, cron/manual autosync runs, and first automatic refreshes after shipment creation or manual tracking attach share the same mechanism. Autosync diagnostics now include `order_statuses_changed`, `order_statuses_skipped`, and `order_status_change_errors`.
 
 Version 0.38.2 stores the manager-facing shipment status check timestamp `tracking_checked_at` in the Novosibirsk timezone (`Asia/Novosibirsk`, GMT+7). Russian Post carrier operation timestamps (`carrier_operation_date`) remain unchanged from the API response.
 

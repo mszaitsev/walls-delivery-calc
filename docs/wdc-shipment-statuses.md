@@ -1,6 +1,20 @@
 # WDC Shipment Statuses
 
-Version: 0.38.2.
+Version: 0.39.1.
+
+Version 0.39.1 fixes terminal shipment autosync with order status mapping. Terminal universal statuses are still not refreshed through the carrier Tracking API, but autosync now applies the universal status to WooCommerce order status mapping against the already saved shipment state. This covers the case where a shipment was already `delivered`, `returned_to_sender`, `cancelled`, or `rejected` before the administrator later enabled mapping such as `delivered -> wc-completed`.
+
+Version 0.39.0 adds universal shipment status to WooCommerce order status mapping. The `WDC -> Статусы -> Соответствие статусов` tab now contains `Включить автоматическое изменение статусов заказов` and a table from every `DeliveryStatus::all()` universal status to a WooCommerce order status. The WooCommerce status list is loaded with `wc_get_order_statuses()`, so standard statuses and custom statuses from WooCommerce Order Status Manager are supported.
+
+Mapping storage:
+
+- global enable flag: `shipment_status_order_status_mapping_enabled`, disabled by default;
+- mapping setting: `shipment_status_order_status_mapping`;
+- format: `array( 'delivered' => 'wc-completed', 'returned_to_sender' => 'wc-returned' )`;
+- empty rows are not stored and mean "do nothing";
+- there is no per-row enabled flag.
+
+Runtime is handled by `ShipmentOrderStatusMappingService`. `ShipmentStatusUpdateService` calls it immediately after saving the updated shipment state into order meta, so manual status refresh, cron autosync, manual autosync, first automatic refresh after shipment creation, and first automatic refresh after manual tracking attach all use the same path. The service validates the universal status, target WooCommerce status, current order status, and then calls WooCommerce `update_status()`. On success it adds a separate private WDC order note; standard WooCommerce status notes remain untouched.
 
 Version 0.38.2 stores and shows `tracking_checked_at` / `Проверено` for managers in `Asia/Novosibirsk` (GMT+7) with the existing `Y-m-d H:i:s` format. `carrier_operation_date` is carrier data from Russian Post Tracking API and remains unchanged, without timezone conversion.
 
@@ -18,8 +32,8 @@ Version 0.38.0 adds a separate `WDC -> Статусы` admin page for shipment s
 Tabs:
 
 - `Основные`: enables/disables autosync, shows the fixed 6-hour interval, and stores selected WooCommerce order statuses from `wc_get_order_statuses()`. Custom WooCommerce statuses, including statuses from WooCommerce Order Status Manager, are preserved as `wc-*` status keys.
-- `Соответствие статусов`: placeholder for a later WooCommerce order-status transition stage. Version 0.38.0 does not automatically change WooCommerce order statuses.
-- `Диагностика`: shows the last run timestamps, trigger type, duration, order/shipment counters, per-carrier updates, skip reasons, up to 20 error samples, and the manual `Запустить синхронизацию сейчас` action.
+- `Соответствие статусов`: enables/disables automatic WooCommerce order status changes and stores universal shipment status to WooCommerce order status mapping.
+- `Диагностика`: shows the last run timestamps, trigger type, duration, order/shipment counters, order status mapping counters, per-carrier updates, skip reasons, up to 20 error samples, and the manual `Запустить синхронизацию сейчас` action.
 
 WP Cron:
 
@@ -40,9 +54,13 @@ Runtime service:
 - order selection: `wc_get_orders()` by selected WooCommerce order statuses only, with no shipment-age filter and no order limit;
 - shipment source: order meta `_wdc_shipments`;
 - required shipment fields: `carrier_key` and `tracking_number` or `barcode`;
-- terminal universal statuses skipped: `delivered`, `returned_to_sender`, `cancelled`, `rejected`;
+- terminal universal statuses skip carrier tracking refresh: `delivered`, `returned_to_sender`, `cancelled`, `rejected`;
+- terminal universal statuses still run `ShipmentOrderStatusMappingService` against the saved shipment state and record skip reason `terminal_status_no_tracking_update`;
 - `unknown` is non-terminal and continues to be refreshed;
 - dispatch: `carrier_key -> updater`, currently `russian_post_domestic -> ShipmentStatusUpdateService::update_russian_post()`.
+- order status mapping diagnostics: `order_statuses_changed`, `order_statuses_skipped`, `order_status_change_errors`.
+
+Order status mapping is carrier-neutral. It uses only universal shipment statuses such as `delivered`, `returning_to_sender`, and `cancelled`; it does not map Russian Post operation ids or any other carrier-specific statuses directly.
 
 ## Universal Status Model
 

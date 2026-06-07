@@ -132,6 +132,7 @@ use WallsShop\WDC\Shipments\Admin\ShipmentStatusesAdminPage;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
+use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncCron;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
@@ -212,8 +213,9 @@ final class Plugin {
 		$this->container->register( RussianPostShipmentAdapter::class, fn(): RussianPostShipmentAdapter => new RussianPostShipmentAdapter( $this->container->get( RussianPostOtpravkaApiClient::class ), $this->container->get( RussianPostCreateRequestBuilder::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( OrderShipmentDraftFactory::class, fn(): OrderShipmentDraftFactory => new OrderShipmentDraftFactory( $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ShipmentServiceSettings::class ), $this->container->get( RussianPostDomesticSettings::class ), $this->container->get( RussianPostOtpravkaApiSettings::class ), $this->container->get( RussianPostPickupPointRepository::class ) ) );
 		$this->container->register( ShipmentCreationService::class, fn(): ShipmentCreationService => new ShipmentCreationService( $this->container->get( OrderShipmentRepository::class ), array( $this->container->get( RussianPostShipmentAdapter::class ) ), $this->container->get( Logger::class ) ) );
-		$this->container->register( ShipmentStatusUpdateService::class, fn(): ShipmentStatusUpdateService => new ShipmentStatusUpdateService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( RussianPostTrackingApiClient::class ), $this->container->get( RussianPostTrackingStatusMapper::class ) ) );
-		$this->container->register( ShipmentStatusAutoSyncService::class, fn(): ShipmentStatusAutoSyncService => new ShipmentStatusAutoSyncService( $this->container->get( SettingsRepository::class ), $this->container->get( OrderShipmentRepository::class ), $this->container->get( ShipmentStatusUpdateService::class ) ) );
+		$this->container->register( ShipmentOrderStatusMappingService::class, fn(): ShipmentOrderStatusMappingService => new ShipmentOrderStatusMappingService( $this->container->get( SettingsRepository::class ) ) );
+		$this->container->register( ShipmentStatusUpdateService::class, fn(): ShipmentStatusUpdateService => new ShipmentStatusUpdateService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( RussianPostTrackingApiClient::class ), $this->container->get( RussianPostTrackingStatusMapper::class ), $this->container->get( ShipmentOrderStatusMappingService::class ) ) );
+		$this->container->register( ShipmentStatusAutoSyncService::class, fn(): ShipmentStatusAutoSyncService => new ShipmentStatusAutoSyncService( $this->container->get( SettingsRepository::class ), $this->container->get( OrderShipmentRepository::class ), $this->container->get( ShipmentStatusUpdateService::class ), $this->container->get( ShipmentOrderStatusMappingService::class ) ) );
 		$this->container->register( ShipmentStatusAutoSyncCron::class, fn(): ShipmentStatusAutoSyncCron => new ShipmentStatusAutoSyncCron( $this->container->get( ShipmentStatusAutoSyncService::class ) ) );
 		$this->container->register( ShipmentBacklogService::class, fn(): ShipmentBacklogService => new ShipmentBacklogService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( RussianPostOtpravkaApiClient::class ), $this->container->get( ShipmentStatusUpdateService::class ) ) );
 		$this->container->register( RussianPostPassportPointNormalizer::class, fn(): RussianPostPassportPointNormalizer => new RussianPostPassportPointNormalizer() );
@@ -480,7 +482,7 @@ final class Plugin {
 		);
 		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox() );
 		$this->container->register( OrderShipmentsMetabox::class, fn(): OrderShipmentsMetabox => new OrderShipmentsMetabox( $this->container->get( OrderShipmentRepository::class ), $this->container->get( OrderShipmentDraftFactory::class ), $this->container->get( ShipmentCreationService::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ShipmentStatusUpdateService::class ), $this->container->get( ShipmentBacklogService::class ), $this->container->get( RussianPostAddressNormalizer::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ), $this->environment->plugin_url(), $this->environment->version() ) );
-		$this->container->register( ShipmentStatusesAdminPage::class, fn(): ShipmentStatusesAdminPage => new ShipmentStatusesAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( ShipmentStatusAutoSyncService::class ) ) );
+		$this->container->register( ShipmentStatusesAdminPage::class, fn(): ShipmentStatusesAdminPage => new ShipmentStatusesAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( ShipmentStatusAutoSyncService::class ), $this->container->get( ShipmentOrderStatusMappingService::class ) ) );
 	}
 
 	private function register_hooks(): void {

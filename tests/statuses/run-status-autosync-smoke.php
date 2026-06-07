@@ -7,6 +7,7 @@ use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Admin\ShipmentStatusesAdminPage;
+use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncCron;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
@@ -42,6 +43,15 @@ if ( ! function_exists( 'esc_url' ) ) {
 if ( ! function_exists( 'checked' ) ) {
 	function checked( mixed $checked, mixed $current = true, bool $display = true ): string {
 		$result = $checked === $current ? 'checked="checked"' : '';
+		if ( $display ) {
+			echo $result;
+		}
+		return $result;
+	}
+}
+if ( ! function_exists( 'selected' ) ) {
+	function selected( mixed $selected, mixed $current = true, bool $display = true ): string {
+		$result = $selected === $current ? 'selected="selected"' : '';
 		if ( $display ) {
 			echo $result;
 		}
@@ -157,18 +167,22 @@ $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/
 $settings_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Infrastructure/Settings/SettingsRepository.php' );
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/ShipmentStatusesAdminPage.php' );
 status_autosync_assert( str_contains( $plugin_source, '$this->container->register( ShipmentStatusAutoSyncService::class' ) && str_contains( $plugin_source, '$this->container->get( SettingsRepository::class )' ) && str_contains( $plugin_source, '$this->container->get( OrderShipmentRepository::class )' ) && str_contains( $plugin_source, '$this->container->get( ShipmentStatusUpdateService::class )' ), 'Plugin container must explicitly register ShipmentStatusAutoSyncService dependencies.' );
+status_autosync_assert( str_contains( $plugin_source, 'new ShipmentStatusAutoSyncService( $this->container->get( SettingsRepository::class ), $this->container->get( OrderShipmentRepository::class ), $this->container->get( ShipmentStatusUpdateService::class ), $this->container->get( ShipmentOrderStatusMappingService::class ) )' ), 'ShipmentStatusAutoSyncService must receive ShipmentOrderStatusMappingService from the container.' );
 status_autosync_assert( str_contains( $plugin_source, '$this->container->register( ShipmentStatusAutoSyncCron::class' ) && str_contains( $plugin_source, '$this->container->get( ShipmentStatusAutoSyncService::class )' ), 'Plugin container must explicitly register ShipmentStatusAutoSyncCron dependency.' );
+status_autosync_assert( str_contains( $plugin_source, '$this->container->register( ShipmentOrderStatusMappingService::class' ) && str_contains( $plugin_source, '$this->container->get( ShipmentOrderStatusMappingService::class )' ), 'Plugin container must register and inject ShipmentOrderStatusMappingService.' );
 status_autosync_assert( ! str_contains( $admin_source, '$this->settings->replace(' ) && str_contains( $admin_source, '$this->settings->set(' ), 'Statuses settings page must use targeted settings saves instead of replace(all()+...).' );
 status_autosync_assert( ! str_contains( $settings_source, '$settings = $this->all();' ), 'SettingsRepository::set() must not persist merged defaults.' );
 
 $settings = new SettingsRepository();
 $repository = new OrderShipmentRepository();
+$order_status_mapping = new ShipmentOrderStatusMappingService( $settings );
 $status_updates = ( new ReflectionClass( ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor();
 $dispatches = array();
 $service = new ShipmentStatusAutoSyncService(
 	$settings,
 	$repository,
 	$status_updates,
+	$order_status_mapping,
 	function ( string $carrier_key, object $order, string $shipment_key ) use ( &$dispatches ): array {
 		$dispatches[] = array( $carrier_key, $order->get_id(), $shipment_key );
 		return array( 'success' => true, 'message' => 'ok' );
@@ -264,20 +278,27 @@ status_autosync_assert( array( 'wc-processing', 'wc-custom-shipping' ) === $GLOB
 status_autosync_assert( 4 === $stats['shipments_found'], 'Autosync must count discovered shipments.' );
 status_autosync_assert( 1 === $stats['shipments_updated'], 'Only the non-terminal supported shipment with tracking must update.' );
 status_autosync_assert( 1 === count( $dispatches ) && RussianPostDomesticSettings::CARRIER_KEY === $dispatches[0][0] && 102 === $dispatches[0][1], 'russian_post_domestic must dispatch through the status updater and unknown must be processed.' );
-status_autosync_assert( 1 === (int) $stats['skip_reasons']['terminal_status'], 'Terminal universal statuses must be skipped.' );
+status_autosync_assert( 1 === (int) $stats['skip_reasons']['terminal_status_no_tracking_update'], 'Terminal universal statuses must skip tracking updates.' );
+status_autosync_assert( 1 === (int) $stats['order_statuses_skipped'], 'Terminal universal statuses must still collect skipped order status mapping diagnostics when mapping is disabled.' );
 status_autosync_assert( 1 === (int) $stats['skip_reasons']['missing_tracking_number'], 'Shipments without tracking number or barcode must be skipped.' );
 status_autosync_assert( 1 === (int) $stats['skip_reasons']['unsupported_carrier'], 'Unsupported carriers must be skipped.' );
 
 $stored = $settings->get_array( ShipmentStatusAutoSyncService::DIAGNOSTICS_KEY );
 status_autosync_assert( 'cron' === (string) $stored['trigger_type'] && 1 === (int) $stored['shipments_updated'], 'Diagnostics stats must be stored after run.' );
 
-$page = new ShipmentStatusesAdminPage( $settings, $service );
+$page = new ShipmentStatusesAdminPage( $settings, $service, $order_status_mapping );
 ob_start();
 $page->add_menu_page();
 $page->render_page();
 $html = ob_get_clean();
 status_autosync_assert( ! empty( $GLOBALS['wdc_status_autosync_wc_statuses_called'] ), 'Settings page must load statuses through wc_get_order_statuses().' );
 status_autosync_assert( str_contains( $html, 'Статусы отправлений' ) && str_contains( $html, 'wc-custom-shipping' ), 'Settings page must render the Statuses screen and custom WooCommerce statuses.' );
+
+$_GET = array( 'tab' => 'mapping' );
+ob_start();
+$page->render_page();
+$mapping_html = ob_get_clean();
+status_autosync_assert( str_contains( $mapping_html, ShipmentOrderStatusMappingService::MAPPING_KEY ) && str_contains( $mapping_html, DeliveryStatus::DELIVERED ) && str_contains( $mapping_html, 'wc-custom-shipping' ), 'Mapping page must render universal statuses and WooCommerce statuses.' );
 
 $_SERVER['REQUEST_METHOD'] = 'POST';
 $_POST = array(
