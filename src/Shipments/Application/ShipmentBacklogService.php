@@ -13,7 +13,8 @@ final class ShipmentBacklogService {
 	public function __construct(
 		private OrderShipmentRepository $repository,
 		private RussianPostOtpravkaApiClient $otpravka_client,
-		private ShipmentStatusUpdateService $status_updates
+		private ShipmentStatusUpdateService $status_updates,
+		private ?RussianPostShipmentActualCostExtractor $actual_cost_extractor = null
 	) {
 	}
 
@@ -118,7 +119,9 @@ final class ShipmentBacklogService {
 			'created_at' => $now,
 			'updated_at' => $now,
 		);
-		$actual_cost = $this->actual_cost_fields( $selected, $source_lookup );
+		$actual_cost = 'backlog_search' === $source_lookup
+			? $this->actual_cost_extractor()->fields_from_row( $selected, 'backlog_search' )
+			: array();
 		if ( array() !== $actual_cost ) {
 			$shipment = array_merge( $shipment, $actual_cost );
 		}
@@ -204,7 +207,7 @@ final class ShipmentBacklogService {
 		}
 
 		$backlog_orders = is_array( $backlog_search['orders'] ?? null ) ? $backlog_search['orders'] : array();
-		$backlog_selected = $this->select_search_result( $backlog_orders, $barcode );
+		$backlog_selected = $this->actual_cost_extractor()->select_search_result( $backlog_orders, $barcode );
 		if ( null !== $backlog_selected ) {
 			return array(
 				'success' => true,
@@ -232,7 +235,7 @@ final class ShipmentBacklogService {
 		}
 
 		$shipment_orders = is_array( $shipment_search['orders'] ?? null ) ? $shipment_search['orders'] : array();
-		$shipment_selected = $this->select_search_result( $shipment_orders, $barcode );
+		$shipment_selected = $this->actual_cost_extractor()->select_search_result( $shipment_orders, $barcode );
 		if ( null !== $shipment_selected ) {
 			return array(
 				'success' => true,
@@ -246,71 +249,6 @@ final class ShipmentBacklogService {
 			'success' => false,
 			'message' => array() === $shipment_orders ? 'Отправление с таким номером отслеживания не найдено в Почте России.' : 'Найдено несколько отправлений, уточните номер отслеживания.',
 			'raw' => $shipment_search,
-		);
-	}
-
-	/**
-	 * @param array<int,mixed> $orders
-	 * @return array<string,mixed>|null
-	 */
-	private function select_search_result( array $orders, string $barcode ): ?array {
-		$rows = array_values( array_filter( $orders, 'is_array' ) );
-		if ( array() === $rows ) {
-			return null;
-		}
-		$matches = array_values(
-			array_filter(
-				$rows,
-				fn ( array $row ): bool => $this->row_matches_barcode( $row, $barcode )
-			)
-		);
-		if ( array() !== $matches ) {
-			return $matches[0];
-		}
-		if ( 1 === count( $rows ) ) {
-			return $rows[0];
-		}
-
-		return null;
-	}
-
-	/**
-	 * @param array<string,mixed> $row
-	 */
-	private function row_matches_barcode( array $row, string $barcode ): bool {
-		foreach ( array( 'barcode', 'mail-id', 'mail_id', 'tracking-number', 'tracking_number' ) as $key ) {
-			if ( $barcode === $this->normalize_barcode( (string) ( $row[ $key ] ?? '' ) ) ) {
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	/**
-	 * @param array<string,mixed> $row
-	 * @return array<string,mixed>
-	 */
-	private function actual_cost_fields( array $row, string $source_lookup ): array {
-		if ( 'backlog_search' !== $source_lookup ) {
-			return array();
-		}
-		if ( ! array_key_exists( 'total-rate-wo-vat', $row ) || ! array_key_exists( 'total-vat', $row ) ) {
-			return array();
-		}
-		if ( ! is_numeric( $row['total-rate-wo-vat'] ) || ! is_numeric( $row['total-vat'] ) ) {
-			return array();
-		}
-
-		$cost_kopecks = max( 0, (int) $row['total-rate-wo-vat'] ) + max( 0, (int) $row['total-vat'] );
-		if ( $cost_kopecks <= 0 ) {
-			return array();
-		}
-
-		return array(
-			'russian_post_actual_cost_kopecks' => $cost_kopecks,
-			'russian_post_actual_cost_rub' => round( $cost_kopecks / 100, 2 ),
-			'russian_post_actual_cost_source' => 'backlog_search',
 		);
 	}
 
@@ -339,6 +277,14 @@ final class ShipmentBacklogService {
 		if ( method_exists( $order, 'add_order_note' ) ) {
 			$order->add_order_note( $message );
 		}
+	}
+
+	private function actual_cost_extractor(): RussianPostShipmentActualCostExtractor {
+		if ( ! $this->actual_cost_extractor instanceof RussianPostShipmentActualCostExtractor ) {
+			$this->actual_cost_extractor = new RussianPostShipmentActualCostExtractor();
+		}
+
+		return $this->actual_cost_extractor;
 	}
 
 	private function order_id( object $order ): int {

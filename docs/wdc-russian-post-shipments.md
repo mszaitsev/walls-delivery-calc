@@ -1,6 +1,8 @@
 # WDC Russian Post Shipments
 
-Version: 0.39.4.
+Version: 0.39.5.
+
+Version 0.39.5 also looks up the actual Russian Post price after normal shipment creation from the `Отправления` modal. Once create returns barcode/tracking number, WDC calls `GET /1.0/backlog/search?query={barcode}` and uses the shared actual-cost extractor. Successful after-create lookup stores `russian_post_actual_cost_source=backlog_search_after_create`; lookup errors or missing totals leave the shipment created without price fields and do not create order notes or admin warnings.
 
 Version 0.39.4 shows the actual Russian Post shipment price in the WooCommerce order metabox `Отправления` when the value is available from manual tracking attach. The source is `GET /1.0/backlog/search?query={barcode}`: WDC stores `total-rate-wo-vat + total-vat` as `russian_post_actual_cost_kopecks`, `russian_post_actual_cost_rub`, and `russian_post_actual_cost_source=backlog_search`, then renders `Цена` after `Отслеживание`. The value is compared with the checkout `Базовая стоимость API` from `_wdc_delivery_calculation_data`; up to 3% over base is normal/green, more than 3% is warning/red, and missing base cost is neutral.
 
@@ -14,6 +16,8 @@ Russian Post shipment creation stores two identifiers:
 
 - barcode / ШПИ: primary tracking number, shown to managers and used by Tracking API;
 - `backlog_order_id`: hidden technical Otpravka backlog id, parsed from create-response `result-id` or manual backlog search `id`.
+
+After successful creation, WDC safely performs `GET /1.0/backlog/search?query={barcode}` to pull actual cost totals when Russian Post already exposes them. If `total-rate-wo-vat` and `total-vat` are numeric, their sum is saved as actual cost with source `backlog_search_after_create`; if lookup fails or totals are absent, creation remains successful and the price row is omitted.
 
 Documents, labels, batches and F103 are not generated or downloaded by WDC. Managers create the batch and download documents manually in the Russian Post account.
 

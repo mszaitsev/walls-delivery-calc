@@ -1,5 +1,7 @@
 # Project Status
 
+0.39.5 note: the same Russian Post actual-cost lookup now runs after ordinary automatic shipment creation from the order metabox. After a successful create response with barcode/tracking number, WDC safely calls `GET /1.0/backlog/search?query={barcode}`, extracts `total-rate-wo-vat + total-vat` through the shared actual-cost extractor, and stores source `backlog_search_after_create`. Lookup errors or missing totals do not fail shipment creation, do not create order notes, and do not show warnings.
+
 0.39.4 note: the WooCommerce order shipment metabox now shows the real Russian Post shipment price when manual tracking attach finds the parcel through `GET /1.0/backlog/search?query={barcode}`. WDC stores `total-rate-wo-vat + total-vat` from that response in `_wdc_shipments`, formats it as `Цена: {amount} руб.`, and compares it with the checkout `Базовая стоимость API` from `_wdc_delivery_calculation_data`; up to 3% over base is ok/green, more than 3% is warning/red, and missing base cost is neutral.
 
 0.39.3 note: the Russian Post courier calculation postcode fill tool on `WDC -> Локации` now runs each backend step as sequential rate-limited probes at about 6 requests/sec. Steps are capped at 18 probes or 3 seconds, the browser waits only a short delay before the next single AJAX step, and job JSON includes target/actual RPS and step timing diagnostics. No parallel AJAX requests or concurrent backend jobs are used.
@@ -20,11 +22,11 @@
 
 ## Общий статус
 
-- Версия / baseline проекта: `0.39.4`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.39.5`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
 - Последнее обновление статуса: 2026-06-08.
 - Общий процент готовности: примерно 66%.
-- Текущий этап 0.39.4: в метабоксе `Отправления` показывается фактическая стоимость Почты России из `backlog/search` и сравнивается с checkout-строкой `Базовая стоимость API` с допустимым порогом +3%.
+- Текущий этап 0.39.5: фактическая стоимость Почты России подтягивается из `backlog/search` как при ручном внесении трекинга, так и после обычного создания отправления; ошибка lookup не ломает создание.
 
 ## Краткое резюме
 
@@ -231,6 +233,7 @@
 - Индексы места приема для регистрации отправлений настраиваются на `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials`, default `630005`, не смешиваются с расчетными `from_postcodes` и выбираются в модалке как `postoffice-code`.
 - `default_from_postcode` редактируется рядом с индексами места приема, но остается прежним service setting и также используется расчетом тарифа как fallback origin index.
 - После AJAX create модалка закрывается, показывает toast с barcode, автоматически запускает первое обновление статуса, а возможная ошибка автообновления статуса показывается предупреждением и не отменяет успешное создание. `backlog_order_id` не попадает в toast или status payload; он хранится hidden-технически для отмены/API.
+- После успешного create WDC дополнительно пробует найти созданную посылку через `backlog/search` по barcode и сохранить фактическую стоимость с source `backlog_search_after_create`; ошибка этого lookup не влияет на успешное создание и не показывается как warning.
 - Кнопка `Скачать документы` удалена из метабокса: печатные формы, партии и Ф103 не реализуются в WDC на этом этапе и выполняются вручную в личном кабинете Почты России.
 - Отмена отправления доступна только при наличии barcode + `backlog_order_id` и последней операции Почты России `28 / Присвоение идентификатора`; успешная отмена очищает shipment state и снова разрешает подготовку/ручной ввод ШПИ.
 - Ручное внесение ШПИ нормализует номер, ищет backlog order id через `GET /1.0/backlog/search?query={barcode}`, сохраняет state с `source=manual_tracking_attach` и запускает первый status refresh.

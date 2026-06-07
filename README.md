@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.39.4.
+Current plugin version: 0.39.5.
+
+Version 0.39.5 also pulls the real Russian Post shipment cost after ordinary shipment creation from the `Отправления` modal. After a successful create response with barcode/tracking number, WDC performs a safe `GET /1.0/backlog/search?query={barcode}` lookup, uses the same `total-rate-wo-vat + total-vat` extraction as manual tracking attach, and stores the source as `backlog_search_after_create`. If the price lookup fails or returns no totals, shipment creation remains successful and no warning/note is shown.
 
 Version 0.39.4 shows the real registered Russian Post shipment cost in the WooCommerce order metabox `Отправления`. Manual tracking attach reads `total-rate-wo-vat + total-vat` from `GET /1.0/backlog/search?query={barcode}`, stores the value in `_wdc_shipments` as Russian Post actual cost fields, and renders `Цена: {amount} руб.` after the tracking number. The price is compared with `_wdc_delivery_calculation_data.api.api_base_price_rub` / the order metabox `Калькулятор доставок` row `Базовая стоимость API`: up to 3% over base is green/ok, more than 3% is red/warning, and missing base cost is neutral.
 
