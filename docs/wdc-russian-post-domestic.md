@@ -1,6 +1,8 @@
 # Russian Post Domestic Carrier
 
-Version: 0.38.0.
+Version: 0.39.3.
+
+Version 0.39.3 speeds up the admin tool that fills `russianpost_courier_calc_postal_code` for courier Russian Post tariff calculation. The `WDC -> Локации` button `Подобрать индексы для курьерской Почты России` still probes candidate postcodes sequentially and uses the same candidate order, but each backend step now targets about 6 Russian Post requests/sec, stops after 18 probes or 3 seconds, and exposes step timing/RPS diagnostics in JSON. The browser keeps one active AJAX step at a time and waits only a short delay before the next step.
 
 ## 1. Overview
 
@@ -12,7 +14,7 @@ Russian Post domestic is the current RU-only carrier/service runtime for checkou
 - Delivery types: `pickup` and `courier`
 - Checkout group ids: `russian_post_domestic:pickup`, `russian_post_domestic:courier`
 - Concrete rate ids: `russian_post_domestic:pickup:{object_code}`, `russian_post_domestic:courier:{object_code}`
-- Current documented version: `0.38.0`
+- Current documented version: `0.39.3`
 
 Cash on delivery / mandatory payment is not used. Insurance is represented by declared value; in Russian Post Tariff API terms this means tariff variants that require `sumoc`.
 

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.39.2.
+Current plugin version: 0.39.3.
+
+Version 0.39.3 speeds up the `WDC -> Locations` action `Подобрать индексы для курьерской Почты России`. A single backend AJAX step now performs sequential Russian Post probes at a target of about 6 requests/sec, up to 18 probes or 3 seconds per step, with no parallel AJAX requests and no concurrent job writes. The job JSON exposes `target_rps`, `step_duration_ms`, `step_probes`, `last_probe_duration_ms`, `actual_step_rps`, `max_probes_per_step`, and `max_step_seconds`.
 
 Version 0.39.2 removes the order note that used to be created on every successful shipment status refresh. WDC now adds an order note only when automatic WooCommerce order status mapping actually changes the order status. That mapping note is compact: `Посылка {barcode}`, `Статус: {universal status}.`, `Статус заказа изменён:`, then `{from_status} → {target_status}`.
 

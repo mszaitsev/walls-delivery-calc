@@ -1,5 +1,7 @@
 # Project Status
 
+0.39.3 note: the Russian Post courier calculation postcode fill tool on `WDC -> Локации` now runs each backend step as sequential rate-limited probes at about 6 requests/sec. Steps are capped at 18 probes or 3 seconds, the browser waits only a short delay before the next single AJAX step, and job JSON includes target/actual RPS and step timing diagnostics. No parallel AJAX requests or concurrent backend jobs are used.
+
 0.39.2 note: successful shipment status refreshes no longer create WooCommerce order notes. WDC creates an order note only when automatic order status mapping changes the WooCommerce order status, using the compact format `Посылка {barcode}`, `Статус: {universal status}.`, `Статус заказа изменён:`, `{from_status} → {target_status}`.
 
 0.39.1 note: autosync no longer drops terminal shipments before order status mapping. Terminal universal statuses still skip carrier tracking refresh, but `ShipmentStatusAutoSyncService` now applies `ShipmentOrderStatusMappingService` to the already saved terminal shipment state, records `terminal_status_no_tracking_update`, and includes the mapping result in `order_statuses_changed`, `order_statuses_skipped`, or `order_status_change_errors`.
@@ -16,11 +18,11 @@
 
 ## Общий статус
 
-- Версия / baseline проекта: `0.39.2`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.39.3`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
 - Последнее обновление статуса: 2026-06-07.
 - Общий процент готовности: примерно 66%.
-- Текущий этап 0.39.2: обычные обновления shipment status не создают order note; note создается только при автоматической смене WooCommerce order status и имеет компактный формат.
+- Текущий этап 0.39.3: подбор индексов курьерской Почты России выполняется последовательными probes с target speed около 6/sec, лимитами 18 probes / 3 sec на backend step и без параллельных AJAX-запросов.
 
 ## Краткое резюме
 
@@ -64,7 +66,7 @@
 
 ### Core Platform
 
-- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.39.2`.
+- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.39.3`.
 - `src/Core/bootstrap.php` wires the autoloader and plugin runtime.
 - `src/Core/Plugin.php` registers services and hooks through a DI container.
 - `src/Infrastructure/Settings`, `src/Infrastructure/Logging`, `src/Infrastructure/Security`, `src/Infrastructure/Queue`, and `src/Infrastructure/Database` provide settings, logging, encryption, background scheduling, and migrations.
