@@ -264,6 +264,24 @@
       canCancel: !!status.can_cancel
     });
     setTrackingDisplay(box, status.barcode || '');
+    renderShipmentPrice(box, status);
+  }
+
+  function renderShipmentPrice(box, status) {
+    if (!box) return;
+    const row = box.querySelector('[data-wdc-shipment-price-row]');
+    const label = box.querySelector('[data-wdc-shipment-price-label]');
+    if (!row || !label) return;
+    const price = String(status && status.actual_cost_label || '').trim();
+    row.hidden = !price;
+    label.textContent = price;
+    row.classList.remove('wdc-shipment-price-ok', 'wdc-shipment-price-warning', 'wdc-shipment-price-neutral');
+    const compare = String(status && status.actual_cost_compare_status || 'neutral');
+    const className = compare === 'ok'
+      ? 'wdc-shipment-price-ok'
+      : (compare === 'warning' ? 'wdc-shipment-price-warning' : 'wdc-shipment-price-neutral');
+    row.classList.add(className);
+    row.title = String(status && status.actual_cost_compare_message || '');
   }
 
   function renderShipmentTechnicalInfo(box, data) {
@@ -304,6 +322,7 @@
     const removeButton = box.querySelector('[data-wdc-remove-shipment-from-order]');
     if (openButton) {
       setVisible(openButton, !hasTracking);
+      openButton.hidden = hasTracking;
       openButton.disabled = hasTracking;
     }
     if (updateButton) {
@@ -313,6 +332,7 @@
     }
     if (manualButton) {
       setVisible(manualButton, !hasTracking);
+      manualButton.hidden = hasTracking;
       manualButton.disabled = hasTracking;
     }
     if (cancelButton) {
@@ -321,6 +341,7 @@
     }
     if (removeButton) {
       setVisible(removeButton, hasTracking && !canCancel);
+      removeButton.hidden = !hasTracking || canCancel;
       removeButton.disabled = !hasTracking || canCancel;
     }
   }
@@ -340,6 +361,7 @@
       if (element) element.textContent = fields[selector];
     });
     setTrackingDisplay(box, '');
+    renderShipmentPrice(box, {});
     const updatedRow = box.querySelector('[data-wdc-updated-row]');
     if (updatedRow) updatedRow.hidden = true;
     updateShipmentButtons(box, { hasTracking: false, canCancel: false });

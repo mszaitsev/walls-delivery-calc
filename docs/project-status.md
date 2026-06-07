@@ -1,5 +1,13 @@
 # Project Status
 
+0.39.5 note: the same Russian Post actual-cost lookup now runs after ordinary automatic shipment creation from the order metabox. After a successful create response with barcode/tracking number, WDC safely calls `GET /1.0/backlog/search?query={barcode}`, extracts `total-rate-wo-vat + total-vat` through the shared actual-cost extractor, and stores source `backlog_search_after_create`. Lookup errors or missing totals do not fail shipment creation, do not create order notes, and do not show warnings.
+
+0.39.4 note: the WooCommerce order shipment metabox now shows the real Russian Post shipment price when manual tracking attach finds the parcel through `GET /1.0/backlog/search?query={barcode}`. WDC stores `total-rate-wo-vat + total-vat` from that response in `_wdc_shipments`, formats it as `Цена: {amount} руб.`, and compares it with the checkout `Базовая стоимость API` from `_wdc_delivery_calculation_data`; up to 3% over base is ok/green, more than 3% is warning/red, and missing base cost is neutral.
+
+0.39.3 note: the Russian Post courier calculation postcode fill tool on `WDC -> Локации` now runs each backend step as sequential rate-limited probes at about 6 requests/sec. Steps are capped at 18 probes or 3 seconds, the browser waits only a short delay before the next single AJAX step, and job JSON includes target/actual RPS and step timing diagnostics. No parallel AJAX requests or concurrent backend jobs are used.
+
+0.39.2 note: successful shipment status refreshes no longer create WooCommerce order notes. WDC creates an order note only when automatic order status mapping changes the WooCommerce order status, using the compact format `Посылка {barcode}`, `Статус: {universal status}.`, `Статус заказа изменён:`, `{from_status} → {target_status}`.
+
 0.39.1 note: autosync no longer drops terminal shipments before order status mapping. Terminal universal statuses still skip carrier tracking refresh, but `ShipmentStatusAutoSyncService` now applies `ShipmentOrderStatusMappingService` to the already saved terminal shipment state, records `terminal_status_no_tracking_update`, and includes the mapping result in `order_statuses_changed`, `order_statuses_skipped`, or `order_status_change_errors`.
 
 0.39.0 note: universal shipment status to WooCommerce order status mapping is implemented. The `WDC -> Статусы -> Соответствие статусов` tab now stores a disabled-by-default global enable flag and `shipment_status_order_status_mapping`, reads available WooCommerce statuses through `wc_get_order_statuses()` including custom statuses, and applies mapping through `ShipmentOrderStatusMappingService` immediately after shipment status is saved by `ShipmentStatusUpdateService`. Autosync diagnostics include order status changed/skipped/error counters.
@@ -14,11 +22,11 @@
 
 ## Общий статус
 
-- Версия / baseline проекта: `0.39.1`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.39.5`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
-- Последнее обновление статуса: 2026-06-07.
+- Последнее обновление статуса: 2026-06-08.
 - Общий процент готовности: примерно 66%.
-- Текущий этап 0.39.1: terminal universal shipment statuses не опрашиваются повторно у ТК, но autosync применяет общий mapping к уже сохраненному terminal status, если mapping включен.
+- Текущий этап 0.39.5: фактическая стоимость Почты России подтягивается из `backlog/search` как при ручном внесении трекинга, так и после обычного создания отправления; ошибка lookup не ломает создание.
 
 ## Краткое резюме
 
@@ -62,7 +70,7 @@
 
 ### Core Platform
 
-- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.39.1`.
+- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.39.3`.
 - `src/Core/bootstrap.php` wires the autoloader and plugin runtime.
 - `src/Core/Plugin.php` registers services and hooks through a DI container.
 - `src/Infrastructure/Settings`, `src/Infrastructure/Logging`, `src/Infrastructure/Security`, `src/Infrastructure/Queue`, and `src/Infrastructure/Database` provide settings, logging, encryption, background scheduling, and migrations.
@@ -225,9 +233,11 @@
 - Индексы места приема для регистрации отправлений настраиваются на `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials`, default `630005`, не смешиваются с расчетными `from_postcodes` и выбираются в модалке как `postoffice-code`.
 - `default_from_postcode` редактируется рядом с индексами места приема, но остается прежним service setting и также используется расчетом тарифа как fallback origin index.
 - После AJAX create модалка закрывается, показывает toast с barcode, автоматически запускает первое обновление статуса, а возможная ошибка автообновления статуса показывается предупреждением и не отменяет успешное создание. `backlog_order_id` не попадает в toast или status payload; он хранится hidden-технически для отмены/API.
+- После успешного create WDC дополнительно пробует найти созданную посылку через `backlog/search` по barcode и сохранить фактическую стоимость с source `backlog_search_after_create`; ошибка этого lookup не влияет на успешное создание и не показывается как warning.
 - Кнопка `Скачать документы` удалена из метабокса: печатные формы, партии и Ф103 не реализуются в WDC на этом этапе и выполняются вручную в личном кабинете Почты России.
 - Отмена отправления доступна только при наличии barcode + `backlog_order_id` и последней операции Почты России `28 / Присвоение идентификатора`; успешная отмена очищает shipment state и снова разрешает подготовку/ручной ввод ШПИ.
 - Ручное внесение ШПИ нормализует номер, ищет backlog order id через `GET /1.0/backlog/search?query={barcode}`, сохраняет state с `source=manual_tracking_attach` и запускает первый status refresh.
+- Если `backlog/search` возвращает `total-rate-wo-vat` и `total-vat`, WDC сохраняет их сумму в копейках как фактическую стоимость отправления, показывает строку `Цена` после `Отслеживание` и подсвечивает ее зеленым/красным/нейтральным цветом относительно checkout `Базовая стоимость API`; превышение до 3% включительно считается нормальным.
 
 ## Несоответствия документации и кода
 

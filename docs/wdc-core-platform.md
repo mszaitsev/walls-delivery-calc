@@ -1,5 +1,7 @@
 # WDC Core Platform
 
+Version `0.39.3` keeps long-running admin data tools single-job and single-AJAX-step oriented. The Russian Post courier postcode fill action on `WDC -> Локации` performs sequential backend probes with an internal target of about 6 requests/sec, capped at 18 probes or 3 seconds per step, and reports target/actual RPS diagnostics in the job JSON. It does not use parallel browser requests or concurrent writes to the job option.
+
 Version `0.20.0` makes the platform core the only runtime.
 
 ## Architecture

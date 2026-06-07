@@ -19,6 +19,8 @@ Key fields:
 
 Repository writes that can change the country set mark the index stale: adding locations, bulk upserts/imports, deleting/clearing locations, and changing an existing row's `country_code`. Postal-code updates, display-name rebuilds, type display rule changes, alias regeneration, DaData postcode enrichment, and other normalization tasks do not mark the country index stale because they cannot add or remove represented countries.
 
+Version `0.39.3` speeds up the `Подобрать индексы для курьерской Почты России` maintenance action on `WDC -> Локации`. It still uses the existing candidate sources (`postal_code`, pickup postcodes by `location_id`, and pickup postcodes by `fias_location_guid`) and performs probes sequentially, but each backend step is paced at about 6 Russian Post requests/sec with hard limits of 18 probes and 3 seconds. The browser starts only one AJAX step at a time; job JSON includes target/actual RPS and step timing diagnostics.
+
 ## FIAS/GAR Abstraction
 
 This stage does not download FIAS archives, call GAR APIs, or run a full sync pipeline. The foundation only introduces stable storage and service boundaries.

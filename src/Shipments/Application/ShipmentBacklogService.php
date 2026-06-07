@@ -13,7 +13,8 @@ final class ShipmentBacklogService {
 	public function __construct(
 		private OrderShipmentRepository $repository,
 		private RussianPostOtpravkaApiClient $otpravka_client,
-		private ShipmentStatusUpdateService $status_updates
+		private ShipmentStatusUpdateService $status_updates,
+		private ?RussianPostShipmentActualCostExtractor $actual_cost_extractor = null
 	) {
 	}
 
@@ -118,6 +119,12 @@ final class ShipmentBacklogService {
 			'created_at' => $now,
 			'updated_at' => $now,
 		);
+		$actual_cost = 'backlog_search' === $source_lookup
+			? $this->actual_cost_extractor()->fields_from_row( $selected, 'backlog_search' )
+			: array();
+		if ( array() !== $actual_cost ) {
+			$shipment = array_merge( $shipment, $actual_cost );
+		}
 		if ( $backlog_order_id > 0 ) {
 			$shipment['backlog_order_id'] = $backlog_order_id;
 		}
@@ -133,7 +140,7 @@ final class ShipmentBacklogService {
 				'warning' => 'Номер отслеживания сохранен, но статус пока не обновлен: ' . (string) ( $status_update['message'] ?? 'не удалось получить статус.' ),
 				'tracking_number' => $barcode,
 				'backlog_order_id' => $backlog_order_id > 0 ? (string) $backlog_order_id : '',
-				'status' => $this->status_updates->status_payload( $this->repository->find_by_carrier( $order, $shipment_key ) ),
+				'status' => $this->status_updates->status_payload( $this->repository->find_by_carrier( $order, $shipment_key ), $order ),
 			);
 		}
 
@@ -142,7 +149,7 @@ final class ShipmentBacklogService {
 			'message' => 'Номер отслеживания сохранен, статус обновлен.',
 			'tracking_number' => $barcode,
 			'backlog_order_id' => $backlog_order_id > 0 ? (string) $backlog_order_id : '',
-			'status' => is_array( $status_update['status'] ?? null ) ? $status_update['status'] : $this->status_updates->status_payload( $this->repository->find_by_carrier( $order, $shipment_key ) ),
+			'status' => is_array( $status_update['status'] ?? null ) ? $status_update['status'] : $this->status_updates->status_payload( $this->repository->find_by_carrier( $order, $shipment_key ), $order ),
 		);
 	}
 
@@ -200,7 +207,7 @@ final class ShipmentBacklogService {
 		}
 
 		$backlog_orders = is_array( $backlog_search['orders'] ?? null ) ? $backlog_search['orders'] : array();
-		$backlog_selected = $this->select_search_result( $backlog_orders, $barcode );
+		$backlog_selected = $this->actual_cost_extractor()->select_search_result( $backlog_orders, $barcode );
 		if ( null !== $backlog_selected ) {
 			return array(
 				'success' => true,
@@ -228,7 +235,7 @@ final class ShipmentBacklogService {
 		}
 
 		$shipment_orders = is_array( $shipment_search['orders'] ?? null ) ? $shipment_search['orders'] : array();
-		$shipment_selected = $this->select_search_result( $shipment_orders, $barcode );
+		$shipment_selected = $this->actual_cost_extractor()->select_search_result( $shipment_orders, $barcode );
 		if ( null !== $shipment_selected ) {
 			return array(
 				'success' => true,
@@ -243,44 +250,6 @@ final class ShipmentBacklogService {
 			'message' => array() === $shipment_orders ? 'Отправление с таким номером отслеживания не найдено в Почте России.' : 'Найдено несколько отправлений, уточните номер отслеживания.',
 			'raw' => $shipment_search,
 		);
-	}
-
-	/**
-	 * @param array<int,mixed> $orders
-	 * @return array<string,mixed>|null
-	 */
-	private function select_search_result( array $orders, string $barcode ): ?array {
-		$rows = array_values( array_filter( $orders, 'is_array' ) );
-		if ( array() === $rows ) {
-			return null;
-		}
-		$matches = array_values(
-			array_filter(
-				$rows,
-				fn ( array $row ): bool => $this->row_matches_barcode( $row, $barcode )
-			)
-		);
-		if ( array() !== $matches ) {
-			return $matches[0];
-		}
-		if ( 1 === count( $rows ) ) {
-			return $rows[0];
-		}
-
-		return null;
-	}
-
-	/**
-	 * @param array<string,mixed> $row
-	 */
-	private function row_matches_barcode( array $row, string $barcode ): bool {
-		foreach ( array( 'barcode', 'mail-id', 'mail_id', 'tracking-number', 'tracking_number' ) as $key ) {
-			if ( $barcode === $this->normalize_barcode( (string) ( $row[ $key ] ?? '' ) ) ) {
-				return true;
-			}
-		}
-
-		return false;
 	}
 
 	/**
@@ -308,6 +277,14 @@ final class ShipmentBacklogService {
 		if ( method_exists( $order, 'add_order_note' ) ) {
 			$order->add_order_note( $message );
 		}
+	}
+
+	private function actual_cost_extractor(): RussianPostShipmentActualCostExtractor {
+		if ( ! $this->actual_cost_extractor instanceof RussianPostShipmentActualCostExtractor ) {
+			$this->actual_cost_extractor = new RussianPostShipmentActualCostExtractor();
+		}
+
+		return $this->actual_cost_extractor;
 	}
 
 	private function order_id( object $order ): int {

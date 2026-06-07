@@ -19,7 +19,8 @@ final class ShipmentCreationService {
 	public function __construct(
 		private OrderShipmentRepository $repository,
 		private array $adapters,
-		private ?Logger $logger = null
+		private ?Logger $logger = null,
+		private ?RussianPostShipmentActualCostLookupService $actual_cost_lookup = null
 	) {
 	}
 
@@ -110,6 +111,10 @@ final class ShipmentCreationService {
 		if ( '' !== $backlog_order_id ) {
 			$shipment['backlog_order_id'] = ctype_digit( $backlog_order_id ) ? (int) $backlog_order_id : $backlog_order_id;
 		}
+		$actual_cost = $this->actual_cost_after_create( $request->carrier_key, $result->tracking_number );
+		if ( array() !== $actual_cost ) {
+			$shipment = array_merge( $shipment, $actual_cost );
+		}
 		$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
 		$this->add_order_note(
 			$order,
@@ -158,6 +163,32 @@ final class ShipmentCreationService {
 		if ( method_exists( $order, 'add_order_note' ) ) {
 			$order->add_order_note( $message );
 		}
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function actual_cost_after_create( string $carrier_key, string $barcode ): array {
+		if ( RussianPostDomesticSettings::CARRIER_KEY !== $carrier_key || '' === trim( $barcode ) ) {
+			return array();
+		}
+		if ( ! $this->actual_cost_lookup instanceof RussianPostShipmentActualCostLookupService ) {
+			return array();
+		}
+
+		try {
+			$result = $this->actual_cost_lookup->lookup_after_create( $barcode );
+		} catch ( \Throwable ) {
+			return array( 'russian_post_actual_cost_lookup_error' => 'exception' );
+		}
+
+		$fields = is_array( $result['fields'] ?? null ) ? $result['fields'] : array();
+		if ( array() !== $fields ) {
+			return $fields;
+		}
+		$error_code = trim( (string) ( $result['error_code'] ?? '' ) );
+
+		return '' !== $error_code ? array( 'russian_post_actual_cost_lookup_error' => $error_code ) : array();
 	}
 
 	private function now(): string {

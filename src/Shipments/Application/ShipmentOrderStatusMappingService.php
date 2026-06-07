@@ -180,7 +180,7 @@ final class ShipmentOrderStatusMappingService {
 		}
 
 		$note = sprintf(
-			"WDC: статус заказа автоматически изменен по статусу отправления.\n\nОтправление:\n%s\n\nСтатус отправления:\n%s\n\nСтатус заказа:\n%s → %s",
+			"Посылка %s\nСтатус: %s.\nСтатус заказа изменён:\n%s → %s",
 			'' !== $tracking_number ? $tracking_number : '-',
 			$shipment_status,
 			$this->status_without_prefix( $from_status ),

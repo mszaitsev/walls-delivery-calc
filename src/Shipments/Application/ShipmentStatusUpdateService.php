@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Application;
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Carriers\RussianPost\Tracking\RussianPostTrackingApiClient;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
@@ -67,21 +68,12 @@ final class ShipmentStatusUpdateService {
 		$order_status_mapping = $this->order_status_mapping instanceof ShipmentOrderStatusMappingService
 			? $this->order_status_mapping->apply( $order, $updated, (string) ( $status_fields['universal_status_code'] ?? '' ) )
 			: array( 'status' => 'skipped', 'changed' => false, 'reason' => 'service_unavailable' );
-		$this->add_order_note(
-			$order,
-			sprintf(
-				'Статус отправления Почты России обновлен. Barcode: %s. Статус: %s. Почта России: %s.',
-				$barcode,
-				(string) $status_fields['universal_status_label'],
-				(string) $status_fields['carrier_status_title']
-			)
-		);
 
 		return array(
 			'success' => true,
 			'message' => 'Статус отправления обновлен.',
 			'shipment' => $updated,
-			'status' => $this->status_payload( $updated ),
+			'status' => $this->status_payload( $updated, $order ),
 			'order_status_mapping' => $order_status_mapping,
 			'tracking_response' => array(
 				'http_code' => (int) ( $response['http_code'] ?? 0 ),
@@ -94,24 +86,27 @@ final class ShipmentStatusUpdateService {
 	 * @param array<string,mixed> $shipment
 	 * @return array<string,mixed>
 	 */
-	public function status_payload( array $shipment ): array {
-		return array(
-			'barcode' => (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ),
-			'universal_status_code' => (string) ( $shipment['universal_status_code'] ?? '' ),
-			'universal_status_label' => (string) ( $shipment['universal_status_label'] ?? '' ),
-			'shipment_status_label' => $this->shipment_status_label( $shipment ),
-			'carrier_status_title' => (string) ( $shipment['carrier_status_title'] ?? '' ),
-			'carrier_status_description' => (string) ( $shipment['carrier_status_description'] ?? '' ),
-			'carrier_operation_type_id' => (string) ( $shipment['carrier_operation_type_id'] ?? '' ),
-			'carrier_operation_type_name' => (string) ( $shipment['carrier_operation_type_name'] ?? '' ),
-			'carrier_operation_attr_id' => (string) ( $shipment['carrier_operation_attr_id'] ?? '' ),
-			'carrier_operation_attr_name' => (string) ( $shipment['carrier_operation_attr_name'] ?? '' ),
-			'carrier_operation_date' => (string) ( $shipment['carrier_operation_date'] ?? '' ),
-			'carrier_operation_address' => (string) ( $shipment['carrier_operation_address'] ?? '' ),
-			'carrier_operation_index' => (string) ( $shipment['carrier_operation_index'] ?? '' ),
-			'tracking_checked_at' => (string) ( $shipment['tracking_checked_at'] ?? '' ),
-			'carrier_status_is_terminal' => ! empty( $shipment['carrier_status_is_terminal'] ),
-			'can_cancel' => $this->can_cancel( $shipment ),
+	public function status_payload( array $shipment, ?object $order = null ): array {
+		return array_merge(
+			array(
+				'barcode' => (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ),
+				'universal_status_code' => (string) ( $shipment['universal_status_code'] ?? '' ),
+				'universal_status_label' => (string) ( $shipment['universal_status_label'] ?? '' ),
+				'shipment_status_label' => $this->shipment_status_label( $shipment ),
+				'carrier_status_title' => (string) ( $shipment['carrier_status_title'] ?? '' ),
+				'carrier_status_description' => (string) ( $shipment['carrier_status_description'] ?? '' ),
+				'carrier_operation_type_id' => (string) ( $shipment['carrier_operation_type_id'] ?? '' ),
+				'carrier_operation_type_name' => (string) ( $shipment['carrier_operation_type_name'] ?? '' ),
+				'carrier_operation_attr_id' => (string) ( $shipment['carrier_operation_attr_id'] ?? '' ),
+				'carrier_operation_attr_name' => (string) ( $shipment['carrier_operation_attr_name'] ?? '' ),
+				'carrier_operation_date' => (string) ( $shipment['carrier_operation_date'] ?? '' ),
+				'carrier_operation_address' => (string) ( $shipment['carrier_operation_address'] ?? '' ),
+				'carrier_operation_index' => (string) ( $shipment['carrier_operation_index'] ?? '' ),
+				'tracking_checked_at' => (string) ( $shipment['tracking_checked_at'] ?? '' ),
+				'carrier_status_is_terminal' => ! empty( $shipment['carrier_status_is_terminal'] ),
+				'can_cancel' => $this->can_cancel( $shipment ),
+			),
+			$this->actual_cost_payload( $shipment, $order )
 		);
 	}
 
@@ -139,12 +134,6 @@ final class ShipmentStatusUpdateService {
 		);
 	}
 
-	private function add_order_note( object $order, string $message ): void {
-		if ( method_exists( $order, 'add_order_note' ) ) {
-			$order->add_order_note( $message );
-		}
-	}
-
 	/**
 	 * @param array<string,mixed> $shipment
 	 */
@@ -161,6 +150,89 @@ final class ShipmentStatusUpdateService {
 			'', 'draft' => 'не создано',
 			default => 'не определено',
 		};
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 * @return array<string,mixed>
+	 */
+	private function actual_cost_payload( array $shipment, ?object $order ): array {
+		$actual_kopecks = $this->positive_int_or_null( $shipment['russian_post_actual_cost_kopecks'] ?? null );
+		if ( null === $actual_kopecks ) {
+			return array(
+				'actual_cost_kopecks' => null,
+				'actual_cost_label' => '',
+				'actual_cost_compare_status' => '',
+				'actual_cost_compare_message' => '',
+				'base_api_cost_kopecks' => null,
+			);
+		}
+
+		$base_kopecks = null !== $order ? $this->base_api_cost_kopecks( $order ) : null;
+		$status = 'neutral';
+		$message = 'нет базовой стоимости для сравнения';
+		if ( null !== $base_kopecks ) {
+			$threshold = (int) floor( $base_kopecks * 1.03 );
+			$status = $actual_kopecks <= $threshold ? 'ok' : 'warning';
+			$message = 'Базовая стоимость API: ' . $this->format_rubles( $base_kopecks ) . ' руб.';
+		}
+
+		return array(
+			'actual_cost_kopecks' => $actual_kopecks,
+			'actual_cost_label' => $this->format_rubles( $actual_kopecks ) . ' руб.',
+			'actual_cost_compare_status' => $status,
+			'actual_cost_compare_message' => $message,
+			'base_api_cost_kopecks' => $base_kopecks,
+		);
+	}
+
+	private function base_api_cost_kopecks( object $order ): ?int {
+		if ( ! method_exists( $order, 'get_meta' ) ) {
+			return null;
+		}
+
+		$value = $order->get_meta( OrderShippingMetaPersister::CALCULATION_META_KEY, true );
+		if ( is_string( $value ) && '' !== trim( $value ) ) {
+			$decoded = json_decode( $value, true );
+			$value = is_array( $decoded ) ? $decoded : array();
+		}
+		if ( ! is_array( $value ) ) {
+			return null;
+		}
+
+		$api = is_array( $value['api'] ?? null ) ? $value['api'] : array();
+		foreach ( array( 'api_base_price_kopecks', 'api_base_cost_kopecks', 'base_api_cost_kopecks' ) as $key ) {
+			$kopecks = $this->positive_int_or_null( $api[ $key ] ?? $value[ $key ] ?? null );
+			if ( null !== $kopecks ) {
+				return $kopecks;
+			}
+		}
+
+		foreach ( array( 'api_base_price_rub', 'api_price_with_vat_rub', 'base_api_cost_rub' ) as $key ) {
+			$rubles = $this->numeric_or_null( $api[ $key ] ?? $value[ $key ] ?? null );
+			if ( null !== $rubles && $rubles > 0 ) {
+				return (int) round( $rubles * 100 );
+			}
+		}
+
+		return null;
+	}
+
+	private function positive_int_or_null( mixed $value ): ?int {
+		if ( ! is_numeric( $value ) ) {
+			return null;
+		}
+		$integer = (int) $value;
+
+		return $integer > 0 ? $integer : null;
+	}
+
+	private function numeric_or_null( mixed $value ): ?float {
+		return is_numeric( $value ) ? (float) $value : null;
+	}
+
+	private function format_rubles( int $kopecks ): string {
+		return number_format( $kopecks / 100, 2, '.', '' );
 	}
 
 	private function now(): string {

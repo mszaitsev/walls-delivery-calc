@@ -1,6 +1,15 @@
 # WDC Shipment Statuses
 
-Version: 0.39.1.
+Version: 0.39.2.
+
+Version 0.39.2 changes WooCommerce order notes for shipment status flows. A successful shipment status refresh only updates `_wdc_shipments` and the metabox payload; it does not create an order note. WDC creates a note only when `ShipmentOrderStatusMappingService` automatically changes the WooCommerce order status. The note is compact:
+
+```text
+Посылка {barcode}
+Статус: {universal status}.
+Статус заказа изменён:
+{from_status} → {target_status}
+```
 
 Version 0.39.1 fixes terminal shipment autosync with order status mapping. Terminal universal statuses are still not refreshed through the carrier Tracking API, but autosync now applies the universal status to WooCommerce order status mapping against the already saved shipment state. This covers the case where a shipment was already `delivered`, `returned_to_sender`, `cancelled`, or `rejected` before the administrator later enabled mapping such as `delivered -> wc-completed`.
 
@@ -14,7 +23,7 @@ Mapping storage:
 - empty rows are not stored and mean "do nothing";
 - there is no per-row enabled flag.
 
-Runtime is handled by `ShipmentOrderStatusMappingService`. `ShipmentStatusUpdateService` calls it immediately after saving the updated shipment state into order meta, so manual status refresh, cron autosync, manual autosync, first automatic refresh after shipment creation, and first automatic refresh after manual tracking attach all use the same path. The service validates the universal status, target WooCommerce status, current order status, and then calls WooCommerce `update_status()`. On success it adds a separate private WDC order note; standard WooCommerce status notes remain untouched.
+Runtime is handled by `ShipmentOrderStatusMappingService`. `ShipmentStatusUpdateService` calls it immediately after saving the updated shipment state into order meta, so manual status refresh, cron autosync, manual autosync, first automatic refresh after shipment creation, and first automatic refresh after manual tracking attach all use the same path. The service validates the universal status, target WooCommerce status, current order status, and then calls WooCommerce `update_status()`. On success it adds a separate compact private WDC order note; standard WooCommerce status notes remain untouched. Plain shipment status refreshes do not create order notes.
 
 Version 0.38.2 stores and shows `tracking_checked_at` / `Проверено` for managers in `Asia/Novosibirsk` (GMT+7) with the existing `Y-m-d H:i:s` format. `carrier_operation_date` is carrier data from Russian Post Tracking API and remains unchanged, without timezone conversion.
 

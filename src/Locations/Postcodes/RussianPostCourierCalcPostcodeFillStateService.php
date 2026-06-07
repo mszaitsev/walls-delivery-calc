@@ -9,14 +9,21 @@ use WallsShop\WDC\Locations\Storage\LocationRepository;
 defined( 'ABSPATH' ) || exit;
 
 final class RussianPostCourierCalcPostcodeFillStateService {
-	public const MAX_PROBES_PER_STEP = 4;
+	public const TARGET_PROBES_PER_SECOND = 6;
+	public const MAX_PROBES_PER_STEP = 18;
+	public const MAX_STEP_SECONDS = 3;
 
 	private \wpdb $wpdb;
 
+	/**
+	 * @param object{probe:callable(string):array<string,mixed>}|RussianPostCourierTariffProbeService $probe
+	 */
 	public function __construct(
 		private LocationRepository $locations,
-		private RussianPostCourierTariffProbeService $probe,
-		?\wpdb $db = null
+		private object $probe,
+		?\wpdb $db = null,
+		private mixed $time_provider = null,
+		private mixed $sleeper = null
 	) {
 		global $wpdb;
 		$this->wpdb = $db ?? $wpdb;
@@ -44,6 +51,13 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 			'consecutive_errors' => 0,
 			'probes' => 0,
 			'step_probes' => 0,
+			'target_rps' => self::TARGET_PROBES_PER_SECOND,
+			'step_started_at' => '',
+			'step_duration_ms' => 0,
+			'last_probe_duration_ms' => 0,
+			'actual_step_rps' => 0.0,
+			'max_probes_per_step' => self::MAX_PROBES_PER_STEP,
+			'max_step_seconds' => self::MAX_STEP_SECONDS,
 			'last_id' => 0,
 			'current_priority' => 'cities',
 			'candidate_offset' => 0,
@@ -69,14 +83,23 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 			return $job;
 		}
 
+		$step_started = $this->now_microtime();
+		$last_probe_started = null;
+		$job['target_rps'] = self::TARGET_PROBES_PER_SECOND;
 		$job['step_probes'] = 0;
+		$job['step_started_at'] = current_time( 'mysql' );
+		$job['step_duration_ms'] = 0;
+		$job['last_probe_duration_ms'] = 0;
+		$job['actual_step_rps'] = 0.0;
+		$job['max_probes_per_step'] = self::MAX_PROBES_PER_STEP;
+		$job['max_step_seconds'] = self::MAX_STEP_SECONDS;
 		$location = is_array( $job['current_location'] ?? null ) && array() !== $job['current_location'] ? $job['current_location'] : $this->next_location( $job );
 		if ( null === $location ) {
 			$job['phase'] = 'finished';
 			$job['status'] = 'finished';
 			$job['finished_at'] = current_time( 'mysql' );
 			$job['updated_at'] = current_time( 'mysql' );
-			return $job;
+			return $this->finish_step_diagnostics( $job, $step_started );
 		}
 
 		$location_id = (int) ( $location['id'] ?? 0 );
@@ -89,7 +112,7 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 			++$job['skipped'];
 			$job['last_error'] = 'invalid_or_marker_postal_code';
 			$job['updated_at'] = current_time( 'mysql' );
-			return $this->finish_location( $job, $location_id );
+			return $this->finish_step_diagnostics( $this->finish_location( $job, $location_id ), $step_started );
 		}
 
 		$candidates = is_array( $job['current_candidates'] ?? null ) && array() !== $job['current_candidates']
@@ -100,16 +123,24 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 		$found = '';
 		$api_error = false;
 
-		while ( $offset < count( $candidates ) && (int) $job['step_probes'] < self::MAX_PROBES_PER_STEP ) {
+		while (
+			$offset < count( $candidates )
+			&& (int) $job['step_probes'] < self::MAX_PROBES_PER_STEP
+			&& $this->elapsed_seconds( $step_started ) < self::MAX_STEP_SECONDS
+		) {
 			$candidate = $this->valid_postcode( (string) $candidates[ $offset ] );
 			++$offset;
 			if ( '' === $candidate ) {
 				continue;
 			}
 
+			$this->pace_probe_start( $last_probe_started );
 			++$job['probes'];
 			++$job['step_probes'];
+			$probe_started = $this->now_microtime();
+			$last_probe_started = $probe_started;
 			$result = $this->probe->probe( $candidate );
+			$job['last_probe_duration_ms'] = max( 0, (int) round( ( $this->now_microtime() - $probe_started ) * 1000 ) );
 			if ( ! empty( $result['success'] ) ) {
 				$found = $candidate;
 				$job['consecutive_errors'] = 0;
@@ -144,7 +175,7 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 		}
 
 		$job['updated_at'] = current_time( 'mysql' );
-		return $job;
+		return $this->finish_step_diagnostics( $job, $step_started );
 	}
 
 	public function count_pending(): int {
@@ -283,6 +314,63 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 		}
 
 		return preg_match( '/^\d{6}$/', $postcode ) ? $postcode : '';
+	}
+
+	private function min_probe_interval_microseconds(): int {
+		return (int) floor( 1000000 / self::TARGET_PROBES_PER_SECOND );
+	}
+
+	private function pace_probe_start( ?float $last_probe_started ): void {
+		if ( null === $last_probe_started ) {
+			return;
+		}
+
+		$elapsed_microseconds = (int) round( ( $this->now_microtime() - $last_probe_started ) * 1000000 );
+		$remaining_microseconds = $this->min_probe_interval_microseconds() - $elapsed_microseconds;
+		if ( $remaining_microseconds > 0 ) {
+			$this->sleep_microseconds( $remaining_microseconds );
+		}
+	}
+
+	private function elapsed_seconds( float $started_at ): float {
+		return max( 0.0, $this->now_microtime() - $started_at );
+	}
+
+	/**
+	 * @param array<string,mixed> $job
+	 * @return array<string,mixed>
+	 */
+	private function finish_step_diagnostics( array $job, float $step_started ): array {
+		$duration_seconds = $this->elapsed_seconds( $step_started );
+		$step_probes = (int) ( $job['step_probes'] ?? 0 );
+		$job['step_duration_ms'] = max( 0, (int) round( $duration_seconds * 1000 ) );
+		$job['actual_step_rps'] = $duration_seconds > 0.0 ? round( $step_probes / $duration_seconds, 2 ) : 0.0;
+		$job['target_rps'] = self::TARGET_PROBES_PER_SECOND;
+		$job['max_probes_per_step'] = self::MAX_PROBES_PER_STEP;
+		$job['max_step_seconds'] = self::MAX_STEP_SECONDS;
+
+		return $job;
+	}
+
+	private function now_microtime(): float {
+		if ( is_callable( $this->time_provider ) ) {
+			return (float) call_user_func( $this->time_provider );
+		}
+
+		return microtime( true );
+	}
+
+	private function sleep_microseconds( int $microseconds): void {
+		if ( $microseconds <= 0 ) {
+			return;
+		}
+		if ( is_callable( $this->sleeper ) ) {
+			call_user_func( $this->sleeper, $microseconds );
+			return;
+		}
+		if ( function_exists( 'usleep' ) ) {
+			usleep( $microseconds );
+		}
 	}
 
 	private function locations_table(): string {

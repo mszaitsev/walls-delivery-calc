@@ -1,6 +1,8 @@
 # Russian Post Pickup Points
 
-Version: 0.35.0.
+Version: 0.39.3.
+
+Version 0.39.3 updates the locations maintenance action `Подобрать индексы для курьерской Почты России`. It uses sequential Russian Post tariff probes at a target of about 6 requests/sec inside one backend step, with no parallel AJAX requests, and each step is limited to 18 probes or 3 seconds. Candidate selection is unchanged.
 
 As of WDC 0.35.0, Russian Post pickup checkout belongs to the unified domestic service `russian_post_domestic`. The active pickup shipping family/rate group is `russian_post_domestic:pickup`; concrete tariff rates look like `russian_post_domestic:pickup:23030`. Older release notes below may mention the historical pickup service key, but the current runtime no longer uses it. Pickup point type settings are stored as `russian_post_domestic_point_type_{ops,pvz,aps}_{enabled,label}` in the unified service settings context.
 

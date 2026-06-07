@@ -799,7 +799,7 @@ final class LocationsAdminPage {
 			const rpCourierPostcodeStart = document.getElementById('wdc-russianpost-courier-calc-postcode-fill-start');
 			if (rpCourierPostcodeStart) rpCourierPostcodeStart.addEventListener('click', function(){
 				const box = document.getElementById('wdc-russianpost-courier-calc-postcode-progress');
-				post('wdc_russianpost_courier_calc_postcode_fill_start').then(resp => { render(box, resp.data); loop('wdc_russianpost_courier_calc_postcode_fill_step', box, 1200); });
+				post('wdc_russianpost_courier_calc_postcode_fill_start').then(resp => { render(box, resp.data); loop('wdc_russianpost_courier_calc_postcode_fill_step', box, 75); });
 			});
 			const rpCourierPostcodeReset = document.getElementById('wdc-russianpost-courier-calc-postcode-fill-reset');
 			if (rpCourierPostcodeReset) rpCourierPostcodeReset.addEventListener('click', function(){

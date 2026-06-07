@@ -10,7 +10,7 @@ defined( 'ABSPATH' ) || exit;
 final class RussianPostCourierTariffProbeService {
 	private const ENDPOINT = 'https://tariff.pochta.ru/v2/calculate/tariff';
 	private const FROM_POSTCODE = '630005';
-	private const MIN_REQUEST_INTERVAL_MICROSECONDS = 250000;
+	private const MIN_REQUEST_INTERVAL_MICROSECONDS = 150000;
 	private const UNAVAILABLE_ERROR_CODES = array( '2005', '2007', '2008', '2009', '2010' );
 
 	private float $last_request_at = 0.0;

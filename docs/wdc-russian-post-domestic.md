@@ -1,6 +1,12 @@
 # Russian Post Domestic Carrier
 
-Version: 0.38.0.
+Version: 0.39.5.
+
+Version 0.39.5 also pulls actual Russian Post cost after ordinary shipment creation from the order metabox. After successful create, WDC calls `backlog/search` by barcode, uses the same shared extractor as manual tracking attach, stores source `backlog_search_after_create`, and keeps create successful if the lookup fails or returns no totals.
+
+Version 0.39.4 adds actual registered shipment cost display for Russian Post manual tracking attachment. When `backlog/search` returns `total-rate-wo-vat` and `total-vat`, WDC stores their sum in `_wdc_shipments`, shows `Цена` after `Отслеживание` in the order metabox, and compares it with checkout `Базовая стоимость API`; values up to 3% over base are green/ok, more than 3% are red/warning, and missing base cost is neutral.
+
+Version 0.39.3 speeds up the admin tool that fills `russianpost_courier_calc_postal_code` for courier Russian Post tariff calculation. The `WDC -> Локации` button `Подобрать индексы для курьерской Почты России` still probes candidate postcodes sequentially and uses the same candidate order, but each backend step now targets about 6 Russian Post requests/sec, stops after 18 probes or 3 seconds, and exposes step timing/RPS diagnostics in JSON. The browser keeps one active AJAX step at a time and waits only a short delay before the next step.
 
 ## 1. Overview
 
@@ -12,7 +18,7 @@ Russian Post domestic is the current RU-only carrier/service runtime for checkou
 - Delivery types: `pickup` and `courier`
 - Checkout group ids: `russian_post_domestic:pickup`, `russian_post_domestic:courier`
 - Concrete rate ids: `russian_post_domestic:pickup:{object_code}`, `russian_post_domestic:courier:{object_code}`
-- Current documented version: `0.38.0`
+- Current documented version: `0.39.5`
 
 Cash on delivery / mandatory payment is not used. Insurance is represented by declared value; in Russian Post Tariff API terms this means tariff variants that require `sumoc`.
 
@@ -253,6 +259,8 @@ On successful create, WDC stores barcode/ШПИ and the Otpravka create-response
 
 After successful create, the preparation modal closes, a 10-second admin toast confirms creation, and WDC automatically starts the first `wdc_update_shipment_status` request. If the status refresh fails, creation remains successful and the metabox shows a warning.
 
+After successful create and before saving final shipment state, WDC also tries `GET /1.0/backlog/search?query={barcode}` to fetch actual Russian Post totals. Numeric `total-rate-wo-vat + total-vat` is stored as `russian_post_actual_cost_kopecks` / `russian_post_actual_cost_rub` with `russian_post_actual_cost_source=backlog_search_after_create`. Lookup failure or missing totals does not fail creation and does not produce an admin warning.
+
 Manual status update uses the existing `Обновить статус` button for created shipments with barcode.
 
 Cancel shipment:
@@ -274,6 +282,9 @@ Manual tracking attachment:
 - saved state records `source=manual_tracking_attach`;
 - saved lookup source is `backlog_search` or `shipment_search`;
 - returned `id`, when present, is saved as `backlog_order_id`;
+- when `backlog_search` returns `total-rate-wo-vat` and `total-vat`, WDC stores `russian_post_actual_cost_kopecks`, `russian_post_actual_cost_rub`, and `russian_post_actual_cost_source=backlog_search`;
+- the metabox shows `Цена: {amount} руб.` after `Отслеживание` and compares it with `_wdc_delivery_calculation_data.api.api_base_price_rub` / `Базовая стоимость API`; up to 3% over base is ok, more than 3% is warning;
+- if only `shipment_search` finds the parcel or the total fields are absent, the actual price fields are not filled and the price row is omitted;
 - if shipment search returns barcode but no `id`, WDC still saves tracking and runs Tracking API by barcode;
 - cancellation remains disabled when `backlog_order_id` is absent.
 
