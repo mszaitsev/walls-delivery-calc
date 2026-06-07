@@ -167,6 +167,7 @@ $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/
 $settings_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Infrastructure/Settings/SettingsRepository.php' );
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/ShipmentStatusesAdminPage.php' );
 status_autosync_assert( str_contains( $plugin_source, '$this->container->register( ShipmentStatusAutoSyncService::class' ) && str_contains( $plugin_source, '$this->container->get( SettingsRepository::class )' ) && str_contains( $plugin_source, '$this->container->get( OrderShipmentRepository::class )' ) && str_contains( $plugin_source, '$this->container->get( ShipmentStatusUpdateService::class )' ), 'Plugin container must explicitly register ShipmentStatusAutoSyncService dependencies.' );
+status_autosync_assert( str_contains( $plugin_source, 'new ShipmentStatusAutoSyncService( $this->container->get( SettingsRepository::class ), $this->container->get( OrderShipmentRepository::class ), $this->container->get( ShipmentStatusUpdateService::class ), $this->container->get( ShipmentOrderStatusMappingService::class ) )' ), 'ShipmentStatusAutoSyncService must receive ShipmentOrderStatusMappingService from the container.' );
 status_autosync_assert( str_contains( $plugin_source, '$this->container->register( ShipmentStatusAutoSyncCron::class' ) && str_contains( $plugin_source, '$this->container->get( ShipmentStatusAutoSyncService::class )' ), 'Plugin container must explicitly register ShipmentStatusAutoSyncCron dependency.' );
 status_autosync_assert( str_contains( $plugin_source, '$this->container->register( ShipmentOrderStatusMappingService::class' ) && str_contains( $plugin_source, '$this->container->get( ShipmentOrderStatusMappingService::class )' ), 'Plugin container must register and inject ShipmentOrderStatusMappingService.' );
 status_autosync_assert( ! str_contains( $admin_source, '$this->settings->replace(' ) && str_contains( $admin_source, '$this->settings->set(' ), 'Statuses settings page must use targeted settings saves instead of replace(all()+...).' );
@@ -181,6 +182,7 @@ $service = new ShipmentStatusAutoSyncService(
 	$settings,
 	$repository,
 	$status_updates,
+	$order_status_mapping,
 	function ( string $carrier_key, object $order, string $shipment_key ) use ( &$dispatches ): array {
 		$dispatches[] = array( $carrier_key, $order->get_id(), $shipment_key );
 		return array( 'success' => true, 'message' => 'ok' );
@@ -276,7 +278,8 @@ status_autosync_assert( array( 'wc-processing', 'wc-custom-shipping' ) === $GLOB
 status_autosync_assert( 4 === $stats['shipments_found'], 'Autosync must count discovered shipments.' );
 status_autosync_assert( 1 === $stats['shipments_updated'], 'Only the non-terminal supported shipment with tracking must update.' );
 status_autosync_assert( 1 === count( $dispatches ) && RussianPostDomesticSettings::CARRIER_KEY === $dispatches[0][0] && 102 === $dispatches[0][1], 'russian_post_domestic must dispatch through the status updater and unknown must be processed.' );
-status_autosync_assert( 1 === (int) $stats['skip_reasons']['terminal_status'], 'Terminal universal statuses must be skipped.' );
+status_autosync_assert( 1 === (int) $stats['skip_reasons']['terminal_status_no_tracking_update'], 'Terminal universal statuses must skip tracking updates.' );
+status_autosync_assert( 1 === (int) $stats['order_statuses_skipped'], 'Terminal universal statuses must still collect skipped order status mapping diagnostics when mapping is disabled.' );
 status_autosync_assert( 1 === (int) $stats['skip_reasons']['missing_tracking_number'], 'Shipments without tracking number or barcode must be skipped.' );
 status_autosync_assert( 1 === (int) $stats['skip_reasons']['unsupported_carrier'], 'Unsupported carriers must be skipped.' );
 

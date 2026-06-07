@@ -147,10 +147,86 @@ order_status_mapping_assert( 'error' === $error['status'] && str_contains( $erro
 
 $repository = new OrderShipmentRepository();
 $status_updates = ( new ReflectionClass( ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor();
+
+$terminal_dispatches = 0;
+$terminal_order = new OrderStatusMappingSmokeOrder(
+	70,
+	'processing',
+	array(
+		OrderShipmentRepository::META_KEY => array(
+			RussianPostDomesticSettings::CARRIER_KEY => array(
+				'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+				'status' => 'created',
+				'tracking_number' => '80080822636270',
+				'universal_status_code' => DeliveryStatus::DELIVERED,
+				'universal_status_label' => 'доставлен',
+			),
+		),
+	)
+);
+$GLOBALS['wdc_order_status_mapping_orders'] = array( $terminal_order );
+$terminal_autosync = new ShipmentStatusAutoSyncService(
+	$settings,
+	$repository,
+	$status_updates,
+	$mapping,
+	function () use ( &$terminal_dispatches ): array {
+		++$terminal_dispatches;
+		return array( 'success' => true );
+	}
+);
+$terminal_stats = $terminal_autosync->run( 'manual' );
+order_status_mapping_assert( 0 === $terminal_dispatches, 'Terminal delivered shipment must not call dispatcher or Tracking API.' );
+order_status_mapping_assert( 'completed' === $terminal_order->get_status() && 1 === $terminal_order->update_calls, 'Terminal delivered shipment with mapping must update WooCommerce order status from saved universal status.' );
+order_status_mapping_assert( 1 === (int) $terminal_stats['skip_reasons']['terminal_status_no_tracking_update'] && 1 === (int) $terminal_stats['order_statuses_changed'], 'Terminal mapping change must be visible in skip reasons and order status diagnostics.' );
+
+$settings->set( ShipmentOrderStatusMappingService::MAPPING_KEY, array() );
+$terminal_without_mapping = new OrderStatusMappingSmokeOrder(
+	71,
+	'processing',
+	array(
+		OrderShipmentRepository::META_KEY => array(
+			RussianPostDomesticSettings::CARRIER_KEY => array(
+				'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+				'status' => 'created',
+				'tracking_number' => '80080822636271',
+				'universal_status_code' => DeliveryStatus::DELIVERED,
+			),
+		),
+	)
+);
+$GLOBALS['wdc_order_status_mapping_orders'] = array( $terminal_without_mapping );
+$terminal_stats = $terminal_autosync->run( 'manual' );
+order_status_mapping_assert( 'processing' === $terminal_without_mapping->get_status() && 0 === $terminal_without_mapping->update_calls, 'Terminal delivered shipment without mapping must not change WooCommerce order status.' );
+order_status_mapping_assert( 1 === (int) $terminal_stats['order_statuses_skipped'], 'Terminal delivered shipment without mapping must increment order_statuses_skipped.' );
+
+$settings->set( ShipmentOrderStatusMappingService::MAPPING_KEY, array( DeliveryStatus::DELIVERED => 'wc-completed' ) );
+$settings->set( ShipmentOrderStatusMappingService::ENABLED_KEY, false );
+$terminal_disabled = new OrderStatusMappingSmokeOrder(
+	72,
+	'processing',
+	array(
+		OrderShipmentRepository::META_KEY => array(
+			RussianPostDomesticSettings::CARRIER_KEY => array(
+				'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+				'status' => 'created',
+				'tracking_number' => '80080822636272',
+				'universal_status_code' => DeliveryStatus::DELIVERED,
+			),
+		),
+	)
+);
+$GLOBALS['wdc_order_status_mapping_orders'] = array( $terminal_disabled );
+$terminal_stats = $terminal_autosync->run( 'manual' );
+order_status_mapping_assert( 'processing' === $terminal_disabled->get_status() && 0 === $terminal_disabled->update_calls, 'Terminal delivered shipment with disabled mapping must not change WooCommerce order status.' );
+order_status_mapping_assert( 1 === (int) $terminal_stats['order_statuses_skipped'], 'Terminal delivered shipment with disabled mapping must increment order_statuses_skipped.' );
+
+$settings->set( ShipmentOrderStatusMappingService::ENABLED_KEY, true );
 $autosync = new ShipmentStatusAutoSyncService(
 	$settings,
 	$repository,
 	$status_updates,
+	$mapping,
 	function ( string $carrier_key, object $order, string $shipment_key ): array {
 		return array(
 			'success' => true,
@@ -184,6 +260,7 @@ $autosync_error = new ShipmentStatusAutoSyncService(
 	$settings,
 	$repository,
 	$status_updates,
+	$mapping,
 	function ( string $carrier_key, object $order, string $shipment_key ): array {
 		return array(
 			'success' => true,

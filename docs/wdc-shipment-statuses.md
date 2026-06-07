@@ -1,6 +1,8 @@
 # WDC Shipment Statuses
 
-Version: 0.39.0.
+Version: 0.39.1.
+
+Version 0.39.1 fixes terminal shipment autosync with order status mapping. Terminal universal statuses are still not refreshed through the carrier Tracking API, but autosync now applies the universal status to WooCommerce order status mapping against the already saved shipment state. This covers the case where a shipment was already `delivered`, `returned_to_sender`, `cancelled`, or `rejected` before the administrator later enabled mapping such as `delivered -> wc-completed`.
 
 Version 0.39.0 adds universal shipment status to WooCommerce order status mapping. The `WDC -> Статусы -> Соответствие статусов` tab now contains `Включить автоматическое изменение статусов заказов` and a table from every `DeliveryStatus::all()` universal status to a WooCommerce order status. The WooCommerce status list is loaded with `wc_get_order_statuses()`, so standard statuses and custom statuses from WooCommerce Order Status Manager are supported.
 
@@ -52,7 +54,8 @@ Runtime service:
 - order selection: `wc_get_orders()` by selected WooCommerce order statuses only, with no shipment-age filter and no order limit;
 - shipment source: order meta `_wdc_shipments`;
 - required shipment fields: `carrier_key` and `tracking_number` or `barcode`;
-- terminal universal statuses skipped: `delivered`, `returned_to_sender`, `cancelled`, `rejected`;
+- terminal universal statuses skip carrier tracking refresh: `delivered`, `returned_to_sender`, `cancelled`, `rejected`;
+- terminal universal statuses still run `ShipmentOrderStatusMappingService` against the saved shipment state and record skip reason `terminal_status_no_tracking_update`;
 - `unknown` is non-terminal and continues to be refreshed;
 - dispatch: `carrier_key -> updater`, currently `russian_post_domestic -> ShipmentStatusUpdateService::update_russian_post()`.
 - order status mapping diagnostics: `order_statuses_changed`, `order_statuses_skipped`, `order_status_change_errors`.

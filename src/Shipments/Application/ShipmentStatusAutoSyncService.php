@@ -33,6 +33,7 @@ final class ShipmentStatusAutoSyncService {
 		private SettingsRepository $settings,
 		private OrderShipmentRepository $repository,
 		private ShipmentStatusUpdateService $status_updates,
+		private ?ShipmentOrderStatusMappingService $order_status_mapping = null,
 		private mixed $dispatcher = null
 	) {
 	}
@@ -158,12 +159,13 @@ final class ShipmentStatusAutoSyncService {
 				$this->skip( $stats, 'missing_tracking_number' );
 				continue;
 			}
-			if ( in_array( $universal_status, self::TERMINAL_STATUSES, true ) ) {
-				$this->skip( $stats, 'terminal_status' );
-				continue;
-			}
 			if ( ! $this->supports_carrier( $carrier_key ) ) {
 				$this->skip( $stats, 'unsupported_carrier' );
+				continue;
+			}
+			if ( in_array( $universal_status, self::TERMINAL_STATUSES, true ) ) {
+				$this->skip( $stats, 'terminal_status_no_tracking_update' );
+				$this->apply_order_status_mapping_for_existing_shipment( $order, $shipment, $stats, $carrier_key );
 				continue;
 			}
 
@@ -226,6 +228,23 @@ final class ShipmentStatusAutoSyncService {
 			'message' => $message,
 		);
 		$stats['error_samples'] = array_slice( $stats['error_samples'], -20 );
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 * @param array<string,mixed> $stats
+	 */
+	private function apply_order_status_mapping_for_existing_shipment( object $order, array $shipment, array &$stats, string $carrier_key ): void {
+		$result = $this->order_status_mapping instanceof ShipmentOrderStatusMappingService
+			? $this->order_status_mapping->apply( $order, $shipment, (string) ( $shipment['universal_status_code'] ?? '' ) )
+			: array( 'status' => 'skipped', 'changed' => false, 'reason' => 'service_unavailable' );
+
+		$this->collect_order_status_mapping_result(
+			$stats,
+			array( 'order_status_mapping' => $result ),
+			$this->order_id( $order ),
+			$carrier_key
+		);
 	}
 
 	/**
