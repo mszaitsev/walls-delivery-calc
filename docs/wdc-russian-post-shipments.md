@@ -1,6 +1,8 @@
 # WDC Russian Post Shipments
 
-Version: 0.39.0.
+Version: 0.39.2.
+
+Version 0.39.2 removes the WooCommerce order note for ordinary Russian Post shipment status refreshes. Tracking refresh still saves the latest universal and carrier status into `_wdc_shipments` and updates the order metabox, but it does not add a note such as "Статус отправления Почты России обновлен". A note is created only if WDC automatically changes the WooCommerce order status through universal status mapping, and that note uses the compact `Посылка {barcode}` format.
 
 Version 0.39.0 can automatically change WooCommerce order statuses after a Russian Post shipment refresh, but the mapping is not Russian-Post-specific. Russian Post Tracking API operations are first mapped to WDC universal shipment statuses, then `ShipmentOrderStatusMappingService` applies the shared `shipment_status_order_status_mapping` from `WDC -> Статусы -> Соответствие статусов` when the global checkbox is enabled. The available target order statuses come from `wc_get_order_statuses()`, including custom WooCommerce Order Status Manager statuses.
 

@@ -127,7 +127,9 @@ $changed = $mapping->apply(
 );
 order_status_mapping_assert( 'changed' === $changed['status'] && 'completed' === $order->get_status(), 'Mapped shipment status must update WooCommerce order status.' );
 order_status_mapping_assert( 1 === $order->update_calls, 'Mapped shipment status must call update_status once.' );
-order_status_mapping_assert( 1 === count( $order->notes ) && false === $order->notes[0]['is_customer_note'] && str_contains( $order->notes[0]['note'], 'processing → completed' ), 'Mapping must add a private WDC order note.' );
+$expected_note = "Посылка 80080822636218\nСтатус: доставлен.\nСтатус заказа изменён:\nprocessing → completed";
+order_status_mapping_assert( 1 === count( $order->notes ) && false === $order->notes[0]['is_customer_note'] && $expected_note === $order->notes[0]['note'], 'Mapping must add a compact private WDC order note.' );
+order_status_mapping_assert( ! str_contains( $order->notes[0]['note'], 'WDC: статус заказа автоматически изменен по статусу отправления' ) && ! str_contains( $order->notes[0]['note'], 'Статус отправления Почты России обновлен' ), 'Mapping note must not use old verbose note texts.' );
 
 $repeat = $mapping->apply( $order, array( 'tracking_number' => '80080822636218' ), DeliveryStatus::DELIVERED );
 order_status_mapping_assert( 'skipped' === $repeat['status'] && 1 === $order->update_calls, 'Repeating target status must not call update_status again.' );

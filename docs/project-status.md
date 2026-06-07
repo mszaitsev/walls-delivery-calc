@@ -1,5 +1,7 @@
 # Project Status
 
+0.39.2 note: successful shipment status refreshes no longer create WooCommerce order notes. WDC creates an order note only when automatic order status mapping changes the WooCommerce order status, using the compact format `Посылка {barcode}`, `Статус: {universal status}.`, `Статус заказа изменён:`, `{from_status} → {target_status}`.
+
 0.39.1 note: autosync no longer drops terminal shipments before order status mapping. Terminal universal statuses still skip carrier tracking refresh, but `ShipmentStatusAutoSyncService` now applies `ShipmentOrderStatusMappingService` to the already saved terminal shipment state, records `terminal_status_no_tracking_update`, and includes the mapping result in `order_statuses_changed`, `order_statuses_skipped`, or `order_status_change_errors`.
 
 0.39.0 note: universal shipment status to WooCommerce order status mapping is implemented. The `WDC -> Статусы -> Соответствие статусов` tab now stores a disabled-by-default global enable flag and `shipment_status_order_status_mapping`, reads available WooCommerce statuses through `wc_get_order_statuses()` including custom statuses, and applies mapping through `ShipmentOrderStatusMappingService` immediately after shipment status is saved by `ShipmentStatusUpdateService`. Autosync diagnostics include order status changed/skipped/error counters.
@@ -14,11 +16,11 @@
 
 ## Общий статус
 
-- Версия / baseline проекта: `0.39.1`, определено по `walls-delivery-calc.php`.
+- Версия / baseline проекта: `0.39.2`, определено по `walls-delivery-calc.php`.
 - Базовая ветка: `develop`.
 - Последнее обновление статуса: 2026-06-07.
 - Общий процент готовности: примерно 66%.
-- Текущий этап 0.39.1: terminal universal shipment statuses не опрашиваются повторно у ТК, но autosync применяет общий mapping к уже сохраненному terminal status, если mapping включен.
+- Текущий этап 0.39.2: обычные обновления shipment status не создают order note; note создается только при автоматической смене WooCommerce order status и имеет компактный формат.
 
 ## Краткое резюме
 
@@ -62,7 +64,7 @@
 
 ### Core Platform
 
-- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.39.1`.
+- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.39.2`.
 - `src/Core/bootstrap.php` wires the autoloader and plugin runtime.
 - `src/Core/Plugin.php` registers services and hooks through a DI container.
 - `src/Infrastructure/Settings`, `src/Infrastructure/Logging`, `src/Infrastructure/Security`, `src/Infrastructure/Queue`, and `src/Infrastructure/Database` provide settings, logging, encryption, background scheduling, and migrations.

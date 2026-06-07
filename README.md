@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.39.1.
+Current plugin version: 0.39.2.
+
+Version 0.39.2 removes the order note that used to be created on every successful shipment status refresh. WDC now adds an order note only when automatic WooCommerce order status mapping actually changes the order status. That mapping note is compact: `Посылка {barcode}`, `Статус: {universal status}.`, `Статус заказа изменён:`, then `{from_status} → {target_status}`.
 
 Version 0.39.1 fixes autosync handling for terminal shipment statuses after order status mapping was added. Terminal shipments such as `delivered`, `returned_to_sender`, `cancelled`, and `rejected` are still not polled again through the carrier Tracking API, but autosync now applies `shipment_status_order_status_mapping` to the already saved universal status and records `terminal_status_no_tracking_update` plus order-status mapping diagnostics.
 

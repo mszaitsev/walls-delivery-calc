@@ -67,15 +67,6 @@ final class ShipmentStatusUpdateService {
 		$order_status_mapping = $this->order_status_mapping instanceof ShipmentOrderStatusMappingService
 			? $this->order_status_mapping->apply( $order, $updated, (string) ( $status_fields['universal_status_code'] ?? '' ) )
 			: array( 'status' => 'skipped', 'changed' => false, 'reason' => 'service_unavailable' );
-		$this->add_order_note(
-			$order,
-			sprintf(
-				'Статус отправления Почты России обновлен. Barcode: %s. Статус: %s. Почта России: %s.',
-				$barcode,
-				(string) $status_fields['universal_status_label'],
-				(string) $status_fields['carrier_status_title']
-			)
-		);
 
 		return array(
 			'success' => true,
@@ -137,12 +128,6 @@ final class ShipmentStatusUpdateService {
 			'message' => $message,
 			'context' => $context,
 		);
-	}
-
-	private function add_order_note( object $order, string $message ): void {
-		if ( method_exists( $order, 'add_order_note' ) ) {
-			$order->add_order_note( $message );
-		}
 	}
 
 	/**
