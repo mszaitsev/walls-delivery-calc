@@ -143,6 +143,7 @@ final class OrderDeliveryMetabox {
 		echo '<div class="wdc-order-delivery-recalculation" data-wdc-order-delivery-recalculation>';
 		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
 		$current_location = $this->current_location_payload( $order );
+		$current_pickup = $this->current_pickup_payload( $order );
 		echo '<p><button type="button" class="button" data-wdc-order-delivery-recalculate data-order-id="' . esc_attr( (string) $order_id ) . '">' . esc_html__( 'Пересчитать доставку', 'walls-delivery-calc' ) . '</button></p>';
 		echo '<div class="wdc-order-delivery-modal" data-wdc-order-delivery-modal hidden>';
 		echo '<div class="wdc-order-delivery-modal__overlay" data-wdc-order-delivery-modal-close></div>';
@@ -164,6 +165,7 @@ final class OrderDeliveryMetabox {
 		echo '</div>';
 		echo '<button type="button" class="button" data-wdc-order-delivery-modal-preview>' . esc_html__( 'Пересчитать', 'walls-delivery-calc' ) . '</button>';
 		echo '<script type="application/json" data-wdc-order-delivery-current-location>' . $this->json_encode( $current_location ) . '</script>';
+		echo '<script type="application/json" data-wdc-order-delivery-current-pickup>' . $this->json_encode( $current_pickup ) . '</script>';
 		echo '</div>';
 		echo '<div class="wdc-order-delivery-modal__status" data-wdc-order-delivery-modal-status></div>';
 		echo '<div class="wdc-order-delivery-modal__content" data-wdc-order-delivery-modal-content></div>';
@@ -207,6 +209,38 @@ final class OrderDeliveryMetabox {
 			'region_name' => $region,
 			'state_value' => $region,
 			'label' => '' !== $label ? $label : $name,
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function current_pickup_payload( object $order ): array {
+		$snapshot = $this->raw_order_meta( $order, '_wdc_pickup_point_snapshot' );
+		if ( is_string( $snapshot ) && '' !== trim( $snapshot ) ) {
+			$decoded = json_decode( $snapshot, true );
+			$snapshot = is_array( $decoded ) ? $decoded : array();
+		}
+		$snapshot = is_array( $snapshot ) ? $snapshot : array();
+		$point_code = $this->meta_string( $order, '_wdc_pickup_point_code' );
+		if ( '' === $point_code ) {
+			$point_code = $this->meta_string( $order, '_wdc_platform_pickup_code' );
+		}
+		$point_address = $this->meta_string( $order, '_wdc_pickup_point_address' );
+		if ( '' === $point_address ) {
+			$point_address = $this->meta_string( $order, '_wdc_platform_pickup_address' );
+		}
+
+		return array_filter(
+			array(
+				'point_code' => $point_code,
+				'point_type' => $this->meta_string( $order, '_wdc_pickup_point_type' ),
+				'point_name' => (string) ( $snapshot['point_name'] ?? $snapshot['name'] ?? '' ),
+				'point_address' => $point_address,
+				'point_postcode' => $this->meta_string( $order, '_wdc_pickup_point_postcode' ),
+				'point_raw' => $snapshot,
+			),
+			static fn( mixed $value ): bool => array() !== $value && '' !== $value
 		);
 	}
 

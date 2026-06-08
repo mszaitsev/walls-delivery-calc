@@ -33,6 +33,18 @@
 		return node ? node.querySelector( '[data-wdc-order-delivery-location-current]' ) : null;
 	}
 
+	function jsonScriptPayload( box, selector ) {
+		const script = box ? box.querySelector( selector ) : null;
+		if ( ! script ) {
+			return {};
+		}
+		try {
+			return JSON.parse( script.textContent || '{}' ) || {};
+		} catch ( error ) {
+			return {};
+		}
+	}
+
 	function setStatus( box, message, type ) {
 		const node = modal( box );
 		const status = node && node.querySelector( '[data-wdc-order-delivery-modal-status]' );
@@ -136,46 +148,8 @@
 			if ( button ) {
 				button.textContent = visible && selectedPickup ? 'Изменить ПВЗ' : 'Выбрать ПВЗ';
 			}
-			ensurePickupAddressBlock( node );
-			updatePickupAddressBlock( box, node, visible && !! selectedPickup );
 		} );
 		updateSaveButton( box );
-	}
-
-	function ensurePickupAddressBlock( node ) {
-		if ( ! node || node.querySelector( '[data-wdc-pickup-address-block]' ) ) {
-			return;
-		}
-		const block = document.createElement( 'div' );
-		block.className = 'wdc-order-delivery-pickup-address';
-		block.setAttribute( 'data-wdc-pickup-address-block', '1' );
-		block.hidden = true;
-		block.innerHTML = [
-			'<label class="wdc-order-delivery-pickup-address__label">',
-			'<span>Адрес доставки</span>',
-			'<input type="text" class="regular-text" data-wdc-pickup-address-line placeholder="улица, дом, квартира">',
-			'</label>',
-			'<button type="button" class="button" data-wdc-normalize-pickup-address>Проверить адрес</button>',
-			'<div class="wdc-order-delivery-pickup-address__status" data-wdc-pickup-address-status></div>',
-			'<div class="wdc-order-delivery-pickup-address__result" data-wdc-pickup-address-result></div>'
-		].join( '' );
-		node.appendChild( block );
-	}
-
-	function updatePickupAddressBlock( box, node, visible ) {
-		const block = node ? node.querySelector( '[data-wdc-pickup-address-block]' ) : null;
-		if ( ! block ) {
-			return;
-		}
-		block.hidden = ! visible;
-		if ( ! visible ) {
-			return;
-		}
-		const normalized = normalizedShippingAddresses.get( box );
-		const result = block.querySelector( '[data-wdc-pickup-address-result]' );
-		if ( result ) {
-			result.textContent = normalized ? 'Нормализованный адрес: ' + addressLabel( normalized ) : '';
-		}
 	}
 
 	function updateSaveButton( box ) {
@@ -186,7 +160,7 @@
 		const rate = selectedRates.get( box );
 		let enabled = !! rate;
 		if ( enabled && rate.requires_pickup_point ) {
-			enabled = !! selectedPickupPoints.get( box ) && !! normalizedShippingAddresses.get( box );
+			enabled = !! selectedPickupPoints.get( box );
 		}
 		button.disabled = ! enabled || activeSaveRequests.has( box );
 	}
@@ -208,11 +182,23 @@
 		payload.service_key = rate.dataset.serviceKey || payload.service_key || '';
 		payload.selected_tariff = selectedTariffPayload( rate );
 		selectedRates.set( box, payload );
-		if ( ! payload.requires_pickup_point ) {
+		if ( payload.requires_pickup_point ) {
+			prefillCurrentPickupIfAvailable( box );
+		} else {
 			selectedPickupPoints.delete( box );
 			normalizedShippingAddresses.delete( box );
 		}
 		updatePickupSelectors( box );
+	}
+
+	function prefillCurrentPickupIfAvailable( box ) {
+		if ( selectedPickupPoints.has( box ) || locationChanged( box ) ) {
+			return;
+		}
+		const pickup = normalizePickupPoint( jsonScriptPayload( box, '[data-wdc-order-delivery-current-pickup]' ) );
+		if ( pickup.point_code || pickup.point_address ) {
+			selectedPickupPoints.set( box, pickup );
+		}
 	}
 
 	function selectedTariffPayload( rate ) {
@@ -239,17 +225,30 @@
 		if ( selectedLocations.has( box ) ) {
 			return;
 		}
-		const script = box.querySelector( '[data-wdc-order-delivery-current-location]' );
-		let location = {};
-		if ( script ) {
-			try {
-				location = JSON.parse( script.textContent || '{}' ) || {};
-			} catch ( error ) {
-				location = {};
-			}
-		}
+		const location = jsonScriptPayload( box, '[data-wdc-order-delivery-current-location]' );
 		selectedLocations.set( box, location );
 		updateLocationSummary( box, location );
+	}
+
+	function locationChanged( box ) {
+		const current = jsonScriptPayload( box, '[data-wdc-order-delivery-current-location]' );
+		const selected = selectedLocations.get( box ) || {};
+		return locationSignature( current ) !== locationSignature( selected );
+	}
+
+	function locationSignature( location ) {
+		if ( ! location ) {
+			return '';
+		}
+		return [
+			location.location_id || location.id || '',
+			location.fias_id || '',
+			location.gar_object_id || location.gar_id || '',
+			location.postal_code || location.postcode || '',
+			locationLabel( location )
+		].map( function ( value ) {
+			return String( value || '' ).trim().toLowerCase();
+		} ).join( '|' );
 	}
 
 	function updateLocationSummary( box, location ) {
@@ -397,76 +396,6 @@
 		return String( point.point_address || point.address || point.point_name || point.point_code || '' );
 	}
 
-	function addressLabel( address ) {
-		return String( address.full_address || address.address_1 || '' );
-	}
-
-	function normalizePickupAddress( button ) {
-		const box = closestBox( button );
-		if ( ! box ) {
-			return;
-		}
-		const block = button.closest( '[data-wdc-pickup-address-block]' );
-		const input = block ? block.querySelector( '[data-wdc-pickup-address-line]' ) : null;
-		const status = block ? block.querySelector( '[data-wdc-pickup-address-status]' ) : null;
-		const result = block ? block.querySelector( '[data-wdc-pickup-address-result]' ) : null;
-		const addressLine = input ? String( input.value || '' ).trim() : '';
-		if ( ! addressLine ) {
-			if ( status ) {
-				status.textContent = 'Введите адрес доставки.';
-			}
-			normalizedShippingAddresses.delete( box );
-			updateSaveButton( box );
-			return;
-		}
-
-		const form = new FormData();
-		form.append( 'action', config.normalizeAddressAction || 'wdc_order_delivery_recalculate_normalize_address' );
-		form.append( 'nonce', config.nonce || '' );
-		form.append( 'order_id', orderId( box ) );
-		form.append( 'selected_location', JSON.stringify( selectedLocations.get( box ) || {} ) );
-		form.append( 'address_line', addressLine );
-		setLoading( button, true );
-		if ( status ) {
-			status.textContent = 'Проверяем адрес...';
-		}
-		if ( result ) {
-			result.textContent = '';
-		}
-		window.fetch( config.ajaxUrl || window.ajaxurl || '', {
-			method: 'POST',
-			credentials: 'same-origin',
-			body: form
-		} )
-			.then( function ( response ) {
-				return response.json();
-			} )
-			.then( function ( payload ) {
-				if ( ! payload || ! payload.success ) {
-					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Адрес не нормализован.' );
-				}
-				const address = payload.data && payload.data.address ? payload.data.address : {};
-				normalizedShippingAddresses.set( box, address );
-				if ( status ) {
-					status.textContent = payload.data && payload.data.message ? payload.data.message : 'Адрес нормализован.';
-				}
-				if ( result ) {
-					result.textContent = 'Нормализованный адрес: ' + addressLabel( address );
-				}
-				updateSaveButton( box );
-			} )
-			.catch( function ( error ) {
-				normalizedShippingAddresses.delete( box );
-				if ( status ) {
-					status.textContent = error && error.message ? error.message : 'Адрес не нормализован.';
-				}
-				updateSaveButton( box );
-			} )
-			.finally( function () {
-				setLoading( button, false );
-			} );
-	}
-
 	function saveDelivery( button ) {
 		const box = closestBox( button );
 		const rate = box ? selectedRates.get( box ) : null;
@@ -481,7 +410,7 @@
 		form.append( 'selected_rate', JSON.stringify( rate ) );
 		form.append( 'selected_tariff', JSON.stringify( rate.selected_tariff || {} ) );
 		form.append( 'selected_pickup_point', JSON.stringify( selectedPickupPoints.get( box ) || {} ) );
-		form.append( 'normalized_shipping_address', JSON.stringify( normalizedShippingAddresses.get( box ) || {} ) );
+		form.append( 'normalized_shipping_address', JSON.stringify( rate.requires_pickup_point ? {} : ( normalizedShippingAddresses.get( box ) || {} ) ) );
 		activeSaveRequests.add( box );
 		setLoading( button, true );
 		setStatus( box, 'Сохраняем новый вариант доставки...', 'loading' );
@@ -571,7 +500,8 @@
 		const providerFactory = window.WDCPickupMapProviders && window.WDCPickupMapProviders[ providerName ];
 		let provider = null;
 		let points = [];
-		let previewPoint = null;
+		let previewPoint = selectedPickupPoints.get( box ) || null;
+		let searchMarker = null;
 
 		function close() {
 			if ( provider && provider.destroy ) {
@@ -616,10 +546,14 @@
 			if ( provider && provider.setActivePoint ) {
 				provider.setActivePoint( pointId( point ) );
 			}
+			if ( provider && provider.focusPoint ) {
+				provider.focusPoint( point );
+			}
 			if ( provider && provider.openPointPopup ) {
 				provider.openPointPopup( point, renderPopup( point ), { forceReopen: true } );
 			}
 			renderPickupPoints();
+			scrollActivePickupRow();
 		}
 
 		function choosePoint( point ) {
@@ -633,6 +567,7 @@
 			mode = mode === 'location' ? 'location' : 'search';
 			const form = new FormData();
 			const value = mode === 'location' ? '' : String( query.value || '' ).trim();
+			searchMarker = null;
 			form.append( 'action', config.pickupSearchAction || 'wdc_order_delivery_recalculate_pickup_search' );
 			form.append( 'nonce', config.nonce || '' );
 			form.append( 'order_id', orderId( box ) );
@@ -656,23 +591,35 @@
 						throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось найти ПВЗ.' );
 					}
 					points = Array.isArray( payload.data && payload.data.points ) ? payload.data.points.map( normalizePickupPoint ) : [];
-					previewPoint = null;
+					previewPoint = matchSelectedPickup( points, previewPoint || selectedPickupPoints.get( box ) );
+					if ( 'search' === mode && value ) {
+						searchMarker = searchMarkerFromQuery( points, value );
+					}
 					const withCoordinates = points.filter( function ( point ) {
 						return point.lat !== null && point.lng !== null;
 					} ).length;
 					status.textContent = points.length
-						? 'Найдено: ' + points.length + ( withCoordinates < points.length ? '. Часть ПВЗ без координат доступна только в списке.' : '' )
+						? 'Найдено: ' + points.length + ( searchMarker ? '. Булавка показывает найденный адрес/совпадение, выберите ПВЗ в списке или на карте.' : '' ) + ( withCoordinates < points.length ? '. Часть ПВЗ без координат доступна только в списке.' : '' )
 						: ( mode === 'location' ? 'ПВЗ для выбранного населенного пункта не найдены. Попробуйте поиск по адресу или индексу.' : 'ПВЗ не найдены.' );
 					if ( selected ) {
 						selected.textContent = 'Выберите ПВЗ на карте или в списке.';
 					}
 					if ( provider && provider.renderMarkers ) {
-						provider.renderMarkers( points, { activePointId: null } );
-						if ( provider.fitToMarkers ) {
+						provider.renderMarkers( points, { activePointId: previewPoint ? pointId( previewPoint ) : null, searchMarker: searchMarker } );
+						if ( searchMarker && provider.setCenter ) {
+							provider.setCenter( searchMarker.lat, searchMarker.lng, 15 );
+						} else if ( previewPoint && provider.focusPoint ) {
+							provider.focusPoint( previewPoint );
+						} else if ( provider.fitToMarkers ) {
 							provider.fitToMarkers();
 						}
 					}
 					renderPickupPoints();
+					if ( previewPoint ) {
+						preview( previewPoint );
+					} else if ( 'search' === mode && value && ! searchMarker ) {
+						status.textContent += ' Геокодинг адреса недоступен, выберите ПВЗ из списка.';
+					}
 				} )
 				.catch( function ( error ) {
 					status.textContent = error && error.message ? error.message : 'Не удалось найти ПВЗ.';
@@ -692,6 +639,40 @@
 				} ).join( '' ),
 				'</tbody></table>'
 			].join( '' );
+		}
+
+		function matchSelectedPickup( list, pickup ) {
+			const id = pointId( pickup );
+			if ( ! id ) {
+				return null;
+			}
+			return list.find( function ( point ) {
+				return pointId( point ) === id || ( pickup.point_code && point.point_code === pickup.point_code );
+			} ) || normalizePickupPoint( pickup );
+		}
+
+		function scrollActivePickupRow() {
+			const active = list.querySelector( '.is-active[data-wdc-pickup-picker-row]' );
+			if ( active && active.scrollIntoView ) {
+				active.scrollIntoView( { block: 'nearest' } );
+			}
+		}
+
+		function searchMarkerFromQuery( list, value ) {
+			const needle = String( value || '' ).trim().toLowerCase();
+			if ( ! needle ) {
+				return null;
+			}
+			const matched = list.find( function ( point ) {
+				return point.lat !== null && point.lng !== null && (
+					String( point.point_postcode || '' ).toLowerCase().indexOf( needle ) !== -1 ||
+					String( pickupPointLabel( point ) ).toLowerCase().indexOf( needle ) !== -1 ||
+					String( point.point_code || '' ).toLowerCase().indexOf( needle ) !== -1
+				);
+			} ) || list.find( function ( point ) {
+				return point.lat !== null && point.lng !== null;
+			} );
+			return matched ? { lat: matched.lat, lng: matched.lng, label: value } : null;
 		}
 
 		root.addEventListener( 'click', function ( event ) {
@@ -822,13 +803,6 @@
 			return;
 		}
 
-		const normalizeAddressButton = event.target && event.target.closest( '[data-wdc-normalize-pickup-address]' );
-		if ( normalizeAddressButton ) {
-			event.preventDefault();
-			normalizePickupAddress( normalizeAddressButton );
-			return;
-		}
-
 		const saveButton = event.target && event.target.closest( '[data-wdc-order-delivery-save]' );
 		if ( saveButton ) {
 			event.preventDefault();
@@ -848,14 +822,6 @@
 
 	document.addEventListener( 'input', function ( event ) {
 		const input = event.target;
-		if ( input && input.matches && input.matches( '[data-wdc-pickup-address-line]' ) ) {
-			const box = closestBox( input );
-			if ( box ) {
-				normalizedShippingAddresses.delete( box );
-				updateSaveButton( box );
-			}
-			return;
-		}
 		if ( ! input || ! input.matches || ! input.matches( '[data-wdc-order-delivery-location-input]' ) ) {
 			return;
 		}

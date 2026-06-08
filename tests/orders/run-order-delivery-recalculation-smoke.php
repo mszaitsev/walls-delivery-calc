@@ -348,6 +348,11 @@ $order = new WdcRecalcOrder(
 $order->meta['_wdc_delivery_calculation_data'] = array( 'destination' => array( 'city_display_name' => 'Новосибирск', 'fias_id' => 'fias-1' ) );
 $order->meta['_wdc_platform_city_postcode'] = '630099';
 $order->meta['_wdc_platform_city_fias_id'] = 'fias-1';
+$order->meta['_wdc_pickup_point_code'] = '630099-OPS';
+$order->meta['_wdc_pickup_point_type'] = 'OPS';
+$order->meta['_wdc_pickup_point_address'] = 'Новосибирск, Красный проспект, 10';
+$order->meta['_wdc_pickup_point_postcode'] = '630099';
+$order->meta['_wdc_pickup_point_snapshot'] = wp_json_encode( array( 'point_code' => '630099-OPS', 'point_name' => 'ОПС 630099', 'point_address' => 'Новосибирск, Красный проспект, 10' ) );
 $GLOBALS['wdc_recalc_orders'][101] = $order;
 
 $metabox = new OrderDeliveryMetabox( new OrderShipmentRepository() );
@@ -362,6 +367,7 @@ recalc_smoke_assert( str_contains( $metabox_html, 'Пересчет достав
 recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-modal-status' ), 'Modal markup must contain status area.' );
 recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-modal-content' ), 'Modal markup must contain content area.' );
 recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-save' ) && str_contains( $metabox_html, 'disabled' ) && str_contains( $metabox_html, 'Сохранить новый вариант доставки' ), 'Modal markup must contain disabled save button.' );
+recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-current-pickup' ) && str_contains( $metabox_html, '630099-OPS' ), 'Modal markup must contain current pickup payload.' );
 
 $service = wdc_recalc_service();
 $before_shipping = $order->shipping_items;
@@ -502,8 +508,13 @@ recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-index="' . "' + escapeAttribute( String( index ) ) + '" ), 'Pickup picker data-index attribute must use escapeAttribute().' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "runSearch( 'location' )" ) && str_contains( $pickup_js, "runSearch( 'search' )" ), 'Pickup picker JS must send location mode for initial load and search mode for manual search.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "const value = mode === 'location' ? '' : String( query.value || '' ).trim();" ), 'Pickup picker initial load must not send postcode as backend query.' );
-recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'normalizedShippingAddresses' ) && str_contains( $pickup_js, 'wdc_order_delivery_recalculate_normalize_address' ), 'JS must store normalized pickup address and call normalization endpoint.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'prefillCurrentPickupIfAvailable' ) && str_contains( $pickup_js, 'data-wdc-order-delivery-current-pickup' ), 'JS must prefill current pickup when location is unchanged.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'scrollActivePickupRow' ) && str_contains( $pickup_js, 'scrollIntoView' ) && str_contains( $pickup_js, 'setActivePoint' ), 'JS marker click must sync active marker and list row.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'searchMarkerFromQuery' ) && str_contains( $pickup_js, 'searchMarker:' ), 'JS manual address search must pass a temporary search marker when possible.' );
+recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'data-wdc-pickup-address-block' ), 'Pickup UI must not render address normalization block.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'wdc_order_delivery_recalculate_save' ) && str_contains( $pickup_js, 'window.location.reload()' ), 'JS must call save endpoint and reload after success.' );
+$pickup_css = file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/order-delivery-recalculation.css' );
+recalc_smoke_assert( is_string( $pickup_css ) && str_contains( $pickup_css, 'overflow: hidden;' ) && str_contains( $pickup_css, '.wdc-order-delivery-pickup-picker__list' ) && str_contains( $pickup_css, 'overflow: auto;' ), 'Pickup picker CSS must keep dialog in viewport and scroll the list separately.' );
 recalc_smoke_assert( $before_shipping === $order->shipping_items, 'Pickup endpoint must not change shipping item data.' );
 recalc_smoke_assert( $before_total === $order->total, 'Pickup endpoint must not change order totals.' );
 recalc_smoke_assert( $before_calc === $order->meta['_wdc_delivery_calculation_data'], 'Pickup endpoint must not change delivery calculation meta.' );
@@ -550,11 +561,11 @@ $invalid_result = $replacement->save(
 		'selected_rate' => $pickup_rate,
 		'selected_tariff' => $pickup_rate['selected_tariff'],
 		'selected_pickup_point' => array(),
-		'normalized_shipping_address' => $normalized_address,
+		'normalized_shipping_address' => array(),
 	)
 );
 recalc_smoke_assert( false === $invalid_result['success'] && $invalid_before_meta === $invalid_pickup->meta, 'Save pickup must require selectedPickupPoint and must not mutate order on validation error.' );
-$invalid_result = $replacement->save(
+$valid_pickup_without_address = $replacement->save(
 	$invalid_pickup,
 	array(
 		'selected_location' => $selected_location,
@@ -564,7 +575,7 @@ $invalid_result = $replacement->save(
 		'normalized_shipping_address' => array(),
 	)
 );
-recalc_smoke_assert( false === $invalid_result['success'], 'Save pickup must require normalized shipping address.' );
+recalc_smoke_assert( true === $valid_pickup_without_address['success'], 'Save pickup must not require normalized shipping address.' );
 
 $no_shipping_order = new WdcRecalcOrder( 106, array() );
 $no_shipping_order->shipping_items = array();
@@ -589,11 +600,11 @@ $replace_result = $replacement->save(
 		'selected_rate' => $pickup_rate,
 		'selected_tariff' => $pickup_rate['selected_tariff'],
 		'selected_pickup_point' => $pickup_point,
-		'normalized_shipping_address' => $normalized_address,
+		'normalized_shipping_address' => array(),
 	)
 );
 recalc_smoke_assert( true === $replace_result['success'] && 400.0 === (float) ( $replace_order->shipping_items['total'] ?? 0 ), 'Save must replace the single shipping item.' );
-recalc_smoke_assert( 'Тверская, 10' === $replace_order->get_shipping_address_1(), 'Save pickup must write normalized manager address to shipping address.' );
+recalc_smoke_assert( 'Красный проспект' === $replace_order->get_shipping_address_1(), 'Save pickup must keep existing street address when no courier address is normalized.' );
 recalc_smoke_assert( 'Москва, ул. Тверская, 1' !== $replace_order->get_shipping_address_1(), 'Save pickup must not write pickup point address to shipping address.' );
 recalc_smoke_assert( '101000-OPS' === ( $replace_order->meta['_wdc_pickup_point_code'] ?? '' ), 'Save pickup must write pickup meta.' );
 recalc_smoke_assert( str_contains( (string) ( $replace_order->meta['_wdc_pickup_point_snapshot'] ?? '' ), '101000-OPS' ), 'Save pickup must write pickup raw snapshot.' );

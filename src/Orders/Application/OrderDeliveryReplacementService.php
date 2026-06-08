@@ -41,9 +41,6 @@ final class OrderDeliveryReplacementService {
 			if ( '' === trim( (string) ( $pickup['point_code'] ?? '' ) ) ) {
 				return array( 'success' => false, 'message' => 'Для pickup-варианта выберите ПВЗ.' );
 			}
-			if ( empty( $address['normalized'] ) || ! empty( $address['fallback'] ) ) {
-				return array( 'success' => false, 'message' => 'Для pickup-варианта проверьте и нормализуйте адрес доставки.' );
-			}
 		}
 
 		$old = $this->note_snapshot( $order );
@@ -244,7 +241,7 @@ final class OrderDeliveryReplacementService {
 			'set_shipping_city' => (string) ( $address['city'] ?? $location['city_value'] ?? $location['city_name'] ?? $location['display_name'] ?? '' ),
 			'set_shipping_postcode' => (string) ( $address['postcode'] ?? $location['postal_code'] ?? $location['postcode'] ?? '' ),
 		);
-		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
+		if ( DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' ) && array() !== $address ) {
 			$values['set_shipping_address_1'] = (string) ( $address['address_1'] ?? '' );
 			$values['set_shipping_address_2'] = (string) ( $address['address_2'] ?? '' );
 		}
