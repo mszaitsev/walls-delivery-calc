@@ -113,7 +113,7 @@ final class OrderDeliveryRecalculationService {
 			'crossed_price_html'    => '',
 			'delivery_comment'      => '',
 			'comments'              => array(),
-			'requires_pickup_point' => true,
+			'requires_pickup_point' => DeliveryType::PICKUP === $delivery_type,
 			'selected'              => false,
 			'is_grouped'            => true,
 			'tariff_variants'       => array_map( array( $this, 'tariff_payload' ), $rates ),
