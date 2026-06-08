@@ -189,7 +189,7 @@ final class WdcRecalcOrder {
 	public function add_item( object $item ): void { $this->shipping_items[] = $item; }
 	public function calculate_totals( bool $and_taxes = true ): void {
 		$shipping = $this->get_items( 'shipping' )[0] ?? array();
-		$shipping_total = is_array( $shipping ) ? (float) ( $shipping['total'] ?? 0 ) : 0.0;
+		$shipping_total = is_array( $shipping ) ? (float) ( $shipping['total'] ?? 0 ) : ( is_object( $shipping ) && method_exists( $shipping, 'get_total' ) ? (float) $shipping->get_total() : 0.0 );
 		$this->total = 5000.0 + $shipping_total;
 	}
 	public function get_total(): float { return $this->total; }
@@ -243,9 +243,35 @@ final class WdcRecalcCarrier implements CarrierAdapterInterface {
 				'tariff_selector_group' => true,
 				'pickup_method_title' => 'Почта России до отделения',
 				'courier_method_title' => 'Почта России до двери',
-				'api_base_price_rub' => $price,
+				'api_base_price_rub' => $price - 50,
+				'api_price_with_vat_rub' => $price - 40,
 				'final_price_rub' => $price,
-				'package' => array( 'weight_g' => 1000 ),
+				'package' => array(
+					'products_weight_g' => 1000,
+					'packaging_weight_g' => 200,
+					'final_weight_g' => 1200,
+					'include_packaging_weight' => true,
+					'packaging_weight_mode' => 'fixed',
+				),
+				'api' => array(
+					'api_base_price_rub' => $price - 50,
+					'delivery_days' => $days,
+					'delivery_text' => $days . ' дня',
+					'request_params' => array( 'object' => $object ),
+					'cache_hit' => false,
+					'http_code' => 200,
+				),
+				'rules' => array(
+					'rules_source' => 'runtime',
+					'applied_rules' => array( 'base' ),
+					'formula_visualization' => array( 'API + 50 руб.' ),
+					'round_up_applied' => false,
+					'minimum_price_applied' => false,
+				),
+				'result' => array(
+					'final_price_rub' => $price,
+					'final_delivery_text' => $days . ' дня',
+				),
 			)
 		);
 	}
@@ -368,6 +394,7 @@ recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-modal
 recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-modal-content' ), 'Modal markup must contain content area.' );
 recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-save' ) && str_contains( $metabox_html, 'disabled' ) && str_contains( $metabox_html, 'Сохранить новый вариант доставки' ), 'Modal markup must contain disabled save button.' );
 recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-current-pickup' ) && str_contains( $metabox_html, '630099-OPS' ), 'Modal markup must contain current pickup payload.' );
+recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-current-shipping-address' ) && str_contains( $metabox_html, 'Красный проспект' ), 'Modal markup must contain current shipping address payload for courier prefill.' );
 
 $service = wdc_recalc_service();
 $before_shipping = $order->shipping_items;
@@ -510,8 +537,10 @@ recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "runSe
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "const value = mode === 'location' ? '' : String( query.value || '' ).trim();" ), 'Pickup picker initial load must not send postcode as backend query.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'prefillCurrentPickupIfAvailable' ) && str_contains( $pickup_js, 'data-wdc-order-delivery-current-pickup' ), 'JS must prefill current pickup when location is unchanged.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'scrollActivePickupRow' ) && str_contains( $pickup_js, 'scrollIntoView' ) && str_contains( $pickup_js, 'setActivePoint' ), 'JS marker click must sync active marker and list row.' );
-recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'searchMarkerFromQuery' ) && str_contains( $pickup_js, 'searchMarker:' ), 'JS manual address search must pass a temporary search marker when possible.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'geocodeAddressAction' ) && str_contains( $pickup_js, 'wdc_order_delivery_recalculate_geocode_address' ) && str_contains( $pickup_js, 'searchMarker:' ), 'JS manual address search must geocode through admin endpoint and pass a temporary search marker.' );
+recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'searchMarkerFromQuery' ), 'JS manual address search must not use the first pickup point as an address marker fallback.' );
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'data-wdc-pickup-address-block' ), 'Pickup UI must not render address normalization block.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-wdc-courier-address-block' ) && str_contains( $pickup_js, 'data-wdc-normalize-courier-address' ), 'Courier UI source must render address normalization block.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'wdc_order_delivery_recalculate_save' ) && str_contains( $pickup_js, 'window.location.reload()' ), 'JS must call save endpoint and reload after success.' );
 $pickup_css = file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/order-delivery-recalculation.css' );
 recalc_smoke_assert( is_string( $pickup_css ) && str_contains( $pickup_css, 'overflow: hidden;' ) && str_contains( $pickup_css, '.wdc-order-delivery-pickup-picker__list' ) && str_contains( $pickup_css, 'overflow: auto;' ), 'Pickup picker CSS must keep dialog in viewport and scroll the list separately.' );
@@ -577,6 +606,19 @@ $valid_pickup_without_address = $replacement->save(
 );
 recalc_smoke_assert( true === $valid_pickup_without_address['success'], 'Save pickup must not require normalized shipping address.' );
 
+$invalid_courier = new WdcRecalcOrder( 112, array() );
+$invalid_courier_before = $invalid_courier->shipping_items;
+$invalid_courier_result = $replacement->save(
+	$invalid_courier,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $courier_rate,
+		'selected_tariff' => $courier_rate['selected_tariff'],
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( false === $invalid_courier_result['success'] && $invalid_courier_before === $invalid_courier->shipping_items, 'Save courier must require normalized shipping address and avoid mutation on validation error.' );
+
 $no_shipping_order = new WdcRecalcOrder( 106, array() );
 $no_shipping_order->shipping_items = array();
 $create_result = $replacement->save(
@@ -585,6 +627,7 @@ $create_result = $replacement->save(
 		'selected_location' => $selected_location,
 		'selected_rate' => $courier_rate,
 		'selected_tariff' => $courier_rate['selected_tariff'],
+		'normalized_shipping_address' => $normalized_address,
 	)
 );
 recalc_smoke_assert( true === $create_result['success'] && 'wdc_platform_delivery' === ( $no_shipping_order->shipping_items['method_id'] ?? '' ), 'Save must create shipping item when order has none.' );
@@ -604,12 +647,17 @@ $replace_result = $replacement->save(
 	)
 );
 recalc_smoke_assert( true === $replace_result['success'] && 400.0 === (float) ( $replace_order->shipping_items['total'] ?? 0 ), 'Save must replace the single shipping item.' );
-recalc_smoke_assert( 'Красный проспект' === $replace_order->get_shipping_address_1(), 'Save pickup must keep existing street address when no courier address is normalized.' );
-recalc_smoke_assert( 'Москва, ул. Тверская, 1' !== $replace_order->get_shipping_address_1(), 'Save pickup must not write pickup point address to shipping address.' );
+recalc_smoke_assert( 'Москва, ул. Тверская, 1' === $replace_order->get_shipping_address_1() && '' === $replace_order->get_shipping_address_2(), 'Save pickup must write pickup point address to WooCommerce shipping address.' );
+recalc_smoke_assert( '101000' === $replace_order->get_shipping_postcode() && 'RU' === $replace_order->get_shipping_country(), 'Save pickup must write pickup postcode and country to shipping address.' );
 recalc_smoke_assert( '101000-OPS' === ( $replace_order->meta['_wdc_pickup_point_code'] ?? '' ), 'Save pickup must write pickup meta.' );
 recalc_smoke_assert( str_contains( (string) ( $replace_order->meta['_wdc_pickup_point_snapshot'] ?? '' ), '101000-OPS' ), 'Save pickup must write pickup raw snapshot.' );
 recalc_smoke_assert( ! str_contains( (string) ( $replace_order->notes[0]['note'] ?? '' ), 'Тверская, 1' ), 'Order note must not include pickup point address.' );
 recalc_smoke_assert( str_contains( (string) ( $replace_order->notes[0]['note'] ?? '' ), 'Прежний город:' ) && str_contains( (string) ( $replace_order->notes[0]['note'] ?? '' ), 'Новый город:' ), 'Save with changed location must include old/new city in note.' );
+$saved_calc = $replace_order->meta['_wdc_delivery_calculation_data'] ?? array();
+recalc_smoke_assert( is_array( $saved_calc ) && 1000 === ( $saved_calc['package']['products_weight_g'] ?? null ) && 1200 === ( $saved_calc['package']['final_weight_g'] ?? null ), 'Saved calculation data must preserve package products/final weight.' );
+recalc_smoke_assert( 350.0 === (float) ( $saved_calc['api']['api_base_price_rub'] ?? 0 ) && 400.0 === (float) ( $saved_calc['result']['final_price_rub'] ?? 0 ), 'Saved calculation data must keep API base price separate from final price.' );
+recalc_smoke_assert( array( 'base' ) === ( $saved_calc['rules']['applied_rules'] ?? null ) && array( 'API + 50 руб.' ) === ( $saved_calc['rules']['formula_visualization'] ?? null ), 'Saved calculation data must preserve applied rules and formula visualization.' );
+recalc_smoke_assert( str_contains( (string) ( $replace_order->shipping_items['method_title'] ?? '' ), ' - 3 дня' ), 'Saved shipping method title must include delivery text.' );
 
 $object_shipping_order = new WdcRecalcOrder( 111, array() );
 $object_shipping_order->shipping_items = array( new WdcRecalcShippingItem( 'Почта России до отделения', 318.42 ) );
@@ -619,6 +667,7 @@ $object_shipping_result = $replacement->save(
 		'selected_location' => $selected_location,
 		'selected_rate' => $courier_rate,
 		'selected_tariff' => $courier_rate['selected_tariff'],
+		'normalized_shipping_address' => $normalized_address,
 	)
 );
 $object_shipping_note = (string) ( $object_shipping_order->notes[0]['note'] ?? '' );
@@ -633,6 +682,7 @@ $same_city_result = $replacement->save(
 		'selected_location' => array( 'display_name' => 'Новосибирск', 'city_value' => 'Новосибирск', 'region_name' => 'Новосибирская область', 'postal_code' => '630099', 'country_code' => 'RU' ),
 		'selected_rate' => $courier_rate,
 		'selected_tariff' => $courier_rate['selected_tariff'],
+		'normalized_shipping_address' => array_merge( $normalized_address, array( 'city' => 'Новосибирск', 'region' => 'Новосибирская область', 'postcode' => '630099' ) ),
 	)
 );
 recalc_smoke_assert( true === $same_city_result['success'] && ! str_contains( (string) ( $same_city_order->notes[0]['note'] ?? '' ), 'Прежний город:' ), 'Save without city change must add short note.' );
@@ -659,7 +709,21 @@ try {
 	recalc_smoke_assert( $response->success && ! empty( $response->data['address']['normalized'] ), 'Address normalization endpoint must return normalized payload.' );
 }
 
+$_POST = array(
+	'order_id' => 101,
+	'nonce' => 'ok',
+	'selected_location' => wp_json_encode( array_merge( $selected_location, array( 'lat' => 55.760, 'lng' => 37.620 ) ) ),
+	'address_line' => 'Москва, Тверская, 10',
+);
+try {
+	$controller->ajax_geocode_address();
+	recalc_smoke_assert( false, 'Geocode endpoint must send JSON response.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	recalc_smoke_assert( $response->success && 55.760 === (float) $response->data['lat'] && 37.620 === (float) $response->data['lng'], 'Geocode endpoint must return lat/lng through the existing address normalization wrapper.' );
+}
+
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'selected_rate' => wp_json_encode( $courier_rate ), 'selected_tariff' => wp_json_encode( $courier_rate['selected_tariff'] ) );
+$_POST['normalized_shipping_address'] = wp_json_encode( $normalized_address );
 try {
 	$controller->ajax_save();
 	recalc_smoke_assert( false, 'Save endpoint must send JSON response.' );
@@ -695,6 +759,12 @@ try {
 } catch ( WdcRecalcAjaxResponse $response ) {
 	recalc_smoke_assert( ! $response->success && 403 === $response->status, 'Address normalization endpoint must require manage_woocommerce.' );
 }
+try {
+	$controller->ajax_geocode_address();
+	recalc_smoke_assert( false, 'Geocode endpoint must reject missing capability.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	recalc_smoke_assert( ! $response->success && 403 === $response->status, 'Geocode endpoint must require manage_woocommerce.' );
+}
 $GLOBALS['wdc_recalc_current_can'] = true;
 $GLOBALS['wdc_recalc_nonce_ok'] = false;
 try {
@@ -708,6 +778,12 @@ try {
 	recalc_smoke_assert( false, 'Address normalization endpoint must reject bad nonce.' );
 } catch ( WdcRecalcAjaxResponse $response ) {
 	recalc_smoke_assert( ! $response->success && 403 === $response->status, 'Address normalization endpoint must require nonce.' );
+}
+try {
+	$controller->ajax_geocode_address();
+	recalc_smoke_assert( false, 'Geocode endpoint must reject bad nonce.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	recalc_smoke_assert( ! $response->success && 403 === $response->status, 'Geocode endpoint must require nonce.' );
 }
 
 echo "Order delivery recalculation smoke OK\n";

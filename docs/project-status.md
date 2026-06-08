@@ -1,5 +1,7 @@
 # Project Status
 
+0.41.12 note: the order-admin delivery recalculation save-flow now separates pickup and courier address requirements correctly. Pickup saves require selected rate + selected pickup point and write the selected pickup address to WooCommerce shipping address while keeping pickup details in WDC pickup meta and out of order notes. Courier saves expose a manager address-normalization block in the modal and are blocked until a normalized address is supplied. The pickup map's manual address search now geocodes the typed address through the existing DaData/address-normalization wrapper instead of placing a temporary marker on a pickup point fallback. Saved calculation data keeps package/API/rules/result details from rate meta, API base price remains distinct from final cost, method titles include delivery text, and note city-change detection uses canonical location identity to avoid duplicate/same-city old/new lines.
+
 0.41.11 note: order-admin delivery recalculation save UX was refined. Pickup saves now require selected rate + selected pickup point only; manager-entered address normalization is no longer required for pickup and pickup shipping address is not replaced by pickup address. If the selected location was not changed, the modal preselects the order's current pickup point from WDC pickup meta. The pickup map picker now syncs marker clicks with the side list, scrolls the active row into view, supports a temporary search pin for manual address/postcode matches, and keeps the picker dialog within the visible viewport with a separately scrolling list.
 
 0.41.9 note: the order-admin delivery recalculation scenario is now complete. Preview/recalculation stays available for orders with shipments or unusual shipping item state, but saving the selected delivery is guarded separately: save is blocked for multiple shipping items and any registered shipment marker. Valid saves create a missing WooCommerce shipping item or replace the single existing one, rewrite WDC platform/calculation/pickup meta, update shipping address, recalculate totals, add a private Russian order note, and reload the admin page. Pickup saves require selected pickup point; the pickup point address is not written to WooCommerce shipping address or order notes.
@@ -34,7 +36,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.41.11`.
+- Текущая версия: `0.41.12`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/order-delivery-recalculation`.
 - Последнее обновление статуса: 2026-06-08.

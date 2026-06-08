@@ -48,6 +48,37 @@ final class OrderDeliveryAddressNormalizationService {
 
 	/**
 	 * @param array<string,mixed> $selected_location
+	 * @return array{success:bool,lat:?float,lng:?float,address:string,formatted_address:string,message:string}
+	 */
+	public function geocode( object $order, array $selected_location, string $address_line ): array {
+		$result = $this->normalize( $order, $selected_location, $address_line );
+		$payload = is_array( $result['payload'] ?? null ) ? $result['payload'] : array();
+		$lat = $this->coordinate( $payload, array( 'lat', 'latitude', 'geo_lat' ) );
+		$lng = $this->coordinate( $payload, array( 'lng', 'lon', 'longitude', 'geo_lon' ) );
+		if ( null !== $lat && null !== $lng && ! empty( $result['success'] ) ) {
+			$address = (string) ( $payload['full_address'] ?? $address_line );
+			return array(
+				'success' => true,
+				'lat' => $lat,
+				'lng' => $lng,
+				'address' => $address,
+				'formatted_address' => $address,
+				'message' => 'Адрес найден.',
+			);
+		}
+
+		return array(
+			'success' => false,
+			'lat' => null,
+			'lng' => null,
+			'address' => '',
+			'formatted_address' => '',
+			'message' => (string) ( $result['message'] ?? 'Адрес не найден или геокодинг недоступен.' ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $selected_location
 	 * @return array<string,mixed>
 	 */
 	private function checkout_data( object $order, array $selected_location, string $address_line ): array {
@@ -69,6 +100,8 @@ final class OrderDeliveryAddressNormalizationService {
 			'wdc_platform_location_display_name' => (string) ( $selected_location['display_name'] ?? $city ),
 			'wdc_platform_location_region_name' => $region,
 			'wdc_platform_location_city_name' => $city,
+			'wdc_platform_location_lat' => (string) ( $selected_location['lat'] ?? $selected_location['latitude'] ?? '' ),
+			'wdc_platform_location_lng' => (string) ( $selected_location['lng'] ?? $selected_location['longitude'] ?? '' ),
 		);
 	}
 
@@ -100,6 +133,8 @@ final class OrderDeliveryAddressNormalizationService {
 			'full_address' => (string) ( $address['raw_address'] ?? $address_line ),
 			'fias_id' => (string) ( $address['fias_id'] ?? '' ),
 			'gar_id' => (string) ( $address['gar_id'] ?? '' ),
+			'lat' => $this->coordinate( $address, array( 'lat', 'latitude', 'geo_lat' ) ),
+			'lng' => $this->coordinate( $address, array( 'lng', 'lon', 'longitude', 'geo_lon' ) ),
 			'normalized' => ! empty( $address['normalized'] ) && ! empty( $result['success'] ),
 			'fallback' => ! empty( $address['fallback'] ),
 			'source' => (string) ( $result['source'] ?? '' ),
@@ -125,10 +160,30 @@ final class OrderDeliveryAddressNormalizationService {
 			'full_address' => $address_line,
 			'fias_id' => (string) ( $checkout_data['wdc_platform_location_fias_id'] ?? '' ),
 			'gar_id' => (string) ( $checkout_data['wdc_platform_location_gar_object_id'] ?? '' ),
+			'lat' => $this->coordinate( $checkout_data, array( 'wdc_platform_location_lat', 'lat', 'latitude' ) ),
+			'lng' => $this->coordinate( $checkout_data, array( 'wdc_platform_location_lng', 'lng', 'longitude' ) ),
 			'normalized' => true,
 			'fallback' => false,
 			'source' => 'admin',
 			'message' => '',
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @param array<int,string> $keys
+	 */
+	private function coordinate( array $payload, array $keys ): ?float {
+		foreach ( $keys as $key ) {
+			if ( ! array_key_exists( $key, $payload ) || '' === (string) $payload[ $key ] ) {
+				continue;
+			}
+			$value = (float) str_replace( ',', '.', (string) $payload[ $key ] );
+			if ( 0.0 !== $value ) {
+				return $value;
+			}
+		}
+
+		return null;
 	}
 }

@@ -194,6 +194,28 @@
 	display: none;
 }
 
+.wdc-order-delivery-courier-address {
+	display: grid;
+	gap: 8px;
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px solid #f0f0f1;
+}
+
+.wdc-order-delivery-courier-address[hidden] {
+	display: none;
+}
+
+.wdc-order-delivery-courier-address__status,
+.wdc-order-delivery-courier-address__result {
+	color: #646970;
+	font-size: 12px;
+}
+
+.wdc-order-delivery-courier-address__result {
+	font-weight: 600;
+}
+
 .wdc-order-delivery-tariffs {
 	margin-top: 8px;
 	padding-left: 20px;

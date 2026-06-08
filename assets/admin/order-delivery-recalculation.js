@@ -114,6 +114,7 @@
 		selectedPickupPoints.delete( box );
 		normalizedShippingAddresses.delete( box );
 		updatePickupSelectors( box );
+		updateCourierAddressBlocks( box );
 		updateSaveButton( box );
 	}
 
@@ -127,6 +128,7 @@
 		selectedPickupPoints.delete( box );
 		normalizedShippingAddresses.delete( box );
 		updatePickupSelectors( box );
+		updateCourierAddressBlocks( box );
 		updateSaveButton( box );
 	}
 
@@ -149,7 +151,51 @@
 				button.textContent = visible && selectedPickup ? 'Изменить ПВЗ' : 'Выбрать ПВЗ';
 			}
 		} );
+		updateCourierAddressBlocks( box );
 		updateSaveButton( box );
+	}
+
+	function updateCourierAddressBlocks( box ) {
+		if ( ! box ) {
+			return;
+		}
+		const selectedRate = selectedRates.get( box );
+		box.querySelectorAll( '[data-wdc-order-delivery-rate]' ).forEach( function ( rateNode ) {
+			const visible = !! ( selectedRate && ! selectedRate.requires_pickup_point && rateNode.dataset.rateId === selectedRate.id );
+			let block = rateNode.querySelector( '[data-wdc-courier-address-block]' );
+			if ( visible && ! block ) {
+				block = document.createElement( 'div' );
+				block.className = 'wdc-order-delivery-courier-address';
+				block.setAttribute( 'data-wdc-courier-address-block', '1' );
+				block.innerHTML = [
+					'<strong>Адрес доставки</strong>',
+					'<input type="text" class="widefat" data-wdc-courier-address-line placeholder="Улица, дом, квартира">',
+					'<button type="button" class="button" data-wdc-normalize-courier-address>Проверить адрес</button>',
+					'<div class="wdc-order-delivery-courier-address__status" data-wdc-courier-address-status></div>',
+					'<div class="wdc-order-delivery-courier-address__result" data-wdc-courier-address-result></div>'
+				].join( '' );
+				rateNode.appendChild( block );
+			}
+			if ( ! block ) {
+				return;
+			}
+			block.hidden = ! visible;
+			if ( visible ) {
+				const input = block.querySelector( '[data-wdc-courier-address-line]' );
+				if ( input && ! input.value ) {
+					input.value = shippingAddressLine( currentShippingAddress( box ) );
+				}
+				const normalized = normalizedShippingAddresses.get( box );
+				const status = block.querySelector( '[data-wdc-courier-address-status]' );
+				const result = block.querySelector( '[data-wdc-courier-address-result]' );
+				if ( status ) {
+					status.textContent = normalized ? 'Адрес нормализован.' : 'Проверьте адрес через DaData перед сохранением.';
+				}
+				if ( result ) {
+					result.textContent = normalized ? String( normalized.full_address || normalized.address_1 || '' ) : '';
+				}
+			}
+		} );
 	}
 
 	function updateSaveButton( box ) {
@@ -161,6 +207,8 @@
 		let enabled = !! rate;
 		if ( enabled && rate.requires_pickup_point ) {
 			enabled = !! selectedPickupPoints.get( box );
+		} else if ( enabled ) {
+			enabled = !! normalizedShippingAddresses.get( box );
 		}
 		button.disabled = ! enabled || activeSaveRequests.has( box );
 	}
@@ -184,11 +232,13 @@
 		selectedRates.set( box, payload );
 		if ( payload.requires_pickup_point ) {
 			prefillCurrentPickupIfAvailable( box );
+			normalizedShippingAddresses.delete( box );
 		} else {
 			selectedPickupPoints.delete( box );
 			normalizedShippingAddresses.delete( box );
 		}
 		updatePickupSelectors( box );
+		updateCourierAddressBlocks( box );
 	}
 
 	function prefillCurrentPickupIfAvailable( box ) {
@@ -392,6 +442,22 @@
 		return openButton ? String( openButton.dataset.orderId || '' ) : '';
 	}
 
+	function currentShippingAddress( box ) {
+		return jsonScriptPayload( box, '[data-wdc-order-delivery-current-shipping-address]' );
+	}
+
+	function shippingAddressLine( address ) {
+		return [
+			address.postcode || '',
+			address.region || '',
+			address.city || '',
+			address.address_1 || '',
+			address.address_2 || ''
+		].map( function ( part ) {
+			return String( part || '' ).trim();
+		} ).filter( Boolean ).join( ', ' );
+	}
+
 	function pickupPointLabel( point ) {
 		return String( point.point_address || point.address || point.point_name || point.point_code || '' );
 	}
@@ -439,6 +505,89 @@
 				activeSaveRequests.delete( box );
 				setLoading( button, false );
 				updateSaveButton( box );
+			} );
+	}
+
+	function normalizeCourierAddress( button ) {
+		const box = closestBox( button );
+		const block = button ? button.closest( '[data-wdc-courier-address-block]' ) : null;
+		const input = block ? block.querySelector( '[data-wdc-courier-address-line]' ) : null;
+		const status = block ? block.querySelector( '[data-wdc-courier-address-status]' ) : null;
+		const result = block ? block.querySelector( '[data-wdc-courier-address-result]' ) : null;
+		if ( ! box || ! input ) {
+			return;
+		}
+		const form = new FormData();
+		form.append( 'action', config.normalizeAddressAction || 'wdc_order_delivery_recalculate_normalize_address' );
+		form.append( 'nonce', config.nonce || '' );
+		form.append( 'order_id', orderId( box ) );
+		form.append( 'selected_location', JSON.stringify( selectedLocations.get( box ) || {} ) );
+		form.append( 'address_line', String( input.value || '' ) );
+		normalizedShippingAddresses.delete( box );
+		updateSaveButton( box );
+		setLoading( button, true );
+		if ( status ) {
+			status.textContent = 'Проверяем адрес...';
+		}
+		window.fetch( config.ajaxUrl || window.ajaxurl || '', {
+			method: 'POST',
+			credentials: 'same-origin',
+			body: form
+		} )
+			.then( function ( response ) {
+				return response.json();
+			} )
+			.then( function ( payload ) {
+				if ( ! payload || ! payload.success ) {
+					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Адрес не нормализован.' );
+				}
+				const address = payload.data && payload.data.address ? payload.data.address : {};
+				normalizedShippingAddresses.set( box, address );
+				if ( status ) {
+					status.textContent = payload.data && payload.data.message ? payload.data.message : 'Адрес нормализован.';
+				}
+				if ( result ) {
+					result.textContent = String( address.full_address || address.address_1 || '' );
+				}
+			} )
+			.catch( function ( error ) {
+				if ( status ) {
+					status.textContent = error && error.message ? error.message : 'Адрес не нормализован.';
+				}
+				if ( result ) {
+					result.textContent = '';
+				}
+			} )
+			.finally( function () {
+				setLoading( button, false );
+				updateSaveButton( box );
+			} );
+	}
+
+	function geocodeAddress( box, value ) {
+		const form = new FormData();
+		form.append( 'action', config.geocodeAddressAction || 'wdc_order_delivery_recalculate_geocode_address' );
+		form.append( 'nonce', config.nonce || '' );
+		form.append( 'order_id', orderId( box ) );
+		form.append( 'selected_location', JSON.stringify( selectedLocations.get( box ) || {} ) );
+		form.append( 'address_line', value );
+		return window.fetch( config.ajaxUrl || window.ajaxurl || '', {
+			method: 'POST',
+			credentials: 'same-origin',
+			body: form
+		} )
+			.then( function ( response ) {
+				return response.json();
+			} )
+			.then( function ( payload ) {
+				if ( ! payload || ! payload.success || ! payload.data || payload.data.lat === null || payload.data.lng === null ) {
+					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Адрес не найден или геокодинг недоступен.' );
+				}
+				return {
+					lat: parseFloat( payload.data.lat ),
+					lng: parseFloat( payload.data.lng ),
+					label: String( payload.data.formatted_address || payload.data.address || value )
+				};
 			} );
 	}
 
@@ -593,13 +742,29 @@
 					points = Array.isArray( payload.data && payload.data.points ) ? payload.data.points.map( normalizePickupPoint ) : [];
 					previewPoint = matchSelectedPickup( points, previewPoint || selectedPickupPoints.get( box ) );
 					if ( 'search' === mode && value ) {
-						searchMarker = searchMarkerFromQuery( points, value );
+						return geocodeAddress( box, value )
+							.then( function ( marker ) {
+								searchMarker = marker;
+								renderSearchResults( mode, value, 'Адрес найден через DaData.' );
+							} )
+							.catch( function ( error ) {
+								searchMarker = null;
+								renderSearchResults( mode, value, error && error.message ? error.message : 'Адрес не найден или геокодинг недоступен.' );
+							} );
 					}
+					renderSearchResults( mode, value, '' );
+				} )
+				.catch( function ( error ) {
+					status.textContent = error && error.message ? error.message : 'Не удалось найти ПВЗ.';
+				} );
+		}
+
+		function renderSearchResults( mode, value, geocodeMessage ) {
 					const withCoordinates = points.filter( function ( point ) {
 						return point.lat !== null && point.lng !== null;
 					} ).length;
 					status.textContent = points.length
-						? 'Найдено: ' + points.length + ( searchMarker ? '. Булавка показывает найденный адрес/совпадение, выберите ПВЗ в списке или на карте.' : '' ) + ( withCoordinates < points.length ? '. Часть ПВЗ без координат доступна только в списке.' : '' )
+						? 'Найдено: ' + points.length + ( searchMarker ? '. Булавка показывает найденный адрес, выберите ПВЗ в списке или на карте.' : '' ) + ( geocodeMessage && ! searchMarker ? ' ' + geocodeMessage : '' ) + ( withCoordinates < points.length ? '. Часть ПВЗ без координат доступна только в списке.' : '' )
 						: ( mode === 'location' ? 'ПВЗ для выбранного населенного пункта не найдены. Попробуйте поиск по адресу или индексу.' : 'ПВЗ не найдены.' );
 					if ( selected ) {
 						selected.textContent = 'Выберите ПВЗ на карте или в списке.';
@@ -618,12 +783,8 @@
 					if ( previewPoint ) {
 						preview( previewPoint );
 					} else if ( 'search' === mode && value && ! searchMarker ) {
-						status.textContent += ' Геокодинг адреса недоступен, выберите ПВЗ из списка.';
+						status.textContent += ' ' + ( geocodeMessage || 'Геокодинг адреса недоступен, выберите ПВЗ из списка.' );
 					}
-				} )
-				.catch( function ( error ) {
-					status.textContent = error && error.message ? error.message : 'Не удалось найти ПВЗ.';
-				} );
 		}
 
 		function renderPickupPoints() {
@@ -656,23 +817,6 @@
 			if ( active && active.scrollIntoView ) {
 				active.scrollIntoView( { block: 'nearest' } );
 			}
-		}
-
-		function searchMarkerFromQuery( list, value ) {
-			const needle = String( value || '' ).trim().toLowerCase();
-			if ( ! needle ) {
-				return null;
-			}
-			const matched = list.find( function ( point ) {
-				return point.lat !== null && point.lng !== null && (
-					String( point.point_postcode || '' ).toLowerCase().indexOf( needle ) !== -1 ||
-					String( pickupPointLabel( point ) ).toLowerCase().indexOf( needle ) !== -1 ||
-					String( point.point_code || '' ).toLowerCase().indexOf( needle ) !== -1
-				);
-			} ) || list.find( function ( point ) {
-				return point.lat !== null && point.lng !== null;
-			} );
-			return matched ? { lat: matched.lat, lng: matched.lng, label: value } : null;
 		}
 
 		root.addEventListener( 'click', function ( event ) {
@@ -803,6 +947,13 @@
 			return;
 		}
 
+		const normalizeCourierButton = event.target && event.target.closest( '[data-wdc-normalize-courier-address]' );
+		if ( normalizeCourierButton ) {
+			event.preventDefault();
+			normalizeCourierAddress( normalizeCourierButton );
+			return;
+		}
+
 		const saveButton = event.target && event.target.closest( '[data-wdc-order-delivery-save]' );
 		if ( saveButton ) {
 			event.preventDefault();
@@ -822,6 +973,23 @@
 
 	document.addEventListener( 'input', function ( event ) {
 		const input = event.target;
+		if ( input && input.matches && input.matches( '[data-wdc-courier-address-line]' ) ) {
+			const box = closestBox( input );
+			if ( box ) {
+				normalizedShippingAddresses.delete( box );
+				const block = input.closest( '[data-wdc-courier-address-block]' );
+				const status = block && block.querySelector( '[data-wdc-courier-address-status]' );
+				const result = block && block.querySelector( '[data-wdc-courier-address-result]' );
+				if ( status ) {
+					status.textContent = 'Проверьте адрес через DaData перед сохранением.';
+				}
+				if ( result ) {
+					result.textContent = '';
+				}
+				updateSaveButton( box );
+			}
+			return;
+		}
 		if ( ! input || ! input.matches || ! input.matches( '[data-wdc-order-delivery-location-input]' ) ) {
 			return;
 		}

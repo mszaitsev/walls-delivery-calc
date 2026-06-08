@@ -41,12 +41,14 @@ final class OrderDeliveryReplacementService {
 			if ( '' === trim( (string) ( $pickup['point_code'] ?? '' ) ) ) {
 				return array( 'success' => false, 'message' => 'Для pickup-варианта выберите ПВЗ.' );
 			}
+		} elseif ( DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' ) && ( empty( $address['normalized'] ) || ! empty( $address['fallback'] ) ) ) {
+			return array( 'success' => false, 'message' => 'Для курьерской доставки проверьте и нормализуйте адрес доставки.' );
 		}
 
 		$old = $this->note_snapshot( $order );
 		$this->replace_shipping_item( $order, $shipping_items, $rate );
 		$this->write_order_meta( $order, $rate, $location, $pickup, $address );
-		$this->write_shipping_address( $order, $rate, $location, $address );
+		$this->write_shipping_address( $order, $rate, $location, $pickup, $address );
 		if ( method_exists( $order, 'calculate_totals' ) ) {
 			$order->calculate_totals( false );
 		} elseif ( property_exists( $order, 'total' ) ) {
@@ -114,6 +116,14 @@ final class OrderDeliveryReplacementService {
 			$rate['tariff_title'] = (string) ( $tariff['title'] ?? '' );
 			$rate['cost'] = (float) ( $tariff['cost'] ?? $rate['cost'] ?? 0 );
 			$rate['delivery_comment'] = (string) ( $tariff['delivery_comment'] ?? $rate['delivery_comment'] ?? '' );
+			if ( is_array( $tariff['rate_meta'] ?? null ) ) {
+				$rate['rate_meta'] = $tariff['rate_meta'];
+			}
+			foreach ( array( 'api_base_price_rub', 'crossed_price', 'planned_delivery_comment', 'rules_source', 'round_up_applied', 'minimum_price_applied' ) as $key ) {
+				if ( array_key_exists( $key, $tariff ) ) {
+					$rate[ $key ] = $tariff[ $key ];
+				}
+			}
 		} else {
 			$rate['rate_id'] = (string) ( $rate['rate_id'] ?? $id );
 		}
@@ -232,21 +242,29 @@ final class OrderDeliveryReplacementService {
 	/**
 	 * @param array<string,mixed> $rate
 	 * @param array<string,mixed> $location
+	 * @param array<string,mixed> $pickup
 	 * @param array<string,mixed> $address
 	 */
-	private function write_shipping_address( object $order, array $rate, array $location, array $address ): void {
+	private function write_shipping_address( object $order, array $rate, array $location, array $pickup, array $address ): void {
 		$values = array(
 			'set_shipping_country' => (string) ( $address['country'] ?? $location['country_code'] ?? 'RU' ),
 			'set_shipping_state' => (string) ( $address['region'] ?? $location['region_name'] ?? $location['state_value'] ?? '' ),
 			'set_shipping_city' => (string) ( $address['city'] ?? $location['city_value'] ?? $location['city_name'] ?? $location['display_name'] ?? '' ),
 			'set_shipping_postcode' => (string) ( $address['postcode'] ?? $location['postal_code'] ?? $location['postcode'] ?? '' ),
 		);
-		if ( DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' ) && array() !== $address ) {
+		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
+			$values['set_shipping_country'] = 'RU';
+			$values['set_shipping_state'] = (string) ( $pickup['region_name'] ?? $location['region_name'] ?? $location['state_value'] ?? '' );
+			$values['set_shipping_city'] = (string) ( $pickup['city_name'] ?? $location['city_value'] ?? $location['city_name'] ?? $location['display_name'] ?? '' );
+			$values['set_shipping_postcode'] = (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? $location['postal_code'] ?? $location['postcode'] ?? '' );
+			$values['set_shipping_address_1'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
+			$values['set_shipping_address_2'] = '';
+		} elseif ( DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' ) && array() !== $address ) {
 			$values['set_shipping_address_1'] = (string) ( $address['address_1'] ?? '' );
 			$values['set_shipping_address_2'] = (string) ( $address['address_2'] ?? '' );
 		}
 		foreach ( $values as $method => $value ) {
-			if ( '' !== $value && method_exists( $order, $method ) ) {
+			if ( method_exists( $order, $method ) && ( '' !== $value || 'set_shipping_address_2' === $method ) ) {
 				$order->{$method}( $value );
 			}
 		}
@@ -286,18 +304,98 @@ final class OrderDeliveryReplacementService {
 				'point_postcode' => (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? '' ),
 				'point_raw' => $pickup,
 			) : array(),
-			'package' => is_array( $rate_meta['package'] ?? null ) ? $rate_meta['package'] : array(),
-			'api' => array( 'api_base_price_rub' => $api_base ),
-			'rules' => array(
-				'source' => (string) ( $rate['rules_source'] ?? 'none' ),
-				'round_up_applied' => ! empty( $rate['round_up_applied'] ),
-				'minimum_price_applied' => ! empty( $rate['minimum_price_applied'] ),
-				'price_delta_rub' => $final - $api_base,
-			),
-			'result' => array(
+			'package' => $this->calculation_package_data( $rate_meta ),
+			'api' => $this->calculation_api_data( $rate, $rate_meta, $api_base ),
+			'rules' => $this->calculation_rules_data( $rate, $rate_meta, $api_base, $final ),
+			'result' => $this->calculation_result_data( $rate, $rate_meta, $final ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $rate_meta
+	 * @return array<string,mixed>
+	 */
+	private function calculation_package_data( array $rate_meta ): array {
+		$package = is_array( $rate_meta['package'] ?? null ) ? $rate_meta['package'] : array();
+		return array(
+			'products_weight_g' => $package['products_weight_g'] ?? $rate_meta['products_weight_g'] ?? $rate_meta['items_weight_g'] ?? null,
+			'packaging_weight_g' => $package['packaging_weight_g'] ?? $rate_meta['packaging_weight_g'] ?? null,
+			'final_weight_g' => $package['final_weight_g'] ?? $rate_meta['final_weight_g'] ?? $rate_meta['package_weight_g'] ?? null,
+			'include_packaging_weight' => $package['include_packaging_weight'] ?? $rate_meta['include_packaging_weight'] ?? null,
+			'packaging_weight_mode' => $package['packaging_weight_mode'] ?? $rate_meta['packaging_weight_mode'] ?? '',
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $rate_meta
+	 * @return array<string,mixed>
+	 */
+	private function calculation_api_data( array $rate, array $rate_meta, float $api_base ): array {
+		$api = is_array( $rate_meta['api'] ?? null ) ? $rate_meta['api'] : array();
+		$api_result = is_array( $rate_meta['api_result'] ?? null ) ? $rate_meta['api_result'] : array();
+		$data = array(
+			'api_base_price_rub' => $api_base,
+			'api_price_with_vat_rub' => $api['api_price_with_vat_rub'] ?? $rate_meta['api_price_with_vat_rub'] ?? $api_result['paynds'] ?? null,
+			'pay' => $api['pay'] ?? $rate_meta['pay'] ?? $api_result['pay'] ?? null,
+			'nds' => $api['nds'] ?? $rate_meta['nds'] ?? $api_result['nds'] ?? null,
+			'paynds' => $api['paynds'] ?? $rate_meta['paynds'] ?? $api_result['paynds'] ?? null,
+			'delivery_days' => $api['delivery_days'] ?? $rate_meta['delivery_days'] ?? $rate['delivery_days'] ?? null,
+			'delivery_text' => $api['delivery_text'] ?? $rate_meta['delivery_text'] ?? $rate['delivery_comment'] ?? '',
+			'request_params' => $api['request_params'] ?? $rate_meta['request_params'] ?? null,
+			'cache_hit' => $api['cache_hit'] ?? $rate_meta['cache_hit'] ?? null,
+			'http_code' => $api['http_code'] ?? $rate_meta['http_code'] ?? null,
+		);
+
+		return $this->drop_null_values( $data );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $rate_meta
+	 * @return array<string,mixed>
+	 */
+	private function calculation_rules_data( array $rate, array $rate_meta, float $api_base, float $final ): array {
+		$rules = is_array( $rate_meta['rules'] ?? null ) ? $rate_meta['rules'] : array();
+		return array(
+			'source' => (string) ( $rules['source'] ?? $rules['rules_source'] ?? $rate['rules_source'] ?? 'none' ),
+			'rules_source' => (string) ( $rules['rules_source'] ?? $rate['rules_source'] ?? 'none' ),
+			'applied_rules' => is_array( $rules['applied_rules'] ?? null ) ? $rules['applied_rules'] : ( is_array( $rate_meta['applied_rules'] ?? null ) ? $rate_meta['applied_rules'] : array() ),
+			'formula_visualization' => is_array( $rules['formula_visualization'] ?? null ) ? $rules['formula_visualization'] : ( is_array( $rate_meta['formula_visualization'] ?? null ) ? $rate_meta['formula_visualization'] : array() ),
+			'round_up_applied' => ! empty( $rules['round_up_applied'] ) || ! empty( $rate['round_up_applied'] ),
+			'minimum_price_applied' => ! empty( $rules['minimum_price_applied'] ) || ! empty( $rate['minimum_price_applied'] ),
+			'price_delta_rub' => $final - $api_base,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $rate_meta
+	 * @return array<string,mixed>
+	 */
+	private function calculation_result_data( array $rate, array $rate_meta, float $final ): array {
+		$result = is_array( $rate_meta['result'] ?? null ) ? $rate_meta['result'] : array();
+		return $this->drop_null_values(
+			array(
 				'final_price_rub' => $final,
-				'final_delivery_text' => (string) ( $rate['delivery_comment'] ?? '' ),
-			),
+				'final_delivery_text' => (string) ( $result['final_delivery_text'] ?? $rate['delivery_comment'] ?? '' ),
+				'crossed_price_rub' => $result['crossed_price_rub'] ?? $rate['crossed_price'] ?? null,
+				'old_price_rub' => $result['old_price_rub'] ?? $rate['old_price'] ?? null,
+				'fallback' => ! empty( $result['fallback'] ) || ! empty( $rate['fallback_used'] ),
+				'fallback_reason' => (string) ( $result['fallback_reason'] ?? $rate['fallback_reason'] ?? '' ),
+				'fallback_text' => (string) ( $result['fallback_text'] ?? $rate['fallback_text'] ?? '' ),
+			)
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private function drop_null_values( array $data ): array {
+		return array_filter(
+			$data,
+			static fn( mixed $value ): bool => null !== $value && '' !== $value
 		);
 	}
 
@@ -319,6 +417,9 @@ final class OrderDeliveryReplacementService {
 			'total' => property_exists( $order, 'total' ) ? (float) $order->total : ( method_exists( $order, 'get_total' ) ? (float) $order->get_total() : 0.0 ),
 			'city' => method_exists( $order, 'get_shipping_city' ) ? (string) $order->get_shipping_city() : '',
 			'region' => method_exists( $order, 'get_shipping_state' ) ? (string) $order->get_shipping_state() : '',
+			'display_name' => $this->order_meta_string( $order, '_wdc_platform_city_display_name' ),
+			'fias_id' => $this->order_meta_string( $order, '_wdc_platform_city_fias_id' ),
+			'gar_id' => $this->order_meta_string( $order, '_wdc_platform_city_gar_id' ),
 		);
 	}
 
@@ -335,9 +436,9 @@ final class OrderDeliveryReplacementService {
 		}
 
 		return $before . ".\n"
-			. 'Прежний город: ' . trim( (string) $old['city'] . ( '' !== (string) $old['region'] ? ', ' . (string) $old['region'] : '' ) ) . "\n"
+			. 'Прежний город: ' . $this->old_location_label( $old ) . "\n"
 			. $after . "\n"
-			. 'Новый город: ' . trim( $this->location_city( $location ) . ( '' !== (string) ( $location['region_name'] ?? '' ) ? ', ' . (string) $location['region_name'] : '' ) );
+			. 'Новый город: ' . $this->location_label( $location );
 	}
 
 	/**
@@ -345,14 +446,29 @@ final class OrderDeliveryReplacementService {
 	 * @param array<string,mixed> $location
 	 */
 	private function location_changed( array $old, array $location ): bool {
-		$new = $this->location_city( $location );
-		return '' !== $new && $this->normalize( (string) $old['city'] ) !== $this->normalize( $new );
+		$old_fias = (string) ( $old['fias_id'] ?? '' );
+		$new_fias = (string) ( $location['fias_id'] ?? '' );
+		if ( '' !== $old_fias && '' !== $new_fias && $this->normalize( $old_fias ) === $this->normalize( $new_fias ) ) {
+			return false;
+		}
+		$old_gar = (string) ( $old['gar_id'] ?? '' );
+		$new_gar = (string) ( $location['gar_id'] ?? $location['gar_object_id'] ?? '' );
+		if ( '' !== $old_gar && '' !== $new_gar && $this->normalize( $old_gar ) === $this->normalize( $new_gar ) ) {
+			return false;
+		}
+		$old_city = $this->canonical_city( (string) ( $old['city'] ?? $old['display_name'] ?? '' ) );
+		$new_city = $this->canonical_city( $this->location_city( $location ) );
+		$old_region = $this->canonical_region( (string) ( $old['region'] ?? $old['display_name'] ?? '' ) );
+		$new_region = $this->canonical_region( (string) ( $location['region_name'] ?? $location['state_value'] ?? $location['display_name'] ?? '' ) );
+		return '' !== $new_city && ( $old_city !== $new_city || ( '' !== $new_region && '' !== $old_region && $old_region !== $new_region ) );
 	}
 
 	private function method_title( array $rate ): string {
 		$title = (string) ( $rate['label'] ?? '' );
 		$tariff = (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' );
-		return '' !== $tariff && ! str_contains( $title, $tariff ) ? $title . ', ' . $tariff : $title;
+		$title = '' !== $tariff && ! str_contains( $title, $tariff ) ? $title . ', ' . $tariff : $title;
+		$delivery = (string) ( $rate['delivery_comment'] ?? $rate['planned_delivery_comment'] ?? '' );
+		return '' !== $delivery && ! str_contains( $title, $delivery ) ? $title . ' - ' . $delivery : $title;
 	}
 
 	/**
@@ -371,7 +487,8 @@ final class OrderDeliveryReplacementService {
 
 	private function base_price( array $rate ): float {
 		$meta = is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : array();
-		return (float) ( $rate['api_base_price_rub'] ?? $meta['api_base_price_rub'] ?? $rate['cost'] ?? 0 );
+		$api = is_array( $meta['api'] ?? null ) ? $meta['api'] : array();
+		return (float) ( $rate['api_base_price_rub'] ?? $meta['api_base_price_rub'] ?? $api['api_base_price_rub'] ?? $rate['cost'] ?? 0 );
 	}
 
 	private function old_base_price( object $order ): float {
@@ -386,5 +503,40 @@ final class OrderDeliveryReplacementService {
 	private function normalize( string $value ): string {
 		$value = trim( $value );
 		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
+	}
+
+	private function canonical_city( string $value ): string {
+		$value = $this->normalize( $value );
+		$value = preg_replace( '/\b(г|город|с|село|д|деревня|п|поселок|посёлок)\.?\s+/u', '', $value ) ?? $value;
+		$value = preg_replace( '/[^a-zа-яё0-9]+/u', '', $value ) ?? $value;
+		return $value;
+	}
+
+	private function canonical_region( string $value ): string {
+		$value = $this->normalize( $value );
+		$value = preg_replace( '/\b(область|обл|край|республика|респ)\.?\b/u', '', $value ) ?? $value;
+		$value = preg_replace( '/[^a-zа-яё0-9]+/u', '', $value ) ?? $value;
+		return $value;
+	}
+
+	/**
+	 * @param array<string,mixed> $old
+	 */
+	private function old_location_label( array $old ): string {
+		$display = trim( (string) ( $old['display_name'] ?? '' ) );
+		if ( '' !== $display ) {
+			return $display;
+		}
+		return trim( (string) ( $old['city'] ?? '' ) . ( '' !== (string) ( $old['region'] ?? '' ) ? ', ' . (string) $old['region'] : '' ) );
+	}
+
+	private function order_meta_string( object $order, string $key ): string {
+		if ( method_exists( $order, 'get_meta' ) ) {
+			return trim( (string) $order->get_meta( $key, true ) );
+		}
+		if ( property_exists( $order, 'meta' ) && is_array( $order->meta ) ) {
+			return trim( (string) ( $order->meta[ $key ] ?? '' ) );
+		}
+		return '';
 	}
 }

@@ -134,6 +134,7 @@ final class OrderDeliveryRecalculationService {
 			'selected'              => false,
 			'is_grouped'            => false,
 			'tariff_variants'       => array(),
+			'rate_meta'             => $rate->meta,
 		);
 	}
 
@@ -151,6 +152,8 @@ final class OrderDeliveryRecalculationService {
 			'delivery_comment'    => $this->delivery_comment( $rate ),
 			'comments'            => array_values( array_filter( array_map( 'strval', $rate->comments ) ) ),
 			'selected'            => false,
+			'rate_meta'           => $rate->meta,
+			'api_base_price_rub'  => $rate->meta['api_base_price_rub'] ?? null,
 		);
 	}
 

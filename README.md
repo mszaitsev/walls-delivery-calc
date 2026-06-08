@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.41.11.
+Current plugin version: 0.41.12.
+
+Version 0.41.12 fixes the second admin order delivery recalculation save-flow iteration. Manual address search in the pickup map now geocodes the typed address through the existing DaData/address-normalization wrapper and no longer drops a temporary marker onto the first pickup point fallback. Courier saves now show and require a manager-normalized delivery address, while pickup saves require only rate + pickup point and write the selected pickup point address into the WooCommerce shipping address. Saved `_wdc_delivery_calculation_data` now keeps checkout-like package, API, rules and result structures, API base price stays separate from final cost, saved method titles include delivery text, and order notes avoid old/new city lines when the selected settlement is canonically unchanged.
 
 Version 0.41.11 refines the admin order delivery recalculation save UX. Pickup saves now require only a selected rate and pickup point, no manager-entered normalized address; if the order location is unchanged, the modal preselects the order's current pickup point and shows it in the pickup UI. Courier remains independent from pickup selection and can use normalized address payload only when an address is explicitly provided. The pickup map picker now synchronizes marker clicks with the side list, scrolls the active row into view, can show a temporary search pin for manual address/postcode search matches, and keeps the dialog bounded to the viewport with a separately scrolling pickup list.
 
