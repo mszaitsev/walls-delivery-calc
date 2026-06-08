@@ -11,6 +11,7 @@ use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
@@ -277,6 +278,29 @@ final class WdcRecalcCarrier implements CarrierAdapterInterface {
 	}
 }
 
+final class WdcRecalcDadataSuggestionClient implements AddressSuggestionClientInterface {
+	public function __construct( private bool $with_coordinates = true ) {}
+
+	public function suggest( string $stage, string $query, array $context = array() ): array {
+		$data = array(
+			'geo_lat' => $this->with_coordinates ? '54.9914' : '',
+			'geo_lon' => $this->with_coordinates ? '73.3645' : '',
+			'fias_id' => 'fake-address-fias',
+		);
+
+		return array(
+			'success' => true,
+			'suggestions' => array(
+				array(
+					'value' => 'Омск, ул. Ленина, 10',
+					'unrestricted_value' => 'Омская область, г Омск, ул. Ленина, д 10',
+					'data' => $data,
+				),
+			),
+		);
+	}
+}
+
 function wdc_recalc_service(): OrderDeliveryRecalculationService {
 	$registry = new CarrierRegistry();
 	$registry->register( new WdcRecalcCarrier( RussianPostDomesticSettings::CARRIER_KEY ) );
@@ -484,7 +508,8 @@ $backlog_blocked->meta['_wdc_shipments'] = array( 'russian_post_domestic' => arr
 recalc_smoke_assert( true === $service->preview( $backlog_blocked )['success'], 'Preview must remain available when shipment has backlog_order_id.' );
 
 $pickup_repository = wdc_recalc_pickup_repository();
-$controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository );
+$address_normalization = new OrderDeliveryAddressNormalizationService( null, new WdcRecalcDadataSuggestionClient() );
+$controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', $address_normalization );
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok' );
 try {
 	$controller->ajax_preview();
@@ -709,17 +734,23 @@ try {
 	recalc_smoke_assert( $response->success && ! empty( $response->data['address']['normalized'] ), 'Address normalization endpoint must return normalized payload.' );
 }
 
-$_POST = array(
-	'order_id' => 101,
-	'nonce' => 'ok',
-	'selected_location' => wp_json_encode( array_merge( $selected_location, array( 'lat' => 55.760, 'lng' => 37.620 ) ) ),
-	'address_line' => 'Москва, Тверская, 10',
-);
+$_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'address_line' => 'Омск, Ленина, 10' );
 try {
 	$controller->ajax_geocode_address();
 	recalc_smoke_assert( false, 'Geocode endpoint must send JSON response.' );
 } catch ( WdcRecalcAjaxResponse $response ) {
-	recalc_smoke_assert( $response->success && 55.760 === (float) $response->data['lat'] && 37.620 === (float) $response->data['lng'], 'Geocode endpoint must return lat/lng through the existing address normalization wrapper.' );
+	recalc_smoke_assert( $response->success && 54.9914 === (float) $response->data['lat'] && 73.3645 === (float) $response->data['lng'], 'Geocode endpoint must return lat/lng from raw DaData suggestion data.' );
+	recalc_smoke_assert( 55.75 !== (float) $response->data['lat'] && 37.61 !== (float) $response->data['lng'], 'Geocode endpoint must not use the first pickup point coordinates.' );
+	recalc_smoke_assert( str_contains( (string) ( $response->data['formatted_address'] ?? '' ), 'Омская область' ), 'Geocode endpoint must return formatted DaData address.' );
+}
+
+$no_coordinates_controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', new OrderDeliveryAddressNormalizationService( null, new WdcRecalcDadataSuggestionClient( false ) ) );
+$_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'address_line' => 'Омск, Ленина, 10' );
+try {
+	$no_coordinates_controller->ajax_geocode_address();
+	recalc_smoke_assert( false, 'Geocode endpoint without coordinates must send JSON error.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	recalc_smoke_assert( ! $response->success && 400 === $response->status && str_contains( (string) ( $response->data['message'] ?? '' ), 'координаты' ), 'Geocode endpoint must return an error when DaData suggestion has no coordinates.' );
 }
 
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'selected_rate' => wp_json_encode( $courier_rate ), 'selected_tariff' => wp_json_encode( $courier_rate['selected_tariff'] ) );

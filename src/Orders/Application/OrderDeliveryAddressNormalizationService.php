@@ -4,12 +4,14 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Orders\Application;
 
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 
 defined( 'ABSPATH' ) || exit;
 
 final class OrderDeliveryAddressNormalizationService {
 	public function __construct(
-		private ?CheckoutAddressRuntime $runtime = null
+		private ?CheckoutAddressRuntime $runtime = null,
+		private ?AddressSuggestionClientInterface $suggestions = null
 	) {
 	}
 
@@ -51,6 +53,34 @@ final class OrderDeliveryAddressNormalizationService {
 	 * @return array{success:bool,lat:?float,lng:?float,address:string,formatted_address:string,message:string}
 	 */
 	public function geocode( object $order, array $selected_location, string $address_line ): array {
+		$address_line = trim( $address_line );
+		if ( '' === $address_line ) {
+			return array(
+				'success' => false,
+				'lat' => null,
+				'lng' => null,
+				'address' => '',
+				'formatted_address' => '',
+				'message' => 'Введите адрес для поиска.',
+			);
+		}
+
+		if ( $this->suggestions instanceof AddressSuggestionClientInterface ) {
+			$suggestion = $this->geocode_from_suggestions( $selected_location, $address_line );
+			if ( null !== $suggestion ) {
+				return $suggestion;
+			}
+
+			return array(
+				'success' => false,
+				'lat' => null,
+				'lng' => null,
+				'address' => '',
+				'formatted_address' => '',
+				'message' => 'Адрес не найден или координаты недоступны.',
+			);
+		}
+
 		$result = $this->normalize( $order, $selected_location, $address_line );
 		$payload = is_array( $result['payload'] ?? null ) ? $result['payload'] : array();
 		$lat = $this->coordinate( $payload, array( 'lat', 'latitude', 'geo_lat' ) );
@@ -73,7 +103,7 @@ final class OrderDeliveryAddressNormalizationService {
 			'lng' => null,
 			'address' => '',
 			'formatted_address' => '',
-			'message' => (string) ( $result['message'] ?? 'Адрес не найден или геокодинг недоступен.' ),
+			'message' => 'Адрес не найден или координаты недоступны.',
 		);
 	}
 
@@ -167,6 +197,58 @@ final class OrderDeliveryAddressNormalizationService {
 			'source' => 'admin',
 			'message' => '',
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $selected_location
+	 * @return array{success:bool,lat:?float,lng:?float,address:string,formatted_address:string,message:string}|null
+	 */
+	private function geocode_from_suggestions( array $selected_location, string $address_line ): ?array {
+		$response = $this->suggestions?->suggest( 'address', $address_line, $this->suggestion_context( $selected_location ) );
+		if ( ! is_array( $response ) || empty( $response['success'] ) ) {
+			return null;
+		}
+
+		$suggestions = is_array( $response['suggestions'] ?? null ) ? $response['suggestions'] : array();
+		foreach ( $suggestions as $suggestion ) {
+			if ( ! is_array( $suggestion ) ) {
+				continue;
+			}
+			$data = is_array( $suggestion['data'] ?? null ) ? $suggestion['data'] : array();
+			$lat = $this->coordinate( $data, array( 'geo_lat', 'lat', 'latitude' ) );
+			$lng = $this->coordinate( $data, array( 'geo_lon', 'lng', 'lon', 'longitude' ) );
+			if ( null === $lat || null === $lng ) {
+				continue;
+			}
+			$address = (string) ( $suggestion['unrestricted_value'] ?? $suggestion['value'] ?? $address_line );
+
+			return array(
+				'success' => true,
+				'lat' => $lat,
+				'lng' => $lng,
+				'address' => $address,
+				'formatted_address' => $address,
+				'message' => 'Адрес найден.',
+			);
+		}
+
+		return null;
+	}
+
+	/**
+	 * @param array<string,mixed> $selected_location
+	 * @return array<string,string>
+	 */
+	private function suggestion_context( array $selected_location ): array {
+		$context = array(
+			'country_code' => (string) ( $selected_location['country_code'] ?? 'RU' ),
+			'location_fias_id' => (string) ( $selected_location['fias_id'] ?? '' ),
+			'location_city_fias_id' => (string) ( $selected_location['fias_id'] ?? '' ),
+			'location_kladr_id' => (string) ( $selected_location['kladr_id'] ?? '' ),
+			'location_city_kladr_id' => (string) ( $selected_location['city_kladr_id'] ?? $selected_location['kladr_id'] ?? '' ),
+		);
+
+		return array_filter( $context, static fn( string $value ): bool => '' !== trim( $value ) );
 	}
 
 	/**
