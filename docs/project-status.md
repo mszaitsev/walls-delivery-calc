@@ -1,5 +1,7 @@
 # Project Status
 
+0.41.2 note: order-admin delivery recalculation preview now opens in a custom admin modal instead of rendering inline in the `Калькулятор доставок` metabox. The metabox keeps only the `Пересчитать доставку` button when recalculation is allowed; the modal contains header/body/footer, close controls, status/loading/error area, rates content area, and a disabled save placeholder for the next patch. The preview-only boundary is unchanged: no delivery save, pickup selection, location override, shipping item replacement, totals recalculation, shipping address change, order note, or `_wdc_delivery_calculation_data` update.
+
 0.41.0 note: the first order-admin delivery recalculation foundation is implemented as preview-only UI. `Калькулятор доставок` can request a recalculation from the WooCommerce order, WDC builds a `QuoteRequest` from order items/address/meta, runs all available services through `CheckoutOrchestrator`, renders pickup/courier rates and Russian Post domestic tariff groups, and blocks preview when `_wdc_shipments` indicates an already created shipment. This version intentionally does not save delivery changes, replace shipping items, recalculate totals, change shipping address, select pickup points, override locations, create order notes, or update `_wdc_delivery_calculation_data`.
 
 0.40.0 note: documentation audit branch. No runtime functionality was added. The status below was refreshed against the current codebase, profile documents, migrations, assets and smoke-test entrypoints after the 0.39.x Russian Post shipment/status work.
@@ -20,7 +22,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.41.0`.
+- Текущая версия: `0.41.2`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/order-delivery-recalculation`.
 - Последнее обновление статуса: 2026-06-08.

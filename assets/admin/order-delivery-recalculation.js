@@ -2,13 +2,29 @@
 	'use strict';
 
 	const config = window.wdcOrderDeliveryRecalculation || {};
+	const activeRequests = new WeakSet();
 
 	function closestBox( element ) {
 		return element ? element.closest( '[data-wdc-order-delivery-recalculation]' ) : null;
 	}
 
+	function modal( box ) {
+		return box ? box.querySelector( '[data-wdc-order-delivery-modal]' ) : null;
+	}
+
+	function modalDialog( box ) {
+		const node = modal( box );
+		return node ? node.querySelector( '.wdc-order-delivery-modal__dialog' ) : null;
+	}
+
+	function modalContent( box ) {
+		const node = modal( box );
+		return node ? node.querySelector( '[data-wdc-order-delivery-modal-content]' ) : null;
+	}
+
 	function setStatus( box, message, type ) {
-		const status = box && box.querySelector( '[data-wdc-order-delivery-preview-status]' );
+		const node = modal( box );
+		const status = node && node.querySelector( '[data-wdc-order-delivery-modal-status]' );
 		if ( ! status ) {
 			return;
 		}
@@ -25,14 +41,51 @@
 		button.textContent = loading ? 'Расчет...' : button.dataset.originalText;
 	}
 
+	function openModal( box ) {
+		const node = modal( box );
+		if ( ! node ) {
+			return;
+		}
+		node.hidden = false;
+		document.body.classList.add( 'wdc-order-delivery-modal-open' );
+		window.setTimeout( function () {
+			const close = node.querySelector( '[data-wdc-order-delivery-modal-close]' );
+			if ( close && close.focus ) {
+				close.focus();
+				return;
+			}
+			const dialog = modalDialog( box );
+			if ( dialog && dialog.focus ) {
+				dialog.focus();
+			}
+		}, 0 );
+	}
+
+	function closeModal( box ) {
+		const node = modal( box );
+		if ( ! node ) {
+			return;
+		}
+		node.hidden = true;
+		if ( ! document.querySelector( '[data-wdc-order-delivery-modal]:not([hidden])' ) ) {
+			document.body.classList.remove( 'wdc-order-delivery-modal-open' );
+		}
+	}
+
+	function resetModal( box ) {
+		const content = modalContent( box );
+		if ( content ) {
+			content.innerHTML = '';
+		}
+		clearPickupPlaceholders( box );
+	}
+
 	function renderPreview( box, html ) {
-		const preview = box.querySelector( '[data-wdc-order-delivery-preview]' );
-		const content = box.querySelector( '[data-wdc-order-delivery-preview-content]' );
-		if ( ! preview || ! content ) {
+		const content = modalContent( box );
+		if ( ! content ) {
 			return;
 		}
 		content.innerHTML = html || '';
-		preview.hidden = false;
 		clearPickupPlaceholders( box );
 	}
 
@@ -61,7 +114,7 @@
 	function requestPreview( button ) {
 		const box = closestBox( button );
 		const orderId = button ? String( button.dataset.orderId || '' ) : '';
-		if ( ! box || ! orderId ) {
+		if ( ! box || ! orderId || activeRequests.has( box ) ) {
 			return;
 		}
 
@@ -70,10 +123,9 @@
 		form.append( 'nonce', config.nonce || '' );
 		form.append( 'order_id', orderId );
 
-		const preview = box.querySelector( '[data-wdc-order-delivery-preview]' );
-		if ( preview ) {
-			preview.hidden = false;
-		}
+		activeRequests.add( box );
+		openModal( box );
+		resetModal( box );
 		setStatus( box, 'Считаем доступные варианты доставки...', 'loading' );
 		setLoading( button, true );
 
@@ -96,17 +148,27 @@
 				setStatus( box, error && error.message ? error.message : 'Не удалось пересчитать доставку.', 'error' );
 			} )
 			.finally( function () {
+				activeRequests.delete( box );
 				setLoading( button, false );
 			} );
 	}
 
 	document.addEventListener( 'click', function ( event ) {
-		const button = event.target && event.target.closest( '[data-wdc-order-delivery-recalculate]' );
-		if ( ! button ) {
+		const openButton = event.target && event.target.closest( '[data-wdc-order-delivery-recalculate]' );
+		if ( openButton ) {
+			event.preventDefault();
+			requestPreview( openButton );
 			return;
 		}
-		event.preventDefault();
-		requestPreview( button );
+
+		const closeButton = event.target && event.target.closest( '[data-wdc-order-delivery-modal-close]' );
+		if ( closeButton ) {
+			event.preventDefault();
+			const box = closestBox( closeButton );
+			if ( box ) {
+				closeModal( box );
+			}
+		}
 	} );
 
 	document.addEventListener( 'change', function ( event ) {
@@ -115,5 +177,17 @@
 			return;
 		}
 		selectedRateChanged( input );
+	} );
+
+	document.addEventListener( 'keydown', function ( event ) {
+		if ( 'Escape' !== event.key ) {
+			return;
+		}
+		document.querySelectorAll( '[data-wdc-order-delivery-modal]:not([hidden])' ).forEach( function ( node ) {
+			const box = closestBox( node );
+			if ( box ) {
+				closeModal( box );
+			}
+		} );
 	} );
 } )();

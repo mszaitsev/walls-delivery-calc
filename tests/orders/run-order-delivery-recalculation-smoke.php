@@ -19,6 +19,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryQuote;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryRateRenderer;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryRecalculationAdminController;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
@@ -212,6 +213,19 @@ $order->meta['_wdc_platform_city_postcode'] = '630099';
 $order->meta['_wdc_platform_city_fias_id'] = 'fias-1';
 $GLOBALS['wdc_recalc_orders'][101] = $order;
 
+$metabox = new OrderDeliveryMetabox( new OrderShipmentRepository() );
+ob_start();
+$metabox->render( $order );
+$metabox_html = (string) ob_get_clean();
+recalc_smoke_assert( str_contains( $metabox_html, 'Пересчитать доставку' ), 'Metabox must contain recalculation button.' );
+recalc_smoke_assert( ! str_contains( $metabox_html, 'data-wdc-order-delivery-preview' ), 'Metabox must not contain permanent inline preview container.' );
+recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-modal' ), 'Metabox must contain modal markup.' );
+recalc_smoke_assert( str_contains( $metabox_html, 'role="dialog"' ) && str_contains( $metabox_html, 'aria-modal="true"' ), 'Modal markup must expose dialog accessibility attributes.' );
+recalc_smoke_assert( str_contains( $metabox_html, 'Пересчет доставки' ), 'Modal markup must contain heading.' );
+recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-modal-status' ), 'Modal markup must contain status area.' );
+recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-modal-content' ), 'Modal markup must contain content area.' );
+recalc_smoke_assert( str_contains( $metabox_html, 'disabled' ) && str_contains( $metabox_html, 'Сохранение будет добавлено следующим шагом' ), 'Modal markup must contain disabled save placeholder.' );
+
 $service = wdc_recalc_service();
 $before_shipping = $order->shipping_items;
 $before_total = $order->total;
@@ -249,6 +263,10 @@ recalc_smoke_assert( $before_calc === $order->meta['_wdc_delivery_calculation_da
 $blocked = new WdcRecalcOrder( 102, array() );
 $blocked->meta['_wdc_shipments'] = array( 'russian_post_domestic' => array( 'status' => 'created' ) );
 recalc_smoke_assert( false === $service->preview( $blocked )['success'], 'Preview must be blocked when shipment status is created.' );
+ob_start();
+$metabox->render( $blocked );
+$blocked_metabox_html = (string) ob_get_clean();
+recalc_smoke_assert( str_contains( $blocked_metabox_html, 'Пересчет доставки недоступен: по заказу уже создано отправление.' ) && ! str_contains( $blocked_metabox_html, 'data-wdc-order-delivery-recalculate' ), 'Blocked metabox must show explanation instead of active button.' );
 $tracking_blocked = new WdcRecalcOrder( 103, array() );
 $tracking_blocked->meta['_wdc_shipments'] = array( 'russian_post_domestic' => array( 'barcode' => 'RA123' ) );
 recalc_smoke_assert( false === $service->preview( $tracking_blocked )['success'], 'Preview must be blocked when shipment has tracking number.' );
