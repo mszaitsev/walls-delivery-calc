@@ -1,5 +1,5 @@
-Структура папок
-Серийный номер тома: 000000FB A0AC:74BD
+Folder PATH listing
+Volume serial number is 0000005F A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
