@@ -714,20 +714,65 @@
 
 		function runSearch( mode ) {
 			mode = mode === 'location' ? 'location' : 'search';
-			const form = new FormData();
 			const value = mode === 'location' ? '' : String( query.value || '' ).trim();
+			if ( 'search' === mode ) {
+				if ( ! value ) {
+					status.textContent = 'Введите адрес для поиска.';
+					return;
+				}
+				status.textContent = 'Ищем адрес через DaData...';
+				geocodeAddress( box, value )
+					.then( function ( marker ) {
+						searchMarker = marker;
+						if ( points.length ) {
+							renderSearchResults( 'address', value, 'Адрес найден через DaData. Показаны ПВЗ выбранного населенного пункта.' );
+							return;
+						}
+						return loadPickupPointsForLocation().then( function () {
+							renderSearchResults( 'address', value, 'Адрес найден через DaData. Показаны ПВЗ выбранного населенного пункта.' );
+						} );
+					} )
+					.catch( function ( error ) {
+						searchMarker = null;
+						const message = error && error.message ? error.message : 'Адрес не найден или геокодинг недоступен.';
+						if ( points.length ) {
+							renderSearchResults( 'address', value, message );
+							return;
+						}
+						loadPickupPointsForLocation()
+							.then( function () {
+								renderSearchResults( 'address', value, message );
+							} )
+							.catch( function () {
+								status.textContent = message;
+							} );
+					} );
+				return;
+			}
+
 			searchMarker = null;
+			status.textContent = 'Загружаем ПВЗ выбранного населенного пункта...';
+			list.innerHTML = '';
+			loadPickupPointsForLocation()
+				.then( function () {
+					renderSearchResults( 'location', value, '' );
+				} )
+				.catch( function ( error ) {
+					status.textContent = error && error.message ? error.message : 'Не удалось найти ПВЗ.';
+				} );
+		}
+
+		function loadPickupPointsForLocation() {
+			const form = new FormData();
 			form.append( 'action', config.pickupSearchAction || 'wdc_order_delivery_recalculate_pickup_search' );
 			form.append( 'nonce', config.nonce || '' );
 			form.append( 'order_id', orderId( box ) );
 			form.append( 'selected_location', JSON.stringify( location ) );
 			form.append( 'selected_rate', JSON.stringify( rate ) );
-			form.append( 'mode', mode );
-			form.append( 'query', value );
-			form.append( 'limit', mode === 'location' ? '300' : '50' );
-			status.textContent = mode === 'location' ? 'Загружаем ПВЗ выбранного населенного пункта...' : 'Идет поиск ПВЗ...';
-			list.innerHTML = '';
-			window.fetch( config.ajaxUrl || window.ajaxurl || '', {
+			form.append( 'mode', 'location' );
+			form.append( 'query', '' );
+			form.append( 'limit', '300' );
+			return window.fetch( config.ajaxUrl || window.ajaxurl || '', {
 				method: 'POST',
 				credentials: 'same-origin',
 				body: form
@@ -741,21 +786,6 @@
 					}
 					points = Array.isArray( payload.data && payload.data.points ) ? payload.data.points.map( normalizePickupPoint ) : [];
 					previewPoint = matchSelectedPickup( points, previewPoint || selectedPickupPoints.get( box ) );
-					if ( 'search' === mode && value ) {
-						return geocodeAddress( box, value )
-							.then( function ( marker ) {
-								searchMarker = marker;
-								renderSearchResults( mode, value, 'Адрес найден через DaData.' );
-							} )
-							.catch( function ( error ) {
-								searchMarker = null;
-								renderSearchResults( mode, value, error && error.message ? error.message : 'Адрес не найден или геокодинг недоступен.' );
-							} );
-					}
-					renderSearchResults( mode, value, '' );
-				} )
-				.catch( function ( error ) {
-					status.textContent = error && error.message ? error.message : 'Не удалось найти ПВЗ.';
 				} );
 		}
 
@@ -763,9 +793,19 @@
 					const withCoordinates = points.filter( function ( point ) {
 						return point.lat !== null && point.lng !== null;
 					} ).length;
-					status.textContent = points.length
-						? 'Найдено: ' + points.length + ( searchMarker ? '. Булавка показывает найденный адрес, выберите ПВЗ в списке или на карте.' : '' ) + ( geocodeMessage && ! searchMarker ? ' ' + geocodeMessage : '' ) + ( withCoordinates < points.length ? '. Часть ПВЗ без координат доступна только в списке.' : '' )
-						: ( mode === 'location' ? 'ПВЗ для выбранного населенного пункта не найдены. Попробуйте поиск по адресу или индексу.' : 'ПВЗ не найдены.' );
+					if ( points.length ) {
+						status.textContent = 'address' === mode && geocodeMessage
+							? geocodeMessage + ' ПВЗ: ' + points.length + '.'
+							: 'Найдено ПВЗ: ' + points.length + ( searchMarker ? '. Булавка показывает найденный адрес.' : '' );
+						if ( withCoordinates < points.length ) {
+							status.textContent += ' Часть ПВЗ без координат доступна только в списке.';
+						}
+					} else {
+						status.textContent = 'ПВЗ для выбранного населенного пункта не найдены. Попробуйте другой населенный пункт.';
+						if ( 'address' === mode && geocodeMessage ) {
+							status.textContent = geocodeMessage + ' ' + status.textContent;
+						}
+					}
 					if ( selected ) {
 						selected.textContent = 'Выберите ПВЗ на карте или в списке.';
 					}
@@ -780,7 +820,7 @@
 						}
 					}
 					renderPickupPoints();
-					if ( previewPoint ) {
+					if ( previewPoint && ! searchMarker ) {
 						preview( previewPoint );
 					} else if ( 'search' === mode && value && ! searchMarker ) {
 						status.textContent += ' ' + ( geocodeMessage || 'Геокодинг адреса недоступен, выберите ПВЗ из списка.' );

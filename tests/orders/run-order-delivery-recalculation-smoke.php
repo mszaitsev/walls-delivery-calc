@@ -286,6 +286,13 @@ final class WdcRecalcDadataSuggestionClient implements AddressSuggestionClientIn
 			'geo_lat' => $this->with_coordinates ? '54.9914' : '',
 			'geo_lon' => $this->with_coordinates ? '73.3645' : '',
 			'fias_id' => 'fake-address-fias',
+			'fias_level' => '8',
+			'country_iso_code' => 'RU',
+			'region_with_type' => 'Омская область',
+			'city_with_type' => 'г Омск',
+			'street_with_type' => 'ул Ленина',
+			'house' => '10',
+			'postal_code' => '644099',
 		);
 
 		return array(
@@ -558,11 +565,13 @@ $pickup_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/order-del
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-wdc-pickup-picker-map' ), 'Pickup picker markup must contain map container.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-wdc-pickup-picker-list' ), 'Pickup picker markup must contain list container.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-index="' . "' + escapeAttribute( String( index ) ) + '" ), 'Pickup picker data-index attribute must use escapeAttribute().' );
-recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "runSearch( 'location' )" ) && str_contains( $pickup_js, "runSearch( 'search' )" ), 'Pickup picker JS must send location mode for initial load and search mode for manual search.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "runSearch( 'location' )" ) && str_contains( $pickup_js, "runSearch( 'search' )" ), 'Pickup picker JS must keep initial load and manual address search entrypoints.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "const value = mode === 'location' ? '' : String( query.value || '' ).trim();" ), 'Pickup picker initial load must not send postcode as backend query.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'prefillCurrentPickupIfAvailable' ) && str_contains( $pickup_js, 'data-wdc-order-delivery-current-pickup' ), 'JS must prefill current pickup when location is unchanged.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'scrollActivePickupRow' ) && str_contains( $pickup_js, 'scrollIntoView' ) && str_contains( $pickup_js, 'setActivePoint' ), 'JS marker click must sync active marker and list row.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'geocodeAddressAction' ) && str_contains( $pickup_js, 'wdc_order_delivery_recalculate_geocode_address' ) && str_contains( $pickup_js, 'searchMarker:' ), 'JS manual address search must geocode through admin endpoint and pass a temporary search marker.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'loadPickupPointsForLocation' ) && str_contains( $pickup_js, "form.append( 'mode', 'location' );" ) && ! str_contains( $pickup_js, "form.append( 'mode', mode );" ), 'JS manual address search must keep pickup loading in location mode instead of filtering pickup points by address query.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'renderSearchResults( \'address\', value' ) && str_contains( $pickup_js, 'provider.setCenter( searchMarker.lat, searchMarker.lng, 15 );' ), 'JS manual address search must keep city pickup points rendered and center the map on the DaData marker.' );
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'searchMarkerFromQuery' ), 'JS manual address search must not use the first pickup point as an address marker fallback.' );
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'data-wdc-pickup-address-block' ), 'Pickup UI must not render address normalization block.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-wdc-courier-address-block' ) && str_contains( $pickup_js, 'data-wdc-normalize-courier-address' ), 'Courier UI source must render address normalization block.' );
@@ -732,6 +741,7 @@ try {
 	recalc_smoke_assert( false, 'Address normalization endpoint must send JSON response.' );
 } catch ( WdcRecalcAjaxResponse $response ) {
 	recalc_smoke_assert( $response->success && ! empty( $response->data['address']['normalized'] ), 'Address normalization endpoint must return normalized payload.' );
+	recalc_smoke_assert( 'dadata' === ( $response->data['address']['source'] ?? '' ) && ! str_contains( (string) ( $response->data['message'] ?? '' ), 'Внешний нормализатор не настроен' ), 'Address normalization endpoint must use configured DaData suggestion client instead of bare fallback normalizer.' );
 }
 
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'address_line' => 'Омск, Ленина, 10' );

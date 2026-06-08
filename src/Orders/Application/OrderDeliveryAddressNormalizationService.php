@@ -30,6 +30,17 @@ final class OrderDeliveryAddressNormalizationService {
 		}
 
 		$checkout_data = $this->checkout_data( $order, $selected_location, $address_line );
+		if ( $this->suggestions instanceof AddressSuggestionClientInterface ) {
+			$payload = $this->normalize_from_suggestions( $selected_location, $address_line );
+			if ( array() !== $payload ) {
+				return array(
+					'success' => true,
+					'payload' => $payload,
+					'message' => 'Адрес нормализован.',
+				);
+			}
+		}
+
 		if ( $this->runtime instanceof CheckoutAddressRuntime ) {
 			$result = $this->runtime->resolve_checkout_address( $checkout_data );
 			$payload = $this->payload_from_result( $result->to_array(), $address_line );
@@ -233,6 +244,62 @@ final class OrderDeliveryAddressNormalizationService {
 		}
 
 		return null;
+	}
+
+	/**
+	 * @param array<string,mixed> $selected_location
+	 * @return array<string,mixed>
+	 */
+	private function normalize_from_suggestions( array $selected_location, string $address_line ): array {
+		$response = $this->suggestions?->suggest( 'address', $address_line, $this->suggestion_context( $selected_location ) );
+		if ( ! is_array( $response ) || empty( $response['success'] ) ) {
+			return array();
+		}
+		$suggestions = is_array( $response['suggestions'] ?? null ) ? $response['suggestions'] : array();
+		foreach ( $suggestions as $suggestion ) {
+			if ( ! is_array( $suggestion ) ) {
+				continue;
+			}
+			$data = is_array( $suggestion['data'] ?? null ) ? $suggestion['data'] : array();
+			if ( ! $this->suggestion_has_delivery_address( $data ) ) {
+				continue;
+			}
+			$street = (string) ( $data['street_with_type'] ?? $data['street'] ?? '' );
+			$house = trim( (string) ( $data['house'] ?? '' ) . ( '' !== (string) ( $data['block'] ?? '' ) ? ' ' . (string) $data['block'] : '' ) );
+			$flat = (string) ( $data['flat'] ?? '' );
+			$address_1 = trim( implode( ', ', array_filter( array( $street, $house ), static fn( string $part ): bool => '' !== $part ) ) );
+			$full = (string) ( $suggestion['unrestricted_value'] ?? $suggestion['value'] ?? $address_line );
+			return array(
+				'country' => (string) ( $data['country_iso_code'] ?? 'RU' ),
+				'region' => (string) ( $data['region_with_type'] ?? $data['region'] ?? $selected_location['region_name'] ?? '' ),
+				'city' => (string) ( $data['settlement_with_type'] ?? $data['city_with_type'] ?? $data['settlement'] ?? $data['city'] ?? $selected_location['city_value'] ?? $selected_location['city_name'] ?? '' ),
+				'postcode' => (string) ( $data['postal_code'] ?? $selected_location['postal_code'] ?? $selected_location['postcode'] ?? '' ),
+				'street' => $street,
+				'house' => $house,
+				'flat' => $flat,
+				'address_1' => '' !== $address_1 ? $address_1 : $address_line,
+				'address_2' => $flat,
+				'full_address' => $full,
+				'fias_id' => (string) ( $data['fias_id'] ?? '' ),
+				'gar_id' => (string) ( $data['gar_id'] ?? '' ),
+				'lat' => $this->coordinate( $data, array( 'geo_lat', 'lat', 'latitude' ) ),
+				'lng' => $this->coordinate( $data, array( 'geo_lon', 'lng', 'lon', 'longitude' ) ),
+				'normalized' => true,
+				'fallback' => false,
+				'source' => 'dadata',
+				'message' => '',
+			);
+		}
+
+		return array();
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function suggestion_has_delivery_address( array $data ): bool {
+		$fias_level = (string) ( $data['fias_level'] ?? '' );
+		return in_array( $fias_level, array( '8', '9', '75' ), true ) || '' !== (string) ( $data['house'] ?? '' );
 	}
 
 	/**
