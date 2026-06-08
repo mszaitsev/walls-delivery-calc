@@ -1,12 +1,12 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.41.2.
+Version: 0.41.4.
 
 ## Цель этапа
 
 Этот документ описывает foundation для будущего пересчета доставки внутри WooCommerce order admin. Итоговая бизнес-цель всей feature-ветки: дать администратору возможность пересчитать доставку заказа, выбрать новый метод, при необходимости выбрать ПВЗ, безопасно заменить WooCommerce shipping item, обновить WDC delivery meta и пересчитать totals.
 
-## Статус 0.41.2
+## Статус 0.41.4
 
 Реализован только preview-only foundation.
 
@@ -16,8 +16,11 @@ Version: 0.41.2.
 - preview результатов открывается в custom admin modal, а не в постоянном inline-блоке внутри metabox;
 - modal содержит header/body/footer, заголовок `Пересчет доставки`, status/loading/error area, content area для rates, close controls и disabled save placeholder `Сохранение будет добавлено следующим шагом`;
 - modal закрывается через close button, overlay и Escape; повторный preview request не запускается, пока текущий request активен;
+- в modal добавлен preview-only блок `Населенный пункт`: он показывает текущий город заказа, позволяет искать населенные пункты через существующий checkout location payload и пересчитать preview для выбранного пункта;
+- выбранный населенный пункт хранится только в памяти JS/AJAX payload и передается в `OrderQuoteRequestMapper` как location override;
+- успешный preview явно показывает, для какого пункта выполнен расчет: `Расчет выполнен для: ...`;
 - если `_wdc_shipments` содержит созданное/зарегистрированное отправление, tracking/barcode или `backlog_order_id`, пересчет блокируется в UI и AJAX endpoint;
-- `OrderQuoteRequestMapper` строит `QuoteRequest` из текущего WooCommerce заказа, товаров, веса, shipping address и WDC location/calculation meta fallback;
+- `OrderQuoteRequestMapper` строит `QuoteRequest` из текущего WooCommerce заказа, товаров, веса, shipping address и WDC location/calculation meta fallback; если передан location override, destination берется из выбранного payload без записи в заказ;
 - `OrderDeliveryRecalculationService` вызывает существующий `CheckoutOrchestrator`, поэтому preview использует активные службы доставки, carrier adapters, правила, упаковку и service post-processing текущего checkout runtime;
 - admin preview показывает pickup/courier groups и Russian Post domestic tariffs;
 - ни один rate и ни один tariff не выбран по умолчанию;
@@ -26,11 +29,11 @@ Version: 0.41.2.
 
 ## Ограничения
 
-В 0.41.2 намеренно не реализованы:
+В 0.41.4 намеренно не реализованы:
 
 - сохранение выбранного метода доставки;
 - выбор ПВЗ;
-- смена/override населенного пункта;
+- сохранение выбранного населенного пункта в заказ;
 - замена WooCommerce shipping item;
 - пересчет WooCommerce order totals;
 - изменение shipping address;
@@ -52,9 +55,8 @@ Version: 0.41.2.
 
 Рекомендуемый порядок:
 
-1. Добавить location selector/override в admin preview и пересчет по выбранному населенному пункту.
-2. Добавить полноценный выбор ПВЗ для pickup rates, переиспользуя существующий map provider stack.
-3. Добавить save/replacement service: безопасная замена shipping item через WooCommerce CRUD, обновление hidden WDC meta и `_wdc_delivery_calculation_data`, пересчет totals, приватный order note и reload страницы.
+1. Добавить полноценный выбор ПВЗ для pickup rates, переиспользуя существующий map provider stack.
+2. Добавить save/replacement service: безопасная замена shipping item через WooCommerce CRUD, обновление hidden WDC meta и `_wdc_delivery_calculation_data`, пересчет totals, приватный order note и reload страницы.
 
 ## Проверки
 

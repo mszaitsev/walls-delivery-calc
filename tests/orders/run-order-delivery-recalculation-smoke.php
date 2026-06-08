@@ -9,6 +9,8 @@ use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
+use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
@@ -19,6 +21,9 @@ use WallsShop\WDC\Domain\Quote\DeliveryQuote;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Services\LocationSearchService;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryRateRenderer;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryRecalculationAdminController;
@@ -30,6 +35,10 @@ use WallsShop\WDC\Rules\Services\RuleEvaluator;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
+
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {}
+}
 
 require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
@@ -79,7 +88,17 @@ function esc_html__( string $text, string $domain = '' ): string { return $text;
 function esc_attr__( string $text, string $domain = '' ): string { return $text; }
 function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
 function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function wp_unslash( mixed $value ): mixed { return $value; }
+function sanitize_text_field( mixed $value ): string { return trim( (string) $value ); }
+function get_option( string $option, mixed $default = false ): mixed { return $default; }
+function wp_json_encode( mixed $value ): string|false { return json_encode( $value, JSON_UNESCAPED_UNICODE ); }
 function wp_date( string $format ): string { return gmdate( $format ); }
+
+final class WdcRecalcLocationDb extends wpdb {
+	public string $prefix = 'wp_';
+	/** @var array<int,array<string,mixed>> */
+	public array $locations = array();
+}
 
 final class WdcRecalcProduct {
 	public function __construct(
@@ -203,6 +222,34 @@ function wdc_recalc_service(): OrderDeliveryRecalculationService {
 	return new OrderDeliveryRecalculationService( new OrderQuoteRequestMapper(), $orchestrator, new OrderShipmentRepository() );
 }
 
+function wdc_recalc_location_ajax(): CheckoutLocationAjax {
+	$db = new WdcRecalcLocationDb();
+	$db->locations = array(
+		array(
+			'id' => 201,
+			'fias_id' => 'fias-override',
+			'gar_id' => '7700000000000',
+			'gar_object_id' => 7700000000000,
+			'country_code' => 'RU',
+			'region_name' => 'Москва',
+			'region_type' => 'г',
+			'region_code' => '77',
+			'city_name' => 'Москва',
+			'city_type' => 'г',
+			'place_name' => 'Москва',
+			'place_type' => 'г',
+			'settlement_name' => 'Москва',
+			'settlement_type' => 'г',
+			'display_name' => 'Москва',
+			'postal_code' => '101000',
+			'searchable_text' => 'москва 101000 fias-override',
+			'active' => 1,
+		),
+	);
+	$repository = new LocationRepository( $db );
+	return new CheckoutLocationAjax( new CheckoutLocationSearch( new LocationSearchService( $repository ) ), new SettingsRepository(), null );
+}
+
 $order = new WdcRecalcOrder(
 	101,
 	array(
@@ -231,12 +278,28 @@ $service = wdc_recalc_service();
 $before_shipping = $order->shipping_items;
 $before_total = $order->total;
 $before_calc = $order->meta['_wdc_delivery_calculation_data'];
+$before_shipping_city = $order->get_shipping_city();
+$before_shipping_postcode = $order->get_shipping_postcode();
 $preview = $service->preview( $order );
 
 recalc_smoke_assert( true === $preview['success'], 'Preview must succeed for an order without shipment.' );
 recalc_smoke_assert( 'RU' === ( $preview['request']['country_code'] ?? '' ), 'Preview must build QuoteRequest country from order.' );
 recalc_smoke_assert( 1000 === ( $preview['request']['package']['total_weight_g'] ?? 0 ), 'Preview must build QuoteRequest package from order items.' );
 recalc_smoke_assert( '630099' === ( $preview['request']['destination']['postcode'] ?? '' ), 'Preview must build destination postcode from order.' );
+recalc_smoke_assert( empty( $preview['request']['customer_context']['location_override'] ?? false ), 'Preview without override must keep current order location behavior.' );
+
+$location_ajax = wdc_recalc_location_ajax();
+$search_payload = $location_ajax->payload( 'Москва', '', 'RU' );
+$search_items = $search_payload['groups'][0]['items'] ?? array();
+recalc_smoke_assert( array() !== $search_items && 'fias-override' === ( $search_items[0]['fias_id'] ?? '' ), 'Location search must return settlements through existing checkout location payload.' );
+$selected_location = $search_items[0];
+$override_preview = $service->preview( $order, $selected_location );
+recalc_smoke_assert( true === $override_preview['success'], 'Preview with location override must succeed.' );
+recalc_smoke_assert( str_contains( (string) ( $override_preview['request']['destination']['city'] ?? '' ), 'Москва' ), 'Preview with override must use selected location city.' );
+recalc_smoke_assert( '101000' === ( $override_preview['request']['destination']['postcode'] ?? '' ), 'Preview with override must use selected location postcode.' );
+recalc_smoke_assert( 'fias-override' === ( $override_preview['request']['destination']['fias_id'] ?? '' ), 'Preview with override must use selected location FIAS id.' );
+recalc_smoke_assert( ! empty( $override_preview['request']['customer_context']['location_override'] ), 'Preview with override must mark customer context.' );
+recalc_smoke_assert( str_contains( (string) ( $override_preview['location']['label'] ?? '' ), 'Москва' ), 'Preview with override must expose calculated location label.' );
 
 $rate_ids = array_column( $preview['rates'], 'id' );
 recalc_smoke_assert( in_array( 'demo:pickup', $rate_ids, true ), 'Preview must include rates from every available carrier/service path.' );
@@ -260,6 +323,7 @@ recalc_smoke_assert( ! str_contains( $html, ' checked' ), 'Renderer must not pre
 recalc_smoke_assert( $before_shipping === $order->shipping_items, 'Preview must not change shipping item data.' );
 recalc_smoke_assert( $before_total === $order->total, 'Preview must not change order totals.' );
 recalc_smoke_assert( $before_calc === $order->meta['_wdc_delivery_calculation_data'], 'Preview must not change delivery calculation meta.' );
+recalc_smoke_assert( $before_shipping_city === $order->get_shipping_city() && $before_shipping_postcode === $order->get_shipping_postcode(), 'Preview with override must not change shipping address fields.' );
 
 $blocked = new WdcRecalcOrder( 102, array() );
 $blocked->meta['_wdc_shipments'] = array( 'russian_post_domestic' => array( 'status' => 'created' ) );
@@ -275,13 +339,30 @@ $backlog_blocked = new WdcRecalcOrder( 104, array() );
 $backlog_blocked->meta['_wdc_shipments'] = array( 'russian_post_domestic' => array( 'backlog_order_id' => '123' ) );
 recalc_smoke_assert( false === $service->preview( $backlog_blocked )['success'], 'Preview must be blocked when shipment has backlog_order_id.' );
 
-$controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer() );
+$controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax );
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok' );
 try {
 	$controller->ajax_preview();
 	recalc_smoke_assert( false, 'Controller must send JSON response.' );
 } catch ( WdcRecalcAjaxResponse $response ) {
 	recalc_smoke_assert( $response->success && isset( $response->data['html'], $response->data['rates'], $response->data['request'] ), 'Endpoint must return html, rates and request on success.' );
+}
+
+$_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ) );
+try {
+	$controller->ajax_preview();
+	recalc_smoke_assert( false, 'Controller must send JSON response for override preview.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	recalc_smoke_assert( $response->success && str_contains( (string) ( $response->data['request']['destination']['city'] ?? '' ), 'Москва' ), 'Endpoint must pass selected location override to preview.' );
+}
+
+$_REQUEST = array( 'nonce' => 'ok', 'query' => 'Москва', 'country_code' => 'RU' );
+try {
+	$controller->ajax_location_search();
+	recalc_smoke_assert( false, 'Location search endpoint must send JSON response.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	$items = $response->data['groups'][0]['items'] ?? array();
+	recalc_smoke_assert( $response->success && array() !== $items && 'fias-override' === ( $items[0]['fias_id'] ?? '' ), 'Location search endpoint must return settlements.' );
 }
 
 $GLOBALS['wdc_recalc_current_can'] = false;

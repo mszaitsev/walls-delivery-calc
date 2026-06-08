@@ -22,19 +22,21 @@ final class OrderDeliveryRecalculationService {
 	}
 
 	/**
-	 * @return array{success:bool,message:string,rates:array<int,array<string,mixed>>,request:array<string,mixed>}
+	 * @param array<string,mixed>|null $selected_location
+	 * @return array{success:bool,message:string,rates:array<int,array<string,mixed>>,request:array<string,mixed>,location:array<string,mixed>}
 	 */
-	public function preview( object $order ): array {
+	public function preview( object $order, ?array $selected_location = null ): array {
 		if ( $this->has_blocking_shipment( $order ) ) {
 			return array(
 				'success' => false,
 				'message' => 'Пересчет доставки недоступен: по заказу уже создано отправление.',
 				'rates'   => array(),
 				'request' => array(),
+				'location' => array(),
 			);
 		}
 
-		$request = $this->mapper->map( $order );
+		$request = $this->mapper->map( $order, $selected_location );
 		$result  = $this->orchestrator->calculate( $request, array(), RateSorter::CHEAPEST, true );
 
 		return array(
@@ -42,6 +44,7 @@ final class OrderDeliveryRecalculationService {
 			'message' => '',
 			'rates'   => $this->normalize_rates( $result->rates ),
 			'request' => $request->to_array(),
+			'location' => $this->location_payload_from_request( $request->to_array() ),
 		);
 	}
 
@@ -184,5 +187,31 @@ final class OrderDeliveryRecalculationService {
 			DeliveryType::COURIER => 'Курьер',
 			default => $delivery_type,
 		};
+	}
+
+	/**
+	 * @param array<string,mixed> $request
+	 * @return array<string,mixed>
+	 */
+	private function location_payload_from_request( array $request ): array {
+		$destination = is_array( $request['destination'] ?? null ) ? $request['destination'] : array();
+		$context = is_array( $request['customer_context'] ?? null ) ? $request['customer_context'] : array();
+		$region = trim( (string) ( $destination['region_name'] ?? $context['selected_location_region'] ?? '' ) );
+		$name = trim( (string) ( $context['selected_location_name'] ?? $context['display_name'] ?? $destination['city'] ?? $destination['settlement'] ?? '' ) );
+		$label = trim( implode( ', ', array_values( array_filter( array( $region, $name ), static fn( string $part ): bool => '' !== $part ) ) ) );
+
+		return array_filter(
+			array(
+				'id'          => $context['selected_location_id'] ?? null,
+				'fias_id'     => $destination['fias_id'] ?? '',
+				'name'        => $name,
+				'postcode'    => $destination['postcode'] ?? '',
+				'country'     => $destination['country_code'] ?? '',
+				'region'      => $region,
+				'label'       => '' !== $label ? $label : $name,
+				'is_override' => ! empty( $context['location_override'] ),
+			),
+			static fn( mixed $value ): bool => null !== $value && '' !== $value
+		);
 	}
 }

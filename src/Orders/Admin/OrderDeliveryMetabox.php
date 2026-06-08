@@ -148,6 +148,7 @@ final class OrderDeliveryMetabox {
 		}
 
 		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
+		$current_location = $this->current_location_payload( $order );
 		echo '<p><button type="button" class="button" data-wdc-order-delivery-recalculate data-order-id="' . esc_attr( (string) $order_id ) . '">' . esc_html__( 'Пересчитать доставку', 'walls-delivery-calc' ) . '</button></p>';
 		echo '<div class="wdc-order-delivery-modal" data-wdc-order-delivery-modal hidden>';
 		echo '<div class="wdc-order-delivery-modal__overlay" data-wdc-order-delivery-modal-close></div>';
@@ -156,6 +157,20 @@ final class OrderDeliveryMetabox {
 		echo '<h2 id="wdc-order-delivery-modal-title-' . esc_attr( (string) $order_id ) . '">' . esc_html__( 'Пересчет доставки', 'walls-delivery-calc' ) . '</h2>';
 		echo '<button type="button" class="button-link wdc-order-delivery-modal__close" data-wdc-order-delivery-modal-close aria-label="' . esc_attr__( 'Закрыть', 'walls-delivery-calc' ) . '">×</button>';
 		echo '</header>';
+		echo '<div class="wdc-order-delivery-location" data-wdc-order-delivery-location>';
+		echo '<div class="wdc-order-delivery-location__summary">';
+		echo '<strong>' . esc_html__( 'Населенный пункт', 'walls-delivery-calc' ) . '</strong>';
+		echo '<span data-wdc-order-delivery-location-current>' . esc_html( $current_location['label'] ) . '</span>';
+		echo '<button type="button" class="button-link" data-wdc-order-delivery-location-edit>' . esc_html__( 'Изменить', 'walls-delivery-calc' ) . '</button>';
+		echo '</div>';
+		echo '<div class="wdc-order-delivery-location__search" data-wdc-order-delivery-location-search hidden>';
+		echo '<label class="screen-reader-text" for="wdc-order-delivery-location-input-' . esc_attr( (string) $order_id ) . '">' . esc_html__( 'Поиск населенного пункта', 'walls-delivery-calc' ) . '</label>';
+		echo '<input type="search" class="widefat" id="wdc-order-delivery-location-input-' . esc_attr( (string) $order_id ) . '" data-wdc-order-delivery-location-input value="' . esc_attr( $current_location['label'] ) . '" placeholder="' . esc_attr__( 'Введите населенный пункт', 'walls-delivery-calc' ) . '" autocomplete="off">';
+		echo '<div class="wdc-order-delivery-location__results" data-wdc-order-delivery-location-results></div>';
+		echo '</div>';
+		echo '<button type="button" class="button" data-wdc-order-delivery-modal-preview>' . esc_html__( 'Пересчитать', 'walls-delivery-calc' ) . '</button>';
+		echo '<script type="application/json" data-wdc-order-delivery-current-location>' . $this->json_encode( $current_location ) . '</script>';
+		echo '</div>';
 		echo '<div class="wdc-order-delivery-modal__status" data-wdc-order-delivery-modal-status></div>';
 		echo '<div class="wdc-order-delivery-modal__content" data-wdc-order-delivery-modal-content></div>';
 		echo '<footer class="wdc-order-delivery-modal__footer">';
@@ -165,6 +180,48 @@ final class OrderDeliveryMetabox {
 		echo '</div>';
 		echo '</div>';
 		echo '</div>';
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	private function current_location_payload( object $order ): array {
+		$calculation = $this->calculation_data( $order );
+		$destination = is_array( $calculation['destination'] ?? null ) ? $calculation['destination'] : array();
+		$name = trim( (string) ( $destination['city_display_name'] ?? $destination['display_name'] ?? '' ) );
+		if ( '' === $name ) {
+			$name = $this->meta_string( $order, '_wdc_platform_city_display_name' );
+		}
+		if ( '' === $name ) {
+			$name = $this->order_string( $order, 'get_shipping_city' );
+		}
+		$region = trim( (string) ( $destination['region_name'] ?? $this->order_string( $order, 'get_shipping_state' ) ) );
+		$postcode = trim( (string) ( $destination['postal_code'] ?? $destination['postcode'] ?? '' ) );
+		if ( '' === $postcode ) {
+			$postcode = $this->meta_string( $order, '_wdc_platform_city_postcode' ) ?: $this->order_string( $order, 'get_shipping_postcode' );
+		}
+		$country = strtoupper( trim( (string) ( $destination['country_code'] ?? $this->order_string( $order, 'get_shipping_country' ) ?: 'RU' ) ) );
+		$label = trim( implode( ', ', array_values( array_filter( array( $region, $name ), static fn( string $part ): bool => '' !== $part ) ) ) );
+
+		return array(
+			'id' => '',
+			'fias_id' => trim( (string) ( $destination['fias_id'] ?? $this->meta_string( $order, '_wdc_platform_location_fias_id' ) ?: $this->meta_string( $order, '_wdc_platform_city_fias_id' ) ) ),
+			'display_name' => $name,
+			'city_value' => $name,
+			'postal_code' => $postcode,
+			'country_code' => '' !== $country ? $country : 'RU',
+			'region_name' => $region,
+			'state_value' => $region,
+			'label' => '' !== $label ? $label : $name,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $value
+	 */
+	private function json_encode( array $value ): string {
+		$encoded = json_encode( $value, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT );
+		return false === $encoded ? '{}' : (string) $encoded;
 	}
 
 	private function has_blocking_shipment( object $order ): bool {
@@ -283,6 +340,14 @@ final class OrderDeliveryMetabox {
 		}
 
 		return (string) $value;
+	}
+
+	private function meta_string( object $order, string $key ): string {
+		return trim( $this->order_meta( $order, $key ) );
+	}
+
+	private function order_string( object $order, string $method ): string {
+		return method_exists( $order, $method ) ? trim( (string) $order->{$method}() ) : '';
 	}
 
 	private function delivery_type_label( string $delivery_type ): string {

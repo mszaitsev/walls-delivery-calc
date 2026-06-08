@@ -59,6 +59,51 @@
 	min-height: 20px;
 }
 
+.wdc-order-delivery-location {
+	display: grid;
+	gap: 8px;
+	padding: 12px 16px 0;
+}
+
+.wdc-order-delivery-location__summary {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.wdc-order-delivery-location__summary span {
+	color: #1d2327;
+}
+
+.wdc-order-delivery-location__search {
+	display: grid;
+	gap: 6px;
+}
+
+.wdc-order-delivery-location__search[hidden] {
+	display: none;
+}
+
+.wdc-order-delivery-location__results {
+	display: grid;
+	gap: 4px;
+	max-height: 180px;
+	overflow: auto;
+	border: 1px solid #dcdcde;
+	background: #fff;
+	padding: 6px;
+}
+
+.wdc-order-delivery-location__results:empty {
+	display: none;
+}
+
+.wdc-order-delivery-location__result {
+	text-align: left;
+	line-height: 1.35;
+}
+
 .wdc-order-delivery-modal__status[data-status="loading"] {
 	color: #646970;
 }

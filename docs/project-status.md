@@ -1,6 +1,8 @@
 # Project Status
 
-0.41.2 note: order-admin delivery recalculation preview now opens in a custom admin modal instead of rendering inline in the `Калькулятор доставок` metabox. The metabox keeps only the `Пересчитать доставку` button when recalculation is allowed; the modal contains header/body/footer, close controls, status/loading/error area, rates content area, and a disabled save placeholder for the next patch. The preview-only boundary is unchanged: no delivery save, pickup selection, location override, shipping item replacement, totals recalculation, shipping address change, order note, or `_wdc_delivery_calculation_data` update.
+0.41.4 note: order-admin delivery recalculation preview now supports a modal-only settlement override. The modal shows the current order settlement, searches settlements through the existing checkout location search payload, sends the selected location only in the preview AJAX request, and recalculates rates for that destination with an explicit `Расчет выполнен для: ...` status. The order is not mutated: no shipping address update, delivery save, shipping item replacement, totals recalculation, pickup selection, order note, or `_wdc_delivery_calculation_data` update.
+
+0.41.2 note: order-admin delivery recalculation preview now opens in a custom admin modal instead of rendering inline in the `Калькулятор доставок` metabox. The metabox keeps only the `Пересчитать доставку` button when recalculation is allowed; the modal contains header/body/footer, close controls, status/loading/error area, rates content area, and a disabled save placeholder for the next patch. The preview-only boundary is unchanged: no delivery save, pickup selection, shipping item replacement, totals recalculation, shipping address change, order note, or `_wdc_delivery_calculation_data` update.
 
 0.41.0 note: the first order-admin delivery recalculation foundation is implemented as preview-only UI. `Калькулятор доставок` can request a recalculation from the WooCommerce order, WDC builds a `QuoteRequest` from order items/address/meta, runs all available services through `CheckoutOrchestrator`, renders pickup/courier rates and Russian Post domestic tariff groups, and blocks preview when `_wdc_shipments` indicates an already created shipment. This version intentionally does not save delivery changes, replace shipping items, recalculate totals, change shipping address, select pickup points, override locations, create order notes, or update `_wdc_delivery_calculation_data`.
 
@@ -22,12 +24,12 @@
 
 ## Общий статус
 
-- Текущая версия: `0.41.2`.
+- Текущая версия: `0.41.4`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/order-delivery-recalculation`.
 - Последнее обновление статуса: 2026-06-08.
 - Общая готовность проекта: примерно 72%.
-- Следующий рекомендуемый этап: продолжить `feature/order-delivery-recalculation` вторым patch: выбор/смена населенного пункта и ПВЗ, затем безопасная замена shipping item.
+- Следующий рекомендуемый этап: продолжить `feature/order-delivery-recalculation`: выбор ПВЗ для pickup preview, затем безопасное сохранение/замена shipping item.
 
 ## Краткое резюме
 

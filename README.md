@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.41.2.
+Current plugin version: 0.41.4.
+
+Version 0.41.4 adds preview-only location override to the admin order delivery recalculation modal. The modal now shows the current order settlement, lets an administrator search settlements through the existing checkout location search payload, keeps the selected settlement only in the modal/AJAX request, and recalculates rates for that settlement while explicitly showing `Расчет выполнен для: ...`. This patch still does not save the settlement, change shipping address, save delivery, replace shipping items, recalculate totals, select pickup points, add order notes, or update `_wdc_delivery_calculation_data`.
 
 Version 0.41.2 moves the admin order delivery recalculation preview from an inline metabox block into a custom admin modal. The `Калькулятор доставок` metabox keeps only the `Пересчитать доставку` button when recalculation is allowed; the modal provides header/body/footer structure, status/loading/error areas, rates content, close controls, and a disabled save placeholder for the next patch. This remains preview-only: no pickup selection, location override, shipping item replacement, totals recalculation, shipping address changes, order notes, or `_wdc_delivery_calculation_data` updates are performed.
 

@@ -1,14 +1,14 @@
 # Карта текущего кода
 
-## Order Delivery Recalculation 0.41.2
+## Order Delivery Recalculation 0.41.4
 
-- `src/Orders/Application/OrderQuoteRequestMapper.php` builds an admin recalculation `QuoteRequest` from a WooCommerce order: order items, product weights/dimensions, shipping country/city/postcode/address, payment method and existing WDC location/calculation meta fallbacks.
-- `src/Orders/Application/OrderDeliveryRecalculationService.php` owns preview-only recalculation. It blocks orders with `_wdc_shipments` created/registered/tracking/barcode/backlog data, calls `CheckoutOrchestrator`, and normalizes available rates for admin rendering without mutating the order.
-- `src/Orders/Admin/OrderDeliveryRecalculationAdminController.php` registers AJAX action `wdc_order_delivery_recalculate_preview`, checks nonce/capability, loads orders through `wc_get_order()`, and returns rendered preview HTML plus rate/request payloads.
+- `src/Orders/Application/OrderQuoteRequestMapper.php` builds an admin recalculation `QuoteRequest` from a WooCommerce order: order items, product weights/dimensions, shipping country/city/postcode/address, payment method and existing WDC location/calculation meta fallbacks. It also accepts a preview-only selected location payload and uses it as destination override without writing to the order.
+- `src/Orders/Application/OrderDeliveryRecalculationService.php` owns preview-only recalculation. It blocks orders with `_wdc_shipments` created/registered/tracking/barcode/backlog data, calls `CheckoutOrchestrator`, normalizes available rates for admin rendering, and returns the destination label used for the preview without mutating the order.
+- `src/Orders/Admin/OrderDeliveryRecalculationAdminController.php` registers AJAX action `wdc_order_delivery_recalculate_preview`, checks nonce/capability, loads orders through `wc_get_order()`, accepts selected location payload, and returns rendered preview HTML plus rate/request/location payloads. It also exposes a thin admin location-search AJAX wrapper over existing `CheckoutLocationAjax::payload()`.
 - `src/Orders/Admin/OrderDeliveryRateRenderer.php` renders admin pickup/courier rate groups, prices, crossed prices, comments and Russian Post domestic tariff rows. It intentionally leaves all radio buttons unchecked.
-- `src/Orders/Admin/OrderDeliveryMetabox.php` now shows only `Пересчитать доставку` in `Калькулятор доставок` when recalculation is allowed, renders the hidden modal markup beside the button, or shows a readonly explanation when a shipment already blocks recalculation.
-- `assets/admin/order-delivery-recalculation.js` and `.css` provide the order-admin modal preview interaction. The JS opens/closes the modal, avoids duplicate preview requests, loads preview HTML into the modal content area, keeps the initial state unselected, and shows only a placeholder for pickup selection.
-- `tests/orders/run-order-delivery-recalculation-smoke.php` covers shipment blocking, modal metabox markup, order-to-quote mapping, all-rates preview, Russian Post pickup/courier groups, security checks, and no mutation of shipping item/totals/calculation meta.
+- `src/Orders/Admin/OrderDeliveryMetabox.php` now shows only `Пересчитать доставку` in `Калькулятор доставок` when recalculation is allowed, renders the hidden modal markup plus current-settlement selector shell beside the button, or shows a readonly explanation when a shipment already blocks recalculation.
+- `assets/admin/order-delivery-recalculation.js` and `.css` provide the order-admin modal preview interaction. The JS opens/closes the modal, avoids duplicate preview requests, searches settlements, stores selected location only in modal memory, loads preview HTML into the modal content area, keeps the initial state unselected, and shows only a placeholder for pickup selection.
+- `tests/orders/run-order-delivery-recalculation-smoke.php` covers shipment blocking, modal metabox markup, order-to-quote mapping, location search, location override preview, all-rates preview, Russian Post pickup/courier groups, security checks, and no mutation of shipping item/totals/shipping address/calculation meta.
 
 ## Project Status Refresh 0.40.0
 
