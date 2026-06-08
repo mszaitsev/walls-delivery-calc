@@ -1,0 +1,574 @@
+Структура папок
+Серийный номер тома: 000000FB A0AC:74BD
+C:.
+|   .gitignore
+|   README.md
+|   tree.txt
+|   uninstall.php
+|   walls-delivery-calc.php
+|   
++---assets
+|   +---admin
+|   |       .gitkeep
+|   |       calendar-admin.css
+|   |       calendar-admin.js
+|   |       checkout-simulation.css
+|   |       locations-admin.css
+|   |       rules-admin.css
+|   |       rules-admin.js
+|   |       russian-post-pickup-import.js
+|   |       shipments-admin.css
+|   |       shipments-admin.js
+|   |       
+|   +---frontend
+|   |   |   .gitkeep
+|   |   |   checkout-address-suggestions.css
+|   |   |   checkout-address-suggestions.js
+|   |   |   checkout-city-selector.css
+|   |   |   checkout-city-selector.js
+|   |   |   checkout-rates.css
+|   |   |   checkout-sort.js
+|   |   |   courier-address-summary.js
+|   |   |   domestic-tariff-selector.css
+|   |   |   domestic-tariff-selector.js
+|   |   |   pickup-foundation.css
+|   |   |   
+|   |   \---pickup-map
+|   |       |   wdc-pickup-api.js
+|   |       |   wdc-pickup-checkout.js
+|   |       |   wdc-pickup-map.css
+|   |       |   wdc-pickup-map.js
+|   |       |   wdc-pickup-modal.js
+|   |       |   
+|   |       \---providers
+|   |               wdc-map-provider-leaflet.js
+|   |               wdc-map-provider-yandex.js
+|   |               
+|   \---vendor
+|       \---leaflet
+|           |   leaflet.css
+|           |   leaflet.js
+|           |   
+|           \---images
+|                   layers-2x.png
+|                   layers.png
+|                   marker-icon-2x.png
+|                   marker-icon.png
+|                   marker-shadow.png
+|                   
++---database
+|   \---migrations
+|           .gitkeep
+|           0001_create_calendar_days_table.php
+|           0002_create_locations_table.php
+|           0003_create_location_aliases_table.php
+|           0004_create_rules_table.php
+|           0005_create_rule_conditions_table.php
+|           0006_create_pickup_points_table.php
+|           0007_create_gar_changes_table.php
+|           0008_create_gar_places_import_tables.php
+|           0009_add_location_alias_unique_key.php
+|           0010_add_gar_district_columns.php
+|           0011_add_location_region_type.php
+|           0013_add_rule_condition_group_logic.php
+|           0014_add_rule_operation_text.php
+|           0015_add_rule_condition_group_expression.php
+|           0016_create_russian_post_country_mappings.php
+|           0017_add_russian_post_country_match_source.php
+|           0018_create_delivery_services_tables.php
+|           0019_add_delivery_service_include_packaging_weight.php
+|           0020_add_delivery_service_customer_comments.php
+|           0021_create_russian_post_pickup_points_table.php
+|           0022_add_russian_post_pickup_location_id.php
+|           0023_drop_unused_locations_postcode.php
+|           0024_add_locations_active_country_index.php
+|           0025_add_locations_russianpost_courier_calc_postal_code.php
+|           0026_unify_russian_post_domestic_service.php
+|           
++---docs
+|       development-workflow.md
+|       project-status.md
+|       stage-start.md
+|       walls-delivery-calc-tech-spec.md
+|       wdc-address-normalization.md
+|       wdc-audit-summary-for-review.md
+|       wdc-carrier-foundation.md
+|       wdc-checkout-integration.md
+|       wdc-core-platform.md
+|       wdc-current-code-map.md
+|       wdc-dadata-postcode-fill-removal.md
+|       wdc-dadata-suggestions.md
+|       wdc-delivery-calendar.md
+|       wdc-delivery-services.md
+|       wdc-domain-model.md
+|       wdc-fias-foundation.md
+|       wdc-gar-places-import.md
+|       wdc-legacy-uninstall-cleanup.md
+|       wdc-locations-clear.md
+|       wdc-migration-plan.md
+|       wdc-packaging-weight.md
+|       wdc-pickup-foundation.md
+|       wdc-real-fias-integration.md
+|       wdc-rule-engine-foundation.md
+|       wdc-rules-admin.md
+|       wdc-runtime-stabilization.md
+|       wdc-russian-post-countries.md
+|       wdc-russian-post-domestic.md
+|       wdc-russian-post-international.md
+|       wdc-russian-post-pickup-points.md
+|       wdc-russian-post-shipments.md
+|       wdc-shipment-statuses.md
+|       wdc-shipments-foundation.md
+|       
++---src
+|   +---Admin
+|   |       AdminMenu.php
+|   |       AdminNotices.php
+|   |       SettingsAdminPage.php
+|   |       
+|   +---Calendar
+|   |   |   .gitkeep
+|   |   |   CalendarTypes.php
+|   |   |   
+|   |   +---Admin
+|   |   |       CalendarAdminPage.php
+|   |   |       
+|   |   +---Services
+|   |   |       CalendarScheduler.php
+|   |   |       CalendarService.php
+|   |   |       DeliveryDateCalculator.php
+|   |   |       DeliveryDateFormatter.php
+|   |   |       TimezoneService.php
+|   |   |       YearGenerator.php
+|   |   |       
+|   |   +---Storage
+|   |   |       CalendarRepository.php
+|   |   |       
+|   |   \---ValueObjects
+|   |           .gitkeep
+|   |           
+|   +---Carriers
+|   |   |   .gitkeep
+|   |   |   
+|   |   +---Contracts
+|   |   |       CarrierAdapterInterface.php
+|   |   |       
+|   |   +---Registry
+|   |   |       CarrierRegistry.php
+|   |   |       
+|   |   +---Runtime
+|   |   |       CarrierRuntimeContext.php
+|   |   |       RussianPostDomesticCarrier.php
+|   |   |       RussianPostInternationalCarrier.php
+|   |   |       
+|   |   \---RussianPost
+|   |       |   DomesticTariffVariant.php
+|   |       |   RussianPostApiClient.php
+|   |       |   RussianPostCountryDirectory.php
+|   |       |   RussianPostCountryMapping.php
+|   |       |   RussianPostCountryMappingRepository.php
+|   |       |   RussianPostCountryMappingService.php
+|   |       |   RussianPostCourierTariffProbeService.php
+|   |       |   RussianPostDomesticApiClient.php
+|   |       |   RussianPostDomesticSettings.php
+|   |       |   RussianPostDomesticTariffVariantResolver.php
+|   |       |   RussianPostSettings.php
+|   |       |   
+|   |       +---Admin
+|   |       |       RussianPostCountriesAdminPage.php
+|   |       |       
+|   |       +---Otpravka
+|   |       |       RussianPostOtpravkaApiClient.php
+|   |       |       RussianPostOtpravkaApiSettings.php
+|   |       |       
+|   |       \---Tracking
+|   |               RussianPostTrackingApiClient.php
+|   |               
+|   +---Checkout
+|   |   +---Address
+|   |   |       CheckoutAddressNormalizer.php
+|   |   |       CheckoutAddressRuntime.php
+|   |   |       FiasAddressNormalizer.php
+|   |   |       
+|   |   +---AddressSuggestions
+|   |   |       AddressSuggestionAjax.php
+|   |   |       AddressSuggestionClientInterface.php
+|   |   |       AddressSuggestionNormalizer.php
+|   |   |       AddressSuggestionService.php
+|   |   |       AddressSuggestionSettings.php
+|   |   |       DaDataSuggestionClient.php
+|   |   |       DaDataTokenPool.php
+|   |   |       FallbackSuggestionClient.php
+|   |   |       
+|   |   +---Admin
+|   |   |       CheckoutSimulationPage.php
+|   |   |       
+|   |   +---Cache
+|   |   |       DeliveryQuoteCacheManager.php
+|   |   |       QuoteCache.php
+|   |   |       
+|   |   +---Locations
+|   |   |       CheckoutCityResolver.php
+|   |   |       CheckoutLocationAjax.php
+|   |   |       CheckoutLocationSearch.php
+|   |   |       CheckoutLocationSearchParser.php
+|   |   |       LocationCoordinateEnricher.php
+|   |   |       
+|   |   +---Runtime
+|   |   |       CarrierExecutionGuard.php
+|   |   |       CheckoutCalculationResult.php
+|   |   |       CheckoutLogger.php
+|   |   |       CheckoutOrchestrator.php
+|   |   |       FallbackRateFactory.php
+|   |   |       RuleAppliedRateBuilder.php
+|   |   |       
+|   |   +---Sorting
+|   |   |       RateSorter.php
+|   |   |       
+|   |   +---Validation
+|   |   |       CheckoutAddressValidation.php
+|   |   |       
+|   |   \---WooCommerce
+|   |           CheckoutAddressRenderer.php
+|   |           CheckoutDebugPanel.php
+|   |           CheckoutDeliveryTypeSelector.php
+|   |           CheckoutFeatureGate.php
+|   |           CheckoutRateRenderer.php
+|   |           CheckoutSessionManager.php
+|   |           CheckoutSortSelector.php
+|   |           CheckoutValidation.php
+|   |           CourierRateSupport.php
+|   |           NewShippingMethod.php
+|   |           OrderShippingMetaPersister.php
+|   |           PickupMapCheckout.php
+|   |           PickupPointOrderDisplay.php
+|   |           PickupPointRenderer.php
+|   |           ShippingMethodRegistrar.php
+|   |           WooCommercePackageMapper.php
+|   |           WooCommerceRateMapper.php
+|   |           
+|   +---Core
+|   |       Autoloader.php
+|   |       bootstrap.php
+|   |       Container.php
+|   |       FeatureFlags.php
+|   |       Plugin.php
+|   |       PluginConstants.php
+|   |       PluginEnvironment.php
+|   |       RequirementsChecker.php
+|   |       
+|   +---DeliveryServices
+|   |   |   DeliveryService.php
+|   |   |   DeliveryServiceCountryRepository.php
+|   |   |   DeliveryServiceManager.php
+|   |   |   DeliveryServiceRegistry.php
+|   |   |   DeliveryServiceRepository.php
+|   |   |   DeliveryServiceSettingsRepository.php
+|   |   |   
+|   |   \---Admin
+|   |           DeliveryServicesAdminPage.php
+|   |           
+|   +---Domain
+|   |   |   .gitkeep
+|   |   |   
+|   |   +---Address
+|   |   |       Address.php
+|   |   |       AddressNormalizationResult.php
+|   |   |       
+|   |   +---Calendar
+|   |   |       CalendarDay.php
+|   |   |       PlannedDeliveryDate.php
+|   |   |       
+|   |   +---Carrier
+|   |   |       CarrierCapabilities.php
+|   |   |       CarrierIdentity.php
+|   |   |       
+|   |   +---Common
+|   |   |       DateRange.php
+|   |   |       DeliveryDaysFormatter.php
+|   |   |       Money.php
+|   |   |       
+|   |   +---Package
+|   |   |       Package.php
+|   |   |       PackageItem.php
+|   |   |       ShipmentPlace.php
+|   |   |       
+|   |   +---Pickup
+|   |   |       PickupPoint.php
+|   |   |       PickupPointSelection.php
+|   |   |       
+|   |   +---Quote
+|   |   |       DeliveryQuote.php
+|   |   |       DeliveryRate.php
+|   |   |       DeliveryType.php
+|   |   |       QuoteRequest.php
+|   |   |       
+|   |   +---Shipment
+|   |   |       Shipment.php
+|   |   |       ShipmentCreateRequest.php
+|   |   |       ShipmentCreateResult.php
+|   |   |       
+|   |   \---Status
+|   |           DeliveryStatus.php
+|   |           StatusEvent.php
+|   |           StatusMapping.php
+|   |           
+|   +---Infrastructure
+|   |   +---Database
+|   |   |       MigrationManager.php
+|   |   |       
+|   |   +---Logging
+|   |   |       Logger.php
+|   |   |       LogRedactor.php
+|   |   |       
+|   |   +---Queue
+|   |   |       ActionScheduler.php
+|   |   |       
+|   |   +---Security
+|   |   |       EncryptionService.php
+|   |   |       
+|   |   \---Settings
+|   |           SettingsRepository.php
+|   |           
+|   +---Locations
+|   |   |   .gitkeep
+|   |   |   
+|   |   +---Admin
+|   |   |       LocationsAdminPage.php
+|   |   |       
+|   |   +---Coordinates
+|   |   |       LocationCoordinatesDadataBatchUpdater.php
+|   |   |       
+|   |   +---DaData
+|   |   +---Fias
+|   |   |       FiasCredentials.php
+|   |   |       FiasEndpoints.php
+|   |   |       FiasHttpClient.php
+|   |   |       FiasLogger.php
+|   |   |       FiasRateLimiter.php
+|   |   |       
+|   |   +---Gar
+|   |   |       GarChangesClient.php
+|   |   |       GarSyncManager.php
+|   |   |       
+|   |   +---Import
+|   |   |       FiasImportManager.php
+|   |   |       GarImportResult.php
+|   |   |       GarPlacesCsvImporter.php
+|   |   |       LocationImportService.php
+|   |   |       LocationIncrementalUpdateService.php
+|   |   |       LocationsSnapshotExporter.php
+|   |   |       LocationsSnapshotImporter.php
+|   |   |       
+|   |   +---Normalization
+|   |   |       AddressNormalizerInterface.php
+|   |   |       FallbackAddressNormalizer.php
+|   |   |       
+|   |   +---Postcodes
+|   |   |       DaDataPostcodeClient.php
+|   |   |       RussianPostCourierCalcPostcodeFillStateService.php
+|   |   |       
+|   |   +---Services
+|   |   |       GarChangesService.php
+|   |   |       KeyboardLayoutTransformer.php
+|   |   |       LocationAliasGenerator.php
+|   |   |       LocationCountryIndexService.php
+|   |   |       LocationDisplayNameFormatter.php
+|   |   |       LocationSearchService.php
+|   |   |       
+|   |   +---Storage
+|   |   |       LocationRepository.php
+|   |   |       RegionRepository.php
+|   |   |       
+|   |   \---ValueObjects
+|   |           Location.php
+|   |           Region.php
+|   |           
+|   +---Orders
+|   |   \---Admin
+|   |           OrderDeliveryMetabox.php
+|   |           
+|   +---Packaging
+|   |       PackagingApplicationResult.php
+|   |       PackagingWeightCalculator.php
+|   |       
+|   +---Pickup
+|   |   +---Admin
+|   |   |       PickupAdminPage.php
+|   |   |       
+|   |   +---Presentation
+|   |   |       PickupPointCardRenderer.php
+|   |   |       
+|   |   +---Rest
+|   |   |       CheckoutPickupPointRestController.php
+|   |   |       PickupPointsRestController.php
+|   |   |       
+|   |   +---RussianPost
+|   |   |       RussianPostPassportPointNormalizer.php
+|   |   |       RussianPostPickupDiagnosticsService.php
+|   |   |       RussianPostPickupImporter.php
+|   |   |       RussianPostPickupImportStateService.php
+|   |   |       RussianPostPickupLocationResolver.php
+|   |   |       RussianPostPickupPointRepository.php
+|   |   |       RussianPostPickupPointTypeSettings.php
+|   |   |       RussianPostWorkTimeFormatter.php
+|   |   |       
+|   |   +---Search
+|   |   |       PickupAddressSearchService.php
+|   |   |       
+|   |   +---Services
+|   |   |       PickupPointLocationResolver.php
+|   |   |       
+|   |   \---Storage
+|   |           PickupPointRepository.php
+|   |           
+|   +---Rules
+|   |   |   .gitkeep
+|   |   |   
+|   |   +---Admin
+|   |   |       RuleAdminContext.php
+|   |   |       RuleConditionUiSchema.php
+|   |   |       RulesAdminPage.php
+|   |   |       
+|   |   +---Domain
+|   |   |       Rule.php
+|   |   |       RuleAuditEntry.php
+|   |   |       RuleCondition.php
+|   |   |       RuleEngineResult.php
+|   |   |       RuleEvaluationContext.php
+|   |   |       RuleEvaluationResult.php
+|   |   |       
+|   |   +---Services
+|   |   |       ConditionEvaluator.php
+|   |   |       RuleEngine.php
+|   |   |       RuleEvaluator.php
+|   |   |       RuleFormulaFormatter.php
+|   |   |       RuleSimulator.php
+|   |   |       
+|   |   +---Storage
+|   |   |       RuleRepository.php
+|   |   |       
+|   |   \---ValueObjects
+|   |           RuleActionTypes.php
+|   |           RuleConditionTypes.php
+|   |           RuleOperationBases.php
+|   |           RuleOperationTypes.php
+|   |           RuleOperators.php
+|   |           
+|   +---Shipments
+|   |   |   .gitkeep
+|   |   |   
+|   |   +---Admin
+|   |   |       OrderShipmentsMetabox.php
+|   |   |       ShipmentStatusesAdminPage.php
+|   |   |       
+|   |   +---Application
+|   |   |       OrderShipmentDraftFactory.php
+|   |   |       RussianPostShipmentActualCostExtractor.php
+|   |   |       RussianPostShipmentActualCostLookupService.php
+|   |   |       ShipmentBacklogService.php
+|   |   |       ShipmentCreationService.php
+|   |   |       ShipmentOrderStatusMappingService.php
+|   |   |       ShipmentServiceSettings.php
+|   |   |       ShipmentStatusAutoSyncCron.php
+|   |   |       ShipmentStatusAutoSyncService.php
+|   |   |       ShipmentStatusUpdateService.php
+|   |   |       
+|   |   +---Contracts
+|   |   |       ShipmentCarrierAdapterInterface.php
+|   |   |       
+|   |   +---RussianPost
+|   |   |       RussianPostAddressNormalizer.php
+|   |   |       RussianPostCreateRequestBuilder.php
+|   |   |       RussianPostShipmentAdapter.php
+|   |   |       RussianPostShipmentProductMapper.php
+|   |   |       RussianPostTrackingStatusMapper.php
+|   |   |       
+|   |   \---Storage
+|   |           OrderShipmentRepository.php
+|   |           
+|   \---WooCommerce
+|           HPOSCompatibility.php
+|           
++---templates
+|       .gitkeep
+|       
+\---tests
+    +---address
+    |       run-address-smoke.php
+    |       run-dadata-suggestions-smoke.php
+    |       
+    +---calendar
+    |       run-calendar-smoke.php
+    |       
+    +---carriers
+    |       run-russian-post-countries-smoke.php
+    |       run-russian-post-domestic-api-probe.php
+    |       run-russian-post-domestic-smoke.php
+    |       run-russian-post-smoke.php
+    |       
+    +---checkout
+    |       run-checkout-location-picker-smoke.php
+    |       run-checkout-smoke.php
+    |       run-runtime-stabilization-smoke.php
+    |       run-woocommerce-checkout-smoke.php
+    |       
+    +---dadata
+    +---delivery-services
+    |       run-delivery-services-smoke.php
+    |       
+    +---domain
+    |       run-domain-smoke.php
+    |       
+    +---fias
+    |       run-fias-smoke.php
+    |       
+    +---fixtures
+    |   |   gar_places_sample.csv
+    |   |   TestDemoCarrier.php
+    |   |   TestPickupProvider.php
+    |   |   
+    |   \---demo
+    |           fias-prepared-sample.json
+    |           locations-demo.json
+    |           pickup-points-demo.json
+    |           rules-demo.json
+    |           
+    +---locations
+    |       run-dadata-postcode-fill-smoke.php
+    |       run-gar-import-smoke.php
+    |       run-location-display-name-smoke.php
+    |       run-locations-incremental-update-smoke.php
+    |       run-locations-smoke.php
+    |       run-russianpost-courier-postcode-fill-smoke.php
+    |       
+    +---orders
+    |       run-order-delivery-calculation-meta-smoke.php
+    |       
+    +---packaging
+    |       run-packaging-smoke.php
+    |       
+    +---pickup
+    |       run-pickup-checkout-smoke.php
+    |       run-pickup-diagnostics-smoke.php
+    |       run-pickup-rest-smoke.php
+    |       run-pickup-smoke.php
+    |       run-russian-post-pickup-import-smoke.php
+    |       
+    +---rules
+    |       run-rules-admin-smoke.php
+    |       run-rules-smoke.php
+    |       
+    +---runtime
+    |       run-no-legacy-smoke.php
+    |       
+    +---shipments
+    |       run-russian-post-cancel-shipment-smoke.php
+    |       run-russian-post-shipment-price-smoke.php
+    |       run-russian-post-shipments-smoke.php
+    |       run-shipment-status-smoke.php
+    |       
+    \---statuses
+            run-order-status-mapping-smoke.php
+            run-status-autosync-smoke.php
+            
