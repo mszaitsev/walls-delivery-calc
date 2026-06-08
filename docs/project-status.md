@@ -1,312 +1,274 @@
 # Project Status
 
+0.40.0 note: documentation audit branch. No runtime functionality was added. The status below was refreshed against the current codebase, profile documents, migrations, assets and smoke-test entrypoints after the 0.39.x Russian Post shipment/status work.
+
 0.39.5 note: the same Russian Post actual-cost lookup now runs after ordinary automatic shipment creation from the order metabox. After a successful create response with barcode/tracking number, WDC safely calls `GET /1.0/backlog/search?query={barcode}`, extracts `total-rate-wo-vat + total-vat` through the shared actual-cost extractor, and stores source `backlog_search_after_create`. Lookup errors or missing totals do not fail shipment creation, do not create order notes, and do not show warnings.
 
-0.39.4 note: the WooCommerce order shipment metabox now shows the real Russian Post shipment price when manual tracking attach finds the parcel through `GET /1.0/backlog/search?query={barcode}`. WDC stores `total-rate-wo-vat + total-vat` from that response in `_wdc_shipments`, formats it as `Цена: {amount} руб.`, and compares it with the checkout `Базовая стоимость API` from `_wdc_delivery_calculation_data`; up to 3% over base is ok/green, more than 3% is warning/red, and missing base cost is neutral.
+0.39.4 note: the WooCommerce order shipment metabox shows the real Russian Post shipment price when manual tracking attach finds the parcel through `GET /1.0/backlog/search?query={barcode}`. WDC stores `total-rate-wo-vat + total-vat` from that response in `_wdc_shipments`, formats it as `Цена: {amount} руб.`, and compares it with the checkout `Базовая стоимость API` from `_wdc_delivery_calculation_data`; up to 3% over base is ok/green, more than 3% is warning/red, and missing base cost is neutral.
 
-0.39.3 note: the Russian Post courier calculation postcode fill tool on `WDC -> Локации` now runs each backend step as sequential rate-limited probes at about 6 requests/sec. Steps are capped at 18 probes or 3 seconds, the browser waits only a short delay before the next single AJAX step, and job JSON includes target/actual RPS and step timing diagnostics. No parallel AJAX requests or concurrent backend jobs are used.
+0.39.3 note: the Russian Post courier calculation postcode fill tool on `WDC -> Локации` runs each backend step as sequential rate-limited probes at about 6 requests/sec. Steps are capped at 18 probes or 3 seconds, the browser keeps one active AJAX step at a time, and job JSON includes target/actual RPS and step timing diagnostics.
 
-0.39.2 note: successful shipment status refreshes no longer create WooCommerce order notes. WDC creates an order note only when automatic order status mapping changes the WooCommerce order status, using the compact format `Посылка {barcode}`, `Статус: {universal status}.`, `Статус заказа изменён:`, `{from_status} → {target_status}`.
+0.39.2 note: successful shipment status refreshes no longer create WooCommerce order notes. WDC creates an order note only when automatic order status mapping changes the WooCommerce order status, using the compact format `Посылка {barcode}`, `Статус: {universal status}.`, `Статус заказа изменён:`, `{from_status} -> {target_status}`.
 
-0.39.1 note: autosync no longer drops terminal shipments before order status mapping. Terminal universal statuses still skip carrier tracking refresh, but `ShipmentStatusAutoSyncService` now applies `ShipmentOrderStatusMappingService` to the already saved terminal shipment state, records `terminal_status_no_tracking_update`, and includes the mapping result in `order_statuses_changed`, `order_statuses_skipped`, or `order_status_change_errors`.
+0.39.1 note: autosync no longer drops terminal shipments before order status mapping. Terminal universal statuses still skip carrier tracking refresh, but `ShipmentStatusAutoSyncService` applies `ShipmentOrderStatusMappingService` to the already saved terminal shipment state, records `terminal_status_no_tracking_update`, and includes the mapping result in diagnostics.
 
-0.39.0 note: universal shipment status to WooCommerce order status mapping is implemented. The `WDC -> Статусы -> Соответствие статусов` tab now stores a disabled-by-default global enable flag and `shipment_status_order_status_mapping`, reads available WooCommerce statuses through `wc_get_order_statuses()` including custom statuses, and applies mapping through `ShipmentOrderStatusMappingService` immediately after shipment status is saved by `ShipmentStatusUpdateService`. Autosync diagnostics include order status changed/skipped/error counters.
-
-0.38.2 note: `tracking_checked_at` for the shipment metabox manager UI is now stored in `Asia/Novosibirsk` / GMT+7. `carrier_operation_date` is still saved exactly as returned by Russian Post Tracking API and is not converted.
-
-0.38.1 note: shipment status autosync defaults and settings persistence were tightened before site testing. `ShipmentStatusAutoSyncService` and `ShipmentStatusAutoSyncCron` are explicitly registered in the container, default order statuses are `wc-processing` and `wc-on-hold`, and the Statuses page persists only autosync keys through targeted saves. `wc-completed` can be enabled manually.
+0.39.0 note: universal shipment status to WooCommerce order status mapping is implemented. The `WDC -> Статусы -> Соответствие статусов` tab stores a disabled-by-default global enable flag and `shipment_status_order_status_mapping`, reads available WooCommerce statuses through `wc_get_order_statuses()` including custom statuses, and applies mapping through `ShipmentOrderStatusMappingService` after shipment status is saved by `ShipmentStatusUpdateService`.
 
 0.38.0 note: universal shipment status autosync is implemented through `ShipmentStatusAutoSyncService`, `WDC -> Статусы`, WP Cron hook `wdc_shipment_status_autosync`, schedule `wdc_every_6_hours`, and lock `wdc_shipment_status_autosync_lock`. The first dispatcher target is `russian_post_domestic`, which reuses `ShipmentStatusUpdateService::update_russian_post()`.
 
-0.37.5 note: Russian Post foundation documentation now matches the current unified domestic service, Tariff API requests, tariff variants, shipment modal/payload rules, address normalization, manual tracking fallback and manual documents workflow. Runtime business logic is unchanged.
-
 ## Общий статус
 
-- Версия / baseline проекта: `0.39.5`, определено по `walls-delivery-calc.php`.
-- Базовая ветка: `develop`.
+- Текущая версия: `0.40.0`.
+- Текущая базовая ветка: `develop`.
+- Рабочая ветка аудита: `chore/project-status-refresh`.
 - Последнее обновление статуса: 2026-06-08.
-- Общий процент готовности: примерно 66%.
-- Текущий этап 0.39.5: фактическая стоимость Почты России подтягивается из `backlog/search` как при ручном внесении трекинга, так и после обычного создания отправления; ошибка lookup не ломает создание.
+- Общая готовность проекта: примерно 72%.
+- Следующий рекомендуемый этап: `feature/order-delivery-recalculation` для пересчета доставки в админке заказа и управляемой замены shipping item.
 
 ## Краткое резюме
 
-Проект уже имеет рабочую платформу расчета доставки для WooCommerce: core bootstrap, DI container, миграции, checkout runtime, календарь доставки, Rule Engine, локальную базу ФИАС/ГАР, DaData-подсказки и обогащение, Почту России для внутренних/международных расчетов и полноценный слой ПВЗ Почты России с импортом, REST API и checkout map.
+Проект уже имеет рабочую платформу расчета доставки для WooCommerce: core bootstrap, DI container, миграции, checkout runtime, календарь доставки, Rule Engine, локальную базу FIAS/GAR, DaData-подсказки и обогащение, слой delivery services, внутреннюю и международную Почту России, ПВЗ Почты России с импортом/REST/картой, а также ручной runtime отправлений Почты России.
 
-При этом проект еще не закрывает полный carrier lifecycle из ТЗ: ручное создание отправлений Почты России, ручное обновление статуса, отмена backlog-отправления и ручное привязывание трекинга реализованы, но автоматический polling, генерация документов/ярлыков, автоматическое изменение WooCommerce-статусов и остальные ТК пока не реализованы.
+После веток 0.38.x-0.39.x закрыты важные части carrier lifecycle для Почты России: создание отправления, отмена backlog-отправления, ручное внесение трекинга, ручное и автоматическое обновление статусов, универсальные статусы, автосинхронизация, автоматическое изменение WooCommerce-статусов заказов и сверка фактической стоимости отправления с расчетом checkout. Не закрыты документы/ярлыки/партии/Ф103 внутри WDC, полноценный admin recalculation, история статусов, production operations dashboard и будущие перевозчики.
 
 ## Готовность по блокам
 
 | Блок | Статус | Готовность | Комментарий |
 | ---- | ------ | ---------: | ----------- |
-| Core Platform | done | 100% | Bootstrap, autoloader, container, settings, logger, migrations, HPOS declaration. |
-| Domain Model | done | 90% | Базовые value objects для адресов, календаря, carrier, package, pickup, quote, shipment и status. |
-| Delivery Calendar | done | 90% | Таблица календаря, генерация года, расчет плановой даты, admin UI. |
-| FIAS/GAR Places | done | 85% | Locations, regions, aliases, GAR import, snapshots, incremental update, checkout lookup. |
-| DaData | done | 80% | Address suggestions, token pool, postcode/coordinate enrichment, pickup address search. |
-| Rule Engine | done | 85% | Conditions, groups, audit trail, price/days mutations, admin builder, simulation. |
-| Checkout Rates | done | 80% | WooCommerce shipping method, orchestrator, cache, sorting, rules, order meta persistence. |
-| Checkout UX | partial | 70% | City picker, sorting, tariff selector, courier address summary, pickup map; browser storage TTL and full UX stabilization remain. |
-| Russian Post Domestic | done | 88% | Domestic runtime, unified `russian_post_domestic` service settings context, delivery-type split for pickup/courier groups, configurable method titles, visible domestic shipping item meta reduced to delivery days only, tariff variants, API client and one-way migration from the previous two-service model. |
-| Russian Post International | done | 75% | International runtime, country mapping, API/fallback pricing. |
-| Russian Post Pickup Points | done | 88% | Import pipeline, compact table, REST API, checkout map, order persistence, and admin shipment-modal local pickup search. |
-| Multicarrier Pickup Layer | partial | 35% | Generic domain/storage exists, but production checkout map is Russian Post-specific. |
-| Order Admin Recalculation | partial | 30% | Order delivery metabox exists; full recalculation/replacement workflow is missing. |
-| Shipment Domain | partial | 55% | Domain objects exist and are used by the manual shipment creation runtime. |
-| Shipment Runtime | partial | 65% | Manual WooCommerce order admin flow creates Russian Post Otpravka backlog shipments, runs the first status refresh, supports manual status refresh, backlog cancellation, local remove-from-order and manual tracking attachment. |
-| Tracking / Documents / Status Sync | partial | 25% | Manual Russian Post Tracking API lookup is implemented for one shipment at a time; automatic polling, labels, acts and plugin-generated documents are not included. |
-| WooCommerce Status Mapping | not-started | 0% | Domain baseline exists, but no automatic WooCommerce order status changes. |
-| CDEK | planned | 0% | Planned carrier stage; no adapter found in code. |
-| DPD | planned | 0% | Planned carrier stage; no adapter found in code. |
-| Yandex Delivery | planned | 0% | Planned carrier stage; no adapter found in code. |
-| PEK | planned | 0% | Planned carrier stage; no adapter found in code. |
-| Energia | planned | 0% | Planned carrier stage; no adapter found in code. |
-| Aerogruz | planned | 0% | Planned carrier stage; no adapter found in code. |
-| Jet | planned | 0% | Planned carrier stage; no adapter found in code. |
-| Manual / Fixed Pseudo-carriers | partial | 40% | Delivery services layer exists; full manual/fixed pseudo-carrier lifecycle is not complete. |
-| Logs / Operations | partial | 45% | Logger and diagnostics exist; production monitoring/dashboard and full rotation remain. |
-| Documentation | needs-review | 70% | Baseline is consolidated here; some historical docs remain intentionally archived. |
+| Core Platform | done | 100% | Entrypoint, autoloader, container, settings, logger, encryption, migrations, HPOS declaration, admin menu. |
+| Locations / FIAS | done | 88% | Locations/regions/aliases, GAR import, snapshots, incremental updates, checkout lookup, DaData coordinate/postcode helpers. |
+| Delivery Services | done | 90% | Registry, repositories, settings/countries/admin UI, service rules integration, unified Russian Post domestic service migration. |
+| Russian Post Domestic | done | 92% | Unified `russian_post_domestic`, pickup/courier split, Tariff API, tariff variants, courier calc postcode substitution, Otpravka credentials and shipment settings. |
+| Pickup Points | done | 90% | Russian Post import, diagnostics, local repository, REST API, checkout map, order persistence, admin shipment-modal map selector. |
+| Shipments | partial | 80% | Russian Post create/cancel/remove/manual attach, draft/preview, address normalization, actual-cost lookup; documents and other carriers are absent. |
+| Shipment Tracking | partial | 78% | Russian Post Tracking API refresh, mapper, universal status persistence and manual metabox refresh; no full status history UI. |
+| Shipment Autosync | partial | 75% | WP Cron/manual run, 6-hour interval, lock, diagnostics and Russian Post dispatch exist; only one carrier target and no advanced batching. |
+| Order Status Mapping | done | 80% | Carrier-neutral universal shipment status -> WooCommerce status mapping, custom statuses, terminal-status autosync handling and compact private notes. |
+| Checkout Integration | partial | 82% | WooCommerce method, city/location picker, sorting, tariff selector, courier validation, pickup map, order meta and calculation metabox; admin recalculation remains. |
+| Rule Engine | done | 88% | Conditions/groups, audit, price/days mutations, comments, service rules, simulation and packaging tab. |
+| International Shipping | partial | 75% | Russian Post international rates/country mapping/fallback work; no shipment creation/tracking/documents for international flow. |
+| Future Carriers | not-started | 0% | CDEK, DPD, Yandex Delivery, PEK, Energia, Aerogruz and Jet have no runtime adapters. |
+| Operations / Monitoring | partial | 50% | Logger, diagnostics pages and autosync diagnostics exist; no production dashboard/rotation strategy. |
+| Documentation | partial | 76% | Profile docs are broad and useful; some historical docs need version/status cleanup after this audit. |
 
 ## Реализовано
 
-### Core Platform
+### Platform, Data And Checkout
 
-- `walls-delivery-calc.php` is a minimal plugin entrypoint with version `0.39.3`.
-- `src/Core/bootstrap.php` wires the autoloader and plugin runtime.
-- `src/Core/Plugin.php` registers services and hooks through a DI container.
-- `src/Infrastructure/Settings`, `src/Infrastructure/Logging`, `src/Infrastructure/Security`, `src/Infrastructure/Queue`, and `src/Infrastructure/Database` provide settings, logging, encryption, background scheduling, and migrations.
-- `src/WooCommerce/HPOSCompatibility.php` declares HPOS compatibility.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.40.0`.
+- `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
+- `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
+- `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
+- `src/WooCommerce/HPOSCompatibility.php` declares WooCommerce HPOS compatibility.
+- `src/Domain` contains address, calendar, carrier, common, package, pickup, quote, shipment and status domain classes.
+- `src/Calendar` stores delivery calendars, generates years, calculates/format delivery dates and exposes admin UI.
+- `src/Locations` covers FIAS/GAR clients/import/snapshots/incremental updates, local locations/regions, aliases, display names, search, country index and courier calculation postcode fill.
+- `src/Checkout` covers WooCommerce shipping method registration, package/rate mapping, quote orchestration, caching, sorting, validation, city selector, DaData suggestions, courier address handling, pickup map and order meta persistence.
+- `src/Rules` implements the Rule Engine, service-level rules, default fallback rules, condition groups/expressions, audit trail, price/days changes, comments, stop-processing, simulation and admin builder.
+- `src/Packaging` adds global/service-aware packaging weight calculation used by delivery services and checkout.
 
-### Domain Model
+### Delivery Services
 
-- `src/Domain` contains framework-independent value objects and entities for address normalization, calendar dates, carriers, money, packages, pickup selection, quotes, shipments, and delivery statuses.
-- Shipment/status domain classes are present. The first runtime uses shipment create requests/results for manual Russian Post shipment creation from the WooCommerce order admin.
+- `src/DeliveryServices` stores and manages delivery services, countries, settings and service admin UI.
+- Runtime availability supports carrier directory, selected countries, all countries and all-except-selected modes.
+- Service rules, minimum price, rounding, packaging weight and customer comments are integrated into checkout rates.
+- Migration `0026_unify_russian_post_domestic_service.php` copies old domestic pickup/courier settings into one `russian_post_domestic` service and removes obsolete domestic service rows/settings/country rows/service-rule bindings.
 
-### Delivery Calendar
+### Russian Post Domestic
 
-- `src/Calendar` includes calendar day storage, year generation, shop/carrier calendar types, timezone handling, delivery date calculation, formatting, scheduler, and admin UI.
-- Migration `0001_create_calendar_days_table.php` creates calendar storage.
+- A single domestic carrier/service is the source of truth: `carrier_key=russian_post_domestic`, `service_key=russian_post_domestic`.
+- Pickup and courier are split by `delivery_type` and checkout group/rate ids such as `russian_post_domestic:pickup` and `russian_post_domestic:courier`.
+- Domestic Tariff API requests support `pack=99`, declared value `sumoc`, tariff variants, per-tariff ECOM flag, API token, cache/debug metadata and safe error diagnostics.
+- Configurable method titles, tariff labels and delivery ranges are persisted in checkout/session/order calculation data while visible WooCommerce shipping item meta is kept clean.
+- Courier Russian Post tariff calculation can use `russianpost_courier_calc_postal_code` found by the admin location tool `Подобрать индексы для курьерской Почты России`.
+- Otpravka credentials, Tracking credentials, postoffice acceptance indices, default from postcode and shipment settings live in `WDC -> Службы доставки -> Почта России по РФ`.
 
-### FIAS/GAR
+### Pickup Points
 
-- `src/Locations` includes FIAS credentials/endpoints/http/rate limiting, GAR changes client/sync, import services, snapshots, aliases, display-name formatting, search, and repositories.
-- Migrations `0002`, `0003`, `0007`, `0008`, `0009`, `0010`, `0011`, `0023`, `0024`, and `0025` support locations, aliases, GAR changes/imports, and location indexes/fields.
-- Checkout location AJAX/search integrates local places into checkout.
+- Russian Post pickup points are imported into `wp_wdc_pickup_points_russian_post`.
+- Import state, diagnostics, local location matching/rebind, point type settings and work-time formatting are implemented.
+- Checkout pickup REST/search/detail endpoints and selection state are implemented.
+- Checkout map uses the frontend pickup map stack with Leaflet/Yandex providers and selected pickup persistence.
+- WooCommerce order admin shipment modal can choose a Russian Post OPS/PVZ on the map; selection updates only the shipment draft/preview/create request and does not rewrite checkout/order meta.
 
-### DaData
+### Russian Post Shipments
 
-- `src/Checkout/AddressSuggestions` implements address suggestions, token pool, DaData client, fallback client, normalization, and AJAX endpoints.
-- `src/Locations/Postcodes` and `src/Locations/Coordinates` support postcode and coordinate enrichment.
-- Pickup address search can use DaData while keeping postcode-only fallback.
+- WooCommerce order metabox `Отправления` prepares Russian Post shipment drafts from HPOS-safe order APIs and saved WDC order meta.
+- Creation sends `PUT /2.0/user/backlog` through `RussianPostShipmentAdapter`.
+- Pickup/OPS payloads use `address-type-to=DEMAND`, `index-to`, `region-to`, `place-to`; domestic payloads send `mail-direct=643`.
+- ECOM payloads are controlled by tariff setting `is_ecom` and use `ecom-data.delivery-point-index`.
+- Courier payloads require Russian Post address normalization before create.
+- Successful create stores barcode/ШПИ and hidden technical `backlog_order_id`.
+- After successful create, the modal closes, a toast is shown, the first status refresh starts automatically, and WDC attempts actual-cost lookup through `backlog/search` without failing the create flow.
+- Cancellation calls `DELETE /1.0/backlog` with `backlog_order_id` and is available only for operation `28 / Присвоение идентификатора`.
+- Local remove-from-order clears only WooCommerce `_wdc_shipments` state and does not call Russian Post.
+- Manual tracking attachment normalizes barcode/ШПИ, searches `backlog/search`, falls back to `shipment/search`, stores lookup source/backlog id when available and starts the first status refresh.
+- Actual Russian Post cost from `total-rate-wo-vat + total-vat` is stored and compared with checkout `Базовая стоимость API`; <=3% over base is ok, more is warning, missing base is neutral.
 
-### Rule Engine
+### Shipment Statuses, Autosync And Order Status Mapping
 
-- `src/Rules` includes domain objects, condition/action value objects, condition evaluator, rule evaluator, rule engine, simulator, repository, and admin UI.
-- The engine supports price changes, promo/crossed prices, delivery-days changes, disabling rates, stop processing, condition groups, and audit trail.
+- `src/Domain/Status/DeliveryStatus.php` defines universal shipment statuses.
+- `RussianPostTrackingApiClient` calls Russian Post Tracking API `getOperationHistory` over SOAP 1.2.
+- `RussianPostTrackingStatusMapper` contains the fixed Russian Post operation/attribute mapping, including pickup/courier corrections and `type:-` fallback.
+- Manual metabox status refresh stores universal status, raw carrier operation data, checked timestamp and terminal marker in `_wdc_shipments`.
+- `ShipmentStatusAutoSyncCron` registers hook `wdc_shipment_status_autosync`, schedule `wdc_every_6_hours` and keeps the event scheduled even when disabled.
+- `ShipmentStatusAutoSyncService` scans selected WooCommerce order statuses, skips missing tracking/unsupported carriers/terminal tracking refreshes, dispatches Russian Post domestic updates and stores diagnostics.
+- Terminal statuses still run order status mapping against saved shipment state.
+- `ShipmentOrderStatusMappingService` applies universal shipment status -> WooCommerce order status mapping when enabled, validates target statuses from `wc_get_order_statuses()`, updates orders and adds a compact private WDC note only when the order status actually changes.
 
-### Checkout Rates
+### Russian Post International
 
-- `src/Checkout/Runtime` includes checkout orchestration, carrier execution guard, fallback rate factory, rule-applied rate builder, calculation result, and checkout logging.
-- `src/Checkout/WooCommerce` registers the WooCommerce shipping method, maps packages/rates, persists order meta, renders rates/sorting/delivery type/address/pickup UI, and validates checkout.
-- `src/Checkout/Cache` caches delivery quotes.
-- `src/Checkout/Sorting` sorts rates.
-
-### Russian Post
-
-- `src/Carriers/Runtime/RussianPostDomesticCarrier.php` and `src/Carriers/Runtime/RussianPostInternationalCarrier.php` are registered in `CarrierRegistry`.
-- `src/Carriers/RussianPost` includes tariff API clients/settings, country mapping/directory, domestic tariff variants, courier tariff probing, and Otpravka credentials/client foundation.
-- `src/DeliveryServices` provides service definitions/settings/countries/admin management used by Russian Post services.
-- Historical migration note: Domestic Russian Post settings use only `service_key=russian_post_domestic` as source of truth. Migration `0026_unify_russian_post_domestic_service.php` copies old domestic settings/tariffs/countries/credentials into that unified service, then physically deletes `russian_post_domestic_pickup` and `russian_post_domestic_courier` rows plus their settings, country rows, and service-rule bindings. Backward compatibility with old domestic service keys is intentionally not supported.
-- Domestic Russian Post admin cleanup in `0.35.1`: availability lives on `Основные`, Tariff API endpoint/token live on `API / Credentials`, tariff calculation indices stay on `Расчет`, pickup/courier checkout method titles are configurable on `Основные`, and technical shipping item meta is hidden from WooCommerce order item display.
-- Domestic Russian Post cleanup in `0.35.2`: calculation index labels now clarify tariff calculation usage, `default_from_postcode` is edited in `API / Credentials`, Tariff API token remains because the tariff client uses it as a bearer token when configured, visible domestic shipping item meta contains only `Срок доставки`, pickup point code/type/postcode/address are stored in `_wdc_delivery_calculation_data.pickup`, and pickup code is no longer written to `shipping_address_2`.
-
-### Russian Post Pickup Points
-
-- `src/Pickup/RussianPost` includes importer, import state, diagnostics, passport point normalizer, point repository, location resolver, type settings, and work-time formatter.
-- `src/Pickup/Rest` exposes pickup point directory and checkout selection state endpoints.
-- `assets/frontend/pickup-map` contains the checkout map, modal, API wrapper, checkout integration, and Leaflet/Yandex provider adapters.
-- `src/Shipments/Admin/OrderShipmentsMetabox.php` reuses the configured pickup map provider in the shipment modal for admin-only Russian Post OPS/PVZ search; the selection updates only the shipment draft/preview.
-- Migration `0021_create_russian_post_pickup_points_table.php` creates the carrier-specific Russian Post pickup table; `0022` links points to local locations.
-- Selected pickup data is persisted in checkout session, order meta, shipping item meta, order details, emails, and admin metabox.
+- `RussianPostInternationalCarrier` supports non-RU Russian Post international quote calculation.
+- Country mapping, Russian Post country directory refresh/manual mapping, fallback rates, VAT normalization, packaging weight and service rules are implemented.
+- International flow is quote-only: shipment creation, tracking and documents are not implemented for international delivery.
 
 ## Частично реализовано
 
-### Checkout UX
-
-- Уже есть: city picker, country-aware location lookup, checkout sorting, nested domestic tariff selector, pickup map, courier address summary and validation, DaData suggestions.
-- Не хватает: полного browser storage TTL по ТЗ, финальной стабилизации всех edge cases, полного multicarrier pickup UX.
-- Следующий документ/этап: `docs/wdc-checkout-integration.md`, этап Admin Recalculation и будущие carrier stages.
-
-### Order Admin Recalculation
-
-- Уже есть: `src/Orders/Admin/OrderDeliveryMetabox.php` и сохранение расчетных данных заказа.
-- Не хватает: полноценного пересчета доставки менеджером, замены shipping item, системного order note по формату ТЗ.
-- Следующий документ/этап: Admin Recalculation.
-
-### Shipment Domain
-
-- Уже есть: `src/Domain/Shipment/Shipment.php`, `ShipmentCreateRequest.php`, `ShipmentCreateResult.php`.
-- Не хватает: shipment runtime services, carrier shipment API adapters, admin form/action, idempotency, order meta/state transitions.
-- Следующий документ/этап: Russian Post Shipments Foundation.
-
-### Delivery Statuses Domain
-
-- Уже есть: `src/Domain/Status/DeliveryStatus.php`, `StatusEvent.php`, `StatusMapping.php`.
-- Не хватает: polling, carrier status translation, persistence, documents/tracking integration, WooCommerce status updates.
-- Следующий документ/этап: Tracking, Documents And Status Sync.
-
-### Pickup Layer
-
-- Уже есть: generic pickup domain/storage baseline plus production Russian Post pickup implementation.
-- Не хватает: carrier-neutral map/source orchestration for CDEK, DPD, Yandex and other carriers.
-- Следующий документ/этап: future carrier foundations.
-
-### Documentation
-
-- Уже есть: detailed documents for core platform, domain model, checkout, calendar, FIAS/GAR, DaData, rules, Russian Post, pickup points, and development workflow.
-- Не хватает: live project status maintenance after every task and planned carrier-specific documents.
-- Следующий документ/этап: keep this `docs/project-status.md` updated after each task.
+- Checkout UX is functional, but full browser-storage TTL behavior, final edge-case stabilization and carrier-neutral pickup orchestration for future carriers remain.
+- Order admin recalculation has a calculation metabox and saved calculation data, but not a full manager workflow for recalculating delivery, replacing shipping items and adding systematic notes.
+- Shipment runtime is strong for Russian Post domestic manual operations, but carrier-neutral shipment lifecycle for other carriers is not implemented.
+- Shipment tracking has current status refresh and autosync, but no full status event history/timeline UI.
+- Shipment autosync supports Russian Post domestic only and scans all selected orders without advanced batching/pagination controls.
+- Operations diagnostics exist, but production monitoring, log/document rotation and long-running import hardening remain limited.
+- Documentation is mostly current in active Russian Post/status docs, but older foundation docs still contain stage-specific historical wording.
 
 ## Не реализовано
 
-### Carrier Adapters
+- CDEK runtime adapter, settings, rates, pickup/courier flow, shipments and statuses.
+- DPD runtime adapter, settings, rates, pickup/courier flow, shipments and statuses.
+- Yandex Delivery runtime adapter, pricing, pickup/courier flow and future offer confirmation.
+- PEK, Energia, Aerogruz, Jet adapters.
+- Plugin-generated Russian Post labels, forms, batches and F103.
+- Carrier document storage, download UI and rotation.
+- Full carrier-neutral status history model/UI.
+- Automatic shipment creation outside the manager-triggered order metabox flow.
+- Shipment integrations for international Russian Post and all future carriers.
+- Full manual/fixed pseudo-carrier lifecycle from the target specification.
+- Production operations dashboard.
 
-- CDEK.
-- DPD.
-- Yandex.Доставка.
-- PEK.
-- Energia.
-- Aerogruz.
-- Jet.
+## Известные ограничения
 
-### Shipment Runtime
+- The plugin is still fresh-install oriented; production data migration compatibility is limited to the active migration path documented in current files.
+- Russian Post shipment documents are intentionally prepared manually in the Russian Post account; WDC does not call Forms API and does not generate labels/F103.
+- Russian Post shipment creation is manual from the WooCommerce order admin metabox; there is no automatic creation on checkout/order placement.
+- Autosync is carrier-neutral in shape but has only the Russian Post domestic dispatcher in production code.
+- Autosync uses selected order statuses and `wc_get_orders(limit=-1)`; high-volume production batching is not yet designed.
+- Terminal statuses skip carrier API refresh and only run order status mapping against the saved shipment state.
+- Actual-cost comparison depends on `backlog/search` returning total fields and on checkout calculation data having `api_base_price_rub`.
+- Courier shipment creation depends on Russian Post address normalization; failed/stale normalization blocks create.
+- Admin PВЗ selection for shipments uses the local Russian Post pickup database and does not recalculate checkout tariffs.
+- Pickup map production implementation is Russian Post-specific, even though generic pickup domain/storage exists.
+- International Russian Post remains quote-only.
+- Runtime monitoring/log rotation and import retry/backoff are not production-complete.
 
-- Документы/ярлыки/партии/Ф103 в плагине не генерируются; менеджер оформляет их вручную в ЛК Почты России.
-- Автосинхронизация статусов.
-- Автоматическое изменение WooCommerce-статуса заказа по статусу доставки.
-- Интеграции отправлений для остальных ТК.
+## Технический долг
 
-### Carrier Documents
+### Russian Post Pickup Import
 
-- Накладные.
-- Ярлыки.
-- Акты.
-- Хранение и ротация документов ТК.
+- Verify automatic ZIP download through Russian Post APIs on production Linux/VDS.
+- Compare direct cURL backend and WordPress HTTP API backend stability.
+- Check timeout, SSL, Action Scheduler, background download and PHP ZipArchive behavior on LocalWP and production.
+- Keep manual TXT/JSON payload import as the final LocalWP/Windows fallback.
+- Add retry/backoff, CLI import mode or chunked streamed download if production testing shows the need.
 
-### Tracking / Status Polling
+### Shipments And Statuses
 
-- Получение tracking number.
-- Фоновая синхронизация статусов.
-- История статусов доставки.
+- Add pagination/batching strategy for autosync on large WooCommerce order volumes.
+- Add status history/timeline if business users need more than the latest universal/carrier status.
+- Keep document generation explicitly out of current scope or start a separate Russian Post documents stage.
+- Improve multi-place UI beyond the current basic first-place/default distribution.
+- Generalize shipment adapters and autosync dispatch once the next carrier starts.
 
-### WooCommerce Status Mapping
+### Checkout And Orders
 
-- Mapping статусов доставки в WooCommerce statuses.
-- Автоматическое изменение статуса заказа по статусу доставки.
+- Implement admin recalculation/replacement workflow for existing orders.
+- Finish browser-storage TTL and remaining checkout UX edge cases.
+- Keep validating hidden WDC order calculation data against WooCommerce order item state before shipment creation.
 
 ### Operations
 
-- Production monitoring/status dashboard.
-- Полная ротация логов и документов.
-- Production hardening для долгих фоновых импортов.
+- Define production monitoring/status dashboard.
+- Define log retention/rotation policy.
+- Harden long background imports and diagnostics for production datasets.
 
-### Manual / Fixed Pseudo-carriers
+### Documentation
 
-- Delivery services foundation уже есть, но полный слой фиксированных/ручных pseudo-carriers по ТЗ не завершен.
+- `docs/wdc-shipments-foundation.md` is historically useful but still describes the original manual stage where background polling was not included; current autosync/order mapping source is `docs/wdc-shipment-statuses.md`.
+- `docs/wdc-russian-post-international.md` still carries an old documented version even though the runtime remains present; update it when international shipping is touched.
+- `docs/wdc-current-code-map.md` should continue to receive small top notes when major modules change.
+- `docs/walls-delivery-calc-tech-spec.md` is a target-state document, not implementation status; do not use it as the source of readiness percentages.
 
-## Текущие технические остатки
+## Завершенные ветки / этапы, отраженные в develop
 
-### Russian Post pickup import
+- Core platform, domain model, migrations, HPOS compatibility and admin menu baseline.
+- Calendar and delivery-date foundation.
+- FIAS/GAR locations, snapshots, aliases, display names and checkout location picker.
+- Rule Engine foundation, admin builder, service-level rules and packaging tab.
+- Delivery Services foundation.
+- Russian Post international quote/fallback/country mapping baseline.
+- Russian Post domestic unified service (`russian_post_domestic`) with pickup/courier split.
+- Russian Post pickup points import, diagnostics, REST API and checkout map.
+- Russian Post admin shipment-modal OPS/PVЗ selector.
+- Russian Post domestic shipment creation, cancellation, manual tracking attachment and manual status refresh.
+- Russian Post universal shipment statuses and fixed status mapping.
+- Shipment status autosync.
+- Universal shipment status -> WooCommerce order status mapping.
+- Russian Post actual-cost lookup and checkout base-cost comparison.
+- Courier Russian Post calculation postcode fill optimization.
 
-- Проверить и доработать автоматическое скачивание ZIP через API "Отправка" на боевом Linux/VDS сервере.
-- Сравнить стабильность direct cURL backend и WordPress HTTP API backend.
-- Проверить timeout behavior, SSL behavior, Action Scheduler interaction, background download stability, PHP ZipArchive/zip extension behavior on LocalWP и production Linux/VDS.
-- Сохранить manual TXT/JSON payload import на LocalWP/Windows как final fallback path.
-- При необходимости добавить retry/backoff, CLI import mode, chunked streamed download.
+## Следующие этапы
 
-### Russian Post shipments
-
-- Админская карта выбора ПВЗ подключена к локальному справочнику Почты России и обновляет только draft/preview/create request.
-- Распределение товаров по грузоместам в UI пока базовое: товары заказа попадают в первое место, детальное распределение остается отдельным этапом.
-- Domestic shipment payloads now use `mail-direct=643`.
-- Обычный pickup/ОПС для Почты России создается через `address-type-to=DEMAND`, `index-to`, `region-to`, `place-to` без `ecom-data`.
-- ECOM-сценарий включается настройкой тарифа `is_ecom` во вкладке `Тарифы`; object `54020` не включает `ecom-data` сам по себе.
-- Индексы места приема для регистрации отправлений настраиваются на `WDC -> Службы доставки -> Почта России по РФ -> API / Credentials`, default `630005`, не смешиваются с расчетными `from_postcodes` и выбираются в модалке как `postoffice-code`.
-- `default_from_postcode` редактируется рядом с индексами места приема, но остается прежним service setting и также используется расчетом тарифа как fallback origin index.
-- После AJAX create модалка закрывается, показывает toast с barcode, автоматически запускает первое обновление статуса, а возможная ошибка автообновления статуса показывается предупреждением и не отменяет успешное создание. `backlog_order_id` не попадает в toast или status payload; он хранится hidden-технически для отмены/API.
-- После успешного create WDC дополнительно пробует найти созданную посылку через `backlog/search` по barcode и сохранить фактическую стоимость с source `backlog_search_after_create`; ошибка этого lookup не влияет на успешное создание и не показывается как warning.
-- Кнопка `Скачать документы` удалена из метабокса: печатные формы, партии и Ф103 не реализуются в WDC на этом этапе и выполняются вручную в личном кабинете Почты России.
-- Отмена отправления доступна только при наличии barcode + `backlog_order_id` и последней операции Почты России `28 / Присвоение идентификатора`; успешная отмена очищает shipment state и снова разрешает подготовку/ручной ввод ШПИ.
-- Ручное внесение ШПИ нормализует номер, ищет backlog order id через `GET /1.0/backlog/search?query={barcode}`, сохраняет state с `source=manual_tracking_attach` и запускает первый status refresh.
-- Если `backlog/search` возвращает `total-rate-wo-vat` и `total-vat`, WDC сохраняет их сумму в копейках как фактическую стоимость отправления, показывает строку `Цена` после `Отслеживание` и подсвечивает ее зеленым/красным/нейтральным цветом относительно checkout `Базовая стоимость API`; превышение до 3% включительно считается нормальным.
-
-## Несоответствия документации и кода
-
-### `docs/wdc-current-code-map.md`
-
-- Этот документ является навигационной картой текущей кодовой базы.
-
-### `docs/walls-delivery-calc-tech-spec.md`
-
-- Документ является целевым ТЗ, а не статусом готовности.
-- Фактический статус реализации ведется в `docs/project-status.md`.
-
-## Roadmap
-
-### 1. Tracking, Documents And Status Sync
-
-- Рекомендуемая ветка: `feature/russian-post-status-documents`.
-- Что входит: tracking number, status polling, labels/docs, acts, status mapping, background sync.
-- Зависимости: Russian Post Shipments Foundation.
-- Обновить документы: `docs/walls-delivery-calc-tech-spec.md`, Russian Post docs, `docs/wdc-migration-plan.md`, `docs/project-status.md`, `README.md`.
-
-### 3. Admin Recalculation
+### 1. Admin Recalculation
 
 - Рекомендуемая ветка: `feature/order-delivery-recalculation`.
-- Что входит: пересчет доставки в заказе, замена shipping item, системные order notes, admin validation.
-- Зависимости: стабильный checkout/order meta baseline.
-- Обновить документы: `docs/wdc-checkout-integration.md`, `docs/wdc-current-code-map.md`, `docs/project-status.md`.
+- Что входит: пересчет доставки в заказе, замена shipping item, валидация сохраненных WDC calculation data, системные order notes и безопасная работа с HPOS.
+- Почему следующий: Russian Post shipment/status lifecycle is now usable enough; order support workflow is the largest missing operational piece before adding more carriers.
+- Обновить документы: `docs/wdc-checkout-integration.md`, `docs/wdc-current-code-map.md`, `docs/project-status.md`, `README.md`.
+
+### 2. Russian Post Production Hardening
+
+- Рекомендуемая ветка: `feature/russian-post-production-hardening`.
+- Что входит: production checks for pickup import, autosync batching strategy, retry/backoff decisions, diagnostics and log/retention policy.
+- Зависимости: current Russian Post domestic shipment/status runtime.
+- Обновить документы: `docs/wdc-russian-post-domestic.md`, `docs/wdc-russian-post-pickup-points.md`, `docs/wdc-shipment-statuses.md`, `docs/project-status.md`.
+
+### 3. Shipment Documents Decision
+
+- Рекомендуемая ветка: `feature/russian-post-documents` only if WDC should own labels/forms/F103.
+- Что входит: decide whether documents stay manual or become plugin-generated; if implemented, add Forms API clients, storage, UI and rotation.
+- Зависимости: stable Russian Post shipment state and production credentials.
+- Обновить документы: Russian Post shipment/status docs and `docs/project-status.md`.
 
 ### 4. CDEK Carrier Foundation
 
 - Рекомендуемая ветка: `feature/cdek-carrier-foundation`.
-- Что входит: CDEK adapter, settings, rates, pickup/courier baseline, smoke tests.
-- Зависимости: stabilized carrier/shipment patterns after Russian Post.
-- Обновить документы: `docs/wdc-cdek.md` planned, `docs/walls-delivery-calc-tech-spec.md`, `docs/wdc-current-code-map.md`, `docs/project-status.md`.
+- Что входит: CDEK adapter, settings, rates, pickup/courier baseline, smoke tests and first multicarrier pickup abstractions.
+- Зависимости: stable checkout/order recalculation patterns.
+- Обновить документы: create `docs/wdc-cdek.md`, update code map and project status.
 
 ### 5. DPD Carrier Foundation
 
 - Рекомендуемая ветка: `feature/dpd-carrier-foundation`.
-- Что входит: DPD adapter, settings, rates, pickup/courier baseline, smoke tests.
+- Что входит: DPD adapter, settings, rates, pickup/courier baseline and smoke tests.
 - Зависимости: multicarrier checkout patterns after CDEK.
-- Обновить документы: `docs/wdc-dpd.md` planned, `docs/walls-delivery-calc-tech-spec.md`, `docs/wdc-current-code-map.md`, `docs/project-status.md`.
 
 ### 6. Yandex Delivery Foundation
 
 - Рекомендуемая ветка: `feature/yandex-delivery-foundation`.
-- Что входит: Yandex pricing, geo, pickup/courier rates, settings, future offer confirmation baseline.
+- Что входит: Yandex pricing, geo, pickup/courier rates, settings and future offer confirmation baseline.
 - Зависимости: stabilized multicarrier checkout.
-- Обновить документы: `docs/wdc-yandex-delivery.md` planned, `docs/walls-delivery-calc-tech-spec.md`, `docs/wdc-current-code-map.md`, `docs/project-status.md`.
 
 ### 7. Operations Stabilization
 
 - Рекомендуемая ветка: `feature/runtime-operations-stabilization`.
-- Что входит: production checks, log/document cleanup, import hardening, monitoring/status dashboard.
+- Что входит: production monitoring, dashboard, cleanup/rotation, long import hardening and support diagnostics.
 - Зависимости: main runtime integrations.
-- Обновить документы: `docs/wdc-runtime-stabilization.md`, `docs/project-status.md`, `README.md`.
-
-## Планируемые профильные carrier-документы
-
-- `docs/wdc-cdek.md` - planned.
-- `docs/wdc-dpd.md` - planned.
-- `docs/wdc-yandex-delivery.md` - planned.
-- Остальные carrier docs - planned по мере начала соответствующего этапа.
 
 ## Документы, которые нужно обновлять после задач
 
 - `docs/project-status.md` - после каждой завершенной задачи.
-- `docs/walls-delivery-calc-tech-spec.md` - если меняется целевой продуктовый или архитектурный контракт.
+- `README.md` - если меняются версия, публичное поведение, runtime-требования или команды проверки.
+- `docs/wdc-current-code-map.md` - если меняется структура модулей или добавляется крупный блок.
 - Профильный `docs/wdc-*.md` по области задачи.
-- `docs/wdc-current-code-map.md` - если меняется структура модулей.
+- `docs/walls-delivery-calc-tech-spec.md` - только если меняется целевой продуктовый или архитектурный контракт.
 - `docs/wdc-migration-plan.md` - если меняется порядок этапов, риски или стратегия перехода.
-- `README.md` - если меняются runtime-требования, публичное поведение или команды проверки.
-- `docs/todo.md` - только как указатель на этот документ, не как самостоятельный список задач.

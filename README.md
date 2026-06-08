@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.39.5.
+Current plugin version: 0.40.0.
+
+Version 0.40.0 refreshes the project status documentation after a code/documentation audit. No runtime feature was added; `docs/project-status.md` now reflects the current Russian Post shipment lifecycle, autosync, order status mapping, actual-cost comparison, known limitations, technical debt and next roadmap.
 
 Version 0.39.5 also pulls the real Russian Post shipment cost after ordinary shipment creation from the `Отправления` modal. After a successful create response with barcode/tracking number, WDC performs a safe `GET /1.0/backlog/search?query={barcode}` lookup, uses the same `total-rate-wo-vat + total-vat` extraction as manual tracking attach, and stores the source as `backlog_search_after_create`. If the price lookup fails or returns no totals, shipment creation remains successful and no warning/note is shown.
 

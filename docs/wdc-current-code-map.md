@@ -1,5 +1,11 @@
 # Карта текущего кода
 
+## Project Status Refresh 0.40.0
+
+- `docs/project-status.md` is the current source for readiness percentages, completed stages, known limitations, technical debt and roadmap after the 0.39.x Russian Post shipment/status work.
+- The codebase currently includes unified `russian_post_domestic`, Russian Post shipment creation/cancellation/manual tracking attach, manual and automatic status refresh, carrier-neutral order status mapping, actual-cost comparison with checkout calculation data, courier calculation postcode fill, and admin pickup-point selection on the shipment map.
+- Future carrier adapters, Russian Post plugin-generated documents, full admin recalculation and production operations hardening remain outside the completed scope.
+
 ## Shipment Statuses 0.38.0
 
 - `src/Domain/Status/DeliveryStatus.php` defines the carrier-neutral shipment status model: `created_in_carrier`, `in_transit`, `ready_for_pickup`, `handed_to_courier`, `delivered`, `returning_to_sender`, `returned_to_sender`, `cancelled`, `rejected`, `unknown`, with Russian UI labels.
