@@ -6,9 +6,12 @@ namespace WallsShop\WDC\Orders\Admin;
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Orders\Application\OrderDeliveryAddressNormalizationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
+use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
+use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -16,6 +19,8 @@ final class OrderDeliveryRecalculationAdminController {
 	public const AJAX_PREVIEW = 'wdc_order_delivery_recalculate_preview';
 	public const AJAX_LOCATION_SEARCH = 'wdc_order_delivery_recalculate_location_search';
 	public const AJAX_PICKUP_SEARCH = 'wdc_order_delivery_recalculate_pickup_search';
+	public const AJAX_NORMALIZE_ADDRESS = 'wdc_order_delivery_recalculate_normalize_address';
+	public const AJAX_SAVE = 'wdc_order_delivery_recalculate_save';
 	public const NONCE_ACTION = 'wdc_order_delivery_recalculation';
 
 	public function __construct(
@@ -24,9 +29,13 @@ final class OrderDeliveryRecalculationAdminController {
 		private ?CheckoutLocationAjax $location_search = null,
 		private ?RussianPostPickupPointRepository $pickup_points = null,
 		private string $plugin_url = '',
-		private string $version = '1'
+		private string $version = '1',
+		private ?OrderDeliveryAddressNormalizationService $address_normalization = null,
+		private ?OrderDeliveryReplacementService $replacement = null
 	) {
 		$this->pickup_points = $this->pickup_points ?? new RussianPostPickupPointRepository();
+		$this->address_normalization = $this->address_normalization ?? new OrderDeliveryAddressNormalizationService();
+		$this->replacement = $this->replacement ?? new OrderDeliveryReplacementService( new OrderShipmentRepository() );
 	}
 
 	public function register(): void {
@@ -34,6 +43,8 @@ final class OrderDeliveryRecalculationAdminController {
 		add_action( 'wp_ajax_' . self::AJAX_PREVIEW, array( $this, 'ajax_preview' ) );
 		add_action( 'wp_ajax_' . self::AJAX_LOCATION_SEARCH, array( $this, 'ajax_location_search' ) );
 		add_action( 'wp_ajax_' . self::AJAX_PICKUP_SEARCH, array( $this, 'ajax_pickup_search' ) );
+		add_action( 'wp_ajax_' . self::AJAX_NORMALIZE_ADDRESS, array( $this, 'ajax_normalize_address' ) );
+		add_action( 'wp_ajax_' . self::AJAX_SAVE, array( $this, 'ajax_save' ) );
 	}
 
 	public function enqueue_assets(): void {
@@ -65,6 +76,8 @@ final class OrderDeliveryRecalculationAdminController {
 				'action'  => self::AJAX_PREVIEW,
 				'locationSearchAction' => self::AJAX_LOCATION_SEARCH,
 				'pickupSearchAction' => self::AJAX_PICKUP_SEARCH,
+				'normalizeAddressAction' => self::AJAX_NORMALIZE_ADDRESS,
+				'saveAction' => self::AJAX_SAVE,
 				'mapProvider' => $provider,
 				'yandexApiKeyPresent' => '' !== $this->yandex_api_key(),
 				'yandexApiKey' => 'yandex' === $provider ? $this->yandex_api_key() : '',
@@ -123,9 +136,6 @@ final class OrderDeliveryRecalculationAdminController {
 		if ( ! is_object( $order ) ) {
 			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
 		}
-		if ( $this->service->has_blocking_shipment( $order ) ) {
-			wp_send_json_error( array( 'message' => __( 'Пересчет доставки недоступен: по заказу уже создано отправление.', 'walls-delivery-calc' ) ), 400 );
-		}
 
 		$location = $this->selected_location_from_request() ?? array();
 		$query = $this->request_string( 'query' );
@@ -149,6 +159,68 @@ final class OrderDeliveryRecalculationAdminController {
 		);
 	}
 
+	public function ajax_normalize_address(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
+		}
+
+		$order_id = (int) ( $_POST['order_id'] ?? 0 );
+		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+		if ( ! is_object( $order ) ) {
+			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
+		}
+
+		$result = $this->address_normalization->normalize(
+			$order,
+			$this->selected_location_from_request() ?? array(),
+			$this->request_string( 'address_line' )
+		);
+		if ( empty( $result['success'] ) ) {
+			wp_send_json_error(
+				array(
+					'message' => (string) ( $result['message'] ?? __( 'Адрес не нормализован.', 'walls-delivery-calc' ) ),
+					'address' => $result['payload'] ?? array(),
+				),
+				400
+			);
+		}
+
+		wp_send_json_success(
+			array(
+				'message' => (string) ( $result['message'] ?? __( 'Адрес нормализован.', 'walls-delivery-calc' ) ),
+				'address' => $result['payload'] ?? array(),
+			)
+		);
+	}
+
+	public function ajax_save(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
+		}
+
+		$order_id = (int) ( $_POST['order_id'] ?? 0 );
+		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+		if ( ! is_object( $order ) ) {
+			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
+		}
+
+		$result = $this->replacement->save(
+			$order,
+			array(
+				'selected_location' => $this->selected_location_from_request() ?? array(),
+				'selected_rate' => $this->array_from_request( 'selected_rate' ),
+				'selected_tariff' => $this->array_from_request( 'selected_tariff' ),
+				'selected_pickup_point' => $this->array_from_request( 'selected_pickup_point' ),
+				'normalized_shipping_address' => $this->array_from_request( 'normalized_shipping_address' ),
+			)
+		);
+		if ( empty( $result['success'] ) ) {
+			wp_send_json_error( array( 'message' => (string) $result['message'] ), 400 );
+		}
+
+		wp_send_json_success( array( 'message' => (string) $result['message'] ) );
+	}
+
 	/**
 	 * @return array<string,mixed>|null
 	 */
@@ -163,6 +235,41 @@ final class OrderDeliveryRecalculationAdminController {
 			return is_array( $decoded ) ? $this->sanitize_location_payload( $decoded ) : null;
 		}
 		return is_array( $raw ) ? $this->sanitize_location_payload( $raw ) : null;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function array_from_request( string $key ): array {
+		$raw = $_POST[ $key ] ?? null;
+		if ( null === $raw ) {
+			return array();
+		}
+		if ( is_string( $raw ) ) {
+			$raw = function_exists( 'wp_unslash' ) ? wp_unslash( $raw ) : $raw;
+			$decoded = json_decode( $raw, true );
+			return is_array( $decoded ) ? $this->sanitize_payload( $decoded ) : array();
+		}
+
+		return is_array( $raw ) ? $this->sanitize_payload( $raw ) : array();
+	}
+
+	/**
+	 * @param array<string|int,mixed> $payload
+	 * @return array<string|int,mixed>
+	 */
+	private function sanitize_payload( array $payload ): array {
+		$clean = array();
+		foreach ( $payload as $key => $value ) {
+			$clean_key = is_int( $key ) ? $key : $this->clean_string( (string) $key );
+			if ( is_array( $value ) ) {
+				$clean[ $clean_key ] = $this->sanitize_payload( $value );
+			} elseif ( is_scalar( $value ) || null === $value ) {
+				$clean[ $clean_key ] = null === $value ? null : $this->clean_string( (string) $value );
+			}
+		}
+
+		return $clean;
 	}
 
 	/**

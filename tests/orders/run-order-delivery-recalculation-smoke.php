@@ -27,7 +27,9 @@ use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryRateRenderer;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryRecalculationAdminController;
+use WallsShop\WDC\Orders\Application\OrderDeliveryAddressNormalizationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
+use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
 use WallsShop\WDC\Orders\Application\OrderQuoteRequestMapper;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
@@ -137,21 +139,45 @@ final class WdcRecalcOrder {
 	public array $meta = array();
 	public array $shipping_items = array( 'method_title' => 'Old delivery', 'total' => 111.0 );
 	public float $total = 5111.0;
+	public array $notes = array();
+	public bool $saved = false;
+	private string $shipping_country = 'RU';
+	private string $shipping_city = 'Новосибирск';
+	private string $shipping_postcode = '630099';
+	private string $shipping_address_1 = 'Красный проспект';
+	private string $shipping_address_2 = '1';
+	private string $shipping_state = 'Новосибирская область';
 
 	public function __construct( private int $id, private array $items ) {}
 	public function get_id(): int { return $this->id; }
-	public function get_items(): array { return $this->items; }
+	public function get_items( string $type = '' ): array { return 'shipping' === $type ? ( array() === $this->shipping_items ? array() : ( array_is_list( $this->shipping_items ) ? $this->shipping_items : array( $this->shipping_items ) ) ) : $this->items; }
 	public function get_item_count(): int { return 3; }
 	public function get_subtotal(): float { return 5000.0; }
 	public function get_payment_method(): string { return 'cod'; }
-	public function get_shipping_country(): string { return 'RU'; }
+	public function get_shipping_country(): string { return $this->shipping_country; }
 	public function get_billing_country(): string { return 'RU'; }
-	public function get_shipping_city(): string { return 'Новосибирск'; }
-	public function get_shipping_postcode(): string { return '630099'; }
-	public function get_shipping_address_1(): string { return 'Красный проспект'; }
-	public function get_shipping_address_2(): string { return '1'; }
-	public function get_shipping_state(): string { return 'Новосибирская область'; }
+	public function get_shipping_city(): string { return $this->shipping_city; }
+	public function get_shipping_postcode(): string { return $this->shipping_postcode; }
+	public function get_shipping_address_1(): string { return $this->shipping_address_1; }
+	public function get_shipping_address_2(): string { return $this->shipping_address_2; }
+	public function get_shipping_state(): string { return $this->shipping_state; }
 	public function get_meta( string $key, bool $single = true ): mixed { return $this->meta[ $key ] ?? ''; }
+	public function update_meta_data( string $key, mixed $value ): void { $this->meta[ $key ] = $value; }
+	public function set_shipping_country( string $value ): void { $this->shipping_country = $value; }
+	public function set_shipping_state( string $value ): void { $this->shipping_state = $value; }
+	public function set_shipping_city( string $value ): void { $this->shipping_city = $value; }
+	public function set_shipping_postcode( string $value ): void { $this->shipping_postcode = $value; }
+	public function set_shipping_address_1( string $value ): void { $this->shipping_address_1 = $value; }
+	public function set_shipping_address_2( string $value ): void { $this->shipping_address_2 = $value; }
+	public function add_item( object $item ): void { $this->shipping_items[] = $item; }
+	public function calculate_totals( bool $and_taxes = true ): void {
+		$shipping = $this->get_items( 'shipping' )[0] ?? array();
+		$shipping_total = is_array( $shipping ) ? (float) ( $shipping['total'] ?? 0 ) : 0.0;
+		$this->total = 5000.0 + $shipping_total;
+	}
+	public function get_total(): float { return $this->total; }
+	public function add_order_note( string $note, bool $is_customer_note = false, bool $added_by_user = false ): void { $this->notes[] = array( 'note' => $note, 'customer' => $is_customer_note ); }
+	public function save(): void { $this->saved = true; }
 }
 
 final class WdcRecalcCarrier implements CarrierAdapterInterface {
@@ -318,7 +344,7 @@ recalc_smoke_assert( str_contains( $metabox_html, 'role="dialog"' ) && str_conta
 recalc_smoke_assert( str_contains( $metabox_html, 'Пересчет доставки' ), 'Modal markup must contain heading.' );
 recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-modal-status' ), 'Modal markup must contain status area.' );
 recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-modal-content' ), 'Modal markup must contain content area.' );
-recalc_smoke_assert( str_contains( $metabox_html, 'disabled' ) && str_contains( $metabox_html, 'Сохранение будет добавлено следующим шагом' ), 'Modal markup must contain disabled save placeholder.' );
+recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-save' ) && str_contains( $metabox_html, 'disabled' ) && str_contains( $metabox_html, 'Сохранить новый вариант доставки' ), 'Modal markup must contain disabled save button.' );
 
 $service = wdc_recalc_service();
 $before_shipping = $order->shipping_items;
@@ -395,17 +421,17 @@ recalc_smoke_assert( $before_shipping_city === $order->get_shipping_city() && $b
 $blocked = new WdcRecalcOrder( 102, array() );
 $blocked->meta['_wdc_shipments'] = array( 'russian_post_domestic' => array( 'status' => 'created' ) );
 $GLOBALS['wdc_recalc_orders'][102] = $blocked;
-recalc_smoke_assert( false === $service->preview( $blocked )['success'], 'Preview must be blocked when shipment status is created.' );
+recalc_smoke_assert( true === $service->preview( $blocked )['success'], 'Preview must remain available when shipment status is created.' );
 ob_start();
 $metabox->render( $blocked );
 $blocked_metabox_html = (string) ob_get_clean();
-recalc_smoke_assert( str_contains( $blocked_metabox_html, 'Пересчет доставки недоступен: по заказу уже создано отправление.' ) && ! str_contains( $blocked_metabox_html, 'data-wdc-order-delivery-recalculate' ), 'Blocked metabox must show explanation instead of active button.' );
+recalc_smoke_assert( str_contains( $blocked_metabox_html, 'data-wdc-order-delivery-recalculate' ), 'Metabox must keep recalculation button even when save is blocked by shipment.' );
 $tracking_blocked = new WdcRecalcOrder( 103, array() );
 $tracking_blocked->meta['_wdc_shipments'] = array( 'russian_post_domestic' => array( 'barcode' => 'RA123' ) );
-recalc_smoke_assert( false === $service->preview( $tracking_blocked )['success'], 'Preview must be blocked when shipment has tracking number.' );
+recalc_smoke_assert( true === $service->preview( $tracking_blocked )['success'], 'Preview must remain available when shipment has tracking number.' );
 $backlog_blocked = new WdcRecalcOrder( 104, array() );
 $backlog_blocked->meta['_wdc_shipments'] = array( 'russian_post_domestic' => array( 'backlog_order_id' => '123' ) );
-recalc_smoke_assert( false === $service->preview( $backlog_blocked )['success'], 'Preview must be blocked when shipment has backlog_order_id.' );
+recalc_smoke_assert( true === $service->preview( $backlog_blocked )['success'], 'Preview must remain available when shipment has backlog_order_id.' );
 
 $pickup_repository = wdc_recalc_pickup_repository();
 $controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository );
@@ -459,17 +485,151 @@ recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-index="' . "' + escapeAttribute( String( index ) ) + '" ), 'Pickup picker data-index attribute must use escapeAttribute().' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "runSearch( 'location' )" ) && str_contains( $pickup_js, "runSearch( 'search' )" ), 'Pickup picker JS must send location mode for initial load and search mode for manual search.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "const value = mode === 'location' ? '' : String( query.value || '' ).trim();" ), 'Pickup picker initial load must not send postcode as backend query.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'normalizedShippingAddresses' ) && str_contains( $pickup_js, 'wdc_order_delivery_recalculate_normalize_address' ), 'JS must store normalized pickup address and call normalization endpoint.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'wdc_order_delivery_recalculate_save' ) && str_contains( $pickup_js, 'window.location.reload()' ), 'JS must call save endpoint and reload after success.' );
 recalc_smoke_assert( $before_shipping === $order->shipping_items, 'Pickup endpoint must not change shipping item data.' );
 recalc_smoke_assert( $before_total === $order->total, 'Pickup endpoint must not change order totals.' );
 recalc_smoke_assert( $before_calc === $order->meta['_wdc_delivery_calculation_data'], 'Pickup endpoint must not change delivery calculation meta.' );
 recalc_smoke_assert( $before_shipping_city === $order->get_shipping_city() && $before_shipping_postcode === $order->get_shipping_postcode(), 'Pickup endpoint must not change shipping address fields.' );
 
+$replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository() );
+$pickup_point = array(
+	'point_code' => '101000-OPS',
+	'point_type' => 'OPS',
+	'point_name' => 'ОПС 101000',
+	'point_address' => 'Москва, ул. Тверская, 1',
+	'point_postcode' => '101000',
+	'point_raw' => array( 'point_code' => '101000-OPS' ),
+);
+$normalized_address = array(
+	'country' => 'RU',
+	'region' => 'Москва',
+	'city' => 'Москва',
+	'postcode' => '101000',
+	'street' => 'Тверская',
+	'house' => '10',
+	'flat' => '5',
+	'address_1' => 'Тверская, 10',
+	'address_2' => '5',
+	'full_address' => 'Москва, Тверская, 10, кв. 5',
+	'fias_id' => 'address-fias',
+	'gar_id' => 'address-gar',
+	'normalized' => true,
+	'fallback' => false,
+	'source' => 'dadata',
+);
+$pickup_rate = $rates_by_id['russian_post_domestic:pickup'];
+$pickup_rate['selected_tariff'] = $pickup_rate['tariff_variants'][0] ?? array();
+$courier_rate = $rates_by_id['russian_post_domestic:courier'];
+$courier_rate['selected_tariff'] = $courier_rate['tariff_variants'][0] ?? array();
+
+$invalid_pickup = new WdcRecalcOrder( 105, array() );
+$invalid_pickup->shipping_items = array( 'method_title' => 'Old delivery', 'total' => 111.0 );
+$invalid_before_meta = $invalid_pickup->meta;
+$invalid_result = $replacement->save(
+	$invalid_pickup,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $pickup_rate,
+		'selected_tariff' => $pickup_rate['selected_tariff'],
+		'selected_pickup_point' => array(),
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+recalc_smoke_assert( false === $invalid_result['success'] && $invalid_before_meta === $invalid_pickup->meta, 'Save pickup must require selectedPickupPoint and must not mutate order on validation error.' );
+$invalid_result = $replacement->save(
+	$invalid_pickup,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $pickup_rate,
+		'selected_tariff' => $pickup_rate['selected_tariff'],
+		'selected_pickup_point' => $pickup_point,
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( false === $invalid_result['success'], 'Save pickup must require normalized shipping address.' );
+
+$no_shipping_order = new WdcRecalcOrder( 106, array() );
+$no_shipping_order->shipping_items = array();
+$create_result = $replacement->save(
+	$no_shipping_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $courier_rate,
+		'selected_tariff' => $courier_rate['selected_tariff'],
+	)
+);
+recalc_smoke_assert( true === $create_result['success'] && 'wdc_platform_delivery' === ( $no_shipping_order->shipping_items['method_id'] ?? '' ), 'Save must create shipping item when order has none.' );
+recalc_smoke_assert( 5700.0 === $no_shipping_order->total && $no_shipping_order->saved, 'Save must recalculate totals and save order after creating shipping item.' );
+recalc_smoke_assert( isset( $no_shipping_order->meta['_wdc_delivery_calculation_data'], $no_shipping_order->meta['_wdc_platform_rate_id'], $no_shipping_order->meta['_wdc_platform_delivery_type'] ), 'Save must update WDC calculation and platform meta.' );
+recalc_smoke_assert( array() !== $no_shipping_order->notes && false === $no_shipping_order->notes[0]['customer'], 'Save must add private order note.' );
+
+$replace_order = new WdcRecalcOrder( 107, array() );
+$replace_result = $replacement->save(
+	$replace_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $pickup_rate,
+		'selected_tariff' => $pickup_rate['selected_tariff'],
+		'selected_pickup_point' => $pickup_point,
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+recalc_smoke_assert( true === $replace_result['success'] && 400.0 === (float) ( $replace_order->shipping_items['total'] ?? 0 ), 'Save must replace the single shipping item.' );
+recalc_smoke_assert( 'Тверская, 10' === $replace_order->get_shipping_address_1(), 'Save pickup must write normalized manager address to shipping address.' );
+recalc_smoke_assert( 'Москва, ул. Тверская, 1' !== $replace_order->get_shipping_address_1(), 'Save pickup must not write pickup point address to shipping address.' );
+recalc_smoke_assert( '101000-OPS' === ( $replace_order->meta['_wdc_pickup_point_code'] ?? '' ), 'Save pickup must write pickup meta.' );
+recalc_smoke_assert( str_contains( (string) ( $replace_order->meta['_wdc_pickup_point_snapshot'] ?? '' ), '101000-OPS' ), 'Save pickup must write pickup raw snapshot.' );
+recalc_smoke_assert( ! str_contains( (string) ( $replace_order->notes[0]['note'] ?? '' ), 'Тверская, 1' ), 'Order note must not include pickup point address.' );
+recalc_smoke_assert( str_contains( (string) ( $replace_order->notes[0]['note'] ?? '' ), 'Прежний город:' ) && str_contains( (string) ( $replace_order->notes[0]['note'] ?? '' ), 'Новый город:' ), 'Save with changed location must include old/new city in note.' );
+
+$same_city_order = new WdcRecalcOrder( 108, array() );
+$same_city_result = $replacement->save(
+	$same_city_order,
+	array(
+		'selected_location' => array( 'display_name' => 'Новосибирск', 'city_value' => 'Новосибирск', 'region_name' => 'Новосибирская область', 'postal_code' => '630099', 'country_code' => 'RU' ),
+		'selected_rate' => $courier_rate,
+		'selected_tariff' => $courier_rate['selected_tariff'],
+	)
+);
+recalc_smoke_assert( true === $same_city_result['success'] && ! str_contains( (string) ( $same_city_order->notes[0]['note'] ?? '' ), 'Прежний город:' ), 'Save without city change must add short note.' );
+
+$multi_shipping_order = new WdcRecalcOrder( 109, array() );
+$multi_shipping_order->shipping_items = array(
+	array( 'method_title' => 'One', 'total' => 100.0 ),
+	array( 'method_title' => 'Two', 'total' => 200.0 ),
+);
+$multi_before = $multi_shipping_order->shipping_items;
+$multi_result = $replacement->save( $multi_shipping_order, array( 'selected_location' => $selected_location, 'selected_rate' => $courier_rate, 'selected_tariff' => $courier_rate['selected_tariff'] ) );
+recalc_smoke_assert( false === $multi_result['success'] && $multi_before === $multi_shipping_order->shipping_items, 'Save must block orders with multiple shipping items without mutation.' );
+
+$registered_order = new WdcRecalcOrder( 110, array() );
+$registered_order->meta['_wdc_shipments'] = array( 'russian_post_domestic' => array( 'universal_status_code' => 'CREATED' ) );
+$registered_result = $replacement->save( $registered_order, array( 'selected_location' => $selected_location, 'selected_rate' => $courier_rate, 'selected_tariff' => $courier_rate['selected_tariff'] ) );
+recalc_smoke_assert( false === $registered_result['success'], 'Save must block registered shipment markers.' );
+
+$_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'address_line' => 'Тверская, 10, 5' );
+try {
+	$controller->ajax_normalize_address();
+	recalc_smoke_assert( false, 'Address normalization endpoint must send JSON response.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	recalc_smoke_assert( $response->success && ! empty( $response->data['address']['normalized'] ), 'Address normalization endpoint must return normalized payload.' );
+}
+
+$_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'selected_rate' => wp_json_encode( $courier_rate ), 'selected_tariff' => wp_json_encode( $courier_rate['selected_tariff'] ) );
+try {
+	$controller->ajax_save();
+	recalc_smoke_assert( false, 'Save endpoint must send JSON response.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	recalc_smoke_assert( $response->success, 'Save endpoint must save valid courier payload.' );
+}
+
 $_POST = array( 'order_id' => 102, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'query' => '101000' );
 try {
 	$controller->ajax_pickup_search();
-	recalc_smoke_assert( false, 'Pickup endpoint must block orders with created shipment.' );
+	recalc_smoke_assert( false, 'Pickup endpoint must send JSON response when shipment exists.' );
 } catch ( WdcRecalcAjaxResponse $response ) {
-	recalc_smoke_assert( ! $response->success && 400 === $response->status, 'Pickup endpoint must be blocked by created shipment.' );
+	recalc_smoke_assert( $response->success, 'Pickup endpoint must remain available when save is blocked by shipment.' );
 }
 
 $GLOBALS['wdc_recalc_current_can'] = false;
@@ -486,6 +646,12 @@ try {
 } catch ( WdcRecalcAjaxResponse $response ) {
 	recalc_smoke_assert( ! $response->success && 403 === $response->status, 'Pickup endpoint must require manage_woocommerce.' );
 }
+try {
+	$controller->ajax_normalize_address();
+	recalc_smoke_assert( false, 'Address normalization endpoint must reject missing capability.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	recalc_smoke_assert( ! $response->success && 403 === $response->status, 'Address normalization endpoint must require manage_woocommerce.' );
+}
 $GLOBALS['wdc_recalc_current_can'] = true;
 $GLOBALS['wdc_recalc_nonce_ok'] = false;
 try {
@@ -493,6 +659,12 @@ try {
 	recalc_smoke_assert( false, 'Controller must reject bad nonce.' );
 } catch ( WdcRecalcAjaxResponse $response ) {
 	recalc_smoke_assert( ! $response->success && 403 === $response->status, 'Endpoint must require nonce.' );
+}
+try {
+	$controller->ajax_normalize_address();
+	recalc_smoke_assert( false, 'Address normalization endpoint must reject bad nonce.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	recalc_smoke_assert( ! $response->success && 403 === $response->status, 'Address normalization endpoint must require nonce.' );
 }
 
 echo "Order delivery recalculation smoke OK\n";

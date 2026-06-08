@@ -141,12 +141,6 @@ final class OrderDeliveryMetabox {
 		}
 
 		echo '<div class="wdc-order-delivery-recalculation" data-wdc-order-delivery-recalculation>';
-		if ( $this->has_blocking_shipment( $order ) ) {
-			echo '<p class="description">' . esc_html__( 'Пересчет доставки недоступен: по заказу уже создано отправление.', 'walls-delivery-calc' ) . '</p>';
-			echo '</div>';
-			return;
-		}
-
 		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
 		$current_location = $this->current_location_payload( $order );
 		echo '<p><button type="button" class="button" data-wdc-order-delivery-recalculate data-order-id="' . esc_attr( (string) $order_id ) . '">' . esc_html__( 'Пересчитать доставку', 'walls-delivery-calc' ) . '</button></p>';
@@ -175,7 +169,7 @@ final class OrderDeliveryMetabox {
 		echo '<div class="wdc-order-delivery-modal__content" data-wdc-order-delivery-modal-content></div>';
 		echo '<footer class="wdc-order-delivery-modal__footer">';
 		echo '<button type="button" class="button" data-wdc-order-delivery-modal-close>' . esc_html__( 'Закрыть', 'walls-delivery-calc' ) . '</button>';
-		echo '<button type="button" class="button button-primary" disabled>' . esc_html__( 'Сохранение будет добавлено следующим шагом', 'walls-delivery-calc' ) . '</button>';
+		echo '<button type="button" class="button button-primary" data-wdc-order-delivery-save disabled>' . esc_html__( 'Сохранить новый вариант доставки', 'walls-delivery-calc' ) . '</button>';
 		echo '</footer>';
 		echo '</div>';
 		echo '</div>';

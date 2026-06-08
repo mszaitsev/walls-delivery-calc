@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.41.8.
+Current plugin version: 0.41.9.
+
+Version 0.41.9 completes the admin order delivery recalculation scenario. The modal can now save the selected rate, create a missing WooCommerce shipping item or replace the single existing one, rewrite WDC delivery meta, update the shipping address, recalculate order totals, add a private Russian order note, and reload the page after success. Preview remains available even when save is blocked; saving is refused when the order has multiple shipping items or a registered shipment. Pickup saves require both a selected pickup point and a manager-entered normalized delivery address, and the pickup point address is stored only in WDC pickup meta, not in the WooCommerce shipping address or order note.
 
 Version 0.41.8 fixes the initial pickup map load in the admin order delivery recalculation modal. Opening the picker now sends `mode=location` with an empty search query, so the backend loads pickup points for the selected settlement by location identifiers / city and region before falling back to postcode. Manual search still sends `mode=search` and can search by exact postcode, address, city or pickup code. The map is no longer limited to one base settlement postcode on open.
 

@@ -1,67 +1,56 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.41.8.
+Version: 0.41.9.
 
 ## Цель этапа
 
-Этот документ описывает foundation для будущего пересчета доставки внутри WooCommerce order admin. Итоговая бизнес-цель всей feature-ветки: дать администратору возможность пересчитать доставку заказа, выбрать новый метод, при необходимости выбрать ПВЗ, безопасно заменить WooCommerce shipping item, обновить WDC delivery meta и пересчитать totals.
+Сценарий пересчета доставки внутри WooCommerce order admin завершен: администратор может открыть модалку из блока `Калькулятор доставок`, пересчитать rates для текущего или выбранного населенного пункта, выбрать courier/pickup вариант, выбрать ПВЗ для pickup, нормализовать адрес доставки для pickup и сохранить новый вариант доставки.
 
-## Статус 0.41.8
+## Статус 0.41.9
 
-Реализован только preview-only foundation.
+Реализовано:
 
-Что уже есть:
-
-- в order metabox `Калькулятор доставок` добавлена кнопка `Пересчитать доставку`;
-- preview результатов открывается в custom admin modal, а не в постоянном inline-блоке внутри metabox;
-- modal содержит header/body/footer, заголовок `Пересчет доставки`, status/loading/error area, content area для rates, close controls и disabled save placeholder `Сохранение будет добавлено следующим шагом`;
-- modal закрывается через close button, overlay и Escape; повторный preview request не запускается, пока текущий request активен;
-- в modal добавлен preview-only блок `Населенный пункт`: он показывает текущий город заказа, позволяет искать населенные пункты через существующий checkout location payload и пересчитать preview для выбранного пункта;
-- выбранный населенный пункт хранится только в памяти JS/AJAX payload и передается в `OrderQuoteRequestMapper` как location override;
-- успешный preview явно показывает, для какого пункта выполнен расчет: `Расчет выполнен для: ...`;
-- если `_wdc_shipments` содержит созданное/зарегистрированное отправление, tracking/barcode или `backlog_order_id`, пересчет блокируется в UI и AJAX endpoint;
-- `OrderQuoteRequestMapper` строит `QuoteRequest` из текущего WooCommerce заказа, товаров, веса, shipping address и WDC location/calculation meta fallback; если передан location override, destination берется из выбранного payload без записи в заказ;
-- `OrderDeliveryRecalculationService` вызывает существующий `CheckoutOrchestrator`, поэтому preview использует активные службы доставки, carrier adapters, правила, упаковку и service post-processing текущего checkout runtime;
-- admin preview показывает pickup/courier groups и Russian Post domestic tariffs;
-- ни один rate и ни один tariff не выбран по умолчанию;
-- при выборе pickup rate modal показывает preview-only состояние `ПВЗ не выбран` и кнопку выбора/изменения ПВЗ;
-- выбор ПВЗ выполняется через map-backed admin picker: он использует существующие pickup map provider assets, показывает карту с markers и список найденных ПВЗ, а при недоступной карте оставляет fallback-выбор из списка;
-- initial load карты ПВЗ отправляет `mode=location` и пустой query, поэтому backend загружает все ПВЗ выбранного населенного пункта через location id/FIAS/GAR, city+region, display/city и только затем postcode fallback;
-- ручной поиск администратора отправляет `mode=search`, поэтому точный поиск по индексу/адресу/городу/коду ПВЗ сохранен;
-- поиск ПВЗ выполняется через admin pickup search endpoint поверх существующего `RussianPostPickupPointRepository`; endpoint защищен nonce/capability checks и тем же shipment block;
-- выбранный ПВЗ хранится только в JS modal state как `selectedPickupPoint` (`point_code`, `point_type`, `point_name`, `point_address`, `point_postcode`, `point_raw`) и очищается при выборе courier rate;
-- endpoint возвращает HTML preview, normalized rates и request payload для диагностики/следующих patch.
-
-## Ограничения
-
-В 0.41.8 намеренно не реализованы:
-
-- сохранение выбранного метода доставки;
-- сохранение выбранного населенного пункта в заказ;
-- сохранение выбранного ПВЗ в заказ;
-- замена WooCommerce shipping item;
-- пересчет WooCommerce order totals;
-- изменение shipping address;
-- order note;
-- обновление `_wdc_delivery_calculation_data`;
-- изменение hidden `_wdc_platform_*` order meta.
+- preview/recalculation в custom admin modal остается доступен всегда и не блокируется shipping items или shipment state;
+- save блокируется отдельно, если в заказе больше одного shipping item или есть зарегистрированное отправление;
+- зарегистрированным отправлением считается `_wdc_shipments` state с `tracking_number`, `barcode`, `backlog_order_id`, `status=created`, `status=registered`, `universal_status_code`, `carrier_status_title` или `tracking_checked_at`;
+- если shipping item отсутствует, save создает новый shipping item;
+- если shipping item ровно один, save заменяет его method title, method id, total и WDC meta;
+- после save обновляются `_wdc_delivery_calculation_data`, `_wdc_platform_*` meta и pickup meta;
+- для courier обновляются shipping country/state/city/postcode по выбранному location, а текущий street/address сохраняется;
+- для pickup shipping address заполняется нормализованным адресом доставки, который ввел менеджер; адрес ПВЗ не пишется в WooCommerce shipping address;
+- ПВЗ сохраняется только в WDC pickup meta и не попадает в order note;
+- totals пересчитываются через WooCommerce order API, затем order сохраняется;
+- после успешного save добавляется приватное примечание на русском языке со старым/новым методом, ценой, базовой API стоимостью, total и old/new city при смене населенного пункта;
+- JS после успешного save перезагружает страницу, чтобы администратор видел актуальные totals, shipping item и блок `Калькулятор доставок`.
 
 ## Основные классы
 
 - `src/Orders/Application/OrderQuoteRequestMapper.php`
 - `src/Orders/Application/OrderDeliveryRecalculationService.php`
+- `src/Orders/Application/OrderDeliveryAddressNormalizationService.php`
+- `src/Orders/Application/OrderDeliveryReplacementService.php`
 - `src/Orders/Admin/OrderDeliveryRecalculationAdminController.php`
 - `src/Orders/Admin/OrderDeliveryRateRenderer.php`
 - `src/Orders/Admin/OrderDeliveryMetabox.php`
 - `assets/admin/order-delivery-recalculation.js`
 - `assets/admin/order-delivery-recalculation.css`
 
-## Следующие patch
+## AJAX
 
-Рекомендуемый порядок:
+- `wdc_order_delivery_recalculate_preview`: пересчет rates, не мутирует заказ.
+- `wdc_order_delivery_recalculate_location_search`: thin wrapper над существующим checkout location search payload.
+- `wdc_order_delivery_recalculate_pickup_search`: поиск ПВЗ для карты, initial `mode=location` грузит все ПВЗ выбранного населенного пункта, manual `mode=search` ищет по введенному адресу/индексу/коду.
+- `wdc_order_delivery_recalculate_normalize_address`: нормализация manager-entered pickup delivery address через существующий checkout address runtime.
+- `wdc_order_delivery_recalculate_save`: сохранение выбранного rate, создание/замена shipping item, meta rewrite, address update, totals, note.
 
-1. Добавить save/replacement service: безопасная замена shipping item через WooCommerce CRUD, обновление hidden WDC meta и `_wdc_delivery_calculation_data`, пересчет totals, приватный order note и reload страницы.
-2. При необходимости расширить map picker bounds/geolocation behavior для больших городов, сохранив preview-only state contract.
+Все admin AJAX endpoints проверяют nonce, `manage_woocommerce` и загружают order через `wc_get_order()`.
+
+## Ограничения
+
+- Несколько shipping items в заказе остаются save-blocker; автоматического выбора одного shipping item нет.
+- Для courier в этом patch не добавлен отдельный ввод домашнего адреса: сохраняется текущий street/address заказа, а city/state/postcode обновляются по selected location.
+- Реальный выбор/валидация налогов зависит от WooCommerce `calculate_totals(false)` и текущей конфигурации магазина.
+- Сценарий требует ручной QA на реальном HPOS order admin screen после smoke-тестов.
 
 ## Проверки
 
@@ -71,4 +60,4 @@ Smoke coverage:
 php tests/orders/run-order-delivery-recalculation-smoke.php
 ```
 
-Тест проверяет shipment block, построение `QuoteRequest`, возврат всех доступных rates, Russian Post domestic pickup/courier groups, отсутствие selected state, nonce/capability checks, pickup endpoint payload/security/blocking, initial `mode=location`, manual `mode=search`, map/list picker markup, JS attribute escaping и отсутствие изменений shipping item/totals/shipping address/calculation meta.
+Тест проверяет modal markup, order-to-quote mapping, location override, all-rates preview, Russian Post pickup/courier groups, pickup map endpoint, save blockers, shipping item create/replace, pickup address rules, WDC meta rewrite, totals recalculation, private notes, endpoint security, JS normalize/save hooks and no mutation during preview/pickup search.

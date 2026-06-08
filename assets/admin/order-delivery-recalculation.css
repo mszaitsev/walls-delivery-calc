@@ -194,6 +194,38 @@
 	display: none;
 }
 
+.wdc-order-delivery-pickup-address {
+	flex-basis: 100%;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 8px;
+	align-items: end;
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px solid #f0f0f1;
+}
+
+.wdc-order-delivery-pickup-address[hidden] {
+	display: none;
+}
+
+.wdc-order-delivery-pickup-address__label span {
+	display: block;
+	margin-bottom: 4px;
+	font-weight: 600;
+}
+
+.wdc-order-delivery-pickup-address__label input {
+	width: 100%;
+}
+
+.wdc-order-delivery-pickup-address__status,
+.wdc-order-delivery-pickup-address__result {
+	grid-column: 1 / -1;
+	color: #646970;
+	font-size: 12px;
+}
+
 .wdc-order-delivery-tariffs {
 	margin-top: 8px;
 	padding-left: 20px;
@@ -320,6 +352,10 @@
 	.wdc-order-delivery-modal__footer .button {
 		width: 100%;
 		text-align: center;
+	}
+
+	.wdc-order-delivery-pickup-address {
+		grid-template-columns: 1fr;
 	}
 
 	.wdc-order-delivery-pickup-picker__dialog {

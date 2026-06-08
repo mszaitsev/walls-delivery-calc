@@ -26,16 +26,6 @@ final class OrderDeliveryRecalculationService {
 	 * @return array{success:bool,message:string,rates:array<int,array<string,mixed>>,request:array<string,mixed>,location:array<string,mixed>}
 	 */
 	public function preview( object $order, ?array $selected_location = null ): array {
-		if ( $this->has_blocking_shipment( $order ) ) {
-			return array(
-				'success' => false,
-				'message' => 'Пересчет доставки недоступен: по заказу уже создано отправление.',
-				'rates'   => array(),
-				'request' => array(),
-				'location' => array(),
-			);
-		}
-
 		$request = $this->mapper->map( $order, $selected_location );
 		$result  = $this->orchestrator->calculate( $request, array(), RateSorter::CHEAPEST, true );
 

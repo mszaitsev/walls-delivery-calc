@@ -1,5 +1,7 @@
 # Project Status
 
+0.41.9 note: the order-admin delivery recalculation scenario is now complete. Preview/recalculation stays available for orders with shipments or unusual shipping item state, but saving the selected delivery is guarded separately: save is blocked for multiple shipping items and any registered shipment marker. Valid saves create a missing WooCommerce shipping item or replace the single existing one, rewrite WDC platform/calculation/pickup meta, update shipping address, recalculate totals, add a private Russian order note, and reload the admin page. Pickup saves require selected pickup point plus manager-entered normalized delivery address; the pickup point address is not written to WooCommerce shipping address or order notes.
+
 0.41.8 note: the order-admin delivery recalculation pickup map initial load now requests `mode=location` and loads all available pickup points for the selected settlement instead of searching by the settlement base postcode. The admin pickup endpoint resolves location mode through location id/FIAS/GAR, city+region, display/city, and only then postcode fallback. Manual `mode=search` remains available for explicit administrator postcode/address/city searches. The order is not mutated: no delivery save, shipping item replacement, totals recalculation, shipping address update, order note, or `_wdc_delivery_calculation_data` update.
 
 0.41.7 note: the order-admin delivery recalculation pickup selector now uses the existing pickup map provider assets instead of a table-only popup. Pickup rates open a picker with map, markers, status area and side list; marker/list selection updates only the modal `selectedPickupPoint` JS state. If the map provider is unavailable, the picker remains usable as a list and shows an explanatory fallback message. The order is not mutated: no delivery save, shipping item replacement, totals recalculation, shipping address update, order note, or `_wdc_delivery_calculation_data` update. The picker also now uses `escapeAttribute()` for `data-index` attributes.
@@ -30,12 +32,12 @@
 
 ## Общий статус
 
-- Текущая версия: `0.41.8`.
+- Текущая версия: `0.41.9`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/order-delivery-recalculation`.
 - Последнее обновление статуса: 2026-06-08.
 - Общая готовность проекта: примерно 72%.
-- Следующий рекомендуемый этап: продолжить `feature/order-delivery-recalculation`: безопасное сохранение/замена shipping item после preview-only выбора населенного пункта, rate и ПВЗ.
+- Следующий рекомендуемый этап: стабилизировать ручной QA сценария `feature/order-delivery-recalculation` на реальном WooCommerce order admin и затем переходить к следующим carrier/checkout улучшениям.
 
 ## Краткое резюме
 
@@ -56,7 +58,7 @@
 | Shipment Tracking | partial | 78% | Russian Post Tracking API refresh, mapper, universal status persistence and manual metabox refresh; no full status history UI. |
 | Shipment Autosync | partial | 75% | WP Cron/manual run, 6-hour interval, lock, diagnostics and Russian Post dispatch exist; only one carrier target and no advanced batching. |
 | Order Status Mapping | done | 80% | Carrier-neutral universal shipment status -> WooCommerce status mapping, custom statuses, terminal-status autosync handling and compact private notes. |
-| Checkout Integration | partial | 84% | WooCommerce method, city/location picker, sorting, tariff selector, courier validation, pickup map, order meta, calculation metabox and preview-only admin recalculation foundation. |
+| Checkout Integration | partial | 86% | WooCommerce method, city/location picker, sorting, tariff selector, courier validation, pickup map, order meta, calculation metabox and completed admin order delivery recalculation save flow. |
 | Rule Engine | done | 88% | Conditions/groups, audit, price/days mutations, comments, service rules, simulation and packaging tab. |
 | International Shipping | partial | 75% | Russian Post international rates/country mapping/fallback work; no shipment creation/tracking/documents for international flow. |
 | Future Carriers | not-started | 0% | CDEK, DPD, Yandex Delivery, PEK, Energia, Aerogruz and Jet have no runtime adapters. |
@@ -233,8 +235,8 @@
 ### 1. Admin Recalculation
 
 - Рекомендуемая ветка: `feature/order-delivery-recalculation`.
-- Что входит: пересчет доставки в заказе, замена shipping item, валидация сохраненных WDC calculation data, системные order notes и безопасная работа с HPOS.
-- Почему следующий: Russian Post shipment/status lifecycle is now usable enough; order support workflow is the largest missing operational piece before adding more carriers.
+- Что входит: ручной QA завершенного пересчета доставки в заказе, проверка реальных WooCommerce shipping item/totals/order note сценариев и доработка UX только по найденным edge cases.
+- Почему следующий: базовый order support workflow реализован; перед расширением carrier coverage стоит пройти его на реальных заказах и HPOS screens.
 - Обновить документы: `docs/wdc-checkout-integration.md`, `docs/wdc-current-code-map.md`, `docs/project-status.md`, `README.md`.
 
 ### 2. Russian Post Production Hardening
