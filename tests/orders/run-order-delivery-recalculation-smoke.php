@@ -135,6 +135,23 @@ final class WdcRecalcOrderItem {
 	public function get_name(): string { return $this->name; }
 }
 
+final class WdcRecalcShippingItem {
+	public array $meta = array();
+
+	public function __construct(
+		private string $method_title,
+		private float $total
+	) {}
+	public function get_method_title(): string { return $this->method_title; }
+	public function get_total(): float { return $this->total; }
+	public function set_method_id( string $method_id ): void { $this->meta['method_id'] = $method_id; }
+	public function set_method_title( string $method_title ): void { $this->method_title = $method_title; }
+	public function set_total( string $total ): void { $this->total = (float) $total; }
+	public function delete_meta_data( string $key ): void { unset( $this->meta[ $key ] ); }
+	public function add_meta_data( string $key, mixed $value, bool $unique = false ): void { $this->meta[ $key ] = $value; }
+	public function save(): void {}
+}
+
 final class WdcRecalcOrder {
 	public array $meta = array();
 	public array $shipping_items = array( 'method_title' => 'Old delivery', 'total' => 111.0 );
@@ -582,6 +599,21 @@ recalc_smoke_assert( '101000-OPS' === ( $replace_order->meta['_wdc_pickup_point_
 recalc_smoke_assert( str_contains( (string) ( $replace_order->meta['_wdc_pickup_point_snapshot'] ?? '' ), '101000-OPS' ), 'Save pickup must write pickup raw snapshot.' );
 recalc_smoke_assert( ! str_contains( (string) ( $replace_order->notes[0]['note'] ?? '' ), 'Тверская, 1' ), 'Order note must not include pickup point address.' );
 recalc_smoke_assert( str_contains( (string) ( $replace_order->notes[0]['note'] ?? '' ), 'Прежний город:' ) && str_contains( (string) ( $replace_order->notes[0]['note'] ?? '' ), 'Новый город:' ), 'Save with changed location must include old/new city in note.' );
+
+$object_shipping_order = new WdcRecalcOrder( 111, array() );
+$object_shipping_order->shipping_items = array( new WdcRecalcShippingItem( 'Почта России до отделения', 318.42 ) );
+$object_shipping_result = $replacement->save(
+	$object_shipping_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $courier_rate,
+		'selected_tariff' => $courier_rate['selected_tariff'],
+	)
+);
+$object_shipping_note = (string) ( $object_shipping_order->notes[0]['note'] ?? '' );
+recalc_smoke_assert( true === $object_shipping_result['success'], 'Save must support object shipping item replacement.' );
+recalc_smoke_assert( str_contains( $object_shipping_note, 'Было: Почта России до отделения - 318.42 руб.' ), 'Order note must read old shipping cost from object shipping item get_total().' );
+recalc_smoke_assert( ! str_contains( $object_shipping_note, 'Было: Почта России до отделения - 0 руб.' ), 'Order note must not use zero cost for object shipping item.' );
 
 $same_city_order = new WdcRecalcOrder( 108, array() );
 $same_city_result = $replacement->save(

@@ -306,9 +306,18 @@ final class OrderDeliveryReplacementService {
 
 	private function note_snapshot( object $order, ?array $rate = null ): array {
 		$shipping = $this->shipping_items( $order )[0] ?? array();
+		$shipping_cost = 0.0;
+		if ( null !== $rate ) {
+			$shipping_cost = (float) ( $rate['cost'] ?? 0 );
+		} elseif ( is_array( $shipping ) ) {
+			$shipping_cost = (float) ( $shipping['total'] ?? 0 );
+		} elseif ( is_object( $shipping ) && method_exists( $shipping, 'get_total' ) ) {
+			$shipping_cost = (float) $shipping->get_total();
+		}
+
 		return array(
 			'method' => null !== $rate ? $this->method_title( $rate ) : ( is_array( $shipping ) ? (string) ( $shipping['method_title'] ?? '' ) : ( is_object( $shipping ) && method_exists( $shipping, 'get_method_title' ) ? (string) $shipping->get_method_title() : '' ) ),
-			'shipping_cost' => null !== $rate ? (float) ( $rate['cost'] ?? 0 ) : ( is_array( $shipping ) ? (float) ( $shipping['total'] ?? 0 ) : 0.0 ),
+			'shipping_cost' => $shipping_cost,
 			'api_base' => null !== $rate ? $this->base_price( $rate ) : $this->old_base_price( $order ),
 			'total' => property_exists( $order, 'total' ) ? (float) $order->total : ( method_exists( $order, 'get_total' ) ? (float) $order->get_total() : 0.0 ),
 			'city' => method_exists( $order, 'get_shipping_city' ) ? (string) $order->get_shipping_city() : '',
