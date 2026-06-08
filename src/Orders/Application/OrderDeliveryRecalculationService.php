@@ -197,8 +197,7 @@ final class OrderDeliveryRecalculationService {
 		$destination = is_array( $request['destination'] ?? null ) ? $request['destination'] : array();
 		$context = is_array( $request['customer_context'] ?? null ) ? $request['customer_context'] : array();
 		$region = trim( (string) ( $destination['region_name'] ?? $context['selected_location_region'] ?? '' ) );
-		$name = trim( (string) ( $context['selected_location_name'] ?? $context['display_name'] ?? $destination['city'] ?? $destination['settlement'] ?? '' ) );
-		$label = trim( implode( ', ', array_values( array_filter( array( $region, $name ), static fn( string $part ): bool => '' !== $part ) ) ) );
+		$name = trim( (string) ( $context['display_name'] ?? $context['selected_location_name'] ?? $destination['display_name'] ?? $destination['city'] ?? $destination['settlement'] ?? '' ) );
 
 		return array_filter(
 			array(
@@ -208,7 +207,7 @@ final class OrderDeliveryRecalculationService {
 				'postcode'    => $destination['postcode'] ?? '',
 				'country'     => $destination['country_code'] ?? '',
 				'region'      => $region,
-				'label'       => '' !== $label ? $label : $name,
+				'label'       => $name,
 				'is_override' => ! empty( $context['location_override'] ),
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value

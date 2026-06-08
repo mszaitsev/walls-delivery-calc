@@ -300,6 +300,18 @@ recalc_smoke_assert( '101000' === ( $override_preview['request']['destination'][
 recalc_smoke_assert( 'fias-override' === ( $override_preview['request']['destination']['fias_id'] ?? '' ), 'Preview with override must use selected location FIAS id.' );
 recalc_smoke_assert( ! empty( $override_preview['request']['customer_context']['location_override'] ), 'Preview with override must mark customer context.' );
 recalc_smoke_assert( str_contains( (string) ( $override_preview['location']['label'] ?? '' ), 'Москва' ), 'Preview with override must expose calculated location label.' );
+$omsk_preview = $service->preview(
+	$order,
+	array(
+		'display_name' => 'Омская область, г Омск',
+		'region_name' => 'Омская область',
+		'city_value' => 'г Омск',
+		'fias_id' => 'fias-omsk',
+		'postal_code' => '644099',
+		'country_code' => 'RU',
+	)
+);
+recalc_smoke_assert( 'Омская область, г Омск' === ( $omsk_preview['location']['label'] ?? '' ), 'Preview location label must use display_name without duplicating region.' );
 
 $rate_ids = array_column( $preview['rates'], 'id' );
 recalc_smoke_assert( in_array( 'demo:pickup', $rate_ids, true ), 'Preview must include rates from every available carrier/service path.' );
