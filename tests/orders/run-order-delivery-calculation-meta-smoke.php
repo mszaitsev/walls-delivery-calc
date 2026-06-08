@@ -49,7 +49,9 @@ function wp_json_encode( mixed $value ): string|false { return json_encode( $val
 function current_user_can( string $capability ): bool { return 'manage_woocommerce' === $capability; }
 function __( string $text, string $domain = '' ): string { return $text; }
 function esc_html__( string $text, string $domain = '' ): string { return $text; }
+function esc_attr__( string $text, string $domain = '' ): string { return $text; }
 function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function sanitize_text_field( mixed $value ): string { return trim( (string) $value ); }
 

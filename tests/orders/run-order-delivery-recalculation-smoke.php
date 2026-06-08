@@ -76,6 +76,7 @@ function wp_send_json_error( mixed $data = null, int $status_code = 400 ): void 
 
 function __( string $text, string $domain = '' ): string { return $text; }
 function esc_html__( string $text, string $domain = '' ): string { return $text; }
+function esc_attr__( string $text, string $domain = '' ): string { return $text; }
 function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
 function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
 function wp_date( string $format ): string { return gmdate( $format ); }

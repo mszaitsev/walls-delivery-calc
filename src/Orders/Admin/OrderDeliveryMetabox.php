@@ -148,13 +148,13 @@ final class OrderDeliveryMetabox {
 		}
 
 		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
-		echo '<p><button type="button" class="button" data-wdc-order-delivery-recalculate data-order-id="' . esc_html( (string) $order_id ) . '">' . esc_html__( 'Пересчитать доставку', 'walls-delivery-calc' ) . '</button></p>';
+		echo '<p><button type="button" class="button" data-wdc-order-delivery-recalculate data-order-id="' . esc_attr( (string) $order_id ) . '">' . esc_html__( 'Пересчитать доставку', 'walls-delivery-calc' ) . '</button></p>';
 		echo '<div class="wdc-order-delivery-modal" data-wdc-order-delivery-modal hidden>';
 		echo '<div class="wdc-order-delivery-modal__overlay" data-wdc-order-delivery-modal-close></div>';
-		echo '<div class="wdc-order-delivery-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="wdc-order-delivery-modal-title-' . esc_html( (string) $order_id ) . '" tabindex="-1">';
+		echo '<div class="wdc-order-delivery-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="wdc-order-delivery-modal-title-' . esc_attr( (string) $order_id ) . '" tabindex="-1">';
 		echo '<header class="wdc-order-delivery-modal__header">';
-		echo '<h2 id="wdc-order-delivery-modal-title-' . esc_html( (string) $order_id ) . '">' . esc_html__( 'Пересчет доставки', 'walls-delivery-calc' ) . '</h2>';
-		echo '<button type="button" class="button-link wdc-order-delivery-modal__close" data-wdc-order-delivery-modal-close aria-label="' . esc_html__( 'Закрыть', 'walls-delivery-calc' ) . '">×</button>';
+		echo '<h2 id="wdc-order-delivery-modal-title-' . esc_attr( (string) $order_id ) . '">' . esc_html__( 'Пересчет доставки', 'walls-delivery-calc' ) . '</h2>';
+		echo '<button type="button" class="button-link wdc-order-delivery-modal__close" data-wdc-order-delivery-modal-close aria-label="' . esc_attr__( 'Закрыть', 'walls-delivery-calc' ) . '">×</button>';
 		echo '</header>';
 		echo '<div class="wdc-order-delivery-modal__status" data-wdc-order-delivery-modal-status></div>';
 		echo '<div class="wdc-order-delivery-modal__content" data-wdc-order-delivery-modal-content></div>';
