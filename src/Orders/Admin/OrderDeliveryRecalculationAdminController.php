@@ -129,20 +129,17 @@ final class OrderDeliveryRecalculationAdminController {
 
 		$location = $this->selected_location_from_request() ?? array();
 		$query = $this->request_string( 'query' );
-		if ( '' === $query ) {
-			$query = trim( implode( ' ', array_filter( array(
-				(string) ( $location['postal_code'] ?? $location['postcode'] ?? '' ),
-				(string) ( $location['city_value'] ?? $location['city_name'] ?? $location['display_name'] ?? '' ),
-			) ) ) );
-		}
-		$limit = max( 1, min( 100, (int) ( $_POST['limit'] ?? 50 ) ) );
-		$rows = array();
+		$mode = 'location' === $this->request_string( 'mode' ) ? 'location' : 'search';
+		$limit = max( 1, min( 'location' === $mode ? 300 : 100, (int) ( $_POST['limit'] ?? ( 'location' === $mode ? 300 : 50 ) ) ) );
 		$postcode = preg_replace( '/\D+/', '', (string) ( $location['postal_code'] ?? $location['postcode'] ?? '' ) ) ?? '';
-		if ( '' !== $query ) {
+		if ( 'location' === $mode ) {
+			$rows = $this->pickup_rows_for_location( $location, $limit, $postcode );
+		} elseif ( '' !== $query ) {
 			$rows = $this->pickup_points->search_admin_pickup_rows( $query, array( 'limit' => $limit ) );
-		}
-		if ( array() === $rows && '' !== $postcode ) {
+		} elseif ( '' !== $postcode ) {
 			$rows = $this->pickup_points->find_rows_by_postcode( $postcode, array( 'limit' => $limit ) );
+		} else {
+			$rows = array();
 		}
 
 		wp_send_json_success(
@@ -175,6 +172,7 @@ final class OrderDeliveryRecalculationAdminController {
 	private function sanitize_location_payload( array $payload ): array {
 		$allowed = array(
 			'id',
+			'location_id',
 			'fias_id',
 			'gar_id',
 			'gar_object_id',
@@ -239,6 +237,27 @@ final class OrderDeliveryRecalculationAdminController {
 			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
 			'point_raw' => $row,
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $location
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function pickup_rows_for_location( array $location, int $limit, string $postcode ): array {
+		foreach ( array( 'ids', 'city_region', 'city' ) as $match ) {
+			$rows = $this->pickup_points->find_rows_by_location_context(
+				$location,
+				array(
+					'match' => $match,
+					'limit' => $limit,
+				)
+			);
+			if ( array() !== $rows ) {
+				return $rows;
+			}
+		}
+
+		return '' !== $postcode ? $this->pickup_points->find_rows_by_postcode( $postcode, array( 'limit' => $limit ) ) : array();
 	}
 
 	private function map_provider(): string {

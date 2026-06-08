@@ -202,6 +202,95 @@ final class RussianPostPickupPointRepository {
 	}
 
 	/**
+	 * @param array<string,mixed> $context
+	 * @param array<string,mixed> $filters
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function find_rows_by_location_context( array $context, array $filters = array() ): array {
+		$limit = $this->limit_from_filters( $filters, 300, 500 );
+		$match = (string) ( $filters['match'] ?? 'city_region' );
+		$city_candidates = $this->location_city_candidates( $context );
+		$region = trim( (string) ( $context['region_name'] ?? $context['state_value'] ?? '' ) );
+		$fias = trim( (string) ( $context['fias_id'] ?? '' ) );
+		$gar = trim( (string) ( $context['gar_object_id'] ?? $context['gar_id'] ?? '' ) );
+		$location_id = max( 0, (int) ( $context['location_id'] ?? $context['id'] ?? 0 ) );
+
+		if ( property_exists( $this->wpdb, 'russian_post_pickup_rows' ) && is_array( $this->wpdb->russian_post_pickup_rows ) ) {
+			$rows = array_values(
+				array_filter(
+					$this->wpdb->russian_post_pickup_rows,
+					function ( array $row ) use ( $match, $city_candidates, $region, $fias, $gar, $location_id ): bool {
+						if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+							return false;
+						}
+						if ( 'ids' === $match ) {
+							return ( $location_id > 0 && $location_id === (int) ( $row['location_id'] ?? 0 ) )
+								|| ( '' !== $fias && $this->same_text( $fias, (string) ( $row['fias_location_guid'] ?? '' ) ) )
+								|| ( '' !== $gar && $this->same_text( $gar, (string) ( $row['gar_region_id'] ?? '' ) ) );
+						}
+
+						$row_city = (string) ( $row['city_name'] ?? '' );
+						$city_ok = array() === $city_candidates || $this->matches_any_city( $row_city, $city_candidates );
+						if ( ! $city_ok ) {
+							return false;
+						}
+						if ( 'city_region' !== $match || '' === $region ) {
+							return true;
+						}
+
+						return $this->contains_text( (string) ( $row['region_name'] ?? '' ), $region ) || $this->contains_text( $region, (string) ( $row['region_name'] ?? '' ) );
+					}
+				)
+			);
+			usort(
+				$rows,
+				static fn( array $a, array $b ): int => strcmp( (string) ( $a['city_name'] ?? '' ) . (string) ( $a['address'] ?? '' ), (string) ( $b['city_name'] ?? '' ) . (string) ( $b['address'] ?? '' ) )
+			);
+
+			return array_slice( $rows, 0, $limit );
+		}
+
+		$where = array( 'active = 1' );
+		$args = array();
+		if ( 'ids' === $match ) {
+			$id_where = array();
+			if ( $location_id > 0 ) {
+				$id_where[] = 'location_id = %d';
+				$args[] = $location_id;
+			}
+			if ( '' !== $fias ) {
+				$id_where[] = 'fias_location_guid = %s';
+				$args[] = $fias;
+			}
+			if ( '' !== $gar ) {
+				$id_where[] = 'gar_region_id = %s';
+				$args[] = $gar;
+			}
+			if ( array() === $id_where ) {
+				return array();
+			}
+			$where[] = '(' . implode( ' OR ', $id_where ) . ')';
+		} else {
+			if ( array() === $city_candidates ) {
+				return array();
+			}
+			$city_where = array();
+			foreach ( $city_candidates as $city ) {
+				$city_where[] = 'city_name LIKE %s';
+				$args[] = '%' . $this->wpdb->esc_like( $city ) . '%';
+			}
+			$where[] = '(' . implode( ' OR ', $city_where ) . ')';
+			if ( 'city_region' === $match && '' !== $region ) {
+				$where[] = 'region_name LIKE %s';
+				$args[] = '%' . $this->wpdb->esc_like( $region ) . '%';
+			}
+		}
+		$this->append_filters( $where, $args, $filters );
+
+		return $this->select_rows( $where, $args, $limit );
+	}
+
+	/**
 	 * @param array<string,mixed> $filters
 	 * @return array<int,array<string,mixed>>
 	 */
@@ -367,6 +456,62 @@ final class RussianPostPickupPointRepository {
 			$where[] = 'point_type IN (' . implode( ',', array_fill( 0, count( $types ), '%s' ) ) . ')';
 			array_push( $args, ...$types );
 		}
+	}
+
+	/**
+	 * @param array<string,mixed> $context
+	 * @return array<int,string>
+	 */
+	private function location_city_candidates( array $context ): array {
+		$values = array(
+			(string) ( $context['city_value'] ?? '' ),
+			(string) ( $context['city_name'] ?? '' ),
+			(string) ( $context['place_name'] ?? '' ),
+			(string) ( $context['settlement_name'] ?? '' ),
+			(string) ( $context['display_name'] ?? '' ),
+			(string) ( $context['label'] ?? '' ),
+			(string) ( $context['option_label'] ?? '' ),
+		);
+		$result = array();
+		foreach ( $values as $value ) {
+			foreach ( preg_split( '/,/', $value ) ?: array() as $part ) {
+				$part = trim( preg_replace( '/\s+/', ' ', (string) $part ) ?? '' );
+				$part = preg_replace( '/^(г|город|поселок|посёлок|п|село|с|д|деревня)\.?\s+/iu', '', $part ) ?? $part;
+				if ( '' !== $part && ! in_array( $part, $result, true ) ) {
+					$result[] = $part;
+				}
+			}
+		}
+
+		return $result;
+	}
+
+	/**
+	 * @param array<int,string> $candidates
+	 */
+	private function matches_any_city( string $city, array $candidates ): bool {
+		foreach ( $candidates as $candidate ) {
+			if ( $this->contains_text( $city, $candidate ) || $this->contains_text( $candidate, $city ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private function contains_text( string $haystack, string $needle ): bool {
+		$haystack = $this->normalized_text( $haystack );
+		$needle = $this->normalized_text( $needle );
+		return '' !== $haystack && '' !== $needle && false !== strpos( $haystack, $needle );
+	}
+
+	private function same_text( string $left, string $right ): bool {
+		return '' !== $left && '' !== $right && $this->normalized_text( $left ) === $this->normalized_text( $right );
+	}
+
+	private function normalized_text( string $value ): string {
+		$value = trim( preg_replace( '/\s+/u', ' ', $value ) ?? '' );
+		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
 	}
 
 	private function limit_from_filters( array $filters, int $default, int $max ): int {

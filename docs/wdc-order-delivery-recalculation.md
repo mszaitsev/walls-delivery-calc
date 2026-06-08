@@ -1,12 +1,12 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.41.7.
+Version: 0.41.8.
 
 ## Цель этапа
 
 Этот документ описывает foundation для будущего пересчета доставки внутри WooCommerce order admin. Итоговая бизнес-цель всей feature-ветки: дать администратору возможность пересчитать доставку заказа, выбрать новый метод, при необходимости выбрать ПВЗ, безопасно заменить WooCommerce shipping item, обновить WDC delivery meta и пересчитать totals.
 
-## Статус 0.41.7
+## Статус 0.41.8
 
 Реализован только preview-only foundation.
 
@@ -26,13 +26,15 @@ Version: 0.41.7.
 - ни один rate и ни один tariff не выбран по умолчанию;
 - при выборе pickup rate modal показывает preview-only состояние `ПВЗ не выбран` и кнопку выбора/изменения ПВЗ;
 - выбор ПВЗ выполняется через map-backed admin picker: он использует существующие pickup map provider assets, показывает карту с markers и список найденных ПВЗ, а при недоступной карте оставляет fallback-выбор из списка;
+- initial load карты ПВЗ отправляет `mode=location` и пустой query, поэтому backend загружает все ПВЗ выбранного населенного пункта через location id/FIAS/GAR, city+region, display/city и только затем postcode fallback;
+- ручной поиск администратора отправляет `mode=search`, поэтому точный поиск по индексу/адресу/городу/коду ПВЗ сохранен;
 - поиск ПВЗ выполняется через admin pickup search endpoint поверх существующего `RussianPostPickupPointRepository`; endpoint защищен nonce/capability checks и тем же shipment block;
 - выбранный ПВЗ хранится только в JS modal state как `selectedPickupPoint` (`point_code`, `point_type`, `point_name`, `point_address`, `point_postcode`, `point_raw`) и очищается при выборе courier rate;
 - endpoint возвращает HTML preview, normalized rates и request payload для диагностики/следующих patch.
 
 ## Ограничения
 
-В 0.41.7 намеренно не реализованы:
+В 0.41.8 намеренно не реализованы:
 
 - сохранение выбранного метода доставки;
 - сохранение выбранного населенного пункта в заказ;
@@ -69,4 +71,4 @@ Smoke coverage:
 php tests/orders/run-order-delivery-recalculation-smoke.php
 ```
 
-Тест проверяет shipment block, построение `QuoteRequest`, возврат всех доступных rates, Russian Post domestic pickup/courier groups, отсутствие selected state, nonce/capability checks, pickup endpoint payload/security/blocking, map/list picker markup, JS attribute escaping и отсутствие изменений shipping item/totals/shipping address/calculation meta.
+Тест проверяет shipment block, построение `QuoteRequest`, возврат всех доступных rates, Russian Post domestic pickup/courier groups, отсутствие selected state, nonce/capability checks, pickup endpoint payload/security/blocking, initial `mode=location`, manual `mode=search`, map/list picker markup, JS attribute escaping и отсутствие изменений shipping item/totals/shipping address/calculation meta.

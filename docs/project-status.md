@@ -1,5 +1,7 @@
 # Project Status
 
+0.41.8 note: the order-admin delivery recalculation pickup map initial load now requests `mode=location` and loads all available pickup points for the selected settlement instead of searching by the settlement base postcode. The admin pickup endpoint resolves location mode through location id/FIAS/GAR, city+region, display/city, and only then postcode fallback. Manual `mode=search` remains available for explicit administrator postcode/address/city searches. The order is not mutated: no delivery save, shipping item replacement, totals recalculation, shipping address update, order note, or `_wdc_delivery_calculation_data` update.
+
 0.41.7 note: the order-admin delivery recalculation pickup selector now uses the existing pickup map provider assets instead of a table-only popup. Pickup rates open a picker with map, markers, status area and side list; marker/list selection updates only the modal `selectedPickupPoint` JS state. If the map provider is unavailable, the picker remains usable as a list and shows an explanatory fallback message. The order is not mutated: no delivery save, shipping item replacement, totals recalculation, shipping address update, order note, or `_wdc_delivery_calculation_data` update. The picker also now uses `escapeAttribute()` for `data-index` attributes.
 
 0.41.6 note: order-admin delivery recalculation preview now supports preview-only pickup point selection for pickup rates. The modal shows pickup controls only for rates marked `requires_pickup_point`, opens an admin pickup search picker backed by the existing Russian Post pickup repository, stores the chosen point only in JS modal state as `selectedPickupPoint`, and clears it when a courier rate is selected. The admin pickup endpoint is protected by nonce/capability checks and the same shipment block. The order is not mutated: no delivery save, shipping item replacement, totals recalculation, shipping address update, order note, or `_wdc_delivery_calculation_data` update.
@@ -28,7 +30,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.41.7`.
+- Текущая версия: `0.41.8`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/order-delivery-recalculation`.
 - Последнее обновление статуса: 2026-06-08.

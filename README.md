@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.41.7.
+Current plugin version: 0.41.8.
+
+Version 0.41.8 fixes the initial pickup map load in the admin order delivery recalculation modal. Opening the picker now sends `mode=location` with an empty search query, so the backend loads pickup points for the selected settlement by location identifiers / city and region before falling back to postcode. Manual search still sends `mode=search` and can search by exact postcode, address, city or pickup code. The map is no longer limited to one base settlement postcode on open.
 
 Version 0.41.7 upgrades the preview-only pickup point picker in the admin order delivery recalculation modal from a table-only popup to a map-backed picker. The picker uses the existing pickup map provider assets, renders map markers plus a side list, lets the administrator preview/select a point from marker popup or list, and falls back to list selection with an explanatory status when the map provider is unavailable. The selected point still lives only in modal JS state. This patch also fixes the JS escaping rule for picker `data-index` attributes by using `escapeAttribute()`.
 

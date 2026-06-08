@@ -453,17 +453,19 @@
 			close();
 		}
 
-		function runSearch() {
+		function runSearch( mode ) {
+			mode = mode === 'location' ? 'location' : 'search';
 			const form = new FormData();
-			const value = String( query.value || '' ).trim();
+			const value = mode === 'location' ? '' : String( query.value || '' ).trim();
 			form.append( 'action', config.pickupSearchAction || 'wdc_order_delivery_recalculate_pickup_search' );
 			form.append( 'nonce', config.nonce || '' );
 			form.append( 'order_id', orderId( box ) );
 			form.append( 'selected_location', JSON.stringify( location ) );
 			form.append( 'selected_rate', JSON.stringify( rate ) );
+			form.append( 'mode', mode );
 			form.append( 'query', value );
-			form.append( 'limit', '50' );
-			status.textContent = 'Идет поиск ПВЗ...';
+			form.append( 'limit', mode === 'location' ? '300' : '50' );
+			status.textContent = mode === 'location' ? 'Загружаем ПВЗ выбранного населенного пункта...' : 'Идет поиск ПВЗ...';
 			list.innerHTML = '';
 			window.fetch( config.ajaxUrl || window.ajaxurl || '', {
 				method: 'POST',
@@ -484,7 +486,7 @@
 					} ).length;
 					status.textContent = points.length
 						? 'Найдено: ' + points.length + ( withCoordinates < points.length ? '. Часть ПВЗ без координат доступна только в списке.' : '' )
-						: 'ПВЗ не найдены.';
+						: ( mode === 'location' ? 'ПВЗ для выбранного населенного пункта не найдены. Попробуйте поиск по адресу или индексу.' : 'ПВЗ не найдены.' );
 					if ( selected ) {
 						selected.textContent = 'Выберите ПВЗ на карте или в списке.';
 					}
@@ -522,7 +524,7 @@
 				return;
 			}
 			if ( event.target.closest( '[data-wdc-pickup-picker-search]' ) ) {
-				runSearch();
+				runSearch( 'search' );
 				return;
 			}
 			const chooseButton = event.target.closest( '[data-wdc-pickup-picker-choose], [data-wdc-pickup-popup-select]' );
@@ -544,7 +546,7 @@
 		query.addEventListener( 'keydown', function ( event ) {
 			if ( 'Enter' === event.key ) {
 				event.preventDefault();
-				runSearch();
+				runSearch( 'search' );
 			}
 		} );
 		window.wdcPickupCheckout = Object.assign( {}, window.wdcPickupCheckout || {}, {
@@ -579,9 +581,9 @@
 				}
 			}, 50 );
 		}
-		query.value = String( location.postal_code || location.postcode || location.city_value || location.display_name || '' );
+		query.value = String( location.display_name || location.city_value || location.city_name || '' );
 		query.focus();
-		runSearch();
+		runSearch( 'location' );
 	}
 
 	document.addEventListener( 'click', function ( event ) {
