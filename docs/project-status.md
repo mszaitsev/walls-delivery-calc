@@ -1,5 +1,7 @@
 # Project Status
 
+0.41.7 note: the order-admin delivery recalculation pickup selector now uses the existing pickup map provider assets instead of a table-only popup. Pickup rates open a picker with map, markers, status area and side list; marker/list selection updates only the modal `selectedPickupPoint` JS state. If the map provider is unavailable, the picker remains usable as a list and shows an explanatory fallback message. The order is not mutated: no delivery save, shipping item replacement, totals recalculation, shipping address update, order note, or `_wdc_delivery_calculation_data` update. The picker also now uses `escapeAttribute()` for `data-index` attributes.
+
 0.41.6 note: order-admin delivery recalculation preview now supports preview-only pickup point selection for pickup rates. The modal shows pickup controls only for rates marked `requires_pickup_point`, opens an admin pickup search picker backed by the existing Russian Post pickup repository, stores the chosen point only in JS modal state as `selectedPickupPoint`, and clears it when a courier rate is selected. The admin pickup endpoint is protected by nonce/capability checks and the same shipment block. The order is not mutated: no delivery save, shipping item replacement, totals recalculation, shipping address update, order note, or `_wdc_delivery_calculation_data` update.
 
 0.41.4 note: order-admin delivery recalculation preview now supports a modal-only settlement override. The modal shows the current order settlement, searches settlements through the existing checkout location search payload, sends the selected location only in the preview AJAX request, and recalculates rates for that destination with an explicit `Расчет выполнен для: ...` status. The order is not mutated: no shipping address update, delivery save, shipping item replacement, totals recalculation, pickup selection, order note, or `_wdc_delivery_calculation_data` update.
@@ -26,7 +28,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.41.6`.
+- Текущая версия: `0.41.7`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/order-delivery-recalculation`.
 - Последнее обновление статуса: 2026-06-08.

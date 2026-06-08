@@ -5,8 +5,10 @@ namespace WallsShop\WDC\Orders\Admin;
 
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -41,8 +43,19 @@ final class OrderDeliveryRecalculationAdminController {
 			return;
 		}
 
-		wp_enqueue_style( 'wdc-order-delivery-recalculation', $this->plugin_url . 'assets/admin/order-delivery-recalculation.css', array(), $this->version );
-		wp_enqueue_script( 'wdc-order-delivery-recalculation', $this->plugin_url . 'assets/admin/order-delivery-recalculation.js', array(), $this->version, true );
+		$provider = $this->map_provider();
+		$provider_handle = 'wdc-map-provider-' . $provider;
+		if ( 'leaflet' === $provider ) {
+			wp_enqueue_style( 'wdc-leaflet', $this->plugin_url . 'assets/vendor/leaflet/leaflet.css', array(), '1.9.4' );
+			wp_enqueue_script( 'wdc-leaflet', $this->plugin_url . 'assets/vendor/leaflet/leaflet.js', array(), '1.9.4', true );
+			wp_enqueue_script( $provider_handle, $this->plugin_url . 'assets/frontend/pickup-map/providers/wdc-map-provider-leaflet.js', array( 'wdc-leaflet' ), $this->version, true );
+		} else {
+			wp_enqueue_script( $provider_handle, $this->plugin_url . 'assets/frontend/pickup-map/providers/wdc-map-provider-yandex.js', array(), $this->version, true );
+		}
+
+		wp_enqueue_style( 'wdc-pickup-map', $this->plugin_url . 'assets/frontend/pickup-map/wdc-pickup-map.css', array(), $this->version );
+		wp_enqueue_style( 'wdc-order-delivery-recalculation', $this->plugin_url . 'assets/admin/order-delivery-recalculation.css', array( 'wdc-pickup-map' ), $this->version );
+		wp_enqueue_script( 'wdc-order-delivery-recalculation', $this->plugin_url . 'assets/admin/order-delivery-recalculation.js', array( $provider_handle ), $this->version, true );
 		wp_localize_script(
 			'wdc-order-delivery-recalculation',
 			'wdcOrderDeliveryRecalculation',
@@ -52,6 +65,10 @@ final class OrderDeliveryRecalculationAdminController {
 				'action'  => self::AJAX_PREVIEW,
 				'locationSearchAction' => self::AJAX_LOCATION_SEARCH,
 				'pickupSearchAction' => self::AJAX_PICKUP_SEARCH,
+				'mapProvider' => $provider,
+				'yandexApiKeyPresent' => '' !== $this->yandex_api_key(),
+				'yandexApiKey' => 'yandex' === $provider ? $this->yandex_api_key() : '',
+				'pickupPointTypes' => ( new RussianPostPickupPointTypeSettings( new SettingsRepository() ) )->all(),
 			)
 		);
 	}
@@ -222,5 +239,14 @@ final class OrderDeliveryRecalculationAdminController {
 			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
 			'point_raw' => $row,
 		);
+	}
+
+	private function map_provider(): string {
+		$provider = ( new SettingsRepository() )->get_string( 'pickup_map_provider', 'leaflet' );
+		return 'yandex' === $provider ? 'yandex' : 'leaflet';
+	}
+
+	private function yandex_api_key(): string {
+		return trim( ( new SettingsRepository() )->get_string( 'pickup_map_yandex_api_key', '' ) );
 	}
 }

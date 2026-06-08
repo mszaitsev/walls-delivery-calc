@@ -1,12 +1,12 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.41.6.
+Version: 0.41.7.
 
 ## Цель этапа
 
 Этот документ описывает foundation для будущего пересчета доставки внутри WooCommerce order admin. Итоговая бизнес-цель всей feature-ветки: дать администратору возможность пересчитать доставку заказа, выбрать новый метод, при необходимости выбрать ПВЗ, безопасно заменить WooCommerce shipping item, обновить WDC delivery meta и пересчитать totals.
 
-## Статус 0.41.6
+## Статус 0.41.7
 
 Реализован только preview-only foundation.
 
@@ -25,13 +25,14 @@ Version: 0.41.6.
 - admin preview показывает pickup/courier groups и Russian Post domestic tariffs;
 - ни один rate и ни один tariff не выбран по умолчанию;
 - при выборе pickup rate modal показывает preview-only состояние `ПВЗ не выбран` и кнопку выбора/изменения ПВЗ;
-- выбор ПВЗ выполняется через admin pickup search endpoint поверх существующего `RussianPostPickupPointRepository`; endpoint защищен nonce/capability checks и тем же shipment block;
+- выбор ПВЗ выполняется через map-backed admin picker: он использует существующие pickup map provider assets, показывает карту с markers и список найденных ПВЗ, а при недоступной карте оставляет fallback-выбор из списка;
+- поиск ПВЗ выполняется через admin pickup search endpoint поверх существующего `RussianPostPickupPointRepository`; endpoint защищен nonce/capability checks и тем же shipment block;
 - выбранный ПВЗ хранится только в JS modal state как `selectedPickupPoint` (`point_code`, `point_type`, `point_name`, `point_address`, `point_postcode`, `point_raw`) и очищается при выборе courier rate;
 - endpoint возвращает HTML preview, normalized rates и request payload для диагностики/следующих patch.
 
 ## Ограничения
 
-В 0.41.6 намеренно не реализованы:
+В 0.41.7 намеренно не реализованы:
 
 - сохранение выбранного метода доставки;
 - сохранение выбранного населенного пункта в заказ;
@@ -58,7 +59,7 @@ Version: 0.41.6.
 Рекомендуемый порядок:
 
 1. Добавить save/replacement service: безопасная замена shipping item через WooCommerce CRUD, обновление hidden WDC meta и `_wdc_delivery_calculation_data`, пересчет totals, приватный order note и reload страницы.
-2. При необходимости заменить lightweight admin pickup picker полноценной картой на том же provider stack, сохранив preview-only state contract.
+2. При необходимости расширить map picker bounds/geolocation behavior для больших городов, сохранив preview-only state contract.
 
 ## Проверки
 
@@ -68,4 +69,4 @@ Smoke coverage:
 php tests/orders/run-order-delivery-recalculation-smoke.php
 ```
 
-Тест проверяет shipment block, построение `QuoteRequest`, возврат всех доступных rates, Russian Post domestic pickup/courier groups, отсутствие selected state, nonce/capability checks, pickup endpoint payload/security/blocking и отсутствие изменений shipping item/totals/shipping address/calculation meta.
+Тест проверяет shipment block, построение `QuoteRequest`, возврат всех доступных rates, Russian Post domestic pickup/courier groups, отсутствие selected state, nonce/capability checks, pickup endpoint payload/security/blocking, map/list picker markup, JS attribute escaping и отсутствие изменений shipping item/totals/shipping address/calculation meta.
