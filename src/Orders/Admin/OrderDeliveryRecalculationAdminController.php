@@ -6,27 +6,32 @@ namespace WallsShop\WDC\Orders\Admin;
 use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 
 defined( 'ABSPATH' ) || exit;
 
 final class OrderDeliveryRecalculationAdminController {
 	public const AJAX_PREVIEW = 'wdc_order_delivery_recalculate_preview';
 	public const AJAX_LOCATION_SEARCH = 'wdc_order_delivery_recalculate_location_search';
+	public const AJAX_PICKUP_SEARCH = 'wdc_order_delivery_recalculate_pickup_search';
 	public const NONCE_ACTION = 'wdc_order_delivery_recalculation';
 
 	public function __construct(
 		private OrderDeliveryRecalculationService $service,
 		private OrderDeliveryRateRenderer $renderer,
 		private ?CheckoutLocationAjax $location_search = null,
+		private ?RussianPostPickupPointRepository $pickup_points = null,
 		private string $plugin_url = '',
 		private string $version = '1'
 	) {
+		$this->pickup_points = $this->pickup_points ?? new RussianPostPickupPointRepository();
 	}
 
 	public function register(): void {
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_action( 'wp_ajax_' . self::AJAX_PREVIEW, array( $this, 'ajax_preview' ) );
 		add_action( 'wp_ajax_' . self::AJAX_LOCATION_SEARCH, array( $this, 'ajax_location_search' ) );
+		add_action( 'wp_ajax_' . self::AJAX_PICKUP_SEARCH, array( $this, 'ajax_pickup_search' ) );
 	}
 
 	public function enqueue_assets(): void {
@@ -46,6 +51,7 @@ final class OrderDeliveryRecalculationAdminController {
 				'nonce'   => wp_create_nonce( self::NONCE_ACTION ),
 				'action'  => self::AJAX_PREVIEW,
 				'locationSearchAction' => self::AJAX_LOCATION_SEARCH,
+				'pickupSearchAction' => self::AJAX_PICKUP_SEARCH,
 			)
 		);
 	}
@@ -88,6 +94,45 @@ final class OrderDeliveryRecalculationAdminController {
 		$country = $this->request_string( 'country_code' );
 		$payload = $this->location_search->payload( $query, '', $country );
 		wp_send_json_success( $payload );
+	}
+
+	public function ajax_pickup_search(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
+		}
+
+		$order_id = (int) ( $_POST['order_id'] ?? 0 );
+		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+		if ( ! is_object( $order ) ) {
+			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
+		}
+		if ( $this->service->has_blocking_shipment( $order ) ) {
+			wp_send_json_error( array( 'message' => __( 'Пересчет доставки недоступен: по заказу уже создано отправление.', 'walls-delivery-calc' ) ), 400 );
+		}
+
+		$location = $this->selected_location_from_request() ?? array();
+		$query = $this->request_string( 'query' );
+		if ( '' === $query ) {
+			$query = trim( implode( ' ', array_filter( array(
+				(string) ( $location['postal_code'] ?? $location['postcode'] ?? '' ),
+				(string) ( $location['city_value'] ?? $location['city_name'] ?? $location['display_name'] ?? '' ),
+			) ) ) );
+		}
+		$limit = max( 1, min( 100, (int) ( $_POST['limit'] ?? 50 ) ) );
+		$rows = array();
+		$postcode = preg_replace( '/\D+/', '', (string) ( $location['postal_code'] ?? $location['postcode'] ?? '' ) ) ?? '';
+		if ( '' !== $query ) {
+			$rows = $this->pickup_points->search_admin_pickup_rows( $query, array( 'limit' => $limit ) );
+		}
+		if ( array() === $rows && '' !== $postcode ) {
+			$rows = $this->pickup_points->find_rows_by_postcode( $postcode, array( 'limit' => $limit ) );
+		}
+
+		wp_send_json_success(
+			array(
+				'points' => array_map( array( $this, 'pickup_point_payload' ), $rows ),
+			)
+		);
 	}
 
 	/**
@@ -143,7 +188,7 @@ final class OrderDeliveryRecalculationAdminController {
 	}
 
 	private function request_string( string $key ): string {
-		$value = $_REQUEST[ $key ] ?? '';
+		$value = $_POST[ $key ] ?? $_REQUEST[ $key ] ?? '';
 		if ( is_array( $value ) ) {
 			return '';
 		}
@@ -153,5 +198,29 @@ final class OrderDeliveryRecalculationAdminController {
 	private function clean_string( string $value ): string {
 		$value = function_exists( 'wp_unslash' ) ? wp_unslash( $value ) : $value;
 		return function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $value ) : trim( $value );
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,mixed>
+	 */
+	private function pickup_point_payload( array $row ): array {
+		$point_code = (string) ( $row['point_code'] ?? '' );
+		$postcode = (string) ( $row['postcode'] ?? $row['postal_code'] ?? '' );
+		$address = (string) ( $row['address'] ?? '' );
+		return array(
+			'point_code' => $point_code,
+			'point_type' => (string) ( $row['point_type'] ?? 'OPS' ),
+			'point_name' => (string) ( $row['name'] ?? $postcode ),
+			'point_address' => $address,
+			'point_postcode' => $postcode,
+			'postcode' => $postcode,
+			'region_name' => (string) ( $row['region_name'] ?? '' ),
+			'city_name' => (string) ( $row['city_name'] ?? '' ),
+			'address' => $address,
+			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
+			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
+			'point_raw' => $row,
+		);
 	}
 }

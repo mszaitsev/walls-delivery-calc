@@ -1,5 +1,7 @@
 # Project Status
 
+0.41.6 note: order-admin delivery recalculation preview now supports preview-only pickup point selection for pickup rates. The modal shows pickup controls only for rates marked `requires_pickup_point`, opens an admin pickup search picker backed by the existing Russian Post pickup repository, stores the chosen point only in JS modal state as `selectedPickupPoint`, and clears it when a courier rate is selected. The admin pickup endpoint is protected by nonce/capability checks and the same shipment block. The order is not mutated: no delivery save, shipping item replacement, totals recalculation, shipping address update, order note, or `_wdc_delivery_calculation_data` update.
+
 0.41.4 note: order-admin delivery recalculation preview now supports a modal-only settlement override. The modal shows the current order settlement, searches settlements through the existing checkout location search payload, sends the selected location only in the preview AJAX request, and recalculates rates for that destination with an explicit `Расчет выполнен для: ...` status. The order is not mutated: no shipping address update, delivery save, shipping item replacement, totals recalculation, pickup selection, order note, or `_wdc_delivery_calculation_data` update.
 
 0.41.2 note: order-admin delivery recalculation preview now opens in a custom admin modal instead of rendering inline in the `Калькулятор доставок` metabox. The metabox keeps only the `Пересчитать доставку` button when recalculation is allowed; the modal contains header/body/footer, close controls, status/loading/error area, rates content area, and a disabled save placeholder for the next patch. The preview-only boundary is unchanged: no delivery save, pickup selection, shipping item replacement, totals recalculation, shipping address change, order note, or `_wdc_delivery_calculation_data` update.
@@ -24,12 +26,12 @@
 
 ## Общий статус
 
-- Текущая версия: `0.41.4`.
+- Текущая версия: `0.41.6`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/order-delivery-recalculation`.
 - Последнее обновление статуса: 2026-06-08.
 - Общая готовность проекта: примерно 72%.
-- Следующий рекомендуемый этап: продолжить `feature/order-delivery-recalculation`: выбор ПВЗ для pickup preview, затем безопасное сохранение/замена shipping item.
+- Следующий рекомендуемый этап: продолжить `feature/order-delivery-recalculation`: безопасное сохранение/замена shipping item после preview-only выбора населенного пункта, rate и ПВЗ.
 
 ## Краткое резюме
 

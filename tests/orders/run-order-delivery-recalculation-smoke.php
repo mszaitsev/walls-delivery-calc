@@ -29,6 +29,7 @@ use WallsShop\WDC\Orders\Admin\OrderDeliveryRateRenderer;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryRecalculationAdminController;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
 use WallsShop\WDC\Orders\Application\OrderQuoteRequestMapper;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
@@ -98,6 +99,8 @@ final class WdcRecalcLocationDb extends wpdb {
 	public string $prefix = 'wp_';
 	/** @var array<int,array<string,mixed>> */
 	public array $locations = array();
+	/** @var array<int,array<string,mixed>> */
+	public array $russian_post_pickup_rows = array();
 }
 
 final class WdcRecalcProduct {
@@ -250,6 +253,24 @@ function wdc_recalc_location_ajax(): CheckoutLocationAjax {
 	return new CheckoutLocationAjax( new CheckoutLocationSearch( new LocationSearchService( $repository ) ), new SettingsRepository(), null );
 }
 
+function wdc_recalc_pickup_repository(): RussianPostPickupPointRepository {
+	$db = new WdcRecalcLocationDb();
+	$db->russian_post_pickup_rows = array(
+		array(
+			'point_code' => '101000-OPS',
+			'point_type' => 'OPS',
+			'postcode' => '101000',
+			'region_name' => 'Москва',
+			'city_name' => 'Москва',
+			'address' => 'Москва, ул. Тверская, 1',
+			'latitude' => 55.75,
+			'longitude' => 37.61,
+			'active' => 1,
+		),
+	);
+	return new RussianPostPickupPointRepository( $db );
+}
+
 $order = new WdcRecalcOrder(
 	101,
 	array(
@@ -331,6 +352,15 @@ $html = ( new OrderDeliveryRateRenderer() )->render( $preview['rates'] );
 recalc_smoke_assert( str_contains( $html, 'Почта России до отделения' ) && str_contains( $html, 'Почта России до двери' ), 'Renderer must show Russian Post pickup and courier groups.' );
 recalc_smoke_assert( str_contains( $html, 'Посылка онлайн' ) && str_contains( $html, 'EMS' ), 'Renderer must show domestic tariff rows.' );
 recalc_smoke_assert( ! str_contains( $html, ' checked' ), 'Renderer must not preselect any radio input.' );
+recalc_smoke_assert( str_contains( $html, 'data-rate-payload' ) && str_contains( $html, 'data-carrier-key' ) && str_contains( $html, 'data-service-key' ), 'Pickup rate payload must contain data for pickup selection.' );
+$pickup_article_pos = strpos( $html, 'data-rate-id="russian_post_domestic:pickup"' );
+$courier_article_pos = strpos( $html, 'data-rate-id="russian_post_domestic:courier"' );
+$pickup_article_next = false === $pickup_article_pos ? false : strpos( $html, 'data-wdc-order-delivery-rate', $pickup_article_pos + 1 );
+$courier_article_next = false === $courier_article_pos ? false : strpos( $html, 'data-wdc-order-delivery-rate', $courier_article_pos + 1 );
+$pickup_article_html = false === $pickup_article_pos ? '' : substr( $html, $pickup_article_pos, false === $pickup_article_next ? null : $pickup_article_next - $pickup_article_pos );
+$courier_article_html = false === $courier_article_pos ? '' : substr( $html, $courier_article_pos, false === $courier_article_next ? null : $courier_article_next - $courier_article_pos );
+recalc_smoke_assert( false !== $pickup_article_pos && str_contains( $pickup_article_html, 'data-wdc-pickup-selector' ), 'Pickup rate UI must show pickup selection control markup.' );
+recalc_smoke_assert( false !== $courier_article_pos && ! str_contains( $courier_article_html, 'data-wdc-pickup-selector' ), 'Courier rate UI must not show pickup selection controls.' );
 
 recalc_smoke_assert( $before_shipping === $order->shipping_items, 'Preview must not change shipping item data.' );
 recalc_smoke_assert( $before_total === $order->total, 'Preview must not change order totals.' );
@@ -339,6 +369,7 @@ recalc_smoke_assert( $before_shipping_city === $order->get_shipping_city() && $b
 
 $blocked = new WdcRecalcOrder( 102, array() );
 $blocked->meta['_wdc_shipments'] = array( 'russian_post_domestic' => array( 'status' => 'created' ) );
+$GLOBALS['wdc_recalc_orders'][102] = $blocked;
 recalc_smoke_assert( false === $service->preview( $blocked )['success'], 'Preview must be blocked when shipment status is created.' );
 ob_start();
 $metabox->render( $blocked );
@@ -351,7 +382,8 @@ $backlog_blocked = new WdcRecalcOrder( 104, array() );
 $backlog_blocked->meta['_wdc_shipments'] = array( 'russian_post_domestic' => array( 'backlog_order_id' => '123' ) );
 recalc_smoke_assert( false === $service->preview( $backlog_blocked )['success'], 'Preview must be blocked when shipment has backlog_order_id.' );
 
-$controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax );
+$pickup_repository = wdc_recalc_pickup_repository();
+$controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository );
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok' );
 try {
 	$controller->ajax_preview();
@@ -377,12 +409,41 @@ try {
 	recalc_smoke_assert( $response->success && array() !== $items && 'fias-override' === ( $items[0]['fias_id'] ?? '' ), 'Location search endpoint must return settlements.' );
 }
 
+$_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'selected_rate' => wp_json_encode( $rates_by_id['russian_post_domestic:pickup'] ), 'query' => '101000' );
+try {
+	$controller->ajax_pickup_search();
+	recalc_smoke_assert( false, 'Pickup endpoint must send JSON response.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	$points = $response->data['points'] ?? array();
+	recalc_smoke_assert( $response->success && array() !== $points && '101000-OPS' === ( $points[0]['point_code'] ?? '' ), 'Pickup endpoint must return pickup points for selected location.' );
+	recalc_smoke_assert( isset( $points[0]['point_type'], $points[0]['point_address'], $points[0]['point_postcode'], $points[0]['point_raw'] ), 'Pickup endpoint must return selectedPickupPoint payload fields.' );
+}
+recalc_smoke_assert( $before_shipping === $order->shipping_items, 'Pickup endpoint must not change shipping item data.' );
+recalc_smoke_assert( $before_total === $order->total, 'Pickup endpoint must not change order totals.' );
+recalc_smoke_assert( $before_calc === $order->meta['_wdc_delivery_calculation_data'], 'Pickup endpoint must not change delivery calculation meta.' );
+recalc_smoke_assert( $before_shipping_city === $order->get_shipping_city() && $before_shipping_postcode === $order->get_shipping_postcode(), 'Pickup endpoint must not change shipping address fields.' );
+
+$_POST = array( 'order_id' => 102, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'query' => '101000' );
+try {
+	$controller->ajax_pickup_search();
+	recalc_smoke_assert( false, 'Pickup endpoint must block orders with created shipment.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	recalc_smoke_assert( ! $response->success && 400 === $response->status, 'Pickup endpoint must be blocked by created shipment.' );
+}
+
 $GLOBALS['wdc_recalc_current_can'] = false;
 try {
 	$controller->ajax_preview();
 	recalc_smoke_assert( false, 'Controller must reject missing capability.' );
 } catch ( WdcRecalcAjaxResponse $response ) {
 	recalc_smoke_assert( ! $response->success && 403 === $response->status, 'Endpoint must require manage_woocommerce.' );
+}
+$GLOBALS['wdc_recalc_current_can'] = false;
+try {
+	$controller->ajax_pickup_search();
+	recalc_smoke_assert( false, 'Pickup endpoint must reject missing capability.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	recalc_smoke_assert( ! $response->success && 403 === $response->status, 'Pickup endpoint must require manage_woocommerce.' );
 }
 $GLOBALS['wdc_recalc_current_can'] = true;
 $GLOBALS['wdc_recalc_nonce_ok'] = false;

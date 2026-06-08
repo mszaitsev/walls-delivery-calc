@@ -174,10 +174,24 @@
 .wdc-order-delivery-rate__delivery,
 .wdc-order-delivery-rate__comment,
 .wdc-order-delivery-tariff__delivery,
-.wdc-order-delivery-rate__pickup-placeholder {
+.wdc-order-delivery-rate__pickup-status {
 	margin-top: 5px;
 	color: #646970;
 	font-size: 12px;
+}
+
+.wdc-order-delivery-rate__pickup-selector {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px solid #f0f0f1;
+}
+
+.wdc-order-delivery-rate__pickup-selector[hidden] {
+	display: none;
 }
 
 .wdc-order-delivery-tariffs {
@@ -188,6 +202,53 @@
 .wdc-order-delivery-tariff {
 	margin: 6px 0;
 	font-size: 12px;
+}
+
+.wdc-order-delivery-pickup-picker {
+	position: fixed;
+	inset: 0;
+	z-index: 100110;
+}
+
+.wdc-order-delivery-pickup-picker__overlay {
+	position: absolute;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.45);
+}
+
+.wdc-order-delivery-pickup-picker__dialog {
+	position: relative;
+	width: min(760px, calc(100vw - 32px));
+	max-height: calc(100vh - 48px);
+	margin: 24px auto;
+	padding: 16px;
+	overflow: auto;
+	background: #fff;
+	border-radius: 4px;
+	box-shadow: 0 18px 45px rgba(0, 0, 0, 0.28);
+}
+
+.wdc-order-delivery-pickup-picker__close {
+	position: absolute;
+	top: 10px;
+	right: 12px;
+	font-size: 26px;
+	line-height: 1;
+	text-decoration: none;
+	color: #1d2327;
+}
+
+.wdc-order-delivery-pickup-picker__search {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.wdc-order-delivery-pickup-picker__status {
+	min-height: 20px;
+	margin-bottom: 8px;
+	color: #646970;
 }
 
 @media (max-width: 782px) {

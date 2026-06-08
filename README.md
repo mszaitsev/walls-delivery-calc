@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.41.4.
+Current plugin version: 0.41.6.
+
+Version 0.41.6 adds preview-only pickup point selection inside the admin order delivery recalculation modal. Pickup rates now expose enough rate/tariff payload for point lookup, show a `PVZ not selected` state plus choose/change action, call a nonce/capability-protected admin pickup search endpoint backed by the existing Russian Post pickup repository, and keep `selectedPickupPoint` only in modal JS state. Courier rates do not show pickup controls and clear any previously selected point. This patch still does not save delivery, replace shipping items, recalculate totals, change shipping address, add order notes, or update `_wdc_delivery_calculation_data`.
 
 Version 0.41.4 adds preview-only location override to the admin order delivery recalculation modal. The modal now shows the current order settlement, lets an administrator search settlements through the existing checkout location search payload, keeps the selected settlement only in the modal/AJAX request, and recalculates rates for that settlement while explicitly showing `Расчет выполнен для: ...`. This patch still does not save the settlement, change shipping address, save delivery, replace shipping items, recalculate totals, select pickup points, add order notes, or update `_wdc_delivery_calculation_data`.
 

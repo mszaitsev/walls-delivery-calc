@@ -58,8 +58,9 @@ final class OrderDeliveryRateRenderer {
 		$id = (string) ( $rate['id'] ?? '' );
 		$delivery_type = (string) ( $rate['delivery_type'] ?? '' );
 		$requires_pickup = ! empty( $rate['requires_pickup_point'] );
+		$payload = $this->rate_payload_json( $rate );
 
-		echo '<article class="wdc-order-delivery-rate" data-wdc-order-delivery-rate data-rate-id="' . esc_attr( $id ) . '" data-delivery-type="' . esc_attr( $delivery_type ) . '" data-requires-pickup="' . esc_attr( $requires_pickup ? '1' : '0' ) . '">';
+		echo '<article class="wdc-order-delivery-rate" data-wdc-order-delivery-rate data-rate-id="' . esc_attr( $id ) . '" data-delivery-type="' . esc_attr( $delivery_type ) . '" data-requires-pickup="' . esc_attr( $requires_pickup ? '1' : '0' ) . '" data-carrier-key="' . esc_attr( (string) ( $rate['carrier_key'] ?? '' ) ) . '" data-service-key="' . esc_attr( (string) ( $rate['service_key'] ?? '' ) ) . '" data-rate-payload="' . esc_attr( $payload ) . '">';
 		echo '<label class="wdc-order-delivery-rate__header">';
 		echo '<input type="radio" name="wdc_order_delivery_preview_rate" value="' . esc_attr( $id ) . '">';
 		echo '<span class="wdc-order-delivery-rate__title">' . esc_html( (string) ( $rate['label'] ?? '' ) ) . '</span>';
@@ -73,7 +74,12 @@ final class OrderDeliveryRateRenderer {
 		}
 		$this->render_comments( is_array( $rate['comments'] ?? null ) ? $rate['comments'] : array() );
 		$this->render_tariffs( is_array( $rate['tariff_variants'] ?? null ) ? $rate['tariff_variants'] : array(), $id );
-		echo '<div class="wdc-order-delivery-rate__pickup-placeholder" data-wdc-pickup-placeholder hidden>' . esc_html__( 'Выбор ПВЗ будет добавлен следующим шагом.', 'walls-delivery-calc' ) . '</div>';
+		if ( $requires_pickup ) {
+			echo '<div class="wdc-order-delivery-rate__pickup-selector" data-wdc-pickup-selector hidden>';
+			echo '<div class="wdc-order-delivery-rate__pickup-status" data-wdc-selected-pickup-label>' . esc_html__( 'ПВЗ не выбран', 'walls-delivery-calc' ) . '</div>';
+			echo '<button type="button" class="button" data-wdc-open-pickup-picker>' . esc_html__( 'Выбрать ПВЗ', 'walls-delivery-calc' ) . '</button>';
+			echo '</div>';
+		}
 		echo '</article>';
 	}
 
@@ -88,8 +94,9 @@ final class OrderDeliveryRateRenderer {
 		echo '<div class="wdc-order-delivery-tariffs">';
 		foreach ( $tariffs as $tariff ) {
 			$object = (string) ( $tariff['object_code'] ?? '' );
+			$tariff_payload = $this->rate_payload_json( $tariff );
 			echo '<label class="wdc-order-delivery-tariff">';
-			echo '<input type="radio" name="wdc_order_delivery_preview_tariff_' . esc_attr( $group_id ) . '" value="' . esc_attr( $object ) . '">';
+			echo '<input type="radio" name="wdc_order_delivery_preview_tariff_' . esc_attr( $group_id ) . '" value="' . esc_attr( $object ) . '" data-tariff-payload="' . esc_attr( $tariff_payload ) . '">';
 			echo '<span class="wdc-order-delivery-tariff__title">' . esc_html( (string) ( $tariff['title'] ?? '' ) ) . '</span>';
 			if ( '' !== trim( (string) ( $tariff['delivery_comment'] ?? '' ) ) ) {
 				echo '<span class="wdc-order-delivery-tariff__delivery">' . esc_html( (string) $tariff['delivery_comment'] ) . '</span>';
@@ -121,5 +128,13 @@ final class OrderDeliveryRateRenderer {
 			DeliveryType::COURIER => 'Курьерская доставка',
 			default => 'Другие варианты',
 		};
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 */
+	private function rate_payload_json( array $payload ): string {
+		$encoded = json_encode( $payload, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT );
+		return false === $encoded ? '{}' : (string) $encoded;
 	}
 }
