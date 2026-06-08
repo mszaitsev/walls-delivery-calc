@@ -1,5 +1,7 @@
 # Project Status
 
+0.41.0 note: the first order-admin delivery recalculation foundation is implemented as preview-only UI. `Калькулятор доставок` can request a recalculation from the WooCommerce order, WDC builds a `QuoteRequest` from order items/address/meta, runs all available services through `CheckoutOrchestrator`, renders pickup/courier rates and Russian Post domestic tariff groups, and blocks preview when `_wdc_shipments` indicates an already created shipment. This version intentionally does not save delivery changes, replace shipping items, recalculate totals, change shipping address, select pickup points, override locations, create order notes, or update `_wdc_delivery_calculation_data`.
+
 0.40.0 note: documentation audit branch. No runtime functionality was added. The status below was refreshed against the current codebase, profile documents, migrations, assets and smoke-test entrypoints after the 0.39.x Russian Post shipment/status work.
 
 0.39.5 note: the same Russian Post actual-cost lookup now runs after ordinary automatic shipment creation from the order metabox. After a successful create response with barcode/tracking number, WDC safely calls `GET /1.0/backlog/search?query={barcode}`, extracts `total-rate-wo-vat + total-vat` through the shared actual-cost extractor, and stores source `backlog_search_after_create`. Lookup errors or missing totals do not fail shipment creation, do not create order notes, and do not show warnings.
@@ -18,12 +20,12 @@
 
 ## Общий статус
 
-- Текущая версия: `0.40.0`.
+- Текущая версия: `0.41.0`.
 - Текущая базовая ветка: `develop`.
-- Рабочая ветка аудита: `chore/project-status-refresh`.
+- Рабочая ветка: `feature/order-delivery-recalculation`.
 - Последнее обновление статуса: 2026-06-08.
 - Общая готовность проекта: примерно 72%.
-- Следующий рекомендуемый этап: `feature/order-delivery-recalculation` для пересчета доставки в админке заказа и управляемой замены shipping item.
+- Следующий рекомендуемый этап: продолжить `feature/order-delivery-recalculation` вторым patch: выбор/смена населенного пункта и ПВЗ, затем безопасная замена shipping item.
 
 ## Краткое резюме
 
@@ -44,7 +46,7 @@
 | Shipment Tracking | partial | 78% | Russian Post Tracking API refresh, mapper, universal status persistence and manual metabox refresh; no full status history UI. |
 | Shipment Autosync | partial | 75% | WP Cron/manual run, 6-hour interval, lock, diagnostics and Russian Post dispatch exist; only one carrier target and no advanced batching. |
 | Order Status Mapping | done | 80% | Carrier-neutral universal shipment status -> WooCommerce status mapping, custom statuses, terminal-status autosync handling and compact private notes. |
-| Checkout Integration | partial | 82% | WooCommerce method, city/location picker, sorting, tariff selector, courier validation, pickup map, order meta and calculation metabox; admin recalculation remains. |
+| Checkout Integration | partial | 84% | WooCommerce method, city/location picker, sorting, tariff selector, courier validation, pickup map, order meta, calculation metabox and preview-only admin recalculation foundation. |
 | Rule Engine | done | 88% | Conditions/groups, audit, price/days mutations, comments, service rules, simulation and packaging tab. |
 | International Shipping | partial | 75% | Russian Post international rates/country mapping/fallback work; no shipment creation/tracking/documents for international flow. |
 | Future Carriers | not-started | 0% | CDEK, DPD, Yandex Delivery, PEK, Energia, Aerogruz and Jet have no runtime adapters. |

@@ -1,5 +1,15 @@
 # Карта текущего кода
 
+## Order Delivery Recalculation 0.41.0
+
+- `src/Orders/Application/OrderQuoteRequestMapper.php` builds an admin recalculation `QuoteRequest` from a WooCommerce order: order items, product weights/dimensions, shipping country/city/postcode/address, payment method and existing WDC location/calculation meta fallbacks.
+- `src/Orders/Application/OrderDeliveryRecalculationService.php` owns preview-only recalculation. It blocks orders with `_wdc_shipments` created/registered/tracking/barcode/backlog data, calls `CheckoutOrchestrator`, and normalizes available rates for admin rendering without mutating the order.
+- `src/Orders/Admin/OrderDeliveryRecalculationAdminController.php` registers AJAX action `wdc_order_delivery_recalculate_preview`, checks nonce/capability, loads orders through `wc_get_order()`, and returns rendered preview HTML plus rate/request payloads.
+- `src/Orders/Admin/OrderDeliveryRateRenderer.php` renders admin pickup/courier rate groups, prices, crossed prices, comments and Russian Post domestic tariff rows. It intentionally leaves all radio buttons unchecked.
+- `src/Orders/Admin/OrderDeliveryMetabox.php` now shows `Пересчитать доставку` in `Калькулятор доставок`, or a readonly explanation when a shipment already blocks recalculation.
+- `assets/admin/order-delivery-recalculation.js` and `.css` provide the order-admin preview interaction. The JS loads preview HTML, keeps the initial state unselected, and shows only a placeholder for pickup selection.
+- `tests/orders/run-order-delivery-recalculation-smoke.php` covers shipment blocking, order-to-quote mapping, all-rates preview, Russian Post pickup/courier groups, security checks, and no mutation of shipping item/totals/calculation meta.
+
 ## Project Status Refresh 0.40.0
 
 - `docs/project-status.md` is the current source for readiness percentages, completed stages, known limitations, technical debt and roadmap after the 0.39.x Russian Post shipment/status work.

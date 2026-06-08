@@ -106,6 +106,10 @@ use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\Storage\RegionRepository;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
+use WallsShop\WDC\Orders\Admin\OrderDeliveryRateRenderer;
+use WallsShop\WDC\Orders\Admin\OrderDeliveryRecalculationAdminController;
+use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
+use WallsShop\WDC\Orders\Application\OrderQuoteRequestMapper;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Pickup\Admin\PickupAdminPage;
 use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
@@ -484,7 +488,11 @@ final class Plugin {
 				$this->container->get( RussianPostPickupPointTypeSettings::class )
 			)
 		);
-		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox() );
+		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper() );
+		$this->container->register( OrderDeliveryRecalculationService::class, fn(): OrderDeliveryRecalculationService => new OrderDeliveryRecalculationService( $this->container->get( OrderQuoteRequestMapper::class ), $this->container->get( CheckoutOrchestrator::class ), $this->container->get( OrderShipmentRepository::class ) ) );
+		$this->container->register( OrderDeliveryRateRenderer::class, fn(): OrderDeliveryRateRenderer => new OrderDeliveryRateRenderer() );
+		$this->container->register( OrderDeliveryRecalculationAdminController::class, fn(): OrderDeliveryRecalculationAdminController => new OrderDeliveryRecalculationAdminController( $this->container->get( OrderDeliveryRecalculationService::class ), $this->container->get( OrderDeliveryRateRenderer::class ), $this->environment->plugin_url(), $this->environment->version() ) );
+		$this->container->register( OrderDeliveryMetabox::class, fn(): OrderDeliveryMetabox => new OrderDeliveryMetabox( $this->container->get( OrderShipmentRepository::class ) ) );
 		$this->container->register( OrderShipmentsMetabox::class, fn(): OrderShipmentsMetabox => new OrderShipmentsMetabox( $this->container->get( OrderShipmentRepository::class ), $this->container->get( OrderShipmentDraftFactory::class ), $this->container->get( ShipmentCreationService::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( ShipmentStatusUpdateService::class ), $this->container->get( ShipmentBacklogService::class ), $this->container->get( RussianPostAddressNormalizer::class ), $this->container->get( RussianPostPickupPointTypeSettings::class ), $this->environment->plugin_url(), $this->environment->version() ) );
 		$this->container->register( ShipmentStatusesAdminPage::class, fn(): ShipmentStatusesAdminPage => new ShipmentStatusesAdminPage( $this->container->get( SettingsRepository::class ), $this->container->get( ShipmentStatusAutoSyncService::class ), $this->container->get( ShipmentOrderStatusMappingService::class ) ) );
 	}
@@ -518,6 +526,7 @@ final class Plugin {
 			$this->container->get( RulesAdminPage::class )->register();
 			$this->container->get( CheckoutSimulationPage::class )->register();
 			$this->container->get( PickupAdminPage::class )->register();
+			$this->container->get( OrderDeliveryRecalculationAdminController::class )->register();
 			$this->container->get( DeliveryServicesAdminPage::class )->register();
 			$this->container->get( ShipmentStatusesAdminPage::class )->register();
 			$this->container->get( OrderDeliveryMetabox::class )->register();

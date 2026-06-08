@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.40.0.
+Current plugin version: 0.41.0.
+
+Version 0.41.0 adds the first admin order delivery recalculation foundation. The WooCommerce order metabox `Калькулятор доставок` now has a preview-only `Пересчитать доставку` action that builds a quote request from the current order, blocks recalculation when `_wdc_shipments` shows an already created shipment, calculates all available delivery services through the existing checkout orchestrator, and renders pickup/courier rates plus Russian Post domestic tariff groups in the admin UI. This patch intentionally does not save a selected method, replace shipping items, recalculate totals, change shipping address, choose pickup points, override locations, add order notes, or update `_wdc_delivery_calculation_data`.
 
 Version 0.40.0 refreshes the project status documentation after a code/documentation audit. No runtime feature was added; `docs/project-status.md` now reflects the current Russian Post shipment lifecycle, autosync, order status mapping, actual-cost comparison, known limitations, technical debt and next roadmap.
 

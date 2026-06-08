@@ -1,0 +1,84 @@
+.wdc-order-delivery-recalculation {
+	margin-top: 12px;
+}
+
+.wdc-order-delivery-preview {
+	margin-top: 10px;
+}
+
+.wdc-order-delivery-preview__status {
+	margin: 8px 0;
+}
+
+.wdc-order-delivery-preview__status[data-status="loading"] {
+	color: #646970;
+}
+
+.wdc-order-delivery-preview__status[data-status="success"] {
+	color: #008a20;
+}
+
+.wdc-order-delivery-preview__status[data-status="error"] {
+	color: #b32d2e;
+}
+
+.wdc-order-delivery-rates__group {
+	margin-top: 12px;
+}
+
+.wdc-order-delivery-rates__group h4 {
+	margin: 10px 0 6px;
+	font-size: 13px;
+}
+
+.wdc-order-delivery-rate {
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	margin: 8px 0;
+	padding: 8px;
+	background: #fff;
+}
+
+.wdc-order-delivery-rate__header,
+.wdc-order-delivery-tariff {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	gap: 6px;
+	align-items: start;
+}
+
+.wdc-order-delivery-rate__title,
+.wdc-order-delivery-tariff__title {
+	font-weight: 600;
+}
+
+.wdc-order-delivery-rate__price,
+.wdc-order-delivery-tariff__price {
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.wdc-order-delivery-rate__crossed {
+	color: #646970;
+	text-decoration: line-through;
+	white-space: nowrap;
+}
+
+.wdc-order-delivery-rate__delivery,
+.wdc-order-delivery-rate__comment,
+.wdc-order-delivery-tariff__delivery,
+.wdc-order-delivery-rate__pickup-placeholder {
+	margin-top: 5px;
+	color: #646970;
+	font-size: 12px;
+}
+
+.wdc-order-delivery-tariffs {
+	margin-top: 8px;
+	padding-left: 20px;
+}
+
+.wdc-order-delivery-tariff {
+	margin: 6px 0;
+	font-size: 12px;
+}

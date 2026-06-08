@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Orders\Admin;
 
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
+use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -15,6 +16,12 @@ final class OrderDeliveryMetabox {
 		'_wdc_platform_rate_id',
 		'_wdc_platform_delivery_type',
 	);
+
+	public function __construct(
+		private ?OrderShipmentRepository $shipments = null
+	) {
+		$this->shipments = $this->shipments ?? new OrderShipmentRepository();
+	}
 
 	public function register(): void {
 		add_action( 'add_meta_boxes_woocommerce_page_wc-orders', array( $this, 'add_hpos_meta_box' ) );
@@ -38,16 +45,21 @@ final class OrderDeliveryMetabox {
 		$order = $this->resolve_order( $post_or_order );
 		if ( null === $order || ! $this->has_wdc_meta( $order ) ) {
 			echo '<p>' . esc_html__( 'Данные WDC для заказа не сохранены.', 'walls-delivery-calc' ) . '</p>';
+			if ( null !== $order ) {
+				$this->render_recalculation_preview_block( $order );
+			}
 			return;
 		}
 
 		$calculation = $this->calculation_data( $order );
 		if ( array() !== $calculation ) {
 			$this->render_calculation_data( $calculation );
+			$this->render_recalculation_preview_block( $order );
 			return;
 		}
 
 		$this->render_rows( $this->legacy_rows( $order ) );
+		$this->render_recalculation_preview_block( $order );
 	}
 
 	private function render_calculation_data( array $calculation ): void {
@@ -121,6 +133,44 @@ final class OrderDeliveryMetabox {
 			echo '<tr><th style="width:45%;text-align:left;">' . esc_html( (string) $label ) . '</th><td>' . esc_html( (string) $value ) . '</td></tr>';
 		}
 		echo '</tbody></table>';
+	}
+
+	private function render_recalculation_preview_block( object $order ): void {
+		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+			return;
+		}
+
+		echo '<div class="wdc-order-delivery-recalculation" data-wdc-order-delivery-recalculation>';
+		if ( $this->has_blocking_shipment( $order ) ) {
+			echo '<p class="description">' . esc_html__( 'Пересчет доставки недоступен: по заказу уже создано отправление.', 'walls-delivery-calc' ) . '</p>';
+			echo '</div>';
+			return;
+		}
+
+		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
+		echo '<p><button type="button" class="button" data-wdc-order-delivery-recalculate data-order-id="' . esc_html( (string) $order_id ) . '">' . esc_html__( 'Пересчитать доставку', 'walls-delivery-calc' ) . '</button></p>';
+		echo '<div class="wdc-order-delivery-preview" data-wdc-order-delivery-preview hidden>';
+		echo '<div class="wdc-order-delivery-preview__status" data-wdc-order-delivery-preview-status></div>';
+		echo '<div class="wdc-order-delivery-preview__content" data-wdc-order-delivery-preview-content></div>';
+		echo '</div>';
+		echo '</div>';
+	}
+
+	private function has_blocking_shipment( object $order ): bool {
+		$repository = $this->shipments ?? new OrderShipmentRepository();
+		foreach ( $repository->all_for_order( $order ) as $shipment ) {
+			if ( ! is_array( $shipment ) ) {
+				continue;
+			}
+			$status = (string) ( $shipment['status'] ?? '' );
+			$tracking = trim( (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
+			$backlog_order_id = trim( (string) ( $shipment['backlog_order_id'] ?? '' ) );
+			if ( in_array( $status, array( 'created', 'registered' ), true ) || '' !== $tracking || '' !== $backlog_order_id ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private function resolve_order( mixed $post_or_order ): ?object {
