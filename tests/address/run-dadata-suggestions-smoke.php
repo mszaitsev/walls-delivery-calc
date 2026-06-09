@@ -383,7 +383,7 @@ dadata_suggestions_assert( str_contains( $js, "usage_type: usageType || 'suggest
 dadata_suggestions_assert( ! str_contains( $js, 'house_after_street' ), 'Frontend suggestions JS must not automatically use house_after_street mode.' );
 dadata_suggestions_assert( ! str_contains( $js, 'selectedStreet' ), 'Frontend suggestions JS must not keep sticky selectedStreet state.' );
 dadata_suggestions_assert( ! str_contains( $js, 'Изменить улицу' ) && ! str_contains( $js, 'wdc-address-picker-change-street' ), 'Frontend suggestions JS must not show change-street mode UI.' );
-dadata_suggestions_assert( str_contains( $js, "var stage = 'address';" ), 'Frontend search stage must remain address after street selection and retyping.' );
+dadata_suggestions_assert( str_contains( $js, "var stage = state.awaitingFlatSelection ? 'address_next' : 'address';" ), 'Frontend search stage must use address_next only while typing flats after house selection.' );
 dadata_suggestions_assert( str_contains( $js, 'searchInput().val( ensureTrailingComma( item.unrestrictedValue || item.value || item.label || data.street_with_type || \'\' ) );' ), 'Selecting street must keep full visible query plus trailing comma.' );
 dadata_suggestions_assert( str_contains( $js, "shippingChecked && ( visibleUsable( selectorFor( 'shipping', 'address_1' )" ), 'activeCheckoutPrefix must use shipping only when shipping fields are visible and ship-to-different is checked.' );
 dadata_suggestions_assert( str_contains( $js, "firstUsable( activePrefix, 'address_1' )" ), 'renderDebugBlock must use the active checkout prefix.' );
@@ -393,6 +393,10 @@ dadata_suggestions_assert( str_contains( $js, 'firstUsable( prefix, \'city\' ).v
 dadata_suggestions_assert( str_contains( $js, "'manual'" ), 'Frontend must support manual fallback status.' );
 dadata_suggestions_assert( str_contains( $js, 'openingQuery' ), 'Frontend must build opening query from checkout fields.' );
 dadata_suggestions_assert( str_contains( $js, 'requestLowerLevelAfterHouse' ) && str_contains( $js, "request( 'address_next', query, prefix" ), 'House suggestion must request lower-level suggestions before finalizing.' );
+dadata_suggestions_assert( str_contains( $js, 'selectedHouseItem' ) && str_contains( $js, 'selectedHouseQuery' ) && str_contains( $js, 'selectedHouseContext' ) && str_contains( $js, 'awaitingFlatSelection' ) && str_contains( $js, 'nextLevelMode' ), 'Frontend must keep selected house state while looking up flats.' );
+dadata_suggestions_assert( str_contains( $js, "state.awaitingFlatSelection ? 'address_next' : 'address'" ) && str_contains( $js, 'state.selectedHouseContext' ), 'Frontend flat lookup mode must keep searching through address_next with selected house context.' );
+dadata_suggestions_assert( str_contains( $js, "flatQuery = ensureTrailingComma( query ) + 'кв ';" ), 'Frontend must seed the input with apartment prefix after selecting a house.' );
+dadata_suggestions_assert( str_contains( $js, 'Квартиры не найдены. Выберите из списка или продолжите ввод.' ) && str_contains( $js, 'clearHouseLookupState' ), 'Frontend must keep flat lookup mode from silently finalizing and must clear it explicitly.' );
 dadata_suggestions_assert( str_contains( $js, 'lowerLevelItems' ) && str_contains( $js, "applyResolved( prefix, item );" ), 'House suggestion must finalize only after lower-level suggestions are checked.' );
 dadata_suggestions_assert( str_contains( $js, 'renderResults( lower, query );' ), 'House suggestion with lower-level items must render flats/rooms instead of finalizing immediately.' );
 dadata_suggestions_assert( str_contains( $js, "'flat' === item.level || 'room' === item.level || 'premise' === item.level" ), 'Flat/room/premise suggestions must be final selectable levels.' );

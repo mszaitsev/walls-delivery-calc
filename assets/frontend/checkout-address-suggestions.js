@@ -151,10 +151,24 @@
 	function stateFor( prefix ) {
 		if ( ! addressPickerState[ prefix ] ) {
 			addressPickerState[ prefix ] = {
-				lastResolved: null
+				lastResolved: null,
+				selectedHouseItem: null,
+				selectedHouseQuery: '',
+				selectedHouseContext: {},
+				awaitingFlatSelection: false,
+				nextLevelMode: ''
 			};
 		}
 		return addressPickerState[ prefix ];
+	}
+
+	function clearHouseLookupState( prefix ) {
+		var state = stateFor( prefix );
+		state.selectedHouseItem = null;
+		state.selectedHouseQuery = '';
+		state.selectedHouseContext = {};
+		state.awaitingFlatSelection = false;
+		state.nextLevelMode = '';
 	}
 
 	function ensureHiddenFields( prefix ) {
@@ -456,7 +470,20 @@
 	function requestLowerLevelAfterHouse( prefix, item ) {
 		var data = item.data || {};
 		var query = item.unrestrictedValue || item.value || item.label || '';
-		searchInput().val( query );
+		var flatQuery = ensureTrailingComma( query ) + 'кв ';
+		var houseContext = {
+			selected_level: 'house',
+			desired_level: 'flat',
+			house_fias_id: data.house_fias_id || '',
+			house_kladr_id: data.house_kladr_id || ''
+		};
+		var state = stateFor( prefix );
+		state.selectedHouseItem = item;
+		state.selectedHouseQuery = query;
+		state.selectedHouseContext = houseContext;
+		state.awaitingFlatSelection = true;
+		state.nextLevelMode = 'address_next';
+		searchInput().val( flatQuery );
 		firstUsable( prefix, 'address_1' ).val( formatAddressWithoutRegionCity( data ) || query );
 		showHint( 'Уточните квартиру, корпус или помещение.' );
 		log( 'lower-level request after house selection', { query: query } );
@@ -467,13 +494,16 @@
 				showHint( 'Уточните квартиру, корпус или помещение.' );
 				return;
 			}
+			clearHouseLookupState( prefix );
 			applyResolved( prefix, item );
-		}, {
-			selected_level: 'house',
-			desired_level: 'flat',
-			house_fias_id: data.house_fias_id || '',
-			house_kladr_id: data.house_kladr_id || ''
-		} );
+		}, houseContext );
+		window.setTimeout( function () {
+			searchInput().trigger( 'focus' );
+			var input = searchInput()[0];
+			if ( input && input.setSelectionRange ) {
+				input.setSelectionRange( input.value.length, input.value.length );
+			}
+		}, 20 );
 	}
 
 	function trackSelectionUsage( item, usageType ) {
@@ -535,8 +565,9 @@
 		window.clearTimeout( debounceTimer );
 		debounceTimer = window.setTimeout( function () {
 			var prefix = activePrefix;
+			var state = stateFor( prefix );
 			var query = String( searchInput().val() || '' );
-			var stage = 'address';
+			var stage = state.awaitingFlatSelection ? 'address_next' : 'address';
 			log( 'modal search input', { query: query, stage: stage } );
 			if ( query.trim().length < minChars() ) {
 				resultsBox().empty();
@@ -553,8 +584,19 @@
 					renderUnavailable( query, body.error_code );
 					return;
 				}
+				if ( state.awaitingFlatSelection ) {
+					var lower = lowerLevelItems( items );
+					if ( lower.length ) {
+						renderResults( lower, query );
+						showHint( 'Уточните квартиру, корпус или помещение.' );
+						return;
+					}
+					resultsBox().html( '<div class="wdc-address-picker-empty">Квартиры не найдены. Выберите из списка или продолжите ввод.</div>' );
+					showHint( 'Уточните квартиру, корпус или помещение.' );
+					return;
+				}
 				renderResults( items, query );
-			} );
+			}, state.awaitingFlatSelection ? state.selectedHouseContext : null );
 		}, debounceDelay );
 	}
 
@@ -583,6 +625,7 @@
 	}
 
 	function closeAddressPicker() {
+		clearHouseLookupState( activePrefix );
 		pickerOpen = false;
 		debugState.modalOpened = 'no';
 		renderDebugBlock();
@@ -595,6 +638,7 @@
 		var prefix = activePrefix;
 		var data = item.data || {};
 		if ( 'street' === item.level ) {
+			clearHouseLookupState( prefix );
 			firstUsable( prefix, 'address_1' ).val( ( data.street_with_type || item.value || '' ) + ' ' );
 			setHiddenData( prefix, item, 'street_selected' );
 			hidden( prefix, 'dadata_house' ).val( '' );
@@ -615,6 +659,7 @@
 		}
 		if ( 'flat' === item.level || 'room' === item.level || 'premise' === item.level ) {
 			log( 'final address selected', item );
+			clearHouseLookupState( prefix );
 			applyResolved( prefix, item );
 		}
 	}
@@ -641,6 +686,7 @@
 		firstUsable( prefix, 'address_2' ).val( '' );
 		setHiddenData( prefix, item, 'resolved' );
 		stateFor( prefix ).lastResolved = item;
+		clearHouseLookupState( prefix );
 		trackSelectionUsage( item, 'final_selection' );
 		closeAddressPicker();
 		showSelectedNotice( prefix, 'Адрес выбран: ' + ( item.label || item.value || '' ) );
@@ -655,6 +701,7 @@
 			return;
 		}
 		firstUsable( prefix, 'address_1' ).val( value );
+		clearHouseLookupState( prefix );
 		clearAddressHidden( prefix );
 		hidden( prefix, 'dadata_status' ).val( 'manual' );
 		hidden( prefix, 'dadata_unrestricted_value' ).val( value );
