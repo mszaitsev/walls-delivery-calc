@@ -218,7 +218,9 @@
 			city_kladr_id: hidden( prefix, 'dadata_city_kladr_id' ).val() || '',
 			city_fias_id: hidden( prefix, 'dadata_city_fias_id' ).val() || '',
 			settlement_kladr_id: hidden( prefix, 'dadata_settlement_kladr_id' ).val() || '',
-			settlement_fias_id: hidden( prefix, 'dadata_settlement_fias_id' ).val() || ''
+			settlement_fias_id: hidden( prefix, 'dadata_settlement_fias_id' ).val() || '',
+			selected_display_name: globalHiddenValue( 'wdc_platform_location_display_name' ),
+			city: firstUsable( prefix, 'city' ).val() || ''
 		};
 	}
 
@@ -272,6 +274,9 @@
 		}
 		if ( data.block ) {
 			parts.push( String( ( data.block_type || 'к' ) + ' ' + data.block ).trim() );
+		}
+		if ( data.flat ) {
+			parts.push( String( ( data.flat_type || 'кв' ) + ' ' + data.flat ).trim() );
 		}
 		return parts.join( ', ' );
 	}
@@ -595,9 +600,7 @@
 			firstUsable( prefix, 'postcode' ).val( data.postal_code );
 			setGlobalHidden( 'wdc_platform_location_postcode', data.postal_code );
 		}
-		if ( data.flat && ! firstUsable( prefix, 'address_2' ).val() ) {
-			firstUsable( prefix, 'address_2' ).val( data.flat );
-		}
+		firstUsable( prefix, 'address_2' ).val( '' );
 		setHiddenData( prefix, item, 'resolved' );
 		stateFor( prefix ).lastResolved = item;
 		trackSelectionUsage( item, 'final_selection' );
