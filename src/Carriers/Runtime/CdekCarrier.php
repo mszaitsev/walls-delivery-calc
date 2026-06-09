@@ -73,8 +73,9 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		try {
 			$result = $this->client->tariffList( $payload );
 		} catch ( CdekApiException $exception ) {
-			$this->logger->warning( 'CDEK tarifflist failed.', array( 'message' => $exception->getMessage(), 'delivery_type' => $delivery_type ) );
-			return $this->empty_quote( $request, 'api_error', array( 'message' => $exception->getMessage() ) );
+			$details = array_merge( $exception->details(), array( 'delivery_type' => $delivery_type ) );
+			$this->logger->warning( 'CDEK tarifflist failed.', $details );
+			return $this->empty_quote( $request, 'api_error', array( 'message' => $exception->getMessage(), 'api_error_details' => $details ) );
 		}
 
 		$rates = array();

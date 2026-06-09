@@ -68,6 +68,16 @@ function delete_transient( string $key ): bool { unset( $GLOBALS['wdc_cdek_tarif
 function sanitize_key( string $key ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( $key ) ) ?? ''; }
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
+function wc_get_logger(): object {
+	return new class {
+		/**
+		 * @param array<string,mixed> $context
+		 */
+		public function log( string $level, string $message, array $context = array() ): void {
+			$GLOBALS['wdc_cdek_tariff_logs'][] = compact( 'level', 'message', 'context' );
+		}
+	};
+}
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -154,7 +164,7 @@ final class CdekTariffFakeHttpClient implements CdekHttpClientInterface {
 		}
 		if ( str_contains( $url, '/v2/calculator/tarifflist' ) ) {
 			if ( $this->tariff_error ) {
-				return new CdekApiResponse( 400, (string) json_encode( array( 'message' => 'bad route' ) ) );
+				return new CdekApiResponse( 400, (string) json_encode( array( 'code' => 'INVALID_ROUTE', 'message' => 'bad route', 'Account' => 'account-id', 'access_token' => 'runtime-token' ) ) );
 			}
 			return new CdekApiResponse(
 				200,
@@ -327,5 +337,26 @@ cdek_tariff_assert( count( array_filter( $preview['rates'], static fn( array $ra
 
 $serialized_meta = json_encode( $pickup_rate->meta, JSON_UNESCAPED_UNICODE );
 cdek_tariff_assert( is_string( $serialized_meta ) && ! str_contains( $serialized_meta, 'secure-password' ) && ! str_contains( $serialized_meta, 'runtime-token' ), 'CDEK saved meta/debug must not include secret or token.' );
+
+$error_http = new CdekTariffFakeHttpClient();
+$error_http->tariff_error = true;
+$GLOBALS['wdc_cdek_tariff_logs'] = array();
+[ , , $error_carrier ] = cdek_tariff_settings( $error_http, true );
+$error_quote = $error_carrier->quote( cdek_tariff_request( DeliveryType::PICKUP ) );
+$details = is_array( $error_quote->raw_reference['api_error_details'] ?? null ) ? $error_quote->raw_reference['api_error_details'] : array();
+cdek_tariff_assert( 'api_error' === $error_quote->error_code, 'CDEK tarifflist API error must produce an empty quote with api_error.' );
+cdek_tariff_assert( 400 === (int) ( $details['http_code'] ?? 0 ), 'CDEK API error diagnostics must include HTTP status code.' );
+cdek_tariff_assert( '/v2/calculator/tarifflist' === (string) ( $details['endpoint'] ?? '' ), 'CDEK API error diagnostics must include endpoint.' );
+cdek_tariff_assert( 270 === (int) ( $details['request']['from_location']['code'] ?? 0 ), 'CDEK API error diagnostics must include sanitized request payload.' );
+cdek_tariff_assert( 'INVALID_ROUTE' === (string) ( $details['cdek_error_code'] ?? '' ), 'CDEK API error diagnostics must include CDEK error code.' );
+cdek_tariff_assert( 'bad route' === (string) ( $details['cdek_error_message'] ?? '' ), 'CDEK API error diagnostics must include CDEK error message.' );
+cdek_tariff_assert( '[redacted]' === (string) ( $details['response']['Account'] ?? '' ), 'CDEK API error diagnostics must redact Account.' );
+cdek_tariff_assert( '[redacted]' === (string) ( $details['response']['access_token'] ?? '' ), 'CDEK API error diagnostics must redact access_token.' );
+$error_log = end( $GLOBALS['wdc_cdek_tariff_logs'] );
+cdek_tariff_assert( is_array( $error_log ) && 'CDEK tarifflist failed.' === (string) ( $error_log['message'] ?? '' ), 'CDEK tarifflist failure must be written to WooCommerce log.' );
+cdek_tariff_assert( 400 === (int) ( $error_log['context']['http_code'] ?? 0 ), 'CDEK tarifflist log must include HTTP status code.' );
+cdek_tariff_assert( DeliveryType::PICKUP === (string) ( $error_log['context']['delivery_type'] ?? '' ), 'CDEK tarifflist log must include delivery type.' );
+$serialized_error_debug = json_encode( array( $details, $error_log ), JSON_UNESCAPED_UNICODE );
+cdek_tariff_assert( is_string( $serialized_error_debug ) && ! str_contains( $serialized_error_debug, 'runtime-token' ) && ! str_contains( $serialized_error_debug, 'secure-password' ) && ! str_contains( $serialized_error_debug, 'account-id' ), 'CDEK tarifflist diagnostics must not expose token, secret, or account.' );
 
 echo "CDEK tariff calculation smoke test passed.\n";

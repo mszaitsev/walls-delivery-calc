@@ -79,8 +79,18 @@ final class CdekApiClient {
 		$response = $this->http->request( $method, $url, $args );
 		$data = $response->json();
 		if ( $response->status_code < 200 || $response->status_code >= 300 ) {
-			$message = (string) ( $data['message'] ?? $data['error_description'] ?? $data['error'] ?? 'CDEK request failed.' );
-			throw new CdekApiException( $this->safeMessage( $message, $response->status_code ) );
+			$message = $this->extractErrorMessage( $data, $response->status_code );
+			throw new CdekApiException(
+				$this->safeMessage( $message, $response->status_code ),
+				array(
+					'http_code' => $response->status_code,
+					'endpoint' => $path,
+					'request' => $this->sanitizeForDiagnostics( array() !== $payload ? $payload : $query ),
+					'response' => $this->sanitizeForDiagnostics( array() !== $data ? $data : array( '_raw' => $this->safeMessage( $response->body, $response->status_code ) ) ),
+					'cdek_error_code' => $this->extractErrorCode( $data ),
+					'cdek_error_message' => $this->safeMessage( $message, $response->status_code ),
+				)
+			);
 		}
 
 		return array(
@@ -96,5 +106,52 @@ final class CdekApiClient {
 		}
 
 		return substr( $message, 0, 180 );
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function extractErrorMessage( array $data, int $statusCode ): string {
+		$errors = is_array( $data['errors'] ?? null ) ? $data['errors'] : array();
+		$first_error = is_array( $errors[0] ?? null ) ? $errors[0] : array();
+		$message = (string) ( $data['message'] ?? $data['error_description'] ?? $first_error['message'] ?? $data['error'] ?? '' );
+
+		return '' !== trim( $message ) ? $message : 'HTTP ' . $statusCode;
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function extractErrorCode( array $data ): string {
+		$errors = is_array( $data['errors'] ?? null ) ? $data['errors'] : array();
+		$first_error = is_array( $errors[0] ?? null ) ? $errors[0] : array();
+
+		return (string) ( $data['code'] ?? $data['error_code'] ?? $first_error['code'] ?? $data['error'] ?? '' );
+	}
+
+	/**
+	 * @param mixed $value
+	 * @return mixed
+	 */
+	private function sanitizeForDiagnostics( mixed $value ): mixed {
+		if ( is_array( $value ) ) {
+			$sanitized = array();
+			foreach ( $value as $key => $item ) {
+				$key_text = strtolower( (string) $key );
+				if ( in_array( $key_text, array( 'access_token', 'authorization', 'client_secret', 'secure_password', 'account' ), true ) ) {
+					$sanitized[ $key ] = '[redacted]';
+					continue;
+				}
+				$sanitized[ $key ] = $this->sanitizeForDiagnostics( $item );
+			}
+
+			return $sanitized;
+		}
+
+		if ( is_string( $value ) && strlen( $value ) > 1000 ) {
+			return substr( $value, 0, 1000 ) . '...';
+		}
+
+		return $value;
 	}
 }
