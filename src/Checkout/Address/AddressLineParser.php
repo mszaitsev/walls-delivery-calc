@@ -108,6 +108,11 @@ final class AddressLineParser {
 			$flat_type = trim( (string) ( $data['flat_type'] ?? $data['flat_type_full'] ?? 'кв' ) );
 			$parts[] = trim( $flat_type . ' ' . $flat );
 		}
+		$room = trim( (string) ( $data['room'] ?? $data['room_number'] ?? $data['premise'] ?? '' ) );
+		if ( '' !== $room ) {
+			$room_type = trim( (string) ( $data['room_type'] ?? $data['room_type_full'] ?? $data['premise_type'] ?? 'пом' ) );
+			$parts[] = trim( $room_type . ' ' . $room );
+		}
 
 		return implode( ', ', array_values( array_filter( $parts, static fn( string $part ): bool => '' !== trim( $part ) ) ) );
 	}

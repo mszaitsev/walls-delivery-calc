@@ -63,7 +63,7 @@ final class AddressSuggestionNormalizer {
 			'city', 'city_with_type', 'city_fias_id', 'city_kladr_id',
 			'settlement', 'settlement_with_type', 'settlement_fias_id', 'settlement_kladr_id',
 			'street', 'street_with_type', 'street_fias_id', 'street_kladr_id',
-			'house', 'house_type', 'house_type_full', 'house_fias_id', 'house_kladr_id', 'block', 'block_type', 'block_type_full', 'stead', 'stead_type', 'flat', 'flat_type', 'flat_type_full',
+			'house', 'house_type', 'house_type_full', 'house_fias_id', 'house_kladr_id', 'block', 'block_type', 'block_type_full', 'stead', 'stead_type', 'flat', 'flat_type', 'flat_type_full', 'room', 'room_type', 'room_type_full', 'room_number', 'premise', 'premise_type',
 			'fias_id', 'kladr_id', 'postal_code',
 		);
 
@@ -79,6 +79,9 @@ final class AddressSuggestionNormalizer {
 	 * @param array<string,mixed> $data
 	 */
 	private function level( array $data, string $fias_level ): string {
+		if ( '' !== (string) ( $data['room'] ?? '' ) || '' !== (string) ( $data['room_number'] ?? '' ) || '' !== (string) ( $data['premise'] ?? '' ) ) {
+			return 'room';
+		}
 		if ( '9' === $fias_level || '' !== (string) ( $data['flat'] ?? '' ) ) {
 			return 'flat';
 		}
@@ -107,8 +110,9 @@ final class AddressSuggestionNormalizer {
 			|| '' !== (string) ( $data['house_kladr_id'] ?? '' )
 			|| '' !== (string) ( $data['stead'] ?? '' );
 		$has_street = '' !== (string) ( $data['street'] ?? '' ) || '' !== (string) ( $data['street_with_type'] ?? '' );
+		$has_lower_level = '' !== (string) ( $data['flat'] ?? '' ) || '' !== (string) ( $data['room'] ?? '' ) || '' !== (string) ( $data['room_number'] ?? '' ) || '' !== (string) ( $data['premise'] ?? '' );
 
-		return ( $has_house && $has_street ) || in_array( $fias_level, array( '8', '9', '75' ), true );
+		return ( $has_house && $has_street ) || $has_lower_level || in_array( $fias_level, array( '8', '9', '75' ), true );
 	}
 
 	/**

@@ -213,8 +213,8 @@
 		hidden( prefix, 'dadata_fias_level' ).val( item ? item.fiasLevel || '' : '' );
 	}
 
-	function context( prefix ) {
-		return {
+	function context( prefix, extra ) {
+		var base = {
 			city_kladr_id: hidden( prefix, 'dadata_city_kladr_id' ).val() || '',
 			city_fias_id: hidden( prefix, 'dadata_city_fias_id' ).val() || '',
 			settlement_kladr_id: hidden( prefix, 'dadata_settlement_kladr_id' ).val() || '',
@@ -222,6 +222,11 @@
 			selected_display_name: globalHiddenValue( 'wdc_platform_location_display_name' ),
 			city: firstUsable( prefix, 'city' ).val() || ''
 		};
+		extra = extra || {};
+		Object.keys( extra ).forEach( function ( key ) {
+			base[ key ] = extra[ key ];
+		} );
+		return base;
 	}
 
 	function openingQuery( prefix ) {
@@ -277,6 +282,9 @@
 		}
 		if ( data.flat ) {
 			parts.push( String( ( data.flat_type || 'кв' ) + ' ' + data.flat ).trim() );
+		}
+		if ( data.room || data.room_number || data.premise ) {
+			parts.push( String( ( data.room_type || data.premise_type || 'пом' ) + ' ' + ( data.room || data.room_number || data.premise ) ).trim() );
 		}
 		return parts.join( ', ' );
 	}
@@ -408,20 +416,20 @@
 		notice.text( message );
 	}
 
-	function request( stage, query, prefix, done ) {
+	function request( stage, query, prefix, done, extraContext ) {
 		debugState.lastStage = stage;
 		debugState.lastQuery = query;
 		debugState.lastAjaxStatus = 'pending';
 		renderDebugBlock();
 		log( 'stage', { stage: stage } );
 		log( 'query', { query: query } );
-		log( 'ajax request start', { stage: stage, query: query, context: context( prefix ) } );
+		log( 'ajax request start', { stage: stage, query: query, context: context( prefix, extraContext ) } );
 		$.post( config.ajax_url || '', {
 			action: config.action || 'wdc_platform_dadata_address_suggest',
 			nonce: config.nonce || '',
 			stage: stage,
 			query: query,
-			context: context( prefix )
+			context: context( prefix, extraContext )
 		} ).done( function ( response ) {
 			var body = response && response.data ? response.data : response;
 			var items = body && body.items ? body.items : [];
@@ -436,6 +444,35 @@
 			renderDebugBlock();
 			log( 'ajax fail', { status: xhr && xhr.status ? xhr.status : 0 } );
 			done( [], {} );
+		} );
+	}
+
+	function lowerLevelItems( items ) {
+		return items.filter( function ( item ) {
+			return 'flat' === item.level || 'room' === item.level || 'premise' === item.level;
+		} );
+	}
+
+	function requestLowerLevelAfterHouse( prefix, item ) {
+		var data = item.data || {};
+		var query = item.unrestrictedValue || item.value || item.label || '';
+		searchInput().val( query );
+		firstUsable( prefix, 'address_1' ).val( formatAddressWithoutRegionCity( data ) || query );
+		showHint( 'Уточните квартиру, корпус или помещение.' );
+		log( 'lower-level request after house selection', { query: query } );
+		request( 'address_next', query, prefix, function ( items ) {
+			var lower = lowerLevelItems( items );
+			if ( lower.length ) {
+				renderResults( lower, query );
+				showHint( 'Уточните квартиру, корпус или помещение.' );
+				return;
+			}
+			applyResolved( prefix, item );
+		}, {
+			selected_level: 'house',
+			desired_level: 'flat',
+			house_fias_id: data.house_fias_id || '',
+			house_kladr_id: data.house_kladr_id || ''
 		} );
 	}
 
@@ -571,13 +608,14 @@
 			scheduleModalSearch();
 			return;
 		}
-		if ( 'house' === item.level || 'flat' === item.level ) {
+		if ( 'house' === item.level ) {
 			log( 'house selected', item );
-			log( 'resolve request start', { query: item.unrestrictedValue || item.value || '' } );
-			request( 'resolve', item.unrestrictedValue || item.value || '', prefix, function ( items ) {
-				log( 'resolve request success', { count: items.length } );
-				applyResolved( prefix, items[0] || item );
-			} );
+			requestLowerLevelAfterHouse( prefix, item );
+			return;
+		}
+		if ( 'flat' === item.level || 'room' === item.level || 'premise' === item.level ) {
+			log( 'final address selected', item );
+			applyResolved( prefix, item );
 		}
 	}
 

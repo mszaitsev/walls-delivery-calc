@@ -87,6 +87,7 @@ final class AddressSuggestionService {
 				'debug' => $this->debug( $stage, $attempt['query'], $attempt['context'], $response ) + array(
 					'query_variants' => $attempt_debug,
 					'flat_restored_from_input' => '' !== $flat['flat'] && $this->has_restored_flat( $items, $flat['flat'] ),
+					'selected_variant' => $attempt['variant'],
 				),
 			);
 			if ( null === $first_success ) {
@@ -186,10 +187,13 @@ final class AddressSuggestionService {
 			'context' => array(
 				'city_kladr_id' => (string) ( $context['city_kladr_id'] ?? '' ),
 				'street_fias_id' => (string) ( $context['street_fias_id'] ?? '' ),
+				'house_fias_id' => (string) ( $context['house_fias_id'] ?? '' ),
+				'selected_level' => (string) ( $context['selected_level'] ?? '' ),
+				'desired_level' => (string) ( $context['desired_level'] ?? '' ),
 			),
+			'context_keys' => array_values( array_keys( array_filter( $context, static fn( string $value ): bool => '' !== trim( $value ) ) ) ),
 			'suggestions_count' => count( is_array( $response['suggestions'] ?? null ) ? $response['suggestions'] : array() ),
 			'status_code' => (int) ( $response['status_code'] ?? 0 ),
-			'request_body' => is_array( $response['body'] ?? null ) ? $response['body'] : array(),
 		);
 	}
 }

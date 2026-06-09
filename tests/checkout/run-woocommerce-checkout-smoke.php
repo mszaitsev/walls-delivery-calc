@@ -327,6 +327,7 @@ $with_flat = $suggestions->suggest( 'address', 'Новосибирск, некр
 $with_flat_item = $with_flat['items'][0] ?? array();
 wc_checkout_smoke_assert( true === ( $with_flat['success'] ?? false ) && true === ( $with_flat_item['isDeliverable'] ?? false ), 'Checkout address suggestions must normalize address with apartment.' );
 wc_checkout_smoke_assert( str_contains( (string) ( $with_flat_item['label'] ?? '' ), 'Некрасова' ) && str_contains( (string) ( $with_flat_item['label'] ?? '' ), '63/1' ) && str_contains( (string) ( $with_flat_item['label'] ?? '' ), 'кв 10' ), 'Checkout address suggestion label must include street, house and flat.' );
+wc_checkout_smoke_assert( ! isset( $with_flat['debug']['request_body'] ) && ! str_contains( json_encode( $with_flat['debug'] ?? array() ) ?: '', 'Authorization' ), 'Checkout address suggestions debug must not expose request body or secrets.' );
 $restored_flat = $suggestions->suggest( 'address', 'некрасова 63/1 кв 1', array( 'country_code' => 'RU', 'selected_display_name' => 'Новосибирск', 'city' => 'Новосибирск' ) );
 $restored_item = $restored_flat['items'][0] ?? array();
 wc_checkout_smoke_assert( true === ( $restored_item['isDeliverable'] ?? false ) && '1' === (string) ( $restored_item['data']['flat'] ?? '' ) && str_contains( (string) ( $restored_item['label'] ?? '' ), 'кв 1' ), 'Checkout address suggestions must restore flat from input when DaData omits flat.' );
