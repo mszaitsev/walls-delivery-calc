@@ -25,6 +25,12 @@ final class CdekSettings {
 	public const LAST_CONNECTION_CHECK_KEY = 'cdek_last_connection_check';
 	public const LAST_CONNECTION_STATUS_KEY = 'cdek_last_connection_status';
 	public const LAST_CONNECTION_MESSAGE_KEY = 'cdek_last_connection_message';
+	public const SENDER_CITY_CODE_KEY = 'cdek_sender_city_code';
+	public const SENDER_POSTAL_CODE_KEY = 'cdek_sender_postal_code';
+	public const SENDER_CITY_NAME_KEY = 'cdek_sender_city_name';
+	public const DEFAULT_PACKAGE_LENGTH_CM_KEY = 'cdek_default_package_length_cm';
+	public const DEFAULT_PACKAGE_WIDTH_CM_KEY = 'cdek_default_package_width_cm';
+	public const DEFAULT_PACKAGE_HEIGHT_CM_KEY = 'cdek_default_package_height_cm';
 
 	public function __construct(
 		private SettingsRepository $settings,
@@ -45,6 +51,12 @@ final class CdekSettings {
 			self::LAST_CONNECTION_CHECK_KEY => '',
 			self::LAST_CONNECTION_STATUS_KEY => '',
 			self::LAST_CONNECTION_MESSAGE_KEY => '',
+			self::SENDER_CITY_CODE_KEY => '',
+			self::SENDER_POSTAL_CODE_KEY => '',
+			self::SENDER_CITY_NAME_KEY => '',
+			self::DEFAULT_PACKAGE_LENGTH_CM_KEY => 20,
+			self::DEFAULT_PACKAGE_WIDTH_CM_KEY => 20,
+			self::DEFAULT_PACKAGE_HEIGHT_CM_KEY => 10,
 		);
 	}
 
@@ -90,6 +102,29 @@ final class CdekSettings {
 		return $this->credentials()->is_complete();
 	}
 
+	public function sender_city_code(): int {
+		return max( 0, $this->settings->get_int( self::SENDER_CITY_CODE_KEY, 0 ) );
+	}
+
+	public function sender_postal_code(): string {
+		return $this->valid_postal_code( $this->settings->get_string( self::SENDER_POSTAL_CODE_KEY, '' ) );
+	}
+
+	public function sender_city_name(): string {
+		return trim( $this->settings->get_string( self::SENDER_CITY_NAME_KEY, '' ) );
+	}
+
+	/**
+	 * @return array{length:int,width:int,height:int}
+	 */
+	public function default_package_dimensions_cm(): array {
+		return array(
+			'length' => max( 1, $this->settings->get_int( self::DEFAULT_PACKAGE_LENGTH_CM_KEY, 20 ) ),
+			'width' => max( 1, $this->settings->get_int( self::DEFAULT_PACKAGE_WIDTH_CM_KEY, 20 ) ),
+			'height' => max( 1, $this->settings->get_int( self::DEFAULT_PACKAGE_HEIGHT_CM_KEY, 10 ) ),
+		);
+	}
+
 	public function token_cache_key(): string {
 		return $this->token_cache_key_for_environment( $this->environment() );
 	}
@@ -118,6 +153,12 @@ final class CdekSettings {
 		$this->settings->set( self::ENVIRONMENT_KEY, $environment );
 		$this->save_credentials_for_environment( self::ENV_TEST, $input );
 		$this->save_credentials_for_environment( self::ENV_PRODUCTION, $input );
+		$this->settings->set( self::SENDER_CITY_CODE_KEY, max( 0, (int) ( $input[ self::SENDER_CITY_CODE_KEY ] ?? 0 ) ) );
+		$this->settings->set( self::SENDER_POSTAL_CODE_KEY, $this->valid_postal_code( (string) wp_unslash( $input[ self::SENDER_POSTAL_CODE_KEY ] ?? '' ) ) );
+		$this->settings->set( self::SENDER_CITY_NAME_KEY, sanitize_text_field( wp_unslash( $input[ self::SENDER_CITY_NAME_KEY ] ?? '' ) ) );
+		$this->settings->set( self::DEFAULT_PACKAGE_LENGTH_CM_KEY, max( 1, (int) ( $input[ self::DEFAULT_PACKAGE_LENGTH_CM_KEY ] ?? 20 ) ) );
+		$this->settings->set( self::DEFAULT_PACKAGE_WIDTH_CM_KEY, max( 1, (int) ( $input[ self::DEFAULT_PACKAGE_WIDTH_CM_KEY ] ?? 20 ) ) );
+		$this->settings->set( self::DEFAULT_PACKAGE_HEIGHT_CM_KEY, max( 1, (int) ( $input[ self::DEFAULT_PACKAGE_HEIGHT_CM_KEY ] ?? 10 ) ) );
 	}
 
 	public function save_connection_result( bool $success, string $message ): void {
@@ -199,5 +240,11 @@ final class CdekSettings {
 
 	private function normalize_environment( string $environment ): string {
 		return self::ENV_PRODUCTION === $environment ? self::ENV_PRODUCTION : self::ENV_TEST;
+	}
+
+	private function valid_postal_code( string $postal_code ): string {
+		$postal_code = preg_replace( '/\D+/', '', $postal_code ) ?? '';
+
+		return preg_match( '/^\d{6}$/', $postal_code ) ? $postal_code : '';
 	}
 }

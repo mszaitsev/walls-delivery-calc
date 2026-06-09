@@ -166,9 +166,12 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		$output = array();
 		foreach ( $rates as $rate ) {
 			if ( $rate instanceof DeliveryRate && ! empty( $rate->meta['tariff_selector_group'] ) ) {
-				$group_id = RussianPostDomesticSettings::CARRIER_KEY === $rate->carrier_key
-					? RussianPostDomesticSettings::checkout_group_id( $rate->delivery_type )
-					: $rate->service_key;
+				$group_id = (string) ( $rate->meta['checkout_group_id'] ?? '' );
+				if ( '' === $group_id ) {
+					$group_id = RussianPostDomesticSettings::CARRIER_KEY === $rate->carrier_key
+						? RussianPostDomesticSettings::checkout_group_id( $rate->delivery_type )
+						: $rate->service_key . ':' . $rate->delivery_type;
+				}
 				$grouped[ $group_id ][] = $rate;
 				continue;
 			}
@@ -251,7 +254,7 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 				$active->meta,
 				array(
 					'tariff_variants' => $variants,
-					'domestic_tariff_grouped' => true,
+					'domestic_tariff_grouped' => RussianPostDomesticSettings::CARRIER_KEY === $active->carrier_key,
 					'checkout_group_id' => $group_id,
 					'pickup_method_title' => (string) ( $active->meta['pickup_method_title'] ?? RussianPostDomesticSettings::PICKUP_SERVICE_TITLE ),
 					'courier_method_title' => (string) ( $active->meta['courier_method_title'] ?? RussianPostDomesticSettings::COURIER_SERVICE_TITLE ),
@@ -278,6 +281,10 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 
 			return $prefix . ', ' . $rate_label;
 		}
+		$prefix = $this->domestic_method_prefix( $rate );
+		if ( '' !== $prefix ) {
+			return $prefix;
+		}
 		$tariff = trim( $rate->tariff_name );
 		if ( '' === $tariff ) {
 			$title = $rate->service_name;
@@ -294,7 +301,11 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		$default = DeliveryType::COURIER === $rate->delivery_type ? RussianPostDomesticSettings::COURIER_SERVICE_TITLE : RussianPostDomesticSettings::PICKUP_SERVICE_TITLE;
 		$title = trim( (string) ( $rate->meta[ $key ] ?? '' ) );
 
-		return '' !== $title ? $title : $default;
+		if ( RussianPostDomesticSettings::CARRIER_KEY === $rate->carrier_key ) {
+			return '' !== $title ? $title : $default;
+		}
+
+		return $title;
 	}
 
 	private function delivery_comment( DateRange $range ): string {

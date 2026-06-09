@@ -261,11 +261,12 @@ final class OrderShippingMetaPersister {
 		$final_weight = (int) ( $rate_meta['package_weight_with_packaging_g'] ?? $package['total_weight_g'] ?? $package['weight_g'] ?? 0 );
 
 		return array(
-			'products_weight_g'          => (int) ( $rate_meta['products_weight_g'] ?? $package['weight_g'] ?? $final_weight ),
-			'packaging_weight_g'         => (int) ( $rate_meta['packaging_weight_g'] ?? 0 ),
+			'products_weight_g'          => (int) ( $rate_meta['products_weight_g'] ?? $package['items_weight_g'] ?? $package['weight_g'] ?? $final_weight ),
+			'packaging_weight_g'         => (int) ( $rate_meta['packaging_weight_g'] ?? $package['packaging_weight_g'] ?? 0 ),
 			'final_weight_g'             => $final_weight,
 			'include_packaging_weight'   => ! empty( $rate_meta['include_packaging_weight'] ),
 			'packaging_weight_mode'      => (string) ( $rate_meta['packaging_weight_mode'] ?? '' ),
+			'dimensions_cm'              => is_array( $package['dimensions_cm'] ?? null ) ? $package['dimensions_cm'] : array(),
 		);
 	}
 
@@ -276,6 +277,7 @@ final class OrderShippingMetaPersister {
 	private function calculation_api_data( array $rate_meta ): array {
 		$country    = is_array( $rate_meta['country_mapping'] ?? null ) ? $rate_meta['country_mapping'] : array();
 		$api_result = is_array( $rate_meta['api_result'] ?? null ) ? $rate_meta['api_result'] : array();
+		$location   = is_array( $rate_meta['location'] ?? null ) ? $rate_meta['location'] : array();
 
 		return array_filter(
 			array(
@@ -295,6 +297,12 @@ final class OrderShippingMetaPersister {
 						'max_days' => $rate_meta['delivery_max_days'] ?? null,
 					)
 				),
+				'api_delivery_days_text'  => (string) ( $rate_meta['api_delivery_days_text'] ?? '' ),
+				'request_payload_sanitized' => is_array( $rate_meta['request_payload_sanitized'] ?? null ) ? $rate_meta['request_payload_sanitized'] : array(),
+				'response_tariff_sanitized' => is_array( $rate_meta['response_tariff_sanitized'] ?? null ) ? $rate_meta['response_tariff_sanitized'] : array(),
+				'cdek_from_city_code'     => $location['cdek_from_city_code'] ?? null,
+				'cdek_to_city_code'       => $location['cdek_to_city_code'] ?? null,
+				'cdek_location_source'    => (string) ( $location['cdek_location_source'] ?? '' ),
 				'transtype'               => array_key_exists( 'transtype', $rate_meta ) ? (int) $rate_meta['transtype'] : null,
 				'delivery_to'             => (string) ( $rate_meta['delivery_to'] ?? '' ),
 				'items_summary'           => is_array( $rate_meta['items_summary'] ?? null ) ? $rate_meta['items_summary'] : array(),
@@ -495,6 +503,12 @@ final class OrderShippingMetaPersister {
 			'api_delivery_min_days',
 			'api_delivery_max_days',
 			'api_delivery_text',
+			'api_delivery_days_text',
+			'request_payload_sanitized',
+			'response_tariff_sanitized',
+			'cdek_from_city_code',
+			'cdek_to_city_code',
+			'cdek_location_source',
 			'final_delivery_min_days',
 			'final_delivery_max_days',
 			'final_delivery_text',

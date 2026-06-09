@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.43.1.
+Current plugin version: 0.44.0.
+
+Version 0.44.0 adds the first CDEK runtime tariff calculation stage on branch `feature/cdek-tariff-calculation`. Checkout and admin order delivery recalculation preview can now show `СДЭК до пункта выдачи` and `СДЭК курьер` when the common `cdek` delivery service is enabled, active environment credentials are complete, sender CDEK city code is configured, and the destination city resolves to a CDEK city code. Runtime uses `POST /v2/calculator/tarifflist`, maps tariff candidates into WDC `DeliveryRate` meta, applies the existing rule engine, and stores safe calculation data without access tokens or secrets. CDEK pickup point map/selection, order creation, statuses, webhooks and print forms are intentionally left for the next stage: `feature/cdek-pickup-points`.
 
 Version 0.43.1 refines the CDEK foundation settings UX. CDEK credentials are now stored separately for test and production environments, the active environment selects both base URL and matching Account / Secure password, and enabling CDEK is controlled only by the common delivery service tab `Основное`. The CDEK and Russian Post credentials tabs are both labeled `Данные для входа`, and CDEK connection diagnostics include the active environment without exposing secrets or tokens.
 

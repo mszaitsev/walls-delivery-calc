@@ -1,5 +1,22 @@
 # WDC Delivery Services
 
+## CDEK Tariff Runtime 0.44.0
+
+The built-in CDEK service still uses service key `cdek` and carrier key `cdek`, and remains disabled by default. When enabled, CDEK rates require complete active environment credentials, sender CDEK city code, and a confident destination city mapping.
+
+Runtime uses CDEK API v2:
+
+- OAuth: `POST /v2/oauth/token`.
+- Tariffs: `POST /v2/calculator/tarifflist`.
+- Destination city resolution: `/v2/location/cities`.
+
+Checkout/admin labels:
+
+- `pickup`: `СДЭК до пункта выдачи`.
+- `courier`: `СДЭК курьер`.
+
+The current stage does not implement CDEK pickup points, pickup point selection, CDEK orders/shipments, statuses, webhooks or print forms. The next stage is `feature/cdek-pickup-points`.
+
 ## CDEK Foundation 0.43.1
 
 The built-in CDEK delivery service uses the single service key `cdek` and carrier key `cdek`. It is created disabled by default so administrators can configure credentials without changing checkout runtime behavior.
@@ -13,7 +30,7 @@ The `Данные для входа` admin tab stores:
 - encrypted production Secure password in `cdek_production_secure_password_encrypted`
 - last connection check diagnostics
 
-The active environment selects the matching base URL and credentials. Switching environments does not copy or clear credentials for the other environment. CDEK service enablement is controlled only by the common `Основное` tab. The foundation includes OAuth for `POST /v2/oauth/token`, token cache, and a protected "Проверить подключение" action. It intentionally does not calculate rates, show pickup points, create orders/shipments, update statuses, print documents or manage webhooks. See `docs/wdc-cdek-foundation.md`.
+The active environment selects the matching base URL and credentials. Switching environments does not copy or clear credentials for the other environment. CDEK service enablement is controlled only by the common `Основное` tab. The foundation includes OAuth for `POST /v2/oauth/token`, token cache, and a protected "Проверить подключение" action. Tariff calculation was added in 0.44.0; pickup points, orders/shipments, statuses, print documents and webhooks are still not implemented. See `docs/wdc-cdek-foundation.md` and `docs/wdc-cdek-tariff-calculation.md`.
 
 ## Russian Post Tracking Statuses 0.36.2
 
