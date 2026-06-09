@@ -64,7 +64,16 @@ final class CdekOAuthTokenService {
 	}
 
 	public function clearTokenCache(): void {
-		$key = $this->settings->token_cache_key();
+		$this->delete_token_cache( $this->settings->token_cache_key() );
+	}
+
+	public function clearAllTokenCaches(): void {
+		foreach ( array( CdekSettings::ENV_TEST, CdekSettings::ENV_PRODUCTION ) as $environment ) {
+			$this->delete_token_cache( $this->settings->token_cache_key_for_environment( $environment ) );
+		}
+	}
+
+	private function delete_token_cache( string $key ): void {
 		if ( function_exists( 'delete_transient' ) ) {
 			delete_transient( $key );
 			return;

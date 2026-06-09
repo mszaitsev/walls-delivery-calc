@@ -24,6 +24,10 @@ function cdek_smoke_assert( bool $condition, string $message ): void {
 	}
 }
 
+function cdek_smoke_transient_exists( string $key ): bool {
+	return array_key_exists( $key, $GLOBALS['wdc_cdek_transients'] );
+}
+
 function current_time( string $type ): string { return '2026-06-10 12:00:00'; }
 function wp_salt( string $scheme = '' ): string { return 'cdek-smoke-salt-' . $scheme; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
@@ -177,6 +181,84 @@ $http->payload['expires_in'] = 30;
 $tokens->getToken();
 $tokens->getToken();
 cdek_smoke_assert( 4 === count( $http->requests ), 'Token with expires_in below safety margin must expire immediately.' );
+
+$tokens->clearAllTokenCaches();
+$settings->save_from_admin(
+	array(
+		CdekSettings::ENVIRONMENT_KEY => CdekSettings::ENV_PRODUCTION,
+		CdekSettings::TEST_ACCOUNT_KEY => 'same-account',
+		CdekSettings::PRODUCTION_ACCOUNT_KEY => 'same-account',
+	)
+);
+$http->payload = array( 'access_token' => 'prod-cache-token', 'expires_in' => 3600 );
+$tokens->getToken();
+$production_cache_key = $settings->token_cache_key_for_environment( CdekSettings::ENV_PRODUCTION );
+cdek_smoke_assert( cdek_smoke_transient_exists( $production_cache_key ), 'Production CDEK token cache must be stored.' );
+
+$settings->save_from_admin(
+	array(
+		CdekSettings::ENVIRONMENT_KEY => CdekSettings::ENV_TEST,
+		CdekSettings::TEST_ACCOUNT_KEY => 'same-account',
+		CdekSettings::PRODUCTION_ACCOUNT_KEY => 'same-account',
+	)
+);
+$http->payload = array( 'access_token' => 'test-cache-token', 'expires_in' => 3600 );
+$tokens->getToken();
+$test_cache_key = $settings->token_cache_key_for_environment( CdekSettings::ENV_TEST );
+cdek_smoke_assert( cdek_smoke_transient_exists( $test_cache_key ), 'Test CDEK token cache must be stored.' );
+cdek_smoke_assert( cdek_smoke_transient_exists( $production_cache_key ), 'Production CDEK token cache must remain distinct from test cache.' );
+
+$tokens->clearAllTokenCaches();
+cdek_smoke_assert( ! cdek_smoke_transient_exists( $test_cache_key ), 'clearAllTokenCaches must delete test token cache.' );
+cdek_smoke_assert( ! cdek_smoke_transient_exists( $production_cache_key ), 'clearAllTokenCaches must delete production token cache.' );
+
+$settings->save_from_admin(
+	array(
+		CdekSettings::ENVIRONMENT_KEY => CdekSettings::ENV_PRODUCTION,
+		CdekSettings::TEST_ACCOUNT_KEY => 'same-account',
+		CdekSettings::PRODUCTION_ACCOUNT_KEY => 'same-account',
+	)
+);
+$http->payload = array( 'access_token' => 'old-prod-cache-token', 'expires_in' => 3600 );
+$tokens->getToken();
+$old_production_cache_key = $settings->token_cache_key_for_environment( CdekSettings::ENV_PRODUCTION );
+
+$settings->save_from_admin(
+	array(
+		CdekSettings::ENVIRONMENT_KEY => CdekSettings::ENV_TEST,
+		CdekSettings::TEST_ACCOUNT_KEY => 'same-account',
+		CdekSettings::PRODUCTION_ACCOUNT_KEY => 'same-account',
+	)
+);
+$http->payload = array( 'access_token' => 'old-test-cache-token', 'expires_in' => 3600 );
+$tokens->getToken();
+$old_test_cache_key = $settings->token_cache_key_for_environment( CdekSettings::ENV_TEST );
+cdek_smoke_assert( cdek_smoke_transient_exists( $old_test_cache_key ), 'Old test CDEK token cache must exist before settings save.' );
+cdek_smoke_assert( cdek_smoke_transient_exists( $old_production_cache_key ), 'Old production CDEK token cache must exist before settings save.' );
+
+$tokens->clearAllTokenCaches();
+$settings->save_from_admin(
+	array(
+		CdekSettings::ENVIRONMENT_KEY => CdekSettings::ENV_TEST,
+		CdekSettings::TEST_ACCOUNT_KEY => 'same-account',
+		CdekSettings::PRODUCTION_ACCOUNT_KEY => 'new-production-account',
+		'cdek_production_secure_password' => 'new-prod-secret',
+	)
+);
+$tokens->clearAllTokenCaches();
+cdek_smoke_assert( ! cdek_smoke_transient_exists( $old_test_cache_key ), 'CDEK settings save must clear old test token cache.' );
+cdek_smoke_assert( ! cdek_smoke_transient_exists( $old_production_cache_key ), 'CDEK settings save must clear old production token cache.' );
+cdek_smoke_assert( ! cdek_smoke_transient_exists( $settings->token_cache_key_for_environment( CdekSettings::ENV_TEST ) ), 'CDEK settings save must leave no new test token cache.' );
+cdek_smoke_assert( ! cdek_smoke_transient_exists( $settings->token_cache_key_for_environment( CdekSettings::ENV_PRODUCTION ) ), 'CDEK settings save must leave no new production token cache.' );
+
+$settings->save_from_admin(
+	array(
+		CdekSettings::ENVIRONMENT_KEY => CdekSettings::ENV_PRODUCTION,
+		CdekSettings::TEST_ACCOUNT_KEY => 'same-account',
+		CdekSettings::PRODUCTION_ACCOUNT_KEY => 'same-account',
+		'cdek_production_secure_password' => 'prod-secret',
+	)
+);
 
 $tokens->clearTokenCache();
 $http->status = 401;

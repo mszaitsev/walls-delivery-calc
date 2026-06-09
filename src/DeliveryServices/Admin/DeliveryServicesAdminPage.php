@@ -234,8 +234,9 @@ final class DeliveryServicesAdminPage {
 				}
 			}
 			if ( 'save_cdek_settings' === $action && $this->cdek_settings instanceof CdekSettings ) {
+				$this->cdek_api?->clearAllTokenCaches();
 				$this->cdek_settings->save_from_admin( $_POST );
-				$this->cdek_api?->clearTokenCache();
+				$this->cdek_api?->clearAllTokenCaches();
 			}
 			if ( 'check_cdek_connection' === $action && $this->cdek_settings instanceof CdekSettings && $this->cdek_api instanceof CdekApiClient ) {
 				try {

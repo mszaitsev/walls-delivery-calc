@@ -19,6 +19,10 @@ final class CdekApiClient {
 		$this->tokens->clearTokenCache();
 	}
 
+	public function clearAllTokenCaches(): void {
+		$this->tokens->clearAllTokenCaches();
+	}
+
 	/**
 	 * @return array{success:bool,message:string}
 	 */

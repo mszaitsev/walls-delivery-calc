@@ -91,8 +91,12 @@ final class CdekSettings {
 	}
 
 	public function token_cache_key(): string {
-		$environment = $this->environment();
-		$credentials = $this->credentials();
+		return $this->token_cache_key_for_environment( $this->environment() );
+	}
+
+	public function token_cache_key_for_environment( string $environment ): string {
+		$environment = $this->normalize_environment( $environment );
+		$credentials = $this->credentials_for_environment( $environment );
 		$hash = hash( 'sha256', $environment . '|' . $credentials->account );
 
 		return 'wdc_cdek_oauth_' . substr( $hash, 0, 32 );
