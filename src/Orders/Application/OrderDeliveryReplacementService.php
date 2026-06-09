@@ -4,7 +4,9 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Orders\Application;
 
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -317,12 +319,13 @@ final class OrderDeliveryReplacementService {
 	 */
 	private function calculation_package_data( array $rate_meta ): array {
 		$package = is_array( $rate_meta['package'] ?? null ) ? $rate_meta['package'] : array();
+		$final_weight = (int) ( $rate_meta['package_weight_with_packaging_g'] ?? $package['total_weight_g'] ?? $package['final_weight_g'] ?? $package['weight_g'] ?? $rate_meta['final_weight_g'] ?? $rate_meta['package_weight_g'] ?? 0 );
 		return array(
-			'products_weight_g' => $package['products_weight_g'] ?? $rate_meta['products_weight_g'] ?? $rate_meta['items_weight_g'] ?? null,
-			'packaging_weight_g' => $package['packaging_weight_g'] ?? $rate_meta['packaging_weight_g'] ?? null,
-			'final_weight_g' => $package['final_weight_g'] ?? $rate_meta['final_weight_g'] ?? $rate_meta['package_weight_g'] ?? null,
-			'include_packaging_weight' => $package['include_packaging_weight'] ?? $rate_meta['include_packaging_weight'] ?? null,
-			'packaging_weight_mode' => $package['packaging_weight_mode'] ?? $rate_meta['packaging_weight_mode'] ?? '',
+			'products_weight_g' => (int) ( $rate_meta['products_weight_g'] ?? $package['products_weight_g'] ?? $package['weight_g'] ?? $final_weight ),
+			'packaging_weight_g' => (int) ( $rate_meta['packaging_weight_g'] ?? $package['packaging_weight_g'] ?? 0 ),
+			'final_weight_g' => $final_weight,
+			'include_packaging_weight' => ! empty( $rate_meta['include_packaging_weight'] ) || ! empty( $package['include_packaging_weight'] ),
+			'packaging_weight_mode' => (string) ( $rate_meta['packaging_weight_mode'] ?? $package['packaging_weight_mode'] ?? '' ),
 		);
 	}
 
@@ -334,17 +337,30 @@ final class OrderDeliveryReplacementService {
 	private function calculation_api_data( array $rate, array $rate_meta, float $api_base ): array {
 		$api = is_array( $rate_meta['api'] ?? null ) ? $rate_meta['api'] : array();
 		$api_result = is_array( $rate_meta['api_result'] ?? null ) ? $rate_meta['api_result'] : array();
+		$country = is_array( $rate_meta['country_mapping'] ?? null ) ? $rate_meta['country_mapping'] : array();
+		$min_days = $rate_meta['delivery_min_days'] ?? $api['delivery_min_days'] ?? $api['api_delivery_min_days'] ?? $api['delivery_days'] ?? null;
+		$max_days = $rate_meta['delivery_max_days'] ?? $api['delivery_max_days'] ?? $api['api_delivery_max_days'] ?? $api['delivery_days'] ?? null;
 		$data = array(
 			'api_base_price_rub' => $api_base,
+			'api_price_has_vat' => array_key_exists( 'api_price_has_vat', $rate_meta ) ? (bool) $rate_meta['api_price_has_vat'] : ( $api['api_price_has_vat'] ?? null ),
 			'api_price_with_vat_rub' => $api['api_price_with_vat_rub'] ?? $rate_meta['api_price_with_vat_rub'] ?? $api_result['paynds'] ?? null,
 			'pay' => $api['pay'] ?? $rate_meta['pay'] ?? $api_result['pay'] ?? null,
 			'nds' => $api['nds'] ?? $rate_meta['nds'] ?? $api_result['nds'] ?? null,
 			'paynds' => $api['paynds'] ?? $rate_meta['paynds'] ?? $api_result['paynds'] ?? null,
-			'delivery_days' => $api['delivery_days'] ?? $rate_meta['delivery_days'] ?? $rate['delivery_days'] ?? null,
-			'delivery_text' => $api['delivery_text'] ?? $rate_meta['delivery_text'] ?? $rate['delivery_comment'] ?? '',
+			'delivery_min_days' => is_numeric( $min_days ) ? (int) $min_days : null,
+			'delivery_max_days' => is_numeric( $max_days ) ? (int) $max_days : null,
+			'api_delivery_min_days' => is_numeric( $min_days ) ? (int) $min_days : null,
+			'api_delivery_max_days' => is_numeric( $max_days ) ? (int) $max_days : null,
+			'api_delivery_text' => (string) ( $api['api_delivery_text'] ?? $api['delivery_text'] ?? DeliveryDaysFormatter::format_values( $min_days, $max_days ) ),
+			'transtype' => array_key_exists( 'transtype', $rate_meta ) ? (int) $rate_meta['transtype'] : null,
+			'delivery_to' => (string) ( $rate_meta['delivery_to'] ?? $api['delivery_to'] ?? '' ),
+			'items_summary' => is_array( $rate_meta['items_summary'] ?? null ) ? $rate_meta['items_summary'] : ( is_array( $api['items_summary'] ?? null ) ? $api['items_summary'] : array() ),
+			'vat_rate' => is_numeric( $rate_meta['vat_rate'] ?? null ) ? (float) $rate_meta['vat_rate'] : null,
 			'request_params' => $api['request_params'] ?? $rate_meta['request_params'] ?? null,
 			'cache_hit' => $api['cache_hit'] ?? $rate_meta['cache_hit'] ?? null,
-			'http_code' => $api['http_code'] ?? $rate_meta['http_code'] ?? null,
+			'http_code' => $api['http_code'] ?? $rate_meta['http_code'] ?? $api_result['http_code'] ?? null,
+			'carrier_country_id' => (string) ( $country['carrier_country_id'] ?? '' ),
+			'country_name' => (string) ( $country['country_name'] ?? '' ),
 		);
 
 		return $this->drop_null_values( $data );
@@ -357,13 +373,28 @@ final class OrderDeliveryReplacementService {
 	 */
 	private function calculation_rules_data( array $rate, array $rate_meta, float $api_base, float $final ): array {
 		$rules = is_array( $rate_meta['rules'] ?? null ) ? $rate_meta['rules'] : array();
+		$source = (string) ( $rules['rules_source'] ?? $rules['source'] ?? $rate['rules_source'] ?? $rate_meta['rules_source'] ?? 'none' );
+		$audit = is_array( $rules['applied_rules'] ?? null ) ? array_values( $rules['applied_rules'] ) : ( is_array( $rate_meta['rules_audit'] ?? null ) ? array_values( $rate_meta['rules_audit'] ) : ( is_array( $rate['rules_audit'] ?? null ) ? array_values( $rate['rules_audit'] ) : ( is_array( $rate_meta['applied_rules'] ?? null ) ? array_values( $rate_meta['applied_rules'] ) : array() ) ) );
+		$round = ! empty( $rules['round_up_applied'] ) || ! empty( $rate['round_up_applied'] ) || ! empty( $rate_meta['round_up_applied'] );
+		$minimum = ! empty( $rules['minimum_price_applied'] ) || ! empty( $rate['minimum_price_applied'] ) || ! empty( $rate_meta['minimum_price_applied'] );
+		$formula = is_array( $rules['formula_visualization'] ?? null ) ? $rules['formula_visualization'] : ( is_array( $rate_meta['formula_visualization'] ?? null ) ? $rate_meta['formula_visualization'] : array() );
+		if ( array() === $formula && ( array() !== $audit || $round || $minimum ) ) {
+			$formula = ( new RuleFormulaFormatter() )->lines(
+				$api_base,
+				$audit,
+				$final,
+				array(
+					'round_up_applied' => $round && $final > 0,
+					'minimum_price_applied' => $minimum && $final > 0,
+				)
+			);
+		}
 		return array(
-			'source' => (string) ( $rules['source'] ?? $rules['rules_source'] ?? $rate['rules_source'] ?? 'none' ),
-			'rules_source' => (string) ( $rules['rules_source'] ?? $rate['rules_source'] ?? 'none' ),
-			'applied_rules' => is_array( $rules['applied_rules'] ?? null ) ? $rules['applied_rules'] : ( is_array( $rate_meta['applied_rules'] ?? null ) ? $rate_meta['applied_rules'] : array() ),
-			'formula_visualization' => is_array( $rules['formula_visualization'] ?? null ) ? $rules['formula_visualization'] : ( is_array( $rate_meta['formula_visualization'] ?? null ) ? $rate_meta['formula_visualization'] : array() ),
-			'round_up_applied' => ! empty( $rules['round_up_applied'] ) || ! empty( $rate['round_up_applied'] ),
-			'minimum_price_applied' => ! empty( $rules['minimum_price_applied'] ) || ! empty( $rate['minimum_price_applied'] ),
+			'rules_source' => $source,
+			'applied_rules' => $audit,
+			'formula_visualization' => $formula,
+			'round_up_applied' => $round,
+			'minimum_price_applied' => $minimum,
 			'price_delta_rub' => $final - $api_base,
 		);
 	}
@@ -375,10 +406,19 @@ final class OrderDeliveryReplacementService {
 	 */
 	private function calculation_result_data( array $rate, array $rate_meta, float $final ): array {
 		$result = is_array( $rate_meta['result'] ?? null ) ? $rate_meta['result'] : array();
+		$delivery_days = is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array();
+		$min_days = $delivery_days['min_days'] ?? $delivery_days['min'] ?? $rate_meta['delivery_min_days'] ?? null;
+		$max_days = $delivery_days['max_days'] ?? $delivery_days['max'] ?? $rate_meta['delivery_max_days'] ?? null;
 		return $this->drop_null_values(
 			array(
 				'final_price_rub' => $final,
-				'final_delivery_text' => (string) ( $result['final_delivery_text'] ?? $rate['delivery_comment'] ?? '' ),
+				'final_delivery_days_min' => is_numeric( $min_days ) ? (int) $min_days : null,
+				'final_delivery_min_days' => is_numeric( $min_days ) ? (int) $min_days : null,
+				'final_delivery_days_max' => is_numeric( $max_days ) ? (int) $max_days : null,
+				'final_delivery_max_days' => is_numeric( $max_days ) ? (int) $max_days : null,
+				'final_delivery_text' => (string) ( $result['final_delivery_text'] ?? DeliveryDaysFormatter::format_values( $min_days, $max_days ) ?: ( $rate['delivery_comment'] ?? '' ) ),
+				'round_up_applied' => ! empty( $rate['round_up_applied'] ) || ! empty( $rate_meta['round_up_applied'] ),
+				'minimum_price_applied' => ! empty( $rate['minimum_price_applied'] ) || ! empty( $rate_meta['minimum_price_applied'] ),
 				'crossed_price_rub' => $result['crossed_price_rub'] ?? $rate['crossed_price'] ?? null,
 				'old_price_rub' => $result['old_price_rub'] ?? $rate['old_price'] ?? null,
 				'fallback' => ! empty( $result['fallback'] ) || ! empty( $rate['fallback_used'] ),

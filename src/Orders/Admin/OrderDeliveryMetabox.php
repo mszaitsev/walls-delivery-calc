@@ -75,7 +75,7 @@ final class OrderDeliveryMetabox {
 			'Служба доставки' => (string) ( $calculation['service_title'] ?? '' ),
 			'Выбранный тариф' => (string) ( $calculation['selected_tariff_title'] ?? '' ),
 			'Тип доставки' => $this->delivery_type_label( (string) ( $calculation['delivery_type'] ?? '' ) ),
-			'Страна назначения' => $this->country_label( $destination ),
+			'Страна назначения' => $this->should_show_country( $destination ) ? $this->country_label( $destination ) : '',
 			'Вес товаров' => $this->grams( $package['products_weight_g'] ?? null ),
 			'Вес упаковки' => $this->grams( $package['packaging_weight_g'] ?? null ),
 			'Итоговый вес для API' => $this->grams( $package['final_weight_g'] ?? null ),
@@ -413,6 +413,14 @@ final class OrderDeliveryMetabox {
 		$code = trim( (string) ( $destination['country_code'] ?? '' ) );
 
 		return trim( $name . ( '' !== $code ? ' (' . $code . ')' : '' ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $destination
+	 */
+	private function should_show_country( array $destination ): bool {
+		$code = strtoupper( trim( (string) ( $destination['country_code'] ?? '' ) ) );
+		return '' !== $code && 'RU' !== $code;
 	}
 
 	private function grams( mixed $value ): string {

@@ -247,10 +247,21 @@ final class WdcRecalcCarrier implements CarrierAdapterInterface {
 				'api_base_price_rub' => $price - 50,
 				'api_price_with_vat_rub' => $price - 40,
 				'final_price_rub' => $price,
+				'products_weight_g' => 1000,
+				'packaging_weight_g' => 200,
+				'package_weight_with_packaging_g' => 1200,
+				'include_packaging_weight' => true,
+				'packaging_weight_mode' => 'fixed',
+				'delivery_min_days' => $days,
+				'delivery_max_days' => $days,
+				'rules_source' => 'runtime',
+				'rules_audit' => array( 'base' ),
 				'package' => array(
 					'products_weight_g' => 1000,
 					'packaging_weight_g' => 200,
 					'final_weight_g' => 1200,
+					'total_weight_g' => 1200,
+					'weight_g' => 1000,
 					'include_packaging_weight' => true,
 					'packaging_weight_mode' => 'fixed',
 				),
@@ -688,10 +699,34 @@ recalc_smoke_assert( str_contains( (string) ( $replace_order->meta['_wdc_pickup_
 recalc_smoke_assert( ! str_contains( (string) ( $replace_order->notes[0]['note'] ?? '' ), 'Тверская, 1' ), 'Order note must not include pickup point address.' );
 recalc_smoke_assert( str_contains( (string) ( $replace_order->notes[0]['note'] ?? '' ), 'Прежний город:' ) && str_contains( (string) ( $replace_order->notes[0]['note'] ?? '' ), 'Новый город:' ), 'Save with changed location must include old/new city in note.' );
 $saved_calc = $replace_order->meta['_wdc_delivery_calculation_data'] ?? array();
-recalc_smoke_assert( is_array( $saved_calc ) && 1000 === ( $saved_calc['package']['products_weight_g'] ?? null ) && 1200 === ( $saved_calc['package']['final_weight_g'] ?? null ), 'Saved calculation data must preserve package products/final weight.' );
+recalc_smoke_assert( is_array( $saved_calc ) && 1000 === ( $saved_calc['package']['products_weight_g'] ?? null ) && 200 === ( $saved_calc['package']['packaging_weight_g'] ?? null ) && 1200 === ( $saved_calc['package']['final_weight_g'] ?? null ), 'Saved calculation data must preserve checkout-compatible package products/packaging/final weight.' );
 recalc_smoke_assert( 350.0 === (float) ( $saved_calc['api']['api_base_price_rub'] ?? 0 ) && 400.0 === (float) ( $saved_calc['result']['final_price_rub'] ?? 0 ), 'Saved calculation data must keep API base price separate from final price.' );
+recalc_smoke_assert( '3 дня' === (string) ( $saved_calc['api']['api_delivery_text'] ?? '' ) && 3 === ( $saved_calc['api']['api_delivery_min_days'] ?? null ), 'Saved calculation data must preserve checkout-compatible API delivery days.' );
 recalc_smoke_assert( array( 'base' ) === ( $saved_calc['rules']['applied_rules'] ?? null ) && array( 'API + 50 руб.' ) === ( $saved_calc['rules']['formula_visualization'] ?? null ), 'Saved calculation data must preserve applied rules and formula visualization.' );
 recalc_smoke_assert( str_contains( (string) ( $replace_order->shipping_items['method_title'] ?? '' ), ' - 3 дня' ), 'Saved shipping method title must include delivery text.' );
+ob_start();
+$metabox->render( $replace_order );
+$replace_metabox_html = (string) ob_get_clean();
+foreach ( array( 'Вес товаров', 'Вес упаковки', 'Итоговый вес для API', 'Базовая стоимость API', 'Срок по API', 'Правила расчета' ) as $expected_row ) {
+	recalc_smoke_assert( str_contains( $replace_metabox_html, $expected_row ), 'Metabox after admin save must render checkout-compatible row: ' . $expected_row );
+}
+recalc_smoke_assert( ! str_contains( $replace_metabox_html, 'Страна назначения' ), 'Metabox after RU domestic admin save must not render destination country.' );
+
+$international_order = new WdcRecalcOrder( 113, array() );
+$international_order->meta['_wdc_delivery_calculation_data'] = array(
+	'service_title' => 'International',
+	'selected_tariff_title' => 'INT',
+	'delivery_type' => 'courier',
+	'destination' => array( 'country_code' => 'KZ', 'country_name' => 'Казахстан' ),
+	'package' => array( 'products_weight_g' => 1000, 'packaging_weight_g' => 0, 'final_weight_g' => 1000 ),
+	'api' => array( 'api_base_price_rub' => 1000 ),
+	'rules' => array(),
+	'result' => array( 'final_price_rub' => 1000 ),
+);
+ob_start();
+$metabox->render( $international_order );
+$international_metabox_html = (string) ob_get_clean();
+recalc_smoke_assert( str_contains( $international_metabox_html, 'Страна назначения' ) && str_contains( $international_metabox_html, 'KZ' ), 'Metabox must still render destination country for non-RU calculation data.' );
 
 $object_shipping_order = new WdcRecalcOrder( 111, array() );
 $object_shipping_order->shipping_items = array( new WdcRecalcShippingItem( 'Почта России до отделения', 318.42 ) );
