@@ -20,6 +20,7 @@ final class OrderDeliveryRecalculationAdminController {
 	public const AJAX_LOCATION_SEARCH = 'wdc_order_delivery_recalculate_location_search';
 	public const AJAX_PICKUP_SEARCH = 'wdc_order_delivery_recalculate_pickup_search';
 	public const AJAX_NORMALIZE_ADDRESS = 'wdc_order_delivery_recalculate_normalize_address';
+	public const AJAX_ADDRESS_SUGGEST = 'wdc_order_delivery_recalculate_address_suggest';
 	public const AJAX_GEOCODE_ADDRESS = 'wdc_order_delivery_recalculate_geocode_address';
 	public const AJAX_SAVE = 'wdc_order_delivery_recalculate_save';
 	public const NONCE_ACTION = 'wdc_order_delivery_recalculation';
@@ -45,6 +46,7 @@ final class OrderDeliveryRecalculationAdminController {
 		add_action( 'wp_ajax_' . self::AJAX_LOCATION_SEARCH, array( $this, 'ajax_location_search' ) );
 		add_action( 'wp_ajax_' . self::AJAX_PICKUP_SEARCH, array( $this, 'ajax_pickup_search' ) );
 		add_action( 'wp_ajax_' . self::AJAX_NORMALIZE_ADDRESS, array( $this, 'ajax_normalize_address' ) );
+		add_action( 'wp_ajax_' . self::AJAX_ADDRESS_SUGGEST, array( $this, 'ajax_address_suggest' ) );
 		add_action( 'wp_ajax_' . self::AJAX_GEOCODE_ADDRESS, array( $this, 'ajax_geocode_address' ) );
 		add_action( 'wp_ajax_' . self::AJAX_SAVE, array( $this, 'ajax_save' ) );
 	}
@@ -79,6 +81,7 @@ final class OrderDeliveryRecalculationAdminController {
 				'locationSearchAction' => self::AJAX_LOCATION_SEARCH,
 				'pickupSearchAction' => self::AJAX_PICKUP_SEARCH,
 				'normalizeAddressAction' => self::AJAX_NORMALIZE_ADDRESS,
+				'addressSuggestAction' => self::AJAX_ADDRESS_SUGGEST,
 				'geocodeAddressAction' => self::AJAX_GEOCODE_ADDRESS,
 				'saveAction' => self::AJAX_SAVE,
 				'mapProvider' => $provider,
@@ -232,6 +235,43 @@ final class OrderDeliveryRecalculationAdminController {
 		}
 
 		wp_send_json_success( $result );
+	}
+
+	public function ajax_address_suggest(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
+		}
+
+		$order_id = (int) ( $_POST['order_id'] ?? 0 );
+		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+		if ( ! is_object( $order ) ) {
+			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
+		}
+
+		$result = $this->address_normalization->suggest(
+			$order,
+			$this->selected_location_from_request() ?? array(),
+			$this->request_string( 'stage' ),
+			$this->request_string( 'query' ),
+			$this->array_from_request( 'context' )
+		);
+		if ( empty( $result['success'] ) ) {
+			wp_send_json_error(
+				array(
+					'message' => (string) ( $result['message'] ?? __( 'Подсказки адреса недоступны.', 'walls-delivery-calc' ) ),
+					'items' => $result['items'] ?? array(),
+					'debug' => $result['debug'] ?? array(),
+				),
+				400
+			);
+		}
+
+		wp_send_json_success(
+			array(
+				'items' => $result['items'] ?? array(),
+				'debug' => $result['debug'] ?? array(),
+			)
+		);
 	}
 
 	public function ajax_save(): void {

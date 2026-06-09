@@ -1,12 +1,12 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.41.12.
+Version: 0.41.24.
 
 ## Цель этапа
 
 Сценарий пересчета доставки внутри WooCommerce order admin завершен: администратор может открыть модалку из блока `Калькулятор доставок`, пересчитать rates для текущего или выбранного населенного пункта, выбрать courier/pickup вариант, выбрать ПВЗ для pickup и сохранить новый вариант доставки.
 
-## Статус 0.41.12
+## Статус 0.41.24
 
 Реализовано:
 
@@ -18,7 +18,8 @@ Version: 0.41.12.
 - после save обновляются `_wdc_delivery_calculation_data`, `_wdc_platform_*` meta и pickup meta;
 - `_wdc_delivery_calculation_data` сохраняет checkout-like структуру `package`, `api`, `rules`, `result`; базовая API стоимость берется из `api_base_price_rub`, а не из итоговой цены;
 - saved shipping method title формируется как на checkout: service/method + selected tariff + delivery text без дублирования срока;
-- для courier в модалке показывается блок `Адрес доставки`, менеджер нормализует адрес через существующий DaData/checkout address runtime, и save блокируется без успешного normalized payload;
+- для courier в модалке показывается блок `Адрес доставки`; подсказки улицы/дома/квартиры/помещения/офиса идут через общий checkout stack `AddressSuggestionService` + `AddressSuggestionNormalizer` + `AddressLineParser`, а save блокируется без successful normalized payload или explicit manual fallback;
+- courier поддерживает выбор lower-level suggestion, ввод номера после выбранного дома для фильтрации, и завершение нормализованного адреса на уровне дома через ссылку `если номера нет - нажмите здесь`;
 - для pickup требуется выбранный ПВЗ, но не требуется нормализованный адрес менеджера;
 - если населенный пункт не менялся, modal prefill выбирает текущий ПВЗ заказа из WDC pickup meta;
 - для pickup WooCommerce shipping address заполняется выбранным ПВЗ: address_1 = адрес ПВЗ, address_2 очищается, city/state/postcode/country берутся из ПВЗ/selected location;
@@ -45,6 +46,7 @@ Version: 0.41.12.
 - `wdc_order_delivery_recalculate_preview`: пересчет rates, не мутирует заказ.
 - `wdc_order_delivery_recalculate_location_search`: thin wrapper над существующим checkout location search payload.
 - `wdc_order_delivery_recalculate_pickup_search`: поиск ПВЗ для карты, initial `mode=location` грузит все ПВЗ выбранного населенного пункта, manual `mode=search` ищет по введенному адресу/индексу/коду.
+- `wdc_order_delivery_recalculate_address_suggest`: thin admin wrapper над checkout `AddressSuggestionService` для courier address suggestions; возвращает shared suggestion items plus normalized save payload.
 - `wdc_order_delivery_recalculate_normalize_address`: thin wrapper нормализации courier delivery address через существующий checkout address runtime; pickup save его не требует.
 - `wdc_order_delivery_recalculate_geocode_address`: thin wrapper геокодинга ручного адреса на карте ПВЗ через существующий address-normalization/DaData runtime и лимиты.
 - `wdc_order_delivery_recalculate_save`: сохранение выбранного rate, создание/замена shipping item, meta rewrite, address update, totals, note.
@@ -66,4 +68,4 @@ Smoke coverage:
 php tests/orders/run-order-delivery-recalculation-smoke.php
 ```
 
-Тест проверяет modal markup, current pickup/current shipping address payload, order-to-quote mapping, location override, all-rates preview, Russian Post pickup/courier groups, pickup map and geocode endpoints, save blockers, shipping item create/replace, pickup save без normalized address, courier save with required normalized address, WDC meta rewrite with package/API/rules/result, totals recalculation, private notes, endpoint security, JS prefill/map-sync/geocode/save hooks and no mutation during preview/pickup search.
+Тест проверяет modal markup, current pickup/current shipping address payload, order-to-quote mapping, location override, all-rates preview, Russian Post pickup/courier groups, pickup map and geocode endpoints, courier address suggest endpoint/shared stack, save blockers, shipping item create/replace, pickup save без normalized address, courier save with required normalized address, WDC meta rewrite with package/API/rules/result, totals recalculation, private notes, endpoint security, JS prefill/map-sync/geocode/save hooks and no mutation during preview/pickup search.

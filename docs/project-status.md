@@ -1,5 +1,7 @@
 # Project Status
 
+0.41.24 note: the order-admin delivery recalculation courier address block now uses the same shared DaData address suggestion flow as checkout. Admin courier suggestions are served by a thin `wdc_order_delivery_recalculate_address_suggest` endpoint backed by `AddressSuggestionService`, `AddressSuggestionNormalizer` and `AddressLineParser`, so street -> house -> flat/room/premise lookup, typed lower-level filtering, house-level finalization and `address_1` formatting match checkout. Manual fallback remains available as an explicit manager action.
+
 0.41.12 note: the order-admin delivery recalculation save-flow now separates pickup and courier address requirements correctly. Pickup saves require selected rate + selected pickup point and write the selected pickup address to WooCommerce shipping address while keeping pickup details in WDC pickup meta and out of order notes. Courier saves expose a manager address-normalization block in the modal and are blocked until a normalized address is supplied. The pickup map's manual address search now geocodes the typed address through the existing DaData/address-normalization wrapper instead of placing a temporary marker on a pickup point fallback. Saved calculation data keeps package/API/rules/result details from rate meta, API base price remains distinct from final cost, method titles include delivery text, and note city-change detection uses canonical location identity to avoid duplicate/same-city old/new lines.
 
 0.41.11 note: order-admin delivery recalculation save UX was refined. Pickup saves now require selected rate + selected pickup point only; manager-entered address normalization is no longer required for pickup and pickup shipping address is not replaced by pickup address. If the selected location was not changed, the modal preselects the order's current pickup point from WDC pickup meta. The pickup map picker now syncs marker clicks with the side list, scrolls the active row into view, supports a temporary search pin for manual address/postcode matches, and keeps the picker dialog within the visible viewport with a separately scrolling list.
@@ -36,10 +38,10 @@
 
 ## Общий статус
 
-- Текущая версия: `0.41.12`.
+- Текущая версия: `0.41.24`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/order-delivery-recalculation`.
-- Последнее обновление статуса: 2026-06-08.
+- Последнее обновление статуса: 2026-06-09.
 - Общая готовность проекта: примерно 72%.
 - Следующий рекомендуемый этап: стабилизировать ручной QA сценария `feature/order-delivery-recalculation` на реальном WooCommerce order admin и затем переходить к следующим carrier/checkout улучшениям.
 

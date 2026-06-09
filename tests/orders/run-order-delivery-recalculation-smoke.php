@@ -12,6 +12,10 @@ use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionNormalizer;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
+use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
@@ -23,6 +27,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
@@ -50,6 +55,7 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 $GLOBALS['wdc_recalc_current_can'] = true;
 $GLOBALS['wdc_recalc_nonce_ok'] = true;
 $GLOBALS['wdc_recalc_orders'] = array();
+$GLOBALS['wdc_recalc_options'] = array();
 
 final class WdcRecalcAjaxResponse extends RuntimeException {
 	public function __construct(
@@ -94,7 +100,8 @@ function esc_html( mixed $text ): string { return htmlspecialchars( (string) $te
 function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function sanitize_text_field( mixed $value ): string { return trim( (string) $value ); }
-function get_option( string $option, mixed $default = false ): mixed { return $default; }
+function get_option( string $option, mixed $default = false ): mixed { return $GLOBALS['wdc_recalc_options'][ $option ] ?? $default; }
+function update_option( string $option, mixed $value, bool|string $autoload = false ): bool { $GLOBALS['wdc_recalc_options'][ $option ] = $value; return true; }
 function wp_json_encode( mixed $value ): string|false { return json_encode( $value, JSON_UNESCAPED_UNICODE ); }
 function wp_date( string $format ): string { return gmdate( $format ); }
 
@@ -369,6 +376,31 @@ final class WdcRecalcDadataSuggestionClient implements AddressSuggestionClientIn
 	}
 }
 
+function wdc_recalc_address_suggestion_service( AddressSuggestionClientInterface $client ): AddressSuggestionService {
+	$settings = new SettingsRepository();
+	$settings->replace(
+		array_merge(
+			$settings->all(),
+			array(
+				'dadata_suggestions_enabled' => true,
+				'dadata_suggestions_count' => 20,
+				'dadata_suggestions_tokens' => array(
+					array(
+						'id' => 'test-token',
+						'enabled' => true,
+						'encrypted_token' => 'encrypted-test-token',
+						'daily_limit' => 10000,
+					),
+				),
+			)
+		)
+	);
+	$encryption = new EncryptionService();
+	$pool = new DaDataTokenPool( $settings, $encryption );
+
+	return new AddressSuggestionService( new AddressSuggestionSettings( $settings, $encryption, $pool ), $client, new AddressSuggestionNormalizer() );
+}
+
 function wdc_recalc_service(): OrderDeliveryRecalculationService {
 	$registry = new CarrierRegistry();
 	$registry->register( new WdcRecalcCarrier( RussianPostDomesticSettings::CARRIER_KEY ) );
@@ -576,7 +608,8 @@ $backlog_blocked->meta['_wdc_shipments'] = array( 'russian_post_domestic' => arr
 recalc_smoke_assert( true === $service->preview( $backlog_blocked )['success'], 'Preview must remain available when shipment has backlog_order_id.' );
 
 $pickup_repository = wdc_recalc_pickup_repository();
-$address_normalization = new OrderDeliveryAddressNormalizationService( null, new WdcRecalcDadataSuggestionClient() );
+$address_client = new WdcRecalcDadataSuggestionClient();
+$address_normalization = new OrderDeliveryAddressNormalizationService( null, $address_client, wdc_recalc_address_suggestion_service( $address_client ) );
 $controller = new OrderDeliveryRecalculationAdminController( $service, new OrderDeliveryRateRenderer(), $location_ajax, $pickup_repository, '', '1', $address_normalization );
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok' );
 try {
@@ -641,10 +674,10 @@ recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'Н�
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'Проверьте адрес перед сохранением.' ) && ! str_contains( $pickup_js, 'Проверьте адрес через DaData перед сохранением.' ), 'Courier address hint must not mention DaData.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'Использовать этот адрес' ) && str_contains( $pickup_js, 'data-wdc-use-manual-courier-address disabled="disabled"' ), 'Courier block must render disabled manual address button by default.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-wdc-courier-address-suggestions' ) && str_contains( $pickup_js, 'data-wdc-courier-address-suggestion' ), 'Courier block must render DaData suggestions under address input.' );
-recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'chooseCourierAddressSuggestion' ) && str_contains( $pickup_js, 'normalizedShippingAddresses.set( box, address );' ), 'Selecting courier suggestion must store normalized address state.' );
-recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'requires_selection' ) && str_contains( $pickup_js, 'Выберите подходящий адрес из вариантов.' ), 'JS must handle multiple DaData suggestions without auto-selecting them.' );
-recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "window.console.debug( '[WDC courier address normalize]', payload.data.debug );" ), 'JS must output temporary safe normalize debug data.' );
-recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'Адрес не удалось нормализовать. Можно использовать введенный адрес вручную.' ) && str_contains( $pickup_js, "manualButton.disabled = '' === String( input.value || '' ).trim();" ), 'Normalize failure must enable manual address button when input is not empty.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'chooseCourierAddressSuggestion' ) && str_contains( $pickup_js, 'finalizeCourierAddress' ) && str_contains( $pickup_js, 'normalizedShippingAddresses.set( box, address );' ), 'Selecting courier suggestion must store normalized address state.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'requestCourierAddressSuggestions' ) && str_contains( $pickup_js, 'Выберите адрес из подсказок.' ), 'JS must render shared DaData suggestions without auto-selecting them.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "window.console.debug( '[WDC courier address suggest]', payload.data.debug );" ), 'JS must output temporary safe suggest debug data.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'Адрес не удалось нормализовать. Можно использовать введенный адрес вручную.' ) && str_contains( $pickup_js, "manualButton.disabled = String( query || '' ).trim() === '';" ), 'Normalize failure must enable manual address button when input is not empty.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "source: 'admin_manual'" ) && str_contains( $pickup_js, 'Адрес будет сохранен без нормализации.' ), 'Manual courier address button must store admin_manual fallback payload.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'normalizedShippingAddresses.delete( box );' ) && str_contains( $pickup_js, 'manualButton.disabled = true;' ) && str_contains( $pickup_js, 'clearCourierAddressSuggestions( block );' ), 'Courier address input change must reset normalized/manual address state and suggestions.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'wdc_order_delivery_recalculate_save' ) && str_contains( $pickup_js, 'window.location.reload()' ), 'JS must call save endpoint and reload after success.' );
@@ -919,6 +952,34 @@ try {
 	recalc_smoke_assert( str_contains( (string) ( $first['address_1'] ?? '' ), 'кв 10' ) && '' === (string) ( $first['address_2'] ?? '' ), 'Multiple suggestion payload must keep flat in address_1 and leave address_2 empty.' );
 	recalc_smoke_assert( isset( $response->data['debug']['suggestions_count'], $response->data['debug']['first_data']['fias_level'] ) && ! isset( $response->data['debug']['authorization'] ), 'Multiple suggestions debug response must expose safe diagnostic fields without secrets.' );
 }
+
+$_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $nsk_location ), 'stage' => 'address', 'query' => 'Новосибирск Некрасова' );
+try {
+	$controller->ajax_address_suggest();
+	recalc_smoke_assert( false, 'Admin address suggest endpoint must send JSON response.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	$items = $response->data['items'] ?? array();
+	recalc_smoke_assert( $response->success && count( $items ) >= 1, 'Admin courier must return shared address suggestions.' );
+	recalc_smoke_assert( isset( $items[0]['level'], $items[0]['address'] ) && 'dadata' === (string) ( $items[0]['address']['source'] ?? '' ), 'Admin courier suggestions must include normalized save payloads from shared suggestion stack.' );
+	recalc_smoke_assert( str_contains( (string) ( $items[0]['address']['address_1'] ?? '' ), 'Некрасова' ) && '' === (string) ( $items[0]['address']['address_2'] ?? '' ), 'Admin courier suggestion payload must keep lower address in address_1 and leave address_2 empty.' );
+}
+
+$_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $nsk_location ), 'stage' => 'address_next', 'query' => 'Новосибирская область, г Новосибирск, ул Некрасова, д 63/1, 10', 'context' => wp_json_encode( array( 'selected_level' => 'house', 'desired_level' => 'flat', 'house_fias_id' => 'fake-nsk-house-fias' ) ) );
+try {
+	$controller->ajax_address_suggest();
+	recalc_smoke_assert( false, 'Admin address_next endpoint must send JSON response.' );
+} catch ( WdcRecalcAjaxResponse $response ) {
+	$items = $response->data['items'] ?? array();
+	recalc_smoke_assert( $response->success && count( $items ) >= 1 && in_array( 'flat', array_column( $items, 'level' ), true ), 'Admin courier house selection must trigger shared address_next flat suggestions.' );
+}
+
+$admin_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/order-delivery-recalculation.js' );
+recalc_smoke_assert( str_contains( $admin_js, 'addressSuggestAction' ) && str_contains( $admin_js, 'wdc_order_delivery_recalculate_address_suggest' ), 'Admin courier must call dedicated thin address suggest endpoint.' );
+recalc_smoke_assert( str_contains( $admin_js, 'requestCourierLowerLevelAfterHouse' ) && str_contains( $admin_js, "'address_next'" ) && str_contains( $admin_js, 'lowerLevelCourierItems' ), 'Admin courier must support house to flat suggestion flow.' );
+recalc_smoke_assert( str_contains( $admin_js, 'data-wdc-courier-address-house-finalize' ) && str_contains( $admin_js, 'houseLevelCourierItem' ), 'Admin courier must support normalized house-level finalize link.' );
+$admin_controller_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Orders/Admin/OrderDeliveryRecalculationAdminController.php' );
+$admin_service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Orders/Application/OrderDeliveryAddressNormalizationService.php' );
+recalc_smoke_assert( str_contains( $admin_controller_source, 'ajax_address_suggest' ) && str_contains( $admin_service_source, 'AddressSuggestionService' ) && str_contains( $admin_service_source, 'AddressLineParser::lower_address_line' ), 'Admin courier must reuse shared AddressSuggestionService and AddressLineParser.' );
 
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'address_line' => 'Омск, Ленина, 10' );
 try {

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.41.12.
+Current plugin version: 0.41.24.
+
+Version 0.41.24 brings the order-admin courier address normalization modal onto the same shared address suggestion stack as checkout. The admin courier address UI now uses `AddressSuggestionService`, `AddressSuggestionNormalizer`, `AddressLineParser` and the same DaData request flow for street, house and lower-level flat/room/premise suggestions. Managers can choose flats/offices/rooms, type after a selected house to filter lower-level suggestions, or finish at the normalized house level through the same `если номера нет - нажмите здесь` action. Manual fallback remains available only when the manager deliberately chooses to use the typed address.
 
 Version 0.41.12 fixes the second admin order delivery recalculation save-flow iteration. Manual address search in the pickup map now geocodes the typed address through the existing DaData/address-normalization wrapper and no longer drops a temporary marker onto the first pickup point fallback. Courier saves now show and require a manager-normalized delivery address, while pickup saves require only rate + pickup point and write the selected pickup point address into the WooCommerce shipping address. Saved `_wdc_delivery_calculation_data` now keeps checkout-like package, API, rules and result structures, API base price stays separate from final cost, saved method titles include delivery text, and order notes avoid old/new city lines when the selected settlement is canonically unchanged.
 

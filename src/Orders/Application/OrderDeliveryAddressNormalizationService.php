@@ -4,15 +4,50 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Orders\Application;
 
 use WallsShop\WDC\Checkout\Address\CheckoutAddressRuntime;
+use WallsShop\WDC\Checkout\Address\AddressLineParser;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
 
 defined( 'ABSPATH' ) || exit;
 
 final class OrderDeliveryAddressNormalizationService {
 	public function __construct(
 		private ?CheckoutAddressRuntime $runtime = null,
-		private ?AddressSuggestionClientInterface $suggestions = null
+		private ?AddressSuggestionClientInterface $suggestions = null,
+		private ?AddressSuggestionService $suggestion_service = null
 	) {
+	}
+
+	/**
+	 * @param array<string,mixed> $selected_location
+	 * @param array<string,mixed> $context
+	 * @return array<string,mixed>
+	 */
+	public function suggest( object $order, array $selected_location, string $stage, string $query, array $context = array() ): array {
+		if ( ! $this->suggestion_service instanceof AddressSuggestionService ) {
+			return array(
+				'success' => false,
+				'error_code' => 'address_suggestion_service_unavailable',
+				'message' => 'Подсказки адреса недоступны.',
+				'items' => array(),
+				'debug' => array( 'stage' => $stage ),
+			);
+		}
+
+		$stage = in_array( $stage, array( 'address', 'address_next' ), true ) ? $stage : 'address';
+		$result = $this->suggestion_service->suggest( $stage, trim( $query ), array_merge( $this->suggestion_context( $selected_location ), $this->string_context( $context ) ) );
+		$items = array();
+		foreach ( is_array( $result['items'] ?? null ) ? $result['items'] : array() as $item ) {
+			if ( ! is_array( $item ) ) {
+				continue;
+			}
+			$item['address'] = $this->payload_from_suggestion_item( $item, $selected_location, $query );
+			$items[] = $item;
+		}
+		$result['items'] = $items;
+		$result['message'] = empty( $result['success'] ) ? 'Подсказки адреса временно недоступны. Введите адрес вручную.' : '';
+
+		return $result;
 	}
 
 	/**
@@ -372,6 +407,38 @@ final class OrderDeliveryAddressNormalizationService {
 	}
 
 	/**
+	 * @param array<string,mixed> $item
+	 * @param array<string,mixed> $selected_location
+	 * @return array<string,mixed>
+	 */
+	private function payload_from_suggestion_item( array $item, array $selected_location, string $address_line ): array {
+		$data = is_array( $item['data'] ?? null ) ? $item['data'] : array();
+		$address_1 = AddressLineParser::lower_address_line( $data );
+		$full = (string) ( $item['unrestrictedValue'] ?? $item['value'] ?? $address_line );
+
+		return array(
+			'country' => 'RU',
+			'region' => (string) ( $data['region_with_type'] ?? $data['region'] ?? $selected_location['region_name'] ?? '' ),
+			'city' => (string) ( $data['settlement_with_type'] ?? $data['city_with_type'] ?? $data['settlement'] ?? $data['city'] ?? $selected_location['city_value'] ?? $selected_location['city_name'] ?? '' ),
+			'postcode' => (string) ( $data['postal_code'] ?? $selected_location['postal_code'] ?? $selected_location['postcode'] ?? '' ),
+			'street' => (string) ( $data['street_with_type'] ?? $data['street'] ?? '' ),
+			'house' => (string) ( $data['house'] ?? '' ),
+			'flat' => (string) ( $data['flat'] ?? $data['room'] ?? $data['room_number'] ?? $data['premise'] ?? '' ),
+			'address_1' => '' !== $address_1 ? $address_1 : $address_line,
+			'address_2' => '',
+			'full_address' => $full,
+			'fias_id' => (string) ( $data['fias_id'] ?? $data['house_fias_id'] ?? '' ),
+			'gar_id' => (string) ( $data['gar_id'] ?? '' ),
+			'house_fias_id' => (string) ( $data['house_fias_id'] ?? '' ),
+			'house_kladr_id' => (string) ( $data['house_kladr_id'] ?? '' ),
+			'normalized' => ! empty( $item['isDeliverable'] ),
+			'fallback' => false,
+			'source' => 'dadata',
+			'message' => '',
+		);
+	}
+
+	/**
 	 * @param array<string,mixed> $data
 	 */
 	private function suggestion_has_delivery_address( array $data ): bool {
@@ -424,6 +491,21 @@ final class OrderDeliveryAddressNormalizationService {
 		);
 
 		return array_filter( $context, static fn( string $value ): bool => '' !== trim( $value ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $context
+	 * @return array<string,string>
+	 */
+	private function string_context( array $context ): array {
+		$normalized = array();
+		foreach ( $context as $key => $value ) {
+			if ( is_scalar( $value ) && '' !== trim( (string) $value ) ) {
+				$normalized[ (string) $key ] = (string) $value;
+			}
+		}
+
+		return $normalized;
 	}
 
 	/**

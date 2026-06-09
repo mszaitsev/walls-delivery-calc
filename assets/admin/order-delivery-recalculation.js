@@ -7,8 +7,10 @@
 	const selectedRates = new WeakMap();
 	const selectedPickupPoints = new WeakMap();
 	const normalizedShippingAddresses = new WeakMap();
+	const courierAddressStates = new WeakMap();
 	const activeSaveRequests = new WeakSet();
 	const searchTimers = new WeakMap();
+	const courierAddressTimers = new WeakMap();
 
 	function closestBox( element ) {
 		return element ? element.closest( '[data-wdc-order-delivery-recalculation]' ) : null;
@@ -243,44 +245,188 @@
 			suggestions.innerHTML = '';
 			return;
 		}
-		suggestions.innerHTML = items.map( function ( item, index ) {
-			return '<button type="button" class="button-link wdc-order-delivery-courier-address__suggestion" data-wdc-courier-address-suggestion data-address="' + escapeAttribute( JSON.stringify( item.address || {} ) ) + '" data-label="' + escapeAttribute( String( item.label || '' ) ) + '">' + escapeHtml( item.label || '' ) + '</button>';
+		suggestions.innerHTML = items.map( function ( item ) {
+			return '<button type="button" class="button-link wdc-order-delivery-courier-address__suggestion" data-wdc-courier-address-suggestion data-item="' + escapeAttribute( JSON.stringify( item || {} ) ) + '">' +
+				'<span>' + escapeHtml( item.label || item.value || '' ) + '</span>' +
+				( item.subLabel ? '<small>' + escapeHtml( item.subLabel ) + '</small>' : '' ) +
+				'</button>';
 		} ).join( '' );
 		updateSaveButton( box );
 	}
 
-	function chooseCourierAddressSuggestion( button ) {
-		const box = closestBox( button );
-		const block = button ? button.closest( '[data-wdc-courier-address-block]' ) : null;
-		if ( ! box || ! block ) {
+	function courierAddressState( block ) {
+		if ( ! courierAddressStates.has( block ) ) {
+			courierAddressStates.set( block, {
+				selectedHouseItem: null,
+				selectedHouseBaseQuery: '',
+				selectedHouseDisplayBase: '',
+				selectedHouseContext: {},
+				awaitingFlatSelection: false
+			} );
+		}
+		return courierAddressStates.get( block );
+	}
+
+	function clearCourierAddressState( block ) {
+		if ( block ) {
+			courierAddressStates.delete( block );
+		}
+	}
+
+	function lowerLevelCourierItems( items ) {
+		return items.filter( function ( item ) {
+			return item && ( item.level === 'flat' || item.level === 'room' || item.level === 'premise' );
+		} );
+	}
+
+	function ensureTrailingComma( value ) {
+		const text = String( value || '' ).replace( /\s+/g, ' ' ).replace( /\s*,\s*$/g, '' ).trim();
+		return text ? text + ', ' : '';
+	}
+
+	function normalizeHouseBaseForCompare( value ) {
+		return String( value || '' ).toLowerCase().replace( /\s+/g, ' ' ).replace( /\s*,\s*/g, ', ' ).trim();
+	}
+
+	function startsWithHouseBase( query, base ) {
+		const normalizedQuery = normalizeHouseBaseForCompare( query );
+		const normalizedBase = normalizeHouseBaseForCompare( base );
+		const remainder = normalizedQuery.slice( normalizedBase.length );
+		return !! normalizedBase && normalizedQuery.slice( 0, normalizedBase.length ) === normalizedBase && ( remainder === '' || /^[\s,]+/.test( remainder ) );
+	}
+
+	function queryMatchesCourierHouseBase( query, state ) {
+		return startsWithHouseBase( query, state.selectedHouseBaseQuery ) || startsWithHouseBase( query, state.selectedHouseDisplayBase );
+	}
+
+	function courierAddressPayload( item ) {
+		return item && item.address ? item.address : {};
+	}
+
+	function houseLevelCourierItem( item ) {
+		const clone = JSON.parse( JSON.stringify( item || {} ) );
+		const data = clone.data || {};
+		[
+			'flat',
+			'flat_type',
+			'flat_type_full',
+			'room',
+			'room_number',
+			'room_type',
+			'room_type_full',
+			'premise',
+			'premise_type',
+			'premise_type_full'
+		].forEach( function ( key ) {
+			delete data[ key ];
+		} );
+		data.flat = '';
+		clone.data = data;
+		clone.level = 'house';
+		if ( clone.address ) {
+			clone.address = Object.assign( {}, clone.address, { flat: '', address_2: '', normalized: true, fallback: false, source: 'dadata' } );
+		}
+		return clone;
+	}
+
+	function showCourierFlatHint( block ) {
+		const status = block ? block.querySelector( '[data-wdc-courier-address-status]' ) : null;
+		if ( ! status ) {
 			return;
 		}
-		let address = {};
-		try {
-			address = JSON.parse( button.dataset.address || '{}' ) || {};
-		} catch ( error ) {
-			address = {};
-		}
-		const label = String( button.dataset.label || address.full_address || address.address_1 || '' );
-		const input = block.querySelector( '[data-wdc-courier-address-line]' );
-		const status = block.querySelector( '[data-wdc-courier-address-status]' );
-		const result = block.querySelector( '[data-wdc-courier-address-result]' );
-		const manualButton = block.querySelector( '[data-wdc-use-manual-courier-address]' );
+		status.innerHTML = '<span>Уточните квартиру, помещение или офис (если номера нет - </span><button type="button" class="button-link wdc-order-delivery-courier-address__house-finalize" data-wdc-courier-address-house-finalize>нажмите здесь</button><span>)</span>';
+	}
+
+	function finalizeCourierAddress( box, block, item ) {
+		const input = block ? block.querySelector( '[data-wdc-courier-address-line]' ) : null;
+		const status = block ? block.querySelector( '[data-wdc-courier-address-status]' ) : null;
+		const result = block ? block.querySelector( '[data-wdc-courier-address-result]' ) : null;
+		const manualButton = block ? block.querySelector( '[data-wdc-use-manual-courier-address]' ) : null;
+		const address = courierAddressPayload( item );
 		normalizedShippingAddresses.set( box, address );
 		if ( input ) {
-			input.value = label;
+			input.value = String( address.full_address || item.unrestrictedValue || item.value || item.label || address.address_1 || '' );
 		}
 		if ( status ) {
 			status.textContent = 'Адрес нормализован.';
 		}
 		if ( result ) {
-			result.textContent = String( address.full_address || label );
+			result.textContent = String( address.full_address || address.address_1 || '' );
 		}
 		if ( manualButton ) {
 			manualButton.disabled = true;
 		}
 		clearCourierAddressSuggestions( block );
+		clearCourierAddressState( block );
 		updateSaveButton( box );
+	}
+
+	function requestCourierLowerLevelAfterHouse( box, block, item ) {
+		const input = block ? block.querySelector( '[data-wdc-courier-address-line]' ) : null;
+		const data = item && item.data ? item.data : {};
+		const query = String( item.unrestrictedValue || item.value || item.label || '' );
+		const state = courierAddressState( block );
+		state.selectedHouseItem = item;
+		state.selectedHouseBaseQuery = query;
+		state.selectedHouseDisplayBase = String( item.label || query );
+		state.selectedHouseContext = {
+			selected_level: 'house',
+			desired_level: 'flat',
+			house_fias_id: String( data.house_fias_id || '' ),
+			house_kladr_id: String( data.house_kladr_id || '' ),
+			city_fias_id: String( data.city_fias_id || data.settlement_fias_id || '' ),
+			city_kladr_id: String( data.city_kladr_id || data.settlement_kladr_id || '' )
+		};
+		state.awaitingFlatSelection = true;
+		if ( input ) {
+			input.value = ensureTrailingComma( query );
+			input.focus();
+		}
+		showCourierFlatHint( block );
+		requestCourierAddressSuggestions( box, block, 'address_next', query, state.selectedHouseContext )
+			.then( function ( items ) {
+				const lower = lowerLevelCourierItems( items );
+				if ( lower.length ) {
+					renderCourierAddressSuggestions( box, block, lower );
+					showCourierFlatHint( block );
+					return;
+				}
+				finalizeCourierAddress( box, block, item );
+			} )
+			.catch( function () {
+				finalizeCourierAddress( box, block, item );
+			} );
+	}
+
+	function chooseCourierAddressSuggestion( button ) {
+		const box = closestBox( button );
+		const block = button ? button.closest( '[data-wdc-courier-address-block]' ) : null;
+		const input = block ? block.querySelector( '[data-wdc-courier-address-line]' ) : null;
+		if ( ! box || ! block ) {
+			return;
+		}
+		let item = {};
+		try {
+			item = JSON.parse( button.dataset.item || '{}' ) || {};
+		} catch ( error ) {
+			item = {};
+		}
+		if ( item.level === 'street' ) {
+			clearCourierAddressState( block );
+			if ( input ) {
+				input.value = ensureTrailingComma( item.unrestrictedValue || item.value || item.label || '' );
+				input.focus();
+			}
+			runCourierAddressSuggest( box, block, 'address', input ? input.value : '', {} );
+			return;
+		}
+		if ( item.level === 'house' ) {
+			requestCourierLowerLevelAfterHouse( box, block, item );
+			return;
+		}
+		if ( item.level === 'flat' || item.level === 'room' || item.level === 'premise' ) {
+			finalizeCourierAddress( box, block, item );
+		}
 	}
 
 	function selectedRateChanged( input ) {
@@ -578,30 +724,16 @@
 			} );
 	}
 
-	function normalizeCourierAddress( button ) {
-		const box = closestBox( button );
-		const block = button ? button.closest( '[data-wdc-courier-address-block]' ) : null;
-		const input = block ? block.querySelector( '[data-wdc-courier-address-line]' ) : null;
-		const status = block ? block.querySelector( '[data-wdc-courier-address-status]' ) : null;
-		const result = block ? block.querySelector( '[data-wdc-courier-address-result]' ) : null;
-		const manualButton = block ? block.querySelector( '[data-wdc-use-manual-courier-address]' ) : null;
-		if ( ! box || ! input ) {
-			return;
-		}
+	function requestCourierAddressSuggestions( box, block, stage, query, context ) {
 		const form = new FormData();
-		form.append( 'action', config.normalizeAddressAction || 'wdc_order_delivery_recalculate_normalize_address' );
+		form.append( 'action', config.addressSuggestAction || 'wdc_order_delivery_recalculate_address_suggest' );
 		form.append( 'nonce', config.nonce || '' );
 		form.append( 'order_id', orderId( box ) );
 		form.append( 'selected_location', JSON.stringify( selectedLocations.get( box ) || {} ) );
-		form.append( 'address_line', String( input.value || '' ) );
-		normalizedShippingAddresses.delete( box );
-		clearCourierAddressSuggestions( block );
-		updateSaveButton( box );
-		setLoading( button, true );
-		if ( status ) {
-			status.textContent = 'Проверяем адрес...';
-		}
-		window.fetch( config.ajaxUrl || window.ajaxurl || '', {
+		form.append( 'stage', stage );
+		form.append( 'query', query );
+		form.append( 'context', JSON.stringify( context || {} ) );
+		return window.fetch( config.ajaxUrl || window.ajaxurl || '', {
 			method: 'POST',
 			credentials: 'same-origin',
 			body: form
@@ -610,55 +742,79 @@
 				return response.json();
 			} )
 			.then( function ( payload ) {
-				if ( payload && payload.data && payload.data.debug && window.console && window.console.debug ) {
-					window.console.debug( '[WDC courier address normalize]', payload.data.debug );
+				if ( ! payload || ! payload.success ) {
+					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Подсказки адреса недоступны.' );
 				}
-				if ( payload && payload.success && payload.data && payload.data.requires_selection ) {
-					normalizedShippingAddresses.delete( box );
-					renderCourierAddressSuggestions( box, block, payload.data.suggestions || [] );
-					if ( status ) {
-						status.textContent = payload.data.message || 'Выберите подходящий адрес из вариантов.';
+				if ( payload.data && payload.data.debug && window.console && window.console.debug ) {
+					window.console.debug( '[WDC courier address suggest]', payload.data.debug );
+				}
+				return Array.isArray( payload.data && payload.data.items ) ? payload.data.items : [];
+			} );
+	}
+
+	function runCourierAddressSuggest( box, block, stage, query, context ) {
+		const status = block ? block.querySelector( '[data-wdc-courier-address-status]' ) : null;
+		const result = block ? block.querySelector( '[data-wdc-courier-address-result]' ) : null;
+		const manualButton = block ? block.querySelector( '[data-wdc-use-manual-courier-address]' ) : null;
+		if ( ! box || ! block || String( query || '' ).trim() === '' ) {
+			return;
+		}
+		normalizedShippingAddresses.delete( box );
+		if ( result ) {
+			result.textContent = '';
+		}
+		if ( status ) {
+			status.textContent = 'Ищем подсказки адреса...';
+		}
+		requestCourierAddressSuggestions( box, block, stage, query, context )
+			.then( function ( items ) {
+				const state = courierAddressState( block );
+				if ( state.awaitingFlatSelection ) {
+					const lower = lowerLevelCourierItems( items );
+					if ( lower.length ) {
+						renderCourierAddressSuggestions( box, block, lower );
+						showCourierFlatHint( block );
+						return;
 					}
-					if ( result ) {
-						result.textContent = '';
-					}
-					if ( manualButton ) {
-						manualButton.disabled = true;
-					}
+					clearCourierAddressSuggestions( block );
+					showCourierFlatHint( block );
 					return;
 				}
-				if ( ! payload || ! payload.success ) {
-					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Адрес не нормализован.' );
-				}
-				const address = payload.data && payload.data.address ? payload.data.address : {};
-				normalizedShippingAddresses.set( box, address );
-				clearCourierAddressSuggestions( block );
+				renderCourierAddressSuggestions( box, block, items );
 				if ( status ) {
-					status.textContent = payload.data && payload.data.message ? payload.data.message : 'Адрес нормализован.';
-				}
-				if ( result ) {
-					result.textContent = String( address.full_address || address.address_1 || '' );
+					status.textContent = items.length ? 'Выберите адрес из подсказок.' : 'Адрес не удалось нормализовать. Можно использовать введенный адрес вручную.';
 				}
 				if ( manualButton ) {
-					manualButton.disabled = true;
+					manualButton.disabled = items.length ? true : String( query || '' ).trim() === '';
 				}
 			} )
 			.catch( function ( error ) {
-				if ( status ) {
-					status.textContent = 'Адрес не удалось нормализовать. Можно использовать введенный адрес вручную.';
-				}
-				if ( result ) {
-					result.textContent = '';
-				}
 				clearCourierAddressSuggestions( block );
-				if ( manualButton ) {
-					manualButton.disabled = '' === String( input.value || '' ).trim();
+				clearCourierAddressState( block );
+				if ( status ) {
+					status.textContent = error && error.message ? error.message : 'Адрес не удалось нормализовать. Можно использовать введенный адрес вручную.';
 				}
-			} )
-			.finally( function () {
-				setLoading( button, false );
+				if ( manualButton ) {
+					manualButton.disabled = String( query || '' ).trim() === '';
+				}
 				updateSaveButton( box );
 			} );
+	}
+
+	function normalizeCourierAddress( button ) {
+		const box = closestBox( button );
+		const block = button ? button.closest( '[data-wdc-courier-address-block]' ) : null;
+		const input = block ? block.querySelector( '[data-wdc-courier-address-line]' ) : null;
+		if ( ! box || ! input ) {
+			return;
+		}
+		setLoading( button, true );
+		clearCourierAddressState( block );
+		runCourierAddressSuggest( box, block, 'address', String( input.value || '' ), {} );
+		window.setTimeout( function () {
+			setLoading( button, false );
+			updateSaveButton( box );
+		}, 250 );
 	}
 
 	function geocodeAddress( box, value ) {
@@ -719,6 +875,7 @@
 			message: ''
 		};
 		normalizedShippingAddresses.set( box, payload );
+		clearCourierAddressState( block );
 		button.disabled = true;
 		if ( status ) {
 			status.textContent = 'Адрес будет сохранен без нормализации.';
@@ -1139,6 +1296,22 @@
 			return;
 		}
 
+		const courierHouseFinalizeButton = event.target && event.target.closest( '[data-wdc-courier-address-house-finalize]' );
+		if ( courierHouseFinalizeButton ) {
+			event.preventDefault();
+			const box = closestBox( courierHouseFinalizeButton );
+			const block = courierHouseFinalizeButton.closest( '[data-wdc-courier-address-block]' );
+			const state = block ? courierAddressState( block ) : null;
+			if ( box && block && state && state.selectedHouseItem ) {
+				const input = block.querySelector( '[data-wdc-courier-address-line]' );
+				if ( input ) {
+					input.value = String( state.selectedHouseBaseQuery || state.selectedHouseDisplayBase || input.value || '' ).replace( /\s*,\s*$/g, '' ).trim();
+				}
+				finalizeCourierAddress( box, block, houseLevelCourierItem( state.selectedHouseItem ) );
+			}
+			return;
+		}
+
 		const manualCourierButton = event.target && event.target.closest( '[data-wdc-use-manual-courier-address]' );
 		if ( manualCourierButton ) {
 			event.preventDefault();
@@ -1173,6 +1346,10 @@
 				const status = block && block.querySelector( '[data-wdc-courier-address-status]' );
 				const result = block && block.querySelector( '[data-wdc-courier-address-result]' );
 				const manualButton = block && block.querySelector( '[data-wdc-use-manual-courier-address]' );
+				let stage = 'address';
+				let context = {};
+				let query = String( input.value || '' );
+				let state = block ? courierAddressState( block ) : null;
 				if ( status ) {
 					status.textContent = 'Проверьте адрес перед сохранением.';
 				}
@@ -1183,6 +1360,21 @@
 				if ( manualButton ) {
 					manualButton.disabled = true;
 				}
+				if ( state && state.awaitingFlatSelection ) {
+					if ( queryMatchesCourierHouseBase( query, state ) ) {
+						stage = 'address_next';
+						context = state.selectedHouseContext;
+					} else {
+						clearCourierAddressState( block );
+						state = courierAddressState( block );
+					}
+				}
+				if ( courierAddressTimers.has( input ) ) {
+					window.clearTimeout( courierAddressTimers.get( input ) );
+				}
+				courierAddressTimers.set( input, window.setTimeout( function () {
+					runCourierAddressSuggest( box, block, stage, query, context );
+				}, 300 ) );
 				updateSaveButton( box );
 			}
 			return;
