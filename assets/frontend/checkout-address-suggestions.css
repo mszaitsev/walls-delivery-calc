@@ -76,6 +76,22 @@
 	text-decoration: underline;
 }
 
+.wdc-address-picker-house-finalize {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: #2271b1;
+	cursor: pointer;
+	font: inherit;
+	text-decoration: underline;
+}
+
+.wdc-address-picker-house-finalize:hover,
+.wdc-address-picker-house-finalize:focus {
+	color: #135e96;
+}
+
 .wdc-address-picker-results {
 	padding: 0 18px 18px;
 	overflow: auto;

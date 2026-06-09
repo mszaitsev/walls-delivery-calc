@@ -410,6 +410,18 @@
 		hintBox().html( message ? '<span>' + escapeHtml( message ) + '</span>' : '' );
 	}
 
+	function showFlatHintWithHouseFinalize() {
+		var hint = hintBox();
+		hint.empty();
+		$( '<span>' ).text( 'Уточните квартиру, помещение или офис (если номера нет - ' ).appendTo( hint );
+		$( '<button>', {
+			type: 'button',
+			class: 'wdc-address-picker-house-finalize',
+			text: 'нажмите здесь'
+		} ).appendTo( hint );
+		$( '<span>' ).text( ')' ).appendTo( hint );
+	}
+
 	function escapeHtml( value ) {
 		return String( value || '' ).replace( /[&<>"']/g, function ( char ) {
 			return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ char ];
@@ -490,6 +502,31 @@
 		} );
 	}
 
+	function houseLevelItem( item ) {
+		var clone = $.extend( true, {}, item || {} );
+		var data = clone.data || {};
+		[
+			'flat',
+			'flat_type',
+			'flat_type_full',
+			'room',
+			'room_number',
+			'room_type',
+			'room_type_full',
+			'premise',
+			'premise_type',
+			'premise_type_full'
+		].forEach( function ( key ) {
+			delete data[ key ];
+		} );
+		data.flat = '';
+		clone.data = data;
+		clone.level = 'house';
+		clone.isDeliverable = true;
+		clone.fiasLevel = data.fias_level || clone.fiasLevel || '';
+		return clone;
+	}
+
 	function requestLowerLevelAfterHouse( prefix, item ) {
 		var data = item.data || {};
 		var query = item.unrestrictedValue || item.value || item.label || '';
@@ -511,13 +548,13 @@
 		state.nextLevelMode = 'address_next';
 		searchInput().val( nextLevelQuery );
 		firstUsable( prefix, 'address_1' ).val( displayBase );
-		showHint( 'Уточните квартиру, корпус или помещение.' );
+		showFlatHintWithHouseFinalize();
 		log( 'lower-level request after house selection', { query: query } );
 		request( 'address_next', query, prefix, function ( items ) {
 			var lower = lowerLevelItems( items );
 			if ( lower.length ) {
 				renderResults( lower, query );
-				showHint( 'Уточните квартиру, корпус или помещение.' );
+				showFlatHintWithHouseFinalize();
 				return;
 			}
 			clearHouseLookupState( prefix );
@@ -621,11 +658,11 @@
 					var lower = lowerLevelItems( items );
 					if ( lower.length ) {
 						renderResults( lower, query );
-						showHint( 'Уточните квартиру, корпус или помещение.' );
+						showFlatHintWithHouseFinalize();
 						return;
 					}
 					resultsBox().html( '<div class="wdc-address-picker-empty">Квартиры не найдены. Выберите из списка или продолжите ввод.</div>' );
-					showHint( 'Уточните квартиру, корпус или помещение.' );
+					showFlatHintWithHouseFinalize();
 					return;
 				}
 				renderResults( items, query );
@@ -695,6 +732,20 @@
 			clearHouseLookupState( prefix );
 			applyResolved( prefix, item );
 		}
+	}
+
+	function finalizeHouseWithoutFlat() {
+		var prefix = activePrefix;
+		var state = stateFor( prefix );
+		var item = state.selectedHouseItem;
+		var houseItem = null;
+		if ( ! item ) {
+			return;
+		}
+		houseItem = houseLevelItem( item );
+		searchInput().val( String( state.selectedHouseBaseQuery || state.selectedHouseDisplayBase || searchInput().val() || '' ).replace( /\s*,\s*$/g, '' ).trim() );
+		clearHouseLookupState( prefix );
+		applyResolved( prefix, houseItem );
 	}
 
 	function applyResolved( prefix, item ) {
@@ -769,6 +820,10 @@
 				selectItem( selectedItem );
 			} )
 			.on( 'click' + namespace, '.wdc-address-picker-manual', manualFallback )
+			.on( 'click' + namespace, '.wdc-address-picker-house-finalize', function ( event ) {
+				event.preventDefault();
+				finalizeHouseWithoutFlat();
+			} )
 			.on( 'click' + namespace, '.wdc-address-picker-close', closeAddressPicker )
 			.on( 'mousedown' + namespace, '.wdc-address-picker-overlay', function ( event ) {
 				if ( event.target === this ) {

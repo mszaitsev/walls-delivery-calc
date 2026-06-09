@@ -378,6 +378,9 @@ $address_next_start = strpos( $dadata_client_source, "if ( 'address_next' === \$
 $address_next_end = false !== $address_next_start ? strpos( $dadata_client_source, "if ( 'address' === \$stage )", $address_next_start ) : false;
 $address_next_source = false !== $address_next_start && false !== $address_next_end ? substr( $dadata_client_source, $address_next_start, $address_next_end - $address_next_start ) : '';
 wc_checkout_smoke_assert( '' !== $address_next_source && str_contains( $address_next_source, 'locations_boost' ) && ! str_contains( $address_next_source, 'from_bound' ) && ! str_contains( $address_next_source, 'to_bound' ) && ! str_contains( $address_next_source, 'restrict_value' ), 'DaData address_next request must be relaxed and avoid strict flat bounds/restrict_value.' );
+$checkout_address_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-address-suggestions.js' );
+wc_checkout_smoke_assert( str_contains( $checkout_address_js, 'wdc-address-picker-house-finalize' ) && str_contains( $checkout_address_js, 'function finalizeHouseWithoutFlat()' ), 'Checkout address picker must expose house-level finalize action while lower-level suggestions exist.' );
+wc_checkout_smoke_assert( str_contains( $checkout_address_js, 'houseLevelItem( item )' ) && str_contains( $checkout_address_js, 'applyResolved( prefix, houseItem );' ) && str_contains( $checkout_address_js, "'flat'," ), 'House-level finalize must apply normalized house item with flat data removed.' );
 
 $fallback = $orchestrator->calculate( $mapper->map( wc_checkout_smoke_package( 'US' ) ) );
 wc_checkout_smoke_assert( $fallback->fallback_used, 'Fallback must appear for unsupported checkout destination.' );
