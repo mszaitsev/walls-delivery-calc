@@ -88,7 +88,7 @@ final class AddressSuggestionAjax {
 		}
 
 		$context = array();
-		foreach ( array( 'city_kladr_id', 'city_fias_id', 'settlement_kladr_id', 'settlement_fias_id', 'street_fias_id' ) as $key ) {
+		foreach ( array( 'city_kladr_id', 'city_fias_id', 'settlement_kladr_id', 'settlement_fias_id', 'street_fias_id', 'house_fias_id', 'house_kladr_id', 'selected_level', 'desired_level', 'selected_display_name', 'city' ) as $key ) {
 			$value = $raw[ $key ] ?? '';
 			$value = is_array( $value ) ? '' : (string) $value;
 			$context[ $key ] = function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $value ) : trim( strip_tags( $value ) );

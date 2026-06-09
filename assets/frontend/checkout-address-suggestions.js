@@ -151,10 +151,28 @@
 	function stateFor( prefix ) {
 		if ( ! addressPickerState[ prefix ] ) {
 			addressPickerState[ prefix ] = {
-				lastResolved: null
+				lastResolved: null,
+				selectedHouseItem: null,
+				selectedHouseQuery: '',
+				selectedHouseBaseQuery: '',
+				selectedHouseDisplayBase: '',
+				selectedHouseContext: {},
+				awaitingFlatSelection: false,
+				nextLevelMode: ''
 			};
 		}
 		return addressPickerState[ prefix ];
+	}
+
+	function clearHouseLookupState( prefix ) {
+		var state = stateFor( prefix );
+		state.selectedHouseItem = null;
+		state.selectedHouseQuery = '';
+		state.selectedHouseBaseQuery = '';
+		state.selectedHouseDisplayBase = '';
+		state.selectedHouseContext = {};
+		state.awaitingFlatSelection = false;
+		state.nextLevelMode = '';
 	}
 
 	function ensureHiddenFields( prefix ) {
@@ -213,13 +231,20 @@
 		hidden( prefix, 'dadata_fias_level' ).val( item ? item.fiasLevel || '' : '' );
 	}
 
-	function context( prefix ) {
-		return {
+	function context( prefix, extra ) {
+		var base = {
 			city_kladr_id: hidden( prefix, 'dadata_city_kladr_id' ).val() || '',
 			city_fias_id: hidden( prefix, 'dadata_city_fias_id' ).val() || '',
 			settlement_kladr_id: hidden( prefix, 'dadata_settlement_kladr_id' ).val() || '',
-			settlement_fias_id: hidden( prefix, 'dadata_settlement_fias_id' ).val() || ''
+			settlement_fias_id: hidden( prefix, 'dadata_settlement_fias_id' ).val() || '',
+			selected_display_name: globalHiddenValue( 'wdc_platform_location_display_name' ),
+			city: firstUsable( prefix, 'city' ).val() || ''
 		};
+		extra = extra || {};
+		Object.keys( extra ).forEach( function ( key ) {
+			base[ key ] = extra[ key ];
+		} );
+		return base;
 	}
 
 	function openingQuery( prefix ) {
@@ -273,6 +298,12 @@
 		if ( data.block ) {
 			parts.push( String( ( data.block_type || 'к' ) + ' ' + data.block ).trim() );
 		}
+		if ( data.flat ) {
+			parts.push( String( ( data.flat_type || 'кв' ) + ' ' + data.flat ).trim() );
+		}
+		if ( data.room || data.room_number || data.premise ) {
+			parts.push( String( ( data.room_type || data.premise_type || 'пом' ) + ' ' + ( data.room || data.room_number || data.premise ) ).trim() );
+		}
 		return parts.join( ', ' );
 	}
 
@@ -296,6 +327,25 @@
 	function ensureTrailingComma( value ) {
 		var text = String( value || '' ).replace( /\s+/g, ' ' ).replace( /\s*,\s*$/g, '' ).trim();
 		return text ? text + ', ' : '';
+	}
+
+	function normalizeHouseBaseForCompare( value ) {
+		return String( value || '' ).toLowerCase().replace( /\s+/g, ' ' ).replace( /\s*,\s*/g, ', ' ).trim();
+	}
+
+	function startsWithHouseBase( query, base ) {
+		var normalizedQuery = normalizeHouseBaseForCompare( query );
+		var normalizedBase = normalizeHouseBaseForCompare( base );
+		var remainder = '';
+		if ( ! normalizedBase || normalizedQuery.length < normalizedBase.length || normalizedQuery.slice( 0, normalizedBase.length ) !== normalizedBase ) {
+			return false;
+		}
+		remainder = normalizedQuery.slice( normalizedBase.length );
+		return '' === remainder || /^[\s,]+/.test( remainder );
+	}
+
+	function queryMatchesSelectedHouseBase( query, state ) {
+		return startsWithHouseBase( query, state.selectedHouseBaseQuery ) || startsWithHouseBase( query, state.selectedHouseDisplayBase );
 	}
 
 	function currentLocationFias() {
@@ -360,6 +410,18 @@
 		hintBox().html( message ? '<span>' + escapeHtml( message ) + '</span>' : '' );
 	}
 
+	function showFlatHintWithHouseFinalize() {
+		var hint = hintBox();
+		hint.empty();
+		$( '<span>' ).text( 'Уточните квартиру, помещение или офис (если номера нет - ' ).appendTo( hint );
+		$( '<button>', {
+			type: 'button',
+			class: 'wdc-address-picker-house-finalize',
+			text: 'нажмите здесь'
+		} ).appendTo( hint );
+		$( '<span>' ).text( ')' ).appendTo( hint );
+	}
+
 	function escapeHtml( value ) {
 		return String( value || '' ).replace( /[&<>"']/g, function ( char ) {
 			return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ char ];
@@ -403,20 +465,20 @@
 		notice.text( message );
 	}
 
-	function request( stage, query, prefix, done ) {
+	function request( stage, query, prefix, done, extraContext ) {
 		debugState.lastStage = stage;
 		debugState.lastQuery = query;
 		debugState.lastAjaxStatus = 'pending';
 		renderDebugBlock();
 		log( 'stage', { stage: stage } );
 		log( 'query', { query: query } );
-		log( 'ajax request start', { stage: stage, query: query, context: context( prefix ) } );
+		log( 'ajax request start', { stage: stage, query: query, context: context( prefix, extraContext ) } );
 		$.post( config.ajax_url || '', {
 			action: config.action || 'wdc_platform_dadata_address_suggest',
 			nonce: config.nonce || '',
 			stage: stage,
 			query: query,
-			context: context( prefix )
+			context: context( prefix, extraContext )
 		} ).done( function ( response ) {
 			var body = response && response.data ? response.data : response;
 			var items = body && body.items ? body.items : [];
@@ -432,6 +494,79 @@
 			log( 'ajax fail', { status: xhr && xhr.status ? xhr.status : 0 } );
 			done( [], {} );
 		} );
+	}
+
+	function lowerLevelItems( items ) {
+		return items.filter( function ( item ) {
+			return 'flat' === item.level || 'room' === item.level || 'premise' === item.level;
+		} );
+	}
+
+	function houseLevelItem( item ) {
+		var clone = $.extend( true, {}, item || {} );
+		var data = clone.data || {};
+		[
+			'flat',
+			'flat_type',
+			'flat_type_full',
+			'room',
+			'room_number',
+			'room_type',
+			'room_type_full',
+			'premise',
+			'premise_type',
+			'premise_type_full'
+		].forEach( function ( key ) {
+			delete data[ key ];
+		} );
+		data.flat = '';
+		clone.data = data;
+		clone.level = 'house';
+		clone.isDeliverable = true;
+		clone.fiasLevel = data.fias_level || clone.fiasLevel || '';
+		return clone;
+	}
+
+	function requestLowerLevelAfterHouse( prefix, item ) {
+		var data = item.data || {};
+		var query = item.unrestrictedValue || item.value || item.label || '';
+		var displayBase = formatAddressWithoutRegionCity( data ) || query;
+		var nextLevelQuery = ensureTrailingComma( query );
+		var houseContext = {
+			selected_level: 'house',
+			desired_level: 'flat',
+			house_fias_id: data.house_fias_id || '',
+			house_kladr_id: data.house_kladr_id || ''
+		};
+		var state = stateFor( prefix );
+		state.selectedHouseItem = item;
+		state.selectedHouseQuery = query;
+		state.selectedHouseBaseQuery = query;
+		state.selectedHouseDisplayBase = displayBase;
+		state.selectedHouseContext = houseContext;
+		state.awaitingFlatSelection = true;
+		state.nextLevelMode = 'address_next';
+		searchInput().val( nextLevelQuery );
+		firstUsable( prefix, 'address_1' ).val( displayBase );
+		showFlatHintWithHouseFinalize();
+		log( 'lower-level request after house selection', { query: query } );
+		request( 'address_next', query, prefix, function ( items ) {
+			var lower = lowerLevelItems( items );
+			if ( lower.length ) {
+				renderResults( lower, query );
+				showFlatHintWithHouseFinalize();
+				return;
+			}
+			clearHouseLookupState( prefix );
+			applyResolved( prefix, item );
+		}, houseContext );
+		window.setTimeout( function () {
+			searchInput().trigger( 'focus' );
+			var input = searchInput()[0];
+			if ( input && input.setSelectionRange ) {
+				input.setSelectionRange( input.value.length, input.value.length );
+			}
+		}, 20 );
 	}
 
 	function trackSelectionUsage( item, usageType ) {
@@ -493,8 +628,16 @@
 		window.clearTimeout( debounceTimer );
 		debounceTimer = window.setTimeout( function () {
 			var prefix = activePrefix;
+			var state = stateFor( prefix );
 			var query = String( searchInput().val() || '' );
-			var stage = 'address';
+			var stage = state.awaitingFlatSelection ? 'address_next' : 'address';
+			var requestContext = state.awaitingFlatSelection ? state.selectedHouseContext : null;
+			if ( state.awaitingFlatSelection && ! queryMatchesSelectedHouseBase( query, state ) ) {
+				clearHouseLookupState( prefix );
+				state = stateFor( prefix );
+				stage = 'address';
+				requestContext = null;
+			}
 			log( 'modal search input', { query: query, stage: stage } );
 			if ( query.trim().length < minChars() ) {
 				resultsBox().empty();
@@ -511,8 +654,19 @@
 					renderUnavailable( query, body.error_code );
 					return;
 				}
+				if ( state.awaitingFlatSelection ) {
+					var lower = lowerLevelItems( items );
+					if ( lower.length ) {
+						renderResults( lower, query );
+						showFlatHintWithHouseFinalize();
+						return;
+					}
+					resultsBox().html( '<div class="wdc-address-picker-empty">Квартиры не найдены. Выберите из списка или продолжите ввод.</div>' );
+					showFlatHintWithHouseFinalize();
+					return;
+				}
 				renderResults( items, query );
-			} );
+			}, requestContext );
 		}, debounceDelay );
 	}
 
@@ -541,6 +695,7 @@
 	}
 
 	function closeAddressPicker() {
+		clearHouseLookupState( activePrefix );
 		pickerOpen = false;
 		debugState.modalOpened = 'no';
 		renderDebugBlock();
@@ -553,6 +708,7 @@
 		var prefix = activePrefix;
 		var data = item.data || {};
 		if ( 'street' === item.level ) {
+			clearHouseLookupState( prefix );
 			firstUsable( prefix, 'address_1' ).val( ( data.street_with_type || item.value || '' ) + ' ' );
 			setHiddenData( prefix, item, 'street_selected' );
 			hidden( prefix, 'dadata_house' ).val( '' );
@@ -566,14 +722,30 @@
 			scheduleModalSearch();
 			return;
 		}
-		if ( 'house' === item.level || 'flat' === item.level ) {
+		if ( 'house' === item.level ) {
 			log( 'house selected', item );
-			log( 'resolve request start', { query: item.unrestrictedValue || item.value || '' } );
-			request( 'resolve', item.unrestrictedValue || item.value || '', prefix, function ( items ) {
-				log( 'resolve request success', { count: items.length } );
-				applyResolved( prefix, items[0] || item );
-			} );
+			requestLowerLevelAfterHouse( prefix, item );
+			return;
 		}
+		if ( 'flat' === item.level || 'room' === item.level || 'premise' === item.level ) {
+			log( 'final address selected', item );
+			clearHouseLookupState( prefix );
+			applyResolved( prefix, item );
+		}
+	}
+
+	function finalizeHouseWithoutFlat() {
+		var prefix = activePrefix;
+		var state = stateFor( prefix );
+		var item = state.selectedHouseItem;
+		var houseItem = null;
+		if ( ! item ) {
+			return;
+		}
+		houseItem = houseLevelItem( item );
+		searchInput().val( String( state.selectedHouseBaseQuery || state.selectedHouseDisplayBase || searchInput().val() || '' ).replace( /\s*,\s*$/g, '' ).trim() );
+		clearHouseLookupState( prefix );
+		applyResolved( prefix, houseItem );
 	}
 
 	function applyResolved( prefix, item ) {
@@ -595,11 +767,10 @@
 			firstUsable( prefix, 'postcode' ).val( data.postal_code );
 			setGlobalHidden( 'wdc_platform_location_postcode', data.postal_code );
 		}
-		if ( data.flat && ! firstUsable( prefix, 'address_2' ).val() ) {
-			firstUsable( prefix, 'address_2' ).val( data.flat );
-		}
+		firstUsable( prefix, 'address_2' ).val( '' );
 		setHiddenData( prefix, item, 'resolved' );
 		stateFor( prefix ).lastResolved = item;
+		clearHouseLookupState( prefix );
 		trackSelectionUsage( item, 'final_selection' );
 		closeAddressPicker();
 		showSelectedNotice( prefix, 'Адрес выбран: ' + ( item.label || item.value || '' ) );
@@ -614,6 +785,7 @@
 			return;
 		}
 		firstUsable( prefix, 'address_1' ).val( value );
+		clearHouseLookupState( prefix );
 		clearAddressHidden( prefix );
 		hidden( prefix, 'dadata_status' ).val( 'manual' );
 		hidden( prefix, 'dadata_unrestricted_value' ).val( value );
@@ -648,6 +820,10 @@
 				selectItem( selectedItem );
 			} )
 			.on( 'click' + namespace, '.wdc-address-picker-manual', manualFallback )
+			.on( 'click' + namespace, '.wdc-address-picker-house-finalize', function ( event ) {
+				event.preventDefault();
+				finalizeHouseWithoutFlat();
+			} )
 			.on( 'click' + namespace, '.wdc-address-picker-close', closeAddressPicker )
 			.on( 'mousedown' + namespace, '.wdc-address-picker-overlay', function ( event ) {
 				if ( event.target === this ) {

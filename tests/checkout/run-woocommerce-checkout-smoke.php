@@ -150,6 +150,11 @@ use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionNormalizer;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
+use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
@@ -167,6 +172,7 @@ use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Rules\ValueObjects\RuleActionTypes;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationBases;
 use WallsShop\WDC\Rules\ValueObjects\RuleOperationTypes;
+use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 
 function wc_checkout_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -194,6 +200,77 @@ final class WdcSmokeOrder {
 
 	public function update_meta_data( string $key, mixed $value ): void {
 		$this->meta[ $key ] = $value;
+	}
+}
+
+final class WdcCheckoutApartmentSuggestionClient implements AddressSuggestionClientInterface {
+	public int $calls = 0;
+	/** @var array<int,string> */
+	public array $queries = array();
+
+	/**
+	 * @param array<string,string> $context
+	 * @return array<string,mixed>
+	 */
+	public function suggest( string $stage, string $query, array $context = array() ): array {
+		$this->calls++;
+		$this->queries[] = $query;
+		if ( 'address_next' === $stage ) {
+			$house = array(
+				'fias_level' => '8',
+				'country_iso_code' => 'RU',
+				'region_with_type' => 'Новосибирская область',
+				'city_with_type' => 'г Новосибирск',
+				'street_with_type' => 'ул Некрасова',
+				'house' => '63/1',
+				'house_fias_id' => 'house-fias',
+				'postal_code' => '630005',
+			);
+			$flat_values = str_contains( $query, 'кв 9' ) || str_contains( $query, ', 9' ) ? array_map( 'strval', range( 9, 28 ) ) : array( '1', '2' );
+			$flat_items = array(
+				array( 'value' => 'Новосибирск, ул Некрасова, 63/1', 'unrestricted_value' => 'Новосибирская область, г Новосибирск, ул Некрасова, д 63/1', 'data' => $house ),
+			);
+			foreach ( $flat_values as $flat_value ) {
+				$flat = array_merge( $house, array( 'fias_level' => '9', 'flat' => $flat_value ) );
+				$flat_items[] = array( 'value' => 'Новосибирск, ул Некрасова, 63/1, кв ' . $flat_value, 'unrestricted_value' => 'Новосибирская область, г Новосибирск, ул Некрасова, д 63/1, кв ' . $flat_value, 'data' => $flat );
+			}
+			return array(
+				'success' => true,
+				'status_code' => 200,
+				'body' => array( 'query' => $query ),
+				'suggestions' => $flat_items,
+			);
+		}
+		$has_flat = str_contains( $query, 'кв' ) || str_contains( $query, 'квартира' ) || str_contains( $query, 'apt' );
+		if ( str_contains( $query, 'без-flat-только' ) && $has_flat ) {
+			return array( 'success' => true, 'suggestions' => array(), 'status_code' => 200, 'body' => array( 'query' => $query ) );
+		}
+		if ( str_contains( $query, 'некрасова' ) || str_contains( $query, 'Некрасова' ) ) {
+			return array(
+				'success' => true,
+				'status_code' => 200,
+				'body' => array( 'query' => $query ),
+				'suggestions' => array(
+					array(
+						'value' => 'Новосибирск, ул Некрасова, 63/1',
+						'unrestricted_value' => 'Новосибирская область, г Новосибирск, ул Некрасова, д 63/1',
+						'data' => array(
+							'fias_level' => '8',
+							'country_iso_code' => 'RU',
+							'region_with_type' => 'Новосибирская область',
+							'city_with_type' => 'г Новосибирск',
+							'street_with_type' => 'ул Некрасова',
+							'house' => '63/1',
+							'house_fias_id' => 'house-fias',
+							'flat' => str_contains( $query, 'кв 10' ) ? '10' : '',
+							'postal_code' => '630005',
+						),
+					),
+				),
+			);
+		}
+
+		return array( 'success' => true, 'suggestions' => array(), 'status_code' => 200, 'body' => array( 'query' => $query ) );
 	}
 }
 
@@ -255,6 +332,55 @@ $rate_mapper = new WooCommerceRateMapper();
 $mapped      = $rate_mapper->map( $result->rates[0] );
 wc_checkout_smoke_assert( isset( $mapped['id'], $mapped['label'], $mapped['cost'], $mapped['meta_data'] ), 'WooCommerceRateMapper output must be valid.' );
 wc_checkout_smoke_assert( is_array( $mapped['meta_data']['crossed_price'] ), 'WooCommerceRateMapper must expose crossed price rendering data.' );
+
+$suggestion_settings_repo = new SettingsRepository();
+$suggestion_settings_repo->set( 'dadata_suggestions_enabled', true );
+$suggestion_settings_repo->set(
+	DaDataTokenPool::OPTION_KEY,
+	array(
+		array(
+			'id' => 'fake-token',
+			'enabled' => true,
+			'encrypted_token' => 'encrypted',
+			'daily_limit' => 100,
+		),
+	)
+);
+$suggestion_pool = new DaDataTokenPool( $suggestion_settings_repo, new EncryptionService() );
+$suggestion_client = new WdcCheckoutApartmentSuggestionClient();
+$suggestions = new AddressSuggestionService( new AddressSuggestionSettings( $suggestion_settings_repo, new EncryptionService(), $suggestion_pool ), $suggestion_client, new AddressSuggestionNormalizer() );
+$with_flat = $suggestions->suggest( 'address', 'Новосибирск, некрасова, д 63/1, кв 10', array( 'country_code' => 'RU', 'selected_display_name' => 'Новосибирск' ) );
+$with_flat_item = $with_flat['items'][0] ?? array();
+wc_checkout_smoke_assert( true === ( $with_flat['success'] ?? false ) && true === ( $with_flat_item['isDeliverable'] ?? false ), 'Checkout address suggestions must normalize address with apartment.' );
+wc_checkout_smoke_assert( str_contains( (string) ( $with_flat_item['label'] ?? '' ), 'Некрасова' ) && str_contains( (string) ( $with_flat_item['label'] ?? '' ), '63/1' ) && str_contains( (string) ( $with_flat_item['label'] ?? '' ), 'кв 10' ), 'Checkout address suggestion label must include street, house and flat.' );
+wc_checkout_smoke_assert( ! isset( $with_flat['debug']['request_body'] ) && ! str_contains( json_encode( $with_flat['debug'] ?? array() ) ?: '', 'Authorization' ), 'Checkout address suggestions debug must not expose request body or secrets.' );
+$restored_flat = $suggestions->suggest( 'address', 'некрасова 63/1 кв 1', array( 'country_code' => 'RU', 'selected_display_name' => 'Новосибирск', 'city' => 'Новосибирск' ) );
+$restored_item = $restored_flat['items'][0] ?? array();
+wc_checkout_smoke_assert( true === ( $restored_item['isDeliverable'] ?? false ) && '1' === (string) ( $restored_item['data']['flat'] ?? '' ) && str_contains( (string) ( $restored_item['label'] ?? '' ), 'кв 1' ), 'Checkout address suggestions must restore flat from input when DaData omits flat.' );
+wc_checkout_smoke_assert( true === ( $restored_flat['debug']['flat_restored_from_input'] ?? false ), 'Checkout address suggestions debug must mark restored flat from input.' );
+$fallback_client = new WdcCheckoutApartmentSuggestionClient();
+$fallback_suggestions = new AddressSuggestionService( new AddressSuggestionSettings( $suggestion_settings_repo, new EncryptionService(), $suggestion_pool ), $fallback_client, new AddressSuggestionNormalizer() );
+$without_flat_fallback = $fallback_suggestions->suggest( 'address', 'без-flat-только новосибирск некрасова 63/1 кв 1', array( 'country_code' => 'RU', 'selected_display_name' => 'Новосибирск' ) );
+wc_checkout_smoke_assert( true === ( $without_flat_fallback['items'][0]['isDeliverable'] ?? false ), 'Checkout address suggestions must retry without flat when query with flat returns no suggestions.' );
+wc_checkout_smoke_assert( $fallback_client->calls <= 5 && in_array( 'без-flat-только новосибирск некрасова 63/1', $fallback_client->queries, true ), 'Checkout address suggestions query variants must stay within a reasonable limit and include query without flat.' );
+$next_client = new WdcCheckoutApartmentSuggestionClient();
+$next_suggestions = new AddressSuggestionService( new AddressSuggestionSettings( $suggestion_settings_repo, new EncryptionService(), $suggestion_pool ), $next_client, new AddressSuggestionNormalizer() );
+$next = $next_suggestions->suggest( 'address_next', '630005, Новосибирская обл, г Новосибирск, ул Некрасова, д 63/1', array( 'country_code' => 'RU', 'city_kladr_id' => '5400000100000', 'city_fias_id' => '8dea00e3-9aab-4d8e-887c-ef2aaa546456', 'selected_level' => 'house', 'desired_level' => 'flat', 'house_fias_id' => 'house-fias', 'house_kladr_id' => 'house-kladr' ) );
+wc_checkout_smoke_assert( true === ( $next['success'] ?? false ) && 3 === count( $next['items'] ?? array() ), 'Address next must return mixed house and flat suggestions.' );
+wc_checkout_smoke_assert( 'house' === ( $next['items'][0]['level'] ?? '' ) && 'flat' === ( $next['items'][1]['level'] ?? '' ) && 'flat' === ( $next['items'][2]['level'] ?? '' ), 'Address next must preserve house and mark flats as lower-level items.' );
+wc_checkout_smoke_assert( 'address_next_relaxed' === ( $next['debug']['selected_variant'] ?? '' ) && 2 === ( $next['debug']['lower_level_count'] ?? 0 ) && ! isset( $next['debug']['request_body'] ), 'Address next debug must expose relaxed variant/lower-level count without request body.' );
+$next_filtered = $next_suggestions->suggest( 'address_next', '630005, Новосибирская обл, г Новосибирск, ул Некрасова, д 63/1, 9', array( 'country_code' => 'RU', 'city_kladr_id' => '5400000100000', 'city_fias_id' => '8dea00e3-9aab-4d8e-887c-ef2aaa546456', 'selected_level' => 'house', 'desired_level' => 'flat', 'house_fias_id' => 'house-fias', 'house_kladr_id' => 'house-kladr' ) );
+$next_filtered_labels = implode( ' | ', array_map( static fn( array $item ): string => (string) ( $item['label'] ?? '' ), $next_filtered['items'] ?? array() ) );
+wc_checkout_smoke_assert( true === ( $next_filtered['success'] ?? false ) && 21 === count( $next_filtered['items'] ?? array() ), 'Address next must keep returning mixed house and filtered flat suggestions while typing flat number without cutting the list to four.' );
+wc_checkout_smoke_assert( 20 === ( $next_filtered['debug']['lower_level_count'] ?? 0 ) && str_contains( $next_filtered_labels, 'кв 9' ) && str_contains( $next_filtered_labels, 'кв 28' ), 'Address next must return all flat suggestions matching typed apartment number within the 20-item limit.' );
+$dadata_client_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/AddressSuggestions/DaDataSuggestionClient.php' );
+$address_next_start = strpos( $dadata_client_source, "if ( 'address_next' === \$stage )" );
+$address_next_end = false !== $address_next_start ? strpos( $dadata_client_source, "if ( 'address' === \$stage )", $address_next_start ) : false;
+$address_next_source = false !== $address_next_start && false !== $address_next_end ? substr( $dadata_client_source, $address_next_start, $address_next_end - $address_next_start ) : '';
+wc_checkout_smoke_assert( '' !== $address_next_source && str_contains( $address_next_source, 'locations_boost' ) && ! str_contains( $address_next_source, 'from_bound' ) && ! str_contains( $address_next_source, 'to_bound' ) && ! str_contains( $address_next_source, 'restrict_value' ), 'DaData address_next request must be relaxed and avoid strict flat bounds/restrict_value.' );
+$checkout_address_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/checkout-address-suggestions.js' );
+wc_checkout_smoke_assert( str_contains( $checkout_address_js, 'wdc-address-picker-house-finalize' ) && str_contains( $checkout_address_js, 'function finalizeHouseWithoutFlat()' ), 'Checkout address picker must expose house-level finalize action while lower-level suggestions exist.' );
+wc_checkout_smoke_assert( str_contains( $checkout_address_js, 'houseLevelItem( item )' ) && str_contains( $checkout_address_js, 'applyResolved( prefix, houseItem );' ) && str_contains( $checkout_address_js, "'flat'," ), 'House-level finalize must apply normalized house item with flat data removed.' );
 
 $fallback = $orchestrator->calculate( $mapper->map( wc_checkout_smoke_package( 'US' ) ) );
 wc_checkout_smoke_assert( $fallback->fallback_used, 'Fallback must appear for unsupported checkout destination.' );

@@ -1,0 +1,402 @@
+.wdc-order-delivery-recalculation {
+	margin-top: 12px;
+}
+
+.wdc-order-delivery-modal[hidden] {
+	display: none;
+}
+
+.wdc-order-delivery-modal {
+	position: fixed;
+	inset: 0;
+	z-index: 100100;
+}
+
+.wdc-order-delivery-modal__overlay {
+	position: absolute;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.45);
+}
+
+.wdc-order-delivery-modal__dialog {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	width: min(920px, calc(100vw - 32px));
+	max-height: calc(100vh - 48px);
+	margin: 24px auto;
+	background: #fff;
+	box-shadow: 0 18px 45px rgba(0, 0, 0, 0.28);
+	border-radius: 4px;
+	outline: none;
+}
+
+.wdc-order-delivery-modal__header,
+.wdc-order-delivery-modal__footer {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 14px 16px;
+	border-bottom: 1px solid #dcdcde;
+}
+
+.wdc-order-delivery-modal__header h2 {
+	flex: 1;
+	margin: 0;
+	font-size: 18px;
+	line-height: 1.3;
+}
+
+.wdc-order-delivery-modal__close {
+	font-size: 26px;
+	line-height: 1;
+	text-decoration: none;
+	color: #1d2327;
+}
+
+.wdc-order-delivery-modal__status {
+	padding: 10px 16px 0;
+	min-height: 20px;
+}
+
+.wdc-order-delivery-location {
+	display: grid;
+	gap: 8px;
+	padding: 12px 16px 0;
+}
+
+.wdc-order-delivery-location__summary {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.wdc-order-delivery-location__summary span {
+	color: #1d2327;
+}
+
+.wdc-order-delivery-location__search {
+	display: grid;
+	gap: 6px;
+}
+
+.wdc-order-delivery-location__search[hidden] {
+	display: none;
+}
+
+.wdc-order-delivery-location__results {
+	display: grid;
+	gap: 4px;
+	max-height: 180px;
+	overflow: auto;
+	border: 1px solid #dcdcde;
+	background: #fff;
+	padding: 6px;
+}
+
+.wdc-order-delivery-location__results:empty {
+	display: none;
+}
+
+.wdc-order-delivery-location__result {
+	text-align: left;
+	line-height: 1.35;
+}
+
+.wdc-order-delivery-modal__status[data-status="loading"] {
+	color: #646970;
+}
+
+.wdc-order-delivery-modal__status[data-status="success"] {
+	color: #008a20;
+}
+
+.wdc-order-delivery-modal__status[data-status="error"] {
+	color: #b32d2e;
+}
+
+.wdc-order-delivery-modal__content {
+	min-height: 0;
+	overflow: auto;
+	padding: 4px 16px 16px;
+}
+
+.wdc-order-delivery-modal__footer {
+	justify-content: flex-end;
+	border-top: 1px solid #dcdcde;
+	border-bottom: 0;
+	margin-top: auto;
+}
+
+.wdc-order-delivery-modal__save-warning {
+	flex: 1 1 100%;
+	color: #b32d2e;
+	font-size: 12px;
+	line-height: 1.4;
+}
+
+.wdc-order-delivery-modal__save-warning[hidden] {
+	display: none;
+}
+
+.wdc-order-delivery-rates__group {
+	margin-top: 12px;
+}
+
+.wdc-order-delivery-rates__group h4 {
+	margin: 10px 0 6px;
+	font-size: 13px;
+}
+
+.wdc-order-delivery-rate {
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	margin: 8px 0;
+	padding: 8px;
+	background: #fff;
+}
+
+.wdc-order-delivery-rate__header,
+.wdc-order-delivery-tariff {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	gap: 6px;
+	align-items: start;
+}
+
+.wdc-order-delivery-rate__title,
+.wdc-order-delivery-tariff__title {
+	font-weight: 600;
+}
+
+.wdc-order-delivery-rate__price,
+.wdc-order-delivery-tariff__price {
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.wdc-order-delivery-rate__crossed {
+	color: #646970;
+	text-decoration: line-through;
+	white-space: nowrap;
+}
+
+.wdc-order-delivery-rate__delivery,
+.wdc-order-delivery-rate__comment,
+.wdc-order-delivery-tariff__delivery,
+.wdc-order-delivery-rate__pickup-status {
+	margin-top: 5px;
+	color: #646970;
+	font-size: 12px;
+}
+
+.wdc-order-delivery-rate__pickup-selector {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px solid #f0f0f1;
+}
+
+.wdc-order-delivery-rate__pickup-selector[hidden] {
+	display: none;
+}
+
+.wdc-order-delivery-courier-address {
+	display: grid;
+	gap: 8px;
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px solid #f0f0f1;
+}
+
+.wdc-order-delivery-courier-address[hidden] {
+	display: none;
+}
+
+.wdc-order-delivery-courier-address__status,
+.wdc-order-delivery-courier-address__result {
+	color: #646970;
+	font-size: 12px;
+}
+
+.wdc-order-delivery-courier-address__result {
+	font-weight: 600;
+}
+
+.wdc-order-delivery-courier-address__suggestions {
+	display: grid;
+	gap: 6px;
+}
+
+.wdc-order-delivery-courier-address__suggestion {
+	text-align: left;
+}
+
+.wdc-order-delivery-courier-address__suggestion small {
+	display: block;
+	margin-top: 2px;
+	color: #646970;
+	font-size: 11px;
+}
+
+.wdc-order-delivery-courier-address__house-finalize {
+	text-decoration: underline;
+}
+
+.wdc-order-delivery-tariffs {
+	margin-top: 8px;
+	padding-left: 20px;
+}
+
+.wdc-order-delivery-tariff {
+	margin: 6px 0;
+	font-size: 12px;
+}
+
+.wdc-order-delivery-pickup-picker {
+	position: fixed;
+	inset: 0;
+	z-index: 100110;
+}
+
+.wdc-order-delivery-pickup-picker__overlay {
+	position: absolute;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.45);
+}
+
+.wdc-order-delivery-pickup-picker__dialog {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	width: min(1120px, calc(100vw - 32px));
+	max-height: calc(100vh - 48px);
+	margin: 24px auto;
+	padding: 16px;
+	overflow: hidden;
+	background: #fff;
+	border-radius: 4px;
+	box-shadow: 0 18px 45px rgba(0, 0, 0, 0.28);
+}
+
+.wdc-order-delivery-pickup-picker__close {
+	position: absolute;
+	top: 10px;
+	right: 12px;
+	font-size: 26px;
+	line-height: 1;
+	text-decoration: none;
+	color: #1d2327;
+}
+
+.wdc-order-delivery-pickup-picker__search {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.wdc-order-delivery-pickup-picker__status {
+	min-height: 20px;
+	margin-bottom: 8px;
+	color: #646970;
+}
+
+.wdc-order-delivery-pickup-picker__layout {
+	display: grid;
+	grid-template-columns: minmax(360px, 1fr) minmax(280px, 360px);
+	gap: 12px;
+	align-items: stretch;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.wdc-order-delivery-pickup-picker__map {
+	min-height: 420px;
+	overflow: hidden;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	background: #f6f7f7;
+}
+
+.wdc-order-delivery-pickup-picker__side {
+	display: flex;
+	min-height: 0;
+	max-height: min(420px, calc(100vh - 230px));
+	flex-direction: column;
+	gap: 8px;
+	overflow: hidden;
+}
+
+.wdc-order-delivery-pickup-picker__selected {
+	padding: 10px;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	background: #f6f7f7;
+}
+
+.wdc-order-delivery-pickup-picker__selected-grid {
+	display: grid;
+	gap: 8px;
+}
+
+.wdc-order-delivery-pickup-picker__selected-grid strong {
+	display: block;
+	color: #50575e;
+	font-size: 11px;
+	text-transform: uppercase;
+}
+
+.wdc-order-delivery-pickup-picker__list {
+	min-height: 0;
+	overflow: auto;
+}
+
+.wdc-order-delivery-pickup-picker__table tr[data-wdc-pickup-picker-row] {
+	cursor: pointer;
+}
+
+.wdc-order-delivery-pickup-picker__table tr.is-active td {
+	background: #e7f5ff;
+}
+
+@media (max-width: 782px) {
+	.wdc-order-delivery-modal__dialog {
+		width: calc(100vw - 16px);
+		max-height: calc(100vh - 16px);
+		margin: 8px auto;
+	}
+
+	.wdc-order-delivery-modal__footer {
+		align-items: stretch;
+		flex-direction: column-reverse;
+	}
+
+	.wdc-order-delivery-modal__footer .button {
+		width: 100%;
+		text-align: center;
+	}
+
+	.wdc-order-delivery-pickup-picker__dialog {
+		width: calc(100vw - 16px);
+		max-height: calc(100vh - 16px);
+		margin: 8px auto;
+	}
+
+	.wdc-order-delivery-pickup-picker__layout {
+		grid-template-columns: 1fr;
+	}
+
+	.wdc-order-delivery-pickup-picker__map {
+		min-height: 320px;
+	}
+
+	.wdc-order-delivery-pickup-picker__side {
+		min-height: 0;
+		max-height: none;
+	}
+}

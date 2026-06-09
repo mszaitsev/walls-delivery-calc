@@ -46,6 +46,18 @@ if ( ! function_exists( 'esc_html' ) ) {
 	}
 }
 
+if ( ! function_exists( 'esc_attr' ) ) {
+	function esc_attr( mixed $text ): string {
+		return htmlspecialchars( (string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' );
+	}
+}
+
+if ( ! function_exists( 'esc_attr__' ) ) {
+	function esc_attr__( string $text, string $domain = '' ): string {
+		return esc_attr( $text );
+	}
+}
+
 if ( ! function_exists( 'current_user_can' ) ) {
 	function current_user_can( string $capability ): bool {
 		return 'manage_woocommerce' === $capability;

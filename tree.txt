@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 0000005F A0AC:74BD
+Volume serial number is 0000001D A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -14,6 +14,8 @@ C:.
 |   |       calendar-admin.js
 |   |       checkout-simulation.css
 |   |       locations-admin.css
+|   |       order-delivery-recalculation.css
+|   |       order-delivery-recalculation.js
 |   |       rules-admin.css
 |   |       rules-admin.js
 |   |       russian-post-pickup-import.js
@@ -106,6 +108,7 @@ C:.
 |       wdc-legacy-uninstall-cleanup.md
 |       wdc-locations-clear.md
 |       wdc-migration-plan.md
+|       wdc-order-delivery-recalculation.md
 |       wdc-packaging-weight.md
 |       wdc-pickup-foundation.md
 |       wdc-real-fias-integration.md
@@ -186,6 +189,7 @@ C:.
 |   |               
 |   +---Checkout
 |   |   +---Address
+|   |   |       AddressLineParser.php
 |   |   |       CheckoutAddressNormalizer.php
 |   |   |       CheckoutAddressRuntime.php
 |   |   |       FiasAddressNormalizer.php
@@ -385,8 +389,16 @@ C:.
 |   |           Region.php
 |   |           
 |   +---Orders
-|   |   \---Admin
-|   |           OrderDeliveryMetabox.php
+|   |   +---Admin
+|   |   |       OrderDeliveryMetabox.php
+|   |   |       OrderDeliveryRateRenderer.php
+|   |   |       OrderDeliveryRecalculationAdminController.php
+|   |   |       
+|   |   \---Application
+|   |           OrderDeliveryAddressNormalizationService.php
+|   |           OrderDeliveryRecalculationService.php
+|   |           OrderDeliveryReplacementService.php
+|   |           OrderQuoteRequestMapper.php
 |   |           
 |   +---Packaging
 |   |       PackagingApplicationResult.php
@@ -544,6 +556,7 @@ C:.
     |       
     +---orders
     |       run-order-delivery-calculation-meta-smoke.php
+    |       run-order-delivery-recalculation-smoke.php
     |       
     +---packaging
     |       run-packaging-smoke.php
