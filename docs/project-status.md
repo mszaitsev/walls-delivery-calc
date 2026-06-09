@@ -1,6 +1,8 @@
 # Project Status
 
-0.41.25 note: the order-admin delivery recalculation modal now treats courier address suggestions as the normal automatic flow and removes the old `Проверить адрес` button. Manual fallback remains explicit through `Использовать этот адрес`. The modal settlement summary no longer duplicates the region when `display_name` already includes it, admin saves write WooCommerce shipping city/state through checkout-compatible location payload/formatter values, temporary admin courier normalization debug payloads/logs were removed, and courier save UI shows a non-blocking warning when the normalized/manual address settlement cannot be confidently matched to the settlement used for the calculated rate.
+0.42.0 note: the order-admin delivery recalculation stage is closed after an HPOS audit and documentation refresh. The completed flow covers preview, settlement override, pickup map selection, shared checkout courier address suggestions, safe WooCommerce shipping item create/replace, WDC delivery/calculation meta rewrite, shipping address update, totals recalculation, private order notes, non-blocking courier settlement mismatch warnings and save blockers for multiple shipping items or registered shipments. The audited order-delivery recalculation code uses `wc_get_order()`, WooCommerce order/shipping-item CRUD, `$order->get_meta()`, `$order->update_meta_data()`, `$order->calculate_totals(false)` and `$order->add_order_note()`; no direct order `postmeta`/`wp_posts` access or `WP_Query` over `shop_order` was found. The next recommended major branch is `feature/cdek-carrier-foundation`.
+
+0.41.25 note: the order-admin delivery recalculation modal now treats courier address suggestions as the normal automatic flow and removes the old `Проверить адрес` button. Manual fallback remains explicit through `Использовать этот адрес`. The modal settlement summary no longer duplicates the region when `display_name` already includes it, admin saves write WooCommerce shipping city/state through checkout-compatible location payload/formatter values, and courier save UI shows a non-blocking warning when the normalized/manual address settlement cannot be confidently matched to the settlement used for the calculated rate.
 
 0.41.24 note: the order-admin delivery recalculation courier address block now uses the same shared DaData address suggestion flow as checkout. Admin courier suggestions are served by a thin `wdc_order_delivery_recalculate_address_suggest` endpoint backed by `AddressSuggestionService`, `AddressSuggestionNormalizer` and `AddressLineParser`, so street -> house -> flat/room/premise lookup, typed lower-level filtering, house-level finalization and `address_1` formatting match checkout. Manual fallback remains available as an explicit manager action.
 
@@ -40,18 +42,18 @@
 
 ## Общий статус
 
-- Текущая версия: `0.41.25`.
+- Текущая версия: `0.42.0`.
 - Текущая базовая ветка: `develop`.
-- Рабочая ветка: `feature/order-delivery-recalculation`.
+- Рабочая ветка: `chore/order-delivery-recalculation-audit`.
 - Последнее обновление статуса: 2026-06-09.
-- Общая готовность проекта: примерно 72%.
-- Следующий рекомендуемый этап: стабилизировать ручной QA сценария `feature/order-delivery-recalculation` на реальном WooCommerce order admin и затем переходить к следующим carrier/checkout улучшениям.
+- Общая готовность проекта: примерно 74%.
+- Следующий рекомендуемый этап: `feature/cdek-carrier-foundation`.
 
 ## Краткое резюме
 
 Проект уже имеет рабочую платформу расчета доставки для WooCommerce: core bootstrap, DI container, миграции, checkout runtime, календарь доставки, Rule Engine, локальную базу FIAS/GAR, DaData-подсказки и обогащение, слой delivery services, внутреннюю и международную Почту России, ПВЗ Почты России с импортом/REST/картой, а также ручной runtime отправлений Почты России.
 
-После веток 0.38.x-0.39.x закрыты важные части carrier lifecycle для Почты России: создание отправления, отмена backlog-отправления, ручное внесение трекинга, ручное и автоматическое обновление статусов, универсальные статусы, автосинхронизация, автоматическое изменение WooCommerce-статусов заказов и сверка фактической стоимости отправления с расчетом checkout. Не закрыты документы/ярлыки/партии/Ф103 внутри WDC, полноценный admin recalculation, история статусов, production operations dashboard и будущие перевозчики.
+После веток 0.38.x-0.39.x закрыты важные части carrier lifecycle для Почты России: создание отправления, отмена backlog-отправления, ручное внесение трекинга, ручное и автоматическое обновление статусов, универсальные статусы, автосинхронизация, автоматическое изменение WooCommerce-статусов заказов и сверка фактической стоимости отправления с расчетом checkout. В 0.41.x-0.42.0 закрыт полноценный admin recalculation для заказа. Не закрыты документы/ярлыки/партии/Ф103 внутри WDC, история статусов, production operations dashboard и будущие перевозчики.
 
 ## Готовность по блокам
 
@@ -66,18 +68,19 @@
 | Shipment Tracking | partial | 78% | Russian Post Tracking API refresh, mapper, universal status persistence and manual metabox refresh; no full status history UI. |
 | Shipment Autosync | partial | 75% | WP Cron/manual run, 6-hour interval, lock, diagnostics and Russian Post dispatch exist; only one carrier target and no advanced batching. |
 | Order Status Mapping | done | 80% | Carrier-neutral universal shipment status -> WooCommerce status mapping, custom statuses, terminal-status autosync handling and compact private notes. |
-| Checkout Integration | partial | 86% | WooCommerce method, city/location picker, sorting, tariff selector, courier validation, pickup map, order meta, calculation metabox and completed admin order delivery recalculation save flow. |
+| Checkout Integration | partial | 88% | WooCommerce method, city/location picker, sorting, tariff selector, courier validation, pickup map, order meta and calculation metabox. |
+| Order Delivery Recalculation | done | 100% | Admin order delivery recalculation is complete and HPOS-audited: preview, location override, pickup map, courier suggestions, shipping item replacement/create, totals, checkout-compatible calculation data, mismatch warning and shipment/save blockers. |
 | Rule Engine | done | 88% | Conditions/groups, audit, price/days mutations, comments, service rules, simulation and packaging tab. |
 | International Shipping | partial | 75% | Russian Post international rates/country mapping/fallback work; no shipment creation/tracking/documents for international flow. |
 | Future Carriers | not-started | 0% | CDEK, DPD, Yandex Delivery, PEK, Energia, Aerogruz and Jet have no runtime adapters. |
 | Operations / Monitoring | partial | 50% | Logger, diagnostics pages and autosync diagnostics exist; no production dashboard/rotation strategy. |
-| Documentation | partial | 76% | Profile docs are broad and useful; some historical docs need version/status cleanup after this audit. |
+| Documentation | partial | 78% | Profile docs cover the completed order delivery recalculation stage and current CDEK-oriented roadmap; older historical notes remain as changelog context. |
 
 ## Реализовано
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.40.0`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.42.0`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
