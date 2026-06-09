@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Infrastructure\Settings;
 
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+
 defined( 'ABSPATH' ) || exit;
 
 final class SettingsRepository {
@@ -28,7 +30,8 @@ final class SettingsRepository {
 	 * @return array<string, mixed>
 	 */
 	public function defaults(): array {
-		return array(
+		return array_merge(
+			array(
 			'shop_processing_days'          => 1,
 			'auto_generate_next_year'       => true,
 			'enable_new_checkout_shipping' => false,
@@ -102,6 +105,8 @@ final class SettingsRepository {
 			'shipment_status_order_status_mapping_enabled' => false,
 			'shipment_status_order_status_mapping' => array(),
 			'packaging_weight_tiers'       => array(),
+			),
+			CdekSettings::defaults()
 		);
 	}
 

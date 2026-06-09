@@ -94,6 +94,7 @@ C:.
 |       walls-delivery-calc-tech-spec.md
 |       wdc-address-normalization.md
 |       wdc-audit-summary-for-review.md
+|       wdc-cdek-foundation.md
 |       wdc-carrier-foundation.md
 |       wdc-checkout-integration.md
 |       wdc-core-platform.md
@@ -153,6 +154,18 @@ C:.
 |   +---Carriers
 |   |   |   .gitkeep
 |   |   |   
+|   |   +---Cdek
+|   |   |   |   CdekCredentials.php
+|   |   |   |   CdekSettings.php
+|   |   |   |   
+|   |   |   \---Api
+|   |   |           CdekApiClient.php
+|   |   |           CdekApiException.php
+|   |   |           CdekApiResponse.php
+|   |   |           CdekHttpClientInterface.php
+|   |   |           CdekOAuthTokenService.php
+|   |   |           WpCdekHttpClient.php
+|   |   |           
 |   |   +---Contracts
 |   |   |       CarrierAdapterInterface.php
 |   |   |       
@@ -512,6 +525,9 @@ C:.
     |       
     +---calendar
     |       run-calendar-smoke.php
+    |       
+    +---cdek
+    |       run-cdek-foundation-smoke.php
     |       
     +---carriers
     |       run-russian-post-countries-smoke.php
