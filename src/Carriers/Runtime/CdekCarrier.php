@@ -65,6 +65,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		}
 
 		$to = $this->locations->resolve( $request );
+		$this->logger->debug( 'CDEK location resolved.', $this->sanitize_location_result( $to ) );
 		if ( empty( $to['success'] ) ) {
 			return $this->empty_quote( $request, 'destination_city_not_resolved', $to );
 		}
@@ -78,16 +79,39 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			return $this->empty_quote( $request, 'api_error', array( 'message' => $exception->getMessage(), 'api_error_details' => $details ) );
 		}
 
+		$tariffs = $this->tariffs_from_response( $result );
+		$this->logger->debug( 'CDEK tarifflist succeeded.', $this->tarifflist_summary( $result, $tariffs ) );
+
 		$rates = array();
-		foreach ( $this->tariffs_from_response( $result ) as $tariff ) {
+		$skipped_unknown = 0;
+		$skipped_other_type = 0;
+		foreach ( $tariffs as $tariff ) {
 			$type = $this->classify_delivery_type( $tariff );
+			if ( DeliveryType::UNKNOWN === $type ) {
+				++$skipped_unknown;
+				continue;
+			}
 			if ( $type !== $delivery_type ) {
+				++$skipped_other_type;
 				continue;
 			}
 			$rate = $this->rate_from_tariff( $request, $type, $tariff, $payload, $result, $to );
 			if ( $rate instanceof DeliveryRate ) {
 				$rates[] = $rate;
 			}
+		}
+		$filter_diagnostics = array(
+			'requested_delivery_type' => $delivery_type,
+			'matched_rates_count' => count( $rates ),
+			'skipped_unknown_count' => $skipped_unknown,
+			'skipped_other_type_count' => $skipped_other_type,
+		);
+		$this->logger->debug( 'CDEK tariff filter completed.', $filter_diagnostics );
+		if ( array() !== $tariffs && array() === $rates ) {
+			$this->logger->warning( 'CDEK tariff response has no matching tariffs for delivery type.', $filter_diagnostics );
+		}
+		if ( array() === $rates ) {
+			$this->logger->warning( 'CDEK quote returned empty.', array_merge( array( 'reason' => 'no_tariffs_available' ), $filter_diagnostics ) );
 		}
 
 		return new DeliveryQuote(
@@ -109,6 +133,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 	 * @param array<string,mixed> $diagnostics
 	 */
 	private function empty_quote( QuoteRequest $request, string $reason, array $diagnostics = array() ): DeliveryQuote {
+		$this->logger->warning( 'CDEK quote returned empty.', array_merge( array( 'reason' => $reason ), $this->sanitize_empty_quote_diagnostics( $diagnostics ) ) );
 		return new DeliveryQuote( $this->quote_id( $request, $reason ), self::KEY, $request->destination, $request->package, array(), false, $reason, $reason, false, 'api', array_merge( array( 'fallback_reason' => $reason ), $diagnostics ) );
 	}
 
@@ -130,7 +155,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 
 		return array(
 			'type' => 1,
-			'currency' => 'RUB',
+			'currency' => 1,
 			'from_location' => $from,
 			'to_location' => $to_location,
 			'packages' => array(
@@ -292,6 +317,72 @@ final class CdekCarrier implements CarrierAdapterInterface {
 				'currency' => true,
 			)
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $result
+	 * @param array<int,array<string,mixed>> $tariffs
+	 * @return array<string,mixed>
+	 */
+	private function tarifflist_summary( array $result, array $tariffs ): array {
+		$modes = array();
+		$items = array();
+		foreach ( $tariffs as $tariff ) {
+			$details = is_array( $tariff['result'] ?? null ) ? array_merge( $tariff, $tariff['result'] ) : $tariff;
+			if ( isset( $details['delivery_mode'] ) ) {
+				$modes[] = (int) $details['delivery_mode'];
+			}
+			$items[] = array(
+				'tariff_code' => (string) ( $details['tariff_code'] ?? '' ),
+				'tariff_name' => (string) ( $details['tariff_name'] ?? $details['tariff_description'] ?? '' ),
+				'delivery_sum' => is_numeric( $details['delivery_sum'] ?? null ) ? (float) $details['delivery_sum'] : null,
+				'period_min' => is_numeric( $details['period_min'] ?? null ) ? (int) $details['period_min'] : null,
+				'period_max' => is_numeric( $details['period_max'] ?? null ) ? (int) $details['period_max'] : null,
+			);
+		}
+
+		return array(
+			'http_code' => (int) ( $result['http_code'] ?? 0 ),
+			'tariff_codes_count' => count( $tariffs ),
+			'delivery_mode_values' => array_values( array_unique( $modes ) ),
+			'tariffs' => $items,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $result
+	 * @return array<string,mixed>
+	 */
+	private function sanitize_location_result( array $result ): array {
+		return array(
+			'success' => (bool) ( $result['success'] ?? false ),
+			'city_code' => isset( $result['city_code'] ) ? (int) $result['city_code'] : null,
+			'city_name' => (string) ( $result['city_name'] ?? '' ),
+			'region' => (string) ( $result['region'] ?? '' ),
+			'source' => (string) ( $result['source'] ?? '' ),
+			'confidence' => isset( $result['confidence'] ) ? (float) $result['confidence'] : null,
+			'reason' => (string) ( $result['reason'] ?? '' ),
+			'attempts_count' => isset( $result['attempts_count'] ) ? (int) $result['attempts_count'] : 0,
+			'attempts_labels' => is_array( $result['attempts_labels'] ?? null ) ? $result['attempts_labels'] : array(),
+			'attempts' => is_array( $result['attempts'] ?? null ) ? $result['attempts'] : array(),
+			'selected_attempt_label' => (string) ( $result['selected_attempt_label'] ?? '' ),
+			'final_reason' => (string) ( $result['final_reason'] ?? '' ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $diagnostics
+	 * @return array<string,mixed>
+	 */
+	private function sanitize_empty_quote_diagnostics( array $diagnostics ): array {
+		if ( isset( $diagnostics['success'] ) || isset( $diagnostics['city_code'] ) || isset( $diagnostics['confidence'] ) ) {
+			return array( 'location' => $this->sanitize_location_result( $diagnostics ) );
+		}
+		if ( isset( $diagnostics['api_error_details'] ) && is_array( $diagnostics['api_error_details'] ) ) {
+			return array( 'api_error_details' => $diagnostics['api_error_details'] );
+		}
+
+		return array();
 	}
 
 	private function method_title( string $delivery_type ): string {

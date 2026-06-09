@@ -18,7 +18,7 @@ final class CdekLocationResolver {
 	}
 
 	/**
-	 * @return array{success:bool,city_code:int,city_name:string,region:string,source:string,confidence:float,reason:string}
+	 * @return array<string,mixed>
 	 */
 	public function resolve( QuoteRequest $request ): array {
 		$fias = $this->destination_fias( $request );
@@ -35,37 +35,56 @@ final class CdekLocationResolver {
 			return $cached;
 		}
 
-		try {
-			$result = $this->client->cities(
-				array_filter(
+		$attempts = $this->query_attempts( $fias, $city, $region, $request );
+		$diagnostics = array();
+		$best = $this->failed( 'not_found' );
+
+		foreach ( $attempts as $attempt ) {
+			$items = array();
+			$http_code = 0;
+			try {
+				$result = $this->client->cities( $attempt['query'] );
+				$http_code = (int) ( $result['http_code'] ?? 0 );
+				$items = is_array( $result['body'] ?? null ) ? $result['body'] : array();
+			} catch ( CdekApiException $exception ) {
+				$http_code = (int) ( $exception->details()['http_code'] ?? 0 );
+				$this->logger->warning(
+					'CDEK location resolve failed.',
 					array(
-						'country_codes' => 'RU',
+						'message' => $exception->getMessage(),
 						'city' => $city,
 						'region' => $region,
-						'fias_guid' => $fias,
-					),
-					static fn( mixed $value ): bool => '' !== trim( (string) $value )
-				)
-			);
-		} catch ( CdekApiException $exception ) {
-			$this->logger->warning( 'CDEK location resolve failed.', array( 'message' => $exception->getMessage(), 'city' => $city, 'region' => $region ) );
-			return $this->failed( 'api_error' );
+						'attempt_label' => $attempt['label'],
+						'http_code' => $http_code,
+					)
+				);
+				$diagnostics[] = $this->attempt_diagnostics( $attempt['label'], $attempt['query'], $http_code, 0 );
+
+				return array_merge( $this->failed( 'api_error' ), $this->resolve_diagnostics( $diagnostics, '', 'api_error' ) );
+			}
+
+			$diagnostics[] = $this->attempt_diagnostics( $attempt['label'], $attempt['query'], $http_code, count( $items ) );
+			$match = $this->best_match( $items, $fias, $attempt['match_city'], $attempt['match_region'] );
+			if ( (float) ( $match['confidence'] ?? 0.0 ) > (float) ( $best['confidence'] ?? 0.0 ) ) {
+				$best = $match;
+				$best['selected_attempt_label'] = $attempt['label'];
+			}
+			if ( ! empty( $match['success'] ) ) {
+				$selected = array_merge( $match, $this->resolve_diagnostics( $diagnostics, $attempt['label'], '' ) );
+				$this->store( $cache_key, $selected );
+
+				return $selected;
+			}
 		}
 
-		$items = is_array( $result['body'] ?? null ) ? $result['body'] : array();
-		$match = $this->best_match( $items, $fias, $city, $region );
-		if ( empty( $match['success'] ) ) {
-			return $match;
-		}
+		$reason = (string) ( $best['reason'] ?? 'not_found' );
 
-		$this->store( $cache_key, $match );
-
-		return $match;
+		return array_merge( $best, $this->resolve_diagnostics( $diagnostics, (string) ( $best['selected_attempt_label'] ?? '' ), $reason ) );
 	}
 
 	/**
 	 * @param array<int|string,mixed> $items
-	 * @return array{success:bool,city_code:int,city_name:string,region:string,source:string,confidence:float,reason:string}
+	 * @return array<string,mixed>
 	 */
 	private function best_match( array $items, string $fias, string $city, string $region ): array {
 		$best = $this->failed( 'not_found' );
@@ -77,6 +96,7 @@ final class CdekLocationResolver {
 			if ( $code <= 0 ) {
 				continue;
 			}
+
 			$item_city = (string) ( $item['city'] ?? $item['city_name'] ?? '' );
 			$item_region = (string) ( $item['region'] ?? $item['region_name'] ?? '' );
 			$item_fias = strtolower( trim( (string) ( $item['fias_guid'] ?? $item['fias_id'] ?? '' ) ) );
@@ -84,7 +104,13 @@ final class CdekLocationResolver {
 			if ( '' !== $fias && '' !== $item_fias && strtolower( $fias ) === $item_fias ) {
 				$confidence = 1.0;
 			} elseif ( '' !== $city && $this->normalize( $city ) === $this->normalize( $item_city ) ) {
-				$confidence = '' === $region || '' === $item_region || str_contains( $this->normalize( $item_region ), $this->normalize( $region ) ) || str_contains( $this->normalize( $region ), $this->normalize( $item_region ) ) ? 0.9 : 0.7;
+				if ( '' === $region ) {
+					$confidence = 0.86;
+				} elseif ( '' === $item_region || $this->regions_compatible( $region, $item_region ) ) {
+					$confidence = 0.9;
+				} else {
+					$confidence = 0.7;
+				}
 			}
 			if ( $confidence > (float) ( $best['confidence'] ?? 0 ) ) {
 				$best = array(
@@ -103,7 +129,7 @@ final class CdekLocationResolver {
 	}
 
 	/**
-	 * @return array{success:bool,city_code:int,city_name:string,region:string,source:string,confidence:float,reason:string}
+	 * @return array<string,mixed>
 	 */
 	private function failed( string $reason ): array {
 		return array(
@@ -134,7 +160,139 @@ final class CdekLocationResolver {
 		$value = str_replace( 'ё', 'е', $value );
 		$value = preg_replace( '/\b(город|г|область|обл|край|республика|респ)\b\.?/u', ' ', $value ) ?? $value;
 
-		return trim( preg_replace( '/[^a-zа-я0-9]+/u', ' ', $value ) ?? $value );
+		return trim( preg_replace( '/[^a-zа-яА-Я0-9]+/u', ' ', $value ) ?? $value );
+	}
+
+	private function normalized_city_for_query( string $city ): string {
+		return $this->title_case( $this->normalize( $city ) );
+	}
+
+	private function title_case( string $value ): string {
+		if ( '' === $value ) {
+			return '';
+		}
+		if ( function_exists( 'mb_convert_case' ) ) {
+			return mb_convert_case( $value, MB_CASE_TITLE, 'UTF-8' );
+		}
+
+		return ucwords( $value );
+	}
+
+	private function regions_compatible( string $expected, string $actual ): bool {
+		$expected = $this->normalize( $expected );
+		$actual = $this->normalize( $actual );
+
+		return '' === $expected || '' === $actual || str_contains( $actual, $expected ) || str_contains( $expected, $actual );
+	}
+
+	/**
+	 * @return array<int,array{label:string,query:array<string,string>,match_city:string,match_region:string}>
+	 */
+	private function query_attempts( string $fias, string $city, string $region, QuoteRequest $request ): array {
+		$attempts = array();
+		if ( '' !== $fias ) {
+			$attempts[] = $this->attempt( 'fias_guid_only', array( 'fias_guid' => $fias ), $city, $region );
+		}
+		if ( '' !== $city && '' !== $region ) {
+			$attempts[] = $this->attempt( 'city_region', array( 'city' => $city, 'region' => $region ), $city, $region );
+		}
+		if ( '' !== $city ) {
+			$attempts[] = $this->attempt( 'city_only', array( 'city' => $city ), $city, '' );
+			$normalized_city = $this->normalized_city_for_query( $city );
+			if ( '' !== $normalized_city && $normalized_city !== trim( $city ) ) {
+				$attempts[] = $this->attempt( 'normalized_city_only', array( 'city' => $normalized_city ), $normalized_city, '' );
+			}
+		}
+
+		$context_city = $this->city_from_context( $request );
+		if ( '' !== $context_city && $this->normalize( $context_city ) !== $this->normalize( $city ) ) {
+			$attempts[] = $this->attempt( 'context_city_only', array( 'city' => $context_city ), $context_city, '' );
+		}
+
+		return $this->unique_attempts( $attempts );
+	}
+
+	/**
+	 * @param array<string,string> $query
+	 * @return array{label:string,query:array<string,string>,match_city:string,match_region:string}
+	 */
+	private function attempt( string $label, array $query, string $match_city, string $match_region ): array {
+		$query = array_merge( array( 'country_codes' => 'RU' ), $query );
+
+		return array( 'label' => $label, 'query' => $query, 'match_city' => $match_city, 'match_region' => $match_region );
+	}
+
+	/**
+	 * @param array<int,array{label:string,query:array<string,string>,match_city:string,match_region:string}> $attempts
+	 * @return array<int,array{label:string,query:array<string,string>,match_city:string,match_region:string}>
+	 */
+	private function unique_attempts( array $attempts ): array {
+		$seen = array();
+		$unique = array();
+		foreach ( $attempts as $attempt ) {
+			$key = (string) json_encode( $attempt['query'] );
+			if ( isset( $seen[ $key ] ) ) {
+				continue;
+			}
+			$seen[ $key ] = true;
+			$unique[] = $attempt;
+		}
+
+		return $unique;
+	}
+
+	private function city_from_context( QuoteRequest $request ): string {
+		foreach ( array( 'display_name', 'selected_location_name' ) as $key ) {
+			$value = trim( (string) ( $request->customer_context[ $key ] ?? '' ) );
+			$city = $this->extract_city_from_text( $value );
+			if ( '' !== $city ) {
+				return $city;
+			}
+		}
+
+		return '';
+	}
+
+	private function extract_city_from_text( string $value ): string {
+		$parts = array_values( array_filter( array_map( 'trim', preg_split( '/[,;]+/u', $value ) ?: array() ) ) );
+		foreach ( $parts as $part ) {
+			if ( preg_match( '/\b(область|обл|край|республика|район)\b/u', $part ) ) {
+				continue;
+			}
+			$city = $this->normalized_city_for_query( $part );
+			if ( '' !== $city ) {
+				return $city;
+			}
+		}
+
+		return $this->normalized_city_for_query( $value );
+	}
+
+	/**
+	 * @param array<string,string> $query
+	 * @return array<string,mixed>
+	 */
+	private function attempt_diagnostics( string $label, array $query, int $http_code, int $items_count ): array {
+		return array(
+			'label' => $label,
+			'query' => $query,
+			'http_code' => $http_code,
+			'items_count' => $items_count,
+		);
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $attempts
+	 * @return array<string,mixed>
+	 */
+	private function resolve_diagnostics( array $attempts, string $selected_label, string $reason ): array {
+		return array(
+			'attempts_count' => count( $attempts ),
+			'attempts_labels' => array_values( array_map( static fn( array $attempt ): string => (string) $attempt['label'], $attempts ) ),
+			'attempts' => $attempts,
+			'selected_attempt_label' => $selected_label,
+			'final_reason' => $reason,
+		);
 	}
 
 	private function cache_key( string $fias, string $city, string $region ): string {

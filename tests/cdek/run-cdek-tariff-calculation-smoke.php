@@ -79,6 +79,19 @@ function wc_get_logger(): object {
 	};
 }
 
+/**
+ * @return array<string,mixed>
+ */
+function cdek_tariff_find_log( string $message ): array {
+	foreach ( array_reverse( $GLOBALS['wdc_cdek_tariff_logs'] ?? array() ) as $log ) {
+		if ( is_array( $log ) && $message === (string) ( $log['message'] ?? '' ) ) {
+			return $log;
+		}
+	}
+
+	return array();
+}
+
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
@@ -153,6 +166,10 @@ final class CdekTariffFakeHttpClient implements CdekHttpClientInterface {
 	/** @var array<int,array{method:string,url:string,args:array<string,mixed>}> */
 	public array $requests = array();
 	public bool $tariff_error = false;
+	/** @var null|array<int,array<string,mixed>> */
+	public ?array $tariff_codes_override = null;
+	/** @var array<int,array<int,array<string,mixed>>> */
+	public array $location_responses = array();
 
 	public function request( string $method, string $url, array $args = array() ): CdekApiResponse {
 		$this->requests[] = array( 'method' => $method, 'url' => $url, 'args' => $args );
@@ -160,11 +177,17 @@ final class CdekTariffFakeHttpClient implements CdekHttpClientInterface {
 			return new CdekApiResponse( 200, (string) json_encode( array( 'access_token' => 'runtime-token', 'expires_in' => 3600 ) ) );
 		}
 		if ( str_contains( $url, '/v2/location/cities' ) ) {
+			if ( array() !== $this->location_responses ) {
+				return new CdekApiResponse( 200, (string) json_encode( array_shift( $this->location_responses ) ) );
+			}
 			return new CdekApiResponse( 200, (string) json_encode( array( array( 'code' => 270, 'city' => 'Москва', 'region' => 'Москва', 'fias_guid' => 'dest-fias' ) ) ) );
 		}
 		if ( str_contains( $url, '/v2/calculator/tarifflist' ) ) {
 			if ( $this->tariff_error ) {
 				return new CdekApiResponse( 400, (string) json_encode( array( 'code' => 'INVALID_ROUTE', 'message' => 'bad route', 'Account' => 'account-id', 'access_token' => 'runtime-token' ) ) );
+			}
+			if ( null !== $this->tariff_codes_override ) {
+				return new CdekApiResponse( 200, (string) json_encode( array( 'tariff_codes' => $this->tariff_codes_override ) ) );
 			}
 			return new CdekApiResponse(
 				200,
@@ -221,6 +244,38 @@ function cdek_tariff_request( string $delivery_type = DeliveryType::PICKUP ): Qu
 	);
 }
 
+function cdek_tariff_location_request( string $city, string $region = '', string $fias = '', array $context = array() ): QuoteRequest {
+	$item = new PackageItem( 'sku', 'Товар', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), 700, 12, 8, 4 );
+	$package = Package::from_items( array( $item ), 300, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) );
+
+	return new QuoteRequest(
+		'RU',
+		new Address( country_code: 'RU', region_name: $region, city: $city, postcode: '101000', street: '', house: '', raw_address: '', fias_id: $fias ),
+		$package,
+		'cod',
+		Money::from_rubles( 1000 ),
+		'2026-06-10',
+		array_merge( array( 'delivery_type' => DeliveryType::PICKUP, 'city_name' => $city, 'selected_location_region' => $region, 'selected_location_fias_id' => $fias ), $context )
+	);
+}
+
+/**
+ * @return array<int,array<string,string>>
+ */
+function cdek_tariff_location_queries( CdekTariffFakeHttpClient $http ): array {
+	$queries = array();
+	foreach ( $http->requests as $request ) {
+		if ( ! str_contains( $request['url'], '/v2/location/cities' ) ) {
+			continue;
+		}
+		$query = array();
+		parse_str( (string) ( parse_url( $request['url'], PHP_URL_QUERY ) ?: '' ), $query );
+		$queries[] = array_map( 'strval', $query );
+	}
+
+	return $queries;
+}
+
 function cdek_tariff_orchestrator( CdekCarrier $carrier, ?DeliveryServiceRegistry $service_registry = null, ?DeliveryServiceManager $service_manager = null ): CheckoutOrchestrator {
 	$registry = new CarrierRegistry();
 	$registry->register( $carrier );
@@ -248,9 +303,71 @@ function cdek_tariff_service_runtime( CdekCarrier $carrier, bool $enabled ): arr
 	return array( new DeliveryServiceRegistry( $services, ( function () use ( $carrier ): CarrierRegistry { $registry = new CarrierRegistry(); $registry->register( $carrier ); return $registry; } )() ), $manager );
 }
 
+$fallback_http = new CdekTariffFakeHttpClient();
+$fallback_http->location_responses = array(
+	array(),
+	array(),
+	array( array( 'code' => 270, 'city' => 'Новосибирск', 'region' => 'Новосибирская область' ) ),
+);
+[ , $fallback_client ] = cdek_tariff_settings( $fallback_http, true );
+$fallback_resolver = new CdekLocationResolver( $fallback_client, new Logger() );
+$fallback_result = $fallback_resolver->resolve( cdek_tariff_location_request( 'Новосибирск', 'Новосибирская область', 'missing-fias' ) );
+cdek_tariff_assert( true === (bool) ( $fallback_result['success'] ?? false ), 'CDEK resolver must fallback to city only when stricter attempts return empty.' );
+cdek_tariff_assert( 270 === (int) ( $fallback_result['city_code'] ?? 0 ), 'CDEK resolver fallback must return city code.' );
+cdek_tariff_assert( 'city_only' === (string) ( $fallback_result['selected_attempt_label'] ?? '' ), 'CDEK resolver must report selected fallback attempt.' );
+cdek_tariff_assert( 3 === (int) ( $fallback_result['attempts_count'] ?? 0 ), 'CDEK resolver diagnostics must include attempts count.' );
+cdek_tariff_assert( array( 'fias_guid_only', 'city_region', 'city_only' ) === array_values( $fallback_result['attempts_labels'] ?? array() ), 'CDEK resolver diagnostics must include attempt labels.' );
+
+$normalized_http = new CdekTariffFakeHttpClient();
+$normalized_http->location_responses = array(
+	array(),
+	array( array( 'code' => 270, 'city' => 'Новосибирск', 'region' => 'Новосибирская область' ) ),
+);
+[ , $normalized_client ] = cdek_tariff_settings( $normalized_http, true );
+$normalized_result = ( new CdekLocationResolver( $normalized_client, new Logger() ) )->resolve( cdek_tariff_location_request( 'г Новосибирск' ) );
+$normalized_queries = cdek_tariff_location_queries( $normalized_http );
+cdek_tariff_assert( true === (bool) ( $normalized_result['success'] ?? false ), 'CDEK resolver must resolve normalized city names.' );
+cdek_tariff_assert( 'Новосибирск' === (string) ( $normalized_queries[1]['city'] ?? '' ), 'CDEK resolver must query normalized city without type prefix.' );
+
+$fias_http = new CdekTariffFakeHttpClient();
+$fias_http->location_responses = array(
+	array( array( 'code' => 270, 'city' => 'Новосибирск', 'region' => 'Новосибирская область', 'fias_guid' => 'exact-fias' ) ),
+);
+[ , $fias_client ] = cdek_tariff_settings( $fias_http, true );
+$fias_result = ( new CdekLocationResolver( $fias_client, new Logger() ) )->resolve( cdek_tariff_location_request( 'Новосибирск', 'Новосибирская область', 'exact-fias' ) );
+cdek_tariff_assert( true === (bool) ( $fias_result['success'] ?? false ) && 1.0 === (float) ( $fias_result['confidence'] ?? 0 ), 'CDEK resolver FIAS exact match must have confidence 1.0.' );
+
+$city_only_http = new CdekTariffFakeHttpClient();
+$city_only_http->location_responses = array(
+	array( array( 'code' => 270, 'city' => 'Новосибирск', 'region' => 'Новосибирская область' ) ),
+);
+[ , $city_only_client ] = cdek_tariff_settings( $city_only_http, true );
+$city_only_result = ( new CdekLocationResolver( $city_only_client, new Logger() ) )->resolve( cdek_tariff_location_request( 'Новосибирск' ) );
+cdek_tariff_assert( true === (bool) ( $city_only_result['success'] ?? false ) && (float) ( $city_only_result['confidence'] ?? 0 ) >= 0.85, 'CDEK resolver city exact without region must be confident enough.' );
+
+$low_confidence_http = new CdekTariffFakeHttpClient();
+$low_confidence_http->location_responses = array(
+	array( array( 'code' => 270, 'city' => 'Новосибирск', 'region' => 'Томская область' ) ),
+);
+[ , $low_confidence_client ] = cdek_tariff_settings( $low_confidence_http, true );
+$low_confidence_result = ( new CdekLocationResolver( $low_confidence_client, new Logger() ) )->resolve( cdek_tariff_location_request( 'Новосибирск', 'Новосибирская область' ) );
+cdek_tariff_assert( false === (bool) ( $low_confidence_result['success'] ?? true ) && 'low_confidence' === (string) ( $low_confidence_result['reason'] ?? '' ), 'CDEK resolver low confidence match must not be successful.' );
+
+$not_found_http = new CdekTariffFakeHttpClient();
+$not_found_http->location_responses = array(
+	array(),
+	array( array( 'code' => 270, 'city' => 'Новосибирск', 'region' => 'Новосибирская область' ) ),
+);
+[ , $not_found_client ] = cdek_tariff_settings( $not_found_http, true );
+$not_found_resolver = new CdekLocationResolver( $not_found_client, new Logger() );
+$not_found_first = $not_found_resolver->resolve( cdek_tariff_location_request( 'Новосибирск' ) );
+$not_found_second = $not_found_resolver->resolve( cdek_tariff_location_request( 'Новосибирск' ) );
+cdek_tariff_assert( false === (bool) ( $not_found_first['success'] ?? true ) && true === (bool) ( $not_found_second['success'] ?? false ), 'CDEK resolver must not cache not_found as permanent failure.' );
+
 $http = new CdekTariffFakeHttpClient();
 [ $settings, $client, $carrier ] = cdek_tariff_settings( $http, true );
 
+$GLOBALS['wdc_cdek_tariff_logs'] = array();
 $pickup_quote = $carrier->quote( cdek_tariff_request( DeliveryType::PICKUP ) );
 cdek_tariff_assert( 1 === count( $pickup_quote->rates ), 'Pickup CDEK tariff must be mapped to one rate.' );
 $pickup_rate = $pickup_quote->rates[0];
@@ -261,6 +378,19 @@ cdek_tariff_assert( 350.5 === $pickup_rate->price->get_rubles(), 'CDEK delivery_
 cdek_tariff_assert( '2-4 дня' === (string) $pickup_rate->meta['api_delivery_days_text'], 'CDEK period must be mapped to delivery days text.' );
 cdek_tariff_assert( DeliveryType::PICKUP === $pickup_rate->delivery_type, 'delivery_mode 1 must be pickup.' );
 cdek_tariff_assert( false === $pickup_rate->requires_pickup_point, 'CDEK pickup point selection is intentionally not required yet.' );
+$location_log = cdek_tariff_find_log( 'CDEK location resolved.' );
+cdek_tariff_assert( true === (bool) ( $location_log['context']['success'] ?? false ), 'CDEK location resolve result must be logged.' );
+cdek_tariff_assert( 270 === (int) ( $location_log['context']['city_code'] ?? 0 ), 'CDEK location resolve log must include city_code.' );
+$tarifflist_log = cdek_tariff_find_log( 'CDEK tarifflist succeeded.' );
+cdek_tariff_assert( 200 === (int) ( $tarifflist_log['context']['http_code'] ?? 0 ), 'CDEK successful tarifflist log must include HTTP status.' );
+cdek_tariff_assert( 3 === (int) ( $tarifflist_log['context']['tariff_codes_count'] ?? 0 ), 'CDEK successful tarifflist log must include tariff_codes count.' );
+cdek_tariff_assert( array( 1, 2, 9 ) === array_values( $tarifflist_log['context']['delivery_mode_values'] ?? array() ), 'CDEK successful tarifflist log must include delivery_mode values.' );
+cdek_tariff_assert( '136' === (string) ( $tarifflist_log['context']['tariffs'][0]['tariff_code'] ?? '' ), 'CDEK successful tarifflist log must include sanitized tariff code.' );
+$filter_log = cdek_tariff_find_log( 'CDEK tariff filter completed.' );
+cdek_tariff_assert( DeliveryType::PICKUP === (string) ( $filter_log['context']['requested_delivery_type'] ?? '' ), 'CDEK filter log must include requested delivery type.' );
+cdek_tariff_assert( 1 === (int) ( $filter_log['context']['matched_rates_count'] ?? 0 ), 'CDEK filter log must include matched rates count.' );
+cdek_tariff_assert( 1 === (int) ( $filter_log['context']['skipped_unknown_count'] ?? 0 ), 'CDEK filter log must include skipped unknown count.' );
+cdek_tariff_assert( 1 === (int) ( $filter_log['context']['skipped_other_type_count'] ?? 0 ), 'CDEK filter log must include skipped other delivery type count.' );
 
 $courier_quote = $carrier->quote( cdek_tariff_request( DeliveryType::COURIER ) );
 cdek_tariff_assert( 1 === count( $courier_quote->rates ), 'Courier CDEK tariff must be mapped to one rate.' );
@@ -274,6 +404,8 @@ cdek_tariff_assert( 'Bearer runtime-token' === ( $tariff_request['args']['header
 $payload = json_decode( (string) $tariff_request['args']['body'], true );
 cdek_tariff_assert( 270 === (int) ( $payload['from_location']['code'] ?? 0 ), 'CDEK from_location.code mismatch.' );
 cdek_tariff_assert( 270 === (int) ( $payload['to_location']['code'] ?? 0 ), 'CDEK to_location.code mismatch.' );
+cdek_tariff_assert( 1 === ( $payload['currency'] ?? null ), 'CDEK tarifflist currency must be int 1 for RUB.' );
+cdek_tariff_assert( ! str_contains( (string) $tariff_request['args']['body'], '"currency":"RUB"' ) && ! str_contains( (string) $tariff_request['args']['body'], '"RUB"' ), 'CDEK tarifflist payload must not contain string RUB currency.' );
 cdek_tariff_assert( 1000 === (int) ( $payload['packages'][0]['weight'] ?? 0 ), 'CDEK package weight mismatch.' );
 cdek_tariff_assert( 12 === (int) ( $payload['packages'][0]['length'] ?? 0 ) && 8 === (int) ( $payload['packages'][0]['width'] ?? 0 ) && 4 === (int) ( $payload['packages'][0]['height'] ?? 0 ), 'CDEK package dimensions mismatch.' );
 
@@ -284,8 +416,11 @@ cdek_tariff_assert( array() === array_values( array_filter( $disabled_result->ra
 $missing_http = new CdekTariffFakeHttpClient();
 [ , , $missing_carrier ] = cdek_tariff_settings( $missing_http, false );
 [ $enabled_registry, $enabled_manager ] = cdek_tariff_service_runtime( $missing_carrier, true );
+$GLOBALS['wdc_cdek_tariff_logs'] = array();
 $missing_result = cdek_tariff_orchestrator( $missing_carrier, $enabled_registry, $enabled_manager )->calculate( cdek_tariff_request(), array(), RateSorter::CHEAPEST, false );
 cdek_tariff_assert( array() === array_values( array_filter( $missing_result->rates, static fn( DeliveryRate $rate ): bool => CdekCarrier::KEY === $rate->carrier_key ) ), 'Missing CDEK credentials must not produce rates or fatal.' );
+$empty_reason_log = cdek_tariff_find_log( 'CDEK quote returned empty.' );
+cdek_tariff_assert( 'unsupported_or_credentials_missing' === (string) ( $empty_reason_log['context']['reason'] ?? '' ), 'CDEK empty quote reason must be logged.' );
 
 $http = new CdekTariffFakeHttpClient();
 [ $settings, $client, $carrier ] = cdek_tariff_settings( $http, true );
@@ -293,6 +428,24 @@ $http = new CdekTariffFakeHttpClient();
 $success_result = cdek_tariff_orchestrator( $carrier, $enabled_registry, $enabled_manager )->calculate( cdek_tariff_request(), array(), RateSorter::CHEAPEST, false );
 $cdek_rates = array_values( array_filter( $success_result->rates, static fn( DeliveryRate $rate ): bool => CdekCarrier::KEY === $rate->carrier_key ) );
 cdek_tariff_assert( 2 === count( $cdek_rates ), 'Enabled CDEK service must produce pickup and courier runtime rates.' );
+
+$no_match_http = new CdekTariffFakeHttpClient();
+$no_match_http->tariff_codes_override = array(
+	array( 'tariff_code' => 137, 'tariff_name' => 'Courier only', 'delivery_mode' => 2, 'delivery_sum' => 520, 'period_min' => 1, 'period_max' => 1 ),
+	array( 'tariff_code' => 999, 'tariff_name' => 'Unknown mode', 'delivery_mode' => 9, 'delivery_sum' => 1, 'period_min' => 1, 'period_max' => 1 ),
+);
+$GLOBALS['wdc_cdek_tariff_logs'] = array();
+[ , , $no_match_carrier ] = cdek_tariff_settings( $no_match_http, true );
+$no_match_quote = $no_match_carrier->quote( cdek_tariff_request( DeliveryType::PICKUP ) );
+cdek_tariff_assert( array() === $no_match_quote->rates && 'no_tariffs_available' === $no_match_quote->error_code, 'CDEK tariff response with no matching tariffs must produce no rates.' );
+$no_match_filter_log = cdek_tariff_find_log( 'CDEK tariff filter completed.' );
+cdek_tariff_assert( 0 === (int) ( $no_match_filter_log['context']['matched_rates_count'] ?? -1 ), 'CDEK no-match filter log must include zero matched rates.' );
+cdek_tariff_assert( 1 === (int) ( $no_match_filter_log['context']['skipped_unknown_count'] ?? 0 ), 'CDEK no-match filter log must include unknown skipped count.' );
+cdek_tariff_assert( 1 === (int) ( $no_match_filter_log['context']['skipped_other_type_count'] ?? 0 ), 'CDEK no-match filter log must include other type skipped count.' );
+$no_match_warning = cdek_tariff_find_log( 'CDEK tariff response has no matching tariffs for delivery type.' );
+cdek_tariff_assert( DeliveryType::PICKUP === (string) ( $no_match_warning['context']['requested_delivery_type'] ?? '' ), 'CDEK no matching tariffs warning must include requested delivery type.' );
+$no_tariffs_reason_log = cdek_tariff_find_log( 'CDEK quote returned empty.' );
+cdek_tariff_assert( 'no_tariffs_available' === (string) ( $no_tariffs_reason_log['context']['reason'] ?? '' ), 'CDEK no_tariffs_available reason must be logged.' );
 
 $rule = new Rule( 1, 'Add 100 rub', true, 10, RuleRepository::TARGET_DEFAULT, '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 100, RuleOperationBases::RUBLES, false, false );
 $ruled = cdek_tariff_orchestrator( $carrier )->calculate( cdek_tariff_request(), array( $rule ), RateSorter::CHEAPEST, false );
@@ -352,10 +505,12 @@ cdek_tariff_assert( 'INVALID_ROUTE' === (string) ( $details['cdek_error_code'] ?
 cdek_tariff_assert( 'bad route' === (string) ( $details['cdek_error_message'] ?? '' ), 'CDEK API error diagnostics must include CDEK error message.' );
 cdek_tariff_assert( '[redacted]' === (string) ( $details['response']['Account'] ?? '' ), 'CDEK API error diagnostics must redact Account.' );
 cdek_tariff_assert( '[redacted]' === (string) ( $details['response']['access_token'] ?? '' ), 'CDEK API error diagnostics must redact access_token.' );
-$error_log = end( $GLOBALS['wdc_cdek_tariff_logs'] );
+$error_log = cdek_tariff_find_log( 'CDEK tarifflist failed.' );
 cdek_tariff_assert( is_array( $error_log ) && 'CDEK tarifflist failed.' === (string) ( $error_log['message'] ?? '' ), 'CDEK tarifflist failure must be written to WooCommerce log.' );
 cdek_tariff_assert( 400 === (int) ( $error_log['context']['http_code'] ?? 0 ), 'CDEK tarifflist log must include HTTP status code.' );
 cdek_tariff_assert( DeliveryType::PICKUP === (string) ( $error_log['context']['delivery_type'] ?? '' ), 'CDEK tarifflist log must include delivery type.' );
+$api_empty_log = cdek_tariff_find_log( 'CDEK quote returned empty.' );
+cdek_tariff_assert( 'api_error' === (string) ( $api_empty_log['context']['reason'] ?? '' ), 'CDEK api_error empty quote reason must be logged.' );
 $serialized_error_debug = json_encode( array( $details, $error_log ), JSON_UNESCAPED_UNICODE );
 cdek_tariff_assert( is_string( $serialized_error_debug ) && ! str_contains( $serialized_error_debug, 'runtime-token' ) && ! str_contains( $serialized_error_debug, 'secure-password' ) && ! str_contains( $serialized_error_debug, 'account-id' ), 'CDEK tarifflist diagnostics must not expose token, secret, or account.' );
 
