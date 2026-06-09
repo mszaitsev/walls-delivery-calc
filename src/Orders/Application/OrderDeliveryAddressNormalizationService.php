@@ -30,7 +30,6 @@ final class OrderDeliveryAddressNormalizationService {
 				'error_code' => 'address_suggestion_service_unavailable',
 				'message' => 'Подсказки адреса недоступны.',
 				'items' => array(),
-				'debug' => array( 'stage' => $stage ),
 			);
 		}
 
@@ -52,7 +51,7 @@ final class OrderDeliveryAddressNormalizationService {
 
 	/**
 	 * @param array<string,mixed> $selected_location
-	 * @return array{success:bool,payload:array<string,mixed>,message:string,requires_selection?:bool,suggestions?:array<int,array<string,mixed>>,debug?:array<string,mixed>}
+	 * @return array{success:bool,payload:array<string,mixed>,message:string,requires_selection?:bool,suggestions?:array<int,array<string,mixed>>}
 	 */
 	public function normalize( object $order, array $selected_location, string $address_line ): array {
 		$address_line = trim( $address_line );
@@ -61,11 +60,6 @@ final class OrderDeliveryAddressNormalizationService {
 				'success' => false,
 				'payload' => array( 'normalized' => false, 'fallback' => false ),
 				'message' => 'Введите адрес доставки.',
-				'debug' => array(
-					'input' => '',
-					'suggestions_count' => 0,
-					'rejected_reasons' => array( 'empty_input' ),
-				),
 			);
 		}
 
@@ -79,7 +73,6 @@ final class OrderDeliveryAddressNormalizationService {
 					'payload' => is_array( $suggestions[0]['address'] ?? null ) ? $suggestions[0]['address'] : array(),
 					'message' => 'Адрес нормализован.',
 					'suggestions' => array(),
-					'debug' => is_array( $suggestion_result['debug'] ?? null ) ? $suggestion_result['debug'] : array(),
 				);
 			}
 			if ( count( $suggestions ) > 1 ) {
@@ -89,7 +82,6 @@ final class OrderDeliveryAddressNormalizationService {
 					'message' => 'Выберите подходящий адрес из вариантов.',
 					'requires_selection' => true,
 					'suggestions' => $suggestions,
-					'debug' => is_array( $suggestion_result['debug'] ?? null ) ? $suggestion_result['debug'] : array(),
 				);
 			}
 		}
@@ -101,11 +93,6 @@ final class OrderDeliveryAddressNormalizationService {
 				'success' => ! empty( $payload['normalized'] ) && empty( $payload['fallback'] ),
 				'payload' => $payload,
 				'message' => ! empty( $payload['normalized'] ) && empty( $payload['fallback'] ) ? 'Адрес нормализован.' : (string) ( $payload['message'] ?? 'Адрес не удалось нормализовать.' ),
-				'debug' => array(
-					'input' => $address_line,
-					'suggestions_count' => 0,
-					'rejected_reasons' => array( 'runtime_result' ),
-				),
 			);
 		}
 
@@ -114,11 +101,6 @@ final class OrderDeliveryAddressNormalizationService {
 			'success' => true,
 			'payload' => $payload,
 			'message' => 'Адрес нормализован.',
-			'debug' => array(
-				'input' => $address_line,
-				'suggestions_count' => 0,
-				'rejected_reasons' => array( 'fallback_payload' ),
-			),
 		);
 	}
 
@@ -311,54 +293,25 @@ final class OrderDeliveryAddressNormalizationService {
 
 	/**
 	 * @param array<string,mixed> $selected_location
-	 * @return array{suggestions:array<int,array{label:string,address:array<string,mixed>}>,debug:array<string,mixed>}
+	 * @return array{suggestions:array<int,array{label:string,address:array<string,mixed>}>}
 	 */
 	private function normalize_from_suggestions( array $selected_location, string $address_line ): array {
 		$response = $this->suggestions?->suggest( 'address', $address_line, $this->suggestion_context( $selected_location ) );
-		$debug = array(
-			'input' => $address_line,
-			'suggestions_count' => 0,
-			'first_suggestion_keys' => array(),
-			'first_data' => array(),
-			'rejected_reasons' => array(),
-		);
 		if ( ! is_array( $response ) || empty( $response['success'] ) ) {
-			$debug['rejected_reasons'][] = 'suggestion_client_error';
-			return array( 'suggestions' => array(), 'debug' => $debug );
+			return array( 'suggestions' => array() );
 		}
 		$suggestions = is_array( $response['suggestions'] ?? null ) ? $response['suggestions'] : array();
-		$debug['suggestions_count'] = count( $suggestions );
-		if ( isset( $suggestions[0] ) && is_array( $suggestions[0] ) ) {
-			$debug['first_suggestion_keys'] = array_values( array_keys( $suggestions[0] ) );
-			$first_data = is_array( $suggestions[0]['data'] ?? null ) ? $suggestions[0]['data'] : array();
-			$debug['first_data'] = array(
-				'value' => (string) ( $suggestions[0]['value'] ?? '' ),
-				'unrestricted_value' => (string) ( $suggestions[0]['unrestricted_value'] ?? '' ),
-				'qc' => $first_data['qc'] ?? null,
-				'qc_complete' => $first_data['qc_complete'] ?? null,
-				'fias_level' => (string) ( $first_data['fias_level'] ?? '' ),
-				'house' => (string) ( $first_data['house'] ?? '' ),
-				'house_fias_id' => (string) ( $first_data['house_fias_id'] ?? '' ),
-				'block' => (string) ( $first_data['block'] ?? '' ),
-				'flat' => (string) ( $first_data['flat'] ?? '' ),
-				'geo_lat' => (string) ( $first_data['geo_lat'] ?? '' ),
-				'geo_lon' => (string) ( $first_data['geo_lon'] ?? '' ),
-			);
-		}
 		$payloads = array();
 		foreach ( $suggestions as $suggestion ) {
 			if ( ! is_array( $suggestion ) ) {
-				$debug['rejected_reasons'][] = 'suggestion_not_array';
 				continue;
 			}
 			$data = is_array( $suggestion['data'] ?? null ) ? $suggestion['data'] : array();
 			if ( ! $this->suggestion_has_delivery_address( $data ) ) {
-				$debug['rejected_reasons'][] = 'missing_delivery_address';
 				continue;
 			}
 			$payload = $this->payload_from_suggestion( $suggestion, $selected_location, $address_line );
 			if ( '' === trim( (string) ( $payload['address_1'] ?? '' ) ) ) {
-				$debug['rejected_reasons'][] = 'empty_address_1';
 				continue;
 			}
 			$payloads[] = array(
@@ -367,7 +320,7 @@ final class OrderDeliveryAddressNormalizationService {
 			);
 		}
 
-		return array( 'suggestions' => $payloads, 'debug' => $debug );
+		return array( 'suggestions' => $payloads );
 	}
 
 	/**
@@ -397,6 +350,11 @@ final class OrderDeliveryAddressNormalizationService {
 			'full_address' => $full,
 			'fias_id' => (string) ( $data['fias_id'] ?? $data['house_fias_id'] ?? '' ),
 			'gar_id' => (string) ( $data['gar_id'] ?? '' ),
+			'city_fias_id' => (string) ( $data['city_fias_id'] ?? '' ),
+			'settlement_fias_id' => (string) ( $data['settlement_fias_id'] ?? '' ),
+			'region_fias_id' => (string) ( $data['region_fias_id'] ?? '' ),
+			'city_kladr_id' => (string) ( $data['city_kladr_id'] ?? '' ),
+			'settlement_kladr_id' => (string) ( $data['settlement_kladr_id'] ?? '' ),
 			'lat' => $this->coordinate( $data, array( 'geo_lat', 'lat', 'latitude' ) ),
 			'lng' => $this->coordinate( $data, array( 'geo_lon', 'lng', 'lon', 'longitude' ) ),
 			'normalized' => true,
@@ -429,6 +387,11 @@ final class OrderDeliveryAddressNormalizationService {
 			'full_address' => $full,
 			'fias_id' => (string) ( $data['fias_id'] ?? $data['house_fias_id'] ?? '' ),
 			'gar_id' => (string) ( $data['gar_id'] ?? '' ),
+			'city_fias_id' => (string) ( $data['city_fias_id'] ?? '' ),
+			'settlement_fias_id' => (string) ( $data['settlement_fias_id'] ?? '' ),
+			'region_fias_id' => (string) ( $data['region_fias_id'] ?? '' ),
+			'city_kladr_id' => (string) ( $data['city_kladr_id'] ?? '' ),
+			'settlement_kladr_id' => (string) ( $data['settlement_kladr_id'] ?? '' ),
 			'house_fias_id' => (string) ( $data['house_fias_id'] ?? '' ),
 			'house_kladr_id' => (string) ( $data['house_kladr_id'] ?? '' ),
 			'normalized' => ! empty( $item['isDeliverable'] ),

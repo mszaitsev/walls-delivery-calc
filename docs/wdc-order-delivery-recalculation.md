@@ -1,12 +1,12 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.41.24.
+Version: 0.41.25.
 
 ## Цель этапа
 
 Сценарий пересчета доставки внутри WooCommerce order admin завершен: администратор может открыть модалку из блока `Калькулятор доставок`, пересчитать rates для текущего или выбранного населенного пункта, выбрать courier/pickup вариант, выбрать ПВЗ для pickup и сохранить новый вариант доставки.
 
-## Статус 0.41.24
+## Статус 0.41.25
 
 Реализовано:
 
@@ -18,11 +18,14 @@ Version: 0.41.24.
 - после save обновляются `_wdc_delivery_calculation_data`, `_wdc_platform_*` meta и pickup meta;
 - `_wdc_delivery_calculation_data` сохраняет checkout-like структуру `package`, `api`, `rules`, `result`; базовая API стоимость берется из `api_base_price_rub`, а не из итоговой цены;
 - saved shipping method title формируется как на checkout: service/method + selected tariff + delivery text без дублирования срока;
-- для courier в модалке показывается блок `Адрес доставки`; подсказки улицы/дома/квартиры/помещения/офиса идут через общий checkout stack `AddressSuggestionService` + `AddressSuggestionNormalizer` + `AddressLineParser`, а save блокируется без successful normalized payload или explicit manual fallback;
+- для courier в модалке показывается блок `Адрес доставки`; подсказки улицы/дома/квартиры/помещения/офиса идут автоматически через общий checkout stack `AddressSuggestionService` + `AddressSuggestionNormalizer` + `AddressLineParser`, без отдельной кнопки `Проверить адрес`;
+- explicit manual fallback `Использовать этот адрес` остается доступен, когда подсказки не дали usable result;
 - courier поддерживает выбор lower-level suggestion, ввод номера после выбранного дома для фильтрации, и завершение нормализованного адреса на уровне дома через ссылку `если номера нет - нажмите здесь`;
+- courier save UI показывает не блокирующий warning, если населенный пункт нормализованного/manual адреса не удалось уверенно сопоставить с населенным пунктом расчета тарифа;
 - для pickup требуется выбранный ПВЗ, но не требуется нормализованный адрес менеджера;
 - если населенный пункт не менялся, modal prefill выбирает текущий ПВЗ заказа из WDC pickup meta;
 - для pickup WooCommerce shipping address заполняется выбранным ПВЗ: address_1 = адрес ПВЗ, address_2 очищается, city/state/postcode/country берутся из ПВЗ/selected location;
+- WooCommerce shipping city/state при admin save записываются через checkout-compatible selected location payload/formatter values (`city_value`, `state_value` и fallback через `LocationDisplayNameFormatter`), а не через полный `display_name`;
 - ПВЗ сохраняется в WDC pickup meta и не попадает в order note;
 - ручной поиск адреса на карте ПВЗ геокодируется через admin wrapper над существующей DaData/address-normalization инфраструктурой; временная булавка ставится только по координатам введенного адреса, не по первому ПВЗ fallback;
 - totals пересчитываются через WooCommerce order API, затем order сохраняется;
@@ -47,7 +50,7 @@ Version: 0.41.24.
 - `wdc_order_delivery_recalculate_location_search`: thin wrapper над существующим checkout location search payload.
 - `wdc_order_delivery_recalculate_pickup_search`: поиск ПВЗ для карты, initial `mode=location` грузит все ПВЗ выбранного населенного пункта, manual `mode=search` ищет по введенному адресу/индексу/коду.
 - `wdc_order_delivery_recalculate_address_suggest`: thin admin wrapper над checkout `AddressSuggestionService` для courier address suggestions; возвращает shared suggestion items plus normalized save payload.
-- `wdc_order_delivery_recalculate_normalize_address`: thin wrapper нормализации courier delivery address через существующий checkout address runtime; pickup save его не требует.
+- `wdc_order_delivery_recalculate_normalize_address`: legacy/thin wrapper нормализации courier delivery address через существующий checkout address runtime; основной admin courier UI использует suggestion-driven flow, pickup save его не требует.
 - `wdc_order_delivery_recalculate_geocode_address`: thin wrapper геокодинга ручного адреса на карте ПВЗ через существующий address-normalization/DaData runtime и лимиты.
 - `wdc_order_delivery_recalculate_save`: сохранение выбранного rate, создание/замена shipping item, meta rewrite, address update, totals, note.
 
@@ -56,7 +59,7 @@ Version: 0.41.24.
 ## Ограничения
 
 - Несколько shipping items в заказе остаются save-blocker; автоматического выбора одного shipping item нет.
-- Для courier требуется успешная нормализация адреса менеджером в модалке; без normalized payload frontend держит save disabled, а backend возвращает ошибку.
+- Для courier требуется выбранный normalized suggestion payload или explicit `admin_manual` fallback; mismatch warning по населенному пункту не блокирует save.
 - Реальный выбор/валидация налогов зависит от WooCommerce `calculate_totals(false)` и текущей конфигурации магазина.
 - Сценарий требует ручной QA на реальном HPOS order admin screen после smoke-тестов.
 
@@ -68,4 +71,4 @@ Smoke coverage:
 php tests/orders/run-order-delivery-recalculation-smoke.php
 ```
 
-Тест проверяет modal markup, current pickup/current shipping address payload, order-to-quote mapping, location override, all-rates preview, Russian Post pickup/courier groups, pickup map and geocode endpoints, courier address suggest endpoint/shared stack, save blockers, shipping item create/replace, pickup save без normalized address, courier save with required normalized address, WDC meta rewrite with package/API/rules/result, totals recalculation, private notes, endpoint security, JS prefill/map-sync/geocode/save hooks and no mutation during preview/pickup search.
+Тест проверяет modal markup, current pickup/current shipping address payload, duplicate-free location labels, order-to-quote mapping, location override, all-rates preview, Russian Post pickup/courier groups, pickup map and geocode endpoints, courier address suggest endpoint/shared stack, отсутствие временного admin debug, save blockers, shipping item create/replace, pickup save без normalized address, courier save with required normalized/manual address, checkout-compatible city/state save, WDC meta rewrite with package/API/rules/result, totals recalculation, private notes, endpoint security, JS prefill/map-sync/geocode/save-warning hooks and no mutation during preview/pickup search.

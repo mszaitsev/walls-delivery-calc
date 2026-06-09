@@ -129,6 +129,17 @@
 	margin-top: auto;
 }
 
+.wdc-order-delivery-modal__save-warning {
+	flex: 1 1 100%;
+	color: #b32d2e;
+	font-size: 12px;
+	line-height: 1.4;
+}
+
+.wdc-order-delivery-modal__save-warning[hidden] {
+	display: none;
+}
+
 .wdc-order-delivery-rates__group {
 	margin-top: 12px;
 }

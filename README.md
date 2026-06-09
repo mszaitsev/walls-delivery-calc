@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.41.24.
+Current plugin version: 0.41.25.
+
+Version 0.41.25 refines the admin order delivery recalculation modal after site QA. Courier address suggestions now run automatically without a separate `Проверить адрес` button, while the explicit `Использовать этот адрес` manual fallback remains. The modal location summary uses `display_name` without duplicating the region, saved shipping city/state now follow checkout-compatible location payload/formatter values, temporary admin courier normalization diagnostics were removed, and courier saves show a non-blocking warning when the normalized/manual address settlement cannot be confidently matched to the settlement used for the rate calculation.
 
 Version 0.41.24 brings the order-admin courier address normalization modal onto the same shared address suggestion stack as checkout. The admin courier address UI now uses `AddressSuggestionService`, `AddressSuggestionNormalizer`, `AddressLineParser` and the same DaData request flow for street, house and lower-level flat/room/premise suggestions. Managers can choose flats/offices/rooms, type after a selected house to filter lower-level suggestions, or finish at the normalized house level through the same `если номера нет - нажмите здесь` action. Manual fallback remains available only when the manager deliberately chooses to use the typed address.
 

@@ -172,6 +172,7 @@ final class OrderDeliveryMetabox {
 		echo '<div class="wdc-order-delivery-modal__status" data-wdc-order-delivery-modal-status></div>';
 		echo '<div class="wdc-order-delivery-modal__content" data-wdc-order-delivery-modal-content></div>';
 		echo '<footer class="wdc-order-delivery-modal__footer">';
+		echo '<div class="wdc-order-delivery-modal__save-warning" data-wdc-order-delivery-save-warning hidden></div>';
 		echo '<button type="button" class="button" data-wdc-order-delivery-modal-close>' . esc_html__( 'Закрыть', 'walls-delivery-calc' ) . '</button>';
 		echo '<button type="button" class="button button-primary" data-wdc-order-delivery-save disabled>' . esc_html__( 'Сохранить новый вариант доставки', 'walls-delivery-calc' ) . '</button>';
 		echo '</footer>';
@@ -199,7 +200,7 @@ final class OrderDeliveryMetabox {
 			$postcode = $this->meta_string( $order, '_wdc_platform_city_postcode' ) ?: $this->order_string( $order, 'get_shipping_postcode' );
 		}
 		$country = strtoupper( trim( (string) ( $destination['country_code'] ?? $this->order_string( $order, 'get_shipping_country' ) ?: 'RU' ) ) );
-		$label = trim( implode( ', ', array_values( array_filter( array( $region, $name ), static fn( string $part ): bool => '' !== $part ) ) ) );
+		$label = $this->location_label_without_region_duplicate( $name, $region );
 
 		return array(
 			'id' => '',
@@ -212,6 +213,31 @@ final class OrderDeliveryMetabox {
 			'state_value' => $region,
 			'label' => '' !== $label ? $label : $name,
 		);
+	}
+
+	private function location_label_without_region_duplicate( string $name, string $region ): string {
+		$name = trim( $name );
+		$region = trim( $region );
+		if ( '' === $name ) {
+			return $region;
+		}
+		if ( '' === $region ) {
+			return $name;
+		}
+		$normalized_name = $this->normalize_location_label_part( $name );
+		$normalized_region = $this->normalize_location_label_part( $region );
+		if ( '' !== $normalized_region && str_contains( $normalized_name, $normalized_region ) ) {
+			return $name;
+		}
+		return trim( $region . ', ' . $name );
+	}
+
+	private function normalize_location_label_part( string $value ): string {
+		$value = str_replace( array( 'Ё', 'ё' ), array( 'Е', 'е' ), $value );
+		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
+		$value = preg_replace( '/\b(область|обл\.?|край|республика|респ\.?)\b/u', ' ', $value );
+		$value = preg_replace( '/[^\p{L}\p{N}]+/u', ' ', is_string( $value ) ? $value : '' );
+		return trim( is_string( $value ) ? $value : '' );
 	}
 
 	/**

@@ -172,7 +172,6 @@
 				block.innerHTML = [
 					'<strong>Адрес доставки</strong>',
 					'<input type="text" class="widefat" data-wdc-courier-address-line placeholder="Улица, дом, квартира">',
-					'<button type="button" class="button" data-wdc-normalize-courier-address>Проверить адрес</button>',
 					'<button type="button" class="button" data-wdc-use-manual-courier-address disabled="disabled">Использовать этот адрес</button>',
 					'<div class="wdc-order-delivery-courier-address__suggestions" data-wdc-courier-address-suggestions></div>',
 					'<div class="wdc-order-delivery-courier-address__status" data-wdc-courier-address-status></div>',
@@ -219,6 +218,7 @@
 			enabled = isValidCourierAddress( normalizedShippingAddresses.get( box ) );
 		}
 		button.disabled = ! enabled || activeSaveRequests.has( box );
+		updateCourierLocationWarning( box );
 	}
 
 	function isValidCourierAddress( address ) {
@@ -227,6 +227,102 @@
 		}
 		const addressLine = String( address.address_1 || address.full_address || '' ).trim();
 		return addressLine !== '' && ( ( !! address.normalized && ! address.fallback ) || ( !! address.fallback && address.source === 'admin_manual' ) );
+	}
+
+	function updateCourierLocationWarning( box ) {
+		const node = box ? box.querySelector( '[data-wdc-order-delivery-save-warning]' ) : null;
+		if ( ! node ) {
+			return;
+		}
+		const rate = selectedRates.get( box );
+		const address = normalizedShippingAddresses.get( box );
+		if ( ! rate || rate.requires_pickup_point || ! isValidCourierAddress( address ) ) {
+			node.hidden = true;
+			node.textContent = '';
+			node.dataset.status = '';
+			return;
+		}
+		const warning = courierLocationWarning( selectedLocations.get( box ) || {}, address || {} );
+		if ( '' === warning ) {
+			node.hidden = true;
+			node.textContent = '';
+			node.dataset.status = '';
+			return;
+		}
+		node.hidden = false;
+		node.textContent = warning;
+		node.dataset.status = 'warning';
+	}
+
+	function courierLocationWarning( location, address ) {
+		if ( ! address || address.fallback || address.source === 'admin_manual' ) {
+			return 'Не удалось подтвердить, что населенный пункт адреса совпадает с расчетом тарифа.';
+		}
+		if ( courierLocationsMatch( location || {}, address || {} ) ) {
+			return '';
+		}
+		const rateLabel = locationLabel( location ) || 'не указан';
+		const addressLabel = addressLocationLabel( address ) || 'не указан';
+		return 'Внимание: населенный пункт в адресе доставки отличается от населенного пункта, для которого рассчитан тариф. Расчет: ' + rateLabel + '. Адрес: ' + addressLabel + '.';
+	}
+
+	function courierLocationsMatch( location, address ) {
+		const locationIds = [
+			location.fias_id,
+			location.location_fias_id,
+			location.city_fias_id,
+			location.settlement_fias_id,
+			location.gar_object_id,
+			location.gar_id
+		].map( normalizeId ).filter( Boolean );
+		const addressIds = [
+			address.location_fias_id,
+			address.city_fias_id,
+			address.settlement_fias_id,
+			address.city_kladr_id,
+			address.settlement_kladr_id,
+			address.location_gar_id,
+			address.gar_object_id,
+			address.gar_id
+		].map( normalizeId ).filter( Boolean );
+		if ( locationIds.length && addressIds.length && locationIds.some( function ( id ) {
+			return addressIds.indexOf( id ) !== -1;
+		} ) ) {
+			return true;
+		}
+		const locationCity = normalizePlaceName( location.city_value || location.place_name || location.city_name || location.display_name || location.label || '' );
+		const addressCity = normalizePlaceName( address.city || address.city_value || address.settlement || '' );
+		const locationRegion = normalizeRegionName( location.region_name || location.state_value || location.display_name || '' );
+		const addressRegion = normalizeRegionName( address.region || address.region_name || '' );
+		return '' !== locationCity && '' !== addressCity && locationCity === addressCity && ( '' === locationRegion || '' === addressRegion || locationRegion === addressRegion );
+	}
+
+	function normalizeId( value ) {
+		return String( value || '' ).trim().toLowerCase();
+	}
+
+	function normalizePlaceName( value ) {
+		return String( value || '' )
+			.toLowerCase()
+			.replace( /ё/g, 'е' )
+			.replace( /\b(город|г|село|с|поселок|посёлок|пгт|деревня|д|станица|ст)\b\.?/g, ' ' )
+			.replace( /[^a-zа-я0-9]+/g, ' ' )
+			.trim();
+	}
+
+	function normalizeRegionName( value ) {
+		return String( value || '' )
+			.toLowerCase()
+			.replace( /ё/g, 'е' )
+			.replace( /\b(область|обл|край|республика|респ|ао|автономный округ|округ)\b\.?/g, ' ' )
+			.replace( /[^a-zа-я0-9]+/g, ' ' )
+			.trim();
+	}
+
+	function addressLocationLabel( address ) {
+		return [ address.region || address.region_name || '', address.city || address.city_value || '' ].filter( function ( part ) {
+			return '' !== String( part || '' ).trim();
+		} ).join( ', ' );
 	}
 
 	function clearCourierAddressSuggestions( block ) {
@@ -532,7 +628,7 @@
 		if ( ! location ) {
 			return '';
 		}
-		return String( location.label || location.option_label || location.display_name || location.city_value || location.city_name || location.place_name || '' );
+		return String( location.display_name || location.label || location.option_label || location.city_value || location.city_name || location.place_name || '' );
 	}
 
 	function requestPreview( box, button ) {
@@ -745,9 +841,6 @@
 				if ( ! payload || ! payload.success ) {
 					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Подсказки адреса недоступны.' );
 				}
-				if ( payload.data && payload.data.debug && window.console && window.console.debug ) {
-					window.console.debug( '[WDC courier address suggest]', payload.data.debug );
-				}
 				return Array.isArray( payload.data && payload.data.items ) ? payload.data.items : [];
 			} );
 	}
@@ -799,22 +892,6 @@
 				}
 				updateSaveButton( box );
 			} );
-	}
-
-	function normalizeCourierAddress( button ) {
-		const box = closestBox( button );
-		const block = button ? button.closest( '[data-wdc-courier-address-block]' ) : null;
-		const input = block ? block.querySelector( '[data-wdc-courier-address-line]' ) : null;
-		if ( ! box || ! input ) {
-			return;
-		}
-		setLoading( button, true );
-		clearCourierAddressState( block );
-		runCourierAddressSuggest( box, block, 'address', String( input.value || '' ), {} );
-		window.setTimeout( function () {
-			setLoading( button, false );
-			updateSaveButton( box );
-		}, 250 );
 	}
 
 	function geocodeAddress( box, value ) {
@@ -1279,13 +1356,6 @@
 		if ( pickupButton ) {
 			event.preventDefault();
 			openPickupPicker( closestBox( pickupButton ) );
-			return;
-		}
-
-		const normalizeCourierButton = event.target && event.target.closest( '[data-wdc-normalize-courier-address]' );
-		if ( normalizeCourierButton ) {
-			event.preventDefault();
-			normalizeCourierAddress( normalizeCourierButton );
 			return;
 		}
 

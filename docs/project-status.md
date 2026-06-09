@@ -1,5 +1,7 @@
 # Project Status
 
+0.41.25 note: the order-admin delivery recalculation modal now treats courier address suggestions as the normal automatic flow and removes the old `Проверить адрес` button. Manual fallback remains explicit through `Использовать этот адрес`. The modal settlement summary no longer duplicates the region when `display_name` already includes it, admin saves write WooCommerce shipping city/state through checkout-compatible location payload/formatter values, temporary admin courier normalization debug payloads/logs were removed, and courier save UI shows a non-blocking warning when the normalized/manual address settlement cannot be confidently matched to the settlement used for the calculated rate.
+
 0.41.24 note: the order-admin delivery recalculation courier address block now uses the same shared DaData address suggestion flow as checkout. Admin courier suggestions are served by a thin `wdc_order_delivery_recalculate_address_suggest` endpoint backed by `AddressSuggestionService`, `AddressSuggestionNormalizer` and `AddressLineParser`, so street -> house -> flat/room/premise lookup, typed lower-level filtering, house-level finalization and `address_1` formatting match checkout. Manual fallback remains available as an explicit manager action.
 
 0.41.12 note: the order-admin delivery recalculation save-flow now separates pickup and courier address requirements correctly. Pickup saves require selected rate + selected pickup point and write the selected pickup address to WooCommerce shipping address while keeping pickup details in WDC pickup meta and out of order notes. Courier saves expose a manager address-normalization block in the modal and are blocked until a normalized address is supplied. The pickup map's manual address search now geocodes the typed address through the existing DaData/address-normalization wrapper instead of placing a temporary marker on a pickup point fallback. Saved calculation data keeps package/API/rules/result details from rate meta, API base price remains distinct from final cost, method titles include delivery text, and note city-change detection uses canonical location identity to avoid duplicate/same-city old/new lines.
@@ -38,7 +40,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.41.24`.
+- Текущая версия: `0.41.25`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/order-delivery-recalculation`.
 - Последнее обновление статуса: 2026-06-09.

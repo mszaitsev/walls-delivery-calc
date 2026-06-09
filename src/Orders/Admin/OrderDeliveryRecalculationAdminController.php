@@ -188,7 +188,6 @@ final class OrderDeliveryRecalculationAdminController {
 					'address' => $result['payload'] ?? array(),
 					'requires_selection' => true,
 					'suggestions' => $result['suggestions'] ?? array(),
-					'debug' => $result['debug'] ?? array(),
 				)
 			);
 		}
@@ -198,7 +197,6 @@ final class OrderDeliveryRecalculationAdminController {
 					'message' => (string) ( $result['message'] ?? __( 'Адрес не нормализован.', 'walls-delivery-calc' ) ),
 					'address' => $result['payload'] ?? array(),
 					'suggestions' => $result['suggestions'] ?? array(),
-					'debug' => $result['debug'] ?? array(),
 				),
 				400
 			);
@@ -209,7 +207,6 @@ final class OrderDeliveryRecalculationAdminController {
 				'message' => (string) ( $result['message'] ?? __( 'Адрес нормализован.', 'walls-delivery-calc' ) ),
 				'address' => $result['payload'] ?? array(),
 				'suggestions' => $result['suggestions'] ?? array(),
-				'debug' => $result['debug'] ?? array(),
 			)
 		);
 	}
@@ -260,7 +257,6 @@ final class OrderDeliveryRecalculationAdminController {
 				array(
 					'message' => (string) ( $result['message'] ?? __( 'Подсказки адреса недоступны.', 'walls-delivery-calc' ) ),
 					'items' => $result['items'] ?? array(),
-					'debug' => $result['debug'] ?? array(),
 				),
 				400
 			);
@@ -269,7 +265,6 @@ final class OrderDeliveryRecalculationAdminController {
 		wp_send_json_success(
 			array(
 				'items' => $result['items'] ?? array(),
-				'debug' => $result['debug'] ?? array(),
 			)
 		);
 	}
@@ -366,12 +361,22 @@ final class OrderDeliveryRecalculationAdminController {
 			'gar_object_id',
 			'country_code',
 			'region_name',
+			'region_type',
 			'region_code',
 			'state_value',
+			'district_name',
+			'district_type',
 			'city_name',
+			'city_type',
+			'city_fias_id',
+			'city_kladr_id',
 			'city_value',
 			'place_name',
+			'place_type',
 			'settlement_name',
+			'settlement_type',
+			'settlement_fias_id',
+			'settlement_kladr_id',
 			'display_name',
 			'option_label',
 			'label',

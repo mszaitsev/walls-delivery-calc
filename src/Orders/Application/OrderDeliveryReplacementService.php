@@ -6,6 +6,8 @@ namespace WallsShop\WDC\Orders\Application;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
+use WallsShop\WDC\Locations\ValueObjects\Location;
 use WallsShop\WDC\Rules\Services\RuleFormulaFormatter;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -263,16 +265,18 @@ final class OrderDeliveryReplacementService {
 	 * @param array<string,mixed> $address
 	 */
 	private function write_shipping_address( object $order, array $rate, array $location, array $pickup, array $address ): void {
+		$location_values = $this->checkout_shipping_location_values( $location, $address );
 		$values = array(
-			'set_shipping_country' => (string) ( $address['country'] ?? $location['country_code'] ?? 'RU' ),
-			'set_shipping_state' => (string) ( $address['region'] ?? $location['region_name'] ?? $location['state_value'] ?? '' ),
-			'set_shipping_city' => (string) ( $address['city'] ?? $location['city_value'] ?? $location['city_name'] ?? $location['display_name'] ?? '' ),
-			'set_shipping_postcode' => (string) ( $address['postcode'] ?? $location['postal_code'] ?? $location['postcode'] ?? '' ),
+			'set_shipping_country' => $location_values['country'],
+			'set_shipping_state' => $location_values['state'],
+			'set_shipping_city' => $location_values['city'],
+			'set_shipping_postcode' => $location_values['postcode'],
 		);
 		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
+			$pickup_location_values = $this->checkout_shipping_location_values( $location, array() );
 			$values['set_shipping_country'] = 'RU';
-			$values['set_shipping_state'] = (string) ( $pickup['region_name'] ?? $location['region_name'] ?? $location['state_value'] ?? '' );
-			$values['set_shipping_city'] = (string) ( $pickup['city_name'] ?? $location['city_value'] ?? $location['city_name'] ?? $location['display_name'] ?? '' );
+			$values['set_shipping_state'] = '' !== $pickup_location_values['state'] ? $pickup_location_values['state'] : (string) ( $pickup['region_name'] ?? '' );
+			$values['set_shipping_city'] = '' !== $pickup_location_values['city'] ? $pickup_location_values['city'] : (string) ( $pickup['city_name'] ?? '' );
 			$values['set_shipping_postcode'] = (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? $location['postal_code'] ?? $location['postcode'] ?? '' );
 			$values['set_shipping_address_1'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
 			$values['set_shipping_address_2'] = '';
@@ -285,6 +289,90 @@ final class OrderDeliveryReplacementService {
 				$order->{$method}( $value );
 			}
 		}
+	}
+
+	/**
+	 * @param array<string,mixed> $location
+	 * @param array<string,mixed> $address
+	 * @return array{country:string,state:string,city:string,postcode:string}
+	 */
+	private function checkout_shipping_location_values( array $location, array $address ): array {
+		$state = trim( (string) ( $location['state_value'] ?? '' ) );
+		if ( '' === $state ) {
+			$state = $this->formatted_location_state( $location );
+		}
+		if ( '' === $state ) {
+			$state = trim( (string) ( $location['region_name'] ?? $address['region'] ?? '' ) );
+		}
+
+		$city = trim( (string) ( $location['city_value'] ?? '' ) );
+		if ( '' === $city ) {
+			$city = $this->formatted_location_city( $location );
+		}
+		if ( '' === $city ) {
+			$city = trim( (string) ( $address['city'] ?? $location['city_name'] ?? $location['place_name'] ?? '' ) );
+		}
+		if ( '' === $city ) {
+			$city = $this->city_from_display_name( (string) ( $location['display_name'] ?? '' ), $state );
+		}
+
+		return array(
+			'country' => (string) ( $address['country'] ?? $location['country_code'] ?? 'RU' ),
+			'state' => $state,
+			'city' => $city,
+			'postcode' => (string) ( $address['postcode'] ?? $location['postal_code'] ?? $location['postcode'] ?? '' ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $location
+	 */
+	private function formatted_location_state( array $location ): string {
+		$location_object = $this->location_from_payload( $location );
+		return null !== $location_object ? $this->location_formatter()->format_checkout_state_value( $location_object ) : '';
+	}
+
+	/**
+	 * @param array<string,mixed> $location
+	 */
+	private function formatted_location_city( array $location ): string {
+		$location_object = $this->location_from_payload( $location );
+		return null !== $location_object ? $this->location_formatter()->format_checkout_city_value( $location_object ) : '';
+	}
+
+	/**
+	 * @param array<string,mixed> $location
+	 */
+	private function location_from_payload( array $location ): ?Location {
+		if ( '' === trim( (string) ( $location['region_name'] ?? '' ) ) && '' === trim( (string) ( $location['city_name'] ?? $location['place_name'] ?? $location['settlement_name'] ?? '' ) ) ) {
+			return null;
+		}
+		return Location::from_array( $location );
+	}
+
+	private function location_formatter(): LocationDisplayNameFormatter {
+		$rules = function_exists( 'get_option' ) ? get_option( 'wdc_location_type_display_rules', array() ) : array();
+		return LocationDisplayNameFormatter::from_rules( is_array( $rules ) ? $rules : array() );
+	}
+
+	private function city_from_display_name( string $display_name, string $state ): string {
+		$parts = array_values(
+			array_filter(
+				array_map( 'trim', explode( ',', $display_name ) ),
+				static fn( string $part ): bool => '' !== $part
+			)
+		);
+		if ( array() === $parts ) {
+			return '';
+		}
+		$state_normalized = $this->canonical_region( $state );
+		$candidates = array_values(
+			array_filter(
+				$parts,
+				fn( string $part ): bool => '' === $state_normalized || $this->canonical_region( $part ) !== $state_normalized
+			)
+		);
+		return (string) ( end( $candidates ) ?: end( $parts ) );
 	}
 
 	/**

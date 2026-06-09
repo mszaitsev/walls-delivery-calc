@@ -302,11 +302,13 @@ final class WdcRecalcDadataSuggestionClient implements AddressSuggestionClientIn
 	public function suggest( string $stage, string $query, array $context = array() ): array {
 		if ( str_contains( $query, 'варианты' ) ) {
 			$first = array(
-				'geo_lat' => $this->with_coordinates ? '55.0401' : '',
-				'geo_lon' => $this->with_coordinates ? '82.9301' : '',
-				'fias_id' => 'fake-nsk-address-fias-1',
-				'house_fias_id' => 'fake-nsk-house-fias-1',
-				'fias_level' => '8',
+			'geo_lat' => $this->with_coordinates ? '55.0401' : '',
+			'geo_lon' => $this->with_coordinates ? '82.9301' : '',
+			'fias_id' => 'fake-nsk-address-fias-1',
+			'house_fias_id' => 'fake-nsk-house-fias-1',
+			'city_fias_id' => 'nsk-fias',
+			'city_kladr_id' => '5400000100000',
+			'fias_level' => '8',
 				'country_iso_code' => 'RU',
 				'region_with_type' => 'Новосибирская область',
 				'city_with_type' => 'г Новосибирск',
@@ -342,6 +344,8 @@ final class WdcRecalcDadataSuggestionClient implements AddressSuggestionClientIn
 			'geo_lon' => $this->with_coordinates ? '82.9301' : '',
 			'fias_id' => 'fake-nsk-address-fias',
 			'house_fias_id' => 'fake-nsk-house-fias',
+			'city_fias_id' => 'nsk-fias',
+			'city_kladr_id' => '5400000100000',
 			'fias_level' => '8',
 			'country_iso_code' => 'RU',
 			'region_with_type' => 'Новосибирская область',
@@ -519,6 +523,14 @@ recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-modal
 recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-save' ) && str_contains( $metabox_html, 'disabled' ) && str_contains( $metabox_html, 'Сохранить новый вариант доставки' ), 'Modal markup must contain disabled save button.' );
 recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-current-pickup' ) && str_contains( $metabox_html, '630099-OPS' ), 'Modal markup must contain current pickup payload.' );
 recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-current-shipping-address' ) && str_contains( $metabox_html, 'Красный проспект' ), 'Modal markup must contain current shipping address payload for courier prefill.' );
+recalc_smoke_assert( str_contains( $metabox_html, 'data-wdc-order-delivery-save-warning' ), 'Modal markup must contain non-blocking courier location warning area.' );
+
+$duplicate_location_order = new WdcRecalcOrder( 116, array() );
+$duplicate_location_order->meta['_wdc_delivery_calculation_data'] = array( 'destination' => array( 'city_display_name' => 'Новосибирская область, г Новосибирск', 'region_name' => 'Новосибирская область', 'fias_id' => 'nsk-fias' ) );
+ob_start();
+$metabox->render( $duplicate_location_order );
+$duplicate_location_html = (string) ob_get_clean();
+recalc_smoke_assert( str_contains( $duplicate_location_html, 'Новосибирская область, г Новосибирск' ) && ! str_contains( $duplicate_location_html, 'Новосибирская область, Новосибирская область, г Новосибирск' ), 'Modal current location summary must not duplicate region when display_name already contains it.' );
 
 $service = wdc_recalc_service();
 $before_shipping = $order->shipping_items;
@@ -668,7 +680,7 @@ recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'loadP
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'renderSearchResults( \'address\', value' ) && str_contains( $pickup_js, 'provider.setCenter( searchMarker.lat, searchMarker.lng, 15 );' ), 'JS manual address search must keep city pickup points rendered and center the map on the DaData marker.' );
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'searchMarkerFromQuery' ), 'JS manual address search must not use the first pickup point as an address marker fallback.' );
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'data-wdc-pickup-address-block' ), 'Pickup UI must not render address normalization block.' );
-recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-wdc-courier-address-block' ) && str_contains( $pickup_js, 'data-wdc-normalize-courier-address' ), 'Courier UI source must render address normalization block.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-wdc-courier-address-block' ) && str_contains( $pickup_js, 'data-wdc-courier-address-suggestions' ) && ! str_contains( $pickup_js, 'data-wdc-normalize-courier-address' ), 'Courier UI source must render automatic suggestions without old check-address button.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "requestPreview( box, box.querySelector( '[data-wdc-order-delivery-modal-preview]' ) );" ), 'Location selection must trigger preview automatically.' );
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'Населенный пункт выбран. Нажмите' ), 'JS must not ask admin to click recalculate after selecting location.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'Проверьте адрес перед сохранением.' ) && ! str_contains( $pickup_js, 'Проверьте адрес через DaData перед сохранением.' ), 'Courier address hint must not mention DaData.' );
@@ -676,7 +688,7 @@ recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'Ис�
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-wdc-courier-address-suggestions' ) && str_contains( $pickup_js, 'data-wdc-courier-address-suggestion' ), 'Courier block must render DaData suggestions under address input.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'chooseCourierAddressSuggestion' ) && str_contains( $pickup_js, 'finalizeCourierAddress' ) && str_contains( $pickup_js, 'normalizedShippingAddresses.set( box, address );' ), 'Selecting courier suggestion must store normalized address state.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'requestCourierAddressSuggestions' ) && str_contains( $pickup_js, 'Выберите адрес из подсказок.' ), 'JS must render shared DaData suggestions without auto-selecting them.' );
-recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "window.console.debug( '[WDC courier address suggest]', payload.data.debug );" ), 'JS must output temporary safe suggest debug data.' );
+recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'console.debug' ), 'JS must not output temporary courier suggest debug data.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'Адрес не удалось нормализовать. Можно использовать введенный адрес вручную.' ) && str_contains( $pickup_js, "manualButton.disabled = String( query || '' ).trim() === '';" ), 'Normalize failure must enable manual address button when input is not empty.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "source: 'admin_manual'" ) && str_contains( $pickup_js, 'Адрес будет сохранен без нормализации.' ), 'Manual courier address button must store admin_manual fallback payload.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'normalizedShippingAddresses.delete( box );' ) && str_contains( $pickup_js, 'manualButton.disabled = true;' ) && str_contains( $pickup_js, 'clearCourierAddressSuggestions( block );' ), 'Courier address input change must reset normalized/manual address state and suggestions.' );
@@ -782,6 +794,7 @@ $manual_courier_result = $replacement->save(
 );
 recalc_smoke_assert( true === $manual_courier_result['success'], 'Save courier must accept admin_manual fallback address.' );
 recalc_smoke_assert( 'Москва, Тверская, 10, кв 5' === $manual_courier_order->get_shipping_address_1() && '' === $manual_courier_order->get_shipping_address_2(), 'Manual fallback courier address must be written as address_1 without address_2.' );
+recalc_smoke_assert( (string) ( $selected_location['city_value'] ?? '' ) === $manual_courier_order->get_shipping_city() && (string) ( $selected_location['state_value'] ?? $selected_location['region_name'] ?? '' ) === $manual_courier_order->get_shipping_state(), 'Manual fallback courier save must use checkout-compatible selected location city/state.' );
 
 $normalized_flat_order = new WdcRecalcOrder( 115, array() );
 $normalized_flat_address = array_merge(
@@ -805,6 +818,7 @@ $normalized_flat_result = $replacement->save(
 	)
 );
 recalc_smoke_assert( true === $normalized_flat_result['success'] && 'ул Некрасова, д 63/1, кв 10' === $normalized_flat_order->get_shipping_address_1() && '' === $normalized_flat_order->get_shipping_address_2(), 'Save normalized courier address must keep flat in address_1 and leave address_2 empty.' );
+recalc_smoke_assert( 'г Новосибирск' === $normalized_flat_order->get_shipping_city() && 'Новосибирская область' === $normalized_flat_order->get_shipping_state(), 'Save normalized courier address must use checkout-compatible selected location city/state instead of full display_name.' );
 
 $no_shipping_order = new WdcRecalcOrder( 106, array() );
 $no_shipping_order->shipping_items = array();
@@ -938,7 +952,7 @@ try {
 	recalc_smoke_assert( $response->success && ! empty( $address['normalized'] ) && empty( $address['fallback'] ), 'Address normalization with apartment must return normalized non-fallback payload.' );
 	recalc_smoke_assert( str_contains( (string) ( $address['address_1'] ?? '' ), 'Некрасова' ) && str_contains( (string) ( $address['address_1'] ?? '' ), '63/1' ) && str_contains( (string) ( $address['address_1'] ?? '' ), '10' ), 'Apartment address normalization must keep street, house and flat in address_1.' );
 	recalc_smoke_assert( '' === (string) ( $address['address_2'] ?? '' ), 'Apartment address normalization must not put flat into address_2.' );
-	recalc_smoke_assert( isset( $response->data['debug']['first_data']['house'], $response->data['debug']['rejected_reasons'] ) && ! isset( $response->data['debug']['token'] ), 'Address normalization debug response must expose safe diagnostic fields without tokens.' );
+	recalc_smoke_assert( ! isset( $response->data['debug'] ), 'Address normalization endpoint must not expose temporary debug payload.' );
 }
 
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $nsk_location ), 'address_line' => 'Новосибирск варианты' );
@@ -950,7 +964,7 @@ try {
 	recalc_smoke_assert( count( $response->data['suggestions'] ?? array() ) >= 2 && str_contains( (string) ( $response->data['message'] ?? '' ), 'Выберите' ), 'Multiple suggestions response must include suggestion choices and selection message.' );
 	$first = $response->data['suggestions'][0]['address'] ?? array();
 	recalc_smoke_assert( str_contains( (string) ( $first['address_1'] ?? '' ), 'кв 10' ) && '' === (string) ( $first['address_2'] ?? '' ), 'Multiple suggestion payload must keep flat in address_1 and leave address_2 empty.' );
-	recalc_smoke_assert( isset( $response->data['debug']['suggestions_count'], $response->data['debug']['first_data']['fias_level'] ) && ! isset( $response->data['debug']['authorization'] ), 'Multiple suggestions debug response must expose safe diagnostic fields without secrets.' );
+	recalc_smoke_assert( ! isset( $response->data['debug'] ), 'Multiple suggestions response must not expose temporary debug payload.' );
 }
 
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $nsk_location ), 'stage' => 'address', 'query' => 'Новосибирск Некрасова' );
@@ -962,6 +976,8 @@ try {
 	recalc_smoke_assert( $response->success && count( $items ) >= 1, 'Admin courier must return shared address suggestions.' );
 	recalc_smoke_assert( isset( $items[0]['level'], $items[0]['address'] ) && 'dadata' === (string) ( $items[0]['address']['source'] ?? '' ), 'Admin courier suggestions must include normalized save payloads from shared suggestion stack.' );
 	recalc_smoke_assert( str_contains( (string) ( $items[0]['address']['address_1'] ?? '' ), 'Некрасова' ) && '' === (string) ( $items[0]['address']['address_2'] ?? '' ), 'Admin courier suggestion payload must keep lower address in address_1 and leave address_2 empty.' );
+	recalc_smoke_assert( ! isset( $response->data['debug'] ), 'Admin address suggest endpoint must not expose temporary debug payload.' );
+	recalc_smoke_assert( 'nsk-fias' === (string) ( $items[0]['address']['city_fias_id'] ?? '' ), 'Admin courier suggestion payload must include city FIAS for location mismatch warning.' );
 }
 
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $nsk_location ), 'stage' => 'address_next', 'query' => 'Новосибирская область, г Новосибирск, ул Некрасова, д 63/1, 10', 'context' => wp_json_encode( array( 'selected_level' => 'house', 'desired_level' => 'flat', 'house_fias_id' => 'fake-nsk-house-fias' ) ) );
@@ -977,6 +993,11 @@ $admin_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/o
 recalc_smoke_assert( str_contains( $admin_js, 'addressSuggestAction' ) && str_contains( $admin_js, 'wdc_order_delivery_recalculate_address_suggest' ), 'Admin courier must call dedicated thin address suggest endpoint.' );
 recalc_smoke_assert( str_contains( $admin_js, 'requestCourierLowerLevelAfterHouse' ) && str_contains( $admin_js, "'address_next'" ) && str_contains( $admin_js, 'lowerLevelCourierItems' ), 'Admin courier must support house to flat suggestion flow.' );
 recalc_smoke_assert( str_contains( $admin_js, 'data-wdc-courier-address-house-finalize' ) && str_contains( $admin_js, 'houseLevelCourierItem' ), 'Admin courier must support normalized house-level finalize link.' );
+recalc_smoke_assert( ! str_contains( $admin_js, 'Проверить адрес' ) && ! str_contains( $admin_js, 'data-wdc-normalize-courier-address' ) && ! str_contains( $admin_js, 'normalizeCourierAddress' ), 'Admin courier suggestion flow must not render or handle the old check-address button.' );
+recalc_smoke_assert( str_contains( $admin_js, 'Использовать этот адрес' ), 'Admin courier manual fallback button must remain available.' );
+recalc_smoke_assert( ! str_contains( $admin_js, 'console.debug' ), 'Admin courier suggestion flow must not output temporary debug logs.' );
+recalc_smoke_assert( str_contains( $admin_js, 'courierLocationWarning' ) && str_contains( $admin_js, 'населенный пункт в адресе доставки отличается' ) && str_contains( $admin_js, 'Не удалось подтвердить' ), 'Admin courier save flow must expose non-blocking location mismatch warning logic.' );
+recalc_smoke_assert( str_contains( $admin_js, 'button.disabled = ! enabled' ) && str_contains( $admin_js, 'updateCourierLocationWarning' ), 'Courier location mismatch warning must update separately from save button disabling.' );
 $admin_controller_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Orders/Admin/OrderDeliveryRecalculationAdminController.php' );
 $admin_service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Orders/Application/OrderDeliveryAddressNormalizationService.php' );
 recalc_smoke_assert( str_contains( $admin_controller_source, 'ajax_address_suggest' ) && str_contains( $admin_service_source, 'AddressSuggestionService' ) && str_contains( $admin_service_source, 'AddressLineParser::lower_address_line' ), 'Admin courier must reuse shared AddressSuggestionService and AddressLineParser.' );
