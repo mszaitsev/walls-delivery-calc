@@ -178,11 +178,24 @@ final class OrderDeliveryRecalculationAdminController {
 			$this->selected_location_from_request() ?? array(),
 			$this->request_string( 'address_line' )
 		);
+		if ( ! empty( $result['requires_selection'] ) ) {
+			wp_send_json_success(
+				array(
+					'message' => (string) ( $result['message'] ?? __( 'Выберите подходящий адрес из вариантов.', 'walls-delivery-calc' ) ),
+					'address' => $result['payload'] ?? array(),
+					'requires_selection' => true,
+					'suggestions' => $result['suggestions'] ?? array(),
+					'debug' => $result['debug'] ?? array(),
+				)
+			);
+		}
 		if ( empty( $result['success'] ) ) {
 			wp_send_json_error(
 				array(
 					'message' => (string) ( $result['message'] ?? __( 'Адрес не нормализован.', 'walls-delivery-calc' ) ),
 					'address' => $result['payload'] ?? array(),
+					'suggestions' => $result['suggestions'] ?? array(),
+					'debug' => $result['debug'] ?? array(),
 				),
 				400
 			);
@@ -192,6 +205,8 @@ final class OrderDeliveryRecalculationAdminController {
 			array(
 				'message' => (string) ( $result['message'] ?? __( 'Адрес нормализован.', 'walls-delivery-calc' ) ),
 				'address' => $result['payload'] ?? array(),
+				'suggestions' => $result['suggestions'] ?? array(),
+				'debug' => $result['debug'] ?? array(),
 			)
 		);
 	}
