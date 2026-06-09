@@ -1,12 +1,14 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.41.25.
+Version: 0.42.0.
 
 ## Цель этапа
 
 Сценарий пересчета доставки внутри WooCommerce order admin завершен: администратор может открыть модалку из блока `Калькулятор доставок`, пересчитать rates для текущего или выбранного населенного пункта, выбрать courier/pickup вариант, выбрать ПВЗ для pickup и сохранить новый вариант доставки.
 
-## Статус 0.41.25
+## Статус 0.42.0
+
+Этап завершен и HPOS-аудирован. Следующий рекомендуемый крупный этап разработки: `feature/cdek-carrier-foundation`.
 
 Реализовано:
 
@@ -31,6 +33,15 @@ Version: 0.41.25.
 - totals пересчитываются через WooCommerce order API, затем order сохраняется;
 - после успешного save добавляется приватное примечание на русском языке со старым/новым методом, ценой, базовой API стоимостью, total и old/new city только при фактической смене населенного пункта;
 - JS после успешного save перезагружает страницу, чтобы администратор видел актуальные totals, shipping item и блок `Калькулятор доставок`.
+
+HPOS audit:
+
+- order loading goes through `wc_get_order()`;
+- order meta is read/written through `$order->get_meta()` and `$order->update_meta_data()`;
+- shipping item create/replace uses `WC_Order_Item_Shipping` and WooCommerce item CRUD;
+- order totals are recalculated through `$order->calculate_totals(false)`;
+- private notes are written through `$order->add_order_note()`;
+- no direct order `get_post_meta()`, `update_post_meta()`, `WP_Query` over `shop_order`, or direct `wp_posts`/`wp_postmeta` access was found in the audited order delivery recalculation code.
 
 ## Основные классы
 
@@ -61,7 +72,7 @@ Version: 0.41.25.
 - Несколько shipping items в заказе остаются save-blocker; автоматического выбора одного shipping item нет.
 - Для courier требуется выбранный normalized suggestion payload или explicit `admin_manual` fallback; mismatch warning по населенному пункту не блокирует save.
 - Реальный выбор/валидация налогов зависит от WooCommerce `calculate_totals(false)` и текущей конфигурации магазина.
-- Сценарий требует ручной QA на реальном HPOS order admin screen после smoke-тестов.
+- Save intentionally remains blocked for ambiguous orders with multiple shipping items or already registered shipments.
 
 ## Проверки
 
@@ -71,4 +82,4 @@ Smoke coverage:
 php tests/orders/run-order-delivery-recalculation-smoke.php
 ```
 
-Тест проверяет modal markup, current pickup/current shipping address payload, duplicate-free location labels, order-to-quote mapping, location override, all-rates preview, Russian Post pickup/courier groups, pickup map and geocode endpoints, courier address suggest endpoint/shared stack, отсутствие временного admin debug, save blockers, shipping item create/replace, pickup save без normalized address, courier save with required normalized/manual address, checkout-compatible city/state save, WDC meta rewrite with package/API/rules/result, totals recalculation, private notes, endpoint security, JS prefill/map-sync/geocode/save-warning hooks and no mutation during preview/pickup search.
+Тест проверяет modal markup, current pickup/current shipping address payload, duplicate-free location labels, order-to-quote mapping, location override, all-rates preview, Russian Post pickup/courier groups, pickup map and geocode endpoints, courier address suggest endpoint/shared stack, save blockers, shipping item create/replace, pickup save без normalized address, courier save with required normalized/manual address, checkout-compatible city/state save, WDC meta rewrite with package/API/rules/result, totals recalculation, private notes, endpoint security, JS prefill/map-sync/geocode/save-warning hooks and no mutation during preview/pickup search.
