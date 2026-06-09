@@ -468,13 +468,13 @@ final class DeliveryServicesAdminPage {
 		if ( $this->is_domestic_service( $service ) ) {
 			$tabs['tariffs'] = 'Тарифы';
 			$tabs['russian_post_pickup'] = 'ПВЗ / ОПС';
-			$tabs['api_credentials'] = 'API / Credentials';
+			$tabs['api_credentials'] = 'Данные для входа';
 			$tabs['shipments'] = 'Отправления';
 			$tabs['status_mapping'] = 'Статусы / Mapping';
 			$tabs['diagnostics'] = 'Диагностика';
 		}
 		if ( $this->is_cdek_service( $service ) ) {
-			$tabs['cdek_settings'] = 'СДЭК';
+			$tabs['cdek_settings'] = 'Данные для входа';
 		}
 		?>
 		<h2><?php echo esc_html( $service->title ); ?></h2>
@@ -644,7 +644,7 @@ final class DeliveryServicesAdminPage {
 				<?php $this->text_row( RussianPostOtpravkaApiSettings::TRACKING_LOGIN_KEY, __( 'Tracking login', 'walls-delivery-calc' ), (string) ( $values[ RussianPostOtpravkaApiSettings::TRACKING_LOGIN_KEY ] ?? '' ) ); ?>
 				<tr><th scope="row"><?php echo esc_html__( 'Tracking password', 'walls-delivery-calc' ); ?></th><td><input class="regular-text" type="password" name="russian_post_tracking_password" value="" placeholder="<?php echo esc_attr( $this->otpravka_settings->has_tracking_password() ? 'задано' : 'не задано' ); ?>"><label style="display:block;margin-top:6px;"><input type="checkbox" name="russian_post_tracking_clear_password" value="1"> <?php echo esc_html__( 'очистить сохраненный пароль', 'walls-delivery-calc' ); ?></label></td></tr>
 			</table>
-			<?php submit_button( __( 'Сохранить API / Credentials', 'walls-delivery-calc' ) ); ?>
+			<?php submit_button( __( 'Сохранить данные для входа', 'walls-delivery-calc' ) ); ?>
 		</form>
 		<?php
 	}
@@ -653,10 +653,11 @@ final class DeliveryServicesAdminPage {
 		if ( ! $this->is_cdek_service( $service ) || ! $this->cdek_settings instanceof CdekSettings ) {
 			return;
 		}
-		$credentials = $this->cdek_settings->credentials();
+		$test_credentials = $this->cdek_settings->credentials_for_environment( CdekSettings::ENV_TEST );
+		$production_credentials = $this->cdek_settings->credentials_for_environment( CdekSettings::ENV_PRODUCTION );
 		$token_status = $this->cdek_settings->credentials_are_complete()
-			? __( 'Credentials заполнены, token cache будет создан после проверки подключения.', 'walls-delivery-calc' )
-			: __( 'Credentials не заполнены.', 'walls-delivery-calc' );
+			? __( 'Данные для активной среды заполнены, token cache будет создан после проверки подключения.', 'walls-delivery-calc' )
+			: __( 'Данные для активной среды не заполнены.', 'walls-delivery-calc' );
 		$last_check = $this->cdek_settings->last_connection_check();
 		$last_status = $this->cdek_settings->last_connection_status();
 		$last_message = $this->cdek_settings->last_connection_message();
@@ -666,25 +667,37 @@ final class DeliveryServicesAdminPage {
 			<input type="hidden" name="wdc_delivery_services_action" value="save_cdek_settings">
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
-			<h3><?php echo esc_html__( 'СДЭК', 'walls-delivery-calc' ); ?></h3>
+			<h3><?php echo esc_html__( 'Данные для входа СДЭК', 'walls-delivery-calc' ); ?></h3>
 			<table class="form-table" role="presentation">
-				<?php $this->checkbox_row( CdekSettings::ENABLED_KEY, __( 'Включить СДЭК', 'walls-delivery-calc' ), $this->cdek_settings->enabled() ); ?>
 				<?php $this->select_assoc_row( CdekSettings::ENVIRONMENT_KEY, __( 'Среда', 'walls-delivery-calc' ), $this->cdek_settings->environment(), array( CdekSettings::ENV_TEST => 'Тестовая', CdekSettings::ENV_PRODUCTION => 'Рабочая' ) ); ?>
-				<?php $this->text_row( CdekSettings::ACCOUNT_KEY, __( 'Account / client_id', 'walls-delivery-calc' ), $credentials->account ); ?>
+				<tr><th colspan="2"><h3><?php echo esc_html__( 'Тестовая среда', 'walls-delivery-calc' ); ?></h3></th></tr>
+				<?php $this->text_row( CdekSettings::TEST_ACCOUNT_KEY, __( 'Account / client_id', 'walls-delivery-calc' ), $test_credentials->account ); ?>
 				<tr>
 					<th scope="row"><?php echo esc_html__( 'Secure password / client_secret', 'walls-delivery-calc' ); ?></th>
 					<td>
-						<input class="regular-text" type="password" name="cdek_secure_password" value="" placeholder="<?php echo esc_attr( $this->cdek_settings->has_secure_password() ? 'задано' : 'не задано' ); ?>">
-						<label style="display:block;margin-top:6px;"><input type="checkbox" name="cdek_clear_secure_password" value="1"> <?php echo esc_html__( 'очистить сохраненный Secure password', 'walls-delivery-calc' ); ?></label>
+						<input class="regular-text" type="password" name="cdek_test_secure_password" value="" placeholder="<?php echo esc_attr( $this->cdek_settings->has_secure_password( CdekSettings::ENV_TEST ) ? 'задано' : 'не задано' ); ?>">
+						<label style="display:block;margin-top:6px;"><input type="checkbox" name="cdek_clear_test_secure_password" value="1"> <?php echo esc_html__( 'очистить сохраненный Secure password тестовой среды', 'walls-delivery-calc' ); ?></label>
 						<p class="description"><?php echo esc_html__( 'Пустое поле не затирает сохраненный секрет.', 'walls-delivery-calc' ); ?></p>
 					</td>
 				</tr>
+				<tr><th colspan="2"><h3><?php echo esc_html__( 'Рабочая среда', 'walls-delivery-calc' ); ?></h3></th></tr>
+				<?php $this->text_row( CdekSettings::PRODUCTION_ACCOUNT_KEY, __( 'Account / client_id', 'walls-delivery-calc' ), $production_credentials->account ); ?>
+				<tr>
+					<th scope="row"><?php echo esc_html__( 'Secure password / client_secret', 'walls-delivery-calc' ); ?></th>
+					<td>
+						<input class="regular-text" type="password" name="cdek_production_secure_password" value="" placeholder="<?php echo esc_attr( $this->cdek_settings->has_secure_password( CdekSettings::ENV_PRODUCTION ) ? 'задано' : 'не задано' ); ?>">
+						<label style="display:block;margin-top:6px;"><input type="checkbox" name="cdek_clear_production_secure_password" value="1"> <?php echo esc_html__( 'очистить сохраненный Secure password рабочей среды', 'walls-delivery-calc' ); ?></label>
+						<p class="description"><?php echo esc_html__( 'Пустое поле не затирает сохраненный секрет.', 'walls-delivery-calc' ); ?></p>
+					</td>
+				</tr>
+				<tr><th colspan="2"><h3><?php echo esc_html__( 'Проверка подключения', 'walls-delivery-calc' ); ?></h3></th></tr>
+				<?php $this->readonly_row( 'cdek_active_environment', __( 'Активная среда', 'walls-delivery-calc' ), $this->cdek_settings->environment_label() ); ?>
 				<?php $this->readonly_row( 'cdek_token_cache_status', __( 'Token cache status', 'walls-delivery-calc' ), $token_status ); ?>
 				<?php $this->readonly_row( CdekSettings::LAST_CONNECTION_CHECK_KEY, __( 'Последняя проверка подключения', 'walls-delivery-calc' ), '' !== $last_check ? $last_check : __( 'не выполнялась', 'walls-delivery-calc' ) ); ?>
 				<?php $this->readonly_row( CdekSettings::LAST_CONNECTION_STATUS_KEY, __( 'Статус последней проверки', 'walls-delivery-calc' ), '' !== $last_status ? $last_status : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
 				<?php $this->readonly_row( CdekSettings::LAST_CONNECTION_MESSAGE_KEY, __( 'Сообщение последней проверки', 'walls-delivery-calc' ), '' !== $last_message ? $last_message : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
 			</table>
-			<?php submit_button( __( 'Сохранить настройки СДЭК', 'walls-delivery-calc' ) ); ?>
+			<?php submit_button( __( 'Сохранить данные для входа', 'walls-delivery-calc' ) ); ?>
 		</form>
 		<form method="post" style="margin-top: 16px; max-width: 860px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>

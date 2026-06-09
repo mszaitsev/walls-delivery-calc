@@ -8,7 +8,8 @@ defined( 'ABSPATH' ) || exit;
 final class CdekCredentials {
 	public function __construct(
 		public readonly string $account,
-		public readonly string $secure_password
+		public readonly string $secure_password,
+		public readonly string $environment = ''
 	) {
 	}
 

@@ -1,5 +1,7 @@
 # Project Status
 
+0.43.1 note: the CDEK foundation settings UX now stores test and production credentials separately. The active CDEK environment chooses the base URL and matching Account / Secure password; switching environments does not copy, clear or mutate the other environment. The duplicate CDEK enabled checkbox was removed from CDEK settings, so runtime enablement remains the common delivery service `Основное` flag. Russian Post and CDEK credentials tabs are now labeled `Данные для входа`, and CDEK diagnostics include the active environment without exposing secrets or tokens.
+
 0.43.0 note: CDEK Carrier Foundation is implemented for branch `feature/cdek-carrier-foundation`. The new predefined delivery service key is `cdek`, disabled by default, with admin settings for environment, Account / client_id, encrypted Secure password / client_secret, OAuth token cache diagnostics and a protected "Проверить подключение" action. Runtime checkout rates, tariff calculation, pickup points, shipments/orders, statuses, print forms, autosync and webhooks are intentionally not connected. The next recommended feature branch is `feature/cdek-tariff-calculation`.
 
 0.42.0 note: the order-admin delivery recalculation stage is closed after an HPOS audit and documentation refresh. The completed flow covers preview, settlement override, pickup map selection, shared checkout courier address suggestions, safe WooCommerce shipping item create/replace, WDC delivery/calculation meta rewrite, shipping address update, totals recalculation, private order notes, non-blocking courier settlement mismatch warnings and save blockers for multiple shipping items or registered shipments. The audited order-delivery recalculation code uses `wc_get_order()`, WooCommerce order/shipping-item CRUD, `$order->get_meta()`, `$order->update_meta_data()`, `$order->calculate_totals(false)` and `$order->add_order_note()`; no direct order `postmeta`/`wp_posts` access or `WP_Query` over `shop_order` was found. The next recommended major branch is `feature/cdek-carrier-foundation`.
@@ -44,7 +46,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.43.0`.
+- Текущая версия: `0.43.1`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/cdek-carrier-foundation`.
 - Последнее обновление статуса: 2026-06-09.
@@ -74,7 +76,7 @@
 | Order Delivery Recalculation | done | 100% | Admin order delivery recalculation is complete and HPOS-audited: preview, location override, pickup map, courier suggestions, shipping item replacement/create, totals, checkout-compatible calculation data, mismatch warning and shipment/save blockers. |
 | Rule Engine | done | 88% | Conditions/groups, audit, price/days mutations, comments, service rules, simulation and packaging tab. |
 | International Shipping | partial | 75% | Russian Post international rates/country mapping/fallback work; no shipment creation/tracking/documents for international flow. |
-| CDEK Carrier Foundation | partial | 35% | `cdek` service metadata, admin settings, encrypted credentials, environment switch, OAuth client/cache and connection check exist; runtime rates, pickup points, shipments, statuses, print forms and webhooks are deferred. |
+| CDEK Carrier Foundation | partial | 38% | `cdek` service metadata, admin settings, separate test/production encrypted credentials, environment switch, OAuth client/cache and connection check exist; runtime rates, pickup points, shipments, statuses, print forms and webhooks are deferred. |
 | Future Carriers | not-started | 0% | DPD, Yandex Delivery, PEK, Energia, Aerogruz and Jet have no runtime adapters. |
 | Operations / Monitoring | partial | 50% | Logger, diagnostics pages and autosync diagnostics exist; no production dashboard/rotation strategy. |
 | Documentation | partial | 78% | Profile docs cover the completed order delivery recalculation stage and current CDEK-oriented roadmap; older historical notes remain as changelog context. |
@@ -83,7 +85,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.43.0`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.43.1`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

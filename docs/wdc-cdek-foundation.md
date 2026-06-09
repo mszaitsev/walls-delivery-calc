@@ -1,6 +1,6 @@
 # WDC CDEK Carrier Foundation
 
-Version: 0.43.0.
+Version: 0.43.1.
 
 This stage adds the foundation for CDEK API v2 integration without connecting CDEK to checkout rates, pickup maps, shipment creation, statuses, print forms, autosync, or webhooks.
 
@@ -10,9 +10,9 @@ Implemented:
 
 - Delivery service metadata key: `cdek`.
 - Future delivery types: `pickup` and `courier`.
-- Admin settings section/tab for CDEK.
+- Admin credentials tab labeled `Данные для входа`.
 - Environment switch: `test` / `production`.
-- Encrypted storage for Secure password / client_secret.
+- Separate encrypted credentials for test and production environments.
 - OAuth client for `POST /v2/oauth/token`.
 - Token cache with expiry and a 60 second safety margin.
 - Admin connection check that only obtains an OAuth token.
@@ -53,23 +53,33 @@ The API client keeps this body construction isolated in `CdekOAuthTokenService` 
 
 Core settings keys:
 
-- `cdek_enabled`
 - `cdek_environment`
-- `cdek_account`
-- `cdek_secure_password_encrypted`
+- `cdek_test_account`
+- `cdek_test_secure_password_encrypted`
+- `cdek_production_account`
+- `cdek_production_secure_password_encrypted`
 - `cdek_last_connection_check`
 - `cdek_last_connection_status`
 - `cdek_last_connection_message`
 
-`cdek_secure_password_encrypted` stores the encrypted Secure password. The admin password field is intentionally empty after save; submitting it empty keeps the saved secret. The diagnostics message is redacted for account, secret, and token-like fragments.
+The active environment selects both base URL and credentials:
+
+- `test` uses `https://api.edu.cdek.ru`, `cdek_test_account` and `cdek_test_secure_password_encrypted`.
+- `production` uses `https://api.cdek.ru`, `cdek_production_account` and `cdek_production_secure_password_encrypted`.
+
+The admin password fields are intentionally empty after save; submitting them empty keeps the saved secrets. Switching the active environment does not copy, clear or mutate credentials for the other environment. CDEK service enablement is controlled only by the common delivery service tab `Основное`, not by the credentials tab.
+
+For development compatibility only, test credentials can fall back to old `cdek_account` / `cdek_secure_password_encrypted` values when the new test keys are empty. New saves write only the environment-specific keys.
+
+Diagnostics messages are redacted for account, secrets, and token-like fragments.
 
 ## Token Cache
 
-The token cache key includes environment and account hash, so test and production tokens are not mixed. Cached payloads contain the access token and calculated expiration timestamp. `clearTokenCache()` removes the cached token and is used before connection checks and after settings saves.
+The token cache key includes environment and account hash, so test and production tokens are not mixed even when the account value is the same. Cached payloads contain the access token and calculated expiration timestamp. `clearTokenCache()` removes the cached token and is used before connection checks and after settings saves.
 
 ## Connection Check
 
-The admin action "Проверить подключение" is protected by the existing delivery services capability and nonce. It loads saved CDEK settings, requests an OAuth token, stores timestamp/status/message, and never stores the token in diagnostics.
+The admin action "Проверить подключение" is protected by the existing delivery services capability and nonce. It loads saved CDEK settings, requests an OAuth token for the active environment only, stores timestamp/status/message, and never stores the token in diagnostics.
 
 Success message:
 
@@ -81,6 +91,13 @@ Error message format:
 
 ```text
 Не удалось подключиться к СДЭК: {короткое сообщение}
+```
+
+Diagnostics include the active environment, for example:
+
+```text
+Среда: Тестовая
+Среда: Рабочая
 ```
 
 ## Async API Note

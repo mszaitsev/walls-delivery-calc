@@ -24,7 +24,7 @@ function cdek_smoke_assert( bool $condition, string $message ): void {
 	}
 }
 
-function current_time( string $type ): string { return '2026-06-09 12:00:00'; }
+function current_time( string $type ): string { return '2026-06-10 12:00:00'; }
 function wp_salt( string $scheme = '' ): string { return 'cdek-smoke-salt-' . $scheme; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
 function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['wdc_cdek_options'][ $key ] ?? $default; }
@@ -116,30 +116,40 @@ $settings_repository = new SettingsRepository();
 $encryption = new EncryptionService();
 $settings = new CdekSettings( $settings_repository, $encryption );
 
-cdek_smoke_assert( false === $settings->enabled(), 'CDEK must be disabled by default.' );
 cdek_smoke_assert( CdekSettings::ENV_TEST === $settings->environment(), 'CDEK default environment must be test.' );
 cdek_smoke_assert( 'https://api.edu.cdek.ru' === $settings->base_url(), 'CDEK test base URL mismatch.' );
 
 $settings->save_from_admin(
 	array(
-		CdekSettings::ENABLED_KEY => '1',
-		CdekSettings::ENVIRONMENT_KEY => CdekSettings::ENV_PRODUCTION,
-		CdekSettings::ACCOUNT_KEY => 'account-1',
-		'cdek_secure_password' => 'secret-1',
+		CdekSettings::ENVIRONMENT_KEY => CdekSettings::ENV_TEST,
+		CdekSettings::TEST_ACCOUNT_KEY => 'same-account',
+		'cdek_test_secure_password' => 'test-secret',
+		CdekSettings::PRODUCTION_ACCOUNT_KEY => 'same-account',
+		'cdek_production_secure_password' => 'prod-secret',
 	)
 );
-cdek_smoke_assert( 'https://api.cdek.ru' === $settings->base_url(), 'CDEK production base URL mismatch.' );
-cdek_smoke_assert( 'account-1' === $settings->credentials()->account, 'CDEK account must be read from settings.' );
-cdek_smoke_assert( 'secret-1' === $settings->credentials()->secure_password, 'CDEK secret must decrypt from settings.' );
+
+$test_credentials = $settings->credentials();
+cdek_smoke_assert( CdekSettings::ENV_TEST === $test_credentials->environment, 'CDEK test credentials must be active.' );
+cdek_smoke_assert( 'same-account' === $test_credentials->account, 'CDEK test account mismatch.' );
+cdek_smoke_assert( 'test-secret' === $test_credentials->secure_password, 'CDEK test secret mismatch.' );
+$test_cache_key = $settings->token_cache_key();
 
 $settings->save_from_admin(
 	array(
-		CdekSettings::ENVIRONMENT_KEY => CdekSettings::ENV_TEST,
-		CdekSettings::ACCOUNT_KEY => 'account-1',
-		'cdek_secure_password' => '',
+		CdekSettings::ENVIRONMENT_KEY => CdekSettings::ENV_PRODUCTION,
+		CdekSettings::TEST_ACCOUNT_KEY => 'same-account',
+		CdekSettings::PRODUCTION_ACCOUNT_KEY => 'same-account',
 	)
 );
-cdek_smoke_assert( 'secret-1' === $settings->credentials()->secure_password, 'Empty password input must not clear saved CDEK secret.' );
+
+$production_credentials = $settings->credentials();
+cdek_smoke_assert( 'https://api.cdek.ru' === $settings->base_url(), 'CDEK production base URL mismatch.' );
+cdek_smoke_assert( CdekSettings::ENV_PRODUCTION === $production_credentials->environment, 'CDEK production credentials must be active.' );
+cdek_smoke_assert( 'same-account' === $production_credentials->account, 'CDEK production account mismatch.' );
+cdek_smoke_assert( 'prod-secret' === $production_credentials->secure_password, 'Switching environment must not clear production secret.' );
+cdek_smoke_assert( 'test-secret' === $settings->credentials_for_environment( CdekSettings::ENV_TEST )->secure_password, 'Switching environment must not clear test secret.' );
+cdek_smoke_assert( $test_cache_key !== $settings->token_cache_key(), 'CDEK token cache key must distinguish test and production even for same account.' );
 
 $http = new CdekFakeHttpClient();
 $tokens = new CdekOAuthTokenService( $settings, $http );
@@ -148,11 +158,11 @@ cdek_smoke_assert( 'fake-token' === $token, 'CDEK OAuth token must be returned.'
 cdek_smoke_assert( 1 === count( $http->requests ), 'First CDEK getToken must call HTTP once.' );
 $request = $http->requests[0];
 cdek_smoke_assert( 'POST' === $request['method'], 'CDEK OAuth must use POST.' );
-cdek_smoke_assert( 'https://api.edu.cdek.ru/v2/oauth/token' === $request['url'], 'CDEK OAuth endpoint mismatch.' );
+cdek_smoke_assert( 'https://api.cdek.ru/v2/oauth/token' === $request['url'], 'CDEK active production OAuth endpoint mismatch.' );
 parse_str( (string) ( $request['args']['body'] ?? '' ), $body );
 cdek_smoke_assert( 'client_credentials' === ( $body['grant_type'] ?? '' ), 'CDEK OAuth grant_type mismatch.' );
-cdek_smoke_assert( 'account-1' === ( $body['client_id'] ?? '' ), 'CDEK OAuth client_id mismatch.' );
-cdek_smoke_assert( 'secret-1' === ( $body['client_secret'] ?? '' ), 'CDEK OAuth client_secret mismatch.' );
+cdek_smoke_assert( 'same-account' === ( $body['client_id'] ?? '' ), 'CDEK OAuth client_id mismatch.' );
+cdek_smoke_assert( 'prod-secret' === ( $body['client_secret'] ?? '' ), 'CDEK OAuth must use active production secret.' );
 
 $second = $tokens->getToken();
 cdek_smoke_assert( 'fake-token' === $second && 1 === count( $http->requests ), 'Second CDEK getToken must use cache.' );
@@ -170,12 +180,12 @@ cdek_smoke_assert( 4 === count( $http->requests ), 'Token with expires_in below 
 
 $tokens->clearTokenCache();
 $http->status = 401;
-$http->payload = array( 'error' => 'invalid_client', 'message' => 'bad secret-1' );
+$http->payload = array( 'error' => 'invalid_client', 'message' => 'bad prod-secret' );
 try {
 	$tokens->getToken();
 	cdek_smoke_assert( false, 'Bad CDEK credentials must throw controlled error.' );
 } catch ( CdekApiException $exception ) {
-	cdek_smoke_assert( str_contains( $exception->getMessage(), 'bad secret-1' ), 'CDEK API error message must be controlled.' );
+	cdek_smoke_assert( str_contains( $exception->getMessage(), 'bad prod-secret' ), 'CDEK API error message must be controlled.' );
 }
 
 $http->status = 200;
@@ -189,31 +199,50 @@ try {
 	cdek_smoke_assert( str_contains( $exception->getMessage(), 'Network unavailable' ), 'CDEK network error mismatch.' );
 }
 
-$settings_repository->set( CdekSettings::ACCOUNT_KEY, '' );
-$settings_repository->set( CdekSettings::SECURE_PASSWORD_ENCRYPTED_KEY, '' );
+$settings_repository->set( CdekSettings::PRODUCTION_ACCOUNT_KEY, '' );
+$settings_repository->set( CdekSettings::PRODUCTION_SECURE_PASSWORD_ENCRYPTED_KEY, '' );
 $http->network_failure = false;
 try {
 	$tokens->clearTokenCache();
 	$tokens->getToken();
-	cdek_smoke_assert( false, 'Missing CDEK credentials must throw controlled error.' );
+	cdek_smoke_assert( false, 'Missing active CDEK credentials must throw controlled error.' );
 } catch ( CdekApiException $exception ) {
 	cdek_smoke_assert( str_contains( $exception->getMessage(), 'Заполните Account' ), 'Missing CDEK credentials message mismatch.' );
 }
 
-$settings_repository->set( CdekSettings::ACCOUNT_KEY, 'account-1' );
-$settings_repository->set( CdekSettings::SECURE_PASSWORD_ENCRYPTED_KEY, $encryption->encrypt( 'secret-1' ) );
-$settings->save_connection_result( false, 'Не удалось подключиться к СДЭК: token fake-token secret-1 account-1' );
-cdek_smoke_assert( '2026-06-09 12:00:00' === $settings->last_connection_check(), 'CDEK connection check timestamp must be saved.' );
+$settings_repository->set( CdekSettings::PRODUCTION_ACCOUNT_KEY, 'same-account' );
+$settings_repository->set( CdekSettings::PRODUCTION_SECURE_PASSWORD_ENCRYPTED_KEY, $encryption->encrypt( 'prod-secret' ) );
+$settings->save_connection_result( false, 'Не удалось подключиться к СДЭК: token fake-token prod-secret same-account test-secret' );
+cdek_smoke_assert( '2026-06-10 12:00:00' === $settings->last_connection_check(), 'CDEK connection check timestamp must be saved.' );
 cdek_smoke_assert( 'error' === $settings->last_connection_status(), 'CDEK connection status must be saved.' );
-cdek_smoke_assert( ! str_contains( $settings->last_connection_message(), 'secret-1' ), 'CDEK secret must not be exposed in diagnostics.' );
-cdek_smoke_assert( ! str_contains( $settings->last_connection_message(), 'account-1' ), 'CDEK account must not be exposed in diagnostics.' );
+cdek_smoke_assert( str_contains( $settings->last_connection_message(), 'Среда: Рабочая' ), 'CDEK diagnostics must show active environment.' );
+cdek_smoke_assert( ! str_contains( $settings->last_connection_message(), 'prod-secret' ), 'CDEK production secret must not be exposed in diagnostics.' );
+cdek_smoke_assert( ! str_contains( $settings->last_connection_message(), 'test-secret' ), 'CDEK test secret must not be exposed in diagnostics.' );
+cdek_smoke_assert( ! str_contains( $settings->last_connection_message(), 'same-account' ), 'CDEK account must not be exposed in diagnostics.' );
 cdek_smoke_assert( ! str_contains( $settings->last_connection_message(), 'fake-token' ), 'CDEK token-like text must not be exposed in diagnostics.' );
 
+$legacy_repository = new SettingsRepository();
+$GLOBALS['wdc_cdek_options'] = array(
+	'wdc_core_settings' => array(
+		CdekSettings::LEGACY_ACCOUNT_KEY => 'legacy-account',
+		CdekSettings::LEGACY_SECURE_PASSWORD_ENCRYPTED_KEY => $encryption->encrypt( 'legacy-secret' ),
+	),
+);
+$legacy_settings = new CdekSettings( $legacy_repository, $encryption );
+cdek_smoke_assert( 'legacy-account' === $legacy_settings->credentials()->account, 'CDEK test credentials may fall back to legacy account.' );
+cdek_smoke_assert( 'legacy-secret' === $legacy_settings->credentials()->secure_password, 'CDEK test credentials may fall back to legacy secret.' );
+
+$GLOBALS['wdc_cdek_options'] = array();
+$GLOBALS['wdc_cdek_transients'] = array();
+$GLOBALS['wpdb'] = new wpdb();
 $services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
 $cdek_service = $services->ensure_cdek_service();
 cdek_smoke_assert( CdekSettings::SERVICE_KEY === $cdek_service->service_key, 'CDEK service key mismatch.' );
 cdek_smoke_assert( CdekSettings::CARRIER_KEY === $cdek_service->carrier_key, 'CDEK carrier key mismatch.' );
-cdek_smoke_assert( false === $cdek_service->enabled, 'CDEK service must be disabled by default.' );
+cdek_smoke_assert( false === $cdek_service->enabled, 'CDEK common delivery service enabled flag must be disabled by default.' );
+$services->update_service( (int) $cdek_service->id, array( 'enabled' => 1 ) );
+$enabled_cdek = $services->find_by_service_key( CdekSettings::SERVICE_KEY );
+cdek_smoke_assert( null !== $enabled_cdek && true === $enabled_cdek->enabled, 'CDEK enabled flag must come from common delivery service settings.' );
 cdek_smoke_assert( $services->is_predefined_service_key( CdekSettings::SERVICE_KEY ), 'CDEK service must be predefined.' );
 
 $registry = new CarrierRegistry();
@@ -223,6 +252,10 @@ $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Delive
 cdek_smoke_assert( str_contains( $admin_source, 'check_cdek_connection' ), 'Admin page must expose CDEK connection check action.' );
 cdek_smoke_assert( str_contains( $admin_source, "check_admin_referer( 'wdc_delivery_services' )" ), 'Admin CDEK action must be behind nonce check.' );
 cdek_smoke_assert( str_contains( $admin_source, 'current_user_can( AdminMenu::CAPABILITY )' ), 'Admin CDEK action must be behind capability check.' );
-cdek_smoke_assert( ! str_contains( $admin_source, 'secret-1' ) && ! str_contains( $admin_source, 'fake-token' ), 'Admin source must not contain test CDEK secrets or tokens.' );
+cdek_smoke_assert( ! str_contains( $admin_source, 'Включить СДЭК' ), 'CDEK credentials tab must not contain duplicate enabled checkbox label.' );
+cdek_smoke_assert( str_contains( $admin_source, 'Данные для входа' ), 'Admin source must contain unified credentials tab label.' );
+cdek_smoke_assert( str_contains( $admin_source, "\$tabs['api_credentials'] = 'Данные для входа';" ), 'Russian Post credentials tab label must be changed.' );
+cdek_smoke_assert( str_contains( $admin_source, "\$tabs['cdek_settings'] = 'Данные для входа';" ), 'CDEK credentials tab label must be changed.' );
+cdek_smoke_assert( ! str_contains( $admin_source, 'prod-secret' ) && ! str_contains( $admin_source, 'fake-token' ), 'Admin source must not contain test CDEK secrets or tokens.' );
 
 echo "CDEK foundation smoke test passed.\n";

@@ -1,22 +1,23 @@
 # WDC Delivery Services
 
-## CDEK Foundation 0.43.0
+## CDEK Foundation 0.43.1
 
 The built-in CDEK delivery service uses the single service key `cdek` and carrier key `cdek`. It is created disabled by default so administrators can configure credentials without changing checkout runtime behavior.
 
-The `СДЭК` admin tab stores:
+The `Данные для входа` admin tab stores:
 
-- `cdek_enabled`
 - `cdek_environment`
-- `cdek_account`
-- encrypted Secure password in `cdek_secure_password_encrypted`
+- `cdek_test_account`
+- encrypted test Secure password in `cdek_test_secure_password_encrypted`
+- `cdek_production_account`
+- encrypted production Secure password in `cdek_production_secure_password_encrypted`
 - last connection check diagnostics
 
-The foundation includes OAuth for `POST /v2/oauth/token`, token cache, and a protected "Проверить подключение" action. It intentionally does not calculate rates, show pickup points, create orders/shipments, update statuses, print documents or manage webhooks. See `docs/wdc-cdek-foundation.md`.
+The active environment selects the matching base URL and credentials. Switching environments does not copy or clear credentials for the other environment. CDEK service enablement is controlled only by the common `Основное` tab. The foundation includes OAuth for `POST /v2/oauth/token`, token cache, and a protected "Проверить подключение" action. It intentionally does not calculate rates, show pickup points, create orders/shipments, update statuses, print documents or manage webhooks. See `docs/wdc-cdek-foundation.md`.
 
 ## Russian Post Tracking Statuses 0.36.2
 
-The unified service `russian_post_domestic` owns Russian Post Tracking API credentials on `API / Credentials`:
+The unified service `russian_post_domestic` owns Russian Post Tracking API credentials on `Данные для входа`:
 
 - `russian_post_tracking_login`;
 - `russian_post_tracking_password_encrypted`.
@@ -111,11 +112,11 @@ Bootstrapping pins it to `RU` and no longer creates pickup/courier service rows.
 
 Historical migration note: migration `0026_unify_russian_post_domestic_service.php` is a one-way cleanup migration for the old domestic Russian Post model. It copies service settings, tariff variants, countries, point type settings, Otpravka/tracking credentials and shipment settings into `service_key=russian_post_domestic`, then physically deletes the old `russian_post_domestic_pickup` and `russian_post_domestic_courier` service rows plus their service settings, country rows and service-rule bindings. The source of truth after the migration is only the unified service; backward compatibility with the old domestic service keys is intentionally not supported.
 
-The domestic service has these tabs: `Основные`, `Расчет`, `Тарифы`, `ПВЗ / ОПС`, `API / Credentials`, `Отправления`, `Статусы / Mapping`, `Диагностика`. The former carrier credentials page is removed from the menu and the UI.
+The domestic service has these tabs: `Основные`, `Расчет`, `Тарифы`, `ПВЗ / ОПС`, `Данные для входа`, `Отправления`, `Статусы / Mapping`, `Диагностика`. The former carrier credentials page is removed from the menu and the UI.
 
 As of 0.35.1, the old separate `Доступность` tab is folded into `Основные`. The main tab saves enabled/title/system keys, `availability_mode`, country availability, and the customer-facing domestic method titles `pickup_method_title` and `courier_method_title`. For `russian_post_domestic`, availability is pinned to `RU`, and the configurable method-title defaults are `Почта России до отделения` and `Почта России до двери`.
 
-The domestic `Расчет` tab keeps calculation behavior: `from_postcodes` labeled as `Индекс отправки для расчета доставки`, `return_postcode` labeled as `Индекс возврата для расчета доставки`, insurance, timeout/cache/debug, packaging weight, rounding, minimum price and fallback settings. Tariff API endpoint and token live on `API / Credentials`, next to Otpravka and Tracking credentials. The token field remains visible because `RussianPostDomesticApiClient` sends it as `Authorization: Bearer ...` when configured. `russian_post_otpravka_postoffice_codes` remains separate from tariff `from_postcodes`; it is the list of acceptance postoffice indices used by the shipment modal as `postoffice-code`. `default_from_postcode` is edited next to those postoffice codes, remains the same service setting, and is also used by tariff calculation as the fallback origin index.
+The domestic `Расчет` tab keeps calculation behavior: `from_postcodes` labeled as `Индекс отправки для расчета доставки`, `return_postcode` labeled as `Индекс возврата для расчета доставки`, insurance, timeout/cache/debug, packaging weight, rounding, minimum price and fallback settings. Tariff API endpoint and token live on `Данные для входа`, next to Otpravka and Tracking credentials. The token field remains visible because `RussianPostDomesticApiClient` sends it as `Authorization: Bearer ...` when configured. `russian_post_otpravka_postoffice_codes` remains separate from tariff `from_postcodes`; it is the list of acceptance postoffice indices used by the shipment modal as `postoffice-code`. `default_from_postcode` is edited next to those postoffice codes, remains the same service setting, and is also used by tariff calculation as the fallback origin index.
 
 Checkout labels for grouped domestic rates use `{pickup_method_title|courier_method_title}, {tariff title - delivery days}`. If delivery days are absent, only the method title and tariff title are shown; if the tariff title is absent, only the method title is shown. Visible domestic WooCommerce shipping item meta contains only `Срок доставки`. Technical and operational data, including service key, selected tariff, delivery type and pickup point code/type/postcode/address, is stored in hidden WDC order meta and `_wdc_delivery_calculation_data`; shipment creation reads that data and does not rely on visible shipping item meta or `shipping_address_2`.
 

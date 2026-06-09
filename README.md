@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.43.0.
+Current plugin version: 0.43.1.
+
+Version 0.43.1 refines the CDEK foundation settings UX. CDEK credentials are now stored separately for test and production environments, the active environment selects both base URL and matching Account / Secure password, and enabling CDEK is controlled only by the common delivery service tab `Основное`. The CDEK and Russian Post credentials tabs are both labeled `Данные для входа`, and CDEK connection diagnostics include the active environment without exposing secrets or tokens.
 
 Version 0.43.0 adds the CDEK carrier foundation on branch `feature/cdek-carrier-foundation`. CDEK is available as a disabled-by-default delivery service metadata entry (`cdek`) with admin settings, test/production environment switch, encrypted Account / Secure password storage, OAuth token client/cache, and a nonce/capability-protected "Проверить подключение" action. Checkout rates, CDEK tariff calculation, pickup points, shipments, statuses, print forms and webhooks are intentionally not connected in this stage; the next recommended feature stage is `feature/cdek-tariff-calculation`.
 

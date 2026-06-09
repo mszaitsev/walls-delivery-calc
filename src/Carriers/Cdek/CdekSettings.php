@@ -15,10 +15,13 @@ final class CdekSettings {
 	public const ENV_TEST = 'test';
 	public const ENV_PRODUCTION = 'production';
 
-	public const ENABLED_KEY = 'cdek_enabled';
 	public const ENVIRONMENT_KEY = 'cdek_environment';
-	public const ACCOUNT_KEY = 'cdek_account';
-	public const SECURE_PASSWORD_ENCRYPTED_KEY = 'cdek_secure_password_encrypted';
+	public const TEST_ACCOUNT_KEY = 'cdek_test_account';
+	public const TEST_SECURE_PASSWORD_ENCRYPTED_KEY = 'cdek_test_secure_password_encrypted';
+	public const PRODUCTION_ACCOUNT_KEY = 'cdek_production_account';
+	public const PRODUCTION_SECURE_PASSWORD_ENCRYPTED_KEY = 'cdek_production_secure_password_encrypted';
+	public const LEGACY_ACCOUNT_KEY = 'cdek_account';
+	public const LEGACY_SECURE_PASSWORD_ENCRYPTED_KEY = 'cdek_secure_password_encrypted';
 	public const LAST_CONNECTION_CHECK_KEY = 'cdek_last_connection_check';
 	public const LAST_CONNECTION_STATUS_KEY = 'cdek_last_connection_status';
 	public const LAST_CONNECTION_MESSAGE_KEY = 'cdek_last_connection_message';
@@ -34,18 +37,15 @@ final class CdekSettings {
 	 */
 	public static function defaults(): array {
 		return array(
-			self::ENABLED_KEY => false,
 			self::ENVIRONMENT_KEY => self::ENV_TEST,
-			self::ACCOUNT_KEY => '',
-			self::SECURE_PASSWORD_ENCRYPTED_KEY => '',
+			self::TEST_ACCOUNT_KEY => '',
+			self::TEST_SECURE_PASSWORD_ENCRYPTED_KEY => '',
+			self::PRODUCTION_ACCOUNT_KEY => '',
+			self::PRODUCTION_SECURE_PASSWORD_ENCRYPTED_KEY => '',
 			self::LAST_CONNECTION_CHECK_KEY => '',
 			self::LAST_CONNECTION_STATUS_KEY => '',
 			self::LAST_CONNECTION_MESSAGE_KEY => '',
 		);
-	}
-
-	public function enabled(): bool {
-		return $this->settings->get_bool( self::ENABLED_KEY, false );
 	}
 
 	public function environment(): string {
@@ -59,14 +59,31 @@ final class CdekSettings {
 	}
 
 	public function credentials(): CdekCredentials {
+		return $this->credentials_for_environment( $this->environment() );
+	}
+
+	public function credentials_for_environment( string $environment ): CdekCredentials {
+		$environment = $this->normalize_environment( $environment );
+		$account_key = self::ENV_PRODUCTION === $environment ? self::PRODUCTION_ACCOUNT_KEY : self::TEST_ACCOUNT_KEY;
+
 		return new CdekCredentials(
-			trim( $this->settings->get_string( self::ACCOUNT_KEY, '' ) ),
-			$this->secure_password()
+			$this->account( $environment, $account_key ),
+			$this->secure_password( $environment ),
+			$environment
 		);
 	}
 
-	public function has_secure_password(): bool {
-		return '' !== $this->settings->get_string( self::SECURE_PASSWORD_ENCRYPTED_KEY, '' );
+	public function has_secure_password( string $environment ): bool {
+		$key = self::ENV_PRODUCTION === $this->normalize_environment( $environment )
+			? self::PRODUCTION_SECURE_PASSWORD_ENCRYPTED_KEY
+			: self::TEST_SECURE_PASSWORD_ENCRYPTED_KEY;
+
+		if ( '' !== $this->settings->get_string( $key, '' ) ) {
+			return true;
+		}
+
+		return self::ENV_TEST === $this->normalize_environment( $environment )
+			&& '' !== $this->settings->get_string( self::LEGACY_SECURE_PASSWORD_ENCRYPTED_KEY, '' );
 	}
 
 	public function credentials_are_complete(): bool {
@@ -74,10 +91,15 @@ final class CdekSettings {
 	}
 
 	public function token_cache_key(): string {
+		$environment = $this->environment();
 		$credentials = $this->credentials();
-		$hash = hash( 'sha256', $this->environment() . '|' . $credentials->account );
+		$hash = hash( 'sha256', $environment . '|' . $credentials->account );
 
 		return 'wdc_cdek_oauth_' . substr( $hash, 0, 32 );
+	}
+
+	public function environment_label(): string {
+		return self::ENV_PRODUCTION === $this->environment() ? 'Рабочая' : 'Тестовая';
 	}
 
 	/**
@@ -89,25 +111,15 @@ final class CdekSettings {
 			$environment = self::ENV_TEST;
 		}
 
-		$this->settings->set( self::ENABLED_KEY, ! empty( $input[ self::ENABLED_KEY ] ) );
 		$this->settings->set( self::ENVIRONMENT_KEY, $environment );
-		$this->settings->set( self::ACCOUNT_KEY, sanitize_text_field( wp_unslash( $input[ self::ACCOUNT_KEY ] ?? '' ) ) );
-
-		if ( ! empty( $input['cdek_clear_secure_password'] ) ) {
-			$this->settings->set( self::SECURE_PASSWORD_ENCRYPTED_KEY, '' );
-			return;
-		}
-
-		$password = trim( (string) wp_unslash( $input['cdek_secure_password'] ?? '' ) );
-		if ( '' !== $password && '********' !== $password ) {
-			$this->settings->set( self::SECURE_PASSWORD_ENCRYPTED_KEY, $this->encryption->encrypt( $password ) );
-		}
+		$this->save_credentials_for_environment( self::ENV_TEST, $input );
+		$this->save_credentials_for_environment( self::ENV_PRODUCTION, $input );
 	}
 
 	public function save_connection_result( bool $success, string $message ): void {
 		$this->settings->set( self::LAST_CONNECTION_CHECK_KEY, function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ) );
 		$this->settings->set( self::LAST_CONNECTION_STATUS_KEY, $success ? 'success' : 'error' );
-		$this->settings->set( self::LAST_CONNECTION_MESSAGE_KEY, $this->redact( $message ) );
+		$this->settings->set( self::LAST_CONNECTION_MESSAGE_KEY, $this->redact( 'Среда: ' . $this->environment_label() . '. ' . $message ) );
 	}
 
 	public function last_connection_check(): string {
@@ -122,8 +134,23 @@ final class CdekSettings {
 		return $this->settings->get_string( self::LAST_CONNECTION_MESSAGE_KEY, '' );
 	}
 
-	private function secure_password(): string {
-		$encrypted = $this->settings->get_string( self::SECURE_PASSWORD_ENCRYPTED_KEY, '' );
+	private function account( string $environment, string $key ): string {
+		$account = trim( $this->settings->get_string( $key, '' ) );
+		if ( '' === $account && self::ENV_TEST === $environment ) {
+			return trim( $this->settings->get_string( self::LEGACY_ACCOUNT_KEY, '' ) );
+		}
+
+		return $account;
+	}
+
+	private function secure_password( string $environment ): string {
+		$key = self::ENV_PRODUCTION === $this->normalize_environment( $environment )
+			? self::PRODUCTION_SECURE_PASSWORD_ENCRYPTED_KEY
+			: self::TEST_SECURE_PASSWORD_ENCRYPTED_KEY;
+		$encrypted = $this->settings->get_string( $key, '' );
+		if ( '' === $encrypted && self::ENV_TEST === $environment ) {
+			$encrypted = $this->settings->get_string( self::LEGACY_SECURE_PASSWORD_ENCRYPTED_KEY, '' );
+		}
 		if ( '' === $encrypted ) {
 			return '';
 		}
@@ -131,15 +158,42 @@ final class CdekSettings {
 		return (string) ( $this->encryption->decrypt( $encrypted ) ?? '' );
 	}
 
+	/**
+	 * @param array<string,mixed> $input
+	 */
+	private function save_credentials_for_environment( string $environment, array $input ): void {
+		$account_key = self::ENV_PRODUCTION === $environment ? self::PRODUCTION_ACCOUNT_KEY : self::TEST_ACCOUNT_KEY;
+		$password_key = self::ENV_PRODUCTION === $environment ? self::PRODUCTION_SECURE_PASSWORD_ENCRYPTED_KEY : self::TEST_SECURE_PASSWORD_ENCRYPTED_KEY;
+		$password_input = self::ENV_PRODUCTION === $environment ? 'cdek_production_secure_password' : 'cdek_test_secure_password';
+		$clear_input = self::ENV_PRODUCTION === $environment ? 'cdek_clear_production_secure_password' : 'cdek_clear_test_secure_password';
+
+		$this->settings->set( $account_key, sanitize_text_field( wp_unslash( $input[ $account_key ] ?? '' ) ) );
+		if ( ! empty( $input[ $clear_input ] ) ) {
+			$this->settings->set( $password_key, '' );
+			return;
+		}
+
+		$password = trim( (string) wp_unslash( $input[ $password_input ] ?? '' ) );
+		if ( '' !== $password && '********' !== $password ) {
+			$this->settings->set( $password_key, $this->encryption->encrypt( $password ) );
+		}
+	}
+
 	private function redact( string $message ): string {
-		$credentials = $this->credentials();
-		foreach ( array( $credentials->account, $credentials->secure_password ) as $secret ) {
-			if ( '' !== $secret ) {
-				$message = str_replace( $secret, '[redacted]', $message );
+		foreach ( array( self::ENV_TEST, self::ENV_PRODUCTION ) as $environment ) {
+			$credentials = $this->credentials_for_environment( $environment );
+			foreach ( array( $credentials->account, $credentials->secure_password ) as $secret ) {
+				if ( '' !== $secret ) {
+					$message = str_replace( $secret, '[redacted]', $message );
+				}
 			}
 		}
 		$message = preg_replace( '/\b(?:bearer\s+)?[A-Za-z0-9._\-]*token[A-Za-z0-9._\-]*\b/i', '[redacted]', $message ) ?? $message;
 
 		return $message;
+	}
+
+	private function normalize_environment( string $environment ): string {
+		return self::ENV_PRODUCTION === $environment ? self::ENV_PRODUCTION : self::ENV_TEST;
 	}
 }
