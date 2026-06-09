@@ -299,7 +299,11 @@ final class OrderDeliveryAddressNormalizationService {
 	 */
 	private function suggestion_has_delivery_address( array $data ): bool {
 		$fias_level = (string) ( $data['fias_level'] ?? '' );
-		return in_array( $fias_level, array( '8', '9', '75' ), true ) || '' !== (string) ( $data['house'] ?? '' );
+		return in_array( $fias_level, array( '8', '9', '75' ), true )
+			|| '' !== (string) ( $data['house'] ?? '' )
+			|| '' !== (string) ( $data['house_fias_id'] ?? '' )
+			|| '' !== (string) ( $data['house_kladr_id'] ?? '' )
+			|| '' !== (string) ( $data['stead'] ?? '' );
 	}
 
 	/**

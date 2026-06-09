@@ -43,8 +43,8 @@ final class OrderDeliveryReplacementService {
 			if ( '' === trim( (string) ( $pickup['point_code'] ?? '' ) ) ) {
 				return array( 'success' => false, 'message' => 'Для pickup-варианта выберите ПВЗ.' );
 			}
-		} elseif ( DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' ) && ( empty( $address['normalized'] ) || ! empty( $address['fallback'] ) ) ) {
-			return array( 'success' => false, 'message' => 'Для курьерской доставки проверьте и нормализуйте адрес доставки.' );
+		} elseif ( DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' ) && ! $this->valid_courier_address( $address ) ) {
+			return array( 'success' => false, 'message' => 'Для курьерской доставки проверьте адрес доставки или используйте введенный адрес вручную.' );
 		}
 
 		$old = $this->note_snapshot( $order );
@@ -82,6 +82,21 @@ final class OrderDeliveryReplacementService {
 		}
 
 		return false;
+	}
+
+	/**
+	 * @param array<string,mixed> $address
+	 */
+	private function valid_courier_address( array $address ): bool {
+		$line = trim( (string) ( $address['address_1'] ?? $address['full_address'] ?? '' ) );
+		if ( '' === $line ) {
+			return false;
+		}
+		if ( ! empty( $address['normalized'] ) && empty( $address['fallback'] ) ) {
+			return true;
+		}
+
+		return ! empty( $address['fallback'] ) && 'admin_manual' === (string) ( $address['source'] ?? '' );
 	}
 
 	/**
@@ -262,8 +277,8 @@ final class OrderDeliveryReplacementService {
 			$values['set_shipping_address_1'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
 			$values['set_shipping_address_2'] = '';
 		} elseif ( DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' ) && array() !== $address ) {
-			$values['set_shipping_address_1'] = (string) ( $address['address_1'] ?? '' );
-			$values['set_shipping_address_2'] = (string) ( $address['address_2'] ?? '' );
+			$values['set_shipping_address_1'] = (string) ( $address['address_1'] ?? $address['full_address'] ?? '' );
+			$values['set_shipping_address_2'] = ! empty( $address['fallback'] ) && 'admin_manual' === (string) ( $address['source'] ?? '' ) ? '' : (string) ( $address['address_2'] ?? '' );
 		}
 		foreach ( $values as $method => $value ) {
 			if ( method_exists( $order, $method ) && ( '' !== $value || 'set_shipping_address_2' === $method ) ) {

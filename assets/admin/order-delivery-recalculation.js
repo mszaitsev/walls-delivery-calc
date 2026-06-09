@@ -171,6 +171,7 @@
 					'<strong>Адрес доставки</strong>',
 					'<input type="text" class="widefat" data-wdc-courier-address-line placeholder="Улица, дом, квартира">',
 					'<button type="button" class="button" data-wdc-normalize-courier-address>Проверить адрес</button>',
+					'<button type="button" class="button" data-wdc-use-manual-courier-address disabled>Использовать этот адрес</button>',
 					'<div class="wdc-order-delivery-courier-address__status" data-wdc-courier-address-status></div>',
 					'<div class="wdc-order-delivery-courier-address__result" data-wdc-courier-address-result></div>'
 				].join( '' );
@@ -188,11 +189,15 @@
 				const normalized = normalizedShippingAddresses.get( box );
 				const status = block.querySelector( '[data-wdc-courier-address-status]' );
 				const result = block.querySelector( '[data-wdc-courier-address-result]' );
+				const manualButton = block.querySelector( '[data-wdc-use-manual-courier-address]' );
 				if ( status ) {
-					status.textContent = normalized ? 'Адрес нормализован.' : 'Проверьте адрес через DaData перед сохранением.';
+					status.textContent = normalized ? ( normalized.fallback ? 'Адрес будет сохранен без нормализации.' : 'Адрес нормализован.' ) : 'Проверьте адрес перед сохранением.';
 				}
 				if ( result ) {
 					result.textContent = normalized ? String( normalized.full_address || normalized.address_1 || '' ) : '';
+				}
+				if ( manualButton && normalized ) {
+					manualButton.disabled = true;
 				}
 			}
 		} );
@@ -208,9 +213,17 @@
 		if ( enabled && rate.requires_pickup_point ) {
 			enabled = !! selectedPickupPoints.get( box );
 		} else if ( enabled ) {
-			enabled = !! normalizedShippingAddresses.get( box );
+			enabled = isValidCourierAddress( normalizedShippingAddresses.get( box ) );
 		}
 		button.disabled = ! enabled || activeSaveRequests.has( box );
+	}
+
+	function isValidCourierAddress( address ) {
+		if ( ! address ) {
+			return false;
+		}
+		const addressLine = String( address.address_1 || address.full_address || '' ).trim();
+		return addressLine !== '' && ( ( !! address.normalized && ! address.fallback ) || ( !! address.fallback && address.source === 'admin_manual' ) );
 	}
 
 	function selectedRateChanged( input ) {
@@ -549,13 +562,21 @@
 				if ( result ) {
 					result.textContent = String( address.full_address || address.address_1 || '' );
 				}
+				const manualButton = block ? block.querySelector( '[data-wdc-use-manual-courier-address]' ) : null;
+				if ( manualButton ) {
+					manualButton.disabled = true;
+				}
 			} )
 			.catch( function ( error ) {
 				if ( status ) {
-					status.textContent = error && error.message ? error.message : 'Адрес не нормализован.';
+					status.textContent = 'Адрес не удалось нормализовать. Можно использовать введенный адрес вручную.';
 				}
 				if ( result ) {
 					result.textContent = '';
+				}
+				const manualButton = block ? block.querySelector( '[data-wdc-use-manual-courier-address]' ) : null;
+				if ( manualButton ) {
+					manualButton.disabled = '' === String( input.value || '' ).trim();
 				}
 			} )
 			.finally( function () {
@@ -583,12 +604,53 @@
 				if ( ! payload || ! payload.success || ! payload.data || payload.data.lat === null || payload.data.lng === null ) {
 					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Адрес не найден или геокодинг недоступен.' );
 				}
-				return {
-					lat: parseFloat( payload.data.lat ),
+			return {
+				lat: parseFloat( payload.data.lat ),
 					lng: parseFloat( payload.data.lng ),
 					label: String( payload.data.formatted_address || payload.data.address || value )
 				};
 			} );
+	}
+
+	function useManualCourierAddress( button ) {
+		const box = closestBox( button );
+		const block = button ? button.closest( '[data-wdc-courier-address-block]' ) : null;
+		const input = block ? block.querySelector( '[data-wdc-courier-address-line]' ) : null;
+		const status = block ? block.querySelector( '[data-wdc-courier-address-status]' ) : null;
+		const result = block ? block.querySelector( '[data-wdc-courier-address-result]' ) : null;
+		const value = input ? String( input.value || '' ).trim() : '';
+		if ( ! box || ! value ) {
+			return;
+		}
+		const location = selectedLocations.get( box ) || {};
+		const currentAddress = currentShippingAddress( box );
+		const payload = {
+			country: String( location.country_code || currentAddress.country || 'RU' ),
+			region: String( location.region_name || location.state_value || currentAddress.region || '' ),
+			city: String( location.city_value || location.city_name || location.display_name || currentAddress.city || '' ),
+			postcode: String( location.postal_code || location.postcode || currentAddress.postcode || '' ),
+			street: value,
+			house: '',
+			flat: '',
+			address_1: value,
+			address_2: '',
+			full_address: value,
+			fias_id: String( location.fias_id || '' ),
+			gar_id: String( location.gar_object_id || location.gar_id || '' ),
+			normalized: false,
+			fallback: true,
+			source: 'admin_manual',
+			message: ''
+		};
+		normalizedShippingAddresses.set( box, payload );
+		button.disabled = true;
+		if ( status ) {
+			status.textContent = 'Адрес будет сохранен без нормализации.';
+		}
+		if ( result ) {
+			result.textContent = value;
+		}
+		updateSaveButton( box );
 	}
 
 	function normalizePickupPoint( point ) {
@@ -975,7 +1037,7 @@
 					search.hidden = true;
 				}
 				resetModal( box );
-				setStatus( box, 'Населенный пункт выбран. Нажмите «Пересчитать», чтобы обновить preview.', '' );
+				requestPreview( box, box.querySelector( '[data-wdc-order-delivery-modal-preview]' ) );
 			}
 			return;
 		}
@@ -991,6 +1053,13 @@
 		if ( normalizeCourierButton ) {
 			event.preventDefault();
 			normalizeCourierAddress( normalizeCourierButton );
+			return;
+		}
+
+		const manualCourierButton = event.target && event.target.closest( '[data-wdc-use-manual-courier-address]' );
+		if ( manualCourierButton ) {
+			event.preventDefault();
+			useManualCourierAddress( manualCourierButton );
 			return;
 		}
 
@@ -1020,11 +1089,15 @@
 				const block = input.closest( '[data-wdc-courier-address-block]' );
 				const status = block && block.querySelector( '[data-wdc-courier-address-status]' );
 				const result = block && block.querySelector( '[data-wdc-courier-address-result]' );
+				const manualButton = block && block.querySelector( '[data-wdc-use-manual-courier-address]' );
 				if ( status ) {
-					status.textContent = 'Проверьте адрес через DaData перед сохранением.';
+					status.textContent = 'Проверьте адрес перед сохранением.';
 				}
 				if ( result ) {
 					result.textContent = '';
+				}
+				if ( manualButton ) {
+					manualButton.disabled = true;
 				}
 				updateSaveButton( box );
 			}
