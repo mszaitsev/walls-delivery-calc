@@ -226,7 +226,7 @@ final class WdcCheckoutApartmentSuggestionClient implements AddressSuggestionCli
 				'house_fias_id' => 'house-fias',
 				'postal_code' => '630005',
 			);
-			$flat_values = str_contains( $query, 'кв 9' ) ? array( '9', '90', '91' ) : array( '1', '2' );
+			$flat_values = str_contains( $query, 'кв 9' ) || str_contains( $query, ', 9' ) ? array_map( 'strval', range( 9, 28 ) ) : array( '1', '2' );
 			$flat_items = array(
 				array( 'value' => 'Новосибирск, ул Некрасова, 63/1', 'unrestricted_value' => 'Новосибирская область, г Новосибирск, ул Некрасова, д 63/1', 'data' => $house ),
 			);
@@ -369,10 +369,10 @@ $next = $next_suggestions->suggest( 'address_next', '630005, Новосибир�
 wc_checkout_smoke_assert( true === ( $next['success'] ?? false ) && 3 === count( $next['items'] ?? array() ), 'Address next must return mixed house and flat suggestions.' );
 wc_checkout_smoke_assert( 'house' === ( $next['items'][0]['level'] ?? '' ) && 'flat' === ( $next['items'][1]['level'] ?? '' ) && 'flat' === ( $next['items'][2]['level'] ?? '' ), 'Address next must preserve house and mark flats as lower-level items.' );
 wc_checkout_smoke_assert( 'address_next_relaxed' === ( $next['debug']['selected_variant'] ?? '' ) && 2 === ( $next['debug']['lower_level_count'] ?? 0 ) && ! isset( $next['debug']['request_body'] ), 'Address next debug must expose relaxed variant/lower-level count without request body.' );
-$next_filtered = $next_suggestions->suggest( 'address_next', '630005, Новосибирская обл, г Новосибирск, ул Некрасова, д 63/1, кв 9', array( 'country_code' => 'RU', 'city_kladr_id' => '5400000100000', 'city_fias_id' => '8dea00e3-9aab-4d8e-887c-ef2aaa546456', 'selected_level' => 'house', 'desired_level' => 'flat', 'house_fias_id' => 'house-fias', 'house_kladr_id' => 'house-kladr' ) );
+$next_filtered = $next_suggestions->suggest( 'address_next', '630005, Новосибирская обл, г Новосибирск, ул Некрасова, д 63/1, 9', array( 'country_code' => 'RU', 'city_kladr_id' => '5400000100000', 'city_fias_id' => '8dea00e3-9aab-4d8e-887c-ef2aaa546456', 'selected_level' => 'house', 'desired_level' => 'flat', 'house_fias_id' => 'house-fias', 'house_kladr_id' => 'house-kladr' ) );
 $next_filtered_labels = implode( ' | ', array_map( static fn( array $item ): string => (string) ( $item['label'] ?? '' ), $next_filtered['items'] ?? array() ) );
-wc_checkout_smoke_assert( true === ( $next_filtered['success'] ?? false ) && 4 === count( $next_filtered['items'] ?? array() ), 'Address next must keep returning mixed house and filtered flat suggestions while typing flat number.' );
-wc_checkout_smoke_assert( 3 === ( $next_filtered['debug']['lower_level_count'] ?? 0 ) && str_contains( $next_filtered_labels, 'кв 9' ) && str_contains( $next_filtered_labels, 'кв 90' ) && str_contains( $next_filtered_labels, 'кв 91' ), 'Address next must return flat suggestions matching typed apartment number.' );
+wc_checkout_smoke_assert( true === ( $next_filtered['success'] ?? false ) && 21 === count( $next_filtered['items'] ?? array() ), 'Address next must keep returning mixed house and filtered flat suggestions while typing flat number without cutting the list to four.' );
+wc_checkout_smoke_assert( 20 === ( $next_filtered['debug']['lower_level_count'] ?? 0 ) && str_contains( $next_filtered_labels, 'кв 9' ) && str_contains( $next_filtered_labels, 'кв 28' ), 'Address next must return all flat suggestions matching typed apartment number within the 20-item limit.' );
 $dadata_client_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/AddressSuggestions/DaDataSuggestionClient.php' );
 $address_next_start = strpos( $dadata_client_source, "if ( 'address_next' === \$stage )" );
 $address_next_end = false !== $address_next_start ? strpos( $dadata_client_source, "if ( 'address' === \$stage )", $address_next_start ) : false;

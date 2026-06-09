@@ -195,6 +195,10 @@ dadata_suggestions_assert( 20 === $house_body['count'], 'House stage must reques
 $resolve_body = $client->body( 'resolve', '630099, Новосибирская обл, г Новосибирск, Красный пр-кт, д 25' );
 dadata_suggestions_assert( 1 === $resolve_body['count'], 'Resolve stage must use count=1.' );
 
+$address_next_body = $client->body( 'address_next', '630099, Новосибирская обл, г Новосибирск, Красный пр-кт, д 25, 9', array( 'city_kladr_id' => '5400000100000', 'selected_level' => 'house', 'desired_level' => 'flat' ) );
+dadata_suggestions_assert( 20 === $address_next_body['count'], 'Address next stage must request the maximum 20 suggestions.' );
+dadata_suggestions_assert( ! isset( $address_next_body['from_bound'] ) && ! isset( $address_next_body['to_bound'] ) && ! isset( $address_next_body['restrict_value'] ), 'Address next stage must stay relaxed without strict bounds/restrict_value.' );
+
 $response = $client->suggest( 'address', 'Красный 25', array( 'city_kladr_id' => '5400000100000' ) );
 dadata_suggestions_assert( true === $response['success'], 'DaData suggestion client must accept mocked response.' );
 dadata_suggestions_assert( 1 === count( $GLOBALS['wdc_dadata_suggestions_http_requests'] ), 'DaData suggestion client must perform one HTTP request.' );
@@ -393,9 +397,10 @@ dadata_suggestions_assert( str_contains( $js, 'firstUsable( prefix, \'city\' ).v
 dadata_suggestions_assert( str_contains( $js, "'manual'" ), 'Frontend must support manual fallback status.' );
 dadata_suggestions_assert( str_contains( $js, 'openingQuery' ), 'Frontend must build opening query from checkout fields.' );
 dadata_suggestions_assert( str_contains( $js, 'requestLowerLevelAfterHouse' ) && str_contains( $js, "request( 'address_next', query, prefix" ), 'House suggestion must request lower-level suggestions before finalizing.' );
-dadata_suggestions_assert( str_contains( $js, 'selectedHouseItem' ) && str_contains( $js, 'selectedHouseQuery' ) && str_contains( $js, 'selectedHouseContext' ) && str_contains( $js, 'awaitingFlatSelection' ) && str_contains( $js, 'nextLevelMode' ), 'Frontend must keep selected house state while looking up flats.' );
+dadata_suggestions_assert( str_contains( $js, 'selectedHouseItem' ) && str_contains( $js, 'selectedHouseBaseQuery' ) && str_contains( $js, 'selectedHouseDisplayBase' ) && str_contains( $js, 'selectedHouseContext' ) && str_contains( $js, 'awaitingFlatSelection' ) && str_contains( $js, 'nextLevelMode' ), 'Frontend must keep selected house state while looking up flats.' );
 dadata_suggestions_assert( str_contains( $js, "state.awaitingFlatSelection ? 'address_next' : 'address'" ) && str_contains( $js, 'state.selectedHouseContext' ), 'Frontend flat lookup mode must keep searching through address_next with selected house context.' );
-dadata_suggestions_assert( str_contains( $js, "flatQuery = ensureTrailingComma( query ) + 'кв ';" ), 'Frontend must seed the input with apartment prefix after selecting a house.' );
+dadata_suggestions_assert( str_contains( $js, 'nextLevelQuery = ensureTrailingComma( query );' ) && ! str_contains( $js, "flatQuery = ensureTrailingComma( query ) + 'кв ';" ), 'Frontend must seed the input with only the selected house base and separator, without automatic apartment prefix.' );
+dadata_suggestions_assert( str_contains( $js, 'queryMatchesSelectedHouseBase' ) && str_contains( $js, "! queryMatchesSelectedHouseBase( query, state )" ) && str_contains( $js, "stage = 'address';" ), 'Frontend must clear flat lookup mode and return to normal address search when the selected house base changes.' );
 dadata_suggestions_assert( str_contains( $js, 'Квартиры не найдены. Выберите из списка или продолжите ввод.' ) && str_contains( $js, 'clearHouseLookupState' ), 'Frontend must keep flat lookup mode from silently finalizing and must clear it explicitly.' );
 dadata_suggestions_assert( str_contains( $js, 'lowerLevelItems' ) && str_contains( $js, "applyResolved( prefix, item );" ), 'House suggestion must finalize only after lower-level suggestions are checked.' );
 dadata_suggestions_assert( str_contains( $js, 'renderResults( lower, query );' ), 'House suggestion with lower-level items must render flats/rooms instead of finalizing immediately.' );

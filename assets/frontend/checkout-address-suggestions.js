@@ -154,6 +154,8 @@
 				lastResolved: null,
 				selectedHouseItem: null,
 				selectedHouseQuery: '',
+				selectedHouseBaseQuery: '',
+				selectedHouseDisplayBase: '',
 				selectedHouseContext: {},
 				awaitingFlatSelection: false,
 				nextLevelMode: ''
@@ -166,6 +168,8 @@
 		var state = stateFor( prefix );
 		state.selectedHouseItem = null;
 		state.selectedHouseQuery = '';
+		state.selectedHouseBaseQuery = '';
+		state.selectedHouseDisplayBase = '';
 		state.selectedHouseContext = {};
 		state.awaitingFlatSelection = false;
 		state.nextLevelMode = '';
@@ -325,6 +329,25 @@
 		return text ? text + ', ' : '';
 	}
 
+	function normalizeHouseBaseForCompare( value ) {
+		return String( value || '' ).toLowerCase().replace( /\s+/g, ' ' ).replace( /\s*,\s*/g, ', ' ).trim();
+	}
+
+	function startsWithHouseBase( query, base ) {
+		var normalizedQuery = normalizeHouseBaseForCompare( query );
+		var normalizedBase = normalizeHouseBaseForCompare( base );
+		var remainder = '';
+		if ( ! normalizedBase || normalizedQuery.length < normalizedBase.length || normalizedQuery.slice( 0, normalizedBase.length ) !== normalizedBase ) {
+			return false;
+		}
+		remainder = normalizedQuery.slice( normalizedBase.length );
+		return '' === remainder || /^[\s,]+/.test( remainder );
+	}
+
+	function queryMatchesSelectedHouseBase( query, state ) {
+		return startsWithHouseBase( query, state.selectedHouseBaseQuery ) || startsWithHouseBase( query, state.selectedHouseDisplayBase );
+	}
+
 	function currentLocationFias() {
 		return {
 			region: globalHiddenValue( 'wdc_platform_location_region_fias_id' ),
@@ -470,7 +493,8 @@
 	function requestLowerLevelAfterHouse( prefix, item ) {
 		var data = item.data || {};
 		var query = item.unrestrictedValue || item.value || item.label || '';
-		var flatQuery = ensureTrailingComma( query ) + 'кв ';
+		var displayBase = formatAddressWithoutRegionCity( data ) || query;
+		var nextLevelQuery = ensureTrailingComma( query );
 		var houseContext = {
 			selected_level: 'house',
 			desired_level: 'flat',
@@ -480,11 +504,13 @@
 		var state = stateFor( prefix );
 		state.selectedHouseItem = item;
 		state.selectedHouseQuery = query;
+		state.selectedHouseBaseQuery = query;
+		state.selectedHouseDisplayBase = displayBase;
 		state.selectedHouseContext = houseContext;
 		state.awaitingFlatSelection = true;
 		state.nextLevelMode = 'address_next';
-		searchInput().val( flatQuery );
-		firstUsable( prefix, 'address_1' ).val( formatAddressWithoutRegionCity( data ) || query );
+		searchInput().val( nextLevelQuery );
+		firstUsable( prefix, 'address_1' ).val( displayBase );
 		showHint( 'Уточните квартиру, корпус или помещение.' );
 		log( 'lower-level request after house selection', { query: query } );
 		request( 'address_next', query, prefix, function ( items ) {
@@ -568,6 +594,13 @@
 			var state = stateFor( prefix );
 			var query = String( searchInput().val() || '' );
 			var stage = state.awaitingFlatSelection ? 'address_next' : 'address';
+			var requestContext = state.awaitingFlatSelection ? state.selectedHouseContext : null;
+			if ( state.awaitingFlatSelection && ! queryMatchesSelectedHouseBase( query, state ) ) {
+				clearHouseLookupState( prefix );
+				state = stateFor( prefix );
+				stage = 'address';
+				requestContext = null;
+			}
 			log( 'modal search input', { query: query, stage: stage } );
 			if ( query.trim().length < minChars() ) {
 				resultsBox().empty();
@@ -596,7 +629,7 @@
 					return;
 				}
 				renderResults( items, query );
-			}, state.awaitingFlatSelection ? state.selectedHouseContext : null );
+			}, requestContext );
 		}, debounceDelay );
 	}
 
