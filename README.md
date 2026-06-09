@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.42.0.
+Current plugin version: 0.43.0.
+
+Version 0.43.0 adds the CDEK carrier foundation on branch `feature/cdek-carrier-foundation`. CDEK is available as a disabled-by-default delivery service metadata entry (`cdek`) with admin settings, test/production environment switch, encrypted Account / Secure password storage, OAuth token client/cache, and a nonce/capability-protected "Проверить подключение" action. Checkout rates, CDEK tariff calculation, pickup points, shipments, statuses, print forms and webhooks are intentionally not connected in this stage; the next recommended feature stage is `feature/cdek-tariff-calculation`.
 
 Version 0.42.0 closes the admin order delivery recalculation stage after an HPOS audit and documentation refresh. The order-admin modal now covers preview, settlement override, pickup map selection, shared checkout courier address suggestions, safe shipping item create/replace, WDC delivery meta rewrite, shipping address update, WooCommerce totals recalculation, private order notes, non-blocking courier settlement mismatch warnings and save blockers for multiple shipping items / registered shipments. No HPOS violations were found in the audited order-delivery recalculation code; the next recommended major feature branch is `feature/cdek-carrier-foundation`.
 

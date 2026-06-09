@@ -1,5 +1,7 @@
 # Project Status
 
+0.43.0 note: CDEK Carrier Foundation is implemented for branch `feature/cdek-carrier-foundation`. The new predefined delivery service key is `cdek`, disabled by default, with admin settings for environment, Account / client_id, encrypted Secure password / client_secret, OAuth token cache diagnostics and a protected "Проверить подключение" action. Runtime checkout rates, tariff calculation, pickup points, shipments/orders, statuses, print forms, autosync and webhooks are intentionally not connected. The next recommended feature branch is `feature/cdek-tariff-calculation`.
+
 0.42.0 note: the order-admin delivery recalculation stage is closed after an HPOS audit and documentation refresh. The completed flow covers preview, settlement override, pickup map selection, shared checkout courier address suggestions, safe WooCommerce shipping item create/replace, WDC delivery/calculation meta rewrite, shipping address update, totals recalculation, private order notes, non-blocking courier settlement mismatch warnings and save blockers for multiple shipping items or registered shipments. The audited order-delivery recalculation code uses `wc_get_order()`, WooCommerce order/shipping-item CRUD, `$order->get_meta()`, `$order->update_meta_data()`, `$order->calculate_totals(false)` and `$order->add_order_note()`; no direct order `postmeta`/`wp_posts` access or `WP_Query` over `shop_order` was found. The next recommended major branch is `feature/cdek-carrier-foundation`.
 
 0.41.25 note: the order-admin delivery recalculation modal now treats courier address suggestions as the normal automatic flow and removes the old `Проверить адрес` button. Manual fallback remains explicit through `Использовать этот адрес`. The modal settlement summary no longer duplicates the region when `display_name` already includes it, admin saves write WooCommerce shipping city/state through checkout-compatible location payload/formatter values, and courier save UI shows a non-blocking warning when the normalized/manual address settlement cannot be confidently matched to the settlement used for the calculated rate.
@@ -42,12 +44,12 @@
 
 ## Общий статус
 
-- Текущая версия: `0.42.0`.
+- Текущая версия: `0.43.0`.
 - Текущая базовая ветка: `develop`.
-- Рабочая ветка: `chore/order-delivery-recalculation-audit`.
+- Рабочая ветка: `feature/cdek-carrier-foundation`.
 - Последнее обновление статуса: 2026-06-09.
 - Общая готовность проекта: примерно 74%.
-- Следующий рекомендуемый этап: `feature/cdek-carrier-foundation`.
+- Следующий рекомендуемый этап: `feature/cdek-tariff-calculation`.
 
 ## Краткое резюме
 
@@ -72,7 +74,8 @@
 | Order Delivery Recalculation | done | 100% | Admin order delivery recalculation is complete and HPOS-audited: preview, location override, pickup map, courier suggestions, shipping item replacement/create, totals, checkout-compatible calculation data, mismatch warning and shipment/save blockers. |
 | Rule Engine | done | 88% | Conditions/groups, audit, price/days mutations, comments, service rules, simulation and packaging tab. |
 | International Shipping | partial | 75% | Russian Post international rates/country mapping/fallback work; no shipment creation/tracking/documents for international flow. |
-| Future Carriers | not-started | 0% | CDEK, DPD, Yandex Delivery, PEK, Energia, Aerogruz and Jet have no runtime adapters. |
+| CDEK Carrier Foundation | partial | 35% | `cdek` service metadata, admin settings, encrypted credentials, environment switch, OAuth client/cache and connection check exist; runtime rates, pickup points, shipments, statuses, print forms and webhooks are deferred. |
+| Future Carriers | not-started | 0% | DPD, Yandex Delivery, PEK, Energia, Aerogruz and Jet have no runtime adapters. |
 | Operations / Monitoring | partial | 50% | Logger, diagnostics pages and autosync diagnostics exist; no production dashboard/rotation strategy. |
 | Documentation | partial | 78% | Profile docs cover the completed order delivery recalculation stage and current CDEK-oriented roadmap; older historical notes remain as changelog context. |
 
@@ -80,7 +83,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.42.0`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.43.0`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
@@ -266,8 +269,8 @@
 
 ### 4. CDEK Carrier Foundation
 
-- Рекомендуемая ветка: `feature/cdek-carrier-foundation`.
-- Что входит: CDEK adapter, settings, rates, pickup/courier baseline, smoke tests and first multicarrier pickup abstractions.
+- Рекомендуемая ветка: `feature/cdek-tariff-calculation`.
+- Что входит: CDEK tariff calculation for checkout rates, while keeping pickup points, shipments, statuses, print forms and webhooks for later dedicated stages.
 - Зависимости: stable checkout/order recalculation patterns.
 - Обновить документы: create `docs/wdc-cdek.md`, update code map and project status.
 

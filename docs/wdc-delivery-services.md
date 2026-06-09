@@ -1,5 +1,19 @@
 # WDC Delivery Services
 
+## CDEK Foundation 0.43.0
+
+The built-in CDEK delivery service uses the single service key `cdek` and carrier key `cdek`. It is created disabled by default so administrators can configure credentials without changing checkout runtime behavior.
+
+The `СДЭК` admin tab stores:
+
+- `cdek_enabled`
+- `cdek_environment`
+- `cdek_account`
+- encrypted Secure password in `cdek_secure_password_encrypted`
+- last connection check diagnostics
+
+The foundation includes OAuth for `POST /v2/oauth/token`, token cache, and a protected "Проверить подключение" action. It intentionally does not calculate rates, show pickup points, create orders/shipments, update statuses, print documents or manage webhooks. See `docs/wdc-cdek-foundation.md`.
+
 ## Russian Post Tracking Statuses 0.36.2
 
 The unified service `russian_post_domestic` owns Russian Post Tracking API credentials on `API / Credentials`:

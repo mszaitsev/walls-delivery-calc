@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\DeliveryServices;
 
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 
@@ -107,6 +108,7 @@ final class DeliveryServiceRepository {
 			array(
 				RussianPostSettings::SERVICE_KEY,
 				RussianPostDomesticSettings::SERVICE_KEY,
+				CdekSettings::SERVICE_KEY,
 			),
 			true
 		);
@@ -192,6 +194,54 @@ final class DeliveryServiceRepository {
 			'Доставка до почтового отделения по индексу',
 			array( RussianPostDomesticSettings::PICKUP_SERVICE_TITLE, RussianPostDomesticSettings::COURIER_SERVICE_TITLE )
 		);
+	}
+
+	public function ensure_cdek_service(): DeliveryService {
+		$existing = $this->find_any_by_service_key( CdekSettings::SERVICE_KEY );
+		if ( $existing instanceof DeliveryService ) {
+			if ( null !== $existing->id ) {
+				$this->update_service(
+					(int) $existing->id,
+					array(
+						'carrier_key' => CdekSettings::CARRIER_KEY,
+						'service_type' => DeliveryService::TYPE_API,
+						'title' => '' === trim( $existing->title ) ? CdekSettings::TITLE : $existing->title,
+						'enabled' => $existing->enabled ? 1 : 0,
+						'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+						'deleted' => 0,
+					)
+				);
+				$this->delete_duplicate_active_services( CdekSettings::SERVICE_KEY, (int) $existing->id );
+			}
+
+			$updated = $this->find_by_service_key( CdekSettings::SERVICE_KEY );
+
+			return $updated instanceof DeliveryService ? $updated : $existing;
+		}
+
+		$id = $this->create_service(
+			array(
+				'service_key' => CdekSettings::SERVICE_KEY,
+				'carrier_key' => CdekSettings::CARRIER_KEY,
+				'service_type' => DeliveryService::TYPE_API,
+				'title' => CdekSettings::TITLE,
+				'enabled' => 0,
+				'availability_mode' => DeliveryService::AVAILABILITY_SELECTED_COUNTRIES,
+				'use_default_rules_when_no_service_rules' => 1,
+				'round_up_to_ruble' => 1,
+				'minimum_price_rub' => 1,
+				'include_packaging_weight' => 1,
+				'packaging_weight_mode' => DeliveryService::PACKAGING_WEIGHT_TOTAL_WEIGHT,
+				'pickup_customer_comment' => '',
+				'courier_customer_comment' => '',
+				'sort_order' => 30,
+				'deleted' => 0,
+			)
+		);
+
+		$created = $this->find_by_service_key( CdekSettings::SERVICE_KEY );
+
+		return $created instanceof DeliveryService ? $created : DeliveryService::from_array( array( 'id' => $id, 'service_key' => CdekSettings::SERVICE_KEY, 'carrier_key' => CdekSettings::CARRIER_KEY, 'title' => CdekSettings::TITLE, 'enabled' => 0 ) );
 	}
 
 	/**
