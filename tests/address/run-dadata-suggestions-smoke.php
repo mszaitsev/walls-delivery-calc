@@ -394,6 +394,7 @@ dadata_suggestions_assert( str_contains( $js, "'manual'" ), 'Frontend must suppo
 dadata_suggestions_assert( str_contains( $js, 'openingQuery' ), 'Frontend must build opening query from checkout fields.' );
 dadata_suggestions_assert( str_contains( $js, 'requestLowerLevelAfterHouse' ) && str_contains( $js, "request( 'address_next', query, prefix" ), 'House suggestion must request lower-level suggestions before finalizing.' );
 dadata_suggestions_assert( str_contains( $js, 'lowerLevelItems' ) && str_contains( $js, "applyResolved( prefix, item );" ), 'House suggestion must finalize only after lower-level suggestions are checked.' );
+dadata_suggestions_assert( str_contains( $js, 'renderResults( lower, query );' ), 'House suggestion with lower-level items must render flats/rooms instead of finalizing immediately.' );
 dadata_suggestions_assert( str_contains( $js, "'flat' === item.level || 'room' === item.level || 'premise' === item.level" ), 'Flat/room/premise suggestions must be final selectable levels.' );
 dadata_suggestions_assert( str_contains( $js, 'cleanQueryPart' ), 'Frontend must sanitize opening query parts.' );
 dadata_suggestions_assert( str_contains( $js, 'checkoutFieldValue' ), 'Opening query must read checkout field values.' );

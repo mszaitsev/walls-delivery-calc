@@ -31,6 +31,9 @@ final class AddressSuggestionService {
 		if ( 'address' === $stage ) {
 			return $this->suggest_address_with_variants( $stage, $query, $context );
 		}
+		if ( 'address_next' === $stage ) {
+			return $this->suggest_address_next( $stage, $query, $context );
+		}
 
 		$response = $this->client->suggest( $stage, $query, $context );
 		if ( empty( $response['success'] ) ) {
@@ -51,6 +54,38 @@ final class AddressSuggestionService {
 			'error_message' => '',
 			'items' => $items,
 			'debug' => $this->debug( $stage, $query, $context, $response ),
+		);
+	}
+
+	/**
+	 * @param array<string,string> $context
+	 * @return array<string,mixed>
+	 */
+	private function suggest_address_next( string $stage, string $query, array $context ): array {
+		$response = $this->client->suggest( $stage, $query, $context );
+		if ( empty( $response['success'] ) ) {
+			return array(
+				'success'       => false,
+				'error_code'    => (string) ( $response['error_code'] ?? 'dadata_api_failed' ),
+				'error_message' => '',
+				'items'         => array(),
+				'debug'         => $this->debug( $stage, $query, $context, $response ) + array(
+					'selected_variant' => 'address_next_relaxed',
+					'lower_level_count' => 0,
+				),
+			);
+		}
+
+		$items = $this->normalizer->normalize_many( is_array( $response['suggestions'] ?? null ) ? $response['suggestions'] : array() );
+		return array(
+			'success' => true,
+			'error_code' => '',
+			'error_message' => '',
+			'items' => $items,
+			'debug' => $this->debug( $stage, $query, $context, $response ) + array(
+				'selected_variant' => 'address_next_relaxed',
+				'lower_level_count' => $this->lower_level_count( $items ),
+			),
 		);
 	}
 
@@ -160,6 +195,20 @@ final class AddressSuggestionService {
 		}
 
 		return false;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $items
+	 */
+	private function lower_level_count( array $items ): int {
+		$count = 0;
+		foreach ( $items as $item ) {
+			if ( in_array( (string) ( $item['level'] ?? '' ), array( 'flat', 'room', 'premise' ), true ) ) {
+				$count++;
+			}
+		}
+
+		return $count;
 	}
 
 	/**
