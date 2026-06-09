@@ -24,8 +24,8 @@ defined( 'ABSPATH' ) || exit;
 
 final class CdekCarrier implements CarrierAdapterInterface {
 	public const KEY = CdekSettings::CARRIER_KEY;
-	public const PICKUP_TITLE = 'СДЭК до пункта выдачи';
-	public const COURIER_TITLE = 'СДЭК курьер';
+	public const PICKUP_TITLE = CdekSettings::DEFAULT_PICKUP_METHOD_TITLE;
+	public const COURIER_TITLE = CdekSettings::DEFAULT_COURIER_METHOD_TITLE;
 
 	public function __construct(
 		private CdekSettings $settings,
@@ -197,11 +197,21 @@ final class CdekCarrier implements CarrierAdapterInterface {
 	 * @param array<string,mixed> $tariff
 	 */
 	private function classify_delivery_type( array $tariff ): string {
-		$mode = (int) ( $tariff['delivery_mode'] ?? ( is_array( $tariff['result'] ?? null ) ? ( $tariff['result']['delivery_mode'] ?? 0 ) : 0 ) );
-		// CDEK delivery_mode: 1 warehouse-warehouse, 2 warehouse-door, 3 door-warehouse, 4 door-door.
+		$raw_mode = $tariff['delivery_mode'] ?? ( is_array( $tariff['result'] ?? null ) ? ( $tariff['result']['delivery_mode'] ?? 0 ) : 0 );
+		$mode_text = strtolower( str_replace( '_', '-', trim( (string) $raw_mode ) ) );
+		if ( '' !== $mode_text && ! is_numeric( $raw_mode ) ) {
+			if ( str_ends_with( $mode_text, '-warehouse' ) || str_ends_with( $mode_text, '-pickup' ) ) {
+				return DeliveryType::PICKUP;
+			}
+			if ( str_ends_with( $mode_text, '-door' ) || str_ends_with( $mode_text, '-courier' ) ) {
+				return DeliveryType::COURIER;
+			}
+		}
+		$mode = (int) $raw_mode;
+		// CDEK delivery_mode: 1 door-door, 2 door-warehouse, 3 warehouse-door, 4 warehouse-warehouse.
 		return match ( $mode ) {
-			1, 3 => DeliveryType::PICKUP,
-			2, 4 => DeliveryType::COURIER,
+			2, 4 => DeliveryType::PICKUP,
+			1, 3 => DeliveryType::COURIER,
 			default => DeliveryType::UNKNOWN,
 		};
 	}
@@ -233,8 +243,8 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		$meta = array(
 			'tariff_selector_group' => true,
 			'checkout_group_id' => self::checkout_group_id( $delivery_type ),
-			'pickup_method_title' => self::PICKUP_TITLE,
-			'courier_method_title' => self::COURIER_TITLE,
+			'pickup_method_title' => $this->settings->pickup_method_title(),
+			'courier_method_title' => $this->settings->courier_method_title(),
 			'carrier_key' => self::KEY,
 			'service_key' => CdekSettings::SERVICE_KEY,
 			'delivery_type' => $delivery_type,
@@ -386,7 +396,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 	}
 
 	private function method_title( string $delivery_type ): string {
-		return DeliveryType::COURIER === $delivery_type ? self::COURIER_TITLE : self::PICKUP_TITLE;
+		return $this->settings->method_title( $delivery_type );
 	}
 
 	private function normalize_delivery_type( string $delivery_type ): string {

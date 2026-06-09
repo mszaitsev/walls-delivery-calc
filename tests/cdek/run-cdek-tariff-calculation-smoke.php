@@ -100,6 +100,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $services = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $countries = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $settings = array();
 
 		public function prepare( string $query, mixed ...$args ): string {
 			foreach ( $args as $arg ) {
@@ -113,12 +115,25 @@ if ( ! class_exists( 'wpdb' ) ) {
 				$this->countries[] = $data;
 				return true;
 			}
+			if ( str_contains( $table, 'wdc_delivery_service_settings' ) ) {
+				$data['id'] = ++$this->insert_id;
+				$this->settings[] = $data;
+				return true;
+			}
 			$data['id'] = ++$this->insert_id;
 			$this->services[] = $data;
 			return true;
 		}
 
 		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
+			if ( str_contains( $table, 'wdc_delivery_service_settings' ) ) {
+				foreach ( $this->settings as $index => $row ) {
+					if ( (int) ( $row['id'] ?? 0 ) === (int) ( $where['id'] ?? 0 ) ) {
+						$this->settings[ $index ] = array_merge( $row, $data );
+					}
+				}
+				return true;
+			}
 			foreach ( $this->services as $index => $row ) {
 				if ( (int) ( $row['id'] ?? 0 ) === (int) ( $where['id'] ?? 0 ) ) {
 					$this->services[ $index ] = array_merge( $row, $data );
@@ -135,6 +150,13 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 
 		public function get_row( string $query, mixed $output = null ): ?array {
+			if ( str_contains( $query, 'wdc_delivery_service_settings' ) && preg_match( '/service_id = (\d+)/', $query, $service ) && preg_match( "/setting_key = '([^']+)'/", $query, $key ) ) {
+				foreach ( $this->settings as $row ) {
+					if ( (int) ( $row['service_id'] ?? 0 ) === (int) $service[1] && (string) ( $row['setting_key'] ?? '' ) === $key[1] ) {
+						return $row;
+					}
+				}
+			}
 			if ( preg_match( "/service_key = '([^']+)'/", $query, $matches ) ) {
 				foreach ( $this->services as $row ) {
 					if ( (string) $row['service_key'] === $matches[1] && ( str_contains( $query, 'ORDER BY deleted ASC' ) || empty( $row['deleted'] ) ) ) {
@@ -146,10 +168,26 @@ if ( ! class_exists( 'wpdb' ) ) {
 		}
 
 		public function get_results( string $query, mixed $output = null ): array {
+			if ( str_contains( $query, 'wdc_delivery_service_settings' ) && preg_match( '/service_id = (\d+)/', $query, $matches ) ) {
+				$id = (int) $matches[1];
+				return array_values( array_filter( $this->settings, static fn( array $row ): bool => (int) ( $row['service_id'] ?? 0 ) === $id ) );
+			}
 			if ( str_contains( $query, 'wdc_delivery_services' ) ) {
 				return array_values( array_filter( $this->services, static fn( array $row ): bool => empty( $row['deleted'] ) ) );
 			}
 			return array();
+		}
+
+		public function get_var( string $query ): mixed {
+			if ( str_contains( $query, 'wdc_delivery_service_settings' ) && preg_match( '/service_id = (\d+)/', $query, $service ) && preg_match( "/setting_key = '([^']+)'/", $query, $key ) ) {
+				foreach ( $this->settings as $row ) {
+					if ( (int) ( $row['service_id'] ?? 0 ) === (int) $service[1] && (string) ( $row['setting_key'] ?? '' ) === $key[1] ) {
+						return $row['id'] ?? null;
+					}
+				}
+			}
+
+			return null;
 		}
 
 		public function get_col( string $query ): array {
@@ -194,8 +232,8 @@ final class CdekTariffFakeHttpClient implements CdekHttpClientInterface {
 				(string) json_encode(
 					array(
 						'tariff_codes' => array(
-							array( 'tariff_code' => 136, 'tariff_name' => 'Посылка склад-склад', 'delivery_mode' => 1, 'delivery_sum' => 350.5, 'period_min' => 2, 'period_max' => 4, 'calendar_min' => 2, 'calendar_max' => 5 ),
-							array( 'tariff_code' => 137, 'tariff_name' => 'Посылка склад-дверь', 'delivery_mode' => 2, 'delivery_sum' => 520, 'period_min' => 1, 'period_max' => 1 ),
+							array( 'tariff_code' => 136, 'tariff_name' => 'Посылка склад-склад', 'delivery_mode' => 4, 'delivery_sum' => 350.5, 'period_min' => 2, 'period_max' => 4, 'calendar_min' => 2, 'calendar_max' => 5 ),
+							array( 'tariff_code' => 137, 'tariff_name' => 'Посылка склад-дверь', 'delivery_mode' => 3, 'delivery_sum' => 520, 'period_min' => 1, 'period_max' => 1 ),
 							array( 'tariff_code' => 999, 'tariff_name' => 'Неизвестный', 'delivery_mode' => 9, 'delivery_sum' => 1, 'period_min' => 1, 'period_max' => 1 ),
 						),
 					)
@@ -376,7 +414,8 @@ cdek_tariff_assert( '136' === $pickup_rate->tariff_key, 'Pickup tariff_code must
 cdek_tariff_assert( 'Посылка склад-склад' === $pickup_rate->tariff_name, 'Pickup tariff_name must be saved.' );
 cdek_tariff_assert( 350.5 === $pickup_rate->price->get_rubles(), 'CDEK delivery_sum must be mapped as rubles.' );
 cdek_tariff_assert( '2-4 дня' === (string) $pickup_rate->meta['api_delivery_days_text'], 'CDEK period must be mapped to delivery days text.' );
-cdek_tariff_assert( DeliveryType::PICKUP === $pickup_rate->delivery_type, 'delivery_mode 1 must be pickup.' );
+cdek_tariff_assert( DeliveryType::PICKUP === $pickup_rate->delivery_type, 'delivery_mode 4 warehouse-warehouse must be pickup.' );
+cdek_tariff_assert( str_starts_with( $pickup_rate->title, CdekSettings::DEFAULT_PICKUP_METHOD_TITLE ), 'CDEK warehouse tariff must use pickup method title.' );
 cdek_tariff_assert( false === $pickup_rate->requires_pickup_point, 'CDEK pickup point selection is intentionally not required yet.' );
 $location_log = cdek_tariff_find_log( 'CDEK location resolved.' );
 cdek_tariff_assert( true === (bool) ( $location_log['context']['success'] ?? false ), 'CDEK location resolve result must be logged.' );
@@ -384,7 +423,7 @@ cdek_tariff_assert( 270 === (int) ( $location_log['context']['city_code'] ?? 0 )
 $tarifflist_log = cdek_tariff_find_log( 'CDEK tarifflist succeeded.' );
 cdek_tariff_assert( 200 === (int) ( $tarifflist_log['context']['http_code'] ?? 0 ), 'CDEK successful tarifflist log must include HTTP status.' );
 cdek_tariff_assert( 3 === (int) ( $tarifflist_log['context']['tariff_codes_count'] ?? 0 ), 'CDEK successful tarifflist log must include tariff_codes count.' );
-cdek_tariff_assert( array( 1, 2, 9 ) === array_values( $tarifflist_log['context']['delivery_mode_values'] ?? array() ), 'CDEK successful tarifflist log must include delivery_mode values.' );
+cdek_tariff_assert( array( 4, 3, 9 ) === array_values( $tarifflist_log['context']['delivery_mode_values'] ?? array() ), 'CDEK successful tarifflist log must include delivery_mode values.' );
 cdek_tariff_assert( '136' === (string) ( $tarifflist_log['context']['tariffs'][0]['tariff_code'] ?? '' ), 'CDEK successful tarifflist log must include sanitized tariff code.' );
 $filter_log = cdek_tariff_find_log( 'CDEK tariff filter completed.' );
 cdek_tariff_assert( DeliveryType::PICKUP === (string) ( $filter_log['context']['requested_delivery_type'] ?? '' ), 'CDEK filter log must include requested delivery type.' );
@@ -394,7 +433,8 @@ cdek_tariff_assert( 1 === (int) ( $filter_log['context']['skipped_other_type_cou
 
 $courier_quote = $carrier->quote( cdek_tariff_request( DeliveryType::COURIER ) );
 cdek_tariff_assert( 1 === count( $courier_quote->rates ), 'Courier CDEK tariff must be mapped to one rate.' );
-cdek_tariff_assert( DeliveryType::COURIER === $courier_quote->rates[0]->delivery_type, 'delivery_mode 2 must be courier.' );
+cdek_tariff_assert( DeliveryType::COURIER === $courier_quote->rates[0]->delivery_type, 'delivery_mode 3 warehouse-door must be courier.' );
+cdek_tariff_assert( str_starts_with( $courier_quote->rates[0]->title, CdekSettings::DEFAULT_COURIER_METHOD_TITLE ), 'CDEK door tariff must use courier method title.' );
 cdek_tariff_assert( '137' === $courier_quote->rates[0]->tariff_key, 'Unknown delivery mode must be skipped.' );
 
 $tariff_request = array_values( array_filter( $http->requests, static fn( array $request ): bool => str_contains( $request['url'], '/v2/calculator/tarifflist' ) ) )[0];
@@ -431,7 +471,7 @@ cdek_tariff_assert( 2 === count( $cdek_rates ), 'Enabled CDEK service must produ
 
 $no_match_http = new CdekTariffFakeHttpClient();
 $no_match_http->tariff_codes_override = array(
-	array( 'tariff_code' => 137, 'tariff_name' => 'Courier only', 'delivery_mode' => 2, 'delivery_sum' => 520, 'period_min' => 1, 'period_max' => 1 ),
+	array( 'tariff_code' => 137, 'tariff_name' => 'Courier only', 'delivery_mode' => 3, 'delivery_sum' => 520, 'period_min' => 1, 'period_max' => 1 ),
 	array( 'tariff_code' => 999, 'tariff_name' => 'Unknown mode', 'delivery_mode' => 9, 'delivery_sum' => 1, 'period_min' => 1, 'period_max' => 1 ),
 );
 $GLOBALS['wdc_cdek_tariff_logs'] = array();
@@ -487,6 +527,71 @@ $preview = ( new OrderDeliveryRecalculationService( new OrderQuoteRequestMapper(
 	public function get_meta( string $key, bool $single = true ): mixed { return 'dest-fias' === $key ? 'dest-fias' : ''; }
 } );
 cdek_tariff_assert( count( array_filter( $preview['rates'], static fn( array $rate ): bool => CdekCarrier::KEY === (string) ( $rate['carrier_key'] ?? '' ) ) ) >= 1, 'CDEK rates must appear in admin recalculation preview.' );
+
+$custom_http = new CdekTariffFakeHttpClient();
+$GLOBALS['wpdb'] = new wpdb();
+$custom_services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
+$custom_countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
+$custom_service = $custom_services->ensure_cdek_service();
+$custom_services->update_service( (int) $custom_service->id, array( 'enabled' => 1 ) );
+$custom_countries->replace_countries( (int) $custom_service->id, array( 'RU' ) );
+$custom_service_settings = new WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository( $GLOBALS['wpdb'] );
+$custom_service_settings->set_setting( (int) $custom_service->id, 'pickup_method_title', 'Custom CDEK pickup', 'string' );
+$custom_service_settings->set_setting( (int) $custom_service->id, 'courier_method_title', 'Custom CDEK courier', 'string' );
+$custom_settings = new CdekSettings( new SettingsRepository(), new EncryptionService(), $custom_services, $custom_service_settings );
+$custom_settings->save_from_admin(
+	array(
+		CdekSettings::ENVIRONMENT_KEY => CdekSettings::ENV_TEST,
+		CdekSettings::TEST_ACCOUNT_KEY => 'account-id',
+		'cdek_test_secure_password' => 'secure-password',
+		CdekSettings::SENDER_CITY_CODE_KEY => '270',
+		CdekSettings::SENDER_POSTAL_CODE_KEY => '630005',
+		CdekSettings::SENDER_CITY_NAME_KEY => 'Новосибирск',
+		CdekSettings::DEFAULT_PACKAGE_LENGTH_CM_KEY => '30',
+		CdekSettings::DEFAULT_PACKAGE_WIDTH_CM_KEY => '20',
+		CdekSettings::DEFAULT_PACKAGE_HEIGHT_CM_KEY => '10',
+	)
+);
+$custom_client = new CdekApiClient( new CdekOAuthTokenService( $custom_settings, $custom_http ), $custom_settings, $custom_http );
+$custom_carrier = new CdekCarrier( $custom_settings, $custom_client, new CdekLocationResolver( $custom_client, new Logger() ), new Logger() );
+$custom_pickup_quote = $custom_carrier->quote( cdek_tariff_request( DeliveryType::PICKUP ) );
+$custom_courier_quote = $custom_carrier->quote( cdek_tariff_request( DeliveryType::COURIER ) );
+cdek_tariff_assert( str_starts_with( $custom_pickup_quote->rates[0]->title ?? '', 'Custom CDEK pickup' ), 'Custom CDEK pickup title must be applied to runtime rate.' );
+cdek_tariff_assert( str_starts_with( $custom_courier_quote->rates[0]->title ?? '', 'Custom CDEK courier' ), 'Custom CDEK courier title must be applied to runtime rate.' );
+cdek_tariff_assert( 'Custom CDEK pickup' === (string) ( $custom_pickup_quote->rates[0]->meta['pickup_method_title'] ?? '' ), 'Custom CDEK pickup title must be saved in rate meta.' );
+cdek_tariff_assert( 'Custom CDEK courier' === (string) ( $custom_courier_quote->rates[0]->meta['courier_method_title'] ?? '' ), 'Custom CDEK courier title must be saved in rate meta.' );
+$custom_manager = new DeliveryServiceManager( $custom_services, $custom_countries, new RuleRepository( $GLOBALS['wpdb'] ), ( new ReflectionClass( RussianPostCountryDirectory::class ) )->newInstanceWithoutConstructor() );
+$custom_registry = new DeliveryServiceRegistry( $custom_services, ( function () use ( $custom_carrier ): CarrierRegistry { $registry = new CarrierRegistry(); $registry->register( $custom_carrier ); return $registry; } )() );
+$custom_preview = ( new OrderDeliveryRecalculationService( new OrderQuoteRequestMapper(), cdek_tariff_orchestrator( $custom_carrier, $custom_registry, $custom_manager ), ( new ReflectionClass( OrderShipmentRepository::class ) )->newInstanceWithoutConstructor() ) )->preview( new class {
+	public function get_items(): array { return array( new class {
+		public function get_quantity(): int { return 1; }
+		public function get_total(): int { return 1000; }
+		public function get_name(): string { return 'Товар'; }
+		public function get_product(): object { return new class {
+			public function get_sku(): string { return 'sku'; }
+			public function get_name(): string { return 'Товар'; }
+			public function get_weight(): float { return 1.0; }
+			public function get_length(): int { return 12; }
+			public function get_width(): int { return 8; }
+			public function get_height(): int { return 4; }
+		}; }
+	} ); }
+	public function get_subtotal(): int { return 1000; }
+	public function get_shipping_country(): string { return 'RU'; }
+	public function get_billing_country(): string { return 'RU'; }
+	public function get_shipping_city(): string { return 'Москва'; }
+	public function get_shipping_postcode(): string { return '101000'; }
+	public function get_shipping_address_1(): string { return 'Тверская'; }
+	public function get_shipping_address_2(): string { return '1'; }
+	public function get_shipping_state(): string { return 'Москва'; }
+	public function get_payment_method(): string { return 'cod'; }
+	public function get_item_count(): int { return 1; }
+	public function get_id(): int { return 10; }
+	public function get_meta( string $key, bool $single = true ): mixed { return 'dest-fias' === $key ? 'dest-fias' : ''; }
+} );
+$custom_preview_labels = array_map( static fn( array $rate ): string => (string) ( $rate['label'] ?? '' ), array_filter( $custom_preview['rates'], static fn( array $rate ): bool => CdekCarrier::KEY === (string) ( $rate['carrier_key'] ?? '' ) ) );
+cdek_tariff_assert( in_array( 'Custom CDEK pickup', $custom_preview_labels, true ), 'Custom CDEK pickup title must be applied in admin recalculation preview.' );
+cdek_tariff_assert( in_array( 'Custom CDEK courier', $custom_preview_labels, true ), 'Custom CDEK courier title must be applied in admin recalculation preview.' );
 
 $serialized_meta = json_encode( $pickup_rate->meta, JSON_UNESCAPED_UNICODE );
 cdek_tariff_assert( is_string( $serialized_meta ) && ! str_contains( $serialized_meta, 'secure-password' ) && ! str_contains( $serialized_meta, 'runtime-token' ), 'CDEK saved meta/debug must not include secret or token.' );

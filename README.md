@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.44.0.
+Current plugin version: 0.44.5.
+
+Version 0.44.5 fixes CDEK `delivery_mode` classification according to the CDEK docs: warehouse/PVZ destination modes now go to `СДЭК до пункта выдачи`, and door destination modes go to `СДЭК курьер`. The CDEK service `Основное` tab now also has configurable service-specific pickup/courier method titles with defaults `СДЭК до пункта выдачи` and `СДЭК курьер`; these titles flow into checkout grouped rates, admin order recalculation preview, saved shipping metadata, and calculation data.
 
 Version 0.44.0 adds the first CDEK runtime tariff calculation stage on branch `feature/cdek-tariff-calculation`. Checkout and admin order delivery recalculation preview can now show `СДЭК до пункта выдачи` and `СДЭК курьер` when the common `cdek` delivery service is enabled, active environment credentials are complete, sender CDEK city code is configured, and the destination city resolves to a CDEK city code. Runtime uses `POST /v2/calculator/tarifflist`, maps tariff candidates into WDC `DeliveryRate` meta, applies the existing rule engine, and stores safe calculation data without access tokens or secrets. CDEK pickup point map/selection, order creation, statuses, webhooks and print forms are intentionally left for the next stage: `feature/cdek-pickup-points`.
 

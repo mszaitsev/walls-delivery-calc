@@ -1,5 +1,7 @@
 # Project Status
 
+0.44.5 note: CDEK tariff calculation now classifies `delivery_mode` by the destination side from the CDEK docs: door destinations are courier, warehouse/PVZ destinations are pickup (`1` door-door -> courier, `2` door-warehouse -> pickup, `3` warehouse-door -> courier, `4` warehouse-warehouse -> pickup). The predefined `cdek` service main tab also stores service-specific `pickup_method_title` and `courier_method_title`, defaulting to `СДЭК до пункта выдачи` and `СДЭК курьер`, and these titles flow into checkout grouped rates, admin recalculation preview, saved shipping metadata and calculation data. CDEK pickup map/point selection, order creation, statuses, webhooks and print forms remain intentionally not implemented. The next feature branch is `feature/cdek-pickup-points`.
+
 0.44.0 note: CDEK tariff calculation is connected to checkout/runtime and admin order delivery recalculation preview. The predefined `cdek` service remains disabled by default; when enabled with complete active credentials, sender CDEK city code and a resolvable destination city, WDC calls CDEK API v2 `POST /v2/calculator/tarifflist`, maps pickup/courier tariff candidates to `DeliveryRate`, applies the existing rule engine, and saves safe calculation data without tokens or secrets. CDEK pickup map/point selection, order creation, statuses, webhooks and print forms are intentionally not implemented. The next feature branch is `feature/cdek-pickup-points`.
 
 0.43.1 note: the CDEK foundation settings UX now stores test and production credentials separately. The active CDEK environment chooses the base URL and matching Account / Secure password; switching environments does not copy, clear or mutate the other environment. The duplicate CDEK enabled checkbox was removed from CDEK settings, so runtime enablement remains the common delivery service `Основное` flag. Russian Post and CDEK credentials tabs are now labeled `Данные для входа`, and CDEK diagnostics include the active environment without exposing secrets or tokens.
@@ -48,12 +50,12 @@
 
 ## Общий статус
 
-- Текущая версия: `0.43.1`.
+- Текущая версия: `0.44.5`.
 - Текущая базовая ветка: `develop`.
-- Рабочая ветка: `feature/cdek-carrier-foundation`.
+- Рабочая ветка: `feature/cdek-tariff-calculation`.
 - Последнее обновление статуса: 2026-06-09.
 - Общая готовность проекта: примерно 74%.
-- Следующий рекомендуемый этап: `feature/cdek-tariff-calculation`.
+- Следующий рекомендуемый этап: `feature/cdek-pickup-points`.
 
 ## Краткое резюме
 
@@ -87,7 +89,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.43.1`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.44.5`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
@@ -166,7 +168,7 @@
 
 ## Не реализовано
 
-- CDEK runtime adapter, settings, rates, pickup/courier flow, shipments and statuses.
+- CDEK pickup-point map/selection, shipments, orders, statuses, webhooks and print forms.
 - DPD runtime adapter, settings, rates, pickup/courier flow, shipments and statuses.
 - Yandex Delivery runtime adapter, pricing, pickup/courier flow and future offer confirmation.
 - PEK, Energia, Aerogruz, Jet adapters.

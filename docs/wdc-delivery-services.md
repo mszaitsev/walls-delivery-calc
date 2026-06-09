@@ -1,6 +1,6 @@
 # WDC Delivery Services
 
-## CDEK Tariff Runtime 0.44.0
+## CDEK Tariff Runtime 0.44.5
 
 The built-in CDEK service still uses service key `cdek` and carrier key `cdek`, and remains disabled by default. When enabled, CDEK rates require complete active environment credentials, sender CDEK city code, and a confident destination city mapping.
 
@@ -12,8 +12,17 @@ Runtime uses CDEK API v2:
 
 Checkout/admin labels:
 
-- `pickup`: `СДЭК до пункта выдачи`.
-- `courier`: `СДЭК курьер`.
+- `pickup`: default `СДЭК до пункта выдачи`.
+- `courier`: default `СДЭК курьер`.
+
+The CDEK `Основное` tab stores service-specific method titles in `wdc_delivery_service_settings` with the same generic keys used by grouped checkout/admin rates:
+
+- `pickup_method_title`
+- `courier_method_title`
+
+If an administrator leaves a title empty, CDEK falls back to the defaults above. These titles affect checkout grouped rate labels, admin recalculation preview labels, saved shipping-item metadata, and calculation data. Russian Post title settings remain isolated on `russian_post_domestic`.
+
+CDEK `delivery_mode` is classified by the destination side of the mode: door destinations are `courier`, warehouse/PVZ destinations are `pickup`. Numeric modes follow the CDEK docs: `1` door-door -> courier, `2` door-warehouse -> pickup, `3` warehouse-door -> courier, `4` warehouse-warehouse -> pickup.
 
 The current stage does not implement CDEK pickup points, pickup point selection, CDEK orders/shipments, statuses, webhooks or print forms. The next stage is `feature/cdek-pickup-points`.
 

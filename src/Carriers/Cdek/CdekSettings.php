@@ -3,6 +3,10 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Carriers\Cdek;
 
+use WallsShop\WDC\DeliveryServices\DeliveryService;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 
@@ -12,6 +16,8 @@ final class CdekSettings {
 	public const SERVICE_KEY = 'cdek';
 	public const CARRIER_KEY = 'cdek';
 	public const TITLE = 'СДЭК';
+	public const DEFAULT_PICKUP_METHOD_TITLE = 'СДЭК до пункта выдачи';
+	public const DEFAULT_COURIER_METHOD_TITLE = 'СДЭК курьер';
 	public const ENV_TEST = 'test';
 	public const ENV_PRODUCTION = 'production';
 
@@ -34,7 +40,9 @@ final class CdekSettings {
 
 	public function __construct(
 		private SettingsRepository $settings,
-		private EncryptionService $encryption
+		private EncryptionService $encryption,
+		private ?DeliveryServiceRepository $services = null,
+		private ?DeliveryServiceSettingsRepository $service_settings = null
 	) {
 	}
 
@@ -123,6 +131,18 @@ final class CdekSettings {
 			'width' => max( 1, $this->settings->get_int( self::DEFAULT_PACKAGE_WIDTH_CM_KEY, 20 ) ),
 			'height' => max( 1, $this->settings->get_int( self::DEFAULT_PACKAGE_HEIGHT_CM_KEY, 10 ) ),
 		);
+	}
+
+	public function pickup_method_title(): string {
+		return $this->service_method_title( 'pickup_method_title', self::DEFAULT_PICKUP_METHOD_TITLE );
+	}
+
+	public function courier_method_title(): string {
+		return $this->service_method_title( 'courier_method_title', self::DEFAULT_COURIER_METHOD_TITLE );
+	}
+
+	public function method_title( string $delivery_type ): string {
+		return DeliveryType::COURIER === $delivery_type ? $this->courier_method_title() : $this->pickup_method_title();
 	}
 
 	public function token_cache_key(): string {
@@ -246,5 +266,15 @@ final class CdekSettings {
 		$postal_code = preg_replace( '/\D+/', '', $postal_code ) ?? '';
 
 		return preg_match( '/^\d{6}$/', $postal_code ) ? $postal_code : '';
+	}
+
+	private function service_method_title( string $key, string $default ): string {
+		$service = $this->services instanceof DeliveryServiceRepository ? $this->services->find_by_service_key( self::SERVICE_KEY ) : null;
+		if ( ! $service instanceof DeliveryService || null === $service->id || ! $this->service_settings instanceof DeliveryServiceSettingsRepository ) {
+			return $default;
+		}
+		$title = trim( (string) $this->service_settings->get_setting( (int) $service->id, $key, $default ) );
+
+		return '' !== $title ? $title : $default;
 	}
 }

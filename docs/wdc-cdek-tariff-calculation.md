@@ -1,6 +1,6 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.44.0.
+Version: 0.44.5.
 
 This stage connects CDEK as a checkout/runtime carrier for tariff preview only. It uses CDEK API v2 `POST /v2/calculator/tarifflist` to fetch available tariffs and converts supported pickup/courier tariffs into WDC `DeliveryRate` objects.
 
@@ -8,11 +8,12 @@ This stage connects CDEK as a checkout/runtime carrier for tariff preview only. 
 
 - Runtime carrier key and service key: `cdek`.
 - Checkout/admin delivery types:
-  - `pickup`: `СДЭК до пункта выдачи`.
-  - `courier`: `СДЭК курьер`.
+  - `pickup`: default `СДЭК до пункта выдачи`.
+  - `courier`: default `СДЭК курьер`.
+- The CDEK service main tab stores service-specific `pickup_method_title` and `courier_method_title`; custom values are used by checkout grouped rates, admin recalculation preview, saved rate meta, and calculation data.
 - CDEK OAuth bearer token reuse from the foundation stage.
 - Authorized JSON requests through the existing `CdekHttpClientInterface`.
-- `CdekLocationResolver` for destination CDEK city code resolution via `/v2/location/cities` with transient cache.
+- `CdekLocationResolver` for destination CDEK city code resolution via `/v2/location/cities` with fallback attempts and transient cache.
 - Sender settings:
   - CDEK sender city code.
   - Sender postal code.
@@ -20,7 +21,7 @@ This stage connects CDEK as a checkout/runtime carrier for tariff preview only. 
   - Default package length/width/height in cm.
 - Tarifflist request payload:
   - `type = 1`.
-  - `currency = RUB`.
+  - `currency = 1` (RUB in CDEK API).
   - `from_location.code`.
   - `to_location.code`.
   - package weight in grams.
@@ -33,8 +34,10 @@ This stage connects CDEK as a checkout/runtime carrier for tariff preview only. 
   - `period_min` / `period_max`.
   - `calendar_min` / `calendar_max` saved in meta.
 - Delivery mode classification:
-  - `1` and `3` -> pickup.
-  - `2` and `4` -> courier.
+  - `1` door-door -> courier.
+  - `2` door-warehouse -> pickup.
+  - `3` warehouse-door -> courier.
+  - `4` warehouse-warehouse -> pickup.
   - unknown modes are skipped.
 - Existing WDC rule engine processing and service post-processing.
 - Checkout grouped tariff selector reuse through generic `tariff_selector_group` / `checkout_group_id`.
