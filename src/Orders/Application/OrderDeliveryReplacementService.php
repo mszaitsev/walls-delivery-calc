@@ -181,8 +181,8 @@ final class OrderDeliveryReplacementService {
 					$item->delete_meta_data( $key );
 				}
 			}
-			if ( method_exists( $item, 'add_meta_data' ) && '' !== (string) ( $rate['delivery_comment'] ?? '' ) ) {
-				$item->add_meta_data( 'Срок доставки', (string) $rate['delivery_comment'], true );
+			if ( method_exists( $item, 'add_meta_data' ) ) {
+				$item->add_meta_data( 'Срок доставки', $this->delivery_label_or_not_specified( $rate ), true );
 			}
 			if ( method_exists( $item, 'save' ) ) {
 				$item->save();
@@ -190,17 +190,22 @@ final class OrderDeliveryReplacementService {
 			return;
 		}
 		if ( property_exists( $order, 'shipping_items' ) ) {
-			$meta = array();
-			if ( '' !== (string) ( $rate['delivery_comment'] ?? '' ) ) {
-				$meta['Срок доставки'] = (string) $rate['delivery_comment'];
-			}
 			$order->shipping_items = array(
 				'method_id' => self::METHOD_ID,
 				'method_title' => $title,
 				'total' => (float) ( $rate['cost'] ?? 0 ),
-				'meta' => $meta,
+				'meta' => array( 'Срок доставки' => $this->delivery_label_or_not_specified( $rate ) ),
 			);
 		}
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function delivery_label_or_not_specified( array $rate ): string {
+		$delivery = trim( (string) ( $rate['delivery_comment'] ?? $rate['planned_delivery_comment'] ?? '' ) );
+
+		return '' !== $delivery ? $delivery : 'не указан';
 	}
 
 	/**

@@ -835,6 +835,31 @@ recalc_smoke_assert( true === $create_result['success'] && 'wdc_platform_deliver
 recalc_smoke_assert( 5700.0 === $no_shipping_order->total && $no_shipping_order->saved, 'Save must recalculate totals and save order after creating shipping item.' );
 recalc_smoke_assert( isset( $no_shipping_order->meta['_wdc_delivery_calculation_data'], $no_shipping_order->meta['_wdc_platform_rate_id'], $no_shipping_order->meta['_wdc_platform_delivery_type'] ), 'Save must update WDC calculation and platform meta.' );
 recalc_smoke_assert( array() !== $no_shipping_order->notes && false === $no_shipping_order->notes[0]['customer'], 'Save must add private order note.' );
+recalc_smoke_assert( array( 'Срок доставки' => (string) ( $courier_rate['selected_tariff']['delivery_comment'] ?? $courier_rate['delivery_comment'] ?? '' ) ) === ( $no_shipping_order->shipping_items['meta'] ?? array() ), 'Russian Post domestic admin visible meta must contain only delivery time.' );
+
+$unspecified_rate = $courier_rate;
+$unspecified_rate['id'] = 'future:carrier';
+$unspecified_rate['rate_id'] = 'future:carrier';
+$unspecified_rate['carrier_key'] = 'future';
+$unspecified_rate['service_key'] = 'future';
+$unspecified_rate['label'] = 'Future carrier';
+$unspecified_rate['delivery_comment'] = '';
+$unspecified_rate['planned_delivery_comment'] = '';
+$unspecified_rate['selected_tariff'] = array();
+$unspecified_rate['tariff_title'] = '';
+$unspecified_rate['selected_tariff_title'] = '';
+$unspecified_order = new WdcRecalcOrder( 118, array() );
+$unspecified_order->shipping_items = array();
+$unspecified_result = $replacement->save(
+	$unspecified_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $unspecified_rate,
+		'selected_tariff' => array(),
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+recalc_smoke_assert( true === $unspecified_result['success'] && array( 'Срок доставки' => 'не указан' ) === ( $unspecified_order->shipping_items['meta'] ?? array() ), 'Admin replacement visible meta must use not specified when delivery time is missing.' );
 
 $cdek_admin_rate = array(
 	'id' => 'cdek:courier:137',

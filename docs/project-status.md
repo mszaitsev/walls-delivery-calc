@@ -1,5 +1,7 @@
 # Project Status
 
+0.44.7 note: visible WooCommerce shipping item meta is now carrier-neutral and compact for checkout and admin delivery replacement. Every service writes only `Срок доставки`; if no delivery range/comment is available, the visible value is `не указан`. Technical carrier/rate/tariff/API/rules/package data remains in hidden WDC order meta, `_wdc_platform_rate_meta`, `_wdc_delivery_calculation_data`, and the `Калькулятор доставок` metabox.
+
 0.44.5 note: CDEK tariff calculation now classifies `delivery_mode` by the destination side from the CDEK docs: door destinations are courier, warehouse/PVZ destinations are pickup (`1` door-door -> courier, `2` door-warehouse -> pickup, `3` warehouse-door -> courier, `4` warehouse-warehouse -> pickup). The predefined `cdek` service main tab also stores service-specific `pickup_method_title` and `courier_method_title`, defaulting to `СДЭК до пункта выдачи` and `СДЭК курьер`, and these titles flow into checkout grouped rates, admin recalculation preview, saved shipping metadata and calculation data. CDEK pickup map/point selection, order creation, statuses, webhooks and print forms remain intentionally not implemented. The next feature branch is `feature/cdek-pickup-points`.
 
 0.44.0 note: CDEK tariff calculation is connected to checkout/runtime and admin order delivery recalculation preview. The predefined `cdek` service remains disabled by default; when enabled with complete active credentials, sender CDEK city code and a resolvable destination city, WDC calls CDEK API v2 `POST /v2/calculator/tarifflist`, maps pickup/courier tariff candidates to `DeliveryRate`, applies the existing rule engine, and saves safe calculation data without tokens or secrets. CDEK pickup map/point selection, order creation, statuses, webhooks and print forms are intentionally not implemented. The next feature branch is `feature/cdek-pickup-points`.
@@ -50,7 +52,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.44.5`.
+- Текущая версия: `0.44.7`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/cdek-tariff-calculation`.
 - Последнее обновление статуса: 2026-06-09.
@@ -89,7 +91,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.44.5`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.44.7`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
@@ -113,7 +115,7 @@
 - A single domestic carrier/service is the source of truth: `carrier_key=russian_post_domestic`, `service_key=russian_post_domestic`.
 - Pickup and courier are split by `delivery_type` and checkout group/rate ids such as `russian_post_domestic:pickup` and `russian_post_domestic:courier`.
 - Domestic Tariff API requests support `pack=99`, declared value `sumoc`, tariff variants, per-tariff ECOM flag, API token, cache/debug metadata and safe error diagnostics.
-- Configurable method titles, tariff labels and delivery ranges are persisted in checkout/session/order calculation data while visible WooCommerce shipping item meta is kept clean.
+- Configurable method titles, tariff labels and delivery ranges are persisted in checkout/session/order calculation data while visible WooCommerce shipping item meta is limited to `Срок доставки` with `не указан` fallback.
 - Courier Russian Post tariff calculation can use `russianpost_courier_calc_postal_code` found by the admin location tool `Подобрать индексы для курьерской Почты России`.
 - Otpravka credentials, Tracking credentials, postoffice acceptance indices, default from postcode and shipment settings live in `WDC -> Службы доставки -> Почта России по РФ`.
 

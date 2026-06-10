@@ -3,8 +3,6 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
-use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
-use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
@@ -131,64 +129,20 @@ final class OrderShippingMetaPersister {
 			return;
 		}
 
-		$delivery_type = (string) ( $rate['delivery_type'] ?? '' );
 		if ( $this->is_russian_post_domestic_rate( $rate ) ) {
 			$method_title = $this->domestic_method_title( $rate );
 			if ( method_exists( $item, 'set_method_title' ) && '' !== $method_title ) {
 				$item->set_method_title( $method_title );
 			}
-			$this->delete_visible_technical_item_meta( $item );
-			$delivery = $this->delivery_days_label( is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array() );
-			if ( '' !== $delivery ) {
-				$item->add_meta_data( 'Срок доставки', $delivery, true );
-			}
-			return;
-		}
-		if ( $this->is_cdek_rate( $rate ) ) {
+		} elseif ( $this->is_cdek_rate( $rate ) ) {
 			$method_title = $this->compact_method_title( $rate );
 			if ( method_exists( $item, 'set_method_title' ) && '' !== $method_title ) {
 				$item->set_method_title( $method_title );
 			}
-			$this->delete_visible_technical_item_meta( $item );
-			$delivery = $this->compact_delivery_label( $rate );
-			if ( '' !== $delivery ) {
-				$item->add_meta_data( 'Срок доставки', $delivery, true );
-			}
-			return;
-		}
-		if ( $this->is_russian_post_international_rate( $rate ) ) {
-			$this->delete_visible_technical_item_meta( $item );
-			$item->add_meta_data( 'Способ доставки', 'международная доставка Почтой России', true );
-			return;
 		}
 
-		$rows          = array(
-			'Перевозчик'       => (string) ( $rate['carrier_key'] ?? '' ),
-			'Способ доставки'  => (string) ( $rate['rate_id'] ?? '' ),
-			'Тип доставки'     => $this->delivery_type_label( $delivery_type ),
-			'Срок доставки'    => (string) ( $rate['planned_delivery_comment'] ?? '' ),
-			'Населенный пункт' => $this->address_summary(),
-			'Нормализация'     => $this->normalization_summary(),
-		);
-
-		$pickup = $this->session_manager->pickup_selection();
-		if (
-			'pickup' === $delivery_type
-			&& $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) )
-		) {
-			$rows['Код ПВЗ']          = (string) ( $pickup['point_code'] ?? '' );
-			$rows['Адрес ПВЗ']        = (string) ( $pickup['point_address'] ?? '' );
-			$rows['Комментарий ПВЗ']  = (string) ( $pickup['point_comment'] ?? '' );
-			$rows['Режим работы ПВЗ'] = (string) ( $pickup['point_work_time'] ?? '' );
-		}
-
-		foreach ( $rows as $label => $value ) {
-			if ( '' === trim( (string) $value ) ) {
-				continue;
-			}
-
-			$item->add_meta_data( $label, $value, true );
-		}
+		$this->delete_visible_technical_item_meta( $item );
+		$item->add_meta_data( 'Срок доставки', $this->delivery_label_or_not_specified( $rate ), true );
 	}
 
 	/**
@@ -385,7 +339,7 @@ final class OrderShippingMetaPersister {
 		$carrier_key = (string) ( $rate['carrier_key'] ?? '' );
 		$service_key = (string) ( $rate['service_key'] ?? '' );
 
-		return CdekSettings::CARRIER_KEY === $carrier_key || CdekSettings::SERVICE_KEY === $service_key;
+		return 'cdek' === $carrier_key || 'cdek' === $service_key;
 	}
 
 	/**
@@ -456,6 +410,15 @@ final class OrderShippingMetaPersister {
 		}
 
 		return trim( (string) ( $rate['delivery_comment'] ?? $rate['planned_delivery_comment'] ?? '' ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function delivery_label_or_not_specified( array $rate ): string {
+		$delivery = $this->compact_delivery_label( $rate );
+
+		return '' !== $delivery ? $delivery : 'не указан';
 	}
 
 	/**
@@ -629,18 +592,6 @@ final class OrderShippingMetaPersister {
 
 	private function nullable_float( mixed $value ): ?float {
 		return is_numeric( $value ) ? (float) $value : null;
-	}
-
-	/**
-	 * @param array<string,mixed> $rate
-	 */
-	private function is_russian_post_international_rate( array $rate ): bool {
-		$service_key = (string) ( $rate['service_key'] ?? '' );
-		$rate_id     = (string) ( $rate['rate_id'] ?? '' );
-
-		return RussianPostInternationalCarrier::SERVICE_KEY === $service_key
-			|| RussianPostInternationalCarrier::SERVICE_KEY === $rate_id
-			|| str_starts_with( $rate_id, RussianPostInternationalCarrier::SERVICE_KEY . ':' );
 	}
 
 	/**

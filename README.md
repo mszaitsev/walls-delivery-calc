@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.44.5.
+Current plugin version: 0.44.7.
+
+Version 0.44.7 unifies visible WooCommerce shipping item meta for every delivery service. Checkout and admin order delivery replacement now keep only `Срок доставки`; when a delivery range is unavailable the visible value is `не указан`. Technical carrier/rate/tariff/API/rules/package data remains in hidden WDC order meta, `_wdc_platform_rate_meta`, `_wdc_delivery_calculation_data`, and the `Калькулятор доставок` metabox.
 
 Version 0.44.5 fixes CDEK `delivery_mode` classification according to the CDEK docs: warehouse/PVZ destination modes now go to `СДЭК до пункта выдачи`, and door destination modes go to `СДЭК курьер`. The CDEK service `Основное` tab now also has configurable service-specific pickup/courier method titles with defaults `СДЭК до пункта выдачи` and `СДЭК курьер`; these titles flow into checkout grouped rates, admin order recalculation preview, saved shipping metadata, and calculation data.
 

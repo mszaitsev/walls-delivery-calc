@@ -521,6 +521,65 @@ wc_checkout_smoke_assert( isset( $cdek_order->meta['_wdc_platform_rate_meta'], $
 $cdek_calc = $cdek_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ];
 wc_checkout_smoke_assert( 520.0 === (float) ( $cdek_calc['api']['api_base_price_rub'] ?? 0 ) && 1000 === (int) ( $cdek_calc['package']['final_weight_g'] ?? 0 ), 'CDEK checkout calculation data must preserve API and package data.' );
 
+$compact_forbidden_meta_keys = array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация', 'Код ПВЗ', 'Адрес ПВЗ' );
+
+$session->save_rates(
+	array(
+		'russian_post_domestic:pickup' => array(
+			'rate_id' => 'russian_post_domestic:pickup',
+			'carrier_key' => 'russian_post_domestic',
+			'service_key' => 'russian_post_domestic',
+			'service_title' => 'Почта России до отделения',
+			'label' => 'Почта России до отделения, Посылка 1 класса - 3-5 дней',
+			'delivery_type' => 'pickup',
+			'delivery_days' => array( 'min_days' => 3, 'max_days' => 5 ),
+			'planned_delivery_comment' => '3-5 дней',
+			'tariff_title' => 'Посылка 1 класса',
+			'selected_tariff_title' => 'Посылка 1 класса',
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:russian_post_domestic:pickup' ) );
+$domestic_item = new WdcSmokeShippingItem();
+$domestic_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'technical' );
+( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $domestic_item );
+wc_checkout_smoke_assert( array( 'Срок доставки' => '3-5 дней' ) === $domestic_item->meta, 'Russian Post domestic checkout visible meta must contain only delivery time.' );
+
+$session->save_rates(
+	array(
+		'russian_post:international' => array(
+			'rate_id' => 'russian_post:international',
+			'carrier_key' => 'russian_post',
+			'service_key' => 'russian_post',
+			'label' => 'Почта России международная - 8-12 дней',
+			'delivery_type' => 'courier',
+			'planned_delivery_comment' => '8-12 дней',
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:russian_post:international' ) );
+$international_item = new WdcSmokeShippingItem();
+$international_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'technical' );
+( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $international_item );
+wc_checkout_smoke_assert( array( 'Срок доставки' => '8-12 дней' ) === $international_item->meta, 'Russian Post international checkout visible meta must contain only delivery time.' );
+
+$session->save_rates(
+	array(
+		'future:carrier' => array(
+			'rate_id' => 'future:carrier',
+			'carrier_key' => 'future',
+			'service_key' => 'future',
+			'label' => 'Future carrier',
+			'delivery_type' => 'courier',
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:future:carrier' ) );
+$unspecified_item = new WdcSmokeShippingItem();
+$unspecified_item->meta = array_fill_keys( $compact_forbidden_meta_keys, 'technical' );
+( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $unspecified_item );
+wc_checkout_smoke_assert( array( 'Срок доставки' => 'не указан' ) === $unspecified_item->meta, 'Checkout visible meta must use not specified when delivery time is missing.' );
+
 WC()->session->set( 'chosen_shipping_methods', array( 'legacy_method:rate' ) );
 $order = new WdcSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
