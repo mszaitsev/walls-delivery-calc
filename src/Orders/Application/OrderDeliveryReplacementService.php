@@ -177,7 +177,7 @@ final class OrderDeliveryReplacementService {
 				$item->set_total( (string) ( $rate['cost'] ?? 0 ) );
 			}
 			if ( method_exists( $item, 'delete_meta_data' ) ) {
-				foreach ( array( 'Срок доставки', 'Способ доставки', 'Пункт выдачи', 'Адрес ПВЗ', 'Код ПВЗ' ) as $key ) {
+				foreach ( $this->visible_shipping_item_meta_keys() as $key ) {
 					$item->delete_meta_data( $key );
 				}
 			}
@@ -190,13 +190,57 @@ final class OrderDeliveryReplacementService {
 			return;
 		}
 		if ( property_exists( $order, 'shipping_items' ) ) {
+			$meta = array();
+			if ( '' !== (string) ( $rate['delivery_comment'] ?? '' ) ) {
+				$meta['Срок доставки'] = (string) $rate['delivery_comment'];
+			}
 			$order->shipping_items = array(
 				'method_id' => self::METHOD_ID,
 				'method_title' => $title,
 				'total' => (float) ( $rate['cost'] ?? 0 ),
-				'meta' => array( 'Срок доставки' => (string) ( $rate['delivery_comment'] ?? '' ) ),
+				'meta' => $meta,
 			);
 		}
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function visible_shipping_item_meta_keys(): array {
+		return array(
+			'carrier_key',
+			'rate_id',
+			'delivery_type',
+			'planned_delivery_comment',
+			'service_key',
+			'service_title',
+			'rules_source',
+			'round_up_applied',
+			'minimum_price_applied',
+			'final_price_rub',
+			'api_base_price_rub',
+			'api_price_with_vat_rub',
+			'tariff_key',
+			'tariff_title',
+			'selected_tariff_object',
+			'selected_tariff_title',
+			'selected_tariff_rate_id',
+			'requires_pickup_point',
+			'requires_courier_address',
+			'Перевозчик',
+			'Способ доставки',
+			'Тип доставки',
+			'Срок доставки',
+			'Населенный пункт',
+			'Нормализация',
+			'Код ПВЗ',
+			'Адрес ПВЗ',
+			'Комментарий ПВЗ',
+			'Режим работы ПВЗ',
+			'Пункт выдачи',
+			'Индекс ПВЗ',
+			'Тип ПВЗ',
+		);
 	}
 
 	/**

@@ -8,6 +8,10 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
+if ( ! class_exists( 'WC_Shipping_Method' ) ) {
+	class WC_Shipping_Method {}
+}
+
 use WallsShop\WDC\Carriers\Cdek\Api\CdekApiResponse;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekHttpClientInterface;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekOAuthTokenService;
@@ -22,6 +26,9 @@ use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Checkout\Sorting\RateSorter;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRegistry;
@@ -68,6 +75,31 @@ function delete_transient( string $key ): bool { unset( $GLOBALS['wdc_cdek_tarif
 function sanitize_key( string $key ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( $key ) ) ?? ''; }
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
+function WC(): object {
+	static $wc = null;
+	if ( null === $wc ) {
+		$wc = new class {
+			public object $session;
+
+			public function __construct() {
+				$this->session = new class {
+					/** @var array<string,mixed> */
+					public array $data = array();
+
+					public function get( string $key, mixed $default = null ): mixed {
+						return $this->data[ $key ] ?? $default;
+					}
+
+					public function set( string $key, mixed $value ): void {
+						$this->data[ $key ] = $value;
+					}
+				};
+			}
+		};
+	}
+
+	return $wc;
+}
 function wc_get_logger(): object {
 	return new class {
 		/**
@@ -197,6 +229,33 @@ if ( ! class_exists( 'wpdb' ) ) {
 			}
 			return array();
 		}
+	}
+}
+
+final class WdcCdekTariffSmokeOrder {
+	/** @var array<string,mixed> */
+	public array $meta = array();
+
+	public function update_meta_data( string $key, mixed $value ): void {
+		$this->meta[ $key ] = $value;
+	}
+}
+
+final class WdcCdekTariffSmokeShippingItem {
+	public string $method_title = '';
+	/** @var array<string,mixed> */
+	public array $meta = array();
+
+	public function set_method_title( string $method_title ): void {
+		$this->method_title = $method_title;
+	}
+
+	public function add_meta_data( string $key, mixed $value, bool $unique = false ): void {
+		$this->meta[ $key ] = $value;
+	}
+
+	public function delete_meta_data( string $key ): void {
+		unset( $this->meta[ $key ] );
 	}
 }
 
@@ -433,9 +492,50 @@ cdek_tariff_assert( 1 === (int) ( $filter_log['context']['skipped_other_type_cou
 
 $courier_quote = $carrier->quote( cdek_tariff_request( DeliveryType::COURIER ) );
 cdek_tariff_assert( 1 === count( $courier_quote->rates ), 'Courier CDEK tariff must be mapped to one rate.' );
-cdek_tariff_assert( DeliveryType::COURIER === $courier_quote->rates[0]->delivery_type, 'delivery_mode 3 warehouse-door must be courier.' );
-cdek_tariff_assert( str_starts_with( $courier_quote->rates[0]->title, CdekSettings::DEFAULT_COURIER_METHOD_TITLE ), 'CDEK door tariff must use courier method title.' );
-cdek_tariff_assert( '137' === $courier_quote->rates[0]->tariff_key, 'Unknown delivery mode must be skipped.' );
+$courier_rate = $courier_quote->rates[0];
+cdek_tariff_assert( DeliveryType::COURIER === $courier_rate->delivery_type, 'delivery_mode 3 warehouse-door must be courier.' );
+cdek_tariff_assert( str_starts_with( $courier_rate->title, CdekSettings::DEFAULT_COURIER_METHOD_TITLE ), 'CDEK door tariff must use courier method title.' );
+cdek_tariff_assert( '137' === $courier_rate->tariff_key, 'Unknown delivery mode must be skipped.' );
+
+$wc_rate = ( new WooCommerceRateMapper() )->map( $courier_rate );
+$checkout_rate = array_merge(
+	$wc_rate['meta_data'],
+	array(
+		'label' => $wc_rate['label'],
+		'cost' => (float) $wc_rate['cost'],
+	)
+);
+$checkout_session = new CheckoutSessionManager();
+$checkout_session->save_rates( array( $courier_rate->rate_id => $checkout_rate ) );
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:' . $courier_rate->rate_id ) );
+$checkout_item = new WdcCdekTariffSmokeShippingItem();
+$checkout_item->meta = array(
+	'carrier_key' => 'cdek',
+	'rate_id' => $courier_rate->rate_id,
+	'delivery_type' => DeliveryType::COURIER,
+	'service_key' => 'cdek',
+	'api_base_price_rub' => 520,
+	'tariff_key' => '137',
+	'selected_tariff_object' => '137',
+	'Перевозчик' => 'cdek',
+	'Способ доставки' => 'cdek:courier',
+	'Тип доставки' => 'Курьер',
+	'Населенный пункт' => 'Новосибирск',
+	'Нормализация' => 'manual',
+);
+$checkout_persister = new OrderShippingMetaPersister( $checkout_session );
+$checkout_persister->persist_shipping_item_meta( $checkout_item );
+cdek_tariff_assert( $courier_rate->title === $checkout_item->method_title, 'CDEK checkout shipping item method title must keep method, tariff and delivery text. Expected "' . $courier_rate->title . '", got "' . $checkout_item->method_title . '".' );
+cdek_tariff_assert( array( 'Срок доставки' => '1 день' ) === $checkout_item->meta, 'CDEK checkout shipping item visible meta must contain only delivery time.' );
+foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация' ) as $forbidden_meta_key ) {
+	cdek_tariff_assert( ! array_key_exists( $forbidden_meta_key, $checkout_item->meta ), 'CDEK checkout visible meta must not contain technical key: ' . $forbidden_meta_key );
+}
+$checkout_order = new WdcCdekTariffSmokeOrder();
+$checkout_persister->persist( $checkout_order );
+$checkout_calc = $checkout_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
+cdek_tariff_assert( isset( $checkout_order->meta['_wdc_platform_rate_meta'], $checkout_calc['api'], $checkout_calc['package'], $checkout_calc['rules'] ), 'CDEK checkout hidden rate meta and calculation data must be saved.' );
+cdek_tariff_assert( 520.0 === (float) ( $checkout_calc['api']['api_base_price_rub'] ?? 0 ), 'CDEK checkout calculation data must keep API base price.' );
+cdek_tariff_assert( isset( $checkout_order->meta['_wdc_platform_rate_meta']['request_payload_sanitized'], $checkout_order->meta['_wdc_platform_rate_meta']['response_tariff_sanitized'] ), 'CDEK checkout hidden rate meta must keep sanitized request and response data.' );
 
 $tariff_request = array_values( array_filter( $http->requests, static fn( array $request ): bool => str_contains( $request['url'], '/v2/calculator/tarifflist' ) ) )[0];
 cdek_tariff_assert( 'POST' === $tariff_request['method'], 'CDEK tarifflist must use POST.' );

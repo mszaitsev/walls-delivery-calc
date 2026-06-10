@@ -203,6 +203,24 @@ final class WdcSmokeOrder {
 	}
 }
 
+final class WdcSmokeShippingItem {
+	public string $method_title = '';
+	/** @var array<string,mixed> */
+	public array $meta = array();
+
+	public function set_method_title( string $method_title ): void {
+		$this->method_title = $method_title;
+	}
+
+	public function add_meta_data( string $key, mixed $value, bool $unique = false ): void {
+		$this->meta[ $key ] = $value;
+	}
+
+	public function delete_meta_data( string $key ): void {
+		unset( $this->meta[ $key ] );
+	}
+}
+
 final class WdcCheckoutApartmentSuggestionClient implements AddressSuggestionClientInterface {
 	public int $calls = 0;
 	/** @var array<int,string> */
@@ -446,6 +464,62 @@ $order = new WdcSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
 wc_checkout_smoke_assert( 'demo:courier' === ( $order->meta['_wdc_platform_rate_id'] ?? '' ), 'Persister must save selected courier from full WooCommerce rate id.' );
 wc_checkout_smoke_assert( 'courier' === ( $order->meta['_wdc_platform_delivery_type'] ?? '' ), 'Persister must not fall back to first pickup rate.' );
+
+$session->save_rates(
+	array(
+		'cdek:courier' => array(
+			'rate_id' => 'cdek:courier',
+			'carrier_key' => 'cdek',
+			'service_key' => 'cdek',
+			'service_title' => 'СДЭК',
+			'label' => 'СДЭК курьер, Посылка склад-дверь - 10-14 дней',
+			'delivery_type' => 'courier',
+			'planned_delivery_comment' => '10-14 дней',
+			'delivery_comment' => '10-14 дней',
+			'cost' => 520.0,
+			'tariff_key' => '137',
+			'tariff_title' => 'Посылка склад-дверь',
+			'selected_tariff_object' => '137',
+			'selected_tariff_title' => 'Посылка склад-дверь',
+			'api_base_price_rub' => 520.0,
+			'rules_source' => 'none',
+			'rate_meta' => array(
+				'api_base_price_rub' => 520.0,
+				'package' => array( 'weight_g' => 1000, 'items_weight_g' => 700, 'packaging_weight_g' => 300 ),
+				'request_payload_sanitized' => array( 'from_location' => array( 'code' => 270 ) ),
+				'response_tariff_sanitized' => array( 'tariff_code' => 137 ),
+			),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:courier' ) );
+$cdek_item = new WdcSmokeShippingItem();
+$cdek_item->meta = array(
+	'carrier_key' => 'cdek',
+	'rate_id' => 'cdek:courier',
+	'delivery_type' => 'courier',
+	'service_key' => 'cdek',
+	'api_base_price_rub' => 520,
+	'tariff_key' => '137',
+	'selected_tariff_object' => '137',
+	'Перевозчик' => 'cdek',
+	'Способ доставки' => 'cdek:courier',
+	'Тип доставки' => 'Курьер',
+	'Населенный пункт' => 'Новосибирск',
+	'Нормализация' => 'manual',
+);
+$cdek_persister = new OrderShippingMetaPersister( $session );
+$cdek_persister->persist_shipping_item_meta( $cdek_item );
+wc_checkout_smoke_assert( 'СДЭК курьер, Посылка склад-дверь - 10-14 дней' === $cdek_item->method_title, 'CDEK checkout shipping item method title must stay user-facing.' );
+wc_checkout_smoke_assert( array( 'Срок доставки' => '10-14 дней' ) === $cdek_item->meta, 'CDEK checkout shipping item visible meta must contain only delivery time.' );
+foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация' ) as $forbidden_meta_key ) {
+	wc_checkout_smoke_assert( ! array_key_exists( $forbidden_meta_key, $cdek_item->meta ), 'CDEK checkout visible meta must not contain technical key: ' . $forbidden_meta_key );
+}
+$cdek_order = new WdcSmokeOrder();
+$cdek_persister->persist( $cdek_order );
+wc_checkout_smoke_assert( isset( $cdek_order->meta['_wdc_platform_rate_meta'], $cdek_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ), 'CDEK checkout hidden meta must keep platform rate meta and calculation data.' );
+$cdek_calc = $cdek_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ];
+wc_checkout_smoke_assert( 520.0 === (float) ( $cdek_calc['api']['api_base_price_rub'] ?? 0 ) && 1000 === (int) ( $cdek_calc['package']['final_weight_g'] ?? 0 ), 'CDEK checkout calculation data must preserve API and package data.' );
 
 WC()->session->set( 'chosen_shipping_methods', array( 'legacy_method:rate' ) );
 $order = new WdcSmokeOrder();

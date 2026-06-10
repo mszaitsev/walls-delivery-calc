@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
@@ -138,6 +139,18 @@ final class OrderShippingMetaPersister {
 			}
 			$this->delete_visible_technical_item_meta( $item );
 			$delivery = $this->delivery_days_label( is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array() );
+			if ( '' !== $delivery ) {
+				$item->add_meta_data( 'Срок доставки', $delivery, true );
+			}
+			return;
+		}
+		if ( $this->is_cdek_rate( $rate ) ) {
+			$method_title = $this->compact_method_title( $rate );
+			if ( method_exists( $item, 'set_method_title' ) && '' !== $method_title ) {
+				$item->set_method_title( $method_title );
+			}
+			$this->delete_visible_technical_item_meta( $item );
+			$delivery = $this->compact_delivery_label( $rate );
 			if ( '' !== $delivery ) {
 				$item->add_meta_data( 'Срок доставки', $delivery, true );
 			}
@@ -366,6 +379,16 @@ final class OrderShippingMetaPersister {
 	}
 
 	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function is_cdek_rate( array $rate ): bool {
+		$carrier_key = (string) ( $rate['carrier_key'] ?? '' );
+		$service_key = (string) ( $rate['service_key'] ?? '' );
+
+		return CdekSettings::CARRIER_KEY === $carrier_key || CdekSettings::SERVICE_KEY === $service_key;
+	}
+
+	/**
 	 * @param array<string,mixed> $delivery_days
 	 */
 	private function delivery_days_label( array $delivery_days ): string {
@@ -402,6 +425,37 @@ final class OrderShippingMetaPersister {
 		$title = trim( (string) ( $rate[ $key ] ?? $rate_meta[ $key ] ?? '' ) );
 
 		return '' !== $title ? $title : $default;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function compact_method_title( array $rate ): string {
+		$title  = trim( (string) ( $rate['label'] ?? '' ) );
+		$tariff = trim( (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' ) );
+		if ( '' !== $tariff && ! str_contains( $title, $tariff ) ) {
+			$title = '' !== $title ? $title . ', ' . $tariff : $tariff;
+		}
+
+		$delivery = $this->compact_delivery_label( $rate );
+		if ( '' !== $delivery && ! str_contains( $title, $delivery ) ) {
+			$title = '' !== $title ? $title . ' - ' . $delivery : $delivery;
+		}
+
+		return $title;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function compact_delivery_label( array $rate ): string {
+		$delivery_days = is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array();
+		$delivery      = $this->delivery_days_label( $delivery_days );
+		if ( '' !== $delivery ) {
+			return $delivery;
+		}
+
+		return trim( (string) ( $rate['delivery_comment'] ?? $rate['planned_delivery_comment'] ?? '' ) );
 	}
 
 	/**
@@ -473,8 +527,17 @@ final class OrderShippingMetaPersister {
 			'delivery_kind',
 			'checkout_group_id',
 			'is_courier',
+			'Перевозчик',
 			'Способ доставки',
+			'Тип доставки',
 			'Тариф',
+			'Срок доставки',
+			'Населенный пункт',
+			'Нормализация',
+			'Код ПВЗ',
+			'Адрес ПВЗ',
+			'Комментарий ПВЗ',
+			'Режим работы ПВЗ',
 			'Пункт выдачи',
 			'Индекс ПВЗ',
 			'Тип ПВЗ',
