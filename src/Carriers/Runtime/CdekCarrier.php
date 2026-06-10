@@ -80,7 +80,6 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		}
 
 		$tariffs = $this->tariffs_from_response( $result );
-		$this->logger->debug( 'CDEK tarifflist succeeded.', $this->tarifflist_summary( $result, $tariffs ) );
 
 		$rates = array();
 		$skipped_unknown = 0;
@@ -283,27 +282,27 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		);
 
 		return new DeliveryRate(
-			self::checkout_group_id( $delivery_type ) . ':' . preg_replace( '/\D+/', '', $code ),
-			self::KEY,
-			CdekSettings::TITLE,
-			CdekSettings::SERVICE_KEY,
-			CdekSettings::TITLE,
-			$code,
-			$name,
-			$delivery_type,
-			$label,
-			Money::from_rubles( $price ),
-			null,
-			null,
-			$range,
-			'',
-			$days,
-			array(),
-			false,
-			'',
-			false,
-			DeliveryType::COURIER === $delivery_type,
-			$meta
+			rate_id: self::checkout_group_id( $delivery_type ) . ':' . preg_replace( '/\D+/', '', $code ),
+			carrier_key: self::KEY,
+			carrier_name: CdekSettings::TITLE,
+			service_key: CdekSettings::SERVICE_KEY,
+			service_name: CdekSettings::TITLE,
+			tariff_key: $code,
+			tariff_name: $name,
+			delivery_type: $delivery_type,
+			title: $label,
+			price: Money::from_rubles( $price ),
+			original_price: null,
+			crossed_price: null,
+			delivery_days: $range,
+			planned_delivery_date: '',
+			planned_delivery_comment: $days,
+			comments: array(),
+			disabled: false,
+			disabled_reason: '',
+			requires_pickup_point: DeliveryType::PICKUP === $delivery_type,
+			requires_courier_address: DeliveryType::COURIER === $delivery_type,
+			meta: $meta
 		);
 	}
 

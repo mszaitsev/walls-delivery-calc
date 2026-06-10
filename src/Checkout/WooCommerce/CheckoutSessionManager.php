@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Domain\Address\AddressNormalizationResult;
 
 defined( 'ABSPATH' ) || exit;
@@ -60,7 +61,7 @@ final class CheckoutSessionManager {
 	}
 
 	public function clear_pickup_selection_if_allowed( string $reason, string $currentRateId = '' ): bool {
-		if ( '' !== $currentRateId && $this->is_russian_post_pickup_family( $currentRateId ) && $this->has_valid_pickup_selection() ) {
+		if ( '' !== $currentRateId && $this->is_supported_pickup_family( $currentRateId ) && $this->has_valid_pickup_selection() ) {
 			$this->log_pickup_selection_clear( $reason, true, $currentRateId );
 			return false;
 		}
@@ -114,8 +115,13 @@ final class CheckoutSessionManager {
 			return true;
 		}
 
-		return RussianPostDomesticSettings::CARRIER_KEY === trim( $carrierKey )
-			&& $this->is_same_pickup_family( $selection_rate_id, $rateId );
+		return (
+			RussianPostDomesticSettings::CARRIER_KEY === trim( $carrierKey )
+			&& $this->is_same_pickup_family( $selection_rate_id, $rateId )
+		) || (
+			CdekCarrier::KEY === trim( $carrierKey )
+			&& $this->is_same_cdek_pickup_family( $selection_rate_id, $rateId )
+		);
 	}
 
 	public function update_pickup_selection_rate_id( string $rateId ): void {
@@ -148,6 +154,9 @@ final class CheckoutSessionManager {
 		if ( $this->is_russian_post_pickup_family( $rate_id ) ) {
 			return RussianPostDomesticSettings::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP );
 		}
+		if ( $this->is_cdek_pickup_family( $rate_id ) ) {
+			return CdekCarrier::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP );
+		}
 
 		return $rate_id;
 	}
@@ -161,6 +170,21 @@ final class CheckoutSessionManager {
 
 		return $pickup_family === $this->shipping_method_family( $oldRateId )
 			&& $pickup_family === $this->shipping_method_family( $newRateId );
+	}
+
+	public function is_cdek_pickup_family( string $rate_id ): bool {
+		return str_starts_with( $this->normalize_rate_id( $rate_id ), CdekCarrier::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP ) );
+	}
+
+	public function is_same_cdek_pickup_family( string $oldRateId, string $newRateId ): bool {
+		$pickup_family = CdekCarrier::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP );
+
+		return $pickup_family === $this->shipping_method_family( $oldRateId )
+			&& $pickup_family === $this->shipping_method_family( $newRateId );
+	}
+
+	private function is_supported_pickup_family( string $rate_id ): bool {
+		return $this->is_russian_post_pickup_family( $rate_id ) || $this->is_cdek_pickup_family( $rate_id );
 	}
 
 	public function save_sort_mode( string $sort_mode ): void {

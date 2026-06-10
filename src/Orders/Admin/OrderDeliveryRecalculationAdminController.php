@@ -9,6 +9,7 @@ use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\OrderDeliveryAddressNormalizationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
+use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
@@ -33,7 +34,8 @@ final class OrderDeliveryRecalculationAdminController {
 		private string $plugin_url = '',
 		private string $version = '1',
 		private ?OrderDeliveryAddressNormalizationService $address_normalization = null,
-		private ?OrderDeliveryReplacementService $replacement = null
+		private ?OrderDeliveryReplacementService $replacement = null,
+		private ?CdekDeliveryPointService $cdek_points = null
 	) {
 		$this->pickup_points = $this->pickup_points ?? new RussianPostPickupPointRepository();
 		$this->address_normalization = $this->address_normalization ?? new OrderDeliveryAddressNormalizationService();
@@ -144,9 +146,18 @@ final class OrderDeliveryRecalculationAdminController {
 		}
 
 		$location = $this->selected_location_from_request() ?? array();
+		$rate = $this->array_from_request( 'selected_rate' );
 		$query = $this->request_string( 'query' );
 		$mode = 'location' === $this->request_string( 'mode' ) ? 'location' : 'search';
 		$limit = max( 1, min( 'location' === $mode ? 300 : 100, (int) ( $_POST['limit'] ?? ( 'location' === $mode ? 300 : 50 ) ) ) );
+		if ( 'cdek' === (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' ) ) {
+			$rows = $this->cdek_pickup_points( $location, $query, $mode, $limit );
+			wp_send_json_success(
+				array(
+					'points' => array_map( array( $this, 'pickup_point_payload' ), $rows ),
+				)
+			);
+		}
 		$postcode = preg_replace( '/\D+/', '', (string) ( $location['postal_code'] ?? $location['postcode'] ?? '' ) ) ?? '';
 		if ( 'location' === $mode ) {
 			$rows = $this->pickup_rows_for_location( $location, $limit, $postcode );
@@ -360,6 +371,8 @@ final class OrderDeliveryRecalculationAdminController {
 			'gar_id',
 			'gar_object_id',
 			'country_code',
+			'city_code',
+			'cdek_city_code',
 			'region_name',
 			'region_type',
 			'region_code',
@@ -418,12 +431,14 @@ final class OrderDeliveryRecalculationAdminController {
 	 */
 	private function pickup_point_payload( array $row ): array {
 		$point_code = (string) ( $row['point_code'] ?? '' );
-		$postcode = (string) ( $row['postcode'] ?? $row['postal_code'] ?? '' );
-		$address = (string) ( $row['address'] ?? '' );
+		$postcode = (string) ( $row['point_postcode'] ?? $row['postcode'] ?? $row['postal_code'] ?? '' );
+		$address = (string) ( $row['point_address'] ?? $row['address'] ?? '' );
 		return array(
+			'id' => (string) ( $row['id'] ?? ( (string) ( $row['carrier_key'] ?? '' ) === 'cdek' ? 'cdek:' . $point_code : '' ) ),
+			'carrier_key' => (string) ( $row['carrier_key'] ?? ( (string) ( $row['carrier'] ?? '' ) === 'cdek' ? 'cdek' : 'russian_post_domestic' ) ),
 			'point_code' => $point_code,
 			'point_type' => (string) ( $row['point_type'] ?? 'OPS' ),
-			'point_name' => (string) ( $row['name'] ?? $postcode ),
+			'point_name' => (string) ( $row['point_name'] ?? $row['name'] ?? $postcode ),
 			'point_address' => $address,
 			'point_postcode' => $postcode,
 			'postcode' => $postcode,
@@ -432,8 +447,57 @@ final class OrderDeliveryRecalculationAdminController {
 			'address' => $address,
 			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
 			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
+			'work_time' => (string) ( $row['work_time'] ?? '' ),
+			'raw_sanitized' => is_array( $row['raw'] ?? null ) ? $row['raw'] : array(),
+			'cdek_code' => (string) ( $row['cdek_code'] ?? '' ),
+			'cdek_uuid' => (string) ( $row['cdek_uuid'] ?? '' ),
+			'cdek_type' => (string) ( $row['cdek_type'] ?? '' ),
+			'cdek_owner_code' => (string) ( $row['cdek_owner_code'] ?? '' ),
+			'cdek_nearest_station' => (string) ( $row['cdek_nearest_station'] ?? '' ),
+			'cdek_note' => (string) ( $row['cdek_note'] ?? '' ),
 			'point_raw' => $row,
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $location
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function cdek_pickup_points( array $location, string $query, string $mode, int $limit ): array {
+		if ( ! $this->cdek_points instanceof CdekDeliveryPointService ) {
+			return array();
+		}
+		$points = $this->cdek_points->pointsForLocation( $location );
+		if ( 'search' === $mode && '' !== $query ) {
+			$needle = $this->normalize_search_text( $query );
+			$points = array_values(
+				array_filter(
+					$points,
+					fn( array $point ): bool => str_contains(
+						$this->normalize_search_text(
+							implode(
+								' ',
+								array(
+									(string) ( $point['point_code'] ?? '' ),
+									(string) ( $point['point_name'] ?? '' ),
+									(string) ( $point['point_address'] ?? '' ),
+									(string) ( $point['point_postcode'] ?? '' ),
+								)
+							)
+						),
+						$needle
+					)
+				)
+			);
+		}
+
+		return array_slice( $points, 0, $limit );
+	}
+
+	private function normalize_search_text( string $value ): string {
+		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
+
+		return trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
 	}
 
 	/**

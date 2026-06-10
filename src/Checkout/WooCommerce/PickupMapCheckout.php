@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
-use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Core\PluginEnvironment;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 
@@ -30,7 +30,7 @@ final class PickupMapCheckout {
 		if ( function_exists( 'is_checkout' ) && ! is_checkout() ) {
 			return;
 		}
-		if ( ! $this->has_domestic_pickup_rate() ) {
+		if ( ! $this->has_pickup_rate() ) {
 			return;
 		}
 
@@ -60,8 +60,8 @@ final class PickupMapCheckout {
 				array(
 					'restUrl'          => function_exists( 'rest_url' ) ? rest_url( 'wdc/v1/' ) : '/wp-json/wdc/v1/',
 					'nonce'            => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( 'wp_rest' ) : '',
-					'carrier'          => RussianPostDomesticSettings::CARRIER_KEY,
-					'shippingMethodId' => RussianPostDomesticSettings::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP ),
+					'carrier'          => $this->first_pickup_carrier(),
+					'shippingMethodId' => $this->first_pickup_rate_id(),
 					'initialContext'   => $this->initial_context(),
 					'mapProvider'      => $provider,
 					'pickupPointTypes' => $this->pickup_point_types(),
@@ -91,11 +91,10 @@ final class PickupMapCheckout {
 		}
 	}
 
-	private function has_domestic_pickup_rate(): bool {
+	private function has_pickup_rate(): bool {
 		foreach ( $this->session_manager->rates() as $rate ) {
 			if (
-				RussianPostDomesticSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? '' )
-				&& \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' )
+				DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' )
 				&& ! empty( $rate['requires_pickup_point'] )
 			) {
 				return true;
@@ -105,11 +104,39 @@ final class PickupMapCheckout {
 		return false;
 	}
 
+	private function first_pickup_carrier(): string {
+		foreach ( $this->session_manager->rates() as $rate ) {
+			if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) && ! empty( $rate['requires_pickup_point'] ) ) {
+				return (string) ( $rate['carrier_key'] ?? '' );
+			}
+		}
+
+		return '';
+	}
+
+	private function first_pickup_rate_id(): string {
+		foreach ( $this->session_manager->rates() as $rate ) {
+			if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) && ! empty( $rate['requires_pickup_point'] ) ) {
+				return (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' );
+			}
+		}
+
+		return '';
+	}
+
 	/**
 	 * @return array<string,mixed>
 	 */
 	private function initial_context(): array {
 		$context = $this->session_manager->city_context();
+		$rate_location = $this->first_pickup_rate_location();
+		if ( array() !== $rate_location ) {
+			foreach ( $rate_location as $key => $value ) {
+				if ( ! array_key_exists( $key, $context ) || '' === (string) $context[ $key ] || null === $context[ $key ] ) {
+					$context[ $key ] = $value;
+				}
+			}
+		}
 		$selected_city = $this->session_manager->selected_city();
 		if ( array() !== $selected_city ) {
 			foreach ( $selected_city as $key => $value ) {
@@ -136,11 +163,35 @@ final class PickupMapCheckout {
 				'lng'   => $lng,
 				'query' => $this->initial_query( $context ),
 				'location_id' => $context['location_id'] ?? $context['id'] ?? null,
+				'city_code' => $context['city_code'] ?? $context['cdek_city_code'] ?? null,
+				'cdek_city_code' => $context['cdek_city_code'] ?? $context['city_code'] ?? null,
+				'city_name' => $context['city_name'] ?? $context['settlement_name'] ?? $context['place_name'] ?? null,
+				'region_name' => $context['region_name'] ?? null,
+				'postcode' => $context['postcode'] ?? $context['postal_code'] ?? null,
 				'country_code' => $context['country_code'] ?? 'RU',
 				'selectedPoint' => $this->selected_point_context(),
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value
 		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function first_pickup_rate_location(): array {
+		foreach ( $this->session_manager->rates() as $rate ) {
+			if ( DeliveryType::PICKUP !== (string) ( $rate['delivery_type'] ?? '' ) || empty( $rate['requires_pickup_point'] ) ) {
+				continue;
+			}
+
+			$meta = is_array( $rate['meta'] ?? null ) ? $rate['meta'] : array();
+			$location = is_array( $meta['location'] ?? null ) ? $meta['location'] : array();
+			if ( array() !== $location ) {
+				return $location;
+			}
+		}
+
+		return array();
 	}
 
 	/**

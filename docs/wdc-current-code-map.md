@@ -2,9 +2,10 @@
 
 ## CDEK Tariff Calculation 0.44.0
 
-- `src/Carriers/Runtime/CdekCarrier.php` is the runtime adapter for service/carrier key `cdek`. It builds `POST /v2/calculator/tarifflist` payloads, maps tariff candidates to `DeliveryRate`, classifies CDEK `delivery_mode`, and stores safe API/location/package meta.
+- `src/Carriers/Runtime/CdekCarrier.php` is the runtime adapter for service/carrier key `cdek`. It builds `POST /v2/calculator/tarifflist` payloads, maps tariff candidates to `DeliveryRate`, classifies CDEK `delivery_mode`, marks pickup rates as requiring a pickup point, and stores safe API/location/package meta.
 - `src/Carriers/Cdek/CdekLocationResolver.php` resolves destination CDEK city code through `/v2/location/cities` and caches confident matches in transients.
-- `src/Carriers/Cdek/Api/CdekApiClient.php` now supports authorized JSON runtime requests in addition to OAuth connection checks.
+- `src/Carriers/Cdek/Api/CdekApiClient.php` now supports authorized JSON runtime requests in addition to OAuth connection checks, including `GET /v2/deliverypoints`.
+- `src/Pickup/Cdek/CdekDeliveryPointService.php` loads CDEK pickup points for a CDEK city code, normalizes them for the shared picker and caches the result by environment/city/type.
 - `src/Checkout/Runtime/CheckoutOrchestrator.php` runs `cdek` services separately for pickup and courier when the common delivery service is active.
 - `src/Checkout/WooCommerce/NewShippingMethod.php` and `CheckoutRateRenderer.php` reuse the existing grouped tariff selector for generic tariff candidates, including CDEK.
 - `src/Orders/Application/OrderDeliveryRecalculationService.php` groups CDEK tariff candidates for admin recalculation preview without requiring a CDEK pickup point yet.
@@ -38,7 +39,7 @@ The order-admin delivery recalculation stage is complete and HPOS-audited. The f
 - `src/Domain/Status/DeliveryStatus.php` defines the carrier-neutral shipment status model: `created_in_carrier`, `in_transit`, `ready_for_pickup`, `handed_to_courier`, `delivered`, `returning_to_sender`, `returned_to_sender`, `cancelled`, `rejected`, `unknown`, with Russian UI labels.
 - `src/Carriers/RussianPost/Tracking/RussianPostTrackingApiClient.php` calls Russian Post Tracking API `getOperationHistory` over SOAP 1.2 with `wp_remote_post`. It uses only `russian_post_tracking_login` and `russian_post_tracking_password_encrypted` from the unified domestic service settings.
 - `src/Carriers/RussianPost/Otpravka/RussianPostOtpravkaApiClient.php` also supports Russian Post backlog deletion through `DELETE /1.0/backlog` and manual shipment lookup through `GET /1.0/backlog/search?query={barcode}` plus fallback `GET /1.0/shipment/search?query={barcode}`.
-- `src/Carriers/Cdek` contains the CDEK foundation and tariff calculation support: settings, separate encrypted test/production credentials, active-environment API base URL selection, OAuth token service/cache, API response/exception objects, WP HTTP adapter, destination city resolver and API client methods for `tarifflist`/locations. Pickup points, orders, statuses, print forms and webhooks are still not implemented.
+- `src/Carriers/Cdek` contains the CDEK foundation and tariff calculation support: settings, separate encrypted test/production credentials, active-environment API base URL selection, OAuth token service/cache, API response/exception objects, WP HTTP adapter, destination city resolver and API client methods for `tarifflist`, locations and delivery points. Orders, statuses, print forms and webhooks are still not implemented.
 - `src/Shipments/Application/ShipmentBacklogService.php` owns cancel/manual-attach rules. Cancel uses `backlog_order_id` and is allowed only for operation `28 / Присвоение идентификатора`; manual attach searches by barcode in backlog first, falls back to shipment search, saves `backlog_order_id` when returned, then attempts the first Tracking API refresh.
 - `src/Shipments/RussianPost/RussianPostTrackingStatusMapper.php` contains the code-fixed mapping generated from `status pocha.xlsx`. Unknown operation/attribute pairs map to `unknown` / `не определён`.
 - The 0.36.1 mapping correction maps selected pickup operations including `8:2`, `12:1..12:31`, and `42:1..42:30` to `ready_for_pickup`, and maps `8:15` plus `8:18` to `handed_to_courier`.
@@ -192,6 +193,7 @@ The order-admin delivery recalculation stage is complete and HPOS-audited. The f
 - поиск адресов для ПВЗ;
 - REST controllers для directory/search/detail ПВЗ и checkout pickup selection state;
 - `RussianPostPickupPointRepository::search_admin_pickup_rows()` searches local Russian Post pickup rows by postcode, city and address for the shipment modal;
+- `CdekDeliveryPointService` provides live CDEK pickup point data from `GET /v2/deliverypoints` to the shared checkout/admin picker infrastructure;
 - admin summary page для ПВЗ.
 
 ## Orders

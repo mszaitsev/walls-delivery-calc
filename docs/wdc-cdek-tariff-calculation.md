@@ -1,6 +1,8 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.44.5.
+Version: 0.45.0.
+
+0.45.0 update: CDEK pickup tariffs now require pickup point selection and are connected to the shared checkout/admin pickup map. Pickup point loading itself is documented in `docs/wdc-cdek-pickup-points.md`.
 
 This stage connects CDEK as a checkout/runtime carrier for tariff preview only. It uses CDEK API v2 `POST /v2/calculator/tarifflist` to fetch available tariffs and converts supported pickup/courier tariffs into WDC `DeliveryRate` objects.
 
@@ -46,16 +48,13 @@ This stage connects CDEK as a checkout/runtime carrier for tariff preview only. 
 
 ## Not Implemented
 
-- CDEK pickup points from `GET /v2/deliverypoints`.
-- CDEK pickup map.
-- CDEK pickup point selection/persistence.
 - CDEK order/shipment creation.
 - CDEK tracking/statuses.
 - CDEK webhooks.
 - CDEK print forms.
 - COD, declared value, and insurance-specific CDEK order logic.
 
-The next planned stage is `feature/cdek-pickup-points`.
+The next planned stage is `feature/cdek-order-creation`.
 
 ## Runtime Visibility
 

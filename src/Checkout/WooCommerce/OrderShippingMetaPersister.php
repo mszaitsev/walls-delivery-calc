@@ -191,12 +191,18 @@ final class OrderShippingMetaPersister {
 		}
 
 		return array(
+			'carrier_key'   => (string) ( $pickup['carrier_key'] ?? '' ),
 			'point_code'    => (string) ( $pickup['point_code'] ?? '' ),
 			'point_type'    => (string) ( $pickup['point_type'] ?? '' ),
 			'point_name'    => (string) ( $pickup['point_name'] ?? '' ),
 			'point_address' => (string) ( $pickup['point_address'] ?? '' ),
 			'point_postcode' => (string) ( $pickup['point_postcode'] ?? '' ),
-			'point_raw'     => $pickup,
+			'city_name'     => (string) ( $pickup['city_name'] ?? $pickup['snapshot']['city'] ?? '' ),
+			'region_name'   => (string) ( $pickup['region_name'] ?? $pickup['snapshot']['region'] ?? '' ),
+			'latitude'      => $pickup['lat'] ?? $pickup['snapshot']['lat'] ?? null,
+			'longitude'     => $pickup['lng'] ?? $pickup['snapshot']['lng'] ?? null,
+			'work_time'     => (string) ( $pickup['point_work_time'] ?? $pickup['snapshot']['work_time'] ?? '' ),
+			'raw_sanitized' => is_array( $pickup['snapshot']['raw_sanitized'] ?? null ) ? $pickup['snapshot']['raw_sanitized'] : ( is_array( $pickup['snapshot']['raw'] ?? null ) ? $pickup['snapshot']['raw'] : array() ),
 		);
 	}
 
@@ -600,7 +606,9 @@ final class OrderShippingMetaPersister {
 	private function set_pickup_shipping_address( object $order, array $pickup, mixed $address_result ): void {
 		$address = is_object( $address_result ) && isset( $address_result->address ) ? $address_result->address : null;
 		$this->call_order_setter( $order, 'set_shipping_address_1', (string) ( $pickup['point_address'] ?? '' ) );
-		$this->call_order_setter( $order, 'set_shipping_city', is_object( $address ) ? (string) ( $address->settlement ?: $address->city ) : '' );
+		$this->call_order_setter( $order, 'set_shipping_address_2', '', true );
+		$this->call_order_setter( $order, 'set_shipping_state', (string) ( $pickup['region_name'] ?? $pickup['snapshot']['region'] ?? ( is_object( $address ) ? $address->region_name : '' ) ) );
+		$this->call_order_setter( $order, 'set_shipping_city', (string) ( $pickup['city_name'] ?? $pickup['snapshot']['city'] ?? ( is_object( $address ) ? (string) ( $address->settlement ?: $address->city ) : '' ) ) );
 		$postcode = (string) ( $pickup['point_postcode'] ?? '' );
 		if ( '' === $postcode && is_object( $address ) ) {
 			$postcode = (string) $address->postcode;
@@ -609,8 +617,8 @@ final class OrderShippingMetaPersister {
 		$this->call_order_setter( $order, 'set_shipping_country', is_object( $address ) && '' !== (string) $address->country_code ? (string) $address->country_code : 'RU' );
 	}
 
-	private function call_order_setter( object $order, string $method, string $value ): void {
-		if ( '' !== $value && method_exists( $order, $method ) ) {
+	private function call_order_setter( object $order, string $method, string $value, bool $allow_empty = false ): void {
+		if ( ( '' !== $value || $allow_empty ) && method_exists( $order, $method ) ) {
 			$order->{$method}( $value );
 		}
 	}

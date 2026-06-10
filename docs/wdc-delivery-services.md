@@ -24,7 +24,7 @@ If an administrator leaves a title empty, CDEK falls back to the defaults above.
 
 CDEK `delivery_mode` is classified by the destination side of the mode: door destinations are `courier`, warehouse/PVZ destinations are `pickup`. Numeric modes follow the CDEK docs: `1` door-door -> courier, `2` door-warehouse -> pickup, `3` warehouse-door -> courier, `4` warehouse-warehouse -> pickup.
 
-The current stage does not implement CDEK pickup points, pickup point selection, CDEK orders/shipments, statuses, webhooks or print forms. The next stage is `feature/cdek-pickup-points`.
+CDEK pickup points and pickup selection were added in 0.45.0 through `GET /v2/deliverypoints`. The current stage still does not implement CDEK orders/shipments, statuses, webhooks or print forms. The next stage is `feature/cdek-order-creation`.
 
 ## CDEK Foundation 0.43.1
 
@@ -39,7 +39,7 @@ The `Данные для входа` admin tab stores:
 - encrypted production Secure password in `cdek_production_secure_password_encrypted`
 - last connection check diagnostics
 
-The active environment selects the matching base URL and credentials. Switching environments does not copy or clear credentials for the other environment. CDEK service enablement is controlled only by the common `Основное` tab. The foundation includes OAuth for `POST /v2/oauth/token`, token cache, and a protected "Проверить подключение" action. Tariff calculation was added in 0.44.0; pickup points, orders/shipments, statuses, print documents and webhooks are still not implemented. See `docs/wdc-cdek-foundation.md` and `docs/wdc-cdek-tariff-calculation.md`.
+The active environment selects the matching base URL and credentials. Switching environments does not copy or clear credentials for the other environment. CDEK service enablement is controlled only by the common `Основное` tab. The foundation includes OAuth for `POST /v2/oauth/token`, token cache, and a protected "Проверить подключение" action. Tariff calculation was added in 0.44.0; pickup points via `GET /v2/deliverypoints` were added in 0.45.0. Orders/shipments, statuses, print documents and webhooks are still not implemented. See `docs/wdc-cdek-foundation.md`, `docs/wdc-cdek-tariff-calculation.md`, and `docs/wdc-cdek-pickup-points.md`.
 
 ## Russian Post Tracking Statuses 0.36.2
 

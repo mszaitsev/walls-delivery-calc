@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Pickup\Rest;
 
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
+use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\Search\PickupAddressSearchService;
 
 defined( 'ABSPATH' ) || exit;
@@ -15,7 +16,8 @@ final class PickupPointsRestController {
 	public function __construct(
 		private RussianPostPickupPointRepository $repository,
 		private ?RussianPostPickupPointTypeSettings $type_settings = null,
-		private ?PickupAddressSearchService $address_search = null
+		private ?PickupAddressSearchService $address_search = null,
+		private ?CdekDeliveryPointService $cdek_points = null
 	) {
 	}
 
@@ -79,6 +81,9 @@ final class PickupPointsRestController {
 
 	public function points( mixed $request ): mixed {
 		$carrier = $this->carrier( $request );
+		if ( 'cdek' === $carrier ) {
+			return $this->response( $this->cdek_points( $request ) );
+		}
 		if ( 'russian_post' !== $carrier ) {
 			return $this->response( array() );
 		}
@@ -145,6 +150,9 @@ final class PickupPointsRestController {
 	public function search( mixed $request ): mixed {
 		$query = trim( $this->param( $request, 'q' ) );
 		$carrier = $this->carrier( $request );
+		if ( 'cdek' === $carrier ) {
+			return $this->response( $this->filter_cdek_points( $this->cdek_points( $request ), $query ) );
+		}
 		if ( 'russian_post' !== $carrier ) {
 			return $this->response( array() );
 		}
@@ -167,6 +175,92 @@ final class PickupPointsRestController {
 		);
 
 		return $this->response( array_map( fn( array $row ): array => $this->summary( $row ), $rows ) );
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function cdek_points( mixed $request ): array {
+		if ( ! $this->cdek_points instanceof CdekDeliveryPointService ) {
+			return array();
+		}
+		$city_code = (int) $this->param( $request, 'city_code' );
+		$options = array(
+			'type' => $this->param( $request, 'type' ) ?: 'ALL',
+			'refresh' => in_array( strtolower( $this->param( $request, 'refresh' ) ), array( '1', 'true', 'yes' ), true ),
+		);
+		if ( $city_code > 0 ) {
+			return array_map( array( $this, 'cdek_summary' ), $this->cdek_points->pointsByCityCode( $city_code, $options ) );
+		}
+
+		return array_map( array( $this, 'cdek_summary' ), $this->cdek_points->pointsForLocation( $this->location_context( $request ), $options ) );
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $points
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function filter_cdek_points( array $points, string $query ): array {
+		if ( '' === $query ) {
+			return $points;
+		}
+		$query = $this->normalize_search_text( $query );
+
+		return array_values(
+			array_filter(
+				$points,
+				fn( array $point ): bool => str_contains(
+					$this->normalize_search_text(
+						implode(
+							' ',
+							array(
+								(string) ( $point['point_code'] ?? '' ),
+								(string) ( $point['point_name'] ?? '' ),
+								(string) ( $point['point_address'] ?? $point['address'] ?? '' ),
+								(string) ( $point['point_postcode'] ?? $point['postal_code'] ?? '' ),
+							)
+						)
+					),
+					$query
+				)
+			)
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $point
+	 * @return array<string,mixed>
+	 */
+	private function cdek_summary( array $point ): array {
+		return array(
+			'id' => (string) ( $point['id'] ?? ( 'cdek:' . (string) ( $point['point_code'] ?? '' ) ) ),
+			'carrier' => 'cdek',
+			'carrier_key' => 'cdek',
+			'point_code' => (string) ( $point['point_code'] ?? '' ),
+			'point_type' => (string) ( $point['point_type'] ?? '' ),
+			'title' => (string) ( $point['point_name'] ?? '' ),
+			'point_name' => (string) ( $point['point_name'] ?? '' ),
+			'address' => (string) ( $point['point_address'] ?? '' ),
+			'point_address' => (string) ( $point['point_address'] ?? '' ),
+			'city' => (string) ( $point['city_name'] ?? '' ),
+			'city_name' => (string) ( $point['city_name'] ?? '' ),
+			'region' => (string) ( $point['region_name'] ?? '' ),
+			'region_name' => (string) ( $point['region_name'] ?? '' ),
+			'postal_code' => (string) ( $point['point_postcode'] ?? '' ),
+			'postcode' => (string) ( $point['point_postcode'] ?? '' ),
+			'point_postcode' => (string) ( $point['point_postcode'] ?? '' ),
+			'lat' => $point['lat'] ?? null,
+			'lng' => $point['lng'] ?? null,
+			'work_time' => (string) ( $point['work_time'] ?? '' ),
+			'description' => (string) ( $point['description'] ?? '' ),
+			'raw' => is_array( $point['raw'] ?? null ) ? $point['raw'] : array(),
+			'cdek_code' => (string) ( $point['cdek_code'] ?? '' ),
+			'cdek_uuid' => (string) ( $point['cdek_uuid'] ?? '' ),
+			'cdek_type' => (string) ( $point['cdek_type'] ?? '' ),
+			'cdek_owner_code' => (string) ( $point['cdek_owner_code'] ?? '' ),
+			'cdek_nearest_station' => (string) ( $point['cdek_nearest_station'] ?? '' ),
+			'cdek_note' => (string) ( $point['cdek_note'] ?? '' ),
+		);
 	}
 
 	public function detail( mixed $request ): mixed {
@@ -273,6 +367,28 @@ final class PickupPointsRestController {
 		$carrier = sanitize_key( wp_unslash( $this->param( $request, 'carrier' ) ) );
 
 		return '' !== $carrier ? $carrier : 'russian_post';
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function location_context( mixed $request ): array {
+		$keys = array( 'city_code', 'cdek_city_code', 'country_code', 'region_name', 'state_value', 'city_name', 'city_value', 'settlement_name', 'place_name', 'display_name', 'postal_code', 'postcode', 'fias_id', 'city_fias_id', 'gar_id', 'gar_object_id' );
+		$context = array();
+		foreach ( $keys as $key ) {
+			$value = $this->param( $request, $key );
+			if ( '' !== $value ) {
+				$context[ $key ] = $value;
+			}
+		}
+
+		return $context;
+	}
+
+	private function normalize_search_text( string $value ): string {
+		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
+
+		return trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
 	}
 
 	private function limit( mixed $request, int $default, int $max ): int {

@@ -90,7 +90,7 @@
 
 		function renderPointPopup(point, selected) {
 			var rows = [];
-			var title = ['Почта России', point.postal_code || point.postcode || point.point_code || ''].filter(Boolean).join(' ');
+			var title = [carrierTitle(point), point.postal_code || point.postcode || point.point_code || ''].filter(Boolean).join(' ');
 			if (title) {
 				rows.push('<h3 class="wdc-pickup-popup__title">' + escapeHtml(title) + '</h3>');
 			}
@@ -298,14 +298,14 @@
 			}
 			controller = new AbortController();
 			card.textContent = labels.loading || 'Loading...';
-			window.WDCPickupApi.points(bbox, controller.signal).then(function (points) {
+			window.WDCPickupApi.points(bbox, controller.signal, context).then(function (points) {
 				renderMarkers(points, labels.empty || '');
 				if (options.previewNearest && visiblePoints[0]) {
 					preview(visiblePoints[0], { focus: false, initial: true });
 				}
 			}).catch(function (error) {
 				if (error.name !== 'AbortError') {
-					card.textContent = labels.error || 'Error';
+					card.textContent = context.carrier === 'cdek' || context.carrier_key === 'cdek' ? 'Не удалось загрузить пункты выдачи СДЭК. Попробуйте позже.' : (labels.error || 'Error');
 				}
 			});
 		}
@@ -334,7 +334,7 @@
 			card.textContent = labels.loading || 'Loading...';
 			if (initial) {
 				var initialRequest = window.WDCPickupApi.searchInitial || window.WDCPickupApi.search;
-				return initialRequest(query, controller.signal).then(function (points) {
+				return initialRequest(query, controller.signal, context).then(function (points) {
 					if (points[0] && points[0].lat !== null && points[0].lng !== null) {
 						var point = enrichPoints([points[0]])[0];
 						suppressNextMoveLoad = true;
@@ -351,7 +351,18 @@
 				});
 			}
 			if (!window.WDCPickupApi.addressSearch) {
-				return Promise.resolve();
+				return window.WDCPickupApi.search(query, controller.signal, context).then(function (points) {
+					renderMarkers(points, labels.empty || '');
+				});
+			}
+			if (context.carrier === 'cdek' || context.carrier_key === 'cdek') {
+				return window.WDCPickupApi.search(query, controller.signal, context).then(function (points) {
+					renderMarkers(points, labels.empty || '');
+				}).catch(function (error) {
+					if (error.name !== 'AbortError') {
+						card.textContent = 'Не удалось загрузить пункты выдачи СДЭК. Попробуйте позже.';
+					}
+				});
 			}
 			return window.WDCPickupApi.addressSearch(query, context, controller.signal).then(function (result) {
 				if (result && result.address_search_available === false) {
@@ -667,6 +678,11 @@
 		return 'Выбран: ' + [point.postal_code || point.postcode || '', point.address || ''].filter(Boolean).join(', ');
 	}
 
+	function carrierTitle(point) {
+		var carrier = String((point && (point.carrier_key || point.carrier)) || '').toLowerCase();
+		return carrier === 'cdek' ? 'СДЭК' : 'Почта России';
+	}
+
 	function validPointCoordinates(point) {
 		var lat = parseFloat(point.lat);
 		var lng = parseFloat(point.lng);
@@ -705,6 +721,9 @@
 
 	function pickupPointType(point) {
 		var type = String(point.point_type || point.type || '').toUpperCase();
+		if ((point.carrier_key || point.carrier) === 'cdek') {
+			return type === 'POSTAMAT' || type === 'APS' ? 'APS' : 'PVZ';
+		}
 		return type === 'PVZ' || type === 'APS' ? type : 'OPS';
 	}
 

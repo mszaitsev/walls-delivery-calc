@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.44.9.
+Current plugin version: 0.45.0.
+
+Version 0.45.0 implements CDEK pickup points for checkout and admin order delivery recalculation. WDC uses CDEK API v2 `GET /v2/deliverypoints`, requires a selected pickup point for CDEK pickup rates, saves the selected point in calculation data, and writes the pickup address to the WooCommerce shipping address. CDEK order creation, statuses, webhooks and print forms are still intentionally not implemented; the next stage is `feature/cdek-order-creation`.
 
 Version 0.44.9 hardens the Russian Post courier calculation postcode fill tool on `WDC -> Локации`. Technical request failures now retry up to 5 attempts before counting one error and saving courier technical marker `999999999`; that marker means "technical error, retry later", not "courier delivery unavailable". A reset/new run processes `999999999` marker rows first, then cities, then other settlements. Successful retry overwrites the marker with a real postcode, while a valid "courier unavailable" API response clears the marker and leaves the courier postcode empty.
 

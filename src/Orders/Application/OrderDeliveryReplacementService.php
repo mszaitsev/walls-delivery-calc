@@ -322,11 +322,10 @@ final class OrderDeliveryReplacementService {
 			'set_shipping_postcode' => $location_values['postcode'],
 		);
 		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
-			$pickup_location_values = $this->checkout_shipping_location_values( $location, array() );
 			$values['set_shipping_country'] = 'RU';
-			$values['set_shipping_state'] = '' !== $pickup_location_values['state'] ? $pickup_location_values['state'] : (string) ( $pickup['region_name'] ?? '' );
-			$values['set_shipping_city'] = '' !== $pickup_location_values['city'] ? $pickup_location_values['city'] : (string) ( $pickup['city_name'] ?? '' );
-			$values['set_shipping_postcode'] = (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? $location['postal_code'] ?? $location['postcode'] ?? '' );
+			$values['set_shipping_state'] = (string) ( $pickup['region_name'] ?? $pickup['region'] ?? $location_values['state'] );
+			$values['set_shipping_city'] = (string) ( $pickup['city_name'] ?? $pickup['city'] ?? $location_values['city'] );
+			$values['set_shipping_postcode'] = (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? $location_values['postcode'] );
 			$values['set_shipping_address_1'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
 			$values['set_shipping_address_2'] = '';
 		} elseif ( DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' ) && array() !== $address ) {
@@ -451,12 +450,18 @@ final class OrderDeliveryReplacementService {
 				'fias_id' => (string) ( $location['fias_id'] ?? $address['fias_id'] ?? '' ),
 			),
 			'pickup' => DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ? array(
+				'carrier_key' => (string) ( $pickup['carrier_key'] ?? $rate['carrier_key'] ?? '' ),
 				'point_code' => (string) ( $pickup['point_code'] ?? '' ),
 				'point_type' => (string) ( $pickup['point_type'] ?? '' ),
 				'point_name' => (string) ( $pickup['point_name'] ?? '' ),
 				'point_address' => (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' ),
 				'point_postcode' => (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? '' ),
-				'point_raw' => $pickup,
+				'city_name' => (string) ( $pickup['city_name'] ?? $pickup['city'] ?? '' ),
+				'region_name' => (string) ( $pickup['region_name'] ?? $pickup['region'] ?? '' ),
+				'latitude' => $pickup['lat'] ?? $pickup['latitude'] ?? null,
+				'longitude' => $pickup['lng'] ?? $pickup['longitude'] ?? null,
+				'work_time' => (string) ( $pickup['work_time'] ?? $pickup['point_work_time'] ?? '' ),
+				'raw_sanitized' => is_array( $pickup['raw_sanitized'] ?? null ) ? $pickup['raw_sanitized'] : ( is_array( $pickup['raw'] ?? null ) ? $pickup['raw'] : array() ),
 			) : array(),
 			'package' => $this->calculation_package_data( $rate_meta ),
 			'api' => $this->calculation_api_data( $rate, $rate_meta, $api_base ),

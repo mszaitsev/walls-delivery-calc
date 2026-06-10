@@ -1,5 +1,7 @@
 # Project Status
 
+0.45.0 note: CDEK pickup points are implemented for checkout and admin order delivery recalculation. WDC calls CDEK API v2 `GET /v2/deliverypoints` with `city_code`, `country_code=RU` and `type=ALL`, normalizes the response through `CdekDeliveryPointService`, caches it by environment/city/type, and reuses the existing pickup map/picker. CDEK pickup rates now require a selected pickup point; checkout and admin save persist the selected point into `_wdc_delivery_calculation_data.pickup` and write the pickup address to the WooCommerce shipping address. Visible shipping item meta remains only delivery time. CDEK order creation, statuses, webhooks and print forms remain intentionally not implemented. The next feature branch is `feature/cdek-order-creation`.
+
 0.44.9 note: Russian Post courier calculation postcode fill on `WDC -> Локации` now retries technical request failures up to 5 attempts. If every attempt fails technically, it counts one error and stores courier technical marker `999999999` meaning "technical error, retry later"; this marker is distinct from "courier delivery unavailable". New/reset runs process marker rows first, then cities, then other settlements. A later success overwrites `999999999`, while a valid business response that courier delivery is unavailable clears it.
 
 0.44.8 note: CDEK method titles are normalized across checkout rates, checkout-created shipping items, admin recalculation preview tariff payloads and admin save. Titles use `{Название доставки}, {название rate} - {срок доставки}`, honor custom CDEK pickup/courier names from the service `Основное` tab, and do not duplicate delivery ranges.
@@ -56,12 +58,12 @@
 
 ## Общий статус
 
-- Текущая версия: `0.44.9`.
+- Текущая версия: `0.45.0`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/cdek-tariff-calculation`.
 - Последнее обновление статуса: 2026-06-09.
 - Общая готовность проекта: примерно 74%.
-- Следующий рекомендуемый этап: `feature/cdek-pickup-points`.
+- Следующий рекомендуемый этап: `feature/cdek-order-creation`.
 
 ## Краткое резюме
 
@@ -95,7 +97,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.44.9`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.0`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

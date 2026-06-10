@@ -1,6 +1,8 @@
 # WDC CDEK Carrier Foundation
 
-Version: 0.44.0.
+Version: 0.45.0.
+
+0.45.0 update: CDEK pickup points are implemented in `docs/wdc-cdek-pickup-points.md` through `GET /v2/deliverypoints`. Pickup rates now require selecting a pickup point, and the selected CDEK point is written to the WooCommerce shipping address. CDEK order creation, statuses, webhooks and print forms are still intentionally out of scope.
 
 0.44.0 update: CDEK tariff runtime is now implemented in `docs/wdc-cdek-tariff-calculation.md`. The foundation OAuth/settings layer remains the base for runtime calls, while pickup points, pickup selection, orders/shipments, statuses, print forms and webhooks are still intentionally out of scope.
 
@@ -20,11 +22,11 @@ Implemented:
 - Admin connection check that only obtains an OAuth token.
 - Smoke test coverage with fake HTTP client and no real CDEK requests.
 - Runtime tariff calculation foundation consumers: `CdekApiClient`, `CdekLocationResolver`, and `CdekCarrier`.
+- Pickup point runtime through `GET /v2/deliverypoints`, documented in `docs/wdc-cdek-pickup-points.md`.
 
 Not implemented:
 
 - `POST /v2/calculator/tariff` by fixed tariff code.
-- Pickup points and pickup map from `GET /v2/deliverypoints`.
 - Orders/shipments.
 - Shipment statuses.
 - Print forms.
@@ -111,7 +113,8 @@ CDEK uses asynchronous processing for part of API v2. A response such as `ACCEPT
 Future stages should be separate branches:
 
 - `feature/cdek-tariff-calculation`: checkout tariff calculation through `/v2/calculator/tarifflist` or `/v2/calculator/tariff`.
-- Pickup points: `GET /v2/deliverypoints`.
+- Done in `feature/cdek-pickup-points`: pickup points through `GET /v2/deliverypoints`.
+- Next: `feature/cdek-order-creation`.
 - Orders: `POST /v2/orders`, `GET /v2/orders`, `GET /v2/orders/{uuid}`, `PATCH /v2/orders`, `DELETE /v2/orders/{uuid}`, `POST /v2/orders/{uuid}/refusal`.
 - Print forms: `/v2/print/orders` and `/v2/print/barcodes`.
 - Webhooks: `POST /v2/webhooks`, `GET /v2/webhooks`, `GET /v2/webhooks/{uuid}`, `DELETE /v2/webhooks/{uuid}`.

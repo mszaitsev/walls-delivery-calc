@@ -426,9 +426,8 @@ pickup_smoke_assert( 'Красный проспект, 25' === ( $order->shippin
 pickup_smoke_assert( ! isset( $order->shipping['address_2'] ) || '' === (string) $order->shipping['address_2'], 'Pickup order must not write pickup code to shipping address_2.' );
 pickup_smoke_assert( 'Новосибирск' === ( $order->shipping['city'] ?? '' ), 'Pickup order must write normalized city to shipping city.' );
 pickup_smoke_assert( '630000' === ( $order->shipping['postcode'] ?? '' ), 'Pickup order must write resolved postcode to shipping postcode.' );
-pickup_smoke_assert( 'demo-nsk-001' === ( $shipping_item->meta['Код ПВЗ'] ?? '' ), 'Pickup shipping item meta must save pickup code.' );
-pickup_smoke_assert( isset( $shipping_item->meta['Адрес ПВЗ'], $shipping_item->meta['Комментарий ПВЗ'], $shipping_item->meta['Режим работы ПВЗ'] ), 'Pickup shipping item meta must save visible pickup details.' );
-pickup_smoke_assert( 'Пункт выдачи' === ( $shipping_item->meta['Тип доставки'] ?? '' ), 'Pickup shipping item meta must expose human delivery type.' );
+pickup_smoke_assert( 1 === count( $shipping_item->meta ), 'Pickup shipping item visible meta must contain only delivery time.' );
+pickup_smoke_assert( ! str_contains( (string) wp_json_encode( $shipping_item->meta ), 'demo-nsk-001' ), 'Pickup shipping item visible meta must not expose pickup code.' );
 ob_start();
 ( new OrderDeliveryMetabox() )->render( $order );
 $metabox_html = (string) ob_get_clean();

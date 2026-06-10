@@ -15,7 +15,7 @@
 	var isPlacingOrder = false;
 	var placeOrderGuardTimer = 0;
 	var placeOrderResetGuardUntil = 0;
-	var russianPostPickupFamily = 'russian_post_domestic:pickup';
+	var pickupFamilies = ['russian_post_domestic:pickup', 'cdek:pickup'];
 	var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function init(container) {
@@ -44,7 +44,7 @@
 			var search = modal.root.querySelector('[data-wdc-search]');
 			var searchSubmit = modal.root.querySelector('[data-wdc-search-submit]');
 			var geolocationButton = modal.root.querySelector('[data-wdc-geolocation]');
-			var context = withPrefetch(resolvedContext);
+			var context = withPrefetch(withCarrierContext(resolvedContext, method));
 			debugDeep('openModal context', context);
 			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
 			var savingPoint = false;
@@ -79,7 +79,7 @@
 				if (!savingPoint) {
 					setLoading(options.message || 'Сохраняем пункт выдачи...');
 				}
-				return window.WDCPickupApi.save(point.id, shippingMethodId || method).then(function (response) {
+				return window.WDCPickupApi.save(point.id, shippingMethodId || method, pointPayload(point)).then(function (response) {
 					applySelection(container, response.pickup_point || {});
 					close();
 					if (true === options.updateCheckoutAfterSave) {
@@ -140,7 +140,7 @@
 						disableDestinationResetSuppression();
 						return;
 					}
-					window.WDCPickupApi.save(point.id, currentMethod).then(function (response) {
+					window.WDCPickupApi.save(point.id, currentMethod, pointPayload(point)).then(function (response) {
 						boot();
 						var actualContainer = document.querySelector('[data-wdc-pickup-checkout]');
 						var savedPoint = response.pickup_point || {};
@@ -300,8 +300,11 @@
 		var config = window.wdcPickupCheckout || {};
 		var carrier = String(point.carrier || point.carrier_key || config.carrier || '').trim();
 		var rateId = String(point.rate_id || point.shipping_method_id || config.shippingMethodId || '').trim();
-		if (carrier === 'russian_post' || carrier === 'russian_post_domestic' || rateId.indexOf(russianPostPickupFamily) === 0) {
+		if (carrier === 'russian_post' || carrier === 'russian_post_domestic' || rateId.indexOf('russian_post_domestic:pickup') === 0) {
 			return 'Отделение Почты России';
+		}
+		if (carrier === 'cdek' || rateId.indexOf('cdek:pickup') === 0) {
+			return 'Пункт выдачи СДЭК';
 		}
 		return 'Пункт выдачи';
 	}
@@ -366,16 +369,23 @@
 
 	function shippingMethodFamily(value) {
 		var method = normalizeShippingMethod(value);
-		if (method.indexOf(russianPostPickupFamily) === 0) {
-			return russianPostPickupFamily;
+		for (var i = 0; i < pickupFamilies.length; i++) {
+			if (method.indexOf(pickupFamilies[i]) === 0) {
+				return pickupFamilies[i];
+			}
 		}
 
 		return method;
 	}
 
 	function isSamePickupMethodFamily(oldMethod, newMethod) {
-		return shippingMethodFamily(oldMethod) === russianPostPickupFamily
-			&& shippingMethodFamily(newMethod) === russianPostPickupFamily;
+		var oldFamily = shippingMethodFamily(oldMethod);
+		var newFamily = shippingMethodFamily(newMethod);
+		return oldFamily === newFamily && isPickupFamily(oldFamily);
+	}
+
+	function isPickupFamily(family) {
+		return pickupFamilies.indexOf(family) !== -1;
 	}
 
 	function initialContext() {
@@ -384,6 +394,10 @@
 			lat: config.lat || '',
 			lng: config.lng || '',
 			query: config.query || '',
+			city_code: config.city_code || config.cdek_city_code || '',
+			cdek_city_code: config.cdek_city_code || config.city_code || '',
+			city_name: config.city_name || '',
+			region_name: config.region_name || '',
 			selectedPoint: config.selectedPoint || (window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint) || null
 		};
 		var fieldContext = contextFromFields();
@@ -401,6 +415,8 @@
 			query: fieldContext.query || runtimeContext.query || localizedContext.query,
 			postcode: fieldContext.postcode || runtimeContext.postcode || localizedContext.postcode || '',
 			display_name: fieldContext.display_name || runtimeContext.display_name || localizedContext.display_name || '',
+			city_code: fieldContext.city_code || runtimeContext.city_code || localizedContext.city_code || '',
+			cdek_city_code: fieldContext.cdek_city_code || runtimeContext.cdek_city_code || localizedContext.cdek_city_code || '',
 			location_id: fieldContext.location_id || runtimeContext.location_id || localizedContext.location_id || '',
 			fias_id: fieldContext.fias_id || runtimeContext.fias_id || localizedContext.fias_id || '',
 			city_name: fieldContext.city_name || runtimeContext.city_name || localizedContext.city_name || '',
@@ -578,6 +594,9 @@
 			return '';
 		}
 		return [
+			context.carrier || '',
+			context.city_code || '',
+			context.cdek_city_code || '',
 			coordinateKey(context.lat),
 			coordinateKey(context.lng),
 			normalizeText(context.postcode || ''),
@@ -586,6 +605,23 @@
 			normalizeGuid(context.fias_id || ''),
 			normalizeText(context.query || '')
 		].join('|');
+	}
+
+	function withCarrierContext(context, method) {
+		context = Object.assign({}, context || {});
+		var family = shippingMethodFamily(method || activeMethod || currentShippingMethod());
+		if (family === 'cdek:pickup') {
+			context.carrier = 'cdek';
+			context.carrier_key = 'cdek';
+		} else {
+			context.carrier = 'russian_post';
+			context.carrier_key = 'russian_post';
+		}
+		if (!window.wdcPickupCheckout) {
+			window.wdcPickupCheckout = {};
+		}
+		window.wdcPickupCheckout.carrier = context.carrier;
+		return context;
 	}
 
 	function coordinateKey(value) {
@@ -704,6 +740,8 @@
 			lng: context.lng || context.longitude || '',
 			postcode: postcode,
 			display_name: displayName,
+			city_code: context.city_code || context.cdek_city_code || '',
+			cdek_city_code: context.cdek_city_code || context.city_code || '',
 			region_name: context.region_name || '',
 			region_code: context.region_code || '',
 			region_type: context.region_type || '',
@@ -751,6 +789,8 @@
 			lng: detail.lng || '',
 			postcode: postcode,
 			display_name: displayName,
+			city_code: detail.city_code || detail.cdek_city_code || '',
+			cdek_city_code: detail.cdek_city_code || detail.city_code || '',
 			region_name: detail.region_name || '',
 			query: query,
 			country_code: detail.country_code || 'RU',
@@ -775,12 +815,27 @@
 		point = point || {};
 		return {
 			id: point.id || '',
+			carrier: point.carrier || point.carrier_key || '',
+			carrier_key: point.carrier_key || point.carrier || '',
+			point_code: point.point_code || '',
+			point_type: point.point_type || '',
+			point_name: point.point_name || '',
 			location_id: point.location_id || '',
 			postal_code: point.postal_code || point.postcode || '',
 			postcode: point.postcode || point.postal_code || '',
 			city: point.city || point.city_name || '',
 			region: point.region || point.region_name || '',
-			address: point.address || '',
+			address: point.address || point.point_address || '',
+			point_address: point.point_address || point.address || '',
+			point_postcode: point.point_postcode || point.postcode || point.postal_code || '',
+			work_time: point.work_time || '',
+			raw_sanitized: point.raw_sanitized || point.raw || {},
+			cdek_code: point.cdek_code || '',
+			cdek_uuid: point.cdek_uuid || '',
+			cdek_type: point.cdek_type || '',
+			cdek_owner_code: point.cdek_owner_code || '',
+			cdek_nearest_station: point.cdek_nearest_station || '',
+			cdek_note: point.cdek_note || '',
 			fias_location_guid: point.fias_location_guid || point.fias_id || '',
 			lat: point.lat || '',
 			lng: point.lng || ''
@@ -788,6 +843,9 @@
 	}
 
 	function pointMatchesDestinationQuick(point, checkoutContext) {
+		if (point && (point.carrier_key === 'cdek' || point.carrier === 'cdek')) {
+			return true;
+		}
 		var checkoutFias = normalizeGuid(checkoutContext && checkoutContext.fias_id);
 		var pointFias = normalizeGuid(point && (point.fias_location_guid || point.fias_id));
 		if (checkoutFias && pointFias) {
@@ -1057,8 +1115,10 @@
 	}
 
 	function isPickupRateValue(value) {
-		value = String(value || '');
-		return value.indexOf(russianPostPickupFamily) !== -1;
+		value = normalizeShippingMethodValue(value);
+		return pickupFamilies.some(function (family) {
+			return value.indexOf(family) !== -1;
+		});
 	}
 
 	function normalizeShippingMethodValue(value) {
@@ -1103,7 +1163,7 @@
 		if (!hasPickupBlock() || !isPickupMethodActive()) {
 			return;
 		}
-		var context = initialContext();
+		var context = withCarrierContext(initialContext(), currentShippingMethod());
 		if (!context.query && !validCoordinate(context.lat, context.lng)) {
 			return;
 		}
@@ -1119,7 +1179,7 @@
 			prefetchBounds(context, parseFloat(context.lat), parseFloat(context.lng), key, prefetchController.signal);
 			return;
 		}
-		window.WDCPickupApi.searchInitial(context.query, prefetchController.signal).then(function (points) {
+		window.WDCPickupApi.searchInitial(context.query, prefetchController.signal, withCarrierContext(context, currentShippingMethod())).then(function (points) {
 			if (!points[0] || points[0].lat === null || points[0].lng === null) {
 				prefetchCache = { key: key, points: [], context: context };
 				return;
@@ -1129,7 +1189,7 @@
 	}
 
 	function prefetchBounds(context, lat, lng, key, signal) {
-		window.WDCPickupApi.points(bboxAround(lat, lng), signal).then(function (points) {
+		window.WDCPickupApi.points(bboxAround(lat, lng), signal, withCarrierContext(context, currentShippingMethod())).then(function (points) {
 			prefetchCache = {
 				key: key,
 				points: points,
@@ -1172,13 +1232,13 @@
 
 	function isPickupMethodActive() {
 		var method = currentShippingMethod();
-		return shippingMethodFamily(method) === russianPostPickupFamily;
+		return isPickupRateValue(method);
 	}
 
 	function toggleForMethod(container) {
 		var method = currentShippingMethod();
 		activeMethod = method || activeMethod;
-		var visible = !method || shippingMethodFamily(method) === russianPostPickupFamily;
+		var visible = !method || isPickupRateValue(method);
 		container.hidden = !visible;
 	}
 
@@ -1206,7 +1266,7 @@
 		if (!pointId || !window.WDCPickupApi || !window.WDCPickupApi.save) {
 			return;
 		}
-		window.WDCPickupApi.save(pointId, method).catch(function () {});
+		window.WDCPickupApi.save(pointId, method, window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint).catch(function () {});
 	}
 
 	function beginPlaceOrder() {
@@ -1243,7 +1303,7 @@
 
 	function restoreSelectedPickupUi() {
 		var selected = window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint;
-		if (!selected || !selected.point_code || shippingMethodFamily(currentShippingMethod()) !== russianPostPickupFamily) {
+		if (!selected || !selected.point_code || !isPickupRateValue(currentShippingMethod())) {
 			return;
 		}
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
@@ -1283,7 +1343,7 @@
 				return;
 			}
 			activeMethod = nextMethod;
-			if (!isPickupResetGuarded() && previousFamily === russianPostPickupFamily && nextFamily !== russianPostPickupFamily) {
+			if (!isPickupResetGuarded() && isPickupFamily(previousFamily) && previousFamily !== nextFamily) {
 				resetSelection('method_family_changed');
 			}
 			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);

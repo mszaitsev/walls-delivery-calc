@@ -50,11 +50,7 @@ final class CheckoutDeliveryTypeSelector {
 
 		$rate_id = (string) ( $meta['rate_id'] ?? $this->method_id( $method ) );
 		if ( ! empty( $meta['requires_pickup_point'] ) && ! $this->skip_pickup_selection( $meta ) ) {
-			if ( RussianPostDomesticSettings::CARRIER_KEY === (string) ( $meta['carrier_key'] ?? '' ) && \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP === (string) ( $meta['delivery_type'] ?? '' ) ) {
-				$this->render_russian_post_pickup_map_selector( $rate_id );
-				return;
-			}
-			$this->render_pickup_selector( (string) $meta['carrier_key'], $rate_id );
+			$this->render_pickup_map_selector( (string) $meta['carrier_key'], $rate_id );
 		}
 	}
 
@@ -100,13 +96,14 @@ final class CheckoutDeliveryTypeSelector {
 		echo '</div>';
 	}
 
-	private function render_russian_post_pickup_map_selector( string $rate_id ): void {
+	private function render_pickup_map_selector( string $carrier_key, string $rate_id ): void {
 		$selection = $this->session_manager->checkout_pickup_point();
-		$has_selection = array() !== $selection && '' !== trim( (string) ( $selection['point_code'] ?? '' ) );
+		$matches = $this->session_manager->pickup_selection_matches( $carrier_key, $rate_id );
+		$has_selection = $matches && array() !== $selection && '' !== trim( (string) ( $selection['point_code'] ?? '' ) );
 
-		echo '<div class="wdc-rp-pickup-checkout" data-wdc-pickup-checkout data-shipping-method-id="' . esc_attr( $rate_id ) . '">';
+		echo '<div class="wdc-rp-pickup-checkout" data-wdc-pickup-checkout data-shipping-method-id="' . esc_attr( $rate_id ) . '" data-carrier-key="' . esc_attr( $carrier_key ) . '">';
 		echo '<input type="hidden" name="wdc_platform_pickup_rate_id" value="' . esc_attr( $rate_id ) . '">';
-		echo '<input type="hidden" name="wdc_platform_pickup_carrier" value="' . esc_attr( RussianPostDomesticSettings::CARRIER_KEY ) . '">';
+		echo '<input type="hidden" name="wdc_platform_pickup_carrier" value="' . esc_attr( $carrier_key ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_point_id" data-wdc-pickup-point-id value="' . esc_attr( (string) ( $selection['id'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_point_code" data-wdc-pickup-point-code value="' . esc_attr( (string) ( $selection['point_code'] ?? '' ) ) . '">';
 		$empty_button_class = 'button wdc-rp-pickup-checkout__button' . ( $has_selection ? ' wdc-is-hidden' : '' );
@@ -115,7 +112,7 @@ final class CheckoutDeliveryTypeSelector {
 			array_merge(
 				$selection,
 				array(
-					'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+					'carrier_key' => $carrier_key,
 					'rate_id'     => $rate_id,
 				)
 			),

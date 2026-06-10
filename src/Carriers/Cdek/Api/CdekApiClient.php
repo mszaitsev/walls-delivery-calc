@@ -51,6 +51,14 @@ final class CdekApiClient {
 	}
 
 	/**
+	 * @param array<string,mixed> $query
+	 * @return array<string,mixed>
+	 */
+	public function deliveryPoints( array $query ): array {
+		return $this->authorizedJsonRequest( 'GET', '/v2/deliverypoints', array(), $query );
+	}
+
+	/**
 	 * @param array<string,mixed> $payload
 	 * @param array<string,mixed> $query
 	 * @return array<string,mixed>

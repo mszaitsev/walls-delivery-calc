@@ -971,6 +971,7 @@
 		const address = String( point.point_address || point.address || '' );
 		return {
 			id: String( point.id || point.point_code || postcode || address || '' ),
+			carrier_key: String( point.carrier_key || point.carrier || '' ),
 			point_code: String( point.point_code || '' ),
 			point_type: String( point.point_type || 'OPS' ),
 			point_name: String( point.point_name || postcode || point.point_code || '' ),
@@ -983,6 +984,14 @@
 			region_name: String( point.region_name || '' ),
 			lat: Number.isFinite( lat ) ? lat : null,
 			lng: Number.isFinite( lng ) ? lng : null,
+			work_time: String( point.work_time || '' ),
+			raw_sanitized: point.raw_sanitized || point.raw || {},
+			cdek_code: String( point.cdek_code || '' ),
+			cdek_uuid: String( point.cdek_uuid || '' ),
+			cdek_type: String( point.cdek_type || '' ),
+			cdek_owner_code: String( point.cdek_owner_code || '' ),
+			cdek_nearest_station: String( point.cdek_nearest_station || '' ),
+			cdek_note: String( point.cdek_note || '' ),
 			point_raw: point
 		};
 	}
@@ -1092,6 +1101,18 @@
 					status.textContent = 'Введите адрес для поиска.';
 					return;
 				}
+				if ( 'cdek' === String( rate.carrier_key || rate.service_key || '' ) ) {
+					status.textContent = 'Ищем ПВЗ СДЭК...';
+					searchMarker = null;
+					loadPickupPointsForLocation( 'search', value )
+						.then( function () {
+							renderSearchResults( 'search', value, '' );
+						} )
+						.catch( function () {
+							status.textContent = 'Не удалось загрузить пункты выдачи СДЭК. Попробуйте позже.';
+						} );
+					return;
+				}
 				status.textContent = 'Ищем адрес через DaData...';
 				geocodeAddress( box, value )
 					.then( function ( marker ) {
@@ -1134,15 +1155,15 @@
 				} );
 		}
 
-		function loadPickupPointsForLocation() {
+		function loadPickupPointsForLocation( modeOverride, queryOverride ) {
 			const form = new FormData();
 			form.append( 'action', config.pickupSearchAction || 'wdc_order_delivery_recalculate_pickup_search' );
 			form.append( 'nonce', config.nonce || '' );
 			form.append( 'order_id', orderId( box ) );
 			form.append( 'selected_location', JSON.stringify( location ) );
 			form.append( 'selected_rate', JSON.stringify( rate ) );
-			form.append( 'mode', 'location' );
-			form.append( 'query', '' );
+			form.append( 'mode', modeOverride || 'location' );
+			form.append( 'query', queryOverride || '' );
 			form.append( 'limit', '300' );
 			return window.fetch( config.ajaxUrl || window.ajaxurl || '', {
 				method: 'POST',

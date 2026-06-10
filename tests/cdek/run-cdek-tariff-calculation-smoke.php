@@ -475,15 +475,12 @@ cdek_tariff_assert( 350.5 === $pickup_rate->price->get_rubles(), 'CDEK delivery_
 cdek_tariff_assert( '2-4 дня' === (string) $pickup_rate->meta['api_delivery_days_text'], 'CDEK period must be mapped to delivery days text.' );
 cdek_tariff_assert( DeliveryType::PICKUP === $pickup_rate->delivery_type, 'delivery_mode 4 warehouse-warehouse must be pickup.' );
 cdek_tariff_assert( 'СДЭК до пункта выдачи, Посылка склад-склад - 2-4 дня' === $pickup_rate->title, 'CDEK pickup runtime title must include method, tariff and delivery days.' );
-cdek_tariff_assert( false === $pickup_rate->requires_pickup_point, 'CDEK pickup point selection is intentionally not required yet.' );
+cdek_tariff_assert( true === $pickup_rate->requires_pickup_point, 'CDEK pickup rate must require pickup point selection.' );
 $location_log = cdek_tariff_find_log( 'CDEK location resolved.' );
 cdek_tariff_assert( true === (bool) ( $location_log['context']['success'] ?? false ), 'CDEK location resolve result must be logged.' );
 cdek_tariff_assert( 270 === (int) ( $location_log['context']['city_code'] ?? 0 ), 'CDEK location resolve log must include city_code.' );
 $tarifflist_log = cdek_tariff_find_log( 'CDEK tarifflist succeeded.' );
-cdek_tariff_assert( 200 === (int) ( $tarifflist_log['context']['http_code'] ?? 0 ), 'CDEK successful tarifflist log must include HTTP status.' );
-cdek_tariff_assert( 3 === (int) ( $tarifflist_log['context']['tariff_codes_count'] ?? 0 ), 'CDEK successful tarifflist log must include tariff_codes count.' );
-cdek_tariff_assert( array( 4, 3, 9 ) === array_values( $tarifflist_log['context']['delivery_mode_values'] ?? array() ), 'CDEK successful tarifflist log must include delivery_mode values.' );
-cdek_tariff_assert( '136' === (string) ( $tarifflist_log['context']['tariffs'][0]['tariff_code'] ?? '' ), 'CDEK successful tarifflist log must include sanitized tariff code.' );
+cdek_tariff_assert( array() === $tarifflist_log, 'CDEK successful tarifflist calls must not emit routine debug logs.' );
 $filter_log = cdek_tariff_find_log( 'CDEK tariff filter completed.' );
 cdek_tariff_assert( DeliveryType::PICKUP === (string) ( $filter_log['context']['requested_delivery_type'] ?? '' ), 'CDEK filter log must include requested delivery type.' );
 cdek_tariff_assert( 1 === (int) ( $filter_log['context']['matched_rates_count'] ?? 0 ), 'CDEK filter log must include matched rates count.' );
