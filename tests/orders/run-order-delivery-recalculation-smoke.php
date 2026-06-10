@@ -867,7 +867,7 @@ $cdek_admin_rate = array(
 	'carrier_key' => 'cdek',
 	'service_key' => 'cdek',
 	'service_title' => 'СДЭК',
-	'label' => 'СДЭК курьер, Посылка склад-дверь - 10-14 дней',
+	'label' => 'СДЭК дверь тест',
 	'delivery_type' => 'courier',
 	'delivery_comment' => '10-14 дней',
 	'planned_delivery_comment' => '10-14 дней',
@@ -906,7 +906,8 @@ $cdek_admin_result = $replacement->save(
 	)
 );
 recalc_smoke_assert( true === $cdek_admin_result['success'], 'CDEK admin save must succeed for courier rate.' );
-recalc_smoke_assert( 'СДЭК курьер, Посылка склад-дверь - 10-14 дней' === (string) ( $cdek_admin_order->shipping_items['method_title'] ?? '' ), 'CDEK admin save must keep method title with tariff and delivery text.' );
+recalc_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь - 10-14 дней' === (string) ( $cdek_admin_order->shipping_items['method_title'] ?? '' ), 'CDEK admin save must build method title with custom method, tariff and delivery text.' );
+recalc_smoke_assert( 1 === substr_count( (string) ( $cdek_admin_order->shipping_items['method_title'] ?? '' ), '10-14 дней' ), 'CDEK admin save method title must not duplicate delivery text.' );
 recalc_smoke_assert( array( 'Срок доставки' => '10-14 дней' ) === ( $cdek_admin_order->shipping_items['meta'] ?? array() ), 'CDEK admin replacement visible meta must contain only delivery time.' );
 foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация' ) as $forbidden_meta_key ) {
 	recalc_smoke_assert( ! array_key_exists( $forbidden_meta_key, $cdek_admin_order->shipping_items['meta'] ?? array() ), 'CDEK admin replacement visible meta must not contain technical key: ' . $forbidden_meta_key );
@@ -916,6 +917,26 @@ recalc_smoke_assert( isset( $cdek_admin_order->meta['_wdc_platform_rate_meta'] )
 recalc_smoke_assert( 520.0 === (float) ( $cdek_admin_calc['api']['api_base_price_rub'] ?? 0 ) && 650.0 === (float) ( $cdek_admin_calc['result']['final_price_rub'] ?? 0 ), 'CDEK admin calculation data must preserve API base and final prices.' );
 recalc_smoke_assert( 900 === (int) ( $cdek_admin_calc['package']['products_weight_g'] ?? 0 ) && 300 === (int) ( $cdek_admin_calc['package']['packaging_weight_g'] ?? 0 ) && 1200 === (int) ( $cdek_admin_calc['package']['final_weight_g'] ?? 0 ), 'CDEK admin calculation data must preserve package weights.' );
 recalc_smoke_assert( array( 'cdek-rule' ) === ( $cdek_admin_calc['rules']['applied_rules'] ?? null ), 'CDEK admin calculation data must preserve rules data.' );
+
+$cdek_no_days_rate = $cdek_admin_rate;
+$cdek_no_days_rate['rate_id'] = 'cdek:courier:no-days';
+$cdek_no_days_rate['id'] = 'cdek:courier:no-days';
+$cdek_no_days_rate['delivery_comment'] = '';
+$cdek_no_days_rate['planned_delivery_comment'] = '';
+$cdek_no_days_order = new WdcRecalcOrder( 119, array() );
+$cdek_no_days_order->shipping_items = array();
+$cdek_no_days_result = $replacement->save(
+	$cdek_no_days_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $cdek_no_days_rate,
+		'selected_tariff' => array(),
+		'normalized_shipping_address' => $normalized_address,
+	)
+);
+recalc_smoke_assert( true === $cdek_no_days_result['success'], 'CDEK admin save without delivery days must succeed.' );
+recalc_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь' === (string) ( $cdek_no_days_order->shipping_items['method_title'] ?? '' ), 'CDEK admin save without delivery days must include method and tariff only.' );
+recalc_smoke_assert( array( 'Срок доставки' => 'не указан' ) === ( $cdek_no_days_order->shipping_items['meta'] ?? array() ), 'CDEK admin save without delivery days must keep visible meta not specified.' );
 
 $replace_order = new WdcRecalcOrder( 107, array() );
 $replace_result = $replacement->save(

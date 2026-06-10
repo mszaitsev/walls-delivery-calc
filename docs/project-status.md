@@ -1,5 +1,7 @@
 # Project Status
 
+0.44.8 note: CDEK method titles are normalized across checkout rates, checkout-created shipping items, admin recalculation preview tariff payloads and admin save. Titles use `{Название доставки}, {название rate} - {срок доставки}`, honor custom CDEK pickup/courier names from the service `Основное` tab, and do not duplicate delivery ranges.
+
 0.44.7 note: visible WooCommerce shipping item meta is now carrier-neutral and compact for checkout and admin delivery replacement. Every service writes only `Срок доставки`; if no delivery range/comment is available, the visible value is `не указан`. Technical carrier/rate/tariff/API/rules/package data remains in hidden WDC order meta, `_wdc_platform_rate_meta`, `_wdc_delivery_calculation_data`, and the `Калькулятор доставок` metabox.
 
 0.44.5 note: CDEK tariff calculation now classifies `delivery_mode` by the destination side from the CDEK docs: door destinations are courier, warehouse/PVZ destinations are pickup (`1` door-door -> courier, `2` door-warehouse -> pickup, `3` warehouse-door -> courier, `4` warehouse-warehouse -> pickup). The predefined `cdek` service main tab also stores service-specific `pickup_method_title` and `courier_method_title`, defaulting to `СДЭК до пункта выдачи` and `СДЭК курьер`, and these titles flow into checkout grouped rates, admin recalculation preview, saved shipping metadata and calculation data. CDEK pickup map/point selection, order creation, statuses, webhooks and print forms remain intentionally not implemented. The next feature branch is `feature/cdek-pickup-points`.
@@ -52,7 +54,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.44.7`.
+- Текущая версия: `0.44.8`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/cdek-tariff-calculation`.
 - Последнее обновление статуса: 2026-06-09.
@@ -91,7 +93,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.44.7`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.44.8`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

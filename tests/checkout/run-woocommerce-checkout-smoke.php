@@ -521,6 +521,50 @@ wc_checkout_smoke_assert( isset( $cdek_order->meta['_wdc_platform_rate_meta'], $
 $cdek_calc = $cdek_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ];
 wc_checkout_smoke_assert( 520.0 === (float) ( $cdek_calc['api']['api_base_price_rub'] ?? 0 ) && 1000 === (int) ( $cdek_calc['package']['final_weight_g'] ?? 0 ), 'CDEK checkout calculation data must preserve API and package data.' );
 
+$session->save_rates(
+	array(
+		'cdek:courier:custom' => array(
+			'rate_id' => 'cdek:courier:custom',
+			'carrier_key' => 'cdek',
+			'service_key' => 'cdek',
+			'label' => 'СДЭК дверь тест',
+			'delivery_type' => 'courier',
+			'delivery_comment' => '10-14 дней',
+			'planned_delivery_comment' => '10-14 дней',
+			'cost' => 520.0,
+			'tariff_title' => 'Посылка склад-дверь',
+			'selected_tariff_title' => 'Посылка склад-дверь',
+			'selected_tariff_object' => '137',
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:courier:custom' ) );
+$custom_cdek_item = new WdcSmokeShippingItem();
+( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $custom_cdek_item );
+wc_checkout_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь - 10-14 дней' === $custom_cdek_item->method_title, 'CDEK checkout method title must use custom service title, selected tariff and delivery days.' );
+wc_checkout_smoke_assert( 1 === substr_count( $custom_cdek_item->method_title, '10-14 дней' ), 'CDEK checkout method title must not duplicate delivery days.' );
+
+$session->save_rates(
+	array(
+		'cdek:courier:no-days' => array(
+			'rate_id' => 'cdek:courier:no-days',
+			'carrier_key' => 'cdek',
+			'service_key' => 'cdek',
+			'label' => 'СДЭК дверь тест',
+			'delivery_type' => 'courier',
+			'cost' => 520.0,
+			'tariff_title' => 'Посылка склад-дверь',
+			'selected_tariff_title' => 'Посылка склад-дверь',
+			'selected_tariff_object' => '137',
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:courier:no-days' ) );
+$no_days_cdek_item = new WdcSmokeShippingItem();
+( new OrderShippingMetaPersister( $session ) )->persist_shipping_item_meta( $no_days_cdek_item );
+wc_checkout_smoke_assert( 'СДЭК дверь тест, Посылка склад-дверь' === $no_days_cdek_item->method_title, 'CDEK checkout method title without delivery days must include method and tariff only.' );
+wc_checkout_smoke_assert( array( 'Срок доставки' => 'не указан' ) === $no_days_cdek_item->meta, 'CDEK checkout visible meta without delivery days must be not specified.' );
+
 $compact_forbidden_meta_keys = array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_base_price_rub', 'tariff_key', 'selected_tariff_object', 'Перевозчик', 'Способ доставки', 'Тип доставки', 'Населенный пункт', 'Нормализация', 'Код ПВЗ', 'Адрес ПВЗ' );
 
 $session->save_rates(

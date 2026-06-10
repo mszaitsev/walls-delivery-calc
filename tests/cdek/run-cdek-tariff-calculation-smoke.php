@@ -474,7 +474,7 @@ cdek_tariff_assert( 'Посылка склад-склад' === $pickup_rate->tar
 cdek_tariff_assert( 350.5 === $pickup_rate->price->get_rubles(), 'CDEK delivery_sum must be mapped as rubles.' );
 cdek_tariff_assert( '2-4 дня' === (string) $pickup_rate->meta['api_delivery_days_text'], 'CDEK period must be mapped to delivery days text.' );
 cdek_tariff_assert( DeliveryType::PICKUP === $pickup_rate->delivery_type, 'delivery_mode 4 warehouse-warehouse must be pickup.' );
-cdek_tariff_assert( str_starts_with( $pickup_rate->title, CdekSettings::DEFAULT_PICKUP_METHOD_TITLE ), 'CDEK warehouse tariff must use pickup method title.' );
+cdek_tariff_assert( 'СДЭК до пункта выдачи, Посылка склад-склад - 2-4 дня' === $pickup_rate->title, 'CDEK pickup runtime title must include method, tariff and delivery days.' );
 cdek_tariff_assert( false === $pickup_rate->requires_pickup_point, 'CDEK pickup point selection is intentionally not required yet.' );
 $location_log = cdek_tariff_find_log( 'CDEK location resolved.' );
 cdek_tariff_assert( true === (bool) ( $location_log['context']['success'] ?? false ), 'CDEK location resolve result must be logged.' );
@@ -494,10 +494,11 @@ $courier_quote = $carrier->quote( cdek_tariff_request( DeliveryType::COURIER ) )
 cdek_tariff_assert( 1 === count( $courier_quote->rates ), 'Courier CDEK tariff must be mapped to one rate.' );
 $courier_rate = $courier_quote->rates[0];
 cdek_tariff_assert( DeliveryType::COURIER === $courier_rate->delivery_type, 'delivery_mode 3 warehouse-door must be courier.' );
-cdek_tariff_assert( str_starts_with( $courier_rate->title, CdekSettings::DEFAULT_COURIER_METHOD_TITLE ), 'CDEK door tariff must use courier method title.' );
+cdek_tariff_assert( 'СДЭК курьер, Посылка склад-дверь - 1 день' === $courier_rate->title, 'CDEK courier runtime title must include method, tariff and delivery days.' );
 cdek_tariff_assert( '137' === $courier_rate->tariff_key, 'Unknown delivery mode must be skipped.' );
 
 $wc_rate = ( new WooCommerceRateMapper() )->map( $courier_rate );
+cdek_tariff_assert( $courier_rate->title === (string) $wc_rate['label'] && 1 === substr_count( (string) $wc_rate['label'], '1 день' ), 'CDEK checkout rate label must include delivery days once.' );
 $checkout_rate = array_merge(
 	$wc_rate['meta_data'],
 	array(
@@ -626,7 +627,15 @@ $preview = ( new OrderDeliveryRecalculationService( new OrderQuoteRequestMapper(
 	public function get_id(): int { return 10; }
 	public function get_meta( string $key, bool $single = true ): mixed { return 'dest-fias' === $key ? 'dest-fias' : ''; }
 } );
-cdek_tariff_assert( count( array_filter( $preview['rates'], static fn( array $rate ): bool => CdekCarrier::KEY === (string) ( $rate['carrier_key'] ?? '' ) ) ) >= 1, 'CDEK rates must appear in admin recalculation preview.' );
+$preview_cdek_rates = array_values( array_filter( $preview['rates'], static fn( array $rate ): bool => CdekCarrier::KEY === (string) ( $rate['carrier_key'] ?? '' ) ) );
+cdek_tariff_assert( count( $preview_cdek_rates ) >= 1, 'CDEK rates must appear in admin recalculation preview.' );
+$preview_cdek_tariff_labels = array();
+foreach ( $preview_cdek_rates as $preview_cdek_rate ) {
+	foreach ( is_array( $preview_cdek_rate['tariff_variants'] ?? null ) ? $preview_cdek_rate['tariff_variants'] : array() as $preview_tariff ) {
+		$preview_cdek_tariff_labels[] = (string) ( $preview_tariff['label'] ?? '' );
+	}
+}
+cdek_tariff_assert( in_array( 'СДЭК до пункта выдачи, Посылка склад-склад - 2-4 дня', $preview_cdek_tariff_labels, true ) || in_array( 'СДЭК курьер, Посылка склад-дверь - 1 день', $preview_cdek_tariff_labels, true ), 'CDEK admin preview tariff payload label must include method, tariff and delivery days.' );
 
 $custom_http = new CdekTariffFakeHttpClient();
 $GLOBALS['wpdb'] = new wpdb();
@@ -656,8 +665,8 @@ $custom_client = new CdekApiClient( new CdekOAuthTokenService( $custom_settings,
 $custom_carrier = new CdekCarrier( $custom_settings, $custom_client, new CdekLocationResolver( $custom_client, new Logger() ), new Logger() );
 $custom_pickup_quote = $custom_carrier->quote( cdek_tariff_request( DeliveryType::PICKUP ) );
 $custom_courier_quote = $custom_carrier->quote( cdek_tariff_request( DeliveryType::COURIER ) );
-cdek_tariff_assert( str_starts_with( $custom_pickup_quote->rates[0]->title ?? '', 'Custom CDEK pickup' ), 'Custom CDEK pickup title must be applied to runtime rate.' );
-cdek_tariff_assert( str_starts_with( $custom_courier_quote->rates[0]->title ?? '', 'Custom CDEK courier' ), 'Custom CDEK courier title must be applied to runtime rate.' );
+cdek_tariff_assert( 'Custom CDEK pickup, Посылка склад-склад - 2-4 дня' === ( $custom_pickup_quote->rates[0]->title ?? '' ), 'Custom CDEK pickup title must be applied to full runtime rate title.' );
+cdek_tariff_assert( 'Custom CDEK courier, Посылка склад-дверь - 1 день' === ( $custom_courier_quote->rates[0]->title ?? '' ), 'Custom CDEK courier title must be applied to full runtime rate title.' );
 cdek_tariff_assert( 'Custom CDEK pickup' === (string) ( $custom_pickup_quote->rates[0]->meta['pickup_method_title'] ?? '' ), 'Custom CDEK pickup title must be saved in rate meta.' );
 cdek_tariff_assert( 'Custom CDEK courier' === (string) ( $custom_courier_quote->rates[0]->meta['courier_method_title'] ?? '' ), 'Custom CDEK courier title must be saved in rate meta.' );
 $custom_manager = new DeliveryServiceManager( $custom_services, $custom_countries, new RuleRepository( $GLOBALS['wpdb'] ), ( new ReflectionClass( RussianPostCountryDirectory::class ) )->newInstanceWithoutConstructor() );
@@ -692,6 +701,14 @@ $custom_preview = ( new OrderDeliveryRecalculationService( new OrderQuoteRequest
 $custom_preview_labels = array_map( static fn( array $rate ): string => (string) ( $rate['label'] ?? '' ), array_filter( $custom_preview['rates'], static fn( array $rate ): bool => CdekCarrier::KEY === (string) ( $rate['carrier_key'] ?? '' ) ) );
 cdek_tariff_assert( in_array( 'Custom CDEK pickup', $custom_preview_labels, true ), 'Custom CDEK pickup title must be applied in admin recalculation preview.' );
 cdek_tariff_assert( in_array( 'Custom CDEK courier', $custom_preview_labels, true ), 'Custom CDEK courier title must be applied in admin recalculation preview.' );
+$custom_preview_tariff_labels = array();
+foreach ( array_filter( $custom_preview['rates'], static fn( array $rate ): bool => CdekCarrier::KEY === (string) ( $rate['carrier_key'] ?? '' ) ) as $custom_preview_rate ) {
+	foreach ( is_array( $custom_preview_rate['tariff_variants'] ?? null ) ? $custom_preview_rate['tariff_variants'] : array() as $custom_preview_tariff ) {
+		$custom_preview_tariff_labels[] = (string) ( $custom_preview_tariff['label'] ?? '' );
+	}
+}
+cdek_tariff_assert( in_array( 'Custom CDEK pickup, Посылка склад-склад - 2-4 дня', $custom_preview_tariff_labels, true ), 'Custom CDEK pickup title must be applied to admin preview tariff label.' );
+cdek_tariff_assert( in_array( 'Custom CDEK courier, Посылка склад-дверь - 1 день', $custom_preview_tariff_labels, true ), 'Custom CDEK courier title must be applied to admin preview tariff label.' );
 
 $serialized_meta = json_encode( $pickup_rate->meta, JSON_UNESCAPED_UNICODE );
 cdek_tariff_assert( is_string( $serialized_meta ) && ! str_contains( $serialized_meta, 'secure-password' ) && ! str_contains( $serialized_meta, 'runtime-token' ), 'CDEK saved meta/debug must not include secret or token.' );

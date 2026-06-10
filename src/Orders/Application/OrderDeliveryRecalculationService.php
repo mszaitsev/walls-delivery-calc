@@ -156,6 +156,7 @@ final class OrderDeliveryRecalculationService {
 			'rate_id'             => $rate->rate_id,
 			'object_code'         => $rate->tariff_key,
 			'title'               => $rate->tariff_name,
+			'label'               => $this->method_title_from_parts( $this->service_method_title( $rate ), $rate->tariff_name, $this->delivery_comment( $rate ) ),
 			'price_html'          => $this->format_rubles( $rate->price->get_rubles() ),
 			'cost'                => $rate->price->get_rubles(),
 			'crossed_price_html'  => $this->crossed_price( $rate ),
@@ -169,6 +170,33 @@ final class OrderDeliveryRecalculationService {
 
 	private function delivery_comment( DeliveryRate $rate ): string {
 		return '' !== trim( $rate->planned_delivery_comment ) ? $rate->planned_delivery_comment : DeliveryDaysFormatter::format( $rate->delivery_days );
+	}
+
+	private function service_method_title( DeliveryRate $rate ): string {
+		$title_key = DeliveryType::COURIER === $rate->delivery_type ? 'courier_method_title' : 'pickup_method_title';
+		$default = '';
+		if ( RussianPostDomesticSettings::CARRIER_KEY === $rate->carrier_key ) {
+			$default = DeliveryType::COURIER === $rate->delivery_type ? RussianPostDomesticSettings::COURIER_SERVICE_TITLE : RussianPostDomesticSettings::PICKUP_SERVICE_TITLE;
+		} elseif ( CdekCarrier::KEY === $rate->carrier_key ) {
+			$default = DeliveryType::COURIER === $rate->delivery_type ? CdekCarrier::COURIER_TITLE : CdekCarrier::PICKUP_TITLE;
+		}
+
+		return trim( (string) ( $rate->meta[ $title_key ] ?? '' ) ) ?: $default;
+	}
+
+	private function method_title_from_parts( string $service_title, string $tariff_title, string $delivery_days ): string {
+		$title = trim( $service_title );
+		$tariff_title = trim( $tariff_title );
+		if ( '' !== $tariff_title && ! str_contains( $title, $tariff_title ) ) {
+			$title = '' !== $title ? $title . ', ' . $tariff_title : $tariff_title;
+		}
+
+		$delivery_days = trim( $delivery_days );
+		if ( '' !== $delivery_days && ! str_contains( $title, $delivery_days ) ) {
+			$title = '' !== $title ? $title . ' - ' . $delivery_days : $delivery_days;
+		}
+
+		return $title;
 	}
 
 	private function crossed_price( DeliveryRate $rate ): string {

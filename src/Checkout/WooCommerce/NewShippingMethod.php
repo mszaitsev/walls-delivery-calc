@@ -268,23 +268,11 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 	}
 
 	private function domestic_method_title( DeliveryRate $rate ): string {
-		if ( RussianPostDomesticSettings::CARRIER_KEY === $rate->carrier_key ) {
-			$prefix = $this->domestic_method_prefix( $rate );
-			$tariff = trim( $rate->tariff_name );
-			$days = $this->delivery_comment( $rate->delivery_days );
-
-			if ( '' === $tariff ) {
-				return $prefix;
-			}
-
-			$rate_label = '' !== $days ? $tariff . ' - ' . $days : $tariff;
-
-			return $prefix . ', ' . $rate_label;
-		}
 		$prefix = $this->domestic_method_prefix( $rate );
-		if ( '' !== $prefix ) {
-			return $prefix;
+		if ( RussianPostDomesticSettings::CARRIER_KEY === $rate->carrier_key || '' !== $prefix ) {
+			return $this->method_title_from_parts( $prefix, $rate->tariff_name, $this->delivery_comment( $rate->delivery_days ) );
 		}
+
 		$tariff = trim( $rate->tariff_name );
 		if ( '' === $tariff ) {
 			$title = $rate->service_name;
@@ -294,6 +282,21 @@ final class NewShippingMethod extends \WC_Shipping_Method {
 		$days = $this->delivery_comment( $rate->delivery_days );
 
 		return '' !== $days ? $title . ' - ' . $days : $title;
+	}
+
+	private function method_title_from_parts( string $service_title, string $tariff_title, string $delivery_days ): string {
+		$title = trim( $service_title );
+		$tariff_title = trim( $tariff_title );
+		if ( '' !== $tariff_title && ! str_contains( $title, $tariff_title ) ) {
+			$title = '' !== $title ? $title . ', ' . $tariff_title : $tariff_title;
+		}
+
+		$delivery_days = trim( $delivery_days );
+		if ( '' !== $delivery_days && ! str_contains( $title, $delivery_days ) ) {
+			$title = '' !== $title ? $title . ' - ' . $delivery_days : $delivery_days;
+		}
+
+		return $title;
 	}
 
 	private function domestic_method_prefix( DeliveryRate $rate ): string {

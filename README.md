@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.44.7.
+Current plugin version: 0.44.8.
+
+Version 0.44.8 fixes CDEK method title construction across checkout and admin order recalculation save. CDEK labels now consistently use `{Название доставки}, {название rate} - {срок доставки}`, honor custom pickup/courier titles from the service `Основное` tab, and avoid duplicate delivery ranges.
 
 Version 0.44.7 unifies visible WooCommerce shipping item meta for every delivery service. Checkout and admin order delivery replacement now keep only `Срок доставки`; when a delivery range is unavailable the visible value is `не указан`. Technical carrier/rate/tariff/API/rules/package data remains in hidden WDC order meta, `_wdc_platform_rate_meta`, `_wdc_delivery_calculation_data`, and the `Калькулятор доставок` metabox.
 
