@@ -284,8 +284,8 @@ final class OrderDeliveryReplacementService {
 		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
 			$map['_wdc_platform_pickup_code'] = (string) ( $pickup['point_code'] ?? '' );
 			$map['_wdc_platform_pickup_address'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
-			$map['_wdc_platform_pickup_comment'] = (string) ( $pickup['description'] ?? $pickup['point_comment'] ?? '' );
-			$map['_wdc_platform_pickup_work_time'] = (string) ( $pickup['work_time'] ?? $pickup['point_work_time'] ?? '' );
+			$map['_wdc_platform_pickup_comment'] = $this->first_meaningful( $pickup['description'] ?? '', $pickup['point_comment'] ?? '' );
+			$map['_wdc_platform_pickup_work_time'] = $this->first_meaningful( $pickup['work_time'] ?? '', $pickup['point_work_time'] ?? '' );
 			$map['_wdc_pickup_point_code'] = (string) ( $pickup['point_code'] ?? '' );
 			$map['_wdc_pickup_point_type'] = (string) ( $pickup['point_type'] ?? '' );
 			$map['_wdc_pickup_point_address'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
@@ -462,9 +462,9 @@ final class OrderDeliveryReplacementService {
 				'region_name' => (string) ( $pickup['region_name'] ?? $pickup['region'] ?? '' ),
 				'latitude' => $pickup['lat'] ?? $pickup['latitude'] ?? null,
 				'longitude' => $pickup['lng'] ?? $pickup['longitude'] ?? null,
-				'work_time' => (string) ( $pickup['work_time'] ?? $pickup['point_work_time'] ?? '' ),
-				'description' => (string) ( $pickup['description'] ?? $pickup['point_comment'] ?? '' ),
-				'storage_notice' => (string) ( $pickup['storage_notice'] ?? '' ),
+				'work_time' => $this->first_meaningful( $pickup['work_time'] ?? '', $pickup['point_work_time'] ?? '' ),
+				'description' => $this->first_meaningful( $pickup['description'] ?? '', $pickup['point_comment'] ?? '' ),
+				'storage_notice' => $this->first_meaningful( $pickup['storage_notice'] ?? '' ),
 				'cdek_code' => (string) ( $pickup['cdek_code'] ?? $pickup['point_code'] ?? '' ),
 				'raw_sanitized' => is_array( $pickup['raw_sanitized'] ?? null ) ? $pickup['raw_sanitized'] : ( is_array( $pickup['raw'] ?? null ) ? $pickup['raw'] : array() ),
 			) : array(),
@@ -705,6 +705,33 @@ final class OrderDeliveryReplacementService {
 	private function normalize( string $value ): string {
 		$value = trim( $value );
 		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
+	}
+
+	private function meaningful_text( mixed $value ): string {
+		if ( null === $value || is_array( $value ) || is_object( $value ) ) {
+			return '';
+		}
+		$text = trim( (string) $value );
+		if ( '' === $text ) {
+			return '';
+		}
+		$normalized = str_replace( ',', '.', $text );
+		if ( is_numeric( $normalized ) && 0.0 === (float) $normalized ) {
+			return '';
+		}
+
+		return $text;
+	}
+
+	private function first_meaningful( mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			$text = $this->meaningful_text( $value );
+			if ( '' !== $text ) {
+				return $text;
+			}
+		}
+
+		return '';
 	}
 
 	private function canonical_city( string $value ): string {

@@ -228,6 +228,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
+use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
@@ -523,6 +524,34 @@ $pickup_rates = $orchestrator->calculate_rates( pickup_smoke_request( DeliveryTy
 $courier_rates = $orchestrator->calculate_rates( pickup_smoke_request( DeliveryType::COURIER ) );
 pickup_smoke_assert( 2 === count( $pickup_rates ), 'Orchestrator must not filter rates by pickup delivery type.' );
 pickup_smoke_assert( 2 === count( $courier_rates ), 'Orchestrator must not filter rates by courier delivery type.' );
+
+$card_renderer = new PickupPointCardRenderer();
+$rp_card = $card_renderer->render(
+	array(
+		'carrier_key' => 'russian_post_domestic',
+		'rate_id' => 'russian_post_domestic:pickup',
+		'point_type' => 'OPS',
+		'point_address' => 'Красный проспект, 25',
+		'point_postcode' => '630000',
+		'point_work_time' => 'Пн-Сб 10:00-20:00',
+		'point_comment' => '0.000000',
+	),
+	false,
+	false
+);
+pickup_smoke_assert( str_contains( $rp_card, 'Отделение Почты России' ), 'Russian Post OPS/PVZ card title must remain unchanged.' );
+pickup_smoke_assert( ! str_contains( $rp_card, '0.000000' ), 'Russian Post pickup card must not render numeric zero description.' );
+$rp_aps_card = $card_renderer->render(
+	array(
+		'carrier_key' => 'russian_post_domestic',
+		'rate_id' => 'russian_post_domestic:pickup',
+		'point_type' => 'APS',
+		'point_address' => 'Почтомат',
+	),
+	false,
+	false
+);
+pickup_smoke_assert( str_contains( $rp_aps_card, 'Почтомат Почты России' ), 'Russian Post APS card title must be Почтомат Почты России.' );
 
 $root = dirname( __DIR__, 2 );
 $modal_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-modal.js' ) ?: '';

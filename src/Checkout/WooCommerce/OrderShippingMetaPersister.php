@@ -90,8 +90,8 @@ final class OrderShippingMetaPersister {
 		) {
 			$map['_wdc_platform_pickup_code']      = $pickup['point_code'] ?? '';
 			$map['_wdc_platform_pickup_address']   = $pickup['point_address'] ?? '';
-			$map['_wdc_platform_pickup_comment']   = $pickup['description'] ?? $pickup['point_comment'] ?? '';
-			$map['_wdc_platform_pickup_work_time'] = $pickup['point_work_time'] ?? '';
+			$map['_wdc_platform_pickup_comment']   = $this->first_meaningful( $pickup['description'] ?? '', $pickup['point_comment'] ?? '', $pickup['snapshot']['description'] ?? '' );
+			$map['_wdc_platform_pickup_work_time'] = $this->first_meaningful( $pickup['point_work_time'] ?? '', $pickup['work_time'] ?? '' );
 			$map['_wdc_pickup_point_id']           = $pickup['point_id'] ?? '';
 			$map['_wdc_pickup_point_code']         = $pickup['point_code'] ?? '';
 			$map['_wdc_pickup_point_type']         = $pickup['point_type'] ?? '';
@@ -201,9 +201,9 @@ final class OrderShippingMetaPersister {
 			'region_name'   => (string) ( $pickup['region_name'] ?? $pickup['snapshot']['region'] ?? '' ),
 			'latitude'      => $pickup['lat'] ?? $pickup['snapshot']['lat'] ?? null,
 			'longitude'     => $pickup['lng'] ?? $pickup['snapshot']['lng'] ?? null,
-			'work_time'     => (string) ( $pickup['point_work_time'] ?? $pickup['snapshot']['work_time'] ?? '' ),
-			'description'   => (string) ( $pickup['description'] ?? $pickup['point_comment'] ?? $pickup['snapshot']['description'] ?? '' ),
-			'storage_notice' => (string) ( $pickup['storage_notice'] ?? $pickup['snapshot']['storage_notice'] ?? '' ),
+			'work_time'     => $this->first_meaningful( $pickup['point_work_time'] ?? '', $pickup['work_time'] ?? '' ),
+			'description'   => $this->first_meaningful( $pickup['description'] ?? '', $pickup['point_comment'] ?? '', $pickup['snapshot']['description'] ?? '' ),
+			'storage_notice' => $this->first_meaningful( $pickup['storage_notice'] ?? '', $pickup['snapshot']['storage_notice'] ?? '' ),
 			'cdek_code'     => (string) ( $pickup['cdek_code'] ?? $pickup['snapshot']['cdek_code'] ?? '' ),
 			'raw_sanitized' => is_array( $pickup['snapshot']['raw_sanitized'] ?? null ) ? $pickup['snapshot']['raw_sanitized'] : ( is_array( $pickup['snapshot']['raw'] ?? null ) ? $pickup['snapshot']['raw'] : array() ),
 		);
@@ -893,5 +893,32 @@ final class OrderShippingMetaPersister {
 		}
 
 		return array();
+	}
+
+	private function meaningful_text( mixed $value ): string {
+		if ( null === $value || is_array( $value ) || is_object( $value ) ) {
+			return '';
+		}
+		$text = trim( (string) $value );
+		if ( '' === $text ) {
+			return '';
+		}
+		$normalized = str_replace( ',', '.', $text );
+		if ( is_numeric( $normalized ) && 0.0 === (float) $normalized ) {
+			return '';
+		}
+
+		return $text;
+	}
+
+	private function first_meaningful( mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			$text = $this->meaningful_text( $value );
+			if ( '' !== $text ) {
+				return $text;
+			}
+		}
+
+		return '';
 	}
 }

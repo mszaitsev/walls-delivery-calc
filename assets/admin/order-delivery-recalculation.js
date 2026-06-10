@@ -789,14 +789,40 @@
 		if ( isCdekPickupPoint( point ) ) {
 			return 'POSTAMAT' === String( point.point_type || point.cdek_type || '' ).toUpperCase() ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК';
 		}
-		return String( point.point_type || '' ).toUpperCase() === 'APS' ? 'Почтомат' : 'Отделение Почты России';
+		return String( point.point_type || '' ).toUpperCase() === 'APS' ? 'Почтомат Почты России' : 'Отделение Почты России';
 	}
 
 	function pickupPointStorageNotice( point ) {
-		if ( point && point.storage_notice ) {
-			return String( point.storage_notice );
+		const notice = meaningfulText( point && point.storage_notice );
+		if ( notice ) {
+			return notice;
 		}
 		return isCdekPickupPoint( point ) && 'POSTAMAT' === String( point.point_type || point.cdek_type || '' ).toUpperCase() ? 'Срок хранения 3 дня' : '';
+	}
+
+	function meaningfulText( value ) {
+		if ( value === null || value === undefined || Array.isArray( value ) || typeof value === 'object' ) {
+			return '';
+		}
+		const text = String( value ).trim();
+		if ( ! text ) {
+			return '';
+		}
+		const normalized = text.replace( ',', '.' );
+		if ( normalized !== '' && ! Number.isNaN( Number( normalized ) ) && Number( normalized ) === 0 ) {
+			return '';
+		}
+		return text;
+	}
+
+	function firstMeaningfulText() {
+		for ( let i = 0; i < arguments.length; i++ ) {
+			const text = meaningfulText( arguments[ i ] );
+			if ( text ) {
+				return text;
+			}
+		}
+		return '';
 	}
 
 	function saveDelivery( button ) {
@@ -1009,9 +1035,9 @@
 			region_name: String( point.region_name || '' ),
 			lat: Number.isFinite( lat ) ? lat : null,
 			lng: Number.isFinite( lng ) ? lng : null,
-			work_time: String( point.work_time || '' ),
-			description: String( point.description || point.point_comment || point.cdek_note || '' ),
-			storage_notice: String( point.storage_notice || '' ),
+			work_time: firstMeaningfulText( point.work_time ),
+			description: firstMeaningfulText( point.description, point.point_comment, point.cdek_note ),
+			storage_notice: meaningfulText( point.storage_notice ),
 			raw_sanitized: point.raw_sanitized || point.raw || {},
 			cdek_code: String( point.cdek_code || '' ),
 			cdek_uuid: String( point.cdek_uuid || '' ),

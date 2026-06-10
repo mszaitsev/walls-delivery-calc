@@ -67,6 +67,14 @@ final class PickupPointOrderDisplay {
 		}
 
 		$snapshot = $this->snapshot( $order );
+		$comment  = $this->first_meaningful(
+			$snapshot['description'] ?? '',
+			$order->get_meta( '_wdc_platform_pickup_comment', true )
+		);
+		$work_time = $this->meaningful_text( $order->get_meta( '_wdc_platform_pickup_work_time', true ) );
+		if ( '' === $work_time ) {
+			unset( $snapshot['work_time'] );
+		}
 
 		return array(
 			'address'         => $address,
@@ -78,9 +86,9 @@ final class PickupPointOrderDisplay {
 			'carrier_key'     => trim( (string) $order->get_meta( '_wdc_platform_carrier_key', true ) ),
 			'service_key'     => trim( (string) $order->get_meta( '_wdc_platform_service_key', true ) ),
 			'rate_id'         => trim( (string) $order->get_meta( '_wdc_platform_rate_id', true ) ),
-			'point_work_time' => trim( (string) $order->get_meta( '_wdc_platform_pickup_work_time', true ) ),
-			'description'     => (string) ( $snapshot['description'] ?? $order->get_meta( '_wdc_platform_pickup_comment', true ) ),
-			'storage_notice'  => (string) ( $snapshot['storage_notice'] ?? '' ),
+			'point_work_time' => $work_time,
+			'description'     => $comment,
+			'storage_notice'  => $this->meaningful_text( $snapshot['storage_notice'] ?? '' ),
 			'cdek_code'       => (string) ( $snapshot['cdek_code'] ?? $code ),
 			'snapshot'        => $snapshot,
 		);
@@ -111,5 +119,32 @@ final class PickupPointOrderDisplay {
 		$enabled = array_map( 'strval', $enabled );
 
 		return in_array( $email_id, $enabled, true );
+	}
+
+	private function first_meaningful( mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			$text = $this->meaningful_text( $value );
+			if ( '' !== $text ) {
+				return $text;
+			}
+		}
+
+		return '';
+	}
+
+	private function meaningful_text( mixed $value ): string {
+		if ( null === $value || is_array( $value ) || is_object( $value ) ) {
+			return '';
+		}
+		$text = trim( (string) $value );
+		if ( '' === $text ) {
+			return '';
+		}
+		$normalized = str_replace( ',', '.', $text );
+		if ( is_numeric( $normalized ) && 0.0 === (float) $normalized ) {
+			return '';
+		}
+
+		return $text;
 	}
 }

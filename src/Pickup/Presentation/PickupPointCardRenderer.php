@@ -16,6 +16,9 @@ final class PickupPointCardRenderer {
 		$work_time = $data['work_time'];
 		$description = $data['description'];
 		$storage_notice = $data['storage_notice'];
+		$code = $data['code'];
+		$postcode = $data['postcode'];
+		$is_cdek = $data['is_cdek'];
 		$classes   = 'wdc-pickup-point-card' . ( $include_change_button ? ' wdc-pickup-point-card--checkout' : '' ) . ( $hidden ? ' wdc-is-hidden' : '' );
 		$hidden_attr = $hidden ? ' hidden' : '';
 		$parts     = array();
@@ -24,12 +27,25 @@ final class PickupPointCardRenderer {
 		$parts[] = '<div class="wdc-pickup-point-card__title" data-wdc-pickup-title style="' . esc_attr( $this->title_style() ) . '"><span class="wdc-pickup-point-card__accent" aria-hidden="true" style="' . esc_attr( $this->accent_style() ) . '"></span><span data-wdc-pickup-title-text>' . esc_html( $data['title'] ) . '</span></div>';
 		$parts[] = '<div class="wdc-pickup-point-card__body" style="' . esc_attr( $this->body_style() ) . '">';
 		$parts[] = '<div class="wdc-pickup-point-card__address" data-wdc-pickup-address style="' . esc_attr( $this->address_style() ) . '">' . esc_html( $data['address_line'] ) . '</div>';
-		$parts[] = '<div class="wdc-pickup-point-card__work-time" data-wdc-pickup-work-time-block' . ( '' === $work_time ? ' hidden' : '' ) . ' style="' . esc_attr( $this->work_time_style() ) . '">';
-		$parts[] = '<span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Время работы:', 'walls-delivery-calc' ) ) . '</span>';
-		$parts[] = '<span data-wdc-pickup-work-time>' . esc_html( $work_time ) . '</span>';
-		$parts[] = '</div>';
-		$parts[] = '<div class="wdc-pickup-point-card__description" data-wdc-pickup-description' . ( '' === $description ? ' hidden' : '' ) . ' style="' . esc_attr( $this->line_style() ) . '">' . esc_html( $description ) . '</div>';
-		$parts[] = '<div class="wdc-pickup-point-card__storage" data-wdc-pickup-storage-notice' . ( '' === $storage_notice ? ' hidden' : '' ) . ' style="' . esc_attr( $this->storage_notice_style() ) . '">' . esc_html( $storage_notice ) . '</div>';
+		$needs_placeholders = $include_change_button || $hidden;
+		if ( $is_cdek && ( '' !== $code || $needs_placeholders ) ) {
+			$parts[] = '<div class="wdc-pickup-point-card__code" data-wdc-pickup-code-block' . ( ! $is_cdek || '' === $code ? ' hidden' : '' ) . ' style="' . esc_attr( $this->line_style() ) . '"><span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Код пункта:', 'walls-delivery-calc' ) ) . '</span> <span data-wdc-pickup-code>' . esc_html( $code ) . '</span></div>';
+		}
+		if ( $is_cdek && ( '' !== $postcode || $needs_placeholders ) ) {
+			$parts[] = '<div class="wdc-pickup-point-card__postcode" data-wdc-pickup-postcode-block' . ( ! $is_cdek || '' === $postcode ? ' hidden' : '' ) . ' style="' . esc_attr( $this->line_style() ) . '"><span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Индекс:', 'walls-delivery-calc' ) ) . '</span> <span data-wdc-pickup-postcode>' . esc_html( $postcode ) . '</span></div>';
+		}
+		if ( '' !== $work_time || $needs_placeholders ) {
+			$parts[] = '<div class="wdc-pickup-point-card__work-time" data-wdc-pickup-work-time-block' . ( '' === $work_time ? ' hidden' : '' ) . ' style="' . esc_attr( $this->work_time_style() ) . '">';
+			$parts[] = '<span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Время работы:', 'walls-delivery-calc' ) ) . '</span>';
+			$parts[] = '<span data-wdc-pickup-work-time>' . esc_html( $work_time ) . '</span>';
+			$parts[] = '</div>';
+		}
+		if ( '' !== $description || $needs_placeholders ) {
+			$parts[] = '<div class="wdc-pickup-point-card__description" data-wdc-pickup-description' . ( '' === $description ? ' hidden' : '' ) . ' style="' . esc_attr( $this->line_style() ) . '"><span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Описание:', 'walls-delivery-calc' ) ) . '</span> <span data-wdc-pickup-description-text>' . esc_html( $description ) . '</span></div>';
+		}
+		if ( '' !== $storage_notice || $needs_placeholders ) {
+			$parts[] = '<div class="wdc-pickup-point-card__storage" data-wdc-pickup-storage-notice' . ( '' === $storage_notice ? ' hidden' : '' ) . ' style="' . esc_attr( $this->storage_notice_style() ) . '">' . esc_html( $storage_notice ) . '</div>';
+		}
 		$parts[] = '</div>';
 
 		if ( $include_change_button ) {
@@ -43,7 +59,7 @@ final class PickupPointCardRenderer {
 
 	/**
 	 * @param array<string,mixed>|object $point
-	 * @return array{title:string,address_line:string,work_time:string,description:string,storage_notice:string}
+	 * @return array{title:string,address_line:string,work_time:string,description:string,storage_notice:string,code:string,postcode:string,is_cdek:bool}
 	 */
 	public function normalize( array|object $point ): array {
 		$point    = $this->point_to_array( $point );
@@ -54,11 +70,24 @@ final class PickupPointCardRenderer {
 		$postcode = trim( (string) ( $point['postcode'] ?? $point['point_postcode'] ?? $snapshot['postcode'] ?? '' ) );
 		$city     = trim( (string) ( $point['city'] ?? $point['city_name'] ?? $snapshot['city'] ?? $snapshot['city_name'] ?? '' ) );
 		$address  = trim( (string) ( $point['address'] ?? $point['point_address'] ?? $snapshot['address'] ?? '' ) );
-		$work_time = trim( (string) ( $point['point_work_time'] ?? $point['work_time'] ?? $snapshot['work_time'] ?? '' ) );
+		$work_time = $this->first_meaningful(
+			$point['point_work_time'] ?? '',
+			$point['work_time'] ?? '',
+			$snapshot['work_time'] ?? ''
+		);
 		$type = strtoupper( trim( (string) ( $point['point_type'] ?? $point['type'] ?? $snapshot['point_type'] ?? $snapshot['type'] ?? '' ) ) );
-		$description = trim( (string) ( $point['description'] ?? $point['point_comment'] ?? $snapshot['description'] ?? '' ) );
-		$storage_notice = trim( (string) ( $point['storage_notice'] ?? $snapshot['storage_notice'] ?? '' ) );
-		if ( '' === $storage_notice && $this->is_cdek( $carrier, $rate_id, $service ) && 'POSTAMAT' === $type ) {
+		$description = $this->first_meaningful(
+			$point['description'] ?? '',
+			$point['point_comment'] ?? '',
+			$snapshot['description'] ?? ''
+		);
+		$storage_notice = $this->first_meaningful(
+			$point['storage_notice'] ?? '',
+			$snapshot['storage_notice'] ?? ''
+		);
+		$is_cdek = $this->is_cdek( $carrier, $rate_id, $service );
+		$code = trim( (string) ( $point['point_code'] ?? $point['code'] ?? $point['cdek_code'] ?? $snapshot['point_code'] ?? $snapshot['code'] ?? $snapshot['cdek_code'] ?? '' ) );
+		if ( '' === $storage_notice && $is_cdek && 'POSTAMAT' === $type ) {
 			$storage_notice = 'Срок хранения 3 дня';
 		}
 
@@ -68,6 +97,9 @@ final class PickupPointCardRenderer {
 			'work_time' => $work_time,
 			'description' => $description,
 			'storage_notice' => $storage_notice,
+			'code' => $code,
+			'postcode' => $postcode,
+			'is_cdek' => $is_cdek,
 		);
 	}
 
@@ -107,7 +139,38 @@ final class PickupPointCardRenderer {
 			return 'POSTAMAT' === $type ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК';
 		}
 
-		return $this->is_russian_post( $carrier, $rate_id, $service ) ? __( 'Отделение Почты России', 'walls-delivery-calc' ) : __( 'Пункт выдачи', 'walls-delivery-calc' );
+		if ( $this->is_russian_post( $carrier, $rate_id, $service ) ) {
+			return 'APS' === $type ? __( 'Почтомат Почты России', 'walls-delivery-calc' ) : __( 'Отделение Почты России', 'walls-delivery-calc' );
+		}
+
+		return __( 'Пункт выдачи', 'walls-delivery-calc' );
+	}
+
+	private function meaningful_text( mixed $value ): string {
+		if ( null === $value || is_array( $value ) || is_object( $value ) ) {
+			return '';
+		}
+		$text = trim( (string) $value );
+		if ( '' === $text ) {
+			return '';
+		}
+		$normalized = str_replace( ',', '.', $text );
+		if ( is_numeric( $normalized ) && 0.0 === (float) $normalized ) {
+			return '';
+		}
+
+		return $text;
+	}
+
+	private function first_meaningful( mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			$text = $this->meaningful_text( $value );
+			if ( '' !== $text ) {
+				return $text;
+			}
+		}
+
+		return '';
 	}
 
 	private function city_line( string $postcode, string $city ): string {

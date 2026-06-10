@@ -238,24 +238,44 @@
 	function applySelection(container, point) {
 		var snapshot = point.snapshot || {};
 		var selectedPoint = normalizeSelectedPoint(point);
+		var workTime = firstMeaningfulText(point.point_work_time, point.work_time, snapshot.work_time);
+		var description = firstMeaningfulText(point.description, snapshot.description);
+		var storage = firstMeaningfulText(point.storage_notice, snapshot.storage_notice, storageNotice(point));
+		var code = point.point_code || point.cdek_code || snapshot.point_code || snapshot.cdek_code || '';
+		var postcode = point.point_postcode || point.postcode || point.postal_code || snapshot.postcode || '';
 		container.querySelector('[data-wdc-pickup-point-id]').value = point.id || '';
-		container.querySelector('[data-wdc-pickup-point-code]').value = point.point_code || '';
+		container.querySelector('[data-wdc-pickup-point-code]').value = code;
+		setHiddenField(container, '[data-wdc-pickup-carrier-key]', point.carrier_key || point.carrier || snapshot.carrier_key || '');
+		setHiddenField(container, '[data-wdc-pickup-point-type]', point.point_type || snapshot.point_type || '');
+		setHiddenField(container, '[data-wdc-pickup-point-name]', point.point_name || snapshot.point_name || '');
+		setHiddenField(container, '[data-wdc-pickup-point-address]', point.point_address || point.address || snapshot.address || '');
+		setHiddenField(container, '[data-wdc-pickup-point-postcode]', postcode);
+		setHiddenField(container, '[data-wdc-pickup-city-name]', point.city_name || point.city || snapshot.city_name || snapshot.city || '');
+		setHiddenField(container, '[data-wdc-pickup-region-name]', point.region_name || point.region || snapshot.region_name || snapshot.region || '');
+		setHiddenField(container, '[data-wdc-pickup-work-time-field]', workTime);
+		setHiddenField(container, '[data-wdc-pickup-description-field]', description);
+		setHiddenField(container, '[data-wdc-pickup-storage-notice-field]', storage);
+		setHiddenField(container, '[data-wdc-pickup-cdek-code]', point.cdek_code || snapshot.cdek_code || (isCdekPoint(point) ? code : ''));
 		setText(container, '[data-wdc-pickup-title-text]', selectedPointTitle(point));
 		setText(container, '[data-wdc-pickup-address]', selectedPointAddress(point));
-		setText(container, '[data-wdc-pickup-work-time]', point.point_work_time || point.work_time || snapshot.work_time || '');
-		setText(container, '[data-wdc-pickup-description]', point.description || snapshot.description || '');
-		setText(container, '[data-wdc-pickup-storage-notice]', point.storage_notice || snapshot.storage_notice || storageNotice(point));
+		setText(container, '[data-wdc-pickup-code]', code);
+		setText(container, '[data-wdc-pickup-postcode]', postcode);
+		setText(container, '[data-wdc-pickup-work-time]', workTime);
+		setText(container, '[data-wdc-pickup-description-text]', description);
+		setText(container, '[data-wdc-pickup-storage-notice]', storage);
+		toggleBlock(container, '[data-wdc-pickup-code-block]', isCdekPoint(point) && !!code);
+		toggleBlock(container, '[data-wdc-pickup-postcode-block]', isCdekPoint(point) && !!postcode);
 		var workTimeBlock = container.querySelector('[data-wdc-pickup-work-time-block]');
 		if (workTimeBlock) {
-			setHidden(workTimeBlock, !(point.point_work_time || point.work_time || snapshot.work_time));
+			setHidden(workTimeBlock, !workTime);
 		}
 		var descriptionBlock = container.querySelector('[data-wdc-pickup-description]');
 		if (descriptionBlock) {
-			setHidden(descriptionBlock, !(point.description || snapshot.description));
+			setHidden(descriptionBlock, !description);
 		}
 		var storageBlock = container.querySelector('[data-wdc-pickup-storage-notice]');
 		if (storageBlock) {
-			setHidden(storageBlock, !(point.storage_notice || snapshot.storage_notice || storageNotice(point)));
+			setHidden(storageBlock, !storage);
 		}
 		container.querySelectorAll('[data-wdc-pickup-card]').forEach(function (card) {
 			setHidden(card, !point.point_code);
@@ -306,12 +326,28 @@
 		}
 	}
 
+	function setHiddenField(container, selector, value) {
+		var field = container.querySelector(selector);
+		if (field) {
+			field.value = String(value || '');
+		}
+	}
+
+	function toggleBlock(container, selector, visible) {
+		var block = container.querySelector(selector);
+		if (block) {
+			setHidden(block, !visible);
+		}
+	}
+
 	function selectedPointTitle(point) {
 		var config = window.wdcPickupCheckout || {};
-		var carrier = String(point.carrier || point.carrier_key || config.carrier || '').trim();
-		var rateId = String(point.rate_id || point.shipping_method_id || config.shippingMethodId || '').trim();
+		var snapshot = point.snapshot || {};
+		var carrier = String(point.carrier || point.carrier_key || snapshot.carrier || snapshot.carrier_key || config.carrier || '').trim();
+		var rateId = String(point.rate_id || point.shipping_method_id || snapshot.rate_id || config.shippingMethodId || '').trim();
+		var type = String(point.point_type || point.type || snapshot.point_type || snapshot.type || '').toUpperCase();
 		if (carrier === 'russian_post' || carrier === 'russian_post_domestic' || rateId.indexOf('russian_post_domestic:pickup') === 0) {
-			return 'Отделение Почты России';
+			return type === 'APS' ? 'Почтомат Почты России' : 'Отделение Почты России';
 		}
 		if (carrier === 'cdek' || rateId.indexOf('cdek:pickup') === 0) {
 			return isCdekPostamat(point) ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК';
@@ -858,13 +894,41 @@
 	}
 
 	function isCdekPostamat(point) {
-		var carrier = String((point && (point.carrier_key || point.carrier)) || '').toLowerCase();
-		var type = String((point && (point.point_type || point.cdek_type || point.type)) || '').toUpperCase();
+		var snapshot = point && point.snapshot ? point.snapshot : {};
+		var carrier = String((point && (point.carrier_key || point.carrier || snapshot.carrier_key || snapshot.carrier)) || '').toLowerCase();
+		var type = String((point && (point.point_type || point.cdek_type || point.type || snapshot.point_type || snapshot.cdek_type || snapshot.type)) || '').toUpperCase();
 		return carrier === 'cdek' && type === 'POSTAMAT';
+	}
+
+	function isCdekPoint(point) {
+		var snapshot = point && point.snapshot ? point.snapshot : {};
+		return String((point && (point.carrier_key || point.carrier || snapshot.carrier_key || snapshot.carrier)) || '').toLowerCase() === 'cdek';
 	}
 
 	function storageNotice(point) {
 		return isCdekPostamat(point) ? 'Срок хранения 3 дня' : '';
+	}
+
+	function meaningfulText(value) {
+		if (value === null || value === undefined || Array.isArray(value) || typeof value === 'object') {
+			return '';
+		}
+		var text = String(value).trim();
+		if (!text) {
+			return '';
+		}
+		var normalized = text.replace(',', '.');
+		return !isNaN(normalized) && parseFloat(normalized) === 0 ? '' : text;
+	}
+
+	function firstMeaningfulText() {
+		for (var i = 0; i < arguments.length; i++) {
+			var text = meaningfulText(arguments[i]);
+			if (text) {
+				return text;
+			}
+		}
+		return '';
 	}
 
 	function pointMatchesDestinationQuick(point, checkoutContext) {

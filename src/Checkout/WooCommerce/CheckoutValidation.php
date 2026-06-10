@@ -354,6 +354,9 @@ final class CheckoutValidation {
 		if ( $is_cdek_rate && '' !== $point_code ) {
 			$selection = $this->selection_from_current_cdek_session( $point_code );
 		}
+		if ( array() === $selection && $is_cdek_rate ) {
+			$selection = $this->selection_from_posted_cdek_fields( $data, $point_id, $point_code );
+		}
 		if ( array() === $selection && ! $is_cdek_rate ) {
 			$selection = $point_id > 0 ? $this->selection_from_pickup_row( $point_id ) : array();
 		}
@@ -445,10 +448,58 @@ final class CheckoutValidation {
 			'region_name' => (string) ( $checkout['region_name'] ?? $snapshot['region'] ?? '' ),
 			'lat' => $checkout['lat'] ?? $snapshot['lat'] ?? null,
 			'lng' => $checkout['lng'] ?? $snapshot['lng'] ?? null,
-			'point_work_time' => (string) ( $checkout['work_time'] ?? $snapshot['work_time'] ?? '' ),
-			'description' => (string) ( $checkout['description'] ?? $snapshot['description'] ?? '' ),
-			'storage_notice' => (string) ( $checkout['storage_notice'] ?? $snapshot['storage_notice'] ?? '' ),
+			'point_work_time' => $this->meaningful_text( $checkout['point_work_time'] ?? $checkout['work_time'] ?? '' ),
+			'description' => $this->first_meaningful( $checkout['description'] ?? '', $checkout['point_comment'] ?? '', $snapshot['description'] ?? '' ),
+			'storage_notice' => $this->first_meaningful( $checkout['storage_notice'] ?? '', $snapshot['storage_notice'] ?? '' ),
 			'cdek_code' => (string) ( $checkout['cdek_code'] ?? $snapshot['cdek_code'] ?? $point_code ),
+			'snapshot' => $snapshot,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private function selection_from_posted_cdek_fields( array $data, int $point_id, string $point_code ): array {
+		if ( '' === $point_code ) {
+			return array();
+		}
+		$point_type = strtoupper( $this->posted_string( $data, 'wdc_pickup_point_type' ) );
+		$storage_notice = $this->meaningful_text( $this->posted_string( $data, 'wdc_pickup_storage_notice' ) );
+		if ( '' === $storage_notice && 'POSTAMAT' === $point_type ) {
+			$storage_notice = 'Срок хранения 3 дня';
+		}
+		$snapshot = array(
+			'id' => 'cdek:' . $point_code,
+			'carrier_key' => CdekCarrier::KEY,
+			'point_code' => $point_code,
+			'point_type' => $point_type,
+			'point_name' => $this->posted_string( $data, 'wdc_pickup_point_name' ),
+			'postcode' => $this->posted_string( $data, 'wdc_pickup_point_postcode' ),
+			'address' => $this->posted_string( $data, 'wdc_pickup_point_address' ),
+			'city' => $this->posted_string( $data, 'wdc_pickup_city_name' ),
+			'region' => $this->posted_string( $data, 'wdc_pickup_region_name' ),
+			'work_time' => $this->meaningful_text( $this->posted_string( $data, 'wdc_pickup_work_time' ) ),
+			'description' => $this->meaningful_text( $this->posted_string( $data, 'wdc_pickup_description' ) ),
+			'storage_notice' => $storage_notice,
+			'cdek_code' => $this->posted_string( $data, 'wdc_pickup_cdek_code' ) ?: $point_code,
+		);
+
+		return array(
+			'id' => $point_id > 0 ? (string) $point_id : (string) $snapshot['id'],
+			'point_id' => $point_id,
+			'carrier_key' => CdekCarrier::KEY,
+			'point_code' => $point_code,
+			'point_type' => $point_type,
+			'point_name' => (string) $snapshot['point_name'],
+			'point_address' => (string) $snapshot['address'],
+			'point_postcode' => (string) $snapshot['postcode'],
+			'city_name' => (string) $snapshot['city'],
+			'region_name' => (string) $snapshot['region'],
+			'point_work_time' => $this->meaningful_text( $snapshot['work_time'] ),
+			'description' => $this->meaningful_text( $snapshot['description'] ),
+			'storage_notice' => $storage_notice,
+			'cdek_code' => (string) $snapshot['cdek_code'],
 			'snapshot' => $snapshot,
 		);
 	}
@@ -534,9 +585,9 @@ final class CheckoutValidation {
 			'point_postcode' => $selection['point_postcode'] ?? $snapshot['postcode'] ?? '',
 			'city_name' => $selection['city_name'] ?? $snapshot['city'] ?? '',
 			'region_name' => $selection['region_name'] ?? $snapshot['region'] ?? '',
-			'work_time' => $selection['point_work_time'] ?? $snapshot['work_time'] ?? '',
-			'description' => $selection['description'] ?? $selection['point_comment'] ?? $snapshot['description'] ?? '',
-			'storage_notice' => $selection['storage_notice'] ?? $snapshot['storage_notice'] ?? '',
+			'work_time' => $this->meaningful_text( $selection['point_work_time'] ?? $selection['work_time'] ?? '' ),
+			'description' => $this->first_meaningful( $selection['description'] ?? '', $selection['point_comment'] ?? '', $snapshot['description'] ?? '' ),
+			'storage_notice' => $this->first_meaningful( $selection['storage_notice'] ?? '', $snapshot['storage_notice'] ?? '' ),
 			'cdek_code' => $selection['cdek_code'] ?? $snapshot['cdek_code'] ?? '',
 			'carrier_key' => $selection['carrier_key'] ?? $snapshot['carrier_key'] ?? '',
 			'snapshot' => array() !== $snapshot ? $snapshot : array(
@@ -557,6 +608,33 @@ final class CheckoutValidation {
 
 		$value = function_exists( 'wp_unslash' ) ? wp_unslash( $value ) : $value;
 		return function_exists( 'sanitize_text_field' ) ? sanitize_text_field( (string) $value ) : trim( strip_tags( (string) $value ) );
+	}
+
+	private function meaningful_text( mixed $value ): string {
+		if ( null === $value || is_array( $value ) || is_object( $value ) ) {
+			return '';
+		}
+		$text = trim( (string) $value );
+		if ( '' === $text ) {
+			return '';
+		}
+		$normalized = str_replace( ',', '.', $text );
+		if ( is_numeric( $normalized ) && 0.0 === (float) $normalized ) {
+			return '';
+		}
+
+		return $text;
+	}
+
+	private function first_meaningful( mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			$text = $this->meaningful_text( $value );
+			if ( '' !== $text ) {
+				return $text;
+			}
+		}
+
+		return '';
 	}
 
 	/**

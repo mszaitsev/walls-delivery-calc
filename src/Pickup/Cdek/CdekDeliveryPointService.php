@@ -113,6 +113,13 @@ final class CdekDeliveryPointService {
 		$lat = $this->float_or_null( $location['latitude'] ?? $point['latitude'] ?? null );
 		$lng = $this->float_or_null( $location['longitude'] ?? $point['longitude'] ?? null );
 		$name = trim( (string) ( $point['name'] ?? $point['address_comment'] ?? '' ) );
+		$description = $this->first_meaningful(
+			$point['note'] ?? '',
+			$point['address_comment'] ?? '',
+			$point['description'] ?? '',
+			$point['comment'] ?? '',
+			$point['address_comment_full'] ?? ''
+		);
 		if ( '' === $name ) {
 			$name = 'PVZ ' . $code;
 		}
@@ -136,8 +143,8 @@ final class CdekDeliveryPointService {
 			'longitude' => $lng,
 			'lat' => $lat,
 			'lng' => $lng,
-			'work_time' => (string) ( $point['work_time'] ?? '' ),
-			'description' => trim( (string) ( $point['description'] ?? $point['note'] ?? $point['address_comment'] ?? '' ) ),
+			'work_time' => $this->meaningful_text( $point['work_time'] ?? '' ),
+			'description' => $description,
 			'storage_notice' => 'POSTAMAT' === $type ? 'Срок хранения 3 дня' : '',
 			'cdek_code' => $code,
 			'cdek_uuid' => (string) ( $point['uuid'] ?? '' ),
@@ -231,6 +238,33 @@ final class CdekDeliveryPointService {
 
 	private function float_or_null( mixed $value ): ?float {
 		return is_numeric( $value ) ? (float) $value : null;
+	}
+
+	private function meaningful_text( mixed $value ): string {
+		if ( null === $value || is_array( $value ) || is_object( $value ) ) {
+			return '';
+		}
+		$text = trim( (string) $value );
+		if ( '' === $text ) {
+			return '';
+		}
+		$normalized = str_replace( ',', '.', $text );
+		if ( is_numeric( $normalized ) && 0.0 === (float) $normalized ) {
+			return '';
+		}
+
+		return $text;
+	}
+
+	private function first_meaningful( mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			$text = $this->meaningful_text( $value );
+			if ( '' !== $text ) {
+				return $text;
+			}
+		}
+
+		return '';
 	}
 
 	/**

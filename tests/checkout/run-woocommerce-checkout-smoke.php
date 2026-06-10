@@ -600,13 +600,24 @@ $cdek_pickup = array(
 		'cdek_code' => 'KEM7',
 	),
 );
-$session->save_checkout_pickup_point( $cdek_pickup );
+$session->clear_pickup_selection( 'cdek_hidden_fields_restore_smoke' );
 $errors = new WdcSmokeCheckoutErrors();
 ( new CheckoutValidation( $session ) )->validate(
 	array(
 		'shipping_method' => array( 'wdc_platform_delivery:cdek:pickup:136' ),
 		'shipping_city' => 'Kemerovo',
 		'wdc_pickup_point_code' => 'KEM7',
+		'wdc_pickup_carrier_key' => 'cdek',
+		'wdc_pickup_point_type' => 'POSTAMAT',
+		'wdc_pickup_point_name' => 'CDEK Postamat',
+		'wdc_pickup_point_address' => 'Kemerovo, Sovetskiy 10',
+		'wdc_pickup_point_postcode' => '650004',
+		'wdc_pickup_city_name' => 'Kemerovo',
+		'wdc_pickup_region_name' => 'Kemerovo region',
+		'wdc_pickup_work_time' => '0.000000',
+		'wdc_pickup_description' => 'Inside the shopping center',
+		'wdc_pickup_storage_notice' => 'Срок хранения 3 дня',
+		'wdc_pickup_cdek_code' => 'KEM7',
 	),
 	$errors
 );
@@ -616,6 +627,7 @@ $cdek_pickup_order = new WdcSmokeOrder();
 $cdek_pickup_calc = $cdek_pickup_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ];
 wc_checkout_smoke_assert( 'KEM7' === ( $cdek_pickup_calc['pickup']['point_code'] ?? '' ) && '650004' === ( $cdek_pickup_calc['pickup']['point_postcode'] ?? '' ), 'CDEK checkout order create must save point_code separately from postcode.' );
 wc_checkout_smoke_assert( 'Inside the shopping center' === ( $cdek_pickup_calc['pickup']['description'] ?? '' ) && 'Срок хранения 3 дня' === ( $cdek_pickup_calc['pickup']['storage_notice'] ?? '' ), 'CDEK checkout order create must save pickup description and storage notice.' );
+wc_checkout_smoke_assert( '' === ( $cdek_pickup_calc['pickup']['work_time'] ?? '' ), 'CDEK checkout order create must not save numeric zero work_time as meaningful text.' );
 wc_checkout_smoke_assert( 'Kemerovo, Sovetskiy 10' === $cdek_pickup_order->shipping_address_1 && '' === $cdek_pickup_order->shipping_address_2, 'CDEK checkout order create must write pickup shipping address.' );
 
 $session->save_rates(

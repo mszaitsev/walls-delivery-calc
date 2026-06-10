@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.1.
+Version: 0.45.2.
+
+0.45.2 card fix: CDEK pickup cards now use carrier-aware titles on checkout, thankyou/order display and email output. `PVZ` renders as `Пункт выдачи СДЭК`; `POSTAMAT` renders as `Постамат СДЭК`. CDEK descriptions are persisted through checkout hidden fields/session, order meta and `_wdc_delivery_calculation_data.pickup`, then rendered with the `Описание:` label. Empty or numeric-zero `work_time`/description values (`0`, `0.0`, `0.000000`) are suppressed, so Russian Post cards no longer show accidental zero descriptions. CDEK POSTAMAT still renders red bold `Срок хранения 3 дня`.
 
 0.45.1 QA fix: CDEK pickup validation is now restored from the CDEK checkout/session payload and no longer falls through to the Russian Post pickup repository for CDEK point codes. CDEK `point_code`/`cdek_code` is the CDEK delivery point code, for example `KEM7`, and is not the postcode. CDEK `PVZ` and `POSTAMAT` are rendered separately: `PVZ` is `Пункт выдачи СДЭК`, `POSTAMAT` is `Постамат СДЭК`. CDEK postamats use a separate marker color and show `Срок хранения 3 дня` as red bold text in map popup, selected point cards, order display and emails. CDEK pickup descriptions are preserved in session/order calculation data and rendered with the pickup card.
 

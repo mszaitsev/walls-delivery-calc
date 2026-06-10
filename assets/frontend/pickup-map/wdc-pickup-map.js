@@ -91,6 +91,8 @@
 		function renderPointPopup(point, selected) {
 			var rows = [];
 			var title = [carrierTitle(point), pointDisplayCode(point)].filter(Boolean).join(' ');
+			var workTime = meaningfulText(point.work_time);
+			var description = cleanDescription(point.description);
 			if (title) {
 				rows.push('<h3 class="wdc-pickup-popup__title">' + escapeHtml(title) + '</h3>');
 			}
@@ -101,11 +103,11 @@
 			if (point.address) {
 				rows.push('<div class="wdc-pickup-popup__section"><strong>Адрес:</strong><span>' + escapeHtml(point.address) + '</span></div>');
 			}
-			if (point.work_time) {
-				rows.push('<div class="wdc-pickup-popup__section"><strong>График:</strong><span>' + escapeHtml(point.work_time) + '</span></div>');
+			if (workTime) {
+				rows.push('<div class="wdc-pickup-popup__section"><strong>График:</strong><span>' + escapeHtml(workTime) + '</span></div>');
 			}
-			if (cleanDescription(point.description)) {
-				rows.push('<div class="wdc-pickup-popup__section"><strong>Описание:</strong><span>' + escapeHtml(cleanDescription(point.description)) + '</span></div>');
+			if (description) {
+				rows.push('<div class="wdc-pickup-popup__section"><strong>Описание:</strong><span>' + escapeHtml(description) + '</span></div>');
 			}
 			rows.push('<button type="button" class="button button-primary wdc-pickup-popup__select" data-wdc-pickup-popup-select data-wdc-point-id="' + escapeHtml(pointId(point)) + '"' + (selected ? ' disabled' : '') + '>' + escapeHtml(selected ? 'Выбран' : 'Выбрать этот пункт') + '</button>');
 			return '<div class="wdc-pickup-popup">' + rows.join('') + '</div>';
@@ -673,9 +675,9 @@
 		normalized.address = normalized.address || snapshot.address;
 		normalized.lat = normalized.lat !== undefined && normalized.lat !== null ? normalized.lat : snapshot.lat;
 		normalized.lng = normalized.lng !== undefined && normalized.lng !== null ? normalized.lng : snapshot.lng;
-		normalized.work_time = normalized.work_time || snapshot.work_time;
-		normalized.description = normalized.description || snapshot.description;
-		normalized.storage_notice = normalized.storage_notice || snapshot.storage_notice;
+		normalized.work_time = firstMeaningfulText(normalized.work_time, snapshot.work_time);
+		normalized.description = firstCleanDescription(normalized.description, snapshot.description);
+		normalized.storage_notice = firstCleanDescription(normalized.storage_notice, snapshot.storage_notice);
 		normalized.cdek_code = normalized.cdek_code || snapshot.cdek_code;
 		return pointId(normalized) ? normalized : null;
 	}
@@ -686,7 +688,10 @@
 
 	function carrierTitle(point) {
 		var carrier = String((point && (point.carrier_key || point.carrier)) || '').toLowerCase();
-		return carrier === 'cdek' ? 'СДЭК' : 'Почта России';
+		if (carrier === 'cdek') {
+			return pickupPointType(point) === 'POSTAMAT' ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК';
+		}
+		return 'Почта России';
 	}
 
 	function isCdekPoint(point) {
@@ -769,8 +774,9 @@
 		if (!point) {
 			return '';
 		}
-		if (point.storage_notice) {
-			return String(point.storage_notice);
+		var notice = cleanDescription(point.storage_notice);
+		if (notice) {
+			return notice;
 		}
 		return isCdekPoint(point) && pickupPointType(point) === 'POSTAMAT' ? 'Срок хранения 3 дня' : '';
 	}
@@ -781,6 +787,38 @@
 			return '';
 		}
 		return text;
+	}
+
+	function meaningfulText(value) {
+		if (value === null || value === undefined || Array.isArray(value) || typeof value === 'object') {
+			return '';
+		}
+		var text = String(value).trim();
+		if (!text) {
+			return '';
+		}
+		var normalized = text.replace(',', '.');
+		return !isNaN(normalized) && parseFloat(normalized) === 0 ? '' : text;
+	}
+
+	function firstMeaningfulText() {
+		for (var i = 0; i < arguments.length; i++) {
+			var text = meaningfulText(arguments[i]);
+			if (text) {
+				return text;
+			}
+		}
+		return '';
+	}
+
+	function firstCleanDescription() {
+		for (var i = 0; i < arguments.length; i++) {
+			var text = cleanDescription(arguments[i]);
+			if (text) {
+				return text;
+			}
+		}
+		return '';
 	}
 
 	function listMeta(total, shown) {

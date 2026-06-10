@@ -21,6 +21,7 @@ use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Checkout\WooCommerce\PickupPointOrderDisplay;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
@@ -138,7 +139,8 @@ final class CdekPickupFakeHttpClient implements CdekHttpClientInterface {
 							'type' => 'POSTAMAT',
 							'owner_code' => 'CDEK',
 							'nearest_station' => 'Mall',
-							'description' => 'Inside the shopping center',
+							'note' => 'Inside the shopping center',
+							'description' => '0.000000',
 							'work_time' => 'Daily 10-22',
 							'address_comment' => 'First floor',
 							'location' => array(
@@ -278,7 +280,10 @@ $pvz_card = $card_renderer->render( array_merge( $pvz, array( 'rate_id' => 'cdek
 $postamat_card = $card_renderer->render( array_merge( $postamat, array( 'rate_id' => 'cdek:pickup:136' ) ), false, false );
 cdek_pickup_assert( str_contains( $pvz_card, 'Пункт выдачи СДЭК' ), 'CDEK PVZ card title must be carrier-aware.' );
 cdek_pickup_assert( str_contains( $postamat_card, 'Постамат СДЭК' ) && str_contains( $postamat_card, 'Срок хранения 3 дня' ), 'CDEK POSTAMAT card title and storage notice must render.' );
-cdek_pickup_assert( str_contains( $postamat_card, 'Inside the shopping center' ), 'CDEK pickup description must render in pickup card.' );
+cdek_pickup_assert( str_contains( $postamat_card, 'Описание:' ) && str_contains( $postamat_card, 'Inside the shopping center' ), 'CDEK pickup description must render with label in pickup card.' );
+cdek_pickup_assert( ! str_contains( $postamat_card, '0.000000' ), 'CDEK pickup card must not render numeric zero description.' );
+$empty_work_card = $card_renderer->render( array_merge( $postamat, array( 'work_time' => '0.000000', 'point_work_time' => '0.000000', 'rate_id' => 'cdek:pickup:136' ) ), false, false );
+cdek_pickup_assert( ! str_contains( $empty_work_card, 'Время работы:' ), 'Pickup card must not render empty numeric work_time row.' );
 
 $delivery_requests = $http->countDeliveryPointRequests();
 $service->pointsByCityCode( 270 );
@@ -334,7 +339,7 @@ $selection = array(
 	'region_name' => (string) $point['region_name'],
 	'lat' => $point['lat'],
 	'lng' => $point['lng'],
-	'point_work_time' => (string) $point['work_time'],
+	'point_work_time' => '0.000000',
 	'description' => (string) $point['description'],
 	'storage_notice' => (string) $point['storage_notice'],
 	'cdek_code' => (string) $point['cdek_code'],
@@ -370,8 +375,27 @@ $calculation = $checkout_order->meta[ OrderShippingMetaPersister::CALCULATION_ME
 cdek_pickup_assert( 'cdek' === ( $calculation['pickup']['carrier_key'] ?? '' ) && 'KEM7' === ( $calculation['pickup']['point_code'] ?? '' ), 'Checkout calculation data must save CDEK pickup block.' );
 cdek_pickup_assert( 'KEM7' === ( $calculation['pickup']['cdek_code'] ?? '' ) && 'POSTAMAT' === ( $calculation['pickup']['point_type'] ?? '' ), 'Checkout calculation data must save CDEK code and point type.' );
 cdek_pickup_assert( 'Inside the shopping center' === ( $calculation['pickup']['description'] ?? '' ) && 'Срок хранения 3 дня' === ( $calculation['pickup']['storage_notice'] ?? '' ), 'Checkout calculation data must save CDEK description and storage notice.' );
+cdek_pickup_assert( '' === ( $calculation['pickup']['work_time'] ?? '' ), 'Checkout calculation data must not save numeric zero work_time.' );
 cdek_pickup_assert( isset( $calculation['pickup']['raw_sanitized'] ) && is_array( $calculation['pickup']['raw_sanitized'] ), 'Checkout calculation data must save raw_sanitized pickup payload.' );
 cdek_pickup_assert( 1 === count( $item->meta ) && in_array( '2-4 days', array_values( $item->meta ), true ), 'Checkout visible shipping item meta must contain only delivery time.' );
+
+$order_display = new PickupPointOrderDisplay( $card_renderer, $settings_repository );
+ob_start();
+$order_display->render( $checkout_order );
+$order_card = (string) ob_get_clean();
+cdek_pickup_assert( str_contains( $order_card, 'Постамат СДЭК' ), 'CDEK thankyou/order card must render carrier-aware POSTAMAT title.' );
+cdek_pickup_assert( str_contains( $order_card, 'Код пункта:' ) && str_contains( $order_card, 'KEM7' ), 'CDEK thankyou/order card must render CDEK point code.' );
+cdek_pickup_assert( str_contains( $order_card, 'Индекс:' ) && str_contains( $order_card, '650004' ), 'CDEK thankyou/order card must render pickup postcode.' );
+cdek_pickup_assert( str_contains( $order_card, 'Kemerovo, Sovetskiy 10' ), 'CDEK thankyou/order card must render pickup address.' );
+cdek_pickup_assert( str_contains( $order_card, 'Описание:' ) && str_contains( $order_card, 'Inside the shopping center' ), 'CDEK thankyou/order card must render saved description with label.' );
+cdek_pickup_assert( str_contains( $order_card, 'Срок хранения 3 дня' ), 'CDEK thankyou/order card must render POSTAMAT storage notice.' );
+cdek_pickup_assert( ! str_contains( $order_card, 'Время работы:' ) && ! str_contains( $order_card, '0.000000' ), 'CDEK thankyou/order card must not render empty work_time or numeric zero values.' );
+
+$settings_repository->set( 'pickup_email_card_enabled_emails', array( 'customer_completed_order' ) );
+ob_start();
+$order_display->render_email( $checkout_order, false, false, (object) array( 'id' => 'customer_completed_order' ) );
+$email_card = (string) ob_get_clean();
+cdek_pickup_assert( str_contains( $email_card, 'Постамат СДЭК' ) && str_contains( $email_card, 'Inside the shopping center' ) && str_contains( $email_card, 'Срок хранения 3 дня' ), 'CDEK email pickup card must render title, description and storage notice.' );
 
 $replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository() );
 $admin_order_without_point = new CdekPickupSmokeOrder();
