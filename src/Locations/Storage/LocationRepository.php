@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Locations\Storage;
 
 use RuntimeException;
+use WallsShop\WDC\Locations\Postcodes\RussianPostCourierCalcPostcodeFillStateService;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
@@ -583,12 +584,19 @@ final class LocationRepository {
 			return count(
 				array_filter(
 					$this->test_location_rows(),
-					static fn( array $row ): bool => '' !== trim( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) )
+					static fn( array $row ): bool =>
+						'' !== trim( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) )
+						&& RussianPostCourierCalcPostcodeFillStateService::COURIER_POSTCODE_TECHNICAL_ERROR !== trim( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) )
 				)
 			);
 		}
 
-		return (int) $this->wpdb->get_var( "SELECT COUNT(*) FROM {$this->table_name()} WHERE russianpost_courier_calc_postal_code IS NOT NULL AND russianpost_courier_calc_postal_code != ''" );
+		return (int) $this->wpdb->get_var(
+			$this->wpdb->prepare(
+				"SELECT COUNT(*) FROM {$this->table_name()} WHERE russianpost_courier_calc_postal_code IS NOT NULL AND russianpost_courier_calc_postal_code != '' AND russianpost_courier_calc_postal_code != %s",
+				RussianPostCourierCalcPostcodeFillStateService::COURIER_POSTCODE_TECHNICAL_ERROR
+			)
+		);
 	}
 
 	public function count_locations_with_coordinates(): int {
@@ -874,19 +882,26 @@ final class LocationRepository {
 	 * @return array<string,mixed>|null
 	 */
 	public function next_russianpost_courier_calc_postcode_location( int $after_id = 0, string $priority = 'cities' ): ?array {
-		$priority = 'others' === $priority ? 'others' : 'cities';
+		$priority = in_array( $priority, array( 'technical_retry', 'cities', 'others' ), true ) ? $priority : 'cities';
 		if ( $this->has_test_location_rows() ) {
 			$rows = array_values(
 				array_filter(
 					$this->test_location_rows(),
 					function ( array $row ) use ( $after_id, $priority ): bool {
+						$courier_postcode = trim( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) );
 						if (
 							(int) ( $row['id'] ?? 0 ) <= $after_id
 							|| ! $this->is_ru_location_row( $row )
 							|| '' === trim( (string) ( $row['postal_code'] ?? '' ) )
-							|| '999999999' === trim( (string) ( $row['postal_code'] ?? '' ) )
-							|| '' !== trim( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) )
+							|| RussianPostCourierCalcPostcodeFillStateService::COURIER_POSTCODE_TECHNICAL_ERROR === trim( (string) ( $row['postal_code'] ?? '' ) )
 						) {
+							return false;
+						}
+
+						if ( 'technical_retry' === $priority ) {
+							return RussianPostCourierCalcPostcodeFillStateService::COURIER_POSTCODE_TECHNICAL_ERROR === $courier_postcode;
+						}
+						if ( '' !== $courier_postcode ) {
 							return false;
 						}
 
@@ -902,6 +917,16 @@ final class LocationRepository {
 			? "AND (place_type IN ('г', 'г.') OR city_type IN ('г', 'г.') OR settlement_type IN ('г', 'г.'))"
 			: "AND (place_type IS NULL OR place_type NOT IN ('г', 'г.')) AND (city_type IS NULL OR city_type NOT IN ('г', 'г.')) AND (settlement_type IS NULL OR settlement_type NOT IN ('г', 'г.'))";
 
+		if ( 'technical_retry' === $priority ) {
+			$type_sql = '';
+		}
+		$courier_sql = 'technical_retry' === $priority
+			? 'AND russianpost_courier_calc_postal_code = %s'
+			: "AND (russianpost_courier_calc_postal_code IS NULL OR russianpost_courier_calc_postal_code = '')";
+		$args = 'technical_retry' === $priority
+			? array( $after_id, RussianPostCourierCalcPostcodeFillStateService::COURIER_POSTCODE_TECHNICAL_ERROR, RussianPostCourierCalcPostcodeFillStateService::COURIER_POSTCODE_TECHNICAL_ERROR )
+			: array( $after_id, RussianPostCourierCalcPostcodeFillStateService::COURIER_POSTCODE_TECHNICAL_ERROR );
+
 		$row = $this->wpdb->get_row(
 			$this->wpdb->prepare(
 				"SELECT *
@@ -911,12 +936,12 @@ final class LocationRepository {
 					AND country_code = 'RU'
 					AND postal_code IS NOT NULL
 					AND postal_code != ''
-					AND postal_code != '999999999'
-					AND (russianpost_courier_calc_postal_code IS NULL OR russianpost_courier_calc_postal_code = '')
+					AND postal_code != %s
+					{$courier_sql}
 					{$type_sql}
 				ORDER BY id ASC
 				LIMIT 1",
-				$after_id
+				...$args
 			),
 			ARRAY_A
 		);
@@ -967,6 +992,62 @@ final class LocationRepository {
 		}
 
 		return (int) $result;
+	}
+
+	public function update_russianpost_courier_calc_postal_code_for_location_id( int $location_id, string $calc_postal_code ): bool {
+		if ( $location_id <= 0 ) {
+			return false;
+		}
+		$calc_postal_code = $this->valid_courier_calc_postal_code( $calc_postal_code );
+		if ( '' === $calc_postal_code ) {
+			return false;
+		}
+
+		$data = array(
+			'russianpost_courier_calc_postal_code' => $calc_postal_code,
+			'updated_at' => current_time( 'mysql' ),
+		);
+		if ( $this->has_test_location_rows() ) {
+			$property = $this->test_location_rows_property();
+			if ( ! isset( $this->wpdb->{$property}[ $location_id ] ) ) {
+				return false;
+			}
+			$this->wpdb->{$property}[ $location_id ] = array_merge( $this->wpdb->{$property}[ $location_id ], $data );
+			return true;
+		}
+
+		$result = $this->wpdb->update( $this->table_name(), $data, array( 'id' => $location_id ), array( '%s', '%s' ), array( '%d' ) );
+		if ( false === $result ) {
+			$this->throw_sql_error( 'Russian Post courier calc postal_code location update failed' );
+		}
+
+		return (int) $result > 0;
+	}
+
+	public function clear_russianpost_courier_calc_postal_code_for_location_id( int $location_id ): bool {
+		if ( $location_id <= 0 ) {
+			return false;
+		}
+
+		$data = array(
+			'russianpost_courier_calc_postal_code' => '',
+			'updated_at' => current_time( 'mysql' ),
+		);
+		if ( $this->has_test_location_rows() ) {
+			$property = $this->test_location_rows_property();
+			if ( ! isset( $this->wpdb->{$property}[ $location_id ] ) ) {
+				return false;
+			}
+			$this->wpdb->{$property}[ $location_id ] = array_merge( $this->wpdb->{$property}[ $location_id ], $data );
+			return true;
+		}
+
+		$result = $this->wpdb->update( $this->table_name(), $data, array( 'id' => $location_id ), array( '%s', '%s' ), array( '%d' ) );
+		if ( false === $result ) {
+			$this->throw_sql_error( 'Russian Post courier calc postal_code location clear failed' );
+		}
+
+		return (int) $result > 0;
 	}
 
 	public function clear_russianpost_courier_calc_postal_codes(): int {
@@ -1548,6 +1629,15 @@ final class LocationRepository {
 		}
 
 		return preg_match( '/^\d{6}$/', $postcode ) ? $postcode : '';
+	}
+
+	private function valid_courier_calc_postal_code( string $postcode ): string {
+		$postcode = preg_replace( '/\D+/', '', $postcode ) ?? '';
+		if ( RussianPostCourierCalcPostcodeFillStateService::COURIER_POSTCODE_TECHNICAL_ERROR === $postcode ) {
+			return $postcode;
+		}
+
+		return $this->valid_six_digit_postcode( $postcode );
 	}
 
 	/**

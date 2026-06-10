@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Locations\Postcodes;
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCourierTariffProbeService;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -12,6 +13,8 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 	public const TARGET_PROBES_PER_SECOND = 6;
 	public const MAX_PROBES_PER_STEP = 18;
 	public const MAX_STEP_SECONDS = 3;
+	public const COURIER_POSTCODE_TECHNICAL_ERROR = '999999999';
+	public const MAX_TECHNICAL_ATTEMPTS = 5;
 
 	private \wpdb $wpdb;
 
@@ -23,7 +26,8 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 		private object $probe,
 		?\wpdb $db = null,
 		private mixed $time_provider = null,
-		private mixed $sleeper = null
+		private mixed $sleeper = null,
+		private ?Logger $logger = null
 	) {
 		global $wpdb;
 		$this->wpdb = $db ?? $wpdb;
@@ -59,7 +63,7 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 			'max_probes_per_step' => self::MAX_PROBES_PER_STEP,
 			'max_step_seconds' => self::MAX_STEP_SECONDS,
 			'last_id' => 0,
-			'current_priority' => 'cities',
+			'current_priority' => 'technical_retry',
 			'candidate_offset' => 0,
 			'current_location' => array(),
 			'current_candidates' => array(),
@@ -104,6 +108,7 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 
 		$location_id = (int) ( $location['id'] ?? 0 );
 		$base_postal_code = $this->valid_postcode( (string) ( $location['postal_code'] ?? '' ) );
+		$had_technical_marker = self::COURIER_POSTCODE_TECHNICAL_ERROR === trim( (string) ( $location['russianpost_courier_calc_postal_code'] ?? '' ) );
 		$job['current_location'] = $location;
 		$job['last_location_id'] = $location_id;
 		$job['last_postal_code'] = $base_postal_code;
@@ -122,6 +127,7 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 		$offset = max( 0, (int) ( $job['candidate_offset'] ?? 0 ) );
 		$found = '';
 		$api_error = false;
+		$final_api_error_result = array();
 
 		while (
 			$offset < count( $candidates )
@@ -134,13 +140,24 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 				continue;
 			}
 
-			$this->pace_probe_start( $last_probe_started );
-			++$job['probes'];
-			++$job['step_probes'];
-			$probe_started = $this->now_microtime();
-			$last_probe_started = $probe_started;
-			$result = $this->probe->probe( $candidate );
-			$job['last_probe_duration_ms'] = max( 0, (int) round( ( $this->now_microtime() - $probe_started ) * 1000 ) );
+			$result = array();
+			for ( $attempt = 1; $attempt <= self::MAX_TECHNICAL_ATTEMPTS; ++$attempt ) {
+				$this->pace_probe_start( $last_probe_started );
+				++$job['probes'];
+				++$job['step_probes'];
+				$probe_started = $this->now_microtime();
+				$last_probe_started = $probe_started;
+				$result = $this->probe->probe( $candidate );
+				$job['last_probe_duration_ms'] = max( 0, (int) round( ( $this->now_microtime() - $probe_started ) * 1000 ) );
+				if ( $this->is_technical_error_result( $result ) ) {
+					$this->log_technical_attempt( $location, $candidate, $attempt, $result );
+					if ( $attempt < self::MAX_TECHNICAL_ATTEMPTS ) {
+						continue;
+					}
+				}
+				break;
+			}
+
 			if ( ! empty( $result['success'] ) ) {
 				$found = $candidate;
 				$job['consecutive_errors'] = 0;
@@ -149,11 +166,9 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 
 			$job['last_error'] = (string) ( $result['error_message'] ?? '' );
 			$job['last_error_code'] = (string) ( $result['error_code'] ?? '' );
-			if ( ! empty( $result['api_error'] ) ) {
+			if ( $this->is_technical_error_result( $result ) ) {
 				$api_error = true;
-				++$job['failed'];
-				++$job['errors'];
-				++$job['consecutive_errors'];
+				$final_api_error_result = $result;
 				break;
 			}
 
@@ -162,14 +177,24 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 
 		$job['candidate_offset'] = $offset;
 		if ( '' !== $found ) {
-			$updated = $this->locations->update_russianpost_courier_calc_postal_code_for_postal_code( $base_postal_code, $found, true );
+			$updated = $had_technical_marker
+				? ( $this->locations->update_russianpost_courier_calc_postal_code_for_location_id( $location_id, $found ) ? 1 : 0 )
+				: $this->locations->update_russianpost_courier_calc_postal_code_for_postal_code( $base_postal_code, $found, true );
 			$job['updated'] = (int) ( $job['updated'] ?? 0 ) + ( $updated > 0 ? 1 : 0 );
 			$job['bulk_updated'] = (int) ( $job['bulk_updated'] ?? 0 ) + $updated;
 			$job['last_success_postal_code'] = $found;
 			$job = $this->finish_location( $job, $location_id );
 		} elseif ( $api_error ) {
+			++$job['failed'];
+			++$job['errors'];
+			++$job['consecutive_errors'];
+			$this->locations->update_russianpost_courier_calc_postal_code_for_location_id( $location_id, self::COURIER_POSTCODE_TECHNICAL_ERROR );
+			$this->log_final_technical_marker( $location, $final_api_error_result );
 			$job = $this->finish_location( $job, $location_id );
 		} elseif ( $offset >= count( $candidates ) ) {
+			if ( $had_technical_marker ) {
+				$this->locations->clear_russianpost_courier_calc_postal_code_for_location_id( $location_id );
+			}
 			++$job['marked_no_index'];
 			$job = $this->finish_location( $job, $location_id );
 		}
@@ -188,7 +213,7 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 						1 === (int) ( $row['active'] ?? 1 )
 						&& 'RU' === strtoupper( trim( (string) ( $row['country_code'] ?? 'RU' ) ) )
 						&& '' !== $this->valid_postcode( (string) ( $row['postal_code'] ?? '' ) )
-						&& '' === trim( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) )
+						&& in_array( trim( (string) ( $row['russianpost_courier_calc_postal_code'] ?? '' ) ), array( '', self::COURIER_POSTCODE_TECHNICAL_ERROR ), true )
 				)
 			);
 		}
@@ -199,8 +224,8 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 				AND country_code = 'RU'
 				AND postal_code IS NOT NULL
 				AND postal_code != ''
-				AND postal_code != '999999999'
-				AND (russianpost_courier_calc_postal_code IS NULL OR russianpost_courier_calc_postal_code = '')"
+				AND postal_code != '" . self::COURIER_POSTCODE_TECHNICAL_ERROR . "'
+				AND (russianpost_courier_calc_postal_code IS NULL OR russianpost_courier_calc_postal_code = '' OR russianpost_courier_calc_postal_code = '" . self::COURIER_POSTCODE_TECHNICAL_ERROR . "')"
 		);
 	}
 
@@ -209,9 +234,14 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 	 * @return array<string,mixed>|null
 	 */
 	private function next_location( array &$job ): ?array {
-		$priority = (string) ( $job['current_priority'] ?? 'cities' );
+		$priority = (string) ( $job['current_priority'] ?? 'technical_retry' );
 		$location = $this->locations->next_russianpost_courier_calc_postcode_location( (int) ( $job['last_id'] ?? 0 ), $priority );
-		if ( null === $location && 'cities' === $priority ) {
+		if ( null === $location && 'technical_retry' === $priority ) {
+			$job['current_priority'] = 'cities';
+			$job['last_id'] = 0;
+			$location = $this->locations->next_russianpost_courier_calc_postcode_location( 0, 'cities' );
+		}
+		if ( null === $location && 'cities' === (string) ( $job['current_priority'] ?? '' ) ) {
 			$job['current_priority'] = 'others';
 			$job['last_id'] = 0;
 			$location = $this->locations->next_russianpost_courier_calc_postcode_location( 0, 'others' );
@@ -240,7 +270,7 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 			array_unique(
 				array_filter(
 					array_map( fn( string $postcode ): string => $this->valid_postcode( $postcode ), $candidates ),
-					static fn( string $postcode ): bool => '' !== $postcode && '999999999' !== $postcode
+					static fn( string $postcode ): bool => '' !== $postcode && self::COURIER_POSTCODE_TECHNICAL_ERROR !== $postcode
 				)
 			)
 		);
@@ -309,11 +339,67 @@ final class RussianPostCourierCalcPostcodeFillStateService {
 
 	private function valid_postcode( string $postcode ): string {
 		$postcode = preg_replace( '/\D+/', '', $postcode ) ?? '';
-		if ( '' === $postcode || '999999999' === $postcode ) {
+		if ( '' === $postcode || self::COURIER_POSTCODE_TECHNICAL_ERROR === $postcode ) {
 			return '';
 		}
 
 		return preg_match( '/^\d{6}$/', $postcode ) ? $postcode : '';
+	}
+
+	/**
+	 * @param array<string,mixed> $result
+	 */
+	private function is_technical_error_result( array $result ): bool {
+		return ! empty( $result['api_error'] ) && empty( $result['unavailable'] );
+	}
+
+	/**
+	 * @param array<string,mixed> $location
+	 * @param array<string,mixed> $result
+	 */
+	private function log_technical_attempt( array $location, string $candidate, int $attempt, array $result ): void {
+		if ( ! $this->logger instanceof Logger ) {
+			return;
+		}
+
+		$this->logger->warning(
+			'Russian Post courier postcode probe technical error.',
+			array(
+				'location_id' => (int) ( $location['id'] ?? 0 ),
+				'fias_id' => (string) ( $location['fias_id'] ?? '' ),
+				'display_name' => (string) ( $location['display_name'] ?? '' ),
+				'postal_code' => $this->valid_postcode( (string) ( $location['postal_code'] ?? '' ) ),
+				'candidate_postal_code' => $candidate,
+				'attempt' => $attempt,
+				'max_attempts' => self::MAX_TECHNICAL_ATTEMPTS,
+				'error_code' => (string) ( $result['error_code'] ?? '' ),
+				'error_message' => (string) ( $result['error_message'] ?? '' ),
+			)
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $location
+	 * @param array<string,mixed> $result
+	 */
+	private function log_final_technical_marker( array $location, array $result ): void {
+		if ( ! $this->logger instanceof Logger ) {
+			return;
+		}
+
+		$this->logger->warning(
+			'Russian Post courier postcode technical marker saved.',
+			array(
+				'location_id' => (int) ( $location['id'] ?? 0 ),
+				'fias_id' => (string) ( $location['fias_id'] ?? '' ),
+				'display_name' => (string) ( $location['display_name'] ?? '' ),
+				'postal_code' => $this->valid_postcode( (string) ( $location['postal_code'] ?? '' ) ),
+				'technical_marker' => self::COURIER_POSTCODE_TECHNICAL_ERROR,
+				'max_attempts' => self::MAX_TECHNICAL_ATTEMPTS,
+				'error_code' => (string) ( $result['error_code'] ?? '' ),
+				'error_message' => (string) ( $result['error_message'] ?? '' ),
+			)
+		);
 	}
 
 	private function min_probe_interval_microseconds(): int {

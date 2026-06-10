@@ -1,6 +1,8 @@
 # Russian Post Domestic Carrier
 
-Version: 0.39.5.
+Version: 0.44.9.
+
+Version 0.44.9 hardens the admin tool that fills `russianpost_courier_calc_postal_code` for courier Russian Post tariff calculation. Technical request failures retry up to 5 attempts; if all attempts fail, WDC counts one error and stores courier marker `999999999` to mean "technical error, retry later". This marker is not the same as courier delivery being unavailable. New/reset runs process marker rows first, then city rows, then other settlements. A later successful response overwrites `999999999`, while a valid "courier unavailable" response clears it and leaves the courier postcode empty.
 
 Version 0.39.5 also pulls actual Russian Post cost after ordinary shipment creation from the order metabox. After successful create, WDC calls `backlog/search` by barcode, uses the same shared extractor as manual tracking attach, stores source `backlog_search_after_create`, and keeps create successful if the lookup fails or returns no totals.
 
@@ -18,7 +20,7 @@ Russian Post domestic is the current RU-only carrier/service runtime for checkou
 - Delivery types: `pickup` and `courier`
 - Checkout group ids: `russian_post_domestic:pickup`, `russian_post_domestic:courier`
 - Concrete rate ids: `russian_post_domestic:pickup:{object_code}`, `russian_post_domestic:courier:{object_code}`
-- Current documented version: `0.39.5`
+- Current documented version: `0.44.9`
 
 Cash on delivery / mandatory payment is not used. Insurance is represented by declared value; in Russian Post Tariff API terms this means tariff variants that require `sumoc`.
 
