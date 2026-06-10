@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
-use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
@@ -130,52 +129,20 @@ final class OrderShippingMetaPersister {
 			return;
 		}
 
-		$delivery_type = (string) ( $rate['delivery_type'] ?? '' );
 		if ( $this->is_russian_post_domestic_rate( $rate ) ) {
 			$method_title = $this->domestic_method_title( $rate );
 			if ( method_exists( $item, 'set_method_title' ) && '' !== $method_title ) {
 				$item->set_method_title( $method_title );
 			}
-			$this->delete_visible_technical_item_meta( $item );
-			$delivery = $this->delivery_days_label( is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array() );
-			if ( '' !== $delivery ) {
-				$item->add_meta_data( 'Срок доставки', $delivery, true );
+		} elseif ( $this->is_cdek_rate( $rate ) ) {
+			$method_title = $this->compact_method_title( $rate );
+			if ( method_exists( $item, 'set_method_title' ) && '' !== $method_title ) {
+				$item->set_method_title( $method_title );
 			}
-			return;
-		}
-		if ( $this->is_russian_post_international_rate( $rate ) ) {
-			$this->delete_visible_technical_item_meta( $item );
-			$item->add_meta_data( 'Способ доставки', 'международная доставка Почтой России', true );
-			return;
 		}
 
-		$rows          = array(
-			'Перевозчик'       => (string) ( $rate['carrier_key'] ?? '' ),
-			'Способ доставки'  => (string) ( $rate['rate_id'] ?? '' ),
-			'Тип доставки'     => $this->delivery_type_label( $delivery_type ),
-			'Срок доставки'    => (string) ( $rate['planned_delivery_comment'] ?? '' ),
-			'Населенный пункт' => $this->address_summary(),
-			'Нормализация'     => $this->normalization_summary(),
-		);
-
-		$pickup = $this->session_manager->pickup_selection();
-		if (
-			'pickup' === $delivery_type
-			&& $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) )
-		) {
-			$rows['Код ПВЗ']          = (string) ( $pickup['point_code'] ?? '' );
-			$rows['Адрес ПВЗ']        = (string) ( $pickup['point_address'] ?? '' );
-			$rows['Комментарий ПВЗ']  = (string) ( $pickup['point_comment'] ?? '' );
-			$rows['Режим работы ПВЗ'] = (string) ( $pickup['point_work_time'] ?? '' );
-		}
-
-		foreach ( $rows as $label => $value ) {
-			if ( '' === trim( (string) $value ) ) {
-				continue;
-			}
-
-			$item->add_meta_data( $label, $value, true );
-		}
+		$this->delete_visible_technical_item_meta( $item );
+		$item->add_meta_data( 'Срок доставки', $this->delivery_label_or_not_specified( $rate ), true );
 	}
 
 	/**
@@ -261,11 +228,12 @@ final class OrderShippingMetaPersister {
 		$final_weight = (int) ( $rate_meta['package_weight_with_packaging_g'] ?? $package['total_weight_g'] ?? $package['weight_g'] ?? 0 );
 
 		return array(
-			'products_weight_g'          => (int) ( $rate_meta['products_weight_g'] ?? $package['weight_g'] ?? $final_weight ),
-			'packaging_weight_g'         => (int) ( $rate_meta['packaging_weight_g'] ?? 0 ),
+			'products_weight_g'          => (int) ( $rate_meta['products_weight_g'] ?? $package['items_weight_g'] ?? $package['weight_g'] ?? $final_weight ),
+			'packaging_weight_g'         => (int) ( $rate_meta['packaging_weight_g'] ?? $package['packaging_weight_g'] ?? 0 ),
 			'final_weight_g'             => $final_weight,
 			'include_packaging_weight'   => ! empty( $rate_meta['include_packaging_weight'] ),
 			'packaging_weight_mode'      => (string) ( $rate_meta['packaging_weight_mode'] ?? '' ),
+			'dimensions_cm'              => is_array( $package['dimensions_cm'] ?? null ) ? $package['dimensions_cm'] : array(),
 		);
 	}
 
@@ -276,6 +244,7 @@ final class OrderShippingMetaPersister {
 	private function calculation_api_data( array $rate_meta ): array {
 		$country    = is_array( $rate_meta['country_mapping'] ?? null ) ? $rate_meta['country_mapping'] : array();
 		$api_result = is_array( $rate_meta['api_result'] ?? null ) ? $rate_meta['api_result'] : array();
+		$location   = is_array( $rate_meta['location'] ?? null ) ? $rate_meta['location'] : array();
 
 		return array_filter(
 			array(
@@ -295,6 +264,12 @@ final class OrderShippingMetaPersister {
 						'max_days' => $rate_meta['delivery_max_days'] ?? null,
 					)
 				),
+				'api_delivery_days_text'  => (string) ( $rate_meta['api_delivery_days_text'] ?? '' ),
+				'request_payload_sanitized' => is_array( $rate_meta['request_payload_sanitized'] ?? null ) ? $rate_meta['request_payload_sanitized'] : array(),
+				'response_tariff_sanitized' => is_array( $rate_meta['response_tariff_sanitized'] ?? null ) ? $rate_meta['response_tariff_sanitized'] : array(),
+				'cdek_from_city_code'     => $location['cdek_from_city_code'] ?? null,
+				'cdek_to_city_code'       => $location['cdek_to_city_code'] ?? null,
+				'cdek_location_source'    => (string) ( $location['cdek_location_source'] ?? '' ),
 				'transtype'               => array_key_exists( 'transtype', $rate_meta ) ? (int) $rate_meta['transtype'] : null,
 				'delivery_to'             => (string) ( $rate_meta['delivery_to'] ?? '' ),
 				'items_summary'           => is_array( $rate_meta['items_summary'] ?? null ) ? $rate_meta['items_summary'] : array(),
@@ -358,6 +333,16 @@ final class OrderShippingMetaPersister {
 	}
 
 	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function is_cdek_rate( array $rate ): bool {
+		$carrier_key = (string) ( $rate['carrier_key'] ?? '' );
+		$service_key = (string) ( $rate['service_key'] ?? '' );
+
+		return 'cdek' === $carrier_key || 'cdek' === $service_key;
+	}
+
+	/**
 	 * @param array<string,mixed> $delivery_days
 	 */
 	private function delivery_days_label( array $delivery_days ): string {
@@ -394,6 +379,46 @@ final class OrderShippingMetaPersister {
 		$title = trim( (string) ( $rate[ $key ] ?? $rate_meta[ $key ] ?? '' ) );
 
 		return '' !== $title ? $title : $default;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function compact_method_title( array $rate ): string {
+		$title  = trim( (string) ( $rate['label'] ?? '' ) );
+		$tariff = trim( (string) ( $rate['selected_tariff_title'] ?? $rate['tariff_title'] ?? '' ) );
+		if ( '' !== $tariff && ! str_contains( $title, $tariff ) ) {
+			$title = '' !== $title ? $title . ', ' . $tariff : $tariff;
+		}
+
+		$delivery = $this->compact_delivery_label( $rate );
+		if ( '' !== $delivery && ! str_contains( $title, $delivery ) ) {
+			$title = '' !== $title ? $title . ' - ' . $delivery : $delivery;
+		}
+
+		return $title;
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function compact_delivery_label( array $rate ): string {
+		$delivery_days = is_array( $rate['delivery_days'] ?? null ) ? $rate['delivery_days'] : array();
+		$delivery      = $this->delivery_days_label( $delivery_days );
+		if ( '' !== $delivery ) {
+			return $delivery;
+		}
+
+		return trim( (string) ( $rate['delivery_comment'] ?? $rate['planned_delivery_comment'] ?? '' ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function delivery_label_or_not_specified( array $rate ): string {
+		$delivery = $this->compact_delivery_label( $rate );
+
+		return '' !== $delivery ? $delivery : 'не указан';
 	}
 
 	/**
@@ -465,8 +490,17 @@ final class OrderShippingMetaPersister {
 			'delivery_kind',
 			'checkout_group_id',
 			'is_courier',
+			'Перевозчик',
 			'Способ доставки',
+			'Тип доставки',
 			'Тариф',
+			'Срок доставки',
+			'Населенный пункт',
+			'Нормализация',
+			'Код ПВЗ',
+			'Адрес ПВЗ',
+			'Комментарий ПВЗ',
+			'Режим работы ПВЗ',
 			'Пункт выдачи',
 			'Индекс ПВЗ',
 			'Тип ПВЗ',
@@ -495,6 +529,12 @@ final class OrderShippingMetaPersister {
 			'api_delivery_min_days',
 			'api_delivery_max_days',
 			'api_delivery_text',
+			'api_delivery_days_text',
+			'request_payload_sanitized',
+			'response_tariff_sanitized',
+			'cdek_from_city_code',
+			'cdek_to_city_code',
+			'cdek_location_source',
 			'final_delivery_min_days',
 			'final_delivery_max_days',
 			'final_delivery_text',
@@ -552,18 +592,6 @@ final class OrderShippingMetaPersister {
 
 	private function nullable_float( mixed $value ): ?float {
 		return is_numeric( $value ) ? (float) $value : null;
-	}
-
-	/**
-	 * @param array<string,mixed> $rate
-	 */
-	private function is_russian_post_international_rate( array $rate ): bool {
-		$service_key = (string) ( $rate['service_key'] ?? '' );
-		$rate_id     = (string) ( $rate['rate_id'] ?? '' );
-
-		return RussianPostInternationalCarrier::SERVICE_KEY === $service_key
-			|| RussianPostInternationalCarrier::SERVICE_KEY === $rate_id
-			|| str_starts_with( $rate_id, RussianPostInternationalCarrier::SERVICE_KEY . ':' );
 	}
 
 	/**

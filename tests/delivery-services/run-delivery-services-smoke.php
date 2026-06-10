@@ -228,6 +228,7 @@ function dbDelta( string $sql ): void { $GLOBALS['wdc_db_delta'][] = $sql; }
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
@@ -276,6 +277,8 @@ $services->ensure_russian_post_domestic_service();
 $domestic_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => RussianPostDomesticSettings::SERVICE_KEY === (string) $row['service_key'] && empty( $row['deleted'] ) ) );
 $legacy_domestic_rows = array_values( array_filter( $GLOBALS['wpdb']->services, static fn ( array $row ): bool => in_array( (string) $row['service_key'], array( 'russian_post_domestic_pickup', 'russian_post_domestic_courier' ), true ) && empty( $row['deleted'] ) ) );
 wdc_ds_assert( 1 === count( $domestic_rows ) && array() === $legacy_domestic_rows, 'Repeated domestic bootstrap must create one unified domestic service and no legacy pickup/courier services.' );
+$cdek = $services->ensure_cdek_service();
+wdc_ds_assert( CdekSettings::SERVICE_KEY === $cdek->service_key && CdekSettings::CARRIER_KEY === $cdek->carrier_key && ! $cdek->enabled, 'CDEK predefined service must be disabled by default.' );
 $domestic = $services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
 wdc_ds_assert( $domestic instanceof DeliveryService && RussianPostDomesticSettings::TITLE === $domestic->title && RussianPostDomesticSettings::CARRIER_KEY === $domestic->carrier_key, 'Unified domestic predefined service must have canonical title and carrier key.' );
 $services->update_service( (int) $domestic->id, array( 'title' => 'Custom domestic title' ) );
@@ -575,6 +578,8 @@ wdc_ds_assert( str_contains( $delivery_admin_source, 'save_russian_post_domestic
 wdc_ds_assert( str_contains( $delivery_admin_source, 'Индекс отправки для расчета доставки' ) && str_contains( $delivery_admin_source, 'Индекс возврата для расчета доставки' ) && ! str_contains( $delivery_admin_source, 'Индексы отделений для отправки' ), 'Domestic calculation index labels must clarify tariff calculation usage.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, "'default_from_postcode' => array( 'value' => \$string( 'rp_default_from_postcode'" ) && strpos( $delivery_admin_source, 'POSTOFFICE_CODES_KEY' ) < strpos( $delivery_admin_source, 'rp_default_from_postcode' ), 'default_from_postcode must save from API / Credentials after postoffice codes.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'pickup_method_title' ) && str_contains( $delivery_admin_source, 'courier_method_title' ) && str_contains( $delivery_admin_source, 'Название варианта до ПВЗ / ОПС' ), 'Domestic pickup/courier method titles must be configurable on the main tab.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'save_cdek_main_settings' ) && str_contains( $delivery_admin_source, 'sanitize_cdek_main_settings_from_post' ) && str_contains( $delivery_admin_source, 'Название варианта до пункта выдачи' ), 'CDEK pickup/courier method titles must be configurable on the main tab.' );
+wdc_ds_assert( str_contains( $delivery_admin_source, 'CdekSettings::DEFAULT_PICKUP_METHOD_TITLE' ) && str_contains( $delivery_admin_source, 'CdekSettings::DEFAULT_COURIER_METHOD_TITLE' ), 'CDEK method title defaults must come from CdekSettings.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'simulate_service_rules' ) && str_contains( $delivery_admin_source, 'QuoteRequest' ) && str_contains( $delivery_admin_source, 'RussianPostInternationalCarrier' ), 'Russian Post service rules simulation must call the real carrier quote flow.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'include_packaging_weight' ) && str_contains( $delivery_admin_source, 'packaging_weight_mode' ) && ! str_contains( $delivery_admin_source, 'rp_packaging_tiers' ), 'Delivery service calculation tab must expose packaging controls and not Russian Post packaging tiers.' );
 wdc_ds_assert( str_contains( $delivery_admin_source, 'tariff_admin_comment' ) && str_contains( $delivery_admin_source, 'admin_comment' ), 'Domestic tariffs tab must save an internal admin comment.' );

@@ -1,8 +1,10 @@
 # WDC CDEK Carrier Foundation
 
-Version: 0.43.1.
+Version: 0.44.0.
 
-This stage adds the foundation for CDEK API v2 integration without connecting CDEK to checkout rates, pickup maps, shipment creation, statuses, print forms, autosync, or webhooks.
+0.44.0 update: CDEK tariff runtime is now implemented in `docs/wdc-cdek-tariff-calculation.md`. The foundation OAuth/settings layer remains the base for runtime calls, while pickup points, pickup selection, orders/shipments, statuses, print forms and webhooks are still intentionally out of scope.
+
+This document describes the foundation for CDEK API v2 integration. Checkout tariff calculation was added later in 0.44.0; pickup maps, shipment creation, statuses, print forms, autosync and webhooks remain unimplemented.
 
 ## Scope
 
@@ -17,11 +19,11 @@ Implemented:
 - Token cache with expiry and a 60 second safety margin.
 - Admin connection check that only obtains an OAuth token.
 - Smoke test coverage with fake HTTP client and no real CDEK requests.
+- Runtime tariff calculation foundation consumers: `CdekApiClient`, `CdekLocationResolver`, and `CdekCarrier`.
 
 Not implemented:
 
-- Checkout rates.
-- `POST /v2/calculator/tarifflist` and `POST /v2/calculator/tariff`.
+- `POST /v2/calculator/tariff` by fixed tariff code.
 - Pickup points and pickup map from `GET /v2/deliverypoints`.
 - Orders/shipments.
 - Shipment statuses.
