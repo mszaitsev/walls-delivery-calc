@@ -90,7 +90,7 @@ final class OrderShippingMetaPersister {
 		) {
 			$map['_wdc_platform_pickup_code']      = $pickup['point_code'] ?? '';
 			$map['_wdc_platform_pickup_address']   = $pickup['point_address'] ?? '';
-			$map['_wdc_platform_pickup_comment']   = $pickup['point_comment'] ?? '';
+			$map['_wdc_platform_pickup_comment']   = $pickup['description'] ?? $pickup['point_comment'] ?? '';
 			$map['_wdc_platform_pickup_work_time'] = $pickup['point_work_time'] ?? '';
 			$map['_wdc_pickup_point_id']           = $pickup['point_id'] ?? '';
 			$map['_wdc_pickup_point_code']         = $pickup['point_code'] ?? '';
@@ -202,6 +202,9 @@ final class OrderShippingMetaPersister {
 			'latitude'      => $pickup['lat'] ?? $pickup['snapshot']['lat'] ?? null,
 			'longitude'     => $pickup['lng'] ?? $pickup['snapshot']['lng'] ?? null,
 			'work_time'     => (string) ( $pickup['point_work_time'] ?? $pickup['snapshot']['work_time'] ?? '' ),
+			'description'   => (string) ( $pickup['description'] ?? $pickup['point_comment'] ?? $pickup['snapshot']['description'] ?? '' ),
+			'storage_notice' => (string) ( $pickup['storage_notice'] ?? $pickup['snapshot']['storage_notice'] ?? '' ),
+			'cdek_code'     => (string) ( $pickup['cdek_code'] ?? $pickup['snapshot']['cdek_code'] ?? '' ),
 			'raw_sanitized' => is_array( $pickup['snapshot']['raw_sanitized'] ?? null ) ? $pickup['snapshot']['raw_sanitized'] : ( is_array( $pickup['snapshot']['raw'] ?? null ) ? $pickup['snapshot']['raw'] : array() ),
 		);
 	}

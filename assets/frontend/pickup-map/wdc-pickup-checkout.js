@@ -243,9 +243,19 @@
 		setText(container, '[data-wdc-pickup-title-text]', selectedPointTitle(point));
 		setText(container, '[data-wdc-pickup-address]', selectedPointAddress(point));
 		setText(container, '[data-wdc-pickup-work-time]', point.point_work_time || point.work_time || snapshot.work_time || '');
+		setText(container, '[data-wdc-pickup-description]', point.description || snapshot.description || '');
+		setText(container, '[data-wdc-pickup-storage-notice]', point.storage_notice || snapshot.storage_notice || storageNotice(point));
 		var workTimeBlock = container.querySelector('[data-wdc-pickup-work-time-block]');
 		if (workTimeBlock) {
 			setHidden(workTimeBlock, !(point.point_work_time || point.work_time || snapshot.work_time));
+		}
+		var descriptionBlock = container.querySelector('[data-wdc-pickup-description]');
+		if (descriptionBlock) {
+			setHidden(descriptionBlock, !(point.description || snapshot.description));
+		}
+		var storageBlock = container.querySelector('[data-wdc-pickup-storage-notice]');
+		if (storageBlock) {
+			setHidden(storageBlock, !(point.storage_notice || snapshot.storage_notice || storageNotice(point)));
 		}
 		container.querySelectorAll('[data-wdc-pickup-card]').forEach(function (card) {
 			setHidden(card, !point.point_code);
@@ -304,7 +314,7 @@
 			return 'Отделение Почты России';
 		}
 		if (carrier === 'cdek' || rateId.indexOf('cdek:pickup') === 0) {
-			return 'Пункт выдачи СДЭК';
+			return isCdekPostamat(point) ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК';
 		}
 		return 'Пункт выдачи';
 	}
@@ -775,6 +785,9 @@
 			lng: point.lng !== undefined && point.lng !== null ? point.lng : snapshot.lng,
 			work_time: point.work_time || snapshot.work_time || '',
 			description: point.description || snapshot.description || '',
+			storage_notice: point.storage_notice || snapshot.storage_notice || storageNotice(point),
+			cdek_code: point.cdek_code || snapshot.cdek_code || '',
+			carrier_key: point.carrier_key || point.carrier || snapshot.carrier_key || '',
 			snapshot: snapshot
 		};
 	}
@@ -829,6 +842,8 @@
 			point_address: point.point_address || point.address || '',
 			point_postcode: point.point_postcode || point.postcode || point.postal_code || '',
 			work_time: point.work_time || '',
+			description: point.description || '',
+			storage_notice: point.storage_notice || storageNotice(point),
 			raw_sanitized: point.raw_sanitized || point.raw || {},
 			cdek_code: point.cdek_code || '',
 			cdek_uuid: point.cdek_uuid || '',
@@ -840,6 +855,16 @@
 			lat: point.lat || '',
 			lng: point.lng || ''
 		};
+	}
+
+	function isCdekPostamat(point) {
+		var carrier = String((point && (point.carrier_key || point.carrier)) || '').toLowerCase();
+		var type = String((point && (point.point_type || point.cdek_type || point.type)) || '').toUpperCase();
+		return carrier === 'cdek' && type === 'POSTAMAT';
+	}
+
+	function storageNotice(point) {
+		return isCdekPostamat(point) ? 'Срок хранения 3 дня' : '';
 	}
 
 	function pointMatchesDestinationQuick(point, checkoutContext) {

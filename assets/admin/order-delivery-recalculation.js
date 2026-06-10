@@ -774,6 +774,31 @@
 		return String( point.point_address || point.address || point.point_name || point.point_code || '' );
 	}
 
+	function isCdekPickupPoint( point ) {
+		return 'cdek' === String( point && ( point.carrier_key || point.carrier ) || '' ).toLowerCase();
+	}
+
+	function pickupPointDisplayCode( point ) {
+		if ( isCdekPickupPoint( point ) ) {
+			return String( point.point_code || point.cdek_code || '' );
+		}
+		return String( point.point_postcode || point.postcode || point.postal_code || point.point_code || '' );
+	}
+
+	function pickupPointTitle( point ) {
+		if ( isCdekPickupPoint( point ) ) {
+			return 'POSTAMAT' === String( point.point_type || point.cdek_type || '' ).toUpperCase() ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК';
+		}
+		return String( point.point_type || '' ).toUpperCase() === 'APS' ? 'Почтомат' : 'Отделение Почты России';
+	}
+
+	function pickupPointStorageNotice( point ) {
+		if ( point && point.storage_notice ) {
+			return String( point.storage_notice );
+		}
+		return isCdekPickupPoint( point ) && 'POSTAMAT' === String( point.point_type || point.cdek_type || '' ).toUpperCase() ? 'Срок хранения 3 дня' : '';
+	}
+
 	function saveDelivery( button ) {
 		const box = closestBox( button );
 		const rate = box ? selectedRates.get( box ) : null;
@@ -985,6 +1010,8 @@
 			lat: Number.isFinite( lat ) ? lat : null,
 			lng: Number.isFinite( lng ) ? lng : null,
 			work_time: String( point.work_time || '' ),
+			description: String( point.description || point.point_comment || point.cdek_note || '' ),
+			storage_notice: String( point.storage_notice || '' ),
 			raw_sanitized: point.raw_sanitized || point.raw || {},
 			cdek_code: String( point.cdek_code || '' ),
 			cdek_uuid: String( point.cdek_uuid || '' ),
@@ -1052,14 +1079,21 @@
 		}
 
 		function renderPopup( point ) {
-			return [
+			const rows = [
 				'<div class="wdc-pickup-popup">',
-				'<h3 class="wdc-pickup-popup__title">' + escapeHtml( point.point_name || point.point_postcode || '' ) + '</h3>',
-				'<div class="wdc-pickup-popup__section"><strong>Индекс:</strong><span>' + escapeHtml( point.point_postcode || '' ) + '</span></div>',
-				'<div class="wdc-pickup-popup__section"><strong>Адрес:</strong><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span></div>',
-				'<button type="button" class="button button-primary wdc-pickup-popup__select" data-wdc-pickup-popup-select data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '">Выбрать этот ПВЗ</button>',
-				'</div>'
-			].join( '' );
+				'<h3 class="wdc-pickup-popup__title">' + escapeHtml( [ pickupPointTitle( point ), pickupPointDisplayCode( point ) ].filter( Boolean ).join( ' ' ) ) + '</h3>',
+				'<div class="wdc-pickup-popup__section"><strong>' + escapeHtml( isCdekPickupPoint( point ) ? 'Код:' : 'Индекс:' ) + '</strong><span>' + escapeHtml( pickupPointDisplayCode( point ) ) + '</span></div>',
+				'<div class="wdc-pickup-popup__section"><strong>Адрес:</strong><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span></div>'
+			];
+			if ( point.description ) {
+				rows.push( '<div class="wdc-pickup-popup__section"><strong>Описание:</strong><span>' + escapeHtml( point.description ) + '</span></div>' );
+			}
+			if ( pickupPointStorageNotice( point ) ) {
+				rows.push( '<div class="wdc-pickup-popup__storage">' + escapeHtml( pickupPointStorageNotice( point ) ) + '</div>' );
+			}
+			rows.push( '<button type="button" class="button button-primary wdc-pickup-popup__select" data-wdc-pickup-popup-select data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '">Выбрать этот ПВЗ</button>' );
+			rows.push( '</div>' );
+			return rows.join( '' );
 		}
 
 		function preview( point ) {
@@ -1067,8 +1101,11 @@
 			if ( selected ) {
 				selected.innerHTML = [
 					'<div class="wdc-order-delivery-pickup-picker__selected-grid">',
-					'<span><strong>Индекс</strong>' + escapeHtml( point.point_postcode || '' ) + '</span>',
+					'<span><strong>' + escapeHtml( isCdekPickupPoint( point ) ? 'Код' : 'Индекс' ) + '</strong>' + escapeHtml( pickupPointDisplayCode( point ) ) + '</span>',
+					'<span><strong>Тип</strong>' + escapeHtml( pickupPointTitle( point ) ) + '</span>',
 					'<span><strong>Адрес</strong>' + escapeHtml( pickupPointLabel( point ) ) + '</span>',
+					point.description ? '<span><strong>Описание</strong>' + escapeHtml( point.description ) + '</span>' : '',
+					pickupPointStorageNotice( point ) ? '<span class="wdc-pickup-popup__storage"><strong>Срок хранения</strong>' + escapeHtml( pickupPointStorageNotice( point ) ) + '</span>' : '',
 					'<button type="button" class="button button-primary" data-wdc-pickup-picker-choose data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '">Выбрать этот ПВЗ</button>',
 					'</div>'
 				].join( '' );
@@ -1226,10 +1263,10 @@
 				return;
 			}
 			list.innerHTML = [
-				'<table class="widefat striped wdc-order-delivery-pickup-picker__table"><thead><tr><th>Индекс</th><th>Адрес</th><th>Выбрать</th></tr></thead><tbody>',
+				'<table class="widefat striped wdc-order-delivery-pickup-picker__table"><thead><tr><th>Код/индекс</th><th>Тип</th><th>Адрес</th><th>Выбрать</th></tr></thead><tbody>',
 				points.map( function ( point, index ) {
 					const active = previewPoint && pointId( previewPoint ) === pointId( point ) ? ' class="is-active"' : '';
-					return '<tr data-wdc-pickup-picker-row data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '" data-index="' + escapeAttribute( String( index ) ) + '"' + active + '><td>' + escapeHtml( point.point_postcode ) + '</td><td>' + escapeHtml( pickupPointLabel( point ) ) + '</td><td><button type="button" class="button" data-wdc-pickup-picker-choose data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '">Выбрать</button></td></tr>';
+					return '<tr data-wdc-pickup-picker-row data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '" data-index="' + escapeAttribute( String( index ) ) + '"' + active + '><td>' + escapeHtml( pickupPointDisplayCode( point ) ) + '</td><td>' + escapeHtml( pickupPointTitle( point ) ) + ( pickupPointStorageNotice( point ) ? '<br><strong class="wdc-pickup-popup__storage">' + escapeHtml( pickupPointStorageNotice( point ) ) + '</strong>' : '' ) + '</td><td>' + escapeHtml( pickupPointLabel( point ) ) + ( point.description ? '<br><span class="description">' + escapeHtml( point.description ) + '</span>' : '' ) + '</td><td><button type="button" class="button" data-wdc-pickup-picker-choose data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '">Выбрать</button></td></tr>';
 				} ).join( '' ),
 				'</tbody></table>'
 			].join( '' );

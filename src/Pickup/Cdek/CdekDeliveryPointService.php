@@ -105,7 +105,7 @@ final class CdekDeliveryPointService {
 		if ( '' === $code ) {
 			return array();
 		}
-		$type = strtoupper( trim( (string) ( $point['type'] ?? 'PVZ' ) ) );
+		$type = $this->normalize_point_type( (string) ( $point['type'] ?? 'PVZ' ) );
 		$address = trim( (string) ( $location['address_full'] ?? $location['address'] ?? $point['address'] ?? $point['address_comment'] ?? '' ) );
 		$city = trim( (string) ( $location['city'] ?? $location['city_name'] ?? $point['city'] ?? '' ) );
 		$region = trim( (string) ( $location['region'] ?? $location['region_name'] ?? $point['region'] ?? '' ) );
@@ -137,7 +137,8 @@ final class CdekDeliveryPointService {
 			'lat' => $lat,
 			'lng' => $lng,
 			'work_time' => (string) ( $point['work_time'] ?? '' ),
-			'description' => (string) ( $point['note'] ?? $point['address_comment'] ?? '' ),
+			'description' => trim( (string) ( $point['description'] ?? $point['note'] ?? $point['address_comment'] ?? '' ) ),
+			'storage_notice' => 'POSTAMAT' === $type ? 'Срок хранения 3 дня' : '',
 			'cdek_code' => $code,
 			'cdek_uuid' => (string) ( $point['uuid'] ?? '' ),
 			'cdek_type' => $type,
@@ -193,6 +194,12 @@ final class CdekDeliveryPointService {
 		$type = strtoupper( trim( $type ) );
 
 		return in_array( $type, array( 'ALL', 'PVZ', 'POSTAMAT' ), true ) ? $type : self::DEFAULT_TYPE;
+	}
+
+	private function normalize_point_type( string $type ): string {
+		$type = strtoupper( trim( $type ) );
+
+		return in_array( $type, array( 'PVZ', 'POSTAMAT' ), true ) ? $type : 'PVZ';
 	}
 
 	/**

@@ -19,6 +19,7 @@ use WallsShop\WDC\Carriers\Cdek\Api\CdekOAuthTokenService;
 use WallsShop\WDC\Carriers\Cdek\CdekLocationResolver;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
@@ -26,6 +27,7 @@ use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
+use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 function cdek_pickup_assert( bool $condition, string $message ): void {
@@ -46,6 +48,10 @@ function delete_transient( string $key ): bool { unset( $GLOBALS['wdc_cdek_picku
 function sanitize_key( string $key ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( $key ) ) ?? ''; }
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
+function __( string $text, string $domain = '' ): string { unset( $domain ); return $text; }
+function esc_html__( string $text, string $domain = '' ): string { unset( $domain ); return htmlspecialchars( $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_html( mixed $value ): string { return htmlspecialchars( (string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
+function esc_attr( mixed $value ): string { return htmlspecialchars( (string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ); }
 function WC(): object {
 	static $wc = null;
 	if ( null === $wc ) {
@@ -125,6 +131,28 @@ final class CdekPickupFakeHttpClient implements CdekHttpClientInterface {
 								'longitude' => 82.9204,
 							),
 						),
+						array(
+							'code' => 'KEM7',
+							'uuid' => 'uuid-kem-7',
+							'name' => 'CDEK Postamat',
+							'type' => 'POSTAMAT',
+							'owner_code' => 'CDEK',
+							'nearest_station' => 'Mall',
+							'description' => 'Inside the shopping center',
+							'work_time' => 'Daily 10-22',
+							'address_comment' => 'First floor',
+							'location' => array(
+								'country_code' => 'RU',
+								'region' => 'Kemerovo region',
+								'city' => 'Kemerovo',
+								'city_code' => 270,
+								'postal_code' => '650004',
+								'address' => 'Sovetskiy 10',
+								'address_full' => 'Kemerovo, Sovetskiy 10',
+								'latitude' => 55.3547,
+								'longitude' => 86.0873,
+							),
+						),
 					)
 				)
 			);
@@ -194,6 +222,15 @@ final class CdekPickupSmokeItem {
 	public function set_method_title( string $title ): void { $this->method_title = $title; }
 }
 
+final class CdekPickupSmokeErrors {
+	/** @var array<string,string> */
+	public array $errors = array();
+
+	public function add( string $code, string $message ): void {
+		$this->errors[ $code ] = $message;
+	}
+}
+
 $GLOBALS['wdc_cdek_pickup_options'] = array();
 $GLOBALS['wdc_cdek_pickup_transients'] = array();
 $GLOBALS['wdc_cdek_pickup_logs'] = array();
@@ -215,21 +252,33 @@ $client = new CdekApiClient( $tokens, $settings, $http );
 $service = new CdekDeliveryPointService( $client, $settings, new CdekLocationResolver( $client, new Logger() ), new Logger() );
 
 $points = $service->pointsByCityCode( 270 );
-cdek_pickup_assert( 1 === count( $points ), 'CDEK deliverypoints response must normalize to one point.' );
+cdek_pickup_assert( 2 === count( $points ), 'CDEK deliverypoints response must normalize all points.' );
 $query = $http->lastDeliveryPointQuery();
 cdek_pickup_assert( '270' === (string) ( $query['city_code'] ?? '' ), 'CDEK deliverypoints request must include city_code.' );
 cdek_pickup_assert( 'RU' === (string) ( $query['country_code'] ?? '' ), 'CDEK deliverypoints request must include country_code=RU.' );
 cdek_pickup_assert( 'ALL' === (string) ( $query['type'] ?? '' ), 'CDEK deliverypoints request must include type=ALL by default.' );
 
-$point = $points[0];
-cdek_pickup_assert( 'cdek' === ( $point['carrier_key'] ?? '' ) && 'NSK1' === ( $point['point_code'] ?? '' ), 'Normalized CDEK point must expose carrier_key and point_code.' );
-cdek_pickup_assert( 'PVZ' === ( $point['point_type'] ?? '' ) && 'CDEK Point One' === ( $point['point_name'] ?? '' ), 'Normalized CDEK point must expose type and name.' );
-cdek_pickup_assert( 'Novosibirsk, Lenina 1' === ( $point['point_address'] ?? '' ) && '630099' === ( $point['point_postcode'] ?? '' ), 'Normalized CDEK point must expose address and postcode.' );
-cdek_pickup_assert( 'Novosibirsk' === ( $point['city_name'] ?? '' ) && 'Novosibirsk region' === ( $point['region_name'] ?? '' ), 'Normalized CDEK point must expose city and region.' );
-cdek_pickup_assert( 55.0302 === (float) ( $point['latitude'] ?? 0 ) && 82.9204 === (float) ( $point['longitude'] ?? 0 ), 'Normalized CDEK point must expose coordinates.' );
-cdek_pickup_assert( 'Mon-Fri 10-20' === ( $point['work_time'] ?? '' ), 'Normalized CDEK point must expose work_time.' );
-cdek_pickup_assert( 'uuid-nsk-1' === ( $point['cdek_uuid'] ?? '' ) && 'CDEK' === ( $point['cdek_owner_code'] ?? '' ), 'Normalized CDEK point must keep CDEK-specific identifiers.' );
-cdek_pickup_assert( ! str_contains( (string) wp_json_encode( $point ), 'must-not-be-kept' ), 'Normalized CDEK point raw payload must not keep sensitive-looking fields.' );
+$pvz = $points[0];
+$postamat = $points[1];
+cdek_pickup_assert( 'cdek' === ( $pvz['carrier_key'] ?? '' ) && 'NSK1' === ( $pvz['point_code'] ?? '' ), 'Normalized CDEK point must expose carrier_key and point_code.' );
+cdek_pickup_assert( 'PVZ' === ( $pvz['point_type'] ?? '' ) && 'CDEK Point One' === ( $pvz['point_name'] ?? '' ), 'Normalized CDEK point must expose type and name.' );
+cdek_pickup_assert( 'Novosibirsk, Lenina 1' === ( $pvz['point_address'] ?? '' ) && '630099' === ( $pvz['point_postcode'] ?? '' ), 'Normalized CDEK point must expose address and postcode.' );
+cdek_pickup_assert( 'Novosibirsk' === ( $pvz['city_name'] ?? '' ) && 'Novosibirsk region' === ( $pvz['region_name'] ?? '' ), 'Normalized CDEK point must expose city and region.' );
+cdek_pickup_assert( 55.0302 === (float) ( $pvz['latitude'] ?? 0 ) && 82.9204 === (float) ( $pvz['longitude'] ?? 0 ), 'Normalized CDEK point must expose coordinates.' );
+cdek_pickup_assert( 'Mon-Fri 10-20' === ( $pvz['work_time'] ?? '' ), 'Normalized CDEK point must expose work_time.' );
+cdek_pickup_assert( 'uuid-nsk-1' === ( $pvz['cdek_uuid'] ?? '' ) && 'CDEK' === ( $pvz['cdek_owner_code'] ?? '' ), 'Normalized CDEK point must keep CDEK-specific identifiers.' );
+cdek_pickup_assert( ! str_contains( (string) wp_json_encode( $pvz ), 'must-not-be-kept' ), 'Normalized CDEK point raw payload must not keep sensitive-looking fields.' );
+cdek_pickup_assert( 'KEM7' === ( $postamat['point_code'] ?? '' ) && 'KEM7' === ( $postamat['cdek_code'] ?? '' ), 'CDEK point_code must use CDEK code, not postcode.' );
+cdek_pickup_assert( '650004' === ( $postamat['point_postcode'] ?? '' ) && 'KEM7' !== ( $postamat['point_postcode'] ?? '' ), 'CDEK postcode must stay separate from point_code.' );
+cdek_pickup_assert( 'POSTAMAT' === ( $postamat['point_type'] ?? '' ) && 'Срок хранения 3 дня' === ( $postamat['storage_notice'] ?? '' ), 'CDEK POSTAMAT must normalize type and storage notice.' );
+cdek_pickup_assert( 'Inside the shopping center' === ( $postamat['description'] ?? '' ), 'CDEK deliverypoints description must be normalized.' );
+
+$card_renderer = new PickupPointCardRenderer();
+$pvz_card = $card_renderer->render( array_merge( $pvz, array( 'rate_id' => 'cdek:pickup:136' ) ), false, false );
+$postamat_card = $card_renderer->render( array_merge( $postamat, array( 'rate_id' => 'cdek:pickup:136' ) ), false, false );
+cdek_pickup_assert( str_contains( $pvz_card, 'Пункт выдачи СДЭК' ), 'CDEK PVZ card title must be carrier-aware.' );
+cdek_pickup_assert( str_contains( $postamat_card, 'Постамат СДЭК' ) && str_contains( $postamat_card, 'Срок хранения 3 дня' ), 'CDEK POSTAMAT card title and storage notice must render.' );
+cdek_pickup_assert( str_contains( $postamat_card, 'Inside the shopping center' ), 'CDEK pickup description must render in pickup card.' );
 
 $delivery_requests = $http->countDeliveryPointRequests();
 $service->pointsByCityCode( 270 );
@@ -270,9 +319,10 @@ $rate = array(
 );
 WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:pickup:136' ) );
 $session->save_rates( array( 'cdek:pickup:136' => $rate ) );
-$session->save_city_context( array( 'city_code' => 270, 'city_name' => 'Novosibirsk', 'region_name' => 'Novosibirsk region', 'postcode' => '630099', 'country_code' => 'RU' ) );
+$session->save_city_context( array( 'city_code' => 270, 'city_name' => 'Kemerovo', 'region_name' => 'Kemerovo region', 'postcode' => '650004', 'country_code' => 'RU' ) );
+$point = $postamat;
 $selection = array(
-	'id' => (string) ( $point['id'] ?? 'cdek:NSK1' ),
+	'id' => (string) ( $point['id'] ?? 'cdek:KEM7' ),
 	'carrier_key' => 'cdek',
 	'rate_id' => 'cdek:pickup:136',
 	'point_code' => (string) $point['point_code'],
@@ -285,6 +335,9 @@ $selection = array(
 	'lat' => $point['lat'],
 	'lng' => $point['lng'],
 	'point_work_time' => (string) $point['work_time'],
+	'description' => (string) $point['description'],
+	'storage_notice' => (string) $point['storage_notice'],
+	'cdek_code' => (string) $point['cdek_code'],
 	'snapshot' => $point,
 );
 $session->save_pickup_selection( $selection );
@@ -292,15 +345,31 @@ $session->save_checkout_pickup_point( $selection );
 cdek_pickup_assert( true === $session->pickup_selection_matches( 'cdek', 'cdek:pickup:999' ), 'CDEK checkout pickup selection must match grouped CDEK pickup family.' );
 cdek_pickup_assert( false === $session->pickup_selection_matches( 'cdek', 'cdek:courier:137' ), 'CDEK checkout pickup selection must not match courier family.' );
 
+$session->clear_pickup_selection( 'validation_restore_smoke' );
+$session->save_checkout_pickup_point( $selection );
+$errors = new CdekPickupSmokeErrors();
+( new CheckoutValidation( $session ) )->validate(
+	array(
+		'shipping_method' => array( 'wdc_platform_delivery:cdek:pickup:136' ),
+		'shipping_city' => 'Kemerovo',
+		'wdc_pickup_point_code' => 'KEM7',
+	),
+	$errors
+);
+cdek_pickup_assert( array() === $errors->errors, 'Selected CDEK pickup must pass checkout validation after restore from checkout session.' );
+cdek_pickup_assert( true === $session->pickup_selection_matches( 'cdek', 'cdek:pickup:136' ), 'Checkout validation must restore CDEK pickup selection with selected rate id.' );
+
 $checkout_order = new CdekPickupSmokeOrder();
 $persister = new OrderShippingMetaPersister( $session );
 $persister->persist( $checkout_order, array() );
 $item = new CdekPickupSmokeItem();
 $persister->persist_shipping_item_meta( $item );
-cdek_pickup_assert( 'RU' === $checkout_order->shipping_country && 'Novosibirsk region' === $checkout_order->shipping_state && 'Novosibirsk' === $checkout_order->shipping_city, 'Checkout order create must write CDEK pickup country/state/city.' );
-cdek_pickup_assert( '630099' === $checkout_order->shipping_postcode && 'Novosibirsk, Lenina 1' === $checkout_order->shipping_address_1 && '' === $checkout_order->shipping_address_2, 'Checkout order create must write CDEK pickup postcode/address and clear address_2.' );
+cdek_pickup_assert( 'RU' === $checkout_order->shipping_country && 'Kemerovo region' === $checkout_order->shipping_state && 'Kemerovo' === $checkout_order->shipping_city, 'Checkout order create must write CDEK pickup country/state/city.' );
+cdek_pickup_assert( '650004' === $checkout_order->shipping_postcode && 'Kemerovo, Sovetskiy 10' === $checkout_order->shipping_address_1 && '' === $checkout_order->shipping_address_2, 'Checkout order create must write CDEK pickup postcode/address and clear address_2.' );
 $calculation = $checkout_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
-cdek_pickup_assert( 'cdek' === ( $calculation['pickup']['carrier_key'] ?? '' ) && 'NSK1' === ( $calculation['pickup']['point_code'] ?? '' ), 'Checkout calculation data must save CDEK pickup block.' );
+cdek_pickup_assert( 'cdek' === ( $calculation['pickup']['carrier_key'] ?? '' ) && 'KEM7' === ( $calculation['pickup']['point_code'] ?? '' ), 'Checkout calculation data must save CDEK pickup block.' );
+cdek_pickup_assert( 'KEM7' === ( $calculation['pickup']['cdek_code'] ?? '' ) && 'POSTAMAT' === ( $calculation['pickup']['point_type'] ?? '' ), 'Checkout calculation data must save CDEK code and point type.' );
+cdek_pickup_assert( 'Inside the shopping center' === ( $calculation['pickup']['description'] ?? '' ) && 'Срок хранения 3 дня' === ( $calculation['pickup']['storage_notice'] ?? '' ), 'Checkout calculation data must save CDEK description and storage notice.' );
 cdek_pickup_assert( isset( $calculation['pickup']['raw_sanitized'] ) && is_array( $calculation['pickup']['raw_sanitized'] ), 'Checkout calculation data must save raw_sanitized pickup payload.' );
 cdek_pickup_assert( 1 === count( $item->meta ) && in_array( '2-4 days', array_values( $item->meta ), true ), 'Checkout visible shipping item meta must contain only delivery time.' );
 
@@ -310,7 +379,7 @@ $admin_order_without_point->shipping_items = array( 'method_title' => 'Old', 'to
 $blocked = $replacement->save(
 	$admin_order_without_point,
 	array(
-		'selected_location' => array( 'city_code' => 270, 'city_value' => 'Novosibirsk', 'region_name' => 'Novosibirsk region', 'country_code' => 'RU' ),
+		'selected_location' => array( 'city_code' => 270, 'city_value' => 'Kemerovo', 'region_name' => 'Kemerovo region', 'country_code' => 'RU' ),
 		'selected_rate' => $rate,
 		'selected_pickup_point' => array(),
 		'normalized_shipping_address' => array(),
@@ -323,18 +392,20 @@ $admin_order->shipping_items = array( 'method_title' => 'Old', 'total' => 10.0, 
 $saved = $replacement->save(
 	$admin_order,
 	array(
-		'selected_location' => array( 'city_code' => 270, 'city_value' => 'Novosibirsk', 'region_name' => 'Novosibirsk region', 'country_code' => 'RU' ),
+		'selected_location' => array( 'city_code' => 270, 'city_value' => 'Kemerovo', 'region_name' => 'Kemerovo region', 'country_code' => 'RU' ),
 		'selected_rate' => $rate,
 		'selected_pickup_point' => $selection,
 		'normalized_shipping_address' => array(),
 	)
 );
 cdek_pickup_assert( true === $saved['success'], 'Admin recalculation must save CDEK pickup with selected point.' );
-cdek_pickup_assert( 'Novosibirsk, Lenina 1' === $admin_order->shipping_address_1 && '' === $admin_order->shipping_address_2, 'Admin recalculation must write CDEK pickup address.' );
-cdek_pickup_assert( '630099' === $admin_order->shipping_postcode && 'RU' === $admin_order->shipping_country, 'Admin recalculation must write CDEK pickup postcode and country.' );
-cdek_pickup_assert( 'NSK1' === ( $admin_order->meta['_wdc_pickup_point_code'] ?? '' ), 'Admin recalculation must save selected CDEK point code.' );
+cdek_pickup_assert( 'Kemerovo, Sovetskiy 10' === $admin_order->shipping_address_1 && '' === $admin_order->shipping_address_2, 'Admin recalculation must write CDEK pickup address.' );
+cdek_pickup_assert( '650004' === $admin_order->shipping_postcode && 'RU' === $admin_order->shipping_country, 'Admin recalculation must write CDEK pickup postcode and country.' );
+cdek_pickup_assert( 'KEM7' === ( $admin_order->meta['_wdc_pickup_point_code'] ?? '' ), 'Admin recalculation must save selected CDEK point code, not postcode.' );
 cdek_pickup_assert( 1 === count( $admin_order->shipping_items['meta'] ?? array() ) && in_array( '2-4 days', array_values( $admin_order->shipping_items['meta'] ?? array() ), true ), 'Admin visible shipping item meta must contain only delivery time.' );
 cdek_pickup_assert( 'cdek' === ( $admin_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['pickup']['carrier_key'] ?? '' ), 'Admin calculation data must save CDEK pickup block.' );
+cdek_pickup_assert( 'Inside the shopping center' === ( $admin_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['pickup']['description'] ?? '' ), 'Admin calculation data must save CDEK pickup description.' );
+cdek_pickup_assert( 'Срок хранения 3 дня' === ( $admin_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['pickup']['storage_notice'] ?? '' ), 'Admin calculation data must save CDEK POSTAMAT storage notice.' );
 
 $checkout_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' );
 $admin_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/order-delivery-recalculation.js' );

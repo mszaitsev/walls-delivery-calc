@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.0.
+Current plugin version: 0.45.1.
+
+Version 0.45.1 fixes the first CDEK pickup QA pass. Checkout validation now restores selected CDEK pickup points from the CDEK checkout/session snapshot instead of looking them up as Russian Post points, so selected `cdek:pickup` orders can be created without the false `Выберите пункт выдачи` error. CDEK `point_code`/`cdek_code` now uses the CDEK delivery point code such as `KEM7`, not the postcode. CDEK `PVZ` renders as `Пункт выдачи СДЭК`; CDEK `POSTAMAT` renders as `Постамат СДЭК`, has a separate map marker color, and shows red bold `Срок хранения 3 дня` in pickup cards/popups/order/email output. Pickup descriptions from CDEK are saved into calculation data and rendered with the selected point. Permanent FIAS/GAR -> CDEK `city_code` mapping remains technical debt for a later CDEK integration stage.
 
 Version 0.45.0 implements CDEK pickup points for checkout and admin order delivery recalculation. WDC uses CDEK API v2 `GET /v2/deliverypoints`, requires a selected pickup point for CDEK pickup rates, saves the selected point in calculation data, and writes the pickup address to the WooCommerce shipping address. CDEK order creation, statuses, webhooks and print forms are still intentionally not implemented; the next stage is `feature/cdek-order-creation`.
 

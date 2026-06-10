@@ -534,4 +534,9 @@ pickup_smoke_assert( str_contains( $modal_js, 'wdc-pickup-map__locate' ) && str_
 pickup_smoke_assert( str_contains( $map_js, 'function useUserLocation(lat, lng)' ) && str_contains( $map_js, 'loadBounds(bboxAround(lat, lng), { force: true })' ) && str_contains( $map_js, 'searchAddress = null' ), 'Pickup geolocation must load nearby points from bbox without keeping the address marker active.' );
 pickup_smoke_assert( ! str_contains( $leaflet_provider_js . $yandex_provider_js, 'wdc-map-user-marker' ) && str_contains( $leaflet_provider_js . $yandex_provider_js, 'wdc-map-search-pin--push' ), 'Pickup geolocation origin must reuse the red search push-pin instead of the old blue user marker.' );
 
+$map_css = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.css' ) ?: '';
+pickup_smoke_assert( str_contains( $map_js, "type === 'APS'" ) && str_contains( $map_js, "label: 'Почтомат'" ), 'Russian Post APS label must remain Почтомат.' );
+pickup_smoke_assert( str_contains( $map_js, "type === 'POSTAMAT'" ) && str_contains( $map_js, "label: 'Постамат'" ) && str_contains( $leaflet_provider_js . $yandex_provider_js, "type === 'POSTAMAT'" ), 'CDEK POSTAMAT must be a separate pickup map type.' );
+pickup_smoke_assert( str_contains( $map_css, 'wdc-map-marker-pin--postamat' ) && str_contains( $map_css, 'wdc-map-marker--postamat' ), 'CDEK POSTAMAT markers must have a separate style.' );
+
 echo "Pickup foundation smoke test passed.\n";

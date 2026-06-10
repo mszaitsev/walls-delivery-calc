@@ -302,4 +302,7 @@ pickup_rest_assert( $invalid instanceof WP_Error && 'invalid_bbox' === $invalid-
 $unsupported = $controller->points( array( 'carrier' => 'demo', 'bbox' => '0,0,180,90' ) );
 pickup_rest_assert( array() === $unsupported, 'Unsupported carrier must not read legacy pickup table.' );
 
+$pickup_rest_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/PickupPointsRestController.php' );
+pickup_rest_assert( str_contains( $pickup_rest_source, "'storage_notice'" ) && str_contains( $pickup_rest_source, "'cdek_code'" ), 'CDEK pickup REST summary must expose storage_notice and cdek_code.' );
+
 echo "Pickup REST smoke test passed.\n";

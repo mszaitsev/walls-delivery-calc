@@ -156,6 +156,7 @@ use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionService;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutValidation;
 use WallsShop\WDC\Checkout\WooCommerce\NewShippingMethod;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommercePackageMapper;
@@ -197,10 +198,23 @@ final class WdcSmokeProduct {
 final class WdcSmokeOrder {
 	/** @var array<string,mixed> */
 	public array $meta = array();
+	public string $shipping_country = '';
+	public string $shipping_state = '';
+	public string $shipping_city = '';
+	public string $shipping_postcode = '';
+	public string $shipping_address_1 = '';
+	public string $shipping_address_2 = 'filled';
 
 	public function update_meta_data( string $key, mixed $value ): void {
 		$this->meta[ $key ] = $value;
 	}
+
+	public function set_shipping_country( string $value ): void { $this->shipping_country = $value; }
+	public function set_shipping_state( string $value ): void { $this->shipping_state = $value; }
+	public function set_shipping_city( string $value ): void { $this->shipping_city = $value; }
+	public function set_shipping_postcode( string $value ): void { $this->shipping_postcode = $value; }
+	public function set_shipping_address_1( string $value ): void { $this->shipping_address_1 = $value; }
+	public function set_shipping_address_2( string $value ): void { $this->shipping_address_2 = $value; }
 }
 
 final class WdcSmokeShippingItem {
@@ -218,6 +232,15 @@ final class WdcSmokeShippingItem {
 
 	public function delete_meta_data( string $key ): void {
 		unset( $this->meta[ $key ] );
+	}
+}
+
+final class WdcSmokeCheckoutErrors {
+	/** @var array<string,string> */
+	public array $errors = array();
+
+	public function add( string $code, string $message ): void {
+		$this->errors[ $code ] = $message;
 	}
 }
 
@@ -520,6 +543,80 @@ $cdek_persister->persist( $cdek_order );
 wc_checkout_smoke_assert( isset( $cdek_order->meta['_wdc_platform_rate_meta'], $cdek_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ), 'CDEK checkout hidden meta must keep platform rate meta and calculation data.' );
 $cdek_calc = $cdek_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ];
 wc_checkout_smoke_assert( 520.0 === (float) ( $cdek_calc['api']['api_base_price_rub'] ?? 0 ) && 1000 === (int) ( $cdek_calc['package']['final_weight_g'] ?? 0 ), 'CDEK checkout calculation data must preserve API and package data.' );
+
+$session->save_rates(
+	array(
+		'cdek:pickup:136' => array(
+			'rate_id' => 'cdek:pickup:136',
+			'carrier_key' => 'cdek',
+			'service_key' => 'cdek',
+			'service_title' => 'СДЭК до пункта выдачи',
+			'label' => 'СДЭК до пункта выдачи, Посылка склад-склад - 2-4 дня',
+			'delivery_type' => 'pickup',
+			'requires_pickup_point' => true,
+			'planned_delivery_comment' => '2-4 дня',
+			'delivery_comment' => '2-4 дня',
+			'cost' => 350.5,
+			'tariff_key' => '136',
+			'tariff_title' => 'Посылка склад-склад',
+			'selected_tariff_title' => 'Посылка склад-склад',
+			'selected_tariff_object' => '136',
+			'rate_meta' => array(
+				'package' => array( 'weight_g' => 1200 ),
+				'request_payload_sanitized' => array( 'to_location' => array( 'code' => 270 ) ),
+			),
+		),
+	)
+);
+WC()->session->set( 'chosen_shipping_methods', array( 'wdc_platform_delivery:cdek:pickup:136' ) );
+$cdek_pickup = array(
+	'id' => 'cdek:KEM7',
+	'carrier_key' => 'cdek',
+	'rate_id' => 'cdek:pickup:136',
+	'point_code' => 'KEM7',
+	'point_type' => 'POSTAMAT',
+	'point_name' => 'CDEK Postamat',
+	'point_address' => 'Kemerovo, Sovetskiy 10',
+	'point_postcode' => '650004',
+	'city_name' => 'Kemerovo',
+	'region_name' => 'Kemerovo region',
+	'lat' => 55.3547,
+	'lng' => 86.0873,
+	'point_work_time' => 'Daily 10-22',
+	'description' => 'Inside the shopping center',
+	'storage_notice' => 'Срок хранения 3 дня',
+	'cdek_code' => 'KEM7',
+	'snapshot' => array(
+		'id' => 'cdek:KEM7',
+		'carrier_key' => 'cdek',
+		'point_code' => 'KEM7',
+		'point_type' => 'POSTAMAT',
+		'postcode' => '650004',
+		'address' => 'Kemerovo, Sovetskiy 10',
+		'city' => 'Kemerovo',
+		'region' => 'Kemerovo region',
+		'description' => 'Inside the shopping center',
+		'storage_notice' => 'Срок хранения 3 дня',
+		'cdek_code' => 'KEM7',
+	),
+);
+$session->save_checkout_pickup_point( $cdek_pickup );
+$errors = new WdcSmokeCheckoutErrors();
+( new CheckoutValidation( $session ) )->validate(
+	array(
+		'shipping_method' => array( 'wdc_platform_delivery:cdek:pickup:136' ),
+		'shipping_city' => 'Kemerovo',
+		'wdc_pickup_point_code' => 'KEM7',
+	),
+	$errors
+);
+wc_checkout_smoke_assert( array() === $errors->errors, 'CDEK pickup selected in checkout must pass validation.' );
+$cdek_pickup_order = new WdcSmokeOrder();
+( new OrderShippingMetaPersister( $session ) )->persist( $cdek_pickup_order );
+$cdek_pickup_calc = $cdek_pickup_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ];
+wc_checkout_smoke_assert( 'KEM7' === ( $cdek_pickup_calc['pickup']['point_code'] ?? '' ) && '650004' === ( $cdek_pickup_calc['pickup']['point_postcode'] ?? '' ), 'CDEK checkout order create must save point_code separately from postcode.' );
+wc_checkout_smoke_assert( 'Inside the shopping center' === ( $cdek_pickup_calc['pickup']['description'] ?? '' ) && 'Срок хранения 3 дня' === ( $cdek_pickup_calc['pickup']['storage_notice'] ?? '' ), 'CDEK checkout order create must save pickup description and storage notice.' );
+wc_checkout_smoke_assert( 'Kemerovo, Sovetskiy 10' === $cdek_pickup_order->shipping_address_1 && '' === $cdek_pickup_order->shipping_address_2, 'CDEK checkout order create must write pickup shipping address.' );
 
 $session->save_rates(
 	array(

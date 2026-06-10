@@ -253,6 +253,7 @@ final class PickupPointsRestController {
 			'lng' => $point['lng'] ?? null,
 			'work_time' => (string) ( $point['work_time'] ?? '' ),
 			'description' => (string) ( $point['description'] ?? '' ),
+			'storage_notice' => (string) ( $point['storage_notice'] ?? '' ),
 			'raw' => is_array( $point['raw'] ?? null ) ? $point['raw'] : array(),
 			'cdek_code' => (string) ( $point['cdek_code'] ?? '' ),
 			'cdek_uuid' => (string) ( $point['cdek_uuid'] ?? '' ),

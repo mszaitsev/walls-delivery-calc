@@ -1,5 +1,15 @@
 # Карта текущего кода
 
+## CDEK Pickup QA Fix 0.45.1
+
+- `src/Checkout/WooCommerce/CheckoutValidation.php` restores CDEK pickup selections as CDEK data and no longer queries the Russian Post pickup repository for CDEK point codes such as `KEM7`.
+- `src/Pickup/Cdek/CdekDeliveryPointService.php` normalizes CDEK `code` into `point_code`/`cdek_code`, keeps postcode separately, supports `PVZ` and `POSTAMAT`, saves description and sets `Срок хранения 3 дня` for CDEK postamats.
+- `src/Pickup/Presentation/PickupPointCardRenderer.php` is carrier-aware for pickup cards: CDEK `PVZ` renders `Пункт выдачи СДЭК`, CDEK `POSTAMAT` renders `Постамат СДЭК`, and CDEK postamats show red bold storage notice.
+- `assets/frontend/pickup-map/wdc-pickup-map.js`, map providers and CSS separate CDEK `POSTAMAT` from Russian Post `APS`; Russian Post keeps `Почтомат`, CDEK uses `Постамат` with a separate marker color.
+- `assets/admin/order-delivery-recalculation.js` keeps CDEK pickup picker state with code/type/description/storage notice and shows CDEK code instead of postcode in the admin picker.
+- `tests/cdek/run-cdek-pickup-points-smoke.php` and checkout/pickup smoke tests cover CDEK validation restore, CDEK code vs postcode, POSTAMAT title/storage notice, description persistence and Russian Post regression boundaries.
+- Technical debt: permanent FIAS/GAR -> CDEK `city_code` mapping remains deferred to a later CDEK integration stage.
+
 ## CDEK Tariff Calculation 0.44.0
 
 - `src/Carriers/Runtime/CdekCarrier.php` is the runtime adapter for service/carrier key `cdek`. It builds `POST /v2/calculator/tarifflist` payloads, maps tariff candidates to `DeliveryRate`, classifies CDEK `delivery_mode`, marks pickup rates as requiring a pickup point, and stores safe API/location/package meta.

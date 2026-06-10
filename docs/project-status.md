@@ -1,5 +1,7 @@
 # Project Status
 
+0.45.1 note: CDEK pickup QA fixes are implemented on `fix/cdek-pickup-selection-and-ui`. Checkout validation now handles CDEK pickup as a CDEK carrier family throughout restore/match logic and can create an order after the user selects a CDEK pickup point. CDEK `point_code`/`cdek_code` uses the CDEK point code, not postcode; `PVZ` renders as `Пункт выдачи СДЭК`; `POSTAMAT` renders as `Постамат СДЭК`, uses a separate marker color and shows `Срок хранения 3 дня`. CDEK pickup descriptions are saved in session/order calculation data and rendered in pickup cards/order/email display. Permanent FIAS/GAR -> CDEK `city_code` mapping is explicitly left as technical debt for a later CDEK integration stage.
+
 0.45.0 note: CDEK pickup points are implemented for checkout and admin order delivery recalculation. WDC calls CDEK API v2 `GET /v2/deliverypoints` with `city_code`, `country_code=RU` and `type=ALL`, normalizes the response through `CdekDeliveryPointService`, caches it by environment/city/type, and reuses the existing pickup map/picker. CDEK pickup rates now require a selected pickup point; checkout and admin save persist the selected point into `_wdc_delivery_calculation_data.pickup` and write the pickup address to the WooCommerce shipping address. Visible shipping item meta remains only delivery time. CDEK order creation, statuses, webhooks and print forms remain intentionally not implemented. The next feature branch is `feature/cdek-order-creation`.
 
 0.44.9 note: Russian Post courier calculation postcode fill on `WDC -> Локации` now retries technical request failures up to 5 attempts. If every attempt fails technically, it counts one error and stores courier technical marker `999999999` meaning "technical error, retry later"; this marker is distinct from "courier delivery unavailable". New/reset runs process marker rows first, then cities, then other settlements. A later success overwrites `999999999`, while a valid business response that courier delivery is unavailable clears it.
@@ -58,9 +60,9 @@
 
 ## Общий статус
 
-- Текущая версия: `0.45.0`.
+- Текущая версия: `0.45.1`.
 - Текущая базовая ветка: `develop`.
-- Рабочая ветка: `feature/cdek-tariff-calculation`.
+- Рабочая ветка: `fix/cdek-pickup-selection-and-ui`.
 - Последнее обновление статуса: 2026-06-09.
 - Общая готовность проекта: примерно 74%.
 - Следующий рекомендуемый этап: `feature/cdek-order-creation`.
@@ -97,7 +99,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.0`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.1`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
@@ -176,7 +178,8 @@
 
 ## Не реализовано
 
-- CDEK pickup-point map/selection, shipments, orders, statuses, webhooks and print forms.
+- CDEK shipments/orders, statuses, webhooks and print forms.
+- Permanent FIAS/GAR -> CDEK `city_code` mapping/storage.
 - DPD runtime adapter, settings, rates, pickup/courier flow, shipments and statuses.
 - Yandex Delivery runtime adapter, pricing, pickup/courier flow and future offer confirmation.
 - PEK, Energia, Aerogruz, Jet adapters.

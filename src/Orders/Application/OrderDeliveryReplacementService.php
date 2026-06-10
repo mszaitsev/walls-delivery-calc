@@ -284,6 +284,8 @@ final class OrderDeliveryReplacementService {
 		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
 			$map['_wdc_platform_pickup_code'] = (string) ( $pickup['point_code'] ?? '' );
 			$map['_wdc_platform_pickup_address'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
+			$map['_wdc_platform_pickup_comment'] = (string) ( $pickup['description'] ?? $pickup['point_comment'] ?? '' );
+			$map['_wdc_platform_pickup_work_time'] = (string) ( $pickup['work_time'] ?? $pickup['point_work_time'] ?? '' );
 			$map['_wdc_pickup_point_code'] = (string) ( $pickup['point_code'] ?? '' );
 			$map['_wdc_pickup_point_type'] = (string) ( $pickup['point_type'] ?? '' );
 			$map['_wdc_pickup_point_address'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
@@ -461,6 +463,9 @@ final class OrderDeliveryReplacementService {
 				'latitude' => $pickup['lat'] ?? $pickup['latitude'] ?? null,
 				'longitude' => $pickup['lng'] ?? $pickup['longitude'] ?? null,
 				'work_time' => (string) ( $pickup['work_time'] ?? $pickup['point_work_time'] ?? '' ),
+				'description' => (string) ( $pickup['description'] ?? $pickup['point_comment'] ?? '' ),
+				'storage_notice' => (string) ( $pickup['storage_notice'] ?? '' ),
+				'cdek_code' => (string) ( $pickup['cdek_code'] ?? $pickup['point_code'] ?? '' ),
 				'raw_sanitized' => is_array( $pickup['raw_sanitized'] ?? null ) ? $pickup['raw_sanitized'] : ( is_array( $pickup['raw'] ?? null ) ? $pickup['raw'] : array() ),
 			) : array(),
 			'package' => $this->calculation_package_data( $rate_meta ),

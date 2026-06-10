@@ -398,7 +398,7 @@
 
 	function pointType(point) {
 		var type = String(point.point_type || point.type || 'OPS').toUpperCase();
-		return type === 'PVZ' || type === 'APS' ? type : 'OPS';
+		return type === 'PVZ' || type === 'APS' || type === 'POSTAMAT' ? type : 'OPS';
 	}
 
 	function distanceMeters(fromLat, fromLng, toLat, toLng) {

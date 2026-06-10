@@ -14,6 +14,8 @@ final class PickupPointCardRenderer {
 	public function render( array|object $point, bool $include_change_button = false, bool $hidden = false ): string {
 		$data      = $this->normalize( $point );
 		$work_time = $data['work_time'];
+		$description = $data['description'];
+		$storage_notice = $data['storage_notice'];
 		$classes   = 'wdc-pickup-point-card' . ( $include_change_button ? ' wdc-pickup-point-card--checkout' : '' ) . ( $hidden ? ' wdc-is-hidden' : '' );
 		$hidden_attr = $hidden ? ' hidden' : '';
 		$parts     = array();
@@ -26,6 +28,8 @@ final class PickupPointCardRenderer {
 		$parts[] = '<span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Время работы:', 'walls-delivery-calc' ) ) . '</span>';
 		$parts[] = '<span data-wdc-pickup-work-time>' . esc_html( $work_time ) . '</span>';
 		$parts[] = '</div>';
+		$parts[] = '<div class="wdc-pickup-point-card__description" data-wdc-pickup-description' . ( '' === $description ? ' hidden' : '' ) . ' style="' . esc_attr( $this->line_style() ) . '">' . esc_html( $description ) . '</div>';
+		$parts[] = '<div class="wdc-pickup-point-card__storage" data-wdc-pickup-storage-notice' . ( '' === $storage_notice ? ' hidden' : '' ) . ' style="' . esc_attr( $this->storage_notice_style() ) . '">' . esc_html( $storage_notice ) . '</div>';
 		$parts[] = '</div>';
 
 		if ( $include_change_button ) {
@@ -39,7 +43,7 @@ final class PickupPointCardRenderer {
 
 	/**
 	 * @param array<string,mixed>|object $point
-	 * @return array{title:string,address_line:string,work_time:string}
+	 * @return array{title:string,address_line:string,work_time:string,description:string,storage_notice:string}
 	 */
 	public function normalize( array|object $point ): array {
 		$point    = $this->point_to_array( $point );
@@ -51,11 +55,19 @@ final class PickupPointCardRenderer {
 		$city     = trim( (string) ( $point['city'] ?? $point['city_name'] ?? $snapshot['city'] ?? $snapshot['city_name'] ?? '' ) );
 		$address  = trim( (string) ( $point['address'] ?? $point['point_address'] ?? $snapshot['address'] ?? '' ) );
 		$work_time = trim( (string) ( $point['point_work_time'] ?? $point['work_time'] ?? $snapshot['work_time'] ?? '' ) );
+		$type = strtoupper( trim( (string) ( $point['point_type'] ?? $point['type'] ?? $snapshot['point_type'] ?? $snapshot['type'] ?? '' ) ) );
+		$description = trim( (string) ( $point['description'] ?? $point['point_comment'] ?? $snapshot['description'] ?? '' ) );
+		$storage_notice = trim( (string) ( $point['storage_notice'] ?? $snapshot['storage_notice'] ?? '' ) );
+		if ( '' === $storage_notice && $this->is_cdek( $carrier, $rate_id, $service ) && 'POSTAMAT' === $type ) {
+			$storage_notice = 'Срок хранения 3 дня';
+		}
 
 		return array(
-			'title'     => $this->is_russian_post( $carrier, $rate_id, $service ) ? __( 'Отделение Почты России', 'walls-delivery-calc' ) : __( 'Пункт выдачи', 'walls-delivery-calc' ),
+			'title'     => $this->title( $carrier, $rate_id, $service, $type ),
 			'address_line' => '' !== $address ? $address : $this->city_line( $postcode, $city ),
 			'work_time' => $work_time,
+			'description' => $description,
+			'storage_notice' => $storage_notice,
 		);
 	}
 
@@ -84,6 +96,18 @@ final class PickupPointCardRenderer {
 
 		return RussianPostDomesticSettings::SERVICE_KEY === $service
 			|| RussianPostDomesticSettings::is_pickup_rate_id( $rate_id );
+	}
+
+	private function is_cdek( string $carrier, string $rate_id, string $service ): bool {
+		return 'cdek' === $carrier || 'cdek' === $service || str_starts_with( $rate_id, 'cdek:' );
+	}
+
+	private function title( string $carrier, string $rate_id, string $service, string $type ): string {
+		if ( $this->is_cdek( $carrier, $rate_id, $service ) ) {
+			return 'POSTAMAT' === $type ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК';
+		}
+
+		return $this->is_russian_post( $carrier, $rate_id, $service ) ? __( 'Отделение Почты России', 'walls-delivery-calc' ) : __( 'Пункт выдачи', 'walls-delivery-calc' );
 	}
 
 	private function city_line( string $postcode, string $city ): string {
@@ -129,6 +153,10 @@ final class PickupPointCardRenderer {
 
 	private function work_time_style(): string {
 		return 'display:grid;gap:2px;margin:0 0 12px;color:#111827;';
+	}
+
+	private function storage_notice_style(): string {
+		return 'margin:0 0 6px;color:#b91c1c;font-weight:700;';
 	}
 
 	private function muted_style(): string {

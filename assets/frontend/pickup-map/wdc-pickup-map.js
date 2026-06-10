@@ -90,11 +90,14 @@
 
 		function renderPointPopup(point, selected) {
 			var rows = [];
-			var title = [carrierTitle(point), point.postal_code || point.postcode || point.point_code || ''].filter(Boolean).join(' ');
+			var title = [carrierTitle(point), pointDisplayCode(point)].filter(Boolean).join(' ');
 			if (title) {
 				rows.push('<h3 class="wdc-pickup-popup__title">' + escapeHtml(title) + '</h3>');
 			}
 			rows.push('<div class="wdc-pickup-popup__type">' + escapeHtml(pointTypeLabel(point)) + '</div>');
+			if (storageNotice(point)) {
+				rows.push('<div class="wdc-pickup-popup__storage">' + escapeHtml(storageNotice(point)) + '</div>');
+			}
 			if (point.address) {
 				rows.push('<div class="wdc-pickup-popup__section"><strong>Адрес:</strong><span>' + escapeHtml(point.address) + '</span></div>');
 			}
@@ -266,6 +269,7 @@
 				'<span class="wdc-pickup-list__headline"><strong>' + escapeHtml(pointTypeLabel(point)) + '</strong>' + (point.distanceText ? '<em>' + escapeHtml(point.distanceText) + '</em>' : '') + '</span>',
 				point.address ? '<span class="wdc-pickup-list__address">' + escapeHtml(point.address) + '</span>' : '',
 				point.work_time ? '<span class="wdc-pickup-list__time">' + escapeHtml(point.work_time) + '</span>' : '',
+				storageNotice(point) ? '<span class="wdc-pickup-list__storage">' + escapeHtml(storageNotice(point)) + '</span>' : '',
 				'</span>',
 				'</div>'
 			].join('');
@@ -671,16 +675,32 @@
 		normalized.lng = normalized.lng !== undefined && normalized.lng !== null ? normalized.lng : snapshot.lng;
 		normalized.work_time = normalized.work_time || snapshot.work_time;
 		normalized.description = normalized.description || snapshot.description;
+		normalized.storage_notice = normalized.storage_notice || snapshot.storage_notice;
+		normalized.cdek_code = normalized.cdek_code || snapshot.cdek_code;
 		return pointId(normalized) ? normalized : null;
 	}
 
 	function selectedSummary(point) {
-		return 'Выбран: ' + [point.postal_code || point.postcode || '', point.address || ''].filter(Boolean).join(', ');
+		return 'Выбран: ' + [pointDisplayCode(point), point.address || ''].filter(Boolean).join(', ');
 	}
 
 	function carrierTitle(point) {
 		var carrier = String((point && (point.carrier_key || point.carrier)) || '').toLowerCase();
 		return carrier === 'cdek' ? 'СДЭК' : 'Почта России';
+	}
+
+	function isCdekPoint(point) {
+		return String((point && (point.carrier_key || point.carrier)) || '').toLowerCase() === 'cdek';
+	}
+
+	function pointDisplayCode(point) {
+		if (!point) {
+			return '';
+		}
+		if (isCdekPoint(point)) {
+			return String(point.point_code || point.cdek_code || '').trim();
+		}
+		return String(point.postal_code || point.postcode || point.point_code || '').trim();
 	}
 
 	function validPointCoordinates(point) {
@@ -721,8 +741,8 @@
 
 	function pickupPointType(point) {
 		var type = String(point.point_type || point.type || '').toUpperCase();
-		if ((point.carrier_key || point.carrier) === 'cdek') {
-			return type === 'POSTAMAT' || type === 'APS' ? 'APS' : 'PVZ';
+		if (isCdekPoint(point)) {
+			return type === 'POSTAMAT' || type === 'APS' ? 'POSTAMAT' : 'PVZ';
 		}
 		return type === 'PVZ' || type === 'APS' ? type : 'OPS';
 	}
@@ -739,7 +759,20 @@
 		if (type === 'APS') {
 			return { enabled: true, label: 'Почтомат' };
 		}
+		if (type === 'POSTAMAT') {
+			return { enabled: true, label: 'Постамат' };
+		}
 		return { enabled: true, label: 'Отделение Почты России' };
+	}
+
+	function storageNotice(point) {
+		if (!point) {
+			return '';
+		}
+		if (point.storage_notice) {
+			return String(point.storage_notice);
+		}
+		return isCdekPoint(point) && pickupPointType(point) === 'POSTAMAT' ? 'Срок хранения 3 дня' : '';
 	}
 
 	function cleanDescription(value) {

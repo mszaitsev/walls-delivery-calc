@@ -66,16 +66,23 @@ final class PickupPointOrderDisplay {
 			return array();
 		}
 
+		$snapshot = $this->snapshot( $order );
+
 		return array(
 			'address'         => $address,
 			'postcode'        => trim( (string) $order->get_meta( '_wdc_pickup_point_postcode', true ) ),
 			'type'            => trim( (string) $order->get_meta( '_wdc_pickup_point_type', true ) ),
+			'point_type'      => trim( (string) $order->get_meta( '_wdc_pickup_point_type', true ) ),
 			'code'            => $code,
+			'point_code'      => $code,
 			'carrier_key'     => trim( (string) $order->get_meta( '_wdc_platform_carrier_key', true ) ),
 			'service_key'     => trim( (string) $order->get_meta( '_wdc_platform_service_key', true ) ),
 			'rate_id'         => trim( (string) $order->get_meta( '_wdc_platform_rate_id', true ) ),
 			'point_work_time' => trim( (string) $order->get_meta( '_wdc_platform_pickup_work_time', true ) ),
-			'snapshot'        => $this->snapshot( $order ),
+			'description'     => (string) ( $snapshot['description'] ?? $order->get_meta( '_wdc_platform_pickup_comment', true ) ),
+			'storage_notice'  => (string) ( $snapshot['storage_notice'] ?? '' ),
+			'cdek_code'       => (string) ( $snapshot['cdek_code'] ?? $code ),
+			'snapshot'        => $snapshot,
 		);
 	}
 

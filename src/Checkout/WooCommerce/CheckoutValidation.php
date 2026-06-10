@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Checkout\Validation\CheckoutAddressValidation;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
@@ -39,7 +40,7 @@ final class CheckoutValidation {
 			)
 		);
 
-		if ( ! $this->session_manager->is_russian_post_pickup_family( $chosen_rate_id ) ) {
+		if ( ! $this->is_supported_pickup_family( $chosen_rate_id ) ) {
 			$this->debug_validation( 'wdc_pickup_preload_from_post_skipped', array( 'reason' => 'not_pickup_family', 'chosen_rate_id' => $chosen_rate_id ) );
 			return;
 		}
@@ -51,7 +52,7 @@ final class CheckoutValidation {
 			return;
 		}
 
-		$restored = $this->restore_posted_pickup_selection( $data, $this->synthetic_russian_post_pickup_rate( $chosen_rate_id ) );
+		$restored = $this->restore_posted_pickup_selection( $data, $this->synthetic_pickup_rate( $chosen_rate_id ) );
 		$this->debug_validation(
 			$restored ? 'wdc_pickup_preload_from_post_success' : 'wdc_pickup_preload_from_post_skipped',
 			array(
@@ -71,8 +72,8 @@ final class CheckoutValidation {
 		$rate = $this->selected_rate( $data );
 		$selected_rate_found = array() !== $rate;
 		$synthetic_rate_created = false;
-		if ( array() === $rate && $this->session_manager->is_russian_post_pickup_family( $chosen_rate_id ) ) {
-			$rate = $this->synthetic_russian_post_pickup_rate( $chosen_rate_id );
+		if ( array() === $rate && $this->is_supported_pickup_family( $chosen_rate_id ) ) {
+			$rate = $this->synthetic_pickup_rate( $chosen_rate_id );
 			$synthetic_rate_created = true;
 		}
 		$this->debug_validation(
@@ -251,7 +252,7 @@ final class CheckoutValidation {
 			}
 
 			foreach ( $rates as $rate ) {
-				if ( is_array( $rate ) && $this->session_manager->is_same_pickup_family( $rate_id, (string) ( $rate['rate_id'] ?? '' ) ) ) {
+				if ( is_array( $rate ) && $this->is_same_supported_pickup_family( $rate_id, (string) ( $rate['rate_id'] ?? '' ) ) ) {
 					return $this->with_selected_rate_id( $rate, $rate_id );
 				}
 			}
@@ -259,6 +260,13 @@ final class CheckoutValidation {
 			if ( $this->session_manager->is_russian_post_pickup_family( $rate_id ) ) {
 				foreach ( $rates as $rate ) {
 					if ( is_array( $rate ) && $this->is_russian_post_pickup_rate( $rate ) ) {
+						return $this->with_selected_rate_id( $rate, $rate_id );
+					}
+				}
+			}
+			if ( $this->session_manager->is_cdek_pickup_family( $rate_id ) ) {
+				foreach ( $rates as $rate ) {
+					if ( is_array( $rate ) && $this->is_cdek_pickup_rate( $rate ) ) {
 						return $this->with_selected_rate_id( $rate, $rate_id );
 					}
 				}
@@ -283,6 +291,32 @@ final class CheckoutValidation {
 			'_selected_rate_id' => $rate_id,
 			'_synthetic' => true,
 		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function synthetic_cdek_pickup_rate( string $selected_rate_id ): array {
+		$normalized = $this->session_manager->normalize_rate_id( $selected_rate_id );
+		$rate_id = '' !== $normalized ? $normalized : CdekCarrier::checkout_group_id( DeliveryType::PICKUP );
+
+		return array(
+			'carrier_key' => CdekCarrier::KEY,
+			'rate_id' => $rate_id,
+			'service_key' => CdekCarrier::KEY,
+			'delivery_type' => DeliveryType::PICKUP,
+			'_selected_rate_id' => $rate_id,
+			'_synthetic' => true,
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function synthetic_pickup_rate( string $selected_rate_id ): array {
+		return $this->session_manager->is_cdek_pickup_family( $selected_rate_id )
+			? $this->synthetic_cdek_pickup_rate( $selected_rate_id )
+			: $this->synthetic_russian_post_pickup_rate( $selected_rate_id );
 	}
 
 	/**
@@ -315,7 +349,14 @@ final class CheckoutValidation {
 			return false;
 		}
 
-		$selection = $point_id > 0 ? $this->selection_from_pickup_row( $point_id ) : array();
+		$is_cdek_rate = $this->is_cdek_pickup_rate( $rate );
+		$selection = array();
+		if ( $is_cdek_rate && '' !== $point_code ) {
+			$selection = $this->selection_from_current_cdek_session( $point_code );
+		}
+		if ( array() === $selection && ! $is_cdek_rate ) {
+			$selection = $point_id > 0 ? $this->selection_from_pickup_row( $point_id ) : array();
+		}
 		$this->debug_validation(
 			'wdc_pickup_restore_lookup_by_id',
 			array(
@@ -323,7 +364,7 @@ final class CheckoutValidation {
 				'success' => array() !== $selection,
 			)
 		);
-		if ( array() === $selection && '' !== $point_code ) {
+		if ( array() === $selection && ! $is_cdek_rate && '' !== $point_code ) {
 			$selection = $this->selection_from_pickup_code( $point_code );
 			$this->debug_validation(
 				'wdc_pickup_restore_lookup_by_code',
@@ -338,6 +379,7 @@ final class CheckoutValidation {
 			$minimal_restore_used = true;
 			$selection = array(
 				'point_id' => $point_id,
+				'id' => $point_id > 0 ? (string) $point_id : ( ( $this->is_cdek_pickup_rate( $rate ) && '' !== $point_code ) ? 'cdek:' . $point_code : '' ),
 				'point_code' => $point_code,
 				'point_type' => '',
 				'point_address' => '',
@@ -357,8 +399,8 @@ final class CheckoutValidation {
 			return false;
 		}
 
-		$selection['carrier_key'] = RussianPostDomesticSettings::CARRIER_KEY;
-		$selection['rate_id'] = $this->selected_rate_id( $rate ) ?: RussianPostDomesticSettings::checkout_group_id( DeliveryType::PICKUP );
+		$selection['carrier_key'] = (string) ( $rate['carrier_key'] ?? ( $this->is_cdek_pickup_rate( $rate ) ? CdekCarrier::KEY : RussianPostDomesticSettings::CARRIER_KEY ) );
+		$selection['rate_id'] = $this->selected_rate_id( $rate ) ?: ( CdekCarrier::KEY === $selection['carrier_key'] ? CdekCarrier::checkout_group_id( DeliveryType::PICKUP ) : RussianPostDomesticSettings::checkout_group_id( DeliveryType::PICKUP ) );
 		$selection['selected_at'] = gmdate( 'c' );
 		$this->session_manager->save_pickup_selection( $selection );
 		$this->session_manager->save_checkout_pickup_point( $this->checkout_pickup_point_from_selection( $selection ) );
@@ -373,6 +415,42 @@ final class CheckoutValidation {
 		);
 
 		return true;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function selection_from_current_cdek_session( string $point_code ): array {
+		$current = $this->session_manager->pickup_selection();
+		if ( array() !== $current && CdekCarrier::KEY === (string) ( $current['carrier_key'] ?? '' ) && $point_code === (string) ( $current['point_code'] ?? '' ) ) {
+			return $current;
+		}
+
+		$checkout = $this->session_manager->checkout_pickup_point();
+		if ( array() === $checkout || $point_code !== (string) ( $checkout['point_code'] ?? '' ) ) {
+			return array();
+		}
+
+		$snapshot = is_array( $checkout['snapshot'] ?? null ) ? $checkout['snapshot'] : $checkout;
+
+		return array(
+			'id' => (string) ( $checkout['id'] ?? $snapshot['id'] ?? ( 'cdek:' . $point_code ) ),
+			'carrier_key' => CdekCarrier::KEY,
+			'point_code' => $point_code,
+			'point_type' => (string) ( $checkout['point_type'] ?? $snapshot['point_type'] ?? '' ),
+			'point_name' => (string) ( $checkout['point_name'] ?? $snapshot['point_name'] ?? '' ),
+			'point_address' => (string) ( $checkout['point_address'] ?? $checkout['address'] ?? $snapshot['address'] ?? '' ),
+			'point_postcode' => (string) ( $checkout['point_postcode'] ?? $checkout['postcode'] ?? $snapshot['postcode'] ?? '' ),
+			'city_name' => (string) ( $checkout['city_name'] ?? $snapshot['city'] ?? '' ),
+			'region_name' => (string) ( $checkout['region_name'] ?? $snapshot['region'] ?? '' ),
+			'lat' => $checkout['lat'] ?? $snapshot['lat'] ?? null,
+			'lng' => $checkout['lng'] ?? $snapshot['lng'] ?? null,
+			'point_work_time' => (string) ( $checkout['work_time'] ?? $snapshot['work_time'] ?? '' ),
+			'description' => (string) ( $checkout['description'] ?? $snapshot['description'] ?? '' ),
+			'storage_notice' => (string) ( $checkout['storage_notice'] ?? $snapshot['storage_notice'] ?? '' ),
+			'cdek_code' => (string) ( $checkout['cdek_code'] ?? $snapshot['cdek_code'] ?? $point_code ),
+			'snapshot' => $snapshot,
+		);
 	}
 
 	/**
@@ -451,6 +529,16 @@ final class CheckoutValidation {
 			'address' => $selection['point_address'] ?? $snapshot['address'] ?? '',
 			'lat' => $selection['lat'] ?? $snapshot['lat'] ?? null,
 			'lng' => $selection['lng'] ?? $snapshot['lng'] ?? null,
+			'point_name' => $selection['point_name'] ?? $snapshot['point_name'] ?? '',
+			'point_address' => $selection['point_address'] ?? $snapshot['address'] ?? '',
+			'point_postcode' => $selection['point_postcode'] ?? $snapshot['postcode'] ?? '',
+			'city_name' => $selection['city_name'] ?? $snapshot['city'] ?? '',
+			'region_name' => $selection['region_name'] ?? $snapshot['region'] ?? '',
+			'work_time' => $selection['point_work_time'] ?? $snapshot['work_time'] ?? '',
+			'description' => $selection['description'] ?? $selection['point_comment'] ?? $snapshot['description'] ?? '',
+			'storage_notice' => $selection['storage_notice'] ?? $snapshot['storage_notice'] ?? '',
+			'cdek_code' => $selection['cdek_code'] ?? $snapshot['cdek_code'] ?? '',
+			'carrier_key' => $selection['carrier_key'] ?? $snapshot['carrier_key'] ?? '',
 			'snapshot' => array() !== $snapshot ? $snapshot : array(
 				'id' => $selection['point_id'] ?? 0,
 				'point_code' => $selection['point_code'] ?? '',
@@ -486,6 +574,23 @@ final class CheckoutValidation {
 			&& RussianPostDomesticSettings::SERVICE_KEY === (string) ( $rate['service_key'] ?? '' )
 			&& DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' )
 			&& $this->session_manager->is_russian_post_pickup_family( (string) ( $rate['rate_id'] ?? '' ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 */
+	private function is_cdek_pickup_rate( array $rate ): bool {
+		return CdekCarrier::KEY === (string) ( $rate['carrier_key'] ?? '' )
+			&& DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' )
+			&& $this->session_manager->is_cdek_pickup_family( (string) ( $rate['rate_id'] ?? $rate['_selected_rate_id'] ?? '' ) );
+	}
+
+	private function is_supported_pickup_family( string $rate_id ): bool {
+		return $this->session_manager->is_russian_post_pickup_family( $rate_id ) || $this->session_manager->is_cdek_pickup_family( $rate_id );
+	}
+
+	private function is_same_supported_pickup_family( string $old_rate_id, string $new_rate_id ): bool {
+		return $this->session_manager->is_same_pickup_family( $old_rate_id, $new_rate_id ) || $this->session_manager->is_same_cdek_pickup_family( $old_rate_id, $new_rate_id );
 	}
 
 	/**
