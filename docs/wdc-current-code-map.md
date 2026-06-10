@@ -136,6 +136,8 @@ The order-admin delivery recalculation stage is complete and HPOS-audited. The f
 - helpers для postcode и coordinate enrichment;
 - admin tooling для импорта, cleanup, поиска и snapshots локаций.
 
+- Russian Post courier postcode fill lives in `src/Locations/Postcodes/RussianPostCourierCalcPostcodeFillStateService.php`, uses courier technical marker `999999999` for retry-later technical failures, retries technical probe errors up to 5 attempts, and queues marker rows before cities and other settlements through `LocationRepository::next_russianpost_courier_calc_postcode_location()`.
+
 ## Rules
 
 Расположение:

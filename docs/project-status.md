@@ -1,5 +1,7 @@
 # Project Status
 
+0.44.9 note: Russian Post courier calculation postcode fill on `WDC -> Локации` now retries technical request failures up to 5 attempts. If every attempt fails technically, it counts one error and stores courier technical marker `999999999` meaning "technical error, retry later"; this marker is distinct from "courier delivery unavailable". New/reset runs process marker rows first, then cities, then other settlements. A later success overwrites `999999999`, while a valid business response that courier delivery is unavailable clears it.
+
 0.44.8 note: CDEK method titles are normalized across checkout rates, checkout-created shipping items, admin recalculation preview tariff payloads and admin save. Titles use `{Название доставки}, {название rate} - {срок доставки}`, honor custom CDEK pickup/courier names from the service `Основное` tab, and do not duplicate delivery ranges.
 
 0.44.7 note: visible WooCommerce shipping item meta is now carrier-neutral and compact for checkout and admin delivery replacement. Every service writes only `Срок доставки`; if no delivery range/comment is available, the visible value is `не указан`. Technical carrier/rate/tariff/API/rules/package data remains in hidden WDC order meta, `_wdc_platform_rate_meta`, `_wdc_delivery_calculation_data`, and the `Калькулятор доставок` metabox.
@@ -54,7 +56,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.44.8`.
+- Текущая версия: `0.44.9`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/cdek-tariff-calculation`.
 - Последнее обновление статуса: 2026-06-09.
@@ -93,7 +95,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.44.8`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.44.9`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
@@ -118,7 +120,7 @@
 - Pickup and courier are split by `delivery_type` and checkout group/rate ids such as `russian_post_domestic:pickup` and `russian_post_domestic:courier`.
 - Domestic Tariff API requests support `pack=99`, declared value `sumoc`, tariff variants, per-tariff ECOM flag, API token, cache/debug metadata and safe error diagnostics.
 - Configurable method titles, tariff labels and delivery ranges are persisted in checkout/session/order calculation data while visible WooCommerce shipping item meta is limited to `Срок доставки` with `не указан` fallback.
-- Courier Russian Post tariff calculation can use `russianpost_courier_calc_postal_code` found by the admin location tool `Подобрать индексы для курьерской Почты России`.
+- Courier Russian Post tariff calculation can use `russianpost_courier_calc_postal_code` found by the admin location tool `Подобрать индексы для курьерской Почты России`; courier marker `999999999` means a technical fill failure that should be retried later, and is not treated as a normal found postcode.
 - Otpravka credentials, Tracking credentials, postoffice acceptance indices, default from postcode and shipment settings live in `WDC -> Службы доставки -> Почта России по РФ`.
 
 ### Pickup Points

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.44.8.
+Current plugin version: 0.44.9.
+
+Version 0.44.9 hardens the Russian Post courier calculation postcode fill tool on `WDC -> Локации`. Technical request failures now retry up to 5 attempts before counting one error and saving courier technical marker `999999999`; that marker means "technical error, retry later", not "courier delivery unavailable". A reset/new run processes `999999999` marker rows first, then cities, then other settlements. Successful retry overwrites the marker with a real postcode, while a valid "courier unavailable" API response clears the marker and leaves the courier postcode empty.
 
 Version 0.44.8 fixes CDEK method title construction across checkout and admin order recalculation save. CDEK labels now consistently use `{Название доставки}, {название rate} - {срок доставки}`, honor custom pickup/courier titles from the service `Основное` tab, and avoid duplicate delivery ranges.
 
