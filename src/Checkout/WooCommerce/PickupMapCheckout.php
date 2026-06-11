@@ -206,6 +206,10 @@ final class PickupMapCheckout {
 		}
 
 		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$address = trim( (string) ( $selection['point_address'] ?? $selection['address'] ?? $snapshot['point_address'] ?? $snapshot['address'] ?? '' ) );
+		if ( '' === $address ) {
+			return null;
+		}
 
 		return array_filter(
 			array(

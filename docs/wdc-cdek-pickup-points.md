@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.5.
+Version: 0.45.6.
+
+0.45.6 checkout state fix: CDEK pickup validation again sees full selected-point payloads posted from checkout hidden fields/session. Checkout reload no longer treats code-only CDEK payloads as valid selected cards; a selected card is shown only when `point_code`, matching `pickup_family` and address are present. Switching between CDEK and Russian Post hides inactive pickup-family cards, shows the empty `Выбрать пункт выдачи` action for the active family until a complete point is selected, and keeps Russian Post map requests on the `russian_post` REST carrier context after returning from CDEK.
 
 0.45.5 restore hardening: CDEK checkout restore no longer falls through to `RussianPostPickupPointRepository` by posted `point_id` or `point_code`. Only `russian_post_domestic:pickup` may use the Russian Post repository; CDEK restores from current session, hidden/full posted payload, or minimal CDEK payload fallback. This prevents collisions where a CDEK code matches a Russian Post row.
 

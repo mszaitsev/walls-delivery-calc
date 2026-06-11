@@ -1,5 +1,7 @@
 # Project Status
 
+0.45.6 note: checkout pickup state after the universal `pickup_family` refactor is hardened. CDEK selected pickup points pass checkout validation from full hidden/session payloads, localized checkout restore suppresses code-only selected points, the frontend selected card is rendered only when `point_code`, matching `pickup_family` and address are present, switching CDEK/Russian Post hides inactive cards and shows the empty chooser for incomplete active selections, and Russian Post map requests keep the `russian_post` REST carrier after switching back from CDEK.
+
 0.45.5 note: checkout pickup restore no longer looks up CDEK/custom pickup point ids or codes in the Russian Post pickup repository. `CheckoutValidation` gates `selection_from_pickup_row()` and `selection_from_pickup_code()` behind `pickup_family=russian_post_domestic:pickup`; CDEK/custom restore uses current session, hidden/full posted payload, or minimal fallback. Collision tests cover CDEK/custom point codes that match Russian Post rows.
 
 0.45.4 note: pickup point presentation/state is now carrier-neutral. `PickupPointPresentationResolver` centralizes built-in Russian Post and CDEK titles, CDEK POSTAMAT `Срок хранения 3 дня`, marker type and generic/custom fallback presentation. Checkout JS, checkout validation, REST/session payloads, order meta and admin recalculation save use normalized `pickup_family = {carrier_key}:pickup` plus `point_title`, `point_type_label`, `marker_type`, `description` and `storage_notice` instead of scattered CDEK/Russian Post card conditions. CDEK order creation, statuses, webhooks and print forms remain intentionally outside this stage.
@@ -68,7 +70,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.45.5`.
+- Текущая версия: `0.45.6`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `fix/cdek-pickup-selection-and-ui`.
 - Последнее обновление статуса: 2026-06-11.
@@ -107,7 +109,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.5`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.6`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

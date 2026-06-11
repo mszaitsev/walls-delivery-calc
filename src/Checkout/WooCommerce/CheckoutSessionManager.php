@@ -101,13 +101,20 @@ final class CheckoutSessionManager {
 			return false;
 		}
 
-		if ( trim( (string) ( $selection['carrier_key'] ?? '' ) ) !== trim( $carrierKey ) ) {
+		$selection_carrier = trim( (string) ( $selection['carrier_key'] ?? '' ) );
+		if ( '' !== $selection_carrier && '' !== trim( $carrierKey ) && $selection_carrier !== trim( $carrierKey ) ) {
 			return false;
 		}
 
 		$selection_rate_id = trim( (string) ( $selection['rate_id'] ?? '' ) );
 		if ( '' === $selection_rate_id ) {
-			return true;
+			$selection_family = (string) ( $selection['pickup_family'] ?? '' );
+			$rate_family      = $this->shipping_method_family( $rateId );
+			if ( '' !== $selection_family || '' !== $rate_family ) {
+				return $selection_family === $rate_family;
+			}
+
+			return $selection_carrier === trim( $carrierKey );
 		}
 
 		$selection_rate_id = $this->normalize_rate_id( $selection_rate_id );
@@ -119,7 +126,11 @@ final class CheckoutSessionManager {
 		$selection_family = (string) ( $selection['pickup_family'] ?? $this->shipping_method_family( $selection_rate_id ) );
 		$rate_family = $this->shipping_method_family( $rateId );
 
-		return '' !== $selection_family && $selection_family === $rate_family;
+		if ( '' !== $selection_family || '' !== $rate_family ) {
+			return '' !== $selection_family && $selection_family === $rate_family;
+		}
+
+		return $selection_carrier === trim( $carrierKey );
 	}
 
 	public function update_pickup_selection_rate_id( string $rateId ): void {

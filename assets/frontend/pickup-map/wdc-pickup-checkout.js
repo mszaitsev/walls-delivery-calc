@@ -237,13 +237,29 @@
 	}
 
 	function applySelection(container, point) {
+		point = point || {};
+		var method = containerMethod(container) || activeMethod || currentShippingMethod();
+		var family = shippingMethodFamily(method);
+		if (!isValidSelectedPointForCard(point, family)) {
+			showEmptySelection(container);
+			if (window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint && pickupFamily(window.wdcPickupCheckout.selectedPickupPoint) === family) {
+				window.wdcPickupCheckout.selectedPickupPoint = null;
+			}
+			debug('applySelection skipped incomplete selected point', {
+				pickup_family: family,
+				point_family: pickupFamily(point),
+				point_code_present: !!selectedPointCode(point),
+				has_address: !!selectedPointAddressValue(point)
+			});
+			return;
+		}
 		var snapshot = point.snapshot || {};
 		var selectedPoint = normalizeSelectedPoint(point);
 		var workTime = firstMeaningfulText(point.point_work_time, point.work_time, snapshot.work_time);
 		var description = firstMeaningfulText(point.description, snapshot.description);
 		var presentation = pickupPresentation(point);
 		var storage = firstMeaningfulText(point.storage_notice, snapshot.storage_notice, presentation.storage_notice);
-		var code = point.point_code || point.cdek_code || snapshot.point_code || snapshot.cdek_code || '';
+		var code = selectedPointCode(point);
 		var postcode = point.point_postcode || point.postcode || point.postal_code || snapshot.postcode || '';
 		container.querySelector('[data-wdc-pickup-point-id]').value = point.id || '';
 		container.querySelector('[data-wdc-pickup-point-code]').value = code;
@@ -285,10 +301,11 @@
 			setHidden(storageBlock, !storage);
 		}
 		container.querySelectorAll('[data-wdc-pickup-card]').forEach(function (card) {
-			setHidden(card, !point.point_code);
+			setHidden(card, false);
 		});
 		container.querySelectorAll('[data-wdc-pickup-empty-open]').forEach(function (button) {
-			setHidden(button, !!point.point_code);
+			setHidden(button, true);
+			button.disabled = false;
 		});
 		if (!window.wdcPickupCheckout) {
 			window.wdcPickupCheckout = {};
@@ -365,6 +382,28 @@
 		return postcode || city;
 	}
 
+	function selectedPointCode(point) {
+		point = point || {};
+		var snapshot = point.snapshot || {};
+		return String(point.point_code || point.cdek_code || snapshot.point_code || snapshot.cdek_code || '').trim();
+	}
+
+	function selectedPointAddressValue(point) {
+		point = point || {};
+		var snapshot = point.snapshot || {};
+		return firstMeaningfulText(point.point_address, point.address, snapshot.point_address, snapshot.address);
+	}
+
+	function isValidSelectedPointForCard(point, family) {
+		if (!point || !selectedPointCode(point)) {
+			return false;
+		}
+		if (family && pickupFamily(point) !== family) {
+			return false;
+		}
+		return !!selectedPointAddressValue(point);
+	}
+
 	function cityWithType(city) {
 		if (!city || /^(г|город|п|пос|с|д|рп|пгт)\.?\s+/i.test(city)) {
 			return city;
@@ -388,7 +427,8 @@
 			return;
 		}
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
-			applySelection(container, {});
+			clearContainerSelection(container);
+			toggleForMethod(container);
 		});
 	}
 
@@ -658,6 +698,9 @@
 		context = Object.assign({}, context || {});
 		var family = shippingMethodFamily(method || activeMethod || currentShippingMethod());
 		var carrier = pickupCarrierFromFamily(family) || context.carrier_key || context.carrier || 'russian_post';
+		if (carrier === 'russian_post_domestic') {
+			carrier = 'russian_post';
+		}
 		context.carrier = carrier;
 		context.carrier_key = carrier;
 		context.pickup_family = family;
@@ -1376,7 +1419,8 @@
 		var method = currentShippingMethod();
 		var ownMethod = containerMethod(container);
 		activeMethod = method || activeMethod;
-		var visible = !method || (isPickupRateValue(method) && (!ownMethod || shippingMethodFamily(ownMethod) === shippingMethodFamily(method)));
+		var family = shippingMethodFamily(method || ownMethod);
+		var visible = !method || (isPickupRateValue(method) && (!ownMethod || shippingMethodFamily(ownMethod) === family));
 		container.hidden = !visible;
 		container.classList.toggle('wdc-is-hidden', !visible);
 		container.setAttribute('aria-hidden', visible ? 'false' : 'true');
@@ -1387,7 +1431,7 @@
 			clearContainerSelection(container);
 			return;
 		}
-		var hasSelection = !!containerSelectedPointCode(container);
+		var hasSelection = isContainerSelectionComplete(container, family);
 		container.querySelectorAll('[data-wdc-pickup-card]').forEach(function (card) {
 			setHidden(card, !hasSelection);
 		});
@@ -1404,6 +1448,22 @@
 	function containerSelectedPointCode(container) {
 		var field = container && container.querySelector('[data-wdc-pickup-point-code]');
 		return field ? String(field.value || '').trim() : '';
+	}
+
+	function containerSelectedPointAddress(container) {
+		var field = container && container.querySelector('[data-wdc-pickup-point-address]');
+		return field ? meaningfulText(field.value) : '';
+	}
+
+	function containerSelectedPickupFamily(container) {
+		var field = container && container.querySelector('[data-wdc-pickup-family]');
+		return field ? String(field.value || '').trim() : '';
+	}
+
+	function isContainerSelectionComplete(container, family) {
+		return !!containerSelectedPointCode(container)
+			&& (!family || containerSelectedPickupFamily(container) === family)
+			&& !!containerSelectedPointAddress(container);
 	}
 
 	function triggerCheckoutUpdate() {
@@ -1426,11 +1486,15 @@
 	}
 
 	function syncSelectedPickupRate(method) {
-		var pointId = selectedPickupPointId();
+		var selected = window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint;
+		if (!selected || !pickupMatchesFamily(selected, method)) {
+			return;
+		}
+		var pointId = selected.id || selected.point_code || selectedPickupPointId();
 		if (!pointId || !window.WDCPickupApi || !window.WDCPickupApi.save) {
 			return;
 		}
-		window.WDCPickupApi.save(pointId, method, window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint).catch(function () {});
+		window.WDCPickupApi.save(pointId, method, selected).catch(function () {});
 	}
 
 	function beginPlaceOrder() {
@@ -1468,11 +1532,13 @@
 	function restoreSelectedPickupUi() {
 		var selected = window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint;
 		var method = currentShippingMethod();
-		if (!selected || !selected.point_code || !isPickupRateValue(method)) {
+		if (!isPickupRateValue(method)) {
+			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 			return;
 		}
+		var family = shippingMethodFamily(method);
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
-			if (shippingMethodFamily(containerMethod(container)) === shippingMethodFamily(method) && pickupMatchesFamily(selected, method)) {
+			if (selected && shippingMethodFamily(containerMethod(container)) === family && pickupMatchesFamily(selected, method) && isValidSelectedPointForCard(selected, family)) {
 				applySelection(container, selected);
 			} else {
 				clearContainerSelection(container);
@@ -1495,6 +1561,14 @@
 		container.querySelectorAll('[data-wdc-pickup-empty-open]').forEach(function (button) {
 			setHidden(button, true);
 			button.disabled = true;
+		});
+	}
+
+	function showEmptySelection(container) {
+		clearContainerSelection(container);
+		container.querySelectorAll('[data-wdc-pickup-empty-open]').forEach(function (button) {
+			setHidden(button, false);
+			button.disabled = false;
 		});
 	}
 
