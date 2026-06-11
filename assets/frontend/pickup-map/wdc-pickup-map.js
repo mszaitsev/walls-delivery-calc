@@ -766,7 +766,7 @@
 		if (type === 'POSTAMAT') {
 			return { enabled: true, label: 'Постамат' };
 		}
-		return { enabled: true, label: 'Отделение Почты России' };
+		return { enabled: true, label: 'Пункт выдачи' };
 	}
 
 	function storageNotice(point) {

@@ -29,6 +29,8 @@ use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
+use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
+use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 function cdek_pickup_assert( bool $condition, string $message ): void {
@@ -40,6 +42,7 @@ function cdek_pickup_assert( bool $condition, string $message ): void {
 function current_time( string $type ): string { return '2026-06-10 12:00:00'; }
 function wp_salt( string $scheme = '' ): string { return 'cdek-pickup-smoke-' . $scheme; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
+function rest_ensure_response( mixed $data ): mixed { return $data; }
 function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['wdc_cdek_pickup_options'][ $key ] ?? $default; }
 function update_option( string $key, mixed $value, bool|string $autoload = false ): bool { $GLOBALS['wdc_cdek_pickup_options'][ $key ] = $value; return true; }
 function delete_option( string $key ): bool { unset( $GLOBALS['wdc_cdek_pickup_options'][ $key ] ); return true; }
@@ -276,6 +279,13 @@ cdek_pickup_assert( 'POSTAMAT' === ( $postamat['point_type'] ?? '' ) && 'Сро�
 cdek_pickup_assert( 'Inside the shopping center' === ( $postamat['description'] ?? '' ), 'CDEK deliverypoints description must be normalized.' );
 cdek_pickup_assert( 'cdek' === ( $postamat['service_key'] ?? '' ) && 'cdek:pickup' === ( $postamat['pickup_family'] ?? '' ) && 'Постамат СДЭК' === ( $postamat['point_title'] ?? '' ) && 'postamat' === ( $postamat['marker_type'] ?? '' ), 'CDEK deliverypoints must expose normalized pickup presentation fields.' );
 
+$rest_controller = new PickupPointsRestController( new RussianPostPickupPointRepository(), null, null, $service );
+$rest_points = $rest_controller->points( array( 'carrier' => 'cdek', 'city_code' => 270 ) );
+$rest_postamat = $rest_points[1] ?? array();
+cdek_pickup_assert( 'cdek:pickup' === (string) ( $rest_postamat['pickup_family'] ?? '' ) && 'cdek' === (string) ( $rest_postamat['service_key'] ?? '' ), 'CDEK REST point must preserve service_key and pickup_family.' );
+cdek_pickup_assert( 'Постамат СДЭК' === (string) ( $rest_postamat['point_title'] ?? '' ) && 'Постамат' === (string) ( $rest_postamat['point_type_label'] ?? '' ) && 'postamat' === (string) ( $rest_postamat['marker_type'] ?? '' ), 'CDEK REST point must expose POSTAMAT presentation fields.' );
+cdek_pickup_assert( is_array( $rest_postamat['snapshot'] ?? null ) && 'cdek:pickup' === (string) ( $rest_postamat['snapshot']['pickup_family'] ?? '' ), 'CDEK REST point must include normalized snapshot.' );
+
 $card_renderer = new PickupPointCardRenderer();
 $pvz_card = $card_renderer->render( array_merge( $pvz, array( 'rate_id' => 'cdek:pickup:136' ) ), false, false );
 $postamat_card = $card_renderer->render( array_merge( $postamat, array( 'rate_id' => 'cdek:pickup:136' ) ), false, false );
@@ -437,6 +447,7 @@ cdek_pickup_assert( 'Inside the shopping center' === ( $admin_order->meta[ Order
 cdek_pickup_assert( 'Срок хранения 3 дня' === ( $admin_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ]['pickup']['storage_notice'] ?? '' ), 'Admin calculation data must save CDEK POSTAMAT storage notice.' );
 
 $checkout_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' );
+$map_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/wdc-pickup-map.js' );
 $admin_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/order-delivery-recalculation.js' );
 $rest_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/PickupPointsRestController.php' );
 $validation_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutValidation.php' );
@@ -447,6 +458,8 @@ cdek_pickup_assert( str_contains( $checkout_js, 'function isValidSelectedPointFo
 cdek_pickup_assert( str_contains( $checkout_js, "carrier === 'russian_post_domestic'" ) && str_contains( $checkout_js, "carrier = 'russian_post'" ), 'Checkout pickup JS must keep Russian Post map context valid after switching from CDEK.' );
 cdek_pickup_assert( str_contains( $checkout_js, "toggleBlock(container, '[data-wdc-pickup-code-block]', false)" ) && str_contains( $checkout_js, "toggleBlock(container, '[data-wdc-pickup-postcode-block]', false)" ), 'Checkout pickup JS must hide CDEK point code and postcode blocks in selected checkout cards.' );
 cdek_pickup_assert( str_contains( $checkout_js, 'description: point.description' ) && str_contains( $checkout_js, 'storage_notice: point.storage_notice' ) && str_contains( $checkout_js, 'cdek_code: point.cdek_code' ), 'Checkout pickup JS restore payload must include full CDEK point fields.' );
+cdek_pickup_assert( str_contains( $checkout_js, 'snapshot: snapshot' ) && str_contains( $checkout_js, 'pickup save payload' ) && str_contains( $checkout_js, 'pickup save response' ), 'Checkout pickup JS save payload must preserve snapshot and debug carrier/family/code/address summaries.' );
+cdek_pickup_assert( str_contains( $map_js, 'point.point_title || point.card_title || point.point_type_label' ) && str_contains( $map_js, "return { enabled: true, label: 'Пункт выдачи' };" ), 'Pickup map popup/list title fallback must use point presentation or generic title, not Russian Post title.' );
 cdek_pickup_assert( str_contains( $admin_js, "'cdek' === String( rate.carrier_key || rate.service_key || '' )" ) && str_contains( $admin_js, "loadPickupPointsForLocation( 'search', value )" ), 'Admin recalculation JS must use CDEK pickup search path.' );
 cdek_pickup_assert( str_contains( $rest_source, "carrier === 'cdek'" ) || str_contains( $rest_source, "'cdek' === \$carrier" ), 'Pickup REST source must route CDEK pickup requests.' );
 

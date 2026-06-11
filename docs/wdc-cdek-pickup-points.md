@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.6.
+Version: 0.45.7.
+
+0.45.7 propagation fix: pickup REST output and checkout save now carry the full normalized carrier payload end-to-end: `carrier_key`, `service_key`, `pickup_family`, `point_title`, `point_type_label`, `marker_type`, address aliases and `snapshot`. CDEK map popups and side-list rows now receive CDEK presentation (`Пункт выдачи СДЭК` / `Постамат СДЭК`) instead of falling back to Russian Post titles. Russian Post save normalizes the REST carrier back to `russian_post_domestic:pickup`, so selected Russian Post points appear on checkout again, while CDEK selected points keep `cdek:pickup` and pass checkout validation.
 
 0.45.6 checkout state fix: CDEK pickup validation again sees full selected-point payloads posted from checkout hidden fields/session. Checkout reload no longer treats code-only CDEK payloads as valid selected cards; a selected card is shown only when `point_code`, matching `pickup_family` and address are present. Switching between CDEK and Russian Post hides inactive pickup-family cards, shows the empty `Выбрать пункт выдачи` action for the active family until a complete point is selected, and keeps Russian Post map requests on the `russian_post` REST carrier context after returning from CDEK.
 

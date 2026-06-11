@@ -199,6 +199,9 @@ pickup_rest_assert( '__return_true' === $route_by_path['/points']['args']['permi
 $bbox = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '82.90,55.00,82.93,55.03' ) );
 pickup_rest_assert( 2 === count( $bbox ) && array( 1, 2 ) === array_column( $bbox, 'id' ), 'bbox must return only points inside requested area.' );
 pickup_rest_assert( array( 'russian_post', 'russian_post' ) === array_column( $bbox, 'carrier' ), 'REST summaries must expose russian_post carrier from the carrier-specific table.' );
+pickup_rest_assert( 'russian_post_domestic' === (string) ( $bbox[0]['carrier_key'] ?? '' ) && 'russian_post_domestic:pickup' === (string) ( $bbox[0]['pickup_family'] ?? '' ), 'Russian Post REST summary must expose normalized carrier_key and pickup_family.' );
+pickup_rest_assert( 'Отделение Почты России' === (string) ( $bbox[0]['point_title'] ?? '' ) && 'Пункт выдачи' === (string) ( $bbox[0]['point_type_label'] ?? '' ) && 'pickup' === (string) ( $bbox[0]['marker_type'] ?? '' ), 'Russian Post REST summary must expose normalized pickup presentation fields.' );
+pickup_rest_assert( is_array( $bbox[0]['snapshot'] ?? null ) && 'russian_post_domestic:pickup' === (string) ( $bbox[0]['snapshot']['pickup_family'] ?? '' ), 'Russian Post REST summary must include normalized snapshot.' );
 pickup_rest_assert( 'nsk-fias' === (string) ( $bbox[0]['fias_location_guid'] ?? '' ), 'REST summaries must expose pickup FIAS location GUID for cross-location checkout checks.' );
 $removed_fields = array( 'brand_name', 'ecom_options', 'payment', 'accepts_cash', 'accepts_card', 'partial_redemption', 'return_available', 'fitting_available', 'contents_checking', 'functionality_checking', 'weight_limit_grams', 'raw_reference', 'work_time_json', 'source_hash' );
 foreach ( $removed_fields as $removed_field ) {

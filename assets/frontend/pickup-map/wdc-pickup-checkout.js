@@ -77,10 +77,13 @@
 				if (!point) {
 					return Promise.resolve(false);
 				}
+				var payload = pointPayload(point);
+				debug('pickup save payload', pickupDebugSummary(payload));
 				if (!savingPoint) {
 					setLoading(options.message || 'Сохраняем пункт выдачи...');
 				}
-				return window.WDCPickupApi.save(point.id, shippingMethodId || method, pointPayload(point)).then(function (response) {
+				return window.WDCPickupApi.save(point.id, shippingMethodId || method, payload).then(function (response) {
+					debug('pickup save response', pickupDebugSummary(response && response.pickup_point));
 					applySelection(container, response.pickup_point || {});
 					close();
 					if (true === options.updateCheckoutAfterSave) {
@@ -581,6 +584,19 @@
 		}
 	}
 
+	function pickupDebugSummary(point) {
+		point = point || {};
+		var snapshot = point.snapshot || {};
+		var address = firstMeaningfulText(point.point_address, point.address, snapshot.point_address, snapshot.address);
+		return {
+			carrier_key: point.carrier_key || point.carrier || snapshot.carrier_key || '',
+			service_key: point.service_key || snapshot.service_key || '',
+			pickup_family: point.pickup_family || snapshot.pickup_family || pickupFamily(point),
+			point_code: selectedPointCode(point),
+			has_address: !!address
+		};
+	}
+
 	function fieldValue(name) {
 		var field = document.querySelector('[name="' + name + '"]');
 		return field ? String(field.value || '').trim() : '';
@@ -916,39 +932,41 @@
 
 	function pointPayload(point) {
 		point = point || {};
+		var snapshot = point.snapshot && typeof point.snapshot === 'object' ? point.snapshot : {};
 		return {
-			id: point.id || '',
-			carrier: point.carrier || point.carrier_key || '',
-			carrier_key: point.carrier_key || point.carrier || '',
-			service_key: point.service_key || point.carrier_key || point.carrier || '',
+			id: point.id || snapshot.id || '',
+			carrier: point.carrier || point.carrier_key || snapshot.carrier || snapshot.carrier_key || '',
+			carrier_key: point.carrier_key || point.carrier || snapshot.carrier_key || snapshot.carrier || '',
+			service_key: point.service_key || snapshot.service_key || point.carrier_key || point.carrier || snapshot.carrier_key || '',
 			pickup_family: point.pickup_family || pickupFamily(point),
-			point_code: point.point_code || '',
-			point_type: point.point_type || '',
-			point_type_label: point.point_type_label || pickupPresentation(point).point_type_label || '',
-			point_title: point.point_title || point.card_title || pickupPresentation(point).card_title || '',
-			point_name: point.point_name || '',
-			location_id: point.location_id || '',
-			postal_code: point.postal_code || point.postcode || '',
-			postcode: point.postcode || point.postal_code || '',
-			city: point.city || point.city_name || '',
-			region: point.region || point.region_name || '',
-			address: point.address || point.point_address || '',
-			point_address: point.point_address || point.address || '',
-			point_postcode: point.point_postcode || point.postcode || point.postal_code || '',
-			work_time: point.work_time || '',
-			description: point.description || '',
-			storage_notice: point.storage_notice || pickupPresentation(point).storage_notice || '',
-			marker_type: point.marker_type || pickupPresentation(point).marker_type || '',
-			raw_sanitized: point.raw_sanitized || point.raw || {},
-			cdek_code: point.cdek_code || '',
-			cdek_uuid: point.cdek_uuid || '',
-			cdek_type: point.cdek_type || '',
-			cdek_owner_code: point.cdek_owner_code || '',
-			cdek_nearest_station: point.cdek_nearest_station || '',
-			cdek_note: point.cdek_note || '',
-			fias_location_guid: point.fias_location_guid || point.fias_id || '',
-			lat: point.lat || '',
-			lng: point.lng || ''
+			point_code: point.point_code || snapshot.point_code || '',
+			point_type: point.point_type || snapshot.point_type || '',
+			point_type_label: point.point_type_label || snapshot.point_type_label || pickupPresentation(point).point_type_label || '',
+			point_title: point.point_title || point.card_title || snapshot.point_title || snapshot.card_title || pickupPresentation(point).card_title || '',
+			point_name: point.point_name || snapshot.point_name || '',
+			location_id: point.location_id || snapshot.location_id || '',
+			postal_code: point.postal_code || point.postcode || snapshot.postcode || '',
+			postcode: point.postcode || point.postal_code || snapshot.postcode || '',
+			city: point.city || point.city_name || snapshot.city || snapshot.city_name || '',
+			region: point.region || point.region_name || snapshot.region || snapshot.region_name || '',
+			address: point.address || point.point_address || snapshot.address || '',
+			point_address: point.point_address || point.address || snapshot.address || '',
+			point_postcode: point.point_postcode || point.postcode || point.postal_code || snapshot.postcode || '',
+			work_time: point.work_time || snapshot.work_time || '',
+			description: point.description || snapshot.description || '',
+			storage_notice: point.storage_notice || snapshot.storage_notice || pickupPresentation(point).storage_notice || '',
+			marker_type: point.marker_type || snapshot.marker_type || pickupPresentation(point).marker_type || '',
+			raw_sanitized: point.raw_sanitized || snapshot.raw_sanitized || point.raw || {},
+			cdek_code: point.cdek_code || snapshot.cdek_code || '',
+			cdek_uuid: point.cdek_uuid || snapshot.cdek_uuid || '',
+			cdek_type: point.cdek_type || snapshot.cdek_type || '',
+			cdek_owner_code: point.cdek_owner_code || snapshot.cdek_owner_code || '',
+			cdek_nearest_station: point.cdek_nearest_station || snapshot.cdek_nearest_station || '',
+			cdek_note: point.cdek_note || snapshot.cdek_note || '',
+			fias_location_guid: point.fias_location_guid || point.fias_id || snapshot.fias_location_guid || '',
+			lat: point.lat || snapshot.lat || '',
+			lng: point.lng || snapshot.lng || '',
+			snapshot: snapshot
 		};
 	}
 

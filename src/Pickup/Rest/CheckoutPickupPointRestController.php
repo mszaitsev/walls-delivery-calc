@@ -228,6 +228,9 @@ final class CheckoutPickupPointRestController {
 
 	private function carrier_from_request( mixed $request, string $method_id ): string {
 		$carrier = sanitize_key( wp_unslash( $this->param( $request, 'carrier' ) ) );
+		if ( 'russian_post' === $carrier ) {
+			$carrier = RussianPostDomesticSettings::CARRIER_KEY;
+		}
 		if ( '' !== $carrier ) {
 			return $carrier;
 		}
@@ -270,16 +273,17 @@ final class CheckoutPickupPointRestController {
 	 * @return array<string,mixed>
 	 */
 	private function cdek_selection( array $point ): array {
+		$type = strtoupper( (string) ( $point['point_type'] ?? '' ) );
 		$snapshot = array(
 			'id' => (string) ( $point['id'] ?? ( 'cdek:' . (string) ( $point['point_code'] ?? '' ) ) ),
 			'carrier_key' => 'cdek',
 			'service_key' => (string) ( $point['service_key'] ?? 'cdek' ),
 			'pickup_family' => (string) ( $point['pickup_family'] ?? 'cdek:pickup' ),
 			'point_code' => (string) ( $point['point_code'] ?? '' ),
-			'point_type' => (string) ( $point['point_type'] ?? '' ),
-			'point_type_label' => (string) ( $point['point_type_label'] ?? '' ),
-			'point_title' => (string) ( $point['point_title'] ?? '' ),
-			'marker_type' => (string) ( $point['marker_type'] ?? '' ),
+			'point_type' => $type,
+			'point_type_label' => (string) ( $point['point_type_label'] ?? ( 'POSTAMAT' === $type ? 'Постамат' : 'Пункт выдачи' ) ),
+			'point_title' => (string) ( $point['point_title'] ?? $point['card_title'] ?? ( 'POSTAMAT' === $type ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК' ) ),
+			'marker_type' => (string) ( $point['marker_type'] ?? ( 'POSTAMAT' === $type ? 'postamat' : 'pickup' ) ),
 			'point_name' => (string) ( $point['point_name'] ?? '' ),
 			'postcode' => (string) ( $point['point_postcode'] ?? $point['postcode'] ?? '' ),
 			'address' => (string) ( $point['point_address'] ?? $point['address'] ?? '' ),
@@ -450,13 +454,21 @@ final class CheckoutPickupPointRestController {
 	 * @return array<string,mixed>
 	 */
 	private function selection_from_row( array $row ): array {
+		$type = strtoupper( (string) ( $row['point_type'] ?? '' ) );
+		$type_label = 'APS' === $type ? 'Почтомат' : 'Пункт выдачи';
+		$point_title = 'APS' === $type ? 'Почтомат Почты России' : 'Отделение Почты России';
+		$marker_type = 'APS' === $type ? 'postamat' : 'pickup';
 		$snapshot = array(
 			'id' => (int) ( $row['id'] ?? 0 ),
 			'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
 			'service_key' => RussianPostDomesticSettings::SERVICE_KEY,
 			'pickup_family' => RussianPostDomesticSettings::CARRIER_KEY . ':pickup',
 			'point_code' => (string) ( $row['point_code'] ?? '' ),
-			'point_type' => (string) ( $row['point_type'] ?? '' ),
+			'point_type' => $type,
+			'point_type_label' => $type_label,
+			'point_title' => $point_title,
+			'marker_type' => $marker_type,
+			'point_name' => $point_title,
 			'postcode' => (string) ( $row['postcode'] ?? '' ),
 			'address' => (string) ( $row['address'] ?? '' ),
 			'city' => (string) ( $row['city_name'] ?? '' ),
@@ -475,6 +487,15 @@ final class CheckoutPickupPointRestController {
 			'pickup_family' => $snapshot['pickup_family'],
 			'point_code' => $snapshot['point_code'],
 			'point_type' => $snapshot['point_type'],
+			'point_type_label' => $snapshot['point_type_label'],
+			'point_title' => $snapshot['point_title'],
+			'card_title' => $snapshot['point_title'],
+			'marker_type' => $snapshot['marker_type'],
+			'point_name' => $snapshot['point_name'],
+			'point_address' => $snapshot['address'],
+			'point_postcode' => $snapshot['postcode'],
+			'city_name' => $snapshot['city'],
+			'region_name' => $snapshot['region'],
 			'postcode' => $snapshot['postcode'],
 			'address' => $snapshot['address'],
 			'lat' => $snapshot['lat'],
