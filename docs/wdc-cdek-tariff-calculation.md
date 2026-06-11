@@ -1,6 +1,8 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.45.0.
+Version: 0.45.11.
+
+0.45.11 cache safety update: CDEK `/v2/calculator/tarifflist` api_error responses such as 403/429/5xx, transport failures and non-JSON/HTML errors continue to return `error_code=api_error` and are not cached as successful empty quotes. Successful CDEK quotes are cached only when they contain rates, so a temporary API failure or zero-rate response cannot replace a previous good result with a stable "0 rates" cache entry. The delivery cache reset path also clears CDEK city and deliverypoints transients while leaving OAuth token cache untouched.
 
 0.45.0 update: CDEK pickup tariffs now require pickup point selection and are connected to the shared checkout/admin pickup map. Pickup point loading itself is documented in `docs/wdc-cdek-pickup-points.md`.
 

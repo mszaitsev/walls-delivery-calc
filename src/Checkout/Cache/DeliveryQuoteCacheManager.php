@@ -10,6 +10,8 @@ final class DeliveryQuoteCacheManager {
 	private const TRANSIENT_PREFIXES = array(
 		'wdc_rp_domestic_',
 		'wdc_rp_tariff_',
+		'wdc_cdek_city_',
+		'wdc_cdek_deliverypoints_',
 	);
 
 	private \wpdb $wpdb;

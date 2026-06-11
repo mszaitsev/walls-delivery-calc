@@ -222,6 +222,20 @@ final class CheckoutSessionManager {
 			return false;
 		}
 
+		$selection_family = (string) ( $selection['pickup_family'] ?? '' );
+		if ( str_ends_with( $rate_family, ':pickup' ) && '' !== $selection_family ) {
+			if ( $selection_family !== $rate_family ) {
+				return false;
+			}
+			$selection_carrier = trim( (string) ( $selection['carrier_key'] ?? '' ) );
+			$family_carrier = explode( ':', $rate_family )[0] ?? '';
+			$expected_carrier = trim( $carrierKey ) ?: $family_carrier;
+			if ( '' === $expected_carrier ) {
+				return true;
+			}
+			return '' !== $selection_carrier && $selection_carrier === $expected_carrier;
+		}
+
 		$selection_carrier = trim( (string) ( $selection['carrier_key'] ?? '' ) );
 		if ( '' !== $selection_carrier && '' !== trim( $carrierKey ) && $selection_carrier !== trim( $carrierKey ) ) {
 			return false;
@@ -229,7 +243,6 @@ final class CheckoutSessionManager {
 
 		$selection_rate_id = trim( (string) ( $selection['rate_id'] ?? '' ) );
 		if ( '' === $selection_rate_id ) {
-			$selection_family = (string) ( $selection['pickup_family'] ?? '' );
 			if ( '' !== $selection_family || '' !== $rate_family ) {
 				return $selection_family === $rate_family;
 			}

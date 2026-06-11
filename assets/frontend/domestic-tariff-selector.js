@@ -33,7 +33,7 @@
 		document.querySelectorAll('.wdc-domestic-tariff-selector').forEach(function (wrapper) {
 			var groupId = normalizeShippingMethod(wrapper.getAttribute('data-wdc-checkout-group-id') || '');
 			var groupFamily = methodFamily(groupId);
-			var active = !activeFamily || !groupFamily || activeFamily === groupFamily;
+			var active = !!activeFamily && !!groupFamily && activeFamily === groupFamily;
 			wrapper.classList.toggle('is-inactive', !active);
 			wrapper.setAttribute('aria-disabled', active ? 'false' : 'true');
 			wrapper.querySelectorAll('input[type="radio"]').forEach(function (input) {

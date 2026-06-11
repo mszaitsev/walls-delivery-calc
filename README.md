@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.10.
+Current plugin version: 0.45.11.
+
+Version 0.45.11 fixes the remaining checkout pickup state blockers. Checkout boot now restores the active family bucket from localized `pickupSelections` / `activePickupFamily` and fills the pickup hidden fields on reload; Russian Post validation accepts the active `russian_post_domestic:pickup` bucket before carrier-key fallback checks; CDEK api_error/403 and zero-rate tarifflist results are not stored as successful empty quote cache entries; delivery cache reset includes CDEK city/deliverypoints caches without clearing token cache; and grouped tariff selectors keep nested rates disabled when no active shipping method is selected after a carrier disappears.
 
 Version 0.45.10 fixes checkout pickup restoration from family buckets. Backend localized config and REST state/save responses now expose `pickupSelections` / `pickup_selections` plus `active_pickup_family`, and frontend restore uses that dictionary as the source of truth after switching methods, checkout updates and page reloads. Save responses merge into the dictionary without replacing full payloads with code-only points. The pickup map side list now uses the same service-specific title and display code as marker popups, so Russian Post shows `Отделение Почты России {postcode}` and CDEK shows `Пункт выдачи СДЭК {cdek_code}` / `Постамат СДЭК {cdek_code}`.
 

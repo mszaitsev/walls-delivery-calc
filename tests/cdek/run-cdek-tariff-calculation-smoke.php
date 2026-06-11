@@ -20,6 +20,7 @@ use WallsShop\WDC\Carriers\Cdek\CdekLocationResolver;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
+use WallsShop\WDC\Checkout\Cache\QuoteCache;
 use WallsShop\WDC\Checkout\Runtime\CarrierExecutionGuard;
 use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
@@ -373,7 +374,7 @@ function cdek_tariff_location_queries( CdekTariffFakeHttpClient $http ): array {
 	return $queries;
 }
 
-function cdek_tariff_orchestrator( CdekCarrier $carrier, ?DeliveryServiceRegistry $service_registry = null, ?DeliveryServiceManager $service_manager = null ): CheckoutOrchestrator {
+function cdek_tariff_orchestrator( CdekCarrier $carrier, ?DeliveryServiceRegistry $service_registry = null, ?DeliveryServiceManager $service_manager = null, ?QuoteCache $quote_cache = null ): CheckoutOrchestrator {
 	$registry = new CarrierRegistry();
 	$registry->register( $carrier );
 	return new CheckoutOrchestrator(
@@ -383,7 +384,7 @@ function cdek_tariff_orchestrator( CdekCarrier $carrier, ?DeliveryServiceRegistr
 		new FallbackRateFactory(),
 		new CarrierExecutionGuard( new CheckoutLogger( new Logger() ) ),
 		new CheckoutLogger( new Logger() ),
-		null,
+		$quote_cache,
 		$service_registry,
 		$service_manager
 	);
@@ -567,6 +568,20 @@ $success_result = cdek_tariff_orchestrator( $carrier, $enabled_registry, $enable
 $cdek_rates = array_values( array_filter( $success_result->rates, static fn( DeliveryRate $rate ): bool => CdekCarrier::KEY === $rate->carrier_key ) );
 cdek_tariff_assert( 2 === count( $cdek_rates ), 'Enabled CDEK service must produce pickup and courier runtime rates.' );
 
+$cache_http = new CdekTariffFakeHttpClient();
+[ , , $cache_carrier ] = cdek_tariff_settings( $cache_http, true );
+[ $cache_registry, $cache_manager ] = cdek_tariff_service_runtime( $cache_carrier, true );
+$success_cache = new QuoteCache();
+$success_cache->invalidate_all();
+$cache_first = cdek_tariff_orchestrator( $cache_carrier, $cache_registry, $cache_manager, $success_cache )->calculate( cdek_tariff_request(), array(), RateSorter::CHEAPEST, true );
+$cache_first_cdek = array_values( array_filter( $cache_first->rates, static fn( DeliveryRate $rate ): bool => CdekCarrier::KEY === $rate->carrier_key ) );
+$cache_tarifflist_count = count( array_filter( $cache_http->requests, static fn( array $request ): bool => str_contains( $request['url'], '/v2/calculator/tarifflist' ) ) );
+$cache_http->tariff_error = true;
+$cache_second = cdek_tariff_orchestrator( $cache_carrier, $cache_registry, $cache_manager, $success_cache )->calculate( cdek_tariff_request(), array(), RateSorter::CHEAPEST, true );
+$cache_second_cdek = array_values( array_filter( $cache_second->rates, static fn( DeliveryRate $rate ): bool => CdekCarrier::KEY === $rate->carrier_key ) );
+$cache_tarifflist_after_hit = count( array_filter( $cache_http->requests, static fn( array $request ): bool => str_contains( $request['url'], '/v2/calculator/tarifflist' ) ) );
+cdek_tariff_assert( 2 === count( $cache_first_cdek ) && 2 === count( $cache_second_cdek ) && $cache_tarifflist_count === $cache_tarifflist_after_hit, 'Successful CDEK quote cache must serve previous rates for the same context without a new tarifflist call.' );
+
 $no_match_http = new CdekTariffFakeHttpClient();
 $no_match_http->tariff_codes_override = array(
 	array( 'tariff_code' => 137, 'tariff_name' => 'Courier only', 'delivery_mode' => 3, 'delivery_sum' => 520, 'period_min' => 1, 'period_max' => 1 ),
@@ -584,6 +599,16 @@ $no_match_warning = cdek_tariff_find_log( 'CDEK tariff response has no matching 
 cdek_tariff_assert( DeliveryType::PICKUP === (string) ( $no_match_warning['context']['requested_delivery_type'] ?? '' ), 'CDEK no matching tariffs warning must include requested delivery type.' );
 $no_tariffs_reason_log = cdek_tariff_find_log( 'CDEK quote returned empty.' );
 cdek_tariff_assert( 'no_tariffs_available' === (string) ( $no_tariffs_reason_log['context']['reason'] ?? '' ), 'CDEK no_tariffs_available reason must be logged.' );
+
+$no_match_cache = new QuoteCache();
+$no_match_cache->invalidate_all();
+$no_match_cached_first = cdek_tariff_orchestrator( $no_match_carrier, null, null, $no_match_cache )->calculate( cdek_tariff_request( DeliveryType::PICKUP ), array(), RateSorter::CHEAPEST, true );
+$no_match_cached_count = count( array_filter( $no_match_http->requests, static fn( array $request ): bool => str_contains( $request['url'], '/v2/calculator/tarifflist' ) ) );
+$no_match_cached_second = cdek_tariff_orchestrator( $no_match_carrier, null, null, $no_match_cache )->calculate( cdek_tariff_request( DeliveryType::PICKUP ), array(), RateSorter::CHEAPEST, true );
+$no_match_cached_count_after = count( array_filter( $no_match_http->requests, static fn( array $request ): bool => str_contains( $request['url'], '/v2/calculator/tarifflist' ) ) );
+$no_match_cached_first_cdek = array_values( array_filter( $no_match_cached_first->rates, static fn( DeliveryRate $rate ): bool => CdekCarrier::KEY === $rate->carrier_key ) );
+$no_match_cached_second_cdek = array_values( array_filter( $no_match_cached_second->rates, static fn( DeliveryRate $rate ): bool => CdekCarrier::KEY === $rate->carrier_key ) );
+cdek_tariff_assert( array() === $no_match_cached_first_cdek && array() === $no_match_cached_second_cdek && $no_match_cached_count_after > $no_match_cached_count, 'CDEK empty successful quote with zero rates must not be cached as a stable no-rates result.' );
 
 $rule = new Rule( 1, 'Add 100 rub', true, 10, RuleRepository::TARGET_DEFAULT, '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 100, RuleOperationBases::RUBLES, false, false );
 $ruled = cdek_tariff_orchestrator( $carrier )->calculate( cdek_tariff_request(), array( $rule ), RateSorter::CHEAPEST, false );
@@ -730,7 +755,18 @@ cdek_tariff_assert( 400 === (int) ( $error_log['context']['http_code'] ?? 0 ), '
 cdek_tariff_assert( DeliveryType::PICKUP === (string) ( $error_log['context']['delivery_type'] ?? '' ), 'CDEK tarifflist log must include delivery type.' );
 $api_empty_log = cdek_tariff_find_log( 'CDEK quote returned empty.' );
 cdek_tariff_assert( 'api_error' === (string) ( $api_empty_log['context']['reason'] ?? '' ), 'CDEK api_error empty quote reason must be logged.' );
+$error_cache = new QuoteCache();
+$error_cache->invalidate_all();
+$error_cached_first = cdek_tariff_orchestrator( $error_carrier, null, null, $error_cache )->calculate( cdek_tariff_request( DeliveryType::PICKUP ), array(), RateSorter::CHEAPEST, true );
+$error_cached_count = count( array_filter( $error_http->requests, static fn( array $request ): bool => str_contains( $request['url'], '/v2/calculator/tarifflist' ) ) );
+$error_cached_second = cdek_tariff_orchestrator( $error_carrier, null, null, $error_cache )->calculate( cdek_tariff_request( DeliveryType::PICKUP ), array(), RateSorter::CHEAPEST, true );
+$error_cached_count_after = count( array_filter( $error_http->requests, static fn( array $request ): bool => str_contains( $request['url'], '/v2/calculator/tarifflist' ) ) );
+$error_cached_first_cdek = array_values( array_filter( $error_cached_first->rates, static fn( DeliveryRate $rate ): bool => CdekCarrier::KEY === $rate->carrier_key ) );
+$error_cached_second_cdek = array_values( array_filter( $error_cached_second->rates, static fn( DeliveryRate $rate ): bool => CdekCarrier::KEY === $rate->carrier_key ) );
+cdek_tariff_assert( array() === $error_cached_first_cdek && array() === $error_cached_second_cdek && $error_cached_count_after > $error_cached_count, 'CDEK api_error quote must not be cached as a zero-rate quote.' );
 $serialized_error_debug = json_encode( array( $details, $error_log ), JSON_UNESCAPED_UNICODE );
 cdek_tariff_assert( is_string( $serialized_error_debug ) && ! str_contains( $serialized_error_debug, 'runtime-token' ) && ! str_contains( $serialized_error_debug, 'secure-password' ) && ! str_contains( $serialized_error_debug, 'account-id' ), 'CDEK tarifflist diagnostics must not expose token, secret, or account.' );
+$cache_manager_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Cache/DeliveryQuoteCacheManager.php' ) ?: '';
+cdek_tariff_assert( str_contains( $cache_manager_source, 'wdc_cdek_city_' ) && str_contains( $cache_manager_source, 'wdc_cdek_deliverypoints_' ) && ! str_contains( $cache_manager_source, 'wdc_cdek_oauth_' ), 'Delivery quote cache reset must include CDEK quote/location point caches without clearing CDEK token cache.' );
 
 echo "CDEK tariff calculation smoke test passed.\n";

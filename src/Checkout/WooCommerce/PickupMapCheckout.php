@@ -66,6 +66,7 @@ final class PickupMapCheckout {
 					'pickupSelections' => $this->selected_points_context(),
 					'selectedPickupPoints' => $this->selected_points_context(),
 					'activePickupFamily' => $this->active_pickup_family(),
+					'selectedPickupPoint' => $this->selected_point_context( $this->active_pickup_family() ),
 					'mapProvider'      => $provider,
 					'pickupPointTypes' => $this->pickup_point_types(),
 					'pickupFamilies'   => $this->pickup_families(),
