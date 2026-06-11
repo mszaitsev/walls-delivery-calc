@@ -975,7 +975,7 @@ ob_start();
 ( new PickupPointOrderDisplay( new PickupPointCardRenderer(), new SettingsRepository() ) )->render( $cdek_pickup_order );
 $cdek_pickup_order_card = (string) ob_get_clean();
 recalc_smoke_assert( str_contains( $cdek_pickup_order_card, 'Постамат СДЭК' ), 'CDEK admin pickup order card must render POSTAMAT title.' );
-recalc_smoke_assert( str_contains( $cdek_pickup_order_card, 'Код пункта:' ) && str_contains( $cdek_pickup_order_card, 'KEM7' ), 'CDEK admin pickup order card must render CDEK point code.' );
+recalc_smoke_assert( str_contains( $cdek_pickup_order_card, 'Kemerovo, Sovetskiy 10' ) && ! str_contains( $cdek_pickup_order_card, 'Код пункта:' ), 'CDEK admin pickup order card must render address and hide code row by default.' );
 recalc_smoke_assert( str_contains( $cdek_pickup_order_card, 'Описание:' ) && str_contains( $cdek_pickup_order_card, 'Inside the shopping center' ), 'CDEK admin pickup order card must render description with label.' );
 recalc_smoke_assert( str_contains( $cdek_pickup_order_card, 'Срок хранения 3 дня' ), 'CDEK admin pickup order card must render storage notice.' );
 recalc_smoke_assert( ! str_contains( $cdek_pickup_order_card, 'Время работы:' ) && ! str_contains( $cdek_pickup_order_card, '0.000000' ), 'CDEK admin pickup order card must hide empty work_time and numeric zero values.' );

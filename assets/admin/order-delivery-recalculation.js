@@ -774,20 +774,13 @@
 		return String( point.point_address || point.address || point.point_name || point.point_code || '' );
 	}
 
-	function isCdekPickupPoint( point ) {
-		return 'cdek' === String( point && ( point.carrier_key || point.carrier ) || '' ).toLowerCase();
-	}
-
 	function pickupPointDisplayCode( point ) {
-		if ( isCdekPickupPoint( point ) ) {
-			return String( point.point_code || point.cdek_code || '' );
-		}
-		return String( point.point_postcode || point.postcode || point.postal_code || point.point_code || '' );
+		return String( point.point_code || point.cdek_code || point.point_postcode || point.postcode || point.postal_code || '' );
 	}
 
 	function pickupPointTitle( point ) {
-		if ( isCdekPickupPoint( point ) ) {
-			return 'POSTAMAT' === String( point.point_type || point.cdek_type || '' ).toUpperCase() ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК';
+		if ( point.point_title || point.card_title || point.point_type_label ) {
+			return String( point.point_title || point.card_title || point.point_type_label );
 		}
 		return String( point.point_type || '' ).toUpperCase() === 'APS' ? 'Почтомат Почты России' : 'Отделение Почты России';
 	}
@@ -797,7 +790,7 @@
 		if ( notice ) {
 			return notice;
 		}
-		return isCdekPickupPoint( point ) && 'POSTAMAT' === String( point.point_type || point.cdek_type || '' ).toUpperCase() ? 'Срок хранения 3 дня' : '';
+		return '';
 	}
 
 	function meaningfulText( value ) {
@@ -1023,8 +1016,13 @@
 		return {
 			id: String( point.id || point.point_code || postcode || address || '' ),
 			carrier_key: String( point.carrier_key || point.carrier || '' ),
+			service_key: String( point.service_key || point.carrier_key || point.carrier || '' ),
+			pickup_family: String( point.pickup_family || ( point.carrier_key ? point.carrier_key + ':pickup' : '' ) ),
 			point_code: String( point.point_code || '' ),
 			point_type: String( point.point_type || 'OPS' ),
+			point_type_label: String( point.point_type_label || '' ),
+			point_title: String( point.point_title || point.card_title || '' ),
+			marker_type: String( point.marker_type || '' ),
 			point_name: String( point.point_name || postcode || point.point_code || '' ),
 			point_address: address,
 			point_postcode: postcode,
@@ -1108,7 +1106,7 @@
 			const rows = [
 				'<div class="wdc-pickup-popup">',
 				'<h3 class="wdc-pickup-popup__title">' + escapeHtml( [ pickupPointTitle( point ), pickupPointDisplayCode( point ) ].filter( Boolean ).join( ' ' ) ) + '</h3>',
-				'<div class="wdc-pickup-popup__section"><strong>' + escapeHtml( isCdekPickupPoint( point ) ? 'Код:' : 'Индекс:' ) + '</strong><span>' + escapeHtml( pickupPointDisplayCode( point ) ) + '</span></div>',
+				'<div class="wdc-pickup-popup__section"><strong>' + escapeHtml( 'Код/индекс:' ) + '</strong><span>' + escapeHtml( pickupPointDisplayCode( point ) ) + '</span></div>',
 				'<div class="wdc-pickup-popup__section"><strong>Адрес:</strong><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span></div>'
 			];
 			if ( point.description ) {
@@ -1127,7 +1125,7 @@
 			if ( selected ) {
 				selected.innerHTML = [
 					'<div class="wdc-order-delivery-pickup-picker__selected-grid">',
-					'<span><strong>' + escapeHtml( isCdekPickupPoint( point ) ? 'Код' : 'Индекс' ) + '</strong>' + escapeHtml( pickupPointDisplayCode( point ) ) + '</span>',
+					'<span><strong>' + escapeHtml( 'Код/индекс' ) + '</strong>' + escapeHtml( pickupPointDisplayCode( point ) ) + '</span>',
 					'<span><strong>Тип</strong>' + escapeHtml( pickupPointTitle( point ) ) + '</span>',
 					'<span><strong>Адрес</strong>' + escapeHtml( pickupPointLabel( point ) ) + '</span>',
 					point.description ? '<span><strong>Описание</strong>' + escapeHtml( point.description ) + '</span>' : '',

@@ -65,6 +65,8 @@ final class PickupMapCheckout {
 					'initialContext'   => $this->initial_context(),
 					'mapProvider'      => $provider,
 					'pickupPointTypes' => $this->pickup_point_types(),
+					'pickupFamilies'   => $this->pickup_families(),
+					'pickupPresentation' => $this->pickup_presentation(),
 					'yandexApiKeyPresent' => $this->has_yandex_api_key(),
 					'yandexApiKey'     => 'yandex' === $provider && $this->has_yandex_api_key() ? $this->yandex_api_key() : '',
 					'labels'           => array(
@@ -210,8 +212,12 @@ final class PickupMapCheckout {
 				'id' => $selection['id'] ?? $snapshot['id'] ?? null,
 				'carrier_key' => $selection['carrier_key'] ?? $snapshot['carrier_key'] ?? null,
 				'carrier' => $selection['carrier'] ?? $selection['carrier_key'] ?? $snapshot['carrier'] ?? $snapshot['carrier_key'] ?? null,
+				'service_key' => $selection['service_key'] ?? $snapshot['service_key'] ?? null,
+				'pickup_family' => $selection['pickup_family'] ?? $snapshot['pickup_family'] ?? null,
 				'point_code' => $selection['point_code'] ?? $snapshot['point_code'] ?? null,
 				'point_type' => $selection['point_type'] ?? $snapshot['point_type'] ?? null,
+				'point_type_label' => $selection['point_type_label'] ?? $snapshot['point_type_label'] ?? null,
+				'point_title' => $selection['point_title'] ?? $selection['card_title'] ?? $snapshot['point_title'] ?? $snapshot['card_title'] ?? null,
 				'point_name' => $selection['point_name'] ?? $snapshot['point_name'] ?? null,
 				'point_address' => $selection['point_address'] ?? $selection['address'] ?? $snapshot['address'] ?? null,
 				'point_postcode' => $selection['point_postcode'] ?? $selection['postcode'] ?? $snapshot['postcode'] ?? null,
@@ -225,6 +231,7 @@ final class PickupMapCheckout {
 				'point_work_time' => $selection['point_work_time'] ?? $selection['work_time'] ?? $snapshot['work_time'] ?? null,
 				'description' => $selection['description'] ?? $selection['point_comment'] ?? $snapshot['description'] ?? null,
 				'storage_notice' => $selection['storage_notice'] ?? $snapshot['storage_notice'] ?? null,
+				'marker_type' => $selection['marker_type'] ?? $snapshot['marker_type'] ?? null,
 				'cdek_code' => $selection['cdek_code'] ?? $snapshot['cdek_code'] ?? null,
 				'cdek_type' => $selection['cdek_type'] ?? $snapshot['cdek_type'] ?? null,
 				'snapshot' => $snapshot,
@@ -297,5 +304,53 @@ final class PickupMapCheckout {
 		$type_settings = $this->point_type_settings ?? new RussianPostPickupPointTypeSettings( $this->settings );
 
 		return $type_settings->all();
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function pickup_families(): array {
+		$families = array();
+		foreach ( $this->session_manager->rates() as $rate ) {
+			if ( DeliveryType::PICKUP !== (string) ( $rate['delivery_type'] ?? '' ) || empty( $rate['requires_pickup_point'] ) ) {
+				continue;
+			}
+			$family = $this->session_manager->shipping_method_family( (string) ( $rate['rate_id'] ?? $rate['id'] ?? '' ) );
+			if ( '' !== $family && ! in_array( $family, $families, true ) ) {
+				$families[] = $family;
+			}
+		}
+
+		return $families;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function pickup_presentation(): array {
+		return array(
+			'defaults' => array(
+				'card_title' => 'Пункт выдачи',
+				'point_type_label' => 'Пункт выдачи',
+				'marker_type' => 'pickup',
+				'show_code_on_checkout' => false,
+				'show_postcode_on_checkout' => false,
+			),
+			'families' => array(
+				'cdek:pickup' => array(
+					'types' => array(
+						'PVZ' => array( 'card_title' => 'Пункт выдачи СДЭК', 'point_type_label' => 'Пункт выдачи', 'marker_type' => 'pickup' ),
+						'POSTAMAT' => array( 'card_title' => 'Постамат СДЭК', 'point_type_label' => 'Постамат', 'storage_notice' => 'Срок хранения 3 дня', 'marker_type' => 'postamat' ),
+					),
+				),
+				'russian_post_domestic:pickup' => array(
+					'types' => array(
+						'OPS' => array( 'card_title' => 'Отделение Почты России', 'point_type_label' => 'Пункт выдачи', 'marker_type' => 'pickup' ),
+						'PVZ' => array( 'card_title' => 'Отделение Почты России', 'point_type_label' => 'Пункт выдачи', 'marker_type' => 'pickup' ),
+						'APS' => array( 'card_title' => 'Почтомат Почты России', 'point_type_label' => 'Почтомат', 'marker_type' => 'postamat' ),
+					),
+				),
+			),
+		);
 	}
 }

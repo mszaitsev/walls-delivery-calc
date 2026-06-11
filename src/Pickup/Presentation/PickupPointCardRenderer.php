@@ -3,22 +3,27 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Pickup\Presentation;
 
-use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
-
 defined( 'ABSPATH' ) || exit;
 
 final class PickupPointCardRenderer {
+	private PickupPointPresentationResolver $presentation;
+
+	public function __construct( ?PickupPointPresentationResolver $presentation = null ) {
+		$this->presentation = $presentation ?? new PickupPointPresentationResolver();
+	}
+
 	/**
 	 * @param array<string,mixed>|object $point
 	 */
-	public function render( array|object $point, bool $include_change_button = false, bool $hidden = false, bool $show_cdek_code_rows = true ): string {
+	public function render( array|object $point, bool $include_change_button = false, bool $hidden = false, bool $show_code_postcode_rows = true ): string {
 		$data      = $this->normalize( $point );
 		$work_time = $data['work_time'];
 		$description = $data['description'];
 		$storage_notice = $data['storage_notice'];
 		$code = $data['code'];
 		$postcode = $data['postcode'];
-		$is_cdek = $data['is_cdek'];
+		$show_code = $show_code_postcode_rows && ( $include_change_button ? $data['show_code_on_checkout'] : $data['show_code_on_order'] );
+		$show_postcode = $show_code_postcode_rows && ( $include_change_button ? $data['show_postcode_on_checkout'] : $data['show_postcode_on_order'] );
 		$classes   = 'wdc-pickup-point-card' . ( $include_change_button ? ' wdc-pickup-point-card--checkout' : '' ) . ( $hidden ? ' wdc-is-hidden' : '' );
 		$hidden_attr = $hidden ? ' hidden' : '';
 		$parts     = array();
@@ -28,11 +33,11 @@ final class PickupPointCardRenderer {
 		$parts[] = '<div class="wdc-pickup-point-card__body" style="' . esc_attr( $this->body_style() ) . '">';
 		$parts[] = '<div class="wdc-pickup-point-card__address" data-wdc-pickup-address style="' . esc_attr( $this->address_style() ) . '">' . esc_html( $data['address_line'] ) . '</div>';
 		$needs_placeholders = $include_change_button || $hidden;
-		if ( $show_cdek_code_rows && $is_cdek && ( '' !== $code || $needs_placeholders ) ) {
-			$parts[] = '<div class="wdc-pickup-point-card__code" data-wdc-pickup-code-block' . ( ! $is_cdek || '' === $code ? ' hidden' : '' ) . ' style="' . esc_attr( $this->line_style() ) . '"><span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Код пункта:', 'walls-delivery-calc' ) ) . '</span> <span data-wdc-pickup-code>' . esc_html( $code ) . '</span></div>';
+		if ( $show_code && ( '' !== $code || $needs_placeholders ) ) {
+			$parts[] = '<div class="wdc-pickup-point-card__code" data-wdc-pickup-code-block' . ( '' === $code ? ' hidden' : '' ) . ' style="' . esc_attr( $this->line_style() ) . '"><span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Код пункта:', 'walls-delivery-calc' ) ) . '</span> <span data-wdc-pickup-code>' . esc_html( $code ) . '</span></div>';
 		}
-		if ( $show_cdek_code_rows && $is_cdek && ( '' !== $postcode || $needs_placeholders ) ) {
-			$parts[] = '<div class="wdc-pickup-point-card__postcode" data-wdc-pickup-postcode-block' . ( ! $is_cdek || '' === $postcode ? ' hidden' : '' ) . ' style="' . esc_attr( $this->line_style() ) . '"><span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Индекс:', 'walls-delivery-calc' ) ) . '</span> <span data-wdc-pickup-postcode>' . esc_html( $postcode ) . '</span></div>';
+		if ( $show_postcode && ( '' !== $postcode || $needs_placeholders ) ) {
+			$parts[] = '<div class="wdc-pickup-point-card__postcode" data-wdc-pickup-postcode-block' . ( '' === $postcode ? ' hidden' : '' ) . ' style="' . esc_attr( $this->line_style() ) . '"><span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Индекс:', 'walls-delivery-calc' ) ) . '</span> <span data-wdc-pickup-postcode>' . esc_html( $postcode ) . '</span></div>';
 		}
 		if ( '' !== $work_time || $needs_placeholders ) {
 			$parts[] = '<div class="wdc-pickup-point-card__work-time" data-wdc-pickup-work-time-block' . ( '' === $work_time ? ' hidden' : '' ) . ' style="' . esc_attr( $this->work_time_style() ) . '">';
@@ -59,14 +64,11 @@ final class PickupPointCardRenderer {
 
 	/**
 	 * @param array<string,mixed>|object $point
-	 * @return array{title:string,address_line:string,work_time:string,description:string,storage_notice:string,code:string,postcode:string,is_cdek:bool}
+	 * @return array{title:string,address_line:string,work_time:string,description:string,storage_notice:string,code:string,postcode:string,show_code_on_checkout:bool,show_postcode_on_checkout:bool,show_code_on_order:bool,show_postcode_on_order:bool}
 	 */
 	public function normalize( array|object $point ): array {
 		$point    = $this->point_to_array( $point );
 		$snapshot = is_array( $point['snapshot'] ?? null ) ? $point['snapshot'] : array();
-		$carrier  = trim( (string) ( $point['carrier'] ?? $point['carrier_key'] ?? $snapshot['carrier'] ?? $snapshot['carrier_key'] ?? '' ) );
-		$rate_id  = trim( (string) ( $point['rate_id'] ?? $point['shipping_method_id'] ?? $snapshot['rate_id'] ?? '' ) );
-		$service  = trim( (string) ( $point['service_key'] ?? $snapshot['service_key'] ?? '' ) );
 		$postcode = trim( (string) ( $point['postcode'] ?? $point['point_postcode'] ?? $snapshot['postcode'] ?? '' ) );
 		$city     = trim( (string) ( $point['city'] ?? $point['city_name'] ?? $snapshot['city'] ?? $snapshot['city_name'] ?? '' ) );
 		$address  = trim( (string) ( $point['address'] ?? $point['point_address'] ?? $snapshot['address'] ?? '' ) );
@@ -75,31 +77,27 @@ final class PickupPointCardRenderer {
 			$point['work_time'] ?? '',
 			$snapshot['work_time'] ?? ''
 		);
-		$type = strtoupper( trim( (string) ( $point['point_type'] ?? $point['type'] ?? $snapshot['point_type'] ?? $snapshot['type'] ?? '' ) ) );
 		$description = $this->first_meaningful(
 			$point['description'] ?? '',
 			$point['point_comment'] ?? '',
 			$snapshot['description'] ?? ''
 		);
-		$storage_notice = $this->first_meaningful(
-			$point['storage_notice'] ?? '',
-			$snapshot['storage_notice'] ?? ''
-		);
-		$is_cdek = $this->is_cdek( $carrier, $rate_id, $service );
+		$presentation = $this->presentation->resolve( $point );
+		$storage_notice = $presentation['storage_notice'];
 		$code = trim( (string) ( $point['point_code'] ?? $point['code'] ?? $point['cdek_code'] ?? $snapshot['point_code'] ?? $snapshot['code'] ?? $snapshot['cdek_code'] ?? '' ) );
-		if ( '' === $storage_notice && $is_cdek && 'POSTAMAT' === $type ) {
-			$storage_notice = 'Срок хранения 3 дня';
-		}
 
 		return array(
-			'title'     => $this->title( $carrier, $rate_id, $service, $type ),
+			'title'     => $presentation['card_title'],
 			'address_line' => '' !== $address ? $address : $this->city_line( $postcode, $city ),
 			'work_time' => $work_time,
 			'description' => $description,
 			'storage_notice' => $storage_notice,
 			'code' => $code,
 			'postcode' => $postcode,
-			'is_cdek' => $is_cdek,
+			'show_code_on_checkout' => $presentation['show_code_on_checkout'],
+			'show_postcode_on_checkout' => $presentation['show_postcode_on_checkout'],
+			'show_code_on_order' => $presentation['show_code_on_order'],
+			'show_postcode_on_order' => $presentation['show_postcode_on_order'],
 		);
 	}
 
@@ -119,31 +117,6 @@ final class PickupPointCardRenderer {
 		}
 
 		return get_object_vars( $point );
-	}
-
-	private function is_russian_post( string $carrier, string $rate_id, string $service ): bool {
-		if ( in_array( $carrier, array( 'russian_post', RussianPostDomesticSettings::CARRIER_KEY ), true ) ) {
-			return true;
-		}
-
-		return RussianPostDomesticSettings::SERVICE_KEY === $service
-			|| RussianPostDomesticSettings::is_pickup_rate_id( $rate_id );
-	}
-
-	private function is_cdek( string $carrier, string $rate_id, string $service ): bool {
-		return 'cdek' === $carrier || 'cdek' === $service || str_starts_with( $rate_id, 'cdek:' );
-	}
-
-	private function title( string $carrier, string $rate_id, string $service, string $type ): string {
-		if ( $this->is_cdek( $carrier, $rate_id, $service ) ) {
-			return 'POSTAMAT' === $type ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК';
-		}
-
-		if ( $this->is_russian_post( $carrier, $rate_id, $service ) ) {
-			return 'APS' === $type ? __( 'Почтомат Почты России', 'walls-delivery-calc' ) : __( 'Отделение Почты России', 'walls-delivery-calc' );
-		}
-
-		return __( 'Пункт выдачи', 'walls-delivery-calc' );
 	}
 
 	private function meaningful_text( mixed $value ): string {

@@ -95,6 +95,12 @@ final class OrderShippingMetaPersister {
 			$map['_wdc_pickup_point_id']           = $pickup['point_id'] ?? '';
 			$map['_wdc_pickup_point_code']         = $pickup['point_code'] ?? '';
 			$map['_wdc_pickup_point_type']         = $pickup['point_type'] ?? '';
+			$map['_wdc_pickup_carrier_key']        = $pickup['carrier_key'] ?? '';
+			$map['_wdc_pickup_service_key']        = $pickup['service_key'] ?? '';
+			$map['_wdc_pickup_family']             = $pickup['pickup_family'] ?? '';
+			$map['_wdc_pickup_point_type_label']   = $pickup['point_type_label'] ?? '';
+			$map['_wdc_pickup_point_title']        = $pickup['point_title'] ?? '';
+			$map['_wdc_pickup_marker_type']        = $pickup['marker_type'] ?? '';
 			$map['_wdc_pickup_point_address']      = $this->first_meaningful( $pickup['point_address'] ?? '', $pickup['address'] ?? '', $pickup['snapshot']['address'] ?? '' );
 			$map['_wdc_pickup_point_postcode']     = $this->first_meaningful( $pickup['point_postcode'] ?? '', $pickup['postcode'] ?? '', $pickup['postal_code'] ?? '', $pickup['snapshot']['postcode'] ?? '' );
 			$map['_wdc_pickup_point_snapshot']     = function_exists( 'wp_json_encode' ) ? wp_json_encode( is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : $pickup, JSON_UNESCAPED_UNICODE ) : json_encode( is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : $pickup );
@@ -192,8 +198,13 @@ final class OrderShippingMetaPersister {
 
 		return array(
 			'carrier_key'   => (string) ( $pickup['carrier_key'] ?? '' ),
+			'service_key'   => (string) ( $pickup['service_key'] ?? '' ),
+			'pickup_family' => (string) ( $pickup['pickup_family'] ?? '' ),
 			'point_code'    => (string) ( $pickup['point_code'] ?? '' ),
 			'point_type'    => (string) ( $pickup['point_type'] ?? '' ),
+			'point_type_label' => (string) ( $pickup['point_type_label'] ?? $pickup['snapshot']['point_type_label'] ?? '' ),
+			'point_title'   => (string) ( $pickup['point_title'] ?? $pickup['snapshot']['point_title'] ?? '' ),
+			'marker_type'   => (string) ( $pickup['marker_type'] ?? $pickup['snapshot']['marker_type'] ?? '' ),
 			'point_name'    => (string) ( $pickup['point_name'] ?? '' ),
 			'point_address' => $this->first_meaningful( $pickup['point_address'] ?? '', $pickup['address'] ?? '', $pickup['snapshot']['address'] ?? '' ),
 			'point_postcode' => $this->first_meaningful( $pickup['point_postcode'] ?? '', $pickup['postcode'] ?? '', $pickup['postal_code'] ?? '', $pickup['snapshot']['postcode'] ?? '' ),

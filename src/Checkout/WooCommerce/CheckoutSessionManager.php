@@ -36,6 +36,7 @@ final class CheckoutSessionManager {
 	 * @param array<string,mixed> $selection
 	 */
 	public function save_pickup_selection( array $selection ): void {
+		$selection = $this->normalize_pickup_selection_payload( $selection );
 		$this->set( self::PICKUP_SELECTION_KEY, $selection );
 		$this->set( self::PICKUP_CARRIER_KEY, (string) ( $selection['carrier_key'] ?? '' ) );
 	}
@@ -82,7 +83,7 @@ final class CheckoutSessionManager {
 	 * @param array<string,mixed> $selection
 	 */
 	public function save_checkout_pickup_point( array $selection ): void {
-		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, $selection );
+		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, $this->normalize_pickup_selection_payload( $selection ) );
 	}
 
 	/**
@@ -115,13 +116,10 @@ final class CheckoutSessionManager {
 			return true;
 		}
 
-		return (
-			RussianPostDomesticSettings::CARRIER_KEY === trim( $carrierKey )
-			&& $this->is_same_pickup_family( $selection_rate_id, $rateId )
-		) || (
-			CdekCarrier::KEY === trim( $carrierKey )
-			&& $this->is_same_cdek_pickup_family( $selection_rate_id, $rateId )
-		);
+		$selection_family = (string) ( $selection['pickup_family'] ?? $this->shipping_method_family( $selection_rate_id ) );
+		$rate_family = $this->shipping_method_family( $rateId );
+
+		return '' !== $selection_family && $selection_family === $rate_family;
 	}
 
 	public function update_pickup_selection_rate_id( string $rateId ): void {
@@ -151,18 +149,17 @@ final class CheckoutSessionManager {
 
 	public function shipping_method_family( string $rate_id ): string {
 		$rate_id = $this->normalize_rate_id( $rate_id );
-		if ( $this->is_russian_post_pickup_family( $rate_id ) ) {
-			return RussianPostDomesticSettings::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP );
-		}
-		if ( $this->is_cdek_pickup_family( $rate_id ) ) {
-			return CdekCarrier::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP );
+		$parts = explode( ':', $rate_id );
+		$pickup_index = array_search( 'pickup', $parts, true );
+		if ( false !== $pickup_index && $pickup_index > 0 ) {
+			return $parts[0] . ':pickup';
 		}
 
 		return $rate_id;
 	}
 
 	public function is_russian_post_pickup_family( string $rate_id ): bool {
-		return RussianPostDomesticSettings::is_pickup_rate_id( $this->normalize_rate_id( $rate_id ) );
+		return RussianPostDomesticSettings::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP ) === $this->shipping_method_family( $rate_id );
 	}
 
 	public function is_same_pickup_family( string $oldRateId, string $newRateId ): bool {
@@ -173,7 +170,7 @@ final class CheckoutSessionManager {
 	}
 
 	public function is_cdek_pickup_family( string $rate_id ): bool {
-		return str_starts_with( $this->normalize_rate_id( $rate_id ), CdekCarrier::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP ) );
+		return CdekCarrier::checkout_group_id( \WallsShop\WDC\Domain\Quote\DeliveryType::PICKUP ) === $this->shipping_method_family( $rate_id );
 	}
 
 	public function is_same_cdek_pickup_family( string $oldRateId, string $newRateId ): bool {
@@ -184,7 +181,39 @@ final class CheckoutSessionManager {
 	}
 
 	private function is_supported_pickup_family( string $rate_id ): bool {
-		return $this->is_russian_post_pickup_family( $rate_id ) || $this->is_cdek_pickup_family( $rate_id );
+		return str_ends_with( $this->shipping_method_family( $rate_id ), ':pickup' );
+	}
+
+	/**
+	 * @param array<string,mixed> $selection
+	 * @return array<string,mixed>
+	 */
+	private function normalize_pickup_selection_payload( array $selection ): array {
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$carrier = trim( (string) ( $selection['carrier_key'] ?? $selection['carrier'] ?? $snapshot['carrier_key'] ?? $snapshot['carrier'] ?? '' ) );
+		$service = trim( (string) ( $selection['service_key'] ?? $snapshot['service_key'] ?? $carrier ) );
+		$family = trim( (string) ( $selection['pickup_family'] ?? $snapshot['pickup_family'] ?? '' ) );
+		if ( '' === $family ) {
+			$rate_family = $this->shipping_method_family( (string) ( $selection['rate_id'] ?? $snapshot['rate_id'] ?? '' ) );
+			$family = str_ends_with( $rate_family, ':pickup' ) ? $rate_family : '';
+		}
+		if ( '' === $family ) {
+			$family_source = '' !== $carrier ? $carrier : $service;
+			$family = '' !== $family_source ? $family_source . ':pickup' : '';
+		}
+
+		if ( '' !== $carrier ) {
+			$selection['carrier_key'] = $carrier;
+			$selection['carrier'] = $selection['carrier'] ?? $carrier;
+		}
+		if ( '' !== $service ) {
+			$selection['service_key'] = $service;
+		}
+		if ( '' !== $family ) {
+			$selection['pickup_family'] = $family;
+		}
+
+		return $selection;
 	}
 
 	public function save_sort_mode( string $sort_mode ): void {

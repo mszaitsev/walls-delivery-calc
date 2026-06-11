@@ -430,6 +430,7 @@ C:.
 |   |   |
 |   |   +---Presentation
 |   |   |       PickupPointCardRenderer.php
+|   |   |       PickupPointPresentationResolver.php
 |   |   |
 |   |   +---Rest
 |   |   |       CheckoutPickupPointRestController.php

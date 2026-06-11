@@ -96,6 +96,17 @@ final class CheckoutPickupPointRestController {
 			return $this->response( array( 'pickup_point' => $selection ) );
 		}
 
+		if ( RussianPostDomesticSettings::CARRIER_KEY !== $carrier ) {
+			$point = $this->array_param( $request, 'point' );
+			if ( array() === $point ) {
+				return $this->error( 'invalid_point', 'Pickup point payload is required.', 400 );
+			}
+			$selection = $this->selection_from_generic_point( $point, $carrier, $method_id );
+			$this->save_selection( $selection, $carrier, $method_id );
+
+			return $this->response( array( 'pickup_point' => $selection ) );
+		}
+
 		$row = $this->repository->find_row_by_id( $point_id );
 		if ( ! is_array( $row ) || 1 !== (int) ( $row['active'] ?? 0 ) ) {
 			return $this->error( 'not_found', 'Pickup point not found.', 404 );
@@ -172,15 +183,25 @@ final class CheckoutPickupPointRestController {
 	 * @param array<string,mixed> $selection
 	 */
 	private function save_selection( array $selection, string $carrier, string $method_id ): void {
+		$family = (string) ( $selection['pickup_family'] ?? $selection['snapshot']['pickup_family'] ?? $this->session_manager->shipping_method_family( $method_id ) );
+		if ( ! str_ends_with( $family, ':pickup' ) ) {
+			$family = $carrier . ':pickup';
+		}
+		$service_key = (string) ( $selection['service_key'] ?? $selection['snapshot']['service_key'] ?? $carrier );
 		$this->session_manager->save_checkout_pickup_point( $selection );
 		$this->session_manager->save_pickup_selection(
 			array(
 				'carrier_key' => $carrier,
 				'carrier' => $carrier,
+				'service_key' => $service_key,
+				'pickup_family' => $family,
 				'rate_id' => $method_id,
 				'point_id' => $selection['id'] ?? '',
 				'point_code' => $selection['point_code'] ?? '',
 				'point_type' => $selection['point_type'] ?? '',
+				'point_type_label' => $selection['point_type_label'] ?? ( $selection['snapshot']['point_type_label'] ?? '' ),
+				'point_title' => $selection['point_title'] ?? ( $selection['snapshot']['point_title'] ?? '' ),
+				'marker_type' => $selection['marker_type'] ?? ( $selection['snapshot']['marker_type'] ?? '' ),
 				'point_name' => $selection['point_name'] ?? ( $selection['snapshot']['point_name'] ?? '' ),
 				'point_address' => $selection['address'] ?? $selection['point_address'] ?? '',
 				'address' => $selection['address'] ?? $selection['point_address'] ?? '',
@@ -252,8 +273,13 @@ final class CheckoutPickupPointRestController {
 		$snapshot = array(
 			'id' => (string) ( $point['id'] ?? ( 'cdek:' . (string) ( $point['point_code'] ?? '' ) ) ),
 			'carrier_key' => 'cdek',
+			'service_key' => (string) ( $point['service_key'] ?? 'cdek' ),
+			'pickup_family' => (string) ( $point['pickup_family'] ?? 'cdek:pickup' ),
 			'point_code' => (string) ( $point['point_code'] ?? '' ),
 			'point_type' => (string) ( $point['point_type'] ?? '' ),
+			'point_type_label' => (string) ( $point['point_type_label'] ?? '' ),
+			'point_title' => (string) ( $point['point_title'] ?? '' ),
+			'marker_type' => (string) ( $point['marker_type'] ?? '' ),
 			'point_name' => (string) ( $point['point_name'] ?? '' ),
 			'postcode' => (string) ( $point['point_postcode'] ?? $point['postcode'] ?? '' ),
 			'address' => (string) ( $point['point_address'] ?? $point['address'] ?? '' ),
@@ -276,8 +302,13 @@ final class CheckoutPickupPointRestController {
 		return array(
 			'id' => $snapshot['id'],
 			'carrier_key' => 'cdek',
+			'service_key' => $snapshot['service_key'],
+			'pickup_family' => $snapshot['pickup_family'],
 			'point_code' => $snapshot['point_code'],
 			'point_type' => $snapshot['point_type'],
+			'point_type_label' => $snapshot['point_type_label'],
+			'point_title' => $snapshot['point_title'],
+			'marker_type' => $snapshot['marker_type'],
 			'point_name' => $snapshot['point_name'],
 			'point_address' => $snapshot['address'],
 			'point_postcode' => $snapshot['postcode'],
@@ -292,6 +323,63 @@ final class CheckoutPickupPointRestController {
 			'cdek_owner_code' => $snapshot['cdek_owner_code'],
 			'cdek_nearest_station' => $snapshot['cdek_nearest_station'],
 			'cdek_note' => $snapshot['cdek_note'],
+			'postcode' => $snapshot['postcode'],
+			'address' => $snapshot['address'],
+			'lat' => $snapshot['lat'],
+			'lng' => $snapshot['lng'],
+			'snapshot' => $snapshot,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $point
+	 * @return array<string,mixed>
+	 */
+	private function selection_from_generic_point( array $point, string $carrier, string $method_id ): array {
+		$family = (string) ( $point['pickup_family'] ?? $this->session_manager->shipping_method_family( $method_id ) );
+		if ( ! str_ends_with( $family, ':pickup' ) ) {
+			$family = $carrier . ':pickup';
+		}
+		$snapshot = array(
+			'id' => (string) ( $point['id'] ?? $point['point_code'] ?? '' ),
+			'carrier_key' => $carrier,
+			'service_key' => (string) ( $point['service_key'] ?? $carrier ),
+			'pickup_family' => $family,
+			'point_code' => (string) ( $point['point_code'] ?? '' ),
+			'point_type' => (string) ( $point['point_type'] ?? '' ),
+			'point_type_label' => (string) ( $point['point_type_label'] ?? '' ),
+			'point_title' => (string) ( $point['point_title'] ?? $point['card_title'] ?? '' ),
+			'marker_type' => (string) ( $point['marker_type'] ?? '' ),
+			'point_name' => (string) ( $point['point_name'] ?? '' ),
+			'postcode' => (string) ( $point['point_postcode'] ?? $point['postcode'] ?? '' ),
+			'address' => (string) ( $point['point_address'] ?? $point['address'] ?? '' ),
+			'city' => (string) ( $point['city_name'] ?? $point['city'] ?? '' ),
+			'region' => (string) ( $point['region_name'] ?? $point['region'] ?? '' ),
+			'lat' => $point['lat'] ?? null,
+			'lng' => $point['lng'] ?? null,
+			'work_time' => (string) ( $point['work_time'] ?? '' ),
+			'description' => (string) ( $point['description'] ?? $point['point_comment'] ?? '' ),
+			'storage_notice' => (string) ( $point['storage_notice'] ?? '' ),
+		);
+
+		return array(
+			'id' => $snapshot['id'],
+			'carrier_key' => $snapshot['carrier_key'],
+			'service_key' => $snapshot['service_key'],
+			'pickup_family' => $snapshot['pickup_family'],
+			'point_code' => $snapshot['point_code'],
+			'point_type' => $snapshot['point_type'],
+			'point_type_label' => $snapshot['point_type_label'],
+			'point_title' => $snapshot['point_title'],
+			'marker_type' => $snapshot['marker_type'],
+			'point_name' => $snapshot['point_name'],
+			'point_address' => $snapshot['address'],
+			'point_postcode' => $snapshot['postcode'],
+			'city_name' => $snapshot['city'],
+			'region_name' => $snapshot['region'],
+			'work_time' => $snapshot['work_time'],
+			'description' => $snapshot['description'],
+			'storage_notice' => $snapshot['storage_notice'],
 			'postcode' => $snapshot['postcode'],
 			'address' => $snapshot['address'],
 			'lat' => $snapshot['lat'],
@@ -364,6 +452,9 @@ final class CheckoutPickupPointRestController {
 	private function selection_from_row( array $row ): array {
 		$snapshot = array(
 			'id' => (int) ( $row['id'] ?? 0 ),
+			'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+			'service_key' => RussianPostDomesticSettings::SERVICE_KEY,
+			'pickup_family' => RussianPostDomesticSettings::CARRIER_KEY . ':pickup',
 			'point_code' => (string) ( $row['point_code'] ?? '' ),
 			'point_type' => (string) ( $row['point_type'] ?? '' ),
 			'postcode' => (string) ( $row['postcode'] ?? '' ),
@@ -379,6 +470,9 @@ final class CheckoutPickupPointRestController {
 
 		return array(
 			'id' => $snapshot['id'],
+			'carrier_key' => $snapshot['carrier_key'],
+			'service_key' => $snapshot['service_key'],
+			'pickup_family' => $snapshot['pickup_family'],
 			'point_code' => $snapshot['point_code'],
 			'point_type' => $snapshot['point_type'],
 			'postcode' => $snapshot['postcode'],
@@ -390,7 +484,14 @@ final class CheckoutPickupPointRestController {
 	}
 
 	private function is_supported_shipping_method( string $method_id, string $carrier ): bool {
-		return 'cdek' === $carrier ? str_starts_with( $method_id, 'cdek:' ) : RussianPostDomesticSettings::is_pickup_rate_id( $method_id );
+		if ( 'cdek' === $carrier ) {
+			return str_starts_with( $method_id, 'cdek:' );
+		}
+		if ( RussianPostDomesticSettings::CARRIER_KEY === $carrier ) {
+			return RussianPostDomesticSettings::is_pickup_rate_id( $method_id );
+		}
+
+		return str_ends_with( $this->session_manager->shipping_method_family( $method_id ), ':pickup' );
 	}
 
 	private function normalize_shipping_method_id( string $method_id ): string {

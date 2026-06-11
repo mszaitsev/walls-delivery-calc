@@ -229,6 +229,7 @@ use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
 use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
+use WallsShop\WDC\Pickup\Presentation\PickupPointPresentationResolver;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
@@ -526,6 +527,13 @@ pickup_smoke_assert( 2 === count( $pickup_rates ), 'Orchestrator must not filter
 pickup_smoke_assert( 2 === count( $courier_rates ), 'Orchestrator must not filter rates by courier delivery type.' );
 
 $card_renderer = new PickupPointCardRenderer();
+$presentation_resolver = new PickupPointPresentationResolver();
+$rp_presentation = $presentation_resolver->resolve( array( 'carrier_key' => 'russian_post_domestic', 'pickup_family' => 'russian_post_domestic:pickup', 'point_type' => 'OPS' ) );
+$cdek_presentation = $presentation_resolver->resolve( array( 'carrier_key' => 'cdek', 'pickup_family' => 'cdek:pickup', 'point_type' => 'POSTAMAT' ) );
+$generic_presentation = $presentation_resolver->resolve( array( 'carrier_key' => 'custom_carrier', 'pickup_family' => 'custom_carrier:pickup', 'point_type' => 'LOCKER' ) );
+pickup_smoke_assert( 'Отделение Почты России' === (string) $rp_presentation['card_title'], 'Built-in Russian Post presentation must resolve through PickupPointPresentationResolver.' );
+pickup_smoke_assert( 'Постамат СДЭК' === (string) $cdek_presentation['card_title'] && 'Срок хранения 3 дня' === (string) $cdek_presentation['storage_notice'] && 'postamat' === (string) $cdek_presentation['marker_type'], 'Built-in CDEK POSTAMAT presentation must resolve through PickupPointPresentationResolver.' );
+pickup_smoke_assert( 'Пункт выдачи' === (string) $generic_presentation['card_title'] && 'pickup' === (string) $generic_presentation['marker_type'], 'Generic/custom pickup presentation must fall back safely.' );
 $rp_card = $card_renderer->render(
 	array(
 		'carrier_key' => 'russian_post_domestic',

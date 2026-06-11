@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.3.
+Version: 0.45.4.
+
+0.45.4 presentation/state refactor: CDEK pickup now uses the same normalized pickup presentation model as Russian Post and future custom pickup services. The saved payload includes `service_key`, `pickup_family=cdek:pickup`, `point_type_label`, `point_title`, `marker_type`, `description`, `storage_notice` and snapshot data. `PickupPointPresentationResolver` owns the built-in CDEK titles (`Пункт выдачи СДЭК`, `Постамат СДЭК`), POSTAMAT `Срок хранения 3 дня`, marker type and generic fallback behavior. Checkout JS state, validation, order meta and admin recalculation save now match by `pickup_family` instead of scattered CDEK/Russian Post card conditions.
 
 0.45.3 checkout state fix: the selected CDEK pickup card under rates is intentionally visual-only and does not render `Код пункта` or `Индекс`, while keeping the selected point title, address, meaningful `work_time`, `Описание:` and POSTAMAT `Срок хранения 3 дня`. Checkout reload localizes the full CDEK selected pickup payload from session, including `point_code`, `cdek_code`, `point_address`/`address`, `point_postcode`/`postcode`, city, region, description, storage notice and snapshot data. Switching shipping method hides inactive pickup-family cards/buttons so CDEK controls cannot open the Russian Post map and vice versa. Thankyou/order/email cards read the full saved pickup payload and stay populated.
 
@@ -34,6 +36,11 @@ This stage connects CDEK pickup points to the existing WDC pickup map/picker flo
   - `work_time`;
   - `description`;
   - `storage_notice`;
+  - `service_key`;
+  - `pickup_family`;
+  - `point_type_label`;
+  - `point_title`;
+  - `marker_type`;
   - sanitized `raw`.
 - CDEK-specific preserved fields:
   - `cdek_code`;

@@ -303,6 +303,8 @@ $unsupported = $controller->points( array( 'carrier' => 'demo', 'bbox' => '0,0,1
 pickup_rest_assert( array() === $unsupported, 'Unsupported carrier must not read legacy pickup table.' );
 
 $pickup_rest_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/PickupPointsRestController.php' );
-pickup_rest_assert( str_contains( $pickup_rest_source, "'description'" ) && str_contains( $pickup_rest_source, "'storage_notice'" ) && str_contains( $pickup_rest_source, "'cdek_code'" ), 'CDEK pickup REST summary must expose description, storage_notice and cdek_code.' );
+$cdek_service_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Cdek/CdekDeliveryPointService.php' ) ?: '';
+$checkout_rest_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' ) ?: '';
+pickup_rest_assert( str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'description'" ) && str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'storage_notice'" ) && str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'cdek_code'" ) && str_contains( $cdek_service_source . $checkout_rest_source, "'pickup_family'" ) && str_contains( $cdek_service_source . $checkout_rest_source, "'point_title'" ), 'CDEK pickup REST summary must expose description, storage_notice, cdek_code and normalized presentation fields.' );
 
 echo "Pickup REST smoke test passed.\n";

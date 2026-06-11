@@ -365,6 +365,13 @@
 	}
 
 	function pointType(point) {
+		var markerType = String(point.marker_type || '').toLowerCase();
+		if (markerType === 'postamat') {
+			return 'POSTAMAT';
+		}
+		if (markerType === 'pickup') {
+			return 'PVZ';
+		}
 		var type = String(point.point_type || point.type || 'OPS').toUpperCase();
 		return type === 'PVZ' || type === 'APS' || type === 'POSTAMAT' ? type : 'OPS';
 	}

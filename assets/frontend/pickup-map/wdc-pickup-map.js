@@ -678,6 +678,9 @@
 		normalized.work_time = firstMeaningfulText(normalized.work_time, snapshot.work_time);
 		normalized.description = firstCleanDescription(normalized.description, snapshot.description);
 		normalized.storage_notice = firstCleanDescription(normalized.storage_notice, snapshot.storage_notice);
+		normalized.marker_type = normalized.marker_type || snapshot.marker_type;
+		normalized.point_title = normalized.point_title || normalized.card_title || snapshot.point_title || snapshot.card_title;
+		normalized.point_type_label = normalized.point_type_label || snapshot.point_type_label;
 		normalized.cdek_code = normalized.cdek_code || snapshot.cdek_code;
 		return pointId(normalized) ? normalized : null;
 	}
@@ -687,25 +690,14 @@
 	}
 
 	function carrierTitle(point) {
-		var carrier = String((point && (point.carrier_key || point.carrier)) || '').toLowerCase();
-		if (carrier === 'cdek') {
-			return pickupPointType(point) === 'POSTAMAT' ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК';
-		}
-		return 'Почта России';
-	}
-
-	function isCdekPoint(point) {
-		return String((point && (point.carrier_key || point.carrier)) || '').toLowerCase() === 'cdek';
+		return String((point && (point.point_title || point.card_title || point.point_type_label)) || '').trim() || 'Пункт выдачи';
 	}
 
 	function pointDisplayCode(point) {
 		if (!point) {
 			return '';
 		}
-		if (isCdekPoint(point)) {
-			return String(point.point_code || point.cdek_code || '').trim();
-		}
-		return String(point.postal_code || point.postcode || point.point_code || '').trim();
+		return String(point.point_code || point.cdek_code || point.postal_code || point.postcode || '').trim();
 	}
 
 	function validPointCoordinates(point) {
@@ -736,6 +728,9 @@
 	}
 
 	function pointTypeLabel(point) {
+		if (point && point.point_type_label) {
+			return point.point_type_label;
+		}
 		if (point && point._wdcTypeLabel) {
 			return point._wdcTypeLabel;
 		}
@@ -745,10 +740,14 @@
 	}
 
 	function pickupPointType(point) {
-		var type = String(point.point_type || point.type || '').toUpperCase();
-		if (isCdekPoint(point)) {
-			return type === 'POSTAMAT' || type === 'APS' ? 'POSTAMAT' : 'PVZ';
+		var markerType = String((point && point.marker_type) || '').toLowerCase();
+		if (markerType === 'postamat') {
+			return 'POSTAMAT';
 		}
+		if (markerType === 'pickup') {
+			return 'PVZ';
+		}
+		var type = String(point.point_type || point.type || '').toUpperCase();
 		return type === 'PVZ' || type === 'APS' ? type : 'OPS';
 	}
 
@@ -778,7 +777,7 @@
 		if (notice) {
 			return notice;
 		}
-		return isCdekPoint(point) && pickupPointType(point) === 'POSTAMAT' ? 'Срок хранения 3 дня' : '';
+		return '';
 	}
 
 	function cleanDescription(value) {

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.3.
+Current plugin version: 0.45.4.
+
+Version 0.45.4 refactors pickup point presentation/state into a carrier-neutral layer. Pickup payloads now carry `service_key`, `pickup_family`, `point_type_label`, `point_title`, `marker_type` and display flags; `PickupPointPresentationResolver` owns built-in Russian Post/CDEK titles, CDEK POSTAMAT storage notice and generic/custom fallback title `Пункт выдачи`. Checkout state, validation, order meta and admin recalculation save now work from normalized pickup family/payload instead of scattered `if cdek` / `if russian_post` card logic. CDEK order creation, statuses, webhooks and print forms are still intentionally not implemented.
 
 Version 0.45.3 fixes the CDEK selected pickup point card state after the second QA pass. The checkout card under rates keeps the customer-facing CDEK title, address, work time, description and POSTAMAT storage notice, but no longer shows the technical point code or postcode rows. Checkout reload restores the full selected CDEK pickup payload from session/localized state instead of falling back to code-only output, switching shipping method hides inactive pickup-family cards/buttons, and thankyou/order/email rendering receives the full CDEK pickup payload.
 

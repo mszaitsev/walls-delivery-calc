@@ -198,12 +198,14 @@ The order-admin delivery recalculation stage is complete and HPOS-audited. The f
 
 Ответственность:
 
-- domain model ПВЗ, storage, location resolution и rendering карточки;
+- domain model ПВЗ, storage, location resolution и carrier-neutral rendering карточки;
 - import ПВЗ Почты России, import state, diagnostics, normalization, type settings и work-time formatting;
 - поиск адресов для ПВЗ;
 - REST controllers для directory/search/detail ПВЗ и checkout pickup selection state;
 - `RussianPostPickupPointRepository::search_admin_pickup_rows()` searches local Russian Post pickup rows by postcode, city and address for the shipment modal;
-- `CdekDeliveryPointService` provides live CDEK pickup point data from `GET /v2/deliverypoints` to the shared checkout/admin picker infrastructure;
+- `PickupPointPresentationResolver` centralizes pickup card presentation metadata for built-in Russian Post/CDEK and generic/custom pickup fallback (`card_title`, `point_type_label`, marker type, code/postcode display flags and storage notice);
+- normalized pickup payloads carry `carrier_key`, `service_key`, `pickup_family={carrier_key}:pickup`, `point_code`, `point_type`, `point_type_label`, `point_title`, address/postcode/city/region, work time, description, storage notice, coordinates and snapshot data;
+- `CdekDeliveryPointService` provides live CDEK pickup point data from `GET /v2/deliverypoints` to the shared checkout/admin picker infrastructure and fills the normalized presentation fields;
 - admin summary page для ПВЗ.
 
 ## Orders
