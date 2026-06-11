@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
-use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Checkout\Validation\CheckoutAddressValidation;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
@@ -273,40 +272,6 @@ final class CheckoutValidation {
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function synthetic_russian_post_pickup_rate( string $selected_rate_id ): array {
-		$normalized = $this->session_manager->normalize_rate_id( $selected_rate_id );
-		$rate_id = '' !== $normalized ? $normalized : RussianPostDomesticSettings::checkout_group_id( DeliveryType::PICKUP );
-
-		return array(
-			'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
-			'rate_id' => $rate_id,
-			'service_key' => RussianPostDomesticSettings::SERVICE_KEY,
-			'delivery_type' => DeliveryType::PICKUP,
-			'_selected_rate_id' => $rate_id,
-			'_synthetic' => true,
-		);
-	}
-
-	/**
-	 * @return array<string,mixed>
-	 */
-	private function synthetic_cdek_pickup_rate( string $selected_rate_id ): array {
-		$normalized = $this->session_manager->normalize_rate_id( $selected_rate_id );
-		$rate_id = '' !== $normalized ? $normalized : CdekCarrier::checkout_group_id( DeliveryType::PICKUP );
-
-		return array(
-			'carrier_key' => CdekCarrier::KEY,
-			'rate_id' => $rate_id,
-			'service_key' => CdekCarrier::KEY,
-			'delivery_type' => DeliveryType::PICKUP,
-			'_selected_rate_id' => $rate_id,
-			'_synthetic' => true,
-		);
-	}
-
-	/**
-	 * @return array<string,mixed>
-	 */
 	private function synthetic_pickup_rate( string $selected_rate_id ): array {
 		$normalized = $this->session_manager->normalize_rate_id( $selected_rate_id );
 		$family = $this->session_manager->shipping_method_family( $normalized );
@@ -357,26 +322,32 @@ final class CheckoutValidation {
 			return false;
 		}
 
+		$family = $this->rate_pickup_family( $rate, $this->selected_rate_id( $rate ) );
+		$is_russian_post_family = RussianPostDomesticSettings::CARRIER_KEY . ':pickup' === $family;
 		$selection = array();
 		if ( '' !== $point_code ) {
 			$selection = $this->selection_from_current_pickup_session( $point_code, $rate );
 		}
-		if ( array() === $selection ) {
+		if ( array() === $selection && $is_russian_post_family ) {
 			$selection = $point_id > 0 ? $this->selection_from_pickup_row( $point_id ) : array();
 		}
 		$this->debug_validation(
 			'wdc_pickup_restore_lookup_by_id',
 			array(
 				'posted_point_id_present' => $point_id > 0,
+				'pickup_family' => $family,
+				'lookup_allowed' => $is_russian_post_family,
 				'success' => array() !== $selection,
 			)
 		);
-		if ( array() === $selection && '' !== $point_code ) {
+		if ( array() === $selection && $is_russian_post_family && '' !== $point_code ) {
 			$selection = $this->selection_from_pickup_code( $point_code );
 			$this->debug_validation(
 				'wdc_pickup_restore_lookup_by_code',
 				array(
 					'posted_point_code_present' => '' !== $point_code,
+					'pickup_family' => $family,
+					'lookup_allowed' => $is_russian_post_family,
 					'success' => array() !== $selection,
 				)
 			);
@@ -386,7 +357,6 @@ final class CheckoutValidation {
 		}
 		$minimal_restore_used = false;
 		if ( array() === $selection ) {
-			$family = $this->rate_pickup_family( $rate, $this->selected_rate_id( $rate ) );
 			$carrier = $this->carrier_from_family( $family );
 			$minimal_restore_used = true;
 			$selection = array(
@@ -759,25 +729,6 @@ final class CheckoutValidation {
 	 */
 	private function selected_rate_id( array $rate ): string {
 		return $this->session_manager->normalize_rate_id( (string) ( $rate['_selected_rate_id'] ?? $rate['rate_id'] ?? '' ) );
-	}
-
-	/**
-	 * @param array<string,mixed> $rate
-	 */
-	private function is_russian_post_pickup_rate( array $rate ): bool {
-		return RussianPostDomesticSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? '' )
-			&& RussianPostDomesticSettings::SERVICE_KEY === (string) ( $rate['service_key'] ?? '' )
-			&& DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' )
-			&& $this->session_manager->is_russian_post_pickup_family( (string) ( $rate['rate_id'] ?? '' ) );
-	}
-
-	/**
-	 * @param array<string,mixed> $rate
-	 */
-	private function is_cdek_pickup_rate( array $rate ): bool {
-		return CdekCarrier::KEY === (string) ( $rate['carrier_key'] ?? '' )
-			&& DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' )
-			&& $this->session_manager->is_cdek_pickup_family( (string) ( $rate['rate_id'] ?? $rate['_selected_rate_id'] ?? '' ) );
 	}
 
 	private function is_supported_pickup_family( string $rate_id ): bool {

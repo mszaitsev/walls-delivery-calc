@@ -1,5 +1,7 @@
 # Project Status
 
+0.45.5 note: checkout pickup restore no longer looks up CDEK/custom pickup point ids or codes in the Russian Post pickup repository. `CheckoutValidation` gates `selection_from_pickup_row()` and `selection_from_pickup_code()` behind `pickup_family=russian_post_domestic:pickup`; CDEK/custom restore uses current session, hidden/full posted payload, or minimal fallback. Collision tests cover CDEK/custom point codes that match Russian Post rows.
+
 0.45.4 note: pickup point presentation/state is now carrier-neutral. `PickupPointPresentationResolver` centralizes built-in Russian Post and CDEK titles, CDEK POSTAMAT `Срок хранения 3 дня`, marker type and generic/custom fallback presentation. Checkout JS, checkout validation, REST/session payloads, order meta and admin recalculation save use normalized `pickup_family = {carrier_key}:pickup` plus `point_title`, `point_type_label`, `marker_type`, `description` and `storage_notice` instead of scattered CDEK/Russian Post card conditions. CDEK order creation, statuses, webhooks and print forms remain intentionally outside this stage.
 
 0.45.3 note: CDEK checkout selected pickup card state is fixed after QA. The checkout card under rates no longer renders technical `Код пункта` / `Индекс` rows for CDEK, but keeps title/address/work time/description/POSTAMAT storage notice. Checkout reload restores the full CDEK selected pickup payload from session/localized state, switching shipping method hides inactive pickup-family cards/buttons, and order/thankyou/email rendering receives the populated CDEK pickup payload. Permanent FIAS/GAR -> CDEK `city_code` mapping remains technical debt.
@@ -66,7 +68,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.45.4`.
+- Текущая версия: `0.45.5`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `fix/cdek-pickup-selection-and-ui`.
 - Последнее обновление статуса: 2026-06-11.
@@ -105,7 +107,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.4`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.5`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

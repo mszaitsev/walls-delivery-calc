@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.4.
+Current plugin version: 0.45.5.
+
+Version 0.45.5 tightens checkout pickup restore after the universal `pickup_family` refactor. `CheckoutValidation` now uses `RussianPostPickupPointRepository` lookup only for `russian_post_domestic:pickup`; CDEK and custom pickup families restore from current session, checkout hidden fields/full posted payload, or minimal fallback without accidentally substituting a Russian Post point on `point_id`/`point_code` collisions. Dead carrier-specific synthetic restore helpers were removed.
 
 Version 0.45.4 refactors pickup point presentation/state into a carrier-neutral layer. Pickup payloads now carry `service_key`, `pickup_family`, `point_type_label`, `point_title`, `marker_type` and display flags; `PickupPointPresentationResolver` owns built-in Russian Post/CDEK titles, CDEK POSTAMAT storage notice and generic/custom fallback title `Пункт выдачи`. Checkout state, validation, order meta and admin recalculation save now work from normalized pickup family/payload instead of scattered `if cdek` / `if russian_post` card logic. CDEK order creation, statuses, webhooks and print forms are still intentionally not implemented.
 

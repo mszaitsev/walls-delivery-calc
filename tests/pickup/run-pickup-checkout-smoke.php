@@ -443,6 +443,81 @@ $errors = new WdcPickupCheckoutErrors();
 pickup_checkout_assert( array() === $errors->errors && 10 === (int) ( $session->pickup_selection()['point_id'] ?? 0 ), 'validation must fall back to restoring the posted pickup selection by point_code when posted point_id is invalid.' );
 
 $session->clear_pickup_selection();
+$session->save_rates(
+	array(
+		'cdek:pickup:136' => array(
+			'carrier_key' => 'cdek',
+			'service_key' => 'cdek',
+			'rate_id' => 'cdek:pickup:136',
+			'pickup_family' => 'cdek:pickup',
+			'delivery_type' => 'pickup',
+			'requires_pickup_point' => true,
+		),
+	)
+);
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate(
+	array(
+		'shipping_city' => 'Новосибирск',
+		'shipping_method' => array( 'wdc_platform_delivery:cdek:pickup:136' ),
+		'wdc_pickup_point_id' => '10',
+		'wdc_pickup_point_code' => '630001-a',
+		'wdc_pickup_carrier_key' => 'cdek',
+		'wdc_pickup_service_key' => 'cdek',
+		'wdc_pickup_family' => 'cdek:pickup',
+		'wdc_pickup_point_type' => 'PVZ',
+		'wdc_pickup_point_title' => 'Пункт выдачи СДЭК',
+		'wdc_pickup_point_address' => 'CDEK collision address',
+		'wdc_pickup_point_postcode' => '650004',
+		'wdc_pickup_city_name' => 'Кемерово',
+		'wdc_pickup_region_name' => 'Кемеровская область',
+		'wdc_pickup_description' => 'CDEK hidden payload wins',
+		'wdc_pickup_cdek_code' => '630001-a',
+	),
+	$errors
+);
+pickup_checkout_assert( array() === $errors->errors, 'CDEK restore from posted hidden fields must pass checkout validation.' );
+pickup_checkout_assert( 'cdek' === (string) ( $session->pickup_selection()['carrier_key'] ?? '' ) && 'cdek:pickup' === (string) ( $session->pickup_selection()['pickup_family'] ?? '' ), 'CDEK restore must keep CDEK pickup family.' );
+pickup_checkout_assert( 'CDEK collision address' === (string) ( $session->pickup_selection()['point_address'] ?? '' ) && 'Ленина, 1' !== (string) ( $session->pickup_selection()['point_address'] ?? '' ), 'CDEK point_code collision must not restore a Russian Post pickup row.' );
+
+$session->clear_pickup_selection();
+$session->save_rates(
+	array(
+		'custom_carrier:pickup:base' => array(
+			'carrier_key' => 'custom_carrier',
+			'service_key' => 'custom_carrier',
+			'rate_id' => 'custom_carrier:pickup:base',
+			'pickup_family' => 'custom_carrier:pickup',
+			'delivery_type' => 'pickup',
+			'requires_pickup_point' => true,
+		),
+	)
+);
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate(
+	array(
+		'shipping_city' => 'Новосибирск',
+		'shipping_method' => array( 'wdc_platform_delivery:custom_carrier:pickup:base' ),
+		'wdc_pickup_point_id' => '10',
+		'wdc_pickup_point_code' => '630001-a',
+		'wdc_pickup_carrier_key' => 'custom_carrier',
+		'wdc_pickup_service_key' => 'custom_carrier',
+		'wdc_pickup_family' => 'custom_carrier:pickup',
+		'wdc_pickup_point_type' => 'LOCKER',
+		'wdc_pickup_point_title' => 'Пункт выдачи',
+		'wdc_pickup_point_address' => 'Custom collision address',
+		'wdc_pickup_point_postcode' => '123456',
+		'wdc_pickup_city_name' => 'Новосибирск',
+		'wdc_pickup_region_name' => 'НСО',
+		'wdc_pickup_description' => 'Custom hidden payload wins',
+	),
+	$errors
+);
+pickup_checkout_assert( array() === $errors->errors, 'Custom pickup restore from posted hidden fields must pass checkout validation.' );
+pickup_checkout_assert( 'custom_carrier:pickup' === (string) ( $session->pickup_selection()['pickup_family'] ?? '' ), 'Custom pickup restore must keep custom pickup family.' );
+pickup_checkout_assert( 'Custom collision address' === (string) ( $session->pickup_selection()['point_address'] ?? '' ) && 'Ленина, 1' !== (string) ( $session->pickup_selection()['point_address'] ?? '' ), 'Custom pickup point_code collision must not restore a Russian Post pickup row.' );
+
+$session->clear_pickup_selection();
 $errors = new WdcPickupCheckoutErrors();
 ( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( $pickup_group_id ), 'wdc_pickup_point_id' => '999999', 'wdc_pickup_point_code' => '987846-c3287ee67a' ), $errors );
 pickup_checkout_assert( array() === $errors->errors && '987846-c3287ee67a' === (string) ( $session->pickup_selection()['point_code'] ?? '' ), 'validation must accept a minimal posted point selection when saved rates are empty and repository lookup misses.' );
@@ -529,7 +604,7 @@ foreach ( array( 'Р’', 'Рµ', 'С‹', 'СЊ' ) as $mojibake ) {
 pickup_checkout_assert( str_contains( $validation_source, 'update_pickup_selection_rate_id( $selected_rate_id )' ) && str_contains( $validation_source, "['_selected_rate_id']" ) && str_contains( $validation_source, '$data[\'shipping_method\']' ), 'Checkout validation must pass same-family pickup selections, read posted shipping_method, and refresh the stored rate_id to the selected rate suffix.' );
 pickup_checkout_assert( str_contains( $validation_source, 'wdc_checkout_validation_registered' ) && str_contains( $validation_source, 'wdc_checkout_validation_start' ) && str_contains( $validation_source, 'wdc_pickup_preload_from_post_start' ) && str_contains( $validation_source, 'wdc_pickup_preload_from_post_success' ) && str_contains( $validation_source, 'wdc_pickup_restore_from_post_attempt' ) && str_contains( $validation_source, 'wdc_pickup_restore_from_post_success' ) && str_contains( $validation_source, 'wdc_pickup_validation_failed' ), 'Checkout validation must log registration, preloader, and detailed pickup validation decisions when debug is enabled.' );
 pickup_checkout_assert( str_contains( $validation_source, 'add_action( \'woocommerce_checkout_process\'' ) && str_contains( $validation_source, 'function preload_from_post()' ) && str_contains( $validation_source, 'posted_checkout_data()' ), 'Checkout validation must register an early checkout_process preloader that reads checkout POST.' );
-pickup_checkout_assert( str_contains( $validation_source, 'find_row_by_point_code' ) && str_contains( $validation_source, 'checkout_pickup_point_from_selection' ) && str_contains( $validation_source, 'synthetic_russian_post_pickup_rate' ), 'Checkout validation must restore posted pickup points by id/code and resolve bare Russian Post pickup rates by family.' );
+pickup_checkout_assert( str_contains( $validation_source, 'find_row_by_point_code' ) && str_contains( $validation_source, 'checkout_pickup_point_from_selection' ) && str_contains( $validation_source, '$is_russian_post_family' ) && str_contains( $validation_source, 'lookup_allowed' ) && ! str_contains( $validation_source, 'synthetic_russian_post_pickup_rate' ) && ! str_contains( $validation_source, 'synthetic_cdek_pickup_rate' ), 'Checkout validation must restore Russian Post posted pickup points by id/code, gate repository lookup by Russian Post family, and avoid dead synthetic carrier helpers.' );
 pickup_checkout_assert( ! str_contains( $validation_source, "'session_pickup_selection'" ) && ! str_contains( $validation_source, "'selected_rate' =>" ) && ! str_contains( $validation_source, "'rate' =>" ) && ! str_contains( $validation_source, 'rate_debug_context' ), 'Checkout validation debug context must not dump full session selection or selected rate arrays.' );
 pickup_checkout_assert( str_contains( $validation_source, "'posted_point_id_present'" ) && str_contains( $validation_source, "'posted_point_code_present'" ) && str_contains( $validation_source, "'session_has_pickup'" ) && str_contains( $validation_source, "'chosen_rate_family'" ), 'Checkout validation debug context must use compact pickup presence and rate-family fields.' );
 $pickup_error_sources = array();

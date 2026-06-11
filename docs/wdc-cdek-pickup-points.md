@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.4.
+Version: 0.45.5.
+
+0.45.5 restore hardening: CDEK checkout restore no longer falls through to `RussianPostPickupPointRepository` by posted `point_id` or `point_code`. Only `russian_post_domestic:pickup` may use the Russian Post repository; CDEK restores from current session, hidden/full posted payload, or minimal CDEK payload fallback. This prevents collisions where a CDEK code matches a Russian Post row.
 
 0.45.4 presentation/state refactor: CDEK pickup now uses the same normalized pickup presentation model as Russian Post and future custom pickup services. The saved payload includes `service_key`, `pickup_family=cdek:pickup`, `point_type_label`, `point_title`, `marker_type`, `description`, `storage_notice` and snapshot data. `PickupPointPresentationResolver` owns the built-in CDEK titles (`Пункт выдачи СДЭК`, `Постамат СДЭК`), POSTAMAT `Срок хранения 3 дня`, marker type and generic fallback behavior. Checkout JS state, validation, order meta and admin recalculation save now match by `pickup_family` instead of scattered CDEK/Russian Post card conditions.
 
