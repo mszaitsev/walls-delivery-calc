@@ -97,9 +97,13 @@ final class CheckoutDeliveryTypeSelector {
 	}
 
 	private function render_pickup_map_selector( string $carrier_key, string $rate_id ): void {
-		$selection = $this->session_manager->checkout_pickup_point();
+		$family = $this->session_manager->shipping_method_family( $rate_id );
+		$selection = $this->session_manager->checkout_pickup_point_for_family( $family );
 		$matches = $this->session_manager->pickup_selection_matches( $carrier_key, $rate_id );
-		$has_selection = $matches && array() !== $selection && '' !== trim( (string) ( $selection['point_code'] ?? '' ) );
+		$has_selection = $matches
+			&& array() !== $selection
+			&& '' !== trim( (string) ( $selection['point_code'] ?? '' ) )
+			&& '' !== trim( (string) ( $selection['point_address'] ?? $selection['address'] ?? '' ) );
 
 		echo '<div class="wdc-rp-pickup-checkout" data-wdc-pickup-checkout data-shipping-method-id="' . esc_attr( $rate_id ) . '" data-carrier-key="' . esc_attr( $carrier_key ) . '">';
 		echo '<input type="hidden" name="wdc_platform_pickup_rate_id" value="' . esc_attr( $rate_id ) . '">';
@@ -108,7 +112,7 @@ final class CheckoutDeliveryTypeSelector {
 		echo '<input type="hidden" name="wdc_pickup_point_code" data-wdc-pickup-point-code value="' . esc_attr( (string) ( $selection['point_code'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_carrier_key" data-wdc-pickup-carrier-key value="' . esc_attr( (string) ( $selection['carrier_key'] ?? $carrier_key ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_service_key" data-wdc-pickup-service-key value="' . esc_attr( (string) ( $selection['service_key'] ?? $carrier_key ) ) . '">';
-		echo '<input type="hidden" name="wdc_pickup_family" data-wdc-pickup-family value="' . esc_attr( (string) ( $selection['pickup_family'] ?? $this->session_manager->shipping_method_family( $rate_id ) ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_family" data-wdc-pickup-family value="' . esc_attr( (string) ( $selection['pickup_family'] ?? $family ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_point_type" data-wdc-pickup-point-type value="' . esc_attr( (string) ( $selection['point_type'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_point_type_label" data-wdc-pickup-point-type-label value="' . esc_attr( (string) ( $selection['point_type_label'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_point_title" data-wdc-pickup-point-title value="' . esc_attr( (string) ( $selection['point_title'] ?? $selection['card_title'] ?? '' ) ) . '">';
@@ -122,6 +126,10 @@ final class CheckoutDeliveryTypeSelector {
 		echo '<input type="hidden" name="wdc_pickup_storage_notice" data-wdc-pickup-storage-notice-field value="' . esc_attr( (string) ( $selection['storage_notice'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_marker_type" data-wdc-pickup-marker-type value="' . esc_attr( (string) ( $selection['marker_type'] ?? '' ) ) . '">';
 		echo '<input type="hidden" name="wdc_pickup_cdek_code" data-wdc-pickup-cdek-code value="' . esc_attr( (string) ( $selection['cdek_code'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_location_id" data-wdc-pickup-location-id value="' . esc_attr( (string) ( $selection['location_id'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_fias_id" data-wdc-pickup-fias-id value="' . esc_attr( (string) ( $selection['fias_id'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_gar_object_id" data-wdc-pickup-gar-object-id value="' . esc_attr( (string) ( $selection['gar_object_id'] ?? '' ) ) . '">';
+		echo '<input type="hidden" name="wdc_pickup_destination_fingerprint" data-wdc-pickup-destination-fingerprint value="' . esc_attr( (string) ( $selection['destination_fingerprint'] ?? '' ) ) . '">';
 		$empty_button_class = 'button wdc-rp-pickup-checkout__button' . ( $has_selection ? ' wdc-is-hidden' : '' );
 		echo '<button type="button" class="' . esc_attr( $empty_button_class ) . '" data-wdc-pickup-open data-wdc-pickup-empty-open aria-hidden="' . esc_attr( $has_selection ? 'true' : 'false' ) . '"' . ( $has_selection ? ' hidden style="display:none;"' : '' ) . '>' . esc_html( __( 'Выбрать пункт выдачи', 'walls-delivery-calc' ) ) . '</button>';
 		echo $this->card_renderer->render(

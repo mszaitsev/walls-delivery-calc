@@ -697,7 +697,14 @@
 		if (!point) {
 			return '';
 		}
-		return String(point.point_code || point.cdek_code || point.postal_code || point.postcode || '').trim();
+		var carrier = String(point.carrier_key || point.carrier || (point.snapshot && (point.snapshot.carrier_key || point.snapshot.carrier)) || '').trim();
+		if (carrier === 'russian_post_domestic' || carrier === 'russian_post') {
+			return String(point.postcode || point.postal_code || (point.snapshot && point.snapshot.postcode) || '').trim();
+		}
+		if (carrier === 'cdek') {
+			return String(point.cdek_code || point.point_code || (point.snapshot && (point.snapshot.cdek_code || point.snapshot.point_code)) || '').trim();
+		}
+		return String(point.point_code || point.postal_code || point.postcode || '').trim();
 	}
 
 	function validPointCoordinates(point) {

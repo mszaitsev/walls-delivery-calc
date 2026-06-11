@@ -83,7 +83,7 @@ final class OrderShippingMetaPersister {
 
 		$map = array_merge( $map, $dadata_meta, $this->compatible_dadata_meta( $data ), $location_meta );
 
-		$pickup = $this->session_manager->pickup_selection();
+		$pickup = $this->pickup_selection_for_rate( $rate );
 		if (
 			'pickup' === (string) ( $rate['delivery_type'] ?? '' )
 			&& $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) )
@@ -92,7 +92,7 @@ final class OrderShippingMetaPersister {
 			$map['_wdc_platform_pickup_address']   = $this->first_meaningful( $pickup['point_address'] ?? '', $pickup['address'] ?? '', $pickup['snapshot']['address'] ?? '' );
 			$map['_wdc_platform_pickup_comment']   = $this->first_meaningful( $pickup['description'] ?? '', $pickup['point_comment'] ?? '', $pickup['snapshot']['description'] ?? '' );
 			$map['_wdc_platform_pickup_work_time'] = $this->first_meaningful( $pickup['point_work_time'] ?? '', $pickup['work_time'] ?? '' );
-			$map['_wdc_pickup_point_id']           = $pickup['point_id'] ?? '';
+			$map['_wdc_pickup_point_id']           = $pickup['point_id'] ?? $pickup['id'] ?? $pickup['snapshot']['id'] ?? '';
 			$map['_wdc_pickup_point_code']         = $pickup['point_code'] ?? '';
 			$map['_wdc_pickup_point_type']         = $pickup['point_type'] ?? '';
 			$map['_wdc_pickup_carrier_key']        = $pickup['carrier_key'] ?? '';
@@ -191,7 +191,7 @@ final class OrderShippingMetaPersister {
 			return array();
 		}
 
-		$pickup = $this->session_manager->pickup_selection();
+		$pickup = $this->pickup_selection_for_rate( $rate );
 		if ( ! $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) ) ) {
 			return array();
 		}
@@ -891,6 +891,19 @@ final class OrderShippingMetaPersister {
 		}
 
 		return array();
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @return array<string,mixed>
+	 */
+	private function pickup_selection_for_rate( array $rate ): array {
+		$family = $this->session_manager->shipping_method_family( (string) ( $rate['rate_id'] ?? '' ) );
+		if ( str_ends_with( $family, ':pickup' ) ) {
+			return $this->session_manager->pickup_selection_for_family( $family );
+		}
+
+		return $this->session_manager->pickup_selection();
 	}
 
 	/**

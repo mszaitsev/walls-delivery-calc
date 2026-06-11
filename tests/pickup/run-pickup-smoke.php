@@ -456,10 +456,12 @@ $session->save_pickup_selection(
 );
 $errors = new WdcPickupSmokeErrors();
 ( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
-pickup_smoke_assert( $errors->has_errors(), 'Validation must fail for pickup selection from another carrier or rate.' );
+pickup_smoke_assert( ! $errors->has_errors(), 'Validation must ignore another carrier pickup bucket while the active family still has a matching selection.' );
+$bucketed_pickup = $session->pickup_selections();
+pickup_smoke_assert( 'demo-nsk-001' === (string) ( $bucketed_pickup['demo:pickup']['point_code'] ?? '' ) && 'OTHER-1' === (string) ( $bucketed_pickup['other_carrier:pickup']['point_code'] ?? '' ), 'Session must keep demo and other carrier pickup selections in separate buckets.' );
 $order = new WdcPickupSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
-pickup_smoke_assert( ! isset( $order->meta['_wdc_platform_pickup_code'] ), 'Order meta must not save mismatched pickup selection.' );
+pickup_smoke_assert( 'demo-nsk-001' === (string) ( $order->meta['_wdc_platform_pickup_code'] ?? '' ), 'Order meta must use only the active pickup_family bucket.' );
 
 $session->save_selected_delivery_type( DeliveryType::COURIER );
 $session->save_rates(

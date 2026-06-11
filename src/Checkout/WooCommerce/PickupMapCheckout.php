@@ -63,6 +63,7 @@ final class PickupMapCheckout {
 					'carrier'          => $this->first_pickup_carrier(),
 					'shippingMethodId' => $this->first_pickup_rate_id(),
 					'initialContext'   => $this->initial_context(),
+					'selectedPickupPoints' => $this->selected_points_context(),
 					'mapProvider'      => $provider,
 					'pickupPointTypes' => $this->pickup_point_types(),
 					'pickupFamilies'   => $this->pickup_families(),
@@ -171,7 +172,7 @@ final class PickupMapCheckout {
 				'region_name' => $context['region_name'] ?? null,
 				'postcode' => $context['postcode'] ?? $context['postal_code'] ?? null,
 				'country_code' => $context['country_code'] ?? 'RU',
-				'selectedPoint' => $this->selected_point_context(),
+				'selectedPoint' => $this->selected_point_context( $this->active_pickup_family() ),
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value
 		);
@@ -199,8 +200,11 @@ final class PickupMapCheckout {
 	/**
 	 * @return array<string,mixed>|null
 	 */
-	private function selected_point_context(): ?array {
-		$selection = $this->session_manager->checkout_pickup_point();
+	private function selected_point_context( string $pickup_family = '' ): ?array {
+		if ( '' !== $pickup_family && ! $this->session_manager->pickup_selection_matches( $this->carrier_from_family( $pickup_family ), $pickup_family ) ) {
+			return null;
+		}
+		$selection = '' !== $pickup_family ? $this->session_manager->checkout_pickup_point_for_family( $pickup_family ) : $this->session_manager->checkout_pickup_point();
 		if ( array() === $selection || '' === trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
 			return null;
 		}
@@ -229,6 +233,10 @@ final class PickupMapCheckout {
 				'address' => $selection['address'] ?? $snapshot['address'] ?? null,
 				'city_name' => $selection['city_name'] ?? $selection['city'] ?? $snapshot['city_name'] ?? $snapshot['city'] ?? null,
 				'region_name' => $selection['region_name'] ?? $selection['region'] ?? $snapshot['region_name'] ?? $snapshot['region'] ?? null,
+				'location_id' => $selection['location_id'] ?? $snapshot['location_id'] ?? null,
+				'fias_id' => $selection['fias_id'] ?? $snapshot['fias_id'] ?? null,
+				'gar_object_id' => $selection['gar_object_id'] ?? $snapshot['gar_object_id'] ?? null,
+				'destination_fingerprint' => $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? null,
 				'lat' => $selection['lat'] ?? $snapshot['lat'] ?? null,
 				'lng' => $selection['lng'] ?? $snapshot['lng'] ?? null,
 				'work_time' => $selection['work_time'] ?? $selection['point_work_time'] ?? $snapshot['work_time'] ?? null,
@@ -356,5 +364,47 @@ final class PickupMapCheckout {
 				),
 			),
 		);
+	}
+
+	/**
+	 * @return array<string,array<string,mixed>>
+	 */
+	private function selected_points_context(): array {
+		$selected = array();
+		foreach ( $this->session_manager->pickup_selections() as $family => $selection ) {
+			$point = $this->selected_point_context( $family );
+			if ( null !== $point ) {
+				$selected[ $family ] = $point;
+			}
+		}
+
+		return $selected;
+	}
+
+	private function active_pickup_family(): string {
+		$chosen = $this->chosen_shipping_method();
+		$family = '' !== $chosen ? $this->session_manager->shipping_method_family( $chosen ) : '';
+		return str_ends_with( $family, ':pickup' ) ? $family : '';
+	}
+
+	private function chosen_shipping_method(): string {
+		if ( function_exists( 'WC' ) && is_object( WC() ) && isset( WC()->session ) && is_object( WC()->session ) && method_exists( WC()->session, 'get' ) ) {
+			$chosen = WC()->session->get( 'chosen_shipping_methods', array() );
+			if ( is_array( $chosen ) ) {
+				foreach ( $chosen as $method ) {
+					$method = trim( (string) $method );
+					if ( '' !== $method ) {
+						return $method;
+					}
+				}
+			}
+		}
+
+		return '';
+	}
+
+	private function carrier_from_family( string $family ): string {
+		$parts = explode( ':', $family );
+		return trim( (string) ( $parts[0] ?? '' ) );
 	}
 }

@@ -73,8 +73,17 @@
 				body: JSON.stringify({ point: point || {}, checkout_context: checkoutContext || {} })
 			});
 		},
-		reset: function () {
-			return request('checkout/pickup-point', { method: 'DELETE' });
+		reset: function (payload) {
+			var params = new URLSearchParams();
+			payload = payload || {};
+			if (payload.pickup_family) {
+				params.set('pickup_family', payload.pickup_family);
+			}
+			if (payload.shipping_method_id) {
+				params.set('shipping_method_id', payload.shipping_method_id);
+			}
+			var path = 'checkout/pickup-point' + (params.toString() ? '?' + params.toString() : '');
+			return request(path, { method: 'DELETE' });
 		},
 		state: function () {
 			return request('checkout/state');

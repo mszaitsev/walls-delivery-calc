@@ -205,6 +205,10 @@ The order-admin delivery recalculation stage is complete and HPOS-audited. The f
 - `RussianPostPickupPointRepository::search_admin_pickup_rows()` searches local Russian Post pickup rows by postcode, city and address for the shipment modal;
 - `PickupPointPresentationResolver` centralizes pickup card presentation metadata for built-in Russian Post/CDEK and generic/custom pickup fallback (`card_title`, `point_type_label`, marker type, code/postcode display flags and storage notice);
 - normalized pickup payloads carry `carrier_key`, `service_key`, `pickup_family={carrier_key}:pickup`, `point_code`, `point_type`, `point_type_label`, `point_title`, address/postcode/city/region, work time, description, storage notice, coordinates and snapshot data;
+- checkout selected pickup state is bucketed by `pickup_family` in `CheckoutSessionManager` under `wdc_platform_pickup_selections`; validation, order meta persistence and localized checkout restore read only the active family bucket and compare destination identity before restoring a saved point;
+- `assets/frontend/pickup-map/wdc-pickup-checkout.js` keeps `selectedPickupPoints` by family, starts background prefetch for the active pickup family (including CDEK city-code requests) and hides inactive family cards without clearing their saved selection;
+- `assets/frontend/pickup-map/wdc-pickup-map.js` uses Russian Post postcode for map/list title display and CDEK `cdek_code` for CDEK titles;
+- `assets/frontend/domestic-tariff-selector.js` and `.css` disable and grey out nested tariff rates when their parent grouped shipping method is inactive;
 - `CdekDeliveryPointService` provides live CDEK pickup point data from `GET /v2/deliverypoints` to the shared checkout/admin picker infrastructure and fills the normalized presentation fields;
 - admin summary page для ПВЗ.
 

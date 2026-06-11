@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.7.
+Current plugin version: 0.45.8.
+
+Version 0.45.8 stores checkout pickup selections by `pickup_family`, so CDEK and Russian Post selected points no longer overwrite each other. Checkout reload/switching restores the active family's saved point when the destination still matches, validation checks only the active family bucket, Russian Post map/list titles show the pickup postcode while CDEK keeps the CDEK code, CDEK pickup points prefetch in the background for the active `cdek:pickup` method, and inactive grouped tariff rates are disabled visually and functionally.
 
 Version 0.45.7 fixes carrier/pickup-family propagation after the universal pickup refactor. Pickup REST responses and checkout save responses now preserve `carrier_key`, `service_key`, `pickup_family`, `point_title`, `point_type_label`, `marker_type` and the full `snapshot` for CDEK and Russian Post. CDEK map/list/popup titles use `Пункт выдачи СДЭК` / `Постамат СДЭК`, Russian Post selection persists to the checkout card again, and CDEK selected pickup payloads pass checkout validation.
 

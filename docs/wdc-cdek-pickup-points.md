@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.7.
+Version: 0.45.8.
+
+0.45.8 checkout bucket fix: selected pickup points are stored by `pickup_family` in the checkout session. Selecting a CDEK point writes the `cdek:pickup` bucket, selecting a Russian Post point writes `russian_post_domestic:pickup`, and one carrier no longer clears the other. Checkout reload and shipping-method switching restore only the active family's complete selection when the saved destination identity still matches; validation also checks only the active family bucket. CDEK pickup prefetch now starts in the background when `cdek:pickup` is the active shipping method. Russian Post map/list/popup titles show the pickup postcode from the repository, while CDEK titles keep `cdek_code` (`KEM7`, `KEM41`). Inactive grouped tariff rates are disabled until their parent shipping method is selected.
 
 0.45.7 propagation fix: pickup REST output and checkout save now carry the full normalized carrier payload end-to-end: `carrier_key`, `service_key`, `pickup_family`, `point_title`, `point_type_label`, `marker_type`, address aliases and `snapshot`. CDEK map popups and side-list rows now receive CDEK presentation (`Пункт выдачи СДЭК` / `Постамат СДЭК`) instead of falling back to Russian Post titles. Russian Post save normalizes the REST carrier back to `russian_post_domestic:pickup`, so selected Russian Post points appear on checkout again, while CDEK selected points keep `cdek:pickup` and pass checkout validation.
 

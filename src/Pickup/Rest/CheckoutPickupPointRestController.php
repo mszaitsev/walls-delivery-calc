@@ -119,19 +119,28 @@ final class CheckoutPickupPointRestController {
 	}
 
 	public function delete( mixed $request = null ): mixed {
-		unset( $request );
-		$this->session_manager->clear_pickup_selection( 'rest_reset' );
+		$family = $this->param( $request, 'pickup_family' );
+		if ( '' === $family ) {
+			$method_id = $this->normalize_shipping_method_id( $this->param( $request, 'shipping_method_id' ) );
+			$family = '' !== $method_id ? $this->session_manager->shipping_method_family( $method_id ) : '';
+		}
+		if ( '' !== $family && str_ends_with( $family, ':pickup' ) ) {
+			$this->session_manager->clear_pickup_selection_for_family( $family, 'rest_reset' );
+		} else {
+			$this->session_manager->clear_pickup_selection( 'rest_reset' );
+		}
 
 		return $this->response( array( 'pickup_point' => null ) );
 	}
 
 	public function state( mixed $request = null ): mixed {
-		unset( $request );
-		$point = $this->session_manager->checkout_pickup_point();
+		$family = $this->param( $request, 'pickup_family' );
+		$point = '' !== $family ? $this->session_manager->checkout_pickup_point_for_family( $family ) : $this->session_manager->checkout_pickup_point();
 
 		return $this->response(
 			array(
 				'pickup_point' => array() !== $point ? $point : null,
+				'pickup_selections' => $this->session_manager->pickup_selections(),
 				'city_context' => $this->city_context(),
 			)
 		);
@@ -188,6 +197,7 @@ final class CheckoutPickupPointRestController {
 			$family = $carrier . ':pickup';
 		}
 		$service_key = (string) ( $selection['service_key'] ?? $selection['snapshot']['service_key'] ?? $carrier );
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
 		$this->session_manager->save_checkout_pickup_point( $selection );
 		$this->session_manager->save_pickup_selection(
 			array(
@@ -211,6 +221,10 @@ final class CheckoutPickupPointRestController {
 				'city' => $selection['snapshot']['city'] ?? $selection['city_name'] ?? '',
 				'region_name' => $selection['snapshot']['region'] ?? $selection['region_name'] ?? '',
 				'region' => $selection['snapshot']['region'] ?? $selection['region_name'] ?? '',
+				'location_id' => $selection['location_id'] ?? $snapshot['location_id'] ?? '',
+				'fias_id' => $selection['fias_id'] ?? $snapshot['fias_id'] ?? '',
+				'gar_object_id' => $selection['gar_object_id'] ?? $snapshot['gar_object_id'] ?? '',
+				'destination_fingerprint' => $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '',
 				'description' => (string) ( $selection['description'] ?? $selection['snapshot']['description'] ?? '' ),
 				'point_comment' => (string) ( $selection['description'] ?? $selection['snapshot']['description'] ?? '' ),
 				'work_time' => (string) ( $selection['work_time'] ?? $selection['point_work_time'] ?? $selection['snapshot']['work_time'] ?? '' ),
@@ -220,7 +234,7 @@ final class CheckoutPickupPointRestController {
 				'cdek_type' => (string) ( $selection['cdek_type'] ?? $selection['snapshot']['cdek_type'] ?? $selection['point_type'] ?? '' ),
 				'lat' => $selection['lat'] ?? null,
 				'lng' => $selection['lng'] ?? null,
-				'snapshot' => $selection['snapshot'] ?? $selection,
+				'snapshot' => $snapshot ?: $selection,
 				'selected_at' => gmdate( 'c' ),
 			)
 		);
@@ -289,6 +303,10 @@ final class CheckoutPickupPointRestController {
 			'address' => (string) ( $point['point_address'] ?? $point['address'] ?? '' ),
 			'city' => (string) ( $point['city_name'] ?? $point['city'] ?? '' ),
 			'region' => (string) ( $point['region_name'] ?? $point['region'] ?? '' ),
+			'location_id' => (string) ( $point['location_id'] ?? '' ),
+			'fias_id' => (string) ( $point['fias_id'] ?? $point['fias_location_guid'] ?? '' ),
+			'gar_object_id' => (string) ( $point['gar_object_id'] ?? $point['gar_id'] ?? '' ),
+			'destination_fingerprint' => (string) ( $point['destination_fingerprint'] ?? '' ),
 			'lat' => null !== ( $point['lat'] ?? null ) ? (float) $point['lat'] : null,
 			'lng' => null !== ( $point['lng'] ?? null ) ? (float) $point['lng'] : null,
 			'work_time' => (string) ( $point['work_time'] ?? '' ),
@@ -318,6 +336,10 @@ final class CheckoutPickupPointRestController {
 			'point_postcode' => $snapshot['postcode'],
 			'city_name' => $snapshot['city'],
 			'region_name' => $snapshot['region'],
+			'location_id' => $snapshot['location_id'],
+			'fias_id' => $snapshot['fias_id'],
+			'gar_object_id' => $snapshot['gar_object_id'],
+			'destination_fingerprint' => $snapshot['destination_fingerprint'],
 			'point_work_time' => $snapshot['work_time'],
 			'description' => $snapshot['description'],
 			'storage_notice' => $snapshot['storage_notice'],
@@ -359,6 +381,10 @@ final class CheckoutPickupPointRestController {
 			'address' => (string) ( $point['point_address'] ?? $point['address'] ?? '' ),
 			'city' => (string) ( $point['city_name'] ?? $point['city'] ?? '' ),
 			'region' => (string) ( $point['region_name'] ?? $point['region'] ?? '' ),
+			'location_id' => (string) ( $point['location_id'] ?? '' ),
+			'fias_id' => (string) ( $point['fias_id'] ?? $point['fias_location_guid'] ?? '' ),
+			'gar_object_id' => (string) ( $point['gar_object_id'] ?? $point['gar_id'] ?? '' ),
+			'destination_fingerprint' => (string) ( $point['destination_fingerprint'] ?? '' ),
 			'lat' => $point['lat'] ?? null,
 			'lng' => $point['lng'] ?? null,
 			'work_time' => (string) ( $point['work_time'] ?? '' ),
@@ -381,6 +407,10 @@ final class CheckoutPickupPointRestController {
 			'point_postcode' => $snapshot['postcode'],
 			'city_name' => $snapshot['city'],
 			'region_name' => $snapshot['region'],
+			'location_id' => $snapshot['location_id'],
+			'fias_id' => $snapshot['fias_id'],
+			'gar_object_id' => $snapshot['gar_object_id'],
+			'destination_fingerprint' => $snapshot['destination_fingerprint'],
 			'work_time' => $snapshot['work_time'],
 			'description' => $snapshot['description'],
 			'storage_notice' => $snapshot['storage_notice'],

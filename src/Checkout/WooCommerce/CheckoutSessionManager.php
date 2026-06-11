@@ -12,6 +12,7 @@ defined( 'ABSPATH' ) || exit;
 final class CheckoutSessionManager {
 	private const DELIVERY_TYPE_KEY = 'wdc_platform_selected_delivery_type';
 	private const PICKUP_SELECTION_KEY = 'wdc_platform_pickup_selection';
+	private const PICKUP_SELECTIONS_KEY = 'wdc_platform_pickup_selections';
 	private const CHECKOUT_PICKUP_POINT_KEY = 'wdc_pickup_point';
 	private const PICKUP_CARRIER_KEY = 'wdc_platform_selected_pickup_carrier';
 	private const SORT_MODE_KEY     = 'wdc_platform_checkout_sort_mode';
@@ -37,6 +38,12 @@ final class CheckoutSessionManager {
 	 */
 	public function save_pickup_selection( array $selection ): void {
 		$selection = $this->normalize_pickup_selection_payload( $selection );
+		$family = (string) ( $selection['pickup_family'] ?? '' );
+		if ( '' !== $family ) {
+			$selections = $this->pickup_selections();
+			$selections[ $family ] = $selection;
+			$this->set( self::PICKUP_SELECTIONS_KEY, $selections );
+		}
 		$this->set( self::PICKUP_SELECTION_KEY, $selection );
 		$this->set( self::PICKUP_CARRIER_KEY, (string) ( $selection['carrier_key'] ?? '' ) );
 	}
@@ -50,6 +57,51 @@ final class CheckoutSessionManager {
 		return is_array( $selection ) ? $selection : array();
 	}
 
+	/**
+	 * @return array<string,array<string,mixed>>
+	 */
+	public function pickup_selections(): array {
+		$selections = $this->get( self::PICKUP_SELECTIONS_KEY, array() );
+		if ( ! is_array( $selections ) ) {
+			return array();
+		}
+
+		$normalized = array();
+		foreach ( $selections as $family => $selection ) {
+			if ( ! is_string( $family ) || '' === trim( $family ) || ! is_array( $selection ) ) {
+				continue;
+			}
+			$normalized[ $family ] = $selection;
+		}
+
+		$legacy = $this->pickup_selection();
+		$legacy_family = (string) ( $legacy['pickup_family'] ?? '' );
+		if ( '' !== $legacy_family && ! isset( $normalized[ $legacy_family ] ) ) {
+			$normalized[ $legacy_family ] = $legacy;
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function pickup_selection_for_family( string $pickup_family ): array {
+		$pickup_family = trim( $pickup_family );
+		if ( '' === $pickup_family ) {
+			return array();
+		}
+
+		$selections = $this->pickup_selections();
+		$selection = $selections[ $pickup_family ] ?? array();
+		if ( is_array( $selection ) && array() !== $selection ) {
+			return $selection;
+		}
+
+		$legacy = $this->pickup_selection();
+		return $pickup_family === (string) ( $legacy['pickup_family'] ?? '' ) ? $legacy : array();
+	}
+
 	public function selected_pickup_carrier(): string {
 		return (string) $this->get( self::PICKUP_CARRIER_KEY, '' );
 	}
@@ -57,8 +109,28 @@ final class CheckoutSessionManager {
 	public function clear_pickup_selection( string $reason = '' ): void {
 		$this->log_pickup_selection_clear( $reason ?: 'manual_clear', false );
 		$this->set( self::PICKUP_SELECTION_KEY, array() );
+		$this->set( self::PICKUP_SELECTIONS_KEY, array() );
 		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, array() );
 		$this->set( self::PICKUP_CARRIER_KEY, '' );
+	}
+
+	public function clear_pickup_selection_for_family( string $pickup_family, string $reason = '' ): void {
+		$pickup_family = trim( $pickup_family );
+		if ( '' === $pickup_family ) {
+			$this->clear_pickup_selection( $reason );
+			return;
+		}
+
+		$selections = $this->pickup_selections();
+		unset( $selections[ $pickup_family ] );
+		$this->set( self::PICKUP_SELECTIONS_KEY, $selections );
+		$current = $this->pickup_selection();
+		if ( $pickup_family === (string) ( $current['pickup_family'] ?? '' ) ) {
+			$this->set( self::PICKUP_SELECTION_KEY, array() );
+			$this->set( self::CHECKOUT_PICKUP_POINT_KEY, array() );
+			$this->set( self::PICKUP_CARRIER_KEY, '' );
+		}
+		$this->log_pickup_selection_clear( $reason ?: 'family_clear', false, $pickup_family );
 	}
 
 	public function clear_pickup_selection_if_allowed( string $reason, string $currentRateId = '' ): bool {
@@ -79,11 +151,25 @@ final class CheckoutSessionManager {
 			&& ( '' !== trim( (string) ( $selection['point_code'] ?? '' ) ) || '' !== trim( (string) ( $selection['point_id'] ?? '' ) ) );
 	}
 
+	public function has_valid_pickup_selection_for_family( string $pickup_family ): bool {
+		$selection = $this->pickup_selection_for_family( $pickup_family );
+
+		return array() !== $selection
+			&& ( '' !== trim( (string) ( $selection['point_code'] ?? '' ) ) || '' !== trim( (string) ( $selection['point_id'] ?? '' ) ) );
+	}
+
 	/**
 	 * @param array<string,mixed> $selection
 	 */
 	public function save_checkout_pickup_point( array $selection ): void {
-		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, $this->normalize_pickup_selection_payload( $selection ) );
+		$selection = $this->normalize_pickup_selection_payload( $selection );
+		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, $selection );
+		$family = (string) ( $selection['pickup_family'] ?? '' );
+		if ( '' !== $family ) {
+			$selections = $this->pickup_selections();
+			$selections[ $family ] = $selection;
+			$this->set( self::PICKUP_SELECTIONS_KEY, $selections );
+		}
 	}
 
 	/**
@@ -95,9 +181,27 @@ final class CheckoutSessionManager {
 		return is_array( $selection ) ? $selection : array();
 	}
 
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function checkout_pickup_point_for_family( string $pickup_family ): array {
+		$selection = $this->pickup_selection_for_family( $pickup_family );
+		if ( array() !== $selection ) {
+			return $selection;
+		}
+
+		$checkout = $this->checkout_pickup_point();
+		return $pickup_family === (string) ( $checkout['pickup_family'] ?? '' ) ? $checkout : array();
+	}
+
 	public function pickup_selection_matches( string $carrierKey, string $rateId ): bool {
-		$selection = $this->pickup_selection();
+		$rate_family = $this->shipping_method_family( $rateId );
+		$selection = str_ends_with( $rate_family, ':pickup' ) ? $this->pickup_selection_for_family( $rate_family ) : $this->pickup_selection();
 		if ( array() === $selection || ( '' === trim( (string) ( $selection['point_code'] ?? '' ) ) && '' === trim( (string) ( $selection['point_id'] ?? '' ) ) ) ) {
+			return false;
+		}
+
+		if ( ! $this->pickup_selection_location_matches_current( $selection ) ) {
 			return false;
 		}
 
@@ -109,7 +213,6 @@ final class CheckoutSessionManager {
 		$selection_rate_id = trim( (string) ( $selection['rate_id'] ?? '' ) );
 		if ( '' === $selection_rate_id ) {
 			$selection_family = (string) ( $selection['pickup_family'] ?? '' );
-			$rate_family      = $this->shipping_method_family( $rateId );
 			if ( '' !== $selection_family || '' !== $rate_family ) {
 				return $selection_family === $rate_family;
 			}
@@ -124,8 +227,6 @@ final class CheckoutSessionManager {
 		}
 
 		$selection_family = (string) ( $selection['pickup_family'] ?? $this->shipping_method_family( $selection_rate_id ) );
-		$rate_family = $this->shipping_method_family( $rateId );
-
 		if ( '' !== $selection_family || '' !== $rate_family ) {
 			return '' !== $selection_family && $selection_family === $rate_family;
 		}
@@ -134,7 +235,8 @@ final class CheckoutSessionManager {
 	}
 
 	public function update_pickup_selection_rate_id( string $rateId ): void {
-		$selection = $this->pickup_selection();
+		$family = $this->shipping_method_family( $rateId );
+		$selection = str_ends_with( $family, ':pickup' ) ? $this->pickup_selection_for_family( $family ) : $this->pickup_selection();
 		if ( array() === $selection ) {
 			return;
 		}
@@ -223,8 +325,102 @@ final class CheckoutSessionManager {
 		if ( '' !== $family ) {
 			$selection['pickup_family'] = $family;
 		}
+		if ( empty( $selection['point_id'] ) && ! empty( $selection['id'] ) ) {
+			$selection['point_id'] = $selection['id'];
+		}
+		if ( is_array( $selection['snapshot'] ?? null ) && empty( $selection['snapshot']['point_id'] ) && ! empty( $selection['snapshot']['id'] ) ) {
+			$selection['snapshot']['point_id'] = $selection['snapshot']['id'];
+		}
+
+		$selection = $this->with_current_location_identity( $selection );
 
 		return $selection;
+	}
+
+	/**
+	 * @param array<string,mixed> $selection
+	 * @return array<string,mixed>
+	 */
+	private function with_current_location_identity( array $selection ): array {
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$context = $this->current_location_context();
+		foreach ( array(
+			'location_id' => array( 'location_id', 'id' ),
+			'fias_id' => array( 'fias_id', 'city_fias_id' ),
+			'gar_object_id' => array( 'gar_object_id', 'gar_id' ),
+			'postcode' => array( 'postcode', 'postal_code' ),
+			'city_name' => array( 'city_name', 'settlement_name', 'place_name', 'city' ),
+			'region_name' => array( 'region_name', 'state_value', 'region' ),
+		) as $target => $sources ) {
+			$value = (string) ( $selection[ $target ] ?? $snapshot[ $target ] ?? '' );
+			if ( '' === trim( $value ) ) {
+				foreach ( $sources as $source ) {
+					if ( '' !== trim( (string) ( $context[ $source ] ?? '' ) ) ) {
+						$value = (string) $context[ $source ];
+						break;
+					}
+				}
+			}
+			if ( '' !== trim( $value ) ) {
+				$selection[ $target ] = $value;
+				$snapshot[ $target ] = $snapshot[ $target ] ?? $value;
+			}
+		}
+
+		$current_fingerprint = $this->location_fingerprint( $context );
+		$fingerprint = '' !== $current_fingerprint ? $current_fingerprint : (string) ( $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '' );
+		if ( '' !== $fingerprint ) {
+			$selection['destination_fingerprint'] = $fingerprint;
+			$snapshot['destination_fingerprint'] = $snapshot['destination_fingerprint'] ?? $fingerprint;
+		}
+		$selection['snapshot'] = $snapshot;
+
+		return $selection;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function current_location_context(): array {
+		$context = $this->city_context();
+		$selected_city = $this->selected_city();
+		foreach ( $selected_city as $key => $value ) {
+			if ( ! array_key_exists( $key, $context ) || '' === (string) $context[ $key ] || null === $context[ $key ] ) {
+				$context[ $key ] = $value;
+			}
+		}
+
+		return $context;
+	}
+
+	/**
+	 * @param array<string,mixed> $selection
+	 */
+	private function pickup_selection_location_matches_current( array $selection ): bool {
+		$current = $this->location_fingerprint( $this->current_location_context() );
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$selected = (string) ( $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '' );
+		if ( '' === $current || '' === $selected ) {
+			return true;
+		}
+
+		return $current === $selected;
+	}
+
+	/**
+	 * @param array<string,mixed> $context
+	 */
+	private function location_fingerprint( array $context ): string {
+		$parts = array();
+		foreach ( array( 'location_id', 'fias_id', 'city_fias_id', 'gar_object_id', 'gar_id', 'postcode', 'postal_code', 'city_name', 'settlement_name', 'place_name', 'region_name', 'state_value' ) as $key ) {
+			$value = trim( (string) ( $context[ $key ] ?? '' ) );
+			$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
+			if ( '' !== $value ) {
+				$parts[] = $key . '=' . $value;
+			}
+		}
+
+		return implode( '|', $parts );
 	}
 
 	public function save_sort_mode( string $sort_mode ): void {

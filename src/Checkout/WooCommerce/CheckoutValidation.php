@@ -414,12 +414,17 @@ final class CheckoutValidation {
 	 */
 	private function selection_from_current_pickup_session( string $point_code, array $rate ): array {
 		$family = $this->rate_pickup_family( $rate, $this->selected_rate_id( $rate ) );
+		$bucket = $this->session_manager->pickup_selection_for_family( $family );
+		if ( array() !== $bucket && $point_code === (string) ( $bucket['point_code'] ?? '' ) ) {
+			return $bucket;
+		}
+
 		$current = $this->session_manager->pickup_selection();
 		if ( array() !== $current && $point_code === (string) ( $current['point_code'] ?? '' ) && $family === $this->selection_pickup_family( $current, (string) ( $current['rate_id'] ?? '' ) ) ) {
 			return $current;
 		}
 
-		$checkout = $this->session_manager->checkout_pickup_point();
+		$checkout = $this->session_manager->checkout_pickup_point_for_family( $family );
 		if ( array() === $checkout || $point_code !== (string) ( $checkout['point_code'] ?? '' ) || $family !== $this->selection_pickup_family( $checkout, (string) ( $checkout['rate_id'] ?? '' ) ) ) {
 			return array();
 		}
@@ -491,6 +496,10 @@ final class CheckoutValidation {
 			'address' => $this->posted_string( $data, 'wdc_pickup_point_address' ),
 			'city' => $this->posted_string( $data, 'wdc_pickup_city_name' ),
 			'region' => $this->posted_string( $data, 'wdc_pickup_region_name' ),
+			'location_id' => $this->posted_string( $data, 'wdc_pickup_location_id' ),
+			'fias_id' => $this->posted_string( $data, 'wdc_pickup_fias_id' ),
+			'gar_object_id' => $this->posted_string( $data, 'wdc_pickup_gar_object_id' ),
+			'destination_fingerprint' => $this->posted_string( $data, 'wdc_pickup_destination_fingerprint' ),
 			'work_time' => $this->meaningful_text( $this->posted_string( $data, 'wdc_pickup_work_time' ) ),
 			'description' => $this->meaningful_text( $this->posted_string( $data, 'wdc_pickup_description' ) ),
 			'storage_notice' => $storage_notice,
@@ -517,6 +526,10 @@ final class CheckoutValidation {
 			'city' => (string) $snapshot['city'],
 			'region_name' => (string) $snapshot['region'],
 			'region' => (string) $snapshot['region'],
+			'location_id' => (string) $snapshot['location_id'],
+			'fias_id' => (string) $snapshot['fias_id'],
+			'gar_object_id' => (string) $snapshot['gar_object_id'],
+			'destination_fingerprint' => (string) $snapshot['destination_fingerprint'],
 			'point_work_time' => $this->meaningful_text( $snapshot['work_time'] ),
 			'work_time' => $this->meaningful_text( $snapshot['work_time'] ),
 			'description' => $this->meaningful_text( $snapshot['description'] ),
@@ -619,6 +632,10 @@ final class CheckoutValidation {
 			'point_postcode' => $selection['point_postcode'] ?? $snapshot['postcode'] ?? '',
 			'city_name' => $selection['city_name'] ?? $snapshot['city'] ?? '',
 			'region_name' => $selection['region_name'] ?? $snapshot['region'] ?? '',
+			'location_id' => $selection['location_id'] ?? $snapshot['location_id'] ?? '',
+			'fias_id' => $selection['fias_id'] ?? $snapshot['fias_id'] ?? '',
+			'gar_object_id' => $selection['gar_object_id'] ?? $snapshot['gar_object_id'] ?? '',
+			'destination_fingerprint' => $selection['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '',
 			'work_time' => $this->meaningful_text( $selection['point_work_time'] ?? $selection['work_time'] ?? '' ),
 			'point_work_time' => $this->meaningful_text( $selection['point_work_time'] ?? $selection['work_time'] ?? '' ),
 			'description' => $this->first_meaningful( $selection['description'] ?? '', $selection['point_comment'] ?? '', $snapshot['description'] ?? '' ),
