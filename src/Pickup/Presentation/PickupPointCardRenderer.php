@@ -11,7 +11,7 @@ final class PickupPointCardRenderer {
 	/**
 	 * @param array<string,mixed>|object $point
 	 */
-	public function render( array|object $point, bool $include_change_button = false, bool $hidden = false ): string {
+	public function render( array|object $point, bool $include_change_button = false, bool $hidden = false, bool $show_cdek_code_rows = true ): string {
 		$data      = $this->normalize( $point );
 		$work_time = $data['work_time'];
 		$description = $data['description'];
@@ -28,10 +28,10 @@ final class PickupPointCardRenderer {
 		$parts[] = '<div class="wdc-pickup-point-card__body" style="' . esc_attr( $this->body_style() ) . '">';
 		$parts[] = '<div class="wdc-pickup-point-card__address" data-wdc-pickup-address style="' . esc_attr( $this->address_style() ) . '">' . esc_html( $data['address_line'] ) . '</div>';
 		$needs_placeholders = $include_change_button || $hidden;
-		if ( $is_cdek && ( '' !== $code || $needs_placeholders ) ) {
+		if ( $show_cdek_code_rows && $is_cdek && ( '' !== $code || $needs_placeholders ) ) {
 			$parts[] = '<div class="wdc-pickup-point-card__code" data-wdc-pickup-code-block' . ( ! $is_cdek || '' === $code ? ' hidden' : '' ) . ' style="' . esc_attr( $this->line_style() ) . '"><span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Код пункта:', 'walls-delivery-calc' ) ) . '</span> <span data-wdc-pickup-code>' . esc_html( $code ) . '</span></div>';
 		}
-		if ( $is_cdek && ( '' !== $postcode || $needs_placeholders ) ) {
+		if ( $show_cdek_code_rows && $is_cdek && ( '' !== $postcode || $needs_placeholders ) ) {
 			$parts[] = '<div class="wdc-pickup-point-card__postcode" data-wdc-pickup-postcode-block' . ( ! $is_cdek || '' === $postcode ? ' hidden' : '' ) . ' style="' . esc_attr( $this->line_style() ) . '"><span style="' . esc_attr( $this->muted_style() ) . '">' . esc_html( __( 'Индекс:', 'walls-delivery-calc' ) ) . '</span> <span data-wdc-pickup-postcode>' . esc_html( $postcode ) . '</span></div>';
 		}
 		if ( '' !== $work_time || $needs_placeholders ) {

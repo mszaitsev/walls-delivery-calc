@@ -552,6 +552,24 @@ $rp_aps_card = $card_renderer->render(
 	false
 );
 pickup_smoke_assert( str_contains( $rp_aps_card, 'Почтомат Почты России' ), 'Russian Post APS card title must be Почтомат Почты России.' );
+$cdek_checkout_card = $card_renderer->render(
+	array(
+		'carrier_key' => 'cdek',
+		'rate_id' => 'cdek:pickup:136',
+		'point_type' => 'POSTAMAT',
+		'point_code' => 'KEM7',
+		'cdek_code' => 'KEM7',
+		'point_address' => 'Kemerovo, Sovetskiy 10',
+		'point_postcode' => '650004',
+		'description' => 'Inside the shopping center',
+		'storage_notice' => 'Срок хранения 3 дня',
+	),
+	true,
+	false,
+	false
+);
+pickup_smoke_assert( str_contains( $cdek_checkout_card, 'Постамат СДЭК' ) && str_contains( $cdek_checkout_card, 'Inside the shopping center' ) && str_contains( $cdek_checkout_card, 'Срок хранения 3 дня' ), 'CDEK checkout pickup card must render title, description, and storage notice.' );
+pickup_smoke_assert( ! str_contains( $cdek_checkout_card, 'Код пункта:' ) && ! str_contains( $cdek_checkout_card, 'Индекс:' ) && ! str_contains( $cdek_checkout_card, '650004' ), 'CDEK checkout pickup card must hide code and postcode rows.' );
 
 $root = dirname( __DIR__, 2 );
 $modal_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-modal.js' ) ?: '';

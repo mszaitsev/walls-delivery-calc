@@ -1,5 +1,7 @@
 # Project Status
 
+0.45.3 note: CDEK checkout selected pickup card state is fixed after QA. The checkout card under rates no longer renders technical `Код пункта` / `Индекс` rows for CDEK, but keeps title/address/work time/description/POSTAMAT storage notice. Checkout reload restores the full CDEK selected pickup payload from session/localized state, switching shipping method hides inactive pickup-family cards/buttons, and order/thankyou/email rendering receives the populated CDEK pickup payload. Permanent FIAS/GAR -> CDEK `city_code` mapping remains technical debt.
+
 0.45.2 note: CDEK pickup card rendering is fixed after QA. Checkout selected-point cards, thankyou/order cards and email cards now use CDEK-aware titles, render descriptions with `Описание:`, suppress empty/numeric-zero `work_time` and description values such as `0.000000`, and keep POSTAMAT `Срок хранения 3 дня` visible in red bold output. Russian Post pickup cards keep their existing titles and no longer render accidental numeric-zero descriptions.
 
 0.45.1 note: CDEK pickup QA fixes are implemented on `fix/cdek-pickup-selection-and-ui`. Checkout validation now handles CDEK pickup as a CDEK carrier family throughout restore/match logic and can create an order after the user selects a CDEK pickup point. CDEK `point_code`/`cdek_code` uses the CDEK point code, not postcode; `PVZ` renders as `Пункт выдачи СДЭК`; `POSTAMAT` renders as `Постамат СДЭК`, uses a separate marker color and shows `Срок хранения 3 дня`. CDEK pickup descriptions are saved in session/order calculation data and rendered in pickup cards/order/email display. Permanent FIAS/GAR -> CDEK `city_code` mapping is explicitly left as technical debt for a later CDEK integration stage.
@@ -62,10 +64,10 @@
 
 ## Общий статус
 
-- Текущая версия: `0.45.2`.
+- Текущая версия: `0.45.3`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `fix/cdek-pickup-selection-and-ui`.
-- Последнее обновление статуса: 2026-06-09.
+- Последнее обновление статуса: 2026-06-11.
 - Общая готовность проекта: примерно 74%.
 - Следующий рекомендуемый этап: `feature/cdek-order-creation`.
 
@@ -101,7 +103,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.2`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.3`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

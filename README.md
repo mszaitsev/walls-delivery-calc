@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.2.
+Current plugin version: 0.45.3.
+
+Version 0.45.3 fixes the CDEK selected pickup point card state after the second QA pass. The checkout card under rates keeps the customer-facing CDEK title, address, work time, description and POSTAMAT storage notice, but no longer shows the technical point code or postcode rows. Checkout reload restores the full selected CDEK pickup payload from session/localized state instead of falling back to code-only output, switching shipping method hides inactive pickup-family cards/buttons, and thankyou/order/email rendering receives the full CDEK pickup payload.
 
 Version 0.45.2 fixes pickup point cards after the first CDEK pickup QA pass. CDEK checkout/order/email cards now use carrier-aware titles (`Пункт выдачи СДЭК` / `Постамат СДЭК`), render `Описание:` only for meaningful descriptions, keep CDEK point code separate from postcode, and hide empty or numeric-zero `work_time`/description values such as `0.000000`. CDEK POSTAMAT cards continue to show red bold `Срок хранения 3 дня`. Russian Post pickup cards keep their existing titles and no longer render accidental numeric-zero descriptions.
 

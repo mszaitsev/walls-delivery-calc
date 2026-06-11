@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.2.
+Version: 0.45.3.
+
+0.45.3 checkout state fix: the selected CDEK pickup card under rates is intentionally visual-only and does not render `Код пункта` or `Индекс`, while keeping the selected point title, address, meaningful `work_time`, `Описание:` and POSTAMAT `Срок хранения 3 дня`. Checkout reload localizes the full CDEK selected pickup payload from session, including `point_code`, `cdek_code`, `point_address`/`address`, `point_postcode`/`postcode`, city, region, description, storage notice and snapshot data. Switching shipping method hides inactive pickup-family cards/buttons so CDEK controls cannot open the Russian Post map and vice versa. Thankyou/order/email cards read the full saved pickup payload and stay populated.
 
 0.45.2 card fix: CDEK pickup cards now use carrier-aware titles on checkout, thankyou/order display and email output. `PVZ` renders as `Пункт выдачи СДЭК`; `POSTAMAT` renders as `Постамат СДЭК`. CDEK descriptions are persisted through checkout hidden fields/session, order meta and `_wdc_delivery_calculation_data.pickup`, then rendered with the `Описание:` label. Empty or numeric-zero `work_time`/description values (`0`, `0.0`, `0.000000`) are suppressed, so Russian Post cards no longer show accidental zero descriptions. CDEK POSTAMAT still renders red bold `Срок хранения 3 дня`.
 
@@ -45,7 +47,8 @@ This stage connects CDEK pickup points to the existing WDC pickup map/picker flo
   - `PVZ` -> `Пункт выдачи СДЭК`;
   - `POSTAMAT` -> `Постамат СДЭК` plus `Срок хранения 3 дня`.
 - CDEK pickup rates now require a pickup point: `requires_pickup_point=true`.
-- Checkout map/picker supports `carrier_key=cdek`, passes CDEK city context, saves the selected point in the WooCommerce session, and keeps grouped CDEK pickup tariffs in one method family.
+- Checkout map/picker supports `carrier_key=cdek`, passes CDEK city context, saves the selected point in the WooCommerce session with the full normalized payload, and keeps grouped CDEK pickup tariffs in one method family.
+- The checkout selected-point card under rates hides CDEK `point_code`/`cdek_code` and `point_postcode`; those values remain saved in session/order calculation data.
 - Checkout order creation saves CDEK pickup data into `_wdc_delivery_calculation_data.pickup` and writes the selected pickup point address to the WooCommerce shipping address.
 - Admin order delivery recalculation can load/search CDEK pickup points, blocks pickup save without a selected point, and writes the selected CDEK pickup address on save.
 - Visible shipping item meta remains carrier-neutral and contains only delivery time.

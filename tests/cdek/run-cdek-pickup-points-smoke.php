@@ -278,10 +278,13 @@ cdek_pickup_assert( 'Inside the shopping center' === ( $postamat['description'] 
 $card_renderer = new PickupPointCardRenderer();
 $pvz_card = $card_renderer->render( array_merge( $pvz, array( 'rate_id' => 'cdek:pickup:136' ) ), false, false );
 $postamat_card = $card_renderer->render( array_merge( $postamat, array( 'rate_id' => 'cdek:pickup:136' ) ), false, false );
+$checkout_postamat_card = $card_renderer->render( array_merge( $postamat, array( 'rate_id' => 'cdek:pickup:136' ) ), true, false, false );
 cdek_pickup_assert( str_contains( $pvz_card, 'Пункт выдачи СДЭК' ), 'CDEK PVZ card title must be carrier-aware.' );
 cdek_pickup_assert( str_contains( $postamat_card, 'Постамат СДЭК' ) && str_contains( $postamat_card, 'Срок хранения 3 дня' ), 'CDEK POSTAMAT card title and storage notice must render.' );
 cdek_pickup_assert( str_contains( $postamat_card, 'Описание:' ) && str_contains( $postamat_card, 'Inside the shopping center' ), 'CDEK pickup description must render with label in pickup card.' );
 cdek_pickup_assert( ! str_contains( $postamat_card, '0.000000' ), 'CDEK pickup card must not render numeric zero description.' );
+cdek_pickup_assert( str_contains( $checkout_postamat_card, 'Постамат СДЭК' ) && str_contains( $checkout_postamat_card, 'Kemerovo, Sovetskiy 10' ) && str_contains( $checkout_postamat_card, 'Inside the shopping center' ) && str_contains( $checkout_postamat_card, 'Срок хранения 3 дня' ), 'CDEK checkout selected card must render full visual pickup details.' );
+cdek_pickup_assert( ! str_contains( $checkout_postamat_card, 'Код пункта:' ) && ! str_contains( $checkout_postamat_card, 'Индекс:' ) && ! str_contains( $checkout_postamat_card, '650004' ), 'CDEK checkout selected card must not render point code or postcode rows.' );
 $empty_work_card = $card_renderer->render( array_merge( $postamat, array( 'work_time' => '0.000000', 'point_work_time' => '0.000000', 'rate_id' => 'cdek:pickup:136' ) ), false, false );
 cdek_pickup_assert( ! str_contains( $empty_work_card, 'Время работы:' ), 'Pickup card must not render empty numeric work_time row.' );
 
@@ -363,6 +366,7 @@ $errors = new CdekPickupSmokeErrors();
 );
 cdek_pickup_assert( array() === $errors->errors, 'Selected CDEK pickup must pass checkout validation after restore from checkout session.' );
 cdek_pickup_assert( true === $session->pickup_selection_matches( 'cdek', 'cdek:pickup:136' ), 'Checkout validation must restore CDEK pickup selection with selected rate id.' );
+cdek_pickup_assert( 'Kemerovo, Sovetskiy 10' === (string) ( $session->checkout_pickup_point()['point_address'] ?? '' ) && 'Inside the shopping center' === (string) ( $session->checkout_pickup_point()['description'] ?? '' ), 'Checkout validation restore must keep the full CDEK checkout pickup payload.' );
 
 $checkout_order = new CdekPickupSmokeOrder();
 $persister = new OrderShippingMetaPersister( $session );
@@ -435,6 +439,9 @@ $checkout_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/fron
 $admin_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/order-delivery-recalculation.js' );
 $rest_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/PickupPointsRestController.php' );
 cdek_pickup_assert( str_contains( $checkout_js, "'cdek:pickup'" ) && str_contains( $checkout_js, 'carrier_key: point.carrier_key' ), 'Checkout pickup JS must carry CDEK carrier context and selected point payload.' );
+cdek_pickup_assert( str_contains( $checkout_js, 'function pickupMatchesFamily' ) && str_contains( $checkout_js, "family === 'cdek:pickup'" ) && str_contains( $checkout_js, 'function containerMethod' ), 'Checkout pickup JS must keep carrier-aware active state per pickup family.' );
+cdek_pickup_assert( str_contains( $checkout_js, "toggleBlock(container, '[data-wdc-pickup-code-block]', false)" ) && str_contains( $checkout_js, "toggleBlock(container, '[data-wdc-pickup-postcode-block]', false)" ), 'Checkout pickup JS must hide CDEK point code and postcode blocks in selected checkout cards.' );
+cdek_pickup_assert( str_contains( $checkout_js, 'description: point.description' ) && str_contains( $checkout_js, 'storage_notice: point.storage_notice' ) && str_contains( $checkout_js, 'cdek_code: point.cdek_code' ), 'Checkout pickup JS restore payload must include full CDEK point fields.' );
 cdek_pickup_assert( str_contains( $admin_js, "'cdek' === String( rate.carrier_key || rate.service_key || '' )" ) && str_contains( $admin_js, "loadPickupPointsForLocation( 'search', value )" ), 'Admin recalculation JS must use CDEK pickup search path.' );
 cdek_pickup_assert( str_contains( $rest_source, "carrier === 'cdek'" ) || str_contains( $rest_source, "'cdek' === \$carrier" ), 'Pickup REST source must route CDEK pickup requests.' );
 

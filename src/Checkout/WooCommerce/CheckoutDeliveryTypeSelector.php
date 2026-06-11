@@ -128,7 +128,8 @@ final class CheckoutDeliveryTypeSelector {
 				)
 			),
 			true,
-			! $has_selection
+			! $has_selection,
+			false
 		);
 		echo '</div>';
 	}

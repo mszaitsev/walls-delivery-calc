@@ -89,14 +89,14 @@ final class OrderShippingMetaPersister {
 			&& $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), (string) ( $rate['rate_id'] ?? '' ) )
 		) {
 			$map['_wdc_platform_pickup_code']      = $pickup['point_code'] ?? '';
-			$map['_wdc_platform_pickup_address']   = $pickup['point_address'] ?? '';
+			$map['_wdc_platform_pickup_address']   = $this->first_meaningful( $pickup['point_address'] ?? '', $pickup['address'] ?? '', $pickup['snapshot']['address'] ?? '' );
 			$map['_wdc_platform_pickup_comment']   = $this->first_meaningful( $pickup['description'] ?? '', $pickup['point_comment'] ?? '', $pickup['snapshot']['description'] ?? '' );
 			$map['_wdc_platform_pickup_work_time'] = $this->first_meaningful( $pickup['point_work_time'] ?? '', $pickup['work_time'] ?? '' );
 			$map['_wdc_pickup_point_id']           = $pickup['point_id'] ?? '';
 			$map['_wdc_pickup_point_code']         = $pickup['point_code'] ?? '';
 			$map['_wdc_pickup_point_type']         = $pickup['point_type'] ?? '';
-			$map['_wdc_pickup_point_address']      = $pickup['point_address'] ?? '';
-			$map['_wdc_pickup_point_postcode']     = $pickup['point_postcode'] ?? '';
+			$map['_wdc_pickup_point_address']      = $this->first_meaningful( $pickup['point_address'] ?? '', $pickup['address'] ?? '', $pickup['snapshot']['address'] ?? '' );
+			$map['_wdc_pickup_point_postcode']     = $this->first_meaningful( $pickup['point_postcode'] ?? '', $pickup['postcode'] ?? '', $pickup['postal_code'] ?? '', $pickup['snapshot']['postcode'] ?? '' );
 			$map['_wdc_pickup_point_snapshot']     = function_exists( 'wp_json_encode' ) ? wp_json_encode( is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : $pickup, JSON_UNESCAPED_UNICODE ) : json_encode( is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : $pickup );
 			$this->set_pickup_shipping_address( $order, $pickup, $address );
 		}
@@ -195,10 +195,10 @@ final class OrderShippingMetaPersister {
 			'point_code'    => (string) ( $pickup['point_code'] ?? '' ),
 			'point_type'    => (string) ( $pickup['point_type'] ?? '' ),
 			'point_name'    => (string) ( $pickup['point_name'] ?? '' ),
-			'point_address' => (string) ( $pickup['point_address'] ?? '' ),
-			'point_postcode' => (string) ( $pickup['point_postcode'] ?? '' ),
-			'city_name'     => (string) ( $pickup['city_name'] ?? $pickup['snapshot']['city'] ?? '' ),
-			'region_name'   => (string) ( $pickup['region_name'] ?? $pickup['snapshot']['region'] ?? '' ),
+			'point_address' => $this->first_meaningful( $pickup['point_address'] ?? '', $pickup['address'] ?? '', $pickup['snapshot']['address'] ?? '' ),
+			'point_postcode' => $this->first_meaningful( $pickup['point_postcode'] ?? '', $pickup['postcode'] ?? '', $pickup['postal_code'] ?? '', $pickup['snapshot']['postcode'] ?? '' ),
+			'city_name'     => $this->first_meaningful( $pickup['city_name'] ?? '', $pickup['city'] ?? '', $pickup['snapshot']['city'] ?? '' ),
+			'region_name'   => $this->first_meaningful( $pickup['region_name'] ?? '', $pickup['region'] ?? '', $pickup['snapshot']['region'] ?? '' ),
 			'latitude'      => $pickup['lat'] ?? $pickup['snapshot']['lat'] ?? null,
 			'longitude'     => $pickup['lng'] ?? $pickup['snapshot']['lng'] ?? null,
 			'work_time'     => $this->first_meaningful( $pickup['point_work_time'] ?? '', $pickup['work_time'] ?? '' ),
@@ -608,11 +608,11 @@ final class OrderShippingMetaPersister {
 	 */
 	private function set_pickup_shipping_address( object $order, array $pickup, mixed $address_result ): void {
 		$address = is_object( $address_result ) && isset( $address_result->address ) ? $address_result->address : null;
-		$this->call_order_setter( $order, 'set_shipping_address_1', (string) ( $pickup['point_address'] ?? '' ) );
+		$this->call_order_setter( $order, 'set_shipping_address_1', $this->first_meaningful( $pickup['point_address'] ?? '', $pickup['address'] ?? '', $pickup['snapshot']['address'] ?? '' ) );
 		$this->call_order_setter( $order, 'set_shipping_address_2', '', true );
-		$this->call_order_setter( $order, 'set_shipping_state', (string) ( $pickup['region_name'] ?? $pickup['snapshot']['region'] ?? ( is_object( $address ) ? $address->region_name : '' ) ) );
-		$this->call_order_setter( $order, 'set_shipping_city', (string) ( $pickup['city_name'] ?? $pickup['snapshot']['city'] ?? ( is_object( $address ) ? (string) ( $address->settlement ?: $address->city ) : '' ) ) );
-		$postcode = (string) ( $pickup['point_postcode'] ?? '' );
+		$this->call_order_setter( $order, 'set_shipping_state', $this->first_meaningful( $pickup['region_name'] ?? '', $pickup['region'] ?? '', $pickup['snapshot']['region'] ?? '', is_object( $address ) ? $address->region_name : '' ) );
+		$this->call_order_setter( $order, 'set_shipping_city', $this->first_meaningful( $pickup['city_name'] ?? '', $pickup['city'] ?? '', $pickup['snapshot']['city'] ?? '', is_object( $address ) ? (string) ( $address->settlement ?: $address->city ) : '' ) );
+		$postcode = $this->first_meaningful( $pickup['point_postcode'] ?? '', $pickup['postcode'] ?? '', $pickup['postal_code'] ?? '', $pickup['snapshot']['postcode'] ?? '' );
 		if ( '' === $postcode && is_object( $address ) ) {
 			$postcode = (string) $address->postcode;
 		}

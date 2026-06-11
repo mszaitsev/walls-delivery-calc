@@ -622,6 +622,7 @@ $errors = new WdcSmokeCheckoutErrors();
 	$errors
 );
 wc_checkout_smoke_assert( array() === $errors->errors, 'CDEK pickup selected in checkout must pass validation.' );
+wc_checkout_smoke_assert( 'Kemerovo, Sovetskiy 10' === (string) ( $session->checkout_pickup_point()['point_address'] ?? '' ) && 'Inside the shopping center' === (string) ( $session->checkout_pickup_point()['description'] ?? '' ) && 'KEM7' === (string) ( $session->checkout_pickup_point()['cdek_code'] ?? '' ), 'CDEK hidden fields restore must keep the full checkout pickup payload in session.' );
 $cdek_pickup_order = new WdcSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $cdek_pickup_order );
 $cdek_pickup_calc = $cdek_pickup_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ];
