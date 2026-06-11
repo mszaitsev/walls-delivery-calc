@@ -462,6 +462,13 @@ pickup_smoke_assert( 'demo-nsk-001' === (string) ( $bucketed_pickup['demo:pickup
 $order = new WdcPickupSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
 pickup_smoke_assert( 'demo-nsk-001' === (string) ( $order->meta['_wdc_platform_pickup_code'] ?? '' ), 'Order meta must use only the active pickup_family bucket.' );
+$session->clear_pickup_selection_for_family( 'other_carrier:pickup', 'family_reset_smoke' );
+pickup_smoke_assert( ! isset( $session->pickup_selections()['other_carrier:pickup'] ) && 'demo-nsk-001' === (string) ( $session->pickup_selections()['demo:pickup']['point_code'] ?? '' ), 'Custom family reset must not remove active demo pickup bucket.' );
+$session->save_pickup_selection( array( 'carrier_key' => 'other_carrier', 'rate_id' => 'other_carrier:pickup', 'point_code' => 'OTHER-1', 'point_address' => 'Other address' ) );
+$session->clear_pickup_selection_for_family( 'demo:pickup', 'family_reset_smoke' );
+pickup_smoke_assert( ! isset( $session->pickup_selections()['demo:pickup'] ) && 'OTHER-1' === (string) ( $session->pickup_selections()['other_carrier:pickup']['point_code'] ?? '' ), 'Active family reset must not remove another carrier bucket.' );
+$session->clear_pickup_selection( 'global_reset_smoke' );
+pickup_smoke_assert( array() === $session->pickup_selections(), 'Global reset must remove every pickup family bucket.' );
 
 $session->save_selected_delivery_type( DeliveryType::COURIER );
 $session->save_rates(

@@ -106,6 +106,12 @@ final class CheckoutSessionManager {
 		return (string) $this->get( self::PICKUP_CARRIER_KEY, '' );
 	}
 
+	/**
+	 * GLOBAL reset: clears all pickup families.
+	 *
+	 * Use only when checkout destination/location identity changes, checkout context
+	 * is fully reset, or an explicit "clear everything" action is requested.
+	 */
 	public function clear_pickup_selection( string $reason = '' ): void {
 		$this->log_pickup_selection_clear( $reason ?: 'manual_clear', false );
 		$this->set( self::PICKUP_SELECTION_KEY, array() );
@@ -134,7 +140,18 @@ final class CheckoutSessionManager {
 	}
 
 	public function clear_pickup_selection_if_allowed( string $reason, string $currentRateId = '' ): bool {
-		if ( '' !== $currentRateId && $this->is_supported_pickup_family( $currentRateId ) && $this->has_valid_pickup_selection() ) {
+		$current_family = '' !== $currentRateId ? $this->shipping_method_family( $currentRateId ) : '';
+		if ( '' !== $current_family && str_ends_with( $current_family, ':pickup' ) ) {
+			if ( $this->has_valid_pickup_selection_for_family( $current_family ) ) {
+				$this->log_pickup_selection_clear( $reason, true, $current_family );
+				return false;
+			}
+
+			$this->clear_pickup_selection_for_family( $current_family, $reason );
+			return true;
+		}
+
+		if ( ! $this->is_global_pickup_reset_reason( $reason ) ) {
 			$this->log_pickup_selection_clear( $reason, true, $currentRateId );
 			return false;
 		}
@@ -295,6 +312,19 @@ final class CheckoutSessionManager {
 
 	private function is_supported_pickup_family( string $rate_id ): bool {
 		return str_ends_with( $this->shipping_method_family( $rate_id ), ':pickup' );
+	}
+
+	private function is_global_pickup_reset_reason( string $reason ): bool {
+		return in_array(
+			$reason,
+			array(
+				'address_fingerprint_changed',
+				'destination_changed',
+				'location_changed',
+				'reset_selection',
+			),
+			true
+		);
 	}
 
 	/**

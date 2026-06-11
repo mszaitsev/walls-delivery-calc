@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.8.
+Current plugin version: 0.45.9.
+
+Version 0.45.9 tightens the pickup bucket reset semantics introduced in 0.45.8. `clear_pickup_selection()` is now documented as a global reset that clears every pickup family and is reserved for destination/location resets or explicit full context clears; ordinary method switching and family-level actions use `clear_pickup_selection_for_family()` or preserve existing buckets. Tests cover CDEK/Russian Post/custom buckets surviving each other's resets, while global reset still removes all saved pickup families.
 
 Version 0.45.8 stores checkout pickup selections by `pickup_family`, so CDEK and Russian Post selected points no longer overwrite each other. Checkout reload/switching restores the active family's saved point when the destination still matches, validation checks only the active family bucket, Russian Post map/list titles show the pickup postcode while CDEK keeps the CDEK code, CDEK pickup points prefetch in the background for the active `cdek:pickup` method, and inactive grouped tariff rates are disabled visually and functionally.
 

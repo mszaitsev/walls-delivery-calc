@@ -148,7 +148,7 @@
 					boot();
 					var currentMethod = currentShippingMethod();
 					if (!isPickupRateValue(currentMethod)) {
-						resetPickupSelectionOnServer('cross_location_method_unavailable');
+						resetPickupSelectionOnServer('cross_location_method_unavailable', null, { all: true });
 						showCheckoutNotice('После пересчета выбранный способ доставки стал недоступен. Выберите другой способ доставки.');
 						disableDestinationResetSuppression();
 						return;

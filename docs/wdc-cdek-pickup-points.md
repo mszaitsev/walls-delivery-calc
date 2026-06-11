@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.8.
+Version: 0.45.9.
+
+0.45.9 reset-scope fix: bucketed pickup selections are no longer vulnerable to accidental full clears during normal checkout method switching. `clear_pickup_selection()` is explicitly documented as a global reset for destination/location identity changes and full checkout-context resets. Family-scoped clears use `clear_pickup_selection_for_family($pickup_family)` so clearing `cdek:pickup` does not remove `russian_post_domestic:pickup`, and vice versa. Cross-location recalculation can still request an explicit global reset when the destination changes and the active pickup method disappears.
 
 0.45.8 checkout bucket fix: selected pickup points are stored by `pickup_family` in the checkout session. Selecting a CDEK point writes the `cdek:pickup` bucket, selecting a Russian Post point writes `russian_post_domestic:pickup`, and one carrier no longer clears the other. Checkout reload and shipping-method switching restore only the active family's complete selection when the saved destination identity still matches; validation also checks only the active family bucket. CDEK pickup prefetch now starts in the background when `cdek:pickup` is the active shipping method. Russian Post map/list/popup titles show the pickup postcode from the repository, while CDEK titles keep `cdek_code` (`KEM7`, `KEM41`). Inactive grouped tariff rates are disabled until their parent shipping method is selected.
 
