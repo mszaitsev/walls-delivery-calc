@@ -176,6 +176,18 @@ final class CheckoutSessionManager {
 	}
 
 	public function valid_pickup_selection_for_family( string $pickup_family ): bool {
+		return $this->valid_pickup_selection_for_checkout( $pickup_family );
+	}
+
+	public function pickup_selection_has_identity_for_family( string $pickup_family ): bool {
+		$selection = $this->pickup_selection_for_family( $pickup_family );
+
+		return array() !== $selection
+			&& $this->selection_has_point_identity( $selection )
+			&& $this->selection_family_matches( $selection, $pickup_family );
+	}
+
+	public function valid_pickup_selection_for_checkout( string $pickup_family ): bool {
 		$selection = $this->pickup_selection_for_family( $pickup_family );
 
 		return array() !== $selection
@@ -241,7 +253,12 @@ final class CheckoutSessionManager {
 			if ( '' === $expected_carrier ) {
 				return true;
 			}
-			return '' !== $selection_carrier && $selection_carrier === $expected_carrier;
+			if ( '' === $selection_carrier ) {
+				$selection_service = $this->normalize_carrier_key_for_pickup( (string) ( $selection['service_key'] ?? '' ) );
+				return '' === $selection_service || $selection_service === $expected_carrier;
+			}
+
+			return $selection_carrier === $expected_carrier;
 		}
 
 		$selection_carrier = $this->normalize_carrier_key_for_pickup( (string) ( $selection['carrier_key'] ?? '' ) );

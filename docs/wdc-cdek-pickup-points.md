@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.12.
+Version: 0.45.13.
+
+0.45.13 reload/validation follow-up: selected pickup restore now depends only on `pickup_family + destination/location + point identity`. A selected CDEK/Russian Post point is not invalidated by tariff changes, grouped rate suffixes, package contents, weight or dimensions. `pickupSelections` in checkout localization keeps raw saved family buckets even when a visual card address has to be resolved from aliases; `selectedPickupPoints` remains the renderable-card subset. CDEK address aliases now include top-level, snapshot and raw address fields, and checkout validation accepts the active `cdek:pickup` bucket without hidden fields when the destination still matches.
 
 0.45.12 canonical pickup state fix: checkout now treats `wdc_platform_pickup_selections` as the source of truth. Each selected point is stored as `pickupSelections[pickup_family]` (`russian_post_domestic:pickup`, `cdek:pickup`, future custom families), while `wdc_platform_pickup_selection` and `wdc_pickup_point` remain derived mirrors/migration fallback only when the dictionary is empty. `PickupMapCheckout` localizes the complete bucket dictionary, active shipping method and active family for reload restore. Validation reads the active family bucket before posted hidden fields, Russian Post aliases normalize to `russian_post_domestic`, and destination fingerprints use stable city/location identifiers so reload of the same city keeps the selected CDEK/Russian Post point while a real city change invalidates it.
 

@@ -110,7 +110,7 @@ final class CheckoutValidation {
 		$selected_rate_id = $this->selected_rate_id( $rate );
 		$active_family = $this->rate_pickup_family( $rate, $selected_rate_id );
 		$active_selection = $this->session_manager->pickup_selection_for_family( $active_family );
-		if ( array() !== $active_selection && $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $active_family ) ) {
+		if ( array() !== $active_selection && $this->session_manager->valid_pickup_selection_for_checkout( $active_family ) ) {
 			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
 			$this->debug_validation(
 				'wdc_pickup_validation_passed',

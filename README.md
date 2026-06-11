@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.12.
+Current plugin version: 0.45.13.
+
+Version 0.45.13 tightens checkout pickup restore around the canonical family bucket model. Reload restore and checkout validation now depend on `pickup_family + destination + point identity`, not the selected tariff/rate/package. Localized `pickupSelections` keeps raw saved buckets even when a card address must be recovered from aliases, while `selectedPickupPoints` remains the renderable-card view. CDEK and Russian Post address aliases include snapshot/raw address fields, and order meta/shipping address persistence uses the same address resolver.
 
 Version 0.45.12 makes `wdc_platform_pickup_selections` the canonical checkout pickup state. Russian Post, CDEK and future pickup services are restored from `pickupSelections[pickup_family]`; legacy singleton keys are kept only as mirrors/migration fallback when the dictionary is empty. Checkout reload now receives the full bucket dictionary plus active method/family, validation checks the active family bucket before posted hidden fields, Russian Post carrier aliases normalize to `russian_post_domestic`, and destination fingerprints are stable across reloads of the same city without letting pickup postcodes replace the checkout destination identity.
 

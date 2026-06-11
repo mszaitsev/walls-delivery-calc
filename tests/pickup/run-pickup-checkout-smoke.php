@@ -286,7 +286,8 @@ $GLOBALS['wdc_pickup_checkout_localized'] = array();
 $localized_minimal = $GLOBALS['wdc_pickup_checkout_localized']['wdc-pickup-checkout']['wdcPickupCheckout'] ?? array();
 pickup_checkout_assert( '630001-a' === (string) ( $localized_minimal['initialContext']['selectedPoint']['point_code'] ?? '' ), 'A minimal CDEK pickup point must not replace the active Russian Post selected point in initial context.' );
 pickup_checkout_assert( ! isset( $localized_minimal['selectedPickupPoints']['cdek:pickup'] ) && '630001-a' === (string) ( $localized_minimal['selectedPickupPoints'][ $pickup_group_id ]['point_code'] ?? '' ), 'Localized selectedPickupPoints must expose only complete per-family selections.' );
-pickup_checkout_assert( ! isset( $localized_minimal['pickupSelections']['cdek:pickup'] ) && '630001-a' === (string) ( $localized_minimal['pickupSelections'][ $pickup_group_id ]['point_code'] ?? '' ), 'Localized pickupSelections must expose only complete per-family selections.' );
+pickup_checkout_assert( 'KEM41' === (string) ( $localized_minimal['pickupSelections']['cdek:pickup']['point_code'] ?? '' ) && '630001-a' === (string) ( $localized_minimal['pickupSelections'][ $pickup_group_id ]['point_code'] ?? '' ), 'Localized pickupSelections must expose raw per-family buckets even when a bucket is not renderable as a card.' );
+pickup_checkout_assert( 'KEM41' === (string) ( $localized_minimal['pickupSelectionsRaw']['cdek:pickup']['point_code'] ?? '' ), 'Localized pickupSelectionsRaw must expose raw selected pickup buckets for reload restore.' );
 $bucketed_selections = $session->pickup_selections();
 pickup_checkout_assert( 'KEM41' === (string) ( $bucketed_selections['cdek:pickup']['point_code'] ?? '' ) && '630001-a' === (string) ( $bucketed_selections[ $pickup_group_id ]['point_code'] ?? '' ), 'Checkout session must keep Russian Post and CDEK pickup selections in separate pickup_family buckets.' );
 $session->save_pickup_selection(
@@ -523,6 +524,32 @@ pickup_checkout_assert( 'cdek' === (string) ( $session->pickup_selection()['carr
 pickup_checkout_assert( 'CDEK collision address' === (string) ( $session->pickup_selection()['point_address'] ?? '' ) && 'Ленина, 1' !== (string) ( $session->pickup_selection()['point_address'] ?? '' ), 'CDEK point_code collision must not restore a Russian Post pickup row.' );
 
 $session->clear_pickup_selection();
+$session->save_pickup_selection(
+	array(
+		'carrier_key' => 'cdek',
+		'service_key' => 'cdek',
+		'pickup_family' => 'cdek:pickup',
+		'rate_id' => 'cdek:pickup:old_tariff',
+		'point_code' => 'OMS6',
+		'snapshot' => array(
+			'carrier_key' => 'cdek',
+			'service_key' => 'cdek',
+			'pickup_family' => 'cdek:pickup',
+			'point_code' => 'OMS6',
+			'raw' => array( 'address' => 'Omsk raw address' ),
+		),
+	)
+);
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'РћРјСЃРє', 'shipping_method' => array( 'wdc_platform_delivery:cdek:pickup:136' ) ), $errors );
+pickup_checkout_assert( array() === $errors->errors, 'CDEK validation must pass from active family bucket without hidden fields and without tariff/rate match.' );
+WC()->session->set( 'chosen_shipping_methods', array( 'cdek:pickup:136' ) );
+$GLOBALS['wdc_pickup_checkout_localized'] = array();
+( new PickupMapCheckout( $session, $environment, $map_settings, $point_type_settings ) )->enqueue_assets();
+$localized_cdek = $GLOBALS['wdc_pickup_checkout_localized']['wdc-pickup-checkout']['wdcPickupCheckout'] ?? array();
+pickup_checkout_assert( 'OMS6' === (string) ( $localized_cdek['pickupSelections']['cdek:pickup']['point_code'] ?? '' ) && 'OMS6' === (string) ( $localized_cdek['selectedPickupPoint']['point_code'] ?? '' ) && 'Omsk raw address' === (string) ( $localized_cdek['selectedPickupPoint']['address'] ?? '' ), 'CDEK reload localized config must restore selectedPickupPoint from active bucket and snapshot raw address aliases.' );
+
+$session->clear_pickup_selection();
 $session->save_rates(
 	array(
 		'custom_carrier:pickup:base' => array(
@@ -749,7 +776,7 @@ pickup_checkout_assert( str_contains( $map_checkout_source, 'map_provider()' ) &
 pickup_checkout_assert( str_contains( $map_checkout_source, 'providers/wdc-map-provider-leaflet.js' ), 'Leaflet provider script must be enqueued.' );
 pickup_checkout_assert( str_contains( $map_checkout_source, "if ( 'leaflet' === \$provider )" ) && str_contains( $map_checkout_source, 'providers/wdc-map-provider-yandex.js' ), 'Yandex provider must enqueue from the non-Leaflet branch.' );
 pickup_checkout_assert( str_contains( $map_checkout_source, "'yandex' === \$provider && \$this->has_yandex_api_key()" ) && str_contains( $map_checkout_source, "'yandexApiKeyPresent'" ), 'Yandex key must be localized only when Yandex is selected and the key exists.' );
-pickup_checkout_assert( str_contains( $map_checkout_source, "'pickupPointTypes'" ) && str_contains( $map_checkout_source, 'pickup_point_types()' ) && str_contains( $map_checkout_source, "'selectedPickupPoints' => \$this->selected_points_context()" ) && str_contains( $map_checkout_source, "'selectedPoint' => \$this->selected_point_context( \$this->active_pickup_family() )" ), 'Pickup map checkout must localize pickupPointTypes, active selectedPoint, and full selectedPickupPoints buckets.' );
+pickup_checkout_assert( str_contains( $map_checkout_source, "'pickupPointTypes'" ) && str_contains( $map_checkout_source, 'pickup_point_types()' ) && str_contains( $map_checkout_source, "'pickupSelections' => \$this->selected_points_context( false )" ) && str_contains( $map_checkout_source, "'selectedPickupPoints' => \$this->selected_points_context( true )" ) && str_contains( $map_checkout_source, "'selectedPoint' => \$this->selected_point_context( \$this->active_pickup_family() )" ), 'Pickup map checkout must localize pickupPointTypes, active selectedPoint, raw pickupSelections, and renderable selectedPickupPoints buckets.' );
 pickup_checkout_assert( str_contains( $map_checkout_source, 'Для Яндекс.Карт не задан API key' ), 'Frontend config must include a clear missing Yandex API key error.' );
 pickup_checkout_assert( file_exists( $root . '/assets/vendor/leaflet/leaflet.css' ) && file_exists( $root . '/assets/vendor/leaflet/leaflet.js' ), 'Leaflet assets must exist under assets/vendor/leaflet.' );
 $checkout_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' ) ?: '';
@@ -870,7 +897,7 @@ pickup_checkout_assert( str_contains( $checkout_js, 'hasPickupBlock' ) && str_co
 pickup_checkout_assert( str_contains( $checkout_js, 'prefetchController.abort()' ) && str_contains( $checkout_js, 'setTimeout(prefetchInitialPoints, 400)' ), 'Prefetch must debounce and abort stale requests.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'prefetchCache = null' ) && str_contains( $checkout_js, 'invalidatePrefetch' ), 'Prefetch cache must invalidate on destination changes.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'var context = withPrefetch(withCarrierContext(resolvedContext, method))' ) && str_contains( $checkout_js, 'preloadedPoints: prefetchCache.points' ), 'Open modal must pass cached preloaded points to the map.' );
-pickup_checkout_assert( str_contains( $checkout_js, 'checkoutConfig.pickupSelections || {}' ) && str_contains( $checkout_js, 'checkoutConfig.selectedPickupPoints || {}' ) && str_contains( $checkout_js, 'function selectedPickupPointForFamily(family)' ) && str_contains( $checkout_js, 'selectedPickupPoints[family]' ), 'Checkout JS must keep selected pickup points by pickup_family.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'checkoutConfig.pickupSelections || checkoutConfig.pickupSelectionsRaw || {}' ) && str_contains( $checkout_js, 'checkoutConfig.selectedPickupPoints || {}' ) && str_contains( $checkout_js, 'function selectedPickupPointForFamily(family)' ) && str_contains( $checkout_js, 'selectedPickupPoints[family]' ), 'Checkout JS must keep selected pickup points by pickup_family.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'if (context.city_code || context.cdek_city_code)' ) && str_contains( $checkout_js, "window.WDCPickupApi.points('', prefetchController.signal, context)" ), 'CDEK pickup prefetch must request deliverypoints by city_code before the modal is opened.' );
 $map_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.js' ) ?: '';
 $modal_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-modal.js' ) ?: '';

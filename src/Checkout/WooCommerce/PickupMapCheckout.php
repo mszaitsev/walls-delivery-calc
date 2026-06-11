@@ -64,8 +64,9 @@ final class PickupMapCheckout {
 					'shippingMethodId' => $this->active_shipping_method_id(),
 					'activeShippingMethod' => $this->active_shipping_method_id(),
 					'initialContext'   => $this->initial_context(),
-					'pickupSelections' => $this->selected_points_context(),
-					'selectedPickupPoints' => $this->selected_points_context(),
+					'pickupSelections' => $this->selected_points_context( false ),
+					'pickupSelectionsRaw' => $this->selected_points_context( false ),
+					'selectedPickupPoints' => $this->selected_points_context( true ),
 					'activePickupFamily' => $this->active_pickup_family(),
 					'selectedPickupPoint' => $this->selected_point_context( $this->active_pickup_family() ),
 					'mapProvider'      => $provider,
@@ -204,15 +205,15 @@ final class PickupMapCheckout {
 	/**
 	 * @return array<string,mixed>|null
 	 */
-	private function selected_point_context( string $pickup_family = '' ): ?array {
+	private function selected_point_context( string $pickup_family = '', bool $require_address = true ): ?array {
 		$selection = '' !== $pickup_family ? $this->session_manager->checkout_pickup_point_for_family( $pickup_family ) : $this->session_manager->checkout_pickup_point();
-		if ( array() === $selection || '' === trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
+		if ( array() === $selection || ! $this->selection_has_identity( $selection ) ) {
 			return null;
 		}
 
 		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
-		$address = trim( (string) ( $selection['point_address'] ?? $selection['address'] ?? $snapshot['point_address'] ?? $snapshot['address'] ?? '' ) );
-		if ( '' === $address ) {
+		$address = $this->pickup_address( $selection );
+		if ( $require_address && '' === $address ) {
 			return null;
 		}
 
@@ -230,10 +231,10 @@ final class PickupMapCheckout {
 				'display_code' => $selection['display_code'] ?? $snapshot['display_code'] ?? null,
 				'display_title' => $selection['display_title'] ?? $snapshot['display_title'] ?? null,
 				'point_name' => $selection['point_name'] ?? $snapshot['point_name'] ?? null,
-				'point_address' => $selection['point_address'] ?? $selection['address'] ?? $snapshot['address'] ?? null,
+				'point_address' => $address ?: ( $selection['point_address'] ?? $selection['address'] ?? $snapshot['address'] ?? null ),
 				'point_postcode' => $selection['point_postcode'] ?? $selection['postcode'] ?? $snapshot['postcode'] ?? null,
 				'postcode' => $selection['postcode'] ?? $snapshot['postcode'] ?? null,
-				'address' => $selection['address'] ?? $snapshot['address'] ?? null,
+				'address' => $address ?: ( $selection['address'] ?? $snapshot['address'] ?? null ),
 				'city_name' => $selection['city_name'] ?? $selection['city'] ?? $snapshot['city_name'] ?? $snapshot['city'] ?? null,
 				'region_name' => $selection['region_name'] ?? $selection['region'] ?? $snapshot['region_name'] ?? $snapshot['region'] ?? null,
 				'location_id' => $selection['location_id'] ?? $snapshot['location_id'] ?? null,
@@ -372,16 +373,67 @@ final class PickupMapCheckout {
 	/**
 	 * @return array<string,array<string,mixed>>
 	 */
-	private function selected_points_context(): array {
+	private function selected_points_context( bool $require_address = false ): array {
 		$selected = array();
 		foreach ( $this->session_manager->pickup_selections() as $family => $selection ) {
-			$point = $this->selected_point_context( $family );
+			$point = $this->selected_point_context( $family, $require_address );
 			if ( null !== $point ) {
 				$selected[ $family ] = $point;
 			}
 		}
 
 		return $selected;
+	}
+
+	/**
+	 * @param array<string,mixed> $selection
+	 */
+	private function selection_has_identity( array $selection ): bool {
+		return '' !== trim( (string) ( $selection['point_code'] ?? '' ) )
+			|| '' !== trim( (string) ( $selection['point_id'] ?? $selection['id'] ?? '' ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $selection
+	 */
+	private function pickup_address( array $selection ): string {
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$raw = is_array( $selection['raw'] ?? null ) ? $selection['raw'] : ( is_array( $snapshot['raw'] ?? null ) ? $snapshot['raw'] : array() );
+
+		return $this->first_text(
+			$selection['point_address'] ?? '',
+			$selection['address'] ?? '',
+			$selection['address_full'] ?? '',
+			$selection['full_address'] ?? '',
+			$selection['address_short'] ?? '',
+			$selection['location_address'] ?? '',
+			$selection['address_source'] ?? '',
+			$snapshot['point_address'] ?? '',
+			$snapshot['address'] ?? '',
+			$snapshot['address_full'] ?? '',
+			$snapshot['full_address'] ?? '',
+			$snapshot['address_short'] ?? '',
+			$snapshot['location_address'] ?? '',
+			$snapshot['address_source'] ?? '',
+			$raw['address'] ?? '',
+			$raw['address_full'] ?? '',
+			$raw['full_address'] ?? '',
+			$raw['address_short'] ?? '',
+			$raw['location_address'] ?? ''
+		);
+	}
+
+	private function first_text( mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			if ( is_scalar( $value ) ) {
+				$text = trim( (string) $value );
+				if ( '' !== $text ) {
+					return $text;
+				}
+			}
+		}
+
+		return '';
 	}
 
 	private function active_pickup_family(): string {

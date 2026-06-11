@@ -18,8 +18,8 @@
 	var placeOrderResetGuardUntil = 0;
 	var pickupFamilies = Array.isArray(checkoutConfig.pickupFamilies) && checkoutConfig.pickupFamilies.length ? checkoutConfig.pickupFamilies : [];
 	var selectedPickupPoints = mergeSelectedPickupPoints(
-		normalizeSelectedPickupPoints(checkoutConfig.pickupSelections || {}),
-		normalizeSelectedPickupPoints(checkoutConfig.selectedPickupPoints || {})
+		normalizeSelectedPickupPoints(checkoutConfig.pickupSelections || checkoutConfig.pickupSelectionsRaw || {}, false),
+		normalizeSelectedPickupPoints(checkoutConfig.selectedPickupPoints || {}, true)
 	);
 	if (checkoutConfig.initialContext && checkoutConfig.initialContext.selectedPoint) {
 		var initialFamily = pickupFamily(checkoutConfig.initialContext.selectedPoint);
@@ -301,7 +301,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		setHiddenField(container, '[data-wdc-pickup-point-type-label]', point.point_type_label || snapshot.point_type_label || presentation.point_type_label || '');
 		setHiddenField(container, '[data-wdc-pickup-point-title]', point.point_title || point.card_title || snapshot.point_title || snapshot.card_title || presentation.card_title || '');
 		setHiddenField(container, '[data-wdc-pickup-point-name]', point.point_name || snapshot.point_name || '');
-		setHiddenField(container, '[data-wdc-pickup-point-address]', point.point_address || point.address || snapshot.address || '');
+		setHiddenField(container, '[data-wdc-pickup-point-address]', selectedPointAddressValue(point));
 		setHiddenField(container, '[data-wdc-pickup-point-postcode]', postcode);
 		setHiddenField(container, '[data-wdc-pickup-city-name]', point.city_name || point.city || snapshot.city_name || snapshot.city || '');
 		setHiddenField(container, '[data-wdc-pickup-region-name]', point.region_name || point.region || snapshot.region_name || snapshot.region || '');
@@ -426,7 +426,28 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	function selectedPointAddressValue(point) {
 		point = point || {};
 		var snapshot = point.snapshot || {};
-		return firstMeaningfulText(point.point_address, point.address, snapshot.point_address, snapshot.address);
+		var raw = point.raw || snapshot.raw || {};
+		return firstMeaningfulText(
+			point.point_address,
+			point.address,
+			point.address_full,
+			point.full_address,
+			point.address_short,
+			point.location_address,
+			point.address_source,
+			snapshot.point_address,
+			snapshot.address,
+			snapshot.address_full,
+			snapshot.full_address,
+			snapshot.address_short,
+			snapshot.location_address,
+			snapshot.address_source,
+			raw.address,
+			raw.address_full,
+			raw.full_address,
+			raw.address_short,
+			raw.location_address
+		);
 	}
 
 	function isValidSelectedPointForCard(point, family) {
@@ -944,10 +965,10 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			point_type_label: point.point_type_label || snapshot.point_type_label || pickupPresentation(point).point_type_label || '',
 			point_title: point.point_title || point.card_title || snapshot.point_title || snapshot.card_title || pickupPresentation(point).card_title || '',
 			point_name: point.point_name || snapshot.point_name || '',
-			point_address: point.point_address || point.address || snapshot.address || '',
+			point_address: selectedPointAddressValue(point),
 			point_postcode: point.point_postcode || point.postcode || point.postal_code || snapshot.postcode || '',
 			postcode: point.point_postcode || point.postcode || point.postal_code || snapshot.postcode || '',
-			address: point.point_address || point.address || snapshot.address || '',
+			address: selectedPointAddressValue(point),
 			city_name: point.city_name || point.city || snapshot.city_name || snapshot.city || '',
 			region_name: point.region_name || point.region || snapshot.region_name || snapshot.region || '',
 			lat: point.lat !== undefined && point.lat !== null ? point.lat : snapshot.lat,
@@ -967,7 +988,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		};
 	}
 
-	function normalizeSelectedPickupPoints(points) {
+	function normalizeSelectedPickupPoints(points, requireAddress) {
 		var normalized = {};
 		if (!points || typeof points !== 'object') {
 			return normalized;
@@ -975,7 +996,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		Object.keys(points).forEach(function (family) {
 			var point = normalizeSelectedPoint(points[family] || {});
 			var pointFamily = pickupFamily(point) || family;
-			if (pointFamily && isValidSelectedPointForCard(point, pointFamily)) {
+			if (pointFamily && selectedPointCode(point) && (!requireAddress || isValidSelectedPointForCard(point, pointFamily))) {
 				normalized[pointFamily] = point;
 			}
 		});
