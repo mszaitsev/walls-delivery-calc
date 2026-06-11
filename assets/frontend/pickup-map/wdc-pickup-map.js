@@ -90,7 +90,7 @@
 
 		function renderPointPopup(point, selected) {
 			var rows = [];
-			var title = [carrierTitle(point), pointDisplayCode(point)].filter(Boolean).join(' ');
+			var title = pointDisplayTitle(point);
 			var workTime = meaningfulText(point.work_time);
 			var description = cleanDescription(point.description);
 			if (title) {
@@ -268,7 +268,7 @@
 				'<div role="button" tabindex="0" class="wdc-pickup-list__item' + (active ? ' active' : '') + (selected ? ' selected' : '') + (previewed ? ' preview' : '') + '" data-wdc-point-id="' + escapeHtml(pointId(point)) + '">',
 				'<span class="wdc-pickup-list__index">' + (index + 1) + '</span>',
 				'<span class="wdc-pickup-list__content">',
-				'<span class="wdc-pickup-list__headline"><strong>' + escapeHtml(pointTypeLabel(point)) + '</strong>' + (point.distanceText ? '<em>' + escapeHtml(point.distanceText) + '</em>' : '') + '</span>',
+				'<span class="wdc-pickup-list__headline"><strong>' + escapeHtml(pointDisplayTitle(point)) + '</strong>' + (point.distanceText ? '<em>' + escapeHtml(point.distanceText) + '</em>' : '') + '</span>',
 				point.address ? '<span class="wdc-pickup-list__address">' + escapeHtml(point.address) + '</span>' : '',
 				point.work_time ? '<span class="wdc-pickup-list__time">' + escapeHtml(point.work_time) + '</span>' : '',
 				storageNotice(point) ? '<span class="wdc-pickup-list__storage">' + escapeHtml(storageNotice(point)) + '</span>' : '',
@@ -693,9 +693,17 @@
 		return String((point && (point.point_title || point.card_title || point.point_type_label)) || '').trim() || 'Пункт выдачи';
 	}
 
+	function pointDisplayTitle(point) {
+		return String((point && (point.display_title || (point.snapshot && point.snapshot.display_title))) || '').trim()
+			|| [carrierTitle(point), pointDisplayCode(point)].filter(Boolean).join(' ');
+	}
+
 	function pointDisplayCode(point) {
 		if (!point) {
 			return '';
+		}
+		if (point.display_code || (point.snapshot && point.snapshot.display_code)) {
+			return String(point.display_code || (point.snapshot && point.snapshot.display_code) || '').trim();
 		}
 		var carrier = String(point.carrier_key || point.carrier || (point.snapshot && (point.snapshot.carrier_key || point.snapshot.carrier)) || '').trim();
 		if (carrier === 'russian_post_domestic' || carrier === 'russian_post') {

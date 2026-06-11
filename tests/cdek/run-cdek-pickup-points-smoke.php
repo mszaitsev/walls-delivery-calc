@@ -274,6 +274,7 @@ cdek_pickup_assert( 'Mon-Fri 10-20' === ( $pvz['work_time'] ?? '' ), 'Normalized
 cdek_pickup_assert( 'uuid-nsk-1' === ( $pvz['cdek_uuid'] ?? '' ) && 'CDEK' === ( $pvz['cdek_owner_code'] ?? '' ), 'Normalized CDEK point must keep CDEK-specific identifiers.' );
 cdek_pickup_assert( ! str_contains( (string) wp_json_encode( $pvz ), 'must-not-be-kept' ), 'Normalized CDEK point raw payload must not keep sensitive-looking fields.' );
 cdek_pickup_assert( 'KEM7' === ( $postamat['point_code'] ?? '' ) && 'KEM7' === ( $postamat['cdek_code'] ?? '' ), 'CDEK point_code must use CDEK code, not postcode.' );
+cdek_pickup_assert( 'KEM7' === ( $postamat['display_code'] ?? '' ) && str_contains( (string) ( $postamat['display_title'] ?? '' ), 'KEM7' ), 'CDEK normalized point must expose display_code/display_title for map list titles.' );
 cdek_pickup_assert( '650004' === ( $postamat['point_postcode'] ?? '' ) && 'KEM7' !== ( $postamat['point_postcode'] ?? '' ), 'CDEK postcode must stay separate from point_code.' );
 cdek_pickup_assert( 'POSTAMAT' === ( $postamat['point_type'] ?? '' ) && 'Срок хранения 3 дня' === ( $postamat['storage_notice'] ?? '' ), 'CDEK POSTAMAT must normalize type and storage notice.' );
 cdek_pickup_assert( 'Inside the shopping center' === ( $postamat['description'] ?? '' ), 'CDEK deliverypoints description must be normalized.' );
@@ -284,6 +285,7 @@ $rest_points = $rest_controller->points( array( 'carrier' => 'cdek', 'city_code'
 $rest_postamat = $rest_points[1] ?? array();
 cdek_pickup_assert( 'cdek:pickup' === (string) ( $rest_postamat['pickup_family'] ?? '' ) && 'cdek' === (string) ( $rest_postamat['service_key'] ?? '' ), 'CDEK REST point must preserve service_key and pickup_family.' );
 cdek_pickup_assert( 'Постамат СДЭК' === (string) ( $rest_postamat['point_title'] ?? '' ) && 'Постамат' === (string) ( $rest_postamat['point_type_label'] ?? '' ) && 'postamat' === (string) ( $rest_postamat['marker_type'] ?? '' ), 'CDEK REST point must expose POSTAMAT presentation fields.' );
+cdek_pickup_assert( 'KEM7' === (string) ( $rest_postamat['display_code'] ?? '' ) && str_contains( (string) ( $rest_postamat['display_title'] ?? '' ), 'KEM7' ), 'CDEK REST point must expose display title/code for popup and side list.' );
 cdek_pickup_assert( is_array( $rest_postamat['snapshot'] ?? null ) && 'cdek:pickup' === (string) ( $rest_postamat['snapshot']['pickup_family'] ?? '' ), 'CDEK REST point must include normalized snapshot.' );
 
 $card_renderer = new PickupPointCardRenderer();

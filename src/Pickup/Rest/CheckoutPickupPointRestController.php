@@ -93,7 +93,7 @@ final class CheckoutPickupPointRestController {
 			$selection = $this->cdek_selection( $point );
 			$this->save_selection( $selection, 'cdek', $method_id );
 
-			return $this->response( array( 'pickup_point' => $selection ) );
+			return $this->selection_response( $selection, $method_id );
 		}
 
 		if ( RussianPostDomesticSettings::CARRIER_KEY !== $carrier ) {
@@ -104,7 +104,7 @@ final class CheckoutPickupPointRestController {
 			$selection = $this->selection_from_generic_point( $point, $carrier, $method_id );
 			$this->save_selection( $selection, $carrier, $method_id );
 
-			return $this->response( array( 'pickup_point' => $selection ) );
+			return $this->selection_response( $selection, $method_id );
 		}
 
 		$row = $this->repository->find_row_by_id( $point_id );
@@ -115,7 +115,7 @@ final class CheckoutPickupPointRestController {
 		$selection = $this->selection_from_row( $row );
 		$this->save_selection( $selection, RussianPostDomesticSettings::CARRIER_KEY, $method_id );
 
-		return $this->response( array( 'pickup_point' => $selection ) );
+		return $this->selection_response( $selection, $method_id );
 	}
 
 	public function delete( mixed $request = null ): mixed {
@@ -130,17 +130,30 @@ final class CheckoutPickupPointRestController {
 			$this->session_manager->clear_pickup_selection( 'rest_reset' );
 		}
 
-		return $this->response( array( 'pickup_point' => null ) );
+		return $this->response(
+			array(
+				'pickup_point' => null,
+				'pickup_selections' => $this->session_manager->pickup_selections(),
+				'pickupSelections' => $this->session_manager->pickup_selections(),
+				'active_pickup_family' => '' !== $family ? $family : null,
+				'activePickupFamily' => '' !== $family ? $family : null,
+			)
+		);
 	}
 
 	public function state( mixed $request = null ): mixed {
 		$family = $this->param( $request, 'pickup_family' );
-		$point = '' !== $family ? $this->session_manager->checkout_pickup_point_for_family( $family ) : $this->session_manager->checkout_pickup_point();
+		$active_family = '' !== $family ? $family : $this->active_pickup_family();
+		$point = '' !== $active_family ? $this->session_manager->checkout_pickup_point_for_family( $active_family ) : $this->session_manager->checkout_pickup_point();
 
 		return $this->response(
 			array(
 				'pickup_point' => array() !== $point ? $point : null,
+				'selected_pickup_point' => array() !== $point ? $point : null,
 				'pickup_selections' => $this->session_manager->pickup_selections(),
+				'pickupSelections' => $this->session_manager->pickup_selections(),
+				'active_pickup_family' => $active_family,
+				'activePickupFamily' => $active_family,
 				'city_context' => $this->city_context(),
 			)
 		);
@@ -211,6 +224,8 @@ final class CheckoutPickupPointRestController {
 				'point_type' => $selection['point_type'] ?? '',
 				'point_type_label' => $selection['point_type_label'] ?? ( $selection['snapshot']['point_type_label'] ?? '' ),
 				'point_title' => $selection['point_title'] ?? ( $selection['snapshot']['point_title'] ?? '' ),
+				'display_code' => $selection['display_code'] ?? ( $selection['snapshot']['display_code'] ?? '' ),
+				'display_title' => $selection['display_title'] ?? ( $selection['snapshot']['display_title'] ?? '' ),
 				'marker_type' => $selection['marker_type'] ?? ( $selection['snapshot']['marker_type'] ?? '' ),
 				'point_name' => $selection['point_name'] ?? ( $selection['snapshot']['point_name'] ?? '' ),
 				'point_address' => $selection['address'] ?? $selection['point_address'] ?? '',
@@ -297,6 +312,8 @@ final class CheckoutPickupPointRestController {
 			'point_type' => $type,
 			'point_type_label' => (string) ( $point['point_type_label'] ?? ( 'POSTAMAT' === $type ? 'Постамат' : 'Пункт выдачи' ) ),
 			'point_title' => (string) ( $point['point_title'] ?? $point['card_title'] ?? ( 'POSTAMAT' === $type ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК' ) ),
+			'display_code' => (string) ( $point['display_code'] ?? $point['cdek_code'] ?? $point['point_code'] ?? '' ),
+			'display_title' => (string) ( $point['display_title'] ?? '' ),
 			'marker_type' => (string) ( $point['marker_type'] ?? ( 'POSTAMAT' === $type ? 'postamat' : 'pickup' ) ),
 			'point_name' => (string) ( $point['point_name'] ?? '' ),
 			'postcode' => (string) ( $point['point_postcode'] ?? $point['postcode'] ?? '' ),
@@ -320,6 +337,9 @@ final class CheckoutPickupPointRestController {
 			'cdek_note' => (string) ( $point['cdek_note'] ?? '' ),
 			'raw_sanitized' => is_array( $point['raw_sanitized'] ?? null ) ? $point['raw_sanitized'] : ( is_array( $point['raw'] ?? null ) ? $point['raw'] : array() ),
 		);
+		if ( '' === $snapshot['display_title'] ) {
+			$snapshot['display_title'] = trim( $snapshot['point_title'] . ' ' . $snapshot['display_code'] );
+		}
 
 		return array(
 			'id' => $snapshot['id'],
@@ -330,6 +350,8 @@ final class CheckoutPickupPointRestController {
 			'point_type' => $snapshot['point_type'],
 			'point_type_label' => $snapshot['point_type_label'],
 			'point_title' => $snapshot['point_title'],
+			'display_code' => $snapshot['display_code'],
+			'display_title' => $snapshot['display_title'],
 			'marker_type' => $snapshot['marker_type'],
 			'point_name' => $snapshot['point_name'],
 			'point_address' => $snapshot['address'],
@@ -422,6 +444,47 @@ final class CheckoutPickupPointRestController {
 		);
 	}
 
+	private function active_pickup_family(): string {
+		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! isset( WC()->session ) || ! is_object( WC()->session ) || ! method_exists( WC()->session, 'get' ) ) {
+			return '';
+		}
+		$chosen = WC()->session->get( 'chosen_shipping_methods', array() );
+		if ( ! is_array( $chosen ) ) {
+			return '';
+		}
+		foreach ( $chosen as $method ) {
+			$family = $this->session_manager->shipping_method_family( (string) $method );
+			if ( str_ends_with( $family, ':pickup' ) ) {
+				return $family;
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * @param array<string,mixed> $selection
+	 */
+	private function selection_response( array $selection, string $method_id ): mixed {
+		$family = $this->session_manager->shipping_method_family( $method_id );
+		if ( ! str_ends_with( $family, ':pickup' ) ) {
+			$family = (string) ( $selection['pickup_family'] ?? $selection['snapshot']['pickup_family'] ?? '' );
+		}
+		$point = '' !== $family ? $this->session_manager->checkout_pickup_point_for_family( $family ) : $selection;
+		$selections = $this->session_manager->pickup_selections();
+
+		return $this->response(
+			array(
+				'pickup_point' => array() !== $point ? $point : $selection,
+				'selected_pickup_point' => array() !== $point ? $point : $selection,
+				'pickup_selections' => $selections,
+				'pickupSelections' => $selections,
+				'active_pickup_family' => $family,
+				'activePickupFamily' => $family,
+			)
+		);
+	}
+
 	/**
 	 * @return array<string,mixed>|null
 	 */
@@ -497,6 +560,8 @@ final class CheckoutPickupPointRestController {
 			'point_type' => $type,
 			'point_type_label' => $type_label,
 			'point_title' => $point_title,
+			'display_code' => (string) ( $row['postcode'] ?? '' ),
+			'display_title' => trim( $point_title . ' ' . (string) ( $row['postcode'] ?? '' ) ),
 			'marker_type' => $marker_type,
 			'point_name' => $point_title,
 			'postcode' => (string) ( $row['postcode'] ?? '' ),
@@ -520,6 +585,8 @@ final class CheckoutPickupPointRestController {
 			'point_type_label' => $snapshot['point_type_label'],
 			'point_title' => $snapshot['point_title'],
 			'card_title' => $snapshot['point_title'],
+			'display_code' => $snapshot['display_code'],
+			'display_title' => $snapshot['display_title'],
 			'marker_type' => $snapshot['marker_type'],
 			'point_name' => $snapshot['point_name'],
 			'point_address' => $snapshot['address'],

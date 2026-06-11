@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.9.
+Version: 0.45.10.
+
+0.45.10 checkout restore fix: checkout pickup state now uses the `pickupSelections` / `pickup_selections` dictionary as the frontend and backend source of truth. `PickupMapCheckout` localizes every complete saved family bucket plus `activePickupFamily`; checkout state/save/reset REST responses return the same dictionary and active family; and `wdc-pickup-checkout.js` restores the selected card from `pickupSelections[activePickupFamily]` after method switching, checkout updates and page reloads without replacing full payloads with code-only fallbacks. Map popup and side-list rows share `display_title` / `display_code`, so Russian Post side rows show `Отделение Почты России {postcode}` while CDEK keeps `Пункт выдачи СДЭК {cdek_code}` / `Постамат СДЭК {cdek_code}`.
 
 0.45.9 reset-scope fix: bucketed pickup selections are no longer vulnerable to accidental full clears during normal checkout method switching. `clear_pickup_selection()` is explicitly documented as a global reset for destination/location identity changes and full checkout-context resets. Family-scoped clears use `clear_pickup_selection_for_family($pickup_family)` so clearing `cdek:pickup` does not remove `russian_post_domestic:pickup`, and vice versa. Cross-location recalculation can still request an explicit global reset when the destination changes and the active pickup method disappears.
 

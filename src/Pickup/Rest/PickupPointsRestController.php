@@ -260,6 +260,8 @@ final class PickupPointsRestController {
 			'cdek_nearest_station' => (string) ( $point['cdek_nearest_station'] ?? '' ),
 			'cdek_note' => (string) ( $point['cdek_note'] ?? '' ),
 		);
+		$snapshot['display_code'] = (string) ( $point['display_code'] ?? $snapshot['cdek_code'] );
+		$snapshot['display_title'] = (string) ( $point['display_title'] ?? trim( $snapshot['point_title'] . ' ' . $snapshot['display_code'] ) );
 
 		return array(
 			'id' => $snapshot['id'],
@@ -272,6 +274,8 @@ final class PickupPointsRestController {
 			'point_type_label' => $snapshot['point_type_label'],
 			'point_title' => $snapshot['point_title'],
 			'card_title' => $snapshot['point_title'],
+			'display_code' => $snapshot['cdek_code'],
+			'display_title' => trim( $snapshot['point_title'] . ' ' . $snapshot['cdek_code'] ),
 			'marker_type' => $snapshot['marker_type'],
 			'title' => (string) ( $point['point_name'] ?? '' ),
 			'point_name' => $snapshot['point_name'],
@@ -332,6 +336,8 @@ final class PickupPointsRestController {
 			'point_type' => $type,
 			'point_type_label' => $type_label,
 			'point_title' => $point_title,
+			'display_code' => (string) ( $row['postcode'] ?? '' ),
+			'display_title' => trim( $point_title . ' ' . (string) ( $row['postcode'] ?? '' ) ),
 			'marker_type' => $marker_type,
 			'point_name' => $this->title( $row ),
 			'postcode' => (string) ( $row['postcode'] ?? '' ),
@@ -356,6 +362,8 @@ final class PickupPointsRestController {
 			'point_type_label' => $snapshot['point_type_label'],
 			'point_title' => $snapshot['point_title'],
 			'card_title' => $snapshot['point_title'],
+			'display_code' => $snapshot['postcode'],
+			'display_title' => trim( $snapshot['point_title'] . ' ' . $snapshot['postcode'] ),
 			'marker_type' => $snapshot['marker_type'],
 			'title' => $snapshot['point_name'],
 			'point_name' => $snapshot['point_name'],

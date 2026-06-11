@@ -16,13 +16,21 @@
 	var placeOrderGuardTimer = 0;
 	var placeOrderResetGuardUntil = 0;
 	var pickupFamilies = Array.isArray(checkoutConfig.pickupFamilies) && checkoutConfig.pickupFamilies.length ? checkoutConfig.pickupFamilies : [];
-	var selectedPickupPoints = normalizeSelectedPickupPoints(checkoutConfig.selectedPickupPoints || {});
+	var selectedPickupPoints = mergeSelectedPickupPoints(
+		normalizeSelectedPickupPoints(checkoutConfig.pickupSelections || {}),
+		normalizeSelectedPickupPoints(checkoutConfig.selectedPickupPoints || {})
+	);
 	if (checkoutConfig.initialContext && checkoutConfig.initialContext.selectedPoint) {
 		var initialFamily = pickupFamily(checkoutConfig.initialContext.selectedPoint);
 		if (initialFamily) {
 			selectedPickupPoints[initialFamily] = normalizeSelectedPoint(checkoutConfig.initialContext.selectedPoint);
 		}
 	}
+	if (!window.wdcPickupCheckout) {
+		window.wdcPickupCheckout = {};
+	}
+	window.wdcPickupCheckout.pickupSelections = selectedPickupPoints;
+	window.wdcPickupCheckout.selectedPickupPoints = selectedPickupPoints;
 	var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function init(container) {
@@ -93,6 +101,7 @@
 				}
 				return window.WDCPickupApi.save(point.id, shippingMethodId || method, payload).then(function (response) {
 					debug('pickup save response', pickupDebugSummary(response && response.pickup_point));
+					mergePickupSelectionsFromResponse(response);
 					applySelection(container, response.pickup_point || {});
 					close();
 					if (true === options.updateCheckoutAfterSave) {
@@ -155,6 +164,7 @@
 					}
 					window.WDCPickupApi.save(point.id, currentMethod, pointPayload(point)).then(function (response) {
 						boot();
+						mergePickupSelectionsFromResponse(response);
 						var actualContainer = document.querySelector('[data-wdc-pickup-checkout]');
 						var savedPoint = response.pickup_point || {};
 						if (actualContainer) {
@@ -829,6 +839,7 @@
 
 	function refreshCheckoutContext() {
 		refreshCheckoutContextOnce().then(function () {
+			restoreSelectedPickupUi();
 			schedulePrefetch();
 		}).catch(function () {
 			schedulePrefetch();
@@ -840,9 +851,13 @@
 			return Promise.resolve(null);
 		}
 		var stateRequest = window.WDCPickupApi.state().then(function (state) {
-			if (state && state.pickup_selections) {
-				selectedPickupPoints = normalizeSelectedPickupPoints(state.pickup_selections);
+			if (state && (state.pickupSelections || state.pickup_selections)) {
+				selectedPickupPoints = mergeSelectedPickupPoints(
+					selectedPickupPoints,
+					normalizeSelectedPickupPoints(state.pickupSelections || state.pickup_selections)
+				);
 				if (window.wdcPickupCheckout) {
+					window.wdcPickupCheckout.pickupSelections = selectedPickupPoints;
 					window.wdcPickupCheckout.selectedPickupPoints = selectedPickupPoints;
 				}
 			}
@@ -950,6 +965,45 @@
 		return normalized;
 	}
 
+	function mergePickupSelectionsFromResponse(response) {
+		if (!response) {
+			return;
+		}
+		if (response.pickupSelections || response.pickup_selections) {
+			selectedPickupPoints = mergeSelectedPickupPoints(
+				selectedPickupPoints,
+				normalizeSelectedPickupPoints(response.pickupSelections || response.pickup_selections)
+			);
+		}
+		if (response.pickup_point) {
+			setSelectedPickupPoint(response.pickup_point);
+			return;
+		}
+		if (!window.wdcPickupCheckout) {
+			window.wdcPickupCheckout = {};
+		}
+		window.wdcPickupCheckout.pickupSelections = selectedPickupPoints;
+		window.wdcPickupCheckout.selectedPickupPoints = selectedPickupPoints;
+	}
+
+	function mergeSelectedPickupPoints(current, incoming) {
+		var merged = Object.assign({}, current || {});
+		Object.keys(incoming || {}).forEach(function (family) {
+			var next = normalizeSelectedPoint(incoming[family] || {});
+			var previous = normalizeSelectedPoint(merged[family] || {});
+			if (!pickupFamily(next)) {
+				next.pickup_family = family;
+			}
+			if (!isValidSelectedPointForCard(next, pickupFamily(next) || family) && isValidSelectedPointForCard(previous, pickupFamily(previous) || family)) {
+				return;
+			}
+			if (pickupFamily(next) || selectedPointCode(next)) {
+				merged[pickupFamily(next) || family] = next;
+			}
+		});
+		return merged;
+	}
+
 	function setSelectedPickupPoint(point) {
 		point = normalizeSelectedPoint(point || {});
 		var family = pickupFamily(point);
@@ -960,6 +1014,7 @@
 			window.wdcPickupCheckout = {};
 		}
 		window.wdcPickupCheckout.selectedPickupPoint = point;
+		window.wdcPickupCheckout.pickupSelections = selectedPickupPoints;
 		window.wdcPickupCheckout.selectedPickupPoints = selectedPickupPoints;
 	}
 

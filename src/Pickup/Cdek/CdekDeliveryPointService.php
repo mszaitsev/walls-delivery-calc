@@ -134,6 +134,8 @@ final class CdekDeliveryPointService {
 			'point_type' => $type,
 			'point_type_label' => 'POSTAMAT' === $type ? 'Постамат' : 'Пункт выдачи',
 			'point_title' => 'POSTAMAT' === $type ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК',
+			'display_code' => $code,
+			'display_title' => trim( ( 'POSTAMAT' === $type ? 'Постамат СДЭК' : 'Пункт выдачи СДЭК' ) . ' ' . $code ),
 			'point_name' => $name,
 			'point_address' => $address,
 			'point_postcode' => $postcode,
