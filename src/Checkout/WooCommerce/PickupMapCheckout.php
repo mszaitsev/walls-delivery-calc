@@ -61,7 +61,8 @@ final class PickupMapCheckout {
 					'restUrl'          => function_exists( 'rest_url' ) ? rest_url( 'wdc/v1/' ) : '/wp-json/wdc/v1/',
 					'nonce'            => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( 'wp_rest' ) : '',
 					'carrier'          => $this->first_pickup_carrier(),
-					'shippingMethodId' => $this->first_pickup_rate_id(),
+					'shippingMethodId' => $this->active_shipping_method_id(),
+					'activeShippingMethod' => $this->active_shipping_method_id(),
 					'initialContext'   => $this->initial_context(),
 					'pickupSelections' => $this->selected_points_context(),
 					'selectedPickupPoints' => $this->selected_points_context(),
@@ -204,9 +205,6 @@ final class PickupMapCheckout {
 	 * @return array<string,mixed>|null
 	 */
 	private function selected_point_context( string $pickup_family = '' ): ?array {
-		if ( '' !== $pickup_family && ! $this->session_manager->pickup_selection_matches( $this->carrier_from_family( $pickup_family ), $pickup_family ) ) {
-			return null;
-		}
 		$selection = '' !== $pickup_family ? $this->session_manager->checkout_pickup_point_for_family( $pickup_family ) : $this->session_manager->checkout_pickup_point();
 		if ( array() === $selection || '' === trim( (string) ( $selection['point_code'] ?? '' ) ) ) {
 			return null;
@@ -387,9 +385,18 @@ final class PickupMapCheckout {
 	}
 
 	private function active_pickup_family(): string {
-		$chosen = $this->chosen_shipping_method();
+		$chosen = $this->active_shipping_method_id();
 		$family = '' !== $chosen ? $this->session_manager->shipping_method_family( $chosen ) : '';
 		return str_ends_with( $family, ':pickup' ) ? $family : '';
+	}
+
+	private function active_shipping_method_id(): string {
+		$chosen = $this->chosen_shipping_method();
+		if ( '' !== $chosen ) {
+			return $chosen;
+		}
+
+		return $this->first_pickup_rate_id();
 	}
 
 	private function chosen_shipping_method(): string {

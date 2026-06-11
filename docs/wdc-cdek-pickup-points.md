@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.11.
+Version: 0.45.12.
+
+0.45.12 canonical pickup state fix: checkout now treats `wdc_platform_pickup_selections` as the source of truth. Each selected point is stored as `pickupSelections[pickup_family]` (`russian_post_domestic:pickup`, `cdek:pickup`, future custom families), while `wdc_platform_pickup_selection` and `wdc_pickup_point` remain derived mirrors/migration fallback only when the dictionary is empty. `PickupMapCheckout` localizes the complete bucket dictionary, active shipping method and active family for reload restore. Validation reads the active family bucket before posted hidden fields, Russian Post aliases normalize to `russian_post_domestic`, and destination fingerprints use stable city/location identifiers so reload of the same city keeps the selected CDEK/Russian Post point while a real city change invalidates it.
 
 0.45.11 reload/validation fix: checkout boot restores the active selected pickup from localized `pickupSelections[activePickupFamily]` and the top-level `selectedPickupPoint`, then writes the hidden checkout fields through the same `applySelection()` path used after map selection. Russian Post checkout validation now accepts the active `russian_post_domestic:pickup` bucket by family before falling back to carrier/rate-id checks, so technical `point_code` values do not break order placement. Grouped tariff UI also keeps nested rates disabled when the active shipping method is temporarily missing after a carrier disappears.
 

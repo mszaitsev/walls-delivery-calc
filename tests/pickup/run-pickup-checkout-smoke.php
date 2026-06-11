@@ -289,6 +289,31 @@ pickup_checkout_assert( ! isset( $localized_minimal['selectedPickupPoints']['cde
 pickup_checkout_assert( ! isset( $localized_minimal['pickupSelections']['cdek:pickup'] ) && '630001-a' === (string) ( $localized_minimal['pickupSelections'][ $pickup_group_id ]['point_code'] ?? '' ), 'Localized pickupSelections must expose only complete per-family selections.' );
 $bucketed_selections = $session->pickup_selections();
 pickup_checkout_assert( 'KEM41' === (string) ( $bucketed_selections['cdek:pickup']['point_code'] ?? '' ) && '630001-a' === (string) ( $bucketed_selections[ $pickup_group_id ]['point_code'] ?? '' ), 'Checkout session must keep Russian Post and CDEK pickup selections in separate pickup_family buckets.' );
+$session->save_pickup_selection(
+	array(
+		'carrier_key' => 'cdek',
+		'service_key' => 'cdek',
+		'pickup_family' => 'cdek:pickup',
+		'rate_id' => 'cdek:pickup:136',
+		'point_code' => 'KEM7',
+		'point_address' => 'CDEK full address',
+		'address' => 'CDEK full address',
+		'city_name' => 'Kemerovo',
+		'region_name' => 'Kemerovo region',
+		'snapshot' => array(
+			'carrier_key' => 'cdek',
+			'service_key' => 'cdek',
+			'pickup_family' => 'cdek:pickup',
+			'point_code' => 'KEM7',
+			'address' => 'CDEK full address',
+		),
+	)
+);
+$GLOBALS['wdc_pickup_checkout_localized'] = array();
+( new PickupMapCheckout( $session, $environment, $map_settings, $point_type_settings ) )->enqueue_assets();
+$localized_buckets = $GLOBALS['wdc_pickup_checkout_localized']['wdc-pickup-checkout']['wdcPickupCheckout'] ?? array();
+pickup_checkout_assert( '630001-a' === (string) ( $localized_buckets['pickupSelections'][ $pickup_group_id ]['point_code'] ?? '' ) && 'KEM7' === (string) ( $localized_buckets['pickupSelections']['cdek:pickup']['point_code'] ?? '' ), 'Localized checkout config must expose all complete pickup family buckets for reload restore.' );
+pickup_checkout_assert( $pickup_group_id === (string) ( $localized_buckets['activePickupFamily'] ?? '' ) && $pickup_group_id === (string) ( $localized_buckets['activeShippingMethod'] ?? '' ) && '630001-a' === (string) ( $localized_buckets['selectedPickupPoint']['point_code'] ?? '' ), 'Reload config must derive selectedPickupPoint from the active Russian Post bucket.' );
 $session->save_checkout_pickup_point( $saved['pickup_point'] );
 
 $map_settings->replace( array_merge( $map_settings->defaults(), array( 'pickup_map_provider' => 'yandex', 'pickup_map_yandex_api_key' => 'test-yandex-key' ) ) );
@@ -574,6 +599,25 @@ $errors = new WdcPickupCheckoutErrors();
 pickup_checkout_assert( array() === $errors->errors && 10 === (int) ( $session->pickup_selection()['point_id'] ?? 0 ), 'validation must restore Russian Post pickup selection by posted point_code when point_id is missing.' );
 
 $session->clear_pickup_selection();
+$session->save_pickup_selection(
+	array(
+		'carrier_key' => 'russian_post',
+		'service_key' => 'russian_post',
+		'pickup_family' => 'russian_post:pickup',
+		'rate_id' => $pickup_group_id,
+		'point_id' => 10,
+		'point_code' => '630001-a',
+		'point_address' => 'Р›РµРЅРёРЅР°, 1',
+		'city_name' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє',
+		'region_name' => 'РќРЎРћ',
+	)
+);
+$errors = new WdcPickupCheckoutErrors();
+( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'РќРѕРІРѕСЃРёР±РёСЂСЃРє', 'shipping_method' => array( $pickup_group_id ) ), $errors );
+pickup_checkout_assert( array() === $errors->errors, 'Russian Post validation must pass from the active family bucket without posted hidden fields.' );
+pickup_checkout_assert( RussianPostDomesticSettings::CARRIER_KEY === (string) ( $session->pickup_selection_for_family( $pickup_group_id )['carrier_key'] ?? '' ) && $pickup_group_id === (string) ( $session->pickup_selection_for_family( $pickup_group_id )['pickup_family'] ?? '' ), 'Russian Post aliases must normalize to russian_post_domestic in the canonical bucket.' );
+
+$session->clear_pickup_selection();
 $errors = new WdcPickupCheckoutErrors();
 ( new CheckoutValidation( $session, null, $repo ) )->validate( array( 'shipping_city' => 'Новосибирск', 'shipping_method' => array( $pickup_group_id ), 'wdc_pickup_point_id' => '999999', 'wdc_pickup_point_code' => '987846-c3287ee67a' ), $errors );
 pickup_checkout_assert( array() === $errors->errors && '987846-c3287ee67a' === (string) ( $session->pickup_selection()['point_code'] ?? '' ), 'validation must accept a minimal posted point selection when repository lookup misses but point_code was posted.' );
@@ -819,7 +863,7 @@ foreach ( array( '.button:after', '.button::after', '.wc-forward:after', '.wc-fo
 }
 pickup_checkout_assert( str_contains( $checkout_js, 'applyContextToHidden' ) && str_contains( $checkout_js, 'window.WDCPickupApi.state()' ), 'Frontend must update hidden fields from checkout state city_context after DaData enrichment.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'refreshCheckoutContextOnce().then(function ()' ) && str_contains( $checkout_js, 'restoreSelectedPickupUi();' ), 'Frontend must restore the active pickup family card after state refresh merges pickupSelections.' );
-pickup_checkout_assert( str_contains( $checkout_js, 'var activePickupFamily = String(checkoutConfig.activePickupFamily' ) && str_contains( $checkout_js, 'checkoutConfig.selectedPickupPoint' ) && str_contains( $checkout_js, 'return normalizeShippingMethod(activeMethod || checkoutConfig.shippingMethodId' ) && str_contains( $checkout_js, 'function boot()' ) && str_contains( $checkout_js, "document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init);" ) && str_contains( $checkout_js, 'restoreSelectedPickupUi();' ), 'Frontend boot must restore selected pickup cards from localized pickupSelections/activePickupFamily on checkout reload and fill hidden fields through applySelection.' );
+pickup_checkout_assert( str_contains( $checkout_js, 'var activePickupFamily = String(checkoutConfig.activePickupFamily' ) && str_contains( $checkout_js, 'checkoutConfig.selectedPickupPoint' ) && str_contains( $checkout_js, 'return normalizeShippingMethod(activeMethod || checkoutConfig.activeShippingMethod || checkoutConfig.active_shipping_method || activePickupFamily || checkoutConfig.shippingMethodId' ) && str_contains( $checkout_js, 'function boot()' ) && str_contains( $checkout_js, "document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init);" ) && str_contains( $checkout_js, 'restoreSelectedPickupUi();' ), 'Frontend boot must restore selected pickup cards from localized pickupSelections/activePickupFamily on checkout reload and fill hidden fields through applySelection.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'prefetchInitialPoints' ) && str_contains( $checkout_js, 'bboxAround' ) && str_contains( $checkout_js, 'searchInitial(context.query' ), 'Frontend must prefetch search to bbox when initial coordinates are unavailable.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'isPickupMethodActive' ) && str_contains( $checkout_js, 'isPickupRateValue' ) && str_contains( $checkout_js, 'shippingMethodFamily' ), 'Prefetch must run only for the active pickup method family.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'hasPickupBlock' ) && str_contains( $checkout_js, '[data-wdc-pickup-checkout]' ), 'Prefetch must require a pickup checkout block.' );

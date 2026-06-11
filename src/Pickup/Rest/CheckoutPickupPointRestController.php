@@ -205,11 +205,12 @@ final class CheckoutPickupPointRestController {
 	 * @param array<string,mixed> $selection
 	 */
 	private function save_selection( array $selection, string $carrier, string $method_id ): void {
-		$family = (string) ( $selection['pickup_family'] ?? $selection['snapshot']['pickup_family'] ?? $this->session_manager->shipping_method_family( $method_id ) );
+		$carrier = $this->session_manager->normalize_carrier_key_for_pickup( $carrier );
+		$family = $this->session_manager->normalize_pickup_family( (string) ( $selection['pickup_family'] ?? $selection['snapshot']['pickup_family'] ?? $this->session_manager->shipping_method_family( $method_id ) ) );
 		if ( ! str_ends_with( $family, ':pickup' ) ) {
 			$family = $carrier . ':pickup';
 		}
-		$service_key = (string) ( $selection['service_key'] ?? $selection['snapshot']['service_key'] ?? $carrier );
+		$service_key = $this->session_manager->normalize_carrier_key_for_pickup( (string) ( $selection['service_key'] ?? $selection['snapshot']['service_key'] ?? $carrier ) );
 		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
 		$this->session_manager->save_checkout_pickup_point( $selection );
 		$this->session_manager->save_pickup_selection(

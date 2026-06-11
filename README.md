@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.11.
+Current plugin version: 0.45.12.
+
+Version 0.45.12 makes `wdc_platform_pickup_selections` the canonical checkout pickup state. Russian Post, CDEK and future pickup services are restored from `pickupSelections[pickup_family]`; legacy singleton keys are kept only as mirrors/migration fallback when the dictionary is empty. Checkout reload now receives the full bucket dictionary plus active method/family, validation checks the active family bucket before posted hidden fields, Russian Post carrier aliases normalize to `russian_post_domestic`, and destination fingerprints are stable across reloads of the same city without letting pickup postcodes replace the checkout destination identity.
 
 Version 0.45.11 fixes the remaining checkout pickup state blockers. Checkout boot now restores the active family bucket from localized `pickupSelections` / `activePickupFamily` and fills the pickup hidden fields on reload; Russian Post validation accepts the active `russian_post_domestic:pickup` bucket before carrier-key fallback checks; CDEK api_error/403 and zero-rate tarifflist results are not stored as successful empty quote cache entries; delivery cache reset includes CDEK city/deliverypoints caches without clearing token cache; and grouped tariff selectors keep nested rates disabled when no active shipping method is selected after a carrier disappears.
 

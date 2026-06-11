@@ -48,7 +48,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return;
 		}
 		container.dataset.wdcPickupReady = '1';
-		var method = container.getAttribute('data-shipping-method-id') || (window.wdcPickupCheckout && window.wdcPickupCheckout.shippingMethodId) || '';
+		var method = container.getAttribute('data-shipping-method-id') || (window.wdcPickupCheckout && (window.wdcPickupCheckout.activeShippingMethod || window.wdcPickupCheckout.shippingMethodId)) || '';
 		activeMethod = currentShippingMethod() || method;
 		rememberDestinationFingerprint();
 		toggleForMethod(container);
@@ -491,7 +491,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		if (checked) {
 			return normalizeShippingMethod(checked.value);
 		}
-		return normalizeShippingMethod(activeMethod || checkoutConfig.shippingMethodId || checkoutConfig.activeShippingMethod || checkoutConfig.active_shipping_method || activePickupFamily);
+		return normalizeShippingMethod(activeMethod || checkoutConfig.activeShippingMethod || checkoutConfig.active_shipping_method || activePickupFamily || checkoutConfig.shippingMethodId);
 	}
 
 	function normalizeShippingMethod(value) {
