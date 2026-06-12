@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.19.
+Current plugin version: 0.45.20.
+
+Version 0.45.20 fixes checkout pickup card restore when WooCommerce reloads a generic or stale pickup container. The frontend now matches the active pickup method by active `pickup_family`, allows a single generic pickup block to accept the active family, rewrites stale `data-shipping-method-id` before applying the selected point, and exposes container matching details in pickup debug output.
 
 Version 0.45.19 fixes frontend checkout pickup restore after reload/update. The checkout JS now extracts pickup buckets from both camelCase and snake_case localized/REST state fields, merges state responses into the `selectedPickupPoints` dictionary without losing full payloads, adds single selected-point responses back into the family bucket, and reapplies the active family selection after REST state refresh so hidden fields and the selected pickup card are restored.
 

@@ -1,5 +1,7 @@
 # Project Status
 
+0.45.20 note: checkout pickup card restore now tolerates generic or stale pickup containers after WooCommerce reload. The frontend matches containers against the active pickup family, rewrites stale `data-shipping-method-id` on the active/generic block, applies the selected family bucket, and logs container method/family/match debug details when `WDC_PICKUP_DEBUG` is enabled.
+
 0.45.19 note: checkout frontend restore now treats backend pickup state as a family-keyed dictionary regardless of camelCase/snake_case response shape. `wdc-pickup-checkout.js` extracts and merges localized/REST `pickupSelections`, selected point aliases and state responses into `selectedPickupPoints`, then reapplies the active family bucket after reload/`updated_checkout` so the selected pickup card and hidden fields return from backend state.
 
 0.45.18 note: checkout pickup REST endpoints now initialize WooCommerce session context before touching canonical pickup buckets. REST save/state/reset ensure `WC()->session` exists, set the customer session cookie when supported, and then read/write `wdc_platform_pickup_selections`, fixing the missing-session path where REST save returned success but left canonical bucket keys empty.
@@ -96,7 +98,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.45.19`.
+- Текущая версия: `0.45.20`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `fix/cdek-pickup-selection-and-ui`.
 - Последнее обновление статуса: 2026-06-12.
@@ -135,7 +137,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.19`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.20`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

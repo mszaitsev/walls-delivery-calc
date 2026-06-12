@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.19.
+Version: 0.45.20.
+
+0.45.20 stale container restore fix: checkout pickup restore no longer rejects a valid active family bucket only because the `[data-wdc-pickup-checkout]` container has an empty or stale `data-shipping-method-id`. A generic/single pickup block can accept the active pickup method, the method id is rewritten before `applySelection()`, and debug output includes container method/family/match details.
 
 0.45.19 frontend restore fix: checkout JS now normalizes `pickupSelections` / `pickup_selections` / `selectedPickupPoints` / `selected_pickup_points` from localized config and REST state into one family-keyed dictionary. REST state responses also merge `selectedPickupPoint`, `selected_pickup_point` and `pickup_point` back into the dictionary, then reapply the active family bucket through `applySelection()` after reload/`updated_checkout` so hidden fields and selected pickup cards are restored.
 

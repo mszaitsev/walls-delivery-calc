@@ -23,6 +23,9 @@
 		selectedPickupPointsType: 'object',
 		selectedPickupPointsKeys: [],
 		selectedForActiveFamilySource: 'none',
+		containerMethod: '',
+		containerFamily: '',
+		containerMatches: false,
 		restoreApplied: false,
 		restoreSkippedReason: 'not_started'
 	};
@@ -829,6 +832,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			selectedPickupPoints: pickupDebugSelections(selectedPickupPoints),
 			selectedForActiveFamily: pickupDebugSummary(selected),
 			selectedForActiveFamilySource: lastRestoreDebug.selectedForActiveFamilySource,
+			containerMethod: lastRestoreDebug.containerMethod || '',
+			containerFamily: lastRestoreDebug.containerFamily || '',
+			containerMatches: !!lastRestoreDebug.containerMatches,
 			restoreApplied: lastRestoreDebug.restoreApplied,
 			restoreSkippedReason: lastRestoreDebug.restoreSkippedReason,
 			initialContextSelectedPoint: pickupDebugSummary(checkoutConfig.initialContext && checkoutConfig.initialContext.selectedPoint),
@@ -1841,7 +1847,11 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		var ownMethod = containerMethod(container);
 		activeMethod = method || activeMethod;
 		var family = shippingMethodFamily(method || ownMethod);
-		var visible = !method || (isPickupRateValue(method) && (!ownMethod || shippingMethodFamily(ownMethod) === family));
+		if (method && isPickupRateValue(method) && containerMatchesActivePickup(container, method, family) && ownMethod !== method) {
+			container.setAttribute('data-shipping-method-id', method);
+			ownMethod = method;
+		}
+		var visible = !method || (isPickupRateValue(method) && containerMatchesActivePickup(container, method, family));
 		container.hidden = !visible;
 		container.classList.toggle('wdc-is-hidden', !visible);
 		container.setAttribute('aria-hidden', visible ? 'false' : 'true');
@@ -1860,6 +1870,28 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			setHidden(button, hasSelection);
 			button.disabled = false;
 		});
+	}
+
+	function containerMatchesActivePickup(container, activeMethodValue, activeFamilyValue) {
+		if (!container) {
+			return false;
+		}
+		var ownMethod = containerMethod(container);
+		if (!ownMethod) {
+			return true;
+		}
+		if (shippingMethodFamily(ownMethod) === activeFamilyValue) {
+			return true;
+		}
+		if (document.querySelectorAll('[data-wdc-pickup-checkout]').length === 1 && isPickupRateValue(activeMethodValue)) {
+			return true;
+		}
+		var checked = document.querySelector('input[name^="shipping_method"]:checked');
+		if (!checked) {
+			return false;
+		}
+		var activeBlock = checked.closest('li, tr, .shipping, .woocommerce-shipping-method, .woocommerce-shipping-methods, .wc-block-components-radio-control__option');
+		return !!(activeBlock && activeBlock.contains(container));
 	}
 
 	function containerMethod(container) {
@@ -1987,7 +2019,18 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			lastRestoreDebug.restoreSkippedReason = 'location_mismatch';
 		}
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
-			if (selected && shippingMethodFamily(containerMethod(container)) === family && pickupMatchesFamily(selected, method) && isValidSelectedPointForCard(selected, family)) {
+			var ownMethod = containerMethod(container);
+			var containerFamily = shippingMethodFamily(ownMethod);
+			var containerMatches = containerMatchesActivePickup(container, method, family);
+			lastRestoreDebug.containerMethod = ownMethod;
+			lastRestoreDebug.containerFamily = containerFamily;
+			lastRestoreDebug.activeMethod = method;
+			lastRestoreDebug.activeFamily = family;
+			lastRestoreDebug.containerMatches = containerMatches;
+			if (selected && containerMatches && pickupMatchesFamily(selected, method) && isValidSelectedPointForCard(selected, family)) {
+				if (ownMethod !== method) {
+					container.setAttribute('data-shipping-method-id', method);
+				}
 				applySelection(container, selected);
 				lastRestoreDebug.restoreApplied = true;
 			} else {
@@ -1997,8 +2040,10 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 						lastRestoreDebug.restoreSkippedReason = 'no_selected_point_for_active_family';
 					} else if (!isValidSelectedPointForCard(selected, family)) {
 						lastRestoreDebug.restoreSkippedReason = 'selected_point_incomplete_for_card';
-					} else {
+					} else if (!containerMatches) {
 						lastRestoreDebug.restoreSkippedReason = 'container_family_mismatch';
+					} else {
+						lastRestoreDebug.restoreSkippedReason = 'selected_family_mismatch';
 					}
 				}
 			}
