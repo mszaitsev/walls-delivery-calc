@@ -1,5 +1,7 @@
 # Project Status
 
+0.45.21 note: checkout pickup restore no longer treats different destination fingerprint formats as a location change when stable destination identity still matches. The frontend compares selected pickup points by `location_id`, FIAS, GAR, city/region and postcode+city before fingerprint fallback, keeps explicit `destination_*` aliases in saved point payloads, and exposes location match details in debug output.
+
 0.45.20 note: checkout pickup card restore now tolerates generic or stale pickup containers after WooCommerce reload. The frontend matches containers against the active pickup family, rewrites stale `data-shipping-method-id` on the active/generic block, applies the selected family bucket, and logs container method/family/match debug details when `WDC_PICKUP_DEBUG` is enabled.
 
 0.45.19 note: checkout frontend restore now treats backend pickup state as a family-keyed dictionary regardless of camelCase/snake_case response shape. `wdc-pickup-checkout.js` extracts and merges localized/REST `pickupSelections`, selected point aliases and state responses into `selectedPickupPoints`, then reapplies the active family bucket after reload/`updated_checkout` so the selected pickup card and hidden fields return from backend state.
@@ -98,7 +100,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.45.20`.
+- Текущая версия: `0.45.21`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `fix/cdek-pickup-selection-and-ui`.
 - Последнее обновление статуса: 2026-06-12.
@@ -137,7 +139,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.20`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.21`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

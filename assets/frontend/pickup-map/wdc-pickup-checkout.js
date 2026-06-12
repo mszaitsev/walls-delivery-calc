@@ -26,6 +26,7 @@
 		containerMethod: '',
 		containerFamily: '',
 		containerMatches: false,
+		locationMatchDetails: {},
 		restoreApplied: false,
 		restoreSkippedReason: 'not_started'
 	};
@@ -835,6 +836,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			containerMethod: lastRestoreDebug.containerMethod || '',
 			containerFamily: lastRestoreDebug.containerFamily || '',
 			containerMatches: !!lastRestoreDebug.containerMatches,
+			locationMatchDetails: lastRestoreDebug.locationMatchDetails || {},
 			restoreApplied: lastRestoreDebug.restoreApplied,
 			restoreSkippedReason: lastRestoreDebug.restoreSkippedReason,
 			initialContextSelectedPoint: pickupDebugSummary(checkoutConfig.initialContext && checkoutConfig.initialContext.selectedPoint),
@@ -934,6 +936,67 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			context.fias_id || '',
 			context.query || ''
 		].map(normalizeText).filter(Boolean).join('|');
+	}
+
+	function selectionLocationMatchDetails(point, context) {
+		point = point || {};
+		context = context || {};
+		var snapshot = point.snapshot || {};
+		var pointFingerprint = String(point.destination_fingerprint || snapshot.destination_fingerprint || '').trim();
+		var contextFingerprint = destinationFingerprint(context);
+		var pointLocationId = normalizeText(point.destination_location_id || snapshot.destination_location_id || point.location_id || snapshot.location_id || fingerprintValue(pointFingerprint, 'location_id') || '');
+		var contextLocationId = normalizeText(context.location_id || context.id || '');
+		var pointFias = normalizeGuid(point.destination_fias_id || snapshot.destination_fias_id || point.fias_id || point.fias_location_guid || snapshot.fias_id || snapshot.fias_location_guid || fingerprintValue(pointFingerprint, 'fias_id') || '');
+		var contextFias = normalizeGuid(context.fias_id || context.city_fias_id || context.fias_location_guid || '');
+		var pointGar = normalizeText(point.destination_gar_object_id || snapshot.destination_gar_object_id || point.gar_object_id || point.gar_id || snapshot.gar_object_id || snapshot.gar_id || fingerprintValue(pointFingerprint, 'gar_object_id') || fingerprintValue(pointFingerprint, 'gar_id') || '');
+		var contextGar = normalizeText(context.gar_object_id || context.gar_id || '');
+		var pointCity = normalizeText(point.destination_city_name || snapshot.destination_city_name || point.city_name || point.city || snapshot.city_name || snapshot.city || '');
+		var contextCity = normalizeText(context.city_name || context.city_value || context.display_name || context.settlement_name || context.place_name || context.query || '');
+		var pointRegion = normalizeText(point.destination_region_name || snapshot.destination_region_name || point.region_name || point.region || snapshot.region_name || snapshot.region || '');
+		var contextRegion = normalizeText(context.region_name || context.state_value || '');
+		var pointPostcode = normalizeText(point.destination_postcode || point.checkout_postcode || snapshot.destination_postcode || snapshot.checkout_postcode || '');
+		var contextPostcode = normalizeText(context.postcode || context.postal_code || '');
+		var matchedBy = '';
+		if (pointLocationId && contextLocationId && pointLocationId === contextLocationId) {
+			matchedBy = 'location_id';
+		} else if (pointFias && contextFias && pointFias === contextFias) {
+			matchedBy = 'fias_id';
+		} else if (pointGar && contextGar && pointGar === contextGar) {
+			matchedBy = 'gar_object_id';
+		} else if (pointCity && contextCity && (pointCity === contextCity || containsDestinationName(pointCity, contextCity) || containsDestinationName(contextCity, pointCity)) && (!pointRegion || !contextRegion || pointRegion === contextRegion)) {
+			matchedBy = 'city_region';
+		} else if (pointPostcode && contextPostcode && pointPostcode === contextPostcode && pointCity && contextCity && (pointCity === contextCity || containsDestinationName(pointCity, contextCity) || containsDestinationName(contextCity, pointCity))) {
+			matchedBy = 'postcode_city';
+		} else if (pointFingerprint && contextFingerprint && pointFingerprint === contextFingerprint) {
+			matchedBy = 'destination_fingerprint';
+		}
+		return {
+			point_location_id: pointLocationId,
+			context_location_id: contextLocationId,
+			point_fias_id: pointFias,
+			context_fias_id: contextFias,
+			point_gar_object_id: pointGar,
+			context_gar_object_id: contextGar,
+			point_city: pointCity,
+			context_city: contextCity,
+			point_region: pointRegion,
+			context_region: contextRegion,
+			point_destination_postcode: pointPostcode,
+			context_postcode: contextPostcode,
+			point_destination_fingerprint: pointFingerprint,
+			context_destination_fingerprint: contextFingerprint,
+			matched_by: matchedBy
+		};
+	}
+
+	function fingerprintValue(fingerprint, key) {
+		var pattern = new RegExp('(?:^|[|;,\\s])' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^|;,\\s]+)', 'i');
+		var match = String(fingerprint || '').match(pattern);
+		return match ? match[1] : '';
+	}
+
+	function selectionLocationMatchesContext(point, context) {
+		return !!selectionLocationMatchDetails(point, context).matched_by;
 	}
 
 	function rememberDestinationFingerprint(context) {
@@ -1157,6 +1220,12 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			location_id: point.location_id || snapshot.location_id || '',
 			fias_id: point.fias_id || point.fias_location_guid || snapshot.fias_id || snapshot.fias_location_guid || '',
 			gar_object_id: point.gar_object_id || point.gar_id || snapshot.gar_object_id || snapshot.gar_id || '',
+			destination_location_id: point.destination_location_id || snapshot.destination_location_id || point.location_id || snapshot.location_id || '',
+			destination_fias_id: point.destination_fias_id || snapshot.destination_fias_id || point.fias_id || point.fias_location_guid || snapshot.fias_id || snapshot.fias_location_guid || '',
+			destination_gar_object_id: point.destination_gar_object_id || snapshot.destination_gar_object_id || point.gar_object_id || point.gar_id || snapshot.gar_object_id || snapshot.gar_id || '',
+			destination_city_name: point.destination_city_name || snapshot.destination_city_name || point.city_name || point.city || snapshot.city_name || snapshot.city || '',
+			destination_region_name: point.destination_region_name || snapshot.destination_region_name || point.region_name || point.region || snapshot.region_name || snapshot.region || '',
+			destination_postcode: point.destination_postcode || point.checkout_postcode || snapshot.destination_postcode || snapshot.checkout_postcode || '',
 			destination_fingerprint: point.destination_fingerprint || snapshot.destination_fingerprint || '',
 			snapshot: snapshot
 		};
@@ -1284,10 +1353,22 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		point.postcode = point.postcode || point.point_postcode || context.postcode || context.postal_code || '';
 		point.city_name = point.city_name || point.city || context.city_name || context.settlement_name || context.place_name || '';
 		point.region_name = point.region_name || point.region || context.region_name || context.state_value || '';
+		point.destination_location_id = point.destination_location_id || context.location_id || context.id || '';
+		point.destination_fias_id = point.destination_fias_id || context.fias_id || context.city_fias_id || '';
+		point.destination_gar_object_id = point.destination_gar_object_id || context.gar_object_id || context.gar_id || '';
+		point.destination_city_name = point.destination_city_name || context.city_name || context.city_value || context.settlement_name || context.place_name || context.display_name || '';
+		point.destination_region_name = point.destination_region_name || context.region_name || context.state_value || '';
+		point.destination_postcode = point.destination_postcode || context.postcode || context.postal_code || '';
 		point.destination_fingerprint = point.destination_fingerprint || snapshot.destination_fingerprint || destinationFingerprint(context);
 		snapshot.location_id = snapshot.location_id || point.location_id || '';
 		snapshot.fias_id = snapshot.fias_id || point.fias_id || '';
 		snapshot.gar_object_id = snapshot.gar_object_id || point.gar_object_id || '';
+		snapshot.destination_location_id = snapshot.destination_location_id || point.destination_location_id || '';
+		snapshot.destination_fias_id = snapshot.destination_fias_id || point.destination_fias_id || '';
+		snapshot.destination_gar_object_id = snapshot.destination_gar_object_id || point.destination_gar_object_id || '';
+		snapshot.destination_city_name = snapshot.destination_city_name || point.destination_city_name || '';
+		snapshot.destination_region_name = snapshot.destination_region_name || point.destination_region_name || '';
+		snapshot.destination_postcode = snapshot.destination_postcode || point.destination_postcode || '';
 		snapshot.destination_fingerprint = snapshot.destination_fingerprint || point.destination_fingerprint || '';
 		point.snapshot = snapshot;
 		return point;
@@ -1362,6 +1443,12 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			location_id: point.location_id || snapshot.location_id || '',
 			fias_id: point.fias_id || snapshot.fias_id || '',
 			gar_object_id: point.gar_object_id || snapshot.gar_object_id || '',
+			destination_location_id: point.destination_location_id || snapshot.destination_location_id || '',
+			destination_fias_id: point.destination_fias_id || snapshot.destination_fias_id || '',
+			destination_gar_object_id: point.destination_gar_object_id || snapshot.destination_gar_object_id || '',
+			destination_city_name: point.destination_city_name || snapshot.destination_city_name || '',
+			destination_region_name: point.destination_region_name || snapshot.destination_region_name || '',
+			destination_postcode: point.destination_postcode || snapshot.destination_postcode || '',
 			destination_fingerprint: point.destination_fingerprint || snapshot.destination_fingerprint || '',
 			lat: point.lat || snapshot.lat || '',
 			lng: point.lng || snapshot.lng || '',
@@ -2083,9 +2170,16 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function sameSelectionDestination(point) {
 		point = point || {};
+		var currentDetails = selectionLocationMatchDetails(point, currentContext);
+		var fieldContext = contextFromFields();
+		var fieldDetails = selectionLocationMatchDetails(point, fieldContext);
+		lastRestoreDebug.locationMatchDetails = currentDetails.matched_by ? currentDetails : fieldDetails;
+		if (currentDetails.matched_by || fieldDetails.matched_by) {
+			return true;
+		}
 		var selected = point.destination_fingerprint || (point.snapshot && point.snapshot.destination_fingerprint) || '';
-		var current = destinationFingerprint(currentContext) || destinationFingerprint(contextFromFields());
-		return !selected || !current || selected === current;
+		var current = destinationFingerprint(currentContext) || destinationFingerprint(fieldContext);
+		return !selected || !current;
 	}
 
 	document.addEventListener('change', function (event) {

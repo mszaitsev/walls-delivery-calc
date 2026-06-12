@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.20.
+Current plugin version: 0.45.21.
+
+Version 0.45.21 fixes false frontend `location_mismatch` during checkout pickup restore. Selected pickup points now compare against the current checkout destination by stable identifiers first (`location_id`, FIAS, GAR, city/region, postcode+city) and use the full destination fingerprint only as a fallback. The selected point payload also keeps explicit `destination_*` aliases so pickup postcodes do not get confused with the checkout destination postcode.
 
 Version 0.45.20 fixes checkout pickup card restore when WooCommerce reloads a generic or stale pickup container. The frontend now matches the active pickup method by active `pickup_family`, allows a single generic pickup block to accept the active family, rewrites stale `data-shipping-method-id` before applying the selected point, and exposes container matching details in pickup debug output.
 

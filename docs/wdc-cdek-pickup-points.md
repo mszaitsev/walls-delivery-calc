@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.20.
+Version: 0.45.21.
+
+0.45.21 location restore fix: frontend pickup restore now matches selected points to the current checkout destination through stable identifiers before comparing full fingerprints. `location_id`, FIAS, GAR, city/region and postcode+city matches are accepted even when the stored `destination_fingerprint` format differs from the current full context string. Selected pickup payloads carry explicit `destination_*` aliases so pickup postcode and destination postcode stay separate.
 
 0.45.20 stale container restore fix: checkout pickup restore no longer rejects a valid active family bucket only because the `[data-wdc-pickup-checkout]` container has an empty or stale `data-shipping-method-id`. A generic/single pickup block can accept the active pickup method, the method id is rewritten before `applySelection()`, and debug output includes container method/family/match details.
 
