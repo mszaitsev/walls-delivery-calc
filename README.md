@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.14.
+Current plugin version: 0.45.15.
+
+Version 0.45.15 fixes canonical checkout pickup bucket persistence. REST pickup save now writes the full selected point through `save_pickup_selection_for_family()`, so `wdc_platform_pickup_selections[pickup_family]` is populated for Russian Post, CDEK and future pickup families before legacy singleton mirrors are updated. Reload checkout receives non-empty `pickupSelections`, and CDEK validation can use the canonical `cdek:pickup` bucket when posted hidden fields are empty.
 
 Version 0.45.14 adds temporary checkout pickup-state diagnostics behind `WDC_PICKUP_DEBUG`. Enable it in `wp-config.php` with `define( 'WDC_PICKUP_DEBUG', true );` to get grouped browser console snapshots for pickup boot/save/apply/update/place-order flow and sanitized WooCommerce logs for REST save/state, localized config and checkout validation. Business pickup validation and restore behavior are intentionally unchanged in this diagnostic step.
 

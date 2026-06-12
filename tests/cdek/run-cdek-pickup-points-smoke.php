@@ -29,6 +29,7 @@ use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
+use WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController;
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
@@ -363,8 +364,32 @@ $selection = array(
 );
 $session->save_pickup_selection( $selection );
 $session->save_checkout_pickup_point( $selection );
+cdek_pickup_assert( 'KEM7' === (string) ( $session->pickup_selections()['cdek:pickup']['point_code'] ?? '' ), 'CDEK save_pickup_selection must write the canonical cdek:pickup bucket.' );
 cdek_pickup_assert( true === $session->pickup_selection_matches( 'cdek', 'cdek:pickup:999' ), 'CDEK checkout pickup selection must match grouped CDEK pickup family.' );
 cdek_pickup_assert( false === $session->pickup_selection_matches( 'cdek', 'cdek:courier:137' ), 'CDEK checkout pickup selection must not match courier family.' );
+
+$rest_session = new CheckoutSessionManager();
+$rest_session->save_rates( array( 'cdek:pickup:136' => $rate ) );
+$rest_session->save_city_context( array( 'city_code' => 270, 'city_name' => 'Kemerovo', 'region_name' => 'Kemerovo region', 'postcode' => '650004', 'country_code' => 'RU' ) );
+$rest_controller = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $rest_session, null, $service );
+$rest_saved = $rest_controller->save(
+	array(
+		'carrier' => 'cdek',
+		'point_id' => 'cdek:KEM7',
+		'shipping_method_id' => 'cdek:pickup:136',
+		'point' => array_merge( $selection, array( 'service_key' => 'cdek', 'pickup_family' => 'cdek:pickup' ) ),
+	)
+);
+cdek_pickup_assert( 'KEM7' === (string) ( $rest_saved['pickupSelections']['cdek:pickup']['point_code'] ?? '' ) && 'KEM7' === (string) ( $rest_session->pickup_selections()['cdek:pickup']['point_code'] ?? '' ), 'CDEK REST save must write and return the canonical cdek:pickup bucket.' );
+$rest_errors = new CdekPickupSmokeErrors();
+( new CheckoutValidation( $rest_session ) )->validate(
+	array(
+		'shipping_method' => array( 'wdc_platform_delivery:cdek:pickup:136' ),
+		'shipping_city' => 'Kemerovo',
+	),
+	$rest_errors
+);
+cdek_pickup_assert( array() === $rest_errors->errors, 'CDEK validation must pass from canonical bucket when posted hidden fields are empty.' );
 
 $session->clear_pickup_selection( 'validation_restore_smoke' );
 $session->save_checkout_pickup_point( $selection );

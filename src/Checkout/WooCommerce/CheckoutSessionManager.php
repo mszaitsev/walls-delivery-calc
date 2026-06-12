@@ -40,12 +40,52 @@ final class CheckoutSessionManager {
 		$selection = $this->normalize_pickup_selection_payload( $selection );
 		$family = (string) ( $selection['pickup_family'] ?? '' );
 		if ( '' !== $family ) {
-			$selections = $this->stored_pickup_selections();
-			$selections[ $family ] = $selection;
-			$this->set( self::PICKUP_SELECTIONS_KEY, $selections );
+			$this->save_pickup_selection_for_family( $family, $selection );
+			return;
 		}
 		$this->set( self::PICKUP_SELECTION_KEY, $selection );
 		$this->set( self::PICKUP_CARRIER_KEY, (string) ( $selection['carrier_key'] ?? '' ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $selection
+	 * @return array<string,mixed>
+	 */
+	public function save_pickup_selection_for_family( string $family, array $selection ): array {
+		$family = $this->normalize_pickup_family( $family );
+		$selection = $this->normalize_pickup_selection_payload( $selection );
+		if ( '' === $family ) {
+			$family = $this->normalize_pickup_family( (string) ( $selection['pickup_family'] ?? '' ) );
+		}
+		if ( '' === $family ) {
+			return $selection;
+		}
+
+		$carrier = $this->normalize_carrier_key_for_pickup( (string) ( $selection['carrier_key'] ?? $selection['carrier'] ?? explode( ':', $family )[0] ?? '' ) );
+		$service = $this->normalize_carrier_key_for_pickup( (string) ( $selection['service_key'] ?? $carrier ) );
+		$snapshot = is_array( $selection['snapshot'] ?? null ) ? $selection['snapshot'] : array();
+		$selection['pickup_family'] = $family;
+		$snapshot['pickup_family'] = $family;
+		if ( '' !== $carrier ) {
+			$selection['carrier_key'] = $carrier;
+			$selection['carrier'] = $selection['carrier'] ?? $carrier;
+			$snapshot['carrier_key'] = $snapshot['carrier_key'] ?? $carrier;
+		}
+		if ( '' !== $service ) {
+			$selection['service_key'] = $service;
+			$snapshot['service_key'] = $snapshot['service_key'] ?? $service;
+		}
+		$selection['snapshot'] = $snapshot;
+
+		$selections = $this->stored_pickup_selections();
+		$selections[ $family ] = $selection;
+		$this->set( self::PICKUP_SELECTIONS_KEY, $selections );
+
+		$this->set( self::PICKUP_SELECTION_KEY, $selection );
+		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, $selection );
+		$this->set( self::PICKUP_CARRIER_KEY, (string) ( $selection['carrier_key'] ?? '' ) );
+
+		return $selection;
 	}
 
 	/**
@@ -201,13 +241,12 @@ final class CheckoutSessionManager {
 	 */
 	public function save_checkout_pickup_point( array $selection ): void {
 		$selection = $this->normalize_pickup_selection_payload( $selection );
-		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, $selection );
 		$family = (string) ( $selection['pickup_family'] ?? '' );
 		if ( '' !== $family ) {
-			$selections = $this->stored_pickup_selections();
-			$selections[ $family ] = $selection;
-			$this->set( self::PICKUP_SELECTIONS_KEY, $selections );
+			$this->save_pickup_selection_for_family( $family, $selection );
+			return;
 		}
+		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, $selection );
 	}
 
 	/**
@@ -741,6 +780,13 @@ final class CheckoutSessionManager {
 
 	public function pickup_debug_enabled(): bool {
 		return defined( 'WDC_PICKUP_DEBUG' ) && WDC_PICKUP_DEBUG;
+	}
+
+	/**
+	 * @return array<string,array<string,mixed>>
+	 */
+	public function raw_pickup_selections(): array {
+		return $this->stored_pickup_selections();
 	}
 
 	/**

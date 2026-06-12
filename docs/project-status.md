@@ -1,5 +1,7 @@
 # Project Status
 
+0.45.15 note: REST pickup save now writes selected points into the canonical `wdc_platform_pickup_selections` dictionary via an explicit family-scoped session writer before updating legacy mirrors. Russian Post and CDEK buckets are present immediately after save, reload checkout receives non-empty `pickupSelections`, and CDEK validation can read the active `cdek:pickup` bucket without posted hidden fields.
+
 0.45.14 note: temporary checkout pickup-state diagnostics are available behind `define( 'WDC_PICKUP_DEBUG', true );`. With the flag enabled, checkout JS writes grouped console snapshots for boot, map opening, save, apply-selection, checkout updates and place order, while PHP writes sanitized WooCommerce logs for REST save/state, localized config and validation. This diagnostic step intentionally leaves business restore/validation behavior unchanged.
 
 0.45.13 note: checkout pickup restore and validation now depend on the active `pickup_family`, destination identity and saved point identity only. Selected CDEK/Russian Post pickup points survive reloads and tariff/rate suffix changes for the same city; CDEK validation passes from the `cdek:pickup` bucket without posted hidden fields; localized `pickupSelections` exposes raw saved buckets while `selectedPickupPoints` remains the renderable-card subset; and pickup address resolution for checkout cards/order meta now reads top-level, snapshot and raw address aliases.
@@ -86,7 +88,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.45.14`.
+- Текущая версия: `0.45.15`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `fix/cdek-pickup-selection-and-ui`.
 - Последнее обновление статуса: 2026-06-11.
@@ -125,7 +127,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.14`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.15`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

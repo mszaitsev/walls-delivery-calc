@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.14.
+Version: 0.45.15.
+
+0.45.15 canonical bucket save fix: REST pickup save now writes the selected point through `CheckoutSessionManager::save_pickup_selection_for_family()`. The canonical `wdc_platform_pickup_selections` dictionary is populated before legacy mirrors, so `pickupSelections['cdek:pickup']` and `pickupSelections['russian_post_domestic:pickup']` survive reload and are available to checkout validation even when hidden fields are empty. `WDC_PICKUP_DEBUG` save logs now include raw/normalized bucket keys and saved bucket summaries.
 
 0.45.14 temporary diagnostics: checkout pickup state now has an explicit debug mode behind `define( 'WDC_PICKUP_DEBUG', true );`. When enabled, `wdc-pickup-checkout.js` writes grouped console snapshots for boot, map context, selected point before save, REST save response, `applySelection`, `updated_checkout`, and place-order submit. PHP logs sanitized pickup summaries for REST save/state, localized config and checkout validation. The diagnostics are temporary and do not change CDEK/Russian Post pickup restore or validation behavior.
 
