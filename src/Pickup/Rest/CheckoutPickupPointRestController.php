@@ -77,6 +77,7 @@ final class CheckoutPickupPointRestController {
 	}
 
 	public function save( mixed $request ): mixed {
+		$this->ensure_woocommerce_session();
 		$point_id_raw = $this->param( $request, 'point_id' );
 		$point_id = (int) $point_id_raw;
 		$method_id = $this->normalize_shipping_method_id( $this->param( $request, 'shipping_method_id' ) );
@@ -119,6 +120,7 @@ final class CheckoutPickupPointRestController {
 	}
 
 	public function delete( mixed $request = null ): mixed {
+		$this->ensure_woocommerce_session();
 		$family = $this->param( $request, 'pickup_family' );
 		if ( '' === $family ) {
 			$method_id = $this->normalize_shipping_method_id( $this->param( $request, 'shipping_method_id' ) );
@@ -142,6 +144,7 @@ final class CheckoutPickupPointRestController {
 	}
 
 	public function state( mixed $request = null ): mixed {
+		$this->ensure_woocommerce_session();
 		$family = $this->param( $request, 'pickup_family' );
 		$active_family = '' !== $family ? $family : $this->active_pickup_family();
 		$point = '' !== $active_family ? $this->session_manager->checkout_pickup_point_for_family( $active_family ) : $this->session_manager->checkout_pickup_point();
@@ -164,6 +167,59 @@ final class CheckoutPickupPointRestController {
 				'active_pickup_family' => $active_family,
 				'activePickupFamily' => $active_family,
 				'city_context' => $this->city_context(),
+			)
+		);
+	}
+
+	private function ensure_woocommerce_session(): void {
+		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) ) {
+			return;
+		}
+
+		$woocommerce = WC();
+		$created_session = false;
+		if ( ! isset( $woocommerce->session ) || ! is_object( $woocommerce->session ) ) {
+			if ( class_exists( '\WC_Session_Handler' ) ) {
+				$session = new \WC_Session_Handler();
+				if ( method_exists( $session, 'init' ) ) {
+					$session->init();
+				}
+				$woocommerce->session = $session;
+				$created_session = true;
+			}
+		}
+
+		if ( isset( $woocommerce->session ) && is_object( $woocommerce->session ) && method_exists( $woocommerce->session, 'set_customer_session_cookie' ) ) {
+			$woocommerce->session->set_customer_session_cookie( true );
+		}
+
+		$created_customer = false;
+		if ( ( ! isset( $woocommerce->customer ) || ! is_object( $woocommerce->customer ) ) && class_exists( '\WC_Customer' ) ) {
+			$user_id = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0;
+			try {
+				$woocommerce->customer = new \WC_Customer( $user_id, true );
+				$created_customer = true;
+			} catch ( \Throwable ) {
+				try {
+					$woocommerce->customer = new \WC_Customer( 0, true );
+					$created_customer = true;
+				} catch ( \Throwable ) {
+					$created_customer = false;
+				}
+			}
+		}
+
+		$this->session_manager->pickup_debug_log(
+			'WDC pickup REST WooCommerce session ensured',
+			array(
+				'session_exists' => isset( $woocommerce->session ) && is_object( $woocommerce->session ),
+				'session_class' => isset( $woocommerce->session ) && is_object( $woocommerce->session ) ? get_class( $woocommerce->session ) : '',
+				'created_session' => $created_session,
+				'customer_exists' => isset( $woocommerce->customer ) && is_object( $woocommerce->customer ),
+				'customer_class' => isset( $woocommerce->customer ) && is_object( $woocommerce->customer ) ? get_class( $woocommerce->customer ) : '',
+				'created_customer' => $created_customer,
+				'has_set_method' => isset( $woocommerce->session ) && is_object( $woocommerce->session ) && method_exists( $woocommerce->session, 'set' ),
+				'has_save_data_method' => isset( $woocommerce->session ) && is_object( $woocommerce->session ) && method_exists( $woocommerce->session, 'save_data' ),
 			)
 		);
 	}

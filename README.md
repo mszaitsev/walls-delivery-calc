@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.17.
+Current plugin version: 0.45.18.
+
+Version 0.45.18 fixes REST checkout pickup saves when the request starts without an initialized WooCommerce session. The checkout pickup REST controller now ensures `WC()->session` / customer session cookie context before save, state and reset endpoints touch canonical pickup buckets, so `wdc_platform_pickup_selections[pickup_family]` can be written during REST save and later restored on checkout reload.
 
 Version 0.45.17 adds step-by-step diagnostics for the canonical checkout pickup dictionary write path. With `WDC_PICKUP_DEBUG` enabled, `CheckoutSessionManager` now logs raw bucket keys before save, local dictionary keys after assignment, `set_raw_session_array()` session details, raw keys after reread, and every global/family dictionary clear reason. Business pickup restore and validation behavior are intentionally unchanged in this diagnostic step.
 

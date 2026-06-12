@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.17.
+Version: 0.45.18.
+
+0.45.18 REST session fix: checkout pickup REST save/state/reset now ensure WooCommerce session context before reading or writing pickup buckets. If a REST request arrives without `WC()->session`, the controller initializes `WC_Session_Handler`, sets the customer session cookie when available, and then writes `wdc_platform_pickup_selections[pickup_family]`. Debug should now show `session_exists=true`, a `WC_Session_Handler` class, and non-empty raw keys after REST save.
 
 0.45.17 diagnostic trace: `CheckoutSessionManager` now emits a step-by-step `WDC_PICKUP_DEBUG` trace around `wdc_platform_pickup_selections` writes. Logs show raw keys before save, local dictionary keys after assigning the family bucket, `set_raw_session_array()` session class/key/count details, raw keys after reread, and explicit `WDC pickup dictionary cleared` events with reasons for global/family resets. This version is diagnostic-only and does not change pickup restore/validation business logic.
 

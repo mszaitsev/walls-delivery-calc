@@ -12,6 +12,20 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 if ( ! class_exists( 'WC_Shipping_Method' ) ) {
 	class WC_Shipping_Method {}
 }
+if ( ! class_exists( 'WC_Session_Handler' ) ) {
+	class WC_Session_Handler {
+		/** @var array<string,mixed> */
+		public array $data = array();
+		public bool $initialized = false;
+		public bool $cookie_set = false;
+		public bool $saved = false;
+		public function init(): void { $this->initialized = true; }
+		public function get( string $key, mixed $default = null ): mixed { return $this->data[ $key ] ?? $default; }
+		public function set( string $key, mixed $value ): void { $this->data[ $key ] = $value; }
+		public function set_customer_session_cookie( bool $set ): void { $this->cookie_set = $set; }
+		public function save_data(): void { $this->saved = true; }
+	}
+}
 
 function pickup_rest_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -43,13 +57,16 @@ function WC(): object {
 	static $wc = null;
 	if ( null === $wc ) {
 		$wc = new class {
-			public object $session;
+			public mixed $session;
+			public mixed $customer = null;
 			public function __construct() {
 				$this->session = new class {
 					/** @var array<string,mixed> */
 					public array $data = array();
 					public function get( string $key, mixed $default = null ): mixed { return $this->data[ $key ] ?? $default; }
 					public function set( string $key, mixed $value ): void { $this->data[ $key ] = $value; }
+					public function set_customer_session_cookie( bool $set ): void {}
+					public function save_data(): void {}
 				};
 			}
 		};
@@ -160,6 +177,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 }
 
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
+use WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Pickup\Search\PickupAddressSearchService;
@@ -333,6 +351,47 @@ $pickup_rest_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/
 $cdek_service_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Cdek/CdekDeliveryPointService.php' ) ?: '';
 $checkout_rest_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' ) ?: '';
 pickup_rest_assert( str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'description'" ) && str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'storage_notice'" ) && str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'cdek_code'" ) && str_contains( $cdek_service_source . $checkout_rest_source, "'pickup_family'" ) && str_contains( $cdek_service_source . $checkout_rest_source, "'point_title'" ), 'CDEK pickup REST summary must expose description, storage_notice, cdek_code and normalized presentation fields.' );
+$checkout_controller = new CheckoutPickupPointRestController( $repo, new CheckoutSessionManager() );
+WC()->session = null;
+$rp_save = $checkout_controller->save(
+	new WdcPickupRestRequest(
+		array(
+			'carrier' => 'russian_post_domestic',
+			'shipping_method_id' => 'russian_post_domestic:pickup',
+			'point_id' => '1',
+		),
+		array( 'X-WP-Nonce' => 'nonce' )
+	)
+);
+pickup_rest_assert( WC()->session instanceof WC_Session_Handler && WC()->session->initialized && WC()->session->cookie_set && WC()->session->saved, 'REST save must initialize a missing WooCommerce session before saving Russian Post pickup.' );
+pickup_rest_assert( '630001-a' === (string) ( $rp_save['pickup_selections']['russian_post_domestic:pickup']['point_code'] ?? '' ) && '630001-a' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['russian_post_domestic:pickup']['point_code'] ?? '' ), 'REST save without pre-existing WC session must write Russian Post canonical bucket.' );
+WC()->session = null;
+$cdek_save = $checkout_controller->save(
+	new WdcPickupRestRequest(
+		array(
+			'carrier' => 'cdek',
+			'shipping_method_id' => 'cdek:pickup',
+			'point' => array(
+				'id' => 'cdek:KEM7',
+				'carrier_key' => 'cdek',
+				'service_key' => 'cdek',
+				'pickup_family' => 'cdek:pickup',
+				'point_code' => 'KEM7',
+				'point_type' => 'PVZ',
+				'point_address' => 'CDEK address',
+				'point_postcode' => '650004',
+				'city_name' => 'Kemerovo',
+				'region_name' => 'Kemerovo oblast',
+			),
+		),
+		array( 'X-WP-Nonce' => 'nonce' )
+	)
+);
+pickup_rest_assert( WC()->session instanceof WC_Session_Handler && 'KEM7' === (string) ( $cdek_save['pickup_selections']['cdek:pickup']['point_code'] ?? '' ) && 'KEM7' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['cdek:pickup']['point_code'] ?? '' ), 'REST save without pre-existing WC session must write CDEK canonical bucket.' );
+$cdek_state = $checkout_controller->state( new WdcPickupRestRequest( array( 'pickup_family' => 'cdek:pickup' ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_rest_assert( 'KEM7' === (string) ( $cdek_state['pickup_selections']['cdek:pickup']['point_code'] ?? '' ) && 'KEM7' === (string) ( $cdek_state['pickup_point']['point_code'] ?? '' ), 'REST state after save must read the initialized CDEK canonical bucket.' );
+$cdek_reset = $checkout_controller->delete( new WdcPickupRestRequest( array( 'pickup_family' => 'cdek:pickup' ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_rest_assert( ! isset( $cdek_reset['pickup_selections']['cdek:pickup'] ) && WC()->session instanceof WC_Session_Handler, 'REST family reset must keep the initialized session and remove only the requested bucket.' );
 $session = new CheckoutSessionManager();
 $session->save_pickup_selection_for_family( 'cdek:pickup', array( 'carrier_key' => 'cdek', 'service_key' => 'cdek', 'point_code' => 'KEM7', 'point_address' => 'CDEK address' ) );
 $session->save_pickup_selection_for_family( 'russian_post_domestic:pickup', array( 'carrier_key' => 'russian_post_domestic', 'service_key' => 'russian_post_domestic', 'point_code' => '630001-a', 'point_address' => 'Ленина, 1' ) );
