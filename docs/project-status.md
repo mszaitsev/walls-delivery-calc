@@ -1,5 +1,7 @@
 # Project Status
 
+0.46.3 note: CDEK tariff sync now stores API limit fields from `GET /v2/calculator/alltariffs`: weight min/max/calculation max and length/width/height min/max. The CDEK tariff admin table displays compact limits, Russian labels `до ПВЗ` / `до двери` for delivery type, and active-first/name/code sorting. Existing custom title/comment/active state survives sync; without a separate manual-override flag, delivery type is still refreshed from API. Safe mojibake normalization fixes obvious CDEK strings before storing names/modes.
+
 0.46.2 note: delivery rate cache reset now invalidates every checkout session through a global package-hash marker. `wdc_delivery_rates_cache_version` is added to WooCommerce shipping packages, and full cache reset bumps it after clearing WDC transients/runtime quote cache. Manual reset, CDEK tariff save and confirmed CDEK tariff sync all bump the version, so a disabled managed tariff disappears for existing checkout sessions without requiring a cart change.
 
 0.46.1 note: delivery tariff cache reset now clears all checkout rate layers affected by managed CDEK tariff changes: WDC quote transients, runtime quote namespace, WooCommerce `shipping_for_package_*` session rates, and WDC runtime rate/tariff session caches. Saving CDEK tariff rows or confirming CDEK tariff sync automatically clears the same quote layers, so disabled tariffs disappear from checkout after refresh without requiring a cart change.
@@ -104,7 +106,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.46.2`.
+- Текущая версия: `0.46.3`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/cdek-tariffs-management`.
 - Последнее обновление статуса: 2026-06-12.
@@ -143,7 +145,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.46.2`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.46.3`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

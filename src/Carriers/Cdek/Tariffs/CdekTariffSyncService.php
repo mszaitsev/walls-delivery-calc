@@ -80,7 +80,7 @@ final class CdekTariffSyncService {
 			if ( ! is_array( $group ) ) {
 				continue;
 			}
-			$name = trim( (string) ( $group['tariff_name'] ?? '' ) );
+			$name = $this->normalize_cdek_string( (string) ( $group['tariff_name'] ?? '' ) );
 			$modes = is_array( $group['delivery_modes'] ?? null ) ? $group['delivery_modes'] : array();
 			foreach ( $modes as $mode_row ) {
 				if ( ! is_array( $mode_row ) ) {
@@ -102,15 +102,18 @@ final class CdekTariffSyncService {
 						)
 					);
 				}
-				$mode_name = trim( (string) ( $mode_row['delivery_mode_name'] ?? '' ) );
+				$mode_name = $this->normalize_cdek_string( (string) ( $mode_row['delivery_mode_name'] ?? '' ) );
 				$display_name = $this->tariff_display_name( $name, $mode_name );
-				$rows[ $code ] = array(
+				$rows[ $code ] = array_merge(
+					array(
 					'tariff_code' => $code,
 					'tariff_name_from_cdek' => $display_name,
 					'delivery_type' => $type['delivery_type'],
 					'delivery_mode' => $mode_row['delivery_mode'] ?? null,
 					'delivery_mode_name' => $mode_name,
 					'warning' => $warning,
+					),
+					$this->limits_from_api_rows( $group, $mode_row )
 				);
 			}
 		}
@@ -125,7 +128,7 @@ final class CdekTariffSyncService {
 	 * @return array{delivery_type:string,unknown:bool}
 	 */
 	public static function delivery_type_from_mode( mixed $raw_mode ): array {
-		$text = strtolower( str_replace( '_', '-', trim( (string) $raw_mode ) ) );
+		$text = strtolower( str_replace( '_', '-', trim( self::normalize_cdek_string_static( (string) $raw_mode ) ) ) );
 		if ( '' !== $text && ! is_numeric( $raw_mode ) ) {
 			if ( str_ends_with( $text, '-warehouse' ) || str_ends_with( $text, '-pickup' ) ) {
 				return array( 'delivery_type' => DeliveryType::PICKUP, 'unknown' => false );
@@ -159,5 +162,115 @@ final class CdekTariffSyncService {
 		}
 
 		return $name . ' ' . $mode_name;
+	}
+
+	/**
+	 * @param array<string,mixed> $group
+	 * @param array<string,mixed> $mode_row
+	 * @return array<string,mixed>
+	 */
+	private function limits_from_api_rows( array $group, array $mode_row ): array {
+		$limits = array();
+		foreach ( array( 'weight_min', 'weight_max', 'weight_calc_max', 'length_min', 'length_max', 'width_min', 'width_max', 'height_min', 'height_max' ) as $key ) {
+			$limits[ $key ] = array_key_exists( $key, $mode_row ) ? $this->nullable_api_number( $mode_row[ $key ] ) : $this->nullable_api_number( $group[ $key ] ?? null );
+		}
+
+		return $limits;
+	}
+
+	private function nullable_api_number( mixed $value ): ?float {
+		if ( null === $value ) {
+			return null;
+		}
+		if ( is_string( $value ) ) {
+			$value = trim( $value );
+			if ( '' === $value ) {
+				return null;
+			}
+			$value = str_replace( ',', '.', $value );
+		}
+		if ( ! is_numeric( $value ) ) {
+			return null;
+		}
+
+		return (float) $value;
+	}
+
+	public function normalize_cdek_string( string $value ): string {
+		return self::normalize_cdek_string_static( $value );
+	}
+
+	public static function normalize_cdek_string_static( string $value ): string {
+		$value = trim( $value );
+		if ( '' === $value || ! self::looks_like_mojibake( $value ) ) {
+			return $value;
+		}
+		foreach ( self::mojibake_fix_candidates( $value ) as $fixed ) {
+			$fixed = trim( $fixed );
+			if ( '' !== $fixed && ! self::looks_like_mojibake( $fixed ) && self::contains_cyrillic( $fixed ) ) {
+				return $fixed;
+			}
+		}
+
+		return $value;
+	}
+
+	private static function looks_like_mojibake( string $value ): bool {
+		return str_contains( $value, 'Ð' ) || str_contains( $value, 'Ñ' ) || str_contains( $value, 'Â' );
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private static function mojibake_fix_candidates( string $value ): array {
+		$candidates = array();
+		$bytes = self::latin1_bytes_from_utf8_chars( $value );
+		if ( null !== $bytes && self::valid_utf8( $bytes ) ) {
+			$candidates[] = $bytes;
+		}
+		if ( function_exists( 'mb_convert_encoding' ) ) {
+			foreach ( array( 'Windows-1252', 'ISO-8859-1' ) as $encoding ) {
+				$converted = @mb_convert_encoding( $value, $encoding, 'UTF-8' );
+				if ( is_string( $converted ) && self::valid_utf8( $converted ) ) {
+					$candidates[] = $converted;
+				}
+			}
+		}
+		if ( function_exists( 'iconv' ) ) {
+			$converted = @iconv( 'UTF-8', 'Windows-1252//IGNORE', $value );
+			if ( is_string( $converted ) && self::valid_utf8( $converted ) ) {
+				$candidates[] = $converted;
+			}
+		}
+
+		return array_values( array_unique( $candidates ) );
+	}
+
+	private static function latin1_bytes_from_utf8_chars( string $value ): ?string {
+		if ( ! function_exists( 'preg_split' ) || ! function_exists( 'mb_ord' ) ) {
+			return null;
+		}
+		$chars = preg_split( '//u', $value, -1, PREG_SPLIT_NO_EMPTY );
+		if ( ! is_array( $chars ) ) {
+			return null;
+		}
+		$bytes = '';
+		foreach ( $chars as $char ) {
+			$codepoint = mb_ord( $char, 'UTF-8' );
+			if ( false === $codepoint || $codepoint > 255 ) {
+				return null;
+			}
+			$bytes .= chr( $codepoint );
+		}
+
+		return $bytes;
+	}
+
+	private static function valid_utf8( string $value ): bool {
+		return function_exists( 'mb_check_encoding' ) ? mb_check_encoding( $value, 'UTF-8' ) : (bool) preg_match( '//u', $value );
+	}
+
+	private static function contains_cyrillic( string $value ): bool {
+		return 1 === preg_match( '/\p{Cyrillic}/u', $value );
 	}
 }

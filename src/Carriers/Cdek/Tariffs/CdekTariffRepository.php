@@ -28,6 +28,15 @@ final class CdekTariffRepository {
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
 			tariff_code VARCHAR(32) NOT NULL,
 			tariff_name_from_cdek VARCHAR(255) NOT NULL DEFAULT '',
+			weight_min DECIMAL(12,3) NULL,
+			weight_max DECIMAL(12,3) NULL,
+			weight_calc_max DECIMAL(12,3) NULL,
+			length_min DECIMAL(12,3) NULL,
+			length_max DECIMAL(12,3) NULL,
+			width_min DECIMAL(12,3) NULL,
+			width_max DECIMAL(12,3) NULL,
+			height_min DECIMAL(12,3) NULL,
+			height_max DECIMAL(12,3) NULL,
 			custom_title VARCHAR(255) NOT NULL DEFAULT '',
 			delivery_type VARCHAR(20) NOT NULL DEFAULT 'pickup',
 			admin_comment TEXT NULL,
@@ -48,12 +57,12 @@ final class CdekTariffRepository {
 	public function all(): array {
 		if ( $this->uses_memory_table() ) {
 			$rows = array_values( $this->wpdb->cdek_tariffs );
-			usort( $rows, static fn( array $a, array $b ): int => strnatcmp( (string) ( $a['tariff_code'] ?? '' ), (string) ( $b['tariff_code'] ?? '' ) ) );
+			usort( $rows, array( $this, 'compare_rows_for_admin' ) );
 
 			return array_map( fn( array $row ): array => $this->normalize_row( $row ), $rows );
 		}
 
-		$rows = $this->wpdb->get_results( 'SELECT * FROM ' . $this->main_table() . ' ORDER BY CAST(tariff_code AS UNSIGNED) ASC, tariff_code ASC', ARRAY_A );
+		$rows = $this->wpdb->get_results( 'SELECT * FROM ' . $this->main_table() . ' ORDER BY is_active DESC, tariff_name_from_cdek ASC, CAST(tariff_code AS UNSIGNED) ASC, tariff_code ASC', ARRAY_A );
 
 		return array_values( array_map( fn( array $row ): array => $this->normalize_row( $row ), is_array( $rows ) ? $rows : array() ) );
 	}
@@ -106,6 +115,7 @@ final class CdekTariffRepository {
 		$existing = $this->find_by_code( $code );
 		$name = $this->clean_text( (string) ( $row['tariff_name_from_cdek'] ?? $row['tariff_name'] ?? '' ), 255 );
 		$type = $this->normalize_delivery_type( (string) ( $row['delivery_type'] ?? DeliveryType::PICKUP ) );
+		$limits = $this->limit_values_from_row( $row );
 		if ( is_array( $existing ) ) {
 			$updated = array_merge(
 				$existing,
@@ -114,7 +124,8 @@ final class CdekTariffRepository {
 					'delivery_type' => $type,
 					'last_sync_at' => $now,
 					'updated_at' => $now,
-				)
+				),
+				$limits
 			);
 			$this->persist( $updated, true );
 
@@ -127,6 +138,7 @@ final class CdekTariffRepository {
 				'tariff_name_from_cdek' => $name,
 				'custom_title' => '',
 				'delivery_type' => $type,
+				...$limits,
 				'admin_comment' => '',
 				'is_active' => 1,
 				'last_sync_at' => $now,
@@ -187,6 +199,7 @@ final class CdekTariffRepository {
 				'tariff_code' => $code,
 				'tariff_name_from_cdek' => $this->clean_text( (string) ( $row['tariff_name_from_cdek'] ?? $row['tariff_name'] ?? '' ), 255 ),
 				'delivery_type' => $this->normalize_delivery_type( (string) ( $row['delivery_type'] ?? DeliveryType::PICKUP ) ),
+				...$this->limit_values_from_row( $row ),
 				'delivery_mode' => $row['delivery_mode'] ?? null,
 				'delivery_mode_name' => $row['delivery_mode_name'] ?? '',
 				'warning' => ! empty( $row['warning'] ),
@@ -197,7 +210,7 @@ final class CdekTariffRepository {
 				continue;
 			}
 			$existing = $existing_by_code[ $code ];
-			if ( (string) $existing['tariff_name_from_cdek'] !== $normalized['tariff_name_from_cdek'] || (string) $existing['delivery_type'] !== $normalized['delivery_type'] ) {
+			if ( (string) $existing['tariff_name_from_cdek'] !== $normalized['tariff_name_from_cdek'] || (string) $existing['delivery_type'] !== $normalized['delivery_type'] || $this->limits_changed( $existing, $normalized ) ) {
 				$changed[] = array_merge( $normalized, array( 'old' => $existing ) );
 			}
 		}
@@ -234,6 +247,15 @@ final class CdekTariffRepository {
 		$data = array(
 			'tariff_code' => $row['tariff_code'],
 			'tariff_name_from_cdek' => $row['tariff_name_from_cdek'],
+			'weight_min' => $row['weight_min'],
+			'weight_max' => $row['weight_max'],
+			'weight_calc_max' => $row['weight_calc_max'],
+			'length_min' => $row['length_min'],
+			'length_max' => $row['length_max'],
+			'width_min' => $row['width_min'],
+			'width_max' => $row['width_max'],
+			'height_min' => $row['height_min'],
+			'height_max' => $row['height_max'],
 			'custom_title' => $row['custom_title'],
 			'delivery_type' => $row['delivery_type'],
 			'admin_comment' => $row['admin_comment'],
@@ -242,10 +264,10 @@ final class CdekTariffRepository {
 			'created_at' => $row['created_at'],
 			'updated_at' => $row['updated_at'],
 		);
-		$formats = array( '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s' );
+		$formats = array( '%s', '%s', '%f', '%f', '%f', '%f', '%f', '%f', '%f', '%f', '%f', '%s', '%s', '%s', '%d', '%s', '%s', '%s' );
 		if ( $existing ) {
 			unset( $data['created_at'] );
-			array_splice( $formats, 7, 1 );
+			array_splice( $formats, 16, 1 );
 			$this->wpdb->update( $this->main_table(), $data, array( 'tariff_code' => $row['tariff_code'] ), $formats, array( '%s' ) );
 			return;
 		}
@@ -264,6 +286,15 @@ final class CdekTariffRepository {
 			'id' => isset( $row['id'] ) ? (int) $row['id'] : 0,
 			'tariff_code' => $this->normalize_code( (string) ( $row['tariff_code'] ?? '' ) ),
 			'tariff_name_from_cdek' => $this->clean_text( (string) ( $row['tariff_name_from_cdek'] ?? $row['tariff_name'] ?? '' ), 255 ),
+			'weight_min' => $this->nullable_number( $row['weight_min'] ?? null ),
+			'weight_max' => $this->nullable_number( $row['weight_max'] ?? null ),
+			'weight_calc_max' => $this->nullable_number( $row['weight_calc_max'] ?? null ),
+			'length_min' => $this->nullable_number( $row['length_min'] ?? null ),
+			'length_max' => $this->nullable_number( $row['length_max'] ?? null ),
+			'width_min' => $this->nullable_number( $row['width_min'] ?? null ),
+			'width_max' => $this->nullable_number( $row['width_max'] ?? null ),
+			'height_min' => $this->nullable_number( $row['height_min'] ?? null ),
+			'height_max' => $this->nullable_number( $row['height_max'] ?? null ),
 			'custom_title' => $this->clean_text( (string) ( $row['custom_title'] ?? '' ), 255 ),
 			'delivery_type' => $this->normalize_delivery_type( (string) ( $row['delivery_type'] ?? DeliveryType::PICKUP ) ),
 			'admin_comment' => $this->clean_textarea( (string) ( $row['admin_comment'] ?? '' ) ),
@@ -280,6 +311,87 @@ final class CdekTariffRepository {
 
 	private function normalize_delivery_type( string $type ): string {
 		return DeliveryType::COURIER === $type ? DeliveryType::COURIER : DeliveryType::PICKUP;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @return array<string,float|null>
+	 */
+	private function limit_values_from_row( array $row ): array {
+		$values = array();
+		foreach ( $this->limit_keys() as $key ) {
+			$values[ $key ] = $this->nullable_number( $row[ $key ] ?? null );
+		}
+
+		return $values;
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function limit_keys(): array {
+		return array(
+			'weight_min',
+			'weight_max',
+			'weight_calc_max',
+			'length_min',
+			'length_max',
+			'width_min',
+			'width_max',
+			'height_min',
+			'height_max',
+		);
+	}
+
+	private function nullable_number( mixed $value ): ?float {
+		if ( null === $value ) {
+			return null;
+		}
+		if ( is_string( $value ) ) {
+			$value = trim( $value );
+			if ( '' === $value ) {
+				return null;
+			}
+			$value = str_replace( ',', '.', $value );
+		}
+		if ( ! is_numeric( $value ) ) {
+			return null;
+		}
+
+		return (float) $value;
+	}
+
+	/**
+	 * @param array<string,mixed> $existing
+	 * @param array<string,mixed> $incoming
+	 */
+	private function limits_changed( array $existing, array $incoming ): bool {
+		foreach ( $this->limit_keys() as $key ) {
+			if ( $this->nullable_number( $existing[ $key ] ?? null ) !== $this->nullable_number( $incoming[ $key ] ?? null ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * @param array<string,mixed> $a
+	 * @param array<string,mixed> $b
+	 */
+	private function compare_rows_for_admin( array $a, array $b ): int {
+		$active = (int) ! empty( $b['is_active'] ) <=> (int) ! empty( $a['is_active'] );
+		if ( 0 !== $active ) {
+			return $active;
+		}
+		$name_a = (string) ( $a['tariff_name_from_cdek'] ?? $a['tariff_name'] ?? '' );
+		$name_b = (string) ( $b['tariff_name_from_cdek'] ?? $b['tariff_name'] ?? '' );
+		$name = strnatcasecmp( $name_a, $name_b );
+		if ( 0 !== $name ) {
+			return $name;
+		}
+
+		return strnatcmp( (string) ( $a['tariff_code'] ?? '' ), (string) ( $b['tariff_code'] ?? '' ) );
 	}
 
 	private function clean_text( string $value, int $max_length ): string {

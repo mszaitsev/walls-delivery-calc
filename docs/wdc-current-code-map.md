@@ -1,11 +1,11 @@
 # Карта текущего кода
 
-## CDEK Tariffs Management 0.46.2
+## CDEK Tariffs Management 0.46.3
 
-- `src/Carriers/Cdek/Tariffs/CdekTariffRepository.php` stores the managed CDEK tariff table (`tariff_code`, CDEK name, custom site title, delivery type, admin comment, active flag and last sync timestamp).
-- `src/Carriers/Cdek/Tariffs/CdekTariffSyncService.php` calls `GET /v2/calculator/alltariffs`, normalizes delivery modes into `pickup`/`courier`, builds sync diffs and applies updates without overwriting custom title/comment/active state.
-- `database/migrations/0027_create_cdek_tariffs_table.php` creates `wp_wdc_cdek_tariffs`.
-- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders the CDEK `Тарифы` tab, sync preview/confirmation, inline tariff editing and active flags.
+- `src/Carriers/Cdek/Tariffs/CdekTariffRepository.php` stores the managed CDEK tariff table (`tariff_code`, CDEK name, nullable weight/dimension limits, custom site title, delivery type, admin comment, active flag and last sync timestamp). Admin listing sorts active tariffs first, then by CDEK name and code.
+- `src/Carriers/Cdek/Tariffs/CdekTariffSyncService.php` calls `GET /v2/calculator/alltariffs`, normalizes delivery modes into `pickup`/`courier`, stores weight/dimension limits, fixes obvious mojibake in CDEK strings, builds sync diffs and applies updates without overwriting custom title/comment/active state.
+- `database/migrations/0027_create_cdek_tariffs_table.php` creates `wp_wdc_cdek_tariffs`; `0028_add_cdek_tariff_limits.php` adds nullable limit columns on updates from the first tariff-management schema.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders the CDEK `Тарифы` tab, sync preview/confirmation, inline tariff editing, active flags, compact restriction display, and Russian delivery-type labels `до ПВЗ` / `до двери`.
 - `src/Carriers/Runtime/CdekCarrier.php` still prices through `POST /v2/calculator/tarifflist`, but uses the managed tariff row for title, delivery type and active/inactive filtering when a row exists.
 - `src/Checkout/Cache/DeliveryQuoteCacheManager.php` clears WDC quote transients, the runtime quote namespace, WooCommerce `shipping_for_package_*` session rates and WDC runtime rate/tariff session caches. It also maintains `wdc_delivery_rates_cache_version` and adds it to WooCommerce shipping packages, so the package hash changes globally after manual reset or CDEK tariff save/sync and existing customer checkout sessions recalculate rates without a cart change.
 - `docs/wdc-cdek-insurance-audit.md` documents current insurance findings and the order-creation follow-up.
@@ -246,7 +246,7 @@ The order-admin delivery recalculation stage is complete and HPOS-audited. The f
 - настройки сервисов, стран, комментариев и packaging-related configuration;
 - admin page сервисов доставки;
 - данные сервисов, используемые checkout и расчетом carrier rates.
-- CDEK tariffs are edited on `WDC -> Службы доставки -> СДЭК -> Тарифы`; sync uses `GET /v2/calculator/alltariffs` and runtime CDEK rates prefer `custom_title` over the CDEK tariff name.
+- CDEK tariffs are edited on `WDC -> Службы доставки -> СДЭК -> Тарифы`; sync uses `GET /v2/calculator/alltariffs`, stores weight/dimension limits, and runtime CDEK rates prefer `custom_title` over the CDEK tariff name.
 - Historical migration note: unified Russian Post domestic service `russian_post_domestic`; old `russian_post_domestic_pickup`/`russian_post_domestic_courier` rows are physically removed by migration `0026`, and no backward compatibility layer for those keys remains.
 - domestic Russian Post availability is edited on `Основные`; the separate availability tab is no longer part of the service edit UI.
 

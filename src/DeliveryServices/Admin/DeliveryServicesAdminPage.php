@@ -886,16 +886,17 @@ final class DeliveryServicesAdminPage {
 				<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 				<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 				<table class="widefat striped">
-					<thead><tr><th>Код</th><th>Название СДЭК</th><th>Название на сайте</th><th>Тип доставки</th><th>Комментарий</th><th>Активен</th><th>Последний sync</th></tr></thead>
+					<thead><tr><th>Код</th><th>Название СДЭК</th><th>Ограничения</th><th>Название на сайте</th><th>Тип доставки</th><th>Комментарий</th><th>Активен</th><th>Последний sync</th></tr></thead>
 					<tbody>
 						<?php if ( array() === $rows ) : ?>
-							<tr><td colspan="7"><?php echo esc_html__( 'Тарифы еще не загружены.', 'walls-delivery-calc' ); ?></td></tr>
+							<tr><td colspan="8"><?php echo esc_html__( 'Тарифы еще не загружены.', 'walls-delivery-calc' ); ?></td></tr>
 						<?php endif; ?>
 						<?php foreach ( $rows as $row ) : ?>
 							<?php $code = (string) $row['tariff_code']; ?>
 							<tr>
 								<td><code><?php echo esc_html( $code ); ?></code><input type="hidden" name="cdek_tariff_code[]" value="<?php echo esc_attr( $code ); ?>"></td>
 								<td><?php echo esc_html( (string) $row['tariff_name_from_cdek'] ); ?></td>
+								<td><?php echo wp_kses_post( $this->cdek_tariff_limits_html( $row ) ); ?></td>
 								<td><input class="regular-text" name="cdek_tariff_custom_title[<?php echo esc_attr( $code ); ?>]" value="<?php echo esc_attr( (string) $row['custom_title'] ); ?>"></td>
 								<td><?php $this->cdek_delivery_type_select( $code, (string) $row['delivery_type'] ); ?></td>
 								<td><textarea name="cdek_tariff_admin_comment[<?php echo esc_attr( $code ); ?>]" rows="2" class="large-text"><?php echo esc_textarea( (string) $row['admin_comment'] ); ?></textarea></td>
@@ -965,10 +966,67 @@ final class DeliveryServicesAdminPage {
 		$value = DeliveryType::COURIER === $value ? DeliveryType::COURIER : DeliveryType::PICKUP;
 		?>
 		<select name="cdek_tariff_delivery_type[<?php echo esc_attr( $code ); ?>]">
-			<option value="<?php echo esc_attr( DeliveryType::PICKUP ); ?>" <?php selected( DeliveryType::PICKUP, $value ); ?>>pickup</option>
-			<option value="<?php echo esc_attr( DeliveryType::COURIER ); ?>" <?php selected( DeliveryType::COURIER, $value ); ?>>courier</option>
+			<option value="<?php echo esc_attr( DeliveryType::PICKUP ); ?>" <?php selected( DeliveryType::PICKUP, $value ); ?>><?php echo esc_html__( 'до ПВЗ', 'walls-delivery-calc' ); ?></option>
+			<option value="<?php echo esc_attr( DeliveryType::COURIER ); ?>" <?php selected( DeliveryType::COURIER, $value ); ?>><?php echo esc_html__( 'до двери', 'walls-delivery-calc' ); ?></option>
 		</select>
 		<?php
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function cdek_tariff_limits_html( array $row ): string {
+		$weight = $this->cdek_limit_range( $row['weight_min'] ?? null, $row['weight_max'] ?? null );
+		$length = $this->cdek_limit_range( $row['length_min'] ?? null, $row['length_max'] ?? null );
+		$width = $this->cdek_limit_range( $row['width_min'] ?? null, $row['width_max'] ?? null );
+		$height = $this->cdek_limit_range( $row['height_min'] ?? null, $row['height_max'] ?? null );
+		$lines = array();
+		if ( '' !== $weight ) {
+			$lines[] = 'Вес: ' . $weight . ' кг';
+		}
+		$dimensions = array();
+		if ( '' !== $length ) {
+			$dimensions[] = 'Д ' . $length;
+		}
+		if ( '' !== $width ) {
+			$dimensions[] = 'Ш ' . $width;
+		}
+		if ( '' !== $height ) {
+			$dimensions[] = 'В ' . $height;
+		}
+		if ( array() !== $dimensions ) {
+			$lines[] = 'Габариты: ' . implode( ', ', $dimensions ) . ' см';
+		}
+		if ( array() === $lines ) {
+			return '&mdash;';
+		}
+
+		return implode( '<br>', array_map( 'esc_html', $lines ) );
+	}
+
+	private function cdek_limit_range( mixed $min, mixed $max ): string {
+		$min = $this->cdek_limit_number( $min );
+		$max = $this->cdek_limit_number( $max );
+		if ( null === $min && null === $max ) {
+			return '';
+		}
+		if ( null === $min ) {
+			return 'до ' . $max;
+		}
+		if ( null === $max ) {
+			return 'от ' . $min;
+		}
+
+		return $min . '–' . $max;
+	}
+
+	private function cdek_limit_number( mixed $value ): ?string {
+		if ( null === $value || '' === trim( (string) $value ) || ! is_numeric( $value ) ) {
+			return null;
+		}
+		$number = rtrim( rtrim( number_format( (float) $value, 3, '.', '' ), '0' ), '.' );
+
+		return '' !== $number ? $number : '0';
 	}
 
 	private function render_russian_post_pickup_tab( DeliveryService $service ): void {

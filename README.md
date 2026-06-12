@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.46.2.
+Current plugin version: 0.46.3.
+
+Version 0.46.3 improves CDEK tariff import and display. `GET /v2/calculator/alltariffs` sync now stores tariff weight limits (`weight_min`, `weight_max`, `weight_calc_max`) and dimension limits (`length_*`, `width_*`, `height_*`) as nullable fields, shows them in the CDEK `Тарифы` table, labels delivery type choices as `до ПВЗ` / `до двери` while keeping `pickup` / `courier` in storage, sorts active tariffs first by CDEK name, and safely fixes obvious CDEK mojibake such as `Ð´Ð²ÐµÑÑ-Ð´Ð²ÐµÑÑ`.
 
 Version 0.46.2 adds a global delivery rates cache version (`wdc_delivery_rates_cache_version`) to WooCommerce shipping packages. Full delivery cache reset bumps this version, so every customer's `shipping_for_package_*` cache is invalidated by package hash even when their cart does not change. Manual cache reset, CDEK tariff save and confirmed CDEK tariff sync all bump the version while still clearing current-session caches opportunistically.
 

@@ -88,8 +88,8 @@ final class CdekTariffsSyncFakeHttpClient implements CdekHttpClientInterface {
 			array(
 				'tariff_name' => 'Посылка',
 				'delivery_modes' => array(
-					array( 'delivery_mode' => 4, 'delivery_mode_name' => 'склад-склад', 'tariff_code' => 136 ),
-					array( 'delivery_mode' => 3, 'delivery_mode_name' => 'склад-дверь', 'tariff_code' => 137 ),
+					array( 'delivery_mode' => 4, 'delivery_mode_name' => 'склад-склад', 'tariff_code' => 136, 'weight_min' => 0.1, 'weight_max' => 30, 'weight_calc_max' => 50, 'length_min' => 10, 'length_max' => 120, 'width_min' => 10, 'width_max' => 80, 'height_min' => 1, 'height_max' => 80 ),
+					array( 'delivery_mode' => 3, 'delivery_mode_name' => 'склад-дверь', 'tariff_code' => 137, 'weight_min' => null, 'weight_max' => '', 'weight_calc_max' => 100, 'length_min' => 1, 'length_max' => 200, 'width_min' => 1, 'width_max' => 100, 'height_min' => 1, 'height_max' => 100 ),
 				),
 			),
 		);
@@ -173,6 +173,11 @@ cdek_tariffs_sync_assert( count( array_filter( $http->requests, static fn( array
 $result = $sync->sync_rows( $rows );
 cdek_tariffs_sync_assert( 2 === $result['added'] && 2 === count( $repository->all() ), 'Initial CDEK tariff sync must add tariffs.' );
 cdek_tariffs_sync_assert( null !== $repository->find_by_code( '136' ) && null !== $repository->find_by_code( '137' ), 'Synced tariffs must be findable by code.' );
+$synced_pickup = $repository->find_by_code( '136' );
+cdek_tariffs_sync_assert( is_array( $synced_pickup ) && 0.1 === $synced_pickup['weight_min'] && 30.0 === $synced_pickup['weight_max'] && 50.0 === $synced_pickup['weight_calc_max'], 'CDEK sync must store weight limits.' );
+cdek_tariffs_sync_assert( is_array( $synced_pickup ) && 10.0 === $synced_pickup['length_min'] && 120.0 === $synced_pickup['length_max'] && 10.0 === $synced_pickup['width_min'] && 80.0 === $synced_pickup['width_max'] && 1.0 === $synced_pickup['height_min'] && 80.0 === $synced_pickup['height_max'], 'CDEK sync must store dimension limits.' );
+$synced_courier = $repository->find_by_code( '137' );
+cdek_tariffs_sync_assert( is_array( $synced_courier ) && null === $synced_courier['weight_min'] && null === $synced_courier['weight_max'] && 100.0 === $synced_courier['weight_calc_max'], 'CDEK sync must store empty API limits as null.' );
 
 $repository->save_admin_rows(
 	array(
@@ -195,9 +200,16 @@ cdek_tariffs_sync_assert( 'СДЭК до пункта выдачи, СДЭК Э�
 $courier_quote = $carrier->quote( cdek_tariffs_sync_request( DeliveryType::COURIER ) );
 cdek_tariffs_sync_assert( array() === $courier_quote->rates, 'Inactive managed CDEK courier tariff must be skipped.' );
 
+$repository->upsert_from_sync( array( 'tariff_code' => 139, 'tariff_name_from_cdek' => 'Альфа ПВЗ', 'delivery_type' => DeliveryType::PICKUP ) );
+$repository->save_admin_rows( array( array( 'tariff_code' => '139', 'custom_title' => '', 'delivery_type' => DeliveryType::PICKUP, 'admin_comment' => '', 'is_active' => 1 ) ) );
+$sorted = $repository->all();
+cdek_tariffs_sync_assert( '139' === (string) $sorted[0]['tariff_code'] && '136' === (string) $sorted[1]['tariff_code'] && '137' === (string) $sorted[2]['tariff_code'], 'CDEK tariff admin rows must sort active first, then CDEK name, then code.' );
+cdek_tariffs_sync_assert( 'дверь-дверь' === CdekTariffSyncService::normalize_cdek_string_static( 'Ð´Ð²ÐµÑÑ-Ð´Ð²ÐµÑÑ' ), 'CDEK mojibake normalizer must fix obvious UTF-8 mojibake.' );
+
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 cdek_tariffs_sync_assert( str_contains( $source, 'Загрузить тарифы из СДЭК' ) && str_contains( $source, 'preview_cdek_tariffs_sync' ) && str_contains( $source, 'confirm_cdek_tariffs_sync' ), 'CDEK admin tariffs tab must include API sync preview and confirmation actions.' );
 cdek_tariffs_sync_assert( str_contains( $source, 'DeliveryQuoteCacheManager' ) && str_contains( $source, 'clear_delivery_quote_cache' ) && str_contains( $source, 'save_cdek_tariffs' ) && str_contains( $source, 'confirm_cdek_tariffs_sync' ), 'CDEK tariff save/sync must clear delivery quote cache.' );
+cdek_tariffs_sync_assert( str_contains( $source, 'Ограничения' ) && str_contains( $source, 'до ПВЗ' ) && str_contains( $source, 'до двери' ) && str_contains( $source, 'DeliveryType::PICKUP' ) && str_contains( $source, 'DeliveryType::COURIER' ), 'CDEK tariff admin table must show limits and Russian delivery type labels while keeping technical values.' );
 $cache_manager_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Cache/DeliveryQuoteCacheManager.php' );
 cdek_tariffs_sync_assert( str_contains( $cache_manager_source, 'shipping_for_package_' ) && str_contains( $cache_manager_source, 'wdc_platform_rates' ) && str_contains( $cache_manager_source, 'wdc_platform_selected_tariffs' ) && str_contains( $cache_manager_source, 'ensure_woocommerce_session' ), 'Delivery quote cache clear must include WooCommerce package rates and WDC runtime session caches.' );
 cdek_tariffs_sync_assert( str_contains( $cache_manager_source, 'wdc_delivery_rates_cache_version' ) && str_contains( $cache_manager_source, 'add_cache_version_to_packages' ) && str_contains( $cache_manager_source, 'bump_delivery_rates_cache_version' ), 'Delivery quote cache clear must bump a global WooCommerce package cache version.' );

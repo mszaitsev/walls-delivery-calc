@@ -1,6 +1,8 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.46.2.
+Version: 0.46.3.
+
+0.46.3 tariff limits update: `GET /v2/calculator/alltariffs` sync stores nullable CDEK restriction fields in `wdc_cdek_tariffs`: `weight_min`, `weight_max`, `weight_calc_max`, `length_min`, `length_max`, `width_min`, `width_max`, `height_min`, `height_max`. In the current CDEK API response/examples these weight values are treated as kilograms and dimensions as centimeters, matching the admin display (`Вес: ... кг`, `Габариты: ... см`). Empty/null API values are stored as `null`. Sync preserves `custom_title`, `admin_comment` and `is_active`; because there is no manual delivery-type override flag yet, `delivery_type` is refreshed from the API-derived mode on sync. Obvious mojibake in CDEK names/modes is normalized only when the string clearly contains broken UTF-8 markers.
 
 0.46.2 global cache version update: WDC adds `wdc_delivery_rates_cache_version` to WooCommerce shipping packages and bumps it on full delivery cache reset. Because WooCommerce includes the package payload in the `shipping_for_package_*` hash, existing customer checkout sessions recalculate rates after CDEK tariff save/sync or manual reset even if the cart contents did not change.
 
@@ -21,7 +23,7 @@ This stage connects CDEK as a checkout/runtime carrier for tariff preview only. 
   - `pickup`: default `СДЭК до пункта выдачи`.
   - `courier`: default `СДЭК курьер`.
 - The CDEK service main tab stores service-specific `pickup_method_title` and `courier_method_title`; custom values are used by checkout grouped rates, admin recalculation preview, saved rate meta, and calculation data.
-- The CDEK service `Тарифы` tab stores tariff-specific `custom_title`, `delivery_type`, `admin_comment` and active state; names sync from `GET /v2/calculator/alltariffs` without overwriting admin presentation fields.
+- The CDEK service `Тарифы` tab stores tariff-specific `custom_title`, `delivery_type`, `admin_comment`, active state and API limit fields; names and limits sync from `GET /v2/calculator/alltariffs` without overwriting admin presentation fields.
 - CDEK OAuth bearer token reuse from the foundation stage.
 - Authorized JSON requests through the existing `CdekHttpClientInterface`.
 - `CdekLocationResolver` for destination CDEK city code resolution via `/v2/location/cities` with fallback attempts and transient cache.
