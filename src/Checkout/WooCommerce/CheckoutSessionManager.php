@@ -77,10 +77,49 @@ final class CheckoutSessionManager {
 		}
 		$selection['snapshot'] = $snapshot;
 
-		$selections = $this->raw_pickup_selections();
+		$raw_before = $this->raw_pickup_selections();
+		$this->pickup_debug_log(
+			'WDC pickup dictionary write step',
+			array(
+				'step' => '1 raw_before',
+				'saved_family' => $family,
+				'raw_before_keys' => array_keys( $raw_before ),
+				'raw_before_count' => count( $raw_before ),
+			)
+		);
+
+		$selections = $raw_before;
 		$selections[ $family ] = $selection;
+		$this->pickup_debug_log(
+			'WDC pickup dictionary write step',
+			array(
+				'step' => '2 local_dictionary',
+				'saved_family' => $family,
+				'local_dictionary_keys' => array_keys( $selections ),
+				'local_dictionary_count' => count( $selections ),
+			)
+		);
 		$this->set_raw_session_array( self::PICKUP_SELECTIONS_KEY, $selections );
+		$this->pickup_debug_log(
+			'WDC pickup dictionary write step',
+			array(
+				'step' => '3 after_set_raw_session_array',
+				'saved_family' => $family,
+				'session_key_name' => self::PICKUP_SELECTIONS_KEY,
+				'value_written_keys' => array_keys( $selections ),
+				'value_written_count' => count( $selections ),
+			)
+		);
 		$raw_after = $this->raw_pickup_selections();
+		$this->pickup_debug_log(
+			'WDC pickup dictionary write step',
+			array(
+				'step' => '4 raw_after',
+				'saved_family' => $family,
+				'raw_after_keys' => array_keys( $raw_after ),
+				'raw_after_count' => count( $raw_after ),
+			)
+		);
 		if ( ! isset( $raw_after[ $family ] ) ) {
 			$this->pickup_debug_log(
 				'WDC pickup canonical bucket write failed',
@@ -168,6 +207,15 @@ final class CheckoutSessionManager {
 		$this->log_pickup_selection_clear( $reason ?: 'manual_clear', false );
 		$this->set( self::PICKUP_SELECTION_KEY, array() );
 		$this->set_raw_session_array( self::PICKUP_SELECTIONS_KEY, array() );
+		$this->pickup_debug_log(
+			'WDC pickup dictionary cleared',
+			array(
+				'reason' => $reason ?: 'manual_clear',
+				'scope' => 'global',
+				'session_key_name' => self::PICKUP_SELECTIONS_KEY,
+				'remaining_keys' => array(),
+			)
+		);
 		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, array() );
 		$this->set( self::PICKUP_CARRIER_KEY, '' );
 	}
@@ -182,6 +230,16 @@ final class CheckoutSessionManager {
 		$selections = $this->raw_pickup_selections();
 		unset( $selections[ $pickup_family ] );
 		$this->set_raw_session_array( self::PICKUP_SELECTIONS_KEY, $selections );
+		$this->pickup_debug_log(
+			'WDC pickup dictionary cleared',
+			array(
+				'reason' => $reason ?: 'family_clear',
+				'scope' => 'family',
+				'pickup_family' => $pickup_family,
+				'session_key_name' => self::PICKUP_SELECTIONS_KEY,
+				'remaining_keys' => array_keys( $selections ),
+			)
+		);
 		$current = $this->pickup_selection();
 		if ( $pickup_family === (string) ( $current['pickup_family'] ?? '' ) ) {
 			$this->set( self::PICKUP_SELECTION_KEY, array() );
@@ -620,6 +678,14 @@ final class CheckoutSessionManager {
 	private function stored_pickup_selections(): array {
 		$selections = $this->get_raw_session_value( self::PICKUP_SELECTIONS_KEY, array() );
 		$stored = array();
+		$this->pickup_debug_log(
+			'WDC pickup raw_pickup_selections',
+			array(
+				'session_key_name' => self::PICKUP_SELECTIONS_KEY,
+				'raw_value_type' => get_debug_type( $selections ),
+				'raw_keys' => is_array( $selections ) ? array_keys( $selections ) : array(),
+			)
+		);
 		if ( ! is_array( $selections ) ) {
 			return $stored;
 		}
@@ -919,6 +985,18 @@ final class CheckoutSessionManager {
 	 */
 	private function set_raw_session_array( string $key, array $value ): void {
 		$session = $this->session();
+		$this->pickup_debug_log(
+			'WDC pickup set_raw_session_array',
+			array(
+				'session_exists' => is_object( $session ),
+				'session_class' => is_object( $session ) ? get_class( $session ) : '',
+				'key' => $key,
+				'keys_count' => count( $value ),
+				'keys' => array_keys( $value ),
+				'has_set_method' => is_object( $session ) && method_exists( $session, 'set' ),
+				'has_save_data_method' => is_object( $session ) && method_exists( $session, 'save_data' ),
+			)
+		);
 		if ( ! is_object( $session ) ) {
 			return;
 		}

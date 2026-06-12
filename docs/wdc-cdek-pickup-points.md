@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.16.
+Version: 0.45.17.
+
+0.45.17 diagnostic trace: `CheckoutSessionManager` now emits a step-by-step `WDC_PICKUP_DEBUG` trace around `wdc_platform_pickup_selections` writes. Logs show raw keys before save, local dictionary keys after assigning the family bucket, `set_raw_session_array()` session class/key/count details, raw keys after reread, and explicit `WDC pickup dictionary cleared` events with reasons for global/family resets. This version is diagnostic-only and does not change pickup restore/validation business logic.
 
 0.45.16 raw session write fix: canonical pickup buckets now use a dedicated raw array writer/reader for `wdc_platform_pickup_selections`. The save path writes the nested dictionary, immediately rereads the raw session key, and logs a `WDC pickup canonical bucket write failed` debug event only if the saved family is still absent. After REST save, debug should show `raw_pickup_selections_after_keys` and `pickup_selections_after_keys` containing the active `...:pickup` family.
 

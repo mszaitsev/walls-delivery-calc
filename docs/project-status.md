@@ -1,5 +1,7 @@
 # Project Status
 
+0.45.17 note: checkout pickup diagnostics now trace the canonical `wdc_platform_pickup_selections` write path step by step. When `WDC_PICKUP_DEBUG` is enabled, logs show raw keys before save, local dictionary keys after assignment, raw session writer details, raw keys after reread, and dictionary clear reasons. This is a diagnostic-only stage; pickup restore and validation behavior were not intentionally changed.
+
 0.45.16 note: canonical pickup bucket persistence now bypasses fragile generic session access for the nested `wdc_platform_pickup_selections` dictionary. A dedicated raw array writer/reader stores the family bucket, verifies the raw key immediately, and keeps debug output focused on raw/normalized bucket keys so reload diagnostics can confirm the saved `...:pickup` family.
 
 0.45.15 note: REST pickup save now writes selected points into the canonical `wdc_platform_pickup_selections` dictionary via an explicit family-scoped session writer before updating legacy mirrors. Russian Post and CDEK buckets are present immediately after save, reload checkout receives non-empty `pickupSelections`, and CDEK validation can read the active `cdek:pickup` bucket without posted hidden fields.
@@ -90,10 +92,10 @@
 
 ## Общий статус
 
-- Текущая версия: `0.45.16`.
+- Текущая версия: `0.45.17`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `fix/cdek-pickup-selection-and-ui`.
-- Последнее обновление статуса: 2026-06-11.
+- Последнее обновление статуса: 2026-06-12.
 - Общая готовность проекта: примерно 74%.
 - Следующий рекомендуемый этап: `feature/cdek-order-creation`.
 
@@ -129,7 +131,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.16`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.17`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

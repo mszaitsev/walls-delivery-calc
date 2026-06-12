@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.16.
+Current plugin version: 0.45.17.
+
+Version 0.45.17 adds step-by-step diagnostics for the canonical checkout pickup dictionary write path. With `WDC_PICKUP_DEBUG` enabled, `CheckoutSessionManager` now logs raw bucket keys before save, local dictionary keys after assignment, `set_raw_session_array()` session details, raw keys after reread, and every global/family dictionary clear reason. Business pickup restore and validation behavior are intentionally unchanged in this diagnostic step.
 
 Version 0.45.16 hardens the low-level WooCommerce session write for canonical pickup buckets. `wdc_platform_pickup_selections` now uses a dedicated raw array writer/reader for the nested dictionary, verifies the bucket immediately after save, and logs a debug failure if the raw key is still missing. This makes `raw_pickup_selections_after_keys` / `pickup_selections_after_keys` show the saved `...:pickup` family right after REST save.
 
