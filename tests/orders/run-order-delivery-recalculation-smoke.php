@@ -9,6 +9,7 @@ use WallsShop\WDC\Checkout\Runtime\CheckoutLogger;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
 use WallsShop\WDC\Checkout\Runtime\FallbackRateFactory;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
+use WallsShop\WDC\Checkout\WooCommerce\PickupPointOrderDisplay;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationSearch;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
@@ -37,6 +38,7 @@ use WallsShop\WDC\Orders\Application\OrderDeliveryAddressNormalizationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
 use WallsShop\WDC\Orders\Application\OrderQuoteRequestMapper;
+use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
@@ -676,7 +678,7 @@ recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "const
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'prefillCurrentPickupIfAvailable' ) && str_contains( $pickup_js, 'data-wdc-order-delivery-current-pickup' ), 'JS must prefill current pickup when location is unchanged.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'scrollActivePickupRow' ) && str_contains( $pickup_js, 'scrollIntoView' ) && str_contains( $pickup_js, 'setActivePoint' ), 'JS marker click must sync active marker and list row.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'geocodeAddressAction' ) && str_contains( $pickup_js, 'wdc_order_delivery_recalculate_geocode_address' ) && str_contains( $pickup_js, 'searchMarker:' ), 'JS manual address search must geocode through admin endpoint and pass a temporary search marker.' );
-recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'loadPickupPointsForLocation' ) && str_contains( $pickup_js, "form.append( 'mode', 'location' );" ) && ! str_contains( $pickup_js, "form.append( 'mode', mode );" ), 'JS manual address search must keep pickup loading in location mode instead of filtering pickup points by address query.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'loadPickupPointsForLocation' ) && str_contains( $pickup_js, "form.append( 'mode', modeOverride || 'location' );" ) && str_contains( $pickup_js, "loadPickupPointsForLocation( 'search', value )" ), 'JS pickup loader must keep location mode by default and allow carrier-specific search overrides.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'renderSearchResults( \'address\', value' ) && str_contains( $pickup_js, 'provider.setCenter( searchMarker.lat, searchMarker.lng, 15 );' ), 'JS manual address search must keep city pickup points rendered and center the map on the DaData marker.' );
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'searchMarkerFromQuery' ), 'JS manual address search must not use the first pickup point as an address marker fallback.' );
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'data-wdc-pickup-address-block' ), 'Pickup UI must not render address normalization block.' );
@@ -917,6 +919,66 @@ recalc_smoke_assert( isset( $cdek_admin_order->meta['_wdc_platform_rate_meta'] )
 recalc_smoke_assert( 520.0 === (float) ( $cdek_admin_calc['api']['api_base_price_rub'] ?? 0 ) && 650.0 === (float) ( $cdek_admin_calc['result']['final_price_rub'] ?? 0 ), 'CDEK admin calculation data must preserve API base and final prices.' );
 recalc_smoke_assert( 900 === (int) ( $cdek_admin_calc['package']['products_weight_g'] ?? 0 ) && 300 === (int) ( $cdek_admin_calc['package']['packaging_weight_g'] ?? 0 ) && 1200 === (int) ( $cdek_admin_calc['package']['final_weight_g'] ?? 0 ), 'CDEK admin calculation data must preserve package weights.' );
 recalc_smoke_assert( array( 'cdek-rule' ) === ( $cdek_admin_calc['rules']['applied_rules'] ?? null ), 'CDEK admin calculation data must preserve rules data.' );
+
+$cdek_pickup_rate = $cdek_admin_rate;
+$cdek_pickup_rate['id'] = 'cdek:pickup:136';
+$cdek_pickup_rate['rate_id'] = 'cdek:pickup:136';
+$cdek_pickup_rate['label'] = 'СДЭК до пункта выдачи';
+$cdek_pickup_rate['delivery_type'] = 'pickup';
+$cdek_pickup_rate['requires_pickup_point'] = true;
+$cdek_pickup_rate['tariff_key'] = '136';
+$cdek_pickup_rate['tariff_title'] = 'Посылка склад-склад';
+$cdek_pickup_rate['selected_tariff_title'] = 'Посылка склад-склад';
+$cdek_pickup_rate['selected_tariff_object'] = '136';
+$cdek_pickup_point = array(
+	'carrier_key' => 'cdek',
+	'point_code' => 'KEM7',
+	'code' => 'KEM7',
+	'cdek_code' => 'KEM7',
+	'point_type' => 'POSTAMAT',
+	'cdek_type' => 'POSTAMAT',
+	'point_name' => 'CDEK Postamat',
+	'point_address' => 'Kemerovo, Sovetskiy 10',
+	'address' => 'Kemerovo, Sovetskiy 10',
+	'point_postcode' => '650004',
+	'postcode' => '650004',
+	'city_name' => 'Kemerovo',
+	'region_name' => 'Kemerovo region',
+	'work_time' => '0.000000',
+	'point_work_time' => '0.000000',
+	'description' => 'Inside the shopping center',
+	'storage_notice' => 'Срок хранения 3 дня',
+	'raw_sanitized' => array( 'code' => 'KEM7', 'type' => 'POSTAMAT' ),
+);
+$cdek_pickup_order = new WdcRecalcOrder( 120, array() );
+$cdek_pickup_order->shipping_items = array();
+$cdek_pickup_result = $replacement->save(
+	$cdek_pickup_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $cdek_pickup_rate,
+		'selected_tariff' => array(),
+		'selected_pickup_point' => $cdek_pickup_point,
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( true === $cdek_pickup_result['success'], 'CDEK admin pickup save must succeed with selected point.' );
+recalc_smoke_assert( 'KEM7' === (string) ( $cdek_pickup_order->meta['_wdc_pickup_point_code'] ?? '' ), 'CDEK admin pickup save must keep CDEK point code instead of postcode.' );
+recalc_smoke_assert( 'Kemerovo, Sovetskiy 10' === $cdek_pickup_order->get_shipping_address_1() && '650004' === $cdek_pickup_order->get_shipping_postcode(), 'CDEK admin pickup save must write pickup shipping address.' );
+$cdek_pickup_calc = $cdek_pickup_order->meta['_wdc_delivery_calculation_data'] ?? array();
+recalc_smoke_assert( 'Kemerovo, Sovetskiy 10' === ( $cdek_pickup_calc['pickup']['point_address'] ?? '' ) && '650004' === ( $cdek_pickup_calc['pickup']['point_postcode'] ?? '' ), 'CDEK admin pickup calculation data must keep full pickup address payload.' );
+recalc_smoke_assert( 'Inside the shopping center' === ( $cdek_pickup_calc['pickup']['description'] ?? '' ), 'CDEK admin pickup calculation data must save description.' );
+recalc_smoke_assert( '' === ( $cdek_pickup_calc['pickup']['work_time'] ?? '' ), 'CDEK admin pickup calculation data must not save numeric zero work_time.' );
+recalc_smoke_assert( 'Срок хранения 3 дня' === ( $cdek_pickup_calc['pickup']['storage_notice'] ?? '' ), 'CDEK admin pickup calculation data must save POSTAMAT storage notice.' );
+recalc_smoke_assert( str_contains( (string) ( $cdek_pickup_order->meta['_wdc_pickup_point_snapshot'] ?? '' ), 'Kemerovo, Sovetskiy 10' ) && str_contains( (string) ( $cdek_pickup_order->meta['_wdc_pickup_point_snapshot'] ?? '' ), 'Inside the shopping center' ), 'CDEK admin pickup snapshot meta must keep full point payload for order/email cards.' );
+ob_start();
+( new PickupPointOrderDisplay( new PickupPointCardRenderer(), new SettingsRepository() ) )->render( $cdek_pickup_order );
+$cdek_pickup_order_card = (string) ob_get_clean();
+recalc_smoke_assert( str_contains( $cdek_pickup_order_card, 'Постамат СДЭК' ), 'CDEK admin pickup order card must render POSTAMAT title.' );
+recalc_smoke_assert( str_contains( $cdek_pickup_order_card, 'Kemerovo, Sovetskiy 10' ) && ! str_contains( $cdek_pickup_order_card, 'Код пункта:' ), 'CDEK admin pickup order card must render address and hide code row by default.' );
+recalc_smoke_assert( str_contains( $cdek_pickup_order_card, 'Описание:' ) && str_contains( $cdek_pickup_order_card, 'Inside the shopping center' ), 'CDEK admin pickup order card must render description with label.' );
+recalc_smoke_assert( str_contains( $cdek_pickup_order_card, 'Срок хранения 3 дня' ), 'CDEK admin pickup order card must render storage notice.' );
+recalc_smoke_assert( ! str_contains( $cdek_pickup_order_card, 'Время работы:' ) && ! str_contains( $cdek_pickup_order_card, '0.000000' ), 'CDEK admin pickup order card must hide empty work_time and numeric zero values.' );
 
 $cdek_no_days_rate = $cdek_admin_rate;
 $cdek_no_days_rate['rate_id'] = 'cdek:courier:no-days';

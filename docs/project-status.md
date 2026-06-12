@@ -1,5 +1,47 @@
 # Project Status
 
+0.45.22 note: temporary checkout pickup diagnostics were removed after the canonical bucket/session investigation. `wdc-pickup-checkout.js` no longer writes grouped console traces, pickup localization no longer exposes debug flags, and PHP pickup save/state/localized/validation/session-write debug logs were removed. Restore/save/validation business logic remains unchanged; real save failures still use normal warning/error logging.
+
+0.45.21 note: checkout pickup restore no longer treats different destination fingerprint formats as a location change when stable destination identity still matches. The frontend compares selected pickup points by `location_id`, FIAS, GAR, city/region and postcode+city before fingerprint fallback, and keeps explicit `destination_*` aliases in saved point payloads.
+
+0.45.20 note: checkout pickup card restore now tolerates generic or stale pickup containers after WooCommerce reload. The frontend matches containers against the active pickup family, rewrites stale `data-shipping-method-id` on the active/generic block, and applies the selected family bucket.
+
+0.45.19 note: checkout frontend restore now treats backend pickup state as a family-keyed dictionary regardless of camelCase/snake_case response shape. `wdc-pickup-checkout.js` extracts and merges localized/REST `pickupSelections`, selected point aliases and state responses into `selectedPickupPoints`, then reapplies the active family bucket after reload/`updated_checkout` so the selected pickup card and hidden fields return from backend state.
+
+0.45.18 note: checkout pickup REST endpoints now initialize WooCommerce session context before touching canonical pickup buckets. REST save/state/reset ensure `WC()->session` exists, set the customer session cookie when supported, and then read/write `wdc_platform_pickup_selections`, fixing the missing-session path where REST save returned success but left canonical bucket keys empty.
+
+0.45.16 note: canonical pickup bucket persistence now bypasses fragile generic session access for the nested `wdc_platform_pickup_selections` dictionary. A dedicated raw array writer/reader stores the family bucket and verifies the raw key immediately.
+
+0.45.15 note: REST pickup save now writes selected points into the canonical `wdc_platform_pickup_selections` dictionary via an explicit family-scoped session writer before updating legacy mirrors. Russian Post and CDEK buckets are present immediately after save, reload checkout receives non-empty `pickupSelections`, and CDEK validation can read the active `cdek:pickup` bucket without posted hidden fields.
+
+0.45.13 note: checkout pickup restore and validation now depend on the active `pickup_family`, destination identity and saved point identity only. Selected CDEK/Russian Post pickup points survive reloads and tariff/rate suffix changes for the same city; CDEK validation passes from the `cdek:pickup` bucket without posted hidden fields; localized `pickupSelections` exposes raw saved buckets while `selectedPickupPoints` remains the renderable-card subset; and pickup address resolution for checkout cards/order meta now reads top-level, snapshot and raw address aliases.
+
+0.45.12 note: checkout pickup state now has a single canonical dictionary, `wdc_platform_pickup_selections`, keyed by `pickup_family`. Legacy singleton keys are derived mirrors only and no longer override existing buckets. Localized checkout config exposes the complete bucket dictionary plus active shipping method/family for reload restore; validation and order persistence read the active family bucket; Russian Post aliases normalize to `russian_post_domestic`; and destination fingerprints are based on stable location/city identity so same-city reloads keep the selected point while real location changes still invalidate saved pickups.
+
+0.45.11 note: remaining checkout pickup state blockers are fixed. Checkout boot now restores the active family bucket from localized `pickupSelections` / `activePickupFamily` and fills hidden pickup fields on page reload; Russian Post validation passes from the active `russian_post_domestic:pickup` bucket before carrier-key fallback comparisons; CDEK `/v2/calculator/tarifflist` api_error/403 and zero-rate results are not cached as successful empty quotes; delivery cache reset includes CDEK city/deliverypoints caches but not token cache; and grouped tariff selectors keep inactive nested rates disabled even when one carrier disappears after checkout update.
+
+0.45.10 note: checkout pickup restore now uses `pickupSelections` / `pickup_selections` as the shared source of truth across localized checkout config and REST state/save/reset responses. The frontend merges saved family buckets without replacing complete points by code-only payloads, restores the active `pickup_family` after method switching, checkout updates and page reloads, and the pickup map side list now uses the same `display_title` / `display_code` as marker popups. Russian Post checkout validation is covered from its family bucket while CDEK bucket validation remains intact.
+
+0.45.9 note: pickup bucket reset scope is corrected. `CheckoutSessionManager::clear_pickup_selection()` is now explicitly documented as a GLOBAL reset that clears every pickup family, while normal method switching and family actions preserve unrelated buckets or call `clear_pickup_selection_for_family()`. `clear_pickup_selection_if_allowed()` no longer turns non-location method-family changes into broad resets; global clears are reserved for destination/location/full-context reset reasons. Tests cover CDEK/Russian Post/custom buckets surviving family resets and being removed only by global reset.
+
+0.45.8 note: checkout pickup selections are now bucketed by `pickup_family` in `wdc_platform_pickup_selections`. CDEK and Russian Post selected points can coexist in the same checkout session, switching methods restores the active family's saved point when the destination identity still matches, validation reads only the active family bucket, and reset can target one family unless the destination changes. Russian Post map titles use repository postcode instead of technical `point_code`; CDEK titles keep `cdek_code`. CDEK pickup prefetch starts in the background for active `cdek:pickup`, and grouped tariff selectors disable inactive nested rates.
+
+0.45.7 note: carrier/pickup-family propagation after the universal pickup refactor is fixed. Pickup REST responses now include full normalized presentation/state fields for CDEK and Russian Post: `carrier_key`, `service_key`, `pickup_family`, `point_title`, `point_type_label`, `marker_type`, address/postcode aliases and `snapshot`. CDEK map/list/popup titles no longer fall back to Russian Post; Russian Post checkout save maps the public REST carrier back to `russian_post_domestic:pickup`; and CDEK selected points keep `cdek:pickup` through checkout save and validation.
+
+0.45.6 note: checkout pickup state after the universal `pickup_family` refactor is hardened. CDEK selected pickup points pass checkout validation from full hidden/session payloads, localized checkout restore suppresses code-only selected points, the frontend selected card is rendered only when `point_code`, matching `pickup_family` and address are present, switching CDEK/Russian Post hides inactive cards and shows the empty chooser for incomplete active selections, and Russian Post map requests keep the `russian_post` REST carrier after switching back from CDEK.
+
+0.45.5 note: checkout pickup restore no longer looks up CDEK/custom pickup point ids or codes in the Russian Post pickup repository. `CheckoutValidation` gates `selection_from_pickup_row()` and `selection_from_pickup_code()` behind `pickup_family=russian_post_domestic:pickup`; CDEK/custom restore uses current session, hidden/full posted payload, or minimal fallback. Collision tests cover CDEK/custom point codes that match Russian Post rows.
+
+0.45.4 note: pickup point presentation/state is now carrier-neutral. `PickupPointPresentationResolver` centralizes built-in Russian Post and CDEK titles, CDEK POSTAMAT `Срок хранения 3 дня`, marker type and generic/custom fallback presentation. Checkout JS, checkout validation, REST/session payloads, order meta and admin recalculation save use normalized `pickup_family = {carrier_key}:pickup` plus `point_title`, `point_type_label`, `marker_type`, `description` and `storage_notice` instead of scattered CDEK/Russian Post card conditions. CDEK order creation, statuses, webhooks and print forms remain intentionally outside this stage.
+
+0.45.3 note: CDEK checkout selected pickup card state is fixed after QA. The checkout card under rates no longer renders technical `Код пункта` / `Индекс` rows for CDEK, but keeps title/address/work time/description/POSTAMAT storage notice. Checkout reload restores the full CDEK selected pickup payload from session/localized state, switching shipping method hides inactive pickup-family cards/buttons, and order/thankyou/email rendering receives the populated CDEK pickup payload. Permanent FIAS/GAR -> CDEK `city_code` mapping remains technical debt.
+
+0.45.2 note: CDEK pickup card rendering is fixed after QA. Checkout selected-point cards, thankyou/order cards and email cards now use CDEK-aware titles, render descriptions with `Описание:`, suppress empty/numeric-zero `work_time` and description values such as `0.000000`, and keep POSTAMAT `Срок хранения 3 дня` visible in red bold output. Russian Post pickup cards keep their existing titles and no longer render accidental numeric-zero descriptions.
+
+0.45.1 note: CDEK pickup QA fixes are implemented on `fix/cdek-pickup-selection-and-ui`. Checkout validation now handles CDEK pickup as a CDEK carrier family throughout restore/match logic and can create an order after the user selects a CDEK pickup point. CDEK `point_code`/`cdek_code` uses the CDEK point code, not postcode; `PVZ` renders as `Пункт выдачи СДЭК`; `POSTAMAT` renders as `Постамат СДЭК`, uses a separate marker color and shows `Срок хранения 3 дня`. CDEK pickup descriptions are saved in session/order calculation data and rendered in pickup cards/order/email display. Permanent FIAS/GAR -> CDEK `city_code` mapping is explicitly left as technical debt for a later CDEK integration stage.
+
+0.45.0 note: CDEK pickup points are implemented for checkout and admin order delivery recalculation. WDC calls CDEK API v2 `GET /v2/deliverypoints` with `city_code`, `country_code=RU` and `type=ALL`, normalizes the response through `CdekDeliveryPointService`, caches it by environment/city/type, and reuses the existing pickup map/picker. CDEK pickup rates now require a selected pickup point; checkout and admin save persist the selected point into `_wdc_delivery_calculation_data.pickup` and write the pickup address to the WooCommerce shipping address. Visible shipping item meta remains only delivery time. CDEK order creation, statuses, webhooks and print forms remain intentionally not implemented. The next feature branch is `feature/cdek-order-creation`.
+
 0.44.9 note: Russian Post courier calculation postcode fill on `WDC -> Локации` now retries technical request failures up to 5 attempts. If every attempt fails technically, it counts one error and stores courier technical marker `999999999` meaning "technical error, retry later"; this marker is distinct from "courier delivery unavailable". New/reset runs process marker rows first, then cities, then other settlements. A later success overwrites `999999999`, while a valid business response that courier delivery is unavailable clears it.
 
 0.44.8 note: CDEK method titles are normalized across checkout rates, checkout-created shipping items, admin recalculation preview tariff payloads and admin save. Titles use `{Название доставки}, {название rate} - {срок доставки}`, honor custom CDEK pickup/courier names from the service `Основное` tab, and do not duplicate delivery ranges.
@@ -56,12 +98,12 @@
 
 ## Общий статус
 
-- Текущая версия: `0.44.9`.
+- Текущая версия: `0.45.22`.
 - Текущая базовая ветка: `develop`.
-- Рабочая ветка: `feature/cdek-tariff-calculation`.
-- Последнее обновление статуса: 2026-06-09.
+- Рабочая ветка: `fix/cdek-pickup-selection-and-ui`.
+- Последнее обновление статуса: 2026-06-12.
 - Общая готовность проекта: примерно 74%.
-- Следующий рекомендуемый этап: `feature/cdek-pickup-points`.
+- Следующий рекомендуемый этап: `feature/cdek-order-creation`.
 
 ## Краткое резюме
 
@@ -95,7 +137,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.44.9`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.22`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
@@ -174,7 +216,8 @@
 
 ## Не реализовано
 
-- CDEK pickup-point map/selection, shipments, orders, statuses, webhooks and print forms.
+- CDEK shipments/orders, statuses, webhooks and print forms.
+- Permanent FIAS/GAR -> CDEK `city_code` mapping/storage.
 - DPD runtime adapter, settings, rates, pickup/courier flow, shipments and statuses.
 - Yandex Delivery runtime adapter, pricing, pickup/courier flow and future offer confirmation.
 - PEK, Energia, Aerogruz, Jet adapters.

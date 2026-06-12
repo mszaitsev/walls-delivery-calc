@@ -96,6 +96,7 @@ C:.
 |       wdc-audit-summary-for-review.md
 |       wdc-carrier-foundation.md
 |       wdc-cdek-foundation.md
+|       wdc-cdek-pickup-points.md
 |       wdc-cdek-tariff-calculation.md
 |       wdc-checkout-integration.md
 |       wdc-core-platform.md
@@ -424,8 +425,12 @@ C:.
 |   |   +---Admin
 |   |   |       PickupAdminPage.php
 |   |   |
+|   |   +---Cdek
+|   |   |       CdekDeliveryPointService.php
+|   |   |
 |   |   +---Presentation
 |   |   |       PickupPointCardRenderer.php
+|   |   |       PickupPointPresentationResolver.php
 |   |   |
 |   |   +---Rest
 |   |   |       CheckoutPickupPointRestController.php
@@ -537,6 +542,7 @@ C:.
     |
     +---cdek
     |       run-cdek-foundation-smoke.php
+    |       run-cdek-pickup-points-smoke.php
     |       run-cdek-tariff-calculation-smoke.php
     |
     +---checkout

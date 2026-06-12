@@ -1,10 +1,22 @@
 # Карта текущего кода
 
+## CDEK Pickup QA Fix 0.45.1
+
+- `src/Checkout/WooCommerce/CheckoutValidation.php` restores CDEK pickup selections as CDEK data and no longer queries the Russian Post pickup repository for CDEK point codes such as `KEM7`.
+- `src/Pickup/Cdek/CdekDeliveryPointService.php` normalizes CDEK `code` into `point_code`/`cdek_code`, keeps postcode separately, supports `PVZ` and `POSTAMAT`, saves description and sets `Срок хранения 3 дня` for CDEK postamats.
+- `src/Pickup/Presentation/PickupPointCardRenderer.php` is carrier-aware for pickup cards: CDEK `PVZ` renders `Пункт выдачи СДЭК`, CDEK `POSTAMAT` renders `Постамат СДЭК`, and CDEK postamats show red bold storage notice.
+- `assets/frontend/pickup-map/wdc-pickup-map.js`, map providers and CSS separate CDEK `POSTAMAT` from Russian Post `APS`; Russian Post keeps `Почтомат`, CDEK uses `Постамат` with a separate marker color.
+- `assets/admin/order-delivery-recalculation.js` keeps CDEK pickup picker state with code/type/description/storage notice and shows CDEK code instead of postcode in the admin picker.
+- `tests/cdek/run-cdek-pickup-points-smoke.php` and checkout/pickup smoke tests cover CDEK validation restore, CDEK code vs postcode, POSTAMAT title/storage notice, description persistence and Russian Post regression boundaries.
+- Technical debt: permanent FIAS/GAR -> CDEK `city_code` mapping remains deferred to a later CDEK integration stage.
+
 ## CDEK Tariff Calculation 0.44.0
 
-- `src/Carriers/Runtime/CdekCarrier.php` is the runtime adapter for service/carrier key `cdek`. It builds `POST /v2/calculator/tarifflist` payloads, maps tariff candidates to `DeliveryRate`, classifies CDEK `delivery_mode`, and stores safe API/location/package meta.
+- `src/Carriers/Runtime/CdekCarrier.php` is the runtime adapter for service/carrier key `cdek`. It builds `POST /v2/calculator/tarifflist` payloads, maps tariff candidates to `DeliveryRate`, classifies CDEK `delivery_mode`, marks pickup rates as requiring a pickup point, and stores safe API/location/package meta.
+- `src/Checkout/Runtime/CheckoutOrchestrator.php` caches successful quotes only when they contain rates, so CDEK `api_error`/403 and zero-rate tarifflist results do not become stable cached empty delivery options; `DeliveryQuoteCacheManager` clears runtime quote cache plus CDEK city/deliverypoints transients without clearing OAuth tokens.
 - `src/Carriers/Cdek/CdekLocationResolver.php` resolves destination CDEK city code through `/v2/location/cities` and caches confident matches in transients.
-- `src/Carriers/Cdek/Api/CdekApiClient.php` now supports authorized JSON runtime requests in addition to OAuth connection checks.
+- `src/Carriers/Cdek/Api/CdekApiClient.php` now supports authorized JSON runtime requests in addition to OAuth connection checks, including `GET /v2/deliverypoints`.
+- `src/Pickup/Cdek/CdekDeliveryPointService.php` loads CDEK pickup points for a CDEK city code, normalizes them for the shared picker and caches the result by environment/city/type.
 - `src/Checkout/Runtime/CheckoutOrchestrator.php` runs `cdek` services separately for pickup and courier when the common delivery service is active.
 - `src/Checkout/WooCommerce/NewShippingMethod.php` and `CheckoutRateRenderer.php` reuse the existing grouped tariff selector for generic tariff candidates, including CDEK.
 - `src/Orders/Application/OrderDeliveryRecalculationService.php` groups CDEK tariff candidates for admin recalculation preview without requiring a CDEK pickup point yet.
@@ -38,7 +50,7 @@ The order-admin delivery recalculation stage is complete and HPOS-audited. The f
 - `src/Domain/Status/DeliveryStatus.php` defines the carrier-neutral shipment status model: `created_in_carrier`, `in_transit`, `ready_for_pickup`, `handed_to_courier`, `delivered`, `returning_to_sender`, `returned_to_sender`, `cancelled`, `rejected`, `unknown`, with Russian UI labels.
 - `src/Carriers/RussianPost/Tracking/RussianPostTrackingApiClient.php` calls Russian Post Tracking API `getOperationHistory` over SOAP 1.2 with `wp_remote_post`. It uses only `russian_post_tracking_login` and `russian_post_tracking_password_encrypted` from the unified domestic service settings.
 - `src/Carriers/RussianPost/Otpravka/RussianPostOtpravkaApiClient.php` also supports Russian Post backlog deletion through `DELETE /1.0/backlog` and manual shipment lookup through `GET /1.0/backlog/search?query={barcode}` plus fallback `GET /1.0/shipment/search?query={barcode}`.
-- `src/Carriers/Cdek` contains the CDEK foundation and tariff calculation support: settings, separate encrypted test/production credentials, active-environment API base URL selection, OAuth token service/cache, API response/exception objects, WP HTTP adapter, destination city resolver and API client methods for `tarifflist`/locations. Pickup points, orders, statuses, print forms and webhooks are still not implemented.
+- `src/Carriers/Cdek` contains the CDEK foundation and tariff calculation support: settings, separate encrypted test/production credentials, active-environment API base URL selection, OAuth token service/cache, API response/exception objects, WP HTTP adapter, destination city resolver and API client methods for `tarifflist`, locations and delivery points. Orders, statuses, print forms and webhooks are still not implemented.
 - `src/Shipments/Application/ShipmentBacklogService.php` owns cancel/manual-attach rules. Cancel uses `backlog_order_id` and is allowed only for operation `28 / Присвоение идентификатора`; manual attach searches by barcode in backlog first, falls back to shipment search, saves `backlog_order_id` when returned, then attempts the first Tracking API refresh.
 - `src/Shipments/RussianPost/RussianPostTrackingStatusMapper.php` contains the code-fixed mapping generated from `status pocha.xlsx`. Unknown operation/attribute pairs map to `unknown` / `не определён`.
 - The 0.36.1 mapping correction maps selected pickup operations including `8:2`, `12:1..12:31`, and `42:1..42:30` to `ready_for_pickup`, and maps `8:15` plus `8:18` to `handed_to_courier`.
@@ -187,11 +199,19 @@ The order-admin delivery recalculation stage is complete and HPOS-audited. The f
 
 Ответственность:
 
-- domain model ПВЗ, storage, location resolution и rendering карточки;
+- domain model ПВЗ, storage, location resolution и carrier-neutral rendering карточки;
 - import ПВЗ Почты России, import state, diagnostics, normalization, type settings и work-time formatting;
 - поиск адресов для ПВЗ;
 - REST controllers для directory/search/detail ПВЗ и checkout pickup selection state;
 - `RussianPostPickupPointRepository::search_admin_pickup_rows()` searches local Russian Post pickup rows by postcode, city and address for the shipment modal;
+- `PickupPointPresentationResolver` centralizes pickup card presentation metadata for built-in Russian Post/CDEK and generic/custom pickup fallback (`card_title`, `point_type_label`, marker type, code/postcode display flags and storage notice);
+- normalized pickup payloads carry `carrier_key`, `service_key`, `pickup_family={carrier_key}:pickup`, `point_code`, `point_type`, `point_type_label`, `point_title`, address/postcode/city/region, work time, description, storage notice, coordinates and snapshot data;
+- checkout selected pickup state is bucketed by `pickup_family` in `CheckoutSessionManager` under canonical `wdc_platform_pickup_selections`; legacy singleton keys are derived mirrors/migration fallback only when the dictionary is empty, while validation, order meta persistence and localized checkout restore read the active family bucket and compare stable destination identity before restoring a saved point;
+- `PickupMapCheckout` localizes raw `pickupSelections` / `pickupSelectionsRaw` dictionaries plus the renderable-card `selectedPickupPoints` subset and `activePickupFamily`, while `CheckoutPickupPointRestController` returns `pickup_selections` / `pickupSelections` and `active_pickup_family` from state, save and reset responses;
+- `assets/frontend/pickup-map/wdc-pickup-checkout.js` keeps `pickupSelections` as the restore source of truth, restores the active family bucket on boot/reload from localized `activePickupFamily`/`selectedPickupPoint`, merges REST/localized dictionaries without replacing complete payloads by code-only points, starts background prefetch for the active pickup family (including CDEK city-code requests) and hides inactive family cards without clearing their saved selection;
+- `assets/frontend/pickup-map/wdc-pickup-map.js` uses shared `display_title` / `display_code` for popup and side-list titles, with Russian Post postcode display and CDEK `cdek_code` display;
+- `assets/frontend/domestic-tariff-selector.js` and `.css` disable and grey out nested tariff rates when their parent grouped shipping method is inactive;
+- `CdekDeliveryPointService` provides live CDEK pickup point data from `GET /v2/deliverypoints` to the shared checkout/admin picker infrastructure and fills the normalized presentation fields;
 - admin summary page для ПВЗ.
 
 ## Orders

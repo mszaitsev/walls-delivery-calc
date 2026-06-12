@@ -228,6 +228,8 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Pickup\Storage\PickupPointRepository;
+use WallsShop\WDC\Pickup\Presentation\PickupPointCardRenderer;
+use WallsShop\WDC\Pickup\Presentation\PickupPointPresentationResolver;
 use WallsShop\WDC\Rules\Services\ConditionEvaluator;
 use WallsShop\WDC\Rules\Services\RuleEngine;
 use WallsShop\WDC\Rules\Services\RuleEvaluator;
@@ -426,9 +428,8 @@ pickup_smoke_assert( 'Красный проспект, 25' === ( $order->shippin
 pickup_smoke_assert( ! isset( $order->shipping['address_2'] ) || '' === (string) $order->shipping['address_2'], 'Pickup order must not write pickup code to shipping address_2.' );
 pickup_smoke_assert( 'Новосибирск' === ( $order->shipping['city'] ?? '' ), 'Pickup order must write normalized city to shipping city.' );
 pickup_smoke_assert( '630000' === ( $order->shipping['postcode'] ?? '' ), 'Pickup order must write resolved postcode to shipping postcode.' );
-pickup_smoke_assert( 'demo-nsk-001' === ( $shipping_item->meta['Код ПВЗ'] ?? '' ), 'Pickup shipping item meta must save pickup code.' );
-pickup_smoke_assert( isset( $shipping_item->meta['Адрес ПВЗ'], $shipping_item->meta['Комментарий ПВЗ'], $shipping_item->meta['Режим работы ПВЗ'] ), 'Pickup shipping item meta must save visible pickup details.' );
-pickup_smoke_assert( 'Пункт выдачи' === ( $shipping_item->meta['Тип доставки'] ?? '' ), 'Pickup shipping item meta must expose human delivery type.' );
+pickup_smoke_assert( 1 === count( $shipping_item->meta ), 'Pickup shipping item visible meta must contain only delivery time.' );
+pickup_smoke_assert( ! str_contains( (string) wp_json_encode( $shipping_item->meta ), 'demo-nsk-001' ), 'Pickup shipping item visible meta must not expose pickup code.' );
 ob_start();
 ( new OrderDeliveryMetabox() )->render( $order );
 $metabox_html = (string) ob_get_clean();
@@ -455,10 +456,19 @@ $session->save_pickup_selection(
 );
 $errors = new WdcPickupSmokeErrors();
 ( new CheckoutValidation( $session ) )->validate( array( 'shipping_city' => 'Новосибирск' ), $errors );
-pickup_smoke_assert( $errors->has_errors(), 'Validation must fail for pickup selection from another carrier or rate.' );
+pickup_smoke_assert( ! $errors->has_errors(), 'Validation must ignore another carrier pickup bucket while the active family still has a matching selection.' );
+$bucketed_pickup = $session->pickup_selections();
+pickup_smoke_assert( 'demo-nsk-001' === (string) ( $bucketed_pickup['demo:pickup']['point_code'] ?? '' ) && 'OTHER-1' === (string) ( $bucketed_pickup['other_carrier:pickup']['point_code'] ?? '' ), 'Session must keep demo and other carrier pickup selections in separate buckets.' );
 $order = new WdcPickupSmokeOrder();
 ( new OrderShippingMetaPersister( $session ) )->persist( $order );
-pickup_smoke_assert( ! isset( $order->meta['_wdc_platform_pickup_code'] ), 'Order meta must not save mismatched pickup selection.' );
+pickup_smoke_assert( 'demo-nsk-001' === (string) ( $order->meta['_wdc_platform_pickup_code'] ?? '' ), 'Order meta must use only the active pickup_family bucket.' );
+$session->clear_pickup_selection_for_family( 'other_carrier:pickup', 'family_reset_smoke' );
+pickup_smoke_assert( ! isset( $session->pickup_selections()['other_carrier:pickup'] ) && 'demo-nsk-001' === (string) ( $session->pickup_selections()['demo:pickup']['point_code'] ?? '' ), 'Custom family reset must not remove active demo pickup bucket.' );
+$session->save_pickup_selection( array( 'carrier_key' => 'other_carrier', 'rate_id' => 'other_carrier:pickup', 'point_code' => 'OTHER-1', 'point_address' => 'Other address' ) );
+$session->clear_pickup_selection_for_family( 'demo:pickup', 'family_reset_smoke' );
+pickup_smoke_assert( ! isset( $session->pickup_selections()['demo:pickup'] ) && 'OTHER-1' === (string) ( $session->pickup_selections()['other_carrier:pickup']['point_code'] ?? '' ), 'Active family reset must not remove another carrier bucket.' );
+$session->clear_pickup_selection( 'global_reset_smoke' );
+pickup_smoke_assert( array() === $session->pickup_selections(), 'Global reset must remove every pickup family bucket.' );
 
 $session->save_selected_delivery_type( DeliveryType::COURIER );
 $session->save_rates(
@@ -525,6 +535,59 @@ $courier_rates = $orchestrator->calculate_rates( pickup_smoke_request( DeliveryT
 pickup_smoke_assert( 2 === count( $pickup_rates ), 'Orchestrator must not filter rates by pickup delivery type.' );
 pickup_smoke_assert( 2 === count( $courier_rates ), 'Orchestrator must not filter rates by courier delivery type.' );
 
+$card_renderer = new PickupPointCardRenderer();
+$presentation_resolver = new PickupPointPresentationResolver();
+$rp_presentation = $presentation_resolver->resolve( array( 'carrier_key' => 'russian_post_domestic', 'pickup_family' => 'russian_post_domestic:pickup', 'point_type' => 'OPS' ) );
+$cdek_presentation = $presentation_resolver->resolve( array( 'carrier_key' => 'cdek', 'pickup_family' => 'cdek:pickup', 'point_type' => 'POSTAMAT' ) );
+$generic_presentation = $presentation_resolver->resolve( array( 'carrier_key' => 'custom_carrier', 'pickup_family' => 'custom_carrier:pickup', 'point_type' => 'LOCKER' ) );
+pickup_smoke_assert( 'Отделение Почты России' === (string) $rp_presentation['card_title'], 'Built-in Russian Post presentation must resolve through PickupPointPresentationResolver.' );
+pickup_smoke_assert( 'Постамат СДЭК' === (string) $cdek_presentation['card_title'] && 'Срок хранения 3 дня' === (string) $cdek_presentation['storage_notice'] && 'postamat' === (string) $cdek_presentation['marker_type'], 'Built-in CDEK POSTAMAT presentation must resolve through PickupPointPresentationResolver.' );
+pickup_smoke_assert( 'Пункт выдачи' === (string) $generic_presentation['card_title'] && 'pickup' === (string) $generic_presentation['marker_type'], 'Generic/custom pickup presentation must fall back safely.' );
+$rp_card = $card_renderer->render(
+	array(
+		'carrier_key' => 'russian_post_domestic',
+		'rate_id' => 'russian_post_domestic:pickup',
+		'point_type' => 'OPS',
+		'point_address' => 'Красный проспект, 25',
+		'point_postcode' => '630000',
+		'point_work_time' => 'Пн-Сб 10:00-20:00',
+		'point_comment' => '0.000000',
+	),
+	false,
+	false
+);
+pickup_smoke_assert( str_contains( $rp_card, 'Отделение Почты России' ), 'Russian Post OPS/PVZ card title must remain unchanged.' );
+pickup_smoke_assert( ! str_contains( $rp_card, '0.000000' ), 'Russian Post pickup card must not render numeric zero description.' );
+$rp_aps_card = $card_renderer->render(
+	array(
+		'carrier_key' => 'russian_post_domestic',
+		'rate_id' => 'russian_post_domestic:pickup',
+		'point_type' => 'APS',
+		'point_address' => 'Почтомат',
+	),
+	false,
+	false
+);
+pickup_smoke_assert( str_contains( $rp_aps_card, 'Почтомат Почты России' ), 'Russian Post APS card title must be Почтомат Почты России.' );
+$cdek_checkout_card = $card_renderer->render(
+	array(
+		'carrier_key' => 'cdek',
+		'rate_id' => 'cdek:pickup:136',
+		'point_type' => 'POSTAMAT',
+		'point_code' => 'KEM7',
+		'cdek_code' => 'KEM7',
+		'point_address' => 'Kemerovo, Sovetskiy 10',
+		'point_postcode' => '650004',
+		'description' => 'Inside the shopping center',
+		'storage_notice' => 'Срок хранения 3 дня',
+	),
+	true,
+	false,
+	false
+);
+pickup_smoke_assert( str_contains( $cdek_checkout_card, 'Постамат СДЭК' ) && str_contains( $cdek_checkout_card, 'Inside the shopping center' ) && str_contains( $cdek_checkout_card, 'Срок хранения 3 дня' ), 'CDEK checkout pickup card must render title, description, and storage notice.' );
+pickup_smoke_assert( ! str_contains( $cdek_checkout_card, 'Код пункта:' ) && ! str_contains( $cdek_checkout_card, 'Индекс:' ) && ! str_contains( $cdek_checkout_card, '650004' ), 'CDEK checkout pickup card must hide code and postcode rows.' );
+
 $root = dirname( __DIR__, 2 );
 $modal_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-modal.js' ) ?: '';
 $checkout_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' ) ?: '';
@@ -534,5 +597,10 @@ $yandex_provider_js = file_get_contents( $root . '/assets/frontend/pickup-map/pr
 pickup_smoke_assert( str_contains( $modal_js, 'wdc-pickup-map__locate' ) && str_contains( $modal_js, 'data-wdc-geolocation' ) && str_contains( $modal_js, '<svg viewBox="0 0 24 24"' ) && ! str_contains( $modal_js . $checkout_js, '⌖' ) && str_contains( $checkout_js, 'window.navigator.geolocation.getCurrentPosition' ), 'Pickup frontend must expose a map overlay geolocation button with the navigation-arrow SVG icon.' );
 pickup_smoke_assert( str_contains( $map_js, 'function useUserLocation(lat, lng)' ) && str_contains( $map_js, 'loadBounds(bboxAround(lat, lng), { force: true })' ) && str_contains( $map_js, 'searchAddress = null' ), 'Pickup geolocation must load nearby points from bbox without keeping the address marker active.' );
 pickup_smoke_assert( ! str_contains( $leaflet_provider_js . $yandex_provider_js, 'wdc-map-user-marker' ) && str_contains( $leaflet_provider_js . $yandex_provider_js, 'wdc-map-search-pin--push' ), 'Pickup geolocation origin must reuse the red search push-pin instead of the old blue user marker.' );
+
+$map_css = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-map.css' ) ?: '';
+pickup_smoke_assert( str_contains( $map_js, "type === 'APS'" ) && str_contains( $map_js, "label: 'Почтомат'" ), 'Russian Post APS label must remain Почтомат.' );
+pickup_smoke_assert( str_contains( $map_js, "type === 'POSTAMAT'" ) && str_contains( $map_js, "label: 'Постамат'" ) && str_contains( $leaflet_provider_js . $yandex_provider_js, "type === 'POSTAMAT'" ), 'CDEK POSTAMAT must be a separate pickup map type.' );
+pickup_smoke_assert( str_contains( $map_css, 'wdc-map-marker-pin--postamat' ) && str_contains( $map_css, 'wdc-map-marker--postamat' ), 'CDEK POSTAMAT markers must have a separate style.' );
 
 echo "Pickup foundation smoke test passed.\n";

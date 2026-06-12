@@ -19,6 +19,17 @@
 	cursor: pointer;
 }
 
+.wdc-domestic-tariff-selector.is-inactive .wdc-domestic-tariff-selector__item {
+	background: #f3f4f6;
+	border-color: #e5e7eb;
+	color: #6b7280;
+	cursor: not-allowed;
+}
+
+.wdc-domestic-tariff-selector.is-inactive .wdc-domestic-tariff-selector__item input {
+	cursor: not-allowed;
+}
+
 .wdc-domestic-tariff-selector__item input {
 	position: static !important;
 	flex: 0 0 auto;

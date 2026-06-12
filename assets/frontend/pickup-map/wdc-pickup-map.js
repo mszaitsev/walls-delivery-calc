@@ -90,19 +90,24 @@
 
 		function renderPointPopup(point, selected) {
 			var rows = [];
-			var title = ['Почта России', point.postal_code || point.postcode || point.point_code || ''].filter(Boolean).join(' ');
+			var title = pointDisplayTitle(point);
+			var workTime = meaningfulText(point.work_time);
+			var description = cleanDescription(point.description);
 			if (title) {
 				rows.push('<h3 class="wdc-pickup-popup__title">' + escapeHtml(title) + '</h3>');
 			}
 			rows.push('<div class="wdc-pickup-popup__type">' + escapeHtml(pointTypeLabel(point)) + '</div>');
+			if (storageNotice(point)) {
+				rows.push('<div class="wdc-pickup-popup__storage">' + escapeHtml(storageNotice(point)) + '</div>');
+			}
 			if (point.address) {
 				rows.push('<div class="wdc-pickup-popup__section"><strong>Адрес:</strong><span>' + escapeHtml(point.address) + '</span></div>');
 			}
-			if (point.work_time) {
-				rows.push('<div class="wdc-pickup-popup__section"><strong>График:</strong><span>' + escapeHtml(point.work_time) + '</span></div>');
+			if (workTime) {
+				rows.push('<div class="wdc-pickup-popup__section"><strong>График:</strong><span>' + escapeHtml(workTime) + '</span></div>');
 			}
-			if (cleanDescription(point.description)) {
-				rows.push('<div class="wdc-pickup-popup__section"><strong>Описание:</strong><span>' + escapeHtml(cleanDescription(point.description)) + '</span></div>');
+			if (description) {
+				rows.push('<div class="wdc-pickup-popup__section"><strong>Описание:</strong><span>' + escapeHtml(description) + '</span></div>');
 			}
 			rows.push('<button type="button" class="button button-primary wdc-pickup-popup__select" data-wdc-pickup-popup-select data-wdc-point-id="' + escapeHtml(pointId(point)) + '"' + (selected ? ' disabled' : '') + '>' + escapeHtml(selected ? 'Выбран' : 'Выбрать этот пункт') + '</button>');
 			return '<div class="wdc-pickup-popup">' + rows.join('') + '</div>';
@@ -263,9 +268,10 @@
 				'<div role="button" tabindex="0" class="wdc-pickup-list__item' + (active ? ' active' : '') + (selected ? ' selected' : '') + (previewed ? ' preview' : '') + '" data-wdc-point-id="' + escapeHtml(pointId(point)) + '">',
 				'<span class="wdc-pickup-list__index">' + (index + 1) + '</span>',
 				'<span class="wdc-pickup-list__content">',
-				'<span class="wdc-pickup-list__headline"><strong>' + escapeHtml(pointTypeLabel(point)) + '</strong>' + (point.distanceText ? '<em>' + escapeHtml(point.distanceText) + '</em>' : '') + '</span>',
+				'<span class="wdc-pickup-list__headline"><strong>' + escapeHtml(pointDisplayTitle(point)) + '</strong>' + (point.distanceText ? '<em>' + escapeHtml(point.distanceText) + '</em>' : '') + '</span>',
 				point.address ? '<span class="wdc-pickup-list__address">' + escapeHtml(point.address) + '</span>' : '',
 				point.work_time ? '<span class="wdc-pickup-list__time">' + escapeHtml(point.work_time) + '</span>' : '',
+				storageNotice(point) ? '<span class="wdc-pickup-list__storage">' + escapeHtml(storageNotice(point)) + '</span>' : '',
 				'</span>',
 				'</div>'
 			].join('');
@@ -298,14 +304,14 @@
 			}
 			controller = new AbortController();
 			card.textContent = labels.loading || 'Loading...';
-			window.WDCPickupApi.points(bbox, controller.signal).then(function (points) {
+			window.WDCPickupApi.points(bbox, controller.signal, context).then(function (points) {
 				renderMarkers(points, labels.empty || '');
 				if (options.previewNearest && visiblePoints[0]) {
 					preview(visiblePoints[0], { focus: false, initial: true });
 				}
 			}).catch(function (error) {
 				if (error.name !== 'AbortError') {
-					card.textContent = labels.error || 'Error';
+					card.textContent = context.carrier === 'cdek' || context.carrier_key === 'cdek' ? 'Не удалось загрузить пункты выдачи СДЭК. Попробуйте позже.' : (labels.error || 'Error');
 				}
 			});
 		}
@@ -334,7 +340,7 @@
 			card.textContent = labels.loading || 'Loading...';
 			if (initial) {
 				var initialRequest = window.WDCPickupApi.searchInitial || window.WDCPickupApi.search;
-				return initialRequest(query, controller.signal).then(function (points) {
+				return initialRequest(query, controller.signal, context).then(function (points) {
 					if (points[0] && points[0].lat !== null && points[0].lng !== null) {
 						var point = enrichPoints([points[0]])[0];
 						suppressNextMoveLoad = true;
@@ -351,7 +357,18 @@
 				});
 			}
 			if (!window.WDCPickupApi.addressSearch) {
-				return Promise.resolve();
+				return window.WDCPickupApi.search(query, controller.signal, context).then(function (points) {
+					renderMarkers(points, labels.empty || '');
+				});
+			}
+			if (context.carrier === 'cdek' || context.carrier_key === 'cdek') {
+				return window.WDCPickupApi.search(query, controller.signal, context).then(function (points) {
+					renderMarkers(points, labels.empty || '');
+				}).catch(function (error) {
+					if (error.name !== 'AbortError') {
+						card.textContent = 'Не удалось загрузить пункты выдачи СДЭК. Попробуйте позже.';
+					}
+				});
 			}
 			return window.WDCPickupApi.addressSearch(query, context, controller.signal).then(function (result) {
 				if (result && result.address_search_available === false) {
@@ -658,13 +675,44 @@
 		normalized.address = normalized.address || snapshot.address;
 		normalized.lat = normalized.lat !== undefined && normalized.lat !== null ? normalized.lat : snapshot.lat;
 		normalized.lng = normalized.lng !== undefined && normalized.lng !== null ? normalized.lng : snapshot.lng;
-		normalized.work_time = normalized.work_time || snapshot.work_time;
-		normalized.description = normalized.description || snapshot.description;
+		normalized.work_time = firstMeaningfulText(normalized.work_time, snapshot.work_time);
+		normalized.description = firstCleanDescription(normalized.description, snapshot.description);
+		normalized.storage_notice = firstCleanDescription(normalized.storage_notice, snapshot.storage_notice);
+		normalized.marker_type = normalized.marker_type || snapshot.marker_type;
+		normalized.point_title = normalized.point_title || normalized.card_title || snapshot.point_title || snapshot.card_title;
+		normalized.point_type_label = normalized.point_type_label || snapshot.point_type_label;
+		normalized.cdek_code = normalized.cdek_code || snapshot.cdek_code;
 		return pointId(normalized) ? normalized : null;
 	}
 
 	function selectedSummary(point) {
-		return 'Выбран: ' + [point.postal_code || point.postcode || '', point.address || ''].filter(Boolean).join(', ');
+		return 'Выбран: ' + [pointDisplayCode(point), point.address || ''].filter(Boolean).join(', ');
+	}
+
+	function carrierTitle(point) {
+		return String((point && (point.point_title || point.card_title || point.point_type_label)) || '').trim() || 'Пункт выдачи';
+	}
+
+	function pointDisplayTitle(point) {
+		return String((point && (point.display_title || (point.snapshot && point.snapshot.display_title))) || '').trim()
+			|| [carrierTitle(point), pointDisplayCode(point)].filter(Boolean).join(' ');
+	}
+
+	function pointDisplayCode(point) {
+		if (!point) {
+			return '';
+		}
+		if (point.display_code || (point.snapshot && point.snapshot.display_code)) {
+			return String(point.display_code || (point.snapshot && point.snapshot.display_code) || '').trim();
+		}
+		var carrier = String(point.carrier_key || point.carrier || (point.snapshot && (point.snapshot.carrier_key || point.snapshot.carrier)) || '').trim();
+		if (carrier === 'russian_post_domestic' || carrier === 'russian_post') {
+			return String(point.postcode || point.postal_code || (point.snapshot && point.snapshot.postcode) || '').trim();
+		}
+		if (carrier === 'cdek') {
+			return String(point.cdek_code || point.point_code || (point.snapshot && (point.snapshot.cdek_code || point.snapshot.point_code)) || '').trim();
+		}
+		return String(point.point_code || point.postal_code || point.postcode || '').trim();
 	}
 
 	function validPointCoordinates(point) {
@@ -695,6 +743,9 @@
 	}
 
 	function pointTypeLabel(point) {
+		if (point && point.point_type_label) {
+			return point.point_type_label;
+		}
 		if (point && point._wdcTypeLabel) {
 			return point._wdcTypeLabel;
 		}
@@ -704,6 +755,13 @@
 	}
 
 	function pickupPointType(point) {
+		var markerType = String((point && point.marker_type) || '').toLowerCase();
+		if (markerType === 'postamat') {
+			return 'POSTAMAT';
+		}
+		if (markerType === 'pickup') {
+			return 'PVZ';
+		}
 		var type = String(point.point_type || point.type || '').toUpperCase();
 		return type === 'PVZ' || type === 'APS' ? type : 'OPS';
 	}
@@ -720,7 +778,21 @@
 		if (type === 'APS') {
 			return { enabled: true, label: 'Почтомат' };
 		}
-		return { enabled: true, label: 'Отделение Почты России' };
+		if (type === 'POSTAMAT') {
+			return { enabled: true, label: 'Постамат' };
+		}
+		return { enabled: true, label: 'Пункт выдачи' };
+	}
+
+	function storageNotice(point) {
+		if (!point) {
+			return '';
+		}
+		var notice = cleanDescription(point.storage_notice);
+		if (notice) {
+			return notice;
+		}
+		return '';
 	}
 
 	function cleanDescription(value) {
@@ -729,6 +801,38 @@
 			return '';
 		}
 		return text;
+	}
+
+	function meaningfulText(value) {
+		if (value === null || value === undefined || Array.isArray(value) || typeof value === 'object') {
+			return '';
+		}
+		var text = String(value).trim();
+		if (!text) {
+			return '';
+		}
+		var normalized = text.replace(',', '.');
+		return !isNaN(normalized) && parseFloat(normalized) === 0 ? '' : text;
+	}
+
+	function firstMeaningfulText() {
+		for (var i = 0; i < arguments.length; i++) {
+			var text = meaningfulText(arguments[i]);
+			if (text) {
+				return text;
+			}
+		}
+		return '';
+	}
+
+	function firstCleanDescription() {
+		for (var i = 0; i < arguments.length; i++) {
+			var text = cleanDescription(arguments[i]);
+			if (text) {
+				return text;
+			}
+		}
+		return '';
 	}
 
 	function listMeta(total, shown) {

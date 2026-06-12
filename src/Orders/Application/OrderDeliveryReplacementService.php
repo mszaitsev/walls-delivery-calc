@@ -284,8 +284,16 @@ final class OrderDeliveryReplacementService {
 		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
 			$map['_wdc_platform_pickup_code'] = (string) ( $pickup['point_code'] ?? '' );
 			$map['_wdc_platform_pickup_address'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
+			$map['_wdc_platform_pickup_comment'] = $this->first_meaningful( $pickup['description'] ?? '', $pickup['point_comment'] ?? '' );
+			$map['_wdc_platform_pickup_work_time'] = $this->first_meaningful( $pickup['work_time'] ?? '', $pickup['point_work_time'] ?? '' );
 			$map['_wdc_pickup_point_code'] = (string) ( $pickup['point_code'] ?? '' );
 			$map['_wdc_pickup_point_type'] = (string) ( $pickup['point_type'] ?? '' );
+			$map['_wdc_pickup_carrier_key'] = (string) ( $pickup['carrier_key'] ?? $rate['carrier_key'] ?? '' );
+			$map['_wdc_pickup_service_key'] = (string) ( $pickup['service_key'] ?? $rate['service_key'] ?? $rate['carrier_key'] ?? '' );
+			$map['_wdc_pickup_family'] = (string) ( $pickup['pickup_family'] ?? ( (string) ( $rate['carrier_key'] ?? '' ) !== '' ? (string) $rate['carrier_key'] . ':pickup' : '' ) );
+			$map['_wdc_pickup_point_type_label'] = (string) ( $pickup['point_type_label'] ?? '' );
+			$map['_wdc_pickup_point_title'] = (string) ( $pickup['point_title'] ?? '' );
+			$map['_wdc_pickup_marker_type'] = (string) ( $pickup['marker_type'] ?? '' );
 			$map['_wdc_pickup_point_address'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
 			$map['_wdc_pickup_point_postcode'] = (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? '' );
 			$map['_wdc_pickup_point_snapshot'] = function_exists( 'wp_json_encode' ) ? wp_json_encode( $pickup, JSON_UNESCAPED_UNICODE ) : json_encode( $pickup );
@@ -322,11 +330,10 @@ final class OrderDeliveryReplacementService {
 			'set_shipping_postcode' => $location_values['postcode'],
 		);
 		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
-			$pickup_location_values = $this->checkout_shipping_location_values( $location, array() );
 			$values['set_shipping_country'] = 'RU';
-			$values['set_shipping_state'] = '' !== $pickup_location_values['state'] ? $pickup_location_values['state'] : (string) ( $pickup['region_name'] ?? '' );
-			$values['set_shipping_city'] = '' !== $pickup_location_values['city'] ? $pickup_location_values['city'] : (string) ( $pickup['city_name'] ?? '' );
-			$values['set_shipping_postcode'] = (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? $location['postal_code'] ?? $location['postcode'] ?? '' );
+			$values['set_shipping_state'] = (string) ( $pickup['region_name'] ?? $pickup['region'] ?? $location_values['state'] );
+			$values['set_shipping_city'] = (string) ( $pickup['city_name'] ?? $pickup['city'] ?? $location_values['city'] );
+			$values['set_shipping_postcode'] = (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? $location_values['postcode'] );
 			$values['set_shipping_address_1'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
 			$values['set_shipping_address_2'] = '';
 		} elseif ( DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' ) && array() !== $address ) {
@@ -451,12 +458,26 @@ final class OrderDeliveryReplacementService {
 				'fias_id' => (string) ( $location['fias_id'] ?? $address['fias_id'] ?? '' ),
 			),
 			'pickup' => DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ? array(
+				'carrier_key' => (string) ( $pickup['carrier_key'] ?? $rate['carrier_key'] ?? '' ),
+				'service_key' => (string) ( $pickup['service_key'] ?? $rate['service_key'] ?? $rate['carrier_key'] ?? '' ),
+				'pickup_family' => (string) ( $pickup['pickup_family'] ?? ( (string) ( $rate['carrier_key'] ?? '' ) !== '' ? (string) $rate['carrier_key'] . ':pickup' : '' ) ),
 				'point_code' => (string) ( $pickup['point_code'] ?? '' ),
 				'point_type' => (string) ( $pickup['point_type'] ?? '' ),
+				'point_type_label' => (string) ( $pickup['point_type_label'] ?? '' ),
+				'point_title' => (string) ( $pickup['point_title'] ?? '' ),
+				'marker_type' => (string) ( $pickup['marker_type'] ?? '' ),
 				'point_name' => (string) ( $pickup['point_name'] ?? '' ),
 				'point_address' => (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' ),
 				'point_postcode' => (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? '' ),
-				'point_raw' => $pickup,
+				'city_name' => (string) ( $pickup['city_name'] ?? $pickup['city'] ?? '' ),
+				'region_name' => (string) ( $pickup['region_name'] ?? $pickup['region'] ?? '' ),
+				'latitude' => $pickup['lat'] ?? $pickup['latitude'] ?? null,
+				'longitude' => $pickup['lng'] ?? $pickup['longitude'] ?? null,
+				'work_time' => $this->first_meaningful( $pickup['work_time'] ?? '', $pickup['point_work_time'] ?? '' ),
+				'description' => $this->first_meaningful( $pickup['description'] ?? '', $pickup['point_comment'] ?? '' ),
+				'storage_notice' => $this->first_meaningful( $pickup['storage_notice'] ?? '' ),
+				'cdek_code' => (string) ( $pickup['cdek_code'] ?? $pickup['point_code'] ?? '' ),
+				'raw_sanitized' => is_array( $pickup['raw_sanitized'] ?? null ) ? $pickup['raw_sanitized'] : ( is_array( $pickup['raw'] ?? null ) ? $pickup['raw'] : array() ),
 			) : array(),
 			'package' => $this->calculation_package_data( $rate_meta ),
 			'api' => $this->calculation_api_data( $rate, $rate_meta, $api_base ),
@@ -695,6 +716,33 @@ final class OrderDeliveryReplacementService {
 	private function normalize( string $value ): string {
 		$value = trim( $value );
 		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
+	}
+
+	private function meaningful_text( mixed $value ): string {
+		if ( null === $value || is_array( $value ) || is_object( $value ) ) {
+			return '';
+		}
+		$text = trim( (string) $value );
+		if ( '' === $text ) {
+			return '';
+		}
+		$normalized = str_replace( ',', '.', $text );
+		if ( is_numeric( $normalized ) && 0.0 === (float) $normalized ) {
+			return '';
+		}
+
+		return $text;
+	}
+
+	private function first_meaningful( mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			$text = $this->meaningful_text( $value );
+			if ( '' !== $text ) {
+				return $text;
+			}
+		}
+
+		return '';
 	}
 
 	private function canonical_city( string $value ): string {

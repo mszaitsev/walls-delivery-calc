@@ -94,7 +94,7 @@ final class CheckoutOrchestrator {
 
 			if ( ! $quote instanceof DeliveryQuote ) {
 				$quote = $this->execution_guard->quote( $carrier, $service_request, $carrier_errors );
-				if ( $cache_enabled && $this->quote_cache instanceof QuoteCache && $quote->success ) {
+				if ( $cache_enabled && $this->quote_cache instanceof QuoteCache && $this->should_cache_quote( $quote ) ) {
 					$this->quote_cache->set( $service_request, $carrier_key, $quote, $delivery_type, $service_key );
 				}
 			}
@@ -156,6 +156,10 @@ final class CheckoutOrchestrator {
 		$this->logger->info( 'Checkout rates calculated.', array( 'rates_count' => count( $final ), 'fallback_used' => $fallback_used ) );
 
 		return new CheckoutCalculationResult( $final, $fallback_used, $cache_hits, $audit, $carrier_errors );
+	}
+
+	private function should_cache_quote( DeliveryQuote $quote ): bool {
+		return $quote->success && array() !== $quote->rates;
 	}
 
 	/**

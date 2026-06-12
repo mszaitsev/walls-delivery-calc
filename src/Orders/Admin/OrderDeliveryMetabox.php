@@ -85,6 +85,8 @@ final class OrderDeliveryMetabox {
 			$rows['Код ПВЗ']   = (string) ( $pickup['point_code'] ?? '' );
 			$rows['Тип ПВЗ']   = (string) ( $pickup['point_type'] ?? '' );
 			$rows['Адрес ПВЗ'] = (string) ( $pickup['point_address'] ?? '' );
+			$rows['Описание ПВЗ'] = (string) ( $pickup['description'] ?? '' );
+			$rows['Срок хранения'] = (string) ( $pickup['storage_notice'] ?? '' );
 		}
 
 		if ( $fallback ) {

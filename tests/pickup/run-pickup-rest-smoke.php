@@ -9,6 +9,24 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
+if ( ! class_exists( 'WC_Shipping_Method' ) ) {
+	class WC_Shipping_Method {}
+}
+if ( ! class_exists( 'WC_Session_Handler' ) ) {
+	class WC_Session_Handler {
+		/** @var array<string,mixed> */
+		public array $data = array();
+		public bool $initialized = false;
+		public bool $cookie_set = false;
+		public bool $saved = false;
+		public function init(): void { $this->initialized = true; }
+		public function get( string $key, mixed $default = null ): mixed { return $this->data[ $key ] ?? $default; }
+		public function set( string $key, mixed $value ): void { $this->data[ $key ] = $value; }
+		public function set_customer_session_cookie( bool $set ): void { $this->cookie_set = $set; }
+		public function save_data(): void { $this->saved = true; }
+	}
+}
+
 function pickup_rest_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
 		throw new RuntimeException( $message );
@@ -34,6 +52,27 @@ function __return_true(): bool { return true; }
 function register_rest_route( string $namespace, string $route, array $args ): bool {
 	$GLOBALS['wdc_rest_routes'][] = compact( 'namespace', 'route', 'args' );
 	return true;
+}
+function WC(): object {
+	static $wc = null;
+	if ( null === $wc ) {
+		$wc = new class {
+			public mixed $session;
+			public mixed $customer = null;
+			public function __construct() {
+				$this->session = new class {
+					/** @var array<string,mixed> */
+					public array $data = array();
+					public function get( string $key, mixed $default = null ): mixed { return $this->data[ $key ] ?? $default; }
+					public function set( string $key, mixed $value ): void { $this->data[ $key ] = $value; }
+					public function set_customer_session_cookie( bool $set ): void {}
+					public function save_data(): void {}
+				};
+			}
+		};
+	}
+
+	return $wc;
 }
 
 if ( ! class_exists( 'WP_Error' ) ) {
@@ -138,9 +177,11 @@ if ( ! class_exists( 'wpdb' ) ) {
 }
 
 use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
+use WallsShop\WDC\Pickup\Rest\CheckoutPickupPointRestController;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Pickup\Search\PickupAddressSearchService;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataSuggestionClient;
@@ -199,6 +240,10 @@ pickup_rest_assert( '__return_true' === $route_by_path['/points']['args']['permi
 $bbox = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '82.90,55.00,82.93,55.03' ) );
 pickup_rest_assert( 2 === count( $bbox ) && array( 1, 2 ) === array_column( $bbox, 'id' ), 'bbox must return only points inside requested area.' );
 pickup_rest_assert( array( 'russian_post', 'russian_post' ) === array_column( $bbox, 'carrier' ), 'REST summaries must expose russian_post carrier from the carrier-specific table.' );
+pickup_rest_assert( 'russian_post_domestic' === (string) ( $bbox[0]['carrier_key'] ?? '' ) && 'russian_post_domestic:pickup' === (string) ( $bbox[0]['pickup_family'] ?? '' ), 'Russian Post REST summary must expose normalized carrier_key and pickup_family.' );
+pickup_rest_assert( 'Отделение Почты России' === (string) ( $bbox[0]['point_title'] ?? '' ) && 'Пункт выдачи' === (string) ( $bbox[0]['point_type_label'] ?? '' ) && 'pickup' === (string) ( $bbox[0]['marker_type'] ?? '' ), 'Russian Post REST summary must expose normalized pickup presentation fields.' );
+pickup_rest_assert( '630001' === (string) ( $bbox[0]['display_code'] ?? '' ) && 'Отделение Почты России 630001' === (string) ( $bbox[0]['display_title'] ?? '' ), 'Russian Post REST summary must expose postcode-based display title for map side list.' );
+pickup_rest_assert( is_array( $bbox[0]['snapshot'] ?? null ) && 'russian_post_domestic:pickup' === (string) ( $bbox[0]['snapshot']['pickup_family'] ?? '' ), 'Russian Post REST summary must include normalized snapshot.' );
 pickup_rest_assert( 'nsk-fias' === (string) ( $bbox[0]['fias_location_guid'] ?? '' ), 'REST summaries must expose pickup FIAS location GUID for cross-location checkout checks.' );
 $removed_fields = array( 'brand_name', 'ecom_options', 'payment', 'accepts_cash', 'accepts_card', 'partial_redemption', 'return_available', 'fitting_available', 'contents_checking', 'functionality_checking', 'weight_limit_grams', 'raw_reference', 'work_time_json', 'source_hash' );
 foreach ( $removed_fields as $removed_field ) {
@@ -301,5 +346,57 @@ $invalid = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => 'b
 pickup_rest_assert( $invalid instanceof WP_Error && 'invalid_bbox' === $invalid->get_error_code(), 'invalid bbox must return error.' );
 $unsupported = $controller->points( array( 'carrier' => 'demo', 'bbox' => '0,0,180,90' ) );
 pickup_rest_assert( array() === $unsupported, 'Unsupported carrier must not read legacy pickup table.' );
+
+$pickup_rest_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/PickupPointsRestController.php' );
+$cdek_service_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Cdek/CdekDeliveryPointService.php' ) ?: '';
+$checkout_rest_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' ) ?: '';
+pickup_rest_assert( str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'description'" ) && str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'storage_notice'" ) && str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'cdek_code'" ) && str_contains( $cdek_service_source . $checkout_rest_source, "'pickup_family'" ) && str_contains( $cdek_service_source . $checkout_rest_source, "'point_title'" ), 'CDEK pickup REST summary must expose description, storage_notice, cdek_code and normalized presentation fields.' );
+$checkout_controller = new CheckoutPickupPointRestController( $repo, new CheckoutSessionManager() );
+WC()->session = null;
+$rp_save = $checkout_controller->save(
+	new WdcPickupRestRequest(
+		array(
+			'carrier' => 'russian_post_domestic',
+			'shipping_method_id' => 'russian_post_domestic:pickup',
+			'point_id' => '1',
+		),
+		array( 'X-WP-Nonce' => 'nonce' )
+	)
+);
+pickup_rest_assert( WC()->session instanceof WC_Session_Handler && WC()->session->initialized && WC()->session->cookie_set && WC()->session->saved, 'REST save must initialize a missing WooCommerce session before saving Russian Post pickup.' );
+pickup_rest_assert( '630001-a' === (string) ( $rp_save['pickup_selections']['russian_post_domestic:pickup']['point_code'] ?? '' ) && '630001-a' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['russian_post_domestic:pickup']['point_code'] ?? '' ), 'REST save without pre-existing WC session must write Russian Post canonical bucket.' );
+WC()->session = null;
+$cdek_save = $checkout_controller->save(
+	new WdcPickupRestRequest(
+		array(
+			'carrier' => 'cdek',
+			'shipping_method_id' => 'cdek:pickup',
+			'point' => array(
+				'id' => 'cdek:KEM7',
+				'carrier_key' => 'cdek',
+				'service_key' => 'cdek',
+				'pickup_family' => 'cdek:pickup',
+				'point_code' => 'KEM7',
+				'point_type' => 'PVZ',
+				'point_address' => 'CDEK address',
+				'point_postcode' => '650004',
+				'city_name' => 'Kemerovo',
+				'region_name' => 'Kemerovo oblast',
+			),
+		),
+		array( 'X-WP-Nonce' => 'nonce' )
+	)
+);
+pickup_rest_assert( WC()->session instanceof WC_Session_Handler && 'KEM7' === (string) ( $cdek_save['pickup_selections']['cdek:pickup']['point_code'] ?? '' ) && 'KEM7' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['cdek:pickup']['point_code'] ?? '' ), 'REST save without pre-existing WC session must write CDEK canonical bucket.' );
+$cdek_state = $checkout_controller->state( new WdcPickupRestRequest( array( 'pickup_family' => 'cdek:pickup' ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_rest_assert( 'KEM7' === (string) ( $cdek_state['pickup_selections']['cdek:pickup']['point_code'] ?? '' ) && 'KEM7' === (string) ( $cdek_state['pickup_point']['point_code'] ?? '' ), 'REST state after save must read the initialized CDEK canonical bucket.' );
+pickup_rest_assert( isset( $cdek_state['pickupSelections']['cdek:pickup'], $cdek_state['pickup_selections']['cdek:pickup'] ) && array_keys( $cdek_state['pickupSelections'] ) === array( 'cdek:pickup' ), 'REST state must expose pickup selections as camelCase and snake_case dictionaries.' );
+$cdek_reset = $checkout_controller->delete( new WdcPickupRestRequest( array( 'pickup_family' => 'cdek:pickup' ), array( 'X-WP-Nonce' => 'nonce' ) ) );
+pickup_rest_assert( ! isset( $cdek_reset['pickup_selections']['cdek:pickup'] ) && WC()->session instanceof WC_Session_Handler, 'REST family reset must keep the initialized session and remove only the requested bucket.' );
+$session = new CheckoutSessionManager();
+$session->save_pickup_selection_for_family( 'cdek:pickup', array( 'carrier_key' => 'cdek', 'service_key' => 'cdek', 'point_code' => 'KEM7', 'point_address' => 'CDEK address' ) );
+$session->save_pickup_selection_for_family( 'russian_post_domestic:pickup', array( 'carrier_key' => 'russian_post_domestic', 'service_key' => 'russian_post_domestic', 'point_code' => '630001-a', 'point_address' => 'Ленина, 1' ) );
+pickup_rest_assert( 'KEM7' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['cdek:pickup']['point_code'] ?? '' ) && '630001-a' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['russian_post_domestic:pickup']['point_code'] ?? '' ), 'Raw WC session key must keep CDEK and Russian Post canonical pickup buckets.' );
+pickup_rest_assert( str_contains( $session_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutSessionManager.php' ), 'function set_raw_session_array' ) && str_contains( $session_source, 'save_data' ) && str_contains( $session_source, 'wdc_platform_pickup_selections' ), 'Checkout session manager must use a raw array writer for canonical pickup selections.' );
 
 echo "Pickup REST smoke test passed.\n";

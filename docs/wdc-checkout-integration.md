@@ -58,7 +58,7 @@ As of version 0.20.0, `CarrierRegistry` registers the real Russian Post internat
 
 ## Session persistence
 
-`CheckoutSessionManager` stores selected `delivery_type`, selected sort mode, last mapped rates, and debug data in the WooCommerce session abstraction. Pickup points and tariffs are not persisted yet.
+`CheckoutSessionManager` stores selected `delivery_type`, selected sort mode, last mapped rates, selected tariffs, pickup selections, city context and debug data in the WooCommerce session abstraction. Checkout order creation persists the selected pickup point into WDC order meta/calculation data and writes pickup shipping address fields when the selected rate requires a pickup point.
 
 ## Order meta persistence
 
