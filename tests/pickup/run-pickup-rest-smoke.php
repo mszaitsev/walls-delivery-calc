@@ -9,6 +9,10 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
+if ( ! class_exists( 'WC_Shipping_Method' ) ) {
+	class WC_Shipping_Method {}
+}
+
 function pickup_rest_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
 		throw new RuntimeException( $message );
@@ -34,6 +38,24 @@ function __return_true(): bool { return true; }
 function register_rest_route( string $namespace, string $route, array $args ): bool {
 	$GLOBALS['wdc_rest_routes'][] = compact( 'namespace', 'route', 'args' );
 	return true;
+}
+function WC(): object {
+	static $wc = null;
+	if ( null === $wc ) {
+		$wc = new class {
+			public object $session;
+			public function __construct() {
+				$this->session = new class {
+					/** @var array<string,mixed> */
+					public array $data = array();
+					public function get( string $key, mixed $default = null ): mixed { return $this->data[ $key ] ?? $default; }
+					public function set( string $key, mixed $value ): void { $this->data[ $key ] = $value; }
+				};
+			}
+		};
+	}
+
+	return $wc;
 }
 
 if ( ! class_exists( 'WP_Error' ) ) {
@@ -141,6 +163,7 @@ use WallsShop\WDC\Pickup\Rest\PickupPointsRestController;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Pickup\Search\PickupAddressSearchService;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
 use WallsShop\WDC\Checkout\AddressSuggestions\DaDataSuggestionClient;
@@ -310,5 +333,10 @@ $pickup_rest_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/
 $cdek_service_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Cdek/CdekDeliveryPointService.php' ) ?: '';
 $checkout_rest_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' ) ?: '';
 pickup_rest_assert( str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'description'" ) && str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'storage_notice'" ) && str_contains( $pickup_rest_source . $cdek_service_source . $checkout_rest_source, "'cdek_code'" ) && str_contains( $cdek_service_source . $checkout_rest_source, "'pickup_family'" ) && str_contains( $cdek_service_source . $checkout_rest_source, "'point_title'" ), 'CDEK pickup REST summary must expose description, storage_notice, cdek_code and normalized presentation fields.' );
+$session = new CheckoutSessionManager();
+$session->save_pickup_selection_for_family( 'cdek:pickup', array( 'carrier_key' => 'cdek', 'service_key' => 'cdek', 'point_code' => 'KEM7', 'point_address' => 'CDEK address' ) );
+$session->save_pickup_selection_for_family( 'russian_post_domestic:pickup', array( 'carrier_key' => 'russian_post_domestic', 'service_key' => 'russian_post_domestic', 'point_code' => '630001-a', 'point_address' => 'Ленина, 1' ) );
+pickup_rest_assert( 'KEM7' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['cdek:pickup']['point_code'] ?? '' ) && '630001-a' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['russian_post_domestic:pickup']['point_code'] ?? '' ), 'Raw WC session key must keep CDEK and Russian Post canonical pickup buckets.' );
+pickup_rest_assert( str_contains( $session_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutSessionManager.php' ), 'function set_raw_session_array' ) && str_contains( $session_source, 'save_data' ) && str_contains( $session_source, 'wdc_platform_pickup_selections' ), 'Checkout session manager must use a raw array writer for canonical pickup selections.' );
 
 echo "Pickup REST smoke test passed.\n";

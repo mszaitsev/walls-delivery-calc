@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.15.
+Version: 0.45.16.
+
+0.45.16 raw session write fix: canonical pickup buckets now use a dedicated raw array writer/reader for `wdc_platform_pickup_selections`. The save path writes the nested dictionary, immediately rereads the raw session key, and logs a `WDC pickup canonical bucket write failed` debug event only if the saved family is still absent. After REST save, debug should show `raw_pickup_selections_after_keys` and `pickup_selections_after_keys` containing the active `...:pickup` family.
 
 0.45.15 canonical bucket save fix: REST pickup save now writes the selected point through `CheckoutSessionManager::save_pickup_selection_for_family()`. The canonical `wdc_platform_pickup_selections` dictionary is populated before legacy mirrors, so `pickupSelections['cdek:pickup']` and `pickupSelections['russian_post_domestic:pickup']` survive reload and are available to checkout validation even when hidden fields are empty. `WDC_PICKUP_DEBUG` save logs now include raw/normalized bucket keys and saved bucket summaries.
 

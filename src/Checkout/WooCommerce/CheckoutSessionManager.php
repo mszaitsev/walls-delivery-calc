@@ -77,9 +77,20 @@ final class CheckoutSessionManager {
 		}
 		$selection['snapshot'] = $snapshot;
 
-		$selections = $this->stored_pickup_selections();
+		$selections = $this->raw_pickup_selections();
 		$selections[ $family ] = $selection;
-		$this->set( self::PICKUP_SELECTIONS_KEY, $selections );
+		$this->set_raw_session_array( self::PICKUP_SELECTIONS_KEY, $selections );
+		$raw_after = $this->raw_pickup_selections();
+		if ( ! isset( $raw_after[ $family ] ) ) {
+			$this->pickup_debug_log(
+				'WDC pickup canonical bucket write failed',
+				array(
+					'saved_family' => $family,
+					'raw_pickup_selections_after_keys' => array_keys( $raw_after ),
+					'saved_bucket_summary' => $this->pickup_debug_summary( $selection ),
+				)
+			);
+		}
 
 		$this->set( self::PICKUP_SELECTION_KEY, $selection );
 		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, $selection );
@@ -101,19 +112,17 @@ final class CheckoutSessionManager {
 	 * @return array<string,array<string,mixed>>
 	 */
 	public function pickup_selections(): array {
-		$selections = $this->get( self::PICKUP_SELECTIONS_KEY, array() );
+		$selections = $this->raw_pickup_selections();
 		$normalized = array();
-		if ( is_array( $selections ) ) {
-			foreach ( $selections as $family => $selection ) {
-				if ( ! is_string( $family ) || '' === trim( $family ) || ! is_array( $selection ) ) {
-					continue;
-				}
-				$family = $this->normalize_pickup_family( $family );
-				$selection = $this->normalize_pickup_selection_payload( $selection, false );
-				if ( '' !== $family ) {
-					$selection['pickup_family'] = (string) ( $selection['pickup_family'] ?? $family );
-					$normalized[ $family ] = $selection;
-				}
+		foreach ( $selections as $family => $selection ) {
+			if ( ! is_string( $family ) || '' === trim( $family ) || ! is_array( $selection ) ) {
+				continue;
+			}
+			$family = $this->normalize_pickup_family( $family );
+			$selection = $this->normalize_pickup_selection_payload( $selection, false );
+			if ( '' !== $family ) {
+				$selection['pickup_family'] = (string) ( $selection['pickup_family'] ?? $family );
+				$normalized[ $family ] = $selection;
 			}
 		}
 
@@ -158,7 +167,7 @@ final class CheckoutSessionManager {
 	public function clear_pickup_selection( string $reason = '' ): void {
 		$this->log_pickup_selection_clear( $reason ?: 'manual_clear', false );
 		$this->set( self::PICKUP_SELECTION_KEY, array() );
-		$this->set( self::PICKUP_SELECTIONS_KEY, array() );
+		$this->set_raw_session_array( self::PICKUP_SELECTIONS_KEY, array() );
 		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, array() );
 		$this->set( self::PICKUP_CARRIER_KEY, '' );
 	}
@@ -170,9 +179,9 @@ final class CheckoutSessionManager {
 			return;
 		}
 
-		$selections = $this->pickup_selections();
+		$selections = $this->raw_pickup_selections();
 		unset( $selections[ $pickup_family ] );
-		$this->set( self::PICKUP_SELECTIONS_KEY, $selections );
+		$this->set_raw_session_array( self::PICKUP_SELECTIONS_KEY, $selections );
 		$current = $this->pickup_selection();
 		if ( $pickup_family === (string) ( $current['pickup_family'] ?? '' ) ) {
 			$this->set( self::PICKUP_SELECTION_KEY, array() );
@@ -609,7 +618,7 @@ final class CheckoutSessionManager {
 	 * @return array<string,array<string,mixed>>
 	 */
 	private function stored_pickup_selections(): array {
-		$selections = $this->get( self::PICKUP_SELECTIONS_KEY, array() );
+		$selections = $this->get_raw_session_value( self::PICKUP_SELECTIONS_KEY, array() );
 		$stored = array();
 		if ( ! is_array( $selections ) ) {
 			return $stored;
@@ -905,6 +914,23 @@ final class CheckoutSessionManager {
 		}
 	}
 
+	/**
+	 * @param array<string,mixed> $value
+	 */
+	private function set_raw_session_array( string $key, array $value ): void {
+		$session = $this->session();
+		if ( ! is_object( $session ) ) {
+			return;
+		}
+		if ( method_exists( $session, 'set' ) ) {
+			$session->set( $key, $value );
+		}
+		$this->write_session_storage_property( $session, $key, $value );
+		if ( method_exists( $session, 'save_data' ) ) {
+			$session->save_data();
+		}
+	}
+
 	private function get( string $key, mixed $default ): mixed {
 		$session = $this->session();
 		if ( is_object( $session ) && method_exists( $session, 'get' ) ) {
@@ -912,6 +938,61 @@ final class CheckoutSessionManager {
 		}
 
 		return $default;
+	}
+
+	private function get_raw_session_value( string $key, mixed $default ): mixed {
+		$session = $this->session();
+		if ( ! is_object( $session ) ) {
+			return $default;
+		}
+		if ( method_exists( $session, 'get' ) ) {
+			$value = $session->get( $key, null );
+			if ( null !== $value ) {
+				return $value;
+			}
+		}
+
+		return $this->read_session_storage_property( $session, $key, $default );
+	}
+
+	private function read_session_storage_property( object $session, string $key, mixed $default ): mixed {
+		foreach ( array( 'data', '_data' ) as $property ) {
+			if ( ! property_exists( $session, $property ) ) {
+				continue;
+			}
+			try {
+				$reflection = new \ReflectionProperty( $session, $property );
+				$reflection->setAccessible( true );
+				$data = $reflection->getValue( $session );
+			} catch ( \Throwable ) {
+				continue;
+			}
+			if ( is_array( $data ) && array_key_exists( $key, $data ) ) {
+				return $data[ $key ];
+			}
+		}
+
+		return $default;
+	}
+
+	private function write_session_storage_property( object $session, string $key, mixed $value ): void {
+		foreach ( array( 'data', '_data' ) as $property ) {
+			if ( ! property_exists( $session, $property ) ) {
+				continue;
+			}
+			try {
+				$reflection = new \ReflectionProperty( $session, $property );
+				$reflection->setAccessible( true );
+				$data = $reflection->getValue( $session );
+				if ( ! is_array( $data ) ) {
+					$data = array();
+				}
+				$data[ $key ] = $value;
+				$reflection->setValue( $session, $data );
+			} catch ( \Throwable ) {
+				continue;
+			}
+		}
 	}
 
 	private function log_pickup_selection_clear( string $reason, bool $blocked, string $currentRateId = '' ): void {

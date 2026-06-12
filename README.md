@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.15.
+Current plugin version: 0.45.16.
+
+Version 0.45.16 hardens the low-level WooCommerce session write for canonical pickup buckets. `wdc_platform_pickup_selections` now uses a dedicated raw array writer/reader for the nested dictionary, verifies the bucket immediately after save, and logs a debug failure if the raw key is still missing. This makes `raw_pickup_selections_after_keys` / `pickup_selections_after_keys` show the saved `...:pickup` family right after REST save.
 
 Version 0.45.15 fixes canonical checkout pickup bucket persistence. REST pickup save now writes the full selected point through `save_pickup_selection_for_family()`, so `wdc_platform_pickup_selections[pickup_family]` is populated for Russian Post, CDEK and future pickup families before legacy singleton mirrors are updated. Reload checkout receives non-empty `pickupSelections`, and CDEK validation can use the canonical `cdek:pickup` bucket when posted hidden fields are empty.
 

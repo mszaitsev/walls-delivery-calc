@@ -365,6 +365,7 @@ $selection = array(
 $session->save_pickup_selection( $selection );
 $session->save_checkout_pickup_point( $selection );
 cdek_pickup_assert( 'KEM7' === (string) ( $session->pickup_selections()['cdek:pickup']['point_code'] ?? '' ), 'CDEK save_pickup_selection must write the canonical cdek:pickup bucket.' );
+cdek_pickup_assert( 'KEM7' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['cdek:pickup']['point_code'] ?? '' ), 'CDEK canonical bucket must be present in the raw WC session key.' );
 cdek_pickup_assert( true === $session->pickup_selection_matches( 'cdek', 'cdek:pickup:999' ), 'CDEK checkout pickup selection must match grouped CDEK pickup family.' );
 cdek_pickup_assert( false === $session->pickup_selection_matches( 'cdek', 'cdek:courier:137' ), 'CDEK checkout pickup selection must not match courier family.' );
 
@@ -381,6 +382,7 @@ $rest_saved = $rest_controller->save(
 	)
 );
 cdek_pickup_assert( 'KEM7' === (string) ( $rest_saved['pickupSelections']['cdek:pickup']['point_code'] ?? '' ) && 'KEM7' === (string) ( $rest_session->pickup_selections()['cdek:pickup']['point_code'] ?? '' ), 'CDEK REST save must write and return the canonical cdek:pickup bucket.' );
+cdek_pickup_assert( 'KEM7' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['cdek:pickup']['point_code'] ?? '' ), 'CDEK REST save must persist the canonical bucket in the raw WC session key.' );
 $rest_errors = new CdekPickupSmokeErrors();
 ( new CheckoutValidation( $rest_session ) )->validate(
 	array(

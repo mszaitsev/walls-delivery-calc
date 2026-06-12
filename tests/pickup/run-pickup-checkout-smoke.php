@@ -204,6 +204,28 @@ pickup_checkout_assert( 1 === count( $bbox ), 'bbox endpoint must return active 
 
 $session = new CheckoutSessionManager();
 pickup_checkout_assert( false === $session->pickup_debug_enabled(), 'pickup debug mode must be disabled by default.' );
+$saved_cdek_bucket = $session->save_pickup_selection_for_family(
+	'cdek:pickup',
+	array(
+		'carrier_key' => 'cdek',
+		'service_key' => 'cdek',
+		'point_code' => 'KEM7',
+		'point_address' => 'CDEK address',
+	)
+);
+pickup_checkout_assert( 'KEM7' === (string) ( $saved_cdek_bucket['point_code'] ?? '' ) && 'KEM7' === (string) ( $session->pickup_selections()['cdek:pickup']['point_code'] ?? '' ), 'save_pickup_selection_for_family must immediately return and expose the CDEK canonical bucket.' );
+pickup_checkout_assert( 'KEM7' === (string) ( $GLOBALS['wdc_pickup_checkout_session']->data['wdc_platform_pickup_selections']['cdek:pickup']['point_code'] ?? '' ), 'Raw WC session key must contain the CDEK pickup bucket immediately after save.' );
+$session->save_pickup_selection_for_family(
+	RussianPostDomesticSettings::CARRIER_KEY . ':pickup',
+	array(
+		'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+		'service_key' => RussianPostDomesticSettings::SERVICE_KEY,
+		'point_code' => '630001-a',
+		'point_address' => 'Ленина, 1',
+	)
+);
+pickup_checkout_assert( 'KEM7' === (string) ( $session->pickup_selections()['cdek:pickup']['point_code'] ?? '' ) && '630001-a' === (string) ( $session->pickup_selections()[ RussianPostDomesticSettings::CARRIER_KEY . ':pickup' ]['point_code'] ?? '' ), 'Sequential family saves must keep CDEK and Russian Post buckets together.' );
+$session->clear_pickup_selection( 'canonical_write_smoke_reset' );
 $debug_summary = $session->pickup_debug_summary(
 	array(
 		'carrier_key' => 'cdek',
