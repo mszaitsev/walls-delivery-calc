@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.18.
+Version: 0.45.19.
+
+0.45.19 frontend restore fix: checkout JS now normalizes `pickupSelections` / `pickup_selections` / `selectedPickupPoints` / `selected_pickup_points` from localized config and REST state into one family-keyed dictionary. REST state responses also merge `selectedPickupPoint`, `selected_pickup_point` and `pickup_point` back into the dictionary, then reapply the active family bucket through `applySelection()` after reload/`updated_checkout` so hidden fields and selected pickup cards are restored.
 
 0.45.18 REST session fix: checkout pickup REST save/state/reset now ensure WooCommerce session context before reading or writing pickup buckets. If a REST request arrives without `WC()->session`, the controller initializes `WC_Session_Handler`, sets the customer session cookie when available, and then writes `wdc_platform_pickup_selections[pickup_family]`. Debug should now show `session_exists=true`, a `WC_Session_Handler` class, and non-empty raw keys after REST save.
 

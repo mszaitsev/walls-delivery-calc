@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.18.
+Current plugin version: 0.45.19.
+
+Version 0.45.19 fixes frontend checkout pickup restore after reload/update. The checkout JS now extracts pickup buckets from both camelCase and snake_case localized/REST state fields, merges state responses into the `selectedPickupPoints` dictionary without losing full payloads, adds single selected-point responses back into the family bucket, and reapplies the active family selection after REST state refresh so hidden fields and the selected pickup card are restored.
 
 Version 0.45.18 fixes REST checkout pickup saves when the request starts without an initialized WooCommerce session. The checkout pickup REST controller now ensures `WC()->session` / customer session cookie context before save, state and reset endpoints touch canonical pickup buckets, so `wdc_platform_pickup_selections[pickup_family]` can be written during REST save and later restored on checkout reload.
 

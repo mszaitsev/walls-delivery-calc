@@ -390,6 +390,7 @@ $cdek_save = $checkout_controller->save(
 pickup_rest_assert( WC()->session instanceof WC_Session_Handler && 'KEM7' === (string) ( $cdek_save['pickup_selections']['cdek:pickup']['point_code'] ?? '' ) && 'KEM7' === (string) ( WC()->session->data['wdc_platform_pickup_selections']['cdek:pickup']['point_code'] ?? '' ), 'REST save without pre-existing WC session must write CDEK canonical bucket.' );
 $cdek_state = $checkout_controller->state( new WdcPickupRestRequest( array( 'pickup_family' => 'cdek:pickup' ), array( 'X-WP-Nonce' => 'nonce' ) ) );
 pickup_rest_assert( 'KEM7' === (string) ( $cdek_state['pickup_selections']['cdek:pickup']['point_code'] ?? '' ) && 'KEM7' === (string) ( $cdek_state['pickup_point']['point_code'] ?? '' ), 'REST state after save must read the initialized CDEK canonical bucket.' );
+pickup_rest_assert( isset( $cdek_state['pickupSelections']['cdek:pickup'], $cdek_state['pickup_selections']['cdek:pickup'] ) && array_keys( $cdek_state['pickupSelections'] ) === array( 'cdek:pickup' ), 'REST state must expose pickup selections as camelCase and snake_case dictionaries.' );
 $cdek_reset = $checkout_controller->delete( new WdcPickupRestRequest( array( 'pickup_family' => 'cdek:pickup' ), array( 'X-WP-Nonce' => 'nonce' ) ) );
 pickup_rest_assert( ! isset( $cdek_reset['pickup_selections']['cdek:pickup'] ) && WC()->session instanceof WC_Session_Handler, 'REST family reset must keep the initialized session and remove only the requested bucket.' );
 $session = new CheckoutSessionManager();
