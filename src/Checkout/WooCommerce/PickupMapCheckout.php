@@ -60,16 +60,6 @@ final class PickupMapCheckout {
 			$pickup_selections = $this->selected_points_context( false );
 			$selected_pickup_points = $this->selected_points_context( true );
 			$selected_pickup_point = $this->selected_point_context( $active_pickup_family );
-			$this->session_manager->pickup_debug_log(
-				'WDC pickup localized config',
-				array(
-					'active_shipping_method' => $active_shipping_method,
-					'active_family' => $active_pickup_family,
-					'pickup_selections_keys' => array_keys( $pickup_selections ),
-					'selected_pickup_point_summary' => is_array( $selected_pickup_point ) ? $this->session_manager->pickup_debug_summary( $selected_pickup_point ) : array(),
-					'initial_context_has_selected_point' => is_array( $initial_context['selectedPoint'] ?? null ) && array() !== (array) $initial_context['selectedPoint'],
-				)
-			);
 			wp_localize_script(
 				'wdc-pickup-checkout',
 				'wdcPickupCheckout',
@@ -85,8 +75,6 @@ final class PickupMapCheckout {
 					'selectedPickupPoints' => $selected_pickup_points,
 					'activePickupFamily' => $active_pickup_family,
 					'selectedPickupPoint' => $selected_pickup_point,
-					'debug'            => $this->session_manager->pickup_debug_enabled(),
-					'pickupDebug'      => $this->session_manager->pickup_debug_enabled(),
 					'mapProvider'      => $provider,
 					'pickupPointTypes' => $this->pickup_point_types(),
 					'pickupFamilies'   => $this->pickup_families(),

@@ -1,20 +1,18 @@
 # Project Status
 
-0.45.21 note: checkout pickup restore no longer treats different destination fingerprint formats as a location change when stable destination identity still matches. The frontend compares selected pickup points by `location_id`, FIAS, GAR, city/region and postcode+city before fingerprint fallback, keeps explicit `destination_*` aliases in saved point payloads, and exposes location match details in debug output.
+0.45.22 note: temporary checkout pickup diagnostics were removed after the canonical bucket/session investigation. `wdc-pickup-checkout.js` no longer writes grouped console traces, pickup localization no longer exposes debug flags, and PHP pickup save/state/localized/validation/session-write debug logs were removed. Restore/save/validation business logic remains unchanged; real save failures still use normal warning/error logging.
 
-0.45.20 note: checkout pickup card restore now tolerates generic or stale pickup containers after WooCommerce reload. The frontend matches containers against the active pickup family, rewrites stale `data-shipping-method-id` on the active/generic block, applies the selected family bucket, and logs container method/family/match debug details when `WDC_PICKUP_DEBUG` is enabled.
+0.45.21 note: checkout pickup restore no longer treats different destination fingerprint formats as a location change when stable destination identity still matches. The frontend compares selected pickup points by `location_id`, FIAS, GAR, city/region and postcode+city before fingerprint fallback, and keeps explicit `destination_*` aliases in saved point payloads.
+
+0.45.20 note: checkout pickup card restore now tolerates generic or stale pickup containers after WooCommerce reload. The frontend matches containers against the active pickup family, rewrites stale `data-shipping-method-id` on the active/generic block, and applies the selected family bucket.
 
 0.45.19 note: checkout frontend restore now treats backend pickup state as a family-keyed dictionary regardless of camelCase/snake_case response shape. `wdc-pickup-checkout.js` extracts and merges localized/REST `pickupSelections`, selected point aliases and state responses into `selectedPickupPoints`, then reapplies the active family bucket after reload/`updated_checkout` so the selected pickup card and hidden fields return from backend state.
 
 0.45.18 note: checkout pickup REST endpoints now initialize WooCommerce session context before touching canonical pickup buckets. REST save/state/reset ensure `WC()->session` exists, set the customer session cookie when supported, and then read/write `wdc_platform_pickup_selections`, fixing the missing-session path where REST save returned success but left canonical bucket keys empty.
 
-0.45.17 note: checkout pickup diagnostics now trace the canonical `wdc_platform_pickup_selections` write path step by step. When `WDC_PICKUP_DEBUG` is enabled, logs show raw keys before save, local dictionary keys after assignment, raw session writer details, raw keys after reread, and dictionary clear reasons. This is a diagnostic-only stage; pickup restore and validation behavior were not intentionally changed.
-
-0.45.16 note: canonical pickup bucket persistence now bypasses fragile generic session access for the nested `wdc_platform_pickup_selections` dictionary. A dedicated raw array writer/reader stores the family bucket, verifies the raw key immediately, and keeps debug output focused on raw/normalized bucket keys so reload diagnostics can confirm the saved `...:pickup` family.
+0.45.16 note: canonical pickup bucket persistence now bypasses fragile generic session access for the nested `wdc_platform_pickup_selections` dictionary. A dedicated raw array writer/reader stores the family bucket and verifies the raw key immediately.
 
 0.45.15 note: REST pickup save now writes selected points into the canonical `wdc_platform_pickup_selections` dictionary via an explicit family-scoped session writer before updating legacy mirrors. Russian Post and CDEK buckets are present immediately after save, reload checkout receives non-empty `pickupSelections`, and CDEK validation can read the active `cdek:pickup` bucket without posted hidden fields.
-
-0.45.14 note: temporary checkout pickup-state diagnostics are available behind `define( 'WDC_PICKUP_DEBUG', true );`. With the flag enabled, checkout JS writes grouped console snapshots for boot, map opening, save, apply-selection, checkout updates and place order, while PHP writes sanitized WooCommerce logs for REST save/state, localized config and validation. This diagnostic step intentionally leaves business restore/validation behavior unchanged.
 
 0.45.13 note: checkout pickup restore and validation now depend on the active `pickup_family`, destination identity and saved point identity only. Selected CDEK/Russian Post pickup points survive reloads and tariff/rate suffix changes for the same city; CDEK validation passes from the `cdek:pickup` bucket without posted hidden fields; localized `pickupSelections` exposes raw saved buckets while `selectedPickupPoints` remains the renderable-card subset; and pickup address resolution for checkout cards/order meta now reads top-level, snapshot and raw address aliases.
 
@@ -100,7 +98,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.45.21`.
+- Текущая версия: `0.45.22`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `fix/cdek-pickup-selection-and-ui`.
 - Последнее обновление статуса: 2026-06-12.
@@ -139,7 +137,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.21`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.22`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

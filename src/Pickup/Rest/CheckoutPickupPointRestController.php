@@ -148,15 +148,6 @@ final class CheckoutPickupPointRestController {
 		$family = $this->param( $request, 'pickup_family' );
 		$active_family = '' !== $family ? $family : $this->active_pickup_family();
 		$point = '' !== $active_family ? $this->session_manager->checkout_pickup_point_for_family( $active_family ) : $this->session_manager->checkout_pickup_point();
-		$this->session_manager->pickup_debug_log(
-			'WDC pickup state',
-			array(
-				'active_shipping_method' => $this->active_shipping_method_id(),
-				'active_family' => $active_family,
-				'pickup_selections_keys' => array_keys( $this->session_manager->pickup_selections() ),
-				'selected_for_active_family_summary' => array() !== $point ? $this->session_manager->pickup_debug_summary( $point ) : array(),
-			)
-		);
 
 		return $this->response(
 			array(
@@ -177,7 +168,6 @@ final class CheckoutPickupPointRestController {
 		}
 
 		$woocommerce = WC();
-		$created_session = false;
 		if ( ! isset( $woocommerce->session ) || ! is_object( $woocommerce->session ) ) {
 			if ( class_exists( '\WC_Session_Handler' ) ) {
 				$session = new \WC_Session_Handler();
@@ -185,7 +175,6 @@ final class CheckoutPickupPointRestController {
 					$session->init();
 				}
 				$woocommerce->session = $session;
-				$created_session = true;
 			}
 		}
 
@@ -193,35 +182,17 @@ final class CheckoutPickupPointRestController {
 			$woocommerce->session->set_customer_session_cookie( true );
 		}
 
-		$created_customer = false;
 		if ( ( ! isset( $woocommerce->customer ) || ! is_object( $woocommerce->customer ) ) && class_exists( '\WC_Customer' ) ) {
 			$user_id = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0;
 			try {
 				$woocommerce->customer = new \WC_Customer( $user_id, true );
-				$created_customer = true;
 			} catch ( \Throwable ) {
 				try {
 					$woocommerce->customer = new \WC_Customer( 0, true );
-					$created_customer = true;
 				} catch ( \Throwable ) {
-					$created_customer = false;
 				}
 			}
 		}
-
-		$this->session_manager->pickup_debug_log(
-			'WDC pickup REST WooCommerce session ensured',
-			array(
-				'session_exists' => isset( $woocommerce->session ) && is_object( $woocommerce->session ),
-				'session_class' => isset( $woocommerce->session ) && is_object( $woocommerce->session ) ? get_class( $woocommerce->session ) : '',
-				'created_session' => $created_session,
-				'customer_exists' => isset( $woocommerce->customer ) && is_object( $woocommerce->customer ),
-				'customer_class' => isset( $woocommerce->customer ) && is_object( $woocommerce->customer ) ? get_class( $woocommerce->customer ) : '',
-				'created_customer' => $created_customer,
-				'has_set_method' => isset( $woocommerce->session ) && is_object( $woocommerce->session ) && method_exists( $woocommerce->session, 'set' ),
-				'has_save_data_method' => isset( $woocommerce->session ) && is_object( $woocommerce->session ) && method_exists( $woocommerce->session, 'save_data' ),
-			)
-		);
 	}
 
 	public function resolve_location( mixed $request ): mixed {
@@ -270,7 +241,6 @@ final class CheckoutPickupPointRestController {
 	 * @param array<string,mixed> $selection
 	 */
 	private function save_selection( array $selection, string $carrier, string $method_id ): void {
-		$before_keys = array_keys( $this->session_manager->pickup_selections() );
 		$carrier = $this->session_manager->normalize_carrier_key_for_pickup( $carrier );
 		$family = $this->session_manager->normalize_pickup_family( (string) ( $selection['pickup_family'] ?? $selection['snapshot']['pickup_family'] ?? $this->session_manager->shipping_method_family( $method_id ) ) );
 		if ( ! str_ends_with( $family, ':pickup' ) ) {
@@ -317,28 +287,7 @@ final class CheckoutPickupPointRestController {
 			'snapshot' => $snapshot ?: $selection,
 			'selected_at' => gmdate( 'c' ),
 		);
-		$saved = $this->session_manager->save_pickup_selection_for_family( $family, $payload );
-		$saved = $this->session_manager->pickup_selection_for_family( $family );
-		$this->session_manager->pickup_debug_log(
-			'WDC pickup save',
-			array(
-				'request_shipping_method_id' => $method_id,
-				'request_pickup_family' => (string) ( $selection['pickup_family'] ?? $selection['snapshot']['pickup_family'] ?? '' ),
-				'normalized_family' => $family,
-				'point_code' => (string) ( $selection['point_code'] ?? $selection['snapshot']['point_code'] ?? '' ),
-				'carrier_key' => $carrier,
-				'service_key' => $service_key,
-				'has_address' => array() !== $this->session_manager->pickup_debug_address_keys( $selection ),
-				'address_keys_present' => $this->session_manager->pickup_debug_address_keys( $selection ),
-				'session_pickup_selections_before_keys' => $before_keys,
-				'raw_pickup_selections_after_keys' => array_keys( $this->session_manager->raw_pickup_selections() ),
-				'session_pickup_selections_after_keys' => array_keys( $this->session_manager->pickup_selections() ),
-				'pickup_selections_after_keys' => array_keys( $this->session_manager->pickup_selections() ),
-				'saved_family' => $family,
-				'saved_bucket_exists' => array() !== $saved,
-				'saved_bucket_summary' => array() !== $saved ? $this->session_manager->pickup_debug_summary( $saved ) : array(),
-			)
-		);
+		$this->session_manager->save_pickup_selection_for_family( $family, $payload );
 	}
 
 	private function carrier_from_request( mixed $request, string $method_id ): string {

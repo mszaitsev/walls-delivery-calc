@@ -1,22 +1,20 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.21.
+Current plugin version: 0.45.22.
+
+Version 0.45.22 removes the temporary checkout pickup diagnostics added during the CDEK/Russian Post restore investigation. Checkout JS no longer emits grouped console traces, localized checkout config no longer exposes debug flags, and PHP pickup save/state/localized/validation/session-write debug logs were removed. Canonical pickup bucket restore/save/validation behavior remains unchanged; only normal warning/error logs remain for real failures.
 
 Version 0.45.21 fixes false frontend `location_mismatch` during checkout pickup restore. Selected pickup points now compare against the current checkout destination by stable identifiers first (`location_id`, FIAS, GAR, city/region, postcode+city) and use the full destination fingerprint only as a fallback. The selected point payload also keeps explicit `destination_*` aliases so pickup postcodes do not get confused with the checkout destination postcode.
 
-Version 0.45.20 fixes checkout pickup card restore when WooCommerce reloads a generic or stale pickup container. The frontend now matches the active pickup method by active `pickup_family`, allows a single generic pickup block to accept the active family, rewrites stale `data-shipping-method-id` before applying the selected point, and exposes container matching details in pickup debug output.
+Version 0.45.20 fixes checkout pickup card restore when WooCommerce reloads a generic or stale pickup container. The frontend now matches the active pickup method by active `pickup_family`, allows a single generic pickup block to accept the active family, and rewrites stale `data-shipping-method-id` before applying the selected point.
 
 Version 0.45.19 fixes frontend checkout pickup restore after reload/update. The checkout JS now extracts pickup buckets from both camelCase and snake_case localized/REST state fields, merges state responses into the `selectedPickupPoints` dictionary without losing full payloads, adds single selected-point responses back into the family bucket, and reapplies the active family selection after REST state refresh so hidden fields and the selected pickup card are restored.
 
 Version 0.45.18 fixes REST checkout pickup saves when the request starts without an initialized WooCommerce session. The checkout pickup REST controller now ensures `WC()->session` / customer session cookie context before save, state and reset endpoints touch canonical pickup buckets, so `wdc_platform_pickup_selections[pickup_family]` can be written during REST save and later restored on checkout reload.
 
-Version 0.45.17 adds step-by-step diagnostics for the canonical checkout pickup dictionary write path. With `WDC_PICKUP_DEBUG` enabled, `CheckoutSessionManager` now logs raw bucket keys before save, local dictionary keys after assignment, `set_raw_session_array()` session details, raw keys after reread, and every global/family dictionary clear reason. Business pickup restore and validation behavior are intentionally unchanged in this diagnostic step.
-
-Version 0.45.16 hardens the low-level WooCommerce session write for canonical pickup buckets. `wdc_platform_pickup_selections` now uses a dedicated raw array writer/reader for the nested dictionary, verifies the bucket immediately after save, and logs a debug failure if the raw key is still missing. This makes `raw_pickup_selections_after_keys` / `pickup_selections_after_keys` show the saved `...:pickup` family right after REST save.
+Version 0.45.16 hardens the low-level WooCommerce session write for canonical pickup buckets. `wdc_platform_pickup_selections` now uses a dedicated raw array writer/reader for the nested dictionary and verifies the bucket immediately after save.
 
 Version 0.45.15 fixes canonical checkout pickup bucket persistence. REST pickup save now writes the full selected point through `save_pickup_selection_for_family()`, so `wdc_platform_pickup_selections[pickup_family]` is populated for Russian Post, CDEK and future pickup families before legacy singleton mirrors are updated. Reload checkout receives non-empty `pickupSelections`, and CDEK validation can use the canonical `cdek:pickup` bucket when posted hidden fields are empty.
-
-Version 0.45.14 adds temporary checkout pickup-state diagnostics behind `WDC_PICKUP_DEBUG`. Enable it in `wp-config.php` with `define( 'WDC_PICKUP_DEBUG', true );` to get grouped browser console snapshots for pickup boot/save/apply/update/place-order flow and sanitized WooCommerce logs for REST save/state, localized config and checkout validation. Business pickup validation and restore behavior are intentionally unchanged in this diagnostic step.
 
 Version 0.45.13 tightens checkout pickup restore around the canonical family bucket model. Reload restore and checkout validation now depend on `pickup_family + destination + point identity`, not the selected tariff/rate/package. Localized `pickupSelections` keeps raw saved buckets even when a card address must be recovered from aliases, while `selectedPickupPoints` remains the renderable-card view. CDEK and Russian Post address aliases include snapshot/raw address fields, and order meta/shipping address persistence uses the same address resolver.
 
@@ -184,7 +182,7 @@ Version 0.28.1 makes the shared pickup point card renderer accept both checkout/
 
 Version 0.28.0 adds a shared pickup point card renderer for checkout, the order thank-you page, and customer emails. The checkout selected-point UI now updates the same card after map selection, order details reuse that renderer, and email output is controlled by a dynamic WooCommerce email-class setting that includes custom emails from extensions such as WooCommerce Order Status Manager.
 
-Version 0.27.15 trims temporary checkout pickup diagnostics for production. Backend validation and pickup clear logs now keep only compact method, point-presence, pass/fail, and restore-status fields, while detailed frontend context logs move behind `window.wdcPickupCheckout.deepDebug`.
+Version 0.27.15 trims temporary checkout pickup diagnostics for production. Backend validation and pickup clear logs now keep only compact method, point-presence, pass/fail, and restore-status fields.
 
 Version 0.27.14 registers an early WooCommerce checkout-process preloader for Russian Post pickup selections. Checkout submit POST hidden fields now restore the pickup session before later validation hooks run, and debug logs include checkout validation registration plus preload start/success/skipped messages.
 

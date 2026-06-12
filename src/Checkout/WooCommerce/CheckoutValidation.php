@@ -21,74 +21,35 @@ final class CheckoutValidation {
 	public function register(): void {
 		add_action( 'woocommerce_checkout_process', array( $this, 'preload_from_post' ), 5, 0 );
 		add_action( 'woocommerce_after_checkout_validation', array( $this, 'validate' ), 20, 2 );
-		$this->debug_validation( 'wdc_checkout_validation_registered' );
 	}
 
 	public function preload_from_post(): void {
 		$data = $this->posted_checkout_data();
 		$chosen_methods = $this->chosen_shipping_methods( $data );
 		$chosen_rate_id = $this->first_chosen_shipping_method( $chosen_methods );
-		$this->debug_validation(
-			'wdc_pickup_preload_from_post_start',
-			array(
-				'chosen_rate_id' => $chosen_rate_id,
-				'chosen_rate_family' => $this->session_manager->shipping_method_family( $chosen_rate_id ),
-				'posted_point_id_present' => max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) ) > 0,
-				'posted_point_code_present' => '' !== $this->posted_string( $data, 'wdc_pickup_point_code' ),
-				'session_has_pickup' => $this->session_manager->has_valid_pickup_selection(),
-			)
-		);
 
 		if ( ! $this->is_supported_pickup_family( $chosen_rate_id ) ) {
-			$this->debug_validation( 'wdc_pickup_preload_from_post_skipped', array( 'reason' => 'not_pickup_family', 'chosen_rate_id' => $chosen_rate_id ) );
 			return;
 		}
 
 		$point_id = max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) );
 		$point_code = $this->posted_string( $data, 'wdc_pickup_point_code' );
 		if ( $point_id <= 0 && '' === $point_code ) {
-			$this->debug_validation( 'wdc_pickup_preload_from_post_skipped', array( 'reason' => 'posted_point_missing' ) );
 			return;
 		}
 
-		$restored = $this->restore_posted_pickup_selection( $data, $this->synthetic_pickup_rate( $chosen_rate_id ) );
-		$this->debug_validation(
-			$restored ? 'wdc_pickup_preload_from_post_success' : 'wdc_pickup_preload_from_post_skipped',
-			array(
-				'reason' => $restored ? 'restored_from_post' : 'restore_failed',
-				'chosen_rate_id' => $chosen_rate_id,
-				'chosen_rate_family' => $this->session_manager->shipping_method_family( $chosen_rate_id ),
-				'session_has_pickup' => $this->session_manager->has_valid_pickup_selection(),
-			)
-		);
+		$this->restore_posted_pickup_selection( $data, $this->synthetic_pickup_rate( $chosen_rate_id ) );
 	}
 
 	public function validate( mixed $data = array(), mixed $errors = null ): void {
 		$data = is_array( $data ) ? $data : array();
 		$chosen_methods = $this->chosen_shipping_methods( $data );
 		$chosen_rate_id = $this->first_chosen_shipping_method( $chosen_methods );
-		$chosen_rate_id_normalized = $this->session_manager->normalize_rate_id( $chosen_rate_id );
 		$rate = $this->selected_rate( $data );
-		$selected_rate_found = array() !== $rate;
-		$synthetic_rate_created = false;
 		if ( array() === $rate && $this->is_supported_pickup_family( $chosen_rate_id ) ) {
 			$rate = $this->synthetic_pickup_rate( $chosen_rate_id );
-			$synthetic_rate_created = true;
 		}
-		$this->debug_validation(
-			'wdc_checkout_validation_start',
-			array(
-				'chosen_rate_id' => $chosen_rate_id,
-				'chosen_rate_family' => $this->session_manager->shipping_method_family( $chosen_rate_id_normalized ),
-				'posted_point_id_present' => max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) ) > 0,
-				'posted_point_code_present' => '' !== $this->posted_string( $data, 'wdc_pickup_point_code' ),
-				'selected_rate_found' => $selected_rate_found,
-				'synthetic_rate_created' => $synthetic_rate_created,
-				'session_has_pickup' => $this->session_manager->has_valid_pickup_selection(),
-			)
-		);
 		if ( array() === $rate ) {
-			$this->debug_validation( 'wdc_pickup_validation_failed', $this->validation_failure_context( 'selected_rate_missing', $data, $chosen_rate_id, '' ) );
 			return;
 		}
 
@@ -112,65 +73,19 @@ final class CheckoutValidation {
 		$active_selection = $this->session_manager->pickup_selection_for_family( $active_family );
 		if ( array() !== $active_selection && $this->session_manager->valid_pickup_selection_for_checkout( $active_family ) ) {
 			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
-			$this->session_manager->pickup_debug_log(
-				'WDC pickup validation',
-				$this->pickup_validation_debug_context( $data, $rate, $chosen_rate_id, $selected_rate_id, $active_family, $active_selection, true, 'active_family_bucket' )
-			);
-			$this->debug_validation(
-				'wdc_pickup_validation_passed',
-				array(
-					'reason' => 'active_family_bucket',
-					'active_pickup_family' => $active_family,
-					'selected_rate_id' => $selected_rate_id,
-				)
-			);
 			return;
 		}
 		$matches_before_restore = $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $selected_rate_id );
 		if ( $matches_before_restore ) {
 			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
-			$this->session_manager->pickup_debug_log(
-				'WDC pickup validation',
-				$this->pickup_validation_debug_context( $data, $rate, $chosen_rate_id, $selected_rate_id, $active_family, $active_selection, true, 'session_match' )
-			);
-			$this->debug_validation( 'wdc_pickup_validation_passed', array( 'reason' => 'session_match', 'selected_rate_id' => $selected_rate_id ) );
 			return;
 		}
 		$restored = $this->restore_posted_pickup_selection( $data, $rate );
 		if ( $restored ) {
 			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
-			$active_selection = $this->session_manager->pickup_selection_for_family( $active_family );
-			$this->session_manager->pickup_debug_log(
-				'WDC pickup validation',
-				$this->pickup_validation_debug_context( $data, $rate, $chosen_rate_id, $selected_rate_id, $active_family, $active_selection, true, 'restored_from_post' )
-			);
-			$this->debug_validation(
-				'wdc_pickup_restore_from_post_success',
-				array(
-					'pass_reason' => 'restored_from_post',
-					'selected_rate_id' => $selected_rate_id,
-					'session_has_pickup' => $this->session_manager->has_valid_pickup_selection(),
-				)
-			);
 			return;
 		}
 
-		$matches_after_restore = $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $selected_rate_id );
-		$active_selection = $this->session_manager->pickup_selection_for_family( $active_family );
-		$this->session_manager->pickup_debug_log(
-			'WDC pickup validation',
-			$this->pickup_validation_debug_context( $data, $rate, $chosen_rate_id, $selected_rate_id, $active_family, $active_selection, false, 'no_session_no_post_point' )
-		);
-		$this->debug_validation(
-			'wdc_pickup_validation_failed',
-			array_merge(
-				$this->validation_failure_context( 'no_session_no_post_point', $data, $chosen_rate_id, $selected_rate_id ),
-				array(
-					'restore_result' => $restored,
-					'matches_after_restore' => $matches_after_restore,
-				)
-			)
-		);
 		$this->add_pickup_error( $errors, $rate );
 	}
 
@@ -341,16 +256,7 @@ final class CheckoutValidation {
 	private function restore_posted_pickup_selection( array $data, array $rate ): bool {
 		$point_id   = max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) );
 		$point_code = $this->posted_string( $data, 'wdc_pickup_point_code' );
-		$this->debug_validation(
-			'wdc_pickup_restore_from_post_attempt',
-			array(
-				'posted_point_id_present' => $point_id > 0,
-				'posted_point_code_present' => '' !== $point_code,
-				'selected_rate_id' => $this->selected_rate_id( $rate ),
-			)
-		);
 		if ( $point_id <= 0 && '' === $point_code ) {
-			$this->debug_validation( 'wdc_pickup_restore_from_post_failed', array( 'reason' => 'posted_point_missing' ) );
 			return false;
 		}
 
@@ -363,26 +269,8 @@ final class CheckoutValidation {
 		if ( array() === $selection && $is_russian_post_family ) {
 			$selection = $point_id > 0 ? $this->selection_from_pickup_row( $point_id ) : array();
 		}
-		$this->debug_validation(
-			'wdc_pickup_restore_lookup_by_id',
-			array(
-				'posted_point_id_present' => $point_id > 0,
-				'pickup_family' => $family,
-				'lookup_allowed' => $is_russian_post_family,
-				'success' => array() !== $selection,
-			)
-		);
 		if ( array() === $selection && $is_russian_post_family && '' !== $point_code ) {
 			$selection = $this->selection_from_pickup_code( $point_code );
-			$this->debug_validation(
-				'wdc_pickup_restore_lookup_by_code',
-				array(
-					'posted_point_code_present' => '' !== $point_code,
-					'pickup_family' => $family,
-					'lookup_allowed' => $is_russian_post_family,
-					'success' => array() !== $selection,
-				)
-			);
 		}
 		if ( array() === $selection ) {
 			$selection = $this->selection_from_posted_fields( $data, $point_id, $point_code, $rate );
@@ -429,15 +317,6 @@ final class CheckoutValidation {
 		$selection['selected_at'] = gmdate( 'c' );
 		$this->session_manager->save_pickup_selection( $selection );
 		$this->session_manager->save_checkout_pickup_point( $this->checkout_pickup_point_from_selection( $selection ) );
-		$this->debug_validation(
-			'wdc_pickup_restore_from_post_saved',
-			array(
-				'pass_reason' => $minimal_restore_used ? 'restored_minimal' : 'restored_from_post',
-				'minimal_restore_used' => $minimal_restore_used,
-				'selected_rate_id' => (string) $selection['rate_id'],
-				'session_has_pickup' => $this->session_manager->has_valid_pickup_selection(),
-			)
-		);
 
 		return true;
 	}
@@ -816,60 +695,6 @@ final class CheckoutValidation {
 			'posted_point_id_present' => max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) ) > 0,
 			'posted_point_code_present' => '' !== $this->posted_string( $data, 'wdc_pickup_point_code' ),
 		);
-	}
-
-	/**
-	 * @param array<string,mixed> $data
-	 * @param array<string,mixed> $rate
-	 * @param array<string,mixed> $bucket
-	 * @return array<string,mixed>
-	 */
-	private function pickup_validation_debug_context( array $data, array $rate, string $chosen_rate_id, string $selected_rate_id, string $active_family, array $bucket, bool $result, string $failure_reason ): array {
-		$rate_carrier = $this->session_manager->normalize_carrier_key_for_pickup( (string) ( $rate['carrier_key'] ?? $this->carrier_from_family( $active_family ) ) );
-		$summary = array() !== $bucket ? $this->session_manager->pickup_debug_summary( $bucket ) : array();
-
-		return array(
-			'selected_shipping_method' => $chosen_rate_id,
-			'active_family' => $active_family,
-			'rate_carrier_key' => $rate_carrier,
-			'bucket_exists' => array() !== $bucket,
-			'bucket_family' => (string) ( $summary['pickup_family'] ?? '' ),
-			'bucket_carrier_key' => (string) ( $summary['carrier_key'] ?? '' ),
-			'bucket_point_code' => (string) ( $summary['point_code'] ?? '' ),
-			'bucket_point_id' => (string) ( $summary['point_id'] ?? '' ),
-			'bucket_has_address' => (bool) ( $summary['has_address'] ?? false ),
-			'location_match' => array() === $bucket ? false : $this->session_manager->pickup_debug_location_matches_current( $bucket ),
-			'carrier_match' => array() === $bucket ? false : $this->session_manager->pickup_debug_carrier_matches( $bucket, $rate_carrier ),
-			'family_match' => array() === $bucket ? false : $this->session_manager->pickup_debug_family_matches( $bucket, $active_family ),
-			'result' => $result ? 'pass' : 'fail',
-			'failure_reason' => $result ? '' : $failure_reason,
-			'selected_rate_id' => $selected_rate_id,
-			'posted_point_id_present' => max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) ) > 0,
-			'posted_point_code_present' => '' !== $this->posted_string( $data, 'wdc_pickup_point_code' ),
-		);
-	}
-
-	/**
-	 * @param array<string,mixed> $context
-	 */
-	private function debug_validation( string $message, array $context = array() ): void {
-		if ( ! $this->debug_logging_enabled() ) {
-			return;
-		}
-
-		if ( function_exists( 'wc_get_logger' ) ) {
-			wc_get_logger()->debug( $message, array_merge( $context, array( 'source' => 'walls-delivery-calc' ) ) );
-			return;
-		}
-
-		if ( function_exists( 'error_log' ) ) {
-			$encoded = function_exists( 'wp_json_encode' ) ? wp_json_encode( $context ) : json_encode( $context );
-			error_log( '[walls-delivery-calc] debug: ' . $message . ' ' . ( false !== $encoded ? $encoded : '' ) );
-		}
-	}
-
-	private function debug_logging_enabled(): bool {
-		return $this->session_manager->pickup_debug_enabled();
 	}
 
 	/**

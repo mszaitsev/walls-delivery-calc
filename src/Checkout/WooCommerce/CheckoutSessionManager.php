@@ -77,56 +77,16 @@ final class CheckoutSessionManager {
 		}
 		$selection['snapshot'] = $snapshot;
 
-		$raw_before = $this->raw_pickup_selections();
-		$this->pickup_debug_log(
-			'WDC pickup dictionary write step',
-			array(
-				'step' => '1 raw_before',
-				'saved_family' => $family,
-				'raw_before_keys' => array_keys( $raw_before ),
-				'raw_before_count' => count( $raw_before ),
-			)
-		);
-
-		$selections = $raw_before;
+		$selections = $this->raw_pickup_selections();
 		$selections[ $family ] = $selection;
-		$this->pickup_debug_log(
-			'WDC pickup dictionary write step',
-			array(
-				'step' => '2 local_dictionary',
-				'saved_family' => $family,
-				'local_dictionary_keys' => array_keys( $selections ),
-				'local_dictionary_count' => count( $selections ),
-			)
-		);
 		$this->set_raw_session_array( self::PICKUP_SELECTIONS_KEY, $selections );
-		$this->pickup_debug_log(
-			'WDC pickup dictionary write step',
-			array(
-				'step' => '3 after_set_raw_session_array',
-				'saved_family' => $family,
-				'session_key_name' => self::PICKUP_SELECTIONS_KEY,
-				'value_written_keys' => array_keys( $selections ),
-				'value_written_count' => count( $selections ),
-			)
-		);
 		$raw_after = $this->raw_pickup_selections();
-		$this->pickup_debug_log(
-			'WDC pickup dictionary write step',
-			array(
-				'step' => '4 raw_after',
-				'saved_family' => $family,
-				'raw_after_keys' => array_keys( $raw_after ),
-				'raw_after_count' => count( $raw_after ),
-			)
-		);
 		if ( ! isset( $raw_after[ $family ] ) ) {
-			$this->pickup_debug_log(
-				'WDC pickup canonical bucket write failed',
+			$this->log_pickup_warning(
+				'Pickup selection bucket could not be saved.',
 				array(
 					'saved_family' => $family,
 					'raw_pickup_selections_after_keys' => array_keys( $raw_after ),
-					'saved_bucket_summary' => $this->pickup_debug_summary( $selection ),
 				)
 			);
 		}
@@ -204,18 +164,8 @@ final class CheckoutSessionManager {
 	 * is fully reset, or an explicit "clear everything" action is requested.
 	 */
 	public function clear_pickup_selection( string $reason = '' ): void {
-		$this->log_pickup_selection_clear( $reason ?: 'manual_clear', false );
 		$this->set( self::PICKUP_SELECTION_KEY, array() );
 		$this->set_raw_session_array( self::PICKUP_SELECTIONS_KEY, array() );
-		$this->pickup_debug_log(
-			'WDC pickup dictionary cleared',
-			array(
-				'reason' => $reason ?: 'manual_clear',
-				'scope' => 'global',
-				'session_key_name' => self::PICKUP_SELECTIONS_KEY,
-				'remaining_keys' => array(),
-			)
-		);
 		$this->set( self::CHECKOUT_PICKUP_POINT_KEY, array() );
 		$this->set( self::PICKUP_CARRIER_KEY, '' );
 	}
@@ -230,30 +180,18 @@ final class CheckoutSessionManager {
 		$selections = $this->raw_pickup_selections();
 		unset( $selections[ $pickup_family ] );
 		$this->set_raw_session_array( self::PICKUP_SELECTIONS_KEY, $selections );
-		$this->pickup_debug_log(
-			'WDC pickup dictionary cleared',
-			array(
-				'reason' => $reason ?: 'family_clear',
-				'scope' => 'family',
-				'pickup_family' => $pickup_family,
-				'session_key_name' => self::PICKUP_SELECTIONS_KEY,
-				'remaining_keys' => array_keys( $selections ),
-			)
-		);
 		$current = $this->pickup_selection();
 		if ( $pickup_family === (string) ( $current['pickup_family'] ?? '' ) ) {
 			$this->set( self::PICKUP_SELECTION_KEY, array() );
 			$this->set( self::CHECKOUT_PICKUP_POINT_KEY, array() );
 			$this->set( self::PICKUP_CARRIER_KEY, '' );
 		}
-		$this->log_pickup_selection_clear( $reason ?: 'family_clear', false, $pickup_family );
 	}
 
 	public function clear_pickup_selection_if_allowed( string $reason, string $currentRateId = '' ): bool {
 		$current_family = '' !== $currentRateId ? $this->shipping_method_family( $currentRateId ) : '';
 		if ( '' !== $current_family && str_ends_with( $current_family, ':pickup' ) ) {
 			if ( $this->has_valid_pickup_selection_for_family( $current_family ) ) {
-				$this->log_pickup_selection_clear( $reason, true, $current_family );
 				return false;
 			}
 
@@ -262,7 +200,6 @@ final class CheckoutSessionManager {
 		}
 
 		if ( ! $this->is_global_pickup_reset_reason( $reason ) ) {
-			$this->log_pickup_selection_clear( $reason, true, $currentRateId );
 			return false;
 		}
 
@@ -678,14 +615,6 @@ final class CheckoutSessionManager {
 	private function stored_pickup_selections(): array {
 		$selections = $this->get_raw_session_value( self::PICKUP_SELECTIONS_KEY, array() );
 		$stored = array();
-		$this->pickup_debug_log(
-			'WDC pickup raw_pickup_selections',
-			array(
-				'session_key_name' => self::PICKUP_SELECTIONS_KEY,
-				'raw_value_type' => get_debug_type( $selections ),
-				'raw_keys' => is_array( $selections ) ? array_keys( $selections ) : array(),
-			)
-		);
 		if ( ! is_array( $selections ) ) {
 			return $stored;
 		}
@@ -853,124 +782,11 @@ final class CheckoutSessionManager {
 		return (string) $this->get( self::ADDRESS_FINGERPRINT_KEY, '' );
 	}
 
-	public function pickup_debug_enabled(): bool {
-		return defined( 'WDC_PICKUP_DEBUG' ) && WDC_PICKUP_DEBUG;
-	}
-
 	/**
 	 * @return array<string,array<string,mixed>>
 	 */
 	public function raw_pickup_selections(): array {
 		return $this->stored_pickup_selections();
-	}
-
-	/**
-	 * @param array<string,mixed> $point
-	 * @return array<string,mixed>
-	 */
-	public function pickup_debug_summary( array $point ): array {
-		$snapshot = is_array( $point['snapshot'] ?? null ) ? $point['snapshot'] : array();
-
-		return array(
-			'pickup_family' => (string) ( $point['pickup_family'] ?? $snapshot['pickup_family'] ?? '' ),
-			'carrier_key' => (string) ( $point['carrier_key'] ?? $point['carrier'] ?? $snapshot['carrier_key'] ?? $snapshot['carrier'] ?? '' ),
-			'service_key' => (string) ( $point['service_key'] ?? $snapshot['service_key'] ?? '' ),
-			'point_code' => (string) ( $point['point_code'] ?? $snapshot['point_code'] ?? '' ),
-			'point_id' => (string) ( $point['point_id'] ?? $point['id'] ?? $snapshot['point_id'] ?? $snapshot['id'] ?? '' ),
-			'has_address' => array() !== $this->pickup_debug_address_keys( $point ),
-			'address_keys' => $this->pickup_debug_address_keys( $point ),
-			'destination_fingerprint' => (string) ( $point['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '' ),
-		);
-	}
-
-	/**
-	 * @param array<string,mixed> $point
-	 * @return array<int,string>
-	 */
-	public function pickup_debug_address_keys( array $point ): array {
-		$keys = array();
-		foreach ( array(
-			'point_address',
-			'address',
-			'address_full',
-			'full_address',
-			'address_short',
-			'location_address',
-			'address_source',
-		) as $key ) {
-			if ( '' !== trim( (string) ( $point[ $key ] ?? '' ) ) ) {
-				$keys[] = $key;
-			}
-		}
-
-		$snapshot = is_array( $point['snapshot'] ?? null ) ? $point['snapshot'] : array();
-		foreach ( array(
-			'point_address',
-			'address',
-			'address_full',
-			'full_address',
-			'address_short',
-			'location_address',
-			'address_source',
-		) as $key ) {
-			if ( '' !== trim( (string) ( $snapshot[ $key ] ?? '' ) ) ) {
-				$keys[] = 'snapshot.' . $key;
-			}
-		}
-
-		$raw = is_array( $point['raw'] ?? null ) ? $point['raw'] : ( is_array( $snapshot['raw'] ?? null ) ? $snapshot['raw'] : array() );
-		foreach ( array( 'address', 'address_full', 'full_address', 'address_short', 'location_address' ) as $key ) {
-			if ( '' !== trim( (string) ( $raw[ $key ] ?? '' ) ) ) {
-				$keys[] = 'raw.' . $key;
-			}
-		}
-
-		return array_values( array_unique( $keys ) );
-	}
-
-	/**
-	 * @param array<string,mixed> $point
-	 */
-	public function pickup_debug_location_matches_current( array $point ): bool {
-		return $this->pickup_selection_location_matches_current( $point );
-	}
-
-	/**
-	 * @param array<string,mixed> $point
-	 */
-	public function pickup_debug_family_matches( array $point, string $pickup_family ): bool {
-		return $this->selection_family_matches( $point, $pickup_family );
-	}
-
-	/**
-	 * @param array<string,mixed> $point
-	 */
-	public function pickup_debug_carrier_matches( array $point, string $carrier_key ): bool {
-		$snapshot = is_array( $point['snapshot'] ?? null ) ? $point['snapshot'] : array();
-		$expected = $this->normalize_carrier_key_for_pickup( $carrier_key );
-		$carrier = $this->normalize_carrier_key_for_pickup( (string) ( $point['carrier_key'] ?? $point['carrier'] ?? $snapshot['carrier_key'] ?? $snapshot['carrier'] ?? '' ) );
-		$service = $this->normalize_carrier_key_for_pickup( (string) ( $point['service_key'] ?? $snapshot['service_key'] ?? '' ) );
-
-		return '' === $expected || $carrier === $expected || ( '' === $carrier && ( '' === $service || $service === $expected ) );
-	}
-
-	/**
-	 * @param array<string,mixed> $context
-	 */
-	public function pickup_debug_log( string $message, array $context = array() ): void {
-		if ( ! $this->pickup_debug_enabled() ) {
-			return;
-		}
-
-		if ( function_exists( 'wc_get_logger' ) ) {
-			wc_get_logger()->debug( $message, array_merge( $context, array( 'source' => 'walls-delivery-calc' ) ) );
-			return;
-		}
-
-		if ( function_exists( 'error_log' ) ) {
-			$encoded = function_exists( 'wp_json_encode' ) ? wp_json_encode( $context ) : json_encode( $context );
-			error_log( '[walls-delivery-calc] debug: ' . $message . ' ' . ( false !== $encoded ? $encoded : '' ) );
-		}
 	}
 
 	private function set( string $key, mixed $value ): void {
@@ -985,18 +801,6 @@ final class CheckoutSessionManager {
 	 */
 	private function set_raw_session_array( string $key, array $value ): void {
 		$session = $this->session();
-		$this->pickup_debug_log(
-			'WDC pickup set_raw_session_array',
-			array(
-				'session_exists' => is_object( $session ),
-				'session_class' => is_object( $session ) ? get_class( $session ) : '',
-				'key' => $key,
-				'keys_count' => count( $value ),
-				'keys' => array_keys( $value ),
-				'has_set_method' => is_object( $session ) && method_exists( $session, 'set' ),
-				'has_save_data_method' => is_object( $session ) && method_exists( $session, 'save_data' ),
-			)
-		);
 		if ( ! is_object( $session ) ) {
 			return;
 		}
@@ -1073,32 +877,16 @@ final class CheckoutSessionManager {
 		}
 	}
 
-	private function log_pickup_selection_clear( string $reason, bool $blocked, string $currentRateId = '' ): void {
-		if ( ! $this->debug_logging_enabled() ) {
-			return;
-		}
-
-		$currentRateId = $this->normalize_rate_id( $currentRateId );
-		$context = array(
-			'reason' => $reason,
-			'blocked' => $blocked,
-			'current_rate_id' => $currentRateId,
-			'current_rate_family' => $this->shipping_method_family( $currentRateId ),
-			'session_has_pickup' => $this->has_valid_pickup_selection(),
-		);
+	private function log_pickup_warning( string $message, array $context = array() ): void {
 		if ( function_exists( 'wc_get_logger' ) ) {
-			wc_get_logger()->debug( $blocked ? 'clear_pickup_selection_blocked' : 'clear_pickup_selection', array_merge( $context, array( 'source' => 'walls-delivery-calc' ) ) );
+			wc_get_logger()->warning( $message, array_merge( $context, array( 'source' => 'walls-delivery-calc' ) ) );
 			return;
 		}
 
 		if ( function_exists( 'error_log' ) ) {
 			$encoded = function_exists( 'wp_json_encode' ) ? wp_json_encode( $context ) : json_encode( $context );
-			error_log( '[walls-delivery-calc] debug: ' . ( $blocked ? 'clear_pickup_selection_blocked' : 'clear_pickup_selection' ) . ' ' . ( false !== $encoded ? $encoded : '' ) );
+			error_log( '[walls-delivery-calc] warning: ' . $message . ' ' . ( false !== $encoded ? $encoded : '' ) );
 		}
-	}
-
-	private function debug_logging_enabled(): bool {
-		return $this->pickup_debug_enabled();
 	}
 
 	private function session(): mixed {

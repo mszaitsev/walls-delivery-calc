@@ -2,7 +2,6 @@
 	'use strict';
 
 	var checkoutConfig = window.wdcPickupCheckout || {};
-	var pickupDebugEnabled = !!(checkoutConfig.debug || checkoutConfig.pickupDebug || checkoutConfig.pickup_debug);
 	var labels = checkoutConfig.labels || {};
 	var activeMethod = '';
 	var activePickupFamily = String(checkoutConfig.activePickupFamily || checkoutConfig.active_pickup_family || '').trim();
@@ -18,18 +17,6 @@
 	var placeOrderGuardTimer = 0;
 	var placeOrderResetGuardUntil = 0;
 	var pickupFamilies = Array.isArray(checkoutConfig.pickupFamilies) && checkoutConfig.pickupFamilies.length ? checkoutConfig.pickupFamilies : [];
-	var lastStateResponseKeys = [];
-	var lastRestoreDebug = {
-		selectedPickupPointsType: 'object',
-		selectedPickupPointsKeys: [],
-		selectedForActiveFamilySource: 'none',
-		containerMethod: '',
-		containerFamily: '',
-		containerMatches: false,
-		locationMatchDetails: {},
-		restoreApplied: false,
-		restoreSkippedReason: 'not_started'
-	};
 	var selectedPickupPoints = extractPickupSelections(checkoutConfig);
 	if (checkoutConfig.initialContext && checkoutConfig.initialContext.selectedPoint) {
 		var initialFamily = pickupFamily(checkoutConfig.initialContext.selectedPoint);
@@ -81,19 +68,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			var searchSubmit = modal.root.querySelector('[data-wdc-search-submit]');
 			var geolocationButton = modal.root.querySelector('[data-wdc-geolocation]');
 			var context = withPrefetch(withCarrierContext(resolvedContext, method));
-			debugDeep('openModal context', context);
-			debugGroup('[WDC Pickup] open map context', {
-				method: method,
-				family: shippingMethodFamily(method),
-				context: context,
-				selectedForFamily: pickupDebugSummary(selectedPickupPointForFamily(shippingMethodFamily(method)) || {}),
-				carrierContext: {
-					carrier: context.carrier || '',
-					carrier_key: context.carrier_key || '',
-					service_key: context.service_key || '',
-					pickup_family: context.pickup_family || ''
-				}
-			});
 			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
 			var savingPoint = false;
 			var loadingText = '';
@@ -125,32 +99,11 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 					return Promise.resolve(false);
 				}
 				var payload = pointPayload(point);
-				debug('pickup save payload', pickupDebugSummary(payload));
-				debugGroup('[WDC Pickup] selected point before save', {
-					point_id: payload.id || payload.point_id || '',
-					point_code: selectedPointCode(payload),
-					carrier_key: payload.carrier_key || payload.carrier || '',
-					service_key: payload.service_key || '',
-					pickup_family: pickupFamily(payload),
-					address: selectedPointAddressValue(payload),
-					postcode: payload.postcode || payload.point_postcode || '',
-					display_title: payload.display_title || selectedPointTitle(payload),
-					display_code: payload.display_code || '',
-					destination_fingerprint: payload.destination_fingerprint || ''
-				});
 				if (!savingPoint) {
 					setLoading(options.message || 'Сохраняем пункт выдачи...');
 				}
 				return window.WDCPickupApi.save(point.id, shippingMethodId || method, payload).then(function (response) {
-					debug('pickup save response', pickupDebugSummary(response && response.pickup_point));
 					mergePickupSelectionsFromResponse(response);
-					debugGroup('[WDC Pickup] save response', {
-						pickup_point: pickupDebugSummary(response && response.pickup_point),
-						pickupSelectionsKeys: Object.keys(selectedPickupPoints || {}),
-						pickupSelections: pickupDebugSelections(selectedPickupPoints),
-						activePickupFamily: response && (response.activePickupFamily || response.active_pickup_family || activePickupFamily),
-						selectedPickupPoint: pickupDebugSummary(response && (response.selectedPickupPoint || response.selected_pickup_point || response.pickup_point))
-					});
 					applySelection(container, response.pickup_point || {});
 					close();
 					if (true === options.updateCheckoutAfterSave) {
@@ -311,29 +264,11 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		point = point || {};
 		var method = containerMethod(container) || activeMethod || currentShippingMethod();
 		var family = shippingMethodFamily(method);
-		var pointFamily = pickupFamily(point);
-		var addressValue = selectedPointAddressValue(point);
-		var validForCard = isValidSelectedPointForCard(point, family);
 		if (!isValidSelectedPointForCard(point, family)) {
 			showEmptySelection(container);
 			if (window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint && pickupFamily(window.wdcPickupCheckout.selectedPickupPoint) === family) {
 				window.wdcPickupCheckout.selectedPickupPoint = null;
 			}
-			debugGroup('[WDC Pickup] apply selection', {
-				expectedFamily: family,
-				pointFamily: pointFamily,
-				pointCode: selectedPointCode(point),
-				hasAddress: !!addressValue,
-				addressAliases: pickupDebugAddressAliases(point),
-				validForCard: validForCard,
-				hiddenFieldsAfterApply: hiddenFieldsSnapshot(container)
-			});
-			debug('applySelection skipped incomplete selected point', {
-				pickup_family: family,
-				point_family: pointFamily,
-				point_code_present: !!selectedPointCode(point),
-				has_address: !!addressValue
-			});
 			return;
 		}
 		var snapshot = point.snapshot || {};
@@ -405,15 +340,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		if (selectedPoint && selectedPoint.point_code) {
 			rememberDestinationFingerprint();
 		}
-		debugGroup('[WDC Pickup] apply selection', {
-			expectedFamily: family,
-			pointFamily: pickupFamily(selectedPoint),
-			pointCode: selectedPointCode(selectedPoint),
-			hasAddress: !!selectedPointAddressValue(selectedPoint),
-			addressAliases: pickupDebugAddressAliases(selectedPoint),
-			validForCard: true,
-			hiddenFieldsAfterApply: hiddenFieldsSnapshot(container)
-		});
 	}
 
 	function setHidden(element, hidden) {
@@ -530,7 +456,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	}
 
 	function resetSelection(reason) {
-		debug('resetSelection called', { reason: reason || '', isPlacingOrder: isPlacingOrder, guardActive: placeOrderResetGuardActive() });
 		if (isPickupResetGuarded()) {
 			return;
 		}
@@ -545,7 +470,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	}
 
 	function clearPickupSelectionUi(reason) {
-		debug('clearPickupSelectionUi called', { reason: reason || '', isPlacingOrder: isPlacingOrder, guardActive: placeOrderResetGuardActive() });
 		if (isPickupResetGuarded()) {
 			return;
 		}
@@ -556,7 +480,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	}
 
 	function resetPickupSelectionOnServer(reason, family, options) {
-		debug('resetPickupSelectionOnServer called', { reason: reason || '', isPlacingOrder: isPlacingOrder, guardActive: placeOrderResetGuardActive() });
 		if (isPickupResetGuarded()) {
 			return Promise.resolve(false);
 		}
@@ -622,14 +545,11 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			selectedPoint: activeSelected || config.selectedPoint || (window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint) || null
 		};
 		var fieldContext = contextFromFields();
-		debugDeep('contextFromFields', fieldContext);
-		debugDeep('currentContext', currentContext);
 		if (fieldContext.countryBlocked) {
 			return {};
 		}
 		var runtimeContext = sameDestination(fieldContext, currentContext) ? currentContext : {};
 		var localizedContext = sameDestination(fieldContext, configContext) ? configContext : {};
-		var latSource = validCoordinate(fieldContext.lat, fieldContext.lng) ? 'fields' : (validCoordinate(runtimeContext.lat, runtimeContext.lng) ? 'currentContext' : (validCoordinate(localizedContext.lat, localizedContext.lng) ? 'localized' : 'none'));
 		var result = {
 			lat: fieldContext.lat || runtimeContext.lat || localizedContext.lat,
 			lng: fieldContext.lng || runtimeContext.lng || localizedContext.lng,
@@ -645,9 +565,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			country_code: fieldContext.country_code || runtimeContext.country_code || localizedContext.country_code || 'RU',
 			selectedPoint: localizedContext.selectedPoint || runtimeContext.selectedPoint || null
 		};
-		debugDeep('sameDestination field/current', sameDestination(fieldContext, currentContext));
-		debugDeep('chosen lat/lng source', latSource);
-		debugDeep('initialContext selected source', fieldContext.query ? 'fields' : (runtimeContext.query ? 'current' : (localizedContext.query ? 'localized' : 'fallback')), result);
 		return result;
 	}
 
@@ -701,150 +618,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return false;
 		}
 		return aName === bName || containsDestinationName(aName, bName) || containsDestinationName(bName, aName);
-	}
-
-	function debug() {
-		if (pickupDebugEnabled && window.console && window.console.log) {
-			window.console.log.apply(window.console, ['wdc pickup:'].concat(Array.prototype.slice.call(arguments)));
-		}
-	}
-
-	function debugDeep() {
-		if (pickupDebugEnabled && window.wdcPickupCheckout && window.wdcPickupCheckout.deepDebug) {
-			debug.apply(null, arguments);
-		}
-	}
-
-	function debugGroup(label, data) {
-		if (!pickupDebugEnabled || !window.console) {
-			return;
-		}
-		if (window.console.groupCollapsed) {
-			window.console.groupCollapsed(label);
-		} else if (window.console.log) {
-			window.console.log(label);
-		}
-		if (window.console.log) {
-			window.console.log(data || {});
-		}
-		if (data && data.pickupSelections && window.console.table) {
-			window.console.table(data.pickupSelections);
-		}
-		if (window.console.groupEnd) {
-			window.console.groupEnd();
-		}
-	}
-
-	function pickupDebugSummary(point) {
-		point = point || {};
-		var snapshot = point.snapshot || {};
-		var address = selectedPointAddressValue(point);
-		return {
-			carrier_key: point.carrier_key || point.carrier || snapshot.carrier_key || '',
-			service_key: point.service_key || snapshot.service_key || '',
-			pickup_family: point.pickup_family || snapshot.pickup_family || pickupFamily(point),
-			point_code: selectedPointCode(point),
-			point_id: point.point_id || point.id || snapshot.point_id || snapshot.id || '',
-			has_address: !!address,
-			destination_fingerprint: point.destination_fingerprint || snapshot.destination_fingerprint || ''
-		};
-	}
-
-	function pickupDebugSelections(points) {
-		var rows = [];
-		Object.keys(points || {}).forEach(function (family) {
-			var summary = pickupDebugSummary(points[family] || {});
-			summary.family_key = family;
-			rows.push(summary);
-		});
-		return rows;
-	}
-
-	function pickupDebugAddressAliases(point) {
-		point = point || {};
-		var snapshot = point.snapshot || {};
-		var raw = point.raw || snapshot.raw || {};
-		var aliases = {};
-		[
-			'point_address',
-			'address',
-			'address_full',
-			'full_address',
-			'address_short',
-			'location_address',
-			'address_source'
-		].forEach(function (key) {
-			aliases[key] = !!meaningfulText(point[key]);
-			aliases['snapshot.' + key] = !!meaningfulText(snapshot[key]);
-		});
-		['address', 'address_full', 'full_address', 'address_short', 'location_address'].forEach(function (key) {
-			aliases['raw.' + key] = !!meaningfulText(raw[key]);
-		});
-		aliases.resolved = selectedPointAddressValue(point);
-		return aliases;
-	}
-
-	function hiddenFieldsSnapshot(container) {
-		var root = container || document;
-		function value(selector) {
-			var field = root.querySelector(selector);
-			return field ? String(field.value || '').trim() : '';
-		}
-		return {
-			point_id: value('[data-wdc-pickup-point-id]'),
-			point_code: value('[data-wdc-pickup-point-code]'),
-			carrier_key: value('[data-wdc-pickup-carrier-key]'),
-			service_key: value('[data-wdc-pickup-service-key]'),
-			pickup_family: value('[data-wdc-pickup-family]'),
-			address: value('[data-wdc-pickup-point-address]'),
-			postcode: value('[data-wdc-pickup-point-postcode]'),
-			city_name: value('[data-wdc-pickup-city-name]'),
-			region_name: value('[data-wdc-pickup-region-name]'),
-			work_time: value('[data-wdc-pickup-work-time-field]'),
-			description: value('[data-wdc-pickup-description-field]'),
-			storage_notice: value('[data-wdc-pickup-storage-notice-field]'),
-			destination_fingerprint: value('[data-wdc-pickup-destination-fingerprint]')
-		};
-	}
-
-	function objectTypeLabel(value) {
-		if (Array.isArray(value)) {
-			return 'array';
-		}
-		return value === null ? 'null' : typeof value;
-	}
-
-	function checkoutPickupDebugState() {
-		var method = currentShippingMethod();
-		var family = shippingMethodFamily(method);
-		var selected = selectedPickupPointForFamily(family);
-		var container = document.querySelector('[data-wdc-pickup-checkout]');
-		var card = container ? container.querySelector('[data-wdc-pickup-card]') : null;
-		return {
-			activeMethod: method,
-			activeFamily: family,
-			currentShippingMethod: method,
-			pickupFamilies: pickupFamilies,
-			stateResponseKeys: lastStateResponseKeys,
-			selectedPickupPointsType: lastRestoreDebug.selectedPickupPointsType,
-			pickupSelectionsKeys: Object.keys(selectedPickupPoints || {}),
-			selectedPickupPointsKeys: Object.keys(selectedPickupPoints || {}),
-			selectedPickupPoint: pickupDebugSummary(window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint),
-			selectedPickupPoints: pickupDebugSelections(selectedPickupPoints),
-			selectedForActiveFamily: pickupDebugSummary(selected),
-			selectedForActiveFamilySource: lastRestoreDebug.selectedForActiveFamilySource,
-			containerMethod: lastRestoreDebug.containerMethod || '',
-			containerFamily: lastRestoreDebug.containerFamily || '',
-			containerMatches: !!lastRestoreDebug.containerMatches,
-			locationMatchDetails: lastRestoreDebug.locationMatchDetails || {},
-			restoreApplied: lastRestoreDebug.restoreApplied,
-			restoreSkippedReason: lastRestoreDebug.restoreSkippedReason,
-			initialContextSelectedPoint: pickupDebugSummary(checkoutConfig.initialContext && checkoutConfig.initialContext.selectedPoint),
-			currentContext: currentContext,
-			destinationFingerprint: destinationFingerprint(currentContext) || destinationFingerprint(contextFromFields()),
-			selectedCardVisible: !!(card && !card.hidden && card.style.display !== 'none'),
-			hiddenFields: hiddenFieldsSnapshot(container || document)
-		};
 	}
 
 	function fieldValue(name) {
@@ -1074,7 +847,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		rememberDestinationFingerprint(context);
 		invalidatePrefetch();
 		schedulePrefetch();
-		debugDeep('syncPickupContextAfterLocationChange', context);
 	}
 
 	function applyContextToHidden(context) {
@@ -1114,11 +886,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	function refreshCheckoutContext() {
 		return refreshCheckoutContextOnce().then(function () {
 			restoreSelectedPickupUi();
-			debugGroup('[WDC Pickup] updated_checkout state', checkoutPickupDebugState());
 			schedulePrefetch();
 		}).catch(function () {
 			restoreSelectedPickupUi();
-			debugGroup('[WDC Pickup] updated_checkout state', checkoutPickupDebugState());
 			schedulePrefetch();
 		});
 	}
@@ -1128,7 +898,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			return Promise.resolve(null);
 		}
 		var stateRequest = window.WDCPickupApi.state().then(function (state) {
-			lastStateResponseKeys = state && typeof state === 'object' ? Object.keys(state) : [];
 			mergePickupSelectionsFromResponse(state);
 			if (state && (state.activePickupFamily || state.active_pickup_family)) {
 				activePickupFamily = String(state.activePickupFamily || state.active_pickup_family || '').trim();
@@ -1137,7 +906,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				}
 			}
 			var context = contextFromState(state && state.city_context);
-			debugDeep('refreshCheckoutContextOnce result', context);
 			if ((context.query || validCoordinate(context.lat, context.lng)) && stateContextMatchesCurrentDestination(context)) {
 				updateCurrentContext(context);
 				applyContextToHidden(context);
@@ -1530,11 +1298,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		var checkoutFias = normalizeGuid(checkoutContext && checkoutContext.fias_id);
 		var pointFias = normalizeGuid(point && (point.fias_location_guid || point.fias_id));
 		if (checkoutFias && pointFias) {
-			debug('pointMatchesDestinationQuick', {
-				checkoutFias: checkoutFias,
-				pointFias: pointFias,
-				quickMatchReason: checkoutFias === pointFias ? 'same_fias' : 'different_fias'
-			});
 			return checkoutFias === pointFias;
 		}
 		var checkoutRegion = normalizeText(checkoutContext && checkoutContext.region_name);
@@ -1543,21 +1306,11 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		var pointCity = normalizeText(point && (point.city || point.city_name));
 		if (checkoutRegion && checkoutCity && pointRegion && pointCity) {
 			var sameCityRegion = checkoutRegion === pointRegion && (checkoutCity === pointCity || containsDestinationName(checkoutCity, pointCity) || containsDestinationName(pointCity, checkoutCity));
-			debug('pointMatchesDestinationQuick', {
-				checkoutFias: checkoutFias,
-				pointFias: pointFias,
-				quickMatchReason: sameCityRegion ? 'same_region_city' : 'different_region_city'
-			});
 			return sameCityRegion;
 		}
 		var checkoutPostcode = normalizeText(checkoutContext && checkoutContext.postcode);
 		var pointPostcode = normalizeText(point && (point.postal_code || point.postcode));
 		var samePostcode = !!(checkoutPostcode && pointPostcode && checkoutPostcode === pointPostcode);
-		debug('pointMatchesDestinationQuick', {
-			checkoutFias: checkoutFias,
-			pointFias: pointFias,
-			quickMatchReason: samePostcode ? 'same_postcode' : 'no_match'
-		});
 		return samePostcode;
 	}
 
@@ -1901,7 +1654,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function withPrefetch(context) {
 		var key = cacheKey(context);
-		debugDeep('prefetch cache key', key);
 		if (prefetchCache && prefetchCache.key === key && Array.isArray(prefetchCache.points) && prefetchCache.points.length) {
 			return Object.assign({}, context, {
 				preloadedPoints: prefetchCache.points,
@@ -2015,7 +1767,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	function boot() {
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init);
 		restoreSelectedPickupUi();
-		debugGroup('[WDC Pickup] boot', checkoutPickupDebugState());
 	}
 
 	function selectedPickupPointId() {
@@ -2043,19 +1794,10 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		isPlacingOrder = true;
 		window.clearTimeout(placeOrderGuardTimer);
 		placeOrderResetGuardUntil = Date.now() + 3000;
-		debugGroup('[WDC Pickup] before place order', {
-			activeMethod: currentShippingMethod(),
-			activeFamily: shippingMethodFamily(currentShippingMethod()),
-			selectedForActiveFamily: pickupDebugSummary(selectedPickupPointForFamily(shippingMethodFamily(currentShippingMethod()))),
-			hiddenFields: hiddenFieldsSnapshot(document.querySelector('[data-wdc-pickup-checkout]') || document),
-			pickupSelectionsKeys: Object.keys(selectedPickupPoints || {})
-		});
-		debug('place order guard active');
 	}
 
 	function endPlaceOrder() {
 		isPlacingOrder = false;
-		debug('place order guard released');
 		rememberDestinationFingerprint();
 	}
 
@@ -2066,7 +1808,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			isPlacingOrder = false;
 			placeOrderResetGuardUntil = 0;
 			rememberDestinationFingerprint();
-			debug('place order guard released');
 		}, 2000);
 	}
 
@@ -2081,58 +1822,28 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	function restoreSelectedPickupUi() {
 		var method = currentShippingMethod();
 		var family = shippingMethodFamily(method);
-		lastRestoreDebug = {
-			selectedPickupPointsType: objectTypeLabel(selectedPickupPoints),
-			selectedPickupPointsKeys: Object.keys(selectedPickupPoints || {}),
-			selectedForActiveFamilySource: 'none',
-			restoreApplied: false,
-			restoreSkippedReason: ''
-		};
 		if (!isPickupRateValue(method)) {
-			lastRestoreDebug.restoreSkippedReason = 'active_method_is_not_pickup';
 			document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(toggleForMethod);
 			return;
 		}
 		var selected = selectedPickupPointForFamily(family);
-		if (selected) {
-			lastRestoreDebug.selectedForActiveFamilySource = 'dictionary';
-		} else if (window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint && pickupFamily(window.wdcPickupCheckout.selectedPickupPoint) === family) {
+		if (!selected && window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint && pickupFamily(window.wdcPickupCheckout.selectedPickupPoint) === family) {
 			selected = normalizeSelectedPoint(window.wdcPickupCheckout.selectedPickupPoint);
-			lastRestoreDebug.selectedForActiveFamilySource = 'selectedPickupPoint';
 		}
 		if (selected && !sameSelectionDestination(selected)) {
 			delete selectedPickupPoints[family];
 			selected = null;
-			lastRestoreDebug.restoreSkippedReason = 'location_mismatch';
 		}
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(function (container) {
 			var ownMethod = containerMethod(container);
-			var containerFamily = shippingMethodFamily(ownMethod);
 			var containerMatches = containerMatchesActivePickup(container, method, family);
-			lastRestoreDebug.containerMethod = ownMethod;
-			lastRestoreDebug.containerFamily = containerFamily;
-			lastRestoreDebug.activeMethod = method;
-			lastRestoreDebug.activeFamily = family;
-			lastRestoreDebug.containerMatches = containerMatches;
 			if (selected && containerMatches && pickupMatchesFamily(selected, method) && isValidSelectedPointForCard(selected, family)) {
 				if (ownMethod !== method) {
 					container.setAttribute('data-shipping-method-id', method);
 				}
 				applySelection(container, selected);
-				lastRestoreDebug.restoreApplied = true;
 			} else {
 				clearContainerSelection(container);
-				if (!lastRestoreDebug.restoreSkippedReason) {
-					if (!selected) {
-						lastRestoreDebug.restoreSkippedReason = 'no_selected_point_for_active_family';
-					} else if (!isValidSelectedPointForCard(selected, family)) {
-						lastRestoreDebug.restoreSkippedReason = 'selected_point_incomplete_for_card';
-					} else if (!containerMatches) {
-						lastRestoreDebug.restoreSkippedReason = 'container_family_mismatch';
-					} else {
-						lastRestoreDebug.restoreSkippedReason = 'selected_family_mismatch';
-					}
-				}
 			}
 			toggleForMethod(container);
 		});
@@ -2173,7 +1884,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		var currentDetails = selectionLocationMatchDetails(point, currentContext);
 		var fieldContext = contextFromFields();
 		var fieldDetails = selectionLocationMatchDetails(point, fieldContext);
-		lastRestoreDebug.locationMatchDetails = currentDetails.matched_by ? currentDetails : fieldDetails;
 		if (currentDetails.matched_by || fieldDetails.matched_by) {
 			return true;
 		}
@@ -2198,15 +1908,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		if (event.target.matches('input[name^="shipping_method"]')) {
 			var previousMethod = activeMethod;
 			var nextMethod = currentShippingMethod() || normalizeShippingMethod(event.target.value);
-			var previousFamily = shippingMethodFamily(previousMethod);
-			var nextFamily = shippingMethodFamily(nextMethod);
-			debug('shipping method change', {
-				previousMethod: previousMethod,
-				nextMethod: nextMethod,
-				previousFamily: previousFamily,
-				nextFamily: nextFamily,
-				isPlacingOrder: isPlacingOrder
-			});
 			if (isSamePickupMethodFamily(previousMethod, nextMethod)) {
 				activeMethod = nextMethod;
 				syncSelectedPickupRate(nextMethod);
@@ -2222,7 +1923,6 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	});
 	document.body.addEventListener('wdc:location-selected', function (event) {
 		var context = contextFromLocationDetail(event.detail || {});
-		debugDeep('wdc:location-selected detail', event.detail || {});
 		invalidatePrefetch();
 		var previousContext = Object.assign({}, currentContext || {});
 		var fieldContext = contextFromFields();
@@ -2264,9 +1964,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			boot();
 			restoreSelectedPickupUi();
 			if (isPlacingOrder) {
-				debug('updated_checkout skipped context refresh during place order');
 				releasePlaceOrderGuardSoon();
-				debugGroup('[WDC Pickup] updated_checkout state', checkoutPickupDebugState());
 				return;
 			}
 			refreshCheckoutContext();
