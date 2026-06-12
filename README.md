@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.22.
+Current plugin version: 0.46.0.
+
+Version 0.46.0 adds CDEK tariff management. The CDEK delivery service now has a `Тарифы` tab with sync preview/confirmation from `GET /v2/calculator/alltariffs`, editable custom tariff titles, pickup/courier type, admin comments and active flags. Runtime CDEK rates use the managed tariff table when available while preserving fallback behavior before the first sync. The stage also adds `docs/wdc-cdek-insurance-audit.md`; CDEK order creation, statuses, webhooks and print forms remain out of scope.
 
 Version 0.45.22 removes the temporary checkout pickup diagnostics added during the CDEK/Russian Post restore investigation. Checkout JS no longer emits grouped console traces, localized checkout config no longer exposes debug flags, and PHP pickup save/state/localized/validation/session-write debug logs were removed. Canonical pickup bucket restore/save/validation behavior remains unchanged; only normal warning/error logs remain for real failures.
 

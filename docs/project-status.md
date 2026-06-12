@@ -1,5 +1,7 @@
 # Project Status
 
+0.46.0 note: CDEK tariff management is implemented on `feature/cdek-tariffs-management`. The predefined CDEK service has a `Тарифы` tab that syncs available contract tariffs from `GET /v2/calculator/alltariffs`, shows a preview diff before applying, stores `tariff_code`, CDEK name, custom site title, delivery type, admin comment, active flag and last sync time, and preserves custom title/comment/active state during sync. Runtime CDEK quotes use managed tariff title/type/active state when a row exists. Insurance was audited in `docs/wdc-cdek-insurance-audit.md`; CDEK order creation, statuses, webhooks and print forms remain future work.
+
 0.45.22 note: temporary checkout pickup diagnostics were removed after the canonical bucket/session investigation. `wdc-pickup-checkout.js` no longer writes grouped console traces, pickup localization no longer exposes debug flags, and PHP pickup save/state/localized/validation/session-write debug logs were removed. Restore/save/validation business logic remains unchanged; real save failures still use normal warning/error logging.
 
 0.45.21 note: checkout pickup restore no longer treats different destination fingerprint formats as a location change when stable destination identity still matches. The frontend compares selected pickup points by `location_id`, FIAS, GAR, city/region and postcode+city before fingerprint fallback, and keeps explicit `destination_*` aliases in saved point payloads.

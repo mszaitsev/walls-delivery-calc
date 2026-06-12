@@ -1,6 +1,8 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.45.11.
+Version: 0.46.0.
+
+0.46.0 tariff management update: CDEK runtime calculation still obtains prices and delivery periods through `POST /v2/calculator/tarifflist`, but tariff presentation is now managed through a dedicated table synced from `GET /v2/calculator/alltariffs`. If a returned `tariff_code` exists in the table, WDC uses its active flag, delivery type and display title (`custom_title`, then `tariff_name_from_cdek`) for checkout/admin rate labels. If no row exists yet, runtime falls back to the API response name and delivery mode classification.
 
 0.45.11 cache safety update: CDEK `/v2/calculator/tarifflist` api_error responses such as 403/429/5xx, transport failures and non-JSON/HTML errors continue to return `error_code=api_error` and are not cached as successful empty quotes. Successful CDEK quotes are cached only when they contain rates, so a temporary API failure or zero-rate response cannot replace a previous good result with a stable "0 rates" cache entry. The delivery cache reset path also clears CDEK city and deliverypoints transients while leaving OAuth token cache untouched.
 
@@ -15,6 +17,7 @@ This stage connects CDEK as a checkout/runtime carrier for tariff preview only. 
   - `pickup`: default `СДЭК до пункта выдачи`.
   - `courier`: default `СДЭК курьер`.
 - The CDEK service main tab stores service-specific `pickup_method_title` and `courier_method_title`; custom values are used by checkout grouped rates, admin recalculation preview, saved rate meta, and calculation data.
+- The CDEK service `Тарифы` tab stores tariff-specific `custom_title`, `delivery_type`, `admin_comment` and active state; names sync from `GET /v2/calculator/alltariffs` without overwriting admin presentation fields.
 - CDEK OAuth bearer token reuse from the foundation stage.
 - Authorized JSON requests through the existing `CdekHttpClientInterface`.
 - `CdekLocationResolver` for destination CDEK city code resolution via `/v2/location/cities` with fallback attempts and transient cache.

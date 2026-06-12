@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\Cdek\Api\CdekApiClient;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekApiException;
 use WallsShop\WDC\Carriers\Cdek\CdekLocationResolver;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
 use WallsShop\WDC\Domain\Carrier\CarrierIdentity;
@@ -31,7 +32,8 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		private CdekSettings $settings,
 		private CdekApiClient $client,
 		private CdekLocationResolver $locations,
-		private Logger $logger
+		private Logger $logger,
+		private ?CdekTariffRepository $tariffs = null
 	) {
 	}
 
@@ -85,7 +87,12 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		$skipped_unknown = 0;
 		$skipped_other_type = 0;
 		foreach ( $tariffs as $tariff ) {
-			$type = $this->classify_delivery_type( $tariff );
+			$managed_tariff = $this->managed_tariff( $tariff );
+			if ( is_array( $managed_tariff ) && empty( $managed_tariff['is_active'] ) ) {
+				++$skipped_other_type;
+				continue;
+			}
+			$type = is_array( $managed_tariff ) ? $this->normalize_delivery_type( (string) ( $managed_tariff['delivery_type'] ?? DeliveryType::PICKUP ) ) : $this->classify_delivery_type( $tariff );
 			if ( DeliveryType::UNKNOWN === $type ) {
 				++$skipped_unknown;
 				continue;
@@ -94,7 +101,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 				++$skipped_other_type;
 				continue;
 			}
-			$rate = $this->rate_from_tariff( $request, $type, $tariff, $payload, $result, $to );
+			$rate = $this->rate_from_tariff( $request, $type, $tariff, $payload, $result, $to, $managed_tariff );
 			if ( $rate instanceof DeliveryRate ) {
 				$rates[] = $rate;
 			}
@@ -221,14 +228,15 @@ final class CdekCarrier implements CarrierAdapterInterface {
 	 * @param array<string,mixed> $result
 	 * @param array<string,mixed> $to
 	 */
-	private function rate_from_tariff( QuoteRequest $request, string $delivery_type, array $tariff, array $payload, array $result, array $to ): ?DeliveryRate {
+	private function rate_from_tariff( QuoteRequest $request, string $delivery_type, array $tariff, array $payload, array $result, array $to, ?array $managed_tariff = null ): ?DeliveryRate {
 		$details = is_array( $tariff['result'] ?? null ) ? array_merge( $tariff, $tariff['result'] ) : $tariff;
 		$price = is_numeric( $details['delivery_sum'] ?? null ) ? (float) $details['delivery_sum'] : 0.0;
 		$code = (string) ( $details['tariff_code'] ?? '' );
 		if ( $price <= 0 || '' === $code ) {
 			return null;
 		}
-		$name = trim( (string) ( $details['tariff_name'] ?? $details['tariff_description'] ?? $code ) );
+		$api_name = trim( (string) ( $details['tariff_name'] ?? $details['tariff_description'] ?? $code ) );
+		$name = $this->display_tariff_title( $api_name, $managed_tariff, $code );
 		$min = is_numeric( $details['period_min'] ?? null ) ? (int) $details['period_min'] : null;
 		$max = is_numeric( $details['period_max'] ?? null ) ? (int) $details['period_max'] : $min;
 		$range = DateRange::range( $min, $max, DateRange::UNIT_CALENDAR_DAYS );
@@ -249,6 +257,8 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			'delivery_type' => $delivery_type,
 			'tariff_code' => $code,
 			'tariff_name' => $name,
+			'tariff_name_from_cdek' => is_array( $managed_tariff ) ? (string) ( $managed_tariff['tariff_name_from_cdek'] ?? $api_name ) : $api_name,
+			'tariff_custom_title' => is_array( $managed_tariff ) ? (string) ( $managed_tariff['custom_title'] ?? '' ) : '',
 			'selected_tariff_object' => $code,
 			'selected_tariff_title' => $name,
 			'api_base_price_rub' => $price,
@@ -396,6 +406,44 @@ final class CdekCarrier implements CarrierAdapterInterface {
 
 	private function method_title( string $delivery_type ): string {
 		return $this->settings->method_title( $delivery_type );
+	}
+
+	/**
+	 * @param array<string,mixed> $tariff
+	 * @return array<string,mixed>|null
+	 */
+	private function managed_tariff( array $tariff ): ?array {
+		if ( ! $this->tariffs instanceof CdekTariffRepository ) {
+			return null;
+		}
+		$details = is_array( $tariff['result'] ?? null ) ? array_merge( $tariff, $tariff['result'] ) : $tariff;
+		$code = trim( (string) ( $details['tariff_code'] ?? '' ) );
+		if ( '' === $code ) {
+			return null;
+		}
+
+		return $this->tariffs->find_by_code( $code );
+	}
+
+	/**
+	 * @param array<string,mixed>|null $managed_tariff
+	 */
+	private function display_tariff_title( string $api_name, ?array $managed_tariff, string $code ): string {
+		if ( is_array( $managed_tariff ) ) {
+			$custom = trim( (string) ( $managed_tariff['custom_title'] ?? '' ) );
+			if ( '' !== $custom ) {
+				return $custom;
+			}
+			$from_cdek = trim( (string) ( $managed_tariff['tariff_name_from_cdek'] ?? '' ) );
+			if ( '' !== $from_cdek ) {
+				return $from_cdek;
+			}
+		}
+		if ( '' !== trim( $api_name ) ) {
+			return trim( $api_name );
+		}
+
+		return $code;
 	}
 
 	private function normalize_delivery_type( string $delivery_type ): string {

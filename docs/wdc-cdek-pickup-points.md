@@ -1,5 +1,9 @@
 # WDC CDEK Pickup Points
 
+Version: 0.46.0.
+
+0.46.0 note: pickup/courier tariff presentation is now managed in the CDEK `Тарифы` tab through `GET /v2/calculator/alltariffs`. Pickup point selection remains independent from the selected tariff inside the CDEK pickup family and still uses `GET /v2/deliverypoints`.
+
 Version: 0.45.22.
 
 0.45.22 diagnostics cleanup: the temporary checkout pickup diagnostics have been removed. The checkout script no longer emits grouped console traces, localized checkout config no longer includes debug flags, and PHP pickup save/state/localized/validation/session-write debug logs were removed. CDEK/Russian Post pickup restore, canonical bucket save, and validation behavior are unchanged.

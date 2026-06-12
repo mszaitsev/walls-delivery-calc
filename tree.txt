@@ -86,6 +86,7 @@ C:.
 |           0024_add_locations_active_country_index.php
 |           0025_add_locations_russianpost_courier_calc_postal_code.php
 |           0026_unify_russian_post_domestic_service.php
+|           0027_create_cdek_tariffs_table.php
 |
 +---docs
 |       development-workflow.md
@@ -96,6 +97,7 @@ C:.
 |       wdc-audit-summary-for-review.md
 |       wdc-carrier-foundation.md
 |       wdc-cdek-foundation.md
+|       wdc-cdek-insurance-audit.md
 |       wdc-cdek-pickup-points.md
 |       wdc-cdek-tariff-calculation.md
 |       wdc-checkout-integration.md
@@ -161,13 +163,17 @@ C:.
 |   |   |   |   CdekLocationResolver.php
 |   |   |   |   CdekSettings.php
 |   |   |   |
-|   |   |   \---Api
+|   |   |   +---Api
 |   |   |           CdekApiClient.php
 |   |   |           CdekApiException.php
 |   |   |           CdekApiResponse.php
 |   |   |           CdekHttpClientInterface.php
 |   |   |           CdekOAuthTokenService.php
 |   |   |           WpCdekHttpClient.php
+|   |   |
+|   |   |   \---Tariffs
+|   |   |           CdekTariffRepository.php
+|   |   |           CdekTariffSyncService.php
 |   |   |
 |   |   +---Contracts
 |   |   |       CarrierAdapterInterface.php
@@ -544,6 +550,7 @@ C:.
     |       run-cdek-foundation-smoke.php
     |       run-cdek-pickup-points-smoke.php
     |       run-cdek-tariff-calculation-smoke.php
+    |       run-cdek-tariffs-sync-smoke.php
     |
     +---checkout
     |       run-checkout-location-picker-smoke.php

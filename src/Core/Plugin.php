@@ -19,6 +19,8 @@ use WallsShop\WDC\Carriers\Cdek\Api\CdekOAuthTokenService;
 use WallsShop\WDC\Carriers\Cdek\Api\WpCdekHttpClient;
 use WallsShop\WDC\Carriers\Cdek\CdekLocationResolver;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
+use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffSyncService;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostCountriesAdminPage;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingRepository;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingService;
@@ -221,6 +223,8 @@ final class Plugin {
 		$this->container->register( CdekApiClient::class, fn(): CdekApiClient => new CdekApiClient( $this->container->get( CdekOAuthTokenService::class ), $this->container->get( CdekSettings::class ), $this->container->get( WpCdekHttpClient::class ) ) );
 		$this->container->register( CdekLocationResolver::class, fn(): CdekLocationResolver => new CdekLocationResolver( $this->container->get( CdekApiClient::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( CdekDeliveryPointService::class, fn(): CdekDeliveryPointService => new CdekDeliveryPointService( $this->container->get( CdekApiClient::class ), $this->container->get( CdekSettings::class ), $this->container->get( CdekLocationResolver::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( CdekTariffRepository::class, fn(): CdekTariffRepository => new CdekTariffRepository() );
+		$this->container->register( CdekTariffSyncService::class, fn(): CdekTariffSyncService => new CdekTariffSyncService( $this->container->get( CdekApiClient::class ), $this->container->get( CdekTariffRepository::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( RussianPostCourierTariffProbeService::class, fn(): RussianPostCourierTariffProbeService => new RussianPostCourierTariffProbeService( $this->container->get( Logger::class ) ) );
 		$this->container->register( RussianPostOtpravkaApiSettings::class, fn(): RussianPostOtpravkaApiSettings => new RussianPostOtpravkaApiSettings( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
 		$this->container->register( RussianPostOtpravkaApiClient::class, fn(): RussianPostOtpravkaApiClient => new RussianPostOtpravkaApiClient( $this->container->get( RussianPostOtpravkaApiSettings::class ) ) );
@@ -249,7 +253,7 @@ final class Plugin {
 		$this->container->register( RussianPostCountryDirectory::class, fn(): RussianPostCountryDirectory => new RussianPostCountryDirectory( $this->container->get( RussianPostApiClient::class ), $this->container->get( Logger::class ), $this->container->get( RussianPostCountryMappingRepository::class ), $this->container->get( RussianPostCountryMappingService::class ), $this->container->get( RussianPostSettings::class ) ) );
 		$this->container->register( RussianPostInternationalCarrier::class, fn(): RussianPostInternationalCarrier => new RussianPostInternationalCarrier( $this->container->get( RussianPostSettings::class ), $this->container->get( RussianPostApiClient::class ), $this->container->get( RussianPostCountryDirectory::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( RussianPostDomesticCarrier::class, fn(): RussianPostDomesticCarrier => new RussianPostDomesticCarrier( $this->container->get( RussianPostDomesticSettings::class ), $this->container->get( RussianPostDomesticApiClient::class ), $this->container->get( RussianPostDomesticTariffVariantResolver::class ), $this->container->get( Logger::class ), $this->container->get( DaDataPostcodeClient::class ), $this->container->get( LocationRepository::class ) ) );
-		$this->container->register( CdekCarrier::class, fn(): CdekCarrier => new CdekCarrier( $this->container->get( CdekSettings::class ), $this->container->get( CdekApiClient::class ), $this->container->get( CdekLocationResolver::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( CdekCarrier::class, fn(): CdekCarrier => new CdekCarrier( $this->container->get( CdekSettings::class ), $this->container->get( CdekApiClient::class ), $this->container->get( CdekLocationResolver::class ), $this->container->get( Logger::class ), $this->container->get( CdekTariffRepository::class ) ) );
 		$this->container->register(
 			CarrierRegistry::class,
 			function (): CarrierRegistry {
@@ -504,7 +508,9 @@ final class Plugin {
 				$this->environment,
 				$this->container->get( RussianPostPickupPointTypeSettings::class ),
 				$this->container->get( CdekSettings::class ),
-				$this->container->get( CdekApiClient::class )
+				$this->container->get( CdekApiClient::class ),
+				$this->container->get( CdekTariffRepository::class ),
+				$this->container->get( CdekTariffSyncService::class )
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper() );
