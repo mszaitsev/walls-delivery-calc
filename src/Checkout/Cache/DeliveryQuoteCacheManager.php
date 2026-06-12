@@ -6,6 +6,8 @@ namespace WallsShop\WDC\Checkout\Cache;
 defined( 'ABSPATH' ) || exit;
 
 final class DeliveryQuoteCacheManager {
+	public const CACHE_VERSION_OPTION = 'wdc_delivery_rates_cache_version';
+
 	/** @var array<int,string> */
 	private const TRANSIENT_PREFIXES = array(
 		'wdc_rp_domestic_',
@@ -26,6 +28,12 @@ final class DeliveryQuoteCacheManager {
 		global $wpdb;
 
 		$this->wpdb = $db ?? $wpdb;
+	}
+
+	public function register(): void {
+		if ( function_exists( 'add_filter' ) ) {
+			add_filter( 'woocommerce_cart_shipping_packages', array( $this, 'add_cache_version_to_packages' ), PHP_INT_MAX );
+		}
 	}
 
 	/**
@@ -52,9 +60,45 @@ final class DeliveryQuoteCacheManager {
 			$this->quote_cache->invalidate_all();
 		}
 
+		$this->bump_delivery_rates_cache_version();
 		$deleted += $this->clear_woocommerce_session_cache();
 
 		return $deleted;
+	}
+
+	public function delivery_rates_cache_version(): string {
+		if ( function_exists( 'get_option' ) ) {
+			$value = get_option( self::CACHE_VERSION_OPTION, '1' );
+
+			return is_scalar( $value ) && '' !== (string) $value ? (string) $value : '1';
+		}
+
+		return '1';
+	}
+
+	public function bump_delivery_rates_cache_version(): string {
+		$version = sha1( uniqid( 'wdc_delivery_rates_', true ) );
+		if ( function_exists( 'update_option' ) ) {
+			update_option( self::CACHE_VERSION_OPTION, $version, false );
+		}
+
+		return $version;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $packages
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function add_cache_version_to_packages( array $packages ): array {
+		$version = $this->delivery_rates_cache_version();
+		foreach ( $packages as $index => $package ) {
+			if ( is_array( $package ) ) {
+				$package['wdc_delivery_rates_cache_version'] = $version;
+				$packages[ $index ] = $package;
+			}
+		}
+
+		return $packages;
 	}
 
 	/**

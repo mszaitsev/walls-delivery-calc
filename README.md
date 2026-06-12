@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.46.1.
+Current plugin version: 0.46.2.
+
+Version 0.46.2 adds a global delivery rates cache version (`wdc_delivery_rates_cache_version`) to WooCommerce shipping packages. Full delivery cache reset bumps this version, so every customer's `shipping_for_package_*` cache is invalidated by package hash even when their cart does not change. Manual cache reset, CDEK tariff save and confirmed CDEK tariff sync all bump the version while still clearing current-session caches opportunistically.
 
 Version 0.46.1 makes delivery tariff cache reset cover all checkout rate layers. The `Очистить кеш тарифов доставки` action now clears WDC quote transients, the runtime quote namespace, WooCommerce `shipping_for_package_*` session rates and WDC runtime rate/tariff session caches. Saving or confirming a CDEK tariff sync also clears those quote layers automatically, so disabling a managed CDEK tariff is reflected on checkout reload without changing the cart.
 

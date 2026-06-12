@@ -1,6 +1,8 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.46.1.
+Version: 0.46.2.
+
+0.46.2 global cache version update: WDC adds `wdc_delivery_rates_cache_version` to WooCommerce shipping packages and bumps it on full delivery cache reset. Because WooCommerce includes the package payload in the `shipping_for_package_*` hash, existing customer checkout sessions recalculate rates after CDEK tariff save/sync or manual reset even if the cart contents did not change.
 
 0.46.1 cache reset update: manual delivery tariff cache reset now clears WDC quote transients, runtime quote namespace, WooCommerce `shipping_for_package_*` session rates and WDC runtime rate/tariff session caches. Saving managed CDEK tariffs or confirming tariff sync triggers the same reset automatically, so deactivated tariffs disappear from checkout after reload without waiting for a cart/package hash change.
 

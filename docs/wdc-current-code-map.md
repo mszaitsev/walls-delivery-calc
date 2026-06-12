@@ -1,13 +1,13 @@
 # Карта текущего кода
 
-## CDEK Tariffs Management 0.46.1
+## CDEK Tariffs Management 0.46.2
 
 - `src/Carriers/Cdek/Tariffs/CdekTariffRepository.php` stores the managed CDEK tariff table (`tariff_code`, CDEK name, custom site title, delivery type, admin comment, active flag and last sync timestamp).
 - `src/Carriers/Cdek/Tariffs/CdekTariffSyncService.php` calls `GET /v2/calculator/alltariffs`, normalizes delivery modes into `pickup`/`courier`, builds sync diffs and applies updates without overwriting custom title/comment/active state.
 - `database/migrations/0027_create_cdek_tariffs_table.php` creates `wp_wdc_cdek_tariffs`.
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders the CDEK `Тарифы` tab, sync preview/confirmation, inline tariff editing and active flags.
 - `src/Carriers/Runtime/CdekCarrier.php` still prices through `POST /v2/calculator/tarifflist`, but uses the managed tariff row for title, delivery type and active/inactive filtering when a row exists.
-- `src/Checkout/Cache/DeliveryQuoteCacheManager.php` clears WDC quote transients, the runtime quote namespace, WooCommerce `shipping_for_package_*` session rates and WDC runtime rate/tariff session caches. The platform overview reset button and CDEK tariff save/sync actions use it so disabled managed tariffs disappear from checkout after refresh without a cart change.
+- `src/Checkout/Cache/DeliveryQuoteCacheManager.php` clears WDC quote transients, the runtime quote namespace, WooCommerce `shipping_for_package_*` session rates and WDC runtime rate/tariff session caches. It also maintains `wdc_delivery_rates_cache_version` and adds it to WooCommerce shipping packages, so the package hash changes globally after manual reset or CDEK tariff save/sync and existing customer checkout sessions recalculate rates without a cart change.
 - `docs/wdc-cdek-insurance-audit.md` documents current insurance findings and the order-creation follow-up.
 
 ## CDEK Pickup QA Fix 0.45.1

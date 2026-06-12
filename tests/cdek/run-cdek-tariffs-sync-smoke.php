@@ -17,6 +17,7 @@ use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
 use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffSyncService;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
+use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
@@ -56,6 +57,8 @@ function wc_get_logger(): object {
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
+		/** @var array<string,mixed> */
+		public array $options = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $cdek_tariffs = array();
 
@@ -197,5 +200,14 @@ cdek_tariffs_sync_assert( str_contains( $source, 'Загрузить тариф�
 cdek_tariffs_sync_assert( str_contains( $source, 'DeliveryQuoteCacheManager' ) && str_contains( $source, 'clear_delivery_quote_cache' ) && str_contains( $source, 'save_cdek_tariffs' ) && str_contains( $source, 'confirm_cdek_tariffs_sync' ), 'CDEK tariff save/sync must clear delivery quote cache.' );
 $cache_manager_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Cache/DeliveryQuoteCacheManager.php' );
 cdek_tariffs_sync_assert( str_contains( $cache_manager_source, 'shipping_for_package_' ) && str_contains( $cache_manager_source, 'wdc_platform_rates' ) && str_contains( $cache_manager_source, 'wdc_platform_selected_tariffs' ) && str_contains( $cache_manager_source, 'ensure_woocommerce_session' ), 'Delivery quote cache clear must include WooCommerce package rates and WDC runtime session caches.' );
+cdek_tariffs_sync_assert( str_contains( $cache_manager_source, 'wdc_delivery_rates_cache_version' ) && str_contains( $cache_manager_source, 'add_cache_version_to_packages' ) && str_contains( $cache_manager_source, 'bump_delivery_rates_cache_version' ), 'Delivery quote cache clear must bump a global WooCommerce package cache version.' );
+
+$cache_manager = new DeliveryQuoteCacheManager( null, $GLOBALS['wpdb'] );
+$package_before = $cache_manager->add_cache_version_to_packages( array( array( 'contents' => array( 'demo' ) ) ) );
+$version_before = (string) ( $package_before[0]['wdc_delivery_rates_cache_version'] ?? '' );
+$cache_manager->clear_all_delivery_cache();
+$package_after = $cache_manager->add_cache_version_to_packages( array( array( 'contents' => array( 'demo' ) ) ) );
+$version_after = (string) ( $package_after[0]['wdc_delivery_rates_cache_version'] ?? '' );
+cdek_tariffs_sync_assert( '' !== $version_before && '' !== $version_after && $version_before !== $version_after, 'Delivery rates cache version must change package hash input after cache reset.' );
 
 echo "CDEK tariffs sync smoke test passed.\n";

@@ -1,5 +1,7 @@
 # Project Status
 
+0.46.2 note: delivery rate cache reset now invalidates every checkout session through a global package-hash marker. `wdc_delivery_rates_cache_version` is added to WooCommerce shipping packages, and full cache reset bumps it after clearing WDC transients/runtime quote cache. Manual reset, CDEK tariff save and confirmed CDEK tariff sync all bump the version, so a disabled managed tariff disappears for existing checkout sessions without requiring a cart change.
+
 0.46.1 note: delivery tariff cache reset now clears all checkout rate layers affected by managed CDEK tariff changes: WDC quote transients, runtime quote namespace, WooCommerce `shipping_for_package_*` session rates, and WDC runtime rate/tariff session caches. Saving CDEK tariff rows or confirming CDEK tariff sync automatically clears the same quote layers, so disabled tariffs disappear from checkout after refresh without requiring a cart change.
 
 0.46.0 note: CDEK tariff management is implemented on `feature/cdek-tariffs-management`. The predefined CDEK service has a `Тарифы` tab that syncs available contract tariffs from `GET /v2/calculator/alltariffs`, shows a preview diff before applying, stores `tariff_code`, CDEK name, custom site title, delivery type, admin comment, active flag and last sync time, and preserves custom title/comment/active state during sync. Runtime CDEK quotes use managed tariff title/type/active state when a row exists. Insurance was audited in `docs/wdc-cdek-insurance-audit.md`; CDEK order creation, statuses, webhooks and print forms remain future work.
@@ -102,7 +104,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.46.1`.
+- Текущая версия: `0.46.2`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/cdek-tariffs-management`.
 - Последнее обновление статуса: 2026-06-12.
@@ -141,7 +143,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.46.1`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.46.2`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
