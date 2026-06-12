@@ -43,6 +43,13 @@ final class CdekApiClient {
 	}
 
 	/**
+	 * @return array<string,mixed>
+	 */
+	public function allTariffs(): array {
+		return $this->authorizedJsonRequest( 'GET', '/v2/calculator/alltariffs' );
+	}
+
+	/**
 	 * @param array<string,mixed> $query
 	 * @return array<string,mixed>
 	 */

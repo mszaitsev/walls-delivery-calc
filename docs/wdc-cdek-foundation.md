@@ -1,6 +1,8 @@
 # WDC CDEK Carrier Foundation
 
-Version: 0.45.0.
+Version: 0.46.0.
+
+0.46.0 update: CDEK tariff management now builds on the foundation API client. `CdekApiClient::allTariffs()` calls `GET /v2/calculator/alltariffs`, the admin `Тарифы` tab stores synced tariffs in a dedicated table, and runtime tariff labels/types can be managed without changing OAuth or credential handling.
 
 0.45.0 update: CDEK pickup points are implemented in `docs/wdc-cdek-pickup-points.md` through `GET /v2/deliverypoints`. Pickup rates now require selecting a pickup point, and the selected CDEK point is written to the WooCommerce shipping address. CDEK order creation, statuses, webhooks and print forms are still intentionally out of scope.
 
@@ -23,6 +25,7 @@ Implemented:
 - Smoke test coverage with fake HTTP client and no real CDEK requests.
 - Runtime tariff calculation foundation consumers: `CdekApiClient`, `CdekLocationResolver`, and `CdekCarrier`.
 - Pickup point runtime through `GET /v2/deliverypoints`, documented in `docs/wdc-cdek-pickup-points.md`.
+- Tariff directory sync through `GET /v2/calculator/alltariffs`, with editable tariff presentation in the CDEK delivery service admin tab.
 
 Not implemented:
 

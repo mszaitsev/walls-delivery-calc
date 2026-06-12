@@ -1,5 +1,15 @@
 # Карта текущего кода
 
+## CDEK Tariffs Management 0.46.4
+
+- `src/Carriers/Cdek/Tariffs/CdekTariffRepository.php` stores the managed CDEK tariff table (`tariff_code`, CDEK name, nullable weight/dimension limits, custom site title, delivery type, admin comment, active flag and last sync timestamp). Admin listing sorts active tariffs first, then by CDEK name and code. Nullable limit fields use dynamic insert/update formats so SQL `NULL` is preserved instead of being formatted as `0.000`.
+- `src/Carriers/Cdek/Tariffs/CdekTariffSyncService.php` calls `GET /v2/calculator/alltariffs`, normalizes delivery modes into `pickup`/`courier`, stores weight/dimension limits, fixes obvious mojibake in CDEK strings, builds sync diffs and applies updates without overwriting custom title/comment/active state.
+- `database/migrations/0027_create_cdek_tariffs_table.php` creates `wp_wdc_cdek_tariffs`; `0028_add_cdek_tariff_limits.php` adds nullable limit columns on updates from the first tariff-management schema.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders the CDEK `Тарифы` tab, sync preview/confirmation, inline tariff editing, active flags, compact restriction display, and Russian delivery-type labels `до ПВЗ` / `до двери`.
+- `src/Carriers/Runtime/CdekCarrier.php` still prices through `POST /v2/calculator/tarifflist`, but uses the managed tariff row for title, delivery type and active/inactive filtering when a row exists.
+- `src/Checkout/Cache/DeliveryQuoteCacheManager.php` clears WDC quote transients, the runtime quote namespace, WooCommerce `shipping_for_package_*` session rates and WDC runtime rate/tariff session caches. It also maintains `wdc_delivery_rates_cache_version` and adds it to WooCommerce shipping packages, so the package hash changes globally after manual reset or CDEK tariff save/sync and existing customer checkout sessions recalculate rates without a cart change.
+- `docs/wdc-cdek-insurance-audit.md` documents current insurance findings and the order-creation follow-up.
+
 ## CDEK Pickup QA Fix 0.45.1
 
 - `src/Checkout/WooCommerce/CheckoutValidation.php` restores CDEK pickup selections as CDEK data and no longer queries the Russian Post pickup repository for CDEK point codes such as `KEM7`.
@@ -50,7 +60,7 @@ The order-admin delivery recalculation stage is complete and HPOS-audited. The f
 - `src/Domain/Status/DeliveryStatus.php` defines the carrier-neutral shipment status model: `created_in_carrier`, `in_transit`, `ready_for_pickup`, `handed_to_courier`, `delivered`, `returning_to_sender`, `returned_to_sender`, `cancelled`, `rejected`, `unknown`, with Russian UI labels.
 - `src/Carriers/RussianPost/Tracking/RussianPostTrackingApiClient.php` calls Russian Post Tracking API `getOperationHistory` over SOAP 1.2 with `wp_remote_post`. It uses only `russian_post_tracking_login` and `russian_post_tracking_password_encrypted` from the unified domestic service settings.
 - `src/Carriers/RussianPost/Otpravka/RussianPostOtpravkaApiClient.php` also supports Russian Post backlog deletion through `DELETE /1.0/backlog` and manual shipment lookup through `GET /1.0/backlog/search?query={barcode}` plus fallback `GET /1.0/shipment/search?query={barcode}`.
-- `src/Carriers/Cdek` contains the CDEK foundation and tariff calculation support: settings, separate encrypted test/production credentials, active-environment API base URL selection, OAuth token service/cache, API response/exception objects, WP HTTP adapter, destination city resolver and API client methods for `tarifflist`, locations and delivery points. Orders, statuses, print forms and webhooks are still not implemented.
+- `src/Carriers/Cdek` contains the CDEK foundation, tariff calculation and tariff-management support: settings, separate encrypted test/production credentials, active-environment API base URL selection, OAuth token service/cache, API response/exception objects, WP HTTP adapter, destination city resolver, API client methods for `tarifflist`, `alltariffs`, locations and delivery points, plus the managed tariff repository/sync service. Orders, statuses, print forms and webhooks are still not implemented.
 - `src/Shipments/Application/ShipmentBacklogService.php` owns cancel/manual-attach rules. Cancel uses `backlog_order_id` and is allowed only for operation `28 / Присвоение идентификатора`; manual attach searches by barcode in backlog first, falls back to shipment search, saves `backlog_order_id` when returned, then attempts the first Tracking API refresh.
 - `src/Shipments/RussianPost/RussianPostTrackingStatusMapper.php` contains the code-fixed mapping generated from `status pocha.xlsx`. Unknown operation/attribute pairs map to `unknown` / `не определён`.
 - The 0.36.1 mapping correction maps selected pickup operations including `8:2`, `12:1..12:31`, and `42:1..42:30` to `ready_for_pickup`, and maps `8:15` plus `8:18` to `handed_to_courier`.
@@ -236,6 +246,7 @@ The order-admin delivery recalculation stage is complete and HPOS-audited. The f
 - настройки сервисов, стран, комментариев и packaging-related configuration;
 - admin page сервисов доставки;
 - данные сервисов, используемые checkout и расчетом carrier rates.
+- CDEK tariffs are edited on `WDC -> Службы доставки -> СДЭК -> Тарифы`; sync uses `GET /v2/calculator/alltariffs`, stores weight/dimension limits, and runtime CDEK rates prefer `custom_title` over the CDEK tariff name.
 - Historical migration note: unified Russian Post domestic service `russian_post_domestic`; old `russian_post_domestic_pickup`/`russian_post_domestic_courier` rows are physically removed by migration `0026`, and no backward compatibility layer for those keys remains.
 - domestic Russian Post availability is edited on `Основные`; the separate availability tab is no longer part of the service edit UI.
 

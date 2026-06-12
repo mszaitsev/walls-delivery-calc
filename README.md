@@ -1,6 +1,16 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.22.
+Current plugin version: 0.46.4.
+
+Version 0.46.4 fixes persistence of nullable CDEK tariff limits. `weight_*` and dimension limit fields from `GET /v2/calculator/alltariffs` now keep empty API values as SQL `NULL` on insert/update instead of formatting them through `%f` and risking `0.000`; numeric limits still save as decimal/float values.
+
+Version 0.46.3 improves CDEK tariff import and display. `GET /v2/calculator/alltariffs` sync now stores tariff weight limits (`weight_min`, `weight_max`, `weight_calc_max`) and dimension limits (`length_*`, `width_*`, `height_*`) as nullable fields, shows them in the CDEK `Тарифы` table, labels delivery type choices as `до ПВЗ` / `до двери` while keeping `pickup` / `courier` in storage, sorts active tariffs first by CDEK name, and safely fixes obvious CDEK mojibake such as `Ð´Ð²ÐµÑÑ-Ð´Ð²ÐµÑÑ`.
+
+Version 0.46.2 adds a global delivery rates cache version (`wdc_delivery_rates_cache_version`) to WooCommerce shipping packages. Full delivery cache reset bumps this version, so every customer's `shipping_for_package_*` cache is invalidated by package hash even when their cart does not change. Manual cache reset, CDEK tariff save and confirmed CDEK tariff sync all bump the version while still clearing current-session caches opportunistically.
+
+Version 0.46.1 makes delivery tariff cache reset cover all checkout rate layers. The `Очистить кеш тарифов доставки` action now clears WDC quote transients, the runtime quote namespace, WooCommerce `shipping_for_package_*` session rates and WDC runtime rate/tariff session caches. Saving or confirming a CDEK tariff sync also clears those quote layers automatically, so disabling a managed CDEK tariff is reflected on checkout reload without changing the cart.
+
+Version 0.46.0 adds CDEK tariff management. The CDEK delivery service now has a `Тарифы` tab with sync preview/confirmation from `GET /v2/calculator/alltariffs`, editable custom tariff titles, pickup/courier type, admin comments and active flags. Runtime CDEK rates use the managed tariff table when available while preserving fallback behavior before the first sync. The stage also adds `docs/wdc-cdek-insurance-audit.md`; CDEK order creation, statuses, webhooks and print forms remain out of scope.
 
 Version 0.45.22 removes the temporary checkout pickup diagnostics added during the CDEK/Russian Post restore investigation. Checkout JS no longer emits grouped console traces, localized checkout config no longer exposes debug flags, and PHP pickup save/state/localized/validation/session-write debug logs were removed. Canonical pickup bucket restore/save/validation behavior remains unchanged; only normal warning/error logs remain for real failures.
 

@@ -1,5 +1,15 @@
 # Project Status
 
+0.46.4 note: nullable CDEK tariff limit persistence is fixed. Insert/update formats for `weight_*`, `length_*`, `width_*` and `height_*` are built dynamically so `null` API values remain SQL `NULL` rather than being sent through `%f` and becoming `0.000`; numeric limits still use decimal/float storage.
+
+0.46.3 note: CDEK tariff sync now stores API limit fields from `GET /v2/calculator/alltariffs`: weight min/max/calculation max and length/width/height min/max. The CDEK tariff admin table displays compact limits, Russian labels `до ПВЗ` / `до двери` for delivery type, and active-first/name/code sorting. Existing custom title/comment/active state survives sync; without a separate manual-override flag, delivery type is still refreshed from API. Safe mojibake normalization fixes obvious CDEK strings before storing names/modes.
+
+0.46.2 note: delivery rate cache reset now invalidates every checkout session through a global package-hash marker. `wdc_delivery_rates_cache_version` is added to WooCommerce shipping packages, and full cache reset bumps it after clearing WDC transients/runtime quote cache. Manual reset, CDEK tariff save and confirmed CDEK tariff sync all bump the version, so a disabled managed tariff disappears for existing checkout sessions without requiring a cart change.
+
+0.46.1 note: delivery tariff cache reset now clears all checkout rate layers affected by managed CDEK tariff changes: WDC quote transients, runtime quote namespace, WooCommerce `shipping_for_package_*` session rates, and WDC runtime rate/tariff session caches. Saving CDEK tariff rows or confirming CDEK tariff sync automatically clears the same quote layers, so disabled tariffs disappear from checkout after refresh without requiring a cart change.
+
+0.46.0 note: CDEK tariff management is implemented on `feature/cdek-tariffs-management`. The predefined CDEK service has a `Тарифы` tab that syncs available contract tariffs from `GET /v2/calculator/alltariffs`, shows a preview diff before applying, stores `tariff_code`, CDEK name, custom site title, delivery type, admin comment, active flag and last sync time, and preserves custom title/comment/active state during sync. Runtime CDEK quotes use managed tariff title/type/active state when a row exists. Insurance was audited in `docs/wdc-cdek-insurance-audit.md`; CDEK order creation, statuses, webhooks and print forms remain future work.
+
 0.45.22 note: temporary checkout pickup diagnostics were removed after the canonical bucket/session investigation. `wdc-pickup-checkout.js` no longer writes grouped console traces, pickup localization no longer exposes debug flags, and PHP pickup save/state/localized/validation/session-write debug logs were removed. Restore/save/validation business logic remains unchanged; real save failures still use normal warning/error logging.
 
 0.45.21 note: checkout pickup restore no longer treats different destination fingerprint formats as a location change when stable destination identity still matches. The frontend compares selected pickup points by `location_id`, FIAS, GAR, city/region and postcode+city before fingerprint fallback, and keeps explicit `destination_*` aliases in saved point payloads.
@@ -98,9 +108,9 @@
 
 ## Общий статус
 
-- Текущая версия: `0.45.22`.
+- Текущая версия: `0.46.4`.
 - Текущая базовая ветка: `develop`.
-- Рабочая ветка: `fix/cdek-pickup-selection-and-ui`.
+- Рабочая ветка: `feature/cdek-tariffs-management`.
 - Последнее обновление статуса: 2026-06-12.
 - Общая готовность проекта: примерно 74%.
 - Следующий рекомендуемый этап: `feature/cdek-order-creation`.
@@ -137,7 +147,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.22`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.46.4`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
