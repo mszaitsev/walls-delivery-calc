@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.46.3.
+Current plugin version: 0.46.4.
+
+Version 0.46.4 fixes persistence of nullable CDEK tariff limits. `weight_*` and dimension limit fields from `GET /v2/calculator/alltariffs` now keep empty API values as SQL `NULL` on insert/update instead of formatting them through `%f` and risking `0.000`; numeric limits still save as decimal/float values.
 
 Version 0.46.3 improves CDEK tariff import and display. `GET /v2/calculator/alltariffs` sync now stores tariff weight limits (`weight_min`, `weight_max`, `weight_calc_max`) and dimension limits (`length_*`, `width_*`, `height_*`) as nullable fields, shows them in the CDEK `Тарифы` table, labels delivery type choices as `до ПВЗ` / `до двери` while keeping `pickup` / `courier` in storage, sorts active tariffs first by CDEK name, and safely fixes obvious CDEK mojibake such as `Ð´Ð²ÐµÑÑ-Ð´Ð²ÐµÑÑ`.
 

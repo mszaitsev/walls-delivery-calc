@@ -264,15 +264,14 @@ final class CdekTariffRepository {
 			'created_at' => $row['created_at'],
 			'updated_at' => $row['updated_at'],
 		);
-		$formats = array( '%s', '%s', '%f', '%f', '%f', '%f', '%f', '%f', '%f', '%f', '%f', '%s', '%s', '%s', '%d', '%s', '%s', '%s' );
 		if ( $existing ) {
 			unset( $data['created_at'] );
-			array_splice( $formats, 16, 1 );
+			$formats = $this->formats_for_data( $data );
 			$this->wpdb->update( $this->main_table(), $data, array( 'tariff_code' => $row['tariff_code'] ), $formats, array( '%s' ) );
 			return;
 		}
 
-		$this->wpdb->insert( $this->main_table(), $data, $formats );
+		$this->wpdb->insert( $this->main_table(), $data, $this->formats_for_data( $data ) );
 	}
 
 	/**
@@ -362,6 +361,30 @@ final class CdekTariffRepository {
 	}
 
 	/**
+	 * @param array<string,mixed> $data
+	 * @return array<int,string>
+	 */
+	private function formats_for_data( array $data ): array {
+		$formats = array();
+		foreach ( $data as $key => $value ) {
+			$formats[] = $this->format_for_field( (string) $key, $value );
+		}
+
+		return $formats;
+	}
+
+	private function format_for_field( string $key, mixed $value ): string {
+		if ( in_array( $key, $this->limit_keys(), true ) ) {
+			return null === $value ? '%s' : '%f';
+		}
+		if ( 'is_active' === $key ) {
+			return '%d';
+		}
+
+		return '%s';
+	}
+
+	/**
 	 * @param array<string,mixed> $existing
 	 * @param array<string,mixed> $incoming
 	 */
@@ -409,6 +432,10 @@ final class CdekTariffRepository {
 	}
 
 	private function uses_memory_table(): bool {
+		if ( property_exists( $this->wpdb, 'wdc_force_sql_table' ) && true === $this->wpdb->wdc_force_sql_table ) {
+			return false;
+		}
+
 		return property_exists( $this->wpdb, 'cdek_tariffs' ) && is_array( $this->wpdb->cdek_tariffs );
 	}
 

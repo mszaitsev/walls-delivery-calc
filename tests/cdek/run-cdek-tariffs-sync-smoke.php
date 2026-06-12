@@ -57,10 +57,21 @@ function wc_get_logger(): object {
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
+		public bool $wdc_force_sql_table = false;
 		/** @var array<string,mixed> */
 		public array $options = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $cdek_tariffs = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $sql_cdek_tariffs = array();
+		/** @var array<string,mixed> */
+		public array $last_insert_data = array();
+		/** @var array<int,string> */
+		public array $last_insert_formats = array();
+		/** @var array<string,mixed> */
+		public array $last_update_data = array();
+		/** @var array<int,string> */
+		public array $last_update_formats = array();
 
 		public function get_charset_collate(): string { return 'DEFAULT CHARSET=utf8mb4'; }
 		public function query( string $query ): bool { return true; }
@@ -70,10 +81,31 @@ if ( ! class_exists( 'wpdb' ) ) {
 			}
 			return $query;
 		}
-		public function get_row( string $query, mixed $output = null ): ?array { return null; }
-		public function get_results( string $query, mixed $output = null ): array { return array(); }
-		public function insert( string $table, array $data, array $format = array() ): bool { return true; }
-		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool { return true; }
+		public function get_row( string $query, mixed $output = null ): ?array {
+			foreach ( $this->sql_cdek_tariffs as $row ) {
+				if ( preg_match( "/WHERE tariff_code = '([^']+)'/i", $query, $matches ) && (string) $row['tariff_code'] === $matches[1] ) {
+					return $row;
+				}
+			}
+			return null;
+		}
+		public function get_results( string $query, mixed $output = null ): array { return $this->wdc_force_sql_table ? array_values( $this->sql_cdek_tariffs ) : array(); }
+		public function insert( string $table, array $data, array $format = array() ): bool {
+			$this->last_insert_data = $data;
+			$this->last_insert_formats = $format;
+			$this->sql_cdek_tariffs[] = $data;
+			return true;
+		}
+		public function update( string $table, array $data, array $where, array $format = array(), array $where_format = array() ): bool {
+			$this->last_update_data = $data;
+			$this->last_update_formats = $format;
+			foreach ( $this->sql_cdek_tariffs as $index => $row ) {
+				if ( (string) ( $row['tariff_code'] ?? '' ) === (string) ( $where['tariff_code'] ?? '' ) ) {
+					$this->sql_cdek_tariffs[ $index ] = array_merge( $row, $data );
+				}
+			}
+			return true;
+		}
 	}
 }
 
@@ -178,6 +210,39 @@ cdek_tariffs_sync_assert( is_array( $synced_pickup ) && 0.1 === $synced_pickup['
 cdek_tariffs_sync_assert( is_array( $synced_pickup ) && 10.0 === $synced_pickup['length_min'] && 120.0 === $synced_pickup['length_max'] && 10.0 === $synced_pickup['width_min'] && 80.0 === $synced_pickup['width_max'] && 1.0 === $synced_pickup['height_min'] && 80.0 === $synced_pickup['height_max'], 'CDEK sync must store dimension limits.' );
 $synced_courier = $repository->find_by_code( '137' );
 cdek_tariffs_sync_assert( is_array( $synced_courier ) && null === $synced_courier['weight_min'] && null === $synced_courier['weight_max'] && 100.0 === $synced_courier['weight_calc_max'], 'CDEK sync must store empty API limits as null.' );
+
+$format_for_key = static function ( array $data, array $formats, string $key ): ?string {
+	$keys = array_keys( $data );
+	$index = array_search( $key, $keys, true );
+	return is_int( $index ) ? ( $formats[ $index ] ?? null ) : null;
+};
+$sql_db = new wpdb();
+$sql_db->wdc_force_sql_table = true;
+$sql_repository = new CdekTariffRepository( $sql_db );
+$sql_repository->upsert_from_sync(
+	array(
+		'tariff_code' => '200',
+		'tariff_name_from_cdek' => 'Null limits',
+		'delivery_type' => DeliveryType::PICKUP,
+		'weight_min' => null,
+		'weight_max' => '',
+		'weight_calc_max' => 12.5,
+	)
+);
+cdek_tariffs_sync_assert( null === $sql_db->last_insert_data['weight_min'] && null === $sql_db->last_insert_data['weight_max'] && 12.5 === $sql_db->last_insert_data['weight_calc_max'], 'CDEK SQL insert must keep null limits as null and numeric limits as numbers.' );
+cdek_tariffs_sync_assert( '%f' !== $format_for_key( $sql_db->last_insert_data, $sql_db->last_insert_formats, 'weight_min' ) && '%f' !== $format_for_key( $sql_db->last_insert_data, $sql_db->last_insert_formats, 'weight_max' ) && '%f' === $format_for_key( $sql_db->last_insert_data, $sql_db->last_insert_formats, 'weight_calc_max' ), 'CDEK SQL insert must not format null limits as floats.' );
+$sql_repository->upsert_from_sync(
+	array(
+		'tariff_code' => '200',
+		'tariff_name_from_cdek' => 'Null limits updated',
+		'delivery_type' => DeliveryType::PICKUP,
+		'weight_min' => '',
+		'weight_max' => null,
+		'weight_calc_max' => '',
+	)
+);
+cdek_tariffs_sync_assert( null === $sql_db->last_update_data['weight_min'] && null === $sql_db->last_update_data['weight_max'] && null === $sql_db->last_update_data['weight_calc_max'], 'CDEK SQL update must keep empty API limits as SQL null values.' );
+cdek_tariffs_sync_assert( '%f' !== $format_for_key( $sql_db->last_update_data, $sql_db->last_update_formats, 'weight_min' ) && '%f' !== $format_for_key( $sql_db->last_update_data, $sql_db->last_update_formats, 'weight_calc_max' ), 'CDEK SQL update must not format null limits as floats.' );
 
 $repository->save_admin_rows(
 	array(

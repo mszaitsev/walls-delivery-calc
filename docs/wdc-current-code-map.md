@@ -1,8 +1,8 @@
 # Карта текущего кода
 
-## CDEK Tariffs Management 0.46.3
+## CDEK Tariffs Management 0.46.4
 
-- `src/Carriers/Cdek/Tariffs/CdekTariffRepository.php` stores the managed CDEK tariff table (`tariff_code`, CDEK name, nullable weight/dimension limits, custom site title, delivery type, admin comment, active flag and last sync timestamp). Admin listing sorts active tariffs first, then by CDEK name and code.
+- `src/Carriers/Cdek/Tariffs/CdekTariffRepository.php` stores the managed CDEK tariff table (`tariff_code`, CDEK name, nullable weight/dimension limits, custom site title, delivery type, admin comment, active flag and last sync timestamp). Admin listing sorts active tariffs first, then by CDEK name and code. Nullable limit fields use dynamic insert/update formats so SQL `NULL` is preserved instead of being formatted as `0.000`.
 - `src/Carriers/Cdek/Tariffs/CdekTariffSyncService.php` calls `GET /v2/calculator/alltariffs`, normalizes delivery modes into `pickup`/`courier`, stores weight/dimension limits, fixes obvious mojibake in CDEK strings, builds sync diffs and applies updates without overwriting custom title/comment/active state.
 - `database/migrations/0027_create_cdek_tariffs_table.php` creates `wp_wdc_cdek_tariffs`; `0028_add_cdek_tariff_limits.php` adds nullable limit columns on updates from the first tariff-management schema.
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders the CDEK `Тарифы` tab, sync preview/confirmation, inline tariff editing, active flags, compact restriction display, and Russian delivery-type labels `до ПВЗ` / `до двери`.

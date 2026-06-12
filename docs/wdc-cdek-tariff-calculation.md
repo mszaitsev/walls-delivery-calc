@@ -1,6 +1,8 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.46.3.
+Version: 0.46.4.
+
+0.46.4 nullable storage fix: CDEK tariff limit insert/update now builds `$wpdb` formats dynamically. Null values for `weight_*`, `length_*`, `width_*` and `height_*` are stored as SQL `NULL` and are not formatted as `%f`; numeric values continue to use decimal/float formats. This prevents empty API fields from being persisted as `0.000`.
 
 0.46.3 tariff limits update: `GET /v2/calculator/alltariffs` sync stores nullable CDEK restriction fields in `wdc_cdek_tariffs`: `weight_min`, `weight_max`, `weight_calc_max`, `length_min`, `length_max`, `width_min`, `width_max`, `height_min`, `height_max`. In the current CDEK API response/examples these weight values are treated as kilograms and dimensions as centimeters, matching the admin display (`Вес: ... кг`, `Габариты: ... см`). Empty/null API values are stored as `null`. Sync preserves `custom_title`, `admin_comment` and `is_active`; because there is no manual delivery-type override flag yet, `delivery_type` is refreshed from the API-derived mode on sync. Obvious mojibake in CDEK names/modes is normalized only when the string clearly contains broken UTF-8 markers.
 
