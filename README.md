@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.46.0.
+Current plugin version: 0.46.1.
+
+Version 0.46.1 makes delivery tariff cache reset cover all checkout rate layers. The `Очистить кеш тарифов доставки` action now clears WDC quote transients, the runtime quote namespace, WooCommerce `shipping_for_package_*` session rates and WDC runtime rate/tariff session caches. Saving or confirming a CDEK tariff sync also clears those quote layers automatically, so disabling a managed CDEK tariff is reflected on checkout reload without changing the cart.
 
 Version 0.46.0 adds CDEK tariff management. The CDEK delivery service now has a `Тарифы` tab with sync preview/confirmation from `GET /v2/calculator/alltariffs`, editable custom tariff titles, pickup/courier type, admin comments and active flags. Runtime CDEK rates use the managed tariff table when available while preserving fallback behavior before the first sync. The stage also adds `docs/wdc-cdek-insurance-audit.md`; CDEK order creation, statuses, webhooks and print forms remain out of scope.
 

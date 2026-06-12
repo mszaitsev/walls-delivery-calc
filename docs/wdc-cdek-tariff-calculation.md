@@ -1,6 +1,8 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.46.0.
+Version: 0.46.1.
+
+0.46.1 cache reset update: manual delivery tariff cache reset now clears WDC quote transients, runtime quote namespace, WooCommerce `shipping_for_package_*` session rates and WDC runtime rate/tariff session caches. Saving managed CDEK tariffs or confirming tariff sync triggers the same reset automatically, so deactivated tariffs disappear from checkout after reload without waiting for a cart/package hash change.
 
 0.46.0 tariff management update: CDEK runtime calculation still obtains prices and delivery periods through `POST /v2/calculator/tarifflist`, but tariff presentation is now managed through a dedicated table synced from `GET /v2/calculator/alltariffs`. If a returned `tariff_code` exists in the table, WDC uses its active flag, delivery type and display title (`custom_title`, then `tariff_name_from_cdek`) for checkout/admin rate labels. If no row exists yet, runtime falls back to the API response name and delivery mode classification.
 

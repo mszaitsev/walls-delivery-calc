@@ -16,6 +16,7 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
 use WallsShop\WDC\Carriers\Runtime\RussianPostDomesticCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
+use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
 use WallsShop\WDC\Checkout\Runtime\RuleAppliedRateBuilder;
 use WallsShop\WDC\Core\PluginEnvironment;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
@@ -75,7 +76,8 @@ final class DeliveryServicesAdminPage {
 		private ?CdekSettings $cdek_settings = null,
 		private ?CdekApiClient $cdek_api = null,
 		private ?CdekTariffRepository $cdek_tariffs = null,
-		private ?CdekTariffSyncService $cdek_tariff_sync = null
+		private ?CdekTariffSyncService $cdek_tariff_sync = null,
+		private ?DeliveryQuoteCacheManager $delivery_quote_cache_manager = null
 	) {
 	}
 
@@ -223,6 +225,7 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_cdek_tariffs' === $action && $this->cdek_tariffs instanceof CdekTariffRepository ) {
 				$this->cdek_tariffs->save_admin_rows( $this->sanitize_cdek_tariffs_from_post() );
 				delete_transient( $this->cdek_tariff_preview_transient_key() );
+				$this->clear_delivery_quote_cache();
 			}
 			if ( 'preview_cdek_tariffs_sync' === $action && $this->cdek_tariff_sync instanceof CdekTariffSyncService ) {
 				try {
@@ -243,6 +246,7 @@ final class DeliveryServicesAdminPage {
 					$this->cdek_tariff_sync->sync_rows( $rows );
 				}
 				delete_transient( $this->cdek_tariff_preview_transient_key() );
+				$this->clear_delivery_quote_cache();
 			}
 			if ( in_array( $action, array( 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import' ), true ) && $this->otpravka_settings instanceof RussianPostOtpravkaApiSettings ) {
 				$this->otpravka_settings->save_from_admin( $_POST );
@@ -1796,6 +1800,12 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		$user_id = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0;
 
 		return 'wdc_cdek_tariff_sync_preview_' . $user_id;
+	}
+
+	private function clear_delivery_quote_cache(): void {
+		if ( $this->delivery_quote_cache_manager instanceof DeliveryQuoteCacheManager ) {
+			$this->delivery_quote_cache_manager->clear_all_delivery_cache();
+		}
 	}
 
 	private function is_domestic_service( ?DeliveryService $service ): bool {

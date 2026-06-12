@@ -14,6 +14,12 @@ final class DeliveryQuoteCacheManager {
 		'wdc_cdek_deliverypoints_',
 	);
 
+	/** @var array<int,string> */
+	private const WDC_SESSION_CACHE_KEYS = array(
+		'wdc_platform_rates',
+		'wdc_platform_selected_tariffs',
+	);
+
 	private \wpdb $wpdb;
 
 	public function __construct( private ?QuoteCache $quote_cache = null, ?\wpdb $db = null ) {
@@ -30,6 +36,10 @@ final class DeliveryQuoteCacheManager {
 	}
 
 	public function clear_all_quote_cache(): int {
+		return $this->clear_all_delivery_cache();
+	}
+
+	public function clear_all_delivery_cache(): int {
 		$keys = $this->transient_keys();
 		$deleted = 0;
 		foreach ( $keys as $key ) {
@@ -41,6 +51,8 @@ final class DeliveryQuoteCacheManager {
 		if ( $this->quote_cache instanceof QuoteCache ) {
 			$this->quote_cache->invalidate_all();
 		}
+
+		$deleted += $this->clear_woocommerce_session_cache();
 
 		return $deleted;
 	}
@@ -130,5 +142,72 @@ final class DeliveryQuoteCacheManager {
 		}
 
 		return $deleted;
+	}
+
+	private function clear_woocommerce_session_cache(): int {
+		if ( ! function_exists( 'WC' ) ) {
+			return 0;
+		}
+
+		$woocommerce = WC();
+		$this->ensure_woocommerce_session( $woocommerce );
+		$session = is_object( $woocommerce ) && isset( $woocommerce->session ) ? $woocommerce->session : null;
+		if ( ! is_object( $session ) ) {
+			return 0;
+		}
+
+		$deleted = 0;
+		for ( $index = 0; $index < 20; ++$index ) {
+			if ( $this->clear_session_key( $session, 'shipping_for_package_' . $index ) ) {
+				++$deleted;
+			}
+		}
+
+		foreach ( self::WDC_SESSION_CACHE_KEYS as $key ) {
+			if ( $this->clear_session_key( $session, $key ) ) {
+				++$deleted;
+			}
+		}
+
+		if ( method_exists( $session, 'save_data' ) ) {
+			$session->save_data();
+		}
+
+		return $deleted;
+	}
+
+	private function ensure_woocommerce_session( mixed $woocommerce ): void {
+		if ( ! is_object( $woocommerce ) ) {
+			return;
+		}
+		if ( isset( $woocommerce->session ) && is_object( $woocommerce->session ) ) {
+			return;
+		}
+		if ( ! class_exists( 'WC_Session_Handler' ) ) {
+			return;
+		}
+
+		$session = new \WC_Session_Handler();
+		if ( method_exists( $session, 'init' ) ) {
+			$session->init();
+		}
+		$woocommerce->session = $session;
+	}
+
+	private function clear_session_key( object $session, string $key ): bool {
+		$had_value = true;
+		if ( method_exists( $session, 'get' ) ) {
+			$had_value = null !== $session->get( $key, null );
+		}
+
+		if ( method_exists( $session, '__unset' ) ) {
+			$session->__unset( $key );
+		} elseif ( method_exists( $session, 'set' ) ) {
+			$session->set( $key, null );
+		} else {
+			return false;
+		}
+
+		return $had_value;
 	}
 }

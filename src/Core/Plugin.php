@@ -510,7 +510,8 @@ final class Plugin {
 				$this->container->get( CdekSettings::class ),
 				$this->container->get( CdekApiClient::class ),
 				$this->container->get( CdekTariffRepository::class ),
-				$this->container->get( CdekTariffSyncService::class )
+				$this->container->get( CdekTariffSyncService::class ),
+				$this->container->get( DeliveryQuoteCacheManager::class )
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper() );

@@ -126,7 +126,7 @@ final class AdminMenu {
 			return '';
 		}
 
-		$deleted = $this->quote_cache_manager instanceof DeliveryQuoteCacheManager ? $this->quote_cache_manager->clear_all_quote_cache() : 0;
+		$deleted = $this->quote_cache_manager instanceof DeliveryQuoteCacheManager ? $this->quote_cache_manager->clear_all_delivery_cache() : 0;
 
 		return sprintf( __( 'Кеш тарифов доставки очищен. Удалено записей: %d', 'walls-delivery-calc' ), $deleted );
 	}

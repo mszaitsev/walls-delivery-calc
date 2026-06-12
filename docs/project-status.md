@@ -1,5 +1,7 @@
 # Project Status
 
+0.46.1 note: delivery tariff cache reset now clears all checkout rate layers affected by managed CDEK tariff changes: WDC quote transients, runtime quote namespace, WooCommerce `shipping_for_package_*` session rates, and WDC runtime rate/tariff session caches. Saving CDEK tariff rows or confirming CDEK tariff sync automatically clears the same quote layers, so disabled tariffs disappear from checkout after refresh without requiring a cart change.
+
 0.46.0 note: CDEK tariff management is implemented on `feature/cdek-tariffs-management`. The predefined CDEK service has a `Тарифы` tab that syncs available contract tariffs from `GET /v2/calculator/alltariffs`, shows a preview diff before applying, stores `tariff_code`, CDEK name, custom site title, delivery type, admin comment, active flag and last sync time, and preserves custom title/comment/active state during sync. Runtime CDEK quotes use managed tariff title/type/active state when a row exists. Insurance was audited in `docs/wdc-cdek-insurance-audit.md`; CDEK order creation, statuses, webhooks and print forms remain future work.
 
 0.45.22 note: temporary checkout pickup diagnostics were removed after the canonical bucket/session investigation. `wdc-pickup-checkout.js` no longer writes grouped console traces, pickup localization no longer exposes debug flags, and PHP pickup save/state/localized/validation/session-write debug logs were removed. Restore/save/validation business logic remains unchanged; real save failures still use normal warning/error logging.
@@ -100,9 +102,9 @@
 
 ## Общий статус
 
-- Текущая версия: `0.45.22`.
+- Текущая версия: `0.46.1`.
 - Текущая базовая ветка: `develop`.
-- Рабочая ветка: `fix/cdek-pickup-selection-and-ui`.
+- Рабочая ветка: `feature/cdek-tariffs-management`.
 - Последнее обновление статуса: 2026-06-12.
 - Общая готовность проекта: примерно 74%.
 - Следующий рекомендуемый этап: `feature/cdek-order-creation`.
@@ -139,7 +141,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.45.22`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.46.1`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
