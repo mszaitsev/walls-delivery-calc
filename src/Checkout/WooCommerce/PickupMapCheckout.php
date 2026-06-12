@@ -54,6 +54,22 @@ final class PickupMapCheckout {
 		wp_enqueue_script( 'wdc-pickup-checkout', $base . 'assets/frontend/pickup-map/wdc-pickup-checkout.js', array( 'wdc-pickup-api', 'wdc-pickup-modal', 'wdc-pickup-map' ), $version, true );
 
 		if ( function_exists( 'wp_localize_script' ) ) {
+			$active_shipping_method = $this->active_shipping_method_id();
+			$active_pickup_family = $this->active_pickup_family();
+			$initial_context = $this->initial_context();
+			$pickup_selections = $this->selected_points_context( false );
+			$selected_pickup_points = $this->selected_points_context( true );
+			$selected_pickup_point = $this->selected_point_context( $active_pickup_family );
+			$this->session_manager->pickup_debug_log(
+				'WDC pickup localized config',
+				array(
+					'active_shipping_method' => $active_shipping_method,
+					'active_family' => $active_pickup_family,
+					'pickup_selections_keys' => array_keys( $pickup_selections ),
+					'selected_pickup_point_summary' => is_array( $selected_pickup_point ) ? $this->session_manager->pickup_debug_summary( $selected_pickup_point ) : array(),
+					'initial_context_has_selected_point' => is_array( $initial_context['selectedPoint'] ?? null ) && array() !== (array) $initial_context['selectedPoint'],
+				)
+			);
 			wp_localize_script(
 				'wdc-pickup-checkout',
 				'wdcPickupCheckout',
@@ -61,14 +77,16 @@ final class PickupMapCheckout {
 					'restUrl'          => function_exists( 'rest_url' ) ? rest_url( 'wdc/v1/' ) : '/wp-json/wdc/v1/',
 					'nonce'            => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( 'wp_rest' ) : '',
 					'carrier'          => $this->first_pickup_carrier(),
-					'shippingMethodId' => $this->active_shipping_method_id(),
-					'activeShippingMethod' => $this->active_shipping_method_id(),
-					'initialContext'   => $this->initial_context(),
-					'pickupSelections' => $this->selected_points_context( false ),
-					'pickupSelectionsRaw' => $this->selected_points_context( false ),
-					'selectedPickupPoints' => $this->selected_points_context( true ),
-					'activePickupFamily' => $this->active_pickup_family(),
-					'selectedPickupPoint' => $this->selected_point_context( $this->active_pickup_family() ),
+					'shippingMethodId' => $active_shipping_method,
+					'activeShippingMethod' => $active_shipping_method,
+					'initialContext'   => $initial_context,
+					'pickupSelections' => $pickup_selections,
+					'pickupSelectionsRaw' => $pickup_selections,
+					'selectedPickupPoints' => $selected_pickup_points,
+					'activePickupFamily' => $active_pickup_family,
+					'selectedPickupPoint' => $selected_pickup_point,
+					'debug'            => $this->session_manager->pickup_debug_enabled(),
+					'pickupDebug'      => $this->session_manager->pickup_debug_enabled(),
 					'mapProvider'      => $provider,
 					'pickupPointTypes' => $this->pickup_point_types(),
 					'pickupFamilies'   => $this->pickup_families(),

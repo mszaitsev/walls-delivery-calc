@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.45.13.
+Version: 0.45.14.
+
+0.45.14 temporary diagnostics: checkout pickup state now has an explicit debug mode behind `define( 'WDC_PICKUP_DEBUG', true );`. When enabled, `wdc-pickup-checkout.js` writes grouped console snapshots for boot, map context, selected point before save, REST save response, `applySelection`, `updated_checkout`, and place-order submit. PHP logs sanitized pickup summaries for REST save/state, localized config and checkout validation. The diagnostics are temporary and do not change CDEK/Russian Post pickup restore or validation behavior.
 
 0.45.13 reload/validation follow-up: selected pickup restore now depends only on `pickup_family + destination/location + point identity`. A selected CDEK/Russian Post point is not invalidated by tariff changes, grouped rate suffixes, package contents, weight or dimensions. `pickupSelections` in checkout localization keeps raw saved family buckets even when a visual card address has to be resolved from aliases; `selectedPickupPoints` remains the renderable-card subset. CDEK address aliases now include top-level, snapshot and raw address fields, and checkout validation accepts the active `cdek:pickup` bucket without hidden fields when the destination still matches.
 

@@ -145,6 +145,15 @@ final class CheckoutPickupPointRestController {
 		$family = $this->param( $request, 'pickup_family' );
 		$active_family = '' !== $family ? $family : $this->active_pickup_family();
 		$point = '' !== $active_family ? $this->session_manager->checkout_pickup_point_for_family( $active_family ) : $this->session_manager->checkout_pickup_point();
+		$this->session_manager->pickup_debug_log(
+			'WDC pickup state',
+			array(
+				'active_shipping_method' => $this->active_shipping_method_id(),
+				'active_family' => $active_family,
+				'pickup_selections_keys' => array_keys( $this->session_manager->pickup_selections() ),
+				'selected_for_active_family_summary' => array() !== $point ? $this->session_manager->pickup_debug_summary( $point ) : array(),
+			)
+		);
 
 		return $this->response(
 			array(
@@ -205,6 +214,7 @@ final class CheckoutPickupPointRestController {
 	 * @param array<string,mixed> $selection
 	 */
 	private function save_selection( array $selection, string $carrier, string $method_id ): void {
+		$before_keys = array_keys( $this->session_manager->pickup_selections() );
 		$carrier = $this->session_manager->normalize_carrier_key_for_pickup( $carrier );
 		$family = $this->session_manager->normalize_pickup_family( (string) ( $selection['pickup_family'] ?? $selection['snapshot']['pickup_family'] ?? $this->session_manager->shipping_method_family( $method_id ) ) );
 		if ( ! str_ends_with( $family, ':pickup' ) ) {
@@ -252,6 +262,23 @@ final class CheckoutPickupPointRestController {
 				'lng' => $selection['lng'] ?? null,
 				'snapshot' => $snapshot ?: $selection,
 				'selected_at' => gmdate( 'c' ),
+			)
+		);
+		$saved = $this->session_manager->pickup_selection_for_family( $family );
+		$this->session_manager->pickup_debug_log(
+			'WDC pickup save',
+			array(
+				'request_shipping_method_id' => $method_id,
+				'request_pickup_family' => (string) ( $selection['pickup_family'] ?? $selection['snapshot']['pickup_family'] ?? '' ),
+				'normalized_family' => $family,
+				'point_code' => (string) ( $selection['point_code'] ?? $selection['snapshot']['point_code'] ?? '' ),
+				'carrier_key' => $carrier,
+				'service_key' => $service_key,
+				'has_address' => array() !== $this->session_manager->pickup_debug_address_keys( $selection ),
+				'address_keys_present' => $this->session_manager->pickup_debug_address_keys( $selection ),
+				'session_pickup_selections_before_keys' => $before_keys,
+				'session_pickup_selections_after_keys' => array_keys( $this->session_manager->pickup_selections() ),
+				'saved_bucket_summary' => array() !== $saved ? $this->session_manager->pickup_debug_summary( $saved ) : array(),
 			)
 		);
 	}
@@ -484,6 +511,24 @@ final class CheckoutPickupPointRestController {
 				'activePickupFamily' => $family,
 			)
 		);
+	}
+
+	private function active_shipping_method_id(): string {
+		if ( ! function_exists( 'WC' ) || ! is_object( WC() ) || ! isset( WC()->session ) || ! is_object( WC()->session ) || ! method_exists( WC()->session, 'get' ) ) {
+			return '';
+		}
+		$chosen = WC()->session->get( 'chosen_shipping_methods', array() );
+		if ( ! is_array( $chosen ) ) {
+			return '';
+		}
+		foreach ( $chosen as $method ) {
+			$method = trim( (string) $method );
+			if ( '' !== $method ) {
+				return $this->normalize_shipping_method_id( $method );
+			}
+		}
+
+		return '';
 	}
 
 	/**

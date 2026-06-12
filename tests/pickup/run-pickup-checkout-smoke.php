@@ -203,6 +203,18 @@ $bbox = $points_controller->points( array( 'carrier' => 'russian_post', 'bbox' =
 pickup_checkout_assert( 1 === count( $bbox ), 'bbox endpoint must return active points.' );
 
 $session = new CheckoutSessionManager();
+pickup_checkout_assert( false === $session->pickup_debug_enabled(), 'pickup debug mode must be disabled by default.' );
+$debug_summary = $session->pickup_debug_summary(
+	array(
+		'carrier_key' => 'cdek',
+		'service_key' => 'cdek',
+		'pickup_family' => 'cdek:pickup',
+		'point_code' => 'KEM7',
+		'point_address' => 'CDEK address',
+		'destination_fingerprint' => 'place=omsk',
+	)
+);
+pickup_checkout_assert( 'cdek:pickup' === $debug_summary['pickup_family'] && true === $debug_summary['has_address'] && array( 'point_address' ) === $debug_summary['address_keys'], 'pickup debug summary must expose only safe point identity fields.' );
 $state_controller = new CheckoutPickupPointRestController( $repo, $session, new PickupPointLocationResolver( $location_repo ) );
 $state_controller->register();
 pickup_checkout_assert( 3 === count( $GLOBALS['wdc_pickup_checkout_routes'] ?? array() ), 'checkout REST routes must register.' );
@@ -264,6 +276,8 @@ $session->save_rates( array( $pickup_group_id => $rate ) );
 WC()->session->set( 'chosen_shipping_methods', array( $pickup_group_id ) );
 
 $root = dirname( __DIR__, 2 );
+$checkout_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' ) ?: '';
+pickup_checkout_assert( str_contains( $checkout_js, 'var pickupDebugEnabled' ) && str_contains( $checkout_js, 'function debugGroup' ) && str_contains( $checkout_js, 'if (!pickupDebugEnabled || !window.console)' ), 'frontend pickup diagnostics must be guarded by the debug flag.' );
 $environment = new PluginEnvironment( $root . '/walls-delivery-calc.php', $root, 'https://example.test/wp-content/plugins/walls-delivery-calc/', '0.24.0' );
 $map_settings = new SettingsRepository();
 $map_settings->replace( array_merge( $map_settings->defaults(), array( 'pickup_map_provider' => 'leaflet' ) ) );
@@ -275,6 +289,7 @@ $GLOBALS['wdc_pickup_checkout_localized'] = array();
 pickup_checkout_assert( isset( $GLOBALS['wdc_pickup_checkout_enqueued_scripts']['wdc-leaflet'], $GLOBALS['wdc_pickup_checkout_enqueued_styles']['wdc-leaflet'], $GLOBALS['wdc_pickup_checkout_enqueued_scripts']['wdc-map-provider-leaflet'] ), 'Leaflet provider must enqueue Leaflet assets and Leaflet provider adapter.' );
 pickup_checkout_assert( ! isset( $GLOBALS['wdc_pickup_checkout_enqueued_scripts']['wdc-map-provider-yandex'] ), 'Leaflet provider must not enqueue the Yandex adapter.' );
 $localized_leaflet = $GLOBALS['wdc_pickup_checkout_localized']['wdc-pickup-checkout']['wdcPickupCheckout'] ?? array();
+pickup_checkout_assert( false === (bool) ( $localized_leaflet['debug'] ?? true ) && false === (bool) ( $localized_leaflet['pickupDebug'] ?? true ), 'pickup checkout localization must keep frontend diagnostics disabled by default.' );
 $ops_type_keys = array_keys( $localized_leaflet['pickupPointTypes']['OPS'] ?? array() );
 sort( $ops_type_keys );
 pickup_checkout_assert( 'Отделение Почты России' === (string) ( $localized_leaflet['pickupPointTypes']['OPS']['label'] ?? '' ) && array( 'enabled', 'label' ) === $ops_type_keys && true === (bool) ( $localized_leaflet['pickupPointTypes']['PVZ']['enabled'] ?? false ) && true === (bool) ( $localized_leaflet['pickupPointTypes']['APS']['enabled'] ?? false ), 'JS localization must include only pickupPointTypes label/enabled flags.' );
@@ -776,7 +791,7 @@ pickup_checkout_assert( str_contains( $map_checkout_source, 'map_provider()' ) &
 pickup_checkout_assert( str_contains( $map_checkout_source, 'providers/wdc-map-provider-leaflet.js' ), 'Leaflet provider script must be enqueued.' );
 pickup_checkout_assert( str_contains( $map_checkout_source, "if ( 'leaflet' === \$provider )" ) && str_contains( $map_checkout_source, 'providers/wdc-map-provider-yandex.js' ), 'Yandex provider must enqueue from the non-Leaflet branch.' );
 pickup_checkout_assert( str_contains( $map_checkout_source, "'yandex' === \$provider && \$this->has_yandex_api_key()" ) && str_contains( $map_checkout_source, "'yandexApiKeyPresent'" ), 'Yandex key must be localized only when Yandex is selected and the key exists.' );
-pickup_checkout_assert( str_contains( $map_checkout_source, "'pickupPointTypes'" ) && str_contains( $map_checkout_source, 'pickup_point_types()' ) && str_contains( $map_checkout_source, "'pickupSelections' => \$this->selected_points_context( false )" ) && str_contains( $map_checkout_source, "'selectedPickupPoints' => \$this->selected_points_context( true )" ) && str_contains( $map_checkout_source, "'selectedPoint' => \$this->selected_point_context( \$this->active_pickup_family() )" ), 'Pickup map checkout must localize pickupPointTypes, active selectedPoint, raw pickupSelections, and renderable selectedPickupPoints buckets.' );
+pickup_checkout_assert( str_contains( $map_checkout_source, "'pickupPointTypes'" ) && str_contains( $map_checkout_source, 'pickup_point_types()' ) && str_contains( $map_checkout_source, '$pickup_selections = $this->selected_points_context( false )' ) && str_contains( $map_checkout_source, "'pickupSelections' => \$pickup_selections" ) && str_contains( $map_checkout_source, '$selected_pickup_points = $this->selected_points_context( true )' ) && str_contains( $map_checkout_source, "'selectedPickupPoints' => \$selected_pickup_points" ) && str_contains( $map_checkout_source, '$selected_pickup_point = $this->selected_point_context( $active_pickup_family )' ) && str_contains( $map_checkout_source, "'selectedPoint' => \$this->selected_point_context( \$this->active_pickup_family() )" ), 'Pickup map checkout must localize pickupPointTypes, active selectedPoint, raw pickupSelections, and renderable selectedPickupPoints buckets.' );
 pickup_checkout_assert( str_contains( $map_checkout_source, 'Для Яндекс.Карт не задан API key' ), 'Frontend config must include a clear missing Yandex API key error.' );
 pickup_checkout_assert( file_exists( $root . '/assets/vendor/leaflet/leaflet.css' ) && file_exists( $root . '/assets/vendor/leaflet/leaflet.js' ), 'Leaflet assets must exist under assets/vendor/leaflet.' );
 $checkout_js = file_get_contents( $root . '/assets/frontend/pickup-map/wdc-pickup-checkout.js' ) ?: '';
@@ -865,7 +880,7 @@ pickup_checkout_assert( str_contains( $checkout_js, 'function syncPickupContextA
 pickup_checkout_assert( str_contains( $checkout_js, 'window.wdcPickupCheckout.currentContext = context' ) && str_contains( $checkout_js, 'window.wdcPickupCheckout.initialContext = Object.assign({}, window.wdcPickupCheckout.initialContext || {}, context)' ) && str_contains( $checkout_js, 'window.wdcPickupCheckout.selectedPickupPoint = selectedPoint' ), 'Cross-location context sync must update currentContext, initialContext, and selectedPickupPoint globals for the next map open.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'invalidatePrefetch();' ) && str_contains( $checkout_js, 'schedulePrefetch();' ) && str_contains( $checkout_js, 'normalizeGuid(context.fias_id || \'\')' ), 'Cross-location context sync must clear old prefetch data and rebuild cache keys with the new FIAS/location context.' );
 pickup_checkout_assert( str_contains( $checkout_js, 'var checkoutFias = normalizeGuid(checkoutContext && checkoutContext.fias_id)' ) && str_contains( $checkout_js, 'var pointFias = normalizeGuid(point && (point.fias_location_guid || point.fias_id))' ) && str_contains( $checkout_js, "quickMatchReason: checkoutFias === pointFias ? 'same_fias' : 'different_fias'" ), 'Pickup quick check must compare normalized checkout FIAS and pickup fias_location_guid before fallback matching.' );
-$commit_source = substr( $checkout_js, strpos( $checkout_js, 'function commitPoint(point, shippingMethodId, options)' ), 800 );
+$commit_source = substr( $checkout_js, strpos( $checkout_js, 'function commitPoint(point, shippingMethodId, options)' ), 2200 );
 $save_point_source = substr( $checkout_js, strpos( $checkout_js, 'function savePoint(point)' ), strpos( $checkout_js, 'function runCrossLocationSelection(point, location)' ) - strpos( $checkout_js, 'function savePoint(point)' ) );
 pickup_checkout_assert( str_contains( $commit_source, 'var payload = pointPayload(point);' ) && str_contains( $commit_source, 'window.WDCPickupApi.save(point.id, shippingMethodId || method, payload)' ) && str_contains( $commit_source, 'applySelection(container, response.pickup_point || {})' ) && str_contains( $commit_source, 'close();' ), 'Same-city save must still call REST save with the full payload, apply the selected point UI, and close the modal.' );
 pickup_checkout_assert( str_contains( $commit_source, 'if (true === options.updateCheckoutAfterSave)' ) && ! str_contains( $commit_source, 'options.updateCheckoutAfterSave !== false' ), 'commitPoint must only trigger checkout update when updateCheckoutAfterSave is explicitly true.' );

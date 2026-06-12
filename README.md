@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.45.13.
+Current plugin version: 0.45.14.
+
+Version 0.45.14 adds temporary checkout pickup-state diagnostics behind `WDC_PICKUP_DEBUG`. Enable it in `wp-config.php` with `define( 'WDC_PICKUP_DEBUG', true );` to get grouped browser console snapshots for pickup boot/save/apply/update/place-order flow and sanitized WooCommerce logs for REST save/state, localized config and checkout validation. Business pickup validation and restore behavior are intentionally unchanged in this diagnostic step.
 
 Version 0.45.13 tightens checkout pickup restore around the canonical family bucket model. Reload restore and checkout validation now depend on `pickup_family + destination + point identity`, not the selected tariff/rate/package. Localized `pickupSelections` keeps raw saved buckets even when a card address must be recovered from aliases, while `selectedPickupPoints` remains the renderable-card view. CDEK and Russian Post address aliases include snapshot/raw address fields, and order meta/shipping address persistence uses the same address resolver.
 

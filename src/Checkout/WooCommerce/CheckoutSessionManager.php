@@ -739,6 +739,119 @@ final class CheckoutSessionManager {
 		return (string) $this->get( self::ADDRESS_FINGERPRINT_KEY, '' );
 	}
 
+	public function pickup_debug_enabled(): bool {
+		return defined( 'WDC_PICKUP_DEBUG' ) && WDC_PICKUP_DEBUG;
+	}
+
+	/**
+	 * @param array<string,mixed> $point
+	 * @return array<string,mixed>
+	 */
+	public function pickup_debug_summary( array $point ): array {
+		$snapshot = is_array( $point['snapshot'] ?? null ) ? $point['snapshot'] : array();
+
+		return array(
+			'pickup_family' => (string) ( $point['pickup_family'] ?? $snapshot['pickup_family'] ?? '' ),
+			'carrier_key' => (string) ( $point['carrier_key'] ?? $point['carrier'] ?? $snapshot['carrier_key'] ?? $snapshot['carrier'] ?? '' ),
+			'service_key' => (string) ( $point['service_key'] ?? $snapshot['service_key'] ?? '' ),
+			'point_code' => (string) ( $point['point_code'] ?? $snapshot['point_code'] ?? '' ),
+			'point_id' => (string) ( $point['point_id'] ?? $point['id'] ?? $snapshot['point_id'] ?? $snapshot['id'] ?? '' ),
+			'has_address' => array() !== $this->pickup_debug_address_keys( $point ),
+			'address_keys' => $this->pickup_debug_address_keys( $point ),
+			'destination_fingerprint' => (string) ( $point['destination_fingerprint'] ?? $snapshot['destination_fingerprint'] ?? '' ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $point
+	 * @return array<int,string>
+	 */
+	public function pickup_debug_address_keys( array $point ): array {
+		$keys = array();
+		foreach ( array(
+			'point_address',
+			'address',
+			'address_full',
+			'full_address',
+			'address_short',
+			'location_address',
+			'address_source',
+		) as $key ) {
+			if ( '' !== trim( (string) ( $point[ $key ] ?? '' ) ) ) {
+				$keys[] = $key;
+			}
+		}
+
+		$snapshot = is_array( $point['snapshot'] ?? null ) ? $point['snapshot'] : array();
+		foreach ( array(
+			'point_address',
+			'address',
+			'address_full',
+			'full_address',
+			'address_short',
+			'location_address',
+			'address_source',
+		) as $key ) {
+			if ( '' !== trim( (string) ( $snapshot[ $key ] ?? '' ) ) ) {
+				$keys[] = 'snapshot.' . $key;
+			}
+		}
+
+		$raw = is_array( $point['raw'] ?? null ) ? $point['raw'] : ( is_array( $snapshot['raw'] ?? null ) ? $snapshot['raw'] : array() );
+		foreach ( array( 'address', 'address_full', 'full_address', 'address_short', 'location_address' ) as $key ) {
+			if ( '' !== trim( (string) ( $raw[ $key ] ?? '' ) ) ) {
+				$keys[] = 'raw.' . $key;
+			}
+		}
+
+		return array_values( array_unique( $keys ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $point
+	 */
+	public function pickup_debug_location_matches_current( array $point ): bool {
+		return $this->pickup_selection_location_matches_current( $point );
+	}
+
+	/**
+	 * @param array<string,mixed> $point
+	 */
+	public function pickup_debug_family_matches( array $point, string $pickup_family ): bool {
+		return $this->selection_family_matches( $point, $pickup_family );
+	}
+
+	/**
+	 * @param array<string,mixed> $point
+	 */
+	public function pickup_debug_carrier_matches( array $point, string $carrier_key ): bool {
+		$snapshot = is_array( $point['snapshot'] ?? null ) ? $point['snapshot'] : array();
+		$expected = $this->normalize_carrier_key_for_pickup( $carrier_key );
+		$carrier = $this->normalize_carrier_key_for_pickup( (string) ( $point['carrier_key'] ?? $point['carrier'] ?? $snapshot['carrier_key'] ?? $snapshot['carrier'] ?? '' ) );
+		$service = $this->normalize_carrier_key_for_pickup( (string) ( $point['service_key'] ?? $snapshot['service_key'] ?? '' ) );
+
+		return '' === $expected || $carrier === $expected || ( '' === $carrier && ( '' === $service || $service === $expected ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $context
+	 */
+	public function pickup_debug_log( string $message, array $context = array() ): void {
+		if ( ! $this->pickup_debug_enabled() ) {
+			return;
+		}
+
+		if ( function_exists( 'wc_get_logger' ) ) {
+			wc_get_logger()->debug( $message, array_merge( $context, array( 'source' => 'walls-delivery-calc' ) ) );
+			return;
+		}
+
+		if ( function_exists( 'error_log' ) ) {
+			$encoded = function_exists( 'wp_json_encode' ) ? wp_json_encode( $context ) : json_encode( $context );
+			error_log( '[walls-delivery-calc] debug: ' . $message . ' ' . ( false !== $encoded ? $encoded : '' ) );
+		}
+	}
+
 	private function set( string $key, mixed $value ): void {
 		$session = $this->session();
 		if ( is_object( $session ) && method_exists( $session, 'set' ) ) {
@@ -780,11 +893,7 @@ final class CheckoutSessionManager {
 	}
 
 	private function debug_logging_enabled(): bool {
-		if ( defined( 'WDC_PICKUP_DEBUG' ) && WDC_PICKUP_DEBUG ) {
-			return true;
-		}
-
-		return defined( 'WP_DEBUG' ) && WP_DEBUG;
+		return $this->pickup_debug_enabled();
 	}
 
 	private function session(): mixed {

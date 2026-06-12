@@ -2,6 +2,7 @@
 	'use strict';
 
 	var checkoutConfig = window.wdcPickupCheckout || {};
+	var pickupDebugEnabled = !!(checkoutConfig.debug || checkoutConfig.pickupDebug || checkoutConfig.pickup_debug);
 	var labels = checkoutConfig.labels || {};
 	var activeMethod = '';
 	var activePickupFamily = String(checkoutConfig.activePickupFamily || checkoutConfig.active_pickup_family || '').trim();
@@ -72,6 +73,18 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			var geolocationButton = modal.root.querySelector('[data-wdc-geolocation]');
 			var context = withPrefetch(withCarrierContext(resolvedContext, method));
 			debugDeep('openModal context', context);
+			debugGroup('[WDC Pickup] open map context', {
+				method: method,
+				family: shippingMethodFamily(method),
+				context: context,
+				selectedForFamily: pickupDebugSummary(selectedPickupPointForFamily(shippingMethodFamily(method)) || {}),
+				carrierContext: {
+					carrier: context.carrier || '',
+					carrier_key: context.carrier_key || '',
+					service_key: context.service_key || '',
+					pickup_family: context.pickup_family || ''
+				}
+			});
 			var map = window.WDCPickupMap.create(modal.root.querySelector('[data-wdc-map]'), modal.root.querySelector('[data-wdc-card]'), confirmButton, labels, context);
 			var savingPoint = false;
 			var loadingText = '';
@@ -104,12 +117,31 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				}
 				var payload = pointPayload(point);
 				debug('pickup save payload', pickupDebugSummary(payload));
+				debugGroup('[WDC Pickup] selected point before save', {
+					point_id: payload.id || payload.point_id || '',
+					point_code: selectedPointCode(payload),
+					carrier_key: payload.carrier_key || payload.carrier || '',
+					service_key: payload.service_key || '',
+					pickup_family: pickupFamily(payload),
+					address: selectedPointAddressValue(payload),
+					postcode: payload.postcode || payload.point_postcode || '',
+					display_title: payload.display_title || selectedPointTitle(payload),
+					display_code: payload.display_code || '',
+					destination_fingerprint: payload.destination_fingerprint || ''
+				});
 				if (!savingPoint) {
 					setLoading(options.message || 'Сохраняем пункт выдачи...');
 				}
 				return window.WDCPickupApi.save(point.id, shippingMethodId || method, payload).then(function (response) {
 					debug('pickup save response', pickupDebugSummary(response && response.pickup_point));
 					mergePickupSelectionsFromResponse(response);
+					debugGroup('[WDC Pickup] save response', {
+						pickup_point: pickupDebugSummary(response && response.pickup_point),
+						pickupSelectionsKeys: Object.keys(selectedPickupPoints || {}),
+						pickupSelections: pickupDebugSelections(selectedPickupPoints),
+						activePickupFamily: response && (response.activePickupFamily || response.active_pickup_family || activePickupFamily),
+						selectedPickupPoint: pickupDebugSummary(response && (response.selectedPickupPoint || response.selected_pickup_point || response.pickup_point))
+					});
 					applySelection(container, response.pickup_point || {});
 					close();
 					if (true === options.updateCheckoutAfterSave) {
@@ -270,16 +302,28 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		point = point || {};
 		var method = containerMethod(container) || activeMethod || currentShippingMethod();
 		var family = shippingMethodFamily(method);
+		var pointFamily = pickupFamily(point);
+		var addressValue = selectedPointAddressValue(point);
+		var validForCard = isValidSelectedPointForCard(point, family);
 		if (!isValidSelectedPointForCard(point, family)) {
 			showEmptySelection(container);
 			if (window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint && pickupFamily(window.wdcPickupCheckout.selectedPickupPoint) === family) {
 				window.wdcPickupCheckout.selectedPickupPoint = null;
 			}
+			debugGroup('[WDC Pickup] apply selection', {
+				expectedFamily: family,
+				pointFamily: pointFamily,
+				pointCode: selectedPointCode(point),
+				hasAddress: !!addressValue,
+				addressAliases: pickupDebugAddressAliases(point),
+				validForCard: validForCard,
+				hiddenFieldsAfterApply: hiddenFieldsSnapshot(container)
+			});
 			debug('applySelection skipped incomplete selected point', {
 				pickup_family: family,
-				point_family: pickupFamily(point),
+				point_family: pointFamily,
 				point_code_present: !!selectedPointCode(point),
-				has_address: !!selectedPointAddressValue(point)
+				has_address: !!addressValue
 			});
 			return;
 		}
@@ -352,6 +396,15 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		if (selectedPoint && selectedPoint.point_code) {
 			rememberDestinationFingerprint();
 		}
+		debugGroup('[WDC Pickup] apply selection', {
+			expectedFamily: family,
+			pointFamily: pickupFamily(selectedPoint),
+			pointCode: selectedPointCode(selectedPoint),
+			hasAddress: !!selectedPointAddressValue(selectedPoint),
+			addressAliases: pickupDebugAddressAliases(selectedPoint),
+			validForCard: true,
+			hiddenFieldsAfterApply: hiddenFieldsSnapshot(container)
+		});
 	}
 
 	function setHidden(element, hidden) {
@@ -642,27 +695,129 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	}
 
 	function debug() {
-		if (window.wdcPickupCheckout && window.wdcPickupCheckout.debug && window.console && window.console.log) {
+		if (pickupDebugEnabled && window.console && window.console.log) {
 			window.console.log.apply(window.console, ['wdc pickup:'].concat(Array.prototype.slice.call(arguments)));
 		}
 	}
 
 	function debugDeep() {
-		if (window.wdcPickupCheckout && window.wdcPickupCheckout.deepDebug) {
+		if (pickupDebugEnabled && window.wdcPickupCheckout && window.wdcPickupCheckout.deepDebug) {
 			debug.apply(null, arguments);
+		}
+	}
+
+	function debugGroup(label, data) {
+		if (!pickupDebugEnabled || !window.console) {
+			return;
+		}
+		if (window.console.groupCollapsed) {
+			window.console.groupCollapsed(label);
+		} else if (window.console.log) {
+			window.console.log(label);
+		}
+		if (window.console.log) {
+			window.console.log(data || {});
+		}
+		if (data && data.pickupSelections && window.console.table) {
+			window.console.table(data.pickupSelections);
+		}
+		if (window.console.groupEnd) {
+			window.console.groupEnd();
 		}
 	}
 
 	function pickupDebugSummary(point) {
 		point = point || {};
 		var snapshot = point.snapshot || {};
-		var address = firstMeaningfulText(point.point_address, point.address, snapshot.point_address, snapshot.address);
+		var address = selectedPointAddressValue(point);
 		return {
 			carrier_key: point.carrier_key || point.carrier || snapshot.carrier_key || '',
 			service_key: point.service_key || snapshot.service_key || '',
 			pickup_family: point.pickup_family || snapshot.pickup_family || pickupFamily(point),
 			point_code: selectedPointCode(point),
-			has_address: !!address
+			point_id: point.point_id || point.id || snapshot.point_id || snapshot.id || '',
+			has_address: !!address,
+			destination_fingerprint: point.destination_fingerprint || snapshot.destination_fingerprint || ''
+		};
+	}
+
+	function pickupDebugSelections(points) {
+		var rows = [];
+		Object.keys(points || {}).forEach(function (family) {
+			var summary = pickupDebugSummary(points[family] || {});
+			summary.family_key = family;
+			rows.push(summary);
+		});
+		return rows;
+	}
+
+	function pickupDebugAddressAliases(point) {
+		point = point || {};
+		var snapshot = point.snapshot || {};
+		var raw = point.raw || snapshot.raw || {};
+		var aliases = {};
+		[
+			'point_address',
+			'address',
+			'address_full',
+			'full_address',
+			'address_short',
+			'location_address',
+			'address_source'
+		].forEach(function (key) {
+			aliases[key] = !!meaningfulText(point[key]);
+			aliases['snapshot.' + key] = !!meaningfulText(snapshot[key]);
+		});
+		['address', 'address_full', 'full_address', 'address_short', 'location_address'].forEach(function (key) {
+			aliases['raw.' + key] = !!meaningfulText(raw[key]);
+		});
+		aliases.resolved = selectedPointAddressValue(point);
+		return aliases;
+	}
+
+	function hiddenFieldsSnapshot(container) {
+		var root = container || document;
+		function value(selector) {
+			var field = root.querySelector(selector);
+			return field ? String(field.value || '').trim() : '';
+		}
+		return {
+			point_id: value('[data-wdc-pickup-point-id]'),
+			point_code: value('[data-wdc-pickup-point-code]'),
+			carrier_key: value('[data-wdc-pickup-carrier-key]'),
+			service_key: value('[data-wdc-pickup-service-key]'),
+			pickup_family: value('[data-wdc-pickup-family]'),
+			address: value('[data-wdc-pickup-point-address]'),
+			postcode: value('[data-wdc-pickup-point-postcode]'),
+			city_name: value('[data-wdc-pickup-city-name]'),
+			region_name: value('[data-wdc-pickup-region-name]'),
+			work_time: value('[data-wdc-pickup-work-time-field]'),
+			description: value('[data-wdc-pickup-description-field]'),
+			storage_notice: value('[data-wdc-pickup-storage-notice-field]'),
+			destination_fingerprint: value('[data-wdc-pickup-destination-fingerprint]')
+		};
+	}
+
+	function checkoutPickupDebugState() {
+		var method = currentShippingMethod();
+		var family = shippingMethodFamily(method);
+		var selected = selectedPickupPointForFamily(family);
+		var container = document.querySelector('[data-wdc-pickup-checkout]');
+		var card = container ? container.querySelector('[data-wdc-pickup-card]') : null;
+		return {
+			activeMethod: method,
+			activeFamily: family,
+			currentShippingMethod: method,
+			pickupFamilies: pickupFamilies,
+			pickupSelectionsKeys: Object.keys(selectedPickupPoints || {}),
+			selectedPickupPoint: pickupDebugSummary(window.wdcPickupCheckout && window.wdcPickupCheckout.selectedPickupPoint),
+			selectedPickupPoints: pickupDebugSelections(selectedPickupPoints),
+			selectedForActiveFamily: pickupDebugSummary(selected),
+			initialContextSelectedPoint: pickupDebugSummary(checkoutConfig.initialContext && checkoutConfig.initialContext.selectedPoint),
+			currentContext: currentContext,
+			destinationFingerprint: destinationFingerprint(currentContext) || destinationFingerprint(contextFromFields()),
+			selectedCardVisible: !!(card && !card.hidden && card.style.display !== 'none'),
+			hiddenFields: hiddenFieldsSnapshot(container || document)
 		};
 	}
 
@@ -1695,6 +1850,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	function boot() {
 		document.querySelectorAll('[data-wdc-pickup-checkout]').forEach(init);
 		restoreSelectedPickupUi();
+		debugGroup('[WDC Pickup] boot', checkoutPickupDebugState());
 	}
 
 	function selectedPickupPointId() {
@@ -1722,6 +1878,13 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		isPlacingOrder = true;
 		window.clearTimeout(placeOrderGuardTimer);
 		placeOrderResetGuardUntil = Date.now() + 3000;
+		debugGroup('[WDC Pickup] before place order', {
+			activeMethod: currentShippingMethod(),
+			activeFamily: shippingMethodFamily(currentShippingMethod()),
+			selectedForActiveFamily: pickupDebugSummary(selectedPickupPointForFamily(shippingMethodFamily(currentShippingMethod()))),
+			hiddenFields: hiddenFieldsSnapshot(document.querySelector('[data-wdc-pickup-checkout]') || document),
+			pickupSelectionsKeys: Object.keys(selectedPickupPoints || {})
+		});
 		debug('place order guard active');
 	}
 
@@ -1890,6 +2053,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		window.jQuery(document.body).on('updated_checkout', function () {
 			boot();
 			restoreSelectedPickupUi();
+			debugGroup('[WDC Pickup] updated_checkout state', checkoutPickupDebugState());
 			if (isPlacingOrder) {
 				debug('updated_checkout skipped context refresh during place order');
 				releasePlaceOrderGuardSoon();

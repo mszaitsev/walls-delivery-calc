@@ -112,6 +112,10 @@ final class CheckoutValidation {
 		$active_selection = $this->session_manager->pickup_selection_for_family( $active_family );
 		if ( array() !== $active_selection && $this->session_manager->valid_pickup_selection_for_checkout( $active_family ) ) {
 			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
+			$this->session_manager->pickup_debug_log(
+				'WDC pickup validation',
+				$this->pickup_validation_debug_context( $data, $rate, $chosen_rate_id, $selected_rate_id, $active_family, $active_selection, true, 'active_family_bucket' )
+			);
 			$this->debug_validation(
 				'wdc_pickup_validation_passed',
 				array(
@@ -125,12 +129,21 @@ final class CheckoutValidation {
 		$matches_before_restore = $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $selected_rate_id );
 		if ( $matches_before_restore ) {
 			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
+			$this->session_manager->pickup_debug_log(
+				'WDC pickup validation',
+				$this->pickup_validation_debug_context( $data, $rate, $chosen_rate_id, $selected_rate_id, $active_family, $active_selection, true, 'session_match' )
+			);
 			$this->debug_validation( 'wdc_pickup_validation_passed', array( 'reason' => 'session_match', 'selected_rate_id' => $selected_rate_id ) );
 			return;
 		}
 		$restored = $this->restore_posted_pickup_selection( $data, $rate );
 		if ( $restored ) {
 			$this->session_manager->update_pickup_selection_rate_id( $selected_rate_id );
+			$active_selection = $this->session_manager->pickup_selection_for_family( $active_family );
+			$this->session_manager->pickup_debug_log(
+				'WDC pickup validation',
+				$this->pickup_validation_debug_context( $data, $rate, $chosen_rate_id, $selected_rate_id, $active_family, $active_selection, true, 'restored_from_post' )
+			);
 			$this->debug_validation(
 				'wdc_pickup_restore_from_post_success',
 				array(
@@ -143,6 +156,11 @@ final class CheckoutValidation {
 		}
 
 		$matches_after_restore = $this->session_manager->pickup_selection_matches( (string) ( $rate['carrier_key'] ?? '' ), $selected_rate_id );
+		$active_selection = $this->session_manager->pickup_selection_for_family( $active_family );
+		$this->session_manager->pickup_debug_log(
+			'WDC pickup validation',
+			$this->pickup_validation_debug_context( $data, $rate, $chosen_rate_id, $selected_rate_id, $active_family, $active_selection, false, 'no_session_no_post_point' )
+		);
 		$this->debug_validation(
 			'wdc_pickup_validation_failed',
 			array_merge(
@@ -801,6 +819,37 @@ final class CheckoutValidation {
 	}
 
 	/**
+	 * @param array<string,mixed> $data
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $bucket
+	 * @return array<string,mixed>
+	 */
+	private function pickup_validation_debug_context( array $data, array $rate, string $chosen_rate_id, string $selected_rate_id, string $active_family, array $bucket, bool $result, string $failure_reason ): array {
+		$rate_carrier = $this->session_manager->normalize_carrier_key_for_pickup( (string) ( $rate['carrier_key'] ?? $this->carrier_from_family( $active_family ) ) );
+		$summary = array() !== $bucket ? $this->session_manager->pickup_debug_summary( $bucket ) : array();
+
+		return array(
+			'selected_shipping_method' => $chosen_rate_id,
+			'active_family' => $active_family,
+			'rate_carrier_key' => $rate_carrier,
+			'bucket_exists' => array() !== $bucket,
+			'bucket_family' => (string) ( $summary['pickup_family'] ?? '' ),
+			'bucket_carrier_key' => (string) ( $summary['carrier_key'] ?? '' ),
+			'bucket_point_code' => (string) ( $summary['point_code'] ?? '' ),
+			'bucket_point_id' => (string) ( $summary['point_id'] ?? '' ),
+			'bucket_has_address' => (bool) ( $summary['has_address'] ?? false ),
+			'location_match' => array() === $bucket ? false : $this->session_manager->pickup_debug_location_matches_current( $bucket ),
+			'carrier_match' => array() === $bucket ? false : $this->session_manager->pickup_debug_carrier_matches( $bucket, $rate_carrier ),
+			'family_match' => array() === $bucket ? false : $this->session_manager->pickup_debug_family_matches( $bucket, $active_family ),
+			'result' => $result ? 'pass' : 'fail',
+			'failure_reason' => $result ? '' : $failure_reason,
+			'selected_rate_id' => $selected_rate_id,
+			'posted_point_id_present' => max( 0, (int) ( $data['wdc_pickup_point_id'] ?? 0 ) ) > 0,
+			'posted_point_code_present' => '' !== $this->posted_string( $data, 'wdc_pickup_point_code' ),
+		);
+	}
+
+	/**
 	 * @param array<string,mixed> $context
 	 */
 	private function debug_validation( string $message, array $context = array() ): void {
@@ -820,11 +869,7 @@ final class CheckoutValidation {
 	}
 
 	private function debug_logging_enabled(): bool {
-		if ( defined( 'WDC_PICKUP_DEBUG' ) && WDC_PICKUP_DEBUG ) {
-			return true;
-		}
-
-		return defined( 'WP_DEBUG' ) && WP_DEBUG;
+		return $this->session_manager->pickup_debug_enabled();
 	}
 
 	/**
