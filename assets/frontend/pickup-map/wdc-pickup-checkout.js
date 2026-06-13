@@ -271,7 +271,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			}
 			return;
 		}
-		var snapshot = point.snapshot || {};
+		var snapshot = pointSnapshot(point);
 		var selectedPoint = normalizeSelectedPoint(point);
 		selectedPoint = withDestinationIdentity(selectedPoint);
 		var workTime = firstMeaningfulText(point.point_work_time, point.work_time, snapshot.work_time);
@@ -391,8 +391,24 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		return pickupPresentation(point).card_title || 'Пункт выдачи';
 	}
 
+	function pointSnapshot(point) {
+		var snapshot = point && point.snapshot;
+		if (snapshot && typeof snapshot === 'object') {
+			return snapshot;
+		}
+		if (typeof snapshot === 'string' && snapshot.trim()) {
+			try {
+				var parsed = JSON.parse(snapshot);
+				return parsed && typeof parsed === 'object' ? parsed : {};
+			} catch (error) {
+				return {};
+			}
+		}
+		return {};
+	}
+
 	function selectedPointAddress(point) {
-		var snapshot = point.snapshot || {};
+		var snapshot = pointSnapshot(point);
 		var address = String(point.address || point.point_address || snapshot.address || '').trim();
 		if (address) {
 			return address;
@@ -407,13 +423,13 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function selectedPointCode(point) {
 		point = point || {};
-		var snapshot = point.snapshot || {};
-		return String(point.point_code || point.cdek_code || snapshot.point_code || snapshot.cdek_code || '').trim();
+		var snapshot = pointSnapshot(point);
+		return String(point.point_code || point.cdek_code || point.delivery_point || point.display_code || point.postcode || point.postal_code || point.point_postcode || snapshot.point_code || snapshot.cdek_code || snapshot.delivery_point || snapshot.display_code || snapshot.postcode || snapshot.postal_code || snapshot.point_postcode || '').trim();
 	}
 
 	function selectedPointAddressValue(point) {
 		point = point || {};
-		var snapshot = point.snapshot || {};
+		var snapshot = pointSnapshot(point);
 		var raw = point.raw || snapshot.raw || {};
 		return firstMeaningfulText(
 			point.point_address,
@@ -563,7 +579,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			city_name: fieldContext.city_name || runtimeContext.city_name || localizedContext.city_name || '',
 			region_name: fieldContext.region_name || runtimeContext.region_name || localizedContext.region_name || '',
 			country_code: fieldContext.country_code || runtimeContext.country_code || localizedContext.country_code || 'RU',
-			selectedPoint: localizedContext.selectedPoint || runtimeContext.selectedPoint || null
+			selectedPoint: activeSelected || localizedContext.selectedPoint || runtimeContext.selectedPoint || null
 		};
 		return result;
 	}
@@ -714,7 +730,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	function selectionLocationMatchDetails(point, context) {
 		point = point || {};
 		context = context || {};
-		var snapshot = point.snapshot || {};
+		var snapshot = pointSnapshot(point);
 		var pointFingerprint = String(point.destination_fingerprint || snapshot.destination_fingerprint || '').trim();
 		var contextFingerprint = destinationFingerprint(context);
 		var pointLocationId = normalizeText(point.destination_location_id || snapshot.destination_location_id || point.location_id || snapshot.location_id || fingerprintValue(pointFingerprint, 'location_id') || '');
@@ -958,21 +974,21 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function normalizeSelectedPoint(point) {
 		point = point || {};
-		var snapshot = point.snapshot || {};
+		var snapshot = pointSnapshot(point);
 		return {
 			id: point.id || snapshot.id || '',
 			carrier: point.carrier || point.carrier_key || snapshot.carrier || snapshot.carrier_key || '',
 			carrier_key: point.carrier_key || point.carrier || snapshot.carrier_key || snapshot.carrier || '',
 			service_key: point.service_key || snapshot.service_key || point.carrier_key || point.carrier || snapshot.carrier_key || '',
 			pickup_family: point.pickup_family || snapshot.pickup_family || pickupFamily(point),
-			point_code: point.point_code || snapshot.point_code || '',
+			point_code: point.point_code || point.cdek_code || point.delivery_point || point.display_code || point.postcode || point.postal_code || point.point_postcode || snapshot.point_code || snapshot.cdek_code || snapshot.delivery_point || snapshot.display_code || snapshot.postcode || snapshot.postal_code || snapshot.point_postcode || '',
 			point_type: point.point_type || snapshot.point_type || '',
 			point_type_label: point.point_type_label || snapshot.point_type_label || pickupPresentation(point).point_type_label || '',
 			point_title: point.point_title || point.card_title || snapshot.point_title || snapshot.card_title || pickupPresentation(point).card_title || '',
 			point_name: point.point_name || snapshot.point_name || '',
 			point_address: selectedPointAddressValue(point),
-			point_postcode: point.point_postcode || point.postcode || point.postal_code || snapshot.postcode || '',
-			postcode: point.point_postcode || point.postcode || point.postal_code || snapshot.postcode || '',
+			point_postcode: point.point_postcode || point.postcode || point.postal_code || point.display_code || snapshot.point_postcode || snapshot.postcode || snapshot.postal_code || snapshot.display_code || '',
+			postcode: point.point_postcode || point.postcode || point.postal_code || point.display_code || snapshot.point_postcode || snapshot.postcode || snapshot.postal_code || snapshot.display_code || '',
 			address: selectedPointAddressValue(point),
 			city_name: point.city_name || point.city || snapshot.city_name || snapshot.city || '',
 			region_name: point.region_name || point.region || snapshot.region_name || snapshot.region || '',
@@ -983,7 +999,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 			description: point.description || point.point_comment || snapshot.description || '',
 			storage_notice: point.storage_notice || snapshot.storage_notice || pickupPresentation(point).storage_notice || '',
 			marker_type: point.marker_type || snapshot.marker_type || pickupPresentation(point).marker_type || '',
-			cdek_code: point.cdek_code || snapshot.cdek_code || '',
+			cdek_code: point.cdek_code || point.delivery_point || snapshot.cdek_code || snapshot.delivery_point || '',
 			cdek_type: point.cdek_type || snapshot.cdek_type || point.point_type || snapshot.point_type || '',
 			location_id: point.location_id || snapshot.location_id || '',
 			fias_id: point.fias_id || point.fias_location_guid || snapshot.fias_id || snapshot.fias_location_guid || '',
@@ -1114,7 +1130,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 	function withDestinationIdentity(point) {
 		point = point || {};
 		var context = currentContext && destinationFingerprint(currentContext) ? currentContext : contextFromFields();
-		var snapshot = point.snapshot && typeof point.snapshot === 'object' ? point.snapshot : {};
+		var snapshot = pointSnapshot(point);
 		point.location_id = point.location_id || context.location_id || context.id || '';
 		point.fias_id = point.fias_id || point.fias_location_guid || context.fias_id || context.city_fias_id || '';
 		point.gar_object_id = point.gar_object_id || point.gar_id || context.gar_object_id || context.gar_id || '';
@@ -1176,26 +1192,26 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function pointPayload(point) {
 		point = withDestinationIdentity(normalizeSelectedPoint(point || {}));
-		var snapshot = point.snapshot && typeof point.snapshot === 'object' ? point.snapshot : {};
+		var snapshot = pointSnapshot(point);
 		return {
 			id: point.id || snapshot.id || '',
 			carrier: point.carrier || point.carrier_key || snapshot.carrier || snapshot.carrier_key || '',
 			carrier_key: point.carrier_key || point.carrier || snapshot.carrier_key || snapshot.carrier || '',
 			service_key: point.service_key || snapshot.service_key || point.carrier_key || point.carrier || snapshot.carrier_key || '',
 			pickup_family: point.pickup_family || pickupFamily(point),
-			point_code: point.point_code || snapshot.point_code || '',
+			point_code: point.point_code || point.cdek_code || point.delivery_point || point.display_code || point.postcode || point.postal_code || point.point_postcode || snapshot.point_code || snapshot.cdek_code || snapshot.delivery_point || snapshot.display_code || snapshot.postcode || snapshot.postal_code || snapshot.point_postcode || '',
 			point_type: point.point_type || snapshot.point_type || '',
 			point_type_label: point.point_type_label || snapshot.point_type_label || pickupPresentation(point).point_type_label || '',
 			point_title: point.point_title || point.card_title || snapshot.point_title || snapshot.card_title || pickupPresentation(point).card_title || '',
 			point_name: point.point_name || snapshot.point_name || '',
 			location_id: point.location_id || snapshot.location_id || '',
-			postal_code: point.postal_code || point.postcode || snapshot.postcode || '',
-			postcode: point.postcode || point.postal_code || snapshot.postcode || '',
+			postal_code: point.postal_code || point.postcode || point.point_postcode || point.display_code || snapshot.postal_code || snapshot.postcode || snapshot.point_postcode || snapshot.display_code || '',
+			postcode: point.postcode || point.postal_code || point.point_postcode || point.display_code || snapshot.postcode || snapshot.postal_code || snapshot.point_postcode || snapshot.display_code || '',
 			city: point.city || point.city_name || snapshot.city || snapshot.city_name || '',
 			region: point.region || point.region_name || snapshot.region || snapshot.region_name || '',
 			address: point.address || point.point_address || snapshot.address || '',
 			point_address: point.point_address || point.address || snapshot.address || '',
-			point_postcode: point.point_postcode || point.postcode || point.postal_code || snapshot.postcode || '',
+			point_postcode: point.point_postcode || point.postcode || point.postal_code || point.display_code || snapshot.point_postcode || snapshot.postcode || snapshot.postal_code || snapshot.display_code || '',
 			work_time: point.work_time || snapshot.work_time || '',
 			description: point.description || snapshot.description || '',
 			storage_notice: point.storage_notice || snapshot.storage_notice || pickupPresentation(point).storage_notice || '',
@@ -1226,7 +1242,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function pickupPresentation(point) {
 		point = point || {};
-		var snapshot = point.snapshot || {};
+		var snapshot = pointSnapshot(point);
 		var config = (window.wdcPickupCheckout && window.wdcPickupCheckout.pickupPresentation) || checkoutConfig.pickupPresentation || {};
 		var defaults = config.defaults || {};
 		var family = pickupFamily(point);
@@ -1250,7 +1266,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 
 	function pickupFamily(point) {
 		point = point || {};
-		var snapshot = point.snapshot || {};
+		var snapshot = pointSnapshot(point);
 		var explicit = String(point.pickup_family || snapshot.pickup_family || '').trim();
 		if (explicit) {
 			return explicit;

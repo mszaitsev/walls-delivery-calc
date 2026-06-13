@@ -841,6 +841,7 @@
     const data = new FormData();
     data.append('action', window.wdcShipmentsAdmin.searchPickupPointsAction);
     data.append('nonce', window.wdcShipmentsAdmin.nonce);
+    data.append('order_id', fieldValue(form, 'input[name="order_id"]') || '');
     data.append('query', query);
     data.append('limit', String(limit || 50));
     data.append('mode', mode || 'search');

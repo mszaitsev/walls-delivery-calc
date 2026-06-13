@@ -675,19 +675,48 @@ final class OrderShipmentsMetabox {
 		}
 		$repository = new RussianPostPickupPointRepository();
 		if ( 'location' === $mode ) {
+			$location_context = array(
+				'city_name' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
+				'city_value' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
+				'region_name' => sanitize_text_field( wp_unslash( $_POST['region'] ?? $_POST['region_name'] ?? '' ) ),
+				'state_value' => sanitize_text_field( wp_unslash( $_POST['region'] ?? $_POST['region_name'] ?? '' ) ),
+				'postal_code' => sanitize_text_field( wp_unslash( $_POST['postcode'] ?? '' ) ),
+				'postcode' => sanitize_text_field( wp_unslash( $_POST['postcode'] ?? '' ) ),
+				'display_name' => sanitize_text_field( wp_unslash( $_POST['address'] ?? $query ) ),
+				'fias_id' => sanitize_text_field( wp_unslash( $_POST['fias_id'] ?? '' ) ),
+				'gar_id' => sanitize_text_field( wp_unslash( $_POST['gar_id'] ?? '' ) ),
+				'location_id' => sanitize_text_field( wp_unslash( $_POST['location_id'] ?? '' ) ),
+			);
+			$order_id = (int) ( $_POST['order_id'] ?? 0 );
+			if ( $order_id > 0 && function_exists( 'wc_get_order' ) ) {
+				$order = wc_get_order( $order_id );
+				if ( is_object( $order ) ) {
+					$shipping_city = method_exists( $order, 'get_shipping_city' ) ? (string) $order->get_shipping_city() : '';
+					$shipping_region = method_exists( $order, 'get_shipping_state' ) ? (string) $order->get_shipping_state() : '';
+					$shipping_postcode = method_exists( $order, 'get_shipping_postcode' ) ? (string) $order->get_shipping_postcode() : '';
+					$shipping_address = trim(
+						implode(
+							' ',
+							array_filter(
+								array(
+									method_exists( $order, 'get_shipping_address_1' ) ? (string) $order->get_shipping_address_1() : '',
+									method_exists( $order, 'get_shipping_address_2' ) ? (string) $order->get_shipping_address_2() : '',
+								),
+								static fn( string $value ): bool => '' !== trim( $value )
+							)
+						)
+					);
+					$location_context['city_name'] = '' !== trim( (string) $location_context['city_name'] ) ? $location_context['city_name'] : $shipping_city;
+					$location_context['city_value'] = '' !== trim( (string) $location_context['city_value'] ) ? $location_context['city_value'] : $shipping_city;
+					$location_context['region_name'] = '' !== trim( (string) $location_context['region_name'] ) ? $location_context['region_name'] : $shipping_region;
+					$location_context['state_value'] = '' !== trim( (string) $location_context['state_value'] ) ? $location_context['state_value'] : $shipping_region;
+					$location_context['postal_code'] = '' !== trim( (string) $location_context['postal_code'] ) ? $location_context['postal_code'] : $shipping_postcode;
+					$location_context['postcode'] = '' !== trim( (string) $location_context['postcode'] ) ? $location_context['postcode'] : $shipping_postcode;
+					$location_context['display_name'] = '' !== trim( (string) $location_context['display_name'] ) ? $location_context['display_name'] : $shipping_address;
+				}
+			}
 			$rows = $repository->find_rows_by_location_context(
-				array(
-					'city_name' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
-					'city_value' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
-					'region_name' => sanitize_text_field( wp_unslash( $_POST['region'] ?? $_POST['region_name'] ?? '' ) ),
-					'state_value' => sanitize_text_field( wp_unslash( $_POST['region'] ?? $_POST['region_name'] ?? '' ) ),
-					'postal_code' => sanitize_text_field( wp_unslash( $_POST['postcode'] ?? '' ) ),
-					'postcode' => sanitize_text_field( wp_unslash( $_POST['postcode'] ?? '' ) ),
-					'display_name' => sanitize_text_field( wp_unslash( $_POST['address'] ?? $query ) ),
-					'fias_id' => sanitize_text_field( wp_unslash( $_POST['fias_id'] ?? '' ) ),
-					'gar_id' => sanitize_text_field( wp_unslash( $_POST['gar_id'] ?? '' ) ),
-					'location_id' => sanitize_text_field( wp_unslash( $_POST['location_id'] ?? '' ) ),
-				),
+				$location_context,
 				array( 'limit' => $limit )
 			);
 		} else {
