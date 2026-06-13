@@ -615,6 +615,9 @@ cdek_order_assert( str_contains( $modal_html, 'name="pickup_carrier_key" value="
 cdek_order_assert( str_contains( $modal_html, 'name="recipient_location_city" value="Кемерово"' ) && ! str_contains( $modal_html, 'name="recipient_location_city" value="Новосибирск"' ), 'CDEK shipment modal map context must use recipient locality, not sender locality.' );
 $shipments_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'window.WDCPickupApi.addressSearch' ) && str_contains( $shipments_js, 'addressMarkerFromResult' ) && str_contains( $shipments_js, 'provider.setCenter(searchMarker.lat, searchMarker.lng, 15);' ), 'CDEK shipment modal pickup map must use shared DaData address search and focus the temporary marker.' );
+cdek_order_assert( is_string( $shipments_js ) && ! str_contains( $shipments_js, 'через DaData' ) && str_contains( $shipments_js, "status.textContent = 'Ищем адрес...'" ) && str_contains( $shipments_js, "'Адрес найден.'" ) && str_contains( $shipments_js, "'Адрес не найден.'" ), 'CDEK shipment modal pickup map must use neutral address-search UI messages.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'data-wdc-pickup-picker-confirm' ) && ! str_contains( $shipments_js, 'data-wdc-pickup-picker-choose' ) && ! str_contains( $shipments_js, 'data-wdc-pickup-popup-select' ) && ! str_contains( $shipments_js, 'wdc-admin-pickup-picker__selected-grid' ), 'CDEK shipment modal pickup map must use one bottom select button and no duplicate per-card controls.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "'ПВЗ СДЭК'" ) && str_contains( $shipments_js, "'Постамат СДЭК'" ), 'CDEK shipment modal pickup map must render CDEK pickup/postamat titles.' );
 
 $render = new ReflectionMethod( OrderShipmentsMetabox::class, 'render_status_block' );
 $render->setAccessible( true );

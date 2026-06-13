@@ -779,6 +779,11 @@
 	}
 
 	function pickupPointTitle( point ) {
+		const carrier = String( point.carrier_key || point.carrier || '' );
+		if ( 'cdek' === carrier ) {
+			const type = String( point.marker_type || point.point_type || point.cdek_type || point.type || '' ).toLowerCase();
+			return ( 'postamat' === type || 'postomat' === type ) ? 'Постамат СДЭК' : 'ПВЗ СДЭК';
+		}
 		if ( point.point_title || point.card_title || point.point_type_label ) {
 			return String( point.point_title || point.card_title || point.point_type_label );
 		}
@@ -1065,8 +1070,8 @@
 			'<div class="wdc-order-delivery-pickup-picker__layout">',
 			'<div class="wdc-order-delivery-pickup-picker__map" data-wdc-pickup-picker-map></div>',
 			'<div class="wdc-order-delivery-pickup-picker__side">',
-			'<div class="wdc-order-delivery-pickup-picker__selected" data-wdc-pickup-picker-selected>Выберите ПВЗ на карте или в списке.</div>',
 			'<div class="wdc-order-delivery-pickup-picker__list" data-wdc-pickup-picker-list></div>',
+			'<div class="wdc-order-delivery-pickup-picker__footer"><button type="button" class="button button-primary" data-wdc-pickup-picker-confirm disabled>Выбрать этот ПВЗ</button></div>',
 			'</div>',
 			'</div>',
 			'</div>'
@@ -1075,8 +1080,8 @@
 		const query = root.querySelector( '[data-wdc-pickup-picker-query]' );
 		const status = root.querySelector( '[data-wdc-pickup-picker-status]' );
 		const mapElement = root.querySelector( '[data-wdc-pickup-picker-map]' );
-		const selected = root.querySelector( '[data-wdc-pickup-picker-selected]' );
 		const list = root.querySelector( '[data-wdc-pickup-picker-list]' );
+		const confirmButton = root.querySelector( '[data-wdc-pickup-picker-confirm]' );
 		const providerName = config.mapProvider === 'yandex' ? 'yandex' : 'leaflet';
 		const providerFactory = window.WDCPickupMapProviders && window.WDCPickupMapProviders[ providerName ];
 		let provider = null;
@@ -1115,25 +1120,13 @@
 			if ( pickupPointStorageNotice( point ) ) {
 				rows.push( '<div class="wdc-pickup-popup__storage">' + escapeHtml( pickupPointStorageNotice( point ) ) + '</div>' );
 			}
-			rows.push( '<button type="button" class="button button-primary wdc-pickup-popup__select" data-wdc-pickup-popup-select data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '">Выбрать этот ПВЗ</button>' );
 			rows.push( '</div>' );
 			return rows.join( '' );
 		}
 
 		function preview( point ) {
 			previewPoint = point;
-			if ( selected ) {
-				selected.innerHTML = [
-					'<div class="wdc-order-delivery-pickup-picker__selected-grid">',
-					'<span><strong>' + escapeHtml( 'Код/индекс' ) + '</strong>' + escapeHtml( pickupPointDisplayCode( point ) ) + '</span>',
-					'<span><strong>Тип</strong>' + escapeHtml( pickupPointTitle( point ) ) + '</span>',
-					'<span><strong>Адрес</strong>' + escapeHtml( pickupPointLabel( point ) ) + '</span>',
-					point.description ? '<span><strong>Описание</strong>' + escapeHtml( point.description ) + '</span>' : '',
-					pickupPointStorageNotice( point ) ? '<span class="wdc-pickup-popup__storage"><strong>Срок хранения</strong>' + escapeHtml( pickupPointStorageNotice( point ) ) + '</span>' : '',
-					'<button type="button" class="button button-primary" data-wdc-pickup-picker-choose data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '">Выбрать этот ПВЗ</button>',
-					'</div>'
-				].join( '' );
-			}
+			updateConfirmButton();
 			if ( provider && provider.setActivePoint ) {
 				provider.setActivePoint( pointId( point ) );
 			}
@@ -1145,6 +1138,14 @@
 			}
 			renderPickupPoints();
 			scrollActivePickupRow();
+		}
+
+		function updateConfirmButton() {
+			if ( ! confirmButton ) {
+				return;
+			}
+			confirmButton.disabled = ! previewPoint;
+			confirmButton.textContent = previewPoint ? 'Выбрать этот ПВЗ' : 'Выберите ПВЗ';
 		}
 
 		function choosePoint( point ) {
@@ -1162,21 +1163,21 @@
 					status.textContent = 'Введите адрес для поиска.';
 					return;
 				}
-				status.textContent = 'Ищем адрес через DaData...';
+				status.textContent = 'Ищем адрес...';
 				geocodeAddress( box, value )
 					.then( function ( marker ) {
 						searchMarker = marker;
 						if ( points.length ) {
-							renderSearchResults( 'address', value, 'Адрес найден через DaData. Показаны ПВЗ выбранного населенного пункта.' );
+							renderSearchResults( 'address', value, 'Адрес найден.' );
 							return;
 						}
 						return loadPickupPointsForLocation().then( function () {
-							renderSearchResults( 'address', value, 'Адрес найден через DaData. Показаны ПВЗ выбранного населенного пункта.' );
+							renderSearchResults( 'address', value, 'Адрес найден.' );
 						} );
 					} )
 					.catch( function ( error ) {
 						searchMarker = null;
-						const message = error && error.message ? error.message : 'Адрес не найден или геокодинг недоступен.';
+						const message = error && error.message ? error.message : 'Адрес не найден.';
 						if ( points.length ) {
 							renderSearchResults( 'address', value, message );
 							return;
@@ -1228,6 +1229,7 @@
 					}
 					points = Array.isArray( payload.data && payload.data.points ) ? payload.data.points.map( normalizePickupPoint ) : [];
 					previewPoint = matchSelectedPickup( points, previewPoint || selectedPickupPoints.get( box ) );
+					updateConfirmButton();
 				} );
 		}
 
@@ -1248,9 +1250,6 @@
 							status.textContent = geocodeMessage + ' ' + status.textContent;
 						}
 					}
-					if ( selected ) {
-						selected.textContent = 'Выберите ПВЗ на карте или в списке.';
-					}
 					if ( provider && provider.renderMarkers ) {
 						provider.renderMarkers( points, { activePointId: previewPoint ? pointId( previewPoint ) : null, searchMarker: searchMarker } );
 						if ( searchMarker && provider.setCenter ) {
@@ -1262,6 +1261,7 @@
 						}
 					}
 					renderPickupPoints();
+					updateConfirmButton();
 					if ( previewPoint && ! searchMarker ) {
 						preview( previewPoint );
 					} else if ( 'search' === mode && value && ! searchMarker ) {
@@ -1272,16 +1272,18 @@
 		function renderPickupPoints() {
 			if ( ! points.length ) {
 				list.innerHTML = '<p class="description">ПВЗ не найдены.</p>';
+				updateConfirmButton();
 				return;
 			}
 			list.innerHTML = [
-				'<table class="widefat striped wdc-order-delivery-pickup-picker__table"><thead><tr><th>Код/индекс</th><th>Тип</th><th>Адрес</th><th>Выбрать</th></tr></thead><tbody>',
+				'<div class="wdc-order-delivery-pickup-picker__items">',
 				points.map( function ( point, index ) {
 					const active = previewPoint && pointId( previewPoint ) === pointId( point ) ? ' class="is-active"' : '';
-					return '<tr data-wdc-pickup-picker-row data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '" data-index="' + escapeAttribute( String( index ) ) + '"' + active + '><td>' + escapeHtml( pickupPointDisplayCode( point ) ) + '</td><td>' + escapeHtml( pickupPointTitle( point ) ) + ( pickupPointStorageNotice( point ) ? '<br><strong class="wdc-pickup-popup__storage">' + escapeHtml( pickupPointStorageNotice( point ) ) + '</strong>' : '' ) + '</td><td>' + escapeHtml( pickupPointLabel( point ) ) + ( point.description ? '<br><span class="description">' + escapeHtml( point.description ) + '</span>' : '' ) + '</td><td><button type="button" class="button" data-wdc-pickup-picker-choose data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '">Выбрать</button></td></tr>';
+					return '<button type="button" data-wdc-pickup-picker-row data-wdc-point-id="' + escapeAttribute( pointId( point ) ) + '" data-index="' + escapeAttribute( String( index ) ) + '"' + active + '><span><strong>' + escapeHtml( [ pickupPointTitle( point ), pickupPointDisplayCode( point ) ].filter( Boolean ).join( ' ' ) ) + '</strong>' + ( pickupPointStorageNotice( point ) ? '<em class="wdc-pickup-popup__storage">' + escapeHtml( pickupPointStorageNotice( point ) ) + '</em>' : '' ) + '</span><span>' + escapeHtml( pickupPointLabel( point ) ) + '</span>' + ( point.description ? '<small>' + escapeHtml( point.description ) + '</small>' : '' ) + '</button>';
 				} ).join( '' ),
-				'</tbody></table>'
+				'</div>'
 			].join( '' );
+			updateConfirmButton();
 		}
 
 		function matchSelectedPickup( list, pickup ) {
@@ -1310,11 +1312,10 @@
 				runSearch( 'search' );
 				return;
 			}
-			const chooseButton = event.target.closest( '[data-wdc-pickup-picker-choose], [data-wdc-pickup-popup-select]' );
+			const chooseButton = event.target.closest( '[data-wdc-pickup-picker-confirm]' );
 			if ( chooseButton ) {
-				const point = findPoint( chooseButton.getAttribute( 'data-wdc-point-id' ) );
-				if ( point ) {
-					choosePoint( point );
+				if ( previewPoint ) {
+					choosePoint( previewPoint );
 				}
 				return;
 			}

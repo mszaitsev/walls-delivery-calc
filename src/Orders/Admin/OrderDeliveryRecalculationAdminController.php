@@ -149,7 +149,7 @@ final class OrderDeliveryRecalculationAdminController {
 		$rate = $this->array_from_request( 'selected_rate' );
 		$query = $this->request_string( 'query' );
 		$mode = 'location' === $this->request_string( 'mode' ) ? 'location' : 'search';
-		$limit = max( 1, min( 'location' === $mode ? 300 : 100, (int) ( $_POST['limit'] ?? ( 'location' === $mode ? 300 : 50 ) ) ) );
+		$limit = max( 1, min( 'location' === $mode ? 1000 : 100, (int) ( $_POST['limit'] ?? ( 'location' === $mode ? 1000 : 50 ) ) ) );
 		if ( 'cdek' === (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' ) ) {
 			$rows = $this->cdek_pickup_points( $location, $query, $mode, $limit );
 			wp_send_json_success(

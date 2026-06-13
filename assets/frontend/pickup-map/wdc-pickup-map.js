@@ -26,8 +26,8 @@
 		var committedPoint = initialSelectedPoint;
 		var preloadedPoints = Array.isArray(context.preloadedPoints) ? context.preloadedPoints : [];
 		var hasPreloadedPoints = preloadedPoints.length > 0;
-		var initialLat = parseFloat(context.centerLat || context.lat || (preloadedPoints[0] && preloadedPoints[0].lat));
-		var initialLng = parseFloat(context.centerLng || context.lng || (preloadedPoints[0] && preloadedPoints[0].lng));
+		var initialLat = parseFloat(context.centerLat || (initialSelectedPoint && initialSelectedPoint.lat) || context.lat || (preloadedPoints[0] && preloadedPoints[0].lat));
+		var initialLng = parseFloat(context.centerLng || (initialSelectedPoint && initialSelectedPoint.lng) || context.lng || (preloadedPoints[0] && preloadedPoints[0].lng));
 		var hasInitialCoordinates = !isNaN(initialLat) && !isNaN(initialLng);
 		var distanceOrigin = hasInitialCoordinates ? { lat: initialLat, lng: initialLng } : null;
 		var searchAddress = null;
@@ -361,6 +361,7 @@
 					renderMarkers(points, labels.empty || '');
 				});
 			}
+			card.textContent = labels.searchingAddress || 'Ищем адрес...';
 			return window.WDCPickupApi.addressSearch(query, context, controller.signal).then(function (result) {
 				if (result && result.address_search_available === false) {
 					setPostcodeOnlyMode();
@@ -373,10 +374,10 @@
 					applySearchResult(result);
 					return;
 				}
-				card.textContent = result && result.error_code === 'dadata_api_failed' ? (labels.dadataError || 'Ошибка DaData') : (labels.addressNotFound || labels.notFound || '');
+				card.textContent = result && result.error_code === 'dadata_api_failed' ? (labels.dadataError || 'Адрес не найден.') : (labels.addressNotFound || labels.notFound || 'Адрес не найден.');
 			}).catch(function (error) {
 				if (error.name !== 'AbortError') {
-					card.textContent = labels.dadataError || labels.error || 'Ошибка DaData';
+					card.textContent = labels.dadataError || labels.error || 'Адрес не найден.';
 				}
 			});
 		}
@@ -393,10 +394,8 @@
 				activePointId: previewPoint ? pointId(previewPoint) : null,
 				searchMarker: activeOriginMarker()
 			});
-			loadBounds(bboxAround(searchAddress.lat, searchAddress.lng), {
-				force: true,
-				preserveSearchAddress: true
-			});
+			card.textContent = labels.addressFound || 'Адрес найден.';
+			renderList(visiblePoints);
 		}
 
 		setTimeout(function () {
@@ -685,8 +684,22 @@
 	}
 
 	function pointDisplayTitle(point) {
+		var cdekTitle = cdekDisplayTitle(point);
+		if (cdekTitle) {
+			return cdekTitle;
+		}
 		return String((point && (point.display_title || (point.snapshot && point.snapshot.display_title))) || '').trim()
 			|| [carrierTitle(point), pointDisplayCode(point)].filter(Boolean).join(' ');
+	}
+
+	function cdekDisplayTitle(point) {
+		var carrier = String(point && (point.carrier_key || point.carrier || (point.snapshot && (point.snapshot.carrier_key || point.snapshot.carrier))) || '').trim();
+		if (carrier !== 'cdek') {
+			return '';
+		}
+		var type = String(point.point_type || point.type || point.cdek_type || point.marker_type || (point.snapshot && (point.snapshot.point_type || point.snapshot.type || point.snapshot.cdek_type || point.snapshot.marker_type)) || '').toLowerCase();
+		var label = type === 'postamat' || type === 'postomat' ? 'Постамат СДЭК' : 'ПВЗ СДЭК';
+		return [label, pointDisplayCode(point)].filter(Boolean).join(' ');
 	}
 
 	function pointDisplayCode(point) {

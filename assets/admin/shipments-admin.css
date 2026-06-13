@@ -236,7 +236,11 @@
 .wdc-admin-pickup-picker__dialog {
   position: relative;
   z-index: 1;
-  width: min(980px, 100%);
+  display: flex;
+  flex-direction: column;
+  width: min(1500px, 95vw);
+  height: min(860px, 90vh);
+  max-height: 90vh;
   padding: 18px;
   background: #fff;
   color: #1d2327;
@@ -274,73 +278,85 @@
   color: #646970;
 }
 
-.wdc-admin-pickup-picker__map {
-  height: 420px;
-  min-height: 420px;
-  border: 1px solid #dcdcde;
-  background: #f6f7f7;
-}
-
-.wdc-admin-pickup-picker__selected {
-  margin: 10px 0;
-  padding: 10px;
-  border: 1px solid #dcdcde;
-  background: #f6f7f7;
-}
-
-.wdc-admin-pickup-picker__selected-grid {
+.wdc-admin-pickup-picker__layout {
   display: grid;
-  grid-template-columns: 120px 180px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
+  grid-template-columns: minmax(460px, 1fr) minmax(360px, 440px);
+  gap: 12px;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
-.wdc-admin-pickup-picker__selected-grid span,
-.wdc-admin-pickup-picker__table td {
-  overflow-wrap: anywhere;
+.wdc-admin-pickup-picker__map {
+  min-height: 0;
+  border: 1px solid #dcdcde;
+  background: #f6f7f7;
 }
 
-.wdc-admin-pickup-picker__selected-grid strong {
-  display: block;
-  color: #646970;
-  font-size: 12px;
+.wdc-admin-pickup-picker__side {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
 }
 
 .wdc-admin-pickup-picker__list {
-  max-height: 260px;
-  overflow: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-.wdc-admin-pickup-picker__table tr.is-active td {
+.wdc-admin-pickup-picker__items {
+  display: grid;
+  gap: 6px;
+}
+
+.wdc-admin-pickup-picker__items [data-wdc-pickup-picker-row] {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #dcdcde;
+  background: #fff;
+  color: #1d2327;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.wdc-admin-pickup-picker__items [data-wdc-pickup-picker-row].is-active {
+  border-color: #2271b1;
   background: #e7f3ff;
 }
 
-.wdc-admin-pickup-picker__table th:first-child,
-.wdc-admin-pickup-picker__table td:first-child {
-  width: 110px;
+.wdc-admin-pickup-picker__items [data-wdc-pickup-picker-row] span {
+  display: block;
 }
 
-.wdc-admin-pickup-picker__table th:nth-child(2),
-.wdc-admin-pickup-picker__table td:nth-child(2) {
-  width: 180px;
+.wdc-admin-pickup-picker__footer {
+  flex: 0 0 auto;
+  padding-top: 8px;
+  border-top: 1px solid #dcdcde;
 }
 
-.wdc-admin-pickup-picker__table th:last-child,
-.wdc-admin-pickup-picker__table td:last-child {
-  width: 120px;
-  text-align: right;
+.wdc-admin-pickup-picker__footer .button {
+  width: 100%;
+  text-align: center;
 }
 
 @media (max-width: 782px) {
   .wdc-shipment-grid,
   .wdc-place-row,
   .wdc-admin-pickup-picker__search,
-  .wdc-admin-pickup-picker__selected-grid {
+  .wdc-admin-pickup-picker__layout {
     grid-template-columns: 1fr;
   }
 
-  .wdc-admin-pickup-picker__map {
-    height: 320px;
-    min-height: 320px;
+  .wdc-admin-pickup-picker__dialog {
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+    max-height: calc(100vh - 16px);
   }
 }

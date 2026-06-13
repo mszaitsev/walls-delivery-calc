@@ -1,6 +1,8 @@
 # WDC CDEK Order Creation
 
-Version: 0.48.8.
+Version: 0.48.9.
+
+0.48.9 update: the CDEK pickup map opened from the shipment preparation modal now follows the unified pickup-map UX. The existing selected point is restored as the preview when the map is reopened, the selected marker/list row are highlighted and scrolled into view, and the admin picker uses the larger two-column layout with one bottom `Выбрать этот ПВЗ` action instead of per-card selection buttons or a duplicated preview card. Address search messages no longer mention the geocoding provider in the UI, CDEK map titles render as `ПВЗ СДЭК {code}` or `Постамат СДЭК {code}`, and the Russian Post admin shipment/recalculation map paths keep their own carrier context and point lists while using the same address-search marker behavior.
 
 0.48.8 update: the CDEK pickup map used from the shipment preparation modal now shares the same carrier-independent DaData address search as checkout and admin recalculation. The map keeps CDEK context (`carrier_key=cdek`, `pickup_family=cdek:pickup`), uses the recipient locality/address context, places a temporary marker for the found address, focuses the map on it, and keeps the CDEK pickup list for the current location. CDEK pickup point loading is no longer truncated to 50 rows in the shipment/admin map paths.
 

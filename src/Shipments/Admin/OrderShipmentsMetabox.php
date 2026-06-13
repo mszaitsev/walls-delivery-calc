@@ -607,10 +607,10 @@ final class OrderShipmentsMetabox {
 		}
 
 		$query = sanitize_text_field( wp_unslash( $_POST['query'] ?? '' ) );
-		$limit = max( 1, min( 100, (int) ( $_POST['limit'] ?? 50 ) ) );
+		$mode = 'location' === sanitize_key( wp_unslash( $_POST['mode'] ?? '' ) ) ? 'location' : 'search';
+		$limit = max( 1, min( 'location' === $mode ? 1000 : 100, (int) ( $_POST['limit'] ?? ( 'location' === $mode ? 1000 : 50 ) ) ) );
 		$carrier_key = sanitize_key( wp_unslash( $_POST['carrier_key'] ?? '' ) );
 		if ( CdekSettings::CARRIER_KEY === $carrier_key && $this->cdek_delivery_points instanceof CdekDeliveryPointService ) {
-			$mode = 'location' === sanitize_key( wp_unslash( $_POST['mode'] ?? '' ) ) ? 'location' : 'search';
 			$points = $this->cdek_delivery_points->pointsForLocation(
 				array(
 					'country_code' => 'RU',
@@ -656,7 +656,26 @@ final class OrderShipmentsMetabox {
 				)
 			);
 		}
-		$rows = ( new RussianPostPickupPointRepository() )->search_admin_pickup_rows( $query, array( 'limit' => $limit ) );
+		$repository = new RussianPostPickupPointRepository();
+		if ( 'location' === $mode ) {
+			$rows = $repository->find_rows_by_location_context(
+				array(
+					'city_name' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
+					'city_value' => sanitize_text_field( wp_unslash( $_POST['city'] ?? $_POST['city_name'] ?? '' ) ),
+					'region_name' => sanitize_text_field( wp_unslash( $_POST['region'] ?? $_POST['region_name'] ?? '' ) ),
+					'state_value' => sanitize_text_field( wp_unslash( $_POST['region'] ?? $_POST['region_name'] ?? '' ) ),
+					'postal_code' => sanitize_text_field( wp_unslash( $_POST['postcode'] ?? '' ) ),
+					'postcode' => sanitize_text_field( wp_unslash( $_POST['postcode'] ?? '' ) ),
+					'display_name' => sanitize_text_field( wp_unslash( $_POST['address'] ?? $query ) ),
+					'fias_id' => sanitize_text_field( wp_unslash( $_POST['fias_id'] ?? '' ) ),
+					'gar_id' => sanitize_text_field( wp_unslash( $_POST['gar_id'] ?? '' ) ),
+					'location_id' => sanitize_text_field( wp_unslash( $_POST['location_id'] ?? '' ) ),
+				),
+				array( 'limit' => $limit )
+			);
+		} else {
+			$rows = $repository->search_admin_pickup_rows( $query, array( 'limit' => $limit ) );
+		}
 
 		wp_send_json_success(
 			array(
