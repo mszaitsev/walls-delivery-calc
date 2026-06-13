@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.46.6.
+Current plugin version: 0.47.0.
+
+Version 0.47.0 extends CDEK runtime calculation. CDEK settings now include `shipment_point` (default `NSK69`) and pass it to every `POST /v2/calculator/tarifflist` request. Eligible carts also receive an additional single-package tarifflist pass for express/one-piece tariffs when a conservative 50x50x30 cm fit check succeeds; new tariff codes from that pass are merged into the main result without duplicates. Before checkout output, CDEK rates are filtered by exact `period_min`/`period_max` groups, then slower and more expensive options are removed by `period_min` and price.
 
 Version 0.46.6 adjusts CDEK tarifflist package payloads for aggregate packaging weight. Item-based `packages[]` remain unchanged, but when `Package::$packaging_weight_g` is present it is added once to the first item package instead of creating a separate 1x1x1 package. If packaging is already represented by a real `WDC_PACKAGING` `PackageItem`, that item remains its own package and the aggregate packaging weight is not applied again. No extra package diagnostics meta is stored.
 

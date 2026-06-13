@@ -83,11 +83,27 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		}
 
 		$tariffs = $this->tariffs_from_response( $result );
+		$tariff_candidates = $this->tariff_candidates( $tariffs, $payload, $result );
+		$single_candidate = $this->single_package_payload( $request, $to );
+		if ( is_array( $single_candidate ) ) {
+			try {
+				$single_result = $this->client->tariffList( $single_candidate );
+				$single_tariffs = $this->tariffs_from_response( $single_result );
+				$tariff_candidates = $this->merge_tariff_candidates( $tariff_candidates, $single_tariffs, $single_candidate, $single_result );
+			} catch ( CdekApiException $exception ) {
+				$details = array_merge( $exception->details(), array( 'delivery_type' => $delivery_type, 'calculation_pass' => 'single_package' ) );
+				$this->logger->warning( 'CDEK single-package tarifflist failed.', $details );
+			}
+		}
+		$tariffs = array_map( static fn( array $candidate ): array => is_array( $candidate['tariff'] ?? null ) ? $candidate['tariff'] : array(), $tariff_candidates );
 
 		$rates = array();
 		$skipped_unknown = 0;
 		$skipped_other_type = 0;
-		foreach ( $tariffs as $tariff ) {
+		foreach ( $tariff_candidates as $candidate ) {
+			$tariff = is_array( $candidate['tariff'] ?? null ) ? $candidate['tariff'] : array();
+			$candidate_payload = is_array( $candidate['payload'] ?? null ) ? $candidate['payload'] : $payload;
+			$candidate_result = is_array( $candidate['result'] ?? null ) ? $candidate['result'] : $result;
 			$managed_tariff = $this->managed_tariff( $tariff );
 			if ( is_array( $managed_tariff ) && empty( $managed_tariff['is_active'] ) ) {
 				++$skipped_other_type;
@@ -102,11 +118,12 @@ final class CdekCarrier implements CarrierAdapterInterface {
 				++$skipped_other_type;
 				continue;
 			}
-			$rate = $this->rate_from_tariff( $request, $type, $tariff, $payload, $result, $to, $managed_tariff );
+			$rate = $this->rate_from_tariff( $request, $type, $tariff, $candidate_payload, $candidate_result, $to, $managed_tariff );
 			if ( $rate instanceof DeliveryRate ) {
 				$rates[] = $rate;
 			}
 		}
+		$rates = $this->filter_rates( $rates );
 		$filter_diagnostics = array(
 			'requested_delivery_type' => $delivery_type,
 			'matched_rates_count' => count( $rates ),
@@ -149,7 +166,15 @@ final class CdekCarrier implements CarrierAdapterInterface {
 	 * @return array<string,mixed>
 	 */
 	private function tariff_payload( QuoteRequest $request, array $to ): array {
-		$packages = $this->packages_payload( $request->package );
+		return $this->tariff_payload_with_packages( $request, $to, $this->packages_payload( $request->package ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $to
+	 * @param array<int,array<string,int>> $packages
+	 * @return array<string,mixed>
+	 */
+	private function tariff_payload_with_packages( QuoteRequest $request, array $to, array $packages ): array {
 		$from = array( 'code' => $this->settings->sender_city_code() );
 		$sender_postal_code = $this->settings->sender_postal_code();
 		if ( '' !== $sender_postal_code ) {
@@ -159,14 +184,320 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		if ( '' !== trim( $request->destination->postcode ) ) {
 			$to_location['postal_code'] = preg_replace( '/\D+/', '', $request->destination->postcode ) ?: $request->destination->postcode;
 		}
-
-		return array(
+		$payload = array(
 			'type' => 1,
 			'currency' => 1,
 			'from_location' => $from,
 			'to_location' => $to_location,
 			'packages' => $packages,
 		);
+		$shipment_point = $this->settings->shipment_point();
+		if ( '' !== $shipment_point ) {
+			$payload['shipment_point'] = $shipment_point;
+		}
+
+		return $payload;
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $tariffs
+	 * @param array<string,mixed> $payload
+	 * @param array<string,mixed> $result
+	 * @return array<int,array{tariff:array<string,mixed>,payload:array<string,mixed>,result:array<string,mixed>}>
+	 */
+	private function tariff_candidates( array $tariffs, array $payload, array $result ): array {
+		return array_map(
+			static fn( array $tariff ): array => array(
+				'tariff' => $tariff,
+				'payload' => $payload,
+				'result' => $result,
+			),
+			$tariffs
+		);
+	}
+
+	/**
+	 * @param array<int,array{tariff:array<string,mixed>,payload:array<string,mixed>,result:array<string,mixed>}> $candidates
+	 * @param array<int,array<string,mixed>> $tariffs
+	 * @param array<string,mixed> $payload
+	 * @param array<string,mixed> $result
+	 * @return array<int,array{tariff:array<string,mixed>,payload:array<string,mixed>,result:array<string,mixed>}>
+	 */
+	private function merge_tariff_candidates( array $candidates, array $tariffs, array $payload, array $result ): array {
+		$codes = array();
+		foreach ( $candidates as $candidate ) {
+			$code = $this->tariff_code_from_tariff( $candidate['tariff'] );
+			if ( '' !== $code ) {
+				$codes[ $code ] = true;
+			}
+		}
+		foreach ( $tariffs as $tariff ) {
+			$code = $this->tariff_code_from_tariff( $tariff );
+			if ( '' === $code || isset( $codes[ $code ] ) ) {
+				continue;
+			}
+			$codes[ $code ] = true;
+			$candidates[] = array(
+				'tariff' => $tariff,
+				'payload' => $payload,
+				'result' => $result,
+			);
+		}
+
+		return $candidates;
+	}
+
+	/**
+	 * @param array<string,mixed> $tariff
+	 */
+	private function tariff_code_from_tariff( array $tariff ): string {
+		$details = is_array( $tariff['result'] ?? null ) ? array_merge( $tariff, $tariff['result'] ) : $tariff;
+
+		return trim( (string) ( $details['tariff_code'] ?? '' ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $to
+	 * @return array<string,mixed>|null
+	 */
+	private function single_package_payload( QuoteRequest $request, array $to ): ?array {
+		$fit = $this->single_package_fit( $request->package );
+		if ( empty( $fit['fits'] ) ) {
+			return null;
+		}
+		$package = array( 'weight' => max( 1, $request->package->get_total_weight_g() ) );
+		if ( is_array( $fit['box_dimensions'] ?? null ) ) {
+			$package = array_merge( $package, $fit['box_dimensions'] );
+		}
+
+		return $this->tariff_payload_with_packages( $request, $to, array( $package ) );
+	}
+
+	/**
+	 * @return array{fits:bool,box_dimensions:array{length:int,width:int,height:int}|null}
+	 */
+	private function single_package_fit( Package $package ): array {
+		$items = $this->expanded_item_dimensions( $package );
+		if ( array() === $items ) {
+			return array( 'fits' => false, 'box_dimensions' => null );
+		}
+		$box = array( 'length' => 50, 'width' => 50, 'height' => 30 );
+		$total_volume = 0;
+		foreach ( $items as $dimensions ) {
+			$total_volume += $dimensions['length'] * $dimensions['width'] * $dimensions['height'];
+			if ( ! $this->item_fits_box( $dimensions, $box ) ) {
+				return array( 'fits' => false, 'box_dimensions' => null );
+			}
+		}
+		if ( $total_volume > $box['length'] * $box['width'] * $box['height'] ) {
+			return array( 'fits' => false, 'box_dimensions' => null );
+		}
+		$dimensions = $this->calculated_single_box_dimensions( $items, $box );
+
+		return array( 'fits' => true, 'box_dimensions' => $dimensions );
+	}
+
+	/**
+	 * @return array<int,array{length:int,width:int,height:int}>
+	 */
+	private function expanded_item_dimensions( Package $package ): array {
+		$defaults = $this->settings->default_package_dimensions_cm();
+		$items = array();
+		foreach ( $package->get_items() as $item ) {
+			if ( ! $item instanceof PackageItem || 'WDC_PACKAGING' === strtoupper( trim( $item->sku ) ) ) {
+				continue;
+			}
+			$dimensions = array(
+				'length' => $this->dimension_or_default( $item->length_cm, $defaults['length'] ),
+				'width' => $this->dimension_or_default( $item->width_cm, $defaults['width'] ),
+				'height' => $this->dimension_or_default( $item->height_cm, $defaults['height'] ),
+			);
+			for ( $index = 0; $index < max( 0, $item->quantity ); ++$index ) {
+				$items[] = $dimensions;
+			}
+		}
+
+		return $items;
+	}
+
+	/**
+	 * @param array{length:int,width:int,height:int} $item
+	 * @param array{length:int,width:int,height:int} $box
+	 */
+	private function item_fits_box( array $item, array $box ): bool {
+		foreach ( $this->orientations( $item ) as $orientation ) {
+			if ( $orientation['length'] <= $box['length'] && $orientation['width'] <= $box['width'] && $orientation['height'] <= $box['height'] ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * @param array<int,array{length:int,width:int,height:int}> $items
+	 * @param array{length:int,width:int,height:int} $box
+	 * @return array{length:int,width:int,height:int}|null
+	 */
+	private function calculated_single_box_dimensions( array $items, array $box ): ?array {
+		if ( $this->all_dimensions_equal( $items ) ) {
+			return $this->single_sku_box_dimensions( $items[0], count( $items ), $box );
+		}
+		$best = null;
+		usort( $items, static fn( array $a, array $b ): int => ( $b['length'] * $b['width'] * $b['height'] ) <=> ( $a['length'] * $a['width'] * $a['height'] ) );
+		foreach ( $this->orientations( $items[0] ) as $first_orientation ) {
+			$layout = $this->row_layer_layout_dimensions( $items, $box, $first_orientation );
+			if ( is_array( $layout ) ) {
+				$best = $this->better_box( $best, $layout );
+			}
+		}
+
+		return $best;
+	}
+
+	/**
+	 * @param array<int,array{length:int,width:int,height:int}> $items
+	 */
+	private function all_dimensions_equal( array $items ): bool {
+		$first = $items[0] ?? null;
+		if ( ! is_array( $first ) ) {
+			return false;
+		}
+		foreach ( $items as $item ) {
+			if ( $item !== $first ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * @param array{length:int,width:int,height:int} $item
+	 * @param array{length:int,width:int,height:int} $box
+	 * @return array{length:int,width:int,height:int}|null
+	 */
+	private function single_sku_box_dimensions( array $item, int $quantity, array $box ): ?array {
+		$best = null;
+		foreach ( $this->orientations( $item ) as $orientation ) {
+			for ( $x = 1; $x <= $quantity; ++$x ) {
+				for ( $y = 1; $y <= $quantity; ++$y ) {
+					$z = (int) ceil( $quantity / max( 1, $x * $y ) );
+					if ( $x * $y * $z < $quantity ) {
+						continue;
+					}
+					$candidate = array(
+						'length' => $orientation['length'] * $x,
+						'width' => $orientation['width'] * $y,
+						'height' => $orientation['height'] * $z,
+					);
+					if ( $this->box_within_limits( $candidate, $box ) ) {
+						$best = $this->better_box( $best, $candidate );
+					}
+				}
+			}
+		}
+
+		return $best;
+	}
+
+	/**
+	 * @param array<int,array{length:int,width:int,height:int}> $items
+	 * @param array{length:int,width:int,height:int} $box
+	 * @param array{length:int,width:int,height:int} $first_orientation
+	 * @return array{length:int,width:int,height:int}|null
+	 */
+	private function row_layer_layout_dimensions( array $items, array $box, array $first_orientation ): ?array {
+		$length = 0;
+		$used_length = 0;
+		$row_width = 0;
+		$layer_height = 0;
+		$used_width = 0;
+		$used_height = 0;
+		foreach ( $items as $index => $item ) {
+			$placed = false;
+			$orientations = 0 === $index ? array( $first_orientation ) : $this->orientations( $item );
+			foreach ( $orientations as $orientation ) {
+				if ( $length + $orientation['length'] <= $box['length'] && max( $used_width, $row_width + $orientation['width'] ) <= $box['width'] && max( $used_height, $layer_height + $orientation['height'] ) <= $box['height'] ) {
+					$length += $orientation['length'];
+					$used_length = max( $used_length, $length );
+					$used_width = max( $used_width, $row_width + $orientation['width'] );
+					$used_height = max( $used_height, $layer_height + $orientation['height'] );
+					$placed = true;
+					break;
+				}
+			}
+			if ( $placed ) {
+				continue;
+			}
+			$length = 0;
+			$row_width = $used_width;
+			foreach ( $this->orientations( $item ) as $orientation ) {
+				if ( $orientation['length'] <= $box['length'] && $row_width + $orientation['width'] <= $box['width'] && max( $used_height, $layer_height + $orientation['height'] ) <= $box['height'] ) {
+					$length = $orientation['length'];
+					$used_length = max( $used_length, $length );
+					$used_width = max( $used_width, $row_width + $orientation['width'] );
+					$used_height = max( $used_height, $layer_height + $orientation['height'] );
+					$placed = true;
+					break;
+				}
+			}
+			if ( ! $placed ) {
+				return null;
+			}
+		}
+		$candidate = array( 'length' => min( $box['length'], max( 1, $used_length ) ), 'width' => max( 1, $used_width ), 'height' => max( 1, $used_height ) );
+
+		return $this->box_within_limits( $candidate, $box ) ? $candidate : null;
+	}
+
+	/**
+	 * @param array{length:int,width:int,height:int} $dimensions
+	 * @return array<int,array{length:int,width:int,height:int}>
+	 */
+	private function orientations( array $dimensions ): array {
+		$values = array_values( $dimensions );
+		$permutations = array(
+			array( $values[0], $values[1], $values[2] ),
+			array( $values[0], $values[2], $values[1] ),
+			array( $values[1], $values[0], $values[2] ),
+			array( $values[1], $values[2], $values[0] ),
+			array( $values[2], $values[0], $values[1] ),
+			array( $values[2], $values[1], $values[0] ),
+		);
+		$orientations = array();
+		foreach ( $permutations as $permutation ) {
+			$key = implode( 'x', $permutation );
+			$orientations[ $key ] = array( 'length' => $permutation[0], 'width' => $permutation[1], 'height' => $permutation[2] );
+		}
+
+		return array_values( $orientations );
+	}
+
+	/**
+	 * @param array{length:int,width:int,height:int} $candidate
+	 * @param array{length:int,width:int,height:int} $limits
+	 */
+	private function box_within_limits( array $candidate, array $limits ): bool {
+		return $candidate['length'] <= $limits['length'] && $candidate['width'] <= $limits['width'] && $candidate['height'] <= $limits['height'];
+	}
+
+	/**
+	 * @param array{length:int,width:int,height:int}|null $best
+	 * @param array{length:int,width:int,height:int} $candidate
+	 * @return array{length:int,width:int,height:int}
+	 */
+	private function better_box( ?array $best, array $candidate ): array {
+		if ( null === $best ) {
+			return $candidate;
+		}
+		$best_volume = $best['length'] * $best['width'] * $best['height'];
+		$candidate_volume = $candidate['length'] * $candidate['width'] * $candidate['height'];
+		if ( $candidate_volume === $best_volume ) {
+			return ( implode( 'x', $candidate ) < implode( 'x', $best ) ) ? $candidate : $best;
+		}
+
+		return $candidate_volume < $best_volume ? $candidate : $best;
 	}
 
 	/**
@@ -397,6 +728,83 @@ final class CdekCarrier implements CarrierAdapterInterface {
 				'currency' => true,
 			)
 		);
+	}
+
+	/**
+	 * @param array<int,DeliveryRate> $rates
+	 * @return array<int,DeliveryRate>
+	 */
+	private function filter_rates( array $rates ): array {
+		$deduplicated = array();
+		foreach ( $rates as $rate ) {
+			$key = $this->period_key( $rate );
+			if ( ! isset( $deduplicated[ $key ] ) || $this->rate_preferred_for_same_period( $rate, $deduplicated[ $key ] ) ) {
+				$deduplicated[ $key ] = $rate;
+			}
+		}
+		$rates = array_values( $deduplicated );
+		$filtered = array();
+		foreach ( $rates as $current ) {
+			$dominated = false;
+			$current_min = $this->rate_period_min( $current );
+			if ( null !== $current_min ) {
+				foreach ( $rates as $other ) {
+					if ( $other === $current ) {
+						continue;
+					}
+					$other_min = $this->rate_period_min( $other );
+					if ( null === $other_min ) {
+						continue;
+					}
+					if ( $other_min <= $current_min && $other->price->get_rubles() < $current->price->get_rubles() ) {
+						$dominated = true;
+						break;
+					}
+				}
+			}
+			if ( ! $dominated ) {
+				$filtered[] = $current;
+			}
+		}
+
+		return $filtered;
+	}
+
+	private function period_key( DeliveryRate $rate ): string {
+		return (string) ( $rate->meta['delivery_min_days'] ?? 'null' ) . ':' . (string) ( $rate->meta['delivery_max_days'] ?? 'null' );
+	}
+
+	private function rate_period_min( DeliveryRate $rate ): ?int {
+		return is_numeric( $rate->meta['delivery_min_days'] ?? null ) ? (int) $rate->meta['delivery_min_days'] : null;
+	}
+
+	private function rate_preferred_for_same_period( DeliveryRate $candidate, DeliveryRate $current ): bool {
+		$candidate_price = $candidate->price->get_rubles();
+		$current_price = $current->price->get_rubles();
+		if ( $candidate_price !== $current_price ) {
+			return $candidate_price < $current_price;
+		}
+		$candidate_priority = $this->tariff_name_priority( (string) ( $candidate->meta['tariff_name_from_cdek'] ?? $candidate->tariff_name ) );
+		$current_priority = $this->tariff_name_priority( (string) ( $current->meta['tariff_name_from_cdek'] ?? $current->tariff_name ) );
+		if ( $candidate_priority !== $current_priority ) {
+			return $candidate_priority < $current_priority;
+		}
+
+		return strcasecmp( (string) ( $candidate->meta['tariff_name_from_cdek'] ?? $candidate->tariff_name ), (string) ( $current->meta['tariff_name_from_cdek'] ?? $current->tariff_name ) ) < 0;
+	}
+
+	private function tariff_name_priority( string $name ): int {
+		if ( preg_match( '/посылка\s+склад-склад/iu', $name ) ) {
+			return 0;
+		}
+		if ( preg_match( '/склад-склад/iu', $name ) ) {
+			return 1;
+		}
+		if ( preg_match( '/посылка/iu', $name ) ) {
+			return 2;
+		}
+
+		return 3;
 	}
 
 	/**

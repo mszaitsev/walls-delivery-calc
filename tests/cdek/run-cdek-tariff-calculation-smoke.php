@@ -267,6 +267,8 @@ final class CdekTariffFakeHttpClient implements CdekHttpClientInterface {
 	/** @var null|array<int,array<string,mixed>> */
 	public ?array $tariff_codes_override = null;
 	/** @var array<int,array<int,array<string,mixed>>> */
+	public array $tariff_codes_responses = array();
+	/** @var array<int,array<int,array<string,mixed>>> */
 	public array $location_responses = array();
 
 	public function request( string $method, string $url, array $args = array() ): CdekApiResponse {
@@ -286,6 +288,9 @@ final class CdekTariffFakeHttpClient implements CdekHttpClientInterface {
 			}
 			if ( null !== $this->tariff_codes_override ) {
 				return new CdekApiResponse( 200, (string) json_encode( array( 'tariff_codes' => $this->tariff_codes_override ) ) );
+			}
+			if ( array() !== $this->tariff_codes_responses ) {
+				return new CdekApiResponse( 200, (string) json_encode( array( 'tariff_codes' => array_shift( $this->tariff_codes_responses ) ) ) );
 			}
 			return new CdekApiResponse(
 				200,
@@ -315,6 +320,7 @@ function cdek_tariff_settings( CdekTariffFakeHttpClient $http, bool $credentials
 			CdekSettings::TEST_ACCOUNT_KEY => $credentials ? 'account-id' : '',
 			'cdek_test_secure_password' => $credentials ? 'secure-password' : '',
 			CdekSettings::SENDER_CITY_CODE_KEY => '270',
+			CdekSettings::SHIPMENT_POINT_KEY => ' nsk69 ',
 			CdekSettings::SENDER_POSTAL_CODE_KEY => '630005',
 			CdekSettings::SENDER_CITY_NAME_KEY => 'Новосибирск',
 			CdekSettings::DEFAULT_PACKAGE_LENGTH_CM_KEY => '30',
@@ -397,6 +403,32 @@ function cdek_tariff_last_tarifflist_payload( CdekTariffFakeHttpClient $http ): 
 	$payload = json_decode( (string) ( $request['args']['body'] ?? '' ), true );
 
 	return is_array( $payload ) ? $payload : array();
+}
+
+/**
+ * @return array<int,array<string,mixed>>
+ */
+function cdek_tariff_tarifflist_payloads( CdekTariffFakeHttpClient $http ): array {
+	$payloads = array();
+	foreach ( $http->requests as $request ) {
+		if ( ! str_contains( $request['url'], '/v2/calculator/tarifflist' ) ) {
+			continue;
+		}
+		$payload = json_decode( (string) ( $request['args']['body'] ?? '' ), true );
+		if ( is_array( $payload ) ) {
+			$payloads[] = $payload;
+		}
+	}
+
+	return $payloads;
+}
+
+/**
+ * @param array<int,DeliveryRate> $rates
+ * @return array<int,string>
+ */
+function cdek_tariff_rate_codes( array $rates ): array {
+	return array_values( array_map( static fn( DeliveryRate $rate ): string => $rate->tariff_key, $rates ) );
 }
 
 function cdek_tariff_orchestrator( CdekCarrier $carrier, ?DeliveryServiceRegistry $service_registry = null, ?DeliveryServiceManager $service_manager = null, ?QuoteCache $quote_cache = null ): CheckoutOrchestrator {
@@ -569,6 +601,7 @@ cdek_tariff_assert( 'Bearer runtime-token' === ( $tariff_request['args']['header
 $payload = json_decode( (string) $tariff_request['args']['body'], true );
 cdek_tariff_assert( 270 === (int) ( $payload['from_location']['code'] ?? 0 ), 'CDEK from_location.code mismatch.' );
 cdek_tariff_assert( 270 === (int) ( $payload['to_location']['code'] ?? 0 ), 'CDEK to_location.code mismatch.' );
+cdek_tariff_assert( 'NSK69' === (string) ( $payload['shipment_point'] ?? '' ), 'CDEK shipment_point must be sent in main tarifflist payload.' );
 cdek_tariff_assert( 1 === ( $payload['currency'] ?? null ), 'CDEK tarifflist currency must be int 1 for RUB.' );
 cdek_tariff_assert( ! str_contains( (string) $tariff_request['args']['body'], '"currency":"RUB"' ) && ! str_contains( (string) $tariff_request['args']['body'], '"RUB"' ), 'CDEK tarifflist payload must not contain string RUB currency.' );
 cdek_tariff_assert( 1 === count( $payload['packages'] ?? array() ), 'CDEK aggregate packaging weight must not produce a separate package.' );
@@ -578,22 +611,28 @@ cdek_tariff_assert( 12 === (int) ( $payload['packages'][0]['length'] ?? 0 ) && 8
 $single_http = new CdekTariffFakeHttpClient();
 [ , , $single_carrier ] = cdek_tariff_settings( $single_http, true );
 $single_carrier->quote( cdek_tariff_request_with_items( array( new PackageItem( 'sku-single', 'Один товар', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 900, 9, 8, 7 ) ) ) );
-$single_payload = cdek_tariff_last_tarifflist_payload( $single_http );
+$single_payload = cdek_tariff_tarifflist_payloads( $single_http )[0] ?? array();
 cdek_tariff_assert( 1 === count( $single_payload['packages'] ?? array() ) && array( 'weight' => 900, 'length' => 9, 'width' => 8, 'height' => 7 ) === ( $single_payload['packages'][0] ?? null ), 'CDEK one item quantity=1 without packaging must produce one package.' );
 
 $quantity_http = new CdekTariffFakeHttpClient();
 [ , , $quantity_carrier ] = cdek_tariff_settings( $quantity_http, true );
 $quantity_item = new PackageItem( 'sku-qty', 'Товар qty', 4, Money::from_rubles( 100 ), Money::from_rubles( 400 ), 1000, 36, 12, 12 );
 $quantity_carrier->quote( cdek_tariff_request_with_items( array( $quantity_item ) ) );
-$quantity_payload = cdek_tariff_last_tarifflist_payload( $quantity_http );
+$quantity_payloads = cdek_tariff_tarifflist_payloads( $quantity_http );
+$quantity_payload = $quantity_payloads[0] ?? array();
+$quantity_single_payload = $quantity_payloads[1] ?? array();
 cdek_tariff_assert( 4 === count( $quantity_payload['packages'] ?? array() ), 'CDEK item quantity=4 must produce four packages.' );
 cdek_tariff_assert( array( 1000, 1000, 1000, 1000 ) === array_map( static fn( array $package ): int => (int) ( $package['weight'] ?? 0 ), $quantity_payload['packages'] ?? array() ), 'CDEK item quantity=4 without packaging must keep four 1000 g packages.' );
 cdek_tariff_assert( array( 'weight' => 1000, 'length' => 36, 'width' => 12, 'height' => 12 ) === ( $quantity_payload['packages'][3] ?? null ), 'CDEK repeated package must keep unit item weight and dimensions.' );
+cdek_tariff_assert( 'NSK69' === (string) ( $quantity_single_payload['shipment_point'] ?? '' ), 'CDEK shipment_point must be sent in single-package payload.' );
+cdek_tariff_assert( 1 === count( $quantity_single_payload['packages'] ?? array() ) && 4000 === (int) ( $quantity_single_payload['packages'][0]['weight'] ?? 0 ), 'CDEK quantity=4 item fitting 50x50x30 must produce a single-package second payload.' );
+$quantity_single_box = $quantity_single_payload['packages'][0] ?? array();
+cdek_tariff_assert( isset( $quantity_single_box['length'], $quantity_single_box['width'], $quantity_single_box['height'] ) && (int) $quantity_single_box['length'] <= 50 && (int) $quantity_single_box['width'] <= 50 && (int) $quantity_single_box['height'] <= 30, 'CDEK single-package payload must include calculated box dimensions within 50x50x30 for four 36x12x12 items.' );
 
 $quantity_packaging_http = new CdekTariffFakeHttpClient();
 [ , , $quantity_packaging_carrier ] = cdek_tariff_settings( $quantity_packaging_http, true );
 $quantity_packaging_carrier->quote( cdek_tariff_request_with_items( array( $quantity_item ), 200 ) );
-$quantity_packaging_payload = cdek_tariff_last_tarifflist_payload( $quantity_packaging_http );
+$quantity_packaging_payload = cdek_tariff_tarifflist_payloads( $quantity_packaging_http )[0] ?? array();
 cdek_tariff_assert( 4 === count( $quantity_packaging_payload['packages'] ?? array() ), 'CDEK packaging_weight_g must not create an extra package for item payloads.' );
 cdek_tariff_assert( array( 1200, 1000, 1000, 1000 ) === array_map( static fn( array $package ): int => (int) ( $package['weight'] ?? 0 ), $quantity_packaging_payload['packages'] ?? array() ), 'CDEK packaging_weight_g must be added once to the first package only.' );
 
@@ -607,13 +646,13 @@ $mixed_carrier->quote(
 		)
 	)
 );
-$mixed_payload = cdek_tariff_last_tarifflist_payload( $mixed_http );
+$mixed_payload = cdek_tariff_tarifflist_payloads( $mixed_http )[0] ?? array();
 cdek_tariff_assert( 5 === count( $mixed_payload['packages'] ?? array() ), 'CDEK different items must produce sum(quantity) packages.' );
 
 $defaults_http = new CdekTariffFakeHttpClient();
 [ , , $defaults_carrier ] = cdek_tariff_settings( $defaults_http, true );
 $defaults_carrier->quote( cdek_tariff_request_with_items( array( new PackageItem( 'sku-defaults', 'Без размеров', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 450, 0, 5, 0 ) ) ) );
-$defaults_payload = cdek_tariff_last_tarifflist_payload( $defaults_http );
+$defaults_payload = cdek_tariff_tarifflist_payloads( $defaults_http )[0] ?? array();
 cdek_tariff_assert( array( 'weight' => 450, 'length' => 30, 'width' => 5, 'height' => 10 ) === ( $defaults_payload['packages'][0] ?? null ), 'CDEK missing item dimensions must fallback per dimension to CDEK defaults.' );
 
 $packaging_http = new CdekTariffFakeHttpClient();
@@ -626,7 +665,7 @@ $packaging_carrier->quote(
 		)
 	)
 );
-$packaging_payload = cdek_tariff_last_tarifflist_payload( $packaging_http );
+$packaging_payload = cdek_tariff_tarifflist_payloads( $packaging_http )[0] ?? array();
 cdek_tariff_assert( 2 === count( $packaging_payload['packages'] ?? array() ) && array( 'weight' => 150, 'length' => 1, 'width' => 1, 'height' => 1 ) === ( $packaging_payload['packages'][1] ?? null ), 'CDEK WDC_PACKAGING item must be sent as a separate package.' );
 
 $packaging_with_property_http = new CdekTariffFakeHttpClient();
@@ -640,7 +679,7 @@ $packaging_with_property_carrier->quote(
 		200
 	)
 );
-$packaging_with_property_payload = cdek_tariff_last_tarifflist_payload( $packaging_with_property_http );
+$packaging_with_property_payload = cdek_tariff_tarifflist_payloads( $packaging_with_property_http )[0] ?? array();
 cdek_tariff_assert( array( 800, 200 ) === array_map( static fn( array $package ): int => (int) ( $package['weight'] ?? 0 ), $packaging_with_property_payload['packages'] ?? array() ), 'CDEK WDC_PACKAGING item must prevent applying package packaging_weight_g again.' );
 
 $aggregate_http = new CdekTariffFakeHttpClient();
@@ -649,6 +688,64 @@ $aggregate_package = new Package( array(), Money::from_rubles( 1000 ), Money::fr
 $aggregate_carrier->quote( cdek_tariff_request_with_package( $aggregate_package ) );
 $aggregate_payload = cdek_tariff_last_tarifflist_payload( $aggregate_http );
 cdek_tariff_assert( 1 === count( $aggregate_payload['packages'] ?? array() ) && 1234 === (int) ( $aggregate_payload['packages'][0]['weight'] ?? 0 ), 'CDEK no-items aggregated fallback must keep one package with total_weight_g.' );
+
+$oversized_http = new CdekTariffFakeHttpClient();
+[ , , $oversized_carrier ] = cdek_tariff_settings( $oversized_http, true );
+$oversized_carrier->quote( cdek_tariff_request_with_items( array( new PackageItem( 'sku-big', 'Большой товар', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 1000, 60, 10, 10 ) ) ) );
+cdek_tariff_assert( 1 === count( cdek_tariff_tarifflist_payloads( $oversized_http ) ), 'CDEK single-package request must not run when an item cannot fit 50x50x30 in any orientation.' );
+
+$merge_http = new CdekTariffFakeHttpClient();
+$merge_http->tariff_codes_responses = array(
+	array(
+		array( 'tariff_code' => 136, 'tariff_name' => 'Посылка склад-склад', 'delivery_mode' => 4, 'delivery_sum' => 350, 'period_min' => 3, 'period_max' => 3 ),
+	),
+	array(
+		array( 'tariff_code' => 136, 'tariff_name' => 'Дубль из single', 'delivery_mode' => 4, 'delivery_sum' => 100, 'period_min' => 1, 'period_max' => 1 ),
+		array( 'tariff_code' => 138, 'tariff_name' => 'Экспресс склад-склад', 'delivery_mode' => 4, 'delivery_sum' => 500, 'period_min' => 1, 'period_max' => 1 ),
+	),
+);
+[ , , $merge_carrier ] = cdek_tariff_settings( $merge_http, true );
+$merge_quote = $merge_carrier->quote( cdek_tariff_request_with_items( array( new PackageItem( 'sku-fit', 'Товар', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 1000, 10, 10, 10 ) ) ) );
+cdek_tariff_assert( array( '136', '138' ) === cdek_tariff_rate_codes( $merge_quote->rates ), 'CDEK single-package tariffs must add only new tariff_code values and ignore duplicates.' );
+
+$same_period_price_http = new CdekTariffFakeHttpClient();
+$same_period_price_http->tariff_codes_override = array(
+	array( 'tariff_code' => 301, 'tariff_name' => 'Дорогой склад-склад', 'delivery_mode' => 4, 'delivery_sum' => 700, 'period_min' => 2, 'period_max' => 4 ),
+	array( 'tariff_code' => 302, 'tariff_name' => 'Дешевый склад-склад', 'delivery_mode' => 4, 'delivery_sum' => 500, 'period_min' => 2, 'period_max' => 4 ),
+);
+[ , , $same_period_price_carrier ] = cdek_tariff_settings( $same_period_price_http, true );
+$same_period_price_quote = $same_period_price_carrier->quote( cdek_tariff_request_with_items( array( new PackageItem( 'sku-big', 'Большой товар', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 1000, 60, 10, 10 ) ) ) );
+cdek_tariff_assert( array( '302' ) === cdek_tariff_rate_codes( $same_period_price_quote->rates ), 'CDEK same period_min/period_max group must keep the cheapest rate.' );
+
+$same_period_name_http = new CdekTariffFakeHttpClient();
+$same_period_name_http->tariff_codes_override = array(
+	array( 'tariff_code' => 401, 'tariff_name' => 'Я тариф', 'delivery_mode' => 4, 'delivery_sum' => 500, 'period_min' => 2, 'period_max' => 2 ),
+	array( 'tariff_code' => 402, 'tariff_name' => 'Просто посылка', 'delivery_mode' => 4, 'delivery_sum' => 500, 'period_min' => 2, 'period_max' => 2 ),
+	array( 'tariff_code' => 403, 'tariff_name' => 'Тариф склад-склад', 'delivery_mode' => 4, 'delivery_sum' => 500, 'period_min' => 2, 'period_max' => 2 ),
+	array( 'tariff_code' => 404, 'tariff_name' => 'Посылка склад-склад', 'delivery_mode' => 4, 'delivery_sum' => 500, 'period_min' => 2, 'period_max' => 2 ),
+);
+[ , , $same_period_name_carrier ] = cdek_tariff_settings( $same_period_name_http, true );
+$same_period_name_quote = $same_period_name_carrier->quote( cdek_tariff_request_with_items( array( new PackageItem( 'sku-big', 'Большой товар', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 1000, 60, 10, 10 ) ) ) );
+cdek_tariff_assert( array( '404' ) === cdek_tariff_rate_codes( $same_period_name_quote->rates ), 'CDEK same price priority must prefer CDEK name Посылка склад-склад over склад-склад, посылка, then alphabet.' );
+
+$same_period_alpha_http = new CdekTariffFakeHttpClient();
+$same_period_alpha_http->tariff_codes_override = array(
+	array( 'tariff_code' => 501, 'tariff_name' => 'Я тариф', 'delivery_mode' => 4, 'delivery_sum' => 500, 'period_min' => 2, 'period_max' => 2 ),
+	array( 'tariff_code' => 502, 'tariff_name' => 'А тариф', 'delivery_mode' => 4, 'delivery_sum' => 500, 'period_min' => 2, 'period_max' => 2 ),
+);
+[ , , $same_period_alpha_carrier ] = cdek_tariff_settings( $same_period_alpha_http, true );
+$same_period_alpha_quote = $same_period_alpha_carrier->quote( cdek_tariff_request_with_items( array( new PackageItem( 'sku-big', 'Большой товар', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 1000, 60, 10, 10 ) ) ) );
+cdek_tariff_assert( array( '502' ) === cdek_tariff_rate_codes( $same_period_alpha_quote->rates ), 'CDEK same price/name fallback must keep alphabetically first CDEK name.' );
+
+$faster_cheaper_http = new CdekTariffFakeHttpClient();
+$faster_cheaper_http->tariff_codes_override = array(
+	array( 'tariff_code' => 601, 'tariff_name' => 'Быстрый дешевый', 'delivery_mode' => 4, 'delivery_sum' => 400, 'period_min' => 1, 'period_max' => 5 ),
+	array( 'tariff_code' => 602, 'tariff_name' => 'Медленный дорогой', 'delivery_mode' => 4, 'delivery_sum' => 500, 'period_min' => 3, 'period_max' => 3 ),
+	array( 'tariff_code' => 603, 'tariff_name' => 'Быстрый дорогой', 'delivery_mode' => 4, 'delivery_sum' => 600, 'period_min' => 1, 'period_max' => 1 ),
+);
+[ , , $faster_cheaper_carrier ] = cdek_tariff_settings( $faster_cheaper_http, true );
+$faster_cheaper_quote = $faster_cheaper_carrier->quote( cdek_tariff_request_with_items( array( new PackageItem( 'sku-big', 'Большой товар', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 1000, 60, 10, 10 ) ) ) );
+cdek_tariff_assert( array( '601' ) === cdek_tariff_rate_codes( $faster_cheaper_quote->rates ), 'CDEK faster and cheaper rule must remove rates with other.period_min <= current.period_min and lower price.' );
 
 [ $service_registry, $service_manager ] = cdek_tariff_service_runtime( $carrier, false );
 $disabled_result = cdek_tariff_orchestrator( $carrier, $service_registry, $service_manager )->calculate( cdek_tariff_request(), array(), RateSorter::CHEAPEST, false );

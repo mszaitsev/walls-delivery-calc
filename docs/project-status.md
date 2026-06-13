@@ -108,7 +108,7 @@
 
 ## Общий статус
 
-- Текущая версия: `0.46.6`.
+- Текущая версия: `0.47.0`.
 - Текущая базовая ветка: `develop`.
 - Рабочая ветка: `feature/cdek-tariffs-management`.
 - Последнее обновление статуса: 2026-06-12.
@@ -147,7 +147,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.46.6`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.47.0`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
@@ -156,7 +156,7 @@
 - `src/Calendar` stores delivery calendars, generates years, calculates/format delivery dates and exposes admin UI.
 - `src/Locations` covers FIAS/GAR clients/import/snapshots/incremental updates, local locations/regions, aliases, display names, search, country index and courier calculation postcode fill.
 - `src/Checkout` covers WooCommerce shipping method registration, package/rate mapping, quote orchestration, caching, sorting, validation, city selector, DaData suggestions, courier address handling, pickup map and order meta persistence.
-- `src/Carriers/Runtime/CdekCarrier.php` sends CDEK tarifflist `packages[]` per `PackageItem` unit, applies aggregate `packaging_weight_g` once to the first item package unless packaging is already represented by `WDC_PACKAGING`, and keeps the old aggregated package only as no-item fallback.
+- `src/Carriers/Runtime/CdekCarrier.php` sends CDEK tarifflist `packages[]` per `PackageItem` unit, applies aggregate `packaging_weight_g` once to the first item package unless packaging is already represented by `WDC_PACKAGING`, keeps the old aggregated package only as no-item fallback, performs an optional 50x50x30 cm single-package express tariff pass, merges new single-package tariff codes, and filters CDEK rates by exact periods plus faster/cheaper dominance.
 - `src/Rules` implements the Rule Engine, service-level rules, default fallback rules, condition groups/expressions, audit trail, price/days changes, comments, stop-processing, simulation and admin builder.
 - `src/Packaging` adds global/service-aware packaging weight calculation used by delivery services and checkout.
 
