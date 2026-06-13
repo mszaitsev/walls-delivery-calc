@@ -84,21 +84,143 @@ final class CdekOrderStatusService {
 	}
 
 	/**
+	 * @return array<string,mixed>
+	 */
+	public function attach_by_cdek_number( object $order, string $cdek_number ): array {
+		$cdek_number = trim( $cdek_number );
+		if ( '' === $cdek_number ) {
+			return array( 'success' => false, 'message' => 'Введите номер СДЭК.' );
+		}
+
+		try {
+			$response = $this->client->orderByCdekNumber( $cdek_number );
+		} catch ( CdekApiException $exception ) {
+			$this->log( 'error', 'CDEK manual attach lookup failed.', $exception->details() );
+			return array( 'success' => false, 'message' => $exception->getMessage() );
+		}
+
+		$body = is_array( $response['body'] ?? null ) ? $response['body'] : array();
+		$entity = is_array( $body['entity'] ?? null ) ? $body['entity'] : array();
+		if ( array() === $entity ) {
+			return array( 'success' => false, 'message' => 'Заказ СДЭК с таким номером не найден.' );
+		}
+
+		$shipment = $this->shipment_from_body( $body, array( 'cdek_number' => $cdek_number ) );
+		$this->repository->save_for_carrier( $order, CdekSettings::CARRIER_KEY, $shipment );
+		$this->log( 'info', 'CDEK shipment manually attached.', array( 'cdek_number' => $shipment['cdek_number'] ?? '', 'entity_uuid' => $shipment['external_id'] ?? '', 'order_status' => $shipment['cdek_order_status_code'] ?? '' ) );
+
+		return array(
+			'success' => true,
+			'message' => 'Номер СДЭК сохранен.',
+			'tracking_number' => (string) ( $shipment['tracking_number'] ?? '' ),
+			'status' => $this->status_payload( $shipment ),
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function cancel_created_order( object $order ): array {
+		$shipment = $this->repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY );
+		if ( array() === $shipment ) {
+			return array( 'success' => false, 'message' => 'Отправление СДЭК не найдено.' );
+		}
+		if ( ! $this->can_cancel_in_cdek( $shipment ) ) {
+			return array( 'success' => false, 'message' => 'Отменить заказ в СДЭК можно только в статусе CREATED / Создан.' );
+		}
+		$uuid = trim( (string) ( $shipment['external_id'] ?? $shipment['entity_uuid'] ?? '' ) );
+		if ( '' === $uuid ) {
+			return array( 'success' => false, 'message' => 'Не найден UUID заказа СДЭК для удаления.' );
+		}
+
+		try {
+			$response = $this->client->deleteOrder( $uuid );
+		} catch ( CdekApiException $exception ) {
+			$this->log( 'error', 'CDEK order delete failed.', $exception->details() );
+			return array( 'success' => false, 'message' => $exception->getMessage() );
+		}
+
+		$body = is_array( $response['body'] ?? null ) ? $response['body'] : array();
+		$request_row = $this->latest_request( $body );
+		if ( 'INVALID' === strtoupper( (string) ( $request_row['state'] ?? '' ) ) ) {
+			return array( 'success' => false, 'message' => $this->errors_message( $request_row ) ?: 'СДЭК не удалил заказ.' );
+		}
+
+		$this->repository->delete_for_carrier( $order, CdekSettings::CARRIER_KEY );
+		$this->log( 'info', 'CDEK order delete accepted.', array( 'entity_uuid' => $uuid, 'request_uuid' => (string) ( $request_row['request_uuid'] ?? '' ), 'request_state' => (string) ( $request_row['state'] ?? '' ) ) );
+
+		return array(
+			'success' => true,
+			'message' => 'Отправление СДЭК отменено.',
+			'status' => $this->status_payload( array() ),
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function remove_local_if_allowed( object $order ): array {
+		$shipment = $this->repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY );
+		if ( array() === $shipment ) {
+			return array( 'success' => false, 'message' => 'Отправление СДЭК не найдено.' );
+		}
+		if ( ! $this->can_remove_from_order( $shipment ) ) {
+			return array( 'success' => false, 'message' => 'Локальное удаление СДЭК-отправления запрещено для текущего статуса.' );
+		}
+
+		$this->repository->delete_for_carrier( $order, CdekSettings::CARRIER_KEY );
+
+		return array(
+			'success' => true,
+			'message' => 'Данные СДЭК-отправления удалены из заказа.',
+			'status' => $this->status_payload( array() ),
+		);
+	}
+
+	/**
 	 * @param array<string,mixed> $shipment
 	 * @return array<string,mixed>
 	 */
 	public function status_payload( array $shipment ): array {
+		$order_status_code = strtoupper( (string) ( $shipment['cdek_order_status_code'] ?? '' ) );
+		$order_status_label = (string) ( $shipment['cdek_order_status_name'] ?? '' );
+		$number = (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? $shipment['cdek_number'] ?? '' );
+
 		return array(
 			'carrier_key' => CdekSettings::CARRIER_KEY,
+			'has_shipment' => array() !== $shipment,
 			'shipment_status_label' => $this->shipment_status_label( (string) ( $shipment['status'] ?? '' ) ),
 			'carrier_status_title' => (string) ( $shipment['status_title'] ?? '' ),
 			'carrier_operation_date' => (string) ( $shipment['tracking_checked_at'] ?? '' ),
-			'carrier_operation_address' => (string) ( $shipment['cdek_order_status_code'] ?? '' ),
+			'carrier_operation_address' => $order_status_code,
 			'carrier_operation_index' => (string) ( $shipment['cdek_request_state'] ?? '' ),
 			'tracking_checked_at' => (string) ( $shipment['tracking_checked_at'] ?? '' ),
-			'barcode' => (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? $shipment['cdek_number'] ?? '' ),
-			'can_cancel' => false,
+			'barcode' => $number,
+			'cdek_number' => $number,
+			'uuid' => (string) ( $shipment['external_id'] ?? $shipment['entity_uuid'] ?? '' ),
+			'order_status_code' => $order_status_code,
+			'order_status_label' => $order_status_label,
+			'can_cancel' => $this->can_cancel_in_cdek( $shipment ),
+			'can_cancel_in_cdek' => $this->can_cancel_in_cdek( $shipment ),
+			'can_remove_from_order' => $this->can_remove_from_order( $shipment ),
+			'can_update_status' => array() !== $shipment,
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 */
+	public function can_cancel_in_cdek( array $shipment ): bool {
+		return 'CREATED' === strtoupper( (string) ( $shipment['cdek_order_status_code'] ?? '' ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 */
+	public function can_remove_from_order( array $shipment ): bool {
+		$status = strtoupper( (string) ( $shipment['cdek_order_status_code'] ?? '' ) );
+
+		return '' !== $status && ! in_array( $status, array( 'ACCEPTED', 'CREATED' ), true );
 	}
 
 	private function shipment_status_label( string $status ): string {
@@ -131,6 +253,49 @@ final class CdekOrderStatusService {
 		}
 
 		throw new CdekApiException( 'Не найден UUID или номер заказа СДЭК для обновления статуса.' );
+	}
+
+	/**
+	 * @param array<string,mixed> $body
+	 * @param array<string,mixed> $base
+	 * @return array<string,mixed>
+	 */
+	private function shipment_from_body( array $body, array $base = array() ): array {
+		$entity = is_array( $body['entity'] ?? null ) ? $body['entity'] : array();
+		$request_row = $this->latest_request( $body );
+		$order_status = $this->latest_order_status( $entity );
+		$request_state = strtoupper( (string) ( $request_row['state'] ?? '' ) );
+		$status_code = strtoupper( (string) ( $order_status['code'] ?? '' ) );
+		$cdek_number = (string) ( $entity['cdek_number'] ?? $base['cdek_number'] ?? '' );
+		$status = 'registration_pending';
+		if ( 'CREATED' === $status_code || 'SUCCESSFUL' === $request_state ) {
+			$status = 'registered';
+		} elseif ( 'INVALID' === $request_state ) {
+			$status = 'failed';
+		}
+		$now = $this->now();
+
+		return array_merge(
+			$base,
+			array(
+				'carrier_key' => CdekSettings::CARRIER_KEY,
+				'service_key' => CdekSettings::SERVICE_KEY,
+				'status' => $status,
+				'status_title' => $this->status_title( $status, $order_status, $request_state ),
+				'external_id' => (string) ( $entity['uuid'] ?? '' ),
+				'cdek_number' => $cdek_number,
+				'tracking_number' => $cdek_number,
+				'barcode' => $cdek_number,
+				'cdek_request_uuid' => (string) ( $request_row['request_uuid'] ?? '' ),
+				'cdek_request_state' => $request_state,
+				'cdek_order_status_code' => $status_code,
+				'cdek_order_status_name' => (string) ( $order_status['name'] ?? '' ),
+				'response_snapshot' => $this->sanitize_response_snapshot( $body ),
+				'created_at' => $now,
+				'updated_at' => $now,
+				'tracking_checked_at' => $now,
+			)
+		);
 	}
 
 	/**

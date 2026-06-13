@@ -147,7 +147,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.47.0`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.48.2`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
@@ -366,6 +366,8 @@
 - Профильный `docs/wdc-*.md` по области задачи.
 - `docs/walls-delivery-calc-tech-spec.md` - только если меняется целевой продуктовый или архитектурный контракт.
 - `docs/wdc-migration-plan.md` - если меняется порядок этапов, риски или стратегия перехода.
+0.48.2 note: CDEK shipment metabox controls are carrier-aware for manual attach and removal actions. Existing CDEK shipments can be attached by `cdek_number`, continue to use the unchanged manual status refresh, can be cancelled/deleted in CDEK only while the CDEK order status is `CREATED`, and can be removed locally only for known statuses other than protected `ACCEPTED` and `CREATED`.
+
 0.48.1 note: CDEK order creation pre-live-test fixes are applied. `ajax_create()` now returns status data for the active created carrier instead of always reading Russian Post; `POST /v2/orders` with `requests[0].state=INVALID` returns `cdek_registration_invalid` and does not persist `registration_pending`; CDEK logs and request/response snapshots are reduced to sanitized technical data; and the shipment status block label is carrier-aware for CDEK.
 
 0.48.0 note: CDEK order creation now starts from the existing WooCommerce `Отправления` metabox. The shipment modal is carrier-aware, adds `Основное` and universal `Грузоместа` tabs, builds CDEK `packages[]/items[]` from manager-entered package rows, sends `POST /v2/orders` as an async registration request, stores `registration_pending`, and polls `GET /v2/orders` or `GET /v2/orders/{uuid}` every 15 seconds for up to 10 minutes. The payload intentionally omits `services`/`INSURANCE`, `additional_order_types`, `delivery_recipient_cost` and checkout packaging weight, uses prepaid `item.payment.value=0`, and blocks duplicate CDEK creation while an order is pending/created/registered.

@@ -84,8 +84,22 @@ final class CdekApiClient {
 	/**
 	 * @return array<string,mixed>
 	 */
+	public function orderByCdekNumber( string $cdek_number ): array {
+		return $this->orderByNumber( array( 'cdek_number' => $cdek_number ) );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
 	public function orderByUuid( string $uuid ): array {
 		return $this->authorizedJsonRequest( 'GET', '/v2/orders/' . rawurlencode( $uuid ) );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function deleteOrder( string $uuid ): array {
+		return $this->authorizedJsonRequest( 'DELETE', '/v2/orders/' . rawurlencode( $uuid ) );
 	}
 
 	/**

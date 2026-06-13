@@ -84,6 +84,8 @@ final class CdekOrderFakeHttp implements CdekHttpClientInterface {
 	public array $post_responses = array();
 	/** @var array<int,array<string,mixed>> */
 	public array $order_responses = array();
+	/** @var array<int,array<string,mixed>> */
+	public array $delete_responses = array();
 
 	public function request( string $method, string $url, array $args = array() ): CdekApiResponse {
 		$this->requests[] = array( 'method' => $method, 'url' => $url, 'args' => $args );
@@ -94,6 +96,13 @@ final class CdekOrderFakeHttp implements CdekHttpClientInterface {
 			$response = array_shift( $this->post_responses ) ?: array(
 				'entity' => array( 'uuid' => 'order-uuid-1', 'recipient' => array( 'name' => 'Иван Иванов', 'email' => 'buyer@example.com' ) ),
 				'requests' => array( array( 'request_uuid' => 'request-uuid-1', 'state' => 'ACCEPTED' ) ),
+			);
+			return new CdekApiResponse( 202, json_encode( $response ) ?: '{}' );
+		}
+		if ( 'DELETE' === $method && str_contains( $url, '/v2/orders/' ) ) {
+			$response = array_shift( $this->delete_responses ) ?: array(
+				'entity' => array( 'uuid' => 'deleted-uuid' ),
+				'requests' => array( array( 'request_uuid' => 'delete-request-uuid', 'state' => 'ACCEPTED' ) ),
 			);
 			return new CdekApiResponse( 202, json_encode( $response ) ?: '{}' );
 		}
@@ -237,6 +246,76 @@ cdek_order_assert( $invalid['success'] && 'failed' === (string) $repository->fin
 
 cdek_order_assert( isset( $created['status'], $invalid['status'] ), 'Status AJAX payload data must contain status for toast/UI.' );
 cdek_order_assert( CdekSettings::CARRIER_KEY === (string) $created['status']['carrier_key'], 'CDEK status payload must be carrier-aware.' );
+
+$attach_http = new CdekOrderFakeHttp();
+$attach_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $attach_http ), $settings, $attach_http );
+$attach_repository = new OrderShipmentRepository();
+$attach_status = new CdekOrderStatusService( $attach_repository, $attach_client );
+$attach_order = new CdekOrderFakeOrder( 103 );
+$attach_http->order_responses[] = array( 'entity' => array( 'uuid' => 'manual-uuid', 'cdek_number' => '100501', 'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
+$attached = $attach_status->attach_by_cdek_number( $attach_order, '100501' );
+cdek_order_assert( $attached['success'] && CdekSettings::CARRIER_KEY === (string) ( $attached['status']['carrier_key'] ?? '' ), 'Manual attach CDEK must return status payload.' );
+$attached_shipment = $attach_repository->find_by_carrier( $attach_order, CdekSettings::CARRIER_KEY );
+cdek_order_assert( '100501' === (string) ( $attached_shipment['cdek_number'] ?? '' ) && 'manual-uuid' === (string) ( $attached_shipment['external_id'] ?? '' ), 'Manual attach CDEK must save cdek_number and uuid.' );
+$attach_http->order_responses[] = array( 'entity' => array( 'uuid' => 'manual-uuid', 'cdek_number' => '100501', 'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
+$manual_update = $attach_status->update( $attach_order );
+cdek_order_assert( $manual_update['success'] && ! empty( $manual_update['status']['can_update_status'] ), 'Manual attached CDEK shipment must support update status.' );
+
+$not_found_http = new CdekOrderFakeHttp();
+$not_found_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $not_found_http ), $settings, $not_found_http );
+$not_found_repository = new OrderShipmentRepository();
+$not_found_status = new CdekOrderStatusService( $not_found_repository, $not_found_client );
+$not_found_order = new CdekOrderFakeOrder( 104 );
+$not_found_http->order_responses[] = array( 'entity' => array(), 'requests' => array( array( 'state' => 'INVALID', 'errors' => array( array( 'message' => 'not found' ) ) ) ) );
+$not_found = $not_found_status->attach_by_cdek_number( $not_found_order, 'missing' );
+cdek_order_assert( ! $not_found['success'] && array() === $not_found_repository->find_by_carrier( $not_found_order, CdekSettings::CARRIER_KEY ), 'Manual attach not found must not save shipment.' );
+
+$cancel_http = new CdekOrderFakeHttp();
+$cancel_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $cancel_http ), $settings, $cancel_http );
+$cancel_repository = new OrderShipmentRepository();
+$cancel_status = new CdekOrderStatusService( $cancel_repository, $cancel_client );
+$cancel_order = new CdekOrderFakeOrder( 105 );
+$cancel_repository->save_for_carrier( $cancel_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'created-uuid', 'cdek_number' => '100502', 'status' => 'registered', 'cdek_order_status_code' => 'CREATED', 'cdek_order_status_label' => 'Создан' ) );
+$cancel_payload = $cancel_status->status_payload( $cancel_repository->find_by_carrier( $cancel_order, CdekSettings::CARRIER_KEY ) );
+cdek_order_assert( ! empty( $cancel_payload['can_cancel'] ), 'CREATED CDEK shipment must allow cancel/delete in CDEK.' );
+$cancel_http->delete_responses[] = array( 'entity' => array( 'uuid' => 'created-uuid' ), 'requests' => array( array( 'request_uuid' => 'delete-1', 'state' => 'ACCEPTED' ) ) );
+$cancelled = $cancel_status->cancel_created_order( $cancel_order );
+$delete_count = count( array_filter( $cancel_http->requests, static fn ( array $request ): bool => 'DELETE' === $request['method'] && str_contains( $request['url'], '/v2/orders/created-uuid' ) ) );
+cdek_order_assert( $cancelled['success'] && 1 === $delete_count && array() === $cancel_repository->find_by_carrier( $cancel_order, CdekSettings::CARRIER_KEY ), 'CDEK cancel/delete must call API and remove local shipment on success.' );
+
+$forbidden_cancel_http = new CdekOrderFakeHttp();
+$forbidden_cancel_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $forbidden_cancel_http ), $settings, $forbidden_cancel_http );
+$forbidden_cancel_repository = new OrderShipmentRepository();
+$forbidden_cancel_status = new CdekOrderStatusService( $forbidden_cancel_repository, $forbidden_cancel_client );
+$forbidden_cancel_order = new CdekOrderFakeOrder( 106 );
+$forbidden_cancel_repository->save_for_carrier( $forbidden_cancel_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'accepted-uuid', 'cdek_number' => '100503', 'status' => 'registered', 'cdek_order_status_code' => 'ACCEPTED', 'cdek_order_status_label' => 'Принят' ) );
+$forbidden_cancel_payload = $forbidden_cancel_status->status_payload( $forbidden_cancel_repository->find_by_carrier( $forbidden_cancel_order, CdekSettings::CARRIER_KEY ) );
+$forbidden_cancel = $forbidden_cancel_status->cancel_created_order( $forbidden_cancel_order );
+$forbidden_delete_count = count( array_filter( $forbidden_cancel_http->requests, static fn ( array $request ): bool => 'DELETE' === $request['method'] ) );
+cdek_order_assert( empty( $forbidden_cancel_payload['can_cancel'] ) && ! $forbidden_cancel['success'] && 0 === $forbidden_delete_count, 'CDEK cancel/delete must be forbidden outside CREATED and must not call API.' );
+
+$remove_http = new CdekOrderFakeHttp();
+$remove_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $remove_http ), $settings, $remove_http );
+$remove_repository = new OrderShipmentRepository();
+$remove_status = new CdekOrderStatusService( $remove_repository, $remove_client );
+$remove_order = new CdekOrderFakeOrder( 107 );
+$remove_repository->save_for_carrier( $remove_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'delivered-uuid', 'cdek_number' => '100504', 'status' => 'registered', 'cdek_order_status_code' => 'DELIVERED', 'cdek_order_status_label' => 'Вручен' ) );
+$remove_payload = $remove_status->status_payload( $remove_repository->find_by_carrier( $remove_order, CdekSettings::CARRIER_KEY ) );
+$removed = $remove_status->remove_local_if_allowed( $remove_order );
+$remove_delete_count = count( array_filter( $remove_http->requests, static fn ( array $request ): bool => 'DELETE' === $request['method'] ) );
+cdek_order_assert( ! empty( $remove_payload['can_remove_from_order'] ) && $removed['success'] && 0 === $remove_delete_count && array() === $remove_repository->find_by_carrier( $remove_order, CdekSettings::CARRIER_KEY ), 'Allowed CDEK local remove must not call API and must remove local shipment.' );
+
+foreach ( array( 'ACCEPTED', 'CREATED' ) as $protected_status ) {
+	$protected_repository = new OrderShipmentRepository();
+	$protected_http = new CdekOrderFakeHttp();
+	$protected_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $protected_http ), $settings, $protected_http );
+	$protected_service = new CdekOrderStatusService( $protected_repository, $protected_client );
+	$protected_order = new CdekOrderFakeOrder( 'ACCEPTED' === $protected_status ? 108 : 109 );
+	$protected_repository->save_for_carrier( $protected_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => strtolower( $protected_status ) . '-uuid', 'cdek_number' => '100505', 'status' => 'registered', 'cdek_order_status_code' => $protected_status ) );
+	$protected_payload = $protected_service->status_payload( $protected_repository->find_by_carrier( $protected_order, CdekSettings::CARRIER_KEY ) );
+	$protected_remove = $protected_service->remove_local_if_allowed( $protected_order );
+	cdek_order_assert( empty( $protected_payload['can_remove_from_order'] ) && ! $protected_remove['success'], 'CDEK local remove must be forbidden for ' . $protected_status . '.' );
+}
 
 $ajax_http = new CdekOrderFakeHttp();
 $ajax_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $ajax_http ), $settings, $ajax_http );

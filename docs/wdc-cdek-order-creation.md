@@ -1,6 +1,8 @@
 # WDC CDEK Order Creation
 
-Version: 0.48.1.
+Version: 0.48.2.
+
+0.48.2 update: the existing `Отправления` metabox can manually attach an existing CDEK shipment by `cdek_number`, then use the same `Обновить статус` action as created shipments. CDEK cancel/delete uses `DELETE /v2/orders/{uuid}` only when the order status from Appendix 1 is `CREATED / Создан`; after API success the local shipment snapshot is removed so the order can be created again. Local-only removal does not call CDEK and is allowed only for known CDEK order statuses other than protected `ACCEPTED / Принят` and `CREATED / Создан`.
 
 0.48.1 update: pre-live-test fixes only. `ajax_create()` returns the status payload for the created carrier, CDEK `POST /v2/orders` with `requests[0].state=INVALID` fails with `cdek_registration_invalid` and is not saved as `registration_pending`, logs/snapshots are sanitized to remove recipient PII and full item lists, and the metabox status label is carrier-aware for CDEK.
 
@@ -65,6 +67,14 @@ The existing `Отправления` metabox is reused. The modal now has tabs:
 The `Грузоместа` tab is shown for all carriers so other services can adopt it later. In 0.48.0 it actively drives CDEK `packages[]`; Russian Post flow is kept backward-compatible.
 
 Repeated CDEK creation is blocked when the order already has a CDEK shipment in `registration_pending`, `created` or `registered`. The UI shows the existing UUID/number/status instead of accidentally creating another CDEK order with the same IM number.
+
+## Manual attach and removal
+
+Manual attach does not create a CDEK order. The manager enters a CDEK number in the existing manual tracking form, WDC calls the CDEK order lookup, and only when the order is found stores `carrier_key=cdek`, `cdek_number`, returned UUID, current order status and a sanitized response snapshot. The attached shipment then uses the unchanged manual `Обновить статус` button.
+
+Cancel/delete in CDEK is intentionally narrow: CDEK documentation allows deleting a created order only while the shipment has no warehouse movement, which corresponds to Appendix 1 order status `CREATED / Создан`. WDC calls `DELETE /v2/orders/{uuid}` only for that status. If CDEK returns an error, the local shipment is kept.
+
+Local remove is separate from cancel/delete. It only clears WDC shipment data from the WooCommerce order and never calls the CDEK API. `ACCEPTED / Принят` and `CREATED / Создан` are protected from local removal; for unknown, request-only or pending registration states the UI keeps removal hidden until the manager refreshes status.
 
 Toast notifications use the same admin mechanism as Russian Post for accepted registration, successful registration, registration errors, timeout and validation errors.
 

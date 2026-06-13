@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.48.1.
+Current plugin version: 0.48.2.
+
+Version 0.48.2 finishes the CDEK shipment metabox controls needed before real order creation tests. The existing `Отправления` block can manually attach a CDEK shipment by `cdek_number`, refresh it through the existing status button, cancel/delete it in CDEK only while the CDEK order status is `CREATED`, and remove only local WooCommerce shipment data for statuses other than protected `ACCEPTED` and `CREATED`. Carrier labels, button text and toast fallbacks now come from the metabox presentation config.
 
 Version 0.48.1 fixes pre-live-test issues in CDEK order creation without adding new features. AJAX creation now returns the status payload for the carrier that was actually created, `requests[0].state=INVALID` from `POST /v2/orders` is treated as a failed creation and is not saved as `registration_pending`, CDEK request/response snapshots and logs keep only sanitized technical shipment data, and the order metabox status block no longer shows the Russian Post label for CDEK.
 

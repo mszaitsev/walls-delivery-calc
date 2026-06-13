@@ -342,6 +342,7 @@
 
   function renderShipmentStatus(box, status) {
     if (!box || !status) return;
+    applyPresentation(box, status.presentation || null);
     const fields = {
       '[data-wdc-shipment-summary-status]': status.shipment_status_label || status.universal_status_label || 'создано',
       '[data-wdc-status-carrier]': status.carrier_status_title || '-',
@@ -354,8 +355,10 @@
       if (element) element.textContent = fields[selector];
     });
     updateShipmentButtons(box, {
-      hasTracking: !!status.barcode,
-      canCancel: !!status.can_cancel
+      hasShipment: status.has_shipment !== undefined ? !!status.has_shipment : !!status.barcode,
+      canCancel: !!status.can_cancel,
+      canRemove: !!status.can_remove_from_order,
+      canUpdate: status.can_update_status !== undefined ? !!status.can_update_status : !!status.barcode
     });
     setTrackingDisplay(box, status.barcode || '');
     renderShipmentPrice(box, status);
@@ -405,38 +408,99 @@
     element.style.display = visible ? '' : 'none';
   }
 
+  function presentationKey(key) {
+    return String(key || '').replace(/_([a-z])/g, function (_match, letter) {
+      return letter.toUpperCase();
+    });
+  }
+
+  function getPresentation(box) {
+    const defaults = {
+      trackingLabel: 'Отслеживание',
+      createButtonLabel: 'Подготовить отправление',
+      manualAttachButtonLabel: 'Внести отслеживание вручную',
+      cancelButtonLabel: 'Отменить отправление',
+      removeButtonLabel: 'Удалить из заказа',
+      updateStatusButtonLabel: 'Обновить статус',
+      manualAttachPlaceholder: 'Номер отслеживания',
+      manualAttachHelp: 'Введите номер отслеживания для поиска и привязки отправления.',
+      createdToast: 'Отправление создано.',
+      updatedToast: 'Статус отправления обновлен.',
+      cancelSuccessToast: 'Отправление отменено.',
+      removeSuccessToast: 'Данные отправления удалены из заказа.',
+      errorFallbackMessage: 'Не удалось получить статус отправления.',
+      pollingTimeoutMessage: 'Автоматическая проверка остановлена через 10 минут. Обновите статус вручную позже.',
+      registrationErrorToast: 'Регистрация завершилась ошибкой.',
+      registrationSuccessToast: 'Регистрация завершена успешно.',
+      autoPollRegistration: '0'
+    };
+    if (!box || !box.dataset) return defaults;
+    return Object.keys(defaults).reduce(function (result, key) {
+      result[key] = box.dataset[key] || defaults[key];
+      return result;
+    }, {});
+  }
+
+  function applyPresentation(box, presentation) {
+    if (!box || !presentation) return;
+    Object.keys(presentation).forEach(function (key) {
+      box.dataset[presentationKey(key)] = presentation[key];
+    });
+    applyPresentationLabels(box);
+  }
+
+  function applyPresentationLabels(box) {
+    if (!box) return;
+    const text = getPresentation(box);
+    const pairs = [
+      ['[data-wdc-tracking-label]', text.trackingLabel],
+      ['[data-wdc-open-shipment-modal]', text.createButtonLabel],
+      ['[data-wdc-open-manual-tracking]', text.manualAttachButtonLabel],
+      ['[data-wdc-cancel-shipment]', text.cancelButtonLabel],
+      ['[data-wdc-remove-shipment-from-order]', text.removeButtonLabel],
+      ['[data-wdc-update-shipment-status]', text.updateStatusButtonLabel],
+      ['[data-wdc-manual-attach-label]', text.manualAttachPlaceholder],
+      ['[data-wdc-manual-attach-help]', text.manualAttachHelp]
+    ];
+    pairs.forEach(function (pair) {
+      const element = box.querySelector(pair[0]);
+      if (element) element.textContent = pair[1];
+    });
+    const input = box.querySelector('[data-wdc-manual-tracking-input]');
+    if (input) input.placeholder = text.manualAttachPlaceholder;
+  }
+
   function updateShipmentButtons(box, state) {
     if (!box) return;
-    const hasTracking = !!(state && state.hasTracking);
+    const hasShipment = !!(state && (state.hasShipment || state.hasTracking));
     const canCancel = !!(state && state.canCancel);
+    const canRemove = !!(state && state.canRemove);
+    const canUpdate = state && state.canUpdate !== undefined ? !!state.canUpdate : hasShipment;
     const openButton = box.querySelector('[data-wdc-open-shipment-modal]');
     const updateButton = box.querySelector('[data-wdc-update-shipment-status]');
     const manualButton = box.querySelector('[data-wdc-open-manual-tracking]');
     const cancelButton = box.querySelector('[data-wdc-cancel-shipment]');
     const removeButton = box.querySelector('[data-wdc-remove-shipment-from-order]');
+    if (box.dataset) box.dataset.hasShipment = hasShipment ? '1' : '0';
     if (openButton) {
-      setVisible(openButton, !(hasTracking || isCdek));
-      openButton.hidden = hasTracking || isCdek;
-      openButton.disabled = hasTracking || isCdek;
+      setVisible(openButton, !hasShipment);
+      openButton.disabled = hasShipment;
     }
     if (updateButton) {
-      setVisible(updateButton, hasTracking || isCdek);
-      updateButton.hidden = !(hasTracking || isCdek);
-      updateButton.disabled = false;
+      setVisible(updateButton, canUpdate);
+      updateButton.disabled = !canUpdate;
     }
     if (manualButton) {
-      setVisible(manualButton, !hasTracking);
-      manualButton.hidden = hasTracking;
-      manualButton.disabled = hasTracking;
+      setVisible(manualButton, !hasShipment);
+      manualButton.disabled = hasShipment;
     }
     if (cancelButton) {
       setVisible(cancelButton, canCancel);
       cancelButton.disabled = !canCancel;
     }
     if (removeButton) {
-      setVisible(removeButton, hasTracking && !canCancel);
-      removeButton.hidden = !hasTracking || canCancel;
-      removeButton.disabled = !hasTracking || canCancel;
+      setVisible(removeButton, canRemove);
+      removeButton.disabled = !canRemove;
     }
   }
 
@@ -458,7 +522,7 @@
     renderShipmentPrice(box, {});
     const updatedRow = box.querySelector('[data-wdc-updated-row]');
     if (updatedRow) updatedRow.hidden = true;
-    updateShipmentButtons(box, { hasTracking: false, canCancel: false });
+    updateShipmentButtons(box, { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false });
     const manualForm = box.querySelector('[data-wdc-manual-tracking-form]');
     if (manualForm) manualForm.hidden = true;
   }
@@ -509,15 +573,15 @@
       .then((response) => response.json())
       .then((payload) => {
         if (!payload || !payload.success) {
-          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось получить статус Почты России.');
+          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : getPresentation(box).errorFallbackMessage);
         }
         renderShipmentStatus(box, payload.data.status || {});
         if (message) {
           message.dataset.status = 'success';
-          message.textContent = payload.data.message || 'Статус отправления обновлен.';
+          message.textContent = payload.data.message || getPresentation(box).updatedToast;
         }
         if (settings.auto) {
-          showShipmentToast(box, 'Статус отправления обновлен.', 'success', { append: true });
+          showShipmentToast(box, payload.data.message || getPresentation(box).updatedToast, 'success', { append: true });
         }
         return payload;
       })
@@ -525,11 +589,11 @@
         if (message) {
           message.dataset.status = settings.auto ? 'warning' : 'error';
           message.textContent = settings.auto
-            ? 'Отправление создано, но статус пока не обновлен: ' + error.message
+            ? text.createdToast + ' Статус пока не обновлен: ' + error.message
             : error.message;
         }
         if (settings.auto) {
-          showShipmentToast(box, 'Отправление создано, но статус пока не обновлен: ' + error.message, 'warning', { append: true });
+          showShipmentToast(box, text.createdToast + ' Статус пока не обновлен: ' + error.message, 'warning', { append: true });
           return null;
         }
         throw error;
@@ -552,22 +616,22 @@
           const state = String(status.carrier_operation_index || '').toUpperCase();
           const code = String(status.carrier_operation_address || '').toUpperCase();
           if (state === 'INVALID') {
-            showShipmentToast(box, 'Регистрация СДЭК завершилась ошибкой.', 'error', { append: true });
+          showShipmentToast(box, getPresentation(box).registrationErrorToast, 'error', { append: true });
             return;
           }
           if (code === 'CREATED' || data.terminal) {
-            showShipmentToast(box, 'Регистрация СДЭК завершена успешно.', 'success', { append: true });
+            showShipmentToast(box, getPresentation(box).registrationSuccessToast, 'success', { append: true });
             return;
           }
           if (attempts >= maxAttempts) {
-            showShipmentToast(box, 'СДЭК еще не завершил регистрацию заказа. Автоматическая проверка остановлена через 10 минут. Обновите статус вручную позже.', 'warning', { append: true });
+            showShipmentToast(box, getPresentation(box).pollingTimeoutMessage, 'warning', { append: true });
             return;
           }
           window.setTimeout(tick, 15000);
         })
         .catch(() => {
           if (attempts >= maxAttempts) {
-            showShipmentToast(box, 'СДЭК еще не завершил регистрацию заказа. Автоматическая проверка остановлена через 10 минут. Обновите статус вручную позже.', 'warning', { append: true });
+            showShipmentToast(box, getPresentation(box).pollingTimeoutMessage, 'warning', { append: true });
             return;
           }
           window.setTimeout(tick, 15000);
@@ -595,7 +659,7 @@
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось отменить отправление.');
         }
         resetShipmentUi(box);
-        showShipmentToast(box, payload.data.message || 'Отправление отменено.', 'success');
+        showShipmentToast(box, payload.data.message || getPresentation(box).cancelSuccessToast, 'success');
         return payload;
       })
       .catch((error) => {
@@ -624,7 +688,7 @@
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось удалить данные отправления.');
         }
         resetShipmentUi(box);
-        showShipmentToast(box, payload.data.message || 'Данные отправления удалены из заказа.', 'success');
+        showShipmentToast(box, payload.data.message || getPresentation(box).removeSuccessToast, 'success');
         return payload;
       })
       .catch((error) => {
@@ -661,8 +725,10 @@
         renderShipmentTechnicalInfo(box, payload.data || {});
         setTrackingDisplay(box, payload.data.tracking_number || payload.data.status && payload.data.status.barcode || '');
         updateShipmentButtons(box, {
-          hasTracking: !!(payload.data.tracking_number || payload.data.status && payload.data.status.barcode),
-          canCancel: !!(payload.data.status && payload.data.status.can_cancel)
+          hasShipment: payload.data.status && payload.data.status.has_shipment !== undefined ? !!payload.data.status.has_shipment : !!(payload.data.tracking_number || payload.data.status && payload.data.status.barcode),
+          canCancel: !!(payload.data.status && payload.data.status.can_cancel),
+          canRemove: !!(payload.data.status && payload.data.status.can_remove_from_order),
+          canUpdate: payload.data.status && payload.data.status.can_update_status !== undefined ? !!payload.data.status.can_update_status : true
         });
         showShipmentToast(box, payload.data.warning || payload.data.message || 'Номер отслеживания сохранен.', payload.data.warning ? 'warning' : 'success');
         return payload;
@@ -1055,7 +1121,7 @@
           const snapshot = payload.data.normalized_address || {};
           if (snapshotInput) snapshotInput.value = JSON.stringify(snapshot);
           if (display) display.value = snapshot.display || '';
-          if (status) status.textContent = snapshot.success ? 'Адрес обработан Почтой России.' : 'Адрес не подтвержден Почтой России, создание отправления заблокировано.';
+          if (status) status.textContent = snapshot.success ? 'Адрес обработан.' : 'Адрес не подтвержден, создание отправления заблокировано.';
           updateCreateAvailability(form);
           requestPreview(form);
         })
@@ -1161,14 +1227,17 @@
           if (updateButton) {
             updateButton.disabled = false;
           }
+          const text = getPresentation(box);
+          const statusPayload = payload.data.status || {};
           updateShipmentButtons(box, {
-            hasTracking: !!(payload.data.tracking_number || payload.data.status && payload.data.status.barcode),
-            canCancel: !!(payload.data.status && payload.data.status.can_cancel)
+            hasShipment: !!(statusPayload.has_shipment || payload.data.tracking_number || statusPayload.barcode || statusPayload.cdek_number),
+            canCancel: !!statusPayload.can_cancel,
+            canRemove: !!statusPayload.can_remove_from_order,
+            canUpdate: statusPayload.can_update_status !== undefined ? !!statusPayload.can_update_status : true
           });
-          showShipmentToast(box, payload.data.message || 'Отправление создано.', 'success');
+          showShipmentToast(box, payload.data.message || text.createdToast, 'success');
           if (updateButton && !updateButton.disabled) {
-            const carrier = updateButton.dataset ? updateButton.dataset.shipmentKey || '' : '';
-            if (carrier === 'cdek') {
+            if (text.autoPollRegistration === '1') {
               startCdekPolling(updateButton);
             } else {
               requestShipmentStatus(updateButton, { auto: true });
@@ -1259,5 +1328,3 @@
     updateCdekPlaceOptions(form);
   });
 })();
-
-    const isCdek = updateButton && updateButton.dataset && updateButton.dataset.shipmentKey === 'cdek';
