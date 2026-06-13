@@ -355,10 +355,10 @@
       if (element) element.textContent = fields[selector];
     });
     updateShipmentButtons(box, {
-      hasShipment: status.has_shipment !== undefined ? !!status.has_shipment : !!status.barcode,
+      hasShipment: !!status.has_shipment,
       canCancel: !!status.can_cancel,
       canRemove: !!status.can_remove_from_order,
-      canUpdate: status.can_update_status !== undefined ? !!status.can_update_status : !!status.barcode
+      canUpdate: !!status.can_update_status
     });
     setTrackingDisplay(box, status.barcode || '');
     renderShipmentPrice(box, status);
@@ -472,10 +472,10 @@
 
   function updateShipmentButtons(box, state) {
     if (!box) return;
-    const hasShipment = !!(state && (state.hasShipment || state.hasTracking));
+    const hasShipment = !!(state && state.hasShipment);
     const canCancel = !!(state && state.canCancel);
     const canRemove = !!(state && state.canRemove);
-    const canUpdate = state && state.canUpdate !== undefined ? !!state.canUpdate : hasShipment;
+    const canUpdate = !!(state && state.canUpdate);
     const openButton = box.querySelector('[data-wdc-open-shipment-modal]');
     const updateButton = box.querySelector('[data-wdc-update-shipment-status]');
     const manualButton = box.querySelector('[data-wdc-open-manual-tracking]');
@@ -554,6 +554,7 @@
   function requestShipmentStatus(button, options) {
     const settings = Object.assign({ auto: false }, options || {});
     const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
+    const text = getPresentation(box);
     const message = box && box.querySelector('[data-wdc-shipment-status-message]');
     const data = new FormData();
     data.append('action', window.wdcShipmentsAdmin.updateStatusAction);
@@ -573,15 +574,15 @@
       .then((response) => response.json())
       .then((payload) => {
         if (!payload || !payload.success) {
-          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : getPresentation(box).errorFallbackMessage);
+          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : text.errorFallbackMessage);
         }
         renderShipmentStatus(box, payload.data.status || {});
         if (message) {
           message.dataset.status = 'success';
-          message.textContent = payload.data.message || getPresentation(box).updatedToast;
+          message.textContent = payload.data.message || text.updatedToast;
         }
         if (settings.auto) {
-          showShipmentToast(box, payload.data.message || getPresentation(box).updatedToast, 'success', { append: true });
+          showShipmentToast(box, payload.data.message || text.updatedToast, 'success', { append: true });
         }
         return payload;
       })
@@ -724,11 +725,12 @@
         renderShipmentStatus(box, payload.data.status || {});
         renderShipmentTechnicalInfo(box, payload.data || {});
         setTrackingDisplay(box, payload.data.tracking_number || payload.data.status && payload.data.status.barcode || '');
+        const statusPayload = payload.data.status || {};
         updateShipmentButtons(box, {
-          hasShipment: payload.data.status && payload.data.status.has_shipment !== undefined ? !!payload.data.status.has_shipment : !!(payload.data.tracking_number || payload.data.status && payload.data.status.barcode),
-          canCancel: !!(payload.data.status && payload.data.status.can_cancel),
-          canRemove: !!(payload.data.status && payload.data.status.can_remove_from_order),
-          canUpdate: payload.data.status && payload.data.status.can_update_status !== undefined ? !!payload.data.status.can_update_status : true
+          hasShipment: !!statusPayload.has_shipment,
+          canCancel: !!statusPayload.can_cancel,
+          canRemove: !!statusPayload.can_remove_from_order,
+          canUpdate: !!statusPayload.can_update_status
         });
         showShipmentToast(box, payload.data.warning || payload.data.message || 'Номер отслеживания сохранен.', payload.data.warning ? 'warning' : 'success');
         return payload;
@@ -1230,10 +1232,10 @@
           const text = getPresentation(box);
           const statusPayload = payload.data.status || {};
           updateShipmentButtons(box, {
-            hasShipment: !!(statusPayload.has_shipment || payload.data.tracking_number || statusPayload.barcode || statusPayload.cdek_number),
+            hasShipment: !!statusPayload.has_shipment,
             canCancel: !!statusPayload.can_cancel,
             canRemove: !!statusPayload.can_remove_from_order,
-            canUpdate: statusPayload.can_update_status !== undefined ? !!statusPayload.can_update_status : true
+            canUpdate: !!statusPayload.can_update_status
           });
           showShipmentToast(box, payload.data.message || text.createdToast, 'success');
           if (updateButton && !updateButton.disabled) {
