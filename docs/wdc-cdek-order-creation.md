@@ -1,6 +1,8 @@
 # WDC CDEK Order Creation
 
-Version: 0.48.5.
+Version: 0.48.6.
+
+0.48.6 update: internal CDEK registration status now distinguishes documented order statuses from request states more precisely. `CREATED` is the only CDEK order status that means the order has been created and validated. `ACCEPTED` from `entity.statuses[]` is saved and displayed as the real CDEK status, but internally remains `registration_pending` and polling continues. `INVALID` from `entity.statuses[]` is a failed/incorrect CDEK order, `REMOVED` is stored as `removed`, and other movement/operation statuses are treated as active registered shipments without introducing a full universal CDEK-to-store status mapping yet.
 
 0.48.5 update: CDEK request state is used only to track registration processing. `INVALID` still fails registration, and `ACCEPTED`/`SUCCESSFUL` without real `entity.statuses[]` keeps the shipment in `registration_pending`. `SUCCESSFUL` no longer marks a shipment as registered by itself. Internal `registered` state is set only when an actual CDEK order status exists in `entity.statuses[]`; `CREATED` and later statuses such as `READY_FOR_SHIPMENT_IN_SENDER_CITY` are all read from that order status list and displayed from the latest active status.
 

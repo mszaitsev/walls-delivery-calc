@@ -245,18 +245,43 @@ $http->order_responses[] = array( 'entity' => array( 'uuid' => 'successful-empty
 $successful_without_status = $status->update( $successful_without_status_order );
 cdek_order_assert( 'registration_pending' === (string) $repository->find_by_carrier( $successful_without_status_order, CdekSettings::CARRIER_KEY )['status'], 'CDEK request_state SUCCESSFUL without order statuses must remain registration_pending.' );
 cdek_order_assert( 'SUCCESSFUL' === (string) ( $successful_without_status['status']['carrier_status_title'] ?? '' ), 'CDEK request state may be displayed only when no order status exists.' );
+cdek_order_assert( empty( $successful_without_status['terminal'] ), 'CDEK SUCCESSFUL without order statuses must keep polling active.' );
+
+$successful_accepted_order = new CdekOrderFakeOrder( 121 );
+$repository->save_for_carrier( $successful_accepted_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'successful-accepted-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-121' ) );
+$http->order_responses[] = array( 'entity' => array( 'uuid' => 'successful-accepted-uuid', 'statuses' => array( array( 'code' => 'ACCEPTED', 'name' => 'Принят', 'date_time' => '2026-06-13T05:48:42+0000' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
+$successful_accepted = $status->update( $successful_accepted_order );
+$successful_accepted_shipment = $repository->find_by_carrier( $successful_accepted_order, CdekSettings::CARRIER_KEY );
+cdek_order_assert( 'registration_pending' === (string) ( $successful_accepted_shipment['status'] ?? '' ) && 'регистрация' === (string) ( $successful_accepted['status']['shipment_status_label'] ?? '' ), 'CDEK order status ACCEPTED must remain registration_pending internally.' );
+cdek_order_assert( empty( $successful_accepted['terminal'] ) && empty( $successful_accepted['status']['can_remove_from_order'] ), 'CDEK order status ACCEPTED must keep polling active and forbid local remove.' );
 
 $successful_created_order = new CdekOrderFakeOrder( 116 );
 $repository->save_for_carrier( $successful_created_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'successful-created-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-116' ) );
 $http->order_responses[] = array( 'entity' => array( 'uuid' => 'successful-created-uuid', 'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан', 'date_time' => '2026-06-13T05:48:44+0000' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
 $successful_created = $status->update( $successful_created_order );
 cdek_order_assert( 'registered' === (string) $repository->find_by_carrier( $successful_created_order, CdekSettings::CARRIER_KEY )['status'] && 'CREATED' === (string) ( $successful_created['status']['order_status_code'] ?? '' ), 'CDEK request_state SUCCESSFUL with CREATED order status must become registered.' );
+cdek_order_assert( ! empty( $successful_created['terminal'] ) && ! empty( $successful_created['status']['can_cancel'] ) && empty( $successful_created['status']['can_remove_from_order'] ), 'CDEK order status CREATED must be terminal, cancellable and protected from local remove.' );
+
+$successful_invalid_order = new CdekOrderFakeOrder( 122 );
+$repository->save_for_carrier( $successful_invalid_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'successful-invalid-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-122' ) );
+$http->order_responses[] = array( 'entity' => array( 'uuid' => 'successful-invalid-uuid', 'statuses' => array( array( 'code' => 'INVALID', 'name' => 'Некорректный заказ', 'date_time' => '2026-06-13T05:48:45+0000' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
+$successful_invalid = $status->update( $successful_invalid_order );
+cdek_order_assert( 'failed' === (string) $repository->find_by_carrier( $successful_invalid_order, CdekSettings::CARRIER_KEY )['status'] && ! empty( $successful_invalid['terminal'] ), 'CDEK order status INVALID must become failed and terminal.' );
+cdek_order_assert( ! empty( $successful_invalid['status']['can_remove_from_order'] ) && 'Заказ СДЭК некорректен.' === (string) ( $successful_invalid['message'] ?? '' ), 'CDEK order status INVALID must allow local remove and use invalid-order message.' );
+
+$successful_removed_order = new CdekOrderFakeOrder( 123 );
+$repository->save_for_carrier( $successful_removed_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'successful-removed-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-123' ) );
+$http->order_responses[] = array( 'entity' => array( 'uuid' => 'successful-removed-uuid', 'statuses' => array( array( 'code' => 'REMOVED', 'name' => 'Удален', 'date_time' => '2026-06-13T05:48:46+0000' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
+$successful_removed = $status->update( $successful_removed_order );
+cdek_order_assert( 'removed' === (string) $repository->find_by_carrier( $successful_removed_order, CdekSettings::CARRIER_KEY )['status'] && ! empty( $successful_removed['terminal'] ), 'CDEK order status REMOVED must become removed and terminal.' );
+cdek_order_assert( ! empty( $successful_removed['status']['can_remove_from_order'] ) && 'удалено' === (string) ( $successful_removed['status']['shipment_status_label'] ?? '' ), 'CDEK order status REMOVED must allow local remove and render removed internal label.' );
 
 $successful_ready_order = new CdekOrderFakeOrder( 117 );
 $repository->save_for_carrier( $successful_ready_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'successful-ready-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-117' ) );
 $http->order_responses[] = array( 'entity' => array( 'uuid' => 'successful-ready-uuid', 'statuses' => array( array( 'code' => 'READY_FOR_SHIPMENT_IN_SENDER_CITY', 'name' => 'Готов к отправке', 'date_time' => '2026-06-13T10:04:41+0000' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
 $successful_ready = $status->update( $successful_ready_order );
 cdek_order_assert( 'registered' === (string) $repository->find_by_carrier( $successful_ready_order, CdekSettings::CARRIER_KEY )['status'] && 'READY_FOR_SHIPMENT_IN_SENDER_CITY' === (string) ( $successful_ready['status']['order_status_code'] ?? '' ), 'CDEK later real order status must keep shipment registered and display order status.' );
+cdek_order_assert( ! empty( $successful_ready['terminal'] ) && ! empty( $successful_ready['status']['can_remove_from_order'] ) && empty( $successful_ready['status']['can_cancel'] ), 'CDEK operational statuses must be terminal registered shipments, removable locally and not cancellable in CDEK.' );
 
 $accepted_without_status_order = new CdekOrderFakeOrder( 118 );
 $repository->save_for_carrier( $accepted_without_status_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'accepted-empty-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-118' ) );

@@ -42,18 +42,8 @@ final class CdekOrderStatusService {
 		$order_status = $this->latest_order_status( $entity );
 		$request_state = strtoupper( (string) ( $request_row['state'] ?? '' ) );
 		$status_code = strtoupper( (string) ( $order_status['code'] ?? '' ) );
-		$status = (string) ( $shipment['status'] ?? 'registration_pending' );
-		$message = 'Статус регистрации СДЭК обновлен.';
-		if ( 'INVALID' === $request_state ) {
-			$status = 'failed';
-			$message = $this->errors_message( $request_row ) ?: 'Регистрация СДЭК завершилась ошибкой.';
-		} elseif ( '' !== $status_code ) {
-			$status = 'registered';
-			$message = 'Регистрация СДЭК завершена успешно.';
-		} else {
-			$status = 'registration_pending';
-			$message = 'СДЭК еще обрабатывает регистрацию заказа.';
-		}
+		$status = $this->internal_status_from_cdek_order_status( $status_code, $request_state );
+		$message = $this->status_update_message( $status, $status_code, $request_state, $request_row );
 
 		$now = $this->now();
 		$updated = array_merge(
@@ -82,7 +72,7 @@ final class CdekOrderStatusService {
 			'success' => true,
 			'message' => $message,
 			'status' => $this->status_payload( $updated, $order ),
-			'terminal' => in_array( $status, array( 'registered', 'created', 'failed' ), true ),
+			'terminal' => in_array( $status, array( 'registered', 'created', 'failed', 'removed' ), true ),
 		);
 	}
 
@@ -236,8 +226,41 @@ final class CdekOrderStatusService {
 			'created' => 'создано',
 			'registered' => 'зарегистрировано',
 			'failed' => 'ошибка',
+			'removed' => 'удалено',
 			'', 'draft' => 'не создано',
 			default => 'не определено',
+		};
+	}
+
+	private function internal_status_from_cdek_order_status( string $order_status_code, string $request_state ): string {
+		$order_status_code = strtoupper( trim( $order_status_code ) );
+		$request_state = strtoupper( trim( $request_state ) );
+		if ( '' !== $order_status_code ) {
+			return match ( $order_status_code ) {
+				'ACCEPTED' => 'registration_pending',
+				'CREATED' => 'registered',
+				'INVALID' => 'failed',
+				'REMOVED' => 'removed',
+				default => 'registered',
+			};
+		}
+
+		return 'INVALID' === $request_state ? 'failed' : 'registration_pending';
+	}
+
+	/**
+	 * @param array<string,mixed> $request_row
+	 */
+	private function status_update_message( string $status, string $order_status_code, string $request_state, array $request_row ): string {
+		$order_status_code = strtoupper( trim( $order_status_code ) );
+		$request_state = strtoupper( trim( $request_state ) );
+
+		return match ( $status ) {
+			'registration_pending' => 'СДЭК еще обрабатывает регистрацию заказа.',
+			'registered' => 'CREATED' === $order_status_code ? 'Отправление СДЭК создано.' : 'Статус СДЭК обновлен.',
+			'failed' => 'INVALID' === $order_status_code ? 'Заказ СДЭК некорректен.' : ( 'INVALID' === $request_state ? ( $this->errors_message( $request_row ) ?: 'Регистрация СДЭК завершилась ошибкой.' ) : 'Регистрация СДЭК завершилась ошибкой.' ),
+			'removed' => 'Заказ СДЭК удален.',
+			default => 'Статус СДЭК обновлен.',
 		};
 	}
 
@@ -274,12 +297,7 @@ final class CdekOrderStatusService {
 		$request_state = strtoupper( (string) ( $request_row['state'] ?? '' ) );
 		$status_code = strtoupper( (string) ( $order_status['code'] ?? '' ) );
 		$cdek_number = (string) ( $entity['cdek_number'] ?? $base['cdek_number'] ?? '' );
-		$status = 'registration_pending';
-		if ( 'INVALID' === $request_state ) {
-			$status = 'failed';
-		} elseif ( '' !== $status_code ) {
-			$status = 'registered';
-		}
+		$status = $this->internal_status_from_cdek_order_status( $status_code, $request_state );
 		$now = $this->now();
 
 		return array_merge(
