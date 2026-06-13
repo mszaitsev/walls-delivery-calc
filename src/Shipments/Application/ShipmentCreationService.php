@@ -93,6 +93,10 @@ final class ShipmentCreationService {
 		$raw = $result->raw_reference;
 		$backlog_order_id = trim( $result->backlog_order_id );
 		$is_cdek = CdekSettings::CARRIER_KEY === $request->carrier_key;
+		$request_snapshot = $is_cdek && is_array( $raw['request'] ?? null )
+			? array( 'method' => 'POST', 'path' => '/v2/orders', 'body' => $raw['request'], 'errors' => array() )
+			: $preview;
+		$response_snapshot = $is_cdek && is_array( $raw['response'] ?? null ) ? $raw : $raw;
 		$shipment = array(
 			'carrier_key' => $request->carrier_key,
 			'service_key' => (string) ( $request->meta['service_key'] ?? $request->rate_id ),
@@ -100,8 +104,8 @@ final class ShipmentCreationService {
 			'service_title' => (string) ( $request->meta['service_title'] ?? '' ),
 			'delivery_type' => $request->delivery_type,
 			'places' => array_map( static fn ( $place ): array => $place->to_array(), $request->places ),
-			'request_snapshot' => $preview,
-			'response_snapshot' => $raw,
+			'request_snapshot' => $request_snapshot,
+			'response_snapshot' => $response_snapshot,
 			'barcode' => $result->tracking_number,
 			'tracking_number' => $result->tracking_number,
 			'external_id' => $result->external_id,

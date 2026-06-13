@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.48.0.
+Current plugin version: 0.48.1.
+
+Version 0.48.1 fixes pre-live-test issues in CDEK order creation without adding new features. AJAX creation now returns the status payload for the carrier that was actually created, `requests[0].state=INVALID` from `POST /v2/orders` is treated as a failed creation and is not saved as `registration_pending`, CDEK request/response snapshots and logs keep only sanitized technical shipment data, and the order metabox status block no longer shows the Russian Post label for CDEK.
 
 Version 0.48.0 starts CDEK order creation from the existing WooCommerce order metabox `Отправления`. The metabox is now carrier-aware, CDEK uses the same shipment service/adapters architecture as Russian Post, and the modal has `Основное` and universal `Грузоместа` tabs. CDEK creation sends `POST /v2/orders` as an asynchronous registration request, saves `registration_pending`, then checks the final state through `GET /v2/orders` or `GET /v2/orders/{uuid}` every 15 seconds for up to 10 minutes. The payload uses manager-entered packages/items, `print=BARCODE`, prepaid `item.payment.value=0`, unit cost after discount, and does not send `services`/`INSURANCE`, `additional_order_types`, `delivery_recipient_cost` or checkout packaging weight. See `docs/wdc-cdek-order-creation.md`.
 

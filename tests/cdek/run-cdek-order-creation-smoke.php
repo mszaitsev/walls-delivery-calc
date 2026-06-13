@@ -12,6 +12,9 @@ use WallsShop\WDC\Carriers\Cdek\Api\CdekHttpClientInterface;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekOAuthTokenService;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekApiClient;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticApiClient;
+use WallsShop\WDC\Carriers\RussianPost\Tracking\RussianPostTrackingApiClient;
+use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\PackageItem;
@@ -21,10 +24,15 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
+use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
+use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
+use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\Cdek\CdekCreateRequestBuilder;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
 use WallsShop\WDC\Shipments\Cdek\CdekShipmentAdapter;
+use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 function cdek_order_assert( bool $condition, string $message ): void {
@@ -46,10 +54,34 @@ function sanitize_key( mixed $key ): string { return preg_replace( '/[^a-z0-9_\-
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
 function sanitize_email( mixed $value ): string { return filter_var( trim( (string) $value ), FILTER_VALIDATE_EMAIL ) ? trim( (string) $value ) : ''; }
 function wp_unslash( mixed $value ): mixed { return $value; }
+function __( string $text, string $domain = '' ): string { return $text; }
+function esc_html__( string $text, string $domain = '' ): string { return $text; }
+function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
+function current_user_can( string $capability ): bool { return true; }
+function check_ajax_referer( string $action, string|bool $query_arg = false, bool $stop = true ): bool { return true; }
+function wc_get_order( int $order_id ): ?object { return $GLOBALS['wdc_cdek_order_ajax_order'] ?? null; }
+function wp_send_json_success( mixed $data = null, int $status_code = 200, int $flags = 0 ): never { throw new CdekOrderAjaxResponse( true, $data, $status_code ); }
+function wp_send_json_error( mixed $data = null, int $status_code = 400, int $flags = 0 ): never { throw new CdekOrderAjaxResponse( false, $data, $status_code ); }
+
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {}
+}
+
+final class CdekOrderAjaxResponse extends RuntimeException {
+	public function __construct(
+		public bool $success,
+		public mixed $data,
+		public int $status_code
+	) {
+		parent::__construct( 'ajax response' );
+	}
+}
 
 final class CdekOrderFakeHttp implements CdekHttpClientInterface {
 	/** @var array<int,array{method:string,url:string,args:array<string,mixed>}> */
 	public array $requests = array();
+	/** @var array<int,array<string,mixed>> */
+	public array $post_responses = array();
 	/** @var array<int,array<string,mixed>> */
 	public array $order_responses = array();
 
@@ -59,7 +91,11 @@ final class CdekOrderFakeHttp implements CdekHttpClientInterface {
 			return new CdekApiResponse( 200, json_encode( array( 'access_token' => 'token', 'expires_in' => 3600 ) ) ?: '{}' );
 		}
 		if ( 'POST' === $method && str_contains( $url, '/v2/orders' ) ) {
-			return new CdekApiResponse( 202, json_encode( array( 'entity' => array( 'uuid' => 'order-uuid-1' ), 'requests' => array( array( 'request_uuid' => 'request-uuid-1', 'state' => 'ACCEPTED' ) ) ) ) ?: '{}' );
+			$response = array_shift( $this->post_responses ) ?: array(
+				'entity' => array( 'uuid' => 'order-uuid-1', 'recipient' => array( 'name' => 'Иван Иванов', 'email' => 'buyer@example.com' ) ),
+				'requests' => array( array( 'request_uuid' => 'request-uuid-1', 'state' => 'ACCEPTED' ) ),
+			);
+			return new CdekApiResponse( 202, json_encode( $response ) ?: '{}' );
 		}
 		$response = array_shift( $this->order_responses ) ?: array( 'entity' => array( 'uuid' => 'order-uuid-1', 'cdek_number' => '100500', 'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
 		return new CdekApiResponse( 200, json_encode( $response ) ?: '{}' );
@@ -75,6 +111,19 @@ final class CdekOrderFakeOrder {
 	public function update_meta_data( string $key, mixed $value ): void { $this->meta[ $key ] = $value; }
 	public function save(): void {}
 	public function add_order_note( string $message ): void { $this->notes[] = $message; }
+	public function get_order_number(): string { return 'WC-' . $this->id; }
+	public function get_shipping_first_name(): string { return 'Иван'; }
+	public function get_shipping_last_name(): string { return 'Иванов'; }
+	public function get_billing_first_name(): string { return 'Иван'; }
+	public function get_billing_last_name(): string { return 'Иванов'; }
+	public function get_billing_phone(): string { return '9131234567'; }
+	public function get_billing_email(): string { return 'buyer@example.com'; }
+	public function get_shipping_postcode(): string { return '650000'; }
+	public function get_shipping_state(): string { return 'Кемеровская область'; }
+	public function get_shipping_city(): string { return 'Кемерово'; }
+	public function get_shipping_address_1(): string { return 'Советский 10'; }
+	public function get_shipping_address_2(): string { return ''; }
+	public function get_items(): array { return array(); }
 }
 
 function cdek_order_request( string $delivery_type, int $mode, array $overrides = array() ): ShipmentCreateRequest {
@@ -159,8 +208,22 @@ $result = $creation->create( $order, cdek_order_request( DeliveryType::PICKUP, 4
 cdek_order_assert( $result->success, 'CDEK POST /v2/orders must be accepted.' );
 $stored = $repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY );
 cdek_order_assert( 'registration_pending' === (string) $stored['status'] && 'order-uuid-1' === (string) $stored['external_id'], 'Accepted CDEK order must be stored as registration_pending with UUID.' );
+$request_snapshot_json = json_encode( $stored['request_snapshot'], JSON_UNESCAPED_UNICODE ) ?: '';
+$response_snapshot_json = json_encode( $stored['response_snapshot'], JSON_UNESCAPED_UNICODE ) ?: '';
+cdek_order_assert( ! str_contains( $request_snapshot_json, 'Иван Иванов' ) && ! str_contains( $request_snapshot_json, '+79131234567' ) && ! str_contains( $request_snapshot_json, 'buyer@example.com' ), 'CDEK request snapshot must redact recipient PII.' );
+cdek_order_assert( ! str_contains( $response_snapshot_json, 'Иван Иванов' ) && ! str_contains( $response_snapshot_json, 'buyer@example.com' ), 'CDEK response snapshot must not keep recipient PII.' );
 $blocked = $creation->create( $order, cdek_order_request( DeliveryType::PICKUP, 4 ) );
 cdek_order_assert( ! $blocked->success && 'shipment_already_created' === $blocked->error_code, 'Repeated CDEK creation must be blocked while pending.' );
+
+$http_post_invalid = new CdekOrderFakeHttp();
+$http_post_invalid->post_responses[] = array( 'entity' => array( 'uuid' => 'invalid-uuid' ), 'requests' => array( array( 'request_uuid' => 'invalid-request-uuid', 'state' => 'INVALID', 'errors' => array( array( 'code' => 'v2_bad', 'message' => 'bad request' ) ) ) ) );
+$invalid_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $http_post_invalid ), $settings, $http_post_invalid );
+$invalid_repository = new OrderShipmentRepository();
+$invalid_creation = new ShipmentCreationService( $invalid_repository, array( new CdekShipmentAdapter( $invalid_client, $builder ) ) );
+$invalid_post_order = new CdekOrderFakeOrder();
+$invalid_post_result = $invalid_creation->create( $invalid_post_order, cdek_order_request( DeliveryType::PICKUP, 4 ) );
+cdek_order_assert( ! $invalid_post_result->success && 'cdek_registration_invalid' === $invalid_post_result->error_code, 'POST /v2/orders INVALID must fail ShipmentCreateResult.' );
+cdek_order_assert( array() === $invalid_repository->find_by_carrier( $invalid_post_order, CdekSettings::CARRIER_KEY ), 'POST /v2/orders INVALID must not be stored as registration_pending.' );
 
 $status = new CdekOrderStatusService( $repository, $client );
 $created = $status->update( $order );
@@ -173,5 +236,54 @@ $invalid = $status->update( $order_invalid );
 cdek_order_assert( $invalid['success'] && 'failed' === (string) $repository->find_by_carrier( $order_invalid, CdekSettings::CARRIER_KEY )['status'], 'GET /v2/orders INVALID must fail shipment.' );
 
 cdek_order_assert( isset( $created['status'], $invalid['status'] ), 'Status AJAX payload data must contain status for toast/UI.' );
+cdek_order_assert( CdekSettings::CARRIER_KEY === (string) $created['status']['carrier_key'], 'CDEK status payload must be carrier-aware.' );
+
+$ajax_http = new CdekOrderFakeHttp();
+$ajax_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $ajax_http ), $settings, $ajax_http );
+$ajax_repository = new OrderShipmentRepository();
+$ajax_creation = new ShipmentCreationService( $ajax_repository, array( new CdekShipmentAdapter( $ajax_client, $builder ) ) );
+$services = new DeliveryServiceRepository( new wpdb() );
+$drafts = new OrderShipmentDraftFactory( $services, new ShipmentServiceSettings() );
+$rp_tracking = ( new ReflectionClass( RussianPostTrackingApiClient::class ) )->newInstanceWithoutConstructor();
+$status_updates = new ShipmentStatusUpdateService( $ajax_repository, $rp_tracking, new RussianPostTrackingStatusMapper() );
+$ajax_status = new CdekOrderStatusService( $ajax_repository, $ajax_client );
+$metabox = new OrderShipmentsMetabox( $ajax_repository, $drafts, $ajax_creation, $services, $status_updates, $ajax_status );
+$ajax_order = new CdekOrderFakeOrder();
+$ajax_order->meta['_wdc_platform_carrier_key'] = CdekSettings::CARRIER_KEY;
+$ajax_order->meta['_wdc_platform_delivery_type'] = DeliveryType::PICKUP;
+$ajax_order->meta['_wdc_delivery_calculation_data'] = array(
+	'carrier_key' => CdekSettings::CARRIER_KEY,
+	'selected_tariff_object' => '136',
+	'selected_tariff_title' => 'Посылка склад-склад',
+	'pickup' => array( 'cdek_code' => 'KEM7', 'point_code' => 'KEM7', 'point_address' => 'Кемерово, ПВЗ', 'point_postcode' => '650000' ),
+	'api' => array( 'response_tariff_sanitized' => array( 'delivery_mode' => 4 ), 'cdek_to_city_code' => 44 ),
+	'package' => array( 'products_weight_g' => 500, 'dimensions_cm' => array( 'length' => 20, 'width' => 15, 'height' => 10 ) ),
+);
+$GLOBALS['wdc_cdek_order_ajax_order'] = $ajax_order;
+$_POST = array(
+	'order_id' => 101,
+	'nonce' => 'ok',
+	'delivery_type' => DeliveryType::PICKUP,
+	'recipient_name' => 'Иван Иванов',
+	'recipient_phone' => '9131234567',
+	'recipient_email' => 'buyer@example.com',
+	'tariff_object' => '136',
+	'places' => array( array( 'weight_g' => 1000, 'length_cm' => 20, 'width_cm' => 15, 'height_cm' => 10 ) ),
+	'cdek_items' => array( array( 'item_key' => '1', 'ordered_quantity' => 1, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-1', 'amount' => 1, 'cost' => 1000, 'weight' => 100 ) ),
+);
+try {
+	$metabox->ajax_create();
+	throw new RuntimeException( 'ajax_create did not send JSON.' );
+} catch ( CdekOrderAjaxResponse $response ) {
+	cdek_order_assert( $response->success, 'ajax_create for CDEK must succeed.' );
+	cdek_order_assert( CdekSettings::CARRIER_KEY === (string) ( $response->data['status']['carrier_key'] ?? '' ), 'ajax_create for CDEK must return CDEK status payload.' );
+}
+
+$render = new ReflectionMethod( OrderShipmentsMetabox::class, 'render_status_block' );
+$render->setAccessible( true );
+ob_start();
+$render->invoke( $metabox, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'carrier_status_title' => 'Регистрация' ) );
+$status_html = ob_get_clean() ?: '';
+cdek_order_assert( str_contains( $status_html, 'Статус СДЭК' ) && ! str_contains( $status_html, 'Статус Почты России' ), 'CDEK status block must use CDEK label.' );
 
 echo "CDEK order creation smoke test passed.\n";

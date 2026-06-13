@@ -392,7 +392,7 @@ final class OrderShipmentsMetabox {
 				'message' => __( 'Отправление создано.', 'walls-delivery-calc' ),
 				'tracking_number' => $result->tracking_number,
 				'backlog_order_id' => $result->backlog_order_id,
-				'status' => $this->status_updates->status_payload( $this->repository->find_by_carrier( $order, RussianPostDomesticSettings::CARRIER_KEY ), $order ),
+				'status' => $this->status_payload_for_carrier( $order, $request->carrier_key ),
 				'preview' => $preview,
 			)
 		);
@@ -657,11 +657,37 @@ final class OrderShipmentsMetabox {
 	private function render_status_block( array $status ): void {
 		?>
 		<div class="wdc-shipment-status" data-wdc-shipment-status-block>
-			<p><strong><?php echo esc_html__( 'Статус Почты России', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-carrier><?php echo esc_html( (string) ( $status['carrier_status_title'] ?? '' ) ?: '-' ); ?></span></p>
+			<p><strong><?php echo esc_html( $this->status_block_label( (string) ( $status['carrier_key'] ?? '' ) ) ); ?>:</strong> <span data-wdc-status-carrier><?php echo esc_html( (string) ( $status['carrier_status_title'] ?? '' ) ?: '-' ); ?></span></p>
 			<p><strong><?php echo esc_html__( 'Последняя операция', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-operation><?php echo esc_html( $this->operation_summary( $status ) ); ?></span></p>
 			<p><strong><?php echo esc_html__( 'Проверено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-checked><?php echo esc_html( (string) ( $status['tracking_checked_at'] ?? '' ) ?: '-' ); ?></span></p>
 		</div>
 		<?php
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function status_payload_for_carrier( object $order, string $carrier_key ): array {
+		$shipment = $this->repository->find_by_carrier( $order, $carrier_key );
+		if ( CdekSettings::CARRIER_KEY === $carrier_key && $this->cdek_status_updates instanceof CdekOrderStatusService ) {
+			return $this->cdek_status_updates->status_payload( $shipment );
+		}
+		if ( RussianPostDomesticSettings::CARRIER_KEY === $carrier_key ) {
+			return $this->status_updates->status_payload( $shipment, $order );
+		}
+
+		return array_merge(
+			array( 'carrier_key' => $carrier_key ),
+			$shipment
+		);
+	}
+
+	private function status_block_label( string $carrier_key ): string {
+		return match ( $carrier_key ) {
+			CdekSettings::CARRIER_KEY => __( 'Статус СДЭК', 'walls-delivery-calc' ),
+			RussianPostDomesticSettings::CARRIER_KEY, '' => __( 'Статус Почты России', 'walls-delivery-calc' ),
+			default => __( 'Статус службы доставки', 'walls-delivery-calc' ),
+		};
 	}
 
 	/**

@@ -1,6 +1,8 @@
 # WDC CDEK Order Creation
 
-Version: 0.48.0.
+Version: 0.48.1.
+
+0.48.1 update: pre-live-test fixes only. `ajax_create()` returns the status payload for the created carrier, CDEK `POST /v2/orders` with `requests[0].state=INVALID` fails with `cdek_registration_invalid` and is not saved as `registration_pending`, logs/snapshots are sanitized to remove recipient PII and full item lists, and the metabox status label is carrier-aware for CDEK.
 
 This stage starts CDEK shipment creation from the existing WooCommerce order metabox `Отправления`. The flow is carrier-aware: Russian Post keeps the existing behavior, while orders saved with `carrier_key=cdek` use the CDEK-specific preview, validation, creation and status polling path.
 

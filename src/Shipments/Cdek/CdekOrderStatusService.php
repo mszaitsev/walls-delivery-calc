@@ -67,7 +67,7 @@ final class CdekOrderStatusService {
 				'cdek_request_state' => $request_state,
 				'cdek_order_status_code' => $status_code,
 				'cdek_order_status_name' => (string) ( $order_status['name'] ?? '' ),
-				'response_snapshot' => $body,
+				'response_snapshot' => $this->sanitize_response_snapshot( $body ),
 				'updated_at' => $now,
 				'tracking_checked_at' => $now,
 			)
@@ -167,6 +167,43 @@ final class CdekOrderStatusService {
 		}
 
 		return implode( "\n", array_filter( $messages ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $body
+	 * @return array<string,mixed>
+	 */
+	private function sanitize_response_snapshot( array $body ): array {
+		$entity = is_array( $body['entity'] ?? null ) ? $body['entity'] : array();
+		$request_row = $this->latest_request( $body );
+		$order_status = $this->latest_order_status( $entity );
+
+		return array(
+			'entity_uuid' => (string) ( $entity['uuid'] ?? '' ),
+			'cdek_number' => (string) ( $entity['cdek_number'] ?? '' ),
+			'request_uuid' => (string) ( $request_row['request_uuid'] ?? '' ),
+			'request_state' => (string) ( $request_row['state'] ?? '' ),
+			'order_status' => (string) ( $order_status['code'] ?? '' ),
+			'errors' => $this->safe_errors( $request_row ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $request_row
+	 * @return array<int,array<string,string>>
+	 */
+	private function safe_errors( array $request_row ): array {
+		$errors = array();
+		foreach ( is_array( $request_row['errors'] ?? null ) ? $request_row['errors'] : array() as $error ) {
+			if ( is_array( $error ) ) {
+				$errors[] = array(
+					'code' => (string) ( $error['code'] ?? '' ),
+					'message' => (string) ( $error['message'] ?? '' ),
+				);
+			}
+		}
+
+		return $errors;
 	}
 
 	/**
