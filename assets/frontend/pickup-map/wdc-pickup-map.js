@@ -656,6 +656,7 @@
 	}
 
 	function pointMatchKeys(point) {
+		var snapshot = point && point.snapshot && typeof point.snapshot === 'object' ? point.snapshot : {};
 		var values = [
 			point && point.id,
 			point && point.point_id,
@@ -664,7 +665,17 @@
 			point && point.delivery_point,
 			point && point.postcode,
 			point && point.postal_code,
-			point && point.point_postcode
+			point && point.point_postcode,
+			point && point.display_code,
+			snapshot.id,
+			snapshot.point_id,
+			snapshot.point_code,
+			snapshot.cdek_code,
+			snapshot.delivery_point,
+			snapshot.postcode,
+			snapshot.postal_code,
+			snapshot.point_postcode,
+			snapshot.display_code
 		];
 		var keys = [];
 		values.forEach(function (value) {
@@ -693,10 +704,11 @@
 		normalized.point_id = normalized.point_id || snapshot.point_id;
 		normalized.point_code = normalized.point_code || snapshot.point_code;
 		normalized.delivery_point = normalized.delivery_point || snapshot.delivery_point;
+		normalized.display_code = normalized.display_code || snapshot.display_code;
 		normalized.point_type = normalized.point_type || snapshot.point_type;
-		normalized.postcode = normalized.postcode || normalized.postal_code || normalized.point_postcode || snapshot.postcode || snapshot.postal_code || snapshot.point_postcode;
-		normalized.postal_code = normalized.postal_code || normalized.postcode || snapshot.postal_code;
-		normalized.point_postcode = normalized.point_postcode || normalized.postcode || snapshot.point_postcode;
+		normalized.postcode = normalized.postcode || normalized.postal_code || normalized.point_postcode || normalized.display_code || snapshot.postcode || snapshot.postal_code || snapshot.point_postcode || snapshot.display_code;
+		normalized.postal_code = normalized.postal_code || normalized.postcode || snapshot.postal_code || snapshot.display_code;
+		normalized.point_postcode = normalized.point_postcode || normalized.postcode || snapshot.point_postcode || snapshot.display_code;
 		normalized.address = normalized.address || snapshot.address;
 		normalized.lat = normalized.lat !== undefined && normalized.lat !== null ? normalized.lat : snapshot.lat;
 		normalized.lng = normalized.lng !== undefined && normalized.lng !== null ? normalized.lng : snapshot.lng;
