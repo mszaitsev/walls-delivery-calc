@@ -15,6 +15,7 @@ use WallsShop\WDC\Domain\Common\DateRange;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\DeliveryQuote;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
@@ -148,7 +149,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 	 * @return array<string,mixed>
 	 */
 	private function tariff_payload( QuoteRequest $request, array $to ): array {
-		$dimensions = $this->dimensions( $request->package );
+		$packages = $this->packages_payload( $request->package );
 		$from = array( 'code' => $this->settings->sender_city_code() );
 		$sender_postal_code = $this->settings->sender_postal_code();
 		if ( '' !== $sender_postal_code ) {
@@ -164,14 +165,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			'currency' => 1,
 			'from_location' => $from,
 			'to_location' => $to_location,
-			'packages' => array(
-				array(
-					'weight' => max( 1, $request->package->get_total_weight_g() ),
-					'length' => $dimensions['length'],
-					'width' => $dimensions['width'],
-					'height' => $dimensions['height'],
-				),
-			),
+			'packages' => $packages,
 		);
 	}
 
@@ -186,6 +180,85 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			'width' => max( 1, (int) ( $package->width_cm ?: $defaults['width'] ) ),
 			'height' => max( 1, (int) ( $package->height_cm ?: $defaults['height'] ) ),
 		);
+	}
+
+	/**
+	 * @return array<int,array{weight:int,length:int,width:int,height:int}>
+	 */
+	private function packages_payload( Package $package ): array {
+		$packages = array();
+		foreach ( $package->get_items() as $item ) {
+			if ( ! $item instanceof PackageItem ) {
+				continue;
+			}
+			$quantity = max( 0, $item->quantity );
+			for ( $index = 0; $index < $quantity; ++$index ) {
+				$packages[] = $this->package_payload_from_item( $item );
+			}
+		}
+		if ( array() !== $packages && $package->packaging_weight_g > 0 && ! $this->has_packaging_item( $package ) ) {
+			$packages[] = $this->packaging_weight_package_payload( $package->packaging_weight_g );
+		}
+
+		if ( array() !== $packages ) {
+			return $packages;
+		}
+
+		return array( $this->aggregated_package_payload( $package ) );
+	}
+
+	/**
+	 * @return array{weight:int,length:int,width:int,height:int}
+	 */
+	private function package_payload_from_item( PackageItem $item ): array {
+		$defaults = $this->settings->default_package_dimensions_cm();
+
+		return array(
+			'weight' => max( 1, $item->weight_g ),
+			'length' => $this->dimension_or_default( $item->length_cm, $defaults['length'] ),
+			'width' => $this->dimension_or_default( $item->width_cm, $defaults['width'] ),
+			'height' => $this->dimension_or_default( $item->height_cm, $defaults['height'] ),
+		);
+	}
+
+	/**
+	 * @return array{weight:int,length:int,width:int,height:int}
+	 */
+	private function aggregated_package_payload( Package $package ): array {
+		$dimensions = $this->dimensions( $package );
+
+		return array(
+			'weight' => max( 1, $package->get_total_weight_g() ),
+			'length' => $dimensions['length'],
+			'width' => $dimensions['width'],
+			'height' => $dimensions['height'],
+		);
+	}
+
+	/**
+	 * @return array{weight:int,length:int,width:int,height:int}
+	 */
+	private function packaging_weight_package_payload( int $weight_g ): array {
+		return array(
+			'weight' => max( 1, $weight_g ),
+			'length' => 1,
+			'width' => 1,
+			'height' => 1,
+		);
+	}
+
+	private function has_packaging_item( Package $package ): bool {
+		foreach ( $package->get_items() as $item ) {
+			if ( $item instanceof PackageItem && 'WDC_PACKAGING' === strtoupper( trim( $item->sku ) ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private function dimension_or_default( int $value, int $default ): int {
+		return max( 1, $value > 0 ? $value : $default );
 	}
 
 	/**
@@ -272,6 +345,8 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			'calendar_max' => $details['calendar_max'] ?? null,
 			'delivery_mode' => $details['delivery_mode'] ?? null,
 			'request_payload_sanitized' => $payload,
+			'package_count' => count( is_array( $payload['packages'] ?? null ) ? $payload['packages'] : array() ),
+			'packages_payload_sanitized' => is_array( $payload['packages'] ?? null ) ? $payload['packages'] : array(),
 			'response_tariff_sanitized' => $this->sanitize_tariff( $details ),
 			'location' => array(
 				'cdek_from_city_code' => $this->settings->sender_city_code(),

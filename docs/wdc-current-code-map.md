@@ -1,12 +1,12 @@
 # Карта текущего кода
 
-## CDEK Tariffs Management 0.46.4
+## CDEK Tariffs Management 0.46.5
 
 - `src/Carriers/Cdek/Tariffs/CdekTariffRepository.php` stores the managed CDEK tariff table (`tariff_code`, CDEK name, nullable weight/dimension limits, custom site title, delivery type, admin comment, active flag and last sync timestamp). Admin listing sorts active tariffs first, then by CDEK name and code. Nullable limit fields use dynamic insert/update formats so SQL `NULL` is preserved instead of being formatted as `0.000`.
 - `src/Carriers/Cdek/Tariffs/CdekTariffSyncService.php` calls `GET /v2/calculator/alltariffs`, normalizes delivery modes into `pickup`/`courier`, stores weight/dimension limits, fixes obvious mojibake in CDEK strings, builds sync diffs and applies updates without overwriting custom title/comment/active state.
 - `database/migrations/0027_create_cdek_tariffs_table.php` creates `wp_wdc_cdek_tariffs`; `0028_add_cdek_tariff_limits.php` adds nullable limit columns on updates from the first tariff-management schema.
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders the CDEK `Тарифы` tab, sync preview/confirmation, inline tariff editing, active flags, compact restriction display, and Russian delivery-type labels `до ПВЗ` / `до двери`.
-- `src/Carriers/Runtime/CdekCarrier.php` still prices through `POST /v2/calculator/tarifflist`, but uses the managed tariff row for title, delivery type and active/inactive filtering when a row exists.
+- `src/Carriers/Runtime/CdekCarrier.php` still prices through `POST /v2/calculator/tarifflist`, but uses the managed tariff row for title, delivery type and active/inactive filtering when a row exists. CDEK package payloads are now built per `PackageItem` unit, with item dimensions and per-dimension CDEK defaults; `WDC_PACKAGING` remains a separate package when packaging is represented as a virtual item, and aggregate packaging weight is kept as its own 1x1x1 package.
 - `src/Checkout/Cache/DeliveryQuoteCacheManager.php` clears WDC quote transients, the runtime quote namespace, WooCommerce `shipping_for_package_*` session rates and WDC runtime rate/tariff session caches. It also maintains `wdc_delivery_rates_cache_version` and adds it to WooCommerce shipping packages, so the package hash changes globally after manual reset or CDEK tariff save/sync and existing customer checkout sessions recalculate rates without a cart change.
 - `docs/wdc-cdek-insurance-audit.md` documents current insurance findings and the order-creation follow-up.
 
