@@ -30,6 +30,7 @@ use WallsShop\WDC\Checkout\Sorting\RateSorter;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Checkout\WooCommerce\WooCommerceRateMapper;
+use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceCountryRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceManager;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRegistry;
@@ -522,6 +523,42 @@ cdek_tariff_assert( false === (bool) ( $not_found_first['success'] ?? true ) && 
 $http = new CdekTariffFakeHttpClient();
 [ $settings, $client, $carrier ] = cdek_tariff_settings( $http, true );
 
+$settings->save_tariff_calculation_from_admin(
+	array(
+		CdekSettings::SENDER_CITY_CODE_KEY => '270',
+		CdekSettings::SHIPMENT_POINT_KEY => 'NSK69',
+		CdekSettings::SENDER_POSTAL_CODE_KEY => '630005',
+		CdekSettings::SENDER_CITY_NAME_KEY => 'Новосибирск',
+		CdekSettings::INSURANCE_PERCENT_KEY => '0,75',
+	)
+);
+cdek_tariff_assert( 0.75 === $settings->insurance_percent(), 'CDEK insurance percent must accept comma decimal input.' );
+$settings->save_tariff_calculation_from_admin( array( CdekSettings::INSURANCE_PERCENT_KEY => '0.75' ) );
+cdek_tariff_assert( 0.75 === $settings->insurance_percent(), 'CDEK insurance percent must accept dot decimal input.' );
+$settings->save_tariff_calculation_from_admin( array( CdekSettings::INSURANCE_PERCENT_KEY => '3' ) );
+cdek_tariff_assert( 3.0 === $settings->insurance_percent(), 'CDEK insurance percent must accept whole percent input.' );
+$settings->save_tariff_calculation_from_admin( array( CdekSettings::INSURANCE_PERCENT_KEY => '-2' ) );
+cdek_tariff_assert( 0.0 === $settings->insurance_percent(), 'CDEK insurance percent must clamp negative values to zero.' );
+$settings->save_tariff_calculation_from_admin(
+	array(
+		CdekSettings::SENDER_CITY_CODE_KEY => '270',
+		CdekSettings::SHIPMENT_POINT_KEY => 'NSK69',
+		CdekSettings::SENDER_POSTAL_CODE_KEY => '630005',
+		CdekSettings::SENDER_CITY_NAME_KEY => 'Новосибирск',
+		CdekSettings::DEFAULT_PACKAGE_LENGTH_CM_KEY => '30',
+		CdekSettings::DEFAULT_PACKAGE_WIDTH_CM_KEY => '20',
+		CdekSettings::DEFAULT_PACKAGE_HEIGHT_CM_KEY => '10',
+		CdekSettings::INSURANCE_PERCENT_KEY => '0',
+	)
+);
+
+$admin_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' ) ?: '';
+$cdek_settings_start = strpos( $admin_source, 'private function render_cdek_settings_tab' );
+$cdek_calculation_rows_start = strpos( $admin_source, 'private function render_cdek_tariff_calculation_rows' );
+$cdek_settings_source = false !== $cdek_settings_start && false !== $cdek_calculation_rows_start ? substr( $admin_source, $cdek_settings_start, $cdek_calculation_rows_start - $cdek_settings_start ) : '';
+cdek_tariff_assert( ! str_contains( $cdek_settings_source, 'Расчет тарифов' ), 'CDEK tariff calculation block must not remain in credentials tab.' );
+cdek_tariff_assert( str_contains( $admin_source, 'render_cdek_tariff_calculation_rows' ) && str_contains( $admin_source, 'Цена страховки' ), 'CDEK tariff calculation block with insurance percent must be rendered in calculation tab.' );
+
 $GLOBALS['wdc_cdek_tariff_logs'] = array();
 $pickup_quote = $carrier->quote( cdek_tariff_request( DeliveryType::PICKUP ) );
 cdek_tariff_assert( 1 === count( $pickup_quote->rates ), 'Pickup CDEK tariff must be mapped to one rate.' );
@@ -707,6 +744,61 @@ $merge_http->tariff_codes_responses = array(
 [ , , $merge_carrier ] = cdek_tariff_settings( $merge_http, true );
 $merge_quote = $merge_carrier->quote( cdek_tariff_request_with_items( array( new PackageItem( 'sku-fit', 'Товар', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 1000, 10, 10, 10 ) ) ) );
 cdek_tariff_assert( array( '136', '138' ) === cdek_tariff_rate_codes( $merge_quote->rates ), 'CDEK single-package tariffs must add only new tariff_code values and ignore duplicates.' );
+
+$insurance_http = new CdekTariffFakeHttpClient();
+$insurance_http->tariff_codes_responses = array(
+	array(
+		array( 'tariff_code' => 701, 'tariff_name' => 'Страховой склад-склад', 'delivery_mode' => 4, 'delivery_sum' => 525, 'period_min' => 2, 'period_max' => 2 ),
+	),
+	array(
+		array( 'tariff_code' => 701, 'tariff_name' => 'Дубль страховой', 'delivery_mode' => 4, 'delivery_sum' => 100, 'period_min' => 1, 'period_max' => 1 ),
+	),
+);
+[ $insurance_settings, , $insurance_carrier ] = cdek_tariff_settings( $insurance_http, true );
+$insurance_settings->save_tariff_calculation_from_admin(
+	array(
+		CdekSettings::SENDER_CITY_CODE_KEY => '270',
+		CdekSettings::SHIPMENT_POINT_KEY => 'NSK69',
+		CdekSettings::SENDER_POSTAL_CODE_KEY => '630005',
+		CdekSettings::SENDER_CITY_NAME_KEY => 'Новосибирск',
+		CdekSettings::DEFAULT_PACKAGE_LENGTH_CM_KEY => '30',
+		CdekSettings::DEFAULT_PACKAGE_WIDTH_CM_KEY => '20',
+		CdekSettings::DEFAULT_PACKAGE_HEIGHT_CM_KEY => '10',
+		CdekSettings::INSURANCE_PERCENT_KEY => '0.75',
+	)
+);
+$insurance_quote = $insurance_carrier->quote( cdek_tariff_request_with_items( array( new PackageItem( 'sku-insured', 'Товар', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), 1000, 10, 10, 10 ) ) ) );
+$insurance_rate = $insurance_quote->rates[0] ?? null;
+cdek_tariff_assert( $insurance_rate instanceof DeliveryRate && 532.5 === $insurance_rate->price->get_rubles(), 'CDEK base API cost must include insurance amount before rules.' );
+cdek_tariff_assert( 525.0 === (float) ( $insurance_rate->meta['cdek_delivery_cost_before_insurance'] ?? 0 ) && 7.5 === (float) ( $insurance_rate->meta['cdek_insurance_amount'] ?? 0 ), 'CDEK insurance breakdown must keep delivery cost before insurance and insurance amount.' );
+cdek_tariff_assert( 532.5 === (float) ( $insurance_rate->meta['api_base_price_rub'] ?? 0 ), 'CDEK api_base_price_rub must include insurance amount.' );
+
+$insurance_rule_http = new CdekTariffFakeHttpClient();
+$insurance_rule_http->tariff_codes_responses = array(
+	array(
+		array( 'tariff_code' => 702, 'tariff_name' => 'Страховой склад-склад', 'delivery_mode' => 4, 'delivery_sum' => 525, 'period_min' => 2, 'period_max' => 2 ),
+	),
+	array(
+		array( 'tariff_code' => 702, 'tariff_name' => 'Дубль страховой', 'delivery_mode' => 4, 'delivery_sum' => 100, 'period_min' => 1, 'period_max' => 1 ),
+	),
+);
+[ $insurance_rule_settings, , $insurance_rule_carrier ] = cdek_tariff_settings( $insurance_rule_http, true );
+$insurance_rule_settings->save_tariff_calculation_from_admin(
+	array(
+		CdekSettings::SENDER_CITY_CODE_KEY => '270',
+		CdekSettings::SHIPMENT_POINT_KEY => 'NSK69',
+		CdekSettings::SENDER_POSTAL_CODE_KEY => '630005',
+		CdekSettings::SENDER_CITY_NAME_KEY => 'Новосибирск',
+		CdekSettings::DEFAULT_PACKAGE_LENGTH_CM_KEY => '30',
+		CdekSettings::DEFAULT_PACKAGE_WIDTH_CM_KEY => '20',
+		CdekSettings::DEFAULT_PACKAGE_HEIGHT_CM_KEY => '10',
+		CdekSettings::INSURANCE_PERCENT_KEY => '0.75',
+	)
+);
+$insurance_rule = new Rule( 701, 'Add 100 rub after insurance', true, 10, RuleRepository::TARGET_DEFAULT, '', RuleActionTypes::CHANGE_PRICE, RuleOperationTypes::INCREASE, 100, RuleOperationBases::RUBLES, false, false );
+$insurance_ruled = cdek_tariff_orchestrator( $insurance_rule_carrier )->calculate( cdek_tariff_request_with_items( array( new PackageItem( 'sku-insured', 'Товар', 1, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), 1000, 10, 10, 10 ) ) ), array( $insurance_rule ), RateSorter::CHEAPEST, false );
+$insurance_ruled_rate = $insurance_ruled->rates[0] ?? null;
+cdek_tariff_assert( $insurance_ruled_rate instanceof DeliveryRate && 632.5 === $insurance_ruled_rate->price->get_rubles() && 532.5 === (float) ( $insurance_ruled_rate->meta['api_base_price_rub'] ?? 0 ), 'CDEK rules must apply to delivery cost with insurance and keep insured base API cost in meta.' );
 
 $same_period_price_http = new CdekTariffFakeHttpClient();
 $same_period_price_http->tariff_codes_override = array(

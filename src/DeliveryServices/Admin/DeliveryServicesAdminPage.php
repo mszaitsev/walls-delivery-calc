@@ -162,7 +162,7 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
-		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'check_cdek_connection' ), true ) ) {
+		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -173,7 +173,7 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_tariffs' === $action ) {
 				$data = array();
 			}
-			if ( in_array( $action, array( 'save_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'check_cdek_connection' ), true ) ) {
+			if ( in_array( $action, array( 'save_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
 				$data = array();
 			}
 			if ( $id > 0 && array() !== $data ) {
@@ -273,6 +273,10 @@ final class DeliveryServicesAdminPage {
 				$this->cdek_settings->save_from_admin( $_POST );
 				$this->cdek_api?->clearAllTokenCaches();
 			}
+			if ( 'save_cdek_calculation' === $action && $this->cdek_settings instanceof CdekSettings ) {
+				$this->cdek_settings->save_tariff_calculation_from_admin( $_POST );
+				$this->clear_delivery_quote_cache();
+			}
 			if ( 'check_cdek_connection' === $action && $this->cdek_settings instanceof CdekSettings && $this->cdek_api instanceof CdekApiClient ) {
 				try {
 					$result = $this->cdek_api->checkConnection();
@@ -308,7 +312,7 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'check_cdek_connection' ), true ) ) {
+		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'main',
@@ -319,6 +323,7 @@ final class DeliveryServicesAdminPage {
 				'save_shipments' => 'shipments',
 				'save_status_mapping' => 'status_mapping',
 				'save_cdek_settings', 'check_cdek_connection' => 'cdek_settings',
+				'save_cdek_calculation' => 'calculation',
 				default => 'main',
 			};
 			if ( '' !== $service_key ) {
@@ -638,6 +643,18 @@ final class DeliveryServicesAdminPage {
 			</table>
 			<?php submit_button( __( 'Сохранить расчет', 'walls-delivery-calc' ) ); ?>
 		</form>
+		<?php if ( $this->is_cdek_service( $service ) && $this->cdek_settings instanceof CdekSettings ) : ?>
+		<form method="post" style="max-width: 860px; margin-top: 16px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="save_cdek_calculation">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<table class="form-table" role="presentation">
+				<?php $this->render_cdek_tariff_calculation_rows(); ?>
+			</table>
+			<?php submit_button( __( 'Сохранить расчет СДЭК', 'walls-delivery-calc' ) ); ?>
+		</form>
+		<?php endif; ?>
 		<?php
 	}
 
@@ -739,16 +756,6 @@ final class DeliveryServicesAdminPage {
 				<?php $this->readonly_row( CdekSettings::LAST_CONNECTION_CHECK_KEY, __( 'Последняя проверка подключения', 'walls-delivery-calc' ), '' !== $last_check ? $last_check : __( 'не выполнялась', 'walls-delivery-calc' ) ); ?>
 				<?php $this->readonly_row( CdekSettings::LAST_CONNECTION_STATUS_KEY, __( 'Статус последней проверки', 'walls-delivery-calc' ), '' !== $last_status ? $last_status : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
 				<?php $this->readonly_row( CdekSettings::LAST_CONNECTION_MESSAGE_KEY, __( 'Сообщение последней проверки', 'walls-delivery-calc' ), '' !== $last_message ? $last_message : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
-				<tr><th colspan="2"><h3><?php echo esc_html__( 'Расчет тарифов', 'walls-delivery-calc' ); ?></h3></th></tr>
-				<?php $this->text_row( CdekSettings::SENDER_CITY_CODE_KEY, __( 'Код города отправителя СДЭК', 'walls-delivery-calc' ), (string) $this->cdek_settings->sender_city_code() ); ?>
-				<?php $this->text_row( CdekSettings::SHIPMENT_POINT_KEY, __( 'Код ПВЗ отправления СДЭК', 'walls-delivery-calc' ), $this->cdek_settings->shipment_point() ); ?>
-				<?php $this->text_row( CdekSettings::SENDER_POSTAL_CODE_KEY, __( 'Индекс отправителя', 'walls-delivery-calc' ), $this->cdek_settings->sender_postal_code() ); ?>
-				<?php $this->text_row( CdekSettings::SENDER_CITY_NAME_KEY, __( 'Город отправителя для диагностики', 'walls-delivery-calc' ), $this->cdek_settings->sender_city_name() ); ?>
-				<?php $this->text_row( CdekSettings::SENDER_ADDRESS_KEY, __( 'Адрес отправителя СДЭК для тарифов от двери', 'walls-delivery-calc' ), $this->cdek_settings->sender_address() ); ?>
-				<?php $dimensions = $this->cdek_settings->default_package_dimensions_cm(); ?>
-				<?php $this->text_row( CdekSettings::DEFAULT_PACKAGE_LENGTH_CM_KEY, __( 'Длина упаковки по умолчанию, см', 'walls-delivery-calc' ), (string) $dimensions['length'] ); ?>
-				<?php $this->text_row( CdekSettings::DEFAULT_PACKAGE_WIDTH_CM_KEY, __( 'Ширина упаковки по умолчанию, см', 'walls-delivery-calc' ), (string) $dimensions['width'] ); ?>
-				<?php $this->text_row( CdekSettings::DEFAULT_PACKAGE_HEIGHT_CM_KEY, __( 'Высота упаковки по умолчанию, см', 'walls-delivery-calc' ), (string) $dimensions['height'] ); ?>
 			</table>
 			<?php submit_button( __( 'Сохранить данные для входа', 'walls-delivery-calc' ) ); ?>
 		</form>
@@ -759,6 +766,31 @@ final class DeliveryServicesAdminPage {
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 			<?php submit_button( __( 'Проверить подключение', 'walls-delivery-calc' ), 'secondary', 'submit', false ); ?>
 		</form>
+		<?php
+	}
+
+	private function render_cdek_tariff_calculation_rows(): void {
+		if ( ! $this->cdek_settings instanceof CdekSettings ) {
+			return;
+		}
+		$dimensions = $this->cdek_settings->default_package_dimensions_cm();
+		?>
+		<tr><th colspan="2"><h3><?php echo esc_html__( 'Расчет тарифов', 'walls-delivery-calc' ); ?></h3></th></tr>
+		<?php $this->text_row( CdekSettings::SENDER_CITY_CODE_KEY, __( 'Код города отправителя СДЭК', 'walls-delivery-calc' ), (string) $this->cdek_settings->sender_city_code() ); ?>
+		<?php $this->text_row( CdekSettings::SHIPMENT_POINT_KEY, __( 'Код ПВЗ отправления СДЭК', 'walls-delivery-calc' ), $this->cdek_settings->shipment_point() ); ?>
+		<?php $this->text_row( CdekSettings::SENDER_POSTAL_CODE_KEY, __( 'Индекс отправителя', 'walls-delivery-calc' ), $this->cdek_settings->sender_postal_code() ); ?>
+		<?php $this->text_row( CdekSettings::SENDER_CITY_NAME_KEY, __( 'Город отправителя для диагностики', 'walls-delivery-calc' ), $this->cdek_settings->sender_city_name() ); ?>
+		<?php $this->text_row( CdekSettings::SENDER_ADDRESS_KEY, __( 'Адрес отправителя СДЭК для тарифов от двери', 'walls-delivery-calc' ), $this->cdek_settings->sender_address() ); ?>
+		<?php $this->text_row( CdekSettings::DEFAULT_PACKAGE_LENGTH_CM_KEY, __( 'Длина упаковки по умолчанию, см', 'walls-delivery-calc' ), (string) $dimensions['length'] ); ?>
+		<?php $this->text_row( CdekSettings::DEFAULT_PACKAGE_WIDTH_CM_KEY, __( 'Ширина упаковки по умолчанию, см', 'walls-delivery-calc' ), (string) $dimensions['width'] ); ?>
+		<?php $this->text_row( CdekSettings::DEFAULT_PACKAGE_HEIGHT_CM_KEY, __( 'Высота упаковки по умолчанию, см', 'walls-delivery-calc' ), (string) $dimensions['height'] ); ?>
+		<tr>
+			<th scope="row"><label for="<?php echo esc_attr( CdekSettings::INSURANCE_PERCENT_KEY ); ?>"><?php echo esc_html__( 'Цена страховки', 'walls-delivery-calc' ); ?></label></th>
+			<td>
+				<input class="regular-text" id="<?php echo esc_attr( CdekSettings::INSURANCE_PERCENT_KEY ); ?>" name="<?php echo esc_attr( CdekSettings::INSURANCE_PERCENT_KEY ); ?>" value="<?php echo esc_attr( (string) $this->cdek_settings->insurance_percent() ); ?>">
+				<p class="description"><?php echo esc_html__( 'Процент от стоимости товаров с учетом скидок, который будет автоматически добавлен к стоимости доставки СДЭК перед применением правил расчета. Например, 0,75 означает 0,75%.', 'walls-delivery-calc' ); ?></p>
+			</td>
+		</tr>
 		<?php
 	}
 

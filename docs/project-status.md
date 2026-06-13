@@ -366,6 +366,8 @@
 - Профильный `docs/wdc-*.md` по области задачи.
 - `docs/walls-delivery-calc-tech-spec.md` - только если меняется целевой продуктовый или архитектурный контракт.
 - `docs/wdc-migration-plan.md` - если меняется порядок этапов, риски или стратегия перехода.
+0.48.4 note: CDEK shipment status handling now treats `requests[].state` only as request-processing state and selects the current order status from `entity.statuses[]` by newest parsable `date_time` among non-deleted statuses. The order metabox saves/renders `planned_delivery_date`, reads actual CDEK delivery cost from `entity.delivery_detail.total_sum`, and compares it with saved “Базовая стоимость API” using the existing 3% tolerance. CDEK tariff calculation settings moved fully to the `Расчет` tab and gained `Цена страховки`; the calculated insurance amount is added to API delivery price before rules.
+
 0.48.2 note: CDEK shipment metabox controls are carrier-aware for manual attach and removal actions. Existing CDEK shipments can be attached by `cdek_number`, continue to use the unchanged manual status refresh, can be cancelled/deleted in CDEK only while the CDEK order status is `CREATED`, and can be removed locally only for known statuses other than protected `ACCEPTED` and `CREATED`.
 
 0.48.1 note: CDEK order creation pre-live-test fixes are applied. `ajax_create()` now returns status data for the active created carrier instead of always reading Russian Post; `POST /v2/orders` with `requests[0].state=INVALID` returns `cdek_registration_invalid` and does not persist `registration_pending`; CDEK logs and request/response snapshots are reduced to sanitized technical data; and the shipment status block label is carrier-aware for CDEK.

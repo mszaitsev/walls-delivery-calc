@@ -69,6 +69,10 @@ final class CdekShipmentAdapter implements ShipmentCarrierAdapterInterface {
 		$request_uuid = (string) ( $request_row['request_uuid'] ?? '' );
 		$cdek_number = $this->first_related_cdek_number( $body );
 		$registration_state = strtoupper( (string) ( $request_row['state'] ?? '' ) );
+		$order_status = $this->latest_order_status( $entity );
+		$order_status_code = strtoupper( (string) ( $order_status['code'] ?? '' ) );
+		$planned_delivery_date = $this->planned_delivery_date( $entity );
+		$actual_cost_kopecks = $this->delivery_total_kopecks( $entity );
 		if ( 'INVALID' === $registration_state ) {
 			$message = $this->errors_message( $request_row ) ?: 'Регистрация СДЭК завершилась ошибкой.';
 			$this->log( 'error', 'CDEK order create failed.', array_merge( $this->sanitize_response_snapshot( $body ), array( 'error_message' => $message ) ) );
@@ -84,6 +88,10 @@ final class CdekShipmentAdapter implements ShipmentCarrierAdapterInterface {
 					'request_uuid' => $request_uuid,
 					'cdek_number' => $cdek_number,
 					'registration_state' => $registration_state,
+					'order_status' => $order_status_code,
+					'order_status_name' => (string) ( $order_status['name'] ?? '' ),
+					'planned_delivery_date' => $planned_delivery_date,
+					'actual_cost_kopecks' => $actual_cost_kopecks,
 				)
 			);
 		}
@@ -95,6 +103,10 @@ final class CdekShipmentAdapter implements ShipmentCarrierAdapterInterface {
 			'request_uuid' => $request_uuid,
 			'cdek_number' => $cdek_number,
 			'registration_state' => $registration_state,
+			'order_status' => $order_status_code,
+			'order_status_name' => (string) ( $order_status['name'] ?? '' ),
+			'planned_delivery_date' => $planned_delivery_date,
+			'actual_cost_kopecks' => $actual_cost_kopecks,
 		);
 		$this->log( 'info', 'CDEK order create request accepted.', $this->sanitize_response_snapshot( $body ) );
 
@@ -176,6 +188,8 @@ final class CdekShipmentAdapter implements ShipmentCarrierAdapterInterface {
 			'request_uuid' => (string) ( $request_row['request_uuid'] ?? $body['request_uuid'] ?? '' ),
 			'request_state' => (string) ( $request_row['state'] ?? $body['registration_state'] ?? '' ),
 			'order_status' => (string) ( $status['code'] ?? $body['order_status'] ?? '' ),
+			'planned_delivery_date' => $this->planned_delivery_date( $entity ),
+			'actual_cost_kopecks' => $this->delivery_total_kopecks( $entity ),
 			'errors' => $this->safe_errors( $request_row ),
 		);
 	}
@@ -241,9 +255,57 @@ final class CdekShipmentAdapter implements ShipmentCarrierAdapterInterface {
 	 */
 	private function latest_order_status( array $entity ): array {
 		$statuses = is_array( $entity['statuses'] ?? null ) ? $entity['statuses'] : array();
-		$last = end( $statuses );
+		$active = array_values(
+			array_filter(
+				$statuses,
+				static fn ( mixed $status ): bool => is_array( $status ) && ! in_array( $status['deleted'] ?? false, array( true, 1, '1', 'true', 'TRUE' ), true )
+			)
+		);
+		if ( array() === $active ) {
+			return array();
+		}
+		$latest = null;
+		$latest_ts = null;
+		foreach ( $active as $status ) {
+			$date = trim( (string) ( $status['date_time'] ?? '' ) );
+			$timestamp = '' !== $date ? strtotime( $date ) : false;
+			if ( false === $timestamp ) {
+				continue;
+			}
+			if ( null === $latest_ts || $timestamp > $latest_ts ) {
+				$latest_ts = $timestamp;
+				$latest = $status;
+			}
+		}
+		if ( is_array( $latest ) ) {
+			return $latest;
+		}
+		$last = end( $active );
 
 		return is_array( $last ) ? $last : array();
+	}
+
+	/**
+	 * @param array<string,mixed> $entity
+	 */
+	private function planned_delivery_date( array $entity ): string {
+		$date = trim( (string) ( $entity['planned_delivery_date'] ?? '' ) );
+
+		return 1 === preg_match( '/^\d{4}-\d{2}-\d{2}$/', $date ) ? $date : '';
+	}
+
+	/**
+	 * @param array<string,mixed> $entity
+	 */
+	private function delivery_total_kopecks( array $entity ): ?int {
+		$detail = is_array( $entity['delivery_detail'] ?? null ) ? $entity['delivery_detail'] : array();
+		$total = $detail['total_sum'] ?? null;
+		if ( ! is_numeric( $total ) ) {
+			return null;
+		}
+		$kopecks = (int) round( (float) $total * 100 );
+
+		return $kopecks > 0 ? $kopecks : null;
 	}
 
 	/**

@@ -348,12 +348,15 @@
       '[data-wdc-status-carrier]': status.carrier_status_title || '-',
       '[data-wdc-status-operation]': operationSummary(status),
       '[data-wdc-status-checked]': status.tracking_checked_at || '-',
+      '[data-wdc-planned-delivery-date]': status.cdek_planned_delivery_date || '',
       '[data-wdc-tracking-number]': status.barcode || ''
     };
     Object.keys(fields).forEach((selector) => {
       const element = box.querySelector(selector);
       if (element) element.textContent = fields[selector];
     });
+    const plannedRow = box.querySelector('[data-wdc-planned-delivery-row]');
+    if (plannedRow) plannedRow.hidden = !String(status.cdek_planned_delivery_date || '').trim();
     updateShipmentButtons(box, {
       hasShipment: !!status.has_shipment,
       canCancel: !!status.can_cancel,
@@ -511,6 +514,7 @@
       '[data-wdc-status-carrier]': '-',
       '[data-wdc-status-operation]': '-',
       '[data-wdc-status-checked]': '-',
+      '[data-wdc-planned-delivery-date]': '',
       '[data-wdc-updated-at]': '',
       '[data-wdc-backlog-order-id]': ''
     };
@@ -522,6 +526,8 @@
     renderShipmentPrice(box, {});
     const updatedRow = box.querySelector('[data-wdc-updated-row]');
     if (updatedRow) updatedRow.hidden = true;
+    const plannedRow = box.querySelector('[data-wdc-planned-delivery-row]');
+    if (plannedRow) plannedRow.hidden = true;
     updateShipmentButtons(box, { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false });
     const manualForm = box.querySelector('[data-wdc-manual-tracking-form]');
     if (manualForm) manualForm.hidden = true;

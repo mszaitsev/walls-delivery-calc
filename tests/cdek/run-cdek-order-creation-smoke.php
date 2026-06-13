@@ -14,6 +14,7 @@ use WallsShop\WDC\Carriers\Cdek\Api\CdekApiClient;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticApiClient;
 use WallsShop\WDC\Carriers\RussianPost\Tracking\RussianPostTrackingApiClient;
+use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
@@ -238,6 +239,87 @@ $status = new CdekOrderStatusService( $repository, $client );
 $created = $status->update( $order );
 cdek_order_assert( $created['success'] && 'registered' === (string) $repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY )['status'], 'GET /v2/orders CREATED must register shipment.' );
 
+$latest_order = new CdekOrderFakeOrder( 110 );
+$latest_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] = array( 'api' => array( 'api_base_price_rub' => 450.0 ) );
+$repository->save_for_carrier( $latest_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'latest-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-110' ) );
+$http->order_responses[] = array(
+	'entity' => array(
+		'uuid' => 'latest-uuid',
+		'cdek_number' => '100510',
+		'planned_delivery_date' => '2026-06-15',
+		'delivery_detail' => array( 'total_sum' => 450.18 ),
+		'statuses' => array(
+			array( 'code' => 'READY_FOR_SHIPMENT_IN_SENDER_CITY', 'name' => 'Готов к отправке', 'date_time' => '2026-06-13T10:04:41+0000' ),
+			array( 'code' => 'RECEIVED_AT_SHIPMENT_WAREHOUSE', 'name' => 'Принят на складе', 'date_time' => '2026-06-13T10:04:33+0000' ),
+			array( 'code' => 'CREATED', 'name' => 'Создан', 'date_time' => '2026-06-13T05:48:44+0000' ),
+			array( 'code' => 'ACCEPTED', 'name' => 'Принят', 'date_time' => '2026-06-13T05:48:42+0000' ),
+		),
+	),
+	'requests' => array( array( 'state' => 'ACCEPTED' ) ),
+);
+$latest = $status->update( $latest_order );
+$latest_shipment = $repository->find_by_carrier( $latest_order, CdekSettings::CARRIER_KEY );
+cdek_order_assert( 'READY_FOR_SHIPMENT_IN_SENDER_CITY' === (string) ( $latest_shipment['cdek_order_status_code'] ?? '' ), 'CDEK latest status must be selected by max date_time, not array tail.' );
+cdek_order_assert( 'READY_FOR_SHIPMENT_IN_SENDER_CITY' === (string) ( $latest['status']['order_status_code'] ?? '' ), 'CDEK status payload must use latest order status, not request state.' );
+cdek_order_assert( '2026-06-15' === (string) ( $latest['status']['cdek_planned_delivery_date'] ?? '' ), 'CDEK planned_delivery_date must be saved in status payload.' );
+cdek_order_assert( 45018 === (int) ( $latest_shipment['cdek_actual_cost_kopecks'] ?? 0 ), 'CDEK delivery_detail.total_sum must be saved as actual cost.' );
+cdek_order_assert( '450.18 руб.' === (string) ( $latest['status']['actual_cost_label'] ?? '' ) && 'ok' === (string) ( $latest['status']['actual_cost_compare_status'] ?? '' ), 'CDEK actual cost within 3 percent of base API cost must compare as ok.' );
+
+$deleted_status_order = new CdekOrderFakeOrder( 111 );
+$repository->save_for_carrier( $deleted_status_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'deleted-status-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-111' ) );
+$http->order_responses[] = array(
+	'entity' => array(
+		'uuid' => 'deleted-status-uuid',
+		'statuses' => array(
+			array( 'code' => 'DELIVERED', 'name' => 'Вручен', 'date_time' => '2026-06-14T10:04:41+0000', 'deleted' => true ),
+			array( 'code' => 'CREATED', 'name' => 'Создан', 'date_time' => '2026-06-13T05:48:44+0000' ),
+		),
+	),
+	'requests' => array( array( 'state' => 'SUCCESSFUL' ) ),
+);
+$deleted_status = $status->update( $deleted_status_order );
+cdek_order_assert( 'CREATED' === (string) ( $deleted_status['status']['order_status_code'] ?? '' ), 'CDEK deleted statuses must be ignored when selecting current status.' );
+
+$empty_status_order = new CdekOrderFakeOrder( 112 );
+$repository->save_for_carrier( $empty_status_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'empty-status-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-112' ) );
+$http->order_responses[] = array(
+	'entity' => array(
+		'uuid' => 'empty-status-uuid',
+		'statuses' => array(
+			array( 'code' => 'CREATED', 'name' => 'Создан', 'date_time' => '2026-06-13T05:48:44+0000', 'deleted' => true ),
+		),
+	),
+	'requests' => array( array( 'state' => 'SUCCESSFUL' ) ),
+);
+$empty_status = $status->update( $empty_status_order );
+cdek_order_assert( $empty_status['success'] && '' === (string) ( $empty_status['status']['order_status_code'] ?? '' ), 'CDEK empty/all-deleted statuses must not break status payload.' );
+
+$warning_cost_order = new CdekOrderFakeOrder( 113 );
+$warning_cost_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] = array( 'api' => array( 'api_base_price_rub' => 450.0 ) );
+$repository->save_for_carrier( $warning_cost_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'warning-cost-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-113' ) );
+$http->order_responses[] = array(
+	'entity' => array(
+		'uuid' => 'warning-cost-uuid',
+		'delivery_detail' => array( 'total_sum' => 470 ),
+		'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан', 'date_time' => '2026-06-13T05:48:44+0000' ) ),
+	),
+	'requests' => array( array( 'state' => 'SUCCESSFUL' ) ),
+);
+$warning_cost = $status->update( $warning_cost_order );
+cdek_order_assert( 'warning' === (string) ( $warning_cost['status']['actual_cost_compare_status'] ?? '' ), 'CDEK actual cost above 3 percent of base API cost must compare as warning.' );
+
+$missing_cost_order = new CdekOrderFakeOrder( 114 );
+$repository->save_for_carrier( $missing_cost_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'missing-cost-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-114' ) );
+$http->order_responses[] = array(
+	'entity' => array(
+		'uuid' => 'missing-cost-uuid',
+		'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан', 'date_time' => '2026-06-13T05:48:44+0000' ) ),
+	),
+	'requests' => array( array( 'state' => 'SUCCESSFUL' ) ),
+);
+$missing_cost = $status->update( $missing_cost_order );
+cdek_order_assert( '' === (string) ( $missing_cost['status']['actual_cost_label'] ?? '' ) && '' === (string) ( $missing_cost['status']['actual_cost_compare_status'] ?? '' ), 'Missing CDEK delivery_detail.total_sum must not render actual cost comparison.' );
+
 $order_invalid = new CdekOrderFakeOrder( 102 );
 $repository->save_for_carrier( $order_invalid, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'bad-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-102' ) );
 $http->order_responses[] = array( 'entity' => array( 'uuid' => 'bad-uuid' ), 'requests' => array( array( 'state' => 'INVALID', 'errors' => array( array( 'message' => 'bad request' ) ) ) ) );
@@ -361,8 +443,9 @@ try {
 $render = new ReflectionMethod( OrderShipmentsMetabox::class, 'render_status_block' );
 $render->setAccessible( true );
 ob_start();
-$render->invoke( $metabox, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'carrier_status_title' => 'Регистрация' ) );
+$render->invoke( $metabox, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'carrier_status_title' => 'Регистрация', 'cdek_planned_delivery_date' => '2026-06-15' ) );
 $status_html = ob_get_clean() ?: '';
 cdek_order_assert( str_contains( $status_html, 'Статус СДЭК' ) && ! str_contains( $status_html, 'Статус Почты России' ), 'CDEK status block must use CDEK label.' );
+cdek_order_assert( str_contains( $status_html, 'Плановая дата доставки' ) && str_contains( $status_html, '2026-06-15' ), 'CDEK status block must render planned_delivery_date when present.' );
 
 echo "CDEK order creation smoke test passed.\n";

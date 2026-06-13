@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.48.2.
+Current plugin version: 0.48.4.
+
+Version 0.48.4 fixes the first CDEK shipment QA batch. The current CDEK order status is now selected from `entity.statuses[]` by the newest parsable `date_time` among non-deleted statuses, `planned_delivery_date` is saved and shown in the order shipment block, and CDEK actual delivery cost is read from `entity.delivery_detail.total_sum` and compared with saved “Базовая стоимость API” using the existing 3% tolerance. CDEK calculation settings now keep the tariff calculation block on the `Расчет` tab, add `Цена страховки` as a percent of discounted goods total, and add that calculated insurance amount to the API delivery price before calculation rules run.
 
 Version 0.48.2 finishes the CDEK shipment metabox controls needed before real order creation tests. The existing `Отправления` block can manually attach a CDEK shipment by `cdek_number`, refresh it through the existing status button, cancel/delete it in CDEK only while the CDEK order status is `CREATED`, and remove only local WooCommerce shipment data for statuses other than protected `ACCEPTED` and `CREATED`. Carrier labels, button text and toast fallbacks now come from the metabox presentation config.
 

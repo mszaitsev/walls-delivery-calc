@@ -214,7 +214,7 @@ final class OrderShipmentsMetabox {
 		$has_created = in_array( (string) ( $shipment['status'] ?? '' ), array( 'registration_pending', 'created', 'registered' ), true );
 		$barcode = trim( (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
 		$backlog_order_id = trim( (string) ( $shipment['backlog_order_id'] ?? '' ) );
-		$status_payload = $is_cdek && $this->cdek_status_updates instanceof CdekOrderStatusService ? $this->cdek_status_updates->status_payload( $shipment ) : $this->status_updates->status_payload( $shipment, $order );
+		$status_payload = $is_cdek && $this->cdek_status_updates instanceof CdekOrderStatusService ? $this->cdek_status_updates->status_payload( $shipment, $order ) : $this->status_updates->status_payload( $shipment, $order );
 		$status_payload = array_merge( $status_payload, array( 'carrier_key' => $carrier_key ) );
 		$presentation = $this->carrier_presentation( $carrier_key );
 		$price_label = (string) ( $status_payload['actual_cost_label'] ?? '' );
@@ -676,6 +676,7 @@ final class OrderShipmentsMetabox {
 		<div class="wdc-shipment-status" data-wdc-shipment-status-block>
 			<p><strong><?php echo esc_html( $this->status_block_label( (string) ( $status['carrier_key'] ?? '' ) ) ); ?>:</strong> <span data-wdc-status-carrier><?php echo esc_html( (string) ( $status['carrier_status_title'] ?? '' ) ?: '-' ); ?></span></p>
 			<p><strong><?php echo esc_html__( 'Последняя операция', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-operation><?php echo esc_html( $this->operation_summary( $status ) ); ?></span></p>
+			<p data-wdc-planned-delivery-row <?php echo '' === (string) ( $status['cdek_planned_delivery_date'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Плановая дата доставки', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-planned-delivery-date><?php echo esc_html( (string) ( $status['cdek_planned_delivery_date'] ?? '' ) ); ?></span></p>
 			<p><strong><?php echo esc_html__( 'Проверено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-checked><?php echo esc_html( (string) ( $status['tracking_checked_at'] ?? '' ) ?: '-' ); ?></span></p>
 		</div>
 		<?php
@@ -687,7 +688,7 @@ final class OrderShipmentsMetabox {
 	private function status_payload_for_carrier( object $order, string $carrier_key ): array {
 		$shipment = $this->repository->find_by_carrier( $order, $carrier_key );
 		if ( CdekSettings::CARRIER_KEY === $carrier_key && $this->cdek_status_updates instanceof CdekOrderStatusService ) {
-			return array_merge( $this->cdek_status_updates->status_payload( $shipment ), array( 'presentation' => $this->carrier_presentation( $carrier_key ) ) );
+			return array_merge( $this->cdek_status_updates->status_payload( $shipment, $order ), array( 'presentation' => $this->carrier_presentation( $carrier_key ) ) );
 		}
 		if ( RussianPostDomesticSettings::CARRIER_KEY === $carrier_key ) {
 			return array_merge( $this->status_updates->status_payload( $shipment, $order ), array( 'carrier_key' => $carrier_key, 'has_shipment' => array() !== $shipment, 'can_update_status' => array() !== $shipment, 'can_remove_from_order' => array() !== $shipment && ! $this->can_cancel_shipment( $shipment ), 'presentation' => $this->carrier_presentation( $carrier_key ) ) );

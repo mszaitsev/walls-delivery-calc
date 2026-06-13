@@ -39,6 +39,7 @@ final class CdekSettings {
 	public const DEFAULT_PACKAGE_LENGTH_CM_KEY = 'cdek_default_package_length_cm';
 	public const DEFAULT_PACKAGE_WIDTH_CM_KEY = 'cdek_default_package_width_cm';
 	public const DEFAULT_PACKAGE_HEIGHT_CM_KEY = 'cdek_default_package_height_cm';
+	public const INSURANCE_PERCENT_KEY = 'cdek_insurance_percent';
 
 	public function __construct(
 		private SettingsRepository $settings,
@@ -69,6 +70,7 @@ final class CdekSettings {
 			self::DEFAULT_PACKAGE_LENGTH_CM_KEY => 20,
 			self::DEFAULT_PACKAGE_WIDTH_CM_KEY => 20,
 			self::DEFAULT_PACKAGE_HEIGHT_CM_KEY => 10,
+			self::INSURANCE_PERCENT_KEY => 0.0,
 		);
 	}
 
@@ -147,6 +149,10 @@ final class CdekSettings {
 		);
 	}
 
+	public function insurance_percent(): float {
+		return max( 0.0, min( 100.0, (float) str_replace( ',', '.', $this->settings->get_string( self::INSURANCE_PERCENT_KEY, '0' ) ) ) );
+	}
+
 	public function pickup_method_title(): string {
 		return $this->service_method_title( 'pickup_method_title', self::DEFAULT_PICKUP_METHOD_TITLE );
 	}
@@ -195,6 +201,22 @@ final class CdekSettings {
 		$this->settings->set( self::DEFAULT_PACKAGE_LENGTH_CM_KEY, max( 1, (int) ( $input[ self::DEFAULT_PACKAGE_LENGTH_CM_KEY ] ?? 20 ) ) );
 		$this->settings->set( self::DEFAULT_PACKAGE_WIDTH_CM_KEY, max( 1, (int) ( $input[ self::DEFAULT_PACKAGE_WIDTH_CM_KEY ] ?? 20 ) ) );
 		$this->settings->set( self::DEFAULT_PACKAGE_HEIGHT_CM_KEY, max( 1, (int) ( $input[ self::DEFAULT_PACKAGE_HEIGHT_CM_KEY ] ?? 10 ) ) );
+		$this->settings->set( self::INSURANCE_PERCENT_KEY, $this->sanitize_percent( $input[ self::INSURANCE_PERCENT_KEY ] ?? 0 ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $input
+	 */
+	public function save_tariff_calculation_from_admin( array $input ): void {
+		$this->settings->set( self::SENDER_CITY_CODE_KEY, max( 0, (int) ( $input[ self::SENDER_CITY_CODE_KEY ] ?? 0 ) ) );
+		$this->settings->set( self::SENDER_POSTAL_CODE_KEY, $this->valid_postal_code( (string) wp_unslash( $input[ self::SENDER_POSTAL_CODE_KEY ] ?? '' ) ) );
+		$this->settings->set( self::SENDER_CITY_NAME_KEY, sanitize_text_field( wp_unslash( $input[ self::SENDER_CITY_NAME_KEY ] ?? '' ) ) );
+		$this->settings->set( self::SENDER_ADDRESS_KEY, substr( sanitize_text_field( wp_unslash( $input[ self::SENDER_ADDRESS_KEY ] ?? '' ) ), 0, 255 ) );
+		$this->settings->set( self::SHIPMENT_POINT_KEY, $this->normalize_shipment_point( (string) wp_unslash( $input[ self::SHIPMENT_POINT_KEY ] ?? 'NSK69' ) ) );
+		$this->settings->set( self::DEFAULT_PACKAGE_LENGTH_CM_KEY, max( 1, (int) ( $input[ self::DEFAULT_PACKAGE_LENGTH_CM_KEY ] ?? 20 ) ) );
+		$this->settings->set( self::DEFAULT_PACKAGE_WIDTH_CM_KEY, max( 1, (int) ( $input[ self::DEFAULT_PACKAGE_WIDTH_CM_KEY ] ?? 20 ) ) );
+		$this->settings->set( self::DEFAULT_PACKAGE_HEIGHT_CM_KEY, max( 1, (int) ( $input[ self::DEFAULT_PACKAGE_HEIGHT_CM_KEY ] ?? 10 ) ) );
+		$this->settings->set( self::INSURANCE_PERCENT_KEY, $this->sanitize_percent( $input[ self::INSURANCE_PERCENT_KEY ] ?? 0 ) );
 	}
 
 	public function save_connection_result( bool $success, string $message ): void {
@@ -283,6 +305,13 @@ final class CdekSettings {
 
 	private function normalize_environment( string $environment ): string {
 		return self::ENV_PRODUCTION === $environment ? self::ENV_PRODUCTION : self::ENV_TEST;
+	}
+
+	private function sanitize_percent( mixed $value ): float {
+		$value = str_replace( ',', '.', trim( (string) wp_unslash( $value ) ) );
+		$percent = is_numeric( $value ) ? (float) $value : 0.0;
+
+		return max( 0.0, min( 100.0, $percent ) );
 	}
 
 	private function valid_postal_code( string $postal_code ): string {

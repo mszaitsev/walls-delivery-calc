@@ -1,6 +1,8 @@
 # WDC CDEK Order Creation
 
-Version: 0.48.2.
+Version: 0.48.4.
+
+0.48.4 update: CDEK order status is now derived from `entity.statuses[]`, not from request state. Deleted statuses are ignored and the active status is the non-deleted status with the maximum parsable `date_time`; if dates cannot be parsed, the fallback is the last non-deleted status. `entity.planned_delivery_date` is saved as shipment data and shown in the grey shipment info block when present. The actual CDEK delivery price is read from `entity.delivery_detail.total_sum`, saved in the shipment payload, shown as `Цена: ... руб.`, and compared with the saved “Базовая стоимость API” using the same 3% tolerance as Russian Post.
 
 0.48.2 update: the existing `Отправления` metabox can manually attach an existing CDEK shipment by `cdek_number`, then use the same `Обновить статус` action as created shipments. CDEK cancel/delete uses `DELETE /v2/orders/{uuid}` only when the order status from Appendix 1 is `CREATED / Создан`; after API success the local shipment snapshot is removed so the order can be created again. Local-only removal does not call CDEK and is allowed only for known CDEK order statuses other than protected `ACCEPTED / Принят` and `CREATED / Создан`.
 
