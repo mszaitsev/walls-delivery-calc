@@ -1,6 +1,8 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.46.6.
+Version: 0.47.0.
+
+0.47.0 express/single-package update: CDEK settings now store `shipment_point` with default `NSK69`; WDC sends it in both the main item-level `POST /v2/calculator/tarifflist` request and the optional single-package request. The main request still expands `PackageItem::quantity` into separate packages. When every product unit fits a 50x50x30 cm box in at least one axis-aligned orientation and total product volume is within that box, WDC performs a second tarifflist request with one package whose weight is total package weight. A simple fit helper attempts to calculate actual combined box dimensions; if it cannot do so but mandatory fit checks pass, the second request may omit dimensions rather than inventing 50x50x30. New single-package `tariff_code` values are merged into the main candidates and duplicate codes are ignored. Before returning CDEK rates, WDC deduplicates exact `period_min`/`period_max` groups by price and CDEK name priority, then removes rates that are slower by `period_min` and more expensive. This is still tariff calculation only, not the future CDEK order creation package model.
 
 0.46.6 packaging weight adjustment: CDEK runtime calculation keeps item-based `packages[]`, but aggregate `Package::$packaging_weight_g` is added once to the first item package instead of becoming a separate 1x1x1 package. If packaging is represented by a `WDC_PACKAGING` `PackageItem`, that item remains its own package and the aggregate packaging property is not applied again. This adjustment is only for `POST /v2/calculator/tarifflist`; it is not the future CDEK order-registration package model. No extra package diagnostics meta is stored.
 
@@ -41,11 +43,13 @@ This stage connects CDEK as a checkout/runtime carrier for tariff preview only. 
 - Tarifflist request payload:
   - `type = 1`.
   - `currency = 1` (RUB in CDEK API).
+  - `shipment_point` when configured.
   - `from_location.code`.
   - `to_location.code`.
   - `packages[]` per `PackageItem` unit when cart/order items are available.
   - package weight in grams from the unit item weight.
   - package dimensions from the unit item dimensions, with CDEK defaults applied only for missing dimensions.
+  - optional second-pass single package for carts fitting the conservative 50x50x30 cm check.
 - Response mapping:
   - `tariff_code`.
   - `tariff_name`.
