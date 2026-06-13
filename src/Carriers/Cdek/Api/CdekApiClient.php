@@ -67,6 +67,29 @@ final class CdekApiClient {
 
 	/**
 	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function registerOrder( array $payload ): array {
+		return $this->authorizedJsonRequest( 'POST', '/v2/orders', $payload );
+	}
+
+	/**
+	 * @param array<string,mixed> $query
+	 * @return array<string,mixed>
+	 */
+	public function orderByNumber( array $query ): array {
+		return $this->authorizedJsonRequest( 'GET', '/v2/orders', array(), $query );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function orderByUuid( string $uuid ): array {
+		return $this->authorizedJsonRequest( 'GET', '/v2/orders/' . rawurlencode( $uuid ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
 	 * @param array<string,mixed> $query
 	 * @return array<string,mixed>
 	 */

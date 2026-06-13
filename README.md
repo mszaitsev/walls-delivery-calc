@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.47.0.
+Current plugin version: 0.48.0.
+
+Version 0.48.0 starts CDEK order creation from the existing WooCommerce order metabox `Отправления`. The metabox is now carrier-aware, CDEK uses the same shipment service/adapters architecture as Russian Post, and the modal has `Основное` and universal `Грузоместа` tabs. CDEK creation sends `POST /v2/orders` as an asynchronous registration request, saves `registration_pending`, then checks the final state through `GET /v2/orders` or `GET /v2/orders/{uuid}` every 15 seconds for up to 10 minutes. The payload uses manager-entered packages/items, `print=BARCODE`, prepaid `item.payment.value=0`, unit cost after discount, and does not send `services`/`INSURANCE`, `additional_order_types`, `delivery_recipient_cost` or checkout packaging weight. See `docs/wdc-cdek-order-creation.md`.
 
 Version 0.47.0 extends CDEK runtime calculation. CDEK settings now include `shipment_point` (default `NSK69`) and pass it to every `POST /v2/calculator/tarifflist` request. Eligible carts also receive an additional single-package tarifflist pass for express/one-piece tariffs when a conservative 50x50x30 cm fit check succeeds; new tariff codes from that pass are merged into the main result without duplicates. Before checkout output, CDEK rates are filtered by exact `period_min`/`period_max` groups, then slower and more expensive options are removed by `period_min` and price.
 

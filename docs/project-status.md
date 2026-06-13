@@ -366,3 +366,4 @@
 - Профильный `docs/wdc-*.md` по области задачи.
 - `docs/walls-delivery-calc-tech-spec.md` - только если меняется целевой продуктовый или архитектурный контракт.
 - `docs/wdc-migration-plan.md` - если меняется порядок этапов, риски или стратегия перехода.
+0.48.0 note: CDEK order creation now starts from the existing WooCommerce `Отправления` metabox. The shipment modal is carrier-aware, adds `Основное` and universal `Грузоместа` tabs, builds CDEK `packages[]/items[]` from manager-entered package rows, sends `POST /v2/orders` as an async registration request, stores `registration_pending`, and polls `GET /v2/orders` or `GET /v2/orders/{uuid}` every 15 seconds for up to 10 minutes. The payload intentionally omits `services`/`INSURANCE`, `additional_order_types`, `delivery_recipient_cost` and checkout packaging weight, uses prepaid `item.payment.value=0`, and blocks duplicate CDEK creation while an order is pending/created/registered.

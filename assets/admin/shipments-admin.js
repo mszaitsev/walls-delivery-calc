@@ -36,6 +36,100 @@
     return data;
   }
 
+  function switchShipmentTab(form, tabName) {
+    if (!form) return;
+    form.querySelectorAll('[data-wdc-shipment-tab]').forEach((button) => {
+      button.classList.toggle('is-active', button.getAttribute('data-wdc-shipment-tab') === tabName);
+    });
+    form.querySelectorAll('[data-wdc-shipment-tab-panel]').forEach((panel) => {
+      panel.hidden = panel.getAttribute('data-wdc-shipment-tab-panel') !== tabName;
+    });
+    if (tabName === 'places') updateCdekPlaceOptions(form);
+  }
+
+  function updateCdekPlaceOptions(form) {
+    if (!form) return;
+    const places = Array.from(form.querySelectorAll('[data-wdc-place]'));
+    const options = places.map((row, index) => {
+      const number = String(index + 1);
+      const weight = row.querySelector('input[name*="[weight_g]"]');
+      const length = row.querySelector('input[name*="[length_cm]"]');
+      const width = row.querySelector('input[name*="[width_cm]"]');
+      const height = row.querySelector('input[name*="[height_cm]"]');
+      return {
+        number,
+        label: number,
+        weight: parseInt(weight && weight.value ? weight.value : '0', 10) || 0,
+        length: parseInt(length && length.value ? length.value : '0', 10) || 0,
+        width: parseInt(width && width.value ? width.value : '0', 10) || 0,
+        height: parseInt(height && height.value ? height.value : '0', 10) || 0
+      };
+    });
+    form.querySelectorAll('[data-wdc-cdek-place-select]').forEach((select) => {
+      const current = select.value || '1';
+      select.innerHTML = '';
+      options.forEach((option) => {
+        const el = document.createElement('option');
+        el.value = option.number;
+        el.textContent = option.label;
+        select.appendChild(el);
+      });
+      select.value = options.some((option) => option.number === current) ? current : '1';
+    });
+    updateCdekItemsSummary(form, options);
+  }
+
+  function updateCdekItemsSummary(form, places) {
+    const summary = form && form.querySelector('[data-wdc-cdek-items-summary]');
+    if (!summary) return;
+    const totals = {};
+    (places || []).forEach((place) => {
+      totals[place.number] = { weight: 0, cost: 0, quantity: 0, place };
+    });
+    form.querySelectorAll('[data-wdc-cdek-item-row]').forEach((row) => {
+      const place = row.querySelector('[data-wdc-cdek-place-select]');
+      const qty = row.querySelector('[data-wdc-cdek-qty]');
+      const weight = row.querySelector('input[name$="[weight]"]');
+      const cost = row.querySelector('input[name$="[cost]"]');
+      const placeNumber = place && place.value ? place.value : '1';
+      if (!totals[placeNumber]) totals[placeNumber] = { weight: 0, cost: 0, quantity: 0, place: { number: placeNumber, weight: 0 } };
+      const amount = parseInt(qty && qty.value ? qty.value : '0', 10) || 0;
+      totals[placeNumber].quantity += amount;
+      totals[placeNumber].weight += amount * (parseInt(weight && weight.value ? weight.value : '0', 10) || 0);
+      totals[placeNumber].cost += amount * (parseFloat(cost && cost.value ? cost.value : '0') || 0);
+    });
+    summary.innerHTML = Object.keys(totals).sort().map((number) => {
+      const row = totals[number];
+      const error = row.place.weight > 0 && row.weight > row.place.weight ? ' data-error="1"' : '';
+      return '<p' + error + '><strong>Место ' + number + ':</strong> товары ' + row.quantity + ', вес товаров ' + row.weight + ' г, стоимость ' + row.cost.toFixed(2) + '</p>';
+    }).join('');
+  }
+
+  function splitCdekItemRow(button) {
+    const row = button && button.closest ? button.closest('[data-wdc-cdek-item-row]') : null;
+    const form = findShipmentForm(button);
+    if (!row || !form) return;
+    const qtyInput = row.querySelector('[data-wdc-cdek-qty]');
+    const currentQty = parseInt(qtyInput && qtyInput.value ? qtyInput.value : '0', 10) || 0;
+    if (currentQty <= 1) return;
+    const clone = row.cloneNode(true);
+    const cloneQty = clone.querySelector('[data-wdc-cdek-qty]');
+    if (qtyInput) qtyInput.value = String(currentQty - 1);
+    if (cloneQty) cloneQty.value = '1';
+    clone.querySelectorAll('[name]').forEach((input) => {
+      input.name = input.name.replace(/cdek_items\[(\d+)\]/, function (_, number) {
+        return 'cdek_items[' + (Date.now() + parseInt(number, 10)) + ']';
+      });
+    });
+    const actionCell = clone.querySelector('td:last-child');
+    if (actionCell) {
+      actionCell.innerHTML = '<button type="button" class="button" data-wdc-cdek-minus>-</button> <button type="button" class="button" data-wdc-cdek-plus>+</button>';
+    }
+    row.after(clone);
+    updateCdekPlaceOptions(form);
+    schedulePreview(form);
+  }
+
   function requestPreview(form) {
     const preview = form.querySelector('[data-wdc-shipment-preview]');
     const errors = form.querySelector('[data-wdc-shipment-errors]');
@@ -321,14 +415,14 @@
     const cancelButton = box.querySelector('[data-wdc-cancel-shipment]');
     const removeButton = box.querySelector('[data-wdc-remove-shipment-from-order]');
     if (openButton) {
-      setVisible(openButton, !hasTracking);
-      openButton.hidden = hasTracking;
-      openButton.disabled = hasTracking;
+      setVisible(openButton, !(hasTracking || isCdek));
+      openButton.hidden = hasTracking || isCdek;
+      openButton.disabled = hasTracking || isCdek;
     }
     if (updateButton) {
-      setVisible(updateButton, hasTracking);
-      updateButton.hidden = !hasTracking;
-      updateButton.disabled = !hasTracking;
+      setVisible(updateButton, hasTracking || isCdek);
+      updateButton.hidden = !(hasTracking || isCdek);
+      updateButton.disabled = false;
     }
     if (manualButton) {
       setVisible(manualButton, !hasTracking);
@@ -443,6 +537,43 @@
       .finally(() => {
         if (button) button.disabled = false;
       });
+  }
+
+  function startCdekPolling(button) {
+    let attempts = 0;
+    const maxAttempts = 40;
+    const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
+    const tick = function () {
+      attempts += 1;
+      requestShipmentStatus(button, { auto: true })
+        .then((payload) => {
+          const data = payload && payload.data ? payload.data : {};
+          const status = data.status || {};
+          const state = String(status.carrier_operation_index || '').toUpperCase();
+          const code = String(status.carrier_operation_address || '').toUpperCase();
+          if (state === 'INVALID') {
+            showShipmentToast(box, 'Регистрация СДЭК завершилась ошибкой.', 'error', { append: true });
+            return;
+          }
+          if (code === 'CREATED' || data.terminal) {
+            showShipmentToast(box, 'Регистрация СДЭК завершена успешно.', 'success', { append: true });
+            return;
+          }
+          if (attempts >= maxAttempts) {
+            showShipmentToast(box, 'СДЭК еще не завершил регистрацию заказа. Автоматическая проверка остановлена через 10 минут. Обновите статус вручную позже.', 'warning', { append: true });
+            return;
+          }
+          window.setTimeout(tick, 15000);
+        })
+        .catch(() => {
+          if (attempts >= maxAttempts) {
+            showShipmentToast(box, 'СДЭК еще не завершил регистрацию заказа. Автоматическая проверка остановлена через 10 минут. Обновите статус вручную позже.', 'warning', { append: true });
+            return;
+          }
+          window.setTimeout(tick, 15000);
+        });
+    };
+    window.setTimeout(tick, 15000);
   }
 
   function requestShipmentCancel(button) {
@@ -841,6 +972,7 @@
       container.appendChild(clone);
       renumberPlaces(container);
       updateRemoveButtons(container);
+      if (form) updateCdekPlaceOptions(form);
       if (form) updateDeclaredValueFields(form);
       if (form) schedulePreview(form);
       return;
@@ -860,7 +992,35 @@
       renumberPlaces(container);
       updateRemoveButtons(container);
       const form = findShipmentForm(remove) || findShipmentForm(container);
+      if (form) updateCdekPlaceOptions(form);
       if (form) requestPreview(form);
+      return;
+    }
+
+    const tab = event.target.closest('[data-wdc-shipment-tab]');
+    if (tab) {
+      switchShipmentTab(findShipmentForm(tab), tab.getAttribute('data-wdc-shipment-tab') || 'main');
+      return;
+    }
+
+    const split = event.target.closest('[data-wdc-cdek-split]');
+    if (split) {
+      splitCdekItemRow(split);
+      return;
+    }
+
+    const minus = event.target.closest('[data-wdc-cdek-minus], [data-wdc-cdek-plus]');
+    if (minus) {
+      const row = minus.closest('[data-wdc-cdek-item-row]');
+      const form = findShipmentForm(minus);
+      const input = row && row.querySelector('[data-wdc-cdek-qty]');
+      if (input) {
+        const delta = minus.matches('[data-wdc-cdek-plus]') ? 1 : -1;
+        const max = parseInt(input.max || '999', 10) || 999;
+        input.value = String(Math.max(1, Math.min(max, (parseInt(input.value || '1', 10) || 1) + delta)));
+      }
+      if (form) updateCdekPlaceOptions(form);
+      if (form) schedulePreview(form);
       return;
     }
 
@@ -999,19 +1159,25 @@
           if (openButton) openButton.disabled = true;
           const updateButton = box && box.querySelector('[data-wdc-update-shipment-status]');
           if (updateButton) {
-            updateButton.disabled = !(payload.data.tracking_number || payload.data.status && payload.data.status.barcode);
+            updateButton.disabled = false;
           }
           updateShipmentButtons(box, {
             hasTracking: !!(payload.data.tracking_number || payload.data.status && payload.data.status.barcode),
             canCancel: !!(payload.data.status && payload.data.status.can_cancel)
           });
-          showShipmentToast(box, (payload.data.message || 'Отправление создано.') + ' Barcode: ' + (payload.data.tracking_number || '-'), 'success');
+          showShipmentToast(box, payload.data.message || 'Отправление создано.', 'success');
           if (updateButton && !updateButton.disabled) {
-            requestShipmentStatus(updateButton, { auto: true });
+            const carrier = updateButton.dataset ? updateButton.dataset.shipmentKey || '' : '';
+            if (carrier === 'cdek') {
+              startCdekPolling(updateButton);
+            } else {
+              requestShipmentStatus(updateButton, { auto: true });
+            }
           }
         })
         .catch((error) => {
           if (errors) errors.textContent = error.message;
+          showShipmentToast(findShipmentForm(create), error.message, 'error');
         });
     }
   });
@@ -1036,6 +1202,7 @@
       const integerForm = findShipmentForm(event.target);
       if (integerForm) {
         updateScenarioSections(integerForm);
+        updateCdekPlaceOptions(integerForm);
         schedulePreview(integerForm);
       }
       return;
@@ -1043,6 +1210,7 @@
     const form = findShipmentForm(event.target);
     if (form) {
       updateScenarioSections(form);
+      updateCdekPlaceOptions(form);
       schedulePreview(form);
     }
   });
@@ -1077,6 +1245,7 @@
       updateDeclaredValueFields(form);
     }
     updateScenarioSections(form);
+    updateCdekPlaceOptions(form);
     schedulePreview(form);
   });
 
@@ -1087,6 +1256,8 @@
   });
   forms.forEach((form) => {
     initializeForm(form, false);
+    updateCdekPlaceOptions(form);
   });
 })();
 
+    const isCdek = updateButton && updateButton.dataset && updateButton.dataset.shipmentKey === 'cdek';

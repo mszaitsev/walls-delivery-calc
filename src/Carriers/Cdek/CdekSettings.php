@@ -34,6 +34,7 @@ final class CdekSettings {
 	public const SENDER_CITY_CODE_KEY = 'cdek_sender_city_code';
 	public const SENDER_POSTAL_CODE_KEY = 'cdek_sender_postal_code';
 	public const SENDER_CITY_NAME_KEY = 'cdek_sender_city_name';
+	public const SENDER_ADDRESS_KEY = 'cdek_sender_address';
 	public const SHIPMENT_POINT_KEY = 'cdek_shipment_point';
 	public const DEFAULT_PACKAGE_LENGTH_CM_KEY = 'cdek_default_package_length_cm';
 	public const DEFAULT_PACKAGE_WIDTH_CM_KEY = 'cdek_default_package_width_cm';
@@ -63,6 +64,7 @@ final class CdekSettings {
 			self::SENDER_CITY_CODE_KEY => '',
 			self::SENDER_POSTAL_CODE_KEY => '',
 			self::SENDER_CITY_NAME_KEY => '',
+			self::SENDER_ADDRESS_KEY => '',
 			self::SHIPMENT_POINT_KEY => 'NSK69',
 			self::DEFAULT_PACKAGE_LENGTH_CM_KEY => 20,
 			self::DEFAULT_PACKAGE_WIDTH_CM_KEY => 20,
@@ -122,6 +124,10 @@ final class CdekSettings {
 
 	public function sender_city_name(): string {
 		return trim( $this->settings->get_string( self::SENDER_CITY_NAME_KEY, '' ) );
+	}
+
+	public function sender_address(): string {
+		return trim( $this->settings->get_string( self::SENDER_ADDRESS_KEY, '' ) );
 	}
 
 	public function shipment_point(): string {
@@ -184,6 +190,7 @@ final class CdekSettings {
 		$this->settings->set( self::SENDER_CITY_CODE_KEY, max( 0, (int) ( $input[ self::SENDER_CITY_CODE_KEY ] ?? 0 ) ) );
 		$this->settings->set( self::SENDER_POSTAL_CODE_KEY, $this->valid_postal_code( (string) wp_unslash( $input[ self::SENDER_POSTAL_CODE_KEY ] ?? '' ) ) );
 		$this->settings->set( self::SENDER_CITY_NAME_KEY, sanitize_text_field( wp_unslash( $input[ self::SENDER_CITY_NAME_KEY ] ?? '' ) ) );
+		$this->settings->set( self::SENDER_ADDRESS_KEY, substr( sanitize_text_field( wp_unslash( $input[ self::SENDER_ADDRESS_KEY ] ?? '' ) ), 0, 255 ) );
 		$this->settings->set( self::SHIPMENT_POINT_KEY, $this->normalize_shipment_point( (string) wp_unslash( $input[ self::SHIPMENT_POINT_KEY ] ?? 'NSK69' ) ) );
 		$this->settings->set( self::DEFAULT_PACKAGE_LENGTH_CM_KEY, max( 1, (int) ( $input[ self::DEFAULT_PACKAGE_LENGTH_CM_KEY ] ?? 20 ) ) );
 		$this->settings->set( self::DEFAULT_PACKAGE_WIDTH_CM_KEY, max( 1, (int) ( $input[ self::DEFAULT_PACKAGE_WIDTH_CM_KEY ] ?? 20 ) ) );

@@ -99,6 +99,7 @@ C:.
 |       wdc-carrier-foundation.md
 |       wdc-cdek-foundation.md
 |       wdc-cdek-insurance-audit.md
+|       wdc-cdek-order-creation.md
 |       wdc-cdek-pickup-points.md
 |       wdc-cdek-tariff-calculation.md
 |       wdc-checkout-integration.md
@@ -517,6 +518,11 @@ C:.
 |   |   +---Contracts
 |   |   |       ShipmentCarrierAdapterInterface.php
 |   |   |
+|   |   +---Cdek
+|   |   |       CdekCreateRequestBuilder.php
+|   |   |       CdekOrderStatusService.php
+|   |   |       CdekShipmentAdapter.php
+|   |   |
 |   |   +---RussianPost
 |   |   |       RussianPostAddressNormalizer.php
 |   |   |       RussianPostCreateRequestBuilder.php
@@ -549,6 +555,7 @@ C:.
     |
     +---cdek
     |       run-cdek-foundation-smoke.php
+    |       run-cdek-order-creation-smoke.php
     |       run-cdek-pickup-points-smoke.php
     |       run-cdek-tariff-calculation-smoke.php
     |       run-cdek-tariffs-sync-smoke.php

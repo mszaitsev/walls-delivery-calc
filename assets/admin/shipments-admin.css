@@ -142,6 +142,27 @@
   gap: 18px;
 }
 
+.wdc-shipment-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 14px;
+}
+
+.wdc-shipment-tab.is-active {
+  border-color: #2271b1;
+  color: #fff;
+  background: #2271b1;
+}
+
+.wdc-cdek-items-table input,
+.wdc-cdek-items-table select {
+  min-width: 72px;
+}
+
+.wdc-cdek-items-summary [data-error="1"] {
+  color: #b32d2e;
+}
+
 .wdc-shipment-modal label {
   display: block;
   margin: 0 0 10px;

@@ -1,0 +1,86 @@
+# WDC CDEK Order Creation
+
+Version: 0.48.0.
+
+This stage starts CDEK shipment creation from the existing WooCommerce order metabox `Отправления`. The flow is carrier-aware: Russian Post keeps the existing behavior, while orders saved with `carrier_key=cdek` use the CDEK-specific preview, validation, creation and status polling path.
+
+## API Contract
+
+The implementation follows the attached CDEK API HTML documentation for:
+
+- `POST /v2/orders` - registration request for an order;
+- `GET /v2/orders` - lookup by CDEK number or IM number;
+- `GET /v2/orders/{uuid}` - lookup by CDEK entity UUID;
+- Appendix 1 order statuses, especially `ACCEPTED` and `CREATED`;
+- Appendix 6 additional services, where `INSURANCE` is automatic for `type=1`;
+- documented `package`, `item`, `money`, `print`, `from_location`, `shipment_point`, `to_location` and `delivery_point` formats.
+
+`POST /v2/orders` only submits an asynchronous registration request. A successful response means the request was accepted for processing; it is not treated as the final created order. The final registration state is checked through `GET /v2/orders/{uuid}` when CDEK returns `entity.uuid`, otherwise through `GET /v2/orders` by CDEK number or IM number.
+
+## Payload Rules
+
+The CDEK order payload uses `type=1`, `number` from the WooCommerce order number, the selected `tariff_code`, recipient data, packages, and `print=BARCODE`. The BARCODE print file is intentionally not downloaded or displayed in this stage.
+
+The shipment origin and destination are selected by tariff delivery mode:
+
+- `1` door-door: `from_location` + `to_location`;
+- `2` door-warehouse: `from_location` + `delivery_point`;
+- `3` warehouse-door: `shipment_point` + `to_location`;
+- `4` warehouse-warehouse: `shipment_point` + `delivery_point`.
+
+`from_location` and `shipment_point` are never sent together. `delivery_point` and `to_location` are never sent together. `from_location` uses `cdek_sender_city_code`, `cdek_sender_address`, and optional sender city/postal fields when configured.
+
+The implementation does not send `services`, `additional_order_types`, `delivery_recipient_cost` or `delivery_recipient_cost_adv`. Insurance is not sent as a service because the CDEK docs state that `INSURANCE` is automatic for Internet-shop orders and is not allowed for explicit `services.code` on `type=1`.
+
+## Packages And Items
+
+Order creation does not reuse checkout calculation packages and does not add checkout packaging weight to the CDEK order. Each manager-entered грузоместо becomes one CDEK `package` with `number`, `weight`, `length`, `width`, `height` and `items`.
+
+Items are built from the modal `Грузоместа` tab. Each item contains `name`, `ware_key`, `payment`, `cost`, `weight` and `amount`. `payment.value` is always `0` because the shop does not use cash on delivery. `cost` is the unit declared value after discount: `line_total / quantity`, with product price only as a fallback. Manager overrides in the modal affect only the outgoing CDEK payload and do not mutate WooCommerce product cards.
+
+The UI supports splitting order item quantities into multiple rows while keeping the total equal to the ordered quantity. Every row must be assigned to an existing package, item weights must be positive, and package weight must be at least the sum of assigned item weights. More than 126 item rows is blocked before API submission.
+
+## Status Flow
+
+After accepted `POST /v2/orders`, the shipment is saved with status `registration_pending`, request UUID/entity UUID/CDEK number when present, and sanitized request/response snapshots.
+
+The admin UI then polls status every 15 seconds for up to 10 minutes, maximum 40 attempts:
+
+- request state `INVALID` saves shipment status `failed` and shows the CDEK errors;
+- order status `CREATED` from Appendix 1, or successful request state, saves shipment status `registered`;
+- `ACCEPTED` and other intermediate states keep `registration_pending`;
+- after timeout the UI stops automatic polling and tells the manager to refresh manually later.
+
+The existing `Обновить статус` button now works for CDEK shipments as a manual status refresh path. Full webhook handling, print downloads, cancellation, bulk actions and cron autosync remain outside this stage.
+
+## UI And Idempotency
+
+The existing `Отправления` metabox is reused. The modal now has tabs:
+
+- `Основное` for the carrier-specific shipment summary and main controls;
+- `Грузоместа` for universal package/item assignment data.
+
+The `Грузоместа` tab is shown for all carriers so other services can adopt it later. In 0.48.0 it actively drives CDEK `packages[]`; Russian Post flow is kept backward-compatible.
+
+Repeated CDEK creation is blocked when the order already has a CDEK shipment in `registration_pending`, `created` or `registered`. The UI shows the existing UUID/number/status instead of accidentally creating another CDEK order with the same IM number.
+
+Toast notifications use the same admin mechanism as Russian Post for accepted registration, successful registration, registration errors, timeout and validation errors.
+
+## Settings
+
+CDEK sender settings now include:
+
+- `cdek_sender_address` - admin label `Адрес отправителя СДЭК для тарифов от двери`.
+
+The value is trimmed, stored as plain text, and limited to 255 characters. `shipper_name` and `shipper_address` are not added because the current stage does not implement international Internet-shop shipments.
+
+## Tests
+
+Smoke coverage:
+
+- `php tests/cdek/run-cdek-order-creation-smoke.php`
+- `php tests/cdek/run-cdek-foundation-smoke.php`
+- `php tests/cdek/run-cdek-tariff-calculation-smoke.php`
+- `php tests/cdek/run-cdek-pickup-points-smoke.php`
+- `php tests/runtime/run-no-legacy-smoke.php`
+- `php tests/orders/run-order-delivery-recalculation-smoke.php`

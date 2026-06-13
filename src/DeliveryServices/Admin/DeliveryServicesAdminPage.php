@@ -744,6 +744,7 @@ final class DeliveryServicesAdminPage {
 				<?php $this->text_row( CdekSettings::SHIPMENT_POINT_KEY, __( 'Код ПВЗ отправления СДЭК', 'walls-delivery-calc' ), $this->cdek_settings->shipment_point() ); ?>
 				<?php $this->text_row( CdekSettings::SENDER_POSTAL_CODE_KEY, __( 'Индекс отправителя', 'walls-delivery-calc' ), $this->cdek_settings->sender_postal_code() ); ?>
 				<?php $this->text_row( CdekSettings::SENDER_CITY_NAME_KEY, __( 'Город отправителя для диагностики', 'walls-delivery-calc' ), $this->cdek_settings->sender_city_name() ); ?>
+				<?php $this->text_row( CdekSettings::SENDER_ADDRESS_KEY, __( 'Адрес отправителя СДЭК для тарифов от двери', 'walls-delivery-calc' ), $this->cdek_settings->sender_address() ); ?>
 				<?php $dimensions = $this->cdek_settings->default_package_dimensions_cm(); ?>
 				<?php $this->text_row( CdekSettings::DEFAULT_PACKAGE_LENGTH_CM_KEY, __( 'Длина упаковки по умолчанию, см', 'walls-delivery-calc' ), (string) $dimensions['length'] ); ?>
 				<?php $this->text_row( CdekSettings::DEFAULT_PACKAGE_WIDTH_CM_KEY, __( 'Ширина упаковки по умолчанию, см', 'walls-delivery-calc' ), (string) $dimensions['width'] ); ?>

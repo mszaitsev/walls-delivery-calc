@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Admin;
 
 use WallsShop\WDC\Admin\AdminMenu;
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
@@ -15,6 +16,7 @@ use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
+use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -37,6 +39,7 @@ final class OrderShipmentsMetabox {
 		private ShipmentCreationService $creation,
 		private DeliveryServiceRepository $services,
 		private ShipmentStatusUpdateService $status_updates,
+		private ?CdekOrderStatusService $cdek_status_updates = null,
 		private ?ShipmentBacklogService $backlog = null,
 		private ?RussianPostAddressNormalizer $address_normalizer = null,
 		private ?RussianPostPickupPointTypeSettings $pickup_point_type_settings = null,
@@ -144,7 +147,6 @@ final class OrderShipmentsMetabox {
 			echo '<p>' . esc_html__( 'Заказ не найден.', 'walls-delivery-calc' ) . '</p>';
 			return;
 		}
-		$shipment = $this->repository->find_by_carrier( $order, RussianPostDomesticSettings::CARRIER_KEY );
 		$error = $this->repository->last_error( $order );
 		$draft = $this->drafts->draft_array( $order );
 		$safe_preview = array(
@@ -158,6 +160,11 @@ final class OrderShipmentsMetabox {
 		$address = is_array( $request['recipient_address'] ?? null ) ? $request['recipient_address'] : array();
 		$place = is_array( $request['places'][0] ?? null ) ? $request['places'][0] : array();
 		$meta = is_array( $request['meta'] ?? null ) ? $request['meta'] : array();
+		$carrier_key = (string) ( $request['carrier_key'] ?? $meta['carrier_key'] ?? '' );
+		$service_key = (string) ( $meta['service_key'] ?? $request['rate_id'] ?? '' );
+		$is_cdek = CdekSettings::CARRIER_KEY === $carrier_key;
+		$is_russian_post = RussianPostDomesticSettings::CARRIER_KEY === $carrier_key;
+		$shipment = '' !== $carrier_key ? $this->repository->find_by_carrier( $order, $carrier_key ) : array();
 		$settings = is_array( $request['services'] ?? null ) ? $request['services'] : array();
 		$pickup_code = (string) ( $request['pickup_point']['point_code'] ?? $meta['pickup_point_code'] ?? '' );
 		$pickup_destination_index = $this->pickup_destination_index( $pickup_code, (string) ( $address['postcode'] ?? '' ), $meta );
@@ -204,18 +211,18 @@ final class OrderShipmentsMetabox {
 			? ( ! empty( $normalized_address['success'] ) ? 'Адрес обработан Почтой России.' : 'Адрес не подтвержден Почтой России, создание отправления заблокировано.' )
 			: 'Адрес нужно обработать перед созданием отправления.';
 		$normalized_json = wp_json_encode( $normalized_address, JSON_UNESCAPED_UNICODE ) ?: '';
-		$has_created = in_array( (string) ( $shipment['status'] ?? '' ), array( 'created', 'registered' ), true );
+		$has_created = in_array( (string) ( $shipment['status'] ?? '' ), array( 'registration_pending', 'created', 'registered' ), true );
 		$barcode = trim( (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
 		$backlog_order_id = trim( (string) ( $shipment['backlog_order_id'] ?? '' ) );
-		$status_payload = $this->status_updates->status_payload( $shipment, $order );
+		$status_payload = $is_cdek && $this->cdek_status_updates instanceof CdekOrderStatusService ? $this->cdek_status_updates->status_payload( $shipment ) : $this->status_updates->status_payload( $shipment, $order );
 		$price_label = (string) ( $status_payload['actual_cost_label'] ?? '' );
 		$price_compare_status = (string) ( $status_payload['actual_cost_compare_status'] ?? '' );
 		$price_compare_message = (string) ( $status_payload['actual_cost_compare_message'] ?? '' );
-		$can_cancel = $this->can_cancel_shipment( $shipment );
-		$show_primary_actions = ! $has_created;
-		$show_update = $has_created && '' !== $barcode;
-		$show_cancel = $has_created && $can_cancel;
-		$show_remove = $has_created && '' !== $barcode && ! $can_cancel;
+		$can_cancel = $is_russian_post && $this->can_cancel_shipment( $shipment );
+		$show_primary_actions = '' !== $carrier_key && ! $has_created;
+		$show_update = $has_created && ( $is_cdek || '' !== $barcode );
+		$show_cancel = $is_russian_post && $has_created && $can_cancel;
+		$show_remove = $has_created && ( $is_cdek || ( '' !== $barcode && ! $can_cancel ) );
 		?>
 		<div class="wdc-shipments-metabox" data-wdc-shipments-metabox>
 			<p><strong><?php echo esc_html__( 'Служба', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $meta['service_title'] ?? $request['rate_id'] ?? '-' ) ); ?></p>
@@ -227,17 +234,18 @@ final class OrderShipmentsMetabox {
 			<span data-wdc-backlog-order-id hidden><?php echo esc_html( $backlog_order_id ); ?></span>
 			<?php if ( array() !== $error && ! $has_created ) : ?><div class="notice notice-error inline"><p><?php echo esc_html( (string) ( $error['error_message'] ?? '' ) ); ?></p></div><?php endif; ?>
 			<div class="wdc-shipment-status-message" data-wdc-shipment-status-message></div>
+			<?php if ( '' === $carrier_key ) : ?><p class="description"><?php echo esc_html__( 'Служба доставки для отправления не определена.', 'walls-delivery-calc' ); ?></p><?php endif; ?>
 			<p class="wdc-shipments-actions">
 				<button type="button" class="button button-primary" data-wdc-open-shipment-modal <?php echo $show_primary_actions ? '' : 'hidden'; ?> <?php disabled( ! $show_primary_actions ); ?>><?php echo esc_html__( 'Подготовить отправление', 'walls-delivery-calc' ); ?></button>
-				<button type="button" class="button" data-wdc-update-shipment-status data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( RussianPostDomesticSettings::CARRIER_KEY ); ?>" <?php echo $show_update ? '' : 'hidden'; ?> <?php disabled( ! $show_update ); ?>><?php echo esc_html__( 'Обновить статус', 'walls-delivery-calc' ); ?></button>
-				<button type="button" class="button" data-wdc-open-manual-tracking <?php echo $show_primary_actions ? '' : 'hidden'; ?> <?php disabled( ! $show_primary_actions ); ?>><?php echo esc_html__( 'Внести отслеживание вручную', 'walls-delivery-calc' ); ?></button>
-				<button type="button" class="button" data-wdc-cancel-shipment data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( RussianPostDomesticSettings::CARRIER_KEY ); ?>" <?php echo $show_cancel ? '' : 'hidden'; ?> <?php disabled( ! $can_cancel ); ?>><?php echo esc_html__( 'Отменить отправление', 'walls-delivery-calc' ); ?></button>
-				<button type="button" class="button" data-wdc-remove-shipment-from-order data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( RussianPostDomesticSettings::CARRIER_KEY ); ?>" <?php echo $show_remove ? '' : 'hidden'; ?> <?php disabled( ! $show_remove ); ?>><?php echo esc_html__( 'Удалить из заказа', 'walls-delivery-calc' ); ?></button>
+				<button type="button" class="button" data-wdc-update-shipment-status data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $show_update ? '' : 'hidden'; ?> <?php disabled( ! $show_update ); ?>><?php echo esc_html__( 'Обновить статус', 'walls-delivery-calc' ); ?></button>
+				<button type="button" class="button" data-wdc-open-manual-tracking <?php echo $show_primary_actions && $is_russian_post ? '' : 'hidden'; ?> <?php disabled( ! $show_primary_actions || ! $is_russian_post ); ?>><?php echo esc_html__( 'Внести отслеживание вручную', 'walls-delivery-calc' ); ?></button>
+				<button type="button" class="button" data-wdc-cancel-shipment data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $show_cancel ? '' : 'hidden'; ?> <?php disabled( ! $can_cancel ); ?>><?php echo esc_html__( 'Отменить отправление', 'walls-delivery-calc' ); ?></button>
+				<button type="button" class="button" data-wdc-remove-shipment-from-order data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $show_remove ? '' : 'hidden'; ?> <?php disabled( ! $show_remove ); ?>><?php echo esc_html__( 'Удалить из заказа', 'walls-delivery-calc' ); ?></button>
 			</p>
 			<div class="wdc-manual-tracking" data-wdc-manual-tracking-form hidden>
 				<label><?php echo esc_html__( 'Номер отслеживания', 'walls-delivery-calc' ); ?><input type="text" data-wdc-manual-tracking-input autocomplete="off"></label>
 				<p>
-					<button type="button" class="button button-primary" data-wdc-attach-tracking data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( RussianPostDomesticSettings::CARRIER_KEY ); ?>"><?php echo esc_html__( 'Найти и сохранить', 'walls-delivery-calc' ); ?></button>
+					<button type="button" class="button button-primary" data-wdc-attach-tracking data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>"><?php echo esc_html__( 'Найти и сохранить', 'walls-delivery-calc' ); ?></button>
 					<button type="button" class="button" data-wdc-cancel-manual-tracking><?php echo esc_html__( 'Отмена', 'walls-delivery-calc' ); ?></button>
 				</p>
 			</div>
@@ -247,6 +255,12 @@ final class OrderShipmentsMetabox {
 					<h2><?php echo esc_html__( 'Подготовка отправления', 'walls-delivery-calc' ); ?></h2>
 					<div id="wdc-shipment-form-<?php echo esc_attr( (string) $order_id ); ?>" class="wdc-shipment-form" data-wdc-shipment-form="1" role="group">
 						<input type="hidden" name="order_id" value="<?php echo esc_attr( (string) $order_id ); ?>">
+						<input type="hidden" name="carrier_key" value="<?php echo esc_attr( $carrier_key ); ?>">
+						<div class="wdc-shipment-tabs" role="tablist">
+							<button type="button" class="button wdc-shipment-tab is-active" data-wdc-shipment-tab="main"><?php echo esc_html__( 'Основное', 'walls-delivery-calc' ); ?></button>
+							<button type="button" class="button wdc-shipment-tab" data-wdc-shipment-tab="places"><?php echo esc_html__( 'Грузоместа', 'walls-delivery-calc' ); ?></button>
+						</div>
+						<div data-wdc-shipment-tab-panel="main">
 						<div class="wdc-shipment-grid">
 							<section>
 								<h3><?php echo esc_html__( 'Получатель', 'walls-delivery-calc' ); ?></h3>
@@ -278,7 +292,7 @@ final class OrderShipmentsMetabox {
 							</section>
 							<section>
 								<h3><?php echo esc_html__( 'Доставка', 'walls-delivery-calc' ); ?></h3>
-								<input type="hidden" name="service_key" value="<?php echo esc_attr( RussianPostDomesticSettings::SERVICE_KEY ); ?>">
+								<input type="hidden" name="service_key" value="<?php echo esc_attr( $service_key ); ?>">
 								<label><?php echo esc_html__( 'Сценарий доставки', 'walls-delivery-calc' ); ?><select name="delivery_type" data-wdc-service-select>
 									<?php foreach ( $services as $service ) : ?>
 										<option value="<?php echo esc_attr( (string) $service['delivery_type'] ); ?>" data-service-key="<?php echo esc_attr( (string) $service['service_key'] ); ?>" data-delivery-type="<?php echo esc_attr( (string) $service['delivery_type'] ); ?>" data-tariffs="<?php echo esc_attr( wp_json_encode( $service['tariffs'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '[]' ); ?>" <?php selected( $selected_delivery_type, (string) $service['delivery_type'] ); ?>><?php echo esc_html( (string) $service['title'] ); ?></option>
@@ -296,11 +310,17 @@ final class OrderShipmentsMetabox {
 									<?php endforeach; ?>
 								</select></label>
 								<p class="description" data-wdc-tariff-message<?php echo $tariff_message_hidden_attr; ?>><?php echo esc_html__( 'Для выбранной службы доставки нет включенных тарифов. Включите тариф на странице настроек службы доставки.', 'walls-delivery-calc' ); ?></p>
+								<?php if ( $is_cdek ) : ?>
+									<p><strong>tariff_code:</strong> <?php echo esc_html( (string) ( $meta['tariff_code'] ?? $meta['tariff_object'] ?? '-' ) ); ?></p>
+									<p><strong>delivery_mode:</strong> <?php echo esc_html( (string) ( $meta['delivery_mode'] ?? '-' ) ); ?></p>
+									<p><strong><?php echo esc_html__( 'Отправление', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( in_array( (int) ( $meta['delivery_mode'] ?? 0 ), array( 1, 2 ), true ) ? __( 'from_location', 'walls-delivery-calc' ) : __( 'shipment_point', 'walls-delivery-calc' ) ); ?></p>
+								<?php else : ?>
 								<label><?php echo esc_html__( 'Индекс места приема', 'walls-delivery-calc' ); ?><select name="postoffice_code">
 									<?php foreach ( $postoffice_codes as $code ) : ?>
 										<option value="<?php echo esc_attr( (string) $code ); ?>" <?php selected( (string) ( $meta['postoffice_code'] ?? '' ), (string) $code ); ?>><?php echo esc_html( (string) $code ); ?></option>
 									<?php endforeach; ?>
 								</select></label>
+								<?php endif; ?>
 							</section>
 						</div>
 						<section>
@@ -326,6 +346,18 @@ final class OrderShipmentsMetabox {
 								<label><?php echo esc_html__( 'Название объединенной строки', 'walls-delivery-calc' ); ?><input name="combined_goods_name" value="<?php echo esc_attr( (string) ( $settings['combined_goods_name'] ?? '' ) ); ?>"></label>
 							</section>
 						<?php endif; ?>
+						</div>
+						<div data-wdc-shipment-tab-panel="places" hidden>
+							<section>
+								<h3><?php echo esc_html__( 'Грузоместа', 'walls-delivery-calc' ); ?></h3>
+								<div class="wdc-cdek-items-summary" data-wdc-cdek-items-summary></div>
+								<?php if ( $is_cdek ) : ?>
+									<?php $this->render_cdek_item_rows( $request ); ?>
+								<?php else : ?>
+									<p class="description"><?php echo esc_html__( 'Вкладка универсальна для всех служб доставки. Для Почты России текущий процесс создания отправления не изменен.', 'walls-delivery-calc' ); ?></p>
+								<?php endif; ?>
+							</section>
+						</div>
 						<section>
 							<h3><?php echo esc_html__( 'Проверка', 'walls-delivery-calc' ); ?></h3>
 							<div class="wdc-shipment-errors" data-wdc-shipment-errors></div>
@@ -392,9 +424,11 @@ final class OrderShipmentsMetabox {
 		}
 
 		$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
-		$result = $this->status_updates->update_russian_post( $order, $shipment_key );
+		$result = CdekSettings::CARRIER_KEY === $shipment_key && $this->cdek_status_updates instanceof CdekOrderStatusService
+			? $this->cdek_status_updates->update( $order )
+			: $this->status_updates->update_russian_post( $order, $shipment_key );
 		if ( ! (bool) ( $result['success'] ?? false ) ) {
-			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось получить статус Почты России.', 'walls-delivery-calc' ) ) ), 400 );
+			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось получить статус отправления.', 'walls-delivery-calc' ) ) ), 400 );
 		}
 
 		wp_send_json_success(
@@ -542,6 +576,48 @@ final class OrderShipmentsMetabox {
 		return $order_id > 0 && function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
 	}
 
+	/**
+	 * @param array<string,mixed> $request
+	 */
+	private function render_cdek_item_rows( array $request ): void {
+		$places = is_array( $request['places'] ?? null ) ? $request['places'] : array();
+		$items = is_array( $places[0]['items'] ?? null ) ? $places[0]['items'] : array();
+		if ( array() === $items ) {
+			echo '<p class="description">' . esc_html__( 'В заказе нет товарных строк для СДЭК.', 'walls-delivery-calc' ) . '</p>';
+			return;
+		}
+		?>
+		<table class="widefat striped wdc-cdek-items-table" data-wdc-cdek-items-table>
+			<thead><tr><th><?php echo esc_html__( 'Товар', 'walls-delivery-calc' ); ?></th><th>SKU / ware_key</th><th>Qty</th><th><?php echo esc_html__( 'Cost', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Длина', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Ширина', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Высота', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Место', 'walls-delivery-calc' ); ?></th><th></th></tr></thead>
+			<tbody>
+			<?php foreach ( $items as $index => $item ) : ?>
+				<?php
+				$row_key = 'item-' . (string) ( $index + 1 );
+				$quantity = max( 1, (int) ( $item['quantity'] ?? 1 ) );
+				$sku = (string) ( $item['sku'] ?? '' );
+				if ( '' === $sku ) {
+					$sku = substr( 'item' . (string) ( $index + 1 ), 0, 20 );
+				}
+				$unit = is_array( $item['unit_price'] ?? null ) ? (int) ( $item['unit_price']['amount_kopecks'] ?? 0 ) / 100 : 0;
+				?>
+				<tr data-wdc-cdek-item-row data-item-key="<?php echo esc_attr( $row_key ); ?>" data-ordered-quantity="<?php echo esc_attr( (string) $quantity ); ?>">
+					<td><?php echo esc_html( (string) ( $item['name'] ?? 'Товар' ) ); ?><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][name]" value="<?php echo esc_attr( (string) ( $item['name'] ?? 'Товар' ) ); ?>"><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][item_key]" value="<?php echo esc_attr( $row_key ); ?>"><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][ordered_quantity]" value="<?php echo esc_attr( (string) $quantity ); ?>"></td>
+					<td><code><?php echo esc_html( $sku ); ?></code><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][ware_key]" value="<?php echo esc_attr( $sku ); ?>"></td>
+					<td><input type="number" min="1" max="<?php echo esc_attr( (string) $quantity ); ?>" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][amount]" value="<?php echo esc_attr( (string) $quantity ); ?>" data-wdc-cdek-qty></td>
+					<td><input type="number" min="0" step="0.01" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][cost]" value="<?php echo esc_attr( (string) $unit ); ?>"></td>
+					<td><input type="number" min="1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][weight]" value="<?php echo esc_attr( (string) max( 1, (int) ( $item['weight_g'] ?? 0 ) ) ); ?>"></td>
+					<td><input type="number" min="1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][length_cm]" value="<?php echo esc_attr( (string) max( 1, (int) ( $item['length_cm'] ?? 1 ) ) ); ?>"></td>
+					<td><input type="number" min="1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][width_cm]" value="<?php echo esc_attr( (string) max( 1, (int) ( $item['width_cm'] ?? 1 ) ) ); ?>"></td>
+					<td><input type="number" min="1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][height_cm]" value="<?php echo esc_attr( (string) max( 1, (int) ( $item['height_cm'] ?? 1 ) ) ); ?>"></td>
+					<td><select name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][place_number]" data-wdc-cdek-place-select><option value="1">1</option></select></td>
+					<td><?php if ( $quantity > 1 ) : ?><button type="button" class="button" data-wdc-cdek-split><?php echo esc_html__( 'Разбить', 'walls-delivery-calc' ); ?></button><?php endif; ?></td>
+				</tr>
+			<?php endforeach; ?>
+			</tbody>
+		</table>
+		<?php
+	}
+
 	private function preview_request( \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest $request ): \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest {
 		return new \WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest(
 			$request->order_id,
@@ -598,6 +674,7 @@ final class OrderShipmentsMetabox {
 		}
 
 		return match ( (string) ( $shipment['status'] ?? '' ) ) {
+			'registration_pending' => 'регистрация',
 			'created' => 'создано',
 			'registered' => 'зарегистрировано',
 			'failed' => 'ошибка',
