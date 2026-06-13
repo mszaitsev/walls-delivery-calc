@@ -197,7 +197,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			}
 		}
 		if ( array() !== $packages && $package->packaging_weight_g > 0 && ! $this->has_packaging_item( $package ) ) {
-			$packages[] = $this->packaging_weight_package_payload( $package->packaging_weight_g );
+			$packages[0]['weight'] = max( 1, (int) $packages[0]['weight'] + $package->packaging_weight_g );
 		}
 
 		if ( array() !== $packages ) {
@@ -232,18 +232,6 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			'length' => $dimensions['length'],
 			'width' => $dimensions['width'],
 			'height' => $dimensions['height'],
-		);
-	}
-
-	/**
-	 * @return array{weight:int,length:int,width:int,height:int}
-	 */
-	private function packaging_weight_package_payload( int $weight_g ): array {
-		return array(
-			'weight' => max( 1, $weight_g ),
-			'length' => 1,
-			'width' => 1,
-			'height' => 1,
 		);
 	}
 
@@ -345,8 +333,6 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			'calendar_max' => $details['calendar_max'] ?? null,
 			'delivery_mode' => $details['delivery_mode'] ?? null,
 			'request_payload_sanitized' => $payload,
-			'package_count' => count( is_array( $payload['packages'] ?? null ) ? $payload['packages'] : array() ),
-			'packages_payload_sanitized' => is_array( $payload['packages'] ?? null ) ? $payload['packages'] : array(),
 			'response_tariff_sanitized' => $this->sanitize_tariff( $details ),
 			'location' => array(
 				'cdek_from_city_code' => $this->settings->sender_city_code(),

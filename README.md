@@ -1,8 +1,10 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.46.5.
+Current plugin version: 0.46.6.
 
-Version 0.46.5 changes CDEK tariff calculation package formation. `POST /v2/calculator/tarifflist` now receives one package per `PackageItem` unit (`quantity` expands into repeated packages) using item weight and item dimensions with per-dimension CDEK defaults only when a product dimension is missing. Virtual packaging items such as `WDC_PACKAGING` are sent as their own package, aggregate `packaging_weight_g` is preserved as a separate 1x1x1 package instead of being distributed across products, and the old aggregated package remains only as a fallback when no package items exist. CDEK rate meta now records `package_count` and `packages_payload_sanitized`.
+Version 0.46.6 adjusts CDEK tarifflist package payloads for aggregate packaging weight. Item-based `packages[]` remain unchanged, but when `Package::$packaging_weight_g` is present it is added once to the first item package instead of creating a separate 1x1x1 package. If packaging is already represented by a real `WDC_PACKAGING` `PackageItem`, that item remains its own package and the aggregate packaging weight is not applied again. No extra package diagnostics meta is stored.
+
+Version 0.46.5 changes CDEK tariff calculation package formation. `POST /v2/calculator/tarifflist` now receives one package per `PackageItem` unit (`quantity` expands into repeated packages) using item weight and item dimensions with per-dimension CDEK defaults only when a product dimension is missing. Virtual packaging items such as `WDC_PACKAGING` are sent as their own package, and the old aggregated package remains only as a fallback when no package items exist.
 
 Version 0.46.4 fixes persistence of nullable CDEK tariff limits. `weight_*` and dimension limit fields from `GET /v2/calculator/alltariffs` now keep empty API values as SQL `NULL` on insert/update instead of formatting them through `%f` and risking `0.000`; numeric limits still save as decimal/float values.
 

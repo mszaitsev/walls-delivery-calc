@@ -338,6 +338,10 @@ function cdek_tariff_request( string $delivery_type = DeliveryType::PICKUP ): Qu
  */
 function cdek_tariff_request_with_items( array $items, int $packaging_weight_g = 0, string $delivery_type = DeliveryType::PICKUP ): QuoteRequest {
 	$package = Package::from_items( $items, $packaging_weight_g, Money::from_rubles( 1000 ), Money::from_rubles( 1000 ) );
+	return cdek_tariff_request_with_package( $package, $delivery_type );
+}
+
+function cdek_tariff_request_with_package( Package $package, string $delivery_type = DeliveryType::PICKUP ): QuoteRequest {
 	return new QuoteRequest(
 		'RU',
 		new Address( country_code: 'RU', region_name: 'Москва', city: 'Москва', postcode: '101000', street: 'Тверская', house: '1', raw_address: 'Тверская 1', fias_id: 'dest-fias' ),
@@ -498,8 +502,7 @@ cdek_tariff_assert( '2-4 дня' === (string) $pickup_rate->meta['api_delivery_d
 cdek_tariff_assert( DeliveryType::PICKUP === $pickup_rate->delivery_type, 'delivery_mode 4 warehouse-warehouse must be pickup.' );
 cdek_tariff_assert( 'СДЭК до пункта выдачи, Посылка склад-склад - 2-4 дня' === $pickup_rate->title, 'CDEK pickup runtime title must include method, tariff and delivery days.' );
 cdek_tariff_assert( true === $pickup_rate->requires_pickup_point, 'CDEK pickup rate must require pickup point selection.' );
-cdek_tariff_assert( 2 === (int) ( $pickup_rate->meta['package_count'] ?? 0 ), 'CDEK rate meta must include package_count.' );
-cdek_tariff_assert( array( array( 'weight' => 700, 'length' => 12, 'width' => 8, 'height' => 4 ), array( 'weight' => 300, 'length' => 1, 'width' => 1, 'height' => 1 ) ) === ( $pickup_rate->meta['packages_payload_sanitized'] ?? null ), 'CDEK rate meta must include sanitized packages payload.' );
+cdek_tariff_assert( ! array_key_exists( 'package_count', $pickup_rate->meta ) && ! array_key_exists( 'packages_payload_sanitized', $pickup_rate->meta ), 'CDEK package payload diagnostics must not add extra rate meta fields.' );
 $location_log = cdek_tariff_find_log( 'CDEK location resolved.' );
 cdek_tariff_assert( true === (bool) ( $location_log['context']['success'] ?? false ), 'CDEK location resolve result must be logged.' );
 cdek_tariff_assert( 270 === (int) ( $location_log['context']['city_code'] ?? 0 ), 'CDEK location resolve log must include city_code.' );
@@ -568,10 +571,9 @@ cdek_tariff_assert( 270 === (int) ( $payload['from_location']['code'] ?? 0 ), 'C
 cdek_tariff_assert( 270 === (int) ( $payload['to_location']['code'] ?? 0 ), 'CDEK to_location.code mismatch.' );
 cdek_tariff_assert( 1 === ( $payload['currency'] ?? null ), 'CDEK tarifflist currency must be int 1 for RUB.' );
 cdek_tariff_assert( ! str_contains( (string) $tariff_request['args']['body'], '"currency":"RUB"' ) && ! str_contains( (string) $tariff_request['args']['body'], '"RUB"' ), 'CDEK tarifflist payload must not contain string RUB currency.' );
-cdek_tariff_assert( 2 === count( $payload['packages'] ?? array() ), 'CDEK aggregate packaging weight must produce its own package.' );
-cdek_tariff_assert( 700 === (int) ( $payload['packages'][0]['weight'] ?? 0 ), 'CDEK package weight must use item weight without distributing aggregate packaging weight.' );
+cdek_tariff_assert( 1 === count( $payload['packages'] ?? array() ), 'CDEK aggregate packaging weight must not produce a separate package.' );
+cdek_tariff_assert( 1000 === (int) ( $payload['packages'][0]['weight'] ?? 0 ), 'CDEK aggregate packaging weight must be added once to the first package.' );
 cdek_tariff_assert( 12 === (int) ( $payload['packages'][0]['length'] ?? 0 ) && 8 === (int) ( $payload['packages'][0]['width'] ?? 0 ) && 4 === (int) ( $payload['packages'][0]['height'] ?? 0 ), 'CDEK package dimensions mismatch.' );
-cdek_tariff_assert( array( 'weight' => 300, 'length' => 1, 'width' => 1, 'height' => 1 ) === ( $payload['packages'][1] ?? null ), 'CDEK aggregate packaging weight must not be distributed across product packages.' );
 
 $single_http = new CdekTariffFakeHttpClient();
 [ , , $single_carrier ] = cdek_tariff_settings( $single_http, true );
@@ -582,15 +584,22 @@ cdek_tariff_assert( 1 === count( $single_payload['packages'] ?? array() ) && arr
 $quantity_http = new CdekTariffFakeHttpClient();
 [ , , $quantity_carrier ] = cdek_tariff_settings( $quantity_http, true );
 $quantity_item = new PackageItem( 'sku-qty', 'Товар qty', 4, Money::from_rubles( 100 ), Money::from_rubles( 400 ), 1000, 36, 12, 12 );
-$quantity_quote = $quantity_carrier->quote( cdek_tariff_request_with_items( array( $quantity_item ) ) );
+$quantity_carrier->quote( cdek_tariff_request_with_items( array( $quantity_item ) ) );
 $quantity_payload = cdek_tariff_last_tarifflist_payload( $quantity_http );
 cdek_tariff_assert( 4 === count( $quantity_payload['packages'] ?? array() ), 'CDEK item quantity=4 must produce four packages.' );
-cdek_tariff_assert( 4 === (int) ( $quantity_quote->rates[0]->meta['package_count'] ?? 0 ), 'CDEK package_count meta must match item quantity.' );
+cdek_tariff_assert( array( 1000, 1000, 1000, 1000 ) === array_map( static fn( array $package ): int => (int) ( $package['weight'] ?? 0 ), $quantity_payload['packages'] ?? array() ), 'CDEK item quantity=4 without packaging must keep four 1000 g packages.' );
 cdek_tariff_assert( array( 'weight' => 1000, 'length' => 36, 'width' => 12, 'height' => 12 ) === ( $quantity_payload['packages'][3] ?? null ), 'CDEK repeated package must keep unit item weight and dimensions.' );
+
+$quantity_packaging_http = new CdekTariffFakeHttpClient();
+[ , , $quantity_packaging_carrier ] = cdek_tariff_settings( $quantity_packaging_http, true );
+$quantity_packaging_carrier->quote( cdek_tariff_request_with_items( array( $quantity_item ), 200 ) );
+$quantity_packaging_payload = cdek_tariff_last_tarifflist_payload( $quantity_packaging_http );
+cdek_tariff_assert( 4 === count( $quantity_packaging_payload['packages'] ?? array() ), 'CDEK packaging_weight_g must not create an extra package for item payloads.' );
+cdek_tariff_assert( array( 1200, 1000, 1000, 1000 ) === array_map( static fn( array $package ): int => (int) ( $package['weight'] ?? 0 ), $quantity_packaging_payload['packages'] ?? array() ), 'CDEK packaging_weight_g must be added once to the first package only.' );
 
 $mixed_http = new CdekTariffFakeHttpClient();
 [ , , $mixed_carrier ] = cdek_tariff_settings( $mixed_http, true );
-$mixed_quote = $mixed_carrier->quote(
+$mixed_carrier->quote(
 	cdek_tariff_request_with_items(
 		array(
 			new PackageItem( 'sku-a', 'Товар A', 2, Money::from_rubles( 100 ), Money::from_rubles( 200 ), 500, 10, 11, 12 ),
@@ -599,7 +608,7 @@ $mixed_quote = $mixed_carrier->quote(
 	)
 );
 $mixed_payload = cdek_tariff_last_tarifflist_payload( $mixed_http );
-cdek_tariff_assert( 5 === count( $mixed_payload['packages'] ?? array() ) && 5 === (int) ( $mixed_quote->rates[0]->meta['package_count'] ?? 0 ), 'CDEK different items must produce sum(quantity) packages.' );
+cdek_tariff_assert( 5 === count( $mixed_payload['packages'] ?? array() ), 'CDEK different items must produce sum(quantity) packages.' );
 
 $defaults_http = new CdekTariffFakeHttpClient();
 [ , , $defaults_carrier ] = cdek_tariff_settings( $defaults_http, true );
@@ -619,6 +628,27 @@ $packaging_carrier->quote(
 );
 $packaging_payload = cdek_tariff_last_tarifflist_payload( $packaging_http );
 cdek_tariff_assert( 2 === count( $packaging_payload['packages'] ?? array() ) && array( 'weight' => 150, 'length' => 1, 'width' => 1, 'height' => 1 ) === ( $packaging_payload['packages'][1] ?? null ), 'CDEK WDC_PACKAGING item must be sent as a separate package.' );
+
+$packaging_with_property_http = new CdekTariffFakeHttpClient();
+[ , , $packaging_with_property_carrier ] = cdek_tariff_settings( $packaging_with_property_http, true );
+$packaging_with_property_carrier->quote(
+	cdek_tariff_request_with_items(
+		array(
+			new PackageItem( 'sku-product', 'Товар', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 800, 15, 10, 5 ),
+			new PackageItem( 'WDC_PACKAGING', 'Упаковка', 1, Money::from_rubles( 0 ), Money::from_rubles( 0 ), 200, 1, 1, 1 ),
+		),
+		200
+	)
+);
+$packaging_with_property_payload = cdek_tariff_last_tarifflist_payload( $packaging_with_property_http );
+cdek_tariff_assert( array( 800, 200 ) === array_map( static fn( array $package ): int => (int) ( $package['weight'] ?? 0 ), $packaging_with_property_payload['packages'] ?? array() ), 'CDEK WDC_PACKAGING item must prevent applying package packaging_weight_g again.' );
+
+$aggregate_http = new CdekTariffFakeHttpClient();
+[ , , $aggregate_carrier ] = cdek_tariff_settings( $aggregate_http, true );
+$aggregate_package = new Package( array(), Money::from_rubles( 1000 ), Money::from_rubles( 1000 ), 0, 200, 1234, 40, 30, 20, null, 'manual' );
+$aggregate_carrier->quote( cdek_tariff_request_with_package( $aggregate_package ) );
+$aggregate_payload = cdek_tariff_last_tarifflist_payload( $aggregate_http );
+cdek_tariff_assert( 1 === count( $aggregate_payload['packages'] ?? array() ) && 1234 === (int) ( $aggregate_payload['packages'][0]['weight'] ?? 0 ), 'CDEK no-items aggregated fallback must keep one package with total_weight_g.' );
 
 [ $service_registry, $service_manager ] = cdek_tariff_service_runtime( $carrier, false );
 $disabled_result = cdek_tariff_orchestrator( $carrier, $service_registry, $service_manager )->calculate( cdek_tariff_request(), array(), RateSorter::CHEAPEST, false );

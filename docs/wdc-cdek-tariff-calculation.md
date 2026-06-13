@@ -1,8 +1,10 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.46.5.
+Version: 0.46.6.
 
-0.46.5 package payload update: CDEK runtime calculation now sends `POST /v2/calculator/tarifflist` packages per cart item unit. Each `PackageItem` with `quantity = N` becomes `N` separate CDEK packages with `weight = max(1, item weight_g)` and item `length_cm`/`width_cm`/`height_cm`; missing dimensions fall back individually to `CdekSettings::default_package_dimensions_cm()`. A virtual packaging item such as `WDC_PACKAGING` is sent as its own package, and aggregate `packaging_weight_g` is preserved as a separate 1x1x1 package instead of being distributed across products. If a package has no items, WDC keeps the previous aggregated package fallback. CDEK rate meta stores `package_count` and `packages_payload_sanitized` for diagnostics.
+0.46.6 packaging weight adjustment: CDEK runtime calculation keeps item-based `packages[]`, but aggregate `Package::$packaging_weight_g` is added once to the first item package instead of becoming a separate 1x1x1 package. If packaging is represented by a `WDC_PACKAGING` `PackageItem`, that item remains its own package and the aggregate packaging property is not applied again. This adjustment is only for `POST /v2/calculator/tarifflist`; it is not the future CDEK order-registration package model. No extra package diagnostics meta is stored.
+
+0.46.5 package payload update: CDEK runtime calculation now sends `POST /v2/calculator/tarifflist` packages per cart item unit. Each `PackageItem` with `quantity = N` becomes `N` separate CDEK packages with `weight = max(1, item weight_g)` and item `length_cm`/`width_cm`/`height_cm`; missing dimensions fall back individually to `CdekSettings::default_package_dimensions_cm()`. A virtual packaging item such as `WDC_PACKAGING` is sent as its own package. If a package has no items, WDC keeps the previous aggregated package fallback.
 
 0.46.4 nullable storage fix: CDEK tariff limit insert/update now builds `$wpdb` formats dynamically. Null values for `weight_*`, `length_*`, `width_*` and `height_*` are stored as SQL `NULL` and are not formatted as `%f`; numeric values continue to use decimal/float formats. This prevents empty API fields from being persisted as `0.000`.
 
@@ -102,8 +104,6 @@ Each CDEK tariff rate stores safe meta such as:
 - `location.cdek_location_source`.
 - `package.weight_g`.
 - `package.dimensions_cm`.
-- `package_count`.
-- `packages_payload_sanitized`.
 
 Order calculation data also exposes API base cost, API delivery text, products/package/final weights, package dimensions, and rule audit details through the existing WDC calculation data structure.
 
