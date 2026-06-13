@@ -1,8 +1,6 @@
 (function (window) {
 	'use strict';
 
-	var LIST_LIMIT = 100;
-
 	function debounce(fn, wait) {
 		var timer = 0;
 		return function () {
@@ -248,14 +246,13 @@
 				].join('');
 				return;
 			}
-			var shown = points.slice(0, LIST_LIMIT);
-			var nearest = shown[0] && shown[0].distanceText ? shown[0].distanceText : '';
+			var nearest = points[0] && points[0].distanceText ? points[0].distanceText : '';
 			list.innerHTML = [
 				originStatus ? '<div class="wdc-pickup-list__status' + (originStatusType === 'error' ? ' is-error' : '') + '">' + escapeHtml(originStatus) + '</div>' : '',
 				searchAddress ? '<div class="wdc-pickup-list__found"><strong>Найден адрес:</strong><span>' + escapeHtml(searchAddress.value || '') + '</span>' + (nearest ? '<em>Ближайший ПВЗ: ' + escapeHtml(nearest) + '</em>' : '') + '</div>' : '',
-				'<div class="wdc-pickup-list__meta">' + escapeHtml(listMeta(points.length, shown.length)) + '</div>',
+				'<div class="wdc-pickup-list__meta">' + escapeHtml(listMeta(points.length, points.length)) + '</div>',
 				'<div class="wdc-pickup-list__items">',
-				shown.map(renderListItem).join(''),
+				points.map(renderListItem).join(''),
 				'</div>'
 			].join('');
 		}

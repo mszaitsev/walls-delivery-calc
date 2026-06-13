@@ -366,6 +366,8 @@
 - Профильный `docs/wdc-*.md` по области задачи.
 - `docs/walls-delivery-calc-tech-spec.md` - только если меняется целевой продуктовый или архитектурный контракт.
 - `docs/wdc-migration-plan.md` - если меняется порядок этапов, риски или стратегия перехода.
+0.48.10 note: the pickup map frontend no longer truncates the side list to the first 100 points. It renders every point returned by backend REST responses, reports the full list count, and selected pickup preview/scroll restoration works for points beyond the first 100 rows in large-city lists such as Moscow.
+
 0.48.9 note: pickup maps now restore the previously selected point as the active preview when reopened, including marker/list highlighting and list scroll. Admin pickup pickers in order recalculation and shipment preparation use the unified larger side-list layout with one bottom `Выбрать этот ПВЗ` button, no duplicate selected preview card and no per-card choose buttons. Address search UI no longer names DaData, CDEK titles render as `ПВЗ СДЭК {code}` / `Постамат СДЭК {code}`, and Russian Post admin pickup maps keep loading their own full point list/markers while address search remains only a temporary orientation marker.
 
 0.48.8 note: CDEK pickup maps now return the full available point list for large cities instead of truncating at 50. Checkout pickup, admin order delivery recalculation and the CDEK shipment preparation modal use a shared DaData-backed address search path that places a temporary marker, focuses the map on the found address, and preserves the active carrier/pickup-family context and point list.

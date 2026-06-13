@@ -523,6 +523,7 @@ cdek_pickup_assert( ! str_contains( $admin_js, "Ищем ПВЗ СДЭК" ) && !
 cdek_pickup_assert( str_contains( $admin_js, "'ПВЗ СДЭК'" ) && str_contains( $admin_js, "'Постамат СДЭК'" ), 'Admin recalculation map must render CDEK pickup/postamat titles.' );
 cdek_pickup_assert( ! str_contains( $map_js, "context.carrier === 'cdek'" ) && str_contains( $map_js, 'window.WDCPickupApi.addressSearch(query, context' ), 'Checkout pickup map must not bypass addressSearch for CDEK.' );
 cdek_pickup_assert( str_contains( $map_js, "'ПВЗ СДЭК'" ) && str_contains( $map_js, "'Постамат СДЭК'" ), 'Checkout pickup map must render CDEK pickup/postamat titles.' );
+cdek_pickup_assert( ! str_contains( $map_js, 'LIST_LIMIT' ) && ! str_contains( $map_js, 'points.slice(0' ) && str_contains( $map_js, 'points.map(renderListItem).join' ) && str_contains( $map_js, 'listMeta(points.length, points.length)' ), 'Checkout pickup map must render every CDEK point returned by backend, including large-city lists beyond the first 100 rows.' );
 cdek_pickup_assert( str_contains( $rest_source, "carrier === 'cdek'" ) || str_contains( $rest_source, "'cdek' === \$carrier" ), 'Pickup REST source must route CDEK pickup requests.' );
 
 $encoded_meta = (string) wp_json_encode( array( $checkout_order->meta, $admin_order->meta, $GLOBALS['wdc_cdek_pickup_logs'] ) );

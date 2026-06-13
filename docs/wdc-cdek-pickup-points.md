@@ -1,5 +1,9 @@
 # WDC CDEK Pickup Points
 
+Version: 0.48.10.
+
+0.48.10 note: the frontend pickup map no longer applies its own `LIST_LIMIT=100` cap to the side list. The list renders every pickup point returned by the backend, the list meta reflects the full point count, and selected-point preview/scroll restoration works even when the selected CDEK or Russian Post pickup point is located after the first 100 rows in a large-city result set.
+
 Version: 0.48.9.
 
 0.48.9 note: reopening the checkout pickup map with an already selected pickup point now previews that point immediately: the marker is active, the balloon opens, and the side-list row is highlighted and scrolled into view. Admin pickup maps in order delivery recalculation and shipment preparation now use one larger map layout with a side list and a single bottom `Выбрать этот ПВЗ` button; duplicate per-card preview controls were removed. Pickup-map address search UI now says `Ищем адрес...`, `Адрес найден.`, or `Адрес не найден.` without mentioning the geocoder provider. CDEK map/list/balloon titles render as `ПВЗ СДЭК {code}` or `Постамат СДЭК {code}`, while Russian Post keeps its current titles. Russian Post admin pickup maps again load points from recipient location context and use a larger location limit for big cities.

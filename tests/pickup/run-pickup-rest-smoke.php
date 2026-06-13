@@ -280,6 +280,8 @@ pickup_rest_assert( $detail_pvz_requested_ops instanceof WP_Error && 'not_found'
 
 $checkout_pickup_controller_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' ) ?: '';
 pickup_rest_assert( str_contains( $checkout_pickup_controller_source, 'RussianPostDomesticSettings::is_pickup_rate_id' ), 'Checkout pickup point REST save must accept Russian Post pickup group ids without clearing the selected point.' );
+$frontend_map_source = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/wdc-pickup-map.js' ) ?: '';
+pickup_rest_assert( ! str_contains( $frontend_map_source, 'LIST_LIMIT' ) && ! str_contains( $frontend_map_source, 'points.slice(0' ) && str_contains( $frontend_map_source, 'points.map(renderListItem).join' ), 'Frontend pickup map must not re-truncate full REST point lists to the first 100 rows.' );
 
 $limited = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '0,0,180,90', 'limit' => '1' ) );
 pickup_rest_assert( 1 === count( $limited ), 'limit must clamp result count.' );
