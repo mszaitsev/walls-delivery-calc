@@ -878,7 +878,7 @@
     }
     const postcode = form.querySelector('[data-wdc-pickup-postcode-field]');
     const address = form.querySelector('[data-wdc-pickup-address-field]');
-    return [postcode && postcode.value, address && address.value].filter(Boolean).join(' ').trim();
+    return [postcode && postcode.value, address && address.value, context.address, context.city, context.region, context.postcode].filter(Boolean).join(' ').trim();
   }
 
   function updatePickupDraft(form, point) {
@@ -1058,8 +1058,9 @@
     }
 
     function runSearch(mode) {
+      mode = mode || 'search';
       const value = String(query.value || '').trim();
-      if (!value) {
+      if (mode !== 'location' && !value) {
         status.textContent = 'Введите адрес или индекс.';
         return;
       }
@@ -1088,7 +1089,7 @@
       }
       searchMarker = null;
       status.textContent = 'Поиск...';
-      pickupSearchRequest(form, value, mode === 'location' ? 1000 : 100, controller.signal, mode || 'search')
+      pickupSearchRequest(form, value, mode === 'location' ? 2000 : 100, controller.signal, mode)
         .then((found) => {
           points = found;
           status.textContent = points.length ? 'Найдено: ' + points.length : 'ПВЗ не найдены.';
@@ -1159,7 +1160,7 @@
 
     query.value = currentPickupQuery(form);
     query.focus();
-    if (query.value) runSearch('location');
+    if (query.value || context.city || context.postcode || context.address || context.locationId || context.fiasId || context.garId) runSearch('location');
   }
 
   document.addEventListener('click', function (event) {

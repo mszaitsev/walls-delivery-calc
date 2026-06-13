@@ -479,7 +479,22 @@ function wdc_recalc_pickup_repository(): RussianPostPickupPointRepository {
 			'longitude' => 37.605,
 			'active' => 1,
 		),
-		array(
+	);
+	for ( $i = 1; $i <= 600; ++$i ) {
+		$db->russian_post_pickup_rows[] = array(
+			'point_code' => '77' . str_pad( (string) $i, 4, '0', STR_PAD_LEFT ) . '-OPS',
+			'point_type' => 'OPS',
+			'postcode' => '77' . str_pad( (string) $i, 4, '0', STR_PAD_LEFT ),
+			'region_name' => 'Москва',
+			'city_name' => 'Москва',
+			'address' => 'Москва, тестовое отделение ' . $i,
+			'fias_location_guid' => 'fias-override',
+			'latitude' => 55.7 + ( $i / 10000 ),
+			'longitude' => 37.5 + ( $i / 10000 ),
+			'active' => 1,
+		);
+	}
+	$db->russian_post_pickup_rows[] = array(
 			'point_code' => '190000-OPS',
 			'point_type' => 'OPS',
 			'postcode' => '190000',
@@ -490,7 +505,6 @@ function wdc_recalc_pickup_repository(): RussianPostPickupPointRepository {
 			'latitude' => 59.93,
 			'longitude' => 30.31,
 			'active' => 1,
-		),
 	);
 	return new RussianPostPickupPointRepository( $db );
 }
@@ -650,14 +664,14 @@ try {
 	recalc_smoke_assert( $response->success && array() !== $items && 'fias-override' === ( $items[0]['fias_id'] ?? '' ), 'Location search endpoint must return settlements.' );
 }
 
-$_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'selected_rate' => wp_json_encode( $rates_by_id['russian_post_domestic:pickup'] ), 'mode' => 'location', 'query' => '', 'limit' => 300 );
+$_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'selected_rate' => wp_json_encode( $rates_by_id['russian_post_domestic:pickup'] ), 'mode' => 'location', 'query' => '', 'limit' => 2000 );
 try {
 	$controller->ajax_pickup_search();
 	recalc_smoke_assert( false, 'Initial pickup endpoint must send JSON response.' );
 } catch ( WdcRecalcAjaxResponse $response ) {
 	$points = $response->data['points'] ?? array();
 	$point_codes = array_column( $points, 'point_code' );
-	recalc_smoke_assert( $response->success && in_array( '101000-OPS', $point_codes, true ) && in_array( '125009-OPS', $point_codes, true ) && ! in_array( '190000-OPS', $point_codes, true ), 'Initial pickup endpoint must return all pickup points for selected settlement, not one postcode.' );
+	recalc_smoke_assert( $response->success && count( $points ) > 300 && in_array( '101000-OPS', $point_codes, true ) && in_array( '125009-OPS', $point_codes, true ) && in_array( '770600-OPS', $point_codes, true ) && ! in_array( '190000-OPS', $point_codes, true ), 'Initial pickup endpoint must return all pickup points for selected settlement, not one postcode or a 300-row cap.' );
 	recalc_smoke_assert( isset( $points[0]['point_type'], $points[0]['point_address'], $points[0]['point_postcode'], $points[0]['lat'], $points[0]['lng'], $points[0]['point_raw'] ), 'Pickup endpoint must return selectedPickupPoint map payload fields.' );
 }
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $selected_location ), 'selected_rate' => wp_json_encode( $rates_by_id['russian_post_domestic:pickup'] ), 'mode' => 'search', 'query' => '101000' );
@@ -679,6 +693,7 @@ recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'prefi
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'scrollActivePickupRow' ) && str_contains( $pickup_js, 'scrollIntoView' ) && str_contains( $pickup_js, 'setActivePoint' ), 'JS marker click must sync active marker and list row.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'geocodeAddressAction' ) && str_contains( $pickup_js, 'wdc_order_delivery_recalculate_geocode_address' ) && str_contains( $pickup_js, 'searchMarker:' ), 'JS manual address search must geocode through admin endpoint and pass a temporary search marker.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'loadPickupPointsForLocation' ) && str_contains( $pickup_js, "form.append( 'mode', modeOverride || 'location' );" ) && str_contains( $pickup_js, 'geocodeAddress( box, value )' ) && ! str_contains( $pickup_js, "loadPickupPointsForLocation( 'search', value )" ), 'JS pickup loader must keep location mode by default and use shared DaData geocoding for manual search.' );
+recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, "? 1000 : 2000" ) && ! str_contains( $pickup_js, "? 1000 : 300" ), 'Admin recalculation pickup loader must not cap Russian Post location lists at 300.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'renderSearchResults( \'address\', value' ) && str_contains( $pickup_js, 'provider.setCenter( searchMarker.lat, searchMarker.lng, 15 );' ), 'JS manual address search must keep city pickup points rendered and center the map on the DaData marker.' );
 recalc_smoke_assert( is_string( $pickup_js ) && ! str_contains( $pickup_js, 'через DaData' ) && str_contains( $pickup_js, "status.textContent = 'Ищем адрес...'" ) && str_contains( $pickup_js, "'Адрес найден.'" ) && str_contains( $pickup_js, "'Адрес не найден.'" ), 'Pickup map address search UI must not mention DaData.' );
 recalc_smoke_assert( is_string( $pickup_js ) && str_contains( $pickup_js, 'data-wdc-pickup-picker-confirm' ) && ! str_contains( $pickup_js, 'data-wdc-pickup-picker-choose' ) && ! str_contains( $pickup_js, 'data-wdc-pickup-popup-select' ) && ! str_contains( $pickup_js, 'wdc-order-delivery-pickup-picker__selected-grid' ), 'Admin recalculation pickup picker must use one bottom select button and no per-card duplicate select controls.' );

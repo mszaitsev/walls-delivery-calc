@@ -608,7 +608,7 @@ final class OrderShipmentsMetabox {
 
 		$query = sanitize_text_field( wp_unslash( $_POST['query'] ?? '' ) );
 		$mode = 'location' === sanitize_key( wp_unslash( $_POST['mode'] ?? '' ) ) ? 'location' : 'search';
-		$limit = max( 1, min( 'location' === $mode ? 1000 : 100, (int) ( $_POST['limit'] ?? ( 'location' === $mode ? 1000 : 50 ) ) ) );
+		$limit = max( 1, min( 'location' === $mode ? 2000 : 100, (int) ( $_POST['limit'] ?? ( 'location' === $mode ? 2000 : 50 ) ) ) );
 		$carrier_key = sanitize_key( wp_unslash( $_POST['carrier_key'] ?? '' ) );
 		if ( CdekSettings::CARRIER_KEY === $carrier_key && $this->cdek_delivery_points instanceof CdekDeliveryPointService ) {
 			$points = $this->cdek_delivery_points->pointsForLocation(

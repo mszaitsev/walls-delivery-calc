@@ -1214,7 +1214,7 @@
 			form.append( 'selected_rate', JSON.stringify( rate ) );
 			form.append( 'mode', modeOverride || 'location' );
 			form.append( 'query', queryOverride || '' );
-			form.append( 'limit', String( 'cdek' === String( rate.carrier_key || rate.service_key || '' ) ? 1000 : 300 ) );
+			form.append( 'limit', String( 'cdek' === String( rate.carrier_key || rate.service_key || '' ) ? 1000 : 2000 ) );
 			return window.fetch( config.ajaxUrl || window.ajaxurl || '', {
 				method: 'POST',
 				credentials: 'same-origin',

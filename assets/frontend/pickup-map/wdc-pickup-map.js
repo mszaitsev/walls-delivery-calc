@@ -191,8 +191,14 @@
 
 		function renderMarkers(points, emptyText) {
 			visiblePoints = sortPoints(enrichPoints(points || []));
-			var previewLeftVisiblePoints = previewPoint && !pointInList(previewPoint, visiblePoints);
-			if (previewPoint && !pointInList(previewPoint, visiblePoints)) {
+			var matchingPreviewPoint = previewPoint ? matchingPoint(previewPoint, visiblePoints) : null;
+			var previewLeftVisiblePoints = previewPoint && !matchingPreviewPoint;
+			if (previewPoint && matchingPreviewPoint) {
+				previewPoint = matchingPreviewPoint;
+				if (committedPoint && pointInList(committedPoint, [matchingPreviewPoint])) {
+					committedPoint = matchingPreviewPoint;
+				}
+			} else if (previewPoint) {
 				previewPoint = null;
 			}
 			if (previewLeftVisiblePoints && committedPoint && pointInList(committedPoint, visiblePoints)) {
@@ -465,8 +471,8 @@
 		}
 
 		function matchingPoint(point, points) {
-			var id = pointId(point);
-			return points.filter(function (item) { return pointId(item) === id; })[0] || null;
+			var keys = pointMatchKeys(point);
+			return points.filter(function (item) { return hasSharedPointKey(keys, pointMatchKeys(item)); })[0] || null;
 		}
 
 		function updateListSelectButton() {
@@ -645,8 +651,36 @@
 	}
 
 	function pointInList(point, points) {
-		var id = pointId(point);
-		return points.some(function (item) { return pointId(item) === id; });
+		var keys = pointMatchKeys(point);
+		return points.some(function (item) { return hasSharedPointKey(keys, pointMatchKeys(item)); });
+	}
+
+	function pointMatchKeys(point) {
+		var values = [
+			point && point.id,
+			point && point.point_id,
+			point && point.point_code,
+			point && point.cdek_code,
+			point && point.delivery_point,
+			point && point.postcode,
+			point && point.postal_code,
+			point && point.point_postcode
+		];
+		var keys = [];
+		values.forEach(function (value) {
+			var key = String(value || '').trim();
+			if (key && keys.indexOf(key) === -1) {
+				keys.push(key);
+			}
+		});
+		return keys;
+	}
+
+	function hasSharedPointKey(left, right) {
+		if (!left.length || !right.length) {
+			return false;
+		}
+		return left.some(function (key) { return right.indexOf(key) !== -1; });
 	}
 
 	function normalizeInitialSelectedPoint(point) {
@@ -656,9 +690,13 @@
 		var snapshot = point.snapshot && typeof point.snapshot === 'object' ? point.snapshot : {};
 		var normalized = Object.assign({}, snapshot, point);
 		normalized.id = normalized.id || snapshot.id;
+		normalized.point_id = normalized.point_id || snapshot.point_id;
 		normalized.point_code = normalized.point_code || snapshot.point_code;
+		normalized.delivery_point = normalized.delivery_point || snapshot.delivery_point;
 		normalized.point_type = normalized.point_type || snapshot.point_type;
-		normalized.postcode = normalized.postcode || normalized.postal_code || snapshot.postcode;
+		normalized.postcode = normalized.postcode || normalized.postal_code || normalized.point_postcode || snapshot.postcode || snapshot.postal_code || snapshot.point_postcode;
+		normalized.postal_code = normalized.postal_code || normalized.postcode || snapshot.postal_code;
+		normalized.point_postcode = normalized.point_postcode || normalized.postcode || snapshot.point_postcode;
 		normalized.address = normalized.address || snapshot.address;
 		normalized.lat = normalized.lat !== undefined && normalized.lat !== null ? normalized.lat : snapshot.lat;
 		normalized.lng = normalized.lng !== undefined && normalized.lng !== null ? normalized.lng : snapshot.lng;

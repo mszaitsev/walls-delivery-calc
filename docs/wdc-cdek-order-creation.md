@@ -1,5 +1,9 @@
 # WDC CDEK Order Creation
 
+Version: 0.48.11.
+
+0.48.11 update: the shipment preparation pickup map keeps the Russian Post carrier context (`russian_post_domestic:pickup`) and now loads recipient-location points even when there is no typed search query, fixing the empty “ПВЗ не найдены” state in the Russian Post shipment modal. The shared checkout pickup map also restores selected-point preview by matching carrier-specific codes/postcodes, not only transient REST ids, so previously selected CDEK and Russian Post points can be highlighted, opened and scrolled into view after reopening the map.
+
 Version: 0.48.9.
 
 0.48.9 update: the CDEK pickup map opened from the shipment preparation modal now follows the unified pickup-map UX. The existing selected point is restored as the preview when the map is reopened, the selected marker/list row are highlighted and scrolled into view, and the admin picker uses the larger two-column layout with one bottom `Выбрать этот ПВЗ` action instead of per-card selection buttons or a duplicated preview card. Address search messages no longer mention the geocoding provider in the UI, CDEK map titles render as `ПВЗ СДЭК {code}` or `Постамат СДЭК {code}`, and the Russian Post admin shipment/recalculation map paths keep their own carrier context and point lists while using the same address-search marker behavior.

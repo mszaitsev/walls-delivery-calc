@@ -207,7 +207,7 @@ final class RussianPostPickupPointRepository {
 	 * @return array<int,array<string,mixed>>
 	 */
 	public function find_rows_by_location_context( array $context, array $filters = array() ): array {
-		$limit = $this->limit_from_filters( $filters, 300, 500 );
+		$limit = $this->limit_from_filters( $filters, 1000, 2000 );
 		$match = (string) ( $filters['match'] ?? 'city_region' );
 		$city_candidates = $this->location_city_candidates( $context );
 		$region = trim( (string) ( $context['region_name'] ?? $context['state_value'] ?? '' ) );

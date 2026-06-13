@@ -1,5 +1,9 @@
 # WDC CDEK Pickup Points
 
+Version: 0.48.11.
+
+0.48.11 note: Russian Post admin pickup maps no longer inherit the old 300-row location cap: location-context lookup now allows large-city result sets up to 2000 rows, so Moscow can return all configured matching OPS/PVZ rows. The shipment preparation modal also restores Russian Post location loading by starting location mode from recipient context even when the visible search input is empty. Checkout selected pickup preview now matches the saved point by carrier-specific stable identifiers (`point_code`, `cdek_code`, `delivery_point`, `postcode`/`postal_code`, `point_id`) instead of relying only on REST `id`, so previously selected Russian Post and CDEK points can become the active preview even when ids differ.
+
 Version: 0.48.10.
 
 0.48.10 note: the frontend pickup map no longer applies its own `LIST_LIMIT=100` cap to the side list. The list renders every pickup point returned by the backend, the list meta reflects the full point count, and selected-point preview/scroll restoration works even when the selected CDEK or Russian Post pickup point is located after the first 100 rows in a large-city result set.
