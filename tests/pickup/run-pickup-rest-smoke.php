@@ -215,7 +215,7 @@ $settings->replace(
 				'id' => 'pickup-address-token',
 				'encrypted_token' => $encryption->encrypt( 'secret-token' ),
 				'masked_token' => '********oken',
-				'daily_limit' => 2,
+				'daily_limit' => 5,
 				'enabled' => true,
 			),
 		),
@@ -280,6 +280,10 @@ pickup_rest_assert( $detail_pvz_requested_ops instanceof WP_Error && 'not_found'
 
 $checkout_pickup_controller_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Rest/CheckoutPickupPointRestController.php' ) ?: '';
 pickup_rest_assert( str_contains( $checkout_pickup_controller_source, 'RussianPostDomesticSettings::is_pickup_rate_id' ), 'Checkout pickup point REST save must accept Russian Post pickup group ids without clearing the selected point.' );
+$frontend_map_source = file_get_contents( dirname( __DIR__, 2 ) . '/assets/frontend/pickup-map/wdc-pickup-map.js' ) ?: '';
+pickup_rest_assert( ! str_contains( $frontend_map_source, 'LIST_LIMIT' ) && ! str_contains( $frontend_map_source, 'points.slice(0' ) && str_contains( $frontend_map_source, 'points.map(renderListItem).join' ), 'Frontend pickup map must not re-truncate full REST point lists to the first 100 rows.' );
+$rp_repository_source = file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/RussianPost/RussianPostPickupPointRepository.php' ) ?: '';
+pickup_rest_assert( str_contains( $rp_repository_source, 'limit_from_filters( $filters, 1000, 2000 )' ) && ! str_contains( $rp_repository_source, 'limit_from_filters( $filters, 300, 500 )' ), 'Russian Post location-context pickup lookup must not keep the old 300-row admin cap.' );
 
 $limited = $controller->points( array( 'carrier' => 'russian_post', 'bbox' => '0,0,180,90', 'limit' => '1' ) );
 pickup_rest_assert( 1 === count( $limited ), 'limit must clamp result count.' );
@@ -295,7 +299,7 @@ $settings->replace(
 				'id' => 'pickup-address-token',
 				'encrypted_token' => $encryption->encrypt( 'secret-token' ),
 				'masked_token' => '********oken',
-				'daily_limit' => 2,
+				'daily_limit' => 4,
 				'enabled' => true,
 			),
 		),
@@ -321,8 +325,43 @@ pickup_rest_assert( 'address' === $address_result['search_type'] && true === $ad
 pickup_rest_assert( 1 === count( $GLOBALS['wdc_pickup_rest_http_requests'] ?? array() ) && 1 === $token_pool->usage_today( 'pickup-address-token' ), 'Address search must use DaDataSuggestionClient and increment shared token usage.' );
 $cached_address_result = $controller->address_search( array( 'carrier' => 'russian_post', 'query' => 'Ленина 15', 'country_code' => 'RU' ) );
 pickup_rest_assert( 1 === count( $GLOBALS['wdc_pickup_rest_http_requests'] ?? array() ) && 1 === $token_pool->usage_today( 'pickup-address-token' ) && $cached_address_result['address'] === $address_result['address'], 'Address search cache must avoid repeated DaData usage.' );
+$GLOBALS['wdc_pickup_rest_http_queue'][] = array(
+	'response' => array( 'code' => 200 ),
+	'body' => wp_json_encode(
+		array(
+			'suggestions' => array(
+				array(
+					'value' => 'г Новосибирск, ул Ленина, д 15',
+					'unrestricted_value' => '630099, Новосибирская обл, г Новосибирск, ул Ленина, д 15',
+					'data' => array( 'geo_lat' => '55.012', 'geo_lon' => '82.915' ),
+				),
+			),
+		),
+		JSON_UNESCAPED_UNICODE
+	),
+);
+$cdek_same_address_result = $controller->address_search( array( 'carrier' => 'cdek', 'query' => 'Ленина 15', 'country_code' => 'RU', 'location_id' => '100' ) );
+pickup_rest_assert( 'address' === $cdek_same_address_result['search_type'] && array() === $cdek_same_address_result['points'] && 2 === count( $GLOBALS['wdc_pickup_rest_http_requests'] ?? array() ), 'CDEK address-only search must not reuse the Russian Post address-search cache entry with pickup points.' );
+$GLOBALS['wdc_pickup_rest_http_queue'][] = array(
+	'response' => array( 'code' => 200 ),
+	'body' => wp_json_encode(
+		array(
+			'suggestions' => array(
+				array(
+					'value' => 'г Москва, ул Тверская, д 1',
+					'unrestricted_value' => '125009, г Москва, ул Тверская, д 1',
+					'data' => array( 'geo_lat' => '55.757', 'geo_lon' => '37.615' ),
+				),
+			),
+		),
+		JSON_UNESCAPED_UNICODE
+	),
+);
+$cdek_address_result = $controller->address_search( array( 'carrier' => 'cdek', 'query' => 'Тверская 1', 'country_code' => 'RU', 'location_id' => '100' ) );
+pickup_rest_assert( 'address' === $cdek_address_result['search_type'] && true === $cdek_address_result['address_search_available'] && 55.757 === (float) $cdek_address_result['address']['lat'] && array() === $cdek_address_result['points'], 'CDEK address search must use the shared DaData path and return marker coordinates without replacing carrier pickup points.' );
+pickup_rest_assert( 3 === count( $GLOBALS['wdc_pickup_rest_http_requests'] ?? array() ) && 3 === $token_pool->usage_today( 'pickup-address-token' ), 'CDEK address search must call DaData without changing carrier context.' );
 $postcode_result = $controller->address_search( array( 'carrier' => 'russian_post', 'query' => '630002', 'country_code' => 'RU' ) );
-pickup_rest_assert( 'postcode' === $postcode_result['search_type'] && count( $postcode_result['points'] ) > 1 && 2 === $postcode_result['points'][0]['id'] && 1 === count( $GLOBALS['wdc_pickup_rest_http_requests'] ?? array() ), 'Six-digit postcode search must return nearest points around the exact postcode anchor without calling DaData.' );
+pickup_rest_assert( 'postcode' === $postcode_result['search_type'] && count( $postcode_result['points'] ) > 1 && 2 === $postcode_result['points'][0]['id'] && 3 === count( $GLOBALS['wdc_pickup_rest_http_requests'] ?? array() ), 'Six-digit postcode search must return nearest points around the exact postcode anchor without calling DaData.' );
 pickup_rest_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Search/PickupAddressSearchService.php' ), '$nearest = $this->points->find_nearest_rows( $anchor' ), 'Postcode exact matches must expand to nearest points around the anchor.' );
 $GLOBALS['wdc_pickup_rest_http_queue'][] = array(
 	'response' => array( 'code' => 200 ),

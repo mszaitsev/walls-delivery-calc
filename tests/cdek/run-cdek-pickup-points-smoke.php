@@ -102,6 +102,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 final class CdekPickupFakeHttpClient implements CdekHttpClientInterface {
 	/** @var array<int,array{method:string,url:string,args:array<string,mixed>}> */
 	public array $requests = array();
+	/** @var array<int,array<string,mixed>>|null */
+	public ?array $next_deliverypoints_body = null;
 
 	public function request( string $method, string $url, array $args = array() ): CdekApiResponse {
 		$this->requests[] = array( 'method' => $method, 'url' => $url, 'args' => $args );
@@ -109,6 +111,11 @@ final class CdekPickupFakeHttpClient implements CdekHttpClientInterface {
 			return new CdekApiResponse( 200, (string) json_encode( array( 'access_token' => 'pickup-token', 'expires_in' => 3600 ) ) );
 		}
 		if ( str_contains( $url, '/v2/deliverypoints' ) ) {
+			if ( null !== $this->next_deliverypoints_body ) {
+				$body = $this->next_deliverypoints_body;
+				$this->next_deliverypoints_body = null;
+				return new CdekApiResponse( 200, (string) json_encode( $body ) );
+			}
 			return new CdekApiResponse(
 				200,
 				(string) json_encode(
@@ -288,6 +295,28 @@ cdek_pickup_assert( 'cdek:pickup' === (string) ( $rest_postamat['pickup_family']
 cdek_pickup_assert( 'Постамат СДЭК' === (string) ( $rest_postamat['point_title'] ?? '' ) && 'Постамат' === (string) ( $rest_postamat['point_type_label'] ?? '' ) && 'postamat' === (string) ( $rest_postamat['marker_type'] ?? '' ), 'CDEK REST point must expose POSTAMAT presentation fields.' );
 cdek_pickup_assert( 'KEM7' === (string) ( $rest_postamat['display_code'] ?? '' ) && str_contains( (string) ( $rest_postamat['display_title'] ?? '' ), 'KEM7' ), 'CDEK REST point must expose display title/code for popup and side list.' );
 cdek_pickup_assert( is_array( $rest_postamat['snapshot'] ?? null ) && 'cdek:pickup' === (string) ( $rest_postamat['snapshot']['pickup_family'] ?? '' ), 'CDEK REST point must include normalized snapshot.' );
+$large_points = array();
+for ( $i = 1; $i <= 490; ++$i ) {
+	$large_points[] = array(
+		'code' => 'MSK' . $i,
+		'name' => 'Moscow CDEK ' . $i,
+		'type' => 0 === $i % 5 ? 'POSTAMAT' : 'PVZ',
+		'location' => array(
+			'country_code' => 'RU',
+			'region' => 'Москва',
+			'city' => 'Москва',
+			'city_code' => 44,
+			'postal_code' => '101000',
+			'address_full' => 'Москва, пункт ' . $i,
+			'latitude' => 55.7 + ( $i / 10000 ),
+			'longitude' => 37.6 + ( $i / 10000 ),
+		),
+	);
+}
+$http->next_deliverypoints_body = $large_points;
+$large_rest_points = $rest_controller->points( array( 'carrier' => 'cdek', 'city_code' => 44, 'refresh' => '1', 'limit' => 50 ) );
+cdek_pickup_assert( 490 === count( $large_rest_points ), 'CDEK REST pickup points for a large city must not be truncated to 50.' );
+$GLOBALS['wdc_cdek_pickup_transients'] = array();
 
 $card_renderer = new PickupPointCardRenderer();
 $pvz_card = $card_renderer->render( array_merge( $pvz, array( 'rate_id' => 'cdek:pickup:136' ) ), false, false );
@@ -302,6 +331,7 @@ cdek_pickup_assert( ! str_contains( $checkout_postamat_card, 'Код пункт�
 $empty_work_card = $card_renderer->render( array_merge( $postamat, array( 'work_time' => '0.000000', 'point_work_time' => '0.000000', 'rate_id' => 'cdek:pickup:136' ) ), false, false );
 cdek_pickup_assert( ! str_contains( $empty_work_card, 'Время работы:' ), 'Pickup card must not render empty numeric work_time row.' );
 
+$service->pointsByCityCode( 270 );
 $delivery_requests = $http->countDeliveryPointRequests();
 $service->pointsByCityCode( 270 );
 cdek_pickup_assert( $delivery_requests === $http->countDeliveryPointRequests(), 'Second CDEK deliverypoints request must be served from cache.' );
@@ -488,8 +518,14 @@ cdek_pickup_assert( str_contains( $checkout_js, "carrier === 'russian_post_domes
 cdek_pickup_assert( str_contains( $checkout_js, "toggleBlock(container, '[data-wdc-pickup-code-block]', false)" ) && str_contains( $checkout_js, "toggleBlock(container, '[data-wdc-pickup-postcode-block]', false)" ), 'Checkout pickup JS must hide CDEK point code and postcode blocks in selected checkout cards.' );
 cdek_pickup_assert( str_contains( $checkout_js, 'description: point.description' ) && str_contains( $checkout_js, 'storage_notice: point.storage_notice' ) && str_contains( $checkout_js, 'cdek_code: point.cdek_code' ), 'Checkout pickup JS restore payload must include full CDEK point fields.' );
 cdek_pickup_assert( str_contains( $checkout_js, 'snapshot: snapshot' ) && str_contains( $checkout_js, 'var payload = pointPayload(point);' ) && str_contains( $checkout_js, 'window.WDCPickupApi.save(point.id, shippingMethodId || method, payload)' ) && ! str_contains( $checkout_js, 'pickup save payload' ) && ! str_contains( $checkout_js, 'pickup save response' ), 'Checkout pickup JS save payload must preserve snapshot without temporary debug carrier/family/code/address summaries.' );
+cdek_pickup_assert( str_contains( $checkout_js, 'function pointSnapshot(point)' ) && str_contains( $checkout_js, 'JSON.parse(snapshot)' ) && str_contains( $checkout_js, 'selectedPoint: activeSelected || localizedContext.selectedPoint || runtimeContext.selectedPoint || null' ) && str_contains( $checkout_js, 'point.cdek_code || point.delivery_point' ), 'Checkout CDEK selected preview must keep active selected point through initialContext and read JSON-string snapshots.' );
 cdek_pickup_assert( str_contains( $map_js, 'point.point_title || point.card_title || point.point_type_label' ) && str_contains( $map_js, "return { enabled: true, label: 'Пункт выдачи' };" ) && str_contains( $map_js, 'point.postcode || point.postal_code' ) && str_contains( $map_js, 'point.cdek_code || point.point_code' ), 'Pickup map popup/list title fallback must use point presentation plus Russian Post postcode or CDEK code.' );
-cdek_pickup_assert( str_contains( $admin_js, "'cdek' === String( rate.carrier_key || rate.service_key || '' )" ) && str_contains( $admin_js, "loadPickupPointsForLocation( 'search', value )" ), 'Admin recalculation JS must use CDEK pickup search path.' );
+cdek_pickup_assert( ! str_contains( $admin_js, "Ищем ПВЗ СДЭК" ) && ! str_contains( $admin_js, 'через DaData' ) && str_contains( $admin_js, "status.textContent = 'Ищем адрес...'" ) && str_contains( $admin_js, "'Адрес найден.'" ) && str_contains( $admin_js, "'Адрес не найден.'" ) && str_contains( $admin_js, 'geocodeAddress( box, value )' ), 'Admin recalculation JS must use shared neutral address search UI for CDEK too.' );
+cdek_pickup_assert( str_contains( $admin_js, "'ПВЗ СДЭК'" ) && str_contains( $admin_js, "'Постамат СДЭК'" ), 'Admin recalculation map must render CDEK pickup/postamat titles.' );
+cdek_pickup_assert( ! str_contains( $map_js, "context.carrier === 'cdek'" ) && str_contains( $map_js, 'window.WDCPickupApi.addressSearch(query, context' ), 'Checkout pickup map must not bypass addressSearch for CDEK.' );
+cdek_pickup_assert( str_contains( $map_js, "'ПВЗ СДЭК'" ) && str_contains( $map_js, "'Постамат СДЭК'" ), 'Checkout pickup map must render CDEK pickup/postamat titles.' );
+cdek_pickup_assert( ! str_contains( $map_js, 'LIST_LIMIT' ) && ! str_contains( $map_js, 'points.slice(0' ) && str_contains( $map_js, 'points.map(renderListItem).join' ) && str_contains( $map_js, 'listMeta(points.length, points.length)' ), 'Checkout pickup map must render every CDEK point returned by backend, including large-city lists beyond the first 100 rows.' );
+cdek_pickup_assert( str_contains( $map_js, 'function pointSnapshot(point)' ) && str_contains( $map_js, 'function pointMatchKeys(point)' ) && str_contains( $map_js, 'point && point.cdek_code' ) && str_contains( $map_js, 'point && point.delivery_point' ) && str_contains( $map_js, 'snapshot.cdek_code' ) && str_contains( $map_js, 'snapshot.delivery_point' ) && str_contains( $map_js, 'hasSharedPointKey(keys, pointMatchKeys(item))' ) && str_contains( $map_js, 'previewPoint = matchingPreviewPoint' ) && str_contains( $map_js, 'committedPoint = matchingPreviewPoint' ), 'Checkout selected CDEK pickup preview must match by CDEK code/delivery_point and replace saved payload with the REST point when ids differ.' );
 cdek_pickup_assert( str_contains( $rest_source, "carrier === 'cdek'" ) || str_contains( $rest_source, "'cdek' === \$carrier" ), 'Pickup REST source must route CDEK pickup requests.' );
 
 $encoded_meta = (string) wp_json_encode( array( $checkout_order->meta, $admin_order->meta, $GLOBALS['wdc_cdek_pickup_logs'] ) );

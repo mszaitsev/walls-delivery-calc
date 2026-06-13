@@ -147,7 +147,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.47.0`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.48.2`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
@@ -366,3 +366,24 @@
 - Профильный `docs/wdc-*.md` по области задачи.
 - `docs/walls-delivery-calc-tech-spec.md` - только если меняется целевой продуктовый или архитектурный контракт.
 - `docs/wdc-migration-plan.md` - если меняется порядок этапов, риски или стратегия перехода.
+0.48.11 note: Russian Post admin pickup maps no longer stop at the old 300-row location cap; location-context repository/admin lookups now allow large-city result sets up to 2000 rows. The Russian Post shipment preparation modal again loads recipient-location OPS/PVZ rows without requiring a typed search query. Checkout selected pickup preview now matches saved points by carrier-specific stable codes/postcodes (`point_code`, `cdek_code`, `delivery_point`, `postcode`/`postal_code`, `point_id`) instead of only REST `id`, so Russian Post and CDEK selected points are restored as active previews when the map is reopened.
+
+0.48.10 note: the pickup map frontend no longer truncates the side list to the first 100 points. It renders every point returned by backend REST responses, reports the full list count, and selected pickup preview/scroll restoration works for points beyond the first 100 rows in large-city lists such as Moscow.
+
+0.48.9 note: pickup maps now restore the previously selected point as the active preview when reopened, including marker/list highlighting and list scroll. Admin pickup pickers in order recalculation and shipment preparation use the unified larger side-list layout with one bottom `Выбрать этот ПВЗ` button, no duplicate selected preview card and no per-card choose buttons. Address search UI no longer names DaData, CDEK titles render as `ПВЗ СДЭК {code}` / `Постамат СДЭК {code}`, and Russian Post admin pickup maps keep loading their own full point list/markers while address search remains only a temporary orientation marker.
+
+0.48.8 note: CDEK pickup maps now return the full available point list for large cities instead of truncating at 50. Checkout pickup, admin order delivery recalculation and the CDEK shipment preparation modal use a shared DaData-backed address search path that places a temporary marker, focuses the map on the found address, and preserves the active carrier/pickup-family context and point list.
+
+0.48.7 note: CDEK shipment preparation modal now uses managed tariff data instead of a single saved tariff row. Active tariffs are filtered by pickup/courier scenario, the saved order tariff remains selected with a fallback marker when missing from active tariffs, CDEK manager-facing labels replace technical `tariff_code`/`delivery_mode` rows, recipient pickup displays `Код ПВЗ`, and the admin pickup map opens with CDEK carrier context plus recipient locality/address context rather than sender city settings.
+
+0.48.6 note: CDEK internal registration status now maps actual `entity.statuses[]` codes explicitly. `CREATED` is the only order status that means the order is created and valid; `ACCEPTED` remains `registration_pending`, `INVALID` becomes `failed`, `REMOVED` becomes `removed`, and later movement/operation statuses remain active `registered` shipments until a fuller CDEK status mapping stage exists.
+
+0.48.5 note: CDEK internal shipment status no longer treats request state `SUCCESSFUL` as a real shipment/order status. Request state is used only for registration processing: `INVALID` fails registration, while `ACCEPTED`/`SUCCESSFUL` without `entity.statuses[]` stays `registration_pending`. A CDEK shipment becomes internally `registered` only when an actual order status exists in `entity.statuses[]`; `CREATED` and later statuses are displayed from that latest order status.
+
+0.48.4 note: CDEK shipment status handling now treats `requests[].state` only as request-processing state and selects the current order status from `entity.statuses[]` by newest parsable `date_time` among non-deleted statuses. The order metabox saves/renders `planned_delivery_date`, reads actual CDEK delivery cost from `entity.delivery_detail.total_sum`, and compares it with saved “Базовая стоимость API” using the existing 3% tolerance. CDEK tariff calculation settings moved fully to the `Расчет` tab and gained `Цена страховки`; the calculated insurance amount is added to API delivery price before rules.
+
+0.48.2 note: CDEK shipment metabox controls are carrier-aware for manual attach and removal actions. Existing CDEK shipments can be attached by `cdek_number`, continue to use the unchanged manual status refresh, can be cancelled/deleted in CDEK only while the CDEK order status is `CREATED`, and can be removed locally only for known statuses other than protected `ACCEPTED` and `CREATED`.
+
+0.48.1 note: CDEK order creation pre-live-test fixes are applied. `ajax_create()` now returns status data for the active created carrier instead of always reading Russian Post; `POST /v2/orders` with `requests[0].state=INVALID` returns `cdek_registration_invalid` and does not persist `registration_pending`; CDEK logs and request/response snapshots are reduced to sanitized technical data; and the shipment status block label is carrier-aware for CDEK.
+
+0.48.0 note: CDEK order creation now starts from the existing WooCommerce `Отправления` metabox. The shipment modal is carrier-aware, adds `Основное` and universal `Грузоместа` tabs, builds CDEK `packages[]/items[]` from manager-entered package rows, sends `POST /v2/orders` as an async registration request, stores `registration_pending`, and polls `GET /v2/orders` or `GET /v2/orders/{uuid}` every 15 seconds for up to 10 minutes. The payload intentionally omits `services`/`INSURANCE`, `additional_order_types`, `delivery_recipient_cost` and checkout packaging weight, uses prepaid `item.payment.value=0`, and blocks duplicate CDEK creation while an order is pending/created/registered.

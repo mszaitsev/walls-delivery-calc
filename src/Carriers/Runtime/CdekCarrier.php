@@ -96,6 +96,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			}
 		}
 		$tariffs = array_map( static fn( array $candidate ): array => is_array( $candidate['tariff'] ?? null ) ? $candidate['tariff'] : array(), $tariff_candidates );
+		$insurance = $this->insurance_context( $request->package );
 
 		$rates = array();
 		$skipped_unknown = 0;
@@ -118,7 +119,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 				++$skipped_other_type;
 				continue;
 			}
-			$rate = $this->rate_from_tariff( $request, $type, $tariff, $candidate_payload, $candidate_result, $to, $managed_tariff );
+			$rate = $this->rate_from_tariff( $request, $type, $tariff, $candidate_payload, $candidate_result, $to, $managed_tariff, $insurance );
 			if ( $rate instanceof DeliveryRate ) {
 				$rates[] = $rate;
 			}
@@ -271,6 +272,28 @@ final class CdekCarrier implements CarrierAdapterInterface {
 		}
 
 		return $this->tariff_payload_with_packages( $request, $to, array( $package ) );
+	}
+
+	/**
+	 * @param Package $package
+	 * @return array{percent:float,items_total_rub:float,amount_rub:float}
+	 */
+	private function insurance_context( Package $package ): array {
+		$percent = $this->settings->insurance_percent();
+		$total_kopecks = 0;
+		foreach ( $package->get_items() as $item ) {
+			if ( ! $item instanceof PackageItem || 'WDC_PACKAGING' === strtoupper( trim( $item->sku ) ) ) {
+				continue;
+			}
+			$total_kopecks += max( 0, $item->total_price->get_kopecks() );
+		}
+		$amount_kopecks = $percent > 0 ? (int) round( $total_kopecks * $percent / 100 ) : 0;
+
+		return array(
+			'percent' => $percent,
+			'items_total_rub' => $total_kopecks / 100,
+			'amount_rub' => $amount_kopecks / 100,
+		);
 	}
 
 	/**
@@ -620,9 +643,11 @@ final class CdekCarrier implements CarrierAdapterInterface {
 	 * @param array<string,mixed> $result
 	 * @param array<string,mixed> $to
 	 */
-	private function rate_from_tariff( QuoteRequest $request, string $delivery_type, array $tariff, array $payload, array $result, array $to, ?array $managed_tariff = null ): ?DeliveryRate {
+	private function rate_from_tariff( QuoteRequest $request, string $delivery_type, array $tariff, array $payload, array $result, array $to, ?array $managed_tariff = null, array $insurance = array() ): ?DeliveryRate {
 		$details = is_array( $tariff['result'] ?? null ) ? array_merge( $tariff, $tariff['result'] ) : $tariff;
-		$price = is_numeric( $details['delivery_sum'] ?? null ) ? (float) $details['delivery_sum'] : 0.0;
+		$delivery_price = is_numeric( $details['delivery_sum'] ?? null ) ? (float) $details['delivery_sum'] : 0.0;
+		$insurance_amount = is_numeric( $insurance['amount_rub'] ?? null ) ? (float) $insurance['amount_rub'] : 0.0;
+		$price = $delivery_price + $insurance_amount;
 		$code = (string) ( $details['tariff_code'] ?? '' );
 		if ( $price <= 0 || '' === $code ) {
 			return null;
@@ -655,6 +680,10 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			'selected_tariff_title' => $name,
 			'api_base_price_rub' => $price,
 			'api_price_with_vat_rub' => $price,
+			'cdek_delivery_cost_before_insurance' => $delivery_price,
+			'cdek_insurance_percent' => (float) ( $insurance['percent'] ?? 0.0 ),
+			'cdek_insurance_amount' => $insurance_amount,
+			'cdek_insurance_items_total' => (float) ( $insurance['items_total_rub'] ?? 0.0 ),
 			'api_delivery_days_min' => $min,
 			'api_delivery_days_max' => $max,
 			'api_delivery_days_text' => $days,

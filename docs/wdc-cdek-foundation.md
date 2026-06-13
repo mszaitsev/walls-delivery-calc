@@ -1,6 +1,8 @@
 # WDC CDEK Carrier Foundation
 
-Version: 0.46.0.
+Version: 0.48.0.
+
+0.48.0 update: CDEK order creation is implemented in `docs/wdc-cdek-order-creation.md`. The foundation API client now exposes `POST /v2/orders`, `GET /v2/orders` and `GET /v2/orders/{uuid}` for shipment registration and status checks. The order flow uses async polling from the existing `Отправления` metabox; print-form downloads, webhooks, cancellation and cron status autosync remain separate future stages.
 
 0.46.0 update: CDEK tariff management now builds on the foundation API client. `CdekApiClient::allTariffs()` calls `GET /v2/calculator/alltariffs`, the admin `Тарифы` tab stores synced tariffs in a dedicated table, and runtime tariff labels/types can be managed without changing OAuth or credential handling.
 
@@ -8,7 +10,7 @@ Version: 0.46.0.
 
 0.44.0 update: CDEK tariff runtime is now implemented in `docs/wdc-cdek-tariff-calculation.md`. The foundation OAuth/settings layer remains the base for runtime calls, while pickup points, pickup selection, orders/shipments, statuses, print forms and webhooks are still intentionally out of scope.
 
-This document describes the foundation for CDEK API v2 integration. Checkout tariff calculation was added later in 0.44.0; pickup maps, shipment creation, statuses, print forms, autosync and webhooks remain unimplemented.
+This document describes the foundation for CDEK API v2 integration. Checkout tariff calculation was added later in 0.44.0, pickup maps in 0.45.0, tariff management in 0.46.0, and order creation/status polling in 0.48.0. Print forms, cancellation, cron autosync and webhooks remain unimplemented.
 
 ## Scope
 
@@ -26,13 +28,14 @@ Implemented:
 - Runtime tariff calculation foundation consumers: `CdekApiClient`, `CdekLocationResolver`, and `CdekCarrier`.
 - Pickup point runtime through `GET /v2/deliverypoints`, documented in `docs/wdc-cdek-pickup-points.md`.
 - Tariff directory sync through `GET /v2/calculator/alltariffs`, with editable tariff presentation in the CDEK delivery service admin tab.
+- Order registration through `POST /v2/orders`, with status checks through `GET /v2/orders` and `GET /v2/orders/{uuid}`.
 
 Not implemented:
 
 - `POST /v2/calculator/tariff` by fixed tariff code.
-- Orders/shipments.
-- Shipment statuses.
-- Print forms.
+- Print form download/display.
+- Shipment cancellation.
+- Cron status autosync for CDEK.
 - Webhooks.
 
 ## API
@@ -117,7 +120,7 @@ Future stages should be separate branches:
 
 - `feature/cdek-tariff-calculation`: checkout tariff calculation through `/v2/calculator/tarifflist` or `/v2/calculator/tariff`.
 - Done in `feature/cdek-pickup-points`: pickup points through `GET /v2/deliverypoints`.
-- Next: `feature/cdek-order-creation`.
-- Orders: `POST /v2/orders`, `GET /v2/orders`, `GET /v2/orders/{uuid}`, `PATCH /v2/orders`, `DELETE /v2/orders/{uuid}`, `POST /v2/orders/{uuid}/refusal`.
+- Done in `feature/cdek-order-creation`: `POST /v2/orders`, `GET /v2/orders`, `GET /v2/orders/{uuid}`.
+- Order changes/cancellation: `PATCH /v2/orders`, `DELETE /v2/orders/{uuid}`, `POST /v2/orders/{uuid}/refusal`.
 - Print forms: `/v2/print/orders` and `/v2/print/barcodes`.
 - Webhooks: `POST /v2/webhooks`, `GET /v2/webhooks`, `GET /v2/webhooks/{uuid}`, `DELETE /v2/webhooks/{uuid}`.

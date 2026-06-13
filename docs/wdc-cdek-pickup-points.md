@@ -1,5 +1,21 @@
 # WDC CDEK Pickup Points
 
+Version: 0.48.11.
+
+0.48.11 note: Russian Post admin pickup maps no longer inherit the old 300-row location cap: location-context lookup now allows large-city result sets up to 2000 rows, so Moscow can return all configured matching OPS/PVZ rows. The shipment preparation modal also restores Russian Post location loading by starting location mode from recipient context even when the visible search input is empty. Checkout selected pickup preview now matches the saved point by carrier-specific stable identifiers (`point_code`, `cdek_code`, `delivery_point`, `postcode`/`postal_code`, `point_id`) instead of relying only on REST `id`, so previously selected Russian Post and CDEK points can become the active preview even when ids differ.
+
+Version: 0.48.10.
+
+0.48.10 note: the frontend pickup map no longer applies its own `LIST_LIMIT=100` cap to the side list. The list renders every pickup point returned by the backend, the list meta reflects the full point count, and selected-point preview/scroll restoration works even when the selected CDEK or Russian Post pickup point is located after the first 100 rows in a large-city result set.
+
+Version: 0.48.9.
+
+0.48.9 note: reopening the checkout pickup map with an already selected pickup point now previews that point immediately: the marker is active, the balloon opens, and the side-list row is highlighted and scrolled into view. Admin pickup maps in order delivery recalculation and shipment preparation now use one larger map layout with a side list and a single bottom `Выбрать этот ПВЗ` button; duplicate per-card preview controls were removed. Pickup-map address search UI now says `Ищем адрес...`, `Адрес найден.`, or `Адрес не найден.` without mentioning the geocoder provider. CDEK map/list/balloon titles render as `ПВЗ СДЭК {code}` or `Постамат СДЭК {code}`, while Russian Post keeps its current titles. Russian Post admin pickup maps again load points from recipient location context and use a larger location limit for big cities.
+
+Version: 0.48.8.
+
+0.48.8 note: CDEK pickup maps no longer truncate delivery points to 50 rows; large cities return the full normalized CDEK point list from the backend, with existing cache separation by city/environment/type. Address search on pickup maps is now shared and carrier-independent: checkout, admin delivery recalculation and the CDEK shipment modal call the same DaData-backed search path, place a temporary address marker, focus the map on the found coordinates, and keep the current carrier context and pickup list (`cdek:pickup` or `russian_post_domestic:pickup`) unchanged.
+
 Version: 0.46.0.
 
 0.46.0 note: pickup/courier tariff presentation is now managed in the CDEK `Тарифы` tab through `GET /v2/calculator/alltariffs`. Pickup point selection remains independent from the selected tariff inside the CDEK pickup family and still uses `GET /v2/deliverypoints`.

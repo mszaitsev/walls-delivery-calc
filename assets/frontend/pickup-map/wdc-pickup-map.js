@@ -1,8 +1,6 @@
 (function (window) {
 	'use strict';
 
-	var LIST_LIMIT = 100;
-
 	function debounce(fn, wait) {
 		var timer = 0;
 		return function () {
@@ -26,8 +24,8 @@
 		var committedPoint = initialSelectedPoint;
 		var preloadedPoints = Array.isArray(context.preloadedPoints) ? context.preloadedPoints : [];
 		var hasPreloadedPoints = preloadedPoints.length > 0;
-		var initialLat = parseFloat(context.centerLat || context.lat || (preloadedPoints[0] && preloadedPoints[0].lat));
-		var initialLng = parseFloat(context.centerLng || context.lng || (preloadedPoints[0] && preloadedPoints[0].lng));
+		var initialLat = parseFloat(context.centerLat || (initialSelectedPoint && initialSelectedPoint.lat) || context.lat || (preloadedPoints[0] && preloadedPoints[0].lat));
+		var initialLng = parseFloat(context.centerLng || (initialSelectedPoint && initialSelectedPoint.lng) || context.lng || (preloadedPoints[0] && preloadedPoints[0].lng));
 		var hasInitialCoordinates = !isNaN(initialLat) && !isNaN(initialLng);
 		var distanceOrigin = hasInitialCoordinates ? { lat: initialLat, lng: initialLng } : null;
 		var searchAddress = null;
@@ -193,8 +191,12 @@
 
 		function renderMarkers(points, emptyText) {
 			visiblePoints = sortPoints(enrichPoints(points || []));
-			var previewLeftVisiblePoints = previewPoint && !pointInList(previewPoint, visiblePoints);
-			if (previewPoint && !pointInList(previewPoint, visiblePoints)) {
+			var matchingPreviewPoint = previewPoint ? matchingPoint(previewPoint, visiblePoints) : null;
+			var previewLeftVisiblePoints = previewPoint && !matchingPreviewPoint;
+			if (previewPoint && matchingPreviewPoint) {
+				previewPoint = matchingPreviewPoint;
+				committedPoint = matchingPreviewPoint;
+			} else if (previewPoint) {
 				previewPoint = null;
 			}
 			if (previewLeftVisiblePoints && committedPoint && pointInList(committedPoint, visiblePoints)) {
@@ -248,14 +250,13 @@
 				].join('');
 				return;
 			}
-			var shown = points.slice(0, LIST_LIMIT);
-			var nearest = shown[0] && shown[0].distanceText ? shown[0].distanceText : '';
+			var nearest = points[0] && points[0].distanceText ? points[0].distanceText : '';
 			list.innerHTML = [
 				originStatus ? '<div class="wdc-pickup-list__status' + (originStatusType === 'error' ? ' is-error' : '') + '">' + escapeHtml(originStatus) + '</div>' : '',
 				searchAddress ? '<div class="wdc-pickup-list__found"><strong>Найден адрес:</strong><span>' + escapeHtml(searchAddress.value || '') + '</span>' + (nearest ? '<em>Ближайший ПВЗ: ' + escapeHtml(nearest) + '</em>' : '') + '</div>' : '',
-				'<div class="wdc-pickup-list__meta">' + escapeHtml(listMeta(points.length, shown.length)) + '</div>',
+				'<div class="wdc-pickup-list__meta">' + escapeHtml(listMeta(points.length, points.length)) + '</div>',
 				'<div class="wdc-pickup-list__items">',
-				shown.map(renderListItem).join(''),
+				points.map(renderListItem).join(''),
 				'</div>'
 			].join('');
 		}
@@ -311,7 +312,7 @@
 				}
 			}).catch(function (error) {
 				if (error.name !== 'AbortError') {
-					card.textContent = context.carrier === 'cdek' || context.carrier_key === 'cdek' ? 'Не удалось загрузить пункты выдачи СДЭК. Попробуйте позже.' : (labels.error || 'Error');
+					card.textContent = labels.error || 'Error';
 				}
 			});
 		}
@@ -361,15 +362,7 @@
 					renderMarkers(points, labels.empty || '');
 				});
 			}
-			if (context.carrier === 'cdek' || context.carrier_key === 'cdek') {
-				return window.WDCPickupApi.search(query, controller.signal, context).then(function (points) {
-					renderMarkers(points, labels.empty || '');
-				}).catch(function (error) {
-					if (error.name !== 'AbortError') {
-						card.textContent = 'Не удалось загрузить пункты выдачи СДЭК. Попробуйте позже.';
-					}
-				});
-			}
+			card.textContent = labels.searchingAddress || 'Ищем адрес...';
 			return window.WDCPickupApi.addressSearch(query, context, controller.signal).then(function (result) {
 				if (result && result.address_search_available === false) {
 					setPostcodeOnlyMode();
@@ -382,10 +375,10 @@
 					applySearchResult(result);
 					return;
 				}
-				card.textContent = result && result.error_code === 'dadata_api_failed' ? (labels.dadataError || 'Ошибка DaData') : (labels.addressNotFound || labels.notFound || '');
+				card.textContent = result && result.error_code === 'dadata_api_failed' ? (labels.dadataError || 'Адрес не найден.') : (labels.addressNotFound || labels.notFound || 'Адрес не найден.');
 			}).catch(function (error) {
 				if (error.name !== 'AbortError') {
-					card.textContent = labels.dadataError || labels.error || 'Ошибка DaData';
+					card.textContent = labels.dadataError || labels.error || 'Адрес не найден.';
 				}
 			});
 		}
@@ -402,10 +395,8 @@
 				activePointId: previewPoint ? pointId(previewPoint) : null,
 				searchMarker: activeOriginMarker()
 			});
-			loadBounds(bboxAround(searchAddress.lat, searchAddress.lng), {
-				force: true,
-				preserveSearchAddress: true
-			});
+			card.textContent = labels.addressFound || 'Адрес найден.';
+			renderList(visiblePoints);
 		}
 
 		setTimeout(function () {
@@ -478,8 +469,8 @@
 		}
 
 		function matchingPoint(point, points) {
-			var id = pointId(point);
-			return points.filter(function (item) { return pointId(item) === id; })[0] || null;
+			var keys = pointMatchKeys(point);
+			return points.filter(function (item) { return hasSharedPointKey(keys, pointMatchKeys(item)); })[0] || null;
 		}
 
 		function updateListSelectButton() {
@@ -658,20 +649,64 @@
 	}
 
 	function pointInList(point, points) {
-		var id = pointId(point);
-		return points.some(function (item) { return pointId(item) === id; });
+		var keys = pointMatchKeys(point);
+		return points.some(function (item) { return hasSharedPointKey(keys, pointMatchKeys(item)); });
+	}
+
+	function pointMatchKeys(point) {
+		var snapshot = pointSnapshot(point);
+		var values = [
+			point && point.id,
+			point && point.point_id,
+			point && point.point_code,
+			point && point.cdek_code,
+			point && point.delivery_point,
+			point && point.postcode,
+			point && point.postal_code,
+			point && point.point_postcode,
+			point && point.display_code,
+			snapshot.id,
+			snapshot.point_id,
+			snapshot.point_code,
+			snapshot.cdek_code,
+			snapshot.delivery_point,
+			snapshot.postcode,
+			snapshot.postal_code,
+			snapshot.point_postcode,
+			snapshot.display_code
+		];
+		var keys = [];
+		values.forEach(function (value) {
+			var key = String(value || '').trim();
+			if (key && keys.indexOf(key) === -1) {
+				keys.push(key);
+			}
+		});
+		return keys;
+	}
+
+	function hasSharedPointKey(left, right) {
+		if (!left.length || !right.length) {
+			return false;
+		}
+		return left.some(function (key) { return right.indexOf(key) !== -1; });
 	}
 
 	function normalizeInitialSelectedPoint(point) {
 		if (!point || typeof point !== 'object') {
 			return null;
 		}
-		var snapshot = point.snapshot && typeof point.snapshot === 'object' ? point.snapshot : {};
+		var snapshot = pointSnapshot(point);
 		var normalized = Object.assign({}, snapshot, point);
 		normalized.id = normalized.id || snapshot.id;
+		normalized.point_id = normalized.point_id || snapshot.point_id;
 		normalized.point_code = normalized.point_code || snapshot.point_code;
+		normalized.delivery_point = normalized.delivery_point || snapshot.delivery_point;
+		normalized.display_code = normalized.display_code || snapshot.display_code;
 		normalized.point_type = normalized.point_type || snapshot.point_type;
-		normalized.postcode = normalized.postcode || normalized.postal_code || snapshot.postcode;
+		normalized.postcode = normalized.postcode || normalized.postal_code || normalized.point_postcode || normalized.display_code || snapshot.postcode || snapshot.postal_code || snapshot.point_postcode || snapshot.display_code;
+		normalized.postal_code = normalized.postal_code || normalized.postcode || snapshot.postal_code || snapshot.display_code;
+		normalized.point_postcode = normalized.point_postcode || normalized.postcode || snapshot.point_postcode || snapshot.display_code;
 		normalized.address = normalized.address || snapshot.address;
 		normalized.lat = normalized.lat !== undefined && normalized.lat !== null ? normalized.lat : snapshot.lat;
 		normalized.lng = normalized.lng !== undefined && normalized.lng !== null ? normalized.lng : snapshot.lng;
@@ -685,6 +720,22 @@
 		return pointId(normalized) ? normalized : null;
 	}
 
+	function pointSnapshot(point) {
+		var snapshot = point && point.snapshot;
+		if (snapshot && typeof snapshot === 'object') {
+			return snapshot;
+		}
+		if (typeof snapshot === 'string' && snapshot.trim()) {
+			try {
+				var parsed = JSON.parse(snapshot);
+				return parsed && typeof parsed === 'object' ? parsed : {};
+			} catch (error) {
+				return {};
+			}
+		}
+		return {};
+	}
+
 	function selectedSummary(point) {
 		return 'Выбран: ' + [pointDisplayCode(point), point.address || ''].filter(Boolean).join(', ');
 	}
@@ -694,8 +745,22 @@
 	}
 
 	function pointDisplayTitle(point) {
+		var cdekTitle = cdekDisplayTitle(point);
+		if (cdekTitle) {
+			return cdekTitle;
+		}
 		return String((point && (point.display_title || (point.snapshot && point.snapshot.display_title))) || '').trim()
 			|| [carrierTitle(point), pointDisplayCode(point)].filter(Boolean).join(' ');
+	}
+
+	function cdekDisplayTitle(point) {
+		var carrier = String(point && (point.carrier_key || point.carrier || (point.snapshot && (point.snapshot.carrier_key || point.snapshot.carrier))) || '').trim();
+		if (carrier !== 'cdek') {
+			return '';
+		}
+		var type = String(point.point_type || point.type || point.cdek_type || point.marker_type || (point.snapshot && (point.snapshot.point_type || point.snapshot.type || point.snapshot.cdek_type || point.snapshot.marker_type)) || '').toLowerCase();
+		var label = type === 'postamat' || type === 'postomat' ? 'Постамат СДЭК' : 'ПВЗ СДЭК';
+		return [label, pointDisplayCode(point)].filter(Boolean).join(' ');
 	}
 
 	function pointDisplayCode(point) {

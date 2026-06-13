@@ -116,17 +116,27 @@ final class PickupPointsRestController {
 			return $this->error( 'address_search_unavailable', 'Address search is unavailable.', 503 );
 		}
 		$carrier = $this->carrier( $request );
-		if ( 'russian_post' !== $carrier ) {
-			return $this->response( array() );
-		}
+		$include_points = 'russian_post' === $carrier;
 
 		$query = trim( $this->param( $request, 'query' ) );
 		if ( '' === $query ) {
 			$query = trim( $this->param( $request, 'q' ) );
 		}
 
-		$types = $this->allowed_types( $request );
+		$types = $include_points ? $this->allowed_types( $request ) : array();
 		if ( array() === $types ) {
+			if ( ! $include_points ) {
+				return $this->response(
+					$this->address_search->search(
+						$query,
+						array(
+							'location_id' => (int) $this->param( $request, 'location_id' ),
+							'country_code' => strtoupper( $this->param( $request, 'country_code' ) ?: 'RU' ),
+							'include_points' => false,
+						)
+					)
+				);
+			}
 			return $this->response(
 				array(
 					'address_search_available' => true,
@@ -142,6 +152,7 @@ final class PickupPointsRestController {
 					'location_id' => (int) $this->param( $request, 'location_id' ),
 					'country_code' => strtoupper( $this->param( $request, 'country_code' ) ?: 'RU' ),
 					'point_types' => $types,
+					'include_points' => $include_points,
 				)
 			)
 		);

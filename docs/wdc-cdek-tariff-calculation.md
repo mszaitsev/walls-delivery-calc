@@ -1,6 +1,8 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.47.0.
+Version: 0.48.4.
+
+0.48.4 insurance update: the CDEK `Расчет тарифов` settings block lives on the service `Расчет` tab. The new `Цена страховки` setting stores a decimal percent from discounted goods total, for example `0,75`/`0.75` means `0.75%`; negative values clamp to `0`. Runtime CDEK tariff calculation computes `insurance_amount = cart_items_total_after_discounts * insurance_percent / 100` and adds it to each CDEK API `delivery_sum` before calculation rules, merge/dedup display and saved “Базовая стоимость API”. The checkout packaging weight is not part of the insured goods total.
 
 0.47.0 express/single-package update: CDEK settings now store `shipment_point` with default `NSK69`; WDC sends it in both the main item-level `POST /v2/calculator/tarifflist` request and the optional single-package request. The main request still expands `PackageItem::quantity` into separate packages. When every product unit fits a 50x50x30 cm box in at least one axis-aligned orientation and total product volume is within that box, WDC performs a second tarifflist request with one package whose weight is total package weight. A simple fit helper attempts to calculate actual combined box dimensions; if it cannot do so but mandatory fit checks pass, the second request may omit dimensions rather than inventing 50x50x30. New single-package `tariff_code` values are merged into the main candidates and duplicate codes are ignored. Before returning CDEK rates, WDC deduplicates exact `period_min`/`period_max` groups by price and CDEK name priority, then removes rates that are slower by `period_min` and more expensive. This is still tariff calculation only, not the future CDEK order creation package model.
 

@@ -1,6 +1,14 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.47.0.
+Current plugin version: 0.48.4.
+
+Version 0.48.4 fixes the first CDEK shipment QA batch. The current CDEK order status is now selected from `entity.statuses[]` by the newest parsable `date_time` among non-deleted statuses, `planned_delivery_date` is saved and shown in the order shipment block, and CDEK actual delivery cost is read from `entity.delivery_detail.total_sum` and compared with saved “Базовая стоимость API” using the existing 3% tolerance. CDEK calculation settings now keep the tariff calculation block on the `Расчет` tab, add `Цена страховки` as a percent of discounted goods total, and add that calculated insurance amount to the API delivery price before calculation rules run.
+
+Version 0.48.2 finishes the CDEK shipment metabox controls needed before real order creation tests. The existing `Отправления` block can manually attach a CDEK shipment by `cdek_number`, refresh it through the existing status button, cancel/delete it in CDEK only while the CDEK order status is `CREATED`, and remove only local WooCommerce shipment data for statuses other than protected `ACCEPTED` and `CREATED`. Carrier labels, button text and toast fallbacks now come from the metabox presentation config.
+
+Version 0.48.1 fixes pre-live-test issues in CDEK order creation without adding new features. AJAX creation now returns the status payload for the carrier that was actually created, `requests[0].state=INVALID` from `POST /v2/orders` is treated as a failed creation and is not saved as `registration_pending`, CDEK request/response snapshots and logs keep only sanitized technical shipment data, and the order metabox status block no longer shows the Russian Post label for CDEK.
+
+Version 0.48.0 starts CDEK order creation from the existing WooCommerce order metabox `Отправления`. The metabox is now carrier-aware, CDEK uses the same shipment service/adapters architecture as Russian Post, and the modal has `Основное` and universal `Грузоместа` tabs. CDEK creation sends `POST /v2/orders` as an asynchronous registration request, saves `registration_pending`, then checks the final state through `GET /v2/orders` or `GET /v2/orders/{uuid}` every 15 seconds for up to 10 minutes. The payload uses manager-entered packages/items, `print=BARCODE`, prepaid `item.payment.value=0`, unit cost after discount, and does not send `services`/`INSURANCE`, `additional_order_types`, `delivery_recipient_cost` or checkout packaging weight. See `docs/wdc-cdek-order-creation.md`.
 
 Version 0.47.0 extends CDEK runtime calculation. CDEK settings now include `shipment_point` (default `NSK69`) and pass it to every `POST /v2/calculator/tarifflist` request. Eligible carts also receive an additional single-package tarifflist pass for express/one-piece tariffs when a conservative 50x50x30 cm fit check succeeds; new tariff codes from that pass are merged into the main result without duplicates. Before checkout output, CDEK rates are filtered by exact `period_min`/`period_max` groups, then slower and more expensive options are removed by `period_min` and price.
 

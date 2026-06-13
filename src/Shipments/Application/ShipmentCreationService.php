@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Application;
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
@@ -84,13 +85,18 @@ final class ShipmentCreationService {
 					'updated_at' => $now,
 				)
 			);
-			$this->add_order_note( $order, 'Не удалось создать отправление Почты России: ' . $result->error_message );
+			$this->add_order_note( $order, 'Не удалось создать отправление: ' . $result->error_message );
 
 			return $result;
 		}
 
 		$raw = $result->raw_reference;
 		$backlog_order_id = trim( $result->backlog_order_id );
+		$is_cdek = CdekSettings::CARRIER_KEY === $request->carrier_key;
+		$request_snapshot = $is_cdek && is_array( $raw['request'] ?? null )
+			? array( 'method' => 'POST', 'path' => '/v2/orders', 'body' => $raw['request'], 'errors' => array() )
+			: $preview;
+		$response_snapshot = $is_cdek && is_array( $raw['response'] ?? null ) ? $raw : $raw;
 		$shipment = array(
 			'carrier_key' => $request->carrier_key,
 			'service_key' => (string) ( $request->meta['service_key'] ?? $request->rate_id ),
@@ -98,13 +104,22 @@ final class ShipmentCreationService {
 			'service_title' => (string) ( $request->meta['service_title'] ?? '' ),
 			'delivery_type' => $request->delivery_type,
 			'places' => array_map( static fn ( $place ): array => $place->to_array(), $request->places ),
-			'request_snapshot' => $preview,
-			'response_snapshot' => $raw,
+			'request_snapshot' => $request_snapshot,
+			'response_snapshot' => $response_snapshot,
 			'barcode' => $result->tracking_number,
 			'tracking_number' => $result->tracking_number,
+			'external_id' => $result->external_id,
+			'cdek_number' => (string) ( $raw['cdek_number'] ?? $result->tracking_number ),
+			'cdek_request_uuid' => $result->backlog_order_id,
+			'cdek_request_state' => (string) ( $raw['registration_state'] ?? '' ),
+			'cdek_order_status_code' => (string) ( $raw['order_status'] ?? '' ),
+			'cdek_order_status_name' => (string) ( $raw['order_status_name'] ?? '' ),
+			'cdek_planned_delivery_date' => (string) ( $raw['planned_delivery_date'] ?? '' ),
+			'cdek_actual_cost_kopecks' => is_numeric( $raw['actual_cost_kopecks'] ?? null ) ? (int) $raw['actual_cost_kopecks'] : null,
 			'order_num' => (string) ( $request->meta['order_num'] ?? $request->order_id ),
 			'group_name' => (string) ( $raw['group_name'] ?? '' ),
-			'status' => 'created',
+			'status' => $is_cdek ? 'registration_pending' : 'created',
+			'status_title' => $is_cdek ? 'Заявка на регистрацию принята' : '',
 			'created_at' => $now,
 			'updated_at' => $now,
 		);
@@ -116,15 +131,7 @@ final class ShipmentCreationService {
 			$shipment = array_merge( $shipment, $actual_cost );
 		}
 		$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
-		$this->add_order_note(
-			$order,
-			sprintf(
-				'Отправление Почты России создано. Barcode: %s. Мест: %d%s',
-				$result->tracking_number,
-				count( $request->places ),
-				'' !== (string) ( $raw['group_name'] ?? '' ) ? '. ММО group-name: ' . (string) $raw['group_name'] : ''
-			)
-		);
+		$this->add_order_note( $order, $this->success_note( $request, $result, $raw ) );
 
 		return $result;
 	}
@@ -193,5 +200,26 @@ final class ShipmentCreationService {
 
 	private function now(): string {
 		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+	}
+
+	/**
+	 * @param array<string,mixed> $raw
+	 */
+	private function success_note( ShipmentCreateRequest $request, ShipmentCreateResult $result, array $raw ): string {
+		if ( CdekSettings::CARRIER_KEY === $request->carrier_key ) {
+			return sprintf(
+				'Заявка на регистрацию отправления СДЭК принята. UUID: %s. Номер ИМ: %s. Мест: %d',
+				$result->external_id ?: '-',
+				(string) ( $request->meta['order_num'] ?? $request->order_id ),
+				count( $request->places )
+			);
+		}
+
+		return sprintf(
+			'Отправление Почты России создано. Barcode: %s. Мест: %d%s',
+			$result->tracking_number,
+			count( $request->places ),
+			'' !== (string) ( $raw['group_name'] ?? '' ) ? '. ММО group-name: ' . (string) $raw['group_name'] : ''
+		);
 	}
 }
