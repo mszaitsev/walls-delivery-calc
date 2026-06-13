@@ -1,6 +1,8 @@
 # WDC CDEK Order Creation
 
-Version: 0.48.6.
+Version: 0.48.7.
+
+0.48.7 update: the CDEK shipment preparation modal now loads all active managed CDEK tariffs instead of only the tariff saved on the order. The tariff select is filtered by the order scenario: pickup orders show only active pickup tariffs, courier orders show only active courier tariffs. The saved order tariff remains selected; if it is no longer active or no longer present in the managed tariff list, the modal keeps that value as a marked fallback so it is not lost before creation. The modal also replaces technical CDEK rows with manager-facing labels: `В заказе тариф`, `ПВЗ отправителя`, and `Код ПВЗ` for the recipient point. The admin “Выбрать другой ПВЗ” map sends CDEK carrier context (`carrier_key=cdek`, `pickup_family=cdek:pickup`) and recipient locality/address context from the WooCommerce order, not sender city settings.
 
 0.48.6 update: internal CDEK registration status now distinguishes documented order statuses from request states more precisely. `CREATED` is the only CDEK order status that means the order has been created and validated. `ACCEPTED` from `entity.statuses[]` is saved and displayed as the real CDEK status, but internally remains `registration_pending` and polling continues. `INVALID` from `entity.statuses[]` is a failed/incorrect CDEK order, `REMOVED` is stored as `removed`, and other movement/operation statuses are treated as active registered shipments without introducing a full universal CDEK-to-store status mapping yet.
 
@@ -57,7 +59,7 @@ After accepted `POST /v2/orders`, the shipment is saved with status `registratio
 The admin UI then polls status every 15 seconds for up to 10 minutes, maximum 40 attempts:
 
 - request state `INVALID` saves shipment status `failed` and shows the CDEK errors;
-- order status `CREATED` from Appendix 1, or successful request state, saves shipment status `registered`;
+- order status `CREATED` from Appendix 1 saves shipment status `registered`; request state `SUCCESSFUL` alone does not;
 - `ACCEPTED` and other intermediate states keep `registration_pending`;
 - after timeout the UI stops automatic polling and tells the manager to refresh manually later.
 

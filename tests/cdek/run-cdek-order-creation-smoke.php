@@ -12,6 +12,7 @@ use WallsShop\WDC\Carriers\Cdek\Api\CdekHttpClientInterface;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekOAuthTokenService;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekApiClient;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticApiClient;
 use WallsShop\WDC\Carriers\RussianPost\Tracking\RussianPostTrackingApiClient;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
@@ -57,7 +58,24 @@ function sanitize_email( mixed $value ): string { return filter_var( trim( (stri
 function wp_unslash( mixed $value ): mixed { return $value; }
 function __( string $text, string $domain = '' ): string { return $text; }
 function esc_html__( string $text, string $domain = '' ): string { return $text; }
+function esc_attr__( string $text, string $domain = '' ): string { return $text; }
 function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
+function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
+function esc_textarea( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
+function selected( mixed $selected, mixed $current = true, bool $display = true ): string {
+	$result = (string) $selected === (string) $current ? ' selected="selected"' : '';
+	if ( $display ) {
+		echo $result;
+	}
+	return $result;
+}
+function disabled( mixed $disabled, mixed $current = true, bool $display = true ): string {
+	$result = (bool) $disabled === (bool) $current ? ' disabled="disabled"' : '';
+	if ( $display ) {
+		echo $result;
+	}
+	return $result;
+}
 function current_user_can( string $capability ): bool { return true; }
 function check_ajax_referer( string $action, string|bool $query_arg = false, bool $stop = true ): bool { return true; }
 function wc_get_order( int $order_id ): ?object { return $GLOBALS['wdc_cdek_order_ajax_order'] ?? null; }
@@ -65,7 +83,11 @@ function wp_send_json_success( mixed $data = null, int $status_code = 200, int $
 function wp_send_json_error( mixed $data = null, int $status_code = 400, int $flags = 0 ): never { throw new CdekOrderAjaxResponse( false, $data, $status_code ); }
 
 if ( ! class_exists( 'wpdb' ) ) {
-	class wpdb {}
+	class wpdb {
+		public string $prefix = 'wp_';
+		/** @var array<int,array<string,mixed>> */
+		public array $cdek_tariffs = array();
+	}
 }
 
 final class CdekOrderAjaxResponse extends RuntimeException {
@@ -475,12 +497,78 @@ foreach ( array( 'ACCEPTED', 'CREATED' ) as $protected_status ) {
 	cdek_order_assert( empty( $protected_payload['can_remove_from_order'] ) && ! $protected_remove['success'], 'CDEK local remove must be forbidden for ' . $protected_status . '.' );
 }
 
+$tariff_db = new wpdb();
+$tariff_db->cdek_tariffs = array(
+	array( 'tariff_code' => '136', 'tariff_name_from_cdek' => 'Посылка склад-склад', 'custom_title' => 'Кастомный ПВЗ', 'delivery_type' => DeliveryType::PICKUP, 'is_active' => 1, 'created_at' => '2026-06-13 12:00:00', 'updated_at' => '2026-06-13 12:00:00' ),
+	array( 'tariff_code' => '138', 'tariff_name_from_cdek' => 'Эконом склад-склад', 'custom_title' => '', 'delivery_type' => DeliveryType::PICKUP, 'is_active' => 1, 'created_at' => '2026-06-13 12:00:00', 'updated_at' => '2026-06-13 12:00:00' ),
+	array( 'tariff_code' => '137', 'tariff_name_from_cdek' => 'Посылка склад-дверь', 'custom_title' => 'Курьер кастом', 'delivery_type' => DeliveryType::COURIER, 'is_active' => 1, 'created_at' => '2026-06-13 12:00:00', 'updated_at' => '2026-06-13 12:00:00' ),
+	array( 'tariff_code' => '139', 'tariff_name_from_cdek' => 'Неактивный ПВЗ', 'custom_title' => '', 'delivery_type' => DeliveryType::PICKUP, 'is_active' => 0, 'created_at' => '2026-06-13 12:00:00', 'updated_at' => '2026-06-13 12:00:00' ),
+);
+$tariff_repository = new CdekTariffRepository( $tariff_db );
+$services = new DeliveryServiceRepository( new wpdb() );
+$drafts = new OrderShipmentDraftFactory( $services, new ShipmentServiceSettings(), null, null, null, $settings, $tariff_repository );
+$draft_order = new CdekOrderFakeOrder( 130 );
+$draft_order->meta['_wdc_platform_carrier_key'] = CdekSettings::CARRIER_KEY;
+$draft_order->meta['_wdc_platform_delivery_type'] = DeliveryType::PICKUP;
+$draft_order->meta['_wdc_delivery_calculation_data'] = array(
+	'carrier_key' => CdekSettings::CARRIER_KEY,
+	'selected_tariff_object' => '136',
+	'selected_tariff_title' => 'Посылка склад-склад',
+	'pickup' => array( 'cdek_code' => 'ISK1', 'point_code' => 'ISK1', 'point_address' => 'Искитим, ПВЗ', 'point_postcode' => '633209', 'city_name' => 'Искитим', 'region_name' => 'Новосибирская область' ),
+	'api' => array( 'response_tariff_sanitized' => array( 'delivery_mode' => 4 ), 'cdek_to_city_code' => 270 ),
+	'package' => array( 'products_weight_g' => 500, 'dimensions_cm' => array( 'length' => 20, 'width' => 15, 'height' => 10 ) ),
+);
+$draft = $drafts->draft_array( $draft_order );
+$draft_request = $draft['request'];
+$pickup_service = array_values( array_filter( $draft['services'], static fn ( array $service ): bool => DeliveryType::PICKUP === (string) ( $service['delivery_type'] ?? '' ) ) )[0] ?? array();
+$pickup_tariffs = is_array( $pickup_service['tariffs'] ?? null ) ? $pickup_service['tariffs'] : array();
+$pickup_codes = array_map( static fn ( array $row ): string => (string) ( $row['object_code'] ?? '' ), $pickup_tariffs );
+cdek_order_assert( array( '136', '138' ) === $pickup_codes && '136' === (string) ( $draft_request['meta']['tariff_code'] ?? '' ), 'CDEK shipment modal pickup tariff select must include active pickup tariffs only and keep selected order tariff.' );
+cdek_order_assert( str_contains( (string) ( $pickup_tariffs[0]['title'] ?? '' ), 'Кастомный ПВЗ' ) && str_contains( (string) ( $pickup_tariffs[1]['title'] ?? '' ), 'Эконом склад-склад' ), 'CDEK tariff titles must use custom_title first and CDEK name as fallback.' );
+cdek_order_assert( ! in_array( '137', $pickup_codes, true ) && ! in_array( '139', $pickup_codes, true ), 'CDEK pickup modal tariffs must exclude courier and inactive tariffs.' );
+$location_context = is_array( $draft_request['meta']['pickup_location_context'] ?? null ) ? $draft_request['meta']['pickup_location_context'] : array();
+cdek_order_assert( CdekSettings::CARRIER_KEY === (string) ( $location_context['carrier_key'] ?? '' ) && 'cdek:pickup' === (string) ( $location_context['pickup_family'] ?? '' ), 'CDEK admin map context must use CDEK carrier and pickup family.' );
+cdek_order_assert( 'Кемерово' === (string) ( $location_context['city_name'] ?? '' ) && 'Новосибирск' !== (string) ( $location_context['city_name'] ?? '' ), 'CDEK admin map location context must come from recipient city, not sender city.' );
+$courier_order = new CdekOrderFakeOrder( 131 );
+$courier_order->meta['_wdc_platform_carrier_key'] = CdekSettings::CARRIER_KEY;
+$courier_order->meta['_wdc_platform_delivery_type'] = DeliveryType::COURIER;
+$courier_order->meta['_wdc_delivery_calculation_data'] = array(
+	'carrier_key' => CdekSettings::CARRIER_KEY,
+	'selected_tariff_object' => '137',
+	'selected_tariff_title' => 'Посылка склад-дверь',
+	'api' => array( 'response_tariff_sanitized' => array( 'delivery_mode' => 3 ), 'cdek_to_city_code' => 44 ),
+	'package' => array( 'products_weight_g' => 500, 'dimensions_cm' => array( 'length' => 20, 'width' => 15, 'height' => 10 ) ),
+);
+$courier_draft = $drafts->draft_array( $courier_order );
+$courier_service = array_values( array_filter( $courier_draft['services'], static fn ( array $service ): bool => DeliveryType::COURIER === (string) ( $service['delivery_type'] ?? '' ) ) )[0] ?? array();
+$courier_codes = array_map( static fn ( array $row ): string => (string) ( $row['object_code'] ?? '' ), is_array( $courier_service['tariffs'] ?? null ) ? $courier_service['tariffs'] : array() );
+cdek_order_assert( array( '137' ) === $courier_codes, 'CDEK shipment modal courier tariff select must include active courier tariffs only.' );
+$missing_tariff_order = new CdekOrderFakeOrder( 132 );
+$missing_tariff_order->meta = $draft_order->meta;
+$missing_tariff_order->meta['_wdc_delivery_calculation_data']['selected_tariff_object'] = '999';
+$missing_draft = $drafts->draft_array( $missing_tariff_order );
+$missing_pickup_service = array_values( array_filter( $missing_draft['services'], static fn ( array $service ): bool => DeliveryType::PICKUP === (string) ( $service['delivery_type'] ?? '' ) ) )[0] ?? array();
+$missing_options = is_array( $missing_pickup_service['tariffs'] ?? null ) ? $missing_pickup_service['tariffs'] : array();
+$missing_option = array_values( array_filter( $missing_options, static fn ( array $row ): bool => '999' === (string) ( $row['object_code'] ?? '' ) ) )[0] ?? array();
+cdek_order_assert( ! empty( $missing_option['selected_missing'] ) && '999' === (string) ( $missing_draft['request']['meta']['tariff_code'] ?? '' ), 'CDEK modal must keep selected tariff value when it is absent from active managed tariffs.' );
+$admin_request = $drafts->create_request_from_admin_data(
+	$draft_order,
+	array(
+		'delivery_type' => DeliveryType::PICKUP,
+		'tariff_object' => '136',
+		'delivery_point' => 'NEW1',
+		'pickup_point_code' => 'NEW1',
+		'pickup_point_address' => 'Новый ПВЗ',
+		'pickup_point_city' => 'Кемерово',
+		'pickup_point_region' => 'Кемеровская область',
+	)
+);
+cdek_order_assert( 'NEW1' === (string) ( $admin_request->meta['delivery_point'] ?? '' ) && 'NEW1' === (string) ( $admin_request->meta['pickup_point_code'] ?? '' ) && $admin_request->pickup_point instanceof PickupPointSelection && 'NEW1' === $admin_request->pickup_point->point_code, 'Choosing another CDEK pickup point in modal must update delivery_point and point_code.' );
+
 $ajax_http = new CdekOrderFakeHttp();
 $ajax_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $ajax_http ), $settings, $ajax_http );
 $ajax_repository = new OrderShipmentRepository();
 $ajax_creation = new ShipmentCreationService( $ajax_repository, array( new CdekShipmentAdapter( $ajax_client, $builder ) ) );
-$services = new DeliveryServiceRepository( new wpdb() );
-$drafts = new OrderShipmentDraftFactory( $services, new ShipmentServiceSettings() );
 $rp_tracking = ( new ReflectionClass( RussianPostTrackingApiClient::class ) )->newInstanceWithoutConstructor();
 $status_updates = new ShipmentStatusUpdateService( $ajax_repository, $rp_tracking, new RussianPostTrackingStatusMapper() );
 $ajax_status = new CdekOrderStatusService( $ajax_repository, $ajax_client );
@@ -515,6 +603,16 @@ try {
 	cdek_order_assert( $response->success, 'ajax_create for CDEK must succeed.' );
 	cdek_order_assert( CdekSettings::CARRIER_KEY === (string) ( $response->data['status']['carrier_key'] ?? '' ), 'ajax_create for CDEK must return CDEK status payload.' );
 }
+
+ob_start();
+$metabox->render( $draft_order );
+$modal_html = ob_get_clean() ?: '';
+cdek_order_assert( ! str_contains( $modal_html, 'tariff_code:' ) && ! str_contains( $modal_html, 'delivery_mode:' ), 'CDEK shipment modal must not render technical tariff_code/delivery_mode labels.' );
+cdek_order_assert( str_contains( $modal_html, 'В заказе тариф' ) && str_contains( $modal_html, 'Кастомный ПВЗ' ), 'CDEK shipment modal must render human selected tariff title.' );
+cdek_order_assert( str_contains( $modal_html, 'ПВЗ отправителя' ) && str_contains( $modal_html, 'NSK69' ), 'CDEK shipment modal must render sender shipment_point label.' );
+cdek_order_assert( str_contains( $modal_html, 'Код ПВЗ' ) && str_contains( $modal_html, 'ISK1' ), 'CDEK shipment modal must show recipient CDEK point code, not index label.' );
+cdek_order_assert( str_contains( $modal_html, 'name="pickup_carrier_key" value="cdek"' ) && str_contains( $modal_html, 'name="pickup_family" value="cdek:pickup"' ), 'CDEK shipment modal must render CDEK carrier context for admin pickup map.' );
+cdek_order_assert( str_contains( $modal_html, 'name="recipient_location_city" value="Кемерово"' ) && ! str_contains( $modal_html, 'name="recipient_location_city" value="Новосибирск"' ), 'CDEK shipment modal map context must use recipient locality, not sender locality.' );
 
 $render = new ReflectionMethod( OrderShipmentsMetabox::class, 'render_status_block' );
 $render->setAccessible( true );
