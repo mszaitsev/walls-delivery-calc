@@ -177,8 +177,25 @@ final class OrderShipmentsMetabox {
 		$pickup_row = is_array( $meta['pickup_point_row'] ?? null ) ? $meta['pickup_point_row'] : array();
 		$pickup_postcode = (string) ( $pickup_row['postcode'] ?? $pickup_destination_index );
 		$pickup_context = is_array( $meta['pickup_location_context'] ?? null ) ? $meta['pickup_location_context'] : array();
-		$region = (string) ( $address['region_name'] ?? '' );
-		$city = (string) ( $address['settlement'] ?? $address['city'] ?? '' );
+		$order_shipping_city = method_exists( $order, 'get_shipping_city' ) ? (string) $order->get_shipping_city() : '';
+		$order_shipping_region = method_exists( $order, 'get_shipping_state' ) ? (string) $order->get_shipping_state() : '';
+		$order_shipping_postcode = method_exists( $order, 'get_shipping_postcode' ) ? (string) $order->get_shipping_postcode() : '';
+		$order_shipping_address = trim(
+			implode(
+				' ',
+				array_filter(
+					array(
+						method_exists( $order, 'get_shipping_address_1' ) ? (string) $order->get_shipping_address_1() : '',
+						method_exists( $order, 'get_shipping_address_2' ) ? (string) $order->get_shipping_address_2() : '',
+					),
+					static fn( string $value ): bool => '' !== trim( $value )
+				)
+			)
+		);
+		$region = (string) ( $address['region_name'] ?? $order_shipping_region );
+		$city = (string) ( $address['settlement'] ?? $address['city'] ?? $order_shipping_city );
+		$recipient_postcode = (string) ( $address['postcode'] ?? $order_shipping_postcode );
+		$recipient_address_context = (string) ( $address['raw_address'] ?? $order_shipping_address );
 		$pickup_demand_address = implode( ', ', array_filter( array( $pickup_destination_index, $region, $city, 'до востребования' ), static fn ( string $value ): bool => '' !== trim( $value ) ) );
 		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
 		$selected_delivery_type = RussianPostDomesticSettings::normalize_delivery_type( (string) ( $request['delivery_type'] ?? $meta['delivery_type'] ?? DeliveryType::PICKUP ) );
@@ -222,7 +239,7 @@ final class OrderShipmentsMetabox {
 		$declared_value_initial = $selected_tariff_has_declared_value ? $default_declared_value_attr : '';
 		$delivery_type = $selected_delivery_type;
 		$pickup_point_found = ! empty( $meta['pickup_point_found'] );
-		$pickup_address = (string) ( $address['raw_address'] ?? '' );
+		$pickup_address = $recipient_address_context;
 		$courier_original_address = (string) ( $meta['courier_original_address'] ?? '' );
 		$normalized_address = is_array( $meta['normalized_address'] ?? null ) ? $meta['normalized_address'] : array();
 		$normalized_display = (string) ( $normalized_address['display'] ?? '' );
@@ -310,8 +327,8 @@ final class OrderShipmentsMetabox {
 									<input type="hidden" name="pickup_family" value="<?php echo esc_attr( (string) ( $meta['pickup_family'] ?? ( $is_cdek ? CdekSettings::CARRIER_KEY . ':pickup' : RussianPostDomesticSettings::CARRIER_KEY . ':pickup' ) ) ); ?>" data-wdc-pickup-family>
 									<input type="hidden" name="recipient_location_city" value="<?php echo esc_attr( (string) ( $pickup_context['city_name'] ?? $pickup_context['city_value'] ?? $city ) ); ?>" data-wdc-pickup-location-city>
 									<input type="hidden" name="recipient_location_region" value="<?php echo esc_attr( (string) ( $pickup_context['region_name'] ?? $pickup_context['state_value'] ?? $region ) ); ?>" data-wdc-pickup-location-region>
-									<input type="hidden" name="recipient_location_postcode" value="<?php echo esc_attr( (string) ( $pickup_context['postal_code'] ?? $pickup_context['postcode'] ?? '' ) ); ?>" data-wdc-pickup-location-postcode>
-									<input type="hidden" name="recipient_location_address" value="<?php echo esc_attr( (string) ( $pickup_context['address'] ?? $pickup_context['display_name'] ?? '' ) ); ?>" data-wdc-pickup-location-address>
+									<input type="hidden" name="recipient_location_postcode" value="<?php echo esc_attr( (string) ( $pickup_context['postal_code'] ?? $pickup_context['postcode'] ?? $recipient_postcode ) ); ?>" data-wdc-pickup-location-postcode>
+									<input type="hidden" name="recipient_location_address" value="<?php echo esc_attr( (string) ( $pickup_context['address'] ?? $pickup_context['display_name'] ?? $recipient_address_context ) ); ?>" data-wdc-pickup-location-address>
 									<input type="hidden" name="recipient_location_fias_id" value="<?php echo esc_attr( (string) ( $pickup_context['fias_id'] ?? '' ) ); ?>" data-wdc-pickup-location-fias>
 									<input type="hidden" name="recipient_location_gar_id" value="<?php echo esc_attr( (string) ( $pickup_context['gar_id'] ?? '' ) ); ?>" data-wdc-pickup-location-gar>
 									<input type="hidden" name="recipient_location_id" value="<?php echo esc_attr( (string) ( $pickup_context['location_id'] ?? '' ) ); ?>" data-wdc-pickup-location-id>

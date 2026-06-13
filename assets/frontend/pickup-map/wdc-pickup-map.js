@@ -195,9 +195,7 @@
 			var previewLeftVisiblePoints = previewPoint && !matchingPreviewPoint;
 			if (previewPoint && matchingPreviewPoint) {
 				previewPoint = matchingPreviewPoint;
-				if (committedPoint && pointInList(committedPoint, [matchingPreviewPoint])) {
-					committedPoint = matchingPreviewPoint;
-				}
+				committedPoint = matchingPreviewPoint;
 			} else if (previewPoint) {
 				previewPoint = null;
 			}
@@ -656,7 +654,7 @@
 	}
 
 	function pointMatchKeys(point) {
-		var snapshot = point && point.snapshot && typeof point.snapshot === 'object' ? point.snapshot : {};
+		var snapshot = pointSnapshot(point);
 		var values = [
 			point && point.id,
 			point && point.point_id,
@@ -698,7 +696,7 @@
 		if (!point || typeof point !== 'object') {
 			return null;
 		}
-		var snapshot = point.snapshot && typeof point.snapshot === 'object' ? point.snapshot : {};
+		var snapshot = pointSnapshot(point);
 		var normalized = Object.assign({}, snapshot, point);
 		normalized.id = normalized.id || snapshot.id;
 		normalized.point_id = normalized.point_id || snapshot.point_id;
@@ -720,6 +718,22 @@
 		normalized.point_type_label = normalized.point_type_label || snapshot.point_type_label;
 		normalized.cdek_code = normalized.cdek_code || snapshot.cdek_code;
 		return pointId(normalized) ? normalized : null;
+	}
+
+	function pointSnapshot(point) {
+		var snapshot = point && point.snapshot;
+		if (snapshot && typeof snapshot === 'object') {
+			return snapshot;
+		}
+		if (typeof snapshot === 'string' && snapshot.trim()) {
+			try {
+				var parsed = JSON.parse(snapshot);
+				return parsed && typeof parsed === 'object' ? parsed : {};
+			} catch (error) {
+				return {};
+			}
+		}
+		return {};
 	}
 
 	function selectedSummary(point) {
