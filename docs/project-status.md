@@ -366,6 +366,8 @@
 - Профильный `docs/wdc-*.md` по области задачи.
 - `docs/walls-delivery-calc-tech-spec.md` - только если меняется целевой продуктовый или архитектурный контракт.
 - `docs/wdc-migration-plan.md` - если меняется порядок этапов, риски или стратегия перехода.
+0.48.8 note: CDEK pickup maps now return the full available point list for large cities instead of truncating at 50. Checkout pickup, admin order delivery recalculation and the CDEK shipment preparation modal use a shared DaData-backed address search path that places a temporary marker, focuses the map on the found address, and preserves the active carrier/pickup-family context and point list.
+
 0.48.7 note: CDEK shipment preparation modal now uses managed tariff data instead of a single saved tariff row. Active tariffs are filtered by pickup/courier scenario, the saved order tariff remains selected with a fallback marker when missing from active tariffs, CDEK manager-facing labels replace technical `tariff_code`/`delivery_mode` rows, recipient pickup displays `Код ПВЗ`, and the admin pickup map opens with CDEK carrier context plus recipient locality/address context rather than sender city settings.
 
 0.48.6 note: CDEK internal registration status now maps actual `entity.statuses[]` codes explicitly. `CREATED` is the only order status that means the order is created and valid; `ACCEPTED` remains `registration_pending`, `INVALID` becomes `failed`, `REMOVED` becomes `removed`, and later movement/operation statuses remain active `registered` shipments until a fuller CDEK status mapping stage exists.

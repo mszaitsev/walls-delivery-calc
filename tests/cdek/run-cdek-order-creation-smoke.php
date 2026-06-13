@@ -613,6 +613,8 @@ cdek_order_assert( str_contains( $modal_html, 'ПВЗ отправителя' ) 
 cdek_order_assert( str_contains( $modal_html, 'Код ПВЗ' ) && str_contains( $modal_html, 'ISK1' ), 'CDEK shipment modal must show recipient CDEK point code, not index label.' );
 cdek_order_assert( str_contains( $modal_html, 'name="pickup_carrier_key" value="cdek"' ) && str_contains( $modal_html, 'name="pickup_family" value="cdek:pickup"' ), 'CDEK shipment modal must render CDEK carrier context for admin pickup map.' );
 cdek_order_assert( str_contains( $modal_html, 'name="recipient_location_city" value="Кемерово"' ) && ! str_contains( $modal_html, 'name="recipient_location_city" value="Новосибирск"' ), 'CDEK shipment modal map context must use recipient locality, not sender locality.' );
+$shipments_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'window.WDCPickupApi.addressSearch' ) && str_contains( $shipments_js, 'addressMarkerFromResult' ) && str_contains( $shipments_js, 'provider.setCenter(searchMarker.lat, searchMarker.lng, 15);' ), 'CDEK shipment modal pickup map must use shared DaData address search and focus the temporary marker.' );
 
 $render = new ReflectionMethod( OrderShipmentsMetabox::class, 'render_status_block' );
 $render->setAccessible( true );

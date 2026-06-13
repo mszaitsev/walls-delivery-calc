@@ -37,13 +37,14 @@ final class PickupAddressSearchService {
 		$location_id = max( 0, (int) ( $filters['location_id'] ?? 0 ) );
 		$country_code = strtoupper( trim( (string) ( $filters['country_code'] ?? 'RU' ) ) );
 		$types = is_array( $filters['point_types'] ?? null ) ? $filters['point_types'] : array();
+		$include_points = ! array_key_exists( 'include_points', $filters ) || ! empty( $filters['include_points'] );
 
 		if ( preg_match( '/^\d{6}$/', $query ) ) {
-			return $this->postcode_search( $query, $types );
+			return $this->postcode_search( $query, $types, $include_points );
 		}
 
 		$location = $this->location( $location_id );
-		$cache_key = $this->cache_key( $query, $location_id, $country_code );
+		$cache_key = $this->cache_key( $query, $location_id, $country_code, $include_points );
 		$cached = $this->cache_get( $cache_key );
 		if ( is_array( $cached ) ) {
 			$cached['address_search_available'] = true;
@@ -68,7 +69,7 @@ final class PickupAddressSearchService {
 			return $this->failure( 'address_not_found', true );
 		}
 
-		$points = $this->points->find_nearest_rows( (float) $address['lat'], (float) $address['lng'], array( 'point_types' => $types, 'limit' => 50 ) );
+		$points = $include_points ? $this->points->find_nearest_rows( (float) $address['lat'], (float) $address['lng'], array( 'point_types' => $types, 'limit' => 50 ) ) : array();
 		$result = array(
 			'search_type' => 'address',
 			'address_search_available' => true,
@@ -84,7 +85,24 @@ final class PickupAddressSearchService {
 	 * @param array<int,string> $types
 	 * @return array<string,mixed>
 	 */
-	private function postcode_search( string $postcode, array $types ): array {
+	private function postcode_search( string $postcode, array $types, bool $include_points = true ): array {
+		if ( ! $include_points ) {
+			$location = $this->location_by_postcode( $postcode );
+			if ( $location instanceof Location && null !== $location->latitude && null !== $location->longitude ) {
+				return array(
+					'search_type' => 'postcode',
+					'address_search_available' => $this->token_pool->has_available_token(),
+					'address' => array(
+						'value' => $location->resolved_display_name(),
+						'lat' => $location->latitude,
+						'lng' => $location->longitude,
+					),
+					'points' => array(),
+				);
+			}
+
+			return $this->failure( 'postcode_not_found', $this->token_pool->has_available_token(), 'postcode' );
+		}
 		$exact = $this->points->find_rows_by_postcode( $postcode, array( 'point_types' => $types, 'limit' => 50 ) );
 		if ( array() !== $exact ) {
 			$anchor = $this->average_point( $exact );
@@ -234,8 +252,8 @@ final class PickupAddressSearchService {
 		);
 	}
 
-	private function cache_key( string $query, int $location_id, string $country_code ): string {
-		return 'wdc_pickup_address_search_' . sha1( $this->normalize( $query ) . '|' . $location_id . '|' . $country_code );
+	private function cache_key( string $query, int $location_id, string $country_code, bool $include_points ): string {
+		return 'wdc_pickup_address_search_' . sha1( $this->normalize( $query ) . '|' . $location_id . '|' . $country_code . '|points:' . ( $include_points ? '1' : '0' ) );
 	}
 
 	private function cache_get( string $key ): mixed {

@@ -1162,18 +1162,6 @@
 					status.textContent = 'Введите адрес для поиска.';
 					return;
 				}
-				if ( 'cdek' === String( rate.carrier_key || rate.service_key || '' ) ) {
-					status.textContent = 'Ищем ПВЗ СДЭК...';
-					searchMarker = null;
-					loadPickupPointsForLocation( 'search', value )
-						.then( function () {
-							renderSearchResults( 'search', value, '' );
-						} )
-						.catch( function () {
-							status.textContent = 'Не удалось загрузить пункты выдачи СДЭК. Попробуйте позже.';
-						} );
-					return;
-				}
 				status.textContent = 'Ищем адрес через DaData...';
 				geocodeAddress( box, value )
 					.then( function ( marker ) {
@@ -1225,7 +1213,7 @@
 			form.append( 'selected_rate', JSON.stringify( rate ) );
 			form.append( 'mode', modeOverride || 'location' );
 			form.append( 'query', queryOverride || '' );
-			form.append( 'limit', '300' );
+			form.append( 'limit', String( 'cdek' === String( rate.carrier_key || rate.service_key || '' ) ? 1000 : 300 ) );
 			return window.fetch( config.ajaxUrl || window.ajaxurl || '', {
 				method: 'POST',
 				credentials: 'same-origin',

@@ -215,7 +215,7 @@ $settings->replace(
 				'id' => 'pickup-address-token',
 				'encrypted_token' => $encryption->encrypt( 'secret-token' ),
 				'masked_token' => '********oken',
-				'daily_limit' => 2,
+				'daily_limit' => 3,
 				'enabled' => true,
 			),
 		),
@@ -321,8 +321,26 @@ pickup_rest_assert( 'address' === $address_result['search_type'] && true === $ad
 pickup_rest_assert( 1 === count( $GLOBALS['wdc_pickup_rest_http_requests'] ?? array() ) && 1 === $token_pool->usage_today( 'pickup-address-token' ), 'Address search must use DaDataSuggestionClient and increment shared token usage.' );
 $cached_address_result = $controller->address_search( array( 'carrier' => 'russian_post', 'query' => 'Ленина 15', 'country_code' => 'RU' ) );
 pickup_rest_assert( 1 === count( $GLOBALS['wdc_pickup_rest_http_requests'] ?? array() ) && 1 === $token_pool->usage_today( 'pickup-address-token' ) && $cached_address_result['address'] === $address_result['address'], 'Address search cache must avoid repeated DaData usage.' );
+$GLOBALS['wdc_pickup_rest_http_queue'][] = array(
+	'response' => array( 'code' => 200 ),
+	'body' => wp_json_encode(
+		array(
+			'suggestions' => array(
+				array(
+					'value' => 'г Москва, ул Тверская, д 1',
+					'unrestricted_value' => '125009, г Москва, ул Тверская, д 1',
+					'data' => array( 'geo_lat' => '55.757', 'geo_lon' => '37.615' ),
+				),
+			),
+		),
+		JSON_UNESCAPED_UNICODE
+	),
+);
+$cdek_address_result = $controller->address_search( array( 'carrier' => 'cdek', 'query' => 'Тверская 1', 'country_code' => 'RU', 'location_id' => '100' ) );
+pickup_rest_assert( 'address' === $cdek_address_result['search_type'] && true === $cdek_address_result['address_search_available'] && 55.757 === (float) $cdek_address_result['address']['lat'] && array() === $cdek_address_result['points'], 'CDEK address search must use the shared DaData path and return marker coordinates without replacing carrier pickup points.' );
+pickup_rest_assert( 2 === count( $GLOBALS['wdc_pickup_rest_http_requests'] ?? array() ) && 2 === $token_pool->usage_today( 'pickup-address-token' ), 'CDEK address search must call DaData without changing carrier context.' );
 $postcode_result = $controller->address_search( array( 'carrier' => 'russian_post', 'query' => '630002', 'country_code' => 'RU' ) );
-pickup_rest_assert( 'postcode' === $postcode_result['search_type'] && count( $postcode_result['points'] ) > 1 && 2 === $postcode_result['points'][0]['id'] && 1 === count( $GLOBALS['wdc_pickup_rest_http_requests'] ?? array() ), 'Six-digit postcode search must return nearest points around the exact postcode anchor without calling DaData.' );
+pickup_rest_assert( 'postcode' === $postcode_result['search_type'] && count( $postcode_result['points'] ) > 1 && 2 === $postcode_result['points'][0]['id'] && 2 === count( $GLOBALS['wdc_pickup_rest_http_requests'] ?? array() ), 'Six-digit postcode search must return nearest points around the exact postcode anchor without calling DaData.' );
 pickup_rest_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Pickup/Search/PickupAddressSearchService.php' ), '$nearest = $this->points->find_nearest_rows( $anchor' ), 'Postcode exact matches must expand to nearest points around the anchor.' );
 $GLOBALS['wdc_pickup_rest_http_queue'][] = array(
 	'response' => array( 'code' => 200 ),

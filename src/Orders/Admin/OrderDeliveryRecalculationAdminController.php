@@ -493,7 +493,9 @@ final class OrderDeliveryRecalculationAdminController {
 			);
 		}
 
-		return array_slice( $points, 0, $limit );
+		unset( $limit );
+
+		return $points;
 	}
 
 	private function normalize_search_text( string $value ): string {

@@ -910,6 +910,8 @@
       mapProvider: config.mapProvider || 'leaflet',
       yandexApiKeyPresent: !!config.yandexApiKeyPresent,
       yandexApiKey: config.yandexApiKey || '',
+      restUrl: config.restUrl || (window.wdcPickupCheckout && window.wdcPickupCheckout.restUrl) || '/wp-json/wdc/v1/',
+      nonce: config.restNonce || (window.wdcPickupCheckout && window.wdcPickupCheckout.nonce) || '',
       pickupPointTypes: config.pickupPointTypes || {},
       carrierKey: context.carrierKey || '',
       serviceKey: context.serviceKey || '',
@@ -942,6 +944,7 @@
     let controller = null;
     let points = [];
     let previewPoint = null;
+    let searchMarker = null;
 
     function close() {
       if (controller) controller.abort();
@@ -1003,6 +1006,37 @@
       return points.find((point) => pointId(point) === String(id)) || null;
     }
 
+    function addressMarkerFromResult(result) {
+      const address = result && result.address ? result.address : null;
+      const lat = address && address.lat !== null && address.lat !== undefined ? parseFloat(address.lat) : null;
+      const lng = address && address.lng !== null && address.lng !== undefined ? parseFloat(address.lng) : null;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      return {
+        id: 'address-search',
+        lat: lat,
+        lng: lng,
+        marker_type: 'search',
+        point_type: 'search',
+        title: address.value || '',
+        address: address.value || ''
+      };
+    }
+
+    function renderSearchResults(message) {
+      status.textContent = points.length ? message + ' Найдено: ' + points.length : message + ' ПВЗ не найдены.';
+      if (provider && provider.renderMarkers) {
+        provider.renderMarkers(points, { activePointId: previewPoint ? pointId(previewPoint) : null, searchMarker: searchMarker });
+        if (searchMarker && provider.setCenter) {
+          provider.setCenter(searchMarker.lat, searchMarker.lng, 15);
+        } else if (provider.fitToMarkers) {
+          provider.fitToMarkers();
+        }
+      }
+      previewPoint = null;
+      selected.textContent = 'Выберите ПВЗ на карте или в списке.';
+      renderList();
+    }
+
     function runSearch(mode) {
       const value = String(query.value || '').trim();
       if (!value) {
@@ -1011,13 +1045,35 @@
       }
       if (controller) controller.abort();
       controller = new AbortController();
+      if ((mode || 'search') === 'search' && window.WDCPickupApi && typeof window.WDCPickupApi.addressSearch === 'function') {
+        status.textContent = 'Ищем адрес через DaData...';
+        window.WDCPickupApi.addressSearch(value, {
+          carrier: context.carrierKey || '',
+          carrier_key: context.carrierKey || '',
+          service_key: context.serviceKey || '',
+          pickup_family: context.pickupFamily || '',
+          country_code: 'RU',
+          location_id: context.locationId || ''
+        }, controller.signal)
+          .then((result) => {
+            searchMarker = addressMarkerFromResult(result);
+            renderSearchResults(searchMarker ? 'Адрес найден через DaData.' : 'Адрес не найден через DaData.');
+          })
+          .catch((error) => {
+            if (error.name === 'AbortError') return;
+            searchMarker = null;
+            renderSearchResults(error.message || 'Адрес не найден или геокодинг недоступен.');
+          });
+        return;
+      }
+      searchMarker = null;
       status.textContent = 'Поиск...';
-      pickupSearchRequest(form, value, 50, controller.signal, mode || 'search')
+      pickupSearchRequest(form, value, mode === 'location' ? 1000 : 100, controller.signal, mode || 'search')
         .then((found) => {
           points = found;
           status.textContent = points.length ? 'Найдено: ' + points.length : 'ПВЗ не найдены.';
           if (provider && provider.renderMarkers) {
-            provider.renderMarkers(points, { activePointId: previewPoint ? pointId(previewPoint) : null });
+            provider.renderMarkers(points, { activePointId: previewPoint ? pointId(previewPoint) : null, searchMarker: searchMarker });
             if (provider.fitToMarkers) provider.fitToMarkers();
           }
           previewPoint = null;

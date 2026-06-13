@@ -93,12 +93,15 @@ final class OrderShipmentsMetabox {
 		}
 		wp_enqueue_style( 'wdc-pickup-map', $this->plugin_url . 'assets/frontend/pickup-map/wdc-pickup-map.css', array(), $this->version );
 		wp_enqueue_style( 'wdc-shipments-admin', $this->plugin_url . 'assets/admin/shipments-admin.css', array( 'wdc-pickup-map' ), $this->version );
-		wp_enqueue_script( 'wdc-shipments-admin', $this->plugin_url . 'assets/admin/shipments-admin.js', array( $provider_handle ), $this->version, true );
+		wp_enqueue_script( 'wdc-pickup-api', $this->plugin_url . 'assets/frontend/pickup-map/wdc-pickup-api.js', array(), $this->version, true );
+		wp_enqueue_script( 'wdc-shipments-admin', $this->plugin_url . 'assets/admin/shipments-admin.js', array( $provider_handle, 'wdc-pickup-api' ), $this->version, true );
 		wp_localize_script(
 			'wdc-shipments-admin',
 			'wdcShipmentsAdmin',
 			array(
 				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+				'restUrl' => function_exists( 'rest_url' ) ? rest_url( 'wdc/v1/' ) : '',
+				'restNonce' => wp_create_nonce( 'wp_rest' ),
 				'nonce' => wp_create_nonce( self::NONCE_ACTION ),
 				'createAction' => self::AJAX_CREATE,
 				'previewAction' => self::AJAX_PREVIEW,
@@ -649,7 +652,7 @@ final class OrderShipmentsMetabox {
 			}
 			wp_send_json_success(
 				array(
-					'points' => array_slice( array_values( $points ), 0, $limit ),
+					'points' => array_values( $points ),
 				)
 			);
 		}

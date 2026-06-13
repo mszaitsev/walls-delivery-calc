@@ -311,7 +311,7 @@
 				}
 			}).catch(function (error) {
 				if (error.name !== 'AbortError') {
-					card.textContent = context.carrier === 'cdek' || context.carrier_key === 'cdek' ? 'Не удалось загрузить пункты выдачи СДЭК. Попробуйте позже.' : (labels.error || 'Error');
+					card.textContent = labels.error || 'Error';
 				}
 			});
 		}
@@ -359,15 +359,6 @@
 			if (!window.WDCPickupApi.addressSearch) {
 				return window.WDCPickupApi.search(query, controller.signal, context).then(function (points) {
 					renderMarkers(points, labels.empty || '');
-				});
-			}
-			if (context.carrier === 'cdek' || context.carrier_key === 'cdek') {
-				return window.WDCPickupApi.search(query, controller.signal, context).then(function (points) {
-					renderMarkers(points, labels.empty || '');
-				}).catch(function (error) {
-					if (error.name !== 'AbortError') {
-						card.textContent = 'Не удалось загрузить пункты выдачи СДЭК. Попробуйте позже.';
-					}
 				});
 			}
 			return window.WDCPickupApi.addressSearch(query, context, controller.signal).then(function (result) {

@@ -1,6 +1,8 @@
 # WDC CDEK Order Creation
 
-Version: 0.48.7.
+Version: 0.48.8.
+
+0.48.8 update: the CDEK pickup map used from the shipment preparation modal now shares the same carrier-independent DaData address search as checkout and admin recalculation. The map keeps CDEK context (`carrier_key=cdek`, `pickup_family=cdek:pickup`), uses the recipient locality/address context, places a temporary marker for the found address, focuses the map on it, and keeps the CDEK pickup list for the current location. CDEK pickup point loading is no longer truncated to 50 rows in the shipment/admin map paths.
 
 0.48.7 update: the CDEK shipment preparation modal now loads all active managed CDEK tariffs instead of only the tariff saved on the order. The tariff select is filtered by the order scenario: pickup orders show only active pickup tariffs, courier orders show only active courier tariffs. The saved order tariff remains selected; if it is no longer active or no longer present in the managed tariff list, the modal keeps that value as a marked fallback so it is not lost before creation. The modal also replaces technical CDEK rows with manager-facing labels: `В заказе тариф`, `ПВЗ отправителя`, and `Код ПВЗ` for the recipient point. The admin “Выбрать другой ПВЗ” map sends CDEK carrier context (`carrier_key=cdek`, `pickup_family=cdek:pickup`) and recipient locality/address context from the WooCommerce order, not sender city settings.
 

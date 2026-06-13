@@ -1,5 +1,9 @@
 # WDC CDEK Pickup Points
 
+Version: 0.48.8.
+
+0.48.8 note: CDEK pickup maps no longer truncate delivery points to 50 rows; large cities return the full normalized CDEK point list from the backend, with existing cache separation by city/environment/type. Address search on pickup maps is now shared and carrier-independent: checkout, admin delivery recalculation and the CDEK shipment modal call the same DaData-backed search path, place a temporary address marker, focus the map on the found coordinates, and keep the current carrier context and pickup list (`cdek:pickup` or `russian_post_domestic:pickup`) unchanged.
+
 Version: 0.46.0.
 
 0.46.0 note: pickup/courier tariff presentation is now managed in the CDEK `Тарифы` tab through `GET /v2/calculator/alltariffs`. Pickup point selection remains independent from the selected tariff inside the CDEK pickup family and still uses `GET /v2/deliverypoints`.
