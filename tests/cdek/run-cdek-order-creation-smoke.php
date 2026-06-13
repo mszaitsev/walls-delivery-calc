@@ -239,6 +239,46 @@ $status = new CdekOrderStatusService( $repository, $client );
 $created = $status->update( $order );
 cdek_order_assert( $created['success'] && 'registered' === (string) $repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY )['status'], 'GET /v2/orders CREATED must register shipment.' );
 
+$successful_without_status_order = new CdekOrderFakeOrder( 115 );
+$repository->save_for_carrier( $successful_without_status_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'successful-empty-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-115' ) );
+$http->order_responses[] = array( 'entity' => array( 'uuid' => 'successful-empty-uuid', 'statuses' => array() ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
+$successful_without_status = $status->update( $successful_without_status_order );
+cdek_order_assert( 'registration_pending' === (string) $repository->find_by_carrier( $successful_without_status_order, CdekSettings::CARRIER_KEY )['status'], 'CDEK request_state SUCCESSFUL without order statuses must remain registration_pending.' );
+cdek_order_assert( 'SUCCESSFUL' === (string) ( $successful_without_status['status']['carrier_status_title'] ?? '' ), 'CDEK request state may be displayed only when no order status exists.' );
+
+$successful_created_order = new CdekOrderFakeOrder( 116 );
+$repository->save_for_carrier( $successful_created_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'successful-created-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-116' ) );
+$http->order_responses[] = array( 'entity' => array( 'uuid' => 'successful-created-uuid', 'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан', 'date_time' => '2026-06-13T05:48:44+0000' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
+$successful_created = $status->update( $successful_created_order );
+cdek_order_assert( 'registered' === (string) $repository->find_by_carrier( $successful_created_order, CdekSettings::CARRIER_KEY )['status'] && 'CREATED' === (string) ( $successful_created['status']['order_status_code'] ?? '' ), 'CDEK request_state SUCCESSFUL with CREATED order status must become registered.' );
+
+$successful_ready_order = new CdekOrderFakeOrder( 117 );
+$repository->save_for_carrier( $successful_ready_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'successful-ready-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-117' ) );
+$http->order_responses[] = array( 'entity' => array( 'uuid' => 'successful-ready-uuid', 'statuses' => array( array( 'code' => 'READY_FOR_SHIPMENT_IN_SENDER_CITY', 'name' => 'Готов к отправке', 'date_time' => '2026-06-13T10:04:41+0000' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
+$successful_ready = $status->update( $successful_ready_order );
+cdek_order_assert( 'registered' === (string) $repository->find_by_carrier( $successful_ready_order, CdekSettings::CARRIER_KEY )['status'] && 'READY_FOR_SHIPMENT_IN_SENDER_CITY' === (string) ( $successful_ready['status']['order_status_code'] ?? '' ), 'CDEK later real order status must keep shipment registered and display order status.' );
+
+$accepted_without_status_order = new CdekOrderFakeOrder( 118 );
+$repository->save_for_carrier( $accepted_without_status_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'accepted-empty-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-118' ) );
+$http->order_responses[] = array( 'entity' => array( 'uuid' => 'accepted-empty-uuid', 'statuses' => array() ), 'requests' => array( array( 'state' => 'ACCEPTED' ) ) );
+$accepted_without_status = $status->update( $accepted_without_status_order );
+cdek_order_assert( 'registration_pending' === (string) $repository->find_by_carrier( $accepted_without_status_order, CdekSettings::CARRIER_KEY )['status'] && 'ACCEPTED' === (string) ( $accepted_without_status['status']['carrier_status_title'] ?? '' ), 'CDEK request_state ACCEPTED without order status must remain registration_pending.' );
+
+$successful_created_latest_order = new CdekOrderFakeOrder( 119 );
+$repository->save_for_carrier( $successful_created_latest_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'created-latest-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-119' ) );
+$http->order_responses[] = array(
+	'entity' => array(
+		'uuid' => 'created-latest-uuid',
+		'statuses' => array(
+			array( 'code' => 'ACCEPTED', 'name' => 'Принят', 'date_time' => '2026-06-13T05:48:42+0000' ),
+			array( 'code' => 'CREATED', 'name' => 'Создан', 'date_time' => '2026-06-13T05:48:44+0000' ),
+		),
+	),
+	'requests' => array( array( 'state' => 'SUCCESSFUL' ) ),
+);
+$successful_created_latest = $status->update( $successful_created_latest_order );
+cdek_order_assert( 'CREATED' === (string) ( $successful_created_latest['status']['order_status_code'] ?? '' ) && 'Создан' === (string) ( $successful_created_latest['status']['carrier_status_title'] ?? '' ), 'CDEK actual status CREATED must come from entity.statuses even when request_state is SUCCESSFUL.' );
+
 $latest_order = new CdekOrderFakeOrder( 110 );
 $latest_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] = array( 'api' => array( 'api_base_price_rub' => 450.0 ) );
 $repository->save_for_carrier( $latest_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'latest-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-110' ) );
@@ -255,12 +295,13 @@ $http->order_responses[] = array(
 			array( 'code' => 'ACCEPTED', 'name' => 'Принят', 'date_time' => '2026-06-13T05:48:42+0000' ),
 		),
 	),
-	'requests' => array( array( 'state' => 'ACCEPTED' ) ),
+	'requests' => array( array( 'state' => 'SUCCESSFUL' ) ),
 );
 $latest = $status->update( $latest_order );
 $latest_shipment = $repository->find_by_carrier( $latest_order, CdekSettings::CARRIER_KEY );
 cdek_order_assert( 'READY_FOR_SHIPMENT_IN_SENDER_CITY' === (string) ( $latest_shipment['cdek_order_status_code'] ?? '' ), 'CDEK latest status must be selected by max date_time, not array tail.' );
 cdek_order_assert( 'READY_FOR_SHIPMENT_IN_SENDER_CITY' === (string) ( $latest['status']['order_status_code'] ?? '' ), 'CDEK status payload must use latest order status, not request state.' );
+cdek_order_assert( 'Готов к отправке' === (string) ( $latest['status']['carrier_status_title'] ?? '' ), 'CDEK displayed status must use entity.statuses name instead of request_state.' );
 cdek_order_assert( '2026-06-15' === (string) ( $latest['status']['cdek_planned_delivery_date'] ?? '' ), 'CDEK planned_delivery_date must be saved in status payload.' );
 cdek_order_assert( 45018 === (int) ( $latest_shipment['cdek_actual_cost_kopecks'] ?? 0 ), 'CDEK delivery_detail.total_sum must be saved as actual cost.' );
 cdek_order_assert( '450.18 руб.' === (string) ( $latest['status']['actual_cost_label'] ?? '' ) && 'ok' === (string) ( $latest['status']['actual_cost_compare_status'] ?? '' ), 'CDEK actual cost within 3 percent of base API cost must compare as ok.' );
@@ -292,7 +333,7 @@ $http->order_responses[] = array(
 	'requests' => array( array( 'state' => 'SUCCESSFUL' ) ),
 );
 $empty_status = $status->update( $empty_status_order );
-cdek_order_assert( $empty_status['success'] && '' === (string) ( $empty_status['status']['order_status_code'] ?? '' ), 'CDEK empty/all-deleted statuses must not break status payload.' );
+cdek_order_assert( $empty_status['success'] && 'registration_pending' === (string) $repository->find_by_carrier( $empty_status_order, CdekSettings::CARRIER_KEY )['status'] && '' === (string) ( $empty_status['status']['order_status_code'] ?? '' ), 'CDEK empty/all-deleted statuses must remain registration_pending and not break status payload.' );
 
 $warning_cost_order = new CdekOrderFakeOrder( 113 );
 $warning_cost_order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] = array( 'api' => array( 'api_base_price_rub' => 450.0 ) );
@@ -342,6 +383,16 @@ cdek_order_assert( '100501' === (string) ( $attached_shipment['cdek_number'] ?? 
 $attach_http->order_responses[] = array( 'entity' => array( 'uuid' => 'manual-uuid', 'cdek_number' => '100501', 'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
 $manual_update = $attach_status->update( $attach_order );
 cdek_order_assert( $manual_update['success'] && ! empty( $manual_update['status']['can_update_status'] ), 'Manual attached CDEK shipment must support update status.' );
+
+$attach_pending_http = new CdekOrderFakeHttp();
+$attach_pending_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $attach_pending_http ), $settings, $attach_pending_http );
+$attach_pending_repository = new OrderShipmentRepository();
+$attach_pending_status = new CdekOrderStatusService( $attach_pending_repository, $attach_pending_client );
+$attach_pending_order = new CdekOrderFakeOrder( 120 );
+$attach_pending_http->order_responses[] = array( 'entity' => array( 'uuid' => 'manual-pending-uuid', 'cdek_number' => '100520', 'statuses' => array() ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
+$attach_pending = $attach_pending_status->attach_by_cdek_number( $attach_pending_order, '100520' );
+$attach_pending_shipment = $attach_pending_repository->find_by_carrier( $attach_pending_order, CdekSettings::CARRIER_KEY );
+cdek_order_assert( $attach_pending['success'] && 'registration_pending' === (string) ( $attach_pending_shipment['status'] ?? '' ), 'Manual attach shipment_from_body must keep SUCCESSFUL without order statuses as registration_pending.' );
 
 $not_found_http = new CdekOrderFakeHttp();
 $not_found_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $not_found_http ), $settings, $not_found_http );

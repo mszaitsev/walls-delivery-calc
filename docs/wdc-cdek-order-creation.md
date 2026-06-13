@@ -1,6 +1,8 @@
 # WDC CDEK Order Creation
 
-Version: 0.48.4.
+Version: 0.48.5.
+
+0.48.5 update: CDEK request state is used only to track registration processing. `INVALID` still fails registration, and `ACCEPTED`/`SUCCESSFUL` without real `entity.statuses[]` keeps the shipment in `registration_pending`. `SUCCESSFUL` no longer marks a shipment as registered by itself. Internal `registered` state is set only when an actual CDEK order status exists in `entity.statuses[]`; `CREATED` and later statuses such as `READY_FOR_SHIPMENT_IN_SENDER_CITY` are all read from that order status list and displayed from the latest active status.
 
 0.48.4 update: CDEK order status is now derived from `entity.statuses[]`, not from request state. Deleted statuses are ignored and the active status is the non-deleted status with the maximum parsable `date_time`; if dates cannot be parsed, the fallback is the last non-deleted status. `entity.planned_delivery_date` is saved as shipment data and shown in the grey shipment info block when present. The actual CDEK delivery price is read from `entity.delivery_detail.total_sum`, saved in the shipment payload, shown as `Цена: ... руб.`, and compared with the saved “Базовая стоимость API” using the same 3% tolerance as Russian Post.
 
