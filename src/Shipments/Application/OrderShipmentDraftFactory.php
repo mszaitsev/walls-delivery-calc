@@ -281,7 +281,7 @@ final class OrderShipmentDraftFactory {
 		$pickup = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
 		$api = is_array( $calculation['api'] ?? null ) ? $calculation['api'] : array();
 		$response_tariff = is_array( $api['response_tariff_sanitized'] ?? null ) ? $api['response_tariff_sanitized'] : array();
-		$delivery_mode = (int) ( $response_tariff['delivery_mode'] ?? $api['delivery_mode'] ?? 0 );
+		$delivery_mode = $this->cdek_delivery_mode_from_calculation( $delivery_type, $calculation, $api, $response_tariff );
 		$tariff_code = preg_replace( '/\D+/', '', (string) ( $calculation['selected_tariff_object'] ?? $this->meta_string( $order, '_wdc_platform_tariff_object' ) ) ) ?: '';
 		$tariff_row = $this->cdek_tariff_row( $tariff_code );
 		$tariff_title = $this->cdek_tariff_title( $tariff_row, $tariff_code, (string) ( $calculation['selected_tariff_title'] ?? $response_tariff['tariff_name'] ?? '' ) );
@@ -315,6 +315,7 @@ final class OrderShipmentDraftFactory {
 				'selected_tariff_title' => $tariff_title,
 				'delivery_mode' => $delivery_mode,
 				'cdek_delivery_mode' => $delivery_mode,
+				'place_weight_hint_g' => $this->default_weight_g( $order, $items ),
 				'cdek_to_city_code' => (int) ( $api['cdek_to_city_code'] ?? 0 ),
 				'shipment_point' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->shipment_point() : '',
 				'shipment_point_address' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->shipment_point_address() : '',
@@ -382,6 +383,8 @@ final class OrderShipmentDraftFactory {
 					'tariff_title' => $tariff_title,
 					'selected_tariff_title' => (string) ( $base->meta['selected_tariff_title'] ?? $base->meta['tariff_title'] ?? $tariff_title ),
 					'delivery_type' => $delivery_type,
+					'delivery_mode' => (int) ( $base->meta['delivery_mode'] ?? $base->meta['cdek_delivery_mode'] ?? 0 ),
+					'cdek_delivery_mode' => (int) ( $base->meta['cdek_delivery_mode'] ?? $base->meta['delivery_mode'] ?? 0 ),
 					'shipment_point' => $shipment_point,
 					'shipment_point_address' => $shipment_point_address,
 					'delivery_point' => DeliveryType::PICKUP === $delivery_type ? $pickup_code : (string) ( $base->meta['delivery_point'] ?? '' ),
@@ -398,7 +401,12 @@ final class OrderShipmentDraftFactory {
 	private function default_weight_g( object $order, array $items ): int {
 		$calculation = $this->calculation_data( $order );
 		$package = is_array( $calculation['package'] ?? null ) ? $calculation['package'] : array();
-		$weight = (int) ( $package['package_weight_with_packaging_g'] ?? $package['final_weight_g'] ?? $package['products_weight_g'] ?? 0 );
+		$products_weight = (int) ( $package['products_weight_g'] ?? 0 );
+		$packaging_weight = (int) ( $package['packaging_weight_g'] ?? 0 );
+		$weight = (int) ( $package['package_weight_with_packaging_g'] ?? $package['final_weight_g'] ?? 0 );
+		if ( $weight <= 0 && $products_weight > 0 ) {
+			$weight = $products_weight + max( 0, $packaging_weight );
+		}
 		if ( $weight > 0 ) {
 			return $weight;
 		}
@@ -408,6 +416,32 @@ final class OrderShipmentDraftFactory {
 		}
 
 		return max( 1, $total ?: 1000 );
+	}
+
+	/**
+	 * @param array<string,mixed> $calculation
+	 * @param array<string,mixed> $api
+	 * @param array<string,mixed> $response_tariff
+	 */
+	private function cdek_delivery_mode_from_calculation( string $delivery_type, array $calculation, array $api, array $response_tariff ): int {
+		$rate_meta = is_array( $calculation['rate_meta'] ?? null ) ? $calculation['rate_meta'] : array();
+		foreach ( array(
+			$response_tariff['delivery_mode'] ?? null,
+			$api['delivery_mode'] ?? null,
+			$api['transtype'] ?? null,
+			$rate_meta['delivery_mode'] ?? null,
+			$rate_meta['cdek_delivery_mode'] ?? null,
+			$rate_meta['transtype'] ?? null,
+			$calculation['delivery_mode'] ?? null,
+			$calculation['transtype'] ?? null,
+		) as $candidate ) {
+			$mode = (int) $candidate;
+			if ( in_array( $mode, array( 1, 2, 3, 4 ), true ) ) {
+				return $mode;
+			}
+		}
+
+		return DeliveryType::PICKUP === $delivery_type ? 4 : ( DeliveryType::COURIER === $delivery_type ? 3 : 0 );
 	}
 
 	/**

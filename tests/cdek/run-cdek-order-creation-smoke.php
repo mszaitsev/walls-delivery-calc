@@ -242,6 +242,14 @@ $override_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4
 cdek_order_assert( 'NSK70' === $override_payload['shipment_point'], 'CDEK order creation must use temporary sender shipment_point from modal meta.' );
 $postcode_as_point_request = cdek_order_request( DeliveryType::PICKUP, 4, array( 'delivery_point' => '101000' ) );
 cdek_order_assert( array() !== $builder->validate( $postcode_as_point_request ), 'CDEK order creation must not accept postcode as delivery_point.' );
+$pickup_without_mode = cdek_order_request( DeliveryType::PICKUP, 0, array( 'delivery_point' => 'KEM7' ) );
+$pickup_without_mode_errors = $builder->validate( $pickup_without_mode );
+cdek_order_assert( ! in_array( 'Не удалось определить режим тарифа СДЭК. Проверьте тариф и повторите создание отправления.', $pickup_without_mode_errors, true ), 'CDEK pickup with tariff_code, shipment_point and delivery_point must not be blocked by missing delivery_mode.' );
+cdek_order_assert( 'KEM7' === (string) ( $builder->build( $pickup_without_mode )['delivery_point'] ?? '' ), 'CDEK pickup delivery_type fallback must build shipment_point + delivery_point when delivery_mode is absent.' );
+$pickup_without_point_errors = $builder->validate( cdek_order_request( DeliveryType::PICKUP, 0, array( 'delivery_point' => '' ) ) );
+cdek_order_assert( ! in_array( 'Не удалось определить режим тарифа СДЭК. Проверьте тариф и повторите создание отправления.', $pickup_without_point_errors, true ) && in_array( 'Для CDEK pickup нужен код ПВЗ delivery_point.', $pickup_without_point_errors, true ), 'CDEK pickup without delivery_point must be blocked by missing pickup point, not tariff mode.' );
+$pickup_without_tariff_errors = $builder->validate( cdek_order_request( DeliveryType::PICKUP, 0, array( 'tariff_code' => '' ) ) );
+cdek_order_assert( in_array( 'Не выбран tariff_code СДЭК.', $pickup_without_tariff_errors, true ), 'CDEK pickup without tariff_code must still show tariff validation error.' );
 
 $courier_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 3 ) );
 cdek_order_assert( isset( $courier_payload['shipment_point'], $courier_payload['to_location'] ) && ! isset( $courier_payload['delivery_point'], $courier_payload['from_location'] ), 'Warehouse-door courier must use shipment_point and to_location only.' );
@@ -559,6 +567,23 @@ cdek_order_assert( ! in_array( '137', $pickup_codes, true ) && ! in_array( '139'
 $location_context = is_array( $draft_request['meta']['pickup_location_context'] ?? null ) ? $draft_request['meta']['pickup_location_context'] : array();
 cdek_order_assert( CdekSettings::CARRIER_KEY === (string) ( $location_context['carrier_key'] ?? '' ) && 'cdek:pickup' === (string) ( $location_context['pickup_family'] ?? '' ), 'CDEK admin map context must use CDEK carrier and pickup family.' );
 cdek_order_assert( 'Кемерово' === (string) ( $location_context['city_name'] ?? '' ) && 'Новосибирск' !== (string) ( $location_context['city_name'] ?? '' ), 'CDEK admin map location context must come from recipient city, not sender city.' );
+$weight_hint_order = new CdekOrderFakeOrder( 136 );
+$weight_hint_order->meta = $draft_order->meta;
+$weight_hint_order->meta['_wdc_delivery_calculation_data']['package'] = array(
+	'products_weight_g' => 2100,
+	'packaging_weight_g' => 150,
+	'dimensions_cm' => array( 'length' => 20, 'width' => 15, 'height' => 10 ),
+);
+$weight_hint_draft = $drafts->draft_array( $weight_hint_order );
+cdek_order_assert( 2250 === (int) ( $weight_hint_draft['request']['meta']['place_weight_hint_g'] ?? 0 ), 'Shipment modal one-place weight hint must use products weight plus packaging weight.' );
+$weight_hint_no_pack_order = new CdekOrderFakeOrder( 137 );
+$weight_hint_no_pack_order->meta = $draft_order->meta;
+$weight_hint_no_pack_order->meta['_wdc_delivery_calculation_data']['package'] = array(
+	'products_weight_g' => 2100,
+	'dimensions_cm' => array( 'length' => 20, 'width' => 15, 'height' => 10 ),
+);
+$weight_hint_no_pack_draft = $drafts->draft_array( $weight_hint_no_pack_order );
+cdek_order_assert( 2100 === (int) ( $weight_hint_no_pack_draft['request']['meta']['place_weight_hint_g'] ?? 0 ), 'Shipment modal weight hint must fall back to products weight when packaging weight is missing.' );
 $saved_pickup_order = new CdekOrderFakeOrder( 134 );
 $saved_pickup_order->meta = $draft_order->meta;
 $saved_pickup_order->meta['_wdc_pickup_point_code'] = 'MSK575';
@@ -709,6 +734,10 @@ cdek_order_assert( ! str_contains( $modal_html, 'tariff_code:' ) && ! str_contai
 cdek_order_assert( str_contains( $modal_html, 'В заказе тариф' ) && str_contains( $modal_html, 'Кастомный ПВЗ' ), 'CDEK shipment modal must render human selected tariff title.' );
 cdek_order_assert( str_contains( $modal_html, 'ПВЗ отправителя' ) && str_contains( $modal_html, 'NSK69' ) && str_contains( $modal_html, 'Новосибирск, Красный проспект 1' ) && str_contains( $modal_html, 'Выбрать другой ПВЗ отправителя' ), 'CDEK shipment modal must render sender shipment_point code/address and temporary replacement button.' );
 cdek_order_assert( str_contains( $modal_html, 'Код ПВЗ' ) && str_contains( $modal_html, 'ISK1' ), 'CDEK shipment modal must show recipient CDEK point code, not index label.' );
+ob_start();
+$metabox->render( $weight_hint_order );
+$weight_hint_modal_html = ob_get_clean() ?: '';
+cdek_order_assert( str_contains( $weight_hint_modal_html, 'data-wdc-weight-hint' ) && str_contains( $weight_hint_modal_html, '(2250)' ), 'Shipment modal one-place weight label must render API weight hint with packaging.' );
 cdek_order_assert( str_contains( $modal_html, 'Артикул' ) && str_contains( $modal_html, 'Кол-во' ) && str_contains( $modal_html, 'Цена' ) && ! str_contains( $modal_html, 'SKU / ware_key' ) && ! str_contains( $modal_html, '<td><code>' ), 'CDEK packages tab must render improved Russian item table headers without code-styled SKU.' );
 cdek_order_assert( str_contains( $modal_html, 'data-wdc-weight-hint' ) && str_contains( $modal_html, 'Добавить товар' ) && str_contains( $modal_html, 'data-wdc-add-manual-shipment-item' ) && str_contains( $modal_html, 'data-wdc-shipment-items-table' ), 'Shipment packages UI must render API weight hint, universal table hook, and manual item add button.' );
 cdek_order_assert( str_contains( $modal_html, 'name="pickup_carrier_key" value="cdek"' ) && str_contains( $modal_html, 'name="pickup_family" value="cdek:pickup"' ), 'CDEK shipment modal must render CDEK carrier context for admin pickup map.' );
@@ -721,6 +750,9 @@ cdek_order_assert( is_string( $shipments_js ) && ! str_contains( $shipments_js, 
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'data-wdc-pickup-picker-confirm' ) && ! str_contains( $shipments_js, 'data-wdc-pickup-picker-choose' ) && ! str_contains( $shipments_js, 'data-wdc-pickup-popup-select' ) && ! str_contains( $shipments_js, 'wdc-admin-pickup-picker__selected-grid' ), 'CDEK shipment modal pickup map must use one bottom select button and no duplicate per-card controls.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "'ПВЗ СДЭК'" ) && str_contains( $shipments_js, "'Постамат СДЭК'" ), 'CDEK shipment modal pickup map must render CDEK pickup/postamat titles.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'function senderPickupContext' ) && str_contains( $shipments_js, 'Выбор ПВЗ отправителя СДЭК' ) && str_contains( $shipments_js, 'updateSenderPickupDraft' ), 'CDEK shipment modal must support temporary sender pickup point selection.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'const maxAttempts = 14' ) && str_contains( $shipments_js, 'const interval = 5000' ) && ! str_contains( $shipments_js, '15000' ) && ! str_contains( $shipments_js, '10 минут' ), 'CDEK auto polling must run every 5 seconds up to 14 attempts and avoid old 10-minute text.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'setCdekPollingIndicator' ) && str_contains( $modal_html, 'data-wdc-cdek-polling-indicator' ), 'CDEK auto polling must expose and toggle a visible registration-check indicator.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'hint.hidden = places.length !== 1' ), 'Shipment modal weight hint must be hidden when there is more than one place.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'data-wdc-remove-shipment-split' ) && str_contains( $shipments_js, 'restoreOriginalBaseRow' ) && str_contains( $shipments_js, 'data-wdc-original-item' ) && str_contains( $shipments_js, 'rebalanceCdekGroup' ) && ! str_contains( $shipments_js, 'Date.now()' ) && ! str_contains( $shipments_js, 'data-wdc-cdek-minus' ), 'Shipment split UI must use stable row keys, delete split rows, restore original base rows after place removal, and avoid +/- controls.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "clone.setAttribute('data-wdc-split-row', '1')" ) && str_contains( $shipments_js, "clone.removeAttribute('data-wdc-base-row')" ) && str_contains( $shipments_js, "removeAttribute('data-wdc-shipment-item-split')" ) && str_contains( $shipments_js, "removeAttribute('data-wdc-cdek-split')" ) && str_contains( $shipments_js, "data-wdc-remove-shipment-split data-wdc-remove-cdek-split" ) && str_contains( $shipments_js, '❌' ), 'Shipment split child row must remove split action hooks and render the delete action.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'wdc_search_products_for_shipment_item' ) && str_contains( $shipments_js, 'applyProductToManualRow' ) && str_contains( $shipments_js, 'data-wdc-product-search-input' ), 'CDEK manual item rows must support catalog product search.' );

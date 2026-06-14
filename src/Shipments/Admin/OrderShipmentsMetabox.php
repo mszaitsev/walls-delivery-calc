@@ -235,7 +235,7 @@ final class OrderShipmentsMetabox {
 		}
 		$has_selected_service_tariffs = array() !== $selected_service_tariffs;
 		$tariff_message_hidden_attr = $has_selected_service_tariffs ? ' hidden' : '';
-		$calculated_weight_g = max( 0, (int) ( $place['weight_g'] ?? 0 ) );
+		$calculated_weight_g = max( 0, (int) ( $meta['place_weight_hint_g'] ?? $place['weight_g'] ?? 0 ) );
 		$weight_hint = $calculated_weight_g > 0 ? sprintf( '(%d)', $calculated_weight_g ) : '';
 		$shipment_point = (string) ( $meta['shipment_point'] ?? '' );
 		$shipment_point_address = (string) ( $meta['shipment_point_address'] ?? '' );
@@ -955,6 +955,7 @@ final class OrderShipmentsMetabox {
 			<p><strong><?php echo esc_html__( 'Последняя операция', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-operation><?php echo esc_html( $this->operation_summary( $status ) ); ?></span></p>
 			<p data-wdc-planned-delivery-row <?php echo '' === (string) ( $status['cdek_planned_delivery_date'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Плановая дата доставки', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-planned-delivery-date><?php echo esc_html( (string) ( $status['cdek_planned_delivery_date'] ?? '' ) ); ?></span></p>
 			<p><strong><?php echo esc_html__( 'Проверено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-checked><?php echo esc_html( (string) ( $status['tracking_checked_at'] ?? '' ) ?: '-' ); ?></span></p>
+			<div class="wdc-cdek-polling-indicator" data-wdc-cdek-polling-indicator hidden><span class="wdc-spinner" aria-hidden="true"></span><span><?php echo esc_html__( 'Проверяем регистрацию отправления…', 'walls-delivery-calc' ); ?></span></div>
 		</div>
 		<?php
 	}
@@ -1013,7 +1014,7 @@ final class OrderShipmentsMetabox {
 			'cancel_success_toast' => __( 'Отправление отменено.', 'walls-delivery-calc' ),
 			'remove_success_toast' => __( 'Данные отправления удалены из заказа.', 'walls-delivery-calc' ),
 			'error_fallback_message' => __( 'Не удалось получить статус отправления.', 'walls-delivery-calc' ),
-			'polling_timeout_message' => __( 'Автоматическая проверка остановлена через 10 минут. Обновите статус вручную позже.', 'walls-delivery-calc' ),
+			'polling_timeout_message' => __( 'Автоматическая проверка завершена. Если статус еще не обновился, воспользуйтесь кнопкой «Обновить статус».', 'walls-delivery-calc' ),
 			'registration_error_toast' => __( 'Регистрация завершилась ошибкой.', 'walls-delivery-calc' ),
 			'registration_success_toast' => __( 'Регистрация завершена успешно.', 'walls-delivery-calc' ),
 			'auto_poll_registration' => '0',
@@ -1036,7 +1037,7 @@ final class OrderShipmentsMetabox {
 					'updated_toast' => 'Статус СДЭК обновлен.',
 					'cancel_success_toast' => 'Отправление СДЭК отменено.',
 					'remove_success_toast' => 'Данные СДЭК-отправления удалены из заказа.',
-					'polling_timeout_message' => 'СДЭК еще не завершил регистрацию заказа. Автоматическая проверка остановлена через 10 минут. Обновите статус вручную позже.',
+					'polling_timeout_message' => 'Автоматическая проверка завершена. Если статус еще не обновился, воспользуйтесь кнопкой «Обновить статус».',
 					'registration_error_toast' => 'Регистрация СДЭК завершилась ошибкой.',
 					'registration_success_toast' => 'Регистрация СДЭК завершена успешно.',
 					'auto_poll_registration' => '1',

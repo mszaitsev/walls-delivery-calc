@@ -985,6 +985,7 @@ recalc_smoke_assert( 'KEM7' === (string) ( $cdek_pickup_order->meta['_wdc_pickup
 recalc_smoke_assert( 'Kemerovo, Sovetskiy 10' === $cdek_pickup_order->get_shipping_address_1() && '650004' === $cdek_pickup_order->get_shipping_postcode(), 'CDEK admin pickup save must write pickup shipping address.' );
 $cdek_pickup_calc = $cdek_pickup_order->meta['_wdc_delivery_calculation_data'] ?? array();
 recalc_smoke_assert( 'Kemerovo, Sovetskiy 10' === ( $cdek_pickup_calc['pickup']['point_address'] ?? '' ) && '650004' === ( $cdek_pickup_calc['pickup']['point_postcode'] ?? '' ), 'CDEK admin pickup calculation data must keep full pickup address payload.' );
+recalc_smoke_assert( '136' === (string) ( $cdek_pickup_order->meta['_wdc_platform_tariff_object'] ?? '' ) && '136' === (string) ( $cdek_pickup_calc['selected_tariff_object'] ?? '' ) && DeliveryType::PICKUP === (string) ( $cdek_pickup_calc['delivery_type'] ?? '' ), 'CDEK admin pickup save must keep selected tariff object and delivery_type for shipment modal fallback.' );
 recalc_smoke_assert( 'Inside the shopping center' === ( $cdek_pickup_calc['pickup']['description'] ?? '' ), 'CDEK admin pickup calculation data must save description.' );
 recalc_smoke_assert( '' === ( $cdek_pickup_calc['pickup']['work_time'] ?? '' ), 'CDEK admin pickup calculation data must not save numeric zero work_time.' );
 recalc_smoke_assert( 'Срок хранения 3 дня' === ( $cdek_pickup_calc['pickup']['storage_notice'] ?? '' ), 'CDEK admin pickup calculation data must save POSTAMAT storage notice.' );

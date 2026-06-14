@@ -697,6 +697,12 @@
     renderShipmentPrice(box, status);
   }
 
+  function setCdekPollingIndicator(box, visible) {
+    const indicator = box && box.querySelector ? box.querySelector('[data-wdc-cdek-polling-indicator]') : null;
+    if (!indicator) return;
+    indicator.hidden = !visible;
+  }
+
   function renderShipmentPrice(box, status) {
     if (!box) return;
     const row = box.querySelector('[data-wdc-shipment-price-row]');
@@ -762,7 +768,7 @@
       cancelSuccessToast: 'Отправление отменено.',
       removeSuccessToast: 'Данные отправления удалены из заказа.',
       errorFallbackMessage: 'Не удалось получить статус отправления.',
-      pollingTimeoutMessage: 'Автоматическая проверка остановлена через 10 минут. Обновите статус вручную позже.',
+      pollingTimeoutMessage: 'Автоматическая проверка завершена. Если статус еще не обновился, воспользуйтесь кнопкой «Обновить статус».',
       registrationErrorToast: 'Регистрация завершилась ошибкой.',
       registrationSuccessToast: 'Регистрация завершена успешно.',
       autoPollRegistration: '0'
@@ -942,8 +948,10 @@
 
   function startCdekPolling(button) {
     let attempts = 0;
-    const maxAttempts = 40;
+    const maxAttempts = 14;
+    const interval = 5000;
     const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
+    setCdekPollingIndicator(box, true);
     const tick = function () {
       attempts += 1;
       requestShipmentStatus(button, { auto: true })
@@ -953,28 +961,32 @@
           const state = String(status.carrier_operation_index || '').toUpperCase();
           const code = String(status.carrier_operation_address || '').toUpperCase();
           if (state === 'INVALID') {
-          showShipmentToast(box, getPresentation(box).registrationErrorToast, 'error', { append: true });
+            setCdekPollingIndicator(box, false);
+            showShipmentToast(box, getPresentation(box).registrationErrorToast, 'error', { append: true });
             return;
           }
           if (code === 'CREATED' || data.terminal) {
+            setCdekPollingIndicator(box, false);
             showShipmentToast(box, getPresentation(box).registrationSuccessToast, 'success', { append: true });
             return;
           }
           if (attempts >= maxAttempts) {
+            setCdekPollingIndicator(box, false);
             showShipmentToast(box, getPresentation(box).pollingTimeoutMessage, 'warning', { append: true });
             return;
           }
-          window.setTimeout(tick, 15000);
+          window.setTimeout(tick, interval);
         })
         .catch(() => {
           if (attempts >= maxAttempts) {
+            setCdekPollingIndicator(box, false);
             showShipmentToast(box, getPresentation(box).pollingTimeoutMessage, 'warning', { append: true });
             return;
           }
-          window.setTimeout(tick, 15000);
+          window.setTimeout(tick, interval);
         });
     };
-    window.setTimeout(tick, 15000);
+    window.setTimeout(tick, interval);
   }
 
   function requestShipmentCancel(button) {

@@ -52,6 +52,33 @@
   margin: 4px 0;
 }
 
+.wdc-cdek-polling-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: #50575e;
+}
+
+.wdc-cdek-polling-indicator[hidden] {
+  display: none;
+}
+
+.wdc-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #c3c4c7;
+  border-top-color: #2271b1;
+  border-radius: 50%;
+  animation: wdc-spin 0.8s linear infinite;
+}
+
+@keyframes wdc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .wdc-shipment-status-message {
   min-height: 20px;
   margin: 8px 0;

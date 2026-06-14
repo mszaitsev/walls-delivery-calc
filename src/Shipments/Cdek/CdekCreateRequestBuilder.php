@@ -326,6 +326,12 @@ final class CdekCreateRequestBuilder {
 		if ( str_starts_with( $title, 'склад-склад' ) || str_starts_with( $title, 'warehouse-warehouse' ) ) {
 			return 4;
 		}
+		if ( DeliveryType::PICKUP === $request->delivery_type ) {
+			return 4;
+		}
+		if ( DeliveryType::COURIER === $request->delivery_type ) {
+			return '' !== $this->shipment_point( $request ) ? 3 : 1;
+		}
 
 		return 0;
 	}
