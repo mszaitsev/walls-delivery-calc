@@ -307,6 +307,12 @@
     clone.removeAttribute('data-wdc-base-row');
     clone.setAttribute('data-wdc-split-row', '1');
     clone.setAttribute('data-group-key', groupKey);
+    clone.querySelectorAll('[data-wdc-shipment-item-split], [data-wdc-cdek-split]').forEach((splitButton) => {
+      splitButton.removeAttribute('data-wdc-shipment-item-split');
+      splitButton.removeAttribute('data-wdc-cdek-split');
+      splitButton.classList.remove('wdc-icon-action--split');
+      splitButton.remove();
+    });
     const cloneQty = shipmentQtyInput(clone);
     if (rowQtyInput) rowQtyInput.value = String(currentQty - 1);
     if (cloneQty) cloneQty.value = '1';
@@ -317,7 +323,7 @@
     parent.name = 'cdek_items[' + index + '][split_parent]';
     parent.value = groupKey;
     clone.appendChild(parent);
-    const actionCell = clone.querySelector('td:last-child');
+    const actionCell = clone.querySelector('[data-wdc-shipment-item-actions], .wdc-cdek-item-actions') || clone.querySelector('td:last-child');
     if (actionCell) {
       actionCell.innerHTML = '<button type="button" class="wdc-icon-action wdc-icon-action--danger" data-wdc-remove-shipment-split data-wdc-remove-cdek-split title="Удалить строку" aria-label="Удалить строку">❌</button>';
     }
@@ -352,7 +358,7 @@
       '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[' + index + '][width_cm]" value="1" data-wdc-decimal-input="1"></td>',
       '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[' + index + '][height_cm]" value="1" data-wdc-decimal-input="1"></td>',
       '<td><select name="cdek_items[' + index + '][place_number]" data-wdc-shipment-place-select data-wdc-cdek-place-select><option value="1">1</option></select></td>',
-      '<td class="wdc-cdek-item-actions"><button type="button" class="wdc-icon-action wdc-icon-action--danger" data-wdc-remove-manual-shipment-item data-wdc-remove-manual-cdek-item title="Удалить строку" aria-label="Удалить строку">❌</button></td>'
+      '<td class="wdc-cdek-item-actions" data-wdc-shipment-item-actions><button type="button" class="wdc-icon-action wdc-icon-action--danger" data-wdc-remove-manual-shipment-item data-wdc-remove-manual-cdek-item title="Удалить строку" aria-label="Удалить строку">❌</button></td>'
     ].join('');
     body.appendChild(row);
     updateCdekPlaceOptions(form);

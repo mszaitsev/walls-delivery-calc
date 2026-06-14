@@ -171,7 +171,7 @@
 
 .wdc-cdek-items-table th:nth-child(2),
 .wdc-cdek-items-table td:nth-child(2) {
-  width: 118px;
+  width: 92px;
   vertical-align: middle;
 }
 
@@ -179,7 +179,7 @@
 .wdc-cdek-items-table td:nth-child(3),
 .wdc-cdek-items-table th:nth-child(9),
 .wdc-cdek-items-table td:nth-child(9) {
-  width: 62px;
+  width: 54px;
 }
 
 .wdc-cdek-items-table th:nth-child(4),
@@ -188,14 +188,17 @@
 }
 
 .wdc-cdek-items-table th:nth-child(5),
-.wdc-cdek-items-table td:nth-child(5),
+.wdc-cdek-items-table td:nth-child(5) {
+  width: 82px;
+}
+
 .wdc-cdek-items-table th:nth-child(6),
 .wdc-cdek-items-table td:nth-child(6),
 .wdc-cdek-items-table th:nth-child(7),
 .wdc-cdek-items-table td:nth-child(7),
 .wdc-cdek-items-table th:nth-child(8),
 .wdc-cdek-items-table td:nth-child(8) {
-  width: 76px;
+  width: 60px;
 }
 
 .wdc-cdek-items-table th:last-child,
@@ -205,10 +208,14 @@
   vertical-align: middle;
 }
 
-.wdc-cdek-items-table .wdc-cdek-input-qty,
-.wdc-cdek-items-table .wdc-cdek-input-weight {
+.wdc-cdek-items-table .wdc-cdek-input-qty {
   width: 58px;
   min-width: 58px;
+}
+
+.wdc-cdek-items-table .wdc-cdek-input-weight {
+  width: 76px;
+  min-width: 76px;
 }
 
 .wdc-cdek-items-table .wdc-cdek-input-price {
@@ -218,8 +225,8 @@
 
 .wdc-cdek-items-table .wdc-cdek-input-dim,
 .wdc-cdek-items-table [data-wdc-cdek-place-select] {
-  width: 62px;
-  min-width: 62px;
+  width: 54px;
+  min-width: 54px;
 }
 
 .wdc-cdek-item-sku {

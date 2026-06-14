@@ -903,7 +903,7 @@ final class OrderShipmentsMetabox {
 					<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][width_cm]" value="<?php echo esc_attr( (string) max( 0.1, (float) ( $item['width_cm'] ?? 0.1 ) ) ); ?>" data-wdc-decimal-input="1"></td>
 					<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][height_cm]" value="<?php echo esc_attr( (string) max( 0.1, (float) ( $item['height_cm'] ?? 0.1 ) ) ); ?>" data-wdc-decimal-input="1"></td>
 					<td><select name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][place_number]" data-wdc-shipment-place-select data-wdc-cdek-place-select><option value="1">1</option></select></td>
-					<td class="wdc-cdek-item-actions"><?php if ( $quantity > 1 ) : ?><button type="button" class="wdc-icon-action wdc-icon-action--split" data-wdc-shipment-item-split data-wdc-cdek-split title="<?php echo esc_attr__( 'Разбить товар по грузоместам', 'walls-delivery-calc' ); ?>" aria-label="<?php echo esc_attr__( 'Разбить товар по грузоместам', 'walls-delivery-calc' ); ?>">🔀</button><?php endif; ?></td>
+					<td class="wdc-cdek-item-actions" data-wdc-shipment-item-actions><?php if ( $quantity > 1 ) : ?><button type="button" class="wdc-icon-action wdc-icon-action--split" data-wdc-shipment-item-split data-wdc-cdek-split title="<?php echo esc_attr__( 'Разбить товар по грузоместам', 'walls-delivery-calc' ); ?>" aria-label="<?php echo esc_attr__( 'Разбить товар по грузоместам', 'walls-delivery-calc' ); ?>">🔀</button><?php endif; ?></td>
 				</tr>
 			<?php endforeach; ?>
 			</tbody>
