@@ -79,6 +79,8 @@ function disabled( mixed $disabled, mixed $current = true, bool $display = true 
 }
 function current_user_can( string $capability ): bool { return true; }
 function check_ajax_referer( string $action, string|bool $query_arg = false, bool $stop = true ): bool { return true; }
+function wc_get_dimension( mixed $dimension, string $to_unit ): float { return (float) str_replace( ',', '.', (string) $dimension ); }
+function wc_get_weight( mixed $weight, string $to_unit ): float { return 'g' === $to_unit ? (float) str_replace( ',', '.', (string) $weight ) * 1000 : (float) str_replace( ',', '.', (string) $weight ); }
 function wc_get_order( int $order_id ): ?object { return $GLOBALS['wdc_cdek_order_ajax_order'] ?? null; }
 function wp_send_json_success( mixed $data = null, int $status_code = 200, int $flags = 0 ): never { throw new CdekOrderAjaxResponse( true, $data, $status_code ); }
 function wp_send_json_error( mixed $data = null, int $status_code = 400, int $flags = 0 ): never { throw new CdekOrderAjaxResponse( false, $data, $status_code ); }
@@ -138,6 +140,7 @@ final class CdekOrderFakeHttp implements CdekHttpClientInterface {
 final class CdekOrderFakeOrder {
 	public array $meta = array();
 	public array $notes = array();
+	public array $items = array();
 	public function __construct( private int $id = 101 ) {}
 	public function get_id(): int { return $this->id; }
 	public function get_meta( string $key, bool $single = true ): mixed { return $this->meta[ $key ] ?? ''; }
@@ -156,7 +159,24 @@ final class CdekOrderFakeOrder {
 	public function get_shipping_city(): string { return 'Кемерово'; }
 	public function get_shipping_address_1(): string { return 'Советский 10'; }
 	public function get_shipping_address_2(): string { return ''; }
-	public function get_items(): array { return array(); }
+	public function get_items(): array { return $this->items; }
+}
+
+final class CdekOrderFakeProduct {
+	public function __construct( private string $sku, private string $weight, private string $length, private string $width, private string $height ) {}
+	public function get_sku(): string { return $this->sku; }
+	public function get_weight(): string { return $this->weight; }
+	public function get_length(): string { return $this->length; }
+	public function get_width(): string { return $this->width; }
+	public function get_height(): string { return $this->height; }
+}
+
+final class CdekOrderFakeOrderItem {
+	public function __construct( private object $product, private string $name, private int $quantity, private float $total ) {}
+	public function get_product(): object { return $this->product; }
+	public function get_name(): string { return $this->name; }
+	public function get_quantity(): int { return $this->quantity; }
+	public function get_total(): float { return $this->total; }
 }
 
 function cdek_order_request( string $delivery_type, int $mode, array $overrides = array() ): ShipmentCreateRequest {
@@ -551,6 +571,12 @@ $courier_draft = $drafts->draft_array( $courier_order );
 $courier_service = array_values( array_filter( $courier_draft['services'], static fn ( array $service ): bool => DeliveryType::COURIER === (string) ( $service['delivery_type'] ?? '' ) ) )[0] ?? array();
 $courier_codes = array_map( static fn ( array $row ): string => (string) ( $row['object_code'] ?? '' ), is_array( $courier_service['tariffs'] ?? null ) ? $courier_service['tariffs'] : array() );
 cdek_order_assert( array( '137' ) === $courier_codes, 'CDEK shipment modal courier tariff select must include active courier tariffs only.' );
+$dimension_order = new CdekOrderFakeOrder( 133 );
+$dimension_order->meta = $draft_order->meta;
+$dimension_order->items = array( new CdekOrderFakeOrderItem( new CdekOrderFakeProduct( 'CAT-DIM', '0.4', '36', '12', '4' ), 'Товар с размерами', 2, 1600.0 ) );
+$dimension_draft = $drafts->draft_array( $dimension_order );
+$dimension_item = $dimension_draft['request']['places'][0]['items'][0] ?? array();
+cdek_order_assert( 36 === (int) ( $dimension_item['length_cm'] ?? 0 ) && 12 === (int) ( $dimension_item['width_cm'] ?? 0 ) && 4 === (int) ( $dimension_item['height_cm'] ?? 0 ), 'Shipment modal initial item dimensions must come from WooCommerce product/variation dimensions.' );
 $missing_tariff_order = new CdekOrderFakeOrder( 132 );
 $missing_tariff_order->meta = $draft_order->meta;
 $missing_tariff_order->meta['_wdc_delivery_calculation_data']['selected_tariff_object'] = '999';
@@ -642,18 +668,25 @@ cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "'
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'function senderPickupContext' ) && str_contains( $shipments_js, 'Выбор ПВЗ отправителя СДЭК' ) && str_contains( $shipments_js, 'updateSenderPickupDraft' ), 'CDEK shipment modal must support temporary sender pickup point selection.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'data-wdc-remove-shipment-split' ) && str_contains( $shipments_js, 'restoreOriginalBaseRow' ) && str_contains( $shipments_js, 'data-wdc-original-item' ) && str_contains( $shipments_js, 'rebalanceCdekGroup' ) && ! str_contains( $shipments_js, 'Date.now()' ) && ! str_contains( $shipments_js, 'data-wdc-cdek-minus' ), 'Shipment split UI must use stable row keys, delete split rows, restore original base rows after place removal, and avoid +/- controls.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'wdc_search_products_for_shipment_item' ) && str_contains( $shipments_js, 'applyProductToManualRow' ) && str_contains( $shipments_js, 'data-wdc-product-search-input' ), 'CDEK manual item rows must support catalog product search.' );
-cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'function parseDecimalValue' ) && str_contains( $shipments_js, 'parseDecimalValue(cost' ) && str_contains( $shipments_js, 'cleanDecimalInput' ), 'Shipment package summary and decimal inputs must accept comma and dot decimal separators.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'normalizeQtyRows' ) && str_contains( $shipments_js, 'targetTotal - 1' ) && str_contains( $shipments_js, 'rebalanceCdekGroup(integerForm, row.getAttribute' ), 'Shipment split quantities must clamp row max to N-1 and rebalance when base or split quantity changes.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'function parseDecimalValue' ) && str_contains( $shipments_js, 'parseDecimalValue(cost' ) && str_contains( $shipments_js, 'cleanDecimalInput' ) && str_contains( $shipments_js, 'separatorMatch' ), 'Shipment package summary and decimal inputs must accept comma and dot decimal separators.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'focusout' ) && str_contains( $shipments_js, '_wdcProductSearchBlurTimer' ) && str_contains( $shipments_js, 'renderProductSearchResults(event.target, [])' ), 'Shipment product search dropdown must close on focus out without auto-filling a product.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'вес места ' ) && str_contains( $shipments_js, 'заполнено: товары ' ) && str_contains( $shipments_js, ' руб.' ), 'Shipment package summary must show place weight, item count, item weight and cost.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'data-wdc-shipment-items-table' ) && str_contains( $shipments_js, 'data-wdc-shipment-item-row' ) && str_contains( $shipments_js, 'data-wdc-shipment-place-select' ) && str_contains( $shipments_js, 'data-wdc-add-manual-shipment-item' ), 'Shipment packages JS must use carrier-neutral data attributes while keeping compatibility hooks.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "mode !== 'location' && !value" ) && str_contains( $shipments_js, "mode === 'location' ? 2000 : 100" ) && str_contains( $shipments_js, "context.city || context.postcode || context.address || context.locationId || context.fiasId || context.garId" ), 'Shipment pickup modal must load location points for Russian Post without requiring a typed query and without a 300-row cap.' );
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 cdek_order_assert( str_contains( $metabox_source, 'AJAX_SEARCH_PRODUCTS' ) && str_contains( $metabox_source, 'wc_get_products' ) && str_contains( $metabox_source, 'shipment_product_search_row' ), 'Shipment modal must expose secured WooCommerce product search for manual package items.' );
+cdek_order_assert( str_contains( $metabox_source, 'inputmode="decimal"' ) && str_contains( $metabox_source, 'wdc-icon-action--split' ) && ! str_contains( $metabox_source, 'button wdc-icon-button' ), 'Shipment item decimal fields must allow typed separators and split icon must be borderless.' );
+cdek_order_assert( str_contains( $metabox_source, 'product_ids_by_partial_sku' ) && str_contains( $metabox_source, "meta_key = '_sku'" ) && str_contains( $metabox_source, 'LIKE %s' ) && str_contains( $metabox_source, 'LIMIT %d' ), 'Shipment product search must support partial SKU matching for products and variations.' );
 cdek_order_assert( str_contains( $metabox_source, 'render_shipment_item_rows' ) && str_contains( $metabox_source, 'data-wdc-shipment-item-row' ) && str_contains( $metabox_source, 'data-wdc-original-item' ) && ! str_contains( $metabox_source, 'Пока используется только для СДЭК' ), 'Shipment packages tab must be carrier-neutral and base rows must expose original item data for forced merge.' );
 cdek_order_assert( str_contains( $metabox_source, 'RussianPostDomesticSettings::CARRIER_KEY . \':pickup\'' ) && str_contains( $metabox_source, 'pickupPointTypes' ) && str_contains( $metabox_source, "'location' === \$mode ? 2000 : 100" ), 'Shipment modal backend must keep Russian Post pickup family/type config and location search limit for admin maps.' );
 cdek_order_assert( str_contains( $metabox_source, '$order_shipping_city' ) && str_contains( $metabox_source, '$order_shipping_postcode' ) && str_contains( $metabox_source, '$recipient_address_context' ) && str_contains( $metabox_source, '$pickup_context[\'postal_code\'] ?? $pickup_context[\'postcode\'] ?? $recipient_postcode' ), 'Shipment modal backend must fall back to WooCommerce shipping recipient context for Russian Post map loading.' );
 cdek_order_assert( str_contains( $metabox_source, '$order_id = (int) ( $_POST[\'order_id\'] ?? 0 )' ) && str_contains( $metabox_source, '$location_context[\'city_name\']' ) && str_contains( $metabox_source, 'get_shipping_city' ) && str_contains( $metabox_source, 'get_shipping_postcode' ), 'Shipment modal pickup search backend must use order_id to restore missing Russian Post location context.' );
 $draft_factory_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/OrderShipmentDraftFactory.php' );
+cdek_order_assert( str_contains( $draft_factory_source, 'product_dimension_cm' ) && str_contains( $draft_factory_source, "\$length_cm" ) && str_contains( $draft_factory_source, "\$height_cm" ), 'Shipment draft factory must load item dimensions from WooCommerce product/variation data.' );
 cdek_order_assert( str_contains( $draft_factory_source, 'decimal_from_admin_row' ) && str_contains( $draft_factory_source, "str_replace( ',', '.'" ) && str_contains( $draft_factory_source, "'length_cm' => \$this->decimal_from_admin_row" ), 'Shipment draft factory must parse item cost/dimensions as decimals with comma and dot support.' );
+$shipments_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.css' );
+cdek_order_assert( str_contains( $shipments_css, '.wdc-icon-action' ) && str_contains( $shipments_css, 'border: 0' ) && str_contains( $shipments_css, 'background: transparent' ) && str_contains( $shipments_css, 'min-width: min(520px, 70vw)' ) && str_contains( $shipments_css, 'overflow-x: hidden' ), 'Shipment package table CSS must use borderless icons and a wider product search dropdown without horizontal scrolling.' );
 
 $render = new ReflectionMethod( OrderShipmentsMetabox::class, 'render_status_block' );
 $render->setAccessible( true );

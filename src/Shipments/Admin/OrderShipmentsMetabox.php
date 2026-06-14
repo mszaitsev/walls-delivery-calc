@@ -762,6 +762,16 @@ final class OrderShipmentsMetabox {
 			}
 		}
 
+		foreach ( $this->product_ids_by_partial_sku( $query, 20 ) as $sku_id ) {
+			$product = wc_get_product( $sku_id );
+			if ( is_object( $product ) && method_exists( $product, 'get_id' ) ) {
+				$products[ (int) $product->get_id() ] = $product;
+			}
+			if ( count( $products ) >= 20 ) {
+				break;
+			}
+		}
+
 		foreach ( wc_get_products( array( 'limit' => 20, 'status' => array( 'publish', 'private' ), 'type' => array( 'simple', 'variation' ), 's' => $query ) ) as $product ) {
 			if ( is_object( $product ) && method_exists( $product, 'get_id' ) ) {
 				$products[ (int) $product->get_id() ] = $product;
@@ -777,6 +787,32 @@ final class OrderShipmentsMetabox {
 		}
 
 		wp_send_json_success( array( 'items' => $items ) );
+	}
+
+	/**
+	 * @return array<int,int>
+	 */
+	private function product_ids_by_partial_sku( string $query, int $limit ): array {
+		global $wpdb;
+
+		if ( '' === $query || ! is_object( $wpdb ) || ! method_exists( $wpdb, 'get_col' ) ) {
+			return array();
+		}
+
+		$postmeta = isset( $wpdb->postmeta ) ? (string) $wpdb->postmeta : '';
+		if ( '' === $postmeta ) {
+			return array();
+		}
+
+		$like = function_exists( 'esc_like' ) ? esc_like( $query ) : addcslashes( $query, '_%\\' );
+		$sql = "SELECT post_id FROM {$postmeta} WHERE meta_key = '_sku' AND meta_value LIKE %s LIMIT %d";
+		if ( method_exists( $wpdb, 'prepare' ) ) {
+			$sql = $wpdb->prepare( $sql, '%' . $like . '%', max( 1, $limit ) );
+		} else {
+			$sql = str_replace( array( '%s', '%d' ), array( "'" . str_replace( "'", "''", '%' . $like . '%' ) . "'", (string) max( 1, $limit ) ), $sql );
+		}
+
+		return array_values( array_filter( array_map( 'intval', (array) $wpdb->get_col( $sql ) ) ) );
 	}
 
 	private function normalize_pickup_search_text( string $value ): string {
@@ -861,13 +897,13 @@ final class OrderShipmentsMetabox {
 					<td class="wdc-cdek-item-product"><?php echo esc_html( (string) ( $item['name'] ?? 'Товар' ) ); ?><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][name]" value="<?php echo esc_attr( (string) ( $item['name'] ?? 'Товар' ) ); ?>"><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][item_key]" value="<?php echo esc_attr( $row_key ); ?>"><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][ordered_quantity]" value="<?php echo esc_attr( (string) $quantity ); ?>"></td>
 					<td class="wdc-cdek-item-sku"><?php echo esc_html( $sku ); ?><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][ware_key]" value="<?php echo esc_attr( $sku ); ?>"></td>
 					<td><input class="wdc-cdek-input-qty" type="number" min="1" max="<?php echo esc_attr( (string) min( 999, $quantity ) ); ?>" step="1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][amount]" value="<?php echo esc_attr( (string) min( 999, $quantity ) ); ?>" data-wdc-shipment-item-qty data-wdc-cdek-qty data-wdc-integer-input></td>
-					<td><input class="wdc-cdek-input-price" type="number" min="0" step="0.01" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][cost]" value="<?php echo esc_attr( (string) $unit ); ?>" data-wdc-decimal-input="2"></td>
+					<td><input class="wdc-cdek-input-price" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][cost]" value="<?php echo esc_attr( (string) $unit ); ?>" data-wdc-decimal-input="2"></td>
 					<td><input class="wdc-cdek-input-weight" type="number" min="1" step="1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][weight]" value="<?php echo esc_attr( (string) max( 1, (int) ( $item['weight_g'] ?? 0 ) ) ); ?>" data-wdc-integer-input></td>
-					<td><input class="wdc-cdek-input-dim" type="number" min="0.1" step="0.1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][length_cm]" value="<?php echo esc_attr( (string) max( 0.1, (float) ( $item['length_cm'] ?? 1 ) ) ); ?>" data-wdc-decimal-input="1"></td>
-					<td><input class="wdc-cdek-input-dim" type="number" min="0.1" step="0.1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][width_cm]" value="<?php echo esc_attr( (string) max( 0.1, (float) ( $item['width_cm'] ?? 1 ) ) ); ?>" data-wdc-decimal-input="1"></td>
-					<td><input class="wdc-cdek-input-dim" type="number" min="0.1" step="0.1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][height_cm]" value="<?php echo esc_attr( (string) max( 0.1, (float) ( $item['height_cm'] ?? 1 ) ) ); ?>" data-wdc-decimal-input="1"></td>
+					<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][length_cm]" value="<?php echo esc_attr( (string) max( 0.1, (float) ( $item['length_cm'] ?? 0.1 ) ) ); ?>" data-wdc-decimal-input="1"></td>
+					<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][width_cm]" value="<?php echo esc_attr( (string) max( 0.1, (float) ( $item['width_cm'] ?? 0.1 ) ) ); ?>" data-wdc-decimal-input="1"></td>
+					<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][height_cm]" value="<?php echo esc_attr( (string) max( 0.1, (float) ( $item['height_cm'] ?? 0.1 ) ) ); ?>" data-wdc-decimal-input="1"></td>
 					<td><select name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][place_number]" data-wdc-shipment-place-select data-wdc-cdek-place-select><option value="1">1</option></select></td>
-					<td class="wdc-cdek-item-actions"><?php if ( $quantity > 1 ) : ?><button type="button" class="button wdc-icon-button" data-wdc-shipment-item-split data-wdc-cdek-split title="<?php echo esc_attr__( 'Разбить товар по грузоместам', 'walls-delivery-calc' ); ?>" aria-label="<?php echo esc_attr__( 'Разбить товар по грузоместам', 'walls-delivery-calc' ); ?>">🔀</button><?php endif; ?></td>
+					<td class="wdc-cdek-item-actions"><?php if ( $quantity > 1 ) : ?><button type="button" class="wdc-icon-action wdc-icon-action--split" data-wdc-shipment-item-split data-wdc-cdek-split title="<?php echo esc_attr__( 'Разбить товар по грузоместам', 'walls-delivery-calc' ); ?>" aria-label="<?php echo esc_attr__( 'Разбить товар по грузоместам', 'walls-delivery-calc' ); ?>">🔀</button><?php endif; ?></td>
 				</tr>
 			<?php endforeach; ?>
 			</tbody>

@@ -1,6 +1,10 @@
 # WDC CDEK Order Creation
 
-Version: 0.49.1.
+Version: 0.49.2.
+
+0.49.2 update: shipment item rows now initialize product dimensions from WooCommerce product/variation data when catalog dimensions exist, with `0.1` used only as the empty-dimension fallback. Item price and item dimension inputs are text decimal fields so managers can type both `.` and `,`, while package place dimensions remain integer-only.
+
+The `Грузоместа` item table now uses borderless centered split/remove icons, clamps split/base quantities to keep every row at least `1` and the group total equal to the ordered quantity, closes manual SKU search results on focus-out without auto-filling, and supports partial SKU lookup through `_sku LIKE` for products and variations.
 
 0.49.1 update: the `Грузоместа` tab is carrier-neutral in the shipment modal instead of being CDEK-only. Russian Post and future carriers receive the same package summary, item rows, split controls and manual item entry UI, while CDEK continues to be the only carrier that currently maps those rows into `/v2/orders` items.
 
@@ -90,7 +94,7 @@ The existing `Отправления` metabox is reused. The modal now has tabs:
 - `Основное` for the carrier-specific shipment summary and main controls;
 - `Грузоместа` for universal package/item assignment data.
 
-The `Грузоместа` tab is shown for all carriers. In 0.49.1 it renders the same table/summary/split/manual-item UI for Russian Post, CDEK and future carriers; CDEK actively uses the rows for `packages[]`, while Russian Post remains backward-compatible if its API flow does not consume item-level rows yet.
+The `Грузоместа` tab is shown for all carriers. Since 0.49.1 it renders the same table/summary/split/manual-item UI for Russian Post, CDEK and future carriers; CDEK actively uses the rows for `packages[]`, while Russian Post remains backward-compatible if its API flow does not consume item-level rows yet.
 
 Repeated CDEK creation is blocked when the order already has a CDEK shipment in `registration_pending`, `created` or `registered`. The UI shows the existing UUID/number/status instead of accidentally creating another CDEK order with the same IM number.
 

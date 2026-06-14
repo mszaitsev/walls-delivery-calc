@@ -227,17 +227,37 @@ final class OrderShipmentDraftFactory {
 			$qty = method_exists( $item, 'get_quantity' ) ? max( 1, (int) $item->get_quantity() ) : 1;
 			$total = method_exists( $item, 'get_total' ) ? (float) $item->get_total() : 0.0;
 			$weight_g = is_object( $product ) && method_exists( $product, 'get_weight' ) ? (int) round( (float) str_replace( ',', '.', (string) $product->get_weight() ) * 1000 ) : 0;
+			$length_cm = $this->product_dimension_cm( $product, 'get_length' );
+			$width_cm = $this->product_dimension_cm( $product, 'get_width' );
+			$height_cm = $this->product_dimension_cm( $product, 'get_height' );
 			$items[] = new PackageItem(
 				is_object( $product ) && method_exists( $product, 'get_sku' ) ? (string) $product->get_sku() : '',
 				method_exists( $item, 'get_name' ) ? (string) $item->get_name() : 'Товар',
 				$qty,
 				Money::from_rubles( $qty > 0 ? $total / $qty : $total ),
 				Money::from_rubles( $total ),
-				$weight_g
+				$weight_g,
+				$length_cm,
+				$width_cm,
+				$height_cm
 			);
 		}
 
 		return $items;
+	}
+
+	private function product_dimension_cm( mixed $product, string $getter ): int {
+		if ( ! is_object( $product ) || ! method_exists( $product, $getter ) ) {
+			return 0;
+		}
+
+		$value = (string) $product->{$getter}();
+		if ( '' === trim( $value ) ) {
+			return 0;
+		}
+
+		$dimension = function_exists( 'wc_get_dimension' ) ? (float) wc_get_dimension( $value, 'cm' ) : (float) str_replace( ',', '.', $value );
+		return max( 0, (int) round( $dimension ) );
 	}
 
 	private function create_cdek_request_from_order( object $order ): ShipmentCreateRequest {

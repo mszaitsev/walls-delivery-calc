@@ -1,5 +1,7 @@
 # Project Status
 
+0.49.2 note: shipment package table UX was corrected. Product rows now inherit WooCommerce product/variation length, width and height instead of falling back to `0.1` when catalog data exists; item price/dimensions accept dot or comma decimals; split/base quantities are clamped so every row stays at least `1` and the group total remains the ordered quantity; split/remove actions are borderless centered icons; manual SKU search closes on focus-out without auto-filling and supports partial `_sku` matches for products and variations.
+
 0.49.1 note: shipment preparation packages were hardened after the first 0.49.0 review. The `Грузоместа` tab now renders the same item table, summary, split controls and manual item rows for all carriers, including Russian Post; CDEK still maps the data into `/v2/orders` while other carriers can ignore item-level rows safely. Deleting a package forces split rows back into their base rows and restores base item cost/weight/dimensions from original order data, while deleting an individual split row preserves manager edits. Item cost/dimensions accept comma or dot decimals; package place dimensions remain integer-only.
 
 0.49.0 note: shipment preparation package UI is improved on `feature/shipment-modal-packages-ui`. CDEK settings now store `cdek_shipment_point_address`; the order shipment modal renders sender pickup point code plus address, allows a temporary CDEK sender pickup replacement without changing settings, and submits the chosen code as `shipment_point`. The universal `Грузоместа` tab now has API-weight hints for single-package drafts, package summaries with package weight and assigned item totals, Russian item-table labels, compact numeric constraints, split rows with delete/rebalance behavior, manual item rows, and WooCommerce product search for manual SKU entry.
@@ -151,7 +153,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.49.1`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.49.2`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

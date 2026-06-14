@@ -53,12 +53,18 @@
   }
 
   function cleanDecimalInput(input, precision) {
-    const separator = String(input.value || '').includes(',') ? ',' : '.';
-    let value = String(input.value || '').replace(/[^\d.,]+/g, '').replace(/,/g, '.');
-    const parts = value.split('.');
-    value = parts.shift() || '';
-    if (parts.length) value += '.' + parts.join('').slice(0, precision);
-    input.value = separator === ',' ? value.replace('.', ',') : value;
+    const raw = String(input.value || '');
+    const separatorMatch = raw.match(/[.,]/);
+    const separator = separatorMatch ? separatorMatch[0] : '';
+    const cleaned = raw.replace(/[^\d.,]+/g, '');
+    const separatorIndex = separator ? cleaned.search(/[.,]/) : -1;
+    if (separatorIndex === -1) {
+      input.value = cleaned.replace(/[.,]/g, '');
+      return;
+    }
+    const integer = cleaned.slice(0, separatorIndex).replace(/[.,]/g, '');
+    const decimal = cleaned.slice(separatorIndex + 1).replace(/[.,]/g, '').slice(0, precision);
+    input.value = integer + separator + decimal;
   }
 
   function parseDecimalValue(value) {
@@ -151,19 +157,65 @@
     }).join('');
   }
 
-  function rebalanceCdekGroup(form, groupKey) {
+  function normalizeQtyRows(rows, targetTotal, lockedRow) {
+    const locked = lockedRow || null;
+    const otherRows = rows.filter((row) => row !== locked);
+    const lockedInput = locked ? shipmentQtyInput(locked) : null;
+    const rowCount = rows.length;
+    if (!rowCount) return;
+    const maxPerRow = Math.max(1, targetTotal - rowCount + 1);
+    rows.forEach((row) => {
+      const input = shipmentQtyInput(row);
+      if (!input) return;
+      input.max = String(rowCount > 1 ? Math.max(1, targetTotal - 1) : Math.min(999, targetTotal));
+    });
+    if (lockedInput) {
+      const lockedValue = Math.max(1, Math.min(maxPerRow, parseInt(lockedInput.value || '1', 10) || 1));
+      lockedInput.value = String(lockedValue);
+    }
+    const lockedValue = lockedInput ? (parseInt(lockedInput.value || '1', 10) || 1) : 0;
+    let otherTarget = targetTotal - lockedValue;
+    if (!locked) otherTarget = targetTotal;
+    if (otherRows.length === 0) return;
+    const minOther = otherRows.length;
+    otherTarget = Math.max(minOther, otherTarget);
+    otherRows.forEach((row) => {
+      const input = shipmentQtyInput(row);
+      if (!input) return;
+      input.value = String(Math.max(1, parseInt(input.value || '1', 10) || 1));
+    });
+    let sum = otherRows.reduce((total, row) => {
+      const input = shipmentQtyInput(row);
+      return total + (parseInt(input && input.value ? input.value : '1', 10) || 1);
+    }, 0);
+    while (sum > otherTarget) {
+      let changed = false;
+      for (let i = otherRows.length - 1; i >= 0 && sum > otherTarget; i--) {
+        const input = shipmentQtyInput(otherRows[i]);
+        const value = parseInt(input && input.value ? input.value : '1', 10) || 1;
+        if (input && value > 1) {
+          input.value = String(value - 1);
+          sum--;
+          changed = true;
+        }
+      }
+      if (!changed) break;
+    }
+    while (sum < otherTarget) {
+      const input = shipmentQtyInput(otherRows[0]);
+      if (!input) break;
+      input.value = String((parseInt(input.value || '1', 10) || 1) + 1);
+      sum++;
+    }
+  }
+
+  function rebalanceCdekGroup(form, groupKey, changedRow) {
     if (!form || !groupKey) return;
     const rows = shipmentItemRows(form).filter((row) => row.getAttribute('data-group-key') === groupKey);
     const base = rows.find((row) => row.hasAttribute('data-wdc-base-row'));
     if (!base) return;
     const total = parseInt(base.getAttribute('data-ordered-quantity') || '1', 10) || 1;
-    const childrenTotal = rows.reduce((sum, row) => {
-      if (row === base) return sum;
-      const qty = shipmentQtyInput(row);
-      return sum + (parseInt(qty && qty.value ? qty.value : '0', 10) || 0);
-    }, 0);
-    const baseQty = shipmentQtyInput(base);
-    if (baseQty) baseQty.value = String(Math.max(1, total - childrenTotal));
+    normalizeQtyRows(rows, total, rows.includes(changedRow) ? changedRow : null);
   }
 
   function originalItemData(row) {
@@ -267,7 +319,7 @@
     clone.appendChild(parent);
     const actionCell = clone.querySelector('td:last-child');
     if (actionCell) {
-      actionCell.innerHTML = '<button type="button" class="button wdc-danger-icon-button" data-wdc-remove-shipment-split data-wdc-remove-cdek-split title="Удалить строку" aria-label="Удалить строку">×</button>';
+      actionCell.innerHTML = '<button type="button" class="wdc-icon-action wdc-icon-action--danger" data-wdc-remove-shipment-split data-wdc-remove-cdek-split title="Удалить строку" aria-label="Удалить строку">❌</button>';
     }
     row.after(clone);
     rebalanceCdekGroup(form, groupKey);
@@ -294,13 +346,13 @@
       '<td class="wdc-cdek-item-product"><input type="text" name="cdek_items[' + index + '][name]" value="" placeholder="Товар"><input type="hidden" name="cdek_items[' + index + '][item_key]" value="' + rowKey + '"><input type="hidden" name="cdek_items[' + index + '][ordered_quantity]" value="999"></td>',
       '<td class="wdc-cdek-item-sku wdc-product-search-cell"><input type="text" name="cdek_items[' + index + '][ware_key]" value="" placeholder="Артикул" autocomplete="off" data-wdc-product-search-input><div class="wdc-product-search-results" data-wdc-product-search-results hidden></div></td>',
       '<td><input class="wdc-cdek-input-qty" type="number" min="1" max="999" step="1" name="cdek_items[' + index + '][amount]" value="1" data-wdc-shipment-item-qty data-wdc-cdek-qty data-wdc-integer-input></td>',
-      '<td><input class="wdc-cdek-input-price" type="number" min="0" step="0.01" name="cdek_items[' + index + '][cost]" value="0" data-wdc-decimal-input="2"></td>',
+      '<td><input class="wdc-cdek-input-price" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[' + index + '][cost]" value="0" data-wdc-decimal-input="2"></td>',
       '<td><input class="wdc-cdek-input-weight" type="number" min="1" step="1" name="cdek_items[' + index + '][weight]" value="1" data-wdc-integer-input></td>',
-      '<td><input class="wdc-cdek-input-dim" type="number" min="0.1" step="0.1" name="cdek_items[' + index + '][length_cm]" value="1" data-wdc-decimal-input="1"></td>',
-      '<td><input class="wdc-cdek-input-dim" type="number" min="0.1" step="0.1" name="cdek_items[' + index + '][width_cm]" value="1" data-wdc-decimal-input="1"></td>',
-      '<td><input class="wdc-cdek-input-dim" type="number" min="0.1" step="0.1" name="cdek_items[' + index + '][height_cm]" value="1" data-wdc-decimal-input="1"></td>',
+      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[' + index + '][length_cm]" value="1" data-wdc-decimal-input="1"></td>',
+      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[' + index + '][width_cm]" value="1" data-wdc-decimal-input="1"></td>',
+      '<td><input class="wdc-cdek-input-dim" type="text" inputmode="decimal" autocomplete="off" name="cdek_items[' + index + '][height_cm]" value="1" data-wdc-decimal-input="1"></td>',
       '<td><select name="cdek_items[' + index + '][place_number]" data-wdc-shipment-place-select data-wdc-cdek-place-select><option value="1">1</option></select></td>',
-      '<td class="wdc-cdek-item-actions"><button type="button" class="button wdc-danger-icon-button" data-wdc-remove-manual-shipment-item data-wdc-remove-manual-cdek-item title="Удалить строку" aria-label="Удалить строку">×</button></td>'
+      '<td class="wdc-cdek-item-actions"><button type="button" class="wdc-icon-action wdc-icon-action--danger" data-wdc-remove-manual-shipment-item data-wdc-remove-manual-cdek-item title="Удалить строку" aria-label="Удалить строку">❌</button></td>'
     ].join('');
     body.appendChild(row);
     updateCdekPlaceOptions(form);
@@ -1747,8 +1799,8 @@
       cleanIntegerInput(event.target);
       const integerForm = findShipmentForm(event.target);
       const row = event.target.closest('[data-wdc-shipment-item-row], [data-wdc-cdek-item-row]');
-      if (integerForm && row && row.hasAttribute('data-wdc-split-row') && event.target.matches('[data-wdc-shipment-item-qty], [data-wdc-cdek-qty]')) {
-        rebalanceCdekGroup(integerForm, row.getAttribute('data-group-key') || '');
+      if (integerForm && row && event.target.matches('[data-wdc-shipment-item-qty], [data-wdc-cdek-qty]')) {
+        rebalanceCdekGroup(integerForm, row.getAttribute('data-group-key') || '', row);
       }
       if (integerForm) {
         updateScenarioSections(integerForm);
@@ -1799,6 +1851,15 @@
       updateScenarioSections(form);
       schedulePreview(form);
     }
+  });
+
+  document.addEventListener('focusout', function (event) {
+    if (!event.target.matches('[data-wdc-product-search-input]')) return;
+    window.clearTimeout(event.target._wdcProductSearchTimer);
+    window.clearTimeout(event.target._wdcProductSearchBlurTimer);
+    event.target._wdcProductSearchBlurTimer = window.setTimeout(function () {
+      renderProductSearchResults(event.target, []);
+    }, 160);
   });
 
   document.addEventListener('change', function (event) {
