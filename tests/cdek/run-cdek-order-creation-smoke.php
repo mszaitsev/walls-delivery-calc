@@ -353,10 +353,60 @@ $location_http = new CdekOrderFakeHttp();
 $location_http->city_responses[] = array( array( 'code' => 44, 'city' => 'Москва' ) );
 $location_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $location_http ), $settings, $location_http );
 $cdek_address_service = cdek_order_address_service( $suggestions, $location_client );
+$prepared_address_without_flat = $cdek_address_service->prepare( new CdekOrderFakeOrder( 124 ), '125252, Москва, Ходынский б-р, д 13', array( 'city_name' => 'Москва', 'postal_code' => '125252', 'delivery_calculation_data' => array( 'api' => array( 'cdek_to_city_code' => 44 ) ) ), CdekSettings::SERVICE_KEY );
+cdek_order_assert( ! empty( $prepared_address_without_flat['success'] ) && str_contains( (string) ( $prepared_address_without_flat['fields']['cdek_delivery_address'] ?? '' ), 'Ходынский б-р, д 13' ), 'CDEK courier address without flat must still prepare successfully.' );
 $prepared_address = $cdek_address_service->prepare( new CdekOrderFakeOrder( 125 ), '125252, Москва, Ходынский б-р, д 13, кв 150', array( 'city_name' => 'Москва', 'postal_code' => '125252', 'delivery_calculation_data' => array( 'api' => array( 'cdek_to_city_code' => 44 ) ) ), CdekSettings::SERVICE_KEY );
 cdek_order_assert( ! empty( $prepared_address['success'] ) && 44 === (int) ( $prepared_address['fields']['cdek_city_code'] ?? 0 ) && 'Москва' === (string) ( $prepared_address['fields']['cdek_city_name'] ?? '' ) && '125252' === (string) ( $prepared_address['fields']['cdek_postal_code'] ?? '' ) && 'Ходынский б-р, д 13, кв 150' === (string) ( $prepared_address['fields']['cdek_delivery_address'] ?? '' ), 'CDEK courier address preparation must normalize DaData address and resolve CDEK city code.' );
+cdek_order_assert( '125252, Москва, Ходынский б-р, д 13' === (string) ( $suggestions->requests[1]['query'] ?? '' ), 'CDEK courier address preparation must send DaData query without flat suffix.' );
+cdek_order_assert( str_contains( (string) ( $prepared_address['display'] ?? '' ), 'кв 150' ), 'CDEK courier normalized display must include flat.' );
+cdek_order_assert( hash( 'sha256', '125252, Москва, Ходынский б-р, д 13, кв 150' ) === (string) ( $prepared_address['original_hash'] ?? '' ), 'CDEK courier original hash must use the full original address with flat.' );
 $location_urls = implode( "\n", array_map( static fn( array $request ): string => (string) $request['url'], $location_http->requests ) );
 cdek_order_assert( ! str_contains( $location_urls, '/v2/location/cities' ), 'Known delivery_calculation_data.api.cdek_to_city_code must skip CDEK location lookup.' );
+
+$extracted_flat_suggestions = new CdekOrderFakeSuggestionClient();
+$extracted_flat_suggestions->responses[] = array(
+	'success' => true,
+	'suggestions' => array(
+		array(
+			'value' => '125252, г Москва, Ходынский б-р, д 13',
+			'unrestricted_value' => '125252, г Москва, Ходынский б-р, д 13',
+			'data' => array(
+				'postal_code' => '125252',
+				'city_with_type' => 'г Москва',
+				'street_with_type' => 'Ходынский б-р',
+				'house' => '13',
+				'geo_lat' => '55.790000',
+				'geo_lon' => '37.530000',
+			),
+		),
+	),
+);
+$extracted_flat_service = cdek_order_address_service( $extracted_flat_suggestions, new CdekApiClient( new CdekOAuthTokenService( $settings, new CdekOrderFakeHttp() ), $settings, new CdekOrderFakeHttp() ) );
+$extracted_flat_prepared = $extracted_flat_service->prepare( new CdekOrderFakeOrder( 131 ), '125252, Москва, Ходынский б-р, д 13, кв. 150', array( 'city_name' => 'Москва', 'delivery_calculation_data' => array( 'api' => array( 'cdek_to_city_code' => 44 ) ) ), CdekSettings::SERVICE_KEY );
+cdek_order_assert( ! empty( $extracted_flat_prepared['success'] ) && 'Ходынский б-р, д 13, кв 150' === (string) ( $extracted_flat_prepared['fields']['cdek_delivery_address'] ?? '' ), 'CDEK courier address preparation must restore extracted flat when DaData does not return it.' );
+
+$dadata_flat_suggestions = new CdekOrderFakeSuggestionClient();
+$dadata_flat_suggestions->responses[] = array(
+	'success' => true,
+	'suggestions' => array(
+		array(
+			'value' => '125252, г Москва, Ходынский б-р, д 13, кв 151',
+			'unrestricted_value' => '125252, г Москва, Ходынский б-р, д 13, кв 151',
+			'data' => array(
+				'postal_code' => '125252',
+				'city_with_type' => 'г Москва',
+				'street_with_type' => 'Ходынский б-р',
+				'house' => '13',
+				'flat' => '151',
+				'geo_lat' => '55.790000',
+				'geo_lon' => '37.530000',
+			),
+		),
+	),
+);
+$dadata_flat_service = cdek_order_address_service( $dadata_flat_suggestions, new CdekApiClient( new CdekOAuthTokenService( $settings, new CdekOrderFakeHttp() ), $settings, new CdekOrderFakeHttp() ) );
+$dadata_flat_prepared = $dadata_flat_service->prepare( new CdekOrderFakeOrder( 132 ), '125252, Москва, Ходынский б-р, д 13, кв 150', array( 'city_name' => 'Москва', 'delivery_calculation_data' => array( 'api' => array( 'cdek_to_city_code' => 44 ) ) ), CdekSettings::SERVICE_KEY );
+cdek_order_assert( ! empty( $dadata_flat_prepared['success'] ) && 'Ходынский б-р, д 13, кв 151' === (string) ( $dadata_flat_prepared['fields']['cdek_delivery_address'] ?? '' ), 'CDEK courier address preparation must prefer DaData flat when it is returned.' );
 
 $rate_meta_suggestions = new CdekOrderFakeSuggestionClient();
 $rate_meta_http = new CdekOrderFakeHttp();

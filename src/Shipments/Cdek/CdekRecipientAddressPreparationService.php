@@ -32,7 +32,8 @@ final class CdekRecipientAddressPreparationService {
 			return $this->failure( 'Подсказки DaData не настроены. Невозможно проверить адрес СДЭК.', $service_key, $original_address );
 		}
 
-		$result = $this->suggestions->suggest( 'address', $original_address, $this->dadata_context( $location_context ) );
+		$prepared_input = $this->address_for_dadata( $original_address );
+		$result = $this->suggestions->suggest( 'address', $prepared_input['address_for_dadata'], $this->dadata_context( $location_context ) );
 		if ( empty( $result['success'] ) ) {
 			return $this->failure( 'Адрес не удалось проверить через DaData.', $service_key, $original_address );
 		}
@@ -45,7 +46,7 @@ final class CdekRecipientAddressPreparationService {
 
 		$city = $this->clean_city_name( (string) ( $payload['city'] ?? $payload['city_with_type'] ?? $payload['settlement'] ?? $payload['settlement_with_type'] ?? $location_context['city_value'] ?? $location_context['city_name'] ?? '' ) );
 		$postal_code = preg_replace( '/\D+/', '', (string) ( $payload['postcode'] ?? $payload['postal_code'] ?? '' ) ) ?: '';
-		$delivery_address = $this->delivery_address( $payload );
+		$delivery_address = $this->delivery_address( $payload, $prepared_input );
 		if ( '' === $delivery_address ) {
 			return $this->failure( 'DaData не вернула адрес доставки до двери.', $service_key, $original_address );
 		}
@@ -89,7 +90,7 @@ final class CdekRecipientAddressPreparationService {
 				'street' => (string) ( $payload['street'] ?? '' ),
 				'house' => (string) ( $payload['house'] ?? '' ),
 				'block' => (string) ( $payload['block'] ?? '' ),
-				'flat' => (string) ( $payload['flat'] ?? '' ),
+				'flat' => $this->flat_value( $payload, $prepared_input ),
 				'fias_id' => (string) ( $payload['fias_id'] ?? '' ),
 				'kladr_id' => (string) ( $payload['kladr_id'] ?? '' ),
 				'geo_lat' => null !== $lat ? (string) $lat : '',
@@ -166,8 +167,9 @@ final class CdekRecipientAddressPreparationService {
 
 	/**
 	 * @param array<string,mixed> $payload
+	 * @param array{address_for_dadata:string,flat:string,flat_type:string} $prepared_input
 	 */
-	private function delivery_address( array $payload ): string {
+	private function delivery_address( array $payload, array $prepared_input = array( 'address_for_dadata' => '', 'flat' => '', 'flat_type' => '' ) ): string {
 		$parts = array();
 		$street = trim( (string) ( $payload['street_with_type'] ?? $payload['street'] ?? '' ) );
 		if ( '' !== $street ) {
@@ -183,13 +185,72 @@ final class CdekRecipientAddressPreparationService {
 			$type = trim( (string) ( $payload['block_type'] ?? 'к' ) );
 			$parts[] = ( '' !== $type ? $type . ' ' : '' ) . $block;
 		}
-		$flat = trim( (string) ( $payload['flat'] ?? $payload['room'] ?? $payload['room_number'] ?? $payload['premise'] ?? '' ) );
+		$flat = $this->flat_value( $payload, $prepared_input );
 		if ( '' !== $flat ) {
-			$type = trim( (string) ( $payload['flat_type'] ?? 'кв' ) );
+			$type = trim( (string) ( $payload['flat_type'] ?? $payload['room_type'] ?? $payload['premise_type'] ?? $prepared_input['flat_type'] ?? 'кв' ) );
 			$parts[] = ( '' !== $type ? $type . ' ' : '' ) . $flat;
 		}
 
 		return trim( implode( ', ', array_values( array_filter( $parts, static fn( string $part ): bool => '' !== trim( $part ) ) ) ) );
+	}
+
+	/**
+	 * @return array{address_for_dadata:string,flat:string,flat_type:string}
+	 */
+	private function address_for_dadata( string $original_address ): array {
+		$address = trim( preg_replace( '/\s+/', ' ', $original_address ) ?? $original_address );
+		$result = array( 'address_for_dadata' => $address, 'flat' => '', 'flat_type' => '' );
+		if ( '' === $address ) {
+			return $result;
+		}
+
+		if ( preg_match( '/(?:^|,\s*|\s+)(кв\.?|квартира|ап\.?|оф\.?|офис|пом\.?|помещение)\s*([A-Za-zА-Яа-яЁё0-9\/\-]+)\s*$/iu', $address, $matches, PREG_OFFSET_CAPTURE ) ) {
+			$type = $this->flat_type( (string) $matches[1][0] );
+			$flat = trim( (string) $matches[2][0] );
+			$prefix = rtrim( substr( $address, 0, (int) $matches[0][1] ), " \t\n\r\0\x0B," );
+			if ( '' !== $prefix && '' !== $flat ) {
+				return array( 'address_for_dadata' => $prefix, 'flat' => $flat, 'flat_type' => $type );
+			}
+		}
+
+		$parts = preg_split( '/\s*,\s*/u', $address ) ?: array();
+		if ( count( $parts ) >= 2 ) {
+			$tail = trim( (string) end( $parts ) );
+			if ( preg_match( '/^[0-9]+[A-Za-zА-Яа-яЁё0-9\/\-]*$/u', $tail ) && ! preg_match( '/\b(г|город|ул|улица|пр|проспект|б-р|бульвар|пер|переулок|ш|шоссе|д|дом)\b\.?/iu', $tail ) ) {
+				array_pop( $parts );
+				$prefix = trim( implode( ', ', array_filter( array_map( 'trim', $parts ), static fn( string $part ): bool => '' !== $part ) ) );
+				if ( '' !== $prefix ) {
+					return array( 'address_for_dadata' => $prefix, 'flat' => $tail, 'flat_type' => 'кв' );
+				}
+			}
+		}
+
+		return $result;
+	}
+
+	private function flat_type( string $type ): string {
+		$type = trim( function_exists( 'mb_strtolower' ) ? mb_strtolower( $type ) : strtolower( $type ) );
+		if ( str_starts_with( $type, 'оф' ) ) {
+			return 'оф';
+		}
+		if ( str_starts_with( $type, 'пом' ) ) {
+			return 'пом';
+		}
+		if ( str_starts_with( $type, 'ап' ) ) {
+			return 'ап';
+		}
+
+		return 'кв';
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @param array{address_for_dadata:string,flat:string,flat_type:string} $prepared_input
+	 */
+	private function flat_value( array $payload, array $prepared_input ): string {
+		$flat = trim( (string) ( $payload['flat'] ?? $payload['room'] ?? $payload['room_number'] ?? $payload['premise'] ?? '' ) );
+
+		return '' !== $flat ? $flat : trim( (string) ( $prepared_input['flat'] ?? '' ) );
 	}
 
 	/**
