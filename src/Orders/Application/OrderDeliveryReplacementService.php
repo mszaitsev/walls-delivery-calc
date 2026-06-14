@@ -42,6 +42,7 @@ final class OrderDeliveryReplacementService {
 		$pickup = is_array( $payload['selected_pickup_point'] ?? null ) ? $payload['selected_pickup_point'] : array();
 		$address = is_array( $payload['normalized_shipping_address'] ?? null ) ? $payload['normalized_shipping_address'] : array();
 		if ( DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) {
+			$pickup = $this->canonical_pickup_for_save( $order, $rate, $pickup );
 			if ( '' === trim( (string) ( $pickup['point_code'] ?? '' ) ) ) {
 				return array( 'success' => false, 'message' => 'Для pickup-варианта выберите ПВЗ.' );
 			}
@@ -462,6 +463,7 @@ final class OrderDeliveryReplacementService {
 				'service_key' => (string) ( $pickup['service_key'] ?? $rate['service_key'] ?? $rate['carrier_key'] ?? '' ),
 				'pickup_family' => (string) ( $pickup['pickup_family'] ?? ( (string) ( $rate['carrier_key'] ?? '' ) !== '' ? (string) $rate['carrier_key'] . ':pickup' : '' ) ),
 				'point_code' => (string) ( $pickup['point_code'] ?? '' ),
+				'delivery_point' => (string) ( $pickup['delivery_point'] ?? $pickup['point_code'] ?? '' ),
 				'point_type' => (string) ( $pickup['point_type'] ?? '' ),
 				'point_type_label' => (string) ( $pickup['point_type_label'] ?? '' ),
 				'point_title' => (string) ( $pickup['point_title'] ?? '' ),
@@ -716,6 +718,129 @@ final class OrderDeliveryReplacementService {
 	private function normalize( string $value ): string {
 		$value = trim( $value );
 		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate
+	 * @param array<string,mixed> $pickup
+	 * @return array<string,mixed>
+	 */
+	private function canonical_pickup_for_save( object $order, array $rate, array $pickup ): array {
+		$carrier = (string) ( $rate['carrier_key'] ?? $pickup['carrier_key'] ?? '' );
+		if ( 'cdek' !== $carrier ) {
+			if ( '' === trim( (string) ( $pickup['point_code'] ?? '' ) ) ) {
+				$postcode = trim( (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? '' ) );
+				if ( '' !== $postcode ) {
+					$pickup['point_code'] = $postcode;
+				}
+			}
+			return $pickup;
+		}
+
+		$existing = $this->existing_cdek_pickup_payload( $order );
+		$new_code = $this->cdek_pickup_code_from_row( $pickup );
+		$old_code = $this->cdek_pickup_code_from_row( $existing );
+		$code = '' !== $new_code ? $new_code : $old_code;
+		$source = '' !== $new_code ? $pickup : $existing;
+		$merged = array_replace( $existing, $pickup );
+		$merged['carrier_key'] = 'cdek';
+		$merged['service_key'] = 'cdek';
+		$merged['pickup_family'] = 'cdek:pickup';
+		$merged['point_code'] = $code;
+		$merged['cdek_code'] = $code;
+		$merged['delivery_point'] = $code;
+		$merged['point_address'] = $this->first_meaningful( $pickup['point_address'] ?? '', $pickup['address'] ?? '', $existing['point_address'] ?? '', $existing['address'] ?? '' );
+		$merged['address'] = $this->first_meaningful( $pickup['address'] ?? '', $pickup['point_address'] ?? '', $existing['address'] ?? '', $existing['point_address'] ?? '' );
+		$merged['point_postcode'] = $this->first_meaningful( $source['point_postcode'] ?? '', $source['postcode'] ?? '', $existing['point_postcode'] ?? '', $existing['postcode'] ?? '' );
+		$merged['postcode'] = $this->first_meaningful( $source['postcode'] ?? '', $source['point_postcode'] ?? '', $existing['postcode'] ?? '', $existing['point_postcode'] ?? '' );
+
+		return $merged;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function existing_cdek_pickup_payload( object $order ): array {
+		$calculation = $this->order_meta_value( $order, OrderShippingMetaPersister::CALCULATION_META_KEY );
+		$pickup = is_array( $calculation ) && is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
+		$snapshot = $this->json_order_meta_array( $order, '_wdc_pickup_point_snapshot' );
+		foreach ( array( '_wdc_platform_pickup_point', '_wdc_platform_selected_pickup_point', '_wdc_platform_pickup_selection' ) as $key ) {
+			$value = $this->order_meta_value( $order, $key );
+			if ( is_array( $value ) ) {
+				$snapshot = array_replace( $snapshot, $value );
+			}
+		}
+		$selections = $this->order_meta_value( $order, '_wdc_platform_pickup_selections' );
+		if ( is_array( $selections ) && is_array( $selections['cdek:pickup'] ?? null ) ) {
+			$snapshot = array_replace( $snapshot, $selections['cdek:pickup'] );
+		}
+
+		return array_replace(
+			$pickup,
+			$snapshot,
+			array(
+				'carrier_key' => 'cdek',
+				'service_key' => 'cdek',
+				'pickup_family' => 'cdek:pickup',
+				'point_code' => $this->first_meaningful(
+					$pickup['delivery_point'] ?? '',
+					$pickup['point_code'] ?? '',
+					$pickup['cdek_code'] ?? '',
+					$snapshot['delivery_point'] ?? '',
+					$snapshot['point_code'] ?? '',
+					$snapshot['cdek_code'] ?? '',
+					$this->order_meta_string( $order, '_wdc_platform_pickup_code' ),
+					$this->order_meta_string( $order, '_wdc_pickup_point_code' )
+				),
+				'point_address' => $this->first_meaningful( $pickup['point_address'] ?? '', $pickup['address'] ?? '', $snapshot['point_address'] ?? '', $snapshot['address'] ?? '', $this->order_meta_string( $order, '_wdc_platform_pickup_address' ), $this->order_meta_string( $order, '_wdc_pickup_point_address' ) ),
+				'point_postcode' => $this->first_meaningful( $pickup['point_postcode'] ?? '', $pickup['postcode'] ?? '', $snapshot['point_postcode'] ?? '', $snapshot['postcode'] ?? '', $this->order_meta_string( $order, '_wdc_pickup_point_postcode' ) ),
+			)
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function cdek_pickup_code_from_row( array $row ): string {
+		$code = $this->first_meaningful( $row['delivery_point'] ?? '', $row['point_code'] ?? '', $row['cdek_code'] ?? '' );
+		$postcode = preg_replace( '/\D+/', '', (string) ( $row['point_postcode'] ?? $row['postcode'] ?? $row['postal_code'] ?? '' ) ) ?: '';
+		if ( '' === $code ) {
+			return '';
+		}
+		$digits = preg_replace( '/\D+/', '', $code ) ?: '';
+		if ( '' !== $postcode && $digits === $postcode ) {
+			return '';
+		}
+		if ( preg_match( '/^\d{6}$/', $code ) ) {
+			return '';
+		}
+
+		return strtoupper( preg_replace( '/[^A-Z0-9_\-]/', '', strtoupper( $code ) ) ?? '' );
+	}
+
+	private function order_meta_value( object $order, string $key ): mixed {
+		if ( method_exists( $order, 'get_meta' ) ) {
+			return $order->get_meta( $key, true );
+		}
+		if ( property_exists( $order, 'meta' ) && is_array( $order->meta ) ) {
+			return $order->meta[ $key ] ?? null;
+		}
+		return null;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function json_order_meta_array( object $order, string $key ): array {
+		$value = $this->order_meta_value( $order, $key );
+		if ( is_array( $value ) ) {
+			return $value;
+		}
+		if ( ! is_string( $value ) || '' === trim( $value ) ) {
+			return array();
+		}
+		$decoded = json_decode( $value, true );
+		return is_array( $decoded ) ? $decoded : array();
 	}
 
 	private function meaningful_text( mixed $value ): string {

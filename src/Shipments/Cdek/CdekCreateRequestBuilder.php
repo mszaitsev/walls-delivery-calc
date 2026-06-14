@@ -335,7 +335,12 @@ final class CdekCreateRequestBuilder {
 	}
 
 	private function delivery_point( ShipmentCreateRequest $request ): string {
-		return trim( (string) ( $request->meta['delivery_point'] ?? $request->meta['pickup_point_code'] ?? $request->pickup_point?->point_code ?? '' ) );
+		$code = trim( (string) ( $request->meta['delivery_point'] ?? $request->meta['pickup_point_code'] ?? $request->meta['point_code'] ?? $request->meta['cdek_code'] ?? $request->pickup_point?->point_code ?? '' ) );
+		if ( preg_match( '/^\d{6}$/', $code ) ) {
+			return '';
+		}
+
+		return strtoupper( preg_replace( '/[^A-Z0-9_\-]/', '', strtoupper( $code ) ) ?? '' );
 	}
 
 	private function order_number( ShipmentCreateRequest $request ): string {

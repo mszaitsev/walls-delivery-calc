@@ -998,6 +998,134 @@ recalc_smoke_assert( str_contains( $cdek_pickup_order_card, 'Описание:' 
 recalc_smoke_assert( str_contains( $cdek_pickup_order_card, 'Срок хранения 3 дня' ), 'CDEK admin pickup order card must render storage notice.' );
 recalc_smoke_assert( ! str_contains( $cdek_pickup_order_card, 'Время работы:' ) && ! str_contains( $cdek_pickup_order_card, '0.000000' ), 'CDEK admin pickup order card must hide empty work_time and numeric zero values.' );
 
+$cdek_existing_pickup_order = new WdcRecalcOrder( 121, array() );
+$cdek_existing_pickup_order->shipping_items = array();
+$cdek_existing_pickup_order->meta['_wdc_platform_pickup_code'] = 'MSK575';
+$cdek_existing_pickup_order->meta['_wdc_pickup_point_code'] = 'MSK575';
+$cdek_existing_pickup_order->meta['_wdc_pickup_point_address'] = '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1';
+$cdek_existing_pickup_order->meta['_wdc_pickup_point_postcode'] = '101000';
+$cdek_existing_pickup_order->meta['_wdc_delivery_calculation_data'] = array(
+	'carrier_key' => 'cdek',
+	'delivery_type' => DeliveryType::PICKUP,
+	'pickup' => array(
+		'carrier_key' => 'cdek',
+		'service_key' => 'cdek',
+		'pickup_family' => 'cdek:pickup',
+		'point_code' => 'MSK575',
+		'cdek_code' => 'MSK575',
+		'delivery_point' => 'MSK575',
+		'point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+		'point_postcode' => '101000',
+	),
+);
+$cdek_existing_pickup_result = $replacement->save(
+	$cdek_existing_pickup_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $cdek_pickup_rate,
+		'selected_tariff' => array(),
+		'selected_pickup_point' => array(
+			'carrier_key' => 'cdek',
+			'point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+			'address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+			'point_postcode' => '101000',
+			'postcode' => '101000',
+		),
+		'normalized_shipping_address' => array(),
+	)
+);
+$cdek_existing_calc = is_array( $cdek_existing_pickup_order->meta['_wdc_delivery_calculation_data'] ?? null ) ? $cdek_existing_pickup_order->meta['_wdc_delivery_calculation_data'] : array();
+recalc_smoke_assert( true === $cdek_existing_pickup_result['success'], 'CDEK admin pickup save must reuse existing selected pickup code when manager keeps the same pickup point.' );
+recalc_smoke_assert( 'MSK575' === (string) ( $cdek_existing_pickup_order->meta['_wdc_pickup_point_code'] ?? '' ) && 'MSK575' === (string) ( $cdek_existing_calc['pickup']['point_code'] ?? '' ) && 'MSK575' === (string) ( $cdek_existing_calc['pickup']['delivery_point'] ?? '' ), 'CDEK admin pickup save must keep existing CDEK code in canonical pickup meta and calculation data.' );
+recalc_smoke_assert( '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1' === (string) ( $cdek_existing_calc['pickup']['point_address'] ?? '' ), 'CDEK admin pickup save must keep existing pickup address together with the fallback code.' );
+
+$cdek_new_pickup_order = new WdcRecalcOrder( 122, array() );
+$cdek_new_pickup_order->shipping_items = array();
+$cdek_new_pickup_order->meta = $cdek_existing_pickup_order->meta;
+$cdek_new_pickup_result = $replacement->save(
+	$cdek_new_pickup_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $cdek_pickup_rate,
+		'selected_tariff' => array(),
+		'selected_pickup_point' => array_merge(
+			$cdek_pickup_point,
+			array(
+				'point_code' => 'MSK999',
+				'cdek_code' => 'MSK999',
+				'delivery_point' => 'MSK999',
+				'point_address' => 'Москва, новый ПВЗ',
+				'address' => 'Москва, новый ПВЗ',
+				'point_postcode' => '101000',
+				'postcode' => '101000',
+			)
+		),
+		'normalized_shipping_address' => array(),
+	)
+);
+$cdek_new_calc = is_array( $cdek_new_pickup_order->meta['_wdc_delivery_calculation_data'] ?? null ) ? $cdek_new_pickup_order->meta['_wdc_delivery_calculation_data'] : array();
+recalc_smoke_assert( true === $cdek_new_pickup_result['success'] && 'MSK999' === (string) ( $cdek_new_calc['pickup']['point_code'] ?? '' ), 'CDEK admin pickup save must prefer newly selected pickup code over existing saved code.' );
+
+$cdek_address_only_order = new WdcRecalcOrder( 123, array() );
+$cdek_address_only_order->shipping_items = array();
+$cdek_address_only_result = $replacement->save(
+	$cdek_address_only_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $cdek_pickup_rate,
+		'selected_tariff' => array(),
+		'selected_pickup_point' => array(
+			'carrier_key' => 'cdek',
+			'point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+			'address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+			'point_postcode' => '101000',
+			'postcode' => '101000',
+		),
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( false === $cdek_address_only_result['success'] && '' === (string) ( $cdek_address_only_order->meta['_wdc_pickup_point_code'] ?? '' ), 'CDEK admin pickup save must reject address-only pickup data without a CDEK point code.' );
+
+$cdek_postcode_code_order = new WdcRecalcOrder( 124, array() );
+$cdek_postcode_code_order->shipping_items = array();
+$cdek_postcode_code_result = $replacement->save(
+	$cdek_postcode_code_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $cdek_pickup_rate,
+		'selected_tariff' => array(),
+		'selected_pickup_point' => array(
+			'carrier_key' => 'cdek',
+			'point_code' => '101000',
+			'cdek_code' => '101000',
+			'point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+			'point_postcode' => '101000',
+			'postcode' => '101000',
+		),
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( false === $cdek_postcode_code_result['success'] && '' === (string) ( $cdek_postcode_code_order->meta['_wdc_pickup_point_code'] ?? '' ), 'CDEK admin pickup save must not use postcode as delivery_point.' );
+
+$rp_postcode_pickup_order = new WdcRecalcOrder( 125, array() );
+$rp_postcode_pickup_order->shipping_items = array();
+$rp_postcode_pickup_result = $replacement->save(
+	$rp_postcode_pickup_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $pickup_rate,
+		'selected_tariff' => $pickup_rate['selected_tariff'],
+		'selected_pickup_point' => array(
+			'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+			'point_address' => 'Москва, ул. Тверская, 1',
+			'point_postcode' => '101000',
+			'postcode' => '101000',
+		),
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( true === $rp_postcode_pickup_result['success'] && '101000' === (string) ( $rp_postcode_pickup_order->meta['_wdc_pickup_point_code'] ?? '' ), 'Russian Post admin pickup save must still allow postcode as OPS code.' );
+
 $cdek_no_days_rate = $cdek_admin_rate;
 $cdek_no_days_rate['rate_id'] = 'cdek:courier:no-days';
 $cdek_no_days_rate['id'] = 'cdek:courier:no-days';

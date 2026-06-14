@@ -240,6 +240,8 @@ cdek_order_assert( is_int( $pickup_payload['packages'][0]['length'] ) && is_int(
 cdek_order_assert( ! isset( $pickup_payload['packages'][0]['items'][0]['length'], $pickup_payload['packages'][0]['items'][0]['width'], $pickup_payload['packages'][0]['items'][0]['height'], $pickup_payload['packages'][0]['items'][0]['length_cm'], $pickup_payload['packages'][0]['items'][0]['width_cm'], $pickup_payload['packages'][0]['items'][0]['height_cm'] ), 'CDEK package items must not send item-level dimensions.' );
 $override_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4, array( 'shipment_point' => 'nsk70' ) ) );
 cdek_order_assert( 'NSK70' === $override_payload['shipment_point'], 'CDEK order creation must use temporary sender shipment_point from modal meta.' );
+$postcode_as_point_request = cdek_order_request( DeliveryType::PICKUP, 4, array( 'delivery_point' => '101000' ) );
+cdek_order_assert( array() !== $builder->validate( $postcode_as_point_request ), 'CDEK order creation must not accept postcode as delivery_point.' );
 
 $courier_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 3 ) );
 cdek_order_assert( isset( $courier_payload['shipment_point'], $courier_payload['to_location'] ) && ! isset( $courier_payload['delivery_point'], $courier_payload['from_location'] ), 'Warehouse-door courier must use shipment_point and to_location only.' );
@@ -557,6 +559,59 @@ cdek_order_assert( ! in_array( '137', $pickup_codes, true ) && ! in_array( '139'
 $location_context = is_array( $draft_request['meta']['pickup_location_context'] ?? null ) ? $draft_request['meta']['pickup_location_context'] : array();
 cdek_order_assert( CdekSettings::CARRIER_KEY === (string) ( $location_context['carrier_key'] ?? '' ) && 'cdek:pickup' === (string) ( $location_context['pickup_family'] ?? '' ), 'CDEK admin map context must use CDEK carrier and pickup family.' );
 cdek_order_assert( 'Кемерово' === (string) ( $location_context['city_name'] ?? '' ) && 'Новосибирск' !== (string) ( $location_context['city_name'] ?? '' ), 'CDEK admin map location context must come from recipient city, not sender city.' );
+$saved_pickup_order = new CdekOrderFakeOrder( 134 );
+$saved_pickup_order->meta = $draft_order->meta;
+$saved_pickup_order->meta['_wdc_pickup_point_code'] = 'MSK575';
+$saved_pickup_order->meta['_wdc_platform_pickup_code'] = 'MSK575';
+$saved_pickup_order->meta['_wdc_delivery_calculation_data']['pickup'] = array(
+	'carrier_key' => CdekSettings::CARRIER_KEY,
+	'service_key' => CdekSettings::SERVICE_KEY,
+	'pickup_family' => 'cdek:pickup',
+	'point_code' => 'MSK575',
+	'cdek_code' => 'MSK575',
+	'delivery_point' => 'MSK575',
+	'point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+	'point_postcode' => '101000',
+);
+$saved_pickup_draft = $drafts->draft_array( $saved_pickup_order );
+cdek_order_assert( 'MSK575' === (string) ( $saved_pickup_draft['request']['meta']['delivery_point'] ?? '' ) && 'MSK575' === (string) ( $saved_pickup_draft['request']['meta']['pickup_point_code'] ?? '' ), 'CDEK shipment draft must keep canonical saved pickup code for modal order creation.' );
+$saved_pickup_request = $drafts->create_request_from_admin_data(
+	$saved_pickup_order,
+	array(
+		'delivery_type' => DeliveryType::PICKUP,
+		'tariff_object' => '136',
+		'delivery_point' => '',
+		'pickup_point_code' => '',
+		'pickup_point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+		'pickup_point_postcode' => '101000',
+		'places' => array( array( 'weight_g' => 2000, 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ),
+	)
+);
+cdek_order_assert( 'MSK575' === (string) ( $saved_pickup_request->meta['delivery_point'] ?? '' ) && $saved_pickup_request->pickup_point instanceof PickupPointSelection && 'MSK575' === $saved_pickup_request->pickup_point->point_code, 'CDEK shipment admin request must fall back to canonical saved pickup code when modal sends only address.' );
+$address_only_order = new CdekOrderFakeOrder( 135 );
+$address_only_order->meta = $draft_order->meta;
+$address_only_order->meta['_wdc_delivery_calculation_data']['pickup'] = array(
+	'carrier_key' => CdekSettings::CARRIER_KEY,
+	'service_key' => CdekSettings::SERVICE_KEY,
+	'pickup_family' => 'cdek:pickup',
+	'point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+	'point_postcode' => '101000',
+);
+$address_only_draft = $drafts->draft_array( $address_only_order );
+cdek_order_assert( '' === (string) ( $address_only_draft['request']['meta']['delivery_point'] ?? '' ), 'CDEK shipment draft must not treat pickup address/postcode as delivery_point.' );
+$address_only_request = $drafts->create_request_from_admin_data(
+	$address_only_order,
+	array(
+		'delivery_type' => DeliveryType::PICKUP,
+		'tariff_object' => '136',
+		'delivery_point' => '101000',
+		'pickup_point_code' => '101000',
+		'pickup_point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+		'pickup_point_postcode' => '101000',
+		'places' => array( array( 'weight_g' => 2000, 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ),
+	)
+);
+cdek_order_assert( '' === (string) ( $address_only_request->meta['delivery_point'] ?? '' ) && array() !== $builder->validate( $address_only_request ), 'CDEK shipment admin request must reject postcode-only pickup code.' );
 $courier_order = new CdekOrderFakeOrder( 131 );
 $courier_order->meta['_wdc_platform_carrier_key'] = CdekSettings::CARRIER_KEY;
 $courier_order->meta['_wdc_platform_delivery_type'] = DeliveryType::COURIER;

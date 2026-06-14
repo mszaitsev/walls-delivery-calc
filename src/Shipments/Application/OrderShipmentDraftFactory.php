@@ -285,7 +285,7 @@ final class OrderShipmentDraftFactory {
 		$tariff_code = preg_replace( '/\D+/', '', (string) ( $calculation['selected_tariff_object'] ?? $this->meta_string( $order, '_wdc_platform_tariff_object' ) ) ) ?: '';
 		$tariff_row = $this->cdek_tariff_row( $tariff_code );
 		$tariff_title = $this->cdek_tariff_title( $tariff_row, $tariff_code, (string) ( $calculation['selected_tariff_title'] ?? $response_tariff['tariff_name'] ?? '' ) );
-		$pickup_code = (string) ( $pickup['cdek_code'] ?? $pickup['point_code'] ?? $this->meta_string( $order, '_wdc_pickup_point_code' ) );
+		$pickup_code = $this->cdek_pickup_code( $pickup, $this->meta_string( $order, '_wdc_platform_pickup_code' ) ?: $this->meta_string( $order, '_wdc_pickup_point_code' ) );
 		$pickup_row = $this->cdek_pickup_row( $pickup );
 		$location_context = $this->recipient_location_context( $order, $pickup_row );
 
@@ -611,8 +611,10 @@ final class OrderShipmentDraftFactory {
 			return array();
 		}
 
+		$point_code = $this->cdek_pickup_code( $pickup );
+
 		return array(
-			'point_code' => (string) ( $pickup['cdek_code'] ?? $pickup['point_code'] ?? '' ),
+			'point_code' => $point_code,
 			'postcode' => (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? '' ),
 			'region_name' => (string) ( $pickup['region_name'] ?? '' ),
 			'city_name' => (string) ( $pickup['city_name'] ?? '' ),
@@ -620,10 +622,44 @@ final class OrderShipmentDraftFactory {
 			'point_type' => (string) ( $pickup['point_type'] ?? $pickup['type'] ?? '' ),
 			'point_title' => (string) ( $pickup['point_title'] ?? $pickup['display_title'] ?? '' ),
 			'display_title' => (string) ( $pickup['display_title'] ?? '' ),
-			'cdek_code' => (string) ( $pickup['cdek_code'] ?? $pickup['point_code'] ?? '' ),
+			'cdek_code' => $point_code,
 			'latitude' => is_numeric( $pickup['lat'] ?? $pickup['latitude'] ?? null ) ? (float) ( $pickup['lat'] ?? $pickup['latitude'] ) : null,
 			'longitude' => is_numeric( $pickup['lng'] ?? $pickup['longitude'] ?? null ) ? (float) ( $pickup['lng'] ?? $pickup['longitude'] ) : null,
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $pickup
+	 */
+	private function cdek_pickup_code( array $pickup, string $fallback = '' ): string {
+		$code = $this->first_non_empty( $pickup['delivery_point'] ?? '', $pickup['point_code'] ?? '', $pickup['cdek_code'] ?? '', $fallback );
+		if ( '' === $code ) {
+			return '';
+		}
+		$postcode = preg_replace( '/\D+/', '', (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? $pickup['postal_code'] ?? '' ) ) ?: '';
+		$digits = preg_replace( '/\D+/', '', $code ) ?: '';
+		if ( '' !== $postcode && $digits === $postcode ) {
+			return '';
+		}
+		if ( preg_match( '/^\d{6}$/', $code ) ) {
+			return '';
+		}
+
+		return strtoupper( preg_replace( '/[^A-Z0-9_\-]/', '', strtoupper( $code ) ) ?? '' );
+	}
+
+	private function first_non_empty( mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			if ( is_array( $value ) || is_object( $value ) || null === $value ) {
+				continue;
+			}
+			$text = trim( (string) $value );
+			if ( '' !== $text ) {
+				return $text;
+			}
+		}
+
+		return '';
 	}
 
 	/**
@@ -633,8 +669,16 @@ final class OrderShipmentDraftFactory {
 	 */
 	private function cdek_pickup_row_from_admin_data( array $data, array $base_meta ): array {
 		$base_row = is_array( $base_meta['pickup_point_row'] ?? null ) ? $base_meta['pickup_point_row'] : array();
-		$point_code = sanitize_text_field( wp_unslash( $data['delivery_point'] ?? $data['pickup_point_code'] ?? $base_meta['delivery_point'] ?? $base_meta['pickup_point_code'] ?? '' ) );
 		$postcode = preg_replace( '/\D+/', '', (string) wp_unslash( $data['pickup_point_postcode'] ?? $base_meta['pickup_point_postcode'] ?? $base_row['postcode'] ?? '' ) ) ?: '';
+		$point_code = $this->cdek_pickup_code(
+			array(
+				'delivery_point' => wp_unslash( $data['delivery_point'] ?? '' ),
+				'point_code' => wp_unslash( $data['pickup_point_code'] ?? $base_meta['pickup_point_code'] ?? '' ),
+				'cdek_code' => wp_unslash( $data['cdek_code'] ?? $base_meta['cdek_code'] ?? '' ),
+				'postcode' => $postcode,
+			),
+			(string) ( $base_meta['delivery_point'] ?? '' )
+		);
 		$address = sanitize_text_field( wp_unslash( $data['pickup_point_address'] ?? $base_row['address'] ?? '' ) );
 		$city = sanitize_text_field( wp_unslash( $data['pickup_point_city'] ?? $base_row['city_name'] ?? '' ) );
 		$region = sanitize_text_field( wp_unslash( $data['pickup_point_region'] ?? $base_row['region_name'] ?? '' ) );
