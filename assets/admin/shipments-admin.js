@@ -1674,7 +1674,16 @@
           const snapshot = payload.data.normalized_address || {};
           if (snapshotInput) snapshotInput.value = JSON.stringify(snapshot);
           if (display) display.value = snapshot.display || '';
-          if (status) status.textContent = snapshot.success ? 'Адрес обработан.' : 'Адрес не подтвержден, создание отправления заблокировано.';
+          const cityCode = snapshot && snapshot.fields ? String(snapshot.fields.cdek_city_code || '') : '';
+          const cityCodeRow = form.querySelector('[data-wdc-cdek-city-code-row]');
+          const cityCodeValue = form.querySelector('[data-wdc-cdek-city-code]');
+          if (cityCodeValue) cityCodeValue.textContent = cityCode;
+          if (cityCodeRow) cityCodeRow.hidden = !cityCode;
+          if (status) {
+            status.textContent = snapshot.success
+              ? (cityCode ? '✅ Данные для СДЭК корректны' : 'Адрес обработан.')
+              : (snapshot.message || 'Адрес не подтвержден, создание отправления заблокировано.');
+          }
           updateCreateAvailability(form);
           requestPreview(form);
         })

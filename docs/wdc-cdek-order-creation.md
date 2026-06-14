@@ -1,6 +1,10 @@
 # WDC CDEK Order Creation
 
-Version: 0.49.2.
+Version: 0.50.0.
+
+0.50.0 update: CDEK courier shipment creation no longer reuses Russian Post address normalization. In the shipment preparation modal, courier CDEK scenarios normalize the recipient address through DaData and then resolve the recipient CDEK city code through the documented `GET /v2/location/cities` location lookup, preferably by DaData `geo_lat`/`geo_lon` and then by saved recipient locality coordinates. The modal keeps the result only in draft state until creation and shows `Нормализованный адрес СДЭК`, the visible CDEK city code and the success message `✅ Данные для СДЭК корректны`.
+
+For CDEK courier tariffs, `to_location` is built from prepared CDEK fields: positive `code`, normalized city name, DaData postal code and component-built delivery address such as `Ходынский б-р, д 13, кв 150`. Postcode is never used as city code, and creation is blocked with `Не удалось определить код города СДЭК для адреса получателя. Проверьте адрес и повторите обработку.` when location lookup cannot resolve a city code. Pickup CDEK tariffs still use `delivery_point`; Russian Post keeps its existing normalization path.
 
 0.49.2 update: shipment item rows now initialize product dimensions from WooCommerce product/variation data when catalog dimensions exist, with `0.1` used only as the empty-dimension fallback. Item price and item dimension inputs are text decimal fields so managers can type both `.` and `,`, while package place dimensions remain integer-only.
 

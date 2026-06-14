@@ -16,6 +16,7 @@ use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticApiClient;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\Tracking\RussianPostTrackingApiClient;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Address\Address;
@@ -27,6 +28,7 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Orders\Application\OrderDeliveryAddressNormalizationService;
 use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
@@ -34,6 +36,7 @@ use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\Cdek\CdekCreateRequestBuilder;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
+use WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService;
 use WallsShop\WDC\Shipments\Cdek\CdekShipmentAdapter;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
@@ -112,6 +115,8 @@ final class CdekOrderFakeHttp implements CdekHttpClientInterface {
 	public array $order_responses = array();
 	/** @var array<int,array<string,mixed>> */
 	public array $delete_responses = array();
+	/** @var array<int,array<string,mixed>> */
+	public array $city_responses = array();
 
 	public function request( string $method, string $url, array $args = array() ): CdekApiResponse {
 		$this->requests[] = array( 'method' => $method, 'url' => $url, 'args' => $args );
@@ -132,8 +137,44 @@ final class CdekOrderFakeHttp implements CdekHttpClientInterface {
 			);
 			return new CdekApiResponse( 202, json_encode( $response ) ?: '{}' );
 		}
+		if ( 'GET' === $method && str_contains( $url, '/v2/location/cities' ) ) {
+			$response = array() !== $this->city_responses ? array_shift( $this->city_responses ) : array( array( 'code' => 44, 'city' => 'Москва' ) );
+			return new CdekApiResponse( 200, json_encode( $response ) ?: '[]' );
+		}
 		$response = array_shift( $this->order_responses ) ?: array( 'entity' => array( 'uuid' => 'order-uuid-1', 'cdek_number' => '100500', 'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
 		return new CdekApiResponse( 200, json_encode( $response ) ?: '{}' );
+	}
+}
+
+final class CdekOrderFakeSuggestionClient implements AddressSuggestionClientInterface {
+	/** @var array<int,array<string,mixed>> */
+	public array $responses = array();
+	/** @var array<int,array{stage:string,query:string,context:array<string,string>}> */
+	public array $requests = array();
+
+	public function suggest( string $stage, string $query, array $context = array() ): array {
+		$this->requests[] = array( 'stage' => $stage, 'query' => $query, 'context' => $context );
+		return array_shift( $this->responses ) ?: array(
+			'success' => true,
+			'suggestions' => array(
+				array(
+					'value' => '125252, г Москва, Ходынский б-р, д 13, кв 150',
+					'unrestricted_value' => '125252, г Москва, Ходынский б-р, д 13, кв 150',
+					'data' => array(
+						'postal_code' => '125252',
+						'region_with_type' => 'г Москва',
+						'city_with_type' => 'г Москва',
+						'street_with_type' => 'Ходынский б-р',
+						'house' => '13',
+						'flat' => '150',
+						'fias_id' => 'fias-house',
+						'kladr_id' => 'kladr-house',
+						'geo_lat' => '55.790000',
+						'geo_lon' => '37.530000',
+					),
+				),
+			),
+		);
 	}
 }
 
@@ -203,7 +244,11 @@ function cdek_order_request( string $delivery_type, int $mode, array $overrides 
 			'delivery_mode' => $mode,
 			'shipment_point' => $overrides['shipment_point'] ?? '',
 			'delivery_point' => $overrides['delivery_point'] ?? ( DeliveryType::PICKUP === $delivery_type ? 'KEM7' : '' ),
-			'cdek_to_city_code' => 44,
+			'cdek_to_city_code' => $overrides['cdek_to_city_code'] ?? 44,
+			'cdek_city_code' => $overrides['cdek_city_code'] ?? null,
+			'cdek_city_name' => $overrides['cdek_city_name'] ?? '',
+			'cdek_postal_code' => $overrides['cdek_postal_code'] ?? '',
+			'cdek_delivery_address' => $overrides['cdek_delivery_address'] ?? '',
 			'cdek_item_rows' => $overrides['cdek_item_rows'] ?? array(
 				array( 'item_key' => '1', 'ordered_quantity' => 5, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-1', 'amount' => 5, 'cost' => $overrides['unit_cost'] ?? 1000, 'weight' => 100 ),
 			),
@@ -255,6 +300,58 @@ $courier_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 3
 cdek_order_assert( isset( $courier_payload['shipment_point'], $courier_payload['to_location'] ) && ! isset( $courier_payload['delivery_point'], $courier_payload['from_location'] ), 'Warehouse-door courier must use shipment_point and to_location only.' );
 $door_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 1 ) );
 cdek_order_assert( isset( $door_payload['from_location'], $door_payload['to_location'] ) && ! isset( $door_payload['shipment_point'], $door_payload['delivery_point'] ), 'Door-door courier must use from_location and to_location only.' );
+$normalized_courier_payload = $builder->build(
+	cdek_order_request(
+		DeliveryType::COURIER,
+		3,
+		array(
+			'cdek_to_city_code' => 0,
+			'cdek_city_code' => 44,
+			'cdek_city_name' => 'Москва',
+			'cdek_postal_code' => '125252',
+			'cdek_delivery_address' => 'Ходынский б-р, д 13, кв 150',
+		)
+	)
+);
+cdek_order_assert( array( 'code' => 44, 'city' => 'Москва', 'postal_code' => '125252', 'address' => 'Ходынский б-р, д 13, кв 150' ) === $normalized_courier_payload['to_location'], 'CDEK courier to_location must use prepared DaData/CDEK fields.' );
+$missing_cdek_city_errors = $builder->validate( cdek_order_request( DeliveryType::COURIER, 3, array( 'cdek_to_city_code' => 0 ) ) );
+cdek_order_assert( in_array( "Не удалось определить код города СДЭК для адреса получателя.\nПроверьте адрес и повторите обработку.", $missing_cdek_city_errors, true ), 'CDEK courier creation must be blocked when CDEK city code is missing.' );
+$postcode_city_code_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 3, array( 'cdek_to_city_code' => 0, 'cdek_city_code' => 44, 'cdek_postal_code' => '125252', 'cdek_delivery_address' => 'Ходынский б-р, д 13' ) ) );
+cdek_order_assert( 44 === (int) $postcode_city_code_payload['to_location']['code'] && 125252 !== (int) $postcode_city_code_payload['to_location']['code'], 'CDEK courier must not use postcode as city code.' );
+
+$suggestions = new CdekOrderFakeSuggestionClient();
+$location_http = new CdekOrderFakeHttp();
+$location_http->city_responses[] = array( array( 'code' => 44, 'city' => 'Москва' ) );
+$location_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $location_http ), $settings, $location_http );
+$cdek_address_service = new CdekRecipientAddressPreparationService( new OrderDeliveryAddressNormalizationService( null, $suggestions ), $location_client );
+$prepared_address = $cdek_address_service->prepare( new CdekOrderFakeOrder( 125 ), '125252, Москва, Ходынский б-р, д 13, кв 150', array( 'city_name' => 'Москва', 'postal_code' => '125252' ), CdekSettings::SERVICE_KEY );
+cdek_order_assert( ! empty( $prepared_address['success'] ) && 44 === (int) ( $prepared_address['fields']['cdek_city_code'] ?? 0 ) && 'Москва' === (string) ( $prepared_address['fields']['cdek_city_name'] ?? '' ) && '125252' === (string) ( $prepared_address['fields']['cdek_postal_code'] ?? '' ) && 'Ходынский б-р, д 13, кв 150' === (string) ( $prepared_address['fields']['cdek_delivery_address'] ?? '' ), 'CDEK courier address preparation must normalize DaData address and resolve CDEK city code.' );
+$location_urls = implode( "\n", array_map( static fn( array $request ): string => (string) $request['url'], $location_http->requests ) );
+cdek_order_assert( str_contains( $location_urls, '/v2/location/cities' ) && ( str_contains( $location_urls, 'latitude=55.79' ) || str_contains( $location_urls, 'latitude=55.790000' ) ), 'CDEK location lookup must use DaData coordinates when available.' );
+
+$fallback_suggestions = new CdekOrderFakeSuggestionClient();
+$fallback_suggestions->responses[] = array(
+	'success' => true,
+	'suggestions' => array(
+		array(
+			'value' => '125252, г Москва, Ходынский б-р, д 13, кв 150',
+			'unrestricted_value' => '125252, г Москва, Ходынский б-р, д 13, кв 150',
+			'data' => array( 'postal_code' => '125252', 'city_with_type' => 'г Москва', 'street_with_type' => 'Ходынский б-р', 'house' => '13', 'flat' => '150' ),
+		),
+	),
+);
+$fallback_http = new CdekOrderFakeHttp();
+$fallback_http->city_responses[] = array( array( 'code' => 44, 'city' => 'Москва' ) );
+$fallback_service = new CdekRecipientAddressPreparationService( new OrderDeliveryAddressNormalizationService( null, $fallback_suggestions ), new CdekApiClient( new CdekOAuthTokenService( $settings, $fallback_http ), $settings, $fallback_http ) );
+$fallback_prepared = $fallback_service->prepare( new CdekOrderFakeOrder( 126 ), '125252, Москва, Ходынский б-р, д 13, кв 150', array( 'city_name' => 'Москва', 'postal_code' => '125252', 'lat' => '55.75', 'lng' => '37.61' ), CdekSettings::SERVICE_KEY );
+$fallback_urls = implode( "\n", array_map( static fn( array $request ): string => (string) $request['url'], $fallback_http->requests ) );
+cdek_order_assert( ! empty( $fallback_prepared['success'] ) && str_contains( $fallback_urls, 'latitude=55.75' ), 'CDEK location lookup must fall back to recipient locality coordinates when DaData address has no coordinates.' );
+
+$not_found_http = new CdekOrderFakeHttp();
+$not_found_http->city_responses[] = array();
+$not_found_service = new CdekRecipientAddressPreparationService( new OrderDeliveryAddressNormalizationService( null, new CdekOrderFakeSuggestionClient() ), new CdekApiClient( new CdekOAuthTokenService( $settings, $not_found_http ), $settings, $not_found_http ) );
+$not_found_prepared = $not_found_service->prepare( new CdekOrderFakeOrder( 127 ), '125252, Москва, Ходынский б-р, д 13, кв 150', array( 'city_name' => 'Москва' ), CdekSettings::SERVICE_KEY );
+cdek_order_assert( empty( $not_found_prepared['success'] ) && str_contains( (string) ( $not_found_prepared['message'] ?? '' ), 'Не удалось определить код города СДЭК' ), 'CDEK courier address preparation must fail when CDEK city code is not found.' );
 
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'phone' => '' ) ) ), 'Missing phone must fail validation.' );
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'tariff_code' => '' ) ) ), 'Missing tariff_code must fail validation.' );

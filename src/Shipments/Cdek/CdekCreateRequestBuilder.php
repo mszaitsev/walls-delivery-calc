@@ -86,6 +86,9 @@ final class CdekCreateRequestBuilder {
 		if ( in_array( $mode, array( 1, 3 ), true ) && '' === trim( $request->recipient_address->raw_address ) ) {
 			$errors[] = 'Для CDEK courier нужен адрес доставки to_location.';
 		}
+		if ( in_array( $mode, array( 1, 3 ), true ) && $this->to_location_city_code( $request ) <= 0 ) {
+			$errors[] = "Не удалось определить код города СДЭК для адреса получателя.\nПроверьте адрес и повторите обработку.";
+		}
 		if ( array() === $request->places ) {
 			$errors[] = 'Добавьте хотя бы одно грузоместо.';
 		}
@@ -233,15 +236,23 @@ final class CdekCreateRequestBuilder {
 	private function to_location( ShipmentCreateRequest $request ): array {
 		$location = array_filter(
 			array(
-				'code' => is_numeric( $request->meta['cdek_to_city_code'] ?? null ) ? (int) $request->meta['cdek_to_city_code'] : null,
-				'city' => $request->recipient_address->city,
-				'postal_code' => preg_replace( '/\D+/', '', $request->recipient_address->postcode ) ?: '',
-				'address' => $request->recipient_address->raw_address,
+				'code' => $this->to_location_city_code( $request ),
+				'city' => (string) ( $request->meta['cdek_city_name'] ?? $request->recipient_address->city ),
+				'postal_code' => preg_replace( '/\D+/', '', (string) ( $request->meta['cdek_postal_code'] ?? $request->recipient_address->postcode ) ) ?: '',
+				'address' => (string) ( $request->meta['cdek_delivery_address'] ?? $request->recipient_address->raw_address ),
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value
 		);
 
 		return $location;
+	}
+
+	private function to_location_city_code( ShipmentCreateRequest $request ): int {
+		$code = is_numeric( $request->meta['cdek_city_code'] ?? null )
+			? (int) $request->meta['cdek_city_code']
+			: ( is_numeric( $request->meta['cdek_to_city_code'] ?? null ) ? (int) $request->meta['cdek_to_city_code'] : 0 );
+
+		return $code > 0 ? $code : 0;
 	}
 
 	/**

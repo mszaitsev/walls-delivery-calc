@@ -18,6 +18,7 @@ use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
+use WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -46,6 +47,7 @@ final class OrderShipmentsMetabox {
 		private ?RussianPostAddressNormalizer $address_normalizer = null,
 		private ?RussianPostPickupPointTypeSettings $pickup_point_type_settings = null,
 		private ?CdekDeliveryPointService $cdek_delivery_points = null,
+		private ?CdekRecipientAddressPreparationService $cdek_address_preparation = null,
 		private string $plugin_url = '',
 		private string $version = '1'
 	) {
@@ -249,8 +251,9 @@ final class OrderShipmentsMetabox {
 		$courier_original_address = (string) ( $meta['courier_original_address'] ?? '' );
 		$normalized_address = is_array( $meta['normalized_address'] ?? null ) ? $meta['normalized_address'] : array();
 		$normalized_display = (string) ( $normalized_address['display'] ?? '' );
+		$normalized_is_cdek = 'dadata+cdek_location' === (string) ( $normalized_address['source'] ?? '' );
 		$normalized_status = array() !== $normalized_address
-			? ( ! empty( $normalized_address['success'] ) ? 'Адрес обработан Почтой России.' : 'Адрес не подтвержден Почтой России, создание отправления заблокировано.' )
+			? ( ! empty( $normalized_address['success'] ) ? ( $normalized_is_cdek ? '✅ Данные для СДЭК корректны' : 'Адрес обработан Почтой России.' ) : ( $normalized_is_cdek ? (string) ( $normalized_address['message'] ?? 'Адрес не подтвержден СДЭК, создание отправления заблокировано.' ) : 'Адрес не подтвержден Почтой России, создание отправления заблокировано.' ) )
 			: 'Адрес нужно обработать перед созданием отправления.';
 		$normalized_json = wp_json_encode( $normalized_address, JSON_UNESCAPED_UNICODE ) ?: '';
 		$has_created = in_array( (string) ( $shipment['status'] ?? '' ), array( 'registration_pending', 'created', 'registered' ), true );
@@ -348,11 +351,21 @@ final class OrderShipmentsMetabox {
 									<?php endif; ?>
 								</div>
 								<div data-wdc-courier-section <?php echo DeliveryType::COURIER === $delivery_type ? '' : 'hidden'; ?>>
+									<input type="hidden" name="recipient_location_city" value="<?php echo esc_attr( (string) ( $pickup_context['city_name'] ?? $pickup_context['city_value'] ?? $city ) ); ?>">
+									<input type="hidden" name="recipient_location_region" value="<?php echo esc_attr( (string) ( $pickup_context['region_name'] ?? $pickup_context['state_value'] ?? $region ) ); ?>">
+									<input type="hidden" name="recipient_location_postcode" value="<?php echo esc_attr( (string) ( $pickup_context['postal_code'] ?? $pickup_context['postcode'] ?? $recipient_postcode ) ); ?>">
+									<input type="hidden" name="recipient_location_address" value="<?php echo esc_attr( (string) ( $pickup_context['address'] ?? $pickup_context['display_name'] ?? $recipient_address_context ) ); ?>">
+									<input type="hidden" name="recipient_location_fias_id" value="<?php echo esc_attr( (string) ( $pickup_context['fias_id'] ?? '' ) ); ?>">
+									<input type="hidden" name="recipient_location_gar_id" value="<?php echo esc_attr( (string) ( $pickup_context['gar_id'] ?? '' ) ); ?>">
+									<input type="hidden" name="recipient_location_id" value="<?php echo esc_attr( (string) ( $pickup_context['location_id'] ?? '' ) ); ?>">
+									<input type="hidden" name="recipient_location_lat" value="<?php echo esc_attr( (string) ( $pickup_context['lat'] ?? '' ) ); ?>">
+									<input type="hidden" name="recipient_location_lng" value="<?php echo esc_attr( (string) ( $pickup_context['lng'] ?? '' ) ); ?>">
 									<label><?php echo esc_html__( 'Оригинальный адрес покупателя', 'walls-delivery-calc' ); ?><textarea name="courier_original_address" rows="3" data-wdc-courier-original-address><?php echo esc_textarea( $courier_original_address ); ?></textarea></label>
 									<button type="button" class="button" data-wdc-normalize-address><?php echo esc_html__( 'Обработать адрес', 'walls-delivery-calc' ); ?></button>
 									<input type="hidden" name="normalized_address_json" value="<?php echo esc_attr( $normalized_json ); ?>" data-wdc-normalized-address-json>
 									<p class="description" data-wdc-normalized-status><?php echo esc_html( $normalized_status ); ?></p>
-									<label><?php echo esc_html__( 'Нормализованный адрес Почты России', 'walls-delivery-calc' ); ?><textarea rows="3" readonly data-wdc-normalized-address-display><?php echo esc_textarea( $normalized_display ); ?></textarea></label>
+									<label><span data-wdc-normalized-address-label><?php echo esc_html( $is_cdek ? __( 'Нормализованный адрес СДЭК', 'walls-delivery-calc' ) : __( 'Нормализованный адрес Почты России', 'walls-delivery-calc' ) ); ?></span><textarea rows="3" readonly data-wdc-normalized-address-display><?php echo esc_textarea( $normalized_display ); ?></textarea></label>
+									<p class="description" data-wdc-cdek-city-code-row <?php echo ( $is_cdek && ! empty( $normalized_address['fields']['cdek_city_code'] ) ) ? '' : 'hidden'; ?>><?php echo esc_html__( 'Код города СДЭК', 'walls-delivery-calc' ); ?>: <span data-wdc-cdek-city-code><?php echo esc_html( (string) ( $normalized_address['fields']['cdek_city_code'] ?? '' ) ); ?></span></p>
 								</div>
 							</section>
 							<section>
@@ -446,7 +459,12 @@ final class OrderShipmentsMetabox {
 		if ( ! is_object( $order ) ) {
 			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
 		}
-		$request = $this->drafts->create_request_from_admin_data( $order, $_POST );
+		$data = $_POST;
+		$prepared = $this->maybe_prepare_cdek_courier_address( $order, $data );
+		if ( ! empty( $prepared['error'] ) ) {
+			wp_send_json_error( array( 'message' => (string) $prepared['error'] ), 400 );
+		}
+		$request = $this->drafts->create_request_from_admin_data( $order, $data );
 		$preview = $this->creation->safe_preview( $request );
 		$result = $this->creation->create( $order, $request );
 		if ( ! $result->success ) {
@@ -473,7 +491,9 @@ final class OrderShipmentsMetabox {
 		if ( ! is_object( $order ) ) {
 			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
 		}
-		$request = $this->preview_request( $this->drafts->create_request_from_admin_data( $order, $_POST ) );
+		$data = $_POST;
+		$this->maybe_prepare_cdek_courier_address( $order, $data );
+		$request = $this->preview_request( $this->drafts->create_request_from_admin_data( $order, $data ) );
 		$preview = $this->creation->safe_preview( $request );
 
 		wp_send_json_success( array( 'preview' => $preview ) );
@@ -608,12 +628,21 @@ final class OrderShipmentsMetabox {
 		if ( ! is_object( $order ) ) {
 			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
 		}
+		$original_address = sanitize_text_field( wp_unslash( $_POST['courier_original_address'] ?? $_POST['original_address'] ?? '' ) );
+		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
+		$carrier_key = sanitize_key( wp_unslash( $_POST['carrier_key'] ?? '' ) );
+		$delivery_type = RussianPostDomesticSettings::normalize_delivery_type( sanitize_key( wp_unslash( $_POST['delivery_type'] ?? '' ) ) );
+		if ( CdekSettings::CARRIER_KEY === $carrier_key && DeliveryType::COURIER === $delivery_type ) {
+			if ( ! $this->cdek_address_preparation instanceof CdekRecipientAddressPreparationService ) {
+				wp_send_json_error( array( 'message' => __( 'Нормализация адреса СДЭК недоступна.', 'walls-delivery-calc' ) ), 500 );
+			}
+			$result = $this->cdek_address_preparation->prepare( $order, $original_address, $this->recipient_location_context_from_request( $order ), $service_key ?: CdekSettings::SERVICE_KEY );
+			wp_send_json_success( array( 'normalized_address' => $result ) );
+		}
 		if ( ! $this->address_normalizer instanceof RussianPostAddressNormalizer ) {
 			wp_send_json_error( array( 'message' => __( 'Нормализация адреса недоступна.', 'walls-delivery-calc' ) ), 500 );
 		}
 
-		$original_address = sanitize_text_field( wp_unslash( $_POST['courier_original_address'] ?? $_POST['original_address'] ?? '' ) );
-		$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 		$result = $this->address_normalizer->normalize( $order_id, $original_address );
 		$result['order_id'] = $order_id;
 		$result['service_key'] = $service_key;
@@ -624,6 +653,84 @@ final class OrderShipmentsMetabox {
 		}
 
 		wp_send_json_success( array( 'normalized_address' => $result ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 * @return array{error:string}
+	 */
+	private function maybe_prepare_cdek_courier_address( object $order, array &$data ): array {
+		$carrier_key = sanitize_key( wp_unslash( $data['carrier_key'] ?? '' ) );
+		$delivery_type = RussianPostDomesticSettings::normalize_delivery_type( sanitize_key( wp_unslash( $data['delivery_type'] ?? '' ) ) );
+		if ( CdekSettings::CARRIER_KEY !== $carrier_key || DeliveryType::COURIER !== $delivery_type ) {
+			return array( 'error' => '' );
+		}
+		$original_address = sanitize_text_field( wp_unslash( $data['courier_original_address'] ?? $data['original_address'] ?? '' ) );
+		$snapshot = $this->decoded_json_field( $data['normalized_address_json'] ?? '' );
+		$valid = ! empty( $snapshot['success'] )
+			&& (string) ( $snapshot['source'] ?? '' ) === 'dadata+cdek_location'
+			&& (string) ( $snapshot['original_hash'] ?? '' ) === hash( 'sha256', trim( $original_address ) )
+			&& (int) ( $snapshot['fields']['cdek_city_code'] ?? 0 ) > 0;
+		if ( $valid ) {
+			return array( 'error' => '' );
+		}
+		if ( ! $this->cdek_address_preparation instanceof CdekRecipientAddressPreparationService ) {
+			return array( 'error' => __( 'Нормализация адреса СДЭК недоступна.', 'walls-delivery-calc' ) );
+		}
+		$prepared = $this->cdek_address_preparation->prepare( $order, $original_address, $this->recipient_location_context_from_request( $order, $data ), CdekSettings::SERVICE_KEY );
+		$data['normalized_address_json'] = wp_json_encode( $prepared, JSON_UNESCAPED_UNICODE ) ?: '';
+		if ( empty( $prepared['success'] ) ) {
+			return array( 'error' => (string) ( $prepared['message'] ?? CdekRecipientAddressPreparationService::CITY_CODE_ERROR ) );
+		}
+
+		return array( 'error' => '' );
+	}
+
+	/**
+	 * @param mixed $value
+	 * @return array<string,mixed>
+	 */
+	private function decoded_json_field( mixed $value ): array {
+		$json = (string) wp_unslash( $value );
+		$decoded = '' !== trim( $json ) ? json_decode( $json, true ) : array();
+
+		return is_array( $decoded ) ? $decoded : array();
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 * @return array<string,mixed>
+	 */
+	private function recipient_location_context_from_request( object $order, array $data = array() ): array {
+		$city = sanitize_text_field( wp_unslash( $data['recipient_location_city'] ?? $_POST['recipient_location_city'] ?? '' ) );
+		$region = sanitize_text_field( wp_unslash( $data['recipient_location_region'] ?? $_POST['recipient_location_region'] ?? '' ) );
+		$postcode = sanitize_text_field( wp_unslash( $data['recipient_location_postcode'] ?? $_POST['recipient_location_postcode'] ?? '' ) );
+		$address = sanitize_text_field( wp_unslash( $data['recipient_location_address'] ?? $_POST['recipient_location_address'] ?? '' ) );
+		if ( '' === $city && method_exists( $order, 'get_shipping_city' ) ) {
+			$city = (string) $order->get_shipping_city();
+		}
+		if ( '' === $region && method_exists( $order, 'get_shipping_state' ) ) {
+			$region = (string) $order->get_shipping_state();
+		}
+		if ( '' === $postcode && method_exists( $order, 'get_shipping_postcode' ) ) {
+			$postcode = (string) $order->get_shipping_postcode();
+		}
+
+		return array(
+			'country_code' => 'RU',
+			'city_name' => $city,
+			'city_value' => $city,
+			'region_name' => $region,
+			'state_value' => $region,
+			'postal_code' => $postcode,
+			'postcode' => $postcode,
+			'display_name' => '' !== $address ? $address : trim( implode( ', ', array_filter( array( $postcode, $region, $city ) ) ) ),
+			'fias_id' => sanitize_text_field( wp_unslash( $data['recipient_location_fias_id'] ?? $_POST['recipient_location_fias_id'] ?? '' ) ),
+			'gar_id' => sanitize_text_field( wp_unslash( $data['recipient_location_gar_id'] ?? $_POST['recipient_location_gar_id'] ?? '' ) ),
+			'location_id' => sanitize_text_field( wp_unslash( $data['recipient_location_id'] ?? $_POST['recipient_location_id'] ?? '' ) ),
+			'lat' => sanitize_text_field( wp_unslash( $data['recipient_location_lat'] ?? $_POST['recipient_location_lat'] ?? '' ) ),
+			'lng' => sanitize_text_field( wp_unslash( $data['recipient_location_lng'] ?? $_POST['recipient_location_lng'] ?? '' ) ),
+		);
 	}
 
 	public function ajax_search_pickup_points(): void {
