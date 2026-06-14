@@ -131,7 +131,9 @@ final class ShipmentCreationService {
 			$shipment = array_merge( $shipment, $actual_cost );
 		}
 		$this->repository->save_for_carrier( $order, $request->carrier_key, $shipment );
-		$this->add_order_note( $order, $this->success_note( $request, $result, $raw ) );
+		if ( ! $is_cdek ) {
+			$this->add_order_note( $order, $this->success_note( $request, $result, $raw ) );
+		}
 
 		return $result;
 	}
@@ -206,15 +208,6 @@ final class ShipmentCreationService {
 	 * @param array<string,mixed> $raw
 	 */
 	private function success_note( ShipmentCreateRequest $request, ShipmentCreateResult $result, array $raw ): string {
-		if ( CdekSettings::CARRIER_KEY === $request->carrier_key ) {
-			return sprintf(
-				'Заявка на регистрацию отправления СДЭК принята. UUID: %s. Номер ИМ: %s. Мест: %d',
-				$result->external_id ?: '-',
-				(string) ( $request->meta['order_num'] ?? $request->order_id ),
-				count( $request->places )
-			);
-		}
-
 		return sprintf(
 			'Отправление Почты России создано. Barcode: %s. Мест: %d%s',
 			$result->tracking_number,

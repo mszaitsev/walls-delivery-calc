@@ -278,6 +278,7 @@ $result = $creation->create( $order, cdek_order_request( DeliveryType::PICKUP, 4
 cdek_order_assert( $result->success, 'CDEK POST /v2/orders must be accepted.' );
 $stored = $repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY );
 cdek_order_assert( 'registration_pending' === (string) $stored['status'] && 'order-uuid-1' === (string) $stored['external_id'], 'Accepted CDEK order must be stored as registration_pending with UUID.' );
+cdek_order_assert( array() === $order->notes, 'Accepted CDEK registration request must not add an order note before CREATED.' );
 $request_snapshot_json = json_encode( $stored['request_snapshot'], JSON_UNESCAPED_UNICODE ) ?: '';
 $response_snapshot_json = json_encode( $stored['response_snapshot'], JSON_UNESCAPED_UNICODE ) ?: '';
 cdek_order_assert( ! str_contains( $request_snapshot_json, 'Иван Иванов' ) && ! str_contains( $request_snapshot_json, '+79131234567' ) && ! str_contains( $request_snapshot_json, 'buyer@example.com' ), 'CDEK request snapshot must redact recipient PII.' );
@@ -298,6 +299,10 @@ cdek_order_assert( array() === $invalid_repository->find_by_carrier( $invalid_po
 $status = new CdekOrderStatusService( $repository, $client );
 $created = $status->update( $order );
 cdek_order_assert( $created['success'] && 'registered' === (string) $repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY )['status'], 'GET /v2/orders CREATED must register shipment.' );
+cdek_order_assert( array( 'Зарегистрировано отправление СДЭК 100500. Мест: 1.' ) === $order->notes, 'CDEK CREATED status update must add a single registered order note.' );
+$http->order_responses[] = array( 'entity' => array( 'uuid' => 'order-uuid-1', 'cdek_number' => '100500', 'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан', 'date_time' => '2026-06-13T05:48:44+0000' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
+$status->update( $order );
+cdek_order_assert( 1 === count( $order->notes ), 'Repeated CDEK CREATED status update must not duplicate the registered order note.' );
 
 $successful_without_status_order = new CdekOrderFakeOrder( 115 );
 $repository->save_for_carrier( $successful_without_status_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'successful-empty-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-115' ) );
@@ -500,6 +505,17 @@ $cancel_http->delete_responses[] = array( 'entity' => array( 'uuid' => 'created-
 $cancelled = $cancel_status->cancel_created_order( $cancel_order );
 $delete_count = count( array_filter( $cancel_http->requests, static fn ( array $request ): bool => 'DELETE' === $request['method'] && str_contains( $request['url'], '/v2/orders/created-uuid' ) ) );
 cdek_order_assert( $cancelled['success'] && 1 === $delete_count && array() === $cancel_repository->find_by_carrier( $cancel_order, CdekSettings::CARRIER_KEY ), 'CDEK cancel/delete must call API and remove local shipment on success.' );
+cdek_order_assert( array( 'Отменено отправление СДЭК 100502. Мест: 1.' ) === $cancel_order->notes, 'Successful CDEK cancel/delete must add a cancellation order note.' );
+
+$cancel_fail_http = new CdekOrderFakeHttp();
+$cancel_fail_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $cancel_fail_http ), $settings, $cancel_fail_http );
+$cancel_fail_repository = new OrderShipmentRepository();
+$cancel_fail_status = new CdekOrderStatusService( $cancel_fail_repository, $cancel_fail_client );
+$cancel_fail_order = new CdekOrderFakeOrder( 110 );
+$cancel_fail_repository->save_for_carrier( $cancel_fail_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'created-fail-uuid', 'cdek_number' => '100506', 'status' => 'registered', 'cdek_order_status_code' => 'CREATED' ) );
+$cancel_fail_http->delete_responses[] = array( 'entity' => array( 'uuid' => 'created-fail-uuid' ), 'requests' => array( array( 'request_uuid' => 'delete-fail', 'state' => 'INVALID', 'errors' => array( array( 'message' => 'delete failed' ) ) ) ) );
+$cancel_failed = $cancel_fail_status->cancel_created_order( $cancel_fail_order );
+cdek_order_assert( ! $cancel_failed['success'] && array() === $cancel_fail_order->notes && array() !== $cancel_fail_repository->find_by_carrier( $cancel_fail_order, CdekSettings::CARRIER_KEY ), 'Failed CDEK cancel/delete must not add a cancellation note or remove local shipment.' );
 
 $forbidden_cancel_http = new CdekOrderFakeHttp();
 $forbidden_cancel_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $forbidden_cancel_http ), $settings, $forbidden_cancel_http );
@@ -522,6 +538,7 @@ $remove_payload = $remove_status->status_payload( $remove_repository->find_by_ca
 $removed = $remove_status->remove_local_if_allowed( $remove_order );
 $remove_delete_count = count( array_filter( $remove_http->requests, static fn ( array $request ): bool => 'DELETE' === $request['method'] ) );
 cdek_order_assert( ! empty( $remove_payload['can_remove_from_order'] ) && $removed['success'] && 0 === $remove_delete_count && array() === $remove_repository->find_by_carrier( $remove_order, CdekSettings::CARRIER_KEY ), 'Allowed CDEK local remove must not call API and must remove local shipment.' );
+cdek_order_assert( array() === $remove_order->notes, 'CDEK local-only remove must not add a cancellation order note.' );
 
 foreach ( array( 'ACCEPTED', 'CREATED' ) as $protected_status ) {
 	$protected_repository = new OrderShipmentRepository();
@@ -752,6 +769,7 @@ cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "'
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'function senderPickupContext' ) && str_contains( $shipments_js, 'Выбор ПВЗ отправителя СДЭК' ) && str_contains( $shipments_js, 'updateSenderPickupDraft' ), 'CDEK shipment modal must support temporary sender pickup point selection.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'const maxAttempts = 14' ) && str_contains( $shipments_js, 'const interval = 5000' ) && ! str_contains( $shipments_js, '15000' ) && ! str_contains( $shipments_js, '10 минут' ), 'CDEK auto polling must run every 5 seconds up to 14 attempts and avoid old 10-minute text.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'setCdekPollingIndicator' ) && str_contains( $modal_html, 'data-wdc-cdek-polling-indicator' ), 'CDEK auto polling must expose and toggle a visible registration-check indicator.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "box.querySelector('[data-wdc-shipment-status-message]')" ) && str_contains( $shipments_js, "message.textContent = ''" ) && str_contains( $shipments_js, "message.dataset.status = ''" ) && str_contains( $shipments_js, 'setCdekPollingIndicator(box, false)' ), 'Shipment UI reset after CDEK cancel must clear persistent status message and hide polling indicator.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'hint.hidden = places.length !== 1' ), 'Shipment modal weight hint must be hidden when there is more than one place.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'data-wdc-remove-shipment-split' ) && str_contains( $shipments_js, 'restoreOriginalBaseRow' ) && str_contains( $shipments_js, 'data-wdc-original-item' ) && str_contains( $shipments_js, 'rebalanceCdekGroup' ) && ! str_contains( $shipments_js, 'Date.now()' ) && ! str_contains( $shipments_js, 'data-wdc-cdek-minus' ), 'Shipment split UI must use stable row keys, delete split rows, restore original base rows after place removal, and avoid +/- controls.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "clone.setAttribute('data-wdc-split-row', '1')" ) && str_contains( $shipments_js, "clone.removeAttribute('data-wdc-base-row')" ) && str_contains( $shipments_js, "removeAttribute('data-wdc-shipment-item-split')" ) && str_contains( $shipments_js, "removeAttribute('data-wdc-cdek-split')" ) && str_contains( $shipments_js, "data-wdc-remove-shipment-split data-wdc-remove-cdek-split" ) && str_contains( $shipments_js, '❌' ), 'Shipment split child row must remove split action hooks and render the delete action.' );

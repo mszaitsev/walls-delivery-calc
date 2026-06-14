@@ -864,6 +864,12 @@
     if (updatedRow) updatedRow.hidden = true;
     const plannedRow = box.querySelector('[data-wdc-planned-delivery-row]');
     if (plannedRow) plannedRow.hidden = true;
+    const message = box.querySelector('[data-wdc-shipment-status-message]');
+    if (message) {
+      message.textContent = '';
+      message.dataset.status = '';
+    }
+    setCdekPollingIndicator(box, false);
     updateShipmentButtons(box, { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false });
     const manualForm = box.querySelector('[data-wdc-manual-tracking-form]');
     if (manualForm) manualForm.hidden = true;

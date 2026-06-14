@@ -65,6 +65,7 @@ final class CdekOrderStatusService {
 				'tracking_checked_at' => $now,
 			)
 		);
+		$updated = $this->maybe_add_created_note( $order, $updated, $status_code );
 		$this->repository->save_for_carrier( $order, CdekSettings::CARRIER_KEY, $updated );
 		$this->log( 'info', 'CDEK order status update result.', array( 'status' => $status, 'request_state' => $request_state, 'order_status' => $status_code ) );
 
@@ -139,6 +140,7 @@ final class CdekOrderStatusService {
 			return array( 'success' => false, 'message' => $this->errors_message( $request_row ) ?: 'СДЭК не удалил заказ.' );
 		}
 
+		$this->add_cancelled_note( $order, $shipment );
 		$this->repository->delete_for_carrier( $order, CdekSettings::CARRIER_KEY );
 		$this->log( 'info', 'CDEK order delete accepted.', array( 'entity_uuid' => $uuid, 'request_uuid' => (string) ( $request_row['request_uuid'] ?? '' ), 'request_state' => (string) ( $request_row['state'] ?? '' ) ) );
 
@@ -262,6 +264,78 @@ final class CdekOrderStatusService {
 			'removed' => 'Заказ СДЭК удален.',
 			default => 'Статус СДЭК обновлен.',
 		};
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 * @return array<string,mixed>
+	 */
+	private function maybe_add_created_note( object $order, array $shipment, string $order_status_code ): array {
+		if ( 'CREATED' !== strtoupper( trim( $order_status_code ) ) ) {
+			return $shipment;
+		}
+		if ( ! empty( $shipment['cdek_created_note_added'] ) ) {
+			return $shipment;
+		}
+
+		$this->add_order_note(
+			$order,
+			sprintf(
+				'Зарегистрировано отправление СДЭК %s. Мест: %d.',
+				$this->shipment_barcode( $shipment ),
+				$this->places_count( $shipment )
+			)
+		);
+		$shipment['cdek_created_note_added'] = true;
+
+		return $shipment;
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 */
+	private function add_cancelled_note( object $order, array $shipment ): void {
+		$this->add_order_note(
+			$order,
+			sprintf(
+				'Отменено отправление СДЭК %s. Мест: %d.',
+				$this->shipment_barcode( $shipment ),
+				$this->places_count( $shipment )
+			)
+		);
+	}
+
+	private function add_order_note( object $order, string $message ): void {
+		if ( method_exists( $order, 'add_order_note' ) ) {
+			$order->add_order_note( $message );
+		}
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 */
+	private function shipment_barcode( array $shipment ): string {
+		$barcode = trim( (string) ( $shipment['cdek_number'] ?? $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
+
+		return '' !== $barcode ? $barcode : '-';
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 */
+	private function places_count( array $shipment ): int {
+		$places = is_array( $shipment['places'] ?? null ) ? $shipment['places'] : array();
+		if ( array() !== $places ) {
+			return max( 1, count( $places ) );
+		}
+		$request_snapshot = is_array( $shipment['request_snapshot'] ?? null ) ? $shipment['request_snapshot'] : array();
+		$request_body = is_array( $request_snapshot['body'] ?? null ) ? $request_snapshot['body'] : $request_snapshot;
+		$packages = is_array( $request_body['packages'] ?? null ) ? $request_body['packages'] : array();
+		if ( array() !== $packages ) {
+			return max( 1, count( $packages ) );
+		}
+
+		return 1;
 	}
 
 	/**
