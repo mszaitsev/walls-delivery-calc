@@ -910,6 +910,7 @@ $cdek_admin_rate = array(
 			'packaging_weight_g' => 300,
 			'dimensions_cm' => array( 'length' => 20, 'width' => 15, 'height' => 10 ),
 		),
+		'location' => array( 'cdek_to_city_code' => 44, 'cdek_to_city_name' => 'Москва' ),
 		'request_payload_sanitized' => array( 'from_location' => array( 'code' => 270 ), 'to_location' => array( 'code' => 44 ) ),
 		'response_tariff_sanitized' => array( 'tariff_code' => 137, 'tariff_name' => 'Посылка склад-дверь' ),
 	),
@@ -935,6 +936,7 @@ foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_
 $cdek_admin_calc = $cdek_admin_order->meta['_wdc_delivery_calculation_data'] ?? array();
 recalc_smoke_assert( isset( $cdek_admin_order->meta['_wdc_platform_rate_meta'] ), 'CDEK admin save must keep hidden platform rate meta.' );
 recalc_smoke_assert( 520.0 === (float) ( $cdek_admin_calc['api']['api_base_price_rub'] ?? 0 ) && 650.0 === (float) ( $cdek_admin_calc['result']['final_price_rub'] ?? 0 ), 'CDEK admin calculation data must preserve API base and final prices.' );
+recalc_smoke_assert( 44 === (int) ( $cdek_admin_calc['api']['cdek_to_city_code'] ?? 0 ), 'CDEK admin calculation data must sync rate_meta.location.cdek_to_city_code into api data.' );
 recalc_smoke_assert( 900 === (int) ( $cdek_admin_calc['package']['products_weight_g'] ?? 0 ) && 300 === (int) ( $cdek_admin_calc['package']['packaging_weight_g'] ?? 0 ) && 1200 === (int) ( $cdek_admin_calc['package']['final_weight_g'] ?? 0 ), 'CDEK admin calculation data must preserve package weights.' );
 recalc_smoke_assert( array( 'cdek-rule' ) === ( $cdek_admin_calc['rules']['applied_rules'] ?? null ), 'CDEK admin calculation data must preserve rules data.' );
 

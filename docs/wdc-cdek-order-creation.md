@@ -1,6 +1,10 @@
 # WDC CDEK Order Creation
 
-Version: 0.50.0.
+Version: 0.50.1.
+
+0.50.1 update: CDEK courier address preparation still uses DaData to verify the recipient address and build the door-delivery address fields, but the CDEK city code now reuses already known calculation data first: prepared `normalized_address.fields.cdek_city_code`, `_wdc_delivery_calculation_data.api.cdek_to_city_code`, `_wdc_platform_rate_meta.location.cdek_to_city_code`, and saved `request_payload_sanitized.to_location.code`. `GET /v2/location/cities` is only a fallback through the shared `CdekLocationResolver`, so admin recalculation and shipment creation no longer lose a known city code or produce `to_location.code = 0`.
+
+For CDEK courier, the shipment modal calls the DaData suggestions stack directly instead of the old checkout external normalizer path. If DaData suggestions are not configured, the modal shows `Подсказки DaData не настроены. Невозможно проверить адрес СДЭК.`; the Russian Post message `Внешний нормализатор не настроен.` is no longer used for CDEK courier preparation.
 
 0.50.0 update: CDEK courier shipment creation no longer reuses Russian Post address normalization. In the shipment preparation modal, courier CDEK scenarios normalize the recipient address through DaData and then resolve the recipient CDEK city code through the documented `GET /v2/location/cities` location lookup, preferably by DaData `geo_lat`/`geo_lon` and then by saved recipient locality coordinates. The modal keeps the result only in draft state until creation and shows `Нормализованный адрес СДЭК`, the visible CDEK city code and the success message `✅ Данные для СДЭК корректны`.
 

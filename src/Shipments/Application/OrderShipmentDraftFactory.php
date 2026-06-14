@@ -280,8 +280,10 @@ final class OrderShipmentDraftFactory {
 		);
 		$pickup = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
 		$api = is_array( $calculation['api'] ?? null ) ? $calculation['api'] : array();
+		$rate_meta = $this->rate_meta_data( $order );
 		$response_tariff = is_array( $api['response_tariff_sanitized'] ?? null ) ? $api['response_tariff_sanitized'] : array();
 		$delivery_mode = $this->cdek_delivery_mode_from_calculation( $delivery_type, $calculation, $api, $response_tariff );
+		$cdek_to_city_code = $this->cdek_city_code_from_saved_data( $calculation, $rate_meta );
 		$tariff_code = preg_replace( '/\D+/', '', (string) ( $calculation['selected_tariff_object'] ?? $this->meta_string( $order, '_wdc_platform_tariff_object' ) ) ) ?: '';
 		$tariff_row = $this->cdek_tariff_row( $tariff_code );
 		$tariff_title = $this->cdek_tariff_title( $tariff_row, $tariff_code, (string) ( $calculation['selected_tariff_title'] ?? $response_tariff['tariff_name'] ?? '' ) );
@@ -316,7 +318,7 @@ final class OrderShipmentDraftFactory {
 				'delivery_mode' => $delivery_mode,
 				'cdek_delivery_mode' => $delivery_mode,
 				'place_weight_hint_g' => $this->default_weight_g( $order, $items ),
-				'cdek_to_city_code' => (int) ( $api['cdek_to_city_code'] ?? 0 ),
+				'cdek_to_city_code' => $cdek_to_city_code,
 				'shipment_point' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->shipment_point() : '',
 				'shipment_point_address' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->shipment_point_address() : '',
 				'delivery_point' => $pickup_code,
@@ -329,6 +331,7 @@ final class OrderShipmentDraftFactory {
 				'courier_original_address' => $this->shipping_address( $order ),
 				'order_num' => $this->order_number( $order ),
 				'calculation_data' => $calculation,
+				'rate_meta' => $rate_meta,
 			)
 		);
 	}
@@ -395,7 +398,7 @@ final class OrderShipmentDraftFactory {
 					'normalization_required' => DeliveryType::COURIER === $delivery_type,
 					'normalization_valid' => DeliveryType::COURIER === $delivery_type && ! empty( $normalized_address['success'] ) && (int) ( $normalized_address['fields']['cdek_city_code'] ?? 0 ) > 0,
 					'normalization_attempted' => DeliveryType::COURIER === $delivery_type && array() !== $normalized_address,
-					'cdek_city_code' => (int) ( $normalized_address['fields']['cdek_city_code'] ?? $base->meta['cdek_city_code'] ?? 0 ),
+					'cdek_city_code' => (int) ( $normalized_address['fields']['cdek_city_code'] ?? $base->meta['cdek_city_code'] ?? $base->meta['cdek_to_city_code'] ?? 0 ),
 					'cdek_city_name' => (string) ( $normalized_address['fields']['cdek_city_name'] ?? $base->meta['cdek_city_name'] ?? '' ),
 					'cdek_postal_code' => (string) ( $normalized_address['fields']['cdek_postal_code'] ?? $base->meta['cdek_postal_code'] ?? '' ),
 					'cdek_delivery_address' => (string) ( $normalized_address['fields']['cdek_delivery_address'] ?? $base->meta['cdek_delivery_address'] ?? '' ),
@@ -1137,6 +1140,43 @@ final class OrderShipmentDraftFactory {
 		}
 
 		return is_array( $value ) ? $value : array();
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function rate_meta_data( object $order ): array {
+		if ( ! method_exists( $order, 'get_meta' ) ) {
+			return array();
+		}
+		$value = $order->get_meta( '_wdc_platform_rate_meta', true );
+		if ( is_string( $value ) ) {
+			$decoded = json_decode( $value, true );
+			return is_array( $decoded ) ? $decoded : array();
+		}
+
+		return is_array( $value ) ? $value : array();
+	}
+
+	/**
+	 * @param array<string,mixed> $calculation
+	 * @param array<string,mixed> $rate_meta
+	 */
+	private function cdek_city_code_from_saved_data( array $calculation, array $rate_meta ): int {
+		foreach ( array(
+			$calculation['api']['cdek_to_city_code'] ?? null,
+			$rate_meta['api']['cdek_to_city_code'] ?? null,
+			$rate_meta['location']['cdek_to_city_code'] ?? null,
+			$calculation['api']['request_payload_sanitized']['to_location']['code'] ?? null,
+			$rate_meta['request_payload_sanitized']['to_location']['code'] ?? null,
+			$rate_meta['api']['request_payload_sanitized']['to_location']['code'] ?? null,
+		) as $value ) {
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (int) $value;
+			}
+		}
+
+		return 0;
 	}
 
 	private function from_postcode( string $service_key ): string {

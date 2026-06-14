@@ -537,8 +537,32 @@ final class OrderDeliveryReplacementService {
 			'carrier_country_id' => (string) ( $country['carrier_country_id'] ?? '' ),
 			'country_name' => (string) ( $country['country_name'] ?? '' ),
 		);
+		$cdek_city_code = $this->cdek_city_code_from_rate_meta( $rate_meta );
+		if ( $cdek_city_code > 0 ) {
+			$data['cdek_to_city_code'] = $cdek_city_code;
+		}
 
 		return $this->drop_null_values( $data );
+	}
+
+	/**
+	 * @param array<string,mixed> $rate_meta
+	 */
+	private function cdek_city_code_from_rate_meta( array $rate_meta ): int {
+		$location = is_array( $rate_meta['location'] ?? null ) ? $rate_meta['location'] : array();
+		$api = is_array( $rate_meta['api'] ?? null ) ? $rate_meta['api'] : array();
+		$payload = is_array( $rate_meta['request_payload_sanitized'] ?? null ) ? $rate_meta['request_payload_sanitized'] : ( is_array( $api['request_payload_sanitized'] ?? null ) ? $api['request_payload_sanitized'] : array() );
+		foreach ( array(
+			$api['cdek_to_city_code'] ?? null,
+			$location['cdek_to_city_code'] ?? null,
+			$payload['to_location']['code'] ?? null,
+		) as $value ) {
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (int) $value;
+			}
+		}
+
+		return 0;
 	}
 
 	/**

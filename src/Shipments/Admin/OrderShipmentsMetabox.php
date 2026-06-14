@@ -716,8 +716,16 @@ final class OrderShipmentsMetabox {
 			$postcode = (string) $order->get_shipping_postcode();
 		}
 
+		$calculation = $this->order_array_meta( $order, '_wdc_delivery_calculation_data' );
+		$rate_meta = $this->order_array_meta( $order, '_wdc_platform_rate_meta' );
+		$cdek_city_code = $this->cdek_city_code_from_saved_data( $calculation, $rate_meta );
+
 		return array(
 			'country_code' => 'RU',
+			'cdek_city_code' => $cdek_city_code > 0 ? $cdek_city_code : '',
+			'cdek_to_city_code' => $cdek_city_code > 0 ? $cdek_city_code : '',
+			'delivery_calculation_data' => $calculation,
+			'rate_meta' => $rate_meta,
 			'city_name' => $city,
 			'city_value' => $city,
 			'region_name' => $region,
@@ -731,6 +739,43 @@ final class OrderShipmentsMetabox {
 			'lat' => sanitize_text_field( wp_unslash( $data['recipient_location_lat'] ?? $_POST['recipient_location_lat'] ?? '' ) ),
 			'lng' => sanitize_text_field( wp_unslash( $data['recipient_location_lng'] ?? $_POST['recipient_location_lng'] ?? '' ) ),
 		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function order_array_meta( object $order, string $key ): array {
+		if ( ! method_exists( $order, 'get_meta' ) ) {
+			return array();
+		}
+		$value = $order->get_meta( $key, true );
+		if ( is_string( $value ) ) {
+			$decoded = json_decode( $value, true );
+			return is_array( $decoded ) ? $decoded : array();
+		}
+
+		return is_array( $value ) ? $value : array();
+	}
+
+	/**
+	 * @param array<string,mixed> $calculation
+	 * @param array<string,mixed> $rate_meta
+	 */
+	private function cdek_city_code_from_saved_data( array $calculation, array $rate_meta ): int {
+		foreach ( array(
+			$calculation['api']['cdek_to_city_code'] ?? null,
+			$rate_meta['api']['cdek_to_city_code'] ?? null,
+			$rate_meta['location']['cdek_to_city_code'] ?? null,
+			$calculation['api']['request_payload_sanitized']['to_location']['code'] ?? null,
+			$rate_meta['request_payload_sanitized']['to_location']['code'] ?? null,
+			$rate_meta['api']['request_payload_sanitized']['to_location']['code'] ?? null,
+		) as $value ) {
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (int) $value;
+			}
+		}
+
+		return 0;
 	}
 
 	public function ajax_search_pickup_points(): void {
