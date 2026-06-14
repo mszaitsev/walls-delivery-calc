@@ -770,15 +770,22 @@ final class OrderShipmentDraftFactory {
 				'name' => sanitize_text_field( wp_unslash( $row['name'] ?? 'Товар' ) ),
 				'ware_key' => substr( sanitize_text_field( wp_unslash( $row['ware_key'] ?? $item_key ) ), 0, 20 ),
 				'amount' => max( 1, (int) ( $row['amount'] ?? 1 ) ),
-				'cost' => max( 0, (float) str_replace( ',', '.', (string) wp_unslash( $row['cost'] ?? '0' ) ) ),
+				'cost' => $this->decimal_from_admin_row( $row, 'cost' ),
 				'weight' => max( 0, (int) ( $row['weight'] ?? 0 ) ),
-				'length_cm' => max( 0, (float) str_replace( ',', '.', (string) wp_unslash( $row['length_cm'] ?? '0' ) ) ),
-				'width_cm' => max( 0, (float) str_replace( ',', '.', (string) wp_unslash( $row['width_cm'] ?? '0' ) ) ),
-				'height_cm' => max( 0, (float) str_replace( ',', '.', (string) wp_unslash( $row['height_cm'] ?? '0' ) ) ),
+				'length_cm' => $this->decimal_from_admin_row( $row, 'length_cm' ),
+				'width_cm' => $this->decimal_from_admin_row( $row, 'width_cm' ),
+				'height_cm' => $this->decimal_from_admin_row( $row, 'height_cm' ),
 			);
 		}
 
 		return $rows;
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 */
+	private function decimal_from_admin_row( array $row, string $key ): float {
+		return max( 0.0, (float) str_replace( ',', '.', (string) wp_unslash( $row[ $key ] ?? '0' ) ) );
 	}
 
 	private function original_address_hash( string $original_address ): string {

@@ -1,6 +1,10 @@
 # WDC CDEK Order Creation
 
-Version: 0.49.0.
+Version: 0.49.1.
+
+0.49.1 update: the `Грузоместа` tab is carrier-neutral in the shipment modal instead of being CDEK-only. Russian Post and future carriers receive the same package summary, item rows, split controls and manual item entry UI, while CDEK continues to be the only carrier that currently maps those rows into `/v2/orders` items.
+
+Package place weight/dimensions remain integer-only because carrier package payloads use whole values. Item dimensions inside the `Грузоместа` table may be fractional and are kept in modal state for package planning/future validation, but CDEK `packages.items[]` still sends only documented item fields (`name`, `ware_key`, `payment`, `cost`, `weight`, `amount`). Decimal item values accept both dot and comma separators, and forced merge after deleting a package restores base rows from the original order item data.
 
 0.49.0 update: CDEK settings now include `cdek_shipment_point_address`, shown under `Код ПВЗ отправления СДЭК` on the service `Расчет` tab. The shipment preparation modal shows sender pickup point as code plus address and lets a manager temporarily choose another CDEK sender pickup point from the admin map; that choice updates only modal draft data and is sent as `shipment_point` in `POST /v2/orders`.
 
@@ -86,7 +90,7 @@ The existing `Отправления` metabox is reused. The modal now has tabs:
 - `Основное` for the carrier-specific shipment summary and main controls;
 - `Грузоместа` for universal package/item assignment data.
 
-The `Грузоместа` tab is shown for all carriers so other services can adopt it later. In 0.48.0 it actively drives CDEK `packages[]`; Russian Post flow is kept backward-compatible.
+The `Грузоместа` tab is shown for all carriers. In 0.49.1 it renders the same table/summary/split/manual-item UI for Russian Post, CDEK and future carriers; CDEK actively uses the rows for `packages[]`, while Russian Post remains backward-compatible if its API flow does not consume item-level rows yet.
 
 Repeated CDEK creation is blocked when the order already has a CDEK shipment in `registration_pending`, `created` or `registered`. The UI shows the existing UUID/number/status instead of accidentally creating another CDEK order with the same IM number.
 
