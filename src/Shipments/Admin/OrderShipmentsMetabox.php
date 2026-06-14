@@ -33,6 +33,7 @@ final class OrderShipmentsMetabox {
 	private const AJAX_ATTACH_TRACKING = 'wdc_attach_shipment_tracking_number';
 	private const AJAX_NORMALIZE_ADDRESS = 'wdc_normalize_shipment_address';
 	private const AJAX_SEARCH_PICKUP_POINTS = 'wdc_search_russian_post_pickup_points';
+	private const AJAX_SEARCH_PRODUCTS = 'wdc_search_products_for_shipment_item';
 
 	public function __construct(
 		private OrderShipmentRepository $repository,
@@ -61,6 +62,7 @@ final class OrderShipmentsMetabox {
 		add_action( 'wp_ajax_' . self::AJAX_ATTACH_TRACKING, array( $this, 'ajax_attach_tracking' ) );
 		add_action( 'wp_ajax_' . self::AJAX_NORMALIZE_ADDRESS, array( $this, 'ajax_normalize_address' ) );
 		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PICKUP_POINTS, array( $this, 'ajax_search_pickup_points' ) );
+		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PRODUCTS, array( $this, 'ajax_search_products' ) );
 	}
 
 	public function add_meta_box(): void {
@@ -111,6 +113,7 @@ final class OrderShipmentsMetabox {
 				'attachTrackingAction' => self::AJAX_ATTACH_TRACKING,
 				'normalizeAddressAction' => self::AJAX_NORMALIZE_ADDRESS,
 				'searchPickupPointsAction' => self::AJAX_SEARCH_PICKUP_POINTS,
+				'searchProductsAction' => self::AJAX_SEARCH_PRODUCTS,
 				'mapProvider' => $provider,
 				'yandexApiKeyPresent' => '' !== $this->yandex_api_key(),
 				'yandexApiKey' => 'yandex' === $provider ? $this->yandex_api_key() : '',
@@ -233,7 +236,10 @@ final class OrderShipmentsMetabox {
 		$has_selected_service_tariffs = array() !== $selected_service_tariffs;
 		$tariff_message_hidden_attr = $has_selected_service_tariffs ? ' hidden' : '';
 		$calculated_weight_g = max( 0, (int) ( $place['weight_g'] ?? 0 ) );
-		$weight_label = $calculated_weight_g > 0 ? sprintf( __( 'Вес, г (%d)', 'walls-delivery-calc' ), $calculated_weight_g ) : __( 'Вес, г', 'walls-delivery-calc' );
+		$weight_hint = $calculated_weight_g > 0 ? sprintf( '(%d)', $calculated_weight_g ) : '';
+		$shipment_point = (string) ( $meta['shipment_point'] ?? '' );
+		$shipment_point_address = (string) ( $meta['shipment_point_address'] ?? '' );
+		$shipment_point_display = implode( ', ', array_filter( array( $shipment_point, $shipment_point_address ), static fn( string $value ): bool => '' !== trim( $value ) ) );
 		$default_declared_value_rub = max( 0, (int) ( $meta['default_declared_value_rub'] ?? 0 ) );
 		$default_declared_value_attr = $default_declared_value_rub > 0 ? (string) $default_declared_value_rub : '';
 		$declared_value_initial = $selected_tariff_has_declared_value ? $default_declared_value_attr : '';
@@ -371,7 +377,13 @@ final class OrderShipmentsMetabox {
 								<p class="description" data-wdc-tariff-message<?php echo $tariff_message_hidden_attr; ?>><?php echo esc_html__( 'Для выбранной службы доставки нет включенных тарифов. Включите тариф на странице настроек службы доставки.', 'walls-delivery-calc' ); ?></p>
 								<?php if ( $is_cdek ) : ?>
 									<p><strong><?php echo esc_html__( 'В заказе тариф', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( '' !== $selected_tariff_title ? $selected_tariff_title : '-' ); ?></p>
-									<p><strong><?php echo esc_html__( 'ПВЗ отправителя', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $meta['shipment_point'] ?? '-' ) ); ?></p>
+									<input type="hidden" name="shipment_point" value="<?php echo esc_attr( $shipment_point ); ?>" data-wdc-sender-shipment-point>
+									<input type="hidden" name="sender_shipment_point" value="<?php echo esc_attr( $shipment_point ); ?>">
+									<input type="hidden" name="shipment_point_address" value="<?php echo esc_attr( $shipment_point_address ); ?>" data-wdc-sender-shipment-point-address>
+									<input type="hidden" name="sender_shipment_point_address" value="<?php echo esc_attr( $shipment_point_address ); ?>">
+									<input type="hidden" name="sender_pickup_city" value="Новосибирск" data-wdc-sender-pickup-city>
+									<p><strong><?php echo esc_html__( 'ПВЗ отправителя', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-sender-shipment-point-display><?php echo esc_html( '' !== $shipment_point_display ? $shipment_point_display : '-' ); ?></span></p>
+									<p><button type="button" class="button" data-wdc-open-sender-pickup-picker><?php echo esc_html__( 'Выбрать другой ПВЗ отправителя', 'walls-delivery-calc' ); ?></button></p>
 								<?php else : ?>
 								<label><?php echo esc_html__( 'Индекс места приема', 'walls-delivery-calc' ); ?><select name="postoffice_code">
 									<?php foreach ( $postoffice_codes as $code ) : ?>
@@ -386,7 +398,7 @@ final class OrderShipmentsMetabox {
 							<div data-wdc-places>
 								<div class="wdc-place-row" data-wdc-place>
 									<div class="wdc-place-row__title" data-wdc-place-title><?php echo esc_html__( 'Место 1', 'walls-delivery-calc' ); ?></div>
-									<label class="wdc-place-field"><?php echo esc_html( $weight_label ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][weight_g]" value="" placeholder="<?php echo esc_attr__( 'г', 'walls-delivery-calc' ); ?>"></label>
+									<label class="wdc-place-field"><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?> <?php if ( '' !== $weight_hint ) : ?><span class="wdc-weight-hint" data-wdc-weight-hint><?php echo esc_html( $weight_hint ); ?></span><?php endif; ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][weight_g]" value="" placeholder="<?php echo esc_attr__( 'г', 'walls-delivery-calc' ); ?>"></label>
 									<label class="wdc-place-field"><?php echo esc_html__( 'Длина, см', 'walls-delivery-calc' ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][length_cm]" value="" placeholder="<?php echo esc_attr__( 'см', 'walls-delivery-calc' ); ?>"></label>
 									<label class="wdc-place-field"><?php echo esc_html__( 'Ширина, см', 'walls-delivery-calc' ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][width_cm]" value="" placeholder="<?php echo esc_attr__( 'см', 'walls-delivery-calc' ); ?>"></label>
 									<label class="wdc-place-field"><?php echo esc_html__( 'Высота, см', 'walls-delivery-calc' ); ?><input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-wdc-integer-input name="places[0][height_cm]" value="" placeholder="<?php echo esc_attr__( 'см', 'walls-delivery-calc' ); ?>"></label>
@@ -730,10 +742,77 @@ final class OrderShipmentsMetabox {
 		);
 	}
 
+	public function ajax_search_products(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
+		}
+		if ( ! function_exists( 'wc_get_products' ) || ! function_exists( 'wc_get_product' ) ) {
+			wp_send_json_success( array( 'items' => array() ) );
+		}
+
+		$query = sanitize_text_field( wp_unslash( $_POST['query'] ?? '' ) );
+		if ( '' === trim( $query ) ) {
+			wp_send_json_success( array( 'items' => array() ) );
+		}
+
+		$products = array();
+		if ( function_exists( 'wc_get_product_id_by_sku' ) ) {
+			$sku_id = (int) wc_get_product_id_by_sku( $query );
+			if ( $sku_id > 0 ) {
+				$product = wc_get_product( $sku_id );
+				if ( is_object( $product ) ) {
+					$products[ $sku_id ] = $product;
+				}
+			}
+		}
+
+		foreach ( wc_get_products( array( 'limit' => 20, 'status' => array( 'publish', 'private' ), 'type' => array( 'simple', 'variation' ), 's' => $query ) ) as $product ) {
+			if ( is_object( $product ) && method_exists( $product, 'get_id' ) ) {
+				$products[ (int) $product->get_id() ] = $product;
+			}
+			if ( count( $products ) >= 20 ) {
+				break;
+			}
+		}
+
+		$items = array();
+		foreach ( array_slice( $products, 0, 20, true ) as $product ) {
+			$items[] = $this->shipment_product_search_row( $product );
+		}
+
+		wp_send_json_success( array( 'items' => $items ) );
+	}
+
 	private function normalize_pickup_search_text( string $value ): string {
 		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
 
 		return trim( preg_replace( '/\s+/u', ' ', $value ) ?? $value );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function shipment_product_search_row( object $product ): array {
+		$product_id = method_exists( $product, 'get_id' ) ? (int) $product->get_id() : 0;
+		$parent_id = method_exists( $product, 'get_parent_id' ) ? (int) $product->get_parent_id() : 0;
+		$is_variation = method_exists( $product, 'is_type' ) && $product->is_type( 'variation' );
+		$price = method_exists( $product, 'get_price' ) ? (float) $product->get_price() : 0.0;
+		$weight = method_exists( $product, 'get_weight' ) ? (string) $product->get_weight() : '';
+		$length = method_exists( $product, 'get_length' ) ? (string) $product->get_length() : '';
+		$width = method_exists( $product, 'get_width' ) ? (string) $product->get_width() : '';
+		$height = method_exists( $product, 'get_height' ) ? (string) $product->get_height() : '';
+
+		return array(
+			'product_id' => $is_variation && $parent_id > 0 ? $parent_id : $product_id,
+			'variation_id' => $is_variation ? $product_id : 0,
+			'name' => method_exists( $product, 'get_name' ) ? (string) $product->get_name() : '',
+			'sku' => method_exists( $product, 'get_sku' ) ? (string) $product->get_sku() : '',
+			'price' => round( max( 0.0, $price ), 2 ),
+			'weight_g' => max( 1, (int) round( function_exists( 'wc_get_weight' ) ? (float) wc_get_weight( $weight, 'g' ) : (float) $weight ) ),
+			'length_cm' => max( 0.1, round( function_exists( 'wc_get_dimension' ) ? (float) wc_get_dimension( $length, 'cm' ) : (float) $length, 1 ) ),
+			'width_cm' => max( 0.1, round( function_exists( 'wc_get_dimension' ) ? (float) wc_get_dimension( $width, 'cm' ) : (float) $width, 1 ) ),
+			'height_cm' => max( 0.1, round( function_exists( 'wc_get_dimension' ) ? (float) wc_get_dimension( $height, 'cm' ) : (float) $height, 1 ) ),
+		);
 	}
 
 	private function resolve_order( mixed $post_or_order ): ?object {
@@ -752,16 +831,16 @@ final class OrderShipmentsMetabox {
 		$places = is_array( $request['places'] ?? null ) ? $request['places'] : array();
 		$items = is_array( $places[0]['items'] ?? null ) ? $places[0]['items'] : array();
 		if ( array() === $items ) {
-			echo '<p class="description">' . esc_html__( 'В заказе нет товарных строк для СДЭК.', 'walls-delivery-calc' ) . '</p>';
-			return;
+			echo '<p class="description">' . esc_html__( 'В заказе нет товарных строк для СДЭК. Добавьте товар вручную, если он должен попасть в грузоместо.', 'walls-delivery-calc' ) . '</p>';
 		}
 		?>
 		<table class="widefat striped wdc-cdek-items-table" data-wdc-cdek-items-table>
-			<thead><tr><th><?php echo esc_html__( 'Товар', 'walls-delivery-calc' ); ?></th><th>SKU / ware_key</th><th>Qty</th><th><?php echo esc_html__( 'Cost', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Длина', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Ширина', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Высота', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Место', 'walls-delivery-calc' ); ?></th><th></th></tr></thead>
+			<thead><tr><th><?php echo esc_html__( 'Товар', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Артикул', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Кол-во', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Цена', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Длина, см', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Ширина, см', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Высота, см', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Место', 'walls-delivery-calc' ); ?></th><th></th></tr></thead>
 			<tbody>
 			<?php foreach ( $items as $index => $item ) : ?>
 				<?php
-				$row_key = 'item-' . (string) ( $index + 1 );
+				$row_key = (string) ( $item['order_item_id'] ?? $item['item_id'] ?? '' );
+				$row_key = '' !== $row_key ? 'order-item-' . $row_key : 'item-' . (string) ( $index + 1 );
 				$quantity = max( 1, (int) ( $item['quantity'] ?? 1 ) );
 				$sku = (string) ( $item['sku'] ?? '' );
 				if ( '' === $sku ) {
@@ -769,21 +848,22 @@ final class OrderShipmentsMetabox {
 				}
 				$unit = is_array( $item['unit_price'] ?? null ) ? (int) ( $item['unit_price']['amount_kopecks'] ?? 0 ) / 100 : 0;
 				?>
-				<tr data-wdc-cdek-item-row data-item-key="<?php echo esc_attr( $row_key ); ?>" data-ordered-quantity="<?php echo esc_attr( (string) $quantity ); ?>">
-					<td><?php echo esc_html( (string) ( $item['name'] ?? 'Товар' ) ); ?><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][name]" value="<?php echo esc_attr( (string) ( $item['name'] ?? 'Товар' ) ); ?>"><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][item_key]" value="<?php echo esc_attr( $row_key ); ?>"><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][ordered_quantity]" value="<?php echo esc_attr( (string) $quantity ); ?>"></td>
-					<td><code><?php echo esc_html( $sku ); ?></code><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][ware_key]" value="<?php echo esc_attr( $sku ); ?>"></td>
-					<td><input type="number" min="1" max="<?php echo esc_attr( (string) $quantity ); ?>" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][amount]" value="<?php echo esc_attr( (string) $quantity ); ?>" data-wdc-cdek-qty></td>
-					<td><input type="number" min="0" step="0.01" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][cost]" value="<?php echo esc_attr( (string) $unit ); ?>"></td>
-					<td><input type="number" min="1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][weight]" value="<?php echo esc_attr( (string) max( 1, (int) ( $item['weight_g'] ?? 0 ) ) ); ?>"></td>
-					<td><input type="number" min="1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][length_cm]" value="<?php echo esc_attr( (string) max( 1, (int) ( $item['length_cm'] ?? 1 ) ) ); ?>"></td>
-					<td><input type="number" min="1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][width_cm]" value="<?php echo esc_attr( (string) max( 1, (int) ( $item['width_cm'] ?? 1 ) ) ); ?>"></td>
-					<td><input type="number" min="1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][height_cm]" value="<?php echo esc_attr( (string) max( 1, (int) ( $item['height_cm'] ?? 1 ) ) ); ?>"></td>
+				<tr data-wdc-cdek-item-row data-wdc-base-row="1" data-item-key="<?php echo esc_attr( $row_key ); ?>" data-group-key="<?php echo esc_attr( $row_key ); ?>" data-ordered-quantity="<?php echo esc_attr( (string) $quantity ); ?>" data-wdc-row-index="<?php echo esc_attr( (string) $index ); ?>">
+					<td class="wdc-cdek-item-product"><?php echo esc_html( (string) ( $item['name'] ?? 'Товар' ) ); ?><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][name]" value="<?php echo esc_attr( (string) ( $item['name'] ?? 'Товар' ) ); ?>"><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][item_key]" value="<?php echo esc_attr( $row_key ); ?>"><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][ordered_quantity]" value="<?php echo esc_attr( (string) $quantity ); ?>"></td>
+					<td class="wdc-cdek-item-sku"><?php echo esc_html( $sku ); ?><input type="hidden" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][ware_key]" value="<?php echo esc_attr( $sku ); ?>"></td>
+					<td><input class="wdc-cdek-input-qty" type="number" min="1" max="<?php echo esc_attr( (string) min( 999, $quantity ) ); ?>" step="1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][amount]" value="<?php echo esc_attr( (string) min( 999, $quantity ) ); ?>" data-wdc-cdek-qty data-wdc-integer-input></td>
+					<td><input class="wdc-cdek-input-price" type="number" min="0" step="0.01" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][cost]" value="<?php echo esc_attr( (string) $unit ); ?>" data-wdc-decimal-input="2"></td>
+					<td><input class="wdc-cdek-input-weight" type="number" min="1" step="1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][weight]" value="<?php echo esc_attr( (string) max( 1, (int) ( $item['weight_g'] ?? 0 ) ) ); ?>" data-wdc-integer-input></td>
+					<td><input class="wdc-cdek-input-dim" type="number" min="0.1" step="0.1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][length_cm]" value="<?php echo esc_attr( (string) max( 0.1, (float) ( $item['length_cm'] ?? 1 ) ) ); ?>" data-wdc-decimal-input="1"></td>
+					<td><input class="wdc-cdek-input-dim" type="number" min="0.1" step="0.1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][width_cm]" value="<?php echo esc_attr( (string) max( 0.1, (float) ( $item['width_cm'] ?? 1 ) ) ); ?>" data-wdc-decimal-input="1"></td>
+					<td><input class="wdc-cdek-input-dim" type="number" min="0.1" step="0.1" name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][height_cm]" value="<?php echo esc_attr( (string) max( 0.1, (float) ( $item['height_cm'] ?? 1 ) ) ); ?>" data-wdc-decimal-input="1"></td>
 					<td><select name="cdek_items[<?php echo esc_attr( (string) $index ); ?>][place_number]" data-wdc-cdek-place-select><option value="1">1</option></select></td>
-					<td><?php if ( $quantity > 1 ) : ?><button type="button" class="button" data-wdc-cdek-split><?php echo esc_html__( 'Разбить', 'walls-delivery-calc' ); ?></button><?php endif; ?></td>
+					<td class="wdc-cdek-item-actions"><?php if ( $quantity > 1 ) : ?><button type="button" class="button wdc-icon-button" data-wdc-cdek-split title="<?php echo esc_attr__( 'Разбить товар по грузоместам', 'walls-delivery-calc' ); ?>" aria-label="<?php echo esc_attr__( 'Разбить товар по грузоместам', 'walls-delivery-calc' ); ?>">🔀</button><?php endif; ?></td>
 				</tr>
 			<?php endforeach; ?>
 			</tbody>
 		</table>
+		<p><button type="button" class="button" data-wdc-add-manual-cdek-item><?php echo esc_html__( 'Добавить товар', 'walls-delivery-calc' ); ?></button></p>
 		<?php
 	}
 

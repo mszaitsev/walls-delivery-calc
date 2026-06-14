@@ -1,5 +1,7 @@
 # Project Status
 
+0.49.0 note: shipment preparation package UI is improved on `feature/shipment-modal-packages-ui`. CDEK settings now store `cdek_shipment_point_address`; the order shipment modal renders sender pickup point code plus address, allows a temporary CDEK sender pickup replacement without changing settings, and submits the chosen code as `shipment_point`. The universal `Грузоместа` tab now has API-weight hints for single-package drafts, package summaries with package weight and assigned item totals, Russian item-table labels, compact numeric constraints, split rows with delete/rebalance behavior, manual item rows, and WooCommerce product search for manual SKU entry.
+
 0.46.4 note: nullable CDEK tariff limit persistence is fixed. Insert/update formats for `weight_*`, `length_*`, `width_*` and `height_*` are built dynamically so `null` API values remain SQL `NULL` rather than being sent through `%f` and becoming `0.000`; numeric limits still use decimal/float storage.
 
 0.46.3 note: CDEK tariff sync now stores API limit fields from `GET /v2/calculator/alltariffs`: weight min/max/calculation max and length/width/height min/max. The CDEK tariff admin table displays compact limits, Russian labels `до ПВЗ` / `до двери` for delivery type, and active-first/name/code sorting. Existing custom title/comment/active state survives sync; without a separate manual-override flag, delivery type is still refreshed from API. Safe mojibake normalization fixes obvious CDEK strings before storing names/modes.
@@ -147,7 +149,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.48.2`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.49.0`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

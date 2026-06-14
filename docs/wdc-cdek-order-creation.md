@@ -1,5 +1,11 @@
 # WDC CDEK Order Creation
 
+Version: 0.49.0.
+
+0.49.0 update: CDEK settings now include `cdek_shipment_point_address`, shown under `Код ПВЗ отправления СДЭК` on the service `Расчет` tab. The shipment preparation modal shows sender pickup point as code plus address and lets a manager temporarily choose another CDEK sender pickup point from the admin map; that choice updates only modal draft data and is sent as `shipment_point` in `POST /v2/orders`.
+
+The universal `Грузоместа` UI was tightened for all carrier flows and actively feeds CDEK packages/items. A single package shows the API-weight hint from the same calculated final weight used by the delivery calculator; multiple packages hide the hint. Package summaries now show package weight, assigned item quantity, item weight and declared value. The item table uses Russian labels, plain SKU text, compact numeric fields, split rows with a delete action instead of `+/-`, automatic quantity rebalancing, manual item rows, and WooCommerce product search for manual SKU entry.
+
 Version: 0.48.11.
 
 0.48.11 update: the shipment preparation pickup map keeps the Russian Post carrier context (`russian_post_domestic:pickup`) and now loads recipient-location points even when there is no typed search query, fixing the empty “ПВЗ не найдены” state in the Russian Post shipment modal. The shared checkout pickup map also restores selected-point preview by matching carrier-specific codes/postcodes, not only transient REST ids, so previously selected CDEK and Russian Post points can be highlighted, opened and scrolled into view after reopening the map.

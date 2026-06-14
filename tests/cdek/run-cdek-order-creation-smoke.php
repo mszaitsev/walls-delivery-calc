@@ -180,6 +180,7 @@ function cdek_order_request( string $delivery_type, int $mode, array $overrides 
 			'tariff_code' => $overrides['tariff_code'] ?? '136',
 			'tariff_title' => $overrides['tariff_title'] ?? 'Посылка склад-склад',
 			'delivery_mode' => $mode,
+			'shipment_point' => $overrides['shipment_point'] ?? '',
 			'delivery_point' => $overrides['delivery_point'] ?? ( DeliveryType::PICKUP === $delivery_type ? 'KEM7' : '' ),
 			'cdek_to_city_code' => 44,
 			'cdek_item_rows' => $overrides['cdek_item_rows'] ?? array(
@@ -202,8 +203,10 @@ $settings->save_from_admin(
 		CdekSettings::SENDER_CITY_NAME_KEY => 'Новосибирск',
 		CdekSettings::SENDER_ADDRESS_KEY => 'Фабричная 1',
 		CdekSettings::SHIPMENT_POINT_KEY => 'NSK69',
+		CdekSettings::SHIPMENT_POINT_ADDRESS_KEY => 'Новосибирск, Красный проспект 1',
 	)
 );
+cdek_order_assert( 'Новосибирск, Красный проспект 1' === $settings->shipment_point_address(), 'CDEK shipment point address setting must be saved and read.' );
 $builder = new CdekCreateRequestBuilder( $settings );
 
 $pickup_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4 ) );
@@ -212,6 +215,8 @@ cdek_order_assert( 'NSK69' === $pickup_payload['shipment_point'] && 'KEM7' === $
 cdek_order_assert( ! isset( $pickup_payload['from_location'], $pickup_payload['to_location'], $pickup_payload['services'], $pickup_payload['additional_order_types'], $pickup_payload['delivery_recipient_cost'], $pickup_payload['delivery_recipient_cost_adv'] ), 'CDEK pickup payload must omit forbidden fields.' );
 cdek_order_assert( 'BARCODE' === $pickup_payload['print'], 'CDEK order payload must request BARCODE print.' );
 cdek_order_assert( 0 === $pickup_payload['packages'][0]['items'][0]['payment']['value'] && 1000.0 === $pickup_payload['packages'][0]['items'][0]['cost'], 'CDEK item payment/cost mismatch.' );
+$override_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4, array( 'shipment_point' => 'nsk70' ) ) );
+cdek_order_assert( 'NSK70' === $override_payload['shipment_point'], 'CDEK order creation must use temporary sender shipment_point from modal meta.' );
 
 $courier_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 3 ) );
 cdek_order_assert( isset( $courier_payload['shipment_point'], $courier_payload['to_location'] ) && ! isset( $courier_payload['delivery_point'], $courier_payload['from_location'] ), 'Warehouse-door courier must use shipment_point and to_location only.' );
@@ -556,6 +561,8 @@ $admin_request = $drafts->create_request_from_admin_data(
 	array(
 		'delivery_type' => DeliveryType::PICKUP,
 		'tariff_object' => '136',
+		'shipment_point' => 'NSK70',
+		'shipment_point_address' => 'Новосибирск, новый ПВЗ',
 		'delivery_point' => 'NEW1',
 		'pickup_point_code' => 'NEW1',
 		'pickup_point_address' => 'Новый ПВЗ',
@@ -564,6 +571,7 @@ $admin_request = $drafts->create_request_from_admin_data(
 	)
 );
 cdek_order_assert( 'NEW1' === (string) ( $admin_request->meta['delivery_point'] ?? '' ) && 'NEW1' === (string) ( $admin_request->meta['pickup_point_code'] ?? '' ) && $admin_request->pickup_point instanceof PickupPointSelection && 'NEW1' === $admin_request->pickup_point->point_code, 'Choosing another CDEK pickup point in modal must update delivery_point and point_code.' );
+cdek_order_assert( 'NSK70' === (string) ( $admin_request->meta['shipment_point'] ?? '' ) && 'Новосибирск, новый ПВЗ' === (string) ( $admin_request->meta['shipment_point_address'] ?? '' ), 'Choosing another sender CDEK pickup point in modal must update temporary shipment_point and address.' );
 
 $ajax_http = new CdekOrderFakeHttp();
 $ajax_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $ajax_http ), $settings, $ajax_http );
@@ -609,8 +617,10 @@ $metabox->render( $draft_order );
 $modal_html = ob_get_clean() ?: '';
 cdek_order_assert( ! str_contains( $modal_html, 'tariff_code:' ) && ! str_contains( $modal_html, 'delivery_mode:' ), 'CDEK shipment modal must not render technical tariff_code/delivery_mode labels.' );
 cdek_order_assert( str_contains( $modal_html, 'В заказе тариф' ) && str_contains( $modal_html, 'Кастомный ПВЗ' ), 'CDEK shipment modal must render human selected tariff title.' );
-cdek_order_assert( str_contains( $modal_html, 'ПВЗ отправителя' ) && str_contains( $modal_html, 'NSK69' ), 'CDEK shipment modal must render sender shipment_point label.' );
+cdek_order_assert( str_contains( $modal_html, 'ПВЗ отправителя' ) && str_contains( $modal_html, 'NSK69' ) && str_contains( $modal_html, 'Новосибирск, Красный проспект 1' ) && str_contains( $modal_html, 'Выбрать другой ПВЗ отправителя' ), 'CDEK shipment modal must render sender shipment_point code/address and temporary replacement button.' );
 cdek_order_assert( str_contains( $modal_html, 'Код ПВЗ' ) && str_contains( $modal_html, 'ISK1' ), 'CDEK shipment modal must show recipient CDEK point code, not index label.' );
+cdek_order_assert( str_contains( $modal_html, 'Артикул' ) && str_contains( $modal_html, 'Кол-во' ) && str_contains( $modal_html, 'Цена' ) && ! str_contains( $modal_html, 'SKU / ware_key' ) && ! str_contains( $modal_html, '<td><code>' ), 'CDEK packages tab must render improved Russian item table headers without code-styled SKU.' );
+cdek_order_assert( str_contains( $modal_html, 'data-wdc-weight-hint' ) && str_contains( $modal_html, 'Добавить товар' ) && str_contains( $modal_html, 'data-wdc-add-manual-cdek-item' ), 'CDEK packages UI must render API weight hint and manual item add button.' );
 cdek_order_assert( str_contains( $modal_html, 'name="pickup_carrier_key" value="cdek"' ) && str_contains( $modal_html, 'name="pickup_family" value="cdek:pickup"' ), 'CDEK shipment modal must render CDEK carrier context for admin pickup map.' );
 cdek_order_assert( str_contains( $modal_html, 'name="recipient_location_city" value="Кемерово"' ) && ! str_contains( $modal_html, 'name="recipient_location_city" value="Новосибирск"' ), 'CDEK shipment modal map context must use recipient locality, not sender locality.' );
 $shipments_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
@@ -619,8 +629,13 @@ cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "d
 cdek_order_assert( is_string( $shipments_js ) && ! str_contains( $shipments_js, 'через DaData' ) && str_contains( $shipments_js, "status.textContent = 'Ищем адрес...'" ) && str_contains( $shipments_js, "'Адрес найден.'" ) && str_contains( $shipments_js, "'Адрес не найден.'" ), 'CDEK shipment modal pickup map must use neutral address-search UI messages.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'data-wdc-pickup-picker-confirm' ) && ! str_contains( $shipments_js, 'data-wdc-pickup-picker-choose' ) && ! str_contains( $shipments_js, 'data-wdc-pickup-popup-select' ) && ! str_contains( $shipments_js, 'wdc-admin-pickup-picker__selected-grid' ), 'CDEK shipment modal pickup map must use one bottom select button and no duplicate per-card controls.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "'ПВЗ СДЭК'" ) && str_contains( $shipments_js, "'Постамат СДЭК'" ), 'CDEK shipment modal pickup map must render CDEK pickup/postamat titles.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'function senderPickupContext' ) && str_contains( $shipments_js, 'Выбор ПВЗ отправителя СДЭК' ) && str_contains( $shipments_js, 'updateSenderPickupDraft' ), 'CDEK shipment modal must support temporary sender pickup point selection.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'data-wdc-remove-cdek-split' ) && str_contains( $shipments_js, 'rebalanceCdekGroup' ) && ! str_contains( $shipments_js, 'Date.now()' ) && ! str_contains( $shipments_js, 'data-wdc-cdek-minus' ), 'CDEK split UI must use stable row keys, delete split rows, and avoid +/- controls.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'wdc_search_products_for_shipment_item' ) && str_contains( $shipments_js, 'applyProductToManualRow' ) && str_contains( $shipments_js, 'data-wdc-product-search-input' ), 'CDEK manual item rows must support catalog product search.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'вес места ' ) && str_contains( $shipments_js, 'заполнено: товары ' ) && str_contains( $shipments_js, ' руб.' ), 'CDEK package summary must show place weight, item count, item weight and cost.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "mode !== 'location' && !value" ) && str_contains( $shipments_js, "mode === 'location' ? 2000 : 100" ) && str_contains( $shipments_js, "context.city || context.postcode || context.address || context.locationId || context.fiasId || context.garId" ), 'Shipment pickup modal must load location points for Russian Post without requiring a typed query and without a 300-row cap.' );
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
+cdek_order_assert( str_contains( $metabox_source, 'AJAX_SEARCH_PRODUCTS' ) && str_contains( $metabox_source, 'wc_get_products' ) && str_contains( $metabox_source, 'shipment_product_search_row' ), 'Shipment modal must expose secured WooCommerce product search for manual package items.' );
 cdek_order_assert( str_contains( $metabox_source, 'RussianPostDomesticSettings::CARRIER_KEY . \':pickup\'' ) && str_contains( $metabox_source, 'pickupPointTypes' ) && str_contains( $metabox_source, "'location' === \$mode ? 2000 : 100" ), 'Shipment modal backend must keep Russian Post pickup family/type config and location search limit for admin maps.' );
 cdek_order_assert( str_contains( $metabox_source, '$order_shipping_city' ) && str_contains( $metabox_source, '$order_shipping_postcode' ) && str_contains( $metabox_source, '$recipient_address_context' ) && str_contains( $metabox_source, '$pickup_context[\'postal_code\'] ?? $pickup_context[\'postcode\'] ?? $recipient_postcode' ), 'Shipment modal backend must fall back to WooCommerce shipping recipient context for Russian Post map loading.' );
 cdek_order_assert( str_contains( $metabox_source, '$order_id = (int) ( $_POST[\'order_id\'] ?? 0 )' ) && str_contains( $metabox_source, '$location_context[\'city_name\']' ) && str_contains( $metabox_source, 'get_shipping_city' ) && str_contains( $metabox_source, 'get_shipping_postcode' ), 'Shipment modal pickup search backend must use order_id to restore missing Russian Post location context.' );

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.48.4.
+Current plugin version: 0.49.0.
+
+Version 0.49.0 improves the shipment preparation modal package UI and CDEK sender pickup settings. CDEK now stores an optional sender pickup address, the modal can temporarily replace the sender pickup point for the current shipment draft, package summaries show package weight plus assigned item totals, split rows rebalance quantities with delete actions, and managers can add manual package items with WooCommerce product search by SKU/name.
 
 Version 0.48.4 fixes the first CDEK shipment QA batch. The current CDEK order status is now selected from `entity.statuses[]` by the newest parsable `date_time` among non-deleted statuses, `planned_delivery_date` is saved and shown in the order shipment block, and CDEK actual delivery cost is read from `entity.delivery_detail.total_sum` and compared with saved “Базовая стоимость API” using the existing 3% tolerance. CDEK calculation settings now keep the tariff calculation block on the `Расчет` tab, add `Цена страховки` as a percent of discounted goods total, and add that calculated insurance amount to the API delivery price before calculation rules run.
 

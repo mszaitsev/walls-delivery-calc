@@ -41,7 +41,7 @@ final class CdekCreateRequestBuilder {
 		if ( in_array( $mode, array( 1, 2 ), true ) ) {
 			$payload['from_location'] = $this->from_location();
 		} else {
-			$payload['shipment_point'] = $this->settings->shipment_point();
+			$payload['shipment_point'] = $this->shipment_point( $request );
 		}
 
 		if ( in_array( $mode, array( 2, 4 ), true ) ) {
@@ -74,7 +74,7 @@ final class CdekCreateRequestBuilder {
 		if ( 0 === $mode ) {
 			$errors[] = 'Не удалось определить режим тарифа СДЭК. Проверьте тариф и повторите создание отправления.';
 		}
-		if ( in_array( $mode, array( 3, 4 ), true ) && '' === $this->settings->shipment_point() ) {
+		if ( in_array( $mode, array( 3, 4 ), true ) && '' === $this->shipment_point( $request ) ) {
 			$errors[] = 'Заполните код ПВЗ отправления СДЭК.';
 		}
 		if ( in_array( $mode, array( 1, 2 ), true ) && ( $this->settings->sender_city_code() <= 0 || '' === $this->settings->sender_address() ) ) {
@@ -219,6 +219,12 @@ final class CdekCreateRequestBuilder {
 		}
 
 		return $location;
+	}
+
+	private function shipment_point( ShipmentCreateRequest $request ): string {
+		$point = preg_replace( '/[^A-Z0-9_\-]/', '', strtoupper( (string) ( $request->meta['shipment_point'] ?? '' ) ) ) ?? '';
+
+		return '' !== $point ? $point : $this->settings->shipment_point();
 	}
 
 	/**

@@ -297,6 +297,7 @@ final class OrderShipmentDraftFactory {
 				'cdek_delivery_mode' => $delivery_mode,
 				'cdek_to_city_code' => (int) ( $api['cdek_to_city_code'] ?? 0 ),
 				'shipment_point' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->shipment_point() : '',
+				'shipment_point_address' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->shipment_point_address() : '',
 				'delivery_point' => $pickup_code,
 				'pickup_point_code' => $pickup_code,
 				'pickup_point_postcode' => (string) ( $pickup['point_postcode'] ?? '' ),
@@ -316,6 +317,8 @@ final class OrderShipmentDraftFactory {
 		$tariff_code = preg_replace( '/\D+/', '', (string) wp_unslash( $data['tariff_object'] ?? $base->meta['tariff_code'] ?? '' ) ) ?: '';
 		$tariff_row = $this->cdek_tariff_row( $tariff_code );
 		$tariff_title = $this->cdek_tariff_title( $tariff_row, $tariff_code, (string) ( $base->meta['tariff_title'] ?? '' ) );
+		$shipment_point = preg_replace( '/[^A-Z0-9_\-]/', '', strtoupper( sanitize_text_field( wp_unslash( $data['shipment_point'] ?? $data['sender_shipment_point'] ?? $base->meta['shipment_point'] ?? '' ) ) ) ) ?? '';
+		$shipment_point_address = sanitize_text_field( wp_unslash( $data['shipment_point_address'] ?? $data['sender_shipment_point_address'] ?? $base->meta['shipment_point_address'] ?? '' ) );
 		$pickup_row = DeliveryType::PICKUP === $delivery_type ? $this->cdek_pickup_row_from_admin_data( $data, $base->meta ) : array();
 		$pickup_code = DeliveryType::PICKUP === $delivery_type ? (string) ( $pickup_row['point_code'] ?? $base->meta['pickup_point_code'] ?? '' ) : '';
 		$places = array();
@@ -359,6 +362,8 @@ final class OrderShipmentDraftFactory {
 					'tariff_title' => $tariff_title,
 					'selected_tariff_title' => (string) ( $base->meta['selected_tariff_title'] ?? $base->meta['tariff_title'] ?? $tariff_title ),
 					'delivery_type' => $delivery_type,
+					'shipment_point' => $shipment_point,
+					'shipment_point_address' => $shipment_point_address,
 					'delivery_point' => DeliveryType::PICKUP === $delivery_type ? $pickup_code : (string) ( $base->meta['delivery_point'] ?? '' ),
 					'pickup_point_code' => DeliveryType::PICKUP === $delivery_type ? $pickup_code : (string) ( $base->meta['pickup_point_code'] ?? '' ),
 					'pickup_point_postcode' => DeliveryType::PICKUP === $delivery_type ? (string) ( $pickup_row['postcode'] ?? $base->meta['pickup_point_postcode'] ?? '' ) : (string) ( $base->meta['pickup_point_postcode'] ?? '' ),
@@ -754,18 +759,22 @@ final class OrderShipmentDraftFactory {
 			if ( ! is_array( $row ) ) {
 				continue;
 			}
+			$item_key = sanitize_text_field( wp_unslash( $row['item_key'] ?? '' ) );
+			if ( '' === $item_key ) {
+				$item_key = 'manual-' . (string) ( count( $rows ) + 1 );
+			}
 			$rows[] = array(
-				'item_key' => sanitize_text_field( wp_unslash( $row['item_key'] ?? '' ) ),
+				'item_key' => $item_key,
 				'ordered_quantity' => max( 1, (int) ( $row['ordered_quantity'] ?? $row['amount'] ?? 1 ) ),
 				'place_number' => max( 1, (int) ( $row['place_number'] ?? 1 ) ),
 				'name' => sanitize_text_field( wp_unslash( $row['name'] ?? 'Товар' ) ),
-				'ware_key' => substr( sanitize_text_field( wp_unslash( $row['ware_key'] ?? '' ) ), 0, 20 ),
+				'ware_key' => substr( sanitize_text_field( wp_unslash( $row['ware_key'] ?? $item_key ) ), 0, 20 ),
 				'amount' => max( 1, (int) ( $row['amount'] ?? 1 ) ),
 				'cost' => max( 0, (float) str_replace( ',', '.', (string) wp_unslash( $row['cost'] ?? '0' ) ) ),
 				'weight' => max( 0, (int) ( $row['weight'] ?? 0 ) ),
-				'length_cm' => max( 0, (int) ( $row['length_cm'] ?? 0 ) ),
-				'width_cm' => max( 0, (int) ( $row['width_cm'] ?? 0 ) ),
-				'height_cm' => max( 0, (int) ( $row['height_cm'] ?? 0 ) ),
+				'length_cm' => max( 0, (float) str_replace( ',', '.', (string) wp_unslash( $row['length_cm'] ?? '0' ) ) ),
+				'width_cm' => max( 0, (float) str_replace( ',', '.', (string) wp_unslash( $row['width_cm'] ?? '0' ) ) ),
+				'height_cm' => max( 0, (float) str_replace( ',', '.', (string) wp_unslash( $row['height_cm'] ?? '0' ) ) ),
 			);
 		}
 

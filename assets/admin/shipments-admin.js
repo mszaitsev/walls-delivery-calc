@@ -36,6 +36,31 @@
     return data;
   }
 
+  function nextCdekItemIndex(form) {
+    const rows = form ? Array.from(form.querySelectorAll('[data-wdc-cdek-item-row]')) : [];
+    return rows.reduce((max, row) => {
+      const value = parseInt(row.getAttribute('data-wdc-row-index') || '0', 10) || 0;
+      return Math.max(max, value);
+    }, 0) + 1;
+  }
+
+  function rewriteCdekItemNames(row, index) {
+    if (!row) return;
+    row.setAttribute('data-wdc-row-index', String(index));
+    row.querySelectorAll('[name]').forEach((input) => {
+      input.name = input.name.replace(/cdek_items\[[^\]]+\]/, 'cdek_items[' + index + ']');
+    });
+  }
+
+  function cleanDecimalInput(input, precision) {
+    const separator = String(input.value || '').includes(',') ? ',' : '.';
+    let value = String(input.value || '').replace(/[^\d.,]+/g, '').replace(/,/g, '.');
+    const parts = value.split('.');
+    value = parts.shift() || '';
+    if (parts.length) value += '.' + parts.join('').slice(0, precision);
+    input.value = separator === ',' ? value.replace('.', ',') : value;
+  }
+
   function switchShipmentTab(form, tabName) {
     if (!form) return;
     form.querySelectorAll('[data-wdc-shipment-tab]').forEach((button) => {
@@ -60,10 +85,14 @@
         number,
         label: number,
         weight: parseInt(weight && weight.value ? weight.value : '0', 10) || 0,
-        length: parseInt(length && length.value ? length.value : '0', 10) || 0,
-        width: parseInt(width && width.value ? width.value : '0', 10) || 0,
-        height: parseInt(height && height.value ? height.value : '0', 10) || 0
+        length: parseFloat(String(length && length.value ? length.value : '0').replace(',', '.')) || 0,
+        width: parseFloat(String(width && width.value ? width.value : '0').replace(',', '.')) || 0,
+        height: parseFloat(String(height && height.value ? height.value : '0').replace(',', '.')) || 0
       };
+    });
+    places.forEach((row) => {
+      const hint = row.querySelector('[data-wdc-weight-hint]');
+      if (hint) hint.hidden = places.length !== 1;
     });
     form.querySelectorAll('[data-wdc-cdek-place-select]').forEach((select) => {
       const current = select.value || '1';
@@ -76,6 +105,7 @@
       });
       select.value = options.some((option) => option.number === current) ? current : '1';
     });
+    updateCdekSplitAvailability(form, options.length);
     updateCdekItemsSummary(form, options);
   }
 
@@ -101,8 +131,61 @@
     summary.innerHTML = Object.keys(totals).sort().map((number) => {
       const row = totals[number];
       const error = row.place.weight > 0 && row.weight > row.place.weight ? ' data-error="1"' : '';
-      return '<p' + error + '><strong>Место ' + number + ':</strong> товары ' + row.quantity + ', вес товаров ' + row.weight + ' г, стоимость ' + row.cost.toFixed(2) + '</p>';
+      return '<p' + error + '><strong>Место ' + number + ':</strong> вес места ' + row.place.weight + ' г; заполнено: товары ' + row.quantity + ' шт, вес товаров ' + row.weight + ' г, стоимость ' + row.cost.toFixed(2) + ' руб.</p>';
     }).join('');
+  }
+
+  function rebalanceCdekGroup(form, groupKey) {
+    if (!form || !groupKey) return;
+    const rows = Array.from(form.querySelectorAll('[data-wdc-cdek-item-row]')).filter((row) => row.getAttribute('data-group-key') === groupKey);
+    const base = rows.find((row) => row.hasAttribute('data-wdc-base-row'));
+    if (!base) return;
+    const total = parseInt(base.getAttribute('data-ordered-quantity') || '1', 10) || 1;
+    const childrenTotal = rows.reduce((sum, row) => {
+      if (row === base) return sum;
+      const qty = row.querySelector('[data-wdc-cdek-qty]');
+      return sum + (parseInt(qty && qty.value ? qty.value : '0', 10) || 0);
+    }, 0);
+    const baseQty = base.querySelector('[data-wdc-cdek-qty]');
+    if (baseQty) baseQty.value = String(Math.max(1, total - childrenTotal));
+  }
+
+  function mergeCdekSplitRows(form) {
+    if (!form) return;
+    form.querySelectorAll('[data-wdc-cdek-item-row][data-wdc-split-row="1"]').forEach((row) => {
+      const groupKey = row.getAttribute('data-group-key') || '';
+      row.remove();
+      rebalanceCdekGroup(form, groupKey);
+    });
+    form.querySelectorAll('[data-wdc-cdek-place-select]').forEach((select) => {
+      select.value = '1';
+    });
+  }
+
+  function mergeRowsFromRemovedPlace(form, removedNumber) {
+    if (!form || !removedNumber) return;
+    form.querySelectorAll('[data-wdc-cdek-item-row]').forEach((row) => {
+      const select = row.querySelector('[data-wdc-cdek-place-select]');
+      if (!select || String(select.value || '') !== String(removedNumber)) return;
+      if (row.hasAttribute('data-wdc-split-row')) {
+        const groupKey = row.getAttribute('data-group-key') || '';
+        row.remove();
+        rebalanceCdekGroup(form, groupKey);
+        return;
+      }
+      select.value = '1';
+    });
+  }
+
+  function updateCdekSplitAvailability(form, placeCount) {
+    if (!form) return;
+    if (placeCount <= 1) mergeCdekSplitRows(form);
+    form.querySelectorAll('[data-wdc-cdek-split]').forEach((button) => {
+      const row = button.closest('[data-wdc-cdek-item-row]');
+      const qty = parseInt(row && row.getAttribute('data-ordered-quantity') || '1', 10) || 1;
+      button.hidden = placeCount <= 1 || qty <= 1;
+      button.disabled = button.hidden;
+    });
   }
 
   function splitCdekItemRow(button) {
@@ -113,21 +196,116 @@
     const currentQty = parseInt(qtyInput && qtyInput.value ? qtyInput.value : '0', 10) || 0;
     if (currentQty <= 1) return;
     const clone = row.cloneNode(true);
+    const groupKey = row.getAttribute('data-group-key') || row.getAttribute('data-item-key') || '';
+    const index = nextCdekItemIndex(form);
+    rewriteCdekItemNames(clone, index);
+    clone.removeAttribute('data-wdc-base-row');
+    clone.setAttribute('data-wdc-split-row', '1');
+    clone.setAttribute('data-group-key', groupKey);
     const cloneQty = clone.querySelector('[data-wdc-cdek-qty]');
     if (qtyInput) qtyInput.value = String(currentQty - 1);
     if (cloneQty) cloneQty.value = '1';
-    clone.querySelectorAll('[name]').forEach((input) => {
-      input.name = input.name.replace(/cdek_items\[(\d+)\]/, function (_, number) {
-        return 'cdek_items[' + (Date.now() + parseInt(number, 10)) + ']';
-      });
-    });
+    const itemKey = clone.querySelector('input[name$="[item_key]"]');
+    const parent = clone.querySelector('input[name$="[split_parent]"]') || document.createElement('input');
+    if (itemKey) itemKey.value = groupKey + ':split:' + index;
+    parent.type = 'hidden';
+    parent.name = 'cdek_items[' + index + '][split_parent]';
+    parent.value = groupKey;
+    clone.appendChild(parent);
     const actionCell = clone.querySelector('td:last-child');
     if (actionCell) {
-      actionCell.innerHTML = '<button type="button" class="button" data-wdc-cdek-minus>-</button> <button type="button" class="button" data-wdc-cdek-plus>+</button>';
+      actionCell.innerHTML = '<button type="button" class="button wdc-danger-icon-button" data-wdc-remove-cdek-split title="Удалить строку" aria-label="Удалить строку">×</button>';
     }
     row.after(clone);
+    rebalanceCdekGroup(form, groupKey);
     updateCdekPlaceOptions(form);
     schedulePreview(form);
+  }
+
+  function addManualCdekItemRow(button) {
+    const form = findShipmentForm(button);
+    const table = form && form.querySelector('[data-wdc-cdek-items-table]');
+    const body = table && table.querySelector('tbody');
+    if (!form || !body) return;
+    const index = nextCdekItemIndex(form);
+    const rowKey = 'manual-' + index;
+    const row = document.createElement('tr');
+    row.setAttribute('data-wdc-cdek-item-row', '1');
+    row.setAttribute('data-wdc-manual-row', '1');
+    row.setAttribute('data-item-key', rowKey);
+    row.setAttribute('data-group-key', rowKey);
+    row.setAttribute('data-ordered-quantity', '999');
+    row.setAttribute('data-wdc-row-index', String(index));
+    row.innerHTML = [
+      '<td class="wdc-cdek-item-product"><input type="text" name="cdek_items[' + index + '][name]" value="" placeholder="Товар"><input type="hidden" name="cdek_items[' + index + '][item_key]" value="' + rowKey + '"><input type="hidden" name="cdek_items[' + index + '][ordered_quantity]" value="999"></td>',
+      '<td class="wdc-cdek-item-sku wdc-product-search-cell"><input type="text" name="cdek_items[' + index + '][ware_key]" value="" placeholder="Артикул" autocomplete="off" data-wdc-product-search-input><div class="wdc-product-search-results" data-wdc-product-search-results hidden></div></td>',
+      '<td><input class="wdc-cdek-input-qty" type="number" min="1" max="999" step="1" name="cdek_items[' + index + '][amount]" value="1" data-wdc-cdek-qty data-wdc-integer-input></td>',
+      '<td><input class="wdc-cdek-input-price" type="number" min="0" step="0.01" name="cdek_items[' + index + '][cost]" value="0" data-wdc-decimal-input="2"></td>',
+      '<td><input class="wdc-cdek-input-weight" type="number" min="1" step="1" name="cdek_items[' + index + '][weight]" value="1" data-wdc-integer-input></td>',
+      '<td><input class="wdc-cdek-input-dim" type="number" min="0.1" step="0.1" name="cdek_items[' + index + '][length_cm]" value="1" data-wdc-decimal-input="1"></td>',
+      '<td><input class="wdc-cdek-input-dim" type="number" min="0.1" step="0.1" name="cdek_items[' + index + '][width_cm]" value="1" data-wdc-decimal-input="1"></td>',
+      '<td><input class="wdc-cdek-input-dim" type="number" min="0.1" step="0.1" name="cdek_items[' + index + '][height_cm]" value="1" data-wdc-decimal-input="1"></td>',
+      '<td><select name="cdek_items[' + index + '][place_number]" data-wdc-cdek-place-select><option value="1">1</option></select></td>',
+      '<td class="wdc-cdek-item-actions"><button type="button" class="button wdc-danger-icon-button" data-wdc-remove-manual-cdek-item title="Удалить строку" aria-label="Удалить строку">×</button></td>'
+    ].join('');
+    body.appendChild(row);
+    updateCdekPlaceOptions(form);
+    schedulePreview(form);
+  }
+
+  function applyProductToManualRow(row, product) {
+    if (!row || !product) return;
+    const set = function (suffix, value) {
+      const input = row.querySelector('input[name$="[' + suffix + ']"]');
+      if (input) input.value = value !== null && value !== undefined ? String(value) : '';
+    };
+    set('name', product.name || '');
+    set('ware_key', product.sku || '');
+    set('cost', product.price || 0);
+    set('weight', product.weight_g || 1);
+    set('length_cm', product.length_cm || 1);
+    set('width_cm', product.width_cm || 1);
+    set('height_cm', product.height_cm || 1);
+    const place = row.querySelector('[data-wdc-cdek-place-select]');
+    if (place) place.value = '1';
+  }
+
+  function renderProductSearchResults(input, items) {
+    const row = input.closest('[data-wdc-cdek-item-row]');
+    const results = row && row.querySelector('[data-wdc-product-search-results]');
+    if (!results) return;
+    if (!items.length) {
+      results.hidden = true;
+      results.innerHTML = '';
+      return;
+    }
+    results.innerHTML = items.map((item) => {
+      return '<button type="button" data-wdc-product-search-choice data-product="' + escapeHtml(JSON.stringify(item)) + '"><strong>' + escapeHtml(item.name || '') + '</strong><span>' + escapeHtml(item.sku || '') + '</span></button>';
+    }).join('');
+    results.hidden = false;
+  }
+
+  function searchProductsForManualItem(input) {
+    const query = String(input.value || '').trim();
+    if (query.length < 2) {
+      renderProductSearchResults(input, []);
+      return;
+    }
+    const data = new FormData();
+    data.append('action', window.wdcShipmentsAdmin.searchProductsAction || 'wdc_search_products_for_shipment_item');
+    data.append('nonce', window.wdcShipmentsAdmin.nonce);
+    data.append('query', query);
+    fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: data
+    })
+      .then((response) => response.json())
+      .then((payload) => {
+        const items = payload && payload.success && payload.data && Array.isArray(payload.data.items) ? payload.data.items : [];
+        renderProductSearchResults(input, items);
+      })
+      .catch(() => renderProductSearchResults(input, []));
   }
 
   function requestPreview(form) {
@@ -336,8 +514,8 @@
     return field ? String(field.value || '').trim() : '';
   }
 
-  function pickupContext(form) {
-    return {
+  function pickupContext(form, override) {
+    return Object.assign({
       carrierKey: fieldValue(form, '[data-wdc-pickup-carrier-key]') || fieldValue(form, 'input[name="carrier_key"]'),
       serviceKey: fieldValue(form, '[data-wdc-pickup-service-key]') || fieldValue(form, 'input[name="service_key"]'),
       pickupFamily: fieldValue(form, '[data-wdc-pickup-family]'),
@@ -350,7 +528,7 @@
       locationId: fieldValue(form, '[data-wdc-pickup-location-id]'),
       lat: fieldValue(form, '[data-wdc-pickup-location-lat]'),
       lng: fieldValue(form, '[data-wdc-pickup-location-lng]')
-    };
+    }, override || {});
   }
 
   function pickupUsesCodeDisplay(form) {
@@ -836,8 +1014,8 @@
     });
   }
 
-  function pickupSearchRequest(form, query, limit, signal, mode) {
-    const context = pickupContext(form);
+  function pickupSearchRequest(form, query, limit, signal, mode, contextOverride) {
+    const context = pickupContext(form, contextOverride);
     const data = new FormData();
     data.append('action', window.wdcShipmentsAdmin.searchPickupPointsAction);
     data.append('nonce', window.wdcShipmentsAdmin.nonce);
@@ -872,8 +1050,8 @@
       });
   }
 
-  function currentPickupQuery(form) {
-    const context = pickupContext(form);
+  function currentPickupQuery(form, contextOverride) {
+    const context = pickupContext(form, contextOverride);
     if (context.pickupFamily === 'cdek:pickup') {
       return [context.address, context.city, context.region, context.postcode].filter(Boolean).join(' ').trim();
     }
@@ -910,12 +1088,44 @@
     requestPreview(form);
   }
 
-  function createPickupPicker(form) {
+  function updateSenderPickupDraft(form, point) {
+    const code = pickupCode(point);
+    const address = String(point && point.address || '');
+    form.querySelectorAll('[name="shipment_point"], [name="sender_shipment_point"], [data-wdc-sender-shipment-point]').forEach((input) => {
+      input.value = code || '';
+    });
+    form.querySelectorAll('[name="shipment_point_address"], [name="sender_shipment_point_address"], [data-wdc-sender-shipment-point-address]').forEach((input) => {
+      input.value = address;
+    });
+    const display = form.querySelector('[data-wdc-sender-shipment-point-display]');
+    if (display) display.textContent = [code, address].filter(Boolean).join(', ') || '-';
+    requestPreview(form);
+  }
+
+  function senderPickupContext(form) {
+    return {
+      carrierKey: 'cdek',
+      serviceKey: 'cdek',
+      pickupFamily: 'cdek:pickup',
+      city: fieldValue(form, '[data-wdc-sender-pickup-city]') || 'Новосибирск',
+      region: 'Новосибирская область',
+      postcode: '',
+      address: fieldValue(form, '[data-wdc-sender-shipment-point-address]'),
+      fiasId: '',
+      garId: '',
+      locationId: '',
+      lat: '',
+      lng: ''
+    };
+  }
+
+  function createPickupPicker(form, options) {
+    const settings = Object.assign({ sender: false }, options || {});
     const config = window.wdcShipmentsAdmin || {};
-    const context = pickupContext(form);
-    const codeDisplay = pickupUsesCodeDisplay(form);
+    const context = settings.context || pickupContext(form);
+    const codeDisplay = settings.sender || context.pickupFamily === 'cdek:pickup';
     const codeLabel = codeDisplay ? 'Код ПВЗ' : 'Индекс';
-    const pickerTitle = codeDisplay ? 'Выбор ПВЗ СДЭК' : 'Выбор ПВЗ / ОПС';
+    const pickerTitle = settings.title || (codeDisplay ? 'Выбор ПВЗ СДЭК' : 'Выбор ПВЗ / ОПС');
     window.wdcPickupCheckout = Object.assign({}, window.wdcPickupCheckout || {}, {
       mapProvider: config.mapProvider || 'leaflet',
       yandexApiKeyPresent: !!config.yandexApiKeyPresent,
@@ -995,7 +1205,11 @@
     }
 
     function choose(point) {
-      updatePickupDraft(form, point);
+      if (typeof settings.onChoose === 'function') {
+        settings.onChoose(point);
+      } else {
+        updatePickupDraft(form, point);
+      }
       close();
     }
 
@@ -1090,7 +1304,7 @@
       }
       searchMarker = null;
       status.textContent = 'Поиск...';
-      pickupSearchRequest(form, value, mode === 'location' ? 2000 : 100, controller.signal, mode)
+      pickupSearchRequest(form, value, mode === 'location' ? 2000 : 100, controller.signal, mode, context)
         .then((found) => {
           points = found;
           status.textContent = points.length ? 'Найдено: ' + points.length : 'ПВЗ не найдены.';
@@ -1159,7 +1373,7 @@
       }, 50);
     }
 
-    query.value = currentPickupQuery(form);
+    query.value = currentPickupQuery(form, context);
     query.focus();
     if (query.value || context.city || context.postcode || context.address || context.locationId || context.fiasId || context.garId) runSearch('location');
   }
@@ -1213,10 +1427,12 @@
         return;
       }
       const row = remove.closest('[data-wdc-place]');
+      const removedNumber = row ? Array.from(container.querySelectorAll('[data-wdc-place]')).indexOf(row) + 1 : 0;
+      const form = findShipmentForm(remove) || findShipmentForm(container);
+      if (form && removedNumber > 0) mergeRowsFromRemovedPlace(form, removedNumber);
       if (row) row.remove();
       renumberPlaces(container);
       updateRemoveButtons(container);
-      const form = findShipmentForm(remove) || findShipmentForm(container);
       if (form) updateCdekPlaceOptions(form);
       if (form) requestPreview(form);
       return;
@@ -1234,16 +1450,47 @@
       return;
     }
 
-    const minus = event.target.closest('[data-wdc-cdek-minus], [data-wdc-cdek-plus]');
-    if (minus) {
-      const row = minus.closest('[data-wdc-cdek-item-row]');
-      const form = findShipmentForm(minus);
-      const input = row && row.querySelector('[data-wdc-cdek-qty]');
-      if (input) {
-        const delta = minus.matches('[data-wdc-cdek-plus]') ? 1 : -1;
-        const max = parseInt(input.max || '999', 10) || 999;
-        input.value = String(Math.max(1, Math.min(max, (parseInt(input.value || '1', 10) || 1) + delta)));
+    const removeSplit = event.target.closest('[data-wdc-remove-cdek-split]');
+    if (removeSplit) {
+      const row = removeSplit.closest('[data-wdc-cdek-item-row]');
+      const form = findShipmentForm(removeSplit);
+      const groupKey = row && row.getAttribute('data-group-key');
+      if (row) row.remove();
+      if (form) rebalanceCdekGroup(form, groupKey);
+      if (form) updateCdekPlaceOptions(form);
+      if (form) schedulePreview(form);
+      return;
+    }
+
+    const addManualItem = event.target.closest('[data-wdc-add-manual-cdek-item]');
+    if (addManualItem) {
+      addManualCdekItemRow(addManualItem);
+      return;
+    }
+
+    const removeManualItem = event.target.closest('[data-wdc-remove-manual-cdek-item]');
+    if (removeManualItem) {
+      const row = removeManualItem.closest('[data-wdc-cdek-item-row]');
+      const form = findShipmentForm(removeManualItem);
+      if (row) row.remove();
+      if (form) updateCdekPlaceOptions(form);
+      if (form) schedulePreview(form);
+      return;
+    }
+
+    const productChoice = event.target.closest('[data-wdc-product-search-choice]');
+    if (productChoice) {
+      const row = productChoice.closest('[data-wdc-cdek-item-row]');
+      const form = findShipmentForm(productChoice);
+      let product = null;
+      try {
+        product = JSON.parse(productChoice.getAttribute('data-product') || '{}');
+      } catch (error) {
+        product = null;
       }
+      applyProductToManualRow(row, product);
+      const results = row && row.querySelector('[data-wdc-product-search-results]');
+      if (results) results.hidden = true;
       if (form) updateCdekPlaceOptions(form);
       if (form) schedulePreview(form);
       return;
@@ -1253,6 +1500,23 @@
     if (openPickupPicker) {
       const form = findShipmentForm(openPickupPicker);
       if (form) createPickupPicker(form);
+      return;
+    }
+
+    const openSenderPickupPicker = event.target.closest('[data-wdc-open-sender-pickup-picker]');
+    if (openSenderPickupPicker) {
+      const form = findShipmentForm(openSenderPickupPicker);
+      if (form) {
+        const context = senderPickupContext(form);
+        createPickupPicker(form, {
+          sender: true,
+          title: 'Выбор ПВЗ отправителя СДЭК',
+          context: context,
+          onChoose: function (point) {
+            updateSenderPickupDraft(form, point);
+          }
+        });
+      }
       return;
     }
 
@@ -1428,11 +1692,31 @@
     if (event.target.matches('[data-wdc-integer-input]')) {
       cleanIntegerInput(event.target);
       const integerForm = findShipmentForm(event.target);
+      const row = event.target.closest('[data-wdc-cdek-item-row]');
+      if (integerForm && row && row.hasAttribute('data-wdc-split-row') && event.target.matches('[data-wdc-cdek-qty]')) {
+        rebalanceCdekGroup(integerForm, row.getAttribute('data-group-key') || '');
+      }
       if (integerForm) {
         updateScenarioSections(integerForm);
         updateCdekPlaceOptions(integerForm);
         schedulePreview(integerForm);
       }
+      return;
+    }
+    if (event.target.matches('[data-wdc-decimal-input]')) {
+      cleanDecimalInput(event.target, parseInt(event.target.getAttribute('data-wdc-decimal-input') || '2', 10) || 2);
+      const decimalForm = findShipmentForm(event.target);
+      if (decimalForm) {
+        updateCdekPlaceOptions(decimalForm);
+        schedulePreview(decimalForm);
+      }
+      return;
+    }
+    if (event.target.matches('[data-wdc-product-search-input]')) {
+      window.clearTimeout(event.target._wdcProductSearchTimer);
+      event.target._wdcProductSearchTimer = window.setTimeout(function () {
+        searchProductsForManualItem(event.target);
+      }, 250);
       return;
     }
     const form = findShipmentForm(event.target);
