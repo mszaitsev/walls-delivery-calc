@@ -178,7 +178,9 @@ final class RulesAdminPage {
 
 		<div class="wdc-rules-toolbar">
 			<a class="button button-primary" href="<?php echo esc_url( $this->page_url( array( 'new_rule' => 1 ) ) ); ?>"><?php echo esc_html__( 'Добавить правило', 'walls-delivery-calc' ); ?></a>
-			<a class="button" href="#wdc-rules-simulation"><?php echo esc_html__( 'Проверить правила', 'walls-delivery-calc' ); ?></a>
+			<?php if ( $this->context()->allow_simulation ) : ?>
+				<a class="button" href="#wdc-rules-simulation"><?php echo esc_html__( 'Проверить правила', 'walls-delivery-calc' ); ?></a>
+			<?php endif; ?>
 		</div>
 
 		<section class="wdc-rules-scope">

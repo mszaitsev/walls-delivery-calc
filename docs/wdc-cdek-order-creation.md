@@ -1,6 +1,8 @@
 # WDC CDEK Order Creation
 
-Version: 0.51.3.
+Version: 0.52.0.
+
+0.52.0 update: CDEK shipments are now included in the shared `WDC -> Статусы` auto-sync loop controlled by the existing `Автообновление статусов отправлений` setting. The dispatcher reuses `CdekOrderStatusService`, so automatic refresh follows the same latest non-deleted `entity.statuses[]` logic as the order metabox `Обновить статус` button, saves raw CDEK status fields, applies `CdekStatusMappingService` to `universal_status_code`/label, and then runs the carrier-neutral WooCommerce order status mapping when enabled. CDEK auto-sync throttles status API calls with a 10 ms pause between CDEK requests and reports counts in diagnostics under `updates_by_carrier[cdek]`.
 
 0.51.3 update: after CDEK BARCODE status becomes `READY`, the admin UI now downloads the label with `fetch()` and a Blob/Object URL instead of a hidden iframe. The browser response is checked for HTTP success, PDF content type and non-empty blob size; failures show a visible toast. The server-side ready-PDF download path also rejects empty bodies, failed HTTP responses and explicit non-PDF content types.
 
