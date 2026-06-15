@@ -476,6 +476,7 @@
       option.value = String(item.object_code || '');
       option.textContent = (item.title || item.object_code || '').toString();
       if (item.selected_missing) option.dataset.selectedMissing = '1';
+      if (item.delivery_mode) option.dataset.deliveryMode = String(item.delivery_mode);
       if (option.value === previous) option.selected = true;
       tariff.appendChild(option);
     });
@@ -487,6 +488,7 @@
     tariff.disabled = !hasTariffs;
     if (message) message.hidden = hasTariffs;
     updateDeclaredValueFields(form);
+    updateCdekDeliveryModeUi(form);
     updateCreateAvailability(form);
     if (!hasTariffs && window.console && typeof window.console.warn === 'function') {
       window.console.warn('WDC shipments: no enabled tariffs for selected service.', {
@@ -508,6 +510,7 @@
     const courier = form.querySelector('[data-wdc-courier-section]');
     if (pickup) pickup.hidden = deliveryType !== 'pickup';
     if (courier) courier.hidden = deliveryType !== 'courier';
+    updateCdekDeliveryModeUi(form);
     updateCreateAvailability(form);
   }
 
@@ -641,6 +644,25 @@
       lat: fieldValue(form, '[data-wdc-pickup-location-lat]'),
       lng: fieldValue(form, '[data-wdc-pickup-location-lng]')
     }, override || {});
+  }
+
+  function selectedDeliveryMode(form) {
+    const tariff = form.querySelector('[data-wdc-tariff-select]');
+    const option = tariff && tariff.options[tariff.selectedIndex] ? tariff.options[tariff.selectedIndex] : null;
+    const fromOption = option ? Number(option.dataset.deliveryMode || 0) : 0;
+    if (fromOption) return fromOption;
+    const item = selectedTariff(form);
+    return item ? Number(item.delivery_mode || 0) : 0;
+  }
+
+  function updateCdekDeliveryModeUi(form) {
+    const mode = selectedDeliveryMode(form);
+    const commentRow = form.querySelector('[data-wdc-cdek-courier-comment-row]');
+    if (commentRow) commentRow.hidden = ![1, 3].includes(mode);
+    const senderDoor = form.querySelector('[data-wdc-cdek-sender-door]');
+    const senderWarehouse = form.querySelector('[data-wdc-cdek-sender-warehouse]');
+    if (senderDoor) senderDoor.hidden = ![1, 2].includes(mode);
+    if (senderWarehouse) senderWarehouse.hidden = [1, 2].includes(mode);
   }
 
   function pickupUsesCodeDisplay(form) {

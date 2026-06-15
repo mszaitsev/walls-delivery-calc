@@ -37,6 +37,10 @@ final class CdekCreateRequestBuilder {
 			'packages' => $this->packages( $request ),
 			'print' => self::PRINT_TYPE,
 		);
+		$comment = $this->comment( $request );
+		if ( '' !== $comment ) {
+			$payload['comment'] = $comment;
+		}
 
 		if ( in_array( $mode, array( 1, 2 ), true ) ) {
 			$payload['from_location'] = $this->from_location();
@@ -358,6 +362,13 @@ final class CdekCreateRequestBuilder {
 		}
 
 		return strtoupper( preg_replace( '/[^A-Z0-9_\-]/', '', strtoupper( $code ) ) ?? '' );
+	}
+
+	private function comment( ShipmentCreateRequest $request ): string {
+		$comment = trim( (string) ( $request->meta['cdek_courier_comment'] ?? $request->meta['comment'] ?? '' ) );
+		$comment = preg_replace( '/\s+/', ' ', $comment ) ?? $comment;
+
+		return function_exists( 'mb_substr' ) ? mb_substr( $comment, 0, 255 ) : substr( $comment, 0, 255 );
 	}
 
 	private function order_number( ShipmentCreateRequest $request ): string {

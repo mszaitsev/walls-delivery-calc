@@ -299,9 +299,11 @@ final class WdcRecalcCarrier implements CarrierAdapterInterface {
 }
 
 final class WdcRecalcDadataSuggestionClient implements AddressSuggestionClientInterface {
+	public array $requests = array();
 	public function __construct( private bool $with_coordinates = true ) {}
 
 	public function suggest( string $stage, string $query, array $context = array() ): array {
+		$this->requests[] = compact( 'stage', 'query', 'context' );
 		if ( str_contains( $query, 'варианты' ) ) {
 			$first = array(
 			'geo_lat' => $this->with_coordinates ? '55.0401' : '',
@@ -1256,6 +1258,7 @@ $nsk_location = array(
 	'country_code' => 'RU',
 	'fias_id' => 'nsk-fias',
 );
+$requests_before_apartment = count( $address_client->requests );
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $nsk_location ), 'address_line' => 'Новосибирск, некрасова, д 63/1, кв 10' );
 try {
 	$controller->ajax_normalize_address();
@@ -1265,6 +1268,7 @@ try {
 	recalc_smoke_assert( $response->success && ! empty( $address['normalized'] ) && empty( $address['fallback'] ), 'Address normalization with apartment must return normalized non-fallback payload.' );
 	recalc_smoke_assert( str_contains( (string) ( $address['address_1'] ?? '' ), 'Некрасова' ) && str_contains( (string) ( $address['address_1'] ?? '' ), '63/1' ) && str_contains( (string) ( $address['address_1'] ?? '' ), '10' ), 'Apartment address normalization must keep street, house and flat in address_1.' );
 	recalc_smoke_assert( '' === (string) ( $address['address_2'] ?? '' ), 'Apartment address normalization must not put flat into address_2.' );
+	recalc_smoke_assert( 'Новосибирск, некрасова, д 63/1' === (string) ( $address_client->requests[ $requests_before_apartment ]['query'] ?? '' ), 'Admin apartment address normalization must send DaData query without flat suffix.' );
 	recalc_smoke_assert( ! isset( $response->data['debug'] ), 'Address normalization endpoint must not expose temporary debug payload.' );
 }
 

@@ -199,6 +199,7 @@ $sync = new CdekTariffSyncService( $client, $repository, new Logger() );
 $rows = $sync->fetch_from_api();
 cdek_tariffs_sync_assert( count( $rows ) === 2, 'CDEK alltariffs sync must normalize delivery modes into tariff rows.' );
 cdek_tariffs_sync_assert( DeliveryType::PICKUP === (string) $rows[0]['delivery_type'] && DeliveryType::COURIER === (string) $rows[1]['delivery_type'], 'CDEK delivery modes must map warehouse destination to pickup and door destination to courier.' );
+cdek_tariffs_sync_assert( 4 === (int) $rows[0]['delivery_mode'] && 3 === (int) $rows[1]['delivery_mode'], 'CDEK alltariffs sync must keep exact delivery_mode values.' );
 cdek_tariffs_sync_assert( 'Посылка склад-склад' === (string) $rows[0]['tariff_name_from_cdek'] && 'Посылка склад-дверь' === (string) $rows[1]['tariff_name_from_cdek'], 'CDEK alltariffs sync must combine tariff name and delivery mode name for site-readable rows.' );
 cdek_tariffs_sync_assert( count( array_filter( $http->requests, static fn( array $request ): bool => 'GET' === $request['method'] && str_contains( $request['url'], '/v2/calculator/alltariffs' ) ) ) === 1, 'CDEK tariff sync must call GET /v2/calculator/alltariffs.' );
 
@@ -206,9 +207,11 @@ $result = $sync->sync_rows( $rows );
 cdek_tariffs_sync_assert( 2 === $result['added'] && 2 === count( $repository->all() ), 'Initial CDEK tariff sync must add tariffs.' );
 cdek_tariffs_sync_assert( null !== $repository->find_by_code( '136' ) && null !== $repository->find_by_code( '137' ), 'Synced tariffs must be findable by code.' );
 $synced_pickup = $repository->find_by_code( '136' );
+cdek_tariffs_sync_assert( is_array( $synced_pickup ) && 4 === (int) $synced_pickup['delivery_mode'], 'CDEK repository must store pickup delivery_mode.' );
 cdek_tariffs_sync_assert( is_array( $synced_pickup ) && 0.1 === $synced_pickup['weight_min'] && 30.0 === $synced_pickup['weight_max'] && 50.0 === $synced_pickup['weight_calc_max'], 'CDEK sync must store weight limits.' );
 cdek_tariffs_sync_assert( is_array( $synced_pickup ) && 10.0 === $synced_pickup['length_min'] && 120.0 === $synced_pickup['length_max'] && 10.0 === $synced_pickup['width_min'] && 80.0 === $synced_pickup['width_max'] && 1.0 === $synced_pickup['height_min'] && 80.0 === $synced_pickup['height_max'], 'CDEK sync must store dimension limits.' );
 $synced_courier = $repository->find_by_code( '137' );
+cdek_tariffs_sync_assert( is_array( $synced_courier ) && 3 === (int) $synced_courier['delivery_mode'], 'CDEK repository must store courier delivery_mode.' );
 cdek_tariffs_sync_assert( is_array( $synced_courier ) && null === $synced_courier['weight_min'] && null === $synced_courier['weight_max'] && 100.0 === $synced_courier['weight_calc_max'], 'CDEK sync must store empty API limits as null.' );
 
 $format_for_key = static function ( array $data, array $formats, string $key ): ?string {
@@ -224,12 +227,14 @@ $sql_repository->upsert_from_sync(
 		'tariff_code' => '200',
 		'tariff_name_from_cdek' => 'Null limits',
 		'delivery_type' => DeliveryType::PICKUP,
+		'delivery_mode' => 4,
 		'weight_min' => null,
 		'weight_max' => '',
 		'weight_calc_max' => 12.5,
 	)
 );
 cdek_tariffs_sync_assert( null === $sql_db->last_insert_data['weight_min'] && null === $sql_db->last_insert_data['weight_max'] && 12.5 === $sql_db->last_insert_data['weight_calc_max'], 'CDEK SQL insert must keep null limits as null and numeric limits as numbers.' );
+cdek_tariffs_sync_assert( 4 === (int) $sql_db->last_insert_data['delivery_mode'] && '%d' === $format_for_key( $sql_db->last_insert_data, $sql_db->last_insert_formats, 'delivery_mode' ), 'CDEK SQL insert must persist delivery_mode as integer.' );
 cdek_tariffs_sync_assert( '%f' !== $format_for_key( $sql_db->last_insert_data, $sql_db->last_insert_formats, 'weight_min' ) && '%f' !== $format_for_key( $sql_db->last_insert_data, $sql_db->last_insert_formats, 'weight_max' ) && '%f' === $format_for_key( $sql_db->last_insert_data, $sql_db->last_insert_formats, 'weight_calc_max' ), 'CDEK SQL insert must not format null limits as floats.' );
 $sql_repository->upsert_from_sync(
 	array(
@@ -246,17 +251,19 @@ cdek_tariffs_sync_assert( '%f' !== $format_for_key( $sql_db->last_update_data, $
 
 $repository->save_admin_rows(
 	array(
-		array( 'tariff_code' => '136', 'custom_title' => 'СДЭК Эконом', 'delivery_type' => DeliveryType::PICKUP, 'admin_comment' => 'site title', 'is_active' => 1 ),
-		array( 'tariff_code' => '137', 'custom_title' => 'СДЭК Курьер', 'delivery_type' => DeliveryType::COURIER, 'admin_comment' => 'courier title', 'is_active' => 0 ),
+		array( 'tariff_code' => '136', 'custom_title' => 'СДЭК Эконом', 'delivery_type' => DeliveryType::PICKUP, 'delivery_mode' => 4, 'admin_comment' => 'site title', 'is_active' => 1 ),
+		array( 'tariff_code' => '137', 'custom_title' => 'СДЭК Курьер', 'delivery_type' => DeliveryType::COURIER, 'delivery_mode' => 1, 'admin_comment' => 'courier title', 'is_active' => 0 ),
 	)
 );
+$admin_edited_courier = $repository->find_by_code( '137' );
+cdek_tariffs_sync_assert( is_array( $admin_edited_courier ) && 1 === (int) $admin_edited_courier['delivery_mode'], 'CDEK admin tariff save must allow manual delivery_mode edit.' );
 $http->all_tariffs_groups[0]['tariff_name'] = 'Посылка обновленная';
 $second = $sync->sync_rows( $sync->fetch_from_api() );
 cdek_tariffs_sync_assert( 0 === $second['added'] && 2 === count( $repository->all() ), 'Repeated CDEK sync must not create duplicates.' );
 $pickup = $repository->find_by_code( '136' );
 $courier = $repository->find_by_code( '137' );
 cdek_tariffs_sync_assert( is_array( $pickup ) && 'СДЭК Эконом' === (string) $pickup['custom_title'] && 'site title' === (string) $pickup['admin_comment'] && 1 === (int) $pickup['is_active'], 'CDEK sync must preserve custom title/comment/active for existing pickup tariff.' );
-cdek_tariffs_sync_assert( is_array( $courier ) && 'СДЭК Курьер' === (string) $courier['custom_title'] && 0 === (int) $courier['is_active'], 'CDEK sync must preserve inactive state for existing courier tariff.' );
+cdek_tariffs_sync_assert( is_array( $courier ) && 'СДЭК Курьер' === (string) $courier['custom_title'] && 0 === (int) $courier['is_active'] && 3 === (int) $courier['delivery_mode'], 'CDEK sync must preserve inactive state and refresh delivery_mode for existing courier tariff.' );
 
 $carrier = new CdekCarrier( $settings, $client, new CdekLocationResolver( $client, new Logger() ), new Logger(), $repository );
 $pickup_quote = $carrier->quote( cdek_tariffs_sync_request( DeliveryType::PICKUP ) );

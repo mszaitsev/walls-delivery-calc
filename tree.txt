@@ -88,6 +88,7 @@ C:.
 |           0026_unify_russian_post_domestic_service.php
 |           0027_create_cdek_tariffs_table.php
 |           0028_add_cdek_tariff_limits.php
+|           0029_add_cdek_tariff_delivery_mode.php
 |
 +---docs
 |       development-workflow.md

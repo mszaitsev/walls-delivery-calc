@@ -252,6 +252,7 @@ function cdek_order_request( string $delivery_type, int $mode, array $overrides 
 			'cdek_city_name' => $overrides['cdek_city_name'] ?? '',
 			'cdek_postal_code' => $overrides['cdek_postal_code'] ?? '',
 			'cdek_delivery_address' => $overrides['cdek_delivery_address'] ?? '',
+			'cdek_courier_comment' => $overrides['cdek_courier_comment'] ?? '',
 			'cdek_item_rows' => $overrides['cdek_item_rows'] ?? array(
 				array( 'item_key' => '1', 'ordered_quantity' => 5, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-1', 'amount' => 5, 'cost' => $overrides['unit_cost'] ?? 1000, 'weight' => 100 ),
 			),
@@ -329,6 +330,14 @@ $courier_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 3
 cdek_order_assert( isset( $courier_payload['shipment_point'], $courier_payload['to_location'] ) && ! isset( $courier_payload['delivery_point'], $courier_payload['from_location'] ), 'Warehouse-door courier must use shipment_point and to_location only.' );
 $door_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 1 ) );
 cdek_order_assert( isset( $door_payload['from_location'], $door_payload['to_location'] ) && ! isset( $door_payload['shipment_point'], $door_payload['delivery_point'] ), 'Door-door courier must use from_location and to_location only.' );
+$door_warehouse_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 2, array( 'delivery_point' => 'KEM7' ) ) );
+cdek_order_assert( isset( $door_warehouse_payload['from_location'], $door_warehouse_payload['delivery_point'] ) && ! isset( $door_warehouse_payload['shipment_point'], $door_warehouse_payload['to_location'] ), 'Door-warehouse CDEK order must use from_location and delivery_point only.' );
+$warehouse_warehouse_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4, array( 'delivery_point' => 'KEM7' ) ) );
+cdek_order_assert( isset( $warehouse_warehouse_payload['shipment_point'], $warehouse_warehouse_payload['delivery_point'] ) && ! isset( $warehouse_warehouse_payload['from_location'], $warehouse_warehouse_payload['to_location'] ), 'Warehouse-warehouse CDEK order must use shipment_point and delivery_point only.' );
+$comment_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 3, array( 'cdek_courier_comment' => str_repeat( 'А', 300 ) ) ) );
+cdek_order_assert( isset( $comment_payload['comment'] ) && 255 === mb_strlen( (string) $comment_payload['comment'] ), 'CDEK courier comment must be sent and trimmed to 255 characters.' );
+$empty_comment_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 3, array( 'cdek_courier_comment' => '' ) ) );
+cdek_order_assert( ! isset( $empty_comment_payload['comment'] ), 'Empty CDEK courier comment must not be sent.' );
 $normalized_courier_payload = $builder->build(
 	cdek_order_request(
 		DeliveryType::COURIER,

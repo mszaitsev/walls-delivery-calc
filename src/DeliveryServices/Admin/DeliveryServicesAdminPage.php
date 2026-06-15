@@ -921,10 +921,10 @@ final class DeliveryServicesAdminPage {
 				<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 				<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 				<table class="widefat striped">
-					<thead><tr><th>Код</th><th>Название СДЭК</th><th>Ограничения</th><th>Название на сайте</th><th>Тип доставки</th><th>Комментарий</th><th>Активен</th><th>Последний sync</th></tr></thead>
+					<thead><tr><th>Код</th><th>Название СДЭК</th><th>Ограничения</th><th>Название на сайте</th><th>Тип доставки</th><th>Режим тарифа</th><th>Комментарий</th><th>Активен</th><th>Последний sync</th></tr></thead>
 					<tbody>
 						<?php if ( array() === $rows ) : ?>
-							<tr><td colspan="8"><?php echo esc_html__( 'Тарифы еще не загружены.', 'walls-delivery-calc' ); ?></td></tr>
+							<tr><td colspan="9"><?php echo esc_html__( 'Тарифы еще не загружены.', 'walls-delivery-calc' ); ?></td></tr>
 						<?php endif; ?>
 						<?php foreach ( $rows as $row ) : ?>
 							<?php $code = (string) $row['tariff_code']; ?>
@@ -934,6 +934,7 @@ final class DeliveryServicesAdminPage {
 								<td><?php echo wp_kses_post( $this->cdek_tariff_limits_html( $row ) ); ?></td>
 								<td><input class="regular-text" name="cdek_tariff_custom_title[<?php echo esc_attr( $code ); ?>]" value="<?php echo esc_attr( (string) $row['custom_title'] ); ?>"></td>
 								<td><?php $this->cdek_delivery_type_select( $code, (string) $row['delivery_type'] ); ?></td>
+								<td><?php $this->cdek_delivery_mode_select( $code, (int) ( $row['delivery_mode'] ?? 0 ) ); ?></td>
 								<td><textarea name="cdek_tariff_admin_comment[<?php echo esc_attr( $code ); ?>]" rows="2" class="large-text"><?php echo esc_textarea( (string) $row['admin_comment'] ); ?></textarea></td>
 								<td><label><input type="checkbox" name="cdek_tariff_is_active[<?php echo esc_attr( $code ); ?>]" value="1" <?php checked( ! empty( $row['is_active'] ) ); ?>> <?php echo esc_html__( 'Да', 'walls-delivery-calc' ); ?></label></td>
 								<td><?php echo esc_html( (string) ( $row['last_sync_at'] ?? '-' ) ); ?></td>
@@ -1005,6 +1006,30 @@ final class DeliveryServicesAdminPage {
 			<option value="<?php echo esc_attr( DeliveryType::COURIER ); ?>" <?php selected( DeliveryType::COURIER, $value ); ?>><?php echo esc_html__( 'до двери', 'walls-delivery-calc' ); ?></option>
 		</select>
 		<?php
+	}
+
+	private function cdek_delivery_mode_select( string $code, int $value ): void {
+		$value = in_array( $value, array( 1, 2, 3, 4 ), true ) ? $value : 0;
+		?>
+		<select name="cdek_tariff_delivery_mode[<?php echo esc_attr( $code ); ?>]">
+			<?php foreach ( $this->cdek_delivery_mode_options() as $mode => $label ) : ?>
+				<option value="<?php echo esc_attr( (string) $mode ); ?>" <?php selected( $mode, $value ); ?>><?php echo esc_html( $label ); ?></option>
+			<?php endforeach; ?>
+		</select>
+		<?php
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function cdek_delivery_mode_options(): array {
+		return array(
+			0 => __( 'Не определен', 'walls-delivery-calc' ),
+			1 => __( 'Дверь-дверь', 'walls-delivery-calc' ),
+			2 => __( 'Дверь-склад', 'walls-delivery-calc' ),
+			3 => __( 'Склад-дверь', 'walls-delivery-calc' ),
+			4 => __( 'Склад-склад', 'walls-delivery-calc' ),
+		);
 	}
 
 	/**
@@ -1869,6 +1894,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		$codes = is_array( $_POST['cdek_tariff_code'] ?? null ) ? wp_unslash( $_POST['cdek_tariff_code'] ) : array();
 		$custom_titles = is_array( $_POST['cdek_tariff_custom_title'] ?? null ) ? wp_unslash( $_POST['cdek_tariff_custom_title'] ) : array();
 		$delivery_types = is_array( $_POST['cdek_tariff_delivery_type'] ?? null ) ? wp_unslash( $_POST['cdek_tariff_delivery_type'] ) : array();
+		$delivery_modes = is_array( $_POST['cdek_tariff_delivery_mode'] ?? null ) ? wp_unslash( $_POST['cdek_tariff_delivery_mode'] ) : array();
 		$comments = is_array( $_POST['cdek_tariff_admin_comment'] ?? null ) ? wp_unslash( $_POST['cdek_tariff_admin_comment'] ) : array();
 		$active = is_array( $_POST['cdek_tariff_is_active'] ?? null ) ? wp_unslash( $_POST['cdek_tariff_is_active'] ) : array();
 		$rows = array();
@@ -1881,6 +1907,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 				'tariff_code' => $code,
 				'custom_title' => sanitize_text_field( (string) ( $custom_titles[ $code ] ?? '' ) ),
 				'delivery_type' => DeliveryType::COURIER === (string) ( $delivery_types[ $code ] ?? '' ) ? DeliveryType::COURIER : DeliveryType::PICKUP,
+				'delivery_mode' => in_array( (int) ( $delivery_modes[ $code ] ?? 0 ), array( 1, 2, 3, 4 ), true ) ? (int) $delivery_modes[ $code ] : 0,
 				'admin_comment' => sanitize_textarea_field( (string) ( $comments[ $code ] ?? '' ) ),
 				'is_active' => isset( $active[ $code ] ),
 			);

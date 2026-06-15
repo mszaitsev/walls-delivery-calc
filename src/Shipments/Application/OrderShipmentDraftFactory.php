@@ -281,11 +281,11 @@ final class OrderShipmentDraftFactory {
 		$pickup = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
 		$api = is_array( $calculation['api'] ?? null ) ? $calculation['api'] : array();
 		$rate_meta = $this->rate_meta_data( $order );
-		$response_tariff = is_array( $api['response_tariff_sanitized'] ?? null ) ? $api['response_tariff_sanitized'] : array();
-		$delivery_mode = $this->cdek_delivery_mode_from_calculation( $delivery_type, $calculation, $api, $response_tariff );
-		$cdek_to_city_code = $this->cdek_city_code_from_saved_data( $calculation, $rate_meta );
 		$tariff_code = preg_replace( '/\D+/', '', (string) ( $calculation['selected_tariff_object'] ?? $this->meta_string( $order, '_wdc_platform_tariff_object' ) ) ) ?: '';
 		$tariff_row = $this->cdek_tariff_row( $tariff_code );
+		$response_tariff = is_array( $api['response_tariff_sanitized'] ?? null ) ? $api['response_tariff_sanitized'] : array();
+		$delivery_mode = $this->cdek_delivery_mode_from_calculation( $delivery_type, $calculation, $api, $response_tariff, $tariff_row );
+		$cdek_to_city_code = $this->cdek_city_code_from_saved_data( $calculation, $rate_meta );
 		$tariff_title = $this->cdek_tariff_title( $tariff_row, $tariff_code, (string) ( $calculation['selected_tariff_title'] ?? $response_tariff['tariff_name'] ?? '' ) );
 		$pickup_code = $this->cdek_pickup_code( $pickup, $this->meta_string( $order, '_wdc_platform_pickup_code' ) ?: $this->meta_string( $order, '_wdc_pickup_point_code' ) );
 		$pickup_row = $this->cdek_pickup_row( $pickup );
@@ -319,6 +319,10 @@ final class OrderShipmentDraftFactory {
 				'cdek_delivery_mode' => $delivery_mode,
 				'place_weight_hint_g' => $this->default_weight_g( $order, $items ),
 				'cdek_to_city_code' => $cdek_to_city_code,
+				'sender_city_code' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->sender_city_code() : 0,
+				'sender_city_name' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->sender_city_name() : '',
+				'sender_postal_code' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->sender_postal_code() : '',
+				'sender_address' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->sender_address() : '',
 				'shipment_point' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->shipment_point() : '',
 				'shipment_point_address' => $this->cdek_settings instanceof CdekSettings ? $this->cdek_settings->shipment_point_address() : '',
 				'delivery_point' => $pickup_code,
@@ -341,6 +345,13 @@ final class OrderShipmentDraftFactory {
 		$tariff_code = preg_replace( '/\D+/', '', (string) wp_unslash( $data['tariff_object'] ?? $base->meta['tariff_code'] ?? '' ) ) ?: '';
 		$tariff_row = $this->cdek_tariff_row( $tariff_code );
 		$tariff_title = $this->cdek_tariff_title( $tariff_row, $tariff_code, (string) ( $base->meta['tariff_title'] ?? '' ) );
+		$delivery_mode = $this->cdek_delivery_mode_from_calculation(
+			$delivery_type,
+			is_array( $base->meta['calculation_data'] ?? null ) ? $base->meta['calculation_data'] : array(),
+			is_array( $base->meta['calculation_data']['api'] ?? null ) ? $base->meta['calculation_data']['api'] : array(),
+			array(),
+			$tariff_row
+		);
 		$shipment_point = preg_replace( '/[^A-Z0-9_\-]/', '', strtoupper( sanitize_text_field( wp_unslash( $data['shipment_point'] ?? $data['sender_shipment_point'] ?? $base->meta['shipment_point'] ?? '' ) ) ) ) ?? '';
 		$shipment_point_address = sanitize_text_field( wp_unslash( $data['shipment_point_address'] ?? $data['sender_shipment_point_address'] ?? $base->meta['shipment_point_address'] ?? '' ) );
 		$pickup_row = DeliveryType::PICKUP === $delivery_type ? $this->cdek_pickup_row_from_admin_data( $data, $base->meta ) : array();
@@ -388,10 +399,11 @@ final class OrderShipmentDraftFactory {
 					'tariff_title' => $tariff_title,
 					'selected_tariff_title' => (string) ( $base->meta['selected_tariff_title'] ?? $base->meta['tariff_title'] ?? $tariff_title ),
 					'delivery_type' => $delivery_type,
-					'delivery_mode' => (int) ( $base->meta['delivery_mode'] ?? $base->meta['cdek_delivery_mode'] ?? 0 ),
-					'cdek_delivery_mode' => (int) ( $base->meta['cdek_delivery_mode'] ?? $base->meta['delivery_mode'] ?? 0 ),
+					'delivery_mode' => $delivery_mode,
+					'cdek_delivery_mode' => $delivery_mode,
 					'shipment_point' => $shipment_point,
 					'shipment_point_address' => $shipment_point_address,
+					'cdek_courier_comment' => $this->short_text_from_admin_data( $data, 'cdek_courier_comment', 255 ),
 					'courier_original_address' => $original_address,
 					'courier_original_hash' => $this->original_address_hash( $original_address ),
 					'normalized_address' => $normalized_address,
@@ -440,9 +452,10 @@ final class OrderShipmentDraftFactory {
 	 * @param array<string,mixed> $api
 	 * @param array<string,mixed> $response_tariff
 	 */
-	private function cdek_delivery_mode_from_calculation( string $delivery_type, array $calculation, array $api, array $response_tariff ): int {
+	private function cdek_delivery_mode_from_calculation( string $delivery_type, array $calculation, array $api, array $response_tariff, array $tariff_row = array() ): int {
 		$rate_meta = is_array( $calculation['rate_meta'] ?? null ) ? $calculation['rate_meta'] : array();
 		foreach ( array(
+			$tariff_row['delivery_mode'] ?? null,
 			$response_tariff['delivery_mode'] ?? null,
 			$api['delivery_mode'] ?? null,
 			$api['transtype'] ?? null,
@@ -814,6 +827,7 @@ final class OrderShipmentDraftFactory {
 				'object_code' => $code,
 				'title' => $this->cdek_tariff_label( $row, $code ),
 				'delivery_type' => $delivery_type,
+				'delivery_mode' => (int) ( $row['delivery_mode'] ?? 0 ),
 				'selected_missing' => false,
 			);
 		}
@@ -830,6 +844,7 @@ final class OrderShipmentDraftFactory {
 			'object_code' => $selected_code,
 			'title' => sprintf( '%s (%s)', $title, __( 'сохранен в заказе, не активен', 'walls-delivery-calc' ) ),
 			'delivery_type' => $delivery_type,
+			'delivery_mode' => (int) ( $request->meta['delivery_mode'] ?? $request->meta['cdek_delivery_mode'] ?? 0 ),
 			'selected_missing' => true,
 		);
 
@@ -921,6 +936,16 @@ final class OrderShipmentDraftFactory {
 	 */
 	private function decimal_from_admin_row( array $row, string $key ): float {
 		return max( 0.0, (float) str_replace( ',', '.', (string) wp_unslash( $row[ $key ] ?? '0' ) ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $data
+	 */
+	private function short_text_from_admin_data( array $data, string $key, int $max_length ): string {
+		$value = sanitize_text_field( wp_unslash( $data[ $key ] ?? '' ) );
+		$value = trim( preg_replace( '/\s+/', ' ', $value ) ?? $value );
+
+		return function_exists( 'mb_substr' ) ? mb_substr( $value, 0, $max_length ) : substr( $value, 0, $max_length );
 	}
 
 	private function original_address_hash( string $original_address ): string {

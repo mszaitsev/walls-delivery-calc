@@ -1,6 +1,8 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.48.4.
+Version: 0.50.3.
+
+0.50.3 tariff direction update: managed CDEK tariffs now store editable `delivery_mode` in addition to the pickup/courier presentation type. Sync fills it from CDEK API mode fields when available or from tariff names such as `дверь-дверь`, `дверь-склад`, `склад-дверь`, `склад-склад`; the admin tariff table exposes `Режим тарифа` for manual correction. Shipment creation uses this mode to choose CDEK order fields: door-origin tariffs use `from_location`, warehouse-origin tariffs use `shipment_point`, recipient-door tariffs use `to_location`, and recipient-warehouse tariffs use `delivery_point`.
 
 0.48.4 insurance update: the CDEK `Расчет тарифов` settings block lives on the service `Расчет` tab. The new `Цена страховки` setting stores a decimal percent from discounted goods total, for example `0,75`/`0.75` means `0.75%`; negative values clamp to `0`. Runtime CDEK tariff calculation computes `insurance_amount = cart_items_total_after_discounts * insurance_percent / 100` and adds it to each CDEK API `delivery_sum` before calculation rules, merge/dedup display and saved “Базовая стоимость API”. The checkout packaging weight is not part of the insured goods total.
 

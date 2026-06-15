@@ -691,7 +691,7 @@ final class CdekCarrier implements CarrierAdapterInterface {
 			'delivery_max_days' => $max,
 			'calendar_min' => $details['calendar_min'] ?? null,
 			'calendar_max' => $details['calendar_max'] ?? null,
-			'delivery_mode' => $details['delivery_mode'] ?? null,
+			'delivery_mode' => $details['delivery_mode'] ?? ( is_array( $managed_tariff ) ? ( $managed_tariff['delivery_mode'] ?? null ) : null ),
 			'request_payload_sanitized' => $payload,
 			'response_tariff_sanitized' => $this->sanitize_tariff( $details ),
 			'location' => array(

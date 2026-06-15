@@ -1,6 +1,10 @@
 # WDC CDEK Order Creation
 
-Version: 0.50.1.
+Version: 0.50.3.
+
+0.50.3 update: CDEK courier order creation now follows the documented direction fields for `POST /v2/orders`. Managed tariffs carry editable `delivery_mode`: `1` door-door uses `from_location` + `to_location`, `2` door-warehouse uses `from_location` + `delivery_point`, `3` warehouse-door uses `shipment_point` + `to_location`, and `4` warehouse-warehouse uses `shipment_point` + `delivery_point`; incompatible pairs are not sent together. Door-origin modes use sender city/postcode/address settings, while warehouse-origin modes keep the sender CDEK pickup point. The modal shows `Комментарий курьеру` only for recipient-door CDEK modes and sends it as `comment` when present, trimmed to CDEK's 255 character limit.
+
+Admin delivery recalculation now uses the shared apartment/office/premise splitter before DaData normalization. Inputs such as `125252, Москва, Ходынский б-р, д 13, кв 150` are normalized by querying the house address without the flat suffix and then restoring the flat into the saved shipping address.
 
 0.50.1 update: CDEK courier address preparation still uses DaData to verify the recipient address and build the door-delivery address fields, but the CDEK city code now reuses already known calculation data first: prepared `normalized_address.fields.cdek_city_code`, `_wdc_delivery_calculation_data.api.cdek_to_city_code`, `_wdc_platform_rate_meta.location.cdek_to_city_code`, and saved `request_payload_sanitized.to_location.code`. `GET /v2/location/cities` is only a fallback through the shared `CdekLocationResolver`, so admin recalculation and shipment creation no longer lose a known city code or produce `to_location.code = 0`.
 

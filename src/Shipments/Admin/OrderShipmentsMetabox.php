@@ -232,6 +232,15 @@ final class OrderShipmentsMetabox {
 				break;
 			}
 		}
+		$selected_delivery_mode = (int) ( $meta['delivery_mode'] ?? $meta['cdek_delivery_mode'] ?? 0 );
+		foreach ( $selected_service_tariffs as $tariff ) {
+			if ( $selected_tariff_object === (string) ( $tariff['object_code'] ?? '' ) && in_array( (int) ( $tariff['delivery_mode'] ?? 0 ), array( 1, 2, 3, 4 ), true ) ) {
+				$selected_delivery_mode = (int) $tariff['delivery_mode'];
+				break;
+			}
+		}
+		$cdek_recipient_door = $is_cdek && in_array( $selected_delivery_mode, array( 1, 3 ), true );
+		$cdek_sender_door = $is_cdek && in_array( $selected_delivery_mode, array( 1, 2 ), true );
 		if ( '' === trim( $selected_tariff_title ) && '' !== $selected_tariff_object ) {
 			$selected_tariff_title = sprintf( __( 'тариф %s', 'walls-delivery-calc' ), $selected_tariff_object );
 		}
@@ -242,6 +251,7 @@ final class OrderShipmentsMetabox {
 		$shipment_point = (string) ( $meta['shipment_point'] ?? '' );
 		$shipment_point_address = (string) ( $meta['shipment_point_address'] ?? '' );
 		$shipment_point_display = implode( ', ', array_filter( array( $shipment_point, $shipment_point_address ), static fn( string $value ): bool => '' !== trim( $value ) ) );
+		$sender_from_door_display = implode( ', ', array_filter( array( (string) ( $meta['sender_city_name'] ?? '' ), (string) ( $meta['sender_address'] ?? '' ) ), static fn( string $value ): bool => '' !== trim( $value ) ) );
 		$default_declared_value_rub = max( 0, (int) ( $meta['default_declared_value_rub'] ?? 0 ) );
 		$default_declared_value_attr = $default_declared_value_rub > 0 ? (string) $default_declared_value_rub : '';
 		$declared_value_initial = $selected_tariff_has_declared_value ? $default_declared_value_attr : '';
@@ -366,6 +376,9 @@ final class OrderShipmentsMetabox {
 									<p class="description" data-wdc-normalized-status><?php echo esc_html( $normalized_status ); ?></p>
 									<label><span data-wdc-normalized-address-label><?php echo esc_html( $is_cdek ? __( 'Нормализованный адрес СДЭК', 'walls-delivery-calc' ) : __( 'Нормализованный адрес Почты России', 'walls-delivery-calc' ) ); ?></span><textarea rows="3" readonly data-wdc-normalized-address-display><?php echo esc_textarea( $normalized_display ); ?></textarea></label>
 									<p class="description" data-wdc-cdek-city-code-row <?php echo ( $is_cdek && ! empty( $normalized_address['fields']['cdek_city_code'] ) ) ? '' : 'hidden'; ?>><?php echo esc_html__( 'Код города СДЭК', 'walls-delivery-calc' ); ?>: <span data-wdc-cdek-city-code><?php echo esc_html( (string) ( $normalized_address['fields']['cdek_city_code'] ?? '' ) ); ?></span></p>
+									<?php if ( $is_cdek ) : ?>
+										<label data-wdc-cdek-courier-comment-row <?php echo $cdek_recipient_door ? '' : 'hidden'; ?>><?php echo esc_html__( 'Комментарий курьеру', 'walls-delivery-calc' ); ?><textarea name="cdek_courier_comment" rows="2" maxlength="255"><?php echo esc_textarea( (string) ( $meta['cdek_courier_comment'] ?? '' ) ); ?></textarea><span class="description"><?php echo esc_html__( 'Будет передан в СДЭК как комментарий к заказу. Не более 255 символов.', 'walls-delivery-calc' ); ?></span></label>
+									<?php endif; ?>
 								</div>
 							</section>
 							<section>
@@ -384,7 +397,7 @@ final class OrderShipmentsMetabox {
 											continue;
 										}
 										?>
-										<option value="<?php echo esc_attr( $tariff_object ); ?>" data-selected-missing="<?php echo ! empty( $tariff['selected_missing'] ) ? '1' : '0'; ?>" <?php selected( $selected_tariff_object, $tariff_object ); ?>><?php echo esc_html( (string) ( $tariff['title'] ?? $tariff_object ) ); ?></option>
+										<option value="<?php echo esc_attr( $tariff_object ); ?>" data-selected-missing="<?php echo ! empty( $tariff['selected_missing'] ) ? '1' : '0'; ?>" data-delivery-mode="<?php echo esc_attr( (string) (int) ( $tariff['delivery_mode'] ?? 0 ) ); ?>" <?php selected( $selected_tariff_object, $tariff_object ); ?>><?php echo esc_html( (string) ( $tariff['title'] ?? $tariff_object ) ); ?></option>
 									<?php endforeach; ?>
 								</select></label>
 								<p class="description" data-wdc-tariff-message<?php echo $tariff_message_hidden_attr; ?>><?php echo esc_html__( 'Для выбранной службы доставки нет включенных тарифов. Включите тариф на странице настроек службы доставки.', 'walls-delivery-calc' ); ?></p>
@@ -395,8 +408,14 @@ final class OrderShipmentsMetabox {
 									<input type="hidden" name="shipment_point_address" value="<?php echo esc_attr( $shipment_point_address ); ?>" data-wdc-sender-shipment-point-address>
 									<input type="hidden" name="sender_shipment_point_address" value="<?php echo esc_attr( $shipment_point_address ); ?>">
 									<input type="hidden" name="sender_pickup_city" value="Новосибирск" data-wdc-sender-pickup-city>
-									<p><strong><?php echo esc_html__( 'ПВЗ отправителя', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-sender-shipment-point-display><?php echo esc_html( '' !== $shipment_point_display ? $shipment_point_display : '-' ); ?></span></p>
-									<p><button type="button" class="button" data-wdc-open-sender-pickup-picker><?php echo esc_html__( 'Выбрать другой ПВЗ отправителя', 'walls-delivery-calc' ); ?></button></p>
+									<div data-wdc-cdek-sender-door <?php echo $cdek_sender_door ? '' : 'hidden'; ?>>
+										<p><strong><?php echo esc_html__( 'Отправитель', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html__( 'от двери', 'walls-delivery-calc' ); ?></p>
+										<p><strong><?php echo esc_html__( 'Адрес отправителя', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( '' !== $sender_from_door_display ? $sender_from_door_display : '-' ); ?></p>
+									</div>
+									<div data-wdc-cdek-sender-warehouse <?php echo $cdek_sender_door ? 'hidden' : ''; ?>>
+										<p><strong><?php echo esc_html__( 'ПВЗ отправителя', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-sender-shipment-point-display><?php echo esc_html( '' !== $shipment_point_display ? $shipment_point_display : '-' ); ?></span></p>
+										<p><button type="button" class="button" data-wdc-open-sender-pickup-picker><?php echo esc_html__( 'Выбрать другой ПВЗ отправителя', 'walls-delivery-calc' ); ?></button></p>
+									</div>
 								<?php else : ?>
 								<label><?php echo esc_html__( 'Индекс места приема', 'walls-delivery-calc' ); ?><select name="postoffice_code">
 									<?php foreach ( $postoffice_codes as $code ) : ?>
