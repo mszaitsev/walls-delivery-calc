@@ -33,6 +33,7 @@ use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\DeliveryRate;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
+use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Packaging\PackagingApplicationResult;
 use WallsShop\WDC\Packaging\PackagingWeightCalculator;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupImportStateService;
@@ -47,6 +48,7 @@ use WallsShop\WDC\Rules\Domain\Rule;
 use WallsShop\WDC\Rules\Domain\RuleCondition;
 use WallsShop\WDC\Rules\Storage\RuleRepository;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
+use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -77,7 +79,8 @@ final class DeliveryServicesAdminPage {
 		private ?CdekApiClient $cdek_api = null,
 		private ?CdekTariffRepository $cdek_tariffs = null,
 		private ?CdekTariffSyncService $cdek_tariff_sync = null,
-		private ?DeliveryQuoteCacheManager $delivery_quote_cache_manager = null
+		private ?DeliveryQuoteCacheManager $delivery_quote_cache_manager = null,
+		private ?CdekStatusMappingService $cdek_status_mapping = null
 	) {
 	}
 
@@ -162,7 +165,7 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
-		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
+		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -173,7 +176,7 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_tariffs' === $action ) {
 				$data = array();
 			}
-			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
+			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
 				$data = array();
 			}
 			if ( $id > 0 && array() !== $data ) {
@@ -214,6 +217,15 @@ final class DeliveryServicesAdminPage {
 				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
 				if ( $service instanceof DeliveryService && $this->is_domestic_service( $service ) && null !== $service->id ) {
 					$this->save_status_mapping_settings( (int) $service->id );
+				}
+			}
+			if ( 'save_cdek_statuses' === $action && $this->cdek_status_mapping instanceof CdekStatusMappingService ) {
+				$service = $this->services->find_by_service_key( sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) ) );
+				if ( $this->is_cdek_service( $service ) ) {
+					$mapping = isset( $_POST[ CdekStatusMappingService::MAPPING_KEY ] ) && is_array( $_POST[ CdekStatusMappingService::MAPPING_KEY ] )
+						? $this->cdek_status_mapping->sanitize_mapping( wp_unslash( $_POST[ CdekStatusMappingService::MAPPING_KEY ] ) )
+						: CdekStatusMappingService::default_mapping();
+					$this->cdek_status_mapping->save_mapping( $mapping );
 				}
 			}
 			if ( 'save_tariffs' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
@@ -330,7 +342,7 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
+		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'main',
@@ -340,6 +352,7 @@ final class DeliveryServicesAdminPage {
 				'save_api_credentials' => 'api_credentials',
 				'save_shipments' => 'shipments',
 				'save_status_mapping' => 'status_mapping',
+				'save_cdek_statuses' => 'cdek_statuses',
 				'save_cdek_settings', 'check_cdek_connection' => 'cdek_settings',
 				'save_cdek_calculation' => 'calculation',
 				default => 'main',
@@ -535,6 +548,7 @@ final class DeliveryServicesAdminPage {
 		if ( $this->is_cdek_service( $service ) ) {
 			$tabs['tariffs'] = 'Тарифы';
 			$tabs['cdek_settings'] = 'Данные для входа';
+			$tabs['cdek_statuses'] = 'Статусы СДЭК';
 		}
 		?>
 		<h2><?php echo esc_html( $service->title ); ?></h2>
@@ -554,6 +568,7 @@ final class DeliveryServicesAdminPage {
 			'status_mapping' => $this->render_status_mapping_tab( $service ),
 			'diagnostics' => $this->render_diagnostics_tab( $service ),
 			'cdek_settings' => $this->render_cdek_settings_tab( $service ),
+			'cdek_statuses' => $this->render_cdek_statuses_tab( $service ),
 			'russian_post_countries' => $this->render_russian_post_countries_tab( $service ),
 			default => $this->render_main_tab( $service ),
 		};
@@ -856,6 +871,42 @@ final class DeliveryServicesAdminPage {
 		<?php
 	}
 
+	private function render_cdek_statuses_tab( DeliveryService $service ): void {
+		if ( ! $this->is_cdek_service( $service ) || ! $this->cdek_status_mapping instanceof CdekStatusMappingService ) {
+			return;
+		}
+		$mapping = $this->cdek_status_mapping->mapping();
+		?>
+		<form method="post" style="max-width: 960px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="save_cdek_statuses">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<p class="description"><?php echo esc_html__( 'Сопоставление не меняет raw-статус СДЭК и правила кнопок; оно сохраняет универсальный статус отправления для общей логики WDC.', 'walls-delivery-calc' ); ?></p>
+			<table class="widefat striped">
+				<thead>
+					<tr>
+						<th><?php echo esc_html__( 'Статус СДЭК', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Универсальный статус отправления', 'walls-delivery-calc' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ( CdekStatusMappingService::status_labels() as $code => $label ) : ?>
+						<tr>
+							<td>
+								<strong><?php echo esc_html( $label ); ?></strong>
+								<br><code><?php echo esc_html( $code ); ?></code>
+							</td>
+							<td><?php $this->render_delivery_status_select( CdekStatusMappingService::MAPPING_KEY, $code, (string) ( $mapping[ $code ] ?? '' ) ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+			<?php submit_button( __( 'Сохранить статусы СДЭК', 'walls-delivery-calc' ) ); ?>
+		</form>
+		<?php
+	}
+
 	private function render_diagnostics_tab( DeliveryService $service ): void {
 		if ( ! $this->is_domestic_service( $service ) ) {
 			return;
@@ -873,6 +924,14 @@ final class DeliveryServicesAdminPage {
 			</tbody>
 		</table>
 		<?php
+	}
+
+	private function render_delivery_status_select( string $name, string $code, string $selected_status ): void {
+		echo '<select name="' . esc_attr( $name ) . '[' . esc_attr( $code ) . ']">';
+		foreach ( DeliveryStatus::all() as $status ) {
+			echo '<option value="' . esc_attr( $status ) . '" ' . selected( $selected_status, $status, false ) . '>' . esc_html( DeliveryStatus::label( $status ) . ' (' . $status . ')' ) . '</option>';
+		}
+		echo '</select>';
 	}
 
 	private function render_tariffs_tab( DeliveryService $service ): void {

@@ -1544,7 +1544,28 @@
     if (query.value || context.city || context.postcode || context.address || context.locationId || context.fiasId || context.garId) runSearch('location');
   }
 
+  function markCdekBarcodeDownloadBusy(link) {
+    if (!link || link.classList.contains('is-busy')) return;
+    const originalText = link.getAttribute('data-wdc-original-label') || link.textContent || 'Скачать этикетку';
+    link.setAttribute('data-wdc-original-label', originalText);
+    link.setAttribute('aria-disabled', 'true');
+    link.classList.add('is-busy', 'wdc-cdek-barcode-download--busy');
+    link.textContent = 'Формируем этикетку...';
+    window.clearTimeout(link._wdcBarcodeBusyTimer);
+    link._wdcBarcodeBusyTimer = window.setTimeout(function () {
+      link.classList.remove('is-busy', 'wdc-cdek-barcode-download--busy');
+      link.removeAttribute('aria-disabled');
+      link.textContent = link.getAttribute('data-wdc-original-label') || 'Скачать этикетку';
+    }, 15000);
+  }
+
   document.addEventListener('click', function (event) {
+    const cdekBarcodeDownload = event.target.closest('[data-wdc-cdek-barcode-download]');
+    if (cdekBarcodeDownload) {
+      markCdekBarcodeDownloadBusy(cdekBarcodeDownload);
+      return;
+    }
+
     const open = event.target.closest('[data-wdc-open-shipment-modal]');
     if (open) {
       const box = open.closest('[data-wdc-shipments-metabox]');
