@@ -14,6 +14,7 @@ use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostSettings;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
+use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostDomesticCarrier;
 use WallsShop\WDC\Carriers\Runtime\RussianPostInternationalCarrier;
 use WallsShop\WDC\Checkout\Cache\DeliveryQuoteCacheManager;
@@ -80,7 +81,8 @@ final class DeliveryServicesAdminPage {
 		private ?CdekTariffRepository $cdek_tariffs = null,
 		private ?CdekTariffSyncService $cdek_tariff_sync = null,
 		private ?DeliveryQuoteCacheManager $delivery_quote_cache_manager = null,
-		private ?CdekStatusMappingService $cdek_status_mapping = null
+		private ?CdekStatusMappingService $cdek_status_mapping = null,
+		private ?CdekCarrier $cdek_carrier = null
 	) {
 	}
 
@@ -809,11 +811,11 @@ final class DeliveryServicesAdminPage {
 		$dimensions = $this->cdek_settings->default_package_dimensions_cm();
 		?>
 		<tr><th colspan="2"><h3><?php echo esc_html__( 'Расчет тарифов', 'walls-delivery-calc' ); ?></h3></th></tr>
+		<?php $this->text_row_with_description( CdekSettings::SENDER_CITY_NAME_KEY, __( 'Город отправителя СДЭК для тарифов от двери', 'walls-delivery-calc' ), $this->cdek_settings->sender_city_name(), __( 'Используется в from_location.city при регистрации отправлений СДЭК с забором от двери.', 'walls-delivery-calc' ) ); ?>
 		<?php $this->text_row( CdekSettings::SENDER_CITY_CODE_KEY, __( 'Код города отправителя СДЭК', 'walls-delivery-calc' ), (string) $this->cdek_settings->sender_city_code() ); ?>
 		<?php $this->text_row( CdekSettings::SHIPMENT_POINT_KEY, __( 'Код ПВЗ отправления СДЭК', 'walls-delivery-calc' ), $this->cdek_settings->shipment_point() ); ?>
 		<?php $this->text_row( CdekSettings::SHIPMENT_POINT_ADDRESS_KEY, __( 'Адрес ПВЗ отправления СДЭК', 'walls-delivery-calc' ), $this->cdek_settings->shipment_point_address() ); ?>
 		<?php $this->text_row( CdekSettings::SENDER_POSTAL_CODE_KEY, __( 'Индекс отправителя', 'walls-delivery-calc' ), $this->cdek_settings->sender_postal_code() ); ?>
-		<?php $this->text_row( CdekSettings::SENDER_CITY_NAME_KEY, __( 'Город отправителя для диагностики', 'walls-delivery-calc' ), $this->cdek_settings->sender_city_name() ); ?>
 		<?php $this->text_row( CdekSettings::SENDER_ADDRESS_KEY, __( 'Адрес отправителя СДЭК для тарифов от двери', 'walls-delivery-calc' ), $this->cdek_settings->sender_address() ); ?>
 		<?php $this->text_row( CdekSettings::DEFAULT_PACKAGE_LENGTH_CM_KEY, __( 'Длина упаковки по умолчанию, см', 'walls-delivery-calc' ), (string) $dimensions['length'] ); ?>
 		<?php $this->text_row( CdekSettings::DEFAULT_PACKAGE_WIDTH_CM_KEY, __( 'Ширина упаковки по умолчанию, см', 'walls-delivery-calc' ), (string) $dimensions['width'] ); ?>
@@ -1542,7 +1544,13 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 			<button class="button"><?php echo esc_html__( 'Скопировать дефолтные правила', 'walls-delivery-calc' ); ?></button>
 		</form>
 		<?php
-		$this->rules_admin->set_service_simulation_runner( fn( array $input, array $rules ): array => $this->simulate_service_rules( $service, $input, $rules ) );
+		$is_cdek = $this->is_cdek_service( $service );
+		if ( $is_cdek ) {
+			$this->render_cdek_rules_calculator( $service, $service_rules );
+			$this->rules_admin->set_service_simulation_runner( null );
+		} else {
+			$this->rules_admin->set_service_simulation_runner( fn( array $input, array $rules ): array => $this->simulate_service_rules( $service, $input, $rules ) );
+		}
 		$this->rules_admin->render_embedded_for_context(
 			new RuleAdminContext(
 				RuleRepository::TARGET_SERVICE,
@@ -1552,9 +1560,199 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 				'Правила службы: ' . $service->title,
 				'Правило службы',
 				'Для этой службы не настроены собственные правила. При расчете будут применяться дефолтные правила, если включена соответствующая настройка службы.',
-				true
+				! $is_cdek
 			)
 		);
+	}
+
+	/**
+	 * @param array<int,Rule> $rules
+	 */
+	private function render_cdek_rules_calculator( DeliveryService $service, array $rules ): void {
+		$input = $this->cdek_rules_calculator_input();
+		$result = null;
+		if ( isset( $_POST['wdc_cdek_rules_calculator'] ) ) {
+			$result = $this->handle_cdek_rules_calculator( $service, $input, $rules );
+		}
+		?>
+		<section class="wdc-rules-card" id="wdc-cdek-test-calculator">
+			<h2><?php echo esc_html__( 'Тестовый калькулятор СДЭК', 'walls-delivery-calc' ); ?></h2>
+			<form method="post" class="wdc-simulation-form">
+				<?php wp_nonce_field( 'wdc_cdek_rules_calculator', 'wdc_cdek_rules_calculator_nonce' ); ?>
+				<input type="hidden" name="wdc_cdek_rules_calculator" value="1">
+				<div class="wdc-rule-grid">
+					<label><span><?php echo esc_html__( 'Область / регион', 'walls-delivery-calc' ); ?></span><input type="text" name="cdek_test[region]" value="<?php echo esc_attr( $input['region'] ); ?>"></label>
+					<label><span><?php echo esc_html__( 'Город', 'walls-delivery-calc' ); ?></span><input type="text" name="cdek_test[city]" value="<?php echo esc_attr( $input['city'] ); ?>" required></label>
+					<label><span><?php echo esc_html__( 'Вес, г', 'walls-delivery-calc' ); ?></span><input type="number" min="1" step="1" name="cdek_test[weight_g]" value="<?php echo esc_attr( (string) $input['weight_g'] ); ?>" required></label>
+					<label><span><?php echo esc_html__( 'Длина, см', 'walls-delivery-calc' ); ?></span><input type="number" min="1" step="1" name="cdek_test[length_cm]" value="<?php echo esc_attr( (string) $input['length_cm'] ); ?>" required></label>
+					<label><span><?php echo esc_html__( 'Ширина, см', 'walls-delivery-calc' ); ?></span><input type="number" min="1" step="1" name="cdek_test[width_cm]" value="<?php echo esc_attr( (string) $input['width_cm'] ); ?>" required></label>
+					<label><span><?php echo esc_html__( 'Высота, см', 'walls-delivery-calc' ); ?></span><input type="number" min="1" step="1" name="cdek_test[height_cm]" value="<?php echo esc_attr( (string) $input['height_cm'] ); ?>" required></label>
+					<label><span><?php echo esc_html__( 'Ценность посылки, руб.', 'walls-delivery-calc' ); ?></span><input type="text" inputmode="decimal" name="cdek_test[declared_value]" value="<?php echo esc_attr( $input['declared_value'] ); ?>"></label>
+				</div>
+				<p class="submit"><button class="button button-primary" type="submit"><?php echo esc_html__( 'Рассчитать СДЭК', 'walls-delivery-calc' ); ?></button></p>
+			</form>
+		</section>
+		<?php if ( is_array( $result ) ) : ?>
+			<?php $this->render_cdek_rules_calculator_result( $result ); ?>
+		<?php endif; ?>
+		<?php
+	}
+
+	/**
+	 * @return array{region:string,city:string,weight_g:int,length_cm:int,width_cm:int,height_cm:int,declared_value:string}
+	 */
+	private function cdek_rules_calculator_input(): array {
+		$raw = is_array( $_POST['cdek_test'] ?? null ) ? wp_unslash( $_POST['cdek_test'] ) : array();
+
+		return array(
+			'region' => sanitize_text_field( (string) ( $raw['region'] ?? '' ) ),
+			'city' => sanitize_text_field( (string) ( $raw['city'] ?? '' ) ),
+			'weight_g' => max( 1, (int) ( $raw['weight_g'] ?? 1000 ) ),
+			'length_cm' => max( 1, (int) ( $raw['length_cm'] ?? 20 ) ),
+			'width_cm' => max( 1, (int) ( $raw['width_cm'] ?? 20 ) ),
+			'height_cm' => max( 1, (int) ( $raw['height_cm'] ?? 10 ) ),
+			'declared_value' => sanitize_text_field( (string) ( $raw['declared_value'] ?? '0' ) ),
+		);
+	}
+
+	/**
+	 * @param array{region:string,city:string,weight_g:int,length_cm:int,width_cm:int,height_cm:int,declared_value:string} $input
+	 * @param array<int,Rule> $rules
+	 * @return array<string,mixed>
+	 */
+	private function handle_cdek_rules_calculator( DeliveryService $service, array $input, array $rules ): array {
+		if ( ! isset( $_POST['wdc_cdek_rules_calculator_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['wdc_cdek_rules_calculator_nonce'] ) ), 'wdc_cdek_rules_calculator' ) ) {
+			return array( 'error' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) );
+		}
+		if ( ! $this->cdek_carrier instanceof CdekCarrier || ! $this->rule_builder instanceof RuleAppliedRateBuilder ) {
+			return array( 'error' => __( 'Тестовый калькулятор СДЭК недоступен: runtime службы не инициализирован.', 'walls-delivery-calc' ) );
+		}
+		if ( '' === trim( $input['city'] ) ) {
+			return array( 'error' => __( 'Укажите город для расчета СДЭК.', 'walls-delivery-calc' ) );
+		}
+
+		$order_total = Money::from_rubles( (float) str_replace( ',', '.', $input['declared_value'] ) );
+		$item = new PackageItem( 'CDEK-TEST', 'Тестовая посылка', 1, $order_total, $order_total, $input['weight_g'], $input['length_cm'], $input['width_cm'], $input['height_cm'] );
+		$package = Package::from_items( array( $item ), 0, $order_total, $order_total );
+		$destination = new Address(
+			country_code: 'RU',
+			region_name: $input['region'],
+			city: $input['city'],
+			settlement: $input['city'],
+			raw_address: trim( implode( ', ', array_filter( array( $input['region'], $input['city'] ) ) ) )
+		);
+		$rows = array();
+		$audit = array();
+		$errors = array();
+		$location = array();
+
+		foreach ( array( DeliveryType::PICKUP, DeliveryType::COURIER ) as $delivery_type ) {
+			$request = new QuoteRequest(
+				'RU',
+				$destination,
+				$package,
+				'',
+				$order_total,
+				gmdate( 'Y-m-d' ),
+				array(
+					'service_key' => CdekSettings::SERVICE_KEY,
+					'delivery_type' => $delivery_type,
+					'city' => $input['city'],
+					'region' => $input['region'],
+				)
+			);
+			$quote = $this->cdek_carrier->quote( $request );
+			if ( is_array( $quote->raw_reference['location'] ?? null ) ) {
+				$location = $quote->raw_reference['location'];
+			}
+			if ( ! $quote->success && 'destination_city_not_resolved' === $quote->error_code ) {
+				$errors[] = __( 'Не удалось определить код города СДЭК для указанного города.', 'walls-delivery-calc' );
+				continue;
+			}
+			if ( ! $quote->success && '' !== $quote->error_code ) {
+				$errors[] = $quote->error_message ?: $quote->error_code;
+			}
+			foreach ( $quote->rates as $rate ) {
+				if ( ! $rate instanceof DeliveryRate ) {
+					continue;
+				}
+				$context = new RuleEvaluationContext( $order_total, $rate->price, $package, $destination, $rate->delivery_type, '', gmdate( 'Y-m-d' ), array(), array_merge( $rate->meta, array( 'original_delivery_days' => $rate->delivery_days->min_days ?? $rate->delivery_days->max_days, 'original_delivery_min_days' => $rate->delivery_days->min_days, 'original_delivery_max_days' => $rate->delivery_days->max_days ) ) );
+				$applied = $this->rule_builder->apply( $rate, $context, $rules );
+				$processed = $this->manager instanceof DeliveryServiceManager ? $this->manager->post_process_rate( $applied['rate'], $service ) : $applied['rate'];
+				$mode = (int) ( $rate->meta['delivery_mode'] ?? 0 );
+				$rows[] = array(
+					'title' => $rate->tariff_name ?: $rate->title,
+					'tariff_code' => $rate->tariff_key,
+					'delivery_mode' => $this->cdek_delivery_mode_label( $mode ),
+					'api_price' => $this->money_label( $rate->price ),
+					'api_term' => $this->range_label( $rate->delivery_days ),
+					'final_price' => $this->money_label( $processed->price ),
+					'final_term' => $this->range_label( $processed->delivery_days ),
+				);
+				$audit[ $rate->tariff_key ] = $applied['audit'];
+			}
+		}
+
+		return array(
+			'rows' => $rows,
+			'errors' => array_values( array_unique( array_filter( $errors ) ) ),
+			'location' => $location,
+			'audit' => $audit,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $result
+	 */
+	private function render_cdek_rules_calculator_result( array $result ): void {
+		$errors = is_array( $result['errors'] ?? null ) ? $result['errors'] : array();
+		if ( ! empty( $result['error'] ) ) {
+			$errors[] = (string) $result['error'];
+		}
+		foreach ( $errors as $error ) {
+			?>
+			<div class="notice notice-error inline"><p><?php echo esc_html( (string) $error ); ?></p></div>
+			<?php
+		}
+		$rows = is_array( $result['rows'] ?? null ) ? $result['rows'] : array();
+		if ( array() === $rows ) {
+			return;
+		}
+		?>
+		<section class="wdc-rules-result" data-wdc-cdek-test-calculator-result>
+			<h2><?php echo esc_html__( 'Результат тестового расчета СДЭК', 'walls-delivery-calc' ); ?></h2>
+			<?php if ( is_array( $result['location'] ?? null ) && ! empty( $result['location']['cdek_to_city_code'] ) ) : ?>
+				<p class="description"><?php echo esc_html( sprintf( __( 'Код города СДЭК: %s', 'walls-delivery-calc' ), (string) $result['location']['cdek_to_city_code'] ) ); ?></p>
+			<?php endif; ?>
+			<table class="widefat striped">
+				<thead>
+					<tr>
+						<th><?php echo esc_html__( 'Тариф', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'tariff_code', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Режим тарифа', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Цена API до правил', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Срок API до правил', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Цена после правил', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Срок после правил', 'walls-delivery-calc' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ( $rows as $row ) : ?>
+						<?php if ( ! is_array( $row ) ) { continue; } ?>
+						<tr>
+							<td><?php echo esc_html( (string) ( $row['title'] ?? '' ) ); ?></td>
+							<td><code><?php echo esc_html( (string) ( $row['tariff_code'] ?? '' ) ); ?></code></td>
+							<td><?php echo esc_html( (string) ( $row['delivery_mode'] ?? '' ) ); ?></td>
+							<td><?php echo esc_html( (string) ( $row['api_price'] ?? '' ) ); ?></td>
+							<td><?php echo esc_html( (string) ( $row['api_term'] ?? '' ) ); ?></td>
+							<td><?php echo esc_html( (string) ( $row['final_price'] ?? '' ) ); ?></td>
+							<td><?php echo esc_html( (string) ( $row['final_term'] ?? '' ) ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+		</section>
+		<?php
 	}
 
 	private function render_create_form(): void {
@@ -1591,6 +1789,18 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		<tr>
 			<th scope="row"><label for="<?php echo esc_attr( $name ); ?>"><?php echo esc_html( $label ); ?></label></th>
 			<td><input class="regular-text" id="<?php echo esc_attr( $name ); ?>" name="<?php echo esc_attr( $name ); ?>" value="<?php echo esc_attr( $value ); ?>"></td>
+		</tr>
+		<?php
+	}
+
+	private function text_row_with_description( string $name, string $label, string $value, string $description ): void {
+		?>
+		<tr>
+			<th scope="row"><label for="<?php echo esc_attr( $name ); ?>"><?php echo esc_html( $label ); ?></label></th>
+			<td>
+				<input class="regular-text" id="<?php echo esc_attr( $name ); ?>" name="<?php echo esc_attr( $name ); ?>" value="<?php echo esc_attr( $value ); ?>">
+				<p class="description"><?php echo esc_html( $description ); ?></p>
+			</td>
 		</tr>
 		<?php
 	}
@@ -2265,5 +2475,19 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		$label = DeliveryDaysFormatter::format( $range );
 
 		return '' !== $label ? $label : '-';
+	}
+
+	private function money_label( Money $money ): string {
+		return number_format( $money->get_rubles(), 2, '.', ' ' ) . ' ' . $money->get_currency();
+	}
+
+	private function cdek_delivery_mode_label( int $mode ): string {
+		return match ( $mode ) {
+			1 => __( 'Дверь-дверь', 'walls-delivery-calc' ),
+			2 => __( 'Дверь-склад', 'walls-delivery-calc' ),
+			3 => __( 'Склад-дверь', 'walls-delivery-calc' ),
+			4 => __( 'Склад-склад', 'walls-delivery-calc' ),
+			default => __( 'Не определен', 'walls-delivery-calc' ),
+		};
 	}
 }

@@ -1,6 +1,10 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.50.5.
+Version: 0.52.0.
+
+0.52.0 rules calculator update: the CDEK service `Правила` tab now uses a dedicated `Тестовый калькулятор СДЭК` instead of the generic Russian Post-style rule checker. The form accepts optional region, required city, required integer package weight/dimensions and optional declared value with comma/dot decimal input; there is no calculation date field. The calculator resolves the destination through the existing CDEK runtime/location resolver path, builds one package from the entered dimensions, requests active managed CDEK pickup and courier tariffs through `CdekCarrier`, applies service rules, and displays tariff name/code, delivery mode, API price/term before rules and final price/term after rules. If the city cannot be resolved, the tab shows `Не удалось определить код города СДЭК для указанного города.`
+
+The CDEK `Расчет` tab now labels sender city settings by their real use: `Город отправителя СДЭК для тарифов от двери`. It is shown before `Код города отправителя СДЭК` and explains that the value is used as `from_location.city` for door-origin CDEK order registration.
 
 0.50.5 admin bulk update: the CDEK `Тарифы` tab now includes compact mass-action controls. `CdekTariffRepository` supports `delete_all()`, `set_all_active()` and `set_active_by_delivery_mode()`, and the admin page exposes POST-only buttons to delete all tariffs, enable/disable all tariffs, or enable/disable a single delivery-mode group. Delivery mode mapping remains `1` door-door, `2` door-warehouse, `3` warehouse-door, `4` warehouse-warehouse; postamats are already classified as the warehouse side.
 

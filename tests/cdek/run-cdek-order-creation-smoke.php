@@ -1077,6 +1077,10 @@ foreach ( $appendix_statuses as $status_code ) {
 cdek_order_assert( DeliveryStatus::READY_FOR_PICKUP === $default_mapping['ACCEPTED_AT_PICK_UP_POINT'] && DeliveryStatus::HANDED_TO_COURIER === $default_mapping['TAKEN_BY_COURIER'] && DeliveryStatus::DELIVERED === $default_mapping['POSTOMAT_RECEIVED'], 'CDEK pickup/courier/postamat defaults must map to specific universal statuses.' );
 $GLOBALS['wdc_cdek_order_options']['wdc_core_settings'][ CdekStatusMappingService::MAPPING_KEY ] = array( 'DELIVERED' => DeliveryStatus::READY_FOR_PICKUP );
 cdek_order_assert( DeliveryStatus::READY_FOR_PICKUP === $mapping_service->universal_status_for( 'DELIVERED' ), 'CDEK status mapping must read saved admin overrides.' );
+$autosync_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/ShipmentStatusAutoSyncService.php' );
+cdek_order_assert( str_contains( $autosync_source, 'CdekOrderStatusService' ) && str_contains( $autosync_source, 'case CdekSettings::CARRIER_KEY' ) && str_contains( $autosync_source, '$this->cdek_status_updates->update( $order )' ), 'Shipment autosync must dispatch CDEK shipments through CdekOrderStatusService.' );
+cdek_order_assert( str_contains( $autosync_source, 'find_by_carrier( $order, CdekSettings::CARRIER_KEY )' ) && str_contains( $autosync_source, '$this->order_status_mapping->apply' ), 'CDEK autosync must apply universal status to WooCommerce order status mapping after status update.' );
+cdek_order_assert( str_contains( $autosync_source, "'cdek_number'" ) && str_contains( $autosync_source, "'external_id'" ) && str_contains( $autosync_source, "'uuid'" ), 'CDEK autosync must treat CDEK number/uuid as valid tracking identifiers.' );
 
 $mapped_status_http = new CdekOrderFakeHttp();
 $mapped_status_http->order_responses[] = array(

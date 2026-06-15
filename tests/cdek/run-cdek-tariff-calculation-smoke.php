@@ -558,6 +558,19 @@ $cdek_calculation_rows_start = strpos( $admin_source, 'private function render_c
 $cdek_settings_source = false !== $cdek_settings_start && false !== $cdek_calculation_rows_start ? substr( $admin_source, $cdek_settings_start, $cdek_calculation_rows_start - $cdek_settings_start ) : '';
 cdek_tariff_assert( ! str_contains( $cdek_settings_source, 'Расчет тарифов' ), 'CDEK tariff calculation block must not remain in credentials tab.' );
 cdek_tariff_assert( str_contains( $admin_source, 'render_cdek_tariff_calculation_rows' ) && str_contains( $admin_source, 'Цена страховки' ), 'CDEK tariff calculation block with insurance percent must be rendered in calculation tab.' );
+cdek_tariff_assert( str_contains( $admin_source, 'Город отправителя СДЭК для тарифов от двери' ) && str_contains( $admin_source, 'Используется в from_location.city при регистрации отправлений СДЭК с забором от двери.' ), 'CDEK sender city setting must use the operational from-door label and description.' );
+$calculation_rows_source = substr( $admin_source, (int) $cdek_calculation_rows_start, 1200 );
+cdek_tariff_assert( false !== strpos( $calculation_rows_source, 'CdekSettings::SENDER_CITY_NAME_KEY' ) && false !== strpos( $calculation_rows_source, 'CdekSettings::SENDER_CITY_CODE_KEY' ) && strpos( $calculation_rows_source, 'CdekSettings::SENDER_CITY_NAME_KEY' ) < strpos( $calculation_rows_source, 'CdekSettings::SENDER_CITY_CODE_KEY' ), 'CDEK sender city name must be the first tariff-calculation field before sender city code.' );
+cdek_tariff_assert( str_contains( $admin_source, 'render_cdek_rules_calculator' ) && str_contains( $admin_source, 'Тестовый калькулятор СДЭК' ), 'CDEK rules tab must render the test calculator block.' );
+cdek_tariff_assert( str_contains( $admin_source, 'name="cdek_test[region]"' ) && str_contains( $admin_source, 'name="cdek_test[city]"' ) && str_contains( $admin_source, 'name="cdek_test[weight_g]"' ) && str_contains( $admin_source, 'name="cdek_test[length_cm]"' ) && str_contains( $admin_source, 'name="cdek_test[width_cm]"' ) && str_contains( $admin_source, 'name="cdek_test[height_cm]"' ) && str_contains( $admin_source, 'name="cdek_test[declared_value]"' ), 'CDEK test calculator must expose region/city/weight/dimensions/value fields.' );
+$cdek_calculator_start = strpos( $admin_source, 'private function render_cdek_rules_calculator' );
+$cdek_calculator_end = strpos( $admin_source, 'private function render_create_form' );
+$cdek_calculator_source = false !== $cdek_calculator_start && false !== $cdek_calculator_end ? substr( $admin_source, $cdek_calculator_start, $cdek_calculator_end - $cdek_calculator_start ) : '';
+cdek_tariff_assert( ! str_contains( $cdek_calculator_source, 'type="date"' ) && ! str_contains( $cdek_calculator_source, 'cdek_test[date]' ), 'CDEK test calculator must not ask for calculation date.' );
+cdek_tariff_assert( str_contains( $admin_source, '$this->cdek_carrier->quote( $request )' ) && str_contains( $admin_source, 'DeliveryType::PICKUP, DeliveryType::COURIER' ), 'CDEK test calculator must reuse CdekCarrier runtime quote path for pickup and courier tariffs.' );
+cdek_tariff_assert( str_contains( $admin_source, 'Не удалось определить код города СДЭК для указанного города.' ), 'CDEK test calculator must show a readable city-code lookup error.' );
+cdek_tariff_assert( str_contains( $admin_source, 'Цена API до правил' ) && str_contains( $admin_source, 'Срок API до правил' ) && str_contains( $admin_source, 'Цена после правил' ) && str_contains( $admin_source, 'Срок после правил' ), 'CDEK test calculator result must show API and final price/term columns.' );
+cdek_tariff_assert( str_contains( $admin_source, '! $is_cdek' ) && str_contains( $admin_source, 'set_service_simulation_runner( null )' ), 'CDEK rules tab must disable the inherited service rules checker.' );
 
 $GLOBALS['wdc_cdek_tariff_logs'] = array();
 $pickup_quote = $carrier->quote( cdek_tariff_request( DeliveryType::PICKUP ) );

@@ -1,5 +1,7 @@
 # Project Status
 
+0.52.0 note: CDEK now participates in the shared shipment status auto-sync controlled by `WDC -> Статусы -> Автообновление статусов отправлений`. Automatic and manual bulk runs dispatch CDEK shipments through `CdekOrderStatusService`, reuse raw CDEK latest-status selection, save universal status mapping, respect terminal universal statuses, throttle CDEK status calls to about 100 rps, and report `updates_by_carrier[cdek]` in diagnostics. The CDEK service `Расчет` tab renamed sender city to its real door-origin use, and the CDEK service `Правила` tab now has a dedicated test calculator with city resolution, one-package CDEK tariff calculation and before/after rules output.
+
 0.51.3 note: CDEK label download no longer relies on a hidden iframe after BARCODE `READY`. The admin script downloads the ready PDF with `fetch()`, validates HTTP/PDF/blob state, starts a temporary anchor download from an Object URL, and shows a visible error toast when the endpoint returns an error or non-PDF response. The backend ready-PDF path now rejects empty, failed, or explicit non-PDF responses.
 
 0.51.2 note: CDEK label download now runs as an AJAX-controlled flow: the order metabox keeps only `Скачать этикетку`, requests/refreshes BARCODE print status in short polling, caches a READY print UUID for 50 minutes, and then downloads the PDF from the final endpoint. The final PDF endpoint only streams cached READY forms and does not create or long-poll print requests. Saving `Статусы СДЭК` now redirects back to the CDEK service tab.

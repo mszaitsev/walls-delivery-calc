@@ -4,9 +4,11 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Application;
 
 use Throwable;
+use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -34,7 +36,9 @@ final class ShipmentStatusAutoSyncService {
 		private OrderShipmentRepository $repository,
 		private ShipmentStatusUpdateService $status_updates,
 		private ?ShipmentOrderStatusMappingService $order_status_mapping = null,
-		private mixed $dispatcher = null
+		private mixed $dispatcher = null,
+		private ?CdekOrderStatusService $cdek_status_updates = null,
+		private mixed $cdek_throttle = null
 	) {
 	}
 
@@ -152,7 +156,7 @@ final class ShipmentStatusAutoSyncService {
 			}
 			++$stats['shipments_found'];
 			$carrier_key = trim( (string) ( $shipment['carrier_key'] ?? $shipment_key ) );
-			$tracking_number = trim( (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
+			$tracking_number = $this->shipment_tracking_identifier( $shipment, $carrier_key );
 			$universal_status = trim( (string) ( $shipment['universal_status_code'] ?? '' ) );
 
 			if ( '' === $tracking_number ) {
@@ -183,13 +187,16 @@ final class ShipmentStatusAutoSyncService {
 	}
 
 	private function supports_carrier( string $carrier_key ): bool {
-		return RussianPostDomesticSettings::CARRIER_KEY === $carrier_key;
+		return in_array( $carrier_key, array( RussianPostDomesticSettings::CARRIER_KEY, CdekSettings::CARRIER_KEY ), true );
 	}
 
 	/**
 	 * @return array<string,mixed>
 	 */
 	private function dispatch( string $carrier_key, object $order, string $shipment_key ): array {
+		if ( CdekSettings::CARRIER_KEY === $carrier_key ) {
+			$this->throttle_cdek();
+		}
 		if ( is_callable( $this->dispatcher ) ) {
 			$result = call_user_func( $this->dispatcher, $carrier_key, $order, $shipment_key );
 			return is_array( $result ) ? $result : array( 'success' => false, 'message' => 'Shipment dispatcher returned an invalid result.' );
@@ -198,9 +205,61 @@ final class ShipmentStatusAutoSyncService {
 		switch ( $carrier_key ) {
 			case RussianPostDomesticSettings::CARRIER_KEY:
 				return $this->status_updates->update_russian_post( $order, $shipment_key );
+			case CdekSettings::CARRIER_KEY:
+				return $this->update_cdek( $order );
 			default:
 				return array( 'success' => false, 'message' => 'Unsupported carrier.' );
 		}
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function update_cdek( object $order ): array {
+		if ( ! $this->cdek_status_updates instanceof CdekOrderStatusService ) {
+			return array( 'success' => false, 'message' => 'CDEK status service is unavailable.' );
+		}
+
+		$result = $this->cdek_status_updates->update( $order );
+		if ( empty( $result['success'] ) || ! $this->order_status_mapping instanceof ShipmentOrderStatusMappingService ) {
+			return $result;
+		}
+
+		$shipment = $this->repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY );
+		if ( is_array( $shipment ) ) {
+			$result['order_status_mapping'] = $this->order_status_mapping->apply( $order, $shipment, (string) ( $shipment['universal_status_code'] ?? '' ) );
+		}
+
+		return $result;
+	}
+
+	private function throttle_cdek(): void {
+		if ( is_callable( $this->cdek_throttle ) ) {
+			call_user_func( $this->cdek_throttle, 10000 );
+			return;
+		}
+
+		if ( function_exists( 'usleep' ) ) {
+			usleep( 10000 );
+		}
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 */
+	private function shipment_tracking_identifier( array $shipment, string $carrier_key ): string {
+		$keys = CdekSettings::CARRIER_KEY === $carrier_key
+			? array( 'tracking_number', 'barcode', 'cdek_number', 'external_id', 'uuid', 'entity_uuid', 'request_uuid' )
+			: array( 'tracking_number', 'barcode' );
+
+		foreach ( $keys as $key ) {
+			$value = trim( (string) ( $shipment[ $key ] ?? '' ) );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		return '';
 	}
 
 	/**
