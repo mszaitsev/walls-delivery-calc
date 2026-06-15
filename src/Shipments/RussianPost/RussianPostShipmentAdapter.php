@@ -65,6 +65,7 @@ final class RussianPostShipmentAdapter implements ShipmentCarrierAdapterInterfac
 	 * @return array<string,mixed>
 	 */
 	public function status_payload( object $order, array $shipment ): array {
+		$can_cancel = array() !== $shipment && $this->backlog instanceof ShipmentBacklogService && $this->backlog->can_cancel( $shipment );
 		if ( $this->status_updates instanceof ShipmentStatusUpdateService ) {
 			$status = $this->status_updates->status_payload( $shipment, $order );
 			return array_merge(
@@ -73,7 +74,8 @@ final class RussianPostShipmentAdapter implements ShipmentCarrierAdapterInterfac
 					'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
 					'has_shipment' => array() !== $shipment,
 					'can_update_status' => array() !== $shipment,
-					'can_remove_from_order' => array() !== $shipment && ! ( $this->backlog instanceof ShipmentBacklogService && $this->backlog->can_cancel( $shipment ) ),
+					'can_cancel' => $can_cancel,
+					'can_remove_from_order' => array() !== $shipment && ! $can_cancel,
 				)
 			);
 		}
@@ -83,6 +85,8 @@ final class RussianPostShipmentAdapter implements ShipmentCarrierAdapterInterfac
 			'has_shipment' => array() !== $shipment,
 			'barcode' => $this->tracking_identifier( $shipment ),
 			'can_update_status' => array() !== $shipment,
+			'can_cancel' => $can_cancel,
+			'can_remove_from_order' => array() !== $shipment && ! $can_cancel,
 		);
 	}
 

@@ -12,6 +12,8 @@ defined( 'ABSPATH' ) || exit;
 
 final class CdekBarcodePrintService {
 	private const CACHE_TTL_SECONDS = 50 * 60;
+	private const STUCK_STATUS_SECONDS = 60;
+	private const STUCK_STATUS_CHECKS = 30;
 
 	/**
 	 * @param callable|null $sleeper
@@ -51,12 +53,16 @@ final class CdekBarcodePrintService {
 						'status' => 'ACCEPTED',
 						'cdek_number' => (string) $context['cdek_number'],
 						'created_at' => time(),
+						'last_checked_at' => null,
+						'checked_count' => 0,
 						'ready_at' => null,
 					)
 				);
 			}
 
 			$status = $this->print_status( $print_uuid );
+			$checked_count = max( 0, (int) ( $cache['checked_count'] ?? $cache['attempts'] ?? 0 ) ) + 1;
+			$created_at = (int) ( $cache['created_at'] ?? time() );
 			if ( 'READY' === $status ) {
 				$this->cache_set(
 					$cache_key,
@@ -64,7 +70,9 @@ final class CdekBarcodePrintService {
 						'print_uuid' => $print_uuid,
 						'status' => 'READY',
 						'cdek_number' => (string) $context['cdek_number'],
-						'created_at' => (int) ( $cache['created_at'] ?? time() ),
+						'created_at' => $created_at,
+						'last_checked_at' => time(),
+						'checked_count' => $checked_count,
 						'ready_at' => time(),
 					)
 				);
@@ -85,21 +93,43 @@ final class CdekBarcodePrintService {
 						'status' => 'ACCEPTED',
 						'cdek_number' => (string) $context['cdek_number'],
 						'created_at' => time(),
+						'last_checked_at' => time(),
+						'checked_count' => 0,
 						'ready_at' => null,
 					)
 				);
 
-				return $this->prepared_status( 'ACCEPTED', $new_uuid, (string) $context['cdek_number'] );
+				return $this->prepared_status( 'ACCEPTED', $new_uuid, (string) $context['cdek_number'], true );
 			}
 
 			$status = in_array( $status, array( 'ACCEPTED', 'PROCESSING' ), true ) ? $status : 'PROCESSING';
+			if ( $this->stuck_pending_print( $status, $created_at, $checked_count ) ) {
+				$this->cache_delete( $cache_key );
+				$new_uuid = $this->create_print_uuid( (string) $context['cdek_number'], (string) $context['order_uuid'] );
+				$this->cache_set(
+					$cache_key,
+					array(
+						'print_uuid' => $new_uuid,
+						'status' => 'ACCEPTED',
+						'cdek_number' => (string) $context['cdek_number'],
+						'created_at' => time(),
+						'last_checked_at' => time(),
+						'checked_count' => 0,
+						'ready_at' => null,
+					)
+				);
+
+				return $this->prepared_status( 'ACCEPTED', $new_uuid, (string) $context['cdek_number'], true );
+			}
 			$this->cache_set(
 				$cache_key,
 				array(
 					'print_uuid' => $print_uuid,
 					'status' => $status,
 					'cdek_number' => (string) $context['cdek_number'],
-					'created_at' => (int) ( $cache['created_at'] ?? time() ),
+					'created_at' => $created_at,
+					'last_checked_at' => time(),
+					'checked_count' => $checked_count,
 					'ready_at' => null,
 				)
 			);
@@ -319,17 +349,31 @@ final class CdekBarcodePrintService {
 		}
 	}
 
+	private function stuck_pending_print( string $status, int $created_at, int $checked_count ): bool {
+		if ( ! in_array( $status, array( 'ACCEPTED', 'PROCESSING' ), true ) ) {
+			return false;
+		}
+		$age = time() - max( 0, $created_at );
+
+		return $age > self::STUCK_STATUS_SECONDS || $checked_count > self::STUCK_STATUS_CHECKS;
+	}
+
 	/**
 	 * @return array{success:true,message:string,status:string,print_uuid:string,cdek_number:string}
 	 */
-	private function prepared_status( string $status, string $print_uuid, string $cdek_number ): array {
-		return array(
+	private function prepared_status( string $status, string $print_uuid, string $cdek_number, bool $recreated = false ): array {
+		$result = array(
 			'success' => true,
 			'message' => '',
 			'status' => $status,
 			'print_uuid' => $print_uuid,
 			'cdek_number' => $cdek_number,
 		);
+		if ( $recreated ) {
+			$result['recreated'] = true;
+		}
+
+		return $result;
 	}
 
 	/**

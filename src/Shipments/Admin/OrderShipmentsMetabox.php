@@ -510,12 +510,14 @@ final class OrderShipmentsMetabox {
 		}
 
 		wp_send_json_success(
-			array(
+			array_merge(
+				$this->carrier_ui_payload( $order, $request->carrier_key ),
+				array(
 				'message' => $this->carrier_presentation( $request->carrier_key )['created_toast'],
 				'tracking_number' => $result->tracking_number,
 				'backlog_order_id' => $result->backlog_order_id,
-				'status' => $this->status_payload_for_carrier( $order, $request->carrier_key ),
 				'preview' => $preview,
+				)
 			)
 		);
 	}
@@ -558,9 +560,11 @@ final class OrderShipmentsMetabox {
 		}
 
 		wp_send_json_success(
-			array(
+			array_merge(
+				$this->carrier_ui_payload( $order, $shipment_key ),
+				array(
 				'message' => (string) ( $result['message'] ?? __( 'Статус отправления обновлен.', 'walls-delivery-calc' ) ),
-				'status' => $this->with_status_presentation( is_array( $result['status'] ?? null ) ? $result['status'] : array(), $shipment_key ),
+				)
 			)
 		);
 	}
@@ -585,9 +589,11 @@ final class OrderShipmentsMetabox {
 		}
 
 		wp_send_json_success(
-			array(
+			array_merge(
+				$this->carrier_ui_payload( $order, $shipment_key ),
+				array(
 				'message' => (string) ( $result['message'] ?? __( 'Отправление отменено.', 'walls-delivery-calc' ) ),
-				'status' => $this->with_status_presentation( is_array( $result['status'] ?? null ) ? $result['status'] : array(), $shipment_key ),
+				)
 			)
 		);
 	}
@@ -612,9 +618,11 @@ final class OrderShipmentsMetabox {
 		}
 
 		wp_send_json_success(
-			array(
+			array_merge(
+				$this->carrier_ui_payload( $order, $shipment_key ),
+				array(
 				'message' => (string) ( $result['message'] ?? __( 'Данные отправления удалены из заказа.', 'walls-delivery-calc' ) ),
-				'status' => $this->with_status_presentation( is_array( $result['status'] ?? null ) ? $result['status'] : array(), $shipment_key ),
+				)
 			)
 		);
 	}
@@ -640,12 +648,14 @@ final class OrderShipmentsMetabox {
 		}
 
 		wp_send_json_success(
-			array(
+			array_merge(
+				$this->carrier_ui_payload( $order, $shipment_key ),
+				array(
 				'message' => (string) ( $result['message'] ?? __( 'Номер отслеживания сохранен.', 'walls-delivery-calc' ) ),
 				'warning' => (string) ( $result['warning'] ?? '' ),
 				'tracking_number' => (string) ( $result['tracking_number'] ?? '' ),
 				'backlog_order_id' => (string) ( $result['backlog_order_id'] ?? '' ),
-				'status' => $this->with_status_presentation( is_array( $result['status'] ?? null ) ? $result['status'] : array(), $shipment_key ),
+				)
 			)
 		);
 	}
@@ -1261,6 +1271,41 @@ final class OrderShipmentsMetabox {
 		return array_merge(
 			array( 'carrier_key' => $carrier_key, 'presentation' => $this->carrier_presentation( $carrier_key ) ),
 			$shipment
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function carrier_ui_payload( object $order, string $carrier_key ): array {
+		$shipment = $this->repository->find_by_carrier( $order, $carrier_key );
+		$adapter = $this->carrier_adapter( $carrier_key );
+		$presentation = $this->carrier_presentation( $carrier_key );
+		$status = null !== $adapter
+			? $adapter->status_payload( $order, $shipment )
+			: $this->status_payload_for_carrier( $order, $carrier_key );
+		$status = array_merge(
+			$status,
+			array(
+				'carrier_key' => $carrier_key,
+				'presentation' => $presentation,
+			)
+		);
+		$label_actions = null !== $adapter ? $adapter->label_actions( $order, $shipment ) : array();
+		if ( array() !== $label_actions ) {
+			$status['label_actions'] = $label_actions;
+		}
+
+		return array(
+			'carrier_key' => $carrier_key,
+			'shipment' => $shipment,
+			'status' => $status,
+			'presentation' => $presentation,
+			'label_actions' => $label_actions,
+			'has_shipment' => ! empty( $status['has_shipment'] ),
+			'can_update_status' => ! empty( $status['can_update_status'] ),
+			'can_cancel' => ! empty( $status['can_cancel'] ),
+			'can_remove_from_order' => ! empty( $status['can_remove_from_order'] ),
 		);
 	}
 

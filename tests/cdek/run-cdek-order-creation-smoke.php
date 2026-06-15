@@ -1159,6 +1159,24 @@ $timeout_pdf = $timeout_service->download_ready_pdf_for_order( $barcode_order );
 cdek_order_assert( ! empty( $timeout_prepare['success'] ) && 'PROCESSING' === (string) ( $timeout_prepare['status'] ?? '' ), 'CDEK BARCODE prepare must return PROCESSING without downloading while the print form is still being created.' );
 cdek_order_assert( empty( $timeout_pdf['success'] ) && 'Этикетка СДЭК еще не готова. Нажмите "Скачать этикетку" еще раз.' === (string) ( $timeout_pdf['message'] ?? '' ), 'CDEK BARCODE final download must fail while READY cache is absent.' );
 
+$GLOBALS['wdc_cdek_order_transients'] = array(
+	'wdc_cdek_barcode_152_10280157676' => array(
+		'print_uuid' => 'print-stuck-uuid',
+		'status' => 'ACCEPTED',
+		'cdek_number' => '10280157676',
+		'created_at' => time() - 61,
+		'last_checked_at' => time() - 2,
+		'checked_count' => 30,
+		'ready_at' => null,
+	),
+);
+$barcode_stuck_http = new CdekOrderFakeHttp();
+$barcode_stuck_http->barcode_create_responses[] = array( 'entity' => array( 'uuid' => 'print-recovered-uuid' ) );
+$barcode_stuck_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-stuck-uuid', 'statuses' => array( array( 'code' => 'ACCEPTED', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
+$stuck_prepare = ( new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_stuck_http ), $settings, $barcode_stuck_http ), static function (): void {}, 1, 0 ) )->prepare_for_order( $barcode_order );
+$stuck_post_count = count( array_filter( $barcode_stuck_http->requests, static fn ( array $request ): bool => 'POST' === $request['method'] && str_contains( $request['url'], '/v2/print/barcodes' ) ) );
+cdek_order_assert( ! empty( $stuck_prepare['success'] ) && ! empty( $stuck_prepare['recreated'] ) && 'print-recovered-uuid' === (string) ( $stuck_prepare['print_uuid'] ?? '' ) && 1 === $stuck_post_count, 'CDEK BARCODE stuck ACCEPTED cache must be recreated after the recovery threshold.' );
+
 $GLOBALS['wdc_cdek_order_transients'] = array();
 $barcode_empty_pdf_http = new CdekOrderFakeHttp();
 $barcode_empty_pdf_http->barcode_create_responses[] = array( 'entity' => array( 'uuid' => 'print-empty-pdf-uuid' ) );
@@ -1180,6 +1198,6 @@ $non_pdf_result = $non_pdf_service->download_ready_pdf_for_order( $barcode_order
 cdek_order_assert( empty( $non_pdf_result['success'] ) && 'Сервер вернул не PDF-файл этикетки СДЭК.' === (string) ( $non_pdf_result['message'] ?? '' ), 'CDEK BARCODE final download must reject explicit non-PDF content type.' );
 
 $barcode_service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Cdek/CdekBarcodePrintService.php' );
-cdek_order_assert( str_contains( $barcode_service_source, 'CACHE_TTL_SECONDS = 50 * 60' ) && str_contains( $barcode_service_source, 'prepare_for_order' ) && str_contains( $barcode_service_source, 'download_ready_pdf_for_order' ) && str_contains( $barcode_service_source, '$http_code < 200 || $http_code >= 300' ) && str_contains( $barcode_service_source, "str_contains( \$content_type, 'application/pdf' )" ), 'CDEK BARCODE service must cache prepared labels for 50 minutes, split prepare/download responsibilities, and reject failed/non-PDF downloads.' );
+cdek_order_assert( str_contains( $barcode_service_source, 'CACHE_TTL_SECONDS = 50 * 60' ) && str_contains( $barcode_service_source, 'STUCK_STATUS_SECONDS = 60' ) && str_contains( $barcode_service_source, 'STUCK_STATUS_CHECKS = 30' ) && str_contains( $barcode_service_source, 'prepare_for_order' ) && str_contains( $barcode_service_source, 'download_ready_pdf_for_order' ) && str_contains( $barcode_service_source, '$http_code < 200 || $http_code >= 300' ) && str_contains( $barcode_service_source, "str_contains( \$content_type, 'application/pdf' )" ), 'CDEK BARCODE service must cache prepared labels, recover stuck ACCEPTED/PROCESSING forms, split prepare/download responsibilities, and reject failed/non-PDF downloads.' );
 
 echo "CDEK order creation smoke test passed.\n";

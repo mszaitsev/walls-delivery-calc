@@ -1,6 +1,10 @@
 # WDC CDEK Order Creation
 
-Version: 0.53.0.
+Version: 0.53.1.
+
+0.53.1 update: CDEK BARCODE preparation now detects print forms that stay in `ACCEPTED`/`PROCESSING` for too long. Pending print UUIDs keep `created_at`, `last_checked_at`, `checked_count` and `cdek_number`; after 60 seconds or more than 30 checks WDC drops the stale cache entry, creates a fresh BARCODE request and lets the existing frontend polling continue on the new UUID. READY print forms are still cached for 50 minutes.
+
+Shipment AJAX responses now use one fresh adapter UI payload after create/update/cancel/remove/manual attach. This keeps Russian Post action buttons in the same state as a full page reload after create or status refresh, while CDEK label actions continue to be supplied by the CDEK adapter.
 
 0.53.0 update: the order `Отправления` block now dispatches lifecycle controls through the shared carrier shipment adapter registry. CDEK and Russian Post adapters expose presentation labels, status payloads, update/cancel/remove/manual-attach actions and label actions while delegating business work to the existing services. CDEK BARCODE download remains the same `Скачать этикетку` action, but it is now advertised by the CDEK adapter; auto-sync also uses adapter support/tracking/throttle/update hooks.
 
