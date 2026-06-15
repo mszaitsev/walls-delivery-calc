@@ -131,18 +131,26 @@ final class CdekBarcodePrintService {
 			return $this->failure( $exception->getMessage() );
 		}
 
+		$http_code = (int) ( $pdf['http_code'] ?? 200 );
+		if ( $http_code < 200 || $http_code >= 300 ) {
+			return $this->failure( 'Не удалось скачать этикетку СДЭК.' );
+		}
 		$body = (string) ( $pdf['body'] ?? '' );
 		if ( '' === $body ) {
 			return $this->failure( 'СДЭК вернул пустой PDF этикетки.' );
+		}
+		$content_type = strtolower( trim( (string) ( $pdf['content_type'] ?? '' ) ) );
+		if ( '' !== $content_type && ! str_contains( $content_type, 'application/pdf' ) ) {
+			return $this->failure( 'Сервер вернул не PDF-файл этикетки СДЭК.' );
 		}
 
 		return array(
 			'success' => true,
 			'message' => '',
 			'body' => $body,
-			'content_type' => (string) ( $pdf['content_type'] ?? 'application/pdf' ),
+			'content_type' => '' !== $content_type ? (string) ( $pdf['content_type'] ?? 'application/pdf' ) : 'application/pdf',
 			'filename' => 'cdek-barcode-' . ( '' !== (string) $context['cdek_number'] ? (string) $context['cdek_number'] : (string) $context['order_uuid'] ) . '.pdf',
-			'http_code' => (int) ( $pdf['http_code'] ?? 200 ),
+			'http_code' => $http_code,
 		);
 	}
 
