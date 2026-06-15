@@ -1,6 +1,8 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.50.4.
+Version: 0.50.5.
+
+0.50.5 admin bulk update: the CDEK `Тарифы` tab now includes compact mass-action controls. `CdekTariffRepository` supports `delete_all()`, `set_all_active()` and `set_active_by_delivery_mode()`, and the admin page exposes POST-only buttons to delete all tariffs, enable/disable all tariffs, or enable/disable a single delivery-mode group. Delivery mode mapping remains `1` door-door, `2` door-warehouse, `3` warehouse-door, `4` warehouse-warehouse; postamats are already classified as the warehouse side.
 
 0.50.4 postamat direction update: the delivery-mode fallback classifier now treats postamats as the warehouse/PVZ side for CDEK order routing. `дверь-постамат` / `door-locker` map to mode `2`, `постамат-дверь` / `locker-door` map to mode `3`, and warehouse/PVZ/postamat-to-warehouse/PVZ/postamat combinations such as `склад-постамат`, `пвз-постамат`, `постамат-пвз`, `постамат-постамат`, `warehouse-locker`, `pickup-locker`, `locker-pickup`, `locker-locker` map to mode `4`.
 

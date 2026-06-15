@@ -285,10 +285,31 @@ cdek_tariffs_sync_assert( 2 === CdekTariffSyncService::delivery_mode_value( null
 cdek_tariffs_sync_assert( 3 === CdekTariffSyncService::delivery_mode_value( null, 'locker-door', '' ), 'CDEK tariff mode fallback must map locker-door to mode 3.' );
 cdek_tariffs_sync_assert( 4 === CdekTariffSyncService::delivery_mode_value( null, 'pickup-locker', '' ), 'CDEK tariff mode fallback must map pickup-locker to mode 4.' );
 
+$bulk_db = new wpdb();
+$bulk_repository = new CdekTariffRepository( $bulk_db );
+foreach ( array( 1 => '101', 2 => '102', 3 => '103', 4 => '104' ) as $mode => $code ) {
+	$bulk_repository->upsert_from_sync( array( 'tariff_code' => $code, 'tariff_name_from_cdek' => 'Mode ' . $mode, 'delivery_type' => in_array( $mode, array( 1, 3 ), true ) ? DeliveryType::COURIER : DeliveryType::PICKUP, 'delivery_mode' => $mode ) );
+}
+cdek_tariffs_sync_assert( 4 === $bulk_repository->set_all_active( false ), 'CDEK set_all_active(false) must disable all tariffs in memory table.' );
+cdek_tariffs_sync_assert( 0 === count( array_filter( $bulk_repository->all(), static fn( array $row ): bool => ! empty( $row['is_active'] ) ) ), 'CDEK set_all_active(false) must leave no active tariffs.' );
+cdek_tariffs_sync_assert( 4 === $bulk_repository->set_all_active( true ), 'CDEK set_all_active(true) must enable all tariffs in memory table.' );
+$disabled_modes = 0;
+foreach ( array( 4 => '104', 3 => '103', 2 => '102', 1 => '101' ) as $mode => $code ) {
+	cdek_tariffs_sync_assert( 1 === $bulk_repository->set_active_by_delivery_mode( $mode, false ), 'CDEK set_active_by_delivery_mode must update one tariff for mode ' . $mode . '.' );
+	++$disabled_modes;
+	$row = $bulk_repository->find_by_code( $code );
+	cdek_tariffs_sync_assert( is_array( $row ) && 0 === (int) $row['is_active'], 'CDEK mode ' . $mode . ' tariff must be disabled.' );
+	$disabled = array_filter( $bulk_repository->all(), static fn( array $candidate ): bool => empty( $candidate['is_active'] ) );
+	cdek_tariffs_sync_assert( count( $disabled ) === $disabled_modes, 'CDEK mode bulk update must only disable the requested mode.' );
+}
+cdek_tariffs_sync_assert( 4 === $bulk_repository->delete_all() && array() === $bulk_repository->all(), 'CDEK delete_all must remove all tariffs in memory table.' );
+
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 cdek_tariffs_sync_assert( str_contains( $source, 'Загрузить тарифы из СДЭК' ) && str_contains( $source, 'preview_cdek_tariffs_sync' ) && str_contains( $source, 'confirm_cdek_tariffs_sync' ), 'CDEK admin tariffs tab must include API sync preview and confirmation actions.' );
 cdek_tariffs_sync_assert( str_contains( $source, 'DeliveryQuoteCacheManager' ) && str_contains( $source, 'clear_delivery_quote_cache' ) && str_contains( $source, 'save_cdek_tariffs' ) && str_contains( $source, 'confirm_cdek_tariffs_sync' ), 'CDEK tariff save/sync must clear delivery quote cache.' );
 cdek_tariffs_sync_assert( str_contains( $source, 'Ограничения' ) && str_contains( $source, 'до ПВЗ' ) && str_contains( $source, 'до двери' ) && str_contains( $source, 'DeliveryType::PICKUP' ) && str_contains( $source, 'DeliveryType::COURIER' ), 'CDEK tariff admin table must show limits and Russian delivery type labels while keeping technical values.' );
+cdek_tariffs_sync_assert( str_contains( $source, 'bulk_cdek_tariffs' ) && str_contains( $source, 'cdek_tariffs_bulk_action' ) && str_contains( $source, 'Удалить все тарифы СДЭК? Это действие нельзя отменить.' ), 'CDEK admin tariffs tab must include POST bulk action buttons with delete confirmation.' );
+cdek_tariffs_sync_assert( str_contains( $source, 'current_user_can( AdminMenu::CAPABILITY )' ) && str_contains( $source, "check_admin_referer( 'wdc_delivery_services' )" ) && str_contains( $source, 'handle_cdek_tariffs_bulk_action' ), 'CDEK bulk tariff admin handler must keep capability and nonce protection.' );
 $cache_manager_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/Cache/DeliveryQuoteCacheManager.php' );
 cdek_tariffs_sync_assert( str_contains( $cache_manager_source, 'shipping_for_package_' ) && str_contains( $cache_manager_source, 'wdc_platform_rates' ) && str_contains( $cache_manager_source, 'wdc_platform_selected_tariffs' ) && str_contains( $cache_manager_source, 'ensure_woocommerce_session' ), 'Delivery quote cache clear must include WooCommerce package rates and WDC runtime session caches.' );
 cdek_tariffs_sync_assert( str_contains( $cache_manager_source, 'wdc_delivery_rates_cache_version' ) && str_contains( $cache_manager_source, 'add_cache_version_to_packages' ) && str_contains( $cache_manager_source, 'bump_delivery_rates_cache_version' ), 'Delivery quote cache clear must bump a global WooCommerce package cache version.' );

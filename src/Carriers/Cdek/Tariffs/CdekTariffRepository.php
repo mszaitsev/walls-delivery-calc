@@ -184,6 +184,80 @@ final class CdekTariffRepository {
 		}
 	}
 
+	public function delete_all(): int {
+		if ( $this->uses_memory_table() ) {
+			$count = count( $this->wpdb->cdek_tariffs );
+			$this->wpdb->cdek_tariffs = array();
+
+			return $count;
+		}
+
+		$result = $this->wpdb->query( 'DELETE FROM ' . $this->main_table() );
+
+		return is_int( $result ) ? $result : 0;
+	}
+
+	public function set_all_active( bool $active ): int {
+		$active_value = $active ? 1 : 0;
+		if ( $this->uses_memory_table() ) {
+			$count = 0;
+			foreach ( $this->wpdb->cdek_tariffs as $index => $row ) {
+				if ( (int) ( $row['is_active'] ?? 0 ) === $active_value ) {
+					continue;
+				}
+				++$count;
+				$this->wpdb->cdek_tariffs[ $index ]['is_active'] = $active_value;
+				$this->wpdb->cdek_tariffs[ $index ]['updated_at'] = $this->now();
+			}
+
+			return $count;
+		}
+
+		$result = $this->wpdb->query(
+			$this->wpdb->prepare(
+				'UPDATE ' . $this->main_table() . ' SET is_active = %d, updated_at = %s WHERE is_active <> %d',
+				$active_value,
+				$this->now(),
+				$active_value
+			)
+		);
+
+		return is_int( $result ) ? $result : 0;
+	}
+
+	public function set_active_by_delivery_mode( int $delivery_mode, bool $active ): int {
+		$delivery_mode = $this->normalize_delivery_mode( $delivery_mode );
+		if ( 0 === $delivery_mode ) {
+			return 0;
+		}
+		$active_value = $active ? 1 : 0;
+		if ( $this->uses_memory_table() ) {
+			$count = 0;
+			foreach ( $this->wpdb->cdek_tariffs as $index => $row ) {
+				if ( (int) ( $row['delivery_mode'] ?? 0 ) !== $delivery_mode || (int) ( $row['is_active'] ?? 0 ) === $active_value ) {
+					continue;
+				}
+				++$count;
+				$this->wpdb->cdek_tariffs[ $index ]['is_active'] = $active_value;
+				$this->wpdb->cdek_tariffs[ $index ]['updated_at'] = $this->now();
+			}
+
+			return $count;
+		}
+
+		$result = $this->wpdb->query(
+			$this->wpdb->prepare(
+				'UPDATE ' . $this->main_table() . ' SET is_active = %d, updated_at = %s WHERE delivery_mode = %d AND is_active <> %d',
+				$active_value,
+				$this->now(),
+				$delivery_mode,
+				$active_value
+			)
+		);
+
+		return is_int( $result ) ? $result : 0;
+	}
+
 	/**
 	 * @param array<int,array<string,mixed>> $api_rows
 	 * @return array{new:array<int,array<string,mixed>>,changed:array<int,array<string,mixed>>,missing:array<int,array<string,mixed>>}
