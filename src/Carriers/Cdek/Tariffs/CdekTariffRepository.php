@@ -39,6 +39,7 @@ final class CdekTariffRepository {
 			height_max DECIMAL(12,3) NULL,
 			custom_title VARCHAR(255) NOT NULL DEFAULT '',
 			delivery_type VARCHAR(20) NOT NULL DEFAULT 'pickup',
+			delivery_mode TINYINT UNSIGNED NOT NULL DEFAULT 0,
 			admin_comment TEXT NULL,
 			is_active TINYINT(1) NOT NULL DEFAULT 1,
 			last_sync_at DATETIME NULL,
@@ -47,6 +48,7 @@ final class CdekTariffRepository {
 			PRIMARY KEY (id),
 			UNIQUE KEY uniq_tariff_code (tariff_code),
 			KEY idx_delivery_type (delivery_type),
+			KEY idx_delivery_mode (delivery_mode),
 			KEY idx_is_active (is_active)
 		) {$charset}";
 	}
@@ -115,6 +117,7 @@ final class CdekTariffRepository {
 		$existing = $this->find_by_code( $code );
 		$name = $this->clean_text( (string) ( $row['tariff_name_from_cdek'] ?? $row['tariff_name'] ?? '' ), 255 );
 		$type = $this->normalize_delivery_type( (string) ( $row['delivery_type'] ?? DeliveryType::PICKUP ) );
+		$mode = $this->normalize_delivery_mode( $row['delivery_mode'] ?? 0 );
 		$limits = $this->limit_values_from_row( $row );
 		if ( is_array( $existing ) ) {
 			$updated = array_merge(
@@ -122,6 +125,7 @@ final class CdekTariffRepository {
 				array(
 					'tariff_name_from_cdek' => $name,
 					'delivery_type' => $type,
+					'delivery_mode' => $mode,
 					'last_sync_at' => $now,
 					'updated_at' => $now,
 				),
@@ -138,6 +142,7 @@ final class CdekTariffRepository {
 				'tariff_name_from_cdek' => $name,
 				'custom_title' => '',
 				'delivery_type' => $type,
+				'delivery_mode' => $mode,
 				...$limits,
 				'admin_comment' => '',
 				'is_active' => 1,
@@ -169,6 +174,7 @@ final class CdekTariffRepository {
 				array(
 					'custom_title' => $this->clean_text( (string) ( $row['custom_title'] ?? '' ), 255 ),
 					'delivery_type' => $this->normalize_delivery_type( (string) ( $row['delivery_type'] ?? $existing['delivery_type'] ?? DeliveryType::PICKUP ) ),
+					'delivery_mode' => $this->normalize_delivery_mode( $row['delivery_mode'] ?? $existing['delivery_mode'] ?? 0 ),
 					'admin_comment' => $this->clean_textarea( (string) ( $row['admin_comment'] ?? '' ) ),
 					'is_active' => ! empty( $row['is_active'] ) ? 1 : 0,
 					'updated_at' => $this->now(),
@@ -176,6 +182,80 @@ final class CdekTariffRepository {
 			);
 			$this->persist( $updated, true );
 		}
+	}
+
+	public function delete_all(): int {
+		if ( $this->uses_memory_table() ) {
+			$count = count( $this->wpdb->cdek_tariffs );
+			$this->wpdb->cdek_tariffs = array();
+
+			return $count;
+		}
+
+		$result = $this->wpdb->query( 'DELETE FROM ' . $this->main_table() );
+
+		return is_int( $result ) ? $result : 0;
+	}
+
+	public function set_all_active( bool $active ): int {
+		$active_value = $active ? 1 : 0;
+		if ( $this->uses_memory_table() ) {
+			$count = 0;
+			foreach ( $this->wpdb->cdek_tariffs as $index => $row ) {
+				if ( (int) ( $row['is_active'] ?? 0 ) === $active_value ) {
+					continue;
+				}
+				++$count;
+				$this->wpdb->cdek_tariffs[ $index ]['is_active'] = $active_value;
+				$this->wpdb->cdek_tariffs[ $index ]['updated_at'] = $this->now();
+			}
+
+			return $count;
+		}
+
+		$result = $this->wpdb->query(
+			$this->wpdb->prepare(
+				'UPDATE ' . $this->main_table() . ' SET is_active = %d, updated_at = %s WHERE is_active <> %d',
+				$active_value,
+				$this->now(),
+				$active_value
+			)
+		);
+
+		return is_int( $result ) ? $result : 0;
+	}
+
+	public function set_active_by_delivery_mode( int $delivery_mode, bool $active ): int {
+		$delivery_mode = $this->normalize_delivery_mode( $delivery_mode );
+		if ( 0 === $delivery_mode ) {
+			return 0;
+		}
+		$active_value = $active ? 1 : 0;
+		if ( $this->uses_memory_table() ) {
+			$count = 0;
+			foreach ( $this->wpdb->cdek_tariffs as $index => $row ) {
+				if ( (int) ( $row['delivery_mode'] ?? 0 ) !== $delivery_mode || (int) ( $row['is_active'] ?? 0 ) === $active_value ) {
+					continue;
+				}
+				++$count;
+				$this->wpdb->cdek_tariffs[ $index ]['is_active'] = $active_value;
+				$this->wpdb->cdek_tariffs[ $index ]['updated_at'] = $this->now();
+			}
+
+			return $count;
+		}
+
+		$result = $this->wpdb->query(
+			$this->wpdb->prepare(
+				'UPDATE ' . $this->main_table() . ' SET is_active = %d, updated_at = %s WHERE delivery_mode = %d AND is_active <> %d',
+				$active_value,
+				$this->now(),
+				$delivery_mode,
+				$active_value
+			)
+		);
+
+		return is_int( $result ) ? $result : 0;
 	}
 
 	/**
@@ -210,7 +290,7 @@ final class CdekTariffRepository {
 				continue;
 			}
 			$existing = $existing_by_code[ $code ];
-			if ( (string) $existing['tariff_name_from_cdek'] !== $normalized['tariff_name_from_cdek'] || (string) $existing['delivery_type'] !== $normalized['delivery_type'] || $this->limits_changed( $existing, $normalized ) ) {
+			if ( (string) $existing['tariff_name_from_cdek'] !== $normalized['tariff_name_from_cdek'] || (string) $existing['delivery_type'] !== $normalized['delivery_type'] || (int) ( $existing['delivery_mode'] ?? 0 ) !== (int) ( $normalized['delivery_mode'] ?? 0 ) || $this->limits_changed( $existing, $normalized ) ) {
 				$changed[] = array_merge( $normalized, array( 'old' => $existing ) );
 			}
 		}
@@ -258,6 +338,7 @@ final class CdekTariffRepository {
 			'height_max' => $row['height_max'],
 			'custom_title' => $row['custom_title'],
 			'delivery_type' => $row['delivery_type'],
+			'delivery_mode' => (int) $row['delivery_mode'],
 			'admin_comment' => $row['admin_comment'],
 			'is_active' => (int) $row['is_active'],
 			'last_sync_at' => $row['last_sync_at'],
@@ -296,6 +377,7 @@ final class CdekTariffRepository {
 			'height_max' => $this->nullable_number( $row['height_max'] ?? null ),
 			'custom_title' => $this->clean_text( (string) ( $row['custom_title'] ?? '' ), 255 ),
 			'delivery_type' => $this->normalize_delivery_type( (string) ( $row['delivery_type'] ?? DeliveryType::PICKUP ) ),
+			'delivery_mode' => $this->normalize_delivery_mode( $row['delivery_mode'] ?? 0 ),
 			'admin_comment' => $this->clean_textarea( (string) ( $row['admin_comment'] ?? '' ) ),
 			'is_active' => ! empty( $row['is_active'] ) ? 1 : 0,
 			'last_sync_at' => '' !== trim( (string) ( $row['last_sync_at'] ?? '' ) ) ? (string) $row['last_sync_at'] : null,
@@ -310,6 +392,12 @@ final class CdekTariffRepository {
 
 	private function normalize_delivery_type( string $type ): string {
 		return DeliveryType::COURIER === $type ? DeliveryType::COURIER : DeliveryType::PICKUP;
+	}
+
+	private function normalize_delivery_mode( mixed $mode ): int {
+		$mode = (int) $mode;
+
+		return in_array( $mode, array( 1, 2, 3, 4 ), true ) ? $mode : 0;
 	}
 
 	/**
@@ -377,7 +465,7 @@ final class CdekTariffRepository {
 		if ( in_array( $key, $this->limit_keys(), true ) ) {
 			return null === $value ? '%s' : '%f';
 		}
-		if ( 'is_active' === $key ) {
+		if ( in_array( $key, array( 'is_active', 'delivery_mode' ), true ) ) {
 			return '%d';
 		}
 

@@ -759,7 +759,7 @@
 			return '';
 		}
 		var type = String(point.point_type || point.type || point.cdek_type || point.marker_type || (point.snapshot && (point.snapshot.point_type || point.snapshot.type || point.snapshot.cdek_type || point.snapshot.marker_type)) || '').toLowerCase();
-		var label = type === 'postamat' || type === 'postomat' ? 'Постамат СДЭК' : 'ПВЗ СДЭК';
+		var label = type === 'postamat' || type === 'postomat' || type === 'locker' ? 'Постамат СДЭК' : 'ПВЗ СДЭК';
 		return [label, pointDisplayCode(point)].filter(Boolean).join(' ');
 	}
 
@@ -821,7 +821,7 @@
 
 	function pickupPointType(point) {
 		var markerType = String((point && point.marker_type) || '').toLowerCase();
-		if (markerType === 'postamat') {
+		if (markerType === 'postamat' || markerType === 'postomat' || markerType === 'locker') {
 			return 'POSTAMAT';
 		}
 		if (markerType === 'pickup') {

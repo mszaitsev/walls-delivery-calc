@@ -190,6 +190,11 @@ final class CdekLocationResolver {
 	 */
 	private function query_attempts( string $fias, string $city, string $region, QuoteRequest $request ): array {
 		$attempts = array();
+		$lat = $this->coordinate_from_context( $request, array( 'lat', 'latitude', 'geo_lat' ) );
+		$lng = $this->coordinate_from_context( $request, array( 'lng', 'lon', 'longitude', 'geo_lon' ) );
+		if ( null !== $lat && null !== $lng ) {
+			$attempts[] = $this->attempt( 'coordinates', array( 'latitude' => (string) $lat, 'longitude' => (string) $lng, 'size' => '1' ), $city, $region );
+		}
 		if ( '' !== $fias ) {
 			$attempts[] = $this->attempt( 'fias_guid_only', array( 'fias_guid' => $fias ), $city, $region );
 		}
@@ -210,6 +215,22 @@ final class CdekLocationResolver {
 		}
 
 		return $this->unique_attempts( $attempts );
+	}
+
+	/**
+	 * @param array<int,string> $keys
+	 */
+	private function coordinate_from_context( QuoteRequest $request, array $keys ): ?float {
+		foreach ( $keys as $key ) {
+			$value = $request->customer_context[ $key ] ?? null;
+			if ( null === $value || '' === trim( (string) $value ) || ! is_numeric( $value ) ) {
+				continue;
+			}
+
+			return (float) $value;
+		}
+
+		return null;
 	}
 
 	/**

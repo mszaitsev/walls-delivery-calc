@@ -11,10 +11,15 @@ use WallsShop\WDC\Carriers\Cdek\Api\CdekApiResponse;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekHttpClientInterface;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekOAuthTokenService;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekApiClient;
+use WallsShop\WDC\Carriers\Cdek\CdekLocationResolver;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticApiClient;
+use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\Tracking\RussianPostTrackingApiClient;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionClientInterface;
+use WallsShop\WDC\Checkout\AddressSuggestions\AddressSuggestionSettings;
+use WallsShop\WDC\Checkout\AddressSuggestions\DaDataTokenPool;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Address\Address;
@@ -26,14 +31,19 @@ use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
+use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Shipments\Cdek\CdekBarcodePrintService;
 use WallsShop\WDC\Shipments\Cdek\CdekCreateRequestBuilder;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
+use WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService;
 use WallsShop\WDC\Shipments\Cdek\CdekShipmentAdapter;
+use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -61,6 +71,7 @@ function esc_html__( string $text, string $domain = '' ): string { return $text;
 function esc_attr__( string $text, string $domain = '' ): string { return $text; }
 function esc_html( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
 function esc_attr( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
+function esc_url( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
 function esc_textarea( mixed $text ): string { return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' ); }
 function selected( mixed $selected, mixed $current = true, bool $display = true ): string {
 	$result = (string) $selected === (string) $current ? ' selected="selected"' : '';
@@ -78,6 +89,8 @@ function disabled( mixed $disabled, mixed $current = true, bool $display = true 
 }
 function current_user_can( string $capability ): bool { return true; }
 function check_ajax_referer( string $action, string|bool $query_arg = false, bool $stop = true ): bool { return true; }
+function wc_get_dimension( mixed $dimension, string $to_unit ): float { return (float) str_replace( ',', '.', (string) $dimension ); }
+function wc_get_weight( mixed $weight, string $to_unit ): float { return 'g' === $to_unit ? (float) str_replace( ',', '.', (string) $weight ) * 1000 : (float) str_replace( ',', '.', (string) $weight ); }
 function wc_get_order( int $order_id ): ?object { return $GLOBALS['wdc_cdek_order_ajax_order'] ?? null; }
 function wp_send_json_success( mixed $data = null, int $status_code = 200, int $flags = 0 ): never { throw new CdekOrderAjaxResponse( true, $data, $status_code ); }
 function wp_send_json_error( mixed $data = null, int $status_code = 400, int $flags = 0 ): never { throw new CdekOrderAjaxResponse( false, $data, $status_code ); }
@@ -109,6 +122,14 @@ final class CdekOrderFakeHttp implements CdekHttpClientInterface {
 	public array $order_responses = array();
 	/** @var array<int,array<string,mixed>> */
 	public array $delete_responses = array();
+	/** @var array<int,array<string,mixed>> */
+	public array $city_responses = array();
+	/** @var array<int,array<string,mixed>> */
+	public array $barcode_create_responses = array();
+	/** @var array<int,array<string,mixed>> */
+	public array $barcode_status_responses = array();
+	/** @var array<int,string> */
+	public array $barcode_pdf_responses = array();
 
 	public function request( string $method, string $url, array $args = array() ): CdekApiResponse {
 		$this->requests[] = array( 'method' => $method, 'url' => $url, 'args' => $args );
@@ -129,14 +150,63 @@ final class CdekOrderFakeHttp implements CdekHttpClientInterface {
 			);
 			return new CdekApiResponse( 202, json_encode( $response ) ?: '{}' );
 		}
+		if ( 'GET' === $method && str_contains( $url, '/v2/location/cities' ) ) {
+			$response = array() !== $this->city_responses ? array_shift( $this->city_responses ) : array( array( 'code' => 44, 'city' => 'Москва' ) );
+			return new CdekApiResponse( 200, json_encode( $response ) ?: '[]' );
+		}
+		if ( 'POST' === $method && str_contains( $url, '/v2/print/barcodes' ) ) {
+			$response = array_shift( $this->barcode_create_responses ) ?: array( 'entity' => array( 'uuid' => 'print-uuid-1' ) );
+			return new CdekApiResponse( 202, json_encode( $response ) ?: '{}' );
+		}
+		if ( 'GET' === $method && str_contains( $url, '/v2/print/barcodes/' ) && str_ends_with( $url, '.pdf' ) ) {
+			$response = array_shift( $this->barcode_pdf_responses ) ?: '%PDF-1.4 fake';
+			return new CdekApiResponse( 200, $response, array( 'content-type' => 'application/pdf' ) );
+		}
+		if ( 'GET' === $method && str_contains( $url, '/v2/print/barcodes/' ) ) {
+			$response = array_shift( $this->barcode_status_responses ) ?: array( 'entity' => array( 'uuid' => 'print-uuid-1', 'statuses' => array( array( 'code' => 'READY', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
+			return new CdekApiResponse( 200, json_encode( $response ) ?: '{}' );
+		}
 		$response = array_shift( $this->order_responses ) ?: array( 'entity' => array( 'uuid' => 'order-uuid-1', 'cdek_number' => '100500', 'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
 		return new CdekApiResponse( 200, json_encode( $response ) ?: '{}' );
+	}
+}
+
+final class CdekOrderFakeSuggestionClient implements AddressSuggestionClientInterface {
+	/** @var array<int,array<string,mixed>> */
+	public array $responses = array();
+	/** @var array<int,array{stage:string,query:string,context:array<string,string>}> */
+	public array $requests = array();
+
+	public function suggest( string $stage, string $query, array $context = array() ): array {
+		$this->requests[] = array( 'stage' => $stage, 'query' => $query, 'context' => $context );
+		return array_shift( $this->responses ) ?: array(
+			'success' => true,
+			'suggestions' => array(
+				array(
+					'value' => '125252, г Москва, Ходынский б-р, д 13, кв 150',
+					'unrestricted_value' => '125252, г Москва, Ходынский б-р, д 13, кв 150',
+					'data' => array(
+						'postal_code' => '125252',
+						'region_with_type' => 'г Москва',
+						'city_with_type' => 'г Москва',
+						'street_with_type' => 'Ходынский б-р',
+						'house' => '13',
+						'flat' => '150',
+						'fias_id' => 'fias-house',
+						'kladr_id' => 'kladr-house',
+						'geo_lat' => '55.790000',
+						'geo_lon' => '37.530000',
+					),
+				),
+			),
+		);
 	}
 }
 
 final class CdekOrderFakeOrder {
 	public array $meta = array();
 	public array $notes = array();
+	public array $items = array();
 	public function __construct( private int $id = 101 ) {}
 	public function get_id(): int { return $this->id; }
 	public function get_meta( string $key, bool $single = true ): mixed { return $this->meta[ $key ] ?? ''; }
@@ -155,7 +225,24 @@ final class CdekOrderFakeOrder {
 	public function get_shipping_city(): string { return 'Кемерово'; }
 	public function get_shipping_address_1(): string { return 'Советский 10'; }
 	public function get_shipping_address_2(): string { return ''; }
-	public function get_items(): array { return array(); }
+	public function get_items(): array { return $this->items; }
+}
+
+final class CdekOrderFakeProduct {
+	public function __construct( private string $sku, private string $weight, private string $length, private string $width, private string $height ) {}
+	public function get_sku(): string { return $this->sku; }
+	public function get_weight(): string { return $this->weight; }
+	public function get_length(): string { return $this->length; }
+	public function get_width(): string { return $this->width; }
+	public function get_height(): string { return $this->height; }
+}
+
+final class CdekOrderFakeOrderItem {
+	public function __construct( private object $product, private string $name, private int $quantity, private float $total ) {}
+	public function get_product(): object { return $this->product; }
+	public function get_name(): string { return $this->name; }
+	public function get_quantity(): int { return $this->quantity; }
+	public function get_total(): float { return $this->total; }
 }
 
 function cdek_order_request( string $delivery_type, int $mode, array $overrides = array() ): ShipmentCreateRequest {
@@ -180,12 +267,44 @@ function cdek_order_request( string $delivery_type, int $mode, array $overrides 
 			'tariff_code' => $overrides['tariff_code'] ?? '136',
 			'tariff_title' => $overrides['tariff_title'] ?? 'Посылка склад-склад',
 			'delivery_mode' => $mode,
+			'shipment_point' => $overrides['shipment_point'] ?? '',
 			'delivery_point' => $overrides['delivery_point'] ?? ( DeliveryType::PICKUP === $delivery_type ? 'KEM7' : '' ),
-			'cdek_to_city_code' => 44,
+			'cdek_to_city_code' => $overrides['cdek_to_city_code'] ?? 44,
+			'cdek_city_code' => $overrides['cdek_city_code'] ?? null,
+			'cdek_city_name' => $overrides['cdek_city_name'] ?? '',
+			'cdek_postal_code' => $overrides['cdek_postal_code'] ?? '',
+			'cdek_delivery_address' => $overrides['cdek_delivery_address'] ?? '',
+			'cdek_courier_comment' => $overrides['cdek_courier_comment'] ?? '',
 			'cdek_item_rows' => $overrides['cdek_item_rows'] ?? array(
 				array( 'item_key' => '1', 'ordered_quantity' => 5, 'place_number' => 1, 'name' => 'Товар', 'ware_key' => 'SKU-1', 'amount' => 5, 'cost' => $overrides['unit_cost'] ?? 1000, 'weight' => 100 ),
 			),
 		)
+	);
+}
+
+function cdek_order_dadata_settings( bool $enabled = true ): AddressSuggestionSettings {
+	$repository = new SettingsRepository();
+	$options = $repository->all();
+	$options['dadata_suggestions_enabled'] = $enabled;
+	$options['dadata_suggestions_tokens'] = $enabled ? array(
+		array(
+			'id' => 'test-token',
+			'enabled' => true,
+			'encrypted_token' => 'encrypted-for-smoke',
+			'daily_limit' => 100,
+		),
+	) : array();
+	$repository->replace( $options );
+	$encryption = new EncryptionService();
+
+	return new AddressSuggestionSettings( $repository, $encryption, new DaDataTokenPool( $repository, $encryption ) );
+}
+
+function cdek_order_address_service( AddressSuggestionClientInterface $suggestions, CdekApiClient $client, bool $dadata_enabled = true ): CdekRecipientAddressPreparationService {
+	return new CdekRecipientAddressPreparationService(
+		cdek_order_dadata_settings( $dadata_enabled ),
+		$suggestions,
+		new CdekLocationResolver( $client, new Logger() )
 	);
 }
 
@@ -202,8 +321,10 @@ $settings->save_from_admin(
 		CdekSettings::SENDER_CITY_NAME_KEY => 'Новосибирск',
 		CdekSettings::SENDER_ADDRESS_KEY => 'Фабричная 1',
 		CdekSettings::SHIPMENT_POINT_KEY => 'NSK69',
+		CdekSettings::SHIPMENT_POINT_ADDRESS_KEY => 'Новосибирск, Красный проспект 1',
 	)
 );
+cdek_order_assert( 'Новосибирск, Красный проспект 1' === $settings->shipment_point_address(), 'CDEK shipment point address setting must be saved and read.' );
 $builder = new CdekCreateRequestBuilder( $settings );
 
 $pickup_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4 ) );
@@ -212,11 +333,157 @@ cdek_order_assert( 'NSK69' === $pickup_payload['shipment_point'] && 'KEM7' === $
 cdek_order_assert( ! isset( $pickup_payload['from_location'], $pickup_payload['to_location'], $pickup_payload['services'], $pickup_payload['additional_order_types'], $pickup_payload['delivery_recipient_cost'], $pickup_payload['delivery_recipient_cost_adv'] ), 'CDEK pickup payload must omit forbidden fields.' );
 cdek_order_assert( 'BARCODE' === $pickup_payload['print'], 'CDEK order payload must request BARCODE print.' );
 cdek_order_assert( 0 === $pickup_payload['packages'][0]['items'][0]['payment']['value'] && 1000.0 === $pickup_payload['packages'][0]['items'][0]['cost'], 'CDEK item payment/cost mismatch.' );
+cdek_order_assert( is_int( $pickup_payload['packages'][0]['length'] ) && is_int( $pickup_payload['packages'][0]['width'] ) && is_int( $pickup_payload['packages'][0]['height'] ), 'CDEK package dimensions must remain integer-only.' );
+cdek_order_assert( ! isset( $pickup_payload['packages'][0]['items'][0]['length'], $pickup_payload['packages'][0]['items'][0]['width'], $pickup_payload['packages'][0]['items'][0]['height'], $pickup_payload['packages'][0]['items'][0]['length_cm'], $pickup_payload['packages'][0]['items'][0]['width_cm'], $pickup_payload['packages'][0]['items'][0]['height_cm'] ), 'CDEK package items must not send item-level dimensions.' );
+$override_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4, array( 'shipment_point' => 'nsk70' ) ) );
+cdek_order_assert( 'NSK70' === $override_payload['shipment_point'], 'CDEK order creation must use temporary sender shipment_point from modal meta.' );
+$postcode_as_point_request = cdek_order_request( DeliveryType::PICKUP, 4, array( 'delivery_point' => '101000' ) );
+cdek_order_assert( array() !== $builder->validate( $postcode_as_point_request ), 'CDEK order creation must not accept postcode as delivery_point.' );
+$pickup_without_mode = cdek_order_request( DeliveryType::PICKUP, 0, array( 'delivery_point' => 'KEM7' ) );
+$pickup_without_mode_errors = $builder->validate( $pickup_without_mode );
+cdek_order_assert( ! in_array( 'Не удалось определить режим тарифа СДЭК. Проверьте тариф и повторите создание отправления.', $pickup_without_mode_errors, true ), 'CDEK pickup with tariff_code, shipment_point and delivery_point must not be blocked by missing delivery_mode.' );
+cdek_order_assert( 'KEM7' === (string) ( $builder->build( $pickup_without_mode )['delivery_point'] ?? '' ), 'CDEK pickup delivery_type fallback must build shipment_point + delivery_point when delivery_mode is absent.' );
+$pickup_without_point_errors = $builder->validate( cdek_order_request( DeliveryType::PICKUP, 0, array( 'delivery_point' => '' ) ) );
+cdek_order_assert( ! in_array( 'Не удалось определить режим тарифа СДЭК. Проверьте тариф и повторите создание отправления.', $pickup_without_point_errors, true ) && in_array( 'Для CDEK pickup нужен код ПВЗ delivery_point.', $pickup_without_point_errors, true ), 'CDEK pickup without delivery_point must be blocked by missing pickup point, not tariff mode.' );
+$pickup_without_tariff_errors = $builder->validate( cdek_order_request( DeliveryType::PICKUP, 0, array( 'tariff_code' => '' ) ) );
+cdek_order_assert( in_array( 'Не выбран tariff_code СДЭК.', $pickup_without_tariff_errors, true ), 'CDEK pickup without tariff_code must still show tariff validation error.' );
 
 $courier_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 3 ) );
 cdek_order_assert( isset( $courier_payload['shipment_point'], $courier_payload['to_location'] ) && ! isset( $courier_payload['delivery_point'], $courier_payload['from_location'] ), 'Warehouse-door courier must use shipment_point and to_location only.' );
 $door_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 1 ) );
 cdek_order_assert( isset( $door_payload['from_location'], $door_payload['to_location'] ) && ! isset( $door_payload['shipment_point'], $door_payload['delivery_point'] ), 'Door-door courier must use from_location and to_location only.' );
+$door_warehouse_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 2, array( 'delivery_point' => 'KEM7' ) ) );
+cdek_order_assert( isset( $door_warehouse_payload['from_location'], $door_warehouse_payload['delivery_point'] ) && ! isset( $door_warehouse_payload['shipment_point'], $door_warehouse_payload['to_location'] ), 'Door-warehouse CDEK order must use from_location and delivery_point only.' );
+$warehouse_warehouse_payload = $builder->build( cdek_order_request( DeliveryType::PICKUP, 4, array( 'delivery_point' => 'KEM7' ) ) );
+cdek_order_assert( isset( $warehouse_warehouse_payload['shipment_point'], $warehouse_warehouse_payload['delivery_point'] ) && ! isset( $warehouse_warehouse_payload['from_location'], $warehouse_warehouse_payload['to_location'] ), 'Warehouse-warehouse CDEK order must use shipment_point and delivery_point only.' );
+$comment_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 3, array( 'cdek_courier_comment' => str_repeat( 'А', 300 ) ) ) );
+cdek_order_assert( isset( $comment_payload['comment'] ) && 255 === mb_strlen( (string) $comment_payload['comment'] ), 'CDEK courier comment must be sent and trimmed to 255 characters.' );
+$empty_comment_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 3, array( 'cdek_courier_comment' => '' ) ) );
+cdek_order_assert( ! isset( $empty_comment_payload['comment'] ), 'Empty CDEK courier comment must not be sent.' );
+$normalized_courier_payload = $builder->build(
+	cdek_order_request(
+		DeliveryType::COURIER,
+		3,
+		array(
+			'cdek_to_city_code' => 0,
+			'cdek_city_code' => 44,
+			'cdek_city_name' => 'Москва',
+			'cdek_postal_code' => '125252',
+			'cdek_delivery_address' => 'Ходынский б-р, д 13, кв 150',
+		)
+	)
+);
+cdek_order_assert( array( 'code' => 44, 'city' => 'Москва', 'postal_code' => '125252', 'address' => 'Ходынский б-р, д 13, кв 150' ) === $normalized_courier_payload['to_location'], 'CDEK courier to_location must use prepared DaData/CDEK fields.' );
+$missing_cdek_city_errors = $builder->validate( cdek_order_request( DeliveryType::COURIER, 3, array( 'cdek_to_city_code' => 0 ) ) );
+cdek_order_assert( in_array( "Не удалось определить код города СДЭК для адреса получателя.\nПроверьте адрес и повторите обработку.", $missing_cdek_city_errors, true ), 'CDEK courier creation must be blocked when CDEK city code is missing.' );
+$postcode_city_code_payload = $builder->build( cdek_order_request( DeliveryType::COURIER, 3, array( 'cdek_to_city_code' => 0, 'cdek_city_code' => 44, 'cdek_postal_code' => '125252', 'cdek_delivery_address' => 'Ходынский б-р, д 13' ) ) );
+cdek_order_assert( 44 === (int) $postcode_city_code_payload['to_location']['code'] && 125252 !== (int) $postcode_city_code_payload['to_location']['code'], 'CDEK courier must not use postcode as city code.' );
+
+$suggestions = new CdekOrderFakeSuggestionClient();
+$location_http = new CdekOrderFakeHttp();
+$location_http->city_responses[] = array( array( 'code' => 44, 'city' => 'Москва' ) );
+$location_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $location_http ), $settings, $location_http );
+$cdek_address_service = cdek_order_address_service( $suggestions, $location_client );
+$prepared_address_without_flat = $cdek_address_service->prepare( new CdekOrderFakeOrder( 124 ), '125252, Москва, Ходынский б-р, д 13', array( 'city_name' => 'Москва', 'postal_code' => '125252', 'delivery_calculation_data' => array( 'api' => array( 'cdek_to_city_code' => 44 ) ) ), CdekSettings::SERVICE_KEY );
+cdek_order_assert( ! empty( $prepared_address_without_flat['success'] ) && str_contains( (string) ( $prepared_address_without_flat['fields']['cdek_delivery_address'] ?? '' ), 'Ходынский б-р, д 13' ), 'CDEK courier address without flat must still prepare successfully.' );
+$prepared_address = $cdek_address_service->prepare( new CdekOrderFakeOrder( 125 ), '125252, Москва, Ходынский б-р, д 13, кв 150', array( 'city_name' => 'Москва', 'postal_code' => '125252', 'delivery_calculation_data' => array( 'api' => array( 'cdek_to_city_code' => 44 ) ) ), CdekSettings::SERVICE_KEY );
+cdek_order_assert( ! empty( $prepared_address['success'] ) && 44 === (int) ( $prepared_address['fields']['cdek_city_code'] ?? 0 ) && 'Москва' === (string) ( $prepared_address['fields']['cdek_city_name'] ?? '' ) && '125252' === (string) ( $prepared_address['fields']['cdek_postal_code'] ?? '' ) && 'Ходынский б-р, д 13, кв 150' === (string) ( $prepared_address['fields']['cdek_delivery_address'] ?? '' ), 'CDEK courier address preparation must normalize DaData address and resolve CDEK city code.' );
+cdek_order_assert( '125252, Москва, Ходынский б-р, д 13' === (string) ( $suggestions->requests[1]['query'] ?? '' ), 'CDEK courier address preparation must send DaData query without flat suffix.' );
+cdek_order_assert( str_contains( (string) ( $prepared_address['display'] ?? '' ), 'кв 150' ), 'CDEK courier normalized display must include flat.' );
+cdek_order_assert( hash( 'sha256', '125252, Москва, Ходынский б-р, д 13, кв 150' ) === (string) ( $prepared_address['original_hash'] ?? '' ), 'CDEK courier original hash must use the full original address with flat.' );
+$location_urls = implode( "\n", array_map( static fn( array $request ): string => (string) $request['url'], $location_http->requests ) );
+cdek_order_assert( ! str_contains( $location_urls, '/v2/location/cities' ), 'Known delivery_calculation_data.api.cdek_to_city_code must skip CDEK location lookup.' );
+
+$extracted_flat_suggestions = new CdekOrderFakeSuggestionClient();
+$extracted_flat_suggestions->responses[] = array(
+	'success' => true,
+	'suggestions' => array(
+		array(
+			'value' => '125252, г Москва, Ходынский б-р, д 13',
+			'unrestricted_value' => '125252, г Москва, Ходынский б-р, д 13',
+			'data' => array(
+				'postal_code' => '125252',
+				'city_with_type' => 'г Москва',
+				'street_with_type' => 'Ходынский б-р',
+				'house' => '13',
+				'geo_lat' => '55.790000',
+				'geo_lon' => '37.530000',
+			),
+		),
+	),
+);
+$extracted_flat_service = cdek_order_address_service( $extracted_flat_suggestions, new CdekApiClient( new CdekOAuthTokenService( $settings, new CdekOrderFakeHttp() ), $settings, new CdekOrderFakeHttp() ) );
+$extracted_flat_prepared = $extracted_flat_service->prepare( new CdekOrderFakeOrder( 131 ), '125252, Москва, Ходынский б-р, д 13, кв. 150', array( 'city_name' => 'Москва', 'delivery_calculation_data' => array( 'api' => array( 'cdek_to_city_code' => 44 ) ) ), CdekSettings::SERVICE_KEY );
+cdek_order_assert( ! empty( $extracted_flat_prepared['success'] ) && 'Ходынский б-р, д 13, кв 150' === (string) ( $extracted_flat_prepared['fields']['cdek_delivery_address'] ?? '' ), 'CDEK courier address preparation must restore extracted flat when DaData does not return it.' );
+
+$dadata_flat_suggestions = new CdekOrderFakeSuggestionClient();
+$dadata_flat_suggestions->responses[] = array(
+	'success' => true,
+	'suggestions' => array(
+		array(
+			'value' => '125252, г Москва, Ходынский б-р, д 13, кв 151',
+			'unrestricted_value' => '125252, г Москва, Ходынский б-р, д 13, кв 151',
+			'data' => array(
+				'postal_code' => '125252',
+				'city_with_type' => 'г Москва',
+				'street_with_type' => 'Ходынский б-р',
+				'house' => '13',
+				'flat' => '151',
+				'geo_lat' => '55.790000',
+				'geo_lon' => '37.530000',
+			),
+		),
+	),
+);
+$dadata_flat_service = cdek_order_address_service( $dadata_flat_suggestions, new CdekApiClient( new CdekOAuthTokenService( $settings, new CdekOrderFakeHttp() ), $settings, new CdekOrderFakeHttp() ) );
+$dadata_flat_prepared = $dadata_flat_service->prepare( new CdekOrderFakeOrder( 132 ), '125252, Москва, Ходынский б-р, д 13, кв 150', array( 'city_name' => 'Москва', 'delivery_calculation_data' => array( 'api' => array( 'cdek_to_city_code' => 44 ) ) ), CdekSettings::SERVICE_KEY );
+cdek_order_assert( ! empty( $dadata_flat_prepared['success'] ) && 'Ходынский б-р, д 13, кв 151' === (string) ( $dadata_flat_prepared['fields']['cdek_delivery_address'] ?? '' ), 'CDEK courier address preparation must prefer DaData flat when it is returned.' );
+
+$rate_meta_suggestions = new CdekOrderFakeSuggestionClient();
+$rate_meta_http = new CdekOrderFakeHttp();
+$rate_meta_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $rate_meta_http ), $settings, $rate_meta_http );
+$rate_meta_service = cdek_order_address_service( $rate_meta_suggestions, $rate_meta_client );
+$rate_meta_prepared = $rate_meta_service->prepare( new CdekOrderFakeOrder( 128 ), '125252, Москва, Ходынский б-р, д 13, кв 150', array( 'city_name' => 'Москва', 'rate_meta' => array( 'location' => array( 'cdek_to_city_code' => 44 ) ) ), CdekSettings::SERVICE_KEY );
+$rate_meta_urls = implode( "\n", array_map( static fn( array $request ): string => (string) $request['url'], $rate_meta_http->requests ) );
+cdek_order_assert( ! empty( $rate_meta_prepared['success'] ) && 44 === (int) ( $rate_meta_prepared['fields']['cdek_city_code'] ?? 0 ) && ! str_contains( $rate_meta_urls, '/v2/location/cities' ), 'Known rate_meta.location.cdek_to_city_code must skip CDEK location lookup.' );
+
+$lookup_suggestions = new CdekOrderFakeSuggestionClient();
+$lookup_http = new CdekOrderFakeHttp();
+$lookup_http->city_responses[] = array( array( 'code' => 44, 'city' => 'Москва' ) );
+$lookup_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $lookup_http ), $settings, $lookup_http );
+$lookup_service = cdek_order_address_service( $lookup_suggestions, $lookup_client );
+$lookup_prepared = $lookup_service->prepare( new CdekOrderFakeOrder( 129 ), '125252, Москва, Ходынский б-р, д 13, кв 150', array( 'city_name' => 'Москва', 'postal_code' => '125252' ), CdekSettings::SERVICE_KEY );
+$lookup_urls = implode( "\n", array_map( static fn( array $request ): string => (string) $request['url'], $lookup_http->requests ) );
+cdek_order_assert( ! empty( $lookup_prepared['success'] ) && str_contains( $lookup_urls, '/v2/location/cities' ) && ( str_contains( $lookup_urls, 'latitude=55.79' ) || str_contains( $lookup_urls, 'latitude=55.790000' ) ), 'Missing city code must fall back to resolver lookup with DaData coordinates.' );
+
+$fallback_suggestions = new CdekOrderFakeSuggestionClient();
+$fallback_suggestions->responses[] = array(
+	'success' => true,
+	'suggestions' => array(
+		array(
+			'value' => '125252, г Москва, Ходынский б-р, д 13, кв 150',
+			'unrestricted_value' => '125252, г Москва, Ходынский б-р, д 13, кв 150',
+			'data' => array( 'postal_code' => '125252', 'city_with_type' => 'г Москва', 'street_with_type' => 'Ходынский б-р', 'house' => '13', 'flat' => '150' ),
+		),
+	),
+);
+$fallback_http = new CdekOrderFakeHttp();
+$fallback_http->city_responses[] = array( array( 'code' => 44, 'city' => 'Москва' ) );
+$fallback_service = cdek_order_address_service( $fallback_suggestions, new CdekApiClient( new CdekOAuthTokenService( $settings, $fallback_http ), $settings, $fallback_http ) );
+$fallback_prepared = $fallback_service->prepare( new CdekOrderFakeOrder( 126 ), '125252, Москва, Ходынский б-р, д 13, кв 150', array( 'city_name' => 'Москва', 'postal_code' => '125252', 'lat' => '55.75', 'lng' => '37.61' ), CdekSettings::SERVICE_KEY );
+$fallback_urls = implode( "\n", array_map( static fn( array $request ): string => (string) $request['url'], $fallback_http->requests ) );
+cdek_order_assert( ! empty( $fallback_prepared['success'] ) && str_contains( $fallback_urls, 'latitude=55.75' ), 'CDEK location lookup must fall back to recipient locality coordinates when DaData address has no coordinates.' );
+
+$GLOBALS['wdc_cdek_order_transients'] = array();
+$not_found_http = new CdekOrderFakeHttp();
+$not_found_http->city_responses = array( array(), array(), array(), array(), array() );
+$not_found_service = cdek_order_address_service( new CdekOrderFakeSuggestionClient(), new CdekApiClient( new CdekOAuthTokenService( $settings, $not_found_http ), $settings, $not_found_http ) );
+$not_found_prepared = $not_found_service->prepare( new CdekOrderFakeOrder( 127 ), '125252, Москва, Ходынский б-р, д 13, кв 150', array( 'city_name' => 'Москва' ), CdekSettings::SERVICE_KEY );
+cdek_order_assert( empty( $not_found_prepared['success'] ) && str_contains( (string) ( $not_found_prepared['message'] ?? '' ), 'Не удалось определить код города СДЭК' ), 'CDEK courier address preparation must fail when CDEK city code is not found.' );
+
+$disabled_service = cdek_order_address_service( new CdekOrderFakeSuggestionClient(), new CdekApiClient( new CdekOAuthTokenService( $settings, new CdekOrderFakeHttp() ), $settings, new CdekOrderFakeHttp() ), false );
+$disabled_prepared = $disabled_service->prepare( new CdekOrderFakeOrder( 130 ), '125252, Москва, Ходынский б-р, д 13, кв 150', array( 'city_name' => 'Москва' ), CdekSettings::SERVICE_KEY );
+cdek_order_assert( empty( $disabled_prepared['success'] ) && 'Подсказки DaData не настроены. Невозможно проверить адрес СДЭК.' === (string) ( $disabled_prepared['message'] ?? '' ) && ! str_contains( (string) ( $disabled_prepared['message'] ?? '' ), 'Внешний нормализатор не настроен' ), 'CDEK courier address preparation must show DaData setup error instead of external normalizer error.' );
 
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'phone' => '' ) ) ), 'Missing phone must fail validation.' );
 cdek_order_assert( array() !== $builder->validate( cdek_order_request( DeliveryType::PICKUP, 4, array( 'tariff_code' => '' ) ) ), 'Missing tariff_code must fail validation.' );
@@ -238,14 +505,32 @@ $creation = new ShipmentCreationService( $repository, array( new CdekShipmentAda
 $order = new CdekOrderFakeOrder();
 $result = $creation->create( $order, cdek_order_request( DeliveryType::PICKUP, 4 ) );
 cdek_order_assert( $result->success, 'CDEK POST /v2/orders must be accepted.' );
+$postamat_result = $builder->build(
+	cdek_order_request(
+		DeliveryType::PICKUP,
+		4,
+		array(
+			'delivery_point' => 'MSK900',
+			'pickup_point_row' => array(
+				'point_type' => 'POSTAMAT',
+				'point_title' => 'Постамат СДЭК',
+			),
+		)
+	)
+);
+cdek_order_assert( 'MSK900' === (string) ( $postamat_result['delivery_point'] ?? '' ) && ! isset( $postamat_result['to_location'] ), 'CDEK postamat shipment creation must use delivery_point like pickup.' );
 $stored = $repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY );
 cdek_order_assert( 'registration_pending' === (string) $stored['status'] && 'order-uuid-1' === (string) $stored['external_id'], 'Accepted CDEK order must be stored as registration_pending with UUID.' );
+cdek_order_assert( array() === $order->notes, 'Accepted CDEK registration request must not add an order note before CREATED.' );
 $request_snapshot_json = json_encode( $stored['request_snapshot'], JSON_UNESCAPED_UNICODE ) ?: '';
 $response_snapshot_json = json_encode( $stored['response_snapshot'], JSON_UNESCAPED_UNICODE ) ?: '';
 cdek_order_assert( ! str_contains( $request_snapshot_json, 'Иван Иванов' ) && ! str_contains( $request_snapshot_json, '+79131234567' ) && ! str_contains( $request_snapshot_json, 'buyer@example.com' ), 'CDEK request snapshot must redact recipient PII.' );
 cdek_order_assert( ! str_contains( $response_snapshot_json, 'Иван Иванов' ) && ! str_contains( $response_snapshot_json, 'buyer@example.com' ), 'CDEK response snapshot must not keep recipient PII.' );
 $blocked = $creation->create( $order, cdek_order_request( DeliveryType::PICKUP, 4 ) );
 cdek_order_assert( ! $blocked->success && 'shipment_already_created' === $blocked->error_code, 'Repeated CDEK creation must be blocked while pending.' );
+
+$metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
+cdek_order_assert( str_contains( $metabox_source, 'Тип точки' ) && str_contains( $metabox_source, 'cdek_pickup_type_label' ) && str_contains( $metabox_source, 'Постамат СДЭК' ) && str_contains( $metabox_source, 'ПВЗ СДЭК' ), 'CDEK shipment modal must show known pickup point type label.' );
 
 $http_post_invalid = new CdekOrderFakeHttp();
 $http_post_invalid->post_responses[] = array( 'entity' => array( 'uuid' => 'invalid-uuid' ), 'requests' => array( array( 'request_uuid' => 'invalid-request-uuid', 'state' => 'INVALID', 'errors' => array( array( 'code' => 'v2_bad', 'message' => 'bad request' ) ) ) ) );
@@ -260,6 +545,10 @@ cdek_order_assert( array() === $invalid_repository->find_by_carrier( $invalid_po
 $status = new CdekOrderStatusService( $repository, $client );
 $created = $status->update( $order );
 cdek_order_assert( $created['success'] && 'registered' === (string) $repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY )['status'], 'GET /v2/orders CREATED must register shipment.' );
+cdek_order_assert( array( 'Зарегистрировано отправление СДЭК 100500. Мест: 1.' ) === $order->notes, 'CDEK CREATED status update must add a single registered order note.' );
+$http->order_responses[] = array( 'entity' => array( 'uuid' => 'order-uuid-1', 'cdek_number' => '100500', 'statuses' => array( array( 'code' => 'CREATED', 'name' => 'Создан', 'date_time' => '2026-06-13T05:48:44+0000' ) ) ), 'requests' => array( array( 'state' => 'SUCCESSFUL' ) ) );
+$status->update( $order );
+cdek_order_assert( 1 === count( $order->notes ), 'Repeated CDEK CREATED status update must not duplicate the registered order note.' );
 
 $successful_without_status_order = new CdekOrderFakeOrder( 115 );
 $repository->save_for_carrier( $successful_without_status_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'successful-empty-uuid', 'status' => 'registration_pending', 'order_num' => 'WC-115' ) );
@@ -462,6 +751,17 @@ $cancel_http->delete_responses[] = array( 'entity' => array( 'uuid' => 'created-
 $cancelled = $cancel_status->cancel_created_order( $cancel_order );
 $delete_count = count( array_filter( $cancel_http->requests, static fn ( array $request ): bool => 'DELETE' === $request['method'] && str_contains( $request['url'], '/v2/orders/created-uuid' ) ) );
 cdek_order_assert( $cancelled['success'] && 1 === $delete_count && array() === $cancel_repository->find_by_carrier( $cancel_order, CdekSettings::CARRIER_KEY ), 'CDEK cancel/delete must call API and remove local shipment on success.' );
+cdek_order_assert( array( 'Отменено отправление СДЭК 100502. Мест: 1.' ) === $cancel_order->notes, 'Successful CDEK cancel/delete must add a cancellation order note.' );
+
+$cancel_fail_http = new CdekOrderFakeHttp();
+$cancel_fail_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $cancel_fail_http ), $settings, $cancel_fail_http );
+$cancel_fail_repository = new OrderShipmentRepository();
+$cancel_fail_status = new CdekOrderStatusService( $cancel_fail_repository, $cancel_fail_client );
+$cancel_fail_order = new CdekOrderFakeOrder( 110 );
+$cancel_fail_repository->save_for_carrier( $cancel_fail_order, CdekSettings::CARRIER_KEY, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'external_id' => 'created-fail-uuid', 'cdek_number' => '100506', 'status' => 'registered', 'cdek_order_status_code' => 'CREATED' ) );
+$cancel_fail_http->delete_responses[] = array( 'entity' => array( 'uuid' => 'created-fail-uuid' ), 'requests' => array( array( 'request_uuid' => 'delete-fail', 'state' => 'INVALID', 'errors' => array( array( 'message' => 'delete failed' ) ) ) ) );
+$cancel_failed = $cancel_fail_status->cancel_created_order( $cancel_fail_order );
+cdek_order_assert( ! $cancel_failed['success'] && array() === $cancel_fail_order->notes && array() !== $cancel_fail_repository->find_by_carrier( $cancel_fail_order, CdekSettings::CARRIER_KEY ), 'Failed CDEK cancel/delete must not add a cancellation note or remove local shipment.' );
 
 $forbidden_cancel_http = new CdekOrderFakeHttp();
 $forbidden_cancel_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $forbidden_cancel_http ), $settings, $forbidden_cancel_http );
@@ -484,6 +784,7 @@ $remove_payload = $remove_status->status_payload( $remove_repository->find_by_ca
 $removed = $remove_status->remove_local_if_allowed( $remove_order );
 $remove_delete_count = count( array_filter( $remove_http->requests, static fn ( array $request ): bool => 'DELETE' === $request['method'] ) );
 cdek_order_assert( ! empty( $remove_payload['can_remove_from_order'] ) && $removed['success'] && 0 === $remove_delete_count && array() === $remove_repository->find_by_carrier( $remove_order, CdekSettings::CARRIER_KEY ), 'Allowed CDEK local remove must not call API and must remove local shipment.' );
+cdek_order_assert( array() === $remove_order->notes, 'CDEK local-only remove must not add a cancellation order note.' );
 
 foreach ( array( 'ACCEPTED', 'CREATED' ) as $protected_status ) {
 	$protected_repository = new OrderShipmentRepository();
@@ -529,6 +830,76 @@ cdek_order_assert( ! in_array( '137', $pickup_codes, true ) && ! in_array( '139'
 $location_context = is_array( $draft_request['meta']['pickup_location_context'] ?? null ) ? $draft_request['meta']['pickup_location_context'] : array();
 cdek_order_assert( CdekSettings::CARRIER_KEY === (string) ( $location_context['carrier_key'] ?? '' ) && 'cdek:pickup' === (string) ( $location_context['pickup_family'] ?? '' ), 'CDEK admin map context must use CDEK carrier and pickup family.' );
 cdek_order_assert( 'Кемерово' === (string) ( $location_context['city_name'] ?? '' ) && 'Новосибирск' !== (string) ( $location_context['city_name'] ?? '' ), 'CDEK admin map location context must come from recipient city, not sender city.' );
+$weight_hint_order = new CdekOrderFakeOrder( 136 );
+$weight_hint_order->meta = $draft_order->meta;
+$weight_hint_order->meta['_wdc_delivery_calculation_data']['package'] = array(
+	'products_weight_g' => 2100,
+	'packaging_weight_g' => 150,
+	'dimensions_cm' => array( 'length' => 20, 'width' => 15, 'height' => 10 ),
+);
+$weight_hint_draft = $drafts->draft_array( $weight_hint_order );
+cdek_order_assert( 2250 === (int) ( $weight_hint_draft['request']['meta']['place_weight_hint_g'] ?? 0 ), 'Shipment modal one-place weight hint must use products weight plus packaging weight.' );
+$weight_hint_no_pack_order = new CdekOrderFakeOrder( 137 );
+$weight_hint_no_pack_order->meta = $draft_order->meta;
+$weight_hint_no_pack_order->meta['_wdc_delivery_calculation_data']['package'] = array(
+	'products_weight_g' => 2100,
+	'dimensions_cm' => array( 'length' => 20, 'width' => 15, 'height' => 10 ),
+);
+$weight_hint_no_pack_draft = $drafts->draft_array( $weight_hint_no_pack_order );
+cdek_order_assert( 2100 === (int) ( $weight_hint_no_pack_draft['request']['meta']['place_weight_hint_g'] ?? 0 ), 'Shipment modal weight hint must fall back to products weight when packaging weight is missing.' );
+$saved_pickup_order = new CdekOrderFakeOrder( 134 );
+$saved_pickup_order->meta = $draft_order->meta;
+$saved_pickup_order->meta['_wdc_pickup_point_code'] = 'MSK575';
+$saved_pickup_order->meta['_wdc_platform_pickup_code'] = 'MSK575';
+$saved_pickup_order->meta['_wdc_delivery_calculation_data']['pickup'] = array(
+	'carrier_key' => CdekSettings::CARRIER_KEY,
+	'service_key' => CdekSettings::SERVICE_KEY,
+	'pickup_family' => 'cdek:pickup',
+	'point_code' => 'MSK575',
+	'cdek_code' => 'MSK575',
+	'delivery_point' => 'MSK575',
+	'point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+	'point_postcode' => '101000',
+);
+$saved_pickup_draft = $drafts->draft_array( $saved_pickup_order );
+cdek_order_assert( 'MSK575' === (string) ( $saved_pickup_draft['request']['meta']['delivery_point'] ?? '' ) && 'MSK575' === (string) ( $saved_pickup_draft['request']['meta']['pickup_point_code'] ?? '' ), 'CDEK shipment draft must keep canonical saved pickup code for modal order creation.' );
+$saved_pickup_request = $drafts->create_request_from_admin_data(
+	$saved_pickup_order,
+	array(
+		'delivery_type' => DeliveryType::PICKUP,
+		'tariff_object' => '136',
+		'delivery_point' => '',
+		'pickup_point_code' => '',
+		'pickup_point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+		'pickup_point_postcode' => '101000',
+		'places' => array( array( 'weight_g' => 2000, 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ),
+	)
+);
+cdek_order_assert( 'MSK575' === (string) ( $saved_pickup_request->meta['delivery_point'] ?? '' ) && $saved_pickup_request->pickup_point instanceof PickupPointSelection && 'MSK575' === $saved_pickup_request->pickup_point->point_code, 'CDEK shipment admin request must fall back to canonical saved pickup code when modal sends only address.' );
+$address_only_order = new CdekOrderFakeOrder( 135 );
+$address_only_order->meta = $draft_order->meta;
+$address_only_order->meta['_wdc_delivery_calculation_data']['pickup'] = array(
+	'carrier_key' => CdekSettings::CARRIER_KEY,
+	'service_key' => CdekSettings::SERVICE_KEY,
+	'pickup_family' => 'cdek:pickup',
+	'point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+	'point_postcode' => '101000',
+);
+$address_only_draft = $drafts->draft_array( $address_only_order );
+cdek_order_assert( '' === (string) ( $address_only_draft['request']['meta']['delivery_point'] ?? '' ), 'CDEK shipment draft must not treat pickup address/postcode as delivery_point.' );
+$address_only_request = $drafts->create_request_from_admin_data(
+	$address_only_order,
+	array(
+		'delivery_type' => DeliveryType::PICKUP,
+		'tariff_object' => '136',
+		'delivery_point' => '101000',
+		'pickup_point_code' => '101000',
+		'pickup_point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+		'pickup_point_postcode' => '101000',
+		'places' => array( array( 'weight_g' => 2000, 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ),
+	)
+);
+cdek_order_assert( '' === (string) ( $address_only_request->meta['delivery_point'] ?? '' ) && array() !== $builder->validate( $address_only_request ), 'CDEK shipment admin request must reject postcode-only pickup code.' );
 $courier_order = new CdekOrderFakeOrder( 131 );
 $courier_order->meta['_wdc_platform_carrier_key'] = CdekSettings::CARRIER_KEY;
 $courier_order->meta['_wdc_platform_delivery_type'] = DeliveryType::COURIER;
@@ -543,6 +914,12 @@ $courier_draft = $drafts->draft_array( $courier_order );
 $courier_service = array_values( array_filter( $courier_draft['services'], static fn ( array $service ): bool => DeliveryType::COURIER === (string) ( $service['delivery_type'] ?? '' ) ) )[0] ?? array();
 $courier_codes = array_map( static fn ( array $row ): string => (string) ( $row['object_code'] ?? '' ), is_array( $courier_service['tariffs'] ?? null ) ? $courier_service['tariffs'] : array() );
 cdek_order_assert( array( '137' ) === $courier_codes, 'CDEK shipment modal courier tariff select must include active courier tariffs only.' );
+$dimension_order = new CdekOrderFakeOrder( 133 );
+$dimension_order->meta = $draft_order->meta;
+$dimension_order->items = array( new CdekOrderFakeOrderItem( new CdekOrderFakeProduct( 'CAT-DIM', '0.4', '36', '12', '4' ), 'Товар с размерами', 2, 1600.0 ) );
+$dimension_draft = $drafts->draft_array( $dimension_order );
+$dimension_item = $dimension_draft['request']['places'][0]['items'][0] ?? array();
+cdek_order_assert( 36 === (int) ( $dimension_item['length_cm'] ?? 0 ) && 12 === (int) ( $dimension_item['width_cm'] ?? 0 ) && 4 === (int) ( $dimension_item['height_cm'] ?? 0 ), 'Shipment modal initial item dimensions must come from WooCommerce product/variation dimensions.' );
 $missing_tariff_order = new CdekOrderFakeOrder( 132 );
 $missing_tariff_order->meta = $draft_order->meta;
 $missing_tariff_order->meta['_wdc_delivery_calculation_data']['selected_tariff_object'] = '999';
@@ -556,14 +933,23 @@ $admin_request = $drafts->create_request_from_admin_data(
 	array(
 		'delivery_type' => DeliveryType::PICKUP,
 		'tariff_object' => '136',
+		'shipment_point' => 'NSK70',
+		'shipment_point_address' => 'Новосибирск, новый ПВЗ',
 		'delivery_point' => 'NEW1',
 		'pickup_point_code' => 'NEW1',
 		'pickup_point_address' => 'Новый ПВЗ',
 		'pickup_point_city' => 'Кемерово',
 		'pickup_point_region' => 'Кемеровская область',
+		'places' => array( array( 'weight_g' => 2000, 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ),
+		'cdek_items' => array(
+			array( 'item_key' => 'decimal-item', 'ordered_quantity' => 2, 'place_number' => 1, 'name' => 'Дробный товар', 'ware_key' => 'DEC-1', 'amount' => 2, 'cost' => '800,50', 'weight' => 250, 'length_cm' => '36,5', 'width_cm' => '12.5', 'height_cm' => '3,5' ),
+		),
 	)
 );
 cdek_order_assert( 'NEW1' === (string) ( $admin_request->meta['delivery_point'] ?? '' ) && 'NEW1' === (string) ( $admin_request->meta['pickup_point_code'] ?? '' ) && $admin_request->pickup_point instanceof PickupPointSelection && 'NEW1' === $admin_request->pickup_point->point_code, 'Choosing another CDEK pickup point in modal must update delivery_point and point_code.' );
+cdek_order_assert( 'NSK70' === (string) ( $admin_request->meta['shipment_point'] ?? '' ) && 'Новосибирск, новый ПВЗ' === (string) ( $admin_request->meta['shipment_point_address'] ?? '' ), 'Choosing another sender CDEK pickup point in modal must update temporary shipment_point and address.' );
+$decimal_rows = is_array( $admin_request->meta['cdek_item_rows'] ?? null ) ? $admin_request->meta['cdek_item_rows'] : array();
+cdek_order_assert( 800.5 === (float) ( $decimal_rows[0]['cost'] ?? 0 ) && 36.5 === (float) ( $decimal_rows[0]['length_cm'] ?? 0 ) && 12.5 === (float) ( $decimal_rows[0]['width_cm'] ?? 0 ) && 3.5 === (float) ( $decimal_rows[0]['height_cm'] ?? 0 ), 'Shipment modal item rows must parse decimal cost/dimensions with comma and dot separators.' );
 
 $ajax_http = new CdekOrderFakeHttp();
 $ajax_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $ajax_http ), $settings, $ajax_http );
@@ -609,21 +995,54 @@ $metabox->render( $draft_order );
 $modal_html = ob_get_clean() ?: '';
 cdek_order_assert( ! str_contains( $modal_html, 'tariff_code:' ) && ! str_contains( $modal_html, 'delivery_mode:' ), 'CDEK shipment modal must not render technical tariff_code/delivery_mode labels.' );
 cdek_order_assert( str_contains( $modal_html, 'В заказе тариф' ) && str_contains( $modal_html, 'Кастомный ПВЗ' ), 'CDEK shipment modal must render human selected tariff title.' );
-cdek_order_assert( str_contains( $modal_html, 'ПВЗ отправителя' ) && str_contains( $modal_html, 'NSK69' ), 'CDEK shipment modal must render sender shipment_point label.' );
+cdek_order_assert( str_contains( $modal_html, 'ПВЗ отправителя' ) && str_contains( $modal_html, 'NSK69' ) && str_contains( $modal_html, 'Новосибирск, Красный проспект 1' ) && str_contains( $modal_html, 'Выбрать другой ПВЗ отправителя' ), 'CDEK shipment modal must render sender shipment_point code/address and temporary replacement button.' );
 cdek_order_assert( str_contains( $modal_html, 'Код ПВЗ' ) && str_contains( $modal_html, 'ISK1' ), 'CDEK shipment modal must show recipient CDEK point code, not index label.' );
+ob_start();
+$metabox->render( $weight_hint_order );
+$weight_hint_modal_html = ob_get_clean() ?: '';
+cdek_order_assert( str_contains( $weight_hint_modal_html, 'data-wdc-weight-hint' ) && str_contains( $weight_hint_modal_html, '(2250)' ), 'Shipment modal one-place weight label must render API weight hint with packaging.' );
+cdek_order_assert( str_contains( $modal_html, 'Артикул' ) && str_contains( $modal_html, 'Кол-во' ) && str_contains( $modal_html, 'Цена' ) && ! str_contains( $modal_html, 'SKU / ware_key' ) && ! str_contains( $modal_html, '<td><code>' ), 'CDEK packages tab must render improved Russian item table headers without code-styled SKU.' );
+cdek_order_assert( str_contains( $modal_html, 'data-wdc-weight-hint' ) && str_contains( $modal_html, 'Добавить товар' ) && str_contains( $modal_html, 'data-wdc-add-manual-shipment-item' ) && str_contains( $modal_html, 'data-wdc-shipment-items-table' ), 'Shipment packages UI must render API weight hint, universal table hook, and manual item add button.' );
 cdek_order_assert( str_contains( $modal_html, 'name="pickup_carrier_key" value="cdek"' ) && str_contains( $modal_html, 'name="pickup_family" value="cdek:pickup"' ), 'CDEK shipment modal must render CDEK carrier context for admin pickup map.' );
 cdek_order_assert( str_contains( $modal_html, 'name="recipient_location_city" value="Кемерово"' ) && ! str_contains( $modal_html, 'name="recipient_location_city" value="Новосибирск"' ), 'CDEK shipment modal map context must use recipient locality, not sender locality.' );
+
 $shipments_js = file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'window.WDCPickupApi.addressSearch' ) && str_contains( $shipments_js, 'addressMarkerFromResult' ) && str_contains( $shipments_js, 'provider.setCenter(searchMarker.lat, searchMarker.lng, 15);' ), 'CDEK shipment modal pickup map must use shared DaData address search and focus the temporary marker.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "data.append('order_id', fieldValue(form, 'input[name=\"order_id\"]') || '')" ), 'Shipment modal pickup point search must send order_id for Russian Post backend fallback.' );
 cdek_order_assert( is_string( $shipments_js ) && ! str_contains( $shipments_js, 'через DaData' ) && str_contains( $shipments_js, "status.textContent = 'Ищем адрес...'" ) && str_contains( $shipments_js, "'Адрес найден.'" ) && str_contains( $shipments_js, "'Адрес не найден.'" ), 'CDEK shipment modal pickup map must use neutral address-search UI messages.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'data-wdc-pickup-picker-confirm' ) && ! str_contains( $shipments_js, 'data-wdc-pickup-picker-choose' ) && ! str_contains( $shipments_js, 'data-wdc-pickup-popup-select' ) && ! str_contains( $shipments_js, 'wdc-admin-pickup-picker__selected-grid' ), 'CDEK shipment modal pickup map must use one bottom select button and no duplicate per-card controls.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "'ПВЗ СДЭК'" ) && str_contains( $shipments_js, "'Постамат СДЭК'" ), 'CDEK shipment modal pickup map must render CDEK pickup/postamat titles.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'function senderPickupContext' ) && str_contains( $shipments_js, 'Выбор ПВЗ отправителя СДЭК' ) && str_contains( $shipments_js, 'updateSenderPickupDraft' ), 'CDEK shipment modal must support temporary sender pickup point selection.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'const maxAttempts = 14' ) && str_contains( $shipments_js, 'const interval = 5000' ) && ! str_contains( $shipments_js, '15000' ) && ! str_contains( $shipments_js, '10 минут' ), 'CDEK auto polling must run every 5 seconds up to 14 attempts and avoid old 10-minute text.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'setCdekPollingIndicator' ) && str_contains( $modal_html, 'data-wdc-cdek-polling-indicator' ), 'CDEK auto polling must expose and toggle a visible registration-check indicator.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "box.querySelector('[data-wdc-shipment-status-message]')" ) && str_contains( $shipments_js, "message.textContent = ''" ) && str_contains( $shipments_js, "message.dataset.status = ''" ) && str_contains( $shipments_js, 'setCdekPollingIndicator(box, false)' ), 'Shipment UI reset after CDEK cancel must clear persistent status message and hide polling indicator.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'hint.hidden = places.length !== 1' ), 'Shipment modal weight hint must be hidden when there is more than one place.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'data-wdc-remove-shipment-split' ) && str_contains( $shipments_js, 'restoreOriginalBaseRow' ) && str_contains( $shipments_js, 'data-wdc-original-item' ) && str_contains( $shipments_js, 'rebalanceCdekGroup' ) && ! str_contains( $shipments_js, 'Date.now()' ) && ! str_contains( $shipments_js, 'data-wdc-cdek-minus' ), 'Shipment split UI must use stable row keys, delete split rows, restore original base rows after place removal, and avoid +/- controls.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "clone.setAttribute('data-wdc-split-row', '1')" ) && str_contains( $shipments_js, "clone.removeAttribute('data-wdc-base-row')" ) && str_contains( $shipments_js, "removeAttribute('data-wdc-shipment-item-split')" ) && str_contains( $shipments_js, "removeAttribute('data-wdc-cdek-split')" ) && str_contains( $shipments_js, "data-wdc-remove-shipment-split data-wdc-remove-cdek-split" ) && str_contains( $shipments_js, '❌' ), 'Shipment split child row must remove split action hooks and render the delete action.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'wdc_search_products_for_shipment_item' ) && str_contains( $shipments_js, 'applyProductToManualRow' ) && str_contains( $shipments_js, 'data-wdc-product-search-input' ), 'CDEK manual item rows must support catalog product search.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'normalizeQtyRows' ) && str_contains( $shipments_js, 'targetTotal - 1' ) && str_contains( $shipments_js, 'rebalanceCdekGroup(integerForm, row.getAttribute' ), 'Shipment split quantities must clamp row max to N-1 and rebalance when base or split quantity changes.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'function parseDecimalValue' ) && str_contains( $shipments_js, 'parseDecimalValue(cost' ) && str_contains( $shipments_js, 'cleanDecimalInput' ) && str_contains( $shipments_js, 'separatorMatch' ), 'Shipment package summary and decimal inputs must accept comma and dot decimal separators.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'focusout' ) && str_contains( $shipments_js, '_wdcProductSearchBlurTimer' ) && str_contains( $shipments_js, 'renderProductSearchResults(event.target, [])' ), 'Shipment product search dropdown must close on focus out without auto-filling a product.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'canPrintBarcode' ) && str_contains( $shipments_js, 'data-wdc-cdek-barcode-download' ) && str_contains( $shipments_js, 'data-wdc-cdek-barcode-inline' ), 'Shipment JS must toggle CDEK BARCODE buttons from status payload.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'вес места ' ) && str_contains( $shipments_js, 'заполнено: товары ' ) && str_contains( $shipments_js, ' руб.' ), 'Shipment package summary must show place weight, item count, item weight and cost.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'data-wdc-shipment-items-table' ) && str_contains( $shipments_js, 'data-wdc-shipment-item-row' ) && str_contains( $shipments_js, 'data-wdc-shipment-place-select' ) && str_contains( $shipments_js, 'data-wdc-add-manual-shipment-item' ), 'Shipment packages JS must use carrier-neutral data attributes while keeping compatibility hooks.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "mode !== 'location' && !value" ) && str_contains( $shipments_js, "mode === 'location' ? 2000 : 100" ) && str_contains( $shipments_js, "context.city || context.postcode || context.address || context.locationId || context.fiasId || context.garId" ), 'Shipment pickup modal must load location points for Russian Post without requiring a typed query and without a 300-row cap.' );
 $metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
+cdek_order_assert( str_contains( $metabox_source, 'AJAX_SEARCH_PRODUCTS' ) && str_contains( $metabox_source, 'wc_get_products' ) && str_contains( $metabox_source, 'shipment_product_search_row' ), 'Shipment modal must expose secured WooCommerce product search for manual package items.' );
+cdek_order_assert( str_contains( $metabox_source, 'inputmode="decimal"' ) && str_contains( $metabox_source, 'wdc-icon-action--split' ) && ! str_contains( $metabox_source, 'button wdc-icon-button' ), 'Shipment item decimal fields must allow typed separators and split icon must be borderless.' );
+cdek_order_assert( str_contains( $metabox_source, 'product_ids_by_partial_sku' ) && str_contains( $metabox_source, "meta_key = '_sku'" ) && str_contains( $metabox_source, 'LIKE %s' ) && str_contains( $metabox_source, 'LIMIT %d' ), 'Shipment product search must support partial SKU matching for products and variations.' );
+cdek_order_assert( str_contains( $metabox_source, 'render_shipment_item_rows' ) && str_contains( $metabox_source, 'data-wdc-shipment-item-row' ) && str_contains( $metabox_source, 'data-wdc-original-item' ) && ! str_contains( $metabox_source, 'Пока используется только для СДЭК' ), 'Shipment packages tab must be carrier-neutral and base rows must expose original item data for forced merge.' );
 cdek_order_assert( str_contains( $metabox_source, 'RussianPostDomesticSettings::CARRIER_KEY . \':pickup\'' ) && str_contains( $metabox_source, 'pickupPointTypes' ) && str_contains( $metabox_source, "'location' === \$mode ? 2000 : 100" ), 'Shipment modal backend must keep Russian Post pickup family/type config and location search limit for admin maps.' );
 cdek_order_assert( str_contains( $metabox_source, '$order_shipping_city' ) && str_contains( $metabox_source, '$order_shipping_postcode' ) && str_contains( $metabox_source, '$recipient_address_context' ) && str_contains( $metabox_source, '$pickup_context[\'postal_code\'] ?? $pickup_context[\'postcode\'] ?? $recipient_postcode' ), 'Shipment modal backend must fall back to WooCommerce shipping recipient context for Russian Post map loading.' );
 cdek_order_assert( str_contains( $metabox_source, '$order_id = (int) ( $_POST[\'order_id\'] ?? 0 )' ) && str_contains( $metabox_source, '$location_context[\'city_name\']' ) && str_contains( $metabox_source, 'get_shipping_city' ) && str_contains( $metabox_source, 'get_shipping_postcode' ), 'Shipment modal pickup search backend must use order_id to restore missing Russian Post location context.' );
+cdek_order_assert( str_contains( $metabox_source, 'ACTION_CDEK_BARCODE_PDF' ) && str_contains( $metabox_source, 'admin_post_cdek_barcode_pdf' ) && str_contains( $metabox_source, 'data-wdc-cdek-barcode-download' ) && str_contains( $metabox_source, 'Скачать ШК' ) && str_contains( $metabox_source, 'Открыть ШК' ), 'CDEK shipment metabox must expose BARCODE download/open admin-post actions.' );
+cdek_order_assert( str_contains( $metabox_source, 'Content-Disposition: \' . $disposition' ) && str_contains( $metabox_source, "'inline' === \$mode ? 'inline' : 'attachment'" ), 'CDEK BARCODE endpoint must support inline and attachment PDF responses.' );
+$draft_factory_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/OrderShipmentDraftFactory.php' );
+cdek_order_assert( str_contains( $draft_factory_source, 'product_dimension_cm' ) && str_contains( $draft_factory_source, "\$length_cm" ) && str_contains( $draft_factory_source, "\$height_cm" ), 'Shipment draft factory must load item dimensions from WooCommerce product/variation data.' );
+cdek_order_assert( str_contains( $draft_factory_source, 'decimal_from_admin_row' ) && str_contains( $draft_factory_source, "str_replace( ',', '.'" ) && str_contains( $draft_factory_source, "'length_cm' => \$this->decimal_from_admin_row" ), 'Shipment draft factory must parse item cost/dimensions as decimals with comma and dot support.' );
+$shipments_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.css' );
+cdek_order_assert( str_contains( $shipments_css, '.wdc-icon-action' ) && str_contains( $shipments_css, 'border: 0' ) && str_contains( $shipments_css, 'background: transparent' ) && str_contains( $shipments_css, 'min-width: min(520px, 70vw)' ) && str_contains( $shipments_css, 'overflow-x: hidden' ), 'Shipment package table CSS must use borderless icons and a wider product search dropdown without horizontal scrolling.' );
+cdek_order_assert( str_contains( $shipments_css, 'th:nth-child(2)' ) && str_contains( $shipments_css, 'width: 92px' ) && str_contains( $shipments_css, '.wdc-cdek-input-weight' ) && str_contains( $shipments_css, 'width: 76px' ) && str_contains( $shipments_css, 'width: 54px' ), 'Shipment package table CSS must keep SKU compact, weight wider, and dimensions/place compact.' );
 
 $render = new ReflectionMethod( OrderShipmentsMetabox::class, 'render_status_block' );
 $render->setAccessible( true );
@@ -632,5 +1051,75 @@ $render->invoke( $metabox, array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'c
 $status_html = ob_get_clean() ?: '';
 cdek_order_assert( str_contains( $status_html, 'Статус СДЭК' ) && ! str_contains( $status_html, 'Статус Почты России' ), 'CDEK status block must use CDEK label.' );
 cdek_order_assert( str_contains( $status_html, 'Плановая дата доставки' ) && str_contains( $status_html, '2026-06-15' ), 'CDEK status block must render planned_delivery_date when present.' );
+
+$mapping_service = new CdekStatusMappingService( new SettingsRepository() );
+$default_mapping = $mapping_service->mapping();
+cdek_order_assert( DeliveryStatus::DELIVERED === $default_mapping['DELIVERED'] && DeliveryStatus::REJECTED === $default_mapping['INVALID'] && DeliveryStatus::CANCELLED === $default_mapping['REMOVED'], 'CDEK status mapping defaults must map delivered/invalid/removed to universal statuses.' );
+$GLOBALS['wdc_cdek_order_options']['wdc_core_settings'][ CdekStatusMappingService::MAPPING_KEY ] = array( 'DELIVERED' => DeliveryStatus::READY_FOR_PICKUP );
+cdek_order_assert( DeliveryStatus::READY_FOR_PICKUP === $mapping_service->universal_status_for( 'DELIVERED' ), 'CDEK status mapping must read saved admin overrides.' );
+
+$mapped_status_http = new CdekOrderFakeHttp();
+$mapped_status_http->order_responses[] = array(
+	'entity' => array(
+		'uuid' => 'mapped-order-uuid',
+		'cdek_number' => '100501',
+		'statuses' => array(
+			array( 'code' => 'DELIVERED', 'name' => 'Доставлен', 'date_time' => '2026-06-13T10:04:41+0000' ),
+			array( 'code' => 'CREATED', 'name' => 'Создан', 'date_time' => '2026-06-13T05:04:41+0000' ),
+		),
+	),
+	'requests' => array( array( 'state' => 'SUCCESSFUL' ) ),
+);
+$mapped_status_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $mapped_status_http ), $settings, $mapped_status_http );
+$mapped_status_repository = new OrderShipmentRepository();
+$mapped_status_order = new CdekOrderFakeOrder( 151 );
+$mapped_status_repository->save_for_carrier(
+	$mapped_status_order,
+	CdekSettings::CARRIER_KEY,
+	array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'status' => 'registered', 'external_id' => 'mapped-order-uuid', 'cdek_number' => '100501', 'cdek_order_status_code' => 'CREATED' )
+);
+$mapped_status_service = new CdekOrderStatusService( $mapped_status_repository, $mapped_status_client, null, $mapping_service );
+$mapped_update = $mapped_status_service->update( $mapped_status_order );
+cdek_order_assert( $mapped_update['success'] && 'DELIVERED' === (string) ( $mapped_update['status']['order_status_code'] ?? '' ) && DeliveryStatus::READY_FOR_PICKUP === (string) ( $mapped_update['status']['universal_status_code'] ?? '' ), 'CDEK update status must select max date_time raw status and apply saved universal mapping.' );
+
+$barcode_http = new CdekOrderFakeHttp();
+$barcode_http->barcode_create_responses[] = array( 'entity' => array( 'uuid' => 'print-ready-uuid' ) );
+$barcode_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-ready-uuid', 'statuses' => array( array( 'code' => 'READY', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
+$barcode_http->barcode_pdf_responses[] = '%PDF-1.4 barcode';
+$barcode_client = new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_http ), $settings, $barcode_http );
+$barcode_repository = new OrderShipmentRepository();
+$barcode_order = new CdekOrderFakeOrder( 152 );
+$barcode_repository->save_for_carrier(
+	$barcode_order,
+	CdekSettings::CARRIER_KEY,
+	array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'status' => 'registered', 'external_id' => 'order-uuid-barcode', 'cdek_number' => '10280157676', 'cdek_order_status_code' => 'CREATED' )
+);
+$barcode_service = new CdekBarcodePrintService( $barcode_repository, $barcode_client, static function (): void {}, 1, 0 );
+$barcode_pdf = $barcode_service->pdf_for_order( $barcode_order );
+cdek_order_assert( ! empty( $barcode_pdf['success'] ) && '%PDF-1.4 barcode' === (string) ( $barcode_pdf['body'] ?? '' ), 'CDEK BARCODE READY status must return PDF body.' );
+$barcode_post_request = array_values( array_filter( $barcode_http->requests, static fn ( array $request ): bool => 'POST' === $request['method'] && str_contains( $request['url'], '/v2/print/barcodes' ) ) )[0] ?? array();
+$barcode_payload = json_decode( (string) ( $barcode_post_request['args']['body'] ?? '{}' ), true );
+cdek_order_assert( 'A6' === (string) ( $barcode_payload['format'] ?? '' ) && 'RUS' === (string) ( $barcode_payload['lang'] ?? '' ) && 1 === (int) ( $barcode_payload['copy_count'] ?? 0 ) && '10280157676' === (string) ( $barcode_payload['orders'][0]['cdek_number'] ?? '' ), 'CDEK BARCODE payload must use A6/RUS/one copy and cdek_number.' );
+cdek_order_assert( 1 === count( array_filter( $barcode_http->requests, static fn ( array $request ): bool => 'GET' === $request['method'] && str_contains( $request['url'], '/v2/print/barcodes/print-ready-uuid.pdf' ) ) ), 'CDEK BARCODE service must download ready PDF by print uuid.' );
+
+$barcode_invalid_http = new CdekOrderFakeHttp();
+$barcode_invalid_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-invalid-uuid', 'statuses' => array( array( 'code' => 'INVALID', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
+$barcode_invalid_service = new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_invalid_http ), $settings, $barcode_invalid_http ), static function (): void {}, 1, 0 );
+$invalid_pdf = $barcode_invalid_service->pdf_for_order( $barcode_order );
+cdek_order_assert( empty( $invalid_pdf['success'] ) && str_contains( (string) ( $invalid_pdf['message'] ?? '' ), 'СДЭК не смог сформировать ШК' ), 'CDEK BARCODE INVALID status must return a readable error.' );
+
+$barcode_removed_http = new CdekOrderFakeHttp();
+$barcode_removed_http->barcode_create_responses[] = array( 'entity' => array( 'uuid' => 'print-removed-uuid' ) );
+$barcode_removed_http->barcode_create_responses[] = array( 'entity' => array( 'uuid' => 'print-recreated-uuid' ) );
+$barcode_removed_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-removed-uuid', 'statuses' => array( array( 'code' => 'REMOVED', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
+$barcode_removed_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-recreated-uuid', 'statuses' => array( array( 'code' => 'READY', 'date_time' => '2026-06-13T10:00:02+0000' ) ) ) );
+$barcode_removed_http->barcode_pdf_responses[] = '%PDF-1.4 recreated';
+$removed_pdf = ( new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_removed_http ), $settings, $barcode_removed_http ), static function (): void {}, 2, 0 ) )->pdf_for_order( $barcode_order );
+cdek_order_assert( ! empty( $removed_pdf['success'] ) && '%PDF-1.4 recreated' === (string) ( $removed_pdf['body'] ?? '' ) && 2 === count( array_filter( $barcode_removed_http->requests, static fn ( array $request ): bool => 'POST' === $request['method'] && str_contains( $request['url'], '/v2/print/barcodes' ) ) ), 'CDEK BARCODE REMOVED status must recreate the print form and return the recreated PDF.' );
+
+$barcode_timeout_http = new CdekOrderFakeHttp();
+$barcode_timeout_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-timeout-uuid', 'statuses' => array( array( 'code' => 'PROCESSING', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
+$timeout_pdf = ( new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_timeout_http ), $settings, $barcode_timeout_http ), static function (): void {}, 1, 0 ) )->pdf_for_order( $barcode_order );
+cdek_order_assert( empty( $timeout_pdf['success'] ) && 'ШК СДЭК еще формируется. Повторите попытку позже.' === (string) ( $timeout_pdf['message'] ?? '' ), 'CDEK BARCODE timeout must return the expected retry-later message.' );
 
 echo "CDEK order creation smoke test passed.\n";

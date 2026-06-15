@@ -299,9 +299,11 @@ final class WdcRecalcCarrier implements CarrierAdapterInterface {
 }
 
 final class WdcRecalcDadataSuggestionClient implements AddressSuggestionClientInterface {
+	public array $requests = array();
 	public function __construct( private bool $with_coordinates = true ) {}
 
 	public function suggest( string $stage, string $query, array $context = array() ): array {
+		$this->requests[] = compact( 'stage', 'query', 'context' );
 		if ( str_contains( $query, 'варианты' ) ) {
 			$first = array(
 			'geo_lat' => $this->with_coordinates ? '55.0401' : '',
@@ -910,6 +912,7 @@ $cdek_admin_rate = array(
 			'packaging_weight_g' => 300,
 			'dimensions_cm' => array( 'length' => 20, 'width' => 15, 'height' => 10 ),
 		),
+		'location' => array( 'cdek_to_city_code' => 44, 'cdek_to_city_name' => 'Москва' ),
 		'request_payload_sanitized' => array( 'from_location' => array( 'code' => 270 ), 'to_location' => array( 'code' => 44 ) ),
 		'response_tariff_sanitized' => array( 'tariff_code' => 137, 'tariff_name' => 'Посылка склад-дверь' ),
 	),
@@ -935,6 +938,7 @@ foreach ( array( 'carrier_key', 'rate_id', 'delivery_type', 'service_key', 'api_
 $cdek_admin_calc = $cdek_admin_order->meta['_wdc_delivery_calculation_data'] ?? array();
 recalc_smoke_assert( isset( $cdek_admin_order->meta['_wdc_platform_rate_meta'] ), 'CDEK admin save must keep hidden platform rate meta.' );
 recalc_smoke_assert( 520.0 === (float) ( $cdek_admin_calc['api']['api_base_price_rub'] ?? 0 ) && 650.0 === (float) ( $cdek_admin_calc['result']['final_price_rub'] ?? 0 ), 'CDEK admin calculation data must preserve API base and final prices.' );
+recalc_smoke_assert( 44 === (int) ( $cdek_admin_calc['api']['cdek_to_city_code'] ?? 0 ), 'CDEK admin calculation data must sync rate_meta.location.cdek_to_city_code into api data.' );
 recalc_smoke_assert( 900 === (int) ( $cdek_admin_calc['package']['products_weight_g'] ?? 0 ) && 300 === (int) ( $cdek_admin_calc['package']['packaging_weight_g'] ?? 0 ) && 1200 === (int) ( $cdek_admin_calc['package']['final_weight_g'] ?? 0 ), 'CDEK admin calculation data must preserve package weights.' );
 recalc_smoke_assert( array( 'cdek-rule' ) === ( $cdek_admin_calc['rules']['applied_rules'] ?? null ), 'CDEK admin calculation data must preserve rules data.' );
 
@@ -985,6 +989,7 @@ recalc_smoke_assert( 'KEM7' === (string) ( $cdek_pickup_order->meta['_wdc_pickup
 recalc_smoke_assert( 'Kemerovo, Sovetskiy 10' === $cdek_pickup_order->get_shipping_address_1() && '650004' === $cdek_pickup_order->get_shipping_postcode(), 'CDEK admin pickup save must write pickup shipping address.' );
 $cdek_pickup_calc = $cdek_pickup_order->meta['_wdc_delivery_calculation_data'] ?? array();
 recalc_smoke_assert( 'Kemerovo, Sovetskiy 10' === ( $cdek_pickup_calc['pickup']['point_address'] ?? '' ) && '650004' === ( $cdek_pickup_calc['pickup']['point_postcode'] ?? '' ), 'CDEK admin pickup calculation data must keep full pickup address payload.' );
+recalc_smoke_assert( '136' === (string) ( $cdek_pickup_order->meta['_wdc_platform_tariff_object'] ?? '' ) && '136' === (string) ( $cdek_pickup_calc['selected_tariff_object'] ?? '' ) && DeliveryType::PICKUP === (string) ( $cdek_pickup_calc['delivery_type'] ?? '' ), 'CDEK admin pickup save must keep selected tariff object and delivery_type for shipment modal fallback.' );
 recalc_smoke_assert( 'Inside the shopping center' === ( $cdek_pickup_calc['pickup']['description'] ?? '' ), 'CDEK admin pickup calculation data must save description.' );
 recalc_smoke_assert( '' === ( $cdek_pickup_calc['pickup']['work_time'] ?? '' ), 'CDEK admin pickup calculation data must not save numeric zero work_time.' );
 recalc_smoke_assert( 'Срок хранения 3 дня' === ( $cdek_pickup_calc['pickup']['storage_notice'] ?? '' ), 'CDEK admin pickup calculation data must save POSTAMAT storage notice.' );
@@ -997,6 +1002,134 @@ recalc_smoke_assert( str_contains( $cdek_pickup_order_card, 'Kemerovo, Sovetskiy
 recalc_smoke_assert( str_contains( $cdek_pickup_order_card, 'Описание:' ) && str_contains( $cdek_pickup_order_card, 'Inside the shopping center' ), 'CDEK admin pickup order card must render description with label.' );
 recalc_smoke_assert( str_contains( $cdek_pickup_order_card, 'Срок хранения 3 дня' ), 'CDEK admin pickup order card must render storage notice.' );
 recalc_smoke_assert( ! str_contains( $cdek_pickup_order_card, 'Время работы:' ) && ! str_contains( $cdek_pickup_order_card, '0.000000' ), 'CDEK admin pickup order card must hide empty work_time and numeric zero values.' );
+
+$cdek_existing_pickup_order = new WdcRecalcOrder( 121, array() );
+$cdek_existing_pickup_order->shipping_items = array();
+$cdek_existing_pickup_order->meta['_wdc_platform_pickup_code'] = 'MSK575';
+$cdek_existing_pickup_order->meta['_wdc_pickup_point_code'] = 'MSK575';
+$cdek_existing_pickup_order->meta['_wdc_pickup_point_address'] = '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1';
+$cdek_existing_pickup_order->meta['_wdc_pickup_point_postcode'] = '101000';
+$cdek_existing_pickup_order->meta['_wdc_delivery_calculation_data'] = array(
+	'carrier_key' => 'cdek',
+	'delivery_type' => DeliveryType::PICKUP,
+	'pickup' => array(
+		'carrier_key' => 'cdek',
+		'service_key' => 'cdek',
+		'pickup_family' => 'cdek:pickup',
+		'point_code' => 'MSK575',
+		'cdek_code' => 'MSK575',
+		'delivery_point' => 'MSK575',
+		'point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+		'point_postcode' => '101000',
+	),
+);
+$cdek_existing_pickup_result = $replacement->save(
+	$cdek_existing_pickup_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $cdek_pickup_rate,
+		'selected_tariff' => array(),
+		'selected_pickup_point' => array(
+			'carrier_key' => 'cdek',
+			'point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+			'address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+			'point_postcode' => '101000',
+			'postcode' => '101000',
+		),
+		'normalized_shipping_address' => array(),
+	)
+);
+$cdek_existing_calc = is_array( $cdek_existing_pickup_order->meta['_wdc_delivery_calculation_data'] ?? null ) ? $cdek_existing_pickup_order->meta['_wdc_delivery_calculation_data'] : array();
+recalc_smoke_assert( true === $cdek_existing_pickup_result['success'], 'CDEK admin pickup save must reuse existing selected pickup code when manager keeps the same pickup point.' );
+recalc_smoke_assert( 'MSK575' === (string) ( $cdek_existing_pickup_order->meta['_wdc_pickup_point_code'] ?? '' ) && 'MSK575' === (string) ( $cdek_existing_calc['pickup']['point_code'] ?? '' ) && 'MSK575' === (string) ( $cdek_existing_calc['pickup']['delivery_point'] ?? '' ), 'CDEK admin pickup save must keep existing CDEK code in canonical pickup meta and calculation data.' );
+recalc_smoke_assert( '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1' === (string) ( $cdek_existing_calc['pickup']['point_address'] ?? '' ), 'CDEK admin pickup save must keep existing pickup address together with the fallback code.' );
+
+$cdek_new_pickup_order = new WdcRecalcOrder( 122, array() );
+$cdek_new_pickup_order->shipping_items = array();
+$cdek_new_pickup_order->meta = $cdek_existing_pickup_order->meta;
+$cdek_new_pickup_result = $replacement->save(
+	$cdek_new_pickup_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $cdek_pickup_rate,
+		'selected_tariff' => array(),
+		'selected_pickup_point' => array_merge(
+			$cdek_pickup_point,
+			array(
+				'point_code' => 'MSK999',
+				'cdek_code' => 'MSK999',
+				'delivery_point' => 'MSK999',
+				'point_address' => 'Москва, новый ПВЗ',
+				'address' => 'Москва, новый ПВЗ',
+				'point_postcode' => '101000',
+				'postcode' => '101000',
+			)
+		),
+		'normalized_shipping_address' => array(),
+	)
+);
+$cdek_new_calc = is_array( $cdek_new_pickup_order->meta['_wdc_delivery_calculation_data'] ?? null ) ? $cdek_new_pickup_order->meta['_wdc_delivery_calculation_data'] : array();
+recalc_smoke_assert( true === $cdek_new_pickup_result['success'] && 'MSK999' === (string) ( $cdek_new_calc['pickup']['point_code'] ?? '' ), 'CDEK admin pickup save must prefer newly selected pickup code over existing saved code.' );
+
+$cdek_address_only_order = new WdcRecalcOrder( 123, array() );
+$cdek_address_only_order->shipping_items = array();
+$cdek_address_only_result = $replacement->save(
+	$cdek_address_only_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $cdek_pickup_rate,
+		'selected_tariff' => array(),
+		'selected_pickup_point' => array(
+			'carrier_key' => 'cdek',
+			'point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+			'address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+			'point_postcode' => '101000',
+			'postcode' => '101000',
+		),
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( false === $cdek_address_only_result['success'] && '' === (string) ( $cdek_address_only_order->meta['_wdc_pickup_point_code'] ?? '' ), 'CDEK admin pickup save must reject address-only pickup data without a CDEK point code.' );
+
+$cdek_postcode_code_order = new WdcRecalcOrder( 124, array() );
+$cdek_postcode_code_order->shipping_items = array();
+$cdek_postcode_code_result = $replacement->save(
+	$cdek_postcode_code_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $cdek_pickup_rate,
+		'selected_tariff' => array(),
+		'selected_pickup_point' => array(
+			'carrier_key' => 'cdek',
+			'point_code' => '101000',
+			'cdek_code' => '101000',
+			'point_address' => '101000, Россия, Москва, Москва, б-р. Чистопрудный, 13с1',
+			'point_postcode' => '101000',
+			'postcode' => '101000',
+		),
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( false === $cdek_postcode_code_result['success'] && '' === (string) ( $cdek_postcode_code_order->meta['_wdc_pickup_point_code'] ?? '' ), 'CDEK admin pickup save must not use postcode as delivery_point.' );
+
+$rp_postcode_pickup_order = new WdcRecalcOrder( 125, array() );
+$rp_postcode_pickup_order->shipping_items = array();
+$rp_postcode_pickup_result = $replacement->save(
+	$rp_postcode_pickup_order,
+	array(
+		'selected_location' => $selected_location,
+		'selected_rate' => $pickup_rate,
+		'selected_tariff' => $pickup_rate['selected_tariff'],
+		'selected_pickup_point' => array(
+			'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+			'point_address' => 'Москва, ул. Тверская, 1',
+			'point_postcode' => '101000',
+			'postcode' => '101000',
+		),
+		'normalized_shipping_address' => array(),
+	)
+);
+recalc_smoke_assert( true === $rp_postcode_pickup_result['success'] && '101000' === (string) ( $rp_postcode_pickup_order->meta['_wdc_pickup_point_code'] ?? '' ), 'Russian Post admin pickup save must still allow postcode as OPS code.' );
 
 $cdek_no_days_rate = $cdek_admin_rate;
 $cdek_no_days_rate['rate_id'] = 'cdek:courier:no-days';
@@ -1125,6 +1258,7 @@ $nsk_location = array(
 	'country_code' => 'RU',
 	'fias_id' => 'nsk-fias',
 );
+$requests_before_apartment = count( $address_client->requests );
 $_POST = array( 'order_id' => 101, 'nonce' => 'ok', 'selected_location' => wp_json_encode( $nsk_location ), 'address_line' => 'Новосибирск, некрасова, д 63/1, кв 10' );
 try {
 	$controller->ajax_normalize_address();
@@ -1134,6 +1268,7 @@ try {
 	recalc_smoke_assert( $response->success && ! empty( $address['normalized'] ) && empty( $address['fallback'] ), 'Address normalization with apartment must return normalized non-fallback payload.' );
 	recalc_smoke_assert( str_contains( (string) ( $address['address_1'] ?? '' ), 'Некрасова' ) && str_contains( (string) ( $address['address_1'] ?? '' ), '63/1' ) && str_contains( (string) ( $address['address_1'] ?? '' ), '10' ), 'Apartment address normalization must keep street, house and flat in address_1.' );
 	recalc_smoke_assert( '' === (string) ( $address['address_2'] ?? '' ), 'Apartment address normalization must not put flat into address_2.' );
+	recalc_smoke_assert( 'Новосибирск, некрасова, д 63/1' === (string) ( $address_client->requests[ $requests_before_apartment ]['query'] ?? '' ), 'Admin apartment address normalization must send DaData query without flat suffix.' );
 	recalc_smoke_assert( ! isset( $response->data['debug'] ), 'Address normalization endpoint must not expose temporary debug payload.' );
 }
 

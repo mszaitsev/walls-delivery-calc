@@ -162,7 +162,7 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
-		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
+		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -173,7 +173,7 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_tariffs' === $action ) {
 				$data = array();
 			}
-			if ( in_array( $action, array( 'save_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
+			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
 				$data = array();
 			}
 			if ( $id > 0 && array() !== $data ) {
@@ -226,6 +226,24 @@ final class DeliveryServicesAdminPage {
 				$this->cdek_tariffs->save_admin_rows( $this->sanitize_cdek_tariffs_from_post() );
 				delete_transient( $this->cdek_tariff_preview_transient_key() );
 				$this->clear_delivery_quote_cache();
+			}
+			if ( 'bulk_cdek_tariffs' === $action && $this->cdek_tariffs instanceof CdekTariffRepository ) {
+				$count = $this->handle_cdek_tariffs_bulk_action();
+				delete_transient( $this->cdek_tariff_preview_transient_key() );
+				$this->clear_delivery_quote_cache();
+				$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
+				if ( '' !== $service_key ) {
+					wp_safe_redirect(
+						add_query_arg(
+							array(
+								'wdc_cdek_tariffs_notice' => $count > 0 ? ( ( 'delete_all' === sanitize_key( wp_unslash( $_POST['cdek_tariffs_bulk_action'] ?? '' ) ) ) ? 'deleted' : 'updated' ) : 'unchanged',
+								'wdc_cdek_tariffs_count' => max( 0, $count ),
+							),
+							$this->service_tab_url_by_key( $service_key, 'tariffs' )
+						)
+					);
+					exit;
+				}
 			}
 			if ( 'preview_cdek_tariffs_sync' === $action && $this->cdek_tariff_sync instanceof CdekTariffSyncService ) {
 				try {
@@ -312,12 +330,12 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
+		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'main',
 				'save_calculation' => 'calculation',
-				'save_tariffs', 'save_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync' => 'tariffs',
+				'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync' => 'tariffs',
 				'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' => 'russian_post_pickup',
 				'save_api_credentials' => 'api_credentials',
 				'save_shipments' => 'shipments',
@@ -778,6 +796,7 @@ final class DeliveryServicesAdminPage {
 		<tr><th colspan="2"><h3><?php echo esc_html__( 'Расчет тарифов', 'walls-delivery-calc' ); ?></h3></th></tr>
 		<?php $this->text_row( CdekSettings::SENDER_CITY_CODE_KEY, __( 'Код города отправителя СДЭК', 'walls-delivery-calc' ), (string) $this->cdek_settings->sender_city_code() ); ?>
 		<?php $this->text_row( CdekSettings::SHIPMENT_POINT_KEY, __( 'Код ПВЗ отправления СДЭК', 'walls-delivery-calc' ), $this->cdek_settings->shipment_point() ); ?>
+		<?php $this->text_row( CdekSettings::SHIPMENT_POINT_ADDRESS_KEY, __( 'Адрес ПВЗ отправления СДЭК', 'walls-delivery-calc' ), $this->cdek_settings->shipment_point_address() ); ?>
 		<?php $this->text_row( CdekSettings::SENDER_POSTAL_CODE_KEY, __( 'Индекс отправителя', 'walls-delivery-calc' ), $this->cdek_settings->sender_postal_code() ); ?>
 		<?php $this->text_row( CdekSettings::SENDER_CITY_NAME_KEY, __( 'Город отправителя для диагностики', 'walls-delivery-calc' ), $this->cdek_settings->sender_city_name() ); ?>
 		<?php $this->text_row( CdekSettings::SENDER_ADDRESS_KEY, __( 'Адрес отправителя СДЭК для тарифов от двери', 'walls-delivery-calc' ), $this->cdek_settings->sender_address() ); ?>
@@ -905,6 +924,7 @@ final class DeliveryServicesAdminPage {
 		$preview = get_transient( $this->cdek_tariff_preview_transient_key() );
 		?>
 		<div style="margin-top:16px;max-width:1180px;">
+			<?php $this->render_cdek_tariffs_bulk_notice(); ?>
 			<form method="post" style="margin-bottom:16px;">
 				<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
 				<input type="hidden" name="wdc_delivery_services_action" value="preview_cdek_tariffs_sync">
@@ -914,16 +934,17 @@ final class DeliveryServicesAdminPage {
 				<p class="description"><?php echo esc_html__( 'Используется метод GET /v2/calculator/alltariffs. Перед записью показывается дифф с текущей таблицей.', 'walls-delivery-calc' ); ?></p>
 			</form>
 			<?php $this->render_cdek_tariffs_sync_preview( $service, is_array( $preview ) ? $preview : array() ); ?>
+			<?php $this->render_cdek_tariffs_bulk_actions( $service ); ?>
 			<form method="post">
 				<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
 				<input type="hidden" name="wdc_delivery_services_action" value="save_cdek_tariffs">
 				<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 				<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 				<table class="widefat striped">
-					<thead><tr><th>Код</th><th>Название СДЭК</th><th>Ограничения</th><th>Название на сайте</th><th>Тип доставки</th><th>Комментарий</th><th>Активен</th><th>Последний sync</th></tr></thead>
+					<thead><tr><th>Код</th><th>Название СДЭК</th><th>Ограничения</th><th>Название на сайте</th><th>Тип доставки</th><th>Режим тарифа</th><th>Комментарий</th><th>Активен</th><th>Последний sync</th></tr></thead>
 					<tbody>
 						<?php if ( array() === $rows ) : ?>
-							<tr><td colspan="8"><?php echo esc_html__( 'Тарифы еще не загружены.', 'walls-delivery-calc' ); ?></td></tr>
+							<tr><td colspan="9"><?php echo esc_html__( 'Тарифы еще не загружены.', 'walls-delivery-calc' ); ?></td></tr>
 						<?php endif; ?>
 						<?php foreach ( $rows as $row ) : ?>
 							<?php $code = (string) $row['tariff_code']; ?>
@@ -933,6 +954,7 @@ final class DeliveryServicesAdminPage {
 								<td><?php echo wp_kses_post( $this->cdek_tariff_limits_html( $row ) ); ?></td>
 								<td><input class="regular-text" name="cdek_tariff_custom_title[<?php echo esc_attr( $code ); ?>]" value="<?php echo esc_attr( (string) $row['custom_title'] ); ?>"></td>
 								<td><?php $this->cdek_delivery_type_select( $code, (string) $row['delivery_type'] ); ?></td>
+								<td><?php $this->cdek_delivery_mode_select( $code, (int) ( $row['delivery_mode'] ?? 0 ) ); ?></td>
 								<td><textarea name="cdek_tariff_admin_comment[<?php echo esc_attr( $code ); ?>]" rows="2" class="large-text"><?php echo esc_textarea( (string) $row['admin_comment'] ); ?></textarea></td>
 								<td><label><input type="checkbox" name="cdek_tariff_is_active[<?php echo esc_attr( $code ); ?>]" value="1" <?php checked( ! empty( $row['is_active'] ) ); ?>> <?php echo esc_html__( 'Да', 'walls-delivery-calc' ); ?></label></td>
 								<td><?php echo esc_html( (string) ( $row['last_sync_at'] ?? '-' ) ); ?></td>
@@ -944,6 +966,85 @@ final class DeliveryServicesAdminPage {
 			</form>
 		</div>
 		<?php
+	}
+
+	private function handle_cdek_tariffs_bulk_action(): int {
+		if ( ! $this->cdek_tariffs instanceof CdekTariffRepository ) {
+			return 0;
+		}
+		$bulk_action = sanitize_key( wp_unslash( $_POST['cdek_tariffs_bulk_action'] ?? '' ) );
+		$mode = max( 0, (int) ( $_POST['cdek_tariffs_delivery_mode'] ?? 0 ) );
+
+		return match ( $bulk_action ) {
+			'delete_all' => $this->cdek_tariffs->delete_all(),
+			'enable_all' => $this->cdek_tariffs->set_all_active( true ),
+			'disable_all' => $this->cdek_tariffs->set_all_active( false ),
+			'enable_mode' => $this->cdek_tariffs->set_active_by_delivery_mode( $mode, true ),
+			'disable_mode' => $this->cdek_tariffs->set_active_by_delivery_mode( $mode, false ),
+			default => 0,
+		};
+	}
+
+	private function render_cdek_tariffs_bulk_notice(): void {
+		$notice = sanitize_key( wp_unslash( $_GET['wdc_cdek_tariffs_notice'] ?? '' ) );
+		if ( '' === $notice ) {
+			return;
+		}
+		$count = max( 0, (int) ( $_GET['wdc_cdek_tariffs_count'] ?? 0 ) );
+		$message = match ( $notice ) {
+			'deleted' => sprintf( __( 'Удалено тарифов СДЭК: %d.', 'walls-delivery-calc' ), $count ),
+			'updated' => sprintf( __( 'Обновлено тарифов СДЭК: %d.', 'walls-delivery-calc' ), $count ),
+			default => __( 'Тарифы СДЭК не изменены.', 'walls-delivery-calc' ),
+		};
+		$class = 'unchanged' === $notice ? 'notice notice-warning inline' : 'notice notice-success inline';
+
+		echo '<div class="' . esc_attr( $class ) . '"><p>' . esc_html( $message ) . '</p></div>';
+	}
+
+	private function render_cdek_tariffs_bulk_actions( DeliveryService $service ): void {
+		?>
+		<div class="notice notice-info inline" style="padding:12px;margin:12px 0 16px;">
+			<p><strong><?php echo esc_html__( 'Массовые действия', 'walls-delivery-calc' ); ?></strong></p>
+			<p style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+				<?php $this->render_cdek_tariffs_bulk_button( $service, 'enable_all', 0, __( 'Включить все', 'walls-delivery-calc' ) ); ?>
+				<?php $this->render_cdek_tariffs_bulk_button( $service, 'disable_all', 0, __( 'Выключить все', 'walls-delivery-calc' ) ); ?>
+				<?php $this->render_cdek_tariffs_bulk_button( $service, 'delete_all', 0, __( 'Удалить все тарифы', 'walls-delivery-calc' ), 'button button-link-delete', __( 'Удалить все тарифы СДЭК? Это действие нельзя отменить.', 'walls-delivery-calc' ) ); ?>
+			</p>
+			<?php foreach ( $this->cdek_delivery_mode_bulk_labels() as $mode => $label ) : ?>
+				<p style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0;">
+					<span style="min-width:120px;"><?php echo esc_html( $label ); ?>:</span>
+					<?php $this->render_cdek_tariffs_bulk_button( $service, 'enable_mode', $mode, __( 'Включить', 'walls-delivery-calc' ) ); ?>
+					<?php $this->render_cdek_tariffs_bulk_button( $service, 'disable_mode', $mode, __( 'Выключить', 'walls-delivery-calc' ) ); ?>
+				</p>
+			<?php endforeach; ?>
+		</div>
+		<?php
+	}
+
+	private function render_cdek_tariffs_bulk_button( DeliveryService $service, string $bulk_action, int $mode, string $label, string $class = 'button button-secondary', string $confirm = '' ): void {
+		?>
+		<form method="post" style="display:inline;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="bulk_cdek_tariffs">
+			<input type="hidden" name="cdek_tariffs_bulk_action" value="<?php echo esc_attr( $bulk_action ); ?>">
+			<input type="hidden" name="cdek_tariffs_delivery_mode" value="<?php echo esc_attr( (string) $mode ); ?>">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<button type="submit" class="<?php echo esc_attr( $class ); ?>"<?php echo '' !== $confirm ? ' onclick="return confirm(' . esc_js( wp_json_encode( $confirm ) ?: "''" ) . ');"' : ''; ?>><?php echo esc_html( $label ); ?></button>
+		</form>
+		<?php
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function cdek_delivery_mode_bulk_labels(): array {
+		return array(
+			4 => __( 'Склад-склад', 'walls-delivery-calc' ),
+			3 => __( 'Склад-дверь', 'walls-delivery-calc' ),
+			2 => __( 'Дверь-склад', 'walls-delivery-calc' ),
+			1 => __( 'Дверь-дверь', 'walls-delivery-calc' ),
+		);
 	}
 
 	/**
@@ -1004,6 +1105,30 @@ final class DeliveryServicesAdminPage {
 			<option value="<?php echo esc_attr( DeliveryType::COURIER ); ?>" <?php selected( DeliveryType::COURIER, $value ); ?>><?php echo esc_html__( 'до двери', 'walls-delivery-calc' ); ?></option>
 		</select>
 		<?php
+	}
+
+	private function cdek_delivery_mode_select( string $code, int $value ): void {
+		$value = in_array( $value, array( 1, 2, 3, 4 ), true ) ? $value : 0;
+		?>
+		<select name="cdek_tariff_delivery_mode[<?php echo esc_attr( $code ); ?>]">
+			<?php foreach ( $this->cdek_delivery_mode_options() as $mode => $label ) : ?>
+				<option value="<?php echo esc_attr( (string) $mode ); ?>" <?php selected( $mode, $value ); ?>><?php echo esc_html( $label ); ?></option>
+			<?php endforeach; ?>
+		</select>
+		<?php
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function cdek_delivery_mode_options(): array {
+		return array(
+			0 => __( 'Не определен', 'walls-delivery-calc' ),
+			1 => __( 'Дверь-дверь', 'walls-delivery-calc' ),
+			2 => __( 'Дверь-склад', 'walls-delivery-calc' ),
+			3 => __( 'Склад-дверь', 'walls-delivery-calc' ),
+			4 => __( 'Склад-склад', 'walls-delivery-calc' ),
+		);
 	}
 
 	/**
@@ -1868,6 +1993,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 		$codes = is_array( $_POST['cdek_tariff_code'] ?? null ) ? wp_unslash( $_POST['cdek_tariff_code'] ) : array();
 		$custom_titles = is_array( $_POST['cdek_tariff_custom_title'] ?? null ) ? wp_unslash( $_POST['cdek_tariff_custom_title'] ) : array();
 		$delivery_types = is_array( $_POST['cdek_tariff_delivery_type'] ?? null ) ? wp_unslash( $_POST['cdek_tariff_delivery_type'] ) : array();
+		$delivery_modes = is_array( $_POST['cdek_tariff_delivery_mode'] ?? null ) ? wp_unslash( $_POST['cdek_tariff_delivery_mode'] ) : array();
 		$comments = is_array( $_POST['cdek_tariff_admin_comment'] ?? null ) ? wp_unslash( $_POST['cdek_tariff_admin_comment'] ) : array();
 		$active = is_array( $_POST['cdek_tariff_is_active'] ?? null ) ? wp_unslash( $_POST['cdek_tariff_is_active'] ) : array();
 		$rows = array();
@@ -1880,6 +2006,7 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 				'tariff_code' => $code,
 				'custom_title' => sanitize_text_field( (string) ( $custom_titles[ $code ] ?? '' ) ),
 				'delivery_type' => DeliveryType::COURIER === (string) ( $delivery_types[ $code ] ?? '' ) ? DeliveryType::COURIER : DeliveryType::PICKUP,
+				'delivery_mode' => in_array( (int) ( $delivery_modes[ $code ] ?? 0 ), array( 1, 2, 3, 4 ), true ) ? (int) $delivery_modes[ $code ] : 0,
 				'admin_comment' => sanitize_textarea_field( (string) ( $comments[ $code ] ?? '' ) ),
 				'is_active' => isset( $active[ $code ] ),
 			);

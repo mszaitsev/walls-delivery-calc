@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Infrastructure\Settings;
 
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -104,6 +105,7 @@ final class SettingsRepository {
 			'shipment_status_autosync_last_run' => array(),
 			'shipment_status_order_status_mapping_enabled' => false,
 			'shipment_status_order_status_mapping' => array(),
+			'cdek_status_mapping' => CdekStatusMappingService::default_mapping(),
 			'packaging_weight_tiers'       => array(),
 			),
 			CdekSettings::defaults()

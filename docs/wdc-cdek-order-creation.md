@@ -1,5 +1,37 @@
 # WDC CDEK Order Creation
 
+Version: 0.51.0.
+
+0.51.0 update: registered CDEK shipments now expose BARCODE print actions in the order `Отправления` block: `Скачать ШК` returns `Content-Disposition: attachment`, while `Открыть ШК` returns the same PDF inline in a new tab. WDC follows the attached CDEK print documentation: it creates the async form with `POST /v2/print/barcodes` using `orders[]`, `copy_count=1`, `format=A6` and `lang=RUS`, polls `GET /v2/print/barcodes/{uuid}` until `READY`, and downloads `GET /v2/print/barcodes/{uuid}.pdf`. Print-form UUIDs and PDF files are not stored, and print creation/download errors are not logged.
+
+The `WDC -> Статусы` admin page now includes a `Статусы СДЭК` tab. Raw CDEK order status from `entity.statuses[]` is still selected by max `date_time` among non-deleted rows and remains the source for CDEK-specific buttons such as cancel/local remove, but WDC also saves a carrier-neutral `universal_status_code` through the configurable CDEK mapping. Defaults map movement statuses to `in_transit`, `DELIVERED` to `delivered`, `INVALID`/`NOT_DELIVERED` to `rejected`, and `REMOVED` to `cancelled`.
+
+0.50.4 update: CDEK postamats are handled as the same warehouse/PVZ endpoint class for order registration. No special shipment creation branch is added: postamat pickup still sends `delivery_point`, just like PVZ. The shipment modal now shows a separate CDEK row `Тип точки: ПВЗ СДЭК` or `Тип точки: Постамат СДЭК` when the selected pickup metadata contains a known type; unknown types are not rendered.
+
+0.50.3 update: CDEK courier order creation now follows the documented direction fields for `POST /v2/orders`. Managed tariffs carry editable `delivery_mode`: `1` door-door uses `from_location` + `to_location`, `2` door-warehouse uses `from_location` + `delivery_point`, `3` warehouse-door uses `shipment_point` + `to_location`, and `4` warehouse-warehouse uses `shipment_point` + `delivery_point`; incompatible pairs are not sent together. Door-origin modes use sender city/postcode/address settings, while warehouse-origin modes keep the sender CDEK pickup point. The modal shows `Комментарий курьеру` only for recipient-door CDEK modes and sends it as `comment` when present, trimmed to CDEK's 255 character limit.
+
+Admin delivery recalculation now uses the shared apartment/office/premise splitter before DaData normalization. Inputs such as `125252, Москва, Ходынский б-р, д 13, кв 150` are normalized by querying the house address without the flat suffix and then restoring the flat into the saved shipping address.
+
+0.50.1 update: CDEK courier address preparation still uses DaData to verify the recipient address and build the door-delivery address fields, but the CDEK city code now reuses already known calculation data first: prepared `normalized_address.fields.cdek_city_code`, `_wdc_delivery_calculation_data.api.cdek_to_city_code`, `_wdc_platform_rate_meta.location.cdek_to_city_code`, and saved `request_payload_sanitized.to_location.code`. `GET /v2/location/cities` is only a fallback through the shared `CdekLocationResolver`, so admin recalculation and shipment creation no longer lose a known city code or produce `to_location.code = 0`.
+
+For CDEK courier, the shipment modal calls the DaData suggestions stack directly instead of the old checkout external normalizer path. If DaData suggestions are not configured, the modal shows `Подсказки DaData не настроены. Невозможно проверить адрес СДЭК.`; the Russian Post message `Внешний нормализатор не настроен.` is no longer used for CDEK courier preparation.
+
+0.50.0 update: CDEK courier shipment creation no longer reuses Russian Post address normalization. In the shipment preparation modal, courier CDEK scenarios normalize the recipient address through DaData and then resolve the recipient CDEK city code through the documented `GET /v2/location/cities` location lookup, preferably by DaData `geo_lat`/`geo_lon` and then by saved recipient locality coordinates. The modal keeps the result only in draft state until creation and shows `Нормализованный адрес СДЭК`, the visible CDEK city code and the success message `✅ Данные для СДЭК корректны`.
+
+For CDEK courier tariffs, `to_location` is built from prepared CDEK fields: positive `code`, normalized city name, DaData postal code and component-built delivery address such as `Ходынский б-р, д 13, кв 150`. Postcode is never used as city code, and creation is blocked with `Не удалось определить код города СДЭК для адреса получателя. Проверьте адрес и повторите обработку.` when location lookup cannot resolve a city code. Pickup CDEK tariffs still use `delivery_point`; Russian Post keeps its existing normalization path.
+
+0.49.2 update: shipment item rows now initialize product dimensions from WooCommerce product/variation data when catalog dimensions exist, with `0.1` used only as the empty-dimension fallback. Item price and item dimension inputs are text decimal fields so managers can type both `.` and `,`, while package place dimensions remain integer-only.
+
+The `Грузоместа` item table now uses borderless centered split/remove icons, clamps split/base quantities to keep every row at least `1` and the group total equal to the ordered quantity, closes manual SKU search results on focus-out without auto-filling, and supports partial SKU lookup through `_sku LIKE` for products and variations.
+
+0.49.1 update: the `Грузоместа` tab is carrier-neutral in the shipment modal instead of being CDEK-only. Russian Post and future carriers receive the same package summary, item rows, split controls and manual item entry UI, while CDEK continues to be the only carrier that currently maps those rows into `/v2/orders` items.
+
+Package place weight/dimensions remain integer-only because carrier package payloads use whole values. Item dimensions inside the `Грузоместа` table may be fractional and are kept in modal state for package planning/future validation, but CDEK `packages.items[]` still sends only documented item fields (`name`, `ware_key`, `payment`, `cost`, `weight`, `amount`). Decimal item values accept both dot and comma separators, and forced merge after deleting a package restores base rows from the original order item data.
+
+0.49.0 update: CDEK settings now include `cdek_shipment_point_address`, shown under `Код ПВЗ отправления СДЭК` on the service `Расчет` tab. The shipment preparation modal shows sender pickup point as code plus address and lets a manager temporarily choose another CDEK sender pickup point from the admin map; that choice updates only modal draft data and is sent as `shipment_point` in `POST /v2/orders`.
+
+The universal `Грузоместа` UI was tightened for all carrier flows and actively feeds CDEK packages/items. A single package shows the API-weight hint from the same calculated final weight used by the delivery calculator; multiple packages hide the hint. Package summaries now show package weight, assigned item quantity, item weight and declared value. The item table uses Russian labels, plain SKU text, compact numeric fields, split rows with a delete action instead of `+/-`, automatic quantity rebalancing, manual item rows, and WooCommerce product search for manual SKU entry.
+
 Version: 0.48.11.
 
 0.48.11 update: the shipment preparation pickup map keeps the Russian Post carrier context (`russian_post_domestic:pickup`) and now loads recipient-location points even when there is no typed search query, fixing the empty “ПВЗ не найдены” state in the Russian Post shipment modal. The shared checkout pickup map also restores selected-point preview by matching carrier-specific codes/postcodes, not only transient REST ids, so previously selected CDEK and Russian Post points can be highlighted, opened and scrolled into view after reopening the map.
@@ -80,7 +112,7 @@ The existing `Отправления` metabox is reused. The modal now has tabs:
 - `Основное` for the carrier-specific shipment summary and main controls;
 - `Грузоместа` for universal package/item assignment data.
 
-The `Грузоместа` tab is shown for all carriers so other services can adopt it later. In 0.48.0 it actively drives CDEK `packages[]`; Russian Post flow is kept backward-compatible.
+The `Грузоместа` tab is shown for all carriers. Since 0.49.1 it renders the same table/summary/split/manual-item UI for Russian Post, CDEK and future carriers; CDEK actively uses the rows for `packages[]`, while Russian Post remains backward-compatible if its API flow does not consume item-level rows yet.
 
 Repeated CDEK creation is blocked when the order already has a CDEK shipment in `registration_pending`, `created` or `registered`. The UI shows the existing UUID/number/status instead of accidentally creating another CDEK order with the same IM number.
 

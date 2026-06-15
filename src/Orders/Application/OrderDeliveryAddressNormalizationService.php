@@ -296,7 +296,8 @@ final class OrderDeliveryAddressNormalizationService {
 	 * @return array{suggestions:array<int,array{label:string,address:array<string,mixed>}>}
 	 */
 	private function normalize_from_suggestions( array $selected_location, string $address_line ): array {
-		$response = $this->suggestions?->suggest( 'address', $address_line, $this->suggestion_context( $selected_location ) );
+		$flat = AddressLineParser::flat_context( $address_line );
+		$response = $this->suggestions?->suggest( 'address', $flat['input_without_flat'], $this->suggestion_context( $selected_location ) );
 		if ( ! is_array( $response ) || empty( $response['success'] ) ) {
 			return array( 'suggestions' => array() );
 		}
@@ -310,7 +311,7 @@ final class OrderDeliveryAddressNormalizationService {
 			if ( ! $this->suggestion_has_delivery_address( $data ) ) {
 				continue;
 			}
-			$payload = $this->payload_from_suggestion( $suggestion, $selected_location, $address_line );
+			$payload = $this->payload_from_suggestion( $suggestion, $selected_location, $address_line, $flat );
 			if ( '' === trim( (string) ( $payload['address_1'] ?? '' ) ) ) {
 				continue;
 			}
@@ -328,27 +329,36 @@ final class OrderDeliveryAddressNormalizationService {
 	 * @param array<string,mixed> $selected_location
 	 * @return array<string,mixed>
 	 */
-	private function payload_from_suggestion( array $suggestion, array $selected_location, string $address_line ): array {
+	private function payload_from_suggestion( array $suggestion, array $selected_location, string $address_line, array $flat_context = array() ): array {
 		$data = is_array( $suggestion['data'] ?? null ) ? $suggestion['data'] : array();
 		$street = (string) ( $data['street_with_type'] ?? $data['street'] ?? '' );
 		$house = (string) ( $data['house'] ?? '' );
 		$block = (string) ( $data['block'] ?? '' );
-		$flat = (string) ( $data['flat'] ?? '' );
+		$flat = trim( (string) ( $data['flat'] ?? $data['room'] ?? $data['room_number'] ?? $data['premise'] ?? '' ) );
+		if ( '' === $flat ) {
+			$flat = trim( (string) ( $flat_context['flat'] ?? '' ) );
+		}
+		if ( '' !== $flat && '' === (string) ( $data['flat_type'] ?? '' ) && '' !== (string) ( $flat_context['flat_type'] ?? '' ) ) {
+			$data['flat_type'] = (string) $flat_context['flat_type'];
+		}
 		$address_1 = $this->address_1_from_parts( $street, $house, $block, $flat, $data );
-		$full = (string) ( $suggestion['unrestricted_value'] ?? $suggestion['value'] ?? $address_line );
+		$full = $this->full_address_with_flat( (string) ( $suggestion['unrestricted_value'] ?? $suggestion['value'] ?? $address_line ), $flat, (string) ( $data['flat_type'] ?? $flat_context['flat_type'] ?? 'кв' ) );
 
 		return array(
 			'country' => (string) ( $data['country_iso_code'] ?? 'RU' ),
 			'region' => (string) ( $data['region_with_type'] ?? $data['region'] ?? $selected_location['region_name'] ?? '' ),
+			'area' => (string) ( $data['area_with_type'] ?? $data['area'] ?? '' ),
 			'city' => (string) ( $data['settlement_with_type'] ?? $data['city_with_type'] ?? $data['settlement'] ?? $data['city'] ?? $selected_location['city_value'] ?? $selected_location['city_name'] ?? '' ),
 			'postcode' => (string) ( $data['postal_code'] ?? $selected_location['postal_code'] ?? $selected_location['postcode'] ?? '' ),
 			'street' => $street,
 			'house' => $house,
+			'block' => $block,
 			'flat' => $flat,
 			'address_1' => '' !== $address_1 ? $address_1 : $address_line,
 			'address_2' => '',
 			'full_address' => $full,
 			'fias_id' => (string) ( $data['fias_id'] ?? $data['house_fias_id'] ?? '' ),
+			'kladr_id' => (string) ( $data['kladr_id'] ?? $data['house_kladr_id'] ?? '' ),
 			'gar_id' => (string) ( $data['gar_id'] ?? '' ),
 			'city_fias_id' => (string) ( $data['city_fias_id'] ?? '' ),
 			'settlement_fias_id' => (string) ( $data['settlement_fias_id'] ?? '' ),
@@ -357,6 +367,8 @@ final class OrderDeliveryAddressNormalizationService {
 			'settlement_kladr_id' => (string) ( $data['settlement_kladr_id'] ?? '' ),
 			'lat' => $this->coordinate( $data, array( 'geo_lat', 'lat', 'latitude' ) ),
 			'lng' => $this->coordinate( $data, array( 'geo_lon', 'lng', 'lon', 'longitude' ) ),
+			'geo_lat' => (string) ( $data['geo_lat'] ?? '' ),
+			'geo_lon' => (string) ( $data['geo_lon'] ?? '' ),
 			'normalized' => true,
 			'fallback' => false,
 			'source' => 'dadata',
@@ -438,6 +450,24 @@ final class OrderDeliveryAddressNormalizationService {
 		}
 
 		return trim( implode( ', ', array_filter( $parts, static fn( string $part ): bool => '' !== $part ) ) );
+	}
+
+	private function full_address_with_flat( string $full, string $flat, string $flat_type ): string {
+		$full = AddressLineParser::normalize_punctuation( $full );
+		$flat = trim( $flat );
+		if ( '' === $flat ) {
+			return $full;
+		}
+		$current = AddressLineParser::flat_context( $full );
+		if ( '' !== $current['flat'] ) {
+			return $full;
+		}
+		$flat_type = trim( $flat_type );
+		if ( '' === $flat_type ) {
+			$flat_type = 'кв';
+		}
+
+		return AddressLineParser::normalize_punctuation( $full . ', ' . $flat_type . ' ' . $flat );
 	}
 
 	/**

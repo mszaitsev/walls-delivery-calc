@@ -287,6 +287,30 @@ cdek_pickup_assert( '650004' === ( $postamat['point_postcode'] ?? '' ) && 'KEM7'
 cdek_pickup_assert( 'POSTAMAT' === ( $postamat['point_type'] ?? '' ) && 'Срок хранения 3 дня' === ( $postamat['storage_notice'] ?? '' ), 'CDEK POSTAMAT must normalize type and storage notice.' );
 cdek_pickup_assert( 'Inside the shopping center' === ( $postamat['description'] ?? '' ), 'CDEK deliverypoints description must be normalized.' );
 cdek_pickup_assert( 'cdek' === ( $postamat['service_key'] ?? '' ) && 'cdek:pickup' === ( $postamat['pickup_family'] ?? '' ) && 'Постамат СДЭК' === ( $postamat['point_title'] ?? '' ) && 'postamat' === ( $postamat['marker_type'] ?? '' ), 'CDEK deliverypoints must expose normalized pickup presentation fields.' );
+$locker = $service->normalize(
+	array(
+		'code' => 'MSK900',
+		'name' => 'Locker',
+		'type' => 'LOCKER',
+		'location' => array(
+			'city' => 'Москва',
+			'address_full' => 'Москва, Locker 900',
+		),
+	)
+);
+$postomat = $service->normalize(
+	array(
+		'code' => 'MSK901',
+		'name' => 'Postomat',
+		'type' => 'POSTOMAT',
+		'location' => array(
+			'city' => 'Москва',
+			'address_full' => 'Москва, Postomat 901',
+		),
+	)
+);
+cdek_pickup_assert( 'POSTAMAT' === ( $locker['point_type'] ?? '' ) && 'Постамат СДЭК' === ( $locker['point_title'] ?? '' ), 'CDEK LOCKER deliverypoint type must normalize as POSTAMAT presentation.' );
+cdek_pickup_assert( 'POSTAMAT' === ( $postomat['point_type'] ?? '' ) && 'Постамат СДЭК' === ( $postomat['point_title'] ?? '' ), 'CDEK POSTOMAT deliverypoint type must normalize as POSTAMAT presentation.' );
 
 $rest_controller = new PickupPointsRestController( new RussianPostPickupPointRepository(), null, null, $service );
 $rest_points = $rest_controller->points( array( 'carrier' => 'cdek', 'city_code' => 270 ) );
@@ -524,6 +548,7 @@ cdek_pickup_assert( ! str_contains( $admin_js, "Ищем ПВЗ СДЭК" ) && !
 cdek_pickup_assert( str_contains( $admin_js, "'ПВЗ СДЭК'" ) && str_contains( $admin_js, "'Постамат СДЭК'" ), 'Admin recalculation map must render CDEK pickup/postamat titles.' );
 cdek_pickup_assert( ! str_contains( $map_js, "context.carrier === 'cdek'" ) && str_contains( $map_js, 'window.WDCPickupApi.addressSearch(query, context' ), 'Checkout pickup map must not bypass addressSearch for CDEK.' );
 cdek_pickup_assert( str_contains( $map_js, "'ПВЗ СДЭК'" ) && str_contains( $map_js, "'Постамат СДЭК'" ), 'Checkout pickup map must render CDEK pickup/postamat titles.' );
+cdek_pickup_assert( str_contains( $map_js, "type === 'locker'" ) && str_contains( $admin_js, "'locker' === type" ), 'Pickup maps must treat CDEK LOCKER as a postamat title.' );
 cdek_pickup_assert( ! str_contains( $map_js, 'LIST_LIMIT' ) && ! str_contains( $map_js, 'points.slice(0' ) && str_contains( $map_js, 'points.map(renderListItem).join' ) && str_contains( $map_js, 'listMeta(points.length, points.length)' ), 'Checkout pickup map must render every CDEK point returned by backend, including large-city lists beyond the first 100 rows.' );
 cdek_pickup_assert( str_contains( $map_js, 'function pointSnapshot(point)' ) && str_contains( $map_js, 'function pointMatchKeys(point)' ) && str_contains( $map_js, 'point && point.cdek_code' ) && str_contains( $map_js, 'point && point.delivery_point' ) && str_contains( $map_js, 'snapshot.cdek_code' ) && str_contains( $map_js, 'snapshot.delivery_point' ) && str_contains( $map_js, 'hasSharedPointKey(keys, pointMatchKeys(item))' ) && str_contains( $map_js, 'previewPoint = matchingPreviewPoint' ) && str_contains( $map_js, 'committedPoint = matchingPreviewPoint' ), 'Checkout selected CDEK pickup preview must match by CDEK code/delivery_point and replace saved payload with the REST point when ids differ.' );
 cdek_pickup_assert( str_contains( $rest_source, "carrier === 'cdek'" ) || str_contains( $rest_source, "'cdek' === \$carrier" ), 'Pickup REST source must route CDEK pickup requests.' );

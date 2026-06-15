@@ -37,11 +37,15 @@ final class CdekCreateRequestBuilder {
 			'packages' => $this->packages( $request ),
 			'print' => self::PRINT_TYPE,
 		);
+		$comment = $this->comment( $request );
+		if ( '' !== $comment ) {
+			$payload['comment'] = $comment;
+		}
 
 		if ( in_array( $mode, array( 1, 2 ), true ) ) {
 			$payload['from_location'] = $this->from_location();
 		} else {
-			$payload['shipment_point'] = $this->settings->shipment_point();
+			$payload['shipment_point'] = $this->shipment_point( $request );
 		}
 
 		if ( in_array( $mode, array( 2, 4 ), true ) ) {
@@ -74,7 +78,7 @@ final class CdekCreateRequestBuilder {
 		if ( 0 === $mode ) {
 			$errors[] = 'Не удалось определить режим тарифа СДЭК. Проверьте тариф и повторите создание отправления.';
 		}
-		if ( in_array( $mode, array( 3, 4 ), true ) && '' === $this->settings->shipment_point() ) {
+		if ( in_array( $mode, array( 3, 4 ), true ) && '' === $this->shipment_point( $request ) ) {
 			$errors[] = 'Заполните код ПВЗ отправления СДЭК.';
 		}
 		if ( in_array( $mode, array( 1, 2 ), true ) && ( $this->settings->sender_city_code() <= 0 || '' === $this->settings->sender_address() ) ) {
@@ -85,6 +89,9 @@ final class CdekCreateRequestBuilder {
 		}
 		if ( in_array( $mode, array( 1, 3 ), true ) && '' === trim( $request->recipient_address->raw_address ) ) {
 			$errors[] = 'Для CDEK courier нужен адрес доставки to_location.';
+		}
+		if ( in_array( $mode, array( 1, 3 ), true ) && $this->to_location_city_code( $request ) <= 0 ) {
+			$errors[] = "Не удалось определить код города СДЭК для адреса получателя.\nПроверьте адрес и повторите обработку.";
 		}
 		if ( array() === $request->places ) {
 			$errors[] = 'Добавьте хотя бы одно грузоместо.';
@@ -221,21 +228,35 @@ final class CdekCreateRequestBuilder {
 		return $location;
 	}
 
+	private function shipment_point( ShipmentCreateRequest $request ): string {
+		$point = preg_replace( '/[^A-Z0-9_\-]/', '', strtoupper( (string) ( $request->meta['shipment_point'] ?? '' ) ) ) ?? '';
+
+		return '' !== $point ? $point : $this->settings->shipment_point();
+	}
+
 	/**
 	 * @return array<string,mixed>
 	 */
 	private function to_location( ShipmentCreateRequest $request ): array {
 		$location = array_filter(
 			array(
-				'code' => is_numeric( $request->meta['cdek_to_city_code'] ?? null ) ? (int) $request->meta['cdek_to_city_code'] : null,
-				'city' => $request->recipient_address->city,
-				'postal_code' => preg_replace( '/\D+/', '', $request->recipient_address->postcode ) ?: '',
-				'address' => $request->recipient_address->raw_address,
+				'code' => $this->to_location_city_code( $request ),
+				'city' => (string) ( $request->meta['cdek_city_name'] ?? $request->recipient_address->city ),
+				'postal_code' => preg_replace( '/\D+/', '', (string) ( $request->meta['cdek_postal_code'] ?? $request->recipient_address->postcode ) ) ?: '',
+				'address' => (string) ( $request->meta['cdek_delivery_address'] ?? $request->recipient_address->raw_address ),
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value
 		);
 
 		return $location;
+	}
+
+	private function to_location_city_code( ShipmentCreateRequest $request ): int {
+		$code = is_numeric( $request->meta['cdek_city_code'] ?? null )
+			? (int) $request->meta['cdek_city_code']
+			: ( is_numeric( $request->meta['cdek_to_city_code'] ?? null ) ? (int) $request->meta['cdek_to_city_code'] : 0 );
+
+		return $code > 0 ? $code : 0;
 	}
 
 	/**
@@ -320,6 +341,12 @@ final class CdekCreateRequestBuilder {
 		if ( str_starts_with( $title, 'склад-склад' ) || str_starts_with( $title, 'warehouse-warehouse' ) ) {
 			return 4;
 		}
+		if ( DeliveryType::PICKUP === $request->delivery_type ) {
+			return 4;
+		}
+		if ( DeliveryType::COURIER === $request->delivery_type ) {
+			return '' !== $this->shipment_point( $request ) ? 3 : 1;
+		}
 
 		return 0;
 	}
@@ -329,7 +356,19 @@ final class CdekCreateRequestBuilder {
 	}
 
 	private function delivery_point( ShipmentCreateRequest $request ): string {
-		return trim( (string) ( $request->meta['delivery_point'] ?? $request->meta['pickup_point_code'] ?? $request->pickup_point?->point_code ?? '' ) );
+		$code = trim( (string) ( $request->meta['delivery_point'] ?? $request->meta['pickup_point_code'] ?? $request->meta['point_code'] ?? $request->meta['cdek_code'] ?? $request->pickup_point?->point_code ?? '' ) );
+		if ( preg_match( '/^\d{6}$/', $code ) ) {
+			return '';
+		}
+
+		return strtoupper( preg_replace( '/[^A-Z0-9_\-]/', '', strtoupper( $code ) ) ?? '' );
+	}
+
+	private function comment( ShipmentCreateRequest $request ): string {
+		$comment = trim( (string) ( $request->meta['cdek_courier_comment'] ?? $request->meta['comment'] ?? '' ) );
+		$comment = preg_replace( '/\s+/', ' ', $comment ) ?? $comment;
+
+		return function_exists( 'mb_substr' ) ? mb_substr( $comment, 0, 255 ) : substr( $comment, 0, 255 );
 	}
 
 	private function order_number( ShipmentCreateRequest $request ): string {

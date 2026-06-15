@@ -8,6 +8,7 @@ use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
+use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -20,7 +21,8 @@ final class ShipmentStatusesAdminPage {
 	public function __construct(
 		private SettingsRepository $settings,
 		private ShipmentStatusAutoSyncService $auto_sync,
-		private ShipmentOrderStatusMappingService $order_status_mapping
+		private ShipmentOrderStatusMappingService $order_status_mapping,
+		private ?CdekStatusMappingService $cdek_status_mapping = null
 	) {
 	}
 
@@ -46,7 +48,7 @@ final class ShipmentStatusesAdminPage {
 
 		$message = $this->handle_post();
 		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( (string) $_GET['tab'] ) ) : 'main';
-		if ( ! in_array( $tab, array( 'main', 'mapping', 'diagnostics' ), true ) ) {
+		if ( ! in_array( $tab, array( 'main', 'mapping', 'cdek_mapping', 'diagnostics' ), true ) ) {
 			$tab = 'main';
 		}
 		?>
@@ -58,11 +60,14 @@ final class ShipmentStatusesAdminPage {
 			<nav class="nav-tab-wrapper">
 				<?php $this->tab_link( 'main', __( 'Основные', 'walls-delivery-calc' ), $tab ); ?>
 				<?php $this->tab_link( 'mapping', __( 'Соответствие статусов', 'walls-delivery-calc' ), $tab ); ?>
+				<?php $this->tab_link( 'cdek_mapping', __( 'Статусы СДЭК', 'walls-delivery-calc' ), $tab ); ?>
 				<?php $this->tab_link( 'diagnostics', __( 'Диагностика', 'walls-delivery-calc' ), $tab ); ?>
 			</nav>
 			<?php
 			if ( 'mapping' === $tab ) {
 				$this->render_order_mapping_tab();
+			} elseif ( 'cdek_mapping' === $tab ) {
+				$this->render_cdek_mapping_tab();
 			} elseif ( 'diagnostics' === $tab ) {
 				$this->render_diagnostics_tab();
 			} else {
@@ -145,6 +150,38 @@ final class ShipmentStatusesAdminPage {
 		<?php
 	}
 
+	private function render_cdek_mapping_tab(): void {
+		$service = $this->cdek_status_mapping ?? new CdekStatusMappingService( $this->settings );
+		$mapping = $service->mapping();
+		?>
+		<form method="post">
+			<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
+			<input type="hidden" name="wdc_statuses_action" value="save_cdek_mapping">
+			<p class="description"><?php echo esc_html__( 'Сопоставление не меняет raw-статус СДЭК и правила кнопок; оно сохраняет универсальный статус отправления для общей логики WDC.', 'walls-delivery-calc' ); ?></p>
+			<table class="widefat striped" style="max-width: 960px;">
+				<thead>
+					<tr>
+						<th><?php echo esc_html__( 'Статус СДЭК', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Универсальный статус отправления', 'walls-delivery-calc' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ( CdekStatusMappingService::status_labels() as $code => $label ) : ?>
+						<tr>
+							<td>
+								<strong><?php echo esc_html( $label ); ?></strong>
+								<br><code><?php echo esc_html( $code ); ?></code>
+							</td>
+							<td><?php $this->render_delivery_status_select( CdekStatusMappingService::MAPPING_KEY, $code, (string) ( $mapping[ $code ] ?? '' ) ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+			<?php submit_button( __( 'Сохранить статусы СДЭК', 'walls-delivery-calc' ) ); ?>
+		</form>
+		<?php
+	}
+
 	private function render_diagnostics_tab(): void {
 		$stats = $this->auto_sync->diagnostics();
 		?>
@@ -217,6 +254,14 @@ final class ShipmentStatusesAdminPage {
 		echo '</select>';
 	}
 
+	private function render_delivery_status_select( string $name, string $code, string $selected_status ): void {
+		echo '<select name="' . esc_attr( $name ) . '[' . esc_attr( $code ) . ']">';
+		foreach ( DeliveryStatus::all() as $status ) {
+			echo '<option value="' . esc_attr( $status ) . '" ' . selected( $selected_status, $status, false ) . '>' . esc_html( DeliveryStatus::label( $status ) . ' (' . $status . ')' ) . '</option>';
+		}
+		echo '</select>';
+	}
+
 	private function handle_post(): string {
 		if ( 'POST' !== (string) ( $_SERVER['REQUEST_METHOD'] ?? 'GET' ) || ! isset( $_POST[ self::NONCE_NAME ] ) ) {
 			return '';
@@ -252,6 +297,17 @@ final class ShipmentStatusesAdminPage {
 			);
 
 			return __( 'Соответствия статусов сохранены.', 'walls-delivery-calc' );
+		}
+
+		if ( 'save_cdek_mapping' === $action ) {
+			$service = $this->cdek_status_mapping ?? new CdekStatusMappingService( $this->settings );
+			$mapping = isset( $_POST[ CdekStatusMappingService::MAPPING_KEY ] ) && is_array( $_POST[ CdekStatusMappingService::MAPPING_KEY ] )
+				? $service->sanitize_mapping( wp_unslash( $_POST[ CdekStatusMappingService::MAPPING_KEY ] ) )
+				: CdekStatusMappingService::default_mapping();
+
+			$this->settings->set( CdekStatusMappingService::MAPPING_KEY, $mapping );
+
+			return __( 'Статусы СДЭК сохранены.', 'walls-delivery-calc' );
 		}
 
 		if ( 'save_settings' !== $action ) {

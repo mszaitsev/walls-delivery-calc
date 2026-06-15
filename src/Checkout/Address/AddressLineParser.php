@@ -7,23 +7,40 @@ defined( 'ABSPATH' ) || exit;
 
 final class AddressLineParser {
 	/**
-	 * @return array{input:string,flat:string,input_without_flat:string}
+	 * @return array{input:string,flat:string,flat_type:string,input_without_flat:string}
 	 */
 	public static function flat_context( string $input ): array {
 		$input = self::normalize_punctuation( $input );
 		$flat = '';
+		$flat_type = '';
 		$without = $input;
-		if ( preg_match( '/(?:^|[,\s])(?:кв\.?|квартира|кв-ра|apt\.?|ап\.?)\s*№?\s*([0-9A-Za-zА-Яа-я\/-]+)/iu', $input, $matches, PREG_OFFSET_CAPTURE ) ) {
-			$flat = trim( (string) $matches[1][0] );
+		if ( preg_match( '/(?:^|[,\s])(кв\.?|квартира|кв-ра|apt\.?|ап\.?|оф\.?|офис|пом\.?|помещение)\s*№?\s*([0-9A-Za-zА-Яа-яЁё\/-]+)\s*$/iu', $input, $matches, PREG_OFFSET_CAPTURE ) ) {
+			$flat_type = self::flat_type( (string) $matches[1][0] );
+			$flat = trim( (string) $matches[2][0] );
 			$start = (int) $matches[0][1];
 			$length = strlen( (string) $matches[0][0] );
 			$without = trim( substr( $input, 0, $start ) . ' ' . substr( $input, $start + $length ) );
 			$without = self::normalize_punctuation( $without );
+		} else {
+			$parts = preg_split( '/\s*,\s*/u', $input ) ?: array();
+			if ( count( $parts ) >= 2 ) {
+				$tail = trim( (string) end( $parts ) );
+				if ( preg_match( '/^[0-9]+[A-Za-zА-Яа-яЁё0-9\/-]*$/u', $tail ) && ! preg_match( '/\b(г|город|ул|улица|пр|проспект|б-р|бульвар|пер|переулок|ш|шоссе|д|дом)\b\.?/iu', $tail ) ) {
+					array_pop( $parts );
+					$prefix = self::normalize_punctuation( implode( ', ', array_filter( array_map( 'trim', $parts ), static fn( string $part ): bool => '' !== $part ) ) );
+					if ( '' !== $prefix ) {
+						$flat = $tail;
+						$flat_type = 'кв';
+						$without = $prefix;
+					}
+				}
+			}
 		}
 
 		return array(
 			'input' => $input,
 			'flat' => $flat,
+			'flat_type' => $flat_type,
 			'input_without_flat' => $without,
 		);
 	}
@@ -84,7 +101,7 @@ final class AddressLineParser {
 	/**
 	 * @param array<string,mixed> $data
 	 */
-	public static function lower_address_line( array $data, string $restored_flat = '' ): string {
+	public static function lower_address_line( array $data, string $restored_flat = '', string $restored_flat_type = 'кв' ): string {
 		$parts = array();
 		$street = trim( (string) ( $data['street_with_type'] ?? $data['street'] ?? '' ) );
 		if ( '' !== $street ) {
@@ -105,7 +122,7 @@ final class AddressLineParser {
 			$flat = $restored_flat;
 		}
 		if ( '' !== $flat ) {
-			$flat_type = trim( (string) ( $data['flat_type'] ?? $data['flat_type_full'] ?? 'кв' ) );
+			$flat_type = trim( (string) ( $data['flat_type'] ?? $data['flat_type_full'] ?? $restored_flat_type ?: 'кв' ) );
 			$parts[] = trim( $flat_type . ' ' . $flat );
 		}
 		$room = trim( (string) ( $data['room'] ?? $data['room_number'] ?? $data['premise'] ?? '' ) );
@@ -127,5 +144,20 @@ final class AddressLineParser {
 		$result = preg_replace( $pattern, '', $query ) ?? $query;
 
 		return self::normalize_punctuation( $result );
+	}
+
+	private static function flat_type( string $type ): string {
+		$type = trim( function_exists( 'mb_strtolower' ) ? mb_strtolower( $type ) : strtolower( $type ) );
+		if ( str_starts_with( $type, 'оф' ) ) {
+			return 'оф';
+		}
+		if ( str_starts_with( $type, 'пом' ) ) {
+			return 'пом';
+		}
+		if ( str_starts_with( $type, 'ап' ) || str_starts_with( $type, 'apt' ) ) {
+			return 'ап';
+		}
+
+		return 'кв';
 	}
 }

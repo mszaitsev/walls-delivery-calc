@@ -90,7 +90,9 @@ final class CdekTariffSyncService {
 				if ( '' === $code ) {
 					continue;
 				}
-				$type = self::delivery_type_from_mode( $mode_row['delivery_mode'] ?? null );
+				$mode_name = $this->normalize_cdek_string( (string) ( $mode_row['delivery_mode_name'] ?? '' ) );
+				$delivery_mode = self::delivery_mode_value( $mode_row['delivery_mode'] ?? null, $mode_name, $name );
+				$type = self::delivery_type_from_mode( $delivery_mode );
 				$warning = DeliveryType::PICKUP === $type['delivery_type'] && ! empty( $type['unknown'] );
 				if ( $warning && $this->logger instanceof Logger ) {
 					$this->logger->warning(
@@ -102,14 +104,13 @@ final class CdekTariffSyncService {
 						)
 					);
 				}
-				$mode_name = $this->normalize_cdek_string( (string) ( $mode_row['delivery_mode_name'] ?? '' ) );
 				$display_name = $this->tariff_display_name( $name, $mode_name );
 				$rows[ $code ] = array_merge(
 					array(
 					'tariff_code' => $code,
 					'tariff_name_from_cdek' => $display_name,
 					'delivery_type' => $type['delivery_type'],
-					'delivery_mode' => $mode_row['delivery_mode'] ?? null,
+					'delivery_mode' => $delivery_mode,
 					'delivery_mode_name' => $mode_name,
 					'warning' => $warning,
 					),
@@ -144,6 +145,59 @@ final class CdekTariffSyncService {
 			1, 3 => array( 'delivery_type' => DeliveryType::COURIER, 'unknown' => false ),
 			default => array( 'delivery_type' => DeliveryType::PICKUP, 'unknown' => true ),
 		};
+	}
+
+	public static function delivery_mode_value( mixed $raw_mode, string $mode_name = '', string $tariff_name = '' ): int {
+		$mode = (int) $raw_mode;
+		if ( in_array( $mode, array( 1, 2, 3, 4 ), true ) ) {
+			return $mode;
+		}
+		$text = strtolower( str_replace( '_', '-', trim( self::normalize_cdek_string_static( $mode_name . ' ' . $tariff_name . ' ' . ( is_scalar( $raw_mode ) ? (string) $raw_mode : '' ) ) ) ) );
+		if ( str_contains( $text, 'дверь-дверь' ) || str_contains( $text, 'door-door' ) ) {
+			return 1;
+		}
+		if (
+			str_contains( $text, 'дверь-склад' )
+			|| str_contains( $text, 'дверь-пвз' )
+			|| str_contains( $text, 'дверь-постамат' )
+			|| str_contains( $text, 'door-warehouse' )
+			|| str_contains( $text, 'door-pickup' )
+			|| str_contains( $text, 'door-locker' )
+			|| str_contains( $text, 'door-postamat' )
+		) {
+			return 2;
+		}
+		if (
+			str_contains( $text, 'склад-дверь' )
+			|| str_contains( $text, 'пвз-дверь' )
+			|| str_contains( $text, 'постамат-дверь' )
+			|| str_contains( $text, 'warehouse-door' )
+			|| str_contains( $text, 'pickup-door' )
+			|| str_contains( $text, 'locker-door' )
+			|| str_contains( $text, 'postamat-door' )
+		) {
+			return 3;
+		}
+		if (
+			str_contains( $text, 'склад-склад' )
+			|| str_contains( $text, 'склад-пвз' )
+			|| str_contains( $text, 'склад-постамат' )
+			|| str_contains( $text, 'пвз-пвз' )
+			|| str_contains( $text, 'пвз-постамат' )
+			|| str_contains( $text, 'постамат-пвз' )
+			|| str_contains( $text, 'постамат-постамат' )
+			|| str_contains( $text, 'warehouse-warehouse' )
+			|| str_contains( $text, 'warehouse-pickup' )
+			|| str_contains( $text, 'warehouse-locker' )
+			|| str_contains( $text, 'pickup-pickup' )
+			|| str_contains( $text, 'pickup-locker' )
+			|| str_contains( $text, 'locker-pickup' )
+			|| str_contains( $text, 'locker-locker' )
+		) {
+			return 4;
+		}
+
+		return 0;
 	}
 
 	private function tariff_display_name( string $name, string $mode_name ): string {

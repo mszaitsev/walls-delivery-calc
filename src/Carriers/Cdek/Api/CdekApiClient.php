@@ -104,31 +104,40 @@ final class CdekApiClient {
 
 	/**
 	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function createBarcodePrint( array $payload ): array {
+		return $this->authorizedJsonRequest( 'POST', '/v2/print/barcodes', $payload );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function getBarcodePrint( string $uuid ): array {
+		return $this->authorizedJsonRequest( 'GET', '/v2/print/barcodes/' . rawurlencode( $uuid ) );
+	}
+
+	/**
+	 * @return array{http_code:int,body:string,headers:array<string,string>,content_type:string}
+	 */
+	public function downloadBarcodePrintPdf( string $uuid ): array {
+		$response = $this->authorizedRawRequest( 'GET', '/v2/print/barcodes/' . rawurlencode( $uuid ) . '.pdf', array(), array( 'Accept' => 'application/pdf' ) );
+
+		return array(
+			'http_code' => $response->status_code,
+			'body' => $response->body,
+			'headers' => $response->headers,
+			'content_type' => $this->header_value( $response->headers, 'content-type' ),
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
 	 * @param array<string,mixed> $query
 	 * @return array<string,mixed>
 	 */
 	private function authorizedJsonRequest( string $method, string $path, array $payload = array(), array $query = array() ): array {
-		if ( ! $this->settings instanceof CdekSettings || ! $this->http instanceof CdekHttpClientInterface ) {
-			throw new CdekApiException( 'CDEK API client is not configured for runtime requests.' );
-		}
-
-		$url = rtrim( $this->settings->base_url(), '/' ) . $path;
-		if ( array() !== $query ) {
-			$url .= '?' . http_build_query( $query, '', '&' );
-		}
-
-		$args = array(
-			'headers' => array(
-				'Authorization' => 'Bearer ' . $this->tokens->getToken(),
-				'Accept' => 'application/json',
-			),
-		);
-		if ( 'GET' !== strtoupper( $method ) ) {
-			$args['headers']['Content-Type'] = 'application/json';
-			$args['body'] = ( function_exists( 'wp_json_encode' ) ? wp_json_encode( $payload ) : json_encode( $payload ) ) ?: '{}';
-		}
-
-		$response = $this->http->request( $method, $url, $args );
+		$response = $this->authorizedRawRequest( $method, $path, $payload, array( 'Accept' => 'application/json' ), $query );
 		$data = $response->json();
 		if ( $response->status_code < 200 || $response->status_code >= 300 ) {
 			$message = $this->extractErrorMessage( $data, $response->status_code );
@@ -149,6 +158,69 @@ final class CdekApiClient {
 			'http_code' => $response->status_code,
 			'body' => $data,
 		);
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @param array<string,string> $headers
+	 * @param array<string,mixed> $query
+	 */
+	private function authorizedRawRequest( string $method, string $path, array $payload = array(), array $headers = array(), array $query = array() ): CdekApiResponse {
+		if ( ! $this->settings instanceof CdekSettings || ! $this->http instanceof CdekHttpClientInterface ) {
+			throw new CdekApiException( 'CDEK API client is not configured for runtime requests.' );
+		}
+
+		$url = rtrim( $this->settings->base_url(), '/' ) . $path;
+		if ( array() !== $query ) {
+			$url .= '?' . http_build_query( $query, '', '&' );
+		}
+
+		$args = array(
+			'headers' => array(
+				'Authorization' => 'Bearer ' . $this->tokens->getToken(),
+				'Accept' => $headers['Accept'] ?? 'application/json',
+			),
+		);
+		foreach ( $headers as $header => $value ) {
+			$args['headers'][ $header ] = $value;
+		}
+		if ( 'GET' !== strtoupper( $method ) ) {
+			$args['headers']['Content-Type'] = 'application/json';
+			$args['body'] = ( function_exists( 'wp_json_encode' ) ? wp_json_encode( $payload ) : json_encode( $payload ) ) ?: '{}';
+		}
+
+		$response = $this->http->request( $method, $url, $args );
+		if ( $response->status_code < 200 || $response->status_code >= 300 ) {
+			$data = $response->json();
+			$message = $this->extractErrorMessage( $data, $response->status_code );
+			throw new CdekApiException(
+				$this->safeMessage( $message, $response->status_code ),
+				array(
+					'http_code' => $response->status_code,
+					'endpoint' => $path,
+					'request' => $this->sanitizeForDiagnostics( array() !== $payload ? $payload : $query ),
+					'response' => $this->sanitizeForDiagnostics( array() !== $data ? $data : array( '_raw' => $this->safeMessage( $response->body, $response->status_code ) ) ),
+					'cdek_error_code' => $this->extractErrorCode( $data ),
+					'cdek_error_message' => $this->safeMessage( $message, $response->status_code ),
+				)
+			);
+		}
+
+		return $response;
+	}
+
+	/**
+	 * @param array<string,string> $headers
+	 */
+	private function header_value( array $headers, string $name ): string {
+		$name = strtolower( $name );
+		foreach ( $headers as $key => $value ) {
+			if ( strtolower( (string) $key ) === $name ) {
+				return (string) $value;
+			}
+		}
+
+		return '';
 	}
 
 	private function safeMessage( string $message, int $statusCode ): string {
