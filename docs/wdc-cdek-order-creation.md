@@ -1,6 +1,8 @@
 # WDC CDEK Order Creation
 
-Version: 0.52.0.
+Version: 0.53.0.
+
+0.53.0 update: the order `Отправления` block now dispatches lifecycle controls through the shared carrier shipment adapter registry. CDEK and Russian Post adapters expose presentation labels, status payloads, update/cancel/remove/manual-attach actions and label actions while delegating business work to the existing services. CDEK BARCODE download remains the same `Скачать этикетку` action, but it is now advertised by the CDEK adapter; auto-sync also uses adapter support/tracking/throttle/update hooks.
 
 0.52.0 update: CDEK shipments are now included in the shared `WDC -> Статусы` auto-sync loop controlled by the existing `Автообновление статусов отправлений` setting. The dispatcher reuses `CdekOrderStatusService`, so automatic refresh follows the same latest non-deleted `entity.statuses[]` logic as the order metabox `Обновить статус` button, saves raw CDEK status fields, applies `CdekStatusMappingService` to `universal_status_code`/label, and then runs the carrier-neutral WooCommerce order status mapping when enabled. CDEK auto-sync throttles status API calls with a 10 ms pause between CDEK requests and reports counts in diagnostics under `updates_by_carrier[cdek]`.
 

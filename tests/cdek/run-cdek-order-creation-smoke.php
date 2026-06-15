@@ -1078,9 +1078,10 @@ cdek_order_assert( DeliveryStatus::READY_FOR_PICKUP === $default_mapping['ACCEPT
 $GLOBALS['wdc_cdek_order_options']['wdc_core_settings'][ CdekStatusMappingService::MAPPING_KEY ] = array( 'DELIVERED' => DeliveryStatus::READY_FOR_PICKUP );
 cdek_order_assert( DeliveryStatus::READY_FOR_PICKUP === $mapping_service->universal_status_for( 'DELIVERED' ), 'CDEK status mapping must read saved admin overrides.' );
 $autosync_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/ShipmentStatusAutoSyncService.php' );
-cdek_order_assert( str_contains( $autosync_source, 'CdekOrderStatusService' ) && str_contains( $autosync_source, 'case CdekSettings::CARRIER_KEY' ) && str_contains( $autosync_source, '$this->cdek_status_updates->update( $order )' ), 'Shipment autosync must dispatch CDEK shipments through CdekOrderStatusService.' );
-cdek_order_assert( str_contains( $autosync_source, 'find_by_carrier( $order, CdekSettings::CARRIER_KEY )' ) && str_contains( $autosync_source, '$this->order_status_mapping->apply' ), 'CDEK autosync must apply universal status to WooCommerce order status mapping after status update.' );
-cdek_order_assert( str_contains( $autosync_source, "'cdek_number'" ) && str_contains( $autosync_source, "'external_id'" ) && str_contains( $autosync_source, "'uuid'" ), 'CDEK autosync must treat CDEK number/uuid as valid tracking identifiers.' );
+$cdek_adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Cdek/CdekShipmentAdapter.php' );
+cdek_order_assert( str_contains( $autosync_source, '$adapter->update_status' ) && str_contains( $cdek_adapter_source, '$this->status_updates->update( $order )' ), 'Shipment autosync must dispatch CDEK shipments through the CDEK shipment adapter and CdekOrderStatusService.' );
+cdek_order_assert( str_contains( $autosync_source, 'find_by_carrier( $order, $carrier_key )' ) && str_contains( $autosync_source, '$this->order_status_mapping->apply' ), 'CDEK autosync must apply universal status to WooCommerce order status mapping after status update.' );
+cdek_order_assert( str_contains( $autosync_source, '$adapter->tracking_identifier' ) && str_contains( $cdek_adapter_source, "'cdek_number'" ) && str_contains( $cdek_adapter_source, "'external_id'" ) && str_contains( $cdek_adapter_source, "'uuid'" ), 'CDEK autosync must treat CDEK number/uuid as valid tracking identifiers through the adapter.' );
 
 $mapped_status_http = new CdekOrderFakeHttp();
 $mapped_status_http->order_responses[] = array(

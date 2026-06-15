@@ -4,10 +4,14 @@ declare(strict_types=1);
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
@@ -89,6 +93,23 @@ final class OrderStatusMappingSmokeOrder {
 	public function save(): void {}
 }
 
+final class OrderStatusMappingFakeAdapter implements CarrierShipmentAdapterInterface {
+	public function carrier_key(): string { return RussianPostDomesticSettings::CARRIER_KEY; }
+	public function supports( ShipmentCreateRequest $request ): bool { return RussianPostDomesticSettings::CARRIER_KEY === $request->carrier_key; }
+	public function build_safe_payload_preview( ShipmentCreateRequest $request ): array { return array(); }
+	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult { return new ShipmentCreateResult( false ); }
+	public function presentation(): array { return array(); }
+	public function status_payload( object $order, array $shipment ): array { return $shipment; }
+	public function update_status( object $order, string $shipment_key = '' ): array { return array( 'success' => true ); }
+	public function attach_manual( object $order, array $payload ): array { return array( 'success' => true ); }
+	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array { return array( 'success' => true ); }
+	public function remove_from_order( object $order, string $shipment_key = '' ): array { return array( 'success' => true ); }
+	public function label_actions( object $order, array $shipment ): array { return array(); }
+	public function supports_status_auto_sync(): bool { return true; }
+	public function tracking_identifier( array $shipment ): string { return (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ); }
+	public function auto_sync_throttle_microseconds(): int { return 0; }
+}
+
 $GLOBALS['wdc_order_status_mapping_options'] = array();
 $settings = new SettingsRepository();
 $mapping = new ShipmentOrderStatusMappingService( $settings );
@@ -149,6 +170,7 @@ order_status_mapping_assert( 'error' === $error['status'] && str_contains( $erro
 
 $repository = new OrderShipmentRepository();
 $status_updates = ( new ReflectionClass( ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor();
+$registry = new CarrierShipmentAdapterRegistry( array( new OrderStatusMappingFakeAdapter() ) );
 
 $terminal_dispatches = 0;
 $terminal_order = new OrderStatusMappingSmokeOrder(
@@ -175,7 +197,10 @@ $terminal_autosync = new ShipmentStatusAutoSyncService(
 	function () use ( &$terminal_dispatches ): array {
 		++$terminal_dispatches;
 		return array( 'success' => true );
-	}
+	},
+	null,
+	null,
+	$registry
 );
 $terminal_stats = $terminal_autosync->run( 'manual' );
 order_status_mapping_assert( 0 === $terminal_dispatches, 'Terminal delivered shipment must not call dispatcher or Tracking API.' );
@@ -237,7 +262,10 @@ $autosync = new ShipmentStatusAutoSyncService(
 				'target_status' => 'wc-completed',
 			),
 		);
-	}
+	},
+	null,
+	null,
+	$registry
 );
 $GLOBALS['wdc_order_status_mapping_orders'] = array(
 	new OrderStatusMappingSmokeOrder(
@@ -271,7 +299,10 @@ $autosync_error = new ShipmentStatusAutoSyncService(
 				'message' => 'status rejected',
 			),
 		);
-	}
+	},
+	null,
+	null,
+	$registry
 );
 $stats = $autosync_error->run( 'manual' );
 order_status_mapping_assert( 1 === (int) $stats['order_status_change_errors'] && str_contains( (string) $stats['error_samples'][0]['message'], 'status rejected' ), 'Autosync diagnostics must collect order status mapping errors.' );

@@ -21,7 +21,8 @@ final class ShipmentCreationService {
 		private OrderShipmentRepository $repository,
 		private array $adapters,
 		private ?Logger $logger = null,
-		private ?RussianPostShipmentActualCostLookupService $actual_cost_lookup = null
+		private ?RussianPostShipmentActualCostLookupService $actual_cost_lookup = null,
+		private ?CarrierShipmentAdapterRegistry $registry = null
 	) {
 	}
 
@@ -139,6 +140,13 @@ final class ShipmentCreationService {
 	}
 
 	private function adapter_for( ShipmentCreateRequest $request ): ?ShipmentCarrierAdapterInterface {
+		if ( $this->registry instanceof CarrierShipmentAdapterRegistry ) {
+			$adapter = $this->registry->get( $request->carrier_key );
+			if ( $adapter instanceof ShipmentCarrierAdapterInterface && $adapter->supports( $request ) ) {
+				return $adapter;
+			}
+		}
+
 		foreach ( $this->adapters as $adapter ) {
 			if ( $adapter->supports( $request ) ) {
 				return $adapter;

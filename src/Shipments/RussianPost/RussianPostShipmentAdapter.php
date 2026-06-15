@@ -8,6 +8,8 @@ use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiClient;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
+use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
+use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\Contracts\ShipmentCarrierAdapterInterface;
 
 defined( 'ABSPATH' ) || exit;
@@ -16,7 +18,9 @@ final class RussianPostShipmentAdapter implements ShipmentCarrierAdapterInterfac
 	public function __construct(
 		private RussianPostOtpravkaApiClient $client,
 		private ?RussianPostCreateRequestBuilder $builder = null,
-		private ?Logger $logger = null
+		private ?Logger $logger = null,
+		private ?ShipmentStatusUpdateService $status_updates = null,
+		private ?ShipmentBacklogService $backlog = null
 	) {
 		$this->builder ??= new RussianPostCreateRequestBuilder();
 	}
@@ -27,6 +31,134 @@ final class RussianPostShipmentAdapter implements ShipmentCarrierAdapterInterfac
 
 	public function supports( ShipmentCreateRequest $request ): bool {
 		return RussianPostDomesticSettings::CARRIER_KEY === $request->carrier_key;
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	public function presentation(): array {
+		return array(
+			'carrier_label' => 'Почта России',
+			'status_title' => 'Статус Почты России',
+			'tracking_label' => 'Отслеживание',
+			'create_button_label' => 'Подготовить отправление',
+			'manual_attach_button_label' => 'Внести отслеживание вручную',
+			'cancel_button_label' => 'Отменить отправление',
+			'remove_button_label' => 'Удалить из заказа',
+			'update_status_button_label' => 'Обновить статус',
+			'manual_attach_placeholder' => 'Номер отслеживания',
+			'manual_attach_help' => 'Введите номер отслеживания для поиска и привязки отправления.',
+			'created_toast' => 'Отправление создано.',
+			'updated_toast' => 'Статус отправления обновлен.',
+			'cancel_success_toast' => 'Отправление отменено.',
+			'remove_success_toast' => 'Данные отправления удалены из заказа.',
+			'error_fallback_message' => 'Не удалось получить статус отправления.',
+			'polling_timeout_message' => 'Автоматическая проверка завершена. Если статус еще не обновился, воспользуйтесь кнопкой «Обновить статус».',
+			'registration_error_toast' => 'Регистрация завершилась ошибкой.',
+			'registration_success_toast' => 'Регистрация завершена успешно.',
+			'auto_poll_registration' => '0',
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 * @return array<string,mixed>
+	 */
+	public function status_payload( object $order, array $shipment ): array {
+		if ( $this->status_updates instanceof ShipmentStatusUpdateService ) {
+			$status = $this->status_updates->status_payload( $shipment, $order );
+			return array_merge(
+				$status,
+				array(
+					'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+					'has_shipment' => array() !== $shipment,
+					'can_update_status' => array() !== $shipment,
+					'can_remove_from_order' => array() !== $shipment && ! ( $this->backlog instanceof ShipmentBacklogService && $this->backlog->can_cancel( $shipment ) ),
+				)
+			);
+		}
+
+		return array(
+			'carrier_key' => RussianPostDomesticSettings::CARRIER_KEY,
+			'has_shipment' => array() !== $shipment,
+			'barcode' => $this->tracking_identifier( $shipment ),
+			'can_update_status' => array() !== $shipment,
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function update_status( object $order, string $shipment_key = '' ): array {
+		if ( ! $this->status_updates instanceof ShipmentStatusUpdateService ) {
+			return array( 'success' => false, 'message' => 'Russian Post status service is unavailable.' );
+		}
+
+		return $this->status_updates->update_russian_post( $order, $shipment_key ?: RussianPostDomesticSettings::CARRIER_KEY );
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function attach_manual( object $order, array $payload ): array {
+		if ( ! $this->backlog instanceof ShipmentBacklogService ) {
+			return array( 'success' => false, 'message' => 'Ручное внесение ШПИ недоступно.' );
+		}
+
+		return $this->backlog->attach_tracking_number( $order, (string) ( $payload['barcode'] ?? $payload['tracking_number'] ?? '' ), RussianPostDomesticSettings::CARRIER_KEY );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array {
+		if ( ! $this->backlog instanceof ShipmentBacklogService ) {
+			return array( 'success' => false, 'message' => 'Отмена отправлений недоступна.' );
+		}
+
+		return $this->backlog->cancel_russian_post( $order, $shipment_key ?: RussianPostDomesticSettings::CARRIER_KEY );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function remove_from_order( object $order, string $shipment_key = '' ): array {
+		if ( ! $this->backlog instanceof ShipmentBacklogService ) {
+			return array( 'success' => false, 'message' => 'Не удалось удалить данные отправления.' );
+		}
+
+		return $this->backlog->remove_from_order( $order, $shipment_key ?: RussianPostDomesticSettings::CARRIER_KEY );
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function label_actions( object $order, array $shipment ): array {
+		return array();
+	}
+
+	public function supports_status_auto_sync(): bool {
+		return true;
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 */
+	public function tracking_identifier( array $shipment ): string {
+		foreach ( array( 'tracking_number', 'barcode' ) as $key ) {
+			$value = trim( (string) ( $shipment[ $key ] ?? '' ) );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		return '';
+	}
+
+	public function auto_sync_throttle_microseconds(): int {
+		return 0;
 	}
 
 	/**

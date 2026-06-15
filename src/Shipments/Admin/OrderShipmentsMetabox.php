@@ -14,12 +14,14 @@ use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
+use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
 use WallsShop\WDC\Shipments\Cdek\CdekBarcodePrintService;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
 use WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -53,7 +55,8 @@ final class OrderShipmentsMetabox {
 		private ?CdekRecipientAddressPreparationService $cdek_address_preparation = null,
 		private string $plugin_url = '',
 		private string $version = '1',
-		private ?CdekBarcodePrintService $cdek_barcode_print = null
+		private ?CdekBarcodePrintService $cdek_barcode_print = null,
+		private ?CarrierShipmentAdapterRegistry $carrier_adapters = null
 	) {
 	}
 
@@ -293,7 +296,8 @@ final class OrderShipmentsMetabox {
 		$show_update = $has_created && $can_update;
 		$show_cancel = $has_created && $can_cancel;
 		$show_remove = $has_created && $can_remove;
-		$show_cdek_barcode = $this->show_cdek_barcode_buttons( $shipment, $status_payload, $is_cdek, $has_created );
+		$label_actions = $this->label_actions_for_carrier( $order, $carrier_key, $shipment );
+		$show_cdek_barcode = array() !== array_filter( $label_actions, static fn ( array $action ): bool => 'download_label' === (string) ( $action['key'] ?? '' ) && ! empty( $action['visible'] ) );
 		$has_cdek_barcode_service = $is_cdek && $this->cdek_barcode_print instanceof CdekBarcodePrintService;
 		$cdek_barcode_download_url = $has_cdek_barcode_service ? $this->cdek_barcode_url( $order_id, 'download' ) : '';
 		?>
@@ -544,9 +548,11 @@ final class OrderShipmentsMetabox {
 		}
 
 		$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
-		$result = CdekSettings::CARRIER_KEY === $shipment_key && $this->cdek_status_updates instanceof CdekOrderStatusService
-			? $this->cdek_status_updates->update( $order )
-			: $this->status_updates->update_russian_post( $order, $shipment_key );
+		$adapter = $this->carrier_adapter( $shipment_key );
+		if ( null === $adapter ) {
+			wp_send_json_error( array( 'message' => __( 'Для выбранной службы нет адаптера отправлений.', 'walls-delivery-calc' ) ), 400 );
+		}
+		$result = $adapter->update_status( $order, $shipment_key );
 		if ( ! (bool) ( $result['success'] ?? false ) ) {
 			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось получить статус отправления.', 'walls-delivery-calc' ) ) ), 400 );
 		}
@@ -569,14 +575,11 @@ final class OrderShipmentsMetabox {
 			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
 		}
 		$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
-		if ( CdekSettings::CARRIER_KEY === $shipment_key && $this->cdek_status_updates instanceof CdekOrderStatusService ) {
-			$result = $this->cdek_status_updates->cancel_created_order( $order );
-		} else {
-			if ( ! $this->backlog instanceof ShipmentBacklogService ) {
-				wp_send_json_error( array( 'message' => __( 'Отмена отправлений недоступна.', 'walls-delivery-calc' ) ), 500 );
-			}
-			$result = $this->backlog->cancel_russian_post( $order, $shipment_key );
+		$adapter = $this->carrier_adapter( $shipment_key );
+		if ( null === $adapter ) {
+			wp_send_json_error( array( 'message' => __( 'Для выбранной службы нет адаптера отправлений.', 'walls-delivery-calc' ) ), 400 );
 		}
+		$result = $adapter->cancel_in_carrier( $order, $shipment_key );
 		if ( ! (bool) ( $result['success'] ?? false ) ) {
 			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось отменить отправление.', 'walls-delivery-calc' ) ) ), 400 );
 		}
@@ -599,14 +602,11 @@ final class OrderShipmentsMetabox {
 			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
 		}
 		$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
-		if ( CdekSettings::CARRIER_KEY === $shipment_key && $this->cdek_status_updates instanceof CdekOrderStatusService ) {
-			$result = $this->cdek_status_updates->remove_local_if_allowed( $order );
-		} else {
-			if ( ! $this->backlog instanceof ShipmentBacklogService ) {
-				wp_send_json_error( array( 'message' => __( 'Не удалось удалить данные отправления.', 'walls-delivery-calc' ) ), 500 );
-			}
-			$result = $this->backlog->remove_from_order( $order, $shipment_key );
+		$adapter = $this->carrier_adapter( $shipment_key );
+		if ( null === $adapter ) {
+			wp_send_json_error( array( 'message' => __( 'Для выбранной службы нет адаптера отправлений.', 'walls-delivery-calc' ) ), 400 );
 		}
+		$result = $adapter->remove_from_order( $order, $shipment_key );
 		if ( ! (bool) ( $result['success'] ?? false ) ) {
 			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось удалить данные отправления.', 'walls-delivery-calc' ) ) ), 400 );
 		}
@@ -630,14 +630,11 @@ final class OrderShipmentsMetabox {
 		}
 		$shipment_key = sanitize_key( wp_unslash( $_POST['shipment_key'] ?? RussianPostDomesticSettings::CARRIER_KEY ) );
 		$barcode = sanitize_text_field( wp_unslash( $_POST['barcode'] ?? '' ) );
-		if ( CdekSettings::CARRIER_KEY === $shipment_key && $this->cdek_status_updates instanceof CdekOrderStatusService ) {
-			$result = $this->cdek_status_updates->attach_by_cdek_number( $order, $barcode );
-		} else {
-			if ( ! $this->backlog instanceof ShipmentBacklogService ) {
-				wp_send_json_error( array( 'message' => __( 'Ручное внесение ШПИ недоступно.', 'walls-delivery-calc' ) ), 500 );
-			}
-			$result = $this->backlog->attach_tracking_number( $order, $barcode, $shipment_key );
+		$adapter = $this->carrier_adapter( $shipment_key );
+		if ( null === $adapter ) {
+			wp_send_json_error( array( 'message' => __( 'Для выбранной службы нет адаптера отправлений.', 'walls-delivery-calc' ) ), 400 );
 		}
+		$result = $adapter->attach_manual( $order, array( 'barcode' => $barcode ) );
 		if ( ! (bool) ( $result['success'] ?? false ) ) {
 			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось сохранить номер отслеживания.', 'walls-delivery-calc' ) ) ), 400 );
 		}
@@ -1244,6 +1241,16 @@ final class OrderShipmentsMetabox {
 	 */
 	private function status_payload_for_carrier( object $order, string $carrier_key ): array {
 		$shipment = $this->repository->find_by_carrier( $order, $carrier_key );
+		$adapter = $this->carrier_adapter( $carrier_key );
+		if ( null !== $adapter ) {
+			return array_merge(
+				$adapter->status_payload( $order, $shipment ),
+				array(
+					'carrier_key' => $carrier_key,
+					'presentation' => $this->carrier_presentation( $carrier_key ),
+				)
+			);
+		}
 		if ( CdekSettings::CARRIER_KEY === $carrier_key && $this->cdek_status_updates instanceof CdekOrderStatusService ) {
 			return array_merge( $this->cdek_status_updates->status_payload( $shipment, $order ), array( 'presentation' => $this->carrier_presentation( $carrier_key ) ) );
 		}
@@ -1298,6 +1305,10 @@ final class OrderShipmentsMetabox {
 			'registration_success_toast' => __( 'Регистрация завершена успешно.', 'walls-delivery-calc' ),
 			'auto_poll_registration' => '0',
 		);
+		$adapter = $this->carrier_adapter( $carrier_key );
+		if ( null !== $adapter ) {
+			return array_merge( $common, $adapter->presentation() );
+		}
 
 		if ( CdekSettings::CARRIER_KEY === $carrier_key ) {
 			return array_merge(
@@ -1340,6 +1351,20 @@ final class OrderShipmentsMetabox {
 		}
 
 		return $common;
+	}
+
+	private function carrier_adapter( string $carrier_key ): ?CarrierShipmentAdapterInterface {
+		return $this->carrier_adapters instanceof CarrierShipmentAdapterRegistry ? $this->carrier_adapters->get( $carrier_key ) : null;
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function label_actions_for_carrier( object $order, string $carrier_key, array $shipment ): array {
+		$adapter = $this->carrier_adapter( $carrier_key );
+
+		return null !== $adapter ? $adapter->label_actions( $order, $shipment ) : array();
 	}
 
 	/**
@@ -1392,25 +1417,6 @@ final class OrderShipmentsMetabox {
 			'warning' => 'wdc-shipment-price-warning',
 			default => 'wdc-shipment-price-neutral',
 		};
-	}
-
-	/**
-	 * @param array<string,mixed> $shipment
-	 * @param array<string,mixed> $status_payload
-	 */
-	private function show_cdek_barcode_buttons( array $shipment, array $status_payload, bool $is_cdek, bool $has_created ): bool {
-		if ( ! $is_cdek || ! $has_created || ! $this->cdek_barcode_print instanceof CdekBarcodePrintService ) {
-			return false;
-		}
-		$order_status = strtoupper( (string) ( $shipment['cdek_order_status_code'] ?? $status_payload['order_status_code'] ?? '' ) );
-		$status = (string) ( $shipment['status'] ?? '' );
-		if ( in_array( $status, array( 'registration_pending', 'failed', 'removed' ), true ) || in_array( $order_status, array( 'ACCEPTED', 'INVALID', 'REMOVED' ), true ) ) {
-			return false;
-		}
-		$number = trim( (string) ( $shipment['cdek_number'] ?? $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
-		$uuid = trim( (string) ( $shipment['external_id'] ?? $shipment['entity_uuid'] ?? '' ) );
-
-		return '' !== $number || '' !== $uuid;
 	}
 
 	private function cdek_barcode_url( int $order_id, string $mode ): string {
