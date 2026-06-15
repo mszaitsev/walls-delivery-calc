@@ -11,8 +11,7 @@ use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 defined( 'ABSPATH' ) || exit;
 
 final class CdekBarcodePrintService {
-	private const MAX_ATTEMPTS = 30;
-	private const INTERVAL_SECONDS = 2;
+	private const CACHE_TTL_SECONDS = 50 * 60;
 
 	/**
 	 * @param callable|null $sleeper
@@ -21,51 +20,155 @@ final class CdekBarcodePrintService {
 		private OrderShipmentRepository $repository,
 		private CdekApiClient $client,
 		private $sleeper = null,
-		private int $max_attempts = self::MAX_ATTEMPTS,
-		private int $interval_seconds = self::INTERVAL_SECONDS
+		private int $max_attempts = 1,
+		private int $interval_seconds = 0
 	) {
+	}
+
+	/**
+	 * @return array{success:bool,message:string,status?:string,print_uuid?:string,cdek_number?:string}
+	 */
+	public function prepare_for_order( object $order ): array {
+		$context = $this->print_context( $order );
+		if ( empty( $context['success'] ) ) {
+			return $context;
+		}
+
+		$cache_key = (string) $context['cache_key'];
+		$cache = $this->cache_get( $cache_key );
+		if ( 'READY' === (string) ( $cache['status'] ?? '' ) && '' !== trim( (string) ( $cache['print_uuid'] ?? '' ) ) ) {
+			return $this->prepared_status( 'READY', (string) $cache['print_uuid'], (string) $context['cdek_number'] );
+		}
+
+		try {
+			$print_uuid = trim( (string) ( $cache['print_uuid'] ?? '' ) );
+			if ( '' === $print_uuid ) {
+				$print_uuid = $this->create_print_uuid( (string) $context['cdek_number'], (string) $context['order_uuid'] );
+				$this->cache_set(
+					$cache_key,
+					array(
+						'print_uuid' => $print_uuid,
+						'status' => 'ACCEPTED',
+						'cdek_number' => (string) $context['cdek_number'],
+						'created_at' => time(),
+						'ready_at' => null,
+					)
+				);
+			}
+
+			$status = $this->print_status( $print_uuid );
+			if ( 'READY' === $status ) {
+				$this->cache_set(
+					$cache_key,
+					array(
+						'print_uuid' => $print_uuid,
+						'status' => 'READY',
+						'cdek_number' => (string) $context['cdek_number'],
+						'created_at' => (int) ( $cache['created_at'] ?? time() ),
+						'ready_at' => time(),
+					)
+				);
+
+				return $this->prepared_status( 'READY', $print_uuid, (string) $context['cdek_number'] );
+			}
+			if ( 'INVALID' === $status ) {
+				$this->cache_delete( $cache_key );
+				return $this->failure( 'СДЭК не смог сформировать этикетку.' );
+			}
+			if ( 'REMOVED' === $status ) {
+				$this->cache_delete( $cache_key );
+				$new_uuid = $this->create_print_uuid( (string) $context['cdek_number'], (string) $context['order_uuid'] );
+				$this->cache_set(
+					$cache_key,
+					array(
+						'print_uuid' => $new_uuid,
+						'status' => 'ACCEPTED',
+						'cdek_number' => (string) $context['cdek_number'],
+						'created_at' => time(),
+						'ready_at' => null,
+					)
+				);
+
+				return $this->prepared_status( 'ACCEPTED', $new_uuid, (string) $context['cdek_number'] );
+			}
+
+			$status = in_array( $status, array( 'ACCEPTED', 'PROCESSING' ), true ) ? $status : 'PROCESSING';
+			$this->cache_set(
+				$cache_key,
+				array(
+					'print_uuid' => $print_uuid,
+					'status' => $status,
+					'cdek_number' => (string) $context['cdek_number'],
+					'created_at' => (int) ( $cache['created_at'] ?? time() ),
+					'ready_at' => null,
+				)
+			);
+
+			return $this->prepared_status( $status, $print_uuid, (string) $context['cdek_number'] );
+		} catch ( CdekApiException $exception ) {
+			return $this->failure( $exception->getMessage() );
+		}
 	}
 
 	/**
 	 * @return array{success:bool,message:string,body?:string,content_type?:string,filename?:string,http_code?:int}
 	 */
-	public function pdf_for_order( object $order ): array {
-		$shipment = $this->repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY );
-		if ( ! $this->shipment_can_print( $shipment ) ) {
-			return $this->failure( 'ШК СДЭК доступен только для зарегистрированного отправления.' );
+	public function download_ready_pdf_for_order( object $order ): array {
+		$context = $this->print_context( $order );
+		if ( empty( $context['success'] ) ) {
+			return $context;
 		}
 
-		$cdek_number = $this->cdek_number( $shipment );
-		$order_uuid = $this->order_uuid( $shipment );
-		if ( '' === $cdek_number && '' === $order_uuid ) {
-			return $this->failure( 'Не найден номер или UUID заказа СДЭК.' );
+		$cache = $this->cache_get( (string) $context['cache_key'] );
+		$ready_uuid = trim( (string) ( $cache['print_uuid'] ?? '' ) );
+		if ( 'READY' !== (string) ( $cache['status'] ?? '' ) || '' === $ready_uuid ) {
+			return $this->failure( 'Этикетка СДЭК еще не готова. Нажмите "Скачать этикетку" еще раз.' );
 		}
 
 		try {
-			$print_uuid = $this->create_print_uuid( $cdek_number, $order_uuid );
-			$ready_uuid = $this->wait_ready_uuid( $print_uuid, $cdek_number, $order_uuid, true );
-			if ( '' === $ready_uuid ) {
-				return $this->failure( 'ШК СДЭК еще формируется. Повторите попытку позже.' );
-			}
-
 			$pdf = $this->client->downloadBarcodePrintPdf( $ready_uuid );
 		} catch ( CdekApiException $exception ) {
 			return $this->failure( $exception->getMessage() );
 		}
 
+		$http_code = (int) ( $pdf['http_code'] ?? 200 );
+		if ( $http_code < 200 || $http_code >= 300 ) {
+			return $this->failure( 'Не удалось скачать этикетку СДЭК.' );
+		}
 		$body = (string) ( $pdf['body'] ?? '' );
 		if ( '' === $body ) {
-			return $this->failure( 'СДЭК вернул пустой PDF ШК.' );
+			return $this->failure( 'СДЭК вернул пустой PDF этикетки.' );
+		}
+		$content_type = strtolower( trim( (string) ( $pdf['content_type'] ?? '' ) ) );
+		if ( '' !== $content_type && ! str_contains( $content_type, 'application/pdf' ) ) {
+			return $this->failure( 'Сервер вернул не PDF-файл этикетки СДЭК.' );
 		}
 
 		return array(
 			'success' => true,
 			'message' => '',
 			'body' => $body,
-			'content_type' => (string) ( $pdf['content_type'] ?? 'application/pdf' ),
-			'filename' => 'cdek-barcode-' . ( '' !== $cdek_number ? $cdek_number : $order_uuid ) . '.pdf',
-			'http_code' => (int) ( $pdf['http_code'] ?? 200 ),
+			'content_type' => '' !== $content_type ? (string) ( $pdf['content_type'] ?? 'application/pdf' ) : 'application/pdf',
+			'filename' => 'cdek-barcode-' . ( '' !== (string) $context['cdek_number'] ? (string) $context['cdek_number'] : (string) $context['order_uuid'] ) . '.pdf',
+			'http_code' => $http_code,
 		);
+	}
+
+	/**
+	 * Backward-compatible wrapper for older callers. It performs at most one status check.
+	 *
+	 * @return array{success:bool,message:string,body?:string,content_type?:string,filename?:string,http_code?:int}
+	 */
+	public function pdf_for_order( object $order ): array {
+		$prepared = $this->prepare_for_order( $order );
+		if ( empty( $prepared['success'] ) ) {
+			return $prepared;
+		}
+		if ( 'READY' !== (string) ( $prepared['status'] ?? '' ) ) {
+			return $this->failure( 'Этикетка СДЭК еще формируется. Повторите попытку позже.' );
+		}
+
+		return $this->download_ready_pdf_for_order( $order );
 	}
 
 	/**
@@ -110,30 +213,12 @@ final class CdekBarcodePrintService {
 		return $uuid;
 	}
 
-	private function wait_ready_uuid( string $uuid, string $cdek_number, string $order_uuid, bool $allow_recreate ): string {
-		for ( $attempt = 0; $attempt < max( 1, $this->max_attempts ); $attempt++ ) {
-			$this->sleep_before_poll();
-			$response = $this->client->getBarcodePrint( $uuid );
-			$body = is_array( $response['body'] ?? null ) ? $response['body'] : array();
-			$entity = is_array( $body['entity'] ?? null ) ? $body['entity'] : array();
-			$status = $this->latest_print_status( $entity );
+	private function print_status( string $uuid ): string {
+		$response = $this->client->getBarcodePrint( $uuid );
+		$body = is_array( $response['body'] ?? null ) ? $response['body'] : array();
+		$entity = is_array( $body['entity'] ?? null ) ? $body['entity'] : array();
 
-			if ( 'READY' === $status ) {
-				return $uuid;
-			}
-			if ( 'INVALID' === $status ) {
-				throw new CdekApiException( 'СДЭК не смог сформировать ШК.' );
-			}
-			if ( 'REMOVED' === $status ) {
-				if ( ! $allow_recreate ) {
-					throw new CdekApiException( 'Ссылка на ШК СДЭК устарела.' );
-				}
-
-				return $this->wait_ready_uuid( $this->create_print_uuid( $cdek_number, $order_uuid ), $cdek_number, $order_uuid, false );
-			}
-		}
-
-		return '';
+		return $this->latest_print_status( $entity );
 	}
 
 	/**
@@ -162,17 +247,6 @@ final class CdekBarcodePrintService {
 		return strtoupper( (string) ( $latest['code'] ?? '' ) );
 	}
 
-	private function sleep_before_poll(): void {
-		if ( $this->interval_seconds <= 0 ) {
-			return;
-		}
-		if ( is_callable( $this->sleeper ) ) {
-			call_user_func( $this->sleeper, $this->interval_seconds );
-			return;
-		}
-		sleep( $this->interval_seconds );
-	}
-
 	/**
 	 * @param array<string,mixed> $shipment
 	 */
@@ -185,6 +259,77 @@ final class CdekBarcodePrintService {
 	 */
 	private function order_uuid( array $shipment ): string {
 		return trim( (string) ( $shipment['external_id'] ?? $shipment['entity_uuid'] ?? '' ) );
+	}
+
+	/**
+	 * @return array{success:bool,message:string,shipment?:array<string,mixed>,cdek_number?:string,order_uuid?:string,cache_key?:string}
+	 */
+	private function print_context( object $order ): array {
+		$shipment = $this->repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY );
+		if ( ! $this->shipment_can_print( $shipment ) ) {
+			return $this->failure( 'Этикетка СДЭК доступна только для зарегистрированного отправления.' );
+		}
+
+		$cdek_number = $this->cdek_number( $shipment );
+		$order_uuid = $this->order_uuid( $shipment );
+		if ( '' === $cdek_number && '' === $order_uuid ) {
+			return $this->failure( 'Не найден номер или UUID заказа СДЭК.' );
+		}
+
+		return array(
+			'success' => true,
+			'message' => '',
+			'shipment' => $shipment,
+			'cdek_number' => $cdek_number,
+			'order_uuid' => $order_uuid,
+			'cache_key' => $this->cache_key( $order, $cdek_number, $order_uuid ),
+		);
+	}
+
+	private function cache_key( object $order, string $cdek_number, string $order_uuid ): string {
+		$order_id = method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0;
+		$identity = '' !== $cdek_number ? $cdek_number : $order_uuid;
+		$identity = preg_replace( '/[^A-Za-z0-9_-]+/', '_', $identity ) ?? '';
+		$identity = '' !== $identity ? $identity : 'unknown';
+
+		return 'wdc_cdek_barcode_' . $order_id . '_' . $identity;
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function cache_get( string $key ): array {
+		$value = function_exists( 'get_transient' ) ? get_transient( $key ) : false;
+
+		return is_array( $value ) ? $value : array();
+	}
+
+	/**
+	 * @param array<string,mixed> $value
+	 */
+	private function cache_set( string $key, array $value ): void {
+		if ( function_exists( 'set_transient' ) ) {
+			set_transient( $key, $value, self::CACHE_TTL_SECONDS );
+		}
+	}
+
+	private function cache_delete( string $key ): void {
+		if ( function_exists( 'delete_transient' ) ) {
+			delete_transient( $key );
+		}
+	}
+
+	/**
+	 * @return array{success:true,message:string,status:string,print_uuid:string,cdek_number:string}
+	 */
+	private function prepared_status( string $status, string $print_uuid, string $cdek_number ): array {
+		return array(
+			'success' => true,
+			'message' => '',
+			'status' => $status,
+			'print_uuid' => $print_uuid,
+			'cdek_number' => $cdek_number,
+		);
 	}
 
 	/**

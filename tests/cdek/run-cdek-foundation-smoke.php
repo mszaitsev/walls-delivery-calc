@@ -343,6 +343,8 @@ cdek_smoke_assert( str_contains( $admin_source, 'Данные для входа'
 cdek_smoke_assert( str_contains( $admin_source, "\$tabs['api_credentials'] = 'Данные для входа';" ), 'Russian Post credentials tab label must be changed.' );
 cdek_smoke_assert( str_contains( $admin_source, "\$tabs['cdek_settings'] = 'Данные для входа';" ), 'CDEK credentials tab label must be changed.' );
 cdek_smoke_assert( ! str_contains( $admin_source, 'prod-secret' ) && ! str_contains( $admin_source, 'fake-token' ), 'Admin source must not contain test CDEK secrets or tokens.' );
-cdek_smoke_assert( str_contains( $statuses_admin_source, 'Статусы СДЭК' ) && str_contains( $statuses_admin_source, 'save_cdek_mapping' ) && str_contains( $statuses_admin_source, 'CdekStatusMappingService::status_labels()' ), 'Shipment statuses admin page must render and save CDEK status mapping tab.' );
+cdek_smoke_assert( str_contains( $admin_source, "\$tabs['cdek_statuses'] = 'Статусы СДЭК';" ) && str_contains( $admin_source, 'save_cdek_statuses' ) && str_contains( $admin_source, 'CdekStatusMappingService::status_labels()' ), 'Delivery services admin CDEK service page must render and save the CDEK status mapping tab.' );
+cdek_smoke_assert( str_contains( $admin_source, "'save_cdek_statuses' => 'cdek_statuses'" ), 'Saving CDEK status mapping must redirect back to the CDEK statuses service tab.' );
+cdek_smoke_assert( ! str_contains( $statuses_admin_source, 'save_cdek_mapping' ) && ! str_contains( $statuses_admin_source, 'CdekStatusMappingService::status_labels()' ), 'General shipment statuses admin page must not render the CDEK status mapping tab.' );
 
 echo "CDEK foundation smoke test passed.\n";

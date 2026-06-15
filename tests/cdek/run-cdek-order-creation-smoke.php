@@ -128,7 +128,7 @@ final class CdekOrderFakeHttp implements CdekHttpClientInterface {
 	public array $barcode_create_responses = array();
 	/** @var array<int,array<string,mixed>> */
 	public array $barcode_status_responses = array();
-	/** @var array<int,string> */
+	/** @var array<int,string|array<string,mixed>> */
 	public array $barcode_pdf_responses = array();
 
 	public function request( string $method, string $url, array $args = array() ): CdekApiResponse {
@@ -160,6 +160,13 @@ final class CdekOrderFakeHttp implements CdekHttpClientInterface {
 		}
 		if ( 'GET' === $method && str_contains( $url, '/v2/print/barcodes/' ) && str_ends_with( $url, '.pdf' ) ) {
 			$response = array_shift( $this->barcode_pdf_responses ) ?: '%PDF-1.4 fake';
+			if ( is_array( $response ) ) {
+				return new CdekApiResponse(
+					(int) ( $response['status'] ?? 200 ),
+					(string) ( $response['body'] ?? '' ),
+					is_array( $response['headers'] ?? null ) ? $response['headers'] : array( 'content-type' => (string) ( $response['content_type'] ?? 'application/pdf' ) )
+				);
+			}
 			return new CdekApiResponse( 200, $response, array( 'content-type' => 'application/pdf' ) );
 		}
 		if ( 'GET' === $method && str_contains( $url, '/v2/print/barcodes/' ) ) {
@@ -1013,7 +1020,7 @@ cdek_order_assert( is_string( $shipments_js ) && ! str_contains( $shipments_js, 
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'data-wdc-pickup-picker-confirm' ) && ! str_contains( $shipments_js, 'data-wdc-pickup-picker-choose' ) && ! str_contains( $shipments_js, 'data-wdc-pickup-popup-select' ) && ! str_contains( $shipments_js, 'wdc-admin-pickup-picker__selected-grid' ), 'CDEK shipment modal pickup map must use one bottom select button and no duplicate per-card controls.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "'ПВЗ СДЭК'" ) && str_contains( $shipments_js, "'Постамат СДЭК'" ), 'CDEK shipment modal pickup map must render CDEK pickup/postamat titles.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'function senderPickupContext' ) && str_contains( $shipments_js, 'Выбор ПВЗ отправителя СДЭК' ) && str_contains( $shipments_js, 'updateSenderPickupDraft' ), 'CDEK shipment modal must support temporary sender pickup point selection.' );
-cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'const maxAttempts = 14' ) && str_contains( $shipments_js, 'const interval = 5000' ) && ! str_contains( $shipments_js, '15000' ) && ! str_contains( $shipments_js, '10 минут' ), 'CDEK auto polling must run every 5 seconds up to 14 attempts and avoid old 10-minute text.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'const maxAttempts = 14' ) && str_contains( $shipments_js, 'const interval = 5000' ) && ! str_contains( $shipments_js, '10 минут' ), 'CDEK auto polling must run every 5 seconds up to 14 attempts and avoid old 10-minute text.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'setCdekPollingIndicator' ) && str_contains( $modal_html, 'data-wdc-cdek-polling-indicator' ), 'CDEK auto polling must expose and toggle a visible registration-check indicator.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "box.querySelector('[data-wdc-shipment-status-message]')" ) && str_contains( $shipments_js, "message.textContent = ''" ) && str_contains( $shipments_js, "message.dataset.status = ''" ) && str_contains( $shipments_js, 'setCdekPollingIndicator(box, false)' ), 'Shipment UI reset after CDEK cancel must clear persistent status message and hide polling indicator.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'hint.hidden = places.length !== 1' ), 'Shipment modal weight hint must be hidden when there is more than one place.' );
@@ -1023,7 +1030,9 @@ cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'w
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'normalizeQtyRows' ) && str_contains( $shipments_js, 'targetTotal - 1' ) && str_contains( $shipments_js, 'rebalanceCdekGroup(integerForm, row.getAttribute' ), 'Shipment split quantities must clamp row max to N-1 and rebalance when base or split quantity changes.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'function parseDecimalValue' ) && str_contains( $shipments_js, 'parseDecimalValue(cost' ) && str_contains( $shipments_js, 'cleanDecimalInput' ) && str_contains( $shipments_js, 'separatorMatch' ), 'Shipment package summary and decimal inputs must accept comma and dot decimal separators.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'focusout' ) && str_contains( $shipments_js, '_wdcProductSearchBlurTimer' ) && str_contains( $shipments_js, 'renderProductSearchResults(event.target, [])' ), 'Shipment product search dropdown must close on focus out without auto-filling a product.' );
-cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'canPrintBarcode' ) && str_contains( $shipments_js, 'data-wdc-cdek-barcode-download' ) && str_contains( $shipments_js, 'data-wdc-cdek-barcode-inline' ), 'Shipment JS must toggle CDEK BARCODE buttons from status payload.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'canPrintBarcode' ) && str_contains( $shipments_js, 'data-wdc-cdek-barcode-download' ) && ! str_contains( $shipments_js, 'data-wdc-cdek-barcode-inline' ), 'Shipment JS must toggle only the CDEK label download button from status payload.' );
+cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'requestCdekBarcodeDownload' ) && str_contains( $shipments_js, 'wdc_cdek_barcode_prepare' ) && str_contains( $shipments_js, 'CDEK_BARCODE_POLL_INTERVAL_MS = 2000' ) && str_contains( $shipments_js, 'CDEK_BARCODE_TIMEOUT_MS = 300000' ) && str_contains( $shipments_js, 'CDEK_BARCODE_RESET_MS = 1500' ), 'CDEK label download click must poll prepare AJAX and reset shortly after download starts.' );
+cdek_order_assert( is_string( $shipments_js ) && ! str_contains( $shipments_js, 'iframe.src' ) && ! str_contains( $shipments_js, 'data-wdc-cdek-barcode-download-frame' ) && str_contains( $shipments_js, "replace(/&amp;/g, '&')" ) && str_contains( $shipments_js, 'fetch(downloadUrl' ) && str_contains( $shipments_js, 'response.ok' ) && str_contains( $shipments_js, 'application/pdf' ) && str_contains( $shipments_js, 'response.blob()' ) && str_contains( $shipments_js, 'blob.size <= 0' ) && str_contains( $shipments_js, 'URL.createObjectURL' ) && str_contains( $shipments_js, "document.createElement('a')" ) && str_contains( $shipments_js, 'anchor.download' ) && str_contains( $shipments_js, 'Сервер вернул не PDF-файл этикетки СДЭК.' ) && str_contains( $shipments_js, 'Не удалось скачать этикетку СДЭК.' ), 'CDEK label download must normalize escaped URLs, fetch a PDF blob, validate it, and start download through an object URL anchor.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'вес места ' ) && str_contains( $shipments_js, 'заполнено: товары ' ) && str_contains( $shipments_js, ' руб.' ), 'Shipment package summary must show place weight, item count, item weight and cost.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, 'data-wdc-shipment-items-table' ) && str_contains( $shipments_js, 'data-wdc-shipment-item-row' ) && str_contains( $shipments_js, 'data-wdc-shipment-place-select' ) && str_contains( $shipments_js, 'data-wdc-add-manual-shipment-item' ), 'Shipment packages JS must use carrier-neutral data attributes while keeping compatibility hooks.' );
 cdek_order_assert( is_string( $shipments_js ) && str_contains( $shipments_js, "mode !== 'location' && !value" ) && str_contains( $shipments_js, "mode === 'location' ? 2000 : 100" ) && str_contains( $shipments_js, "context.city || context.postcode || context.address || context.locationId || context.fiasId || context.garId" ), 'Shipment pickup modal must load location points for Russian Post without requiring a typed query and without a 300-row cap.' );
@@ -1035,14 +1044,18 @@ cdek_order_assert( str_contains( $metabox_source, 'render_shipment_item_rows' ) 
 cdek_order_assert( str_contains( $metabox_source, 'RussianPostDomesticSettings::CARRIER_KEY . \':pickup\'' ) && str_contains( $metabox_source, 'pickupPointTypes' ) && str_contains( $metabox_source, "'location' === \$mode ? 2000 : 100" ), 'Shipment modal backend must keep Russian Post pickup family/type config and location search limit for admin maps.' );
 cdek_order_assert( str_contains( $metabox_source, '$order_shipping_city' ) && str_contains( $metabox_source, '$order_shipping_postcode' ) && str_contains( $metabox_source, '$recipient_address_context' ) && str_contains( $metabox_source, '$pickup_context[\'postal_code\'] ?? $pickup_context[\'postcode\'] ?? $recipient_postcode' ), 'Shipment modal backend must fall back to WooCommerce shipping recipient context for Russian Post map loading.' );
 cdek_order_assert( str_contains( $metabox_source, '$order_id = (int) ( $_POST[\'order_id\'] ?? 0 )' ) && str_contains( $metabox_source, '$location_context[\'city_name\']' ) && str_contains( $metabox_source, 'get_shipping_city' ) && str_contains( $metabox_source, 'get_shipping_postcode' ), 'Shipment modal pickup search backend must use order_id to restore missing Russian Post location context.' );
-cdek_order_assert( str_contains( $metabox_source, 'ACTION_CDEK_BARCODE_PDF' ) && str_contains( $metabox_source, 'admin_post_cdek_barcode_pdf' ) && str_contains( $metabox_source, 'data-wdc-cdek-barcode-download' ) && str_contains( $metabox_source, 'Скачать ШК' ) && str_contains( $metabox_source, 'Открыть ШК' ), 'CDEK shipment metabox must expose BARCODE download/open admin-post actions.' );
-cdek_order_assert( str_contains( $metabox_source, 'Content-Disposition: \' . $disposition' ) && str_contains( $metabox_source, "'inline' === \$mode ? 'inline' : 'attachment'" ), 'CDEK BARCODE endpoint must support inline and attachment PDF responses.' );
+cdek_order_assert( str_contains( $metabox_source, 'AJAX_CDEK_BARCODE_PREPARE' ) && str_contains( $metabox_source, 'ajax_cdek_barcode_prepare' ) && str_contains( $metabox_source, 'download_ready_pdf_for_order' ), 'CDEK shipment metabox must expose prepare AJAX and final-only PDF download endpoint.' );
+cdek_order_assert( str_contains( $metabox_source, 'data-wdc-cdek-barcode-download' ) && str_contains( $metabox_source, 'data-prepare-action' ) && str_contains( $metabox_source, 'data-download-url' ) && str_contains( $metabox_source, 'Скачать этикетку' ) && ! str_contains( $metabox_source, 'Открыть этикетку' ) && ! str_contains( $metabox_source, 'data-wdc-cdek-barcode-inline' ), 'CDEK shipment metabox must keep only the managed label download button.' );
+cdek_order_assert( str_contains( $metabox_source, "'_wpnonce' => wp_create_nonce( self::ACTION_CDEK_BARCODE_PDF . '_' . \$order_id )" ) && ! str_contains( $metabox_source, 'wp_nonce_url( $url' ) && str_contains( $metabox_source, "\$result['download_url'] = \$this->cdek_barcode_url( \$order_id, 'download' );" ), 'CDEK barcode AJAX download_url must be a raw URL with ordinary ampersands and nonce query arg.' );
+cdek_order_assert( str_contains( $metabox_source, 'data-download-url="<?php echo esc_url( $cdek_barcode_download_url ); ?>"' ) && str_contains( $metabox_source, 'href="<?php echo esc_url( $cdek_barcode_download_url ); ?>"' ), 'CDEK barcode HTML output must still escape the raw download URL.' );
+cdek_order_assert( str_contains( $metabox_source, 'Content-Disposition: attachment' ) && ! str_contains( $metabox_source, "'inline' === \$mode ? 'inline' : 'attachment'" ), 'CDEK BARCODE PDF endpoint must return attachment only and must not create print forms.' );
 $draft_factory_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/OrderShipmentDraftFactory.php' );
 cdek_order_assert( str_contains( $draft_factory_source, 'product_dimension_cm' ) && str_contains( $draft_factory_source, "\$length_cm" ) && str_contains( $draft_factory_source, "\$height_cm" ), 'Shipment draft factory must load item dimensions from WooCommerce product/variation data.' );
 cdek_order_assert( str_contains( $draft_factory_source, 'decimal_from_admin_row' ) && str_contains( $draft_factory_source, "str_replace( ',', '.'" ) && str_contains( $draft_factory_source, "'length_cm' => \$this->decimal_from_admin_row" ), 'Shipment draft factory must parse item cost/dimensions as decimals with comma and dot support.' );
 $shipments_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.css' );
 cdek_order_assert( str_contains( $shipments_css, '.wdc-icon-action' ) && str_contains( $shipments_css, 'border: 0' ) && str_contains( $shipments_css, 'background: transparent' ) && str_contains( $shipments_css, 'min-width: min(520px, 70vw)' ) && str_contains( $shipments_css, 'overflow-x: hidden' ), 'Shipment package table CSS must use borderless icons and a wider product search dropdown without horizontal scrolling.' );
 cdek_order_assert( str_contains( $shipments_css, 'th:nth-child(2)' ) && str_contains( $shipments_css, 'width: 92px' ) && str_contains( $shipments_css, '.wdc-cdek-input-weight' ) && str_contains( $shipments_css, 'width: 76px' ) && str_contains( $shipments_css, 'width: 54px' ), 'Shipment package table CSS must keep SKU compact, weight wider, and dimensions/place compact.' );
+cdek_order_assert( str_contains( $shipments_css, '.wdc-cdek-barcode-download--busy' ) && str_contains( $shipments_css, 'animation: wdc-spin 0.8s linear infinite' ), 'CDEK label download busy state must render a spinner.' );
 
 $render = new ReflectionMethod( OrderShipmentsMetabox::class, 'render_status_block' );
 $render->setAccessible( true );
@@ -1055,6 +1068,13 @@ cdek_order_assert( str_contains( $status_html, 'Плановая дата дос
 $mapping_service = new CdekStatusMappingService( new SettingsRepository() );
 $default_mapping = $mapping_service->mapping();
 cdek_order_assert( DeliveryStatus::DELIVERED === $default_mapping['DELIVERED'] && DeliveryStatus::REJECTED === $default_mapping['INVALID'] && DeliveryStatus::CANCELLED === $default_mapping['REMOVED'], 'CDEK status mapping defaults must map delivered/invalid/removed to universal statuses.' );
+$appendix_statuses = array( 'ACCEPTED', 'CREATED', 'REMOVED', 'RECEIVED_AT_SHIPMENT_WAREHOUSE', 'DELIVERED', 'NOT_DELIVERED', 'READY_FOR_SHIPMENT_IN_SENDER_CITY', 'TAKEN_BY_TRANSPORTER_FROM_SENDER_CITY', 'SENT_TO_RECIPIENT_CITY', 'ACCEPTED_IN_RECIPIENT_CITY', 'ACCEPTED_AT_RECIPIENT_CITY_WAREHOUSE', 'TAKEN_BY_COURIER', 'ACCEPTED_AT_PICK_UP_POINT', 'ACCEPTED_AT_TRANSIT_WAREHOUSE', 'RETURNED_TO_SENDER_CITY_WAREHOUSE', 'RETURNED_TO_TRANSIT_WAREHOUSE', 'RETURNED_TO_RECIPIENT_CITY_WAREHOUSE', 'READY_FOR_SHIPMENT_IN_TRANSIT_CITY', 'TAKEN_BY_TRANSPORTER_FROM_TRANSIT_CITY', 'SENT_TO_TRANSIT_CITY', 'ACCEPTED_IN_TRANSIT_CITY', 'SENT_TO_SENDER_CITY', 'ACCEPTED_IN_SENDER_CITY', 'ENTERED_TO_TRANSIT_WAREHOUSE', 'ENTERED_TO_RECIPIENT_CITY_WAREHOUSE', 'ENTERED_TO_PICK_UP_POINT', 'IN_CUSTOMS_INTERNATIONAL', 'SHIPPED_TO_DESTINATION', 'PASSED_TO_TRANSIT_CARRIER', 'IN_CUSTOMS_LOCAL', 'CUSTOMS_COMPLETE', 'POSTOMAT_POSTED', 'POSTOMAT_SEIZED', 'POSTOMAT_RECEIVED', 'INVALID' );
+$status_labels = CdekStatusMappingService::status_labels();
+foreach ( $appendix_statuses as $status_code ) {
+	cdek_order_assert( isset( $status_labels[ $status_code ], $default_mapping[ $status_code ] ), 'Every CDEK Appendix 1 status must have label and default mapping: ' . $status_code );
+	cdek_order_assert( DeliveryStatus::is_valid( (string) $default_mapping[ $status_code ] ), 'CDEK default mapping must use valid DeliveryStatus for ' . $status_code );
+}
+cdek_order_assert( DeliveryStatus::READY_FOR_PICKUP === $default_mapping['ACCEPTED_AT_PICK_UP_POINT'] && DeliveryStatus::HANDED_TO_COURIER === $default_mapping['TAKEN_BY_COURIER'] && DeliveryStatus::DELIVERED === $default_mapping['POSTOMAT_RECEIVED'], 'CDEK pickup/courier/postamat defaults must map to specific universal statuses.' );
 $GLOBALS['wdc_cdek_order_options']['wdc_core_settings'][ CdekStatusMappingService::MAPPING_KEY ] = array( 'DELIVERED' => DeliveryStatus::READY_FOR_PICKUP );
 cdek_order_assert( DeliveryStatus::READY_FOR_PICKUP === $mapping_service->universal_status_for( 'DELIVERED' ), 'CDEK status mapping must read saved admin overrides.' );
 
@@ -1095,31 +1115,66 @@ $barcode_repository->save_for_carrier(
 	array( 'carrier_key' => CdekSettings::CARRIER_KEY, 'status' => 'registered', 'external_id' => 'order-uuid-barcode', 'cdek_number' => '10280157676', 'cdek_order_status_code' => 'CREATED' )
 );
 $barcode_service = new CdekBarcodePrintService( $barcode_repository, $barcode_client, static function (): void {}, 1, 0 );
-$barcode_pdf = $barcode_service->pdf_for_order( $barcode_order );
-cdek_order_assert( ! empty( $barcode_pdf['success'] ) && '%PDF-1.4 barcode' === (string) ( $barcode_pdf['body'] ?? '' ), 'CDEK BARCODE READY status must return PDF body.' );
+$barcode_prepared = $barcode_service->prepare_for_order( $barcode_order );
+cdek_order_assert( ! empty( $barcode_prepared['success'] ) && 'READY' === (string) ( $barcode_prepared['status'] ?? '' ), 'CDEK BARCODE prepare must return READY when CDEK print form is ready.' );
+$barcode_pdf = $barcode_service->download_ready_pdf_for_order( $barcode_order );
+cdek_order_assert( ! empty( $barcode_pdf['success'] ) && '%PDF-1.4 barcode' === (string) ( $barcode_pdf['body'] ?? '' ), 'CDEK BARCODE ready cache must allow final PDF download.' );
 $barcode_post_request = array_values( array_filter( $barcode_http->requests, static fn ( array $request ): bool => 'POST' === $request['method'] && str_contains( $request['url'], '/v2/print/barcodes' ) ) )[0] ?? array();
 $barcode_payload = json_decode( (string) ( $barcode_post_request['args']['body'] ?? '{}' ), true );
 cdek_order_assert( 'A6' === (string) ( $barcode_payload['format'] ?? '' ) && 'RUS' === (string) ( $barcode_payload['lang'] ?? '' ) && 1 === (int) ( $barcode_payload['copy_count'] ?? 0 ) && '10280157676' === (string) ( $barcode_payload['orders'][0]['cdek_number'] ?? '' ), 'CDEK BARCODE payload must use A6/RUS/one copy and cdek_number.' );
 cdek_order_assert( 1 === count( array_filter( $barcode_http->requests, static fn ( array $request ): bool => 'GET' === $request['method'] && str_contains( $request['url'], '/v2/print/barcodes/print-ready-uuid.pdf' ) ) ), 'CDEK BARCODE service must download ready PDF by print uuid.' );
+$barcode_post_count = count( array_filter( $barcode_http->requests, static fn ( array $request ): bool => 'POST' === $request['method'] && str_contains( $request['url'], '/v2/print/barcodes' ) ) );
+$barcode_prepared_again = $barcode_service->prepare_for_order( $barcode_order );
+$barcode_post_count_again = count( array_filter( $barcode_http->requests, static fn ( array $request ): bool => 'POST' === $request['method'] && str_contains( $request['url'], '/v2/print/barcodes' ) ) );
+cdek_order_assert( 'READY' === (string) ( $barcode_prepared_again['status'] ?? '' ) && $barcode_post_count === $barcode_post_count_again, 'CDEK BARCODE READY cache must avoid repeated print-form POST requests.' );
 
+$GLOBALS['wdc_cdek_order_transients'] = array();
 $barcode_invalid_http = new CdekOrderFakeHttp();
 $barcode_invalid_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-invalid-uuid', 'statuses' => array( array( 'code' => 'INVALID', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
 $barcode_invalid_service = new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_invalid_http ), $settings, $barcode_invalid_http ), static function (): void {}, 1, 0 );
-$invalid_pdf = $barcode_invalid_service->pdf_for_order( $barcode_order );
-cdek_order_assert( empty( $invalid_pdf['success'] ) && str_contains( (string) ( $invalid_pdf['message'] ?? '' ), 'СДЭК не смог сформировать ШК' ), 'CDEK BARCODE INVALID status must return a readable error.' );
+$invalid_prepare = $barcode_invalid_service->prepare_for_order( $barcode_order );
+cdek_order_assert( empty( $invalid_prepare['success'] ) && str_contains( (string) ( $invalid_prepare['message'] ?? '' ), 'СДЭК не смог сформировать этикетку' ), 'CDEK BARCODE INVALID status must return a readable error and clear cache.' );
 
+$GLOBALS['wdc_cdek_order_transients'] = array();
 $barcode_removed_http = new CdekOrderFakeHttp();
 $barcode_removed_http->barcode_create_responses[] = array( 'entity' => array( 'uuid' => 'print-removed-uuid' ) );
 $barcode_removed_http->barcode_create_responses[] = array( 'entity' => array( 'uuid' => 'print-recreated-uuid' ) );
 $barcode_removed_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-removed-uuid', 'statuses' => array( array( 'code' => 'REMOVED', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
 $barcode_removed_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-recreated-uuid', 'statuses' => array( array( 'code' => 'READY', 'date_time' => '2026-06-13T10:00:02+0000' ) ) ) );
 $barcode_removed_http->barcode_pdf_responses[] = '%PDF-1.4 recreated';
-$removed_pdf = ( new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_removed_http ), $settings, $barcode_removed_http ), static function (): void {}, 2, 0 ) )->pdf_for_order( $barcode_order );
-cdek_order_assert( ! empty( $removed_pdf['success'] ) && '%PDF-1.4 recreated' === (string) ( $removed_pdf['body'] ?? '' ) && 2 === count( array_filter( $barcode_removed_http->requests, static fn ( array $request ): bool => 'POST' === $request['method'] && str_contains( $request['url'], '/v2/print/barcodes' ) ) ), 'CDEK BARCODE REMOVED status must recreate the print form and return the recreated PDF.' );
+$removed_prepare = ( new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_removed_http ), $settings, $barcode_removed_http ), static function (): void {}, 2, 0 ) )->prepare_for_order( $barcode_order );
+cdek_order_assert( ! empty( $removed_prepare['success'] ) && 'ACCEPTED' === (string) ( $removed_prepare['status'] ?? '' ) && 'print-recreated-uuid' === (string) ( $removed_prepare['print_uuid'] ?? '' ) && 2 === count( array_filter( $barcode_removed_http->requests, static fn ( array $request ): bool => 'POST' === $request['method'] && str_contains( $request['url'], '/v2/print/barcodes' ) ) ), 'CDEK BARCODE REMOVED status must clear cache and create a fresh print form.' );
 
+$GLOBALS['wdc_cdek_order_transients'] = array();
 $barcode_timeout_http = new CdekOrderFakeHttp();
 $barcode_timeout_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-timeout-uuid', 'statuses' => array( array( 'code' => 'PROCESSING', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
-$timeout_pdf = ( new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_timeout_http ), $settings, $barcode_timeout_http ), static function (): void {}, 1, 0 ) )->pdf_for_order( $barcode_order );
-cdek_order_assert( empty( $timeout_pdf['success'] ) && 'ШК СДЭК еще формируется. Повторите попытку позже.' === (string) ( $timeout_pdf['message'] ?? '' ), 'CDEK BARCODE timeout must return the expected retry-later message.' );
+$timeout_service = new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_timeout_http ), $settings, $barcode_timeout_http ), static function (): void {}, 1, 0 );
+$timeout_prepare = $timeout_service->prepare_for_order( $barcode_order );
+$timeout_pdf = $timeout_service->download_ready_pdf_for_order( $barcode_order );
+cdek_order_assert( ! empty( $timeout_prepare['success'] ) && 'PROCESSING' === (string) ( $timeout_prepare['status'] ?? '' ), 'CDEK BARCODE prepare must return PROCESSING without downloading while the print form is still being created.' );
+cdek_order_assert( empty( $timeout_pdf['success'] ) && 'Этикетка СДЭК еще не готова. Нажмите "Скачать этикетку" еще раз.' === (string) ( $timeout_pdf['message'] ?? '' ), 'CDEK BARCODE final download must fail while READY cache is absent.' );
+
+$GLOBALS['wdc_cdek_order_transients'] = array();
+$barcode_empty_pdf_http = new CdekOrderFakeHttp();
+$barcode_empty_pdf_http->barcode_create_responses[] = array( 'entity' => array( 'uuid' => 'print-empty-pdf-uuid' ) );
+$barcode_empty_pdf_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-empty-pdf-uuid', 'statuses' => array( array( 'code' => 'READY', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
+$barcode_empty_pdf_http->barcode_pdf_responses[] = array( 'body' => '', 'content_type' => 'application/pdf' );
+$empty_pdf_service = new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_empty_pdf_http ), $settings, $barcode_empty_pdf_http ), static function (): void {}, 1, 0 );
+$empty_pdf_service->prepare_for_order( $barcode_order );
+$empty_pdf_result = $empty_pdf_service->download_ready_pdf_for_order( $barcode_order );
+cdek_order_assert( empty( $empty_pdf_result['success'] ) && str_contains( (string) ( $empty_pdf_result['message'] ?? '' ), 'пустой PDF' ), 'CDEK BARCODE final download must reject an empty PDF body.' );
+
+$GLOBALS['wdc_cdek_order_transients'] = array();
+$barcode_non_pdf_http = new CdekOrderFakeHttp();
+$barcode_non_pdf_http->barcode_create_responses[] = array( 'entity' => array( 'uuid' => 'print-html-uuid' ) );
+$barcode_non_pdf_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-html-uuid', 'statuses' => array( array( 'code' => 'READY', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
+$barcode_non_pdf_http->barcode_pdf_responses[] = array( 'body' => '<html>not pdf</html>', 'content_type' => 'text/html' );
+$non_pdf_service = new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_non_pdf_http ), $settings, $barcode_non_pdf_http ), static function (): void {}, 1, 0 );
+$non_pdf_service->prepare_for_order( $barcode_order );
+$non_pdf_result = $non_pdf_service->download_ready_pdf_for_order( $barcode_order );
+cdek_order_assert( empty( $non_pdf_result['success'] ) && 'Сервер вернул не PDF-файл этикетки СДЭК.' === (string) ( $non_pdf_result['message'] ?? '' ), 'CDEK BARCODE final download must reject explicit non-PDF content type.' );
+
+$barcode_service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Cdek/CdekBarcodePrintService.php' );
+cdek_order_assert( str_contains( $barcode_service_source, 'CACHE_TTL_SECONDS = 50 * 60' ) && str_contains( $barcode_service_source, 'prepare_for_order' ) && str_contains( $barcode_service_source, 'download_ready_pdf_for_order' ) && str_contains( $barcode_service_source, '$http_code < 200 || $http_code >= 300' ) && str_contains( $barcode_service_source, "str_contains( \$content_type, 'application/pdf' )" ), 'CDEK BARCODE service must cache prepared labels for 50 minutes, split prepare/download responsibilities, and reject failed/non-PDF downloads.' );
 
 echo "CDEK order creation smoke test passed.\n";
