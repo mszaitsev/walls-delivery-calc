@@ -520,9 +520,11 @@ C:.
 |   |   |       ShipmentCarrierAdapterInterface.php
 |   |   |
 |   |   +---Cdek
+|   |   |       CdekBarcodePrintService.php
 |   |   |       CdekCreateRequestBuilder.php
 |   |   |       CdekOrderStatusService.php
 |   |   |       CdekShipmentAdapter.php
+|   |   |       CdekStatusMappingService.php
 |   |   |
 |   |   +---RussianPost
 |   |   |       RussianPostAddressNormalizer.php

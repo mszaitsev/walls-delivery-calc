@@ -17,6 +17,7 @@ use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentBacklogService;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
+use WallsShop\WDC\Shipments\Cdek\CdekBarcodePrintService;
 use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
 use WallsShop\WDC\Shipments\Cdek\CdekRecipientAddressPreparationService;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
@@ -35,6 +36,7 @@ final class OrderShipmentsMetabox {
 	private const AJAX_NORMALIZE_ADDRESS = 'wdc_normalize_shipment_address';
 	private const AJAX_SEARCH_PICKUP_POINTS = 'wdc_search_russian_post_pickup_points';
 	private const AJAX_SEARCH_PRODUCTS = 'wdc_search_products_for_shipment_item';
+	private const ACTION_CDEK_BARCODE_PDF = 'wdc_cdek_barcode_pdf';
 
 	public function __construct(
 		private OrderShipmentRepository $repository,
@@ -49,7 +51,8 @@ final class OrderShipmentsMetabox {
 		private ?CdekDeliveryPointService $cdek_delivery_points = null,
 		private ?CdekRecipientAddressPreparationService $cdek_address_preparation = null,
 		private string $plugin_url = '',
-		private string $version = '1'
+		private string $version = '1',
+		private ?CdekBarcodePrintService $cdek_barcode_print = null
 	) {
 	}
 
@@ -65,6 +68,7 @@ final class OrderShipmentsMetabox {
 		add_action( 'wp_ajax_' . self::AJAX_NORMALIZE_ADDRESS, array( $this, 'ajax_normalize_address' ) );
 		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PICKUP_POINTS, array( $this, 'ajax_search_pickup_points' ) );
 		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PRODUCTS, array( $this, 'ajax_search_products' ) );
+		add_action( 'admin_post_' . self::ACTION_CDEK_BARCODE_PDF, array( $this, 'admin_post_cdek_barcode_pdf' ) );
 	}
 
 	public function add_meta_box(): void {
@@ -286,6 +290,10 @@ final class OrderShipmentsMetabox {
 		$show_update = $has_created && $can_update;
 		$show_cancel = $has_created && $can_cancel;
 		$show_remove = $has_created && $can_remove;
+		$show_cdek_barcode = $this->show_cdek_barcode_buttons( $shipment, $status_payload, $is_cdek, $has_created );
+		$has_cdek_barcode_service = $is_cdek && $this->cdek_barcode_print instanceof CdekBarcodePrintService;
+		$cdek_barcode_download_url = $has_cdek_barcode_service ? $this->cdek_barcode_url( $order_id, 'download' ) : '';
+		$cdek_barcode_inline_url = $has_cdek_barcode_service ? $this->cdek_barcode_url( $order_id, 'inline' ) : '';
 		?>
 		<div class="wdc-shipments-metabox" data-wdc-shipments-metabox data-carrier-key="<?php echo esc_attr( $carrier_key ); ?>" data-has-shipment="<?php echo $has_created ? '1' : '0'; ?>" <?php $this->render_presentation_attrs( $presentation ); ?>>
 			<p><strong><?php echo esc_html__( 'Служба', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $meta['service_title'] ?? $request['rate_id'] ?? '-' ) ); ?></p>
@@ -301,6 +309,8 @@ final class OrderShipmentsMetabox {
 			<p class="wdc-shipments-actions">
 				<button type="button" class="button button-primary" data-wdc-open-shipment-modal <?php echo $show_primary_actions ? '' : 'hidden'; ?> <?php disabled( ! $show_primary_actions ); ?>><?php echo esc_html( $presentation['create_button_label'] ); ?></button>
 				<button type="button" class="button" data-wdc-update-shipment-status data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $show_update ? '' : 'hidden'; ?> <?php disabled( ! $show_update ); ?>><?php echo esc_html( $presentation['update_status_button_label'] ); ?></button>
+				<a class="button" data-wdc-cdek-barcode-download href="<?php echo esc_url( $cdek_barcode_download_url ); ?>" <?php echo $show_cdek_barcode ? '' : 'hidden'; ?>><?php echo esc_html__( 'Скачать ШК', 'walls-delivery-calc' ); ?></a>
+				<a class="button" data-wdc-cdek-barcode-inline href="<?php echo esc_url( $cdek_barcode_inline_url ); ?>" target="_blank" rel="noopener" <?php echo $show_cdek_barcode ? '' : 'hidden'; ?>><?php echo esc_html__( 'Открыть ШК', 'walls-delivery-calc' ); ?></a>
 				<button type="button" class="button" data-wdc-open-manual-tracking <?php echo $show_primary_actions ? '' : 'hidden'; ?> <?php disabled( ! $show_primary_actions ); ?>><?php echo esc_html( $presentation['manual_attach_button_label'] ); ?></button>
 				<button type="button" class="button" data-wdc-cancel-shipment data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $show_cancel ? '' : 'hidden'; ?> <?php disabled( ! $can_cancel ); ?>><?php echo esc_html( $presentation['cancel_button_label'] ); ?></button>
 				<button type="button" class="button" data-wdc-remove-shipment-from-order data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $show_remove ? '' : 'hidden'; ?> <?php disabled( ! $show_remove ); ?>><?php echo esc_html( $presentation['remove_button_label'] ); ?></button>
@@ -640,6 +650,44 @@ final class OrderShipmentsMetabox {
 				'status' => $this->with_status_presentation( is_array( $result['status'] ?? null ) ? $result['status'] : array(), $shipment_key ),
 			)
 		);
+	}
+
+	public function admin_post_cdek_barcode_pdf(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_die( esc_html__( 'Недостаточно прав.', 'walls-delivery-calc' ), '', array( 'response' => 403 ) );
+		}
+		$order_id = (int) ( $_GET['order_id'] ?? 0 );
+		$nonce = sanitize_text_field( wp_unslash( (string) ( $_GET['_wpnonce'] ?? '' ) ) );
+		if ( $order_id <= 0 || ! wp_verify_nonce( $nonce, self::ACTION_CDEK_BARCODE_PDF . '_' . $order_id ) ) {
+			wp_die( esc_html__( 'Неверный запрос.', 'walls-delivery-calc' ), '', array( 'response' => 403 ) );
+		}
+		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+		if ( ! is_object( $order ) ) {
+			wp_die( esc_html__( 'Заказ не найден.', 'walls-delivery-calc' ), '', array( 'response' => 404 ) );
+		}
+		if ( ! $this->cdek_barcode_print instanceof CdekBarcodePrintService ) {
+			wp_die( esc_html__( 'Печать ШК СДЭК недоступна.', 'walls-delivery-calc' ), '', array( 'response' => 500 ) );
+		}
+
+		$result = $this->cdek_barcode_print->pdf_for_order( $order );
+		if ( empty( $result['success'] ) ) {
+			wp_die( esc_html( (string) ( $result['message'] ?? 'Не удалось получить ШК СДЭК.' ) ), '', array( 'response' => 400 ) );
+		}
+
+		$mode = sanitize_key( wp_unslash( (string) ( $_GET['mode'] ?? 'download' ) ) );
+		$disposition = 'inline' === $mode ? 'inline' : 'attachment';
+		$filename = sanitize_file_name( (string) ( $result['filename'] ?? 'cdek-barcode.pdf' ) );
+		if ( '' === $filename ) {
+			$filename = 'cdek-barcode.pdf';
+		}
+		if ( function_exists( 'nocache_headers' ) ) {
+			nocache_headers();
+		}
+		header( 'Content-Type: application/pdf' );
+		header( 'Content-Disposition: ' . $disposition . '; filename="' . $filename . '"' );
+		header( 'Content-Length: ' . strlen( (string) ( $result['body'] ?? '' ) ) );
+		echo (string) ( $result['body'] ?? '' );
+		exit;
 	}
 
 	public function ajax_normalize_address(): void {
@@ -1320,6 +1368,38 @@ final class OrderShipmentsMetabox {
 			'warning' => 'wdc-shipment-price-warning',
 			default => 'wdc-shipment-price-neutral',
 		};
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 * @param array<string,mixed> $status_payload
+	 */
+	private function show_cdek_barcode_buttons( array $shipment, array $status_payload, bool $is_cdek, bool $has_created ): bool {
+		if ( ! $is_cdek || ! $has_created || ! $this->cdek_barcode_print instanceof CdekBarcodePrintService ) {
+			return false;
+		}
+		$order_status = strtoupper( (string) ( $shipment['cdek_order_status_code'] ?? $status_payload['order_status_code'] ?? '' ) );
+		$status = (string) ( $shipment['status'] ?? '' );
+		if ( in_array( $status, array( 'registration_pending', 'failed', 'removed' ), true ) || in_array( $order_status, array( 'ACCEPTED', 'INVALID', 'REMOVED' ), true ) ) {
+			return false;
+		}
+		$number = trim( (string) ( $shipment['cdek_number'] ?? $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
+		$uuid = trim( (string) ( $shipment['external_id'] ?? $shipment['entity_uuid'] ?? '' ) );
+
+		return '' !== $number || '' !== $uuid;
+	}
+
+	private function cdek_barcode_url( int $order_id, string $mode ): string {
+		$url = add_query_arg(
+			array(
+				'action' => self::ACTION_CDEK_BARCODE_PDF,
+				'order_id' => $order_id,
+				'mode' => 'inline' === $mode ? 'inline' : 'download',
+			),
+			admin_url( 'admin-post.php' )
+		);
+
+		return wp_nonce_url( $url, self::ACTION_CDEK_BARCODE_PDF . '_' . $order_id );
 	}
 
 	/**

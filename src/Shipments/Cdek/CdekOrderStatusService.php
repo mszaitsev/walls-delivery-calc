@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\Cdek\Api\CdekApiClient;
 use WallsShop\WDC\Carriers\Cdek\Api\CdekApiException;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -16,7 +17,8 @@ final class CdekOrderStatusService {
 	public function __construct(
 		private OrderShipmentRepository $repository,
 		private CdekApiClient $client,
-		private ?Logger $logger = null
+		private ?Logger $logger = null,
+		private ?CdekStatusMappingService $status_mapping = null
 	) {
 	}
 
@@ -43,6 +45,7 @@ final class CdekOrderStatusService {
 		$request_state = strtoupper( (string) ( $request_row['state'] ?? '' ) );
 		$status_code = strtoupper( (string) ( $order_status['code'] ?? '' ) );
 		$status = $this->internal_status_from_cdek_order_status( $status_code, $request_state );
+		$universal_status = $this->universal_status_for( $status_code, $status );
 		$message = $this->status_update_message( $status, $status_code, $request_state, $request_row );
 
 		$now = $this->now();
@@ -58,6 +61,8 @@ final class CdekOrderStatusService {
 				'cdek_request_state' => $request_state,
 				'cdek_order_status_code' => $status_code,
 				'cdek_order_status_name' => (string) ( $order_status['name'] ?? '' ),
+				'universal_status_code' => $universal_status,
+				'universal_status_label' => '' !== $universal_status ? DeliveryStatus::label( $universal_status ) : '',
 				'cdek_planned_delivery_date' => $this->planned_delivery_date( $entity ),
 				'cdek_actual_cost_kopecks' => $this->delivery_total_kopecks( $entity ),
 				'response_snapshot' => $this->sanitize_response_snapshot( $body ),
@@ -185,6 +190,8 @@ final class CdekOrderStatusService {
 			array(
 				'carrier_key' => CdekSettings::CARRIER_KEY,
 				'has_shipment' => array() !== $shipment,
+				'universal_status_code' => (string) ( $shipment['universal_status_code'] ?? '' ),
+				'universal_status_label' => (string) ( $shipment['universal_status_label'] ?? '' ),
 				'shipment_status_label' => $this->shipment_status_label( (string) ( $shipment['status'] ?? '' ) ),
 				'carrier_status_title' => (string) ( $shipment['status_title'] ?? '' ),
 				'carrier_operation_date' => (string) ( $shipment['tracking_checked_at'] ?? '' ),
@@ -201,6 +208,7 @@ final class CdekOrderStatusService {
 				'can_cancel_in_cdek' => $this->can_cancel_in_cdek( $shipment ),
 				'can_remove_from_order' => $this->can_remove_from_order( $shipment ),
 				'can_update_status' => array() !== $shipment,
+				'can_print_barcode' => $this->can_print_barcode( $shipment ),
 			),
 			$this->actual_cost_payload( $shipment, $order )
 		);
@@ -220,6 +228,24 @@ final class CdekOrderStatusService {
 		$status = strtoupper( (string) ( $shipment['cdek_order_status_code'] ?? '' ) );
 
 		return '' !== $status && ! in_array( $status, array( 'ACCEPTED', 'CREATED' ), true );
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 */
+	private function can_print_barcode( array $shipment ): bool {
+		if ( array() === $shipment ) {
+			return false;
+		}
+		$internal_status = (string) ( $shipment['status'] ?? '' );
+		$order_status = strtoupper( (string) ( $shipment['cdek_order_status_code'] ?? '' ) );
+		if ( in_array( $internal_status, array( 'registration_pending', 'failed', 'removed' ), true ) || in_array( $order_status, array( 'ACCEPTED', 'INVALID', 'REMOVED' ), true ) ) {
+			return false;
+		}
+		$number = trim( (string) ( $shipment['cdek_number'] ?? $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
+		$uuid = trim( (string) ( $shipment['external_id'] ?? $shipment['entity_uuid'] ?? '' ) );
+
+		return '' !== $number || '' !== $uuid;
 	}
 
 	private function shipment_status_label( string $status ): string {
@@ -248,6 +274,24 @@ final class CdekOrderStatusService {
 		}
 
 		return 'INVALID' === $request_state ? 'failed' : 'registration_pending';
+	}
+
+	private function universal_status_for( string $order_status_code, string $internal_status ): string {
+		$order_status_code = strtoupper( trim( $order_status_code ) );
+		if ( '' !== $order_status_code && $this->status_mapping instanceof CdekStatusMappingService ) {
+			return $this->status_mapping->universal_status_for( $order_status_code );
+		}
+		if ( '' !== $order_status_code ) {
+			$mapping = CdekStatusMappingService::default_mapping();
+			return (string) ( $mapping[ $order_status_code ] ?? DeliveryStatus::UNKNOWN );
+		}
+
+		return match ( $internal_status ) {
+			'failed' => DeliveryStatus::REJECTED,
+			'removed' => DeliveryStatus::CANCELLED,
+			'registered', 'created', 'registration_pending' => DeliveryStatus::CREATED_IN_CARRIER,
+			default => DeliveryStatus::UNKNOWN,
+		};
 	}
 
 	/**
@@ -372,6 +416,7 @@ final class CdekOrderStatusService {
 		$status_code = strtoupper( (string) ( $order_status['code'] ?? '' ) );
 		$cdek_number = (string) ( $entity['cdek_number'] ?? $base['cdek_number'] ?? '' );
 		$status = $this->internal_status_from_cdek_order_status( $status_code, $request_state );
+		$universal_status = $this->universal_status_for( $status_code, $status );
 		$now = $this->now();
 
 		return array_merge(
@@ -389,6 +434,8 @@ final class CdekOrderStatusService {
 				'cdek_request_state' => $request_state,
 				'cdek_order_status_code' => $status_code,
 				'cdek_order_status_name' => (string) ( $order_status['name'] ?? '' ),
+				'universal_status_code' => $universal_status,
+				'universal_status_label' => '' !== $universal_status ? DeliveryStatus::label( $universal_status ) : '',
 				'cdek_planned_delivery_date' => $this->planned_delivery_date( $entity ),
 				'cdek_actual_cost_kopecks' => $this->delivery_total_kopecks( $entity ),
 				'response_snapshot' => $this->sanitize_response_snapshot( $body ),

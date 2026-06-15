@@ -713,7 +713,8 @@
       hasShipment: !!status.has_shipment,
       canCancel: !!status.can_cancel,
       canRemove: !!status.can_remove_from_order,
-      canUpdate: !!status.can_update_status
+      canUpdate: !!status.can_update_status,
+      canPrintBarcode: !!status.can_print_barcode
     });
     setTrackingDisplay(box, status.barcode || '');
     renderShipmentPrice(box, status);
@@ -837,11 +838,14 @@
     const canCancel = !!(state && state.canCancel);
     const canRemove = !!(state && state.canRemove);
     const canUpdate = !!(state && state.canUpdate);
+    const canPrintBarcode = !!(state && state.canPrintBarcode);
     const openButton = box.querySelector('[data-wdc-open-shipment-modal]');
     const updateButton = box.querySelector('[data-wdc-update-shipment-status]');
     const manualButton = box.querySelector('[data-wdc-open-manual-tracking]');
     const cancelButton = box.querySelector('[data-wdc-cancel-shipment]');
     const removeButton = box.querySelector('[data-wdc-remove-shipment-from-order]');
+    const barcodeDownload = box.querySelector('[data-wdc-cdek-barcode-download]');
+    const barcodeInline = box.querySelector('[data-wdc-cdek-barcode-inline]');
     if (box.dataset) box.dataset.hasShipment = hasShipment ? '1' : '0';
     if (openButton) {
       setVisible(openButton, !hasShipment);
@@ -863,6 +867,15 @@
       setVisible(removeButton, canRemove);
       removeButton.disabled = !canRemove;
     }
+    [barcodeDownload, barcodeInline].forEach(function (link) {
+      if (!link) return;
+      setVisible(link, canPrintBarcode);
+      if (canPrintBarcode) {
+        link.removeAttribute('aria-disabled');
+      } else {
+        link.setAttribute('aria-disabled', 'true');
+      }
+    });
   }
 
   function resetShipmentUi(box) {
@@ -892,7 +905,7 @@
       message.dataset.status = '';
     }
     setCdekPollingIndicator(box, false);
-    updateShipmentButtons(box, { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false });
+    updateShipmentButtons(box, { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false, canPrintBarcode: false });
     const manualForm = box.querySelector('[data-wdc-manual-tracking-form]');
     if (manualForm) manualForm.hidden = true;
   }
@@ -1106,7 +1119,8 @@
           hasShipment: !!statusPayload.has_shipment,
           canCancel: !!statusPayload.can_cancel,
           canRemove: !!statusPayload.can_remove_from_order,
-          canUpdate: !!statusPayload.can_update_status
+          canUpdate: !!statusPayload.can_update_status,
+          canPrintBarcode: !!statusPayload.can_print_barcode
         });
         showShipmentToast(box, payload.data.warning || payload.data.message || 'Номер отслеживания сохранен.', payload.data.warning ? 'warning' : 'success');
         return payload;
@@ -1817,7 +1831,8 @@
             hasShipment: !!statusPayload.has_shipment,
             canCancel: !!statusPayload.can_cancel,
             canRemove: !!statusPayload.can_remove_from_order,
-            canUpdate: !!statusPayload.can_update_status
+            canUpdate: !!statusPayload.can_update_status,
+            canPrintBarcode: !!statusPayload.can_print_barcode
           });
           showShipmentToast(box, payload.data.message || text.createdToast, 'success');
           if (updateButton && !updateButton.disabled) {

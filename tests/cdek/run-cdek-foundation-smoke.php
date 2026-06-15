@@ -17,6 +17,7 @@ use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
 
 function cdek_smoke_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -122,6 +123,8 @@ $settings = new CdekSettings( $settings_repository, $encryption );
 
 cdek_smoke_assert( CdekSettings::ENV_TEST === $settings->environment(), 'CDEK default environment must be test.' );
 cdek_smoke_assert( 'https://api.edu.cdek.ru' === $settings->base_url(), 'CDEK test base URL mismatch.' );
+$default_settings = $settings_repository->defaults();
+cdek_smoke_assert( isset( $default_settings[ CdekStatusMappingService::MAPPING_KEY ]['DELIVERED'] ) && isset( $default_settings[ CdekStatusMappingService::MAPPING_KEY ]['INVALID'] ) && isset( $default_settings[ CdekStatusMappingService::MAPPING_KEY ]['REMOVED'] ), 'CDEK universal status mapping defaults must be registered in settings.' );
 
 $settings->save_from_admin(
 	array(
@@ -331,6 +334,7 @@ $registry = new CarrierRegistry();
 cdek_smoke_assert( ! $registry->has( CdekSettings::CARRIER_KEY ), 'CDEK runtime carrier must not be registered in foundation smoke.' );
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
+$statuses_admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/ShipmentStatusesAdminPage.php' );
 cdek_smoke_assert( str_contains( $admin_source, 'check_cdek_connection' ), 'Admin page must expose CDEK connection check action.' );
 cdek_smoke_assert( str_contains( $admin_source, "check_admin_referer( 'wdc_delivery_services' )" ), 'Admin CDEK action must be behind nonce check.' );
 cdek_smoke_assert( str_contains( $admin_source, 'current_user_can( AdminMenu::CAPABILITY )' ), 'Admin CDEK action must be behind capability check.' );
@@ -339,5 +343,6 @@ cdek_smoke_assert( str_contains( $admin_source, 'Данные для входа'
 cdek_smoke_assert( str_contains( $admin_source, "\$tabs['api_credentials'] = 'Данные для входа';" ), 'Russian Post credentials tab label must be changed.' );
 cdek_smoke_assert( str_contains( $admin_source, "\$tabs['cdek_settings'] = 'Данные для входа';" ), 'CDEK credentials tab label must be changed.' );
 cdek_smoke_assert( ! str_contains( $admin_source, 'prod-secret' ) && ! str_contains( $admin_source, 'fake-token' ), 'Admin source must not contain test CDEK secrets or tokens.' );
+cdek_smoke_assert( str_contains( $statuses_admin_source, 'Статусы СДЭК' ) && str_contains( $statuses_admin_source, 'save_cdek_mapping' ) && str_contains( $statuses_admin_source, 'CdekStatusMappingService::status_labels()' ), 'Shipment statuses admin page must render and save CDEK status mapping tab.' );
 
 echo "CDEK foundation smoke test passed.\n";

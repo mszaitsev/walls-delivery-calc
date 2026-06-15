@@ -1,6 +1,10 @@
 # WDC CDEK Order Creation
 
-Version: 0.50.4.
+Version: 0.51.0.
+
+0.51.0 update: registered CDEK shipments now expose BARCODE print actions in the order `Отправления` block: `Скачать ШК` returns `Content-Disposition: attachment`, while `Открыть ШК` returns the same PDF inline in a new tab. WDC follows the attached CDEK print documentation: it creates the async form with `POST /v2/print/barcodes` using `orders[]`, `copy_count=1`, `format=A6` and `lang=RUS`, polls `GET /v2/print/barcodes/{uuid}` until `READY`, and downloads `GET /v2/print/barcodes/{uuid}.pdf`. Print-form UUIDs and PDF files are not stored, and print creation/download errors are not logged.
+
+The `WDC -> Статусы` admin page now includes a `Статусы СДЭК` tab. Raw CDEK order status from `entity.statuses[]` is still selected by max `date_time` among non-deleted rows and remains the source for CDEK-specific buttons such as cancel/local remove, but WDC also saves a carrier-neutral `universal_status_code` through the configurable CDEK mapping. Defaults map movement statuses to `in_transit`, `DELIVERED` to `delivered`, `INVALID`/`NOT_DELIVERED` to `rejected`, and `REMOVED` to `cancelled`.
 
 0.50.4 update: CDEK postamats are handled as the same warehouse/PVZ endpoint class for order registration. No special shipment creation branch is added: postamat pickup still sends `delivery_point`, just like PVZ. The shipment modal now shows a separate CDEK row `Тип точки: ПВЗ СДЭК` or `Тип точки: Постамат СДЭК` when the selected pickup metadata contains a known type; unknown types are not rendered.
 
