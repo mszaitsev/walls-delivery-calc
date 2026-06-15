@@ -1,6 +1,8 @@
 # WDC CDEK Tariff Calculation
 
-Version: 0.50.3.
+Version: 0.50.4.
+
+0.50.4 postamat direction update: the delivery-mode fallback classifier now treats postamats as the warehouse/PVZ side for CDEK order routing. `дверь-постамат` / `door-locker` map to mode `2`, `постамат-дверь` / `locker-door` map to mode `3`, and warehouse/PVZ/postamat-to-warehouse/PVZ/postamat combinations such as `склад-постамат`, `пвз-постамат`, `постамат-пвз`, `постамат-постамат`, `warehouse-locker`, `pickup-locker`, `locker-pickup`, `locker-locker` map to mode `4`.
 
 0.50.3 tariff direction update: managed CDEK tariffs now store editable `delivery_mode` in addition to the pickup/courier presentation type. Sync fills it from CDEK API mode fields when available or from tariff names such as `дверь-дверь`, `дверь-склад`, `склад-дверь`, `склад-склад`; the admin tariff table exposes `Режим тарифа` for manual correction. Shipment creation uses this mode to choose CDEK order fields: door-origin tariffs use `from_location`, warehouse-origin tariffs use `shipment_point`, recipient-door tariffs use `to_location`, and recipient-warehouse tariffs use `delivery_point`.
 

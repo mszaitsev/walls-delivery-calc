@@ -677,7 +677,7 @@
     const carrier = String(point && (point.carrier_key || point.carrier) || '');
     if (carrier === 'cdek') {
       const type = String(point.marker_type || point.point_type || point.cdek_type || point.type || '').toLowerCase();
-      return (type === 'postamat' || type === 'postomat') ? 'Постамат СДЭК' : 'ПВЗ СДЭК';
+      return (type === 'postamat' || type === 'postomat' || type === 'locker') ? 'Постамат СДЭК' : 'ПВЗ СДЭК';
     }
     return String(point && (point.point_title || point.card_title || point.point_type_label || point.display_title) || '').trim() || 'Отделение Почты России';
   }

@@ -156,13 +156,44 @@ final class CdekTariffSyncService {
 		if ( str_contains( $text, 'дверь-дверь' ) || str_contains( $text, 'door-door' ) ) {
 			return 1;
 		}
-		if ( str_contains( $text, 'дверь-склад' ) || str_contains( $text, 'door-warehouse' ) || str_contains( $text, 'door-pickup' ) ) {
+		if (
+			str_contains( $text, 'дверь-склад' )
+			|| str_contains( $text, 'дверь-пвз' )
+			|| str_contains( $text, 'дверь-постамат' )
+			|| str_contains( $text, 'door-warehouse' )
+			|| str_contains( $text, 'door-pickup' )
+			|| str_contains( $text, 'door-locker' )
+			|| str_contains( $text, 'door-postamat' )
+		) {
 			return 2;
 		}
-		if ( str_contains( $text, 'склад-дверь' ) || str_contains( $text, 'warehouse-door' ) || str_contains( $text, 'pickup-door' ) ) {
+		if (
+			str_contains( $text, 'склад-дверь' )
+			|| str_contains( $text, 'пвз-дверь' )
+			|| str_contains( $text, 'постамат-дверь' )
+			|| str_contains( $text, 'warehouse-door' )
+			|| str_contains( $text, 'pickup-door' )
+			|| str_contains( $text, 'locker-door' )
+			|| str_contains( $text, 'postamat-door' )
+		) {
 			return 3;
 		}
-		if ( str_contains( $text, 'склад-склад' ) || str_contains( $text, 'warehouse-warehouse' ) || str_contains( $text, 'pickup-pickup' ) ) {
+		if (
+			str_contains( $text, 'склад-склад' )
+			|| str_contains( $text, 'склад-пвз' )
+			|| str_contains( $text, 'склад-постамат' )
+			|| str_contains( $text, 'пвз-пвз' )
+			|| str_contains( $text, 'пвз-постамат' )
+			|| str_contains( $text, 'постамат-пвз' )
+			|| str_contains( $text, 'постамат-постамат' )
+			|| str_contains( $text, 'warehouse-warehouse' )
+			|| str_contains( $text, 'warehouse-pickup' )
+			|| str_contains( $text, 'warehouse-locker' )
+			|| str_contains( $text, 'pickup-pickup' )
+			|| str_contains( $text, 'pickup-locker' )
+			|| str_contains( $text, 'locker-pickup' )
+			|| str_contains( $text, 'locker-locker' )
+		) {
 			return 4;
 		}
 

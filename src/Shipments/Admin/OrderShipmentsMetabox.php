@@ -180,6 +180,7 @@ final class OrderShipmentsMetabox {
 		$pickup_destination_index = $this->pickup_destination_index( $pickup_code, (string) ( $address['postcode'] ?? '' ), $meta );
 		$pickup_display_value = $is_cdek ? $pickup_code : $pickup_destination_index;
 		$pickup_row = is_array( $meta['pickup_point_row'] ?? null ) ? $meta['pickup_point_row'] : array();
+		$cdek_pickup_type_label = $is_cdek ? $this->cdek_pickup_type_label( $pickup_row ) : '';
 		$pickup_postcode = (string) ( $pickup_row['postcode'] ?? $pickup_destination_index );
 		$pickup_context = is_array( $meta['pickup_location_context'] ?? null ) ? $meta['pickup_location_context'] : array();
 		$order_shipping_city = method_exists( $order, 'get_shipping_city' ) ? (string) $order->get_shipping_city() : '';
@@ -354,6 +355,9 @@ final class OrderShipmentsMetabox {
 									<input type="hidden" name="recipient_location_lat" value="<?php echo esc_attr( (string) ( $pickup_context['lat'] ?? '' ) ); ?>" data-wdc-pickup-location-lat>
 									<input type="hidden" name="recipient_location_lng" value="<?php echo esc_attr( (string) ( $pickup_context['lng'] ?? '' ) ); ?>" data-wdc-pickup-location-lng>
 									<p><strong><?php echo esc_html( $is_cdek ? __( 'Код ПВЗ', 'walls-delivery-calc' ) : __( 'Индекс выбранного ПВЗ / ОПС', 'walls-delivery-calc' ) ); ?>:</strong> <span data-wdc-pickup-index><?php echo esc_html( '' !== $pickup_display_value ? $pickup_display_value : '-' ); ?></span></p>
+									<?php if ( $is_cdek && '' !== $cdek_pickup_type_label ) : ?>
+										<p><strong><?php echo esc_html__( 'Тип точки', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-cdek-pickup-type-label><?php echo esc_html( $cdek_pickup_type_label ); ?></span></p>
+									<?php endif; ?>
 									<p><strong><?php echo esc_html( $is_cdek ? __( 'Адрес ПВЗ', 'walls-delivery-calc' ) : __( 'Адрес ПВЗ / ОПС', 'walls-delivery-calc' ) ); ?>:</strong> <span data-wdc-pickup-address><?php echo esc_html( '' !== $pickup_address ? $pickup_address : '-' ); ?></span></p>
 									<p><button type="button" class="button" data-wdc-open-pickup-picker><?php echo esc_html__( 'Выбрать другой ПВЗ', 'walls-delivery-calc' ); ?></button></p>
 									<?php if ( ! $pickup_point_found ) : ?>
@@ -795,6 +799,38 @@ final class OrderShipmentsMetabox {
 		}
 
 		return 0;
+	}
+
+	/**
+	 * @param array<string,mixed> $pickup_row
+	 */
+	private function cdek_pickup_type_label( array $pickup_row ): string {
+		$type = strtoupper(
+			trim(
+				(string) (
+					$pickup_row['point_type']
+					?? $pickup_row['cdek_type']
+					?? $pickup_row['marker_type']
+					?? ''
+				)
+			)
+		);
+		$type = str_replace( '_', '-', $type );
+		if ( in_array( $type, array( 'POSTAMAT', 'POSTOMAT', 'LOCKER' ), true ) || 'POSTAMAT' === strtoupper( (string) ( $pickup_row['marker_type'] ?? '' ) ) || 'POSTAMAT' === strtoupper( (string) ( $pickup_row['point_title'] ?? '' ) ) ) {
+			return __( 'Постамат СДЭК', 'walls-delivery-calc' );
+		}
+		if ( 'PVZ' === $type || 'PICKUP' === $type ) {
+			return __( 'ПВЗ СДЭК', 'walls-delivery-calc' );
+		}
+		$title = trim( (string) ( $pickup_row['point_title'] ?? $pickup_row['display_title'] ?? $pickup_row['point_type_label'] ?? '' ) );
+		if ( str_contains( function_exists( 'mb_strtolower' ) ? mb_strtolower( $title ) : strtolower( $title ), 'постамат' ) ) {
+			return __( 'Постамат СДЭК', 'walls-delivery-calc' );
+		}
+		if ( str_contains( function_exists( 'mb_strtolower' ) ? mb_strtolower( $title ) : strtolower( $title ), 'пвз' ) || str_contains( function_exists( 'mb_strtolower' ) ? mb_strtolower( $title ) : strtolower( $title ), 'пункт выдачи' ) ) {
+			return __( 'ПВЗ СДЭК', 'walls-delivery-calc' );
+		}
+
+		return '';
 	}
 
 	public function ajax_search_pickup_points(): void {

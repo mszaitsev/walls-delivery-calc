@@ -277,6 +277,13 @@ $repository->save_admin_rows( array( array( 'tariff_code' => '139', 'custom_titl
 $sorted = $repository->all();
 cdek_tariffs_sync_assert( '139' === (string) $sorted[0]['tariff_code'] && '136' === (string) $sorted[1]['tariff_code'] && '137' === (string) $sorted[2]['tariff_code'], 'CDEK tariff admin rows must sort active first, then CDEK name, then code.' );
 cdek_tariffs_sync_assert( 'дверь-дверь' === CdekTariffSyncService::normalize_cdek_string_static( 'Ð´Ð²ÐµÑÑ-Ð´Ð²ÐµÑÑ' ), 'CDEK mojibake normalizer must fix obvious UTF-8 mojibake.' );
+cdek_tariffs_sync_assert( 2 === CdekTariffSyncService::delivery_mode_value( null, 'дверь-постамат', '' ), 'CDEK tariff mode fallback must map door-postamat to mode 2.' );
+cdek_tariffs_sync_assert( 3 === CdekTariffSyncService::delivery_mode_value( null, 'постамат-дверь', '' ), 'CDEK tariff mode fallback must map postamat-door to mode 3.' );
+cdek_tariffs_sync_assert( 4 === CdekTariffSyncService::delivery_mode_value( null, 'склад-постамат', '' ), 'CDEK tariff mode fallback must map warehouse-postamat to mode 4.' );
+cdek_tariffs_sync_assert( 4 === CdekTariffSyncService::delivery_mode_value( null, 'постамат-постамат', '' ), 'CDEK tariff mode fallback must map postamat-postamat to mode 4.' );
+cdek_tariffs_sync_assert( 2 === CdekTariffSyncService::delivery_mode_value( null, 'door-locker', '' ), 'CDEK tariff mode fallback must map door-locker to mode 2.' );
+cdek_tariffs_sync_assert( 3 === CdekTariffSyncService::delivery_mode_value( null, 'locker-door', '' ), 'CDEK tariff mode fallback must map locker-door to mode 3.' );
+cdek_tariffs_sync_assert( 4 === CdekTariffSyncService::delivery_mode_value( null, 'pickup-locker', '' ), 'CDEK tariff mode fallback must map pickup-locker to mode 4.' );
 
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 cdek_tariffs_sync_assert( str_contains( $source, 'Загрузить тарифы из СДЭК' ) && str_contains( $source, 'preview_cdek_tariffs_sync' ) && str_contains( $source, 'confirm_cdek_tariffs_sync' ), 'CDEK admin tariffs tab must include API sync preview and confirmation actions.' );

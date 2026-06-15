@@ -782,7 +782,7 @@
 		const carrier = String( point.carrier_key || point.carrier || '' );
 		if ( 'cdek' === carrier ) {
 			const type = String( point.marker_type || point.point_type || point.cdek_type || point.type || '' ).toLowerCase();
-			return ( 'postamat' === type || 'postomat' === type ) ? 'Постамат СДЭК' : 'ПВЗ СДЭК';
+			return ( 'postamat' === type || 'postomat' === type || 'locker' === type ) ? 'Постамат СДЭК' : 'ПВЗ СДЭК';
 		}
 		if ( point.point_title || point.card_title || point.point_type_label ) {
 			return String( point.point_title || point.card_title || point.point_type_label );

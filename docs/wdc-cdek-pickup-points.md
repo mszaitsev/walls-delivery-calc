@@ -1,6 +1,8 @@
 # WDC CDEK Pickup Points
 
-Version: 0.48.11.
+Version: 0.50.4.
+
+0.50.4 update: CDEK deliverypoint type normalization treats `POSTAMAT`, `LOCKER` and `POSTOMAT` as postamats and preserves the normalized pickup metadata (`point_type`, `point_type_label`, `point_title`, `marker_type`) for checkout, admin recalculation and shipment preparation. Map/list titles render `ПВЗ СДЭК {code}` for PVZ and `Постамат СДЭК {code}` for postamats when the type is present.
 
 0.48.11 note: Russian Post admin pickup maps no longer inherit the old 300-row location cap: location-context lookup now allows large-city result sets up to 2000 rows, so Moscow can return all configured matching OPS/PVZ rows. The shipment preparation modal also restores Russian Post location loading by starting location mode from recipient context even when the visible search input is empty. Checkout selected pickup preview now matches the saved point by carrier-specific stable identifiers (`point_code`, `cdek_code`, `delivery_point`, `postcode`/`postal_code`, `point_id`) instead of relying only on REST `id`, so previously selected Russian Post and CDEK points can become the active preview even when ids differ.
 

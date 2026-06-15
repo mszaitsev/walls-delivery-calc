@@ -1,6 +1,8 @@
 # WDC CDEK Order Creation
 
-Version: 0.50.3.
+Version: 0.50.4.
+
+0.50.4 update: CDEK postamats are handled as the same warehouse/PVZ endpoint class for order registration. No special shipment creation branch is added: postamat pickup still sends `delivery_point`, just like PVZ. The shipment modal now shows a separate CDEK row `Тип точки: ПВЗ СДЭК` or `Тип точки: Постамат СДЭК` when the selected pickup metadata contains a known type; unknown types are not rendered.
 
 0.50.3 update: CDEK courier order creation now follows the documented direction fields for `POST /v2/orders`. Managed tariffs carry editable `delivery_mode`: `1` door-door uses `from_location` + `to_location`, `2` door-warehouse uses `from_location` + `delivery_point`, `3` warehouse-door uses `shipment_point` + `to_location`, and `4` warehouse-warehouse uses `shipment_point` + `delivery_point`; incompatible pairs are not sent together. Door-origin modes use sender city/postcode/address settings, while warehouse-origin modes keep the sender CDEK pickup point. The modal shows `Комментарий курьеру` only for recipient-door CDEK modes and sends it as `comment` when present, trimmed to CDEK's 255 character limit.
 

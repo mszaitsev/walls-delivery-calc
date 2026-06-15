@@ -483,6 +483,20 @@ $creation = new ShipmentCreationService( $repository, array( new CdekShipmentAda
 $order = new CdekOrderFakeOrder();
 $result = $creation->create( $order, cdek_order_request( DeliveryType::PICKUP, 4 ) );
 cdek_order_assert( $result->success, 'CDEK POST /v2/orders must be accepted.' );
+$postamat_result = $builder->build(
+	cdek_order_request(
+		DeliveryType::PICKUP,
+		4,
+		array(
+			'delivery_point' => 'MSK900',
+			'pickup_point_row' => array(
+				'point_type' => 'POSTAMAT',
+				'point_title' => 'Постамат СДЭК',
+			),
+		)
+	)
+);
+cdek_order_assert( 'MSK900' === (string) ( $postamat_result['delivery_point'] ?? '' ) && ! isset( $postamat_result['to_location'] ), 'CDEK postamat shipment creation must use delivery_point like pickup.' );
 $stored = $repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY );
 cdek_order_assert( 'registration_pending' === (string) $stored['status'] && 'order-uuid-1' === (string) $stored['external_id'], 'Accepted CDEK order must be stored as registration_pending with UUID.' );
 cdek_order_assert( array() === $order->notes, 'Accepted CDEK registration request must not add an order note before CREATED.' );
@@ -492,6 +506,9 @@ cdek_order_assert( ! str_contains( $request_snapshot_json, 'Иван Ивано�
 cdek_order_assert( ! str_contains( $response_snapshot_json, 'Иван Иванов' ) && ! str_contains( $response_snapshot_json, 'buyer@example.com' ), 'CDEK response snapshot must not keep recipient PII.' );
 $blocked = $creation->create( $order, cdek_order_request( DeliveryType::PICKUP, 4 ) );
 cdek_order_assert( ! $blocked->success && 'shipment_already_created' === $blocked->error_code, 'Repeated CDEK creation must be blocked while pending.' );
+
+$metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
+cdek_order_assert( str_contains( $metabox_source, 'Тип точки' ) && str_contains( $metabox_source, 'cdek_pickup_type_label' ) && str_contains( $metabox_source, 'Постамат СДЭК' ) && str_contains( $metabox_source, 'ПВЗ СДЭК' ), 'CDEK shipment modal must show known pickup point type label.' );
 
 $http_post_invalid = new CdekOrderFakeHttp();
 $http_post_invalid->post_responses[] = array( 'entity' => array( 'uuid' => 'invalid-uuid' ), 'requests' => array( array( 'request_uuid' => 'invalid-request-uuid', 'state' => 'INVALID', 'errors' => array( array( 'code' => 'v2_bad', 'message' => 'bad request' ) ) ) ) );

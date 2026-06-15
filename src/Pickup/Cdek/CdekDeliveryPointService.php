@@ -206,12 +206,19 @@ final class CdekDeliveryPointService {
 
 	private function normalize_type( string $type ): string {
 		$type = strtoupper( trim( $type ) );
+		if ( 'ALL' === $type ) {
+			return self::DEFAULT_TYPE;
+		}
+		$type = $this->normalize_point_type( $type );
 
-		return in_array( $type, array( 'ALL', 'PVZ', 'POSTAMAT' ), true ) ? $type : self::DEFAULT_TYPE;
+		return in_array( $type, array( 'PVZ', 'POSTAMAT' ), true ) ? $type : self::DEFAULT_TYPE;
 	}
 
 	private function normalize_point_type( string $type ): string {
 		$type = strtoupper( trim( $type ) );
+		if ( in_array( $type, array( 'LOCKER', 'POSTOMAT' ), true ) ) {
+			return 'POSTAMAT';
+		}
 
 		return in_array( $type, array( 'PVZ', 'POSTAMAT' ), true ) ? $type : 'PVZ';
 	}
