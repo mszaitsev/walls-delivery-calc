@@ -255,26 +255,33 @@ final class CdekBarcodePrintService {
 	 * @param array<string,mixed> $entity
 	 */
 	private function latest_print_status( array $entity ): string {
+		$url = trim( (string) ( $entity['url'] ?? '' ) );
+		if ( '' !== $url ) {
+			$path = parse_url( $url, PHP_URL_PATH );
+			$path = strtolower( (string) ( false !== $path && null !== $path ? $path : $url ) );
+			if ( 4 <= strlen( $path ) && '.pdf' === substr( $path, -4 ) ) {
+				return 'READY';
+			}
+		}
+
 		$statuses = is_array( $entity['statuses'] ?? null ) ? $entity['statuses'] : array();
-		$latest = null;
-		$latest_ts = null;
+		$codes = array();
 		foreach ( $statuses as $row ) {
 			if ( ! is_array( $row ) ) {
 				continue;
 			}
-			$date = trim( (string) ( $row['date_time'] ?? '' ) );
-			$timestamp = '' !== $date ? strtotime( $date ) : false;
-			if ( false !== $timestamp && ( null === $latest_ts || $timestamp > $latest_ts ) ) {
-				$latest_ts = $timestamp;
-				$latest = $row;
+			$code = strtoupper( trim( (string) ( $row['code'] ?? '' ) ) );
+			if ( '' !== $code ) {
+				$codes[] = $code;
 			}
 		}
-		if ( ! is_array( $latest ) ) {
-			$last = end( $statuses );
-			$latest = is_array( $last ) ? $last : array();
+		foreach ( array( 'READY', 'INVALID', 'REMOVED', 'PROCESSING', 'ACCEPTED' ) as $priority ) {
+			if ( in_array( $priority, $codes, true ) ) {
+				return $priority;
+			}
 		}
 
-		return strtoupper( (string) ( $latest['code'] ?? '' ) );
+		return array() !== $codes ? (string) end( $codes ) : '';
 	}
 
 	/**

@@ -1134,8 +1134,40 @@ $barcode_post_count_again = count( array_filter( $barcode_http->requests, static
 cdek_order_assert( 'READY' === (string) ( $barcode_prepared_again['status'] ?? '' ) && $barcode_post_count === $barcode_post_count_again, 'CDEK BARCODE READY cache must avoid repeated print-form POST requests.' );
 
 $GLOBALS['wdc_cdek_order_transients'] = array();
+$barcode_same_time_http = new CdekOrderFakeHttp();
+$barcode_same_time_http->barcode_create_responses[] = array( 'entity' => array( 'uuid' => 'print-same-time-uuid' ) );
+$barcode_same_time_http->barcode_status_responses[] = array(
+	'entity' => array(
+		'uuid' => 'print-same-time-uuid',
+		'statuses' => array(
+			array( 'code' => 'ACCEPTED', 'date_time' => '2026-06-15T19:16:12+0000' ),
+			array( 'code' => 'PROCESSING', 'date_time' => '2026-06-15T19:16:12+0000' ),
+			array( 'code' => 'READY', 'date_time' => '2026-06-15T19:16:12+0000' ),
+		),
+		'url' => '',
+	),
+	'requests' => array( array( 'state' => 'SUCCESSFUL' ) ),
+);
+$same_time_prepare = ( new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_same_time_http ), $settings, $barcode_same_time_http ), static function (): void {}, 1, 0 ) )->prepare_for_order( $barcode_order );
+cdek_order_assert( ! empty( $same_time_prepare['success'] ) && 'READY' === (string) ( $same_time_prepare['status'] ?? '' ), 'CDEK BARCODE print status must prefer READY when statuses share the same date_time.' );
+
+$GLOBALS['wdc_cdek_order_transients'] = array();
+$barcode_url_http = new CdekOrderFakeHttp();
+$barcode_url_http->barcode_create_responses[] = array( 'entity' => array( 'uuid' => 'print-url-uuid' ) );
+$barcode_url_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-url-uuid', 'url' => 'https://api.cdek.ru/v2/print/barcodes/print-url-uuid.pdf', 'statuses' => array( array( 'code' => 'ACCEPTED', 'date_time' => '2026-06-15T19:16:12+0000' ) ) ) );
+$url_prepare = ( new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_url_http ), $settings, $barcode_url_http ), static function (): void {}, 1, 0 ) )->prepare_for_order( $barcode_order );
+cdek_order_assert( ! empty( $url_prepare['success'] ) && 'READY' === (string) ( $url_prepare['status'] ?? '' ), 'CDEK BARCODE print status must treat a PDF entity.url as READY even when the first status is ACCEPTED.' );
+
+$GLOBALS['wdc_cdek_order_transients'] = array();
+$barcode_processing_http = new CdekOrderFakeHttp();
+$barcode_processing_http->barcode_create_responses[] = array( 'entity' => array( 'uuid' => 'print-processing-uuid' ) );
+$barcode_processing_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-processing-uuid', 'statuses' => array( array( 'code' => 'ACCEPTED', 'date_time' => '2026-06-15T19:16:12+0000' ), array( 'code' => 'PROCESSING', 'date_time' => '2026-06-15T19:16:12+0000' ) ) ) );
+$processing_prepare = ( new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_processing_http ), $settings, $barcode_processing_http ), static function (): void {}, 1, 0 ) )->prepare_for_order( $barcode_order );
+cdek_order_assert( ! empty( $processing_prepare['success'] ) && 'PROCESSING' === (string) ( $processing_prepare['status'] ?? '' ), 'CDEK BARCODE print status must prefer PROCESSING over ACCEPTED when READY is absent.' );
+
+$GLOBALS['wdc_cdek_order_transients'] = array();
 $barcode_invalid_http = new CdekOrderFakeHttp();
-$barcode_invalid_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-invalid-uuid', 'statuses' => array( array( 'code' => 'INVALID', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
+$barcode_invalid_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-invalid-uuid', 'statuses' => array( array( 'code' => 'ACCEPTED', 'date_time' => '2026-06-13T10:00:00+0000' ), array( 'code' => 'INVALID', 'date_time' => '2026-06-13T10:00:00+0000' ), array( 'code' => 'PROCESSING', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
 $barcode_invalid_service = new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_invalid_http ), $settings, $barcode_invalid_http ), static function (): void {}, 1, 0 );
 $invalid_prepare = $barcode_invalid_service->prepare_for_order( $barcode_order );
 cdek_order_assert( empty( $invalid_prepare['success'] ) && str_contains( (string) ( $invalid_prepare['message'] ?? '' ), 'СДЭК не смог сформировать этикетку' ), 'CDEK BARCODE INVALID status must return a readable error and clear cache.' );
@@ -1144,7 +1176,7 @@ $GLOBALS['wdc_cdek_order_transients'] = array();
 $barcode_removed_http = new CdekOrderFakeHttp();
 $barcode_removed_http->barcode_create_responses[] = array( 'entity' => array( 'uuid' => 'print-removed-uuid' ) );
 $barcode_removed_http->barcode_create_responses[] = array( 'entity' => array( 'uuid' => 'print-recreated-uuid' ) );
-$barcode_removed_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-removed-uuid', 'statuses' => array( array( 'code' => 'REMOVED', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
+$barcode_removed_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-removed-uuid', 'statuses' => array( array( 'code' => 'ACCEPTED', 'date_time' => '2026-06-13T10:00:00+0000' ), array( 'code' => 'REMOVED', 'date_time' => '2026-06-13T10:00:00+0000' ) ) ) );
 $barcode_removed_http->barcode_status_responses[] = array( 'entity' => array( 'uuid' => 'print-recreated-uuid', 'statuses' => array( array( 'code' => 'READY', 'date_time' => '2026-06-13T10:00:02+0000' ) ) ) );
 $barcode_removed_http->barcode_pdf_responses[] = '%PDF-1.4 recreated';
 $removed_prepare = ( new CdekBarcodePrintService( $barcode_repository, new CdekApiClient( new CdekOAuthTokenService( $settings, $barcode_removed_http ), $settings, $barcode_removed_http ), static function (): void {}, 2, 0 ) )->prepare_for_order( $barcode_order );
