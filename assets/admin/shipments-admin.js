@@ -845,7 +845,6 @@
     const cancelButton = box.querySelector('[data-wdc-cancel-shipment]');
     const removeButton = box.querySelector('[data-wdc-remove-shipment-from-order]');
     const barcodeDownload = box.querySelector('[data-wdc-cdek-barcode-download]');
-    const barcodeInline = box.querySelector('[data-wdc-cdek-barcode-inline]');
     if (box.dataset) box.dataset.hasShipment = hasShipment ? '1' : '0';
     if (openButton) {
       setVisible(openButton, !hasShipment);
@@ -867,15 +866,14 @@
       setVisible(removeButton, canRemove);
       removeButton.disabled = !canRemove;
     }
-    [barcodeDownload, barcodeInline].forEach(function (link) {
-      if (!link) return;
-      setVisible(link, canPrintBarcode);
+    if (barcodeDownload) {
+      setVisible(barcodeDownload, canPrintBarcode);
       if (canPrintBarcode) {
-        link.removeAttribute('aria-disabled');
+        barcodeDownload.removeAttribute('aria-disabled');
       } else {
-        link.setAttribute('aria-disabled', 'true');
+        barcodeDownload.setAttribute('aria-disabled', 'true');
       }
-    });
+    }
   }
 
   function resetShipmentUi(box) {
@@ -1544,25 +1542,101 @@
     if (query.value || context.city || context.postcode || context.address || context.locationId || context.fiasId || context.garId) runSearch('location');
   }
 
-  function markCdekBarcodeDownloadBusy(link) {
-    if (!link || link.classList.contains('is-busy')) return;
+  const CDEK_BARCODE_POLL_INTERVAL_MS = 2000;
+  const CDEK_BARCODE_TIMEOUT_MS = 300000;
+  const CDEK_BARCODE_RESET_MS = 10000;
+
+  function setCdekBarcodeButtonState(link, busy, label) {
+    if (!link) return;
     const originalText = link.getAttribute('data-wdc-original-label') || link.textContent || 'Скачать этикетку';
     link.setAttribute('data-wdc-original-label', originalText);
-    link.setAttribute('aria-disabled', 'true');
-    link.classList.add('is-busy', 'wdc-cdek-barcode-download--busy');
-    link.textContent = 'Формируем этикетку...';
-    window.clearTimeout(link._wdcBarcodeBusyTimer);
-    link._wdcBarcodeBusyTimer = window.setTimeout(function () {
+    if (busy) {
+      link.setAttribute('aria-disabled', 'true');
+      link.classList.add('is-busy', 'wdc-cdek-barcode-download--busy');
+      link.textContent = label || 'Формируем этикетку...';
+    } else {
       link.classList.remove('is-busy', 'wdc-cdek-barcode-download--busy');
       link.removeAttribute('aria-disabled');
-      link.textContent = link.getAttribute('data-wdc-original-label') || 'Скачать этикетку';
-    }, 15000);
+      link.textContent = originalText;
+    }
+  }
+
+  function cdekBarcodeDownloadFrame() {
+    let frame = document.querySelector('[data-wdc-cdek-barcode-download-frame]');
+    if (!frame) {
+      frame = document.createElement('iframe');
+      frame.setAttribute('data-wdc-cdek-barcode-download-frame', '1');
+      frame.hidden = true;
+      frame.style.display = 'none';
+      document.body.appendChild(frame);
+    }
+    return frame;
+  }
+
+  function triggerCdekBarcodeDownload(downloadUrl) {
+    if (!downloadUrl) return;
+    cdekBarcodeDownloadFrame().src = downloadUrl;
+  }
+
+  function requestCdekBarcodeDownload(link) {
+    if (!link || link.classList.contains('is-busy')) return;
+    const box = link.closest('[data-wdc-shipments-metabox]');
+    const startedAt = new Date().getTime();
+
+    const poll = function () {
+      if (new Date().getTime() - startedAt > CDEK_BARCODE_TIMEOUT_MS) {
+        setCdekBarcodeButtonState(link, false);
+        showShipmentToast(box, 'Этикетка СДЭК еще формируется. Повторите попытку позже.', 'warning');
+        return;
+      }
+
+      const data = new FormData();
+      data.append('action', link.dataset.prepareAction || (window.wdcShipmentsAdmin && window.wdcShipmentsAdmin.cdekBarcodePrepareAction) || 'wdc_cdek_barcode_prepare');
+      data.append('nonce', (window.wdcShipmentsAdmin && window.wdcShipmentsAdmin.nonce) || '');
+      data.append('order_id', link.dataset.orderId || '');
+      fetch((window.wdcShipmentsAdmin && window.wdcShipmentsAdmin.ajaxUrl) || (typeof ajaxurl !== 'undefined' ? ajaxurl : ''), {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: data
+      })
+        .then((response) => response.json())
+        .then((payload) => {
+          if (!payload || !payload.success) {
+            throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'СДЭК не смог сформировать этикетку.');
+          }
+          const result = payload.data || {};
+          const status = String(result.status || '').toUpperCase();
+          if (status === 'READY') {
+            setCdekBarcodeButtonState(link, true, 'Скачиваем этикетку...');
+            triggerCdekBarcodeDownload(result.download_url || link.dataset.downloadUrl || link.href || '');
+            window.clearTimeout(link._wdcBarcodeResetTimer);
+            link._wdcBarcodeResetTimer = window.setTimeout(function () {
+              setCdekBarcodeButtonState(link, false);
+            }, CDEK_BARCODE_RESET_MS);
+            return;
+          }
+          if (status === 'ACCEPTED' || status === 'PROCESSING') {
+            window.setTimeout(poll, CDEK_BARCODE_POLL_INTERVAL_MS);
+            return;
+          }
+
+          throw new Error(result.message || 'СДЭК не смог сформировать этикетку.');
+        })
+        .catch((error) => {
+          setCdekBarcodeButtonState(link, false);
+          showShipmentToast(box, error && error.message ? error.message : 'СДЭК не смог сформировать этикетку.', 'error');
+        });
+    };
+
+    setCdekBarcodeButtonState(link, true, 'Формируем этикетку...');
+    poll();
   }
 
   document.addEventListener('click', function (event) {
     const cdekBarcodeDownload = event.target.closest('[data-wdc-cdek-barcode-download]');
     if (cdekBarcodeDownload) {
-      markCdekBarcodeDownloadBusy(cdekBarcodeDownload);
+      event.preventDefault();
+      requestCdekBarcodeDownload(cdekBarcodeDownload);
       return;
     }
 

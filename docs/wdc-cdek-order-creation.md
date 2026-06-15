@@ -1,8 +1,10 @@
 # WDC CDEK Order Creation
 
-Version: 0.51.1.
+Version: 0.51.2.
 
-0.51.1 update: registered CDEK shipments now show `Скачать этикетку` and `Открыть этикетку`. Download keeps the existing admin-post PDF stream and shows a temporary `Формируем этикетку...` busy state while CDEK prepares the PDF; open uses the same endpoint with `mode=inline`, `target=_blank`, and inline PDF disposition. The CDEK raw-status mapping UI moved from the general `WDC -> Статусы` page into `WDC -> Службы доставки -> СДЭК -> Статусы СДЭК`, while keeping the same settings key.
+0.51.2 update: the CDEK label UX now uses one managed `Скачать этикетку` action. The old `Открыть этикетку` link was removed. A click starts AJAX preparation, polls CDEK print status every 2 seconds for up to 5 minutes, then downloads the ready PDF through a hidden iframe. Ready print UUIDs are cached for 50 minutes, so repeat downloads reuse the existing BARCODE form instead of posting a new print request. The final `admin-post` PDF endpoint only downloads a ready cached form and no longer creates or long-polls print requests. Saving `Статусы СДЭК` redirects back to the CDEK service tab `cdek_statuses`.
+
+0.51.1 update: registered CDEK shipments gained manager-facing label actions and the CDEK raw-status mapping UI moved from the general `WDC -> Статусы` page into `WDC -> Службы доставки -> СДЭК -> Статусы СДЭК`, while keeping the same settings key.
 
 0.51.0 update: registered CDEK shipments expose BARCODE print actions in the order `Отправления` block. WDC follows the attached CDEK print documentation: it creates the async form with `POST /v2/print/barcodes` using `orders[]`, `copy_count=1`, `format=A6` and `lang=RUS`, polls `GET /v2/print/barcodes/{uuid}` until `READY`, and downloads `GET /v2/print/barcodes/{uuid}.pdf`. Print-form UUIDs and PDF files are not stored, and print creation/download errors are not logged.
 

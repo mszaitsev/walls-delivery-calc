@@ -1,6 +1,8 @@
 # Project Status
 
-0.51.1 note: CDEK shipment label actions now use manager-facing text: `Скачать этикетку` shows a temporary spinner/busy state while the async PDF is formed, and `Открыть этикетку` uses the inline PDF admin-post mode in a new tab. The CDEK status mapping UI moved from the general shipment statuses page into `WDC -> Службы доставки -> СДЭК -> Статусы СДЭК`; storage remains unchanged. The mapping list now covers every order status code from CDEK documentation appendix `Приложение 1. Статусы заказов`.
+0.51.2 note: CDEK label download now runs as an AJAX-controlled flow: the order metabox keeps only `Скачать этикетку`, requests/refreshes BARCODE print status in short polling, caches a READY print UUID for 50 minutes, and downloads the PDF through a hidden iframe. The final PDF endpoint only streams cached READY forms and does not create or long-poll print requests. Saving `Статусы СДЭК` now redirects back to the CDEK service tab.
+
+0.51.1 note: CDEK shipment label actions gained manager-facing wording and the CDEK status mapping UI moved from the general shipment statuses page into `WDC -> Службы доставки -> СДЭК -> Статусы СДЭК`; storage remains unchanged. The mapping list now covers every order status code from CDEK documentation appendix `Приложение 1. Статусы заказов`.
 
 0.51.0 note: CDEK shipments now support BARCODE PDF actions directly in the order shipment metabox. The actions create the documented async CDEK print form (`POST /v2/print/barcodes`, `copy_count=1`, `format=A6`, `lang=RUS`), poll print status until `READY`, and stream the resulting PDF without storing print files or print UUIDs in order meta. The CDEK mapping maps raw CDEK order statuses to the existing universal shipment statuses while leaving CDEK cancel/remove rules based on raw `entity.statuses[]`.
 
