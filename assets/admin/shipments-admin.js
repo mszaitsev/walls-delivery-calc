@@ -1577,6 +1577,7 @@
   }
 
   function triggerCdekBarcodeDownload(downloadUrl) {
+    downloadUrl = String(downloadUrl || '').replace(/&amp;/g, '&');
     if (!downloadUrl) return Promise.reject(new Error('Не удалось скачать этикетку СДЭК.'));
     return fetch(downloadUrl, {
       method: 'GET',

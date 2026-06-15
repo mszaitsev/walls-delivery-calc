@@ -1414,16 +1414,15 @@ final class OrderShipmentsMetabox {
 	}
 
 	private function cdek_barcode_url( int $order_id, string $mode ): string {
-		$url = add_query_arg(
+		return add_query_arg(
 			array(
 				'action' => self::ACTION_CDEK_BARCODE_PDF,
 				'order_id' => $order_id,
 				'mode' => 'download',
+				'_wpnonce' => wp_create_nonce( self::ACTION_CDEK_BARCODE_PDF . '_' . $order_id ),
 			),
 			admin_url( 'admin-post.php' )
 		);
-
-		return wp_nonce_url( $url, self::ACTION_CDEK_BARCODE_PDF . '_' . $order_id );
 	}
 
 	/**
