@@ -720,6 +720,22 @@
     renderShipmentPrice(box, status);
   }
 
+  function shipmentStatusFromResponse(data) {
+    const payload = data || {};
+    const status = Object.assign({}, payload.status || {});
+    ['carrier_key', 'presentation', 'label_actions', 'has_shipment', 'can_update_status', 'can_cancel', 'can_remove_from_order'].forEach(function (key) {
+      if (Object.prototype.hasOwnProperty.call(payload, key) && !Object.prototype.hasOwnProperty.call(status, key)) {
+        status[key] = payload[key];
+      }
+    });
+    if (Array.isArray(payload.label_actions) && !Object.prototype.hasOwnProperty.call(status, 'can_print_barcode')) {
+      status.can_print_barcode = payload.label_actions.some(function (action) {
+        return action && action.key === 'download_label' && !!action.visible;
+      });
+    }
+    return status;
+  }
+
   function setCdekPollingIndicator(box, visible) {
     const indicator = box && box.querySelector ? box.querySelector('[data-wdc-cdek-polling-indicator]') : null;
     if (!indicator) return;
@@ -957,7 +973,7 @@
         if (!payload || !payload.success) {
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : text.errorFallbackMessage);
         }
-        renderShipmentStatus(box, payload.data.status || {});
+        renderShipmentStatus(box, shipmentStatusFromResponse(payload.data));
         if (message) {
           message.dataset.status = 'success';
           message.textContent = payload.data.message || text.updatedToast;
@@ -1109,10 +1125,10 @@
         }
         if (form) form.hidden = true;
         if (input) input.value = '';
-        renderShipmentStatus(box, payload.data.status || {});
+        const statusPayload = shipmentStatusFromResponse(payload.data);
+        renderShipmentStatus(box, statusPayload);
         renderShipmentTechnicalInfo(box, payload.data || {});
         setTrackingDisplay(box, payload.data.tracking_number || payload.data.status && payload.data.status.barcode || '');
-        const statusPayload = payload.data.status || {};
         updateShipmentButtons(box, {
           hasShipment: !!statusPayload.has_shipment,
           canCancel: !!statusPayload.can_cancel,
@@ -1951,8 +1967,9 @@
             preview.textContent = JSON.stringify(payload.data.preview || {}, null, 2);
           }
           if (modal) modal.hidden = true;
-          if (box && payload.data.status) {
-            renderShipmentStatus(box, payload.data.status);
+          const statusPayload = shipmentStatusFromResponse(payload.data);
+          if (box && statusPayload) {
+            renderShipmentStatus(box, statusPayload);
           }
           renderShipmentTechnicalInfo(box, payload.data || {});
           const openButton = box && box.querySelector('[data-wdc-open-shipment-modal]');
@@ -1962,7 +1979,6 @@
             updateButton.disabled = false;
           }
           const text = getPresentation(box);
-          const statusPayload = payload.data.status || {};
           updateShipmentButtons(box, {
             hasShipment: !!statusPayload.has_shipment,
             canCancel: !!statusPayload.can_cancel,

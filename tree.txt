@@ -505,6 +505,7 @@ C:.
 |   |   |       ShipmentStatusesAdminPage.php
 |   |   |
 |   |   +---Application
+|   |   |       CarrierShipmentAdapterRegistry.php
 |   |   |       OrderShipmentDraftFactory.php
 |   |   |       RussianPostShipmentActualCostExtractor.php
 |   |   |       RussianPostShipmentActualCostLookupService.php
@@ -517,6 +518,7 @@ C:.
 |   |   |       ShipmentStatusUpdateService.php
 |   |   |
 |   |   +---Contracts
+|   |   |       CarrierShipmentAdapterInterface.php
 |   |   |       ShipmentCarrierAdapterInterface.php
 |   |   |
 |   |   +---Cdek

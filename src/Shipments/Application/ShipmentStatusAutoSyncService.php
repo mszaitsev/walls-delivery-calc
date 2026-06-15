@@ -4,11 +4,8 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Application;
 
 use Throwable;
-use WallsShop\WDC\Carriers\Cdek\CdekSettings;
-use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
-use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -37,8 +34,9 @@ final class ShipmentStatusAutoSyncService {
 		private ShipmentStatusUpdateService $status_updates,
 		private ?ShipmentOrderStatusMappingService $order_status_mapping = null,
 		private mixed $dispatcher = null,
-		private ?CdekOrderStatusService $cdek_status_updates = null,
-		private mixed $cdek_throttle = null
+		private mixed $cdek_status_updates = null,
+		private mixed $cdek_throttle = null,
+		private ?CarrierShipmentAdapterRegistry $registry = null
 	) {
 	}
 
@@ -156,15 +154,15 @@ final class ShipmentStatusAutoSyncService {
 			}
 			++$stats['shipments_found'];
 			$carrier_key = trim( (string) ( $shipment['carrier_key'] ?? $shipment_key ) );
-			$tracking_number = $this->shipment_tracking_identifier( $shipment, $carrier_key );
 			$universal_status = trim( (string) ( $shipment['universal_status_code'] ?? '' ) );
 
-			if ( '' === $tracking_number ) {
-				$this->skip( $stats, 'missing_tracking_number' );
-				continue;
-			}
 			if ( ! $this->supports_carrier( $carrier_key ) ) {
 				$this->skip( $stats, 'unsupported_carrier' );
+				continue;
+			}
+			$tracking_number = $this->shipment_tracking_identifier( $shipment, $carrier_key );
+			if ( '' === $tracking_number ) {
+				$this->skip( $stats, 'missing_tracking_number' );
 				continue;
 			}
 			if ( in_array( $universal_status, self::TERMINAL_STATUSES, true ) ) {
@@ -187,45 +185,35 @@ final class ShipmentStatusAutoSyncService {
 	}
 
 	private function supports_carrier( string $carrier_key ): bool {
-		return in_array( $carrier_key, array( RussianPostDomesticSettings::CARRIER_KEY, CdekSettings::CARRIER_KEY ), true );
+		$adapter = $this->registry instanceof CarrierShipmentAdapterRegistry ? $this->registry->get( $carrier_key ) : null;
+
+		return null !== $adapter && $adapter->supports_status_auto_sync();
 	}
 
 	/**
 	 * @return array<string,mixed>
 	 */
 	private function dispatch( string $carrier_key, object $order, string $shipment_key ): array {
-		if ( CdekSettings::CARRIER_KEY === $carrier_key ) {
-			$this->throttle_cdek();
-		}
 		if ( is_callable( $this->dispatcher ) ) {
 			$result = call_user_func( $this->dispatcher, $carrier_key, $order, $shipment_key );
 			return is_array( $result ) ? $result : array( 'success' => false, 'message' => 'Shipment dispatcher returned an invalid result.' );
 		}
 
-		switch ( $carrier_key ) {
-			case RussianPostDomesticSettings::CARRIER_KEY:
-				return $this->status_updates->update_russian_post( $order, $shipment_key );
-			case CdekSettings::CARRIER_KEY:
-				return $this->update_cdek( $order );
-			default:
-				return array( 'success' => false, 'message' => 'Unsupported carrier.' );
+		$adapter = $this->registry instanceof CarrierShipmentAdapterRegistry ? $this->registry->get( $carrier_key ) : null;
+		if ( null === $adapter ) {
+			return array( 'success' => false, 'message' => 'Unsupported carrier.' );
 		}
-	}
-
-	/**
-	 * @return array<string,mixed>
-	 */
-	private function update_cdek( object $order ): array {
-		if ( ! $this->cdek_status_updates instanceof CdekOrderStatusService ) {
-			return array( 'success' => false, 'message' => 'CDEK status service is unavailable.' );
+		$throttle = max( 0, $adapter->auto_sync_throttle_microseconds() );
+		if ( $throttle > 0 ) {
+			$this->throttle( $throttle );
 		}
 
-		$result = $this->cdek_status_updates->update( $order );
+		$result = $adapter->update_status( $order, $shipment_key );
 		if ( empty( $result['success'] ) || ! $this->order_status_mapping instanceof ShipmentOrderStatusMappingService ) {
 			return $result;
 		}
 
-		$shipment = $this->repository->find_by_carrier( $order, CdekSettings::CARRIER_KEY );
+		$shipment = $this->repository->find_by_carrier( $order, $carrier_key );
 		if ( is_array( $shipment ) ) {
 			$result['order_status_mapping'] = $this->order_status_mapping->apply( $order, $shipment, (string) ( $shipment['universal_status_code'] ?? '' ) );
 		}
@@ -233,14 +221,14 @@ final class ShipmentStatusAutoSyncService {
 		return $result;
 	}
 
-	private function throttle_cdek(): void {
+	private function throttle( int $microseconds ): void {
 		if ( is_callable( $this->cdek_throttle ) ) {
-			call_user_func( $this->cdek_throttle, 10000 );
+			call_user_func( $this->cdek_throttle, $microseconds );
 			return;
 		}
 
 		if ( function_exists( 'usleep' ) ) {
-			usleep( 10000 );
+			usleep( $microseconds );
 		}
 	}
 
@@ -248,15 +236,9 @@ final class ShipmentStatusAutoSyncService {
 	 * @param array<string,mixed> $shipment
 	 */
 	private function shipment_tracking_identifier( array $shipment, string $carrier_key ): string {
-		$keys = CdekSettings::CARRIER_KEY === $carrier_key
-			? array( 'tracking_number', 'barcode', 'cdek_number', 'external_id', 'uuid', 'entity_uuid', 'request_uuid' )
-			: array( 'tracking_number', 'barcode' );
-
-		foreach ( $keys as $key ) {
-			$value = trim( (string) ( $shipment[ $key ] ?? '' ) );
-			if ( '' !== $value ) {
-				return $value;
-			}
+		$adapter = $this->registry instanceof CarrierShipmentAdapterRegistry ? $this->registry->get( $carrier_key ) : null;
+		if ( null !== $adapter ) {
+			return $adapter->tracking_identifier( $shipment );
 		}
 
 		return '';

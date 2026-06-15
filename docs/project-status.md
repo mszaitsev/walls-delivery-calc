@@ -1,5 +1,11 @@
 # Project Status
 
+0.53.2 note: CDEK BARCODE print status detection no longer uses `date_time` ordering. For `GET /v2/print/barcodes/{uuid}`, WDC now treats a PDF `entity.url` as `READY`, then applies print-form status priority `READY`, `INVALID`, `REMOVED`, `PROCESSING`, `ACCEPTED`. This fixes CDEK responses where all print statuses have the same timestamp and the form is already downloadable.
+
+0.53.1 note: CDEK BARCODE preparation now recovers from print requests that stay in `ACCEPTED`/`PROCESSING`: pending print UUIDs track creation/check timestamps and check counts, and after 60 seconds or more than 30 checks WDC recreates the print request while keeping READY labels cached for 50 minutes. Shipment AJAX actions now return one fresh adapter-built UI payload after create/update/cancel/remove/manual attach, so Russian Post buttons switch immediately to the saved-shipment state after AJAX create or status refresh.
+
+0.53.0 note: the order `Отправления` lifecycle now has a shared carrier action layer for the current carriers. `CarrierShipmentAdapterInterface` and `CarrierShipmentAdapterRegistry` register Russian Post and CDEK adapters for presentation labels, status payloads, manual attach, cancel, local remove, label actions and auto-sync dispatch. `OrderShipmentsMetabox` now delegates update/cancel/remove/manual attach through the registry, CDEK label download is exposed as an adapter label action, and `ShipmentStatusAutoSyncService` uses adapter support/tracking/throttle/update hooks instead of hardcoded carrier dispatch.
+
 0.52.0 note: CDEK now participates in the shared shipment status auto-sync controlled by `WDC -> Статусы -> Автообновление статусов отправлений`. Automatic and manual bulk runs dispatch CDEK shipments through `CdekOrderStatusService`, reuse raw CDEK latest-status selection, save universal status mapping, respect terminal universal statuses, throttle CDEK status calls to about 100 rps, and report `updates_by_carrier[cdek]` in diagnostics. The CDEK service `Расчет` tab renamed sender city to its real door-origin use, and the CDEK service `Правила` tab now has a dedicated test calculator with city resolution, one-package CDEK tariff calculation and before/after rules output.
 
 0.51.3 note: CDEK label download no longer relies on a hidden iframe after BARCODE `READY`. The admin script downloads the ready PDF with `fetch()`, validates HTTP/PDF/blob state, starts a temporary anchor download from an Object URL, and shows a visible error toast when the endpoint returns an error or non-PDF response. The backend ready-PDF path now rejects empty, failed, or explicit non-PDF responses.
@@ -231,7 +237,7 @@
 - `RussianPostTrackingStatusMapper` contains the fixed Russian Post operation/attribute mapping, including pickup/courier corrections and `type:-` fallback.
 - Manual metabox status refresh stores universal status, raw carrier operation data, checked timestamp and terminal marker in `_wdc_shipments`.
 - `ShipmentStatusAutoSyncCron` registers hook `wdc_shipment_status_autosync`, schedule `wdc_every_6_hours` and keeps the event scheduled even when disabled.
-- `ShipmentStatusAutoSyncService` scans selected WooCommerce order statuses, skips missing tracking/unsupported carriers/terminal tracking refreshes, dispatches Russian Post domestic updates and stores diagnostics.
+- `ShipmentStatusAutoSyncService` scans selected WooCommerce order statuses, skips missing tracking/unsupported carriers/terminal tracking refreshes, dispatches supported carriers through `CarrierShipmentAdapterRegistry` and stores diagnostics.
 - Terminal statuses still run order status mapping against saved shipment state.
 - `ShipmentOrderStatusMappingService` applies universal shipment status -> WooCommerce order status mapping when enabled, validates target statuses from `wc_get_order_statuses()`, updates orders and adds a compact private WDC note only when the order status actually changes.
 
@@ -245,15 +251,15 @@
 
 - Checkout UX is functional, but full browser-storage TTL behavior, final edge-case stabilization and carrier-neutral pickup orchestration for future carriers remain.
 - Order admin recalculation has the full manager workflow for previewing rates, choosing pickup/courier, saving delivery, replacing shipping items and adding systematic notes; remaining work is real-store QA and carrier expansion.
-- Shipment runtime is strong for Russian Post domestic manual operations, but carrier-neutral shipment lifecycle for other carriers is not implemented.
+- Shipment runtime has a shared carrier-action adapter layer for Russian Post domestic and CDEK; future carriers still need their own adapters and runtime support.
 - Shipment tracking has current status refresh and autosync, but no full status event history/timeline UI.
-- Shipment autosync supports Russian Post domestic only and scans all selected orders without advanced batching/pagination controls.
+- Shipment autosync supports Russian Post domestic and CDEK through adapters, but still scans all selected orders without advanced batching/pagination controls.
 - Operations diagnostics exist, but production monitoring, log/document rotation and long-running import hardening remain limited.
 - Documentation is mostly current in active Russian Post/status docs, but older foundation docs still contain stage-specific historical wording.
 
 ## Не реализовано
 
-- CDEK shipments/orders, statuses, webhooks and print forms.
+- CDEK webhooks and persistent print-form storage.
 - Permanent FIAS/GAR -> CDEK `city_code` mapping/storage.
 - DPD runtime adapter, settings, rates, pickup/courier flow, shipments and statuses.
 - Yandex Delivery runtime adapter, pricing, pickup/courier flow and future offer confirmation.
@@ -271,11 +277,11 @@
 - The plugin is still fresh-install oriented; production data migration compatibility is limited to the active migration path documented in current files.
 - Russian Post shipment documents are intentionally prepared manually in the Russian Post account; WDC does not call Forms API and does not generate labels/F103.
 - Russian Post shipment creation is manual from the WooCommerce order admin metabox; there is no automatic creation on checkout/order placement.
-- Autosync is carrier-neutral in shape but has only the Russian Post domestic dispatcher in production code.
+- Autosync is carrier-neutral in dispatch shape for Russian Post domestic and CDEK, but high-volume batching for more carriers is not yet designed.
 - Autosync uses selected order statuses and `wc_get_orders(limit=-1)`; high-volume production batching is not yet designed.
 - Terminal statuses skip carrier API refresh and only run order status mapping against the saved shipment state.
 - Actual-cost comparison depends on `backlog/search` returning total fields and on checkout calculation data having `api_base_price_rub`.
-- Courier shipment creation depends on Russian Post address normalization; failed/stale normalization blocks create.
+- Courier shipment creation still depends on each carrier's address-preparation path; failed/stale normalization blocks create.
 - Admin PВЗ selection for shipments uses the local Russian Post pickup database and does not recalculate checkout tariffs.
 - Pickup map production implementation is Russian Post-specific, even though generic pickup domain/storage exists.
 - International Russian Post remains quote-only.

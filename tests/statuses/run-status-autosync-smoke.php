@@ -8,11 +8,15 @@ use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Admin\ShipmentStatusesAdminPage;
+use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\ShipmentOrderStatusMappingService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncCron;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusAutoSyncService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 
 defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
 
@@ -157,6 +161,41 @@ final class StatusAutoSyncSmokeOrder {
 	public function meta_snapshot(): array { return $this->meta; }
 }
 
+final class StatusAutoSyncFakeAdapter implements CarrierShipmentAdapterInterface {
+	public function __construct(
+		private string $carrier_key,
+		private array &$calls,
+		private int $throttle = 0
+	) {
+	}
+
+	public function carrier_key(): string { return $this->carrier_key; }
+	public function supports( ShipmentCreateRequest $request ): bool { return $request->carrier_key === $this->carrier_key; }
+	public function build_safe_payload_preview( ShipmentCreateRequest $request ): array { return array(); }
+	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult { return new ShipmentCreateResult( false ); }
+	public function presentation(): array { return array( 'carrier_label' => $this->carrier_key, 'status_title' => $this->carrier_key, 'tracking_label' => 'tracking' ); }
+	public function status_payload( object $order, array $shipment ): array { return $shipment; }
+	public function update_status( object $order, string $shipment_key = '' ): array {
+		$this->calls[] = array( $this->carrier_key, $order->get_id(), $shipment_key );
+		return array( 'success' => true, 'message' => 'ok' );
+	}
+	public function attach_manual( object $order, array $payload ): array { return array( 'success' => true ); }
+	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array { return array( 'success' => true ); }
+	public function remove_from_order( object $order, string $shipment_key = '' ): array { return array( 'success' => true ); }
+	public function label_actions( object $order, array $shipment ): array { return array(); }
+	public function supports_status_auto_sync(): bool { return true; }
+	public function tracking_identifier( array $shipment ): string {
+		foreach ( array( 'tracking_number', 'barcode', 'cdek_number', 'external_id', 'uuid', 'entity_uuid', 'request_uuid' ) as $key ) {
+			$value = trim( (string) ( $shipment[ $key ] ?? '' ) );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+		return '';
+	}
+	public function auto_sync_throttle_microseconds(): int { return $this->throttle; }
+}
+
 $GLOBALS['wdc_status_autosync_options'] = array();
 $GLOBALS['wdc_status_autosync_transients'] = array();
 $GLOBALS['wdc_status_autosync_events'] = array();
@@ -168,7 +207,7 @@ $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/
 $settings_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Infrastructure/Settings/SettingsRepository.php' );
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/ShipmentStatusesAdminPage.php' );
 status_autosync_assert( str_contains( $plugin_source, '$this->container->register( ShipmentStatusAutoSyncService::class' ) && str_contains( $plugin_source, '$this->container->get( SettingsRepository::class )' ) && str_contains( $plugin_source, '$this->container->get( OrderShipmentRepository::class )' ) && str_contains( $plugin_source, '$this->container->get( ShipmentStatusUpdateService::class )' ), 'Plugin container must explicitly register ShipmentStatusAutoSyncService dependencies.' );
-status_autosync_assert( str_contains( $plugin_source, 'new ShipmentStatusAutoSyncService( $this->container->get( SettingsRepository::class ), $this->container->get( OrderShipmentRepository::class ), $this->container->get( ShipmentStatusUpdateService::class ), $this->container->get( ShipmentOrderStatusMappingService::class ), null, $this->container->get( CdekOrderStatusService::class ) )' ), 'ShipmentStatusAutoSyncService must receive ShipmentOrderStatusMappingService and CdekOrderStatusService from the container.' );
+status_autosync_assert( str_contains( $plugin_source, '$this->container->register( CarrierShipmentAdapterRegistry::class' ) && str_contains( $plugin_source, '$this->container->get( CarrierShipmentAdapterRegistry::class )' ), 'Plugin container must register and inject CarrierShipmentAdapterRegistry.' );
 status_autosync_assert( str_contains( $plugin_source, '$this->container->register( ShipmentStatusAutoSyncCron::class' ) && str_contains( $plugin_source, '$this->container->get( ShipmentStatusAutoSyncService::class )' ), 'Plugin container must explicitly register ShipmentStatusAutoSyncCron dependency.' );
 status_autosync_assert( str_contains( $plugin_source, '$this->container->register( ShipmentOrderStatusMappingService::class' ) && str_contains( $plugin_source, '$this->container->get( ShipmentOrderStatusMappingService::class )' ), 'Plugin container must register and inject ShipmentOrderStatusMappingService.' );
 status_autosync_assert( ! str_contains( $admin_source, '$this->settings->replace(' ) && str_contains( $admin_source, '$this->settings->set(' ), 'Statuses settings page must use targeted settings saves instead of replace(all()+...).' );
@@ -180,19 +219,23 @@ $order_status_mapping = new ShipmentOrderStatusMappingService( $settings );
 $status_updates = ( new ReflectionClass( ShipmentStatusUpdateService::class ) )->newInstanceWithoutConstructor();
 $dispatches = array();
 $cdek_sleeps = array();
+$registry = new CarrierShipmentAdapterRegistry(
+	array(
+		new StatusAutoSyncFakeAdapter( RussianPostDomesticSettings::CARRIER_KEY, $dispatches, 0 ),
+		new StatusAutoSyncFakeAdapter( CdekSettings::CARRIER_KEY, $dispatches, 10000 ),
+	)
+);
 $service = new ShipmentStatusAutoSyncService(
 	$settings,
 	$repository,
 	$status_updates,
 	$order_status_mapping,
-	function ( string $carrier_key, object $order, string $shipment_key ) use ( &$dispatches ): array {
-		$dispatches[] = array( $carrier_key, $order->get_id(), $shipment_key );
-		return array( 'success' => true, 'message' => 'ok' );
-	},
+	null,
 	null,
 	function ( int $microseconds ) use ( &$cdek_sleeps ): void {
 		$cdek_sleeps[] = $microseconds;
-	}
+	},
+	$registry
 );
 
 status_autosync_assert( true === $service->enabled(), 'Autosync must be enabled by default.' );
@@ -338,7 +381,7 @@ status_autosync_assert( 6 === $stats['shipments_found'], 'Autosync must count di
 status_autosync_assert( 2 === $stats['shipments_updated'], 'Russian Post and CDEK non-terminal supported shipments with tracking must update.' );
 status_autosync_assert( 2 === count( $dispatches ) && RussianPostDomesticSettings::CARRIER_KEY === $dispatches[0][0] && 102 === $dispatches[0][1] && CdekSettings::CARRIER_KEY === $dispatches[1][0] && 105 === $dispatches[1][1], 'russian_post_domestic and cdek must dispatch through the status updater path.' );
 status_autosync_assert( 2 === (int) $stats['skip_reasons']['terminal_status_no_tracking_update'], 'Terminal universal statuses must skip tracking updates for every carrier.' );
-status_autosync_assert( 2 === (int) $stats['order_statuses_skipped'], 'Terminal universal statuses must still collect skipped order status mapping diagnostics when mapping is disabled.' );
+status_autosync_assert( 4 === (int) $stats['order_statuses_skipped'], 'Updated and terminal shipments must collect skipped order status mapping diagnostics when mapping is disabled.' );
 status_autosync_assert( 1 === (int) $stats['skip_reasons']['missing_tracking_number'], 'Shipments without tracking number or barcode must be skipped.' );
 status_autosync_assert( 1 === (int) $stats['skip_reasons']['unsupported_carrier'], 'Unsupported carriers must be skipped.' );
 status_autosync_assert( 1 === (int) $stats['updates_by_carrier'][ RussianPostDomesticSettings::CARRIER_KEY ] && 1 === (int) $stats['updates_by_carrier'][ CdekSettings::CARRIER_KEY ], 'Diagnostics updates_by_carrier must count Russian Post and CDEK updates.' );

@@ -10,6 +10,7 @@ use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
 use WallsShop\WDC\Shipments\Contracts\ShipmentCarrierAdapterInterface;
+use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -17,7 +18,10 @@ final class CdekShipmentAdapter implements ShipmentCarrierAdapterInterface {
 	public function __construct(
 		private CdekApiClient $client,
 		private CdekCreateRequestBuilder $builder,
-		private ?Logger $logger = null
+		private ?Logger $logger = null,
+		private ?OrderShipmentRepository $repository = null,
+		private ?CdekOrderStatusService $status_updates = null,
+		private ?CdekBarcodePrintService $barcode_print = null
 	) {
 	}
 
@@ -27,6 +31,141 @@ final class CdekShipmentAdapter implements ShipmentCarrierAdapterInterface {
 
 	public function supports( ShipmentCreateRequest $request ): bool {
 		return CdekSettings::CARRIER_KEY === $request->carrier_key;
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	public function presentation(): array {
+		return array(
+			'carrier_label' => 'СДЭК',
+			'status_title' => 'Статус СДЭК',
+			'tracking_label' => 'Номер СДЭК',
+			'create_button_label' => 'Создать отправление СДЭК',
+			'manual_attach_button_label' => 'Внести номер СДЭК вручную',
+			'cancel_button_label' => 'Отменить отправление в СДЭК',
+			'remove_button_label' => 'Удалить из заказа',
+			'update_status_button_label' => 'Обновить статус',
+			'manual_attach_placeholder' => 'Номер СДЭК',
+			'manual_attach_help' => 'Введите номер СДЭК для поиска и привязки отправления.',
+			'created_toast' => 'Заявка на регистрацию СДЭК принята.',
+			'updated_toast' => 'Статус СДЭК обновлен.',
+			'cancel_success_toast' => 'Отправление СДЭК отменено.',
+			'remove_success_toast' => 'Данные СДЭК-отправления удалены из заказа.',
+			'error_fallback_message' => 'Не удалось получить статус СДЭК.',
+			'polling_timeout_message' => 'Автоматическая проверка завершена. Если статус еще не обновился, воспользуйтесь кнопкой «Обновить статус».',
+			'registration_error_toast' => 'Регистрация СДЭК завершилась ошибкой.',
+			'registration_success_toast' => 'Регистрация СДЭК завершена успешно.',
+			'auto_poll_registration' => '1',
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 * @return array<string,mixed>
+	 */
+	public function status_payload( object $order, array $shipment ): array {
+		if ( $this->status_updates instanceof CdekOrderStatusService ) {
+			return $this->status_updates->status_payload( $shipment, $order );
+		}
+
+		return array(
+			'carrier_key' => CdekSettings::CARRIER_KEY,
+			'has_shipment' => array() !== $shipment,
+			'barcode' => $this->tracking_identifier( $shipment ),
+			'can_update_status' => array() !== $shipment,
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function update_status( object $order, string $shipment_key = '' ): array {
+		if ( ! $this->status_updates instanceof CdekOrderStatusService ) {
+			return array( 'success' => false, 'message' => 'CDEK status service is unavailable.' );
+		}
+
+		return $this->status_updates->update( $order );
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function attach_manual( object $order, array $payload ): array {
+		if ( ! $this->status_updates instanceof CdekOrderStatusService ) {
+			return array( 'success' => false, 'message' => 'Ручное внесение номера СДЭК недоступно.' );
+		}
+
+		return $this->status_updates->attach_by_cdek_number( $order, (string) ( $payload['barcode'] ?? $payload['tracking_number'] ?? '' ) );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array {
+		if ( ! $this->status_updates instanceof CdekOrderStatusService ) {
+			return array( 'success' => false, 'message' => 'Отмена СДЭК недоступна.' );
+		}
+
+		return $this->status_updates->cancel_created_order( $order );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function remove_from_order( object $order, string $shipment_key = '' ): array {
+		if ( ! $this->status_updates instanceof CdekOrderStatusService ) {
+			return array( 'success' => false, 'message' => 'Локальное удаление СДЭК недоступно.' );
+		}
+
+		return $this->status_updates->remove_local_if_allowed( $order );
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function label_actions( object $order, array $shipment ): array {
+		$status = $this->status_payload( $order, $shipment );
+		if ( ! $this->barcode_print instanceof CdekBarcodePrintService || empty( $status['can_print_barcode'] ) ) {
+			return array();
+		}
+
+		return array(
+			array(
+				'key' => 'download_label',
+				'label' => 'Скачать этикетку',
+				'type' => 'ajax_download',
+				'visible' => true,
+				'data' => array(
+					'prepare_action' => 'wdc_cdek_barcode_prepare',
+					'requires_ready_download_url' => true,
+				),
+			),
+		);
+	}
+
+	public function supports_status_auto_sync(): bool {
+		return true;
+	}
+
+	/**
+	 * @param array<string,mixed> $shipment
+	 */
+	public function tracking_identifier( array $shipment ): string {
+		foreach ( array( 'tracking_number', 'barcode', 'cdek_number', 'external_id', 'uuid', 'entity_uuid', 'request_uuid' ) as $key ) {
+			$value = trim( (string) ( $shipment[ $key ] ?? '' ) );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		return '';
+	}
+
+	public function auto_sync_throttle_microseconds(): int {
+		return 10000;
 	}
 
 	/**
