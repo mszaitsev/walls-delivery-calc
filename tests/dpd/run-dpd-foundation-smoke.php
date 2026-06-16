@@ -198,14 +198,14 @@ dpd_smoke_assert( false === $dpd_service->enabled, 'DPD delivery service must be
 dpd_smoke_assert( $services->is_predefined_service_key( DpdSettings::SERVICE_KEY ), 'DPD service must be predefined.' );
 
 $registry = new CarrierRegistry();
-dpd_smoke_assert( ! $registry->has( DpdSettings::CARRIER_KEY ), 'DPD runtime quote carrier must not be registered in foundation smoke.' );
+dpd_smoke_assert( ! $registry->has( DpdSettings::CARRIER_KEY ), 'Empty test registry must start without DPD before explicit runtime registration.' );
 $services->update_service( (int) $dpd_service->id, array( 'enabled' => 1 ) );
 $enabled_dpd = $services->find_by_service_key( DpdSettings::SERVICE_KEY );
 $service_registry = new DeliveryServiceRegistry( $services, $registry );
 dpd_smoke_assert( null !== $enabled_dpd && true === $enabled_dpd->enabled, 'DPD service enabled flag must be stored in common delivery service settings.' );
-dpd_smoke_assert( null === $service_registry->carrier_for( $enabled_dpd ), 'Enabled DPD foundation service must not resolve to a checkout runtime carrier.' );
+dpd_smoke_assert( null === $service_registry->carrier_for( $enabled_dpd ), 'Enabled DPD service must still depend on explicit checkout registry wiring.' );
 $shipment_registry = new CarrierShipmentAdapterRegistry();
-dpd_smoke_assert( ! $shipment_registry->has( DpdSettings::CARRIER_KEY ), 'DPD shipment adapter must not be registered at foundation stage.' );
+dpd_smoke_assert( ! $shipment_registry->has( DpdSettings::CARRIER_KEY ), 'DPD shipment adapter must not be registered at checkout-runtime stage.' );
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
@@ -213,8 +213,8 @@ dpd_smoke_assert( str_contains( $admin_source, 'save_dpd_settings' ) && str_cont
 dpd_smoke_assert( str_contains( $admin_source, 'render_dpd_geography_action_result' ) && str_contains( $admin_source, 'save_geography_action_result' ), 'Delivery service admin must render and save DPD geography action results.' );
 dpd_smoke_assert( str_contains( $admin_source, 'DPD SFTP import' ) && str_contains( $admin_source, 'DPD DaData fallback' ), 'DPD geography actions must save visible result titles.' );
 dpd_smoke_assert( str_contains( $admin_source, 'check_admin_referer( \'wdc_delivery_services\' )' ) && str_contains( $admin_source, 'current_user_can( AdminMenu::CAPABILITY )' ), 'Admin DPD actions must remain behind nonce and capability checks.' );
-dpd_smoke_assert( ! str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'Plugin must not register a DPD shipment adapter at foundation stage.' );
-dpd_smoke_assert( ! str_contains( $plugin_source, 'DpdCarrier' ), 'Plugin must not register a DPD runtime quote carrier at foundation stage.' );
+dpd_smoke_assert( str_contains( $plugin_source, 'DpdQuoteCarrier' ), 'Plugin must register the DPD checkout runtime quote carrier.' );
+dpd_smoke_assert( ! str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'Plugin must not register a DPD shipment adapter at checkout-runtime stage.' );
 dpd_smoke_assert( ! str_contains( $admin_source, 'test-client-key' ) && ! str_contains( $admin_source, 'production-client-key' ), 'Admin source must not contain DPD credentials.' );
 
 echo "DPD foundation smoke test passed.\n";

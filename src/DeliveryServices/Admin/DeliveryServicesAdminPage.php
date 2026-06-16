@@ -213,7 +213,7 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
-		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'test_dpd_tariff_calculation' ), true ) ) {
+		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'test_dpd_tariff_calculation' ), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -224,7 +224,7 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_tariffs' === $action ) {
 				$data = array();
 			}
-			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'test_dpd_tariff_calculation' ), true ) ) {
+			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'test_dpd_tariff_calculation' ), true ) ) {
 				$data = array();
 			}
 			if ( $id > 0 && array() !== $data ) {
@@ -244,6 +244,10 @@ final class DeliveryServicesAdminPage {
 				}
 				if ( $service instanceof DeliveryService && CdekSettings::SERVICE_KEY === $service->service_key && null !== $service->id ) {
 					$this->save_cdek_main_settings( (int) $service->id );
+				}
+				if ( $service instanceof DeliveryService && $this->is_dpd_service( $service ) && $this->dpd_settings instanceof DpdSettings ) {
+					$this->dpd_settings->save_runtime_titles_from_admin( $_POST );
+					$this->clear_delivery_quote_cache();
 				}
 			}
 			if ( 'save_calculation' === $action && $this->settings instanceof DeliveryServiceSettingsRepository ) {
@@ -285,6 +289,10 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_cdek_tariffs' === $action && $this->cdek_tariffs instanceof CdekTariffRepository ) {
 				$this->cdek_tariffs->save_admin_rows( $this->sanitize_cdek_tariffs_from_post() );
 				delete_transient( $this->cdek_tariff_preview_transient_key() );
+				$this->clear_delivery_quote_cache();
+			}
+			if ( 'save_dpd_runtime_tariffs' === $action && $this->dpd_settings instanceof DpdSettings ) {
+				$this->dpd_settings->save_runtime_tariffs_from_admin( $_POST );
 				$this->clear_delivery_quote_cache();
 			}
 			if ( 'bulk_cdek_tariffs' === $action && $this->cdek_tariffs instanceof CdekTariffRepository ) {
@@ -501,12 +509,12 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'test_dpd_tariff_calculation' ), true ) ) {
+		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'test_dpd_tariff_calculation' ), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'main',
 				'save_calculation' => 'calculation',
-				'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync' => 'tariffs',
+				'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs' => 'tariffs',
 				'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import' => 'russian_post_pickup',
 				'save_api_credentials' => 'api_credentials',
 				'save_shipments' => 'shipments',
@@ -713,6 +721,7 @@ final class DeliveryServicesAdminPage {
 			$tabs['cdek_statuses'] = 'Статусы СДЭК';
 		}
 		if ( $this->is_dpd_service( $service ) ) {
+			$tabs['tariffs'] = 'Тарифы';
 			$tabs['dpd_settings'] = 'Данные для входа';
 			$tabs['dpd_geography'] = 'DPD География';
 			$tabs['dpd_tariff'] = 'DPD Расчет';
@@ -788,6 +797,11 @@ final class DeliveryServicesAdminPage {
 					<tr><th colspan="2"><h3><?php echo esc_html__( 'Названия способов доставки', 'walls-delivery-calc' ); ?></h3></th></tr>
 					<?php $this->text_row( 'pickup_method_title', __( 'Название варианта до пункта выдачи', 'walls-delivery-calc' ), (string) ( $cdek['pickup_method_title'] ?? CdekSettings::DEFAULT_PICKUP_METHOD_TITLE ) ); ?>
 					<?php $this->text_row( 'courier_method_title', __( 'Название варианта курьером', 'walls-delivery-calc' ), (string) ( $cdek['courier_method_title'] ?? CdekSettings::DEFAULT_COURIER_METHOD_TITLE ) ); ?>
+				<?php elseif ( $this->is_dpd_service( $service ) && $this->dpd_settings instanceof DpdSettings ) : ?>
+					<tr><th scope="row"><?php echo esc_html__( 'Страны', 'walls-delivery-calc' ); ?></th><td><code>RU</code><p class="description"><?php echo esc_html__( 'DPD на текущем этапе доступен только для России.', 'walls-delivery-calc' ); ?></p><input type="hidden" name="countries" value="RU"></td></tr>
+					<tr><th colspan="2"><h3><?php echo esc_html__( 'Названия способов доставки', 'walls-delivery-calc' ); ?></h3></th></tr>
+					<?php $this->text_row( DpdSettings::RUNTIME_PICKUP_TITLE_KEY, __( 'Название варианта до пункта выдачи', 'walls-delivery-calc' ), $this->dpd_settings->runtime_pickup_title() ); ?>
+					<?php $this->text_row( DpdSettings::RUNTIME_COURIER_TITLE_KEY, __( 'Название варианта курьером', 'walls-delivery-calc' ), $this->dpd_settings->runtime_courier_title() ); ?>
 				<?php elseif ( in_array( $service->availability_mode, array( DeliveryService::AVAILABILITY_SELECTED_COUNTRIES, DeliveryService::AVAILABILITY_ALL_EXCEPT_SELECTED ), true ) ) : ?>
 					<?php $this->text_row( 'countries', __( 'Countries', 'walls-delivery-calc' ), implode( ',', $this->countries->countries( (int) $service->id ) ) ); ?>
 				<?php else : ?>
@@ -1569,6 +1583,10 @@ final class DeliveryServicesAdminPage {
 			$this->render_cdek_tariffs_tab( $service );
 			return;
 		}
+		if ( $this->is_dpd_service( $service ) ) {
+			$this->render_dpd_runtime_tariffs_tab( $service );
+			return;
+		}
 		if ( ! $this->is_domestic_service( $service ) ) {
 			return;
 		}
@@ -1601,6 +1619,50 @@ final class DeliveryServicesAdminPage {
 		<?php submit_button( __( 'Сохранить тарифы', 'walls-delivery-calc' ) ); ?>
 		</form>
 		<p><?php echo esc_html__( 'Лимиты веса можно оставить пустыми. Расчет использует вес товаров с учетом настроек упаковки службы; pack для API всегда равен 99.', 'walls-delivery-calc' ); ?></p>
+		<?php
+	}
+
+	private function render_dpd_runtime_tariffs_tab( DeliveryService $service ): void {
+		if ( ! $this->dpd_settings instanceof DpdSettings ) {
+			echo '<p>' . esc_html__( 'Настройки DPD недоступны.', 'walls-delivery-calc' ) . '</p>';
+			return;
+		}
+		$enabled = array_fill_keys( $this->dpd_settings->runtime_enabled_service_codes(), true );
+		$titles = $this->dpd_settings->runtime_tariff_titles();
+		?>
+		<form method="post" style="margin-top:16px;max-width:1120px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="save_dpd_runtime_tariffs">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<h3><?php echo esc_html__( 'Тарифы DPD для checkout', 'walls-delivery-calc' ); ?></h3>
+			<table class="widefat striped">
+				<thead>
+					<tr>
+						<th><?php echo esc_html__( 'Включен', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'serviceCode', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Название DPD', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'Название тарифа в checkout', 'walls-delivery-calc' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ( DpdSettings::known_service_codes() as $code => $default_title ) : ?>
+						<tr>
+							<td><label><input type="checkbox" name="dpd_runtime_service_enabled[<?php echo esc_attr( $code ); ?>]" value="1" <?php checked( ! empty( $enabled[ $code ] ) ); ?>> <?php echo esc_html__( 'Да', 'walls-delivery-calc' ); ?></label></td>
+							<td><code><?php echo esc_html( $code ); ?></code></td>
+							<td><?php echo esc_html( $default_title ); ?></td>
+							<td><input class="regular-text" name="dpd_runtime_tariff_title[<?php echo esc_attr( $code ); ?>]" value="<?php echo esc_attr( (string) ( $titles[ $code ] ?? $default_title ) ); ?>"></td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+			<h3><?php echo esc_html__( 'Режим расчета DPD для checkout', 'walls-delivery-calc' ); ?></h3>
+			<table class="form-table" role="presentation">
+				<?php $this->checkbox_row( DpdSettings::RUNTIME_ENABLE_COURIER_RATES_KEY, __( 'Использовать курьерские тарифы', 'walls-delivery-calc' ), $this->dpd_settings->runtime_courier_rates_enabled() ); ?>
+			</table>
+			<p class="description"><?php echo esc_html__( 'DPD checkout всегда считает отправку от терминала. Доставка до пункта выдачи считается всегда; доставка до двери считается отдельным запросом только при включенной галке. Выбор конкретного пункта DPD и карта будут добавлены позже.', 'walls-delivery-calc' ); ?></p>
+			<?php submit_button( __( 'Сохранить тарифы DPD', 'walls-delivery-calc' ) ); ?>
+		</form>
 		<?php
 	}
 

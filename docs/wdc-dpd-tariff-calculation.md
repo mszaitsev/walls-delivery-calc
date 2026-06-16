@@ -1,8 +1,8 @@
 # WDC DPD Tariff Calculation
 
-Version: 0.57.1.
+Version: 0.58.2.
 
-This stage implements the DPD tariff calculation foundation for admin diagnostics only. It verifies `getServiceCostByParcels3` request/response shape before any checkout runtime integration.
+This stage implements the DPD tariff calculation foundation used by admin diagnostics and, as of 0.58.0, by the checkout runtime quote carrier. Shipment creation and pickup points remain out of scope.
 
 ## Scope
 
@@ -57,6 +57,8 @@ The `DPD Расчет` tab stores:
 
 The test form accepts sender override, receiver `location_id`, parcel values, pickup/delivery mode and optional `serviceCode`. After POST it redirects back to the same tab and displays success/failure, raw count, normalized service list and, when DPD debug is enabled, the business payload plus redacted SOAP payload shape metadata. The action result block is one-shot: after it renders, `clear_tariff_action_result()` removes it from settings so a normal page reload does not repeat the notice.
 
+Checkout runtime settings no longer live on `DPD Расчет`. Method titles are edited on `Основное`, while DPD service-code enablement, custom tariff titles and the `Использовать курьерские тарифы` checkbox are edited on the DPD `Тарифы` tab. Checkout runtime mode flags are not configurable: runtime always sends from a DPD terminal, and courier delivery is calculated by a separate request only when enabled.
+
 ## Normalization
 
 `DpdTariffOptionNormalizer` accepts single-object, array and nested SOAP response shapes. It normalizes:
@@ -82,7 +84,6 @@ Missing fields are not fatal.
 
 ## Not Implemented
 
-- DPD checkout runtime carrier.
 - DPD `CarrierShipmentAdapterRegistry` adapter.
 - Pickup points / `getParcelShops` / maps.
 - Order creation, cancellation, statuses, labels.

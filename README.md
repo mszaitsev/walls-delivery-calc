@@ -1,6 +1,28 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.57.1.
+Current plugin version: 0.58.3.
+
+Version 0.58.3 filters DPD checkout tariff candidates inside each delivery type by price and delivery days. Equal-duration
+DPD tariffs collapse to the cheapest option, and a tariff hidden when another option is no slower and no more expensive
+with at least one strictly better parameter. Tariff names, service names and service-code semantics are not used in this
+comparison. DPD payload modes, courier enablement, pickup points and shipment adapter scope are unchanged.
+
+Version 0.58.2 fixes the DPD checkout runtime model around pickup/courier delivery types. Checkout DPD shipment is now
+always calculated from a DPD terminal (`selfPickup=true`). Terminal delivery is the default pickup group and sends
+`selfDelivery=true`; courier delivery sends a separate `getServiceCostByParcels3` request with `selfDelivery=false` only
+when the new DPD `Тарифы` checkbox `Использовать курьерские тарифы` is enabled. The old runtime pickup/delivery mode and
+method-title-prefix settings are no longer rendered or used. DPD pickup points, maps, shipment adapter, statuses and labels
+remain out of scope.
+
+Version 0.58.1 aligns DPD checkout UX with CDEK/Russian Post grouped tariff selectors. DPD exposes one checkout group per
+delivery type and keeps returned DPD services as `tariff_variants` / selected tariffs inside that group. DPD tariff
+enablement and custom checkout tariff titles moved to the DPD `Тарифы` tab with default enabled codes `ECN,CSM,MXO`.
+
+Version 0.58.0 enables DPD checkout runtime rates through the existing carrier registry architecture. `DpdQuoteCarrier`
+uses `calculator2/getServiceCostByParcels3`, resolves receiver `dpd_city_id` from `wdc_location_delivery_codes`, builds
+door-to-door courier rates for returned service codes such as `MAX` / `DPD Максимум` and `NDY` / `DPD Экспресс`, and
+honors configured DPD runtime service codes. DPD remains excluded from shipment adapters, shipment metabox creation,
+pickup points, maps, statuses, labels, COD/NPP, `unitLoad`, and fiscal receipt flows.
 
 Version 0.57.1 fixes DPD `calculator2/getServiceCostByParcels3` authentication by sending centralized
 `DpdSoapRequest` auth inside the calculator `request` wrapper while keeping geography methods on the direct

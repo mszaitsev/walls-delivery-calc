@@ -15,6 +15,8 @@ final class DpdSettings {
 	public const ENV_TEST = 'test';
 	public const ENV_PRODUCTION = 'production';
 	public const DEFAULT_REQUEST_TIMEOUT = 20;
+	public const DEFAULT_PICKUP_METHOD_TITLE = 'DPD до пункта выдачи';
+	public const DEFAULT_COURIER_METHOD_TITLE = 'DPD курьером';
 
 	public const ENVIRONMENT_KEY = 'dpd_environment';
 	public const TEST_CLIENT_NUMBER_KEY = 'dpd_test_client_number';
@@ -41,6 +43,11 @@ final class DpdSettings {
 	public const TARIFF_DEFAULT_WIDTH_CM_KEY = 'dpd_tariff_default_width_cm';
 	public const TARIFF_DEFAULT_HEIGHT_CM_KEY = 'dpd_tariff_default_height_cm';
 	public const TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY = 'dpd_tariff_default_declared_value_rub';
+	public const RUNTIME_PICKUP_TITLE_KEY = 'dpd_runtime_pickup_title';
+	public const RUNTIME_COURIER_TITLE_KEY = 'dpd_runtime_courier_title';
+	public const RUNTIME_ENABLED_SERVICE_CODES_KEY = 'dpd_runtime_enabled_service_codes';
+	public const RUNTIME_TARIFF_TITLES_KEY = 'dpd_runtime_tariff_titles';
+	public const RUNTIME_ENABLE_COURIER_RATES_KEY = 'dpd_runtime_enable_courier_rates';
 	public const LAST_TARIFF_ACTION_RESULT_KEY = 'dpd_last_tariff_action_result';
 
 	public function __construct(
@@ -79,7 +86,34 @@ final class DpdSettings {
 			self::TARIFF_DEFAULT_WIDTH_CM_KEY => 20,
 			self::TARIFF_DEFAULT_HEIGHT_CM_KEY => 20,
 			self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY => 1000,
+			self::RUNTIME_PICKUP_TITLE_KEY => self::DEFAULT_PICKUP_METHOD_TITLE,
+			self::RUNTIME_COURIER_TITLE_KEY => self::DEFAULT_COURIER_METHOD_TITLE,
+			self::RUNTIME_ENABLED_SERVICE_CODES_KEY => 'ECN,CSM,MXO',
+			self::RUNTIME_TARIFF_TITLES_KEY => array(),
+			self::RUNTIME_ENABLE_COURIER_RATES_KEY => false,
 			self::LAST_TARIFF_ACTION_RESULT_KEY => array(),
+		);
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	public static function known_service_codes(): array {
+		return array(
+			'MAX' => 'DPD Максимум',
+			'NDY' => 'DPD Экспресс',
+			'IND' => 'DPD Экспресс-13',
+			'PCL' => 'DPD Оптимум',
+			'CUR' => 'DPD Classic',
+			'MXO' => 'DPD Стандарт',
+			'ECN' => 'DPD Эконом',
+			'ECU' => 'DPD Эконом ЕАЭС',
+			'BZP' => 'DPD 18:00',
+			'CSM' => 'DPD Онлайн-экспресс',
+			'PUP' => 'DPD Коробка',
+			'PKT' => 'DPD Пакет',
+			'DPI' => 'DPD Импорт Классик',
+			'DPE' => 'DPD Экспорт Классик',
 		);
 	}
 
@@ -287,6 +321,39 @@ final class DpdSettings {
 		$this->settings->set( self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY, max( 0.0, (float) ( $input[ self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY ] ?? 1000 ) ) );
 	}
 
+	/**
+	 * @param array<string,mixed> $input
+	 */
+	public function save_runtime_titles_from_admin( array $input ): void {
+		$pickup = $this->sanitize_text( (string) ( $input[ self::RUNTIME_PICKUP_TITLE_KEY ] ?? self::DEFAULT_PICKUP_METHOD_TITLE ) );
+		$courier = $this->sanitize_text( (string) ( $input[ self::RUNTIME_COURIER_TITLE_KEY ] ?? self::DEFAULT_COURIER_METHOD_TITLE ) );
+		$this->settings->set( self::RUNTIME_PICKUP_TITLE_KEY, '' !== $pickup ? $pickup : self::DEFAULT_PICKUP_METHOD_TITLE );
+		$this->settings->set( self::RUNTIME_COURIER_TITLE_KEY, '' !== $courier ? $courier : self::DEFAULT_COURIER_METHOD_TITLE );
+	}
+
+	/**
+	 * @param array<string,mixed> $input
+	 */
+	public function save_runtime_tariffs_from_admin( array $input ): void {
+		$enabled_input = is_array( $input['dpd_runtime_service_enabled'] ?? null ) ? wp_unslash( $input['dpd_runtime_service_enabled'] ) : array();
+		$enabled = array();
+		foreach ( array_keys( self::known_service_codes() ) as $code ) {
+			if ( ! empty( $enabled_input[ $code ] ) ) {
+				$enabled[] = $code;
+			}
+		}
+		$this->settings->set( self::RUNTIME_ENABLED_SERVICE_CODES_KEY, implode( ',', $enabled ) );
+
+		$title_input = is_array( $input['dpd_runtime_tariff_title'] ?? null ) ? wp_unslash( $input['dpd_runtime_tariff_title'] ) : array();
+		$titles = array();
+		foreach ( self::known_service_codes() as $code => $default_title ) {
+			$title = $this->sanitize_text( (string) ( $title_input[ $code ] ?? $default_title ) );
+			$titles[ $code ] = '' !== $title ? $title : $default_title;
+		}
+		$this->settings->set( self::RUNTIME_TARIFF_TITLES_KEY, $titles );
+		$this->settings->set( self::RUNTIME_ENABLE_COURIER_RATES_KEY, ! empty( $input[ self::RUNTIME_ENABLE_COURIER_RATES_KEY ] ) );
+	}
+
 	public function tariff_sender_location_id(): int {
 		return max( 0, $this->settings->get_int( self::TARIFF_SENDER_LOCATION_ID_KEY, 0 ) );
 	}
@@ -317,6 +384,74 @@ final class DpdSettings {
 
 	public function tariff_default_declared_value_rub(): float {
 		return max( 0.0, (float) $this->settings->get_string( self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY, '1000' ) );
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	public function runtime_enabled_service_codes(): array {
+		$codes = $this->sanitize_service_codes( $this->settings->get_string( self::RUNTIME_ENABLED_SERVICE_CODES_KEY, 'ECN,CSM,MXO' ) );
+		if ( '' === $codes ) {
+			return array();
+		}
+
+		return array_values( array_filter( array_map( 'trim', explode( ',', $codes ) ), static fn( string $code ): bool => '' !== $code ) );
+	}
+
+	public function runtime_enabled_service_codes_raw(): string {
+		return $this->sanitize_service_codes( $this->settings->get_string( self::RUNTIME_ENABLED_SERVICE_CODES_KEY, 'ECN,CSM,MXO' ) );
+	}
+
+	public function runtime_allowed_service_codes(): array {
+		return $this->runtime_enabled_service_codes();
+	}
+
+	public function runtime_allowed_service_codes_raw(): string {
+		return $this->runtime_enabled_service_codes_raw();
+	}
+
+	public function runtime_courier_rates_enabled(): bool {
+		return $this->settings->get_bool( self::RUNTIME_ENABLE_COURIER_RATES_KEY, false );
+	}
+
+	public function runtime_pickup_title(): string {
+		$title = trim( $this->settings->get_string( self::RUNTIME_PICKUP_TITLE_KEY, self::DEFAULT_PICKUP_METHOD_TITLE ) );
+
+		return '' !== $title ? $title : self::DEFAULT_PICKUP_METHOD_TITLE;
+	}
+
+	public function runtime_courier_title(): string {
+		$title = trim( $this->settings->get_string( self::RUNTIME_COURIER_TITLE_KEY, self::DEFAULT_COURIER_METHOD_TITLE ) );
+
+		return '' !== $title ? $title : self::DEFAULT_COURIER_METHOD_TITLE;
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	public function runtime_tariff_titles(): array {
+		$saved = $this->settings->get_array( self::RUNTIME_TARIFF_TITLES_KEY, array() );
+		$titles = self::known_service_codes();
+		foreach ( $saved as $code => $title ) {
+			$code = strtoupper( trim( (string) $code ) );
+			if ( '' === $code ) {
+				continue;
+			}
+			$title = trim( (string) $title );
+			if ( '' !== $title ) {
+				$titles[ $code ] = $title;
+			}
+		}
+
+		return $titles;
+	}
+
+	public function runtime_tariff_title( string $code, string $fallback = '' ): string {
+		$code = strtoupper( trim( $code ) );
+		$titles = $this->runtime_tariff_titles();
+		$title = trim( (string) ( $titles[ $code ] ?? '' ) );
+
+		return '' !== $title ? $title : trim( $fallback );
 	}
 
 	/**
@@ -443,6 +578,23 @@ final class DpdSettings {
 
 	private function digits( string $value ): string {
 		return preg_replace( '/\D+/', '', $value ) ?? '';
+	}
+
+	private function sanitize_service_codes( string $value ): string {
+		$codes = preg_split( '/[\s,;]+/', strtoupper( $value ) ) ?: array();
+		$codes = array_values(
+			array_unique(
+				array_filter(
+					array_map(
+						static fn( string $code ): string => preg_replace( '/[^A-Z0-9_\-]+/', '', $code ) ?? '',
+						$codes
+					),
+					static fn( string $code ): bool => '' !== $code
+				)
+			)
+		);
+
+		return implode( ',', $codes );
 	}
 
 	private function sanitize_text( string $value ): string {
