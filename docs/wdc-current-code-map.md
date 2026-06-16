@@ -1,5 +1,16 @@
 # Карта текущего кода
 
+## DPD Geography 0.55.0
+
+- `src/Locations/Storage/LocationCarrierCodeRepository.php` is the shared storage boundary for `wdc_location_carrier_codes`. It is carrier-neutral and is used by DPD to persist `external_code=<dpd_city_id>` with `carrier_key=dpd`.
+- `src/Carriers/Dpd/DpdCityResolver.php` resolves DPD `cityId` for an existing WDC/FIAS/GAR `Location`: stored mapping first, DPD geography API next, FIAS-only fallback last. Successful API matches are saved back to `wdc_location_carrier_codes`.
+- `src/Carriers/Dpd/DpdDuplicateCityResolver.php` handles DPD `pickupDups` / `deliveryDups` outside tariff/runtime services. It scores candidates by FIAS GUID, GAR ID, cityCode/KLADR, regionCode, postal code and city name.
+- `src/Carriers/Dpd/DpdApiClient.php` exposes geography wrappers for `getCitiesCashPay` and `getPossibleExtraService`; these are wrappers only and do not implement tariff business logic.
+- `src/Carriers/Dpd/DpdGeographyDiagnosticService.php` provides admin-only DPD geography diagnostics and manual mapping save for existing locations. It does not run mass enrichment, cron jobs or FTP import.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders DPD geography diagnostic/manual mapping controls inside the existing DPD settings tab and stores a redacted summary through the existing DPD diagnostic fields.
+- `tests/dpd/run-dpd-city-resolver-smoke.php` covers mapping save/reuse, duplicate-city matching, FIAS fallback, absence of a new DPD city table, and non-registration as runtime carrier/shipment adapter.
+- `docs/wdc-dpd-geography.md` documents the geography scope and stage-2 constraints. DPD remains absent from `CarrierRegistry` and `CarrierShipmentAdapterRegistry`.
+
 ## DPD Foundation 0.54.0
 
 - `src/Carriers/Dpd/DpdSettings.php` stores DPD environment, test/production client numbers, encrypted client keys, request timeout, debug flag and redacted dry diagnostic result in the existing settings/encryption layer.
@@ -7,7 +18,7 @@
 - `src/Carriers/Dpd/DpdEndpoints.php` maps test/production WSDL URLs for `geography2`, `calculator2`, `order2`, `tracing`, `tracing1-1`, `event-tracking`, `label-print` and `delivery-management`.
 - `src/DeliveryServices/DeliveryServiceRepository.php` and `DeliveryServiceManager.php` create the built-in `dpd` service disabled by default with RU country availability. The service is predefined and protected from deletion like other system services.
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds the DPD `Данные для входа` tab and a dry diagnostic action. The diagnostic checks credentials, endpoint selection and SOAP transport availability only; it does not call the DPD API.
-- `src/Core/Plugin.php` registers DPD settings/API/transport for admin diagnostics only. It does not register a DPD runtime quote carrier and does not add a DPD shipment adapter.
+- `src/Core/Plugin.php` registers DPD settings/API/transport/geography services for admin diagnostics only. It does not register a DPD runtime quote carrier and does not add a DPD shipment adapter.
 - `tests/dpd/run-dpd-foundation-smoke.php` covers disabled service creation, encrypted client key storage, redaction, endpoint selection, graceful missing transport diagnostic, and registry non-registration.
 - `docs/wdc-dpd-integration.md` documents the stage-1 boundary and future strategies for cityId, statuses, `unitLoad`, COD and receipts.
 

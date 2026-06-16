@@ -1,0 +1,189 @@
+<?php
+declare(strict_types=1);
+
+define( 'ABSPATH', __DIR__ . '/../../' );
+
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $prefix = 'wp_';
+		/** @var array<int,array<string,mixed>> */
+		public array $carrier_codes = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $locations = array();
+		public int $insert_id = 0;
+	}
+}
+
+function current_time( string $type ): string {
+	return '2026-06-16 12:00:00';
+}
+
+function wp_json_encode( mixed $value ): string|false {
+	return json_encode( $value );
+}
+
+function get_option( string $name, mixed $default = false ): mixed {
+	return $GLOBALS['wdc_test_options'][ $name ] ?? $default;
+}
+
+function update_option( string $name, mixed $value, bool $autoload = true ): bool {
+	$GLOBALS['wdc_test_options'][ $name ] = $value;
+
+	return true;
+}
+
+function wp_salt( string $scheme = '' ): string {
+	return 'wdc-test-salt-' . $scheme;
+}
+
+require_once __DIR__ . '/../../src/Domain/Status/DeliveryStatus.php';
+require_once __DIR__ . '/../../src/Shipments/Cdek/CdekStatusMappingService.php';
+require_once __DIR__ . '/../../src/Carriers/Cdek/CdekSettings.php';
+require_once __DIR__ . '/../../src/Infrastructure/Settings/SettingsRepository.php';
+require_once __DIR__ . '/../../src/Infrastructure/Security/EncryptionService.php';
+require_once __DIR__ . '/../../src/Locations/ValueObjects/Location.php';
+require_once __DIR__ . '/../../src/Locations/Storage/LocationRepository.php';
+require_once __DIR__ . '/../../src/Locations/Storage/LocationCarrierCodeRepository.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/DpdSettings.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/DpdCredentials.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/DpdEndpoints.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/DpdException.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/DpdSoapResponse.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/DpdSoapClientInterface.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/DpdApiClient.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/DpdDuplicateCityResolver.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/DpdCityResolver.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/DpdGeographyDiagnosticService.php';
+
+use WallsShop\WDC\Carriers\Dpd\DpdApiClient;
+use WallsShop\WDC\Carriers\Dpd\DpdCityResolver;
+use WallsShop\WDC\Carriers\Dpd\DpdCredentials;
+use WallsShop\WDC\Carriers\Dpd\DpdDuplicateCityResolver;
+use WallsShop\WDC\Carriers\Dpd\DpdGeographyDiagnosticService;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Dpd\DpdSoapClientInterface;
+use WallsShop\WDC\Carriers\Dpd\DpdSoapResponse;
+use WallsShop\WDC\Infrastructure\Security\EncryptionService;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Storage\LocationCarrierCodeRepository;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\ValueObjects\Location;
+
+final class FakeDpdSoapClient implements DpdSoapClientInterface {
+	/** @var array<int,array{method:string,payload:array<string,mixed>}> */
+	public array $calls = array();
+	private bool $first_lookup_empty = false;
+
+	public function call( string $service, string $method, array $payload, DpdCredentials $credentials, array $options = array() ): DpdSoapResponse {
+		$this->calls[] = array( 'method' => $method, 'payload' => $payload );
+
+		if ( $this->first_lookup_empty && isset( $payload['cityName'] ) ) {
+			return new DpdSoapResponse( true, array( 'return' => array() ) );
+		}
+
+		if ( ! $this->first_lookup_empty && isset( $payload['cityName'] ) ) {
+			return new DpdSoapResponse(
+				true,
+				array(
+					'return' => array(
+						'pickupDups' => array(
+							array( 'cityId' => '111111', 'cityName' => 'Новосибирск', 'regionCode' => '54', 'postalCode' => '630000', 'fiasGuid' => '00000000-0000-0000-0000-000000000000' ),
+							array( 'cityId' => '492941', 'cityName' => 'Бердск', 'regionCode' => '54', 'indexMin' => '633000', 'indexMax' => '633099', 'fiasGuid' => '11111111-2222-3333-4444-555555555555', 'garId' => '123456789', 'cityCode' => '5400000200000' ),
+						),
+						'deliveryDups' => array(),
+					),
+				)
+			);
+		}
+
+		return new DpdSoapResponse(
+			true,
+			array( 'return' => array( 'cityId' => '700001' ) )
+		);
+	}
+
+	public function is_available(): bool {
+		return true;
+	}
+
+	public function make_first_lookup_empty(): void {
+		$this->first_lookup_empty = true;
+	}
+}
+
+function assert_true( bool $condition, string $message ): void {
+	if ( ! $condition ) {
+		fwrite( STDERR, "FAIL: {$message}\n" );
+		exit( 1 );
+	}
+}
+
+$GLOBALS['wpdb'] = new wpdb();
+$GLOBALS['wdc_test_options'] = array(
+	'dpd_test_client_number' => 'client-number',
+	'dpd_test_client_key_encrypted' => ( new EncryptionService() )->encrypt( 'secret-client-key' ),
+);
+$GLOBALS['wpdb']->locations[] = array(
+	'id' => 10,
+	'fias_id' => '11111111-2222-3333-4444-555555555555',
+	'gar_id' => '123456789',
+	'gar_object_id' => 123456789,
+	'kladr_id' => '5400000200000',
+	'country_code' => 'RU',
+	'region_code' => '54',
+	'region_name' => 'Новосибирская область',
+	'city_name' => 'Бердск',
+	'settlement_name' => 'Бердск',
+	'place_name' => 'Бердск',
+	'place_type' => 'г',
+	'display_name' => 'Бердск, Новосибирская область',
+	'postal_code' => '633010',
+	'active' => 1,
+);
+
+$settings = new DpdSettings( new SettingsRepository(), new EncryptionService() );
+$soap = new FakeDpdSoapClient();
+$api = new DpdApiClient( $settings, $soap );
+$carrier_codes = new LocationCarrierCodeRepository( $GLOBALS['wpdb'] );
+$duplicate_resolver = new DpdDuplicateCityResolver();
+$resolver = new DpdCityResolver( $carrier_codes, $api, $duplicate_resolver );
+
+$location = Location::from_array( $GLOBALS['wpdb']->locations[0] );
+$result = $resolver->resolve( $location );
+assert_true( null !== $result, 'resolver returns a DPD cityId' );
+assert_true( '492941' === $result['city_id'], 'duplicate city response resolves by FIAS/GAR/postal data' );
+assert_true( true === $result['saved'], 'mapping is saved after successful API resolve' );
+assert_true( true === $result['multiple'], 'diagnostics marks duplicate city response' );
+assert_true( true === $result['resolver_applied'], 'duplicate resolver was applied' );
+assert_true( 1 === count( $GLOBALS['wpdb']->carrier_codes ), 'exactly one carrier code mapping is stored' );
+assert_true( 'dpd' === $GLOBALS['wpdb']->carrier_codes[0]['carrier_key'], 'mapping carrier_key is dpd' );
+assert_true( '492941' === $GLOBALS['wpdb']->carrier_codes[0]['external_code'], 'mapping external_code stores dpd_city_id' );
+
+$call_count = count( $soap->calls );
+$cached = $resolver->resolve( $location );
+assert_true( null !== $cached && 'mapping' === $cached['source'], 'second lookup reuses stored mapping' );
+assert_true( $call_count === count( $soap->calls ), 'stored mapping avoids a second DPD API call' );
+
+$manual = new DpdGeographyDiagnosticService( $resolver, $carrier_codes, new LocationRepository( $GLOBALS['wpdb'] ) );
+$manual_result = $manual->save_manual_mapping( 10, '900001' );
+assert_true( true === $manual_result['success'], 'admin service can save a manual DPD cityId mapping' );
+assert_true( 1 === count( $GLOBALS['wpdb']->carrier_codes ), 'manual save updates existing mapping instead of creating DPD table rows elsewhere' );
+assert_true( '900001' === $GLOBALS['wpdb']->carrier_codes[0]['external_code'], 'manual admin mapping updates dpd_city_id' );
+
+$GLOBALS['wpdb']->carrier_codes = array();
+$soap->make_first_lookup_empty();
+$fallback = $resolver->resolve( $location );
+assert_true( null !== $fallback && '700001' === $fallback['city_id'], 'FIAS fallback can resolve cityId when the first geography lookup is ambiguous/empty' );
+assert_true( isset( $soap->calls[ count( $soap->calls ) - 1 ]['payload']['fiasGuid'] ), 'fallback payload contains fiasGuid' );
+
+$tables = array_keys( get_object_vars( $GLOBALS['wpdb'] ) );
+assert_true( ! in_array( 'dpd_cities', $tables, true ), 'no DPD cities table is introduced in the smoke double' );
+foreach ( $GLOBALS['wpdb']->carrier_codes as $row ) {
+	assert_true( 'dpd' === $row['carrier_key'], 'carrier code writes do not affect CDEK or Russian Post carrier codes' );
+}
+
+$plugin_source = file_get_contents( __DIR__ . '/../../src/Core/Plugin.php' );
+assert_true( is_string( $plugin_source ) && ! str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'DPD shipment adapter is not registered' );
+assert_true( is_string( $plugin_source ) && ! str_contains( $plugin_source, 'DpdCarrier' ), 'DPD runtime carrier is not registered' );
+
+echo "DPD city resolver smoke OK\n";

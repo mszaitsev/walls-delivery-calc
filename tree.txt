@@ -111,6 +111,7 @@ C:.
 |   |   wdc-delivery-calendar.md
 |   |   wdc-delivery-services.md
 |   |   wdc-domain-model.md
+|   |   wdc-dpd-geography.md
 |   |   wdc-dpd-integration.md
 |   |   wdc-fias-foundation.md
 |   |   wdc-gar-places-import.md
@@ -189,9 +190,11 @@ C:.
 |   |   |       DpdApiClient.php
 |   |   |       DpdCityResolver.php
 |   |   |       DpdCredentials.php
+|   |   |       DpdDuplicateCityResolver.php
 |   |   |       DpdEndpoints.php
 |   |   |       DpdErrorMapper.php
 |   |   |       DpdException.php
+|   |   |       DpdGeographyDiagnosticService.php
 |   |   |       DpdSettings.php
 |   |   |       DpdSoapClient.php
 |   |   |       DpdSoapClientInterface.php
@@ -424,6 +427,7 @@ C:.
 |   |   |       LocationSearchService.php
 |   |   |       
 |   |   +---Storage
+|   |   |       LocationCarrierCodeRepository.php
 |   |   |       LocationRepository.php
 |   |   |       RegionRepository.php
 |   |   |       
@@ -597,6 +601,7 @@ C:.
     |       run-domain-smoke.php
     |       
     +---dpd
+    |       run-dpd-city-resolver-smoke.php
     |       run-dpd-foundation-smoke.php
     |       
     +---fias
