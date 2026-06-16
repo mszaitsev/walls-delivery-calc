@@ -26,6 +26,12 @@ final class DpdSettings {
 	public const LAST_CONNECTION_CHECK_KEY = 'dpd_last_connection_check';
 	public const LAST_CONNECTION_STATUS_KEY = 'dpd_last_connection_status';
 	public const LAST_CONNECTION_MESSAGE_KEY = 'dpd_last_connection_message';
+	public const GEOGRAPHY_FTP_HOST_KEY = 'dpd_geography_ftp_host';
+	public const GEOGRAPHY_FTP_PORT_KEY = 'dpd_geography_ftp_port';
+	public const GEOGRAPHY_FTP_USERNAME_KEY = 'dpd_geography_ftp_username';
+	public const GEOGRAPHY_FTP_PASSWORD_ENCRYPTED_KEY = 'dpd_geography_ftp_password_encrypted';
+	public const GEOGRAPHY_FTP_REMOTE_DIRECTORY_KEY = 'dpd_geography_ftp_remote_directory';
+	public const LAST_GEOGRAPHY_IMPORT_REPORT_KEY = 'dpd_last_geography_import_report';
 
 	public function __construct(
 		private SettingsRepository $settings,
@@ -48,6 +54,12 @@ final class DpdSettings {
 			self::LAST_CONNECTION_CHECK_KEY => '',
 			self::LAST_CONNECTION_STATUS_KEY => '',
 			self::LAST_CONNECTION_MESSAGE_KEY => '',
+			self::GEOGRAPHY_FTP_HOST_KEY => 'ftp.dpd.ru',
+			self::GEOGRAPHY_FTP_PORT_KEY => 22,
+			self::GEOGRAPHY_FTP_USERNAME_KEY => 'integration',
+			self::GEOGRAPHY_FTP_PASSWORD_ENCRYPTED_KEY => '',
+			self::GEOGRAPHY_FTP_REMOTE_DIRECTORY_KEY => '/integration',
+			self::LAST_GEOGRAPHY_IMPORT_REPORT_KEY => array(),
 		);
 	}
 
@@ -115,6 +127,27 @@ final class DpdSettings {
 		$this->settings->set( self::LAST_CONNECTION_MESSAGE_KEY, $this->redact( 'Среда: ' . $this->environment_label() . '. ' . $message ) );
 	}
 
+	/**
+	 * @param array<string,mixed> $input
+	 */
+	public function save_geography_settings_from_admin( array $input ): void {
+		$this->settings->set( self::GEOGRAPHY_FTP_HOST_KEY, $this->sanitize_text( (string) ( $input[ self::GEOGRAPHY_FTP_HOST_KEY ] ?? 'ftp.dpd.ru' ) ) );
+		$this->settings->set( self::GEOGRAPHY_FTP_PORT_KEY, max( 1, min( 65535, (int) ( $input[ self::GEOGRAPHY_FTP_PORT_KEY ] ?? 22 ) ) ) );
+		$this->settings->set( self::GEOGRAPHY_FTP_USERNAME_KEY, $this->sanitize_text( (string) ( $input[ self::GEOGRAPHY_FTP_USERNAME_KEY ] ?? 'integration' ) ) );
+		$directory = '/' . trim( $this->sanitize_text( (string) ( $input[ self::GEOGRAPHY_FTP_REMOTE_DIRECTORY_KEY ] ?? '/integration' ) ), '/' );
+		$this->settings->set( self::GEOGRAPHY_FTP_REMOTE_DIRECTORY_KEY, '/' === $directory ? '/integration' : $directory );
+
+		if ( ! empty( $input['dpd_clear_geography_ftp_password'] ) ) {
+			$this->settings->set( self::GEOGRAPHY_FTP_PASSWORD_ENCRYPTED_KEY, '' );
+			return;
+		}
+
+		$password = trim( (string) wp_unslash( $input['dpd_geography_ftp_password'] ?? '' ) );
+		if ( '' !== $password && '********' !== $password ) {
+			$this->settings->set( self::GEOGRAPHY_FTP_PASSWORD_ENCRYPTED_KEY, $this->encryption->encrypt( $password ) );
+		}
+	}
+
 	public function last_connection_check(): string {
 		return $this->settings->get_string( self::LAST_CONNECTION_CHECK_KEY, '' );
 	}
@@ -125,6 +158,52 @@ final class DpdSettings {
 
 	public function last_connection_message(): string {
 		return $this->settings->get_string( self::LAST_CONNECTION_MESSAGE_KEY, '' );
+	}
+
+	public function geography_ftp_host(): string {
+		$host = trim( $this->settings->get_string( self::GEOGRAPHY_FTP_HOST_KEY, 'ftp.dpd.ru' ) );
+		return '' !== $host ? $host : 'ftp.dpd.ru';
+	}
+
+	public function geography_ftp_port(): int {
+		return max( 1, min( 65535, $this->settings->get_int( self::GEOGRAPHY_FTP_PORT_KEY, 22 ) ) );
+	}
+
+	public function geography_ftp_username(): string {
+		$username = trim( $this->settings->get_string( self::GEOGRAPHY_FTP_USERNAME_KEY, 'integration' ) );
+		return '' !== $username ? $username : 'integration';
+	}
+
+	public function geography_ftp_remote_directory(): string {
+		$directory = '/' . trim( $this->settings->get_string( self::GEOGRAPHY_FTP_REMOTE_DIRECTORY_KEY, '/integration' ), '/' );
+		return '/' === $directory ? '/integration' : $directory;
+	}
+
+	public function has_geography_ftp_password(): bool {
+		return '' !== $this->settings->get_string( self::GEOGRAPHY_FTP_PASSWORD_ENCRYPTED_KEY, '' );
+	}
+
+	public function geography_ftp_password(): string {
+		$encrypted = $this->settings->get_string( self::GEOGRAPHY_FTP_PASSWORD_ENCRYPTED_KEY, '' );
+		if ( '' === $encrypted ) {
+			return '';
+		}
+
+		return (string) ( $this->encryption->decrypt( $encrypted ) ?? '' );
+	}
+
+	/**
+	 * @param array<string,mixed> $report
+	 */
+	public function save_geography_import_report( array $report ): void {
+		$this->settings->set( self::LAST_GEOGRAPHY_IMPORT_REPORT_KEY, $report );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function last_geography_import_report(): array {
+		return $this->settings->get_array( self::LAST_GEOGRAPHY_IMPORT_REPORT_KEY, array() );
 	}
 
 	private function client_number( string $environment ): string {
@@ -173,9 +252,17 @@ final class DpdSettings {
 				}
 			}
 		}
+		$password = $this->geography_ftp_password();
+		if ( '' !== $password ) {
+			$message = str_replace( $password, '[redacted]', $message );
+		}
 		$message = preg_replace( '/\b(?:clientKey|client_key|token|secret)[A-Za-z0-9._\-:=]*\b/i', '[redacted]', $message ) ?? $message;
 
 		return $message;
 	}
-}
 
+	private function sanitize_text( string $value ): string {
+		$value = function_exists( 'wp_unslash' ) ? (string) wp_unslash( $value ) : $value;
+		return function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $value ) : trim( strip_tags( $value ) );
+	}
+}

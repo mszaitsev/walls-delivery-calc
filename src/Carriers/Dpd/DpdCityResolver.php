@@ -46,7 +46,7 @@ final class DpdCityResolver {
 			);
 		}
 
-		$this->last_error = 'DPD cityId mapping was not found. Use DPD geography import or manual mapping.';
+		$this->last_error = 'DPD cityId mapping was not found. Run DPD geography import, DaData fallback, or manual mapping.';
 
 		return null;
 	}

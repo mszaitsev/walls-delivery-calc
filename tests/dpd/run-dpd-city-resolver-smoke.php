@@ -125,13 +125,13 @@ $diagnostics = new DpdGeographyDiagnosticService( $resolver, $delivery_codes, ne
 $location = Location::from_array( $GLOBALS['wpdb']->locations[0] );
 $result = $resolver->resolve( $location );
 assert_true( null === $result, 'resolver returns null when DPD cityId mapping is missing' );
-assert_true( 'DPD cityId mapping was not found. Use DPD geography import or manual mapping.' === $resolver->last_error(), 'resolver exposes import/manual mapping required message' );
+assert_true( 'DPD cityId mapping was not found. Run DPD geography import, DaData fallback, or manual mapping.' === $resolver->last_error(), 'resolver exposes import/DaData/manual mapping required message' );
 assert_true( 0 === count( $soap->calls ), 'resolver does not call DPD API when mapping is missing' );
 
 $missing_diagnostic = $diagnostics->diagnose_location_id( 10 );
 assert_true( false === $missing_diagnostic['success'], 'diagnostic returns success=false when mapping is missing' );
 assert_true( str_contains( $missing_diagnostic['message'], 'location_id=10' ), 'diagnostic message includes location_id' );
-assert_true( str_contains( $missing_diagnostic['message'], 'Add or import cityId' ), 'diagnostic asks for manual/import cityId mapping' );
+assert_true( str_contains( $missing_diagnostic['message'], 'Run DPD geography import, DaData fallback, or add cityId manually' ), 'diagnostic asks for import/DaData/manual cityId mapping' );
 assert_true( 0 === count( $soap->calls ), 'diagnostic does not call DPD API when mapping is missing' );
 
 $manual_result = $diagnostics->save_manual_mapping( 10, '900001' );

@@ -36,10 +36,10 @@ final class DpdGeographyDiagnosticService {
 		}
 		if ( null === $result ) {
 			if ( '' !== $this->resolver->last_error() ) {
-				return $this->empty_result( 'DPD cityId mapping was not found for location_id=' . $location_id . '. Add or import cityId.' );
+				return $this->empty_result( 'DPD cityId mapping was not found for location_id=' . $location_id . '. Run DPD geography import, DaData fallback, or add cityId manually.' );
 			}
 
-			return $this->empty_result( 'DPD cityId mapping was not found for location_id=' . $location_id . '. Add or import cityId.' );
+			return $this->empty_result( 'DPD cityId mapping was not found for location_id=' . $location_id . '. Run DPD geography import, DaData fallback, or add cityId manually.' );
 		}
 
 		return array(

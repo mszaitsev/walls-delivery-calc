@@ -1,8 +1,10 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.56.0.
+Current plugin version: 0.56.1.
 
-Version 0.56.0 replaces the cancelled generic carrier-code storage with `wdc_location_delivery_codes`, a 1:1 table keyed by `location_id` with nullable `dpd_city_id`. `DpdCityResolver` reads only this local mapping; live DPD city lookup remains disabled, and manual mapping is the current supported path until a future DPD geography import stage. Runtime DPD tariffs, checkout rates, pickup points, orders, statuses, labels, COD, `unitLoad` and FTP import remain intentionally not implemented.
+Version 0.56.1 adds the DPD Geography Import Foundation on top of `wdc_location_delivery_codes.dpd_city_id`: admin-only SFTP/manual CSV import for `GeographyNewDPD_*.csv`, stream parsing, conservative FIAS/KLADR/name matching, last import report storage, and manual DaData delivery fallback for one `location_id`. DPD tariffs, checkout rates, pickup points, orders, statuses, labels, COD, `unitLoad`, cron import and runtime DPD carrier registration remain intentionally not implemented.
+
+Version 0.56.0 replaces the cancelled generic carrier-code storage with `wdc_location_delivery_codes`, a 1:1 table keyed by `location_id` with nullable `dpd_city_id`. `DpdCityResolver` reads only this local mapping; live DPD city lookup remains disabled, and manual mapping is the current supported path until a future DPD geography import stage.
 
 Version 0.49.0 improves the shipment preparation modal package UI and CDEK sender pickup settings. CDEK now stores an optional sender pickup address, the modal can temporarily replace the sender pickup point for the current shipment draft, package summaries show package weight plus assigned item totals, split rows rebalance quantities with delete actions, and managers can add manual package items with WooCommerce product search by SKU/name.
 

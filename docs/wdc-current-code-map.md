@@ -1,13 +1,16 @@
 # Карта текущего кода
 
-## DPD Delivery Codes 0.56.0
+## DPD Delivery Codes And Geography Import 0.56.1
 
 - `database/migrations/0030_create_location_delivery_codes.php` creates `wdc_location_delivery_codes` with `location_id` primary key, nullable `dpd_city_id`, nullable `updated_at`, and `dpd_city_id` index.
 - `src/Locations/Storage/LocationDeliveryCodeRepository.php` is the storage boundary for delivery carrier codes tied 1:1 to `wdc_locations.id`. It supports `find_by_location_id`, `get_dpd_city_id`, `save_dpd_city_id`, `delete_by_location_id`, and `cleanup_orphans`.
-- `src/Carriers/Dpd/DpdCityResolver.php` resolves DPD `cityId` for an existing WDC/FIAS/GAR `Location` from `wdc_location_delivery_codes.dpd_city_id` only. It requires `Location->id`, does not call live DPD geography APIs automatically, and returns an import/manual-mapping-required diagnostic message when no mapping exists.
+- `src/Carriers/Dpd/DpdCityResolver.php` resolves DPD `cityId` for an existing WDC/FIAS/GAR `Location` from `wdc_location_delivery_codes.dpd_city_id` only. It requires `Location->id`, does not call live DPD geography APIs automatically, and returns an import/DaData/manual-mapping-required diagnostic message when no mapping exists.
 - `src/Carriers/Dpd/DpdDuplicateCityResolver.php` remains isolated for future imported/API candidate matching. It scores candidates by FIAS GUID, GAR ID, countryCode, cityCode/KLADR, regionCode, postal code and city name, but is not used by the mapping-only resolver path.
 - `src/Carriers/Dpd/DpdApiClient.php` exposes geography wrappers for `getCitiesCashPay` and `getPossibleExtraService`; these are low-level wrappers only and do not implement tariff or automatic city lookup business logic.
-- `src/Carriers/Dpd/DpdGeographyDiagnosticService.php` provides admin-only DPD geography diagnostics and manual mapping save for existing locations. Manual mapping writes `dpd_city_id` through `LocationDeliveryCodeRepository`. The current diagnostic checks resolver/mapping state only and does not run live SOAP calls, mass enrichment, cron jobs or FTP import.
+- `src/Carriers/Dpd/DpdGeographyDiagnosticService.php` provides admin-only DPD geography diagnostics and manual mapping save for existing locations. Manual mapping writes `dpd_city_id` through `LocationDeliveryCodeRepository`. The current diagnostic checks resolver/mapping state only and does not run live SOAP calls, mass enrichment or cron jobs.
+- `src/Carriers/Dpd/Geography/DpdGeographyFtpClient.php` downloads the newest `GeographyNewDPD_*.csv` through SFTP when `ssh2` and encrypted DPD SFTP password are available; otherwise it returns a safe manual-upload message.
+- `src/Carriers/Dpd/Geography/DpdGeographyCsvParser.php`, `DpdGeographyMatcher.php`, `DpdGeographyImportService.php` and `DpdGeographyImportReport.php` stream-parse DPD CSV, match RU rows to `wdc_locations`, write `wdc_location_delivery_codes.dpd_city_id`, and store the last report in DPD settings.
+- `src/Carriers/Dpd/Geography/WpDpdDaDataDeliveryClient.php` and `DpdDaDataDeliveryFallbackService.php` implement the admin-only single-location DaData delivery fallback using the shared DaData token pool and usage counters.
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders DPD geography diagnostic/manual mapping controls inside the existing DPD settings tab and stores a redacted summary through the existing DPD diagnostic fields.
 - `tests/locations/run-location-delivery-codes-smoke.php` covers insert/update/read/delete/orphan cleanup for the new table.
 - `tests/dpd/run-dpd-city-resolver-smoke.php` covers missing mapping, manual save, mapping reuse, API wrapper availability outside resolver, and non-registration as runtime carrier/shipment adapter.

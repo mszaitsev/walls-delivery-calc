@@ -2,7 +2,7 @@
 
 ## Scope
 
-Version 0.55.0 keeps the DPD integration limited to foundation plus geography. The built-in delivery service uses:
+Version 0.56.1 keeps the DPD integration limited to foundation plus geography. The built-in delivery service uses:
 
 - `service_key`: `dpd`
 - `carrier_key`: `dpd`
@@ -11,7 +11,7 @@ Version 0.55.0 keeps the DPD integration limited to foundation plus geography. T
 
 DPD is not registered as a checkout runtime quote carrier and is not registered in `CarrierShipmentAdapterRegistry`. Enabling the service row alone does not produce checkout rates because there is no DPD carrier adapter in `CarrierRegistry`.
 
-Stages 1-2 intentionally do not implement DPD tariffs, checkout rates, pickup points, city FTP import, order creation, cancellation, tracing/statuses, labels, COD, `unitLoad`, fiscal receipts, or receipt storage.
+Current stages intentionally do not implement DPD tariffs, checkout rates, pickup points, order creation, cancellation, tracing/statuses, labels, COD, `unitLoad`, fiscal receipts, or receipt storage. DPD city FTP/SFTP/manual CSV import is admin-only geography preparation and does not register runtime carrier behavior.
 
 ## DpdSoapClient Architecture
 
@@ -83,7 +83,7 @@ The stage 1 connection check is a dry diagnostic. It checks credentials complete
 
 ## CityId Strategy
 
-No static DPD city table and no FTP import are implemented in stage 1 or stage 2.
+No static DPD city table is implemented. DPD city mappings are imported into the existing 1:1 delivery-code table.
 
 The existing WDC/FIAS/GAR settlement model stores settlement identity in `wdc_locations`. DPD `cityId` values are stored in the 1:1 delivery-code table:
 
@@ -97,15 +97,15 @@ The cancelled `wdc_location_carrier_codes` storage is no longer created or used.
 Implemented `DpdCityResolver` strategy:
 
 - primary source: already saved `dpd_city_id` linked to the WDC/FIAS/GAR settlement by `location_id`;
-- if mapping is missing, return a manual-mapping-required diagnostic and do not call live DPD SOAP;
+- if mapping is missing, return an import/DaData/manual-mapping-required diagnostic and do not call live DPD SOAP;
 - `getCitiesCashPay` and `getPossibleExtraService` remain optional low-level wrappers only. They are not used by `DpdCityResolver` automatically because live DPD test/production checks returned `java.lang.NullPointerException` for sparse city lookup attempts;
 - future imported/API candidate matching should use `DpdDuplicateCityResolver`, matching FIAS/GAR guid, `countryCode`, `regionCode`, `indexMin`/`indexMax`, postal code, city name, and city code/KLADR where available;
 - after a future verified match/import, persist `dpd_city_id` and `updated_at` so later calculations do not repeat ambiguous lookup;
-- use FTP files `GeographyDPD_YYYYMMDD` and `GeographyNewDPD_YYYYMMDD` only as optional future import data, not as a runtime dependency.
+- use `GeographyNewDPD_YYYY_MM_DD.csv` as the current admin import source, never as a runtime dependency.
 
-Stage 2 also adds admin-only geography diagnostics/manual mapping in the DPD settings tab. The current diagnostic checks only whether a cityId mapping exists and does not run a live SOAP call. No mass enrichment is started automatically.
+The DPD География tab contains admin-only geography diagnostics/manual mapping, SFTP/manual CSV import, last import report, and single-location DaData fallback. The current diagnostic checks only whether a cityId mapping exists and does not run a live SOAP call. No mass DaData enrichment is started automatically.
 
-If FTP import becomes necessary, it must be a separate task with manual run or WP-Cron no more often than once every 6 months, no hardcoded FTP credentials, audit/logging, and safe rollback.
+SFTP settings default to `ftp.dpd.ru`, port `22`, username `integration`, and `/integration`; the password default is empty and stored encrypted when entered. If PHP `ssh2` is unavailable, the admin action safely instructs the manager to upload `GeographyNewDPD` manually. Future cron import, if needed, must be a separate task with no hardcoded credentials, audit/logging, and safe rollback.
 
 ## Status Strategy
 
