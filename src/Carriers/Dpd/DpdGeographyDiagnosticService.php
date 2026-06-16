@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Carriers\Dpd;
 
+use Throwable;
 use WallsShop\WDC\Locations\Storage\LocationCarrierCodeRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
@@ -26,8 +27,18 @@ final class DpdGeographyDiagnosticService {
 			return $this->empty_result( 'Location was not found.' );
 		}
 
-		$result = $this->resolver->resolve( $location );
+		try {
+			$result = $this->resolver->resolve( $location );
+		} catch ( DpdException $throwable ) {
+			return $this->empty_result( 'DPD API error: ' . $this->safe_message( $throwable->getMessage() ) );
+		} catch ( Throwable $throwable ) {
+			return $this->empty_result( 'DPD API error: ' . $this->safe_message( $throwable->getMessage() ) );
+		}
 		if ( null === $result ) {
+			if ( '' !== $this->resolver->last_error() ) {
+				return $this->empty_result( 'DPD API error: ' . $this->safe_message( $this->resolver->last_error() ) );
+			}
+
 			return $this->empty_result( 'DPD cityId was not found.' );
 		}
 
@@ -84,5 +95,11 @@ final class DpdGeographyDiagnosticService {
 			'resolver_applied' => false,
 			'matched_by' => array(),
 		);
+	}
+
+	private function safe_message( string $message ): string {
+		$message = preg_replace( '/\b(?:clientKey|client_key|token|secret)[A-Za-z0-9._\-:=]*\b/i', '[redacted]', $message ) ?? $message;
+
+		return trim( $message );
 	}
 }

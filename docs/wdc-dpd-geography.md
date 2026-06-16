@@ -23,14 +23,22 @@ No DPD-specific city table is created.
 ## Components
 
 - `LocationCarrierCodeRepository` is the carrier-neutral repository for `wdc_location_carrier_codes`.
-- `DpdCityResolver` resolves cityId from stored mapping, DPD geography API, then FIAS-only fallback.
+- `DpdCityResolver` resolves cityId from stored mapping first, then `getCitiesCashPay(countryCode)` city-list lookup.
 - `DpdDuplicateCityResolver` handles DPD `pickupDups` and `deliveryDups` arrays.
 - `DpdApiClient::getCitiesCashPay()` and `DpdApiClient::getPossibleExtraService()` are API wrappers only.
 - `DpdGeographyDiagnosticService` supports admin diagnostics and manual mapping for a single existing location.
 
+## Live API Note
+
+`getPossibleExtraService` is not used as the primary city resolver. DPD guide describes it as a method for possible services and its input is a fuller address/service request, not a sparse city lookup. A live diagnostic with only WDC location fields returned a SOAP `java.lang.NullPointerException`, so using it for city lookup is unsafe.
+
+The active lookup uses `getCitiesCashPay` with `countryCode`. The guide documents this method as returning a `city` list with `cityId`, `countryCode`, `regionCode`, `cityCode`, `cityName`, `abbreviation` and index fields. This is suitable for safe diagnostic matching, but the exact live response shape should still be verified before tariff runtime depends on it.
+
+When the DPD API fails, `DpdGeographyDiagnosticService` returns `success=false` with a redacted `DPD API error` message instead of letting admin diagnostics fatal.
+
 ## Duplicate City Matching
 
-`DpdDuplicateCityResolver` is isolated from future tariff services. It scores candidates by:
+`DpdDuplicateCityResolver` is isolated from future tariff services. It scores city-list or duplicate candidates by:
 
 - FIAS GUID;
 - GAR ID;

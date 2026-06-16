@@ -3,10 +3,10 @@
 ## DPD Geography 0.55.0
 
 - `src/Locations/Storage/LocationCarrierCodeRepository.php` is the shared storage boundary for `wdc_location_carrier_codes`. It is carrier-neutral and is used by DPD to persist `external_code=<dpd_city_id>` with `carrier_key=dpd`.
-- `src/Carriers/Dpd/DpdCityResolver.php` resolves DPD `cityId` for an existing WDC/FIAS/GAR `Location`: stored mapping first, DPD geography API next, FIAS-only fallback last. Successful API matches are saved back to `wdc_location_carrier_codes`.
-- `src/Carriers/Dpd/DpdDuplicateCityResolver.php` handles DPD `pickupDups` / `deliveryDups` outside tariff/runtime services. It scores candidates by FIAS GUID, GAR ID, cityCode/KLADR, regionCode, postal code and city name.
-- `src/Carriers/Dpd/DpdApiClient.php` exposes geography wrappers for `getCitiesCashPay` and `getPossibleExtraService`; these are wrappers only and do not implement tariff business logic.
-- `src/Carriers/Dpd/DpdGeographyDiagnosticService.php` provides admin-only DPD geography diagnostics and manual mapping save for existing locations. It does not run mass enrichment, cron jobs or FTP import.
+- `src/Carriers/Dpd/DpdCityResolver.php` resolves DPD `cityId` for an existing WDC/FIAS/GAR `Location`: stored mapping first, then `getCitiesCashPay(countryCode)` city-list lookup. Successful API matches are saved back to `wdc_location_carrier_codes`.
+- `src/Carriers/Dpd/DpdDuplicateCityResolver.php` handles DPD city-list candidates and future `pickupDups` / `deliveryDups` outside tariff/runtime services. It scores candidates by FIAS GUID, GAR ID, cityCode/KLADR, regionCode, postal code and city name.
+- `src/Carriers/Dpd/DpdApiClient.php` exposes geography wrappers for `getCitiesCashPay` and `getPossibleExtraService`; these are wrappers only and do not implement tariff business logic. `getPossibleExtraService` is not used as the primary city resolver after live diagnostics showed sparse payloads can fail in DPD SOAP.
+- `src/Carriers/Dpd/DpdGeographyDiagnosticService.php` provides admin-only DPD geography diagnostics and manual mapping save for existing locations, catching DPD API/transport failures as non-fatal diagnostic messages. It does not run mass enrichment, cron jobs or FTP import.
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders DPD geography diagnostic/manual mapping controls inside the existing DPD settings tab and stores a redacted summary through the existing DPD diagnostic fields.
 - `tests/dpd/run-dpd-city-resolver-smoke.php` covers mapping save/reuse, duplicate-city matching, FIAS fallback, absence of a new DPD city table, and non-registration as runtime carrier/shipment adapter.
 - `docs/wdc-dpd-geography.md` documents the geography scope and stage-2 constraints. DPD remains absent from `CarrierRegistry` and `CarrierShipmentAdapterRegistry`.

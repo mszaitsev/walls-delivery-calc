@@ -72,42 +72,37 @@ use WallsShop\WDC\Locations\ValueObjects\Location;
 final class FakeDpdSoapClient implements DpdSoapClientInterface {
 	/** @var array<int,array{method:string,payload:array<string,mixed>}> */
 	public array $calls = array();
-	private bool $first_lookup_empty = false;
+	private bool $throw_on_lookup = false;
 
 	public function call( string $service, string $method, array $payload, DpdCredentials $credentials, array $options = array() ): DpdSoapResponse {
 		$this->calls[] = array( 'method' => $method, 'payload' => $payload );
 
-		if ( $this->first_lookup_empty && isset( $payload['cityName'] ) ) {
-			return new DpdSoapResponse( true, array( 'return' => array() ) );
+		if ( $this->throw_on_lookup ) {
+			throw new \WallsShop\WDC\Carriers\Dpd\DpdException( 'DPD SOAP request failed: java.lang.NullPointerException' );
 		}
-
-		if ( ! $this->first_lookup_empty && isset( $payload['cityName'] ) ) {
+		if ( 'getCitiesCashPay' === $method ) {
 			return new DpdSoapResponse(
 				true,
 				array(
 					'return' => array(
-						'pickupDups' => array(
-							array( 'cityId' => '111111', 'cityName' => 'Новосибирск', 'regionCode' => '54', 'postalCode' => '630000', 'fiasGuid' => '00000000-0000-0000-0000-000000000000' ),
+						'city' => array(
+							array( 'cityId' => '111111', 'cityName' => 'Новосибирск', 'regionCode' => '54', 'indexMin' => '630000', 'indexMax' => '630999', 'fiasGuid' => '00000000-0000-0000-0000-000000000000' ),
 							array( 'cityId' => '492941', 'cityName' => 'Бердск', 'regionCode' => '54', 'indexMin' => '633000', 'indexMax' => '633099', 'fiasGuid' => '11111111-2222-3333-4444-555555555555', 'garId' => '123456789', 'cityCode' => '5400000200000' ),
 						),
-						'deliveryDups' => array(),
 					),
 				)
 			);
 		}
 
-		return new DpdSoapResponse(
-			true,
-			array( 'return' => array( 'cityId' => '700001' ) )
-		);
+		return new DpdSoapResponse( true, array( 'return' => array() ) );
 	}
 
 	public function is_available(): bool {
 		return true;
 	}
 
-	public function make_first_lookup_empty(): void {
-		$this->first_lookup_empty = true;
+	public function throw_on_lookup(): void {
+		$this->throw_on_lookup = true;
 	}
 }
 
@@ -155,6 +150,8 @@ assert_true( '492941' === $result['city_id'], 'duplicate city response resolves 
 assert_true( true === $result['saved'], 'mapping is saved after successful API resolve' );
 assert_true( true === $result['multiple'], 'diagnostics marks duplicate city response' );
 assert_true( true === $result['resolver_applied'], 'duplicate resolver was applied' );
+assert_true( 'getCitiesCashPay' === $soap->calls[0]['method'], 'resolver uses getCitiesCashPay as city lookup method' );
+assert_true( ! isset( $soap->calls[0]['payload']['cityName'] ), 'getCitiesCashPay lookup does not send getPossibleExtraService-style address payload' );
 assert_true( 1 === count( $GLOBALS['wpdb']->carrier_codes ), 'exactly one carrier code mapping is stored' );
 assert_true( 'dpd' === $GLOBALS['wpdb']->carrier_codes[0]['carrier_key'], 'mapping carrier_key is dpd' );
 assert_true( '492941' === $GLOBALS['wpdb']->carrier_codes[0]['external_code'], 'mapping external_code stores dpd_city_id' );
@@ -171,10 +168,26 @@ assert_true( 1 === count( $GLOBALS['wpdb']->carrier_codes ), 'manual save update
 assert_true( '900001' === $GLOBALS['wpdb']->carrier_codes[0]['external_code'], 'manual admin mapping updates dpd_city_id' );
 
 $GLOBALS['wpdb']->carrier_codes = array();
-$soap->make_first_lookup_empty();
-$fallback = $resolver->resolve( $location );
-assert_true( null !== $fallback && '700001' === $fallback['city_id'], 'FIAS fallback can resolve cityId when the first geography lookup is ambiguous/empty' );
-assert_true( isset( $soap->calls[ count( $soap->calls ) - 1 ]['payload']['fiasGuid'] ), 'fallback payload contains fiasGuid' );
+$soap->throw_on_lookup();
+$diagnostic = $manual->diagnose_location_id( 10 );
+assert_true( false === $diagnostic['success'], 'diagnostic returns success=false on DPD API exception' );
+assert_true( str_contains( $diagnostic['message'], 'DPD API error' ), 'diagnostic message contains DPD API error' );
+assert_true( str_contains( $diagnostic['message'], 'NullPointerException' ), 'diagnostic message contains original API failure' );
+
+$GLOBALS['wpdb']->carrier_codes[] = array(
+	'id' => 20,
+	'location_id' => 10,
+	'gar_object_id' => 123456789,
+	'fias_id' => '11111111-2222-3333-4444-555555555555',
+	'carrier_key' => 'dpd',
+	'external_code' => '777777',
+	'meta' => array( 'source' => 'test' ),
+);
+$call_count_before_cached_diagnostic = count( $soap->calls );
+$cached_diagnostic = $manual->diagnose_location_id( 10 );
+assert_true( true === $cached_diagnostic['success'], 'diagnostic can resolve from existing mapping even when API would fail' );
+assert_true( '777777' === $cached_diagnostic['city_id'], 'diagnostic returns stored mapping cityId' );
+assert_true( $call_count_before_cached_diagnostic === count( $soap->calls ), 'existing mapping prevents API call in diagnostic' );
 
 $tables = array_keys( get_object_vars( $GLOBALS['wpdb'] ) );
 assert_true( ! in_array( 'dpd_cities', $tables, true ), 'no DPD cities table is introduced in the smoke double' );

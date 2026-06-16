@@ -11,6 +11,8 @@ defined( 'ABSPATH' ) || exit;
 final class DpdCityResolver {
 	public const CARRIER_KEY = DpdSettings::CARRIER_KEY;
 
+	private string $last_error = '';
+
 	public function __construct(
 		private LocationCarrierCodeRepository $carrier_codes,
 		private DpdApiClient $api,
@@ -18,10 +20,15 @@ final class DpdCityResolver {
 	) {
 	}
 
+	public function last_error(): string {
+		return $this->last_error;
+	}
+
 	/**
 	 * @return array{city_id:string,source:string,confidence:string,saved:bool,multiple:bool,resolver_applied:bool,matched_by:array<int,string>,diagnostics:array<string,mixed>}|null
 	 */
 	public function resolve( Location $location ): ?array {
+		$this->last_error = '';
 		$stored = $this->carrier_codes->find_best( self::CARRIER_KEY, $location );
 		if ( null !== $stored && '' !== trim( $stored['external_code'] ) ) {
 			return array(
@@ -36,19 +43,11 @@ final class DpdCityResolver {
 			);
 		}
 
-		$attempts = array(
-			array( 'source' => 'geography_api', 'payload' => $this->payload_from_location( $location, false ) ),
-		);
-		$fias = $this->location_fias( $location );
-		if ( '' !== $fias ) {
-			$attempts[] = array( 'source' => 'fias_lookup', 'payload' => $this->payload_from_location( $location, true ) );
-		}
-
-		foreach ( $attempts as $attempt ) {
-			$response = $this->api->getPossibleExtraService( $attempt['payload'] );
-			$result = $this->city_from_response( $response, $location );
+		try {
+			$response = $this->api->getCitiesCashPay( $this->cities_cash_pay_payload( $location ) );
+			$result = $this->city_from_cities_cash_pay_response( $response, $location );
 			if ( null === $result['city_id'] ) {
-				continue;
+				return null;
 			}
 
 			$mapping = $this->carrier_codes->save(
@@ -56,7 +55,7 @@ final class DpdCityResolver {
 				self::CARRIER_KEY,
 				$result['city_id'],
 				array(
-					'source' => $attempt['source'],
+					'source' => 'getCitiesCashPay',
 					'matched_by' => $result['matched_by'],
 					'multiple' => $result['multiple'],
 					'resolver_applied' => $result['resolver_applied'],
@@ -65,7 +64,7 @@ final class DpdCityResolver {
 
 			return array(
 				'city_id' => $result['city_id'],
-				'source' => $attempt['source'],
+				'source' => 'getCitiesCashPay',
 				'confidence' => $result['confidence'],
 				'saved' => $mapping['id'] > 0,
 				'multiple' => $result['multiple'],
@@ -73,13 +72,60 @@ final class DpdCityResolver {
 				'matched_by' => $result['matched_by'],
 				'diagnostics' => array(
 					'mapping_id' => $mapping['id'],
-					'api_method' => 'getPossibleExtraService',
+					'api_method' => 'getCitiesCashPay',
 					'response_keys' => array_keys( $response ),
 				),
 			);
+		} catch ( \Throwable $throwable ) {
+			$this->last_error = $throwable->getMessage();
+			return null;
+		}
+	}
+
+	/**
+	 * @return array{city_id:string|null,confidence:string,multiple:bool,resolver_applied:bool,matched_by:array<int,string>}
+	 */
+	public function city_from_cities_cash_pay_response( array $response, Location $location ): array {
+		$cities = $this->cities_from_response( $response );
+		if ( array() === $cities ) {
+			return array(
+				'city_id' => null,
+				'confidence' => 'none',
+				'multiple' => false,
+				'resolver_applied' => false,
+				'matched_by' => array(),
+			);
 		}
 
-		return null;
+		$selected = $this->duplicate_resolver->resolve( $cities, $location );
+		if ( null === $selected ) {
+			return array(
+				'city_id' => null,
+				'confidence' => 'none',
+				'multiple' => count( $cities ) > 1,
+				'resolver_applied' => count( $cities ) > 1,
+				'matched_by' => array(),
+			);
+		}
+
+		$city_id = $this->extract_city_id( $selected['city'] );
+		if ( null === $city_id ) {
+			return array(
+				'city_id' => null,
+				'confidence' => 'none',
+				'multiple' => count( $cities ) > 1,
+				'resolver_applied' => count( $cities ) > 1,
+				'matched_by' => $selected['matched_by'],
+			);
+		}
+
+		return array(
+			'city_id' => $city_id,
+			'confidence' => count( $cities ) > 1 ? 'city_list_resolved' : 'direct',
+			'multiple' => count( $cities ) > 1,
+			'resolver_applied' => count( $cities ) > 1,
+			'matched_by' => $selected['matched_by'],
+		);
 	}
 
 	/**
@@ -143,30 +189,11 @@ final class DpdCityResolver {
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function payload_from_location( Location $location, bool $fias_only ): array {
-		$fias = $this->location_fias( $location );
-		if ( $fias_only ) {
-			return '' !== $fias ? array( 'fiasGuid' => $fias ) : array();
-		}
-
-		$payload = array_filter(
-			array(
-				'countryCode' => $location->country_code,
-				'regionCode' => $location->region_code,
-				'cityName' => $location->resolved_place_name(),
-				'postalCode' => $location->postal_code,
-				'cityCode' => $location->kladr_id,
-				'fiasGuid' => $fias,
-				'garId' => $location->gar_object_id > 0 ? (string) $location->gar_object_id : $location->gar_id,
-			),
-			static fn( mixed $value ): bool => null !== $value && '' !== trim( (string) $value )
-		);
-
-		return $payload;
-	}
-
-	private function location_fias( Location $location ): string {
-		return '' !== trim( $location->fias_id ) ? trim( $location->fias_id ) : trim( $location->city_fias_id );
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function cities_cash_pay_payload( Location $location ): array {
+		return array( 'countryCode' => '' !== trim( $location->country_code ) ? strtoupper( trim( $location->country_code ) ) : 'RU' );
 	}
 
 	/**
@@ -182,6 +209,31 @@ final class DpdCityResolver {
 		}
 
 		return $current;
+	}
+
+	/**
+	 * @param array<string,mixed> $response
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function cities_from_response( array $response ): array {
+		$flat = $this->flatten_return( $response );
+		foreach ( array( 'city', 'cities', 'items' ) as $key ) {
+			if ( isset( $flat[ $key ] ) && is_array( $flat[ $key ] ) ) {
+				if ( $this->is_list( $flat[ $key ] ) ) {
+					return array_values( array_filter( $flat[ $key ], 'is_array' ) );
+				}
+
+				return array( $flat[ $key ] );
+			}
+		}
+		if ( $this->extract_city_id( $flat ) !== null ) {
+			return array( $flat );
+		}
+		if ( $this->is_list( $flat ) ) {
+			return array_values( array_filter( $flat, 'is_array' ) );
+		}
+
+		return array();
 	}
 
 	/**

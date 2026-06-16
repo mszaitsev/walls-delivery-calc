@@ -85,6 +85,10 @@ final class DpdDuplicateCityResolver {
 			$score += 60;
 			$matched_by[] = 'city_code';
 		}
+		if ( '' !== trim( $location->country_code ) && $this->candidate_value_matches( $candidate, array( 'countryCode', 'country_code' ), trim( $location->country_code ) ) ) {
+			$score += 35;
+			$matched_by[] = 'country_code';
+		}
 		if ( '' !== trim( $location->region_code ) && $this->candidate_value_matches( $candidate, array( 'regionCode', 'region_code' ), trim( $location->region_code ) ) ) {
 			$score += 30;
 			$matched_by[] = 'region_code';
