@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.56.3.
+Current plugin version: 0.56.4.
+
+Version 0.56.4 fixes DPD Geography import file cleanup semantics: uploaded/SFTP temp CSV files are deleted on finish/reset, while CLI/diagnostic imports through `import_file()` keep the caller-provided CSV and still remove the serialized index and staging table.
 
 Version 0.56.3 makes DPD Geography import staging-first. Step import writes candidates/conflicts only to a per-job `wdc_dpd_geography_stage_<hash>` table; `wdc_location_delivery_codes` is unchanged until EOF finalization. Finish performs a DPD-only full refresh of `dpd_city_id`, saves the report, and removes CSV/index/staging temp data. Reset removes the same temporary data and leaves the working table untouched.
 

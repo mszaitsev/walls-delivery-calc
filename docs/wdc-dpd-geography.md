@@ -1,6 +1,6 @@
 # WDC DPD Geography
 
-Version: 0.56.3.
+Version: 0.56.4.
 
 ## Scope
 
@@ -60,6 +60,8 @@ As of 0.56.3, imports are stateful staging jobs rather than one synchronous PHP 
 - progress state records phase, source, source file, rows read, total rows, RU/skipped rows, matching counters, saved/unchanged mappings, conflicts, ambiguous/unmatched rows, errors and timestamps;
 - finish finalizes candidates into `wdc_location_delivery_codes.dpd_city_id`, stores the final report in DPD settings, and deletes the temporary CSV/index/staging resources;
 - reset/cancel deletes stale temporary CSV/index/staging resources and marks the job cancelled.
+
+The import state includes an internal `delete_file_on_finish` flag. Manual upload and SFTP jobs set it to `true`, because WDC owns those temporary CSV files. CLI/smoke/diagnostic calls through `DpdGeographyImportService::import_file()` set it to `false`, so the caller-provided CSV is preserved after finish/reset. The serialized index file and staging table are always removed by finish/reset. `delete_file_on_finish` is not exposed in public AJAX state.
 
 The working `wdc_location_delivery_codes` table is not changed while rows are being imported. During a job, `DpdGeographyStageRepository` creates:
 

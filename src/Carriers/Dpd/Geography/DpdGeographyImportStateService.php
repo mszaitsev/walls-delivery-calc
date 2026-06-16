@@ -22,7 +22,7 @@ final class DpdGeographyImportStateService {
 	 */
 	public function public_state(): array {
 		$state = $this->current();
-		unset( $state['file_path'], $state['index_path'], $state['stage_table'], $state['columns'] );
+		unset( $state['file_path'], $state['index_path'], $state['stage_table'], $state['delete_file_on_finish'], $state['columns'] );
 		$total = max( 0, (int) ( $state['total_rows'] ?? 0 ) );
 		$read = max( 0, (int) ( $state['rows_read'] ?? 0 ) );
 		$state['percent_complete'] = $total > 0 ? min( 100, round( $read / $total * 100, 1 ) ) : 0;
@@ -46,6 +46,7 @@ final class DpdGeographyImportStateService {
 				'file_path' => (string) ( $context['file_path'] ?? '' ),
 				'index_path' => (string) ( $context['index_path'] ?? '' ),
 				'stage_table' => (string) ( $context['stage_table'] ?? '' ),
+				'delete_file_on_finish' => (bool) ( $context['delete_file_on_finish'] ?? true ),
 				'total_rows' => max( 0, (int) ( $context['total_rows'] ?? 0 ) ),
 				'byte_offset' => max( 0, (int) ( $context['byte_offset'] ?? 0 ) ),
 				'columns' => is_array( $context['columns'] ?? null ) ? $context['columns'] : array(),
@@ -96,7 +97,7 @@ final class DpdGeographyImportStateService {
 	public function reset(): array {
 		$state = $this->current();
 		$file = (string) ( $state['file_path'] ?? '' );
-		if ( '' !== $file && file_exists( $file ) ) {
+		if ( ! empty( $state['delete_file_on_finish'] ) && '' !== $file && file_exists( $file ) ) {
 			@unlink( $file );
 		}
 		$index = (string) ( $state['index_path'] ?? '' );
@@ -121,6 +122,7 @@ final class DpdGeographyImportStateService {
 			'file_path' => '',
 			'index_path' => '',
 			'stage_table' => '',
+			'delete_file_on_finish' => true,
 			'byte_offset' => 0,
 			'rows_read' => 0,
 			'total_rows' => 0,

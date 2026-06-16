@@ -195,9 +195,12 @@ $job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tm
 $internal = $state->current();
 $stage_table = (string) $internal['stage_table'];
 $import_path = (string) $internal['file_path'];
+$upload_index_path = (string) $internal['index_path'];
 dpd_import_assert( 'ready' === (string) $job['phase'], 'start creates ready import job' );
 dpd_import_assert( '' !== $stage_table && isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ] ), 'start creates staging table' );
 dpd_import_assert( ! array_key_exists( 'stage_table', $job ) && ! array_key_exists( 'file_path', $job ), 'public state hides internal paths and stage table' );
+dpd_import_assert( ! array_key_exists( 'delete_file_on_finish', $job ), 'public state hides delete_file_on_finish flag' );
+dpd_import_assert( true === (bool) $internal['delete_file_on_finish'], 'manual upload marks imported temp file for deletion' );
 dpd_import_assert( ! array_key_exists( 'seen_mappings', $internal ) && ! array_key_exists( 'saved_by_job', $internal ) && ! array_key_exists( 'blocked_locations', $internal ), 'state does not contain large in-memory mapping arrays' );
 
 $job = $importer->step( (string) $job['job_id'], 1 );
@@ -234,17 +237,49 @@ dpd_import_assert( null === $repository->get_dpd_city_id( 4 ) && null === $repos
 dpd_import_assert( array() !== $settings->last_geography_import_report(), 'last import report is stored in settings' );
 dpd_import_assert( 'finished' === $state->current()['phase'], 'step import finishes job state' );
 dpd_import_assert( ! file_exists( $import_path ), 'import temp file is deleted on finish' );
+dpd_import_assert( ! file_exists( $upload_index_path ), 'serialized index file is deleted on finish' );
 dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ] ), 'staging table is deleted on finish' );
+
+$cli_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-cli-' );
+file_put_contents( $cli_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+$report = $importer->import_file( $cli_path, 'cli', 'GeographyNewDPD_2026_06_16.csv' );
+$cli_state = $state->current();
+dpd_import_assert( 8 === (int) $report['total_rows'], 'CLI wrapper imports existing file' );
+dpd_import_assert( false === (bool) $cli_state['delete_file_on_finish'], 'CLI wrapper stores delete_file_on_finish=false' );
+dpd_import_assert( file_exists( $cli_path ), 'CLI wrapper keeps existing CSV on finish' );
+dpd_import_assert( ! file_exists( (string) $cli_state['index_path'] ), 'CLI wrapper deletes serialized index on finish' );
+dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ (string) $cli_state['stage_table'] ] ), 'CLI wrapper deletes staging table on finish' );
+@unlink( $cli_path );
 
 $reset_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-reset-' );
 file_put_contents( $reset_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
 $reset_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $reset_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
 $reset_state = $state->current();
 $reset_stage = (string) $reset_state['stage_table'];
+$reset_import_path = (string) $reset_state['file_path'];
+$reset_index_path = (string) $reset_state['index_path'];
 dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $reset_stage ] ), 'reset scenario creates staging table' );
 $reset_public = $importer->reset();
 dpd_import_assert( 'cancelled' === (string) $reset_public['phase'], 'reset marks import as cancelled' );
+dpd_import_assert( ! file_exists( $reset_import_path ), 'reset deletes uploaded import temp file when delete_file_on_finish=true' );
+dpd_import_assert( ! file_exists( $reset_index_path ), 'reset deletes serialized index when delete_file_on_finish=true' );
 dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $reset_stage ] ), 'reset deletes staging table' );
+
+$existing_reset_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-existing-reset-' );
+file_put_contents( $existing_reset_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+$starter = new ReflectionMethod( $importer, 'start_from_existing_file' );
+$starter->setAccessible( true );
+$existing_reset_job = $starter->invoke( $importer, $existing_reset_path, 'cli', 'GeographyNewDPD_2026_06_16.csv', false );
+$existing_reset_state = $state->current();
+$existing_reset_stage = (string) $existing_reset_state['stage_table'];
+$existing_reset_index_path = (string) $existing_reset_state['index_path'];
+dpd_import_assert( 'ready' === (string) $existing_reset_job['phase'], 'existing-file reset scenario creates ready job' );
+dpd_import_assert( false === (bool) $existing_reset_state['delete_file_on_finish'], 'existing-file reset scenario stores delete_file_on_finish=false' );
+$importer->reset();
+dpd_import_assert( file_exists( $existing_reset_path ), 'reset keeps existing CSV when delete_file_on_finish=false' );
+dpd_import_assert( ! file_exists( $existing_reset_index_path ), 'reset deletes serialized index when delete_file_on_finish=false' );
+dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $existing_reset_stage ] ), 'reset deletes staging table when delete_file_on_finish=false' );
+@unlink( $existing_reset_path );
 
 $plugin_source = file_get_contents( __DIR__ . '/../../src/Core/Plugin.php' );
 dpd_import_assert( is_string( $plugin_source ) && ! str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'DPD shipment adapter is not registered by geography import' );

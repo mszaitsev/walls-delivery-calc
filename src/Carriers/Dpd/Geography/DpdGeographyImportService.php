@@ -154,6 +154,7 @@ final class DpdGeographyImportService {
 					'file_path' => $path,
 					'index_path' => $index_path,
 					'stage_table' => $stage_table,
+					'delete_file_on_finish' => $delete_on_finish,
 					'total_rows' => (int) $inspect['total_rows'],
 					'byte_offset' => (int) $inspect['data_offset'],
 					'columns' => $inspect['columns'],
@@ -233,11 +234,13 @@ final class DpdGeographyImportService {
 		);
 		$report = $this->report_from_state( $state );
 		$this->settings?->save_geography_import_report( $report );
-		foreach ( array( 'file_path', 'index_path' ) as $key ) {
-			$file = (string) ( $state[ $key ] ?? '' );
-			if ( '' !== $file && file_exists( $file ) ) {
-				@unlink( $file );
-			}
+		$file = (string) ( $state['file_path'] ?? '' );
+		if ( ! empty( $state['delete_file_on_finish'] ) && '' !== $file && file_exists( $file ) ) {
+			@unlink( $file );
+		}
+		$index_file = (string) ( $state['index_path'] ?? '' );
+		if ( '' !== $index_file && file_exists( $index_file ) ) {
+			@unlink( $index_file );
 		}
 		$this->stage->drop( $stage_table );
 
