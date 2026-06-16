@@ -1,5 +1,16 @@
 # Карта текущего кода
 
+## DPD Foundation 0.54.0
+
+- `src/Carriers/Dpd/DpdSettings.php` stores DPD environment, test/production client numbers, encrypted client keys, request timeout, debug flag and redacted dry diagnostic result in the existing settings/encryption layer.
+- `src/Carriers/Dpd/DpdSoapClientInterface.php` is the required replaceable DPD SOAP transport boundary. `DpdApiClient` depends on the interface, while `DpdSoapClient` is only the current PHP `SoapClient` implementation.
+- `src/Carriers/Dpd/DpdEndpoints.php` maps test/production WSDL URLs for `geography2`, `calculator2`, `order2`, `tracing`, `tracing1-1`, `event-tracking`, `label-print` and `delivery-management`.
+- `src/DeliveryServices/DeliveryServiceRepository.php` and `DeliveryServiceManager.php` create the built-in `dpd` service disabled by default with RU country availability. The service is predefined and protected from deletion like other system services.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds the DPD `Данные для входа` tab and a dry diagnostic action. The diagnostic checks credentials, endpoint selection and SOAP transport availability only; it does not call the DPD API.
+- `src/Core/Plugin.php` registers DPD settings/API/transport for admin diagnostics only. It does not register a DPD runtime quote carrier and does not add a DPD shipment adapter.
+- `tests/dpd/run-dpd-foundation-smoke.php` covers disabled service creation, encrypted client key storage, redaction, endpoint selection, graceful missing transport diagnostic, and registry non-registration.
+- `docs/wdc-dpd-integration.md` documents the stage-1 boundary and future strategies for cityId, statuses, `unitLoad`, COD and receipts.
+
 ## CDEK Express Single Package Rates 0.47.0
 
 - 0.53.1 shipment actions note: `src/Shipments/Cdek/CdekBarcodePrintService.php` now stores BARCODE print creation/check metadata and recreates pending print forms that remain `ACCEPTED`/`PROCESSING` beyond the recovery threshold, while preserving the READY cache. `src/Shipments/Admin/OrderShipmentsMetabox.php` returns `carrier_ui_payload()` after every shipment AJAX action, and `assets/admin/shipments-admin.js` normalizes that adapter payload before rendering buttons, fixing Russian Post create/update button state without carrier-specific JS branches.

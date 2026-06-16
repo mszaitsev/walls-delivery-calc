@@ -9,6 +9,8 @@ use WallsShop\WDC\Carriers\Cdek\Api\CdekApiException;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
 use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffSyncService;
+use WallsShop\WDC\Carriers\Dpd\DpdApiClient;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostCountriesAdminPage;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
@@ -82,7 +84,9 @@ final class DeliveryServicesAdminPage {
 		private ?CdekTariffSyncService $cdek_tariff_sync = null,
 		private ?DeliveryQuoteCacheManager $delivery_quote_cache_manager = null,
 		private ?CdekStatusMappingService $cdek_status_mapping = null,
-		private ?CdekCarrier $cdek_carrier = null
+		private ?CdekCarrier $cdek_carrier = null,
+		private ?DpdSettings $dpd_settings = null,
+		private ?DpdApiClient $dpd_api = null
 	) {
 	}
 
@@ -167,7 +171,7 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
-		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
+		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection' ), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -178,7 +182,7 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_tariffs' === $action ) {
 				$data = array();
 			}
-			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
+			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection' ), true ) ) {
 				$data = array();
 			}
 			if ( $id > 0 && array() !== $data ) {
@@ -317,6 +321,13 @@ final class DeliveryServicesAdminPage {
 					$this->cdek_settings->save_connection_result( false, 'Не удалось подключиться к СДЭК: ' . $exception->getMessage() );
 				}
 			}
+			if ( 'save_dpd_settings' === $action && $this->dpd_settings instanceof DpdSettings ) {
+				$this->dpd_settings->save_from_admin( $_POST );
+			}
+			if ( 'check_dpd_connection' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_api instanceof DpdApiClient ) {
+				$result = $this->dpd_api->checkConnectionDryRun();
+				$this->dpd_settings->save_connection_result( (bool) $result['success'], (string) $result['message'] );
+			}
 		}
 
 		if ( 'toggle' === $action ) {
@@ -344,7 +355,7 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection' ), true ) ) {
+		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection' ), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'main',
@@ -356,6 +367,7 @@ final class DeliveryServicesAdminPage {
 				'save_status_mapping' => 'status_mapping',
 				'save_cdek_statuses' => 'cdek_statuses',
 				'save_cdek_settings', 'check_cdek_connection' => 'cdek_settings',
+				'save_dpd_settings', 'check_dpd_connection' => 'dpd_settings',
 				'save_cdek_calculation' => 'calculation',
 				default => 'main',
 			};
@@ -552,6 +564,9 @@ final class DeliveryServicesAdminPage {
 			$tabs['cdek_settings'] = 'Данные для входа';
 			$tabs['cdek_statuses'] = 'Статусы СДЭК';
 		}
+		if ( $this->is_dpd_service( $service ) ) {
+			$tabs['dpd_settings'] = 'Данные для входа';
+		}
 		?>
 		<h2><?php echo esc_html( $service->title ); ?></h2>
 		<nav class="nav-tab-wrapper">
@@ -570,6 +585,7 @@ final class DeliveryServicesAdminPage {
 			'status_mapping' => $this->render_status_mapping_tab( $service ),
 			'diagnostics' => $this->render_diagnostics_tab( $service ),
 			'cdek_settings' => $this->render_cdek_settings_tab( $service ),
+			'dpd_settings' => $this->render_dpd_settings_tab( $service ),
 			'cdek_statuses' => $this->render_cdek_statuses_tab( $service ),
 			'russian_post_countries' => $this->render_russian_post_countries_tab( $service ),
 			default => $this->render_main_tab( $service ),
@@ -800,6 +816,68 @@ final class DeliveryServicesAdminPage {
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 			<?php submit_button( __( 'Проверить подключение', 'walls-delivery-calc' ), 'secondary', 'submit', false ); ?>
+		</form>
+		<?php
+	}
+
+	private function render_dpd_settings_tab( DeliveryService $service ): void {
+		if ( ! $this->is_dpd_service( $service ) || ! $this->dpd_settings instanceof DpdSettings ) {
+			return;
+		}
+		$test_credentials = $this->dpd_settings->credentials_for_environment( DpdSettings::ENV_TEST );
+		$production_credentials = $this->dpd_settings->credentials_for_environment( DpdSettings::ENV_PRODUCTION );
+		$diagnostic_status = $this->dpd_settings->credentials_are_complete()
+			? __( 'Данные для активной среды заполнены. Проверка DPD на этом этапе выполняется в dry-режиме без внешнего API-вызова.', 'walls-delivery-calc' )
+			: __( 'Данные для активной среды не заполнены.', 'walls-delivery-calc' );
+		$last_check = $this->dpd_settings->last_connection_check();
+		$last_status = $this->dpd_settings->last_connection_status();
+		$last_message = $this->dpd_settings->last_connection_message();
+		?>
+		<form method="post" style="max-width: 860px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="save_dpd_settings">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<h3><?php echo esc_html__( 'Данные для входа DPD', 'walls-delivery-calc' ); ?></h3>
+			<table class="form-table" role="presentation">
+				<?php $this->select_assoc_row( DpdSettings::ENVIRONMENT_KEY, __( 'Среда', 'walls-delivery-calc' ), $this->dpd_settings->environment(), array( DpdSettings::ENV_TEST => 'Тестовая', DpdSettings::ENV_PRODUCTION => 'Рабочая' ) ); ?>
+				<tr><th colspan="2"><h3><?php echo esc_html__( 'Тестовая среда', 'walls-delivery-calc' ); ?></h3></th></tr>
+				<?php $this->text_row( DpdSettings::TEST_CLIENT_NUMBER_KEY, __( 'Номер клиента DPD / clientNumber', 'walls-delivery-calc' ), $test_credentials->client_number ); ?>
+				<tr>
+					<th scope="row"><?php echo esc_html__( 'Ключ клиента DPD / clientKey', 'walls-delivery-calc' ); ?></th>
+					<td>
+						<input class="regular-text" type="password" name="dpd_test_client_key" value="" placeholder="<?php echo esc_attr( $this->dpd_settings->has_client_key( DpdSettings::ENV_TEST ) ? 'задано' : 'не задано' ); ?>">
+						<label style="display:block;margin-top:6px;"><input type="checkbox" name="dpd_clear_test_client_key" value="1"> <?php echo esc_html__( 'очистить сохраненный ключ тестовой среды', 'walls-delivery-calc' ); ?></label>
+						<p class="description"><?php echo esc_html__( 'Пустое поле не затирает сохраненный секрет. Ключ хранится только в зашифрованном виде.', 'walls-delivery-calc' ); ?></p>
+					</td>
+				</tr>
+				<tr><th colspan="2"><h3><?php echo esc_html__( 'Рабочая среда', 'walls-delivery-calc' ); ?></h3></th></tr>
+				<?php $this->text_row( DpdSettings::PRODUCTION_CLIENT_NUMBER_KEY, __( 'Номер клиента DPD / clientNumber', 'walls-delivery-calc' ), $production_credentials->client_number ); ?>
+				<tr>
+					<th scope="row"><?php echo esc_html__( 'Ключ клиента DPD / clientKey', 'walls-delivery-calc' ); ?></th>
+					<td>
+						<input class="regular-text" type="password" name="dpd_production_client_key" value="" placeholder="<?php echo esc_attr( $this->dpd_settings->has_client_key( DpdSettings::ENV_PRODUCTION ) ? 'задано' : 'не задано' ); ?>">
+						<label style="display:block;margin-top:6px;"><input type="checkbox" name="dpd_clear_production_client_key" value="1"> <?php echo esc_html__( 'очистить сохраненный ключ рабочей среды', 'walls-delivery-calc' ); ?></label>
+						<p class="description"><?php echo esc_html__( 'Пустое поле не затирает сохраненный секрет. Не используйте тестовые данные из документации как значения по умолчанию.', 'walls-delivery-calc' ); ?></p>
+					</td>
+				</tr>
+				<tr><th colspan="2"><h3><?php echo esc_html__( 'Транспорт и диагностика', 'walls-delivery-calc' ); ?></h3></th></tr>
+				<?php $this->text_row( DpdSettings::REQUEST_TIMEOUT_KEY, __( 'Таймаут запроса, сек.', 'walls-delivery-calc' ), (string) $this->dpd_settings->request_timeout() ); ?>
+				<?php $this->checkbox_row( DpdSettings::DEBUG_KEY, __( 'Отладочное логирование', 'walls-delivery-calc' ), $this->dpd_settings->debug_enabled() ); ?>
+				<?php $this->readonly_row( 'dpd_active_environment', __( 'Активная среда', 'walls-delivery-calc' ), $this->dpd_settings->environment_label() ); ?>
+				<?php $this->readonly_row( 'dpd_diagnostic_status', __( 'Статус диагностики', 'walls-delivery-calc' ), $diagnostic_status ); ?>
+				<?php $this->readonly_row( DpdSettings::LAST_CONNECTION_CHECK_KEY, __( 'Последняя проверка подключения', 'walls-delivery-calc' ), '' !== $last_check ? $last_check : __( 'не выполнялась', 'walls-delivery-calc' ) ); ?>
+				<?php $this->readonly_row( DpdSettings::LAST_CONNECTION_STATUS_KEY, __( 'Статус последней проверки', 'walls-delivery-calc' ), '' !== $last_status ? $last_status : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
+				<?php $this->readonly_row( DpdSettings::LAST_CONNECTION_MESSAGE_KEY, __( 'Сообщение последней проверки', 'walls-delivery-calc' ), '' !== $last_message ? $last_message : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
+			</table>
+			<?php submit_button( __( 'Сохранить данные для входа', 'walls-delivery-calc' ) ); ?>
+		</form>
+		<form method="post" style="margin-top: 16px; max-width: 860px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="check_dpd_connection">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<?php submit_button( __( 'Проверить DPD без внешнего API-вызова', 'walls-delivery-calc' ), 'secondary', 'submit', false ); ?>
 		</form>
 		<?php
 	}
@@ -2302,6 +2380,10 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 
 	private function is_cdek_service( ?DeliveryService $service ): bool {
 		return $service instanceof DeliveryService && CdekSettings::SERVICE_KEY === $service->service_key && CdekSettings::CARRIER_KEY === $service->carrier_key;
+	}
+
+	private function is_dpd_service( ?DeliveryService $service ): bool {
+		return $service instanceof DeliveryService && DpdSettings::SERVICE_KEY === $service->service_key && DpdSettings::CARRIER_KEY === $service->carrier_key;
 	}
 
 	private function service_tab_url( DeliveryService $service, string $tab ): string {
