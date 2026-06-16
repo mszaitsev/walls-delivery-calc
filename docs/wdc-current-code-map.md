@@ -1,12 +1,25 @@
 # Карта текущего кода
 
+## DPD Tariff Calculation Foundation 0.57.0
+
+- `src/Carriers/Dpd/DpdApiClient.php::getServiceCostByParcels3()` is the low-level wrapper for the DPD calculator SOAP method. It uses `DpdEndpoints::SERVICE_CALCULATOR` (`calculator2`) and the existing `DpdApiClient::call()` path, so `DpdSoapRequest` remains the only place that adds `auth`.
+- `src/Carriers/Dpd/Tariff/DpdTariffRequest.php` and `DpdTariffParcel.php` describe the admin diagnostic tariff input: sender/receiver DPD city IDs, one parcel, declared value, pickup/delivery mode flags, optional service code and pickup date.
+- `src/Carriers/Dpd/Tariff/DpdTariffRequestBuilder.php` builds the `getServiceCostByParcels3` payload with `pickup.cityId`, `delivery.cityId`, `selfPickup`, `selfDelivery`, `declaredValue`, optional `serviceCode`/`pickupDate`, and `parcel[]` weight/dimensions/quantity. It intentionally does not include credentials or WooCommerce objects.
+- `src/Carriers/Dpd/Tariff/DpdTariffCalculationService.php` resolves sender city ID from DPD tariff settings/override or sender `location_id`, resolves receiver `location_id` through `DpdCityResolver`, calls the DPD API wrapper, catches `DpdException`, and returns `DpdTariffResult` without writing rates to delivery tables.
+- `src/Carriers/Dpd/Tariff/DpdTariffOptionNormalizer.php` tolerates DPD SOAP bodies shaped as one object, arrays, or nested `return`/service fields and normalizes service code, name, cost, currency, delivery period/date, pickup/delivery flags and raw fields.
+- `src/Carriers/Dpd/DpdSettings.php` stores DPD tariff calculator settings (`dpd_tariff_sender_location_id`, `dpd_tariff_sender_dpd_city_id`, display sender city name, default parcel dimensions/weight, declared value) and the last visible tariff action result.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds the `DPD Расчет` tab with settings and a nonce/capability-protected test calculator. The tab displays success/failure, raw returned option count, normalized service list and debug raw payload/response when DPD debug is enabled.
+- `src/Core/Plugin.php` registers DPD tariff builder/normalizer/calculation service for admin use only. It still registers no `DpdCarrier` in `CarrierRegistry` and no DPD shipment adapter in `CarrierShipmentAdapterRegistry`.
+- `tests/dpd/run-dpd-tariff-calculation-smoke.php` covers payload building/auth separation, controlled sender/receiver cityId errors, fake API invocation, single/array response normalization, visible admin result storage, and DPD non-registration in checkout/shipment adapters.
+- `docs/wdc-dpd-tariff-calculation.md` documents the 0.57.0 boundary. Pickup points, checkout runtime, order creation, statuses, labels, COD, `unitLoad`, receipts, cron and tariff sync are intentionally not implemented.
+
 ## DPD Delivery Codes And Geography Import 0.56.3
 
 - `database/migrations/0030_create_location_delivery_codes.php` creates `wdc_location_delivery_codes` with `location_id` primary key, nullable `dpd_city_id`, nullable `updated_at`, and `dpd_city_id` index.
 - `src/Locations/Storage/LocationDeliveryCodeRepository.php` is the storage boundary for delivery carrier codes tied 1:1 to `wdc_locations.id`. It supports `find_by_location_id`, `get_dpd_city_id`, `save_dpd_city_id`, `delete_by_location_id`, and `cleanup_orphans`.
 - `src/Carriers/Dpd/DpdCityResolver.php` resolves DPD `cityId` for an existing WDC/FIAS/GAR `Location` from `wdc_location_delivery_codes.dpd_city_id` only. It requires `Location->id`, does not call live DPD geography APIs automatically, and returns an import/DaData/manual-mapping-required diagnostic message when no mapping exists.
 - `src/Carriers/Dpd/DpdDuplicateCityResolver.php` remains isolated for future imported/API candidate matching. It scores candidates by FIAS GUID, GAR ID, countryCode, cityCode/KLADR, regionCode, postal code and city name, but is not used by the mapping-only resolver path.
-- `src/Carriers/Dpd/DpdApiClient.php` exposes geography wrappers for `getCitiesCashPay` and `getPossibleExtraService`; these are low-level wrappers only and do not implement tariff or automatic city lookup business logic.
+- `src/Carriers/Dpd/DpdApiClient.php` exposes geography wrappers for `getCitiesCashPay` and `getPossibleExtraService`; these are low-level wrappers only and do not implement automatic city lookup business logic.
 - `src/Carriers/Dpd/DpdGeographyDiagnosticService.php` provides admin-only DPD geography diagnostics and manual mapping save for existing locations. Manual mapping writes `dpd_city_id` through `LocationDeliveryCodeRepository`. The current diagnostic checks resolver/mapping state only and does not run live SOAP calls, mass enrichment or cron jobs.
 - `src/Carriers/Dpd/Geography/DpdGeographyFtpClient.php` downloads the newest `GeographyNewDPD_*.csv` through SFTP when `ssh2` and encrypted DPD SFTP password are available; otherwise it returns a safe manual-upload message.
 - `src/Locations/Storage/LocationRepository.php::dpd_location_index_rows()` reads only the active RU columns needed for DPD indexed matching, in chunks, instead of loading full `Location` objects or querying per CSV row.

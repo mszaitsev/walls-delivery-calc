@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.56.9.
+Current plugin version: 0.57.0.
+
+Version 0.57.0 adds the DPD tariff calculation foundation as an admin-only diagnostic calculator. The DPD service can call `getServiceCostByParcels3` through the existing SOAP abstraction, resolve receiver city IDs from `wdc_location_delivery_codes.dpd_city_id`, use a configured sender `cityId`, and show normalized tariff options plus debug raw response on the new `DPD Расчет` tab. DPD is still not registered in checkout or shipment adapters.
 
 Version 0.56.9 adds a visible DPD География action result block. Diagnostics, manual cityId mapping, DaData fallback, SFTP warnings, import job start, and reset now save a structured last result and display it after admin redirects, separately from import progress and the last import report.
 

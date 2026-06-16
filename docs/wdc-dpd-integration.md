@@ -2,7 +2,7 @@
 
 ## Scope
 
-Version 0.56.3 keeps the DPD integration limited to foundation plus geography. The built-in delivery service uses:
+Version 0.57.0 keeps the DPD integration limited to foundation, geography and admin-only tariff diagnostics. The built-in delivery service uses:
 
 - `service_key`: `dpd`
 - `carrier_key`: `dpd`
@@ -11,7 +11,7 @@ Version 0.56.3 keeps the DPD integration limited to foundation plus geography. T
 
 DPD is not registered as a checkout runtime quote carrier and is not registered in `CarrierShipmentAdapterRegistry`. Enabling the service row alone does not produce checkout rates because there is no DPD carrier adapter in `CarrierRegistry`.
 
-Current stages intentionally do not implement DPD tariffs, checkout rates, pickup points, order creation, cancellation, tracing/statuses, labels, COD, `unitLoad`, fiscal receipts, or receipt storage. DPD city FTP/SFTP/manual CSV import is admin-only geography preparation and does not register runtime carrier behavior.
+Current stages intentionally do not implement DPD checkout rates, pickup points, order creation, cancellation, tracing/statuses, labels, COD, `unitLoad`, fiscal receipts, or receipt storage. DPD city FTP/SFTP/manual CSV import and tariff calculation are admin-only preparation/diagnostics and do not register runtime carrier behavior.
 
 As of 0.56.3, DPD geography import is a stateful staging process. SFTP/manual CSV actions create an admin import job, build a `DpdLocationIndex` from active RU `wdc_locations`, create a per-job `wdc_dpd_geography_stage_<job_hash>` table, and process rows through AJAX polling with visual progress. The importer avoids SQL lookup per CSV row, does not write to `wdc_location_delivery_codes` during steps, and finalizes candidates into the working table only after EOF. Import state is stored in `wdc_dpd_geography_import_state`; the final report remains in DPD settings.
 
@@ -65,6 +65,12 @@ Current endpoint keys:
 - `delivery-management`
 
 The stage 1 smoke test verifies test/production URL selection only. Runtime methods are not called.
+
+## Admin Tariff Calculation
+
+As of 0.57.0, `DpdApiClient::getServiceCostByParcels3()` calls `getServiceCostByParcels3` on `calculator2` through the same `DpdApiClient::call()` path as other low-level DPD wrappers. `DpdSoapRequest` adds `auth`; the tariff builder never inserts credentials.
+
+The `DPD Расчет` tab is admin-only. It stores sender/default parcel settings in `DpdSettings`, resolves sender `cityId` from explicit `dpd_tariff_sender_dpd_city_id` first and then from `dpd_tariff_sender_location_id` via `DpdCityResolver`, resolves receiver `location_id` via `wdc_location_delivery_codes.dpd_city_id`, and displays a visible result after redirect. It does not create checkout rates, write tariff rows, create shipments, or mutate orders.
 
 ## Credentials And Diagnostics
 
@@ -129,12 +135,10 @@ Basket composition should be sent to DPD only if it is required for declared val
 
 Fiscal receipts and DPD receipt storage are not implemented.
 
-## Not Implemented In Stage 1
+## Not Implemented In Current Stage
 
-- tariff calculation, including `getServiceCostByParcels3`;
 - checkout runtime DPD rates;
 - DPD pickup points / parcel shops / maps;
-- DPD city FTP import;
 - DPD order creation, cancellation, statuses, labels;
 - COD / NPP;
 - `unitLoad`;

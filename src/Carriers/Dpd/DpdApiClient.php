@@ -50,6 +50,13 @@ final class DpdApiClient {
 	}
 
 	/**
+	 * @param array<string,mixed> $payload
+	 */
+	public function getServiceCostByParcels3( array $payload ): DpdSoapResponse {
+		return $this->call( DpdEndpoints::SERVICE_CALCULATOR, 'getServiceCostByParcels3', $payload );
+	}
+
+	/**
 	 * @return array{success:bool,message:string,details:array<string,mixed>}
 	 */
 	public function checkConnectionDryRun(): array {
