@@ -1,12 +1,12 @@
 # WDC DPD Geography
 
-Version: 0.56.9.
+Version: 0.57.0.
 
 ## Scope
 
 This stage implements only a production-safe DPD geography foundation needed before tariff work. It reads and stores DPD `cityId` mappings for existing WDC/FIAS/GAR locations, adds admin diagnostics/manual mapping, SFTP/manual CSV import for `GeographyNewDPD_*.csv`, and a manual DaData delivery fallback for one `location_id`.
 
-It does not implement DPD tariffs, `getServiceCost*`, checkout integration, pickup points, `getParcelShops`, order creation, cancellation, statuses, labels, cron jobs, Action Scheduler jobs, COD, `unitLoad` or fiscal receipts.
+It does not implement DPD checkout integration, pickup points, `getParcelShops`, order creation, cancellation, statuses, labels, cron jobs, Action Scheduler jobs, COD, `unitLoad` or fiscal receipts. DPD tariff calculation now exists separately as an admin-only diagnostic calculator documented in `docs/wdc-dpd-tariff-calculation.md`.
 
 ## Storage
 
@@ -149,8 +149,8 @@ Diagnostics do not call live DPD SOAP methods. They only check whether a mapping
 
 Diagnostics do not calculate rates, do not create orders, do not import pickup points, do not mutate shipments and do not run cron jobs.
 
-## Future Tariff Stage
+## Tariff Consumer
 
-Future tariff implementation should consume `DpdCityResolver` instead of adding carrier-specific branches to checkout or tariff services. At tariff stage, WDC must require an existing `dpd_city_id` mapping and must not silently call DPD geography APIs to guess a city.
+The DPD tariff diagnostic stage consumes `DpdCityResolver` instead of adding carrier-specific city lookup branches. It requires an existing `dpd_city_id` mapping and does not silently call DPD geography APIs to guess a city.
 
-Future tariff work should require an existing `dpd_city_id` mapping and must not perform city guessing in tariff services. Future automatic population can build on the staging step CSV importer with an explicit scheduled task, but 0.56.3 does not add cron or Action Scheduler jobs.
+Future automatic population can build on the staging step CSV importer with an explicit scheduled task, but 0.57.0 still does not add cron or Action Scheduler jobs.

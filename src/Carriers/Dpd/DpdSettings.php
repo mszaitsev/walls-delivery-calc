@@ -33,6 +33,15 @@ final class DpdSettings {
 	public const GEOGRAPHY_FTP_REMOTE_DIRECTORY_KEY = 'dpd_geography_ftp_remote_directory';
 	public const LAST_GEOGRAPHY_IMPORT_REPORT_KEY = 'dpd_last_geography_import_report';
 	public const LAST_GEOGRAPHY_ACTION_RESULT_KEY = 'dpd_last_geography_action_result';
+	public const TARIFF_SENDER_LOCATION_ID_KEY = 'dpd_tariff_sender_location_id';
+	public const TARIFF_SENDER_DPD_CITY_ID_KEY = 'dpd_tariff_sender_dpd_city_id';
+	public const TARIFF_SENDER_CITY_NAME_KEY = 'dpd_tariff_sender_city_name';
+	public const TARIFF_DEFAULT_WEIGHT_G_KEY = 'dpd_tariff_default_weight_g';
+	public const TARIFF_DEFAULT_LENGTH_CM_KEY = 'dpd_tariff_default_length_cm';
+	public const TARIFF_DEFAULT_WIDTH_CM_KEY = 'dpd_tariff_default_width_cm';
+	public const TARIFF_DEFAULT_HEIGHT_CM_KEY = 'dpd_tariff_default_height_cm';
+	public const TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY = 'dpd_tariff_default_declared_value_rub';
+	public const LAST_TARIFF_ACTION_RESULT_KEY = 'dpd_last_tariff_action_result';
 
 	public function __construct(
 		private SettingsRepository $settings,
@@ -62,6 +71,15 @@ final class DpdSettings {
 			self::GEOGRAPHY_FTP_REMOTE_DIRECTORY_KEY => '/integration',
 			self::LAST_GEOGRAPHY_IMPORT_REPORT_KEY => array(),
 			self::LAST_GEOGRAPHY_ACTION_RESULT_KEY => array(),
+			self::TARIFF_SENDER_LOCATION_ID_KEY => 0,
+			self::TARIFF_SENDER_DPD_CITY_ID_KEY => '',
+			self::TARIFF_SENDER_CITY_NAME_KEY => '',
+			self::TARIFF_DEFAULT_WEIGHT_G_KEY => 1000,
+			self::TARIFF_DEFAULT_LENGTH_CM_KEY => 20,
+			self::TARIFF_DEFAULT_WIDTH_CM_KEY => 20,
+			self::TARIFF_DEFAULT_HEIGHT_CM_KEY => 20,
+			self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY => 1000,
+			self::LAST_TARIFF_ACTION_RESULT_KEY => array(),
 		);
 	}
 
@@ -251,6 +269,94 @@ final class DpdSettings {
 		$this->settings->set( self::LAST_GEOGRAPHY_ACTION_RESULT_KEY, array() );
 	}
 
+	public function clear_tariff_action_result(): void {
+		$this->settings->set( self::LAST_TARIFF_ACTION_RESULT_KEY, array() );
+	}
+
+	/**
+	 * @param array<string,mixed> $input
+	 */
+	public function save_tariff_settings_from_admin( array $input ): void {
+		$this->settings->set( self::TARIFF_SENDER_LOCATION_ID_KEY, max( 0, (int) ( $input[ self::TARIFF_SENDER_LOCATION_ID_KEY ] ?? 0 ) ) );
+		$this->settings->set( self::TARIFF_SENDER_DPD_CITY_ID_KEY, $this->digits( (string) ( $input[ self::TARIFF_SENDER_DPD_CITY_ID_KEY ] ?? '' ) ) );
+		$this->settings->set( self::TARIFF_SENDER_CITY_NAME_KEY, $this->sanitize_text( (string) ( $input[ self::TARIFF_SENDER_CITY_NAME_KEY ] ?? '' ) ) );
+		$this->settings->set( self::TARIFF_DEFAULT_WEIGHT_G_KEY, max( 1, (int) ( $input[ self::TARIFF_DEFAULT_WEIGHT_G_KEY ] ?? 1000 ) ) );
+		$this->settings->set( self::TARIFF_DEFAULT_LENGTH_CM_KEY, max( 0.1, (float) ( $input[ self::TARIFF_DEFAULT_LENGTH_CM_KEY ] ?? 20 ) ) );
+		$this->settings->set( self::TARIFF_DEFAULT_WIDTH_CM_KEY, max( 0.1, (float) ( $input[ self::TARIFF_DEFAULT_WIDTH_CM_KEY ] ?? 20 ) ) );
+		$this->settings->set( self::TARIFF_DEFAULT_HEIGHT_CM_KEY, max( 0.1, (float) ( $input[ self::TARIFF_DEFAULT_HEIGHT_CM_KEY ] ?? 20 ) ) );
+		$this->settings->set( self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY, max( 0.0, (float) ( $input[ self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY ] ?? 1000 ) ) );
+	}
+
+	public function tariff_sender_location_id(): int {
+		return max( 0, $this->settings->get_int( self::TARIFF_SENDER_LOCATION_ID_KEY, 0 ) );
+	}
+
+	public function tariff_sender_dpd_city_id(): string {
+		return $this->digits( $this->settings->get_string( self::TARIFF_SENDER_DPD_CITY_ID_KEY, '' ) );
+	}
+
+	public function tariff_sender_city_name(): string {
+		return $this->settings->get_string( self::TARIFF_SENDER_CITY_NAME_KEY, '' );
+	}
+
+	public function tariff_default_weight_g(): int {
+		return max( 1, $this->settings->get_int( self::TARIFF_DEFAULT_WEIGHT_G_KEY, 1000 ) );
+	}
+
+	public function tariff_default_length_cm(): float {
+		return max( 0.1, (float) $this->settings->get_string( self::TARIFF_DEFAULT_LENGTH_CM_KEY, '20' ) );
+	}
+
+	public function tariff_default_width_cm(): float {
+		return max( 0.1, (float) $this->settings->get_string( self::TARIFF_DEFAULT_WIDTH_CM_KEY, '20' ) );
+	}
+
+	public function tariff_default_height_cm(): float {
+		return max( 0.1, (float) $this->settings->get_string( self::TARIFF_DEFAULT_HEIGHT_CM_KEY, '20' ) );
+	}
+
+	public function tariff_default_declared_value_rub(): float {
+		return max( 0.0, (float) $this->settings->get_string( self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY, '1000' ) );
+	}
+
+	/**
+	 * @param array<string,mixed> $result
+	 */
+	public function save_tariff_action_result( array $result ): void {
+		$type = (string) ( $result['type'] ?? 'info' );
+		if ( ! in_array( $type, array( 'success', 'warning', 'error', 'info' ), true ) ) {
+			$type = 'info';
+		}
+		$this->settings->set(
+			self::LAST_TARIFF_ACTION_RESULT_KEY,
+			array(
+				'type' => $type,
+				'title' => $this->sanitize_text( (string) ( $result['title'] ?? 'DPD Расчет' ) ),
+				'message' => $this->redact( $this->sanitize_text( (string) ( $result['message'] ?? '' ) ) ),
+				'details' => $this->redact_value( is_array( $result['details'] ?? null ) ? $result['details'] : array() ),
+				'created_at' => (string) ( $result['created_at'] ?? ( function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ) ) ),
+			)
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function get_tariff_action_result(): array {
+		$result = $this->settings->get_array( self::LAST_TARIFF_ACTION_RESULT_KEY, array() );
+		if ( array() === $result ) {
+			return array();
+		}
+
+		return array(
+			'type' => (string) ( $result['type'] ?? 'info' ),
+			'title' => (string) ( $result['title'] ?? '' ),
+			'message' => (string) ( $result['message'] ?? '' ),
+			'details' => is_array( $result['details'] ?? null ) ? $result['details'] : array(),
+			'created_at' => (string) ( $result['created_at'] ?? '' ),
+		);
+	}
+
 	private function client_number( string $environment ): string {
 		$key = self::ENV_PRODUCTION === $environment ? self::PRODUCTION_CLIENT_NUMBER_KEY : self::TEST_CLIENT_NUMBER_KEY;
 
@@ -321,6 +427,22 @@ final class DpdSettings {
 		}
 
 		return $redacted;
+	}
+
+	private function redact_value( mixed $value ): mixed {
+		if ( is_array( $value ) ) {
+			$redacted = array();
+			foreach ( $value as $key => $item ) {
+				$redacted[ $key ] = $this->redact_value( $item );
+			}
+			return $redacted;
+		}
+
+		return is_scalar( $value ) ? $this->redact( (string) $value ) : '';
+	}
+
+	private function digits( string $value ): string {
+		return preg_replace( '/\D+/', '', $value ) ?? '';
 	}
 
 	private function sanitize_text( string $value ): string {

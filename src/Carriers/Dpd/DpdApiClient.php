@@ -50,18 +50,33 @@ final class DpdApiClient {
 	}
 
 	/**
+	 * @param array<string,mixed> $payload
+	 */
+	public function getServiceCostByParcels3( array $payload ): DpdSoapResponse {
+		return $this->call(
+			DpdEndpoints::SERVICE_CALCULATOR,
+			'getServiceCostByParcels3',
+			$payload,
+			array( 'wrapper' => DpdSoapRequest::WRAPPER_REQUEST )
+		);
+	}
+
+	/**
 	 * @return array{success:bool,message:string,details:array<string,mixed>}
 	 */
 	public function checkConnectionDryRun(): array {
 		$credentials = $this->settings->credentials();
 		$endpoints = DpdEndpoints::wsdl_map( $this->settings->environment() );
 		$transport_available = $this->soap->is_available();
-		$success = $credentials->is_complete() && $transport_available && isset( $endpoints[ DpdEndpoints::SERVICE_GEOGRAPHY ] );
+		$success = $credentials->is_complete()
+			&& $transport_available
+			&& isset( $endpoints[ DpdEndpoints::SERVICE_GEOGRAPHY ], $endpoints[ DpdEndpoints::SERVICE_CALCULATOR ] );
 
 		$parts = array();
 		$parts[] = $credentials->is_complete() ? 'credentials configured' : 'credentials missing';
 		$parts[] = $transport_available ? 'SOAP transport available' : 'SOAP transport unavailable';
-		$parts[] = isset( $endpoints[ DpdEndpoints::SERVICE_GEOGRAPHY ] ) ? 'endpoints selected' : 'endpoints missing';
+		$parts[] = isset( $endpoints[ DpdEndpoints::SERVICE_GEOGRAPHY ] ) ? 'geography endpoint selected' : 'geography endpoint missing';
+		$parts[] = isset( $endpoints[ DpdEndpoints::SERVICE_CALCULATOR ] ) ? 'calculator endpoint selected' : 'calculator endpoint missing';
 
 		return array(
 			'success' => $success,

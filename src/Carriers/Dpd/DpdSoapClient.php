@@ -54,7 +54,17 @@ final class DpdSoapClient implements DpdSoapClientInterface {
 			throw new DpdException( 'DPD SOAP response is empty.', array( 'service' => $service, 'method' => $method ) );
 		}
 
-		return new DpdSoapResponse( true, $response, array( 'service' => $service, 'method' => $method, 'wsdl' => $wsdl ) );
+		return new DpdSoapResponse(
+			true,
+			$response,
+			array(
+				'service' => $service,
+				'method' => $method,
+				'wsdl' => $wsdl,
+				'wrapper' => $request->wrapper_mode(),
+				'debug_payload_shape' => $request->redacted_payload_shape(),
+			)
+		);
 	}
 
 	public function is_available(): bool {
@@ -67,4 +77,3 @@ final class DpdSoapClient implements DpdSoapClientInterface {
 		return substr( $message, 0, 180 );
 	}
 }
-

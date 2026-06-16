@@ -103,6 +103,8 @@ The DPD `Данные для входа` tab stores test/production `clientNumbe
 
 As of 0.56.3, DPD geography lives in a separate `DPD География` tab. This tab stores SFTP settings for `GeographyNewDPD_*.csv` (`host`, `port`, `username`, encrypted password and remote directory), starts SFTP or manual CSV import jobs, shows AJAX progress for the current job, allows reset of a stale/failed/running job, diagnoses one `location_id`, saves manual `dpd_city_id`, runs the single-location DaData delivery fallback, and shows the last import report. The import builds an indexed lookup from active RU `wdc_locations`, does not query SQL per CSV row, and writes import rows only to a per-job DPD staging table until EOF. Finalization refreshes only `wdc_location_delivery_codes.dpd_city_id`/`updated_at`; reset leaves the working table untouched. These actions do not enable DPD checkout rates or shipment actions.
 
+As of 0.57.0, DPD also has a `DPD Расчет` tab. It stores sender/default parcel settings and provides an admin-only `getServiceCostByParcels3` test calculator. Results are visible after redirect with normalized service code/name/cost/period fields and optional raw debug output. The calculator does not register DPD in checkout, does not write delivery rate tables, and does not add shipment actions.
+
 ## Admin
 
 The admin page is `Калькулятор доставок → Службы доставки` (`wdc-delivery-services`). It lists services, availability, countries, rule fallback, rounding, minimum price, sort order, and actions for enable/disable, edit, delete, and future service creation.
