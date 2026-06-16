@@ -194,8 +194,35 @@ $importer = new DpdGeographyImportService(
 	$settings
 );
 $parser = new DpdGeographyCsvParser();
+
+foreach ( array( 'LF' => "\n", 'CRLF' => "\r\n", 'CR' => "\r" ) as $ending_name => $line_ending ) {
+	$ending_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-ending-' );
+	file_put_contents(
+		$ending_path,
+		mb_convert_encoding(
+			implode(
+				$line_ending,
+				array(
+					'ID НП;Код страны;Регион;Район;Основной город;Населённый пункт;Тип НП;Индекс НП;ФИАС;Код КЛАДР',
+					'111;RU;Новосибирская;;Новосибирск;Новосибирск;г;630023;8DEA00E3-9AAB-4D8E-887C-EF2AAA546456;RU54000001000',
+					'222;RU;Новосибирская;;Бердск;Бердск;г;633010;;RU54000002000',
+				)
+			),
+			'Windows-1251',
+			'UTF-8'
+		)
+	);
+	$ending_header = $parser->inspect_header( $ending_path );
+	dpd_import_assert( 'dpd_city_id' === ( $ending_header['columns'][0] ?? '' ), "Windows-1251 {$ending_name} header without BOM is detected correctly" );
+	$first_step = $parser->read_step( $ending_path, (int) $ending_header['data_offset'], $ending_header['columns'], 1 );
+	$second_step = $parser->read_step( $ending_path, (int) $first_step['new_byte_offset'], $ending_header['columns'], 1 );
+	dpd_import_assert( '111' === (string) ( $first_step['rows'][0]['dpd_city_id'] ?? '' ), "read_step reads first {$ending_name} data row" );
+	dpd_import_assert( '222' === (string) ( $second_step['rows'][0]['dpd_city_id'] ?? '' ), "read_step resumes from byte_offset for {$ending_name} data row" );
+	@unlink( $ending_path );
+}
+
 $oversized_header_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-oversized-header-' );
-file_put_contents( $oversized_header_path, str_repeat( 'A', 270000 ) . "\n" );
+file_put_contents( $oversized_header_path, str_repeat( 'A', 270000 ) );
 $oversized_header_failed = false;
 try {
 	$parser->inspect_header( $oversized_header_path );
@@ -203,7 +230,7 @@ try {
 	$oversized_header_failed = str_contains( $exception->getMessage(), 'row length' );
 }
 @unlink( $oversized_header_path );
-dpd_import_assert( $oversized_header_failed, 'oversized CSV header fails safely without memory exhaustion' );
+dpd_import_assert( $oversized_header_failed, 'oversized CSV header without line ending fails safely without memory exhaustion' );
 
 $oversized_row_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-oversized-row-' );
 file_put_contents( $oversized_row_path, mb_convert_encoding( "ID НП;Код страны;Регион\n", 'Windows-1251', 'UTF-8' ) . str_repeat( '1', 270000 ) . "\n" );

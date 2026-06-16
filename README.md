@@ -1,8 +1,10 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.56.7.
+Current plugin version: 0.56.8.
 
-Version 0.56.7 switches DPD Geography CSV reading from `fgetcsv()` to bounded `fgets()` plus `str_getcsv()`. This avoids Windows/Local PHP false-positive row length failures while still rejecting genuinely broken rows without a newline before the safe limit. SFTP-unavailable warnings do not pollute import job errors.
+Version 0.56.8 switches DPD Geography CSV reading to a custom bounded `fread()` line reader plus `str_getcsv()`. It supports Windows-1251 files without BOM and LF, CRLF, or CR line endings without relying on `fgets()`/`fgetcsv()` buffering, while still rejecting genuinely oversized rows safely. SFTP-unavailable warnings do not pollute import job errors.
+
+Version 0.56.7 switched DPD Geography CSV reading from `fgetcsv()` to bounded `fgets()` plus `str_getcsv()`.
 
 Version 0.56.6 makes the DPD Geography CSV parser memory-safe on Windows/Local PHP by using a bounded `fgetcsv` row length. DPD `GeographyNewDPD_*.csv` may be Windows-1251 without BOM; rows are converted to UTF-8, and oversized/broken rows now fail as controlled diagnostics instead of exhausting memory.
 

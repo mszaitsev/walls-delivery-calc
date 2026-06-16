@@ -8,6 +8,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class DpdGeographyCsvParser {
 	private const MAX_CSV_ROW_LENGTH = 262144;
+	private const READ_CHUNK_SIZE = 8192;
 
 	private const POSITIONAL_COLUMNS = array(
 		0 => 'dpd_city_id',
@@ -129,15 +130,79 @@ final class DpdGeographyCsvParser {
 	 * @return array<int,string|null>|false
 	 */
 	private function read_csv_row( $file ): array|false {
-		$line = fgets( $file, self::MAX_CSV_ROW_LENGTH );
+		$line = $this->read_line( $file );
 		if ( false === $line ) {
 			return false;
 		}
-		if ( ! str_ends_with( $line, "\n" ) && ! str_ends_with( $line, "\r" ) && ! feof( $file ) ) {
-			throw new \RuntimeException( 'DPD Geography CSV row exceeds the safe length limit. Check file encoding and row length.' );
-		}
 
 		return str_getcsv( $line, ';', '"', '\\' );
+	}
+
+	/**
+	 * Reads one physical CSV line with explicit bounded chunking.
+	 *
+	 * @param resource $file
+	 */
+	private function read_line( $file ): string|false {
+		$buffer = '';
+		while ( ! feof( $file ) ) {
+			$chunk = fread( $file, self::READ_CHUNK_SIZE );
+			if ( false === $chunk ) {
+				throw new \RuntimeException( 'Unable to read DPD Geography CSV row.' );
+			}
+			if ( '' === $chunk ) {
+				continue;
+			}
+			$buffer .= $chunk;
+			if ( strlen( $buffer ) > self::MAX_CSV_ROW_LENGTH ) {
+				throw new \RuntimeException( 'DPD Geography CSV row exceeds the safe length limit. Check file encoding and row length.' );
+			}
+
+			$ending = $this->first_line_ending( $buffer );
+			if ( null === $ending ) {
+				continue;
+			}
+
+			$position = $ending['position'];
+			$length = $ending['length'];
+			if ( "\r" === $buffer[ $position ] && 1 === $length && $position === strlen( $buffer ) - 1 && ! feof( $file ) ) {
+				$next = fread( $file, 1 );
+				if ( "\n" === $next ) {
+					$length = 2;
+				} elseif ( is_string( $next ) && '' !== $next ) {
+					fseek( $file, -strlen( $next ), SEEK_CUR );
+				}
+			}
+
+			$line = substr( $buffer, 0, $position );
+			$tail_length = strlen( $buffer ) - $position - ( 2 === $length && isset( $buffer[ $position + 1 ] ) ? 2 : 1 );
+			if ( $tail_length > 0 ) {
+				fseek( $file, -$tail_length, SEEK_CUR );
+			}
+
+			return $line;
+		}
+
+		return '' === $buffer ? false : $buffer;
+	}
+
+	/**
+	 * @return array{position:int,length:int}|null
+	 */
+	private function first_line_ending( string $buffer ): ?array {
+		$lf = strpos( $buffer, "\n" );
+		$cr = strpos( $buffer, "\r" );
+		if ( false === $lf && false === $cr ) {
+			return null;
+		}
+		if ( false === $cr || ( false !== $lf && $lf < $cr ) ) {
+			return array( 'position' => $lf, 'length' => 1 );
+		}
+
+		return array(
+			'position' => $cr,
+			'length' => isset( $buffer[ $cr + 1 ] ) && "\n" === $buffer[ $cr + 1 ] ? 2 : 1,
+		);
 	}
 
 	/**
