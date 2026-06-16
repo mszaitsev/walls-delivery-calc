@@ -984,6 +984,7 @@ final class DeliveryServicesAdminPage {
 		$phase = (string) ( $state['phase'] ?? 'idle' );
 		$is_import_busy = in_array( $phase, array( 'preparing', 'indexing_locations', 'downloading', 'ready', 'importing', 'finalizing' ), true );
 		$percent = max( 0, min( 100, (float) ( $state['percent_complete'] ?? 0 ) ) );
+		$sftp_available = $this->dpd_geography_ftp instanceof DpdGeographyFtpClient && $this->dpd_geography_ftp->is_sftp_available();
 		?>
 		<form method="post" style="max-width: 860px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
@@ -1007,12 +1008,16 @@ final class DeliveryServicesAdminPage {
 			</table>
 			<?php submit_button( __( 'Сохранить настройки DPD Географии', 'walls-delivery-calc' ) ); ?>
 		</form>
+		<div style="max-width: 860px; margin-top: 12px; padding: 10px; border-left: 4px solid <?php echo esc_attr( $sftp_available ? '#00a32a' : '#dba617' ); ?>; background: #fff;">
+			<strong><?php echo esc_html( $sftp_available ? '[OK]' : '[WARNING]' ); ?></strong>
+			<?php echo esc_html( $sftp_available ? __( 'SFTP extension available.', 'walls-delivery-calc' ) : __( 'SFTP extension is not available. Manual CSV upload remains available.', 'walls-delivery-calc' ) ); ?>
+		</div>
 		<form method="post" style="margin-top: 16px; max-width: 860px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
 			<input type="hidden" name="wdc_delivery_services_action" value="run_dpd_geography_ftp_import">
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
-			<?php submit_button( __( 'Загрузить GeographyNewDPD с FTP/SFTP', 'walls-delivery-calc' ), 'secondary', 'submit', false, $is_import_busy ? array( 'disabled' => 'disabled' ) : array() ); ?>
+			<?php submit_button( __( 'Загрузить GeographyNewDPD с FTP/SFTP', 'walls-delivery-calc' ), 'secondary', 'submit', false, $is_import_busy || ! $sftp_available ? array( 'disabled' => 'disabled' ) : array() ); ?>
 		</form>
 		<form method="post" enctype="multipart/form-data" style="margin-top: 16px; max-width: 860px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
@@ -1028,10 +1033,10 @@ final class DeliveryServicesAdminPage {
 			<div style="height: 18px; background: #f0f0f1; border: 1px solid #c3c4c7; max-width: 520px;">
 				<div data-wdc-dpd-progress-bar style="height: 18px; width: <?php echo esc_attr( (string) $percent ); ?>%; background: #2271b1;"></div>
 			</div>
-			<p data-wdc-dpd-summary><?php echo esc_html( sprintf( 'Фаза: %s. Обработано %d из %d строк.', $phase, (int) ( $state['rows_read'] ?? 0 ), (int) ( $state['total_rows'] ?? 0 ) ) ); ?></p>
+			<p data-wdc-dpd-summary><?php echo esc_html( sprintf( 'Фаза: %s. Обработано %d строк. Прочитано %.1f%% файла.', $phase, (int) ( $state['rows_read'] ?? 0 ), $percent ) ); ?></p>
 			<table class="widefat striped" style="max-width: 860px;">
 				<tbody>
-				<?php foreach ( array( 'phase', 'source', 'source_file', 'rows_read', 'total_rows', 'ru_rows', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_kladr', 'matched_by_name', 'saved_candidates', 'finalized_mappings', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
+				<?php foreach ( array( 'phase', 'source', 'source_file', 'rows_read', 'file_size', 'byte_offset', 'ru_rows', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_kladr', 'matched_by_name', 'saved_candidates', 'finalized_mappings', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
 					<tr>
 						<th><?php echo esc_html( $key ); ?></th>
 						<td data-wdc-dpd-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( is_array( $state[ $key ] ?? null ) ? implode( '; ', array_map( 'strval', $state[ $key ] ) ) : (string) ( $state[ $key ] ?? '' ) ); ?></td>

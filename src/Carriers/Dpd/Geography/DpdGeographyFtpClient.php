@@ -15,11 +15,11 @@ final class DpdGeographyFtpClient {
 	}
 
 	/**
-	 * @return array{success:bool,path:string,source_file:string,message:string}
+	 * @return array{success:bool,status:string,path:string,source_file:string,message:string}
 	 */
 	public function download_latest(): array {
-		if ( ! extension_loaded( 'ssh2' ) || ! function_exists( 'ssh2_connect' ) ) {
-			return $this->failure( 'SFTP extension is not available. Upload GeographyNewDPD CSV manually.' );
+		if ( ! $this->is_sftp_available() ) {
+			return $this->warning( 'SFTP extension is not available. Use manual CSV upload.' );
 		}
 		if ( ! $this->settings->has_geography_ftp_password() ) {
 			return $this->failure( 'DPD SFTP password is not configured. Upload GeographyNewDPD CSV manually or save the encrypted password.' );
@@ -70,10 +70,14 @@ final class DpdGeographyFtpClient {
 			fclose( $input );
 			fclose( $output );
 
-			return array( 'success' => true, 'path' => $tmp, 'source_file' => $source_file, 'message' => 'DPD geography CSV downloaded.' );
+			return array( 'success' => true, 'status' => 'ok', 'path' => $tmp, 'source_file' => $source_file, 'message' => 'DPD geography CSV downloaded.' );
 		} catch ( Throwable $throwable ) {
 			return $this->failure( 'DPD SFTP download failed: ' . $throwable->getMessage() );
 		}
+	}
+
+	public function is_sftp_available(): bool {
+		return extension_loaded( 'ssh2' ) && function_exists( 'ssh2_connect' );
 	}
 
 	/**
@@ -105,9 +109,16 @@ final class DpdGeographyFtpClient {
 	}
 
 	/**
-	 * @return array{success:bool,path:string,source_file:string,message:string}
+	 * @return array{success:bool,status:string,path:string,source_file:string,message:string}
 	 */
 	private function failure( string $message ): array {
-		return array( 'success' => false, 'path' => '', 'source_file' => '', 'message' => $message );
+		return array( 'success' => false, 'status' => 'failed', 'path' => '', 'source_file' => '', 'message' => $message );
+	}
+
+	/**
+	 * @return array{success:bool,status:string,path:string,source_file:string,message:string}
+	 */
+	private function warning( string $message ): array {
+		return array( 'success' => false, 'status' => 'warning', 'path' => '', 'source_file' => '', 'message' => $message );
 	}
 }

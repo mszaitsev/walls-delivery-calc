@@ -58,12 +58,18 @@ final class DpdGeographyImportService {
 	 * @return array<string,mixed>
 	 */
 	public function start_from_ftp( DpdGeographyFtpClient $ftp ): array {
-		$this->state->update( array( 'phase' => 'downloading', 'last_message' => 'Downloading DPD GeographyNewDPD CSV from SFTP.' ) );
 		$download = $ftp->download_latest();
+		if ( 'warning' === (string) ( $download['status'] ?? '' ) ) {
+			$current = $this->state->public_state();
+			$current['status'] = 'warning';
+			$current['last_message'] = (string) $download['message'];
+			return $current;
+		}
 		if ( empty( $download['success'] ) ) {
 			return $this->state->fail( (string) $download['message'] );
 		}
 
+		$this->state->update( array( 'phase' => 'downloading', 'last_message' => 'Downloading DPD GeographyNewDPD CSV from SFTP.' ) );
 		return $this->start_from_existing_file( (string) $download['path'], 'ftp', (string) $download['source_file'], true );
 	}
 
@@ -138,7 +144,7 @@ final class DpdGeographyImportService {
 	 */
 	private function start_from_existing_file( string $path, string $source, string $source_file, bool $delete_on_finish ): array {
 		try {
-			$inspect = $this->parser->inspect_file( $path );
+			$inspect = $this->parser->inspect_header( $path );
 			$this->index->build();
 			$index_path = $this->temp_path( 'index-' . $source_file . '.ser' );
 			file_put_contents( $index_path, serialize( $this->index->export() ) );
@@ -155,7 +161,8 @@ final class DpdGeographyImportService {
 					'index_path' => $index_path,
 					'stage_table' => $stage_table,
 					'delete_file_on_finish' => $delete_on_finish,
-					'total_rows' => (int) $inspect['total_rows'],
+					'file_size' => is_file( $path ) ? (int) filesize( $path ) : 0,
+					'total_rows' => 0,
 					'byte_offset' => (int) $inspect['data_offset'],
 					'columns' => $inspect['columns'],
 					'last_message' => $delete_on_finish ? 'DPD geography import job created.' : 'DPD geography import job created for existing file.',
@@ -255,6 +262,7 @@ final class DpdGeographyImportService {
 		return array(
 			'source' => (string) ( $state['source'] ?? '' ),
 			'source_file' => (string) ( $state['source_file'] ?? '' ),
+			'file_size' => (int) ( $state['file_size'] ?? 0 ),
 			'total_rows' => (int) ( $state['total_rows'] ?? 0 ),
 			'ru_rows' => (int) ( $state['ru_rows'] ?? 0 ),
 			'skipped_non_ru' => (int) ( $state['skipped_non_ru'] ?? 0 ),

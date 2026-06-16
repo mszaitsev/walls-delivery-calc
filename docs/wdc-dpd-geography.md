@@ -1,6 +1,6 @@
 # WDC DPD Geography
 
-Version: 0.56.4.
+Version: 0.56.5.
 
 ## Scope
 
@@ -52,9 +52,9 @@ The DPD География tab supports two admin-only import paths:
 
 The importer reads `;`-delimited CSV row by row, supports UTF-8 and Windows-1251, detects the header row when present, and maps the documented first columns: DPD city ID, country code, region, district, main city, settlement, settlement type, postal code, FIAS and KLADR. Only `Код страны = RU` rows are imported. Postal codes, services/options, terminal data, schedules, raw rows and per-row diagnostics are not stored.
 
-As of 0.56.3, imports are stateful staging jobs rather than one synchronous PHP request:
+As of 0.56.5, imports are stateful staging jobs rather than one synchronous PHP request:
 
-- start action creates an import job, counts data rows by streaming the file, builds a `DpdLocationIndex` from active RU locations, creates a per-job `wdc_dpd_geography_stage_<job_hash>` table, and stores the job in `wdc_dpd_geography_import_state`;
+- start action creates an import job, reads only the first non-empty CSV row to detect header columns/data offset, stores `file_size`, builds a `DpdLocationIndex` from active RU locations, creates a per-job `wdc_dpd_geography_stage_<job_hash>` table, and stores the job in `wdc_dpd_geography_import_state`;
 - the DPD География tab polls `wp_ajax_wdc_dpd_geography_import_status`;
 - each AJAX step reads from the saved byte offset, processes a limited batch of rows, and writes only to the staging table;
 - progress state records phase, source, source file, rows read, total rows, RU/skipped rows, matching counters, saved/unchanged mappings, conflicts, ambiguous/unmatched rows, errors and timestamps;
@@ -74,7 +74,7 @@ The working `wdc_location_delivery_codes` table is not changed while rows are be
 
 The import state stores the staging table name for services, but public state never exposes `file_path`, `index_path` or `stage_table`. The cancelled heavy state arrays `seen_mappings`, `saved_by_job` and `blocked_locations` are not stored in the option.
 
-The admin UI shows the current phase, progress bar, `Обработано X из Y строк`, counters, last message and reset button. If JavaScript is unavailable, the current state and reset action remain visible on page reload.
+The admin UI shows the current phase, progress bar, processed row count, percent of file read, counters, last message and reset button. Progress is calculated by `byte_offset / file_size`; `total_rows` remains `0` because the importer intentionally does not scan the whole file before import. If JavaScript is unavailable, the current state and reset action remain visible on page reload.
 
 Matching is conservative:
 
@@ -94,7 +94,7 @@ Finalization is DPD-column-only and safe for future carrier code columns. It:
 4. deletes the CSV temp file, serialized index file and staging table;
 5. marks the job `finished`.
 
-SFTP import requires the PHP `ssh2` extension. If it is unavailable, the admin action returns a safe message: `SFTP extension is not available. Upload GeographyNewDPD CSV manually.`
+SFTP import requires the PHP `ssh2` extension. If `ssh2` or `ssh2_connect` is unavailable, this is reported as a warning, not as a failed import: `SFTP extension is not available. Use manual CSV upload.` No import job is created and the current import state/report are left untouched. Manual CSV upload remains a fully supported import path.
 
 ## DaData Fallback
 

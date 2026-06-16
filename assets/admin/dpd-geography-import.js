@@ -49,27 +49,28 @@
 		var phase = String((state && state.phase) || 'idle');
 		var percent = Number((state && state.percent_complete) || 0);
 		var read = Number((state && state.rows_read) || 0);
-		var total = Number((state && state.total_rows) || 0);
 		root.setAttribute('data-wdc-dpd-phase', phase);
 		if (bar) {
 			bar.style.width = Math.max(0, Math.min(100, percent)) + '%';
 		}
 		if (summary) {
-			summary.textContent = 'Фаза: ' + labelPhase(phase) + '. Обработано ' + read + (total > 0 ? ' из ' + total + ' строк.' : ' строк.');
+			summary.textContent = 'Фаза: ' + labelPhase(phase) + '. Обработано ' + read + ' строк. Прочитано ' + Math.max(0, Math.min(100, percent)).toFixed(1) + '% файла.';
 		}
 		[
 			'phase',
 			'source',
 			'source_file',
 			'rows_read',
-			'total_rows',
+			'file_size',
+			'byte_offset',
 			'ru_rows',
 			'skipped_non_ru',
 			'skipped_invalid',
 			'matched_by_fias',
 			'matched_by_kladr',
 			'matched_by_name',
-			'saved_mappings',
+			'saved_candidates',
+			'finalized_mappings',
 			'unchanged_mappings',
 			'conflicts',
 			'ambiguous',

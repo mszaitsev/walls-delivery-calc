@@ -4,8 +4,6 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\Dpd\Geography;
 
 use Generator;
-use SplFileObject;
-
 defined( 'ABSPATH' ) || exit;
 
 final class DpdGeographyCsvParser {
@@ -40,7 +38,7 @@ final class DpdGeographyCsvParser {
 	 * @return Generator<int,array<string,string>>
 	 */
 	public function rows( string $path ): Generator {
-		$inspect = $this->inspect_file( $path );
+		$inspect = $this->inspect_header( $path );
 		$offset = (int) $inspect['data_offset'];
 		do {
 			$step = $this->read_step( $path, $offset, $inspect['columns'], 5000 );
@@ -52,39 +50,34 @@ final class DpdGeographyCsvParser {
 	}
 
 	/**
-	 * @return array{columns:array<int,string>,data_offset:int,total_rows:int,has_header:bool}
+	 * @return array{columns:array<int,string>,data_offset:int,has_header:bool}
 	 */
-	public function inspect_file( string $path ): array {
-		$file = new SplFileObject( $path, 'rb' );
-		$file->setFlags( SplFileObject::READ_CSV | SplFileObject::SKIP_EMPTY );
-		$file->setCsvControl( ';', '"', '\\' );
-
+	public function inspect_header( string $path ): array {
 		$columns = self::POSITIONAL_COLUMNS;
-		$first = true;
 		$data_offset = 0;
 		$has_header = false;
-		$total_rows = 0;
-		foreach ( $file as $row ) {
+		$file = fopen( $path, 'rb' );
+		if ( ! is_resource( $file ) ) {
+			return array( 'columns' => $columns, 'data_offset' => 0, 'has_header' => false );
+		}
+
+		while ( false !== ( $row = fgetcsv( $file, 0, ';', '"', '\\' ) ) ) {
 			if ( ! is_array( $row ) || array( null ) === $row ) {
 				continue;
 			}
 			$row = array_map( fn( mixed $value ): string => $this->to_utf8( (string) $value ), $row );
-			if ( $first ) {
-				$first = false;
-				if ( $this->looks_like_header( $row ) ) {
-					$columns = $this->columns_from_header( $row );
-					$data_offset = $file->ftell();
-					$has_header = true;
-					continue;
-				}
+			if ( $this->looks_like_header( $row ) ) {
+				$columns = $this->columns_from_header( $row );
+				$data_offset = (int) ftell( $file );
+				$has_header = true;
 			}
-			++$total_rows;
+			break;
 		}
+		fclose( $file );
 
 		return array(
 			'columns' => $columns,
 			'data_offset' => $data_offset,
-			'total_rows' => $total_rows,
 			'has_header' => $has_header,
 		);
 	}

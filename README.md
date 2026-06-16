@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.56.4.
+Current plugin version: 0.56.5.
+
+Version 0.56.5 removes the full pre-import CSV scan from DPD Geography import. Progress is now calculated from `byte_offset / file_size`, so large `GeographyNewDPD_*.csv` files do not need a row-count pass before import. Missing PHP `ssh2` is treated as an SFTP warning, not a failed import; manual CSV upload remains fully supported.
 
 Version 0.56.4 fixes DPD Geography import file cleanup semantics: uploaded/SFTP temp CSV files are deleted on finish/reset, while CLI/diagnostic imports through `import_file()` keep the caller-provided CSV and still remove the serialized index and staging table.
 

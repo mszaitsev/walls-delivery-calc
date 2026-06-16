@@ -42,12 +42,14 @@ require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdLocationIndex.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyMatcher.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportStateService.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyStageRepository.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyFtpClient.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportService.php';
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyCsvParser;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyImportService;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyImportStateService;
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyFtpClient;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyMatcher;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyStageRepository;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdLocationIndex;
@@ -191,6 +193,10 @@ $importer = new DpdGeographyImportService(
 	$stage,
 	$settings
 );
+$header = ( new DpdGeographyCsvParser() )->inspect_header( $path );
+dpd_import_assert( ! array_key_exists( 'total_rows', $header ), 'inspect_header does not perform a full-row count' );
+dpd_import_assert( (int) $header['data_offset'] > 0, 'inspect_header reads only header and returns data offset' );
+
 $job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
 $internal = $state->current();
 $stage_table = (string) $internal['stage_table'];
@@ -201,6 +207,9 @@ dpd_import_assert( '' !== $stage_table && isset( $GLOBALS['wpdb']->dpd_geography
 dpd_import_assert( ! array_key_exists( 'stage_table', $job ) && ! array_key_exists( 'file_path', $job ), 'public state hides internal paths and stage table' );
 dpd_import_assert( ! array_key_exists( 'delete_file_on_finish', $job ), 'public state hides delete_file_on_finish flag' );
 dpd_import_assert( true === (bool) $internal['delete_file_on_finish'], 'manual upload marks imported temp file for deletion' );
+dpd_import_assert( (int) $internal['file_size'] > 0, 'start stores file_size for progress' );
+dpd_import_assert( 0 === (int) $internal['total_rows'], 'start does not pre-count total CSV rows' );
+dpd_import_assert( (float) $job['percent_complete'] > 0, 'start progress is calculated from byte_offset and file_size' );
 dpd_import_assert( ! array_key_exists( 'seen_mappings', $internal ) && ! array_key_exists( 'saved_by_job', $internal ) && ! array_key_exists( 'blocked_locations', $internal ), 'state does not contain large in-memory mapping arrays' );
 
 $job = $importer->step( (string) $job['job_id'], 1 );
@@ -219,7 +228,8 @@ while ( in_array( (string) ( $job['phase'] ?? '' ), array( 'ready', 'importing' 
 }
 $report = $settings->last_geography_import_report();
 
-dpd_import_assert( 8 === (int) $report['total_rows'], 'parser counts data rows after header' );
+dpd_import_assert( 0 === (int) $report['total_rows'], 'import does not pre-count data rows' );
+dpd_import_assert( (int) $report['file_size'] > 0, 'report stores source file size' );
 dpd_import_assert( 7 === (int) $report['ru_rows'], 'import processes RU rows only' );
 dpd_import_assert( 1 === (int) $report['skipped_non_ru'], 'import skips non-RU rows' );
 dpd_import_assert( 1 === (int) $report['skipped_invalid'], 'import skips rows without DPD city ID' );
@@ -240,11 +250,19 @@ dpd_import_assert( ! file_exists( $import_path ), 'import temp file is deleted o
 dpd_import_assert( ! file_exists( $upload_index_path ), 'serialized index file is deleted on finish' );
 dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ] ), 'staging table is deleted on finish' );
 
+$phase_before_ftp_warning = (string) $state->current()['phase'];
+$ftp_warning = $importer->start_from_ftp( new DpdGeographyFtpClient( $settings ) );
+if ( ! extension_loaded( 'ssh2' ) || ! function_exists( 'ssh2_connect' ) ) {
+	dpd_import_assert( 'warning' === (string) ( $ftp_warning['status'] ?? '' ), 'missing ssh2 returns FTP warning instead of failed import' );
+	dpd_import_assert( str_contains( strtolower( (string) ( $ftp_warning['last_message'] ?? '' ) ), 'manual csv upload' ), 'missing ssh2 warning points to manual CSV upload' );
+	dpd_import_assert( $phase_before_ftp_warning === (string) $state->current()['phase'], 'missing ssh2 does not change current import state phase' );
+}
+
 $cli_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-cli-' );
 file_put_contents( $cli_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
 $report = $importer->import_file( $cli_path, 'cli', 'GeographyNewDPD_2026_06_16.csv' );
 $cli_state = $state->current();
-dpd_import_assert( 8 === (int) $report['total_rows'], 'CLI wrapper imports existing file' );
+dpd_import_assert( 0 === (int) $report['total_rows'], 'CLI wrapper imports existing file without pre-counting rows' );
 dpd_import_assert( false === (bool) $cli_state['delete_file_on_finish'], 'CLI wrapper stores delete_file_on_finish=false' );
 dpd_import_assert( file_exists( $cli_path ), 'CLI wrapper keeps existing CSV on finish' );
 dpd_import_assert( ! file_exists( (string) $cli_state['index_path'] ), 'CLI wrapper deletes serialized index on finish' );
