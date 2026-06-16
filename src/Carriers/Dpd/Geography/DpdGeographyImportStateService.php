@@ -22,7 +22,7 @@ final class DpdGeographyImportStateService {
 	 */
 	public function public_state(): array {
 		$state = $this->current();
-		unset( $state['file_path'], $state['index_path'], $state['seen_mappings'], $state['saved_by_job'], $state['blocked_locations'], $state['columns'] );
+		unset( $state['file_path'], $state['index_path'], $state['stage_table'], $state['columns'] );
 		$total = max( 0, (int) ( $state['total_rows'] ?? 0 ) );
 		$read = max( 0, (int) ( $state['rows_read'] ?? 0 ) );
 		$state['percent_complete'] = $total > 0 ? min( 100, round( $read / $total * 100, 1 ) ) : 0;
@@ -39,12 +39,13 @@ final class DpdGeographyImportStateService {
 		$state = array_merge(
 			$this->defaults(),
 			array(
-				'job_id' => $this->new_job_id(),
+				'job_id' => (string) ( $context['job_id'] ?? $this->new_job_id() ),
 				'phase' => (string) ( $context['phase'] ?? 'ready' ),
 				'source' => (string) ( $context['source'] ?? 'manual' ),
 				'source_file' => (string) ( $context['source_file'] ?? '' ),
 				'file_path' => (string) ( $context['file_path'] ?? '' ),
 				'index_path' => (string) ( $context['index_path'] ?? '' ),
+				'stage_table' => (string) ( $context['stage_table'] ?? '' ),
 				'total_rows' => max( 0, (int) ( $context['total_rows'] ?? 0 ) ),
 				'byte_offset' => max( 0, (int) ( $context['byte_offset'] ?? 0 ) ),
 				'columns' => is_array( $context['columns'] ?? null ) ? $context['columns'] : array(),
@@ -119,6 +120,7 @@ final class DpdGeographyImportStateService {
 			'source_file' => '',
 			'file_path' => '',
 			'index_path' => '',
+			'stage_table' => '',
 			'byte_offset' => 0,
 			'rows_read' => 0,
 			'total_rows' => 0,
@@ -128,7 +130,8 @@ final class DpdGeographyImportStateService {
 			'matched_by_fias' => 0,
 			'matched_by_kladr' => 0,
 			'matched_by_name' => 0,
-			'saved_mappings' => 0,
+			'saved_candidates' => 0,
+			'finalized_mappings' => 0,
 			'unchanged_mappings' => 0,
 			'conflicts' => 0,
 			'ambiguous' => 0,
@@ -139,9 +142,6 @@ final class DpdGeographyImportStateService {
 			'finished_at' => '',
 			'last_message' => '',
 			'columns' => array(),
-			'seen_mappings' => array(),
-			'saved_by_job' => array(),
-			'blocked_locations' => array(),
 		);
 	}
 

@@ -1,6 +1,6 @@
 # Карта текущего кода
 
-## DPD Delivery Codes And Geography Import 0.56.2
+## DPD Delivery Codes And Geography Import 0.56.3
 
 - `database/migrations/0030_create_location_delivery_codes.php` creates `wdc_location_delivery_codes` with `location_id` primary key, nullable `dpd_city_id`, nullable `updated_at`, and `dpd_city_id` index.
 - `src/Locations/Storage/LocationDeliveryCodeRepository.php` is the storage boundary for delivery carrier codes tied 1:1 to `wdc_locations.id`. It supports `find_by_location_id`, `get_dpd_city_id`, `save_dpd_city_id`, `delete_by_location_id`, and `cleanup_orphans`.
@@ -13,8 +13,9 @@
 - `src/Carriers/Dpd/Geography/DpdLocationIndex.php` builds reusable in-memory lookup maps for normalized FIAS, city FIAS, KLADR variants, city KLADR variants and conservative region+district+name+type keys. Duplicate keys are marked ambiguous and are not auto-matchable.
 - `src/Carriers/Dpd/Geography/DpdGeographyCsvParser.php` supports full stream parsing plus step reads by byte offset/header columns for large `GeographyNewDPD_*.csv` files.
 - `src/Carriers/Dpd/Geography/DpdGeographyMatcher.php` matches each DPD row against `DpdLocationIndex`; it no longer calls `LocationRepository` SQL lookup per CSV row.
-- `src/Carriers/Dpd/Geography/DpdGeographyImportStateService.php` stores the current import job in `wdc_dpd_geography_import_state`, hides temp paths from public state, and deletes CSV/index temp files on reset.
-- `src/Carriers/Dpd/Geography/DpdGeographyImportService.php` starts SFTP/manual import jobs, builds the location index once, processes rows in limited AJAX steps, tracks progress counters/conflicts, finalizes the report in DPD settings, and removes temp files on finish.
+- `src/Carriers/Dpd/Geography/DpdGeographyImportStateService.php` stores the current import job in `wdc_dpd_geography_import_state`, hides temp paths/staging table name from public state, and keeps only light job metadata, offsets, counters, timestamps, errors and last message.
+- `src/Carriers/Dpd/Geography/DpdGeographyStageRepository.php` owns per-job `wdc_dpd_geography_stage_<job_hash>` tables. It creates/drops staging, upserts candidates, marks conflicts, and finalizes candidates into `wdc_location_delivery_codes` without touching future non-DPD carrier-code columns.
+- `src/Carriers/Dpd/Geography/DpdGeographyImportService.php` starts SFTP/manual import jobs, builds the location index once, processes rows in limited AJAX steps, writes only to staging during import, finalizes the DPD-only refresh on EOF, stores the report in DPD settings, and removes CSV/index/staging temp resources on finish/reset.
 - `src/Carriers/Dpd/Geography/WpDpdDaDataDeliveryClient.php` and `DpdDaDataDeliveryFallbackService.php` implement the admin-only single-location DaData delivery fallback using the shared DaData token pool and usage counters.
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders the separate DPD География tab, starts SFTP/manual import jobs, registers `wp_ajax_wdc_dpd_geography_import_status`, and displays the import progress/reset UI alongside manual mapping, diagnostics and DaData fallback.
 - `assets/admin/dpd-geography-import.js` polls the DPD geography AJAX endpoint only on `page=wdc-delivery-services&service=dpd&tab=dpd_geography`, updates the progress bar and counters, and stops polling after finished/failed/cancelled.

@@ -5,7 +5,6 @@ namespace WallsShop\WDC\Carriers\Dpd\Geography;
 
 use Throwable;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
-use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -15,9 +14,9 @@ final class DpdGeographyImportService {
 	public function __construct(
 		private DpdGeographyCsvParser $parser,
 		private DpdGeographyMatcher $matcher,
-		private LocationDeliveryCodeRepository $delivery_codes,
 		private DpdLocationIndex $index,
 		private DpdGeographyImportStateService $state,
+		private DpdGeographyStageRepository $stage,
 		private ?DpdSettings $settings = null
 	) {
 	}
@@ -87,6 +86,10 @@ final class DpdGeographyImportService {
 		if ( '' === $index_path || ! file_exists( $index_path ) ) {
 			return $this->state->fail( 'DPD geography location index is missing.' );
 		}
+		$stage_table = (string) ( $state['stage_table'] ?? '' );
+		if ( '' === $stage_table || ! $this->stage->exists( $stage_table ) ) {
+			return $this->state->fail( 'DPD geography staging table is missing.' );
+		}
 
 		$loaded = unserialize( (string) file_get_contents( $index_path ), array( 'allowed_classes' => false ) );
 		$this->index->load( is_array( $loaded ) ? $loaded : array() );
@@ -98,15 +101,9 @@ final class DpdGeographyImportService {
 			'rows_read' => (int) $state['rows_read'] + (int) $step['rows_read_count'],
 			'last_message' => 'DPD geography import is processing CSV rows.',
 		);
-		$seen = is_array( $state['seen_mappings'] ?? null ) ? $state['seen_mappings'] : array();
-		$saved_by_job = is_array( $state['saved_by_job'] ?? null ) ? $state['saved_by_job'] : array();
-		$blocked = is_array( $state['blocked_locations'] ?? null ) ? $state['blocked_locations'] : array();
 		foreach ( $step['rows'] as $row ) {
-			$this->process_row( $row, $patch, $seen, $saved_by_job, $blocked );
+			$this->process_row( $stage_table, $row, $patch );
 		}
-		$patch['seen_mappings'] = $seen;
-		$patch['saved_by_job'] = $saved_by_job;
-		$patch['blocked_locations'] = $blocked;
 
 		$state = $this->state->update( $patch );
 		if ( ! empty( $step['eof'] ) ) {
@@ -127,6 +124,11 @@ final class DpdGeographyImportService {
 	 * @return array<string,mixed>
 	 */
 	public function reset(): array {
+		$current = $this->state->current();
+		$stage_table = (string) ( $current['stage_table'] ?? '' );
+		if ( '' !== $stage_table ) {
+			$this->stage->drop( $stage_table );
+		}
 		$this->state->reset();
 		return $this->state->public_state();
 	}
@@ -140,13 +142,18 @@ final class DpdGeographyImportService {
 			$this->index->build();
 			$index_path = $this->temp_path( 'index-' . $source_file . '.ser' );
 			file_put_contents( $index_path, serialize( $this->index->export() ) );
+			$job_id = sha1( microtime( true ) . '|' . $source . '|' . $source_file . '|' . ( function_exists( 'wp_rand' ) ? (string) wp_rand() : (string) random_int( 1, PHP_INT_MAX ) ) );
+			$stage_table = $this->stage->table_name_for_job( $job_id );
+			$this->stage->create( $stage_table );
 			$state = $this->state->start(
 				array(
+					'job_id' => $job_id,
 					'phase' => 'ready',
 					'source' => $source,
 					'source_file' => $source_file,
 					'file_path' => $path,
 					'index_path' => $index_path,
+					'stage_table' => $stage_table,
 					'total_rows' => (int) $inspect['total_rows'],
 					'byte_offset' => (int) $inspect['data_offset'],
 					'columns' => $inspect['columns'],
@@ -163,11 +170,8 @@ final class DpdGeographyImportService {
 	/**
 	 * @param array<string,string> $row
 	 * @param array<string,mixed> $patch
-	 * @param array<string,string> $seen
-	 * @param array<string,string> $saved_by_job
-	 * @param array<string,bool> $blocked
 	 */
-	private function process_row( array $row, array &$patch, array &$seen, array &$saved_by_job, array &$blocked ): void {
+	private function process_row( string $stage_table, array $row, array &$patch ): void {
 		if ( 'RU' !== strtoupper( trim( (string) ( $row['country_code'] ?? '' ) ) ) ) {
 			$this->inc( $patch, 'skipped_non_ru' );
 			return;
@@ -188,37 +192,25 @@ final class DpdGeographyImportService {
 			$this->inc( $patch, 'unmatched' );
 			return;
 		}
-		$key = (string) $location_id;
-		if ( ! empty( $blocked[ $key ] ) ) {
-			return;
-		}
-		if ( isset( $seen[ $key ] ) && $seen[ $key ] !== $dpd_city_id ) {
-			if ( isset( $saved_by_job[ $key ] ) && $saved_by_job[ $key ] === $seen[ $key ] ) {
-				$this->delivery_codes->delete_by_location_id( $location_id );
-				unset( $saved_by_job[ $key ] );
-			}
-			unset( $seen[ $key ] );
-			$blocked[ $key ] = true;
-			$this->inc( $patch, 'conflicts' );
-			return;
-		}
-		$seen[ $key ] = $dpd_city_id;
 		$method = (string) ( $match['method'] ?? '' );
 		if ( '' !== $method ) {
 			$this->inc( $patch, 'matched_by_' . $method );
 		}
-		$current = $this->delivery_codes->get_dpd_city_id( $location_id );
-		if ( $current === $dpd_city_id ) {
+		$result = $this->stage->upsert_candidate( $stage_table, $location_id, $dpd_city_id, $method );
+		if ( 'inserted' === $result ) {
+			$this->inc( $patch, 'saved_candidates' );
+			return;
+		}
+		if ( 'unchanged' === $result ) {
 			$this->inc( $patch, 'unchanged_mappings' );
 			return;
 		}
-		if ( $this->delivery_codes->save_dpd_city_id( $location_id, $dpd_city_id ) ) {
-			$saved_by_job[ $key ] = $dpd_city_id;
-			$this->inc( $patch, 'saved_mappings' );
+		if ( 'conflict' === $result ) {
+			$this->inc( $patch, 'conflicts' );
 			return;
 		}
 		$errors = is_array( $patch['errors'] ?? null ) ? $patch['errors'] : array();
-		$errors[] = 'Failed to save mapping for location_id=' . $location_id;
+		$errors[] = 'Failed to stage mapping for location_id=' . $location_id;
 		$patch['errors'] = $errors;
 	}
 
@@ -227,6 +219,18 @@ final class DpdGeographyImportService {
 	 * @return array<string,mixed>
 	 */
 	private function finalize( array $state ): array {
+		$stage_table = (string) ( $state['stage_table'] ?? '' );
+		if ( '' === $stage_table || ! $this->stage->exists( $stage_table ) ) {
+			return $this->state->fail( 'DPD geography staging table is missing during finalization.' );
+		}
+		$finalized = $this->stage->finalize_into_delivery_codes( $stage_table );
+		$state = $this->state->update(
+			array(
+				'phase' => 'finalizing',
+				'finalized_mappings' => $finalized,
+				'last_message' => 'DPD geography import is finalizing mappings.',
+			)
+		);
 		$report = $this->report_from_state( $state );
 		$this->settings?->save_geography_import_report( $report );
 		foreach ( array( 'file_path', 'index_path' ) as $key ) {
@@ -235,6 +239,7 @@ final class DpdGeographyImportService {
 				@unlink( $file );
 			}
 		}
+		$this->stage->drop( $stage_table );
 
 		return $this->state->finish( 'DPD geography import finished.' );
 	}
@@ -254,7 +259,8 @@ final class DpdGeographyImportService {
 			'matched_by_fias' => (int) ( $state['matched_by_fias'] ?? 0 ),
 			'matched_by_kladr' => (int) ( $state['matched_by_kladr'] ?? 0 ),
 			'matched_by_name' => (int) ( $state['matched_by_name'] ?? 0 ),
-			'saved_mappings' => (int) ( $state['saved_mappings'] ?? 0 ),
+			'saved_candidates' => (int) ( $state['saved_candidates'] ?? 0 ),
+			'finalized_mappings' => (int) ( $state['finalized_mappings'] ?? 0 ),
 			'unchanged_mappings' => (int) ( $state['unchanged_mappings'] ?? 0 ),
 			'conflicts' => (int) ( $state['conflicts'] ?? 0 ),
 			'ambiguous' => (int) ( $state['ambiguous'] ?? 0 ),

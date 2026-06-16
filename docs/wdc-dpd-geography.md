@@ -1,6 +1,6 @@
 # WDC DPD Geography
 
-Version: 0.56.2.
+Version: 0.56.3.
 
 ## Scope
 
@@ -30,7 +30,7 @@ The legacy `wdc_location_carrier_codes` model is removed from code and is not cr
 - `DpdGeographyDiagnosticService` supports admin diagnostics and manual mapping for a single existing location.
 - `DpdGeographyFtpClient` downloads the newest `GeographyNewDPD_YYYY_MM_DD.csv` through SFTP when `ssh2` is available and an encrypted password is configured.
 - `DpdLocationIndex` builds reusable FIAS/KLADR/name lookup maps from active RU `wdc_locations` rows.
-- `DpdGeographyCsvParser`, `DpdGeographyMatcher`, `DpdGeographyImportStateService` and `DpdGeographyImportService` stream-parse, match, step through import jobs and save DPD city mappings.
+- `DpdGeographyCsvParser`, `DpdGeographyMatcher`, `DpdGeographyImportStateService`, `DpdGeographyStageRepository` and `DpdGeographyImportService` stream-parse, match, stage, finalize and report DPD city mappings.
 - `DpdDaDataDeliveryFallbackService` uses the shared DaData token pool for an admin-triggered single-location fallback.
 
 ## Live API Note
@@ -52,14 +52,25 @@ The DPD География tab supports two admin-only import paths:
 
 The importer reads `;`-delimited CSV row by row, supports UTF-8 and Windows-1251, detects the header row when present, and maps the documented first columns: DPD city ID, country code, region, district, main city, settlement, settlement type, postal code, FIAS and KLADR. Only `Код страны = RU` rows are imported. Postal codes, services/options, terminal data, schedules, raw rows and per-row diagnostics are not stored.
 
-As of 0.56.2, imports are stateful step jobs rather than one synchronous PHP request:
+As of 0.56.3, imports are stateful staging jobs rather than one synchronous PHP request:
 
-- start action creates an import job, counts data rows by streaming the file, builds a `DpdLocationIndex` from active RU locations, and stores the job in `wdc_dpd_geography_import_state`;
+- start action creates an import job, counts data rows by streaming the file, builds a `DpdLocationIndex` from active RU locations, creates a per-job `wdc_dpd_geography_stage_<job_hash>` table, and stores the job in `wdc_dpd_geography_import_state`;
 - the DPD География tab polls `wp_ajax_wdc_dpd_geography_import_status`;
-- each AJAX step reads from the saved byte offset and processes a limited batch of rows;
+- each AJAX step reads from the saved byte offset, processes a limited batch of rows, and writes only to the staging table;
 - progress state records phase, source, source file, rows read, total rows, RU/skipped rows, matching counters, saved/unchanged mappings, conflicts, ambiguous/unmatched rows, errors and timestamps;
-- finish stores the final report in DPD settings and deletes the temporary CSV/index files;
-- reset/cancel deletes stale temporary files and marks the job cancelled.
+- finish finalizes candidates into `wdc_location_delivery_codes.dpd_city_id`, stores the final report in DPD settings, and deletes the temporary CSV/index/staging resources;
+- reset/cancel deletes stale temporary CSV/index/staging resources and marks the job cancelled.
+
+The working `wdc_location_delivery_codes` table is not changed while rows are being imported. During a job, `DpdGeographyStageRepository` creates:
+
+- `location_id BIGINT UNSIGNED NOT NULL PRIMARY KEY`;
+- `dpd_city_id BIGINT UNSIGNED NULL`;
+- `match_method VARCHAR(20) NOT NULL`;
+- `status VARCHAR(20) NOT NULL DEFAULT 'candidate'`;
+- `updated_at DATETIME NULL`;
+- optional `status` index.
+
+The import state stores the staging table name for services, but public state never exposes `file_path`, `index_path` or `stage_table`. The cancelled heavy state arrays `seen_mappings`, `saved_by_job` and `blocked_locations` are not stored in the option.
 
 The admin UI shows the current phase, progress bar, `Обработано X из Y строк`, counters, last message and reset button. If JavaScript is unavailable, the current state and reset action remain visible on page reload.
 
@@ -71,7 +82,15 @@ Matching is conservative:
 - Name fallback runs only when FIAS/KLADR fail and saves only a single confident indexed candidate by settlement name, region, district and type.
 - If an index key points to multiple locations, the key is marked ambiguous and is not used for automatic mapping.
 
-Duplicate rows with the same DPD city ID for one location are idempotent. Conflicting DPD city IDs for one `location_id` are counted as conflicts and are not overwritten. Ambiguous name matches are counted and not saved. The last import report is stored in DPD settings under `dpd_last_geography_import_report`.
+Duplicate rows with the same DPD city ID for one location are idempotent. If a later row maps the same `location_id` to a different DPD city ID, the staging row becomes `status=conflict` and `dpd_city_id=NULL`; it is excluded from finalization. Ambiguous name matches are counted and not staged. The last import report is stored in DPD settings under `dpd_last_geography_import_report`.
+
+Finalization is DPD-column-only and safe for future carrier code columns. It:
+
+1. clears `wdc_location_delivery_codes.dpd_city_id` for locations absent from candidate staging rows;
+2. upserts candidate staging rows with `ON DUPLICATE KEY UPDATE`, changing only `dpd_city_id` and `updated_at`;
+3. saves the final report;
+4. deletes the CSV temp file, serialized index file and staging table;
+5. marks the job `finished`.
 
 SFTP import requires the PHP `ssh2` extension. If it is unavailable, the admin action returns a safe message: `SFTP extension is not available. Upload GeographyNewDPD CSV manually.`
 
@@ -118,4 +137,4 @@ Diagnostics do not calculate rates, do not create orders, do not import pickup p
 
 Future tariff implementation should consume `DpdCityResolver` instead of adding carrier-specific branches to checkout or tariff services. At tariff stage, WDC must require an existing `dpd_city_id` mapping and must not silently call DPD geography APIs to guess a city.
 
-Future tariff work should require an existing `dpd_city_id` mapping and must not perform city guessing in tariff services. Future automatic population can build on the step CSV importer with an explicit scheduled task, but 0.56.2 does not add cron or Action Scheduler jobs.
+Future tariff work should require an existing `dpd_city_id` mapping and must not perform city guessing in tariff services. Future automatic population can build on the staging step CSV importer with an explicit scheduled task, but 0.56.3 does not add cron or Action Scheduler jobs.

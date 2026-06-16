@@ -1031,7 +1031,7 @@ final class DeliveryServicesAdminPage {
 			<p data-wdc-dpd-summary><?php echo esc_html( sprintf( 'Фаза: %s. Обработано %d из %d строк.', $phase, (int) ( $state['rows_read'] ?? 0 ), (int) ( $state['total_rows'] ?? 0 ) ) ); ?></p>
 			<table class="widefat striped" style="max-width: 860px;">
 				<tbody>
-				<?php foreach ( array( 'phase', 'source', 'source_file', 'rows_read', 'total_rows', 'ru_rows', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_kladr', 'matched_by_name', 'saved_mappings', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
+				<?php foreach ( array( 'phase', 'source', 'source_file', 'rows_read', 'total_rows', 'ru_rows', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_kladr', 'matched_by_name', 'saved_candidates', 'finalized_mappings', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
 					<tr>
 						<th><?php echo esc_html( $key ); ?></th>
 						<td data-wdc-dpd-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( is_array( $state[ $key ] ?? null ) ? implode( '; ', array_map( 'strval', $state[ $key ] ) ) : (string) ( $state[ $key ] ?? '' ) ); ?></td>
@@ -2769,12 +2769,13 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 	 */
 	private function dpd_import_report_message( array $report ): string {
 		return sprintf(
-			'DPD geography import: source=%s file=%s total=%d ru=%d saved=%d unchanged=%d conflicts=%d ambiguous=%d unmatched=%d errors=%d',
+			'DPD geography import: source=%s file=%s total=%d ru=%d candidates=%d finalized=%d unchanged=%d conflicts=%d ambiguous=%d unmatched=%d errors=%d',
 			(string) ( $report['source'] ?? '' ),
 			(string) ( $report['source_file'] ?? '' ),
 			(int) ( $report['total_rows'] ?? 0 ),
 			(int) ( $report['ru_rows'] ?? 0 ),
-			(int) ( $report['saved_mappings'] ?? 0 ),
+			(int) ( $report['saved_candidates'] ?? 0 ),
+			(int) ( $report['finalized_mappings'] ?? 0 ),
 			(int) ( $report['unchanged_mappings'] ?? 0 ),
 			(int) ( $report['conflicts'] ?? 0 ),
 			(int) ( $report['ambiguous'] ?? 0 ),

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.56.2.
+Current plugin version: 0.56.3.
+
+Version 0.56.3 makes DPD Geography import staging-first. Step import writes candidates/conflicts only to a per-job `wdc_dpd_geography_stage_<hash>` table; `wdc_location_delivery_codes` is unchanged until EOF finalization. Finish performs a DPD-only full refresh of `dpd_city_id`, saves the report, and removes CSV/index/staging temp data. Reset removes the same temporary data and leaves the working table untouched.
 
 Version 0.56.2 makes DPD Geography import production-sized-file ready. SFTP/manual `GeographyNewDPD_*.csv` imports now create a stateful admin job, build a reusable in-memory index from `wdc_locations`, process CSV rows in AJAX steps with visual progress, and avoid SQL lookup per CSV row. State is stored in an option and temp files are removed on finish/reset. DPD tariffs, checkout rates, pickup points, orders, statuses, labels, COD, `unitLoad`, cron import and runtime DPD carrier registration remain intentionally not implemented.
 

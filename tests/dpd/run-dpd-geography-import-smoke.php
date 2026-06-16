@@ -10,6 +10,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $delivery_codes = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $locations = array();
+		/** @var array<string,array<int,array<string,mixed>>> */
+		public array $dpd_geography_stage_tables = array();
 	}
 }
 
@@ -39,6 +41,7 @@ require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyCsvParser.
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdLocationIndex.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyMatcher.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportStateService.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyStageRepository.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportService.php';
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
@@ -46,6 +49,7 @@ use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyCsvParser;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyImportService;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyImportStateService;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyMatcher;
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyStageRepository;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdLocationIndex;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -178,24 +182,48 @@ $repository = new LocationDeliveryCodeRepository( $GLOBALS['wpdb'] );
 $location_repository = new LocationRepository( $GLOBALS['wpdb'] );
 $index = new DpdLocationIndex( $location_repository );
 $state = new DpdGeographyImportStateService();
+$stage = new DpdGeographyStageRepository( $GLOBALS['wpdb'] );
 $importer = new DpdGeographyImportService(
 	new DpdGeographyCsvParser(),
 	new DpdGeographyMatcher( $index ),
-	$repository,
 	$index,
 	$state,
+	$stage,
 	$settings
 );
-$report = $importer->import_file( $path, 'manual', 'GeographyNewDPD_2026_06_16.csv' );
-@unlink( $path );
+$job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
+$internal = $state->current();
+$stage_table = (string) $internal['stage_table'];
+$import_path = (string) $internal['file_path'];
+dpd_import_assert( 'ready' === (string) $job['phase'], 'start creates ready import job' );
+dpd_import_assert( '' !== $stage_table && isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ] ), 'start creates staging table' );
+dpd_import_assert( ! array_key_exists( 'stage_table', $job ) && ! array_key_exists( 'file_path', $job ), 'public state hides internal paths and stage table' );
+dpd_import_assert( ! array_key_exists( 'seen_mappings', $internal ) && ! array_key_exists( 'saved_by_job', $internal ) && ! array_key_exists( 'blocked_locations', $internal ), 'state does not contain large in-memory mapping arrays' );
+
+$job = $importer->step( (string) $job['job_id'], 1 );
+dpd_import_assert( array() === $GLOBALS['wpdb']->delivery_codes, 'step import does not write directly to working delivery codes table' );
+dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ][1] ), 'candidate is saved in staging table' );
+dpd_import_assert( 'candidate' === $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ][1]['status'], 'staged candidate has candidate status' );
+
+$job = $importer->step( (string) $job['job_id'], 4 );
+dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ][3] ), 'conflicted location exists in staging table' );
+dpd_import_assert( 'conflict' === $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ][3]['status'], 'different DPD city IDs mark staged row as conflict' );
+dpd_import_assert( null === $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ][3]['dpd_city_id'], 'conflict clears staged dpd_city_id' );
+dpd_import_assert( array() === $GLOBALS['wpdb']->delivery_codes, 'working delivery codes table remains unchanged before finalization' );
+
+while ( in_array( (string) ( $job['phase'] ?? '' ), array( 'ready', 'importing' ), true ) ) {
+	$job = $importer->step( (string) $job['job_id'], 10000 );
+}
+$report = $settings->last_geography_import_report();
 
 dpd_import_assert( 8 === (int) $report['total_rows'], 'parser counts data rows after header' );
 dpd_import_assert( 7 === (int) $report['ru_rows'], 'import processes RU rows only' );
 dpd_import_assert( 1 === (int) $report['skipped_non_ru'], 'import skips non-RU rows' );
 dpd_import_assert( 1 === (int) $report['skipped_invalid'], 'import skips rows without DPD city ID' );
-dpd_import_assert( 3 === (int) $report['matched_by_fias'], 'FIAS exact matches are counted before conflict rollback' );
+dpd_import_assert( 4 === (int) $report['matched_by_fias'], 'FIAS exact matches are counted before staging conflict filtering' );
 dpd_import_assert( 1 === (int) $report['matched_by_kladr'], 'KLADR normalized match is saved' );
-dpd_import_assert( 3 === (int) $report['saved_mappings'], 'non-conflicting rows are saved and conflicted job-local writes are rolled back' );
+dpd_import_assert( 3 === (int) $report['saved_candidates'], 'non-conflicting rows are staged as candidates before finalization' );
+dpd_import_assert( 2 === (int) $report['finalized_mappings'], 'only candidates are finalized into working delivery codes table' );
 dpd_import_assert( 1 === (int) $report['unchanged_mappings'], 'duplicate same DPD city ID is idempotent' );
 dpd_import_assert( 1 === (int) $report['conflicts'], 'different DPD city IDs for one location are treated as conflict' );
 dpd_import_assert( 1 === (int) $report['ambiguous'], 'ambiguous name match is not saved' );
@@ -205,7 +233,18 @@ dpd_import_assert( null === $repository->get_dpd_city_id( 3 ), 'conflicted mappi
 dpd_import_assert( null === $repository->get_dpd_city_id( 4 ) && null === $repository->get_dpd_city_id( 5 ), 'ambiguous name mapping is not saved' );
 dpd_import_assert( array() !== $settings->last_geography_import_report(), 'last import report is stored in settings' );
 dpd_import_assert( 'finished' === $state->current()['phase'], 'step import finishes job state' );
-dpd_import_assert( ! file_exists( $path ), 'import temp file is deleted on finish' );
+dpd_import_assert( ! file_exists( $import_path ), 'import temp file is deleted on finish' );
+dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $stage_table ] ), 'staging table is deleted on finish' );
+
+$reset_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-reset-' );
+file_put_contents( $reset_path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) );
+$reset_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $reset_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
+$reset_state = $state->current();
+$reset_stage = (string) $reset_state['stage_table'];
+dpd_import_assert( isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $reset_stage ] ), 'reset scenario creates staging table' );
+$reset_public = $importer->reset();
+dpd_import_assert( 'cancelled' === (string) $reset_public['phase'], 'reset marks import as cancelled' );
+dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $reset_stage ] ), 'reset deletes staging table' );
 
 $plugin_source = file_get_contents( __DIR__ . '/../../src/Core/Plugin.php' );
 dpd_import_assert( is_string( $plugin_source ) && ! str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'DPD shipment adapter is not registered by geography import' );
