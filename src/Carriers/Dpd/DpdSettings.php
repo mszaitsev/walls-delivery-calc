@@ -47,10 +47,7 @@ final class DpdSettings {
 	public const RUNTIME_COURIER_TITLE_KEY = 'dpd_runtime_courier_title';
 	public const RUNTIME_ENABLED_SERVICE_CODES_KEY = 'dpd_runtime_enabled_service_codes';
 	public const RUNTIME_TARIFF_TITLES_KEY = 'dpd_runtime_tariff_titles';
-	public const RUNTIME_ALLOWED_SERVICE_CODES_KEY = 'dpd_runtime_allowed_service_codes';
-	public const RUNTIME_METHOD_TITLE_PREFIX_KEY = 'dpd_runtime_method_title_prefix';
-	public const RUNTIME_PICKUP_MODE_KEY = 'dpd_runtime_pickup_mode';
-	public const RUNTIME_DELIVERY_MODE_KEY = 'dpd_runtime_delivery_mode';
+	public const RUNTIME_ENABLE_COURIER_RATES_KEY = 'dpd_runtime_enable_courier_rates';
 	public const LAST_TARIFF_ACTION_RESULT_KEY = 'dpd_last_tariff_action_result';
 
 	public function __construct(
@@ -93,10 +90,7 @@ final class DpdSettings {
 			self::RUNTIME_COURIER_TITLE_KEY => self::DEFAULT_COURIER_METHOD_TITLE,
 			self::RUNTIME_ENABLED_SERVICE_CODES_KEY => 'ECN,CSM,MXO',
 			self::RUNTIME_TARIFF_TITLES_KEY => array(),
-			self::RUNTIME_ALLOWED_SERVICE_CODES_KEY => '',
-			self::RUNTIME_METHOD_TITLE_PREFIX_KEY => 'DPD',
-			self::RUNTIME_PICKUP_MODE_KEY => 'door',
-			self::RUNTIME_DELIVERY_MODE_KEY => 'door',
+			self::RUNTIME_ENABLE_COURIER_RATES_KEY => false,
 			self::LAST_TARIFF_ACTION_RESULT_KEY => array(),
 		);
 	}
@@ -357,11 +351,7 @@ final class DpdSettings {
 			$titles[ $code ] = '' !== $title ? $title : $default_title;
 		}
 		$this->settings->set( self::RUNTIME_TARIFF_TITLES_KEY, $titles );
-
-		$pickup_mode = sanitize_key( wp_unslash( $input[ self::RUNTIME_PICKUP_MODE_KEY ] ?? 'door' ) );
-		$delivery_mode = sanitize_key( wp_unslash( $input[ self::RUNTIME_DELIVERY_MODE_KEY ] ?? 'door' ) );
-		$this->settings->set( self::RUNTIME_PICKUP_MODE_KEY, in_array( $pickup_mode, array( 'door', 'terminal' ), true ) ? $pickup_mode : 'door' );
-		$this->settings->set( self::RUNTIME_DELIVERY_MODE_KEY, in_array( $delivery_mode, array( 'door', 'terminal' ), true ) ? $delivery_mode : 'door' );
+		$this->settings->set( self::RUNTIME_ENABLE_COURIER_RATES_KEY, ! empty( $input[ self::RUNTIME_ENABLE_COURIER_RATES_KEY ] ) );
 	}
 
 	public function tariff_sender_location_id(): int {
@@ -420,6 +410,10 @@ final class DpdSettings {
 		return $this->runtime_enabled_service_codes_raw();
 	}
 
+	public function runtime_courier_rates_enabled(): bool {
+		return $this->settings->get_bool( self::RUNTIME_ENABLE_COURIER_RATES_KEY, false );
+	}
+
 	public function runtime_pickup_title(): string {
 		$title = trim( $this->settings->get_string( self::RUNTIME_PICKUP_TITLE_KEY, self::DEFAULT_PICKUP_METHOD_TITLE ) );
 
@@ -458,18 +452,6 @@ final class DpdSettings {
 		$title = trim( (string) ( $titles[ $code ] ?? '' ) );
 
 		return '' !== $title ? $title : trim( $fallback );
-	}
-
-	public function runtime_pickup_mode(): string {
-		$mode = $this->settings->get_string( self::RUNTIME_PICKUP_MODE_KEY, 'door' );
-
-		return 'terminal' === $mode ? 'terminal' : 'door';
-	}
-
-	public function runtime_delivery_mode(): string {
-		$mode = $this->settings->get_string( self::RUNTIME_DELIVERY_MODE_KEY, 'door' );
-
-		return 'terminal' === $mode ? 'terminal' : 'door';
 	}
 
 	/**

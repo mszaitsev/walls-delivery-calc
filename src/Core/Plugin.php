@@ -341,7 +341,8 @@ final class Plugin {
 				$this->container->get( QuoteCache::class ),
 				$this->container->get( DeliveryServiceRegistry::class ),
 				$this->container->get( DeliveryServiceManager::class ),
-				$this->container->get( PackagingWeightCalculator::class )
+				$this->container->get( PackagingWeightCalculator::class ),
+				$this->container->get( DpdSettings::class )
 			)
 		);
 		$this->container->register( CheckoutSessionManager::class, fn(): CheckoutSessionManager => new CheckoutSessionManager() );

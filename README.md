@@ -1,13 +1,17 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.58.1.
+Current plugin version: 0.58.2.
 
-Version 0.58.1 aligns DPD checkout UX with CDEK/Russian Post grouped tariff selectors. DPD now exposes one checkout group
-per delivery type (`DPD курьером` or calculation-only `DPD до пункта выдачи`) and keeps returned DPD services as
-`tariff_variants` / selected tariffs inside that group. DPD tariff enablement and custom checkout tariff titles moved to
-the DPD `Тарифы` tab with default enabled codes `ECN,CSM,MXO`; the old checkout title prefix setting is no longer used.
-DPD terminal delivery mode sets `selfDelivery=true` for calculation and is marked as pickup-point-selection-not-yet-
-implemented without adding a DPD pickup map, shipment adapter, statuses or labels.
+Version 0.58.2 fixes the DPD checkout runtime model around pickup/courier delivery types. Checkout DPD shipment is now
+always calculated from a DPD terminal (`selfPickup=true`). Terminal delivery is the default pickup group and sends
+`selfDelivery=true`; courier delivery sends a separate `getServiceCostByParcels3` request with `selfDelivery=false` only
+when the new DPD `Тарифы` checkbox `Использовать курьерские тарифы` is enabled. The old runtime pickup/delivery mode and
+method-title-prefix settings are no longer rendered or used. DPD pickup points, maps, shipment adapter, statuses and labels
+remain out of scope.
+
+Version 0.58.1 aligns DPD checkout UX with CDEK/Russian Post grouped tariff selectors. DPD exposes one checkout group per
+delivery type and keeps returned DPD services as `tariff_variants` / selected tariffs inside that group. DPD tariff
+enablement and custom checkout tariff titles moved to the DPD `Тарифы` tab with default enabled codes `ECN,CSM,MXO`.
 
 Version 0.58.0 enables DPD checkout runtime rates through the existing carrier registry architecture. `DpdQuoteCarrier`
 uses `calculator2/getServiceCostByParcels3`, resolves receiver `dpd_city_id` from `wdc_location_delivery_codes`, builds

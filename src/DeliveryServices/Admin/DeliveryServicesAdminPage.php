@@ -1658,10 +1658,9 @@ final class DeliveryServicesAdminPage {
 			</table>
 			<h3><?php echo esc_html__( 'Режим расчета DPD для checkout', 'walls-delivery-calc' ); ?></h3>
 			<table class="form-table" role="presentation">
-				<?php $this->select_assoc_row( DpdSettings::RUNTIME_PICKUP_MODE_KEY, __( 'Забор для checkout', 'walls-delivery-calc' ), $this->dpd_settings->runtime_pickup_mode(), array( 'door' => 'Дверь', 'terminal' => 'Терминал' ) ); ?>
-				<?php $this->select_assoc_row( DpdSettings::RUNTIME_DELIVERY_MODE_KEY, __( 'Доставка для checkout', 'walls-delivery-calc' ), $this->dpd_settings->runtime_delivery_mode(), array( 'door' => 'Дверь', 'terminal' => 'Терминал' ) ); ?>
+				<?php $this->checkbox_row( DpdSettings::RUNTIME_ENABLE_COURIER_RATES_KEY, __( 'Использовать курьерские тарифы', 'walls-delivery-calc' ), $this->dpd_settings->runtime_courier_rates_enabled() ); ?>
 			</table>
-			<p class="description"><?php echo esc_html__( 'Терминальная доставка на этом этапе влияет только на расчет DPD. Выбор конкретного пункта DPD и карта будут добавлены позже.', 'walls-delivery-calc' ); ?></p>
+			<p class="description"><?php echo esc_html__( 'DPD checkout всегда считает отправку от терминала. Доставка до пункта выдачи считается всегда; доставка до двери считается отдельным запросом только при включенной галке. Выбор конкретного пункта DPD и карта будут добавлены позже.', 'walls-delivery-calc' ); ?></p>
 			<?php submit_button( __( 'Сохранить тарифы DPD', 'walls-delivery-calc' ) ); ?>
 		</form>
 		<?php

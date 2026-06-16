@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Checkout\Runtime;
 
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Checkout\Cache\QuoteCache;
@@ -34,7 +35,8 @@ final class CheckoutOrchestrator {
 		private ?QuoteCache $quote_cache = null,
 		private ?DeliveryServiceRegistry $service_registry = null,
 		private ?DeliveryServiceManager $service_manager = null,
-		private ?PackagingWeightCalculator $packaging_calculator = null
+		private ?PackagingWeightCalculator $packaging_calculator = null,
+		private ?DpdSettings $dpd_settings = null
 	) {
 	}
 
@@ -185,6 +187,13 @@ final class CheckoutOrchestrator {
 				if ( in_array( $service->service_key, array( RussianPostDomesticSettings::SERVICE_KEY, CdekCarrier::KEY ), true ) ) {
 					$entries[] = array( 'carrier' => $carrier, 'service' => $service, 'delivery_type' => DeliveryType::PICKUP );
 					$entries[] = array( 'carrier' => $carrier, 'service' => $service, 'delivery_type' => DeliveryType::COURIER );
+					continue;
+				}
+				if ( DpdSettings::SERVICE_KEY === $service->service_key ) {
+					$entries[] = array( 'carrier' => $carrier, 'service' => $service, 'delivery_type' => DeliveryType::PICKUP );
+					if ( $this->dpd_settings instanceof DpdSettings && $this->dpd_settings->runtime_courier_rates_enabled() ) {
+						$entries[] = array( 'carrier' => $carrier, 'service' => $service, 'delivery_type' => DeliveryType::COURIER );
+					}
 					continue;
 				}
 				$entries[] = array( 'carrier' => $carrier, 'service' => $service );

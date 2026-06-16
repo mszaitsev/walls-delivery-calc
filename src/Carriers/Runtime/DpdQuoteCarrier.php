@@ -46,16 +46,20 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 	}
 
 	public function quote( QuoteRequest $request ): DeliveryQuote {
+		$delivery_type = $this->normalize_delivery_type( (string) ( $request->customer_context['delivery_type'] ?? DeliveryType::PICKUP ) );
+		if ( DeliveryType::COURIER === $delivery_type && ! $this->settings->runtime_courier_rates_enabled() ) {
+			return $this->empty_quote( $request, 'courier_rates_disabled', array(), array(), array(), $delivery_type );
+		}
 		if ( ! $this->supports_country( $request->country_code ?: $request->destination->country_code ) ) {
-			return $this->empty_quote( $request, 'unsupported_or_credentials_missing' );
+			return $this->empty_quote( $request, 'unsupported_or_credentials_missing', array(), array(), array(), $delivery_type );
 		}
 
 		$receiver_location_id = $this->receiver_location_id( $request );
 		if ( $receiver_location_id <= 0 ) {
-			return $this->empty_quote( $request, 'receiver_location_id_required' );
+			return $this->empty_quote( $request, 'receiver_location_id_required', array(), array(), array(), $delivery_type );
 		}
 
-		$params = $this->tariff_params( $request );
+		$params = $this->tariff_params( $request, $delivery_type );
 		$result = $this->tariffs->calculate( $receiver_location_id, $params );
 		if ( ! $result->success ) {
 			$this->logger->warning(
@@ -67,7 +71,7 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 				)
 			);
 
-			return $this->empty_quote( $request, 'tariff_calculation_failed', array( 'errors' => $result->errors ), $params, $result->meta );
+			return $this->empty_quote( $request, 'tariff_calculation_failed', array( 'errors' => $result->errors ), $params, $result->meta, $delivery_type );
 		}
 
 		$enabled = $this->enabled_codes();
@@ -80,7 +84,8 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 				'no_enabled_service_codes',
 				array( 'raw_count' => count( $result->options ) ),
 				$params,
-				$result->meta
+				$result->meta,
+				$delivery_type
 			);
 		}
 		foreach ( $result->options as $option ) {
@@ -95,7 +100,7 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 				++$skipped_disallowed;
 				continue;
 			}
-			$rate = $this->rate_from_option( $request, $option, $result->payload, $result->meta );
+			$rate = $this->rate_from_option( $request, $delivery_type, $option, $result->payload, $result->meta );
 			if ( ! $rate instanceof DeliveryRate ) {
 				++$skipped_no_cost;
 				continue;
@@ -116,7 +121,7 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 		}
 
 		return new DeliveryQuote(
-			$this->quote_id( $request, 'checkout', $params, $result->meta ),
+			$this->quote_id( $request, 'checkout', $params, $result->meta, $delivery_type ),
 			self::KEY,
 			$request->destination,
 			$request->package,
@@ -131,6 +136,7 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 				'sender_city_id' => (string) ( $result->meta['sender_city_id'] ?? '' ),
 				'receiver_city_id' => (string) ( $result->meta['receiver_city_id'] ?? '' ),
 				'enabled_service_codes' => array_keys( $enabled ),
+				'delivery_type' => $delivery_type,
 			)
 		);
 	}
@@ -138,10 +144,10 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 	/**
 	 * @param array<string,mixed> $diagnostics
 	 */
-	private function empty_quote( QuoteRequest $request, string $reason, array $diagnostics = array(), array $params = array(), array $meta = array() ): DeliveryQuote {
+	private function empty_quote( QuoteRequest $request, string $reason, array $diagnostics = array(), array $params = array(), array $meta = array(), string $delivery_type = DeliveryType::PICKUP ): DeliveryQuote {
 		$this->logger->warning( 'DPD checkout quote returned empty.', array_merge( array( 'reason' => $reason ), $diagnostics ) );
 
-		return new DeliveryQuote( $this->quote_id( $request, $reason, $params, $meta ), self::KEY, $request->destination, $request->package, array(), false, $reason, $reason, false, 'api', array_merge( array( 'fallback_reason' => $reason ), $diagnostics ) );
+		return new DeliveryQuote( $this->quote_id( $request, $reason, $params, $meta, $delivery_type ), self::KEY, $request->destination, $request->package, array(), false, $reason, $reason, false, 'api', array_merge( array( 'fallback_reason' => $reason, 'delivery_type' => $delivery_type ), $diagnostics ) );
 	}
 
 	/**
@@ -159,18 +165,15 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function tariff_params( QuoteRequest $request ): array {
-		$pickup_mode = $this->settings->runtime_pickup_mode();
-		$delivery_mode = $this->settings->runtime_delivery_mode();
-
+	private function tariff_params( QuoteRequest $request, string $delivery_type ): array {
 		return array(
 			'weight_g' => max( 1, $request->package->get_total_weight_g(), $this->settings->tariff_default_weight_g() ),
 			'length_cm' => $this->dimension_or_default( $request->package->length_cm, $this->settings->tariff_default_length_cm() ),
 			'width_cm' => $this->dimension_or_default( $request->package->width_cm, $this->settings->tariff_default_width_cm() ),
 			'height_cm' => $this->dimension_or_default( $request->package->height_cm, $this->settings->tariff_default_height_cm() ),
 			'declared_value_rub' => $this->declared_value_rub( $request ),
-			'self_pickup' => 'terminal' === $pickup_mode,
-			'self_delivery' => 'terminal' === $delivery_mode,
+			'self_pickup' => true,
+			'self_delivery' => DeliveryType::PICKUP === $delivery_type,
 		);
 	}
 
@@ -202,7 +205,7 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 	 * @param array<string,mixed> $payload
 	 * @param array<string,mixed> $meta
 	 */
-	private function rate_from_option( QuoteRequest $request, array $option, array $payload, array $meta ): ?DeliveryRate {
+	private function rate_from_option( QuoteRequest $request, string $delivery_type, array $option, array $payload, array $meta ): ?DeliveryRate {
 		if ( ! is_numeric( $option['cost'] ?? null ) ) {
 			return null;
 		}
@@ -220,7 +223,6 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 			DateRange::UNIT_CALENDAR_DAYS
 		);
 		$days = DeliveryDaysFormatter::format( $range );
-		$delivery_type = 'terminal' === $this->settings->runtime_delivery_mode() ? DeliveryType::PICKUP : DeliveryType::COURIER;
 		$method_title = DeliveryType::PICKUP === $delivery_type ? $this->settings->runtime_pickup_title() : $this->settings->runtime_courier_title();
 		$title = $this->method_title_from_parts( $method_title, $tariff_name, $days );
 		$requires_pickup_point = false;
@@ -270,8 +272,9 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 				'dpd_service_name' => $service_name,
 				'dpd_sender_city_id' => (string) ( $meta['sender_city_id'] ?? '' ),
 				'dpd_receiver_city_id' => (string) ( $meta['receiver_city_id'] ?? '' ),
-				'dpd_runtime_pickup_mode' => $this->settings->runtime_pickup_mode(),
-				'dpd_runtime_delivery_mode' => $this->settings->runtime_delivery_mode(),
+				'dpd_self_pickup' => true,
+				'dpd_self_delivery' => DeliveryType::PICKUP === $delivery_type,
+				'dpd_courier_rates_enabled' => $this->settings->runtime_courier_rates_enabled(),
 				'dpd_pickup_points_not_implemented' => DeliveryType::PICKUP === $delivery_type,
 				'request_payload_sanitized' => $payload,
 				'response_tariff_sanitized' => $this->sanitize_option( $option ),
@@ -338,7 +341,8 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 		);
 	}
 
-	private function quote_id( QuoteRequest $request, string $suffix, array $params = array(), array $meta = array() ): string {
+	private function quote_id( QuoteRequest $request, string $suffix, array $params = array(), array $meta = array(), string $delivery_type = DeliveryType::PICKUP ): string {
+		$delivery_type = $this->normalize_delivery_type( $delivery_type );
 		$diagnostics = array(
 			'country_code' => $request->country_code,
 			'selected_location_id' => (string) ( $request->customer_context['selected_location_id'] ?? $request->customer_context['location_id'] ?? '' ),
@@ -349,8 +353,10 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 			'width_cm' => (float) ( $params['width_cm'] ?? $this->dimension_or_default( $request->package->width_cm, $this->settings->tariff_default_width_cm() ) ),
 			'height_cm' => (float) ( $params['height_cm'] ?? $this->dimension_or_default( $request->package->height_cm, $this->settings->tariff_default_height_cm() ) ),
 			'declared_value_rub' => (float) ( $params['declared_value_rub'] ?? $this->declared_value_rub( $request ) ),
-			'runtime_pickup_mode' => $this->settings->runtime_pickup_mode(),
-			'runtime_delivery_mode' => $this->settings->runtime_delivery_mode(),
+			'delivery_type' => $delivery_type,
+			'self_pickup' => true,
+			'self_delivery' => DeliveryType::PICKUP === $delivery_type,
+			'enable_courier_rates' => $this->settings->runtime_courier_rates_enabled(),
 			'enabled_service_codes' => $this->settings->runtime_enabled_service_codes(),
 			'calculation_date' => $request->calculation_date,
 			'environment' => $this->settings->environment(),
@@ -359,5 +365,9 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 		$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $diagnostics ) : json_encode( $diagnostics );
 
 		return self::KEY . ':' . sha1( is_string( $json ) ? $json : '' );
+	}
+
+	private function normalize_delivery_type( string $delivery_type ): string {
+		return DeliveryType::COURIER === $delivery_type ? DeliveryType::COURIER : DeliveryType::PICKUP;
 	}
 }

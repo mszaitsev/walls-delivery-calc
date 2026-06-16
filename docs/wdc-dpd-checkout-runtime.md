@@ -1,6 +1,6 @@
 # DPD Checkout Runtime
 
-Version: 0.58.1
+Version: 0.58.2
 
 ## Scope
 
@@ -38,8 +38,8 @@ The checkout stage sends only aggregate package data:
 
 - `pickup.cityId`: sender DPD city ID from settings/override;
 - `delivery.cityId`: receiver DPD city ID resolved from `wdc_location_delivery_codes`;
-- `selfPickup`: `false` for pickup mode `door`, `true` for pickup mode `terminal`;
-- `selfDelivery`: `false` for delivery mode `door`, `true` for delivery mode `terminal`;
+- `selfPickup`: always `true` in checkout runtime; DPD checkout shipment is calculated from a DPD terminal;
+- `selfDelivery`: `true` for the pickup/terminal delivery entry, `false` for the courier delivery entry;
 - `parcel[]`: total package weight and dimensions, with DPD defaults as fallback;
 - `declaredValue`: package/order total, with DPD default declared value as fallback.
 
@@ -59,13 +59,15 @@ DPD SOAP response options are normalized by `DpdTariffOptionNormalizer`.
 - `tariff_variants` are built by the shared WooCommerce tariff-selector flow;
 - checkout labels follow the common format `{method title}, {tariff title} - {delivery days}`.
 
+DPD uses separate DPD API requests for separate checkout delivery types. The same `serviceCode` can exist in both terminal and courier delivery responses, so the pickup group must not be reused for courier rates.
+
 Examples:
 
 - `DPD курьером, DPD Максимум - 5 дней`
 - `DPD курьером, DPD Экспресс - 1 день`
 - `DPD до пункта выдачи, DPD Максимум - 5 дней`
 
-The old `dpd_runtime_method_title_prefix` setting is no longer rendered in admin and is not used by runtime titles.
+The old `dpd_runtime_method_title_prefix`, `dpd_runtime_pickup_mode` and `dpd_runtime_delivery_mode` settings are no longer rendered in admin and are not used by runtime titles or payload mode selection.
 
 ## Admin Settings
 
@@ -78,23 +80,39 @@ DPD `Тарифы` stores runtime tariff controls:
 
 - fixed known service codes with enabled checkboxes;
 - custom checkout tariff titles;
-- `dpd_runtime_pickup_mode`: `door` or `terminal`;
-- `dpd_runtime_delivery_mode`: `door` or `terminal`.
+- `dpd_runtime_enable_courier_rates`: checkbox `Использовать курьерские тарифы`.
 
 Default enabled service codes are `ECN,CSM,MXO`. If all checkboxes are off, DPD returns no checkout rates. Unknown returned DPD service codes are skipped unless they become explicitly enabled in settings.
 
 DPD `DPD Расчет` remains only for admin diagnostics and sender/default package settings.
 
-## Terminal Delivery
+## Pickup And Courier Entries
 
-`runtime_delivery_mode=terminal` is calculation-only in 0.58.1:
+The checkout orchestrator builds DPD delivery-type entries from the built-in DPD service:
 
+- pickup entry: created whenever the DPD delivery service is active;
+- courier entry: created only when `dpd_runtime_enable_courier_rates` is enabled.
+
+`DpdQuoteCarrier` reads `QuoteRequest::$customer_context['delivery_type']` and defaults to pickup when it is absent.
+
+Pickup/terminal delivery is calculation-only in 0.58.2:
+
+- request payload sends `selfPickup=true`;
 - request payload sends `selfDelivery=true`;
 - returned rates use `DeliveryType::PICKUP`;
 - `requires_pickup_point=false`;
 - meta includes `dpd_pickup_points_not_implemented=true`.
 
 This keeps checkout from requiring a DPD pickup point before DPD parcel shops, map and selection are implemented.
+
+Courier delivery:
+
+- is skipped with reason `courier_rates_disabled` and no SOAP call when `dpd_runtime_enable_courier_rates` is disabled;
+- request payload sends `selfPickup=true`;
+- request payload sends `selfDelivery=false`;
+- returned rates use `DeliveryType::COURIER`;
+- `requires_courier_address=true`;
+- `requires_pickup_point=false`.
 
 ## Quote Id
 
@@ -106,7 +124,10 @@ DPD `quote_id` is diagnostic and includes:
 - weight;
 - length, width and height;
 - declared value;
-- pickup and delivery modes;
+- `delivery_type`;
+- fixed `selfPickup=true`;
+- delivery-type-derived `selfDelivery`;
+- courier-rates enablement;
 - enabled service codes;
 - calculation date;
 - active DPD environment.
@@ -117,7 +138,7 @@ The generic checkout quote cache key includes selected receiver location, packag
 
 ## Out Of Scope
 
-The 0.58.1 stage does not implement:
+The 0.58.2 stage does not implement:
 
 - DPD pickup points;
 - parcel shop selection;
