@@ -2,7 +2,7 @@
 
 ## Scope
 
-Version 0.54.0 adds only the DPD foundation. The built-in delivery service uses:
+Version 0.55.0 keeps the DPD integration limited to foundation plus geography. The built-in delivery service uses:
 
 - `service_key`: `dpd`
 - `carrier_key`: `dpd`
@@ -11,7 +11,7 @@ Version 0.54.0 adds only the DPD foundation. The built-in delivery service uses:
 
 DPD is not registered as a checkout runtime quote carrier and is not registered in `CarrierShipmentAdapterRegistry`. Enabling the service row alone does not produce checkout rates because there is no DPD carrier adapter in `CarrierRegistry`.
 
-Stage 1 intentionally does not implement DPD tariffs, pickup points, city FTP import, order creation, cancellation, tracing/statuses, labels, COD, `unitLoad`, fiscal receipts, or receipt storage.
+Stages 1-2 intentionally do not implement DPD tariffs, checkout rates, pickup points, city FTP import, order creation, cancellation, tracing/statuses, labels, COD, `unitLoad`, fiscal receipts, or receipt storage.
 
 ## DpdSoapClient Architecture
 
@@ -83,22 +83,25 @@ The stage 1 connection check is a dry diagnostic. It checks credentials complete
 
 ## CityId Strategy
 
-No static DPD city table and no FTP import are implemented in stage 1.
+No static DPD city table and no FTP import are implemented in stage 1 or stage 2.
 
-The existing WDC/FIAS/GAR settlement model already has `wdc_locations` and the foundation table `wdc_location_carrier_codes`. Future DPD `cityId` values should be stored as carrier mappings there:
+The existing WDC/FIAS/GAR settlement model already has `wdc_locations` and the foundation table `wdc_location_carrier_codes`. DPD `cityId` values are stored as carrier mappings there:
 
 - `carrier_key = dpd`
 - `external_code = <dpd_city_id>`
 - `location_id` / `gar_object_id` / `fias_id` linked to the WDC location
-- `meta` for DPD-specific matching evidence such as region, postcode range, abbreviation, and source
+- `meta` for DPD-specific matching evidence such as source, duplicate matching fields and resolver status
 
-Future `DpdCityResolver` strategy:
+Implemented `DpdCityResolver` strategy:
 
 - primary source: already saved `dpd_city_id` linked to the WDC/FIAS/GAR settlement;
-- fallback source: DPD API calculation/geography response;
-- handle `too-many-rows` by matching FIAS/GAR guid, `countryCode`, `regionCode`, `indexMin`/`indexMax`, city name, abbreviation, and city code/KLADR where available;
-- after a confident match, persist the mapping so later calculations do not repeat ambiguous lookup;
+- if mapping is missing, return a manual-mapping-required diagnostic and do not call live DPD SOAP;
+- `getCitiesCashPay` and `getPossibleExtraService` remain optional low-level wrappers only. They are not used by `DpdCityResolver` automatically because live DPD test/production checks returned `java.lang.NullPointerException` for sparse city lookup attempts;
+- future imported/API candidate matching should use `DpdDuplicateCityResolver`, matching FIAS/GAR guid, `countryCode`, `regionCode`, `indexMin`/`indexMax`, postal code, city name, and city code/KLADR where available;
+- after a future verified match/import, persist the mapping so later calculations do not repeat ambiguous lookup;
 - use FTP files `GeographyDPD_YYYYMMDD` and `GeographyNewDPD_YYYYMMDD` only as optional future import data, not as a runtime dependency.
+
+Stage 2 also adds admin-only geography diagnostics/manual mapping in the DPD settings tab. The current diagnostic checks only whether a cityId mapping exists and does not run a live SOAP call. No mass enrichment is started automatically.
 
 If FTP import becomes necessary, it must be a separate task with manual run or WP-Cron no more often than once every 6 months, no hardcoded FTP credentials, audit/logging, and safe rollback.
 
@@ -133,4 +136,3 @@ Fiscal receipts and DPD receipt storage are not implemented.
 - `unitLoad`;
 - fiscal receipts / receipt storage;
 - DPD shipment adapter registration.
-

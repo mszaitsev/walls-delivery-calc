@@ -1,8 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.54.0.
+Current plugin version: 0.55.0.
 
-Version 0.54.0 adds the DPD foundation only. The built-in `dpd` delivery service is created disabled by default, DPD credentials use encrypted settings with redacted dry diagnostics, and the new `DpdSoapClientInterface` keeps DPD transport replaceable. Runtime DPD tariffs, pickup points, orders, statuses, labels, COD, `unitLoad` and receipts are intentionally not implemented yet.
+Version 0.55.0 adds the DPD geography layer only. `DpdCityResolver` resolves and stores DPD `cityId` mappings in `wdc_location_carrier_codes`, `DpdDuplicateCityResolver` handles duplicate geography responses, and DPD geography diagnostics/manual mapping are available from the DPD service settings. Runtime DPD tariffs, checkout rates, pickup points, orders, statuses, labels, COD, `unitLoad` and FTP import remain intentionally not implemented.
 
 Version 0.49.0 improves the shipment preparation modal package UI and CDEK sender pickup settings. CDEK now stores an optional sender pickup address, the modal can temporarily replace the sender pickup point for the current shipment draft, package summaries show package weight plus assigned item totals, split rows rebalance quantities with delete actions, and managers can add manual package items with WooCommerce product search by SKU/name.
 

@@ -30,6 +30,26 @@ final class DpdApiClient {
 	}
 
 	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function getCitiesCashPay( array $payload = array() ): array {
+		return $this->normalize_response(
+			$this->call( DpdEndpoints::SERVICE_GEOGRAPHY, 'getCitiesCashPay', $payload )
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function getPossibleExtraService( array $payload = array() ): array {
+		return $this->normalize_response(
+			$this->call( DpdEndpoints::SERVICE_GEOGRAPHY, 'getPossibleExtraService', $payload )
+		);
+	}
+
+	/**
 	 * @return array{success:bool,message:string,details:array<string,mixed>}
 	 */
 	public function checkConnectionDryRun(): array {
@@ -54,5 +74,33 @@ final class DpdApiClient {
 			),
 		);
 	}
-}
 
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function normalize_response( DpdSoapResponse $response ): array {
+		$body = $this->value_to_array( $response->body );
+
+		return array(
+			'success' => $response->success,
+			'body' => is_array( $body ) ? $body : array(),
+			'meta' => $response->meta,
+		);
+	}
+
+	/**
+	 * @return mixed
+	 */
+	private function value_to_array( mixed $value ): mixed {
+		if ( is_object( $value ) ) {
+			$value = get_object_vars( $value );
+		}
+		if ( is_array( $value ) ) {
+			foreach ( $value as $key => $item ) {
+				$value[ $key ] = $this->value_to_array( $item );
+			}
+		}
+
+		return $value;
+	}
+}
