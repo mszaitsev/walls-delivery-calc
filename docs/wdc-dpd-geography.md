@@ -1,6 +1,6 @@
 # WDC DPD Geography
 
-Version: 0.56.6.
+Version: 0.56.7.
 
 ## Scope
 
@@ -52,7 +52,7 @@ The DPD География tab supports two admin-only import paths:
 
 The importer reads `;`-delimited CSV row by row, supports UTF-8 and Windows-1251 including Windows-1251 files without BOM, detects the header row when present, and maps the documented first columns: DPD city ID, country code, region, district, main city, settlement, settlement type, postal code, FIAS and KLADR. Only `Код страны = RU` rows are imported. Postal codes, services/options, terminal data, schedules, raw rows and per-row diagnostics are not stored.
 
-Parser reads are bounded with a safe maximum CSV row length (`262144` bytes) for every `fgetcsv()` call. This avoids unbounded buffer allocation on Windows/Local PHP. Rows exceeding the safe length are treated as broken input and reported as controlled parser diagnostics instead of causing memory exhaustion.
+Parser reads are bounded with a safe maximum CSV row length (`262144` bytes). WDC reads each physical line with `fgets()` and parses it with `str_getcsv()` instead of calling `fgetcsv()` directly, avoiding Windows/Local PHP false positives around bounded reads. A row is considered too long only when it does not end with `\n` or `\r` before the safe limit and the file is not at EOF. Rows exceeding the safe length are treated as broken input and reported as controlled parser diagnostics instead of causing memory exhaustion.
 
 As of 0.56.5, imports are stateful staging jobs rather than one synchronous PHP request:
 

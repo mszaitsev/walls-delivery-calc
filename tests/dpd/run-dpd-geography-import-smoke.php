@@ -277,6 +277,7 @@ if ( ! extension_loaded( 'ssh2' ) || ! function_exists( 'ssh2_connect' ) ) {
 	dpd_import_assert( 'warning' === (string) ( $ftp_warning['status'] ?? '' ), 'missing ssh2 returns FTP warning instead of failed import' );
 	dpd_import_assert( str_contains( strtolower( (string) ( $ftp_warning['last_message'] ?? '' ) ), 'manual csv upload' ), 'missing ssh2 warning points to manual CSV upload' );
 	dpd_import_assert( $phase_before_ftp_warning === (string) $state->current()['phase'], 'missing ssh2 does not change current import state phase' );
+	dpd_import_assert( array() === (array) ( $state->current()['errors'] ?? array() ), 'missing ssh2 warning does not pollute import errors' );
 }
 
 $cli_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-cli-' );

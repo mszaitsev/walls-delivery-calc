@@ -129,14 +129,15 @@ final class DpdGeographyCsvParser {
 	 * @return array<int,string|null>|false
 	 */
 	private function read_csv_row( $file ): array|false {
-		$before = (int) ftell( $file );
-		$row = fgetcsv( $file, self::MAX_CSV_ROW_LENGTH, ';', '"', '\\' );
-		$after = (int) ftell( $file );
-		if ( false !== $row && $after - $before >= self::MAX_CSV_ROW_LENGTH && ! feof( $file ) ) {
+		$line = fgets( $file, self::MAX_CSV_ROW_LENGTH );
+		if ( false === $line ) {
+			return false;
+		}
+		if ( ! str_ends_with( $line, "\n" ) && ! str_ends_with( $line, "\r" ) && ! feof( $file ) ) {
 			throw new \RuntimeException( 'DPD Geography CSV row exceeds the safe length limit. Check file encoding and row length.' );
 		}
 
-		return $row;
+		return str_getcsv( $line, ';', '"', '\\' );
 	}
 
 	/**
