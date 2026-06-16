@@ -15,6 +15,8 @@ final class DpdSettings {
 	public const ENV_TEST = 'test';
 	public const ENV_PRODUCTION = 'production';
 	public const DEFAULT_REQUEST_TIMEOUT = 20;
+	public const DEFAULT_PICKUP_METHOD_TITLE = 'DPD до пункта выдачи';
+	public const DEFAULT_COURIER_METHOD_TITLE = 'DPD курьером';
 
 	public const ENVIRONMENT_KEY = 'dpd_environment';
 	public const TEST_CLIENT_NUMBER_KEY = 'dpd_test_client_number';
@@ -41,6 +43,10 @@ final class DpdSettings {
 	public const TARIFF_DEFAULT_WIDTH_CM_KEY = 'dpd_tariff_default_width_cm';
 	public const TARIFF_DEFAULT_HEIGHT_CM_KEY = 'dpd_tariff_default_height_cm';
 	public const TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY = 'dpd_tariff_default_declared_value_rub';
+	public const RUNTIME_PICKUP_TITLE_KEY = 'dpd_runtime_pickup_title';
+	public const RUNTIME_COURIER_TITLE_KEY = 'dpd_runtime_courier_title';
+	public const RUNTIME_ENABLED_SERVICE_CODES_KEY = 'dpd_runtime_enabled_service_codes';
+	public const RUNTIME_TARIFF_TITLES_KEY = 'dpd_runtime_tariff_titles';
 	public const RUNTIME_ALLOWED_SERVICE_CODES_KEY = 'dpd_runtime_allowed_service_codes';
 	public const RUNTIME_METHOD_TITLE_PREFIX_KEY = 'dpd_runtime_method_title_prefix';
 	public const RUNTIME_PICKUP_MODE_KEY = 'dpd_runtime_pickup_mode';
@@ -83,11 +89,37 @@ final class DpdSettings {
 			self::TARIFF_DEFAULT_WIDTH_CM_KEY => 20,
 			self::TARIFF_DEFAULT_HEIGHT_CM_KEY => 20,
 			self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY => 1000,
-			self::RUNTIME_ALLOWED_SERVICE_CODES_KEY => 'MAX,NDY',
+			self::RUNTIME_PICKUP_TITLE_KEY => self::DEFAULT_PICKUP_METHOD_TITLE,
+			self::RUNTIME_COURIER_TITLE_KEY => self::DEFAULT_COURIER_METHOD_TITLE,
+			self::RUNTIME_ENABLED_SERVICE_CODES_KEY => 'ECN,CSM,MXO',
+			self::RUNTIME_TARIFF_TITLES_KEY => array(),
+			self::RUNTIME_ALLOWED_SERVICE_CODES_KEY => '',
 			self::RUNTIME_METHOD_TITLE_PREFIX_KEY => 'DPD',
 			self::RUNTIME_PICKUP_MODE_KEY => 'door',
 			self::RUNTIME_DELIVERY_MODE_KEY => 'door',
 			self::LAST_TARIFF_ACTION_RESULT_KEY => array(),
+		);
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	public static function known_service_codes(): array {
+		return array(
+			'MAX' => 'DPD Максимум',
+			'NDY' => 'DPD Экспресс',
+			'IND' => 'DPD Экспресс-13',
+			'PCL' => 'DPD Оптимум',
+			'CUR' => 'DPD Classic',
+			'MXO' => 'DPD Стандарт',
+			'ECN' => 'DPD Эконом',
+			'ECU' => 'DPD Эконом ЕАЭС',
+			'BZP' => 'DPD 18:00',
+			'CSM' => 'DPD Онлайн-экспресс',
+			'PUP' => 'DPD Коробка',
+			'PKT' => 'DPD Пакет',
+			'DPI' => 'DPD Импорт Классик',
+			'DPE' => 'DPD Экспорт Классик',
 		);
 	}
 
@@ -293,12 +325,43 @@ final class DpdSettings {
 		$this->settings->set( self::TARIFF_DEFAULT_WIDTH_CM_KEY, max( 0.1, (float) ( $input[ self::TARIFF_DEFAULT_WIDTH_CM_KEY ] ?? 20 ) ) );
 		$this->settings->set( self::TARIFF_DEFAULT_HEIGHT_CM_KEY, max( 0.1, (float) ( $input[ self::TARIFF_DEFAULT_HEIGHT_CM_KEY ] ?? 20 ) ) );
 		$this->settings->set( self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY, max( 0.0, (float) ( $input[ self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY ] ?? 1000 ) ) );
-		$this->settings->set( self::RUNTIME_ALLOWED_SERVICE_CODES_KEY, $this->sanitize_service_codes( (string) ( $input[ self::RUNTIME_ALLOWED_SERVICE_CODES_KEY ] ?? 'MAX,NDY' ) ) );
-		$prefix = $this->sanitize_text( (string) ( $input[ self::RUNTIME_METHOD_TITLE_PREFIX_KEY ] ?? 'DPD' ) );
-		$this->settings->set( self::RUNTIME_METHOD_TITLE_PREFIX_KEY, '' !== $prefix ? $prefix : 'DPD' );
+	}
+
+	/**
+	 * @param array<string,mixed> $input
+	 */
+	public function save_runtime_titles_from_admin( array $input ): void {
+		$pickup = $this->sanitize_text( (string) ( $input[ self::RUNTIME_PICKUP_TITLE_KEY ] ?? self::DEFAULT_PICKUP_METHOD_TITLE ) );
+		$courier = $this->sanitize_text( (string) ( $input[ self::RUNTIME_COURIER_TITLE_KEY ] ?? self::DEFAULT_COURIER_METHOD_TITLE ) );
+		$this->settings->set( self::RUNTIME_PICKUP_TITLE_KEY, '' !== $pickup ? $pickup : self::DEFAULT_PICKUP_METHOD_TITLE );
+		$this->settings->set( self::RUNTIME_COURIER_TITLE_KEY, '' !== $courier ? $courier : self::DEFAULT_COURIER_METHOD_TITLE );
+	}
+
+	/**
+	 * @param array<string,mixed> $input
+	 */
+	public function save_runtime_tariffs_from_admin( array $input ): void {
+		$enabled_input = is_array( $input['dpd_runtime_service_enabled'] ?? null ) ? wp_unslash( $input['dpd_runtime_service_enabled'] ) : array();
+		$enabled = array();
+		foreach ( array_keys( self::known_service_codes() ) as $code ) {
+			if ( ! empty( $enabled_input[ $code ] ) ) {
+				$enabled[] = $code;
+			}
+		}
+		$this->settings->set( self::RUNTIME_ENABLED_SERVICE_CODES_KEY, implode( ',', $enabled ) );
+
+		$title_input = is_array( $input['dpd_runtime_tariff_title'] ?? null ) ? wp_unslash( $input['dpd_runtime_tariff_title'] ) : array();
+		$titles = array();
+		foreach ( self::known_service_codes() as $code => $default_title ) {
+			$title = $this->sanitize_text( (string) ( $title_input[ $code ] ?? $default_title ) );
+			$titles[ $code ] = '' !== $title ? $title : $default_title;
+		}
+		$this->settings->set( self::RUNTIME_TARIFF_TITLES_KEY, $titles );
+
 		$pickup_mode = sanitize_key( wp_unslash( $input[ self::RUNTIME_PICKUP_MODE_KEY ] ?? 'door' ) );
+		$delivery_mode = sanitize_key( wp_unslash( $input[ self::RUNTIME_DELIVERY_MODE_KEY ] ?? 'door' ) );
 		$this->settings->set( self::RUNTIME_PICKUP_MODE_KEY, in_array( $pickup_mode, array( 'door', 'terminal' ), true ) ? $pickup_mode : 'door' );
-		$this->settings->set( self::RUNTIME_DELIVERY_MODE_KEY, 'door' );
+		$this->settings->set( self::RUNTIME_DELIVERY_MODE_KEY, in_array( $delivery_mode, array( 'door', 'terminal' ), true ) ? $delivery_mode : 'door' );
 	}
 
 	public function tariff_sender_location_id(): int {
@@ -336,8 +399,8 @@ final class DpdSettings {
 	/**
 	 * @return array<int,string>
 	 */
-	public function runtime_allowed_service_codes(): array {
-		$codes = $this->sanitize_service_codes( $this->settings->get_string( self::RUNTIME_ALLOWED_SERVICE_CODES_KEY, 'MAX,NDY' ) );
+	public function runtime_enabled_service_codes(): array {
+		$codes = $this->sanitize_service_codes( $this->settings->get_string( self::RUNTIME_ENABLED_SERVICE_CODES_KEY, 'ECN,CSM,MXO' ) );
 		if ( '' === $codes ) {
 			return array();
 		}
@@ -345,14 +408,56 @@ final class DpdSettings {
 		return array_values( array_filter( array_map( 'trim', explode( ',', $codes ) ), static fn( string $code ): bool => '' !== $code ) );
 	}
 
-	public function runtime_allowed_service_codes_raw(): string {
-		return $this->sanitize_service_codes( $this->settings->get_string( self::RUNTIME_ALLOWED_SERVICE_CODES_KEY, 'MAX,NDY' ) );
+	public function runtime_enabled_service_codes_raw(): string {
+		return $this->sanitize_service_codes( $this->settings->get_string( self::RUNTIME_ENABLED_SERVICE_CODES_KEY, 'ECN,CSM,MXO' ) );
 	}
 
-	public function runtime_method_title_prefix(): string {
-		$prefix = trim( $this->settings->get_string( self::RUNTIME_METHOD_TITLE_PREFIX_KEY, 'DPD' ) );
+	public function runtime_allowed_service_codes(): array {
+		return $this->runtime_enabled_service_codes();
+	}
 
-		return '' !== $prefix ? $prefix : 'DPD';
+	public function runtime_allowed_service_codes_raw(): string {
+		return $this->runtime_enabled_service_codes_raw();
+	}
+
+	public function runtime_pickup_title(): string {
+		$title = trim( $this->settings->get_string( self::RUNTIME_PICKUP_TITLE_KEY, self::DEFAULT_PICKUP_METHOD_TITLE ) );
+
+		return '' !== $title ? $title : self::DEFAULT_PICKUP_METHOD_TITLE;
+	}
+
+	public function runtime_courier_title(): string {
+		$title = trim( $this->settings->get_string( self::RUNTIME_COURIER_TITLE_KEY, self::DEFAULT_COURIER_METHOD_TITLE ) );
+
+		return '' !== $title ? $title : self::DEFAULT_COURIER_METHOD_TITLE;
+	}
+
+	/**
+	 * @return array<string,string>
+	 */
+	public function runtime_tariff_titles(): array {
+		$saved = $this->settings->get_array( self::RUNTIME_TARIFF_TITLES_KEY, array() );
+		$titles = self::known_service_codes();
+		foreach ( $saved as $code => $title ) {
+			$code = strtoupper( trim( (string) $code ) );
+			if ( '' === $code ) {
+				continue;
+			}
+			$title = trim( (string) $title );
+			if ( '' !== $title ) {
+				$titles[ $code ] = $title;
+			}
+		}
+
+		return $titles;
+	}
+
+	public function runtime_tariff_title( string $code, string $fallback = '' ): string {
+		$code = strtoupper( trim( $code ) );
+		$titles = $this->runtime_tariff_titles();
+		$title = trim( (string) ( $titles[ $code ] ?? '' ) );
+
+		return '' !== $title ? $title : trim( $fallback );
 	}
 
 	public function runtime_pickup_mode(): string {
@@ -362,7 +467,9 @@ final class DpdSettings {
 	}
 
 	public function runtime_delivery_mode(): string {
-		return 'door';
+		$mode = $this->settings->get_string( self::RUNTIME_DELIVERY_MODE_KEY, 'door' );
+
+		return 'terminal' === $mode ? 'terminal' : 'door';
 	}
 
 	/**

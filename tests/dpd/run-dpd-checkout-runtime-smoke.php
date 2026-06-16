@@ -282,11 +282,23 @@ $settings->save_tariff_settings_from_admin(
 		DpdSettings::TARIFF_DEFAULT_WIDTH_CM_KEY => 20,
 		DpdSettings::TARIFF_DEFAULT_HEIGHT_CM_KEY => 20,
 		DpdSettings::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY => 1000,
-		DpdSettings::RUNTIME_ALLOWED_SERVICE_CODES_KEY => '',
-		DpdSettings::RUNTIME_METHOD_TITLE_PREFIX_KEY => 'DPD',
-		DpdSettings::RUNTIME_PICKUP_MODE_KEY => 'door',
 	)
 );
+$settings->save_runtime_titles_from_admin(
+	array(
+		DpdSettings::RUNTIME_PICKUP_TITLE_KEY => DpdSettings::DEFAULT_PICKUP_METHOD_TITLE,
+		DpdSettings::RUNTIME_COURIER_TITLE_KEY => DpdSettings::DEFAULT_COURIER_METHOD_TITLE,
+	)
+);
+$settings->save_runtime_tariffs_from_admin(
+	array(
+		'dpd_runtime_service_enabled' => array( 'MAX' => '1', 'NDY' => '1' ),
+		'dpd_runtime_tariff_title' => array( 'MAX' => 'DPD Максимум', 'NDY' => 'DPD Экспресс' ),
+		DpdSettings::RUNTIME_PICKUP_MODE_KEY => 'door',
+		DpdSettings::RUNTIME_DELIVERY_MODE_KEY => 'door',
+	)
+);
+( new SettingsRepository() )->set( DpdSettings::RUNTIME_METHOD_TITLE_PREFIX_KEY, 'OLDPREFIX' );
 $carrier = dpd_checkout_build_carrier( $soap, $settings );
 $missing_city = $carrier->quote( dpd_checkout_request( 300 ) );
 dpd_checkout_assert( array() === $missing_city->rates, 'DPD checkout carrier must return no rates without receiver dpd_city_id.' );
@@ -294,21 +306,51 @@ dpd_checkout_assert( array() === $missing_city->rates, 'DPD checkout carrier mus
 $quote = $carrier->quote( dpd_checkout_request() );
 dpd_checkout_assert( 2 === count( $quote->rates ), 'DPD checkout carrier must map MAX and NDY and skip missing-cost options.' );
 dpd_checkout_assert( 'MAX' === $quote->rates[0]->tariff_key && 'NDY' === $quote->rates[1]->tariff_key, 'DPD checkout rates must preserve returned service codes.' );
-dpd_checkout_assert( 'DPD Максимум' === $quote->rates[0]->title && 'DPD Экспресс' === $quote->rates[1]->title, 'DPD checkout method titles must use configured prefix and serviceName.' );
+dpd_checkout_assert( ! empty( $quote->rates[0]->meta['tariff_selector_group'] ) && ( $quote->rates[0]->meta['checkout_group_id'] ?? '' ) === ( $quote->rates[1]->meta['checkout_group_id'] ?? '' ), 'DPD checkout tariff options must be marked for grouped tariff selector output.' );
+dpd_checkout_assert( 'DPD курьером, DPD Максимум - 1-2 дня' === $quote->rates[0]->title && 'DPD курьером, DPD Экспресс - 2-3 дня' === $quote->rates[1]->title, 'DPD checkout titles must use method title, tariff title and delivery days without old prefix.' );
 dpd_checkout_assert( DeliveryType::COURIER === $quote->rates[0]->delivery_type && $quote->rates[0]->requires_courier_address && ! $quote->rates[0]->requires_pickup_point, 'DPD checkout runtime must be courier delivery-to-door only.' );
 dpd_checkout_assert( isset( $soap->calls[0]['soap_payload']['request']['auth'] ), 'DPD checkout runtime must call calculator2 with request.auth SOAP wrapper.' );
 dpd_checkout_assert( 1.5 === $soap->calls[0]['payload']['parcel'][0]['weight'] && 2500.0 === $soap->calls[0]['payload']['declaredValue'], 'DPD checkout payload must use cart weight and declared value.' );
+$base_quote_id = $quote->quote_id;
+dpd_checkout_assert( $base_quote_id !== $carrier->quote( dpd_checkout_request( 200, 2200 ) )->quote_id, 'DPD quote_id must change when weight changes.' );
+dpd_checkout_assert( $base_quote_id !== $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Москва', postcode: '101000' ), new Package( array(), Money::from_rubles( 2600 ), Money::from_rubles( 2600 ), 1500, 0, 1500, 40, 20, 10, null, 'cart' ), '', Money::from_rubles( 2600 ), '2026-06-17', array( 'selected_location_id' => '200' ) ) )->quote_id, 'DPD quote_id must change when dimensions or declared value change.' );
 
-$settings->save_tariff_settings_from_admin(
+$settings->save_runtime_tariffs_from_admin(
 	array(
-		DpdSettings::TARIFF_SENDER_LOCATION_ID_KEY => 100,
-		DpdSettings::RUNTIME_ALLOWED_SERVICE_CODES_KEY => 'MAX',
-		DpdSettings::RUNTIME_METHOD_TITLE_PREFIX_KEY => 'DPD',
+		'dpd_runtime_service_enabled' => array( 'MAX' => '1' ),
+		'dpd_runtime_tariff_title' => array( 'MAX' => 'DPD Максимум', 'NDY' => 'DPD Экспресс' ),
 		DpdSettings::RUNTIME_PICKUP_MODE_KEY => 'door',
+		DpdSettings::RUNTIME_DELIVERY_MODE_KEY => 'door',
 	)
 );
 $filtered = $carrier->quote( dpd_checkout_request() );
-dpd_checkout_assert( 1 === count( $filtered->rates ) && 'MAX' === $filtered->rates[0]->tariff_key, 'DPD allowed_service_codes must filter NDY when only MAX is allowed.' );
+dpd_checkout_assert( 1 === count( $filtered->rates ) && 'MAX' === $filtered->rates[0]->tariff_key, 'DPD enabled service codes must filter NDY when only MAX is checked.' );
+dpd_checkout_assert( $base_quote_id !== $filtered->quote_id, 'DPD quote_id must change when enabled service codes change.' );
+
+$settings->save_runtime_tariffs_from_admin(
+	array(
+		'dpd_runtime_service_enabled' => array(),
+		'dpd_runtime_tariff_title' => array( 'MAX' => 'DPD Максимум', 'NDY' => 'DPD Экспресс' ),
+		DpdSettings::RUNTIME_PICKUP_MODE_KEY => 'door',
+		DpdSettings::RUNTIME_DELIVERY_MODE_KEY => 'door',
+	)
+);
+$none_enabled = $carrier->quote( dpd_checkout_request() );
+dpd_checkout_assert( array() === $none_enabled->rates, 'DPD checkout carrier must return no rates when all DPD service code checkboxes are off.' );
+
+$settings->save_runtime_tariffs_from_admin(
+	array(
+		'dpd_runtime_service_enabled' => array( 'MAX' => '1', 'NDY' => '1' ),
+		'dpd_runtime_tariff_title' => array( 'MAX' => 'DPD Максимум', 'NDY' => 'DPD Экспресс' ),
+		DpdSettings::RUNTIME_PICKUP_MODE_KEY => 'terminal',
+		DpdSettings::RUNTIME_DELIVERY_MODE_KEY => 'terminal',
+	)
+);
+$terminal = $carrier->quote( dpd_checkout_request() );
+$terminal_call = $soap->calls[ count( $soap->calls ) - 1 ] ?? array();
+dpd_checkout_assert( true === ( $terminal_call['payload']['selfPickup'] ?? null ) && true === ( $terminal_call['payload']['selfDelivery'] ?? null ), 'DPD terminal modes must set selfPickup=true and selfDelivery=true in tariff payload.' );
+dpd_checkout_assert( DeliveryType::PICKUP === $terminal->rates[0]->delivery_type && ! $terminal->rates[0]->requires_pickup_point && ! empty( $terminal->rates[0]->meta['dpd_pickup_points_not_implemented'] ), 'DPD terminal delivery must be represented as calculation-only pickup without requiring pickup point selection.' );
+dpd_checkout_assert( $base_quote_id !== $terminal->quote_id, 'DPD quote_id must change when pickup/delivery modes change.' );
 
 $services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
 $countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );
@@ -324,18 +366,18 @@ dpd_checkout_assert( $calls_before_disabled === count( $soap->calls ), 'Disabled
 dpd_checkout_assert( array() === array_values( array_filter( $disabled_result->rates, static fn( $rate ): bool => DpdSettings::CARRIER_KEY === $rate->carrier_key ) ), 'Disabled DPD delivery service must not expose DPD rates.' );
 
 $services->update_service( (int) $dpd_service->id, array( 'enabled' => 1, 'minimum_price_rub' => 150, 'round_up_to_ruble' => 1 ) );
-$settings->save_tariff_settings_from_admin(
+$settings->save_runtime_tariffs_from_admin(
 	array(
-		DpdSettings::TARIFF_SENDER_LOCATION_ID_KEY => 100,
-		DpdSettings::RUNTIME_ALLOWED_SERVICE_CODES_KEY => 'MAX,NDY',
-		DpdSettings::RUNTIME_METHOD_TITLE_PREFIX_KEY => 'DPD',
+		'dpd_runtime_service_enabled' => array( 'MAX' => '1', 'NDY' => '1' ),
+		'dpd_runtime_tariff_title' => array( 'MAX' => 'DPD Максимум', 'NDY' => 'DPD Экспресс' ),
 		DpdSettings::RUNTIME_PICKUP_MODE_KEY => 'door',
+		DpdSettings::RUNTIME_DELIVERY_MODE_KEY => 'door',
 	)
 );
 $enabled_result = $orchestrator->calculate( dpd_checkout_request(), array(), RateSorter::CHEAPEST, false );
 $dpd_rates = array_values( array_filter( $enabled_result->rates, static fn( $rate ): bool => DpdSettings::CARRIER_KEY === $rate->carrier_key ) );
 dpd_checkout_assert( 2 === count( $dpd_rates ), 'Enabled DPD delivery service must expose DPD checkout rates.' );
-dpd_checkout_assert( 'DPD Максимум' === $dpd_rates[0]->title && 150.0 === $dpd_rates[0]->price->get_rubles(), 'DPD checkout rates must preserve method title and use common minimum price post-processing.' );
+dpd_checkout_assert( ! empty( $dpd_rates[0]->meta['tariff_selector_group'] ) && 'DPD Максимум' === (string) ( $dpd_rates[0]->meta['selected_tariff_title'] ?? '' ) && 150.0 === $dpd_rates[0]->price->get_rubles(), 'DPD checkout rates must use grouped tariff meta and common minimum price post-processing before WooCommerce selector grouping.' );
 dpd_checkout_assert( ! ( new CarrierShipmentAdapterRegistry() )->has( DpdSettings::CARRIER_KEY ), 'DPD must not be registered in CarrierShipmentAdapterRegistry.' );
 
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );

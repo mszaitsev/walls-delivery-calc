@@ -2,7 +2,7 @@
 
 ## Scope
 
-Version 0.58.0 keeps the DPD integration limited to foundation, geography, tariff calculation and checkout quote rates. The built-in delivery service uses:
+Version 0.58.1 keeps the DPD integration limited to foundation, geography, tariff calculation and checkout quote rates. The built-in delivery service uses:
 
 - `service_key`: `dpd`
 - `carrier_key`: `dpd`
@@ -74,13 +74,15 @@ The `DPD Расчет` tab is admin-only. It stores sender/default parcel settin
 
 ## Checkout Runtime Rates
 
-As of 0.58.0, `DpdQuoteCarrier` is registered in `CarrierRegistry` and returns only courier `DeliveryType::COURIER` rates. The checkout runtime does not use DPD pickup points or maps. It passes `selfDelivery=false` and defaults `selfPickup=false` for door-to-door; `dpd_runtime_pickup_mode=terminal` can switch only the sender side to terminal pickup.
+As of 0.58.1, `DpdQuoteCarrier` is registered in `CarrierRegistry` and returns DPD tariff candidates that are grouped by the shared checkout tariff selector. DPD no longer exposes each returned `serviceCode` as a separate checkout shipping method. Courier delivery is grouped under `DPD курьером`; terminal delivery calculation is grouped under `DPD до пункта выдачи`.
 
-Runtime availability requires the DPD delivery service row to be enabled, RU country availability, complete active-environment credentials, configured sender `cityId`, selected checkout `location_id`, saved receiver `dpd_city_id`, and a successful DPD tariff response. API and mapping errors are logged and produce no DPD checkout rates instead of breaking checkout.
+Runtime availability requires the DPD delivery service row to be enabled, RU country availability, complete active-environment credentials, configured sender `cityId`, selected checkout `location_id`, saved receiver `dpd_city_id`, at least one enabled DPD service code, and a successful DPD tariff response. API and mapping errors are logged and produce no DPD checkout rates instead of breaking checkout.
 
-Checkout package params are built from the domain package: total weight from cart/package when present, DPD default weight as fallback, DPD default dimensions for the first runtime stage, and declared value from package/order total with DPD default declared value as fallback. Basket composition, COD/NPP and `unitLoad` are not sent.
+Checkout package params are built from the domain package: total weight from cart/package when present, DPD default weight as fallback, dimensions from package/defaults, and declared value from package/order total with DPD default declared value as fallback. Basket composition, COD/NPP and `unitLoad` are not sent.
 
-`dpd_runtime_allowed_service_codes` defaults to `MAX,NDY`. Empty value allows every returned DPD service option. Options without numeric `cost` are skipped. Method titles use `dpd_runtime_method_title_prefix` and DPD `service_name`, for example `DPD Максимум` and `DPD Экспресс`.
+The DPD `Основное` tab stores checkout method titles. The DPD `Тарифы` tab stores fixed known service-code checkboxes, custom tariff titles, sender pickup mode and receiver delivery mode. Default enabled codes are `ECN,CSM,MXO`; if all checkboxes are cleared, DPD returns no checkout rates. The old method-title prefix setting is not rendered and is not used by runtime.
+
+`runtime_pickup_mode=terminal` sends `selfPickup=true`. `runtime_delivery_mode=terminal` sends `selfDelivery=true` and returns a pickup-type calculation rate with `dpd_pickup_points_not_implemented=true`, but does not require pickup point selection until DPD parcel shops and map are implemented.
 
 ## Credentials And Diagnostics
 

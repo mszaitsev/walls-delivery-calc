@@ -105,14 +105,9 @@ As of 0.56.3, DPD geography lives in a separate `DPD География` tab. Th
 
 As of 0.57.0, DPD also has a `DPD Расчет` tab. It stores sender/default parcel settings and provides an admin-only `getServiceCostByParcels3` test calculator. Results are visible once after redirect with normalized service code/name/cost/period fields and optional raw debug output. The calculator does not write delivery rate tables and does not add shipment actions.
 
-As of 0.58.0, the same tab stores DPD checkout runtime settings:
+As of 0.58.1, DPD checkout titles and runtime tariffs follow the same grouped model as CDEK/Russian Post. The DPD `Основное` tab stores `dpd_runtime_pickup_title` and `dpd_runtime_courier_title` with defaults `DPD до пункта выдачи` and `DPD курьером`. The DPD `Тарифы` tab stores known DPD service-code checkboxes, custom checkout tariff titles, `runtime_pickup_mode` and `runtime_delivery_mode`. Default enabled service codes are `ECN,CSM,MXO`; if all checkboxes are off, DPD rates are not shown.
 
-- `allowed_service_codes`: `MAX,NDY` by default; empty means all returned DPD services with numeric cost.
-- `method_title_prefix`: `DPD` by default; checkout labels use the prefix plus DPD service name/code, for example `DPD Максимум` and `DPD Экспресс`.
-- `runtime_pickup_mode`: `door` by default; `terminal` is reserved for sender-side terminal pickup without implementing customer pickup selection.
-- `runtime_delivery_mode`: fixed to `door` for the first checkout runtime stage.
-
-DPD checkout rates reuse `calculator2/getServiceCostByParcels3`, receiver `dpd_city_id` from `wdc_location_delivery_codes` through `DpdCityResolver`, sender city ID from tariff settings/override, aggregate package weight/dimensions/declared value, and the common delivery-service post-processing for rounding, minimum price and rules. DPD pickup points, maps, postamats, order creation, statuses, labels, COD/НПП, `unitLoad` and fiscal receipts are not implemented.
+DPD checkout rates reuse `calculator2/getServiceCostByParcels3`, receiver `dpd_city_id` from `wdc_location_delivery_codes` through `DpdCityResolver`, sender city ID from tariff settings/override, aggregate package weight/dimensions/declared value, and the common delivery-service post-processing for rounding, minimum price and rules. Returned DPD service options are grouped into one checkout method per delivery type with `tariff_variants`. Terminal delivery is calculation-only until DPD pickup point selection is implemented. DPD pickup points, maps, postamats, order creation, statuses, labels, COD/НПП, `unitLoad` and fiscal receipts are not implemented.
 
 ## Admin
 
