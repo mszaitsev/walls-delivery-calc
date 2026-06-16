@@ -2,7 +2,7 @@
 
 ## Scope
 
-Version 0.57.0 keeps the DPD integration limited to foundation, geography and admin-only tariff diagnostics. The built-in delivery service uses:
+Version 0.57.1 keeps the DPD integration limited to foundation, geography and admin-only tariff diagnostics. The built-in delivery service uses:
 
 - `service_key`: `dpd`
 - `carrier_key`: `dpd`
@@ -68,9 +68,9 @@ The stage 1 smoke test verifies test/production URL selection only. Runtime meth
 
 ## Admin Tariff Calculation
 
-As of 0.57.0, `DpdApiClient::getServiceCostByParcels3()` calls `getServiceCostByParcels3` on `calculator2` through the same `DpdApiClient::call()` path as other low-level DPD wrappers. `DpdSoapRequest` adds `auth`; the tariff builder never inserts credentials.
+As of 0.57.1, `DpdApiClient::getServiceCostByParcels3()` calls `getServiceCostByParcels3` on `calculator2` through the same `DpdApiClient::call()` path as other low-level DPD wrappers, but passes the explicit `request` wrapper strategy required by the calculator SOAP shape. `DpdSoapRequest` adds credentials under `request.auth.clientNumber` and `request.auth.clientKey`; the tariff builder never inserts credentials. Geography methods keep the direct root-level auth shape.
 
-The `DPD Расчет` tab is admin-only. It stores sender/default parcel settings in `DpdSettings`, resolves sender `cityId` from explicit `dpd_tariff_sender_dpd_city_id` first and then from `dpd_tariff_sender_location_id` via `DpdCityResolver`, resolves receiver `location_id` via `wdc_location_delivery_codes.dpd_city_id`, and displays a visible result after redirect. It does not create checkout rates, write tariff rows, create shipments, or mutate orders.
+The `DPD Расчет` tab is admin-only. It stores sender/default parcel settings in `DpdSettings`, resolves sender `cityId` from explicit `dpd_tariff_sender_dpd_city_id` first and then from `dpd_tariff_sender_location_id` via `DpdCityResolver`, resolves receiver `location_id` via `wdc_location_delivery_codes.dpd_city_id`, and displays a visible result after redirect. Tariff and geography action result notices are cleared after their blocks render once; the DPD geography last import report and current import progress remain persistent. The tariff debug block shows redacted payload shape metadata and must not expose `clientKey`. It does not create checkout rates, write tariff rows, create shipments, or mutate orders.
 
 ## Credentials And Diagnostics
 

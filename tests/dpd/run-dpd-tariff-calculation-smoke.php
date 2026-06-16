@@ -70,15 +70,18 @@ final class DpdTariffFakeSoapClient implements DpdSoapClientInterface {
 	}
 
 	public function call( string $service, string $method, array $payload, DpdCredentials $credentials, array $options = array() ): DpdSoapResponse {
+		$request = new DpdSoapRequest( $service, $method, $payload, $credentials, $options );
 		$this->calls[] = array(
 			'service' => $service,
 			'method' => $method,
 			'payload' => $payload,
+			'soap_payload' => $request->payload_with_auth(),
+			'debug_payload_shape' => $request->redacted_payload_shape(),
 			'credentials' => $credentials,
 			'options' => $options,
 		);
 
-		return new DpdSoapResponse( true, $this->next_body, array( 'fake' => true ) );
+		return new DpdSoapResponse( true, $this->next_body, array( 'fake' => true, 'wrapper' => $request->wrapper_mode(), 'debug_payload_shape' => $request->redacted_payload_shape() ) );
 	}
 
 	public function is_available(): bool {
@@ -86,10 +89,7 @@ final class DpdTariffFakeSoapClient implements DpdSoapClientInterface {
 	}
 }
 
-$GLOBALS['wdc_dpd_tariff_options'] = array(
-	DpdSettings::TEST_CLIENT_NUMBER_KEY => 'test-client-number',
-	DpdSettings::TEST_CLIENT_KEY_ENCRYPTED_KEY => ( new EncryptionService() )->encrypt( 'test-client-key' ),
-);
+$GLOBALS['wdc_dpd_tariff_options'] = array();
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->locations = array(
 	array( 'id' => 100, 'country_code' => 'RU', 'active' => 1, 'region_name' => 'Новосибирская область', 'place_name' => 'Новосибирск', 'place_type' => 'г', 'display_name' => 'Новосибирск' ),
@@ -101,6 +101,14 @@ $GLOBALS['wpdb']->delivery_codes = array(
 );
 
 $settings = new DpdSettings( new SettingsRepository(), new EncryptionService() );
+$settings->save_from_admin(
+	array(
+		DpdSettings::ENVIRONMENT_KEY => DpdSettings::ENV_TEST,
+		DpdSettings::TEST_CLIENT_NUMBER_KEY => 'test-client-number',
+		'dpd_test_client_key' => 'test-client-key',
+		DpdSettings::REQUEST_TIMEOUT_KEY => 20,
+	)
+);
 $settings->save_tariff_settings_from_admin(
 	array(
 		DpdSettings::TARIFF_SENDER_LOCATION_ID_KEY => 100,
@@ -122,6 +130,8 @@ $settings->save_tariff_action_result(
 );
 $stored_result = $settings->get_tariff_action_result();
 dpd_tariff_assert( 'DPD Расчет' === (string) $stored_result['title'] && '1' === (string) $stored_result['details']['raw_count'], 'DPD tariff action result must be saved for visible admin rendering.' );
+$settings->clear_tariff_action_result();
+dpd_tariff_assert( array() === $settings->get_tariff_action_result(), 'DPD tariff action result must support one-shot clearing after render.' );
 
 $builder = new DpdTariffRequestBuilder();
 $payload = $builder->build(
@@ -139,9 +149,14 @@ $payload = $builder->build(
 dpd_tariff_assert( ! isset( $payload['auth'] ), 'Builder must not duplicate auth; DpdSoapRequest adds it centrally.' );
 dpd_tariff_assert( '49455627' === $payload['pickup']['cityId'] && '49694102' === $payload['delivery']['cityId'], 'Builder must include pickup and delivery cityId.' );
 dpd_tariff_assert( 1.5 === $payload['parcel'][0]['weight'] && 30.0 === $payload['parcel'][0]['length'] && 2500.0 === $payload['declaredValue'], 'Builder must include parcel weight, dimensions and declared value.' );
-$soap_request = new DpdSoapRequest( DpdEndpoints::SERVICE_CALCULATOR, 'getServiceCostByParcels3', $payload, new DpdCredentials( 'client-number', 'client-key', DpdSettings::ENV_TEST ) );
-$payload_with_auth = $soap_request->payload_with_auth();
-dpd_tariff_assert( isset( $payload_with_auth['auth']['clientNumber'], $payload_with_auth['auth']['clientKey'] ), 'DpdSoapRequest must add auth centrally.' );
+$direct_request = new DpdSoapRequest( DpdEndpoints::SERVICE_CALCULATOR, 'getServiceCostByParcels3', $payload, new DpdCredentials( 'client-number', 'client-key', DpdSettings::ENV_TEST ) );
+$direct_payload_with_auth = $direct_request->payload_with_auth();
+dpd_tariff_assert( isset( $direct_payload_with_auth['auth']['clientNumber'], $direct_payload_with_auth['auth']['clientKey'] ) && ! isset( $direct_payload_with_auth['request'] ), 'DpdSoapRequest direct wrapper must add auth at the root.' );
+$calculator_request = new DpdSoapRequest( DpdEndpoints::SERVICE_CALCULATOR, 'getServiceCostByParcels3', $payload, new DpdCredentials( 'client-number', 'client-key', DpdSettings::ENV_TEST ), array( 'wrapper' => DpdSoapRequest::WRAPPER_REQUEST ) );
+$calculator_payload_with_auth = $calculator_request->payload_with_auth();
+$calculator_debug_shape = $calculator_request->redacted_payload_shape();
+dpd_tariff_assert( isset( $calculator_payload_with_auth['request']['auth']['clientNumber'], $calculator_payload_with_auth['request']['auth']['clientKey'] ) && ! isset( $calculator_payload_with_auth['auth'] ), 'DpdSoapRequest request wrapper must add auth below request for calculator2.' );
+dpd_tariff_assert( DpdSoapRequest::WRAPPER_REQUEST === $calculator_debug_shape['wrapper'] && 'yes' === $calculator_debug_shape['has_auth'] && ! str_contains( (string) wp_json_encode( $calculator_debug_shape ), 'client-key' ), 'Redacted payload shape must expose wrapper/auth presence without leaking clientKey.' );
 
 $normalizer = new DpdTariffOptionNormalizer();
 $single = $normalizer->normalize(
@@ -177,6 +192,15 @@ $missing_sender = $missing_sender_service->calculate( 200, array() );
 dpd_tariff_assert( false === $missing_sender->success && in_array( 'DPD sender cityId is not configured.', $missing_sender->errors, true ), 'Service must return a controlled error without sender cityId.' );
 $GLOBALS['wdc_dpd_tariff_options'] = $stored_options_before_missing_sender;
 
+$stored_options_before_missing_credentials = $GLOBALS['wdc_dpd_tariff_options'];
+$GLOBALS['wdc_dpd_tariff_options']['wdc_core_settings'][ DpdSettings::TEST_CLIENT_NUMBER_KEY ] = '';
+$GLOBALS['wdc_dpd_tariff_options']['wdc_core_settings'][ DpdSettings::TEST_CLIENT_KEY_ENCRYPTED_KEY ] = '';
+$soap_calls_before_missing_credentials = count( $soap->calls );
+$missing_credentials = $service->calculate( 200, array( 'sender_dpd_city_id' => '49455627' ) );
+dpd_tariff_assert( false === $missing_credentials->success && in_array( 'DPD credentials are incomplete for current environment.', $missing_credentials->errors, true ), 'Service must return a controlled error when credentials are incomplete.' );
+dpd_tariff_assert( $soap_calls_before_missing_credentials === count( $soap->calls ), 'Service must not call SOAP when DPD credentials are incomplete.' );
+$GLOBALS['wdc_dpd_tariff_options'] = $stored_options_before_missing_credentials;
+
 $missing_receiver = $service->calculate( 999, array( 'sender_dpd_city_id' => '49455627' ) );
 dpd_tariff_assert( false === $missing_receiver->success && str_contains( implode( ' ', $missing_receiver->errors ), 'DPD cityId was not found for receiver location_id' ), 'Service must return a controlled error without receiver cityId.' );
 
@@ -197,6 +221,10 @@ dpd_tariff_assert( true === $result->success && 1 === count( $result->options ),
 dpd_tariff_assert( 1 === count( $soap->calls ), 'Service must make one DPD API call.' );
 dpd_tariff_assert( DpdEndpoints::SERVICE_CALCULATOR === $soap->calls[0]['service'] && 'getServiceCostByParcels3' === $soap->calls[0]['method'], 'Service must call calculator2 getServiceCostByParcels3.' );
 dpd_tariff_assert( '49455627' === $soap->calls[0]['payload']['pickup']['cityId'] && '49694102' === $soap->calls[0]['payload']['delivery']['cityId'], 'Service must pass expected sender/receiver cityId in payload.' );
+dpd_tariff_assert( DpdSoapRequest::WRAPPER_REQUEST === $soap->calls[0]['options']['wrapper'] && isset( $soap->calls[0]['soap_payload']['request']['auth']['clientNumber'], $soap->calls[0]['soap_payload']['request']['auth']['clientKey'] ), 'Calculator SOAP call must send auth inside the request wrapper.' );
+dpd_tariff_assert( ! isset( $soap->calls[0]['payload']['auth'] ) && ! isset( $soap->calls[0]['payload']['request'] ), 'Business payload passed to DpdApiClient must remain auth-free and wrapper-free.' );
+dpd_tariff_assert( DpdSoapRequest::WRAPPER_REQUEST === ( $result->meta['wrapper'] ?? '' ) && 'yes' === ( $result->meta['debug_payload_shape']['has_auth'] ?? '' ), 'Tariff result meta must expose redacted wrapper/auth debug shape.' );
+dpd_tariff_assert( ! str_contains( (string) wp_json_encode( $result->meta['debug_payload_shape'] ?? array() ), 'test-client-key' ), 'Tariff debug payload shape must not leak clientKey.' );
 
 $soap->next_body = array(
 	'return' => array(

@@ -1251,10 +1251,10 @@ final class DeliveryServicesAdminPage {
 					</tbody>
 				</table>
 			<?php endif; ?>
-			<?php if ( $this->dpd_settings->debug_enabled() && ( isset( $details['payload'] ) || isset( $details['raw_response'] ) ) ) : ?>
+			<?php if ( $this->dpd_settings->debug_enabled() && ( isset( $details['payload'] ) || isset( $details['debug_payload_shape'] ) || isset( $details['raw_response'] ) ) ) : ?>
 				<details style="margin-top: 12px;">
 					<summary><?php echo esc_html__( 'Raw debug', 'walls-delivery-calc' ); ?></summary>
-					<pre style="white-space: pre-wrap; background:#f6f7f7; padding:12px; border:1px solid #dcdcde;"><code><?php echo esc_html( wp_json_encode( array( 'payload' => $details['payload'] ?? array(), 'raw_response' => $details['raw_response'] ?? null ), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) ?: '' ); ?></code></pre>
+					<pre style="white-space: pre-wrap; background:#f6f7f7; padding:12px; border:1px solid #dcdcde;"><code><?php echo esc_html( wp_json_encode( array( 'payload' => $details['payload'] ?? array(), 'debug_payload_shape' => $details['debug_payload_shape'] ?? array(), 'raw_response' => $details['raw_response'] ?? null ), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) ?: '' ); ?></code></pre>
 				</details>
 			<?php endif; ?>
 			<?php if ( '' !== (string) ( $result['created_at'] ?? '' ) ) : ?>
@@ -1262,6 +1262,7 @@ final class DeliveryServicesAdminPage {
 			<?php endif; ?>
 		</div>
 		<?php
+		$this->dpd_settings->clear_tariff_action_result();
 	}
 
 	/**
@@ -1294,6 +1295,9 @@ final class DeliveryServicesAdminPage {
 			'payload' => $result->payload,
 			'meta' => $result->meta,
 		);
+		if ( is_array( $result->meta['debug_payload_shape'] ?? null ) ) {
+			$details['debug_payload_shape'] = $result->meta['debug_payload_shape'];
+		}
 		if ( $this->dpd_settings instanceof DpdSettings && $this->dpd_settings->debug_enabled() ) {
 			$details['raw_response'] = $result->raw_response;
 		}
@@ -1386,6 +1390,7 @@ final class DeliveryServicesAdminPage {
 			<?php endif; ?>
 		</div>
 		<?php
+		$this->dpd_settings->clear_geography_action_result();
 	}
 
 	/**

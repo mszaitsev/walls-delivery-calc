@@ -1,6 +1,6 @@
 # WDC DPD Tariff Calculation
 
-Version: 0.57.0.
+Version: 0.57.1.
 
 This stage implements the DPD tariff calculation foundation for admin diagnostics only. It verifies `getServiceCostByParcels3` request/response shape before any checkout runtime integration.
 
@@ -26,7 +26,23 @@ This stage implements the DPD tariff calculation foundation for admin diagnostic
 - `declaredValue`
 - `parcel[]` with `weight` in kg, `length`, `width`, `height` in cm, and `quantity`
 
-`DpdSoapRequest::payload_with_auth()` adds `auth.clientNumber` and `auth.clientKey` centrally when the SOAP transport executes the request.
+`DpdSoapRequest::payload_with_auth()` adds `auth.clientNumber` and `auth.clientKey` centrally when the SOAP transport executes the request. `calculator2/getServiceCostByParcels3` uses the explicit `request` wrapper strategy, so the SOAP argument shape is:
+
+```php
+array(
+    'request' => array(
+        'auth' => array(
+            'clientNumber' => '...',
+            'clientKey' => '...',
+        ),
+        'pickup' => array( 'cityId' => '...' ),
+        'delivery' => array( 'cityId' => '...' ),
+        // other business fields...
+    ),
+)
+```
+
+Geography methods such as `getCitiesCashPay` and `getPossibleExtraService` keep the direct payload shape with root-level `auth`.
 
 ## Admin Calculator
 
@@ -39,7 +55,7 @@ The `DPD Расчет` tab stores:
 - default declared value
 - last visible tariff action result
 
-The test form accepts sender override, receiver `location_id`, parcel values, pickup/delivery mode and optional `serviceCode`. After POST it redirects back to the same tab and displays success/failure, raw count, normalized service list and, when DPD debug is enabled, raw payload/response.
+The test form accepts sender override, receiver `location_id`, parcel values, pickup/delivery mode and optional `serviceCode`. After POST it redirects back to the same tab and displays success/failure, raw count, normalized service list and, when DPD debug is enabled, the business payload plus redacted SOAP payload shape metadata. The action result block is one-shot: after it renders, `clear_tariff_action_result()` removes it from settings so a normal page reload does not repeat the notice.
 
 ## Normalization
 
@@ -62,7 +78,7 @@ Missing fields are not fatal.
 
 ## Error Handling
 
-`DpdTariffCalculationService` returns controlled errors for missing sender or receiver city IDs. `DpdException`, including missing PHP SOAP extension and SOAP faults, is caught and stored as an admin-visible result instead of breaking the page.
+`DpdTariffCalculationService` returns controlled errors for incomplete active-environment credentials, missing sender city ID or missing receiver city ID. Incomplete credentials return `DPD credentials are incomplete for current environment.` before any SOAP call. `DpdException`, including missing PHP SOAP extension and SOAP faults, is caught and stored as an admin-visible result instead of breaking the page.
 
 ## Not Implemented
 

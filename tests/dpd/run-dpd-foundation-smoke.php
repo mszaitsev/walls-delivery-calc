@@ -14,6 +14,7 @@ use WallsShop\WDC\Carriers\Dpd\DpdEndpoints;
 use WallsShop\WDC\Carriers\Dpd\DpdException;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapClientInterface;
+use WallsShop\WDC\Carriers\Dpd\DpdSoapRequest;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapResponse;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
@@ -141,10 +142,20 @@ dpd_smoke_assert( 'https://wstest.dpd.ru/services/geography2?wsdl' === $test_map
 dpd_smoke_assert( 'https://ws.dpd.ru/services/calculator2?wsdl' === $production_map[ DpdEndpoints::SERVICE_CALCULATOR ], 'DPD production calculator endpoint mismatch.' );
 dpd_smoke_assert( isset( $production_map[ DpdEndpoints::SERVICE_ORDER ], $production_map[ DpdEndpoints::SERVICE_TRACING ], $production_map[ DpdEndpoints::SERVICE_TRACING_1_1 ], $production_map[ DpdEndpoints::SERVICE_EVENT_TRACKING ], $production_map[ DpdEndpoints::SERVICE_LABEL_PRINT ], $production_map[ DpdEndpoints::SERVICE_DELIVERY_MANAGEMENT ] ), 'DPD endpoint map must include planned service areas.' );
 
+$geography_request = new DpdSoapRequest( DpdEndpoints::SERVICE_GEOGRAPHY, 'getCitiesCashPay', array( 'countryCode' => 'RU' ), $settings->credentials() );
+$geography_payload = $geography_request->payload_with_auth();
+dpd_smoke_assert( isset( $geography_payload['auth']['clientNumber'], $geography_payload['auth']['clientKey'] ) && ! isset( $geography_payload['request'] ), 'DPD geography methods must keep direct auth payload shape.' );
+$calculator_request = new DpdSoapRequest( DpdEndpoints::SERVICE_CALCULATOR, 'getServiceCostByParcels3', array( 'pickup' => array( 'cityId' => '49455627' ), 'delivery' => array( 'cityId' => '49694102' ) ), $settings->credentials(), array( 'wrapper' => DpdSoapRequest::WRAPPER_REQUEST ) );
+$calculator_payload = $calculator_request->payload_with_auth();
+$calculator_shape = $calculator_request->redacted_payload_shape();
+dpd_smoke_assert( isset( $calculator_payload['request']['auth']['clientNumber'], $calculator_payload['request']['auth']['clientKey'] ) && ! isset( $calculator_payload['auth'] ), 'DPD calculator2 getServiceCostByParcels3 must use request wrapper auth shape.' );
+dpd_smoke_assert( DpdSoapRequest::WRAPPER_REQUEST === $calculator_shape['wrapper'] && 'yes' === $calculator_shape['has_auth'] && ! str_contains( (string) json_encode( $calculator_shape ), 'test-client-key' ), 'DPD calculator debug payload shape must be redacted.' );
+
 $fake_soap = new DpdFakeSoapClient();
 $api = new DpdApiClient( $settings, $fake_soap );
 $diagnostic = $api->checkConnectionDryRun();
 dpd_smoke_assert( false === $diagnostic['success'], 'DPD dry diagnostic must fail gracefully when SOAP transport is unavailable.' );
+dpd_smoke_assert( isset( $diagnostic['details']['endpoints'][ DpdEndpoints::SERVICE_GEOGRAPHY ], $diagnostic['details']['endpoints'][ DpdEndpoints::SERVICE_CALCULATOR ] ), 'DPD dry diagnostic must inspect geography and calculator endpoints without live calls.' );
 dpd_smoke_assert( 0 === count( $fake_soap->calls ), 'DPD dry diagnostic must not execute a SOAP API call.' );
 $settings->save_connection_result( false, 'clientKey=test-client-key clientNumber test-client-number production-client-key production-client-number' );
 dpd_smoke_assert( '2026-06-16 12:00:00' === $settings->last_connection_check(), 'DPD connection timestamp must be saved.' );

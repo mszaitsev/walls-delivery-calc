@@ -269,6 +269,10 @@ final class DpdSettings {
 		$this->settings->set( self::LAST_GEOGRAPHY_ACTION_RESULT_KEY, array() );
 	}
 
+	public function clear_tariff_action_result(): void {
+		$this->settings->set( self::LAST_TARIFF_ACTION_RESULT_KEY, array() );
+	}
+
 	/**
 	 * @param array<string,mixed> $input
 	 */

@@ -26,6 +26,10 @@ final class DpdTariffCalculationService {
 	 * @param array<string,mixed> $params
 	 */
 	public function calculate( int $receiver_location_id, array $params = array() ): DpdTariffResult {
+		if ( ! $this->settings->credentials_are_complete() ) {
+			return DpdTariffResult::failure( array( 'DPD credentials are incomplete for current environment.' ) );
+		}
+
 		$sender_city_id = $this->sender_city_id( $params );
 		if ( '' === $sender_city_id ) {
 			return DpdTariffResult::failure( array( 'DPD sender cityId is not configured.' ) );
@@ -76,6 +80,8 @@ final class DpdTariffCalculationService {
 					'receiver_city_id' => $receiver_city_id,
 					'receiver_location_id' => $receiver_location_id,
 					'raw_count' => count( $options ),
+					'wrapper' => (string) ( $response->meta['wrapper'] ?? '' ),
+					'debug_payload_shape' => is_array( $response->meta['debug_payload_shape'] ?? null ) ? $response->meta['debug_payload_shape'] : array(),
 				)
 			);
 		} catch ( DpdException $exception ) {
