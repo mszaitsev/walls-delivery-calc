@@ -187,7 +187,7 @@ final class DpdCheckoutFakeSoapClient implements DpdSoapClientInterface {
 		$this->next_body = array(
 			'return' => array(
 				array( 'serviceCode' => 'MAX', 'serviceName' => 'DPD Максимум', 'cost' => 100.25, 'deliveryPeriodMin' => 1, 'deliveryPeriodMax' => 2 ),
-				array( 'serviceCode' => 'NDY', 'serviceName' => 'DPD Экспресс', 'cost' => 220.10, 'deliveryPeriodMin' => 2, 'deliveryPeriodMax' => 3 ),
+				array( 'serviceCode' => 'NDY', 'serviceName' => 'DPD Экспресс', 'cost' => 220.10, 'deliveryPeriodMin' => 1, 'deliveryPeriodMax' => 1 ),
 				array( 'serviceCode' => 'BAD', 'serviceName' => 'No cost' ),
 			),
 		);
@@ -203,6 +203,20 @@ final class DpdCheckoutFakeSoapClient implements DpdSoapClientInterface {
 	public function is_available(): bool {
 		return true;
 	}
+}
+
+/**
+ * @param array<int,array<string,mixed>> $services
+ */
+function dpd_checkout_fake_services( DpdCheckoutFakeSoapClient $soap, array $services ): void {
+	$soap->next_body = array( 'return' => $services );
+}
+
+/**
+ * @return array<int,string>
+ */
+function dpd_checkout_tariff_keys( array $rates ): array {
+	return array_values( array_map( static fn( $rate ): string => $rate->tariff_key, $rates ) );
 }
 
 function dpd_checkout_request( int $location_id = 200, int $weight_g = 1500, string $delivery_type = '' ): QuoteRequest {
@@ -319,7 +333,7 @@ $quote = $carrier->quote( dpd_checkout_request() );
 dpd_checkout_assert( 2 === count( $quote->rates ), 'DPD checkout carrier must map MAX and NDY and skip missing-cost options.' );
 dpd_checkout_assert( 'MAX' === $quote->rates[0]->tariff_key && 'NDY' === $quote->rates[1]->tariff_key, 'DPD checkout rates must preserve returned service codes.' );
 dpd_checkout_assert( ! empty( $quote->rates[0]->meta['tariff_selector_group'] ) && ( $quote->rates[0]->meta['checkout_group_id'] ?? '' ) === ( $quote->rates[1]->meta['checkout_group_id'] ?? '' ), 'DPD checkout tariff options must be marked for grouped tariff selector output.' );
-dpd_checkout_assert( 'DPD до пункта выдачи, DPD Максимум - 1-2 дня' === $quote->rates[0]->title && 'DPD до пункта выдачи, DPD Экспресс - 2-3 дня' === $quote->rates[1]->title, 'DPD pickup titles must use method title, tariff title and delivery days.' );
+dpd_checkout_assert( 'DPD до пункта выдачи, DPD Максимум - 1-2 дня' === $quote->rates[0]->title && 'DPD до пункта выдачи, DPD Экспресс - 1 день' === $quote->rates[1]->title, 'DPD pickup titles must use method title, tariff title and delivery days.' );
 dpd_checkout_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && ! $quote->rates[0]->requires_courier_address && ! $quote->rates[0]->requires_pickup_point && ! empty( $quote->rates[0]->meta['dpd_pickup_points_not_implemented'] ), 'DPD pickup runtime must be calculation-only terminal delivery without pickup point selection.' );
 dpd_checkout_assert( isset( $soap->calls[0]['soap_payload']['request']['auth'] ), 'DPD checkout runtime must call calculator2 with request.auth SOAP wrapper.' );
 dpd_checkout_assert( 1.5 === $soap->calls[0]['payload']['parcel'][0]['weight'] && 2500.0 === $soap->calls[0]['payload']['declaredValue'], 'DPD checkout payload must use cart weight and declared value.' );
@@ -367,6 +381,95 @@ dpd_checkout_assert( DeliveryType::COURIER === $courier->rates[0]->delivery_type
 dpd_checkout_assert( 'DPD курьером, DPD Максимум - 1-2 дня' === $courier->rates[0]->title, 'DPD courier title must use courier method title, tariff title and days.' );
 dpd_checkout_assert( ( $quote->rates[0]->meta['checkout_group_id'] ?? '' ) !== ( $courier->rates[0]->meta['checkout_group_id'] ?? '' ), 'Same DPD serviceCode must stay in separate pickup/courier groups.' );
 dpd_checkout_assert( $base_quote_id !== $courier->quote_id, 'DPD quote_id must change when courier rates are enabled and courier delivery type is requested.' );
+
+$settings->save_runtime_tariffs_from_admin(
+	array(
+		'dpd_runtime_service_enabled' => array( 'ECN' => '1', 'CSM' => '1' ),
+		'dpd_runtime_tariff_title' => array( 'ECN' => 'DPD Эконом', 'CSM' => 'DPD Онлайн-экспресс' ),
+		DpdSettings::RUNTIME_ENABLE_COURIER_RATES_KEY => '1',
+	)
+);
+dpd_checkout_fake_services(
+	$soap,
+	array(
+		array( 'serviceCode' => 'ECN', 'serviceName' => 'DPD Эконом', 'cost' => 500, 'deliveryPeriodMin' => 3, 'deliveryPeriodMax' => 5 ),
+		array( 'serviceCode' => 'CSM', 'serviceName' => 'DPD Онлайн-экспресс', 'cost' => 700, 'deliveryPeriodMin' => 3, 'deliveryPeriodMax' => 5 ),
+	)
+);
+$same_duration = $carrier->quote( dpd_checkout_request() );
+dpd_checkout_assert( array( 'ECN' ) === dpd_checkout_tariff_keys( $same_duration->rates ), 'DPD filter must keep the cheapest tariff for identical delivery days.' );
+dpd_checkout_assert( 1 === (int) ( $same_duration->raw_reference['dpd_filter_removed_count'] ?? 0 ) && 'CSM' === (string) ( $same_duration->raw_reference['dpd_filter_removed_tariffs'][0]['tariff_key'] ?? '' ), 'DPD filter diagnostics must list removed same-duration tariff.' );
+
+dpd_checkout_fake_services(
+	$soap,
+	array(
+		array( 'serviceCode' => 'ECN', 'serviceName' => 'DPD Эконом', 'cost' => 500, 'deliveryPeriodMin' => 2, 'deliveryPeriodMax' => 3 ),
+		array( 'serviceCode' => 'CSM', 'serviceName' => 'Экспресс', 'cost' => 700, 'deliveryPeriodMin' => 4, 'deliveryPeriodMax' => 5 ),
+	)
+);
+$faster_cheaper = $carrier->quote( dpd_checkout_request() );
+dpd_checkout_assert( array( 'ECN' ) === dpd_checkout_tariff_keys( $faster_cheaper->rates ), 'DPD filter must remove a slower and more expensive tariff regardless of tariff name.' );
+
+dpd_checkout_fake_services(
+	$soap,
+	array(
+		array( 'serviceCode' => 'ECN', 'serviceName' => 'DPD Эконом', 'cost' => 900, 'deliveryPeriodMin' => 2, 'deliveryPeriodMax' => 3 ),
+		array( 'serviceCode' => 'CSM', 'serviceName' => 'DPD Онлайн-экспресс', 'cost' => 700, 'deliveryPeriodMin' => 4, 'deliveryPeriodMax' => 5 ),
+	)
+);
+$faster_expensive = $carrier->quote( dpd_checkout_request() );
+dpd_checkout_assert( array( 'ECN', 'CSM' ) === dpd_checkout_tariff_keys( $faster_expensive->rates ), 'DPD filter must keep faster but more expensive alternatives.' );
+
+dpd_checkout_fake_services(
+	$soap,
+	array(
+		array( 'serviceCode' => 'ECN', 'serviceName' => 'DPD Эконом', 'cost' => 900, 'deliveryPeriodMin' => 2, 'deliveryPeriodMax' => 3 ),
+		array( 'serviceCode' => 'CSM', 'serviceName' => 'DPD Онлайн-экспресс', 'cost' => 500, 'deliveryPeriodMin' => 4, 'deliveryPeriodMax' => 5 ),
+	)
+);
+$slower_cheaper = $carrier->quote( dpd_checkout_request() );
+dpd_checkout_assert( array( 'ECN', 'CSM' ) === dpd_checkout_tariff_keys( $slower_cheaper->rates ), 'DPD filter must keep slower but cheaper alternatives.' );
+
+dpd_checkout_fake_services(
+	$soap,
+	array(
+		array( 'serviceCode' => 'ECN', 'serviceName' => 'DPD Эконом', 'cost' => 500, 'deliveryPeriodMin' => 3, 'deliveryPeriodMax' => 5 ),
+		array( 'serviceCode' => 'CSM', 'serviceName' => 'DPD Онлайн-экспресс', 'cost' => 500, 'deliveryPeriodMin' => 4, 'deliveryPeriodMax' => 5 ),
+	)
+);
+$same_max_wider_min = $carrier->quote( dpd_checkout_request() );
+dpd_checkout_assert( array( 'ECN' ) === dpd_checkout_tariff_keys( $same_max_wider_min->rates ), 'DPD filter must remove a tariff with same max days, worse min days and equal price.' );
+
+dpd_checkout_fake_services(
+	$soap,
+	array(
+		array( 'serviceCode' => 'ECN', 'serviceName' => 'DPD Эконом', 'cost' => 500 ),
+		array( 'serviceCode' => 'CSM', 'serviceName' => 'DPD Онлайн-экспресс', 'cost' => 700, 'deliveryPeriodMin' => 3, 'deliveryPeriodMax' => 5 ),
+	)
+);
+$unknown_days = $carrier->quote( dpd_checkout_request() );
+dpd_checkout_assert( array( 'ECN', 'CSM' ) === dpd_checkout_tariff_keys( $unknown_days->rates ), 'DPD filter must keep unknown-duration tariffs.' );
+
+dpd_checkout_fake_services(
+	$soap,
+	array(
+		array( 'serviceCode' => 'ECN', 'serviceName' => 'DPD Эконом', 'cost' => 500, 'deliveryPeriodMin' => 2, 'deliveryPeriodMax' => 3 ),
+		array( 'serviceCode' => 'CSM', 'serviceName' => 'DPD Онлайн-экспресс', 'cost' => 700, 'deliveryPeriodMin' => 4, 'deliveryPeriodMax' => 5 ),
+	)
+);
+$filtered_pickup = $carrier->quote( dpd_checkout_request( 200, 1500, DeliveryType::PICKUP ) );
+$filtered_courier = $carrier->quote( dpd_checkout_request( 200, 1500, DeliveryType::COURIER ) );
+dpd_checkout_assert( array( 'ECN' ) === dpd_checkout_tariff_keys( $filtered_pickup->rates ) && array( 'ECN' ) === dpd_checkout_tariff_keys( $filtered_courier->rates ), 'DPD filtering must be applied independently inside pickup and courier groups.' );
+dpd_checkout_assert( ( $filtered_pickup->rates[0]->meta['checkout_group_id'] ?? '' ) !== ( $filtered_courier->rates[0]->meta['checkout_group_id'] ?? '' ), 'DPD filtered pickup and courier groups must stay separate.' );
+
+dpd_checkout_fake_services(
+	$soap,
+	array(
+		array( 'serviceCode' => 'MAX', 'serviceName' => 'DPD Максимум', 'cost' => 100.25, 'deliveryPeriodMin' => 1, 'deliveryPeriodMax' => 2 ),
+		array( 'serviceCode' => 'NDY', 'serviceName' => 'DPD Экспресс', 'cost' => 220.10, 'deliveryPeriodMin' => 1, 'deliveryPeriodMax' => 1 ),
+		array( 'serviceCode' => 'BAD', 'serviceName' => 'No cost' ),
+	)
+);
 
 $services = new DeliveryServiceRepository( $GLOBALS['wpdb'] );
 $countries = new DeliveryServiceCountryRepository( $GLOBALS['wpdb'] );

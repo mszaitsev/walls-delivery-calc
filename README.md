@@ -1,6 +1,11 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.58.2.
+Current plugin version: 0.58.3.
+
+Version 0.58.3 filters DPD checkout tariff candidates inside each delivery type by price and delivery days. Equal-duration
+DPD tariffs collapse to the cheapest option, and a tariff hidden when another option is no slower and no more expensive
+with at least one strictly better parameter. Tariff names, service names and service-code semantics are not used in this
+comparison. DPD payload modes, courier enablement, pickup points and shipment adapter scope are unchanged.
 
 Version 0.58.2 fixes the DPD checkout runtime model around pickup/courier delivery types. Checkout DPD shipment is now
 always calculated from a DPD terminal (`selfPickup=true`). Terminal delivery is the default pickup group and sends

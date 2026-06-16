@@ -107,6 +107,9 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 			}
 			$rates[] = $rate;
 		}
+		$filter_result = $this->filter_rates_by_price_and_delivery_days( $rates );
+		$rates = $filter_result['rates'];
+		$removed_by_filter = $filter_result['removed'];
 
 		if ( array() === $rates ) {
 			$this->logger->warning(
@@ -116,6 +119,7 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 					'raw_count' => count( $result->options ),
 					'skipped_disallowed_count' => $skipped_disallowed,
 					'skipped_no_cost_count' => $skipped_no_cost,
+					'filter_removed_count' => count( $removed_by_filter ),
 				)
 			);
 		}
@@ -137,6 +141,8 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 				'receiver_city_id' => (string) ( $result->meta['receiver_city_id'] ?? '' ),
 				'enabled_service_codes' => array_keys( $enabled ),
 				'delivery_type' => $delivery_type,
+				'dpd_filter_removed_count' => count( $removed_by_filter ),
+				'dpd_filter_removed_tariffs' => $removed_by_filter,
 			)
 		);
 	}
@@ -316,6 +322,74 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 
 	private function checkout_group_id( string $delivery_type ): string {
 		return self::KEY . ':' . $delivery_type;
+	}
+
+	/**
+	 * @param array<int,DeliveryRate> $rates
+	 * @return array{rates:array<int,DeliveryRate>,removed:array<int,array<string,mixed>>}
+	 */
+	private function filter_rates_by_price_and_delivery_days( array $rates ): array {
+		$remove = array();
+		$removed = array();
+		foreach ( $rates as $index => $rate ) {
+			foreach ( $rates as $candidate_index => $candidate ) {
+				if ( $index === $candidate_index || isset( $remove[ $index ] ) ) {
+					continue;
+				}
+				$reason = $this->dpd_filter_removal_reason( $candidate, $rate );
+				if ( '' === $reason ) {
+					continue;
+				}
+				$remove[ $index ] = true;
+				$removed[] = array(
+					'tariff_key' => $rate->tariff_key,
+					'tariff_name' => $rate->tariff_name,
+					'price_rub' => $rate->price->get_rubles(),
+					'delivery_min_days' => $rate->delivery_days->min_days,
+					'delivery_max_days' => $rate->delivery_days->max_days,
+					'removed_by_tariff_key' => $candidate->tariff_key,
+					'removed_by_price_rub' => $candidate->price->get_rubles(),
+					'removed_by_delivery_min_days' => $candidate->delivery_days->min_days,
+					'removed_by_delivery_max_days' => $candidate->delivery_days->max_days,
+					'reason' => $reason,
+				);
+			}
+		}
+
+		if ( array() === $remove ) {
+			return array( 'rates' => array_values( $rates ), 'removed' => array() );
+		}
+
+		return array(
+			'rates' => array_values( array_filter( $rates, static fn ( DeliveryRate $rate, int $index ): bool => ! isset( $remove[ $index ] ), ARRAY_FILTER_USE_BOTH ) ),
+			'removed' => $removed,
+		);
+	}
+
+	private function dpd_filter_removal_reason( DeliveryRate $candidate, DeliveryRate $rate ): string {
+		$candidate_min = $candidate->delivery_days->min_days;
+		$candidate_max = $candidate->delivery_days->max_days;
+		$rate_min = $rate->delivery_days->min_days;
+		$rate_max = $rate->delivery_days->max_days;
+		if ( null === $candidate_min || null === $candidate_max || null === $rate_min || null === $rate_max ) {
+			return '';
+		}
+
+		$candidate_price = $candidate->price->get_kopecks();
+		$rate_price = $rate->price->get_kopecks();
+		if ( $candidate_min === $rate_min && $candidate_max === $rate_max && $candidate_price < $rate_price ) {
+			return 'same_delivery_days_higher_price';
+		}
+		if (
+			$candidate_min <= $rate_min
+			&& $candidate_max <= $rate_max
+			&& $candidate_price <= $rate_price
+			&& ( $candidate_min < $rate_min || $candidate_max < $rate_max || $candidate_price < $rate_price )
+		) {
+			return 'dominated_by_price_and_delivery_days';
+		}
+
+		return '';
 	}
 
 	/**

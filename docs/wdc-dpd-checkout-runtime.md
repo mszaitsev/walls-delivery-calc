@@ -1,6 +1,6 @@
 # DPD Checkout Runtime
 
-Version: 0.58.2
+Version: 0.58.3
 
 ## Scope
 
@@ -69,6 +69,30 @@ Examples:
 
 The old `dpd_runtime_method_title_prefix`, `dpd_runtime_pickup_mode` and `dpd_runtime_delivery_mode` settings are no longer rendered in admin and are not used by runtime titles or payload mode selection.
 
+## Price And Delivery-Days Filtering
+
+DPD tariff candidates are filtered inside the current delivery-type group after enabled service-code filtering and numeric-cost validation, before the `DeliveryQuote` is returned.
+
+The filter compares only:
+
+- final DPD candidate price;
+- normalized delivery period min/max days.
+
+The filter does not compare tariff names, service names, configured checkout titles or service-code semantics.
+
+Rules:
+
+- if two tariffs have the same known min/max delivery period, only the cheaper tariff survives;
+- a tariff is hidden when another tariff has known min/max days that are no worse, a price that is no higher, and at least one strictly better value among min days, max days or price;
+- tariffs with unknown min/max days are kept and are not removed by delivery-speed dominance.
+
+Filtering is scoped to the current quote. Pickup candidates and courier candidates are filtered independently because DPD uses separate API requests for those delivery types.
+
+`DeliveryQuote::raw_reference` stores non-customer-facing diagnostics:
+
+- `dpd_filter_removed_count`;
+- `dpd_filter_removed_tariffs`.
+
 ## Admin Settings
 
 DPD `Основное` stores method titles:
@@ -95,7 +119,7 @@ The checkout orchestrator builds DPD delivery-type entries from the built-in DPD
 
 `DpdQuoteCarrier` reads `QuoteRequest::$customer_context['delivery_type']` and defaults to pickup when it is absent.
 
-Pickup/terminal delivery is calculation-only in 0.58.2:
+Pickup/terminal delivery is calculation-only in the current runtime:
 
 - request payload sends `selfPickup=true`;
 - request payload sends `selfDelivery=true`;
@@ -138,7 +162,7 @@ The generic checkout quote cache key includes selected receiver location, packag
 
 ## Out Of Scope
 
-The 0.58.2 stage does not implement:
+The 0.58.3 stage does not implement:
 
 - DPD pickup points;
 - parcel shop selection;
