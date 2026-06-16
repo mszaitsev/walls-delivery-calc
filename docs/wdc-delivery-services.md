@@ -88,6 +88,19 @@ The bootstrap creates `russian_post_worldwide_parcel` if it does not exist:
 
 No rules or built-in markups are created automatically.
 
+As of 0.54.0, the bootstrap also creates the DPD foundation service:
+
+- `service_key`: `dpd`
+- `carrier_key`: `dpd`
+- `service_type`: `api`
+- title: `DPD`
+- default state: disabled
+- RU availability row is created for future use
+
+DPD is registered only for delivery service/settings/admin diagnostics. There is no DPD carrier adapter in `CarrierRegistry` and no DPD shipment adapter in `CarrierShipmentAdapterRegistry`, so DPD does not produce checkout rates and does not appear in shipment actions at the foundation stage.
+
+The DPD `Данные для входа` tab stores test/production `clientNumber`, encrypted `clientKey`, environment, timeout and optional debug flag through the existing settings/encryption layer. The connection check is a dry diagnostic and does not execute a DPD API call.
+
 ## Admin
 
 The admin page is `Калькулятор доставок → Службы доставки` (`wdc-delivery-services`). It lists services, availability, countries, rule fallback, rounding, minimum price, sort order, and actions for enable/disable, edit, delete, and future service creation.

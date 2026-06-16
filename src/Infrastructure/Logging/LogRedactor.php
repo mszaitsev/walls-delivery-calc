@@ -12,6 +12,8 @@ final class LogRedactor {
 		'token',
 		'secret',
 		'api_key',
+		'client_key',
+		'clientkey',
 		'authorization',
 		'phone',
 		'email',

@@ -29,6 +29,10 @@ final class DeliveryServiceManager {
 		if ( null !== $cdek->id ) {
 			$this->countries->replace_countries( (int) $cdek->id, array( 'RU' ) );
 		}
+		$dpd = $this->services->ensure_dpd_service();
+		if ( null !== $dpd->id ) {
+			$this->countries->replace_countries( (int) $dpd->id, array( 'RU' ) );
+		}
 	}
 
 	public function service_available_for_country( DeliveryService $service, string $country_code ): bool {
