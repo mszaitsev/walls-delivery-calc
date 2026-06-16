@@ -36,15 +36,15 @@ final class DpdGeographyDiagnosticService {
 		}
 		if ( null === $result ) {
 			if ( '' !== $this->resolver->last_error() ) {
-				return $this->empty_result( 'DPD API error: ' . $this->safe_message( $this->resolver->last_error() ) );
+				return $this->empty_result( 'DPD cityId mapping was not found for location_id=' . $location_id . '. Add cityId manually.' );
 			}
 
-			return $this->empty_result( 'DPD cityId was not found.' );
+			return $this->empty_result( 'DPD cityId mapping was not found for location_id=' . $location_id . '. Add cityId manually.' );
 		}
 
 		return array(
 			'success' => true,
-			'message' => 'DPD cityId found.',
+			'message' => 'DPD cityId mapping found.',
 			'city_id' => $result['city_id'],
 			'source' => $result['source'],
 			'saved' => $result['saved'],

@@ -58,7 +58,6 @@ require_once __DIR__ . '/../../src/Carriers/Dpd/DpdGeographyDiagnosticService.ph
 use WallsShop\WDC\Carriers\Dpd\DpdApiClient;
 use WallsShop\WDC\Carriers\Dpd\DpdCityResolver;
 use WallsShop\WDC\Carriers\Dpd\DpdCredentials;
-use WallsShop\WDC\Carriers\Dpd\DpdDuplicateCityResolver;
 use WallsShop\WDC\Carriers\Dpd\DpdGeographyDiagnosticService;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapClientInterface;
@@ -72,14 +71,10 @@ use WallsShop\WDC\Locations\ValueObjects\Location;
 final class FakeDpdSoapClient implements DpdSoapClientInterface {
 	/** @var array<int,array{method:string,payload:array<string,mixed>}> */
 	public array $calls = array();
-	private bool $throw_on_lookup = false;
 
 	public function call( string $service, string $method, array $payload, DpdCredentials $credentials, array $options = array() ): DpdSoapResponse {
 		$this->calls[] = array( 'method' => $method, 'payload' => $payload );
 
-		if ( $this->throw_on_lookup ) {
-			throw new \WallsShop\WDC\Carriers\Dpd\DpdException( 'DPD SOAP request failed: java.lang.NullPointerException' );
-		}
 		if ( 'getCitiesCashPay' === $method ) {
 			return new DpdSoapResponse(
 				true,
@@ -99,10 +94,6 @@ final class FakeDpdSoapClient implements DpdSoapClientInterface {
 
 	public function is_available(): bool {
 		return true;
-	}
-
-	public function throw_on_lookup(): void {
-		$this->throw_on_lookup = true;
 	}
 }
 
@@ -140,54 +131,42 @@ $settings = new DpdSettings( new SettingsRepository(), new EncryptionService() )
 $soap = new FakeDpdSoapClient();
 $api = new DpdApiClient( $settings, $soap );
 $carrier_codes = new LocationCarrierCodeRepository( $GLOBALS['wpdb'] );
-$duplicate_resolver = new DpdDuplicateCityResolver();
-$resolver = new DpdCityResolver( $carrier_codes, $api, $duplicate_resolver );
+$resolver = new DpdCityResolver( $carrier_codes );
 
 $location = Location::from_array( $GLOBALS['wpdb']->locations[0] );
 $result = $resolver->resolve( $location );
-assert_true( null !== $result, 'resolver returns a DPD cityId' );
-assert_true( '492941' === $result['city_id'], 'duplicate city response resolves by FIAS/GAR/postal data' );
-assert_true( true === $result['saved'], 'mapping is saved after successful API resolve' );
-assert_true( true === $result['multiple'], 'diagnostics marks duplicate city response' );
-assert_true( true === $result['resolver_applied'], 'duplicate resolver was applied' );
-assert_true( 'getCitiesCashPay' === $soap->calls[0]['method'], 'resolver uses getCitiesCashPay as city lookup method' );
-assert_true( ! isset( $soap->calls[0]['payload']['cityName'] ), 'getCitiesCashPay lookup does not send getPossibleExtraService-style address payload' );
-assert_true( 1 === count( $GLOBALS['wpdb']->carrier_codes ), 'exactly one carrier code mapping is stored' );
-assert_true( 'dpd' === $GLOBALS['wpdb']->carrier_codes[0]['carrier_key'], 'mapping carrier_key is dpd' );
-assert_true( '492941' === $GLOBALS['wpdb']->carrier_codes[0]['external_code'], 'mapping external_code stores dpd_city_id' );
+assert_true( null === $result, 'resolver returns null when DPD cityId mapping is missing' );
+assert_true( 'DPD cityId mapping was not found. Use manual mapping or future geography import.' === $resolver->last_error(), 'resolver exposes manual mapping required message' );
+assert_true( 0 === count( $soap->calls ), 'resolver does not call DPD API when mapping is missing' );
+
+$diagnostics = new DpdGeographyDiagnosticService( $resolver, $carrier_codes, new LocationRepository( $GLOBALS['wpdb'] ) );
+$missing_diagnostic = $diagnostics->diagnose_location_id( 10 );
+assert_true( false === $missing_diagnostic['success'], 'diagnostic returns success=false when mapping is missing' );
+assert_true( str_contains( $missing_diagnostic['message'], 'location_id=10' ), 'diagnostic message includes location_id' );
+assert_true( str_contains( $missing_diagnostic['message'], 'Add cityId manually' ), 'diagnostic asks for manual cityId mapping' );
+assert_true( 0 === count( $soap->calls ), 'diagnostic does not call DPD API when mapping is missing' );
 
 $call_count = count( $soap->calls );
 $cached = $resolver->resolve( $location );
-assert_true( null !== $cached && 'mapping' === $cached['source'], 'second lookup reuses stored mapping' );
-assert_true( $call_count === count( $soap->calls ), 'stored mapping avoids a second DPD API call' );
+assert_true( null === $cached, 'missing mapping remains null until manual mapping is saved' );
+assert_true( $call_count === count( $soap->calls ), 'missing mapping lookup still avoids DPD API calls' );
 
-$manual = new DpdGeographyDiagnosticService( $resolver, $carrier_codes, new LocationRepository( $GLOBALS['wpdb'] ) );
-$manual_result = $manual->save_manual_mapping( 10, '900001' );
+$manual_result = $diagnostics->save_manual_mapping( 10, '900001' );
 assert_true( true === $manual_result['success'], 'admin service can save a manual DPD cityId mapping' );
-assert_true( 1 === count( $GLOBALS['wpdb']->carrier_codes ), 'manual save updates existing mapping instead of creating DPD table rows elsewhere' );
+assert_true( 1 === count( $GLOBALS['wpdb']->carrier_codes ), 'manual save writes one carrier mapping row' );
 assert_true( '900001' === $GLOBALS['wpdb']->carrier_codes[0]['external_code'], 'manual admin mapping updates dpd_city_id' );
 
-$GLOBALS['wpdb']->carrier_codes = array();
-$soap->throw_on_lookup();
-$diagnostic = $manual->diagnose_location_id( 10 );
-assert_true( false === $diagnostic['success'], 'diagnostic returns success=false on DPD API exception' );
-assert_true( str_contains( $diagnostic['message'], 'DPD API error' ), 'diagnostic message contains DPD API error' );
-assert_true( str_contains( $diagnostic['message'], 'NullPointerException' ), 'diagnostic message contains original API failure' );
-
-$GLOBALS['wpdb']->carrier_codes[] = array(
-	'id' => 20,
-	'location_id' => 10,
-	'gar_object_id' => 123456789,
-	'fias_id' => '11111111-2222-3333-4444-555555555555',
-	'carrier_key' => 'dpd',
-	'external_code' => '777777',
-	'meta' => array( 'source' => 'test' ),
-);
 $call_count_before_cached_diagnostic = count( $soap->calls );
-$cached_diagnostic = $manual->diagnose_location_id( 10 );
+$cached_diagnostic = $diagnostics->diagnose_location_id( 10 );
 assert_true( true === $cached_diagnostic['success'], 'diagnostic can resolve from existing mapping even when API would fail' );
-assert_true( '777777' === $cached_diagnostic['city_id'], 'diagnostic returns stored mapping cityId' );
+assert_true( '900001' === $cached_diagnostic['city_id'], 'diagnostic returns stored mapping cityId' );
+assert_true( 'mapping' === $cached_diagnostic['source'], 'diagnostic source is mapping after manual save' );
 assert_true( $call_count_before_cached_diagnostic === count( $soap->calls ), 'existing mapping prevents API call in diagnostic' );
+
+$cities_wrapper = $api->getCitiesCashPay( array( 'countryCode' => 'RU' ) );
+assert_true( true === $cities_wrapper['success'], 'getCitiesCashPay wrapper returns normalized fake response' );
+$extra_wrapper = $api->getPossibleExtraService( array( 'request' => 'fake' ) );
+assert_true( true === $extra_wrapper['success'], 'getPossibleExtraService wrapper remains available as low-level wrapper' );
 
 $tables = array_keys( get_object_vars( $GLOBALS['wpdb'] ) );
 assert_true( ! in_array( 'dpd_cities', $tables, true ), 'no DPD cities table is introduced in the smoke double' );

@@ -95,13 +95,13 @@ The existing WDC/FIAS/GAR settlement model already has `wdc_locations` and the f
 Implemented `DpdCityResolver` strategy:
 
 - primary source: already saved `dpd_city_id` linked to the WDC/FIAS/GAR settlement;
-- secondary source: DPD geography API wrapper `getCitiesCashPay(countryCode)`, matching the returned city list;
-- `getPossibleExtraService` remains an optional future wrapper and is not used as primary city lookup because DPD expects a fuller possible-services payload and sparse live diagnostics can fail with SOAP errors;
-- handle city-list duplicates and future `too-many-rows` data via `DpdDuplicateCityResolver`, matching FIAS/GAR guid, `regionCode`, `indexMin`/`indexMax`, postal code, city name, and city code/KLADR where available;
-- after a match, persist the mapping so later calculations do not repeat ambiguous lookup;
+- if mapping is missing, return a manual-mapping-required diagnostic and do not call live DPD SOAP;
+- `getCitiesCashPay` and `getPossibleExtraService` remain optional low-level wrappers only. They are not used by `DpdCityResolver` automatically because live DPD test/production checks returned `java.lang.NullPointerException` for sparse city lookup attempts;
+- future imported/API candidate matching should use `DpdDuplicateCityResolver`, matching FIAS/GAR guid, `countryCode`, `regionCode`, `indexMin`/`indexMax`, postal code, city name, and city code/KLADR where available;
+- after a future verified match/import, persist the mapping so later calculations do not repeat ambiguous lookup;
 - use FTP files `GeographyDPD_YYYYMMDD` and `GeographyNewDPD_YYYYMMDD` only as optional future import data, not as a runtime dependency.
 
-Stage 2 also adds admin-only geography diagnostics/manual mapping in the DPD settings tab. Diagnostics report whether a cityId was found, the source, whether mapping was saved, whether duplicate rows were present, and whether the duplicate resolver was applied. DPD API/transport exceptions are caught and saved as non-fatal diagnostic messages. No mass enrichment is started automatically.
+Stage 2 also adds admin-only geography diagnostics/manual mapping in the DPD settings tab. The current diagnostic checks only whether a cityId mapping exists and does not run a live SOAP call. No mass enrichment is started automatically.
 
 If FTP import becomes necessary, it must be a separate task with manual run or WP-Cron no more often than once every 6 months, no hardcoded FTP credentials, audit/logging, and safe rollback.
 
