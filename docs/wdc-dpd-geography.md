@@ -1,6 +1,6 @@
 # WDC DPD Geography
 
-Version: 0.56.8.
+Version: 0.56.9.
 
 ## Scope
 
@@ -77,6 +77,18 @@ The working `wdc_location_delivery_codes` table is not changed while rows are be
 The import state stores the staging table name for services, but public state never exposes `file_path`, `index_path` or `stage_table`. The cancelled heavy state arrays `seen_mappings`, `saved_by_job` and `blocked_locations` are not stored in the option.
 
 The admin UI shows the current phase, progress bar, processed row count, percent of file read, counters, last message and reset button. Progress is calculated by `byte_offset / file_size`; `total_rows` remains `0` because the importer intentionally does not scan the whole file before import. If JavaScript is unavailable, the current state and reset action remain visible on page reload.
+
+The DPD География tab also renders a separate last action result block above the forms and progress UI. This result is stored in DPD settings under `dpd_last_geography_action_result` and is intentionally separate from the current import state and `dpd_last_geography_import_report`. The block uses WordPress notice classes (`success`, `warning`, `error`, `info`) and includes a title, message, compact details and timestamp. It is not cleared immediately after display, so a manager can still see the result after redirect or page refresh until the next DPD geography action replaces it.
+
+The following actions save a visible geography result:
+
+- diagnostics by `location_id`, including `location_id`, `cityId`, source, saved status, multiple flag, resolver flag and `matched_by`;
+- manual DPD cityId mapping, including location ID, cityId and saved status;
+- DaData fallback test, including DaData result status, DPD ID, saved status and token usage hint;
+- SFTP/no-ssh2 warning, without mutating the import job state;
+- manual or SFTP import job start, including source file, file size and phase;
+- import reset;
+- geography SFTP settings save.
 
 Matching is conservative:
 

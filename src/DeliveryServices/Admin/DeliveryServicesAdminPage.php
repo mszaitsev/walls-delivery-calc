@@ -370,19 +370,31 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_dpd_geography_settings' === $action && $this->dpd_settings instanceof DpdSettings ) {
 				$this->dpd_settings->save_geography_settings_from_admin( $_POST );
 				$this->dpd_settings->save_connection_result( true, 'DPD geography settings saved.' );
+				$this->save_dpd_geography_action_result( 'success', 'DPD Geography settings', 'DPD geography settings saved.', array() );
 			}
 			if ( 'run_dpd_geography_ftp_import' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_ftp instanceof DpdGeographyFtpClient && $this->dpd_geography_importer instanceof DpdGeographyImportService ) {
 				$state = $this->dpd_geography_importer->start_from_ftp( $this->dpd_geography_ftp );
 				$this->dpd_settings->save_connection_result( 'failed' !== (string) ( $state['phase'] ?? '' ), 'DPD geography FTP import job: ' . (string) ( $state['last_message'] ?? '' ) );
+				$this->save_dpd_import_action_result( 'DPD SFTP import', $state );
 			}
 			if ( 'upload_dpd_geography_csv_import' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_importer instanceof DpdGeographyImportService ) {
 				$upload = $_FILES['dpd_geography_csv'] ?? null;
 				$state = is_array( $upload ) ? $this->dpd_geography_importer->start_from_uploaded_file( $upload ) : array( 'phase' => 'failed', 'last_message' => 'DPD geography manual import: CSV upload failed.' );
 				$this->dpd_settings->save_connection_result( 'failed' !== (string) ( $state['phase'] ?? '' ), 'DPD geography manual import job: ' . (string) ( $state['last_message'] ?? '' ) );
+				$this->save_dpd_import_action_result( 'DPD Geography import', $state );
 			}
 			if ( 'reset_dpd_geography_import' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_importer instanceof DpdGeographyImportService ) {
 				$state = $this->dpd_geography_importer->reset();
 				$this->dpd_settings->save_connection_result( true, 'DPD geography import reset: ' . (string) ( $state['last_message'] ?? '' ) );
+				$this->save_dpd_geography_action_result(
+					'info',
+					'DPD Geography import reset',
+					'Import state was reset.',
+					array(
+						'phase' => (string) ( $state['phase'] ?? '' ),
+						'message' => (string) ( $state['last_message'] ?? '' ),
+					)
+				);
 			}
 			if ( in_array( $action, array( 'check_dpd_geography', 'save_dpd_city_mapping' ), true ) && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_diagnostics instanceof DpdGeographyDiagnosticService ) {
 				$location_id = isset( $_POST['dpd_geography_location_id'] ) ? max( 0, (int) $_POST['dpd_geography_location_id'] ) : 0;
@@ -403,6 +415,21 @@ final class DeliveryServicesAdminPage {
 						implode( ',', $result['matched_by'] )
 					)
 				);
+				$this->save_dpd_geography_action_result(
+					(bool) $result['success'] ? 'success' : 'warning',
+					'save_dpd_city_mapping' === $action ? 'DPD cityId manual mapping' : 'DPD geography diagnostic',
+					(string) $result['message'],
+					array(
+						'location_id' => $location_id,
+						'cityId' => (string) $result['city_id'],
+						'source' => (string) $result['source'],
+						'saved' => ! empty( $result['saved'] ) ? 'yes' : 'no',
+						'multiple' => ! empty( $result['multiple'] ) ? 'yes' : 'no',
+						'resolver' => ! empty( $result['resolver_applied'] ) ? 'yes' : 'no',
+						'matched_by' => is_array( $result['matched_by'] ?? null ) ? $result['matched_by'] : array(),
+						'message' => (string) $result['message'],
+					)
+				);
 			}
 			if ( 'test_dpd_dadata_fallback' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_dadata_fallback instanceof DpdDaDataDeliveryFallbackService ) {
 				$location_id = isset( $_POST['dpd_geography_location_id'] ) ? max( 0, (int) $_POST['dpd_geography_location_id'] ) : 0;
@@ -415,6 +442,20 @@ final class DeliveryServicesAdminPage {
 						(string) $result['city_id'],
 						(int) $result['location_id'],
 						(string) $result['token_id']
+					)
+				);
+				$this->save_dpd_geography_action_result(
+					(bool) $result['success'] ? 'success' : 'error',
+					'DPD DaData fallback',
+					(string) $result['message'],
+					array(
+						'location_id' => (int) $result['location_id'],
+						'dadata_result' => (bool) $result['success'] ? 'found' : 'not_found',
+						'dpd_id' => (string) $result['city_id'],
+						'saved' => (bool) $result['success'] ? 'yes' : 'no',
+						'token_usage' => '' !== (string) $result['token_id'] ? 'incremented' : 'not_available',
+						'token_id' => (string) $result['token_id'],
+						'message' => (string) $result['message'],
 					)
 				);
 			}
@@ -986,6 +1027,7 @@ final class DeliveryServicesAdminPage {
 		$percent = max( 0, min( 100, (float) ( $state['percent_complete'] ?? 0 ) ) );
 		$sftp_available = $this->dpd_geography_ftp instanceof DpdGeographyFtpClient && $this->dpd_geography_ftp->is_sftp_available();
 		?>
+		<?php $this->render_dpd_geography_action_result(); ?>
 		<form method="post" style="max-width: 860px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
 			<input type="hidden" name="wdc_delivery_services_action" value="save_dpd_geography_settings">
@@ -1090,6 +1132,81 @@ final class DeliveryServicesAdminPage {
 			</table>
 		<?php endif; ?>
 		<?php
+	}
+
+	private function render_dpd_geography_action_result(): void {
+		if ( ! $this->dpd_settings instanceof DpdSettings ) {
+			return;
+		}
+		$result = $this->dpd_settings->get_geography_action_result();
+		if ( array() === $result ) {
+			return;
+		}
+		$type = (string) ( $result['type'] ?? 'info' );
+		$notice_class = match ( $type ) {
+			'success' => 'notice-success',
+			'warning' => 'notice-warning',
+			'error' => 'notice-error',
+			default => 'notice-info',
+		};
+		$details = is_array( $result['details'] ?? null ) ? $result['details'] : array();
+		?>
+		<div class="notice <?php echo esc_attr( $notice_class ); ?>" style="max-width: 860px; padding-top: 8px; padding-bottom: 8px;">
+			<p><strong><?php echo esc_html( (string) ( $result['title'] ?? 'DPD География' ) ); ?></strong></p>
+			<?php if ( '' !== (string) ( $result['message'] ?? '' ) ) : ?>
+				<p><?php echo esc_html( (string) $result['message'] ); ?></p>
+			<?php endif; ?>
+			<?php if ( array() !== $details ) : ?>
+				<ul style="margin: 0 0 0 18px; list-style: disc;">
+					<?php foreach ( $details as $key => $value ) : ?>
+						<li><code><?php echo esc_html( (string) $key ); ?></code>=<?php echo esc_html( is_array( $value ) ? implode( ',', array_map( 'strval', $value ) ) : (string) $value ); ?></li>
+					<?php endforeach; ?>
+				</ul>
+			<?php endif; ?>
+			<?php if ( '' !== (string) ( $result['created_at'] ?? '' ) ) : ?>
+				<p class="description"><?php echo esc_html( (string) $result['created_at'] ); ?></p>
+			<?php endif; ?>
+		</div>
+		<?php
+	}
+
+	/**
+	 * @param array<string,mixed> $state
+	 */
+	private function save_dpd_import_action_result( string $title, array $state ): void {
+		$phase = (string) ( $state['phase'] ?? '' );
+		$status = (string) ( $state['status'] ?? '' );
+		$type = 'failed' === $phase ? 'error' : ( 'warning' === $status ? 'warning' : 'success' );
+		$message = (string) ( $state['last_message'] ?? ( $state['message'] ?? 'Import job created.' ) );
+		$this->save_dpd_geography_action_result(
+			$type,
+			$title,
+			'' !== $message ? $message : 'Import job created.',
+			array(
+				'source' => (string) ( $state['source'] ?? '' ),
+				'source_file' => (string) ( $state['source_file'] ?? '' ),
+				'file_size' => (int) ( $state['file_size'] ?? 0 ),
+				'phase' => $phase,
+				'status' => $status,
+			)
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $details
+	 */
+	private function save_dpd_geography_action_result( string $type, string $title, string $message, array $details ): void {
+		if ( ! $this->dpd_settings instanceof DpdSettings ) {
+			return;
+		}
+		$this->dpd_settings->save_geography_action_result(
+			array(
+				'type' => $type,
+				'title' => $title,
+				'message' => $message,
+				'details' => $details,
+			)
+		);
 	}
 
 	private function render_cdek_tariff_calculation_rows(): void {

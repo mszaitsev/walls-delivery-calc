@@ -154,6 +154,28 @@ dpd_smoke_assert( ! str_contains( $settings->last_connection_message(), 'test-cl
 dpd_smoke_assert( ! str_contains( $settings->last_connection_message(), 'production-client-key' ), 'DPD production client key must not be exposed in diagnostics.' );
 dpd_smoke_assert( ! str_contains( $settings->last_connection_message(), 'test-client-number' ), 'DPD test client number must not be exposed in diagnostics.' );
 
+$settings->save_geography_action_result(
+	array(
+		'type' => 'success',
+		'title' => 'DPD geography diagnostic',
+		'message' => 'DPD cityId mapping found.',
+		'details' => array(
+			'location_id' => 92468,
+			'cityId' => '49455627',
+			'source' => 'mapping',
+			'matched_by' => array( 'stored_mapping' ),
+			'secret' => 'clientKey=test-client-key',
+		),
+	)
+);
+$geography_action_result = $settings->get_geography_action_result();
+dpd_smoke_assert( 'success' === (string) $geography_action_result['type'], 'DPD geography action result type must be saved.' );
+dpd_smoke_assert( 'DPD geography diagnostic' === (string) $geography_action_result['title'], 'DPD geography action result title must be saved.' );
+dpd_smoke_assert( '49455627' === (string) $geography_action_result['details']['cityId'], 'DPD geography action result details must be saved.' );
+dpd_smoke_assert( ! str_contains( (string) $geography_action_result['details']['secret'], 'test-client-key' ), 'DPD geography action result details must be redacted.' );
+$settings->clear_geography_action_result();
+dpd_smoke_assert( array() === $settings->get_geography_action_result(), 'DPD geography action result must be clearable.' );
+
 $redacted = ( new LogRedactor() )->redact_context( array( 'clientKey' => 'secret', 'auth' => array( 'client_key' => 'nested' ) ) );
 dpd_smoke_assert( '[redacted]' === $redacted['clientKey'] && '[redacted]' === $redacted['auth']['client_key'], 'Log redactor must redact DPD client keys.' );
 
@@ -177,6 +199,8 @@ dpd_smoke_assert( ! $shipment_registry->has( DpdSettings::CARRIER_KEY ), 'DPD sh
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 dpd_smoke_assert( str_contains( $admin_source, 'save_dpd_settings' ) && str_contains( $admin_source, 'check_dpd_connection' ), 'Delivery service admin must expose DPD settings and diagnostic actions.' );
+dpd_smoke_assert( str_contains( $admin_source, 'render_dpd_geography_action_result' ) && str_contains( $admin_source, 'save_geography_action_result' ), 'Delivery service admin must render and save DPD geography action results.' );
+dpd_smoke_assert( str_contains( $admin_source, 'DPD SFTP import' ) && str_contains( $admin_source, 'DPD DaData fallback' ), 'DPD geography actions must save visible result titles.' );
 dpd_smoke_assert( str_contains( $admin_source, 'check_admin_referer( \'wdc_delivery_services\' )' ) && str_contains( $admin_source, 'current_user_can( AdminMenu::CAPABILITY )' ), 'Admin DPD actions must remain behind nonce and capability checks.' );
 dpd_smoke_assert( ! str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'Plugin must not register a DPD shipment adapter at foundation stage.' );
 dpd_smoke_assert( ! str_contains( $plugin_source, 'DpdCarrier' ), 'Plugin must not register a DPD runtime quote carrier at foundation stage.' );

@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.56.8.
+Current plugin version: 0.56.9.
+
+Version 0.56.9 adds a visible DPD География action result block. Diagnostics, manual cityId mapping, DaData fallback, SFTP warnings, import job start, and reset now save a structured last result and display it after admin redirects, separately from import progress and the last import report.
 
 Version 0.56.8 switches DPD Geography CSV reading to a custom bounded `fread()` line reader plus `str_getcsv()`. It supports Windows-1251 files without BOM and LF, CRLF, or CR line endings without relying on `fgets()`/`fgetcsv()` buffering, while still rejecting genuinely oversized rows safely. SFTP-unavailable warnings do not pollute import job errors.
 

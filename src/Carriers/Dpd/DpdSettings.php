@@ -32,6 +32,7 @@ final class DpdSettings {
 	public const GEOGRAPHY_FTP_PASSWORD_ENCRYPTED_KEY = 'dpd_geography_ftp_password_encrypted';
 	public const GEOGRAPHY_FTP_REMOTE_DIRECTORY_KEY = 'dpd_geography_ftp_remote_directory';
 	public const LAST_GEOGRAPHY_IMPORT_REPORT_KEY = 'dpd_last_geography_import_report';
+	public const LAST_GEOGRAPHY_ACTION_RESULT_KEY = 'dpd_last_geography_action_result';
 
 	public function __construct(
 		private SettingsRepository $settings,
@@ -60,6 +61,7 @@ final class DpdSettings {
 			self::GEOGRAPHY_FTP_PASSWORD_ENCRYPTED_KEY => '',
 			self::GEOGRAPHY_FTP_REMOTE_DIRECTORY_KEY => '/integration',
 			self::LAST_GEOGRAPHY_IMPORT_REPORT_KEY => array(),
+			self::LAST_GEOGRAPHY_ACTION_RESULT_KEY => array(),
 		);
 	}
 
@@ -206,6 +208,49 @@ final class DpdSettings {
 		return $this->settings->get_array( self::LAST_GEOGRAPHY_IMPORT_REPORT_KEY, array() );
 	}
 
+	/**
+	 * @param array<string,mixed> $result
+	 */
+	public function save_geography_action_result( array $result ): void {
+		$type = (string) ( $result['type'] ?? 'info' );
+		if ( ! in_array( $type, array( 'success', 'warning', 'error', 'info' ), true ) ) {
+			$type = 'info';
+		}
+		$details = is_array( $result['details'] ?? null ) ? $result['details'] : array();
+		$this->settings->set(
+			self::LAST_GEOGRAPHY_ACTION_RESULT_KEY,
+			array(
+				'type' => $type,
+				'title' => $this->sanitize_text( (string) ( $result['title'] ?? 'DPD География' ) ),
+				'message' => $this->redact( $this->sanitize_text( (string) ( $result['message'] ?? '' ) ) ),
+				'details' => $this->redact_details( $details ),
+				'created_at' => (string) ( $result['created_at'] ?? ( function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ) ) ),
+			)
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function get_geography_action_result(): array {
+		$result = $this->settings->get_array( self::LAST_GEOGRAPHY_ACTION_RESULT_KEY, array() );
+		if ( array() === $result ) {
+			return array();
+		}
+
+		return array(
+			'type' => (string) ( $result['type'] ?? 'info' ),
+			'title' => (string) ( $result['title'] ?? '' ),
+			'message' => (string) ( $result['message'] ?? '' ),
+			'details' => is_array( $result['details'] ?? null ) ? $result['details'] : array(),
+			'created_at' => (string) ( $result['created_at'] ?? '' ),
+		);
+	}
+
+	public function clear_geography_action_result(): void {
+		$this->settings->set( self::LAST_GEOGRAPHY_ACTION_RESULT_KEY, array() );
+	}
+
 	private function client_number( string $environment ): string {
 		$key = self::ENV_PRODUCTION === $environment ? self::PRODUCTION_CLIENT_NUMBER_KEY : self::TEST_CLIENT_NUMBER_KEY;
 
@@ -259,6 +304,23 @@ final class DpdSettings {
 		$message = preg_replace( '/\b(?:clientKey|client_key|token|secret)[A-Za-z0-9._\-:=]*\b/i', '[redacted]', $message ) ?? $message;
 
 		return $message;
+	}
+
+	/**
+	 * @param array<string,mixed> $details
+	 * @return array<string,mixed>
+	 */
+	private function redact_details( array $details ): array {
+		$redacted = array();
+		foreach ( $details as $key => $value ) {
+			if ( is_array( $value ) ) {
+				$redacted[ $key ] = implode( ',', array_map( 'strval', $value ) );
+				continue;
+			}
+			$redacted[ $key ] = is_scalar( $value ) ? $this->redact( (string) $value ) : '';
+		}
+
+		return $redacted;
 	}
 
 	private function sanitize_text( string $value ): string {
