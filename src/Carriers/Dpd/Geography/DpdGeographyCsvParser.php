@@ -7,6 +7,8 @@ use Generator;
 defined( 'ABSPATH' ) || exit;
 
 final class DpdGeographyCsvParser {
+	private const MAX_CSV_ROW_LENGTH = 262144;
+
 	private const POSITIONAL_COLUMNS = array(
 		0 => 'dpd_city_id',
 		1 => 'country_code',
@@ -58,13 +60,15 @@ final class DpdGeographyCsvParser {
 		$has_header = false;
 		$file = fopen( $path, 'rb' );
 		if ( ! is_resource( $file ) ) {
-			return array( 'columns' => $columns, 'data_offset' => 0, 'has_header' => false );
+			throw new \RuntimeException( 'Unable to read DPD Geography CSV header. Check file encoding and row length.' );
 		}
 
-		while ( false !== ( $row = fgetcsv( $file, 0, ';', '"', '\\' ) ) ) {
+		$read_any = false;
+		while ( false !== ( $row = $this->read_csv_row( $file ) ) ) {
 			if ( ! is_array( $row ) || array( null ) === $row ) {
 				continue;
 			}
+			$read_any = true;
 			$row = array_map( fn( mixed $value ): string => $this->to_utf8( (string) $value ), $row );
 			if ( $this->looks_like_header( $row ) ) {
 				$columns = $this->columns_from_header( $row );
@@ -74,6 +78,9 @@ final class DpdGeographyCsvParser {
 			break;
 		}
 		fclose( $file );
+		if ( ! $read_any ) {
+			throw new \RuntimeException( 'Unable to read DPD Geography CSV header. Check file encoding and row length.' );
+		}
 
 		return array(
 			'columns' => $columns,
@@ -90,7 +97,7 @@ final class DpdGeographyCsvParser {
 		$limit = max( 1, min( 10000, $limit ) );
 		$file = fopen( $path, 'rb' );
 		if ( ! is_resource( $file ) ) {
-			return array( 'rows' => array(), 'new_byte_offset' => $byte_offset, 'eof' => true, 'rows_read_count' => 0 );
+			throw new \RuntimeException( 'Unable to open DPD Geography CSV for reading.' );
 		}
 		if ( $byte_offset > 0 ) {
 			fseek( $file, $byte_offset );
@@ -98,7 +105,7 @@ final class DpdGeographyCsvParser {
 
 		$rows = array();
 		$count = 0;
-		while ( $count < $limit && false !== ( $row = fgetcsv( $file, 0, ';', '"', '\\' ) ) ) {
+		while ( $count < $limit && false !== ( $row = $this->read_csv_row( $file ) ) ) {
 			if ( ! is_array( $row ) || array( null ) === $row ) {
 				continue;
 			}
@@ -115,6 +122,21 @@ final class DpdGeographyCsvParser {
 		fclose( $file );
 
 		return array( 'rows' => $rows, 'new_byte_offset' => $new_offset, 'eof' => $eof, 'rows_read_count' => $count );
+	}
+
+	/**
+	 * @param resource $file
+	 * @return array<int,string|null>|false
+	 */
+	private function read_csv_row( $file ): array|false {
+		$before = (int) ftell( $file );
+		$row = fgetcsv( $file, self::MAX_CSV_ROW_LENGTH, ';', '"', '\\' );
+		$after = (int) ftell( $file );
+		if ( false !== $row && $after - $before >= self::MAX_CSV_ROW_LENGTH && ! feof( $file ) ) {
+			throw new \RuntimeException( 'DPD Geography CSV row exceeds the safe length limit. Check file encoding and row length.' );
+		}
+
+		return $row;
 	}
 
 	/**

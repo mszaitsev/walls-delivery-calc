@@ -193,9 +193,30 @@ $importer = new DpdGeographyImportService(
 	$stage,
 	$settings
 );
-$header = ( new DpdGeographyCsvParser() )->inspect_header( $path );
+$parser = new DpdGeographyCsvParser();
+$oversized_header_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-oversized-header-' );
+file_put_contents( $oversized_header_path, str_repeat( 'A', 270000 ) . "\n" );
+$oversized_header_failed = false;
+try {
+	$parser->inspect_header( $oversized_header_path );
+} catch ( RuntimeException $exception ) {
+	$oversized_header_failed = str_contains( $exception->getMessage(), 'row length' );
+}
+@unlink( $oversized_header_path );
+dpd_import_assert( $oversized_header_failed, 'oversized CSV header fails safely without memory exhaustion' );
+
+$oversized_row_path = tempnam( sys_get_temp_dir(), 'wdc-dpd-import-oversized-row-' );
+file_put_contents( $oversized_row_path, mb_convert_encoding( "ID НП;Код страны;Регион\n", 'Windows-1251', 'UTF-8' ) . str_repeat( '1', 270000 ) . "\n" );
+$oversized_job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $oversized_row_path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
+$oversized_step = $importer->step( (string) $oversized_job['job_id'], 1 );
+dpd_import_assert( 'failed' === (string) $oversized_step['phase'], 'read_step parser exception becomes failed import state' );
+dpd_import_assert( str_contains( (string) $oversized_step['last_message'], 'DPD geography CSV parse failed' ), 'read_step parser exception is reported as diagnostic message' );
+$importer->reset();
+
+$header = $parser->inspect_header( $path );
 dpd_import_assert( ! array_key_exists( 'total_rows', $header ), 'inspect_header does not perform a full-row count' );
 dpd_import_assert( (int) $header['data_offset'] > 0, 'inspect_header reads only header and returns data offset' );
+dpd_import_assert( 'dpd_city_id' === ( $header['columns'][0] ?? '' ) && 'country_code' === ( $header['columns'][1] ?? '' ), 'Windows-1251 header without BOM is detected correctly' );
 
 $job = $importer->start_from_uploaded_file( array( 'error' => UPLOAD_ERR_OK, 'tmp_name' => $path, 'name' => 'GeographyNewDPD_2026_06_16.csv' ) );
 $internal = $state->current();

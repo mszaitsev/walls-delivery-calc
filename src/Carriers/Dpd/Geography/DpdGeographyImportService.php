@@ -100,7 +100,11 @@ final class DpdGeographyImportService {
 		$loaded = unserialize( (string) file_get_contents( $index_path ), array( 'allowed_classes' => false ) );
 		$this->index->load( is_array( $loaded ) ? $loaded : array() );
 		$columns = is_array( $state['columns'] ?? null ) ? $state['columns'] : array();
-		$step = $this->parser->read_step( $file, (int) $state['byte_offset'], $columns, $limit );
+		try {
+			$step = $this->parser->read_step( $file, (int) $state['byte_offset'], $columns, $limit );
+		} catch ( Throwable $throwable ) {
+			return $this->state->fail( 'DPD geography CSV parse failed: ' . $throwable->getMessage() );
+		}
 		$patch = array(
 			'phase' => 'importing',
 			'byte_offset' => (int) $step['new_byte_offset'],

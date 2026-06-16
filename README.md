@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.56.5.
+Current plugin version: 0.56.6.
+
+Version 0.56.6 makes the DPD Geography CSV parser memory-safe on Windows/Local PHP by using a bounded `fgetcsv` row length. DPD `GeographyNewDPD_*.csv` may be Windows-1251 without BOM; rows are converted to UTF-8, and oversized/broken rows now fail as controlled diagnostics instead of exhausting memory.
 
 Version 0.56.5 removes the full pre-import CSV scan from DPD Geography import. Progress is now calculated from `byte_offset / file_size`, so large `GeographyNewDPD_*.csv` files do not need a row-count pass before import. Missing PHP `ssh2` is treated as an SFTP warning, not a failed import; manual CSV upload remains fully supported.
 

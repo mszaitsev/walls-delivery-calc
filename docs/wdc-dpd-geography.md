@@ -1,6 +1,6 @@
 # WDC DPD Geography
 
-Version: 0.56.5.
+Version: 0.56.6.
 
 ## Scope
 
@@ -50,7 +50,9 @@ The DPD География tab supports two admin-only import paths:
 - SFTP download from configured host/port/username/password/directory. Defaults are `ftp.dpd.ru`, port `22`, username `integration`, directory `/integration`; the password default is empty and is stored encrypted when entered.
 - Manual upload of a `.csv` file. The uploaded temporary file is moved into a temporary import path and removed after processing or reset.
 
-The importer reads `;`-delimited CSV row by row, supports UTF-8 and Windows-1251, detects the header row when present, and maps the documented first columns: DPD city ID, country code, region, district, main city, settlement, settlement type, postal code, FIAS and KLADR. Only `Код страны = RU` rows are imported. Postal codes, services/options, terminal data, schedules, raw rows and per-row diagnostics are not stored.
+The importer reads `;`-delimited CSV row by row, supports UTF-8 and Windows-1251 including Windows-1251 files without BOM, detects the header row when present, and maps the documented first columns: DPD city ID, country code, region, district, main city, settlement, settlement type, postal code, FIAS and KLADR. Only `Код страны = RU` rows are imported. Postal codes, services/options, terminal data, schedules, raw rows and per-row diagnostics are not stored.
+
+Parser reads are bounded with a safe maximum CSV row length (`262144` bytes) for every `fgetcsv()` call. This avoids unbounded buffer allocation on Windows/Local PHP. Rows exceeding the safe length are treated as broken input and reported as controlled parser diagnostics instead of causing memory exhaustion.
 
 As of 0.56.5, imports are stateful staging jobs rather than one synchronous PHP request:
 
