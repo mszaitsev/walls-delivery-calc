@@ -2,16 +2,16 @@
 
 ## Scope
 
-Version 0.57.1 keeps the DPD integration limited to foundation, geography and admin-only tariff diagnostics. The built-in delivery service uses:
+Version 0.58.0 keeps the DPD integration limited to foundation, geography, tariff calculation and checkout quote rates. The built-in delivery service uses:
 
 - `service_key`: `dpd`
 - `carrier_key`: `dpd`
 - title: `DPD`
 - default state: disabled
 
-DPD is not registered as a checkout runtime quote carrier and is not registered in `CarrierShipmentAdapterRegistry`. Enabling the service row alone does not produce checkout rates because there is no DPD carrier adapter in `CarrierRegistry`.
+DPD is registered as a checkout runtime quote carrier through `CarrierRegistry`, but it is not registered in `CarrierShipmentAdapterRegistry`. Enabling the service row can produce checkout rates only when credentials, sender cityId, receiver `location_id`, receiver `dpd_city_id`, country availability and service/rule checks all pass.
 
-Current stages intentionally do not implement DPD checkout rates, pickup points, order creation, cancellation, tracing/statuses, labels, COD, `unitLoad`, fiscal receipts, or receipt storage. DPD city FTP/SFTP/manual CSV import and tariff calculation are admin-only preparation/diagnostics and do not register runtime carrier behavior.
+Current stages intentionally do not implement DPD pickup points, order creation, cancellation, tracing/statuses, labels, COD, `unitLoad`, fiscal receipts, or receipt storage. DPD city FTP/SFTP/manual CSV import and admin tariff calculation remain preparation/diagnostics; checkout uses only tariff quotes.
 
 As of 0.56.3, DPD geography import is a stateful staging process. SFTP/manual CSV actions create an admin import job, build a `DpdLocationIndex` from active RU `wdc_locations`, create a per-job `wdc_dpd_geography_stage_<job_hash>` table, and process rows through AJAX polling with visual progress. The importer avoids SQL lookup per CSV row, does not write to `wdc_location_delivery_codes` during steps, and finalizes candidates into the working table only after EOF. Import state is stored in `wdc_dpd_geography_import_state`; the final report remains in DPD settings.
 
@@ -71,6 +71,16 @@ The stage 1 smoke test verifies test/production URL selection only. Runtime meth
 As of 0.57.1, `DpdApiClient::getServiceCostByParcels3()` calls `getServiceCostByParcels3` on `calculator2` through the same `DpdApiClient::call()` path as other low-level DPD wrappers, but passes the explicit `request` wrapper strategy required by the calculator SOAP shape. `DpdSoapRequest` adds credentials under `request.auth.clientNumber` and `request.auth.clientKey`; the tariff builder never inserts credentials. Geography methods keep the direct root-level auth shape.
 
 The `DPD Расчет` tab is admin-only. It stores sender/default parcel settings in `DpdSettings`, resolves sender `cityId` from explicit `dpd_tariff_sender_dpd_city_id` first and then from `dpd_tariff_sender_location_id` via `DpdCityResolver`, resolves receiver `location_id` via `wdc_location_delivery_codes.dpd_city_id`, and displays a visible result after redirect. Tariff and geography action result notices are cleared after their blocks render once; the DPD geography last import report and current import progress remain persistent. The tariff debug block shows redacted payload shape metadata and must not expose `clientKey`. It does not create checkout rates, write tariff rows, create shipments, or mutate orders.
+
+## Checkout Runtime Rates
+
+As of 0.58.0, `DpdQuoteCarrier` is registered in `CarrierRegistry` and returns only courier `DeliveryType::COURIER` rates. The checkout runtime does not use DPD pickup points or maps. It passes `selfDelivery=false` and defaults `selfPickup=false` for door-to-door; `dpd_runtime_pickup_mode=terminal` can switch only the sender side to terminal pickup.
+
+Runtime availability requires the DPD delivery service row to be enabled, RU country availability, complete active-environment credentials, configured sender `cityId`, selected checkout `location_id`, saved receiver `dpd_city_id`, and a successful DPD tariff response. API and mapping errors are logged and produce no DPD checkout rates instead of breaking checkout.
+
+Checkout package params are built from the domain package: total weight from cart/package when present, DPD default weight as fallback, DPD default dimensions for the first runtime stage, and declared value from package/order total with DPD default declared value as fallback. Basket composition, COD/NPP and `unitLoad` are not sent.
+
+`dpd_runtime_allowed_service_codes` defaults to `MAX,NDY`. Empty value allows every returned DPD service option. Options without numeric `cost` are skipped. Method titles use `dpd_runtime_method_title_prefix` and DPD `service_name`, for example `DPD Максимум` and `DPD Экспресс`.
 
 ## Credentials And Diagnostics
 
@@ -137,7 +147,6 @@ Fiscal receipts and DPD receipt storage are not implemented.
 
 ## Not Implemented In Current Stage
 
-- checkout runtime DPD rates;
 - DPD pickup points / parcel shops / maps;
 - DPD order creation, cancellation, statuses, labels;
 - COD / NPP;

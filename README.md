@@ -1,6 +1,12 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.57.1.
+Current plugin version: 0.58.0.
+
+Version 0.58.0 enables DPD checkout runtime rates through the existing carrier registry architecture. `DpdQuoteCarrier`
+uses `calculator2/getServiceCostByParcels3`, resolves receiver `dpd_city_id` from `wdc_location_delivery_codes`, builds
+door-to-door courier rates for returned service codes such as `MAX` / `DPD Максимум` and `NDY` / `DPD Экспресс`, and
+honors `dpd_runtime_allowed_service_codes`. DPD remains excluded from shipment adapters, shipment metabox creation,
+pickup points, maps, statuses, labels, COD/NPP, `unitLoad`, and fiscal receipt flows.
 
 Version 0.57.1 fixes DPD `calculator2/getServiceCostByParcels3` authentication by sending centralized
 `DpdSoapRequest` auth inside the calculator `request` wrapper while keeping geography methods on the direct

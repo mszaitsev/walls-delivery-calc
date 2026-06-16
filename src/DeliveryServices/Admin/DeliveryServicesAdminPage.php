@@ -1174,6 +1174,11 @@ final class DeliveryServicesAdminPage {
 				<?php $this->text_row( DpdSettings::TARIFF_DEFAULT_WIDTH_CM_KEY, __( 'Ширина, см', 'walls-delivery-calc' ), (string) $this->dpd_settings->tariff_default_width_cm() ); ?>
 				<?php $this->text_row( DpdSettings::TARIFF_DEFAULT_HEIGHT_CM_KEY, __( 'Высота, см', 'walls-delivery-calc' ), (string) $this->dpd_settings->tariff_default_height_cm() ); ?>
 				<?php $this->text_row( DpdSettings::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY, __( 'Объявленная ценность, руб.', 'walls-delivery-calc' ), (string) $this->dpd_settings->tariff_default_declared_value_rub() ); ?>
+				<tr><th colspan="2"><h3><?php echo esc_html__( 'Checkout DPD', 'walls-delivery-calc' ); ?></h3></th></tr>
+				<?php $this->text_row_with_description( DpdSettings::RUNTIME_ALLOWED_SERVICE_CODES_KEY, __( 'Разрешенные serviceCode DPD', 'walls-delivery-calc' ), $this->dpd_settings->runtime_allowed_service_codes_raw(), __( 'Через запятую. Например MAX,NDY. Если оставить пустым, checkout покажет все тарифы, которые вернул DPD.', 'walls-delivery-calc' ) ); ?>
+				<?php $this->text_row( DpdSettings::RUNTIME_METHOD_TITLE_PREFIX_KEY, __( 'Префикс метода checkout', 'walls-delivery-calc' ), $this->dpd_settings->runtime_method_title_prefix() ); ?>
+				<?php $this->select_assoc_row( DpdSettings::RUNTIME_PICKUP_MODE_KEY, __( 'Забор для checkout', 'walls-delivery-calc' ), $this->dpd_settings->runtime_pickup_mode(), array( 'door' => 'Дверь', 'terminal' => 'Терминал' ) ); ?>
+				<?php $this->select_assoc_row( DpdSettings::RUNTIME_DELIVERY_MODE_KEY, __( 'Доставка для checkout', 'walls-delivery-calc' ), $this->dpd_settings->runtime_delivery_mode(), array( 'door' => 'Дверь' ) ); ?>
 			</table>
 			<?php submit_button( __( 'Сохранить настройки расчета DPD', 'walls-delivery-calc' ) ); ?>
 		</form>

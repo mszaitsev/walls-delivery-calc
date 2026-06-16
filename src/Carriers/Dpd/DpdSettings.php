@@ -41,6 +41,10 @@ final class DpdSettings {
 	public const TARIFF_DEFAULT_WIDTH_CM_KEY = 'dpd_tariff_default_width_cm';
 	public const TARIFF_DEFAULT_HEIGHT_CM_KEY = 'dpd_tariff_default_height_cm';
 	public const TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY = 'dpd_tariff_default_declared_value_rub';
+	public const RUNTIME_ALLOWED_SERVICE_CODES_KEY = 'dpd_runtime_allowed_service_codes';
+	public const RUNTIME_METHOD_TITLE_PREFIX_KEY = 'dpd_runtime_method_title_prefix';
+	public const RUNTIME_PICKUP_MODE_KEY = 'dpd_runtime_pickup_mode';
+	public const RUNTIME_DELIVERY_MODE_KEY = 'dpd_runtime_delivery_mode';
 	public const LAST_TARIFF_ACTION_RESULT_KEY = 'dpd_last_tariff_action_result';
 
 	public function __construct(
@@ -79,6 +83,10 @@ final class DpdSettings {
 			self::TARIFF_DEFAULT_WIDTH_CM_KEY => 20,
 			self::TARIFF_DEFAULT_HEIGHT_CM_KEY => 20,
 			self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY => 1000,
+			self::RUNTIME_ALLOWED_SERVICE_CODES_KEY => 'MAX,NDY',
+			self::RUNTIME_METHOD_TITLE_PREFIX_KEY => 'DPD',
+			self::RUNTIME_PICKUP_MODE_KEY => 'door',
+			self::RUNTIME_DELIVERY_MODE_KEY => 'door',
 			self::LAST_TARIFF_ACTION_RESULT_KEY => array(),
 		);
 	}
@@ -285,6 +293,12 @@ final class DpdSettings {
 		$this->settings->set( self::TARIFF_DEFAULT_WIDTH_CM_KEY, max( 0.1, (float) ( $input[ self::TARIFF_DEFAULT_WIDTH_CM_KEY ] ?? 20 ) ) );
 		$this->settings->set( self::TARIFF_DEFAULT_HEIGHT_CM_KEY, max( 0.1, (float) ( $input[ self::TARIFF_DEFAULT_HEIGHT_CM_KEY ] ?? 20 ) ) );
 		$this->settings->set( self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY, max( 0.0, (float) ( $input[ self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY ] ?? 1000 ) ) );
+		$this->settings->set( self::RUNTIME_ALLOWED_SERVICE_CODES_KEY, $this->sanitize_service_codes( (string) ( $input[ self::RUNTIME_ALLOWED_SERVICE_CODES_KEY ] ?? 'MAX,NDY' ) ) );
+		$prefix = $this->sanitize_text( (string) ( $input[ self::RUNTIME_METHOD_TITLE_PREFIX_KEY ] ?? 'DPD' ) );
+		$this->settings->set( self::RUNTIME_METHOD_TITLE_PREFIX_KEY, '' !== $prefix ? $prefix : 'DPD' );
+		$pickup_mode = sanitize_key( wp_unslash( $input[ self::RUNTIME_PICKUP_MODE_KEY ] ?? 'door' ) );
+		$this->settings->set( self::RUNTIME_PICKUP_MODE_KEY, in_array( $pickup_mode, array( 'door', 'terminal' ), true ) ? $pickup_mode : 'door' );
+		$this->settings->set( self::RUNTIME_DELIVERY_MODE_KEY, 'door' );
 	}
 
 	public function tariff_sender_location_id(): int {
@@ -317,6 +331,38 @@ final class DpdSettings {
 
 	public function tariff_default_declared_value_rub(): float {
 		return max( 0.0, (float) $this->settings->get_string( self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY, '1000' ) );
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	public function runtime_allowed_service_codes(): array {
+		$codes = $this->sanitize_service_codes( $this->settings->get_string( self::RUNTIME_ALLOWED_SERVICE_CODES_KEY, 'MAX,NDY' ) );
+		if ( '' === $codes ) {
+			return array();
+		}
+
+		return array_values( array_filter( array_map( 'trim', explode( ',', $codes ) ), static fn( string $code ): bool => '' !== $code ) );
+	}
+
+	public function runtime_allowed_service_codes_raw(): string {
+		return $this->sanitize_service_codes( $this->settings->get_string( self::RUNTIME_ALLOWED_SERVICE_CODES_KEY, 'MAX,NDY' ) );
+	}
+
+	public function runtime_method_title_prefix(): string {
+		$prefix = trim( $this->settings->get_string( self::RUNTIME_METHOD_TITLE_PREFIX_KEY, 'DPD' ) );
+
+		return '' !== $prefix ? $prefix : 'DPD';
+	}
+
+	public function runtime_pickup_mode(): string {
+		$mode = $this->settings->get_string( self::RUNTIME_PICKUP_MODE_KEY, 'door' );
+
+		return 'terminal' === $mode ? 'terminal' : 'door';
+	}
+
+	public function runtime_delivery_mode(): string {
+		return 'door';
 	}
 
 	/**
@@ -443,6 +489,23 @@ final class DpdSettings {
 
 	private function digits( string $value ): string {
 		return preg_replace( '/\D+/', '', $value ) ?? '';
+	}
+
+	private function sanitize_service_codes( string $value ): string {
+		$codes = preg_split( '/[\s,;]+/', strtoupper( $value ) ) ?: array();
+		$codes = array_values(
+			array_unique(
+				array_filter(
+					array_map(
+						static fn( string $code ): string => preg_replace( '/[^A-Z0-9_\-]+/', '', $code ) ?? '',
+						$codes
+					),
+					static fn( string $code ): bool => '' !== $code
+				)
+			)
+		);
+
+		return implode( ',', $codes );
 	}
 
 	private function sanitize_text( string $value ): string {

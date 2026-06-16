@@ -214,7 +214,7 @@ final class CheckoutOrchestrator {
 			$rate->tariff_key,
 			$rate->tariff_name,
 			$rate->delivery_type,
-			$is_fallback ? $rate->title : $service->title,
+			$is_fallback || ! empty( $rate->meta['preserve_rate_title'] ) ? $rate->title : $service->title,
 			$rate->price,
 			$rate->original_price,
 			$rate->crossed_price,

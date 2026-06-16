@@ -97,13 +97,22 @@ As of 0.54.0, the bootstrap also creates the DPD foundation service:
 - default state: disabled
 - RU availability row is created for future use
 
-DPD is registered only for delivery service/settings/admin diagnostics. There is no DPD carrier adapter in `CarrierRegistry` and no DPD shipment adapter in `CarrierShipmentAdapterRegistry`, so DPD does not produce checkout rates and does not appear in shipment actions at the foundation stage.
+As of 0.58.0, DPD is registered as a checkout quote carrier in `CarrierRegistry`. It is still disabled by default through the built-in delivery service row, so DPD rates appear only after the administrator enables the `dpd` service and completes the active DPD environment credentials, sender city settings and receiver city mapping. There is still no DPD shipment adapter in `CarrierShipmentAdapterRegistry`, so DPD does not appear in shipment creation/metabox actions.
 
 The DPD `Данные для входа` tab stores test/production `clientNumber`, encrypted `clientKey`, environment, timeout and optional debug flag through the existing settings/encryption layer. The connection check is a dry diagnostic and does not execute a DPD API call.
 
 As of 0.56.3, DPD geography lives in a separate `DPD География` tab. This tab stores SFTP settings for `GeographyNewDPD_*.csv` (`host`, `port`, `username`, encrypted password and remote directory), starts SFTP or manual CSV import jobs, shows AJAX progress for the current job, allows reset of a stale/failed/running job, diagnoses one `location_id`, saves manual `dpd_city_id`, runs the single-location DaData delivery fallback, and shows the last import report. The import builds an indexed lookup from active RU `wdc_locations`, does not query SQL per CSV row, and writes import rows only to a per-job DPD staging table until EOF. Finalization refreshes only `wdc_location_delivery_codes.dpd_city_id`/`updated_at`; reset leaves the working table untouched. These actions do not enable DPD checkout rates or shipment actions.
 
-As of 0.57.0, DPD also has a `DPD Расчет` tab. It stores sender/default parcel settings and provides an admin-only `getServiceCostByParcels3` test calculator. Results are visible after redirect with normalized service code/name/cost/period fields and optional raw debug output. The calculator does not register DPD in checkout, does not write delivery rate tables, and does not add shipment actions.
+As of 0.57.0, DPD also has a `DPD Расчет` tab. It stores sender/default parcel settings and provides an admin-only `getServiceCostByParcels3` test calculator. Results are visible once after redirect with normalized service code/name/cost/period fields and optional raw debug output. The calculator does not write delivery rate tables and does not add shipment actions.
+
+As of 0.58.0, the same tab stores DPD checkout runtime settings:
+
+- `allowed_service_codes`: `MAX,NDY` by default; empty means all returned DPD services with numeric cost.
+- `method_title_prefix`: `DPD` by default; checkout labels use the prefix plus DPD service name/code, for example `DPD Максимум` and `DPD Экспресс`.
+- `runtime_pickup_mode`: `door` by default; `terminal` is reserved for sender-side terminal pickup without implementing customer pickup selection.
+- `runtime_delivery_mode`: fixed to `door` for the first checkout runtime stage.
+
+DPD checkout rates reuse `calculator2/getServiceCostByParcels3`, receiver `dpd_city_id` from `wdc_location_delivery_codes` through `DpdCityResolver`, sender city ID from tariff settings/override, aggregate package weight/dimensions/declared value, and the common delivery-service post-processing for rounding, minimum price and rules. DPD pickup points, maps, postamats, order creation, statuses, labels, COD/НПП, `unitLoad` and fiscal receipts are not implemented.
 
 ## Admin
 
