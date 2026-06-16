@@ -36,13 +36,17 @@ require_once __DIR__ . '/../../src/Locations/Storage/LocationDeliveryCodeReposit
 require_once __DIR__ . '/../../src/Carriers/Dpd/DpdSettings.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportReport.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyCsvParser.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdLocationIndex.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyMatcher.php';
+require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportStateService.php';
 require_once __DIR__ . '/../../src/Carriers/Dpd/Geography/DpdGeographyImportService.php';
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyCsvParser;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyImportService;
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyImportStateService;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyMatcher;
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdLocationIndex;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
@@ -141,7 +145,7 @@ $GLOBALS['wpdb']->locations = array(
 		'country_code' => 'RU',
 		'region_code' => '54',
 		'region_name' => 'Новосибирская',
-		'district_name' => 'Два',
+		'district_name' => 'Один',
 		'city_name' => 'Дубль',
 		'city_type' => 'с',
 		'settlement_name' => 'Дубль',
@@ -161,7 +165,7 @@ $csv = implode(
 		'70000001;RU;Новосибирская;;Бердск;Бердск;г;633010;;RU54000002000',
 		'80000001;RU;Новосибирская;;Конфликт;Конфликт;г;633020;22222222-2222-3333-4444-555555555555;RU54000003000',
 		'80000002;RU;Новосибирская;;Конфликт;Конфликт;г;633021;22222222-2222-3333-4444-555555555555;RU54000003000',
-		'90000001;RU;Новосибирская;;Дубль;Дубль;с;633030;;',
+		'90000001;RU;Новосибирская;Один;Дубль;Дубль;с;633030;;',
 		'10000001;KZ;Алматы;;Алматы;Алматы;г;050000;;',
 		';RU;Новосибирская;;Пусто;Пусто;г;633040;;',
 	)
@@ -171,10 +175,15 @@ file_put_contents( $path, mb_convert_encoding( $csv, 'Windows-1251', 'UTF-8' ) )
 
 $settings = new DpdSettings( new SettingsRepository(), new EncryptionService() );
 $repository = new LocationDeliveryCodeRepository( $GLOBALS['wpdb'] );
+$location_repository = new LocationRepository( $GLOBALS['wpdb'] );
+$index = new DpdLocationIndex( $location_repository );
+$state = new DpdGeographyImportStateService();
 $importer = new DpdGeographyImportService(
 	new DpdGeographyCsvParser(),
-	new DpdGeographyMatcher( new LocationRepository( $GLOBALS['wpdb'] ) ),
+	new DpdGeographyMatcher( $index ),
 	$repository,
+	$index,
+	$state,
 	$settings
 );
 $report = $importer->import_file( $path, 'manual', 'GeographyNewDPD_2026_06_16.csv' );
@@ -184,9 +193,10 @@ dpd_import_assert( 8 === (int) $report['total_rows'], 'parser counts data rows a
 dpd_import_assert( 7 === (int) $report['ru_rows'], 'import processes RU rows only' );
 dpd_import_assert( 1 === (int) $report['skipped_non_ru'], 'import skips non-RU rows' );
 dpd_import_assert( 1 === (int) $report['skipped_invalid'], 'import skips rows without DPD city ID' );
-dpd_import_assert( 1 === (int) $report['matched_by_fias'], 'FIAS exact match is saved once despite duplicate postal rows' );
+dpd_import_assert( 3 === (int) $report['matched_by_fias'], 'FIAS exact matches are counted before conflict rollback' );
 dpd_import_assert( 1 === (int) $report['matched_by_kladr'], 'KLADR normalized match is saved' );
-dpd_import_assert( 2 === (int) $report['saved_mappings'], 'two non-conflicting mappings are saved' );
+dpd_import_assert( 3 === (int) $report['saved_mappings'], 'non-conflicting rows are saved and conflicted job-local writes are rolled back' );
+dpd_import_assert( 1 === (int) $report['unchanged_mappings'], 'duplicate same DPD city ID is idempotent' );
 dpd_import_assert( 1 === (int) $report['conflicts'], 'different DPD city IDs for one location are treated as conflict' );
 dpd_import_assert( 1 === (int) $report['ambiguous'], 'ambiguous name match is not saved' );
 dpd_import_assert( '49455627' === $repository->get_dpd_city_id( 1 ), 'FIAS match writes dpd_city_id' );
@@ -194,6 +204,8 @@ dpd_import_assert( '70000001' === $repository->get_dpd_city_id( 2 ), 'KLADR norm
 dpd_import_assert( null === $repository->get_dpd_city_id( 3 ), 'conflicted mapping is not saved' );
 dpd_import_assert( null === $repository->get_dpd_city_id( 4 ) && null === $repository->get_dpd_city_id( 5 ), 'ambiguous name mapping is not saved' );
 dpd_import_assert( array() !== $settings->last_geography_import_report(), 'last import report is stored in settings' );
+dpd_import_assert( 'finished' === $state->current()['phase'], 'step import finishes job state' );
+dpd_import_assert( ! file_exists( $path ), 'import temp file is deleted on finish' );
 
 $plugin_source = file_get_contents( __DIR__ . '/../../src/Core/Plugin.php' );
 dpd_import_assert( is_string( $plugin_source ) && ! str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'DPD shipment adapter is not registered by geography import' );

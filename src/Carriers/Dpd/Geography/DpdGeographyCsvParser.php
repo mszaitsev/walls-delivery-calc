@@ -40,12 +40,30 @@ final class DpdGeographyCsvParser {
 	 * @return Generator<int,array<string,string>>
 	 */
 	public function rows( string $path ): Generator {
+		$inspect = $this->inspect_file( $path );
+		$offset = (int) $inspect['data_offset'];
+		do {
+			$step = $this->read_step( $path, $offset, $inspect['columns'], 5000 );
+			foreach ( $step['rows'] as $row ) {
+				yield $row;
+			}
+			$offset = (int) $step['new_byte_offset'];
+		} while ( ! $step['eof'] );
+	}
+
+	/**
+	 * @return array{columns:array<int,string>,data_offset:int,total_rows:int,has_header:bool}
+	 */
+	public function inspect_file( string $path ): array {
 		$file = new SplFileObject( $path, 'rb' );
 		$file->setFlags( SplFileObject::READ_CSV | SplFileObject::SKIP_EMPTY );
 		$file->setCsvControl( ';', '"', '\\' );
 
 		$columns = self::POSITIONAL_COLUMNS;
 		$first = true;
+		$data_offset = 0;
+		$has_header = false;
+		$total_rows = 0;
 		foreach ( $file as $row ) {
 			if ( ! is_array( $row ) || array( null ) === $row ) {
 				continue;
@@ -55,20 +73,75 @@ final class DpdGeographyCsvParser {
 				$first = false;
 				if ( $this->looks_like_header( $row ) ) {
 					$columns = $this->columns_from_header( $row );
+					$data_offset = $file->ftell();
+					$has_header = true;
 					continue;
 				}
 			}
-
-			$mapped = array();
-			foreach ( $columns as $index => $key ) {
-				$mapped[ $key ] = trim( (string) ( $row[ $index ] ?? '' ) );
-			}
-			foreach ( self::POSITIONAL_COLUMNS as $key ) {
-				$mapped[ $key ] = (string) ( $mapped[ $key ] ?? '' );
-			}
-
-			yield $mapped;
+			++$total_rows;
 		}
+
+		return array(
+			'columns' => $columns,
+			'data_offset' => $data_offset,
+			'total_rows' => $total_rows,
+			'has_header' => $has_header,
+		);
+	}
+
+	/**
+	 * @param array<int,string> $columns
+	 * @return array{rows:array<int,array<string,string>>,new_byte_offset:int,eof:bool,rows_read_count:int}
+	 */
+	public function read_step( string $path, int $byte_offset, array $columns, int $limit = 3000 ): array {
+		$limit = max( 1, min( 10000, $limit ) );
+		$file = fopen( $path, 'rb' );
+		if ( ! is_resource( $file ) ) {
+			return array( 'rows' => array(), 'new_byte_offset' => $byte_offset, 'eof' => true, 'rows_read_count' => 0 );
+		}
+		if ( $byte_offset > 0 ) {
+			fseek( $file, $byte_offset );
+		}
+
+		$rows = array();
+		$count = 0;
+		while ( $count < $limit && false !== ( $row = fgetcsv( $file, 0, ';', '"', '\\' ) ) ) {
+			if ( ! is_array( $row ) || array( null ) === $row ) {
+				continue;
+			}
+			$row = array_map( fn( mixed $value ): string => $this->to_utf8( (string) $value ), $row );
+			$mapped = $this->map_row( $row, $columns );
+			if ( array() === $mapped ) {
+				continue;
+			}
+			$rows[] = $mapped;
+			++$count;
+		}
+		$new_offset = (int) ftell( $file );
+		$eof = feof( $file );
+		fclose( $file );
+
+		return array( 'rows' => $rows, 'new_byte_offset' => $new_offset, 'eof' => $eof, 'rows_read_count' => $count );
+	}
+
+	/**
+	 * @param array<int,string> $row
+	 * @param array<int,string> $columns
+	 * @return array<string,string>
+	 */
+	private function map_row( array $row, array $columns ): array {
+		if ( array() === $columns ) {
+			$columns = self::POSITIONAL_COLUMNS;
+		}
+		$mapped = array();
+		foreach ( $columns as $index => $key ) {
+			$mapped[ $key ] = trim( (string) ( $row[ $index ] ?? '' ) );
+		}
+		foreach ( self::POSITIONAL_COLUMNS as $key ) {
+			$mapped[ $key ] = (string) ( $mapped[ $key ] ?? '' );
+		}
+
+		return $mapped;
 	}
 
 	/**

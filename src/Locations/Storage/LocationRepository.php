@@ -316,6 +316,53 @@ final class LocationRepository {
 		return $this->rows_to_locations( is_array( $rows ) ? $rows : array() );
 	}
 
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function dpd_location_index_rows( int $limit = 5000, int $offset = 0 ): array {
+		$limit = max( 100, min( 20000, $limit ) );
+		$offset = max( 0, $offset );
+		$columns = array( 'id', 'country_code', 'active', 'fias_id', 'city_fias_id', 'kladr_id', 'city_kladr_id', 'region_name', 'district_name', 'place_name', 'settlement_name', 'city_name', 'place_type', 'settlement_type', 'city_type' );
+
+		if ( $this->has_test_location_rows() ) {
+			return array_slice(
+				array_values(
+					array_map(
+						static function ( array $row ) use ( $columns ): array {
+							$filtered = array();
+							foreach ( $columns as $column ) {
+								$filtered[ $column ] = $row[ $column ] ?? '';
+							}
+							return $filtered;
+						},
+						array_filter(
+							$this->test_location_rows(),
+							static fn( array $row ): bool => 1 === (int) ( $row['active'] ?? 1 ) && 'RU' === strtoupper( (string) ( $row['country_code'] ?? 'RU' ) )
+						)
+					)
+				),
+				$offset,
+				$limit
+			);
+		}
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				'SELECT id, country_code, active, fias_id, city_fias_id, kladr_id, city_kladr_id, region_name, district_name, place_name, settlement_name, city_name, place_type, settlement_type, city_type
+				FROM ' . $this->table_name() . '
+				WHERE active = 1 AND country_code = %s
+				ORDER BY id ASC
+				LIMIT %d OFFSET %d',
+				'RU',
+				$limit,
+				$offset
+			),
+			ARRAY_A
+		);
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
 	public function find_first_by_postal_code( string $postal_code ): ?Location {
 		$postal_code = preg_replace( '/\D+/', '', $postal_code ) ?? '';
 		if ( '' === $postal_code ) {

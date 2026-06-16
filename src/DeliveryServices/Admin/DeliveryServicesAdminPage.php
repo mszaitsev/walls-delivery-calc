@@ -103,31 +103,47 @@ final class DeliveryServicesAdminPage {
 		add_action( 'admin_init', array( $this, 'handle_actions' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_action( 'wp_ajax_wdc_russian_post_pickup_import_status', array( $this, 'ajax_pickup_import_status' ) );
+		add_action( 'wp_ajax_wdc_dpd_geography_import_status', array( $this, 'ajax_dpd_geography_import_status' ) );
 	}
 
 	public function enqueue_assets(): void {
 		$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : '';
 		$service = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
 		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
-		if ( self::MENU_SLUG !== $page || RussianPostDomesticSettings::SERVICE_KEY !== $service || 'russian_post_pickup' !== $tab ) {
-			return;
+		if ( self::MENU_SLUG === $page && RussianPostDomesticSettings::SERVICE_KEY === $service && 'russian_post_pickup' === $tab ) {
+			wp_enqueue_script(
+				'wdc-russian-post-pickup-import-admin',
+				$this->asset_url( 'assets/admin/russian-post-pickup-import.js' ),
+				array(),
+				$this->asset_version(),
+				true
+			);
+			wp_localize_script(
+				'wdc-russian-post-pickup-import-admin',
+				'wdcRussianPostPickupImport',
+				array(
+					'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+					'nonce' => wp_create_nonce( 'wdc_russian_post_pickup_import_status' ),
+				)
+			);
 		}
-
-		wp_enqueue_script(
-			'wdc-russian-post-pickup-import-admin',
-			$this->asset_url( 'assets/admin/russian-post-pickup-import.js' ),
-			array(),
-			$this->asset_version(),
-			true
-		);
-		wp_localize_script(
-			'wdc-russian-post-pickup-import-admin',
-			'wdcRussianPostPickupImport',
-			array(
-				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-				'nonce' => wp_create_nonce( 'wdc_russian_post_pickup_import_status' ),
-			)
-		);
+		if ( self::MENU_SLUG === $page && DpdSettings::SERVICE_KEY === $service && 'dpd_geography' === $tab ) {
+			wp_enqueue_script(
+				'wdc-dpd-geography-import-admin',
+				$this->asset_url( 'assets/admin/dpd-geography-import.js' ),
+				array(),
+				$this->asset_version(),
+				true
+			);
+			wp_localize_script(
+				'wdc-dpd-geography-import-admin',
+				'wdcDpdGeographyImport',
+				array(
+					'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+					'nonce' => wp_create_nonce( 'wdc_dpd_geography_import_status' ),
+				)
+			);
+		}
 	}
 
 	public function add_menu_page(): void {
@@ -156,6 +172,21 @@ final class DeliveryServicesAdminPage {
 		wp_send_json_success( $state );
 	}
 
+	public function ajax_dpd_geography_import_status(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 );
+		}
+		if ( ! check_ajax_referer( 'wdc_dpd_geography_import_status', 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 );
+		}
+
+		$state = $this->dpd_geography_importer instanceof DpdGeographyImportService
+			? $this->dpd_geography_importer->step( '', 3000 )
+			: array();
+
+		wp_send_json_success( $state );
+	}
+
 	private function asset_url( string $path ): string {
 		if ( $this->environment instanceof PluginEnvironment ) {
 			return $this->environment->plugin_url() . ltrim( $path, '/' );
@@ -179,7 +210,7 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
-		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback' ), true ) ) {
+		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback' ), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -190,7 +221,7 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_tariffs' === $action ) {
 				$data = array();
 			}
-			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback' ), true ) ) {
+			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback' ), true ) ) {
 				$data = array();
 			}
 			if ( $id > 0 && array() !== $data ) {
@@ -341,41 +372,17 @@ final class DeliveryServicesAdminPage {
 				$this->dpd_settings->save_connection_result( true, 'DPD geography settings saved.' );
 			}
 			if ( 'run_dpd_geography_ftp_import' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_ftp instanceof DpdGeographyFtpClient && $this->dpd_geography_importer instanceof DpdGeographyImportService ) {
-				$download = $this->dpd_geography_ftp->download_latest();
-				if ( empty( $download['success'] ) ) {
-					$this->dpd_settings->save_connection_result( false, 'DPD geography FTP import: ' . (string) $download['message'] );
-				} else {
-					$path = (string) $download['path'];
-					try {
-						$report = $this->dpd_geography_importer->import_file( $path, 'ftp', (string) $download['source_file'] );
-						$this->dpd_settings->save_connection_result( empty( $report['errors'] ), $this->dpd_import_report_message( $report ) );
-					} finally {
-						if ( '' !== $path && file_exists( $path ) ) {
-							@unlink( $path );
-						}
-					}
-				}
+				$state = $this->dpd_geography_importer->start_from_ftp( $this->dpd_geography_ftp );
+				$this->dpd_settings->save_connection_result( 'failed' !== (string) ( $state['phase'] ?? '' ), 'DPD geography FTP import job: ' . (string) ( $state['last_message'] ?? '' ) );
 			}
 			if ( 'upload_dpd_geography_csv_import' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_importer instanceof DpdGeographyImportService ) {
 				$upload = $_FILES['dpd_geography_csv'] ?? null;
-				if ( ! is_array( $upload ) || (int) ( $upload['error'] ?? UPLOAD_ERR_NO_FILE ) !== UPLOAD_ERR_OK ) {
-					$this->dpd_settings->save_connection_result( false, 'DPD geography manual import: CSV upload failed.' );
-				} else {
-					$path = (string) ( $upload['tmp_name'] ?? '' );
-					$name = sanitize_file_name( (string) ( $upload['name'] ?? 'manual.csv' ) );
-					if ( '' === $path || ! file_exists( $path ) || ! str_ends_with( strtolower( $name ), '.csv' ) ) {
-						$this->dpd_settings->save_connection_result( false, 'DPD geography manual import: upload must be a CSV file.' );
-					} else {
-						try {
-							$report = $this->dpd_geography_importer->import_file( $path, 'manual', $name );
-							$this->dpd_settings->save_connection_result( empty( $report['errors'] ), $this->dpd_import_report_message( $report ) );
-						} finally {
-							if ( file_exists( $path ) ) {
-								@unlink( $path );
-							}
-						}
-					}
-				}
+				$state = is_array( $upload ) ? $this->dpd_geography_importer->start_from_uploaded_file( $upload ) : array( 'phase' => 'failed', 'last_message' => 'DPD geography manual import: CSV upload failed.' );
+				$this->dpd_settings->save_connection_result( 'failed' !== (string) ( $state['phase'] ?? '' ), 'DPD geography manual import job: ' . (string) ( $state['last_message'] ?? '' ) );
+			}
+			if ( 'reset_dpd_geography_import' === $action && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_importer instanceof DpdGeographyImportService ) {
+				$state = $this->dpd_geography_importer->reset();
+				$this->dpd_settings->save_connection_result( true, 'DPD geography import reset: ' . (string) ( $state['last_message'] ?? '' ) );
 			}
 			if ( in_array( $action, array( 'check_dpd_geography', 'save_dpd_city_mapping' ), true ) && $this->dpd_settings instanceof DpdSettings && $this->dpd_geography_diagnostics instanceof DpdGeographyDiagnosticService ) {
 				$location_id = isset( $_POST['dpd_geography_location_id'] ) ? max( 0, (int) $_POST['dpd_geography_location_id'] ) : 0;
@@ -438,7 +445,7 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback' ), true ) ) {
+		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback' ), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'main',
@@ -451,7 +458,7 @@ final class DeliveryServicesAdminPage {
 				'save_cdek_statuses' => 'cdek_statuses',
 				'save_cdek_settings', 'check_cdek_connection' => 'cdek_settings',
 				'save_dpd_settings', 'check_dpd_connection' => 'dpd_settings',
-				'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback' => 'dpd_geography',
+				'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback' => 'dpd_geography',
 				'save_cdek_calculation' => 'calculation',
 				default => 'main',
 			};
@@ -973,6 +980,10 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 		$report = $this->dpd_settings->last_geography_import_report();
+		$state = $this->dpd_geography_importer instanceof DpdGeographyImportService ? $this->dpd_geography_importer->current_state() : array();
+		$phase = (string) ( $state['phase'] ?? 'idle' );
+		$is_import_busy = in_array( $phase, array( 'preparing', 'indexing_locations', 'downloading', 'ready', 'importing', 'finalizing' ), true );
+		$percent = max( 0, min( 100, (float) ( $state['percent_complete'] ?? 0 ) ) );
 		?>
 		<form method="post" style="max-width: 860px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
@@ -1001,7 +1012,7 @@ final class DeliveryServicesAdminPage {
 			<input type="hidden" name="wdc_delivery_services_action" value="run_dpd_geography_ftp_import">
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
-			<?php submit_button( __( 'Загрузить GeographyNewDPD с FTP/SFTP', 'walls-delivery-calc' ), 'secondary', 'submit', false ); ?>
+			<?php submit_button( __( 'Загрузить GeographyNewDPD с FTP/SFTP', 'walls-delivery-calc' ), 'secondary', 'submit', false, $is_import_busy ? array( 'disabled' => 'disabled' ) : array() ); ?>
 		</form>
 		<form method="post" enctype="multipart/form-data" style="margin-top: 16px; max-width: 860px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
@@ -1010,8 +1021,32 @@ final class DeliveryServicesAdminPage {
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
 			<h3><?php echo esc_html__( 'Ручная загрузка GeographyNewDPD CSV', 'walls-delivery-calc' ); ?></h3>
 			<input type="file" name="dpd_geography_csv" accept=".csv,text/csv">
-			<?php submit_button( __( 'Импортировать CSV', 'walls-delivery-calc' ), 'secondary', 'submit', false ); ?>
+			<?php submit_button( __( 'Импортировать CSV', 'walls-delivery-calc' ), 'secondary', 'submit', false, $is_import_busy ? array( 'disabled' => 'disabled' ) : array() ); ?>
 		</form>
+		<div id="wdc-dpd-geography-import-progress" data-wdc-dpd-phase="<?php echo esc_attr( $phase ); ?>" style="max-width: 860px; margin-top: 16px; padding: 12px; border: 1px solid #ccd0d4; background: #fff;">
+			<h3><?php echo esc_html__( 'Прогресс импорта DPD Географии', 'walls-delivery-calc' ); ?></h3>
+			<div style="height: 18px; background: #f0f0f1; border: 1px solid #c3c4c7; max-width: 520px;">
+				<div data-wdc-dpd-progress-bar style="height: 18px; width: <?php echo esc_attr( (string) $percent ); ?>%; background: #2271b1;"></div>
+			</div>
+			<p data-wdc-dpd-summary><?php echo esc_html( sprintf( 'Фаза: %s. Обработано %d из %d строк.', $phase, (int) ( $state['rows_read'] ?? 0 ), (int) ( $state['total_rows'] ?? 0 ) ) ); ?></p>
+			<table class="widefat striped" style="max-width: 860px;">
+				<tbody>
+				<?php foreach ( array( 'phase', 'source', 'source_file', 'rows_read', 'total_rows', 'ru_rows', 'skipped_non_ru', 'skipped_invalid', 'matched_by_fias', 'matched_by_kladr', 'matched_by_name', 'saved_mappings', 'unchanged_mappings', 'conflicts', 'ambiguous', 'unmatched', 'errors', 'percent_complete', 'last_message', 'started_at', 'updated_at', 'finished_at' ) as $key ) : ?>
+					<tr>
+						<th><?php echo esc_html( $key ); ?></th>
+						<td data-wdc-dpd-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( is_array( $state[ $key ] ?? null ) ? implode( '; ', array_map( 'strval', $state[ $key ] ) ) : (string) ( $state[ $key ] ?? '' ) ); ?></td>
+					</tr>
+				<?php endforeach; ?>
+				</tbody>
+			</table>
+			<form method="post" style="margin-top: 12px;">
+				<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+				<input type="hidden" name="wdc_delivery_services_action" value="reset_dpd_geography_import">
+				<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+				<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+				<?php submit_button( __( 'Сбросить импорт', 'walls-delivery-calc' ), 'secondary', 'submit', false ); ?>
+			</form>
+		</div>
 		<form method="post" style="margin-top: 16px; max-width: 860px;">
 			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">

@@ -1,6 +1,6 @@
 # WDC DPD Geography
 
-Version: 0.56.1.
+Version: 0.56.2.
 
 ## Scope
 
@@ -29,7 +29,8 @@ The legacy `wdc_location_carrier_codes` model is removed from code and is not cr
 - `DpdApiClient::getCitiesCashPay()` and `DpdApiClient::getPossibleExtraService()` are API wrappers only.
 - `DpdGeographyDiagnosticService` supports admin diagnostics and manual mapping for a single existing location.
 - `DpdGeographyFtpClient` downloads the newest `GeographyNewDPD_YYYY_MM_DD.csv` through SFTP when `ssh2` is available and an encrypted password is configured.
-- `DpdGeographyCsvParser`, `DpdGeographyMatcher` and `DpdGeographyImportService` stream-parse, match and save DPD city mappings.
+- `DpdLocationIndex` builds reusable FIAS/KLADR/name lookup maps from active RU `wdc_locations` rows.
+- `DpdGeographyCsvParser`, `DpdGeographyMatcher`, `DpdGeographyImportStateService` and `DpdGeographyImportService` stream-parse, match, step through import jobs and save DPD city mappings.
 - `DpdDaDataDeliveryFallbackService` uses the shared DaData token pool for an admin-triggered single-location fallback.
 
 ## Live API Note
@@ -47,15 +48,28 @@ The current supported primary path is DPD `GeographyNewDPD` CSV import into `wdc
 The DPD География tab supports two admin-only import paths:
 
 - SFTP download from configured host/port/username/password/directory. Defaults are `ftp.dpd.ru`, port `22`, username `integration`, directory `/integration`; the password default is empty and is stored encrypted when entered.
-- Manual upload of a `.csv` file. The uploaded temporary file is parsed as a stream and removed after processing.
+- Manual upload of a `.csv` file. The uploaded temporary file is moved into a temporary import path and removed after processing or reset.
 
 The importer reads `;`-delimited CSV row by row, supports UTF-8 and Windows-1251, detects the header row when present, and maps the documented first columns: DPD city ID, country code, region, district, main city, settlement, settlement type, postal code, FIAS and KLADR. Only `Код страны = RU` rows are imported. Postal codes, services/options, terminal data, schedules, raw rows and per-row diagnostics are not stored.
 
+As of 0.56.2, imports are stateful step jobs rather than one synchronous PHP request:
+
+- start action creates an import job, counts data rows by streaming the file, builds a `DpdLocationIndex` from active RU locations, and stores the job in `wdc_dpd_geography_import_state`;
+- the DPD География tab polls `wp_ajax_wdc_dpd_geography_import_status`;
+- each AJAX step reads from the saved byte offset and processes a limited batch of rows;
+- progress state records phase, source, source file, rows read, total rows, RU/skipped rows, matching counters, saved/unchanged mappings, conflicts, ambiguous/unmatched rows, errors and timestamps;
+- finish stores the final report in DPD settings and deletes the temporary CSV/index files;
+- reset/cancel deletes stale temporary files and marks the job cancelled.
+
+The admin UI shows the current phase, progress bar, `Обработано X из Y строк`, counters, last message and reset button. If JavaScript is unavailable, the current state and reset action remain visible on page reload.
+
 Matching is conservative:
 
-- FIAS exact match checks DPD `ФИАС` against `wdc_locations.fias_id` and `city_fias_id`.
-- KLADR matching normalizes DPD codes such as `RU54000001000` and compares exact/padded/trimmed numeric variants against `kladr_id` and `city_kladr_id`.
-- Name fallback runs only when FIAS/KLADR fail and saves only a single confident candidate by settlement name, region, district and type.
+- `DpdLocationIndex` is built once from selected `wdc_locations` columns in chunks: `id`, country/active flags, FIAS/city FIAS, KLADR/city KLADR, region, district, place/settlement/city name and type.
+- FIAS exact match checks DPD `ФИАС` against indexed `wdc_locations.fias_id` and `city_fias_id`.
+- KLADR matching normalizes DPD codes such as `RU54000001000` and compares exact/padded/trimmed numeric variants against indexed `kladr_id` and `city_kladr_id`.
+- Name fallback runs only when FIAS/KLADR fail and saves only a single confident indexed candidate by settlement name, region, district and type.
+- If an index key points to multiple locations, the key is marked ambiguous and is not used for automatic mapping.
 
 Duplicate rows with the same DPD city ID for one location are idempotent. Conflicting DPD city IDs for one `location_id` are counted as conflicts and are not overwritten. Ambiguous name matches are counted and not saved. The last import report is stored in DPD settings under `dpd_last_geography_import_report`.
 
@@ -104,4 +118,4 @@ Diagnostics do not calculate rates, do not create orders, do not import pickup p
 
 Future tariff implementation should consume `DpdCityResolver` instead of adding carrier-specific branches to checkout or tariff services. At tariff stage, WDC must require an existing `dpd_city_id` mapping and must not silently call DPD geography APIs to guess a city.
 
-Future tariff work should require an existing `dpd_city_id` mapping and must not perform city guessing in tariff services. Future automatic population can build on the CSV importer with an explicit scheduled task, but 0.56.1 does not add cron or Action Scheduler jobs.
+Future tariff work should require an existing `dpd_city_id` mapping and must not perform city guessing in tariff services. Future automatic population can build on the step CSV importer with an explicit scheduled task, but 0.56.2 does not add cron or Action Scheduler jobs.

@@ -2,7 +2,7 @@
 
 ## Scope
 
-Version 0.56.1 keeps the DPD integration limited to foundation plus geography. The built-in delivery service uses:
+Version 0.56.2 keeps the DPD integration limited to foundation plus geography. The built-in delivery service uses:
 
 - `service_key`: `dpd`
 - `carrier_key`: `dpd`
@@ -12,6 +12,8 @@ Version 0.56.1 keeps the DPD integration limited to foundation plus geography. T
 DPD is not registered as a checkout runtime quote carrier and is not registered in `CarrierShipmentAdapterRegistry`. Enabling the service row alone does not produce checkout rates because there is no DPD carrier adapter in `CarrierRegistry`.
 
 Current stages intentionally do not implement DPD tariffs, checkout rates, pickup points, order creation, cancellation, tracing/statuses, labels, COD, `unitLoad`, fiscal receipts, or receipt storage. DPD city FTP/SFTP/manual CSV import is admin-only geography preparation and does not register runtime carrier behavior.
+
+As of 0.56.2, DPD geography import is a stateful step process. SFTP/manual CSV actions create an admin import job, build a `DpdLocationIndex` from active RU `wdc_locations`, and process rows through AJAX polling with visual progress. The importer avoids SQL lookup per CSV row and stores state in `wdc_dpd_geography_import_state`; the final report remains in DPD settings.
 
 ## DpdSoapClient Architecture
 

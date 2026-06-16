@@ -101,7 +101,7 @@ DPD is registered only for delivery service/settings/admin diagnostics. There is
 
 The DPD `Данные для входа` tab stores test/production `clientNumber`, encrypted `clientKey`, environment, timeout and optional debug flag through the existing settings/encryption layer. The connection check is a dry diagnostic and does not execute a DPD API call.
 
-As of 0.56.1, DPD geography lives in a separate `DPD География` tab. This tab stores SFTP settings for `GeographyNewDPD_*.csv` (`host`, `port`, `username`, encrypted password and remote directory), runs the manual SFTP import action, accepts manual CSV uploads, diagnoses one `location_id`, saves manual `dpd_city_id`, runs the single-location DaData delivery fallback, and shows the last import report. These actions write only to `wdc_location_delivery_codes.dpd_city_id`/`updated_at` and DPD settings diagnostics/report storage. They do not enable DPD checkout rates or shipment actions.
+As of 0.56.2, DPD geography lives in a separate `DPD География` tab. This tab stores SFTP settings for `GeographyNewDPD_*.csv` (`host`, `port`, `username`, encrypted password and remote directory), starts SFTP or manual CSV import jobs, shows AJAX progress for the current job, allows reset of a stale/failed/running job, diagnoses one `location_id`, saves manual `dpd_city_id`, runs the single-location DaData delivery fallback, and shows the last import report. The import builds an indexed lookup from active RU `wdc_locations` and does not query SQL per CSV row. These actions write only to `wdc_location_delivery_codes.dpd_city_id`/`updated_at`, DPD import state/report storage and DPD settings diagnostics. They do not enable DPD checkout rates or shipment actions.
 
 ## Admin
 

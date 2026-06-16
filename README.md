@@ -1,8 +1,10 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.56.1.
+Current plugin version: 0.56.2.
 
-Version 0.56.1 adds the DPD Geography Import Foundation on top of `wdc_location_delivery_codes.dpd_city_id`: admin-only SFTP/manual CSV import for `GeographyNewDPD_*.csv`, stream parsing, conservative FIAS/KLADR/name matching, last import report storage, and manual DaData delivery fallback for one `location_id`. DPD tariffs, checkout rates, pickup points, orders, statuses, labels, COD, `unitLoad`, cron import and runtime DPD carrier registration remain intentionally not implemented.
+Version 0.56.2 makes DPD Geography import production-sized-file ready. SFTP/manual `GeographyNewDPD_*.csv` imports now create a stateful admin job, build a reusable in-memory index from `wdc_locations`, process CSV rows in AJAX steps with visual progress, and avoid SQL lookup per CSV row. State is stored in an option and temp files are removed on finish/reset. DPD tariffs, checkout rates, pickup points, orders, statuses, labels, COD, `unitLoad`, cron import and runtime DPD carrier registration remain intentionally not implemented.
+
+Version 0.56.1 adds the DPD Geography Import Foundation on top of `wdc_location_delivery_codes.dpd_city_id`: admin-only SFTP/manual CSV import for `GeographyNewDPD_*.csv`, stream parsing, conservative FIAS/KLADR/name matching, last import report storage, and manual DaData delivery fallback for one `location_id`.
 
 Version 0.56.0 replaces the cancelled generic carrier-code storage with `wdc_location_delivery_codes`, a 1:1 table keyed by `location_id` with nullable `dpd_city_id`. `DpdCityResolver` reads only this local mapping; live DPD city lookup remains disabled, and manual mapping is the current supported path until a future DPD geography import stage.
 

@@ -13,6 +13,7 @@ C:.
 |   |       calendar-admin.css
 |   |       calendar-admin.js
 |   |       checkout-simulation.css
+|   |       dpd-geography-import.js
 |   |       locations-admin.css
 |   |       order-delivery-recalculation.css
 |   |       order-delivery-recalculation.js
@@ -209,7 +210,9 @@ C:.
 |   |   |           DpdGeographyFtpClient.php
 |   |   |           DpdGeographyImportReport.php
 |   |   |           DpdGeographyImportService.php
+|   |   |           DpdGeographyImportStateService.php
 |   |   |           DpdGeographyMatcher.php
+|   |   |           DpdLocationIndex.php
 |   |   |           WpDpdDaDataDeliveryClient.php
 |   |   |           
 |   |   +---Registry
@@ -616,6 +619,7 @@ C:.
     |       run-dpd-dadata-fallback-smoke.php
     |       run-dpd-foundation-smoke.php
     |       run-dpd-geography-import-smoke.php
+    |       run-dpd-location-index-smoke.php
     |       
     +---fias
     |       run-fias-smoke.php
