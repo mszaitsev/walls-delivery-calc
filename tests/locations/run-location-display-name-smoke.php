@@ -70,7 +70,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 					'wdc_locations' => array( 'id', 'gar_object_id', 'fias_id', 'region_name', 'region_type', 'region_code', 'place_name', 'place_type', 'place_level', 'display_name', 'searchable_text', 'postal_code', 'active', 'created_at', 'updated_at' ),
 					'wdc_regions' => array( 'region_code', 'region_name', 'region_type' ),
 					'wdc_location_aliases' => array( 'id', 'location_id', 'alias', 'alias_normalized', 'source', 'created_at' ),
-					'wdc_location_carrier_codes' => array( 'id', 'gar_object_id', 'fias_id', 'carrier_key', 'external_code', 'meta', 'created_at', 'updated_at' ),
+					'wdc_location_delivery_codes' => array( 'location_id', 'dpd_city_id', 'updated_at' ),
 					default => array(),
 				};
 				return array_map( static fn( string $field ): array => array( 'Field' => $field ), $columns );

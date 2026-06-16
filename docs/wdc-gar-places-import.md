@@ -94,11 +94,10 @@ The type-rule editor is split into collapsible Region, City, and Place sections.
 
 `postal_code` is imported but not used in delivery calculations yet. It may be empty in the current prepared CSV. `postal_code` is the only location postal-index field used by the new domain/runtime; legacy `postcode` is not exported in snapshots and should not be used for GAR locations.
 
-`wdc_location_carrier_codes` is a foundation table for future carrier mappings. This branch does not populate CDEK/DPD codes. Future examples:
+`wdc_location_delivery_codes` is a foundation table for future delivery code mappings tied 1:1 to `wdc_locations.id`. The current DPD geography foundation can store `dpd_city_id`; imports are not implemented here.
 
 ```text
-carrier_key=cdek external_code=344
-carrier_key=dpd external_code=196006461
+location_id=123 dpd_city_id=196006461
 ```
 
 DaData enrichment by `kladr_id` for postal codes and carrier mappings is planned separately.
@@ -116,7 +115,7 @@ The admin section `Экспорт / импорт подготовленной б
 - `wdc_regions`
 - `wdc_locations`
 - `wdc_location_aliases`
-- `wdc_location_carrier_codes`
+- `wdc_location_delivery_codes`
 - option `wdc_location_type_display_rules`
 
 Only this display-rules option is carried with the snapshot; the exporter does not dump all plugin options. The option is written as a separate `type=option` row, and import sanitizes it before `update_option()`.
@@ -124,7 +123,7 @@ Only this display-rules option is carried with the snapshot; the exporter does n
 The first JSONL row is metadata:
 
 ```json
-{"type":"meta","version":"0.15.10","tables":["wdc_regions","wdc_locations","wdc_location_aliases","wdc_location_carrier_codes"],"options":["wdc_location_type_display_rules"],"created_at":"2026-05-23 12:00:00"}
+{"type":"meta","version":"0.56.0","tables":["wdc_regions","wdc_locations","wdc_location_aliases","wdc_location_delivery_codes"],"options":["wdc_location_type_display_rules"],"created_at":"2026-05-23 12:00:00"}
 {"type":"option","name":"wdc_location_type_display_rules","data":{"region":{"обл":{"display":"обл.","position":"after"}}}}
 ```
 

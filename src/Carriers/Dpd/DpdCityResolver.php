@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Carriers\Dpd;
 
-use WallsShop\WDC\Locations\Storage\LocationCarrierCodeRepository;
+use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
 defined( 'ABSPATH' ) || exit;
@@ -14,7 +14,7 @@ final class DpdCityResolver {
 	private string $last_error = '';
 
 	public function __construct(
-		private LocationCarrierCodeRepository $carrier_codes
+		private LocationDeliveryCodeRepository $delivery_codes
 	) {
 	}
 
@@ -27,21 +27,26 @@ final class DpdCityResolver {
 	 */
 	public function resolve( Location $location ): ?array {
 		$this->last_error = '';
-		$stored = $this->carrier_codes->find_best( self::CARRIER_KEY, $location );
-		if ( null !== $stored && '' !== trim( $stored['external_code'] ) ) {
+		if ( null === $location->id || $location->id <= 0 ) {
+			$this->last_error = 'DPD cityId mapping lookup requires a saved WDC location_id.';
+			return null;
+		}
+
+		$city_id = $this->delivery_codes->get_dpd_city_id( $location->id );
+		if ( null !== $city_id ) {
 			return array(
-				'city_id' => $stored['external_code'],
+				'city_id' => $city_id,
 				'source' => 'mapping',
 				'confidence' => 'stored',
 				'saved' => false,
 				'multiple' => false,
 				'resolver_applied' => false,
 				'matched_by' => array( 'stored_mapping' ),
-				'diagnostics' => array( 'mapping_id' => $stored['id'], 'meta' => $stored['meta'] ),
+				'diagnostics' => array( 'location_id' => $location->id ),
 			);
 		}
 
-		$this->last_error = 'DPD cityId mapping was not found. Use manual mapping or future geography import.';
+		$this->last_error = 'DPD cityId mapping was not found. Use DPD geography import or manual mapping.';
 
 		return null;
 	}

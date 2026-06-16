@@ -915,7 +915,7 @@ final class DeliveryServicesAdminPage {
 					<th scope="row"><?php echo esc_html__( 'DPD cityId для ручного mapping', 'walls-delivery-calc' ); ?></th>
 					<td>
 						<input class="regular-text" type="text" name="dpd_geography_city_id" value="">
-						<p class="description"><?php echo esc_html__( 'Ручное сохранение пишет mapping в wdc_location_carrier_codes. Массовое заполнение, cron и FTP не запускаются.', 'walls-delivery-calc' ); ?></p>
+						<p class="description"><?php echo esc_html__( 'Ручное сохранение пишет DPD cityId в wdc_location_delivery_codes. Массовое заполнение, cron и FTP не запускаются.', 'walls-delivery-calc' ); ?></p>
 					</td>
 				</tr>
 			</table>

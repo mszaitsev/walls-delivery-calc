@@ -1,6 +1,6 @@
 # WDC DPD Geography
 
-Version: 0.55.0.
+Version: 0.56.0.
 
 ## Scope
 
@@ -10,19 +10,20 @@ It does not implement DPD tariffs, `getServiceCost*`, checkout integration, pick
 
 ## Storage
 
-DPD city IDs are stored in the existing shared table:
+DPD city IDs are stored in the 1:1 location delivery codes table:
 
-- table: `wdc_location_carrier_codes`
-- `carrier_key`: `dpd`
-- `external_code`: DPD `cityId`
-- location link: `location_id`, `gar_object_id`, `fias_id`
-- `meta`: source and matching diagnostics
+- table: `wdc_location_delivery_codes`
+- primary key: `location_id`
+- DPD mapping: nullable `dpd_city_id`
+- maintenance timestamp: nullable `updated_at`
 
-No DPD-specific city table is created.
+No `carrier_key`, `external_code`, `meta`, `gar_object_id`, `fias_id`, `kladr_id`, `created_at`, or diagnostic fields are stored in this table. GAR/FIAS/KLADR data remains in `wdc_locations`. Future carriers can be added as new columns, for example `yandex_city_id` or `pec_city_id`.
+
+The legacy `wdc_location_carrier_codes` model is removed from code and is not created by migrations.
 
 ## Components
 
-- `LocationCarrierCodeRepository` is the carrier-neutral repository for `wdc_location_carrier_codes`.
+- `LocationDeliveryCodeRepository` is the repository for `wdc_location_delivery_codes`.
 - `DpdCityResolver` resolves cityId from stored mapping only.
 - `DpdDuplicateCityResolver` handles DPD `pickupDups` and `deliveryDups` arrays.
 - `DpdApiClient::getCitiesCashPay()` and `DpdApiClient::getPossibleExtraService()` are API wrappers only.
@@ -36,7 +37,13 @@ Live API city lookup is disabled in `DpdCityResolver`.
 
 `getCitiesCashPay(countryCode)` is also not used by the resolver. The guide documents it as returning a `city` list, but live test and production checks returned `java.lang.NullPointerException` even for `countryCode`, so WDC cannot treat it as a reliable primary city lookup without a confirmed DPD contract or an imported geography directory.
 
-The current supported path is manual mapping into `wdc_location_carrier_codes`. `DpdApiClient::getCitiesCashPay()` and `DpdApiClient::getPossibleExtraService()` remain low-level wrappers for future verified work, but admin geography diagnostics do not call them.
+The current supported path is manual mapping into `wdc_location_delivery_codes.dpd_city_id`. `DpdApiClient::getCitiesCashPay()` and `DpdApiClient::getPossibleExtraService()` remain low-level wrappers for future verified work, but admin geography diagnostics do not call them.
+
+## Synchronization With Locations
+
+Rows in `wdc_location_delivery_codes` are created lazily when a manager saves a manual code or a future import writes a code. A new row in `wdc_locations` does not require a matching delivery-code row.
+
+When locations are deleted, `LocationDeliveryCodeRepository::cleanup_orphans()` removes rows whose `location_id` no longer exists in `wdc_locations`. If `wdc_locations` is fully rebuilt with new IDs, DPD mappings must be rebuilt by a future geography import. Planned DPD geography import should update only `dpd_city_id` and `updated_at`.
 
 ## Duplicate City Matching
 
@@ -69,4 +76,4 @@ Diagnostics do not calculate rates, do not create orders, do not import pickup p
 
 Future tariff implementation should consume `DpdCityResolver` instead of adding carrier-specific branches to checkout or tariff services. At tariff stage, WDC must require an existing `dpd_city_id` mapping and must not silently call DPD geography APIs to guess a city.
 
-Future automatic population requires either a confirmed correct DPD API contract/response shape or a separate FTP geography import. FTP geography files may be considered only as an optional future import, with explicit manual/WP-Cron scheduling no more often than once every six months, no hardcoded credentials, audit logging and rollback.
+Future automatic population requires either a confirmed correct DPD API contract/response shape or a separate FTP/manual CSV geography import into `wdc_location_delivery_codes`. FTP geography files may be considered only as an optional future import, with explicit manual/WP-Cron scheduling no more often than once every six months, no hardcoded credentials, audit logging and rollback.

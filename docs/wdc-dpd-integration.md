@@ -85,20 +85,22 @@ The stage 1 connection check is a dry diagnostic. It checks credentials complete
 
 No static DPD city table and no FTP import are implemented in stage 1 or stage 2.
 
-The existing WDC/FIAS/GAR settlement model already has `wdc_locations` and the foundation table `wdc_location_carrier_codes`. DPD `cityId` values are stored as carrier mappings there:
+The existing WDC/FIAS/GAR settlement model stores settlement identity in `wdc_locations`. DPD `cityId` values are stored in the 1:1 delivery-code table:
 
-- `carrier_key = dpd`
-- `external_code = <dpd_city_id>`
-- `location_id` / `gar_object_id` / `fias_id` linked to the WDC location
-- `meta` for DPD-specific matching evidence such as source, duplicate matching fields and resolver status
+- table: `wdc_location_delivery_codes`
+- key: `location_id`
+- value: nullable `dpd_city_id`
+- timestamp: nullable `updated_at`
+
+The cancelled `wdc_location_carrier_codes` storage is no longer created or used.
 
 Implemented `DpdCityResolver` strategy:
 
-- primary source: already saved `dpd_city_id` linked to the WDC/FIAS/GAR settlement;
+- primary source: already saved `dpd_city_id` linked to the WDC/FIAS/GAR settlement by `location_id`;
 - if mapping is missing, return a manual-mapping-required diagnostic and do not call live DPD SOAP;
 - `getCitiesCashPay` and `getPossibleExtraService` remain optional low-level wrappers only. They are not used by `DpdCityResolver` automatically because live DPD test/production checks returned `java.lang.NullPointerException` for sparse city lookup attempts;
 - future imported/API candidate matching should use `DpdDuplicateCityResolver`, matching FIAS/GAR guid, `countryCode`, `regionCode`, `indexMin`/`indexMax`, postal code, city name, and city code/KLADR where available;
-- after a future verified match/import, persist the mapping so later calculations do not repeat ambiguous lookup;
+- after a future verified match/import, persist `dpd_city_id` and `updated_at` so later calculations do not repeat ambiguous lookup;
 - use FTP files `GeographyDPD_YYYYMMDD` and `GeographyNewDPD_YYYYMMDD` only as optional future import data, not as a runtime dependency.
 
 Stage 2 also adds admin-only geography diagnostics/manual mapping in the DPD settings tab. The current diagnostic checks only whether a cityId mapping exists and does not run a live SOAP call. No mass enrichment is started automatically.

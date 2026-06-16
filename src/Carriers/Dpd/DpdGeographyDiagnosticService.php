@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Carriers\Dpd;
 
 use Throwable;
-use WallsShop\WDC\Locations\Storage\LocationCarrierCodeRepository;
+use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\ValueObjects\Location;
 
@@ -13,7 +13,7 @@ defined( 'ABSPATH' ) || exit;
 final class DpdGeographyDiagnosticService {
 	public function __construct(
 		private DpdCityResolver $resolver,
-		private LocationCarrierCodeRepository $carrier_codes,
+		private LocationDeliveryCodeRepository $delivery_codes,
 		private LocationRepository $locations
 	) {
 	}
@@ -36,10 +36,10 @@ final class DpdGeographyDiagnosticService {
 		}
 		if ( null === $result ) {
 			if ( '' !== $this->resolver->last_error() ) {
-				return $this->empty_result( 'DPD cityId mapping was not found for location_id=' . $location_id . '. Add cityId manually.' );
+				return $this->empty_result( 'DPD cityId mapping was not found for location_id=' . $location_id . '. Add or import cityId.' );
 			}
 
-			return $this->empty_result( 'DPD cityId mapping was not found for location_id=' . $location_id . '. Add cityId manually.' );
+			return $this->empty_result( 'DPD cityId mapping was not found for location_id=' . $location_id . '. Add or import cityId.' );
 		}
 
 		return array(
@@ -67,7 +67,9 @@ final class DpdGeographyDiagnosticService {
 			return $this->empty_result( 'DPD cityId is empty.' );
 		}
 
-		$this->carrier_codes->save( $location, DpdSettings::CARRIER_KEY, $city_id, array( 'source' => 'manual_admin' ) );
+		if ( null === $location->id || $location->id <= 0 || ! $this->delivery_codes->save_dpd_city_id( $location->id, $city_id ) ) {
+			return $this->empty_result( 'DPD cityId mapping was not saved.' );
+		}
 
 		return array(
 			'success' => true,

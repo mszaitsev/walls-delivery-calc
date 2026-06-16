@@ -89,6 +89,7 @@ C:.
 |           0027_create_cdek_tariffs_table.php
 |           0028_add_cdek_tariff_limits.php
 |           0029_add_cdek_tariff_delivery_mode.php
+|           0030_create_location_delivery_codes.php
 |           
 +---docs
 |   |   development-workflow.md
@@ -427,7 +428,7 @@ C:.
 |   |   |       LocationSearchService.php
 |   |   |       
 |   |   +---Storage
-|   |   |       LocationCarrierCodeRepository.php
+|   |   |       LocationDeliveryCodeRepository.php
 |   |   |       LocationRepository.php
 |   |   |       RegionRepository.php
 |   |   |       
@@ -621,6 +622,7 @@ C:.
     +---locations
     |       run-dadata-postcode-fill-smoke.php
     |       run-gar-import-smoke.php
+    |       run-location-delivery-codes-smoke.php
     |       run-location-display-name-smoke.php
     |       run-locations-incremental-update-smoke.php
     |       run-locations-smoke.php

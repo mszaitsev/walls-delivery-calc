@@ -863,11 +863,11 @@ final class LocationsAdminPage {
 			}
 
 			return sprintf(
-				__( 'База населенных пунктов очищена. Удалено: населенных пунктов — %s, алиасов — %s, регионов — %s, carrier mappings — %s.', 'walls-delivery-calc' ),
+				__( 'База населенных пунктов очищена. Удалено: населенных пунктов — %s, алиасов — %s, регионов — %s, коды доставки — %s.', 'walls-delivery-calc' ),
 				$this->deleted_count_label( $stats['locations_deleted'] ),
 				$this->deleted_count_label( $stats['aliases_deleted'] ),
 				$this->deleted_count_label( $stats['regions_deleted'] ),
-				$this->deleted_count_label( $stats['carrier_codes_deleted'] )
+				$this->deleted_count_label( $stats['delivery_codes_deleted'] )
 			);
 		}
 

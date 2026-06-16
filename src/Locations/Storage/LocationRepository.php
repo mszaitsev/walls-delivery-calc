@@ -1164,11 +1164,11 @@ final class LocationRepository {
 	}
 
 	/**
-	 * @return array{locations_deleted:int|null, aliases_deleted:int|null, regions_deleted:int|null, carrier_codes_deleted:int|null}
+	 * @return array{locations_deleted:int|null, aliases_deleted:int|null, regions_deleted:int|null, delivery_codes_deleted:int|null}
 	 */
 	public function clear_all(): array {
 		$result = array(
-			'carrier_codes_deleted' => $this->clear_table( $this->carrier_codes_table_name() ),
+			'delivery_codes_deleted' => $this->clear_table( $this->delivery_codes_table_name() ),
 			'aliases_deleted'       => $this->clear_table( $this->alias_table_name() ),
 			'locations_deleted'     => $this->clear_table( $this->table_name() ),
 			'regions_deleted'       => $this->clear_table( $this->region_table_name() ),
@@ -1762,7 +1762,7 @@ final class LocationRepository {
 		return $this->wpdb->prefix . 'wdc_regions';
 	}
 
-	private function carrier_codes_table_name(): string {
-		return $this->wpdb->prefix . 'wdc_location_carrier_codes';
+	private function delivery_codes_table_name(): string {
+		return $this->wpdb->prefix . 'wdc_location_delivery_codes';
 	}
 }
