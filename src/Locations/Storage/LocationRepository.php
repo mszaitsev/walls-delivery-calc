@@ -157,8 +157,210 @@ final class LocationRepository {
 		return is_array( $row ) ? $this->row_to_location( $row ) : null;
 	}
 
+	public function find_by_fias_or_city_fias_id( string $fias_id ): ?Location {
+		$normalized = $this->normalize_guid( $fias_id );
+		if ( '' === $normalized ) {
+			return null;
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+					continue;
+				}
+				if ( in_array( $normalized, array( $this->normalize_guid( (string) ( $row['fias_id'] ?? '' ) ), $this->normalize_guid( (string) ( $row['city_fias_id'] ?? '' ) ) ), true ) ) {
+					return $this->row_to_location( $this->join_region_for_test_double( $row ) );
+				}
+			}
+			return null;
+		}
+
+		$row = $this->wpdb->get_row(
+			$this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.active = 1
+					AND (
+						LOWER(REPLACE(REPLACE(REPLACE(REPLACE(l.fias_id, '-', ''), '{', ''), '}', ''), ' ', '')) = %s
+						OR LOWER(REPLACE(REPLACE(REPLACE(REPLACE(l.city_fias_id, '-', ''), '{', ''), '}', ''), ' ', '')) = %s
+					)
+				LIMIT 1",
+				$normalized,
+				$normalized
+			),
+			ARRAY_A
+		);
+
+		return is_array( $row ) ? $this->row_to_location( $row ) : null;
+	}
+
 	public function find_by_kladr_id( string $kladr_id ): ?Location {
 		return $this->find_one( 'kladr_id', trim( $kladr_id ), '%s' );
+	}
+
+	public function find_unique_by_kladr_variant( string $kladr_id ): ?Location {
+		$normalized = preg_replace( '/\D+/', '', strtoupper( preg_replace( '/^RU/i', '', trim( $kladr_id ) ) ) ) ?? '';
+		if ( '' === $normalized ) {
+			return null;
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$matches = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+					continue;
+				}
+				foreach ( array( 'kladr_id', 'city_kladr_id' ) as $column ) {
+					$row_kladr = preg_replace( '/\D+/', '', strtoupper( (string) ( $row[ $column ] ?? '' ) ) ) ?? '';
+					if ( '' !== $row_kladr && ( $row_kladr === $normalized || rtrim( $row_kladr, '0' ) === rtrim( $normalized, '0' ) ) ) {
+						$matches[ (int) ( $row['id'] ?? 0 ) ] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
+					}
+				}
+			}
+			return 1 === count( $matches ) ? reset( $matches ) : null;
+		}
+
+		$variants = array_values( array_unique( array_filter( array( $normalized, rtrim( $normalized, '0' ), str_pad( $normalized, 13, '0' ) ) ) ) );
+		$placeholders = implode( ',', array_fill( 0, count( $variants ), '%s' ) );
+		$args = array_merge( $variants, $variants );
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE l.active = 1
+					AND (
+						l.kladr_id IN ({$placeholders})
+						OR l.city_kladr_id IN ({$placeholders})
+					)
+				LIMIT 2",
+				...$args
+			),
+			ARRAY_A
+		);
+
+		return is_array( $rows ) && 1 === count( $rows ) ? $this->row_to_location( $rows[0] ) : null;
+	}
+
+	/**
+	 * @return array<int,Location>
+	 */
+	public function find_conservative_name_matches( string $name, string $region, string $district, string $type ): array {
+		$name = $this->normalize_query( $name );
+		$region = $this->normalize_query( $region );
+		$district = $this->normalize_query( $district );
+		$type = $this->normalize_query( $type );
+		if ( '' === $name ) {
+			return array();
+		}
+
+		if ( $this->has_test_location_rows() ) {
+			$matches = array();
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) || 'RU' !== strtoupper( (string) ( $row['country_code'] ?? 'RU' ) ) ) {
+					continue;
+				}
+				$row_name = $this->normalize_query( (string) ( $row['place_name'] ?? $row['settlement_name'] ?? $row['city_name'] ?? '' ) );
+				if ( $row_name !== $name ) {
+					continue;
+				}
+				$row_region = $this->normalize_query( (string) ( $row['region_name'] ?? '' ) );
+				if ( '' !== $region && '' !== $row_region && ! str_starts_with( $row_region, $region ) && ! str_starts_with( $region, $row_region ) ) {
+					continue;
+				}
+				$row_district = $this->normalize_query( (string) ( $row['district_name'] ?? '' ) );
+				if ( '' !== $district && $row_district !== $district ) {
+					continue;
+				}
+				$row_type = $this->normalize_query( (string) ( $row['place_type'] ?? $row['settlement_type'] ?? $row['city_type'] ?? '' ) );
+				if ( '' !== $type && $row_type !== $type ) {
+					continue;
+				}
+				$matches[ (int) ( $row['id'] ?? 0 ) ] = $this->row_to_location( $this->join_region_for_test_double( $row ) );
+			}
+			return array_values( $matches );
+		}
+
+		$where = array( 'l.active = 1', 'l.country_code = %s', '(LOWER(l.place_name) = %s OR LOWER(l.settlement_name) = %s OR LOWER(l.city_name) = %s)' );
+		$args = array( 'RU', $name, $name, $name );
+		if ( '' !== $region ) {
+			$where[] = '(LOWER(l.region_name) LIKE %s OR %s LIKE CONCAT(LOWER(l.region_name), %s))';
+			$args[] = $region . '%';
+			$args[] = $region;
+			$args[] = '%';
+		}
+		if ( '' !== $district ) {
+			$where[] = 'LOWER(l.district_name) = %s';
+			$args[] = $district;
+		}
+		if ( '' !== $type ) {
+			$where[] = '(LOWER(l.place_type) = %s OR LOWER(l.settlement_type) = %s OR LOWER(l.city_type) = %s)';
+			$args[] = $type;
+			$args[] = $type;
+			$args[] = $type;
+		}
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT l.*, r.region_name AS joined_region_name, r.region_type AS joined_region_type
+				FROM {$this->table_name()} l
+				LEFT JOIN {$this->region_table_name()} r ON r.region_code = l.region_code
+				WHERE " . implode( ' AND ', $where ) . '
+				LIMIT 2',
+				...$args
+			),
+			ARRAY_A
+		);
+
+		return $this->rows_to_locations( is_array( $rows ) ? $rows : array() );
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function dpd_location_index_rows( int $limit = 5000, int $offset = 0 ): array {
+		$limit = max( 100, min( 20000, $limit ) );
+		$offset = max( 0, $offset );
+		$columns = array( 'id', 'country_code', 'active', 'fias_id', 'city_fias_id', 'kladr_id', 'city_kladr_id', 'region_name', 'district_name', 'place_name', 'settlement_name', 'city_name', 'place_type', 'settlement_type', 'city_type' );
+
+		if ( $this->has_test_location_rows() ) {
+			return array_slice(
+				array_values(
+					array_map(
+						static function ( array $row ) use ( $columns ): array {
+							$filtered = array();
+							foreach ( $columns as $column ) {
+								$filtered[ $column ] = $row[ $column ] ?? '';
+							}
+							return $filtered;
+						},
+						array_filter(
+							$this->test_location_rows(),
+							static fn( array $row ): bool => 1 === (int) ( $row['active'] ?? 1 ) && 'RU' === strtoupper( (string) ( $row['country_code'] ?? 'RU' ) )
+						)
+					)
+				),
+				$offset,
+				$limit
+			);
+		}
+
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				'SELECT id, country_code, active, fias_id, city_fias_id, kladr_id, city_kladr_id, region_name, district_name, place_name, settlement_name, city_name, place_type, settlement_type, city_type
+				FROM ' . $this->table_name() . '
+				WHERE active = 1 AND country_code = %s
+				ORDER BY id ASC
+				LIMIT %d OFFSET %d',
+				'RU',
+				$limit,
+				$offset
+			),
+			ARRAY_A
+		);
+
+		return is_array( $rows ) ? $rows : array();
 	}
 
 	public function find_first_by_postal_code( string $postal_code ): ?Location {
@@ -1164,11 +1366,11 @@ final class LocationRepository {
 	}
 
 	/**
-	 * @return array{locations_deleted:int|null, aliases_deleted:int|null, regions_deleted:int|null, carrier_codes_deleted:int|null}
+	 * @return array{locations_deleted:int|null, aliases_deleted:int|null, regions_deleted:int|null, delivery_codes_deleted:int|null}
 	 */
 	public function clear_all(): array {
 		$result = array(
-			'carrier_codes_deleted' => $this->clear_table( $this->carrier_codes_table_name() ),
+			'delivery_codes_deleted' => $this->clear_table( $this->delivery_codes_table_name() ),
 			'aliases_deleted'       => $this->clear_table( $this->alias_table_name() ),
 			'locations_deleted'     => $this->clear_table( $this->table_name() ),
 			'regions_deleted'       => $this->clear_table( $this->region_table_name() ),
@@ -1762,7 +1964,7 @@ final class LocationRepository {
 		return $this->wpdb->prefix . 'wdc_regions';
 	}
 
-	private function carrier_codes_table_name(): string {
-		return $this->wpdb->prefix . 'wdc_location_carrier_codes';
+	private function delivery_codes_table_name(): string {
+		return $this->wpdb->prefix . 'wdc_location_delivery_codes';
 	}
 }

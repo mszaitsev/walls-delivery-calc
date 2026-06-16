@@ -12,7 +12,6 @@ return static function (): void {
 	$regions = $wpdb->prefix . 'wdc_regions';
 	$stage   = $wpdb->prefix . 'wdc_gar_places_stage';
 	$places  = $wpdb->prefix . 'wdc_locations';
-	$codes   = $wpdb->prefix . 'wdc_location_carrier_codes';
 
 	dbDelta(
 		"CREATE TABLE {$regions} (
@@ -121,22 +120,4 @@ return static function (): void {
 		) {$charset_collate};"
 	);
 
-	dbDelta(
-		"CREATE TABLE {$codes} (
-			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-			location_id bigint(20) unsigned NULL,
-			gar_object_id bigint(20) unsigned NOT NULL,
-			fias_id char(36) NULL,
-			carrier_key varchar(64) NOT NULL,
-			external_code varchar(128) NOT NULL,
-			meta longtext NULL,
-			created_at datetime NOT NULL,
-			updated_at datetime NOT NULL,
-			PRIMARY KEY  (id),
-			UNIQUE KEY ux_carrier_gar_code (carrier_key, gar_object_id, external_code),
-			KEY ix_carrier_key (carrier_key),
-			KEY ix_gar_object_id (gar_object_id),
-			KEY ix_fias_id (fias_id)
-		) {$charset_collate};"
-	);
 };

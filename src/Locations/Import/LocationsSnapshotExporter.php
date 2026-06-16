@@ -15,7 +15,7 @@ final class LocationsSnapshotExporter {
 		'wdc_regions',
 		'wdc_locations',
 		'wdc_location_aliases',
-		'wdc_location_carrier_codes',
+		'wdc_location_delivery_codes',
 	);
 
 	/** @var array<int,string> */

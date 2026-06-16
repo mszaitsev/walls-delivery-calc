@@ -28,6 +28,16 @@ use WallsShop\WDC\Carriers\Dpd\DpdGeographyDiagnosticService;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapClient;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapClientInterface;
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdDaDataDeliveryClientInterface;
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdDaDataDeliveryFallbackService;
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyCsvParser;
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyFtpClient;
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyImportService;
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyImportStateService;
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyMatcher;
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyStageRepository;
+use WallsShop\WDC\Carriers\Dpd\Geography\DpdLocationIndex;
+use WallsShop\WDC\Carriers\Dpd\Geography\WpDpdDaDataDeliveryClient;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostCountriesAdminPage;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingRepository;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingService;
@@ -118,7 +128,7 @@ use WallsShop\WDC\Locations\Services\GarChangesService;
 use WallsShop\WDC\Locations\Services\LocationAliasGenerator;
 use WallsShop\WDC\Locations\Services\LocationCountryIndexService;
 use WallsShop\WDC\Locations\Services\LocationSearchService;
-use WallsShop\WDC\Locations\Storage\LocationCarrierCodeRepository;
+use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 use WallsShop\WDC\Locations\Storage\RegionRepository;
 use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
@@ -209,7 +219,7 @@ final class Plugin {
 		$this->container->register( ActionScheduler::class, fn(): ActionScheduler => new ActionScheduler( $this->container->get( Logger::class ) ) );
 		$this->container->register( CalendarRepository::class, fn(): CalendarRepository => new CalendarRepository() );
 		$this->container->register( LocationRepository::class, fn(): LocationRepository => new LocationRepository() );
-		$this->container->register( LocationCarrierCodeRepository::class, fn(): LocationCarrierCodeRepository => new LocationCarrierCodeRepository() );
+		$this->container->register( LocationDeliveryCodeRepository::class, fn(): LocationDeliveryCodeRepository => new LocationDeliveryCodeRepository() );
 		$this->container->register( RegionRepository::class, fn(): RegionRepository => new RegionRepository() );
 		$this->container->register( PickupPointRepository::class, fn(): PickupPointRepository => new PickupPointRepository() );
 		$this->container->register( RussianPostPickupPointRepository::class, fn(): RussianPostPickupPointRepository => new RussianPostPickupPointRepository() );
@@ -244,8 +254,17 @@ final class Plugin {
 		$this->container->register( DpdSoapClientInterface::class, fn(): DpdSoapClientInterface => new DpdSoapClient( $this->container->get( DpdSettings::class )->request_timeout() ) );
 		$this->container->register( DpdApiClient::class, fn(): DpdApiClient => new DpdApiClient( $this->container->get( DpdSettings::class ), $this->container->get( DpdSoapClientInterface::class ) ) );
 		$this->container->register( DpdDuplicateCityResolver::class, fn(): DpdDuplicateCityResolver => new DpdDuplicateCityResolver() );
-		$this->container->register( DpdCityResolver::class, fn(): DpdCityResolver => new DpdCityResolver( $this->container->get( LocationCarrierCodeRepository::class ) ) );
-		$this->container->register( DpdGeographyDiagnosticService::class, fn(): DpdGeographyDiagnosticService => new DpdGeographyDiagnosticService( $this->container->get( DpdCityResolver::class ), $this->container->get( LocationCarrierCodeRepository::class ), $this->container->get( LocationRepository::class ) ) );
+		$this->container->register( DpdCityResolver::class, fn(): DpdCityResolver => new DpdCityResolver( $this->container->get( LocationDeliveryCodeRepository::class ) ) );
+		$this->container->register( DpdGeographyDiagnosticService::class, fn(): DpdGeographyDiagnosticService => new DpdGeographyDiagnosticService( $this->container->get( DpdCityResolver::class ), $this->container->get( LocationDeliveryCodeRepository::class ), $this->container->get( LocationRepository::class ) ) );
+		$this->container->register( DpdGeographyCsvParser::class, fn(): DpdGeographyCsvParser => new DpdGeographyCsvParser() );
+		$this->container->register( DpdLocationIndex::class, fn(): DpdLocationIndex => new DpdLocationIndex( $this->container->get( LocationRepository::class ) ) );
+		$this->container->register( DpdGeographyMatcher::class, fn(): DpdGeographyMatcher => new DpdGeographyMatcher( $this->container->get( DpdLocationIndex::class ) ) );
+		$this->container->register( DpdGeographyImportStateService::class, fn(): DpdGeographyImportStateService => new DpdGeographyImportStateService() );
+		$this->container->register( DpdGeographyStageRepository::class, fn(): DpdGeographyStageRepository => new DpdGeographyStageRepository() );
+		$this->container->register( DpdGeographyImportService::class, fn(): DpdGeographyImportService => new DpdGeographyImportService( $this->container->get( DpdGeographyCsvParser::class ), $this->container->get( DpdGeographyMatcher::class ), $this->container->get( DpdLocationIndex::class ), $this->container->get( DpdGeographyImportStateService::class ), $this->container->get( DpdGeographyStageRepository::class ), $this->container->get( DpdSettings::class ) ) );
+		$this->container->register( DpdGeographyFtpClient::class, fn(): DpdGeographyFtpClient => new DpdGeographyFtpClient( $this->container->get( DpdSettings::class ) ) );
+		$this->container->register( DpdDaDataDeliveryClientInterface::class, fn(): DpdDaDataDeliveryClientInterface => new WpDpdDaDataDeliveryClient( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( DpdDaDataDeliveryFallbackService::class, fn(): DpdDaDataDeliveryFallbackService => new DpdDaDataDeliveryFallbackService( $this->container->get( LocationRepository::class ), $this->container->get( LocationDeliveryCodeRepository::class ), $this->container->get( DpdDaDataDeliveryClientInterface::class ) ) );
 		$this->container->register( RussianPostCourierTariffProbeService::class, fn(): RussianPostCourierTariffProbeService => new RussianPostCourierTariffProbeService( $this->container->get( Logger::class ) ) );
 		$this->container->register( RussianPostOtpravkaApiSettings::class, fn(): RussianPostOtpravkaApiSettings => new RussianPostOtpravkaApiSettings( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
 		$this->container->register( RussianPostOtpravkaApiClient::class, fn(): RussianPostOtpravkaApiClient => new RussianPostOtpravkaApiClient( $this->container->get( RussianPostOtpravkaApiSettings::class ) ) );
@@ -543,7 +562,10 @@ final class Plugin {
 				$this->container->get( CdekCarrier::class ),
 				$this->container->get( DpdSettings::class ),
 				$this->container->get( DpdApiClient::class ),
-				$this->container->get( DpdGeographyDiagnosticService::class )
+				$this->container->get( DpdGeographyDiagnosticService::class ),
+				$this->container->get( DpdGeographyImportService::class ),
+				$this->container->get( DpdGeographyFtpClient::class ),
+				$this->container->get( DpdDaDataDeliveryFallbackService::class )
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper() );

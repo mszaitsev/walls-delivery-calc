@@ -25,4 +25,4 @@
 
 # 0.15.x GAR Import Update
 
-Full clear now removes local locations, aliases, regions, and `wdc_location_carrier_codes`. Carrier mappings are cleared during a full GAR reimport because location IDs and GAR mappings may be replaced together.
+Full clear now removes local locations, aliases, regions, and `wdc_location_delivery_codes`. Delivery code mappings are cleared during a full GAR reimport because location IDs may be replaced together.

@@ -1,8 +1,26 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.55.0.
+Current plugin version: 0.56.9.
 
-Version 0.55.0 adds the DPD geography layer only. `DpdCityResolver` resolves and stores DPD `cityId` mappings in `wdc_location_carrier_codes`, `DpdDuplicateCityResolver` handles duplicate geography responses, and DPD geography diagnostics/manual mapping are available from the DPD service settings. Runtime DPD tariffs, checkout rates, pickup points, orders, statuses, labels, COD, `unitLoad` and FTP import remain intentionally not implemented.
+Version 0.56.9 adds a visible DPD География action result block. Diagnostics, manual cityId mapping, DaData fallback, SFTP warnings, import job start, and reset now save a structured last result and display it after admin redirects, separately from import progress and the last import report.
+
+Version 0.56.8 switches DPD Geography CSV reading to a custom bounded `fread()` line reader plus `str_getcsv()`. It supports Windows-1251 files without BOM and LF, CRLF, or CR line endings without relying on `fgets()`/`fgetcsv()` buffering, while still rejecting genuinely oversized rows safely. SFTP-unavailable warnings do not pollute import job errors.
+
+Version 0.56.7 switched DPD Geography CSV reading from `fgetcsv()` to bounded `fgets()` plus `str_getcsv()`.
+
+Version 0.56.6 makes the DPD Geography CSV parser memory-safe on Windows/Local PHP by using a bounded `fgetcsv` row length. DPD `GeographyNewDPD_*.csv` may be Windows-1251 without BOM; rows are converted to UTF-8, and oversized/broken rows now fail as controlled diagnostics instead of exhausting memory.
+
+Version 0.56.5 removes the full pre-import CSV scan from DPD Geography import. Progress is now calculated from `byte_offset / file_size`, so large `GeographyNewDPD_*.csv` files do not need a row-count pass before import. Missing PHP `ssh2` is treated as an SFTP warning, not a failed import; manual CSV upload remains fully supported.
+
+Version 0.56.4 fixes DPD Geography import file cleanup semantics: uploaded/SFTP temp CSV files are deleted on finish/reset, while CLI/diagnostic imports through `import_file()` keep the caller-provided CSV and still remove the serialized index and staging table.
+
+Version 0.56.3 makes DPD Geography import staging-first. Step import writes candidates/conflicts only to a per-job `wdc_dpd_geography_stage_<hash>` table; `wdc_location_delivery_codes` is unchanged until EOF finalization. Finish performs a DPD-only full refresh of `dpd_city_id`, saves the report, and removes CSV/index/staging temp data. Reset removes the same temporary data and leaves the working table untouched.
+
+Version 0.56.2 makes DPD Geography import production-sized-file ready. SFTP/manual `GeographyNewDPD_*.csv` imports now create a stateful admin job, build a reusable in-memory index from `wdc_locations`, process CSV rows in AJAX steps with visual progress, and avoid SQL lookup per CSV row. State is stored in an option and temp files are removed on finish/reset. DPD tariffs, checkout rates, pickup points, orders, statuses, labels, COD, `unitLoad`, cron import and runtime DPD carrier registration remain intentionally not implemented.
+
+Version 0.56.1 adds the DPD Geography Import Foundation on top of `wdc_location_delivery_codes.dpd_city_id`: admin-only SFTP/manual CSV import for `GeographyNewDPD_*.csv`, stream parsing, conservative FIAS/KLADR/name matching, last import report storage, and manual DaData delivery fallback for one `location_id`.
+
+Version 0.56.0 replaces the cancelled generic carrier-code storage with `wdc_location_delivery_codes`, a 1:1 table keyed by `location_id` with nullable `dpd_city_id`. `DpdCityResolver` reads only this local mapping; live DPD city lookup remains disabled, and manual mapping is the current supported path until a future DPD geography import stage.
 
 Version 0.49.0 improves the shipment preparation modal package UI and CDEK sender pickup settings. CDEK now stores an optional sender pickup address, the modal can temporarily replace the sender pickup point for the current shipment draft, package summaries show package weight plus assigned item totals, split rows rebalance quantities with delete actions, and managers can add manual package items with WooCommerce product search by SKU/name.
 

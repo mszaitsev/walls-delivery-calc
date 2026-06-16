@@ -26,7 +26,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $stage = array();
 		public array $stage_history = array();
 		public array $aliases = array();
-		public array $carrier_codes = array();
+		public array $delivery_codes = array();
 		public array $missing_tables = array();
 		public array $stage_columns = array( 'region_code', 'region_name', 'region_type', 'region_fias_id', 'region_kladr_id', 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level', 'city_name', 'city_type', 'city_fias_id', 'city_kladr_id', 'place_name', 'place_type', 'place_level', 'display_name', 'fias_id', 'gar_object_id', 'kladr_id', 'okato', 'oktmo', 'postal_code' );
 		public array $location_columns = array( 'id', 'gar_object_id', 'fias_id', 'kladr_id', 'gar_id', 'country_code', 'region_name', 'region_code', 'region_type', 'district_name', 'district_type', 'district_fias_id', 'district_kladr_id', 'district_gar_object_id', 'district_level', 'city_name', 'city_type', 'city_fias_id', 'city_kladr_id', 'settlement_name', 'settlement_type', 'place_name', 'place_type', 'place_level', 'display_name', 'postal_code', 'okato', 'oktmo', 'latitude', 'longitude', 'searchable_text', 'active', 'created_at', 'updated_at' );
@@ -65,10 +65,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 				return 1;
 			}
 
-			if ( str_contains( $table, 'wdc_location_carrier_codes' ) ) {
-				++$this->insert_id;
-				$data['id'] = $this->insert_id;
-				$this->carrier_codes[ $this->insert_id ] = $data;
+			if ( str_contains( $table, 'wdc_location_delivery_codes' ) ) {
+				$this->delivery_codes[ (int) $data['location_id'] ] = $data;
 				return 1;
 			}
 
@@ -207,8 +205,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 			if ( str_contains( $sql, 'wdc_location_aliases' ) ) {
 				return count( $this->aliases );
 			}
-			if ( str_contains( $sql, 'wdc_location_carrier_codes' ) ) {
-				return count( $this->carrier_codes );
+			if ( str_contains( $sql, 'wdc_location_delivery_codes' ) ) {
+				return count( $this->delivery_codes );
 			}
 			return count( $this->locations );
 		}
@@ -252,8 +250,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 				$this->stage = array();
 			} elseif ( str_contains( $sql, 'wdc_location_aliases' ) ) {
 				$this->aliases = array();
-			} elseif ( str_contains( $sql, 'wdc_location_carrier_codes' ) ) {
-				$this->carrier_codes = array();
+			} elseif ( str_contains( $sql, 'wdc_location_delivery_codes' ) ) {
+				$this->delivery_codes = array();
 			} elseif ( str_contains( $sql, 'wdc_locations' ) ) {
 				$this->locations = array();
 			} elseif ( str_contains( $sql, 'wdc_regions' ) ) {
@@ -274,7 +272,7 @@ if ( ! class_exists( 'wpdb' ) ) {
 				'wdc_regions' => $this->regions,
 				'wdc_locations' => $this->locations,
 				'wdc_location_aliases' => $this->aliases,
-				'wdc_location_carrier_codes' => $this->carrier_codes,
+				'wdc_location_delivery_codes' => $this->delivery_codes,
 				default => array(),
 			};
 		}
@@ -294,7 +292,11 @@ if ( ! class_exists( 'wpdb' ) ) {
 				return $this->stage_columns;
 			}
 
-			return array( 'id', 'region_code', 'region_name', 'gar_object_id', 'fias_id', 'carrier_key', 'external_code', 'created_at', 'updated_at' );
+			if ( 'wdc_location_delivery_codes' === $table ) {
+				return array( 'location_id', 'dpd_city_id', 'updated_at' );
+			}
+
+			return array( 'id', 'region_code', 'region_name', 'created_at', 'updated_at' );
 		}
 	}
 }
@@ -559,19 +561,14 @@ $fallback = $locations->find_by_gar_object_id( 1004 );
 gar_smoke_assert( null !== $fallback && 'Новосибирская обл, р-н Новосибирский, г Новосибирск, рп Краснообск' === $fallback->display_name, 'Fallback display_name must include district.' );
 
 $wpdb->insert(
-	'wdc_location_carrier_codes',
+	'wdc_location_delivery_codes',
 	array(
-		'location_id' => null,
-		'gar_object_id' => 1001,
-		'fias_id' => $novosibirsk->fias_id,
-		'carrier_key' => 'cdek',
-		'external_code' => '344',
-		'meta' => null,
-		'created_at' => current_time( 'mysql' ),
+		'location_id' => $novosibirsk->id,
+		'dpd_city_id' => '196006461',
 		'updated_at' => current_time( 'mysql' ),
 	)
 );
-gar_smoke_assert( 1 === count( $wpdb->carrier_codes ), 'carrier_codes table foundation must accept rows.' );
+gar_smoke_assert( 1 === count( $wpdb->delivery_codes ), 'delivery_codes table foundation must accept rows.' );
 
 update_option(
 	'wdc_location_type_display_rules',
@@ -592,7 +589,7 @@ gar_smoke_assert( is_string( $snapshot ), 'Snapshot temp file must be created.' 
 $exported = ( new LocationsSnapshotExporter( $wpdb ) )->export_to_file( $snapshot, '0.15.10' );
 gar_smoke_assert( $exported > 0, 'Snapshot export must include rows from 4 tables.' );
 $snapshot_text = (string) file_get_contents( $snapshot );
-gar_smoke_assert( str_contains( $snapshot_text, '"table":"wdc_regions"' ) && str_contains( $snapshot_text, '"table":"wdc_location_carrier_codes"' ), 'Snapshot export must include all foundation tables.' );
+gar_smoke_assert( str_contains( $snapshot_text, '"table":"wdc_regions"' ) && str_contains( $snapshot_text, '"table":"wdc_location_delivery_codes"' ), 'Snapshot export must include all foundation tables.' );
 gar_smoke_assert( str_contains( $snapshot_text, '"district_name":"Новосибирский"' ) && str_contains( $snapshot_text, '"postal_code":"630555"' ), 'Snapshot export must preserve district_* and postal_code.' );
 gar_smoke_assert( ! str_contains( $snapshot_text, '"postcode"' ), 'Snapshot export must not include postcode as a location field.' );
 gar_smoke_assert( str_contains( $snapshot_text, '"type":"option"' ) && str_contains( $snapshot_text, '"name":"wdc_location_type_display_rules"' ), 'Snapshot export must include type display rules option row.' );
