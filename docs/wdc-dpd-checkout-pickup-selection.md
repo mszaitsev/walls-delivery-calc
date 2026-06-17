@@ -1,6 +1,10 @@
 # WDC DPD Checkout Pickup Selection
 
-Version: 0.60.4.
+Version: 0.61.0.
+
+0.61.0 note: the selected DPD pickup `terminal_code` can now be used manually in an admin-only Parcels3 diagnostic
+calculator, but checkout runtime pricing is still unchanged. Checkout continues to save the selected terminal for future
+use and does not pass it to tariff calculation.
 
 0.60.4 update: the shared checkout pickup map recalculates and resorts visible point distances after DPD address search
 or browser geolocation changes the active origin, so side-card distances and `Ближайший ПВЗ` use the current origin.
@@ -160,5 +164,6 @@ It does not affect DPD price calculation yet:
 - runtime does not call `getServiceCost3`;
 - `parcel[]` remains the packaging-place model.
 
-Next step: test `getServiceCostByParcels3` with `parcel[]`, `pickup.terminalCode` and `delivery.terminalCode`, compare
-prices with the DPD cabinet, and only then consider terminalCode-aware runtime pricing.
+Admin diagnostic step: `WDC -> Службы доставки -> DPD -> DPD Расчет` can test `getServiceCostByParcels3` with `parcel[]`,
+`pickup.terminalCode` and `delivery.terminalCode`, compare it with the current Parcels2 payload and then compare the
+result with the DPD cabinet. Only after those checks should runtime terminalCode-aware pricing be considered.

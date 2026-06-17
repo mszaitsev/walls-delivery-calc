@@ -1,12 +1,13 @@
 # WDC DPD Tariff Calculation
 
-Version: 0.59.0.
+Version: 0.61.0.
 
-This stage documents the DPD tariff calculation foundation used by admin diagnostics and checkout runtime. As of 0.59.0, DPD pickup points / terminals can be imported into a local read-only foundation table, but tariff calculation is intentionally unchanged.
+This document covers the DPD tariff calculation foundation used by checkout runtime and admin diagnostics. As of 0.61.0, checkout runtime still uses `calculator2/getServiceCostByParcels2`, while `calculator2/getServiceCostByParcels3` is available only through an admin terminalCode diagnostic calculator.
 
 ## Scope
 
 - Low-level API wrapper: `DpdApiClient::getServiceCostByParcels2()`.
+- Admin-only terminalCode diagnostic wrapper: `DpdApiClient::getServiceCostByParcels3()`.
 - SOAP service: `calculator2`, method `getServiceCostByParcels2`.
 - Transport/auth: existing `DpdApiClient::call()`, `DpdSoapClientInterface`, `DpdSoapRequest`, `DpdSettings` credentials.
 - Admin UI: `WDC -> Службы доставки -> DPD -> DPD Расчет`.
@@ -59,9 +60,19 @@ The `DPD Расчет` tab stores:
 
 The test form accepts sender override, receiver `location_id`, parcel values, pickup/delivery mode and optional `serviceCode`. After POST it redirects back to the same tab and displays success/failure, raw count, normalized service list and, when DPD debug is enabled, the business payload plus redacted SOAP payload shape metadata. The action result block is one-shot: after it renders, `clear_tariff_action_result()` removes it from settings so a normal page reload does not repeat the notice.
 
+The same tab also contains `DPD terminalCode диагностика`, an admin-only calculator for `calculator2/getServiceCostByParcels3`. It accepts pickup cityId, optional pickup terminalCode, receiver location_id or delivery cityId, delivery terminalCode, parcel dimensions/weight, declared value, pickup/delivery modes and optional `serviceCode`. The diagnostic payload remains business-only at builder/service level; `DpdSoapRequest` adds `request.auth` centrally. The diagnostic does not pass `extraService`.
+
+When the diagnostic runs, it can also call the current `getServiceCostByParcels2` with the same cityId/selfPickup/selfDelivery/declaredValue/parcel/serviceCode fields but without terminalCode. The admin result shows Parcels2 cost, Parcels3 terminalCode cost and delta by serviceCode. This comparison is for DPD cabinet verification only and is not used by checkout.
+
 Checkout runtime settings no longer live on `DPD Расчет`. Method titles are edited on `Основное`, while DPD service-code enablement, custom tariff titles and the `Использовать курьерские тарифы` checkbox are edited on the DPD `Тарифы` tab. Checkout runtime mode flags are not configurable: runtime always sends from a DPD terminal, and courier delivery is calculated by a separate request only when enabled.
 
 Runtime pricing still uses `calculator2/getServiceCostByParcels2`. In checkout, pickup/terminal rates send `selfPickup=true` and `selfDelivery=true`; courier rates send `selfPickup=true` and `selfDelivery=false`. Future terminal/PVZ pricing must not jump to `getServiceCost3`, because that method does not match the current `parcel[]` packaging-place model. The future candidate is `getServiceCostByParcels3`, but only after DPD pickup-point work provides `pickup.terminalCode` / `delivery.terminalCode` and live tests confirm `parcel[]` plus terminal-code pricing against the DPD cabinet.
+
+## getServiceCostByParcels3 WSDL Notes
+
+`docs/dpd/ws-integration-guide.docx` contains section `2.5.5. Параметры входного сообщения для getServiceCostByParcels3`. The calculator request supports the same package-place `parcel[]` model, `declaredValue`, `selfPickup`, `selfDelivery`, optional `serviceCode` and optional `pickupDate`. The guide lists `terminalCode` under both pickup and delivery city blocks alongside `cityId`, `cityName`, `regionCode`, `countryCode` and `guidFIAS`. `DpdApiClient::getServiceCostByParcels3()` calls `calculator2` with wrapper `request`; auth is placed under `request.auth` by `DpdSoapRequest`.
+
+`extraService` / option types exist in the DPD guide, but WDC does not include them in the terminalCode diagnostic payload.
 
 ## Normalization
 
@@ -90,7 +101,7 @@ Missing fields are not fatal.
 
 - DPD `CarrierShipmentAdapterRegistry` adapter.
 - Checkout pickup map/selection.
-- TerminalCode-aware runtime pricing.
+- TerminalCode-aware runtime pricing; 0.61.0 adds diagnostics only.
 - Order creation, cancellation, statuses, labels.
 - COD / NPP.
 - `unitLoad`.

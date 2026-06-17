@@ -1,6 +1,11 @@
 # WDC DPD Pickup Points
 
-Version: 0.60.3.
+Version: 0.61.0.
+
+0.61.0 update: `DpdPickupPointService` now also exposes an admin diagnostic parcel_shop selector for terminalCode
+pricing checks. It uses only `parcel_shop` rows, avoids duplicate `terminal_self_delivery` rows with the same
+`terminal_code` when possible, allows the only duplicated parcel shop as a flagged fallback, and returns an explicit
+ambiguous warning when multiple parcel shops are all duplicated.
 
 0.60.3 update: `raw_json` is diagnostic/admin/internal storage only. It remains in `wdc_dpd_pickup_points` but is not
 returned by checkout REST, not saved in checkout session snapshots and not saved to order meta. Checkout-facing DPD point
@@ -133,6 +138,7 @@ The first 20 matching active rows are rendered in the admin table.
 - `get_points_for_location_id(int $location_id)`;
 - `get_points_by_city_id(int $city_id)`;
 - `get_point_by_terminal_code(string $terminal_code)`.
+- `find_diagnostic_parcel_shop_for_city_id(int $city_id)` and `find_diagnostic_parcel_shop_for_location_id(int $location_id)` for admin-only terminalCode pricing diagnostics.
 
 `get_points_for_location_id()` resolves `wdc_location_delivery_codes.dpd_city_id` through `LocationDeliveryCodeRepository` and then reads local points by `city_id`.
 The service returns consumer-facing points: rows with the same `terminal_code` are grouped, `parcel_shop` is preferred,
@@ -155,7 +161,7 @@ After the checkout map and selected terminal storage are implemented:
 
 - obtain selected `delivery.terminalCode`;
 - define sender `pickup.terminalCode`;
-- test `calculator2/getServiceCostByParcels3` with `parcel[]`, `pickup.terminalCode` and `delivery.terminalCode`;
+- test `calculator2/getServiceCostByParcels3` with `parcel[]`, `pickup.terminalCode` and `delivery.terminalCode` through the admin-only diagnostic calculator;
 - compare prices with the DPD cabinet;
 - only then switch runtime pricing.
 

@@ -1,6 +1,11 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.60.4.
+Current plugin version: 0.61.0.
+
+Version 0.61.0 adds an admin-only DPD terminalCode pricing diagnostic for `calculator2/getServiceCostByParcels3`.
+The DPD `DPD Расчет` tab can build a Parcels3 request with `parcel[]`, cityId and selected/manual terminalCode,
+compare it side by side with the current Parcels2 payload, and use a deterministic diagnostic parcel_shop selector.
+Checkout runtime pricing is unchanged and still uses `getServiceCostByParcels2` without terminalCode.
 
 Version 0.60.4 fixes stale pickup-map distances after address search or browser geolocation changes the active origin.
 The frontend now recalculates and resorts current visible pickup points before rerendering markers, the side list and the

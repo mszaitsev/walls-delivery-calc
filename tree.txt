@@ -120,6 +120,7 @@ C:.
 |   |   wdc-dpd-integration.md
 |   |   wdc-dpd-pickup-points.md
 |   |   wdc-dpd-tariff-calculation.md
+|   |   wdc-dpd-terminalcode-pricing.md
 |   |   wdc-fias-foundation.md
 |   |   wdc-gar-places-import.md
 |   |   wdc-legacy-uninstall-cleanup.md
@@ -237,6 +238,10 @@ C:.
 |   |   |           DpdTariffRequest.php
 |   |   |           DpdTariffRequestBuilder.php
 |   |   |           DpdTariffResult.php
+|   |   |           DpdTerminalCodeTariffDiagnosticRequest.php
+|   |   |           DpdTerminalCodeTariffDiagnosticRequestBuilder.php
+|   |   |           DpdTerminalCodeTariffDiagnosticResult.php
+|   |   |           DpdTerminalCodeTariffDiagnosticService.php
 |   |   |
 |   |   +---Registry
 |   |   |       CarrierRegistry.php
@@ -649,6 +654,7 @@ C:.
     |       run-dpd-parcel-builder-smoke.php
     |       run-dpd-pickup-points-smoke.php
     |       run-dpd-tariff-calculation-smoke.php
+    |       run-dpd-terminalcode-pricing-smoke.php
     |
     +---fias
     |       run-fias-smoke.php

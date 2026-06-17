@@ -1,5 +1,13 @@
 # Карта текущего кода
 
+## DPD TerminalCode Pricing Diagnostics 0.61.0
+
+- `src/Carriers/Dpd/Tariff/DpdTerminalCodeTariffDiagnosticRequest.php`, `DpdTerminalCodeTariffDiagnosticRequestBuilder.php`, `DpdTerminalCodeTariffDiagnosticResult.php` and `DpdTerminalCodeTariffDiagnosticService.php` implement the admin-only `calculator2/getServiceCostByParcels3` diagnostic path. The service builds a Parcels3 payload with `pickup.cityId`, optional `pickup.terminalCode`, `delivery.cityId`, `delivery.terminalCode`, `selfPickup`, `selfDelivery`, `declaredValue`, optional `serviceCode`/`pickupDate` and `parcel[]`, then compares it with the current Parcels2 payload without terminalCode.
+- `src/Carriers/Dpd/Pickup/DpdPickupPointService.php::find_diagnostic_parcel_shop_for_city_id()` and `find_diagnostic_parcel_shop_for_location_id()` select only `parcel_shop` rows for diagnostics, avoid same-city duplicate `terminal_self_delivery` rows when possible, allow the only duplicated parcel shop as a warning fallback, and refuse ambiguous multiple duplicated parcel shops.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds the `DPD terminalCode диагностика` block to the existing DPD `DPD Расчет` tab. Results reuse the one-shot DPD tariff action result and can show Parcels2/Parcels3 deltas plus debug payload/response only when DPD debug is enabled.
+- `tests/dpd/run-dpd-terminalcode-pricing-smoke.php` covers Parcels3 wrapper/request payload, no `extraService`, Parcels2 runtime boundary, diagnostic parcel_shop selector rules, admin one-shot result storage and absence of a DPD shipment adapter/metabox.
+- Checkout runtime is unchanged: `DpdTariffCalculationService` and `DpdQuoteCarrier` still use `getServiceCostByParcels2`, and selected checkout terminalCode is not sent to tariff calculation.
+
 ## DPD Checkout Pickup Selection 0.60.0
 
 - `src/Carriers/Runtime/DpdQuoteCarrier.php` still calculates DPD checkout prices with `calculator2/getServiceCostByParcels2`, cityId, `selfPickup=true` and delivery-type-derived `selfDelivery`. Pickup rates now set `requires_pickup_point=true` and `dpd_pickup_point_selection_enabled=true`; tariff payloads still do not include `terminalCode`.
@@ -19,7 +27,7 @@
 - `src/Carriers/Dpd/Pickup/DpdPickupPointNormalizer.php` tolerates object/array/single-object SOAP shapes and normalizes DPD parcel shops (`code`) and self-delivery terminals (`terminalCode`) into one local format.
 - `src/Carriers/Dpd/Pickup/DpdPickupPointScheduleFormatter.php` converts DPD schedule arrays/objects/JSON strings/plain strings into readable checkout text.
 - `src/Carriers/Dpd/Pickup/DpdPickupPointImportService.php` performs manual imports for parcel shops, terminals or both, stores `dpd_last_pickup_import_report` through `DpdSettings`, and catches SOAP/import errors into controlled reports. Empty DPD responses and responses with fetched rows but zero normalized valid points do not call replacement and leave existing points unchanged.
-- `src/Carriers/Dpd/Pickup/DpdPickupPointService.php` is the read-only checkout-map boundary. It resolves WDC `location_id` through `LocationDeliveryCodeRepository::get_dpd_city_id()` and reads points by DPD cityId or terminalCode. Consumer reads deduplicate by `terminal_code` and prefer `parcel_shop` over duplicate `terminal_self_delivery`; terminal-only rows remain visible.
+- `src/Carriers/Dpd/Pickup/DpdPickupPointService.php` is the read-only checkout-map boundary. It resolves WDC `location_id` through `LocationDeliveryCodeRepository::get_dpd_city_id()` and reads points by DPD cityId or terminalCode. Consumer reads deduplicate by `terminal_code` and prefer `parcel_shop` over duplicate `terminal_self_delivery`; terminal-only rows remain visible. The same service also owns the admin-only diagnostic parcel_shop selector for terminalCode pricing checks.
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds the DPD `DPD ПВЗ` tab with status, manual import buttons and diagnostics by terminalCode/cityId/cityName.
 - `tests/dpd/run-dpd-pickup-points-smoke.php` covers repository behavior, normalizer shapes, import counts, wrapper names/auth wrappers, read-only service lookup, unchanged Parcels2 runtime pricing and absence of DPD shipment adapter/metabox.
 
