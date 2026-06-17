@@ -1,6 +1,11 @@
 # WDC DPD Checkout Pickup Selection
 
-Version: 0.60.0.
+Version: 0.60.1.
+
+0.60.1 review fix: checkout resolve-location now extracts the selected point payload or `point_id` before applying the
+DPD/CDEK skip checks. DPD and CDEK pickup points return `requires_location_change=false` without invoking the Russian
+Post location resolver; Russian Post behavior remains on the resolver path. Pricing remains unchanged and selected DPD
+`terminal_code` is still not sent to tariff calculation.
 
 ## Scope
 

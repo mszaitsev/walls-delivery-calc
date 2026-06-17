@@ -1,6 +1,11 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.60.0.
+Current plugin version: 0.60.1.
+
+Version 0.60.1 fixes the checkout pickup resolve-location order for DPD. The REST controller now reads the selected
+point payload before applying the DPD/CDEK skip path, so DPD and CDEK return `requires_location_change=false` without
+touching an undefined variable or requiring the Russian Post location resolver. Russian Post resolve-location behavior is
+unchanged, and DPD pricing still does not use `terminalCode`.
 
 Version 0.60.0 connects the DPD pickup-point selection foundation to checkout. DPD pickup rates now reuse the shared
 checkout pickup map/list UI, load active local points from `wdc_dpd_pickup_points` through `carrier=dpd&location_id=...`,

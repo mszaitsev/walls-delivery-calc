@@ -149,6 +149,12 @@ $session->save_rates(
 $session->save_city_context( array( 'location_id' => 77, 'city_name' => 'Новосибирск', 'region_name' => 'Новосибирская обл.', 'country_code' => 'RU' ) );
 
 $checkout_rest = new CheckoutPickupPointRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), $session, null, null, $service );
+$dpd_resolve = $checkout_rest->resolve_location( new DpdCheckoutPickupRequest( array( 'point' => array( 'carrier_key' => 'dpd', 'point_code' => 'NSK-PS-1' ) ) ) );
+dpd_checkout_pickup_assert( false === (bool) ( $dpd_resolve['requires_location_change'] ?? true ) && null === ( $dpd_resolve['location'] ?? null ) && ! isset( $dpd_resolve['message'] ), 'DPD resolve_location must skip location resolver and not touch undefined point.' );
+$cdek_resolve = $checkout_rest->resolve_location( new DpdCheckoutPickupRequest( array( 'point' => array( 'carrier_key' => 'cdek', 'point_code' => 'CDEK1' ) ) ) );
+dpd_checkout_pickup_assert( false === (bool) ( $cdek_resolve['requires_location_change'] ?? true ) && null === ( $cdek_resolve['location'] ?? null ) && ! isset( $cdek_resolve['message'] ), 'CDEK resolve_location skip behavior must be preserved.' );
+$rp_resolve = $checkout_rest->resolve_location( new DpdCheckoutPickupRequest( array( 'point' => array( 'carrier_key' => 'russian_post_domestic', 'point_code' => '630001', 'postcode' => '630001' ) ) ) );
+dpd_checkout_pickup_assert( false === (bool) ( $rp_resolve['requires_location_change'] ?? true ) && 'Pickup point location resolver is unavailable.' === (string) ( $rp_resolve['message'] ?? '' ), 'Russian Post resolve_location behavior must keep resolver path.' );
 $save_response = $checkout_rest->save( new DpdCheckoutPickupRequest( array( 'carrier' => 'dpd', 'shipping_method_id' => $pickup_rate_id, 'point_code' => 'NSK-PS-1' ) ) );
 dpd_checkout_pickup_assert( 'NSK-PS-1' === (string) ( $save_response['pickup_point']['point_code'] ?? '' ), 'Checkout save endpoint must persist selected DPD terminal_code.' );
 dpd_checkout_pickup_assert( 'dpd:pickup' === (string) ( $save_response['active_pickup_family'] ?? '' ), 'Checkout save endpoint must save DPD selection in dpd:pickup bucket.' );

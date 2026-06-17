@@ -210,24 +210,6 @@ final class CheckoutPickupPointRestController {
 	}
 
 	public function resolve_location( mixed $request ): mixed {
-		if ( ! $this->location_resolver instanceof PickupPointLocationResolver ) {
-			return $this->response(
-				array(
-					'requires_location_change' => false,
-					'location' => null,
-					'message' => 'Pickup point location resolver is unavailable.',
-				)
-			);
-		}
-		if ( DpdSettings::CARRIER_KEY === (string) ( $point['carrier_key'] ?? $point['carrier'] ?? '' ) ) {
-			return $this->response(
-				array(
-					'requires_location_change' => false,
-					'location' => null,
-				)
-			);
-		}
-
 		$point = $this->array_param( $request, 'point' );
 		if ( array() === $point ) {
 			$point_id = (int) $this->param( $request, 'point_id' );
@@ -242,11 +224,29 @@ final class CheckoutPickupPointRestController {
 		if ( array() === $point ) {
 			return $this->error( 'invalid_point', 'Pickup point payload is required.', 400 );
 		}
+		if ( DpdSettings::CARRIER_KEY === (string) ( $point['carrier_key'] ?? $point['carrier'] ?? '' ) ) {
+			return $this->response(
+				array(
+					'requires_location_change' => false,
+					'location' => null,
+				)
+			);
+		}
 		if ( 'cdek' === (string) ( $point['carrier_key'] ?? $point['carrier'] ?? '' ) ) {
 			return $this->response(
 				array(
 					'requires_location_change' => false,
 					'location' => null,
+				)
+			);
+		}
+
+		if ( ! $this->location_resolver instanceof PickupPointLocationResolver ) {
+			return $this->response(
+				array(
+					'requires_location_change' => false,
+					'location' => null,
+					'message' => 'Pickup point location resolver is unavailable.',
 				)
 			);
 		}
