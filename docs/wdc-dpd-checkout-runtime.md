@@ -1,6 +1,6 @@
 # DPD Checkout Runtime
 
-Version: 0.58.4
+Version: 0.58.5
 
 ## Scope
 
@@ -43,13 +43,16 @@ The checkout stage sends only aggregate package data:
 - `parcel[]`: packaging places, not cart items;
 - `declaredValue`: package/order total, with DPD default declared value as fallback.
 
-`DpdParcelBuilder` builds the initial runtime `parcel[]` as a safe single-box model:
+`DpdParcelBuilder` builds runtime `parcel[]` as packaging places:
 
-- package-level total weight and dimensions become one DPD parcel when available;
-- otherwise product item dimensions are used only to calculate one box that fits the temporary 50x50x30 cm model;
+- product quantities are expanded before packaging;
+- items with any side over 49 cm are long items and become separate DPD parcels with quantity `1`;
+- remaining regular items are packed into one common parcel by `single_box_fit()` when possible;
+- if regular items do not fit the temporary 50x50x30 cm single-box model, stacked rows are used with a 45 cm row width threshold;
+- package-level dimensions are used only when item dimensions are missing;
 - if no reliable dimensions can be calculated, DPD default weight/dimensions from settings are used.
 
-Cart line composition, individual products as separate parcels, `unitLoad`, COD/НПП and fiscal receipts are intentionally not sent. Advanced multi-box/bin-packing is a separate future stage.
+Regular cart items are not sent as individual parcels. Long items are the intentional exception because they cannot be packed into the temporary standard box. `unitLoad`, COD/НПП and fiscal receipts are intentionally not sent. Advanced multi-box/bin-packing is a separate future stage.
 
 ## Grouped Rate Mapping
 
@@ -164,11 +167,11 @@ DPD `quote_id` is diagnostic and includes:
 
 ## Cache And Parcel Diagnostics
 
-The generic checkout quote cache key includes selected receiver location, package dimensions and declared value in addition to the existing carrier/service/country/city/weight/order-total dimensions. DPD `quote_id` diagnostics also include the normalized parcel signature, parcel count, total weight, dimensions, declared value and `package_builder_source`.
+The generic checkout quote cache key includes selected receiver location, package dimensions and declared value in addition to the existing carrier/service/country/city/weight/order-total dimensions. DPD `quote_id` diagnostics also include the normalized parcel signature, parcel count, long-item parcel count, regular item count, total weight, dimensions, declared value, `parcel_dimensions`, `box_limit` and `package_builder_source`.
 
 ## Out Of Scope
 
-The 0.58.4 stage does not implement:
+The 0.58.5 stage does not implement:
 
 - DPD pickup points;
 - parcel shop selection;

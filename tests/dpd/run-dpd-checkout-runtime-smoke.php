@@ -255,6 +255,22 @@ function dpd_checkout_request_with_package( Package $package, string $delivery_t
 	);
 }
 
+function dpd_checkout_regular_items_package( int $quantity ): Package {
+	return new Package(
+		array( new PackageItem( 'sku-regular', 'Обычный товар', $quantity, Money::from_rubles( 100 ), Money::from_rubles( 100 * $quantity ), 1000, 36, 11, 11 ) ),
+		Money::from_rubles( 100 * $quantity ),
+		Money::from_rubles( 100 * $quantity ),
+		1000 * $quantity,
+		0,
+		1000 * $quantity,
+		null,
+		null,
+		null,
+		null,
+		'cart'
+	);
+}
+
 function dpd_checkout_build_carrier( DpdCheckoutFakeSoapClient $soap, DpdSettings $settings ): DpdQuoteCarrier {
 	$resolver = new DpdCityResolver( new LocationDeliveryCodeRepository( $GLOBALS['wpdb'] ) );
 	$locations = new LocationRepository( $GLOBALS['wpdb'] );
@@ -427,12 +443,64 @@ $items_package = new Package(
 );
 $items_quote = $carrier->quote( dpd_checkout_request_with_package( $items_package ) );
 $items_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
-dpd_checkout_assert( 1 === count( $items_payload['parcel'] ?? array() ) && 'items_single_box_fit' === (string) ( $items_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD parcel builder must collapse cart items into one calculated packaging parcel.' );
+dpd_checkout_assert( 1 === count( $items_payload['parcel'] ?? array() ) && in_array( (string) ( $items_quote->raw_reference['package_builder_source'] ?? '' ), array( 'items_single_box_fit', 'items_stacked_rows' ), true ), 'DPD parcel builder must collapse regular cart items into one calculated packaging parcel.' );
 
 $fallback_package = new Package( array(), Money::from_rubles( 0 ), Money::from_rubles( 0 ), 0, 0, 0, null, null, null, null, 'cart' );
 $fallback_quote = $carrier->quote( dpd_checkout_request_with_package( $fallback_package ) );
 $fallback_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
 dpd_checkout_assert( 1.0 === (float) ( $fallback_payload['parcel'][0]['weight'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['length'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['width'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['height'] ?? 0 ) && 'defaults' === (string) ( $fallback_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD parcel builder must fallback to DPD default parcel dimensions and weight.' );
+
+$regular_4_quote = $carrier->quote( dpd_checkout_request_with_package( dpd_checkout_regular_items_package( 4 ) ) );
+$regular_4_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
+dpd_checkout_assert( 1 === count( $regular_4_payload['parcel'] ?? array() ) && ! ( 36.0 === (float) ( $regular_4_payload['parcel'][0]['length'] ?? 0 ) && 11.0 === (float) ( $regular_4_payload['parcel'][0]['width'] ?? 0 ) && 11.0 === (float) ( $regular_4_payload['parcel'][0]['height'] ?? 0 ) ), 'DPD 4 regular items must build one package parcel, not one item dimensions.' );
+dpd_checkout_assert( 'items_single_box_fit' === (string) ( $regular_4_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD 4 regular items should use single_box_fit when it fits.' );
+
+$regular_5_quote = $carrier->quote( dpd_checkout_request_with_package( dpd_checkout_regular_items_package( 5 ) ) );
+$regular_5_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
+dpd_checkout_assert( 36.0 === (float) ( $regular_5_payload['parcel'][0]['length'] ?? 0 ) && 55.0 === (float) ( $regular_5_payload['parcel'][0]['width'] ?? 0 ) && 11.0 === (float) ( $regular_5_payload['parcel'][0]['height'] ?? 0 ) && 'items_stacked_rows' === (string) ( $regular_5_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD 5 regular items must use stacked rows fallback as 36x55x11.' );
+
+$regular_9_quote = $carrier->quote( dpd_checkout_request_with_package( dpd_checkout_regular_items_package( 9 ) ) );
+$regular_9_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
+dpd_checkout_assert( 36.0 === (float) ( $regular_9_payload['parcel'][0]['length'] ?? 0 ) && 55.0 === (float) ( $regular_9_payload['parcel'][0]['width'] ?? 0 ) && 22.0 === (float) ( $regular_9_payload['parcel'][0]['height'] ?? 0 ) && 'items_stacked_rows' === (string) ( $regular_9_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD 9 regular items must use stacked rows fallback as 36x55x22.' );
+
+$long_package = new Package(
+	array( new PackageItem( 'sku-long', 'Длинномер', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 300, 70, 5, 5 ) ),
+	Money::from_rubles( 100 ),
+	Money::from_rubles( 100 ),
+	300,
+	0,
+	300,
+	null,
+	null,
+	null,
+	null,
+	'cart'
+);
+$long_quote = $carrier->quote( dpd_checkout_request_with_package( $long_package ) );
+$long_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
+dpd_checkout_assert( 1 === count( $long_payload['parcel'] ?? array() ) && 70.0 === (float) ( $long_payload['parcel'][0]['length'] ?? 0 ) && 5.0 === (float) ( $long_payload['parcel'][0]['width'] ?? 0 ) && 5.0 === (float) ( $long_payload['parcel'][0]['height'] ?? 0 ) && 0.3 === (float) ( $long_payload['parcel'][0]['weight'] ?? 0 ) && 'long_items' === (string) ( $long_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD long item over 49 cm must become its own parcel.' );
+
+$mixed_package = new Package(
+	array(
+		new PackageItem( 'sku-long', 'Длинномер', 1, Money::from_rubles( 100 ), Money::from_rubles( 100 ), 300, 70, 5, 5 ),
+		new PackageItem( 'sku-regular', 'Обычный товар', 2, Money::from_rubles( 100 ), Money::from_rubles( 200 ), 1000, 36, 11, 11 ),
+	),
+	Money::from_rubles( 300 ),
+	Money::from_rubles( 300 ),
+	2300,
+	0,
+	2300,
+	null,
+	null,
+	null,
+	null,
+	'cart'
+);
+$mixed_quote = $carrier->quote( dpd_checkout_request_with_package( $mixed_package ) );
+$mixed_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
+dpd_checkout_assert( 2 === count( $mixed_payload['parcel'] ?? array() ) && 70.0 === (float) ( $mixed_payload['parcel'][0]['length'] ?? 0 ) && 36.0 === (float) ( $mixed_payload['parcel'][1]['length'] ?? 0 ) && 22.0 === (float) ( $mixed_payload['parcel'][1]['width'] ?? 0 ) && 11.0 === (float) ( $mixed_payload['parcel'][1]['height'] ?? 0 ), 'DPD mixed basket must produce one long-item parcel plus one regular-items parcel.' );
+dpd_checkout_assert( 2 === (int) ( $mixed_quote->raw_reference['parcels_count'] ?? 0 ) && 1 === (int) ( $mixed_quote->raw_reference['long_item_parcels_count'] ?? 0 ) && 2 === (int) ( $mixed_quote->raw_reference['regular_items_count'] ?? 0 ) && 'mixed_items_single_box_fit' === (string) ( $mixed_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD mixed basket diagnostics must expose parcel counts and source.' );
+dpd_checkout_assert( 2.0 === (float) ( $mixed_payload['parcel'][1]['weight'] ?? 0 ), 'DPD long item must not participate in the regular-items parcel weight.' );
 
 $settings->save_runtime_tariffs_from_admin(
 	array(

@@ -1,6 +1,6 @@
 # WDC DPD Tariff Calculation
 
-Version: 0.58.4.
+Version: 0.58.5.
 
 This stage implements the DPD tariff calculation foundation used by admin diagnostics and, as of 0.58.0, by the checkout runtime quote carrier. Shipment creation and pickup points remain out of scope.
 
@@ -26,7 +26,7 @@ This stage implements the DPD tariff calculation foundation used by admin diagno
 - `declaredValue`
 - `parcel[]` with `weight` in kg, `length`, `width`, `height` in cm, and `quantity`
 
-`parcel[]` represents packaging places, not cart items. The checkout runtime uses `DpdParcelBuilder` to create an initial safe single-box parcel from package-level dimensions, a deterministic item-fit box inside the temporary 50x50x30 cm model, or DPD default dimensions as fallback. The admin diagnostic calculator remains a one-parcel form for now, while `DpdTariffCalculationService` can accept explicit `params['parcels']` for multi-parcel tests/future UI.
+`parcel[]` represents packaging places, not cart items. The checkout runtime uses `DpdParcelBuilder` to expand product quantities, split long items with any side over 49 cm into separate parcels, and pack the remaining regular items into one common parcel. Regular items first try `single_box_fit()` inside the temporary 50x50x30 cm model; if that fails, the stacked-rows fallback orients each item by max/middle/min side and closes rows at 45 cm width. Package-level dimensions are used only when item dimensions are missing, and DPD default dimensions are the final fallback. The admin diagnostic calculator remains a one-parcel form for now, while `DpdTariffCalculationService` can accept explicit `params['parcels']` for multi-parcel tests/future UI.
 
 `DpdSoapRequest::payload_with_auth()` adds `auth.clientNumber` and `auth.clientKey` centrally when the SOAP transport executes the request. `calculator2/getServiceCostByParcels2` uses the explicit `request` wrapper strategy, so the SOAP argument shape is:
 

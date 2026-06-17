@@ -1,6 +1,12 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.58.4.
+Current plugin version: 0.58.5.
+
+Version 0.58.5 refines the DPD checkout parcel builder. Product quantities are expanded before packaging, items with any
+side over 49 cm become separate DPD parcels, and remaining regular items are packed into one common parcel through
+`single_box_fit()` or the deterministic stacked-rows fallback. Package-level dimensions are now only a fallback when item
+dimensions are unavailable. DPD still uses `calculator2/getServiceCostByParcels2`, where `parcel[]` means packaging places,
+not cart items.
 
 Version 0.58.4 switches the DPD tariff foundation and checkout runtime from `calculator2/getServiceCostByParcels3` to
 `calculator2/getServiceCostByParcels2`. DPD `parcel[]` now represents packaging places, not cart items: checkout builds a
