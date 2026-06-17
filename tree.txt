@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 00000036 A0AC:74BD
+Volume serial number is 000000C2 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -226,6 +226,7 @@ C:.
 |   |   |   |       DpdPickupPointImportService.php
 |   |   |   |       DpdPickupPointNormalizer.php
 |   |   |   |       DpdPickupPointRepository.php
+|   |   |   |       DpdPickupPointScheduleFormatter.php
 |   |   |   |       DpdPickupPointService.php
 |   |   |   |
 |   |   |   \---Tariff

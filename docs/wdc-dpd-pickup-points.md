@@ -1,6 +1,11 @@
 # WDC DPD Pickup Points
 
-Version: 0.60.0.
+Version: 0.60.2.
+
+0.60.2 update: DPD schedules are normalized for display. `DpdPickupPointScheduleFormatter` accepts array, object, JSON
+string and plain string values, chooses timetable operations by priority (`SelfDelivery`, `SelfPickup`, `Payment`,
+`PaymentByBankCard`), and returns readable strings such as `Пн–Вс: 10:00–22:00`. REST and checkout summary layers also
+format existing JSON schedule strings already stored in `wdc_dpd_pickup_points`; `raw_json` remains unchanged.
 
 0.60.0 update: local DPD points are now used by checkout pickup selection through the shared pickup UI and REST
 controllers. The selected active `terminal_code` is saved to checkout/order meta, but it does not affect DPD pricing yet.

@@ -115,8 +115,14 @@ $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->delivery_codes = array(
 	array( 'location_id' => 77, 'dpd_city_id' => '49455627', 'updated_at' => '2026-06-17 12:00:00' ),
 );
+$dpd_json_schedule = wp_json_encode(
+	array(
+		array( 'operation' => 'Payment', 'timetable' => array( 'weekDays' => 'Пн,Вт,Ср,Чт,Пт,Сб,Вс', 'workTime' => '10:00 - 22:00' ) ),
+	),
+	JSON_UNESCAPED_UNICODE
+);
 $GLOBALS['wpdb']->dpd_pickup_points = array(
-	array( 'id' => 1, 'terminal_code' => 'NSK-PS-1', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'region_name' => 'Новосибирская обл.', 'address' => 'ул Ленина, 1', 'name' => 'DPD Ленина', 'latitude' => 55.030199, 'longitude' => 82.92043, 'schedule' => 'пн-пт 09:00-18:00', 'source' => 'getParcelShops', 'is_active' => 1 ),
+	array( 'id' => 1, 'terminal_code' => 'NSK-PS-1', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'region_name' => 'Новосибирская обл.', 'address' => 'ул Ленина, 1', 'name' => 'DPD Ленина', 'latitude' => 55.030199, 'longitude' => 82.92043, 'schedule' => $dpd_json_schedule, 'source' => 'getParcelShops', 'is_active' => 1 ),
 	array( 'id' => 2, 'terminal_code' => 'NSK-TERM-1', 'type' => 'terminal_self_delivery', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'region_name' => 'Новосибирская обл.', 'address' => 'Складская, 2', 'name' => 'DPD Терминал', 'latitude' => 55.100000, 'longitude' => 82.950000, 'schedule' => 'ежедневно', 'source' => 'getTerminalsSelfDelivery2', 'is_active' => 1 ),
 	array( 'id' => 3, 'terminal_code' => 'INACTIVE', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'address' => 'Закрытый', 'source' => 'getParcelShops', 'is_active' => 0 ),
 );
@@ -132,6 +138,7 @@ $points_controller = new PickupPointsRestController( new RussianPostPickupPointR
 $points = $points_controller->points( array( 'carrier' => 'dpd', 'location_id' => '77', 'limit' => '20' ) );
 dpd_checkout_pickup_assert( 2 === count( $points ) && 'NSK-PS-1' === (string) ( $points[0]['terminal_code'] ?? '' ), 'Endpoint must return DPD pickup points for location_id.' );
 dpd_checkout_pickup_assert( 'dpd:pickup' === (string) ( $points[0]['pickup_family'] ?? '' ) && 'Пункт выдачи DPD' === (string) ( $points[0]['point_title'] ?? '' ), 'Endpoint DPD response shape must match checkout pickup UI shape.' );
+dpd_checkout_pickup_assert( 'Пн–Вс: 10:00–22:00' === (string) ( $points[0]['work_time'] ?? '' ) && 'Пн–Вс: 10:00–22:00' === (string) ( $points[0]['schedule'] ?? '' ) && 'Пн–Вс: 10:00–22:00' === (string) ( $points[0]['snapshot']['work_time'] ?? '' ), 'REST DPD summary must return readable work_time and schedule.' );
 dpd_checkout_pickup_assert( array() === $points_controller->points( array( 'carrier' => 'dpd', 'location_id' => '78' ) ), 'Endpoint must return empty list without dpd_city_id.' );
 $searched = $points_controller->search( array( 'carrier' => 'dpd', 'location_id' => '77', 'q' => 'Складская' ) );
 dpd_checkout_pickup_assert( 1 === count( $searched ) && 'NSK-TERM-1' === (string) ( $searched[0]['point_code'] ?? '' ), 'Endpoint must filter DPD points by query.' );
@@ -158,6 +165,7 @@ dpd_checkout_pickup_assert( false === (bool) ( $rp_resolve['requires_location_ch
 $save_response = $checkout_rest->save( new DpdCheckoutPickupRequest( array( 'carrier' => 'dpd', 'shipping_method_id' => $pickup_rate_id, 'point_code' => 'NSK-PS-1' ) ) );
 dpd_checkout_pickup_assert( 'NSK-PS-1' === (string) ( $save_response['pickup_point']['point_code'] ?? '' ), 'Checkout save endpoint must persist selected DPD terminal_code.' );
 dpd_checkout_pickup_assert( 'dpd:pickup' === (string) ( $save_response['active_pickup_family'] ?? '' ), 'Checkout save endpoint must save DPD selection in dpd:pickup bucket.' );
+dpd_checkout_pickup_assert( 'Пн–Вс: 10:00–22:00' === (string) ( $save_response['pickup_point']['snapshot']['work_time'] ?? '' ), 'Checkout selection snapshot must save readable DPD work_time.' );
 $inactive_response = $checkout_rest->save( new DpdCheckoutPickupRequest( array( 'carrier' => 'dpd', 'shipping_method_id' => $pickup_rate_id, 'point_code' => 'INACTIVE' ) ) );
 dpd_checkout_pickup_assert( is_array( $inactive_response ) && 'not_found' === (string) ( $inactive_response['code'] ?? '' ), 'Checkout save endpoint must reject inactive DPD terminal_code.' );
 

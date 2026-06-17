@@ -18,6 +18,7 @@ use WallsShop\WDC\Carriers\Dpd\DpdSoapResponse;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointImportService;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointNormalizer;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -162,12 +163,28 @@ dpd_pickup_assert( 1 === count( $repository->find_by_city_id( 49455627 ) ), 'fin
 dpd_pickup_assert( 1 === count( $repository->find_by_city_name( 'Новосиб' ) ), 'find_by_city_name must support partial city search.' );
 
 $normalizer = new DpdPickupPointNormalizer();
+$schedule_formatter = new DpdPickupPointScheduleFormatter();
+$dpd_json_schedule = wp_json_encode(
+	array(
+		array( 'operation' => 'Payment', 'timetable' => array( 'weekDays' => 'Пн,Вт,Ср,Чт,Пт,Сб,Вс', 'workTime' => '10:00 - 22:00' ) ),
+	),
+	JSON_UNESCAPED_UNICODE
+);
+dpd_pickup_assert( 'Пн–Вс: 10:00–22:00' === $schedule_formatter->format( $dpd_json_schedule ), 'DPD schedule JSON must be formatted for humans.' );
+$priority_schedule = array(
+	array( 'operation' => 'Payment', 'timetable' => array( 'weekDays' => 'Пн,Вт,Ср,Чт,Пт,Сб,Вс', 'workTime' => '10:00 - 22:00' ) ),
+	array( 'operation' => 'SelfDelivery', 'timetable' => array( 'weekDays' => 'Пн,Ср,Пт', 'workTime' => '09:00 - 18:00' ) ),
+);
+dpd_pickup_assert( 'Пн, Ср, Пт: 09:00–18:00' === $schedule_formatter->format( $priority_schedule ), 'DPD SelfDelivery schedule must have priority over Payment.' );
+dpd_pickup_assert( 'Пн–Пт: 09:00–18:00' === $schedule_formatter->format( array( 'operation' => 'SelfDelivery', 'timetable' => array( 'weekDays' => 'пн-пт', 'workTime' => '09:00-18:00' ) ) ), 'DPD weekday range schedule must be formatted cleanly.' );
+dpd_pickup_assert( 'ежедневно' === $schedule_formatter->format( 'ежедневно' ), 'DPD plain string schedule must pass through unchanged.' );
 $object_result = $normalizer->normalize_response(
 	(object) array(
 		'return' => (object) array(
 			'parcelShop' => (object) array(
 				'code' => 'OBJ1',
 				'address' => (object) array( 'cityId' => 1, 'cityName' => 'Москва' ),
+				'schedule' => json_decode( (string) $dpd_json_schedule ),
 			),
 		),
 	),
@@ -175,6 +192,7 @@ $object_result = $normalizer->normalize_response(
 	DpdPickupPointNormalizer::TYPE_PARCEL_SHOP
 );
 dpd_pickup_assert( 1 === $object_result['fetched_count'] && 1 === count( $object_result['points'] ), 'Normalizer must handle single object parcelShop response.' );
+dpd_pickup_assert( 'Пн–Вс: 10:00–22:00' === (string) ( $object_result['points'][0]['schedule'] ?? '' ), 'Normalizer must store readable DPD schedule.' );
 $array_result = $normalizer->normalize_response(
 	array(
 		'return' => array(

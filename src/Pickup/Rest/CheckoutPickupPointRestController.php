@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Pickup\Rest;
 
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
@@ -473,6 +474,7 @@ final class CheckoutPickupPointRestController {
 		$point_title = 'terminal_self_delivery' === $type ? 'Терминал DPD' : 'Пункт выдачи DPD';
 		$marker_type = 'terminal_self_delivery' === $type ? 'terminal' : 'pickup';
 		$code = (string) ( $point['terminal_code'] ?? '' );
+		$work_time = ( new DpdPickupPointScheduleFormatter() )->format( $point['schedule'] ?? '' );
 		$snapshot = array(
 			'id' => DpdSettings::CARRIER_KEY . ':' . $code,
 			'carrier_key' => DpdSettings::CARRIER_KEY,
@@ -492,7 +494,7 @@ final class CheckoutPickupPointRestController {
 			'region' => (string) ( $point['region_name'] ?? '' ),
 			'lat' => $point['latitude'] ?? null,
 			'lng' => $point['longitude'] ?? null,
-			'work_time' => (string) ( $point['schedule'] ?? '' ),
+			'work_time' => $work_time,
 			'description' => '',
 			'dpd_source' => (string) ( $point['source'] ?? '' ),
 		);

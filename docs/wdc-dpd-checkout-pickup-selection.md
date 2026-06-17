@@ -1,6 +1,11 @@
 # WDC DPD Checkout Pickup Selection
 
-Version: 0.60.1.
+Version: 0.60.2.
+
+0.60.2 update: DPD pickup schedules are formatted for checkout output. REST point payloads and saved checkout pickup
+snapshots expose readable `work_time`/`schedule` values, including JSON schedules already stored in
+`wdc_dpd_pickup_points`. Raw DPD `raw_json` remains untouched, and the selected `terminal_code` still does not affect
+tariff calculation.
 
 0.60.1 review fix: checkout resolve-location now extracts the selected point payload or `point_id` before applying the
 DPD/CDEK skip checks. DPD and CDEK pickup points return `requires_location_change=false` without invoking the Russian

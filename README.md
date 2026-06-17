@@ -1,6 +1,10 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.60.1.
+Current plugin version: 0.60.2.
+
+Version 0.60.2 formats DPD pickup schedules for checkout map/list cards. DPD schedule JSON from imported parcel shops
+and terminals is converted to readable text such as `Пн–Вс: 10:00–22:00` in REST responses and saved checkout pickup
+snapshots, while raw DPD response JSON remains unchanged. DPD pricing and `terminalCode` tariff behavior are unchanged.
 
 Version 0.60.1 fixes the checkout pickup resolve-location order for DPD. The REST controller now reads the selected
 point payload before applying the DPD/CDEK skip path, so DPD and CDEK return `requires_location_change=false` without
