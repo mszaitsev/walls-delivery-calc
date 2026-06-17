@@ -71,6 +71,16 @@ function dpd_parcel_build( DpdParcelBuilder $builder, Package $package ): array 
 	return $builder->build( dpd_parcel_request( $package ) );
 }
 
+/**
+ * @param array<int,array<string,mixed>> $units
+ * @return array<string,mixed>|null
+ */
+function dpd_parcel_pack_units_in_box( DpdParcelBuilder $builder, array $units ): ?array {
+	$method = new ReflectionMethod( $builder, 'pack_units_in_box' );
+	$method->setAccessible( true );
+	return $method->invoke( $builder, $units, array( 'length' => 50, 'width' => 50, 'height' => 30 ), 'box_50_50_30' );
+}
+
 $GLOBALS['wdc_dpd_parcel_builder_options'] = array(
 	'wdc_core_settings' => array(
 		PackagingWeightCalculator::SETTINGS_KEY => array(
@@ -87,6 +97,27 @@ $builder = new DpdParcelBuilder( $settings, new PackagingWeightCalculator( new S
 $regular_4 = dpd_parcel_build( $builder, dpd_parcel_package( array( dpd_parcel_item( '36x11x11', 4, 1000, 36, 11, 11 ) ) ) );
 dpd_parcel_assert( 1 === (int) $regular_4['parcels_count'], '4 regular items must fit one parcel.' );
 dpd_parcel_assert( ! ( 36.0 === (float) $regular_4['parcel_dimensions'][0]['length'] && 11.0 === (float) $regular_4['parcel_dimensions'][0]['width'] && 11.0 === (float) $regular_4['parcel_dimensions'][0]['height'] ), '4 regular items must not be passed as one item dimensions.' );
+
+$row_2 = dpd_parcel_pack_units_in_box(
+	$builder,
+	array(
+		array( 'source' => 'row-a', 'length' => 20, 'width' => 20, 'height' => 10, 'weight_g' => 500, 'index' => 1 ),
+		array( 'source' => 'row-b', 'length' => 20, 'width' => 20, 'height' => 10, 'weight_g' => 500, 'index' => 2 ),
+	)
+);
+dpd_parcel_assert( null !== $row_2, '2 items 20x20x10 must fit in one row.' );
+dpd_parcel_assert( 40 === (int) $row_2['length'] && 20 === (int) $row_2['width'] && 10 === (int) $row_2['height'], '2 items 20x20x10 must occupy 40x20x10, without doubled row width.' );
+
+$row_3 = dpd_parcel_pack_units_in_box(
+	$builder,
+	array(
+		array( 'source' => 'row-a', 'length' => 15, 'width' => 10, 'height' => 10, 'weight_g' => 300, 'index' => 1 ),
+		array( 'source' => 'row-b', 'length' => 15, 'width' => 10, 'height' => 10, 'weight_g' => 300, 'index' => 2 ),
+		array( 'source' => 'row-c', 'length' => 15, 'width' => 10, 'height' => 10, 'weight_g' => 300, 'index' => 3 ),
+	)
+);
+dpd_parcel_assert( null !== $row_3, 'Several items in one row must not prematurely fallback.' );
+dpd_parcel_assert( 45 === (int) $row_3['length'] && 10 === (int) $row_3['width'] && 10 === (int) $row_3['height'], '3 row items must stay in one compact row.' );
 
 $grid_4 = dpd_parcel_build( $builder, dpd_parcel_package( array( dpd_parcel_item( '20x20x10', 4, 500, 20, 20, 10 ) ) ) );
 $grid_dims = $grid_4['identical_grid_blocks_dimensions'][0] ?? array();

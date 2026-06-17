@@ -421,7 +421,7 @@ final class DpdParcelBuilder {
 			'row_length' => 0,
 			'row_width' => 0,
 			'row_height' => 0,
-			'layer_width' => 0,
+			'closed_rows_width' => 0,
 			'layer_height' => 0,
 			'placed' => array(),
 			'goods_weight_g' => 0,
@@ -439,14 +439,14 @@ final class DpdParcelBuilder {
 		$next = $state;
 		if ( 'new_layer' === $mode ) {
 			$next['height'] = (int) $state['height'];
-			$next['width'] = max( (int) $state['width'], (int) $state['layer_width'] );
+			$next['width'] = max( (int) $state['width'], (int) $state['closed_rows_width'] + (int) $state['row_width'] );
 			$next['row_length'] = 0;
 			$next['row_width'] = 0;
 			$next['row_height'] = 0;
-			$next['layer_width'] = 0;
+			$next['closed_rows_width'] = 0;
 			$next['layer_height'] = 0;
 		} elseif ( 'new_row' === $mode ) {
-			$next['layer_width'] = (int) $state['layer_width'];
+			$next['closed_rows_width'] = (int) $state['closed_rows_width'] + (int) $state['row_width'];
 			$next['layer_height'] = (int) $state['layer_height'];
 			$next['row_length'] = 0;
 			$next['row_width'] = 0;
@@ -456,7 +456,7 @@ final class DpdParcelBuilder {
 		$row_length = (int) $next['row_length'] + $orientation['length'];
 		$row_width = max( (int) $next['row_width'], $orientation['width'] );
 		$row_height = max( (int) $next['row_height'], $orientation['height'] );
-		$layer_width = (int) $next['layer_width'] + $row_width;
+		$layer_width = (int) $next['closed_rows_width'] + $row_width;
 		$layer_height = max( (int) $next['layer_height'], $row_height );
 		$occupied_length = max( (int) $next['length'], $row_length );
 		$occupied_width = max( (int) $next['width'], $layer_width );
@@ -468,7 +468,7 @@ final class DpdParcelBuilder {
 		$next['row_length'] = $row_length;
 		$next['row_width'] = $row_width;
 		$next['row_height'] = $row_height;
-		$next['layer_width'] = $layer_width;
+		$next['closed_rows_width'] = (int) $next['closed_rows_width'];
 		$next['layer_height'] = $layer_height;
 		$next['length'] = $occupied_length;
 		$next['width'] = $occupied_width;

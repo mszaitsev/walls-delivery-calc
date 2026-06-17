@@ -1,6 +1,11 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.58.8.
+Current plugin version: 0.58.9.
+
+Version 0.58.9 fixes the DPD 3D parcel packer row-state model: closed row width is now tracked separately from the
+current row, so adding multiple items to one shelf row no longer double-counts layer width. The DPD API method remains
+`calculator2/getServiceCostByParcels2`, and checkout runtime, shipment adapter/metabox, CDEK and Russian Post behavior
+are unchanged.
 
 Version 0.58.8 replaces the DPD checkout parcel builder fallback model with a fast deterministic 3D shelf/bin packer while
 keeping `calculator2/getServiceCostByParcels2` as the API method. DPD tries actual occupied dimensions in `50x50x30` and

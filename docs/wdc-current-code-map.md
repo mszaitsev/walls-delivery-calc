@@ -1,6 +1,6 @@
 # Карта текущего кода
 
-## DPD Checkout Runtime 0.58.8
+## DPD Checkout Runtime 0.58.9
 
 - `src/Carriers/Runtime/DpdQuoteCarrier.php` is the DPD checkout quote carrier registered in `CarrierRegistry` under `carrier_key=dpd`. It returns rates only when the built-in DPD delivery service is enabled by the common service settings, active-environment credentials are complete, the receiver `location_id` is known, receiver `dpd_city_id` is mapped, and DPD `getServiceCostByParcels2` returns numeric-cost options.
 - The runtime reuses `src/Carriers/Dpd/Tariff/DpdTariffCalculationService.php`, `DpdCityResolver`, `DpdSettings` and the existing SOAP wrapper/auth path. It does not call DPD outside `DpdApiClient` and does not write checkout rates back to delivery tables.
