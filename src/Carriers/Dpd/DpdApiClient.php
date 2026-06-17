@@ -52,6 +52,18 @@ final class DpdApiClient {
 	/**
 	 * @param array<string,mixed> $payload
 	 */
+	public function getServiceCostByParcels2( array $payload ): DpdSoapResponse {
+		return $this->call(
+			DpdEndpoints::SERVICE_CALCULATOR,
+			'getServiceCostByParcels2',
+			$payload,
+			array( 'wrapper' => DpdSoapRequest::WRAPPER_REQUEST )
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 */
 	public function getServiceCostByParcels3( array $payload ): DpdSoapResponse {
 		return $this->call(
 			DpdEndpoints::SERVICE_CALCULATOR,

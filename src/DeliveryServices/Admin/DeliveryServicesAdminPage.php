@@ -1299,7 +1299,7 @@ final class DeliveryServicesAdminPage {
 
 	private function save_dpd_tariff_result( DpdTariffResult $result ): void {
 		$message = $result->success
-			? sprintf( 'DPD getServiceCostByParcels3 вернул тарифов: %d.', count( $result->options ) )
+			? sprintf( 'DPD getServiceCostByParcels2 вернул тарифов: %d.', count( $result->options ) )
 			: implode( ' ', $result->errors );
 		$details = array(
 			'success' => $result->success ? 'yes' : 'no',
@@ -1318,7 +1318,7 @@ final class DeliveryServicesAdminPage {
 
 		$this->save_dpd_tariff_action_result(
 			$result->success ? 'success' : 'error',
-			'DPD Расчет getServiceCostByParcels3',
+			'DPD Расчет getServiceCostByParcels2',
 			'' !== trim( $message ) ? $message : 'DPD tariff calculation finished.',
 			$details
 		);

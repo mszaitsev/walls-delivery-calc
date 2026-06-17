@@ -138,7 +138,7 @@ $payload = $builder->build(
 	new DpdTariffRequest(
 		'49455627',
 		'49694102',
-		array( new DpdTariffParcel( 1500, 30, 20, 10 ) ),
+		array( new DpdTariffParcel( 4500, 38, 24, 21 ) ),
 		2500,
 		true,
 		false,
@@ -148,11 +148,23 @@ $payload = $builder->build(
 );
 dpd_tariff_assert( ! isset( $payload['auth'] ), 'Builder must not duplicate auth; DpdSoapRequest adds it centrally.' );
 dpd_tariff_assert( '49455627' === $payload['pickup']['cityId'] && '49694102' === $payload['delivery']['cityId'], 'Builder must include pickup and delivery cityId.' );
-dpd_tariff_assert( 1.5 === $payload['parcel'][0]['weight'] && 30.0 === $payload['parcel'][0]['length'] && 2500.0 === $payload['declaredValue'], 'Builder must include parcel weight, dimensions and declared value.' );
-$direct_request = new DpdSoapRequest( DpdEndpoints::SERVICE_CALCULATOR, 'getServiceCostByParcels3', $payload, new DpdCredentials( 'client-number', 'client-key', DpdSettings::ENV_TEST ) );
+dpd_tariff_assert( ! isset( $payload['extraService'] ) && ! isset( $payload['extraServices'] ), 'Builder must not include DPD extraService in Parcels2 payload.' );
+dpd_tariff_assert( 4.5 === $payload['parcel'][0]['weight'] && 38.0 === $payload['parcel'][0]['length'] && 24.0 === $payload['parcel'][0]['width'] && 21.0 === $payload['parcel'][0]['height'] && 1 === $payload['parcel'][0]['quantity'] && 2500.0 === $payload['declaredValue'], 'Builder must include one parcel weight=4.5kg, dimensions 38x24x21, quantity=1 and declared value.' );
+$multi_payload = $builder->build(
+	new DpdTariffRequest(
+		'49455627',
+		'49694102',
+		array( new DpdTariffParcel( 4500, 38, 24, 21, 1 ), new DpdTariffParcel( 4500, 38, 24, 21, 1 ) ),
+		5000,
+		true,
+		true
+	)
+);
+dpd_tariff_assert( 2 === count( $multi_payload['parcel'] ?? array() ) && 4.5 === $multi_payload['parcel'][1]['weight'], 'Builder must preserve explicitly provided multi-parcel requests as separate parcel entries.' );
+$direct_request = new DpdSoapRequest( DpdEndpoints::SERVICE_CALCULATOR, 'getServiceCostByParcels2', $payload, new DpdCredentials( 'client-number', 'client-key', DpdSettings::ENV_TEST ) );
 $direct_payload_with_auth = $direct_request->payload_with_auth();
 dpd_tariff_assert( isset( $direct_payload_with_auth['auth']['clientNumber'], $direct_payload_with_auth['auth']['clientKey'] ) && ! isset( $direct_payload_with_auth['request'] ), 'DpdSoapRequest direct wrapper must add auth at the root.' );
-$calculator_request = new DpdSoapRequest( DpdEndpoints::SERVICE_CALCULATOR, 'getServiceCostByParcels3', $payload, new DpdCredentials( 'client-number', 'client-key', DpdSettings::ENV_TEST ), array( 'wrapper' => DpdSoapRequest::WRAPPER_REQUEST ) );
+$calculator_request = new DpdSoapRequest( DpdEndpoints::SERVICE_CALCULATOR, 'getServiceCostByParcels2', $payload, new DpdCredentials( 'client-number', 'client-key', DpdSettings::ENV_TEST ), array( 'wrapper' => DpdSoapRequest::WRAPPER_REQUEST ) );
 $calculator_payload_with_auth = $calculator_request->payload_with_auth();
 $calculator_debug_shape = $calculator_request->redacted_payload_shape();
 dpd_tariff_assert( isset( $calculator_payload_with_auth['request']['auth']['clientNumber'], $calculator_payload_with_auth['request']['auth']['clientKey'] ) && ! isset( $calculator_payload_with_auth['auth'] ), 'DpdSoapRequest request wrapper must add auth below request for calculator2.' );
@@ -169,12 +181,14 @@ dpd_tariff_assert( 1 === count( $single ) && 'PCL' === $single[0]['service_code'
 $multiple = $normalizer->normalize(
 	array(
 		'return' => array(
-			array( 'serviceCode' => 'PCL', 'serviceName' => 'Classic', 'cost' => 321 ),
-			array( 'service_code' => 'ECN', 'service_name' => 'Economy', 'price' => 222 ),
+			'serviceCost' => array(
+				array( 'serviceCode' => 'PCL', 'serviceName' => 'Classic', 'cost' => 321 ),
+				array( 'service_code' => 'ECN', 'service_name' => 'Economy', 'price' => 222 ),
+			),
 		),
 	)
 );
-dpd_tariff_assert( 2 === count( $multiple ) && 'ECN' === $multiple[1]['service_code'], 'Normalizer must support an array response and alternate casing.' );
+dpd_tariff_assert( 2 === count( $multiple ) && 'ECN' === $multiple[1]['service_code'], 'Normalizer must support Parcels2 serviceCost array response and alternate casing.' );
 
 $delivery_codes = new LocationDeliveryCodeRepository( $GLOBALS['wpdb'] );
 $resolver = new DpdCityResolver( $delivery_codes );
@@ -219,12 +233,29 @@ $result = $service->calculate(
 );
 dpd_tariff_assert( true === $result->success && 1 === count( $result->options ), 'Service must call fake DPD API and normalize single response.' );
 dpd_tariff_assert( 1 === count( $soap->calls ), 'Service must make one DPD API call.' );
-dpd_tariff_assert( DpdEndpoints::SERVICE_CALCULATOR === $soap->calls[0]['service'] && 'getServiceCostByParcels3' === $soap->calls[0]['method'], 'Service must call calculator2 getServiceCostByParcels3.' );
+dpd_tariff_assert( DpdEndpoints::SERVICE_CALCULATOR === $soap->calls[0]['service'] && 'getServiceCostByParcels2' === $soap->calls[0]['method'], 'Service must call calculator2 getServiceCostByParcels2.' );
 dpd_tariff_assert( '49455627' === $soap->calls[0]['payload']['pickup']['cityId'] && '49694102' === $soap->calls[0]['payload']['delivery']['cityId'], 'Service must pass expected sender/receiver cityId in payload.' );
 dpd_tariff_assert( DpdSoapRequest::WRAPPER_REQUEST === $soap->calls[0]['options']['wrapper'] && isset( $soap->calls[0]['soap_payload']['request']['auth']['clientNumber'], $soap->calls[0]['soap_payload']['request']['auth']['clientKey'] ), 'Calculator SOAP call must send auth inside the request wrapper.' );
 dpd_tariff_assert( ! isset( $soap->calls[0]['payload']['auth'] ) && ! isset( $soap->calls[0]['payload']['request'] ), 'Business payload passed to DpdApiClient must remain auth-free and wrapper-free.' );
+dpd_tariff_assert( ! isset( $soap->calls[0]['payload']['extraService'] ) && ! isset( $soap->calls[0]['payload']['extraServices'] ), 'Parcels2 business payload must not include extra services.' );
 dpd_tariff_assert( DpdSoapRequest::WRAPPER_REQUEST === ( $result->meta['wrapper'] ?? '' ) && 'yes' === ( $result->meta['debug_payload_shape']['has_auth'] ?? '' ), 'Tariff result meta must expose redacted wrapper/auth debug shape.' );
 dpd_tariff_assert( ! str_contains( (string) wp_json_encode( $result->meta['debug_payload_shape'] ?? array() ), 'test-client-key' ), 'Tariff debug payload shape must not leak clientKey.' );
+
+$explicit_multi_result = $service->calculate(
+	200,
+	array(
+		'parcels' => array(
+			new DpdTariffParcel( 4500, 38, 24, 21, 1 ),
+			array( 'weight_g' => 4500, 'length_cm' => 38, 'width_cm' => 24, 'height_cm' => 21, 'quantity' => 1 ),
+		),
+		'declared_value_rub' => 5000,
+		'sender_dpd_city_id' => '49455627',
+		'self_pickup' => true,
+		'self_delivery' => true,
+	)
+);
+$multi_service_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
+dpd_tariff_assert( true === $explicit_multi_result->success && 2 === count( $multi_service_payload['parcel'] ?? array() ), 'Service must pass valid explicit multi-parcel params to Parcels2 payload.' );
 
 $soap->next_body = array(
 	'return' => array(

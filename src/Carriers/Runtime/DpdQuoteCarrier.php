@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Carriers\Runtime;
 
 use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Dpd\Tariff\DpdParcelBuilder;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffCalculationService;
 use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
 use WallsShop\WDC\Domain\Carrier\CarrierIdentity;
@@ -25,6 +26,7 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 	public function __construct(
 		private DpdSettings $settings,
 		private DpdTariffCalculationService $tariffs,
+		private DpdParcelBuilder $parcels,
 		private Logger $logger
 	) {
 	}
@@ -59,7 +61,8 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 			return $this->empty_quote( $request, 'receiver_location_id_required', array(), array(), array(), $delivery_type );
 		}
 
-		$params = $this->tariff_params( $request, $delivery_type );
+		$parcel_build = $this->parcels->build( $request );
+		$params = $this->tariff_params( $parcel_build, $delivery_type );
 		$result = $this->tariffs->calculate( $receiver_location_id, $params );
 		if ( ! $result->success ) {
 			$this->logger->warning(
@@ -141,6 +144,30 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 				'receiver_city_id' => (string) ( $result->meta['receiver_city_id'] ?? '' ),
 				'enabled_service_codes' => array_keys( $enabled ),
 				'delivery_type' => $delivery_type,
+				'parcels_count' => (int) ( $parcel_build['parcels_count'] ?? count( $params['parcels'] ?? array() ) ),
+				'long_item_parcels_count' => (int) ( $parcel_build['long_item_parcels_count'] ?? 0 ),
+				'regular_items_count' => (int) ( $parcel_build['regular_items_count'] ?? 0 ),
+				'total_weight_g' => (int) ( $parcel_build['total_weight_g'] ?? 0 ),
+				'dimensions' => is_array( $parcel_build['dimensions'] ?? null ) ? $parcel_build['dimensions'] : array(),
+				'parcel_dimensions' => is_array( $parcel_build['parcel_dimensions'] ?? null ) ? $parcel_build['parcel_dimensions'] : array(),
+				'declared_value_rub' => (float) ( $parcel_build['declared_value_rub'] ?? 0 ),
+				'package_builder_source' => (string) ( $parcel_build['package_builder_source'] ?? '' ),
+				'packing_strategy' => (string) ( $parcel_build['packing_strategy'] ?? '' ),
+				'box_formats_tried' => is_array( $parcel_build['box_formats_tried'] ?? null ) ? $parcel_build['box_formats_tried'] : array(),
+				'selected_box_format' => (string) ( $parcel_build['selected_box_format'] ?? '' ),
+				'selected_box_formats' => is_array( $parcel_build['selected_box_formats'] ?? null ) ? $parcel_build['selected_box_formats'] : array(),
+				'small_items_count' => (int) ( $parcel_build['small_items_count'] ?? 0 ),
+				'small_items_total_volume_cm3' => (int) ( $parcel_build['small_items_total_volume_cm3'] ?? 0 ),
+				'small_items_total_weight_g' => (int) ( $parcel_build['small_items_total_weight_g'] ?? 0 ),
+				'small_items_block_dimensions' => is_array( $parcel_build['small_items_block_dimensions'] ?? null ) ? $parcel_build['small_items_block_dimensions'] : array(),
+				'identical_groups_count' => (int) ( $parcel_build['identical_groups_count'] ?? 0 ),
+				'identical_grid_blocks_count' => (int) ( $parcel_build['identical_grid_blocks_count'] ?? 0 ),
+				'identical_grid_blocks_dimensions' => is_array( $parcel_build['identical_grid_blocks_dimensions'] ?? null ) ? $parcel_build['identical_grid_blocks_dimensions'] : array(),
+				'goods_weight_g' => (int) ( $parcel_build['goods_weight_g'] ?? 0 ),
+				'packaging_weight_g' => (int) ( $parcel_build['packaging_weight_g'] ?? 0 ),
+				'final_weight_g' => (int) ( $parcel_build['final_weight_g'] ?? 0 ),
+				'packing_limit_reason' => (string) ( $parcel_build['packing_limit_reason'] ?? '' ),
+				'box_limit' => is_array( $parcel_build['box_limit'] ?? null ) ? $parcel_build['box_limit'] : array(),
 				'dpd_filter_removed_count' => count( $removed_by_filter ),
 				'dpd_filter_removed_tariffs' => $removed_by_filter,
 			)
@@ -171,33 +198,36 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function tariff_params( QuoteRequest $request, string $delivery_type ): array {
+	private function tariff_params( array $parcel_build, string $delivery_type ): array {
 		return array(
-			'weight_g' => max( 1, $request->package->get_total_weight_g(), $this->settings->tariff_default_weight_g() ),
-			'length_cm' => $this->dimension_or_default( $request->package->length_cm, $this->settings->tariff_default_length_cm() ),
-			'width_cm' => $this->dimension_or_default( $request->package->width_cm, $this->settings->tariff_default_width_cm() ),
-			'height_cm' => $this->dimension_or_default( $request->package->height_cm, $this->settings->tariff_default_height_cm() ),
-			'declared_value_rub' => $this->declared_value_rub( $request ),
+			'parcels' => is_array( $parcel_build['parcels'] ?? null ) ? $parcel_build['parcels'] : array(),
+			'declared_value_rub' => (float) ( $parcel_build['declared_value_rub'] ?? $this->settings->tariff_default_declared_value_rub() ),
 			'self_pickup' => true,
 			'self_delivery' => DeliveryType::PICKUP === $delivery_type,
+			'package_builder_source' => (string) ( $parcel_build['package_builder_source'] ?? '' ),
+			'parcels_count' => (int) ( $parcel_build['parcels_count'] ?? 0 ),
+			'long_item_parcels_count' => (int) ( $parcel_build['long_item_parcels_count'] ?? 0 ),
+			'regular_items_count' => (int) ( $parcel_build['regular_items_count'] ?? 0 ),
+			'total_weight_g' => (int) ( $parcel_build['total_weight_g'] ?? 0 ),
+			'dimensions' => is_array( $parcel_build['dimensions'] ?? null ) ? $parcel_build['dimensions'] : array(),
+			'parcel_dimensions' => is_array( $parcel_build['parcel_dimensions'] ?? null ) ? $parcel_build['parcel_dimensions'] : array(),
+			'box_limit' => is_array( $parcel_build['box_limit'] ?? null ) ? $parcel_build['box_limit'] : array(),
+			'packing_strategy' => (string) ( $parcel_build['packing_strategy'] ?? '' ),
+			'box_formats_tried' => is_array( $parcel_build['box_formats_tried'] ?? null ) ? $parcel_build['box_formats_tried'] : array(),
+			'selected_box_format' => (string) ( $parcel_build['selected_box_format'] ?? '' ),
+			'selected_box_formats' => is_array( $parcel_build['selected_box_formats'] ?? null ) ? $parcel_build['selected_box_formats'] : array(),
+			'small_items_count' => (int) ( $parcel_build['small_items_count'] ?? 0 ),
+			'small_items_total_volume_cm3' => (int) ( $parcel_build['small_items_total_volume_cm3'] ?? 0 ),
+			'small_items_total_weight_g' => (int) ( $parcel_build['small_items_total_weight_g'] ?? 0 ),
+			'small_items_block_dimensions' => is_array( $parcel_build['small_items_block_dimensions'] ?? null ) ? $parcel_build['small_items_block_dimensions'] : array(),
+			'identical_groups_count' => (int) ( $parcel_build['identical_groups_count'] ?? 0 ),
+			'identical_grid_blocks_count' => (int) ( $parcel_build['identical_grid_blocks_count'] ?? 0 ),
+			'identical_grid_blocks_dimensions' => is_array( $parcel_build['identical_grid_blocks_dimensions'] ?? null ) ? $parcel_build['identical_grid_blocks_dimensions'] : array(),
+			'goods_weight_g' => (int) ( $parcel_build['goods_weight_g'] ?? 0 ),
+			'packaging_weight_g' => (int) ( $parcel_build['packaging_weight_g'] ?? 0 ),
+			'final_weight_g' => (int) ( $parcel_build['final_weight_g'] ?? 0 ),
+			'packing_limit_reason' => (string) ( $parcel_build['packing_limit_reason'] ?? '' ),
 		);
-	}
-
-	private function declared_value_rub( QuoteRequest $request ): float {
-		$declared = $request->package->declared_value->get_rubles();
-		if ( $declared > 0 ) {
-			return $declared;
-		}
-		$total = $request->order_total->get_rubles();
-		if ( $total > 0 ) {
-			return $total;
-		}
-
-		return $this->settings->tariff_default_declared_value_rub();
-	}
-
-	private function dimension_or_default( ?int $value, float $default ): float {
-		return null !== $value && $value > 0 ? (float) $value : $default;
 	}
 
 	private function receiver_location_id( QuoteRequest $request ): int {
@@ -285,12 +315,8 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 				'request_payload_sanitized' => $payload,
 				'response_tariff_sanitized' => $this->sanitize_option( $option ),
 				'package' => array(
-					'weight_g' => (int) ( $payload['parcel'][0]['weight'] ?? 0 ),
-					'dimensions_cm' => array(
-						'length' => (float) ( $payload['parcel'][0]['length'] ?? 0 ),
-						'width' => (float) ( $payload['parcel'][0]['width'] ?? 0 ),
-						'height' => (float) ( $payload['parcel'][0]['height'] ?? 0 ),
-					),
+					'parcels_count' => count( is_array( $payload['parcel'] ?? null ) ? $payload['parcel'] : array() ),
+					'parcels' => is_array( $payload['parcel'] ?? null ) ? $payload['parcel'] : array(),
 					'declared_value_rub' => (float) ( $payload['declaredValue'] ?? 0 ),
 				),
 			)
@@ -422,11 +448,25 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 			'selected_location_id' => (string) ( $request->customer_context['selected_location_id'] ?? $request->customer_context['location_id'] ?? '' ),
 			'sender_city_id' => (string) ( $meta['sender_city_id'] ?? $this->settings->tariff_sender_dpd_city_id() ),
 			'receiver_city_id' => (string) ( $meta['receiver_city_id'] ?? '' ),
-			'weight_g' => (int) ( $params['weight_g'] ?? $request->package->get_total_weight_g() ),
-			'length_cm' => (float) ( $params['length_cm'] ?? $this->dimension_or_default( $request->package->length_cm, $this->settings->tariff_default_length_cm() ) ),
-			'width_cm' => (float) ( $params['width_cm'] ?? $this->dimension_or_default( $request->package->width_cm, $this->settings->tariff_default_width_cm() ) ),
-			'height_cm' => (float) ( $params['height_cm'] ?? $this->dimension_or_default( $request->package->height_cm, $this->settings->tariff_default_height_cm() ) ),
-			'declared_value_rub' => (float) ( $params['declared_value_rub'] ?? $this->declared_value_rub( $request ) ),
+			'parcels' => $this->parcel_signature( is_array( $params['parcels'] ?? null ) ? $params['parcels'] : array() ),
+			'parcels_count' => (int) ( $params['parcels_count'] ?? 0 ),
+			'long_item_parcels_count' => (int) ( $params['long_item_parcels_count'] ?? 0 ),
+			'regular_items_count' => (int) ( $params['regular_items_count'] ?? 0 ),
+			'total_weight_g' => (int) ( $params['total_weight_g'] ?? $request->package->get_total_weight_g() ),
+			'dimensions' => is_array( $params['dimensions'] ?? null ) ? $params['dimensions'] : array(),
+			'parcel_dimensions' => is_array( $params['parcel_dimensions'] ?? null ) ? $params['parcel_dimensions'] : array(),
+			'box_limit' => is_array( $params['box_limit'] ?? null ) ? $params['box_limit'] : array(),
+			'declared_value_rub' => (float) ( $params['declared_value_rub'] ?? $this->settings->tariff_default_declared_value_rub() ),
+			'package_builder_source' => (string) ( $params['package_builder_source'] ?? '' ),
+			'packing_strategy' => (string) ( $params['packing_strategy'] ?? '' ),
+			'selected_box_format' => (string) ( $params['selected_box_format'] ?? '' ),
+			'selected_box_formats' => is_array( $params['selected_box_formats'] ?? null ) ? $params['selected_box_formats'] : array(),
+			'small_items_count' => (int) ( $params['small_items_count'] ?? 0 ),
+			'identical_grid_blocks_count' => (int) ( $params['identical_grid_blocks_count'] ?? 0 ),
+			'goods_weight_g' => (int) ( $params['goods_weight_g'] ?? 0 ),
+			'packaging_weight_g' => (int) ( $params['packaging_weight_g'] ?? 0 ),
+			'final_weight_g' => (int) ( $params['final_weight_g'] ?? 0 ),
+			'packing_limit_reason' => (string) ( $params['packing_limit_reason'] ?? '' ),
 			'delivery_type' => $delivery_type,
 			'self_pickup' => true,
 			'self_delivery' => DeliveryType::PICKUP === $delivery_type,
@@ -443,5 +483,22 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 
 	private function normalize_delivery_type( string $delivery_type ): string {
 		return DeliveryType::COURIER === $delivery_type ? DeliveryType::COURIER : DeliveryType::PICKUP;
+	}
+
+	/**
+	 * @param array<int,mixed> $parcels
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function parcel_signature( array $parcels ): array {
+		$signature = array();
+		foreach ( $parcels as $parcel ) {
+			if ( is_object( $parcel ) ) {
+				$signature[] = get_object_vars( $parcel );
+			} elseif ( is_array( $parcel ) ) {
+				$signature[] = $parcel;
+			}
+		}
+
+		return $signature;
 	}
 }

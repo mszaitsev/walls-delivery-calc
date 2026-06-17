@@ -1,13 +1,13 @@
 # WDC DPD Tariff Calculation
 
-Version: 0.58.2.
+Version: 0.58.9.
 
 This stage implements the DPD tariff calculation foundation used by admin diagnostics and, as of 0.58.0, by the checkout runtime quote carrier. Shipment creation and pickup points remain out of scope.
 
 ## Scope
 
-- Low-level API wrapper: `DpdApiClient::getServiceCostByParcels3()`.
-- SOAP service: `calculator2`, method `getServiceCostByParcels3`.
+- Low-level API wrapper: `DpdApiClient::getServiceCostByParcels2()`.
+- SOAP service: `calculator2`, method `getServiceCostByParcels2`.
 - Transport/auth: existing `DpdApiClient::call()`, `DpdSoapClientInterface`, `DpdSoapRequest`, `DpdSettings` credentials.
 - Admin UI: `WDC -> Службы доставки -> DPD -> DPD Расчет`.
 - Receiver city: `DpdCityResolver` reads `wdc_location_delivery_codes.dpd_city_id`.
@@ -26,7 +26,9 @@ This stage implements the DPD tariff calculation foundation used by admin diagno
 - `declaredValue`
 - `parcel[]` with `weight` in kg, `length`, `width`, `height` in cm, and `quantity`
 
-`DpdSoapRequest::payload_with_auth()` adds `auth.clientNumber` and `auth.clientKey` centrally when the SOAP transport executes the request. `calculator2/getServiceCostByParcels3` uses the explicit `request` wrapper strategy, so the SOAP argument shape is:
+`parcel[]` represents packaging places, not cart items. The checkout runtime uses `DpdParcelBuilder` to expand product quantities, split long items with any side over 49 cm into separate parcels, aggregate <=50 cm3 small items into one synthetic volume block, optimize identical groups into grid blocks, and pack regular units with a bounded deterministic 3D shelf/bin packer. The packer supports `box_50_50_30` and `box_40_40_40`, sends actual occupied dimensions, attempts one box and then two boxes, and falls back to stacked rows. Package-level dimensions are used only when item dimensions are missing, and DPD default dimensions are the final fallback. The admin diagnostic calculator remains a one-parcel form for now, while `DpdTariffCalculationService` can accept explicit `params['parcels']` for multi-parcel tests/future UI.
+
+`DpdSoapRequest::payload_with_auth()` adds `auth.clientNumber` and `auth.clientKey` centrally when the SOAP transport executes the request. `calculator2/getServiceCostByParcels2` uses the explicit `request` wrapper strategy, so the SOAP argument shape is:
 
 ```php
 array(
@@ -59,6 +61,8 @@ The test form accepts sender override, receiver `location_id`, parcel values, pi
 
 Checkout runtime settings no longer live on `DPD Расчет`. Method titles are edited on `Основное`, while DPD service-code enablement, custom tariff titles and the `Использовать курьерские тарифы` checkbox are edited on the DPD `Тарифы` tab. Checkout runtime mode flags are not configurable: runtime always sends from a DPD terminal, and courier delivery is calculated by a separate request only when enabled.
 
+Runtime pricing still uses `calculator2/getServiceCostByParcels2`. In checkout, pickup/terminal rates send `selfPickup=true` and `selfDelivery=true`; courier rates send `selfPickup=true` and `selfDelivery=false`. Future terminal/PVZ pricing must not jump to `getServiceCost3`, because that method does not match the current `parcel[]` packaging-place model. The future candidate is `getServiceCostByParcels3`, but only after DPD pickup-point work provides `pickup.terminalCode` / `delivery.terminalCode` and live tests confirm `parcel[]` plus terminal-code pricing against the DPD cabinet.
+
 ## Normalization
 
 `DpdTariffOptionNormalizer` accepts single-object, array and nested SOAP response shapes. It normalizes:
@@ -90,6 +94,7 @@ Missing fields are not fatal.
 - COD / NPP.
 - `unitLoad`.
 - Fiscal receipts or receipt storage.
+- Complex multi-box/bin packing.
 - Cron, Action Scheduler or automatic tariff sync.
 - Writing DPD tariffs into delivery rates tables.
 

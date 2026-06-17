@@ -38,6 +38,7 @@ use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyMatcher;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyStageRepository;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdLocationIndex;
 use WallsShop\WDC\Carriers\Dpd\Geography\WpDpdDaDataDeliveryClient;
+use WallsShop\WDC\Carriers\Dpd\Tariff\DpdParcelBuilder;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffCalculationService;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffOptionNormalizer;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffRequestBuilder;
@@ -269,6 +270,7 @@ final class Plugin {
 		$this->container->register( DpdGeographyFtpClient::class, fn(): DpdGeographyFtpClient => new DpdGeographyFtpClient( $this->container->get( DpdSettings::class ) ) );
 		$this->container->register( DpdDaDataDeliveryClientInterface::class, fn(): DpdDaDataDeliveryClientInterface => new WpDpdDaDataDeliveryClient( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( DpdDaDataDeliveryFallbackService::class, fn(): DpdDaDataDeliveryFallbackService => new DpdDaDataDeliveryFallbackService( $this->container->get( LocationRepository::class ), $this->container->get( LocationDeliveryCodeRepository::class ), $this->container->get( DpdDaDataDeliveryClientInterface::class ) ) );
+		$this->container->register( DpdParcelBuilder::class, fn(): DpdParcelBuilder => new DpdParcelBuilder( $this->container->get( DpdSettings::class ), $this->container->get( PackagingWeightCalculator::class ) ) );
 		$this->container->register( DpdTariffRequestBuilder::class, fn(): DpdTariffRequestBuilder => new DpdTariffRequestBuilder() );
 		$this->container->register( DpdTariffOptionNormalizer::class, fn(): DpdTariffOptionNormalizer => new DpdTariffOptionNormalizer() );
 		$this->container->register( DpdTariffCalculationService::class, fn(): DpdTariffCalculationService => new DpdTariffCalculationService( $this->container->get( DpdApiClient::class ), $this->container->get( DpdCityResolver::class ), $this->container->get( LocationRepository::class ), $this->container->get( DpdSettings::class ), $this->container->get( DpdTariffRequestBuilder::class ), $this->container->get( DpdTariffOptionNormalizer::class ) ) );
@@ -307,7 +309,7 @@ final class Plugin {
 		$this->container->register( RussianPostInternationalCarrier::class, fn(): RussianPostInternationalCarrier => new RussianPostInternationalCarrier( $this->container->get( RussianPostSettings::class ), $this->container->get( RussianPostApiClient::class ), $this->container->get( RussianPostCountryDirectory::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( RussianPostDomesticCarrier::class, fn(): RussianPostDomesticCarrier => new RussianPostDomesticCarrier( $this->container->get( RussianPostDomesticSettings::class ), $this->container->get( RussianPostDomesticApiClient::class ), $this->container->get( RussianPostDomesticTariffVariantResolver::class ), $this->container->get( Logger::class ), $this->container->get( DaDataPostcodeClient::class ), $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( CdekCarrier::class, fn(): CdekCarrier => new CdekCarrier( $this->container->get( CdekSettings::class ), $this->container->get( CdekApiClient::class ), $this->container->get( CdekLocationResolver::class ), $this->container->get( Logger::class ), $this->container->get( CdekTariffRepository::class ) ) );
-		$this->container->register( DpdQuoteCarrier::class, fn(): DpdQuoteCarrier => new DpdQuoteCarrier( $this->container->get( DpdSettings::class ), $this->container->get( DpdTariffCalculationService::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( DpdQuoteCarrier::class, fn(): DpdQuoteCarrier => new DpdQuoteCarrier( $this->container->get( DpdSettings::class ), $this->container->get( DpdTariffCalculationService::class ), $this->container->get( DpdParcelBuilder::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register(
 			CarrierRegistry::class,
 			function (): CarrierRegistry {

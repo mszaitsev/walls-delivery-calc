@@ -1,6 +1,40 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.58.3.
+Current plugin version: 0.58.9.
+
+Version 0.58.9 fixes the DPD 3D parcel packer row-state model: closed row width is now tracked separately from the
+current row, so adding multiple items to one shelf row no longer double-counts layer width. The DPD API method remains
+`calculator2/getServiceCostByParcels2`, and checkout runtime, shipment adapter/metabox, CDEK and Russian Post behavior
+are unchanged.
+
+Version 0.58.8 replaces the DPD checkout parcel builder fallback model with a fast deterministic 3D shelf/bin packer while
+keeping `calculator2/getServiceCostByParcels2` as the API method. DPD tries actual occupied dimensions in `50x50x30` and
+`40x40x40` box formats, aggregates small items into one synthetic volume block, optimizes identical item groups into grid
+blocks, attempts one box then two boxes before stacked-rows fallback, and adds packaging weight per parcel from the existing
+admin packaging-weight tiers. Long items over 49 cm remain separate parcels.
+
+Version 0.58.7 documents DPD terminalCode pricing debt without changing runtime code. Checkout still uses
+`calculator2/getServiceCostByParcels2`: pickup rates are calculated with `selfPickup=true/selfDelivery=true`, and courier
+rates with `selfPickup=true/selfDelivery=false`. Future DPD pickup-point work must obtain concrete
+`pickup.terminalCode` / `delivery.terminalCode`, test `getServiceCostByParcels3` with `parcel[]` plus terminal codes against
+the DPD cabinet, and only then switch to terminalCode-aware pricing. `getServiceCost3` is not the automatic target because
+it does not cover the current `parcel[]` package-place model.
+
+Version 0.58.6 completes the review cleanup for the DPD parcel builder. A full project search proved that the DPD-local
+`single_sku_box_dimensions()` helper had no callers after the 0.58.5 stacked-rows model, so that dead DPD method was removed.
+The same-named CDEK helper remains because CDEK still calls it. DPD API integration, Parcels2 payload shape, long-item split
+logic, stacked rows and checkout runtime behavior are unchanged.
+
+Version 0.58.5 refines the DPD checkout parcel builder. Product quantities are expanded before packaging, items with any
+side over 49 cm become separate DPD parcels, and remaining regular items are packed into one common parcel through
+`single_box_fit()` or the deterministic stacked-rows fallback. Package-level dimensions are now only a fallback when item
+dimensions are unavailable. DPD still uses `calculator2/getServiceCostByParcels2`, where `parcel[]` means packaging places,
+not cart items.
+
+Version 0.58.4 switches the DPD tariff foundation and checkout runtime from `calculator2/getServiceCostByParcels3` to
+`calculator2/getServiceCostByParcels2`. DPD `parcel[]` now represents packaging places, not cart items: checkout builds a
+safe single-box parcel from package-level dimensions first, then a deterministic item-fit box within the temporary
+50x50x30 cm limit, then DPD default dimensions as fallback. Advanced multi-box packing remains a future stage.
 
 Version 0.58.3 filters DPD checkout tariff candidates inside each delivery type by price and delivery days. Equal-duration
 DPD tariffs collapse to the cheapest option, and a tariff hidden when another option is no slower and no more expensive
@@ -9,7 +43,7 @@ comparison. DPD payload modes, courier enablement, pickup points and shipment ad
 
 Version 0.58.2 fixes the DPD checkout runtime model around pickup/courier delivery types. Checkout DPD shipment is now
 always calculated from a DPD terminal (`selfPickup=true`). Terminal delivery is the default pickup group and sends
-`selfDelivery=true`; courier delivery sends a separate `getServiceCostByParcels3` request with `selfDelivery=false` only
+`selfDelivery=true`; courier delivery sends a separate `getServiceCostByParcels2` request with `selfDelivery=false` only
 when the new DPD `Тарифы` checkbox `Использовать курьерские тарифы` is enabled. The old runtime pickup/delivery mode and
 method-title-prefix settings are no longer rendered or used. DPD pickup points, maps, shipment adapter, statuses and labels
 remain out of scope.
