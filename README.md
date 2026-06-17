@@ -1,6 +1,10 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.60.3.
+Current plugin version: 0.60.4.
+
+Version 0.60.4 fixes stale pickup-map distances after address search or browser geolocation changes the active origin.
+The frontend now recalculates and resorts current visible pickup points before rerendering markers, the side list and the
+`Ближайший ПВЗ` text. Backend carrier behavior and DPD pricing are unchanged.
 
 Version 0.60.3 keeps DPD `raw_json` diagnostic-only and filters duplicate consumer pickup points. Checkout REST
 responses, checkout session snapshots and order meta no longer expose DPD `raw_json`; it remains stored only in the local

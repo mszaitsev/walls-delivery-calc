@@ -1,6 +1,10 @@
 # WDC DPD Checkout Pickup Selection
 
-Version: 0.60.3.
+Version: 0.60.4.
+
+0.60.4 update: the shared checkout pickup map recalculates and resorts visible point distances after DPD address search
+or browser geolocation changes the active origin, so side-card distances and `Ближайший ПВЗ` use the current origin.
+No DPD pricing, import or backend carrier behavior changed.
 
 0.60.3 update: checkout-facing DPD pickup data is consumer-deduplicated by `terminal_code` and prefers `parcel_shop`
 over a duplicate `terminal_self_delivery` row. DPD `raw_json` stays in local storage for diagnostics, but checkout REST
