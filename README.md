@@ -1,6 +1,12 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.59.2.
+Current plugin version: 0.60.0.
+
+Version 0.60.0 connects the DPD pickup-point selection foundation to checkout. DPD pickup rates now reuse the shared
+checkout pickup map/list UI, load active local points from `wdc_dpd_pickup_points` through `carrier=dpd&location_id=...`,
+validate the selected active `terminal_code`, and save the selected point to canonical pickup meta plus DPD-specific order
+meta. Pricing is unchanged: DPD still uses `calculator2/getServiceCostByParcels2` with cityId/selfPickup/selfDelivery and
+does not send `terminalCode` to tariff calculation yet.
 
 Version 0.59.2 removes the obsolete internal DPD pickup repository `mark_source_inactive()` helper after confirming
 safe-replace now uses targeted stale-key inactivation only. Safe-replace behavior is unchanged.
@@ -16,7 +22,7 @@ WSDL/docx methods were verified: `geography2/getParcelShops` is the primary parc
 and accepts direct root-level `auth`. WDC now has low-level wrappers, the separate `wdc_dpd_pickup_points` table,
 repository/normalizer/import service, a manual `DPD ПВЗ` admin tab, and a read-only service for the future checkout map.
 Checkout runtime still uses `calculator2/getServiceCostByParcels2` with cityId/selfPickup/selfDelivery only; no DPD
-pickup selection, shipment adapter, metabox, labels, COD/NPP or terminalCode-aware pricing was added.
+shipment adapter, metabox, labels, COD/NPP or terminalCode-aware pricing was added.
 
 Version 0.58.9 fixes the DPD 3D parcel packer row-state model: closed row width is now tracked separately from the
 current row, so adding multiple items to one shelf row no longer double-counts layer width. The DPD API method remains

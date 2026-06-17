@@ -1,5 +1,7 @@
 # Project Status
 
+0.60.0 note: DPD checkout pickup selection foundation is connected. DPD pickup rates now set `requires_pickup_point=true` and reuse the shared checkout pickup map/list UI. The shared `/wdc/v1/points` endpoint supports `carrier=dpd` with `location_id`/optional search and returns active local rows from `wdc_dpd_pickup_points` via `DpdPickupPointService`. The checkout save endpoint and validation verify that the selected DPD `terminal_code` exists and is active before saving. Orders store canonical `_wdc_pickup_*` meta plus DPD aliases such as `_wdc_dpd_pickup_terminal_code`, `_wdc_dpd_pickup_type`, `_wdc_dpd_pickup_name`, `_wdc_dpd_pickup_address`, `_wdc_dpd_pickup_city_name`, coordinates and `_wdc_dpd_pickup_source`. DPD pricing is unchanged: runtime still uses `calculator2/getServiceCostByParcels2`, cityId/selfPickup/selfDelivery, and does not send `terminalCode`. No DPD shipment adapter/metabox, CDEK runtime or Russian Post runtime changes were added.
+
 0.59.2 note: removed the obsolete private `DpdPickupPointRepository::mark_source_inactive()` helper after confirming it had no callers after the DPD pickup safe-replace change. The active safe-replace flow is unchanged: imports upsert a non-empty valid point set first and then mark inactive only old active rows missing from the new source key set. Checkout pricing, `getServiceCostByParcels2`, shipment adapter/metabox, CDEK and Russian Post behavior are unchanged.
 
 0.59.1 note: DPD pickup import now uses safe-replace semantics. `DpdPickupPointImportService` refuses to call repository replacement when DPD returns no rows or when rows are fetched but zero valid points are normalized, returning clear reports: "Existing points were left unchanged." `DpdPickupPointRepository::replace_all_for_source()` no longer starts by marking the full source inactive; it upserts the new valid point set first and then marks inactive only old active rows for the same source whose `terminal_code + type` key is absent from the new set. Reports now include `marked_inactive`, and DPD pickup smoke tests cover empty API responses, unrecognized response shapes, successful upsert and stale-row inactivation. Checkout pricing, `getServiceCostByParcels2`, shipment adapter/metabox, CDEK and Russian Post behavior are unchanged.
@@ -315,7 +317,7 @@
 
 - CDEK webhooks and persistent print-form storage.
 - Permanent FIAS/GAR -> CDEK `city_code` mapping/storage.
-- DPD checkout map/selection, terminalCode-aware pricing, shipments and statuses.
+- DPD terminalCode-aware pricing, shipments and statuses.
 - Yandex Delivery runtime adapter, pricing, pickup/courier flow and future offer confirmation.
 - PEK, Energia, Aerogruz, Jet adapters.
 - Plugin-generated Russian Post labels, forms, batches and F103.

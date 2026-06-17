@@ -1,13 +1,16 @@
 # WDC DPD Pickup Points
 
-Version: 0.59.2.
+Version: 0.60.0.
+
+0.60.0 update: local DPD points are now used by checkout pickup selection through the shared pickup UI and REST
+controllers. The selected active `terminal_code` is saved to checkout/order meta, but it does not affect DPD pricing yet.
 
 0.59.2 cleanup: the old full-source `mark_source_inactive()` helper was removed after safe-replace switched to
 upserting the new valid set first and then inactivating only stale missing keys. Import behavior did not change.
 
 ## Scope
 
-This stage adds a local DPD pickup points / terminals foundation for future checkout map work. It does not connect DPD pickup selection to checkout runtime and does not change tariff calculation.
+This stage stores local DPD pickup points / terminals and now supplies them to the checkout pickup selection foundation. It still does not change DPD tariff calculation.
 
 ## DPD Methods Checked
 

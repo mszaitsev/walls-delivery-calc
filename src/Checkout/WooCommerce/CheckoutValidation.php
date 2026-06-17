@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Checkout\WooCommerce;
 
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Checkout\Validation\CheckoutAddressValidation;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
@@ -14,7 +16,8 @@ final class CheckoutValidation {
 	public function __construct(
 		private CheckoutSessionManager $session_manager,
 		private ?CheckoutAddressValidation $address_validation = null,
-		private ?RussianPostPickupPointRepository $pickup_repository = null
+		private ?RussianPostPickupPointRepository $pickup_repository = null,
+		private ?DpdPickupPointService $dpd_pickup_points = null
 	) {
 	}
 
@@ -106,9 +109,12 @@ final class CheckoutValidation {
 	 * @param array<string,mixed> $rate
 	 */
 	private function add_pickup_error( mixed $errors = null, array $rate = array() ): void {
-		$message = RussianPostDomesticSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? '' )
-			? __( 'Выберите пункт выдачи Почты России.', 'walls-delivery-calc' )
-			: __( 'Выберите пункт выдачи.', 'walls-delivery-calc' );
+		$carrier = (string) ( $rate['carrier_key'] ?? '' );
+		$message = match ( $carrier ) {
+			RussianPostDomesticSettings::CARRIER_KEY => __( 'Выберите пункт выдачи Почты России.', 'walls-delivery-calc' ),
+			DpdSettings::CARRIER_KEY => __( 'Выберите пункт выдачи DPD.', 'walls-delivery-calc' ),
+			default => __( 'Выберите пункт выдачи.', 'walls-delivery-calc' ),
+		};
 		if ( is_object( $errors ) && method_exists( $errors, 'add' ) ) {
 			$errors->add( 'wdc_pickup_required', $message );
 			return;
@@ -262,6 +268,7 @@ final class CheckoutValidation {
 
 		$family = $this->rate_pickup_family( $rate, $this->selected_rate_id( $rate ) );
 		$is_russian_post_family = RussianPostDomesticSettings::CARRIER_KEY . ':pickup' === $family;
+		$is_dpd_family = DpdSettings::CARRIER_KEY . ':pickup' === $family;
 		$selection = array();
 		if ( '' !== $point_code ) {
 			$selection = $this->selection_from_current_pickup_session( $point_code, $rate );
@@ -271,6 +278,12 @@ final class CheckoutValidation {
 		}
 		if ( array() === $selection && $is_russian_post_family && '' !== $point_code ) {
 			$selection = $this->selection_from_pickup_code( $point_code );
+		}
+		if ( $is_dpd_family && '' !== $point_code ) {
+			$selection = $this->selection_from_dpd_point_code( $point_code, $rate );
+		}
+		if ( $is_dpd_family && array() === $selection ) {
+			return false;
 		}
 		if ( array() === $selection ) {
 			$selection = $this->selection_from_posted_fields( $data, $point_id, $point_code, $rate );
@@ -479,6 +492,83 @@ final class CheckoutValidation {
 	}
 
 	/**
+	 * @param array<string,mixed> $rate
+	 * @return array<string,mixed>
+	 */
+	private function selection_from_dpd_point_code( string $point_code, array $rate ): array {
+		$service = $this->dpd_pickup_points;
+		if ( ! $service instanceof DpdPickupPointService ) {
+			return array();
+		}
+		$row = $service->get_point_by_terminal_code( $point_code );
+		if ( ! is_array( $row ) || '' === (string) ( $row['terminal_code'] ?? '' ) ) {
+			return array();
+		}
+
+		return $this->selection_from_dpd_row_data( $row, $rate );
+	}
+
+	/**
+	 * @param array<string,mixed> $row
+	 * @param array<string,mixed> $rate
+	 * @return array<string,mixed>
+	 */
+	private function selection_from_dpd_row_data( array $row, array $rate ): array {
+		$type = (string) ( $row['type'] ?? '' );
+		$type_label = 'terminal_self_delivery' === $type ? 'Терминал' : 'Пункт выдачи';
+		$point_title = 'terminal_self_delivery' === $type ? 'Терминал DPD' : 'Пункт выдачи DPD';
+		$marker_type = 'terminal_self_delivery' === $type ? 'terminal' : 'pickup';
+		$code = (string) ( $row['terminal_code'] ?? '' );
+		$family = $this->rate_pickup_family( $rate, $this->selected_rate_id( $rate ) );
+		$snapshot = array(
+			'id' => DpdSettings::CARRIER_KEY . ':' . $code,
+			'carrier_key' => DpdSettings::CARRIER_KEY,
+			'service_key' => DpdSettings::SERVICE_KEY,
+			'pickup_family' => $family,
+			'point_code' => $code,
+			'terminal_code' => $code,
+			'point_type' => $type,
+			'point_type_label' => $type_label,
+			'point_title' => $point_title,
+			'display_code' => $code,
+			'display_title' => trim( $point_title . ' ' . $code ),
+			'marker_type' => $marker_type,
+			'point_name' => (string) ( $row['name'] ?? '' ),
+			'address' => (string) ( $row['address'] ?? '' ),
+			'city' => (string) ( $row['city_name'] ?? '' ),
+			'region' => (string) ( $row['region_name'] ?? '' ),
+			'lat' => $row['latitude'] ?? null,
+			'lng' => $row['longitude'] ?? null,
+			'work_time' => (string) ( $row['schedule'] ?? '' ),
+			'description' => '',
+			'dpd_source' => (string) ( $row['source'] ?? '' ),
+		);
+
+		return array(
+			'id' => $snapshot['id'],
+			'point_id' => $snapshot['id'],
+			'carrier_key' => DpdSettings::CARRIER_KEY,
+			'service_key' => DpdSettings::SERVICE_KEY,
+			'pickup_family' => $family,
+			'point_code' => $code,
+			'terminal_code' => $code,
+			'point_type' => $type,
+			'point_type_label' => $type_label,
+			'point_title' => $point_title,
+			'marker_type' => $marker_type,
+			'point_name' => $snapshot['point_name'],
+			'point_address' => $snapshot['address'],
+			'city_name' => $snapshot['city'],
+			'region_name' => $snapshot['region'],
+			'point_work_time' => $snapshot['work_time'],
+			'dpd_source' => $snapshot['dpd_source'],
+			'lat' => $snapshot['lat'],
+			'lng' => $snapshot['lng'],
+			'snapshot' => $snapshot,
+		);
+	}
+
+	/**
 	 * @param array<string,mixed> $row
 	 * @return array<string,mixed>
 	 */
@@ -532,6 +622,7 @@ final class CheckoutValidation {
 			'service_key' => $selection['service_key'] ?? $snapshot['service_key'] ?? '',
 			'pickup_family' => $selection['pickup_family'] ?? $snapshot['pickup_family'] ?? '',
 			'point_code' => $selection['point_code'] ?? $snapshot['point_code'] ?? '',
+			'terminal_code' => $selection['terminal_code'] ?? $snapshot['terminal_code'] ?? '',
 			'point_type' => $selection['point_type'] ?? $snapshot['point_type'] ?? '',
 			'point_type_label' => $selection['point_type_label'] ?? $snapshot['point_type_label'] ?? '',
 			'point_title' => $selection['point_title'] ?? $snapshot['point_title'] ?? '',
@@ -554,6 +645,7 @@ final class CheckoutValidation {
 			'description' => $this->first_meaningful( $selection['description'] ?? '', $selection['point_comment'] ?? '', $snapshot['description'] ?? '' ),
 			'storage_notice' => $this->first_meaningful( $selection['storage_notice'] ?? '', $snapshot['storage_notice'] ?? '' ),
 			'cdek_code' => $selection['cdek_code'] ?? $snapshot['cdek_code'] ?? '',
+			'dpd_source' => $selection['dpd_source'] ?? $snapshot['dpd_source'] ?? '',
 			'snapshot' => array() !== $snapshot ? $snapshot : array(
 				'id' => $selection['point_id'] ?? 0,
 				'carrier_key' => $selection['carrier_key'] ?? '',
