@@ -301,35 +301,6 @@ final class DpdParcelBuilder {
 	}
 
 	/**
-	 * @param array{length:int,width:int,height:int} $item
-	 * @param array{length:int,width:int,height:int} $box
-	 * @return array{length:int,width:int,height:int}|null
-	 */
-	private function single_sku_box_dimensions( array $item, int $quantity, array $box ): ?array {
-		$best = null;
-		foreach ( $this->orientations( $item ) as $orientation ) {
-			for ( $x = 1; $x <= $quantity; ++$x ) {
-				for ( $y = 1; $y <= $quantity; ++$y ) {
-					$z = (int) ceil( $quantity / max( 1, $x * $y ) );
-					if ( $x * $y * $z < $quantity ) {
-						continue;
-					}
-					$candidate = array(
-						'length' => $orientation['length'] * $x,
-						'width' => $orientation['width'] * $y,
-						'height' => $orientation['height'] * $z,
-					);
-					if ( $this->box_within_limits( $candidate, $box ) ) {
-						$best = $this->better_box( $best, $candidate );
-					}
-				}
-			}
-		}
-
-		return $best;
-	}
-
-	/**
 	 * @param array<int,array{length:int,width:int,height:int}> $items
 	 * @param array{length:int,width:int,height:int} $box
 	 * @param array{length:int,width:int,height:int} $first_orientation

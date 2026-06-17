@@ -1,6 +1,11 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.58.5.
+Current plugin version: 0.58.6.
+
+Version 0.58.6 completes the review cleanup for the DPD parcel builder. A full project search proved that the DPD-local
+`single_sku_box_dimensions()` helper had no callers after the 0.58.5 stacked-rows model, so that dead DPD method was removed.
+The same-named CDEK helper remains because CDEK still calls it. DPD API integration, Parcels2 payload shape, long-item split
+logic, stacked rows and checkout runtime behavior are unchanged.
 
 Version 0.58.5 refines the DPD checkout parcel builder. Product quantities are expanded before packaging, items with any
 side over 49 cm become separate DPD parcels, and remaining regular items are packed into one common parcel through

@@ -1,6 +1,6 @@
 # WDC DPD Tariff Calculation
 
-Version: 0.58.5.
+Version: 0.58.6.
 
 This stage implements the DPD tariff calculation foundation used by admin diagnostics and, as of 0.58.0, by the checkout runtime quote carrier. Shipment creation and pickup points remain out of scope.
 

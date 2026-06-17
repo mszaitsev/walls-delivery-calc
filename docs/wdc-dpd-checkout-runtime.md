@@ -1,6 +1,6 @@
 # DPD Checkout Runtime
 
-Version: 0.58.5
+Version: 0.58.6
 
 ## Scope
 
@@ -171,7 +171,7 @@ The generic checkout quote cache key includes selected receiver location, packag
 
 ## Out Of Scope
 
-The 0.58.5 stage does not implement:
+The 0.58.6 stage does not implement:
 
 - DPD pickup points;
 - parcel shop selection;
