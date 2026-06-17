@@ -1,6 +1,6 @@
 # WDC DPD Tariff Calculation
 
-Version: 0.58.6.
+Version: 0.58.7.
 
 This stage implements the DPD tariff calculation foundation used by admin diagnostics and, as of 0.58.0, by the checkout runtime quote carrier. Shipment creation and pickup points remain out of scope.
 
@@ -60,6 +60,8 @@ The `DPD Расчет` tab stores:
 The test form accepts sender override, receiver `location_id`, parcel values, pickup/delivery mode and optional `serviceCode`. After POST it redirects back to the same tab and displays success/failure, raw count, normalized service list and, when DPD debug is enabled, the business payload plus redacted SOAP payload shape metadata. The action result block is one-shot: after it renders, `clear_tariff_action_result()` removes it from settings so a normal page reload does not repeat the notice.
 
 Checkout runtime settings no longer live on `DPD Расчет`. Method titles are edited on `Основное`, while DPD service-code enablement, custom tariff titles and the `Использовать курьерские тарифы` checkbox are edited on the DPD `Тарифы` tab. Checkout runtime mode flags are not configurable: runtime always sends from a DPD terminal, and courier delivery is calculated by a separate request only when enabled.
+
+Runtime pricing still uses `calculator2/getServiceCostByParcels2`. In checkout, pickup/terminal rates send `selfPickup=true` and `selfDelivery=true`; courier rates send `selfPickup=true` and `selfDelivery=false`. Future terminal/PVZ pricing must not jump to `getServiceCost3`, because that method does not match the current `parcel[]` packaging-place model. The future candidate is `getServiceCostByParcels3`, but only after DPD pickup-point work provides `pickup.terminalCode` / `delivery.terminalCode` and live tests confirm `parcel[]` plus terminal-code pricing against the DPD cabinet.
 
 ## Normalization
 

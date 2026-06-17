@@ -1,6 +1,6 @@
 # DPD Checkout Runtime
 
-Version: 0.58.6
+Version: 0.58.7
 
 ## Scope
 
@@ -42,6 +42,11 @@ The checkout stage sends only aggregate package data:
 - `selfDelivery`: `true` for the pickup/terminal delivery entry, `false` for the courier delivery entry;
 - `parcel[]`: packaging places, not cart items;
 - `declaredValue`: package/order total, with DPD default declared value as fallback.
+
+Current pricing mode is city/mode based, not terminalCode-aware:
+
+- pickup group: `selfPickup=true` and `selfDelivery=true`, currently priced as terminal-to-terminal without courier legs;
+- courier group: `selfPickup=true` and `selfDelivery=false`, priced with courier delivery to the receiver.
 
 `DpdParcelBuilder` builds runtime `parcel[]` as packaging places:
 
@@ -147,6 +152,19 @@ Courier delivery:
 - `requires_courier_address=true`;
 - `requires_pickup_point=false`.
 
+## TerminalCode Pricing Debt
+
+DPD pickup points, terminal map and selected terminal storage are not implemented yet, so checkout has no reliable source for `pickup.terminalCode` or `delivery.terminalCode`.
+
+After DPD pickup-point selection exists, the terminal pricing stage must:
+
+- obtain the sender terminal code and the selected receiver terminal code;
+- test `calculator2/getServiceCostByParcels3` with `parcel[]`, `pickup.terminalCode` and `delivery.terminalCode`;
+- compare terminal-to-terminal and terminal-to-door prices with the DPD cabinet;
+- switch runtime to terminalCode-aware calculation only after those checks pass.
+
+`getServiceCost3` should not be chosen automatically as the target method because it does not cover the current `parcel[]` packaging-place model. The preferred future candidate is `getServiceCostByParcels3`, if it confirms support for both `parcel[]` and terminal codes.
+
 ## Quote Id
 
 DPD `quote_id` is diagnostic and includes:
@@ -171,7 +189,7 @@ The generic checkout quote cache key includes selected receiver location, packag
 
 ## Out Of Scope
 
-The 0.58.6 stage does not implement:
+The 0.58.7 stage does not implement:
 
 - DPD pickup points;
 - parcel shop selection;

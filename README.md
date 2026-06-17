@@ -1,6 +1,13 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.58.6.
+Current plugin version: 0.58.7.
+
+Version 0.58.7 documents DPD terminalCode pricing debt without changing runtime code. Checkout still uses
+`calculator2/getServiceCostByParcels2`: pickup rates are calculated with `selfPickup=true/selfDelivery=true`, and courier
+rates with `selfPickup=true/selfDelivery=false`. Future DPD pickup-point work must obtain concrete
+`pickup.terminalCode` / `delivery.terminalCode`, test `getServiceCostByParcels3` with `parcel[]` plus terminal codes against
+the DPD cabinet, and only then switch to terminalCode-aware pricing. `getServiceCost3` is not the automatic target because
+it does not cover the current `parcel[]` package-place model.
 
 Version 0.58.6 completes the review cleanup for the DPD parcel builder. A full project search proved that the DPD-local
 `single_sku_box_dimensions()` helper had no callers after the 0.58.5 stacked-rows model, so that dead DPD method was removed.
