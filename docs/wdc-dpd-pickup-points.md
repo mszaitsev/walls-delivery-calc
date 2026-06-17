@@ -1,6 +1,12 @@
 # WDC DPD Pickup Points
 
-Version: 0.60.2.
+Version: 0.60.3.
+
+0.60.3 update: `raw_json` is diagnostic/admin/internal storage only. It remains in `wdc_dpd_pickup_points` but is not
+returned by checkout REST, not saved in checkout session snapshots and not saved to order meta. Checkout-facing DPD point
+reads are deduplicated by `terminal_code` in `DpdPickupPointService`: `parcel_shop` wins over duplicate
+`terminal_self_delivery`, while terminal-only rows remain available. Import behavior and stored supplementary terminal
+rows are unchanged.
 
 0.60.2 update: DPD schedules are normalized for display. `DpdPickupPointScheduleFormatter` accepts array, object, JSON
 string and plain string values, chooses timetable operations by priority (`SelfDelivery`, `SelfPickup`, `Payment`,
@@ -122,15 +128,19 @@ The first 20 matching active rows are rendered in the admin table.
 
 ## Future Checkout Service
 
-`DpdPickupPointService` is read-only and prepared for the next map stage:
+`DpdPickupPointService` is read-only and prepared for the checkout map stage:
 
 - `get_points_for_location_id(int $location_id)`;
 - `get_points_by_city_id(int $city_id)`;
 - `get_point_by_terminal_code(string $terminal_code)`.
 
 `get_points_for_location_id()` resolves `wdc_location_delivery_codes.dpd_city_id` through `LocationDeliveryCodeRepository` and then reads local points by `city_id`.
+The service returns consumer-facing points: rows with the same `terminal_code` are grouped, `parcel_shop` is preferred,
+and a `terminal_self_delivery` row is returned only when no parcel shop exists for that code. Admin diagnostics can still
+inspect both stored rows through repository/search tools.
 
-The service is not connected to the checkout UI, public pickup REST endpoint, WooCommerce session or order metadata in this stage.
+The service is connected to the checkout pickup selection layer, but `raw_json` remains diagnostic-only and is not exposed
+in checkout REST, checkout session snapshots or order meta.
 
 ## TerminalCode Pricing Debt
 

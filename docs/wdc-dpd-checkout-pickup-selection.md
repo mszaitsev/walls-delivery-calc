@@ -1,6 +1,10 @@
 # WDC DPD Checkout Pickup Selection
 
-Version: 0.60.2.
+Version: 0.60.3.
+
+0.60.3 update: checkout-facing DPD pickup data is consumer-deduplicated by `terminal_code` and prefers `parcel_shop`
+over a duplicate `terminal_self_delivery` row. DPD `raw_json` stays in local storage for diagnostics, but checkout REST
+responses, checkout session snapshots and order meta do not expose it.
 
 0.60.2 update: DPD pickup schedules are formatted for checkout output. REST point payloads and saved checkout pickup
 snapshots expose readable `work_time`/`schedule` values, including JSON schedules already stored in
@@ -53,6 +57,9 @@ location_id -> wdc_location_delivery_codes.dpd_city_id -> wdc_dpd_pickup_points.
 ```
 
 Only active points are returned. If the location has no DPD cityId mapping, the endpoint returns an empty list.
+Before returning points to checkout, the DPD service deduplicates rows by `terminal_code`. If a `parcel_shop` and a
+`terminal_self_delivery` row share the same code, checkout receives only the `parcel_shop`; a terminal row is returned
+only when no parcel-shop row exists for that code.
 
 DPD response fields follow the shared pickup shape:
 
@@ -72,6 +79,8 @@ DPD response fields follow the shared pickup shape:
 - `work_time` / `schedule`;
 - `source` / `dpd_source`;
 - `snapshot`.
+
+DPD `raw_json` is not included in checkout REST responses.
 
 ## Checkout UI
 
@@ -94,6 +103,7 @@ For DPD pickup rates, `CheckoutValidation` requires a selected active terminal:
 ```
 
 The posted `terminal_code`/`point_code` is checked server-side through `DpdPickupPointService::get_point_by_terminal_code()`.
+For duplicate local DPD rows this lookup also prefers the active `parcel_shop`.
 Inactive or missing DPD points fail validation even if hidden frontend fields were posted.
 
 DPD courier rates do not require a terminal. Non-DPD rates keep their existing CDEK/Russian Post validation behavior.
@@ -108,6 +118,7 @@ POST /wp-json/wdc/v1/checkout/pickup-point
 
 The controller resolves the posted `point_code`/`terminal_code` against the local active DPD table before saving the
 selection into the checkout session bucket `dpd:pickup`.
+Saved DPD checkout snapshots do not include `raw_json`.
 
 Orders store the common pickup meta:
 

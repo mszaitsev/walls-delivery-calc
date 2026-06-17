@@ -256,10 +256,15 @@ dpd_pickup_assert( null === $repository->find_by_terminal_code( 'STALE' ) && emp
 dpd_pickup_assert( str_contains( (string) ( $repository->find_by_terminal_code( 'PS2' )['address'] ?? '' ), 'Новая' ), 'Successful DPD pickup import must update existing active points.' );
 $soap->parcel_mode = 'default';
 
+$GLOBALS['wpdb']->dpd_pickup_points[] = array( 'id' => 3, 'terminal_code' => 'PS2', 'type' => 'terminal_self_delivery', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'address' => 'terminal duplicate', 'name' => 'DPD terminal duplicate', 'source' => 'getTerminalsSelfDelivery2', 'raw_json' => '{"diagnostic":true}', 'is_active' => 1 );
+$GLOBALS['wpdb']->dpd_pickup_points[] = array( 'id' => 4, 'terminal_code' => 'TERM_ONLY', 'type' => 'terminal_self_delivery', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'address' => 'terminal only', 'name' => 'DPD terminal only', 'source' => 'getTerminalsSelfDelivery2', 'raw_json' => '{"diagnostic":true}', 'is_active' => 1 );
 $GLOBALS['wpdb']->delivery_codes[] = array( 'location_id' => 77, 'dpd_city_id' => '49455627', 'updated_at' => '2026-06-17 12:00:00' );
 $service = new DpdPickupPointService( $repository, new LocationDeliveryCodeRepository( $GLOBALS['wpdb'] ) );
-dpd_pickup_assert( 1 === count( $service->get_points_for_location_id( 77 ) ), 'Read-only service must resolve location_id to DPD cityId and return active points.' );
-dpd_pickup_assert( null !== $service->get_point_by_terminal_code( 'PS2' ), 'Read-only service must find points by terminalCode.' );
+$consumer_points = $service->get_points_for_location_id( 77 );
+dpd_pickup_assert( 2 === count( $consumer_points ), 'Read-only service must resolve location_id to DPD cityId and return consumer-deduplicated active points.' );
+dpd_pickup_assert( 'parcel_shop' === (string) ( $service->get_point_by_terminal_code( 'PS2' )['type'] ?? '' ), 'Read-only service must prefer parcel_shop by terminalCode.' );
+dpd_pickup_assert( 'terminal_self_delivery' === (string) ( $service->get_point_by_terminal_code( 'TERM_ONLY' )['type'] ?? '' ), 'Read-only service must return terminal_self_delivery when no parcel_shop exists for terminalCode.' );
+dpd_pickup_assert( '' !== (string) ( $repository->find_by_terminal_code( 'PS2' )['raw_json'] ?? '' ), 'Repository/admin storage may keep raw_json for diagnostics.' );
 
 $api_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/Dpd/DpdApiClient.php' );
 $tariff_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/Dpd/Tariff/DpdTariffCalculationService.php' );

@@ -1,6 +1,12 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.60.2.
+Current plugin version: 0.60.3.
+
+Version 0.60.3 keeps DPD `raw_json` diagnostic-only and filters duplicate consumer pickup points. Checkout REST
+responses, checkout session snapshots and order meta no longer expose DPD `raw_json`; it remains stored only in the local
+admin/internal pickup table. When DPD stores both `parcel_shop` and `terminal_self_delivery` rows with the same
+`terminal_code`, checkout/map/search prefer the `parcel_shop` row and hide the duplicate terminal row. Terminal-only rows
+remain available. DPD pricing and `terminalCode` tariff behavior are unchanged.
 
 Version 0.60.2 formats DPD pickup schedules for checkout map/list cards. DPD schedule JSON from imported parcel shops
 and terminals is converted to readable text such as `Пн–Вс: 10:00–22:00` in REST responses and saved checkout pickup

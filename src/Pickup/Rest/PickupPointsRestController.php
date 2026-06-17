@@ -418,7 +418,6 @@ final class PickupPointsRestController {
 			'description' => $snapshot['description'],
 			'dpd_source' => $snapshot['dpd_source'],
 			'source' => $snapshot['dpd_source'],
-			'raw' => is_array( $point['raw_json'] ?? null ) ? $point['raw_json'] : array(),
 			'snapshot' => $snapshot,
 		);
 	}

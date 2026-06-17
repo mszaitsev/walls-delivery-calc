@@ -122,7 +122,8 @@ $dpd_json_schedule = wp_json_encode(
 	JSON_UNESCAPED_UNICODE
 );
 $GLOBALS['wpdb']->dpd_pickup_points = array(
-	array( 'id' => 1, 'terminal_code' => 'NSK-PS-1', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'region_name' => 'Новосибирская обл.', 'address' => 'ул Ленина, 1', 'name' => 'DPD Ленина', 'latitude' => 55.030199, 'longitude' => 82.92043, 'schedule' => $dpd_json_schedule, 'source' => 'getParcelShops', 'is_active' => 1 ),
+	array( 'id' => 1, 'terminal_code' => 'NSK-PS-1', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'region_name' => 'Новосибирская обл.', 'address' => 'ул Ленина, 1', 'name' => 'DPD Ленина', 'latitude' => 55.030199, 'longitude' => 82.92043, 'schedule' => $dpd_json_schedule, 'raw_json' => '{"secret":"diagnostic"}', 'source' => 'getParcelShops', 'is_active' => 1 ),
+	array( 'id' => 4, 'terminal_code' => 'NSK-PS-1', 'type' => 'terminal_self_delivery', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'region_name' => 'Новосибирская обл.', 'address' => 'ул Ленина, 1 терминал', 'name' => 'DPD Терминал дубль', 'latitude' => 55.030199, 'longitude' => 82.92043, 'schedule' => 'терминал дубль', 'raw_json' => '{"secret":"duplicate"}', 'source' => 'getTerminalsSelfDelivery2', 'is_active' => 1 ),
 	array( 'id' => 2, 'terminal_code' => 'NSK-TERM-1', 'type' => 'terminal_self_delivery', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'region_name' => 'Новосибирская обл.', 'address' => 'Складская, 2', 'name' => 'DPD Терминал', 'latitude' => 55.100000, 'longitude' => 82.950000, 'schedule' => 'ежедневно', 'source' => 'getTerminalsSelfDelivery2', 'is_active' => 1 ),
 	array( 'id' => 3, 'terminal_code' => 'INACTIVE', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'address' => 'Закрытый', 'source' => 'getParcelShops', 'is_active' => 0 ),
 );
@@ -132,6 +133,7 @@ $delivery_codes = new LocationDeliveryCodeRepository( $GLOBALS['wpdb'] );
 $service = new DpdPickupPointService( $repository, $delivery_codes );
 
 dpd_checkout_pickup_assert( 2 === count( $service->get_points_for_location_id( 77 ) ), 'DpdPickupPointService must return active points by location_id through dpd_city_id.' );
+dpd_checkout_pickup_assert( 'parcel_shop' === (string) ( $service->get_point_by_terminal_code( 'NSK-PS-1' )['type'] ?? '' ), 'DpdPickupPointService must prefer parcel_shop for duplicate terminal_code.' );
 dpd_checkout_pickup_assert( array() === $service->get_points_for_location_id( 78 ), 'DpdPickupPointService must return empty list when location_id has no dpd_city_id.' );
 
 $points_controller = new PickupPointsRestController( new RussianPostPickupPointRepository( $GLOBALS['wpdb'] ), null, null, null, $service );
@@ -139,6 +141,7 @@ $points = $points_controller->points( array( 'carrier' => 'dpd', 'location_id' =
 dpd_checkout_pickup_assert( 2 === count( $points ) && 'NSK-PS-1' === (string) ( $points[0]['terminal_code'] ?? '' ), 'Endpoint must return DPD pickup points for location_id.' );
 dpd_checkout_pickup_assert( 'dpd:pickup' === (string) ( $points[0]['pickup_family'] ?? '' ) && 'Пункт выдачи DPD' === (string) ( $points[0]['point_title'] ?? '' ), 'Endpoint DPD response shape must match checkout pickup UI shape.' );
 dpd_checkout_pickup_assert( 'Пн–Вс: 10:00–22:00' === (string) ( $points[0]['work_time'] ?? '' ) && 'Пн–Вс: 10:00–22:00' === (string) ( $points[0]['schedule'] ?? '' ) && 'Пн–Вс: 10:00–22:00' === (string) ( $points[0]['snapshot']['work_time'] ?? '' ), 'REST DPD summary must return readable work_time and schedule.' );
+dpd_checkout_pickup_assert( 'parcel_shop' === (string) ( $points[0]['point_type'] ?? '' ) && ! array_key_exists( 'raw', $points[0] ) && ! array_key_exists( 'raw_json', $points[0] ) && ! array_key_exists( 'raw_json', $points[0]['snapshot'] ?? array() ), 'REST DPD response must deduplicate terminal_code and not expose raw_json.' );
 dpd_checkout_pickup_assert( array() === $points_controller->points( array( 'carrier' => 'dpd', 'location_id' => '78' ) ), 'Endpoint must return empty list without dpd_city_id.' );
 $searched = $points_controller->search( array( 'carrier' => 'dpd', 'location_id' => '77', 'q' => 'Складская' ) );
 dpd_checkout_pickup_assert( 1 === count( $searched ) && 'NSK-TERM-1' === (string) ( $searched[0]['point_code'] ?? '' ), 'Endpoint must filter DPD points by query.' );
@@ -166,6 +169,7 @@ $save_response = $checkout_rest->save( new DpdCheckoutPickupRequest( array( 'car
 dpd_checkout_pickup_assert( 'NSK-PS-1' === (string) ( $save_response['pickup_point']['point_code'] ?? '' ), 'Checkout save endpoint must persist selected DPD terminal_code.' );
 dpd_checkout_pickup_assert( 'dpd:pickup' === (string) ( $save_response['active_pickup_family'] ?? '' ), 'Checkout save endpoint must save DPD selection in dpd:pickup bucket.' );
 dpd_checkout_pickup_assert( 'Пн–Вс: 10:00–22:00' === (string) ( $save_response['pickup_point']['snapshot']['work_time'] ?? '' ), 'Checkout selection snapshot must save readable DPD work_time.' );
+dpd_checkout_pickup_assert( 'parcel_shop' === (string) ( $save_response['pickup_point']['point_type'] ?? '' ) && ! array_key_exists( 'raw_json', $save_response['pickup_point']['snapshot'] ?? array() ), 'Checkout selection snapshot must prefer parcel_shop and not include raw_json.' );
 $inactive_response = $checkout_rest->save( new DpdCheckoutPickupRequest( array( 'carrier' => 'dpd', 'shipping_method_id' => $pickup_rate_id, 'point_code' => 'INACTIVE' ) ) );
 dpd_checkout_pickup_assert( is_array( $inactive_response ) && 'not_found' === (string) ( $inactive_response['code'] ?? '' ), 'Checkout save endpoint must reject inactive DPD terminal_code.' );
 
@@ -199,6 +203,7 @@ dpd_checkout_pickup_assert( 'NSK-PS-1' === (string) ( $order->meta['_wdc_pickup_
 dpd_checkout_pickup_assert( 'NSK-PS-1' === (string) ( $order->meta['_wdc_dpd_pickup_terminal_code'] ?? '' ), 'Order meta must save DPD terminal_code alias.' );
 dpd_checkout_pickup_assert( 'DPD Ленина' === (string) ( $order->meta['_wdc_dpd_pickup_name'] ?? '' ) && 'ул Ленина, 1' === (string) ( $order->meta['_wdc_dpd_pickup_address'] ?? '' ), 'Order meta must save selected DPD name and address.' );
 dpd_checkout_pickup_assert( 'Новосибирск' === (string) ( $order->meta['_wdc_dpd_pickup_city_name'] ?? '' ) && 'getParcelShops' === (string) ( $order->meta['_wdc_dpd_pickup_source'] ?? '' ), 'Order meta must save selected DPD city and source.' );
+dpd_checkout_pickup_assert( ! str_contains( implode( ' ', array_keys( $order->meta ) ), 'raw_json' ) && ! str_contains( (string) ( $order->meta['_wdc_pickup_point_snapshot'] ?? '' ), 'raw_json' ), 'Order meta must not save DPD raw_json.' );
 
 $delivery_selector_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/CheckoutDeliveryTypeSelector.php' );
 $pickup_map_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Checkout/WooCommerce/PickupMapCheckout.php' );
