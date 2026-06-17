@@ -1,6 +1,12 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.58.7.
+Current plugin version: 0.58.8.
+
+Version 0.58.8 replaces the DPD checkout parcel builder fallback model with a fast deterministic 3D shelf/bin packer while
+keeping `calculator2/getServiceCostByParcels2` as the API method. DPD tries actual occupied dimensions in `50x50x30` and
+`40x40x40` box formats, aggregates small items into one synthetic volume block, optimizes identical item groups into grid
+blocks, attempts one box then two boxes before stacked-rows fallback, and adds packaging weight per parcel from the existing
+admin packaging-weight tiers. Long items over 49 cm remain separate parcels.
 
 Version 0.58.7 documents DPD terminalCode pricing debt without changing runtime code. Checkout still uses
 `calculator2/getServiceCostByParcels2`: pickup rates are calculated with `selfPickup=true/selfDelivery=true`, and courier

@@ -1,6 +1,6 @@
 # DPD Checkout Runtime
 
-Version: 0.58.7
+Version: 0.58.8
 
 ## Scope
 
@@ -48,16 +48,21 @@ Current pricing mode is city/mode based, not terminalCode-aware:
 - pickup group: `selfPickup=true` and `selfDelivery=true`, currently priced as terminal-to-terminal without courier legs;
 - courier group: `selfPickup=true` and `selfDelivery=false`, priced with courier delivery to the receiver.
 
-`DpdParcelBuilder` builds runtime `parcel[]` as packaging places:
+`DpdParcelBuilder` builds runtime `parcel[]` as packaging places with fast deterministic 3D shelf/bin packing:
 
 - product quantities are expanded before packaging;
 - items with any side over 49 cm are long items and become separate DPD parcels with quantity `1`;
-- remaining regular items are packed into one common parcel by `single_box_fit()` when possible;
-- if regular items do not fit the temporary 50x50x30 cm single-box model, stacked rows are used with a 45 cm row width threshold;
+- regular small items with volume <=50 cm3 are aggregated into one synthetic 3:1:1 volume block;
+- identical item groups can become one synthetic `identical_grid` block;
+- regular units are packed into `box_50_50_30` or `box_40_40_40`;
+- actual occupied dimensions are sent to DPD, not the full box format;
+- one box is attempted first, then bounded two-box distribution;
+- if regular items do not fit one or two boxes, stacked rows are used with a 45 cm row width threshold;
+- packaging weight is added to each parcel from the existing admin packaging-weight tiers;
 - package-level dimensions are used only when item dimensions are missing;
 - if no reliable dimensions can be calculated, DPD default weight/dimensions from settings are used.
 
-Regular cart items are not sent as individual parcels. Long items are the intentional exception because they cannot be packed into the temporary standard box. `unitLoad`, COD/НПП and fiscal receipts are intentionally not sent. Advanced multi-box/bin-packing is a separate future stage.
+Regular cart items are not sent as individual parcels. Long items and actual two-box splits are the intentional exceptions. `unitLoad`, COD/НПП and fiscal receipts are intentionally not sent. This is a bounded practical packer, not full optimal bin packing.
 
 ## Grouped Rate Mapping
 
@@ -185,11 +190,11 @@ DPD `quote_id` is diagnostic and includes:
 
 ## Cache And Parcel Diagnostics
 
-The generic checkout quote cache key includes selected receiver location, package dimensions and declared value in addition to the existing carrier/service/country/city/weight/order-total dimensions. DPD `quote_id` diagnostics also include the normalized parcel signature, parcel count, long-item parcel count, regular item count, total weight, dimensions, declared value, `parcel_dimensions`, `box_limit` and `package_builder_source`.
+The generic checkout quote cache key includes selected receiver location, package dimensions and declared value in addition to the existing carrier/service/country/city/weight/order-total dimensions. DPD `quote_id` diagnostics also include the normalized parcel signature, parcel count, long-item parcel count, regular item count, total weight, dimensions, declared value, `parcel_dimensions`, goods/packaging/final weights, tried/selected box formats, small-item and identical-grid diagnostics, `box_limit`, packing limit reason and `package_builder_source`.
 
 ## Out Of Scope
 
-The 0.58.7 stage does not implement:
+The 0.58.8 stage does not implement:
 
 - DPD pickup points;
 - parcel shop selection;
