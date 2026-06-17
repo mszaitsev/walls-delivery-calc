@@ -1295,12 +1295,13 @@ final class DeliveryServicesAdminPage {
 		}
 
 		return sprintf(
-			'%s: fetched=%d normalized=%d saved=%d skipped=%d errors=%d',
+			'%s: fetched=%d normalized=%d saved=%d skipped=%d inactive=%d errors=%d',
 			(string) ( $report['source'] ?? '' ),
 			(int) ( $report['fetched_count'] ?? 0 ),
 			(int) ( $report['normalized_count'] ?? 0 ),
 			(int) ( $report['saved_count'] ?? 0 ),
 			(int) ( $report['skipped_invalid'] ?? 0 ),
+			(int) ( $report['marked_inactive'] ?? 0 ),
 			count( is_array( $report['errors'] ?? null ) ? $report['errors'] : array() )
 		);
 	}
@@ -1346,6 +1347,7 @@ final class DeliveryServicesAdminPage {
 					'normalized' => $report->normalized_count,
 					'saved' => $report->saved_count,
 					'skipped_invalid' => $report->skipped_invalid,
+					'marked_inactive' => $report->marked_inactive,
 					'errors' => $report->errors,
 				),
 			)

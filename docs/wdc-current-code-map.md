@@ -1,12 +1,12 @@
 # Карта текущего кода
 
-## DPD Pickup Points Foundation 0.59.0
+## DPD Pickup Points Foundation 0.59.1
 
 - `src/Carriers/Dpd/DpdApiClient.php` exposes low-level geography wrappers for `getParcelShops()` and `getTerminalsSelfDelivery2()`. `getParcelShops` uses `DpdSoapRequest::WRAPPER_REQUEST`; `getTerminalsSelfDelivery2` uses direct auth.
 - `database/migrations/0031_create_dpd_pickup_points_table.php` creates `wdc_dpd_pickup_points`, separate from `wdc_location_delivery_codes`. The table stores `terminal_code`, `type`, country/region/city fields, address, name, coordinates, schedule JSON, raw JSON, source, active flag and import timestamps.
-- `src/Carriers/Dpd/Pickup/DpdPickupPointRepository.php` owns schema creation, safe source replacement, upserts, inactive marking, lookup by `terminal_code`, cityId/cityName search and source counts.
+- `src/Carriers/Dpd/Pickup/DpdPickupPointRepository.php` owns schema creation, safe source replacement, upserts, inactive marking, lookup by `terminal_code`, cityId/cityName search and source counts. Replacement upserts the new valid set first and only then marks inactive old rows for the same source whose `terminal_code + type` key is absent from the new set.
 - `src/Carriers/Dpd/Pickup/DpdPickupPointNormalizer.php` tolerates object/array/single-object SOAP shapes and normalizes DPD parcel shops (`code`) and self-delivery terminals (`terminalCode`) into one local format.
-- `src/Carriers/Dpd/Pickup/DpdPickupPointImportService.php` performs manual imports for parcel shops, terminals or both, stores `dpd_last_pickup_import_report` through `DpdSettings`, and catches SOAP/import errors into controlled reports.
+- `src/Carriers/Dpd/Pickup/DpdPickupPointImportService.php` performs manual imports for parcel shops, terminals or both, stores `dpd_last_pickup_import_report` through `DpdSettings`, and catches SOAP/import errors into controlled reports. Empty DPD responses and responses with fetched rows but zero normalized valid points do not call replacement and leave existing points unchanged.
 - `src/Carriers/Dpd/Pickup/DpdPickupPointService.php` is the read-only future checkout-map boundary. It resolves WDC `location_id` through `LocationDeliveryCodeRepository::get_dpd_city_id()` and reads points by DPD cityId or terminalCode. It is not wired into the public checkout map/REST runtime yet.
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds the DPD `DPD ПВЗ` tab with status, manual import buttons and diagnostics by terminalCode/cityId/cityName.
 - `tests/dpd/run-dpd-pickup-points-smoke.php` covers repository behavior, normalizer shapes, import counts, wrapper names/auth wrappers, read-only service lookup, unchanged Parcels2 runtime pricing and absence of DPD shipment adapter/metabox.

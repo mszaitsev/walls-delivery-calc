@@ -84,14 +84,23 @@ final class DpdPickupPointRepository {
 	public function replace_all_for_source( string $source, array $points ): array {
 		$this->create_schema_if_needed();
 		$source = $this->sanitize_source( $source );
-		$marked = $this->mark_source_inactive( $source );
 		$prepared = array();
 		foreach ( $points as $point ) {
 			$point['source'] = $source;
 			$point['is_active'] = 1;
 			$prepared[] = $point;
 		}
+		if ( array() === $prepared ) {
+			return array(
+				'received' => 0,
+				'saved' => 0,
+				'skipped_invalid' => 0,
+				'marked_inactive' => 0,
+			);
+		}
 		$report = $this->upsert_many( $prepared );
+		$active_keys = $this->active_keys_from_points( $prepared );
+		$marked = array() !== $active_keys ? $this->mark_source_missing_keys_inactive( $source, $active_keys ) : 0;
 
 		return array(
 			'received' => $report['received'],
@@ -196,6 +205,53 @@ final class DpdPickupPointRepository {
 	}
 
 	/**
+	 * @param array<int,array<string,mixed>> $points
+	 * @return array<string,bool>
+	 */
+	private function active_keys_from_points( array $points ): array {
+		$keys = array();
+		foreach ( $points as $point ) {
+			$normalized = $this->normalize_point( $point );
+			if ( null === $normalized ) {
+				continue;
+			}
+			$keys[ $this->point_key( $normalized['terminal_code'], $normalized['type'] ) ] = true;
+		}
+
+		return $keys;
+	}
+
+	/**
+	 * @param array<string,bool> $active_keys
+	 */
+	private function mark_source_missing_keys_inactive( string $source, array $active_keys ): int {
+		if ( array() === $active_keys ) {
+			return 0;
+		}
+		if ( $this->has_test_rows() ) {
+			$count = 0;
+			foreach ( $this->wpdb->dpd_pickup_points as $index => $row ) {
+				$key = $this->point_key( (string) ( $row['terminal_code'] ?? '' ), (string) ( $row['type'] ?? '' ) );
+				if ( (string) ( $row['source'] ?? '' ) === $source && ! empty( $row['is_active'] ) && ! isset( $active_keys[ $key ] ) ) {
+					$this->wpdb->dpd_pickup_points[ $index ]['is_active'] = 0;
+					++$count;
+				}
+			}
+			return $count;
+		}
+
+		$conditions = array();
+		foreach ( array_keys( $active_keys ) as $key ) {
+			$parts = explode( '|', $key, 2 );
+			$conditions[] = $this->wpdb->prepare( '(terminal_code = %s AND type = %s)', $parts[0] ?? '', $parts[1] ?? '' );
+		}
+		$sql = 'UPDATE ' . $this->table_name() . ' SET is_active = 0 WHERE source = %s AND is_active = 1 AND NOT (' . implode( ' OR ', $conditions ) . ')';
+		$result = $this->wpdb->query( $this->wpdb->prepare( $sql, $source ) );
+
+		return is_numeric( $result ) ? (int) $result : 0;
+	}
+
+	/**
 	 * @param array<string,mixed> $point
 	 */
 	private function upsert_one( array $point ): bool {
@@ -294,6 +350,10 @@ final class DpdPickupPointRepository {
 		$source = preg_replace( '/[^A-Za-z0-9_\\-]/', '', $source ) ?? '';
 
 		return substr( '' !== $source ? $source : 'unknown', 0, 64 );
+	}
+
+	private function point_key( string $terminal_code, string $type ): string {
+		return trim( $terminal_code ) . '|' . trim( $type );
 	}
 
 	private function sql_literal( mixed $value, string $type ): string {

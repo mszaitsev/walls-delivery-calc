@@ -1,6 +1,6 @@
 # WDC DPD Pickup Points
 
-Version: 0.59.0.
+Version: 0.59.1.
 
 ## Scope
 
@@ -79,9 +79,19 @@ This table is intentionally separate from `wdc_location_delivery_codes`. `wdc_lo
 - `import_terminals_self_delivery()`;
 - `import_all()`.
 
-Each import fetches SOAP data, normalizes rows, then calls `DpdPickupPointRepository::replace_all_for_source()`. Existing rows for that source are marked inactive before valid new rows are upserted, so a failed fetch/normalization does not clear the working table.
+Each import fetches SOAP data and normalizes rows before storage changes. Replacement is safe:
 
-The report contains `source`, `started_at`, `finished_at`, `fetched_count`, `normalized_count`, `saved_count`, `skipped_invalid`, `errors` and `message`. The last report is stored in DPD settings as `dpd_last_pickup_import_report`.
+- if `fetched_count = 0`, existing points are left unchanged;
+- if `fetched_count > 0` but `normalized_count = 0`, existing points are left unchanged;
+- only when `normalized_count > 0` does the repository update storage;
+- successful storage first upserts the new valid points, then marks inactive only old active rows from the same `source` whose `terminal_code + type` is absent from the new valid set.
+
+This prevents an empty or unrecognized DPD response from wiping the local working directory. The admin report uses explicit messages:
+
+- `DPD pickup import returned no rows. Existing points were left unchanged.`
+- `DPD pickup import returned rows, but no valid points were normalized. Existing points were left unchanged.`
+
+The report contains `source`, `started_at`, `finished_at`, `fetched_count`, `normalized_count`, `saved_count`, `skipped_invalid`, `marked_inactive`, `errors` and `message`. The last report is stored in DPD settings as `dpd_last_pickup_import_report`.
 
 ## Admin
 

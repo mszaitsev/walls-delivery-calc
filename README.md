@@ -1,6 +1,11 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.59.0.
+Current plugin version: 0.59.1.
+
+Version 0.59.1 makes DPD pickup import safe-replace. Empty DPD responses and responses where the normalizer cannot
+produce any valid points no longer deactivate existing local pickup rows; the admin report explains that existing points
+were left unchanged. Successful imports upsert the new valid set first and then mark only old rows from the same source
+inactive when their `terminal_code + type` is absent from the new set.
 
 Version 0.59.0 adds the DPD pickup points / terminals foundation without changing checkout pricing. The DPD geography
 WSDL/docx methods were verified: `geography2/getParcelShops` is the primary parcel-shop/PVZ source and uses the

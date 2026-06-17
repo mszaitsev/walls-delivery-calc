@@ -61,10 +61,42 @@ if ( ! class_exists( 'wpdb' ) ) {
 final class DpdPickupFakeSoapClient implements DpdSoapClientInterface {
 	/** @var array<int,array<string,mixed>> */
 	public array $calls = array();
+	public string $parcel_mode = 'default';
 
 	public function call( string $service, string $method, array $payload, DpdCredentials $credentials, array $options = array() ): DpdSoapResponse {
 		$this->calls[] = compact( 'service', 'method', 'payload', 'options' );
 		if ( 'getParcelShops' === $method ) {
+			if ( 'empty' === $this->parcel_mode ) {
+				return new DpdSoapResponse( true, (object) array( 'return' => (object) array( 'parcelShop' => array() ) ) );
+			}
+			if ( 'invalid_only' === $this->parcel_mode ) {
+				return new DpdSoapResponse(
+					true,
+					(object) array(
+						'return' => (object) array(
+							'parcelShop' => array(
+								(object) array( 'parcelShopType' => 'П', 'address' => (object) array( 'cityName' => 'Новосибирск' ) ),
+								(object) array( 'brand' => 'DPD' ),
+							),
+						),
+					)
+				);
+			}
+			if ( 'success_single' === $this->parcel_mode ) {
+				return new DpdSoapResponse(
+					true,
+					(object) array(
+						'return' => (object) array(
+							'parcelShop' => (object) array(
+								'code' => 'PS2',
+								'parcelShopType' => 'П',
+								'address' => (object) array( 'cityId' => 49455627, 'countryCode' => 'RU', 'cityName' => 'Новосибирск', 'street' => 'Новая', 'houseNo' => '5' ),
+								'geoCoordinates' => (object) array( 'latitude' => '55.200000', 'longitude' => '82.800000' ),
+							),
+						),
+					)
+				);
+			}
 			return new DpdSoapResponse(
 				true,
 				(object) array(
@@ -177,10 +209,39 @@ dpd_pickup_assert( 2 === $repository->count_all(), 'import_all must save parcel 
 dpd_pickup_assert( 'getTerminalsSelfDelivery2' === (string) ( $repository->find_by_terminal_code( 'TERM1' )['source'] ?? '' ), 'Self-delivery terminal source must be stored.' );
 dpd_pickup_assert( 'getTerminalsSelfDelivery2' === (string) ( $settings->last_pickup_import_report()['source'] ?? '' ) || str_contains( (string) ( $settings->last_pickup_import_report()['source'] ?? '' ), 'getTerminalsSelfDelivery2' ), 'Last pickup import report must be stored in DpdSettings.' );
 
+$GLOBALS['wpdb']->dpd_pickup_points = array(
+	array( 'id' => 1, 'terminal_code' => 'KEEP_EMPTY', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'address' => 'old empty', 'source' => 'getParcelShops', 'is_active' => 1 ),
+);
+$soap->parcel_mode = 'empty';
+$empty_report = $importer->import_parcel_shops();
+dpd_pickup_assert( 0 === $empty_report->fetched_count && 0 === $empty_report->normalized_count && 0 === $empty_report->saved_count && 0 === $empty_report->marked_inactive, 'Empty DPD pickup response must not save or deactivate rows.' );
+dpd_pickup_assert( null !== $repository->find_by_terminal_code( 'KEEP_EMPTY' ), 'Existing active points must remain active when API response is empty.' );
+dpd_pickup_assert( str_contains( implode( ' ', $empty_report->errors ), 'DPD pickup import returned no rows. Existing points were left unchanged.' ), 'Empty DPD pickup response must report safe unchanged state.' );
+
+$GLOBALS['wpdb']->dpd_pickup_points = array(
+	array( 'id' => 1, 'terminal_code' => 'KEEP_INVALID', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'address' => 'old invalid', 'source' => 'getParcelShops', 'is_active' => 1 ),
+);
+$soap->parcel_mode = 'invalid_only';
+$invalid_report = $importer->import_parcel_shops();
+dpd_pickup_assert( 2 === $invalid_report->fetched_count && 0 === $invalid_report->normalized_count && 0 === $invalid_report->saved_count && 0 === $invalid_report->marked_inactive, 'Unrecognized DPD pickup response must not save or deactivate rows.' );
+dpd_pickup_assert( null !== $repository->find_by_terminal_code( 'KEEP_INVALID' ), 'Existing active points must remain active when normalizer produces no valid points.' );
+dpd_pickup_assert( str_contains( implode( ' ', $invalid_report->errors ), 'DPD pickup import returned rows, but no valid points were normalized. Existing points were left unchanged.' ), 'Unrecognized DPD pickup response must report safe unchanged state.' );
+
+$GLOBALS['wpdb']->dpd_pickup_points = array(
+	array( 'id' => 1, 'terminal_code' => 'STALE', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'address' => 'old stale', 'source' => 'getParcelShops', 'is_active' => 1 ),
+	array( 'id' => 2, 'terminal_code' => 'PS2', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'address' => 'old ps2', 'source' => 'getParcelShops', 'is_active' => 1 ),
+);
+$soap->parcel_mode = 'success_single';
+$success_report = $importer->import_parcel_shops();
+dpd_pickup_assert( 1 === $success_report->fetched_count && 1 === $success_report->normalized_count && 1 === $success_report->saved_count && 1 === $success_report->marked_inactive, 'Successful DPD pickup import must upsert valid points and mark missing old points inactive.' );
+dpd_pickup_assert( null === $repository->find_by_terminal_code( 'STALE' ) && empty( $GLOBALS['wpdb']->dpd_pickup_points[0]['is_active'] ), 'Old points absent from successful new import must become inactive.' );
+dpd_pickup_assert( str_contains( (string) ( $repository->find_by_terminal_code( 'PS2' )['address'] ?? '' ), 'Новая' ), 'Successful DPD pickup import must update existing active points.' );
+$soap->parcel_mode = 'default';
+
 $GLOBALS['wpdb']->delivery_codes[] = array( 'location_id' => 77, 'dpd_city_id' => '49455627', 'updated_at' => '2026-06-17 12:00:00' );
 $service = new DpdPickupPointService( $repository, new LocationDeliveryCodeRepository( $GLOBALS['wpdb'] ) );
-dpd_pickup_assert( 2 === count( $service->get_points_for_location_id( 77 ) ), 'Read-only service must resolve location_id to DPD cityId and return points.' );
-dpd_pickup_assert( null !== $service->get_point_by_terminal_code( 'TERM1' ), 'Read-only service must find points by terminalCode.' );
+dpd_pickup_assert( 1 === count( $service->get_points_for_location_id( 77 ) ), 'Read-only service must resolve location_id to DPD cityId and return active points.' );
+dpd_pickup_assert( null !== $service->get_point_by_terminal_code( 'PS2' ), 'Read-only service must find points by terminalCode.' );
 
 $api_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/Dpd/DpdApiClient.php' );
 $tariff_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/Dpd/Tariff/DpdTariffCalculationService.php' );

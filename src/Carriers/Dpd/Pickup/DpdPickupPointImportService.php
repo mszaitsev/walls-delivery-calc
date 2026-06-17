@@ -55,6 +55,7 @@ final class DpdPickupPointImportService {
 		$normalized_count = 0;
 		$saved = 0;
 		$skipped = 0;
+		$marked_inactive = 0;
 		try {
 			$response = $fetch();
 			$normalized = $this->normalizer->normalize_response( $response, $source, $type );
@@ -62,9 +63,16 @@ final class DpdPickupPointImportService {
 			$points = $normalized['points'];
 			$normalized_count = count( $points );
 			$skipped = (int) $normalized['skipped_invalid'];
-			$save = $this->repository->replace_all_for_source( $source, $points );
-			$saved = (int) $save['saved'];
-			$skipped += (int) $save['skipped_invalid'];
+			if ( 0 === $fetched ) {
+				$errors[] = 'DPD pickup import returned no rows. Existing points were left unchanged.';
+			} elseif ( 0 === $normalized_count ) {
+				$errors[] = 'DPD pickup import returned rows, but no valid points were normalized. Existing points were left unchanged.';
+			} else {
+				$save = $this->repository->replace_all_for_source( $source, $points );
+				$saved = (int) $save['saved'];
+				$skipped += (int) $save['skipped_invalid'];
+				$marked_inactive = (int) $save['marked_inactive'];
+			}
 		} catch ( DpdException $exception ) {
 			$errors[] = $exception->getMessage();
 		} catch ( \Throwable $exception ) {
@@ -79,6 +87,7 @@ final class DpdPickupPointImportService {
 			$normalized_count,
 			$saved,
 			$skipped,
+			$marked_inactive,
 			$errors,
 			array() === $errors ? 'DPD pickup points imported.' : 'DPD pickup points import failed.'
 		);

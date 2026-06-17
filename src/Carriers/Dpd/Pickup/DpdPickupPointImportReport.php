@@ -17,6 +17,7 @@ final class DpdPickupPointImportReport {
 		public readonly int $normalized_count,
 		public readonly int $saved_count,
 		public readonly int $skipped_invalid,
+		public readonly int $marked_inactive,
 		public readonly array $errors,
 		public readonly string $message
 	) {
@@ -34,6 +35,7 @@ final class DpdPickupPointImportReport {
 			'normalized_count' => $this->normalized_count,
 			'saved_count' => $this->saved_count,
 			'skipped_invalid' => $this->skipped_invalid,
+			'marked_inactive' => $this->marked_inactive,
 			'errors' => $this->errors,
 			'message' => $this->message,
 		);
@@ -49,6 +51,7 @@ final class DpdPickupPointImportReport {
 		$normalized = 0;
 		$saved = 0;
 		$skipped = 0;
+		$marked_inactive = 0;
 		$errors = array();
 		$sources = array();
 		foreach ( $reports as $report ) {
@@ -59,6 +62,7 @@ final class DpdPickupPointImportReport {
 			$normalized += $report->normalized_count;
 			$saved += $report->saved_count;
 			$skipped += $report->skipped_invalid;
+			$marked_inactive += $report->marked_inactive;
 			$errors = array_merge( $errors, $report->errors );
 		}
 
@@ -70,6 +74,7 @@ final class DpdPickupPointImportReport {
 			$normalized,
 			$saved,
 			$skipped,
+			$marked_inactive,
 			$errors,
 			array() === $errors ? 'DPD pickup points import completed.' : 'DPD pickup points import completed with errors.'
 		);
