@@ -1,6 +1,11 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.58.3.
+Current plugin version: 0.58.4.
+
+Version 0.58.4 switches the DPD tariff foundation and checkout runtime from `calculator2/getServiceCostByParcels3` to
+`calculator2/getServiceCostByParcels2`. DPD `parcel[]` now represents packaging places, not cart items: checkout builds a
+safe single-box parcel from package-level dimensions first, then a deterministic item-fit box within the temporary
+50x50x30 cm limit, then DPD default dimensions as fallback. Advanced multi-box packing remains a future stage.
 
 Version 0.58.3 filters DPD checkout tariff candidates inside each delivery type by price and delivery days. Equal-duration
 DPD tariffs collapse to the cheapest option, and a tariff hidden when another option is no slower and no more expensive
@@ -9,7 +14,7 @@ comparison. DPD payload modes, courier enablement, pickup points and shipment ad
 
 Version 0.58.2 fixes the DPD checkout runtime model around pickup/courier delivery types. Checkout DPD shipment is now
 always calculated from a DPD terminal (`selfPickup=true`). Terminal delivery is the default pickup group and sends
-`selfDelivery=true`; courier delivery sends a separate `getServiceCostByParcels3` request with `selfDelivery=false` only
+`selfDelivery=true`; courier delivery sends a separate `getServiceCostByParcels2` request with `selfDelivery=false` only
 when the new DPD `Тарифы` checkbox `Использовать курьерские тарифы` is enabled. The old runtime pickup/delivery mode and
 method-title-prefix settings are no longer rendered or used. DPD pickup points, maps, shipment adapter, statuses and labels
 remain out of scope.

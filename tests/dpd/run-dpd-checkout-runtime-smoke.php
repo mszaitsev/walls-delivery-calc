@@ -17,6 +17,7 @@ use WallsShop\WDC\Carriers\Dpd\DpdSoapRequest;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapResponse;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffCalculationService;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffOptionNormalizer;
+use WallsShop\WDC\Carriers\Dpd\Tariff\DpdParcelBuilder;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffRequestBuilder;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\Runtime\DpdQuoteCarrier;
@@ -37,6 +38,7 @@ use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
 use WallsShop\WDC\Domain\Package\Package;
+use WallsShop\WDC\Domain\Package\PackageItem;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Domain\Quote\QuoteRequest;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
@@ -236,13 +238,30 @@ function dpd_checkout_request( int $location_id = 200, int $weight_g = 1500, str
 	);
 }
 
+function dpd_checkout_request_with_package( Package $package, string $delivery_type = '' ): QuoteRequest {
+	$customer_context = array( 'selected_location_id' => '200' );
+	if ( '' !== $delivery_type ) {
+		$customer_context['delivery_type'] = $delivery_type;
+	}
+
+	return new QuoteRequest(
+		'RU',
+		new Address( country_code: 'RU', city: 'Москва', postcode: '101000', street: 'Тверская', house: '1' ),
+		$package,
+		'',
+		$package->cart_total,
+		'2026-06-17',
+		$customer_context
+	);
+}
+
 function dpd_checkout_build_carrier( DpdCheckoutFakeSoapClient $soap, DpdSettings $settings ): DpdQuoteCarrier {
 	$resolver = new DpdCityResolver( new LocationDeliveryCodeRepository( $GLOBALS['wpdb'] ) );
 	$locations = new LocationRepository( $GLOBALS['wpdb'] );
 	$api = new DpdApiClient( $settings, $soap );
 	$service = new DpdTariffCalculationService( $api, $resolver, $locations, $settings, new DpdTariffRequestBuilder(), new DpdTariffOptionNormalizer() );
 
-	return new DpdQuoteCarrier( $settings, $service, new Logger() );
+	return new DpdQuoteCarrier( $settings, $service, new DpdParcelBuilder( $settings ), new Logger() );
 }
 
 function dpd_checkout_orchestrator( CarrierRegistry $registry, DeliveryServiceRepository $services, DeliveryServiceCountryRepository $countries, DpdSettings $settings ): CheckoutOrchestrator {
@@ -336,8 +355,10 @@ dpd_checkout_assert( ! empty( $quote->rates[0]->meta['tariff_selector_group'] ) 
 dpd_checkout_assert( 'DPD до пункта выдачи, DPD Максимум - 1-2 дня' === $quote->rates[0]->title && 'DPD до пункта выдачи, DPD Экспресс - 1 день' === $quote->rates[1]->title, 'DPD pickup titles must use method title, tariff title and delivery days.' );
 dpd_checkout_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && ! $quote->rates[0]->requires_courier_address && ! $quote->rates[0]->requires_pickup_point && ! empty( $quote->rates[0]->meta['dpd_pickup_points_not_implemented'] ), 'DPD pickup runtime must be calculation-only terminal delivery without pickup point selection.' );
 dpd_checkout_assert( isset( $soap->calls[0]['soap_payload']['request']['auth'] ), 'DPD checkout runtime must call calculator2 with request.auth SOAP wrapper.' );
+dpd_checkout_assert( 'getServiceCostByParcels2' === $soap->calls[0]['method'], 'DPD checkout runtime must use getServiceCostByParcels2.' );
 dpd_checkout_assert( 1.5 === $soap->calls[0]['payload']['parcel'][0]['weight'] && 2500.0 === $soap->calls[0]['payload']['declaredValue'], 'DPD checkout payload must use cart weight and declared value.' );
 dpd_checkout_assert( true === ( $soap->calls[0]['payload']['selfPickup'] ?? null ) && true === ( $soap->calls[0]['payload']['selfDelivery'] ?? null ), 'DPD pickup payload must always use selfPickup=true and selfDelivery=true.' );
+dpd_checkout_assert( 1 === count( $soap->calls[0]['payload']['parcel'] ?? array() ) && 1 === (int) ( $soap->calls[0]['payload']['parcel'][0]['quantity'] ?? 0 ), 'DPD checkout payload must send one packaging parcel, not cart items.' );
 $base_quote_id = $quote->quote_id;
 dpd_checkout_assert( $base_quote_id !== $carrier->quote( dpd_checkout_request( 200, 2200 ) )->quote_id, 'DPD quote_id must change when weight changes.' );
 dpd_checkout_assert( $base_quote_id !== $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Москва', postcode: '101000' ), new Package( array(), Money::from_rubles( 2600 ), Money::from_rubles( 2600 ), 1500, 0, 1500, 40, 20, 10, null, 'cart' ), '', Money::from_rubles( 2600 ), '2026-06-17', array( 'selected_location_id' => '200' ) ) )->quote_id, 'DPD quote_id must change when dimensions or declared value change.' );
@@ -381,6 +402,37 @@ dpd_checkout_assert( DeliveryType::COURIER === $courier->rates[0]->delivery_type
 dpd_checkout_assert( 'DPD курьером, DPD Максимум - 1-2 дня' === $courier->rates[0]->title, 'DPD courier title must use courier method title, tariff title and days.' );
 dpd_checkout_assert( ( $quote->rates[0]->meta['checkout_group_id'] ?? '' ) !== ( $courier->rates[0]->meta['checkout_group_id'] ?? '' ), 'Same DPD serviceCode must stay in separate pickup/courier groups.' );
 dpd_checkout_assert( $base_quote_id !== $courier->quote_id, 'DPD quote_id must change when courier rates are enabled and courier delivery type is requested.' );
+
+$package_box = new Package( array(), Money::from_rubles( 5000 ), Money::from_rubles( 5000 ), 4500, 0, 4500, 38, 24, 21, null, 'cart' );
+$box_quote = $carrier->quote( dpd_checkout_request_with_package( $package_box ) );
+$box_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
+dpd_checkout_assert( 4.5 === (float) ( $box_payload['parcel'][0]['weight'] ?? 0 ) && 38.0 === (float) ( $box_payload['parcel'][0]['length'] ?? 0 ) && 24.0 === (float) ( $box_payload['parcel'][0]['width'] ?? 0 ) && 21.0 === (float) ( $box_payload['parcel'][0]['height'] ?? 0 ) && 1 === (int) ( $box_payload['parcel'][0]['quantity'] ?? 0 ), 'DPD parcel builder must use package-level dimensions as one 4.5kg 38x24x21 box.' );
+dpd_checkout_assert( 'package_dimensions' === (string) ( $box_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD quote diagnostics must expose package builder source.' );
+
+$items_package = new Package(
+	array(
+		new PackageItem( 'sku-a', 'Товар A', 2, Money::from_rubles( 1000 ), Money::from_rubles( 2000 ), 1000, 36, 12, 12 ),
+		new PackageItem( 'sku-b', 'Товар B', 1, Money::from_rubles( 500 ), Money::from_rubles( 500 ), 500, 10, 10, 10 ),
+	),
+	Money::from_rubles( 2500 ),
+	Money::from_rubles( 2500 ),
+	2500,
+	0,
+	2500,
+	null,
+	null,
+	null,
+	null,
+	'cart'
+);
+$items_quote = $carrier->quote( dpd_checkout_request_with_package( $items_package ) );
+$items_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
+dpd_checkout_assert( 1 === count( $items_payload['parcel'] ?? array() ) && 'items_single_box_fit' === (string) ( $items_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD parcel builder must collapse cart items into one calculated packaging parcel.' );
+
+$fallback_package = new Package( array(), Money::from_rubles( 0 ), Money::from_rubles( 0 ), 0, 0, 0, null, null, null, null, 'cart' );
+$fallback_quote = $carrier->quote( dpd_checkout_request_with_package( $fallback_package ) );
+$fallback_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
+dpd_checkout_assert( 1.0 === (float) ( $fallback_payload['parcel'][0]['weight'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['length'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['width'] ?? 0 ) && 20.0 === (float) ( $fallback_payload['parcel'][0]['height'] ?? 0 ) && 'defaults' === (string) ( $fallback_quote->raw_reference['package_builder_source'] ?? '' ), 'DPD parcel builder must fallback to DPD default parcel dimensions and weight.' );
 
 $settings->save_runtime_tariffs_from_admin(
 	array(

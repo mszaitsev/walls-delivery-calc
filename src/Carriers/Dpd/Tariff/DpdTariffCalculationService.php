@@ -49,14 +49,7 @@ final class DpdTariffCalculationService {
 		$request = new DpdTariffRequest(
 			$sender_city_id,
 			$receiver_city_id,
-			array(
-				new DpdTariffParcel(
-					$this->positive_int( $params['weight_g'] ?? $this->settings->tariff_default_weight_g(), $this->settings->tariff_default_weight_g() ),
-					$this->positive_float( $params['length_cm'] ?? $this->settings->tariff_default_length_cm(), $this->settings->tariff_default_length_cm() ),
-					$this->positive_float( $params['width_cm'] ?? $this->settings->tariff_default_width_cm(), $this->settings->tariff_default_width_cm() ),
-					$this->positive_float( $params['height_cm'] ?? $this->settings->tariff_default_height_cm(), $this->settings->tariff_default_height_cm() )
-				),
-			),
+			$this->parcels( $params ),
 			$this->non_negative_float( $params['declared_value_rub'] ?? $this->settings->tariff_default_declared_value_rub(), $this->settings->tariff_default_declared_value_rub() ),
 			! empty( $params['self_pickup'] ),
 			! empty( $params['self_delivery'] ),
@@ -66,7 +59,7 @@ final class DpdTariffCalculationService {
 		$payload = $this->builder->build( $request );
 
 		try {
-			$response = $this->api->getServiceCostByParcels3( $payload );
+			$response = $this->api->getServiceCostByParcels2( $payload );
 			$options = $this->normalizer->normalize( $response );
 
 			return new DpdTariffResult(
@@ -115,6 +108,61 @@ final class DpdTariffCalculationService {
 
 	private function digits( string $value ): string {
 		return preg_replace( '/\D+/', '', $value ) ?? '';
+	}
+
+	/**
+	 * @param array<string,mixed> $params
+	 * @return array<int,DpdTariffParcel>
+	 */
+	private function parcels( array $params ): array {
+		$parcels = array();
+		if ( is_array( $params['parcels'] ?? null ) ) {
+			foreach ( $params['parcels'] as $parcel ) {
+				$normalized = $this->parcel_from_param( $parcel );
+				if ( $normalized instanceof DpdTariffParcel ) {
+					$parcels[] = $normalized;
+				}
+			}
+		}
+		if ( array() !== $parcels ) {
+			return $parcels;
+		}
+
+		return array(
+			new DpdTariffParcel(
+				$this->positive_int( $params['weight_g'] ?? $this->settings->tariff_default_weight_g(), $this->settings->tariff_default_weight_g() ),
+				$this->positive_float( $params['length_cm'] ?? $this->settings->tariff_default_length_cm(), $this->settings->tariff_default_length_cm() ),
+				$this->positive_float( $params['width_cm'] ?? $this->settings->tariff_default_width_cm(), $this->settings->tariff_default_width_cm() ),
+				$this->positive_float( $params['height_cm'] ?? $this->settings->tariff_default_height_cm(), $this->settings->tariff_default_height_cm() )
+			),
+		);
+	}
+
+	private function parcel_from_param( mixed $parcel ): ?DpdTariffParcel {
+		if ( $parcel instanceof DpdTariffParcel ) {
+			return $parcel;
+		}
+		if ( ! is_array( $parcel ) ) {
+			return null;
+		}
+
+		$raw_weight = $parcel['weight_g'] ?? $parcel['weight'] ?? 0;
+		$raw_length = $parcel['length_cm'] ?? $parcel['length'] ?? 0;
+		$raw_width = $parcel['width_cm'] ?? $parcel['width'] ?? 0;
+		$raw_height = $parcel['height_cm'] ?? $parcel['height'] ?? 0;
+		if ( ! is_numeric( $raw_weight ) || ! is_numeric( $raw_length ) || ! is_numeric( $raw_width ) || ! is_numeric( $raw_height ) ) {
+			return null;
+		}
+		$weight = (int) $raw_weight;
+		$length = (float) $raw_length;
+		$width = (float) $raw_width;
+		$height = (float) $raw_height;
+		$quantity = $this->positive_int( $parcel['quantity'] ?? 1, 1 );
+		if ( $weight <= 0 || $length <= 0 || $width <= 0 || $height <= 0 ) {
+			return null;
+		}
+
+		return new DpdTariffParcel( $weight, $length, $width, $height, max( 1, $quantity ) );
 	}
 
 	private function positive_int( mixed $value, int $default ): int {

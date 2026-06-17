@@ -145,10 +145,10 @@ dpd_smoke_assert( isset( $production_map[ DpdEndpoints::SERVICE_ORDER ], $produc
 $geography_request = new DpdSoapRequest( DpdEndpoints::SERVICE_GEOGRAPHY, 'getCitiesCashPay', array( 'countryCode' => 'RU' ), $settings->credentials() );
 $geography_payload = $geography_request->payload_with_auth();
 dpd_smoke_assert( isset( $geography_payload['auth']['clientNumber'], $geography_payload['auth']['clientKey'] ) && ! isset( $geography_payload['request'] ), 'DPD geography methods must keep direct auth payload shape.' );
-$calculator_request = new DpdSoapRequest( DpdEndpoints::SERVICE_CALCULATOR, 'getServiceCostByParcels3', array( 'pickup' => array( 'cityId' => '49455627' ), 'delivery' => array( 'cityId' => '49694102' ) ), $settings->credentials(), array( 'wrapper' => DpdSoapRequest::WRAPPER_REQUEST ) );
+$calculator_request = new DpdSoapRequest( DpdEndpoints::SERVICE_CALCULATOR, 'getServiceCostByParcels2', array( 'pickup' => array( 'cityId' => '49455627' ), 'delivery' => array( 'cityId' => '49694102' ) ), $settings->credentials(), array( 'wrapper' => DpdSoapRequest::WRAPPER_REQUEST ) );
 $calculator_payload = $calculator_request->payload_with_auth();
 $calculator_shape = $calculator_request->redacted_payload_shape();
-dpd_smoke_assert( isset( $calculator_payload['request']['auth']['clientNumber'], $calculator_payload['request']['auth']['clientKey'] ) && ! isset( $calculator_payload['auth'] ), 'DPD calculator2 getServiceCostByParcels3 must use request wrapper auth shape.' );
+dpd_smoke_assert( isset( $calculator_payload['request']['auth']['clientNumber'], $calculator_payload['request']['auth']['clientKey'] ) && ! isset( $calculator_payload['auth'] ), 'DPD calculator2 getServiceCostByParcels2 must use request wrapper auth shape.' );
 dpd_smoke_assert( DpdSoapRequest::WRAPPER_REQUEST === $calculator_shape['wrapper'] && 'yes' === $calculator_shape['has_auth'] && ! str_contains( (string) json_encode( $calculator_shape ), 'test-client-key' ), 'DPD calculator debug payload shape must be redacted.' );
 
 $fake_soap = new DpdFakeSoapClient();

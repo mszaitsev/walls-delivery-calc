@@ -1,13 +1,13 @@
 # WDC DPD Tariff Calculation
 
-Version: 0.58.2.
+Version: 0.58.4.
 
 This stage implements the DPD tariff calculation foundation used by admin diagnostics and, as of 0.58.0, by the checkout runtime quote carrier. Shipment creation and pickup points remain out of scope.
 
 ## Scope
 
-- Low-level API wrapper: `DpdApiClient::getServiceCostByParcels3()`.
-- SOAP service: `calculator2`, method `getServiceCostByParcels3`.
+- Low-level API wrapper: `DpdApiClient::getServiceCostByParcels2()`.
+- SOAP service: `calculator2`, method `getServiceCostByParcels2`.
 - Transport/auth: existing `DpdApiClient::call()`, `DpdSoapClientInterface`, `DpdSoapRequest`, `DpdSettings` credentials.
 - Admin UI: `WDC -> Службы доставки -> DPD -> DPD Расчет`.
 - Receiver city: `DpdCityResolver` reads `wdc_location_delivery_codes.dpd_city_id`.
@@ -26,7 +26,9 @@ This stage implements the DPD tariff calculation foundation used by admin diagno
 - `declaredValue`
 - `parcel[]` with `weight` in kg, `length`, `width`, `height` in cm, and `quantity`
 
-`DpdSoapRequest::payload_with_auth()` adds `auth.clientNumber` and `auth.clientKey` centrally when the SOAP transport executes the request. `calculator2/getServiceCostByParcels3` uses the explicit `request` wrapper strategy, so the SOAP argument shape is:
+`parcel[]` represents packaging places, not cart items. The checkout runtime uses `DpdParcelBuilder` to create an initial safe single-box parcel from package-level dimensions, a deterministic item-fit box inside the temporary 50x50x30 cm model, or DPD default dimensions as fallback. The admin diagnostic calculator remains a one-parcel form for now, while `DpdTariffCalculationService` can accept explicit `params['parcels']` for multi-parcel tests/future UI.
+
+`DpdSoapRequest::payload_with_auth()` adds `auth.clientNumber` and `auth.clientKey` centrally when the SOAP transport executes the request. `calculator2/getServiceCostByParcels2` uses the explicit `request` wrapper strategy, so the SOAP argument shape is:
 
 ```php
 array(
@@ -90,6 +92,7 @@ Missing fields are not fatal.
 - COD / NPP.
 - `unitLoad`.
 - Fiscal receipts or receipt storage.
+- Complex multi-box/bin packing.
 - Cron, Action Scheduler or automatic tariff sync.
 - Writing DPD tariffs into delivery rates tables.
 
