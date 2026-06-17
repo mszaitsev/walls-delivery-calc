@@ -1,6 +1,6 @@
 # DPD Checkout Runtime
 
-Version: 0.58.9
+Version: 0.59.0
 
 ## Scope
 
@@ -159,7 +159,7 @@ Courier delivery:
 
 ## TerminalCode Pricing Debt
 
-DPD pickup points, terminal map and selected terminal storage are not implemented yet, so checkout has no reliable source for `pickup.terminalCode` or `delivery.terminalCode`.
+DPD pickup points and self-delivery terminals are now importable into the local read-only foundation table, but checkout map/selection and selected terminal storage are not connected yet. Checkout still has no runtime source for the buyer-selected `delivery.terminalCode`, and sender terminal selection is not finalized.
 
 After DPD pickup-point selection exists, the terminal pricing stage must:
 
@@ -194,9 +194,8 @@ The generic checkout quote cache key includes selected receiver location, packag
 
 ## Out Of Scope
 
-The 0.58.9 stage does not implement:
+The 0.59.0 stage still does not implement:
 
-- DPD pickup points;
 - parcel shop selection;
 - parcel shop map;
 - postamats;

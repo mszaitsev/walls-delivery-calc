@@ -1,5 +1,7 @@
 # Project Status
 
+0.59.0 note: DPD pickup points / terminals foundation is implemented. The DPD geography WSDL and `docs/dpd/ws-integration-guide.docx` were checked for `geography2/getParcelShops` and `geography2/getTerminalsSelfDelivery2`: `getParcelShops` is the primary PVZ/parcel-shop source with `request.auth` plus optional `countryCode`, `regionCode`, `cityCode`, `cityName` filters; `getTerminalsSelfDelivery2` is the supplementary self-delivery terminal source with direct `auth`. Both responses expose codes, address/city/region/country fields, coordinates and schedule; `getParcelShops` uses `code`, while terminals use `terminalCode`. WDC now has `DpdApiClient` wrappers, migration `0031_create_dpd_pickup_points_table.php`, `src/Carriers/Dpd/Pickup/` repository/normalizer/import/read-only services, a manual `DPD ПВЗ` admin tab with import buttons and diagnostics, and `tests/dpd/run-dpd-pickup-points-smoke.php`. Checkout pricing remains on `calculator2/getServiceCostByParcels2` with cityId/selfPickup/selfDelivery only; no checkout map/selection, terminalCode-aware pricing, shipment adapter/metabox, labels, COD/NPP, CDEK or Russian Post runtime changes were added.
+
 0.58.9 note: Fixed the DPD 3D parcel packer shelf row state. `DpdParcelBuilder::place_unit()` now tracks closed row width separately from the current row width, so placing several items into `current_row` no longer double-counts the occupied layer width. `getServiceCostByParcels2`, DPD checkout runtime behavior, shipment adapter/metabox scope, CDEK and Russian Post behavior are unchanged.
 
 0.58.8 note: DPD checkout parcel building now uses a fast deterministic 3D shelf/bin packing model while keeping `calculator2/getServiceCostByParcels2` as the runtime tariff method. `DpdParcelBuilder` supports `box_50_50_30` and `box_40_40_40`, sends actual occupied dimensions rather than full box format dimensions, keeps long items over 49 cm as separate parcels, aggregates small items with volume <=50 cm3 into one synthetic 3:1:1 volume block, optimizes identical item groups into grid blocks, attempts one box and then bounded two-box distribution before falling back to stacked rows, and adds packaging weight per parcel through the existing `PackagingWeightCalculator` tiers. Diagnostics now include packing strategy, tried/selected box formats, small-item and identical-grid counters, parcel goods/packaging/final weights, and packing limit reason. DPD pickup points, terminalCode pricing changes, shipment adapter/metabox, COD/NPP, `unitLoad`, labels and full optimal bin packing remain out of scope.
@@ -219,7 +221,7 @@
 | Rule Engine | done | 88% | Conditions/groups, audit, price/days mutations, comments, service rules, simulation and packaging tab. |
 | International Shipping | partial | 75% | Russian Post international rates/country mapping/fallback work; no shipment creation/tracking/documents for international flow. |
 | CDEK Carrier Foundation | partial | 38% | `cdek` service metadata, admin settings, separate test/production encrypted credentials, environment switch, OAuth client/cache and connection check exist; runtime rates, pickup points, shipments, statuses, print forms and webhooks are deferred. |
-| Future Carriers | not-started | 0% | DPD, Yandex Delivery, PEK, Energia, Aerogruz and Jet have no runtime adapters. |
+| Future Carriers | partial | 15% | DPD has quote-only checkout runtime plus local pickup-point foundation; Yandex Delivery, PEK, Energia, Aerogruz and Jet have no runtime adapters. |
 | Operations / Monitoring | partial | 50% | Logger, diagnostics pages and autosync diagnostics exist; no production dashboard/rotation strategy. |
 | Documentation | partial | 78% | Profile docs cover the completed order delivery recalculation stage and current CDEK-oriented roadmap; older historical notes remain as changelog context. |
 
@@ -227,7 +229,7 @@
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.49.2`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.59.0`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.
@@ -309,7 +311,7 @@
 
 - CDEK webhooks and persistent print-form storage.
 - Permanent FIAS/GAR -> CDEK `city_code` mapping/storage.
-- DPD runtime adapter, settings, rates, pickup/courier flow, shipments and statuses.
+- DPD checkout map/selection, terminalCode-aware pricing, shipments and statuses.
 - Yandex Delivery runtime adapter, pricing, pickup/courier flow and future offer confirmation.
 - PEK, Energia, Aerogruz, Jet adapters.
 - Plugin-generated Russian Post labels, forms, batches and F103.

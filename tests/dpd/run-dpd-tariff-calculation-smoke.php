@@ -271,6 +271,7 @@ $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/
 dpd_tariff_assert( str_contains( $admin_source, 'DPD Расчет' ) && str_contains( $admin_source, 'render_dpd_tariff_action_result' ) && str_contains( $admin_source, 'test_dpd_tariff_calculation' ), 'Admin page must expose an admin-only DPD tariff calculator with visible result storage.' );
 dpd_tariff_assert( str_contains( $plugin_source, 'DpdQuoteCarrier' ) && ! str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'DPD may be registered for checkout quotes but must not be registered in shipment adapters.' );
 dpd_tariff_assert( str_contains( $plugin_source, 'RussianPostInternationalCarrier' ) && str_contains( $plugin_source, 'RussianPostDomesticCarrier' ) && str_contains( $plugin_source, 'CdekCarrier' ), 'Existing CDEK/Russian Post runtime registrations must remain present.' );
-dpd_tariff_assert( ! str_contains( $admin_source, 'createOrder' ) && ! str_contains( $admin_source, 'getParcelShops' ) && ! str_contains( $admin_source, 'unitLoad' ), 'DPD tariff admin must not add shipment creation, parcel shops or unitLoad.' );
+dpd_tariff_assert( ! str_contains( $admin_source, 'createOrder' ) && ! str_contains( $admin_source, 'unitLoad' ), 'DPD tariff admin must not add shipment creation or unitLoad.' );
+dpd_tariff_assert( str_contains( $admin_source, 'render_dpd_pickup_tab' ) && str_contains( $admin_source, 'getParcelShops' ), 'DPD parcel shop import must live in the separate pickup tab, not in tariff calculation runtime.' );
 
 echo "DPD tariff calculation smoke test passed.\n";

@@ -50,6 +50,27 @@ final class DpdApiClient {
 	}
 
 	/**
+	 * @param array<string,mixed> $request
+	 */
+	public function getParcelShops( array $request = array() ): DpdSoapResponse {
+		return $this->call(
+			DpdEndpoints::SERVICE_GEOGRAPHY,
+			'getParcelShops',
+			$request,
+			array( 'wrapper' => DpdSoapRequest::WRAPPER_REQUEST )
+		);
+	}
+
+	public function getTerminalsSelfDelivery2(): DpdSoapResponse {
+		return $this->call(
+			DpdEndpoints::SERVICE_GEOGRAPHY,
+			'getTerminalsSelfDelivery2',
+			array(),
+			array( 'wrapper' => DpdSoapRequest::WRAPPER_DIRECT )
+		);
+	}
+
+	/**
 	 * @param array<string,mixed> $payload
 	 */
 	public function getServiceCostByParcels2( array $payload ): DpdSoapResponse {

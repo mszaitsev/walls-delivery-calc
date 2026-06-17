@@ -1,8 +1,8 @@
 # WDC DPD Tariff Calculation
 
-Version: 0.58.9.
+Version: 0.59.0.
 
-This stage implements the DPD tariff calculation foundation used by admin diagnostics and, as of 0.58.0, by the checkout runtime quote carrier. Shipment creation and pickup points remain out of scope.
+This stage documents the DPD tariff calculation foundation used by admin diagnostics and checkout runtime. As of 0.59.0, DPD pickup points / terminals can be imported into a local read-only foundation table, but tariff calculation is intentionally unchanged.
 
 ## Scope
 
@@ -89,7 +89,8 @@ Missing fields are not fatal.
 ## Not Implemented
 
 - DPD `CarrierShipmentAdapterRegistry` adapter.
-- Pickup points / `getParcelShops` / maps.
+- Checkout pickup map/selection.
+- TerminalCode-aware runtime pricing.
 - Order creation, cancellation, statuses, labels.
 - COD / NPP.
 - `unitLoad`.

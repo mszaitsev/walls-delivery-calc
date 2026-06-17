@@ -1,6 +1,14 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.58.9.
+Current plugin version: 0.59.0.
+
+Version 0.59.0 adds the DPD pickup points / terminals foundation without changing checkout pricing. The DPD geography
+WSDL/docx methods were verified: `geography2/getParcelShops` is the primary parcel-shop/PVZ source and uses the
+`request` SOAP wrapper, while `geography2/getTerminalsSelfDelivery2` is the supplementary self-delivery terminal source
+and accepts direct root-level `auth`. WDC now has low-level wrappers, the separate `wdc_dpd_pickup_points` table,
+repository/normalizer/import service, a manual `DPD ПВЗ` admin tab, and a read-only service for the future checkout map.
+Checkout runtime still uses `calculator2/getServiceCostByParcels2` with cityId/selfPickup/selfDelivery only; no DPD
+pickup selection, shipment adapter, metabox, labels, COD/NPP or terminalCode-aware pricing was added.
 
 Version 0.58.9 fixes the DPD 3D parcel packer row-state model: closed row width is now tracked separately from the
 current row, so adding multiple items to one shelf row no longer double-counts layer width. The DPD API method remains

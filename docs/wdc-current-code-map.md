@@ -1,6 +1,17 @@
 # Карта текущего кода
 
-## DPD Checkout Runtime 0.58.9
+## DPD Pickup Points Foundation 0.59.0
+
+- `src/Carriers/Dpd/DpdApiClient.php` exposes low-level geography wrappers for `getParcelShops()` and `getTerminalsSelfDelivery2()`. `getParcelShops` uses `DpdSoapRequest::WRAPPER_REQUEST`; `getTerminalsSelfDelivery2` uses direct auth.
+- `database/migrations/0031_create_dpd_pickup_points_table.php` creates `wdc_dpd_pickup_points`, separate from `wdc_location_delivery_codes`. The table stores `terminal_code`, `type`, country/region/city fields, address, name, coordinates, schedule JSON, raw JSON, source, active flag and import timestamps.
+- `src/Carriers/Dpd/Pickup/DpdPickupPointRepository.php` owns schema creation, safe source replacement, upserts, inactive marking, lookup by `terminal_code`, cityId/cityName search and source counts.
+- `src/Carriers/Dpd/Pickup/DpdPickupPointNormalizer.php` tolerates object/array/single-object SOAP shapes and normalizes DPD parcel shops (`code`) and self-delivery terminals (`terminalCode`) into one local format.
+- `src/Carriers/Dpd/Pickup/DpdPickupPointImportService.php` performs manual imports for parcel shops, terminals or both, stores `dpd_last_pickup_import_report` through `DpdSettings`, and catches SOAP/import errors into controlled reports.
+- `src/Carriers/Dpd/Pickup/DpdPickupPointService.php` is the read-only future checkout-map boundary. It resolves WDC `location_id` through `LocationDeliveryCodeRepository::get_dpd_city_id()` and reads points by DPD cityId or terminalCode. It is not wired into the public checkout map/REST runtime yet.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds the DPD `DPD ПВЗ` tab with status, manual import buttons and diagnostics by terminalCode/cityId/cityName.
+- `tests/dpd/run-dpd-pickup-points-smoke.php` covers repository behavior, normalizer shapes, import counts, wrapper names/auth wrappers, read-only service lookup, unchanged Parcels2 runtime pricing and absence of DPD shipment adapter/metabox.
+
+## DPD Checkout Runtime 0.59.0
 
 - `src/Carriers/Runtime/DpdQuoteCarrier.php` is the DPD checkout quote carrier registered in `CarrierRegistry` under `carrier_key=dpd`. It returns rates only when the built-in DPD delivery service is enabled by the common service settings, active-environment credentials are complete, the receiver `location_id` is known, receiver `dpd_city_id` is mapped, and DPD `getServiceCostByParcels2` returns numeric-cost options.
 - The runtime reuses `src/Carriers/Dpd/Tariff/DpdTariffCalculationService.php`, `DpdCityResolver`, `DpdSettings` and the existing SOAP wrapper/auth path. It does not call DPD outside `DpdApiClient` and does not write checkout rates back to delivery tables.
@@ -10,7 +21,7 @@
 - `src/Checkout/Runtime/CheckoutOrchestrator.php` adds a DPD pickup entry whenever the DPD delivery service is active and adds the DPD courier entry only when `dpd_runtime_enable_courier_rates` is enabled.
 - DPD checkout shipment is always calculated from a DPD terminal: pickup delivery sends `selfPickup=true` and `selfDelivery=true`, returns a `DeliveryType::PICKUP` calculation rate, keeps `requires_pickup_point=false`, and stores `dpd_pickup_points_not_implemented=true` until DPD pickup point selection exists.
 - DPD courier delivery sends a separate `getServiceCostByParcels2` request with `selfPickup=true` and `selfDelivery=false`, returns `DeliveryType::COURIER`, and requires a courier address. If courier rates are disabled, `DpdQuoteCarrier` returns empty quote reason `courier_rates_disabled` without a SOAP call.
-- TerminalCode-aware DPD pricing is documented as future technical debt: after DPD pickup points/map exist, runtime must obtain `pickup.terminalCode`/`delivery.terminalCode`, test `getServiceCostByParcels3` with `parcel[]` and terminal codes against the DPD cabinet, and only then switch from the current Parcels2 mode. `getServiceCost3` is not the default target because it does not match the current package-place `parcel[]` model.
+- TerminalCode-aware DPD pricing is documented as future technical debt: after checkout map/selection stores concrete sender/receiver terminal codes, runtime must obtain `pickup.terminalCode`/`delivery.terminalCode`, test `getServiceCostByParcels3` with `parcel[]` and terminal codes against the DPD cabinet, and only then switch from the current Parcels2 mode. `getServiceCost3` is not the default target because it does not match the current package-place `parcel[]` model.
 - `DpdQuoteCarrier::quote_id()` includes receiver location, sender/receiver city IDs, normalized parcel signature, parcel count, long-item parcel count, regular item count, total weight, dimensions, declared value, parcel dimensions, box limits, package builder source, `delivery_type`, fixed `selfPickup=true`, derived `selfDelivery`, courier-rates enablement, enabled service codes, calculation date and environment for diagnostics.
 - `src/Checkout/Cache/QuoteCache.php` includes selected location, package dimensions and declared value in the generic quote cache key so DPD quotes vary on the receiver and parcel parameters that affect `getServiceCostByParcels2`.
 - `src/Core/Plugin.php` registers `DpdQuoteCarrier` in the checkout runtime registry only. It still registers no `DpdShipmentAdapter` in `CarrierShipmentAdapterRegistry`, so DPD does not appear in shipment creation/metabox actions.
