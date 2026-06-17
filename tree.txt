@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 00000034 A0AC:74BD
+Volume serial number is 000000FF A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -91,6 +91,7 @@ C:.
 |           0028_add_cdek_tariff_limits.php
 |           0029_add_cdek_tariff_delivery_mode.php
 |           0030_create_location_delivery_codes.php
+|           0031_create_dpd_pickup_points_table.php
 |
 +---docs
 |   |   development-workflow.md
@@ -116,6 +117,7 @@ C:.
 |   |   wdc-dpd-checkout-runtime.md
 |   |   wdc-dpd-geography.md
 |   |   wdc-dpd-integration.md
+|   |   wdc-dpd-pickup-points.md
 |   |   wdc-dpd-tariff-calculation.md
 |   |   wdc-fias-foundation.md
 |   |   wdc-gar-places-import.md
@@ -217,6 +219,13 @@ C:.
 |   |   |   |       DpdGeographyStageRepository.php
 |   |   |   |       DpdLocationIndex.php
 |   |   |   |       WpDpdDaDataDeliveryClient.php
+|   |   |   |
+|   |   |   +---Pickup
+|   |   |   |       DpdPickupPointImportReport.php
+|   |   |   |       DpdPickupPointImportService.php
+|   |   |   |       DpdPickupPointNormalizer.php
+|   |   |   |       DpdPickupPointRepository.php
+|   |   |   |       DpdPickupPointService.php
 |   |   |   |
 |   |   |   \---Tariff
 |   |   |           DpdParcelBuilder.php
@@ -635,6 +644,7 @@ C:.
     |       run-dpd-geography-import-smoke.php
     |       run-dpd-location-index-smoke.php
     |       run-dpd-parcel-builder-smoke.php
+    |       run-dpd-pickup-points-smoke.php
     |       run-dpd-tariff-calculation-smoke.php
     |
     +---fias

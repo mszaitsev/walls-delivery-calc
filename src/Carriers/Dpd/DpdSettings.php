@@ -49,6 +49,8 @@ final class DpdSettings {
 	public const RUNTIME_TARIFF_TITLES_KEY = 'dpd_runtime_tariff_titles';
 	public const RUNTIME_ENABLE_COURIER_RATES_KEY = 'dpd_runtime_enable_courier_rates';
 	public const LAST_TARIFF_ACTION_RESULT_KEY = 'dpd_last_tariff_action_result';
+	public const LAST_PICKUP_IMPORT_REPORT_KEY = 'dpd_last_pickup_import_report';
+	public const LAST_PICKUP_ACTION_RESULT_KEY = 'dpd_last_pickup_action_result';
 
 	public function __construct(
 		private SettingsRepository $settings,
@@ -92,6 +94,8 @@ final class DpdSettings {
 			self::RUNTIME_TARIFF_TITLES_KEY => array(),
 			self::RUNTIME_ENABLE_COURIER_RATES_KEY => false,
 			self::LAST_TARIFF_ACTION_RESULT_KEY => array(),
+			self::LAST_PICKUP_IMPORT_REPORT_KEY => array(),
+			self::LAST_PICKUP_ACTION_RESULT_KEY => array(),
 		);
 	}
 
@@ -305,6 +309,62 @@ final class DpdSettings {
 
 	public function clear_tariff_action_result(): void {
 		$this->settings->set( self::LAST_TARIFF_ACTION_RESULT_KEY, array() );
+	}
+
+	/**
+	 * @param array<string,mixed> $report
+	 */
+	public function save_pickup_import_report( array $report ): void {
+		$this->settings->set( self::LAST_PICKUP_IMPORT_REPORT_KEY, $report );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function last_pickup_import_report(): array {
+		return $this->settings->get_array( self::LAST_PICKUP_IMPORT_REPORT_KEY, array() );
+	}
+
+	/**
+	 * @param array<string,mixed> $result
+	 */
+	public function save_pickup_action_result( array $result ): void {
+		$type = (string) ( $result['type'] ?? 'info' );
+		if ( ! in_array( $type, array( 'success', 'warning', 'error', 'info' ), true ) ) {
+			$type = 'info';
+		}
+		$this->settings->set(
+			self::LAST_PICKUP_ACTION_RESULT_KEY,
+			array(
+				'type' => $type,
+				'title' => $this->sanitize_text( (string) ( $result['title'] ?? 'DPD ПВЗ' ) ),
+				'message' => $this->redact( $this->sanitize_text( (string) ( $result['message'] ?? '' ) ) ),
+				'details' => $this->redact_details( is_array( $result['details'] ?? null ) ? $result['details'] : array() ),
+				'created_at' => (string) ( $result['created_at'] ?? ( function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ) ) ),
+			)
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	public function get_pickup_action_result(): array {
+		$result = $this->settings->get_array( self::LAST_PICKUP_ACTION_RESULT_KEY, array() );
+		if ( array() === $result ) {
+			return array();
+		}
+
+		return array(
+			'type' => (string) ( $result['type'] ?? 'info' ),
+			'title' => (string) ( $result['title'] ?? '' ),
+			'message' => (string) ( $result['message'] ?? '' ),
+			'details' => is_array( $result['details'] ?? null ) ? $result['details'] : array(),
+			'created_at' => (string) ( $result['created_at'] ?? '' ),
+		);
+	}
+
+	public function clear_pickup_action_result(): void {
+		$this->settings->set( self::LAST_PICKUP_ACTION_RESULT_KEY, array() );
 	}
 
 	/**

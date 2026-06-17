@@ -38,6 +38,10 @@ use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyMatcher;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyStageRepository;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdLocationIndex;
 use WallsShop\WDC\Carriers\Dpd\Geography\WpDpdDaDataDeliveryClient;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointImportService;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointNormalizer;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdParcelBuilder;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffCalculationService;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffOptionNormalizer;
@@ -270,6 +274,10 @@ final class Plugin {
 		$this->container->register( DpdGeographyFtpClient::class, fn(): DpdGeographyFtpClient => new DpdGeographyFtpClient( $this->container->get( DpdSettings::class ) ) );
 		$this->container->register( DpdDaDataDeliveryClientInterface::class, fn(): DpdDaDataDeliveryClientInterface => new WpDpdDaDataDeliveryClient( $this->container->get( AddressSuggestionSettings::class ), $this->container->get( DaDataTokenPool::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( DpdDaDataDeliveryFallbackService::class, fn(): DpdDaDataDeliveryFallbackService => new DpdDaDataDeliveryFallbackService( $this->container->get( LocationRepository::class ), $this->container->get( LocationDeliveryCodeRepository::class ), $this->container->get( DpdDaDataDeliveryClientInterface::class ) ) );
+		$this->container->register( DpdPickupPointRepository::class, fn(): DpdPickupPointRepository => new DpdPickupPointRepository() );
+		$this->container->register( DpdPickupPointNormalizer::class, fn(): DpdPickupPointNormalizer => new DpdPickupPointNormalizer() );
+		$this->container->register( DpdPickupPointImportService::class, fn(): DpdPickupPointImportService => new DpdPickupPointImportService( $this->container->get( DpdApiClient::class ), $this->container->get( DpdPickupPointNormalizer::class ), $this->container->get( DpdPickupPointRepository::class ), $this->container->get( DpdSettings::class ) ) );
+		$this->container->register( DpdPickupPointService::class, fn(): DpdPickupPointService => new DpdPickupPointService( $this->container->get( DpdPickupPointRepository::class ), $this->container->get( LocationDeliveryCodeRepository::class ) ) );
 		$this->container->register( DpdParcelBuilder::class, fn(): DpdParcelBuilder => new DpdParcelBuilder( $this->container->get( DpdSettings::class ), $this->container->get( PackagingWeightCalculator::class ) ) );
 		$this->container->register( DpdTariffRequestBuilder::class, fn(): DpdTariffRequestBuilder => new DpdTariffRequestBuilder() );
 		$this->container->register( DpdTariffOptionNormalizer::class, fn(): DpdTariffOptionNormalizer => new DpdTariffOptionNormalizer() );
@@ -578,7 +586,9 @@ final class Plugin {
 				$this->container->get( DpdGeographyImportService::class ),
 				$this->container->get( DpdGeographyFtpClient::class ),
 				$this->container->get( DpdDaDataDeliveryFallbackService::class ),
-				$this->container->get( DpdTariffCalculationService::class )
+				$this->container->get( DpdTariffCalculationService::class ),
+				$this->container->get( DpdPickupPointRepository::class ),
+				$this->container->get( DpdPickupPointImportService::class )
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper() );
