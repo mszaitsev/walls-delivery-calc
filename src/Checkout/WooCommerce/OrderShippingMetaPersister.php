@@ -104,6 +104,17 @@ final class OrderShippingMetaPersister {
 			$map['_wdc_pickup_point_address']      = $this->pickup_address( $pickup );
 			$map['_wdc_pickup_point_postcode']     = $this->first_meaningful( $pickup['point_postcode'] ?? '', $pickup['postcode'] ?? '', $pickup['postal_code'] ?? '', $pickup['snapshot']['postcode'] ?? '' );
 			$map['_wdc_pickup_point_snapshot']     = function_exists( 'wp_json_encode' ) ? wp_json_encode( is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : $pickup, JSON_UNESCAPED_UNICODE ) : json_encode( is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : $pickup );
+			if ( 'dpd' === (string) ( $pickup['carrier_key'] ?? $rate['carrier_key'] ?? '' ) ) {
+				$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+				$map['_wdc_dpd_pickup_terminal_code'] = $this->first_meaningful( $pickup['terminal_code'] ?? '', $pickup['point_code'] ?? '', $snapshot['terminal_code'] ?? '', $snapshot['point_code'] ?? '' );
+				$map['_wdc_dpd_pickup_type']          = $this->first_meaningful( $pickup['point_type'] ?? '', $snapshot['point_type'] ?? '' );
+				$map['_wdc_dpd_pickup_name']          = $this->first_meaningful( $pickup['point_name'] ?? '', $snapshot['point_name'] ?? '' );
+				$map['_wdc_dpd_pickup_address']       = $this->pickup_address( $pickup );
+				$map['_wdc_dpd_pickup_city_name']     = $this->first_meaningful( $pickup['city_name'] ?? '', $pickup['city'] ?? '', $snapshot['city_name'] ?? '', $snapshot['city'] ?? '' );
+				$map['_wdc_dpd_pickup_latitude']      = $this->first_meaningful( $pickup['lat'] ?? '', $snapshot['lat'] ?? '' );
+				$map['_wdc_dpd_pickup_longitude']     = $this->first_meaningful( $pickup['lng'] ?? '', $snapshot['lng'] ?? '' );
+				$map['_wdc_dpd_pickup_source']        = $this->first_meaningful( $pickup['dpd_source'] ?? '', $snapshot['dpd_source'] ?? '' );
+			}
 			$this->set_pickup_shipping_address( $order, $pickup, $address );
 		}
 

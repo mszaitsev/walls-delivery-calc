@@ -261,7 +261,7 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 		$days = DeliveryDaysFormatter::format( $range );
 		$method_title = DeliveryType::PICKUP === $delivery_type ? $this->settings->runtime_pickup_title() : $this->settings->runtime_courier_title();
 		$title = $this->method_title_from_parts( $method_title, $tariff_name, $days );
-		$requires_pickup_point = false;
+		$requires_pickup_point = DeliveryType::PICKUP === $delivery_type;
 		$requires_courier_address = DeliveryType::COURIER === $delivery_type;
 
 		return new DeliveryRate(
@@ -311,7 +311,7 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 				'dpd_self_pickup' => true,
 				'dpd_self_delivery' => DeliveryType::PICKUP === $delivery_type,
 				'dpd_courier_rates_enabled' => $this->settings->runtime_courier_rates_enabled(),
-				'dpd_pickup_points_not_implemented' => DeliveryType::PICKUP === $delivery_type,
+				'dpd_pickup_point_selection_enabled' => DeliveryType::PICKUP === $delivery_type,
 				'request_payload_sanitized' => $payload,
 				'response_tariff_sanitized' => $this->sanitize_option( $option ),
 				'package' => array(

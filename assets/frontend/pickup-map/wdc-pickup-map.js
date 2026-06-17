@@ -391,12 +391,8 @@
 			distanceOrigin = { lat: parseFloat(searchAddress.lat), lng: parseFloat(searchAddress.lng) };
 			suppressNextMoveLoad = true;
 			provider.setCenter(searchAddress.lat, searchAddress.lng, 15);
-			provider.renderMarkers(visiblePoints, {
-				activePointId: previewPoint ? pointId(previewPoint) : null,
-				searchMarker: activeOriginMarker()
-			});
+			refreshDistancesFromOrigin();
 			card.textContent = labels.addressFound || 'Адрес найден.';
-			renderList(visiblePoints);
 		}
 
 		setTimeout(function () {
@@ -462,6 +458,18 @@
 				}
 				return a._wdcOrder - b._wdcOrder;
 			});
+		}
+
+		function refreshDistancesFromOrigin() {
+			visiblePoints = sortPoints(enrichPoints(visiblePoints));
+			previewPoint = previewPoint ? matchingPoint(previewPoint, visiblePoints) : null;
+			committedPoint = committedPoint ? matchingPoint(committedPoint, visiblePoints) || committedPoint : null;
+			provider.renderMarkers(visiblePoints, {
+				activePointId: previewPoint ? pointId(previewPoint) : null,
+				searchMarker: activeOriginMarker()
+			});
+			renderList(visiblePoints);
+			updateListSelectButton();
 		}
 
 		function findPoint(id) {
@@ -564,11 +572,7 @@
 			originStatusType = '';
 			suppressNextMoveLoad = true;
 			provider.setCenter(lat, lng, 15);
-			provider.renderMarkers(visiblePoints, {
-				activePointId: previewPoint ? pointId(previewPoint) : null,
-				searchMarker: activeOriginMarker()
-			});
-			renderList(visiblePoints);
+			refreshDistancesFromOrigin();
 			loadBounds(bboxAround(lat, lng), { force: true });
 		}
 

@@ -365,6 +365,12 @@ final class PickupMapCheckout {
 						'POSTAMAT' => array( 'card_title' => 'Постамат СДЭК', 'point_type_label' => 'Постамат', 'storage_notice' => 'Срок хранения 3 дня', 'marker_type' => 'postamat' ),
 					),
 				),
+				'dpd:pickup' => array(
+					'types' => array(
+						'PARCEL_SHOP' => array( 'card_title' => 'Пункт выдачи DPD', 'point_type_label' => 'Пункт выдачи', 'marker_type' => 'pickup' ),
+						'TERMINAL_SELF_DELIVERY' => array( 'card_title' => 'Терминал DPD', 'point_type_label' => 'Терминал', 'marker_type' => 'terminal' ),
+					),
+				),
 				'russian_post_domestic:pickup' => array(
 					'types' => array(
 						'OPS' => array( 'card_title' => 'Отделение Почты России', 'point_type_label' => 'Пункт выдачи', 'marker_type' => 'pickup' ),

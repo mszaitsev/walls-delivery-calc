@@ -1,6 +1,31 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.59.2.
+Current plugin version: 0.60.4.
+
+Version 0.60.4 fixes stale pickup-map distances after address search or browser geolocation changes the active origin.
+The frontend now recalculates and resorts current visible pickup points before rerendering markers, the side list and the
+`Ближайший ПВЗ` text. Backend carrier behavior and DPD pricing are unchanged.
+
+Version 0.60.3 keeps DPD `raw_json` diagnostic-only and filters duplicate consumer pickup points. Checkout REST
+responses, checkout session snapshots and order meta no longer expose DPD `raw_json`; it remains stored only in the local
+admin/internal pickup table. When DPD stores both `parcel_shop` and `terminal_self_delivery` rows with the same
+`terminal_code`, checkout/map/search prefer the `parcel_shop` row and hide the duplicate terminal row. Terminal-only rows
+remain available. DPD pricing and `terminalCode` tariff behavior are unchanged.
+
+Version 0.60.2 formats DPD pickup schedules for checkout map/list cards. DPD schedule JSON from imported parcel shops
+and terminals is converted to readable text such as `Пн–Вс: 10:00–22:00` in REST responses and saved checkout pickup
+snapshots, while raw DPD response JSON remains unchanged. DPD pricing and `terminalCode` tariff behavior are unchanged.
+
+Version 0.60.1 fixes the checkout pickup resolve-location order for DPD. The REST controller now reads the selected
+point payload before applying the DPD/CDEK skip path, so DPD and CDEK return `requires_location_change=false` without
+touching an undefined variable or requiring the Russian Post location resolver. Russian Post resolve-location behavior is
+unchanged, and DPD pricing still does not use `terminalCode`.
+
+Version 0.60.0 connects the DPD pickup-point selection foundation to checkout. DPD pickup rates now reuse the shared
+checkout pickup map/list UI, load active local points from `wdc_dpd_pickup_points` through `carrier=dpd&location_id=...`,
+validate the selected active `terminal_code`, and save the selected point to canonical pickup meta plus DPD-specific order
+meta. Pricing is unchanged: DPD still uses `calculator2/getServiceCostByParcels2` with cityId/selfPickup/selfDelivery and
+does not send `terminalCode` to tariff calculation yet.
 
 Version 0.59.2 removes the obsolete internal DPD pickup repository `mark_source_inactive()` helper after confirming
 safe-replace now uses targeted stale-key inactivation only. Safe-replace behavior is unchanged.
@@ -16,7 +41,7 @@ WSDL/docx methods were verified: `geography2/getParcelShops` is the primary parc
 and accepts direct root-level `auth`. WDC now has low-level wrappers, the separate `wdc_dpd_pickup_points` table,
 repository/normalizer/import service, a manual `DPD ПВЗ` admin tab, and a read-only service for the future checkout map.
 Checkout runtime still uses `calculator2/getServiceCostByParcels2` with cityId/selfPickup/selfDelivery only; no DPD
-pickup selection, shipment adapter, metabox, labels, COD/NPP or terminalCode-aware pricing was added.
+shipment adapter, metabox, labels, COD/NPP or terminalCode-aware pricing was added.
 
 Version 0.58.9 fixes the DPD 3D parcel packer row-state model: closed row width is now tracked separately from the
 current row, so adding multiple items to one shelf row no longer double-counts layer width. The DPD API method remains

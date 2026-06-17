@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Pickup\Rest;
 
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointRepository;
 use WallsShop\WDC\Pickup\RussianPost\RussianPostPickupPointTypeSettings;
 use WallsShop\WDC\Pickup\Cdek\CdekDeliveryPointService;
@@ -17,7 +20,8 @@ final class PickupPointsRestController {
 		private RussianPostPickupPointRepository $repository,
 		private ?RussianPostPickupPointTypeSettings $type_settings = null,
 		private ?PickupAddressSearchService $address_search = null,
-		private ?CdekDeliveryPointService $cdek_points = null
+		private ?CdekDeliveryPointService $cdek_points = null,
+		private ?DpdPickupPointService $dpd_points = null
 	) {
 	}
 
@@ -83,6 +87,9 @@ final class PickupPointsRestController {
 		$carrier = $this->carrier( $request );
 		if ( 'cdek' === $carrier ) {
 			return $this->response( $this->cdek_points( $request ) );
+		}
+		if ( DpdSettings::CARRIER_KEY === $carrier ) {
+			return $this->response( $this->dpd_points( $request ) );
 		}
 		if ( 'russian_post' !== $carrier ) {
 			return $this->response( array() );
@@ -164,6 +171,9 @@ final class PickupPointsRestController {
 		if ( 'cdek' === $carrier ) {
 			return $this->response( $this->filter_cdek_points( $this->cdek_points( $request ), $query ) );
 		}
+		if ( DpdSettings::CARRIER_KEY === $carrier ) {
+			return $this->response( $this->filter_generic_points( $this->dpd_points( $request ), $query ) );
+		}
 		if ( 'russian_post' !== $carrier ) {
 			return $this->response( array() );
 		}
@@ -208,10 +218,35 @@ final class PickupPointsRestController {
 	}
 
 	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function dpd_points( mixed $request ): array {
+		if ( ! $this->dpd_points instanceof DpdPickupPointService ) {
+			return array();
+		}
+		$limit = $this->limit( $request, 200, 500 );
+		$location_id = (int) $this->param( $request, 'location_id' );
+		$city_id = (int) $this->param( $request, 'dpd_city_id' );
+		$points = $city_id > 0
+			? $this->dpd_points->get_points_by_city_id( $city_id )
+			: ( $location_id > 0 ? $this->dpd_points->get_points_for_location_id( $location_id ) : array() );
+
+		return array_slice( array_map( array( $this, 'dpd_summary' ), $points ), 0, $limit );
+	}
+
+	/**
 	 * @param array<int,array<string,mixed>> $points
 	 * @return array<int,array<string,mixed>>
 	 */
 	private function filter_cdek_points( array $points, string $query ): array {
+		return $this->filter_generic_points( $points, $query );
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $points
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function filter_generic_points( array $points, string $query ): array {
 		if ( '' === $query ) {
 			return $points;
 		}
@@ -228,6 +263,7 @@ final class PickupPointsRestController {
 								(string) ( $point['point_code'] ?? '' ),
 								(string) ( $point['point_name'] ?? '' ),
 								(string) ( $point['point_address'] ?? $point['address'] ?? '' ),
+								(string) ( $point['city_name'] ?? $point['city'] ?? '' ),
 								(string) ( $point['point_postcode'] ?? $point['postal_code'] ?? '' ),
 							)
 						)
@@ -311,6 +347,77 @@ final class PickupPointsRestController {
 			'cdek_owner_code' => $snapshot['cdek_owner_code'],
 			'cdek_nearest_station' => $snapshot['cdek_nearest_station'],
 			'cdek_note' => $snapshot['cdek_note'],
+			'snapshot' => $snapshot,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $point
+	 * @return array<string,mixed>
+	 */
+	private function dpd_summary( array $point ): array {
+		$type = (string) ( $point['type'] ?? '' );
+		$type_label = 'terminal_self_delivery' === $type ? 'Терминал' : 'Пункт выдачи';
+		$point_title = 'terminal_self_delivery' === $type ? 'Терминал DPD' : 'Пункт выдачи DPD';
+		$marker_type = 'terminal_self_delivery' === $type ? 'terminal' : 'pickup';
+		$code = (string) ( $point['terminal_code'] ?? '' );
+		$work_time = ( new DpdPickupPointScheduleFormatter() )->format( $point['schedule'] ?? '' );
+		$snapshot = array(
+			'id' => DpdSettings::CARRIER_KEY . ':' . $code,
+			'carrier_key' => DpdSettings::CARRIER_KEY,
+			'service_key' => DpdSettings::SERVICE_KEY,
+			'pickup_family' => DpdSettings::CARRIER_KEY . ':pickup',
+			'point_code' => $code,
+			'terminal_code' => $code,
+			'point_type' => $type,
+			'point_type_label' => $type_label,
+			'point_title' => $point_title,
+			'display_code' => $code,
+			'display_title' => trim( $point_title . ' ' . $code ),
+			'marker_type' => $marker_type,
+			'point_name' => (string) ( $point['name'] ?? '' ),
+			'address' => (string) ( $point['address'] ?? '' ),
+			'city' => (string) ( $point['city_name'] ?? '' ),
+			'region' => (string) ( $point['region_name'] ?? '' ),
+			'lat' => $point['latitude'] ?? null,
+			'lng' => $point['longitude'] ?? null,
+			'work_time' => $work_time,
+			'description' => '',
+			'dpd_source' => (string) ( $point['source'] ?? '' ),
+		);
+
+		return array(
+			'id' => $snapshot['id'],
+			'carrier' => DpdSettings::CARRIER_KEY,
+			'carrier_key' => DpdSettings::CARRIER_KEY,
+			'service_key' => DpdSettings::SERVICE_KEY,
+			'pickup_family' => $snapshot['pickup_family'],
+			'point_code' => $snapshot['point_code'],
+			'terminal_code' => $snapshot['terminal_code'],
+			'point_type' => $snapshot['point_type'],
+			'point_type_label' => $snapshot['point_type_label'],
+			'point_title' => $snapshot['point_title'],
+			'card_title' => $snapshot['point_title'],
+			'display_code' => $snapshot['display_code'],
+			'display_title' => $snapshot['display_title'],
+			'marker_type' => $snapshot['marker_type'],
+			'title' => $snapshot['point_name'],
+			'point_name' => $snapshot['point_name'],
+			'address' => $snapshot['address'],
+			'point_address' => $snapshot['address'],
+			'city' => $snapshot['city'],
+			'city_name' => $snapshot['city'],
+			'region' => $snapshot['region'],
+			'region_name' => $snapshot['region'],
+			'lat' => $snapshot['lat'],
+			'lng' => $snapshot['lng'],
+			'latitude' => $snapshot['lat'],
+			'longitude' => $snapshot['lng'],
+			'work_time' => $snapshot['work_time'],
+			'schedule' => $snapshot['work_time'],
+			'description' => $snapshot['description'],
+			'dpd_source' => $snapshot['dpd_source'],
+			'source' => $snapshot['dpd_source'],
 			'snapshot' => $snapshot,
 		);
 	}
@@ -470,7 +577,7 @@ final class PickupPointsRestController {
 	 * @return array<string,mixed>
 	 */
 	private function location_context( mixed $request ): array {
-		$keys = array( 'city_code', 'cdek_city_code', 'country_code', 'region_name', 'state_value', 'city_name', 'city_value', 'settlement_name', 'place_name', 'display_name', 'postal_code', 'postcode', 'fias_id', 'city_fias_id', 'gar_id', 'gar_object_id' );
+		$keys = array( 'city_code', 'cdek_city_code', 'country_code', 'region_name', 'state_value', 'city_name', 'city_value', 'settlement_name', 'place_name', 'display_name', 'postal_code', 'postcode', 'fias_id', 'city_fias_id', 'gar_id', 'gar_object_id', 'location_id' );
 		$context = array();
 		foreach ( $keys as $key ) {
 			$value = $this->param( $request, $key );

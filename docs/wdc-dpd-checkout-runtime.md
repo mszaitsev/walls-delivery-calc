@@ -1,12 +1,16 @@
 # DPD Checkout Runtime
 
-Version: 0.59.0
+Version: 0.60.0
 
 ## Scope
 
 DPD checkout runtime is a quote-only carrier. It produces WooCommerce checkout delivery rates through the existing `CarrierRegistry` / `CheckoutOrchestrator` / grouped tariff-selector architecture and reuses the DPD tariff foundation built on `calculator2/getServiceCostByParcels2`.
 
 DPD remains disabled by default as the built-in delivery service `dpd`.
+
+0.60.0 update: DPD pickup checkout rates now require pickup-point selection and reuse the shared WDC pickup UI. The
+selected point is loaded from the local `wdc_dpd_pickup_points` table and saved to checkout/order meta. This does not
+change pricing: tariff requests still use `getServiceCostByParcels2`, cityId, `selfPickup` and `selfDelivery` only.
 
 ## Runtime Registration
 
@@ -138,15 +142,17 @@ The checkout orchestrator builds DPD delivery-type entries from the built-in DPD
 
 `DpdQuoteCarrier` reads `QuoteRequest::$customer_context['delivery_type']` and defaults to pickup when it is absent.
 
-Pickup/terminal delivery is calculation-only in the current runtime:
+Pickup/terminal delivery now requires local DPD pickup-point selection in checkout:
 
 - request payload sends `selfPickup=true`;
 - request payload sends `selfDelivery=true`;
 - returned rates use `DeliveryType::PICKUP`;
-- `requires_pickup_point=false`;
-- meta includes `dpd_pickup_points_not_implemented=true`.
+- `requires_pickup_point=true`;
+- meta includes `dpd_pickup_point_selection_enabled=true`;
+- the shared checkout pickup UI loads active local DPD points from `wdc_dpd_pickup_points`;
+- the selected `terminal_code` is saved to checkout/session/order meta.
 
-This keeps checkout from requiring a DPD pickup point before DPD parcel shops, map and selection are implemented.
+The selected terminal does not affect the DPD tariff request in this stage.
 
 Courier delivery:
 
@@ -159,9 +165,9 @@ Courier delivery:
 
 ## TerminalCode Pricing Debt
 
-DPD pickup points and self-delivery terminals are now importable into the local read-only foundation table, but checkout map/selection and selected terminal storage are not connected yet. Checkout still has no runtime source for the buyer-selected `delivery.terminalCode`, and sender terminal selection is not finalized.
+DPD pickup points and self-delivery terminals are importable into the local table and checkout now stores the buyer-selected receiver `terminal_code`. Pricing is still city/mode based; checkout does not send `delivery.terminalCode`, and sender terminal selection is not finalized.
 
-After DPD pickup-point selection exists, the terminal pricing stage must:
+The terminal pricing stage must:
 
 - obtain the sender terminal code and the selected receiver terminal code;
 - test `calculator2/getServiceCostByParcels3` with `parcel[]`, `pickup.terminalCode` and `delivery.terminalCode`;
@@ -194,11 +200,11 @@ The generic checkout quote cache key includes selected receiver location, packag
 
 ## Out Of Scope
 
-The 0.59.0 stage still does not implement:
+The 0.60.0 checkout selection stage still does not implement:
 
-- parcel shop selection;
-- parcel shop map;
-- postamats;
+- terminalCode-aware pricing;
+- passing `terminalCode` to DPD tariff requests;
+- DPD-specific shipment creation;
 - shipment creation;
 - cancellation;
 - statuses/events;

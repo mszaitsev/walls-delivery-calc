@@ -10,6 +10,11 @@ final class DpdPickupPointNormalizer {
 	public const TYPE_TERMINAL_SELF_DELIVERY = 'terminal_self_delivery';
 	public const SOURCE_PARCEL_SHOPS = 'getParcelShops';
 	public const SOURCE_TERMINALS_SELF_DELIVERY = 'getTerminalsSelfDelivery2';
+	private DpdPickupPointScheduleFormatter $schedule_formatter;
+
+	public function __construct( ?DpdPickupPointScheduleFormatter $schedule_formatter = null ) {
+		$this->schedule_formatter = $schedule_formatter ?? new DpdPickupPointScheduleFormatter();
+	}
 
 	/**
 	 * @return array{points:array<int,array<string,mixed>>,fetched_count:int,skipped_invalid:int}
@@ -78,7 +83,7 @@ final class DpdPickupPointNormalizer {
 			'name' => $this->first( $row['terminalName'] ?? null, $row['brand'] ?? null, $row['name'] ?? null, $terminal_code ),
 			'latitude' => $this->first( $coordinates['latitude'] ?? null, $row['latitude'] ?? null, $row['lat'] ?? null ),
 			'longitude' => $this->first( $coordinates['longitude'] ?? null, $row['longitude'] ?? null, $row['lng'] ?? null, $row['lon'] ?? null ),
-			'schedule' => $this->json( $row['schedule'] ?? null ),
+			'schedule' => $this->schedule_formatter->format( $row['schedule'] ?? null ),
 			'raw_json' => $this->json( $row ),
 			'is_active' => 1,
 			'source' => $source,

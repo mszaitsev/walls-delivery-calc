@@ -82,7 +82,7 @@ Checkout package params are built from the domain package: total weight from car
 
 The DPD `Основное` tab stores checkout method titles. The DPD `Тарифы` tab stores fixed known service-code checkboxes, custom tariff titles and the `Использовать курьерские тарифы` checkbox. Default enabled codes are `ECN,CSM,MXO`; if all checkboxes are cleared, DPD returns no checkout rates. The old method-title prefix, pickup-mode and delivery-mode settings are not rendered and are not used by runtime.
 
-Checkout DPD always sends `selfPickup=true`, because shipment is calculated from a DPD terminal. The pickup/terminal delivery entry sends `selfDelivery=true`, returns a pickup-type calculation rate with `dpd_pickup_points_not_implemented=true`, and does not require pickup point selection until DPD parcel shops and map are implemented. When courier rates are enabled, the courier entry sends a separate DPD calculation request with `selfDelivery=false` and returns `DeliveryType::COURIER`.
+Checkout DPD always sends `selfPickup=true`, because shipment is calculated from a DPD terminal. The pickup/terminal delivery entry sends `selfDelivery=true`, returns a pickup-type calculation rate, and requires a selected local DPD pickup point in checkout. The selected `terminal_code` is saved to order meta but is not sent to tariff calculation yet. When courier rates are enabled, the courier entry sends a separate DPD calculation request with `selfDelivery=false` and returns `DeliveryType::COURIER`.
 
 ## Credentials And Diagnostics
 
