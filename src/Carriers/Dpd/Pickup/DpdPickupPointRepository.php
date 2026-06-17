@@ -287,22 +287,6 @@ final class DpdPickupPointRepository {
 		return false !== $this->wpdb->query( $sql );
 	}
 
-	private function mark_source_inactive( string $source ): int {
-		if ( $this->has_test_rows() ) {
-			$count = 0;
-			foreach ( $this->wpdb->dpd_pickup_points as $index => $row ) {
-				if ( (string) ( $row['source'] ?? '' ) === $source && ! empty( $row['is_active'] ) ) {
-					$this->wpdb->dpd_pickup_points[ $index ]['is_active'] = 0;
-					++$count;
-				}
-			}
-			return $count;
-		}
-		$result = $this->wpdb->update( $this->table_name(), array( 'is_active' => 0 ), array( 'source' => $source ), array( '%d' ), array( '%s' ) );
-
-		return is_numeric( $result ) ? (int) $result : 0;
-	}
-
 	/**
 	 * @param array<string,mixed> $point
 	 * @return array<string,mixed>|null

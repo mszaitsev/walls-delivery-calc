@@ -1,6 +1,9 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.59.1.
+Current plugin version: 0.59.2.
+
+Version 0.59.2 removes the obsolete internal DPD pickup repository `mark_source_inactive()` helper after confirming
+safe-replace now uses targeted stale-key inactivation only. Safe-replace behavior is unchanged.
 
 Version 0.59.1 makes DPD pickup import safe-replace. Empty DPD responses and responses where the normalizer cannot
 produce any valid points no longer deactivate existing local pickup rows; the admin report explains that existing points

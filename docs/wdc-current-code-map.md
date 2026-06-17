@@ -1,6 +1,6 @@
 # Карта текущего кода
 
-## DPD Pickup Points Foundation 0.59.1
+## DPD Pickup Points Foundation 0.59.2
 
 - `src/Carriers/Dpd/DpdApiClient.php` exposes low-level geography wrappers for `getParcelShops()` and `getTerminalsSelfDelivery2()`. `getParcelShops` uses `DpdSoapRequest::WRAPPER_REQUEST`; `getTerminalsSelfDelivery2` uses direct auth.
 - `database/migrations/0031_create_dpd_pickup_points_table.php` creates `wdc_dpd_pickup_points`, separate from `wdc_location_delivery_codes`. The table stores `terminal_code`, `type`, country/region/city fields, address, name, coordinates, schedule JSON, raw JSON, source, active flag and import timestamps.

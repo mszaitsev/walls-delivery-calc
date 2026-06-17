@@ -1,6 +1,9 @@
 # WDC DPD Pickup Points
 
-Version: 0.59.1.
+Version: 0.59.2.
+
+0.59.2 cleanup: the old full-source `mark_source_inactive()` helper was removed after safe-replace switched to
+upserting the new valid set first and then inactivating only stale missing keys. Import behavior did not change.
 
 ## Scope
 
