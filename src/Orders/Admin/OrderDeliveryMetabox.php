@@ -205,7 +205,7 @@ final class OrderDeliveryMetabox {
 		$label = $this->location_label_without_region_duplicate( $name, $region );
 
 		return array(
-			'id' => '',
+			'id' => $this->current_location_id( $order, $destination ),
 			'fias_id' => trim( (string) ( $destination['fias_id'] ?? $this->meta_string( $order, '_wdc_platform_location_fias_id' ) ?: $this->meta_string( $order, '_wdc_platform_city_fias_id' ) ) ),
 			'display_name' => $name,
 			'city_value' => $name,
@@ -215,6 +215,22 @@ final class OrderDeliveryMetabox {
 			'state_value' => $region,
 			'label' => '' !== $label ? $label : $name,
 		);
+	}
+
+	private function current_location_id( object $order, array $destination ): string {
+		foreach ( array( $destination['location_id'] ?? null, $destination['selected_location_id'] ?? null, $destination['id'] ?? null ) as $value ) {
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (string) (int) $value;
+			}
+		}
+		foreach ( array( '_wdc_platform_location_id', '_wdc_platform_city_location_id', '_wdc_location_id' ) as $key ) {
+			$value = $this->meta_string( $order, $key );
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (string) (int) $value;
+			}
+		}
+
+		return '';
 	}
 
 	private function location_label_without_region_duplicate( string $name, string $region ): string {
@@ -246,6 +262,23 @@ final class OrderDeliveryMetabox {
 	 * @return array<string,mixed>
 	 */
 	private function current_pickup_payload( object $order ): array {
+		$calculation = $this->calculation_data( $order );
+		$calculation_pickup = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
+		$carrier_key = $this->meta_string( $order, '_wdc_pickup_carrier_key' );
+		$platform_carrier_key = $this->meta_string( $order, '_wdc_platform_carrier_key' );
+		$delivery_type = $this->meta_string( $order, '_wdc_platform_delivery_type' );
+		$calculation_carrier_key = (string) ( $calculation['carrier_key'] ?? '' );
+		$calculation_delivery_type = (string) ( $calculation['delivery_type'] ?? '' );
+		$is_dpd_context = 'dpd' === $carrier_key || 'dpd' === $platform_carrier_key || 'dpd' === $calculation_carrier_key;
+		$is_dpd_pickup = $is_dpd_context && (
+			'pickup' === $delivery_type
+			|| 'pickup' === $calculation_delivery_type
+			|| ( 'dpd' === $carrier_key && '' === $delivery_type && '' === $platform_carrier_key && '' === $calculation_delivery_type )
+		);
+		if ( $is_dpd_context && ! $is_dpd_pickup ) {
+			return array();
+		}
+
 		$snapshot = $this->raw_order_meta( $order, '_wdc_pickup_point_snapshot' );
 		if ( is_string( $snapshot ) && '' !== trim( $snapshot ) ) {
 			$decoded = json_decode( $snapshot, true );
@@ -260,18 +293,50 @@ final class OrderDeliveryMetabox {
 		if ( '' === $point_address ) {
 			$point_address = $this->meta_string( $order, '_wdc_platform_pickup_address' );
 		}
+		$dpd_terminal_code = '';
+		if ( $is_dpd_pickup ) {
+			$dpd_terminal_code = $this->first_non_empty(
+				$this->meta_string( $order, '_wdc_dpd_pickup_terminal_code' ),
+				'dpd' === $carrier_key ? $point_code : '',
+				(string) ( $calculation_pickup['terminal_code'] ?? '' ),
+				(string) ( $calculation_pickup['point_code'] ?? '' ),
+				(string) ( $snapshot['terminal_code'] ?? '' )
+			);
+			if ( '' === $dpd_terminal_code ) {
+				return array();
+			}
+			$point_code = $dpd_terminal_code;
+			$carrier_key = 'dpd';
+		}
 
 		return array_filter(
 			array(
 				'point_code' => $point_code,
+				'terminal_code' => $dpd_terminal_code,
+				'carrier_key' => $carrier_key,
+				'service_key' => $this->meta_string( $order, '_wdc_pickup_service_key' ),
+				'pickup_family' => $is_dpd_pickup ? 'dpd:pickup' : $this->meta_string( $order, '_wdc_pickup_family' ),
+				'delivery_type' => $is_dpd_pickup ? 'pickup' : $delivery_type,
 				'point_type' => $this->meta_string( $order, '_wdc_pickup_point_type' ),
 				'point_name' => (string) ( $snapshot['point_name'] ?? $snapshot['name'] ?? '' ),
 				'point_address' => $point_address,
 				'point_postcode' => $this->meta_string( $order, '_wdc_pickup_point_postcode' ),
+				'dpd_source' => $this->meta_string( $order, '_wdc_dpd_pickup_source' ),
 				'point_raw' => $snapshot,
 			),
 			static fn( mixed $value ): bool => array() !== $value && '' !== $value
 		);
+	}
+
+	private function first_non_empty( mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			$text = trim( (string) $value );
+			if ( '' !== $text ) {
+				return $text;
+			}
+		}
+
+		return '';
 	}
 
 	/**

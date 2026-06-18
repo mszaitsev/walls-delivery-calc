@@ -1,6 +1,6 @@
 # DPD Checkout Runtime
 
-Version: 0.63.0
+Version: 0.64.0
 
 ## Scope
 
@@ -18,10 +18,16 @@ DPD remains disabled by default as the built-in delivery service `dpd`.
 Checkout runtime pricing is unchanged. Checkout `parcel[]` remains pricing diagnostics/input only and is not reused for
 shipment creation.
 
+0.64.0 update: the WooCommerce order admin `Калькулятор доставок` recalculation flow now reuses this same DPD checkout
+runtime. Order preview goes through `CheckoutOrchestrator` and `DpdQuoteCarrier`; admin DPD pickup selection passes the
+selected receiver `terminal_code` into a fresh preview before save, so DPD quote IDs/cache keys vary by selected point just
+like checkout. No separate DPD order calculator was added.
+
 ## Runtime Registration
 
 - `src/Carriers/Runtime/DpdQuoteCarrier.php` implements `CarrierAdapterInterface`.
 - `src/Core/Plugin.php` registers `DpdQuoteCarrier` in the checkout `CarrierRegistry`.
+- `src/Orders/Application/OrderDeliveryRecalculationService.php` reuses the same `CheckoutOrchestrator` for order-admin recalculation.
 - `src/Core/Plugin.php` registers `DpdShipmentAdapter` in `CarrierShipmentAdapterRegistry` only so DPD orders can open the manual preparation modal and dry-run preview.
 - `ShipmentCreationService` live-create adapters remain Russian Post and CDEK only.
 - There is no live DPD shipment creation, auto creation, status sync, cancellation or label flow.

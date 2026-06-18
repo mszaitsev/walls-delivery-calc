@@ -4,6 +4,9 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Orders\Admin;
 
 use WallsShop\WDC\Admin\AdminMenu;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointScheduleFormatter;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Checkout\Locations\CheckoutLocationAjax;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Orders\Application\OrderDeliveryAddressNormalizationService;
@@ -35,7 +38,8 @@ final class OrderDeliveryRecalculationAdminController {
 		private string $version = '1',
 		private ?OrderDeliveryAddressNormalizationService $address_normalization = null,
 		private ?OrderDeliveryReplacementService $replacement = null,
-		private ?CdekDeliveryPointService $cdek_points = null
+		private ?CdekDeliveryPointService $cdek_points = null,
+		private ?DpdPickupPointService $dpd_points = null
 	) {
 		$this->pickup_points = $this->pickup_points ?? new RussianPostPickupPointRepository();
 		$this->address_normalization = $this->address_normalization ?? new OrderDeliveryAddressNormalizationService();
@@ -105,7 +109,7 @@ final class OrderDeliveryRecalculationAdminController {
 			wp_send_json_error( array( 'message' => __( 'Заказ не найден.', 'walls-delivery-calc' ) ), 404 );
 		}
 
-		$result = $this->service->preview( $order, $this->selected_location_from_request() );
+		$result = $this->service->preview( $order, $this->selected_location_from_request(), $this->array_from_request( 'selected_pickup_point' ) );
 		if ( empty( $result['success'] ) ) {
 			wp_send_json_error( array( 'message' => (string) $result['message'] ), 400 );
 		}
@@ -150,6 +154,14 @@ final class OrderDeliveryRecalculationAdminController {
 		$query = $this->request_string( 'query' );
 		$mode = 'location' === $this->request_string( 'mode' ) ? 'location' : 'search';
 		$limit = max( 1, min( 'location' === $mode ? 2000 : 100, (int) ( $_POST['limit'] ?? ( 'location' === $mode ? 2000 : 50 ) ) ) );
+		if ( DpdSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' ) ) {
+			$rows = $this->dpd_pickup_points( $location, $query, $mode, $limit );
+			wp_send_json_success(
+				array(
+					'points' => array_map( array( $this, 'pickup_point_payload' ), $rows ),
+				)
+			);
+		}
 		if ( 'cdek' === (string) ( $rate['carrier_key'] ?? $rate['service_key'] ?? '' ) ) {
 			$rows = $this->cdek_pickup_points( $location, $query, $mode, $limit );
 			wp_send_json_success(
@@ -373,6 +385,8 @@ final class OrderDeliveryRecalculationAdminController {
 			'country_code',
 			'city_code',
 			'cdek_city_code',
+			'dpd_city_id',
+			'dpd_receiver_city_id',
 			'region_name',
 			'region_type',
 			'region_code',
@@ -457,6 +471,8 @@ final class OrderDeliveryRecalculationAdminController {
 			'cdek_owner_code' => (string) ( $row['cdek_owner_code'] ?? '' ),
 			'cdek_nearest_station' => (string) ( $row['cdek_nearest_station'] ?? '' ),
 			'cdek_note' => (string) ( $row['cdek_note'] ?? '' ),
+			'terminal_code' => (string) ( $row['terminal_code'] ?? '' ),
+			'dpd_source' => (string) ( $row['dpd_source'] ?? $row['source'] ?? '' ),
 			'point_raw' => $row,
 		);
 	}
@@ -496,6 +512,109 @@ final class OrderDeliveryRecalculationAdminController {
 		unset( $limit );
 
 		return $points;
+	}
+
+	/**
+	 * @param array<string,mixed> $location
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function dpd_pickup_points( array $location, string $query, string $mode, int $limit ): array {
+		if ( ! $this->dpd_points instanceof DpdPickupPointService ) {
+			return array();
+		}
+		$location_id = isset( $location['id'] ) && is_numeric( $location['id'] ) ? (int) $location['id'] : 0;
+		$city_id = isset( $location['dpd_city_id'] ) && is_numeric( $location['dpd_city_id'] ) ? (int) $location['dpd_city_id'] : 0;
+		if ( $city_id <= 0 && isset( $location['dpd_receiver_city_id'] ) && is_numeric( $location['dpd_receiver_city_id'] ) ) {
+			$city_id = (int) $location['dpd_receiver_city_id'];
+		}
+		if ( 'location' === $mode ) {
+			$points = $city_id > 0
+				? $this->dpd_points->get_parcel_shops_by_city_id( $city_id, $limit )
+				: ( $location_id > 0 ? $this->dpd_points->get_points_for_location_id( $location_id ) : array() );
+		} elseif ( '' !== $query ) {
+			$filters = array( 'limit' => $limit );
+			if ( $city_id > 0 ) {
+				$filters['city_id'] = $city_id;
+			} elseif ( '' !== trim( (string) ( $location['display_name'] ?? $location['city_value'] ?? '' ) ) ) {
+				$filters['city_name'] = trim( (string) ( $location['display_name'] ?? $location['city_value'] ?? '' ) );
+			}
+			$points = $this->dpd_points->search_parcel_shops( $query, $filters );
+		} else {
+			$points = array();
+		}
+
+		return array_slice( array_map( array( $this, 'dpd_pickup_point_payload' ), $points ), 0, $limit );
+	}
+
+	/**
+	 * @param array<string,mixed> $point
+	 * @return array<string,mixed>
+	 */
+	private function dpd_pickup_point_payload( array $point ): array {
+		$type = (string) ( $point['type'] ?? '' );
+		$type_label = 'terminal_self_delivery' === $type ? 'Терминал' : 'Пункт выдачи';
+		$point_title = 'terminal_self_delivery' === $type ? 'Терминал DPD' : 'Пункт выдачи DPD';
+		$marker_type = 'terminal_self_delivery' === $type ? 'terminal' : 'pickup';
+		$code = (string) ( $point['terminal_code'] ?? '' );
+		$work_time = ( new DpdPickupPointScheduleFormatter() )->format( $point['schedule'] ?? '' );
+		$snapshot = array(
+			'id' => DpdSettings::CARRIER_KEY . ':' . $code,
+			'carrier_key' => DpdSettings::CARRIER_KEY,
+			'service_key' => DpdSettings::SERVICE_KEY,
+			'pickup_family' => DpdSettings::CARRIER_KEY . ':pickup',
+			'point_code' => $code,
+			'terminal_code' => $code,
+			'point_type' => $type,
+			'point_type_label' => $type_label,
+			'point_title' => $point_title,
+			'display_code' => $code,
+			'display_title' => trim( $point_title . ' ' . $code ),
+			'marker_type' => $marker_type,
+			'point_name' => (string) ( $point['name'] ?? '' ),
+			'address' => (string) ( $point['address'] ?? '' ),
+			'city' => (string) ( $point['city_name'] ?? '' ),
+			'region' => (string) ( $point['region_name'] ?? '' ),
+			'lat' => $point['latitude'] ?? null,
+			'lng' => $point['longitude'] ?? null,
+			'work_time' => $work_time,
+			'description' => '',
+			'dpd_source' => (string) ( $point['source'] ?? '' ),
+		);
+
+		return array(
+			'id' => $snapshot['id'],
+			'carrier' => DpdSettings::CARRIER_KEY,
+			'carrier_key' => DpdSettings::CARRIER_KEY,
+			'service_key' => DpdSettings::SERVICE_KEY,
+			'pickup_family' => $snapshot['pickup_family'],
+			'point_code' => $snapshot['point_code'],
+			'terminal_code' => $snapshot['terminal_code'],
+			'point_type' => $snapshot['point_type'],
+			'point_type_label' => $snapshot['point_type_label'],
+			'point_title' => $snapshot['point_title'],
+			'card_title' => $snapshot['point_title'],
+			'display_code' => $snapshot['display_code'],
+			'display_title' => $snapshot['display_title'],
+			'marker_type' => $snapshot['marker_type'],
+			'title' => $snapshot['point_name'],
+			'point_name' => $snapshot['point_name'],
+			'address' => $snapshot['address'],
+			'point_address' => $snapshot['address'],
+			'city' => $snapshot['city'],
+			'city_name' => $snapshot['city'],
+			'region' => $snapshot['region'],
+			'region_name' => $snapshot['region'],
+			'lat' => $snapshot['lat'],
+			'lng' => $snapshot['lng'],
+			'latitude' => $snapshot['lat'],
+			'longitude' => $snapshot['lng'],
+			'work_time' => $snapshot['work_time'],
+			'schedule' => $snapshot['work_time'],
+			'description' => $snapshot['description'],
+			'dpd_source' => $snapshot['dpd_source'],
+			'source' => $snapshot['dpd_source'],
+			'snapshot' => $snapshot,
+		);
 	}
 
 	private function normalize_search_text( string $value ): string {

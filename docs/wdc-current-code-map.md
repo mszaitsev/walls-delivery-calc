@@ -19,6 +19,17 @@
 - `DpdShipmentPayloadBuilder` validates sender terminalCode, pickup receiver terminalCode, courier normalized address, serviceCode and manual parcels, then builds the dry-run `order2/createOrder` preview using the temporary modal values. It still returns `live_api_call=false`.
 - `tests/dpd/run-dpd-shipment-preparation-smoke.php` covers DPD receiver/sender picker markers, pickup/courier switch, tariff switch, hidden technical block removal, temporary payload overrides, normalized courier address, single/multi-place weight hint behavior and no live API call.
 
+## DPD Order Recalculation 0.64.0
+
+- `src/Orders/Admin/OrderDeliveryMetabox.php` renders the existing order `Калькулятор доставок` modal and now passes saved `location_id` plus current DPD pickup terminal aliases into the modal bootstrap JSON.
+- `src/Orders/Admin/OrderDeliveryRecalculationAdminController.php` handles preview/save AJAX and now supports DPD pickup search through `DpdPickupPointService`; DPD rows are normalized into the same map/list payload shape as checkout.
+- `assets/admin/order-delivery-recalculation.js` keeps the existing pickup picker and adds a DPD-only fresh preview after selecting a DPD point, sending `selected_pickup_point.terminal_code` so `DpdQuoteCarrier` recalculates with the selected receiver terminalCode before save.
+- `src/Orders/Application/OrderQuoteRequestMapper.php` maps WooCommerce order items/address/meta into a checkout `QuoteRequest` and now includes saved/selected DPD terminalCode plus saved `location_id` in `customer_context`.
+- `src/Orders/Application/OrderDeliveryRecalculationService.php` continues to call the shared `CheckoutOrchestrator`; DPD therefore uses `DpdQuoteCarrier`, `DpdParcelBuilder`, enabled DPD tariffs and Parcels3 terminalCode-aware pricing exactly like checkout.
+- `src/Orders/Application/OrderDeliveryReplacementService.php` writes DPD selected serviceCode/title, DPD rate meta, `_wdc_delivery_calculation_data`, shared `_wdc_pickup_*` meta and DPD alias meta. Courier saves clear shared pickup meta and DPD receiver aliases.
+- `src/Shipments/Application/OrderShipmentDraftFactory.php` reads the recalculated DPD order meta for `Отправления`: serviceCode, delivery type, sender pickup terminalCode, receiver delivery terminalCode for pickup, selected pickup snapshot and courier address for courier.
+- `tests/dpd/run-dpd-order-recalculation-smoke.php` covers DPD appearance in recalculation, Parcels3 pickup/courier payloads, auto vs selected receiver terminalCode, pickup/courier save meta, WooCommerce shipping item update, shipment draft visibility and the no-live-create boundary.
+
 ## DPD Manual Shipment Preparation 0.63.0
 
 - `src/Shipments/Dpd/DpdShipmentAdapter.php` registers DPD in `CarrierShipmentAdapterRegistry` for manual preparation and dry-run preview only. `build_safe_payload_preview()` returns an `order2/createOrder` preview with `dry_run=true` and `live_api_call=false`; `create()` returns `dpd_create_disabled`, label/status/cancel/manual-attach actions are disabled, and `supports_status_auto_sync()` is `false`.

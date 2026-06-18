@@ -228,13 +228,13 @@ $request = $factory->create_request_from_admin_data(
 		'pickup_point_code' => 'MSK-RECEIVER-2',
 		'pickup_terminal_code' => 'NSK-SENDER-2',
 		'tariff_object' => 'CSM',
-		'date_pickup' => '2026-06-18',
+		'date_pickup' => '2026-06-22',
 	)
 );
 $preview = $adapter->build_safe_payload_preview( $request );
 $body = $preview['body']['request']['order'] ?? array();
 $header = $preview['body']['request']['header'] ?? array();
-dpd_shipment_assert( '2026-06-18' === (string) ( $header['datePickup'] ?? '' ), 'DPD dry-run payload must include request.header.datePickup.' );
+dpd_shipment_assert( '2026-06-22' === (string) ( $header['datePickup'] ?? '' ), 'DPD dry-run payload must include request.header.datePickup.' );
 dpd_shipment_assert( ! isset( $body['comment'] ), 'DPD dry-run payload must not contain comment.' );
 dpd_shipment_assert( 'CSM' === (string) ( $body['serviceCode'] ?? '' ), 'DPD pickup preview must use modal-selected serviceCode.' );
 dpd_shipment_assert( '49455627' === (string) ( $body['pickup']['cityId'] ?? '' ), 'DPD pickup preview must contain pickup cityId.' );
@@ -263,7 +263,7 @@ $normalized = array(
 );
 $courier_request = $factory->create_request_from_admin_data(
 	$courier_order,
-	array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'normalized_address_json' => wp_json_encode( $normalized, JSON_UNESCAPED_UNICODE ), 'recipient_phone' => '+79990000000', 'date_pickup' => '2026-06-18' )
+	array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'normalized_address_json' => wp_json_encode( $normalized, JSON_UNESCAPED_UNICODE ), 'recipient_phone' => '+79990000000', 'date_pickup' => '2026-06-22' )
 );
 $courier_body = $adapter->build_safe_payload_preview( $courier_request )['body']['request']['order'] ?? array();
 dpd_shipment_assert( 'NSK-SENDER' === (string) ( $courier_body['pickup']['terminalCode'] ?? '' ) && ! isset( $courier_body['delivery']['terminalCode'] ), 'DPD courier preview must contain pickup terminalCode and no delivery terminalCode.' );

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Orders\Application;
 
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\Domain\Address\Address;
 use WallsShop\WDC\Domain\Common\Money;
@@ -15,8 +16,9 @@ defined( 'ABSPATH' ) || exit;
 final class OrderQuoteRequestMapper {
 	/**
 	 * @param array<string,mixed>|null $selected_location
+	 * @param array<string,mixed> $selected_pickup_point
 	 */
-	public function map( object $order, ?array $selected_location = null ): QuoteRequest {
+	public function map( object $order, ?array $selected_location = null, array $selected_pickup_point = array() ): QuoteRequest {
 		$items      = $this->package_items( $order );
 		$item_total = $this->items_total( $items );
 		$order_total = $item_total->is_zero() ? Money::from_rubles( $this->order_number( $order, 'get_subtotal' ) ) : $item_total;
@@ -35,7 +37,7 @@ final class OrderQuoteRequestMapper {
 			$this->order_string( $order, 'get_payment_method' ),
 			$order_total,
 			$this->calculation_date(),
-			$this->customer_context( $order, $address, $selected_location )
+			$this->customer_context( $order, $address, $selected_location, $selected_pickup_point )
 		);
 	}
 
@@ -133,9 +135,10 @@ final class OrderQuoteRequestMapper {
 
 	/**
 	 * @param array<string,mixed>|null $selected_location
+	 * @param array<string,mixed> $selected_pickup_point
 	 * @return array<string,mixed>
 	 */
-	private function customer_context( object $order, Address $address, ?array $selected_location = null ): array {
+	private function customer_context( object $order, Address $address, ?array $selected_location = null, array $selected_pickup_point = array() ): array {
 		$city_display = $this->meta_string( $order, '_wdc_platform_city_display_name' );
 		if ( '' === $city_display ) {
 			$city_display = $address->city ?: $address->settlement;
@@ -151,6 +154,7 @@ final class OrderQuoteRequestMapper {
 				'order_id'                  => method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0,
 				'location_override'         => array() !== $override,
 				'selected_location_id'      => $override['id'] ?? null,
+				'location_id'               => $override['id'] ?? $this->saved_location_id( $order ),
 				'items_quantity'            => $address instanceof Address && method_exists( $order, 'get_item_count' ) ? (int) $order->get_item_count() : 0,
 				'postcode'                  => $address->postcode,
 				'resolved_postcode'         => array() !== $override ? $address->postcode : ( $this->meta_string( $order, '_wdc_platform_resolved_postcode' ) ?: $address->postcode ),
@@ -167,9 +171,54 @@ final class OrderQuoteRequestMapper {
 				'gar_id'                    => $address->gar_id,
 				'normalized_address'        => $address->normalized,
 				'fallback_address'          => $address->fallback,
+				'dpd_selected_terminal_code'=> $this->dpd_selected_terminal_code( $order, $selected_pickup_point ),
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value && 0 !== $value
 		);
+	}
+
+	private function saved_location_id( object $order ): int {
+		foreach ( array( '_wdc_platform_location_id', '_wdc_platform_city_location_id', '_wdc_location_id' ) as $key ) {
+			$value = $this->meta_value( $order, $key );
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (int) $value;
+			}
+		}
+		$calculation = $this->calculation_data( $order );
+		$destination = is_array( $calculation['destination'] ?? null ) ? $calculation['destination'] : array();
+		foreach ( array( 'location_id', 'selected_location_id', 'id' ) as $key ) {
+			$value = $destination[ $key ] ?? null;
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (int) $value;
+			}
+		}
+
+		return 0;
+	}
+
+	private function dpd_selected_terminal_code( object $order, array $selected_pickup_point = array() ): string {
+		foreach ( array( 'terminal_code', 'point_code', 'delivery_point' ) as $key ) {
+			$value = trim( (string) ( $selected_pickup_point[ $key ] ?? '' ) );
+			if ( '' !== $value && DpdSettings::CARRIER_KEY === (string) ( $selected_pickup_point['carrier_key'] ?? $selected_pickup_point['carrier'] ?? DpdSettings::CARRIER_KEY ) ) {
+				return $value;
+			}
+		}
+		foreach ( array( '_wdc_dpd_pickup_terminal_code', '_wdc_pickup_point_code', '_wdc_platform_pickup_code' ) as $key ) {
+			$value = $this->meta_string( $order, $key );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+		$calculation = $this->calculation_data( $order );
+		$pickup = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
+		foreach ( array( 'terminal_code', 'delivery_point', 'point_code' ) as $key ) {
+			$value = trim( (string) ( $pickup[ $key ] ?? '' ) );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		return '';
 	}
 
 	/**

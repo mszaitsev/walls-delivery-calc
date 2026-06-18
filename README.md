@@ -1,6 +1,30 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.63.4.
+Current plugin version: 0.64.2.
+
+Version 0.64.2 tightens DPD pickup prefill in the order-admin recalculation modal. `OrderDeliveryMetabox` now exposes a
+DPD `current_pickup` only for saved DPD pickup orders with a real terminal code; DPD courier, empty orders, CDEK,
+Russian Post and other carriers no longer leak shipping address or arbitrary pickup snapshots into the DPD selected
+pickup UI. The DPD quote preview may still auto-select a receiver terminalCode for calculation when no
+`selected_pickup_point` is sent, but that terminal remains quote-only until a manager chooses a point on the map; save
+continues to require an explicit selected DPD pickup point.
+
+Version 0.64.1 fixes the DPD pickup picker inside the order-admin `Калькулятор доставок` recalculation modal. DPD
+pickup balloons/list cards now render `Пункт выдачи DPD {terminal_code}` and `Код пункта`, while Russian Post keeps
+`Отделение Почты России` / `Код/индекс` and CDEK keeps its own labels. Current pickup prefill is now carrier-aware:
+DPD pickup prefill happens only when the order already has saved DPD pickup meta/terminalCode, so a courier/CDEK/Russian
+Post order does not show the shipping address as a selected DPD pickup point. The backend may still use an auto-selected
+receiver terminalCode for quote calculation, but the admin UI treats it as quote-only until the manager explicitly
+chooses a DPD pickup point; saving DPD pickup without that selected point remains blocked.
+
+Version 0.64.0 connects DPD to the existing WooCommerce order admin `Калькулятор доставок` recalculation flow. Preview
+uses the same `CheckoutOrchestrator` / `DpdQuoteCarrier` / `getServiceCostByParcels3` terminalCode-aware runtime as
+checkout: pickup sends sender `pickup.terminalCode` plus receiver `delivery.terminalCode`, courier sends only sender
+`pickup.terminalCode`, `parcel[]` comes from `DpdParcelBuilder`, and selected DPD pickup terminalCode triggers a fresh
+admin preview before save. Saving a DPD pickup rate writes shared `_wdc_pickup_*` meta plus DPD aliases, selected
+serviceCode/title/cost/delivery days, WooCommerce shipping item title/total and calculation data; saving DPD courier clears
+pickup-point meta and leaves no receiver terminalCode. The `Отправления` draft then reads the recalculated DPD serviceCode,
+delivery type and terminalCode data. Live DPD create calls remain disabled.
 
 Version 0.63.4 makes the DPD preparation `Дата отправки` control two-line: label on the first line, compact date input
 with `−`/`+` buttons on the second. Clicking/focusing the date input now attempts the browser native date picker through
