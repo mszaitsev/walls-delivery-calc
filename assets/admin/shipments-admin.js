@@ -1883,7 +1883,7 @@
           const cityCodeRow = form.querySelector('[data-wdc-cdek-city-code-row]');
           const cityCodeValue = form.querySelector('[data-wdc-cdek-city-code]');
           if (cityCodeValue) cityCodeValue.textContent = cityCode;
-          if (cityCodeRow) cityCodeRow.hidden = !cityCode;
+          if (cityCodeRow) cityCodeRow.hidden = isDpd || !cityCode;
           if (status) {
             status.textContent = snapshot.success
               ? (isDpd ? 'Данные для DPD корректны' : (cityCode ? '✅ Данные для СДЭК корректны' : 'Адрес обработан.'))

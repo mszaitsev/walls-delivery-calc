@@ -1,5 +1,14 @@
 # Карта текущего кода
 
+## DPD Modal Preparation Cleanup 0.63.2
+
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` keeps the DPD receiver pickup block focused on `Код ПВЗ`, `Адрес ПВЗ` and `Выбрать другой ПВЗ`; the visible `Тип точки` row is now CDEK-only. The DPD comment textarea was removed.
+- `src/Carriers/Dpd/Shipments/DpdShipmentDateResolver.php` resolves DPD `datePickup` defaults with the store timezone, a 17:00 cutoff and `CalendarService`/`CalendarTypes::SHOP`; when no calendar service is available it falls back to today/next calendar day.
+- `src/Shipments/Application/OrderShipmentDraftFactory.php` adds the resolved `date_pickup` to DPD draft meta and reads temporary modal `date_pickup` from the admin request without saving it to order meta or settings.
+- `src/Carriers/Dpd/Shipments/DpdShipmentPayloadBuilder.php` validates `date_pickup`, writes it to `request.header.datePickup`, and no longer emits a DPD `comment` field.
+- `assets/admin/shipments-admin.js` hides the CDEK city-code row for DPD courier normalization even when the shared normalized snapshot contains `cdek_city_code`; CDEK still shows the row.
+- `tests/dpd/run-dpd-shipment-preparation-smoke.php` covers hidden DPD point type/comment, CDEK preservation, date defaults/validation/payload header, hidden DPD CDEK city code and the no-live-call boundary.
+
 ## DPD Modal Preparation Refinement 0.63.1
 
 - `src/Shipments/Admin/OrderShipmentsMetabox.php` now shows DPD receiver pickup point fields as `Код ПВЗ`, `Тип точки`, `Адрес ПВЗ` and exposes the shared `Выбрать другой ПВЗ` picker for DPD pickup delivery. The visible DPD technical block (`serviceCode`, cityId and terminalCode rows) was removed; the modal shows `В заказе тариф` instead.

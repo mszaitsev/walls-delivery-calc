@@ -1,6 +1,12 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.63.1.
+Current plugin version: 0.63.2.
+
+Version 0.63.2 applies site-check refinements to the manual DPD shipment preparation modal. The DPD receiver pickup
+point block no longer shows `Тип точки`, the DPD-only comment field/payload value was removed, and DPD courier address
+normalization no longer displays the CDEK city-code row. The dry-run preview now includes `request.header.datePickup`;
+the default date uses the store timezone, a 17:00 cutoff and the store calendar when available. DPD remains manual
+dry-run only: no live create call, auto creation, labels, statuses or DPD checkout pricing changes were added.
 
 Version 0.63.1 refines the manual DPD shipment preparation modal. Managers can temporarily switch receiver DPD pickup
 point, sender pickup point, delivery scenario and active DPD tariff inside the modal; these changes affect only the

@@ -22,6 +22,14 @@ final class DpdShipmentPayloadBuilder {
 		if ( '' === trim( (string) ( $request->meta['service_code'] ?? '' ) ) ) {
 			$errors[] = 'DPD serviceCode обязателен.';
 		}
+		if ( '' === trim( (string) ( $request->meta['date_pickup'] ?? '' ) ) ) {
+			$errors[] = 'Дата отправки DPD обязательна.';
+		}
+		foreach ( is_array( $request->meta['date_pickup_errors'] ?? null ) ? $request->meta['date_pickup_errors'] : array() as $error ) {
+			if ( is_string( $error ) && '' !== trim( $error ) ) {
+				$errors[] = trim( $error );
+			}
+		}
 		if ( '' === trim( (string) ( $request->meta['pickup_city_id'] ?? '' ) ) ) {
 			$errors[] = 'DPD pickup cityId обязателен.';
 		}
@@ -80,6 +88,9 @@ final class DpdShipmentPayloadBuilder {
 		$payload = array(
 			'operation' => 'createOrder',
 			'request' => array(
+				'header' => array(
+					'datePickup' => (string) ( $request->meta['date_pickup'] ?? '' ),
+				),
 				'order' => array(
 					'orderNumberInternal' => (string) ( $request->meta['order_num'] ?? $request->order_id ),
 					'serviceCode' => (string) ( $request->meta['service_code'] ?? '' ),
@@ -105,13 +116,9 @@ final class DpdShipmentPayloadBuilder {
 					'cargoValue' => round( (float) ( $request->meta['declared_value_rub'] ?? 0 ), 2 ),
 					'cargoRegistered' => false,
 					'parcel' => $this->parcels( $request ),
-					'comment' => (string) ( $request->meta['comment'] ?? '' ),
 				),
 			),
 		);
-		if ( '' === $payload['request']['order']['comment'] ) {
-			unset( $payload['request']['order']['comment'] );
-		}
 
 		return $payload;
 	}

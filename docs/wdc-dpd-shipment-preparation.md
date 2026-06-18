@@ -1,6 +1,14 @@
 # WDC DPD Shipment Preparation
 
-Version: 0.63.1.
+Version: 0.63.2.
+
+0.63.2 update: the DPD preparation modal no longer shows receiver pickup point `Тип точки`, no longer renders or posts a
+DPD comment field, and no longer emits `comment` in the DPD dry-run payload. The modal now has `Дата отправки` after the
+sender pickup point controls, and the payload includes `request.header.datePickup`. The default date uses the store
+timezone with a 17:00 cutoff and the store calendar (`Календарь магазина`) to choose today or the next working day; if
+the calendar service is unavailable, it falls back to today before 17:00 or the next calendar day after 17:00. DPD courier
+normalization keeps using the shared CDEK-like address-processing flow, but the DPD UI hides `Код города СДЭК` and the
+DPD payload does not use `cdek_city_code` as a DPD-specific field.
 
 0.63.1 update: the DPD preparation modal supports temporary sender/receiver pickup-point changes, pickup/courier delivery
 scenario switching and active tariff switching. DPD courier preparation reuses the CDEK-like address processing button and
@@ -82,10 +90,11 @@ guide `docs/dpd/ws-integration-guide.docx` documents `order2?wsdl`, `createOrder
 `serviceVariant`, `cargoNumPack`, `cargoValue`, `selfPickup`, `selfDelivery`, address blocks and `terminalCode`
 requirements: terminalCode is required in pickup when `selfPickup=true`, and in delivery when `selfDelivery=true`.
 
-The 0.63.0 preview includes:
+The preview includes:
 
 - operation `createOrder`, method path `order2/createOrder`, `dry_run=true`, `live_api_call=false`;
-- `orderNumberInternal`, optional comment and tariff/service labels;
+- `request.header.datePickup` from the modal `Дата отправки` field;
+- `orderNumberInternal` and tariff/service labels;
 - DPD `serviceCode`;
 - `serviceVariant` as `ТТ` for pickup delivery and `ТД` for courier delivery;
 - `pickupAddress` with sender `cityId` and sender `terminalCode`;
@@ -93,6 +102,8 @@ The 0.63.0 preview includes:
 - receiver name, phone and email;
 - `cargoNumPack`, `cargoValue`, `cargoRegistered=false`;
 - `parcel[]` built only from manager-entered modal places: weight kg, length cm, width cm, height cm and expanded quantity.
+
+DPD comment is intentionally absent from the modal and payload in 0.63.2.
 
 The 0.63.1 modal can temporarily override these payload fields:
 
@@ -113,6 +124,8 @@ Errors:
 
 - order/rate must be DPD;
 - `serviceCode` is required;
+- `header.datePickup` is required, must be `YYYY-MM-DD`, cannot be in the past and must be a store working day when the
+  store calendar is available;
 - pickup cityId is required;
 - delivery cityId is required;
 - sender pickup terminalCode is required;

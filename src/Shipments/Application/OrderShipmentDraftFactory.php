@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentDateResolver;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
@@ -34,7 +35,8 @@ final class OrderShipmentDraftFactory {
 		private ?CdekSettings $cdek_settings = null,
 		private ?CdekTariffRepository $cdek_tariffs = null,
 		private ?DpdSettings $dpd_settings = null,
-		private ?DpdPickupPointService $dpd_pickup_points = null
+		private ?DpdPickupPointService $dpd_pickup_points = null,
+		private ?DpdShipmentDateResolver $dpd_dates = null
 	) {
 	}
 
@@ -481,6 +483,7 @@ final class OrderShipmentDraftFactory {
 		) );
 		$delivery_terminal = $this->dpd_delivery_terminal_snapshot( $order, $delivery_terminal_code, $delivery_city_id );
 		$sender_terminal = $this->dpd_terminal_snapshot( $pickup_terminal_code, $pickup_city_id );
+		$date_pickup = $this->dpd_default_date_pickup();
 		$recipient_address = DeliveryType::PICKUP === $delivery_type
 			? new Address( country_code: 'RU', city: (string) ( $delivery_terminal['city_name'] ?? $this->meta_string( $order, '_wdc_dpd_pickup_city_name' ) ), raw_address: (string) ( $delivery_terminal['address'] ?? $this->meta_string( $order, '_wdc_dpd_pickup_address' ) ) )
 			: new Address( country_code: 'RU', city: method_exists( $order, 'get_shipping_city' ) ? (string) $order->get_shipping_city() : '', postcode: method_exists( $order, 'get_shipping_postcode' ) ? (string) $order->get_shipping_postcode() : '', raw_address: $this->shipping_address( $order ) );
@@ -526,6 +529,9 @@ final class OrderShipmentDraftFactory {
 				'declared_value_rub' => $this->default_declared_value_rub( $items ),
 				'place_weight_hint_g' => $this->default_weight_g( $order, $items ),
 				'courier_original_address' => $this->shipping_address( $order ),
+				'date_pickup' => $date_pickup['date'],
+				'date_pickup_calendar_used' => $date_pickup['calendar_used'],
+				'date_pickup_fallback_used' => $date_pickup['fallback_used'],
 				'order_num' => $this->order_number( $order ),
 				'calculation_data' => $calculation,
 				'rate_meta' => $rate_meta,
@@ -560,6 +566,7 @@ final class OrderShipmentDraftFactory {
 		$delivery_terminal = DeliveryType::PICKUP === $delivery_type ? $this->dpd_terminal_snapshot( $delivery_terminal_code, $delivery_city_id ) : array();
 		$original_address = sanitize_text_field( wp_unslash( $data['courier_original_address'] ?? $base->meta['courier_original_address'] ?? $base->recipient_address->raw_address ) );
 		$normalized_address = DeliveryType::COURIER === $delivery_type ? $this->normalized_address_from_admin_data( $data, $original_address, DpdSettings::SERVICE_KEY ) : array();
+		$date_pickup = $this->date_value( (string) wp_unslash( $data['date_pickup'] ?? $base->meta['date_pickup'] ?? '' ) );
 		$recipient_address = DeliveryType::PICKUP === $delivery_type
 			? new Address( country_code: 'RU', city: (string) ( $delivery_terminal['city_name'] ?? $base->recipient_address->city ), raw_address: (string) ( $delivery_terminal['address'] ?? $base->recipient_address->raw_address ) )
 			: $this->dpd_courier_address_from_normalized( $base->recipient_address, $normalized_address, $original_address );
@@ -601,7 +608,8 @@ final class OrderShipmentDraftFactory {
 					'normalized_address' => $normalized_address,
 					'normalization_valid' => DeliveryType::COURIER === $delivery_type && ! empty( $normalized_address['success'] ),
 					'normalization_attempted' => DeliveryType::COURIER === $delivery_type && array() !== $normalized_address,
-					'comment' => sanitize_textarea_field( wp_unslash( $data['dpd_comment'] ?? $data['comment'] ?? '' ) ),
+					'date_pickup' => $date_pickup,
+					'date_pickup_errors' => $this->dpd_date_errors( $date_pickup ),
 				)
 			)
 		);
@@ -625,6 +633,33 @@ final class OrderShipmentDraftFactory {
 		}
 
 		return max( 1, $total ?: 1000 );
+	}
+
+	/**
+	 * @return array{date:string,calendar_used:bool,fallback_used:bool}
+	 */
+	private function dpd_default_date_pickup(): array {
+		if ( $this->dpd_dates instanceof DpdShipmentDateResolver ) {
+			return $this->dpd_dates->default_date();
+		}
+
+		return array(
+			'date' => gmdate( 'Y-m-d' ),
+			'calendar_used' => false,
+			'fallback_used' => true,
+		);
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function dpd_date_errors( string $date ): array {
+		$resolver = $this->dpd_dates instanceof DpdShipmentDateResolver ? $this->dpd_dates : new DpdShipmentDateResolver();
+		return $resolver->validate( $date );
+	}
+
+	private function date_value( string $value ): string {
+		return sanitize_text_field( $value );
 	}
 
 	/**

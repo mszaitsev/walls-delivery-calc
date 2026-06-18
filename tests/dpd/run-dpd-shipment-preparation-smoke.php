@@ -10,7 +10,12 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentDateResolver;
 use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentPayloadBuilder;
+use WallsShop\WDC\Calendar\Services\CalendarService;
+use WallsShop\WDC\Calendar\Services\TimezoneService;
+use WallsShop\WDC\Calendar\Services\YearGenerator;
+use WallsShop\WDC\Calendar\Storage\CalendarRepository;
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
@@ -39,16 +44,49 @@ function sanitize_text_field( mixed $value ): string { return trim( strip_tags( 
 function sanitize_textarea_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
 function sanitize_email( mixed $value ): string { return filter_var( trim( (string) $value ), FILTER_VALIDATE_EMAIL ) ? trim( (string) $value ) : ''; }
 function wp_unslash( mixed $value ): mixed { return $value; }
+defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
 		/** @var array<int,array<string,mixed>> */
 		public array $dpd_pickup_points = array();
+		/** @var array<string,array<string,mixed>> */
+		public array $calendar_days = array();
 		public function prepare( string $query, mixed ...$args ): string { return vsprintf( str_replace( array( '%d', '%s' ), array( '%d', "'%s'" ), $query ), $args ); }
 		public function esc_like( string $text ): string { return addcslashes( $text, '_%\\' ); }
-		public function get_results( string $query, string $output = '' ): array { return array(); }
-		public function get_var( string $query ): mixed { return 0; }
+		public function get_row( string $query, string $output = '' ): ?array {
+			if ( 1 === preg_match( "/calendar_type = '([^']+)'.*calendar_date = '([^']+)'/s", $query, $matches ) ) {
+				return $this->calendar_days[ $matches[1] . '|' . $matches[2] ] ?? null;
+			}
+			return null;
+		}
+		public function get_results( string $query, string $output = '' ): array {
+			if ( 1 === preg_match( "/calendar_type = '([^']+)'.*YEAR\\(calendar_date\\) = (\\d+)/s", $query, $matches ) ) {
+				$prefix = $matches[1] . '|' . $matches[2] . '-';
+				return array_values( array_filter( $this->calendar_days, static fn( array $row, string $key ): bool => str_starts_with( $key, $prefix ), ARRAY_FILTER_USE_BOTH ) );
+			}
+			return array();
+		}
+		public function get_var( string $query ): mixed {
+			if ( 1 === preg_match( "/calendar_type = '([^']+)'.*YEAR\\(calendar_date\\) = (\\d+)/s", $query, $matches ) ) {
+				$prefix = $matches[1] . '|' . $matches[2] . '-';
+				return count( array_filter( array_keys( $this->calendar_days ), static fn( string $key ): bool => str_starts_with( $key, $prefix ) ) );
+			}
+			return 0;
+		}
+		public function replace( string $table, array $data, array $format = array() ): bool {
+			if ( str_ends_with( $table, 'wdc_calendar_days' ) ) {
+				$this->calendar_days[ (string) $data['calendar_type'] . '|' . (string) $data['calendar_date'] ] = array(
+					'calendar_type' => (string) $data['calendar_type'],
+					'calendar_date' => (string) $data['calendar_date'],
+					'is_working' => (int) $data['is_working'],
+					'reason' => (string) ( $data['reason'] ?? '' ),
+				);
+			}
+			return true;
+		}
+		public function query( string $query ): int { return 0; }
 	}
 }
 
@@ -147,9 +185,16 @@ $settings->save_runtime_tariffs_from_admin(
 	)
 );
 $pickup_service = new DpdPickupPointService( new DpdPickupPointRepository(), new LocationDeliveryCodeRepository() );
-$factory = new OrderShipmentDraftFactory( new DeliveryServiceRepository(), new ShipmentServiceSettings(), null, null, null, null, null, $settings, $pickup_service );
+$calendar = new CalendarService( new CalendarRepository(), new YearGenerator(), $settings_repo, new TimezoneService() );
+$date_resolver = new DpdShipmentDateResolver( $calendar, new TimezoneService() );
+$factory = new OrderShipmentDraftFactory( new DeliveryServiceRepository(), new ShipmentServiceSettings(), null, null, null, null, null, $settings, $pickup_service, $date_resolver );
 $builder = new DpdShipmentPayloadBuilder();
 $adapter = new DpdShipmentAdapter( $builder );
+
+$before_cutoff = $date_resolver->default_date( new DateTimeImmutable( '2026-06-18 16:30:00', new DateTimeZone( TimezoneService::TIMEZONE ) ) );
+$after_cutoff = $date_resolver->default_date( new DateTimeImmutable( '2026-06-20 17:00:00', new DateTimeZone( TimezoneService::TIMEZONE ) ) );
+dpd_shipment_assert( '2026-06-18' === $before_cutoff['date'], 'Default DPD datePickup before 17:00 must be today when today is a store working day.' );
+dpd_shipment_assert( '2026-06-22' === $after_cutoff['date'], 'Default DPD datePickup at/after 17:00 must use the next store working day.' );
 
 $pickup_order = new DpdShipmentFakeOrder( 630, DeliveryType::PICKUP );
 $base_request = $factory->create_request_from_order( $pickup_order );
@@ -160,7 +205,11 @@ $draft = $factory->draft_array( $pickup_order );
 $draft_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 dpd_shipment_assert( 'MSK-RECEIVER' === (string) ( $draft['request']['meta']['pickup_point_row']['point_code'] ?? '' ) && 'parcel_shop' === (string) ( $draft['request']['meta']['pickup_point_row']['point_type'] ?? '' ), 'DPD modal draft must expose recipient pickup point code/type.' );
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-open-pickup-picker' ) && str_contains( $draft_source, 'data-wdc-open-sender-pickup-picker' ), 'DPD modal must expose choose receiver/sender pickup buttons.' );
+dpd_shipment_assert( ! str_contains( $draft_source, "|| \$is_dpd ) : ?>\n\t\t\t\t\t\t\t\t\t\t<p><strong><?php echo esc_html__( 'Тип точки'" ), 'DPD recipient pickup point visible block must not render point type.' );
+dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-cdek-pickup-type-label' ), 'CDEK pickup point type display must remain available.' );
 dpd_shipment_assert( str_contains( $draft_source, 'В заказе тариф' ) && ! str_contains( $draft_source, 'serviceCode</strong>' ) && ! str_contains( $draft_source, 'pickup cityId</strong>' ), 'DPD modal must show order tariff and remove visible technical service block.' );
+dpd_shipment_assert( ! str_contains( $draft_source, 'name="dpd_comment"' ), 'DPD modal must not render DPD comment field.' );
+dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-dpd-date-pickup' ) && str_contains( $draft_source, 'Дата отправки' ), 'DPD modal must render datePickup date input after sender pickup point block.' );
 dpd_shipment_assert( array( DeliveryType::PICKUP, DeliveryType::COURIER ) === array_column( $draft['services'], 'delivery_type' ), 'DPD modal must allow pickup/courier delivery type switch.' );
 dpd_shipment_assert( array( 'ECN', 'CSM' ) === array_column( $draft['services'][0]['tariffs'], 'object_code' ), 'DPD modal must allow active tariff switch.' );
 
@@ -174,10 +223,14 @@ $request = $factory->create_request_from_admin_data(
 		'pickup_point_code' => 'MSK-RECEIVER-2',
 		'pickup_terminal_code' => 'NSK-SENDER-2',
 		'tariff_object' => 'CSM',
+		'date_pickup' => '2026-06-18',
 	)
 );
 $preview = $adapter->build_safe_payload_preview( $request );
 $body = $preview['body']['request']['order'] ?? array();
+$header = $preview['body']['request']['header'] ?? array();
+dpd_shipment_assert( '2026-06-18' === (string) ( $header['datePickup'] ?? '' ), 'DPD dry-run payload must include request.header.datePickup.' );
+dpd_shipment_assert( ! isset( $body['comment'] ), 'DPD dry-run payload must not contain comment.' );
 dpd_shipment_assert( 'CSM' === (string) ( $body['serviceCode'] ?? '' ), 'DPD pickup preview must use modal-selected serviceCode.' );
 dpd_shipment_assert( '49455627' === (string) ( $body['pickup']['cityId'] ?? '' ), 'DPD pickup preview must contain pickup cityId.' );
 dpd_shipment_assert( '195300000' === (string) ( $body['delivery']['cityId'] ?? '' ), 'DPD pickup preview must contain delivery cityId.' );
@@ -205,7 +258,7 @@ $normalized = array(
 );
 $courier_request = $factory->create_request_from_admin_data(
 	$courier_order,
-	array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'normalized_address_json' => wp_json_encode( $normalized, JSON_UNESCAPED_UNICODE ), 'recipient_phone' => '+79990000000' )
+	array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'normalized_address_json' => wp_json_encode( $normalized, JSON_UNESCAPED_UNICODE ), 'recipient_phone' => '+79990000000', 'date_pickup' => '2026-06-18' )
 );
 $courier_body = $adapter->build_safe_payload_preview( $courier_request )['body']['request']['order'] ?? array();
 dpd_shipment_assert( 'NSK-SENDER' === (string) ( $courier_body['pickup']['terminalCode'] ?? '' ) && ! isset( $courier_body['delivery']['terminalCode'] ), 'DPD courier preview must contain pickup terminalCode and no delivery terminalCode.' );
@@ -226,6 +279,15 @@ dpd_shipment_assert( in_array( 'Добавьте хотя бы одно груз
 dpd_shipment_assert( in_array( 'Адрес DPD курьер нужно обработать перед предпросмотром payload.', $builder->validate( $factory->create_request_from_admin_data( $courier_order, array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'recipient_phone' => '+79990000000' ) ) ), true ), 'DPD courier preview must require address normalization.' );
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-weight-hint' ) && str_contains( $js_source, 'hint.hidden = places.length !== 1' ), 'Single-place weight hint must be common and hidden for multi-place mode.' );
+dpd_shipment_assert( str_contains( $js_source, 'cityCodeRow.hidden = isDpd || !cityCode' ), 'DPD courier modal must not display CDEK city code after address normalization.' );
+dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-cdek-city-code-row <?php echo ( $is_cdek' ), 'CDEK courier modal must still display CDEK city code when normalization has it.' );
+
+$missing_date_request = $factory->create_request_from_admin_data( $pickup_order, array( 'places' => array( array( 'weight_g' => '1000', 'length_cm' => '10', 'width_cm' => '10', 'height_cm' => '10' ) ), 'recipient_phone' => '+79990000000', 'date_pickup' => '' ) );
+dpd_shipment_assert( in_array( 'Дата отправки DPD обязательна.', $builder->validate( $missing_date_request ), true ), 'Missing datePickup must produce validation error.' );
+$invalid_date_request = $factory->create_request_from_admin_data( $pickup_order, array( 'places' => array( array( 'weight_g' => '1000', 'length_cm' => '10', 'width_cm' => '10', 'height_cm' => '10' ) ), 'recipient_phone' => '+79990000000', 'date_pickup' => '2026/06/18' ) );
+dpd_shipment_assert( in_array( 'Дата отправки DPD должна быть в формате YYYY-MM-DD.', $builder->validate( $invalid_date_request ), true ), 'Invalid datePickup must produce validation error.' );
+$past_date_request = $factory->create_request_from_admin_data( $pickup_order, array( 'places' => array( array( 'weight_g' => '1000', 'length_cm' => '10', 'width_cm' => '10', 'height_cm' => '10' ) ), 'recipient_phone' => '+79990000000', 'date_pickup' => '2020-01-01' ) );
+dpd_shipment_assert( in_array( 'Дата отправки DPD не может быть в прошлом.', $builder->validate( $past_date_request ), true ), 'Past datePickup must be rejected.' );
 
 $create_result = $adapter->create( $request );
 dpd_shipment_assert( ! $create_result->success && 'dpd_create_disabled' === $create_result->error_code, 'DPD create shipment action must be disabled.' );
