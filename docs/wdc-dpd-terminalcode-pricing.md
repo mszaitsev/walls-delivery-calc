@@ -1,6 +1,6 @@
 # WDC DPD TerminalCode Runtime Pricing
 
-Version: 0.62.1.
+Version: 0.63.0.
 
 DPD terminalCode pricing is now part of checkout runtime. The previous 0.61.0 admin-only diagnostic matched the DPD
 personal cabinet, so the temporary terminalCode diagnostic UI/classes were removed.
@@ -81,8 +81,13 @@ Removed from `DPD Расчет`:
 - diagnostic service/result/request classes.
 
 0.62.1 also removed the remaining generic `Тестовый расчет DPD` form from `DPD Расчет`, including its submit action,
-one-shot result block, tariff result storage, and display-only sender city text option. The tab now keeps only sender
-location/DPD cityId/default parcel settings and read-only sender information.
+one-shot result block, tariff result storage, and display-only sender city text option.
+
+0.63.0 keeps checkout terminalCode pricing unchanged and adds the shipment-preparation-only `ПВЗ отправителя по умолчанию`
+field to `DPD Расчет`. The field stores a sender `terminalCode`, summarizes the matching active local `parcel_shop`, warns
+when the code is missing/not a parcel shop or cityId does not match the configured sender city, and is used by manual DPD
+shipment preparation. If it is empty, checkout runtime may still auto-select a sender parcel shop as before; the shipment
+modal shows a warning.
 
 Kept:
 
@@ -94,8 +99,7 @@ Kept:
 
 Still out of scope:
 
-- DPD shipment adapter/metabox;
-- DPD shipment creation;
+- live DPD shipment creation;
 - labels;
 - COD/NPP;
 - unitLoad;

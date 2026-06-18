@@ -214,8 +214,9 @@ dpd_terminal_runtime_assert( str_contains( $js_source, "requiresRateRefreshAfter
 $carrier_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/Runtime/DpdQuoteCarrier.php' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
+$dpd_adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Dpd/DpdShipmentAdapter.php' );
 dpd_terminal_runtime_assert( str_contains( $carrier_source, 'getServiceCostByParcels3' ) || str_contains( $carrier_source, 'DpdTariffCalculationService' ), 'DpdQuoteCarrier must route runtime pricing through the tariff service.' );
 dpd_terminal_runtime_assert( ! str_contains( $plugin_source . $admin_source, 'DpdTerminalCodeTariffDiagnostic' ) && ! str_contains( $admin_source, 'test_dpd_terminalcode_tariff_calculation' ), 'Admin terminalCode diagnostic UI/service must be removed.' );
-dpd_terminal_runtime_assert( ! str_contains( $plugin_source, 'DpdShipmentAdapter' ) && ! str_contains( $admin_source, 'DpdShipmentAdapter' ), 'DPD shipment adapter/metabox must not be added.' );
+dpd_terminal_runtime_assert( str_contains( $plugin_source, 'DpdShipmentAdapter' ) && str_contains( $dpd_adapter_source, 'dpd_create_disabled' ) && ! str_contains( $admin_source, 'DpdShipmentAdapter' ), 'DPD may have only a disabled dry-run shipment adapter at terminalCode runtime stage.' );
 
 echo "DPD terminalCode runtime pricing smoke test passed.\n";

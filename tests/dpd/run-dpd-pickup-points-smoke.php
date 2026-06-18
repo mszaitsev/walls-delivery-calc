@@ -271,8 +271,9 @@ $tariff_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carri
 $runtime_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/Runtime/DpdQuoteCarrier.php' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 $shipments_metabox = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
+$dpd_adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Dpd/DpdShipmentAdapter.php' );
 dpd_pickup_assert( str_contains( $api_source, 'getServiceCostByParcels2' ), 'DPD API client must keep getServiceCostByParcels2.' );
 dpd_pickup_assert( str_contains( $tariff_source, 'getServiceCostByParcels3' ) && str_contains( $tariff_source, 'pickup_terminal_code' ), 'DPD checkout runtime must use Parcels3 with terminalCode-aware pricing.' );
-dpd_pickup_assert( ! str_contains( $plugin_source, 'DpdShipmentAdapter' ) && ! str_contains( $shipments_metabox, 'DpdShipmentAdapter' ), 'DPD shipment adapter/metabox must not be added.' );
+dpd_pickup_assert( str_contains( $plugin_source, 'DpdShipmentAdapter' ) && str_contains( $shipments_metabox, 'data-wdc-preview-shipment' ) && str_contains( $dpd_adapter_source, 'dpd_create_disabled' ), 'DPD shipment metabox may expose only dry-run preview with disabled create.' );
 
 echo "DPD pickup points smoke test passed.\n";

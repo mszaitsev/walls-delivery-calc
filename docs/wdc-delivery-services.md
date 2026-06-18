@@ -97,7 +97,7 @@ As of 0.54.0, the bootstrap also creates the DPD foundation service:
 - default state: disabled
 - RU availability row is created for future use
 
-As of 0.58.0, DPD is registered as a checkout quote carrier in `CarrierRegistry`. It is still disabled by default through the built-in delivery service row, so DPD rates appear only after the administrator enables the `dpd` service and completes the active DPD environment credentials, sender city settings and receiver city mapping. There is still no DPD shipment adapter in `CarrierShipmentAdapterRegistry`, so DPD does not appear in shipment creation/metabox actions.
+As of 0.58.0, DPD is registered as a checkout quote carrier in `CarrierRegistry`. It is still disabled by default through the built-in delivery service row, so DPD rates appear only after the administrator enables the `dpd` service and completes the active DPD environment credentials, sender city settings and receiver city mapping. As of 0.63.0, DPD is also registered in `CarrierShipmentAdapterRegistry` only for manual shipment preparation dry-run preview; live create/status/label actions remain disabled.
 
 The DPD `Данные для входа` tab stores test/production `clientNumber`, encrypted `clientKey`, environment, timeout and optional debug flag through the existing settings/encryption layer. The connection check is a dry diagnostic and does not execute a DPD API call.
 

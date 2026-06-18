@@ -33,6 +33,62 @@ final class DpdPickupPointService {
 		return $this->deduplicate_consumer_points( $this->repository->find_by_city_id( $city_id ) );
 	}
 
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function get_parcel_shops_by_city_id( int $city_id, int $limit = 500 ): array {
+		$rows = $this->repository->search( array( 'city_id' => $city_id, 'type' => 'parcel_shop', 'limit' => $limit ) );
+
+		return array_values(
+			array_filter(
+				$rows,
+				static fn( array $point ): bool => 'parcel_shop' === (string) ( $point['type'] ?? '' )
+			)
+		);
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function search_parcel_shops( string $query, array $filters = array() ): array {
+		$limit = max( 1, min( 500, (int) ( $filters['limit'] ?? 100 ) ) );
+		$rows = $this->repository->search(
+			array_filter(
+				array(
+					'type' => 'parcel_shop',
+					'city_id' => isset( $filters['city_id'] ) && (int) $filters['city_id'] > 0 ? (int) $filters['city_id'] : null,
+					'city_name' => (string) ( $filters['city_name'] ?? '' ),
+					'limit' => $limit,
+				),
+				static fn( mixed $value ): bool => null !== $value && '' !== (string) $value
+			)
+		);
+		$needle = $this->normalize_search_text( $query );
+		if ( '' === $needle ) {
+			return $rows;
+		}
+
+		return array_values(
+			array_filter(
+				$rows,
+				fn( array $point ): bool => str_contains(
+					$this->normalize_search_text(
+						implode(
+							' ',
+							array(
+								(string) ( $point['terminal_code'] ?? '' ),
+								(string) ( $point['name'] ?? '' ),
+								(string) ( $point['address'] ?? '' ),
+								(string) ( $point['city_name'] ?? '' ),
+							)
+						)
+					),
+					$needle
+				)
+			)
+		);
+	}
+
 	public function get_point_by_terminal_code( string $terminal_code ): ?array {
 		$points = $this->deduplicate_consumer_points( $this->repository->search( array( 'terminal_code' => $terminal_code, 'limit' => 20 ) ) );
 
@@ -154,6 +210,12 @@ final class DpdPickupPointService {
 	 */
 	private function type_priority( array $point ): int {
 		return 'parcel_shop' === (string) ( $point['type'] ?? '' ) ? 1 : 2;
+	}
+
+	private function normalize_search_text( string $value ): string {
+		$value = trim( preg_replace( '/\s+/u', ' ', $value ) ?? '' );
+
+		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
 	}
 
 	/**

@@ -42,6 +42,7 @@ final class DpdSettings {
 	public const TARIFF_DEFAULT_WIDTH_CM_KEY = 'dpd_tariff_default_width_cm';
 	public const TARIFF_DEFAULT_HEIGHT_CM_KEY = 'dpd_tariff_default_height_cm';
 	public const TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY = 'dpd_tariff_default_declared_value_rub';
+	public const TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY = 'dpd_tariff_default_sender_terminal_code';
 	public const RUNTIME_PICKUP_TITLE_KEY = 'dpd_runtime_pickup_title';
 	public const RUNTIME_COURIER_TITLE_KEY = 'dpd_runtime_courier_title';
 	public const RUNTIME_ENABLED_SERVICE_CODES_KEY = 'dpd_runtime_enabled_service_codes';
@@ -85,6 +86,7 @@ final class DpdSettings {
 			self::TARIFF_DEFAULT_WIDTH_CM_KEY => 20,
 			self::TARIFF_DEFAULT_HEIGHT_CM_KEY => 20,
 			self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY => 1000,
+			self::TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY => '',
 			self::RUNTIME_PICKUP_TITLE_KEY => self::DEFAULT_PICKUP_METHOD_TITLE,
 			self::RUNTIME_COURIER_TITLE_KEY => self::DEFAULT_COURIER_METHOD_TITLE,
 			self::RUNTIME_ENABLED_SERVICE_CODES_KEY => 'ECN,CSM,MXO',
@@ -365,6 +367,7 @@ final class DpdSettings {
 	public function save_tariff_settings_from_admin( array $input ): void {
 		$this->settings->set( self::TARIFF_SENDER_LOCATION_ID_KEY, max( 0, (int) ( $input[ self::TARIFF_SENDER_LOCATION_ID_KEY ] ?? 0 ) ) );
 		$this->settings->set( self::TARIFF_SENDER_DPD_CITY_ID_KEY, $this->digits( (string) ( $input[ self::TARIFF_SENDER_DPD_CITY_ID_KEY ] ?? '' ) ) );
+		$this->settings->set( self::TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY, $this->terminal_code( (string) ( $input[ self::TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY ] ?? '' ) ) );
 		$this->settings->set( self::TARIFF_DEFAULT_WEIGHT_G_KEY, max( 1, (int) ( $input[ self::TARIFF_DEFAULT_WEIGHT_G_KEY ] ?? 1000 ) ) );
 		$this->settings->set( self::TARIFF_DEFAULT_LENGTH_CM_KEY, max( 0.1, (float) ( $input[ self::TARIFF_DEFAULT_LENGTH_CM_KEY ] ?? 20 ) ) );
 		$this->settings->set( self::TARIFF_DEFAULT_WIDTH_CM_KEY, max( 0.1, (float) ( $input[ self::TARIFF_DEFAULT_WIDTH_CM_KEY ] ?? 20 ) ) );
@@ -431,6 +434,10 @@ final class DpdSettings {
 
 	public function tariff_default_declared_value_rub(): float {
 		return max( 0.0, (float) $this->settings->get_string( self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY, '1000' ) );
+	}
+
+	public function tariff_default_sender_terminal_code(): string {
+		return $this->terminal_code( $this->settings->get_string( self::TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY, '' ) );
 	}
 
 	/**
@@ -587,6 +594,10 @@ final class DpdSettings {
 
 	private function digits( string $value ): string {
 		return preg_replace( '/\D+/', '', $value ) ?? '';
+	}
+
+	private function terminal_code( string $value ): string {
+		return substr( preg_replace( '/[^A-Za-z0-9_\-]+/', '', strtoupper( trim( $value ) ) ) ?? '', 0, 64 );
 	}
 
 	private function sanitize_service_codes( string $value ): string {

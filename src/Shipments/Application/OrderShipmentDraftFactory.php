@@ -5,6 +5,9 @@ namespace WallsShop\WDC\Shipments\Application;
 
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Cdek\Tariffs\CdekTariffRepository;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentDateResolver;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\Otpravka\RussianPostOtpravkaApiSettings;
@@ -30,7 +33,10 @@ final class OrderShipmentDraftFactory {
 		private ?RussianPostOtpravkaApiSettings $otpravka_settings = null,
 		private ?RussianPostPickupPointRepository $pickup_points = null,
 		private ?CdekSettings $cdek_settings = null,
-		private ?CdekTariffRepository $cdek_tariffs = null
+		private ?CdekTariffRepository $cdek_tariffs = null,
+		private ?DpdSettings $dpd_settings = null,
+		private ?DpdPickupPointService $dpd_pickup_points = null,
+		private ?DpdShipmentDateResolver $dpd_dates = null
 	) {
 	}
 
@@ -38,6 +44,9 @@ final class OrderShipmentDraftFactory {
 		$carrier_key = $this->active_carrier_key( $order );
 		if ( CdekSettings::CARRIER_KEY === $carrier_key ) {
 			return $this->create_cdek_request_from_order( $order );
+		}
+		if ( DpdSettings::CARRIER_KEY === $carrier_key ) {
+			return $this->create_dpd_request_from_order( $order );
 		}
 		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
 		$delivery_type = $this->delivery_type_from_order( $order );
@@ -112,6 +121,13 @@ final class OrderShipmentDraftFactory {
 				'postoffice_codes' => array(),
 			);
 		}
+		if ( DpdSettings::CARRIER_KEY === $request->carrier_key ) {
+			return array(
+				'request' => $request->to_array(),
+				'services' => $this->dpd_service_variants( $request ),
+				'postoffice_codes' => array(),
+			);
+		}
 		$service = $this->services->find_by_service_key( RussianPostDomesticSettings::SERVICE_KEY );
 		$service_variants = array();
 		if ( $service instanceof DeliveryService ) {
@@ -137,6 +153,9 @@ final class OrderShipmentDraftFactory {
 		$base = $this->create_request_from_order( $order );
 		if ( CdekSettings::CARRIER_KEY === $base->carrier_key ) {
 			return $this->create_cdek_request_from_admin_data( $base, $data );
+		}
+		if ( DpdSettings::CARRIER_KEY === $base->carrier_key ) {
+			return $this->create_dpd_request_from_admin_data( $base, $data );
 		}
 		$service_key = RussianPostDomesticSettings::SERVICE_KEY;
 		$service = $this->services->find_by_service_key( $service_key );
@@ -427,6 +446,175 @@ final class OrderShipmentDraftFactory {
 		);
 	}
 
+	private function create_dpd_request_from_order( object $order ): ShipmentCreateRequest {
+		$calculation = $this->calculation_data( $order );
+		$rate_meta = $this->rate_meta_data( $order );
+		$delivery_type = $this->delivery_type_from_order( $order );
+		$items = $this->order_items( $order );
+		$service_code = strtoupper( $this->first_non_empty(
+			$rate_meta['dpd_service_code'] ?? '',
+			$rate_meta['tariff_code'] ?? '',
+			$calculation['selected_tariff_object'] ?? '',
+			$this->meta_string( $order, '_wdc_platform_tariff_object' )
+		) );
+		$pickup_city_id = $this->digits_string( $this->first_non_empty(
+			$rate_meta['dpd_sender_city_id'] ?? '',
+			$rate_meta['request_payload_sanitized']['pickup']['cityId'] ?? '',
+			$calculation['api']['request_payload_sanitized']['pickup']['cityId'] ?? '',
+			$this->dpd_settings instanceof DpdSettings ? $this->dpd_settings->tariff_sender_dpd_city_id() : ''
+		) );
+		$delivery_city_id = $this->digits_string( $this->first_non_empty(
+			$rate_meta['dpd_receiver_city_id'] ?? '',
+			$rate_meta['request_payload_sanitized']['delivery']['cityId'] ?? '',
+			$calculation['api']['request_payload_sanitized']['delivery']['cityId'] ?? ''
+		) );
+		$default_sender_terminal = $this->dpd_settings instanceof DpdSettings ? $this->dpd_settings->tariff_default_sender_terminal_code() : '';
+		$pickup_terminal_code = $this->terminal_code( $this->first_non_empty(
+			$default_sender_terminal,
+			$rate_meta['dpd_pickup_terminal_code'] ?? '',
+			$rate_meta['request_payload_sanitized']['pickup']['terminalCode'] ?? '',
+			$calculation['api']['request_payload_sanitized']['pickup']['terminalCode'] ?? ''
+		) );
+		$delivery_terminal_code = $this->terminal_code( $this->first_non_empty(
+			$this->meta_string( $order, '_wdc_dpd_pickup_terminal_code' ),
+			$rate_meta['dpd_delivery_terminal_code'] ?? '',
+			$rate_meta['request_payload_sanitized']['delivery']['terminalCode'] ?? '',
+			$calculation['api']['request_payload_sanitized']['delivery']['terminalCode'] ?? ''
+		) );
+		$delivery_terminal = $this->dpd_delivery_terminal_snapshot( $order, $delivery_terminal_code, $delivery_city_id );
+		$sender_terminal = $this->dpd_terminal_snapshot( $pickup_terminal_code, $pickup_city_id );
+		$date_pickup = $this->dpd_default_date_pickup();
+		$recipient_address = DeliveryType::PICKUP === $delivery_type
+			? new Address( country_code: 'RU', city: (string) ( $delivery_terminal['city_name'] ?? $this->meta_string( $order, '_wdc_dpd_pickup_city_name' ) ), raw_address: (string) ( $delivery_terminal['address'] ?? $this->meta_string( $order, '_wdc_dpd_pickup_address' ) ) )
+			: new Address( country_code: 'RU', city: method_exists( $order, 'get_shipping_city' ) ? (string) $order->get_shipping_city() : '', postcode: method_exists( $order, 'get_shipping_postcode' ) ? (string) $order->get_shipping_postcode() : '', raw_address: $this->shipping_address( $order ) );
+
+		return new ShipmentCreateRequest(
+			order_id: $this->order_id( $order ),
+			carrier_key: DpdSettings::CARRIER_KEY,
+			delivery_type: $delivery_type,
+			rate_id: DpdSettings::CARRIER_KEY . ':' . $delivery_type,
+			recipient_address: $recipient_address,
+			pickup_point: DeliveryType::PICKUP === $delivery_type && '' !== $delivery_terminal_code ? new PickupPointSelection( DpdSettings::CARRIER_KEY, DpdSettings::SERVICE_KEY, $delivery_terminal_code, (string) ( $delivery_terminal['address'] ?? '' ), $this->now() ) : null,
+			places: array(),
+			declared_value: Money::from_rubles( $this->default_declared_value_rub( $items ) ),
+			services: array(),
+			recipient: array(
+				'name' => $this->recipient_name( $order ),
+				'phone' => $this->phone( $order ),
+				'email' => $this->email( $order ),
+			),
+			meta: array(
+				'carrier_key' => DpdSettings::CARRIER_KEY,
+				'service_key' => DpdSettings::SERVICE_KEY,
+				'service_title' => DpdSettings::TITLE,
+				'delivery_type' => $delivery_type,
+				'service_code' => $service_code,
+				'tariff_object' => $service_code,
+				'tariff_title' => $this->first_non_empty( $rate_meta['selected_tariff_title'] ?? '', $rate_meta['tariff_name'] ?? '', $calculation['selected_tariff_title'] ?? '', DpdSettings::known_service_codes()[ $service_code ] ?? $service_code ),
+				'pickup_city_id' => $pickup_city_id,
+				'delivery_city_id' => $delivery_city_id,
+				'pickup_terminal_code' => $pickup_terminal_code,
+				'delivery_terminal_code' => DeliveryType::PICKUP === $delivery_type ? $delivery_terminal_code : '',
+				'delivery_terminal_source' => (string) ( $rate_meta['dpd_delivery_terminal_source'] ?? '' ),
+				'default_sender_terminal_configured' => '' !== $default_sender_terminal,
+				'sender_terminal' => $sender_terminal,
+				'shipment_point' => $pickup_terminal_code,
+				'shipment_point_address' => (string) ( $sender_terminal['address'] ?? '' ),
+				'delivery_terminal' => $delivery_terminal,
+				'pickup_point_code' => DeliveryType::PICKUP === $delivery_type ? $delivery_terminal_code : '',
+				'pickup_point_found' => DeliveryType::PICKUP === $delivery_type ? '' !== $delivery_terminal_code : true,
+				'pickup_point_row' => DeliveryType::PICKUP === $delivery_type ? $this->dpd_pickup_row_from_snapshot( $delivery_terminal, $delivery_terminal_code ) : array(),
+				'pickup_family' => DpdSettings::CARRIER_KEY . ':pickup',
+				'selected_pickup_point_snapshot' => $this->dpd_selected_pickup_snapshot( $order ),
+				'declared_value_rub' => $this->default_declared_value_rub( $items ),
+				'place_weight_hint_g' => $this->default_weight_g( $order, $items ),
+				'courier_original_address' => $this->shipping_address( $order ),
+				'date_pickup' => $date_pickup['date'],
+				'date_pickup_calendar_used' => $date_pickup['calendar_used'],
+				'date_pickup_fallback_used' => $date_pickup['fallback_used'],
+				'order_num' => $this->order_number( $order ),
+				'calculation_data' => $calculation,
+				'rate_meta' => $rate_meta,
+			)
+		);
+	}
+
+	private function create_dpd_request_from_admin_data( ShipmentCreateRequest $base, array $data ): ShipmentCreateRequest {
+		$delivery_type = RussianPostDomesticSettings::normalize_delivery_type( sanitize_key( wp_unslash( $data['delivery_type'] ?? $base->delivery_type ) ) );
+		$places = array();
+		foreach ( is_array( $data['places'] ?? null ) ? $data['places'] : array() as $index => $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$places[] = new ShipmentPlace(
+				$index + 1,
+				$this->whole_number_from_place_row( $row, 'weight_g' ),
+				$this->whole_number_from_place_row( $row, 'length_cm' ),
+				$this->whole_number_from_place_row( $row, 'width_cm' ),
+				$this->whole_number_from_place_row( $row, 'height_cm' ),
+				Money::from_kopecks( 0 ),
+				array()
+			);
+		}
+		$service_code = $this->terminal_code( (string) wp_unslash( $data['tariff_object'] ?? $data['service_code'] ?? $base->meta['service_code'] ?? '' ) );
+		$tariff_title = $this->dpd_tariff_title( $service_code, (string) ( $base->meta['tariff_title'] ?? '' ) );
+		$pickup_terminal_code = $this->terminal_code( (string) wp_unslash( $data['pickup_terminal_code'] ?? $data['shipment_point'] ?? $data['sender_shipment_point'] ?? $base->meta['pickup_terminal_code'] ?? '' ) );
+		$pickup_city_id = $this->digits_string( (string) ( $base->meta['pickup_city_id'] ?? '' ) );
+		$sender_terminal = $this->dpd_terminal_snapshot( $pickup_terminal_code, $pickup_city_id );
+		$delivery_terminal_code = DeliveryType::PICKUP === $delivery_type ? $this->terminal_code( (string) wp_unslash( $data['pickup_point_code'] ?? $base->meta['delivery_terminal_code'] ?? '' ) ) : '';
+		$delivery_city_id = $this->digits_string( (string) ( $base->meta['delivery_city_id'] ?? '' ) );
+		$delivery_terminal = DeliveryType::PICKUP === $delivery_type ? $this->dpd_terminal_snapshot( $delivery_terminal_code, $delivery_city_id ) : array();
+		$original_address = sanitize_text_field( wp_unslash( $data['courier_original_address'] ?? $base->meta['courier_original_address'] ?? $base->recipient_address->raw_address ) );
+		$normalized_address = DeliveryType::COURIER === $delivery_type ? $this->normalized_address_from_admin_data( $data, $original_address, DpdSettings::SERVICE_KEY ) : array();
+		$date_pickup = $this->date_value( (string) wp_unslash( $data['date_pickup'] ?? $base->meta['date_pickup'] ?? '' ) );
+		$recipient_address = DeliveryType::PICKUP === $delivery_type
+			? new Address( country_code: 'RU', city: (string) ( $delivery_terminal['city_name'] ?? $base->recipient_address->city ), raw_address: (string) ( $delivery_terminal['address'] ?? $base->recipient_address->raw_address ) )
+			: $this->dpd_courier_address_from_normalized( $base->recipient_address, $normalized_address, $original_address );
+
+		return new ShipmentCreateRequest(
+			$base->order_id,
+			DpdSettings::CARRIER_KEY,
+			$delivery_type,
+			$base->rate_id,
+			$recipient_address,
+			DeliveryType::PICKUP === $delivery_type && '' !== $delivery_terminal_code ? new PickupPointSelection( DpdSettings::CARRIER_KEY, DpdSettings::SERVICE_KEY, $delivery_terminal_code, (string) ( $delivery_terminal['address'] ?? '' ), $base->pickup_point?->selected_at ?: $this->now() ) : null,
+			$places,
+			$base->declared_value,
+			false,
+			array(),
+			array(
+				'name' => sanitize_text_field( wp_unslash( $data['recipient_name'] ?? $base->recipient['name'] ?? '' ) ),
+				'phone' => sanitize_text_field( wp_unslash( $data['recipient_phone'] ?? $base->recipient['phone'] ?? '' ) ),
+				'email' => sanitize_email( wp_unslash( $data['recipient_email'] ?? $base->recipient['email'] ?? '' ) ),
+			),
+			array_merge(
+				$base->meta,
+				array(
+					'delivery_type' => $delivery_type,
+					'service_code' => $service_code,
+					'tariff_object' => $service_code,
+					'tariff_title' => $tariff_title,
+					'pickup_terminal_code' => $pickup_terminal_code,
+					'shipment_point' => $pickup_terminal_code,
+					'shipment_point_address' => (string) ( $sender_terminal['address'] ?? sanitize_text_field( wp_unslash( $data['shipment_point_address'] ?? $data['sender_shipment_point_address'] ?? $base->meta['shipment_point_address'] ?? '' ) ) ),
+					'sender_terminal' => $sender_terminal,
+					'delivery_terminal_code' => $delivery_terminal_code,
+					'delivery_terminal' => $delivery_terminal,
+					'pickup_point_code' => DeliveryType::PICKUP === $delivery_type ? $delivery_terminal_code : (string) ( $base->meta['pickup_point_code'] ?? '' ),
+					'pickup_point_found' => DeliveryType::PICKUP === $delivery_type ? '' !== $delivery_terminal_code : ! empty( $base->meta['pickup_point_found'] ),
+					'pickup_point_row' => DeliveryType::PICKUP === $delivery_type ? $this->dpd_pickup_row_from_snapshot( $delivery_terminal, $delivery_terminal_code ) : (array) ( $base->meta['pickup_point_row'] ?? array() ),
+					'courier_original_address' => $original_address,
+					'courier_original_hash' => $this->original_address_hash( $original_address ),
+					'normalized_address' => $normalized_address,
+					'normalization_valid' => DeliveryType::COURIER === $delivery_type && ! empty( $normalized_address['success'] ),
+					'normalization_attempted' => DeliveryType::COURIER === $delivery_type && array() !== $normalized_address,
+					'date_pickup' => $date_pickup,
+					'date_pickup_errors' => $this->dpd_date_errors( $date_pickup ),
+				)
+			)
+		);
+	}
+
 	private function default_weight_g( object $order, array $items ): int {
 		$calculation = $this->calculation_data( $order );
 		$package = is_array( $calculation['package'] ?? null ) ? $calculation['package'] : array();
@@ -445,6 +633,33 @@ final class OrderShipmentDraftFactory {
 		}
 
 		return max( 1, $total ?: 1000 );
+	}
+
+	/**
+	 * @return array{date:string,calendar_used:bool,fallback_used:bool}
+	 */
+	private function dpd_default_date_pickup(): array {
+		if ( $this->dpd_dates instanceof DpdShipmentDateResolver ) {
+			return $this->dpd_dates->default_date();
+		}
+
+		return array(
+			'date' => gmdate( 'Y-m-d' ),
+			'calendar_used' => false,
+			'fallback_used' => true,
+		);
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function dpd_date_errors( string $date ): array {
+		$resolver = $this->dpd_dates instanceof DpdShipmentDateResolver ? $this->dpd_dates : new DpdShipmentDateResolver();
+		return $resolver->validate( $date );
+	}
+
+	private function date_value( string $value ): string {
+		return sanitize_text_field( $value );
 	}
 
 	/**
@@ -576,6 +791,37 @@ final class OrderShipmentDraftFactory {
 		);
 	}
 
+	/**
+	 * @param array<string,mixed> $normalized_address
+	 */
+	private function dpd_courier_address_from_normalized( Address $base, array $normalized_address, string $original_address ): Address {
+		if ( empty( $normalized_address['success'] ) ) {
+			return new Address(
+				country_code: $base->country_code ?: 'RU',
+				region_name: $base->region_name,
+				city: $base->city,
+				postcode: $base->postcode,
+				street: $base->street,
+				apartment: $base->apartment,
+				raw_address: $original_address,
+				fias_id: $base->fias_id,
+				gar_id: $base->gar_id
+			);
+		}
+		$fields = is_array( $normalized_address['fields'] ?? null ) ? $normalized_address['fields'] : array();
+		$raw_address = sanitize_text_field( wp_unslash( $fields['cdek_delivery_address'] ?? $fields['delivery_address'] ?? $normalized_address['display'] ?? $original_address ) );
+
+		return new Address(
+			country_code: $base->country_code ?: 'RU',
+			region_name: sanitize_text_field( wp_unslash( $fields['region'] ?? $fields['region_name'] ?? $base->region_name ) ),
+			city: sanitize_text_field( wp_unslash( $fields['cdek_city_name'] ?? $fields['city'] ?? $base->city ) ),
+			postcode: preg_replace( '/\D+/', '', (string) wp_unslash( $fields['cdek_postal_code'] ?? $fields['postal_code'] ?? $base->postcode ) ) ?: '',
+			raw_address: $raw_address,
+			fias_id: sanitize_text_field( wp_unslash( $fields['fias_id'] ?? $base->fias_id ) ),
+			gar_id: $base->gar_id
+		);
+	}
+
 	private function pickup_point( object $order ): ?PickupPointSelection {
 		$code = $this->meta_string( $order, '_wdc_pickup_point_code' );
 		if ( '' === $code ) {
@@ -684,6 +930,105 @@ final class OrderShipmentDraftFactory {
 			'lat' => null !== ( $row['latitude'] ?? null ) ? (float) $row['latitude'] : null,
 			'lng' => null !== ( $row['longitude'] ?? null ) ? (float) $row['longitude'] : null,
 		);
+	}
+
+	private function digits_string( string $value ): string {
+		return preg_replace( '/\D+/', '', $value ) ?? '';
+	}
+
+	private function terminal_code( string $value ): string {
+		return substr( preg_replace( '/[^A-Za-z0-9_\-]+/', '', strtoupper( trim( $value ) ) ) ?? '', 0, 64 );
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function dpd_terminal_snapshot( string $terminal_code, string $city_id = '' ): array {
+		$terminal_code = $this->terminal_code( $terminal_code );
+		if ( '' === $terminal_code || ! $this->dpd_pickup_points instanceof DpdPickupPointService ) {
+			return array();
+		}
+		$point = $this->dpd_pickup_points->find_runtime_parcel_shop_by_terminal_code( $terminal_code, '' !== $city_id ? (int) $city_id : null );
+		if ( null === $point ) {
+			$point = $this->dpd_pickup_points->find_runtime_parcel_shop_by_terminal_code( $terminal_code );
+		}
+		if ( null === $point ) {
+			return array();
+		}
+
+		return array(
+			'terminal_code' => (string) ( $point['terminal_code'] ?? $terminal_code ),
+			'type' => (string) ( $point['type'] ?? '' ),
+			'name' => (string) ( $point['name'] ?? '' ),
+			'address' => (string) ( $point['address'] ?? '' ),
+			'city_id' => (string) ( $point['city_id'] ?? '' ),
+			'city_name' => (string) ( $point['city_name'] ?? '' ),
+			'source' => (string) ( $point['source'] ?? '' ),
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function dpd_delivery_terminal_snapshot( object $order, string $terminal_code, string $city_id ): array {
+		$snapshot = $this->dpd_terminal_snapshot( $terminal_code, $city_id );
+		if ( array() !== $snapshot ) {
+			return $snapshot;
+		}
+
+		return array_filter(
+			array(
+				'terminal_code' => $terminal_code,
+				'type' => $this->meta_string( $order, '_wdc_dpd_pickup_type' ),
+				'name' => $this->meta_string( $order, '_wdc_dpd_pickup_name' ),
+				'address' => $this->meta_string( $order, '_wdc_dpd_pickup_address' ),
+				'city_id' => $city_id,
+				'city_name' => $this->meta_string( $order, '_wdc_dpd_pickup_city_name' ),
+				'source' => $this->meta_string( $order, '_wdc_dpd_pickup_source' ),
+			),
+			static fn ( mixed $value ): bool => '' !== (string) $value
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $snapshot
+	 * @return array<string,mixed>
+	 */
+	private function dpd_pickup_row_from_snapshot( array $snapshot, string $fallback_code = '' ): array {
+		$code = $this->terminal_code( (string) ( $snapshot['terminal_code'] ?? $fallback_code ) );
+		if ( '' === $code ) {
+			return array();
+		}
+
+		return array(
+			'point_code' => $code,
+			'postcode' => '',
+			'region_name' => '',
+			'city_name' => (string) ( $snapshot['city_name'] ?? '' ),
+			'address' => (string) ( $snapshot['address'] ?? '' ),
+			'point_type' => (string) ( $snapshot['type'] ?? 'parcel_shop' ),
+			'point_title' => (string) ( $snapshot['name'] ?? 'ПВЗ DPD' ),
+			'display_title' => (string) ( $snapshot['name'] ?? 'ПВЗ DPD' ),
+			'cdek_code' => '',
+			'latitude' => is_numeric( $snapshot['lat'] ?? $snapshot['latitude'] ?? null ) ? (float) ( $snapshot['lat'] ?? $snapshot['latitude'] ) : null,
+			'longitude' => is_numeric( $snapshot['lng'] ?? $snapshot['longitude'] ?? null ) ? (float) ( $snapshot['lng'] ?? $snapshot['longitude'] ) : null,
+		);
+	}
+
+	/**
+	 * @return array<string,mixed>
+	 */
+	private function dpd_selected_pickup_snapshot( object $order ): array {
+		if ( ! method_exists( $order, 'get_meta' ) ) {
+			return array();
+		}
+		$value = $order->get_meta( '_wdc_pickup_point_snapshot', true );
+		if ( is_string( $value ) ) {
+			$decoded = json_decode( $value, true );
+			return is_array( $decoded ) ? $decoded : array();
+		}
+
+		return is_array( $value ) ? $value : array();
 	}
 
 	/**
@@ -807,6 +1152,73 @@ final class OrderShipmentDraftFactory {
 				'tariffs' => $this->cdek_tariff_options( DeliveryType::COURIER, $request ),
 			),
 		);
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function dpd_service_variants( ShipmentCreateRequest $request ): array {
+		$pickup_title = $this->dpd_settings instanceof DpdSettings ? $this->dpd_settings->runtime_pickup_title() : DpdSettings::DEFAULT_PICKUP_METHOD_TITLE;
+		$courier_title = $this->dpd_settings instanceof DpdSettings ? $this->dpd_settings->runtime_courier_title() : DpdSettings::DEFAULT_COURIER_METHOD_TITLE;
+
+		return array(
+			array(
+				'service_key' => DpdSettings::SERVICE_KEY,
+				'group_id' => DpdSettings::CARRIER_KEY . ':' . DeliveryType::PICKUP,
+				'title' => $pickup_title,
+				'delivery_type' => DeliveryType::PICKUP,
+				'tariffs' => $this->dpd_tariff_options( $request ),
+			),
+			array(
+				'service_key' => DpdSettings::SERVICE_KEY,
+				'group_id' => DpdSettings::CARRIER_KEY . ':' . DeliveryType::COURIER,
+				'title' => $courier_title,
+				'delivery_type' => DeliveryType::COURIER,
+				'tariffs' => $this->dpd_tariff_options( $request ),
+			),
+		);
+	}
+
+	/**
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function dpd_tariff_options( ShipmentCreateRequest $request ): array {
+		$selected_code = $this->terminal_code( (string) ( $request->meta['service_code'] ?? $request->meta['tariff_object'] ?? '' ) );
+		$enabled = $this->dpd_settings instanceof DpdSettings ? $this->dpd_settings->runtime_enabled_service_codes() : array();
+		if ( array() === $enabled && '' !== $selected_code ) {
+			$enabled = array( $selected_code );
+		}
+		$options = array();
+		foreach ( $enabled as $code ) {
+			$code = $this->terminal_code( (string) $code );
+			if ( '' === $code ) {
+				continue;
+			}
+			$options[ $code ] = array(
+				'object_code' => $code,
+				'title' => $this->dpd_tariff_title( $code, $code ),
+				'has_declared_value' => false,
+			);
+		}
+		if ( '' !== $selected_code && ! isset( $options[ $selected_code ] ) ) {
+			$options[ $selected_code ] = array(
+				'object_code' => $selected_code,
+				'title' => $this->dpd_tariff_title( $selected_code, (string) ( $request->meta['tariff_title'] ?? $selected_code ) ),
+				'has_declared_value' => false,
+				'selected_missing' => true,
+			);
+		}
+
+		return array_values( $options );
+	}
+
+	private function dpd_tariff_title( string $code, string $fallback = '' ): string {
+		$code = $this->terminal_code( $code );
+		if ( $this->dpd_settings instanceof DpdSettings ) {
+			return $this->dpd_settings->runtime_tariff_title( $code, $fallback ?: ( DpdSettings::known_service_codes()[ $code ] ?? $code ) );
+		}
+
+		return '' !== $fallback ? $fallback : ( DpdSettings::known_service_codes()[ $code ] ?? $code );
 	}
 
 	/**

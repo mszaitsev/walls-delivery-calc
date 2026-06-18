@@ -648,9 +648,9 @@ sort( $split_delivery_types );
 dpd_checkout_assert( 4 === count( $dpd_split_rates ) && array( DeliveryType::COURIER, DeliveryType::PICKUP ) === $split_delivery_types, 'Enabled DPD courier rates must add separate pickup and courier checkout entries.' );
 $max_rates = array_values( array_filter( $dpd_split_rates, static fn( $rate ): bool => 'MAX' === $rate->tariff_key ) );
 dpd_checkout_assert( 2 === count( $max_rates ) && ( $max_rates[0]->meta['checkout_group_id'] ?? '' ) !== ( $max_rates[1]->meta['checkout_group_id'] ?? '' ), 'Same DPD serviceCode must be preserved separately for pickup and courier orchestrator entries.' );
-dpd_checkout_assert( ! ( new CarrierShipmentAdapterRegistry() )->has( DpdSettings::CARRIER_KEY ), 'DPD must not be registered in CarrierShipmentAdapterRegistry.' );
+dpd_checkout_assert( ! ( new CarrierShipmentAdapterRegistry() )->has( DpdSettings::CARRIER_KEY ), 'Empty shipment registry must not contain DPD before explicit adapter registration.' );
 
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
-dpd_checkout_assert( str_contains( $plugin_source, 'DpdQuoteCarrier' ) && ! str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'Plugin must register DPD checkout carrier but not DPD shipment adapter.' );
+dpd_checkout_assert( str_contains( $plugin_source, 'DpdQuoteCarrier' ) && str_contains( $plugin_source, 'DpdShipmentAdapter' ) && str_contains( $plugin_source, 'array( $this->container->get( RussianPostShipmentAdapter::class ), $this->container->get( CdekShipmentAdapter::class ) ), $this->container->get( Logger::class )' ), 'Plugin must register DPD checkout carrier and dry-run adapter while keeping DPD out of the live-create adapter list.' );
 
 echo "DPD checkout runtime smoke test passed.\n";

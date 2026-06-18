@@ -1,6 +1,35 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.62.1.
+Current plugin version: 0.63.4.
+
+Version 0.63.4 makes the DPD preparation `Дата отправки` control two-line: label on the first line, compact date input
+with `−`/`+` buttons on the second. Clicking/focusing the date input now attempts the browser native date picker through
+`showPicker()` when available, with focus fallback. DPD payload logic, checkout pricing, live create calls, CDEK and
+Russian Post behavior are unchanged.
+
+Version 0.63.3 cosmetically refines the DPD preparation `Дата отправки` control. The date input is now compact instead
+of full-width, with small `−`/`+` buttons that move the selected date by one calendar day and trigger the existing
+dry-run preview/validation flow. DPD remains manual dry-run only; payload creation logic, checkout pricing, live create
+calls, CDEK and Russian Post behavior are unchanged.
+
+Version 0.63.2 applies site-check refinements to the manual DPD shipment preparation modal. The DPD receiver pickup
+point block no longer shows `Тип точки`, the DPD-only comment field/payload value was removed, and DPD courier address
+normalization no longer displays the CDEK city-code row. The dry-run preview now includes `request.header.datePickup`;
+the default date uses the store timezone, a 17:00 cutoff and the store calendar when available. DPD remains manual
+dry-run only: no live create call, auto creation, labels, statuses or DPD checkout pricing changes were added.
+
+Version 0.63.1 refines the manual DPD shipment preparation modal. Managers can temporarily switch receiver DPD pickup
+point, sender pickup point, delivery scenario and active DPD tariff inside the modal; these changes affect only the
+current dry-run payload request and are not saved to order meta or DPD settings. The DPD courier scenario reuses the
+CDEK-like address processing flow for a normalized DPD address preview, while DPD remains dry-run only with no live create
+call or auto shipment creation.
+
+Version 0.63.0 adds the first manual DPD shipment preparation stage. DPD orders can open the shared `Отправления`
+modal, managers enter cargo places manually, and the adapter builds a dry-run `order2/createOrder` payload preview with
+warnings/errors. No live DPD create call is made, no DPD auto-shipment creation exists, checkout `parcel[]` is not reused
+for shipment creation, and declared value is derived from the order goods value instead of separate order meta. The DPD
+`DPD Расчет` tab now has a `ПВЗ отправителя по умолчанию` terminalCode setting with a read-only parcel-shop summary for
+shipment preparation; checkout runtime keeps its existing auto-selection behavior when this value is empty.
 
 Version 0.62.1 cleans up the DPD `DPD Расчет` admin tab after runtime moved to
 `calculator2/getServiceCostByParcels3`. The old `Тестовый расчет DPD` form, submit action, result block and dedicated
