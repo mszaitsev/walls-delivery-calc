@@ -68,6 +68,8 @@ final class QuoteCache {
 			(string) $request->order_total->get_kopecks(),
 			(string) ( $request->customer_context['selected_location_id'] ?? '' ),
 			(string) ( $request->customer_context['selected_location_fias_id'] ?? '' ),
+			(string) ( $request->customer_context['dpd_selected_terminal_code'] ?? '' ),
+			(string) ( $request->customer_context['dpd_delivery_terminal_code'] ?? '' ),
 			$carrier_key,
 			$service_key,
 			$delivery_type,

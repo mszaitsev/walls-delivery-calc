@@ -46,6 +46,7 @@ use WallsShop\WDC\Carriers\Dpd\Tariff\DpdParcelBuilder;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffCalculationService;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffOptionNormalizer;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffRequestBuilder;
+use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTerminalCodeTariffRequestBuilder;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostCountriesAdminPage;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingRepository;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostCountryMappingService;
@@ -281,7 +282,8 @@ final class Plugin {
 		$this->container->register( DpdParcelBuilder::class, fn(): DpdParcelBuilder => new DpdParcelBuilder( $this->container->get( DpdSettings::class ), $this->container->get( PackagingWeightCalculator::class ) ) );
 		$this->container->register( DpdTariffRequestBuilder::class, fn(): DpdTariffRequestBuilder => new DpdTariffRequestBuilder() );
 		$this->container->register( DpdTariffOptionNormalizer::class, fn(): DpdTariffOptionNormalizer => new DpdTariffOptionNormalizer() );
-		$this->container->register( DpdTariffCalculationService::class, fn(): DpdTariffCalculationService => new DpdTariffCalculationService( $this->container->get( DpdApiClient::class ), $this->container->get( DpdCityResolver::class ), $this->container->get( LocationRepository::class ), $this->container->get( DpdSettings::class ), $this->container->get( DpdTariffRequestBuilder::class ), $this->container->get( DpdTariffOptionNormalizer::class ) ) );
+		$this->container->register( DpdTerminalCodeTariffRequestBuilder::class, fn(): DpdTerminalCodeTariffRequestBuilder => new DpdTerminalCodeTariffRequestBuilder() );
+		$this->container->register( DpdTariffCalculationService::class, fn(): DpdTariffCalculationService => new DpdTariffCalculationService( $this->container->get( DpdApiClient::class ), $this->container->get( DpdCityResolver::class ), $this->container->get( LocationRepository::class ), $this->container->get( DpdSettings::class ), $this->container->get( DpdTariffRequestBuilder::class ), $this->container->get( DpdTariffOptionNormalizer::class ), $this->container->get( DpdPickupPointService::class ), $this->container->get( DpdTerminalCodeTariffRequestBuilder::class ) ) );
 		$this->container->register( RussianPostCourierTariffProbeService::class, fn(): RussianPostCourierTariffProbeService => new RussianPostCourierTariffProbeService( $this->container->get( Logger::class ) ) );
 		$this->container->register( RussianPostOtpravkaApiSettings::class, fn(): RussianPostOtpravkaApiSettings => new RussianPostOtpravkaApiSettings( $this->container->get( SettingsRepository::class ), $this->container->get( EncryptionService::class ), $this->container->get( DeliveryServiceRepository::class ), $this->container->get( DeliveryServiceSettingsRepository::class ) ) );
 		$this->container->register( RussianPostOtpravkaApiClient::class, fn(): RussianPostOtpravkaApiClient => new RussianPostOtpravkaApiClient( $this->container->get( RussianPostOtpravkaApiSettings::class ) ) );
@@ -317,7 +319,7 @@ final class Plugin {
 		$this->container->register( RussianPostInternationalCarrier::class, fn(): RussianPostInternationalCarrier => new RussianPostInternationalCarrier( $this->container->get( RussianPostSettings::class ), $this->container->get( RussianPostApiClient::class ), $this->container->get( RussianPostCountryDirectory::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( RussianPostDomesticCarrier::class, fn(): RussianPostDomesticCarrier => new RussianPostDomesticCarrier( $this->container->get( RussianPostDomesticSettings::class ), $this->container->get( RussianPostDomesticApiClient::class ), $this->container->get( RussianPostDomesticTariffVariantResolver::class ), $this->container->get( Logger::class ), $this->container->get( DaDataPostcodeClient::class ), $this->container->get( LocationRepository::class ) ) );
 		$this->container->register( CdekCarrier::class, fn(): CdekCarrier => new CdekCarrier( $this->container->get( CdekSettings::class ), $this->container->get( CdekApiClient::class ), $this->container->get( CdekLocationResolver::class ), $this->container->get( Logger::class ), $this->container->get( CdekTariffRepository::class ) ) );
-		$this->container->register( DpdQuoteCarrier::class, fn(): DpdQuoteCarrier => new DpdQuoteCarrier( $this->container->get( DpdSettings::class ), $this->container->get( DpdTariffCalculationService::class ), $this->container->get( DpdParcelBuilder::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( DpdQuoteCarrier::class, fn(): DpdQuoteCarrier => new DpdQuoteCarrier( $this->container->get( DpdSettings::class ), $this->container->get( DpdTariffCalculationService::class ), $this->container->get( DpdParcelBuilder::class ), $this->container->get( Logger::class ), $this->container->get( CheckoutSessionManager::class ) ) );
 		$this->container->register(
 			CarrierRegistry::class,
 			function (): CarrierRegistry {
@@ -586,9 +588,10 @@ final class Plugin {
 				$this->container->get( DpdGeographyImportService::class ),
 				$this->container->get( DpdGeographyFtpClient::class ),
 				$this->container->get( DpdDaDataDeliveryFallbackService::class ),
-				$this->container->get( DpdTariffCalculationService::class ),
 				$this->container->get( DpdPickupPointRepository::class ),
-				$this->container->get( DpdPickupPointImportService::class )
+				$this->container->get( DpdPickupPointImportService::class ),
+				$this->container->get( DpdCityResolver::class ),
+				$this->container->get( LocationRepository::class )
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper() );

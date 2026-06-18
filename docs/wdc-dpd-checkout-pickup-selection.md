@@ -1,6 +1,10 @@
 # WDC DPD Checkout Pickup Selection
 
-Version: 0.60.4.
+Version: 0.62.0.
+
+0.62.0 update: the selected DPD pickup `terminal_code` now affects checkout pricing. Runtime uses
+`calculator2/getServiceCostByParcels3`; before buyer selection it auto-selects a receiver-city `parcel_shop`, and after
+save it uses the buyer-selected terminalCode and triggers checkout recalculation.
 
 0.60.4 update: the shared checkout pickup map recalculates and resorts visible point distances after DPD address search
 or browser geolocation changes the active origin, so side-card distances and `Ближайший ПВЗ` use the current origin.
@@ -12,8 +16,7 @@ responses, checkout session snapshots and order meta do not expose it.
 
 0.60.2 update: DPD pickup schedules are formatted for checkout output. REST point payloads and saved checkout pickup
 snapshots expose readable `work_time`/`schedule` values, including JSON schedules already stored in
-`wdc_dpd_pickup_points`. Raw DPD `raw_json` remains untouched, and the selected `terminal_code` still does not affect
-tariff calculation.
+`wdc_dpd_pickup_points`. Raw DPD `raw_json` remains untouched.
 
 0.60.1 review fix: checkout resolve-location now extracts the selected point payload or `point_id` before applying the
 DPD/CDEK skip checks. DPD and CDEK pickup points return `requires_location_change=false` without invoking the Russian
@@ -22,13 +25,8 @@ Post location resolver; Russian Post behavior remains on the resolver path. Pric
 
 ## Scope
 
-DPD pickup-point selection is connected to checkout as a foundation step. Buyers can select a local DPD parcel shop or
-self-delivery terminal for DPD pickup rates. The selected point is stored in checkout/session/order meta for future DPD
-terminalCode-aware pricing and order/shipment work.
-
-This stage intentionally does not change DPD pricing. DPD checkout rates still use `calculator2/getServiceCostByParcels2`
-with sender/receiver cityId and `selfPickup`/`selfDelivery` mode flags. The selected `terminal_code` is not sent to DPD
-tariff calculation yet.
+DPD pickup-point selection is connected to checkout. Buyers select a local DPD `parcel_shop` for DPD pickup rates. The
+selected point is stored in checkout/session/order meta and is now used by DPD terminalCode-aware runtime pricing.
 
 ## Reused Pattern
 
@@ -151,14 +149,14 @@ is added in this stage.
 
 ## Pricing Boundary
 
-The selected DPD pickup point currently affects only checkout validation and saved order metadata.
+The selected DPD pickup point affects DPD pickup price calculation:
 
-It does not affect DPD price calculation yet:
+- runtime calls `getServiceCostByParcels3`;
+- pickup pricing sends sender `pickup.terminalCode` and receiver `delivery.terminalCode`;
+- before buyer selection, receiver terminalCode is auto-selected from an active receiver-city `parcel_shop`;
+- after buyer selection, the selected `terminal_code` replaces the auto-selected receiver terminalCode;
+- checkout JS triggers `update_checkout` after saving a DPD point so rates recalculate;
+- `parcel[]` remains the packaging-place model;
+- `getServiceCost3` is not used.
 
-- no `terminalCode` is added to DPD tariff requests;
-- runtime does not call `getServiceCostByParcels3`;
-- runtime does not call `getServiceCost3`;
-- `parcel[]` remains the packaging-place model.
-
-Next step: test `getServiceCostByParcels3` with `parcel[]`, `pickup.terminalCode` and `delivery.terminalCode`, compare
-prices with the DPD cabinet, and only then consider terminalCode-aware runtime pricing.
+This still does not create DPD shipments, labels, COD/NPP, unitLoad or shipment metabox actions.

@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\Dpd\DpdApiClient;
 use WallsShop\WDC\Carriers\Dpd\DpdCityResolver;
 use WallsShop\WDC\Carriers\Dpd\DpdException;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -18,7 +19,9 @@ final class DpdTariffCalculationService {
 		private LocationRepository $locations,
 		private DpdSettings $settings,
 		private DpdTariffRequestBuilder $builder,
-		private DpdTariffOptionNormalizer $normalizer
+		private DpdTariffOptionNormalizer $normalizer,
+		private ?DpdPickupPointService $pickup_points = null,
+		private ?DpdTerminalCodeTariffRequestBuilder $terminal_builder = null
 	) {
 	}
 
@@ -46,20 +49,109 @@ final class DpdTariffCalculationService {
 			return DpdTariffResult::failure( array( 'DPD cityId was not found for receiver location_id. Run DPD geography import or manual mapping.' ), array( 'receiver_location_id' => $receiver_location_id ) );
 		}
 
-		$request = new DpdTariffRequest(
+		if ( ! $this->pickup_points instanceof DpdPickupPointService ) {
+			return DpdTariffResult::failure(
+				array( 'DPD pickup point service is unavailable. Import DPD pickup points before terminalCode pricing.' ),
+				array(
+					'sender_city_id' => $sender_city_id,
+					'receiver_city_id' => $receiver_city_id,
+					'receiver_location_id' => $receiver_location_id,
+					'method' => 'getServiceCostByParcels3',
+				)
+			);
+		}
+
+		$pickup_terminal = $this->pickup_points->find_runtime_parcel_shop_for_city_id( (int) $sender_city_id );
+		$pickup_terminal_code = trim( (string) ( $pickup_terminal['selected_terminal_code'] ?? '' ) );
+		if ( '' === $pickup_terminal_code ) {
+			return DpdTariffResult::failure(
+				array_merge(
+					array( 'DPD pickup terminalCode was not found for sender cityId. Import DPD pickup points or configure sender DPD city mapping.' ),
+					is_array( $pickup_terminal['warnings'] ?? null ) ? $pickup_terminal['warnings'] : array()
+				),
+				array(
+					'sender_city_id' => $sender_city_id,
+					'receiver_city_id' => $receiver_city_id,
+					'receiver_location_id' => $receiver_location_id,
+					'method' => 'getServiceCostByParcels3',
+					'pickup_terminal_selection' => $pickup_terminal,
+				)
+			);
+		}
+
+		$self_delivery = ! empty( $params['self_delivery'] );
+		$delivery_terminal = array();
+		$delivery_terminal_code = '';
+		$delivery_terminal_source = '';
+		if ( $self_delivery ) {
+			$selected_delivery_terminal_code = trim( (string) ( $params['delivery_terminal_code'] ?? '' ) );
+			if ( '' !== $selected_delivery_terminal_code ) {
+				$selected_point = $this->pickup_points->find_runtime_parcel_shop_by_terminal_code( $selected_delivery_terminal_code, (int) $receiver_city_id );
+				if ( null === $selected_point ) {
+					return DpdTariffResult::failure(
+						array( 'Selected DPD delivery terminalCode is not an active parcel_shop in receiver cityId.' ),
+						array(
+							'sender_city_id' => $sender_city_id,
+							'receiver_city_id' => $receiver_city_id,
+							'receiver_location_id' => $receiver_location_id,
+							'method' => 'getServiceCostByParcels3',
+							'pickup_terminal_selection' => $pickup_terminal,
+							'delivery_terminal_code' => $selected_delivery_terminal_code,
+						)
+					);
+				}
+				$delivery_terminal_code = $selected_delivery_terminal_code;
+				$delivery_terminal_source = 'selected';
+				$delivery_terminal = array(
+					'point' => $selected_point,
+					'selected_terminal_code' => $delivery_terminal_code,
+					'selected_type' => (string) ( $selected_point['type'] ?? '' ),
+					'selected_name' => (string) ( $selected_point['name'] ?? '' ),
+					'selected_address' => (string) ( $selected_point['address'] ?? '' ),
+					'fallback_duplicate_was_used' => false,
+					'ambiguous' => false,
+					'warnings' => array(),
+				);
+			} else {
+				$delivery_terminal = $this->pickup_points->find_runtime_parcel_shop_for_city_id( (int) $receiver_city_id );
+				$delivery_terminal_code = trim( (string) ( $delivery_terminal['selected_terminal_code'] ?? '' ) );
+				$delivery_terminal_source = 'auto';
+				if ( '' === $delivery_terminal_code ) {
+					return DpdTariffResult::failure(
+						array_merge(
+							array( 'DPD delivery terminalCode was not found for receiver cityId. Import DPD pickup points before pickup pricing.' ),
+							is_array( $delivery_terminal['warnings'] ?? null ) ? $delivery_terminal['warnings'] : array()
+						),
+						array(
+							'sender_city_id' => $sender_city_id,
+							'receiver_city_id' => $receiver_city_id,
+							'receiver_location_id' => $receiver_location_id,
+							'method' => 'getServiceCostByParcels3',
+							'pickup_terminal_selection' => $pickup_terminal,
+							'delivery_terminal_selection' => $delivery_terminal,
+						)
+					);
+				}
+			}
+		}
+
+		$terminal_builder = $this->terminal_builder ?? new DpdTerminalCodeTariffRequestBuilder();
+		$request = new DpdTerminalCodeTariffRequest(
 			$sender_city_id,
 			$receiver_city_id,
 			$this->parcels( $params ),
 			$this->non_negative_float( $params['declared_value_rub'] ?? $this->settings->tariff_default_declared_value_rub(), $this->settings->tariff_default_declared_value_rub() ),
 			! empty( $params['self_pickup'] ),
-			! empty( $params['self_delivery'] ),
+			$self_delivery,
+			$pickup_terminal_code,
+			$self_delivery ? $delivery_terminal_code : '',
 			(string) ( $params['service_code'] ?? '' ),
 			(string) ( $params['pickup_date'] ?? '' )
 		);
-		$payload = $this->builder->build( $request );
+		$payload = $terminal_builder->build( $request );
 
 		try {
-			$response = $this->api->getServiceCostByParcels2( $payload );
+			$response = $this->api->getServiceCostByParcels3( $payload );
 			$options = $this->normalizer->normalize( $response );
 
 			return new DpdTariffResult(
@@ -69,18 +161,24 @@ final class DpdTariffCalculationService {
 				$payload,
 				$this->normalizer->raw_body( $response ),
 				array(
+					'method' => 'getServiceCostByParcels3',
 					'sender_city_id' => $sender_city_id,
 					'receiver_city_id' => $receiver_city_id,
 					'receiver_location_id' => $receiver_location_id,
+					'pickup_terminal_code' => $pickup_terminal_code,
+					'pickup_terminal_selection' => $pickup_terminal,
+					'delivery_terminal_code' => $self_delivery ? $delivery_terminal_code : '',
+					'delivery_terminal_source' => $delivery_terminal_source,
+					'delivery_terminal_selection' => $delivery_terminal,
 					'raw_count' => count( $options ),
 					'wrapper' => (string) ( $response->meta['wrapper'] ?? '' ),
 					'debug_payload_shape' => is_array( $response->meta['debug_payload_shape'] ?? null ) ? $response->meta['debug_payload_shape'] : array(),
 				)
 			);
 		} catch ( DpdException $exception ) {
-			return new DpdTariffResult( false, array( $exception->getMessage() ), array(), $payload, null, array( 'receiver_location_id' => $receiver_location_id ) );
+			return new DpdTariffResult( false, array( $exception->getMessage() ), array(), $payload, null, array( 'receiver_location_id' => $receiver_location_id, 'method' => 'getServiceCostByParcels3' ) );
 		} catch ( \Throwable $exception ) {
-			return new DpdTariffResult( false, array( 'DPD tariff calculation failed: ' . $exception->getMessage() ), array(), $payload, null, array( 'receiver_location_id' => $receiver_location_id ) );
+			return new DpdTariffResult( false, array( 'DPD tariff calculation failed: ' . $exception->getMessage() ), array(), $payload, null, array( 'receiver_location_id' => $receiver_location_id, 'method' => 'getServiceCostByParcels3' ) );
 		}
 	}
 

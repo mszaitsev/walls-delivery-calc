@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 000000CF A0AC:74BD
+Volume serial number is 00000097 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -120,6 +120,7 @@ C:.
 |   |   wdc-dpd-integration.md
 |   |   wdc-dpd-pickup-points.md
 |   |   wdc-dpd-tariff-calculation.md
+|   |   wdc-dpd-terminalcode-pricing.md
 |   |   wdc-fias-foundation.md
 |   |   wdc-gar-places-import.md
 |   |   wdc-legacy-uninstall-cleanup.md
@@ -237,6 +238,8 @@ C:.
 |   |   |           DpdTariffRequest.php
 |   |   |           DpdTariffRequestBuilder.php
 |   |   |           DpdTariffResult.php
+|   |   |           DpdTerminalCodeTariffRequest.php
+|   |   |           DpdTerminalCodeTariffRequestBuilder.php
 |   |   |
 |   |   +---Registry
 |   |   |       CarrierRegistry.php
@@ -649,6 +652,7 @@ C:.
     |       run-dpd-parcel-builder-smoke.php
     |       run-dpd-pickup-points-smoke.php
     |       run-dpd-tariff-calculation-smoke.php
+    |       run-dpd-terminalcode-runtime-pricing-smoke.php
     |
     +---fias
     |       run-fias-smoke.php

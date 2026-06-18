@@ -40,6 +40,97 @@ final class DpdPickupPointService {
 	}
 
 	/**
+	 * @return array{point:?array<string,mixed>,selected_terminal_code:string,selected_type:string,selected_name:string,selected_address:string,fallback_duplicate_was_used:bool,ambiguous:bool,warnings:array<int,string>}
+	 */
+	public function find_runtime_parcel_shop_for_city_id( int $city_id ): array {
+		return $this->parcel_shop_selection_for_city_id( $city_id );
+	}
+
+	public function find_runtime_parcel_shop_by_terminal_code( string $terminal_code, ?int $city_id = null ): ?array {
+		$terminal_code = trim( $terminal_code );
+		if ( '' === $terminal_code ) {
+			return null;
+		}
+		$filters = array( 'terminal_code' => $terminal_code, 'limit' => 50 );
+		if ( null !== $city_id && $city_id > 0 ) {
+			$filters['city_id'] = $city_id;
+		}
+		foreach ( $this->repository->search( $filters ) as $point ) {
+			if ( 'parcel_shop' === (string) ( $point['type'] ?? '' ) && $terminal_code === trim( (string) ( $point['terminal_code'] ?? '' ) ) ) {
+				return $point;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * @return array{point:?array<string,mixed>,selected_terminal_code:string,selected_type:string,selected_name:string,selected_address:string,fallback_duplicate_was_used:bool,ambiguous:bool,warnings:array<int,string>}
+	 */
+	public function find_runtime_parcel_shop_for_location_id( int $location_id ): array {
+		$city_id = $this->delivery_codes->get_dpd_city_id( $location_id );
+		if ( null === $city_id ) {
+			return $this->terminal_selection(
+				null,
+				false,
+				array( 'DPD cityId was not found for location_id. DPD terminalCode pricing is unavailable.' ),
+				false
+			);
+		}
+
+		return $this->find_runtime_parcel_shop_for_city_id( (int) $city_id );
+	}
+
+	/**
+	 * @return array{point:?array<string,mixed>,selected_terminal_code:string,selected_type:string,selected_name:string,selected_address:string,fallback_duplicate_was_used:bool,ambiguous:bool,warnings:array<int,string>}
+	 */
+	private function parcel_shop_selection_for_city_id( int $city_id ): array {
+		$rows = $this->repository->search( array( 'city_id' => $city_id, 'limit' => 500 ) );
+		$terminal_duplicates = array();
+		$parcel_shops = array();
+
+		foreach ( $rows as $row ) {
+			$code = trim( (string) ( $row['terminal_code'] ?? '' ) );
+			if ( '' === $code ) {
+				continue;
+			}
+			$type = (string) ( $row['type'] ?? '' );
+			if ( 'terminal_self_delivery' === $type ) {
+				$terminal_duplicates[ $code ] = true;
+				continue;
+			}
+			if ( 'parcel_shop' === $type ) {
+				$parcel_shops[] = $row;
+			}
+		}
+
+		$unambiguous = array_values(
+			array_filter(
+				$parcel_shops,
+				static fn( array $point ): bool => ! isset( $terminal_duplicates[ trim( (string) ( $point['terminal_code'] ?? '' ) ) ] )
+			)
+		);
+		if ( array() !== $unambiguous ) {
+			return $this->terminal_selection( $unambiguous[0], false, array(), false );
+		}
+		if ( count( $parcel_shops ) > 0 ) {
+			return $this->terminal_selection(
+				$parcel_shops[0],
+				true,
+				array( 'Selected parcel_shop fallback even though terminal_self_delivery duplicate exists for terminalCode.' ),
+				false
+			);
+		}
+
+		return $this->terminal_selection(
+			null,
+			false,
+			array( 'No parcel_shop terminalCode found for cityId. DPD terminalCode pricing is unavailable.' ),
+			false
+		);
+	}
+
+	/**
 	 * @param array<int,array<string,mixed>> $points
 	 * @return array<int,array<string,mixed>>
 	 */
@@ -63,5 +154,23 @@ final class DpdPickupPointService {
 	 */
 	private function type_priority( array $point ): int {
 		return 'parcel_shop' === (string) ( $point['type'] ?? '' ) ? 1 : 2;
+	}
+
+	/**
+	 * @param array<string,mixed>|null $point
+	 * @param array<int,string> $warnings
+	 * @return array{point:?array<string,mixed>,selected_terminal_code:string,selected_type:string,selected_name:string,selected_address:string,fallback_duplicate_was_used:bool,ambiguous:bool,warnings:array<int,string>}
+	 */
+	private function terminal_selection( ?array $point, bool $fallback_duplicate_was_used, array $warnings, bool $ambiguous ): array {
+		return array(
+			'point' => $point,
+			'selected_terminal_code' => null === $point ? '' : (string) ( $point['terminal_code'] ?? '' ),
+			'selected_type' => null === $point ? '' : (string) ( $point['type'] ?? '' ),
+			'selected_name' => null === $point ? '' : (string) ( $point['name'] ?? '' ),
+			'selected_address' => null === $point ? '' : (string) ( $point['address'] ?? '' ),
+			'fallback_duplicate_was_used' => $fallback_duplicate_was_used,
+			'ambiguous' => $ambiguous,
+			'warnings' => $warnings,
+		);
 	}
 }

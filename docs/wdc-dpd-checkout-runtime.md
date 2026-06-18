@@ -1,16 +1,18 @@
 # DPD Checkout Runtime
 
-Version: 0.60.0
+Version: 0.62.0
 
 ## Scope
 
-DPD checkout runtime is a quote-only carrier. It produces WooCommerce checkout delivery rates through the existing `CarrierRegistry` / `CheckoutOrchestrator` / grouped tariff-selector architecture and reuses the DPD tariff foundation built on `calculator2/getServiceCostByParcels2`.
+DPD checkout runtime is a quote-only carrier. It produces WooCommerce checkout delivery rates through the existing
+`CarrierRegistry` / `CheckoutOrchestrator` / grouped tariff-selector architecture and uses
+`calculator2/getServiceCostByParcels3` with terminalCode.
 
 DPD remains disabled by default as the built-in delivery service `dpd`.
 
-0.60.0 update: DPD pickup checkout rates now require pickup-point selection and reuse the shared WDC pickup UI. The
-selected point is loaded from the local `wdc_dpd_pickup_points` table and saved to checkout/order meta. This does not
-change pricing: tariff requests still use `getServiceCostByParcels2`, cityId, `selfPickup` and `selfDelivery` only.
+0.62.0 update: DPD pickup and courier checkout pricing now use Parcels3. Pickup rates send sender
+`pickup.terminalCode` and receiver `delivery.terminalCode`; courier rates send sender `pickup.terminalCode` and omit
+`delivery.terminalCode`.
 
 ## Runtime Registration
 
@@ -29,7 +31,8 @@ DPD rates are returned only when all runtime prerequisites pass:
 - checkout has a receiver `location_id`;
 - receiver `location_id` has `wdc_location_delivery_codes.dpd_city_id`;
 - at least one DPD service code is enabled on the DPD `Тарифы` tab;
-- `getServiceCostByParcels2` returns enabled tariff options with numeric positive `cost`;
+- `getServiceCostByParcels3` returns enabled tariff options with numeric positive `cost`;
+- active DPD `parcel_shop` rows exist for sender terminalCode and, for pickup delivery, receiver terminalCode;
 - common delivery-service availability/rules do not reject the service.
 
 If one of these conditions fails, DPD returns no rates and checkout continues without a fatal error.
@@ -41,16 +44,18 @@ The runtime calls `DpdTariffCalculationService`, which builds the same business 
 The checkout stage sends only aggregate package data:
 
 - `pickup.cityId`: sender DPD city ID from settings/override;
+- `pickup.terminalCode`: active sender-city DPD `parcel_shop`;
 - `delivery.cityId`: receiver DPD city ID resolved from `wdc_location_delivery_codes`;
+- `delivery.terminalCode`: active receiver-city DPD `parcel_shop` for pickup delivery only;
 - `selfPickup`: always `true` in checkout runtime; DPD checkout shipment is calculated from a DPD terminal;
 - `selfDelivery`: `true` for the pickup/terminal delivery entry, `false` for the courier delivery entry;
 - `parcel[]`: packaging places, not cart items;
 - `declaredValue`: package/order total, with DPD default declared value as fallback.
 
-Current pricing mode is city/mode based, not terminalCode-aware:
+Current pricing mode is terminalCode-aware:
 
-- pickup group: `selfPickup=true` and `selfDelivery=true`, currently priced as terminal-to-terminal without courier legs;
-- courier group: `selfPickup=true` and `selfDelivery=false`, priced with courier delivery to the receiver.
+- pickup group: `selfPickup=true`, `selfDelivery=true`, sender `pickup.terminalCode`, receiver `delivery.terminalCode`;
+- courier group: `selfPickup=true`, `selfDelivery=false`, sender `pickup.terminalCode`; `delivery.terminalCode` is not sent.
 
 `DpdParcelBuilder` builds runtime `parcel[]` as packaging places with fast deterministic 3D shelf/bin packing:
 
@@ -131,7 +136,8 @@ DPD `Тарифы` stores runtime tariff controls:
 
 Default enabled service codes are `ECN,CSM,MXO`. If all checkboxes are off, DPD returns no checkout rates. Unknown returned DPD service codes are skipped unless they become explicitly enabled in settings.
 
-DPD `DPD Расчет` remains only for admin diagnostics and sender/default package settings.
+DPD `DPD Расчет` stores sender/default package settings and can run a test calculation through the same Parcels3 runtime
+service. The old terminalCode diagnostic comparison UI was removed.
 
 ## Pickup And Courier Entries
 
@@ -152,29 +158,33 @@ Pickup/terminal delivery now requires local DPD pickup-point selection in checko
 - the shared checkout pickup UI loads active local DPD points from `wdc_dpd_pickup_points`;
 - the selected `terminal_code` is saved to checkout/session/order meta.
 
-The selected terminal does not affect the DPD tariff request in this stage.
+Before a buyer selects a DPD point, runtime auto-selects a receiver-city `parcel_shop` terminalCode so pickup prices can
+appear immediately. After the buyer selects or changes a DPD point, the checkout frontend saves the selected
+`terminal_code`, triggers `update_checkout`, and runtime uses the selected terminalCode instead of the auto-selected one.
 
 Courier delivery:
 
 - is skipped with reason `courier_rates_disabled` and no SOAP call when `dpd_runtime_enable_courier_rates` is disabled;
 - request payload sends `selfPickup=true`;
+- request payload sends sender `pickup.terminalCode`;
 - request payload sends `selfDelivery=false`;
+- request payload does not send `delivery.terminalCode`;
 - returned rates use `DeliveryType::COURIER`;
 - `requires_courier_address=true`;
 - `requires_pickup_point=false`.
 
-## TerminalCode Pricing Debt
+## TerminalCode Selection
 
-DPD pickup points and self-delivery terminals are importable into the local table and checkout now stores the buyer-selected receiver `terminal_code`. Pricing is still city/mode based; checkout does not send `delivery.terminalCode`, and sender terminal selection is not finalized.
+Sender terminalCode is always selected from active sender-city `parcel_shop` rows. Receiver terminalCode for pickup
+delivery is selected from active receiver-city `parcel_shop` rows until the buyer picks a concrete DPD point.
 
-The terminal pricing stage must:
+Selection rules:
 
-- obtain the sender terminal code and the selected receiver terminal code;
-- test `calculator2/getServiceCostByParcels3` with `parcel[]`, `pickup.terminalCode` and `delivery.terminalCode`;
-- compare terminal-to-terminal and terminal-to-door prices with the DPD cabinet;
-- switch runtime to terminalCode-aware calculation only after those checks pass.
-
-`getServiceCost3` should not be chosen automatically as the target method because it does not cover the current `parcel[]` packaging-place model. The preferred future candidate is `getServiceCostByParcels3`, if it confirms support for both `parcel[]` and terminal codes.
+- standalone `terminal_self_delivery` rows are not used as runtime terminals;
+- `parcel_shop` is preferred;
+- `parcel_shop` without a same-code `terminal_self_delivery` duplicate is preferred;
+- if every parcel shop is duplicated, runtime falls back to the first deterministic `parcel_shop`;
+- if no `parcel_shop` exists, DPD returns no quote.
 
 ## Quote Id
 
@@ -183,6 +193,8 @@ DPD `quote_id` is diagnostic and includes:
 - selected receiver `location_id`;
 - sender city ID;
 - receiver city ID when available;
+- sender pickup terminalCode;
+- receiver delivery terminalCode for pickup delivery;
 - weight;
 - length, width and height;
 - declared value;
@@ -196,14 +208,16 @@ DPD `quote_id` is diagnostic and includes:
 
 ## Cache And Parcel Diagnostics
 
-The generic checkout quote cache key includes selected receiver location, package dimensions and declared value in addition to the existing carrier/service/country/city/weight/order-total dimensions. DPD `quote_id` diagnostics also include the normalized parcel signature, parcel count, long-item parcel count, regular item count, total weight, dimensions, declared value, `parcel_dimensions`, goods/packaging/final weights, tried/selected box formats, small-item and identical-grid diagnostics, `box_limit`, packing limit reason and `package_builder_source`.
+The generic checkout quote cache key includes selected receiver location, selected DPD terminalCode, package dimensions
+and declared value in addition to the existing carrier/service/country/city/weight/order-total dimensions. DPD
+`quote_id` diagnostics also include the normalized parcel signature, terminalCode values, parcel count, long-item parcel
+count, regular item count, total weight, dimensions, declared value, `parcel_dimensions`, goods/packaging/final weights,
+tried/selected box formats, small-item and identical-grid diagnostics, `box_limit`, packing limit reason and
+`package_builder_source`.
 
 ## Out Of Scope
 
-The 0.60.0 checkout selection stage still does not implement:
-
-- terminalCode-aware pricing;
-- passing `terminalCode` to DPD tariff requests;
+The 0.62.0 terminalCode runtime pricing stage still does not implement:
 - DPD-specific shipment creation;
 - shipment creation;
 - cancellation;

@@ -1,6 +1,24 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.60.4.
+Current plugin version: 0.62.1.
+
+Version 0.62.1 cleans up the DPD `DPD Расчет` admin tab after runtime moved to
+`calculator2/getServiceCostByParcels3`. The old `Тестовый расчет DPD` form, submit action, result block and dedicated
+tariff result storage were removed. The display-only sender city text setting was also removed; the tab keeps
+`sender_location_id`, optional sender DPD cityId override, default parcel values, and read-only sender information from
+the stored location plus resolved DPD cityId. Checkout runtime pricing, Parcels3 payloads, pickup selection, shipment
+adapter/metabox scope, CDEK and Russian Post remain unchanged.
+
+Version 0.62.0 switches DPD checkout runtime pricing to `calculator2/getServiceCostByParcels3` after the terminalCode
+diagnostic matched the DPD personal cabinet. Pickup rates now send `pickup.cityId`, `pickup.terminalCode`,
+`delivery.cityId`, `delivery.terminalCode`, `selfPickup=true`, `selfDelivery=true`, `declaredValue` and `parcel[]`.
+Courier rates send `pickup.cityId`, `pickup.terminalCode`, `delivery.cityId`, `selfPickup=true`, `selfDelivery=false`,
+`declaredValue` and `parcel[]`; `delivery.terminalCode` is intentionally omitted. Sender and automatic receiver
+terminalCode selection use active `parcel_shop` rows, avoiding duplicate `terminal_self_delivery` rows when possible and
+falling back to a duplicated `parcel_shop` only when needed. The old admin terminalCode diagnostic UI was removed; DPD
+shipment adapter/metabox, shipment creation, labels, COD/NPP, unitLoad, CDEK and Russian Post runtime remain unchanged.
+
+Version 0.61.0 added an admin-only DPD terminalCode pricing diagnostic for `calculator2/getServiceCostByParcels3`.
 
 Version 0.60.4 fixes stale pickup-map distances after address search or browser geolocation changes the active origin.
 The frontend now recalculates and resorts current visible pickup points before rerendering markers, the side list and the

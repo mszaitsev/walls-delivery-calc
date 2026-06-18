@@ -1,6 +1,10 @@
 # WDC DPD Pickup Points
 
-Version: 0.60.3.
+Version: 0.62.0.
+
+0.62.0 update: `DpdPickupPointService` now provides runtime `parcel_shop` terminal selection for DPD Parcels3 pricing.
+It uses only active `parcel_shop` rows, avoids duplicate `terminal_self_delivery` rows with the same `terminal_code`
+when possible, and falls back to a duplicated `parcel_shop` when no unambiguous parcel shop exists.
 
 0.60.3 update: `raw_json` is diagnostic/admin/internal storage only. It remains in `wdc_dpd_pickup_points` but is not
 returned by checkout REST, not saved in checkout session snapshots and not saved to order meta. Checkout-facing DPD point
@@ -14,14 +18,16 @@ string and plain string values, chooses timetable operations by priority (`SelfD
 format existing JSON schedule strings already stored in `wdc_dpd_pickup_points`; `raw_json` remains unchanged.
 
 0.60.0 update: local DPD points are now used by checkout pickup selection through the shared pickup UI and REST
-controllers. The selected active `terminal_code` is saved to checkout/order meta, but it does not affect DPD pricing yet.
+controllers. The selected active `terminal_code` is saved to checkout/order meta and now replaces the auto-selected
+receiver terminalCode in DPD Parcels3 pickup pricing.
 
 0.59.2 cleanup: the old full-source `mark_source_inactive()` helper was removed after safe-replace switched to
 upserting the new valid set first and then inactivating only stale missing keys. Import behavior did not change.
 
 ## Scope
 
-This stage stores local DPD pickup points / terminals and now supplies them to the checkout pickup selection foundation. It still does not change DPD tariff calculation.
+This stage stores local DPD pickup points / terminals, supplies them to checkout pickup selection, and supplies active
+`parcel_shop` terminalCode values to DPD Parcels3 runtime pricing.
 
 ## DPD Methods Checked
 
@@ -126,37 +132,33 @@ Diagnostics can search by:
 
 The first 20 matching active rows are rendered in the admin table.
 
-## Future Checkout Service
+## Checkout And Runtime Service
 
-`DpdPickupPointService` is read-only and prepared for the checkout map stage:
+`DpdPickupPointService` is read-only for checkout and runtime pricing:
 
 - `get_points_for_location_id(int $location_id)`;
 - `get_points_by_city_id(int $city_id)`;
 - `get_point_by_terminal_code(string $terminal_code)`.
+- `find_runtime_parcel_shop_for_city_id(int $city_id)`;
+- `find_runtime_parcel_shop_by_terminal_code(string $terminal_code, ?int $city_id = null)`;
+- `find_runtime_parcel_shop_for_location_id(int $location_id)`.
 
 `get_points_for_location_id()` resolves `wdc_location_delivery_codes.dpd_city_id` through `LocationDeliveryCodeRepository` and then reads local points by `city_id`.
 The service returns consumer-facing points: rows with the same `terminal_code` are grouped, `parcel_shop` is preferred,
-and a `terminal_self_delivery` row is returned only when no parcel shop exists for that code. Admin diagnostics can still
-inspect both stored rows through repository/search tools.
+and a `terminal_self_delivery` row is returned only when no parcel shop exists for that code. Runtime terminal selection
+uses only `parcel_shop` rows and never uses a standalone `terminal_self_delivery` as a pricing terminal.
 
 The service is connected to the checkout pickup selection layer, but `raw_json` remains diagnostic-only and is not exposed
 in checkout REST, checkout session snapshots or order meta.
 
-## TerminalCode Pricing Debt
+## TerminalCode Pricing
 
-Current checkout pricing remains:
+Current checkout pricing uses:
 
-- `calculator2/getServiceCostByParcels2`;
-- DPD cityId only;
-- `selfPickup` / `selfDelivery`;
+- `calculator2/getServiceCostByParcels3`;
+- sender `pickup.terminalCode` from a sender-city `parcel_shop`;
+- receiver `delivery.terminalCode` from a buyer-selected or auto-selected receiver-city `parcel_shop` for pickup;
+- no `delivery.terminalCode` for courier;
 - `parcel[]` as packaging places.
-
-After the checkout map and selected terminal storage are implemented:
-
-- obtain selected `delivery.terminalCode`;
-- define sender `pickup.terminalCode`;
-- test `calculator2/getServiceCostByParcels3` with `parcel[]`, `pickup.terminalCode` and `delivery.terminalCode`;
-- compare prices with the DPD cabinet;
-- only then switch runtime pricing.
 
 Do not switch to `getServiceCost3` by default because it does not match the current `parcel[]` package-place model.
