@@ -1,6 +1,13 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.64.1.
+Current plugin version: 0.64.2.
+
+Version 0.64.2 tightens DPD pickup prefill in the order-admin recalculation modal. `OrderDeliveryMetabox` now exposes a
+DPD `current_pickup` only for saved DPD pickup orders with a real terminal code; DPD courier, empty orders, CDEK,
+Russian Post and other carriers no longer leak shipping address or arbitrary pickup snapshots into the DPD selected
+pickup UI. The DPD quote preview may still auto-select a receiver terminalCode for calculation when no
+`selected_pickup_point` is sent, but that terminal remains quote-only until a manager chooses a point on the map; save
+continues to require an explicit selected DPD pickup point.
 
 Version 0.64.1 fixes the DPD pickup picker inside the order-admin `Калькулятор доставок` recalculation modal. DPD
 pickup balloons/list cards now render `Пункт выдачи DPD {terminal_code}` and `Код пункта`, while Russian Post keeps

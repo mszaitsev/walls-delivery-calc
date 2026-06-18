@@ -262,6 +262,23 @@ final class OrderDeliveryMetabox {
 	 * @return array<string,mixed>
 	 */
 	private function current_pickup_payload( object $order ): array {
+		$calculation = $this->calculation_data( $order );
+		$calculation_pickup = is_array( $calculation['pickup'] ?? null ) ? $calculation['pickup'] : array();
+		$carrier_key = $this->meta_string( $order, '_wdc_pickup_carrier_key' );
+		$platform_carrier_key = $this->meta_string( $order, '_wdc_platform_carrier_key' );
+		$delivery_type = $this->meta_string( $order, '_wdc_platform_delivery_type' );
+		$calculation_carrier_key = (string) ( $calculation['carrier_key'] ?? '' );
+		$calculation_delivery_type = (string) ( $calculation['delivery_type'] ?? '' );
+		$is_dpd_context = 'dpd' === $carrier_key || 'dpd' === $platform_carrier_key || 'dpd' === $calculation_carrier_key;
+		$is_dpd_pickup = $is_dpd_context && (
+			'pickup' === $delivery_type
+			|| 'pickup' === $calculation_delivery_type
+			|| ( 'dpd' === $carrier_key && '' === $delivery_type && '' === $platform_carrier_key && '' === $calculation_delivery_type )
+		);
+		if ( $is_dpd_context && ! $is_dpd_pickup ) {
+			return array();
+		}
+
 		$snapshot = $this->raw_order_meta( $order, '_wdc_pickup_point_snapshot' );
 		if ( is_string( $snapshot ) && '' !== trim( $snapshot ) ) {
 			$decoded = json_decode( $snapshot, true );
@@ -276,14 +293,30 @@ final class OrderDeliveryMetabox {
 		if ( '' === $point_address ) {
 			$point_address = $this->meta_string( $order, '_wdc_platform_pickup_address' );
 		}
+		$dpd_terminal_code = '';
+		if ( $is_dpd_pickup ) {
+			$dpd_terminal_code = $this->first_non_empty(
+				$this->meta_string( $order, '_wdc_dpd_pickup_terminal_code' ),
+				'dpd' === $carrier_key ? $point_code : '',
+				(string) ( $calculation_pickup['terminal_code'] ?? '' ),
+				(string) ( $calculation_pickup['point_code'] ?? '' ),
+				(string) ( $snapshot['terminal_code'] ?? '' )
+			);
+			if ( '' === $dpd_terminal_code ) {
+				return array();
+			}
+			$point_code = $dpd_terminal_code;
+			$carrier_key = 'dpd';
+		}
 
 		return array_filter(
 			array(
 				'point_code' => $point_code,
-				'terminal_code' => $this->meta_string( $order, '_wdc_dpd_pickup_terminal_code' ) ?: (string) ( $snapshot['terminal_code'] ?? $snapshot['point_code'] ?? '' ),
-				'carrier_key' => $this->meta_string( $order, '_wdc_pickup_carrier_key' ),
+				'terminal_code' => $dpd_terminal_code,
+				'carrier_key' => $carrier_key,
 				'service_key' => $this->meta_string( $order, '_wdc_pickup_service_key' ),
-				'pickup_family' => $this->meta_string( $order, '_wdc_pickup_family' ),
+				'pickup_family' => $is_dpd_pickup ? 'dpd:pickup' : $this->meta_string( $order, '_wdc_pickup_family' ),
+				'delivery_type' => $is_dpd_pickup ? 'pickup' : $delivery_type,
 				'point_type' => $this->meta_string( $order, '_wdc_pickup_point_type' ),
 				'point_name' => (string) ( $snapshot['point_name'] ?? $snapshot['name'] ?? '' ),
 				'point_address' => $point_address,
@@ -293,6 +326,17 @@ final class OrderDeliveryMetabox {
 			),
 			static fn( mixed $value ): bool => array() !== $value && '' !== $value
 		);
+	}
+
+	private function first_non_empty( mixed ...$values ): string {
+		foreach ( $values as $value ) {
+			$text = trim( (string) $value );
+			if ( '' !== $text ) {
+				return $text;
+			}
+		}
+
+		return '';
 	}
 
 	/**

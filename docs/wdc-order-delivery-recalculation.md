@@ -1,6 +1,16 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.64.1.
+Version: 0.64.2.
+
+## Статус 0.64.2
+
+Уточнен источник `current_pickup` для DPD prefill в order-admin пересчете.
+
+- `OrderDeliveryMetabox::current_pickup_payload()` теперь отдает DPD `terminal_code` только если сохраненный контекст заказа явно DPD pickup: carrier `dpd`, delivery type `pickup` и непустой DPD terminal/point code.
+- DPD courier, пустой заказ, CDEK, Почта России и любые другие non-DPD варианты не получают DPD `terminal_code` из shipping address или общего pickup snapshot.
+- Для non-DPD pickup текущий payload остается carrier-specific: CDEK/Почта могут prefill-иться своим carrier, но не превращаются в DPD pickup.
+- `requestPreview()` отправляет `selected_pickup_point` только после явного выбора ПВЗ менеджером. Если его нет, backend DPD quote может использовать auto-selected receiver terminalCode только для расчета.
+- Auto-selected terminalCode из DPD quote не считается selected pickup point в UI и не может попасть в save payload без выбора ПВЗ на карте.
 
 ## Статус 0.64.1
 

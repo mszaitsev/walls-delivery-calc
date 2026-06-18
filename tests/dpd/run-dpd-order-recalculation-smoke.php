@@ -16,6 +16,7 @@ use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
 use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
 use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
 use WallsShop\WDC\Orders\Application\OrderQuoteRequestMapper;
+use WallsShop\WDC\Orders\Admin\OrderDeliveryMetabox;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
@@ -24,6 +25,16 @@ function dpd_order_recalc_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
 		throw new RuntimeException( $message );
 	}
+}
+
+/**
+ * @return array<string,mixed>
+ */
+function dpd_order_recalc_current_pickup_payload( DpdOrderRecalcOrder $order ): array {
+	$method = new ReflectionMethod( OrderDeliveryMetabox::class, 'current_pickup_payload' );
+	$method->setAccessible( true );
+	$value = $method->invoke( new OrderDeliveryMetabox( new OrderShipmentRepository() ), $order );
+	return is_array( $value ) ? $value : array();
 }
 
 final class DpdOrderRecalcProduct {
@@ -114,6 +125,45 @@ $pickup_tariff = $pickup_group['tariff_variants'][0] ?? array();
 $courier_tariff = $courier_group['tariff_variants'][0] ?? array();
 dpd_order_recalc_assert( 'MAX' === (string) ( $pickup_tariff['object_code'] ?? '' ) && 'MAX' === (string) ( $courier_tariff['object_code'] ?? '' ), 'DPD recalculation grouped variants must expose selected serviceCode.' );
 
+$dpd_pickup_order = new DpdOrderRecalcOrder();
+$dpd_pickup_order->meta['_wdc_platform_carrier_key'] = 'dpd';
+$dpd_pickup_order->meta['_wdc_platform_delivery_type'] = 'pickup';
+$dpd_pickup_order->meta['_wdc_platform_tariff_object'] = 'NDY';
+$dpd_pickup_order->meta['_wdc_dpd_pickup_terminal_code'] = 'MSK-SAVED';
+$dpd_pickup_order->meta['_wdc_pickup_carrier_key'] = 'dpd';
+$dpd_pickup_order->meta['_wdc_pickup_point_code'] = 'MSK-SAVED';
+$dpd_pickup_order->meta['_wdc_pickup_point_address'] = 'Москва, saved DPD point';
+$dpd_current_pickup = dpd_order_recalc_current_pickup_payload( $dpd_pickup_order );
+dpd_order_recalc_assert( 'dpd' === (string) ( $dpd_current_pickup['carrier_key'] ?? '' ) && 'MSK-SAVED' === (string) ( $dpd_current_pickup['terminal_code'] ?? '' ), 'Existing DPD pickup order with any tariff must expose saved DPD terminalCode for prefill.' );
+
+$dpd_courier_order = new DpdOrderRecalcOrder();
+$dpd_courier_order->meta['_wdc_platform_carrier_key'] = 'dpd';
+$dpd_courier_order->meta['_wdc_platform_delivery_type'] = 'courier';
+$dpd_courier_order->meta['_wdc_dpd_pickup_terminal_code'] = 'STALE-DPD';
+$dpd_courier_order->meta['_wdc_pickup_carrier_key'] = 'dpd';
+$dpd_courier_order->meta['_wdc_pickup_point_code'] = 'STALE-DPD';
+$dpd_courier_order->shipping_address_1 = 'Тверская 1';
+dpd_order_recalc_assert( array() === dpd_order_recalc_current_pickup_payload( $dpd_courier_order ), 'Existing DPD courier order must not expose shipping address or stale terminalCode as current pickup.' );
+dpd_order_recalc_assert( array() === dpd_order_recalc_current_pickup_payload( new DpdOrderRecalcOrder() ), 'Order without saved delivery must not expose current pickup.' );
+
+$cdek_pickup_order = new DpdOrderRecalcOrder();
+$cdek_pickup_order->meta['_wdc_platform_carrier_key'] = 'cdek';
+$cdek_pickup_order->meta['_wdc_platform_delivery_type'] = 'pickup';
+$cdek_pickup_order->meta['_wdc_pickup_carrier_key'] = 'cdek';
+$cdek_pickup_order->meta['_wdc_pickup_point_code'] = 'KEM7';
+$cdek_pickup_order->meta['_wdc_pickup_point_address'] = 'Kemerovo, Sovetskiy 10';
+$cdek_current_pickup = dpd_order_recalc_current_pickup_payload( $cdek_pickup_order );
+dpd_order_recalc_assert( 'cdek' === (string) ( $cdek_current_pickup['carrier_key'] ?? '' ) && 'KEM7' === (string) ( $cdek_current_pickup['point_code'] ?? '' ) && '' === (string) ( $cdek_current_pickup['terminal_code'] ?? '' ), 'CDEK current pickup prefill must remain non-DPD and must not receive DPD terminal_code.' );
+
+$russian_post_pickup_order = new DpdOrderRecalcOrder();
+$russian_post_pickup_order->meta['_wdc_platform_carrier_key'] = 'russian_post_domestic';
+$russian_post_pickup_order->meta['_wdc_platform_delivery_type'] = 'pickup';
+$russian_post_pickup_order->meta['_wdc_pickup_carrier_key'] = 'russian_post_domestic';
+$russian_post_pickup_order->meta['_wdc_pickup_point_code'] = '101000-OPS';
+$russian_post_pickup_order->meta['_wdc_pickup_point_address'] = 'Москва, ОПС 101000';
+$russian_post_current_pickup = dpd_order_recalc_current_pickup_payload( $russian_post_pickup_order );
+dpd_order_recalc_assert( 'russian_post_domestic' === (string) ( $russian_post_current_pickup['carrier_key'] ?? '' ) && '101000-OPS' === (string) ( $russian_post_current_pickup['point_code'] ?? '' ) && '' === (string) ( $russian_post_current_pickup['terminal_code'] ?? '' ), 'Russian Post current pickup prefill must remain non-DPD and must not receive DPD terminal_code.' );
+
 $renderer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Orders/Admin/OrderDeliveryRateRenderer.php' );
 dpd_order_recalc_assert( str_contains( $renderer_source, 'data-carrier-key' ) && str_contains( $renderer_source, 'ПВЗ не выбран' ), 'DPD pickup recalculation UI must start with an explicit empty pickup state.' );
 $pickup_js = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/order-delivery-recalculation.js' );
@@ -121,6 +171,7 @@ dpd_order_recalc_assert( str_contains( $pickup_js, "'Пункт выдачи DPD
 dpd_order_recalc_assert( str_contains( $pickup_js, "return isDpdPickupPoint( point ) ? 'Код пункта:' : 'Код/индекс:'" ), 'DPD pickup picker must use "Код пункта" instead of the Russian Post code/index label.' );
 dpd_order_recalc_assert( str_contains( $pickup_js, "if ( 'dpd' === carrier )" ) && str_contains( $pickup_js, 'pickupCodeForCarrier( pickup, carrier ) !== \'\'' ) && str_contains( $pickup_js, 'selectedPickupPoints.delete( box );' ), 'DPD pickup prefill must be carrier-aware and must not reuse non-DPD pickup or shipping address state.' );
 dpd_order_recalc_assert( str_contains( $pickup_js, "setStatus( box, 'Для pickup-варианта выберите ПВЗ.', 'error' );" ), 'Saving pickup without an explicitly selected point must be blocked in the admin UI.' );
+dpd_order_recalc_assert( str_contains( $pickup_js, "if ( options.selectedPickupPoint )" ) && str_contains( $pickup_js, "form.append( 'selected_pickup_point'" ) && str_contains( $pickup_js, 'restoreDpdPickupPreview' ), 'DPD preview must send selected_pickup_point only after explicit pickup choice and then restore it in UI.' );
 dpd_order_recalc_assert( str_contains( $pickup_js, "'ПВЗ СДЭК'" ) && str_contains( $pickup_js, "'Постамат СДЭК'" ), 'CDEK pickup labels must remain in the admin recalculation picker.' );
 dpd_order_recalc_assert( str_contains( $pickup_js, "'Код/индекс:'" ) && str_contains( $pickup_js, "'Отделение Почты России'" ), 'Russian Post pickup title and code/index label must remain available.' );
 
