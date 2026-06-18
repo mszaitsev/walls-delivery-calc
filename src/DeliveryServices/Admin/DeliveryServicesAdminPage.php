@@ -1361,6 +1361,8 @@ final class DeliveryServicesAdminPage {
 				<?php $this->text_row_with_description( DpdSettings::TARIFF_SENDER_LOCATION_ID_KEY, __( 'location_id отправителя', 'walls-delivery-calc' ), (string) $this->dpd_settings->tariff_sender_location_id(), __( 'Если override DPD cityId пустой, отправитель будет резолвиться через DpdCityResolver.', 'walls-delivery-calc' ) ); ?>
 				<?php $this->text_row_with_description( DpdSettings::TARIFF_SENDER_DPD_CITY_ID_KEY, __( 'DPD cityId отправителя override', 'walls-delivery-calc' ), $this->dpd_settings->tariff_sender_dpd_city_id(), __( 'Имеет приоритет над location_id отправителя. Для Новосибирска ожидается 49455627.', 'walls-delivery-calc' ) ); ?>
 				<?php $this->dpd_sender_location_info_row(); ?>
+				<?php $this->text_row_with_description( DpdSettings::TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY, __( 'ПВЗ отправителя по умолчанию', 'walls-delivery-calc' ), $this->dpd_settings->tariff_default_sender_terminal_code(), __( 'DPD terminalCode активного parcel_shop отправителя. Не используйте terminal_self_delivery.', 'walls-delivery-calc' ) ); ?>
+				<?php $this->dpd_default_sender_terminal_row(); ?>
 				<tr><th colspan="2"><h3><?php echo esc_html__( 'Посылка по умолчанию', 'walls-delivery-calc' ); ?></h3></th></tr>
 				<?php $this->text_row( DpdSettings::TARIFF_DEFAULT_WEIGHT_G_KEY, __( 'Вес, г', 'walls-delivery-calc' ), (string) $this->dpd_settings->tariff_default_weight_g() ); ?>
 				<?php $this->text_row( DpdSettings::TARIFF_DEFAULT_LENGTH_CM_KEY, __( 'Длина, см', 'walls-delivery-calc' ), (string) $this->dpd_settings->tariff_default_length_cm() ); ?>
@@ -1407,6 +1409,77 @@ final class DeliveryServicesAdminPage {
 		}
 
 		return implode( "\n", $lines );
+	}
+
+	private function dpd_default_sender_terminal_row(): void {
+		if ( ! $this->dpd_settings instanceof DpdSettings ) {
+			return;
+		}
+		$code = $this->dpd_settings->tariff_default_sender_terminal_code();
+		if ( '' === $code ) {
+			?>
+			<tr>
+				<th scope="row"><?php echo esc_html__( 'ПВЗ отправителя', 'walls-delivery-calc' ); ?></th>
+				<td><p class="description" style="margin:0;"><?php echo esc_html__( 'ПВЗ отправителя по умолчанию не задан.', 'walls-delivery-calc' ); ?></p></td>
+			</tr>
+			<?php
+			return;
+		}
+		$summary = $this->dpd_default_sender_terminal_summary( $code );
+		?>
+		<tr>
+			<th scope="row"><?php echo esc_html__( 'ПВЗ отправителя', 'walls-delivery-calc' ); ?></th>
+			<td><p class="description" style="margin:0; white-space: pre-line;"><?php echo esc_html( $summary ); ?></p></td>
+		</tr>
+		<?php
+	}
+
+	private function dpd_default_sender_terminal_summary( string $terminal_code ): string {
+		if ( ! $this->dpd_pickup_points instanceof DpdPickupPointRepository ) {
+			return 'warning: справочник DPD ПВЗ недоступен.';
+		}
+		$sender_city_id = $this->dpd_sender_city_id();
+		$rows = $this->dpd_pickup_points->search( array( 'terminal_code' => $terminal_code, 'limit' => 20 ) );
+		$point = null;
+		foreach ( $rows as $row ) {
+			if ( 'parcel_shop' === (string) ( $row['type'] ?? '' ) ) {
+				$point = $row;
+				break;
+			}
+		}
+		if ( null === $point ) {
+			return 'warning: terminalCode не найден среди активных DPD parcel_shop.';
+		}
+		$lines = array(
+			'terminalCode: ' . (string) ( $point['terminal_code'] ?? $terminal_code ),
+			'name: ' . (string) ( $point['name'] ?? '' ),
+			'address: ' . (string) ( $point['address'] ?? '' ),
+			'city_name: ' . (string) ( $point['city_name'] ?? '' ),
+			'source: ' . (string) ( $point['source'] ?? '' ),
+		);
+		if ( '' !== $sender_city_id && $sender_city_id !== (string) ( $point['city_id'] ?? '' ) ) {
+			$lines[] = 'warning: cityId ПВЗ не совпадает с cityId отправителя (' . $sender_city_id . ').';
+		}
+
+		return implode( "\n", $lines );
+	}
+
+	private function dpd_sender_city_id(): string {
+		if ( ! $this->dpd_settings instanceof DpdSettings ) {
+			return '';
+		}
+		$city_id = preg_replace( '/\D+/', '', $this->dpd_settings->tariff_sender_dpd_city_id() ) ?? '';
+		if ( '' !== $city_id ) {
+			return $city_id;
+		}
+		$location_id = $this->dpd_settings->tariff_sender_location_id();
+		$location = $location_id > 0 && $this->locations instanceof LocationRepository ? $this->locations->find_by_id( $location_id ) : null;
+		if ( null !== $location && $this->dpd_city_resolver instanceof DpdCityResolver ) {
+			$resolution = $this->dpd_city_resolver->resolve( $location );
+			return is_array( $resolution ) ? ( preg_replace( '/\D+/', '', (string) ( $resolution['city_id'] ?? '' ) ) ?? '' ) : '';
+		}
+
+		return '';
 	}
 
 	private function render_dpd_geography_action_result(): void {

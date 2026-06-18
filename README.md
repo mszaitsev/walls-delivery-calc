@@ -1,6 +1,13 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.62.1.
+Current plugin version: 0.63.0.
+
+Version 0.63.0 adds the first manual DPD shipment preparation stage. DPD orders can open the shared `Отправления`
+modal, managers enter cargo places manually, and the adapter builds a dry-run `order2/createOrder` payload preview with
+warnings/errors. No live DPD create call is made, no DPD auto-shipment creation exists, checkout `parcel[]` is not reused
+for shipment creation, and declared value is derived from the order goods value instead of separate order meta. The DPD
+`DPD Расчет` tab now has a `ПВЗ отправителя по умолчанию` terminalCode setting with a read-only parcel-shop summary for
+shipment preparation; checkout runtime keeps its existing auto-selection behavior when this value is empty.
 
 Version 0.62.1 cleans up the DPD `DPD Расчет` admin tab after runtime moved to
 `calculator2/getServiceCostByParcels3`. The old `Тестовый расчет DPD` form, submit action, result block and dedicated

@@ -349,7 +349,7 @@ dpd_import_assert( ! isset( $GLOBALS['wpdb']->dpd_geography_stage_tables[ $exist
 @unlink( $existing_reset_path );
 
 $plugin_source = file_get_contents( __DIR__ . '/../../src/Core/Plugin.php' );
-dpd_import_assert( is_string( $plugin_source ) && ! str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'DPD shipment adapter is not registered by geography import' );
+dpd_import_assert( is_string( $plugin_source ) && str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'DPD dry-run shipment adapter is registered outside geography import.' );
 dpd_import_assert( is_string( $plugin_source ) && ! str_contains( $plugin_source, 'DpdCarrier' ), 'DPD runtime carrier is not registered by geography import' );
 
 echo "DPD geography import smoke OK\n";

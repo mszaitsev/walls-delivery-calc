@@ -1,5 +1,16 @@
 # Карта текущего кода
 
+## DPD Manual Shipment Preparation 0.63.0
+
+- `src/Shipments/Dpd/DpdShipmentAdapter.php` registers DPD in `CarrierShipmentAdapterRegistry` for manual preparation and dry-run preview only. `build_safe_payload_preview()` returns an `order2/createOrder` preview with `dry_run=true` and `live_api_call=false`; `create()` returns `dpd_create_disabled`, label/status/cancel/manual-attach actions are disabled, and `supports_status_auto_sync()` is `false`.
+- `src/Carriers/Dpd/Shipments/DpdShipmentPayloadBuilder.php` builds a future-facing DPD order payload from saved order/rate meta, recipient/order values and manager-entered places. It does not read checkout tariff `parcel[]`, does not persist parcels in order meta, and uses order goods value as `cargoValue`/declared value source.
+- `src/Shipments/Application/OrderShipmentDraftFactory.php` now creates DPD shipment drafts from `_wdc_platform_rate_meta`, `_wdc_delivery_calculation_data`, DPD pickup aliases and `DpdSettings::tariff_default_sender_terminal_code()`. Initial DPD drafts intentionally have no places, so the manager must enter грузоместа in the modal.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` exposes the same shared `Отправления` modal for DPD orders, adds read-only DPD service/city/terminal fields, renders an editable DPD comment, shows `Предпросмотр payload`, and keeps the real create button disabled for DPD in 0.63.0.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds `ПВЗ отправителя по умолчанию` to `DPD Расчет`, stores a sender terminalCode, validates/summarizes active `parcel_shop` rows and warns when the configured terminal does not match the resolved sender cityId.
+- `src/Core/Plugin.php` registers `DpdShipmentAdapter` in the adapter registry for button visibility/status payload, while `ShipmentCreationService` live-create adapters remain Russian Post and CDEK only. DPD auto creation is not implemented.
+- `tests/dpd/run-dpd-shipment-preparation-smoke.php` covers DPD order/rate meta reading, pickup/courier dry-run payloads, missing terminal/parcel validation, missing default sender warning, declared-value derivation, no checkout `parcel[]` reuse, no live API call and disabled create action.
+- `docs/wdc-dpd-shipment-preparation.md` documents the manual-only boundary and future `order2/createOrder` mapping.
+
 ## DPD TerminalCode Runtime Pricing 0.62.1
 
 - `src/Carriers/Dpd/Tariff/DpdTerminalCodeTariffRequest.php` and `DpdTerminalCodeTariffRequestBuilder.php` build the runtime `calculator2/getServiceCostByParcels3` payload with `pickup.cityId`, `pickup.terminalCode`, `delivery.cityId`, optional pickup-only `delivery.terminalCode`, `selfPickup`, `selfDelivery`, `declaredValue`, optional `serviceCode`/`pickupDate` and `parcel[]`. The builder stays auth-free; `DpdSoapRequest` adds `request.auth`.
@@ -7,7 +18,7 @@
 - `src/Carriers/Dpd/Pickup/DpdPickupPointService.php::find_runtime_parcel_shop_for_city_id()` and `find_runtime_parcel_shop_by_terminal_code()` select active `parcel_shop` rows for runtime pricing. They avoid duplicate `terminal_self_delivery` rows when possible, allow duplicated `parcel_shop` fallback when needed, and never use standalone `terminal_self_delivery` as a runtime terminal.
 - `assets/frontend/pickup-map/wdc-pickup-checkout.js` triggers `update_checkout` after saving a DPD pickup point so selected terminalCode replaces the auto-selected receiver terminalCode and rates recalculate.
 - `src/Checkout/WooCommerce/WooCommercePackageMapper.php` and `src/Checkout/Cache/QuoteCache.php` include the selected DPD terminalCode in checkout context/cache keys.
-- The previous 0.61.0 admin terminalCode diagnostic service/form/comparison block was removed. In 0.62.1 the remaining generic `Тестовый расчет DPD` form/result storage was also removed from `DPD Расчет`; the tab now stores only sender/default parcel settings and shows read-only sender location + DPD cityId information. `tests/dpd/run-dpd-terminalcode-runtime-pricing-smoke.php` covers Parcels3 pickup/courier payloads, auto/selected terminalCode, duplicate fallback, quote_id changes and shipment-adapter absence.
+- The previous 0.61.0 admin terminalCode diagnostic service/form/comparison block was removed. In 0.62.1 the remaining generic `Тестовый расчет DPD` form/result storage was also removed from `DPD Расчет`; the tab now stores sender/default parcel settings plus the 0.63.0 default sender terminalCode, and shows read-only sender location + DPD cityId information. `tests/dpd/run-dpd-terminalcode-runtime-pricing-smoke.php` covers Parcels3 pickup/courier payloads, auto/selected terminalCode, duplicate fallback, quote_id changes and the disabled DPD dry-run adapter boundary.
 
 ## DPD Checkout Pickup Selection 0.60.0
 
@@ -18,7 +29,7 @@
 - `assets/frontend/pickup-map/wdc-pickup-map.js` owns the shared checkout pickup map/list interaction. Address search and browser geolocation update the active distance origin, then refresh `visiblePoints` through `sortPoints(enrichPoints(...))` before rerendering markers/list so distances and `Ближайший ПВЗ` are current.
 - `src/Checkout/WooCommerce/CheckoutValidation.php` validates DPD pickup selections through `DpdPickupPointService`; DPD pickup fails with `Выберите пункт выдачи DPD.` when no active terminal is selected. DPD courier and non-DPD rates keep their existing validation paths.
 - `src/Checkout/WooCommerce/OrderShippingMetaPersister.php` stores the selected DPD point in canonical `_wdc_pickup_*` meta and DPD aliases: `_wdc_dpd_pickup_terminal_code`, `_wdc_dpd_pickup_type`, `_wdc_dpd_pickup_name`, `_wdc_dpd_pickup_address`, `_wdc_dpd_pickup_city_name`, `_wdc_dpd_pickup_latitude`, `_wdc_dpd_pickup_longitude`, `_wdc_dpd_pickup_source`.
-- `tests/dpd/run-dpd-checkout-pickup-selection-smoke.php` covers DPD location_id lookup, endpoint shape/search, checkout save, validation, order meta persistence, Parcels3 terminalCode runtime boundary and absence of DPD shipment adapter/metabox.
+- `tests/dpd/run-dpd-checkout-pickup-selection-smoke.php` covers DPD location_id lookup, endpoint shape/search, checkout save, validation, order meta persistence, Parcels3 terminalCode runtime boundary and the disabled DPD shipment preview/metabox boundary.
 
 ## DPD Pickup Points Foundation 0.59.2
 
@@ -30,7 +41,7 @@
 - `src/Carriers/Dpd/Pickup/DpdPickupPointImportService.php` performs manual imports for parcel shops, terminals or both, stores `dpd_last_pickup_import_report` through `DpdSettings`, and catches SOAP/import errors into controlled reports. Empty DPD responses and responses with fetched rows but zero normalized valid points do not call replacement and leave existing points unchanged.
 - `src/Carriers/Dpd/Pickup/DpdPickupPointService.php` is the read-only checkout-map and runtime terminal-selection boundary. It resolves WDC `location_id` through `LocationDeliveryCodeRepository::get_dpd_city_id()` and reads points by DPD cityId or terminalCode. Consumer reads deduplicate by `terminal_code` and prefer `parcel_shop` over duplicate `terminal_self_delivery`; runtime terminal selection uses only `parcel_shop`.
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds the DPD `DPD ПВЗ` tab with status, manual import buttons and diagnostics by terminalCode/cityId/cityName.
-- `tests/dpd/run-dpd-pickup-points-smoke.php` covers repository behavior, normalizer shapes, import counts, wrapper names/auth wrappers, read-only service lookup, Parcels3 runtime pricing boundary and absence of DPD shipment adapter/metabox.
+- `tests/dpd/run-dpd-pickup-points-smoke.php` covers repository behavior, normalizer shapes, import counts, wrapper names/auth wrappers, read-only service lookup, Parcels3 runtime pricing boundary and the disabled DPD shipment preview/metabox boundary.
 
 ## DPD Checkout Runtime 0.59.0
 
@@ -45,8 +56,8 @@
 - `getServiceCost3` is not used because it does not match the current package-place `parcel[]` model.
 - `DpdQuoteCarrier::quote_id()` includes receiver location, sender/receiver city IDs, sender/receiver terminalCode values, normalized parcel signature, parcel count, long-item parcel count, regular item count, total weight, dimensions, declared value, parcel dimensions, box limits, package builder source, `delivery_type`, fixed `selfPickup=true`, derived `selfDelivery`, courier-rates enablement, enabled service codes, calculation date and environment for diagnostics.
 - `src/Checkout/Cache/QuoteCache.php` includes selected location, selected DPD terminalCode, package dimensions and declared value in the generic quote cache key so DPD quotes vary on receiver, terminal and parcel parameters that affect `getServiceCostByParcels3`.
-- `src/Core/Plugin.php` registers `DpdQuoteCarrier` in the checkout runtime registry only. It still registers no `DpdShipmentAdapter` in `CarrierShipmentAdapterRegistry`, so DPD does not appear in shipment creation/metabox actions.
-- `tests/dpd/run-dpd-parcel-builder-smoke.php` covers DPD 3D packing, identical grid blocks, small-item aggregation, long items, mixed baskets, packaging weight per parcel, two-box split and stacked-rows fallback. `tests/dpd/run-dpd-checkout-runtime-smoke.php` covers disabled service, missing credentials, missing receiver cityId, grouped MAX/NDY mapping, enabled-code filtering, unchecked-all behavior, fixed terminal-origin pickup payload, courier-disabled no-call behavior, courier-enabled payload, split orchestrator entries, DPD parcel payload propagation, quote_id parcel/delivery type/courier settings, missing-cost skipping, service-level minimum price post-processing through the orchestrator, DPD runtime registry presence, and shipment adapter absence.
+- `src/Core/Plugin.php` registers `DpdQuoteCarrier` in the checkout runtime registry and registers `DpdShipmentAdapter` in `CarrierShipmentAdapterRegistry` for manual dry-run preview only. DPD does not appear in live shipment creation, status sync, label or cancellation flows.
+- `tests/dpd/run-dpd-parcel-builder-smoke.php` covers DPD 3D packing, identical grid blocks, small-item aggregation, long items, mixed baskets, packaging weight per parcel, two-box split and stacked-rows fallback. `tests/dpd/run-dpd-checkout-runtime-smoke.php` covers disabled service, missing credentials, missing receiver cityId, grouped MAX/NDY mapping, enabled-code filtering, unchecked-all behavior, fixed terminal-origin pickup payload, courier-disabled no-call behavior, courier-enabled payload, split orchestrator entries, DPD parcel payload propagation, quote_id parcel/delivery type/courier settings, missing-cost skipping, service-level minimum price post-processing through the orchestrator, DPD runtime registry presence, and dry-run-only shipment adapter boundary.
 - `docs/wdc-dpd-checkout-runtime.md` documents the 0.62.0 DPD checkout boundary. TerminalCode-aware runtime pricing is connected, while DPD shipment creation, cancellation, statuses, labels, COD/НПП, `unitLoad`, fiscal receipts, complex bin packing and new global carrier branching remain intentionally out of scope.
 
 ## DPD Tariff Calculation Foundation 0.57.0
@@ -58,8 +69,8 @@
 - `src/Carriers/Dpd/Tariff/DpdTariffOptionNormalizer.php` tolerates DPD SOAP bodies shaped as one object, arrays, or nested `return`/service fields and normalizes service code, name, cost, currency, delivery period/date, pickup/delivery flags and raw fields.
 - `src/Carriers/Dpd/DpdSettings.php` stores DPD calculation settings (`dpd_tariff_sender_location_id`, optional `dpd_tariff_sender_dpd_city_id`, default parcel dimensions/weight and declared value) plus runtime titles/service-code settings. The removed display-only sender city name and one-shot tariff action result options are no longer part of current settings.
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders the `DPD Расчет` tab as settings-only: sender `location_id`, optional sender DPD cityId override, read-only sender location + DPD cityId summary, and default parcel values. The old `Тестовый расчет DPD` form/action/result block is removed.
-- `src/Core/Plugin.php` registers DPD tariff builder/normalizer/calculation service for the DPD checkout quote carrier. It still registers no DPD shipment adapter in `CarrierShipmentAdapterRegistry`.
-- `tests/dpd/run-dpd-tariff-calculation-smoke.php` covers payload building/auth separation, controlled sender/receiver cityId errors, fake API invocation, single/array response normalization, current admin settings boundaries, and DPD shipment-adapter non-registration.
+- `src/Core/Plugin.php` registers DPD tariff builder/normalizer/calculation service for the DPD checkout quote carrier, plus the 0.63.0 DPD shipment adapter for manual dry-run preview only.
+- `tests/dpd/run-dpd-tariff-calculation-smoke.php` covers payload building/auth separation, controlled sender/receiver cityId errors, fake API invocation, single/array response normalization, current admin settings boundaries, and the disabled DPD dry-run adapter boundary.
 - `docs/wdc-dpd-tariff-calculation.md` documents the tariff boundary. Pickup points, order creation, statuses, labels, COD, `unitLoad`, receipts, cron and tariff sync are intentionally not implemented.
 
 ## DPD Delivery Codes And Geography Import 0.56.3
@@ -85,7 +96,7 @@
 - `tests/dpd/run-dpd-city-resolver-smoke.php` covers missing mapping, manual save, mapping reuse, API wrapper availability outside resolver, and shipment-adapter non-registration.
 - `tests/dpd/run-dpd-location-index-smoke.php` covers unique FIAS matching, KLADR normalization, ambiguous name keys and index export/load.
 - `tests/dpd/run-dpd-geography-import-smoke.php` covers Windows-1251 CSV parsing, indexed matching, idempotent duplicates, conflict rollback, final report storage and temp-file cleanup.
-- `docs/wdc-dpd-geography.md` documents the geography scope and stage-2 constraints. DPD geography remains isolated from shipment adapters; checkout runtime only reads the resolved `dpd_city_id` through `DpdCityResolver`.
+- `docs/wdc-dpd-geography.md` documents the geography scope and stage-2 constraints. DPD geography remains isolated from live shipment creation; checkout runtime and manual shipment preparation only read the resolved `dpd_city_id` through `DpdCityResolver`/saved order meta.
 
 ## DPD Foundation 0.54.0
 
@@ -94,8 +105,8 @@
 - `src/Carriers/Dpd/DpdEndpoints.php` maps test/production WSDL URLs for `geography2`, `calculator2`, `order2`, `tracing`, `tracing1-1`, `event-tracking`, `label-print` and `delivery-management`.
 - `src/DeliveryServices/DeliveryServiceRepository.php` and `DeliveryServiceManager.php` create the built-in `dpd` service disabled by default with RU country availability. The service is predefined and protected from deletion like other system services.
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds the DPD `Данные для входа` tab and a dry diagnostic action. The diagnostic checks credentials, endpoint selection and SOAP transport availability only; it does not call the DPD API.
-- `src/Core/Plugin.php` registers DPD settings/API/transport/geography services and, as of 0.58.0, the checkout quote carrier. It does not add a DPD shipment adapter.
-- `tests/dpd/run-dpd-foundation-smoke.php` covers disabled service creation, encrypted client key storage, redaction, endpoint selection, graceful missing transport diagnostic, quote carrier registration source, and shipment adapter absence.
+- `src/Core/Plugin.php` registers DPD settings/API/transport/geography services, the checkout quote carrier and the 0.63.0 dry-run shipment adapter. Live DPD create/status/label flows are still disabled.
+- `tests/dpd/run-dpd-foundation-smoke.php` covers disabled service creation, encrypted client key storage, redaction, endpoint selection, graceful missing transport diagnostic, quote carrier registration source, and disabled dry-run adapter registration.
 - `docs/wdc-dpd-integration.md` documents the stage-1 boundary and future strategies for cityId, statuses, `unitLoad`, COD and receipts.
 
 ## CDEK Express Single Package Rates 0.47.0

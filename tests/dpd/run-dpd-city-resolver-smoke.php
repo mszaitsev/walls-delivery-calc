@@ -152,7 +152,7 @@ $extra_wrapper = $api->getPossibleExtraService( array( 'request' => 'fake' ) );
 assert_true( true === $extra_wrapper['success'], 'getPossibleExtraService wrapper remains available as low-level wrapper' );
 
 $plugin_source = file_get_contents( __DIR__ . '/../../src/Core/Plugin.php' );
-assert_true( is_string( $plugin_source ) && ! str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'DPD shipment adapter is not registered' );
+assert_true( is_string( $plugin_source ) && str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'DPD dry-run shipment adapter is registered outside city resolver runtime.' );
 assert_true( is_string( $plugin_source ) && ! str_contains( $plugin_source, 'DpdCarrier' ), 'DPD runtime carrier is not registered' );
 assert_true( is_string( $plugin_source ) && ! str_contains( $plugin_source, 'LocationCarrierCodeRepository' ), 'legacy LocationCarrierCodeRepository is not registered' );
 

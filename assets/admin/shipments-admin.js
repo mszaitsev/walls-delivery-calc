@@ -443,8 +443,17 @@
           const previewErrors = payload.data.preview && Array.isArray(payload.data.preview.errors)
             ? payload.data.preview.errors
             : [];
-          errors.textContent = previewErrors.length ? previewErrors.join('; ') : '';
-          delete errors.dataset.previewWarning;
+          const previewWarnings = payload.data.preview && Array.isArray(payload.data.preview.warnings)
+            ? payload.data.preview.warnings
+            : [];
+          errors.textContent = previewErrors.length ? previewErrors.join('; ') : previewWarnings.join('; ');
+          if (previewErrors.length) {
+            delete errors.dataset.previewWarning;
+          } else if (previewWarnings.length) {
+            errors.dataset.previewWarning = '1';
+          } else {
+            delete errors.dataset.previewWarning;
+          }
         }
       })
       .catch((error) => {
@@ -1885,6 +1894,13 @@
     const updateStatus = event.target.closest('[data-wdc-update-shipment-status]');
     if (updateStatus) {
       requestShipmentStatus(updateStatus).catch(function () {});
+      return;
+    }
+
+    const previewShipment = event.target.closest('[data-wdc-preview-shipment]');
+    if (previewShipment) {
+      const form = findShipmentForm(previewShipment);
+      if (form) requestPreview(form);
       return;
     }
 

@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 00000097 A0AC:74BD
+Volume serial number is 00000086 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -119,6 +119,7 @@ C:.
 |   |   wdc-dpd-geography.md
 |   |   wdc-dpd-integration.md
 |   |   wdc-dpd-pickup-points.md
+|   |   wdc-dpd-shipment-preparation.md
 |   |   wdc-dpd-tariff-calculation.md
 |   |   wdc-dpd-terminalcode-pricing.md
 |   |   wdc-fias-foundation.md
@@ -229,6 +230,9 @@ C:.
 |   |   |   |       DpdPickupPointRepository.php
 |   |   |   |       DpdPickupPointScheduleFormatter.php
 |   |   |   |       DpdPickupPointService.php
+|   |   |   |
+|   |   |   +---Shipments
+|   |   |   |       DpdShipmentPayloadBuilder.php
 |   |   |   |
 |   |   |   \---Tariff
 |   |   |           DpdParcelBuilder.php
@@ -591,6 +595,9 @@ C:.
 |   |   |       CarrierShipmentAdapterInterface.php
 |   |   |       ShipmentCarrierAdapterInterface.php
 |   |   |
+|   |   +---Dpd
+|   |   |       DpdShipmentAdapter.php
+|   |   |
 |   |   +---RussianPost
 |   |   |       RussianPostAddressNormalizer.php
 |   |   |       RussianPostCreateRequestBuilder.php
@@ -651,6 +658,7 @@ C:.
     |       run-dpd-location-index-smoke.php
     |       run-dpd-parcel-builder-smoke.php
     |       run-dpd-pickup-points-smoke.php
+    |       run-dpd-shipment-preparation-smoke.php
     |       run-dpd-tariff-calculation-smoke.php
     |       run-dpd-terminalcode-runtime-pricing-smoke.php
     |

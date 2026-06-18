@@ -1,6 +1,6 @@
 # DPD Checkout Runtime
 
-Version: 0.62.0
+Version: 0.63.0
 
 ## Scope
 
@@ -14,12 +14,17 @@ DPD remains disabled by default as the built-in delivery service `dpd`.
 `pickup.terminalCode` and receiver `delivery.terminalCode`; courier rates send sender `pickup.terminalCode` and omit
 `delivery.terminalCode`.
 
+0.63.0 update: DPD shipment preparation is available only as a manual dry-run preview from the order `Отправления` block.
+Checkout runtime pricing is unchanged. Checkout `parcel[]` remains pricing diagnostics/input only and is not reused for
+shipment creation.
+
 ## Runtime Registration
 
 - `src/Carriers/Runtime/DpdQuoteCarrier.php` implements `CarrierAdapterInterface`.
 - `src/Core/Plugin.php` registers `DpdQuoteCarrier` in the checkout `CarrierRegistry`.
-- DPD is not registered in `CarrierShipmentAdapterRegistry`.
-- There is no DPD shipment adapter, shipment creation action, metabox button, status sync or label flow.
+- `src/Core/Plugin.php` registers `DpdShipmentAdapter` in `CarrierShipmentAdapterRegistry` only so DPD orders can open the manual preparation modal and dry-run preview.
+- `ShipmentCreationService` live-create adapters remain Russian Post and CDEK only.
+- There is no live DPD shipment creation, auto creation, status sync, cancellation or label flow.
 
 ## Availability
 
