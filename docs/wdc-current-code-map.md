@@ -1,5 +1,15 @@
 # Карта текущего кода
 
+## DPD Modal Preparation Refinement 0.63.1
+
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` now shows DPD receiver pickup point fields as `Код ПВЗ`, `Тип точки`, `Адрес ПВЗ` and exposes the shared `Выбрать другой ПВЗ` picker for DPD pickup delivery. The visible DPD technical block (`serviceCode`, cityId and terminalCode rows) was removed; the modal shows `В заказе тариф` instead.
+- DPD sender pickup point is displayed as `ПВЗ отправителя: {код}, {адрес}` with `Выбрать другой ПВЗ отправителя`. Sender and receiver picker results are written only into modal hidden fields/admin request data and are not saved to order meta or DPD settings.
+- `assets/admin/shipments-admin.js` treats `dpd:pickup` like CDEK code-based pickup points, opens receiver/sender picker titles for DPD, posts receiver/sender cityId to the shared admin pickup search endpoint, updates DPD pickup labels in the modal and keeps the single-place weight hint hidden once multiple places exist.
+- `OrderShipmentsMetabox::ajax_search_pickup_points()` handles `carrier_key=dpd` through `DpdPickupPointService` and returns only active `parcel_shop` rows. `terminal_self_delivery` rows are not returned to the modal picker.
+- `OrderShipmentDraftFactory` reads temporary DPD `delivery_type`, selected `tariff_object`, sender `pickup_terminal_code`, receiver `pickup_point_code`, normalized courier address snapshot and manual places from the admin request. These values are merged into the in-memory `ShipmentCreateRequest` only.
+- `DpdShipmentPayloadBuilder` validates sender terminalCode, pickup receiver terminalCode, courier normalized address, serviceCode and manual parcels, then builds the dry-run `order2/createOrder` preview using the temporary modal values. It still returns `live_api_call=false`.
+- `tests/dpd/run-dpd-shipment-preparation-smoke.php` covers DPD receiver/sender picker markers, pickup/courier switch, tariff switch, hidden technical block removal, temporary payload overrides, normalized courier address, single/multi-place weight hint behavior and no live API call.
+
 ## DPD Manual Shipment Preparation 0.63.0
 
 - `src/Shipments/Dpd/DpdShipmentAdapter.php` registers DPD in `CarrierShipmentAdapterRegistry` for manual preparation and dry-run preview only. `build_safe_payload_preview()` returns an `order2/createOrder` preview with `dry_run=true` and `live_api_call=false`; `create()` returns `dpd_create_disabled`, label/status/cancel/manual-attach actions are disabled, and `supports_status_auto_sync()` is `false`.

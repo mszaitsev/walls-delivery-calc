@@ -1,6 +1,11 @@
 # WDC DPD Shipment Preparation
 
-Version: 0.63.0.
+Version: 0.63.1.
+
+0.63.1 update: the DPD preparation modal supports temporary sender/receiver pickup-point changes, pickup/courier delivery
+scenario switching and active tariff switching. DPD courier preparation reuses the CDEK-like address processing button and
+normalized-address snapshot flow. All modal changes live only in hidden inputs/admin request data until the page reloads;
+they are not written to order meta or DPD settings.
 
 DPD shipment preparation is manual-only in 0.63.0. The manager opens the order `Отправления` block, reviews saved DPD
 delivery data, enters cargo places manually and clicks `Предпросмотр payload`. WDC builds a dry-run preview shaped for the
@@ -89,6 +94,14 @@ The 0.63.0 preview includes:
 - `cargoNumPack`, `cargoValue`, `cargoRegistered=false`;
 - `parcel[]` built only from manager-entered modal places: weight kg, length cm, width cm, height cm and expanded quantity.
 
+The 0.63.1 modal can temporarily override these payload fields:
+
+- `serviceCode`/tariff from active DPD service codes configured in `DPD -> Тарифы`;
+- delivery type `pickup` or `courier`;
+- sender `pickup.terminalCode`;
+- receiver `delivery.terminalCode` for pickup delivery;
+- normalized courier delivery address for courier delivery.
+
 No checkout tariff-calculation `parcel[]` is read for shipment payloads. No parcel array is persisted into the order.
 Declared value is derived from order goods/order total and is not saved as a separate custom meta field.
 
@@ -105,6 +118,7 @@ Errors:
 - sender pickup terminalCode is required;
 - pickup delivery requires receiver delivery terminalCode;
 - courier delivery requires recipient address;
+- courier delivery requires a successful DPD address processing snapshot;
 - recipient phone is required;
 - at least one cargo place is required;
 - every cargo place must have positive weight and dimensions.

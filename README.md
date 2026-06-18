@@ -1,6 +1,12 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.63.0.
+Current plugin version: 0.63.1.
+
+Version 0.63.1 refines the manual DPD shipment preparation modal. Managers can temporarily switch receiver DPD pickup
+point, sender pickup point, delivery scenario and active DPD tariff inside the modal; these changes affect only the
+current dry-run payload request and are not saved to order meta or DPD settings. The DPD courier scenario reuses the
+CDEK-like address processing flow for a normalized DPD address preview, while DPD remains dry-run only with no live create
+call or auto shipment creation.
 
 Version 0.63.0 adds the first manual DPD shipment preparation stage. DPD orders can open the shared `Отправления`
 modal, managers enter cargo places manually, and the adapter builds a dry-run `order2/createOrder` payload preview with

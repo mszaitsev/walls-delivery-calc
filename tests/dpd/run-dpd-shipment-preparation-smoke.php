@@ -126,7 +126,9 @@ final class DpdShipmentFakeOrder {
 $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->dpd_pickup_points = array(
 	array( 'terminal_code' => 'NSK-SENDER', 'type' => 'parcel_shop', 'city_id' => '49455627', 'city_name' => 'Новосибирск', 'name' => 'DPD НСК', 'address' => 'Новосибирск, Складская, 1', 'source' => 'test', 'is_active' => 1 ),
+	array( 'terminal_code' => 'NSK-SENDER-2', 'type' => 'parcel_shop', 'city_id' => '49455627', 'city_name' => 'Новосибирск', 'name' => 'DPD НСК 2', 'address' => 'Новосибирск, Складская, 2', 'source' => 'test', 'is_active' => 1 ),
 	array( 'terminal_code' => 'MSK-RECEIVER', 'type' => 'parcel_shop', 'city_id' => '195300000', 'city_name' => 'Москва', 'name' => 'DPD Москва', 'address' => 'Москва, Тестовая, 1', 'source' => 'test', 'is_active' => 1 ),
+	array( 'terminal_code' => 'MSK-RECEIVER-2', 'type' => 'parcel_shop', 'city_id' => '195300000', 'city_name' => 'Москва', 'name' => 'DPD Москва 2', 'address' => 'Москва, Тестовая, 2', 'source' => 'test', 'is_active' => 1 ),
 	array( 'terminal_code' => 'NSK-SELF', 'type' => 'terminal_self_delivery', 'city_id' => '49455627', 'city_name' => 'Новосибирск', 'name' => 'DPD терминал', 'address' => 'Новосибирск', 'source' => 'test', 'is_active' => 1 ),
 );
 
@@ -136,6 +138,12 @@ $settings->save_tariff_settings_from_admin(
 	array(
 		DpdSettings::TARIFF_SENDER_DPD_CITY_ID_KEY => '49455627',
 		DpdSettings::TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY => 'NSK-SENDER',
+	)
+);
+$settings->save_runtime_tariffs_from_admin(
+	array(
+		'dpd_runtime_service_enabled' => array( 'ECN' => '1', 'CSM' => '1' ),
+		'dpd_runtime_tariff_title' => array( 'ECN' => 'DPD Эконом', 'CSM' => 'DPD Оптимум' ),
 	)
 );
 $pickup_service = new DpdPickupPointService( new DpdPickupPointRepository(), new LocationDeliveryCodeRepository() );
@@ -148,6 +156,13 @@ $base_request = $factory->create_request_from_order( $pickup_order );
 dpd_shipment_assert( 'ECN' === (string) ( $base_request->meta['service_code'] ?? '' ), 'Existing DPD serviceCode must be read from order/rate meta.' );
 dpd_shipment_assert( '49455627' === (string) ( $base_request->meta['pickup_city_id'] ?? '' ), 'Existing sender pickup cityId must be read.' );
 dpd_shipment_assert( '195300000' === (string) ( $base_request->meta['delivery_city_id'] ?? '' ), 'Existing delivery cityId must be read.' );
+$draft = $factory->draft_array( $pickup_order );
+$draft_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
+dpd_shipment_assert( 'MSK-RECEIVER' === (string) ( $draft['request']['meta']['pickup_point_row']['point_code'] ?? '' ) && 'parcel_shop' === (string) ( $draft['request']['meta']['pickup_point_row']['point_type'] ?? '' ), 'DPD modal draft must expose recipient pickup point code/type.' );
+dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-open-pickup-picker' ) && str_contains( $draft_source, 'data-wdc-open-sender-pickup-picker' ), 'DPD modal must expose choose receiver/sender pickup buttons.' );
+dpd_shipment_assert( str_contains( $draft_source, 'В заказе тариф' ) && ! str_contains( $draft_source, 'serviceCode</strong>' ) && ! str_contains( $draft_source, 'pickup cityId</strong>' ), 'DPD modal must show order tariff and remove visible technical service block.' );
+dpd_shipment_assert( array( DeliveryType::PICKUP, DeliveryType::COURIER ) === array_column( $draft['services'], 'delivery_type' ), 'DPD modal must allow pickup/courier delivery type switch.' );
+dpd_shipment_assert( array( 'ECN', 'CSM' ) === array_column( $draft['services'][0]['tariffs'], 'object_code' ), 'DPD modal must allow active tariff switch.' );
 
 $request = $factory->create_request_from_admin_data(
 	$pickup_order,
@@ -156,28 +171,46 @@ $request = $factory->create_request_from_admin_data(
 		'recipient_name' => 'Иван Петров',
 		'recipient_phone' => '+79990000000',
 		'recipient_email' => 'buyer@example.test',
+		'pickup_point_code' => 'MSK-RECEIVER-2',
+		'pickup_terminal_code' => 'NSK-SENDER-2',
+		'tariff_object' => 'CSM',
 	)
 );
 $preview = $adapter->build_safe_payload_preview( $request );
 $body = $preview['body']['request']['order'] ?? array();
-dpd_shipment_assert( 'ECN' === (string) ( $body['serviceCode'] ?? '' ), 'DPD pickup preview must contain serviceCode.' );
+dpd_shipment_assert( 'CSM' === (string) ( $body['serviceCode'] ?? '' ), 'DPD pickup preview must use modal-selected serviceCode.' );
 dpd_shipment_assert( '49455627' === (string) ( $body['pickup']['cityId'] ?? '' ), 'DPD pickup preview must contain pickup cityId.' );
 dpd_shipment_assert( '195300000' === (string) ( $body['delivery']['cityId'] ?? '' ), 'DPD pickup preview must contain delivery cityId.' );
-dpd_shipment_assert( 'NSK-SENDER' === (string) ( $body['pickup']['terminalCode'] ?? '' ), 'DPD pickup preview must contain sender terminalCode.' );
-dpd_shipment_assert( 'MSK-RECEIVER' === (string) ( $body['delivery']['terminalCode'] ?? '' ), 'DPD pickup preview must contain receiver terminalCode.' );
+dpd_shipment_assert( 'NSK-SENDER-2' === (string) ( $body['pickup']['terminalCode'] ?? '' ), 'DPD pickup preview must use modal-selected sender terminalCode.' );
+dpd_shipment_assert( 'MSK-RECEIVER-2' === (string) ( $body['delivery']['terminalCode'] ?? '' ), 'DPD pickup preview must use modal-selected receiver terminalCode.' );
 dpd_shipment_assert( '+79990000000' === (string) ( $body['receiver']['phone'] ?? '' ), 'DPD pickup preview must contain recipient.' );
 dpd_shipment_assert( 2.5 === (float) ( $body['parcel'][0]['weight'] ?? 0 ), 'DPD pickup preview must use parcels from modal input.' );
 dpd_shipment_assert( 40 === (int) ( $body['parcel'][0]['length'] ?? 0 ), 'DPD pickup preview must not reuse checkout parcel[] dimensions.' );
 dpd_shipment_assert( 3000.0 === (float) ( $body['cargoValue'] ?? 0 ), 'DPD declaredValue must be derived from order items total.' );
 dpd_shipment_assert( false === (bool) ( $preview['live_api_call'] ?? true ), 'DPD preview must not make a live API call.' );
+dpd_shipment_assert( 'MSK-RECEIVER' === (string) $pickup_order->meta['_wdc_dpd_pickup_terminal_code'] && 'NSK-SENDER' === $settings->tariff_default_sender_terminal_code(), 'Modal pickup changes must not be saved to order meta/settings.' );
 
 $courier_order = new DpdShipmentFakeOrder( 631, DeliveryType::COURIER );
+$normalized = array(
+	'success' => true,
+	'service_key' => DpdSettings::SERVICE_KEY,
+	'source' => 'dadata+dpd',
+	'original_hash' => hash( 'sha256', '101000, Москва, Тестовая, 1' ),
+	'display' => '101000, Москва, Тестовая, 9',
+	'fields' => array(
+		'cdek_city_name' => 'Москва',
+		'cdek_postal_code' => '101000',
+		'cdek_delivery_address' => 'Тестовая, 9',
+	),
+);
 $courier_request = $factory->create_request_from_admin_data(
 	$courier_order,
-	array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'recipient_phone' => '+79990000000' )
+	array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'normalized_address_json' => wp_json_encode( $normalized, JSON_UNESCAPED_UNICODE ), 'recipient_phone' => '+79990000000' )
 );
 $courier_body = $adapter->build_safe_payload_preview( $courier_request )['body']['request']['order'] ?? array();
 dpd_shipment_assert( 'NSK-SENDER' === (string) ( $courier_body['pickup']['terminalCode'] ?? '' ) && ! isset( $courier_body['delivery']['terminalCode'] ), 'DPD courier preview must contain pickup terminalCode and no delivery terminalCode.' );
+dpd_shipment_assert( 'Тестовая, 9' === (string) ( $courier_body['delivery']['address'] ?? '' ), 'DPD courier payload must use normalized address when provided.' );
+dpd_shipment_assert( str_contains( $draft_source, 'Оригинальный адрес покупателя' ) && str_contains( $draft_source, 'Нормализованный адрес DPD' ), 'DPD courier modal must expose address normalization fields.' );
 
 $settings_repo->set( DpdSettings::TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY, '' );
 $warning_request = ( new OrderShipmentDraftFactory( new DeliveryServiceRepository(), new ShipmentServiceSettings(), null, null, null, null, null, $settings, $pickup_service ) )->create_request_from_admin_data( $pickup_order, array( 'places' => array( array( 'weight_g' => '1000', 'length_cm' => '10', 'width_cm' => '10', 'height_cm' => '10' ) ), 'recipient_phone' => '+79990000000' ) );
@@ -190,6 +223,9 @@ $missing_delivery_order->meta['_wdc_platform_rate_meta']['dpd_delivery_terminal_
 $missing_delivery_request = $factory->create_request_from_admin_data( $missing_delivery_order, array( 'places' => array( array( 'weight_g' => '1000', 'length_cm' => '10', 'width_cm' => '10', 'height_cm' => '10' ) ), 'recipient_phone' => '+79990000000' ) );
 dpd_shipment_assert( in_array( 'DPD delivery terminalCode получателя обязателен для доставки до ПВЗ.', $builder->validate( $missing_delivery_request ), true ), 'Missing pickup delivery terminalCode must produce validation error.' );
 dpd_shipment_assert( in_array( 'Добавьте хотя бы одно грузоместо.', $builder->validate( $base_request ), true ), 'Missing parcels must produce validation error.' );
+dpd_shipment_assert( in_array( 'Адрес DPD курьер нужно обработать перед предпросмотром payload.', $builder->validate( $factory->create_request_from_admin_data( $courier_order, array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'recipient_phone' => '+79990000000' ) ) ), true ), 'DPD courier preview must require address normalization.' );
+$js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
+dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-weight-hint' ) && str_contains( $js_source, 'hint.hidden = places.length !== 1' ), 'Single-place weight hint must be common and hidden for multi-place mode.' );
 
 $create_result = $adapter->create( $request );
 dpd_shipment_assert( ! $create_result->success && 'dpd_create_disabled' === $create_result->error_code, 'DPD create shipment action must be disabled.' );

@@ -37,6 +37,9 @@ final class DpdShipmentPayloadBuilder {
 		if ( DeliveryType::COURIER === $request->delivery_type && '' === trim( $request->recipient_address->raw_address ) ) {
 			$errors[] = 'Адрес получателя обязателен для курьерской доставки DPD.';
 		}
+		if ( DeliveryType::COURIER === $request->delivery_type && empty( $request->meta['normalization_valid'] ) ) {
+			$errors[] = 'Адрес DPD курьер нужно обработать перед предпросмотром payload.';
+		}
 		if ( '' === trim( (string) ( $request->recipient['phone'] ?? '' ) ) ) {
 			$errors[] = 'Телефон получателя обязателен.';
 		}
@@ -81,6 +84,7 @@ final class DpdShipmentPayloadBuilder {
 					'orderNumberInternal' => (string) ( $request->meta['order_num'] ?? $request->order_id ),
 					'serviceCode' => (string) ( $request->meta['service_code'] ?? '' ),
 					'serviceName' => (string) ( $request->meta['tariff_title'] ?? '' ),
+					'serviceVariant' => DeliveryType::PICKUP === $request->delivery_type ? 'ТТ' : 'ТД',
 					'deliveryType' => $delivery_type,
 					'pickup' => array(
 						'cityId' => (string) ( $request->meta['pickup_city_id'] ?? '' ),

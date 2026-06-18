@@ -650,6 +650,7 @@
       fiasId: fieldValue(form, '[data-wdc-pickup-location-fias]'),
       garId: fieldValue(form, '[data-wdc-pickup-location-gar]'),
       locationId: fieldValue(form, '[data-wdc-pickup-location-id]'),
+      cityId: fieldValue(form, '[data-wdc-pickup-location-city-id]'),
       lat: fieldValue(form, '[data-wdc-pickup-location-lat]'),
       lng: fieldValue(form, '[data-wdc-pickup-location-lng]')
     }, override || {});
@@ -675,7 +676,8 @@
   }
 
   function pickupUsesCodeDisplay(form) {
-    return pickupContext(form).pickupFamily === 'cdek:pickup';
+    const context = pickupContext(form);
+    return context.pickupFamily === 'cdek:pickup' || context.pickupFamily === 'dpd:pickup';
   }
 
   function pickupCode(point) {
@@ -688,6 +690,7 @@
       const type = String(point.marker_type || point.point_type || point.cdek_type || point.type || '').toLowerCase();
       return (type === 'postamat' || type === 'postomat' || type === 'locker') ? 'Постамат СДЭК' : 'ПВЗ СДЭК';
     }
+    if (carrier === 'dpd') return 'ПВЗ DPD';
     return String(point && (point.point_title || point.card_title || point.point_type_label || point.display_title) || '').trim() || 'Отделение Почты России';
   }
 
@@ -1222,6 +1225,7 @@
     data.append('fias_id', context.fiasId || '');
     data.append('gar_id', context.garId || '');
     data.append('location_id', context.locationId || '');
+    data.append('city_id', context.cityId || '');
     data.append('lat', context.lat || '');
     data.append('lng', context.lng || '');
     return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
@@ -1241,7 +1245,7 @@
 
   function currentPickupQuery(form, contextOverride) {
     const context = pickupContext(form, contextOverride);
-    if (context.pickupFamily === 'cdek:pickup') {
+    if (context.pickupFamily === 'cdek:pickup' || context.pickupFamily === 'dpd:pickup') {
       return [context.address, context.city, context.region, context.postcode].filter(Boolean).join(' ').trim();
     }
     const postcode = form.querySelector('[data-wdc-pickup-postcode-field]');
@@ -1271,6 +1275,8 @@
     const address = form.querySelector('[data-wdc-pickup-address]');
     if (index) index.textContent = (pickupUsesCodeDisplay(form) ? fields.pickup_point_code : fields.pickup_point_postcode) || '-';
     if (address) address.textContent = fields.pickup_point_address || '-';
+    const typeLabel = form.querySelector('[data-wdc-pickup-type-label]');
+    if (typeLabel) typeLabel.textContent = fields.pickup_point_type || '-';
     const warning = form.querySelector('[data-wdc-pickup-warning]');
     if (warning) warning.remove();
     updateCreateAvailability(form);
@@ -1280,7 +1286,7 @@
   function updateSenderPickupDraft(form, point) {
     const code = pickupCode(point);
     const address = String(point && point.address || '');
-    form.querySelectorAll('[name="shipment_point"], [name="sender_shipment_point"], [data-wdc-sender-shipment-point]').forEach((input) => {
+    form.querySelectorAll('[name="shipment_point"], [name="sender_shipment_point"], [name="pickup_terminal_code"], [data-wdc-sender-shipment-point]').forEach((input) => {
       input.value = code || '';
     });
     form.querySelectorAll('[name="shipment_point_address"], [name="sender_shipment_point_address"], [data-wdc-sender-shipment-point-address]').forEach((input) => {
@@ -1293,10 +1299,11 @@
 
   function senderPickupContext(form) {
     return {
-      carrierKey: 'cdek',
-      serviceKey: 'cdek',
-      pickupFamily: 'cdek:pickup',
+      carrierKey: fieldValue(form, '[data-wdc-pickup-carrier-key]') === 'dpd' ? 'dpd' : 'cdek',
+      serviceKey: fieldValue(form, '[data-wdc-pickup-carrier-key]') === 'dpd' ? 'dpd' : 'cdek',
+      pickupFamily: fieldValue(form, '[data-wdc-pickup-carrier-key]') === 'dpd' ? 'dpd:pickup' : 'cdek:pickup',
       city: fieldValue(form, '[data-wdc-sender-pickup-city]') || 'Новосибирск',
+      cityId: fieldValue(form, '[data-wdc-sender-pickup-city-id]'),
       region: 'Новосибирская область',
       postcode: '',
       address: fieldValue(form, '[data-wdc-sender-shipment-point-address]'),
@@ -1314,7 +1321,7 @@
     const context = settings.context || pickupContext(form);
     const codeDisplay = settings.sender || context.pickupFamily === 'cdek:pickup';
     const codeLabel = codeDisplay ? 'Код ПВЗ' : 'Индекс';
-    const pickerTitle = settings.title || (codeDisplay ? 'Выбор ПВЗ СДЭК' : 'Выбор ПВЗ / ОПС');
+    const pickerTitle = settings.title || (context.pickupFamily === 'dpd:pickup' ? 'Выбор ПВЗ DPD' : (codeDisplay ? 'Выбор ПВЗ СДЭК' : 'Выбор ПВЗ / ОПС'));
     window.wdcPickupCheckout = Object.assign({}, window.wdcPickupCheckout || {}, {
       mapProvider: config.mapProvider || 'leaflet',
       yandexApiKeyPresent: !!config.yandexApiKeyPresent,
@@ -1837,7 +1844,7 @@
         const context = senderPickupContext(form);
         createPickupPicker(form, {
           sender: true,
-          title: 'Выбор ПВЗ отправителя СДЭК',
+          title: context.pickupFamily === 'dpd:pickup' ? 'Выбор ПВЗ отправителя DPD' : 'Выбор ПВЗ отправителя СДЭК',
           context: context,
           onChoose: function (point) {
             updateSenderPickupDraft(form, point);
@@ -1872,14 +1879,15 @@
           if (snapshotInput) snapshotInput.value = JSON.stringify(snapshot);
           if (display) display.value = snapshot.display || '';
           const cityCode = snapshot && snapshot.fields ? String(snapshot.fields.cdek_city_code || '') : '';
+          const isDpd = fieldValue(form, 'input[name="carrier_key"]') === 'dpd';
           const cityCodeRow = form.querySelector('[data-wdc-cdek-city-code-row]');
           const cityCodeValue = form.querySelector('[data-wdc-cdek-city-code]');
           if (cityCodeValue) cityCodeValue.textContent = cityCode;
           if (cityCodeRow) cityCodeRow.hidden = !cityCode;
           if (status) {
             status.textContent = snapshot.success
-              ? (cityCode ? '✅ Данные для СДЭК корректны' : 'Адрес обработан.')
-              : (snapshot.message || 'Адрес не подтвержден, создание отправления заблокировано.');
+              ? (isDpd ? 'Данные для DPD корректны' : (cityCode ? '✅ Данные для СДЭК корректны' : 'Адрес обработан.'))
+              : (snapshot.message || (isDpd ? 'Адрес не подтвержден DPD, предпросмотр payload заблокирован.' : 'Адрес не подтвержден, создание отправления заблокировано.'));
           }
           updateCreateAvailability(form);
           requestPreview(form);
