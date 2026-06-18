@@ -1,10 +1,10 @@
 # WDC DPD Tariff Calculation
 
-Version: 0.62.0.
+Version: 0.62.1.
 
-This document covers the DPD tariff calculation foundation used by checkout runtime and admin checks. As of 0.62.0,
-checkout runtime uses `calculator2/getServiceCostByParcels3` with terminalCode. The former admin-only terminalCode
-diagnostic UI was removed after prices matched the DPD personal cabinet.
+This document covers the DPD tariff calculation foundation used by checkout runtime. As of 0.62.0, checkout runtime uses
+`calculator2/getServiceCostByParcels3` with terminalCode. As of 0.62.1, the remaining admin test calculator UI was
+removed from `DPD Расчет`; that tab is settings-only.
 
 ## Scope
 
@@ -31,7 +31,7 @@ diagnostic UI was removed after prices matched the DPD personal cabinet.
 - `declaredValue`
 - `parcel[]` with `weight` in kg, `length`, `width`, `height` in cm, and `quantity`
 
-`parcel[]` represents packaging places, not cart items. The checkout runtime uses `DpdParcelBuilder` to expand product quantities, split long items with any side over 49 cm into separate parcels, aggregate <=50 cm3 small items into one synthetic volume block, optimize identical groups into grid blocks, and pack regular units with a bounded deterministic 3D shelf/bin packer. The packer supports `box_50_50_30` and `box_40_40_40`, sends actual occupied dimensions, attempts one box and then two boxes, and falls back to stacked rows. Package-level dimensions are used only when item dimensions are missing, and DPD default dimensions are the final fallback. The admin test calculator remains a one-parcel form for now, while `DpdTariffCalculationService` can accept explicit `params['parcels']` for multi-parcel tests/future UI.
+`parcel[]` represents packaging places, not cart items. The checkout runtime uses `DpdParcelBuilder` to expand product quantities, split long items with any side over 49 cm into separate parcels, aggregate <=50 cm3 small items into one synthetic volume block, optimize identical groups into grid blocks, and pack regular units with a bounded deterministic 3D shelf/bin packer. The packer supports `box_50_50_30` and `box_40_40_40`, sends actual occupied dimensions, attempts one box and then two boxes, and falls back to stacked rows. Package-level dimensions are used only when item dimensions are missing, and DPD default dimensions are the final fallback. `DpdTariffCalculationService` can accept explicit `params['parcels']` for smoke tests/future admin tooling.
 
 `DpdSoapRequest::payload_with_auth()` adds `auth.clientNumber` and `auth.clientKey` centrally when the SOAP transport executes the request. `calculator2/getServiceCostByParcels3` uses the explicit `request` wrapper strategy, so the SOAP argument shape is:
 
@@ -51,21 +51,22 @@ array(
 
 Geography methods such as `getCitiesCashPay` and `getPossibleExtraService` keep the direct payload shape with root-level `auth`.
 
-## Admin Calculator
+## Admin Settings
 
 The `DPD Расчет` tab stores:
 
 - `dpd_tariff_sender_location_id`
 - `dpd_tariff_sender_dpd_city_id`
-- `dpd_tariff_sender_city_name`
 - default weight, length, width, height
 - default declared value
-- last visible tariff action result
 
-The test form accepts sender override, receiver `location_id`, parcel values, pickup/delivery mode and optional `serviceCode`. After POST it redirects back to the same tab and displays success/failure, raw count, normalized service list and, when DPD debug is enabled, the business payload plus redacted SOAP payload shape metadata. The action result block is one-shot: after it renders, `clear_tariff_action_result()` removes it from settings so a normal page reload does not repeat the notice.
+The tab no longer contains a manual `Тестовый расчет DPD` form or tariff result block. Future manual calculators should
+be added as a separate admin tool, not inside these runtime settings.
 
-The former `DPD terminalCode диагностика` block was removed in 0.62.0. The regular test form now calls the same
-`DpdTariffCalculationService` path as checkout, so it checks the current Parcels3 + terminalCode runtime behavior.
+The old display-only sender city text field was removed. Sender display now comes from the saved `sender_location_id`
+through `LocationRepository::find_by_id()` and `resolved_display_name()`. The read-only sender summary shows that display
+name plus the configured sender DPD cityId override, or the DPD cityId resolved from `DpdCityResolver` when the override is
+empty.
 
 Checkout runtime settings no longer live on `DPD Расчет`. Method titles are edited on `Основное`, while DPD service-code enablement, custom tariff titles and the `Использовать курьерские тарифы` checkbox are edited on the DPD `Тарифы` tab. Checkout runtime mode flags are not configurable: runtime always sends from a DPD terminal, and courier delivery is calculated by a separate request only when enabled.
 
@@ -101,7 +102,7 @@ Missing fields are not fatal.
 
 ## Error Handling
 
-`DpdTariffCalculationService` returns controlled errors for incomplete active-environment credentials, missing sender city ID or missing receiver city ID. Incomplete credentials return `DPD credentials are incomplete for current environment.` before any SOAP call. `DpdException`, including missing PHP SOAP extension and SOAP faults, is caught and stored as an admin-visible result instead of breaking the page.
+`DpdTariffCalculationService` returns controlled errors for incomplete active-environment credentials, missing sender city ID or missing receiver city ID. Incomplete credentials return `DPD credentials are incomplete for current environment.` before any SOAP call. `DpdException`, including missing PHP SOAP extension and SOAP faults, is caught and returned in the calculation result instead of breaking checkout.
 
 ## Not Implemented
 

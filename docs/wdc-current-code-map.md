@@ -1,13 +1,13 @@
 # Карта текущего кода
 
-## DPD TerminalCode Runtime Pricing 0.62.0
+## DPD TerminalCode Runtime Pricing 0.62.1
 
 - `src/Carriers/Dpd/Tariff/DpdTerminalCodeTariffRequest.php` and `DpdTerminalCodeTariffRequestBuilder.php` build the runtime `calculator2/getServiceCostByParcels3` payload with `pickup.cityId`, `pickup.terminalCode`, `delivery.cityId`, optional pickup-only `delivery.terminalCode`, `selfPickup`, `selfDelivery`, `declaredValue`, optional `serviceCode`/`pickupDate` and `parcel[]`. The builder stays auth-free; `DpdSoapRequest` adds `request.auth`.
 - `src/Carriers/Dpd/Tariff/DpdTariffCalculationService.php` now calls `DpdApiClient::getServiceCostByParcels3()`. Pickup quotes include sender and receiver terminalCode; courier quotes include sender terminalCode and omit receiver terminalCode.
 - `src/Carriers/Dpd/Pickup/DpdPickupPointService.php::find_runtime_parcel_shop_for_city_id()` and `find_runtime_parcel_shop_by_terminal_code()` select active `parcel_shop` rows for runtime pricing. They avoid duplicate `terminal_self_delivery` rows when possible, allow duplicated `parcel_shop` fallback when needed, and never use standalone `terminal_self_delivery` as a runtime terminal.
 - `assets/frontend/pickup-map/wdc-pickup-checkout.js` triggers `update_checkout` after saving a DPD pickup point so selected terminalCode replaces the auto-selected receiver terminalCode and rates recalculate.
 - `src/Checkout/WooCommerce/WooCommercePackageMapper.php` and `src/Checkout/Cache/QuoteCache.php` include the selected DPD terminalCode in checkout context/cache keys.
-- The previous 0.61.0 admin terminalCode diagnostic service/form/comparison block was removed. `tests/dpd/run-dpd-terminalcode-runtime-pricing-smoke.php` covers Parcels3 pickup/courier payloads, auto/selected terminalCode, duplicate fallback, quote_id changes and shipment-adapter absence.
+- The previous 0.61.0 admin terminalCode diagnostic service/form/comparison block was removed. In 0.62.1 the remaining generic `Тестовый расчет DPD` form/result storage was also removed from `DPD Расчет`; the tab now stores only sender/default parcel settings and shows read-only sender location + DPD cityId information. `tests/dpd/run-dpd-terminalcode-runtime-pricing-smoke.php` covers Parcels3 pickup/courier payloads, auto/selected terminalCode, duplicate fallback, quote_id changes and shipment-adapter absence.
 
 ## DPD Checkout Pickup Selection 0.60.0
 
@@ -52,14 +52,14 @@
 ## DPD Tariff Calculation Foundation 0.57.0
 
 - `src/Carriers/Dpd/DpdApiClient.php::getServiceCostByParcels3()` is the primary runtime low-level wrapper for the DPD calculator SOAP method. It uses `DpdEndpoints::SERVICE_CALCULATOR` (`calculator2`) and the existing `DpdApiClient::call()` path, so `DpdSoapRequest` remains the only place that adds `auth`. `getServiceCostByParcels2()` remains available as a legacy wrapper.
-- `src/Carriers/Dpd/Tariff/DpdTariffRequest.php` and `DpdTariffParcel.php` describe the admin diagnostic tariff input: sender/receiver DPD city IDs, one parcel, declared value, pickup/delivery mode flags, optional service code and pickup date.
+- `src/Carriers/Dpd/Tariff/DpdTariffRequest.php` and `DpdTariffParcel.php` remain as the legacy Parcels2 request DTOs used by low-level/smoke coverage. Runtime Parcels3 requests use `DpdTerminalCodeTariffRequest`.
 - `src/Carriers/Dpd/Tariff/DpdTerminalCodeTariffRequestBuilder.php` builds the runtime `getServiceCostByParcels3` payload with `pickup.cityId`, `pickup.terminalCode`, `delivery.cityId`, optional `delivery.terminalCode`, `selfPickup`, `selfDelivery`, `declaredValue`, optional `serviceCode`/`pickupDate`, and `parcel[]` packaging-place weight/dimensions/quantity. It intentionally does not include credentials, extra services or WooCommerce objects.
 - `src/Carriers/Dpd/Tariff/DpdTariffCalculationService.php` resolves sender city ID from DPD tariff settings/override or sender `location_id`, resolves receiver `location_id` through `DpdCityResolver`, calls the DPD API wrapper, catches `DpdException`, and returns `DpdTariffResult` without writing rates to delivery tables.
 - `src/Carriers/Dpd/Tariff/DpdTariffOptionNormalizer.php` tolerates DPD SOAP bodies shaped as one object, arrays, or nested `return`/service fields and normalizes service code, name, cost, currency, delivery period/date, pickup/delivery flags and raw fields.
-- `src/Carriers/Dpd/DpdSettings.php` stores DPD tariff calculator settings (`dpd_tariff_sender_location_id`, `dpd_tariff_sender_dpd_city_id`, display sender city name, default parcel dimensions/weight, declared value) and the one-shot visible tariff action result.
-- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds the `DPD Расчет` tab with diagnostic sender/default package settings and a nonce/capability-protected test calculator. The tab displays success/failure, raw returned option count, normalized service list and debug raw payload/response when DPD debug is enabled.
-- `src/Core/Plugin.php` registers DPD tariff builder/normalizer/calculation service for admin diagnostics and the DPD checkout quote carrier. It still registers no DPD shipment adapter in `CarrierShipmentAdapterRegistry`.
-- `tests/dpd/run-dpd-tariff-calculation-smoke.php` covers payload building/auth separation, controlled sender/receiver cityId errors, fake API invocation, single/array response normalization, visible admin result storage, and DPD shipment-adapter non-registration.
+- `src/Carriers/Dpd/DpdSettings.php` stores DPD calculation settings (`dpd_tariff_sender_location_id`, optional `dpd_tariff_sender_dpd_city_id`, default parcel dimensions/weight and declared value) plus runtime titles/service-code settings. The removed display-only sender city name and one-shot tariff action result options are no longer part of current settings.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders the `DPD Расчет` tab as settings-only: sender `location_id`, optional sender DPD cityId override, read-only sender location + DPD cityId summary, and default parcel values. The old `Тестовый расчет DPD` form/action/result block is removed.
+- `src/Core/Plugin.php` registers DPD tariff builder/normalizer/calculation service for the DPD checkout quote carrier. It still registers no DPD shipment adapter in `CarrierShipmentAdapterRegistry`.
+- `tests/dpd/run-dpd-tariff-calculation-smoke.php` covers payload building/auth separation, controlled sender/receiver cityId errors, fake API invocation, single/array response normalization, current admin settings boundaries, and DPD shipment-adapter non-registration.
 - `docs/wdc-dpd-tariff-calculation.md` documents the tariff boundary. Pickup points, order creation, statuses, labels, COD, `unitLoad`, receipts, cron and tariff sync are intentionally not implemented.
 
 ## DPD Delivery Codes And Geography Import 0.56.3

@@ -588,7 +588,6 @@ final class Plugin {
 				$this->container->get( DpdGeographyImportService::class ),
 				$this->container->get( DpdGeographyFtpClient::class ),
 				$this->container->get( DpdDaDataDeliveryFallbackService::class ),
-				$this->container->get( DpdTariffCalculationService::class ),
 				$this->container->get( DpdPickupPointRepository::class ),
 				$this->container->get( DpdPickupPointImportService::class ),
 				$this->container->get( DpdCityResolver::class ),

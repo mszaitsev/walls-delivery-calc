@@ -124,7 +124,6 @@ $settings->save_from_admin(
 $settings->save_tariff_settings_from_admin(
 	array(
 		DpdSettings::TARIFF_SENDER_LOCATION_ID_KEY => 100,
-		DpdSettings::TARIFF_SENDER_CITY_NAME_KEY => 'Новосибирск',
 		DpdSettings::TARIFF_DEFAULT_WEIGHT_G_KEY => 1500,
 		DpdSettings::TARIFF_DEFAULT_LENGTH_CM_KEY => 30,
 		DpdSettings::TARIFF_DEFAULT_WIDTH_CM_KEY => 20,
@@ -132,18 +131,6 @@ $settings->save_tariff_settings_from_admin(
 		DpdSettings::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY => 2500,
 	)
 );
-$settings->save_tariff_action_result(
-	array(
-		'type' => 'success',
-		'title' => 'DPD Расчет',
-		'message' => 'Visible result',
-		'details' => array( 'raw_count' => 1, 'options' => array( array( 'service_code' => 'PCL' ) ) ),
-	)
-);
-$stored_result = $settings->get_tariff_action_result();
-dpd_tariff_assert( 'DPD Расчет' === (string) $stored_result['title'] && '1' === (string) $stored_result['details']['raw_count'], 'DPD tariff action result must be saved for visible admin rendering.' );
-$settings->clear_tariff_action_result();
-dpd_tariff_assert( array() === $settings->get_tariff_action_result(), 'DPD tariff action result must support one-shot clearing after render.' );
 
 $builder = new DpdTariffRequestBuilder();
 $payload = $builder->build(
@@ -301,7 +288,9 @@ dpd_tariff_assert( true === $array_result->success && 2 === count( $array_result
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
-dpd_tariff_assert( str_contains( $admin_source, 'DPD Расчет' ) && str_contains( $admin_source, 'render_dpd_tariff_action_result' ) && str_contains( $admin_source, 'test_dpd_tariff_calculation' ), 'Admin page must expose an admin-only DPD tariff calculator with visible result storage.' );
+dpd_tariff_assert( str_contains( $admin_source, 'DPD Расчет' ) && str_contains( $admin_source, 'Настройки расчета DPD' ), 'Admin page must keep the DPD calculation settings tab.' );
+dpd_tariff_assert( ! str_contains( $admin_source, 'Тестовый расчет DPD' ) && ! str_contains( $admin_source, 'test_dpd_tariff_calculation' ) && ! str_contains( $admin_source, 'render_dpd_tariff_action_result' ), 'Admin page must not expose the removed DPD test calculation form/result block.' );
+dpd_tariff_assert( ! str_contains( $admin_source, 'Город отправителя для отображения' ) && ! str_contains( $admin_source, 'TARIFF_SENDER_CITY_NAME_KEY' ), 'Admin page must not expose the removed sender display-only field.' );
 dpd_tariff_assert( str_contains( $plugin_source, 'DpdQuoteCarrier' ) && ! str_contains( $plugin_source, 'DpdShipmentAdapter' ), 'DPD may be registered for checkout quotes but must not be registered in shipment adapters.' );
 dpd_tariff_assert( str_contains( $plugin_source, 'RussianPostInternationalCarrier' ) && str_contains( $plugin_source, 'RussianPostDomesticCarrier' ) && str_contains( $plugin_source, 'CdekCarrier' ), 'Existing CDEK/Russian Post runtime registrations must remain present.' );
 dpd_tariff_assert( ! str_contains( $admin_source, 'createOrder' ) && ! str_contains( $admin_source, 'unitLoad' ), 'DPD tariff admin must not add shipment creation or unitLoad.' );

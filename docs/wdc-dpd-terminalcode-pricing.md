@@ -1,6 +1,6 @@
 # WDC DPD TerminalCode Runtime Pricing
 
-Version: 0.62.0.
+Version: 0.62.1.
 
 DPD terminalCode pricing is now part of checkout runtime. The previous 0.61.0 admin-only diagnostic matched the DPD
 personal cabinet, so the temporary terminalCode diagnostic UI/classes were removed.
@@ -79,6 +79,10 @@ Removed from `DPD Расчет`:
 - manual diagnostic terminal selectors;
 - Parcels2/Parcels3 comparison result block;
 - diagnostic service/result/request classes.
+
+0.62.1 also removed the remaining generic `Тестовый расчет DPD` form from `DPD Расчет`, including its submit action,
+one-shot result block, tariff result storage, and display-only sender city text option. The tab now keeps only sender
+location/DPD cityId/default parcel settings and read-only sender information.
 
 Kept:
 

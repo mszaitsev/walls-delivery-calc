@@ -1,6 +1,13 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.62.0.
+Current plugin version: 0.62.1.
+
+Version 0.62.1 cleans up the DPD `DPD Расчет` admin tab after runtime moved to
+`calculator2/getServiceCostByParcels3`. The old `Тестовый расчет DPD` form, submit action, result block and dedicated
+tariff result storage were removed. The display-only sender city text setting was also removed; the tab keeps
+`sender_location_id`, optional sender DPD cityId override, default parcel values, and read-only sender information from
+the stored location plus resolved DPD cityId. Checkout runtime pricing, Parcels3 payloads, pickup selection, shipment
+adapter/metabox scope, CDEK and Russian Post remain unchanged.
 
 Version 0.62.0 switches DPD checkout runtime pricing to `calculator2/getServiceCostByParcels3` after the terminalCode
 diagnostic matched the DPD personal cabinet. Pickup rates now send `pickup.cityId`, `pickup.terminalCode`,
