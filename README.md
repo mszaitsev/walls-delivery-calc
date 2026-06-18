@@ -1,6 +1,11 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.63.3.
+Current plugin version: 0.63.4.
+
+Version 0.63.4 makes the DPD preparation `Дата отправки` control two-line: label on the first line, compact date input
+with `−`/`+` buttons on the second. Clicking/focusing the date input now attempts the browser native date picker through
+`showPicker()` when available, with focus fallback. DPD payload logic, checkout pricing, live create calls, CDEK and
+Russian Post behavior are unchanged.
 
 Version 0.63.3 cosmetically refines the DPD preparation `Дата отправки` control. The date input is now compact instead
 of full-width, with small `−`/`+` buttons that move the selected date by one calendar day and trigger the existing

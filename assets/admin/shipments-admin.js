@@ -622,6 +622,22 @@
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
+  function openNativeDatePicker(input) {
+    if (!input || input._wdcDatePickerOpening) return;
+    input._wdcDatePickerOpening = true;
+    window.setTimeout(function () {
+      input._wdcDatePickerOpening = false;
+    }, 180);
+    try {
+      input.focus();
+      if (typeof input.showPicker === 'function') {
+        input.showPicker();
+      }
+    } catch (error) {
+      input.focus();
+    }
+  }
+
   function renumberPlaces(container) {
     container.querySelectorAll('[data-wdc-place]').forEach((row, index) => {
       const title = row.querySelector('[data-wdc-place-title]');
@@ -1748,6 +1764,11 @@
       return;
     }
 
+    const dateInput = event.target.closest('[data-wdc-dpd-date-pickup]');
+    if (dateInput) {
+      openNativeDatePicker(dateInput);
+    }
+
     const cdekBarcodeDownload = event.target.closest('[data-wdc-cdek-barcode-download]');
     if (cdekBarcodeDownload) {
       event.preventDefault();
@@ -2120,6 +2141,18 @@
       schedulePreview(form);
     }
   });
+
+  document.addEventListener('pointerdown', function (event) {
+    if (event.target.matches('[data-wdc-dpd-date-pickup]')) {
+      openNativeDatePicker(event.target);
+    }
+  });
+
+  document.addEventListener('focus', function (event) {
+    if (event.target.matches('[data-wdc-dpd-date-pickup]')) {
+      openNativeDatePicker(event.target);
+    }
+  }, true);
 
   document.addEventListener('keydown', function (event) {
     if (!event.target.matches('[data-wdc-integer-input]')) return;

@@ -372,6 +372,10 @@
   margin-bottom: 10px;
 }
 
+.wdc-shipment-modal .wdc-dpd-date-label {
+  display: block;
+}
+
 .wdc-shipment-modal .wdc-dpd-date-row {
   display: inline-flex;
   align-items: center;

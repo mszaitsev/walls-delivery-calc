@@ -212,6 +212,7 @@ dpd_shipment_assert( str_contains( $draft_source, 'В заказе тариф' )
 dpd_shipment_assert( ! str_contains( $draft_source, 'name="dpd_comment"' ), 'DPD modal must not render DPD comment field.' );
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-dpd-date-pickup' ) && str_contains( $draft_source, 'Дата отправки' ), 'DPD modal must render datePickup date input after sender pickup point block.' );
 dpd_shipment_assert( str_contains( $draft_source, 'name="date_pickup"' ) && str_contains( $draft_source, 'type="date"' ), 'DPD modal must render date_pickup date input.' );
+dpd_shipment_assert( str_contains( $draft_source, 'class="wdc-dpd-date-label"' ) && str_contains( $draft_source, 'class="wdc-dpd-date-row"' ), 'DPD date field must render label and input/buttons on separate rows.' );
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-date-step="-1"' ) && str_contains( $draft_source, 'data-wdc-date-step="1"' ), 'DPD modal must render date step buttons.' );
 dpd_shipment_assert( str_contains( $draft_source, 'wdc-dpd-date-row' ) && str_contains( $draft_css, '.wdc-shipment-modal .wdc-dpd-date-row input[type="date"]' ) && str_contains( $draft_css, 'width: auto;' ), 'DPD date input must use compact row styles instead of the full-width modal input pattern.' );
 dpd_shipment_assert( array( DeliveryType::PICKUP, DeliveryType::COURIER ) === array_column( $draft['services'], 'delivery_type' ), 'DPD modal must allow pickup/courier delivery type switch.' );
@@ -285,6 +286,7 @@ $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-weight-hint' ) && str_contains( $js_source, 'hint.hidden = places.length !== 1' ), 'Single-place weight hint must be common and hidden for multi-place mode.' );
 dpd_shipment_assert( str_contains( $js_source, 'cityCodeRow.hidden = isDpd || !cityCode' ), 'DPD courier modal must not display CDEK city code after address normalization.' );
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-cdek-city-code-row <?php echo ( $is_cdek' ), 'CDEK courier modal must still display CDEK city code when normalization has it.' );
+dpd_shipment_assert( str_contains( $js_source, 'function openNativeDatePicker' ) && str_contains( $js_source, 'input.showPicker()' ) && str_contains( $js_source, '[data-wdc-dpd-date-pickup]' ), 'DPD date input must try to open native date picker on interaction.' );
 
 $missing_date_request = $factory->create_request_from_admin_data( $pickup_order, array( 'places' => array( array( 'weight_g' => '1000', 'length_cm' => '10', 'width_cm' => '10', 'height_cm' => '10' ) ), 'recipient_phone' => '+79990000000', 'date_pickup' => '' ) );
 dpd_shipment_assert( in_array( 'Дата отправки DPD обязательна.', $builder->validate( $missing_date_request ), true ), 'Missing datePickup must produce validation error.' );

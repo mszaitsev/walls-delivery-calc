@@ -1,6 +1,12 @@
 # WDC DPD Shipment Preparation
 
-Version: 0.63.3.
+Version: 0.63.4.
+
+0.63.4 update: the DPD `Дата отправки` control uses two rows: `.wdc-dpd-date-label` for the label and
+`.wdc-dpd-date-row` for the compact date input plus `−`/`+` buttons. Pointer/click/focus interaction with
+`input[data-wdc-dpd-date-pickup]` attempts native `showPicker()` behind a short guard and falls back to `focus()` without
+making the field readonly. This only improves UI opening behavior; value changes still flow through the existing preview
+and validation paths.
 
 0.63.3 update: the DPD `Дата отправки` input is rendered as a compact inline control instead of the modal-wide input
 style. Small `−` and `+` buttons with `data-wdc-date-step="-1"` / `data-wdc-date-step="1"` move the selected value by
