@@ -214,8 +214,8 @@ $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/
 $shipments_metabox = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 dpd_checkout_pickup_assert( str_contains( $delivery_selector_source, 'render_pickup_map_selector' ) && str_contains( $pickup_map_source, "'dpd:pickup'" ), 'Checkout UI registration/hook must exist for DPD pickup.' );
 dpd_checkout_pickup_assert( str_contains( $points_source, 'DpdPickupPointService' ) && str_contains( $points_source, 'dpd_points' ), 'Pickup points endpoint must be extended for DPD.' );
-dpd_checkout_pickup_assert( str_contains( $runtime_source, 'getServiceCostByParcels2' ) || ! str_contains( $runtime_source, 'getServiceCostByParcels3' ), 'DPD runtime must not switch to getServiceCostByParcels3.' );
-dpd_checkout_pickup_assert( ! str_contains( $tariff_source, 'terminalCode' ) && ! str_contains( $runtime_source, 'terminalCode' ), 'DPD terminalCode must not be sent to tariff calculation yet.' );
+dpd_checkout_pickup_assert( str_contains( $tariff_source, 'getServiceCostByParcels3' ) && str_contains( $tariff_source, 'delivery_terminal_code' ), 'DPD runtime must use Parcels3 with terminalCode-aware tariff payload.' );
+dpd_checkout_pickup_assert( str_contains( $runtime_source, 'selected_delivery_terminal_code' ), 'DPD runtime must read buyer-selected terminalCode from checkout context/session.' );
 dpd_checkout_pickup_assert( ! str_contains( $plugin_source, 'DpdShipmentAdapter' ) && ! str_contains( $shipments_metabox, 'DpdShipmentAdapter' ), 'DPD shipment adapter/metabox must not be added.' );
 
 echo "DPD checkout pickup selection smoke test passed.\n";

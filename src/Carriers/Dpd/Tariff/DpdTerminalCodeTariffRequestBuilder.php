@@ -5,18 +5,18 @@ namespace WallsShop\WDC\Carriers\Dpd\Tariff;
 
 defined( 'ABSPATH' ) || exit;
 
-final class DpdTerminalCodeTariffDiagnosticRequestBuilder {
+final class DpdTerminalCodeTariffRequestBuilder {
 	/**
 	 * @return array<string,mixed>
 	 */
-	public function build( DpdTerminalCodeTariffDiagnosticRequest $request ): array {
+	public function build( DpdTerminalCodeTariffRequest $request ): array {
 		$payload = array(
 			'pickup' => array(
 				'cityId' => $request->pickup_city_id,
+				'terminalCode' => $request->pickup_terminal_code,
 			),
 			'delivery' => array(
 				'cityId' => $request->delivery_city_id,
-				'terminalCode' => $request->delivery_terminal_code,
 			),
 			'selfPickup' => $request->self_pickup,
 			'selfDelivery' => $request->self_delivery,
@@ -24,8 +24,8 @@ final class DpdTerminalCodeTariffDiagnosticRequestBuilder {
 			'parcel' => array_map( array( $this, 'parcel_payload' ), $request->parcels ),
 		);
 
-		if ( '' !== trim( $request->pickup_terminal_code ) ) {
-			$payload['pickup']['terminalCode'] = trim( $request->pickup_terminal_code );
+		if ( '' !== trim( $request->delivery_terminal_code ) ) {
+			$payload['delivery']['terminalCode'] = trim( $request->delivery_terminal_code );
 		}
 		if ( '' !== trim( $request->service_code ) ) {
 			$payload['serviceCode'] = trim( $request->service_code );

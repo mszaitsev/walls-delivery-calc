@@ -125,14 +125,14 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 				setLoading('Сохраняем пункт выдачи...');
 				var checkoutContext = contextFromFields();
 				if (pointMatchesDestinationQuick(point, checkoutContext) || !window.WDCPickupApi.resolveLocation) {
-					commitPoint(point, method, { updateCheckoutAfterSave: false });
+					commitPoint(point, method, { updateCheckoutAfterSave: requiresRateRefreshAfterPickupSave(point) });
 					return;
 				}
 				setLoading('Проверяем населенный пункт...');
 				window.WDCPickupApi.resolveLocation(pointPayload(point), checkoutContext).then(function (response) {
 					if (!response || !response.requires_location_change || !response.location) {
 						clearLoading();
-						commitPoint(point, method, { updateCheckoutAfterSave: false });
+						commitPoint(point, method, { updateCheckoutAfterSave: requiresRateRefreshAfterPickupSave(point) });
 						return;
 					}
 					clearLoading();
@@ -145,7 +145,7 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 					});
 				}).catch(function () {
 					clearLoading();
-					commitPoint(point, method, { updateCheckoutAfterSave: false });
+					commitPoint(point, method, { updateCheckoutAfterSave: requiresRateRefreshAfterPickupSave(point) });
 				});
 			}
 
@@ -173,6 +173,9 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 							applySelection(actualContainer, savedPoint);
 						}
 						syncPickupContextAfterLocationChange(location, savedPoint);
+						if (requiresRateRefreshAfterPickupSave(savedPoint || point)) {
+							triggerCheckoutUpdate();
+						}
 						disableDestinationResetSuppression();
 					}).catch(function () {
 						showCheckoutNotice('Не удалось сохранить пункт выдачи. Выберите пункт выдачи еще раз.');
@@ -1778,6 +1781,10 @@ var lastDestinationFingerprint = destinationFingerprint(contextFromFields());
 		if (window.jQuery) {
 			window.jQuery(document.body).trigger('update_checkout');
 		}
+	}
+
+	function requiresRateRefreshAfterPickupSave(point) {
+		return pickupFamily(point) === 'dpd:pickup';
 	}
 
 	function boot() {

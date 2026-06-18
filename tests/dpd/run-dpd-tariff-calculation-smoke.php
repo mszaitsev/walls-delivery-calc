@@ -16,11 +16,15 @@ use WallsShop\WDC\Carriers\Dpd\DpdSoapClientInterface;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapRequest;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapResponse;
 use WallsShop\WDC\Carriers\Dpd\DpdCityResolver;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffCalculationService;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffOptionNormalizer;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffParcel;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffRequest;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffRequestBuilder;
+use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTerminalCodeTariffRequest;
+use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTerminalCodeTariffRequestBuilder;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
@@ -48,6 +52,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $locations = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $delivery_codes = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $dpd_pickup_points = array();
 	}
 }
 
@@ -98,6 +104,12 @@ $GLOBALS['wpdb']->locations = array(
 $GLOBALS['wpdb']->delivery_codes = array(
 	array( 'location_id' => 100, 'dpd_city_id' => '49455627', 'updated_at' => current_time( 'mysql' ) ),
 	array( 'location_id' => 200, 'dpd_city_id' => '49694102', 'updated_at' => current_time( 'mysql' ) ),
+);
+$GLOBALS['wpdb']->dpd_pickup_points = array(
+	array( 'id' => 1, 'terminal_code' => 'NSK-SENDER', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'name' => 'DPD Новосибирск', 'address' => 'ул Ленина, 1', 'source' => 'getParcelShops', 'is_active' => 1 ),
+	array( 'id' => 2, 'terminal_code' => 'MSK-AUTO', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49694102, 'city_name' => 'Москва', 'name' => 'DPD Москва', 'address' => 'ул Тверская, 1', 'source' => 'getParcelShops', 'is_active' => 1 ),
+	array( 'id' => 3, 'terminal_code' => 'MSK-SELECTED', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49694102, 'city_name' => 'Москва', 'name' => 'DPD Москва selected', 'address' => 'ул Арбат, 1', 'source' => 'getParcelShops', 'is_active' => 1 ),
+	array( 'id' => 4, 'terminal_code' => 'MSK-SELECTED', 'type' => 'terminal_self_delivery', 'country_code' => 'RU', 'city_id' => 49694102, 'city_name' => 'Москва', 'name' => 'DPD duplicate terminal', 'address' => 'ул Арбат, 1', 'source' => 'getTerminalsSelfDelivery2', 'is_active' => 1 ),
 );
 
 $settings = new DpdSettings( new SettingsRepository(), new EncryptionService() );
@@ -161,6 +173,23 @@ $multi_payload = $builder->build(
 	)
 );
 dpd_tariff_assert( 2 === count( $multi_payload['parcel'] ?? array() ) && 4.5 === $multi_payload['parcel'][1]['weight'], 'Builder must preserve explicitly provided multi-parcel requests as separate parcel entries.' );
+$terminal_builder = new DpdTerminalCodeTariffRequestBuilder();
+$terminal_payload = $terminal_builder->build(
+	new DpdTerminalCodeTariffRequest(
+		'49455627',
+		'49694102',
+		array( new DpdTariffParcel( 4500, 38, 24, 21, 1 ) ),
+		5000,
+		true,
+		true,
+		'NSK-SENDER',
+		'MSK-AUTO',
+		'PCL',
+		'2026-06-17'
+	)
+);
+dpd_tariff_assert( 'NSK-SENDER' === (string) ( $terminal_payload['pickup']['terminalCode'] ?? '' ) && 'MSK-AUTO' === (string) ( $terminal_payload['delivery']['terminalCode'] ?? '' ), 'Parcels3 terminalCode builder must include pickup and delivery terminalCode for pickup delivery.' );
+dpd_tariff_assert( ! isset( $terminal_payload['extraService'] ) && ! isset( $terminal_payload['extraServices'] ), 'Parcels3 terminalCode builder must not include extra services.' );
 $direct_request = new DpdSoapRequest( DpdEndpoints::SERVICE_CALCULATOR, 'getServiceCostByParcels2', $payload, new DpdCredentials( 'client-number', 'client-key', DpdSettings::ENV_TEST ) );
 $direct_payload_with_auth = $direct_request->payload_with_auth();
 dpd_tariff_assert( isset( $direct_payload_with_auth['auth']['clientNumber'], $direct_payload_with_auth['auth']['clientKey'] ) && ! isset( $direct_payload_with_auth['request'] ), 'DpdSoapRequest direct wrapper must add auth at the root.' );
@@ -195,13 +224,14 @@ $resolver = new DpdCityResolver( $delivery_codes );
 $locations = new LocationRepository( $GLOBALS['wpdb'] );
 $soap = new DpdTariffFakeSoapClient();
 $api = new DpdApiClient( $settings, $soap );
-$service = new DpdTariffCalculationService( $api, $resolver, $locations, $settings, $builder, $normalizer );
+$pickup_service = new DpdPickupPointService( new DpdPickupPointRepository( $GLOBALS['wpdb'] ), $delivery_codes );
+$service = new DpdTariffCalculationService( $api, $resolver, $locations, $settings, $builder, $normalizer, $pickup_service, $terminal_builder );
 
 $stored_options_before_missing_sender = $GLOBALS['wdc_dpd_tariff_options'];
 $GLOBALS['wdc_dpd_tariff_options']['wdc_core_settings'][ DpdSettings::TARIFF_SENDER_LOCATION_ID_KEY ] = 0;
 $GLOBALS['wdc_dpd_tariff_options']['wdc_core_settings'][ DpdSettings::TARIFF_SENDER_DPD_CITY_ID_KEY ] = '';
 $missing_sender_settings = new DpdSettings( new SettingsRepository(), new EncryptionService() );
-$missing_sender_service = new DpdTariffCalculationService( $api, $resolver, $locations, $missing_sender_settings, $builder, $normalizer );
+$missing_sender_service = new DpdTariffCalculationService( $api, $resolver, $locations, $missing_sender_settings, $builder, $normalizer, $pickup_service, $terminal_builder );
 $missing_sender = $missing_sender_service->calculate( 200, array() );
 dpd_tariff_assert( false === $missing_sender->success && in_array( 'DPD sender cityId is not configured.', $missing_sender->errors, true ), 'Service must return a controlled error without sender cityId.' );
 $GLOBALS['wdc_dpd_tariff_options'] = $stored_options_before_missing_sender;
@@ -233,12 +263,14 @@ $result = $service->calculate(
 );
 dpd_tariff_assert( true === $result->success && 1 === count( $result->options ), 'Service must call fake DPD API and normalize single response.' );
 dpd_tariff_assert( 1 === count( $soap->calls ), 'Service must make one DPD API call.' );
-dpd_tariff_assert( DpdEndpoints::SERVICE_CALCULATOR === $soap->calls[0]['service'] && 'getServiceCostByParcels2' === $soap->calls[0]['method'], 'Service must call calculator2 getServiceCostByParcels2.' );
+dpd_tariff_assert( DpdEndpoints::SERVICE_CALCULATOR === $soap->calls[0]['service'] && 'getServiceCostByParcels3' === $soap->calls[0]['method'], 'Service must call calculator2 getServiceCostByParcels3.' );
 dpd_tariff_assert( '49455627' === $soap->calls[0]['payload']['pickup']['cityId'] && '49694102' === $soap->calls[0]['payload']['delivery']['cityId'], 'Service must pass expected sender/receiver cityId in payload.' );
+dpd_tariff_assert( 'NSK-SENDER' === (string) ( $soap->calls[0]['payload']['pickup']['terminalCode'] ?? '' ) && ! isset( $soap->calls[0]['payload']['delivery']['terminalCode'] ), 'Courier Parcels3 payload must include pickup terminalCode and omit delivery terminalCode.' );
 dpd_tariff_assert( DpdSoapRequest::WRAPPER_REQUEST === $soap->calls[0]['options']['wrapper'] && isset( $soap->calls[0]['soap_payload']['request']['auth']['clientNumber'], $soap->calls[0]['soap_payload']['request']['auth']['clientKey'] ), 'Calculator SOAP call must send auth inside the request wrapper.' );
 dpd_tariff_assert( ! isset( $soap->calls[0]['payload']['auth'] ) && ! isset( $soap->calls[0]['payload']['request'] ), 'Business payload passed to DpdApiClient must remain auth-free and wrapper-free.' );
-dpd_tariff_assert( ! isset( $soap->calls[0]['payload']['extraService'] ) && ! isset( $soap->calls[0]['payload']['extraServices'] ), 'Parcels2 business payload must not include extra services.' );
+dpd_tariff_assert( ! isset( $soap->calls[0]['payload']['extraService'] ) && ! isset( $soap->calls[0]['payload']['extraServices'] ), 'Parcels3 business payload must not include extra services.' );
 dpd_tariff_assert( DpdSoapRequest::WRAPPER_REQUEST === ( $result->meta['wrapper'] ?? '' ) && 'yes' === ( $result->meta['debug_payload_shape']['has_auth'] ?? '' ), 'Tariff result meta must expose redacted wrapper/auth debug shape.' );
+dpd_tariff_assert( 'getServiceCostByParcels3' === (string) ( $result->meta['method'] ?? '' ), 'Tariff result meta must expose Parcels3 runtime method.' );
 dpd_tariff_assert( ! str_contains( (string) wp_json_encode( $result->meta['debug_payload_shape'] ?? array() ), 'test-client-key' ), 'Tariff debug payload shape must not leak clientKey.' );
 
 $explicit_multi_result = $service->calculate(
@@ -255,7 +287,8 @@ $explicit_multi_result = $service->calculate(
 	)
 );
 $multi_service_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
-dpd_tariff_assert( true === $explicit_multi_result->success && 2 === count( $multi_service_payload['parcel'] ?? array() ), 'Service must pass valid explicit multi-parcel params to Parcels2 payload.' );
+dpd_tariff_assert( true === $explicit_multi_result->success && 2 === count( $multi_service_payload['parcel'] ?? array() ), 'Service must pass valid explicit multi-parcel params to Parcels3 payload.' );
+dpd_tariff_assert( 'MSK-AUTO' === (string) ( $multi_service_payload['delivery']['terminalCode'] ?? '' ), 'Pickup Parcels3 payload must auto-select delivery terminalCode when no buyer terminalCode is provided.' );
 
 $soap->next_body = array(
 	'return' => array(

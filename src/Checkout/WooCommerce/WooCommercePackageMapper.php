@@ -54,6 +54,7 @@ final class WooCommercePackageMapper {
 					'fallback_address'   => $address->fallback,
 					'selected_location_id' => $this->selected_location_id(),
 					'selected_location_fias_id' => $this->selected_location_fias_id( $address ),
+					'dpd_selected_terminal_code' => $this->dpd_selected_terminal_code(),
 				),
 				$customer_context
 			)
@@ -180,6 +181,15 @@ final class WooCommercePackageMapper {
 		$context = $this->session_manager instanceof CheckoutSessionManager ? $this->session_manager->city_context() : array();
 
 		return (string) ( $context['location_id'] ?? $context['id'] ?? '' );
+	}
+
+	private function dpd_selected_terminal_code(): string {
+		if ( ! $this->session_manager instanceof CheckoutSessionManager ) {
+			return '';
+		}
+		$selection = $this->session_manager->pickup_selection_for_family( 'dpd:pickup' );
+
+		return trim( (string) ( $selection['terminal_code'] ?? $selection['point_code'] ?? '' ) );
 	}
 
 }

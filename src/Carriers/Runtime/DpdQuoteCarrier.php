@@ -7,6 +7,7 @@ use WallsShop\WDC\Carriers\Contracts\CarrierAdapterInterface;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdParcelBuilder;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffCalculationService;
+use WallsShop\WDC\Checkout\WooCommerce\CheckoutSessionManager;
 use WallsShop\WDC\Domain\Carrier\CarrierCapabilities;
 use WallsShop\WDC\Domain\Carrier\CarrierIdentity;
 use WallsShop\WDC\Domain\Common\DateRange;
@@ -27,7 +28,8 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 		private DpdSettings $settings,
 		private DpdTariffCalculationService $tariffs,
 		private DpdParcelBuilder $parcels,
-		private Logger $logger
+		private Logger $logger,
+		private ?CheckoutSessionManager $session_manager = null
 	) {
 	}
 
@@ -62,7 +64,7 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 		}
 
 		$parcel_build = $this->parcels->build( $request );
-		$params = $this->tariff_params( $parcel_build, $delivery_type );
+		$params = $this->tariff_params( $parcel_build, $delivery_type, $request );
 		$result = $this->tariffs->calculate( $receiver_location_id, $params );
 		if ( ! $result->success ) {
 			$this->logger->warning(
@@ -170,6 +172,10 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 				'box_limit' => is_array( $parcel_build['box_limit'] ?? null ) ? $parcel_build['box_limit'] : array(),
 				'dpd_filter_removed_count' => count( $removed_by_filter ),
 				'dpd_filter_removed_tariffs' => $removed_by_filter,
+				'dpd_tariff_method' => (string) ( $result->meta['method'] ?? 'getServiceCostByParcels3' ),
+				'dpd_pickup_terminal_code' => (string) ( $result->meta['pickup_terminal_code'] ?? '' ),
+				'dpd_delivery_terminal_code' => (string) ( $result->meta['delivery_terminal_code'] ?? '' ),
+				'dpd_delivery_terminal_source' => (string) ( $result->meta['delivery_terminal_source'] ?? '' ),
 			)
 		);
 	}
@@ -198,8 +204,8 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function tariff_params( array $parcel_build, string $delivery_type ): array {
-		return array(
+	private function tariff_params( array $parcel_build, string $delivery_type, QuoteRequest $request ): array {
+		$params = array(
 			'parcels' => is_array( $parcel_build['parcels'] ?? null ) ? $parcel_build['parcels'] : array(),
 			'declared_value_rub' => (float) ( $parcel_build['declared_value_rub'] ?? $this->settings->tariff_default_declared_value_rub() ),
 			'self_pickup' => true,
@@ -228,6 +234,11 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 			'final_weight_g' => (int) ( $parcel_build['final_weight_g'] ?? 0 ),
 			'packing_limit_reason' => (string) ( $parcel_build['packing_limit_reason'] ?? '' ),
 		);
+		if ( DeliveryType::PICKUP === $delivery_type ) {
+			$params['delivery_terminal_code'] = $this->selected_delivery_terminal_code( $request );
+		}
+
+		return $params;
 	}
 
 	private function receiver_location_id( QuoteRequest $request ): int {
@@ -308,6 +319,10 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 				'dpd_service_name' => $service_name,
 				'dpd_sender_city_id' => (string) ( $meta['sender_city_id'] ?? '' ),
 				'dpd_receiver_city_id' => (string) ( $meta['receiver_city_id'] ?? '' ),
+				'dpd_tariff_method' => (string) ( $meta['method'] ?? 'getServiceCostByParcels3' ),
+				'dpd_pickup_terminal_code' => (string) ( $meta['pickup_terminal_code'] ?? '' ),
+				'dpd_delivery_terminal_code' => (string) ( $meta['delivery_terminal_code'] ?? '' ),
+				'dpd_delivery_terminal_source' => (string) ( $meta['delivery_terminal_source'] ?? '' ),
 				'dpd_self_pickup' => true,
 				'dpd_self_delivery' => DeliveryType::PICKUP === $delivery_type,
 				'dpd_courier_rates_enabled' => $this->settings->runtime_courier_rates_enabled(),
@@ -470,6 +485,8 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 			'delivery_type' => $delivery_type,
 			'self_pickup' => true,
 			'self_delivery' => DeliveryType::PICKUP === $delivery_type,
+			'pickup_terminal_code' => (string) ( $meta['pickup_terminal_code'] ?? '' ),
+			'delivery_terminal_code' => DeliveryType::PICKUP === $delivery_type ? (string) ( $meta['delivery_terminal_code'] ?? $params['delivery_terminal_code'] ?? '' ) : '',
 			'enable_courier_rates' => $this->settings->runtime_courier_rates_enabled(),
 			'enabled_service_codes' => $this->settings->runtime_enabled_service_codes(),
 			'calculation_date' => $request->calculation_date,
@@ -483,6 +500,25 @@ final class DpdQuoteCarrier implements CarrierAdapterInterface {
 
 	private function normalize_delivery_type( string $delivery_type ): string {
 		return DeliveryType::COURIER === $delivery_type ? DeliveryType::COURIER : DeliveryType::PICKUP;
+	}
+
+	private function selected_delivery_terminal_code( QuoteRequest $request ): string {
+		foreach ( array( 'dpd_selected_terminal_code', 'dpd_delivery_terminal_code', 'dpd_pickup_terminal_code', 'terminal_code' ) as $key ) {
+			$value = trim( (string) ( $request->customer_context[ $key ] ?? '' ) );
+			if ( '' !== $value ) {
+				return $value;
+			}
+		}
+
+		if ( ! $this->session_manager instanceof CheckoutSessionManager ) {
+			return '';
+		}
+		$selection = $this->session_manager->pickup_selection_for_family( DpdSettings::CARRIER_KEY . ':pickup' );
+		if ( ! is_array( $selection ) ) {
+			return '';
+		}
+
+		return trim( (string) ( $selection['terminal_code'] ?? $selection['point_code'] ?? '' ) );
 	}
 
 	/**

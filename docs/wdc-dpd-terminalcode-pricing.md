@@ -1,90 +1,99 @@
-# WDC DPD TerminalCode Pricing Diagnostics
+# WDC DPD TerminalCode Runtime Pricing
 
-Version: 0.61.0.
+Version: 0.62.0.
 
-This stage adds an admin-only diagnostic foundation for checking DPD terminalCode-aware pricing through
-`calculator2/getServiceCostByParcels3`. Checkout runtime pricing is not switched: `DpdTariffCalculationService` and
-`DpdQuoteCarrier` still use `getServiceCostByParcels2` with cityId/selfPickup/selfDelivery and no terminalCode.
+DPD terminalCode pricing is now part of checkout runtime. The previous 0.61.0 admin-only diagnostic matched the DPD
+personal cabinet, so the temporary terminalCode diagnostic UI/classes were removed.
 
-## WSDL And Docs
+## Calculator Method
 
-Checked sources:
+Runtime uses `calculator2/getServiceCostByParcels3` through `DpdApiClient::getServiceCostByParcels3()`.
 
-- `docs/dpd/ws-integration-guide.docx`;
-- existing `calculator2` wrapper behavior in `DpdApiClient` / `DpdSoapRequest`.
+`DpdTerminalCodeTariffRequestBuilder` builds a business-only payload; `DpdSoapRequest` adds `request.auth` centrally.
+The payload still uses `parcel[]` as packaging places and does not send `extraService`, `unitLoad`, COD/NPP or fiscal
+receipt data.
 
-The guide contains section `2.5.5. Параметры входного сообщения для getServiceCostByParcels3`. The request supports:
+Pickup payload:
 
 - `pickup.cityId`;
-- optional `pickup.terminalCode`;
+- `pickup.terminalCode`;
 - `delivery.cityId`;
 - `delivery.terminalCode`;
-- `selfPickup`;
-- `selfDelivery`;
-- optional `serviceCode`;
-- optional `pickupDate`;
+- `selfPickup=true`;
+- `selfDelivery=true`;
 - `declaredValue`;
-- `parcel[]` with package-place dimensions and weight.
+- `parcel[]`;
+- optional `serviceCode` / `pickupDate`.
 
-The guide also documents `extraService` / option types, but this diagnostic does not send `extraService`. The business
-payload is built without auth; `DpdSoapRequest` adds `request.auth` centrally. `DpdApiClient::getServiceCostByParcels3()`
-calls `calculator2/getServiceCostByParcels3` with wrapper `request`.
+Courier payload:
 
-## Diagnostic Service
+- `pickup.cityId`;
+- `pickup.terminalCode`;
+- `delivery.cityId`;
+- `selfPickup=true`;
+- `selfDelivery=false`;
+- `declaredValue`;
+- `parcel[]`.
 
-Implemented classes:
+Courier payload intentionally omits `delivery.terminalCode` because the delivery leg is courier-to-door.
 
-- `DpdTerminalCodeTariffDiagnosticRequest`;
-- `DpdTerminalCodeTariffDiagnosticRequestBuilder`;
-- `DpdTerminalCodeTariffDiagnosticResult`;
-- `DpdTerminalCodeTariffDiagnosticService`.
+## Sender TerminalCode
 
-The service builds a Parcels3 payload with terminalCode, calls `getServiceCostByParcels3`, then builds a Parcels2
-comparison payload by removing `pickup.terminalCode` and `delivery.terminalCode` and calls `getServiceCostByParcels2`.
-The normalized admin result includes Parcels3 options, Parcels2 options, and a comparison table by `serviceCode`:
-Parcels2 cost, Parcels3 terminalCode cost and delta.
+The sender always drops parcels at a DPD pickup point. Runtime always selects a sender `pickup.terminalCode` from active
+local `parcel_shop` rows in the sender DPD city.
 
-## Diagnostic Parcel Shop Selector
+Selection order:
 
-`DpdPickupPointService::find_diagnostic_parcel_shop_for_city_id()` and
-`find_diagnostic_parcel_shop_for_location_id()` select a deterministic test terminalCode for admin diagnostics. The
-location method resolves `location_id -> wdc_location_delivery_codes.dpd_city_id` first.
+- prefer active `parcel_shop`;
+- prefer a `parcel_shop` without a same-city active `terminal_self_delivery` duplicate for the same `terminal_code`;
+- if no unambiguous parcel shop exists, fall back to the first deterministic active `parcel_shop`;
+- never select standalone `terminal_self_delivery`;
+- if no sender `parcel_shop` exists, DPD quote returns empty.
 
-- only active `parcel_shop` rows are eligible;
-- standalone `terminal_self_delivery` rows are never selected;
-- a `parcel_shop` with no active same-city `terminal_self_delivery` duplicate is preferred;
-- if the only available parcel shop has a duplicate terminal row with the same terminalCode, it may be used as a flagged
-  fallback;
-- if multiple parcel shops exist and all are duplicated by terminal rows, no automatic candidate is selected and the
-  admin must enter terminalCode manually.
+## Receiver TerminalCode
 
-This selector is diagnostic-only. Checkout consumer point deduplication still prefers `parcel_shop` for duplicate
-terminalCode rows.
+For pickup delivery, `delivery.terminalCode` is required.
 
-## Admin UI
+Before the buyer selects a point, runtime auto-selects an active receiver-city `parcel_shop` using the same preference
+rules as sender terminal selection. This lets DPD pickup rates appear immediately after a checkout city/location is
+chosen.
 
-Open:
+After the buyer selects a DPD point, checkout saves the selected `terminal_code` and the frontend triggers
+`update_checkout`. Runtime validates that the selected code belongs to an active `parcel_shop` in the receiver DPD city,
+then uses it instead of the auto-selected code. A standalone `terminal_self_delivery` code is rejected for runtime
+pricing.
 
-`WDC -> Службы доставки -> DPD -> DPD Расчет`
+## Cache And Quote Id
 
-The block `DPD terminalCode диагностика` accepts pickup cityId, optional pickup terminalCode, receiver location_id or
-delivery cityId, delivery terminalCode, parcel fields, declared value, pickup/delivery modes and optional `serviceCode`.
-The `Подобрать тестовый parcel_shop` action uses the local `wdc_dpd_pickup_points` table and the selector above.
+DPD `quote_id` includes city IDs, selected terminalCode values, parcel signature, declared value, enabled services,
+environment and calculation date.
 
-The result is stored through the existing one-shot DPD tariff action result. When DPD debug is enabled, raw/debug
-payload and response data are visible only in the admin result block.
+The generic checkout quote cache key also includes `dpd_selected_terminal_code`, so changing the selected DPD pickup
+point recalculates rates instead of reusing a stale quote.
 
-## Runtime Boundary
+## Removed Diagnostic UI
 
-Not changed in 0.61.0:
+Removed from `DPD Расчет`:
 
-- checkout runtime pricing;
-- `DpdTariffCalculationService::calculate()`;
-- `DpdQuoteCarrier`;
-- runtime cache keys;
-- selected terminalCode handling in checkout;
-- DPD pickup import;
-- DPD shipment adapter/metabox.
+- terminalCode diagnostic form;
+- manual diagnostic terminal selectors;
+- Parcels2/Parcels3 comparison result block;
+- diagnostic service/result/request classes.
 
-The next decision depends on comparing Parcels3 diagnostic prices with the DPD personal cabinet. Runtime should only
-move to terminalCode-aware pricing after that comparison is accepted.
+Kept:
+
+- low-level `getServiceCostByParcels3` wrapper;
+- reusable runtime request builder;
+- local DPD pickup point import/storage/admin diagnostics.
+
+## Boundaries
+
+Still out of scope:
+
+- DPD shipment adapter/metabox;
+- DPD shipment creation;
+- labels;
+- COD/NPP;
+- unitLoad;
+- CDEK runtime changes;
+- Russian Post runtime changes.

@@ -2,16 +2,16 @@
 
 ## Scope
 
-Version 0.58.2 keeps the DPD integration limited to foundation, geography, tariff calculation and checkout quote rates. The built-in delivery service uses:
+Version 0.62.0 keeps the DPD integration limited to foundation, geography, pickup-point import/selection, terminalCode-aware tariff calculation and checkout quote rates. The built-in delivery service uses:
 
 - `service_key`: `dpd`
 - `carrier_key`: `dpd`
 - title: `DPD`
 - default state: disabled
 
-DPD is registered as a checkout runtime quote carrier through `CarrierRegistry`, but it is not registered in `CarrierShipmentAdapterRegistry`. Enabling the service row can produce checkout rates only when credentials, sender cityId, receiver `location_id`, receiver `dpd_city_id`, country availability and service/rule checks all pass.
+DPD is registered as a checkout runtime quote carrier through `CarrierRegistry`, but it is not registered in `CarrierShipmentAdapterRegistry`. Enabling the service row can produce checkout rates only when credentials, sender cityId, sender pickup terminalCode, receiver `location_id`, receiver `dpd_city_id`, pickup receiver terminalCode when needed, country availability and service/rule checks all pass.
 
-Current stages intentionally do not implement DPD pickup points, order creation, cancellation, tracing/statuses, labels, COD, `unitLoad`, fiscal receipts, or receipt storage. DPD city FTP/SFTP/manual CSV import and admin tariff calculation remain preparation/diagnostics; checkout uses only tariff quotes.
+Current stages intentionally do not implement DPD order creation, cancellation, tracing/statuses, labels, COD, `unitLoad`, fiscal receipts, or receipt storage. DPD city FTP/SFTP/manual CSV import, pickup-point import and admin tariff calculation remain quote/checkout support layers; checkout uses only tariff quotes and saved pickup selection.
 
 As of 0.56.3, DPD geography import is a stateful staging process. SFTP/manual CSV actions create an admin import job, build a `DpdLocationIndex` from active RU `wdc_locations`, create a per-job `wdc_dpd_geography_stage_<job_hash>` table, and process rows through AJAX polling with visual progress. The importer avoids SQL lookup per CSV row, does not write to `wdc_location_delivery_codes` during steps, and finalizes candidates into the working table only after EOF. Import state is stored in `wdc_dpd_geography_import_state`; the final report remains in DPD settings.
 
@@ -68,7 +68,7 @@ The stage 1 smoke test verifies test/production URL selection only. Runtime meth
 
 ## Admin Tariff Calculation
 
-As of 0.58.4, `DpdApiClient::getServiceCostByParcels2()` calls `getServiceCostByParcels2` on `calculator2` through the same `DpdApiClient::call()` path as other low-level DPD wrappers, but passes the explicit `request` wrapper strategy required by the calculator SOAP shape. `DpdSoapRequest` adds credentials under `request.auth.clientNumber` and `request.auth.clientKey`; the tariff builder never inserts credentials. Geography methods keep the direct root-level auth shape. The older `getServiceCostByParcels3()` wrapper remains available for history/compatibility, but checkout and the admin tariff calculator use Parcels2.
+As of 0.62.0, checkout runtime uses `DpdApiClient::getServiceCostByParcels3()` on `calculator2` through the same `DpdApiClient::call()` path as other low-level DPD wrappers, with the explicit `request` wrapper strategy required by the calculator SOAP shape. `DpdSoapRequest` adds credentials under `request.auth.clientNumber` and `request.auth.clientKey`; the tariff builders never insert credentials. Geography methods keep the direct root-level auth shape. `getServiceCostByParcels2()` remains available as a legacy wrapper.
 
 The `DPD Расчет` tab is admin-only. It stores sender/default parcel settings in `DpdSettings`, resolves sender `cityId` from explicit `dpd_tariff_sender_dpd_city_id` first and then from `dpd_tariff_sender_location_id` via `DpdCityResolver`, resolves receiver `location_id` via `wdc_location_delivery_codes.dpd_city_id`, and displays a visible result after redirect. Tariff and geography action result notices are cleared after their blocks render once; the DPD geography last import report and current import progress remain persistent. The tariff debug block shows redacted payload shape metadata and must not expose `clientKey`. It does not create checkout rates, write tariff rows, create shipments, or mutate orders.
 
@@ -82,7 +82,7 @@ Checkout package params are built from the domain package: total weight from car
 
 The DPD `Основное` tab stores checkout method titles. The DPD `Тарифы` tab stores fixed known service-code checkboxes, custom tariff titles and the `Использовать курьерские тарифы` checkbox. Default enabled codes are `ECN,CSM,MXO`; if all checkboxes are cleared, DPD returns no checkout rates. The old method-title prefix, pickup-mode and delivery-mode settings are not rendered and are not used by runtime.
 
-Checkout DPD always sends `selfPickup=true`, because shipment is calculated from a DPD terminal. The pickup/terminal delivery entry sends `selfDelivery=true`, returns a pickup-type calculation rate, and requires a selected local DPD pickup point in checkout. The selected `terminal_code` is saved to order meta but is not sent to tariff calculation yet. When courier rates are enabled, the courier entry sends a separate DPD calculation request with `selfDelivery=false` and returns `DeliveryType::COURIER`.
+Checkout DPD always sends `selfPickup=true`, because shipment is calculated from a DPD terminal. The pickup/terminal delivery entry sends `selfDelivery=true`, sender `pickup.terminalCode` and receiver `delivery.terminalCode`, returns a pickup-type calculation rate, and requires a selected local DPD pickup point in checkout. Before buyer selection, receiver terminalCode is auto-selected from active local `parcel_shop` rows; after selection, the buyer-selected terminalCode is used and checkout recalculates. When courier rates are enabled, the courier entry sends `selfDelivery=false` plus sender `pickup.terminalCode`, omits `delivery.terminalCode`, and returns `DeliveryType::COURIER`.
 
 ## Credentials And Diagnostics
 

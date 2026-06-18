@@ -15,10 +15,13 @@ use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapClientInterface;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapRequest;
 use WallsShop\WDC\Carriers\Dpd\DpdSoapResponse;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffCalculationService;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffOptionNormalizer;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdParcelBuilder;
 use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTariffRequestBuilder;
+use WallsShop\WDC\Carriers\Dpd\Tariff\DpdTerminalCodeTariffRequestBuilder;
 use WallsShop\WDC\Carriers\Registry\CarrierRegistry;
 use WallsShop\WDC\Carriers\Runtime\DpdQuoteCarrier;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostApiClient;
@@ -82,6 +85,8 @@ if ( ! class_exists( 'wpdb' ) ) {
 		public array $locations = array();
 		/** @var array<int,array<string,mixed>> */
 		public array $delivery_codes = array();
+		/** @var array<int,array<string,mixed>> */
+		public array $dpd_pickup_points = array();
 
 		public function prepare( string $query, mixed ...$args ): string {
 			foreach ( $args as $arg ) {
@@ -272,10 +277,12 @@ function dpd_checkout_regular_items_package( int $quantity ): Package {
 }
 
 function dpd_checkout_build_carrier( DpdCheckoutFakeSoapClient $soap, DpdSettings $settings ): DpdQuoteCarrier {
-	$resolver = new DpdCityResolver( new LocationDeliveryCodeRepository( $GLOBALS['wpdb'] ) );
+	$delivery_codes = new LocationDeliveryCodeRepository( $GLOBALS['wpdb'] );
+	$resolver = new DpdCityResolver( $delivery_codes );
 	$locations = new LocationRepository( $GLOBALS['wpdb'] );
 	$api = new DpdApiClient( $settings, $soap );
-	$service = new DpdTariffCalculationService( $api, $resolver, $locations, $settings, new DpdTariffRequestBuilder(), new DpdTariffOptionNormalizer() );
+	$pickup_service = new DpdPickupPointService( new DpdPickupPointRepository( $GLOBALS['wpdb'] ), $delivery_codes );
+	$service = new DpdTariffCalculationService( $api, $resolver, $locations, $settings, new DpdTariffRequestBuilder(), new DpdTariffOptionNormalizer(), $pickup_service, new DpdTerminalCodeTariffRequestBuilder() );
 
 	return new DpdQuoteCarrier( $settings, $service, new DpdParcelBuilder( $settings ), new Logger() );
 }
@@ -313,6 +320,12 @@ $GLOBALS['wpdb']->locations = array(
 $GLOBALS['wpdb']->delivery_codes = array(
 	array( 'location_id' => 100, 'dpd_city_id' => '49455627', 'updated_at' => current_time( 'mysql' ) ),
 	array( 'location_id' => 200, 'dpd_city_id' => '49694102', 'updated_at' => current_time( 'mysql' ) ),
+);
+$GLOBALS['wpdb']->dpd_pickup_points = array(
+	array( 'id' => 1, 'terminal_code' => 'NSK-SENDER', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49455627, 'city_name' => 'Новосибирск', 'name' => 'DPD Новосибирск', 'address' => 'ул Ленина, 1', 'source' => 'getParcelShops', 'is_active' => 1 ),
+	array( 'id' => 2, 'terminal_code' => 'MSK-AUTO', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49694102, 'city_name' => 'Москва', 'name' => 'DPD Москва auto', 'address' => 'ул Тверская, 1', 'source' => 'getParcelShops', 'is_active' => 1 ),
+	array( 'id' => 3, 'terminal_code' => 'MSK-SELECTED', 'type' => 'parcel_shop', 'country_code' => 'RU', 'city_id' => 49694102, 'city_name' => 'Москва', 'name' => 'DPD Москва selected', 'address' => 'ул Арбат, 1', 'source' => 'getParcelShops', 'is_active' => 1 ),
+	array( 'id' => 4, 'terminal_code' => 'MSK-SELECTED', 'type' => 'terminal_self_delivery', 'country_code' => 'RU', 'city_id' => 49694102, 'city_name' => 'Москва', 'name' => 'DPD duplicate terminal', 'address' => 'ул Арбат, 1', 'source' => 'getTerminalsSelfDelivery2', 'is_active' => 1 ),
 );
 
 $settings = new DpdSettings( new SettingsRepository(), new EncryptionService() );
@@ -369,13 +382,17 @@ dpd_checkout_assert( 2 === count( $quote->rates ), 'DPD checkout carrier must ma
 dpd_checkout_assert( 'MAX' === $quote->rates[0]->tariff_key && 'NDY' === $quote->rates[1]->tariff_key, 'DPD checkout rates must preserve returned service codes.' );
 dpd_checkout_assert( ! empty( $quote->rates[0]->meta['tariff_selector_group'] ) && ( $quote->rates[0]->meta['checkout_group_id'] ?? '' ) === ( $quote->rates[1]->meta['checkout_group_id'] ?? '' ), 'DPD checkout tariff options must be marked for grouped tariff selector output.' );
 dpd_checkout_assert( 'DPD до пункта выдачи, DPD Максимум - 1-2 дня' === $quote->rates[0]->title && 'DPD до пункта выдачи, DPD Экспресс - 1 день' === $quote->rates[1]->title, 'DPD pickup titles must use method title, tariff title and delivery days.' );
-dpd_checkout_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && ! $quote->rates[0]->requires_courier_address && $quote->rates[0]->requires_pickup_point && ! empty( $quote->rates[0]->meta['dpd_pickup_point_selection_enabled'] ), 'DPD pickup runtime must require checkout pickup point selection without changing tariff calculation.' );
+dpd_checkout_assert( DeliveryType::PICKUP === $quote->rates[0]->delivery_type && ! $quote->rates[0]->requires_courier_address && $quote->rates[0]->requires_pickup_point && ! empty( $quote->rates[0]->meta['dpd_pickup_point_selection_enabled'] ), 'DPD pickup runtime must require checkout pickup point selection.' );
 dpd_checkout_assert( isset( $soap->calls[0]['soap_payload']['request']['auth'] ), 'DPD checkout runtime must call calculator2 with request.auth SOAP wrapper.' );
-dpd_checkout_assert( 'getServiceCostByParcels2' === $soap->calls[0]['method'], 'DPD checkout runtime must use getServiceCostByParcels2.' );
+dpd_checkout_assert( 'getServiceCostByParcels3' === $soap->calls[0]['method'], 'DPD checkout runtime must use getServiceCostByParcels3.' );
+dpd_checkout_assert( 'NSK-SENDER' === (string) ( $soap->calls[0]['payload']['pickup']['terminalCode'] ?? '' ) && 'MSK-AUTO' === (string) ( $soap->calls[0]['payload']['delivery']['terminalCode'] ?? '' ), 'DPD pickup payload must include sender and auto-selected delivery terminalCode.' );
 dpd_checkout_assert( 1.5 === $soap->calls[0]['payload']['parcel'][0]['weight'] && 2500.0 === $soap->calls[0]['payload']['declaredValue'], 'DPD checkout payload must use cart weight and declared value.' );
 dpd_checkout_assert( true === ( $soap->calls[0]['payload']['selfPickup'] ?? null ) && true === ( $soap->calls[0]['payload']['selfDelivery'] ?? null ), 'DPD pickup payload must always use selfPickup=true and selfDelivery=true.' );
 dpd_checkout_assert( 1 === count( $soap->calls[0]['payload']['parcel'] ?? array() ) && 1 === (int) ( $soap->calls[0]['payload']['parcel'][0]['quantity'] ?? 0 ), 'DPD checkout payload must send one packaging parcel, not cart items.' );
 $base_quote_id = $quote->quote_id;
+$selected_terminal_quote = $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Москва', postcode: '101000' ), new Package( array(), Money::from_rubles( 2500 ), Money::from_rubles( 2500 ), 1500, 0, 1500, 30, 20, 10, null, 'cart' ), '', Money::from_rubles( 2500 ), '2026-06-17', array( 'selected_location_id' => '200', 'dpd_selected_terminal_code' => 'MSK-SELECTED' ) ) );
+dpd_checkout_assert( 'MSK-SELECTED' === (string) ( $soap->calls[ count( $soap->calls ) - 1 ]['payload']['delivery']['terminalCode'] ?? '' ), 'DPD pickup payload must use buyer-selected delivery terminalCode after selection.' );
+dpd_checkout_assert( $base_quote_id !== $selected_terminal_quote->quote_id, 'DPD quote_id must change when selected delivery terminalCode changes.' );
 dpd_checkout_assert( $base_quote_id !== $carrier->quote( dpd_checkout_request( 200, 2200 ) )->quote_id, 'DPD quote_id must change when weight changes.' );
 dpd_checkout_assert( $base_quote_id !== $carrier->quote( new QuoteRequest( 'RU', new Address( country_code: 'RU', city: 'Москва', postcode: '101000' ), new Package( array(), Money::from_rubles( 2600 ), Money::from_rubles( 2600 ), 1500, 0, 1500, 40, 20, 10, null, 'cart' ), '', Money::from_rubles( 2600 ), '2026-06-17', array( 'selected_location_id' => '200' ) ) )->quote_id, 'DPD quote_id must change when dimensions or declared value change.' );
 $calls_before_courier_disabled = count( $soap->calls );
@@ -414,6 +431,7 @@ $courier = $carrier->quote( dpd_checkout_request( 200, 1500, DeliveryType::COURI
 $courier_call = $soap->calls[ count( $soap->calls ) - 1 ] ?? array();
 dpd_checkout_assert( 2 === count( $courier->rates ), 'DPD courier quote must expose enabled tariffs when courier rates are enabled.' );
 dpd_checkout_assert( true === ( $courier_call['payload']['selfPickup'] ?? null ) && false === ( $courier_call['payload']['selfDelivery'] ?? null ), 'DPD courier payload must use selfPickup=true and selfDelivery=false.' );
+dpd_checkout_assert( 'NSK-SENDER' === (string) ( $courier_call['payload']['pickup']['terminalCode'] ?? '' ) && ! isset( $courier_call['payload']['delivery']['terminalCode'] ), 'DPD courier payload must include pickup terminalCode and omit delivery terminalCode.' );
 dpd_checkout_assert( DeliveryType::COURIER === $courier->rates[0]->delivery_type && $courier->rates[0]->requires_courier_address && ! $courier->rates[0]->requires_pickup_point, 'DPD courier delivery must require courier address without pickup point selection.' );
 dpd_checkout_assert( 'DPD курьером, DPD Максимум - 1-2 дня' === $courier->rates[0]->title, 'DPD courier title must use courier method title, tariff title and days.' );
 dpd_checkout_assert( ( $quote->rates[0]->meta['checkout_group_id'] ?? '' ) !== ( $courier->rates[0]->meta['checkout_group_id'] ?? '' ), 'Same DPD serviceCode must stay in separate pickup/courier groups.' );

@@ -272,7 +272,7 @@ $runtime_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carr
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 $shipments_metabox = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 dpd_pickup_assert( str_contains( $api_source, 'getServiceCostByParcels2' ), 'DPD API client must keep getServiceCostByParcels2.' );
-dpd_pickup_assert( ! str_contains( $tariff_source, 'getServiceCostByParcels3' ) && ! str_contains( $runtime_source, 'getServiceCostByParcels3' ), 'DPD checkout runtime must not switch to getServiceCostByParcels3.' );
+dpd_pickup_assert( str_contains( $tariff_source, 'getServiceCostByParcels3' ) && str_contains( $tariff_source, 'pickup_terminal_code' ), 'DPD checkout runtime must use Parcels3 with terminalCode-aware pricing.' );
 dpd_pickup_assert( ! str_contains( $plugin_source, 'DpdShipmentAdapter' ) && ! str_contains( $shipments_metabox, 'DpdShipmentAdapter' ), 'DPD shipment adapter/metabox must not be added.' );
 
 echo "DPD pickup points smoke test passed.\n";
