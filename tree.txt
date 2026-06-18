@@ -120,6 +120,7 @@ C:.
 |   |   wdc-dpd-integration.md
 |   |   wdc-dpd-pickup-points.md
 |   |   wdc-dpd-shipment-preparation.md
+|   |   wdc-dpd-status-mapping.md
 |   |   wdc-dpd-tariff-calculation.md
 |   |   wdc-dpd-terminalcode-pricing.md
 |   |   wdc-fias-foundation.md
@@ -598,6 +599,7 @@ C:.
 |   |   |
 |   |   +---Dpd
 |   |   |       DpdShipmentAdapter.php
+|   |   |       DpdStatusMapping.php
 |   |   |
 |   |   +---RussianPost
 |   |   |       RussianPostAddressNormalizer.php
@@ -661,6 +663,7 @@ C:.
     |       run-dpd-parcel-builder-smoke.php
     |       run-dpd-pickup-points-smoke.php
     |       run-dpd-shipment-preparation-smoke.php
+    |       run-dpd-status-mapping-smoke.php
     |       run-dpd-tariff-calculation-smoke.php
     |       run-dpd-terminalcode-runtime-pricing-smoke.php
     |

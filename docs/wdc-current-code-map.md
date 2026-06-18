@@ -1,5 +1,27 @@
 # Карта текущего кода
 
+## DPD Status Mapping 0.65.0
+
+- `src/Shipments/Dpd/DpdStatusMapping.php` is the DPD EventCode dictionary and mapping service. The dictionary is sourced
+  from `docs/dpd/ws-integration-guide.docx`, section 5.5.4 "Справочник статусов заказа EventCode, EventName и его
+  параметров(ParamName)", and contains 75 EventCode rows with event name, optional DPD status code, ParamName entries and
+  comments where the document has them.
+- `DpdStatusMapping::default_mapping()` maps each DPD EventCode to a universal `DeliveryStatus`. Created/offer events map
+  to `created_in_carrier`; movement, customs and delivery-date changes map to `in_transit`; pickup readiness maps to
+  `ready_for_pickup`; courier handoff/delivery-in-progress maps to `handed_to_courier`; final delivery maps to
+  `delivered`; return events map to `returning_to_sender` or `returned_to_sender`; cancellations map to `cancelled`;
+  refusal/problem events map to `rejected`; billing/notification-only events map to `unknown`.
+- `SettingsRepository::defaults()` registers `dpd_status_mapping`, and the service reads/writes saved overrides through
+  the same `wdc_core_settings` option as CDEK status mapping.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds `WDC → Службы доставки → DPD → Статусы DPD`. The tab
+  renders EventCode, EventName, ParamName/parameters, editable universal-status select and default value; it supports save
+  and reset-to-default.
+- `tests/dpd/run-dpd-status-mapping-smoke.php` covers dictionary completeness, EventName/default validity, saved override,
+  unknown fallback, ParamName preservation, admin render, universal-status select options, save/reset and CDEK mapping
+  regression.
+- DPD status API polling, cron/sync, shipment updates, live create, labels and cancellation remain intentionally out of
+  scope.
+
 ## DPD Modal Preparation Cleanup 0.63.2
 
 - `src/Shipments/Admin/OrderShipmentsMetabox.php` keeps the DPD receiver pickup block focused on `Код ПВЗ`, `Адрес ПВЗ` and `Выбрать другой ПВЗ`; the visible `Тип точки` row is now CDEK-only. The DPD comment textarea was removed.

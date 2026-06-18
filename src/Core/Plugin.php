@@ -191,6 +191,7 @@ use WallsShop\WDC\Shipments\Cdek\CdekOrderStatusService;
 use WallsShop\WDC\Shipments\Cdek\CdekShipmentAdapter;
 use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentAdapter;
+use WallsShop\WDC\Shipments\Dpd\DpdStatusMapping;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostCreateRequestBuilder;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostAddressNormalizer;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostShipmentAdapter;
@@ -303,6 +304,7 @@ final class Plugin {
 		$this->container->register( DpdShipmentDateResolver::class, fn(): DpdShipmentDateResolver => new DpdShipmentDateResolver( $this->container->get( CalendarService::class ), $this->container->get( TimezoneService::class ) ) );
 		$this->container->register( DpdShipmentPayloadBuilder::class, fn(): DpdShipmentPayloadBuilder => new DpdShipmentPayloadBuilder() );
 		$this->container->register( DpdShipmentAdapter::class, fn(): DpdShipmentAdapter => new DpdShipmentAdapter( $this->container->get( DpdShipmentPayloadBuilder::class ) ) );
+		$this->container->register( DpdStatusMapping::class, fn(): DpdStatusMapping => new DpdStatusMapping( $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( CdekStatusMappingService::class, fn(): CdekStatusMappingService => new CdekStatusMappingService( $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( CdekOrderStatusService::class, fn(): CdekOrderStatusService => new CdekOrderStatusService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( CdekApiClient::class ), $this->container->get( Logger::class ), $this->container->get( CdekStatusMappingService::class ) ) );
 		$this->container->register( CdekBarcodePrintService::class, fn(): CdekBarcodePrintService => new CdekBarcodePrintService( $this->container->get( OrderShipmentRepository::class ), $this->container->get( CdekApiClient::class ) ) );
@@ -597,7 +599,8 @@ final class Plugin {
 				$this->container->get( DpdPickupPointRepository::class ),
 				$this->container->get( DpdPickupPointImportService::class ),
 				$this->container->get( DpdCityResolver::class ),
-				$this->container->get( LocationRepository::class )
+				$this->container->get( LocationRepository::class ),
+				$this->container->get( DpdStatusMapping::class )
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper() );

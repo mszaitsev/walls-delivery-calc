@@ -1,6 +1,18 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.64.2.
+Current plugin version: 0.65.0.
+
+Version 0.65.0 adds the DPD status mapping settings tab. `WDC → Службы доставки → DPD → Статусы DPD` now renders the
+EventCode dictionary from `docs/dpd/ws-integration-guide.docx`, section 5.5.4 "Справочник статусов заказа EventCode,
+EventName и его параметров(ParamName)": 75 DPD EventCode rows with event names, ParamName descriptions, default
+universal shipment statuses and editable selects. The mapping is stored in `wdc_core_settings[dpd_status_mapping]`
+through `SettingsRepository` and served by `DpdStatusMapping::statuses()`, `default_mapping()`, `mapping()` and
+`resolve($eventCode, $paramName = null)`. Defaults map created/offer events to `created_in_carrier`, movement/customs
+events to `in_transit`, pickup-ready events to `ready_for_pickup`, courier handoff/delivery-in-progress events to
+`handed_to_courier`, final delivery events to `delivered`, return path events to `returning_to_sender` or
+`returned_to_sender`, cancellations to `cancelled`, refusal/problem events to `rejected`, and notification/billing-only
+events to `unknown`. No DPD status API calls, cron/sync, shipment updates, live create, labels or cancellation flows were
+added.
 
 Version 0.64.2 tightens DPD pickup prefill in the order-admin recalculation modal. `OrderDeliveryMetabox` now exposes a
 DPD `current_pickup` only for saved DPD pickup orders with a real terminal code; DPD courier, empty orders, CDEK,

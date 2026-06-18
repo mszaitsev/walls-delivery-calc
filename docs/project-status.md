@@ -1,5 +1,12 @@
 # Project Status
 
+0.65.0 note: added DPD status mapping settings only. `src/Shipments/Dpd/DpdStatusMapping.php` contains the DPD WS
+Integration Guide 5.5.4 EventCode dictionary (75 rows), default universal shipment-status mapping, saved mapping
+sanitization and `resolve($eventCode, $paramName = null)`. `WDC → Службы доставки → DPD → Статусы DPD` renders the
+dictionary with ParamName details, editable universal-status selects, default values, save and reset-to-default behavior.
+Settings are stored in `wdc_core_settings[dpd_status_mapping]` through `SettingsRepository`. This release deliberately
+does not add DPD status API polling, cron/sync, shipment updates, live create, labels or cancellation.
+
 0.64.2 note: tightened DPD current-pickup prefill for order-admin delivery recalculation. `OrderDeliveryMetabox::current_pickup_payload()` now emits DPD `terminal_code` only when the saved order context is DPD pickup and a real DPD pickup code exists; DPD courier, empty orders and non-DPD orders no longer expose shipping address or generic snapshot `point_code` as a selected DPD pickup. JS prefill remains carrier-aware, request preview sends `selected_pickup_point` only after explicit manager selection, and backend auto-selected terminalCode remains quote-only.
 
 0.64.1 note: fixed the DPD pickup picker inside order-admin delivery recalculation. DPD pickup popup/list labels now use `Пункт выдачи DPD {terminal_code}` and `Код пункта`, while CDEK and Russian Post labels are unchanged. Current pickup prefill is carrier-aware: DPD pickup is prefilled only from saved DPD pickup meta/terminalCode, so courier, CDEK, Russian Post or other orders keep the DPD pickup selector in `ПВЗ не выбран` state. Auto-selected DPD receiver terminalCode remains quote-only until a manager explicitly selects a pickup point, and saving DPD pickup without a selected point is blocked.

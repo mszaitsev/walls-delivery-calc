@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Infrastructure\Settings;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
+use WallsShop\WDC\Shipments\Dpd\DpdStatusMapping;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -107,6 +108,7 @@ final class SettingsRepository {
 			'shipment_status_order_status_mapping_enabled' => false,
 			'shipment_status_order_status_mapping' => array(),
 			'cdek_status_mapping' => CdekStatusMappingService::default_mapping(),
+			'dpd_status_mapping' => DpdStatusMapping::default_mapping(),
 			'packaging_weight_tiers'       => array(),
 			),
 			CdekSettings::defaults(),
