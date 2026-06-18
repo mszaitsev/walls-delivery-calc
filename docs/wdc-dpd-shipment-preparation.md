@@ -1,6 +1,12 @@
 # WDC DPD Shipment Preparation
 
-Version: 0.63.2.
+Version: 0.63.3.
+
+0.63.3 update: the DPD `Дата отправки` input is rendered as a compact inline control instead of the modal-wide input
+style. Small `−` and `+` buttons with `data-wdc-date-step="-1"` / `data-wdc-date-step="1"` move the selected value by
+one calendar day, keep `YYYY-MM-DD`, and dispatch `input`/`change` so the existing dry-run preview receives the updated
+`date_pickup`. The buttons do not auto-skip non-working days; `DpdShipmentDateResolver` validation continues to reject
+past or non-working dates.
 
 0.63.2 update: the DPD preparation modal no longer shows receiver pickup point `Тип точки`, no longer renders or posts a
 DPD comment field, and no longer emits `comment` in the DPD dry-run payload. The modal now has `Дата отправки` after the

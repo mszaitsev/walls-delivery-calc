@@ -203,6 +203,7 @@ dpd_shipment_assert( '49455627' === (string) ( $base_request->meta['pickup_city_
 dpd_shipment_assert( '195300000' === (string) ( $base_request->meta['delivery_city_id'] ?? '' ), 'Existing delivery cityId must be read.' );
 $draft = $factory->draft_array( $pickup_order );
 $draft_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
+$draft_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.css' );
 dpd_shipment_assert( 'MSK-RECEIVER' === (string) ( $draft['request']['meta']['pickup_point_row']['point_code'] ?? '' ) && 'parcel_shop' === (string) ( $draft['request']['meta']['pickup_point_row']['point_type'] ?? '' ), 'DPD modal draft must expose recipient pickup point code/type.' );
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-open-pickup-picker' ) && str_contains( $draft_source, 'data-wdc-open-sender-pickup-picker' ), 'DPD modal must expose choose receiver/sender pickup buttons.' );
 dpd_shipment_assert( ! str_contains( $draft_source, "|| \$is_dpd ) : ?>\n\t\t\t\t\t\t\t\t\t\t<p><strong><?php echo esc_html__( 'Тип точки'" ), 'DPD recipient pickup point visible block must not render point type.' );
@@ -210,6 +211,9 @@ dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-cdek-pickup-type-lab
 dpd_shipment_assert( str_contains( $draft_source, 'В заказе тариф' ) && ! str_contains( $draft_source, 'serviceCode</strong>' ) && ! str_contains( $draft_source, 'pickup cityId</strong>' ), 'DPD modal must show order tariff and remove visible technical service block.' );
 dpd_shipment_assert( ! str_contains( $draft_source, 'name="dpd_comment"' ), 'DPD modal must not render DPD comment field.' );
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-dpd-date-pickup' ) && str_contains( $draft_source, 'Дата отправки' ), 'DPD modal must render datePickup date input after sender pickup point block.' );
+dpd_shipment_assert( str_contains( $draft_source, 'name="date_pickup"' ) && str_contains( $draft_source, 'type="date"' ), 'DPD modal must render date_pickup date input.' );
+dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-date-step="-1"' ) && str_contains( $draft_source, 'data-wdc-date-step="1"' ), 'DPD modal must render date step buttons.' );
+dpd_shipment_assert( str_contains( $draft_source, 'wdc-dpd-date-row' ) && str_contains( $draft_css, '.wdc-shipment-modal .wdc-dpd-date-row input[type="date"]' ) && str_contains( $draft_css, 'width: auto;' ), 'DPD date input must use compact row styles instead of the full-width modal input pattern.' );
 dpd_shipment_assert( array( DeliveryType::PICKUP, DeliveryType::COURIER ) === array_column( $draft['services'], 'delivery_type' ), 'DPD modal must allow pickup/courier delivery type switch.' );
 dpd_shipment_assert( array( 'ECN', 'CSM' ) === array_column( $draft['services'][0]['tariffs'], 'object_code' ), 'DPD modal must allow active tariff switch.' );
 

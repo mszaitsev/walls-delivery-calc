@@ -458,7 +458,13 @@ final class OrderShipmentsMetabox {
 									<input type="hidden" name="sender_pickup_city" value="<?php echo esc_attr( (string) ( $sender_terminal['city_name'] ?? '' ) ); ?>" data-wdc-sender-pickup-city>
 									<p><strong><?php echo esc_html__( 'ПВЗ отправителя', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-sender-shipment-point-display><?php echo esc_html( '' !== $shipment_point_display ? $shipment_point_display : '-' ); ?></span></p>
 									<p><button type="button" class="button" data-wdc-open-sender-pickup-picker><?php echo esc_html__( 'Выбрать другой ПВЗ отправителя', 'walls-delivery-calc' ); ?></button></p>
-									<label><?php echo esc_html__( 'Дата отправки', 'walls-delivery-calc' ); ?><input type="date" name="date_pickup" value="<?php echo esc_attr( (string) ( $meta['date_pickup'] ?? '' ) ); ?>" data-wdc-dpd-date-pickup></label>
+									<label class="wdc-dpd-date-field"><?php echo esc_html__( 'Дата отправки', 'walls-delivery-calc' ); ?>
+										<span class="wdc-dpd-date-row">
+											<input type="date" name="date_pickup" value="<?php echo esc_attr( (string) ( $meta['date_pickup'] ?? '' ) ); ?>" data-wdc-dpd-date-pickup>
+											<button type="button" class="button button-small" data-wdc-date-step="-1" aria-label="<?php echo esc_attr__( 'На день назад', 'walls-delivery-calc' ); ?>">−</button>
+											<button type="button" class="button button-small" data-wdc-date-step="1" aria-label="<?php echo esc_attr__( 'На день вперед', 'walls-delivery-calc' ); ?>">+</button>
+										</span>
+									</label>
 									<?php if ( ! empty( $meta['date_pickup_fallback_used'] ) ) : ?>
 										<p class="description wdc-shipment-warning"><?php echo esc_html__( 'Календарь магазина недоступен, дата отправки DPD рассчитана по fallback-правилу.', 'walls-delivery-calc' ); ?></p>
 									<?php endif; ?>

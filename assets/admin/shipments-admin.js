@@ -587,6 +587,41 @@
     }, 400));
   }
 
+  function formatDateInputValue(date) {
+    const year = String(date.getFullYear());
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return year + '-' + month + '-' + day;
+  }
+
+  function dateFromInputValue(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return new Date();
+    const parsed = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  }
+
+  function findDateStepInput(button) {
+    const row = button && button.closest('.wdc-dpd-date-row');
+    if (row) {
+      const rowInput = row.querySelector('input[type="date"]');
+      if (rowInput) return rowInput;
+    }
+    const label = button && button.closest('label');
+    return label ? label.querySelector('input[type="date"]') : null;
+  }
+
+  function stepDateInput(button) {
+    const input = findDateStepInput(button);
+    const step = Number(button && button.dataset ? button.dataset.wdcDateStep : 0);
+    if (!input || !Number.isFinite(step) || 0 === step) return;
+    const date = dateFromInputValue(input.value);
+    date.setDate(date.getDate() + step);
+    input.value = formatDateInputValue(date);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
   function renumberPlaces(container) {
     container.querySelectorAll('[data-wdc-place]').forEach((row, index) => {
       const title = row.querySelector('[data-wdc-place-title]');
@@ -1706,6 +1741,13 @@
   }
 
   document.addEventListener('click', function (event) {
+    const dateStep = event.target.closest('[data-wdc-date-step]');
+    if (dateStep) {
+      event.preventDefault();
+      stepDateInput(dateStep);
+      return;
+    }
+
     const cdekBarcodeDownload = event.target.closest('[data-wdc-cdek-barcode-download]');
     if (cdekBarcodeDownload) {
       event.preventDefault();

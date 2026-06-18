@@ -1,6 +1,11 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.63.2.
+Current plugin version: 0.63.3.
+
+Version 0.63.3 cosmetically refines the DPD preparation `Дата отправки` control. The date input is now compact instead
+of full-width, with small `−`/`+` buttons that move the selected date by one calendar day and trigger the existing
+dry-run preview/validation flow. DPD remains manual dry-run only; payload creation logic, checkout pricing, live create
+calls, CDEK and Russian Post behavior are unchanged.
 
 Version 0.63.2 applies site-check refinements to the manual DPD shipment preparation modal. The DPD receiver pickup
 point block no longer shows `Тип точки`, the DPD-only comment field/payload value was removed, and DPD courier address
