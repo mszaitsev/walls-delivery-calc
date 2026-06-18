@@ -1,5 +1,6 @@
 # Project Status
 
+0.65.1 note: refined DPD status mapping and universal shipment statuses. `DeliveryStatus` now includes `pending_creation_in_carrier` (`Попытка создания в ТК`) before `created_in_carrier`, so the new status is first in admin universal-status selects. `src/Shipments/Dpd/DpdStatusMapping.php` keeps the DPD WS Integration Guide 5.5.4 EventCode dictionary at 75 rows, but status mapping now stores EventCode, EventName, optional DPD marker/code name and comments only; ParamName/event parameters are removed from runtime storage and the DPD admin table. Defaults were updated for offer/pre-registration events, unknown-safe problem/payment/cancel/archive events, in-transit delivery/problem-repeat events and return-refusal events. The DPD tab still only saves settings through `SettingsRepository`; this release deliberately does not add DPD status API polling, cron/sync, shipment updates, live create, labels or cancellation.
 0.65.0 note: added DPD status mapping settings only. `src/Shipments/Dpd/DpdStatusMapping.php` contains the DPD WS
 Integration Guide 5.5.4 EventCode dictionary (75 rows), default universal shipment-status mapping, saved mapping
 sanitization and `resolve($eventCode, $paramName = null)`. `WDC → Службы доставки → DPD → Статусы DPD` renders the

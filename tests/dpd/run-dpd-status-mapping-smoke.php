@@ -9,7 +9,6 @@ require_once dirname( __DIR__, 2 ) . '/src/Core/Autoloader.php';
 ( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', dirname( __DIR__, 2 ) . '/src' ) )->register();
 
 use WallsShop\WDC\Admin\AdminMenu;
-use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\DeliveryServices\Admin\DeliveryServicesAdminPage;
 use WallsShop\WDC\DeliveryServices\DeliveryService;
@@ -119,19 +118,47 @@ $statuses = DpdStatusMapping::statuses();
 $defaults = DpdStatusMapping::default_mapping();
 $doc_event_codes = array( '1001', '1101', '1201', '1301', '1401', '1501', '1601', '1603', '1701', '1801', '1802', '1810', '1811', '2101', '2102', '2103', '2201', '2202', '2203', '2204', '2205', '2209', '2210', '2301', '2302', '2303', '2304', '2305', '2306', '2307', '2309', '2310', '2311', '2314', '2401', '2402', '2404', '2405', '2406', '2407', '2408', '2409', '2410', '2411', '2416', '3701', '2501', '2601', '2602', '2701', '2801', '2901', '2904', '3001', '3201', '3202', '3203', '3204', '3205', '3206', '3211', '3216', '3301', '3302', '3303', '3304', '3305', '3306', '3308', '3401', '3501', '3601', '3901', '4001', '4101' );
 
+$all_statuses = DeliveryStatus::all();
+dpd_status_assert( DeliveryStatus::PENDING_CREATION_IN_CARRIER === 'pending_creation_in_carrier', 'Universal status pending_creation_in_carrier must exist.' );
+dpd_status_assert( DeliveryStatus::PENDING_CREATION_IN_CARRIER === $all_statuses[0] && DeliveryStatus::CREATED_IN_CARRIER === $all_statuses[1], 'pending_creation_in_carrier must be ordered before created_in_carrier.' );
+dpd_status_assert( 'Попытка создания в ТК' === DeliveryStatus::label( DeliveryStatus::PENDING_CREATION_IN_CARRIER ), 'pending_creation_in_carrier label must be available.' );
+
 dpd_status_assert( $doc_event_codes === array_map( 'strval', array_keys( $statuses ) ), 'DPD dictionary must contain all EventCode values from docs/dpd/ws-integration-guide.docx section 5.5.4.' );
 foreach ( $statuses as $event_code => $status ) {
 	dpd_status_assert( '' !== $status['event_name'], 'Every DPD EventCode must have EventName: ' . $event_code );
+	dpd_status_assert( array_key_exists( 'status_code', $status ), 'Every DPD EventCode must expose DPD marker/code name field: ' . $event_code );
+	dpd_status_assert( ! array_key_exists( 'parameters', $status ), 'DPD statuses must not contain ParamName/parameters: ' . $event_code );
 	dpd_status_assert( isset( $defaults[ $event_code ] ) && DeliveryStatus::is_valid( $defaults[ $event_code ] ), 'Every DPD EventCode must have a valid default universal status: ' . $event_code );
 }
 
 dpd_status_assert( 75 === count( $statuses ), 'DPD status dictionary must contain 75 EventCode rows.' );
-dpd_status_assert( DeliveryStatus::READY_FOR_PICKUP === $defaults['2201'] && DeliveryStatus::DELIVERED === $defaults['3305'] && DeliveryStatus::CANCELLED === $defaults['2901'], 'DPD key defaults must map ready/delivered/cancelled events.' );
-dpd_status_assert( count( $statuses['1001']['parameters'] ) > 20 && 'MomentLocZone' === $statuses['1001']['parameters'][24]['name'], 'DPD parameters from section 5.5.4 must be preserved.' );
 
-$mapping->save_mapping( array( '3305' => DeliveryStatus::READY_FOR_PICKUP ) );
-dpd_status_assert( DeliveryStatus::READY_FOR_PICKUP === $mapping->resolve( '3305' ), 'Saved DPD mapping must override default mapping.' );
+foreach ( array( '1001', '1101', '1201', '1301' ) as $event_code ) {
+	dpd_status_assert( DeliveryStatus::PENDING_CREATION_IN_CARRIER === $defaults[ $event_code ], 'DPD EventCode ' . $event_code . ' must default to pending_creation_in_carrier.' );
+}
+foreach ( array( '2402', '2408', '2410', '2411', '2501', '2701', '2801', '2901', '2904', '3301', '3302', '3401' ) as $event_code ) {
+	dpd_status_assert( DeliveryStatus::UNKNOWN === $defaults[ $event_code ], 'DPD EventCode ' . $event_code . ' must default to unknown.' );
+}
+foreach ( array( '2202', '2210', '2301', '2304', '2401', '2407', '3701', '3303', '3501', '3601' ) as $event_code ) {
+	dpd_status_assert( DeliveryStatus::IN_TRANSIT === $defaults[ $event_code ], 'DPD EventCode ' . $event_code . ' must default to in_transit.' );
+}
+foreach ( array( '2404', '2405', '2406', '2416' ) as $event_code ) {
+	dpd_status_assert( DeliveryStatus::RETURNING_TO_SENDER === $defaults[ $event_code ], 'DPD EventCode ' . $event_code . ' must default to returning_to_sender.' );
+}
+foreach ( array( '3304', '3305', '3308' ) as $event_code ) {
+	dpd_status_assert( DeliveryStatus::DELIVERED === $defaults[ $event_code ], 'DPD EventCode ' . $event_code . ' must default to delivered.' );
+}
+dpd_status_assert( DeliveryStatus::READY_FOR_PICKUP === $defaults['2201'] && DeliveryStatus::READY_FOR_PICKUP === $defaults['2209'], 'DPD pickup-ready events must default to ready_for_pickup.' );
+foreach ( array( '2102', '2203', '2204', '2305', '2309', '2314' ) as $event_code ) {
+	dpd_status_assert( DeliveryStatus::RETURNING_TO_SENDER === $defaults[ $event_code ], 'DPD return flow EventCode ' . $event_code . ' must default to returning_to_sender.' );
+}
+dpd_status_assert( DeliveryStatus::RETURNED_TO_SENDER === $defaults['3306'], 'DPD EventCode 3306 must default to returned_to_sender.' );
+
+$mapping->save_mapping( array( '3305' => DeliveryStatus::PENDING_CREATION_IN_CARRIER ) );
+dpd_status_assert( DeliveryStatus::PENDING_CREATION_IN_CARRIER === $mapping->resolve( '3305' ), 'Saved DPD mapping must persist pending_creation_in_carrier.' );
 dpd_status_assert( DeliveryStatus::UNKNOWN === $mapping->resolve( '9999' ), 'Unknown DPD EventCode must return safe fallback universal status.' );
+$mapping->save_mapping( array( '3305' => 'invalid-status' ) );
+dpd_status_assert( DeliveryStatus::DELIVERED === $mapping->resolve( '3305' ), 'Invalid saved DPD mapping must fall back to default mapping.' );
 dpd_status_assert( isset( $settings->defaults()[ DpdStatusMapping::MAPPING_KEY ]['3305'] ), 'DPD status mapping defaults must be registered in SettingsRepository.' );
 
 $GLOBALS['wpdb']->services[] = array(
@@ -160,8 +187,10 @@ ob_start();
 $render->invoke( $page, $service );
 $html = ob_get_clean() ?: '';
 
-dpd_status_assert( str_contains( $html, 'Статусы DPD' ) || str_contains( $html, 'EventCode' ), 'Admin tab "Статусы DPD" must render.' );
+dpd_status_assert( str_contains( $html, 'EventCode' ) && str_contains( $html, 'DPD marker/code name' ), 'Admin tab "Статусы DPD" must render EventCode/EventName/marker table.' );
+dpd_status_assert( ! str_contains( $html, 'ParamName / параметры' ) && ! str_contains( $html, 'parameters' ), 'Admin tab must not render ParamName/parameters column.' );
 dpd_status_assert( str_contains( $html, 'dpd_status_mapping[3305]' ) && str_contains( $html, 'Заказ выдан на ПВЗ' ), 'Admin tab must render DPD EventCode rows.' );
+dpd_status_assert( str_contains( $html, '<code>OfferCreate</code>' ), 'Admin tab must render DPD marker/code name when present.' );
 foreach ( DeliveryStatus::all() as $status ) {
 	dpd_status_assert( str_contains( $html, 'value="' . $status . '"' ), 'DPD status select must contain universal status: ' . $status );
 }
@@ -170,28 +199,29 @@ $_POST = array(
 	'wdc_delivery_services_action' => 'save_dpd_statuses',
 	'service_key' => DpdSettings::SERVICE_KEY,
 	'id' => '1',
-	DpdStatusMapping::MAPPING_KEY => array( '3305' => DeliveryStatus::READY_FOR_PICKUP ),
+	DpdStatusMapping::MAPPING_KEY => array( '3305' => DeliveryStatus::PENDING_CREATION_IN_CARRIER ),
 );
 try {
 	$page->handle_actions();
 } catch ( DpdStatusRedirectException ) {
 }
-dpd_status_assert( DeliveryStatus::READY_FOR_PICKUP === $mapping->resolve( '3305' ), 'Admin save must persist DPD status mapping.' );
+dpd_status_assert( DeliveryStatus::PENDING_CREATION_IN_CARRIER === $mapping->resolve( '3305' ), 'Admin save must persist DPD status mapping.' );
 
 $_POST = array(
 	'wdc_delivery_services_action' => 'save_dpd_statuses',
 	'service_key' => DpdSettings::SERVICE_KEY,
 	'id' => '1',
 	'dpd_statuses_reset' => '1',
-	DpdStatusMapping::MAPPING_KEY => array( '3305' => DeliveryStatus::READY_FOR_PICKUP ),
+	DpdStatusMapping::MAPPING_KEY => array( '3305' => DeliveryStatus::PENDING_CREATION_IN_CARRIER ),
 );
 try {
 	$page->handle_actions();
 } catch ( DpdStatusRedirectException ) {
 }
-dpd_status_assert( DeliveryStatus::DELIVERED === $mapping->resolve( '3305' ), 'Admin reset must restore DPD default mapping.' );
+dpd_status_assert( DeliveryStatus::DELIVERED === $mapping->resolve( '3305' ), 'Admin reset must restore updated DPD default mapping.' );
 
 $cdek_mapping = new CdekStatusMappingService( $settings );
 dpd_status_assert( DeliveryStatus::DELIVERED === $cdek_mapping->universal_status_for( 'DELIVERED' ) && DeliveryStatus::CANCELLED === $cdek_mapping->universal_status_for( 'REMOVED' ), 'CDEK status mapping must remain intact.' );
+
 
 echo "DPD status mapping smoke passed\n";

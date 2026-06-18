@@ -7,13 +7,17 @@ use WallsShop\WDC\Carriers\RussianPost\Tracking\RussianPostTrackingApiClient;
 use WallsShop\WDC\Core\Autoloader;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceSettingsRepository;
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
+use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Admin\OrderShipmentsMetabox;
+use WallsShop\WDC\Shipments\Application\CarrierShipmentAdapterRegistry;
 use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
 use WallsShop\WDC\Shipments\Application\ShipmentCreationService;
 use WallsShop\WDC\Shipments\Application\ShipmentStatusUpdateService;
+use WallsShop\WDC\Shipments\Contracts\CarrierShipmentAdapterInterface;
 use WallsShop\WDC\Shipments\RussianPost\RussianPostTrackingStatusMapper;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -99,6 +103,25 @@ final class ShipmentStatusAjaxResponse extends RuntimeException {
 	}
 }
 
+final class ShipmentStatusSmokeAdapter implements CarrierShipmentAdapterInterface {
+	public function __construct( private ShipmentStatusUpdateService $status_updates ) {
+	}
+
+	public function carrier_key(): string { return RussianPostDomesticSettings::CARRIER_KEY; }
+	public function supports( ShipmentCreateRequest $request ): bool { return RussianPostDomesticSettings::CARRIER_KEY === $request->carrier_key; }
+	public function build_safe_payload_preview( ShipmentCreateRequest $request ): array { return array(); }
+	public function create( ShipmentCreateRequest $request ): ShipmentCreateResult { return new ShipmentCreateResult( false, error_code: 'not-supported', error_message: 'Not supported in smoke.' ); }
+	public function presentation(): array { return array(); }
+	public function status_payload( object $order, array $shipment ): array { return $this->status_updates->status_payload( $shipment, $order ); }
+	public function update_status( object $order, string $shipment_key = '' ): array { return $this->status_updates->update_russian_post( $order, $shipment_key ?: RussianPostDomesticSettings::CARRIER_KEY ); }
+	public function attach_manual( object $order, array $payload ): array { return array( 'success' => false ); }
+	public function cancel_in_carrier( object $order, string $shipment_key = '' ): array { return array( 'success' => false ); }
+	public function remove_from_order( object $order, string $shipment_key = '' ): array { return array( 'success' => false ); }
+	public function label_actions( object $order, array $shipment ): array { return array(); }
+	public function supports_status_auto_sync(): bool { return false; }
+	public function tracking_identifier( array $shipment ): string { return (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ); }
+	public function auto_sync_throttle_microseconds(): int { return 0; }
+}
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
 		public string $prefix = 'wp_';
@@ -187,6 +210,10 @@ $settings = new RussianPostOtpravkaApiSettings( new SettingsRepository(), $encry
 $client = new RussianPostTrackingApiClient( $settings );
 $mapper = new RussianPostTrackingStatusMapper();
 
+$universal_statuses = DeliveryStatus::all();
+shipment_status_smoke_assert( DeliveryStatus::PENDING_CREATION_IN_CARRIER === $universal_statuses[0], 'pending_creation_in_carrier must be the first universal shipment status.' );
+shipment_status_smoke_assert( DeliveryStatus::CREATED_IN_CARRIER === $universal_statuses[1], 'created_in_carrier must follow pending_creation_in_carrier.' );
+shipment_status_smoke_assert( 'Попытка создания в ТК' === DeliveryStatus::label( DeliveryStatus::PENDING_CREATION_IN_CARRIER ), 'pending_creation_in_carrier label must be available.' );
 $known = $mapper->map_record(
 	array(
 		'operation_type_id' => '2',
@@ -337,8 +364,7 @@ $metabox = new OrderShipmentsMetabox(
 	( new ReflectionClass( ShipmentCreationService::class ) )->newInstanceWithoutConstructor(),
 	new DeliveryServiceRepository( $wpdb ),
 	$status_service,
-	null,
-	null
+	carrier_adapters: new CarrierShipmentAdapterRegistry( array( new ShipmentStatusSmokeAdapter( $status_service ) ) )
 );
 $_POST = array( 'order_id' => 11, 'shipment_key' => RussianPostDomesticSettings::CARRIER_KEY );
 $GLOBALS['wdc_status_smoke_can'] = false;
@@ -355,7 +381,7 @@ try {
 	$metabox->ajax_update_status();
 	shipment_status_smoke_assert( false, 'Valid AJAX must return JSON success.' );
 } catch ( ShipmentStatusAjaxResponse $response ) {
-	shipment_status_smoke_assert( true === $response->success, 'Valid AJAX must succeed.' );
+	shipment_status_smoke_assert( true === $response->success, 'Valid AJAX must succeed: ' . json_encode( $response->data, JSON_UNESCAPED_UNICODE ) );
 	shipment_status_smoke_assert( isset( $response->data['status']['universal_status_label'] ), 'Valid AJAX must return status payload for JS.' );
 }
 
@@ -365,18 +391,18 @@ $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/
 $adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/RussianPost/RussianPostShipmentAdapter.php' );
 shipment_status_smoke_assert( str_contains( $status_service_source, 'Asia/Novosibirsk' ) && str_contains( $status_service_source, '7 * $hour' ), 'tracking_checked_at helper must use Asia/Novosibirsk with a GMT+7 fallback.' );
 shipment_status_smoke_assert( ! str_contains( $status_service_source, 'Статус отправления Почты России обновлен' ) && ! str_contains( implode( "\n", $order->notes ), 'Статус отправления Почты России обновлен' ), 'Shipment status update must not use the old Russian Post status refresh order note.' );
-shipment_status_smoke_assert( str_contains( $metabox_source, 'data-wdc-update-shipment-status' ) && str_contains( $metabox_source, '$show_update = $has_created &&' ) && str_contains( $js_source, 'updateButton.hidden = !hasTracking' ), 'Metabox update button must be visible only when tracking exists.' );
+shipment_status_smoke_assert( str_contains( $metabox_source, 'data-wdc-update-shipment-status' ) && str_contains( $metabox_source, '$show_update = $has_created && $can_update' ) && str_contains( $js_source, 'setVisible(updateButton, canUpdate)' ), 'Metabox update button must be visible only when carrier status updates are allowed.' );
 shipment_status_smoke_assert( ! str_contains( $metabox_source, 'data-wdc-status-plugin' ) && str_contains( $metabox_source, 'data-wdc-status-carrier' ), 'Metabox status block must render carrier status without duplicating plugin status.' );
 shipment_status_smoke_assert( ! str_contains( $metabox_source, 'Result ID' ) && ! str_contains( $js_source, 'Result ID' ), 'Result ID must not be shown in metabox or JS create result.' );
 shipment_status_smoke_assert( ! str_contains( $metabox_source, 'Backlog ID' ) && str_contains( $metabox_source, 'data-wdc-backlog-order-id' ), 'Metabox must keep backlog_order_id hidden.' );
 shipment_status_smoke_assert( str_contains( $js_source, 'renderShipmentTechnicalInfo' ) && str_contains( $js_source, 'data-wdc-backlog-order-id' ), 'Admin JS must update hidden backlog id after shipment create.' );
-shipment_status_smoke_assert( str_contains( $js_source, "' Barcode: '" ) && ! str_contains( $js_source, "' Backlog ID: '" ), 'Shipment toast must show barcode and not backlog_order_id.' );
+shipment_status_smoke_assert( str_contains( $js_source, 'setTrackingDisplay(box, payload.data.tracking_number' ) && ! str_contains( $js_source, "' Backlog ID: '" ), 'Shipment create flow must update tracking display and not show backlog_order_id in toast.' );
 shipment_status_smoke_assert( ! str_contains( $adapter_source, "'result_ids'" ), 'Adapter success raw reference must not save result-id list in shipment state.' );
 shipment_status_smoke_assert( str_contains( $metabox_source, 'shipment_status_label' ) && str_contains( $metabox_source, 'создано' ) && str_contains( $metabox_source, 'не определено' ), 'Metabox must expose Russian shipment status labels.' );
 shipment_status_smoke_assert( str_contains( $js_source, 'renderShipmentStatus' ) && str_contains( $js_source, 'updateStatusAction' ), 'Admin JS must update status block from AJAX response.' );
 shipment_status_smoke_assert( str_contains( $js_source, 'showShipmentToast' ) && str_contains( $js_source, '10000' ), 'Admin JS must show auto-hiding shipment toast.' );
 shipment_status_smoke_assert( str_contains( $js_source, 'modal.hidden = true' ), 'Admin JS must close shipment modal after successful create.' );
 shipment_status_smoke_assert( str_contains( $js_source, 'requestShipmentStatus(updateButton, { auto: true })' ), 'Admin JS must trigger automatic first status update after create.' );
-shipment_status_smoke_assert( str_contains( $js_source, 'Отправление создано, но статус пока не обновлен:' ), 'Admin JS must warn when automatic first status update fails.' );
+shipment_status_smoke_assert( str_contains( $js_source, 'Статус пока не обновлен:' ), 'Admin JS must warn when automatic first status update fails.' );
 
 echo "Shipment status smoke test passed.\n";

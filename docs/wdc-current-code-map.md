@@ -1,27 +1,14 @@
 # Карта текущего кода
 
-## DPD Status Mapping 0.65.0
+## DPD Status Mapping 0.65.1
 
-- `src/Shipments/Dpd/DpdStatusMapping.php` is the DPD EventCode dictionary and mapping service. The dictionary is sourced
-  from `docs/dpd/ws-integration-guide.docx`, section 5.5.4 "Справочник статусов заказа EventCode, EventName и его
-  параметров(ParamName)", and contains 75 EventCode rows with event name, optional DPD status code, ParamName entries and
-  comments where the document has them.
-- `DpdStatusMapping::default_mapping()` maps each DPD EventCode to a universal `DeliveryStatus`. Created/offer events map
-  to `created_in_carrier`; movement, customs and delivery-date changes map to `in_transit`; pickup readiness maps to
-  `ready_for_pickup`; courier handoff/delivery-in-progress maps to `handed_to_courier`; final delivery maps to
-  `delivered`; return events map to `returning_to_sender` or `returned_to_sender`; cancellations map to `cancelled`;
-  refusal/problem events map to `rejected`; billing/notification-only events map to `unknown`.
-- `SettingsRepository::defaults()` registers `dpd_status_mapping`, and the service reads/writes saved overrides through
-  the same `wdc_core_settings` option as CDEK status mapping.
-- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds `WDC → Службы доставки → DPD → Статусы DPD`. The tab
-  renders EventCode, EventName, ParamName/parameters, editable universal-status select and default value; it supports save
-  and reset-to-default.
-- `tests/dpd/run-dpd-status-mapping-smoke.php` covers dictionary completeness, EventName/default validity, saved override,
-  unknown fallback, ParamName preservation, admin render, universal-status select options, save/reset and CDEK mapping
-  regression.
-- DPD status API polling, cron/sync, shipment updates, live create, labels and cancellation remain intentionally out of
-  scope.
-
+- `src/Domain/Status/DeliveryStatus.php` defines the universal shipment status `pending_creation_in_carrier` with label `Попытка создания в ТК`. It is the first value in `DeliveryStatus::all()`, directly before `created_in_carrier`, so admin select ordering stays stable.
+- `src/Shipments/Dpd/DpdStatusMapping.php` is the DPD EventCode dictionary and mapping service. The dictionary is sourced from `docs/dpd/ws-integration-guide.docx`, section 5.5.4 "Справочник статусов заказа EventCode, EventName и его параметров(ParamName)", and contains 75 EventCode rows. Runtime rows keep EventCode, EventName, optional DPD marker/code name from the `Код` column and document comments where relevant; ParamName/event parameters are intentionally not stored.
+- `DpdStatusMapping::default_mapping()` maps offer/pre-registration events `1001`, `1101`, `1201`, `1301` to `pending_creation_in_carrier`; unknown-safe payment/problem/cancel/archive events to `unknown`; active delivery/problem-repeat events to `in_transit`; refusal return events `2404`, `2405`, `2406`, `2416` to `returning_to_sender`; final delivery events `3304`, `3305`, `3308` to `delivered`; and `3306` to `returned_to_sender`.
+- `SettingsRepository::defaults()` registers `dpd_status_mapping`, and the service reads/writes saved overrides through the same `wdc_core_settings` option as CDEK status mapping. Invalid saved values fall back to the updated default for that EventCode.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds `WDC → Службы доставки → DPD → Статусы DPD`. The tab renders EventCode, EventName, DPD marker/code name, editable universal-status select and default value; it supports save and reset-to-default.
+- `tests/dpd/run-dpd-status-mapping-smoke.php` covers dictionary completeness, EventName/default validity, absence of ParamName/parameters, new universal status ordering/select presence, saved override, invalid fallback, unknown EventCode fallback, admin render, save/reset and CDEK mapping regression. `tests/shipments/run-shipment-status-smoke.php` also verifies the new universal-status ordering for shipment status flows.
+- DPD status API polling, cron/sync, shipment updates, live create, labels and cancellation remain intentionally out of scope.
 ## DPD Modal Preparation Cleanup 0.63.2
 
 - `src/Shipments/Admin/OrderShipmentsMetabox.php` keeps the DPD receiver pickup block focused on `Код ПВЗ`, `Адрес ПВЗ` and `Выбрать другой ПВЗ`; the visible `Тип точки` row is now CDEK-only. The DPD comment textarea was removed.

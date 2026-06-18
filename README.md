@@ -1,19 +1,10 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.65.0.
+Current plugin version: 0.65.1.
 
-Version 0.65.0 adds the DPD status mapping settings tab. `WDC → Службы доставки → DPD → Статусы DPD` now renders the
-EventCode dictionary from `docs/dpd/ws-integration-guide.docx`, section 5.5.4 "Справочник статусов заказа EventCode,
-EventName и его параметров(ParamName)": 75 DPD EventCode rows with event names, ParamName descriptions, default
-universal shipment statuses and editable selects. The mapping is stored in `wdc_core_settings[dpd_status_mapping]`
-through `SettingsRepository` and served by `DpdStatusMapping::statuses()`, `default_mapping()`, `mapping()` and
-`resolve($eventCode, $paramName = null)`. Defaults map created/offer events to `created_in_carrier`, movement/customs
-events to `in_transit`, pickup-ready events to `ready_for_pickup`, courier handoff/delivery-in-progress events to
-`handed_to_courier`, final delivery events to `delivered`, return path events to `returning_to_sender` or
-`returned_to_sender`, cancellations to `cancelled`, refusal/problem events to `rejected`, and notification/billing-only
-events to `unknown`. No DPD status API calls, cron/sync, shipment updates, live create, labels or cancellation flows were
-added.
+Version 0.65.1 refines DPD status mapping and universal shipment statuses. A new universal status `pending_creation_in_carrier` (`Попытка создания в ТК`) is first in `DeliveryStatus::all()` before `created_in_carrier`, so it appears first in admin status selects including `/admin.php?page=wdc-shipment-statuses&tab=mapping` and `WDC → Службы доставки → DPD → Статусы DPD`.
 
+The DPD status dictionary remains sourced from `docs/dpd/ws-integration-guide.docx`, section 5.5.4 "Справочник статусов заказа EventCode, EventName и его параметров(ParamName)", but the runtime mapping now stores only EventCode, EventName, DPD marker/code name, comments and universal-status mapping. ParamName/event parameters are no longer stored in `DpdStatusMapping::statuses()` and are no longer rendered in the DPD admin table. Defaults were adjusted so offer events `1001`, `1101`, `1201`, `1301` map to `pending_creation_in_carrier`; selected problem/payment/cancel/archive events map to `unknown`; delivery-progress/problem-repeat events map to `in_transit`; and return-refusal events `2404`, `2405`, `2406`, `2416` map to `returning_to_sender`. No DPD status API calls, cron/sync, shipment updates, live create, labels or cancellation flows were added.
 Version 0.64.2 tightens DPD pickup prefill in the order-admin recalculation modal. `OrderDeliveryMetabox` now exposes a
 DPD `current_pickup` only for saved DPD pickup orders with a real terminal code; DPD courier, empty orders, CDEK,
 Russian Post and other carriers no longer leak shipping address or arbitrary pickup snapshots into the DPD selected

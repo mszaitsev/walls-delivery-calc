@@ -1690,13 +1690,13 @@ final class DeliveryServicesAdminPage {
 			<input type="hidden" name="wdc_delivery_services_action" value="save_dpd_statuses">
 			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
 			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
-			<p class="description"><?php echo esc_html__( 'Справочник взят из DPD WS Integration Guide, раздел 5.5.4: EventCode, EventName и параметры ParamName. Сопоставление сохраняет универсальный статус отправления WDC и не запускает API статусов DPD.', 'walls-delivery-calc' ); ?></p>
+			<p class="description"><?php echo esc_html__( 'Справочник взят из DPD WS Integration Guide, раздел 5.5.4: EventCode, EventName и marker/code name. Сопоставление сохраняет универсальный статус отправления WDC и не запускает API статусов DPD.', 'walls-delivery-calc' ); ?></p>
 			<table class="widefat striped">
 				<thead>
 					<tr>
 						<th><?php echo esc_html__( 'EventCode', 'walls-delivery-calc' ); ?></th>
 						<th><?php echo esc_html__( 'EventName', 'walls-delivery-calc' ); ?></th>
-						<th><?php echo esc_html__( 'ParamName / параметры', 'walls-delivery-calc' ); ?></th>
+						<th><?php echo esc_html__( 'DPD marker/code name', 'walls-delivery-calc' ); ?></th>
 						<th><?php echo esc_html__( 'Универсальный статус отправления', 'walls-delivery-calc' ); ?></th>
 						<th><?php echo esc_html__( 'Дефолтное значение', 'walls-delivery-calc' ); ?></th>
 					</tr>
@@ -1705,14 +1705,14 @@ final class DeliveryServicesAdminPage {
 					<?php foreach ( DpdStatusMapping::statuses() as $event_code => $status ) : ?>
 						<?php $event_code = (string) $event_code; ?>
 						<tr>
-							<td><code><?php echo esc_html( $event_code ); ?></code><?php echo '' !== $status['status_code'] ? '<br><small>' . esc_html( $status['status_code'] ) . '</small>' : ''; ?></td>
+							<td><code><?php echo esc_html( $event_code ); ?></code></td>
 							<td>
 								<strong><?php echo esc_html( $status['event_name'] ); ?></strong>
 								<?php if ( '' !== $status['comment'] ) : ?>
 									<br><small><?php echo esc_html( $status['comment'] ); ?></small>
 								<?php endif; ?>
 							</td>
-							<td><?php echo wp_kses_post( $this->dpd_parameters_label( $status['parameters'] ) ); ?></td>
+							<td><?php echo '' !== $status['status_code'] ? '<code>' . esc_html( $status['status_code'] ) . '</code>' : '<span class="description">-</span>'; ?></td>
 							<td><?php $this->render_delivery_status_select( DpdStatusMapping::MAPPING_KEY, $event_code, (string) ( $mapping[ $event_code ] ?? '' ) ); ?></td>
 							<td><?php echo esc_html( DeliveryStatus::label( (string) ( $defaults[ $event_code ] ?? DeliveryStatus::UNKNOWN ) ) . ' (' . (string) ( $defaults[ $event_code ] ?? DeliveryStatus::UNKNOWN ) . ')' ); ?></td>
 						</tr>
@@ -1724,22 +1724,6 @@ final class DeliveryServicesAdminPage {
 		</form>
 		<?php
 	}
-
-	/**
-	 * @param array<int,array{name:string,description:string}> $parameters
-	 */
-	private function dpd_parameters_label( array $parameters ): string {
-		if ( array() === $parameters ) {
-			return '<span class="description">-</span>';
-		}
-		$items = array_map(
-			static fn ( array $parameter ): string => '<li><code>' . esc_html( $parameter['name'] ) . '</code>' . ( '' !== $parameter['description'] ? ' - ' . esc_html( $parameter['description'] ) : '' ) . '</li>',
-			$parameters
-		);
-
-		return '<ul style="margin:0 0 0 18px;">' . implode( '', $items ) . '</ul>';
-	}
-
 	private function render_diagnostics_tab( DeliveryService $service ): void {
 		if ( ! $this->is_domestic_service( $service ) ) {
 			return;
