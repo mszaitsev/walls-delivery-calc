@@ -1,6 +1,14 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.64.0.
+Current plugin version: 0.64.1.
+
+Version 0.64.1 fixes the DPD pickup picker inside the order-admin `Калькулятор доставок` recalculation modal. DPD
+pickup balloons/list cards now render `Пункт выдачи DPD {terminal_code}` and `Код пункта`, while Russian Post keeps
+`Отделение Почты России` / `Код/индекс` and CDEK keeps its own labels. Current pickup prefill is now carrier-aware:
+DPD pickup prefill happens only when the order already has saved DPD pickup meta/terminalCode, so a courier/CDEK/Russian
+Post order does not show the shipping address as a selected DPD pickup point. The backend may still use an auto-selected
+receiver terminalCode for quote calculation, but the admin UI treats it as quote-only until the manager explicitly
+chooses a DPD pickup point; saving DPD pickup without that selected point remains blocked.
 
 Version 0.64.0 connects DPD to the existing WooCommerce order admin `Калькулятор доставок` recalculation flow. Preview
 uses the same `CheckoutOrchestrator` / `DpdQuoteCarrier` / `getServiceCostByParcels3` terminalCode-aware runtime as

@@ -1,6 +1,18 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.64.0.
+Version: 0.64.1.
+
+## Статус 0.64.1
+
+Исправлен DPD pickup picker в order-admin блоке `Калькулятор доставок`.
+
+- DPD popup/list card теперь показывает `Пункт выдачи DPD {terminal_code}` и label `Код пункта`, а не Russian Post `Отделение Почты России` / `Код/индекс`.
+- `normalizePickupPoint()` сохраняет DPD `terminal_code`, а `pickupPointDisplayCode()` для DPD берет `terminal_code` или `point_code`.
+- `prefillCurrentPickupIfAvailable()` стал carrier-aware: выбранный pickup prefill используется только если текущий сохраненный pickup соответствует выбранному carrier/pickup family.
+- Для DPD prefill разрешен только когда заказ уже был DPD pickup: есть `carrier_key=dpd`/`pickup_family=dpd:pickup` или DPD terminal alias и непустой `terminal_code`/`point_code`.
+- Если заказ был courier, CDEK, Почта России или другой не-DPD вариант, выбор DPD pickup оставляет UI в состоянии `ПВЗ не выбран`; shipping address не считается выбранным DPD ПВЗ.
+- Auto-selected receiver terminalCode, который backend использует для quote preview, остается quote-only диагностикой. Он не попадает в `selected_pickup_point` UI и не сохраняется как менеджерский выбор без явного выбора ПВЗ.
+- Save DPD pickup без выбранного `selected_pickup_point` блокируется сообщением `Для pickup-варианта выберите ПВЗ.`.
 
 ## Статус 0.64.0
 
@@ -40,7 +52,7 @@ DPD подключен к существующему order-admin пересче�
 - courier поддерживает выбор lower-level suggestion, ввод номера после выбранного дома для фильтрации, и завершение нормализованного адреса на уровне дома через ссылку `если номера нет - нажмите здесь`;
 - courier save UI показывает не блокирующий warning, если населенный пункт нормализованного/manual адреса не удалось уверенно сопоставить с населенным пунктом расчета тарифа;
 - для pickup требуется выбранный ПВЗ, но не требуется нормализованный адрес менеджера;
-- если населенный пункт не менялся, modal prefill выбирает текущий ПВЗ заказа из WDC pickup meta;
+- если населенный пункт не менялся, modal prefill выбирает текущий ПВЗ заказа из WDC pickup meta только когда этот ПВЗ соответствует выбранному carrier/pickup family;
 - для pickup WooCommerce shipping address заполняется выбранным ПВЗ: address_1 = адрес ПВЗ, address_2 очищается, city/state/postcode/country берутся из ПВЗ/selected location;
 - WooCommerce shipping city/state при admin save записываются через checkout-compatible selected location payload/formatter values (`city_value`, `state_value` и fallback через `LocationDisplayNameFormatter`), а не через полный `display_name`;
 - ПВЗ сохраняется в WDC pickup meta и не попадает в order note;
