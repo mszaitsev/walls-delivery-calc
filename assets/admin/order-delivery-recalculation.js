@@ -631,7 +631,8 @@
 		return String( location.display_name || location.label || location.option_label || location.city_value || location.city_name || location.place_name || '' );
 	}
 
-	function requestPreview( box, button ) {
+	function requestPreview( box, button, options ) {
+		options = options || {};
 		if ( ! box ) {
 			return;
 		}
@@ -647,6 +648,9 @@
 		form.append( 'nonce', config.nonce || '' );
 		form.append( 'order_id', orderId );
 		form.append( 'selected_location', JSON.stringify( selectedLocations.get( box ) || {} ) );
+		if ( options.selectedPickupPoint ) {
+			form.append( 'selected_pickup_point', JSON.stringify( options.selectedPickupPoint ) );
+		}
 
 		activeRequests.add( box );
 		openModal( box );
@@ -667,6 +671,9 @@
 					throw new Error( payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось пересчитать доставку.' );
 				}
 				renderPreview( box, payload.data && payload.data.html ? payload.data.html : '' );
+				if ( options.restoreDpdPickup && options.selectedPickupPoint ) {
+					restoreDpdPickupPreview( box, options.selectedPickupPoint, options.selectedTariffCode || '' );
+				}
 				if ( payload.data && payload.data.location && payload.data.location.label ) {
 					setStatus( box, 'Расчет выполнен для: ' + payload.data.location.label, 'success' );
 				} else {
@@ -680,6 +687,38 @@
 				activeRequests.delete( box );
 				setPreviewButtonsLoading( box, false );
 			} );
+	}
+
+	function restoreDpdPickupPreview( box, point, tariffCode ) {
+		const content = modalContent( box );
+		if ( ! content ) {
+			return;
+		}
+		const rate = content.querySelector( '[data-wdc-order-delivery-rate][data-carrier-key="dpd"][data-delivery-type="pickup"]' );
+		if ( ! rate ) {
+			return;
+		}
+		const rateInput = rate.querySelector( 'input[name="wdc_order_delivery_preview_rate"]' );
+		if ( rateInput ) {
+			rateInput.checked = true;
+		}
+		if ( tariffCode ) {
+			const tariff = rate.querySelector( '.wdc-order-delivery-tariff input[value="' + cssEscape( tariffCode ) + '"]' );
+			if ( tariff ) {
+				tariff.checked = true;
+			}
+		}
+		selectedRateChanged( rateInput || rate );
+		selectedPickupPoints.set( box, point );
+		updatePickupSelectors( box );
+		updateSaveButton( box );
+	}
+
+	function cssEscape( value ) {
+		if ( window.CSS && window.CSS.escape ) {
+			return window.CSS.escape( String( value || '' ) );
+		}
+		return String( value || '' ).replace( /["\\]/g, '\\$&' );
 	}
 
 	function searchLocations( box, query ) {
@@ -1149,10 +1188,19 @@
 		}
 
 		function choosePoint( point ) {
+			const rate = selectedRates.get( box ) || {};
+			const tariffCode = rate.selected_tariff && rate.selected_tariff.object_code ? String( rate.selected_tariff.object_code ) : '';
 			selectedPickupPoints.set( box, point );
 			normalizedShippingAddresses.delete( box );
 			updatePickupSelectors( box );
 			close();
+			if ( 'dpd' === String( point.carrier_key || point.carrier || rate.carrier_key || '' ) ) {
+				requestPreview( box, box.querySelector( '[data-wdc-order-delivery-modal-preview]' ), {
+					selectedPickupPoint: point,
+					restoreDpdPickup: true,
+					selectedTariffCode: tariffCode
+				} );
+			}
 		}
 
 		function runSearch( mode ) {

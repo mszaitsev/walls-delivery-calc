@@ -24,10 +24,11 @@ final class OrderDeliveryRecalculationService {
 
 	/**
 	 * @param array<string,mixed>|null $selected_location
+	 * @param array<string,mixed> $selected_pickup_point
 	 * @return array{success:bool,message:string,rates:array<int,array<string,mixed>>,request:array<string,mixed>,location:array<string,mixed>}
 	 */
-	public function preview( object $order, ?array $selected_location = null ): array {
-		$request = $this->mapper->map( $order, $selected_location );
+	public function preview( object $order, ?array $selected_location = null, array $selected_pickup_point = array() ): array {
+		$request = $this->mapper->map( $order, $selected_location, $selected_pickup_point );
 		$result  = $this->orchestrator->calculate( $request, array(), RateSorter::CHEAPEST, true );
 
 		return array(

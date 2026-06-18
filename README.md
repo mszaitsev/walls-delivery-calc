@@ -1,6 +1,15 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.63.4.
+Current plugin version: 0.64.0.
+
+Version 0.64.0 connects DPD to the existing WooCommerce order admin `Калькулятор доставок` recalculation flow. Preview
+uses the same `CheckoutOrchestrator` / `DpdQuoteCarrier` / `getServiceCostByParcels3` terminalCode-aware runtime as
+checkout: pickup sends sender `pickup.terminalCode` plus receiver `delivery.terminalCode`, courier sends only sender
+`pickup.terminalCode`, `parcel[]` comes from `DpdParcelBuilder`, and selected DPD pickup terminalCode triggers a fresh
+admin preview before save. Saving a DPD pickup rate writes shared `_wdc_pickup_*` meta plus DPD aliases, selected
+serviceCode/title/cost/delivery days, WooCommerce shipping item title/total and calculation data; saving DPD courier clears
+pickup-point meta and leaves no receiver terminalCode. The `Отправления` draft then reads the recalculated DPD serviceCode,
+delivery type and terminalCode data. Live DPD create calls remain disabled.
 
 Version 0.63.4 makes the DPD preparation `Дата отправки` control two-line: label on the first line, compact date input
 with `−`/`+` buttons on the second. Clicking/focusing the date input now attempts the browser native date picker through

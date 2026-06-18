@@ -205,7 +205,7 @@ final class OrderDeliveryMetabox {
 		$label = $this->location_label_without_region_duplicate( $name, $region );
 
 		return array(
-			'id' => '',
+			'id' => $this->current_location_id( $order, $destination ),
 			'fias_id' => trim( (string) ( $destination['fias_id'] ?? $this->meta_string( $order, '_wdc_platform_location_fias_id' ) ?: $this->meta_string( $order, '_wdc_platform_city_fias_id' ) ) ),
 			'display_name' => $name,
 			'city_value' => $name,
@@ -215,6 +215,22 @@ final class OrderDeliveryMetabox {
 			'state_value' => $region,
 			'label' => '' !== $label ? $label : $name,
 		);
+	}
+
+	private function current_location_id( object $order, array $destination ): string {
+		foreach ( array( $destination['location_id'] ?? null, $destination['selected_location_id'] ?? null, $destination['id'] ?? null ) as $value ) {
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (string) (int) $value;
+			}
+		}
+		foreach ( array( '_wdc_platform_location_id', '_wdc_platform_city_location_id', '_wdc_location_id' ) as $key ) {
+			$value = $this->meta_string( $order, $key );
+			if ( is_numeric( $value ) && (int) $value > 0 ) {
+				return (string) (int) $value;
+			}
+		}
+
+		return '';
 	}
 
 	private function location_label_without_region_duplicate( string $name, string $region ): string {
@@ -264,10 +280,15 @@ final class OrderDeliveryMetabox {
 		return array_filter(
 			array(
 				'point_code' => $point_code,
+				'terminal_code' => $this->meta_string( $order, '_wdc_dpd_pickup_terminal_code' ) ?: (string) ( $snapshot['terminal_code'] ?? $snapshot['point_code'] ?? '' ),
+				'carrier_key' => $this->meta_string( $order, '_wdc_pickup_carrier_key' ),
+				'service_key' => $this->meta_string( $order, '_wdc_pickup_service_key' ),
+				'pickup_family' => $this->meta_string( $order, '_wdc_pickup_family' ),
 				'point_type' => $this->meta_string( $order, '_wdc_pickup_point_type' ),
 				'point_name' => (string) ( $snapshot['point_name'] ?? $snapshot['name'] ?? '' ),
 				'point_address' => $point_address,
 				'point_postcode' => $this->meta_string( $order, '_wdc_pickup_point_postcode' ),
+				'dpd_source' => $this->meta_string( $order, '_wdc_dpd_pickup_source' ),
 				'point_raw' => $snapshot,
 			),
 			static fn( mixed $value ): bool => array() !== $value && '' !== $value

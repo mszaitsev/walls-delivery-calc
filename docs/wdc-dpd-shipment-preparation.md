@@ -1,6 +1,12 @@
 # WDC DPD Shipment Preparation
 
-Version: 0.63.4.
+Version: 0.64.0.
+
+0.64.0 update: DPD order-admin delivery recalculation now writes the same DPD order meta that checkout-created DPD orders
+write. After a manager saves a recalculated DPD pickup option, the shipment preparation draft reads the selected
+serviceCode, delivery type, sender `pickup_terminal_code`, receiver `delivery_terminal_code`, selected pickup snapshot and
+DPD alias meta from the order. After a manager saves DPD courier, receiver pickup meta is cleared and the draft uses the
+courier address with an empty receiver terminalCode. Live DPD create calls remain disabled.
 
 0.63.4 update: the DPD `Дата отправки` control uses two rows: `.wdc-dpd-date-label` for the label and
 `.wdc-dpd-date-row` for the compact date input plus `−`/`+` buttons. Pointer/click/focus interaction with

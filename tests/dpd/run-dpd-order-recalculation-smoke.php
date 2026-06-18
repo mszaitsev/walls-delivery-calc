@@ -1,0 +1,201 @@
+<?php
+declare(strict_types=1);
+
+ob_start();
+require __DIR__ . '/run-dpd-checkout-runtime-smoke.php';
+ob_end_clean();
+
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentDateResolver;
+use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Domain\Quote\DeliveryType;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Storage\LocationDeliveryCodeRepository;
+use WallsShop\WDC\Orders\Application\OrderDeliveryRecalculationService;
+use WallsShop\WDC\Orders\Application\OrderDeliveryReplacementService;
+use WallsShop\WDC\Orders\Application\OrderQuoteRequestMapper;
+use WallsShop\WDC\Shipments\Application\OrderShipmentDraftFactory;
+use WallsShop\WDC\Shipments\Application\ShipmentServiceSettings;
+use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
+
+function dpd_order_recalc_assert( bool $condition, string $message ): void {
+	if ( ! $condition ) {
+		throw new RuntimeException( $message );
+	}
+}
+
+final class DpdOrderRecalcProduct {
+	public function get_sku(): string { return 'dpd-order-sku'; }
+	public function get_name(): string { return 'DPD order item'; }
+	public function get_weight(): float { return 1.5; }
+	public function get_length(): float { return 30.0; }
+	public function get_width(): float { return 20.0; }
+	public function get_height(): float { return 10.0; }
+}
+
+final class DpdOrderRecalcItem {
+	public function get_quantity(): int { return 1; }
+	public function get_total(): float { return 2500.0; }
+	public function get_product(): DpdOrderRecalcProduct { return new DpdOrderRecalcProduct(); }
+	public function get_name(): string { return 'DPD order item'; }
+}
+
+final class DpdOrderRecalcOrder {
+	/** @var array<string,mixed> */
+	public array $meta = array();
+	/** @var array<string,mixed> */
+	public array $shipping_items = array( 'method_title' => 'Old shipping', 'total' => 10.0, 'meta' => array() );
+	public float $total = 2510.0;
+	public bool $saved = false;
+	/** @var array<int,string> */
+	public array $notes = array();
+	public string $shipping_country = 'RU';
+	public string $shipping_state = 'Москва';
+	public string $shipping_city = 'Москва';
+	public string $shipping_postcode = '101000';
+	public string $shipping_address_1 = 'Тверская 1';
+	public string $shipping_address_2 = '';
+
+	public function get_id(): int { return 640; }
+	public function get_items( string $type = '' ): array { return 'shipping' === $type ? ( array() === $this->shipping_items ? array() : array( $this->shipping_items ) ) : array( new DpdOrderRecalcItem() ); }
+	public function get_subtotal(): float { return 2500.0; }
+	public function get_item_count(): int { return 1; }
+	public function get_payment_method(): string { return 'cod'; }
+	public function get_shipping_country(): string { return $this->shipping_country; }
+	public function get_billing_country(): string { return 'RU'; }
+	public function get_shipping_city(): string { return $this->shipping_city; }
+	public function get_shipping_state(): string { return $this->shipping_state; }
+	public function get_shipping_postcode(): string { return $this->shipping_postcode; }
+	public function get_shipping_address_1(): string { return $this->shipping_address_1; }
+	public function get_shipping_address_2(): string { return $this->shipping_address_2; }
+	public function get_billing_first_name(): string { return 'Ivan'; }
+	public function get_billing_last_name(): string { return 'Petrov'; }
+	public function get_billing_phone(): string { return '+79990000000'; }
+	public function get_billing_email(): string { return 'client@example.test'; }
+	public function get_meta( string $key, bool $single = true ): mixed { return $this->meta[ $key ] ?? ''; }
+	public function update_meta_data( string $key, mixed $value ): void { $this->meta[ $key ] = $value; }
+	public function set_shipping_country( string $value ): void { $this->shipping_country = $value; }
+	public function set_shipping_state( string $value ): void { $this->shipping_state = $value; }
+	public function set_shipping_city( string $value ): void { $this->shipping_city = $value; }
+	public function set_shipping_postcode( string $value ): void { $this->shipping_postcode = $value; }
+	public function set_shipping_address_1( string $value ): void { $this->shipping_address_1 = $value; }
+	public function set_shipping_address_2( string $value ): void { $this->shipping_address_2 = $value; }
+	public function calculate_totals( bool $and_taxes = true ): void { $this->total = 2500.0 + (float) ( $this->shipping_items['total'] ?? 0 ); }
+	public function add_order_note( string $note, bool $is_customer_note = false, bool $added_by_user = false ): void { $this->notes[] = $note; }
+	public function save(): void { $this->saved = true; }
+}
+
+$settings->save_runtime_tariffs_from_admin(
+	array(
+		'dpd_runtime_service_enabled' => array( 'MAX' => '1', 'NDY' => '1' ),
+		'dpd_runtime_tariff_title' => array( 'MAX' => 'DPD Максимум', 'NDY' => 'DPD Экспресс' ),
+		DpdSettings::RUNTIME_ENABLE_COURIER_RATES_KEY => '1',
+	)
+);
+dpd_checkout_fake_services(
+	$soap,
+	array(
+		array( 'serviceCode' => 'MAX', 'serviceName' => 'DPD Максимум', 'cost' => 100.25, 'deliveryPeriodMin' => 1, 'deliveryPeriodMax' => 2 ),
+		array( 'serviceCode' => 'NDY', 'serviceName' => 'DPD Экспресс', 'cost' => 220.10, 'deliveryPeriodMin' => 1, 'deliveryPeriodMax' => 1 ),
+	)
+);
+
+$order = new DpdOrderRecalcOrder();
+$order->meta['_wdc_platform_location_id'] = '200';
+$recalculation = new OrderDeliveryRecalculationService( new OrderQuoteRequestMapper(), $orchestrator, new OrderShipmentRepository() );
+$preview = $recalculation->preview( $order, array( 'id' => 200, 'display_name' => 'Москва', 'city_value' => 'Москва', 'region_name' => 'Москва', 'postal_code' => '101000', 'country_code' => 'RU' ) );
+$dpd_groups = array_values( array_filter( $preview['rates'], static fn( array $rate ): bool => DpdSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? '' ) ) );
+dpd_order_recalc_assert( count( $dpd_groups ) >= 2, 'DPD pickup and courier groups must appear in order recalculation results.' );
+$pickup_group = array_values( array_filter( $dpd_groups, static fn( array $rate ): bool => DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) )[0] ?? array();
+$courier_group = array_values( array_filter( $dpd_groups, static fn( array $rate ): bool => DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' ) ) )[0] ?? array();
+$pickup_tariff = $pickup_group['tariff_variants'][0] ?? array();
+$courier_tariff = $courier_group['tariff_variants'][0] ?? array();
+dpd_order_recalc_assert( 'MAX' === (string) ( $pickup_tariff['object_code'] ?? '' ) && 'MAX' === (string) ( $courier_tariff['object_code'] ?? '' ), 'DPD recalculation grouped variants must expose selected serviceCode.' );
+
+$pickup_payload = $soap->calls[ count( $soap->calls ) - 2 ]['payload'] ?? array();
+$courier_payload = $soap->calls[ count( $soap->calls ) - 1 ]['payload'] ?? array();
+dpd_order_recalc_assert( 'getServiceCostByParcels3' === (string) ( $soap->calls[ count( $soap->calls ) - 1 ]['method'] ?? '' ), 'DPD order recalculation must use Parcels3 runtime pricing.' );
+dpd_order_recalc_assert( 'NSK-SENDER' === (string) ( $pickup_payload['pickup']['terminalCode'] ?? '' ) && 'MSK-AUTO' === (string) ( $pickup_payload['delivery']['terminalCode'] ?? '' ), 'DPD pickup recalculation must use sender terminalCode and auto-selected receiver terminalCode.' );
+dpd_order_recalc_assert( 'NSK-SENDER' === (string) ( $courier_payload['pickup']['terminalCode'] ?? '' ) && ! isset( $courier_payload['delivery']['terminalCode'] ), 'DPD courier recalculation must use sender terminalCode and no delivery terminalCode.' );
+dpd_order_recalc_assert( is_array( $pickup_payload['parcel'] ?? null ) && 2500.0 === (float) ( $pickup_payload['declaredValue'] ?? 0 ), 'DPD order recalculation must build parcel[] and declaredValue from order items.' );
+
+$selected_preview = $recalculation->preview(
+	$order,
+	array( 'id' => 200, 'display_name' => 'Москва', 'city_value' => 'Москва', 'region_name' => 'Москва', 'postal_code' => '101000', 'country_code' => 'RU' ),
+	array( 'carrier_key' => 'dpd', 'terminal_code' => 'MSK-SELECTED', 'point_code' => 'MSK-SELECTED' )
+);
+$selected_pickup_payload = $soap->calls[ count( $soap->calls ) - 2 ]['payload'] ?? array();
+dpd_order_recalc_assert( 'MSK-SELECTED' === (string) ( $selected_pickup_payload['delivery']['terminalCode'] ?? '' ), 'Selected DPD pickup point must override auto-selected terminalCode in recalculation preview.' );
+dpd_order_recalc_assert( count( array_filter( $selected_preview['rates'], static fn( array $rate ): bool => 'dpd' === (string) ( $rate['carrier_key'] ?? '' ) ) ) >= 2, 'DPD selected-terminal preview must still expose DPD rates.' );
+$selected_dpd_groups = array_values( array_filter( $selected_preview['rates'], static fn( array $rate ): bool => DpdSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? '' ) ) );
+$selected_pickup_group = array_values( array_filter( $selected_dpd_groups, static fn( array $rate ): bool => DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) )[0] ?? array();
+$selected_pickup_tariff = $selected_pickup_group['tariff_variants'][0] ?? array();
+
+$replacement = new OrderDeliveryReplacementService( new OrderShipmentRepository() );
+$selected_point = array(
+	'id' => 'dpd:MSK-SELECTED',
+	'carrier_key' => 'dpd',
+	'service_key' => 'dpd',
+	'pickup_family' => 'dpd:pickup',
+	'point_code' => 'MSK-SELECTED',
+	'terminal_code' => 'MSK-SELECTED',
+	'point_type' => 'parcel_shop',
+	'point_title' => 'Пункт выдачи DPD',
+	'point_name' => 'DPD Москва selected',
+	'point_address' => 'ул Арбат, 1',
+	'city_name' => 'Москва',
+	'lat' => '55.75',
+	'lng' => '37.60',
+	'dpd_source' => 'getParcelShops',
+);
+$save_pickup = $replacement->save(
+	$order,
+	array(
+		'selected_location' => array( 'id' => 200, 'display_name' => 'Москва', 'city_value' => 'Москва', 'region_name' => 'Москва', 'postal_code' => '101000', 'country_code' => 'RU' ),
+		'selected_rate' => $selected_pickup_group,
+		'selected_tariff' => $selected_pickup_tariff,
+		'selected_pickup_point' => $selected_point,
+		'normalized_shipping_address' => array(),
+	)
+);
+dpd_order_recalc_assert( true === $save_pickup['success'], 'Saving DPD pickup recalculation must succeed.' );
+dpd_order_recalc_assert( 'dpd' === (string) ( $order->meta['_wdc_platform_carrier_key'] ?? '' ) && 'dpd' === (string) ( $order->meta['_wdc_platform_service_key'] ?? '' ), 'Saving DPD pickup must write carrier/service keys.' );
+dpd_order_recalc_assert( 'pickup' === (string) ( $order->meta['_wdc_platform_delivery_type'] ?? '' ) && 'MAX' === (string) ( $order->meta['_wdc_platform_tariff_object'] ?? '' ), 'Saving DPD pickup must write delivery type and serviceCode.' );
+dpd_order_recalc_assert( 'MSK-SELECTED' === (string) ( $order->meta['_wdc_pickup_point_code'] ?? '' ) && 'MSK-SELECTED' === (string) ( $order->meta['_wdc_dpd_pickup_terminal_code'] ?? '' ), 'Saving DPD pickup must write shared and alias pickup terminal meta.' );
+dpd_order_recalc_assert( 'parcel_shop' === (string) ( $order->meta['_wdc_dpd_pickup_type'] ?? '' ) && 'DPD Москва selected' === (string) ( $order->meta['_wdc_dpd_pickup_name'] ?? '' ) && 'ул Арбат, 1' === (string) ( $order->meta['_wdc_dpd_pickup_address'] ?? '' ), 'Saving DPD pickup must write DPD alias type/name/address meta.' );
+dpd_order_recalc_assert( 'dpd:pickup' === (string) ( $order->meta['_wdc_pickup_family'] ?? '' ) && is_string( $order->meta['_wdc_pickup_point_snapshot'] ?? null ), 'Saving DPD pickup must write shared pickup family and snapshot.' );
+$calc = $order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
+dpd_order_recalc_assert( 'dpd' === (string) ( $calc['carrier_key'] ?? '' ) && 'MAX' === (string) ( $calc['selected_tariff_object'] ?? '' ) && 'MSK-SELECTED' === (string) ( $calc['pickup']['terminal_code'] ?? '' ), 'Saving DPD pickup must write calculation data with selected terminal.' );
+dpd_order_recalc_assert( 'NSK-SENDER' === (string) ( $calc['api']['dpd_pickup_terminal_code'] ?? '' ) && 'MSK-SELECTED' === (string) ( $calc['api']['dpd_delivery_terminal_code'] ?? '' ), 'Saved DPD rate meta must keep Parcels3 sender and quoted receiver terminal diagnostics.' );
+dpd_order_recalc_assert( str_contains( (string) ( $order->shipping_items['method_title'] ?? '' ), 'DPD' ) && (float) ( $order->shipping_items['total'] ?? 0 ) >= 100.0 && 1 === count( $order->shipping_items['meta'] ?? array() ), 'Saving DPD pickup must update WooCommerce shipping item title, total and compact visible meta.' );
+
+$pickup_service = new DpdPickupPointService( new DpdPickupPointRepository( $GLOBALS['wpdb'] ), new LocationDeliveryCodeRepository( $GLOBALS['wpdb'] ) );
+$draft_factory = new OrderShipmentDraftFactory( $services, new ShipmentServiceSettings(), null, null, null, null, null, $settings, $pickup_service, new DpdShipmentDateResolver() );
+$draft = $draft_factory->create_request_from_order( $order );
+dpd_order_recalc_assert( 'dpd' === $draft->carrier_key && 'pickup' === $draft->delivery_type && 'MAX' === (string) ( $draft->meta['service_code'] ?? '' ), 'Shipment draft after DPD pickup recalculation must see carrier, delivery type and serviceCode.' );
+dpd_order_recalc_assert( 'NSK-SENDER' === (string) ( $draft->meta['pickup_terminal_code'] ?? '' ) && 'MSK-SELECTED' === (string) ( $draft->meta['delivery_terminal_code'] ?? '' ), 'Shipment draft after DPD pickup recalculation must see sender and receiver terminalCode.' );
+
+$save_courier = $replacement->save(
+	$order,
+	array(
+		'selected_location' => array( 'id' => 200, 'display_name' => 'Москва', 'city_value' => 'Москва', 'region_name' => 'Москва', 'postal_code' => '101000', 'country_code' => 'RU' ),
+		'selected_rate' => $courier_group,
+		'selected_tariff' => $courier_tariff,
+		'selected_pickup_point' => array(),
+		'normalized_shipping_address' => array( 'source' => 'admin_manual', 'fallback' => true, 'address_1' => 'Тверская 1', 'address_2' => '', 'country' => 'RU', 'region' => 'Москва', 'city' => 'Москва', 'postcode' => '101000' ),
+	)
+);
+dpd_order_recalc_assert( true === $save_courier['success'], 'Saving DPD courier recalculation must succeed.' );
+dpd_order_recalc_assert( 'courier' === (string) ( $order->meta['_wdc_platform_delivery_type'] ?? '' ), 'Saving DPD courier must write courier delivery type.' );
+dpd_order_recalc_assert( '' === (string) ( $order->meta['_wdc_pickup_point_code'] ?? '' ) && '' === (string) ( $order->meta['_wdc_dpd_pickup_terminal_code'] ?? '' ), 'Saving DPD courier must clear shared pickup meta and DPD receiver terminal alias.' );
+$courier_calc = $order->meta[ OrderShippingMetaPersister::CALCULATION_META_KEY ] ?? array();
+dpd_order_recalc_assert( array() === ( $courier_calc['pickup'] ?? array() ) && '' === (string) ( $courier_calc['api']['dpd_delivery_terminal_code'] ?? '' ), 'Saving DPD courier calculation data must not keep pickup block or receiver terminalCode.' );
+$courier_draft = $draft_factory->create_request_from_order( $order );
+dpd_order_recalc_assert( 'courier' === $courier_draft->delivery_type && '' === (string) ( $courier_draft->meta['delivery_terminal_code'] ?? '' ), 'Shipment draft after DPD courier recalculation must not keep receiver terminalCode.' );
+
+$adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Dpd/DpdShipmentAdapter.php' );
+dpd_order_recalc_assert( str_contains( $adapter_source, "'dry_run' => true" ) && str_contains( $adapter_source, 'Создание отправления DPD отключено' ), 'DPD recalculation smoke must keep live DPD create call disabled.' );
+
+echo "DPD order recalculation smoke OK\n";

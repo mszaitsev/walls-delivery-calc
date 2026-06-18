@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Orders\Application;
 
 use WallsShop\WDC\Checkout\WooCommerce\OrderShippingMetaPersister;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Domain\Common\DeliveryDaysFormatter;
 use WallsShop\WDC\Domain\Quote\DeliveryType;
 use WallsShop\WDC\Locations\Services\LocationDisplayNameFormatter;
@@ -273,6 +274,7 @@ final class OrderDeliveryReplacementService {
 			'_wdc_platform_round_up_applied' => ! empty( $rate['round_up_applied'] ) ? 1 : 0,
 			'_wdc_platform_minimum_price_applied' => ! empty( $rate['minimum_price_applied'] ) ? 1 : 0,
 			'_wdc_platform_rate_meta' => is_array( $rate['rate_meta'] ?? null ) ? $rate['rate_meta'] : $rate,
+			'_wdc_platform_location_id' => isset( $location['id'] ) && is_numeric( $location['id'] ) ? (int) $location['id'] : '',
 			'_wdc_platform_city_display_name' => $this->location_label( $location ),
 			'_wdc_platform_city_postcode' => (string) ( $location['postal_code'] ?? $location['postcode'] ?? $address['postcode'] ?? '' ),
 			'_wdc_platform_city_fias_id' => (string) ( $location['fias_id'] ?? '' ),
@@ -298,14 +300,41 @@ final class OrderDeliveryReplacementService {
 			$map['_wdc_pickup_point_address'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
 			$map['_wdc_pickup_point_postcode'] = (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? '' );
 			$map['_wdc_pickup_point_snapshot'] = function_exists( 'wp_json_encode' ) ? wp_json_encode( $pickup, JSON_UNESCAPED_UNICODE ) : json_encode( $pickup );
+			if ( DpdSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? $pickup['carrier_key'] ?? '' ) ) {
+				$snapshot = is_array( $pickup['snapshot'] ?? null ) ? $pickup['snapshot'] : array();
+				$map['_wdc_dpd_pickup_terminal_code'] = $this->first_meaningful( $pickup['terminal_code'] ?? '', $pickup['point_code'] ?? '', $snapshot['terminal_code'] ?? '', $snapshot['point_code'] ?? '' );
+				$map['_wdc_dpd_pickup_type'] = $this->first_meaningful( $pickup['point_type'] ?? '', $snapshot['point_type'] ?? '' );
+				$map['_wdc_dpd_pickup_name'] = $this->first_meaningful( $pickup['point_name'] ?? '', $snapshot['point_name'] ?? '' );
+				$map['_wdc_dpd_pickup_address'] = (string) ( $pickup['point_address'] ?? $pickup['address'] ?? '' );
+				$map['_wdc_dpd_pickup_city_name'] = $this->first_meaningful( $pickup['city_name'] ?? '', $pickup['city'] ?? '', $snapshot['city_name'] ?? '', $snapshot['city'] ?? '' );
+				$map['_wdc_dpd_pickup_latitude'] = $this->first_meaningful( $pickup['lat'] ?? '', $pickup['latitude'] ?? '', $snapshot['lat'] ?? '' );
+				$map['_wdc_dpd_pickup_longitude'] = $this->first_meaningful( $pickup['lng'] ?? '', $pickup['longitude'] ?? '', $snapshot['lng'] ?? '' );
+				$map['_wdc_dpd_pickup_source'] = $this->first_meaningful( $pickup['dpd_source'] ?? '', $pickup['source'] ?? '', $snapshot['dpd_source'] ?? '', $snapshot['source'] ?? '', 'recalculation/admin' );
+			}
 		} else {
 			$map['_wdc_platform_pickup_code'] = '';
 			$map['_wdc_platform_pickup_address'] = '';
+			$map['_wdc_platform_pickup_comment'] = '';
+			$map['_wdc_platform_pickup_work_time'] = '';
 			$map['_wdc_pickup_point_code'] = '';
 			$map['_wdc_pickup_point_type'] = '';
+			$map['_wdc_pickup_carrier_key'] = '';
+			$map['_wdc_pickup_service_key'] = '';
+			$map['_wdc_pickup_family'] = '';
+			$map['_wdc_pickup_point_type_label'] = '';
+			$map['_wdc_pickup_point_title'] = '';
+			$map['_wdc_pickup_marker_type'] = '';
 			$map['_wdc_pickup_point_address'] = '';
 			$map['_wdc_pickup_point_postcode'] = '';
 			$map['_wdc_pickup_point_snapshot'] = '';
+			$map['_wdc_dpd_pickup_terminal_code'] = '';
+			$map['_wdc_dpd_pickup_type'] = '';
+			$map['_wdc_dpd_pickup_name'] = '';
+			$map['_wdc_dpd_pickup_address'] = '';
+			$map['_wdc_dpd_pickup_city_name'] = '';
+			$map['_wdc_dpd_pickup_latitude'] = '';
+			$map['_wdc_dpd_pickup_longitude'] = '';
+			$map['_wdc_dpd_pickup_source'] = '';
 		}
 		foreach ( $map as $key => $value ) {
 			if ( method_exists( $order, 'update_meta_data' ) ) {
@@ -479,6 +508,8 @@ final class OrderDeliveryReplacementService {
 				'description' => $this->first_meaningful( $pickup['description'] ?? '', $pickup['point_comment'] ?? '' ),
 				'storage_notice' => $this->first_meaningful( $pickup['storage_notice'] ?? '' ),
 				'cdek_code' => (string) ( $pickup['cdek_code'] ?? $pickup['point_code'] ?? '' ),
+				'terminal_code' => $this->first_meaningful( $pickup['terminal_code'] ?? '', $pickup['point_code'] ?? '' ),
+				'dpd_source' => $this->first_meaningful( $pickup['dpd_source'] ?? '', $pickup['source'] ?? '' ),
 				'raw_sanitized' => is_array( $pickup['raw_sanitized'] ?? null ) ? $pickup['raw_sanitized'] : ( is_array( $pickup['raw'] ?? null ) ? $pickup['raw'] : array() ),
 			) : array(),
 			'package' => $this->calculation_package_data( $rate_meta ),
@@ -540,6 +571,21 @@ final class OrderDeliveryReplacementService {
 		$cdek_city_code = $this->cdek_city_code_from_rate_meta( $rate_meta );
 		if ( $cdek_city_code > 0 ) {
 			$data['cdek_to_city_code'] = $cdek_city_code;
+		}
+		if ( DpdSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? $rate_meta['carrier_key'] ?? '' ) ) {
+			foreach ( array(
+				'dpd_service_code',
+				'dpd_sender_city_id',
+				'dpd_receiver_city_id',
+				'dpd_pickup_terminal_code',
+				'dpd_delivery_terminal_code',
+				'dpd_delivery_terminal_source',
+				'dpd_tariff_method',
+			) as $key ) {
+				if ( array_key_exists( $key, $rate_meta ) ) {
+					$data[ $key ] = $rate_meta[ $key ];
+				}
+			}
 		}
 
 		return $this->drop_null_values( $data );
@@ -752,6 +798,21 @@ final class OrderDeliveryReplacementService {
 	private function canonical_pickup_for_save( object $order, array $rate, array $pickup ): array {
 		$carrier = (string) ( $rate['carrier_key'] ?? $pickup['carrier_key'] ?? '' );
 		if ( 'cdek' !== $carrier ) {
+			if ( DpdSettings::CARRIER_KEY === $carrier ) {
+				$code = $this->first_meaningful( $pickup['terminal_code'] ?? '', $pickup['point_code'] ?? '' );
+				$pickup['carrier_key'] = DpdSettings::CARRIER_KEY;
+				$pickup['service_key'] = DpdSettings::SERVICE_KEY;
+				$pickup['pickup_family'] = DpdSettings::CARRIER_KEY . ':pickup';
+				$pickup['terminal_code'] = $code;
+				$pickup['point_code'] = $code;
+				if ( '' === (string) ( $pickup['point_title'] ?? '' ) ) {
+					$pickup['point_title'] = 'Пункт выдачи DPD';
+				}
+				if ( '' === (string) ( $pickup['marker_type'] ?? '' ) ) {
+					$pickup['marker_type'] = 'pickup';
+				}
+				return $pickup;
+			}
 			if ( '' === trim( (string) ( $pickup['point_code'] ?? '' ) ) ) {
 				$postcode = trim( (string) ( $pickup['point_postcode'] ?? $pickup['postcode'] ?? '' ) );
 				if ( '' !== $postcode ) {

@@ -1,6 +1,21 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.42.0.
+Version: 0.64.0.
+
+## Статус 0.64.0
+
+DPD подключен к существующему order-admin пересчету доставки по тому же паттерну, что CDEK и Почта России.
+
+- Preview по-прежнему строится через `OrderQuoteRequestMapper`, `OrderDeliveryRecalculationService` и общий `CheckoutOrchestrator`.
+- DPD не имеет отдельной "почти checkout" калькуляции: rates приходят из `DpdQuoteCarrier` и текущего `getServiceCostByParcels3` runtime.
+- Для DPD pickup preview отправляет sender `pickup.terminalCode` и receiver `delivery.terminalCode`; до выбора ПВЗ receiver terminalCode авто-выбирается из активного `parcel_shop`, после выбора DPD ПВЗ admin JS запускает fresh preview с выбранным `terminal_code`.
+- Для DPD courier preview отправляет sender `pickup.terminalCode` и не отправляет receiver `delivery.terminalCode`.
+- Admin pickup search endpoint теперь поддерживает `carrier_key=dpd` через `DpdPickupPointService`, возвращая тот же map/list payload shape: `point_code`, `terminal_code`, `pickup_family=dpd:pickup`, title/type/address/city/coordinates/source/snapshot.
+- Save DPD pickup пишет `_wdc_platform_carrier_key=dpd`, `_wdc_platform_service_key=dpd`, `_wdc_platform_delivery_type=pickup`, selected serviceCode/title, shipping cost, `_wdc_platform_rate_meta`, `_wdc_delivery_calculation_data`, canonical `_wdc_pickup_*` meta and DPD aliases.
+- Save DPD courier пишет `delivery_type=courier`, обновляет DPD tariff/rate data and clears shared pickup meta plus `_wdc_dpd_pickup_*` receiver aliases.
+- WooCommerce shipping item is still created/replaced by `OrderDeliveryReplacementService`: method id `wdc_platform_delivery`, compact method title, total = selected rate cost, visible meta only `Срок доставки`.
+- `OrderShipmentDraftFactory` reads the recalculated DPD serviceCode, delivery type, sender pickup terminalCode, receiver delivery terminalCode for pickup and selected pickup snapshot from the same order meta used by checkout-created DPD orders.
+- Live DPD shipment creation remains disabled; no labels/statuses/cancellation/COD/unitLoad were added.
 
 ## Цель этапа
 
@@ -59,7 +74,7 @@ HPOS audit:
 
 - `wdc_order_delivery_recalculate_preview`: пересчет rates, не мутирует заказ.
 - `wdc_order_delivery_recalculate_location_search`: thin wrapper над существующим checkout location search payload.
-- `wdc_order_delivery_recalculate_pickup_search`: поиск ПВЗ для карты, initial `mode=location` грузит все ПВЗ выбранного населенного пункта, manual `mode=search` ищет по введенному адресу/индексу/коду.
+- `wdc_order_delivery_recalculate_pickup_search`: поиск ПВЗ для карты, initial `mode=location` грузит все ПВЗ выбранного населенного пункта, manual `mode=search` ищет по введенному адресу/индексу/коду. Supports Russian Post, CDEK and DPD; DPD rows come from active local `parcel_shop` points through `DpdPickupPointService`.
 - `wdc_order_delivery_recalculate_address_suggest`: thin admin wrapper над checkout `AddressSuggestionService` для courier address suggestions; возвращает shared suggestion items plus normalized save payload.
 - `wdc_order_delivery_recalculate_normalize_address`: legacy/thin wrapper нормализации courier delivery address через существующий checkout address runtime; основной admin courier UI использует suggestion-driven flow, pickup save его не требует.
 - `wdc_order_delivery_recalculate_geocode_address`: thin wrapper геокодинга ручного адреса на карте ПВЗ через существующий address-normalization/DaData runtime и лимиты.
@@ -80,6 +95,7 @@ Smoke coverage:
 
 ```powershell
 php tests/orders/run-order-delivery-recalculation-smoke.php
+php tests/dpd/run-dpd-order-recalculation-smoke.php
 ```
 
-Тест проверяет modal markup, current pickup/current shipping address payload, duplicate-free location labels, order-to-quote mapping, location override, all-rates preview, Russian Post pickup/courier groups, pickup map and geocode endpoints, courier address suggest endpoint/shared stack, save blockers, shipping item create/replace, pickup save без normalized address, courier save with required normalized/manual address, checkout-compatible city/state save, WDC meta rewrite with package/API/rules/result, totals recalculation, private notes, endpoint security, JS prefill/map-sync/geocode/save-warning hooks and no mutation during preview/pickup search.
+Тесты проверяют modal markup, current pickup/current shipping address payload, duplicate-free location labels, order-to-quote mapping, location override, all-rates preview, Russian Post/CDEK/DPD pickup/courier groups, pickup map and geocode endpoints, courier address suggest endpoint/shared stack, save blockers, shipping item create/replace, pickup save без normalized address, courier save with required normalized/manual address, checkout-compatible city/state save, WDC meta rewrite with package/API/rules/result, DPD Parcels3 terminalCode payloads, DPD pickup alias meta, DPD courier pickup-meta cleanup, shipment draft visibility, totals recalculation, private notes, endpoint security, JS prefill/map-sync/geocode/save-warning hooks and no mutation during ordinary preview/pickup search.
