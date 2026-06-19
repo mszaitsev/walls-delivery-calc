@@ -563,6 +563,15 @@
     const hasTariffs = !!(tariff && !tariff.disabled && tariff.options.length);
     const deliveryType = selectedDeliveryType(form);
     const pickupMissing = deliveryType === 'pickup' && !!form.querySelector('[data-wdc-pickup-warning]');
+    const isDpd = fieldValue(form, 'input[name="carrier_key"]') === 'dpd';
+    const datePickup = fieldValue(form, '[data-wdc-dpd-date-pickup]');
+    const dateReady = !isDpd || /^\d{4}-\d{2}-\d{2}$/.test(datePickup);
+    const placesReady = Array.from(form.querySelectorAll('[data-wdc-place]')).some((row) => {
+      return ['weight_g', 'length_cm', 'width_cm', 'height_cm'].every((suffix) => {
+        const input = row.querySelector('input[name$="[' + suffix + ']"]');
+        return parseInt(input && input.value ? input.value : '0', 10) > 0;
+      });
+    });
     const normalizedJson = form.querySelector('[data-wdc-normalized-address-json]');
     let courierReady = true;
     if (deliveryType === 'courier') {
@@ -574,7 +583,7 @@
         courierReady = false;
       }
     }
-    submit.disabled = !hasTariffs || pickupMissing || !courierReady;
+    submit.disabled = !hasTariffs || pickupMissing || !courierReady || !dateReady || !placesReady;
   }
 
   function schedulePreview(form) {

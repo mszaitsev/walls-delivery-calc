@@ -217,6 +217,6 @@ dpd_checkout_pickup_assert( str_contains( $delivery_selector_source, 'render_pic
 dpd_checkout_pickup_assert( str_contains( $points_source, 'DpdPickupPointService' ) && str_contains( $points_source, 'dpd_points' ), 'Pickup points endpoint must be extended for DPD.' );
 dpd_checkout_pickup_assert( str_contains( $tariff_source, 'getServiceCostByParcels3' ) && str_contains( $tariff_source, 'delivery_terminal_code' ), 'DPD runtime must use Parcels3 with terminalCode-aware tariff payload.' );
 dpd_checkout_pickup_assert( str_contains( $runtime_source, 'selected_delivery_terminal_code' ), 'DPD runtime must read buyer-selected terminalCode from checkout context/session.' );
-dpd_checkout_pickup_assert( str_contains( $plugin_source, 'DpdShipmentAdapter' ) && str_contains( $shipments_metabox, 'data-wdc-preview-shipment' ) && str_contains( $dpd_adapter_source, 'dpd_create_disabled' ), 'DPD shipment metabox may expose only dry-run preview with disabled create.' );
+dpd_checkout_pickup_assert( str_contains( $plugin_source, 'DpdShipmentAdapter' ) && str_contains( $shipments_metabox, 'data-wdc-preview-shipment' ) && str_contains( $shipments_metabox, 'Создать отправление DPD' ) && str_contains( $dpd_adapter_source, 'createOrder2' ), 'DPD shipment metabox must expose preview and manual create only.' );
 
 echo "DPD checkout pickup selection smoke test passed.\n";

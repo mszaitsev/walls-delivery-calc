@@ -1,3 +1,12 @@
+## DPD Manual Create 0.66.0
+
+- `src/Carriers/Dpd/DpdSoapRequest.php` supports the DPD `orders` SOAP wrapper in addition to existing `direct` and `request` modes.
+- `src/Carriers/Dpd/DpdApiClient.php::createOrder2()` calls `order2/createOrder2`, normalizes SOAP/transport/business errors and returns an array result.
+- `src/Carriers/Dpd/Shipments/DpdShipmentPayloadBuilder.php` builds the shared preview/live DPD body: `header.datePickup`, `senderAddress`, `pickupTimePeriod`, `order.serviceCode`, `serviceVariant`, cargo fields, `receiverAddress` and `parcel[]`.
+- `src/Shipments/Dpd/DpdShipmentAdapter.php` validates, calls DPD createOrder2, normalizes DPD order/request/parcel numbers and keeps status/label/cancel/autosync disabled.
+- `src/Shipments/Application/ShipmentCreationService.php` saves successful DPD manual creates in `_wdc_shipments[dpd]` with `pending_creation_in_carrier`, DPD identifiers, sanitized request/response and admin marker.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` exposes `Создать отправление DPD` in the existing modal. `assets/admin/shipments-admin.js` keeps the button disabled until tariff, date, pickup/courier and cargo-place data are valid.
+- `tests/dpd/run-dpd-create-order-smoke.php` covers mocked createOrder2, payload shape, persistence, duplicates, errors and no auto-create hook.
 # Карта текущего кода
 
 ## DPD Status Mapping 0.65.1
@@ -25,7 +34,7 @@
 - `assets/admin/shipments-admin.js` treats `dpd:pickup` like CDEK code-based pickup points, opens receiver/sender picker titles for DPD, posts receiver/sender cityId to the shared admin pickup search endpoint, updates DPD pickup labels in the modal and keeps the single-place weight hint hidden once multiple places exist.
 - `OrderShipmentsMetabox::ajax_search_pickup_points()` handles `carrier_key=dpd` through `DpdPickupPointService` and returns only active `parcel_shop` rows. `terminal_self_delivery` rows are not returned to the modal picker.
 - `OrderShipmentDraftFactory` reads temporary DPD `delivery_type`, selected `tariff_object`, sender `pickup_terminal_code`, receiver `pickup_point_code`, normalized courier address snapshot and manual places from the admin request. These values are merged into the in-memory `ShipmentCreateRequest` only.
-- `DpdShipmentPayloadBuilder` validates sender terminalCode, pickup receiver terminalCode, courier normalized address, serviceCode and manual parcels, then builds the dry-run `order2/createOrder` preview using the temporary modal values. It still returns `live_api_call=false`.
+- `DpdShipmentPayloadBuilder` validates sender terminalCode, pickup receiver terminalCode, courier normalized address, serviceCode and manual parcels, then builds the shared `order2/createOrder2` body used by both dry-run preview and live manual create. Preview still returns `live_api_call=false`.
 - `tests/dpd/run-dpd-shipment-preparation-smoke.php` covers DPD receiver/sender picker markers, pickup/courier switch, tariff switch, hidden technical block removal, temporary payload overrides, normalized courier address, single/multi-place weight hint behavior and no live API call.
 
 ## DPD Order Recalculation 0.64.0
@@ -37,19 +46,19 @@
 - `src/Orders/Application/OrderDeliveryRecalculationService.php` continues to call the shared `CheckoutOrchestrator`; DPD therefore uses `DpdQuoteCarrier`, `DpdParcelBuilder`, enabled DPD tariffs and Parcels3 terminalCode-aware pricing exactly like checkout.
 - `src/Orders/Application/OrderDeliveryReplacementService.php` writes DPD selected serviceCode/title, DPD rate meta, `_wdc_delivery_calculation_data`, shared `_wdc_pickup_*` meta and DPD alias meta. Courier saves clear shared pickup meta and DPD receiver aliases.
 - `src/Shipments/Application/OrderShipmentDraftFactory.php` reads the recalculated DPD order meta for `Отправления`: serviceCode, delivery type, sender pickup terminalCode, receiver delivery terminalCode for pickup, selected pickup snapshot and courier address for courier.
-- `tests/dpd/run-dpd-order-recalculation-smoke.php` covers DPD appearance in recalculation, Parcels3 pickup/courier payloads, auto vs selected receiver terminalCode, pickup/courier save meta, WooCommerce shipping item update, shipment draft visibility and the no-live-create boundary.
+- `tests/dpd/run-dpd-order-recalculation-smoke.php` covers DPD appearance in recalculation, Parcels3 pickup/courier payloads, auto vs selected receiver terminalCode, pickup/courier save meta, WooCommerce shipping item update, shipment draft visibility and the manual-create/no-auto-create boundary.
 
-## DPD Manual Shipment Preparation 0.63.0
+## DPD Manual Shipment Preparation/Create 0.63.0-0.66.0
 
-- `src/Shipments/Dpd/DpdShipmentAdapter.php` registers DPD in `CarrierShipmentAdapterRegistry` for manual preparation and dry-run preview only. `build_safe_payload_preview()` returns an `order2/createOrder` preview with `dry_run=true` and `live_api_call=false`; `create()` returns `dpd_create_disabled`, label/status/cancel/manual-attach actions are disabled, and `supports_status_auto_sync()` is `false`.
-- `src/Carriers/Dpd/Shipments/DpdShipmentPayloadBuilder.php` builds a future-facing DPD order payload from saved order/rate meta, recipient/order values and manager-entered places. It does not read checkout tariff `parcel[]`, does not persist parcels in order meta, and uses order goods value as `cargoValue`/declared value source.
-- `src/Shipments/Application/OrderShipmentDraftFactory.php` now creates DPD shipment drafts from `_wdc_platform_rate_meta`, `_wdc_delivery_calculation_data`, DPD pickup aliases and `DpdSettings::tariff_default_sender_terminal_code()`. Initial DPD drafts intentionally have no places, so the manager must enter грузоместа in the modal.
-- `src/Shipments/Admin/OrderShipmentsMetabox.php` exposes the same shared `Отправления` modal for DPD orders, adds read-only DPD service/city/terminal fields, renders an editable DPD comment, shows `Предпросмотр payload`, and keeps the real create button disabled for DPD in 0.63.0.
-- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds `ПВЗ отправителя по умолчанию` to `DPD Расчет`, stores a sender terminalCode, validates/summarizes active `parcel_shop` rows and warns when the configured terminal does not match the resolved sender cityId.
-- `src/Core/Plugin.php` registers `DpdShipmentAdapter` in the adapter registry for button visibility/status payload, while `ShipmentCreationService` live-create adapters remain Russian Post and CDEK only. DPD auto creation is not implemented.
-- `tests/dpd/run-dpd-shipment-preparation-smoke.php` covers DPD order/rate meta reading, pickup/courier dry-run payloads, missing terminal/parcel validation, missing default sender warning, declared-value derivation, no checkout `parcel[]` reuse, no live API call and disabled create action.
-- `docs/wdc-dpd-shipment-preparation.md` documents the manual-only boundary and future `order2/createOrder` mapping.
-
+- `src/Shipments/Dpd/DpdShipmentAdapter.php` registers DPD in `CarrierShipmentAdapterRegistry` for manual preview/create. `build_safe_payload_preview()` returns an `order2/createOrder2` preview with `dry_run=true` and `live_api_call=false`; `create()` validates, calls `DpdApiClient::createOrder2()` and normalizes DPD order/request/parcel identifiers. Label/status/cancel/manual-attach actions remain disabled, and `supports_status_auto_sync()` is `false`.
+- `src/Carriers/Dpd/Shipments/DpdShipmentPayloadBuilder.php` builds the DPD order payload from saved order/rate meta, recipient/order values and manager-entered places. It does not read checkout tariff `parcel[]`, does not persist parcels in order meta, and uses order goods value as `cargoValue`/declared value source.
+- `src/Shipments/Application/OrderShipmentDraftFactory.php` creates DPD shipment drafts from `_wdc_platform_rate_meta`, `_wdc_delivery_calculation_data`, DPD pickup aliases and `DpdSettings::tariff_default_sender_terminal_code()`. Initial DPD drafts intentionally have no places, so the manager must enter грузоместа in the modal.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` exposes the shared `Отправления` modal for DPD orders, shows `Предпросмотр payload`, renders `Создать отправление DPD`, keeps DPD comment absent and relies on server-side validation before SOAP.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` keeps `ПВЗ отправителя по умолчанию` on `DPD Расчет`, stores a sender terminalCode, validates/summarizes active `parcel_shop` rows and warns when the configured terminal does not match the resolved sender cityId.
+- `src/Core/Plugin.php` registers `DpdShipmentAdapter` in the adapter registry and in `ShipmentCreationService` live-create adapters. DPD auto creation is not implemented.
+- `tests/dpd/run-dpd-shipment-preparation-smoke.php` covers DPD order/rate meta reading, pickup/courier payloads, missing terminal/parcel validation, missing default sender warning, declared-value derivation, no checkout `parcel[]` reuse and preview behavior.
+- `tests/dpd/run-dpd-create-order-smoke.php` covers mocked createOrder2, persistence, duplicates, DPD errors and no auto-create hook.
+- `docs/wdc-dpd-shipment-preparation.md` and `docs/wdc-dpd-create-order.md` document the manual-only boundary and `order2/createOrder2` mapping.
 ## DPD TerminalCode Runtime Pricing 0.62.1
 
 - `src/Carriers/Dpd/Tariff/DpdTerminalCodeTariffRequest.php` and `DpdTerminalCodeTariffRequestBuilder.php` build the runtime `calculator2/getServiceCostByParcels3` payload with `pickup.cityId`, `pickup.terminalCode`, `delivery.cityId`, optional pickup-only `delivery.terminalCode`, `selfPickup`, `selfDelivery`, `declaredValue`, optional `serviceCode`/`pickupDate` and `parcel[]`. The builder stays auth-free; `DpdSoapRequest` adds `request.auth`.

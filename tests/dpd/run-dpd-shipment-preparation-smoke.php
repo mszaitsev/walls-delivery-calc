@@ -237,11 +237,11 @@ $header = $preview['body']['request']['header'] ?? array();
 dpd_shipment_assert( '2026-06-22' === (string) ( $header['datePickup'] ?? '' ), 'DPD dry-run payload must include request.header.datePickup.' );
 dpd_shipment_assert( ! isset( $body['comment'] ), 'DPD dry-run payload must not contain comment.' );
 dpd_shipment_assert( 'CSM' === (string) ( $body['serviceCode'] ?? '' ), 'DPD pickup preview must use modal-selected serviceCode.' );
-dpd_shipment_assert( '49455627' === (string) ( $body['pickup']['cityId'] ?? '' ), 'DPD pickup preview must contain pickup cityId.' );
-dpd_shipment_assert( '195300000' === (string) ( $body['delivery']['cityId'] ?? '' ), 'DPD pickup preview must contain delivery cityId.' );
-dpd_shipment_assert( 'NSK-SENDER-2' === (string) ( $body['pickup']['terminalCode'] ?? '' ), 'DPD pickup preview must use modal-selected sender terminalCode.' );
-dpd_shipment_assert( 'MSK-RECEIVER-2' === (string) ( $body['delivery']['terminalCode'] ?? '' ), 'DPD pickup preview must use modal-selected receiver terminalCode.' );
-dpd_shipment_assert( '+79990000000' === (string) ( $body['receiver']['phone'] ?? '' ), 'DPD pickup preview must contain recipient.' );
+dpd_shipment_assert( '49455627' === (string) ( $header['senderAddress']['cityId'] ?? '' ), 'DPD pickup preview must contain pickup cityId.' );
+dpd_shipment_assert( '195300000' === (string) ( $body['receiverAddress']['cityId'] ?? '' ), 'DPD pickup preview must contain delivery cityId.' );
+dpd_shipment_assert( 'NSK-SENDER-2' === (string) ( $header['senderAddress']['terminalCode'] ?? '' ), 'DPD pickup preview must use modal-selected sender terminalCode.' );
+dpd_shipment_assert( 'MSK-RECEIVER-2' === (string) ( $body['receiverAddress']['terminalCode'] ?? '' ), 'DPD pickup preview must use modal-selected receiver terminalCode.' );
+dpd_shipment_assert( '+79990000000' === (string) ( $body['receiverAddress']['contactPhone'] ?? '' ), 'DPD pickup preview must contain recipient.' );
 dpd_shipment_assert( 2.5 === (float) ( $body['parcel'][0]['weight'] ?? 0 ), 'DPD pickup preview must use parcels from modal input.' );
 dpd_shipment_assert( 40 === (int) ( $body['parcel'][0]['length'] ?? 0 ), 'DPD pickup preview must not reuse checkout parcel[] dimensions.' );
 dpd_shipment_assert( 3000.0 === (float) ( $body['cargoValue'] ?? 0 ), 'DPD declaredValue must be derived from order items total.' );
@@ -265,9 +265,11 @@ $courier_request = $factory->create_request_from_admin_data(
 	$courier_order,
 	array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'normalized_address_json' => wp_json_encode( $normalized, JSON_UNESCAPED_UNICODE ), 'recipient_phone' => '+79990000000', 'date_pickup' => '2026-06-22' )
 );
-$courier_body = $adapter->build_safe_payload_preview( $courier_request )['body']['request']['order'] ?? array();
-dpd_shipment_assert( 'NSK-SENDER' === (string) ( $courier_body['pickup']['terminalCode'] ?? '' ) && ! isset( $courier_body['delivery']['terminalCode'] ), 'DPD courier preview must contain pickup terminalCode and no delivery terminalCode.' );
-dpd_shipment_assert( 'Тестовая, 9' === (string) ( $courier_body['delivery']['address'] ?? '' ), 'DPD courier payload must use normalized address when provided.' );
+$courier_payload = $adapter->build_safe_payload_preview( $courier_request )['body']['request'] ?? array();
+$courier_body = $courier_payload['order'] ?? array();
+$courier_header = $courier_payload['header'] ?? array();
+dpd_shipment_assert( 'NSK-SENDER' === (string) ( $courier_header['senderAddress']['terminalCode'] ?? '' ) && ! isset( $courier_body['receiverAddress']['terminalCode'] ), 'DPD courier preview must contain pickup terminalCode and no delivery terminalCode.' );
+dpd_shipment_assert( 'Тестовая, 9' === (string) ( $courier_body['receiverAddress']['addressString'] ?? '' ), 'DPD courier payload must use normalized address when provided.' );
 dpd_shipment_assert( str_contains( $draft_source, 'Оригинальный адрес покупателя' ) && str_contains( $draft_source, 'Нормализованный адрес DPD' ), 'DPD courier modal must expose address normalization fields.' );
 
 $settings_repo->set( DpdSettings::TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY, '' );
@@ -296,8 +298,8 @@ $past_date_request = $factory->create_request_from_admin_data( $pickup_order, ar
 dpd_shipment_assert( in_array( 'Дата отправки DPD не может быть в прошлом.', $builder->validate( $past_date_request ), true ), 'Past datePickup must be rejected.' );
 
 $create_result = $adapter->create( $request );
-dpd_shipment_assert( ! $create_result->success && 'dpd_create_disabled' === $create_result->error_code, 'DPD create shipment action must be disabled.' );
+dpd_shipment_assert( ! $create_result->success && 'dpd_api_unavailable' === $create_result->error_code, 'DPD create shipment action must require configured API client.' );
 $registry = new CarrierShipmentAdapterRegistry( array( $adapter ) );
-dpd_shipment_assert( $registry->has( DpdSettings::CARRIER_KEY ) && ! $registry->get( DpdSettings::CARRIER_KEY )->supports_status_auto_sync(), 'DPD adapter must be registered only for manual preparation/dry-run.' );
+dpd_shipment_assert( $registry->has( DpdSettings::CARRIER_KEY ) && ! $registry->get( DpdSettings::CARRIER_KEY )->supports_status_auto_sync(), 'DPD adapter must be registered for manual create and must not support auto status sync.' );
 
 echo "DPD shipment preparation smoke passed\n";

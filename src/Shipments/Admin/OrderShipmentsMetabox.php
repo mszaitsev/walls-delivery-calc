@@ -514,12 +514,7 @@ final class OrderShipmentsMetabox {
 							<div class="wdc-shipment-errors" data-wdc-shipment-errors></div>
 							<pre class="wdc-shipment-preview" data-wdc-shipment-preview><?php echo esc_html( wp_json_encode( $safe_preview, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) ?: '{}' ); ?></pre>
 							<button type="button" class="button" data-wdc-preview-shipment><?php echo esc_html__( 'Предпросмотр payload', 'walls-delivery-calc' ); ?></button>
-							<?php if ( $is_dpd ) : ?>
-								<button type="button" class="button button-primary" disabled title="<?php echo esc_attr__( 'Будет добавлено позже', 'walls-delivery-calc' ); ?>"><?php echo esc_html__( 'Создать отправление', 'walls-delivery-calc' ); ?></button>
-								<p class="description"><?php echo esc_html__( 'Создание отправления DPD будет добавлено позже. Сейчас доступен только dry-run preview без API-вызова.', 'walls-delivery-calc' ); ?></p>
-							<?php else : ?>
-								<button type="button" class="button button-primary" data-wdc-create-shipment><?php echo esc_html__( 'Создать отправление', 'walls-delivery-calc' ); ?></button>
-							<?php endif; ?>
+							<button type="button" class="button button-primary" data-wdc-create-shipment><?php echo esc_html( $is_dpd ? __( 'Создать отправление DPD', 'walls-delivery-calc' ) : __( 'Создать отправление', 'walls-delivery-calc' ) ); ?></button>
 						</section>
 					</div>
 				</div>

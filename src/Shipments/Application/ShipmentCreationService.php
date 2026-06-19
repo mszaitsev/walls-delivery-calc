@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Shipments\Application;
 
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateRequest;
 use WallsShop\WDC\Domain\Shipment\ShipmentCreateResult;
 use WallsShop\WDC\Infrastructure\Logging\Logger;
@@ -63,7 +64,7 @@ final class ShipmentCreationService {
 			return new ShipmentCreateResult(
 				false,
 				error_code: 'shipment_already_created',
-				error_message: 'По заказу уже создано отправление: ' . (string) ( $existing['tracking_number'] ?? $existing['barcode'] ?? '' ),
+				error_message: DpdSettings::CARRIER_KEY === $request->carrier_key ? 'DPD отправление уже создано для этого заказа.' : 'По заказу уже создано отправление: ' . (string) ( $existing['tracking_number'] ?? $existing['barcode'] ?? '' ),
 				raw_reference: array( 'existing' => $existing )
 			);
 		}
@@ -94,10 +95,11 @@ final class ShipmentCreationService {
 		$raw = $result->raw_reference;
 		$backlog_order_id = trim( $result->backlog_order_id );
 		$is_cdek = CdekSettings::CARRIER_KEY === $request->carrier_key;
-		$request_snapshot = $is_cdek && is_array( $raw['request'] ?? null )
-			? array( 'method' => 'POST', 'path' => '/v2/orders', 'body' => $raw['request'], 'errors' => array() )
+		$is_dpd = DpdSettings::CARRIER_KEY === $request->carrier_key;
+		$request_snapshot = ( $is_cdek || $is_dpd ) && is_array( $raw['request'] ?? null )
+			? ( $is_dpd ? $raw['request'] : array( 'method' => 'POST', 'path' => '/v2/orders', 'body' => $raw['request'], 'errors' => array() ) )
 			: $preview;
-		$response_snapshot = $is_cdek && is_array( $raw['response'] ?? null ) ? $raw : $raw;
+		$response_snapshot = ( $is_cdek || $is_dpd ) && is_array( $raw['response'] ?? null ) ? $raw : $raw;
 		$shipment = array(
 			'carrier_key' => $request->carrier_key,
 			'service_key' => (string) ( $request->meta['service_key'] ?? $request->rate_id ),
@@ -117,10 +119,24 @@ final class ShipmentCreationService {
 			'cdek_order_status_name' => (string) ( $raw['order_status_name'] ?? '' ),
 			'cdek_planned_delivery_date' => (string) ( $raw['planned_delivery_date'] ?? '' ),
 			'cdek_actual_cost_kopecks' => is_numeric( $raw['actual_cost_kopecks'] ?? null ) ? (int) $raw['actual_cost_kopecks'] : null,
+			'dpd_order_number' => (string) ( $raw['dpd_order_number'] ?? '' ),
+			'dpd_request_number' => (string) ( $raw['dpd_request_number'] ?? '' ),
+			'dpd_parcel_numbers' => is_array( $raw['dpd_parcel_numbers'] ?? null ) ? $raw['dpd_parcel_numbers'] : array(),
+			'dpd_status' => (string) ( $raw['dpd_status'] ?? '' ),
+			'dpd_pickup_date' => (string) ( $raw['dpd_pickup_date'] ?? '' ),
+			'dpd_date_flag' => (string) ( $raw['dpd_date_flag'] ?? '' ),
+			'dpd_service_code' => (string) ( $request->meta['service_code'] ?? '' ),
+			'dpd_sender_terminal_code' => (string) ( $request->meta['pickup_terminal_code'] ?? '' ),
+			'dpd_receiver_terminal_code' => (string) ( $request->meta['delivery_terminal_code'] ?? '' ),
+			'dpd_date_pickup' => (string) ( $request->meta['date_pickup'] ?? '' ),
+			'dpd_cargo_value' => (float) ( $request->meta['declared_value_rub'] ?? 0 ),
+			'created_by' => function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0,
+			'created_by_context' => 'admin_manual',
 			'order_num' => (string) ( $request->meta['order_num'] ?? $request->order_id ),
 			'group_name' => (string) ( $raw['group_name'] ?? '' ),
-			'status' => $is_cdek ? 'registration_pending' : 'created',
-			'status_title' => $is_cdek ? 'Заявка на регистрацию принята' : '',
+			'status' => $is_dpd ? 'pending_creation_in_carrier' : ( $is_cdek ? 'registration_pending' : 'created' ),
+			'universal_status_code' => $is_dpd ? 'pending_creation_in_carrier' : '',
+			'status_title' => $is_dpd ? 'Заявка DPD создана' : ( $is_cdek ? 'Заявка на регистрацию принята' : '' ),
 			'created_at' => $now,
 			'updated_at' => $now,
 		);
@@ -216,6 +232,14 @@ final class ShipmentCreationService {
 	 * @param array<string,mixed> $raw
 	 */
 	private function success_note( ShipmentCreateRequest $request, ShipmentCreateResult $result, array $raw ): string {
+		if ( DpdSettings::CARRIER_KEY === $request->carrier_key ) {
+			return sprintf(
+				'DPD отправление создано вручную. Номер: %s. Мест: %d',
+				$result->tracking_number,
+				count( $request->places )
+			);
+		}
+
 		return sprintf(
 			'Отправление Почты России создано. Barcode: %s. Мест: %d%s',
 			$result->tracking_number,

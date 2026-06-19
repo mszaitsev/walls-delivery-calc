@@ -292,9 +292,9 @@ $dpd_adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/
 dpd_tariff_assert( str_contains( $admin_source, 'DPD Расчет' ) && str_contains( $admin_source, 'Настройки расчета DPD' ), 'Admin page must keep the DPD calculation settings tab.' );
 dpd_tariff_assert( ! str_contains( $admin_source, 'Тестовый расчет DPD' ) && ! str_contains( $admin_source, 'test_dpd_tariff_calculation' ) && ! str_contains( $admin_source, 'render_dpd_tariff_action_result' ), 'Admin page must not expose the removed DPD test calculation form/result block.' );
 dpd_tariff_assert( ! str_contains( $admin_source, 'Город отправителя для отображения' ) && ! str_contains( $admin_source, 'TARIFF_SENDER_CITY_NAME_KEY' ), 'Admin page must not expose the removed sender display-only field.' );
-dpd_tariff_assert( str_contains( $plugin_source, 'DpdQuoteCarrier' ) && str_contains( $plugin_source, 'DpdShipmentAdapter' ) && str_contains( $dpd_adapter_source, 'dpd_create_disabled' ), 'DPD may be registered for checkout quotes and dry-run shipment preview only.' );
+dpd_tariff_assert( str_contains( $plugin_source, 'DpdQuoteCarrier' ) && str_contains( $plugin_source, 'DpdShipmentAdapter' ) && str_contains( $dpd_adapter_source, 'createOrder2' ), 'DPD may be registered for checkout quotes and manual shipment create only.' );
 dpd_tariff_assert( str_contains( $plugin_source, 'RussianPostInternationalCarrier' ) && str_contains( $plugin_source, 'RussianPostDomesticCarrier' ) && str_contains( $plugin_source, 'CdekCarrier' ), 'Existing CDEK/Russian Post runtime registrations must remain present.' );
-dpd_tariff_assert( ! str_contains( $admin_source, 'createOrder' ) && ! str_contains( $admin_source, 'unitLoad' ), 'DPD tariff admin must not add shipment creation or unitLoad.' );
+dpd_tariff_assert( ! str_contains( $admin_source, 'unitLoad' ), 'DPD tariff admin must not add unitLoad.' );
 dpd_tariff_assert( str_contains( $admin_source, 'render_dpd_pickup_tab' ) && str_contains( $admin_source, 'getParcelShops' ), 'DPD parcel shop import must live in the separate pickup tab, not in tariff calculation runtime.' );
 
 echo "DPD tariff calculation smoke test passed.\n";

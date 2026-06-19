@@ -39,7 +39,7 @@ final class OrderShipmentRepository {
 		$shipment = $this->find_by_carrier( $order, $carrier_key );
 		$status = (string) ( $shipment['status'] ?? '' );
 
-		return in_array( $status, array( 'registration_pending', 'created', 'registered' ), true );
+		return in_array( $status, array( 'pending_creation_in_carrier', 'registration_pending', 'created', 'registered' ), true );
 	}
 
 	/**

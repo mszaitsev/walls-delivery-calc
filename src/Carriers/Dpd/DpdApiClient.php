@@ -95,6 +95,58 @@ final class DpdApiClient {
 	}
 
 	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function createOrder2( array $payload ): array {
+		try {
+			$response = $this->call(
+				DpdEndpoints::SERVICE_ORDER,
+				'createOrder2',
+				$payload,
+				array( 'wrapper' => DpdSoapRequest::WRAPPER_ORDERS )
+			);
+		} catch ( DpdException $exception ) {
+			return array(
+				'success' => false,
+				'body' => array(),
+				'meta' => array( 'service' => DpdEndpoints::SERVICE_ORDER, 'method' => 'createOrder2' ),
+				'error_code' => 'dpd_soap_error',
+				'error_message' => $this->safe_message( $exception->getMessage() ),
+				'details' => $exception->context,
+			);
+		} catch ( \Throwable $exception ) {
+			return array(
+				'success' => false,
+				'body' => array(),
+				'meta' => array( 'service' => DpdEndpoints::SERVICE_ORDER, 'method' => 'createOrder2' ),
+				'error_code' => 'dpd_order_create_failed',
+				'error_message' => $this->safe_message( $exception->getMessage() ),
+				'details' => array(),
+			);
+		}
+
+		$normalized = $this->normalize_response( $response );
+		$body = is_array( $normalized['body'] ?? null ) ? $normalized['body'] : array();
+		$row = $this->first_order_response_row( $body );
+		$status = strtoupper( trim( (string) ( $row['status'] ?? $body['status'] ?? '' ) ) );
+		$error_message = trim( (string) ( $row['errorMessage'] ?? $body['errorMessage'] ?? '' ) );
+		$success = '' === $status || 'OK' === $status;
+		if ( '' !== $error_message && 'OK' !== $status ) {
+			$success = false;
+		}
+
+		return array_merge(
+			$normalized,
+			array(
+				'success' => $success,
+				'order' => $row,
+				'error_code' => $success ? '' : 'dpd_business_error',
+				'error_message' => $success ? '' : $this->safe_message( '' !== $error_message ? $error_message : 'DPD вернул ошибку создания заказа.' ),
+			)
+		);
+	}
+	/**
 	 * @return array{success:bool,message:string,details:array<string,mixed>}
 	 */
 	public function checkConnectionDryRun(): array {
@@ -136,6 +188,29 @@ final class DpdApiClient {
 		);
 	}
 
+	/**
+	 * @param array<string,mixed> $body
+	 * @return array<string,mixed>
+	 */
+	private function first_order_response_row( array $body ): array {
+		foreach ( array( 'return', 'order', 'orders' ) as $key ) {
+			$value = $body[ $key ] ?? null;
+			if ( is_array( $value ) ) {
+				if ( is_array( $value[0] ?? null ) ) {
+					return $value[0];
+				}
+				return $value;
+			}
+		}
+
+		return $body;
+	}
+
+	private function safe_message( string $message ): string {
+		$message = trim( preg_replace( '/\s+/', ' ', $message ) ?? $message );
+
+		return substr( $message, 0, 180 );
+	}
 	/**
 	 * @return mixed
 	 */

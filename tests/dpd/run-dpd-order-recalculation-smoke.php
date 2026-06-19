@@ -269,6 +269,6 @@ $courier_draft = $draft_factory->create_request_from_order( $order );
 dpd_order_recalc_assert( 'courier' === $courier_draft->delivery_type && '' === (string) ( $courier_draft->meta['delivery_terminal_code'] ?? '' ), 'Shipment draft after DPD courier recalculation must not keep receiver terminalCode.' );
 
 $adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Dpd/DpdShipmentAdapter.php' );
-dpd_order_recalc_assert( str_contains( $adapter_source, "'dry_run' => true" ) && str_contains( $adapter_source, 'Создание отправления DPD отключено' ), 'DPD recalculation smoke must keep live DPD create call disabled.' );
+dpd_order_recalc_assert( str_contains( $adapter_source, "'dry_run' => true" ) && str_contains( $adapter_source, 'createOrder2' ) && ! str_contains( $adapter_source, 'dpd_create_disabled' ), 'DPD recalculation smoke must keep preview dry-run while manual createOrder2 is available.' );
 
 echo "DPD order recalculation smoke OK\n";
