@@ -8,6 +8,7 @@ defined( 'ABSPATH' ) || exit;
 final class DpdSoapRequest {
 	public const WRAPPER_DIRECT = 'direct';
 	public const WRAPPER_REQUEST = 'request';
+	public const WRAPPER_ORDERS = 'orders';
 
 	/**
 	 * @param array<string,mixed> $payload
@@ -36,15 +37,17 @@ final class DpdSoapRequest {
 			$this->payload
 		);
 
-		return self::WRAPPER_REQUEST === $this->wrapper_mode()
-			? array( 'request' => $payload )
-			: $payload;
+		return match ( $this->wrapper_mode() ) {
+			self::WRAPPER_REQUEST => array( 'request' => $payload ),
+			self::WRAPPER_ORDERS => array( 'orders' => $payload ),
+			default => $payload,
+		};
 	}
 
 	public function wrapper_mode(): string {
 		$wrapper = (string) ( $this->options['wrapper'] ?? self::WRAPPER_DIRECT );
 
-		return self::WRAPPER_REQUEST === $wrapper ? self::WRAPPER_REQUEST : self::WRAPPER_DIRECT;
+		return in_array( $wrapper, array( self::WRAPPER_REQUEST, self::WRAPPER_ORDERS ), true ) ? $wrapper : self::WRAPPER_DIRECT;
 	}
 
 	/**
@@ -72,6 +75,9 @@ final class DpdSoapRequest {
 		}
 		if ( isset( $payload['request'] ) && is_array( $payload['request'] ) ) {
 			$payload['request'] = $this->redact_auth( $payload['request'] );
+		}
+		if ( isset( $payload['orders'] ) && is_array( $payload['orders'] ) ) {
+			$payload['orders'] = $this->redact_auth( $payload['orders'] );
 		}
 
 		return $payload;

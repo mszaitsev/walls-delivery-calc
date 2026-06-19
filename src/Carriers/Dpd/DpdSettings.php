@@ -15,6 +15,7 @@ final class DpdSettings {
 	public const ENV_TEST = 'test';
 	public const ENV_PRODUCTION = 'production';
 	public const DEFAULT_REQUEST_TIMEOUT = 20;
+	public const DEFAULT_ORDER_CREATE_TIMEOUT = 90;
 	public const DEFAULT_PICKUP_METHOD_TITLE = 'DPD до пункта выдачи';
 	public const DEFAULT_COURIER_METHOD_TITLE = 'DPD курьером';
 
@@ -43,6 +44,11 @@ final class DpdSettings {
 	public const TARIFF_DEFAULT_HEIGHT_CM_KEY = 'dpd_tariff_default_height_cm';
 	public const TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY = 'dpd_tariff_default_declared_value_rub';
 	public const TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY = 'dpd_tariff_default_sender_terminal_code';
+	public const TARIFF_CARGO_CATEGORY_KEY = 'dpd_tariff_cargo_category';
+	public const TARIFF_SENDER_NAME_KEY = 'dpd_tariff_sender_name';
+	public const TARIFF_SENDER_PHONE_KEY = 'dpd_tariff_sender_phone';
+	public const ORDER_CREATE_TIMEOUT_KEY = 'dpd_order_create_timeout';
+	public const COURIER_CONTACT_FIO_HISTORY_KEY = 'dpd_courier_contact_fio_history';
 	public const RUNTIME_PICKUP_TITLE_KEY = 'dpd_runtime_pickup_title';
 	public const RUNTIME_COURIER_TITLE_KEY = 'dpd_runtime_courier_title';
 	public const RUNTIME_ENABLED_SERVICE_CODES_KEY = 'dpd_runtime_enabled_service_codes';
@@ -68,6 +74,7 @@ final class DpdSettings {
 			self::PRODUCTION_CLIENT_NUMBER_KEY => '',
 			self::PRODUCTION_CLIENT_KEY_ENCRYPTED_KEY => '',
 			self::REQUEST_TIMEOUT_KEY => self::DEFAULT_REQUEST_TIMEOUT,
+			self::ORDER_CREATE_TIMEOUT_KEY => self::DEFAULT_ORDER_CREATE_TIMEOUT,
 			self::DEBUG_KEY => false,
 			self::LAST_CONNECTION_CHECK_KEY => '',
 			self::LAST_CONNECTION_STATUS_KEY => '',
@@ -87,6 +94,10 @@ final class DpdSettings {
 			self::TARIFF_DEFAULT_HEIGHT_CM_KEY => 20,
 			self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY => 1000,
 			self::TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY => '',
+			self::TARIFF_CARGO_CATEGORY_KEY => 'Товары',
+			self::TARIFF_SENDER_NAME_KEY => '',
+			self::TARIFF_SENDER_PHONE_KEY => '',
+			self::COURIER_CONTACT_FIO_HISTORY_KEY => array(),
 			self::RUNTIME_PICKUP_TITLE_KEY => self::DEFAULT_PICKUP_METHOD_TITLE,
 			self::RUNTIME_COURIER_TITLE_KEY => self::DEFAULT_COURIER_METHOD_TITLE,
 			self::RUNTIME_ENABLED_SERVICE_CODES_KEY => 'ECN,CSM,MXO',
@@ -127,6 +138,10 @@ final class DpdSettings {
 
 	public function request_timeout(): int {
 		return max( 1, min( 120, $this->settings->get_int( self::REQUEST_TIMEOUT_KEY, self::DEFAULT_REQUEST_TIMEOUT ) ) );
+	}
+
+	public function order_create_timeout(): int {
+		return max( 60, min( 120, $this->settings->get_int( self::ORDER_CREATE_TIMEOUT_KEY, self::DEFAULT_ORDER_CREATE_TIMEOUT ) ) );
 	}
 
 	public function debug_enabled(): bool {
@@ -174,6 +189,7 @@ final class DpdSettings {
 		$this->save_credentials_for_environment( self::ENV_TEST, $input );
 		$this->save_credentials_for_environment( self::ENV_PRODUCTION, $input );
 		$this->settings->set( self::REQUEST_TIMEOUT_KEY, max( 1, min( 120, (int) ( $input[ self::REQUEST_TIMEOUT_KEY ] ?? self::DEFAULT_REQUEST_TIMEOUT ) ) ) );
+		$this->settings->set( self::ORDER_CREATE_TIMEOUT_KEY, max( 60, min( 120, (int) ( $input[ self::ORDER_CREATE_TIMEOUT_KEY ] ?? self::DEFAULT_ORDER_CREATE_TIMEOUT ) ) ) );
 		$this->settings->set( self::DEBUG_KEY, ! empty( $input[ self::DEBUG_KEY ] ) );
 	}
 
@@ -373,6 +389,10 @@ final class DpdSettings {
 		$this->settings->set( self::TARIFF_DEFAULT_WIDTH_CM_KEY, max( 0.1, (float) ( $input[ self::TARIFF_DEFAULT_WIDTH_CM_KEY ] ?? 20 ) ) );
 		$this->settings->set( self::TARIFF_DEFAULT_HEIGHT_CM_KEY, max( 0.1, (float) ( $input[ self::TARIFF_DEFAULT_HEIGHT_CM_KEY ] ?? 20 ) ) );
 		$this->settings->set( self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY, max( 0.0, (float) ( $input[ self::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY ] ?? 1000 ) ) );
+		$cargo_category = substr( $this->sanitize_text( (string) ( $input[ self::TARIFF_CARGO_CATEGORY_KEY ] ?? 'Товары' ) ), 0, 120 );
+		$this->settings->set( self::TARIFF_CARGO_CATEGORY_KEY, '' !== $cargo_category ? $cargo_category : 'Товары' );
+		$this->settings->set( self::TARIFF_SENDER_NAME_KEY, substr( $this->sanitize_text( (string) ( $input[ self::TARIFF_SENDER_NAME_KEY ] ?? '' ) ), 0, 120 ) );
+		$this->settings->set( self::TARIFF_SENDER_PHONE_KEY, substr( preg_replace( '/[^0-9+()\-\s]+/', '', $this->sanitize_text( (string) ( $input[ self::TARIFF_SENDER_PHONE_KEY ] ?? '' ) ) ) ?? '', 0, 40 ) );
 	}
 
 	/**
@@ -438,6 +458,43 @@ final class DpdSettings {
 
 	public function tariff_default_sender_terminal_code(): string {
 		return $this->terminal_code( $this->settings->get_string( self::TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY, '' ) );
+	}
+
+	public function tariff_cargo_category(): string {
+		$value = substr( $this->sanitize_text( $this->settings->get_string( self::TARIFF_CARGO_CATEGORY_KEY, 'Товары' ) ), 0, 120 );
+		return '' !== $value ? $value : 'Товары';
+	}
+
+	public function tariff_sender_name(): string {
+		return substr( $this->sanitize_text( $this->settings->get_string( self::TARIFF_SENDER_NAME_KEY, '' ) ), 0, 120 );
+	}
+
+	public function tariff_sender_phone(): string {
+		return substr( preg_replace( '/[^0-9+()\-\s]+/', '', $this->sanitize_text( $this->settings->get_string( self::TARIFF_SENDER_PHONE_KEY, '' ) ) ) ?? '', 0, 40 );
+	}
+
+	public function current_client_number(): string {
+		return $this->client_number( $this->environment() );
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	public function courier_contact_fio_history(): array {
+		return $this->sanitize_history( $this->settings->get_array( self::COURIER_CONTACT_FIO_HISTORY_KEY, array() ) );
+	}
+
+	public function add_courier_contact_fio_history( string $value ): array {
+		$history = $this->sanitize_history( array_merge( array( $value ), $this->courier_contact_fio_history() ) );
+		$this->settings->set( self::COURIER_CONTACT_FIO_HISTORY_KEY, $history );
+		return $history;
+	}
+
+	public function remove_courier_contact_fio_history( string $value ): array {
+		$remove = $this->sanitize_text( $value );
+		$history = array_values( array_filter( $this->courier_contact_fio_history(), static fn( string $item ): bool => $item !== $remove ) );
+		$this->settings->set( self::COURIER_CONTACT_FIO_HISTORY_KEY, $history );
+		return $history;
 	}
 
 	/**
@@ -506,6 +563,18 @@ final class DpdSettings {
 		$title = trim( (string) ( $titles[ $code ] ?? '' ) );
 
 		return '' !== $title ? $title : trim( $fallback );
+	}
+
+	private function sanitize_history( array $values ): array {
+		$history = array();
+		foreach ( $values as $value ) {
+			$value = substr( $this->sanitize_text( (string) $value ), 0, 120 );
+			if ( '' !== $value && ! in_array( $value, $history, true ) ) {
+				$history[] = $value;
+			}
+		}
+
+		return array_slice( $history, 0, 20 );
 	}
 
 	private function client_number( string $environment ): string {

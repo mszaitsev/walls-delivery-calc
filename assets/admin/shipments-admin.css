@@ -578,3 +578,60 @@
     max-height: calc(100vh - 16px);
   }
 }
+
+.wdc-dpd-courier-contact-field {
+  position: relative;
+}
+
+.wdc-dpd-contact-history {
+  position: absolute;
+  z-index: 20;
+  display: grid;
+  gap: 2px;
+  width: min(100%, 360px);
+  max-height: 180px;
+  overflow-y: auto;
+  margin-top: 4px;
+  padding: 4px;
+  border: 1px solid #c3c4c7;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.12);
+}
+
+.wdc-dpd-contact-history[hidden] {
+  display: none;
+}
+
+.wdc-dpd-contact-history__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 4px;
+}
+
+.wdc-dpd-contact-history__choice,
+.wdc-dpd-contact-history__remove {
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  color: #1d2327;
+  cursor: pointer;
+}
+
+.wdc-dpd-contact-history__choice {
+  overflow: hidden;
+  padding: 4px 6px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wdc-dpd-contact-history__remove {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.wdc-dpd-contact-history__choice:hover,
+.wdc-dpd-contact-history__remove:hover {
+  background: #f0f0f1;
+}
