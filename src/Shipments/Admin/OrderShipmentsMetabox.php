@@ -481,7 +481,7 @@ final class OrderShipmentsMetabox {
 										</span>
 									</label>
 									<label class="wdc-dpd-courier-contact-field"><?php echo esc_html__( 'ФИО курьера', 'walls-delivery-calc' ); ?><input type="text" name="sender_contact_fio" value="<?php echo esc_attr( $sender_contact_fio ); ?>" autocomplete="off" data-wdc-dpd-contact-fio><span class="wdc-dpd-contact-history" data-wdc-dpd-contact-history hidden></span></label>
-									<label><?php echo esc_html__( 'Комментарии курьеру', 'walls-delivery-calc' ); ?><textarea name="courier_instructions" rows="2" maxlength="250" data-wdc-dpd-courier-instructions></textarea><span class="description"><?php echo esc_html__( 'Только для DPD courier instructions. Не более 250 символов.', 'walls-delivery-calc' ); ?></span></label>
+									<label data-wdc-dpd-courier-instructions-row <?php echo DeliveryType::COURIER === $delivery_type ? '' : 'hidden'; ?>><?php echo esc_html__( 'Комментарии курьеру', 'walls-delivery-calc' ); ?><textarea name="courier_instructions" rows="2" maxlength="250" data-wdc-dpd-courier-instructions></textarea><span class="description"><?php echo esc_html__( 'Только для DPD courier instructions. Не более 250 символов.', 'walls-delivery-calc' ); ?></span></label>
 									<?php if ( ! empty( $meta['date_pickup_fallback_used'] ) ) : ?>
 										<p class="description wdc-shipment-warning"><?php echo esc_html__( 'Календарь магазина недоступен, дата отправки DPD рассчитана по fallback-правилу.', 'walls-delivery-calc' ); ?></p>
 									<?php endif; ?>

@@ -407,7 +407,7 @@
     data.append('action', window.wdcShipmentsAdmin.searchProductsAction || 'wdc_search_products_for_shipment_item');
     data.append('nonce', window.wdcShipmentsAdmin.nonce);
     data.append('query', query);
-    fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+    return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
       method: 'POST',
       credentials: 'same-origin',
       body: data
@@ -420,13 +420,21 @@
       .catch(() => renderProductSearchResults(input, []));
   }
 
+  function markPreviewPending(form) {
+    if (!form) return;
+    form.dataset.wdcPreviewLoaded = '';
+    form.dataset.wdcPreviewHasErrors = '1';
+    updateCreateAvailability(form);
+  }
+
   function requestPreview(form) {
+    markPreviewPending(form);
     const preview = form.querySelector('[data-wdc-shipment-preview]');
     const errors = form.querySelector('[data-wdc-shipment-errors]');
     const data = collectShipmentData(form);
     data.append('action', window.wdcShipmentsAdmin.previewAction);
     data.append('nonce', window.wdcShipmentsAdmin.nonce);
-    fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+    return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
       method: 'POST',
       credentials: 'same-origin',
       body: data
@@ -447,6 +455,8 @@
             ? payload.data.preview.warnings
             : [];
           errors.textContent = previewErrors.length ? previewErrors.join('; ') : previewWarnings.join('; ');
+          form.dataset.wdcPreviewLoaded = '1';
+          form.dataset.wdcPreviewHasErrors = previewErrors.length ? '1' : '0';
           if (previewErrors.length) {
             delete errors.dataset.previewWarning;
           } else if (previewWarnings.length) {
@@ -454,13 +464,20 @@
           } else {
             delete errors.dataset.previewWarning;
           }
+        } else {
+          form.dataset.wdcPreviewLoaded = '1';
+          form.dataset.wdcPreviewHasErrors = '0';
         }
+        updateCreateAvailability(form);
       })
       .catch((error) => {
+        form.dataset.wdcPreviewLoaded = '';
+        form.dataset.wdcPreviewHasErrors = '1';
         if (errors) {
           errors.dataset.previewWarning = '1';
           errors.textContent = 'Предпросмотр временно не обновлен: ' + error.message;
         }
+        updateCreateAvailability(form);
       });
   }
 
@@ -594,6 +611,9 @@
     const courier = form.querySelector('[data-wdc-courier-section]');
     if (pickup) pickup.hidden = deliveryType !== 'pickup';
     if (courier) courier.hidden = deliveryType !== 'courier';
+    form.querySelectorAll('[data-wdc-dpd-courier-instructions-row]').forEach((row) => {
+      row.hidden = deliveryType !== 'courier';
+    });
     updateCdekDeliveryModeUi(form);
     updateCreateAvailability(form);
   }
@@ -631,6 +651,14 @@
     });
   }
 
+  function firstFieldValue(form, selectors) {
+    for (const selector of selectors) {
+      const value = fieldValue(form, selector);
+      if (value) return value;
+    }
+    return '';
+  }
+
   function updateCreateAvailability(form) {
     const submit = form.querySelector('[data-wdc-create-shipment]');
     if (!submit) return;
@@ -639,8 +667,12 @@
     const deliveryType = selectedDeliveryType(form);
     const pickupMissing = deliveryType === 'pickup' && !!form.querySelector('[data-wdc-pickup-warning]');
     const isDpd = fieldValue(form, 'input[name="carrier_key"]') === 'dpd';
+    const latestPreviewReady = !isDpd || (form.dataset.wdcPreviewLoaded === '1' && form.dataset.wdcPreviewHasErrors !== '1');
     const datePickup = fieldValue(form, '[data-wdc-dpd-date-pickup]');
     const dateReady = !isDpd || /^\d{4}-\d{2}-\d{2}$/.test(datePickup);
+    const contactReady = !isDpd || !!fieldValue(form, '[data-wdc-dpd-contact-fio]');
+    const senderTerminalReady = !isDpd || !!firstFieldValue(form, ['[name="pickup_terminal_code"]', '[name="sender_shipment_point"]', '[name="shipment_point"]', '[data-wdc-sender-shipment-point]']);
+    const receiverTerminalReady = !isDpd || deliveryType !== 'pickup' || !!firstFieldValue(form, ['[name="pickup_point_code"]', '[name="delivery_point"]']);
     const placesReady = Array.from(form.querySelectorAll('[data-wdc-place]')).some((row) => {
       return ['weight_g', 'length_cm', 'width_cm', 'height_cm'].every((suffix) => {
         const input = row.querySelector('input[name$="[' + suffix + ']"]');
@@ -649,7 +681,7 @@
     });
     const normalizedJson = form.querySelector('[data-wdc-normalized-address-json]');
     let courierReady = true;
-    if (deliveryType === 'courier') {
+    if (isDpd && deliveryType === 'courier') {
       courierReady = false;
       try {
         const snapshot = JSON.parse(normalizedJson && normalizedJson.value ? normalizedJson.value : '{}');
@@ -658,10 +690,10 @@
         courierReady = false;
       }
     }
-    submit.disabled = !hasTariffs || pickupMissing || !courierReady || !dateReady || !contactReady || !placesReady;
+    submit.disabled = !hasTariffs || !latestPreviewReady || pickupMissing || !courierReady || !dateReady || !contactReady || !senderTerminalReady || !receiverTerminalReady || !placesReady;
   }
-
   function schedulePreview(form) {
+    markPreviewPending(form);
     const previous = timers.get(form);
     if (previous) {
       window.clearTimeout(previous);
@@ -2045,6 +2077,7 @@
           }
           const snapshot = payload.data.normalized_address || {};
           if (snapshotInput) snapshotInput.value = JSON.stringify(snapshot);
+          syncDpdAddressFields(form, snapshot);
           if (display) display.value = snapshot.display || '';
           const cityCode = snapshot && snapshot.fields ? String(snapshot.fields.cdek_city_code || '') : '';
           const isDpd = fieldValue(form, 'input[name="carrier_key"]') === 'dpd';

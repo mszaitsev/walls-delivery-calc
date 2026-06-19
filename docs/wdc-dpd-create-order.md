@@ -1,6 +1,8 @@
 # WDC DPD Create Order
 
-Version: 0.66.1.
+Version: 0.66.2.
+
+0.66.2 UI update: the DPD modal automatically requests preview when opened. The manual `Предпросмотр payload` button remains available and uses the same request path. Create button state is recalculated after every preview response and is enabled only when the latest preview has no errors and local DPD readiness checks pass. DPD courier normalization syncs hidden structured address fields and immediately refreshes preview; `ФИО курьера` input/blur also refreshes preview. `Комментарии курьеру` is visible only for courier delivery.
 
 DPD shipment creation is manual-only. WDC never creates DPD shipments from checkout, recalculation, cron, hooks or background jobs. A manager must open the WooCommerce order `Отправления` modal, verify `Предпросмотр payload`, then click `Создать отправление DPD`.
 
@@ -59,9 +61,9 @@ The DPD modal keeps `Предпросмотр payload` and adds `Создать 
 - an enabled tariff is selected;
 - at least one cargo place has positive weight and dimensions;
 - DPD `datePickup` is a `YYYY-MM-DD` value;
-- DPD `ФИО курьера` is filled;
+- DPD `ФИО курьера` is filled and has refreshed preview after input/blur;
 - pickup delivery has a receiver terminal without a pickup warning;
-- courier delivery has a successful normalized-address snapshot and structured hidden address fields.
+- courier delivery has a successful normalized-address snapshot, synchronized structured hidden address fields and the latest preview has no errors.
 
 The AJAX create request uses the existing `wdc_create_shipment` action, nonce `wdc_shipments_admin`, `manage_woocommerce` capability, WooCommerce order lookup and carrier request validation. The DPD adapter performs server-side validation again before any SOAP call.
 
