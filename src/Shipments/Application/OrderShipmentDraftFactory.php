@@ -527,6 +527,9 @@ final class OrderShipmentDraftFactory {
 				'pickup_family' => DpdSettings::CARRIER_KEY . ':pickup',
 				'selected_pickup_point_snapshot' => $this->dpd_selected_pickup_snapshot( $order ),
 				'declared_value_rub' => $this->default_declared_value_rub( $items ),
+				'cargo_category' => $this->dpd_settings instanceof DpdSettings ? $this->dpd_settings->tariff_cargo_category() : 'Товары',
+				'sender_name' => $this->dpd_settings instanceof DpdSettings ? $this->dpd_settings->tariff_sender_name() : '',
+				'sender_phone' => $this->dpd_settings instanceof DpdSettings ? $this->dpd_settings->tariff_sender_phone() : '',
 				'place_weight_hint_g' => $this->default_weight_g( $order, $items ),
 				'courier_original_address' => $this->shipping_address( $order ),
 				'date_pickup' => $date_pickup['date'],
@@ -567,6 +570,8 @@ final class OrderShipmentDraftFactory {
 		$original_address = sanitize_text_field( wp_unslash( $data['courier_original_address'] ?? $base->meta['courier_original_address'] ?? $base->recipient_address->raw_address ) );
 		$normalized_address = DeliveryType::COURIER === $delivery_type ? $this->normalized_address_from_admin_data( $data, $original_address, DpdSettings::SERVICE_KEY ) : array();
 		$date_pickup = $this->date_value( (string) wp_unslash( $data['date_pickup'] ?? $base->meta['date_pickup'] ?? '' ) );
+		$sender_contact_fio = substr( sanitize_text_field( wp_unslash( $data['sender_contact_fio'] ?? $base->meta['sender_contact_fio'] ?? '' ) ), 0, 120 );
+		$courier_instructions = substr( sanitize_textarea_field( wp_unslash( $data['courier_instructions'] ?? '' ) ), 0, 250 );
 		$recipient_address = DeliveryType::PICKUP === $delivery_type
 			? new Address( country_code: 'RU', city: (string) ( $delivery_terminal['city_name'] ?? $base->recipient_address->city ), raw_address: (string) ( $delivery_terminal['address'] ?? $base->recipient_address->raw_address ) )
 			: $this->dpd_courier_address_from_normalized( $base->recipient_address, $normalized_address, $original_address );
@@ -610,6 +615,8 @@ final class OrderShipmentDraftFactory {
 					'normalization_attempted' => DeliveryType::COURIER === $delivery_type && array() !== $normalized_address,
 					'date_pickup' => $date_pickup,
 					'date_pickup_errors' => $this->dpd_date_errors( $date_pickup ),
+					'sender_contact_fio' => $sender_contact_fio,
+					'courier_instructions' => $courier_instructions,
 				)
 			)
 		);
@@ -1647,7 +1654,7 @@ final class OrderShipmentDraftFactory {
 
 	private function recipient_name( object $order ): string {
 		$parts = array();
-		foreach ( array( 'get_shipping_first_name', 'get_shipping_last_name' ) as $method ) {
+		foreach ( array( 'get_shipping_last_name', 'get_shipping_first_name' ) as $method ) {
 			if ( method_exists( $order, $method ) ) {
 				$parts[] = (string) $order->{$method}();
 			}
@@ -1657,7 +1664,7 @@ final class OrderShipmentDraftFactory {
 			return $name;
 		}
 
-		return trim( ( method_exists( $order, 'get_billing_first_name' ) ? (string) $order->get_billing_first_name() : '' ) . ' ' . ( method_exists( $order, 'get_billing_last_name' ) ? (string) $order->get_billing_last_name() : '' ) );
+		return trim( ( method_exists( $order, 'get_billing_last_name' ) ? (string) $order->get_billing_last_name() : '' ) . ' ' . ( method_exists( $order, 'get_billing_first_name' ) ? (string) $order->get_billing_first_name() : '' ) );
 	}
 
 	private function phone( object $order ): string {

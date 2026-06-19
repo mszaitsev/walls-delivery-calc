@@ -56,8 +56,7 @@ final class DpdShipmentAdapter implements ShipmentCarrierAdapterInterface {
 			'body' => array() === $errors ? $this->builder->build_preview_body( $request ) : array(),
 			'errors' => $errors,
 			'warnings' => $this->builder->warnings( $request ),
-			'dry_run' => true,
-			'live_api_call' => false,
+
 		);
 	}
 

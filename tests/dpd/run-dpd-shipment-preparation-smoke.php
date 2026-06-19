@@ -176,6 +176,9 @@ $settings->save_tariff_settings_from_admin(
 	array(
 		DpdSettings::TARIFF_SENDER_DPD_CITY_ID_KEY => '49455627',
 		DpdSettings::TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY => 'NSK-SENDER',
+		DpdSettings::TARIFF_CARGO_CATEGORY_KEY => 'Товары',
+		DpdSettings::TARIFF_SENDER_NAME_KEY => 'Walls Shop',
+		DpdSettings::TARIFF_SENDER_PHONE_KEY => '+73830000000',
 	)
 );
 $settings->save_runtime_tariffs_from_admin(
@@ -188,7 +191,7 @@ $pickup_service = new DpdPickupPointService( new DpdPickupPointRepository(), new
 $calendar = new CalendarService( new CalendarRepository(), new YearGenerator(), $settings_repo, new TimezoneService() );
 $date_resolver = new DpdShipmentDateResolver( $calendar, new TimezoneService() );
 $factory = new OrderShipmentDraftFactory( new DeliveryServiceRepository(), new ShipmentServiceSettings(), null, null, null, null, null, $settings, $pickup_service, $date_resolver );
-$builder = new DpdShipmentPayloadBuilder();
+$builder = new DpdShipmentPayloadBuilder( $settings );
 $adapter = new DpdShipmentAdapter( $builder );
 
 $before_cutoff = $date_resolver->default_date( new DateTimeImmutable( '2026-06-18 16:30:00', new DateTimeZone( TimezoneService::TIMEZONE ) ) );
@@ -201,9 +204,12 @@ $base_request = $factory->create_request_from_order( $pickup_order );
 dpd_shipment_assert( 'ECN' === (string) ( $base_request->meta['service_code'] ?? '' ), 'Existing DPD serviceCode must be read from order/rate meta.' );
 dpd_shipment_assert( '49455627' === (string) ( $base_request->meta['pickup_city_id'] ?? '' ), 'Existing sender pickup cityId must be read.' );
 dpd_shipment_assert( '195300000' === (string) ( $base_request->meta['delivery_city_id'] ?? '' ), 'Existing delivery cityId must be read.' );
+dpd_shipment_assert( 'Петров Иван' === (string) ( $base_request->recipient['name'] ?? '' ), 'Recipient name must use last name before first name.' );
 $draft = $factory->draft_array( $pickup_order );
 $draft_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
 $draft_css = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.css' );
+$factory_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Application/OrderShipmentDraftFactory.php' );
+dpd_shipment_assert( str_contains( $factory_source, "array( 'get_shipping_last_name', 'get_shipping_first_name' )" ) && strpos( $factory_source, 'get_billing_last_name' ) < strpos( $factory_source, 'get_billing_first_name' ), 'Shared shipment draft factory must build recipient FIO as last name + first name for all carriers.' );
 dpd_shipment_assert( 'MSK-RECEIVER' === (string) ( $draft['request']['meta']['pickup_point_row']['point_code'] ?? '' ) && 'parcel_shop' === (string) ( $draft['request']['meta']['pickup_point_row']['point_type'] ?? '' ), 'DPD modal draft must expose recipient pickup point code/type.' );
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-open-pickup-picker' ) && str_contains( $draft_source, 'data-wdc-open-sender-pickup-picker' ), 'DPD modal must expose choose receiver/sender pickup buttons.' );
 dpd_shipment_assert( ! str_contains( $draft_source, "|| \$is_dpd ) : ?>\n\t\t\t\t\t\t\t\t\t\t<p><strong><?php echo esc_html__( 'Тип точки'" ), 'DPD recipient pickup point visible block must not render point type.' );
@@ -229,6 +235,7 @@ $request = $factory->create_request_from_admin_data(
 		'pickup_terminal_code' => 'NSK-SENDER-2',
 		'tariff_object' => 'CSM',
 		'date_pickup' => '2026-06-22',
+		'sender_contact_fio' => 'Курьер Иванов',
 	)
 );
 $preview = $adapter->build_safe_payload_preview( $request );
@@ -245,7 +252,7 @@ dpd_shipment_assert( '+79990000000' === (string) ( $body['receiverAddress']['con
 dpd_shipment_assert( 2.5 === (float) ( $body['parcel'][0]['weight'] ?? 0 ), 'DPD pickup preview must use parcels from modal input.' );
 dpd_shipment_assert( 40 === (int) ( $body['parcel'][0]['length'] ?? 0 ), 'DPD pickup preview must not reuse checkout parcel[] dimensions.' );
 dpd_shipment_assert( 3000.0 === (float) ( $body['cargoValue'] ?? 0 ), 'DPD declaredValue must be derived from order items total.' );
-dpd_shipment_assert( false === (bool) ( $preview['live_api_call'] ?? true ), 'DPD preview must not make a live API call.' );
+dpd_shipment_assert( ! array_key_exists( 'dry_run', $preview ) && ! array_key_exists( 'live_api_call', $preview ), 'DPD visible preview payload must not expose legacy dry_run/live_api_call meta.' );
 dpd_shipment_assert( 'MSK-RECEIVER' === (string) $pickup_order->meta['_wdc_dpd_pickup_terminal_code'] && 'NSK-SENDER' === $settings->tariff_default_sender_terminal_code(), 'Modal pickup changes must not be saved to order meta/settings.' );
 
 $courier_order = new DpdShipmentFakeOrder( 631, DeliveryType::COURIER );
@@ -259,18 +266,29 @@ $normalized = array(
 		'cdek_city_name' => 'Москва',
 		'cdek_postal_code' => '101000',
 		'cdek_delivery_address' => 'Тестовая, 9',
+		'postal_code' => '101000',
+		'region' => 'Москва',
+		'city' => 'Москва',
+		'street' => 'Тестовая',
+		'street_type' => 'ул',
+		'house' => '9',
+		'flat' => '12',
 	),
 );
 $courier_request = $factory->create_request_from_admin_data(
 	$courier_order,
-	array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'normalized_address_json' => wp_json_encode( $normalized, JSON_UNESCAPED_UNICODE ), 'recipient_phone' => '+79990000000', 'date_pickup' => '2026-06-22' )
+	array( 'places' => array( array( 'weight_g' => '1100', 'length_cm' => '20', 'width_cm' => '15', 'height_cm' => '10' ) ), 'courier_original_address' => '101000, Москва, Тестовая, 1', 'normalized_address_json' => wp_json_encode( $normalized, JSON_UNESCAPED_UNICODE ), 'recipient_phone' => '+79990000000', 'date_pickup' => '2026-06-22', 'sender_contact_fio' => 'Курьер Иванов', 'courier_instructions' => 'Позвонить за час' )
 );
 $courier_payload = $adapter->build_safe_payload_preview( $courier_request )['body']['request'] ?? array();
 $courier_body = $courier_payload['order'] ?? array();
 $courier_header = $courier_payload['header'] ?? array();
 dpd_shipment_assert( 'NSK-SENDER' === (string) ( $courier_header['senderAddress']['terminalCode'] ?? '' ) && ! isset( $courier_body['receiverAddress']['terminalCode'] ), 'DPD courier preview must contain pickup terminalCode and no delivery terminalCode.' );
-dpd_shipment_assert( 'Тестовая, 9' === (string) ( $courier_body['receiverAddress']['addressString'] ?? '' ), 'DPD courier payload must use normalized address when provided.' );
+dpd_shipment_assert( ! isset( $courier_body['receiverAddress']['addressString'] ) && 'Тестовая' === (string) ( $courier_body['receiverAddress']['street'] ?? '' ) && '9' === (string) ( $courier_body['receiverAddress']['house'] ?? '' ), 'DPD courier payload must use structured address fields for Russia.' );
+dpd_shipment_assert( 'Позвонить за час' === (string) ( $courier_body['receiverAddress']['instructions'] ?? '' ) && ! isset( $courier_body['comment'] ), 'DPD courier instructions must go to receiverAddress.instructions only.' );
 dpd_shipment_assert( str_contains( $draft_source, 'Оригинальный адрес покупателя' ) && str_contains( $draft_source, 'Нормализованный адрес DPD' ), 'DPD courier modal must expose address normalization fields.' );
+dpd_shipment_assert( str_contains( $draft_source, 'ФИО курьера' ) && str_contains( $draft_source, 'data-wdc-dpd-contact-fio' ) && str_contains( $draft_source, 'data-wdc-dpd-contact-history' ), 'DPD modal must expose courier contactFio with selectable history.' );
+dpd_shipment_assert( str_contains( $draft_source, 'Комментарии курьеру' ) && str_contains( $draft_source, 'maxlength' ) && str_contains( $draft_source, 'courier_instructions' ), 'DPD modal must expose 250-char courier instructions field.' );
+dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-dpd-address-field' ) && str_contains( $draft_source, 'street' ) && str_contains( $draft_source, 'house' ), 'DPD modal must include hidden structured address fields.' );
 
 $settings_repo->set( DpdSettings::TARIFF_DEFAULT_SENDER_TERMINAL_CODE_KEY, '' );
 $warning_request = ( new OrderShipmentDraftFactory( new DeliveryServiceRepository(), new ShipmentServiceSettings(), null, null, null, null, null, $settings, $pickup_service ) )->create_request_from_admin_data( $pickup_order, array( 'places' => array( array( 'weight_g' => '1000', 'length_cm' => '10', 'width_cm' => '10', 'height_cm' => '10' ) ), 'recipient_phone' => '+79990000000' ) );
@@ -289,6 +307,8 @@ dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-weight-hint' ) && st
 dpd_shipment_assert( str_contains( $js_source, 'cityCodeRow.hidden = isDpd || !cityCode' ), 'DPD courier modal must not display CDEK city code after address normalization.' );
 dpd_shipment_assert( str_contains( $draft_source, 'data-wdc-cdek-city-code-row <?php echo ( $is_cdek' ), 'CDEK courier modal must still display CDEK city code when normalization has it.' );
 dpd_shipment_assert( str_contains( $js_source, 'function openNativeDatePicker' ) && str_contains( $js_source, 'input.showPicker()' ) && str_contains( $js_source, '[data-wdc-dpd-date-pickup]' ), 'DPD date input must try to open native date picker on interaction.' );
+dpd_shipment_assert( str_contains( $js_source, 'visiblePreviewPayload' ) && str_contains( $js_source, 'delete clone.dry_run' ) && str_contains( $js_source, 'delete clone.live_api_call' ), 'DPD visible preview must strip legacy debug meta.' );
+dpd_shipment_assert( str_contains( $js_source, 'syncDpdAddressFields' ) && str_contains( $js_source, 'data-wdc-dpd-contact-remove' ), 'DPD UI must sync DaData fields and allow removing one contactFio history entry.' );
 
 $missing_date_request = $factory->create_request_from_admin_data( $pickup_order, array( 'places' => array( array( 'weight_g' => '1000', 'length_cm' => '10', 'width_cm' => '10', 'height_cm' => '10' ) ), 'recipient_phone' => '+79990000000', 'date_pickup' => '' ) );
 dpd_shipment_assert( in_array( 'Дата отправки DPD обязательна.', $builder->validate( $missing_date_request ), true ), 'Missing datePickup must produce validation error.' );

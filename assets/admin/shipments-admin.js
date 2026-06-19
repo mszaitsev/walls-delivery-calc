@@ -437,7 +437,7 @@
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось обновить предпросмотр.');
         }
         if (preview) {
-          preview.textContent = JSON.stringify(payload.data.preview || {}, null, 2);
+          preview.textContent = JSON.stringify(visiblePreviewPayload(payload.data.preview || {}), null, 2);
         }
         if (errors) {
           const previewErrors = payload.data.preview && Array.isArray(payload.data.preview.errors)
@@ -464,6 +464,81 @@
       });
   }
 
+  function visiblePreviewPayload(payload) {
+    const clone = Object.assign({}, payload || {});
+    delete clone.dry_run;
+    delete clone.live_api_call;
+    return clone;
+  }
+
+  function dpdContactHistory() {
+    return Array.isArray(window.wdcShipmentsAdmin && window.wdcShipmentsAdmin.dpdCourierContactHistory)
+      ? window.wdcShipmentsAdmin.dpdCourierContactHistory
+      : [];
+  }
+
+  function setDpdContactHistory(values) {
+    if (!window.wdcShipmentsAdmin) return;
+    window.wdcShipmentsAdmin.dpdCourierContactHistory = Array.isArray(values) ? values : [];
+    document.querySelectorAll('[data-wdc-dpd-contact-history]').forEach((list) => renderDpdContactHistory(list));
+  }
+
+  function renderDpdContactHistory(list) {
+    if (!list) return;
+    const values = dpdContactHistory();
+    if (!values.length) {
+      list.hidden = true;
+      list.innerHTML = '';
+      return;
+    }
+    list.innerHTML = values.map((value) => '<span class="wdc-dpd-contact-choice"><button type="button" data-wdc-dpd-contact-choice data-value="' + escapeHtml(value) + '">' + escapeHtml(value) + '</button><button type="button" class="wdc-icon-action wdc-icon-action--danger" data-wdc-dpd-contact-remove data-value="' + escapeHtml(value) + '" aria-label="Удалить">×</button></span>').join('');
+    list.hidden = false;
+  }
+
+  function showDpdContactHistory(input) {
+    const list = input && input.closest('label') && input.closest('label').querySelector('[data-wdc-dpd-contact-history]');
+    renderDpdContactHistory(list);
+  }
+
+  function syncDpdAddressFields(form, snapshot) {
+    const fields = snapshot && snapshot.fields ? snapshot.fields : {};
+    const mapped = {
+      countryName: 'Россия',
+      index: fields.index || fields.postal_code || fields.cdek_postal_code || '',
+      region: fields.region || fields.region_name || '',
+      city: fields.city || fields.settlement || fields.cdek_city_name || '',
+      street: fields.street || fields.street_name || '',
+      streetAbbr: fields.street_type || fields.street_abbr || '',
+      house: fields.house || fields.house_no || '',
+      houseKorpus: fields.block || fields.houseKorpus || '',
+      str: fields.structure || fields.str || '',
+      vlad: fields.stead || fields.vlad || '',
+      extraInfo: fields.extraInfo || fields.extra_info || '',
+      office: fields.office || '',
+      flat: fields.flat || fields.apartment || ''
+    };
+    Object.keys(mapped).forEach((key) => {
+      const input = form.querySelector('[data-wdc-dpd-address-field="' + key + '"]');
+      if (input) input.value = mapped[key] || '';
+    });
+  }
+
+  function updateDpdContactHistory(value, operation) {
+    const data = new FormData();
+    data.append('action', window.wdcShipmentsAdmin.dpdCourierContactHistoryAction || 'wdc_dpd_courier_contact_history');
+    data.append('nonce', window.wdcShipmentsAdmin.nonce);
+    data.append('operation', operation || 'add');
+    data.append('value', value || '');
+    return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: data
+    }).then((response) => response.json()).then((payload) => {
+      if (payload && payload.success && payload.data && Array.isArray(payload.data.history)) {
+        setDpdContactHistory(payload.data.history);
+      }
+    });
+  }
   function updateTariffOptions(form) {
     const service = form.querySelector('[data-wdc-service-select]');
     const tariff = form.querySelector('[data-wdc-tariff-select]');
@@ -583,7 +658,7 @@
         courierReady = false;
       }
     }
-    submit.disabled = !hasTariffs || pickupMissing || !courierReady || !dateReady || !placesReady;
+    submit.disabled = !hasTariffs || pickupMissing || !courierReady || !dateReady || !contactReady || !placesReady;
   }
 
   function schedulePreview(form) {
@@ -1778,6 +1853,27 @@
       openNativeDatePicker(dateInput);
     }
 
+    const dpdContactChoice = event.target.closest('[data-wdc-dpd-contact-choice]');
+    if (dpdContactChoice) {
+      event.preventDefault();
+      const form = findShipmentForm(dpdContactChoice);
+      const input = form && form.querySelector('[data-wdc-dpd-contact-fio]');
+      if (input) {
+        input.value = dpdContactChoice.dataset.value || '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      const list = dpdContactChoice.closest('[data-wdc-dpd-contact-history]');
+      if (list) list.hidden = true;
+      return;
+    }
+
+    const dpdContactRemove = event.target.closest('[data-wdc-dpd-contact-remove]');
+    if (dpdContactRemove) {
+      event.preventDefault();
+      updateDpdContactHistory(dpdContactRemove.dataset.value || '', 'remove').catch(function () {});
+      return;
+    }
+
     const cdekBarcodeDownload = event.target.closest('[data-wdc-cdek-barcode-download]');
     if (cdekBarcodeDownload) {
       event.preventDefault();
@@ -2099,6 +2195,20 @@
   });
 
   document.addEventListener('input', function (event) {
+    if (event.target.matches('[data-wdc-dpd-contact-fio]')) {
+      const form = findShipmentForm(event.target);
+      if (form) {
+        updateCreateAvailability(form);
+        schedulePreview(form);
+      }
+      return;
+    }
+    if (event.target.matches('[data-wdc-dpd-courier-instructions]')) {
+      if (event.target.value.length > 250) event.target.value = event.target.value.slice(0, 250);
+      const form = findShipmentForm(event.target);
+      if (form) schedulePreview(form);
+      return;
+    }
     if (event.target.matches('[data-wdc-courier-original-address]')) {
       const form = findShipmentForm(event.target);
       if (form) {
@@ -2106,6 +2216,7 @@
         const display = form.querySelector('[data-wdc-normalized-address-display]');
         const status = form.querySelector('[data-wdc-normalized-status]');
         if (snapshotInput) snapshotInput.value = '';
+        syncDpdAddressFields(form, {});
         if (display) display.value = '';
         if (status) status.textContent = 'Адрес изменен, нужно обработать адрес заново.';
         updateCreateAvailability(form);
@@ -2160,6 +2271,9 @@
   document.addEventListener('focus', function (event) {
     if (event.target.matches('[data-wdc-dpd-date-pickup]')) {
       openNativeDatePicker(event.target);
+    }
+    if (event.target.matches('[data-wdc-dpd-contact-fio]')) {
+      showDpdContactHistory(event.target);
     }
   }, true);
 

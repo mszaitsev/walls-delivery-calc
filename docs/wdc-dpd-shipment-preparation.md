@@ -1,7 +1,8 @@
 # WDC DPD Shipment Preparation
 
-Version: 0.66.0.
+Version: 0.66.1.
 
+0.66.1 update: DPD preparation now matches the live create payload verified on site. `DPD Расчет` stores cargo category (`Товары` fallback), sender name and sender phone. The modal requires editable `ФИО курьера`, stores unique history values in settings with per-item removal, and has `Комментарии курьеру` limited to 250 chars for `receiverAddress.instructions` only. DaData normalized address parts are copied into hidden DPD fields and Russian courier delivery sends structured `receiverAddress` fields instead of `addressString`. Visible preview strips `dry_run` and `live_api_call`. `Error Fetching http headers` during live create is shown as an uncertain result without local success save or automatic retry.
 0.66.0 update: DPD preparation now has a real manual live create step. The modal still renders `Предпросмотр payload`, but also enables `Создать отправление DPD` when the selected tariff, cargo places, `datePickup`, sender terminalCode and receiver pickup/courier data are valid. Preview and live create use the same `DpdShipmentPayloadBuilder` body for DPD SOAP `order2/createOrder2`. Successful live create saves the DPD shipment record with `pending_creation_in_carrier`, DPD order/request/parcel numbers when returned, selected serviceCode, delivery type, sender/receiver terminalCode, datePickup, cargoValue, places and sanitized request/response. Duplicate active DPD shipments are blocked. Auto-create, labels, status sync, cancellation, COD/NPP and unitLoad remain out of scope.
 0.64.0 update: DPD order-admin delivery recalculation now writes the same DPD order meta that checkout-created DPD orders
 write. After a manager saves a recalculated DPD pickup option, the shipment preparation draft reads the selected
@@ -70,7 +71,7 @@ The DPD preparation draft reads:
 Known missing/manager-owned data:
 
 - cargo places for the shipment. Checkout `parcel[]` is not reused and parcels are not saved to order meta;
-- final live-create policy fields such as payer/COD/NPP/extra services, labels and status sync are out of scope;
+- COD/NPP/extra services, labels and status sync are out of scope; `header.payer` is now populated from the DPD clientNumber;
 - a configured default sender parcel shop is recommended for preparation, but checkout can still auto-select sender
   terminalCode for pricing when it is empty.
 
@@ -111,18 +112,19 @@ requirements: terminalCode is required in pickup when `selfPickup=true`, and in 
 
 The preview includes:
 
-- operation `createOrder2`, method path `order2/createOrder2`, `dry_run=true`, `live_api_call=false` for preview;
+- operation `createOrder2` and method path `order2/createOrder2`; visible JSON does not show legacy `dry_run` / `live_api_call`;
 - `request.header.datePickup` from the modal `Дата отправки` field;
+- `request.header.payer` from DPD clientNumber;
 - `orderNumberInternal` and tariff/service labels;
 - DPD `serviceCode`;
 - `serviceVariant` as `ТТ` for pickup delivery and `ТД` for courier delivery;
-- `header `senderAddress` with sender `cityId` and sender `terminalCode`;
-- ``receiverAddress` with receiver `cityId`, receiver `terminalCode` for pickup delivery, or courier address fields;
+- `header.senderAddress` with sender `cityId`, sender `terminalCode`, sender name, modal `contactFio` and sender phone;
+- `receiverAddress` with receiver `cityId`, receiver `terminalCode` for pickup delivery, or structured courier address fields from DaData for Russia;
 - receiver name, phone and email;
-- `cargoNumPack`, `cargoValue`, `cargoRegistered=false`;
+- `cargoNumPack`, `cargoValue`, `cargoRegistered=false`, `cargoCategory`;
 - `parcel[]` built only from manager-entered modal places: weight kg, length cm, width cm, height cm and expanded quantity.
 
-DPD comment is intentionally absent from the modal and payload in 0.63.2.
+DPD `order.comment` remains absent. The only courier note is modal `Комментарии курьеру`, sent as `receiverAddress.instructions` when filled.
 
 The 0.63.1 modal can temporarily override these payload fields:
 
@@ -152,6 +154,7 @@ Errors:
 - courier delivery requires recipient address;
 - courier delivery requires a successful DPD address processing snapshot;
 - recipient phone is required;
+- sender contactFio and sender contactPhone are required for live create;
 - at least one cargo place is required;
 - every cargo place must have positive weight and dimensions.
 
@@ -164,6 +167,8 @@ Warnings:
 0.63.0 does not implement:
 
 - automatic DPD `createOrder/createShipment` API calls;
+- automatic retry after uncertain `createOrder2` timeout;
+- manual linking of existing DPD orders;
 - DPD auto shipment creation;
 - labels;
 - status sync;

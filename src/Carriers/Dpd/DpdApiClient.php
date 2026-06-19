@@ -104,9 +104,20 @@ final class DpdApiClient {
 				DpdEndpoints::SERVICE_ORDER,
 				'createOrder2',
 				$payload,
-				array( 'wrapper' => DpdSoapRequest::WRAPPER_ORDERS )
+				array( 'wrapper' => DpdSoapRequest::WRAPPER_ORDERS, 'timeout' => $this->settings->order_create_timeout() )
 			);
 		} catch ( DpdException $exception ) {
+			if ( $this->is_header_timeout( $exception->getMessage() ) ) {
+				return array(
+					'success' => false,
+					'body' => array(),
+					'meta' => array( 'service' => DpdEndpoints::SERVICE_ORDER, 'method' => 'createOrder2' ),
+					'error_code' => 'dpd_order_create_uncertain',
+					'error_message' => 'DPD не вернул ответ вовремя. Заказ мог быть создан в DPD. Проверьте личный кабинет DPD перед повторной отправкой.',
+					'details' => $exception->context,
+				);
+			}
+
 			return array(
 				'success' => false,
 				'body' => array(),
@@ -204,6 +215,10 @@ final class DpdApiClient {
 		}
 
 		return $body;
+	}
+
+	private function is_header_timeout( string $message ): bool {
+		return str_contains( strtolower( $message ), 'error fetching http headers' );
 	}
 
 	private function safe_message( string $message ): string {

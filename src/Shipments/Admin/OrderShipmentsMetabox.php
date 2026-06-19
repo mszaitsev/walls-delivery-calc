@@ -41,6 +41,7 @@ final class OrderShipmentsMetabox {
 	private const AJAX_SEARCH_PICKUP_POINTS = 'wdc_search_russian_post_pickup_points';
 	private const AJAX_SEARCH_PRODUCTS = 'wdc_search_products_for_shipment_item';
 	private const AJAX_CDEK_BARCODE_PREPARE = 'wdc_cdek_barcode_prepare';
+	private const AJAX_DPD_COURIER_CONTACT_HISTORY = 'wdc_dpd_courier_contact_history';
 	private const ACTION_CDEK_BARCODE_PDF = 'wdc_cdek_barcode_pdf';
 
 	public function __construct(
@@ -76,6 +77,7 @@ final class OrderShipmentsMetabox {
 		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PICKUP_POINTS, array( $this, 'ajax_search_pickup_points' ) );
 		add_action( 'wp_ajax_' . self::AJAX_SEARCH_PRODUCTS, array( $this, 'ajax_search_products' ) );
 		add_action( 'wp_ajax_' . self::AJAX_CDEK_BARCODE_PREPARE, array( $this, 'ajax_cdek_barcode_prepare' ) );
+		add_action( 'wp_ajax_' . self::AJAX_DPD_COURIER_CONTACT_HISTORY, array( $this, 'ajax_dpd_courier_contact_history' ) );
 		add_action( 'admin_post_' . self::ACTION_CDEK_BARCODE_PDF, array( $this, 'admin_post_cdek_barcode_pdf' ) );
 	}
 
@@ -129,6 +131,8 @@ final class OrderShipmentsMetabox {
 				'searchPickupPointsAction' => self::AJAX_SEARCH_PICKUP_POINTS,
 				'searchProductsAction' => self::AJAX_SEARCH_PRODUCTS,
 				'cdekBarcodePrepareAction' => self::AJAX_CDEK_BARCODE_PREPARE,
+				'dpdCourierContactHistoryAction' => self::AJAX_DPD_COURIER_CONTACT_HISTORY,
+				'dpdCourierContactHistory' => $this->dpd_courier_contact_history(),
 				'mapProvider' => $provider,
 				'yandexApiKeyPresent' => '' !== $this->yandex_api_key(),
 				'yandexApiKey' => 'yandex' === $provider ? $this->yandex_api_key() : '',
@@ -287,6 +291,11 @@ final class OrderShipmentsMetabox {
 			? ( ! empty( $normalized_address['success'] ) ? ( $normalized_is_dpd ? 'Данные для DPD корректны' : ( $normalized_is_cdek ? '✅ Данные для СДЭК корректны' : 'Адрес обработан Почтой России.' ) ) : ( $normalized_is_dpd ? (string) ( $normalized_address['message'] ?? 'Адрес не подтвержден DPD, предпросмотр payload заблокирован.' ) : ( $normalized_is_cdek ? (string) ( $normalized_address['message'] ?? 'Адрес не подтвержден СДЭК, создание отправления заблокировано.' ) : 'Адрес не подтвержден Почтой России, создание отправления заблокировано.' ) ) )
 			: ( $is_dpd ? 'Адрес нужно обработать перед предпросмотром payload.' : 'Адрес нужно обработать перед созданием отправления.' );
 		$normalized_json = wp_json_encode( $normalized_address, JSON_UNESCAPED_UNICODE ) ?: '';
+		$sender_contact_fio = (string) ( $meta['sender_contact_fio'] ?? '' );
+		if ( '' === trim( $sender_contact_fio ) ) {
+			$history = $this->dpd_courier_contact_history();
+			$sender_contact_fio = (string) ( $history[0] ?? '' );
+		}
 		$has_created = in_array( (string) ( $shipment['status'] ?? '' ), array( 'registration_pending', 'created', 'registered' ), true );
 		$barcode = trim( (string) ( $shipment['tracking_number'] ?? $shipment['barcode'] ?? '' ) );
 		$backlog_order_id = trim( (string) ( $shipment['backlog_order_id'] ?? '' ) );
@@ -404,6 +413,11 @@ final class OrderShipmentsMetabox {
 									<label><?php echo esc_html__( 'Оригинальный адрес покупателя', 'walls-delivery-calc' ); ?><textarea name="courier_original_address" rows="3" data-wdc-courier-original-address><?php echo esc_textarea( $courier_original_address ); ?></textarea></label>
 									<button type="button" class="button" data-wdc-normalize-address><?php echo esc_html__( 'Обработать адрес', 'walls-delivery-calc' ); ?></button>
 									<input type="hidden" name="normalized_address_json" value="<?php echo esc_attr( $normalized_json ); ?>" data-wdc-normalized-address-json>
+									<?php if ( $is_dpd ) : ?>
+										<?php foreach ( array( 'countryName', 'index', 'region', 'city', 'street', 'streetAbbr', 'house', 'houseKorpus', 'str', 'vlad', 'extraInfo', 'office', 'flat' ) as $dpd_address_field ) : ?>
+											<input type="hidden" name="dpd_address[<?php echo esc_attr( $dpd_address_field ); ?>]" value="<?php echo esc_attr( (string) ( $normalized_address['fields'][ $dpd_address_field ] ?? '' ) ); ?>" data-wdc-dpd-address-field="<?php echo esc_attr( $dpd_address_field ); ?>">
+										<?php endforeach; ?>
+									<?php endif; ?>
 									<p class="description" data-wdc-normalized-status><?php echo esc_html( $normalized_status ); ?></p>
 									<label><span data-wdc-normalized-address-label><?php echo esc_html( $is_dpd ? __( 'Нормализованный адрес DPD', 'walls-delivery-calc' ) : ( $is_cdek ? __( 'Нормализованный адрес СДЭК', 'walls-delivery-calc' ) : __( 'Нормализованный адрес Почты России', 'walls-delivery-calc' ) ) ); ?></span><textarea rows="3" readonly data-wdc-normalized-address-display><?php echo esc_textarea( $normalized_display ); ?></textarea></label>
 									<p class="description" data-wdc-cdek-city-code-row <?php echo ( $is_cdek && ! empty( $normalized_address['fields']['cdek_city_code'] ) ) ? '' : 'hidden'; ?>><?php echo esc_html__( 'Код города СДЭК', 'walls-delivery-calc' ); ?>: <span data-wdc-cdek-city-code><?php echo esc_html( (string) ( $normalized_address['fields']['cdek_city_code'] ?? '' ) ); ?></span></p>
@@ -466,6 +480,8 @@ final class OrderShipmentsMetabox {
 											<button type="button" class="button button-small" data-wdc-date-step="1" aria-label="<?php echo esc_attr__( 'На день вперед', 'walls-delivery-calc' ); ?>">+</button>
 										</span>
 									</label>
+									<label class="wdc-dpd-courier-contact-field"><?php echo esc_html__( 'ФИО курьера', 'walls-delivery-calc' ); ?><input type="text" name="sender_contact_fio" value="<?php echo esc_attr( $sender_contact_fio ); ?>" autocomplete="off" data-wdc-dpd-contact-fio><span class="wdc-dpd-contact-history" data-wdc-dpd-contact-history hidden></span></label>
+									<label><?php echo esc_html__( 'Комментарии курьеру', 'walls-delivery-calc' ); ?><textarea name="courier_instructions" rows="2" maxlength="250" data-wdc-dpd-courier-instructions></textarea><span class="description"><?php echo esc_html__( 'Только для DPD courier instructions. Не более 250 символов.', 'walls-delivery-calc' ); ?></span></label>
 									<?php if ( ! empty( $meta['date_pickup_fallback_used'] ) ) : ?>
 										<p class="description wdc-shipment-warning"><?php echo esc_html__( 'Календарь магазина недоступен, дата отправки DPD рассчитана по fallback-правилу.', 'walls-delivery-calc' ); ?></p>
 									<?php endif; ?>
@@ -543,6 +559,9 @@ final class OrderShipmentsMetabox {
 		if ( ! $result->success ) {
 			wp_send_json_error( array( 'message' => $result->error_message, 'code' => $result->error_code, 'preview' => $preview ), 400 );
 		}
+		if ( DpdSettings::CARRIER_KEY === $request->carrier_key ) {
+			$this->add_dpd_courier_contact_history( (string) ( $request->meta['sender_contact_fio'] ?? '' ) );
+		}
 
 		wp_send_json_success(
 			array_merge(
@@ -574,6 +593,16 @@ final class OrderShipmentsMetabox {
 		wp_send_json_success( array( 'preview' => $preview ) );
 	}
 
+	public function ajax_dpd_courier_contact_history(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
+		}
+		$operation = sanitize_key( wp_unslash( $_POST['operation'] ?? '' ) );
+		$value = sanitize_text_field( wp_unslash( $_POST['value'] ?? '' ) );
+		$history = 'remove' === $operation ? $this->remove_dpd_courier_contact_history( $value ) : $this->add_dpd_courier_contact_history( $value );
+
+		wp_send_json_success( array( 'history' => $history ) );
+	}
 	public function ajax_update_status(): void {
 		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );
@@ -956,6 +985,54 @@ final class OrderShipmentsMetabox {
 		return '';
 	}
 
+	/**
+	 * @return array<int,string>
+	 */
+	private function dpd_courier_contact_history(): array {
+		$settings = new SettingsRepository();
+		$values = $settings->get_array( DpdSettings::COURIER_CONTACT_FIO_HISTORY_KEY, array() );
+
+		return $this->sanitize_dpd_courier_contact_history( $values );
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function add_dpd_courier_contact_history( string $value ): array {
+		$settings = new SettingsRepository();
+		$history = $this->sanitize_dpd_courier_contact_history( array_merge( array( $value ), $settings->get_array( DpdSettings::COURIER_CONTACT_FIO_HISTORY_KEY, array() ) ) );
+		$settings->set( DpdSettings::COURIER_CONTACT_FIO_HISTORY_KEY, $history );
+
+		return $history;
+	}
+
+	/**
+	 * @return array<int,string>
+	 */
+	private function remove_dpd_courier_contact_history( string $value ): array {
+		$settings = new SettingsRepository();
+		$remove = sanitize_text_field( wp_unslash( $value ) );
+		$history = array_values( array_filter( $this->dpd_courier_contact_history(), static fn( string $item ): bool => $item !== $remove ) );
+		$settings->set( DpdSettings::COURIER_CONTACT_FIO_HISTORY_KEY, $history );
+
+		return $history;
+	}
+
+	/**
+	 * @param array<int|string,mixed> $values
+	 * @return array<int,string>
+	 */
+	private function sanitize_dpd_courier_contact_history( array $values ): array {
+		$history = array();
+		foreach ( $values as $value ) {
+			$value = substr( sanitize_text_field( wp_unslash( (string) $value ) ), 0, 120 );
+			if ( '' !== $value && ! in_array( $value, $history, true ) ) {
+				$history[] = $value;
+			}
+		}
+
+		return array_slice( $history, 0, 20 );
+	}
 	public function ajax_search_pickup_points(): void {
 		if ( ! current_user_can( AdminMenu::CAPABILITY ) || ! check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав или неверный nonce.', 'walls-delivery-calc' ) ), 403 );

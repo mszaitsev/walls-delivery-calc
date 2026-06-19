@@ -38,6 +38,8 @@ function get_option( string $key, mixed $default = false ): mixed { return $GLOB
 function update_option( string $key, mixed $value, bool|string $autoload = false ): bool { $GLOBALS['wdc_dpd_create_options'][ $key ] = $value; return true; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
+function sanitize_textarea_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
+function sanitize_key( mixed $key ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $key ) ) ?? ''; }
 function wp_unslash( mixed $value ): mixed { return $value; }
 
 final class DpdCreateFakeSoap implements DpdSoapClientInterface {
@@ -97,6 +99,18 @@ function dpd_create_request( string $delivery_type = DeliveryType::PICKUP, array
 		'sender_terminal' => array( 'terminal_code' => 'NSK-SENDER', 'city_name' => 'Новосибирск', 'address' => 'Новосибирск, Складская, 1' ),
 		'delivery_terminal' => array( 'terminal_code' => 'MSK-RECEIVER', 'city_name' => 'Москва', 'address' => 'Москва, Тестовая, 1' ),
 		'normalization_valid' => DeliveryType::COURIER === $delivery_type,
+		'sender_contact_fio' => 'Курьер Иванов',
+		'normalized_address' => array(
+			'fields' => array(
+				'postal_code' => '101000',
+				'region' => 'Москва',
+				'city' => 'Москва',
+				'street' => 'Тестовая',
+				'street_type' => 'ул',
+				'house' => '9',
+				'flat' => '12',
+			),
+		),
 	);
 	$address = DeliveryType::PICKUP === $delivery_type
 		? new Address( country_code: 'RU', city: 'Москва', raw_address: 'Москва, Тестовая, 1' )
@@ -114,18 +128,21 @@ function dpd_create_request( string $delivery_type = DeliveryType::PICKUP, array
 		Money::from_rubles( 3000 ),
 		false,
 		array(),
-		array( 'name' => 'Иван Петров', 'phone' => '+79990000000', 'email' => 'buyer@example.test' ),
+		array( 'name' => 'Петров Иван', 'phone' => '+79990000000', 'email' => 'buyer@example.test' ),
 		array_merge( $base_meta, $meta )
 	);
 }
 
-$builder = new DpdShipmentPayloadBuilder();
+$settings = dpd_create_settings();
+$settings->save_from_admin( array( DpdSettings::ENVIRONMENT_KEY => DpdSettings::ENV_TEST, DpdSettings::TEST_CLIENT_NUMBER_KEY => '123456', 'dpd_test_client_key' => 'secret', DpdSettings::ORDER_CREATE_TIMEOUT_KEY => 90 ) );
+$settings->save_tariff_settings_from_admin( array( DpdSettings::TARIFF_CARGO_CATEGORY_KEY => 'Посуда', DpdSettings::TARIFF_SENDER_NAME_KEY => 'Walls Shop', DpdSettings::TARIFF_SENDER_PHONE_KEY => '+73830000000' ) );
+$builder = new DpdShipmentPayloadBuilder( $settings );
 dpd_create_assert( method_exists( DpdApiClient::class, 'createOrder2' ), 'DpdApiClient must expose createOrder2().' );
 $no_client_result = ( new DpdShipmentAdapter( $builder ) )->create( dpd_create_request() );
 dpd_create_assert( ! $no_client_result->success && 'dpd_create_disabled' !== $no_client_result->error_code, 'DPD adapter create() must no longer return dpd_create_disabled.' );
 
 $preview = ( new DpdShipmentAdapter( $builder ) )->build_safe_payload_preview( dpd_create_request() );
-dpd_create_assert( 'order2/createOrder2' === (string) $preview['path'] && false === (bool) $preview['live_api_call'], 'DPD dry-run preview must still work without live API call.' );
+dpd_create_assert( 'order2/createOrder2' === (string) $preview['path'] && ! array_key_exists( 'live_api_call', $preview ), 'DPD dry-run preview must not expose live_api_call in preview payload.' );
 
 $success_body = array(
 	'orderNumberInternal' => 'WC-660',
@@ -136,29 +153,41 @@ $success_body = array(
 	'parcel' => array( array( 'number' => 'PARCEL-1' ), array( 'number' => 'PARCEL-2' ) ),
 );
 $soap = new DpdCreateFakeSoap( $success_body );
-$client = new DpdApiClient( dpd_create_settings(), $soap );
+$client = new DpdApiClient( $settings, $soap );
 $adapter = new DpdShipmentAdapter( $builder, $client );
 $request = dpd_create_request();
 $result = $adapter->create( $request );
 dpd_create_assert( $result->success && 'DPD-ORDER-1' === $result->tracking_number, 'Successful mocked DPD response must create a successful result.' );
 dpd_create_assert( 1 === count( $soap->calls ) && 'order2' === $soap->calls[0]['service'] && 'createOrder2' === $soap->calls[0]['method'] && DpdSoapRequest::WRAPPER_ORDERS === $soap->calls[0]['options']['wrapper'], 'Live create must call order2/createOrder2 with orders wrapper.' );
+dpd_create_assert( DpdSettings::DEFAULT_ORDER_CREATE_TIMEOUT === (int) $soap->calls[0]['options']['timeout'], 'createOrder2 must use increased order create timeout.' );
 dpd_create_assert( $soap->calls[0]['payload'] === $builder->build( $request ), 'Live create must use the same DpdShipmentPayloadBuilder payload as preview.' );
 
 $pickup_payload = $builder->build( $request );
-dpd_create_assert( '2026-06-22' === (string) $pickup_payload['header']['datePickup'], 'Pickup create payload must contain datePickup.' );
+dpd_create_assert( '2026-06-22' === (string) $pickup_payload['header']['datePickup'] && '123456' === (string) $pickup_payload['header']['payer'], 'Pickup create payload must contain datePickup and header.payer.' );
 dpd_create_assert( 'ECN' === (string) $pickup_payload['order']['serviceCode'], 'Pickup create payload must contain serviceCode.' );
-dpd_create_assert( 'NSK-SENDER' === (string) $pickup_payload['header']['senderAddress']['terminalCode'], 'Pickup create payload must contain sender terminalCode.' );
+dpd_create_assert( 'NSK-SENDER' === (string) $pickup_payload['header']['senderAddress']['terminalCode'] && 'Walls Shop' === (string) $pickup_payload['header']['senderAddress']['name'] && '+73830000000' === (string) $pickup_payload['header']['senderAddress']['contactPhone'] && 'Курьер Иванов' === (string) $pickup_payload['header']['senderAddress']['contactFio'], 'Pickup create payload must contain sender terminalCode/name/phone/contactFio.' );
 dpd_create_assert( 'MSK-RECEIVER' === (string) $pickup_payload['order']['receiverAddress']['terminalCode'], 'Pickup create payload must contain receiver terminalCode.' );
-dpd_create_assert( 3000.0 === (float) $pickup_payload['order']['cargoValue'] && 1 === (int) $pickup_payload['order']['cargoNumPack'] && 1 === count( $pickup_payload['order']['parcel'] ), 'Pickup create payload must contain cargoValue and parcels.' );
+dpd_create_assert( 3000.0 === (float) $pickup_payload['order']['cargoValue'] && 1 === (int) $pickup_payload['order']['cargoNumPack'] && 1 === count( $pickup_payload['order']['parcel'] ) && 'Посуда' === (string) $pickup_payload['order']['cargoCategory'], 'Pickup create payload must contain cargoValue, cargoCategory and parcels.' );
 
 $courier_payload = $builder->build( dpd_create_request( DeliveryType::COURIER ) );
 dpd_create_assert( '2026-06-22' === (string) $courier_payload['header']['datePickup'] && 'ECN' === (string) $courier_payload['order']['serviceCode'], 'Courier create payload must contain datePickup and serviceCode.' );
 dpd_create_assert( 'NSK-SENDER' === (string) $courier_payload['header']['senderAddress']['terminalCode'], 'Courier create payload must contain sender terminalCode.' );
-dpd_create_assert( 'Тестовая, 9' === (string) $courier_payload['order']['receiverAddress']['addressString'], 'Courier create payload must contain courier address.' );
+dpd_create_assert( ! isset( $courier_payload['order']['receiverAddress']['addressString'] ) && 'Тестовая' === (string) $courier_payload['order']['receiverAddress']['street'] && '9' === (string) $courier_payload['order']['receiverAddress']['house'], 'Courier create payload must contain structured address and no addressString.' );
 dpd_create_assert( ! isset( $courier_payload['order']['receiverAddress']['terminalCode'] ), 'Courier create payload must not contain receiver terminalCode.' );
 
+
+$timeout_soap = new DpdCreateFakeSoap( new \WallsShop\WDC\Carriers\Dpd\DpdException( 'DPD SOAP request failed: Error Fetching http headers' ) );
+$timeout_response = ( new DpdApiClient( $settings, $timeout_soap ) )->createOrder2( $builder->build( $request ) );
+dpd_create_assert( empty( $timeout_response['success'] ) && 'dpd_order_create_uncertain' === (string) $timeout_response['error_code'] && str_contains( (string) $timeout_response['error_message'], 'DPD не вернул ответ вовремя' ), 'SOAP Error Fetching http headers must return uncertain-result manager message.' );
+$settings->add_courier_contact_fio_history( '' );
+$settings->add_courier_contact_fio_history( 'Курьер Иванов' );
+$settings->add_courier_contact_fio_history( 'Курьер Иванов' );
+$settings->add_courier_contact_fio_history( 'Курьер Петров' );
+dpd_create_assert( array( 'Курьер Петров', 'Курьер Иванов' ) === $settings->courier_contact_fio_history(), 'contactFio history must ignore empty values and duplicates.' );
+$settings->remove_courier_contact_fio_history( 'Курьер Иванов' );
+dpd_create_assert( array( 'Курьер Петров' ) === $settings->courier_contact_fio_history(), 'contactFio history must remove one selected value.' );
 $invalid_soap = new DpdCreateFakeSoap( $success_body );
-$invalid = ( new DpdShipmentAdapter( $builder, new DpdApiClient( dpd_create_settings(), $invalid_soap ) ) )->create( dpd_create_request( DeliveryType::PICKUP, array( 'date_pickup' => '' ) ) );
+$invalid = ( new DpdShipmentAdapter( $builder, new DpdApiClient( $settings, $invalid_soap ) ) )->create( dpd_create_request( DeliveryType::PICKUP, array( 'date_pickup' => '' ) ) );
 dpd_create_assert( ! $invalid->success && 'dpd_validation_failed' === $invalid->error_code && 0 === count( $invalid_soap->calls ), 'Missing required fields must block create before SOAP call.' );
 
 $repository = new OrderShipmentRepository();
@@ -174,7 +203,7 @@ $duplicate = $creation->create( $order, $request );
 dpd_create_assert( ! $duplicate->success && 'shipment_already_created' === $duplicate->error_code && 'DPD отправление уже создано для этого заказа.' === $duplicate->error_message, 'Duplicate active DPD shipment must block second create.' );
 
 $error_soap = new DpdCreateFakeSoap( array( 'orderNumberInternal' => 'WC-661', 'status' => 'Error', 'errorMessage' => 'Не заполнен параметр Улица' ) );
-$error_creation = new ShipmentCreationService( new OrderShipmentRepository(), array( new DpdShipmentAdapter( $builder, new DpdApiClient( dpd_create_settings(), $error_soap ) ) ) );
+$error_creation = new ShipmentCreationService( new OrderShipmentRepository(), array( new DpdShipmentAdapter( $builder, new DpdApiClient( $settings, $error_soap ) ) ) );
 $error_order = new DpdCreateFakeOrder( 660 );
 $error_result = $error_creation->create( $error_order, dpd_create_request() );
 dpd_create_assert( ! $error_result->success && 'dpd_business_error' === $error_result->error_code, 'DPD API business error must be shown as create failure.' );

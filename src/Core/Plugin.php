@@ -302,7 +302,7 @@ final class Plugin {
 		$this->container->register( CdekCreateRequestBuilder::class, fn(): CdekCreateRequestBuilder => new CdekCreateRequestBuilder( $this->container->get( CdekSettings::class ) ) );
 		$this->container->register( CdekShipmentAdapter::class, fn(): CdekShipmentAdapter => new CdekShipmentAdapter( $this->container->get( CdekApiClient::class ), $this->container->get( CdekCreateRequestBuilder::class ), $this->container->get( Logger::class ), $this->container->get( OrderShipmentRepository::class ), $this->container->get( CdekOrderStatusService::class ), $this->container->get( CdekBarcodePrintService::class ) ) );
 		$this->container->register( DpdShipmentDateResolver::class, fn(): DpdShipmentDateResolver => new DpdShipmentDateResolver( $this->container->get( CalendarService::class ), $this->container->get( TimezoneService::class ) ) );
-		$this->container->register( DpdShipmentPayloadBuilder::class, fn(): DpdShipmentPayloadBuilder => new DpdShipmentPayloadBuilder() );
+		$this->container->register( DpdShipmentPayloadBuilder::class, fn(): DpdShipmentPayloadBuilder => new DpdShipmentPayloadBuilder( $this->container->get( DpdSettings::class ) ) );
 		$this->container->register( DpdShipmentAdapter::class, fn(): DpdShipmentAdapter => new DpdShipmentAdapter( $this->container->get( DpdShipmentPayloadBuilder::class ), $this->container->get( DpdApiClient::class ) ) );
 		$this->container->register( DpdStatusMapping::class, fn(): DpdStatusMapping => new DpdStatusMapping( $this->container->get( SettingsRepository::class ) ) );
 		$this->container->register( CdekStatusMappingService::class, fn(): CdekStatusMappingService => new CdekStatusMappingService( $this->container->get( SettingsRepository::class ) ) );
