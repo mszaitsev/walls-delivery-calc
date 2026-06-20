@@ -23,3 +23,9 @@ For a new latest event, the service stores only the last event fields in `_wdc_s
 After a package is fully parsed, matched updates are saved and unmatched summaries are logged, `confirm(docId)` is called only when the admin setting is enabled. If confirm is disabled, one package is processed and no confirm or next getEvents call is made. If confirm succeeds and `resultComplete=false`, the next package is fetched; `resultComplete=true` finishes the run. A 20-package safety limit returns a warning without rolling back already saved and confirmed packages.
 
 Unmatched events are still considered processed and do not block confirm. Confirm errors stop the loop; saved changes remain, and the next manual run can safely receive the same unconfirmed package because event application is idempotent.
+
+## 0.67.3 multiple shipments per Woo order
+
+When one WooCommerce order has had multiple DPD shipments over time, `dpdOrderNr` is the primary event identity. `DpdEventSyncService::match_order()` first looks up `_wdc_dpd_order_number`; if that finds an order, the event belongs only to that shipment. `clientOrderNr` is used only as fallback when no DPD-number match exists, which keeps pending registration without a DPD number working.
+
+Before applying an event, the service checks the active shipment: if `dpd_order_number` is already saved, incoming `event.dpdOrderNr` must match it after trim and case-insensitive normalization. Mismatched events are logged as unmatched with `saved_dpd_order_number`, increase the unmatched counter and still allow confirm after the package is otherwise processed.
