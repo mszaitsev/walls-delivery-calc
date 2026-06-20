@@ -31,3 +31,13 @@ No local DPD shipment shows `Создать отправление DPD` and `В�
 ## Price/date enrichment
 
 Manual update with a DPD number runs global `getEvents`, then calls `tracing1-1/getStatesByDPDOrder` for the current order with wrapper `request`, `dpdOrderNr` and `pickupYear` from `datePickup`. It stores `dpd_actual_cost_kopecks`, `planned_delivery_date` and `dpd_enrichment_checked_at` only when both `orderCost` and `planDeliveryDate` are present. This API never changes universal status. Actual price is compared with saved base API cost using the existing 3% tolerance: within threshold is green/ok, above threshold is warning/red, missing base cost is neutral.
+
+## 0.67.2 create/status QA
+
+After `createOrder2` returns `OK` with `orderNum`, `DpdOrderRegistrationService` saves the DPD number and immediately calls the same refresh path used by manual `Обновить статус`: `DpdEventSyncService::sync()`, current-order `DpdShipmentEnrichmentService`, then a `tracking_checked_at` / `updated_at` touch. A missing matching event is not fatal; the check time still changes so the manager can see that DPD was queried.
+
+Manual DPD status refresh also touches `tracking_checked_at` and `updated_at` after sync/enrichment even when the latest saved event remains unchanged. The future scheduled sync can keep its own policy; no DPD cron is registered in this release.
+
+DPD button visibility is based only on persisted shipment data. Saved `dpd_event_code` or generic `carrier_operation_code=1401` keeps `Отменить отправление в DPD` visible after reload; `1301` and non-cancellable operation codes hide cancel and show `Удалить из заказа`.
+
+The DPD shipment record stores the actual places sent in the `createOrder2` request as `dpd_sent_places` plus `dpd_cargo_num_pack`, `dpd_cargo_weight` and `dpd_cargo_volume`. These values are extracted from the already-built request payload / `request_snapshot`, not recalculated after the SOAP call. They are shown in the `Отправления` technical block because managers create shipment places in the shipment modal, not in `Калькулятор доставок`. If the DPD cabinet does not display dimensions, WDC still treats the request snapshot and `dpd_sent_places` as the local source of truth.

@@ -126,6 +126,7 @@ final class DpdShipmentAdapter implements ShipmentCarrierAdapterInterface {
 		$policy = $this->buttons instanceof DpdShipmentButtonPolicy ? $this->buttons->resolve( $shipment ) : array( 'update' => $has, 'cancel' => false, 'remove' => $has );
 		$label = $this->shipment_status_label( $shipment );
 		$actual_cost = $this->actual_cost_payload( $shipment, $order );
+		$places_summary = $this->places_summary( $shipment );
 
 		return array_merge( array(
 			'carrier_key' => DpdSettings::CARRIER_KEY,
@@ -141,7 +142,11 @@ final class DpdShipmentAdapter implements ShipmentCarrierAdapterInterface {
 			'carrier_operation_code' => (string) ( $shipment['dpd_event_code'] ?? '' ),
 			'carrier_operation_marker' => (string) ( $shipment['dpd_event_marker'] ?? '' ),
 			'tracking_checked_at' => (string) ( $shipment['tracking_checked_at'] ?? $shipment['dpd_enrichment_checked_at'] ?? '' ),
+			'updated_at' => (string) ( $shipment['updated_at'] ?? '' ),
 			'planned_delivery_date' => (string) ( $shipment['planned_delivery_date'] ?? '' ),
+			'dpd_sent_places' => is_array( $shipment['dpd_sent_places'] ?? null ) ? $shipment['dpd_sent_places'] : array(),
+			'dpd_places_summary' => $places_summary,
+			'dpd_places_label' => count( is_array( $shipment['dpd_sent_places'] ?? null ) ? $shipment['dpd_sent_places'] : array() ) > 1 ? 'Грузоместа DPD' : 'Грузоместо DPD',
 			'barcode' => $this->tracking_identifier( $shipment ),
 			'registration_polling' => $has && '' === trim( (string) ( $shipment['dpd_order_number'] ?? '' ) ) && ! in_array( (string) ( $shipment['dpd_registration_state'] ?? '' ), array( 'duplicate', 'error', 'cancelled', 'transport_error' ), true ),
 			'registration_terminal' => in_array( (string) ( $shipment['dpd_registration_state'] ?? '' ), array( 'ok', 'duplicate', 'error', 'cancelled', 'transport_error' ), true ),
@@ -149,6 +154,32 @@ final class DpdShipmentAdapter implements ShipmentCarrierAdapterInterface {
 			'registration_error' => in_array( (string) ( $shipment['dpd_registration_state'] ?? '' ), array( 'duplicate', 'error', 'transport_error' ), true ),
 			'polling_continue' => $has && '' === trim( (string) ( $shipment['dpd_order_number'] ?? '' ) ) && in_array( (string) ( $shipment['dpd_registration_state'] ?? '' ), array( 'submitting', 'pending' ), true ),
 		), $actual_cost );
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function places_summary( array $shipment ): string {
+		$places = is_array( $shipment['dpd_sent_places'] ?? null ) ? $shipment['dpd_sent_places'] : array();
+		$rows = array();
+		foreach ( $places as $index => $place ) {
+			if ( ! is_array( $place ) ) {
+				continue;
+			}
+			$weight = is_numeric( $place['weight_kg'] ?? null ) ? $this->format_decimal( (float) $place['weight_kg'] ) . ' кг' : '';
+			$length = (int) ( $place['length_cm'] ?? 0 );
+			$width = (int) ( $place['width_cm'] ?? 0 );
+			$height = (int) ( $place['height_cm'] ?? 0 );
+			$dimensions = $length > 0 && $width > 0 && $height > 0 ? $length . '×' . $width . '×' . $height . ' см' : '';
+			$text = trim( implode( ', ', array_filter( array( $weight, $dimensions ), static fn ( string $value ): bool => '' !== $value ) ) );
+			if ( '' !== $text ) {
+				$rows[] = count( $places ) > 1 ? ( (string) ( $place['number'] ?? ( $index + 1 ) ) ) . ') ' . $text : $text;
+			}
+		}
+
+		return implode( '; ', $rows );
+	}
+
+	private function format_decimal( float $value ): string {
+		return rtrim( rtrim( number_format( $value, 3, '.', '' ), '0' ), '.' );
 	}
 
 	/**

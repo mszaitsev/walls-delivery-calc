@@ -24,12 +24,20 @@ dpd_buttons_assert( $pending['update'] && $pending['remove'] && ! $pending['crea
 foreach ( array( '1001', '1101', '1201', '1401', '1501' ) as $code ) { dpd_buttons_assert( $policy->resolve( array( 'dpd_order_number' => 'DPD1', 'dpd_event_code' => $code ) )['cancel'], 'DPD event ' . $code . ' must allow cancel.' ); }
 dpd_buttons_assert( ! $policy->resolve( array( 'dpd_order_number' => 'DPD1', 'dpd_event_code' => '1301' ) )['cancel'] && $policy->resolve( array( 'dpd_order_number' => 'DPD1', 'dpd_event_code' => '1301' ) )['remove'], 'DPD 1301 must hide cancel and show remove.' );
 dpd_buttons_assert( ! $policy->resolve( array( 'dpd_order_number' => 'DPD1', 'dpd_event_code' => '2201' ) )['cancel'], 'Other DPD event codes must not allow cancel.' );
+$reload_1401 = $policy->resolve( array( 'dpd_order_number' => 'DPD1', 'carrier_operation_code' => '1401' ) );
+dpd_buttons_assert( $reload_1401['update'] && $reload_1401['cancel'] && ! $reload_1401['remove'], 'Reloaded DPD shipment with generic 1401 operation code must show update/cancel and hide remove.' );
+$reload_1301 = $policy->resolve( array( 'dpd_order_number' => 'DPD1', 'carrier_operation_code' => '1301' ) );
+dpd_buttons_assert( $reload_1301['update'] && ! $reload_1301['cancel'] && $reload_1301['remove'], 'Reloaded DPD shipment with generic 1301 operation code must show update/remove and hide cancel.' );
 $adapter = new DpdShipmentAdapter( new DpdShipmentPayloadBuilder( new DpdSettings( new SettingsRepository(), new EncryptionService() ) ), null, null, $policy );
 dpd_buttons_assert( array() === $adapter->label_actions( new stdClass(), array( 'dpd_order_number' => 'DPD1' ) ), 'DPD documents/labels action must be absent.' );
+$payload = $adapter->status_payload( new stdClass(), array( 'dpd_sent_places' => array( array( 'number' => '1', 'weight_kg' => 6.7, 'length_cm' => 38, 'width_cm' => 24, 'height_cm' => 24 ), array( 'number' => '2', 'weight_kg' => 1.2, 'length_cm' => 20, 'width_cm' => 15, 'height_cm' => 10 ) ) ) );
+dpd_buttons_assert( str_contains( (string) ( $payload['dpd_places_summary'] ?? '' ), '1) 6.7 кг, 38×24×24 см' ) && str_contains( (string) ( $payload['dpd_places_summary'] ?? '' ), '2) 1.2 кг, 20×15×10 см' ), 'DPD status payload must expose manager-readable sent places summary.' );
 $presentation = $adapter->presentation();
 dpd_buttons_assert( 'Внести номер DPD вручную' === $presentation['manual_attach_button_label'] && 'Номер DPD' === $presentation['manual_attach_placeholder'], 'DPD manual attach UI text must be configured.' );
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
 dpd_buttons_assert( str_contains( $source, 'temporary_can_remove' ) && str_contains( $source, 'startDpdRegistrationPolling' ) && str_contains( $source, 'registration_attempt_id' ), 'Admin JS must include DPD temporary remove and two-stage polling markers.' );
 dpd_buttons_assert( str_contains( $source, 'carrier_operation_code || status.carrier_operation_address' ) && str_contains( $source, 'carrier_operation_marker || status.carrier_operation_index' ), 'Admin JS operationSummary must render DPD date/code/marker with CDEK fallback.' );
+dpd_buttons_assert( str_contains( $source, 'data-wdc-dpd-places-summary' ) && str_contains( $source, 'dpd_places_summary' ), 'Admin JS must render DPD sent places summary in the shipment block.' );
+dpd_buttons_assert( str_contains( $source, 'data-wdc-status-updated' ) && str_contains( $source, 'updated_at' ), 'Admin JS must render updated_at when the shipment block provides it.' );
 echo "DPD shipment buttons smoke passed
 ";

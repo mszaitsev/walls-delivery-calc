@@ -30,6 +30,7 @@ final class DpdOrderRegistrationService {
 		$existing = $this->repository->find( $order );
 		if ( array() !== $existing ) { return array( 'success' => false, 'message' => 'DPD-отправление уже есть в заказе.' ); }
 		$payload = $this->builder->build( $request );
+		$sent_places = $this->sent_places_fields( $payload );
 		$now = $this->now();
 		$token = sha1( $this->repository->order_id( $order ) . '|' . wp_json_encode( $payload ) . '|' . microtime( true ) );
 		$shipment = array(
@@ -46,6 +47,7 @@ final class DpdOrderRegistrationService {
 			'universal_status_label' => DeliveryStatus::label( DeliveryStatus::PENDING_CREATION_IN_CARRIER ), 'status_title' => 'Ждём регистрацию',
 			'created_at' => $now, 'updated_at' => $now,
 		);
+		$shipment = array_merge( $shipment, $sent_places );
 		$this->repository->save( $order, $shipment );
 		return array( 'success' => true, 'message' => 'Ждём регистрацию DPD.', 'registration_attempt_id' => $token, 'shipment' => $shipment, 'status' => array( 'registration_polling' => true, 'polling_continue' => true ) );
 	}
@@ -54,7 +56,10 @@ final class DpdOrderRegistrationService {
 	public function submit( object $order, ShipmentCreateRequest $request, string $attempt_id ): array {
 		$shipment = $this->repository->find( $order );
 		if ( array() === $shipment || $attempt_id !== (string) ( $shipment['dpd_registration_attempt_id'] ?? '' ) ) { return array( 'success' => false, 'message' => 'Локальная попытка регистрации DPD не найдена.' ); }
-		$response = $this->client->createOrder2( $this->builder->build( $request ) );
+		$payload = $this->builder->build( $request );
+		$shipment = array_merge( $shipment, $this->sent_places_fields( $payload ), array( 'request_snapshot' => array( 'method' => 'SOAP', 'path' => 'order2/createOrder2', 'body' => $this->sanitize_value( $payload ) ) ) );
+		$this->repository->save( $order, $shipment );
+		$response = $this->client->createOrder2( $payload );
 		$updated = $this->apply_registration_response( $order, $shipment, $response, 'createOrder2' );
 		return array_merge( array( 'success' => true ), $updated );
 	}
@@ -75,9 +80,9 @@ final class DpdOrderRegistrationService {
 		$shipment = $this->repository->find( $order );
 		if ( array() === $shipment ) { return array( 'success' => false, 'message' => 'Сначала создайте отправление DPD.' ); }
 		if ( '' === trim( (string) ( $shipment['dpd_order_number'] ?? '' ) ) ) { return $this->refresh_registration( $order ); }
-		$sync = $this->events instanceof DpdEventSyncService ? $this->events->sync() : new DpdEventSyncResult( true, 'Синхронизация событий DPD недоступна.' );
-		$enrichment = $this->enrichment instanceof DpdShipmentEnrichmentService ? $this->enrichment->enrich_current_order( $order ) : array();
-		return array( 'success' => $sync->success, 'message' => $sync->message ?: 'Статус DPD обновлен.', 'event_sync' => $sync->to_array(), 'enrichment' => $enrichment, 'shipment' => $this->repository->find( $order ) );
+		$refresh = $this->refresh_created_shipment( $order );
+		$sync = $refresh['sync'];
+		return array( 'success' => $sync->success, 'message' => $sync->message ?: 'Статус DPD обновлен.', 'event_sync' => $sync->to_array(), 'enrichment' => $refresh['enrichment'], 'shipment' => $refresh['shipment'] );
 	}
 
 	/** @param array<string,mixed> $payload @return array<string,mixed> */
@@ -123,8 +128,8 @@ final class DpdOrderRegistrationService {
 		if ( 'OK' === $status && '' !== $order_num ) {
 			$shipment['dpd_order_number'] = $order_num; $shipment['tracking_number'] = $order_num; $shipment['barcode'] = $order_num; $shipment['external_id'] = $order_num; $shipment['dpd_registration_state'] = 'ok'; $shipment['status'] = 'created'; $shipment['universal_status_code'] = DeliveryStatus::CREATED_IN_CARRIER; $shipment['universal_status_label'] = DeliveryStatus::label( DeliveryStatus::CREATED_IN_CARRIER ); $shipment['status_title'] = 'Зарегистрировано';
 			$this->repository->save( $order, $shipment );
-			if ( $this->events instanceof DpdEventSyncService ) { $this->events->sync(); }
-			return array( 'message' => 'DPD зарегистрировал отправление.', 'shipment' => $this->repository->find( $order ), 'registration_success' => true, 'registration_terminal' => true, 'polling_continue' => false );
+			$refresh = $this->refresh_created_shipment( $order );
+			return array( 'message' => 'DPD зарегистрировал отправление.', 'shipment' => $refresh['shipment'], 'event_sync' => $refresh['sync']->to_array(), 'enrichment' => $refresh['enrichment'], 'registration_success' => true, 'registration_terminal' => true, 'polling_continue' => false );
 		}
 		if ( in_array( $status, array( 'OrderDuplicate', 'OrderError', 'OrderCancelled' ), true ) ) {
 			$shipment['dpd_registration_state'] = 'OrderCancelled' === $status ? 'cancelled' : ( 'OrderDuplicate' === $status ? 'duplicate' : 'error' ); $shipment['dpd_registration_error'] = (string) ( $row['errorMessage'] ?? $status ); $shipment['status_title'] = 'OrderCancelled' === $status ? 'Заказ отменён' : 'Ошибка регистрации'; $this->repository->save( $order, $shipment );
@@ -132,6 +137,62 @@ final class DpdOrderRegistrationService {
 		}
 		$shipment['dpd_registration_state'] = 'pending'; $shipment['status'] = DeliveryStatus::PENDING_CREATION_IN_CARRIER; $shipment['universal_status_code'] = DeliveryStatus::PENDING_CREATION_IN_CARRIER; $shipment['universal_status_label'] = DeliveryStatus::label( DeliveryStatus::PENDING_CREATION_IN_CARRIER ); $shipment['status_title'] = 'OrderPending' === $status ? 'Ждёт ручной доработки DPD' : 'Ждём регистрацию'; $this->repository->save( $order, $shipment );
 		return array( 'message' => $shipment['status_title'], 'shipment' => $shipment, 'registration_polling' => true, 'polling_continue' => true );
+	}
+
+	/** @return array{sync:DpdEventSyncResult,enrichment:array<string,mixed>,shipment:array<string,mixed>} */
+	private function refresh_created_shipment( object $order ): array {
+		$sync = $this->events instanceof DpdEventSyncService ? $this->events->sync() : new DpdEventSyncResult( true, 'Синхронизация событий DPD недоступна.' );
+		$enrichment = $this->enrichment instanceof DpdShipmentEnrichmentService ? $this->enrichment->enrich_current_order( $order ) : array();
+		$shipment = $this->touch_tracking_checked( $order );
+
+		return array( 'sync' => $sync, 'enrichment' => $enrichment, 'shipment' => $shipment );
+	}
+
+	/** @return array<string,mixed> */
+	private function touch_tracking_checked( object $order ): array {
+		$shipment = $this->repository->find( $order );
+		if ( array() === $shipment ) {
+			return $shipment;
+		}
+		$now = $this->now();
+		$shipment['tracking_checked_at'] = $now;
+		$shipment['updated_at'] = $now;
+		$this->repository->save( $order, $shipment );
+
+		return $this->repository->find( $order );
+	}
+
+	/** @param array<string,mixed> $payload @return array<string,mixed> */
+	private function sent_places_fields( array $payload ): array {
+		$order = is_array( $payload['order'] ?? null ) ? $payload['order'] : array();
+		$parcels = is_array( $order['parcel'] ?? null ) ? $order['parcel'] : array();
+		$places = array();
+		foreach ( $parcels as $index => $parcel ) {
+			if ( ! is_array( $parcel ) ) {
+				continue;
+			}
+			$weight_kg = is_numeric( $parcel['weight'] ?? null ) ? (float) $parcel['weight'] : 0.0;
+			$length = is_numeric( $parcel['length'] ?? null ) ? (int) $parcel['length'] : 0;
+			$width = is_numeric( $parcel['width'] ?? null ) ? (int) $parcel['width'] : 0;
+			$height = is_numeric( $parcel['height'] ?? null ) ? (int) $parcel['height'] : 0;
+			$places[] = array(
+				'number' => (string) ( $parcel['number'] ?? ( $index + 1 ) ),
+				'place_number' => (int) ( is_numeric( $parcel['number'] ?? null ) ? $parcel['number'] : ( $index + 1 ) ),
+				'weight_kg' => $weight_kg,
+				'weight_g' => (int) round( $weight_kg * 1000 ),
+				'length_cm' => $length,
+				'width_cm' => $width,
+				'height_cm' => $height,
+				'volume_m3' => round( max( 0, $length ) * max( 0, $width ) * max( 0, $height ) / 1000000, 4 ),
+			);
+		}
+
+		return array(
+			'dpd_sent_places' => $places,
+			'dpd_cargo_num_pack' => is_numeric( $order['cargoNumPack'] ?? null ) ? (int) $order['cargoNumPack'] : count( $places ),
+			'dpd_cargo_weight' => is_numeric( $order['cargoWeight'] ?? null ) ? (float) $order['cargoWeight'] : 0.0,
+			'dpd_cargo_volume' => is_numeric( $order['cargoVolume'] ?? null ) ? (float) $order['cargoVolume'] : 0.0,
+		);
 	}
 
 	/** @param array<string,mixed> $body @return array<string,mixed> */

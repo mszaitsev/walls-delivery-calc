@@ -880,7 +880,10 @@
       '[data-wdc-status-carrier]': status.carrier_status_title || '-',
       '[data-wdc-status-operation]': operationSummary(status),
       '[data-wdc-status-checked]': status.tracking_checked_at || '-',
+      '[data-wdc-status-updated]': status.updated_at || '',
       '[data-wdc-planned-delivery-date]': status.planned_delivery_date || status.cdek_planned_delivery_date || '',
+      '[data-wdc-dpd-places-summary]': status.dpd_places_summary || '',
+      '[data-wdc-dpd-places-label]': status.dpd_places_label || 'Грузоместа DPD',
       '[data-wdc-tracking-number]': status.barcode || ''
     };
     Object.keys(fields).forEach((selector) => {
@@ -889,6 +892,10 @@
     });
     const plannedRow = box.querySelector('[data-wdc-planned-delivery-row]');
     if (plannedRow) plannedRow.hidden = !String(status.planned_delivery_date || status.cdek_planned_delivery_date || '').trim();
+    const updatedRow = box.querySelector('[data-wdc-status-updated-row]');
+    if (updatedRow) updatedRow.hidden = !String(status.updated_at || '').trim();
+    const dpdPlacesRow = box.querySelector('[data-wdc-dpd-places-row]');
+    if (dpdPlacesRow) dpdPlacesRow.hidden = !String(status.dpd_places_summary || '').trim();
     updateShipmentButtons(box, {
       hasShipment: !!status.has_shipment,
       canCancel: !!status.can_cancel,

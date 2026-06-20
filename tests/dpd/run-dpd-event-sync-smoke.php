@@ -47,5 +47,7 @@ $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Dp
 dpd_event_assert( str_contains( $source, 'add_option' ) && str_contains( $source, 'MAX_PACKAGES = 20' ) && str_contains( $source, 'resultComplete' ) && str_contains( $source, 'confirmEvents' ), 'DpdEventSyncService must include atomic lock, batch limit, resultComplete and confirm loop.' );
 dpd_event_assert( str_contains( $source, 'if ( array() === $shipment ) { $result->unmatched++; $this->log_unmatched( $event ); continue; }' ), 'Matched Woo order without local DPD shipment must be counted and logged as unmatched.' );
 dpd_event_assert( str_contains( $source, 'if ( $saved_ts > 0 && $incoming_ts <= 0 ) { return false; }' ), 'Incoming DPD event without valid timestamp must not overwrite a saved valid timestamp.' );
+$registration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Dpd/DpdOrderRegistrationService.php' );
+dpd_event_assert( str_contains( $registration_source, 'touch_tracking_checked( $order )' ), 'Manual DPD status refresh must update tracking_checked_at even when getEvents is unchanged.' );
 echo "DPD event sync smoke passed
 ";
