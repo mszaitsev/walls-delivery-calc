@@ -1,6 +1,7 @@
 (function () {
   const timers = new WeakMap();
   const toastTimers = new WeakMap();
+  const shipmentPollingTimers = new WeakMap();
   const formSelector = '[data-wdc-shipment-form], .wdc-shipment-form';
 
   function findShipmentContainer(element) {
@@ -879,7 +880,7 @@
       '[data-wdc-status-carrier]': status.carrier_status_title || '-',
       '[data-wdc-status-operation]': operationSummary(status),
       '[data-wdc-status-checked]': status.tracking_checked_at || '-',
-      '[data-wdc-planned-delivery-date]': status.cdek_planned_delivery_date || '',
+      '[data-wdc-planned-delivery-date]': status.planned_delivery_date || status.cdek_planned_delivery_date || '',
       '[data-wdc-tracking-number]': status.barcode || ''
     };
     Object.keys(fields).forEach((selector) => {
@@ -887,7 +888,7 @@
       if (element) element.textContent = fields[selector];
     });
     const plannedRow = box.querySelector('[data-wdc-planned-delivery-row]');
-    if (plannedRow) plannedRow.hidden = !String(status.cdek_planned_delivery_date || '').trim();
+    if (plannedRow) plannedRow.hidden = !String(status.planned_delivery_date || status.cdek_planned_delivery_date || '').trim();
     updateShipmentButtons(box, {
       hasShipment: !!status.has_shipment,
       canCancel: !!status.can_cancel,
@@ -915,10 +916,14 @@
     return status;
   }
 
-  function setCdekPollingIndicator(box, visible) {
-    const indicator = box && box.querySelector ? box.querySelector('[data-wdc-cdek-polling-indicator]') : null;
+  function setShipmentPollingIndicator(box, visible) {
+    const indicator = box && box.querySelector ? box.querySelector('[data-wdc-shipment-polling-indicator], [data-wdc-cdek-polling-indicator]') : null;
     if (!indicator) return;
     indicator.hidden = !visible;
+  }
+
+  function setCdekPollingIndicator(box, visible) {
+    setShipmentPollingIndicator(box, visible);
   }
 
   function renderShipmentPrice(box, status) {
@@ -1180,6 +1185,64 @@
       });
   }
 
+  function submitDpdRegistration(form, attemptId, box, updateButton) {
+    const data = collectShipmentData(form);
+    data.append('action', window.wdcShipmentsAdmin.createAction);
+    data.append('nonce', window.wdcShipmentsAdmin.nonce);
+    data.append('dpd_registration_stage', 'submit');
+    data.append('registration_attempt_id', attemptId || '');
+    setShipmentPollingIndicator(box, true);
+    return fetch(window.wdcShipmentsAdmin.ajaxUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: data
+    })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (!payload || !payload.success) {
+          throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось отправить заявку DPD.');
+        }
+        renderShipmentStatus(box, shipmentStatusFromResponse(payload.data));
+        renderShipmentTechnicalInfo(box, payload.data || {});
+        if (updateButton) updateButton.disabled = false;
+        if (payload.data && payload.data.polling_continue) {
+          startDpdRegistrationPolling(updateButton);
+        } else {
+          setShipmentPollingIndicator(box, false);
+        }
+        return payload;
+      })
+      .catch((error) => {
+        setShipmentPollingIndicator(box, false);
+        showShipmentToast(box, error.message, 'error', { append: true });
+      });
+  }
+
+  function startDpdRegistrationPolling(button) {
+    const box = button && button.closest ? button.closest('[data-wdc-shipments-metabox]') : null;
+    if (!box || shipmentPollingTimers.has(box)) return;
+    setShipmentPollingIndicator(box, true);
+    const tick = function () {
+      requestShipmentStatus(button, { auto: true })
+        .then((payload) => {
+          const status = payload && payload.data && payload.data.status ? payload.data.status : {};
+          if (status.registration_terminal || status.registration_success || status.registration_error || !status.polling_continue) {
+            const timer = shipmentPollingTimers.get(box);
+            if (timer) window.clearTimeout(timer);
+            shipmentPollingTimers.delete(box);
+            setShipmentPollingIndicator(box, false);
+            return;
+          }
+          shipmentPollingTimers.set(box, window.setTimeout(tick, 10000));
+        })
+        .catch(() => {
+          shipmentPollingTimers.delete(box);
+          setShipmentPollingIndicator(box, false);
+        });
+    };
+    shipmentPollingTimers.set(box, window.setTimeout(tick, 10000));
+  }
+
   function startCdekPolling(button) {
     let attempts = 0;
     const maxAttempts = 14;
@@ -1239,6 +1302,9 @@
       .then((response) => response.json())
       .then((payload) => {
         if (!payload || !payload.success) {
+          if (payload && payload.data && payload.data.temporary_can_remove) {
+            updateShipmentButtons(box, { hasShipment: true, canCancel: false, canRemove: true, canUpdate: true, canPrintBarcode: false });
+          }
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось отменить отправление.');
         }
         resetShipmentUi(box);
@@ -2212,8 +2278,12 @@
             canPrintBarcode: !!statusPayload.can_print_barcode
           });
           showShipmentToast(box, payload.data.message || text.createdToast, 'success');
-          if (updateButton && !updateButton.disabled) {
-            if (text.autoPollRegistration === '1') {
+          if (payload.data && payload.data.registration_attempt_id) {
+            submitDpdRegistration(form, payload.data.registration_attempt_id, box, updateButton);
+          } else if (updateButton && !updateButton.disabled) {
+            if (text.autoPollRegistration === '1' && statusPayload.carrier_key === 'dpd' && statusPayload.polling_continue) {
+              startDpdRegistrationPolling(updateButton);
+            } else if (text.autoPollRegistration === '1') {
               startCdekPolling(updateButton);
             } else {
               requestShipmentStatus(updateButton, { auto: true });

@@ -179,3 +179,7 @@ Warnings:
 - `unitLoad`;
 - CDEK/Russian Post runtime changes;
 - DPD checkout pricing changes.
+
+## 0.67.0 Shipment Preparation Boundary
+
+The existing DPD shipment preparation modal still owns validation, places and payload preview. The lifecycle step reuses that payload but does not change checkout pricing, order delivery recalculation, package builder rules, COD/NPP, unitLoad or label/document preparation. Pending registration is persisted before `createOrder2`, and DPD shipments now keep only common shipment fields plus `dpd_*` lifecycle fields; `cdek_*` fields are stripped for DPD.

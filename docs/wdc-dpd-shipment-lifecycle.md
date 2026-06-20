@@ -1,0 +1,33 @@
+# DPD Shipment Lifecycle 0.67.0
+
+This lifecycle is rebuilt from `develop` 0.66.2 and does not reuse experimental DPD status/debug branches or old 0.67.x adapter code.
+
+## Manual create
+
+Manual creation is page-controlled and two-stage. The first AJAX request validates the modal draft and saves a local DPD shipment before any SOAP call: `carrier_key=dpd`, Woo order id, internal order number, `datePickup`, service code, delivery type, terminals, places, sanitized request snapshot, `registration_started_at`, `dpd_registration_state=submitting`, `status=pending_creation_in_carrier`, `universal_status_code=pending_creation_in_carrier`, `status_title=Ждём регистрацию`, current admin id and `created_by_context=admin_manual`. The response contains `registration_attempt_id`; the modal closes and the shared shipment block shows the pending state immediately.
+
+The second AJAX request submits the same form with `registration_attempt_id` and calls DPD `order2/createOrder2` using wrapper `orders`. The timeout is fixed at 10 seconds. `OK` stores `orderNum` as `dpd_order_number`, tracking fields and `_wdc_dpd_order_number`. `OrderPending` keeps the shipment pending. `OrderDuplicate`, `OrderError` and `OrderCancelled` become terminal registration states. Timeout / `Error Fetching http headers` is treated as uncertain and continues through `getOrderStatus`; explicit transport errors stop automatic polling but leave manual update available.
+
+No Action Scheduler, background queue or DPD cron is registered.
+
+## Registration polling
+
+While the current page is open, DPD pending registration uses non-overlapping frontend polling every 10 seconds. The backend calls `order2/getOrderStatus` with wrapper `orderStatus`, `auth` inside `orderStatus`, and `order[]` rows containing `orderNumberInternal` and `datePickup`.
+
+`OK` stores the DPD number, marks `dpd_registration_state=ok`, sets `created_in_carrier`, runs one global DPD event sync and refreshes the block. `OrderPending` and empty/no-data responses keep polling. Terminal DPD creation statuses stop polling and show the saved message. Transport/SOAP errors stop automatic polling but leave the update button visible so the manager can restart polling.
+
+## Manual attach, cancel and remove
+
+Manual attach is available only when no DPD shipment or pending registration exists. It saves the DPD number into shipment tracking fields and `_wdc_dpd_order_number`, marks the shipment as created and does not run `getEvents` automatically.
+
+Cancel uses `order2/cancelOrder` with wrapper `orders` and `cancel[]`. `Canceled` and `CanceledPreviously` delete the local shipment and `_wdc_dpd_order_number`. `CallDPD`, `NotFound`, `Error` and transport failures keep the local shipment; the remove button may be shown only in the current DOM after the failed cancel response and that temporary state is not persisted.
+
+Local remove deletes only the local DPD shipment, clears `_wdc_dpd_order_number` and does not call DPD.
+
+## Button policy
+
+No local DPD shipment shows `Создать отправление DPD` and `Внести номер DPD вручную`. Pending registration without DPD number shows `Обновить статус` and `Удалить из заказа`. A shipment with DPD number shows `Обновить статус`; cancel is shown only for EventCode `1001`, `1101`, `1201`, `1401`, `1501`. EventCode `1301` and all other non-cancellable states show local remove instead. DPD document/label actions are intentionally empty.
+
+## Price/date enrichment
+
+Manual update with a DPD number runs global `getEvents`, then calls `tracing1-1/getStatesByDPDOrder` for the current order with wrapper `request`, `dpdOrderNr` and `pickupYear` from `datePickup`. It stores `dpd_actual_cost_kopecks`, `planned_delivery_date` and `dpd_enrichment_checked_at` only when both `orderCost` and `planDeliveryDate` are present. This API never changes universal status. Actual price is compared with saved base API cost using the existing 3% tolerance: within threshold is green/ok, above threshold is warning/red, missing base cost is neutral.
