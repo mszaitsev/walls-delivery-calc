@@ -1,7 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.67.0.
+Current plugin version: 0.67.1.
 
+Version 0.67.1 fixes four DPD lifecycle review blockers: registration business statuses with `errorMessage` now reach the registration service instead of becoming transport errors; the admin shipment block renders DPD last operation as date, EventCode and marker; getEvents rows matched only by `clientOrderNr` but without a local DPD shipment are treated as unmatched; and incoming events without a valid timestamp no longer overwrite a saved event with a valid timestamp. No checkout pricing, order recalculation, DPD cron, Action Scheduler, labels/documents or legacy migration changes were added.
 Version 0.67.0 rebuilds the DPD shipment lifecycle from `develop` 0.66.2. Manual DPD create is now a two-stage page-controlled flow: the first AJAX request saves a local pending shipment before any SOAP call, closes the modal and renders `Ждём регистрацию`; the second AJAX request calls `order2/createOrder2` with the fixed 10-second timeout. Pending or uncertain creates continue through frontend `getOrderStatus` polling every 10 seconds while the page is open. DPD status updates use `event-tracking/getEvents` as a global client inbox with an atomic lock, last-event-only storage, optional `confirm(docId)` and `resultComplete` pagination. `tracing1-1/getStatesByDPDOrder` is used only for actual price and planned delivery date enrichment; DPD documents/labels, cron/autosync, Action Scheduler jobs, legacy migrations and checkout/recalculation changes remain out of scope. See `docs/wdc-dpd-shipment-lifecycle.md` and `docs/wdc-dpd-event-sync.md`.
 
 

@@ -865,8 +865,8 @@
   function operationSummary(status) {
     return [
       status && status.carrier_operation_date,
-      status && status.carrier_operation_address,
-      status && status.carrier_operation_index
+      status && (status.carrier_operation_code || status.carrier_operation_address),
+      status && (status.carrier_operation_marker || status.carrier_operation_index)
     ].filter(function (value) {
       return String(value || '').trim() !== '';
     }).join(', ') || '-';

@@ -142,10 +142,8 @@ final class DpdApiClient {
 		$row = $this->first_order_response_row( $body );
 		$status = strtoupper( trim( (string) ( $row['status'] ?? $body['status'] ?? '' ) ) );
 		$error_message = trim( (string) ( $row['errorMessage'] ?? $body['errorMessage'] ?? '' ) );
-		$success = '' === $status || 'OK' === $status;
-		if ( '' !== $error_message && 'OK' !== $status ) {
-			$success = false;
-		}
+		$business_status = in_array( $status, array( 'OK', 'ORDERPENDING', 'ORDERDUPLICATE', 'ORDERERROR', 'ORDERCANCELLED' ), true );
+		$success = ( '' === $status || $business_status ) && ! empty( $normalized['success'] );
 
 		return array_merge(
 			$normalized,
@@ -153,7 +151,7 @@ final class DpdApiClient {
 				'success' => $success,
 				'order' => $row,
 				'error_code' => $success ? '' : 'dpd_business_error',
-				'error_message' => $success ? '' : $this->safe_message( '' !== $error_message ? $error_message : 'DPD вернул ошибку создания заказа.' ),
+				'error_message' => '' !== $error_message ? $this->safe_message( $error_message ) : ( $success ? '' : 'DPD вернул ошибку создания заказа.' ),
 			)
 		);
 	}
@@ -168,7 +166,7 @@ final class DpdApiClient {
 			DpdEndpoints::SERVICE_ORDER,
 			'getOrderStatus',
 			$payload,
-			array( 'wrapper' => DpdSoapRequest::WRAPPER_ORDER_STATUS )
+			array( 'wrapper' => DpdSoapRequest::WRAPPER_ORDER_STATUS, 'allow_business_status_response' => true )
 		);
 	}
 
@@ -337,9 +335,11 @@ final class DpdApiClient {
 		$body = is_array( $normalized['body'] ?? null ) ? $normalized['body'] : array();
 		$error_message = $this->first_error_message( $body );
 		if ( '' !== $error_message ) {
-			$normalized['success'] = false;
-			$normalized['error_code'] = 'dpd_business_error';
 			$normalized['error_message'] = $this->safe_message( $error_message );
+			if ( empty( $options['allow_business_status_response'] ) ) {
+				$normalized['success'] = false;
+				$normalized['error_code'] = 'dpd_business_error';
+			}
 		}
 
 		return $normalized;

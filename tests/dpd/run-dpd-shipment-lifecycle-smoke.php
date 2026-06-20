@@ -21,7 +21,7 @@ function wp_salt( string $scheme = '' ): string { return 'lifecycle'; }
 function sanitize_key( mixed $key ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $key ) ) ?? ''; }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function sanitize_text_field( mixed $value ): string { return trim( (string) $value ); }
-final class DpdLifecycleFakeSoap implements DpdSoapClientInterface { public array $calls = array(); public function call( string $service, string $method, array $payload, DpdCredentials $credentials, array $options = array() ): DpdSoapResponse { $this->calls[] = compact( 'service', 'method', 'payload', 'options' ); return new DpdSoapResponse( true, array(), array() ); } public function is_available(): bool { return true; } }
+final class DpdLifecycleFakeSoap implements DpdSoapClientInterface { public array $calls = array(); public array $responses = array(); public function call( string $service, string $method, array $payload, DpdCredentials $credentials, array $options = array() ): DpdSoapResponse { $this->calls[] = compact( 'service', 'method', 'payload', 'options' ); $body = array_shift( $this->responses ) ?? array(); return new DpdSoapResponse( true, $body, array() ); } public function is_available(): bool { return true; } }
 $settings = new DpdSettings( new SettingsRepository(), new EncryptionService() );
 $settings->save_from_admin( array( DpdSettings::ENVIRONMENT_KEY => DpdSettings::ENV_TEST, DpdSettings::TEST_CLIENT_NUMBER_KEY => '123', 'dpd_test_client_key' => 'secret' ) );
 dpd_lifecycle_assert( 10 === $settings->order_create_timeout(), 'createOrder2 timeout must be exactly 10 seconds.' );
@@ -33,6 +33,21 @@ $client->getStatesByDPDOrder( array( 'dpdOrderNr' => 'DPD1', 'pickupYear' => 202
 dpd_lifecycle_assert( 'order2' === $soap->calls[0]['service'] && 'getOrderStatus' === $soap->calls[0]['method'] && DpdSoapRequest::WRAPPER_ORDER_STATUS === $soap->calls[0]['options']['wrapper'], 'getOrderStatus must use order2/orderStatus wrapper.' );
 dpd_lifecycle_assert( 'order2' === $soap->calls[1]['service'] && 'cancelOrder' === $soap->calls[1]['method'] && DpdSoapRequest::WRAPPER_ORDERS === $soap->calls[1]['options']['wrapper'], 'cancelOrder must use order2/orders wrapper.' );
 dpd_lifecycle_assert( 'tracing1-1' === $soap->calls[2]['service'] && 'getStatesByDPDOrder' === $soap->calls[2]['method'] && DpdSoapRequest::WRAPPER_REQUEST === $soap->calls[2]['options']['wrapper'] && 2026 === $soap->calls[2]['payload']['pickupYear'], 'getStatesByDPDOrder must use tracing1-1/request with pickupYear.' );
+$business_soap = new DpdLifecycleFakeSoap();
+$business_soap->responses = array(
+	array( 'return' => array( 'status' => 'OrderDuplicate', 'errorMessage' => 'duplicate from DPD' ) ),
+	array( 'return' => array( 'status' => 'OrderError', 'errorMessage' => 'error from DPD' ) ),
+	array( 'return' => array( 'status' => 'OrderCancelled', 'errorMessage' => 'cancelled from DPD' ) ),
+	array( 'return' => array( 'status' => 'OrderDuplicate', 'errorMessage' => 'duplicate create' ) ),
+);
+$business_client = new DpdApiClient( $settings, $business_soap );
+foreach ( array( 'OrderDuplicate', 'OrderError', 'OrderCancelled' ) as $expected_status ) {
+	$response = $business_client->getOrderStatus( array( 'order' => array( array( 'orderNumberInternal' => '100', 'datePickup' => '2026-06-20' ) ) ) );
+	$row = $response['body']['return'] ?? array();
+	dpd_lifecycle_assert( ! empty( $response['success'] ) && $expected_status === (string) ( $row['status'] ?? '' ) && 'dpd_business_error' !== (string) ( $response['error_code'] ?? '' ), 'getOrderStatus ' . $expected_status . ' must remain a business response for registration service.' );
+}
+$create_business = $business_client->createOrder2( array( 'order' => array() ) );
+dpd_lifecycle_assert( ! empty( $create_business['success'] ) && 'OrderDuplicate' === (string) ( $create_business['order']['status'] ?? '' ) && 'duplicate create' === (string) ( $create_business['error_message'] ?? '' ), 'createOrder2 OrderDuplicate with errorMessage must not become transport_error before registration service.' );
 $adapter_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Dpd/DpdShipmentAdapter.php' );
 $registration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Dpd/DpdOrderRegistrationService.php' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );

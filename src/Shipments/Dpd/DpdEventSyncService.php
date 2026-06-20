@@ -63,7 +63,8 @@ final class DpdEventSyncService {
 			$order = $this->match_order( $event );
 			if ( null === $order ) { $result->unmatched++; $this->log_unmatched( $event ); continue; }
 			$shipment = $this->repository->find( $order );
-			if ( array() === $shipment || $this->is_stale_pending_client_event( $shipment, $event ) || ! $this->is_new_event( $shipment, $event ) ) { $result->unchanged++; continue; }
+			if ( array() === $shipment ) { $result->unmatched++; $this->log_unmatched( $event ); continue; }
+			if ( $this->is_stale_pending_client_event( $shipment, $event ) || ! $this->is_new_event( $shipment, $event ) ) { $result->unchanged++; continue; }
 			$status = $this->mapping->resolve( (string) $event['eventNumber'] );
 			$now = $this->now();
 			$updated = array_merge( $shipment, array(
@@ -89,6 +90,7 @@ final class DpdEventSyncService {
 	/** @param array<string,mixed> $shipment @param array<string,mixed> $event */
 	private function is_new_event( array $shipment, array $event ): bool {
 		$saved_ts = (int) ( $shipment['dpd_event_timestamp'] ?? 0 ); $incoming_ts = (int) $event['timestamp'];
+		if ( $saved_ts > 0 && $incoming_ts <= 0 ) { return false; }
 		if ( $incoming_ts > 0 && $saved_ts > 0 && $incoming_ts < $saved_ts ) { return false; }
 		if ( $incoming_ts === $saved_ts && (string) ( $shipment['dpd_event_code'] ?? '' ) === (string) $event['eventNumber'] && (string) ( $shipment['dpd_event_marker'] ?? '' ) === (string) $event['eventCode'] ) { return false; }
 		return true;

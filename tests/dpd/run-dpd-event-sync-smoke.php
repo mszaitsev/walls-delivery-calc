@@ -45,5 +45,7 @@ $latest = $normalizer->latest_by_order( $events );
 dpd_event_assert( '2201' === $latest['dpd:DPD1']['eventNumber'], 'DPD normalizer must choose latest eventDate per dpdOrderNr.' );
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Dpd/DpdEventSyncService.php' );
 dpd_event_assert( str_contains( $source, 'add_option' ) && str_contains( $source, 'MAX_PACKAGES = 20' ) && str_contains( $source, 'resultComplete' ) && str_contains( $source, 'confirmEvents' ), 'DpdEventSyncService must include atomic lock, batch limit, resultComplete and confirm loop.' );
+dpd_event_assert( str_contains( $source, 'if ( array() === $shipment ) { $result->unmatched++; $this->log_unmatched( $event ); continue; }' ), 'Matched Woo order without local DPD shipment must be counted and logged as unmatched.' );
+dpd_event_assert( str_contains( $source, 'if ( $saved_ts > 0 && $incoming_ts <= 0 ) { return false; }' ), 'Incoming DPD event without valid timestamp must not overwrite a saved valid timestamp.' );
 echo "DPD event sync smoke passed
 ";

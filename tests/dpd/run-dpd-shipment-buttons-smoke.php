@@ -30,5 +30,6 @@ $presentation = $adapter->presentation();
 dpd_buttons_assert( 'Внести номер DPD вручную' === $presentation['manual_attach_button_label'] && 'Номер DPD' === $presentation['manual_attach_placeholder'], 'DPD manual attach UI text must be configured.' );
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' );
 dpd_buttons_assert( str_contains( $source, 'temporary_can_remove' ) && str_contains( $source, 'startDpdRegistrationPolling' ) && str_contains( $source, 'registration_attempt_id' ), 'Admin JS must include DPD temporary remove and two-stage polling markers.' );
+dpd_buttons_assert( str_contains( $source, 'carrier_operation_code || status.carrier_operation_address' ) && str_contains( $source, 'carrier_operation_marker || status.carrier_operation_index' ), 'Admin JS operationSummary must render DPD date/code/marker with CDEK fallback.' );
 echo "DPD shipment buttons smoke passed
 ";
