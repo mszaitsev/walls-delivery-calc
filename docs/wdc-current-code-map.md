@@ -1,4 +1,4 @@
-## DPD Shipment Lifecycle And Autosync 0.68.0
+## DPD Shipment Lifecycle, Documents And Autosync 0.69.1
 
 - `src/Shipments/Dpd/DpdOrderRegistrationService.php` owns manual DPD registration, local pending creation before SOAP, `getOrderStatus` refresh/polling decisions, manual attach, cancel and local remove.
 - `src/Shipments/Dpd/DpdEventSyncService.php` treats `event-tracking/getEvents` as the global DPD client inbox: atomic option lock, `docId`, `resultComplete`, optional confirm, 20-package safety limit, all matched WooCommerce orders updated from one package and unmatched event summaries logged without PII. In autosync mode it also enriches only newly updated shipments missing actual cost or planned delivery date.
@@ -6,10 +6,12 @@
 - `src/Shipments/Dpd/DpdEventNormalizer.php` normalizes `clientOrderNr`, `dpdOrderNr`, `eventNumber`, `eventCode`, `eventName`, `eventDate` and selects the latest event per order without storing parameter history.
 - `src/Shipments/Dpd/DpdShipmentEnrichmentService.php` calls `tracing1-1/getStatesByDPDOrder` only for `orderCost` and `planDeliveryDate`; status and button policy still come from registration state or `getEvents`.
 - `src/Shipments/Dpd/DpdShipmentButtonPolicy.php` centralizes DPD actions: create/manual when absent, update/remove while pending, update with DPD number, cancel only for EventCode `1001`, `1101`, `1201`, `1401`, `1501`, and remove for cancelled/other states.
-- `src/Shipments/Dpd/DpdShipmentAdapter.php` stays thin over those services, returns no label/document actions, exposes generic shipment status payload fields for the shared metabox UI, and opts into autosync support so the shared scheduler can run the DPD global pre-pass.
-- `src/Carriers/Dpd/DpdApiClient.php`, `DpdSoapRequest.php` and `DpdSettings.php` provide WSDL-checked DPD methods/wrappers, fixed 10-second `createOrder2` timeout, nullable event lookback days, disabled-by-default event confirm setting, enabled-by-default DPD autosync setting and readonly last autosync run/result keys.
-- `src/Shipments/Admin/OrderShipmentsMetabox.php` and `assets/admin/shipments-admin.js` handle the two-stage DPD create flow, non-overlapping 10-second pending polling, manual update, temporary local-remove visibility after cancel errors and carrier-neutral planned-date/status rendering.
-- `src/Shipments/Application/ShipmentCreationService.php` strips CDEK-only fields from DPD shipments; no `cdek_*` keys are written for DPD.`r`n- `src/Shipments/Application/ShipmentStatusAutoSyncService.php` runs DPD once per autosync pass via `DpdEventSyncService::sync(null, true)`, records DPD diagnostics, saves `wdc_dpd_autosync_last_run/result`, and skips per-order DPD polling because the event inbox is already global.
+- `src/Shipments/Dpd/DpdShipmentAdapter.php` stays thin over those services, returns the `Скачать документы` action only for EventCode `1401` with `dpd_order_number`, exposes generic shipment status payload fields for the shared metabox UI, and opts into autosync support so the shared scheduler can run the DPD global pre-pass.
+- `src/Carriers/Dpd/DpdApiClient.php`, `DpdSoapRequest.php` and `DpdSettings.php` provide WSDL-checked DPD methods/wrappers including `order2/getInvoiceFile` with wrapper `request` and `label-print/createLabelFile` with wrapper `getLabelFile`, fixed 10-second `createOrder2` timeout, nullable event lookback days, disabled-by-default event confirm setting, enabled-by-default DPD autosync setting and readonly last autosync run/result keys.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` and `assets/admin/shipments-admin.js` handle the two-stage DPD create flow, non-overlapping 10-second pending polling, manual update, temporary local-remove visibility after cancel errors, carrier-neutral planned-date/status rendering and DPD ZIP document download. Initial PHP render now uses the DPD adapter status payload for cancel/remove visibility, matching AJAX refresh behavior.
+- `src/Shipments/Application/ShipmentCreationService.php` strips CDEK-only fields from DPD shipments; no `cdek_*` keys are written for DPD.
+- `src/Shipments/Dpd/DpdShipmentDocumentService.php` validates DPD shipment state, requests invoice PDF without `parcelCount`/`cargoValue`, requests the A6 PDF label, creates a temporary ZIP and cleans it after streaming; it never writes PDFs to order meta or mutates shipment status.
+- `src/Shipments/Application/ShipmentStatusAutoSyncService.php` runs DPD once per autosync pass via `DpdEventSyncService::sync(null, true)`, records DPD diagnostics, saves `wdc_dpd_autosync_last_run/result`, and skips per-order DPD polling because the event inbox is already global.
 
 ## DPD Manual Create 0.66.0
 
@@ -21,6 +23,17 @@
 - `src/Shipments/Admin/OrderShipmentsMetabox.php` exposes `Создать отправление DPD` in the existing modal. `assets/admin/shipments-admin.js` keeps the button disabled until tariff, date, pickup/courier and cargo-place data are valid.
 - `tests/dpd/run-dpd-create-order-smoke.php` covers mocked createOrder2, payload shape, persistence, duplicates, errors and no auto-create hook.
 # Карта текущего кода
+
+## DPD Pickup Recalculation Diagnostics 0.69.3
+
+- `src/Carriers/Runtime/DpdQuoteCarrier.php` keeps order recalculation on the checkout DPD carrier path and passes explicit `dpd_receiver_city_id` / `dpd_city_id` context into tariff calculation. Its quote raw reference and DPD rate meta expose receiver location/city, delivery terminal selection/code/source, raw count, skipped counters and `dpd_filter_removed_count`.
+- `src/Carriers/Dpd/Tariff/DpdTariffCalculationService.php` still calls `getServiceCostByParcels3` for pickup and courier. Pickup uses `selfDelivery=true`; when no selected pickup point is supplied it auto-selects an active receiver `parcel_shop` terminalCode and never treats `terminal_self_delivery` as the receiver pickup point. Missing receiver parcel shops return `DPD pickup tariff unavailable: no active parcel_shop for receiver cityId {cityId}`.
+- `tests/dpd/run-dpd-order-recalculation-smoke.php` covers DPD courier presence, DPD pickup grouped rendering, auto parcel_shop terminalCode, duplicate `terminal_self_delivery` avoidance, selected pickup payload, diagnostics counters and the no-parcel-shop case where courier remains available while pickup is absent.
+## Order Delivery Recalculation 0.69.2
+
+- `src/Orders/Application/OrderQuoteRequestMapper.php` maps WooCommerce order state plus the admin-selected settlement into the checkout `QuoteRequest`. For order recalculation it accepts `id`, `location_id` or `selected_location_id`, preserves DPD cityId aliases, and passes `dpd_receiver_city_id` into `customer_context` so DPD rates use the same `DpdQuoteCarrier` runtime as checkout.
+- `src/Orders/Application/OrderDeliveryRecalculationService.php` groups preview rates without carrier filtering and now has DPD fallback titles: `DPD до пункта выдачи` for pickup and `DPD курьером` for courier. Russian Post and CDEK title fallbacks are unchanged.
+- `tests/dpd/run-dpd-order-recalculation-smoke.php` covers DPD pickup/courier preview, grouped tariffs, DPD titles, `location_id` payloads, pickup save blockers/aliases, courier pickup-meta cleanup and platform/calculation data persistence.
 
 ## DPD Status Mapping 0.65.1
 

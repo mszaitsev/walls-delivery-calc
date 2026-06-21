@@ -134,6 +134,7 @@ final class DpdShipmentAdapter implements ShipmentCarrierAdapterInterface {
 			'can_update_status' => ! empty( $policy['update'] ),
 			'can_cancel' => ! empty( $policy['cancel'] ),
 			'can_remove_from_order' => ! empty( $policy['remove'] ),
+			'can_download_dpd_documents' => DpdShipmentDocumentService::can_download_documents( $shipment ),
 			'shipment_status_label' => $label,
 			'universal_status_code' => (string) ( $shipment['universal_status_code'] ?? '' ),
 			'universal_status_label' => (string) ( $shipment['universal_status_label'] ?? '' ),
@@ -310,9 +311,19 @@ final class DpdShipmentAdapter implements ShipmentCarrierAdapterInterface {
 	 * @return array<int,array<string,mixed>>
 	 */
 	public function label_actions( object $order, array $shipment ): array {
-		unset( $order, $shipment );
+		unset( $order );
+		if ( ! DpdShipmentDocumentService::can_download_documents( $shipment ) ) {
+			return array();
+		}
 
-		return array();
+		return array(
+			array(
+				'key' => 'download_documents',
+				'label' => 'Скачать документы',
+				'type' => 'download',
+				'visible' => true,
+			),
+		);
 	}
 
 	public function supports_status_auto_sync(): bool {

@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 0000006F A0AC:74BD
+Volume serial number is 00000069 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -118,6 +118,7 @@ C:.
 |   |   wdc-dpd-checkout-pickup-selection.md
 |   |   wdc-dpd-checkout-runtime.md
 |   |   wdc-dpd-create-order.md
+|   |   wdc-dpd-documents.md
 |   |   wdc-dpd-event-sync.md
 |   |   wdc-dpd-geography.md
 |   |   wdc-dpd-integration.md
@@ -609,6 +610,7 @@ C:.
 |   |   |       DpdOrderRegistrationService.php
 |   |   |       DpdShipmentAdapter.php
 |   |   |       DpdShipmentButtonPolicy.php
+|   |   |       DpdShipmentDocumentService.php
 |   |   |       DpdShipmentEnrichmentService.php
 |   |   |       DpdShipmentRepository.php
 |   |   |       DpdStatusMapping.php
@@ -670,6 +672,7 @@ C:.
     |       run-dpd-city-resolver-smoke.php
     |       run-dpd-create-order-smoke.php
     |       run-dpd-dadata-fallback-smoke.php
+    |       run-dpd-documents-smoke.php
     |       run-dpd-event-sync-smoke.php
     |       run-dpd-foundation-smoke.php
     |       run-dpd-geography-import-smoke.php

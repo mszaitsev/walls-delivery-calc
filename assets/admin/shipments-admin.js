@@ -901,7 +901,8 @@
       canCancel: !!status.can_cancel,
       canRemove: !!status.can_remove_from_order,
       canUpdate: !!status.can_update_status,
-      canPrintBarcode: !!status.can_print_barcode
+      canPrintBarcode: !!status.can_print_barcode,
+      canDownloadDpdDocuments: !!status.can_download_dpd_documents
     });
     setTrackingDisplay(box, status.barcode || '');
     renderShipmentPrice(box, status);
@@ -918,6 +919,11 @@
     if (Array.isArray(payload.label_actions) && !Object.prototype.hasOwnProperty.call(status, 'can_print_barcode')) {
       status.can_print_barcode = payload.label_actions.some(function (action) {
         return action && action.key === 'download_label' && !!action.visible;
+      });
+    }
+    if (Array.isArray(payload.label_actions) && !Object.prototype.hasOwnProperty.call(status, 'can_download_dpd_documents')) {
+      status.can_download_dpd_documents = payload.label_actions.some(function (action) {
+        return action && action.key === 'download_documents' && !!action.visible;
       });
     }
     return status;
@@ -1047,12 +1053,14 @@
     const canRemove = !!(state && state.canRemove);
     const canUpdate = !!(state && state.canUpdate);
     const canPrintBarcode = !!(state && state.canPrintBarcode);
+    const canDownloadDpdDocuments = !!(state && state.canDownloadDpdDocuments);
     const openButton = box.querySelector('[data-wdc-open-shipment-modal]');
     const updateButton = box.querySelector('[data-wdc-update-shipment-status]');
     const manualButton = box.querySelector('[data-wdc-open-manual-tracking]');
     const cancelButton = box.querySelector('[data-wdc-cancel-shipment]');
     const removeButton = box.querySelector('[data-wdc-remove-shipment-from-order]');
     const barcodeDownload = box.querySelector('[data-wdc-cdek-barcode-download]');
+    const dpdDocumentsDownload = box.querySelector('[data-wdc-dpd-documents-download]');
     if (box.dataset) box.dataset.hasShipment = hasShipment ? '1' : '0';
     if (openButton) {
       setVisible(openButton, !hasShipment);
@@ -1080,6 +1088,14 @@
         barcodeDownload.removeAttribute('aria-disabled');
       } else {
         barcodeDownload.setAttribute('aria-disabled', 'true');
+      }
+    }
+    if (dpdDocumentsDownload) {
+      setVisible(dpdDocumentsDownload, canDownloadDpdDocuments);
+      if (canDownloadDpdDocuments) {
+        dpdDocumentsDownload.removeAttribute('aria-disabled');
+      } else {
+        dpdDocumentsDownload.setAttribute('aria-disabled', 'true');
       }
     }
   }
@@ -1111,7 +1127,7 @@
       message.dataset.status = '';
     }
     setCdekPollingIndicator(box, false);
-    updateShipmentButtons(box, { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false, canPrintBarcode: false });
+    updateShipmentButtons(box, { hasShipment: false, canCancel: false, canRemove: false, canUpdate: false, canPrintBarcode: false, canDownloadDpdDocuments: false });
     const manualForm = box.querySelector('[data-wdc-manual-tracking-form]');
     if (manualForm) manualForm.hidden = true;
   }
@@ -1311,7 +1327,7 @@
       .then((payload) => {
         if (!payload || !payload.success) {
           if (payload && payload.data && payload.data.temporary_can_remove) {
-            updateShipmentButtons(box, { hasShipment: true, canCancel: false, canRemove: true, canUpdate: true, canPrintBarcode: false });
+            updateShipmentButtons(box, { hasShipment: true, canCancel: false, canRemove: true, canUpdate: true, canPrintBarcode: false, canDownloadDpdDocuments: false });
           }
           throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Не удалось отменить отправление.');
         }
@@ -1387,7 +1403,8 @@
           canCancel: !!statusPayload.can_cancel,
           canRemove: !!statusPayload.can_remove_from_order,
           canUpdate: !!statusPayload.can_update_status,
-          canPrintBarcode: !!statusPayload.can_print_barcode
+          canPrintBarcode: !!statusPayload.can_print_barcode,
+          canDownloadDpdDocuments: !!statusPayload.can_download_dpd_documents
         });
         showShipmentToast(box, payload.data.warning || payload.data.message || 'Номер отслеживания сохранен.', payload.data.warning ? 'warning' : 'success');
         return payload;
@@ -1946,6 +1963,93 @@
     poll();
   }
 
+
+  function setDpdDocumentsButtonState(link, busy, label) {
+    if (!link) return;
+    const originalText = link.getAttribute('data-wdc-original-label') || link.textContent || 'Скачать документы';
+    link.setAttribute('data-wdc-original-label', originalText);
+    if (busy) {
+      link.setAttribute('aria-disabled', 'true');
+      link.classList.add('is-busy', 'wdc-cdek-barcode-download--busy');
+      link.textContent = label || 'Формируем документы...';
+    } else {
+      link.classList.remove('is-busy', 'wdc-cdek-barcode-download--busy');
+      link.removeAttribute('aria-disabled');
+      link.textContent = originalText;
+    }
+  }
+
+  function dpdDocumentsFilenameFromDisposition(disposition) {
+    const fallback = 'dpd-documents.zip';
+    if (!disposition) return fallback;
+    const utfMatch = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+    if (utfMatch && utfMatch[1]) {
+      try {
+        return decodeURIComponent(utfMatch[1].replace(/["']/g, '')) || fallback;
+      } catch (error) {
+        return fallback;
+      }
+    }
+    const match = /filename="?([^";]+)"?/i.exec(disposition);
+    return match && match[1] ? match[1] : fallback;
+  }
+
+  function triggerDpdDocumentsDownload(downloadUrl) {
+    downloadUrl = String(downloadUrl || '').replace(/&amp;/g, '&');
+    if (!downloadUrl) return Promise.reject(new Error('Не удалось скачать документы DPD.'));
+    return fetch(downloadUrl, {
+      method: 'GET',
+      credentials: 'same-origin'
+    })
+      .then((response) => {
+        if (!response.ok) {
+          return response.text().catch(function () { return ''; }).then(function (text) {
+            const message = String(text || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+            throw new Error(message || 'Не удалось скачать документы DPD.');
+          });
+        }
+        const contentType = response.headers.get('Content-Type') || response.headers.get('content-type') || '';
+        const normalizedType = contentType.toLowerCase();
+        if (normalizedType && normalizedType.indexOf('application/zip') === -1 && normalizedType.indexOf('application/octet-stream') === -1) {
+          throw new Error('Сервер вернул не ZIP-файл документов DPD.');
+        }
+        const filename = dpdDocumentsFilenameFromDisposition(response.headers.get('Content-Disposition') || response.headers.get('content-disposition') || '');
+        return response.blob().then((blob) => ({ blob, filename }));
+      })
+      .then((download) => {
+        if (!download.blob || download.blob.size <= 0) {
+          throw new Error('Не удалось скачать документы DPD.');
+        }
+        const objectUrl = URL.createObjectURL(download.blob);
+        const anchor = document.createElement('a');
+        anchor.href = objectUrl;
+        anchor.download = download.filename || 'dpd-documents.zip';
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(function () {
+          URL.revokeObjectURL(objectUrl);
+        }, 30000);
+      });
+  }
+
+  function requestDpdDocumentsDownload(link) {
+    if (!link || link.classList.contains('is-busy')) return;
+    const box = link.closest('[data-wdc-shipments-metabox]');
+    setDpdDocumentsButtonState(link, true, 'Формируем документы...');
+    triggerDpdDocumentsDownload(link.dataset.downloadUrl || link.href || '')
+      .then(function () {
+        window.clearTimeout(link._wdcDocumentsResetTimer);
+        link._wdcDocumentsResetTimer = window.setTimeout(function () {
+          setDpdDocumentsButtonState(link, false);
+        }, CDEK_BARCODE_RESET_MS);
+      })
+      .catch(function (error) {
+        setDpdDocumentsButtonState(link, false);
+        showShipmentToast(box, error && error.message ? error.message : 'Не удалось скачать документы DPD.', 'error');
+      });
+  }
+
   document.addEventListener('click', function (event) {
     const dateStep = event.target.closest('[data-wdc-date-step]');
     if (dateStep) {
@@ -1980,6 +2084,12 @@
       return;
     }
 
+    const dpdDocumentsDownload = event.target.closest('[data-wdc-dpd-documents-download]');
+    if (dpdDocumentsDownload) {
+      event.preventDefault();
+      requestDpdDocumentsDownload(dpdDocumentsDownload);
+      return;
+    }
     const cdekBarcodeDownload = event.target.closest('[data-wdc-cdek-barcode-download]');
     if (cdekBarcodeDownload) {
       event.preventDefault();
@@ -2283,7 +2393,8 @@
             canCancel: !!statusPayload.can_cancel,
             canRemove: !!statusPayload.can_remove_from_order,
             canUpdate: !!statusPayload.can_update_status,
-            canPrintBarcode: !!statusPayload.can_print_barcode
+            canPrintBarcode: !!statusPayload.can_print_barcode,
+            canDownloadDpdDocuments: !!statusPayload.can_download_dpd_documents
           });
           showShipmentToast(box, payload.data.message || text.createdToast, 'success');
           if (payload.data && payload.data.registration_attempt_id) {

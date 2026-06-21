@@ -7,6 +7,7 @@ use WallsShop\WDC\Admin\AdminMenu;
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointService;
+use WallsShop\WDC\Shipments\Dpd\DpdShipmentDocumentService;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\DeliveryServices\DeliveryServiceRepository;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
@@ -43,6 +44,7 @@ final class OrderShipmentsMetabox {
 	private const AJAX_CDEK_BARCODE_PREPARE = 'wdc_cdek_barcode_prepare';
 	private const AJAX_DPD_COURIER_CONTACT_HISTORY = 'wdc_dpd_courier_contact_history';
 	private const ACTION_CDEK_BARCODE_PDF = 'wdc_cdek_barcode_pdf';
+	private const ACTION_DPD_DOCUMENTS_ZIP = 'wdc_dpd_documents_zip';
 
 	public function __construct(
 		private OrderShipmentRepository $repository,
@@ -60,7 +62,8 @@ final class OrderShipmentsMetabox {
 		private string $plugin_url = '',
 		private string $version = '1',
 		private ?CdekBarcodePrintService $cdek_barcode_print = null,
-		private ?CarrierShipmentAdapterRegistry $carrier_adapters = null
+		private ?CarrierShipmentAdapterRegistry $carrier_adapters = null,
+		private ?DpdShipmentDocumentService $dpd_documents = null
 	) {
 	}
 
@@ -79,6 +82,7 @@ final class OrderShipmentsMetabox {
 		add_action( 'wp_ajax_' . self::AJAX_CDEK_BARCODE_PREPARE, array( $this, 'ajax_cdek_barcode_prepare' ) );
 		add_action( 'wp_ajax_' . self::AJAX_DPD_COURIER_CONTACT_HISTORY, array( $this, 'ajax_dpd_courier_contact_history' ) );
 		add_action( 'admin_post_' . self::ACTION_CDEK_BARCODE_PDF, array( $this, 'admin_post_cdek_barcode_pdf' ) );
+		add_action( 'admin_post_' . self::ACTION_DPD_DOCUMENTS_ZIP, array( $this, 'admin_post_dpd_documents_zip' ) );
 	}
 
 	public function add_meta_box(): void {
@@ -306,7 +310,7 @@ final class OrderShipmentsMetabox {
 		$price_compare_status = (string) ( $status_payload['actual_cost_compare_status'] ?? '' );
 		$price_compare_message = (string) ( $status_payload['actual_cost_compare_message'] ?? '' );
 		$can_cancel = $is_russian_post && $this->can_cancel_shipment( $shipment );
-		if ( $is_cdek ) {
+		if ( $is_cdek || $is_dpd ) {
 			$can_cancel = ! empty( $status_payload['can_cancel'] );
 		}
 		$can_remove = ! empty( $status_payload['can_remove_from_order'] ) || ( $is_russian_post && '' !== $barcode && ! $can_cancel );
@@ -318,8 +322,11 @@ final class OrderShipmentsMetabox {
 		$show_remove = $has_created && $can_remove;
 		$label_actions = $this->label_actions_for_carrier( $order, $carrier_key, $shipment );
 		$show_cdek_barcode = array() !== array_filter( $label_actions, static fn ( array $action ): bool => 'download_label' === (string) ( $action['key'] ?? '' ) && ! empty( $action['visible'] ) );
+		$show_dpd_documents = array() !== array_filter( $label_actions, static fn ( array $action ): bool => 'download_documents' === (string) ( $action['key'] ?? '' ) && ! empty( $action['visible'] ) );
 		$has_cdek_barcode_service = $is_cdek && $this->cdek_barcode_print instanceof CdekBarcodePrintService;
+		$has_dpd_documents_service = $is_dpd && $this->dpd_documents instanceof DpdShipmentDocumentService;
 		$cdek_barcode_download_url = $has_cdek_barcode_service ? $this->cdek_barcode_url( $order_id, 'download' ) : '';
+		$dpd_documents_download_url = $has_dpd_documents_service ? $this->dpd_documents_url( $order_id ) : '';
 		?>
 		<div class="wdc-shipments-metabox" data-wdc-shipments-metabox data-carrier-key="<?php echo esc_attr( $carrier_key ); ?>" data-has-shipment="<?php echo $has_created ? '1' : '0'; ?>" <?php $this->render_presentation_attrs( $presentation ); ?>>
 			<p><strong><?php echo esc_html__( 'Служба', 'walls-delivery-calc' ); ?>:</strong> <?php echo esc_html( (string) ( $meta['service_title'] ?? $request['rate_id'] ?? '-' ) ); ?></p>
@@ -336,6 +343,7 @@ final class OrderShipmentsMetabox {
 				<button type="button" class="button button-primary" data-wdc-open-shipment-modal <?php echo $show_primary_actions ? '' : 'hidden'; ?> <?php disabled( ! $show_primary_actions ); ?>><?php echo esc_html( $presentation['create_button_label'] ); ?></button>
 				<button type="button" class="button" data-wdc-update-shipment-status data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $show_update ? '' : 'hidden'; ?> <?php disabled( ! $show_update ); ?>><?php echo esc_html( $presentation['update_status_button_label'] ); ?></button>
 				<a class="button" data-wdc-cdek-barcode-download data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-prepare-action="<?php echo esc_attr( self::AJAX_CDEK_BARCODE_PREPARE ); ?>" data-download-url="<?php echo esc_url( $cdek_barcode_download_url ); ?>" href="<?php echo esc_url( $cdek_barcode_download_url ); ?>" <?php echo $show_cdek_barcode ? '' : 'hidden'; ?>><?php echo esc_html__( 'Скачать этикетку', 'walls-delivery-calc' ); ?></a>
+				<a class="button" data-wdc-dpd-documents-download data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-download-url="<?php echo esc_url( $dpd_documents_download_url ); ?>" href="<?php echo esc_url( $dpd_documents_download_url ); ?>" <?php echo $show_dpd_documents ? '' : 'hidden'; ?>><?php echo esc_html__( 'Скачать документы', 'walls-delivery-calc' ); ?></a>
 				<button type="button" class="button" data-wdc-open-manual-tracking <?php echo $show_manual_attach ? '' : 'hidden'; ?> <?php disabled( ! $show_manual_attach ); ?>><?php echo esc_html( $presentation['manual_attach_button_label'] ); ?></button>
 				<button type="button" class="button" data-wdc-cancel-shipment data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $show_cancel ? '' : 'hidden'; ?> <?php disabled( ! $can_cancel ); ?>><?php echo esc_html( $presentation['cancel_button_label'] ); ?></button>
 				<button type="button" class="button" data-wdc-remove-shipment-from-order data-order-id="<?php echo esc_attr( (string) $order_id ); ?>" data-shipment-key="<?php echo esc_attr( $carrier_key ); ?>" <?php echo $show_remove ? '' : 'hidden'; ?> <?php disabled( ! $show_remove ); ?>><?php echo esc_html( $presentation['remove_button_label'] ); ?></button>
@@ -780,6 +788,48 @@ final class OrderShipmentsMetabox {
 		header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
 		header( 'Content-Length: ' . strlen( (string) ( $result['body'] ?? '' ) ) );
 		echo (string) ( $result['body'] ?? '' );
+		exit;
+	}
+
+	public function admin_post_dpd_documents_zip(): void {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_die( esc_html__( 'Недостаточно прав.', 'walls-delivery-calc' ), '', array( 'response' => 403 ) );
+		}
+		$order_id = (int) ( $_GET['order_id'] ?? 0 );
+		$carrier = sanitize_key( wp_unslash( (string) ( $_GET['carrier'] ?? '' ) ) );
+		$nonce = sanitize_text_field( wp_unslash( (string) ( $_GET['_wpnonce'] ?? '' ) ) );
+		if ( DpdSettings::CARRIER_KEY !== $carrier || $order_id <= 0 || ! wp_verify_nonce( $nonce, self::ACTION_DPD_DOCUMENTS_ZIP . '_' . $order_id ) ) {
+			wp_die( esc_html__( 'Неверный запрос.', 'walls-delivery-calc' ), '', array( 'response' => 403 ) );
+		}
+		$order = function_exists( 'wc_get_order' ) ? wc_get_order( $order_id ) : null;
+		if ( ! is_object( $order ) ) {
+			wp_die( esc_html__( 'Заказ не найден.', 'walls-delivery-calc' ), '', array( 'response' => 404 ) );
+		}
+		if ( ! $this->dpd_documents instanceof DpdShipmentDocumentService ) {
+			wp_die( esc_html__( 'Документы DPD недоступны.', 'walls-delivery-calc' ), '', array( 'response' => 500 ) );
+		}
+
+		$result = $this->dpd_documents->create_zip_for_order( $order );
+		if ( empty( $result['success'] ) ) {
+			wp_die( esc_html( (string) ( $result['message'] ?? 'Не удалось скачать документы DPD.' ) ), '', array( 'response' => 400 ) );
+		}
+
+		$path = (string) ( $result['path'] ?? '' );
+		$filename = sanitize_file_name( (string) ( $result['filename'] ?? 'dpd-documents.zip' ) );
+		if ( '' === $filename ) {
+			$filename = 'dpd-documents.zip';
+		}
+		if ( ! is_file( $path ) ) {
+			wp_die( esc_html__( 'ZIP-файл документов DPD не найден.', 'walls-delivery-calc' ), '', array( 'response' => 500 ) );
+		}
+		if ( function_exists( 'nocache_headers' ) ) {
+			nocache_headers();
+		}
+		header( 'Content-Type: application/zip' );
+		header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
+		header( 'Content-Length: ' . filesize( $path ) );
+		readfile( $path );
+		$this->dpd_documents->delete_temp_file( $path );
 		exit;
 	}
 
@@ -1654,6 +1704,18 @@ final class OrderShipmentsMetabox {
 	/**
 	 * @param array<string,mixed> $meta
 	 */
+	private function dpd_documents_url( int $order_id ): string {
+		return add_query_arg(
+			array(
+				'action' => self::ACTION_DPD_DOCUMENTS_ZIP,
+				'order_id' => $order_id,
+				'carrier' => DpdSettings::CARRIER_KEY,
+				'_wpnonce' => wp_create_nonce( self::ACTION_DPD_DOCUMENTS_ZIP . '_' . $order_id ),
+			),
+			admin_url( 'admin-post.php' )
+		);
+	}
+
 	private function pickup_destination_index( string $pickup_code, string $postcode, array $meta ): string {
 		$explicit = preg_replace( '/\D+/', '', (string) ( $meta['pickup_point_postcode'] ?? $meta['pickup_postcode'] ?? '' ) ) ?? '';
 		if ( 1 === preg_match( '/^\d{6}$/', $explicit ) ) {

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Orders\Application;
 
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\Runtime\CdekCarrier;
 use WallsShop\WDC\Checkout\Runtime\CheckoutOrchestrator;
@@ -100,6 +101,8 @@ final class OrderDeliveryRecalculationService {
 		$default = DeliveryType::COURIER === $delivery_type ? RussianPostDomesticSettings::COURIER_SERVICE_TITLE : RussianPostDomesticSettings::PICKUP_SERVICE_TITLE;
 		if ( CdekCarrier::KEY === $first->carrier_key ) {
 			$default = DeliveryType::COURIER === $delivery_type ? CdekCarrier::COURIER_TITLE : CdekCarrier::PICKUP_TITLE;
+		} elseif ( DpdSettings::CARRIER_KEY === $first->carrier_key ) {
+			$default = DeliveryType::COURIER === $delivery_type ? DpdSettings::DEFAULT_COURIER_METHOD_TITLE : DpdSettings::DEFAULT_PICKUP_METHOD_TITLE;
 		}
 		$title = trim( (string) ( $first->meta[ $title_key ] ?? '' ) ) ?: $default;
 		usort( $rates, static fn( DeliveryRate $left, DeliveryRate $right ): int => $left->price->get_kopecks() <=> $right->price->get_kopecks() );
@@ -180,6 +183,8 @@ final class OrderDeliveryRecalculationService {
 			$default = DeliveryType::COURIER === $rate->delivery_type ? RussianPostDomesticSettings::COURIER_SERVICE_TITLE : RussianPostDomesticSettings::PICKUP_SERVICE_TITLE;
 		} elseif ( CdekCarrier::KEY === $rate->carrier_key ) {
 			$default = DeliveryType::COURIER === $rate->delivery_type ? CdekCarrier::COURIER_TITLE : CdekCarrier::PICKUP_TITLE;
+		} elseif ( DpdSettings::CARRIER_KEY === $rate->carrier_key ) {
+			$default = DeliveryType::COURIER === $rate->delivery_type ? DpdSettings::DEFAULT_COURIER_METHOD_TITLE : DpdSettings::DEFAULT_PICKUP_METHOD_TITLE;
 		}
 
 		return trim( (string) ( $rate->meta[ $title_key ] ?? '' ) ) ?: $default;
