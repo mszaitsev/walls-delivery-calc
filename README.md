@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.69.1.
+Current plugin version: 0.69.2.
+
+Version 0.69.2 restores DPD pickup/courier rates in the WooCommerce order `Калькулятор доставок` preview when the admin location payload carries `location_id` instead of `id`. Order recalculation still uses the checkout runtime (`CheckoutOrchestrator` -> `DpdQuoteCarrier`), now preserving `location_id` and DPD cityId in the quote context and using DPD fallback group titles (`DPD до пункта выдачи`, `DPD курьером`). DPD `getEvents` after `createOrder2 OK` was checked: an empty first inbox response is allowed, timestamps are touched, and later manual status refresh can pull delayed `1401 / OrderCreate` without API flow changes.
 
 Version 0.69.1 fixes the initial PHP render for DPD shipment action buttons. The order `Отправления` block now uses the same DPD status payload policy on reload as AJAX refreshes: EventCode `1401` shows `Обновить статус`, `Скачать документы` and `Отменить заказ в DPD`, while EventCode `1301` shows `Обновить статус` and `Удалить из заказа`.
 Version 0.69.0 adds the DPD `Скачать документы` action in the WooCommerce order `Отправления` block. The button is shown only for DPD shipments with saved `dpd_order_number` and EventCode `1401`; it downloads one ZIP with `getInvoiceFile` invoice PDF and `label-print/createLabelFile` A6 PDF label. `getInvoiceFile` sends only `orderNum` and does not send `parcelCount` or `cargoValue`, so DPD uses order data from its system. The label request uses `fileFormat=PDF`, `pageSize=A6`, wrapper `getLabelFile`, and the DPD pickup-date business error is shown as `Наклейка DPD недоступна: у заказа дата забора ранее текущей даты.` See `docs/wdc-dpd-documents.md`.

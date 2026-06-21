@@ -1,6 +1,16 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.64.2.
+Version: 0.69.2.
+
+## Статус 0.69.2
+
+Восстановлен показ DPD pickup/courier rates в order-admin блоке `Калькулятор доставок` при preview после выбора населенного пункта.
+
+- Причина была в mapper-слое пересчета: admin selected-location payload может приходить с `location_id`, а `OrderQuoteRequestMapper` принимал только `id`. В таком случае checkout-compatible request терял `location_id`, и DPD runtime не получал корректный receiver location context.
+- Mapper теперь принимает `id`, `location_id` и `selected_location_id`, сохраняет DPD cityId aliases (`dpd_city_id` / `dpd_receiver_city_id`) и передает `dpd_receiver_city_id` в `customer_context`.
+- Preview по-прежнему идет через `CheckoutOrchestrator -> DpdQuoteCarrier`; отдельного DPD calculator для order recalculation нет.
+- `OrderDeliveryRecalculationService` добавил DPD fallback titles для grouped tariffs: `DPD до пункта выдачи` и `DPD курьером`; Russian Post/CDEK fallbacks не изменялись.
+- DPD pickup save по-прежнему требует явно выбранный `selected_pickup_point`; auto-selected receiver terminalCode остается quote-only. DPD courier save по-прежнему очищает shared pickup meta и DPD receiver terminal aliases.
 
 ## Статус 0.64.2
 

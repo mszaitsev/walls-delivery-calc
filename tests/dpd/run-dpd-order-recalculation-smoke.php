@@ -124,6 +124,11 @@ $courier_group = array_values( array_filter( $dpd_groups, static fn( array $rate
 $pickup_tariff = $pickup_group['tariff_variants'][0] ?? array();
 $courier_tariff = $courier_group['tariff_variants'][0] ?? array();
 dpd_order_recalc_assert( 'MAX' === (string) ( $pickup_tariff['object_code'] ?? '' ) && 'MAX' === (string) ( $courier_tariff['object_code'] ?? '' ), 'DPD recalculation grouped variants must expose selected serviceCode.' );
+dpd_order_recalc_assert( 'DPD до пункта выдачи' === (string) ( $pickup_group['label'] ?? '' ) && 'DPD курьером' === (string) ( $courier_group['label'] ?? '' ), 'DPD recalculation grouped titles must use DPD pickup/courier defaults.' );
+$location_id_preview = $recalculation->preview( $order, array( 'location_id' => 200, 'dpd_city_id' => 49694102, 'display_name' => 'Москва', 'city_value' => 'Москва', 'region_name' => 'Москва', 'postal_code' => '101000', 'country_code' => 'RU' ) );
+$location_id_dpd_groups = array_values( array_filter( $location_id_preview['rates'], static fn( array $rate ): bool => DpdSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? '' ) ) );
+dpd_order_recalc_assert( count( $location_id_dpd_groups ) >= 2, 'DPD order recalculation preview must keep DPD rates when selected_location uses location_id instead of id.' );
+dpd_order_recalc_assert( 200 === (int) ( $location_id_preview['request']['customer_context']['location_id'] ?? 0 ) && 49694102 === (int) ( $location_id_preview['request']['customer_context']['dpd_receiver_city_id'] ?? 0 ), 'Order recalculation QuoteRequest must preserve location_id and DPD cityId context.' );
 
 $dpd_pickup_order = new DpdOrderRecalcOrder();
 $dpd_pickup_order->meta['_wdc_platform_carrier_key'] = 'dpd';

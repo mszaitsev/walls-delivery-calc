@@ -171,6 +171,8 @@ final class OrderQuoteRequestMapper {
 				'gar_id'                    => $address->gar_id,
 				'normalized_address'        => $address->normalized,
 				'fallback_address'          => $address->fallback,
+				'dpd_city_id'               => $override['dpd_city_id'] ?? null,
+				'dpd_receiver_city_id'      => $override['dpd_city_id'] ?? null,
 				'dpd_selected_terminal_code'=> $this->dpd_selected_terminal_code( $order, $selected_pickup_point ),
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value && 0 !== $value
@@ -235,9 +237,12 @@ final class OrderQuoteRequestMapper {
 			return array();
 		}
 
+		$location_id = $this->positive_int( $selected_location['id'] ?? $selected_location['location_id'] ?? $selected_location['selected_location_id'] ?? null );
+		$dpd_city_id = $this->positive_int( $selected_location['dpd_city_id'] ?? $selected_location['dpd_receiver_city_id'] ?? null );
+
 		return array_filter(
 			array(
-				'id'           => isset( $selected_location['id'] ) && '' !== (string) $selected_location['id'] ? (int) $selected_location['id'] : null,
+				'id'           => $location_id > 0 ? $location_id : null,
 				'fias_id'      => trim( (string) ( $selected_location['fias_id'] ?? $selected_location['selected_location_fias_id'] ?? '' ) ),
 				'gar_id'       => trim( (string) ( $selected_location['gar_id'] ?? $selected_location['gar_object_id'] ?? '' ) ),
 				'country_code' => strtoupper( trim( (string) ( $selected_location['country_code'] ?? $selected_location['selected_location_country'] ?? 'RU' ) ) ),
@@ -246,9 +251,14 @@ final class OrderQuoteRequestMapper {
 				'city'         => $city,
 				'postcode'     => trim( (string) ( $selected_location['postal_code'] ?? $selected_location['postcode'] ?? $selected_location['selected_location_postcode'] ?? '' ) ),
 				'display_name' => $display,
+				'dpd_city_id'  => $dpd_city_id > 0 ? $dpd_city_id : null,
 			),
 			static fn( mixed $value ): bool => null !== $value && '' !== $value
 		);
+	}
+
+	private function positive_int( mixed $value ): int {
+		return is_numeric( $value ) && (int) $value > 0 ? (int) $value : 0;
 	}
 
 	private function order_weight_g( object $order ): int {

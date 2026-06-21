@@ -24,6 +24,12 @@
 - `tests/dpd/run-dpd-create-order-smoke.php` covers mocked createOrder2, payload shape, persistence, duplicates, errors and no auto-create hook.
 # Карта текущего кода
 
+## Order Delivery Recalculation 0.69.2
+
+- `src/Orders/Application/OrderQuoteRequestMapper.php` maps WooCommerce order state plus the admin-selected settlement into the checkout `QuoteRequest`. For order recalculation it accepts `id`, `location_id` or `selected_location_id`, preserves DPD cityId aliases, and passes `dpd_receiver_city_id` into `customer_context` so DPD rates use the same `DpdQuoteCarrier` runtime as checkout.
+- `src/Orders/Application/OrderDeliveryRecalculationService.php` groups preview rates without carrier filtering and now has DPD fallback titles: `DPD до пункта выдачи` for pickup and `DPD курьером` for courier. Russian Post and CDEK title fallbacks are unchanged.
+- `tests/dpd/run-dpd-order-recalculation-smoke.php` covers DPD pickup/courier preview, grouped tariffs, DPD titles, `location_id` payloads, pickup save blockers/aliases, courier pickup-meta cleanup and platform/calculation data persistence.
+
 ## DPD Status Mapping 0.65.1
 
 - `src/Domain/Status/DeliveryStatus.php` defines the universal shipment status `pending_creation_in_carrier` with label `Попытка создания в ТК`. It is the first value in `DeliveryStatus::all()`, directly before `created_in_carrier`, so admin select ordering stays stable.
