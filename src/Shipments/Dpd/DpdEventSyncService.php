@@ -59,13 +59,13 @@ final class DpdEventSyncService {
 
 	/** @param array<int,array<string,mixed>> $events */
 	private function process_events( array $events, DpdEventSyncResult $result ): void {
-		foreach ( $this->normalizer->latest_by_order( $events ) as $event ) {
+		foreach ( $this->events_for_processing( $events, $result ) as $event ) {
 			$order = $this->match_order( $event );
 			if ( null === $order ) { $result->unmatched++; $this->log_unmatched( $event ); continue; }
 			$shipment = $this->repository->find( $order );
 			if ( array() === $shipment ) { $result->unmatched++; $this->log_unmatched( $event ); continue; }
 			if ( ! $this->event_matches_shipment( $shipment, $event ) ) { $result->unmatched++; $this->log_unmatched( $event, (string) ( $shipment['dpd_order_number'] ?? '' ) ); continue; }
-			if ( $this->is_stale_pending_client_event( $shipment, $event ) || ! $this->is_new_event( $shipment, $event ) ) { $result->unchanged++; continue; }
+			if ( ! $this->is_new_event( $shipment, $event ) ) { $result->unchanged++; continue; }
 			$status = $this->mapping->resolve( (string) $event['eventNumber'] );
 			$now = $this->now();
 			$updated = array_merge( $shipment, array(
@@ -78,6 +78,121 @@ final class DpdEventSyncService {
 			$this->order_status_mapping->apply( $order, $updated, $status );
 			$result->updated++;
 		}
+	}
+
+	/** @param array<int,array<string,mixed>> $events @return array<int,array<string,mixed>> */
+	private function events_for_processing( array $events, DpdEventSyncResult $result ): array {
+		$selected = array();
+		foreach ( $this->normalizer->latest_by_order( $events ) as $event ) {
+			if ( $this->event_targets_pending_client_shipment( $event ) ) {
+				continue;
+			}
+			$selected[] = $event;
+		}
+
+		return array_merge( $selected, array_values( $this->select_pending_client_events( $events, $result ) ) );
+	}
+
+	/** @param array<int,array<string,mixed>> $events @return array<string,array<string,mixed>> */
+	private function select_pending_client_events( array $events, DpdEventSyncResult $result ): array {
+		$selected = array();
+		foreach ( $events as $event ) {
+			$client_key = $this->pending_client_key( $event );
+			if ( '' === $client_key ) {
+				continue;
+			}
+			$order = $this->pending_event_order( $event );
+			if ( null === $order ) {
+				continue;
+			}
+			$shipment = $this->repository->find( $order );
+			if ( ! $this->is_pending_shipment( $shipment ) ) {
+				continue;
+			}
+			if ( ! $this->is_valid_pending_client_event( $shipment, $event ) ) {
+				$result->unmatched++;
+				$this->log_unmatched( $event, '', 'stale_or_cancelled_pending_event' );
+				continue;
+			}
+			if ( ! isset( $selected[ $client_key ] ) || $this->event_is_later( $event, $selected[ $client_key ] ) ) {
+				$selected[ $client_key ] = $event;
+			}
+		}
+
+		return $selected;
+	}
+
+	/** @param array<string,mixed> $event */
+	private function event_targets_pending_client_shipment( array $event ): bool {
+		$order = $this->pending_event_order( $event );
+		if ( null === $order ) {
+			return false;
+		}
+
+		return $this->is_pending_shipment( $this->repository->find( $order ) );
+	}
+
+	/** @param array<string,mixed> $event */
+	private function pending_event_order( array $event ): ?object {
+		$client_order = trim( (string) ( $event['clientOrderNr'] ?? '' ) );
+		if ( '' === $client_order ) {
+			return null;
+		}
+
+		return $this->repository->find_order_by_client_order_number( $client_order );
+	}
+
+	/** @param array<string,mixed> $event */
+	private function pending_client_key( array $event ): string {
+		$client_order = trim( (string) ( $event['clientOrderNr'] ?? '' ) );
+		return '' === $client_order ? '' : 'client:' . $client_order;
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function is_pending_shipment( array $shipment ): bool {
+		return array() !== $shipment && '' === trim( (string) ( $shipment['dpd_order_number'] ?? '' ) );
+	}
+
+	/** @param array<string,mixed> $shipment @param array<string,mixed> $event */
+	private function is_valid_pending_client_event( array $shipment, array $event ): bool {
+		$started_at = trim( (string) ( $shipment['registration_started_at'] ?? '' ) );
+		$event_ts = (int) ( $event['timestamp'] ?? 0 );
+		if ( '' !== $started_at && $event_ts > 0 ) {
+			$started_ts = strtotime( $started_at );
+			if ( false !== $started_ts && $event_ts < ( $started_ts - 300 ) ) {
+				return false;
+			}
+		}
+		if ( '' !== trim( (string) ( $event['dpdOrderNr'] ?? '' ) ) && $this->is_pending_negative_event( $event ) ) {
+			return false;
+		}
+
+		return true;
+	}
+
+	/** @param array<string,mixed> $event */
+	private function is_pending_negative_event( array $event ): bool {
+		$event_number = (string) ( $event['eventNumber'] ?? '' );
+		if ( in_array( $event_number, array( '1301', '2901', '2904' ), true ) ) {
+			return true;
+		}
+		$status = $this->mapping->resolve( $event_number );
+
+		return in_array( $status, array( DeliveryStatus::CANCELLED, DeliveryStatus::RETURNING_TO_SENDER, DeliveryStatus::RETURNED_TO_SENDER ), true );
+	}
+
+	/** @param array<string,mixed> $incoming @param array<string,mixed> $current */
+	private function event_is_later( array $incoming, array $current ): bool {
+		$incoming_ts = (int) ( $incoming['timestamp'] ?? 0 );
+		$current_ts = (int) ( $current['timestamp'] ?? 0 );
+		if ( $incoming_ts > 0 && $current_ts > 0 && $incoming_ts !== $current_ts ) {
+			return $incoming_ts > $current_ts;
+		}
+		if ( 0 === $incoming_ts && $current_ts > 0 ) {
+			return false;
+		}
+
+		return (int) ( $incoming['index'] ?? 0 ) >= (int) ( $current['index'] ?? 0 );
 	}
 
 	/** @param array<string,mixed> $event */
@@ -117,24 +232,6 @@ final class DpdEventSyncService {
 	}
 
 
-	/** @param array<string,mixed> $shipment @param array<string,mixed> $event */
-	private function is_stale_pending_client_event( array $shipment, array $event ): bool {
-		if ( '' !== trim( (string) ( $shipment['dpd_order_number'] ?? '' ) ) || '' !== trim( (string) ( $event['dpdOrderNr'] ?? '' ) ) ) {
-			return false;
-		}
-		$started_at = trim( (string) ( $shipment['registration_started_at'] ?? '' ) );
-		$event_ts = (int) ( $event['timestamp'] ?? 0 );
-		if ( '' === $started_at || $event_ts <= 0 ) {
-			return false;
-		}
-		$started_ts = strtotime( $started_at );
-		if ( false === $started_ts ) {
-			return false;
-		}
-
-		return $event_ts < ( $started_ts - 300 );
-	}
-
 	/** @return array<string,mixed> */
 	private function events_request(): array {
 		$request = array(); $days = $this->settings->events_lookback_days();
@@ -144,7 +241,7 @@ final class DpdEventSyncService {
 
 	private function acquire_lock(): string { $token = sha1( uniqid( 'dpd-events-', true ) ); $value = array( 'token' => $token, 'expires' => time() + self::LOCK_TTL ); $existing = function_exists( 'get_option' ) ? get_option( self::LOCK_OPTION, array() ) : array(); if ( is_array( $existing ) && (int) ( $existing['expires'] ?? 0 ) > time() ) { return ''; } if ( function_exists( 'delete_option' ) ) { delete_option( self::LOCK_OPTION ); } if ( function_exists( 'add_option' ) && add_option( self::LOCK_OPTION, $value, '', 'no' ) ) { return $token; } return ''; }
 	private function release_lock( string $token ): void { $existing = function_exists( 'get_option' ) ? get_option( self::LOCK_OPTION, array() ) : array(); if ( is_array( $existing ) && $token === (string) ( $existing['token'] ?? '' ) && function_exists( 'delete_option' ) ) { delete_option( self::LOCK_OPTION ); } }
-	/** @param array<string,mixed> $event */ private function log_unmatched( array $event, string $saved_dpd_order_number = '' ): void { $context = array( 'eventNumber' => $event['eventNumber'], 'eventCode' => $event['eventCode'], 'eventDate' => $event['eventDate'], 'clientOrderNr' => $event['clientOrderNr'], 'dpdOrderNr' => $event['dpdOrderNr'] ); if ( '' !== trim( $saved_dpd_order_number ) ) { $context['saved_dpd_order_number'] = trim( $saved_dpd_order_number ); } $this->log( 'warning', 'DPD event unmatched.', $context ); }
+	/** @param array<string,mixed> $event */ private function log_unmatched( array $event, string $saved_dpd_order_number = '', string $reason = '' ): void { $context = array( 'eventNumber' => $event['eventNumber'], 'eventCode' => $event['eventCode'], 'eventDate' => $event['eventDate'], 'clientOrderNr' => $event['clientOrderNr'], 'dpdOrderNr' => $event['dpdOrderNr'] ); if ( '' !== trim( $saved_dpd_order_number ) ) { $context['saved_dpd_order_number'] = trim( $saved_dpd_order_number ); } if ( '' !== trim( $reason ) ) { $context['reason'] = trim( $reason ); } $this->log( 'warning', 'DPD event unmatched.', $context ); }
 	/** @param array<string,mixed> $context */ private function log( string $level, string $message, array $context ): void { if ( $this->logger instanceof Logger && method_exists( $this->logger, $level ) ) { $this->logger->{$level}( $message, $context ); } }
 	private function now(): string { return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' ); }
 	private function now_datetime(): \DateTimeImmutable { $tz = function_exists( 'wp_timezone' ) ? wp_timezone() : new \DateTimeZone( 'Asia/Novosibirsk' ); return new \DateTimeImmutable( 'now', $tz ); }

@@ -24,6 +24,11 @@ After a package is fully parsed, matched updates are saved and unmatched summari
 
 Unmatched events are still considered processed and do not block confirm. Confirm errors stop the loop; saved changes remain, and the next manual run can safely receive the same unconfirmed package because event application is idempotent.
 
+## 0.67.4 pending re-registration guard
+
+For a pending DPD shipment that does not yet have `dpd_order_number`, `clientOrderNr` fallback is allowed only after extra guards. The event must belong to the Woo order, have `eventDate` at or after `registration_started_at - 300 seconds`, and must not be an old negative event with a DPD number. `1301`, `2901`, `2904`, mapped `cancelled`, `returning_to_sender` and `returned_to_sender` events are logged as unmatched with `reason=stale_or_cancelled_pending_event` and do not attach their `dpdOrderNr` to the current pending registration.
+
+If one package contains several valid events for the same pending `clientOrderNr`, the service picks the latest valid `eventDate`, using the response order as the tie-breaker. This lets a fresh `1401 / OrderCreate` for `RUNEW` win over older ignored events for `RUOLD`. Once a shipment has a saved `dpd_order_number`, the fallback is no longer relevant: incoming events must match that exact DPD number after trim and case-insensitive normalization.
 ## 0.67.3 multiple shipments per Woo order
 
 When one WooCommerce order has had multiple DPD shipments over time, `dpdOrderNr` is the primary event identity. `DpdEventSyncService::match_order()` first looks up `_wdc_dpd_order_number`; if that finds an order, the event belongs only to that shipment. `clientOrderNr` is used only as fallback when no DPD-number match exists, which keeps pending registration without a DPD number working.

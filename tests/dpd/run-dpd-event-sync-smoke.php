@@ -15,6 +15,7 @@ use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Dpd\DpdEventNormalizer;
 use WallsShop\WDC\Shipments\Dpd\DpdEventSyncService;
+use WallsShop\WDC\Shipments\Dpd\DpdStatusMapping;
 
 function dpd_event_assert( bool $condition, string $message ): void { if ( ! $condition ) { throw new RuntimeException( $message ); } }
 function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['wdc_dpd_event_options'][ $key ] ?? $default; }
@@ -50,11 +51,27 @@ $matches->setAccessible( true );
 dpd_event_assert( false === $matches->invoke( $sync_service, array( 'dpd_order_number' => 'RU222222222' ), array( 'dpdOrderNr' => 'RU111111111' ) ), 'Old DPD event with same clientOrderNr but different dpdOrderNr must not match active shipment.' );
 dpd_event_assert( true === $matches->invoke( $sync_service, array( 'dpd_order_number' => ' RU222222222 ' ), array( 'dpdOrderNr' => 'ru222222222' ) ), 'Matching DPD order numbers must match case-insensitively with trim.' );
 dpd_event_assert( true === $matches->invoke( $sync_service, array( 'dpd_order_number' => '' ), array( 'clientOrderNr' => '12345', 'dpdOrderNr' => '' ) ), 'Pending DPD shipment without saved number must allow clientOrderNr fallback.' );
+$mapping_property = $reflection->getProperty( 'mapping' );
+$mapping_property->setAccessible( true );
+$mapping_property->setValue( $sync_service, new DpdStatusMapping( new SettingsRepository() ) );
+$valid_pending = $reflection->getMethod( 'is_valid_pending_client_event' );
+$valid_pending->setAccessible( true );
+$pending_shipment = array( 'dpd_order_number' => '', 'registration_started_at' => '2026-06-20 10:00:00' );
+dpd_event_assert( false === $valid_pending->invoke( $sync_service, $pending_shipment, array( 'eventNumber' => '1301', 'dpdOrderNr' => 'RUOLD', 'timestamp' => strtotime( '2026-06-20 09:50:00' ) ) ), 'Pending fallback must reject old cancelled DPD events before registration_started_at tolerance.' );
+dpd_event_assert( false === $valid_pending->invoke( $sync_service, $pending_shipment, array( 'eventNumber' => '1301', 'dpdOrderNr' => 'RUOLD', 'timestamp' => strtotime( '2026-06-20 10:00:00' ) ) ), 'Pending fallback must reject cancellation/negative events with a DPD number.' );
+dpd_event_assert( false === $valid_pending->invoke( $sync_service, $pending_shipment, array( 'eventNumber' => '2901', 'dpdOrderNr' => 'RUOLD', 'timestamp' => strtotime( '2026-06-20 10:01:00' ) ) ), 'Pending fallback must reject DPD OrderCancelled events with a DPD number.' );
+dpd_event_assert( true === $valid_pending->invoke( $sync_service, $pending_shipment, array( 'eventNumber' => '1401', 'dpdOrderNr' => 'RUNEW', 'timestamp' => strtotime( '2026-06-20 10:01:00' ) ) ), 'Pending fallback must accept a fresh OrderCreate event for the current registration.' );
+$event_later = $reflection->getMethod( 'event_is_later' );
+$event_later->setAccessible( true );
+dpd_event_assert( true === $event_later->invoke( $sync_service, array( 'timestamp' => strtotime( '2026-06-20 10:01:00' ), 'index' => 2 ), array( 'timestamp' => strtotime( '2026-06-20 10:00:00' ), 'index' => 1 ) ), 'Pending clientOrderNr selection must prefer the latest valid eventDate.' );
 $source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Dpd/DpdEventSyncService.php' );
 dpd_event_assert( str_contains( $source, 'add_option' ) && str_contains( $source, 'MAX_PACKAGES = 20' ) && str_contains( $source, 'resultComplete' ) && str_contains( $source, 'confirmEvents' ), 'DpdEventSyncService must include atomic lock, batch limit, resultComplete and confirm loop.' );
 dpd_event_assert( str_contains( $source, 'if ( array() === $shipment ) { $result->unmatched++; $this->log_unmatched( $event ); continue; }' ), 'Matched Woo order without local DPD shipment must be counted and logged as unmatched.' );
-dpd_event_assert( str_contains( $source, 'find_order_by_dpd_order_number( $dpd_order )' ) && strpos( $source, 'find_order_by_dpd_order_number( $dpd_order )' ) < strpos( $source, 'find_order_by_client_order_number' ), 'DPD event matching must prefer dpdOrderNr before clientOrderNr fallback.' );
+$match_order_source = substr( $source, strpos( $source, 'private function match_order' ), strpos( $source, 'private function event_matches_shipment' ) - strpos( $source, 'private function match_order' ) );
+dpd_event_assert( str_contains( $match_order_source, 'find_order_by_dpd_order_number( $dpd_order )' ) && strpos( $match_order_source, 'find_order_by_dpd_order_number( $dpd_order )' ) < strpos( $match_order_source, 'find_order_by_client_order_number' ), 'DPD event matching must prefer dpdOrderNr before clientOrderNr fallback.' );
 dpd_event_assert( str_contains( $source, 'event_matches_shipment' ) && str_contains( $source, 'normalize_dpd_number' ), 'DPD event processing must verify saved dpd_order_number before applying an event.' );
+dpd_event_assert( str_contains( $source, 'events_for_processing( $events, $result )' ) && str_contains( $source, 'select_pending_client_events' ) && str_contains( $source, 'stale_or_cancelled_pending_event' ), 'DPD pending registration events must be selected by clientOrderNr only after stale/cancelled filters.' );
+dpd_event_assert( str_contains( $source, "array( '1301', '2901', '2904' )" ) && str_contains( $source, 'DeliveryStatus::RETURNING_TO_SENDER' ) && str_contains( $source, 'DeliveryStatus::RETURNED_TO_SENDER' ), 'DPD pending fallback must reject cancelled/returning old-negative events with dpdOrderNr.' );
 dpd_event_assert( str_contains( $source, 'log_unmatched( $event, (string) ( $shipment[' ) && str_contains( $source, 'saved_dpd_order_number' ), 'DPD event dpdOrderNr mismatch must be logged as unmatched with saved DPD number.' );
 dpd_event_assert( str_contains( $source, 'if ( $saved_ts > 0 && $incoming_ts <= 0 ) { return false; }' ), 'Incoming DPD event without valid timestamp must not overwrite a saved valid timestamp.' );
 $registration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Dpd/DpdOrderRegistrationService.php' );

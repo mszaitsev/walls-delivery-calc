@@ -41,3 +41,9 @@ Manual DPD status refresh also touches `tracking_checked_at` and `updated_at` af
 DPD button visibility is based only on persisted shipment data. Saved `dpd_event_code` or generic `carrier_operation_code=1401` keeps `Отменить отправление в DPD` visible after reload; `1301` and non-cancellable operation codes hide cancel and show `Удалить из заказа`.
 
 The DPD shipment record stores the actual places sent in the `createOrder2` request as `dpd_sent_places` plus `dpd_cargo_num_pack`, `dpd_cargo_weight` and `dpd_cargo_volume`. These values are extracted from the already-built request payload / `request_snapshot`, not recalculated after the SOAP call. They are shown in the `Отправления` technical block because managers create shipment places in the shipment modal, not in `Калькулятор доставок`. If the DPD cabinet does not display dimensions, WDC still treats the request snapshot and `dpd_sent_places` as the local source of truth.
+
+## 0.67.4 pending re-registration events
+
+When a WooCommerce order previously had a DPD shipment and a new DPD registration is pending without a saved `dpd_order_number`, `getEvents` may still contain old unconfirmed events for the same `clientOrderNr`. The event sync keeps the client-order fallback only for this pending state, but filters it by `registration_started_at - 300 seconds` and ignores cancellation/return events with a DPD number so an old `RUOLD` cannot become the active number for the new attempt.
+
+Among valid pending events for the same `clientOrderNr`, the latest `eventDate` wins. A fresh `1401 / OrderCreate` with the new `dpdOrderNr` is saved as the active shipment number. After that point, all later events must match the saved `dpd_order_number`; `clientOrderNr` alone cannot update the shipment.
