@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.69.3.
+Current plugin version: 0.70.0.
+
+Version 0.70.0 completes the DPD WooCommerce status audit. DPD getEvents/manual refresh/autosync continue to use the carrier-neutral universal shipment status layer, and DpdEventSyncResult now exposes order status mapping counters so autosync diagnostics show DPD WooCommerce status changes, skips and errors. The new tests/dpd/run-dpd-woocommerce-status-audit-smoke.php covers DPD 1401/2201/3304 mapping, missing mappings, duplicate and older events, old dpdOrderNr protection, manual refresh, multi-order autosync, confirm enabled/disabled behavior and diagnostics. DPD is considered functionally complete after this step.
 
 Version 0.69.3 tightens DPD pickup pricing in the order Калькулятор доставок: pickup still goes through CheckoutOrchestrator -> DpdQuoteCarrier -> DpdTariffCalculationService -> getServiceCostByParcels3, passes selfDelivery=true, uses an active receiver parcel_shop terminalCode, and does not use 	erminal_self_delivery as the receiver pickup point. If no active receiver parcel shop exists, DPD courier rates stay available and pickup fails with the diagnostic DPD pickup tariff unavailable: no active parcel_shop for receiver cityId {cityId}. The smoke test now checks request payload, terminal selection, raw/filter counters and grouped pickup rendering.
 

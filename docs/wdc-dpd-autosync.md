@@ -1,6 +1,8 @@
 # DPD Autosync
 
-Version: 0.68.0.
+Version: 0.70.0.
+
+Version 0.70.0 update: DPD autosync now carries WooCommerce order status mapping diagnostics from the global getEvents pre-pass into the shared autosync counters. DPD still does not have separate WooCommerce status logic: EventCode -> DpdStatusMapping -> DeliveryStatus -> ShipmentOrderStatusMappingService remains the only path.
 
 DPD status autosync is connected to the existing shipment status autosync cron. It does not add a separate cron, does not change the manual DPD create/update flow, and does not implement DPD documents or labels.
 
