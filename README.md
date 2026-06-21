@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.69.2.
+Current plugin version: 0.69.3.
+
+Version 0.69.3 tightens DPD pickup pricing in the order Калькулятор доставок: pickup still goes through CheckoutOrchestrator -> DpdQuoteCarrier -> DpdTariffCalculationService -> getServiceCostByParcels3, passes selfDelivery=true, uses an active receiver parcel_shop terminalCode, and does not use 	erminal_self_delivery as the receiver pickup point. If no active receiver parcel shop exists, DPD courier rates stay available and pickup fails with the diagnostic DPD pickup tariff unavailable: no active parcel_shop for receiver cityId {cityId}. The smoke test now checks request payload, terminal selection, raw/filter counters and grouped pickup rendering.
 
 Version 0.69.2 restores DPD pickup/courier rates in the WooCommerce order `Калькулятор доставок` preview when the admin location payload carries `location_id` instead of `id`. Order recalculation still uses the checkout runtime (`CheckoutOrchestrator` -> `DpdQuoteCarrier`), now preserving `location_id` and DPD cityId in the quote context and using DPD fallback group titles (`DPD до пункта выдачи`, `DPD курьером`). DPD `getEvents` after `createOrder2 OK` was checked: an empty first inbox response is allowed, timestamps are touched, and later manual status refresh can pull delayed `1401 / OrderCreate` without API flow changes.
 

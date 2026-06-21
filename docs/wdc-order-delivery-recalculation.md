@@ -1,7 +1,16 @@
 # WDC Order Delivery Recalculation
 
-Version: 0.69.2.
+Version: 0.69.3.
 
+## Статус 0.69.3
+
+Уточнен DPD pickup flow в order-admin блоке `Калькулятор доставок`.
+
+- DPD pickup рассчитывается тем же checkout runtime path: `CheckoutOrchestrator -> DpdQuoteCarrier -> DpdTariffCalculationService -> getServiceCostByParcels3`.
+- Для pickup payload содержит `selfDelivery=true` и `delivery.terminalCode`; если менеджер еще не выбрал ПВЗ, backend выбирает активный receiver `parcel_shop` по `receiver_city_id` только для расчета.
+- `terminal_self_delivery` не используется как receiver pickup point. Если у `terminal_self_delivery` и `parcel_shop` совпадает `terminalCode`, auto-selection выбирает другой `parcel_shop`; fallback на duplicate parcel_shop остается допустимым только с warning.
+- Если в receiver cityId нет активного `parcel_shop`, DPD pickup не показывается, DPD courier не ломается, а diagnostics содержит `DPD pickup tariff unavailable: no active parcel_shop for receiver cityId {cityId}`.
+- Smoke покрывает receiver location/city diagnostics, terminal selection/code/source, raw/skipped/filter counters, `request_payload_sanitized.delivery.terminalCode`, grouped pickup result и no-parcel-shop negative case.
 ## Статус 0.69.2
 
 Восстановлен показ DPD pickup/courier rates в order-admin блоке `Калькулятор доставок` при preview после выбора населенного пункта.

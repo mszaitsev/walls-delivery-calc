@@ -37,6 +37,9 @@ function dpd_order_recalc_current_pickup_payload( DpdOrderRecalcOrder $order ): 
 	return is_array( $value ) ? $value : array();
 }
 
+$GLOBALS['wpdb']->locations[] = array( 'id' => 400, 'country_code' => 'RU', 'active' => 1, 'region_name' => 'Терминальная область', 'place_name' => 'Терминальный город', 'place_type' => 'г', 'display_name' => 'Терминальный город' );
+$GLOBALS['wpdb']->delivery_codes[] = array( 'location_id' => 400, 'dpd_city_id' => '77700001', 'updated_at' => current_time( 'mysql' ) );
+$GLOBALS['wpdb']->dpd_pickup_points[] = array( 'id' => 5, 'terminal_code' => 'ONLY-TERMINAL', 'type' => 'terminal_self_delivery', 'country_code' => 'RU', 'city_id' => 77700001, 'city_name' => 'Терминальный город', 'name' => 'DPD terminal only', 'address' => 'ул Складская, 1', 'source' => 'getTerminalsSelfDelivery2', 'is_active' => 1 );
 final class DpdOrderRecalcProduct {
 	public function get_sku(): string { return 'dpd-order-sku'; }
 	public function get_name(): string { return 'DPD order item'; }
@@ -125,10 +128,19 @@ $pickup_tariff = $pickup_group['tariff_variants'][0] ?? array();
 $courier_tariff = $courier_group['tariff_variants'][0] ?? array();
 dpd_order_recalc_assert( 'MAX' === (string) ( $pickup_tariff['object_code'] ?? '' ) && 'MAX' === (string) ( $courier_tariff['object_code'] ?? '' ), 'DPD recalculation grouped variants must expose selected serviceCode.' );
 dpd_order_recalc_assert( 'DPD до пункта выдачи' === (string) ( $pickup_group['label'] ?? '' ) && 'DPD курьером' === (string) ( $courier_group['label'] ?? '' ), 'DPD recalculation grouped titles must use DPD pickup/courier defaults.' );
+$pickup_rate_meta = is_array( $pickup_tariff['rate_meta'] ?? null ) ? $pickup_tariff['rate_meta'] : array();
+$pickup_request_payload = is_array( $pickup_rate_meta['request_payload_sanitized'] ?? null ) ? $pickup_rate_meta['request_payload_sanitized'] : array();
+$pickup_terminal_selection = is_array( $pickup_rate_meta['dpd_delivery_terminal_selection'] ?? null ) ? $pickup_rate_meta['dpd_delivery_terminal_selection'] : array();
+dpd_order_recalc_assert( 200 === (int) ( $preview['request']['customer_context']['location_id'] ?? 0 ) && '49694102' === (string) ( $pickup_rate_meta['dpd_receiver_city_id'] ?? '' ), 'DPD recalculation diagnostics must expose receiver_location_id and receiver_city_id.' );
+dpd_order_recalc_assert( 'MSK-AUTO' === (string) ( $pickup_terminal_selection['selected_terminal_code'] ?? '' ) && 'parcel_shop' === (string) ( $pickup_terminal_selection['selected_type'] ?? '' ) && 'auto' === (string) ( $pickup_rate_meta['dpd_delivery_terminal_source'] ?? '' ), 'DPD pickup diagnostics must expose auto parcel_shop terminal selection.' );
+dpd_order_recalc_assert( true === ( $pickup_request_payload['selfDelivery'] ?? null ) && 'MSK-AUTO' === (string) ( $pickup_request_payload['delivery']['terminalCode'] ?? '' ), 'DPD pickup request_payload_sanitized must contain selfDelivery=true and delivery.terminalCode.' );
+dpd_order_recalc_assert( 'MSK-SELECTED' !== (string) ( $pickup_terminal_selection['selected_terminal_code'] ?? '' ), 'DPD auto pickup must avoid terminal_self_delivery duplicate when another parcel_shop exists.' );
+dpd_order_recalc_assert( 2 === (int) ( $pickup_rate_meta['dpd_raw_count'] ?? 0 ) && 0 === (int) ( $pickup_rate_meta['dpd_skipped_disallowed_count'] ?? 0 ) && 0 === (int) ( $pickup_rate_meta['dpd_skipped_no_cost_count'] ?? 0 ) && 0 === (int) ( $pickup_rate_meta['dpd_filter_removed_count'] ?? 0 ), 'DPD pickup diagnostics must expose raw/filter counters.' );
 $location_id_preview = $recalculation->preview( $order, array( 'location_id' => 200, 'dpd_city_id' => 49694102, 'display_name' => 'Москва', 'city_value' => 'Москва', 'region_name' => 'Москва', 'postal_code' => '101000', 'country_code' => 'RU' ) );
 $location_id_dpd_groups = array_values( array_filter( $location_id_preview['rates'], static fn( array $rate ): bool => DpdSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? '' ) ) );
 dpd_order_recalc_assert( count( $location_id_dpd_groups ) >= 2, 'DPD order recalculation preview must keep DPD rates when selected_location uses location_id instead of id.' );
 dpd_order_recalc_assert( 200 === (int) ( $location_id_preview['request']['customer_context']['location_id'] ?? 0 ) && 49694102 === (int) ( $location_id_preview['request']['customer_context']['dpd_receiver_city_id'] ?? 0 ), 'Order recalculation QuoteRequest must preserve location_id and DPD cityId context.' );
+
 
 $dpd_pickup_order = new DpdOrderRecalcOrder();
 $dpd_pickup_order->meta['_wdc_platform_carrier_key'] = 'dpd';
@@ -186,6 +198,16 @@ dpd_order_recalc_assert( 'getServiceCostByParcels3' === (string) ( $soap->calls[
 dpd_order_recalc_assert( 'NSK-SENDER' === (string) ( $pickup_payload['pickup']['terminalCode'] ?? '' ) && 'MSK-AUTO' === (string) ( $pickup_payload['delivery']['terminalCode'] ?? '' ), 'DPD pickup recalculation must use sender terminalCode and auto-selected receiver terminalCode.' );
 dpd_order_recalc_assert( 'NSK-SENDER' === (string) ( $courier_payload['pickup']['terminalCode'] ?? '' ) && ! isset( $courier_payload['delivery']['terminalCode'] ), 'DPD courier recalculation must use sender terminalCode and no delivery terminalCode.' );
 dpd_order_recalc_assert( is_array( $pickup_payload['parcel'] ?? null ) && 2500.0 === (float) ( $pickup_payload['declaredValue'] ?? 0 ), 'DPD order recalculation must build parcel[] and declaredValue from order items.' );
+$terminal_only_preview = $recalculation->preview( $order, array( 'id' => 400, 'dpd_city_id' => 77700001, 'display_name' => 'Терминальный город', 'city_value' => 'Терминальный город', 'region_name' => 'Терминальная область', 'postal_code' => '777000', 'country_code' => 'RU' ) );
+$terminal_only_dpd_groups = array_values( array_filter( $terminal_only_preview['rates'], static fn( array $rate ): bool => DpdSettings::CARRIER_KEY === (string) ( $rate['carrier_key'] ?? '' ) ) );
+$terminal_only_pickup_groups = array_values( array_filter( $terminal_only_dpd_groups, static fn( array $rate ): bool => DeliveryType::PICKUP === (string) ( $rate['delivery_type'] ?? '' ) ) );
+$terminal_only_courier_groups = array_values( array_filter( $terminal_only_dpd_groups, static fn( array $rate ): bool => DeliveryType::COURIER === (string) ( $rate['delivery_type'] ?? '' ) ) );
+dpd_order_recalc_assert( array() === $terminal_only_pickup_groups && array() !== $terminal_only_courier_groups, 'DPD courier must stay available when pickup is unavailable because receiver city has no active parcel_shop.' );
+$missing_pickup_quote = $carrier->quote( dpd_checkout_request( 400, 1500, DeliveryType::PICKUP ) );
+$missing_errors = is_array( $missing_pickup_quote->raw_reference['errors'] ?? null ) ? $missing_pickup_quote->raw_reference['errors'] : array();
+dpd_order_recalc_assert( str_contains( implode( ' ', array_map( 'strval', $missing_errors ) ), 'DPD pickup tariff unavailable: no active parcel_shop for receiver cityId 77700001' ), 'DPD missing pickup quote must expose a clear no active parcel_shop diagnostic reason.' );
+dpd_order_recalc_assert( 400 === (int) ( $missing_pickup_quote->raw_reference['receiver_location_id'] ?? 0 ) && '77700001' === (string) ( $missing_pickup_quote->raw_reference['receiver_city_id'] ?? '' ) && 'auto' === (string) ( $missing_pickup_quote->raw_reference['delivery_terminal_source'] ?? '' ), 'DPD missing pickup diagnostics must expose receiver ids and auto terminal source.' );
+dpd_order_recalc_assert( 'ONLY-TERMINAL' !== (string) ( $missing_pickup_quote->raw_reference['delivery_terminal_code'] ?? '' ), 'DPD pickup must not use terminal_self_delivery as receiver pickup point.' );
 
 $selected_preview = $recalculation->preview(
 	$order,

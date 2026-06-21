@@ -38,13 +38,16 @@ final class DpdTariffCalculationService {
 			return DpdTariffResult::failure( array( 'DPD sender cityId is not configured.' ) );
 		}
 
+		$receiver_city_id = $this->digits( (string) ( $params['receiver_dpd_city_id'] ?? $params['dpd_receiver_city_id'] ?? '' ) );
 		$receiver = $this->locations->find_by_id( $receiver_location_id );
-		if ( null === $receiver ) {
+		if ( null === $receiver && '' === $receiver_city_id ) {
 			return DpdTariffResult::failure( array( 'DPD cityId was not found for receiver location_id. Run DPD geography import or manual mapping.' ), array( 'receiver_location_id' => $receiver_location_id ) );
 		}
 
-		$receiver_resolution = $this->city_resolver->resolve( $receiver );
-		$receiver_city_id = is_array( $receiver_resolution ) ? (string) ( $receiver_resolution['city_id'] ?? '' ) : '';
+		if ( '' === $receiver_city_id ) {
+			$receiver_resolution = $this->city_resolver->resolve( $receiver );
+			$receiver_city_id = is_array( $receiver_resolution ) ? $this->digits( (string) ( $receiver_resolution['city_id'] ?? '' ) ) : '';
+		}
 		if ( '' === $receiver_city_id ) {
 			return DpdTariffResult::failure( array( 'DPD cityId was not found for receiver location_id. Run DPD geography import or manual mapping.' ), array( 'receiver_location_id' => $receiver_location_id ) );
 		}
@@ -119,7 +122,7 @@ final class DpdTariffCalculationService {
 				if ( '' === $delivery_terminal_code ) {
 					return DpdTariffResult::failure(
 						array_merge(
-							array( 'DPD delivery terminalCode was not found for receiver cityId. Import DPD pickup points before pickup pricing.' ),
+							array( 'DPD pickup tariff unavailable: no active parcel_shop for receiver cityId ' . $receiver_city_id ),
 							is_array( $delivery_terminal['warnings'] ?? null ) ? $delivery_terminal['warnings'] : array()
 						),
 						array(
@@ -129,6 +132,8 @@ final class DpdTariffCalculationService {
 							'method' => 'getServiceCostByParcels3',
 							'pickup_terminal_selection' => $pickup_terminal,
 							'delivery_terminal_selection' => $delivery_terminal,
+							'delivery_terminal_code' => '',
+							'delivery_terminal_source' => 'auto',
 						)
 					);
 				}
@@ -176,9 +181,9 @@ final class DpdTariffCalculationService {
 				)
 			);
 		} catch ( DpdException $exception ) {
-			return new DpdTariffResult( false, array( $exception->getMessage() ), array(), $payload, null, array( 'receiver_location_id' => $receiver_location_id, 'method' => 'getServiceCostByParcels3' ) );
+			return new DpdTariffResult( false, array( $exception->getMessage() ), array(), $payload, null, array( 'receiver_location_id' => $receiver_location_id, 'receiver_city_id' => $receiver_city_id, 'method' => 'getServiceCostByParcels3', 'delivery_terminal_code' => $self_delivery ? $delivery_terminal_code : '', 'delivery_terminal_source' => $delivery_terminal_source, 'delivery_terminal_selection' => $delivery_terminal ) );
 		} catch ( \Throwable $exception ) {
-			return new DpdTariffResult( false, array( 'DPD tariff calculation failed: ' . $exception->getMessage() ), array(), $payload, null, array( 'receiver_location_id' => $receiver_location_id, 'method' => 'getServiceCostByParcels3' ) );
+			return new DpdTariffResult( false, array( 'DPD tariff calculation failed: ' . $exception->getMessage() ), array(), $payload, null, array( 'receiver_location_id' => $receiver_location_id, 'receiver_city_id' => $receiver_city_id, 'method' => 'getServiceCostByParcels3', 'delivery_terminal_code' => $self_delivery ? $delivery_terminal_code : '', 'delivery_terminal_source' => $delivery_terminal_source, 'delivery_terminal_selection' => $delivery_terminal ) );
 		}
 	}
 

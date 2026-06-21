@@ -24,6 +24,11 @@
 - `tests/dpd/run-dpd-create-order-smoke.php` covers mocked createOrder2, payload shape, persistence, duplicates, errors and no auto-create hook.
 # Карта текущего кода
 
+## DPD Pickup Recalculation Diagnostics 0.69.3
+
+- `src/Carriers/Runtime/DpdQuoteCarrier.php` keeps order recalculation on the checkout DPD carrier path and passes explicit `dpd_receiver_city_id` / `dpd_city_id` context into tariff calculation. Its quote raw reference and DPD rate meta expose receiver location/city, delivery terminal selection/code/source, raw count, skipped counters and `dpd_filter_removed_count`.
+- `src/Carriers/Dpd/Tariff/DpdTariffCalculationService.php` still calls `getServiceCostByParcels3` for pickup and courier. Pickup uses `selfDelivery=true`; when no selected pickup point is supplied it auto-selects an active receiver `parcel_shop` terminalCode and never treats `terminal_self_delivery` as the receiver pickup point. Missing receiver parcel shops return `DPD pickup tariff unavailable: no active parcel_shop for receiver cityId {cityId}`.
+- `tests/dpd/run-dpd-order-recalculation-smoke.php` covers DPD courier presence, DPD pickup grouped rendering, auto parcel_shop terminalCode, duplicate `terminal_self_delivery` avoidance, selected pickup payload, diagnostics counters and the no-parcel-shop case where courier remains available while pickup is absent.
 ## Order Delivery Recalculation 0.69.2
 
 - `src/Orders/Application/OrderQuoteRequestMapper.php` maps WooCommerce order state plus the admin-selected settlement into the checkout `QuoteRequest`. For order recalculation it accepts `id`, `location_id` or `selected_location_id`, preserves DPD cityId aliases, and passes `dpd_receiver_city_id` into `customer_context` so DPD rates use the same `DpdQuoteCarrier` runtime as checkout.
