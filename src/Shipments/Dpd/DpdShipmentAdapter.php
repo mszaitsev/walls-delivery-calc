@@ -134,6 +134,7 @@ final class DpdShipmentAdapter implements ShipmentCarrierAdapterInterface {
 			'can_update_status' => ! empty( $policy['update'] ),
 			'can_cancel' => ! empty( $policy['cancel'] ),
 			'can_remove_from_order' => ! empty( $policy['remove'] ),
+			'can_download_dpd_documents' => DpdShipmentDocumentService::can_download_documents( $shipment ),
 			'shipment_status_label' => $label,
 			'universal_status_code' => (string) ( $shipment['universal_status_code'] ?? '' ),
 			'universal_status_label' => (string) ( $shipment['universal_status_label'] ?? '' ),

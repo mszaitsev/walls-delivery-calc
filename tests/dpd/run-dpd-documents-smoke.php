@@ -16,6 +16,7 @@ use WallsShop\WDC\Carriers\Dpd\Shipments\DpdShipmentPayloadBuilder;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentAdapter;
+use WallsShop\WDC\Shipments\Dpd\DpdShipmentButtonPolicy;
 use WallsShop\WDC\Shipments\Dpd\DpdShipmentDocumentService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
@@ -73,7 +74,11 @@ function dpd_documents_service( DpdDocumentsFakeSoap $soap ): DpdShipmentDocumen
 function dpd_documents_pdf( string $label ): string { return '%PDF-1.4\n%' . $label . '\n'; }
 function dpd_documents_temp_glob(): array { return glob( sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wdc-dpd-documents-*' ) ?: array(); }
 
-$adapter = new DpdShipmentAdapter( new DpdShipmentPayloadBuilder( dpd_documents_settings() ) );
+$adapter = new DpdShipmentAdapter( new DpdShipmentPayloadBuilder( dpd_documents_settings() ), null, null, new DpdShipmentButtonPolicy() );
+$payload_1401 = $adapter->status_payload( new stdClass(), dpd_documents_shipment() );
+dpd_documents_assert( ! empty( $payload_1401['can_cancel'] ) && empty( $payload_1401['can_remove_from_order'] ) && ! empty( $payload_1401['can_download_dpd_documents'] ), 'Initial DPD payload for 1401 must show cancel/download and hide remove.' );
+$payload_1301 = $adapter->status_payload( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => '1301' ) ) );
+dpd_documents_assert( empty( $payload_1301['can_cancel'] ) && ! empty( $payload_1301['can_remove_from_order'] ) && empty( $payload_1301['can_download_dpd_documents'] ), 'Initial DPD payload for 1301 must show remove and hide cancel/download.' );
 dpd_documents_assert( 'Скачать документы' === (string) $adapter->label_actions( new stdClass(), dpd_documents_shipment() )[0]['label'], 'Button must be visible for DPD 1401 with order number.' );
 dpd_documents_assert( array() === $adapter->label_actions( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => '1001' ) ) ), 'Button must be hidden for DPD 1001.' );
 dpd_documents_assert( array() === $adapter->label_actions( new stdClass(), dpd_documents_shipment( array( 'dpd_event_code' => '1501' ) ) ), 'Button must be hidden for DPD 1501.' );
@@ -124,6 +129,8 @@ dpd_documents_assert( empty( $no_number['success'] ) && str_contains( (string) $
 $bad_status = dpd_documents_service( new DpdDocumentsFakeSoap( array() ) )->create_zip_for_order( new DpdDocumentsFakeOrder( 84, dpd_documents_shipment( array( 'dpd_event_code' => '1501' ) ) ) );
 dpd_documents_assert( empty( $bad_status['success'] ) && str_contains( (string) $bad_status['message'], '1401' ), 'Non-1401 status must deny document access.' );
 dpd_documents_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/shipments-admin.js' ), 'requestDpdDocumentsDownload' ), 'Admin JS must include DPD document ZIP download flow.' );
-dpd_documents_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' ), 'ACTION_DPD_DOCUMENTS_ZIP' ), 'Metabox must expose DPD documents admin-post action.' );
+$metabox_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Shipments/Admin/OrderShipmentsMetabox.php' );
+dpd_documents_assert( str_contains( $metabox_source, 'ACTION_DPD_DOCUMENTS_ZIP' ), 'Metabox must expose DPD documents admin-post action.' );
+dpd_documents_assert( str_contains( $metabox_source, 'if ( $is_cdek || $is_dpd )' ), 'Initial metabox render must use DPD status payload for cancel/remove button state.' );
 
 echo "DPD documents smoke passed\n";

@@ -310,7 +310,7 @@ final class OrderShipmentsMetabox {
 		$price_compare_status = (string) ( $status_payload['actual_cost_compare_status'] ?? '' );
 		$price_compare_message = (string) ( $status_payload['actual_cost_compare_message'] ?? '' );
 		$can_cancel = $is_russian_post && $this->can_cancel_shipment( $shipment );
-		if ( $is_cdek ) {
+		if ( $is_cdek || $is_dpd ) {
 			$can_cancel = ! empty( $status_payload['can_cancel'] );
 		}
 		$can_remove = ! empty( $status_payload['can_remove_from_order'] ) || ( $is_russian_post && '' !== $barcode && ! $can_cancel );
