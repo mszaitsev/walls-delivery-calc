@@ -23,11 +23,13 @@ final class DpdEventSyncService {
 		private DpdEventNormalizer $normalizer,
 		private DpdStatusMapping $mapping,
 		private ShipmentOrderStatusMappingService $order_status_mapping,
-		private ?Logger $logger = null
+		private ?Logger $logger = null,
+		private ?DpdShipmentEnrichmentService $enrichment = null
 	) {}
 
-	public function sync( ?bool $confirm = null ): DpdEventSyncResult {
+	public function sync( ?bool $confirm = null, bool $enrich_new_events = false ): DpdEventSyncResult {
 		$confirm = null === $confirm ? $this->settings->events_confirm_enabled() : $confirm;
+		$started_ms = microtime( true );
 		$token = $this->acquire_lock();
 		if ( '' === $token ) { return new DpdEventSyncResult( true, 'События DPD уже обрабатываются другим запросом', extra: array( 'lock_busy' => true ) ); }
 		$result = new DpdEventSyncResult( true, 'События DPD обработаны.', confirm_status: $confirm ? 'pending' : 'disabled' );
@@ -41,7 +43,7 @@ final class DpdEventSyncService {
 				$result_complete = (bool) ( $packet['resultComplete'] ?? true );
 				$events = $this->normalizer->normalize_many( $packet['event'] ?? array() );
 				$result->packages++; $result->events += count( $events ); $result->result_complete = $result_complete;
-				$this->process_events( $events, $result );
+				$this->process_events( $events, $result, $enrich_new_events );
 				if ( $confirm && '' !== $doc_id ) {
 					$confirmed = $this->client->confirmEvents( array( 'docId' => $doc_id ) );
 					if ( empty( $confirmed['success'] ) ) { $result->success = false; $result->confirm_status = 'error'; $result->message = (string) ( $confirmed['error_message'] ?? 'DPD не подтвердил пакет событий.' ); break; }
@@ -53,12 +55,17 @@ final class DpdEventSyncService {
 				if ( ! $confirm || $result_complete ) { break; }
 				if ( self::MAX_PACKAGES === $batch ) { $result->success = false; $result->message = 'DPD events batch limit reached; запустите обновление ещё раз.'; $result->extra['warning'] = 'batch_limit'; }
 			}
-		} finally { $this->release_lock( $token ); }
+		} finally {
+			$duration_ms = max( 0, (int) round( ( microtime( true ) - $started_ms ) * 1000 ) );
+			$result->extra['duration_ms'] = $duration_ms;
+			$this->log( 'info', 'DPD getEvents sync finished.', array( 'packages' => $result->packages, 'events' => $result->events, 'updated' => $result->updated, 'unchanged' => $result->unchanged, 'unmatched' => $result->unmatched, 'confirm' => $result->confirm_status, 'success' => $result->success ? 'yes' : 'no', 'duration_ms' => $duration_ms ) );
+			$this->release_lock( $token );
+		}
 		return $result;
 	}
 
 	/** @param array<int,array<string,mixed>> $events */
-	private function process_events( array $events, DpdEventSyncResult $result ): void {
+	private function process_events( array $events, DpdEventSyncResult $result, bool $enrich_new_events = false ): void {
 		foreach ( $this->events_for_processing( $events, $result ) as $event ) {
 			$order = $this->match_order( $event );
 			if ( null === $order ) { $result->unmatched++; $this->log_unmatched( $event ); continue; }
@@ -76,8 +83,35 @@ final class DpdEventSyncService {
 			) );
 			$this->repository->save( $order, $updated );
 			$this->order_status_mapping->apply( $order, $updated, $status );
+			if ( $enrich_new_events && $this->should_enrich_after_event( $updated ) ) {
+				$enrichment = $this->enrichment->enrich_current_order( $order );
+				if ( empty( $enrichment['success'] ) ) {
+					$result->extra['enrichment_failed'] = (int) ( $result->extra['enrichment_failed'] ?? 0 ) + 1;
+				} else {
+					$result->extra['enrichment_started'] = (int) ( $result->extra['enrichment_started'] ?? 0 ) + 1;
+				}
+			}
 			$result->updated++;
 		}
+	}
+
+	/** @param array<string,mixed> $shipment */
+	private function should_enrich_after_event( array $shipment ): bool {
+		if ( ! $this->enrichment instanceof DpdShipmentEnrichmentService ) {
+			return false;
+		}
+
+		return null === $this->positive_int_or_null( $shipment['dpd_actual_cost_kopecks'] ?? null )
+			|| '' === trim( (string) ( $shipment['planned_delivery_date'] ?? '' ) );
+	}
+
+	private function positive_int_or_null( mixed $value ): ?int {
+		if ( ! is_numeric( $value ) ) {
+			return null;
+		}
+		$integer = (int) $value;
+
+		return $integer > 0 ? $integer : null;
 	}
 
 	/** @param array<int,array<string,mixed>> $events @return array<int,array<string,mixed>> */

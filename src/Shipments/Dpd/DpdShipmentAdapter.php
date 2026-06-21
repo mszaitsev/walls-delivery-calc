@@ -316,7 +316,7 @@ final class DpdShipmentAdapter implements ShipmentCarrierAdapterInterface {
 	}
 
 	public function supports_status_auto_sync(): bool {
-		return false;
+		return true;
 	}
 
 	/**

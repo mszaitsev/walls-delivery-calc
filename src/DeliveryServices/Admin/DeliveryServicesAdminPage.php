@@ -1391,10 +1391,27 @@ final class DeliveryServicesAdminPage {
 				<tr><th colspan="2"><h3><?php echo esc_html__( 'События DPD', 'walls-delivery-calc' ); ?></h3></th></tr>
 				<?php $this->text_row_with_description( DpdSettings::EVENTS_LOOKBACK_DAYS_KEY, __( 'Количество дней для получения событий DPD', 'walls-delivery-calc' ), null === $this->dpd_settings->events_lookback_days() ? '' : (string) $this->dpd_settings->events_lookback_days(), __( 'Пусто: dateFrom/dateTo не передаются. 1: сегодня с 00:00; 2: вчера с 00:00. Диапазон 1..365.', 'walls-delivery-calc' ) ); ?>
 				<?php $this->checkbox_row( DpdSettings::EVENTS_CONFIRM_ENABLED_KEY, __( 'Подтверждать обработанные события DPD', 'walls-delivery-calc' ), $this->dpd_settings->events_confirm_enabled() ); ?>
+				<?php $this->checkbox_row( DpdSettings::AUTOSYNC_ENABLED_KEY, __( 'Автоматическое обновление статусов DPD', 'walls-delivery-calc' ), $this->dpd_settings->autosync_enabled() ); ?>
+				<tr>
+					<th scope="row"><?php echo esc_html__( 'Последний autosync DPD', 'walls-delivery-calc' ); ?></th>
+					<td>
+						<p style="margin:0;"><?php echo esc_html( '' !== $this->dpd_settings->autosync_last_run() ? $this->dpd_settings->autosync_last_run() : '-' ); ?></p>
+						<p class="description" style="margin:4px 0 0;"><?php echo esc_html__( 'Последний результат:', 'walls-delivery-calc' ); ?> <?php echo esc_html( $this->dpd_autosync_result_label( $this->dpd_settings->autosync_last_result() ) ); ?></p>
+					</td>
+				</tr>
 			</table>
 			<?php submit_button( __( 'Сохранить настройки расчета DPD', 'walls-delivery-calc' ) ); ?>
 		</form>
 		<?php
+	}
+
+	private function dpd_autosync_result_label( string $result ): string {
+		return match ( $result ) {
+			'success' => __( 'успешно', 'walls-delivery-calc' ),
+			'error' => __( 'ошибка', 'walls-delivery-calc' ),
+			'disabled' => __( 'отключено', 'walls-delivery-calc' ),
+			default => __( 'не запускался', 'walls-delivery-calc' ),
+		};
 	}
 
 	private function dpd_sender_location_info_row(): void {
