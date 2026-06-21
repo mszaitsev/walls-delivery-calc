@@ -927,6 +927,7 @@
     const indicator = box && box.querySelector ? box.querySelector('[data-wdc-shipment-polling-indicator], [data-wdc-cdek-polling-indicator]') : null;
     if (!indicator) return;
     indicator.hidden = !visible;
+    indicator.classList.toggle('is-active', !!visible);
   }
 
   function setCdekPollingIndicator(box, visible) {
