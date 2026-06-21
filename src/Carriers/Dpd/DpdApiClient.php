@@ -233,6 +233,33 @@ final class DpdApiClient {
 		);
 	}
 	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function getInvoiceFile( array $payload ): array {
+		unset( $payload['parcelCount'], $payload['cargoValue'] );
+
+		return $this->safe_wrapped_call(
+			DpdEndpoints::SERVICE_ORDER,
+			'getInvoiceFile',
+			$payload,
+			array( 'wrapper' => DpdSoapRequest::WRAPPER_REQUEST )
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function createLabelFile( array $payload ): array {
+		return $this->safe_wrapped_call(
+			DpdEndpoints::SERVICE_LABEL_PRINT,
+			'createLabelFile',
+			$payload,
+			array( 'wrapper' => DpdSoapRequest::WRAPPER_GET_LABEL_FILE )
+		);
+	}
+	/**
 	 * @return array{success:bool,message:string,details:array<string,mixed>}
 	 */
 	public function checkConnectionDryRun(): array {

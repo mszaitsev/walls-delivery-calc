@@ -26,7 +26,7 @@ Local remove deletes only the local DPD shipment, clears `_wdc_dpd_order_number`
 
 ## Button policy
 
-No local DPD shipment shows `Создать отправление DPD` and `Внести номер DPD вручную`. Pending registration without DPD number shows `Обновить статус` and `Удалить из заказа`. A shipment with DPD number shows `Обновить статус`; cancel is shown only for EventCode `1001`, `1101`, `1201`, `1401`, `1501`. EventCode `1301` and all other non-cancellable states show local remove instead. DPD document/label actions are intentionally empty.
+No local DPD shipment shows `Создать отправление DPD` and `Внести номер DPD вручную`. Pending registration without DPD number shows `Обновить статус` and `Удалить из заказа`. A shipment with DPD number shows `Обновить статус`; cancel is shown only for EventCode `1001`, `1101`, `1201`, `1401`, `1501`. EventCode `1301` and all other non-cancellable states show local remove instead. DPD `Скачать документы` is shown only for shipments with saved `dpd_order_number` and strict EventCode `1401`. Other DPD statuses, including `1001`, `1101`, `1201`, `1301`, `1501`, delivered, cancelled and unknown states, do not show the documents action. See `docs/wdc-dpd-documents.md`.
 
 ## Price/date enrichment
 

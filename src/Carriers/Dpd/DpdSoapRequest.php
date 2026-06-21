@@ -10,6 +10,7 @@ final class DpdSoapRequest {
 	public const WRAPPER_REQUEST = 'request';
 	public const WRAPPER_ORDERS = 'orders';
 	public const WRAPPER_ORDER_STATUS = 'orderStatus';
+	public const WRAPPER_GET_LABEL_FILE = 'getLabelFile';
 
 	/**
 	 * @param array<string,mixed> $payload
@@ -42,6 +43,7 @@ final class DpdSoapRequest {
 			self::WRAPPER_REQUEST => array( 'request' => $payload ),
 			self::WRAPPER_ORDERS => array( 'orders' => $payload ),
 			self::WRAPPER_ORDER_STATUS => array( 'orderStatus' => $payload ),
+			self::WRAPPER_GET_LABEL_FILE => array( 'getLabelFile' => $payload ),
 			default => $payload,
 		};
 	}
@@ -49,7 +51,7 @@ final class DpdSoapRequest {
 	public function wrapper_mode(): string {
 		$wrapper = (string) ( $this->options['wrapper'] ?? self::WRAPPER_DIRECT );
 
-		return in_array( $wrapper, array( self::WRAPPER_REQUEST, self::WRAPPER_ORDERS, self::WRAPPER_ORDER_STATUS ), true ) ? $wrapper : self::WRAPPER_DIRECT;
+		return in_array( $wrapper, array( self::WRAPPER_REQUEST, self::WRAPPER_ORDERS, self::WRAPPER_ORDER_STATUS, self::WRAPPER_GET_LABEL_FILE ), true ) ? $wrapper : self::WRAPPER_DIRECT;
 	}
 
 	/**
@@ -83,6 +85,9 @@ final class DpdSoapRequest {
 		}
 		if ( isset( $payload['orderStatus'] ) && is_array( $payload['orderStatus'] ) ) {
 			$payload['orderStatus'] = $this->redact_auth( $payload['orderStatus'] );
+		}
+		if ( isset( $payload['getLabelFile'] ) && is_array( $payload['getLabelFile'] ) ) {
+			$payload['getLabelFile'] = $this->redact_auth( $payload['getLabelFile'] );
 		}
 
 		return $payload;

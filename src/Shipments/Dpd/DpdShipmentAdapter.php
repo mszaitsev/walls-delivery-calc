@@ -310,9 +310,19 @@ final class DpdShipmentAdapter implements ShipmentCarrierAdapterInterface {
 	 * @return array<int,array<string,mixed>>
 	 */
 	public function label_actions( object $order, array $shipment ): array {
-		unset( $order, $shipment );
+		unset( $order );
+		if ( ! DpdShipmentDocumentService::can_download_documents( $shipment ) ) {
+			return array();
+		}
 
-		return array();
+		return array(
+			array(
+				'key' => 'download_documents',
+				'label' => 'Скачать документы',
+				'type' => 'download',
+				'visible' => true,
+			),
+		);
 	}
 
 	public function supports_status_auto_sync(): bool {
