@@ -312,7 +312,7 @@ final class OrderShipmentsMetabox {
 		$can_remove = ! empty( $status_payload['can_remove_from_order'] ) || ( $is_russian_post && '' !== $barcode && ! $can_cancel );
 		$can_update = ! empty( $status_payload['can_update_status'] ) || ( $has_created && ( $is_cdek || '' !== $barcode ) );
 		$show_primary_actions = '' !== $carrier_key && ! $has_created;
-		$show_manual_attach = $show_primary_actions && ! $is_dpd;
+		$show_manual_attach = $show_primary_actions;
 		$show_update = $has_created && $can_update;
 		$show_cancel = $has_created && $can_cancel;
 		$show_remove = $has_created && $can_remove;
@@ -555,12 +555,31 @@ final class OrderShipmentsMetabox {
 		}
 		$request = $this->drafts->create_request_from_admin_data( $order, $data );
 		$preview = $this->creation->safe_preview( $request );
+		if ( DpdSettings::CARRIER_KEY === $request->carrier_key ) {
+			$adapter = $this->carrier_adapter( DpdSettings::CARRIER_KEY );
+			if ( null === $adapter ) {
+				wp_send_json_error( array( 'message' => __( 'DPD adapter unavailable.', 'walls-delivery-calc' ) ), 400 );
+			}
+			$stage = sanitize_key( wp_unslash( $_POST['dpd_registration_stage'] ?? 'begin' ) );
+			$result = 'submit' === $stage && method_exists( $adapter, 'submit_registration' )
+				? $adapter->submit_registration( $order, $request, sanitize_text_field( wp_unslash( $_POST['registration_attempt_id'] ?? '' ) ) )
+				: ( method_exists( $adapter, 'begin_registration' ) ? $adapter->begin_registration( $order, $request ) : array( 'success' => false, 'message' => __( 'Регистрация DPD недоступна.', 'walls-delivery-calc' ) ) );
+			if ( empty( $result['success'] ) ) {
+				wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? 'DPD registration failed.' ), 'preview' => $preview ), 400 );
+			}
+			$this->add_dpd_courier_contact_history( (string) ( $request->meta['sender_contact_fio'] ?? '' ) );
+			wp_send_json_success(
+				array_merge(
+					$this->carrier_ui_payload( $order, $request->carrier_key, is_array( $result['shipment'] ?? null ) ? $result['shipment'] : null ),
+					$result,
+					array( 'message' => (string) ( $result['message'] ?? $this->carrier_presentation( $request->carrier_key )['created_toast'] ), 'preview' => $preview )
+				)
+			);
+		}
+
 		$result = $this->creation->create( $order, $request );
 		if ( ! $result->success ) {
 			wp_send_json_error( array( 'message' => $result->error_message, 'code' => $result->error_code, 'preview' => $preview ), 400 );
-		}
-		if ( DpdSettings::CARRIER_KEY === $request->carrier_key ) {
-			$this->add_dpd_courier_contact_history( (string) ( $request->meta['sender_contact_fio'] ?? '' ) );
 		}
 
 		wp_send_json_success(
@@ -649,7 +668,11 @@ final class OrderShipmentsMetabox {
 		}
 		$result = $adapter->cancel_in_carrier( $order, $shipment_key );
 		if ( ! (bool) ( $result['success'] ?? false ) ) {
-			wp_send_json_error( array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось отменить отправление.', 'walls-delivery-calc' ) ) ), 400 );
+			$error_payload = array_merge(
+				$this->carrier_ui_payload( $order, $shipment_key ),
+				array( 'message' => (string) ( $result['message'] ?? __( 'Не удалось отменить отправление.', 'walls-delivery-calc' ) ), 'temporary_can_remove' => ! empty( $result['temporary_can_remove'] ) )
+			);
+			wp_send_json_error( $error_payload, 400 );
 		}
 
 		wp_send_json_success(
@@ -1389,9 +1412,11 @@ final class OrderShipmentsMetabox {
 		<div class="wdc-shipment-status" data-wdc-shipment-status-block>
 			<p><strong><?php echo esc_html( $this->status_block_label( (string) ( $status['carrier_key'] ?? '' ) ) ); ?>:</strong> <span data-wdc-status-carrier><?php echo esc_html( (string) ( $status['carrier_status_title'] ?? '' ) ?: '-' ); ?></span></p>
 			<p><strong><?php echo esc_html__( 'Последняя операция', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-operation><?php echo esc_html( $this->operation_summary( $status ) ); ?></span></p>
-			<p data-wdc-planned-delivery-row <?php echo '' === (string) ( $status['cdek_planned_delivery_date'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Плановая дата доставки', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-planned-delivery-date><?php echo esc_html( (string) ( $status['cdek_planned_delivery_date'] ?? '' ) ); ?></span></p>
+			<p data-wdc-planned-delivery-row <?php echo '' === (string) ( $status['planned_delivery_date'] ?? $status['cdek_planned_delivery_date'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Плановая дата доставки', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-planned-delivery-date><?php echo esc_html( (string) ( $status['planned_delivery_date'] ?? $status['cdek_planned_delivery_date'] ?? '' ) ); ?></span></p>
+			<p data-wdc-dpd-places-row <?php echo '' === (string) ( $status['dpd_places_summary'] ?? '' ) ? 'hidden' : ''; ?>><strong data-wdc-dpd-places-label><?php echo esc_html( (string) ( $status['dpd_places_label'] ?? __( 'Грузоместа DPD', 'walls-delivery-calc' ) ) ); ?></strong>: <span data-wdc-dpd-places-summary><?php echo esc_html( (string) ( $status['dpd_places_summary'] ?? '' ) ); ?></span></p>
+			<p data-wdc-status-updated-row <?php echo '' === (string) ( $status['updated_at'] ?? '' ) ? 'hidden' : ''; ?>><strong><?php echo esc_html__( 'Обновлено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-updated><?php echo esc_html( (string) ( $status['updated_at'] ?? '' ) ); ?></span></p>
 			<p><strong><?php echo esc_html__( 'Проверено', 'walls-delivery-calc' ); ?>:</strong> <span data-wdc-status-checked><?php echo esc_html( (string) ( $status['tracking_checked_at'] ?? '' ) ?: '-' ); ?></span></p>
-			<div class="wdc-cdek-polling-indicator" data-wdc-cdek-polling-indicator hidden><span class="wdc-spinner" aria-hidden="true"></span><span><?php echo esc_html__( 'Проверяем регистрацию отправления…', 'walls-delivery-calc' ); ?></span></div>
+			<div class="wdc-shipment-polling-indicator" data-wdc-shipment-polling-indicator data-wdc-cdek-polling-indicator hidden><span class="wdc-shipment-inline-spinner" aria-hidden="true"></span><span><?php echo esc_html__( 'Проверяем регистрацию отправления…', 'walls-delivery-calc' ); ?></span></div>
 		</div>
 		<?php
 	}
@@ -1427,8 +1452,8 @@ final class OrderShipmentsMetabox {
 	/**
 	 * @return array<string,mixed>
 	 */
-	private function carrier_ui_payload( object $order, string $carrier_key ): array {
-		$shipment = $this->repository->find_by_carrier( $order, $carrier_key );
+	private function carrier_ui_payload( object $order, string $carrier_key, ?array $shipment_override = null ): array {
+		$shipment = null === $shipment_override ? $this->repository->find_by_carrier( $order, $carrier_key ) : $shipment_override;
 		$adapter = $this->carrier_adapter( $carrier_key );
 		$presentation = $this->carrier_presentation( $carrier_key );
 		$status = null !== $adapter
@@ -1597,8 +1622,8 @@ final class OrderShipmentsMetabox {
 		$parts = array_filter(
 			array(
 				(string) ( $status['carrier_operation_date'] ?? '' ),
-				(string) ( $status['carrier_operation_address'] ?? '' ),
-				(string) ( $status['carrier_operation_index'] ?? '' ),
+				(string) ( $status['carrier_operation_code'] ?? $status['carrier_operation_address'] ?? '' ),
+				(string) ( $status['carrier_operation_marker'] ?? $status['carrier_operation_index'] ?? '' ),
 			),
 			static fn ( string $value ): bool => '' !== trim( $value )
 		);

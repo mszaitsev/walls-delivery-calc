@@ -15,7 +15,8 @@ final class DpdSettings {
 	public const ENV_TEST = 'test';
 	public const ENV_PRODUCTION = 'production';
 	public const DEFAULT_REQUEST_TIMEOUT = 20;
-	public const DEFAULT_ORDER_CREATE_TIMEOUT = 90;
+	public const ORDER_CREATE_SOAP_TIMEOUT = 10;
+	public const DEFAULT_ORDER_CREATE_TIMEOUT = 10;
 	public const DEFAULT_PICKUP_METHOD_TITLE = 'DPD до пункта выдачи';
 	public const DEFAULT_COURIER_METHOD_TITLE = 'DPD курьером';
 
@@ -48,6 +49,8 @@ final class DpdSettings {
 	public const TARIFF_SENDER_NAME_KEY = 'dpd_tariff_sender_name';
 	public const TARIFF_SENDER_PHONE_KEY = 'dpd_tariff_sender_phone';
 	public const ORDER_CREATE_TIMEOUT_KEY = 'dpd_order_create_timeout';
+	public const EVENTS_LOOKBACK_DAYS_KEY = 'dpd_events_lookback_days';
+	public const EVENTS_CONFIRM_ENABLED_KEY = 'dpd_events_confirm_enabled';
 	public const COURIER_CONTACT_FIO_HISTORY_KEY = 'dpd_courier_contact_fio_history';
 	public const RUNTIME_PICKUP_TITLE_KEY = 'dpd_runtime_pickup_title';
 	public const RUNTIME_COURIER_TITLE_KEY = 'dpd_runtime_courier_title';
@@ -74,7 +77,8 @@ final class DpdSettings {
 			self::PRODUCTION_CLIENT_NUMBER_KEY => '',
 			self::PRODUCTION_CLIENT_KEY_ENCRYPTED_KEY => '',
 			self::REQUEST_TIMEOUT_KEY => self::DEFAULT_REQUEST_TIMEOUT,
-			self::ORDER_CREATE_TIMEOUT_KEY => self::DEFAULT_ORDER_CREATE_TIMEOUT,
+			self::EVENTS_LOOKBACK_DAYS_KEY => '',
+			self::EVENTS_CONFIRM_ENABLED_KEY => false,
 			self::DEBUG_KEY => false,
 			self::LAST_CONNECTION_CHECK_KEY => '',
 			self::LAST_CONNECTION_STATUS_KEY => '',
@@ -141,7 +145,21 @@ final class DpdSettings {
 	}
 
 	public function order_create_timeout(): int {
-		return max( 60, min( 120, $this->settings->get_int( self::ORDER_CREATE_TIMEOUT_KEY, self::DEFAULT_ORDER_CREATE_TIMEOUT ) ) );
+		return self::ORDER_CREATE_SOAP_TIMEOUT;
+	}
+
+	public function events_lookback_days(): ?int {
+		$value = $this->settings->get_string( self::EVENTS_LOOKBACK_DAYS_KEY, '' );
+		if ( '' === trim( $value ) ) {
+			return null;
+		}
+
+		$days = (int) $value;
+		return max( 1, min( 365, $days ) );
+	}
+
+	public function events_confirm_enabled(): bool {
+		return $this->settings->get_bool( self::EVENTS_CONFIRM_ENABLED_KEY, false );
 	}
 
 	public function debug_enabled(): bool {
@@ -189,7 +207,6 @@ final class DpdSettings {
 		$this->save_credentials_for_environment( self::ENV_TEST, $input );
 		$this->save_credentials_for_environment( self::ENV_PRODUCTION, $input );
 		$this->settings->set( self::REQUEST_TIMEOUT_KEY, max( 1, min( 120, (int) ( $input[ self::REQUEST_TIMEOUT_KEY ] ?? self::DEFAULT_REQUEST_TIMEOUT ) ) ) );
-		$this->settings->set( self::ORDER_CREATE_TIMEOUT_KEY, max( 60, min( 120, (int) ( $input[ self::ORDER_CREATE_TIMEOUT_KEY ] ?? self::DEFAULT_ORDER_CREATE_TIMEOUT ) ) ) );
 		$this->settings->set( self::DEBUG_KEY, ! empty( $input[ self::DEBUG_KEY ] ) );
 	}
 
@@ -380,6 +397,12 @@ final class DpdSettings {
 	/**
 	 * @param array<string,mixed> $input
 	 */
+	public function save_event_settings_from_admin( array $input ): void {
+		$raw_days = trim( (string) ( $input[ self::EVENTS_LOOKBACK_DAYS_KEY ] ?? '' ) );
+		$this->settings->set( self::EVENTS_LOOKBACK_DAYS_KEY, '' === $raw_days ? '' : (string) max( 1, min( 365, (int) $raw_days ) ) );
+		$this->settings->set( self::EVENTS_CONFIRM_ENABLED_KEY, ! empty( $input[ self::EVENTS_CONFIRM_ENABLED_KEY ] ) );
+	}
+
 	public function save_tariff_settings_from_admin( array $input ): void {
 		$this->settings->set( self::TARIFF_SENDER_LOCATION_ID_KEY, max( 0, (int) ( $input[ self::TARIFF_SENDER_LOCATION_ID_KEY ] ?? 0 ) ) );
 		$this->settings->set( self::TARIFF_SENDER_DPD_CITY_ID_KEY, $this->digits( (string) ( $input[ self::TARIFF_SENDER_DPD_CITY_ID_KEY ] ?? '' ) ) );

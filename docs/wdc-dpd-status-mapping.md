@@ -68,3 +68,6 @@ Other EventCode defaults keep the existing reasonable 0.65.0 behavior where it d
 `tests/dpd/run-dpd-status-mapping-smoke.php` covers dictionary completeness against section 5.5.4, EventName/default validity, absence of ParamName/parameters in runtime rows and admin UI, new universal status ordering/select presence, saved override, invalid saved fallback, unknown EventCode fallback, admin tab render, save/reset behavior and CDEK mapping regression.
 
 `tests/shipments/run-shipment-status-smoke.php` covers the new universal status ordering in the shared shipment-status flow alongside Russian Post mapping checks.
+## 0.67.0 Runtime Usage
+
+`DpdStatusMapping::resolve()` is now used by `DpdEventSyncService` with the numeric `eventNumber` from `event-tracking/getEvents`. `eventCode` is stored as the DPD marker, `eventName` is the carrier display title and `parameter[]` is ignored for runtime mapping and not persisted in order meta. `getStatesByDPDOrder` is not a status source; it enriches only actual cost and planned delivery date.

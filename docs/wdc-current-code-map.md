@@ -1,3 +1,16 @@
+## DPD Shipment Lifecycle 0.67.0
+
+- `src/Shipments/Dpd/DpdOrderRegistrationService.php` owns manual DPD registration, local pending creation before SOAP, `getOrderStatus` refresh/polling decisions, manual attach, cancel and local remove.
+- `src/Shipments/Dpd/DpdEventSyncService.php` treats `event-tracking/getEvents` as the global DPD client inbox: atomic option lock, `docId`, `resultComplete`, optional confirm, 20-package safety limit, all matched WooCommerce orders updated from one package and unmatched event summaries logged without PII.
+- `src/Shipments/Dpd/DpdShipmentRepository.php` wraps `_wdc_shipments[dpd]`, maintains `_wdc_dpd_order_number`, supports HPOS-compatible lookup by DPD number, and removes the DPD index on local delete.
+- `src/Shipments/Dpd/DpdEventNormalizer.php` normalizes `clientOrderNr`, `dpdOrderNr`, `eventNumber`, `eventCode`, `eventName`, `eventDate` and selects the latest event per order without storing parameter history.
+- `src/Shipments/Dpd/DpdShipmentEnrichmentService.php` calls `tracing1-1/getStatesByDPDOrder` only for `orderCost` and `planDeliveryDate`; status and button policy still come from registration state or `getEvents`.
+- `src/Shipments/Dpd/DpdShipmentButtonPolicy.php` centralizes DPD actions: create/manual when absent, update/remove while pending, update with DPD number, cancel only for EventCode `1001`, `1101`, `1201`, `1401`, `1501`, and remove for cancelled/other states.
+- `src/Shipments/Dpd/DpdShipmentAdapter.php` stays thin over those services, returns no label/document actions, and exposes generic shipment status payload fields for the shared metabox UI.
+- `src/Carriers/Dpd/DpdApiClient.php`, `DpdSoapRequest.php` and `DpdSettings.php` provide WSDL-checked DPD methods/wrappers, fixed 10-second `createOrder2` timeout, nullable event lookback days and disabled-by-default event confirm setting.
+- `src/Shipments/Admin/OrderShipmentsMetabox.php` and `assets/admin/shipments-admin.js` handle the two-stage DPD create flow, non-overlapping 10-second pending polling, manual update, temporary local-remove visibility after cancel errors and carrier-neutral planned-date/status rendering.
+- `src/Shipments/Application/ShipmentCreationService.php` strips CDEK-only fields from DPD shipments; no `cdek_*` keys are written for DPD.
+
 ## DPD Manual Create 0.66.0
 
 - `src/Carriers/Dpd/DpdSoapRequest.php` supports the DPD `orders` SOAP wrapper in addition to existing `direct` and `request` modes.

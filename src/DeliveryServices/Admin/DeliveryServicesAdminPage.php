@@ -490,6 +490,7 @@ final class DeliveryServicesAdminPage {
 			}
 			if ( 'save_dpd_tariff_settings' === $action && $this->dpd_settings instanceof DpdSettings ) {
 				$this->dpd_settings->save_tariff_settings_from_admin( $_POST );
+				$this->dpd_settings->save_event_settings_from_admin( $_POST );
 			}
 			if ( in_array( $action, array( 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import' ), true ) && $this->dpd_settings instanceof DpdSettings && $this->dpd_pickup_importer instanceof DpdPickupPointImportService ) {
 				$report = match ( $action ) {
@@ -1387,6 +1388,9 @@ final class DeliveryServicesAdminPage {
 				<?php $this->text_row( DpdSettings::TARIFF_DEFAULT_WIDTH_CM_KEY, __( 'Ширина, см', 'walls-delivery-calc' ), (string) $this->dpd_settings->tariff_default_width_cm() ); ?>
 				<?php $this->text_row( DpdSettings::TARIFF_DEFAULT_HEIGHT_CM_KEY, __( 'Высота, см', 'walls-delivery-calc' ), (string) $this->dpd_settings->tariff_default_height_cm() ); ?>
 				<?php $this->text_row( DpdSettings::TARIFF_DEFAULT_DECLARED_VALUE_RUB_KEY, __( 'Объявленная ценность, руб.', 'walls-delivery-calc' ), (string) $this->dpd_settings->tariff_default_declared_value_rub() ); ?>
+				<tr><th colspan="2"><h3><?php echo esc_html__( 'События DPD', 'walls-delivery-calc' ); ?></h3></th></tr>
+				<?php $this->text_row_with_description( DpdSettings::EVENTS_LOOKBACK_DAYS_KEY, __( 'Количество дней для получения событий DPD', 'walls-delivery-calc' ), null === $this->dpd_settings->events_lookback_days() ? '' : (string) $this->dpd_settings->events_lookback_days(), __( 'Пусто: dateFrom/dateTo не передаются. 1: сегодня с 00:00; 2: вчера с 00:00. Диапазон 1..365.', 'walls-delivery-calc' ) ); ?>
+				<?php $this->checkbox_row( DpdSettings::EVENTS_CONFIRM_ENABLED_KEY, __( 'Подтверждать обработанные события DPD', 'walls-delivery-calc' ), $this->dpd_settings->events_confirm_enabled() ); ?>
 			</table>
 			<?php submit_button( __( 'Сохранить настройки расчета DPD', 'walls-delivery-calc' ) ); ?>
 		</form>

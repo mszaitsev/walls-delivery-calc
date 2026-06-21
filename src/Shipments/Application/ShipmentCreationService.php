@@ -140,7 +140,12 @@ final class ShipmentCreationService {
 			'created_at' => $now,
 			'updated_at' => $now,
 		);
-		if ( '' !== $backlog_order_id ) {
+		if ( $is_dpd ) {
+			foreach ( array( 'cdek_number', 'cdek_request_uuid', 'cdek_request_state', 'cdek_order_status_code', 'cdek_order_status_name', 'cdek_planned_delivery_date', 'cdek_actual_cost_kopecks' ) as $cdek_key ) {
+				unset( $shipment[ $cdek_key ] );
+			}
+		}
+		if ( ! $is_dpd && '' !== $backlog_order_id ) {
 			$shipment['backlog_order_id'] = ctype_digit( $backlog_order_id ) ? (int) $backlog_order_id : $backlog_order_id;
 		}
 		$actual_cost = $this->actual_cost_after_create( $request->carrier_key, $result->tracking_number );

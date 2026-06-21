@@ -142,10 +142,8 @@ final class DpdApiClient {
 		$row = $this->first_order_response_row( $body );
 		$status = strtoupper( trim( (string) ( $row['status'] ?? $body['status'] ?? '' ) ) );
 		$error_message = trim( (string) ( $row['errorMessage'] ?? $body['errorMessage'] ?? '' ) );
-		$success = '' === $status || 'OK' === $status;
-		if ( '' !== $error_message && 'OK' !== $status ) {
-			$success = false;
-		}
+		$business_status = in_array( $status, array( 'OK', 'ORDERPENDING', 'ORDERDUPLICATE', 'ORDERERROR', 'ORDERCANCELLED' ), true );
+		$success = ( '' === $status || $business_status ) && ! empty( $normalized['success'] );
 
 		return array_merge(
 			$normalized,
@@ -153,8 +151,85 @@ final class DpdApiClient {
 				'success' => $success,
 				'order' => $row,
 				'error_code' => $success ? '' : 'dpd_business_error',
-				'error_message' => $success ? '' : $this->safe_message( '' !== $error_message ? $error_message : 'DPD вернул ошибку создания заказа.' ),
+				'error_message' => '' !== $error_message ? $this->safe_message( $error_message ) : ( $success ? '' : 'DPD вернул ошибку создания заказа.' ),
 			)
+		);
+	}
+
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function getOrderStatus( array $payload ): array {
+		return $this->safe_wrapped_call(
+			DpdEndpoints::SERVICE_ORDER,
+			'getOrderStatus',
+			$payload,
+			array( 'wrapper' => DpdSoapRequest::WRAPPER_ORDER_STATUS, 'allow_business_status_response' => true )
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function getEvents( array $payload = array() ): array {
+		unset( $payload['dateFromSpecified'], $payload['dateToSpecified'], $payload['maxRowCountSpecified'] );
+		$payload['maxRowCount'] = 500;
+
+		return $this->safe_wrapped_call(
+			DpdEndpoints::SERVICE_EVENT_TRACKING,
+			'getEvents',
+			$payload,
+			array( 'wrapper' => DpdSoapRequest::WRAPPER_REQUEST )
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function confirmEvents( array $payload ): array {
+		return $this->safe_wrapped_call(
+			DpdEndpoints::SERVICE_EVENT_TRACKING,
+			'confirm',
+			$payload,
+			array( 'wrapper' => DpdSoapRequest::WRAPPER_REQUEST )
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function confirm( array $payload ): array {
+		return $this->confirmEvents( $payload );
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function cancelOrder( array $payload ): array {
+		return $this->safe_wrapped_call(
+			DpdEndpoints::SERVICE_ORDER,
+			'cancelOrder',
+			$payload,
+			array( 'wrapper' => DpdSoapRequest::WRAPPER_ORDERS )
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function getStatesByDPDOrder( array $payload ): array {
+		return $this->safe_wrapped_call(
+			DpdEndpoints::SERVICE_TRACING_1_1,
+			'getStatesByDPDOrder',
+			$payload,
+			array( 'wrapper' => DpdSoapRequest::WRAPPER_REQUEST )
 		);
 	}
 	/**
@@ -226,6 +301,73 @@ final class DpdApiClient {
 
 		return substr( $message, 0, 180 );
 	}
+
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @param array<string,mixed> $options
+	 * @return array<string,mixed>
+	 */
+	private function safe_wrapped_call( string $service, string $method, array $payload, array $options ): array {
+		try {
+			$response = $this->call( $service, $method, $payload, $options );
+		} catch ( DpdException $exception ) {
+			return array(
+				'success' => false,
+				'body' => array(),
+				'meta' => array( 'service' => $service, 'method' => $method ),
+				'error_code' => $this->is_header_timeout( $exception->getMessage() ) ? 'dpd_uncertain_timeout' : 'dpd_soap_error',
+				'error_message' => $this->safe_message( $exception->getMessage() ),
+				'details' => $exception->context,
+			);
+		} catch ( \Throwable $exception ) {
+			return array(
+				'success' => false,
+				'body' => array(),
+				'meta' => array( 'service' => $service, 'method' => $method ),
+				'error_code' => 'dpd_transport_error',
+				'error_message' => $this->safe_message( $exception->getMessage() ),
+				'details' => array(),
+			);
+		}
+
+		$normalized = $this->normalize_response( $response );
+		$body = is_array( $normalized['body'] ?? null ) ? $normalized['body'] : array();
+		$error_message = $this->first_error_message( $body );
+		if ( '' !== $error_message ) {
+			$normalized['error_message'] = $this->safe_message( $error_message );
+			if ( empty( $options['allow_business_status_response'] ) ) {
+				$normalized['success'] = false;
+				$normalized['error_code'] = 'dpd_business_error';
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * @param array<string,mixed> $body
+	 */
+	private function first_error_message( array $body ): string {
+		$walker = function ( mixed $value ) use ( &$walker ): string {
+			if ( is_array( $value ) ) {
+				if ( isset( $value['errorMessage'] ) && '' !== trim( (string) $value['errorMessage'] ) ) {
+					return trim( (string) $value['errorMessage'] );
+				}
+				foreach ( $value as $item ) {
+					$found = $walker( $item );
+					if ( '' !== $found ) {
+						return $found;
+					}
+				}
+			}
+
+			return '';
+		};
+
+		return $walker( $body );
+	}
+
 	/**
 	 * @return mixed
 	 */

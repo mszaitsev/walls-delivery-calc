@@ -122,3 +122,15 @@ Failed DPD create requests are not saved as shipment records. The existing last-
 - checkout pricing changes;
 - DPD order recalculation changes;
 - CDEK/Russian Post runtime changes.
+
+## 0.67.0 Lifecycle Update
+
+Manual DPD creation is now intentionally split into two AJAX stages on the current WooCommerce order page. Stage 1 validates the draft and saves a local `_wdc_shipments[dpd]` pending record before any external SOAP request, including `orderNumberInternal`, `datePickup`, service/delivery data, places, sanitized request snapshot, `registration_started_at`, `dpd_registration_state=submitting`, `status=pending_creation_in_carrier` and `created_by_context=admin_manual`. This immediately blocks duplicate creates and lets the UI close the modal, show `Ждём регистрацию` and start the spinner.
+
+Stage 2 submits the same form plus `registration_attempt_id` and calls `order2/createOrder2` with the WSDL `orders` wrapper and the fixed 10-second timeout. `OK` with `orderNum` stores the DPD number and `_wdc_dpd_order_number`; `OrderPending` and timeout/uncertain results leave the local pending shipment for `getOrderStatus`; `OrderDuplicate`, `OrderError`, `OrderCancelled` and explicit transport/SOAP errors store a terminal local registration state without inventing a DPD number. No Action Scheduler, cron or background queue is used for DPD create.
+
+## 0.67.2 Sent Places And Immediate Refresh
+
+The create flow now stores the exact DPD `parcel[]` rows and cargo summary from the built `createOrder2` payload in the DPD shipment record before the SOAP call is submitted. The stored fields are `dpd_sent_places`, `dpd_cargo_num_pack`, `dpd_cargo_weight` and `dpd_cargo_volume`; they mirror what was sent to DPD and disappear naturally when the local DPD shipment is removed or successfully cancelled.
+
+When DPD returns `OK + orderNum`, WDC immediately runs event sync and enrichment and touches `tracking_checked_at`, so the order block can show the first DPD event without requiring a manual update click.
