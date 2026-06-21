@@ -72,7 +72,7 @@ final class DpdEventSyncService {
 			$shipment = $this->repository->find( $order );
 			if ( array() === $shipment ) { $result->unmatched++; $this->log_unmatched( $event ); continue; }
 			if ( ! $this->event_matches_shipment( $shipment, $event ) ) { $result->unmatched++; $this->log_unmatched( $event, (string) ( $shipment['dpd_order_number'] ?? '' ) ); continue; }
-			if ( ! $this->is_new_event( $shipment, $event ) ) { $result->unchanged++; continue; }
+			if ( ! $this->is_new_event( $shipment, $event ) ) { $result->unchanged++; $result->order_statuses_skipped++; continue; }
 			$status = $this->mapping->resolve( (string) $event['eventNumber'] );
 			$now = $this->now();
 			$updated = array_merge( $shipment, array(
@@ -82,7 +82,7 @@ final class DpdEventSyncService {
 				'universal_status_code' => $status, 'universal_status_label' => DeliveryStatus::label( $status ), 'carrier_status_title' => (string) $event['eventName'], 'carrier_operation_date' => (string) $event['eventDate'], 'carrier_operation_code' => (string) $event['eventNumber'], 'carrier_operation_marker' => (string) $event['eventCode'], 'tracking_checked_at' => $now, 'updated_at' => $now,
 			) );
 			$this->repository->save( $order, $updated );
-			$this->order_status_mapping->apply( $order, $updated, $status );
+			$this->collect_order_status_mapping_result( $result, $this->order_status_mapping->apply( $order, $updated, $status ), $event );
 			if ( $enrich_new_events && $this->should_enrich_after_event( $updated ) ) {
 				$enrichment = $this->enrichment->enrich_current_order( $order );
 				if ( empty( $enrichment['success'] ) ) {
@@ -95,6 +95,27 @@ final class DpdEventSyncService {
 		}
 	}
 
+	/** @param array<string,mixed> $mapping @param array<string,mixed> $event */
+	private function collect_order_status_mapping_result( DpdEventSyncResult $result, array $mapping, array $event ): void {
+		$status = (string) ( $mapping['status'] ?? '' );
+		if ( 'changed' === $status ) {
+			$result->order_statuses_changed++;
+			return;
+		}
+		if ( 'error' === $status ) {
+			$result->order_status_change_errors++;
+			$result->extra['order_status_error_samples'][] = array(
+				'message' => (string) ( $mapping['message'] ?? 'WooCommerce order status change failed.' ),
+				'clientOrderNr' => (string) ( $event['clientOrderNr'] ?? '' ),
+				'dpdOrderNr' => (string) ( $event['dpdOrderNr'] ?? '' ),
+				'eventNumber' => (string) ( $event['eventNumber'] ?? '' ),
+			);
+			return;
+		}
+		if ( 'skipped' === $status ) {
+			$result->order_statuses_skipped++;
+		}
+	}
 	/** @param array<string,mixed> $shipment */
 	private function should_enrich_after_event( array $shipment ): bool {
 		if ( ! $this->enrichment instanceof DpdShipmentEnrichmentService ) {

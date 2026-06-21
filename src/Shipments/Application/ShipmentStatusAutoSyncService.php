@@ -157,6 +157,7 @@ final class ShipmentStatusAutoSyncService {
 		$stats['dpd_autosync'] = $payload;
 		$stats['updates_by_carrier'][ DpdSettings::CARRIER_KEY ] = (int) ( $stats['updates_by_carrier'][ DpdSettings::CARRIER_KEY ] ?? 0 ) + 1;
 		$stats['shipments_updated'] += max( 0, $result->updated );
+		$this->collect_dpd_order_status_mapping_diagnostics( $stats, $payload );
 		if ( ! empty( $payload['lock_busy'] ) ) {
 			$stats['skip_reasons']['dpd_lock_busy'] = (int) ( $stats['skip_reasons']['dpd_lock_busy'] ?? 0 ) + 1;
 		} elseif ( ! $result->success ) {
@@ -164,6 +165,21 @@ final class ShipmentStatusAutoSyncService {
 			$this->add_error_sample( $stats, 0, DpdSettings::CARRIER_KEY, $result->message );
 		}
 		$this->global_synced_carriers[ DpdSettings::CARRIER_KEY ] = true;
+	}
+
+	/** @param array<string,mixed> $stats @param array<string,mixed> $payload */
+	private function collect_dpd_order_status_mapping_diagnostics( array &$stats, array $payload ): void {
+		$stats['order_statuses_changed'] += max( 0, (int) ( $payload['order_statuses_changed'] ?? 0 ) );
+		$stats['order_statuses_skipped'] += max( 0, (int) ( $payload['order_statuses_skipped'] ?? 0 ) );
+		$stats['order_status_change_errors'] += max( 0, (int) ( $payload['order_status_change_errors'] ?? 0 ) );
+
+		$samples = is_array( $payload['order_status_error_samples'] ?? null ) ? $payload['order_status_error_samples'] : array();
+		foreach ( $samples as $sample ) {
+			$message = is_array( $sample ) ? (string) ( $sample['message'] ?? '' ) : '';
+			if ( '' !== trim( $message ) ) {
+				$this->add_error_sample( $stats, 0, DpdSettings::CARRIER_KEY, 'Order status mapping: ' . $message );
+			}
+		}
 	}
 
 	private function was_global_synced( string $carrier_key ): bool {
