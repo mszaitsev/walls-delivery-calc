@@ -1,3 +1,5 @@
+0.68.0 note: connected DPD to the existing shipment status autosync architecture. ShipmentStatusAutoSyncService now performs one DPD global pre-pass through DpdEventSyncService::sync(null, true) per run, records DPD stats in diagnostics, and skips per-order DPD polling because getEvents is already a client-wide inbox. DpdEventSyncService still owns the DPD lock, confirm loop and matching; autosync-only enrichment calls getStatesByDPDOrder only for newly updated shipments missing actual cost or planned delivery date. DPD Расчет now has enabled-by-default Автоматическое обновление статусов DPD plus readonly wdc_dpd_autosync_last_run / wdc_dpd_autosync_last_result. Manual create/update, checkout pricing, documents and labels were not changed.
+
 0.67.5 note: fixed the DPD post-create admin UI refresh. The create AJAX response now builds carrier UI/status payload from the refreshed shipment returned by `DpdOrderRegistrationService` after event sync/enrichment/touch, so a found `1401 / OrderCreate` immediately renders the DPD last operation and button policy (`Обновить статус` + `Отменить отправление в DPD`). The registration polling message now uses `.wdc-shipment-inline-spinner` with CSS keyframes instead of a static-looking indicator.
 
 0.67.4 note: refined DPD pending-registration event matching for orders that previously had another DPD shipment. While a local shipment has no `dpd_order_number`, `clientOrderNr` fallback now filters events by `registration_started_at - 300 seconds`, rejects old cancellation/return events that carry a DPD number, logs them as unmatched with `reason=stale_or_cancelled_pending_event`, and chooses the latest valid event for that client order. After `dpd_order_number` is saved, matching remains strict by DPD number and `clientOrderNr` cannot update a different active shipment.
@@ -278,7 +280,7 @@ does not add DPD status API polling, cron/sync, shipment updates, live create, l
 | Pickup Points | done | 90% | Russian Post import, diagnostics, local repository, REST API, checkout map, order persistence, admin shipment-modal map selector. |
 | Shipments | partial | 80% | Russian Post create/cancel/remove/manual attach, draft/preview, address normalization, actual-cost lookup; documents and other carriers are absent. |
 | Shipment Tracking | partial | 78% | Russian Post Tracking API refresh, mapper, universal status persistence and manual metabox refresh; no full status history UI. |
-| Shipment Autosync | partial | 75% | WP Cron/manual run, 6-hour interval, lock, diagnostics and Russian Post dispatch exist; only one carrier target and no advanced batching. |
+| Shipment Autosync | partial | 82% | WP Cron/manual run, 6-hour interval, lock and diagnostics exist for Russian Post/CDEK per-order updates plus DPD global getEvents autosync; large-store pagination/backoff strategy is still future work. |
 | Order Status Mapping | done | 80% | Carrier-neutral universal shipment status -> WooCommerce status mapping, custom statuses, terminal-status autosync handling and compact private notes. |
 | Checkout Integration | partial | 88% | WooCommerce method, city/location picker, sorting, tariff selector, courier validation, pickup map, order meta and calculation metabox. |
 | Order Delivery Recalculation | done | 100% | Admin order delivery recalculation is complete and HPOS-audited for Russian Post, CDEK and DPD: preview through checkout runtime, location override, pickup map, DPD terminalCode-aware refresh, courier suggestions, shipping item replacement/create, totals, checkout-compatible calculation data, mismatch warning and shipment/save blockers. |
@@ -351,7 +353,7 @@ does not add DPD status API polling, cron/sync, shipment updates, live create, l
 - `RussianPostTrackingStatusMapper` contains the fixed Russian Post operation/attribute mapping, including pickup/courier corrections and `type:-` fallback.
 - Manual metabox status refresh stores universal status, raw carrier operation data, checked timestamp and terminal marker in `_wdc_shipments`.
 - `ShipmentStatusAutoSyncCron` registers hook `wdc_shipment_status_autosync`, schedule `wdc_every_6_hours` and keeps the event scheduled even when disabled.
-- `ShipmentStatusAutoSyncService` scans selected WooCommerce order statuses, skips missing tracking/unsupported carriers/terminal tracking refreshes, dispatches supported carriers through `CarrierShipmentAdapterRegistry` and stores diagnostics.
+- `ShipmentStatusAutoSyncService` scans selected WooCommerce order statuses, skips missing tracking/unsupported carriers/terminal tracking refreshes, dispatches supported per-order carriers through `CarrierShipmentAdapterRegistry`, and runs DPD once per autosync pass through `DpdEventSyncService` because DPD `getEvents` returns a client-wide event inbox.
 - Terminal statuses still run order status mapping against saved shipment state.
 - `ShipmentOrderStatusMappingService` applies universal shipment status -> WooCommerce order status mapping when enabled, validates target statuses from `wc_get_order_statuses()`, updates orders and adds a compact private WDC note only when the order status actually changes.
 
@@ -367,7 +369,7 @@ does not add DPD status API polling, cron/sync, shipment updates, live create, l
 - Order admin recalculation has the full manager workflow for previewing rates, choosing pickup/courier, saving delivery, replacing shipping items and adding systematic notes; remaining work is real-store QA and carrier expansion.
 - Shipment runtime has a shared carrier-action adapter layer for Russian Post domestic and CDEK; future carriers still need their own adapters and runtime support.
 - Shipment tracking has current status refresh and autosync, but no full status event history/timeline UI.
-- Shipment autosync supports Russian Post domestic and CDEK through adapters, but still scans all selected orders without advanced batching/pagination controls.
+- Shipment autosync supports Russian Post domestic and CDEK through per-order adapters and DPD through one global `getEvents` pre-pass, but still scans selected WooCommerce orders for diagnostics/terminal mapping without advanced pagination controls.
 - Operations diagnostics exist, but production monitoring, log/document rotation and long-running import hardening remain limited.
 - Documentation is mostly current in active Russian Post/status docs, but older foundation docs still contain stage-specific historical wording.
 
@@ -375,7 +377,7 @@ does not add DPD status API polling, cron/sync, shipment updates, live create, l
 
 - CDEK webhooks and persistent print-form storage.
 - Permanent FIAS/GAR -> CDEK `city_code` mapping/storage.
-- DPD terminalCode-aware pricing, shipments and statuses.
+- DPD documents and labels.
 - Yandex Delivery runtime adapter, pricing, pickup/courier flow and future offer confirmation.
 - PEK, Energia, Aerogruz, Jet adapters.
 - Plugin-generated Russian Post labels, forms, batches and F103.

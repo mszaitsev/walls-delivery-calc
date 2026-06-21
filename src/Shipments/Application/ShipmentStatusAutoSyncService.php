@@ -4,8 +4,10 @@ declare(strict_types=1);
 namespace WallsShop\WDC\Shipments\Application;
 
 use Throwable;
+use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Domain\Status\DeliveryStatus;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Shipments\Dpd\DpdEventSyncService;
 use WallsShop\WDC\Shipments\Storage\OrderShipmentRepository;
 
 defined( 'ABSPATH' ) || exit;
@@ -28,6 +30,11 @@ final class ShipmentStatusAutoSyncService {
 		DeliveryStatus::REJECTED,
 	);
 
+	/**
+	 * @var array<string,bool>
+	 */
+	private array $global_synced_carriers = array();
+
 	public function __construct(
 		private SettingsRepository $settings,
 		private OrderShipmentRepository $repository,
@@ -36,7 +43,9 @@ final class ShipmentStatusAutoSyncService {
 		private mixed $dispatcher = null,
 		private mixed $cdek_status_updates = null,
 		private mixed $cdek_throttle = null,
-		private ?CarrierShipmentAdapterRegistry $registry = null
+		private ?CarrierShipmentAdapterRegistry $registry = null,
+		private ?DpdEventSyncService $dpd_events = null,
+		private ?DpdSettings $dpd_settings = null
 	) {
 	}
 
@@ -54,6 +63,7 @@ final class ShipmentStatusAutoSyncService {
 		}
 
 		$this->lock();
+		$this->global_synced_carriers = array();
 		$started_at = $this->now();
 		$started_ms = microtime( true );
 		$stats = array_merge(
@@ -66,6 +76,7 @@ final class ShipmentStatusAutoSyncService {
 		);
 
 		try {
+			$this->run_global_carrier_syncs( $stats );
 			foreach ( $this->find_orders() as $order ) {
 				if ( ! is_object( $order ) ) {
 					continue;
@@ -120,6 +131,45 @@ final class ShipmentStatusAutoSyncService {
 		return array( 'wc-processing', 'wc-on-hold' );
 	}
 
+	/** @param array<string,mixed> $stats */
+	private function run_global_carrier_syncs( array &$stats ): void {
+		if ( ! $this->supports_carrier( DpdSettings::CARRIER_KEY ) ) {
+			return;
+		}
+
+		if ( ! $this->dpd_settings instanceof DpdSettings || ! $this->dpd_events instanceof DpdEventSyncService ) {
+			$this->global_synced_carriers[ DpdSettings::CARRIER_KEY ] = true;
+			$this->skip( $stats, 'dpd_autosync_unavailable' );
+			return;
+		}
+
+		if ( ! $this->dpd_settings->autosync_enabled() ) {
+			$this->global_synced_carriers[ DpdSettings::CARRIER_KEY ] = true;
+			$this->dpd_settings->save_autosync_result( 'disabled', $this->now() );
+			$stats['dpd_autosync'] = array( 'status' => 'disabled' );
+			return;
+		}
+
+		$result = $this->dpd_events->sync( null, true );
+		$payload = $result->to_array();
+		$status = ! empty( $payload['lock_busy'] ) || $result->success ? 'success' : 'error';
+		$this->dpd_settings->save_autosync_result( $status, $this->now() );
+		$stats['dpd_autosync'] = $payload;
+		$stats['updates_by_carrier'][ DpdSettings::CARRIER_KEY ] = (int) ( $stats['updates_by_carrier'][ DpdSettings::CARRIER_KEY ] ?? 0 ) + 1;
+		$stats['shipments_updated'] += max( 0, $result->updated );
+		if ( ! empty( $payload['lock_busy'] ) ) {
+			$stats['skip_reasons']['dpd_lock_busy'] = (int) ( $stats['skip_reasons']['dpd_lock_busy'] ?? 0 ) + 1;
+		} elseif ( ! $result->success ) {
+			++$stats['shipments_failed'];
+			$this->add_error_sample( $stats, 0, DpdSettings::CARRIER_KEY, $result->message );
+		}
+		$this->global_synced_carriers[ DpdSettings::CARRIER_KEY ] = true;
+	}
+
+	private function was_global_synced( string $carrier_key ): bool {
+		return ! empty( $this->global_synced_carriers[ $carrier_key ] );
+	}
+
 	/**
 	 * @return array<int,object>
 	 */
@@ -155,6 +205,11 @@ final class ShipmentStatusAutoSyncService {
 			++$stats['shipments_found'];
 			$carrier_key = trim( (string) ( $shipment['carrier_key'] ?? $shipment_key ) );
 			$universal_status = trim( (string) ( $shipment['universal_status_code'] ?? '' ) );
+
+			if ( $this->was_global_synced( $carrier_key ) ) {
+				$this->skip( $stats, 'carrier_global_sync' );
+				continue;
+			}
 
 			if ( ! $this->supports_carrier( $carrier_key ) ) {
 				$this->skip( $stats, 'unsupported_carrier' );
@@ -355,6 +410,7 @@ final class ShipmentStatusAutoSyncService {
 			'order_statuses_skipped' => 0,
 			'order_status_change_errors' => 0,
 			'updates_by_carrier' => array(),
+			'dpd_autosync' => array(),
 			'skip_reasons' => array(),
 			'error_samples' => array(),
 			'status' => '',

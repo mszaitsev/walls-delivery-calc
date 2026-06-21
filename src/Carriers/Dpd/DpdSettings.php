@@ -51,6 +51,9 @@ final class DpdSettings {
 	public const ORDER_CREATE_TIMEOUT_KEY = 'dpd_order_create_timeout';
 	public const EVENTS_LOOKBACK_DAYS_KEY = 'dpd_events_lookback_days';
 	public const EVENTS_CONFIRM_ENABLED_KEY = 'dpd_events_confirm_enabled';
+	public const AUTOSYNC_ENABLED_KEY = 'dpd_autosync_enabled';
+	public const AUTOSYNC_LAST_RUN_KEY = 'wdc_dpd_autosync_last_run';
+	public const AUTOSYNC_LAST_RESULT_KEY = 'wdc_dpd_autosync_last_result';
 	public const COURIER_CONTACT_FIO_HISTORY_KEY = 'dpd_courier_contact_fio_history';
 	public const RUNTIME_PICKUP_TITLE_KEY = 'dpd_runtime_pickup_title';
 	public const RUNTIME_COURIER_TITLE_KEY = 'dpd_runtime_courier_title';
@@ -79,6 +82,9 @@ final class DpdSettings {
 			self::REQUEST_TIMEOUT_KEY => self::DEFAULT_REQUEST_TIMEOUT,
 			self::EVENTS_LOOKBACK_DAYS_KEY => '',
 			self::EVENTS_CONFIRM_ENABLED_KEY => false,
+			self::AUTOSYNC_ENABLED_KEY => true,
+			self::AUTOSYNC_LAST_RUN_KEY => '',
+			self::AUTOSYNC_LAST_RESULT_KEY => '',
 			self::DEBUG_KEY => false,
 			self::LAST_CONNECTION_CHECK_KEY => '',
 			self::LAST_CONNECTION_STATUS_KEY => '',
@@ -160,6 +166,23 @@ final class DpdSettings {
 
 	public function events_confirm_enabled(): bool {
 		return $this->settings->get_bool( self::EVENTS_CONFIRM_ENABLED_KEY, false );
+	}
+
+	public function autosync_enabled(): bool {
+		return $this->settings->get_bool( self::AUTOSYNC_ENABLED_KEY, true );
+	}
+
+	public function autosync_last_run(): string {
+		return $this->settings->get_string( self::AUTOSYNC_LAST_RUN_KEY, '' );
+	}
+
+	public function autosync_last_result(): string {
+		if ( ! $this->autosync_enabled() ) {
+			return 'disabled';
+		}
+
+		$result = $this->settings->get_string( self::AUTOSYNC_LAST_RESULT_KEY, '' );
+		return in_array( $result, array( 'success', 'error', 'disabled' ), true ) ? $result : '';
 	}
 
 	public function debug_enabled(): bool {
@@ -401,6 +424,13 @@ final class DpdSettings {
 		$raw_days = trim( (string) ( $input[ self::EVENTS_LOOKBACK_DAYS_KEY ] ?? '' ) );
 		$this->settings->set( self::EVENTS_LOOKBACK_DAYS_KEY, '' === $raw_days ? '' : (string) max( 1, min( 365, (int) $raw_days ) ) );
 		$this->settings->set( self::EVENTS_CONFIRM_ENABLED_KEY, ! empty( $input[ self::EVENTS_CONFIRM_ENABLED_KEY ] ) );
+		$this->settings->set( self::AUTOSYNC_ENABLED_KEY, ! empty( $input[ self::AUTOSYNC_ENABLED_KEY ] ) );
+	}
+
+	public function save_autosync_result( string $result, ?string $run_at = null ): void {
+		$result = in_array( $result, array( 'success', 'error', 'disabled' ), true ) ? $result : 'error';
+		$this->settings->set( self::AUTOSYNC_LAST_RUN_KEY, null !== $run_at ? $run_at : $this->now() );
+		$this->settings->set( self::AUTOSYNC_LAST_RESULT_KEY, $result );
 	}
 
 	public function save_tariff_settings_from_admin( array $input ): void {
@@ -712,5 +742,9 @@ final class DpdSettings {
 	private function sanitize_text( string $value ): string {
 		$value = function_exists( 'wp_unslash' ) ? (string) wp_unslash( $value ) : $value;
 		return function_exists( 'sanitize_text_field' ) ? sanitize_text_field( $value ) : trim( strip_tags( $value ) );
+	}
+
+	private function now(): string {
+		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
 	}
 }
