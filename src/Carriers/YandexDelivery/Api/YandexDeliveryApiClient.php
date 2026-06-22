@@ -127,8 +127,13 @@ final class YandexDeliveryApiClient {
 	/** @param array<string,mixed> $data */
 	private function extractErrorCode( array $data ): string {
 		$error = is_array( $data['error'] ?? null ) ? $data['error'] : array();
+		foreach ( array( $data['code'] ?? null, $data['error_code'] ?? null, $error['code'] ?? null, $data['error'] ?? null ) as $code ) {
+			if ( is_scalar( $code ) ) {
+				return (string) $code;
+			}
+		}
 
-		return (string) ( $data['code'] ?? $data['error_code'] ?? $error['code'] ?? $data['error'] ?? '' );
+		return '';
 	}
 
 	private function safeMessage( string $message, int $status_code ): string {

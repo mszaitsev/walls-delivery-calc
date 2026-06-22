@@ -118,22 +118,25 @@ $settings->save_from_admin( array(
 	'yandex_delivery_test_bearer_token' => 'secret-test-token',
 	YandexDeliverySettings::TEST_PLATFORM_STATION_ID_KEY => 'station-1',
 ) );
-$fake_http = new YdFakeHttp( new YandexDeliveryApiResponse( 200, json_encode( array( 'pickup_points' => array( array( 'platform_station_id' => 'station-1', 'type' => 'pickup_point', 'available_for_dropoff' => true ) ) ) ) ?: '{}' ) );
+$fake_http = new YdFakeHttp( new YandexDeliveryApiResponse( 200, json_encode( array( 'points' => array( array( 'id' => 'station-1', 'type' => 'pickup_point', 'available_for_dropoff' => true ) ) ) ) ?: '{}' ) );
 $api = new YandexDeliveryApiClient( $settings, $fake_http );
-$api->pickupPointsList( array( 'source' => array( 'platform_station_id' => 'station-1' ) ) );
+$api->pickupPointsList( array( 'pickup_point_ids' => array( 'station-1' ), 'type' => 'pickup_point', 'available_for_dropoff' => true ) );
 $request = $fake_http->requests[0];
 yd_assert( $request['url'] === 'https://b2b.taxi.tst.yandex.net/api/b2b/platform/pickup-points/list', 'pickup-points/list must use active test endpoint.' );
 yd_assert( ( $request['args']['headers']['Authorization'] ?? '' ) === 'Bearer secret-test-token', 'Bearer header must contain decrypted token for HTTP request only.' );
+yd_assert( json_decode( (string) $request['args']['body'], true ) === array( 'pickup_point_ids' => array( 'station-1' ), 'type' => 'pickup_point', 'available_for_dropoff' => true ), 'pickup-points/list diagnostic payload must filter by pickup_point_ids, type and available_for_dropoff.' );
 
 $diagnostics = new YandexDeliveryConnectionDiagnosticService( $settings, $api );
 $result = $diagnostics->checkPickupPoint();
 yd_assert( $result['success'] && 'success' === $result['status'], 'successful diagnostic must require found pickup_point with available_for_dropoff=true.' );
 yd_assert( ! str_contains( serialize( $result ), 'secret-test-token' ), 'successful diagnostics must not include bearer token.' );
+$diagnostic_request = $fake_http->requests[1];
+yd_assert( json_decode( (string) $diagnostic_request['args']['body'], true ) === array( 'pickup_point_ids' => array( 'station-1' ), 'type' => 'pickup_point', 'available_for_dropoff' => true ), 'explicit connection diagnostic must use the documented pickup-points/list payload.' );
 
 $cases = array(
-	'point_not_found' => array( 200, array( 'pickup_points' => array() ) ),
-	'dropoff_unavailable' => array( 200, array( 'pickup_points' => array( array( 'platform_station_id' => 'station-1', 'type' => 'pickup_point', 'available_for_dropoff' => false ) ) ) ),
-	'unsupported_point_type' => array( 200, array( 'pickup_points' => array( array( 'platform_station_id' => 'station-1', 'type' => 'terminal', 'available_for_dropoff' => true ) ) ) ),
+	'point_not_found' => array( 200, array( 'points' => array() ) ),
+	'dropoff_unavailable' => array( 200, array( 'points' => array( array( 'id' => 'station-1', 'type' => 'pickup_point', 'available_for_dropoff' => false ) ) ) ),
+	'unsupported_point_type' => array( 200, array( 'points' => array( array( 'id' => 'station-1', 'type' => 'terminal', 'available_for_dropoff' => true ) ) ) ),
 	'auth_failed' => array( 401, array( 'code' => 'unauthorized', 'message' => 'bad token' ) ),
 	'server_error' => array( 500, array( 'code' => 'server_error', 'message' => 'try later' ) ),
 );
@@ -156,6 +159,25 @@ try {
 
 	yd_assert( ! str_contains( $payload, 'secret-test-token' ) && ! str_contains( $payload, '+79998887766' ) && ! str_contains( $payload, 'a@example.com' ) && ! str_contains( $payload, 'full street' ), 'exception diagnostics must redact token, phone, email and full address.' );
 }
+$warnings = array();
+$previous_handler = set_error_handler( static function ( int $errno, string $errstr ) use ( &$warnings ): bool {
+	$warnings[] = $errstr;
+	return true;
+}, E_WARNING );
+try {
+	( new YandexDeliveryApiClient( $settings, new YdFakeHttp( new YandexDeliveryApiResponse( 400, json_encode( array( 'error' => array( 'message' => 'Something failed' ) ) ) ?: '{}' ) ) ) )->pickupPointsList( array() );
+	yd_assert( false, 'Yandex API error with nested message must throw exception.' );
+} catch ( YandexDeliveryApiException $exception ) {
+	yd_assert( '' === (string) ( $exception->details()['yandex_error_code'] ?? 'not-empty' ), 'nested error without scalar code must produce empty Yandex error code.' );
+	yd_assert( str_contains( $exception->getMessage(), 'Something failed' ), 'nested error message must still be extracted.' );
+} finally {
+	if ( null !== $previous_handler ) {
+		set_error_handler( $previous_handler );
+	} else {
+		restore_error_handler();
+	}
+}
+yd_assert( array() === $warnings, 'nested error array without code must not trigger PHP warnings.' );
 $redacted = ( new LogRedactor() )->redact_context( array( 'Authorization' => 'Bearer secret-test-token', 'phone' => '+79998887766', 'email' => 'a@example.com', 'address' => 'full street' ) );
 yd_assert( '[redacted]' === $redacted['Authorization'] && '[redacted]' === $redacted['phone'] && '[redacted]' === $redacted['email'] && '[redacted]' === $redacted['address'], 'log redactor must redact auth, phone, email and address keys.' );
 

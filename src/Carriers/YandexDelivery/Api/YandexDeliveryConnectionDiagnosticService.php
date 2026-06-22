@@ -22,9 +22,9 @@ final class YandexDeliveryConnectionDiagnosticService {
 		}
 
 		$payload = array(
-			'source' => array(
-				'platform_station_id' => $credentials->platform_station_id,
-			),
+			'pickup_point_ids' => array( $credentials->platform_station_id ),
+			'type' => 'pickup_point',
+			'available_for_dropoff' => true,
 		);
 
 		try {
