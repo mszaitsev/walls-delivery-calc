@@ -85,6 +85,7 @@ $migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/databa
 $repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointRepository.php' );
 $import_service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointImportService.php' );
 $js_asset_path = dirname( __DIR__, 2 ) . '/assets/admin/yandex-delivery-pickup-import.js';
+$js_source = is_readable( $js_asset_path ) ? (string) file_get_contents( $js_asset_path ) : '';
 yd_pickup_assert( str_contains( $migration_source, 'YandexDeliveryPickupPointRepository' ) && str_contains( $repository_source, 'wdc_yandex_delivery_pickup_points' ), 'Migration must create Yandex pickup points table through the repository.' );
 $schema_start = strpos( $repository_source, 'public function create_schema_if_needed' );
 $schema_end = strpos( $repository_source, 'public function mark_all_inactive' );
@@ -229,6 +230,10 @@ yd_pickup_assert( ! str_contains( $admin_source, 'run_yandex_delivery_pickup_imp
 yd_pickup_assert( str_contains( $admin_source, 'reset_import()' ) && str_contains( $admin_source, 'Сбросить результат и lock' ), 'Admin reset action must clear Yandex pickup report and import lock.' );
 yd_pickup_assert( str_contains( $admin_source, 'Размер страницы импорта' ) && str_contains( $admin_source, YandexDeliverySettings::PICKUP_IMPORT_PAGE_SIZE_KEY ), 'Admin page must expose Yandex pickup import page size setting.' );
 yd_pickup_assert( file_exists( $js_asset_path ), 'Yandex pickup AJAX import JS asset must exist.' );
+yd_pickup_assert( str_contains( $admin_source, 'Сбросить результат и lock' ) && str_contains( $js_source, 'Сбросить результат и lock' ), 'Yandex pickup reset label must remain visible in UI and AJAX fail guidance.' );
+yd_pickup_assert( str_contains( $js_source, 'Ошибка AJAX-запроса или timeout' ) && str_contains( $js_source, 'Требуется сброс lock или повторный запуск импорта.' ), 'Yandex pickup AJAX fail path must show a human recovery hint.' );
+yd_pickup_assert( str_contains( $js_source, 'running = false' ), 'Yandex pickup AJAX fail path must clear running state.' );
+yd_pickup_assert( str_contains( $js_source, 'var originalMessage = message' ) && ! str_contains( $js_source, "message: message || 'AJAX import step failed.'" ), 'Yandex pickup AJAX fail message must not be formed only from raw exception text.' );
 yd_pickup_assert( str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_start' ) && str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_step' ) && str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_reset' ) && str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_status' ), 'Admin page must register Yandex pickup AJAX import actions.' );
 yd_pickup_assert( ! preg_match( '/yandex_delivery.*(cron|autosync)|YandexDelivery.*(Cron|AutoSync)/i', $plugin_source ), 'Yandex pickup stage must not register cron/autosync.' );
 yd_pickup_assert( ! str_contains( $plugin_source, 'YandexDeliveryQuoteCarrier' ) && ! str_contains( $plugin_source, 'offers/create' ), 'Yandex pickup stage must not add checkout quote or shipment creation.' );

@@ -38,6 +38,7 @@
 	function render(state) {
 		state = state || {};
 		var status = String(state.status || 'idle');
+		var needsReset = status === 'error' || status === 'stale_lock';
 		root.setAttribute('data-wdc-yandex-status', status);
 		[
 			'status',
@@ -55,10 +56,13 @@
 			setField(key, state[key]);
 		});
 		if (summary) {
-			summary.textContent = 'Статус: ' + status + '. Шаг ' + format(state.page || 0) + ': обработано ' + format(state.fetched || 0) + ', сохранено ' + format(state.saved || 0) + ', page size ' + format(state.page_size || '');
+			summary.textContent = 'Статус: ' + status + '. Шаг ' + format(state.page || 0) + ': обработано ' + format(state.fetched || 0) + ', сохранено ' + format(state.saved || 0) + ', page size ' + format(state.page_size || '') + (needsReset ? '. Требуется сброс lock или повторный запуск импорта.' : '');
 		}
 		if (startButton) {
-			startButton.disabled = isRunning(state) || running;
+			startButton.disabled = !needsReset && (isRunning(state) || running);
+		}
+		if (resetButton) {
+			resetButton.disabled = false;
 		}
 	}
 
@@ -90,11 +94,12 @@
 	}
 
 	function fail(message) {
+		var originalMessage = message || 'AJAX import step failed.';
 		running = false;
 		render({
 			status: 'error',
-			message: message || 'AJAX import step failed.',
-			errors: [message || 'AJAX import step failed.']
+			message: 'Ошибка AJAX-запроса или timeout. Если импорт был прерван, нажмите «Сбросить результат и lock» и запустите импорт заново.',
+			errors: [originalMessage]
 		});
 	}
 
