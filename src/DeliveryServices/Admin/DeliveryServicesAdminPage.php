@@ -497,7 +497,20 @@ final class DeliveryServicesAdminPage {
 			if ( 'run_yandex_delivery_geo_detect' === $action && $this->yandex_delivery_geo_mapping_service instanceof YandexDeliveryGeoMappingService && $this->yandex_delivery_settings instanceof YandexDeliverySettings ) {
 				$location_id = isset( $_POST['yandex_delivery_geo_location_id'] ) ? (int) $_POST['yandex_delivery_geo_location_id'] : 0;
 				$result = $this->yandex_delivery_geo_mapping_service->detect_for_location_id( $location_id );
-				$this->yandex_delivery_settings->save_pickup_action_result( array( 'type' => ! empty( $result['success'] ) ? 'success' : 'error', 'title' => 'Yandex geo_id', 'message' => (string) ( $result['query'] ?? $result['message'] ?? '' ), 'details' => $result ) );
+				$this->yandex_delivery_settings->save_pickup_action_result(
+					array(
+						'type' => ! empty( $result['success'] ) ? 'success' : 'error',
+						'title' => 'Yandex geo_id',
+						'message' => (string) ( $result['query'] ?? $result['message'] ?? '' ),
+						'details' => array(
+							'location_id' => $location_id,
+							'query' => (string) ( $result['query'] ?? '' ),
+							'status' => (string) ( $result['status'] ?? '' ),
+							'mappings_count' => is_array( $result['mappings'] ?? null ) ? count( $result['mappings'] ) : 0,
+							'success' => ! empty( $result['success'] ) ? 'yes' : 'no',
+						),
+					)
+				);
 			}
 			if ( 'set_yandex_delivery_geo_primary' === $action && $this->yandex_delivery_geo_mappings instanceof YandexDeliveryGeoMappingRepository && $this->yandex_delivery_settings instanceof YandexDeliverySettings ) {
 				$location_id = isset( $_POST['yandex_delivery_geo_location_id'] ) ? (int) $_POST['yandex_delivery_geo_location_id'] : 0;

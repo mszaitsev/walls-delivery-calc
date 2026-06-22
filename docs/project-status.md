@@ -1,3 +1,5 @@
+0.75.3 note: fixed Yandex Delivery geo_id live-test issues. `location/detect` variants with string `address` now save that text as fallback locality when no structured locality exists, and the geo detect admin notice now stores compact details instead of full location/mappings payloads. No new Yandex functional stage was added.
+
 0.75.2 note: fixed Yandex Delivery geo_id admin tab DI. `DeliveryServicesAdminPage` now promotes the Yandex geo mapping repository and service passed by `Plugin.php`, so the `Yandex geo_id` tab receives non-null dependencies instead of returning at the guard. No new Yandex functional stage was added.
 
 0.75.1 note: fixed Yandex Delivery geo mapping review issues. `yandex_geo_id` is now nullable for `not_found` and `error` rows, repository saves use deterministic upsert semantics instead of repeated live inserts, and failed `location/detect` calls preserve existing working mappings while adding a nullable error diagnostic row. No new Yandex functional stage was added.

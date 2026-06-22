@@ -87,6 +87,9 @@ final class YandexDeliveryGeoMappingService {
 				continue;
 			}
 			$locality = $this->extract_text( $variant, array( 'locality', 'city', 'name', 'title' ), array( 'address' => array( 'locality', 'city', 'name' ) ) );
+			if ( '' === $locality && is_string( $variant['address'] ?? null ) ) {
+				$locality = trim( $variant['address'] );
+			}
 			$region = $this->extract_text( $variant, array( 'region', 'region_name' ), array( 'address' => array( 'region', 'region_name' ) ) );
 			$rows[] = array(
 				'location_id' => (int) $location->id,
