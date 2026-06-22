@@ -113,6 +113,10 @@ yd_geo_assert( str_contains( $plugin_source, '$this->container->get( YandexDeliv
 yd_geo_assert( str_contains( $admin_source, '! $this->yandex_delivery_geo_mappings instanceof YandexDeliveryGeoMappingRepository' ) && str_contains( $admin_source, '! $this->yandex_delivery_geo_mapping_service instanceof YandexDeliveryGeoMappingService' ), 'Yandex geo tab guard must be backed by constructor DI properties.' );
 yd_geo_assert( str_contains( $service_source, 'is_string( $variant[\'address\'] ?? null )' ) && str_contains( $service_source, 'trim( $variant[\'address\'] )' ), 'Normalizer must use string address as locality fallback.' );
 yd_geo_assert( str_contains( $scorer_source, 'final class YandexDeliveryGeoMatchScorer' ) && str_contains( $scorer_source, 'foreign_country_hint' ) && str_contains( $scorer_source, 'matched_by' ), 'Scorer source must contain deterministic smart geo match logic.' );
+yd_geo_assert( str_contains( $plugin_source, 'YandexDeliveryGeoMatchScorer::class' ) && str_contains( $plugin_source, 'new YandexDeliveryGeoMatchScorer()' ), 'Plugin must register YandexDeliveryGeoMatchScorer in the container.' );
+yd_geo_assert( str_contains( $plugin_source, '$this->container->get( YandexDeliveryGeoMatchScorer::class )' ), 'Plugin must pass YandexDeliveryGeoMatchScorer into YandexDeliveryGeoMappingService.' );
+yd_geo_assert( ! str_contains( $service_source, 'new YandexDeliveryGeoMatchScorer()' ) && ! str_contains( $service_source, '??= new YandexDeliveryGeoMatchScorer' ), 'Geo mapping service must not fallback-construct the scorer.' );
+yd_geo_assert( str_contains( $service_source, 'private YandexDeliveryGeoMatchScorer $scorer' ) && ! str_contains( $service_source, '?YandexDeliveryGeoMatchScorer $scorer = null' ), 'Geo mapping service constructor must require scorer dependency.' );
 yd_geo_assert( ! str_contains( $admin_source, '\'details\' => $result' ) && str_contains( $admin_source, '\'mappings_count\' =>' ) && str_contains( $admin_source, '\'success\' => ! empty( $result[\'success\'] ) ? \'yes\' : \'no\'' ), 'Yandex geo detect action result must store compact details instead of the full result blob.' );
 
 $repository = new YandexDeliveryGeoMappingRepository( $GLOBALS['wpdb'] );
@@ -139,7 +143,7 @@ yd_geo_assert( (int) $not_found_1['id'] === (int) $not_found_2['id'] && 1 === co
 $settings = new YandexDeliverySettings( new SettingsRepository(), new EncryptionService() );
 $settings->save_from_admin( array( YandexDeliverySettings::ENVIRONMENT_KEY => YandexDeliverySettings::ENV_TEST, 'yandex_delivery_test_bearer_token' => 'secret-test-token', YandexDeliverySettings::TEST_PLATFORM_STATION_ID_KEY => 'sender-1' ) );
 $location_repository = new LocationRepository( $GLOBALS['wpdb'] );
-$query = ( new YandexDeliveryGeoMappingService( $location_repository, new YandexDeliveryApiClient( $settings, new YdGeoFakeHttp() ), $repository ) )->build_search_query( $location_repository->find_by_id( 11 ) );
+$query = ( new YandexDeliveryGeoMappingService( $location_repository, new YandexDeliveryApiClient( $settings, new YdGeoFakeHttp() ), $repository, new YandexDeliveryGeoMatchScorer() ) )->build_search_query( $location_repository->find_by_id( 11 ) );
 yd_geo_assert( 'Россия, Новосибирская область, р-н Новосибирский район, с Гусиный Брод' === $query, 'search query must include country, region, district and settlement when district exists.' );
 $scorer = new YandexDeliveryGeoMatchScorer();
 $score = $scorer->score( $location_repository->find_by_id( 20 ), array( 'geo_id' => 213, 'address' => 'Москва, Москва' ), 2 );
@@ -168,7 +172,7 @@ yd_geo_assert( 0.0 === $score['confidence'], 'Nizhny Tagil candidate must not ma
 $GLOBALS['wpdb']->yandex_delivery_geo_mappings = array();
 $safety_repository = new YandexDeliveryGeoMappingRepository( $GLOBALS['wpdb'] );
 $safety_repository->save_mapping( array( 'location_id' => 10, 'yandex_geo_id' => 65, 'status' => YandexDeliveryGeoMappingStatus::MAPPED, 'confidence' => 100, 'is_primary' => 1 ) );
-$error_service = new YandexDeliveryGeoMappingService( new LocationRepository( $GLOBALS['wpdb'] ), new YandexDeliveryApiClient( $settings, new YdGeoFakeHttp( new YandexDeliveryApiException( 'timeout', array( 'error_code' => 'timeout' ) ) ) ), $safety_repository );
+$error_service = new YandexDeliveryGeoMappingService( new LocationRepository( $GLOBALS['wpdb'] ), new YandexDeliveryApiClient( $settings, new YdGeoFakeHttp( new YandexDeliveryApiException( 'timeout', array( 'error_code' => 'timeout' ) ) ) ), $safety_repository, new YandexDeliveryGeoMatchScorer() );
 $error_result = $error_service->detect_for_location_id( 10 );
 $after_error = $safety_repository->find_by_location_id( 10 );
 yd_geo_assert( false === $error_result['success'] && YandexDeliveryGeoMappingStatus::ERROR === $error_result['status'], 'detect_for_location_id must report API errors.' );
@@ -176,7 +180,7 @@ yd_geo_assert( null !== $safety_repository->find_primary_geo_id( 10 ) && 2 === c
 yd_geo_assert( null === $error_result['mappings'][0]['yandex_geo_id'], 'error diagnostic mapping must have NULL yandex_geo_id.' );
 
 $success_http = new YdGeoFakeHttp( new YandexDeliveryApiResponse( 200, json_encode( array( 'locations' => array( array( 'geo_id' => 777, 'locality' => 'Новосибирск', 'region' => 'Новосибирская область' ) ) ), JSON_UNESCAPED_UNICODE ) ?: '{}' ) );
-$success_service = new YandexDeliveryGeoMappingService( new LocationRepository( $GLOBALS['wpdb'] ), new YandexDeliveryApiClient( $settings, $success_http ), $safety_repository );
+$success_service = new YandexDeliveryGeoMappingService( new LocationRepository( $GLOBALS['wpdb'] ), new YandexDeliveryApiClient( $settings, $success_http ), $safety_repository, new YandexDeliveryGeoMatchScorer() );
 $success_result = $success_service->detect_for_location_id( 10 );
 $after_success = $safety_repository->find_by_location_id( 10 );
 yd_geo_assert( true === $success_result['success'] && 1 === count( $after_success ) && 777 === (int) $after_success[0]['yandex_geo_id'], 'successful location/detect must replace old mappings with new mappings.' );

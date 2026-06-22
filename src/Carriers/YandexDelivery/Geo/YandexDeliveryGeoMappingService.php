@@ -15,9 +15,8 @@ final class YandexDeliveryGeoMappingService {
 		private LocationRepository $locations,
 		private YandexDeliveryApiClient $api,
 		private YandexDeliveryGeoMappingRepository $repository,
-		private ?YandexDeliveryGeoMatchScorer $scorer = null
+		private YandexDeliveryGeoMatchScorer $scorer
 	) {
-		$this->scorer ??= new YandexDeliveryGeoMatchScorer();
 	}
 
 	/** @return array<string,mixed> */
