@@ -919,3 +919,19 @@ Use only after this plan is approved.
 - checkout и order-admin recalculation должны идти через CheckoutOrchestrator
 - статусы должны идти через YandexDeliveryStatusMapping -> DeliveryStatus -> ShipmentOrderStatusMappingService
 ```
+
+## Yandex geo_id scoring
+
+`location/detect` can return many candidates that are not valid geo_id values for the same WDC location. Examples include nearby settlements, cottage settlements, garden associations, foreign names that share the same text, and other weak textual matches.
+
+Multiple geo_id for a large city is a working hypothesis from Yandex FAQ. It must be rechecked later against real pickup-points/list results and the completed mapping database. Do not treat every additional location/detect variant as a valid geo_id for the same WDC location.
+
+Practical scoring rules for the current stage:
+
+- exact locality plus matching region is high confidence and may be auto-primary;
+- exact locality without verifiable region is high but slightly less certain;
+- noisy variants that only contain the WDC locality as a token or substring stay low confidence;
+- foreign country hints are low confidence even when locality text matches;
+- additional candidates such as Парголово/Шушары/Колпино for Санкт-Петербург are stored as candidates, but are treated as separate localities/territories unless they match the WDC location.
+
+The scorer is intended to prepare future automation for 160k locations, but ambiguous cases still require manual confirmation. This stage does not add checkout, pricing calculator integration, pickup-point selection, full Russia pickup import, or mass mapping.

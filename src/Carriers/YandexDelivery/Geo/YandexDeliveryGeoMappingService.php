@@ -14,8 +14,10 @@ final class YandexDeliveryGeoMappingService {
 	public function __construct(
 		private LocationRepository $locations,
 		private YandexDeliveryApiClient $api,
-		private YandexDeliveryGeoMappingRepository $repository
+		private YandexDeliveryGeoMappingRepository $repository,
+		private ?YandexDeliveryGeoMatchScorer $scorer = null
 	) {
+		$this->scorer ??= new YandexDeliveryGeoMatchScorer();
 	}
 
 	/** @return array<string,mixed> */
@@ -79,9 +81,8 @@ final class YandexDeliveryGeoMappingService {
 		if ( array() === $variants ) {
 			return array( $this->empty_mapping( $location, $query, $body ) );
 		}
-		$status = count( $variants ) > 1 ? YandexDeliveryGeoMappingStatus::MULTIPLE_MATCHES : YandexDeliveryGeoMappingStatus::MAPPED;
 		$rows = array();
-		foreach ( $variants as $index => $variant ) {
+		foreach ( $variants as $variant ) {
 			$geo_id = $this->extract_geo_id( $variant );
 			if ( $geo_id <= 0 ) {
 				continue;
@@ -91,20 +92,41 @@ final class YandexDeliveryGeoMappingService {
 				$locality = trim( $variant['address'] );
 			}
 			$region = $this->extract_text( $variant, array( 'region', 'region_name' ), array( 'address' => array( 'region', 'region_name' ) ) );
+			$scoring = $this->scorer->score( $location, $variant, count( $variants ) );
 			$rows[] = array(
 				'location_id' => (int) $location->id,
 				'yandex_geo_id' => $geo_id,
 				'yandex_locality' => $locality,
 				'yandex_region' => $region,
 				'source_query' => $query,
-				'status' => $status,
-				'confidence' => $this->confidence( $location, $locality, $region, count( $variants ) ),
-				'is_primary' => 1 === count( $variants ) && 0 === $index ? 1 : 0,
-				'raw_json' => $this->json( $variant ),
+				'scoring' => $scoring,
+				'status' => YandexDeliveryGeoMappingStatus::MULTIPLE_MATCHES,
+				'confidence' => (float) $scoring['confidence'],
+				'is_primary' => 0,
+				'raw_json' => $this->json( array( 'variant' => $variant, 'scoring' => $scoring ) ),
 			);
 		}
+		if ( array() === $rows ) {
+			return array( $this->empty_mapping( $location, $query, $body ) );
+		}
+		usort( $rows, static fn( array $left, array $right ): int => (float) $right['confidence'] <=> (float) $left['confidence'] );
+		$best = (float) ( $rows[0]['confidence'] ?? 0 );
+		$second = isset( $rows[1] ) ? (float) $rows[1]['confidence'] : null;
+		if ( 1 === count( $rows ) ) {
+			$rows[0]['status'] = YandexDeliveryGeoMappingStatus::MAPPED;
+			$rows[0]['is_primary'] = $best >= 60 ? 1 : 0;
+			unset( $rows[0]['scoring'] );
+			return $rows;
+		}
+		if ( $best >= 95 && ( null === $second || $second <= $best - 15 ) ) {
+			$rows[0]['status'] = YandexDeliveryGeoMappingStatus::MAPPED;
+			$rows[0]['is_primary'] = 1;
+		}
+		foreach ( $rows as $index => $row ) {
+			unset( $rows[ $index ]['scoring'] );
+		}
 
-		return array() !== $rows ? $rows : array( $this->empty_mapping( $location, $query, $body ) );
+		return $rows;
 	}
 
 	public function confidence( Location $location, string $locality, string $region, int $variant_count = 1 ): float {

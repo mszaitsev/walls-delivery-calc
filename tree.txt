@@ -309,6 +309,7 @@ C:.
 |   |       |       YandexDeliveryGeoMappingRepository.php
 |   |       |       YandexDeliveryGeoMappingService.php
 |   |       |       YandexDeliveryGeoMappingStatus.php
+|   |       |       YandexDeliveryGeoMatchScorer.php
 |   |       |
 |   |       \---Pickup
 |   |               YandexDeliveryPickupPointImportService.php

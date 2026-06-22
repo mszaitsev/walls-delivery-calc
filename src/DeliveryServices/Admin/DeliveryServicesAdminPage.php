@@ -1375,7 +1375,7 @@ final class DeliveryServicesAdminPage {
 		<?php endif; ?>
 		<?php if ( array() !== $rows ) : ?>
 			<table class="widefat striped" style="max-width: 1180px;">
-				<thead><tr><th>geo_id</th><th>locality</th><th>region</th><th>confidence</th><th>status</th><th>primary</th><th><?php echo esc_html__( 'Действие', 'walls-delivery-calc' ); ?></th></tr></thead>
+				<thead><tr><th>geo_id</th><th>locality</th><th>region</th><th>confidence</th><th>status</th><th>scoring</th><th>primary</th><th><?php echo esc_html__( 'Действие', 'walls-delivery-calc' ); ?></th></tr></thead>
 				<tbody>
 					<?php foreach ( $rows as $row ) : ?>
 						<tr>
@@ -1384,6 +1384,7 @@ final class DeliveryServicesAdminPage {
 							<td><?php echo esc_html( (string) ( $row['yandex_region'] ?? '' ) ); ?></td>
 							<td><?php echo esc_html( number_format( (float) ( $row['confidence'] ?? 0 ), 2, '.', '' ) ); ?></td>
 							<td><?php echo esc_html( (string) ( $row['status'] ?? '' ) ); ?></td>
+							<td><?php echo esc_html( $this->yandex_delivery_geo_scoring_summary( $row ) ); ?></td>
 							<td><?php echo empty( $row['is_primary'] ) ? '-' : esc_html__( 'да', 'walls-delivery-calc' ); ?></td>
 							<td>
 								<?php if ( (int) ( $row['yandex_geo_id'] ?? 0 ) > 0 ) : ?>
@@ -1403,6 +1404,18 @@ final class DeliveryServicesAdminPage {
 			</table>
 		<?php endif; ?>
 		<?php
+	}
+	/** @param array<string,mixed> $row */
+	private function yandex_delivery_geo_scoring_summary( array $row ): string {
+		$raw = json_decode( (string) ( $row['raw_json'] ?? '' ), true );
+		$scoring = is_array( $raw ) && is_array( $raw['scoring'] ?? null ) ? $raw['scoring'] : array();
+		$reason = is_scalar( $scoring['reason'] ?? null ) ? trim( (string) $scoring['reason'] ) : '';
+		if ( '' !== $reason ) {
+			return $reason;
+		}
+		$matched_by = is_array( $scoring['matched_by'] ?? null ) ? array_values( array_filter( array_map( 'strval', $scoring['matched_by'] ) ) ) : array();
+
+		return array() !== $matched_by ? implode( ', ', $matched_by ) : '—';
 	}
 	/** @param array<string,mixed> $state */
 	private function yandex_delivery_pickup_import_state_summary( array $state ): string {

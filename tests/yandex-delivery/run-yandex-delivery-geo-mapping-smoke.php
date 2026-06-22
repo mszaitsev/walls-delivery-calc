@@ -16,6 +16,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryHttpClientInterface;
 use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingRepository;
 use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingService;
 use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingStatus;
+use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMatchScorer;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -84,12 +85,17 @@ $GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->locations = array(
 	array( 'id' => 10, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'district_name' => '', 'city_name' => 'Новосибирск', 'place_name' => 'Новосибирск', 'place_type' => 'г', 'display_name' => 'Новосибирская область, г Новосибирск', 'active' => 1 ),
 	array( 'id' => 11, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'district_name' => 'Новосибирский район', 'district_type' => 'р-н', 'city_name' => '', 'place_name' => 'Гусиный Брод', 'place_type' => 'с', 'display_name' => 'Новосибирская область, Новосибирский район, с Гусиный Брод', 'active' => 1 ),
+	array( 'id' => 20, 'country_code' => 'RU', 'region_name' => 'Москва', 'city_name' => 'Москва', 'place_name' => 'Москва', 'place_type' => 'г', 'display_name' => 'г Москва', 'active' => 1 ),
+	array( 'id' => 21, 'country_code' => 'RU', 'region_name' => 'Санкт-Петербург', 'city_name' => 'Санкт-Петербург', 'place_name' => 'Санкт-Петербург', 'place_type' => 'г', 'display_name' => 'г Санкт-Петербург', 'active' => 1 ),
+	array( 'id' => 22, 'country_code' => 'RU', 'region_name' => 'Республика Татарстан', 'city_name' => 'Казань', 'place_name' => 'Казань', 'place_type' => 'г', 'display_name' => 'Республика Татарстан, г Казань', 'active' => 1 ),
+	array( 'id' => 23, 'country_code' => 'RU', 'region_name' => 'Свердловская область', 'city_name' => 'Екатеринбург', 'place_name' => 'Екатеринбург', 'place_type' => 'г', 'display_name' => 'Свердловская область, г Екатеринбург', 'active' => 1 ),
 );
 
 $migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0033_create_yandex_delivery_geo_mappings_table.php' );
 $repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingRepository.php' );
 $service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingService.php' );
 $api_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Api/YandexDeliveryApiClient.php' );
+$scorer_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMatchScorer.php' );
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 yd_geo_assert( str_contains( $migration_source, 'YandexDeliveryGeoMappingRepository' ) && str_contains( $repository_source, 'wdc_yandex_delivery_geo_mappings' ), 'Migration must create Yandex geo mappings table through repository.' );
@@ -106,6 +112,7 @@ yd_geo_assert( str_contains( $admin_source, '?YandexDeliveryGeoMappingRepository
 yd_geo_assert( str_contains( $plugin_source, '$this->container->get( YandexDeliveryGeoMappingRepository::class )' ) && str_contains( $plugin_source, '$this->container->get( YandexDeliveryGeoMappingService::class )' ), 'Plugin must pass Yandex geo mapping dependencies into DeliveryServicesAdminPage.' );
 yd_geo_assert( str_contains( $admin_source, '! $this->yandex_delivery_geo_mappings instanceof YandexDeliveryGeoMappingRepository' ) && str_contains( $admin_source, '! $this->yandex_delivery_geo_mapping_service instanceof YandexDeliveryGeoMappingService' ), 'Yandex geo tab guard must be backed by constructor DI properties.' );
 yd_geo_assert( str_contains( $service_source, 'is_string( $variant[\'address\'] ?? null )' ) && str_contains( $service_source, 'trim( $variant[\'address\'] )' ), 'Normalizer must use string address as locality fallback.' );
+yd_geo_assert( str_contains( $scorer_source, 'final class YandexDeliveryGeoMatchScorer' ) && str_contains( $scorer_source, 'foreign_country_hint' ) && str_contains( $scorer_source, 'matched_by' ), 'Scorer source must contain deterministic smart geo match logic.' );
 yd_geo_assert( ! str_contains( $admin_source, '\'details\' => $result' ) && str_contains( $admin_source, '\'mappings_count\' =>' ) && str_contains( $admin_source, '\'success\' => ! empty( $result[\'success\'] ) ? \'yes\' : \'no\'' ), 'Yandex geo detect action result must store compact details instead of the full result blob.' );
 
 $repository = new YandexDeliveryGeoMappingRepository( $GLOBALS['wpdb'] );
@@ -134,6 +141,29 @@ $settings->save_from_admin( array( YandexDeliverySettings::ENVIRONMENT_KEY => Ya
 $location_repository = new LocationRepository( $GLOBALS['wpdb'] );
 $query = ( new YandexDeliveryGeoMappingService( $location_repository, new YandexDeliveryApiClient( $settings, new YdGeoFakeHttp() ), $repository ) )->build_search_query( $location_repository->find_by_id( 11 ) );
 yd_geo_assert( 'Россия, Новосибирская область, р-н Новосибирский район, с Гусиный Брод' === $query, 'search query must include country, region, district and settlement when district exists.' );
+$scorer = new YandexDeliveryGeoMatchScorer();
+$score = $scorer->score( $location_repository->find_by_id( 20 ), array( 'geo_id' => 213, 'address' => 'Москва, Москва' ), 2 );
+yd_geo_assert( $score['confidence'] >= 95, 'Moscow exact candidate must get high score.' );
+$score = $scorer->score( $location_repository->find_by_id( 20 ), array( 'geo_id' => 9001, 'address' => 'КП Москва река' ), 2 );
+yd_geo_assert( $score['confidence'] <= 30, 'Moscow noisy cottage-settlement candidate must get low score.' );
+$score = $scorer->score( $location_repository->find_by_id( 21 ), array( 'geo_id' => 2, 'address' => 'Санкт-Петербург' ), 2 );
+yd_geo_assert( $score['confidence'] >= 95, 'Saint Petersburg exact candidate must get high score.' );
+$score = $scorer->score( $location_repository->find_by_id( 21 ), array( 'geo_id' => 101, 'address' => 'посёлок Парголово, Санкт-Петербург' ), 2 );
+yd_geo_assert( $score['confidence'] < 95, 'Pargolovo must score below the Saint Petersburg city candidate.' );
+$score = $scorer->score( $location_repository->find_by_id( 10 ), array( 'geo_id' => 65, 'address' => array( 'locality' => 'Новосибирск', 'region' => 'Новосибирская область' ) ), 2 );
+yd_geo_assert( $score['confidence'] >= 95, 'Novosibirsk exact candidate must get high score.' );
+$score = $scorer->score( $location_repository->find_by_id( 10 ), array( 'geo_id' => 1002, 'address' => 'посёлок Новосибирский' ), 2 );
+yd_geo_assert( $score['confidence'] <= 30, 'Novosibirsky settlement must get low score.' );
+$score = $scorer->score( $location_repository->find_by_id( 22 ), array( 'geo_id' => 43, 'address' => 'Казань, Республика Татарстан (Татарстан)' ), 3 );
+yd_geo_assert( $score['confidence'] >= 95, 'Kazan exact Татарстан candidate must get high score.' );
+$score = $scorer->score( $location_repository->find_by_id( 22 ), array( 'geo_id' => 2001, 'address' => 'Казань, Франция' ), 3 );
+yd_geo_assert( $score['confidence'] <= 30, 'Kazan France candidate must get low score.' );
+$score = $scorer->score( $location_repository->find_by_id( 22 ), array( 'geo_id' => 2002, 'address' => 'Казаньо, Италия' ), 3 );
+yd_geo_assert( $score['confidence'] <= 10, 'Kazanyo Italy candidate must get zero or weak score.' );
+$score = $scorer->score( $location_repository->find_by_id( 23 ), array( 'geo_id' => 54, 'address' => 'Екатеринбург, Свердловская область' ), 2 );
+yd_geo_assert( $score['confidence'] >= 95, 'Ekaterinburg exact candidate must get high score.' );
+$score = $scorer->score( $location_repository->find_by_id( 23 ), array( 'geo_id' => 2003, 'address' => 'Нижний Тагил, Свердловская область' ), 2 );
+yd_geo_assert( 0.0 === $score['confidence'], 'Nizhny Tagil candidate must not match Ekaterinburg.' );
 
 $GLOBALS['wpdb']->yandex_delivery_geo_mappings = array();
 $safety_repository = new YandexDeliveryGeoMappingRepository( $GLOBALS['wpdb'] );
@@ -155,10 +185,15 @@ yd_geo_assert( array( 'location' => 'Россия, Новосибирская о
 yd_geo_assert( 100.00 === (float) $success_result['mappings'][0]['confidence'], 'confidence must be 100 when locality and region match.' );
 yd_geo_assert( 70.00 === $success_service->confidence( ( new LocationRepository( $GLOBALS['wpdb'] ) )->find_by_id( 10 ), 'Новосибирск', 'Другой регион', 1 ), 'confidence must be 70 when only locality matches.' );
 $normalized_multiple = $success_service->normalize_detect_response( ( new LocationRepository( $GLOBALS['wpdb'] ) )->find_by_id( 10 ), 'query', array( 'body' => array( 'variants' => array( array( 'geoId' => 1, 'address' => array( 'locality' => 'Новосибирск', 'region' => 'Новосибирская область' ) ), array( 'id' => 2, 'name' => 'Новосибирск', 'region_name' => 'Новосибирская область' ) ) ) ) );
-yd_geo_assert( 2 === count( $normalized_multiple ) && YandexDeliveryGeoMappingStatus::MULTIPLE_MATCHES === $normalized_multiple[0]['status'] && 40.00 === (float) $normalized_multiple[0]['confidence'], 'normalization must support multiple location/detect variants with confidence 40.' );
+yd_geo_assert( 2 === count( $normalized_multiple ) && YandexDeliveryGeoMappingStatus::MULTIPLE_MATCHES === $normalized_multiple[0]['status'] && 100.00 === (float) $normalized_multiple[0]['confidence'] && empty( $normalized_multiple[0]['is_primary'] ), 'normalization must keep equally strong duplicate variants ambiguous.' );
 yd_geo_assert( 'Новосибирск' === $normalized_multiple[0]['yandex_locality'] && 'Новосибирская область' === $normalized_multiple[0]['yandex_region'], 'structured address normalization must keep locality and region.' );
 $normalized_address_string = $success_service->normalize_detect_response( ( new LocationRepository( $GLOBALS['wpdb'] ) )->find_by_id( 10 ), 'query', array( 'body' => array( 'locations' => array( array( 'geo_id' => 2, 'address' => 'Санкт-Петербург' ) ) ) ) );
 yd_geo_assert( 'Санкт-Петербург' === $normalized_address_string[0]['yandex_locality'] && '' === $normalized_address_string[0]['yandex_region'], 'string address must normalize to fallback locality without region.' );
+$normalized_auto_primary = $success_service->normalize_detect_response( $location_repository->find_by_id( 22 ), 'query', array( 'body' => array( 'locations' => array( array( 'geo_id' => 43, 'address' => 'Казань, Республика Татарстан (Татарстан)' ), array( 'geo_id' => 2001, 'address' => 'Казань, Франция' ), array( 'geo_id' => 2002, 'address' => 'Казаньо, Италия' ) ) ) ) );
+yd_geo_assert( 43 === (int) $normalized_auto_primary[0]['yandex_geo_id'] && 1 === (int) $normalized_auto_primary[0]['is_primary'] && YandexDeliveryGeoMappingStatus::MAPPED === $normalized_auto_primary[0]['status'], 'auto-primary must select the reliable Kazan candidate.' );
+yd_geo_assert( empty( $normalized_auto_primary[1]['is_primary'] ) && empty( $normalized_auto_primary[2]['is_primary'] ) && YandexDeliveryGeoMappingStatus::MULTIPLE_MATCHES === $normalized_auto_primary[1]['status'], 'auto-primary must not select lower-confidence extra candidates.' );
+$raw = json_decode( (string) $normalized_auto_primary[0]['raw_json'], true );
+yd_geo_assert( is_array( $raw['variant'] ?? null ) && is_array( $raw['scoring'] ?? null ) && isset( $raw['scoring']['confidence'] ) && is_array( $raw['scoring']['matched_by'] ?? null ) && is_string( $raw['scoring']['reason'] ?? null ), 'raw_json must contain variant and scoring diagnostics.' );
 $normalized_empty = $success_service->normalize_detect_response( ( new LocationRepository( $GLOBALS['wpdb'] ) )->find_by_id( 10 ), 'query', array( 'body' => array( 'locations' => array() ) ) );
 yd_geo_assert( YandexDeliveryGeoMappingStatus::NOT_FOUND === $normalized_empty[0]['status'] && null === $normalized_empty[0]['yandex_geo_id'], 'empty location/detect result must normalize to not_found with NULL geo_id.' );
 foreach ( array( 'mapped', 'multiple_matches', 'not_found', 'manual', 'error' ) as $status ) {
