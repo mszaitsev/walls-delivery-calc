@@ -741,8 +741,38 @@ Still intentionally not implemented in 0.72.0: pickup-point table/import, checko
 - local table and migration;
 - import/safe-replace service;
 - sender dropoff validation;
-- checkout/admin pickup REST integration;
-- smoke tests for point normalization, active filtering and checkout payload shape.
+- manual admin pickup-point import/search tab;
+- smoke tests for point normalization, active filtering, sender validation and import statistics.
+
+Checkout/admin pickup REST integration and checkout payload shape move to Phase 3 with pickup selection/pricing.
+
+
+### 0.73.0 implementation note
+
+Phase 2 is implemented as a local pickup/dropoff points foundation only:
+
+- migration `0032_create_yandex_delivery_pickup_points_table.php` creates `wdc_yandex_delivery_pickup_points`;
+- repository, normalizer, manual import service and service layer live in `src/Carriers/YandexDelivery/Pickup/`;
+- import source is `POST /api/b2b/platform/pickup-points/list` with `type=pickup_point`;
+- importer stores pickup points, dropoff points and partner points, including rows where `available_for_dropoff=false`;
+- admin tab `ПВЗ / точки сдачи` shows stats, active-environment sender point validation, manual import and basic search;
+- smoke coverage is in `tests/yandex-delivery/run-yandex-delivery-pickup-smoke.php`.
+
+Still intentionally not implemented in 0.73.0: checkout rates, pickup map/selection, `YandexDeliveryQuoteCarrier`, pricing-calculator integration, order-admin recalculation, shipment adapter/actions, `offers/create`, `offers/confirm`, cancellation, statuses/autosync, documents, cron or pickup autosync. Import is manual only.
+
+
+
+### 0.74.2 fixed geo_id import note
+
+Live testing showed `pickup-points/list` ignores `limit` and does not provide usable page tokens, returning the full Russia dataset in one response. The current manual AJAX import is therefore temporarily constrained to `type=pickup_point` with integer `geo_id=213` (`Москва`) and stores `mode=geo_id_fixed`, `geo_id` and `geo_label` in state/report. Full Russia import remains a later phase after WDC location records can be mapped to Yandex `geo_id` values.
+
+### 0.74.0 AJAX import note
+
+The Phase 2 pickup/dropoff import is manual AJAX only. The admin tab starts a session, stores progress in `wdc_yandex_delivery_pickup_import_state`, processes exactly one `pickup-points/list` page per step, updates counters after every step and saves the final report on success/error. Reset removes both `wdc_yandex_delivery_pickup_import_lock` and the import state so an admin can recover from a failed request. Cron/autosync, checkout rates, pickup map/selection, shipments, statuses and documents remain out of scope.
+
+### 0.73.3 production import memory note
+
+Yandex pickup/dropoff import remains manual-only and page-streamed. Production imports use a conservative default `yandex_delivery_pickup_import_page_size=100`; the admin pickup tab can set 20..500, and the import report records `page_size`, `pages` and `memory_peak_mb`. Use 50 or 100 if a large Yandex page exhausts PHP memory during response decoding.
 
 ### Phase 3 — checkout and order recalculation
 

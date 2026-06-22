@@ -15,6 +15,9 @@ final class YandexDeliverySettings {
 	public const ENV_TEST = 'test';
 	public const ENV_PRODUCTION = 'production';
 	public const DEFAULT_REQUEST_TIMEOUT = 20;
+	public const DEFAULT_PICKUP_IMPORT_PAGE_SIZE = 100;
+	public const MIN_PICKUP_IMPORT_PAGE_SIZE = 20;
+	public const MAX_PICKUP_IMPORT_PAGE_SIZE = 500;
 
 	public const ENVIRONMENT_KEY = 'yandex_delivery_environment';
 	public const TEST_TOKEN_ENCRYPTED_KEY = 'yandex_delivery_test_bearer_token_encrypted';
@@ -26,6 +29,9 @@ final class YandexDeliverySettings {
 	public const LAST_CONNECTION_CHECK_KEY = 'yandex_delivery_last_connection_check';
 	public const LAST_CONNECTION_STATUS_KEY = 'yandex_delivery_last_connection_status';
 	public const LAST_CONNECTION_MESSAGE_KEY = 'yandex_delivery_last_connection_message';
+	public const LAST_PICKUP_IMPORT_REPORT_KEY = 'yandex_delivery_last_pickup_import_report';
+	public const PICKUP_ACTION_RESULT_KEY = 'yandex_delivery_pickup_action_result';
+	public const PICKUP_IMPORT_PAGE_SIZE_KEY = 'yandex_delivery_pickup_import_page_size';
 
 	public function __construct(
 		private SettingsRepository $settings,
@@ -46,6 +52,9 @@ final class YandexDeliverySettings {
 			self::LAST_CONNECTION_CHECK_KEY => '',
 			self::LAST_CONNECTION_STATUS_KEY => '',
 			self::LAST_CONNECTION_MESSAGE_KEY => '',
+			self::LAST_PICKUP_IMPORT_REPORT_KEY => array(),
+			self::PICKUP_ACTION_RESULT_KEY => array(),
+			self::PICKUP_IMPORT_PAGE_SIZE_KEY => self::DEFAULT_PICKUP_IMPORT_PAGE_SIZE,
 		);
 	}
 
@@ -63,6 +72,15 @@ final class YandexDeliverySettings {
 
 	public function debug_enabled(): bool {
 		return $this->settings->get_bool( self::DEBUG_KEY, false );
+	}
+
+	public function pickup_import_page_size(): int {
+		return $this->sanitize_pickup_import_page_size( $this->settings->get_string( self::PICKUP_IMPORT_PAGE_SIZE_KEY, (string) self::DEFAULT_PICKUP_IMPORT_PAGE_SIZE ) );
+	}
+
+	/** @param array<string,mixed> $input */
+	public function save_pickup_import_page_size_from_admin( array $input ): void {
+		$this->settings->set( self::PICKUP_IMPORT_PAGE_SIZE_KEY, $this->sanitize_pickup_import_page_size( $input[ self::PICKUP_IMPORT_PAGE_SIZE_KEY ] ?? self::DEFAULT_PICKUP_IMPORT_PAGE_SIZE ) );
 	}
 
 	public function credentials(): YandexDeliveryCredentials {
@@ -101,6 +119,34 @@ final class YandexDeliverySettings {
 		return $this->settings->get_string( self::LAST_CONNECTION_MESSAGE_KEY, '' );
 	}
 
+	/** @return array<string,mixed> */
+	public function last_pickup_import_report(): array {
+		$value = $this->settings->get_array( self::LAST_PICKUP_IMPORT_REPORT_KEY, array() );
+
+		return is_array( $value ) ? $value : array();
+	}
+
+	/** @param array<string,mixed> $report */
+	public function save_pickup_import_report( array $report ): void {
+		$this->settings->set( self::LAST_PICKUP_IMPORT_REPORT_KEY, $this->sanitize_report( $report ) );
+	}
+
+	/** @return array<string,mixed> */
+	public function get_pickup_action_result(): array {
+		$value = $this->settings->get_array( self::PICKUP_ACTION_RESULT_KEY, array() );
+
+		return is_array( $value ) ? $value : array();
+	}
+
+	/** @param array<string,mixed> $result */
+	public function save_pickup_action_result( array $result ): void {
+		$this->settings->set( self::PICKUP_ACTION_RESULT_KEY, $this->sanitize_report( $result ) );
+	}
+
+	public function clear_pickup_action_result(): void {
+		$this->settings->set( self::PICKUP_ACTION_RESULT_KEY, array() );
+	}
+
 	/** @param array<string,mixed> $input */
 	public function save_from_admin( array $input ): void {
 		$environment = $this->sanitize_key( (string) ( $input[ self::ENVIRONMENT_KEY ] ?? self::ENV_TEST ) );
@@ -113,6 +159,9 @@ final class YandexDeliverySettings {
 		$this->save_credentials_for_environment( self::ENV_PRODUCTION, $input );
 		$this->settings->set( self::REQUEST_TIMEOUT_KEY, max( 1, min( 120, (int) ( $input[ self::REQUEST_TIMEOUT_KEY ] ?? self::DEFAULT_REQUEST_TIMEOUT ) ) ) );
 		$this->settings->set( self::DEBUG_KEY, ! empty( $input[ self::DEBUG_KEY ] ) );
+		if ( array_key_exists( self::PICKUP_IMPORT_PAGE_SIZE_KEY, $input ) ) {
+			$this->save_pickup_import_page_size_from_admin( $input );
+		}
 	}
 
 	public function save_connection_result( bool $success, string $message ): void {
@@ -208,12 +257,54 @@ final class YandexDeliverySettings {
 		}
 	}
 
+	private function sanitize_pickup_import_page_size( mixed $value ): int {
+		if ( is_string( $value ) ) {
+			$value = trim( $this->unslash( $value ) );
+		}
+		if ( ! is_numeric( $value ) ) {
+			return self::DEFAULT_PICKUP_IMPORT_PAGE_SIZE;
+		}
+
+		return max( self::MIN_PICKUP_IMPORT_PAGE_SIZE, min( self::MAX_PICKUP_IMPORT_PAGE_SIZE, (int) $value ) );
+	}
+
 	private function sanitize_station_id( string $value ): string {
 		return substr( preg_replace( '/[^A-Za-z0-9_-]+/', '', trim( $this->unslash( $value ) ) ) ?? '', 0, 80 );
 	}
 
 	private function sanitize_message( string $value ): string {
 		return substr( $this->sanitize_text( $value ), 0, 500 );
+	}
+
+	/** @param array<string,mixed> $report @return array<string,mixed> */
+	private function sanitize_report( array $report ): array {
+		$sanitized = array();
+		foreach ( $report as $key => $value ) {
+			$key = $this->sanitize_key( (string) $key );
+			if ( '' === $key ) {
+				continue;
+			}
+			if ( is_array( $value ) ) {
+				$sanitized[ $key ] = array_map(
+					fn( mixed $item ): string => substr( $this->sanitize_text( is_scalar( $item ) ? (string) $item : $this->json( $item ) ), 0, 500 ),
+					$value
+				);
+				continue;
+			}
+			if ( is_bool( $value ) || is_int( $value ) || is_float( $value ) ) {
+				$sanitized[ $key ] = $value;
+				continue;
+			}
+			$sanitized[ $key ] = substr( $this->sanitize_text( (string) $value ), 0, 500 );
+		}
+
+		return $sanitized;
+	}
+
+	private function json( mixed $value ): string {
+		$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $value, JSON_UNESCAPED_UNICODE ) : json_encode( $value, JSON_UNESCAPED_UNICODE );
+
+		return is_string( $json ) ? $json : '';
 	}
 
 	private function sanitize_text( string $value ): string {
