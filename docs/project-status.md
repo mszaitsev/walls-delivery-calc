@@ -1,3 +1,5 @@
+0.74.2 note: Yandex Delivery pickup import no longer sends unsupported limit/page_token pagination fields. Until WDC has a location-to-Yandex-geo_id model, manual AJAX import is temporarily limited to Moscow with integer geo_id=213 and reports mode=geo_id_fixed, geo_id and geo_label.
+
 0.74.1 note: Yandex Delivery pickup AJAX import now shows a recovery hint on browser-side AJAX errors/timeouts, keeps the reset button available and re-enables the start button so admins know to reset lock or retry after an interrupted step.
 
 0.74.0 note: Yandex Delivery pickup import is now a manual AJAX step-runner. Admin start creates option-backed state and lock, each step processes one pickup-points/list page, progress is rendered on the pickup tab, final success saves the import report, and reset clears both state and lock. No cron/autosync, checkout, tariffs, map, shipments or statuses were added.

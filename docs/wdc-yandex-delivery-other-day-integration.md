@@ -761,6 +761,11 @@ Phase 2 is implemented as a local pickup/dropoff points foundation only:
 Still intentionally not implemented in 0.73.0: checkout rates, pickup map/selection, `YandexDeliveryQuoteCarrier`, pricing-calculator integration, order-admin recalculation, shipment adapter/actions, `offers/create`, `offers/confirm`, cancellation, statuses/autosync, documents, cron or pickup autosync. Import is manual only.
 
 
+
+### 0.74.2 fixed geo_id import note
+
+Live testing showed `pickup-points/list` ignores `limit` and does not provide usable page tokens, returning the full Russia dataset in one response. The current manual AJAX import is therefore temporarily constrained to `type=pickup_point` with integer `geo_id=213` (`Москва`) and stores `mode=geo_id_fixed`, `geo_id` and `geo_label` in state/report. Full Russia import remains a later phase after WDC location records can be mapped to Yandex `geo_id` values.
+
 ### 0.74.0 AJAX import note
 
 The Phase 2 pickup/dropoff import is manual AJAX only. The admin tab starts a session, stores progress in `wdc_yandex_delivery_pickup_import_state`, processes exactly one `pickup-points/list` page per step, updates counters after every step and saves the final report on success/error. Reset removes both `wdc_yandex_delivery_pickup_import_lock` and the import state so an admin can recover from a failed request. Cron/autosync, checkout rates, pickup map/selection, shipments, statuses and documents remain out of scope.

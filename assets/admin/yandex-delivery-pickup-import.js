@@ -9,7 +9,6 @@
 
 	var startButton = root.querySelector('[data-wdc-yandex-import-start]');
 	var resetButton = root.querySelector('[data-wdc-yandex-import-reset]');
-	var pageSizeInput = root.querySelector('[data-wdc-yandex-page-size]');
 	var summary = root.querySelector('[data-wdc-yandex-summary]');
 	var running = false;
 	var timer = null;
@@ -47,7 +46,9 @@
 			'normalized',
 			'saved',
 			'inactive',
-			'page_size',
+			'mode',
+			'geo_id',
+			'geo_label',
 			'memory_peak_mb',
 			'updated_at',
 			'message',
@@ -56,7 +57,11 @@
 			setField(key, state[key]);
 		});
 		if (summary) {
-			summary.textContent = 'Статус: ' + status + '. Шаг ' + format(state.page || 0) + ': обработано ' + format(state.fetched || 0) + ', сохранено ' + format(state.saved || 0) + ', page size ' + format(state.page_size || '') + (needsReset ? '. Требуется сброс lock или повторный запуск импорта.' : '');
+			if (status === 'success') {
+				summary.textContent = 'Статус: success. Импортировано: ' + format(state.fetched || 0) + ', сохранено: ' + format(state.saved || 0) + '. ' + format(state.geo_label || 'Москва') + ', geo_id=' + format(state.geo_id || 213) + (needsReset ? '. Требуется сброс lock или повторный запуск импорта.' : '');
+			} else {
+				summary.textContent = 'Статус: ' + status + '. Импортируется: ' + format(state.geo_label || 'Москва') + ', geo_id=' + format(state.geo_id || 213) + (needsReset ? '. Требуется сброс lock или повторный запуск импорта.' : '');
+			}
 		}
 		if (startButton) {
 			startButton.disabled = !needsReset && (isRunning(state) || running);
@@ -83,7 +88,18 @@
 			body: body.toString()
 		})
 			.then(function (response) {
-				return response.json();
+				return response.text().then(function (text) {
+					var payload = null;
+					try {
+						payload = JSON.parse(text);
+					} catch (error) {
+						throw new Error('Сервер вернул не JSON. Вероятна критическая ошибка PHP во время шага импорта. Проверьте wp-content/debug.log или лог PHP.');
+					}
+					if (!response.ok) {
+						throw new Error('HTTP ' + response.status + ': ' + (payload && payload.data && payload.data.message ? payload.data.message : 'AJAX request failed.'));
+					}
+					return payload;
+				});
 			})
 			.then(function (payload) {
 				if (!payload || !payload.success) {
@@ -130,7 +146,7 @@
 			window.clearTimeout(timer);
 			timer = null;
 		}
-		request('wdc_yandex_delivery_pickup_import_start', { page_size: pageSizeInput ? pageSizeInput.value : '' })
+		request('wdc_yandex_delivery_pickup_import_start', {})
 			.then(function (state) {
 				render(state);
 				if (isRunning(state) && state.session_id) {

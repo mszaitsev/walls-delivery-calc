@@ -14,8 +14,9 @@ final class YandexDeliveryPickupPointImportService {
 	private const LOCK_OPTION = 'wdc_yandex_delivery_pickup_import_lock';
 	private const STATE_OPTION = 'wdc_yandex_delivery_pickup_import_state';
 	private const LOCK_TTL = 30 * 60;
-	private const MAX_PAGES = 500;
-	private const PAGE_SIZE = 100;
+	private const DEFAULT_IMPORT_GEO_ID = 213;
+	private const DEFAULT_IMPORT_GEO_LABEL = 'Москва';
+	private const IMPORT_MODE = 'geo_id_fixed';
 
 	public function __construct(
 		private YandexDeliveryApiClient $api,
@@ -28,12 +29,11 @@ final class YandexDeliveryPickupPointImportService {
 
 	/** @return array<string,mixed> */
 	public function start_import( string $context = 'manual_ajax' ): array {
-		$page_size = $this->settings->pickup_import_page_size();
 		$token = $this->acquire_lock();
 		if ( '' === $token ) {
 			$state = $this->current_import_state();
 			if ( array() === $state || 'idle' === (string) ( $state['status'] ?? '' ) ) {
-				$state = $this->base_state( 'stale_lock', $page_size, $context );
+				$state = $this->base_state( 'stale_lock', $context );
 				$state['message'] = 'Yandex Delivery pickup import skipped: another import is already running.';
 			}
 
@@ -41,11 +41,11 @@ final class YandexDeliveryPickupPointImportService {
 		}
 
 		$started = $this->now();
-		$state = $this->base_state( 'running', $page_size, $context );
+		$state = $this->base_state( 'running', $context );
 		$state['session_id'] = $this->new_session_id();
 		$state['started_at'] = $started;
 		$state['updated_at'] = $started;
-		$state['message'] = 'Yandex Delivery pickup import started.';
+		$state['message'] = 'Импорт ПВЗ Яндекс.Доставки запущен: Москва, geo_id=213.';
 		$state['inactive'] = $this->repository->mark_all_inactive();
 		$state['lock_token'] = $token;
 		$this->save_state( $state );
@@ -73,51 +73,45 @@ final class YandexDeliveryPickupPointImportService {
 			$this->save_state( $state );
 			return $this->public_state( $state );
 		}
+		if ( (int) ( $state['page'] ?? 0 ) > 0 ) {
+			return $this->public_state( $state );
+		}
 
 		try {
-			if ( (int) ( $state['page'] ?? 0 ) >= self::MAX_PAGES ) {
-				throw new \RuntimeException( 'Yandex Delivery pickup import stopped: max pages reached.' );
-			}
-			$response = $this->api->pickupPointsList( $this->page_payload( (string) ( $state['next_page_token'] ?? '' ), (int) ( $state['page_size'] ?? self::PAGE_SIZE ) ) );
+			$response = $this->api->pickupPointsList( $this->pickup_payload() );
 			$body = is_array( $response['body'] ?? null ) ? $response['body'] : array();
 			$normalized = $this->normalizer->normalize_response( $body );
-			$page_points = is_array( $normalized['points'] ) ? $normalized['points'] : array();
-			$state['page'] = (int) ( $state['page'] ?? 0 ) + 1;
-			$state['fetched'] = (int) ( $state['fetched'] ?? 0 ) + (int) $normalized['fetched_count'];
-			$state['normalized'] = (int) ( $state['normalized'] ?? 0 ) + count( $page_points );
+			$points = is_array( $normalized['points'] ) ? $normalized['points'] : array();
+			$state['page'] = 1;
+			$state['fetched'] = (int) $normalized['fetched_count'];
+			$state['normalized'] = count( $points );
 			$skipped = (int) $normalized['skipped_invalid'];
-			if ( array() !== $page_points ) {
-				$save = $this->repository->save_batch( $page_points, (string) ( $state['started_at'] ?? $this->now() ) );
-				$state['saved'] = (int) ( $state['saved'] ?? 0 ) + (int) $save['saved'];
+			if ( array() !== $points ) {
+				$save = $this->repository->save_batch( $points, (string) ( $state['started_at'] ?? $this->now() ) );
+				$state['saved'] = (int) $save['saved'];
 				$skipped += (int) $save['skipped_invalid'];
 			}
 			if ( $skipped > 0 ) {
 				$state['errors'] = $this->limited_errors( array_merge( is_array( $state['errors'] ?? null ) ? $state['errors'] : array(), array( 'Yandex Delivery pickup import skipped invalid rows: ' . $skipped ) ) );
 			}
-			$state['next_page_token'] = $this->next_page_token( $body );
-			$state['memory_peak_mb'] = $this->memory_peak_mb();
-			$state['updated_at'] = $this->now();
-			$state['message'] = sprintf( 'Step %d: fetched=%d saved=%d.', (int) $state['page'], (int) $state['fetched'], (int) $state['saved'] );
-			unset( $response, $body, $normalized, $page_points, $save );
-
-			if ( '' === (string) $state['next_page_token'] ) {
-				if ( 0 === (int) ( $state['fetched'] ?? 0 ) ) {
-					throw new \RuntimeException( 'Yandex Delivery pickup import returned no rows.' );
-				}
-				if ( 0 === (int) ( $state['normalized'] ?? 0 ) ) {
-					throw new \RuntimeException( 'Yandex Delivery pickup import returned rows, but no valid points were normalized.' );
-				}
-				if ( 0 === (int) ( $state['saved'] ?? 0 ) ) {
-					throw new \RuntimeException( 'Yandex Delivery pickup import normalized rows, but no points were saved.' );
-				}
-				$this->repository->activate_imported_points( (string) ( $state['started_at'] ?? $this->now() ) );
-				$state['status'] = 'success';
-				$state['finished_at'] = $this->now();
-				$state['updated_at'] = $state['finished_at'];
-				$state['message'] = 'Yandex Delivery pickup points imported.';
-				$this->settings->save_pickup_import_report( $this->report_from_state( $state ) );
-				$this->release_lock( (string) ( $state['lock_token'] ?? '' ) );
+			if ( 0 === (int) ( $state['fetched'] ?? 0 ) ) {
+				throw new \RuntimeException( 'Yandex Delivery pickup import returned no rows for Москва, geo_id=213.' );
 			}
+			if ( 0 === (int) ( $state['normalized'] ?? 0 ) ) {
+				throw new \RuntimeException( 'Yandex Delivery pickup import returned rows, but no valid points were normalized for Москва, geo_id=213.' );
+			}
+			if ( 0 === (int) ( $state['saved'] ?? 0 ) ) {
+				throw new \RuntimeException( 'Yandex Delivery pickup import normalized rows, but no points were saved for Москва, geo_id=213.' );
+			}
+			$this->repository->activate_imported_points( (string) ( $state['started_at'] ?? $this->now() ) );
+			$state['status'] = 'success';
+			$state['finished_at'] = $this->now();
+			$state['updated_at'] = $state['finished_at'];
+			$state['memory_peak_mb'] = $this->memory_peak_mb();
+			$state['message'] = sprintf( 'Импорт ПВЗ Яндекс.Доставки завершен: %s, geo_id=%d.', self::DEFAULT_IMPORT_GEO_LABEL, self::DEFAULT_IMPORT_GEO_ID );
+			$this->settings->save_pickup_import_report( $this->report_from_state( $state ) );
+			$this->release_lock( (string) ( $state['lock_token'] ?? '' ) );
+			unset( $response, $body, $normalized, $points, $save );
 		} catch ( YandexDeliveryApiException $exception ) {
 			$state = $this->fail_state( $state, $exception->getMessage() );
 		} catch ( \Throwable $exception ) {
@@ -164,15 +158,8 @@ final class YandexDeliveryPickupPointImportService {
 	/** @return array<string,mixed> */
 	public function import_all( string $context = 'manual' ): array {
 		$state = $this->start_import( $context );
-		if ( 'running' !== (string) ( $state['status'] ?? '' ) ) {
-			return $this->report_from_state( $state );
-		}
-		$session_id = (string) $state['session_id'];
-		for ( $page = 0; $page < self::MAX_PAGES; ++$page ) {
-			$state = $this->run_import_step( $session_id );
-			if ( 'running' !== (string) ( $state['status'] ?? '' ) ) {
-				break;
-			}
+		if ( 'running' === (string) ( $state['status'] ?? '' ) ) {
+			$state = $this->run_import_step( (string) $state['session_id'] );
 		}
 
 		return $this->report_from_state( $state );
@@ -185,7 +172,7 @@ final class YandexDeliveryPickupPointImportService {
 	}
 
 	/** @return array<string,mixed> */
-	private function base_state( string $status, int $page_size, string $context ): array {
+	private function base_state( string $status, string $context ): array {
 		$now = $this->now();
 		return array(
 			'session_id' => '',
@@ -193,9 +180,7 @@ final class YandexDeliveryPickupPointImportService {
 			'started_at' => '',
 			'updated_at' => $now,
 			'finished_at' => '',
-			'page_size' => $page_size,
 			'page' => 0,
-			'next_page_token' => '',
 			'fetched' => 0,
 			'normalized' => 0,
 			'saved' => 0,
@@ -204,13 +189,16 @@ final class YandexDeliveryPickupPointImportService {
 			'message' => '',
 			'memory_peak_mb' => $this->memory_peak_mb(),
 			'context' => $this->sanitize_context( $context ),
+			'geo_id' => self::DEFAULT_IMPORT_GEO_ID,
+			'geo_label' => self::DEFAULT_IMPORT_GEO_LABEL,
+			'mode' => self::IMPORT_MODE,
 			'lock_token' => '',
 		);
 	}
 
 	/** @return array<string,mixed> */
 	private function idle_state( string $message = '' ): array {
-		$state = $this->base_state( 'idle', $this->settings->pickup_import_page_size(), 'manual_ajax' );
+		$state = $this->base_state( 'idle', 'manual_ajax' );
 		$state['message'] = $message;
 
 		return $this->public_state( $state );
@@ -269,9 +257,11 @@ final class YandexDeliveryPickupPointImportService {
 			'inactive' => (int) ( $state['inactive'] ?? 0 ),
 			'errors' => $this->limited_errors( is_array( $state['errors'] ?? null ) ? $state['errors'] : array() ),
 			'duration' => $this->duration_seconds( (string) ( $state['started_at'] ?? '' ), (string) ( $state['finished_at'] ?? '' ) ),
-			'page_size' => (int) ( $state['page_size'] ?? self::PAGE_SIZE ),
 			'pages' => (int) ( $state['page'] ?? 0 ),
 			'memory_peak_mb' => (float) ( $state['memory_peak_mb'] ?? 0.0 ),
+			'geo_id' => (int) ( $state['geo_id'] ?? self::DEFAULT_IMPORT_GEO_ID ),
+			'geo_label' => (string) ( $state['geo_label'] ?? self::DEFAULT_IMPORT_GEO_LABEL ),
+			'mode' => (string) ( $state['mode'] ?? self::IMPORT_MODE ),
 			'message' => (string) ( $state['message'] ?? '' ),
 			'context' => $this->sanitize_context( (string) ( $state['context'] ?? 'manual_ajax' ) ),
 			'status' => (string) ( $state['status'] ?? 'idle' ),
@@ -279,27 +269,11 @@ final class YandexDeliveryPickupPointImportService {
 	}
 
 	/** @return array<string,mixed> */
-	private function page_payload( string $page_token, int $page_size ): array {
-		$payload = array(
+	private function pickup_payload(): array {
+		return array(
 			'type' => YandexDeliveryPickupPointNormalizer::TYPE_PICKUP_POINT,
-			'limit' => $page_size,
+			'geo_id' => self::DEFAULT_IMPORT_GEO_ID,
 		);
-		if ( '' !== $page_token ) {
-			$payload['page_token'] = $page_token;
-		}
-
-		return $payload;
-	}
-
-	/** @param array<string,mixed> $body */
-	private function next_page_token( array $body ): string {
-		foreach ( array( 'next_page_token', 'nextPageToken', 'next_page', 'nextPage' ) as $key ) {
-			if ( is_scalar( $body[ $key ] ?? null ) && '' !== trim( (string) $body[ $key ] ) ) {
-				return trim( (string) $body[ $key ] );
-			}
-		}
-
-		return '';
 	}
 
 	private function acquire_lock(): string {

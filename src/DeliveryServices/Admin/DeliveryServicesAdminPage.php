@@ -1201,7 +1201,6 @@ final class DeliveryServicesAdminPage {
 		$stats = $this->yandex_delivery_pickup_service->statistics();
 		$sender = $this->yandex_delivery_pickup_service->validate_sender_point();
 		$last_report = $this->yandex_delivery_settings->last_pickup_import_report();
-		$page_size = $this->yandex_delivery_settings->pickup_import_page_size();
 		$import_state = $this->yandex_delivery_pickup_importer instanceof YandexDeliveryPickupPointImportService ? $this->yandex_delivery_pickup_importer->current_import_state() : array();
 		$search = $this->yandex_delivery_pickup_search_results();
 		?>
@@ -1229,15 +1228,10 @@ final class DeliveryServicesAdminPage {
 			</tbody>
 		</table>
 		<div id="wdc-yandex-delivery-pickup-import" data-wdc-yandex-pickup-import data-wdc-yandex-status="<?php echo esc_attr( (string) ( $import_state['status'] ?? 'idle' ) ); ?>">
-			<table class="form-table" role="presentation" style="max-width: 940px;">
-				<tr>
-					<th scope="row"><label for="yandex_delivery_pickup_import_page_size"><?php echo esc_html__( 'Размер страницы импорта', 'walls-delivery-calc' ); ?></label></th>
-					<td>
-						<input id="yandex_delivery_pickup_import_page_size" type="number" min="20" max="500" step="1" name="<?php echo esc_attr( YandexDeliverySettings::PICKUP_IMPORT_PAGE_SIZE_KEY ); ?>" value="<?php echo esc_attr( (string) $page_size ); ?>" class="small-text" data-wdc-yandex-page-size>
-						<p class="description"><?php echo esc_html__( 'Сколько ПВЗ запрашивать за один API-запрос. Если импорт падает по памяти, уменьшите до 50 или 100.', 'walls-delivery-calc' ); ?></p>
-					</td>
-				</tr>
-			</table>
+			<div class="notice notice-warning inline" style="max-width: 940px;">
+				<p><strong><?php echo esc_html__( 'Режим импорта: Москва, geo_id=213.', 'walls-delivery-calc' ); ?></strong></p>
+				<p><?php echo esc_html__( 'Временное ограничение: API Яндекса возвращает всю РФ одним ответом без pagination. Полный импорт РФ будет добавлен после внедрения модели Yandex geo_id для населенных пунктов.', 'walls-delivery-calc' ); ?></p>
+			</div>
 			<p>
 				<button class="button button-primary" type="button" data-wdc-yandex-import-start><?php echo esc_html__( 'Импортировать точки Яндекс', 'walls-delivery-calc' ); ?></button>
 				<button class="button button-secondary" type="button" data-wdc-yandex-import-reset><?php echo esc_html__( 'Сбросить результат и lock', 'walls-delivery-calc' ); ?></button>
@@ -1290,12 +1284,15 @@ final class DeliveryServicesAdminPage {
 	/** @param array<string,mixed> $state */
 	private function yandex_delivery_pickup_import_state_summary( array $state ): string {
 		$status = (string) ( $state['status'] ?? 'idle' );
-		$page = (int) ( $state['page'] ?? 0 );
 		$fetched = (int) ( $state['fetched'] ?? 0 );
 		$saved = (int) ( $state['saved'] ?? 0 );
-		$page_size = (int) ( $state['page_size'] ?? 0 );
+		$geo_label = (string) ( $state['geo_label'] ?? 'Москва' );
+		$geo_id = (int) ( $state['geo_id'] ?? 213 );
+		if ( 'success' === $status ) {
+			return sprintf( 'Статус: success. Импортировано: %d, сохранено: %d. %s, geo_id=%d.', $fetched, $saved, $geo_label, $geo_id );
+		}
 
-		return sprintf( 'Статус: %s. Шаг %d: обработано %d, сохранено %d, page size %d.', $status, $page, $fetched, $saved, $page_size );
+		return sprintf( 'Статус: %s. Импортируется: %s, geo_id=%d.', $status, $geo_label, $geo_id );
 	}
 
 	/** @return array<string,string> */
@@ -1307,7 +1304,9 @@ final class DeliveryServicesAdminPage {
 			'normalized' => 'Нормализовано',
 			'saved' => 'Сохранено',
 			'inactive' => 'Деактивировано старых',
-			'page_size' => 'Page size',
+			'mode' => 'mode',
+			'geo_id' => 'geo_id',
+			'geo_label' => 'geo_label',
 			'memory_peak_mb' => 'Peak memory',
 			'updated_at' => 'Последнее обновление',
 			'message' => 'Сообщение',
@@ -1372,15 +1371,16 @@ final class DeliveryServicesAdminPage {
 		}
 
 		return sprintf(
-			'%s: fetched=%d normalized=%d saved=%d inactive=%d errors=%d pages=%d page_size=%d memory_peak_mb=%s duration=%s',
+			'%s: fetched=%d normalized=%d saved=%d inactive=%d errors=%d mode=%s geo_id=%d geo_label=%s memory_peak_mb=%s duration=%s',
 			(string) ( $report['status'] ?? '' ),
 			(int) ( $report['fetched'] ?? 0 ),
 			(int) ( $report['normalized'] ?? 0 ),
 			(int) ( $report['saved'] ?? 0 ),
 			(int) ( $report['inactive'] ?? 0 ),
 			count( is_array( $report['errors'] ?? null ) ? $report['errors'] : array() ),
-			(int) ( $report['pages'] ?? 0 ),
-			(int) ( $report['page_size'] ?? 0 ),
+			(string) ( $report['mode'] ?? '' ),
+			(int) ( $report['geo_id'] ?? 0 ),
+			(string) ( $report['geo_label'] ?? '' ),
 			(string) ( $report['memory_peak_mb'] ?? '0' ),
 			(string) ( $report['duration'] ?? '0' )
 		);
