@@ -36,6 +36,7 @@ function sanitize_key( string $key ): string { return preg_replace( '/[^a-z0-9_\
 function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
 function wp_unslash( mixed $value ): mixed { return $value; }
 function wp_json_encode( mixed $value, int $flags = 0 ): string|false { return json_encode( $value, $flags ); }
+function dbDelta( string|array $queries = '', bool $execute = true ): array { ++$GLOBALS['wdc_yandex_delivery_pickup_dbdelta_calls']; return array(); }
 
 if ( ! class_exists( 'wpdb' ) ) {
 	class wpdb {
@@ -77,11 +78,16 @@ final class YdPickupFakeHttp implements YandexDeliveryHttpClientInterface {
 }
 
 $GLOBALS['wdc_yandex_delivery_pickup_options'] = array();
+$GLOBALS['wdc_yandex_delivery_pickup_dbdelta_calls'] = 0;
 $GLOBALS['wpdb'] = new wpdb();
 
 $migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0032_create_yandex_delivery_pickup_points_table.php' );
 $repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointRepository.php' );
 yd_pickup_assert( str_contains( $migration_source, 'YandexDeliveryPickupPointRepository' ) && str_contains( $repository_source, 'wdc_yandex_delivery_pickup_points' ), 'Migration must create Yandex pickup points table through the repository.' );
+$schema_start = strpos( $repository_source, 'public function create_schema_if_needed' );
+$schema_end = strpos( $repository_source, 'public function mark_all_inactive' );
+$schema_block = false !== $schema_start && false !== $schema_end ? substr( $repository_source, $schema_start, $schema_end - $schema_start ) : '';
+yd_pickup_assert( '' !== $schema_block && str_contains( $repository_source, 'function can_create_schema' ) && ! str_contains( $schema_block, 'has_test_rows' ), 'create_schema_if_needed must not use has_test_rows as its early return condition.' );
 foreach ( array( 'platform_station_id', 'operator_id', 'operator_name', 'available_for_dropoff', 'available_for_c2c_dropoff', 'is_yandex_branded', 'raw_json', 'imported_at' ) as $column ) {
 	yd_pickup_assert( str_contains( $repository_source, $column ), 'Repository schema must include column ' . $column . '.' );
 }
@@ -123,6 +129,12 @@ yd_pickup_assert( null !== $partial && 'pickup_point' === $partial['type'] && 'p
 yd_pickup_assert( null === $normalizer->normalize( array( 'name' => 'broken' ) ), 'Normalizer must skip objects without platform_station_id.' );
 
 $repository = new YandexDeliveryPickupPointRepository( $GLOBALS['wpdb'] );
+$repository->create_schema_if_needed();
+yd_pickup_assert( 0 === $GLOBALS['wdc_yandex_delivery_pickup_dbdelta_calls'], 'Fake repository create_schema_if_needed must not call real dbDelta.' );
+$global_repository = new YandexDeliveryPickupPointRepository();
+$global_repository->create_schema_if_needed();
+yd_pickup_assert( 0 === $GLOBALS['wdc_yandex_delivery_pickup_dbdelta_calls'], 'Repository without constructor argument must use global fake wpdb and still avoid dbDelta in smoke.' );
+yd_pickup_assert( is_array( $global_repository->search( array( 'limit' => 1 ) ) ), 'Repository without constructor argument must keep a usable wpdb object.' );
 $save = $repository->save_batch(
 	array(
 		$full,
@@ -133,6 +145,7 @@ $save = $repository->save_batch(
 	'2026-06-22 12:00:00'
 );
 yd_pickup_assert( 3 === $save['saved'] && 1 === $save['skipped_invalid'], 'save_batch must save/update valid rows and skip invalid rows.' );
+yd_pickup_assert( 2 === count( $GLOBALS['wpdb']->yandex_delivery_pickup_points ), 'Fake wpdb CRUD storage must be used when fake object is passed explicitly.' );
 yd_pickup_assert( 0 === $repository->count_active(), 'Saved rows must remain inactive until activate_imported_points().' );
 $activated = $repository->activate_imported_points( '2026-06-22 12:00:00' );
 yd_pickup_assert( 2 === $activated && 2 === $repository->count_active(), 'activate_imported_points must reactivate only imported rows.' );

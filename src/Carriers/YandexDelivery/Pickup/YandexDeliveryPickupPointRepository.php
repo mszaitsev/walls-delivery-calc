@@ -9,14 +9,17 @@ final class YandexDeliveryPickupPointRepository {
 	private object $wpdb;
 
 	public function __construct( ?object $wpdb = null ) {
-		if ( null === $wpdb ) {
+		$db = $wpdb;
+		if ( null === $db ) {
 			global $wpdb;
+			$db = $wpdb;
 		}
-		$this->wpdb = $wpdb;
+
+		$this->wpdb = $db;
 	}
 
 	public function create_schema_if_needed(): void {
-		if ( $this->has_test_rows() ) {
+		if ( ! $this->can_create_schema() ) {
 			return;
 		}
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -309,6 +312,14 @@ final class YandexDeliveryPickupPointRepository {
 
 	private function has_test_rows(): bool {
 		return property_exists( $this->wpdb, 'yandex_delivery_pickup_points' ) && is_array( $this->wpdb->yandex_delivery_pickup_points );
+	}
+
+	private function can_create_schema(): bool {
+		return defined( 'ABSPATH' )
+			&& is_string( ABSPATH )
+			&& '' !== ABSPATH
+			&& method_exists( $this->wpdb, 'get_charset_collate' )
+			&& file_exists( ABSPATH . 'wp-admin/includes/upgrade.php' );
 	}
 
 	/** @return array<int,array<string,mixed>> */
