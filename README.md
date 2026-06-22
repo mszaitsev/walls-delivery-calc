@@ -1,6 +1,8 @@
 # Walls Delivery Calc
 
-Current plugin version: 0.70.0.
+Current plugin version: 0.71.0.
+
+Version 0.71.0 adds scheduled DPD pickup point autosync on `WDC -> Службы доставки -> DPD -> ПВЗ`. Admins can enable automatic updates and choose up to three daily 15-minute slots interpreted as Moscow time (GMT+3); WDC stores those settings separately from DPD shipment status autosync, schedules one WP-Cron daily event per unique selected time, and clears/rebuilds those events on save/activation/deactivation. Cron calls the existing `DpdPickupPointImportService::import_all()` with context `auto_cron`, shares the same lock and safe-replace behavior as manual import, and writes the same last import report with source/status/context. See `docs/wdc-dpd-pickup-autosync.md`.
 
 Version 0.70.0 completes the DPD WooCommerce status audit. DPD getEvents/manual refresh/autosync continue to use the carrier-neutral universal shipment status layer, and DpdEventSyncResult now exposes order status mapping counters so autosync diagnostics show DPD WooCommerce status changes, skips and errors. The new tests/dpd/run-dpd-woocommerce-status-audit-smoke.php covers DPD 1401/2201/3304 mapping, missing mappings, duplicate and older events, old dpdOrderNr protection, manual refresh, multi-order autosync, confirm enabled/disabled behavior and diagnostics. DPD is considered functionally complete after this step.
 

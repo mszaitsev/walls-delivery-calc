@@ -62,6 +62,10 @@ final class DpdSettings {
 	public const RUNTIME_ENABLE_COURIER_RATES_KEY = 'dpd_runtime_enable_courier_rates';
 	public const LAST_PICKUP_IMPORT_REPORT_KEY = 'dpd_last_pickup_import_report';
 	public const LAST_PICKUP_ACTION_RESULT_KEY = 'dpd_last_pickup_action_result';
+	public const PICKUP_AUTOSYNC_ENABLED_KEY = 'dpd_pickup_autosync_enabled';
+	public const PICKUP_AUTOSYNC_TIME_1_KEY = 'dpd_pickup_autosync_time_1';
+	public const PICKUP_AUTOSYNC_TIME_2_KEY = 'dpd_pickup_autosync_time_2';
+	public const PICKUP_AUTOSYNC_TIME_3_KEY = 'dpd_pickup_autosync_time_3';
 
 	public function __construct(
 		private SettingsRepository $settings,
@@ -115,6 +119,10 @@ final class DpdSettings {
 			self::RUNTIME_ENABLE_COURIER_RATES_KEY => false,
 			self::LAST_PICKUP_IMPORT_REPORT_KEY => array(),
 			self::LAST_PICKUP_ACTION_RESULT_KEY => array(),
+			self::PICKUP_AUTOSYNC_ENABLED_KEY => false,
+			self::PICKUP_AUTOSYNC_TIME_1_KEY => '',
+			self::PICKUP_AUTOSYNC_TIME_2_KEY => '',
+			self::PICKUP_AUTOSYNC_TIME_3_KEY => '',
 		);
 	}
 
@@ -373,6 +381,60 @@ final class DpdSettings {
 	 */
 	public function last_pickup_import_report(): array {
 		return $this->settings->get_array( self::LAST_PICKUP_IMPORT_REPORT_KEY, array() );
+	}
+
+	public function pickup_autosync_enabled(): bool {
+		return $this->settings->get_bool( self::PICKUP_AUTOSYNC_ENABLED_KEY, false );
+	}
+
+	/** @return array<int,string> */
+	public function pickup_autosync_times(): array {
+		$times = array(
+			$this->settings->get_string( self::PICKUP_AUTOSYNC_TIME_1_KEY, '' ),
+			$this->settings->get_string( self::PICKUP_AUTOSYNC_TIME_2_KEY, '' ),
+			$this->settings->get_string( self::PICKUP_AUTOSYNC_TIME_3_KEY, '' ),
+		);
+		$times = array_filter( array_map( array( $this, 'sanitize_pickup_autosync_time' ), $times ), static fn( string $time ): bool => '' !== $time );
+
+		return array_values( array_unique( $times ) );
+	}
+
+	public function pickup_autosync_time_1(): string {
+		return $this->sanitize_pickup_autosync_time( $this->settings->get_string( self::PICKUP_AUTOSYNC_TIME_1_KEY, '' ) );
+	}
+
+	public function pickup_autosync_time_2(): string {
+		return $this->sanitize_pickup_autosync_time( $this->settings->get_string( self::PICKUP_AUTOSYNC_TIME_2_KEY, '' ) );
+	}
+
+	public function pickup_autosync_time_3(): string {
+		return $this->sanitize_pickup_autosync_time( $this->settings->get_string( self::PICKUP_AUTOSYNC_TIME_3_KEY, '' ) );
+	}
+
+	/** @return array<string,string> */
+	public static function pickup_autosync_time_options(): array {
+		$options = array( '' => 'Не выбрано' );
+		for ( $hour = 0; $hour < 24; $hour++ ) {
+			foreach ( array( 0, 15, 30, 45 ) as $minute ) {
+				$time = sprintf( '%02d:%02d', $hour, $minute );
+				$options[ $time ] = $time;
+			}
+		}
+
+		return $options;
+	}
+
+	public function sanitize_pickup_autosync_time( string $time ): string {
+		$time = trim( $time );
+		return array_key_exists( $time, self::pickup_autosync_time_options() ) ? $time : '';
+	}
+
+	/** @param array<string,mixed> $input */
+	public function save_pickup_autosync_settings_from_admin( array $input ): void {
+		$this->settings->set( self::PICKUP_AUTOSYNC_ENABLED_KEY, ! empty( $input[ self::PICKUP_AUTOSYNC_ENABLED_KEY ] ) );
+		$this->settings->set( self::PICKUP_AUTOSYNC_TIME_1_KEY, $this->sanitize_pickup_autosync_time( (string) ( $input[ self::PICKUP_AUTOSYNC_TIME_1_KEY ] ?? '' ) ) );
+		$this->settings->set( self::PICKUP_AUTOSYNC_TIME_2_KEY, $this->sanitize_pickup_autosync_time( (string) ( $input[ self::PICKUP_AUTOSYNC_TIME_2_KEY ] ?? '' ) ) );
+		$this->settings->set( self::PICKUP_AUTOSYNC_TIME_3_KEY, $this->sanitize_pickup_autosync_time( (string) ( $input[ self::PICKUP_AUTOSYNC_TIME_3_KEY ] ?? '' ) ) );
 	}
 
 	/**

@@ -1,3 +1,13 @@
+# Карта текущего кода
+
+## DPD Pickup Autosync 0.71.0
+
+- `src/Carriers/Dpd/Pickup/DpdPickupPointAutoSync.php` owns the dedicated WP-Cron hook `wdc_dpd_pickup_points_autosync`. It reads DPD pickup autosync settings, converts selected Moscow-time (GMT+3) slots into UTC timestamps, schedules one daily event per unique time and skips execution when disabled or no selected time matches.
+- `src/Carriers/Dpd/DpdSettings.php` stores `dpd_pickup_autosync_enabled` plus three independent 15-minute time fields. Invalid values normalize to empty, duplicates are ignored when effective times are read, and the option set is separate from DPD shipment status autosync settings.
+- `src/Carriers/Dpd/Pickup/DpdPickupPointImportService.php` is still the only importer. Manual buttons and cron both call it; public import methods accept a context (`manual` or `auto_cron`) and share a short option-based lock so concurrent manual/cron runs skip safely as `skipped_lock_busy`.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders the DPD -> ПВЗ autosync block, saves settings, reschedules cron events and displays the last import context/source beside the existing counts/result.
+- `tests/dpd/run-dpd-pickup-autosync-smoke.php` covers select options, time validation, GMT+3 conversion, scheduling/rescheduling, duplicate slots, disabled/no-time skips, cron success/failure, lock-busy skip and shared manual/cron importer path.
+
 ## DPD Shipment Lifecycle, Documents And Autosync 0.69.1
 
 - `src/Shipments/Dpd/DpdOrderRegistrationService.php` owns manual DPD registration, local pending creation before SOAP, `getOrderStatus` refresh/polling decisions, manual attach, cancel and local remove.
@@ -22,8 +32,6 @@
 - `src/Shipments/Application/ShipmentCreationService.php` saves successful DPD manual creates in `_wdc_shipments[dpd]` with `pending_creation_in_carrier`, DPD identifiers, sanitized request/response and admin marker.
 - `src/Shipments/Admin/OrderShipmentsMetabox.php` exposes `Создать отправление DPD` in the existing modal. `assets/admin/shipments-admin.js` keeps the button disabled until tariff, date, pickup/courier and cargo-place data are valid.
 - `tests/dpd/run-dpd-create-order-smoke.php` covers mocked createOrder2, payload shape, persistence, duplicates, errors and no auto-create hook.
-# Карта текущего кода
-
 ## DPD Pickup Recalculation Diagnostics 0.69.3
 
 - `src/Carriers/Runtime/DpdQuoteCarrier.php` keeps order recalculation on the checkout DPD carrier path and passes explicit `dpd_receiver_city_id` / `dpd_city_id` context into tariff calculation. Its quote raw reference and DPD rate meta expose receiver location/city, delivery terminal selection/code/source, raw count, skipped counters and `dpd_filter_removed_count`.

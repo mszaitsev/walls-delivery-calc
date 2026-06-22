@@ -19,7 +19,9 @@ final class DpdPickupPointImportReport {
 		public readonly int $skipped_invalid,
 		public readonly int $marked_inactive,
 		public readonly array $errors,
-		public readonly string $message
+		public readonly string $message,
+		public readonly string $context = 'manual',
+		public readonly string $status = ''
 	) {
 	}
 
@@ -38,6 +40,8 @@ final class DpdPickupPointImportReport {
 			'marked_inactive' => $this->marked_inactive,
 			'errors' => $this->errors,
 			'message' => $this->message,
+			'context' => $this->context,
+			'status' => '' !== $this->status ? $this->status : ( array() === $this->errors ? 'success' : 'error' ),
 		);
 	}
 
@@ -54,8 +58,12 @@ final class DpdPickupPointImportReport {
 		$marked_inactive = 0;
 		$errors = array();
 		$sources = array();
+		$contexts = array();
+		$statuses = array();
 		foreach ( $reports as $report ) {
 			$sources[] = $report->source;
+			$contexts[] = $report->context;
+			$statuses[] = '' !== $report->status ? $report->status : ( array() === $report->errors ? 'success' : 'error' );
 			$started = '' === $started ? $report->started_at : min( $started, $report->started_at );
 			$finished = max( $finished, $report->finished_at );
 			$fetched += $report->fetched_count;
@@ -76,7 +84,9 @@ final class DpdPickupPointImportReport {
 			$skipped,
 			$marked_inactive,
 			$errors,
-			array() === $errors ? 'DPD pickup points import completed.' : 'DPD pickup points import completed with errors.'
+			array() === $errors ? 'DPD pickup points import completed.' : 'DPD pickup points import completed with errors.',
+			implode( '+', array_values( array_unique( array_filter( $contexts ) ) ) ) ?: 'manual',
+			in_array( 'error', $statuses, true ) ? 'error' : 'success'
 		);
 	}
 }
