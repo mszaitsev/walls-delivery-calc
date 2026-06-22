@@ -130,6 +130,59 @@ $full = $normalizer->normalize(
 yd_pickup_assert( null !== $full && 'sender-1' === $full['platform_station_id'] && true === $full['available_for_dropoff'], 'Normalizer must normalize full Yandex pickup point object.' );
 yd_pickup_assert( str_contains( (string) $full['raw_json'], 'ПВЗ Яндекс' ), 'Normalizer must preserve full raw_json.' );
 
+
+$communalka = $normalizer->normalize(
+	array(
+		'id' => '63e07227-30f8-4afc-bc3f-22b76fa1672c',
+		'operator_station_id' => '10017733479',
+		'operator_id' => 'market_l4g',
+		'name' => 'Пункт выдачи заказов Яндекс Маркета',
+		'type' => 'pickup_point',
+		'position' => array(
+			'latitude' => 55.606040954589837,
+			'longitude' => 37.473125457763672,
+		),
+		'address' => array(
+			'geoId' => 215263,
+			'country' => 'Россия',
+			'region' => 'Москва',
+			'subRegion' => '',
+			'locality' => 'район Коммунарка',
+			'street' => 'Новомихайловское шоссе',
+			'house' => '1 к2',
+			'housing' => '',
+			'apartment' => '',
+			'building' => '',
+			'comment' => 'На общественном транспорте - тест',
+			'full_address' => 'район Коммунарка Новомихайловское шоссе 1 к2',
+			'postal_code' => '108820',
+		),
+		'payment_methods' => array( 'already_paid', 'card_on_receipt' ),
+		'schedule' => array( 'time_zone' => 3, 'restrictions' => array() ),
+		'is_yandex_branded' => true,
+		'available_for_dropoff' => true,
+		'available_for_c2c_dropoff' => true,
+	)
+);
+$duplicated_communalka_address = 'Россия, район Коммунарка, Новомихайловское шоссе, 1 к2, район Коммунарка Новомихайловское шоссе 1 к2';
+yd_pickup_assert( null !== $communalka && 'район Коммунарка Новомихайловское шоссе 1 к2' === $communalka['address'], 'Normalizer must prefer Yandex full_address without prepending assembled address parts.' );
+yd_pickup_assert( $duplicated_communalka_address !== (string) $communalka['address'] && ! str_contains( (string) $communalka['address'], ', район Коммунарка Новомихайловское шоссе 1 к2' ), 'Normalizer must not append full_address after assembled address parts.' );
+yd_pickup_assert( '215263' === (string) $communalka['geo_id'] && 'Москва' === (string) $communalka['region_name'] && 'район Коммунарка' === (string) $communalka['city_name'], 'Normalizer must keep Yandex geoId, region, and locality fields while fixing address.' );
+$fallback_address = $normalizer->normalize(
+	array(
+		'id' => 'fallback-address-1',
+		'address' => array(
+			'country' => 'Россия',
+			'region' => 'Москва',
+			'locality' => 'район Коммунарка',
+			'street' => 'Новомихайловское шоссе',
+			'house' => '1 к2',
+			'full_address' => '',
+		),
+	)
+);
+yd_pickup_assert( null !== $fallback_address && 'Россия, Москва, район Коммунарка, Новомихайловское шоссе, 1 к2' === $fallback_address['address'], 'Normalizer must assemble fallback address from Yandex address parts when full_address is empty.' );
+
 $partial = $normalizer->normalize( array( 'platform_station_id' => 'partial-1' ) );
 yd_pickup_assert( null !== $partial && 'pickup_point' === $partial['type'] && 'partial-1' === $partial['name'], 'Normalizer must survive incomplete objects with safe defaults.' );
 yd_pickup_assert( null === $normalizer->normalize( array( 'name' => 'broken' ) ), 'Normalizer must skip objects without platform_station_id.' );
@@ -216,6 +269,6 @@ yd_pickup_assert( str_contains( $js_source, 'var originalMessage = message' ) &&
 yd_pickup_assert( str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_start' ) && str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_step' ) && str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_reset' ) && str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_status' ), 'Admin page must register Yandex pickup AJAX import actions.' );
 yd_pickup_assert( ! preg_match( '/yandex_delivery.*(cron|autosync)|YandexDelivery.*(Cron|AutoSync)/i', $plugin_source ), 'Yandex pickup stage must not register cron/autosync.' );
 yd_pickup_assert( ! str_contains( $plugin_source, 'YandexDeliveryQuoteCarrier' ) && ! str_contains( $plugin_source, 'offers/create' ), 'Yandex pickup stage must not add checkout quote or shipment creation.' );
-yd_pickup_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/walls-delivery-calc.php' ), '0.74.2' ), 'Plugin version must be 0.74.2.' );
+yd_pickup_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/walls-delivery-calc.php' ), '0.74.3' ), 'Plugin version must be 0.74.3.' );
 
 echo "Yandex Delivery pickup points smoke test passed.\n";
