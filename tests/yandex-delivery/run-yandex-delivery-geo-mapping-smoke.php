@@ -91,6 +91,7 @@ $repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/C
 $service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingService.php' );
 $api_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Api/YandexDeliveryApiClient.php' );
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
+$plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 yd_geo_assert( str_contains( $migration_source, 'YandexDeliveryGeoMappingRepository' ) && str_contains( $repository_source, 'wdc_yandex_delivery_geo_mappings' ), 'Migration must create Yandex geo mappings table through repository.' );
 yd_geo_assert( str_contains( $repository_source, 'yandex_geo_id bigint(20) unsigned NULL' ), 'Schema must make yandex_geo_id nullable.' );
 yd_geo_assert( ! str_contains( $repository_source, 'yandex_geo_id bigint(20) unsigned NOT NULL' ), 'Schema must not make yandex_geo_id NOT NULL.' );
@@ -101,6 +102,9 @@ yd_geo_assert( str_contains( $repository_source, 'private function find_existing
 yd_geo_assert( str_contains( $api_source, 'locationDetect' ) && str_contains( $api_source, 'LOCATION_DETECT_PATH' ), 'API client must expose location/detect.' );
 yd_geo_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_geo'] = 'Yandex geo_id';" ) && str_contains( $admin_source, 'Найти geo_id' ) && str_contains( $admin_source, 'Сделать основным' ), 'Admin page must expose Yandex geo_id tab and actions.' );
 yd_geo_assert( str_contains( $admin_source, "(int) ( \$row['yandex_geo_id'] ?? 0 ) > 0" ) && str_contains( $admin_source, "'—'" ), 'Admin source must show primary button only for positive geo_id and render NULL as dash.' );
+yd_geo_assert( str_contains( $admin_source, '?YandexDeliveryGeoMappingRepository $yandex_delivery_geo_mappings' ) && str_contains( $admin_source, '?YandexDeliveryGeoMappingService $yandex_delivery_geo_mapping_service' ), 'DeliveryServicesAdminPage constructor must promote Yandex geo mapping dependencies.' );
+yd_geo_assert( str_contains( $plugin_source, '$this->container->get( YandexDeliveryGeoMappingRepository::class )' ) && str_contains( $plugin_source, '$this->container->get( YandexDeliveryGeoMappingService::class )' ), 'Plugin must pass Yandex geo mapping dependencies into DeliveryServicesAdminPage.' );
+yd_geo_assert( str_contains( $admin_source, '! $this->yandex_delivery_geo_mappings instanceof YandexDeliveryGeoMappingRepository' ) && str_contains( $admin_source, '! $this->yandex_delivery_geo_mapping_service instanceof YandexDeliveryGeoMappingService' ), 'Yandex geo tab guard must be backed by constructor DI properties.' );
 
 $repository = new YandexDeliveryGeoMappingRepository( $GLOBALS['wpdb'] );
 $repository->create_schema_if_needed();

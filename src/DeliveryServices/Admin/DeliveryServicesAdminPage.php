@@ -119,7 +119,9 @@ final class DeliveryServicesAdminPage {
 		private ?YandexDeliveryConnectionDiagnosticService $yandex_delivery_diagnostics = null,
 		private ?YandexDeliveryPickupPointRepository $yandex_delivery_pickup_points = null,
 		private ?YandexDeliveryPickupPointImportService $yandex_delivery_pickup_importer = null,
-		private ?YandexDeliveryPickupPointService $yandex_delivery_pickup_service = null
+		private ?YandexDeliveryPickupPointService $yandex_delivery_pickup_service = null,
+		private ?YandexDeliveryGeoMappingRepository $yandex_delivery_geo_mappings = null,
+		private ?YandexDeliveryGeoMappingService $yandex_delivery_geo_mapping_service = null
 	) {
 	}
 
