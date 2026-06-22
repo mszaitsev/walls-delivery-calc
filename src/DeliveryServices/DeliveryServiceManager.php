@@ -33,6 +33,10 @@ final class DeliveryServiceManager {
 		if ( null !== $dpd->id ) {
 			$this->countries->replace_countries( (int) $dpd->id, array( 'RU' ) );
 		}
+		$yandex_delivery = $this->services->ensure_yandex_delivery_service();
+		if ( null !== $yandex_delivery->id ) {
+			$this->countries->replace_countries( (int) $yandex_delivery->id, array( 'RU' ) );
+		}
 	}
 
 	public function service_available_for_country( DeliveryService $service, string $country_code ): bool {

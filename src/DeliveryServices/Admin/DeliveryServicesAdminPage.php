@@ -20,6 +20,8 @@ use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointAutoSync;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointImportReport;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointImportService;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
+use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryConnectionDiagnosticService;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostCountriesAdminPage;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticTariffVariantResolver;
@@ -107,7 +109,9 @@ final class DeliveryServicesAdminPage {
 		private ?DpdCityResolver $dpd_city_resolver = null,
 		private ?LocationRepository $locations = null,
 		private ?DpdStatusMapping $dpd_status_mapping = null,
-		private ?DpdPickupPointAutoSync $dpd_pickup_autosync = null
+		private ?DpdPickupPointAutoSync $dpd_pickup_autosync = null,
+		private ?YandexDeliverySettings $yandex_delivery_settings = null,
+		private ?YandexDeliveryConnectionDiagnosticService $yandex_delivery_diagnostics = null
 	) {
 	}
 
@@ -223,7 +227,7 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
-		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' ), true ) ) {
+		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result', 'save_yandex_delivery_settings', 'check_yandex_delivery_connection' ), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -234,7 +238,7 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_tariffs' === $action ) {
 				$data = array();
 			}
-			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' ), true ) ) {
+			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result', 'save_yandex_delivery_settings', 'check_yandex_delivery_connection' ), true ) ) {
 				$data = array();
 			}
 			if ( $id > 0 && array() !== $data ) {
@@ -398,6 +402,13 @@ final class DeliveryServicesAdminPage {
 				$result = $this->dpd_api->checkConnectionDryRun();
 				$this->dpd_settings->save_connection_result( (bool) $result['success'], (string) $result['message'] );
 			}
+			if ( 'save_yandex_delivery_settings' === $action && $this->yandex_delivery_settings instanceof YandexDeliverySettings ) {
+				$this->yandex_delivery_settings->save_from_admin( $_POST );
+			}
+			if ( 'check_yandex_delivery_connection' === $action && $this->yandex_delivery_settings instanceof YandexDeliverySettings && $this->yandex_delivery_diagnostics instanceof YandexDeliveryConnectionDiagnosticService ) {
+				$result = $this->yandex_delivery_diagnostics->checkPickupPoint();
+				$this->yandex_delivery_settings->save_connection_result( (bool) $result['success'], (string) $result['message'] );
+			}
 			if ( 'save_dpd_geography_settings' === $action && $this->dpd_settings instanceof DpdSettings ) {
 				$this->dpd_settings->save_geography_settings_from_admin( $_POST );
 				$this->dpd_settings->save_connection_result( true, 'DPD geography settings saved.' );
@@ -547,7 +558,7 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' ), true ) ) {
+		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result', 'save_yandex_delivery_settings', 'check_yandex_delivery_connection' ), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'main',
@@ -561,6 +572,7 @@ final class DeliveryServicesAdminPage {
 				'save_dpd_statuses' => 'dpd_statuses',
 				'save_cdek_settings', 'check_cdek_connection' => 'cdek_settings',
 				'save_dpd_settings', 'check_dpd_connection' => 'dpd_settings',
+				'save_yandex_delivery_settings', 'check_yandex_delivery_connection' => 'yandex_delivery_settings',
 				'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback' => 'dpd_geography',
 				'save_dpd_tariff_settings' => 'dpd_tariff',
 				'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' => 'dpd_pickup',
@@ -760,6 +772,9 @@ final class DeliveryServicesAdminPage {
 			$tabs['cdek_settings'] = 'Данные для входа';
 			$tabs['cdek_statuses'] = 'Статусы СДЭК';
 		}
+		if ( $this->is_yandex_delivery_service( $service ) ) {
+			$tabs['yandex_delivery_settings'] = 'Данные для входа';
+		}
 		if ( $this->is_dpd_service( $service ) ) {
 			$tabs['tariffs'] = 'Тарифы';
 			$tabs['dpd_settings'] = 'Данные для входа';
@@ -787,6 +802,7 @@ final class DeliveryServicesAdminPage {
 			'diagnostics' => $this->render_diagnostics_tab( $service ),
 			'cdek_settings' => $this->render_cdek_settings_tab( $service ),
 			'dpd_settings' => $this->render_dpd_settings_tab( $service ),
+			'yandex_delivery_settings' => $this->render_yandex_delivery_settings_tab( $service ),
 			'dpd_geography' => $this->render_dpd_geography_tab( $service ),
 			'dpd_pickup' => $this->render_dpd_pickup_tab( $service ),
 			'dpd_tariff' => $this->render_dpd_tariff_tab( $service ),
@@ -841,6 +857,8 @@ final class DeliveryServicesAdminPage {
 					<tr><th colspan="2"><h3><?php echo esc_html__( 'Названия способов доставки', 'walls-delivery-calc' ); ?></h3></th></tr>
 					<?php $this->text_row( 'pickup_method_title', __( 'Название варианта до пункта выдачи', 'walls-delivery-calc' ), (string) ( $cdek['pickup_method_title'] ?? CdekSettings::DEFAULT_PICKUP_METHOD_TITLE ) ); ?>
 					<?php $this->text_row( 'courier_method_title', __( 'Название варианта курьером', 'walls-delivery-calc' ), (string) ( $cdek['courier_method_title'] ?? CdekSettings::DEFAULT_COURIER_METHOD_TITLE ) ); ?>
+				<?php elseif ( $this->is_yandex_delivery_service( $service ) ) : ?>
+					<tr><th scope="row"><?php echo esc_html__( 'Страны', 'walls-delivery-calc' ); ?></th><td><code>RU</code><p class="description"><?php echo esc_html__( 'Яндекс Доставка на текущем этапе доступна только для России.', 'walls-delivery-calc' ); ?></p><input type="hidden" name="countries" value="RU"></td></tr>
 				<?php elseif ( $this->is_dpd_service( $service ) && $this->dpd_settings instanceof DpdSettings ) : ?>
 					<tr><th scope="row"><?php echo esc_html__( 'Страны', 'walls-delivery-calc' ); ?></th><td><code>RU</code><p class="description"><?php echo esc_html__( 'DPD на текущем этапе доступен только для России.', 'walls-delivery-calc' ); ?></p><input type="hidden" name="countries" value="RU"></td></tr>
 					<tr><th colspan="2"><h3><?php echo esc_html__( 'Названия способов доставки', 'walls-delivery-calc' ); ?></h3></th></tr>
@@ -1030,6 +1048,67 @@ final class DeliveryServicesAdminPage {
 		<?php
 	}
 
+	private function render_yandex_delivery_settings_tab( DeliveryService $service ): void {
+		if ( ! $this->is_yandex_delivery_service( $service ) || ! $this->yandex_delivery_settings instanceof YandexDeliverySettings ) {
+			return;
+		}
+		$test_credentials = $this->yandex_delivery_settings->credentials_for_environment( YandexDeliverySettings::ENV_TEST );
+		$production_credentials = $this->yandex_delivery_settings->credentials_for_environment( YandexDeliverySettings::ENV_PRODUCTION );
+		$diagnostic_status = $this->yandex_delivery_settings->credentials_are_complete()
+			? __( 'Данные для активной среды заполнены. Проверка выполняется только по кнопке администратора.', 'walls-delivery-calc' )
+			: __( 'Данные для активной среды не заполнены.', 'walls-delivery-calc' );
+		$last_check = $this->yandex_delivery_settings->last_connection_check();
+		$last_status = $this->yandex_delivery_settings->last_connection_status();
+		$last_message = $this->yandex_delivery_settings->last_connection_message();
+		?>
+		<form method="post" style="max-width: 860px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="save_yandex_delivery_settings">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<h3><?php echo esc_html__( 'Данные для входа Яндекс.Доставки', 'walls-delivery-calc' ); ?></h3>
+			<table class="form-table" role="presentation">
+				<?php $this->select_assoc_row( YandexDeliverySettings::ENVIRONMENT_KEY, __( 'Среда', 'walls-delivery-calc' ), $this->yandex_delivery_settings->environment(), array( YandexDeliverySettings::ENV_TEST => 'Тестовая', YandexDeliverySettings::ENV_PRODUCTION => 'Рабочая' ) ); ?>
+				<tr><th colspan="2"><h3><?php echo esc_html__( 'Тестовая среда', 'walls-delivery-calc' ); ?></h3></th></tr>
+				<tr>
+					<th scope="row"><?php echo esc_html__( 'Bearer token', 'walls-delivery-calc' ); ?></th>
+					<td>
+						<input class="regular-text" type="password" name="yandex_delivery_test_bearer_token" value="" placeholder="<?php echo esc_attr( $this->yandex_delivery_settings->has_bearer_token( YandexDeliverySettings::ENV_TEST ) ? 'задано' : 'не задано' ); ?>">
+						<label style="display:block;margin-top:6px;"><input type="checkbox" name="yandex_delivery_clear_test_bearer_token" value="1"> <?php echo esc_html__( 'очистить сохраненный Bearer token тестовой среды', 'walls-delivery-calc' ); ?></label>
+						<p class="description"><?php echo esc_html__( 'Пустое поле не затирает сохраненный токен. Токен хранится только в зашифрованном виде.', 'walls-delivery-calc' ); ?></p>
+					</td>
+				</tr>
+				<?php $this->text_row( YandexDeliverySettings::TEST_PLATFORM_STATION_ID_KEY, __( 'platform_station_id точки отправления', 'walls-delivery-calc' ), $test_credentials->platform_station_id ); ?>
+				<tr><th colspan="2"><h3><?php echo esc_html__( 'Рабочая среда', 'walls-delivery-calc' ); ?></h3></th></tr>
+				<tr>
+					<th scope="row"><?php echo esc_html__( 'Bearer token', 'walls-delivery-calc' ); ?></th>
+					<td>
+						<input class="regular-text" type="password" name="yandex_delivery_production_bearer_token" value="" placeholder="<?php echo esc_attr( $this->yandex_delivery_settings->has_bearer_token( YandexDeliverySettings::ENV_PRODUCTION ) ? 'задано' : 'не задано' ); ?>">
+						<label style="display:block;margin-top:6px;"><input type="checkbox" name="yandex_delivery_clear_production_bearer_token" value="1"> <?php echo esc_html__( 'очистить сохраненный Bearer token рабочей среды', 'walls-delivery-calc' ); ?></label>
+						<p class="description"><?php echo esc_html__( 'Пустое поле не затирает сохраненный токен. Токен не выводится обратно в HTML.', 'walls-delivery-calc' ); ?></p>
+					</td>
+				</tr>
+				<?php $this->text_row( YandexDeliverySettings::PRODUCTION_PLATFORM_STATION_ID_KEY, __( 'platform_station_id точки отправления', 'walls-delivery-calc' ), $production_credentials->platform_station_id ); ?>
+				<tr><th colspan="2"><h3><?php echo esc_html__( 'Транспорт и диагностика', 'walls-delivery-calc' ); ?></h3></th></tr>
+				<?php $this->text_row( YandexDeliverySettings::REQUEST_TIMEOUT_KEY, __( 'Таймаут запроса, сек.', 'walls-delivery-calc' ), (string) $this->yandex_delivery_settings->request_timeout() ); ?>
+				<?php $this->checkbox_row( YandexDeliverySettings::DEBUG_KEY, __( 'Отладочное логирование', 'walls-delivery-calc' ), $this->yandex_delivery_settings->debug_enabled() ); ?>
+				<?php $this->readonly_row( 'yandex_delivery_active_environment', __( 'Активная среда', 'walls-delivery-calc' ), $this->yandex_delivery_settings->environment_label() ); ?>
+				<?php $this->readonly_row( 'yandex_delivery_diagnostic_status', __( 'Статус диагностики', 'walls-delivery-calc' ), $diagnostic_status ); ?>
+				<?php $this->readonly_row( YandexDeliverySettings::LAST_CONNECTION_CHECK_KEY, __( 'Последняя проверка подключения', 'walls-delivery-calc' ), '' !== $last_check ? $last_check : __( 'не выполнялась', 'walls-delivery-calc' ) ); ?>
+				<?php $this->readonly_row( YandexDeliverySettings::LAST_CONNECTION_STATUS_KEY, __( 'Статус последней проверки', 'walls-delivery-calc' ), '' !== $last_status ? $last_status : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
+				<?php $this->readonly_row( YandexDeliverySettings::LAST_CONNECTION_MESSAGE_KEY, __( 'Сообщение последней проверки', 'walls-delivery-calc' ), '' !== $last_message ? $last_message : __( 'нет данных', 'walls-delivery-calc' ) ); ?>
+			</table>
+			<?php submit_button( __( 'Сохранить данные для входа', 'walls-delivery-calc' ) ); ?>
+		</form>
+		<form method="post" style="margin-top: 16px; max-width: 860px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="check_yandex_delivery_connection">
+			<input type="hidden" name="id" value="<?php echo esc_attr( (string) $service->id ); ?>">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<?php submit_button( __( 'Проверить подключение', 'walls-delivery-calc' ), 'secondary', 'submit', false ); ?>
+		</form>
+		<?php
+	}
 	private function render_dpd_settings_tab( DeliveryService $service ): void {
 		if ( ! $this->is_dpd_service( $service ) || ! $this->dpd_settings instanceof DpdSettings ) {
 			return;
@@ -3260,6 +3339,10 @@ Get-ChildItem "D:\russian-post-passport-all"</code></pre>
 
 	private function is_dpd_service( ?DeliveryService $service ): bool {
 		return $service instanceof DeliveryService && DpdSettings::SERVICE_KEY === $service->service_key && DpdSettings::CARRIER_KEY === $service->carrier_key;
+	}
+
+	private function is_yandex_delivery_service( ?DeliveryService $service ): bool {
+		return $service instanceof DeliveryService && YandexDeliverySettings::SERVICE_KEY === $service->service_key && YandexDeliverySettings::CARRIER_KEY === $service->carrier_key;
 	}
 
 	private function service_tab_url( DeliveryService $service, string $tab ): string {

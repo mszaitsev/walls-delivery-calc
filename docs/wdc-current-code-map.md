@@ -1,5 +1,14 @@
 # Карта текущего кода
 
+## Yandex Delivery Foundation 0.72.0
+
+- `src/Carriers/YandexDelivery/YandexDeliverySettings.php` stores the first Yandex Delivery settings set: active environment, encrypted test/production Bearer tokens, test/production source `platform_station_id`, request timeout, debug flag and last explicit connection-check result. Empty token fields preserve the old encrypted token; explicit clear checkboxes remove it.
+- `src/Carriers/YandexDelivery/YandexDeliveryEndpoints.php` selects `https://b2b.taxi.tst.yandex.net` for test and `https://b2b-authproxy.taxi.yandex.net` for production. `src/Carriers/YandexDelivery/Api/YandexDeliveryApiClient.php` sends JSON requests with `Authorization: Bearer ...`, extracts Yandex error code/message and sanitizes diagnostics through settings redaction.
+- `src/Carriers/YandexDelivery/Api/YandexDeliveryConnectionDiagnosticService.php` is the only live probe in this stage. It runs `POST /api/b2b/platform/pickup-points/list` only from the explicit admin button and succeeds only when the configured source point is found with `type=pickup_point` and `available_for_dropoff=true`.
+- `src/DeliveryServices/DeliveryServiceRepository.php` and `DeliveryServiceManager.php` create the built-in `yandex_delivery` service as `Яндекс Доставка`, RU-only, disabled by default, sorted after DPD and non-deletable as a custom service.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds only the `Яндекс Доставка -> Данные для входа` tab. Rendering or saving settings does not call the Yandex API.
+- `src/Core/Plugin.php` registers settings, replaceable HTTP client, API client and diagnostic service only. No Yandex checkout carrier, shipment adapter, cron, autosync, pickup table/import, offers/create, offers/confirm, documents or status mapping are registered in 0.72.0.
+- `tests/yandex-delivery/run-yandex-delivery-foundation-smoke.php` covers endpoint selection, Bearer header, encrypted token handling, explicit token clear, diagnostic redaction, pickup-points/list success/failure states, built-in service creation and absence of checkout/shipment/cron wiring.
 ## DPD Pickup Autosync 0.71.0
 
 - `src/Carriers/Dpd/Pickup/DpdPickupPointAutoSync.php` owns the dedicated WP-Cron hook `wdc_dpd_pickup_points_autosync`. It reads DPD pickup autosync settings, converts selected Moscow-time (GMT+3) slots into UTC timestamps, schedules one daily event per unique time and skips execution when disabled or no selected time matches.

@@ -15,8 +15,10 @@ final class LogRedactor {
 		'client_key',
 		'clientkey',
 		'authorization',
+		'bearer',
 		'phone',
 		'email',
+		'address',
 	);
 
 	/**

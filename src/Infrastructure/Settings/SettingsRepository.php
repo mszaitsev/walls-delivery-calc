@@ -5,6 +5,7 @@ namespace WallsShop\WDC\Infrastructure\Settings;
 
 use WallsShop\WDC\Carriers\Cdek\CdekSettings;
 use WallsShop\WDC\Carriers\Dpd\DpdSettings;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Shipments\Cdek\CdekStatusMappingService;
 use WallsShop\WDC\Shipments\Dpd\DpdStatusMapping;
 
@@ -112,7 +113,8 @@ final class SettingsRepository {
 			'packaging_weight_tiers'       => array(),
 			),
 			CdekSettings::defaults(),
-			DpdSettings::defaults()
+			DpdSettings::defaults(),
+			YandexDeliverySettings::defaults()
 		);
 	}
 

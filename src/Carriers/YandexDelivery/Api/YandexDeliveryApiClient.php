@@ -1,0 +1,143 @@
+<?php
+declare(strict_types=1);
+
+namespace WallsShop\WDC\Carriers\YandexDelivery\Api;
+
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliveryCredentials;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliveryEndpoints;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
+
+defined( 'ABSPATH' ) || exit;
+
+final class YandexDeliveryApiClient {
+	public function __construct(
+		private YandexDeliverySettings $settings,
+		private YandexDeliveryHttpClientInterface $http
+	) {
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	public function pickupPointsList( array $payload ): array {
+		return $this->authorizedJsonRequest( 'POST', YandexDeliveryEndpoints::PICKUP_POINTS_LIST_PATH, $payload );
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 * @return array<string,mixed>
+	 */
+	private function authorizedJsonRequest( string $method, string $path, array $payload = array() ): array {
+		$credentials = $this->settings->credentials();
+		if ( ! $credentials->is_complete() ) {
+			throw new YandexDeliveryApiException(
+				'Данные для входа Яндекс.Доставки не заполнены.',
+				array_merge( $this->settings->diagnostic_context(), array( 'error_code' => 'credentials_missing' ) )
+			);
+		}
+
+		$response = $this->rawRequest( $method, $path, $payload, $credentials );
+		$data = $response->json();
+		if ( '' !== trim( $response->body ) && array() === $data ) {
+			throw new YandexDeliveryApiException(
+				'Яндекс.Доставка вернула некорректный JSON.',
+				array(
+					'http_code' => $response->status_code,
+					'endpoint' => $path,
+					'request' => $this->settings->sanitize_for_diagnostics( $payload ),
+					'response' => array( '_raw' => $this->safeMessage( $response->body, $response->status_code ) ),
+					'error_code' => 'malformed_json',
+				)
+			);
+		}
+		if ( array() === $data ) {
+			throw new YandexDeliveryApiException(
+				'Яндекс.Доставка вернула пустой JSON.',
+				array(
+					'http_code' => $response->status_code,
+					'endpoint' => $path,
+					'request' => $this->settings->sanitize_for_diagnostics( $payload ),
+					'error_code' => 'empty_json',
+				)
+			);
+		}
+		if ( $response->status_code < 200 || $response->status_code >= 300 ) {
+			$message = $this->extractErrorMessage( $data, $response->status_code );
+			throw new YandexDeliveryApiException(
+				$this->safeMessage( $message, $response->status_code ),
+				array(
+					'http_code' => $response->status_code,
+					'endpoint' => $path,
+					'request' => $this->settings->sanitize_for_diagnostics( $payload ),
+					'response' => $this->settings->sanitize_for_diagnostics( $data ),
+					'yandex_error_code' => $this->extractErrorCode( $data ),
+					'yandex_error_message' => $this->safeMessage( $message, $response->status_code ),
+				)
+			);
+		}
+
+		return array(
+			'http_code' => $response->status_code,
+			'body' => $data,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 */
+	private function rawRequest( string $method, string $path, array $payload, YandexDeliveryCredentials $credentials ): YandexDeliveryApiResponse {
+		$body = ( function_exists( 'wp_json_encode' ) ? wp_json_encode( $payload ) : json_encode( $payload ) ) ?: '{}';
+		$args = array(
+			'timeout' => $this->settings->request_timeout(),
+			'headers' => array(
+				'Authorization' => 'Bearer ' . $credentials->bearer_token,
+				'Accept' => 'application/json',
+				'Content-Type' => 'application/json',
+			),
+			'body' => $body,
+		);
+
+		try {
+			return $this->http->request( $method, YandexDeliveryEndpoints::url( $this->settings->environment(), $path ), $args );
+		} catch ( YandexDeliveryApiException $exception ) {
+			throw new YandexDeliveryApiException(
+				$this->safeMessage( $this->settings->redact( $exception->getMessage() ), 0 ),
+				array_merge(
+					$exception->details(),
+					array(
+						'endpoint' => $path,
+						'request' => $this->settings->sanitize_for_diagnostics( $payload ),
+					)
+				),
+				0,
+				$exception
+			);
+		}
+	}
+
+	/** @param array<string,mixed> $data */
+	private function extractErrorMessage( array $data, int $status_code ): string {
+		$error = is_array( $data['error'] ?? null ) ? $data['error'] : array();
+		$message = (string) ( $data['message'] ?? $data['error_message'] ?? $data['error_description'] ?? $error['message'] ?? $error['text'] ?? '' );
+
+		return '' !== trim( $message ) ? $message : 'HTTP ' . $status_code;
+	}
+
+	/** @param array<string,mixed> $data */
+	private function extractErrorCode( array $data ): string {
+		$error = is_array( $data['error'] ?? null ) ? $data['error'] : array();
+
+		return (string) ( $data['code'] ?? $data['error_code'] ?? $error['code'] ?? $data['error'] ?? '' );
+	}
+
+	private function safeMessage( string $message, int $status_code ): string {
+		$message = $this->settings->redact( trim( preg_replace( '/\s+/', ' ', $message ) ?? $message ) );
+		if ( '' === $message ) {
+			$message = $status_code > 0 ? 'HTTP ' . $status_code : 'Ошибка транспорта Яндекс.Доставки.';
+		}
+
+		return substr( $message, 0, 180 );
+	}
+}
+
