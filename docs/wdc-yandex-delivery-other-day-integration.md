@@ -741,8 +741,24 @@ Still intentionally not implemented in 0.72.0: pickup-point table/import, checko
 - local table and migration;
 - import/safe-replace service;
 - sender dropoff validation;
-- checkout/admin pickup REST integration;
-- smoke tests for point normalization, active filtering and checkout payload shape.
+- manual admin pickup-point import/search tab;
+- smoke tests for point normalization, active filtering, sender validation and import statistics.
+
+Checkout/admin pickup REST integration and checkout payload shape move to Phase 3 with pickup selection/pricing.
+
+
+### 0.73.0 implementation note
+
+Phase 2 is implemented as a local pickup/dropoff points foundation only:
+
+- migration `0032_create_yandex_delivery_pickup_points_table.php` creates `wdc_yandex_delivery_pickup_points`;
+- repository, normalizer, manual import service and service layer live in `src/Carriers/YandexDelivery/Pickup/`;
+- import source is `POST /api/b2b/platform/pickup-points/list` with `type=pickup_point`;
+- importer stores pickup points, dropoff points and partner points, including rows where `available_for_dropoff=false`;
+- admin tab `ПВЗ / точки сдачи` shows stats, active-environment sender point validation, manual import and basic search;
+- smoke coverage is in `tests/yandex-delivery/run-yandex-delivery-pickup-smoke.php`.
+
+Still intentionally not implemented in 0.73.0: checkout rates, pickup map/selection, `YandexDeliveryQuoteCarrier`, pricing-calculator integration, order-admin recalculation, shipment adapter/actions, `offers/create`, `offers/confirm`, cancellation, statuses/autosync, documents, cron or pickup autosync. Import is manual only.
 
 ### Phase 3 — checkout and order recalculation
 

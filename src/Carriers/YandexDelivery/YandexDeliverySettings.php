@@ -26,6 +26,8 @@ final class YandexDeliverySettings {
 	public const LAST_CONNECTION_CHECK_KEY = 'yandex_delivery_last_connection_check';
 	public const LAST_CONNECTION_STATUS_KEY = 'yandex_delivery_last_connection_status';
 	public const LAST_CONNECTION_MESSAGE_KEY = 'yandex_delivery_last_connection_message';
+	public const LAST_PICKUP_IMPORT_REPORT_KEY = 'yandex_delivery_last_pickup_import_report';
+	public const PICKUP_ACTION_RESULT_KEY = 'yandex_delivery_pickup_action_result';
 
 	public function __construct(
 		private SettingsRepository $settings,
@@ -46,6 +48,8 @@ final class YandexDeliverySettings {
 			self::LAST_CONNECTION_CHECK_KEY => '',
 			self::LAST_CONNECTION_STATUS_KEY => '',
 			self::LAST_CONNECTION_MESSAGE_KEY => '',
+			self::LAST_PICKUP_IMPORT_REPORT_KEY => array(),
+			self::PICKUP_ACTION_RESULT_KEY => array(),
 		);
 	}
 
@@ -99,6 +103,34 @@ final class YandexDeliverySettings {
 
 	public function last_connection_message(): string {
 		return $this->settings->get_string( self::LAST_CONNECTION_MESSAGE_KEY, '' );
+	}
+
+	/** @return array<string,mixed> */
+	public function last_pickup_import_report(): array {
+		$value = $this->settings->get_array( self::LAST_PICKUP_IMPORT_REPORT_KEY, array() );
+
+		return is_array( $value ) ? $value : array();
+	}
+
+	/** @param array<string,mixed> $report */
+	public function save_pickup_import_report( array $report ): void {
+		$this->settings->set( self::LAST_PICKUP_IMPORT_REPORT_KEY, $this->sanitize_report( $report ) );
+	}
+
+	/** @return array<string,mixed> */
+	public function get_pickup_action_result(): array {
+		$value = $this->settings->get_array( self::PICKUP_ACTION_RESULT_KEY, array() );
+
+		return is_array( $value ) ? $value : array();
+	}
+
+	/** @param array<string,mixed> $result */
+	public function save_pickup_action_result( array $result ): void {
+		$this->settings->set( self::PICKUP_ACTION_RESULT_KEY, $this->sanitize_report( $result ) );
+	}
+
+	public function clear_pickup_action_result(): void {
+		$this->settings->set( self::PICKUP_ACTION_RESULT_KEY, array() );
 	}
 
 	/** @param array<string,mixed> $input */
@@ -214,6 +246,37 @@ final class YandexDeliverySettings {
 
 	private function sanitize_message( string $value ): string {
 		return substr( $this->sanitize_text( $value ), 0, 500 );
+	}
+
+	/** @param array<string,mixed> $report @return array<string,mixed> */
+	private function sanitize_report( array $report ): array {
+		$sanitized = array();
+		foreach ( $report as $key => $value ) {
+			$key = $this->sanitize_key( (string) $key );
+			if ( '' === $key ) {
+				continue;
+			}
+			if ( is_array( $value ) ) {
+				$sanitized[ $key ] = array_map(
+					fn( mixed $item ): string => substr( $this->sanitize_text( is_scalar( $item ) ? (string) $item : $this->json( $item ) ), 0, 500 ),
+					$value
+				);
+				continue;
+			}
+			if ( is_bool( $value ) || is_int( $value ) || is_float( $value ) ) {
+				$sanitized[ $key ] = $value;
+				continue;
+			}
+			$sanitized[ $key ] = substr( $this->sanitize_text( (string) $value ), 0, 500 );
+		}
+
+		return $sanitized;
+	}
+
+	private function json( mixed $value ): string {
+		$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $value, JSON_UNESCAPED_UNICODE ) : json_encode( $value, JSON_UNESCAPED_UNICODE );
+
+		return is_string( $json ) ? $json : '';
 	}
 
 	private function sanitize_text( string $value ): string {
