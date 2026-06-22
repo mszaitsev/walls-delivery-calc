@@ -1364,7 +1364,7 @@ final class DeliveryServicesAdminPage {
 				<tbody>
 					<?php foreach ( $rows as $row ) : ?>
 						<tr>
-							<td><?php echo esc_html( (string) ( $row['yandex_geo_id'] ?? '' ) ); ?></td>
+							<td><?php $display_geo_id = isset( $row['yandex_geo_id'] ) && is_numeric( $row['yandex_geo_id'] ) && (int) $row['yandex_geo_id'] > 0 ? (string) $row['yandex_geo_id'] : '—'; echo esc_html( $display_geo_id ); ?></td>
 							<td><?php echo esc_html( (string) ( $row['yandex_locality'] ?? '' ) ); ?></td>
 							<td><?php echo esc_html( (string) ( $row['yandex_region'] ?? '' ) ); ?></td>
 							<td><?php echo esc_html( number_format( (float) ( $row['confidence'] ?? 0 ), 2, '.', '' ) ); ?></td>

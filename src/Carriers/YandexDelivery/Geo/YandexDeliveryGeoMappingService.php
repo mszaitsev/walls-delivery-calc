@@ -42,7 +42,7 @@ final class YandexDeliveryGeoMappingService {
 			$mapping = $this->repository->save_mapping(
 				array(
 					'location_id' => $location_id,
-					'yandex_geo_id' => 0,
+					'yandex_geo_id' => null,
 					'source_query' => $query,
 					'status' => YandexDeliveryGeoMappingStatus::ERROR,
 					'confidence' => 0,
@@ -179,7 +179,7 @@ final class YandexDeliveryGeoMappingService {
 	private function empty_mapping( Location $location, string $query, array $body ): array {
 		return array(
 			'location_id' => (int) $location->id,
-			'yandex_geo_id' => 0,
+			'yandex_geo_id' => null,
 			'source_query' => $query,
 			'status' => YandexDeliveryGeoMappingStatus::NOT_FOUND,
 			'confidence' => 0,
