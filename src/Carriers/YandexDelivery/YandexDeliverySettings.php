@@ -15,6 +15,9 @@ final class YandexDeliverySettings {
 	public const ENV_TEST = 'test';
 	public const ENV_PRODUCTION = 'production';
 	public const DEFAULT_REQUEST_TIMEOUT = 20;
+	public const DEFAULT_PICKUP_IMPORT_PAGE_SIZE = 100;
+	public const MIN_PICKUP_IMPORT_PAGE_SIZE = 20;
+	public const MAX_PICKUP_IMPORT_PAGE_SIZE = 500;
 
 	public const ENVIRONMENT_KEY = 'yandex_delivery_environment';
 	public const TEST_TOKEN_ENCRYPTED_KEY = 'yandex_delivery_test_bearer_token_encrypted';
@@ -28,6 +31,7 @@ final class YandexDeliverySettings {
 	public const LAST_CONNECTION_MESSAGE_KEY = 'yandex_delivery_last_connection_message';
 	public const LAST_PICKUP_IMPORT_REPORT_KEY = 'yandex_delivery_last_pickup_import_report';
 	public const PICKUP_ACTION_RESULT_KEY = 'yandex_delivery_pickup_action_result';
+	public const PICKUP_IMPORT_PAGE_SIZE_KEY = 'yandex_delivery_pickup_import_page_size';
 
 	public function __construct(
 		private SettingsRepository $settings,
@@ -50,6 +54,7 @@ final class YandexDeliverySettings {
 			self::LAST_CONNECTION_MESSAGE_KEY => '',
 			self::LAST_PICKUP_IMPORT_REPORT_KEY => array(),
 			self::PICKUP_ACTION_RESULT_KEY => array(),
+			self::PICKUP_IMPORT_PAGE_SIZE_KEY => self::DEFAULT_PICKUP_IMPORT_PAGE_SIZE,
 		);
 	}
 
@@ -67,6 +72,15 @@ final class YandexDeliverySettings {
 
 	public function debug_enabled(): bool {
 		return $this->settings->get_bool( self::DEBUG_KEY, false );
+	}
+
+	public function pickup_import_page_size(): int {
+		return $this->sanitize_pickup_import_page_size( $this->settings->get_string( self::PICKUP_IMPORT_PAGE_SIZE_KEY, (string) self::DEFAULT_PICKUP_IMPORT_PAGE_SIZE ) );
+	}
+
+	/** @param array<string,mixed> $input */
+	public function save_pickup_import_page_size_from_admin( array $input ): void {
+		$this->settings->set( self::PICKUP_IMPORT_PAGE_SIZE_KEY, $this->sanitize_pickup_import_page_size( $input[ self::PICKUP_IMPORT_PAGE_SIZE_KEY ] ?? self::DEFAULT_PICKUP_IMPORT_PAGE_SIZE ) );
 	}
 
 	public function credentials(): YandexDeliveryCredentials {
@@ -145,6 +159,9 @@ final class YandexDeliverySettings {
 		$this->save_credentials_for_environment( self::ENV_PRODUCTION, $input );
 		$this->settings->set( self::REQUEST_TIMEOUT_KEY, max( 1, min( 120, (int) ( $input[ self::REQUEST_TIMEOUT_KEY ] ?? self::DEFAULT_REQUEST_TIMEOUT ) ) ) );
 		$this->settings->set( self::DEBUG_KEY, ! empty( $input[ self::DEBUG_KEY ] ) );
+		if ( array_key_exists( self::PICKUP_IMPORT_PAGE_SIZE_KEY, $input ) ) {
+			$this->save_pickup_import_page_size_from_admin( $input );
+		}
 	}
 
 	public function save_connection_result( bool $success, string $message ): void {
@@ -238,6 +255,17 @@ final class YandexDeliverySettings {
 		if ( '' !== $token && '********' !== $token ) {
 			$this->settings->set( $token_storage_key, $this->encryption->encrypt( $token ) );
 		}
+	}
+
+	private function sanitize_pickup_import_page_size( mixed $value ): int {
+		if ( is_string( $value ) ) {
+			$value = trim( $this->unslash( $value ) );
+		}
+		if ( ! is_numeric( $value ) ) {
+			return self::DEFAULT_PICKUP_IMPORT_PAGE_SIZE;
+		}
+
+		return max( self::MIN_PICKUP_IMPORT_PAGE_SIZE, min( self::MAX_PICKUP_IMPORT_PAGE_SIZE, (int) $value ) );
 	}
 
 	private function sanitize_station_id( string $value ): string {

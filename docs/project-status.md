@@ -1,3 +1,5 @@
+0.73.3 note: Yandex Delivery pickup import now defaults to page_size=100, supports admin-configurable page size clamped to 20..500, and stores page_size/pages/memory_peak_mb diagnostics in the import report to avoid production memory exhaustion on large pickup-point pages.
+
 0.73.2 note: Yandex Delivery pickup import is now streaming by API page, so production imports do not accumulate all pages/points in memory; the admin reset action also clears the pickup import lock.
 
 0.73.1 note: fixed Yandex Delivery pickup repository review issues. The repository constructor now resolves the default WordPress global `$wpdb` through a local variable so live code gets the real DB object while smoke tests can still inject a fake object. `create_schema_if_needed()` no longer treats fake row storage as the reason to skip schema creation; fake/non-WP smoke environments are skipped through an explicit schema-environment check, while live WordPress can still reach `dbDelta`. No Yandex checkout, tariffs, shipments, statuses, documents, cron or autosync were added.

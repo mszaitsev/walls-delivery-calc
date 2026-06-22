@@ -92,6 +92,7 @@ yd_pickup_assert( '' !== $schema_block && str_contains( $repository_source, 'fun
 yd_pickup_assert( ! str_contains( $import_service_source, '$responses =' ), 'Import service must not collect all API responses in memory.' );
 yd_pickup_assert( ! str_contains( $import_service_source, 'download_all_pages()' ), 'Import service must not use a download_all_pages accumulator.' );
 yd_pickup_assert( ! str_contains( $import_service_source, '$points = array_merge( $points' ), 'Import service must not merge every page into a global points array.' );
+yd_pickup_assert( ! str_contains( $import_service_source, 'private const PAGE_SIZE = 1000' ) && ! str_contains( $import_service_source, "'limit' => 1000" ), 'Import service must not use 1000 as pickup import page size.' );
 foreach ( array( 'platform_station_id', 'operator_id', 'operator_name', 'available_for_dropoff', 'available_for_c2c_dropoff', 'is_yandex_branded', 'raw_json', 'imported_at' ) as $column ) {
 	yd_pickup_assert( str_contains( $repository_source, $column ), 'Repository schema must include column ' . $column . '.' );
 }
@@ -107,6 +108,13 @@ $settings->save_from_admin(
 		YandexDeliverySettings::TEST_PLATFORM_STATION_ID_KEY => 'sender-1',
 	)
 );
+yd_pickup_assert( 100 === $settings->pickup_import_page_size(), 'Default Yandex pickup import page size must be 100.' );
+$settings->save_pickup_import_page_size_from_admin( array( YandexDeliverySettings::PICKUP_IMPORT_PAGE_SIZE_KEY => 1 ) );
+yd_pickup_assert( 20 === $settings->pickup_import_page_size(), 'Yandex pickup import page size must clamp low values to 20.' );
+$settings->save_pickup_import_page_size_from_admin( array( YandexDeliverySettings::PICKUP_IMPORT_PAGE_SIZE_KEY => 9999 ) );
+yd_pickup_assert( 500 === $settings->pickup_import_page_size(), 'Yandex pickup import page size must clamp high values to 500.' );
+$settings->save_pickup_import_page_size_from_admin( array( YandexDeliverySettings::PICKUP_IMPORT_PAGE_SIZE_KEY => 'broken' ) );
+yd_pickup_assert( 100 === $settings->pickup_import_page_size(), 'Yandex pickup import page size must fall back to 100 for non-numeric values.' );
 
 $normalizer = new YandexDeliveryPickupPointNormalizer();
 $full = $normalizer->normalize(
@@ -180,8 +188,9 @@ yd_pickup_assert( 'success' === $report['status'] && 2 === $report['fetched'] &&
 yd_pickup_assert( 2 === count( $http->calls ), 'Importer must request each pickup-points/list page separately.' );
 $first_payload = json_decode( (string) $http->calls[0]['args']['body'], true );
 $second_payload = json_decode( (string) $http->calls[1]['args']['body'], true );
-yd_pickup_assert( array( 'type' => 'pickup_point', 'limit' => 1000 ) === $first_payload && ! array_key_exists( 'page_token', $first_payload ), 'First importer request must not include page_token.' );
-yd_pickup_assert( 'page-2' === (string) ( $second_payload['page_token'] ?? '' ), 'Second importer request must include page_token=page-2.' );
+yd_pickup_assert( array( 'type' => 'pickup_point', 'limit' => 100 ) === $first_payload && ! array_key_exists( 'page_token', $first_payload ), 'First importer request must use default limit=100 and must not include page_token.' );
+yd_pickup_assert( 100 === (int) ( $second_payload['limit'] ?? 0 ) && 'page-2' === (string) ( $second_payload['page_token'] ?? '' ), 'Second importer request must include limit=100 and page_token=page-2.' );
+yd_pickup_assert( 2 === (int) ( $report['pages'] ?? 0 ) && 100 === (int) ( $report['page_size'] ?? 0 ) && is_numeric( $report['memory_peak_mb'] ?? null ), 'Import report must include pages, page_size and memory_peak_mb diagnostics.' );
 yd_pickup_assert( 2 === ( new YandexDeliveryPickupPointRepository( $GLOBALS['wpdb'] ) )->count_active(), 'Importer must activate imported points and keep old points inactive.' );
 yd_pickup_assert( null !== ( new YandexDeliveryPickupPointRepository( $GLOBALS['wpdb'] ) )->find_by_platform_station_id( 'api-1' ), 'Importer must not drop points with available_for_dropoff=false.' );
 yd_pickup_assert( 'success' === (string) ( $settings->last_pickup_import_report()['status'] ?? '' ), 'Import service must store last import report.' );
@@ -189,11 +198,22 @@ $GLOBALS['wdc_yandex_delivery_pickup_options']['wdc_yandex_delivery_pickup_impor
 $importer->reset_lock();
 yd_pickup_assert( ! isset( $GLOBALS['wdc_yandex_delivery_pickup_options']['wdc_yandex_delivery_pickup_import_lock'] ), 'Import reset_lock must delete a running pickup import lock regardless of TTL.' );
 
+$settings->save_pickup_import_page_size_from_admin( array( YandexDeliverySettings::PICKUP_IMPORT_PAGE_SIZE_KEY => 50 ) );
+$GLOBALS['wpdb']->yandex_delivery_pickup_points = array();
+$custom_http = new YdPickupFakeHttp(
+	new YandexDeliveryApiResponse( 200, json_encode( array( 'points' => array( array( 'id' => 'custom-1', 'type' => 'pickup_point', 'city_name' => 'Томск', 'available_for_dropoff' => true ) ) ), JSON_UNESCAPED_UNICODE ) ?: '{}' )
+);
+$custom_importer = new YandexDeliveryPickupPointImportService( new YandexDeliveryApiClient( $settings, $custom_http ), $normalizer, new YandexDeliveryPickupPointRepository( $GLOBALS['wpdb'] ), $settings );
+$custom_report = $custom_importer->import_all();
+$custom_payload = json_decode( (string) $custom_http->calls[0]['args']['body'], true );
+yd_pickup_assert( 50 === (int) ( $custom_payload['limit'] ?? 0 ) && 50 === (int) ( $custom_report['page_size'] ?? 0 ), 'Custom Yandex pickup import page size must be used in payload and report.' );
+
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 yd_pickup_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_pickup'] = 'ПВЗ / точки сдачи';" ), 'Admin page must register Yandex pickup tab.' );
 yd_pickup_assert( str_contains( $admin_source, 'run_yandex_delivery_pickup_import' ) && str_contains( $admin_source, 'Импортировать точки Яндекс' ), 'Admin page must expose manual Yandex pickup import button.' );
 yd_pickup_assert( str_contains( $admin_source, 'reset_lock()' ) && str_contains( $admin_source, 'Сбросить результат и lock' ), 'Admin reset action must clear Yandex pickup report and import lock.' );
+yd_pickup_assert( str_contains( $admin_source, 'Размер страницы импорта' ) && str_contains( $admin_source, YandexDeliverySettings::PICKUP_IMPORT_PAGE_SIZE_KEY ), 'Admin page must expose Yandex pickup import page size setting.' );
 yd_pickup_assert( ! preg_match( '/yandex_delivery.*(cron|autosync)|YandexDelivery.*(Cron|AutoSync)/i', $plugin_source ), 'Yandex pickup stage must not register cron/autosync.' );
 yd_pickup_assert( ! str_contains( $plugin_source, 'YandexDeliveryQuoteCarrier' ) && ! str_contains( $plugin_source, 'offers/create' ), 'Yandex pickup stage must not add checkout quote or shipment creation.' );
 

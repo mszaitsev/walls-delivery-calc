@@ -14,7 +14,7 @@ final class YandexDeliveryPickupPointImportService {
 	private const LOCK_OPTION = 'wdc_yandex_delivery_pickup_import_lock';
 	private const LOCK_TTL = 30 * 60;
 	private const MAX_PAGES = 500;
-	private const PAGE_SIZE = 1000;
+	private const PAGE_SIZE = 100;
 
 	public function __construct(
 		private YandexDeliveryApiClient $api,
@@ -28,8 +28,9 @@ final class YandexDeliveryPickupPointImportService {
 	/** @return array<string,mixed> */
 	public function import_all( string $context = 'manual' ): array {
 		$token = $this->acquire_lock();
+		$page_size = $this->settings->pickup_import_page_size();
 		if ( '' === $token ) {
-			$report = $this->report( 'skipped_lock_busy', $this->now(), $this->now(), 0, 0, 0, 0, array(), 'Yandex Delivery pickup points import skipped: another import is already running.', $context );
+			$report = $this->report( 'skipped_lock_busy', $this->now(), $this->now(), 0, 0, 0, 0, array(), 'Yandex Delivery pickup points import skipped: another import is already running.', $context, 0.0, $page_size, 0, $this->memory_peak_mb() );
 			$this->settings->save_pickup_import_report( $report );
 			return $report;
 		}
@@ -40,6 +41,7 @@ final class YandexDeliveryPickupPointImportService {
 		$normalized_count = 0;
 		$saved = 0;
 		$inactive = 0;
+		$pages = 0;
 		$errors = array();
 
 		try {
@@ -47,8 +49,9 @@ final class YandexDeliveryPickupPointImportService {
 			$skipped = 0;
 			$page_token = '';
 			for ( $page = 0; $page < self::MAX_PAGES; ++$page ) {
-				$response = $this->api->pickupPointsList( $this->page_payload( $page_token ) );
+				$response = $this->api->pickupPointsList( $this->page_payload( $page_token, $page_size ) );
 				$body = is_array( $response['body'] ?? null ) ? $response['body'] : array();
+				++$pages;
 				$normalized = $this->normalizer->normalize_response( $body );
 				$fetched += (int) $normalized['fetched_count'];
 				$skipped += (int) $normalized['skipped_invalid'];
@@ -95,7 +98,10 @@ final class YandexDeliveryPickupPointImportService {
 			$errors,
 			array() === $errors ? 'Yandex Delivery pickup points imported.' : 'Yandex Delivery pickup points import finished with errors.',
 			$context,
-			round( microtime( true ) - $time_start, 3 )
+			round( microtime( true ) - $time_start, 3 ),
+			$page_size,
+			$pages,
+			$this->memory_peak_mb()
 		);
 		$this->settings->save_pickup_import_report( $report );
 		if ( array() !== $errors ) {
@@ -112,10 +118,10 @@ final class YandexDeliveryPickupPointImportService {
 	}
 
 	/** @return array<string,mixed> */
-	private function page_payload( string $page_token ): array {
+	private function page_payload( string $page_token, int $page_size ): array {
 		$payload = array(
 			'type' => YandexDeliveryPickupPointNormalizer::TYPE_PICKUP_POINT,
-			'limit' => self::PAGE_SIZE,
+			'limit' => $page_size,
 		);
 		if ( '' !== $page_token ) {
 			$payload['page_token'] = $page_token;
@@ -144,7 +150,7 @@ final class YandexDeliveryPickupPointImportService {
 	 * @param array<int,string> $errors
 	 * @return array<string,mixed>
 	 */
-	private function report( string $status, string $started, string $finished, int $fetched, int $normalized, int $saved, int $inactive, array $errors, string $message, string $context, float $duration = 0.0 ): array {
+	private function report( string $status, string $started, string $finished, int $fetched, int $normalized, int $saved, int $inactive, array $errors, string $message, string $context, float $duration = 0.0, int $page_size = self::PAGE_SIZE, int $pages = 0, float $memory_peak_mb = 0.0 ): array {
 		return array(
 			'source' => 'pickup-points/list',
 			'started_at' => $started,
@@ -155,10 +161,17 @@ final class YandexDeliveryPickupPointImportService {
 			'inactive' => $inactive,
 			'errors' => $errors,
 			'duration' => $duration,
+			'page_size' => $page_size,
+			'pages' => $pages,
+			'memory_peak_mb' => $memory_peak_mb,
 			'message' => $message,
 			'context' => $this->sanitize_context( $context ),
 			'status' => $status,
 		);
+	}
+
+	private function memory_peak_mb(): float {
+		return function_exists( 'memory_get_peak_usage' ) ? round( memory_get_peak_usage( true ) / 1048576, 1 ) : 0.0;
 	}
 
 	private function acquire_lock(): string {

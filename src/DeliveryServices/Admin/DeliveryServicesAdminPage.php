@@ -416,6 +416,7 @@ final class DeliveryServicesAdminPage {
 				$this->yandex_delivery_settings->save_connection_result( (bool) $result['success'], (string) $result['message'] );
 			}
 			if ( 'run_yandex_delivery_pickup_import' === $action && $this->yandex_delivery_settings instanceof YandexDeliverySettings && $this->yandex_delivery_pickup_importer instanceof YandexDeliveryPickupPointImportService ) {
+				$this->yandex_delivery_settings->save_pickup_import_page_size_from_admin( $_POST );
 				$report = $this->yandex_delivery_pickup_importer->import_all();
 				$this->save_yandex_delivery_pickup_action_result( $report );
 			}
@@ -1137,6 +1138,7 @@ final class DeliveryServicesAdminPage {
 		$stats = $this->yandex_delivery_pickup_service->statistics();
 		$sender = $this->yandex_delivery_pickup_service->validate_sender_point();
 		$last_report = $this->yandex_delivery_settings->last_pickup_import_report();
+		$page_size = $this->yandex_delivery_settings->pickup_import_page_size();
 		$search = $this->yandex_delivery_pickup_search_results();
 		?>
 		<h3><?php echo esc_html__( 'ПВЗ / точки сдачи Яндекс.Доставки', 'walls-delivery-calc' ); ?></h3>
@@ -1162,8 +1164,22 @@ final class DeliveryServicesAdminPage {
 				<tr><th scope="row"><?php echo esc_html__( 'Сообщение', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) $sender['message'] ); ?></td></tr>
 			</tbody>
 		</table>
+		<form method="post" style="max-width: 940px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<input type="hidden" name="wdc_delivery_services_action" value="run_yandex_delivery_pickup_import">
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><label for="yandex_delivery_pickup_import_page_size"><?php echo esc_html__( 'Размер страницы импорта', 'walls-delivery-calc' ); ?></label></th>
+					<td>
+						<input id="yandex_delivery_pickup_import_page_size" type="number" min="20" max="500" step="1" name="<?php echo esc_attr( YandexDeliverySettings::PICKUP_IMPORT_PAGE_SIZE_KEY ); ?>" value="<?php echo esc_attr( (string) $page_size ); ?>" class="small-text">
+						<p class="description"><?php echo esc_html__( 'Сколько ПВЗ запрашивать за один API-запрос. Если импорт падает по памяти, уменьшите до 50 или 100.', 'walls-delivery-calc' ); ?></p>
+					</td>
+				</tr>
+			</table>
+			<p><button class="button button-primary" type="submit"><?php echo esc_html__( 'Импортировать точки Яндекс', 'walls-delivery-calc' ); ?></button></p>
+		</form>
 		<p>
-			<?php $this->yandex_delivery_pickup_button( $service, 'run_yandex_delivery_pickup_import', __( 'Импортировать точки Яндекс', 'walls-delivery-calc' ), 'button button-primary' ); ?>
 			<?php $this->yandex_delivery_pickup_button( $service, 'reset_yandex_delivery_pickup_result', __( 'Сбросить результат и lock', 'walls-delivery-calc' ), 'button button-secondary' ); ?>
 		</p>
 		<hr>
@@ -1246,13 +1262,16 @@ final class DeliveryServicesAdminPage {
 		}
 
 		return sprintf(
-			'%s: fetched=%d normalized=%d saved=%d inactive=%d errors=%d duration=%s',
+			'%s: fetched=%d normalized=%d saved=%d inactive=%d errors=%d pages=%d page_size=%d memory_peak_mb=%s duration=%s',
 			(string) ( $report['status'] ?? '' ),
 			(int) ( $report['fetched'] ?? 0 ),
 			(int) ( $report['normalized'] ?? 0 ),
 			(int) ( $report['saved'] ?? 0 ),
 			(int) ( $report['inactive'] ?? 0 ),
 			count( is_array( $report['errors'] ?? null ) ? $report['errors'] : array() ),
+			(int) ( $report['pages'] ?? 0 ),
+			(int) ( $report['page_size'] ?? 0 ),
+			(string) ( $report['memory_peak_mb'] ?? '0' ),
 			(string) ( $report['duration'] ?? '0' )
 		);
 	}
