@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 00000007 A0AC:74BD
+Volume serial number is 00000092 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -22,6 +22,7 @@ C:.
 |   |       russian-post-pickup-import.js
 |   |       shipments-admin.css
 |   |       shipments-admin.js
+|   |       yandex-delivery-pickup-import.js
 |   |
 |   +---frontend
 |   |   |   .gitkeep

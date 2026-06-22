@@ -127,6 +127,10 @@ final class DeliveryServicesAdminPage {
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_action( 'wp_ajax_wdc_russian_post_pickup_import_status', array( $this, 'ajax_pickup_import_status' ) );
 		add_action( 'wp_ajax_wdc_dpd_geography_import_status', array( $this, 'ajax_dpd_geography_import_status' ) );
+		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_import_start', array( $this, 'ajax_yandex_delivery_pickup_import_start' ) );
+		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_import_step', array( $this, 'ajax_yandex_delivery_pickup_import_step' ) );
+		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_import_reset', array( $this, 'ajax_yandex_delivery_pickup_import_reset' ) );
+		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_import_status', array( $this, 'ajax_yandex_delivery_pickup_import_status' ) );
 	}
 
 	public function enqueue_assets(): void {
@@ -164,6 +168,24 @@ final class DeliveryServicesAdminPage {
 				array(
 					'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 					'nonce' => wp_create_nonce( 'wdc_dpd_geography_import_status' ),
+				)
+			);
+		}
+		if ( self::MENU_SLUG === $page && YandexDeliverySettings::SERVICE_KEY === $service && 'yandex_delivery_pickup' === $tab ) {
+			wp_enqueue_script(
+				'wdc-yandex-delivery-pickup-import-admin',
+				$this->asset_url( 'assets/admin/yandex-delivery-pickup-import.js' ),
+				array(),
+				$this->asset_version(),
+				true
+			);
+			wp_localize_script(
+				'wdc-yandex-delivery-pickup-import-admin',
+				'wdcYandexDeliveryPickupImport',
+				array(
+					'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+					'nonce' => wp_create_nonce( 'wdc_yandex_delivery_pickup_import' ),
+					'initialState' => $this->yandex_delivery_pickup_importer instanceof YandexDeliveryPickupPointImportService ? $this->yandex_delivery_pickup_importer->current_import_state() : array(),
 				)
 			);
 		}
@@ -210,6 +232,56 @@ final class DeliveryServicesAdminPage {
 		wp_send_json_success( $state );
 	}
 
+
+	public function ajax_yandex_delivery_pickup_import_start(): void {
+		if ( ! $this->can_handle_yandex_delivery_pickup_ajax() ) {
+			return;
+		}
+		if ( $this->yandex_delivery_settings instanceof YandexDeliverySettings ) {
+			$this->yandex_delivery_settings->save_pickup_import_page_size_from_admin( $_POST );
+		}
+		wp_send_json_success( $this->yandex_delivery_pickup_importer->start_import() );
+	}
+
+	public function ajax_yandex_delivery_pickup_import_step(): void {
+		if ( ! $this->can_handle_yandex_delivery_pickup_ajax() ) {
+			return;
+		}
+		$session_id = isset( $_POST['session_id'] ) ? sanitize_text_field( wp_unslash( $_POST['session_id'] ) ) : '';
+		wp_send_json_success( $this->yandex_delivery_pickup_importer->run_import_step( $session_id ) );
+	}
+
+	public function ajax_yandex_delivery_pickup_import_reset(): void {
+		if ( ! $this->can_handle_yandex_delivery_pickup_ajax() ) {
+			return;
+		}
+		wp_send_json_success( $this->yandex_delivery_pickup_importer->reset_import() );
+	}
+
+	public function ajax_yandex_delivery_pickup_import_status(): void {
+		if ( ! $this->can_handle_yandex_delivery_pickup_ajax() ) {
+			return;
+		}
+		wp_send_json_success( $this->yandex_delivery_pickup_importer->current_import_state() );
+	}
+
+	private function can_handle_yandex_delivery_pickup_ajax(): bool {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 );
+			return false;
+		}
+		if ( ! check_ajax_referer( 'wdc_yandex_delivery_pickup_import', 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 );
+			return false;
+		}
+		if ( ! $this->yandex_delivery_pickup_importer instanceof YandexDeliveryPickupPointImportService ) {
+			wp_send_json_error( array( 'message' => __( 'Импорт ПВЗ Яндекс.Доставки недоступен.', 'walls-delivery-calc' ) ), 500 );
+			return false;
+		}
+
+		return true;
+	}
+
 	private function asset_url( string $path ): string {
 		if ( $this->environment instanceof PluginEnvironment ) {
 			return $this->environment->plugin_url() . ltrim( $path, '/' );
@@ -233,7 +305,7 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
-		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result', 'save_yandex_delivery_settings', 'check_yandex_delivery_connection', 'run_yandex_delivery_pickup_import', 'reset_yandex_delivery_pickup_result' ), true ) ) {
+		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result', 'save_yandex_delivery_settings', 'check_yandex_delivery_connection', 'reset_yandex_delivery_pickup_result' ), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -244,7 +316,7 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_tariffs' === $action ) {
 				$data = array();
 			}
-			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result', 'save_yandex_delivery_settings', 'check_yandex_delivery_connection', 'run_yandex_delivery_pickup_import', 'reset_yandex_delivery_pickup_result' ), true ) ) {
+			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result', 'save_yandex_delivery_settings', 'check_yandex_delivery_connection', 'reset_yandex_delivery_pickup_result' ), true ) ) {
 				$data = array();
 			}
 			if ( $id > 0 && array() !== $data ) {
@@ -415,17 +487,8 @@ final class DeliveryServicesAdminPage {
 				$result = $this->yandex_delivery_diagnostics->checkPickupPoint();
 				$this->yandex_delivery_settings->save_connection_result( (bool) $result['success'], (string) $result['message'] );
 			}
-			if ( 'run_yandex_delivery_pickup_import' === $action && $this->yandex_delivery_settings instanceof YandexDeliverySettings && $this->yandex_delivery_pickup_importer instanceof YandexDeliveryPickupPointImportService ) {
-				$this->yandex_delivery_settings->save_pickup_import_page_size_from_admin( $_POST );
-				$report = $this->yandex_delivery_pickup_importer->import_all();
-				$this->save_yandex_delivery_pickup_action_result( $report );
-			}
-			if ( 'reset_yandex_delivery_pickup_result' === $action && $this->yandex_delivery_settings instanceof YandexDeliverySettings ) {
-				$this->yandex_delivery_settings->clear_pickup_action_result();
-				$this->yandex_delivery_settings->save_pickup_import_report( array() );
-				if ( $this->yandex_delivery_pickup_importer instanceof YandexDeliveryPickupPointImportService ) {
-					$this->yandex_delivery_pickup_importer->reset_lock();
-				}
+			if ( 'reset_yandex_delivery_pickup_result' === $action && $this->yandex_delivery_pickup_importer instanceof YandexDeliveryPickupPointImportService ) {
+				$this->yandex_delivery_pickup_importer->reset_import();
 			}
 			if ( 'save_dpd_geography_settings' === $action && $this->dpd_settings instanceof DpdSettings ) {
 				$this->dpd_settings->save_geography_settings_from_admin( $_POST );
@@ -576,7 +639,7 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result', 'save_yandex_delivery_settings', 'check_yandex_delivery_connection', 'run_yandex_delivery_pickup_import', 'reset_yandex_delivery_pickup_result' ), true ) ) {
+		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result', 'save_yandex_delivery_settings', 'check_yandex_delivery_connection', 'reset_yandex_delivery_pickup_result' ), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'main',
@@ -591,7 +654,7 @@ final class DeliveryServicesAdminPage {
 				'save_cdek_settings', 'check_cdek_connection' => 'cdek_settings',
 				'save_dpd_settings', 'check_dpd_connection' => 'dpd_settings',
 				'save_yandex_delivery_settings', 'check_yandex_delivery_connection' => 'yandex_delivery_settings',
-				'run_yandex_delivery_pickup_import', 'reset_yandex_delivery_pickup_result' => 'yandex_delivery_pickup',
+				'reset_yandex_delivery_pickup_result' => 'yandex_delivery_pickup',
 				'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback' => 'dpd_geography',
 				'save_dpd_tariff_settings' => 'dpd_tariff',
 				'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' => 'dpd_pickup',
@@ -1139,6 +1202,7 @@ final class DeliveryServicesAdminPage {
 		$sender = $this->yandex_delivery_pickup_service->validate_sender_point();
 		$last_report = $this->yandex_delivery_settings->last_pickup_import_report();
 		$page_size = $this->yandex_delivery_settings->pickup_import_page_size();
+		$import_state = $this->yandex_delivery_pickup_importer instanceof YandexDeliveryPickupPointImportService ? $this->yandex_delivery_pickup_importer->current_import_state() : array();
 		$search = $this->yandex_delivery_pickup_search_results();
 		?>
 		<h3><?php echo esc_html__( 'ПВЗ / точки сдачи Яндекс.Доставки', 'walls-delivery-calc' ); ?></h3>
@@ -1164,24 +1228,31 @@ final class DeliveryServicesAdminPage {
 				<tr><th scope="row"><?php echo esc_html__( 'Сообщение', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) $sender['message'] ); ?></td></tr>
 			</tbody>
 		</table>
-		<form method="post" style="max-width: 940px;">
-			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
-			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
-			<input type="hidden" name="wdc_delivery_services_action" value="run_yandex_delivery_pickup_import">
-			<table class="form-table" role="presentation">
+		<div id="wdc-yandex-delivery-pickup-import" data-wdc-yandex-pickup-import data-wdc-yandex-status="<?php echo esc_attr( (string) ( $import_state['status'] ?? 'idle' ) ); ?>">
+			<table class="form-table" role="presentation" style="max-width: 940px;">
 				<tr>
 					<th scope="row"><label for="yandex_delivery_pickup_import_page_size"><?php echo esc_html__( 'Размер страницы импорта', 'walls-delivery-calc' ); ?></label></th>
 					<td>
-						<input id="yandex_delivery_pickup_import_page_size" type="number" min="20" max="500" step="1" name="<?php echo esc_attr( YandexDeliverySettings::PICKUP_IMPORT_PAGE_SIZE_KEY ); ?>" value="<?php echo esc_attr( (string) $page_size ); ?>" class="small-text">
+						<input id="yandex_delivery_pickup_import_page_size" type="number" min="20" max="500" step="1" name="<?php echo esc_attr( YandexDeliverySettings::PICKUP_IMPORT_PAGE_SIZE_KEY ); ?>" value="<?php echo esc_attr( (string) $page_size ); ?>" class="small-text" data-wdc-yandex-page-size>
 						<p class="description"><?php echo esc_html__( 'Сколько ПВЗ запрашивать за один API-запрос. Если импорт падает по памяти, уменьшите до 50 или 100.', 'walls-delivery-calc' ); ?></p>
 					</td>
 				</tr>
 			</table>
-			<p><button class="button button-primary" type="submit"><?php echo esc_html__( 'Импортировать точки Яндекс', 'walls-delivery-calc' ); ?></button></p>
-		</form>
-		<p>
-			<?php $this->yandex_delivery_pickup_button( $service, 'reset_yandex_delivery_pickup_result', __( 'Сбросить результат и lock', 'walls-delivery-calc' ), 'button button-secondary' ); ?>
-		</p>
+			<p>
+				<button class="button button-primary" type="button" data-wdc-yandex-import-start><?php echo esc_html__( 'Импортировать точки Яндекс', 'walls-delivery-calc' ); ?></button>
+				<button class="button button-secondary" type="button" data-wdc-yandex-import-reset><?php echo esc_html__( 'Сбросить результат и lock', 'walls-delivery-calc' ); ?></button>
+			</p>
+			<div class="notice notice-info inline" data-wdc-yandex-progress>
+				<p data-wdc-yandex-summary><?php echo esc_html( $this->yandex_delivery_pickup_import_state_summary( $import_state ) ); ?></p>
+				<table class="widefat striped" style="max-width: 940px;">
+					<tbody>
+						<?php foreach ( $this->yandex_delivery_pickup_import_state_rows() as $key => $label ) : ?>
+							<tr><th scope="row"><?php echo esc_html( $label ); ?></th><td data-wdc-yandex-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $this->yandex_delivery_pickup_import_state_value( $import_state, $key ) ); ?></td></tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+			</div>
+		</div>
 		<hr>
 		<h3><?php echo esc_html__( 'Поиск', 'walls-delivery-calc' ); ?></h3>
 		<form method="get">
@@ -1213,6 +1284,45 @@ final class DeliveryServicesAdminPage {
 			</table>
 		<?php endif; ?>
 		<?php
+	}
+
+
+	/** @param array<string,mixed> $state */
+	private function yandex_delivery_pickup_import_state_summary( array $state ): string {
+		$status = (string) ( $state['status'] ?? 'idle' );
+		$page = (int) ( $state['page'] ?? 0 );
+		$fetched = (int) ( $state['fetched'] ?? 0 );
+		$saved = (int) ( $state['saved'] ?? 0 );
+		$page_size = (int) ( $state['page_size'] ?? 0 );
+
+		return sprintf( 'Статус: %s. Шаг %d: обработано %d, сохранено %d, page size %d.', $status, $page, $fetched, $saved, $page_size );
+	}
+
+	/** @return array<string,string> */
+	private function yandex_delivery_pickup_import_state_rows(): array {
+		return array(
+			'status' => 'Статус',
+			'page' => 'Страница',
+			'fetched' => 'Обработано / fetched',
+			'normalized' => 'Нормализовано',
+			'saved' => 'Сохранено',
+			'inactive' => 'Деактивировано старых',
+			'page_size' => 'Page size',
+			'memory_peak_mb' => 'Peak memory',
+			'updated_at' => 'Последнее обновление',
+			'message' => 'Сообщение',
+			'errors' => 'Ошибки',
+		);
+	}
+
+	/** @param array<string,mixed> $state */
+	private function yandex_delivery_pickup_import_state_value( array $state, string $key ): string {
+		$value = $state[ $key ] ?? '';
+		if ( is_array( $value ) ) {
+			return implode( '; ', array_map( 'strval', $value ) );
+		}
+
+		return is_scalar( $value ) ? (string) $value : '';
 	}
 
 	private function yandex_delivery_pickup_button( DeliveryService $service, string $action, string $label, string $class = 'button' ): void {

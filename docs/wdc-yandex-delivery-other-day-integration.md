@@ -760,6 +760,11 @@ Phase 2 is implemented as a local pickup/dropoff points foundation only:
 
 Still intentionally not implemented in 0.73.0: checkout rates, pickup map/selection, `YandexDeliveryQuoteCarrier`, pricing-calculator integration, order-admin recalculation, shipment adapter/actions, `offers/create`, `offers/confirm`, cancellation, statuses/autosync, documents, cron or pickup autosync. Import is manual only.
 
+
+### 0.74.0 AJAX import note
+
+The Phase 2 pickup/dropoff import is manual AJAX only. The admin tab starts a session, stores progress in `wdc_yandex_delivery_pickup_import_state`, processes exactly one `pickup-points/list` page per step, updates counters after every step and saves the final report on success/error. Reset removes both `wdc_yandex_delivery_pickup_import_lock` and the import state so an admin can recover from a failed request. Cron/autosync, checkout rates, pickup map/selection, shipments, statuses and documents remain out of scope.
+
 ### 0.73.3 production import memory note
 
 Yandex pickup/dropoff import remains manual-only and page-streamed. Production imports use a conservative default `yandex_delivery_pickup_import_page_size=100`; the admin pickup tab can set 20..500, and the import report records `page_size`, `pages` and `memory_peak_mb`. Use 50 or 100 if a large Yandex page exhausts PHP memory during response decoding.

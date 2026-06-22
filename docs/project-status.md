@@ -1,3 +1,5 @@
+0.74.0 note: Yandex Delivery pickup import is now a manual AJAX step-runner. Admin start creates option-backed state and lock, each step processes one pickup-points/list page, progress is rendered on the pickup tab, final success saves the import report, and reset clears both state and lock. No cron/autosync, checkout, tariffs, map, shipments or statuses were added.
+
 0.73.3 note: Yandex Delivery pickup import now defaults to page_size=100, supports admin-configurable page size clamped to 20..500, and stores page_size/pages/memory_peak_mb diagnostics in the import report to avoid production memory exhaustion on large pickup-point pages.
 
 0.73.2 note: Yandex Delivery pickup import is now streaming by API page, so production imports do not accumulate all pages/points in memory; the admin reset action also clears the pickup import lock.
