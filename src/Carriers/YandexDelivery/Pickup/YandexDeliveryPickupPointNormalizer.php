@@ -56,7 +56,7 @@ final class YandexDeliveryPickupPointNormalizer {
 			'address' => $this->address_to_string( $address, $row['address'] ?? null, $row['full_address'] ?? null, $row['formatted_address'] ?? null ),
 			'geo_id' => $this->first( $row['geo_id'] ?? null, $address['geo_id'] ?? null, $address['geoId'] ?? null, $location['geo_id'] ?? null ),
 			'country_code' => $this->first( $row['country_code'] ?? null, $address['country_code'] ?? null, $address['countryCode'] ?? null, 'RU' ),
-			'region_name' => $this->first( $row['region_name'] ?? null, $address['region_name'] ?? null, $address['regionName'] ?? null, $location['region_name'] ?? null ),
+			'region_name' => $this->first( $row['region_name'] ?? null, $address['region'] ?? null, $address['region_name'] ?? null, $address['regionName'] ?? null, $location['region_name'] ?? null ),
 			'city_name' => $this->first( $row['city_name'] ?? null, $address['city_name'] ?? null, $address['cityName'] ?? null, $address['locality'] ?? null, $location['city_name'] ?? null ),
 			'latitude' => $this->first( $row['latitude'] ?? null, $row['lat'] ?? null, $coordinates['latitude'] ?? null, $coordinates['lat'] ?? null, $position['latitude'] ?? null ),
 			'longitude' => $this->first( $row['longitude'] ?? null, $row['lon'] ?? null, $row['lng'] ?? null, $coordinates['longitude'] ?? null, $coordinates['lon'] ?? null, $coordinates['lng'] ?? null, $position['longitude'] ?? null ),
@@ -128,20 +128,59 @@ final class YandexDeliveryPickupPointNormalizer {
 
 	/** @param array<string,mixed> $address */
 	private function address_to_string( array $address, mixed ...$fallbacks ): string {
+		$full_address = $this->clean_text( $address['full_address'] ?? $address['fullAddress'] ?? null );
+		if ( '' !== $full_address ) {
+			return $full_address;
+		}
+
 		foreach ( $fallbacks as $fallback ) {
-			if ( ! is_array( $fallback ) && ! is_object( $fallback ) && '' !== trim( (string) $fallback ) ) {
-				return trim( (string) $fallback );
+			if ( ! is_array( $fallback ) && ! is_object( $fallback ) ) {
+				$value = $this->clean_text( $fallback );
+				if ( '' !== $value ) {
+					return $value;
+				}
 			}
 		}
+
 		$parts = array();
-		foreach ( array( 'country', 'region_name', 'regionName', 'city_name', 'cityName', 'locality', 'street', 'house', 'building', 'full_address', 'formatted' ) as $key ) {
-			$value = trim( (string) ( $address[ $key ] ?? '' ) );
-			if ( '' !== $value ) {
+		foreach ( array( 'country', 'region', 'region_name', 'regionName', 'subRegion', 'sub_region', 'locality', 'street', 'house', 'building', 'housing' ) as $key ) {
+			$value = $this->clean_text( $address[ $key ] ?? null );
+			if ( '' === $value ) {
+				continue;
+			}
+			$last = end( $parts );
+			if ( false !== $last && $this->same_address_part( (string) $last, $value ) ) {
+				continue;
+			}
+			$duplicate = false;
+			foreach ( $parts as $part ) {
+				if ( $this->same_address_part( (string) $part, $value ) ) {
+					$duplicate = true;
+					break;
+				}
+			}
+			if ( ! $duplicate ) {
 				$parts[] = $value;
 			}
 		}
 
-		return implode( ', ', array_unique( $parts ) );
+		return implode( ', ', $parts );
+	}
+
+	private function clean_text( mixed $value ): string {
+		if ( null === $value || is_array( $value ) || is_object( $value ) ) {
+			return '';
+		}
+
+		return trim( preg_replace( '/\s+/u', ' ', (string) $value ) ?? (string) $value );
+	}
+
+	private function same_address_part( string $left, string $right ): bool {
+		return $this->lower_text( $left ) === $this->lower_text( $right );
+	}
+
+	private function lower_text( string $value ): string {
+		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
 	}
 
 	private function bool( mixed $value ): bool {
