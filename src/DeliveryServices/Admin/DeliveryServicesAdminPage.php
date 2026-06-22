@@ -16,6 +16,7 @@ use WallsShop\WDC\Carriers\Dpd\DpdSettings;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdDaDataDeliveryFallbackService;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyFtpClient;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyImportService;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointAutoSync;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointImportReport;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointImportService;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
@@ -105,7 +106,8 @@ final class DeliveryServicesAdminPage {
 		private ?DpdPickupPointImportService $dpd_pickup_importer = null,
 		private ?DpdCityResolver $dpd_city_resolver = null,
 		private ?LocationRepository $locations = null,
-		private ?DpdStatusMapping $dpd_status_mapping = null
+		private ?DpdStatusMapping $dpd_status_mapping = null,
+		private ?DpdPickupPointAutoSync $dpd_pickup_autosync = null
 	) {
 	}
 
@@ -221,7 +223,7 @@ final class DeliveryServicesAdminPage {
 
 		check_admin_referer( 'wdc_delivery_services' );
 		$action = sanitize_key( wp_unslash( $_POST['wdc_delivery_services_action'] ) );
-		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' ), true ) ) {
+		if ( in_array( $action, array( 'save', 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' ), true ) ) {
 			$id = isset( $_POST['id'] ) ? (int) $_POST['id'] : 0;
 			$data = match ( $action ) {
 				'save_main' => $this->sanitize_main_data(),
@@ -232,7 +234,7 @@ final class DeliveryServicesAdminPage {
 			if ( 'save_tariffs' === $action ) {
 				$data = array();
 			}
-			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' ), true ) ) {
+			if ( in_array( $action, array( 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' ), true ) ) {
 				$data = array();
 			}
 			if ( $id > 0 && array() !== $data ) {
@@ -492,6 +494,20 @@ final class DeliveryServicesAdminPage {
 				$this->dpd_settings->save_tariff_settings_from_admin( $_POST );
 				$this->dpd_settings->save_event_settings_from_admin( $_POST );
 			}
+			if ( 'save_dpd_pickup_autosync' === $action && $this->dpd_settings instanceof DpdSettings ) {
+				$this->dpd_settings->save_pickup_autosync_settings_from_admin( $_POST );
+				if ( $this->dpd_pickup_autosync instanceof DpdPickupPointAutoSync ) {
+					$this->dpd_pickup_autosync->reschedule();
+				}
+				$this->dpd_settings->save_pickup_action_result(
+					array(
+						'type' => 'success',
+						'title' => 'DPD ПВЗ autosync',
+						'message' => 'Настройки автоматического обновления ПВЗ сохранены.',
+						'details' => array( 'times' => $this->dpd_settings->pickup_autosync_times() ),
+					)
+				);
+			}
 			if ( in_array( $action, array( 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import' ), true ) && $this->dpd_settings instanceof DpdSettings && $this->dpd_pickup_importer instanceof DpdPickupPointImportService ) {
 				$report = match ( $action ) {
 					'run_dpd_pickup_parcel_shops_import' => $this->dpd_pickup_importer->import_parcel_shops(),
@@ -531,7 +547,7 @@ final class DeliveryServicesAdminPage {
 			}
 		}
 
-		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' ), true ) ) {
+		if ( in_array( $action, array( 'save_main', 'save_availability', 'save_calculation', 'save_tariffs', 'save_cdek_tariffs', 'bulk_cdek_tariffs', 'preview_cdek_tariffs_sync', 'confirm_cdek_tariffs_sync', 'save_dpd_runtime_tariffs', 'save_russian_post_pickup', 'run_russian_post_pickup_import', 'upload_russian_post_pickup_file_import', 'upload_russian_post_pickup_zip_import', 'reset_russian_post_pickup_import', 'save_api_credentials', 'save_shipments', 'save_status_mapping', 'save_cdek_statuses', 'save_dpd_statuses', 'save_cdek_settings', 'save_cdek_calculation', 'check_cdek_connection', 'save_dpd_settings', 'check_dpd_connection', 'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback', 'save_dpd_tariff_settings', 'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' ), true ) ) {
 			$service_key = sanitize_key( wp_unslash( $_POST['service_key'] ?? '' ) );
 			$tab = match ( $action ) {
 				'save_availability' => 'main',
@@ -547,7 +563,7 @@ final class DeliveryServicesAdminPage {
 				'save_dpd_settings', 'check_dpd_connection' => 'dpd_settings',
 				'save_dpd_geography_settings', 'run_dpd_geography_ftp_import', 'upload_dpd_geography_csv_import', 'reset_dpd_geography_import', 'check_dpd_geography', 'save_dpd_city_mapping', 'test_dpd_dadata_fallback' => 'dpd_geography',
 				'save_dpd_tariff_settings' => 'dpd_tariff',
-				'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' => 'dpd_pickup',
+				'save_dpd_pickup_autosync', 'run_dpd_pickup_parcel_shops_import', 'run_dpd_pickup_terminals_import', 'run_dpd_pickup_all_import', 'reset_dpd_pickup_result' => 'dpd_pickup',
 				'save_cdek_calculation' => 'calculation',
 				default => 'main',
 			};
@@ -1211,6 +1227,7 @@ final class DeliveryServicesAdminPage {
 				<tr><th scope="row"><?php echo esc_html__( 'parcel shops', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $counts['getParcelShops'] ?? 0 ) ); ?></td></tr>
 				<tr><th scope="row"><?php echo esc_html__( 'self-delivery terminals', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $counts['getTerminalsSelfDelivery2'] ?? 0 ) ); ?></td></tr>
 				<tr><th scope="row"><?php echo esc_html__( 'Последний импорт', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $last_report['finished_at'] ?? 'не выполнялся' ) ); ?></td></tr>
+				<tr><th scope="row"><?php echo esc_html__( 'Источник', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( $this->dpd_pickup_report_source_label( $last_report ) ); ?></td></tr>
 				<tr><th scope="row"><?php echo esc_html__( 'Результат', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( $this->dpd_pickup_report_summary( $last_report ) ); ?></td></tr>
 			</tbody>
 		</table>
@@ -1220,6 +1237,26 @@ final class DeliveryServicesAdminPage {
 			<?php $this->dpd_pickup_import_button( $service, 'run_dpd_pickup_all_import', __( 'Обновить все', 'walls-delivery-calc' ), 'button button-primary' ); ?>
 			<?php $this->dpd_pickup_import_button( $service, 'reset_dpd_pickup_result', __( 'Сбросить last result', 'walls-delivery-calc' ), 'button button-secondary' ); ?>
 		</p>
+		<hr>
+		<h3><?php echo esc_html__( 'Автоматическое обновление списка ПВЗ', 'walls-delivery-calc' ); ?></h3>
+		<form method="post" style="max-width: 860px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="wdc_delivery_services_action" value="save_dpd_pickup_autosync">
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<table class="form-table" role="presentation">
+				<tr>
+					<th scope="row"><?php echo esc_html__( 'Автоматическое обновление списка ПВЗ', 'walls-delivery-calc' ); ?></th>
+					<td>
+						<label><input type="checkbox" name="<?php echo esc_attr( DpdSettings::PICKUP_AUTOSYNC_ENABLED_KEY ); ?>" value="1" <?php checked( $this->dpd_settings->pickup_autosync_enabled() ); ?>> <?php echo esc_html__( 'Включить ежедневный импорт ПВЗ DPD', 'walls-delivery-calc' ); ?></label>
+					</td>
+				</tr>
+				<?php $this->dpd_pickup_autosync_time_row( DpdSettings::PICKUP_AUTOSYNC_TIME_1_KEY, __( 'Время обновления 1', 'walls-delivery-calc' ), $this->dpd_settings->pickup_autosync_time_1() ); ?>
+				<?php $this->dpd_pickup_autosync_time_row( DpdSettings::PICKUP_AUTOSYNC_TIME_2_KEY, __( 'Время обновления 2', 'walls-delivery-calc' ), $this->dpd_settings->pickup_autosync_time_2() ); ?>
+				<?php $this->dpd_pickup_autosync_time_row( DpdSettings::PICKUP_AUTOSYNC_TIME_3_KEY, __( 'Время обновления 3', 'walls-delivery-calc' ), $this->dpd_settings->pickup_autosync_time_3() ); ?>
+			</table>
+			<p class="description"><?php echo esc_html__( 'Время указывается по Москве (GMT+3). Можно выбрать от 0 до 3 запусков в день. Если время не выбрано, запуск не выполняется.', 'walls-delivery-calc' ); ?></p>
+			<p class="submit"><button class="button button-primary" type="submit"><?php echo esc_html__( 'Сохранить autosync ПВЗ', 'walls-delivery-calc' ); ?></button></p>
+		</form>
 		<hr>
 		<h3><?php echo esc_html__( 'Диагностика', 'walls-delivery-calc' ); ?></h3>
 		<form method="get">
@@ -1265,6 +1302,21 @@ final class DeliveryServicesAdminPage {
 		<?php
 	}
 
+	private function dpd_pickup_autosync_time_row( string $name, string $label, string $selected ): void {
+		?>
+		<tr>
+			<th scope="row"><?php echo esc_html( $label ); ?></th>
+			<td>
+				<select name="<?php echo esc_attr( $name ); ?>">
+					<?php foreach ( DpdSettings::pickup_autosync_time_options() as $value => $option_label ) : ?>
+						<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $selected, $value ); ?>><?php echo esc_html( $option_label ); ?></option>
+					<?php endforeach; ?>
+				</select>
+			</td>
+		</tr>
+		<?php
+	}
+
 	/**
 	 * @return array{terminal_code:string,city_id:string,city_name:string,rows:array<int,array<string,mixed>>}
 	 */
@@ -1297,6 +1349,21 @@ final class DeliveryServicesAdminPage {
 	/**
 	 * @param array<string,mixed> $report
 	 */
+	private function dpd_pickup_report_source_label( array $report ): string {
+		if ( array() === $report ) {
+			return 'нет данных';
+		}
+
+		$context = (string) ( $report['context'] ?? 'manual' );
+		$label = 'auto_cron' === $context ? 'автоматический' : 'ручной';
+		$source = (string) ( $report['source'] ?? '' );
+
+		return '' !== $source ? sprintf( '%s (%s)', $label, $source ) : $label;
+	}
+
+	/**
+	 * @param array<string,mixed> $report
+	 */
 	private function dpd_pickup_report_summary( array $report ): string {
 		if ( array() === $report ) {
 			return 'нет данных';
@@ -1304,7 +1371,7 @@ final class DeliveryServicesAdminPage {
 
 		return sprintf(
 			'%s: fetched=%d normalized=%d saved=%d skipped=%d inactive=%d errors=%d',
-			(string) ( $report['source'] ?? '' ),
+			(string) ( $report['status'] ?? ( $report['source'] ?? '' ) ),
 			(int) ( $report['fetched_count'] ?? 0 ),
 			(int) ( $report['normalized_count'] ?? 0 ),
 			(int) ( $report['saved_count'] ?? 0 ),

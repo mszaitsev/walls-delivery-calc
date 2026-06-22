@@ -1,6 +1,8 @@
 # WDC DPD Pickup Points
 
-Version: 0.62.0.
+Version: 0.71.0.
+
+0.71.0 update: DPD pickup points can now be refreshed automatically by WP-Cron. The DPD -> ПВЗ tab has a dedicated enable checkbox and three independent Moscow-time (GMT+3) 15-minute slots; cron calls the same `DpdPickupPointImportService::import_all()` path as the manual “Обновить все” button, stores context `auto_cron` in the last import report, and uses the same lock and safe no-wipe failure behavior. This is separate from DPD shipment status autosync. See `docs/wdc-dpd-pickup-autosync.md`.
 
 0.62.0 update: `DpdPickupPointService` now provides runtime `parcel_shop` terminal selection for DPD Parcels3 pricing.
 It uses only active `parcel_shop` rows, avoids duplicate `terminal_self_delivery` rows with the same `terminal_code`
@@ -114,7 +116,7 @@ This prevents an empty or unrecognized DPD response from wiping the local workin
 - `DPD pickup import returned no rows. Existing points were left unchanged.`
 - `DPD pickup import returned rows, but no valid points were normalized. Existing points were left unchanged.`
 
-The report contains `source`, `started_at`, `finished_at`, `fetched_count`, `normalized_count`, `saved_count`, `skipped_invalid`, `marked_inactive`, `errors` and `message`. The last report is stored in DPD settings as `dpd_last_pickup_import_report`.
+The report contains `source`, `started_at`, `finished_at`, `fetched_count`, `normalized_count`, `saved_count`, `skipped_invalid`, `marked_inactive`, `errors`, `message`, `context` and `status`. The last report is stored in DPD settings as `dpd_last_pickup_import_report`.
 
 ## Admin
 
@@ -122,7 +124,7 @@ Open:
 
 `WDC -> Службы доставки -> DPD -> DPD ПВЗ`
 
-The tab shows total active points, counts for `getParcelShops` and `getTerminalsSelfDelivery2`, last import date/result, manual import buttons and diagnostics.
+The tab shows total active points, counts for `getParcelShops` and `getTerminalsSelfDelivery2`, last import date/source/result, manual import buttons, DPD pickup autosync settings and diagnostics.
 
 Diagnostics can search by:
 

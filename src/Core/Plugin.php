@@ -38,6 +38,7 @@ use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyMatcher;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdGeographyStageRepository;
 use WallsShop\WDC\Carriers\Dpd\Geography\DpdLocationIndex;
 use WallsShop\WDC\Carriers\Dpd\Geography\WpDpdDaDataDeliveryClient;
+use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointAutoSync;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointImportService;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointNormalizer;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
@@ -288,7 +289,8 @@ final class Plugin {
 		$this->container->register( DpdDaDataDeliveryFallbackService::class, fn(): DpdDaDataDeliveryFallbackService => new DpdDaDataDeliveryFallbackService( $this->container->get( LocationRepository::class ), $this->container->get( LocationDeliveryCodeRepository::class ), $this->container->get( DpdDaDataDeliveryClientInterface::class ) ) );
 		$this->container->register( DpdPickupPointRepository::class, fn(): DpdPickupPointRepository => new DpdPickupPointRepository() );
 		$this->container->register( DpdPickupPointNormalizer::class, fn(): DpdPickupPointNormalizer => new DpdPickupPointNormalizer() );
-		$this->container->register( DpdPickupPointImportService::class, fn(): DpdPickupPointImportService => new DpdPickupPointImportService( $this->container->get( DpdApiClient::class ), $this->container->get( DpdPickupPointNormalizer::class ), $this->container->get( DpdPickupPointRepository::class ), $this->container->get( DpdSettings::class ) ) );
+		$this->container->register( DpdPickupPointImportService::class, fn(): DpdPickupPointImportService => new DpdPickupPointImportService( $this->container->get( DpdApiClient::class ), $this->container->get( DpdPickupPointNormalizer::class ), $this->container->get( DpdPickupPointRepository::class ), $this->container->get( DpdSettings::class ), $this->container->get( Logger::class ) ) );
+		$this->container->register( DpdPickupPointAutoSync::class, fn(): DpdPickupPointAutoSync => new DpdPickupPointAutoSync( $this->container->get( DpdSettings::class ), $this->container->get( DpdPickupPointImportService::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( DpdPickupPointService::class, fn(): DpdPickupPointService => new DpdPickupPointService( $this->container->get( DpdPickupPointRepository::class ), $this->container->get( LocationDeliveryCodeRepository::class ) ) );
 		$this->container->register( DpdParcelBuilder::class, fn(): DpdParcelBuilder => new DpdParcelBuilder( $this->container->get( DpdSettings::class ), $this->container->get( PackagingWeightCalculator::class ) ) );
 		$this->container->register( DpdTariffRequestBuilder::class, fn(): DpdTariffRequestBuilder => new DpdTariffRequestBuilder() );
@@ -614,7 +616,8 @@ final class Plugin {
 				$this->container->get( DpdPickupPointImportService::class ),
 				$this->container->get( DpdCityResolver::class ),
 				$this->container->get( LocationRepository::class ),
-				$this->container->get( DpdStatusMapping::class )
+				$this->container->get( DpdStatusMapping::class ),
+				$this->container->get( DpdPickupPointAutoSync::class )
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper() );
@@ -634,6 +637,7 @@ final class Plugin {
 
 		add_action( 'plugins_loaded', array( $this, 'boot_modules' ), 20 );
 		register_activation_hook( $this->environment->plugin_file(), array( $this, 'activate' ) );
+		register_deactivation_hook( $this->environment->plugin_file(), array( $this, 'deactivate' ) );
 		$this->container->get( DeliveryQuoteCacheManager::class )->register();
 		$this->container->get( ShippingMethodRegistrar::class )->register();
 		$this->container->get( CheckoutLocationAjax::class )->register();
@@ -667,6 +671,7 @@ final class Plugin {
 		}
 		$this->container->get( RussianPostPickupImporter::class )->register();
 		$this->container->get( ShipmentStatusAutoSyncCron::class )->register();
+		$this->container->get( DpdPickupPointAutoSync::class )->register();
 		add_action( 'rest_api_init', array( $this->container->get( PickupPointsRestController::class ), 'register' ) );
 		add_action( 'rest_api_init', array( $this->container->get( CheckoutPickupPointRestController::class ), 'register' ) );
 	}
@@ -686,5 +691,10 @@ final class Plugin {
 		$this->container->get( MigrationManager::class )->run();
 		$this->container->get( DeliveryServiceManager::class )->ensure_builtin_services();
 		$this->container->get( CalendarService::class )->ensure_initial_years();
+		$this->container->get( DpdPickupPointAutoSync::class )->activate();
+	}
+
+	public function deactivate(): void {
+		$this->container->get( DpdPickupPointAutoSync::class )->deactivate();
 	}
 }
