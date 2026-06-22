@@ -54,6 +54,8 @@ use WallsShop\WDC\Carriers\YandexDelivery\Api\WpYandexDeliveryHttpClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryConnectionDiagnosticService;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryHttpClientInterface;
+use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingRepository;
+use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingService;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointImportService;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointNormalizer;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointRepository;
@@ -290,6 +292,8 @@ final class Plugin {
 		$this->container->register( YandexDeliveryPickupPointNormalizer::class, fn(): YandexDeliveryPickupPointNormalizer => new YandexDeliveryPickupPointNormalizer() );
 		$this->container->register( YandexDeliveryPickupPointImportService::class, fn(): YandexDeliveryPickupPointImportService => new YandexDeliveryPickupPointImportService( $this->container->get( YandexDeliveryApiClient::class ), $this->container->get( YandexDeliveryPickupPointNormalizer::class ), $this->container->get( YandexDeliveryPickupPointRepository::class ), $this->container->get( YandexDeliverySettings::class ), $this->container->get( Logger::class ) ) );
 		$this->container->register( YandexDeliveryPickupPointService::class, fn(): YandexDeliveryPickupPointService => new YandexDeliveryPickupPointService( $this->container->get( YandexDeliveryPickupPointRepository::class ), $this->container->get( YandexDeliverySettings::class ) ) );
+		$this->container->register( YandexDeliveryGeoMappingRepository::class, fn(): YandexDeliveryGeoMappingRepository => new YandexDeliveryGeoMappingRepository() );
+		$this->container->register( YandexDeliveryGeoMappingService::class, fn(): YandexDeliveryGeoMappingService => new YandexDeliveryGeoMappingService( $this->container->get( LocationRepository::class ), $this->container->get( YandexDeliveryApiClient::class ), $this->container->get( YandexDeliveryGeoMappingRepository::class ) ) );
 		$this->container->register( DpdSoapClientInterface::class, fn(): DpdSoapClientInterface => new DpdSoapClient( $this->container->get( DpdSettings::class )->request_timeout() ) );
 		$this->container->register( DpdApiClient::class, fn(): DpdApiClient => new DpdApiClient( $this->container->get( DpdSettings::class ), $this->container->get( DpdSoapClientInterface::class ) ) );
 		$this->container->register( DpdDuplicateCityResolver::class, fn(): DpdDuplicateCityResolver => new DpdDuplicateCityResolver() );
@@ -639,7 +643,9 @@ final class Plugin {
 				$this->container->get( YandexDeliveryConnectionDiagnosticService::class ),
 				$this->container->get( YandexDeliveryPickupPointRepository::class ),
 				$this->container->get( YandexDeliveryPickupPointImportService::class ),
-				$this->container->get( YandexDeliveryPickupPointService::class )
+				$this->container->get( YandexDeliveryPickupPointService::class ),
+				$this->container->get( YandexDeliveryGeoMappingRepository::class ),
+				$this->container->get( YandexDeliveryGeoMappingService::class )
 			)
 		);
 		$this->container->register( OrderQuoteRequestMapper::class, fn(): OrderQuoteRequestMapper => new OrderQuoteRequestMapper() );
