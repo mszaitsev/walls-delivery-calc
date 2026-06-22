@@ -422,6 +422,9 @@ final class DeliveryServicesAdminPage {
 			if ( 'reset_yandex_delivery_pickup_result' === $action && $this->yandex_delivery_settings instanceof YandexDeliverySettings ) {
 				$this->yandex_delivery_settings->clear_pickup_action_result();
 				$this->yandex_delivery_settings->save_pickup_import_report( array() );
+				if ( $this->yandex_delivery_pickup_importer instanceof YandexDeliveryPickupPointImportService ) {
+					$this->yandex_delivery_pickup_importer->reset_lock();
+				}
 			}
 			if ( 'save_dpd_geography_settings' === $action && $this->dpd_settings instanceof DpdSettings ) {
 				$this->dpd_settings->save_geography_settings_from_admin( $_POST );
@@ -1161,7 +1164,7 @@ final class DeliveryServicesAdminPage {
 		</table>
 		<p>
 			<?php $this->yandex_delivery_pickup_button( $service, 'run_yandex_delivery_pickup_import', __( 'Импортировать точки Яндекс', 'walls-delivery-calc' ), 'button button-primary' ); ?>
-			<?php $this->yandex_delivery_pickup_button( $service, 'reset_yandex_delivery_pickup_result', __( 'Сбросить last result', 'walls-delivery-calc' ), 'button button-secondary' ); ?>
+			<?php $this->yandex_delivery_pickup_button( $service, 'reset_yandex_delivery_pickup_result', __( 'Сбросить результат и lock', 'walls-delivery-calc' ), 'button button-secondary' ); ?>
 		</p>
 		<hr>
 		<h3><?php echo esc_html__( 'Поиск', 'walls-delivery-calc' ); ?></h3>

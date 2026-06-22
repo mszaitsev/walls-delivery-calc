@@ -44,24 +44,35 @@ final class YandexDeliveryPickupPointImportService {
 
 		try {
 			$inactive = $this->repository->mark_all_inactive();
-			$responses = $this->download_all_pages();
-			$points = array();
 			$skipped = 0;
-			foreach ( $responses as $response ) {
-				$normalized = $this->normalizer->normalize_response( $response );
+			$page_token = '';
+			for ( $page = 0; $page < self::MAX_PAGES; ++$page ) {
+				$response = $this->api->pickupPointsList( $this->page_payload( $page_token ) );
+				$body = is_array( $response['body'] ?? null ) ? $response['body'] : array();
+				$normalized = $this->normalizer->normalize_response( $body );
 				$fetched += (int) $normalized['fetched_count'];
 				$skipped += (int) $normalized['skipped_invalid'];
-				$points = array_merge( $points, $normalized['points'] );
+				$page_points = is_array( $normalized['points'] ) ? $normalized['points'] : array();
+				$normalized_count += count( $page_points );
+				if ( array() !== $page_points ) {
+					$save = $this->repository->save_batch( $page_points, $started );
+					$saved += (int) $save['saved'];
+					$skipped += (int) $save['skipped_invalid'];
+				}
+				$page_token = $this->next_page_token( $body );
+				unset( $body, $normalized, $page_points, $response, $save );
+				if ( '' === $page_token ) {
+					break;
+				}
 			}
-			$normalized_count = count( $points );
 			if ( 0 === $fetched ) {
 				$errors[] = 'Yandex Delivery pickup import returned no rows.';
 			} elseif ( 0 === $normalized_count ) {
 				$errors[] = 'Yandex Delivery pickup import returned rows, but no valid points were normalized.';
+			} elseif ( 0 === $saved ) {
+				$errors[] = 'Yandex Delivery pickup import normalized rows, but no points were saved.';
 			} else {
-				$save = $this->repository->save_batch( $points, $started );
-				$saved = (int) $save['saved'];
-				$errors = array_merge( $errors, $this->skipped_errors( $skipped + (int) $save['skipped_invalid'] ) );
+				$errors = array_merge( $errors, $this->skipped_errors( $skipped ) );
 				$this->repository->activate_imported_points( $started );
 			}
 		} catch ( YandexDeliveryApiException $exception ) {
@@ -94,28 +105,23 @@ final class YandexDeliveryPickupPointImportService {
 		return $report;
 	}
 
-	/** @return array<int,array<string,mixed>> */
-	private function download_all_pages(): array {
-		$responses = array();
-		$page_token = '';
-		for ( $page = 0; $page < self::MAX_PAGES; ++$page ) {
-			$payload = array(
-				'type' => YandexDeliveryPickupPointNormalizer::TYPE_PICKUP_POINT,
-				'limit' => self::PAGE_SIZE,
-			);
-			if ( '' !== $page_token ) {
-				$payload['page_token'] = $page_token;
-			}
-			$response = $this->api->pickupPointsList( $payload );
-			$body = is_array( $response['body'] ?? null ) ? $response['body'] : array();
-			$responses[] = $body;
-			$page_token = $this->next_page_token( $body );
-			if ( '' === $page_token ) {
-				break;
-			}
+	public function reset_lock(): void {
+		if ( function_exists( 'delete_option' ) ) {
+			delete_option( self::LOCK_OPTION );
+		}
+	}
+
+	/** @return array<string,mixed> */
+	private function page_payload( string $page_token ): array {
+		$payload = array(
+			'type' => YandexDeliveryPickupPointNormalizer::TYPE_PICKUP_POINT,
+			'limit' => self::PAGE_SIZE,
+		);
+		if ( '' !== $page_token ) {
+			$payload['page_token'] = $page_token;
 		}
 
-		return $responses;
+		return $payload;
 	}
 
 	/** @param array<string,mixed> $body */

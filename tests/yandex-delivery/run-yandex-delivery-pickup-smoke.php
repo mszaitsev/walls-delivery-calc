@@ -83,11 +83,15 @@ $GLOBALS['wpdb'] = new wpdb();
 
 $migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0032_create_yandex_delivery_pickup_points_table.php' );
 $repository_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointRepository.php' );
+$import_service_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointImportService.php' );
 yd_pickup_assert( str_contains( $migration_source, 'YandexDeliveryPickupPointRepository' ) && str_contains( $repository_source, 'wdc_yandex_delivery_pickup_points' ), 'Migration must create Yandex pickup points table through the repository.' );
 $schema_start = strpos( $repository_source, 'public function create_schema_if_needed' );
 $schema_end = strpos( $repository_source, 'public function mark_all_inactive' );
 $schema_block = false !== $schema_start && false !== $schema_end ? substr( $repository_source, $schema_start, $schema_end - $schema_start ) : '';
 yd_pickup_assert( '' !== $schema_block && str_contains( $repository_source, 'function can_create_schema' ) && ! str_contains( $schema_block, 'has_test_rows' ), 'create_schema_if_needed must not use has_test_rows as its early return condition.' );
+yd_pickup_assert( ! str_contains( $import_service_source, '$responses =' ), 'Import service must not collect all API responses in memory.' );
+yd_pickup_assert( ! str_contains( $import_service_source, 'download_all_pages()' ), 'Import service must not use a download_all_pages accumulator.' );
+yd_pickup_assert( ! str_contains( $import_service_source, '$points = array_merge( $points' ), 'Import service must not merge every page into a global points array.' );
 foreach ( array( 'platform_station_id', 'operator_id', 'operator_name', 'available_for_dropoff', 'available_for_c2c_dropoff', 'is_yandex_branded', 'raw_json', 'imported_at' ) as $column ) {
 	yd_pickup_assert( str_contains( $repository_source, $column ), 'Repository schema must include column ' . $column . '.' );
 }
@@ -173,15 +177,23 @@ $http = new YdPickupFakeHttp(
 $importer = new YandexDeliveryPickupPointImportService( new YandexDeliveryApiClient( $settings, $http ), $normalizer, new YandexDeliveryPickupPointRepository( $GLOBALS['wpdb'] ), $settings );
 $report = $importer->import_all();
 yd_pickup_assert( 'success' === $report['status'] && 2 === $report['fetched'] && 2 === $report['normalized'] && 2 === $report['saved'] && 1 === $report['inactive'], 'Import statistics must include fetched/normalized/saved/inactive counts.' );
-yd_pickup_assert( 2 === count( $http->calls ) && array( 'type' => 'pickup_point', 'limit' => 1000 ) === json_decode( (string) $http->calls[0]['args']['body'], true ), 'Importer must call pickup-points/list with type=pickup_point and pagination payload.' );
+yd_pickup_assert( 2 === count( $http->calls ), 'Importer must request each pickup-points/list page separately.' );
+$first_payload = json_decode( (string) $http->calls[0]['args']['body'], true );
+$second_payload = json_decode( (string) $http->calls[1]['args']['body'], true );
+yd_pickup_assert( array( 'type' => 'pickup_point', 'limit' => 1000 ) === $first_payload && ! array_key_exists( 'page_token', $first_payload ), 'First importer request must not include page_token.' );
+yd_pickup_assert( 'page-2' === (string) ( $second_payload['page_token'] ?? '' ), 'Second importer request must include page_token=page-2.' );
 yd_pickup_assert( 2 === ( new YandexDeliveryPickupPointRepository( $GLOBALS['wpdb'] ) )->count_active(), 'Importer must activate imported points and keep old points inactive.' );
 yd_pickup_assert( null !== ( new YandexDeliveryPickupPointRepository( $GLOBALS['wpdb'] ) )->find_by_platform_station_id( 'api-1' ), 'Importer must not drop points with available_for_dropoff=false.' );
 yd_pickup_assert( 'success' === (string) ( $settings->last_pickup_import_report()['status'] ?? '' ), 'Import service must store last import report.' );
+$GLOBALS['wdc_yandex_delivery_pickup_options']['wdc_yandex_delivery_pickup_import_lock'] = array( 'token' => 'stuck', 'expires' => time() + 3600 );
+$importer->reset_lock();
+yd_pickup_assert( ! isset( $GLOBALS['wdc_yandex_delivery_pickup_options']['wdc_yandex_delivery_pickup_import_lock'] ), 'Import reset_lock must delete a running pickup import lock regardless of TTL.' );
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 yd_pickup_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_pickup'] = 'ПВЗ / точки сдачи';" ), 'Admin page must register Yandex pickup tab.' );
 yd_pickup_assert( str_contains( $admin_source, 'run_yandex_delivery_pickup_import' ) && str_contains( $admin_source, 'Импортировать точки Яндекс' ), 'Admin page must expose manual Yandex pickup import button.' );
+yd_pickup_assert( str_contains( $admin_source, 'reset_lock()' ) && str_contains( $admin_source, 'Сбросить результат и lock' ), 'Admin reset action must clear Yandex pickup report and import lock.' );
 yd_pickup_assert( ! preg_match( '/yandex_delivery.*(cron|autosync)|YandexDelivery.*(Cron|AutoSync)/i', $plugin_source ), 'Yandex pickup stage must not register cron/autosync.' );
 yd_pickup_assert( ! str_contains( $plugin_source, 'YandexDeliveryQuoteCarrier' ) && ! str_contains( $plugin_source, 'offers/create' ), 'Yandex pickup stage must not add checkout quote or shipment creation.' );
 
