@@ -1,6 +1,6 @@
 # WDC Yandex Delivery Other-Day Integration
 
-Status: API audit and architecture plan. PHP implementation is intentionally not included in this step.
+Status: Phase 1 foundation/API/settings implemented in 0.72.0; pickup-point storage/import, checkout, order recalculation and shipments remain planned.
 
 Date: 2026-06-22.
 
@@ -721,6 +721,20 @@ docs/wdc-yandex-delivery-other-day-integration.md
 - redacted diagnostics;
 - fake-client smoke tests;
 - optional explicit live probe using configured credentials only.
+
+
+### 0.72.0 implementation note
+
+Phase 1 is implemented as infrastructure only:
+
+- built-in service `yandex_delivery` / `Яндекс Доставка`, RU-only, disabled by default and sorted after DPD;
+- admin tab `Данные для входа` with active environment, encrypted test/production Bearer tokens, test/production source `platform_station_id`, timeout, debug and last connection-check fields;
+- replaceable HTTP client plus JSON API client for `POST /api/b2b/platform/pickup-points/list`;
+- explicit connection diagnostic that succeeds only for a found `pickup_point` with `available_for_dropoff=true`;
+- sanitized diagnostics/exceptions/log-safe payloads without Bearer token, phones, email or full address;
+- smoke coverage in `tests/yandex-delivery/run-yandex-delivery-foundation-smoke.php`.
+
+Still intentionally not implemented in 0.72.0: pickup-point table/import, checkout rates, order-admin recalculation, shipment adapter/actions, `offers/create`, `offers/confirm`, cancellation, statuses/autosync, documents and any Yandex-specific cron.
 
 ### Phase 2 — pickup/dropoff points
 
