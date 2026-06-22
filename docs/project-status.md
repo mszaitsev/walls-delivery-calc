@@ -1,3 +1,15 @@
+0.76.1 note: fixed Yandex Delivery geo scorer DI wiring. `YandexDeliveryGeoMatchScorer` is now registered in `Plugin.php` and passed explicitly into `YandexDeliveryGeoMappingService`; the service no longer fallback-constructs its scorer dependency. No new functional stage was added.
+
+0.76.0 note: added Smart Geo Match Scoring for Yandex Delivery geo_id mapping. `YandexDeliveryGeoMatchScorer` scores location/detect candidates with normalized locality/region matching, noisy/foreign candidate downranking, auto-primary thresholds, and raw `variant` + `scoring` diagnostics; the admin table now shows compact scoring diagnostics. Multiple geo_id for large cities remains a working hypothesis to recheck later against pickup-points/list and the completed mapping database. No checkout, pickup selection, full Russia import or mass 160k mapping was added.
+
+0.75.3 note: fixed Yandex Delivery geo_id live-test issues. `location/detect` variants with string `address` now save that text as fallback locality when no structured locality exists, and the geo detect admin notice now stores compact details instead of full location/mappings payloads. No new Yandex functional stage was added.
+
+0.75.2 note: fixed Yandex Delivery geo_id admin tab DI. `DeliveryServicesAdminPage` now promotes the Yandex geo mapping repository and service passed by `Plugin.php`, so the `Yandex geo_id` tab receives non-null dependencies instead of returning at the guard. No new Yandex functional stage was added.
+
+0.75.1 note: fixed Yandex Delivery geo mapping review issues. `yandex_geo_id` is now nullable for `not_found` and `error` rows, repository saves use deterministic upsert semantics instead of repeated live inserts, and failed `location/detect` calls preserve existing working mappings while adding a nullable error diagnostic row. No new Yandex functional stage was added.
+
+0.75.0 note: added Yandex Delivery geo_id mapping foundation. `database/migrations/0033_create_yandex_delivery_geo_mappings_table.php` creates `wdc_yandex_delivery_geo_mappings` for 1 WDC `location_id` to many Yandex `geo_id` rows with locality/region/source/status/confidence/primary/raw JSON. `src/Carriers/YandexDelivery/Geo/*` adds status constants, repository CRUD/statistics and a `location/detect` service that builds search strings from existing `LocationRepository`/`Location` models, saves `mapped`, `multiple_matches`, `not_found`, `manual` and `error` rows, and keeps `wp_wdc_location_delivery_codes` untouched. The Yandex admin page now has tabs `Данные для входа`, `ПВЗ / точки сдачи`, `Yandex geo_id` with single-location detect, location search, result table, primary selection and mapping statistics. Full Russia pickup import, checkout, pricing calculator, pickup selection, maps and shipments remain out of scope. Control figures for later full Russia pickup import are 35222 pickup points and 12605 dropoff points.
+
 0.74.2 note: Yandex Delivery pickup import no longer sends unsupported limit/page_token pagination fields. Until WDC has a location-to-Yandex-geo_id model, manual AJAX import is temporarily limited to Moscow with integer geo_id=213 and reports mode=geo_id_fixed, geo_id and geo_label.
 
 0.74.1 note: Yandex Delivery pickup AJAX import now shows a recovery hint on browser-side AJAX errors/timeouts, keeps the reset button available and re-enables the start button so admins know to reset lock or retry after an interrupted step.
@@ -319,7 +331,7 @@ does not add DPD status API polling, cron/sync, shipment updates, live create, l
 | Rule Engine | done | 88% | Conditions/groups, audit, price/days mutations, comments, service rules, simulation and packaging tab. |
 | International Shipping | partial | 75% | Russian Post international rates/country mapping/fallback work; no shipment creation/tracking/documents for international flow. |
 | CDEK Carrier Foundation | partial | 38% | `cdek` service metadata, admin settings, separate test/production encrypted credentials, environment switch, OAuth client/cache and connection check exist; runtime rates, pickup points, shipments, statuses, print forms and webhooks are deferred. |
-| Future Carriers | partial | 15% | DPD has quote-only checkout runtime plus local pickup-point foundation; Yandex Delivery, PEK, Energia, Aerogruz and Jet have no runtime adapters. |
+| Future Carriers | partial | 18% | DPD has quote-only checkout runtime plus local pickup-point foundation; Yandex Delivery has API/settings, pickup storage/import foundation and WDC location_id -> Yandex geo_id mapping foundation, but no runtime adapter; PEK, Energia, Aerogruz and Jet have no runtime adapters. |
 | Operations / Monitoring | partial | 50% | Logger, diagnostics pages and autosync diagnostics exist; no production dashboard/rotation strategy. |
 | Documentation | partial | 78% | Profile docs cover the completed order delivery recalculation stage and current CDEK-oriented roadmap; older historical notes remain as changelog context. |
 
@@ -327,7 +339,7 @@ does not add DPD status API polling, cron/sync, shipment updates, live create, l
 
 ### Platform, Data And Checkout
 
-- Plugin entrypoint and `WDC_VERSION` are updated to `0.59.0`.
+- Plugin entrypoint and `WDC_VERSION` are updated to `0.75.0`.
 - `src/Core` wires runtime environment, autoloader, DI container, feature flags, requirements checks, plugin hooks and activation.
 - `src/Infrastructure` provides settings, logging/redaction, encryption, Action Scheduler/WP Cron wrapper and migration manager.
 - `database/migrations` contains the active schema for calendar, locations, GAR import, rules, delivery services, Russian Post pickup points and unified Russian Post domestic service.

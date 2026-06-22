@@ -6,6 +6,7 @@ namespace WallsShop\WDC\Carriers\YandexDelivery;
 defined( 'ABSPATH' ) || exit;
 
 final class YandexDeliveryEndpoints {
+	public const LOCATION_DETECT_PATH = '/api/b2b/platform/location/detect';
 	public const PICKUP_POINTS_LIST_PATH = '/api/b2b/platform/pickup-points/list';
 
 	private const TEST_HOST = 'https://b2b.taxi.tst.yandex.net';

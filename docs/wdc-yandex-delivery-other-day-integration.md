@@ -762,6 +762,37 @@ Still intentionally not implemented in 0.73.0: checkout rates, pickup map/select
 
 
 
+### 0.75.0 geo_id mapping foundation note
+
+This stage adds only the WDC `location_id` -> Yandex `geo_id` mapping layer needed before pricing, pickup filtering and checkout pickup selection.
+
+Implemented:
+
+- migration `0033_create_yandex_delivery_geo_mappings_table.php` creates `wdc_yandex_delivery_geo_mappings`;
+- storage supports one WDC `location_id` with multiple Yandex `geo_id` rows and an explicit primary row;
+- statuses are `mapped`, `multiple_matches`, `not_found`, `manual` and `error`;
+- `YandexDeliveryGeoMappingService` builds location search strings from existing WDC `LocationRepository`/`Location` models, calls `POST /api/b2b/platform/location/detect`, normalizes variants and saves mappings;
+- admin tab order for Yandex Delivery is now `Данные для входа`, `ПВЗ / точки сдачи`, `Yandex geo_id`;
+- the geo tab can search/select a WDC location, run one `location/detect`, display `geo_id`, locality, region, confidence and status, and mark a mapping as primary.
+
+The mapping intentionally does not use `wp_wdc_location_delivery_codes`; that table remains DPD-specific in shape (`location_id`, `dpd_city_id`, `updated_at`) and cannot represent one WDC location mapped to several Yandex `geo_id` values.
+
+Confidence is deterministic and intentionally simple for this foundation:
+
+- `100.00` when Yandex locality and region match the WDC location;
+- `70.00` when only locality matches;
+- `40.00` for multiple matches or weak matches.
+
+Still intentionally not implemented in 0.75.0: full Russia pickup import, import of all WDC locations, checkout, pricing calculator, pickup selection, maps, shipments, statuses, documents, cron or autosync.
+
+### Контрольное число ПВЗ Яндекс.Доставки
+
+Live API checks for the full Russia `pickup-points/list` response showed:
+
+- `35222` pickup points;
+- `12605` dropoff points.
+
+After a later full Russia import is implemented, the local database should be close to these values. If the final count is substantially lower, return to the analysis of multiple Yandex `geo_id` values for large cities.
 ### 0.74.2 fixed geo_id import note
 
 Live testing showed `pickup-points/list` ignores `limit` and does not provide usable page tokens, returning the full Russia dataset in one response. The current manual AJAX import is therefore temporarily constrained to `type=pickup_point` with integer `geo_id=213` (`Москва`) and stores `mode=geo_id_fixed`, `geo_id` and `geo_label` in state/report. Full Russia import remains a later phase after WDC location records can be mapped to Yandex `geo_id` values.
@@ -888,3 +919,19 @@ Use only after this plan is approved.
 - checkout и order-admin recalculation должны идти через CheckoutOrchestrator
 - статусы должны идти через YandexDeliveryStatusMapping -> DeliveryStatus -> ShipmentOrderStatusMappingService
 ```
+
+## Yandex geo_id scoring
+
+`location/detect` can return many candidates that are not valid geo_id values for the same WDC location. Examples include nearby settlements, cottage settlements, garden associations, foreign names that share the same text, and other weak textual matches.
+
+Multiple geo_id for a large city is a working hypothesis from Yandex FAQ. It must be rechecked later against real pickup-points/list results and the completed mapping database. Do not treat every additional location/detect variant as a valid geo_id for the same WDC location.
+
+Practical scoring rules for the current stage:
+
+- exact locality plus matching region is high confidence and may be auto-primary;
+- exact locality without verifiable region is high but slightly less certain;
+- noisy variants that only contain the WDC locality as a token or substring stay low confidence;
+- foreign country hints are low confidence even when locality text matches;
+- additional candidates such as Парголово/Шушары/Колпино for Санкт-Петербург are stored as candidates, but are treated as separate localities/territories unless they match the WDC location.
+
+The scorer is intended to prepare future automation for 160k locations, but ambiguous cases still require manual confirmation. This stage does not add checkout, pricing calculator integration, pickup-point selection, full Russia pickup import, or mass mapping.
