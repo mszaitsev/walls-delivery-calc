@@ -172,9 +172,10 @@ foreach ( array( 'wdc_yandex_delivery_geo_mapping_runner_start', 'wdc_yandex_del
 }
 yd_geo_runner_assert( str_contains( $admin_source, 'Сейчас выполняется массовый маппинг. Ручная обработка временно заблокирована.' ) && str_contains( $admin_source, '$this->yandex_delivery_geo_runner->is_running()' ), 'Admin POST/UI must block manual mapping while runner is running.' );
 yd_geo_runner_assert( str_contains( $admin_source, 'is_technical_error_geo_id( $row_geo_id )' ) && ! str_contains( $admin_source, 'yandex_delivery_geo_batch_limit' ) && ! str_contains( $admin_source, 'yandex_delivery_geo_batch_size' ), 'Admin UI must hide primary action for marker and remove legacy limit/batch_size fields.' );
+yd_geo_runner_assert( str_contains( $admin_source, "'worker_count' => 'worker_count'" ) && str_contains( $admin_source, "'batch_size' => 'batch_size'" ), 'Admin runner state table must show worker_count next to batch_size.' );
 yd_geo_runner_assert( str_contains( $plugin_source, 'YandexDeliveryGeoMappingRunnerService::class' ), 'Plugin must register runner service.' );
 yd_geo_runner_assert( str_contains( $js_source, 'workerLoop(workerId)' ) && str_contains( $js_source, 'activeWorkers' ) && str_contains( $js_source, 'workerCount()' ) && ! str_contains( $js_source, 'function loop()' ), 'Runner JS must run bounded parallel worker loops instead of a single worker loop.' );
-yd_geo_runner_assert( str_contains( $version_source, '0.87.0' ), 'Plugin version must be 0.87.0.' );
+yd_geo_runner_assert( str_contains( $version_source, '0.87.1' ), 'Plugin version must be 0.87.1.' );
 foreach ( array( 'CheckoutOrchestrator', 'pricing', 'pickupPointsList', 'YandexDeliveryPickupPointImportService' ) as $forbidden ) {
 	yd_geo_runner_assert( ! str_contains( $runner_source, $forbidden ), 'Runner must not touch checkout/pricing/PVZ import code: ' . $forbidden );
 }

@@ -269,6 +269,6 @@ yd_pickup_assert( str_contains( $js_source, 'var originalMessage = message' ) &&
 yd_pickup_assert( str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_start' ) && str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_step' ) && str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_reset' ) && str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_status' ), 'Admin page must register Yandex pickup AJAX import actions.' );
 yd_pickup_assert( ! preg_match( '/yandex_delivery.*(cron|autosync)|YandexDelivery.*(Cron|AutoSync)/i', $plugin_source ), 'Yandex pickup stage must not register cron/autosync.' );
 yd_pickup_assert( ! str_contains( $plugin_source, 'YandexDeliveryQuoteCarrier' ) && ! str_contains( $plugin_source, 'offers/create' ), 'Yandex pickup stage must not add checkout quote or shipment creation.' );
-yd_pickup_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/walls-delivery-calc.php' ), '0.87.0' ), 'Plugin version must be 0.87.0.' );
+yd_pickup_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/walls-delivery-calc.php' ), '0.87.1' ), 'Plugin version must be 0.87.1.' );
 
 echo "Yandex Delivery pickup points smoke test passed.\n";

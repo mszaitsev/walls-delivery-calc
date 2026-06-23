@@ -1735,6 +1735,7 @@ final class DeliveryServicesAdminPage {
 			'total_estimated' => 'total_estimated',
 			'updated_at' => 'updated_at',
 			'message' => 'message',
+			'worker_count' => 'worker_count',
 			'batch_size' => 'batch_size',
 		);
 		?>
