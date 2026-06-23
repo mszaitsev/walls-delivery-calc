@@ -1473,21 +1473,49 @@ final class LocationRepository {
 	/**
 	 * @return array<int,Location>
 	 */
-	public function find_batch_after_id( int $last_id, int $limit = 500 ): array {
+	public function find_batch_after_id( int $after_id, int $limit = 500, string $country_code = 'RU', bool $require_display_name = false ): array {
+		$after_id = max( 0, $after_id );
 		$limit = max( 1, min( 1000, $limit ) );
+		$country_code = strtoupper( trim( $country_code ) );
 		if ( $this->has_test_location_rows() ) {
-			$rows = array_values( array_filter( $this->test_location_rows(), static fn( array $row ): bool => (int) ( $row['id'] ?? 0 ) > $last_id ) );
+			$rows = array_values(
+				array_filter(
+					$this->test_location_rows(),
+					static function ( array $row ) use ( $after_id, $country_code, $require_display_name ): bool {
+						if ( (int) ( $row['id'] ?? 0 ) <= $after_id ) {
+							return false;
+						}
+						if ( '' !== $country_code && strtoupper( (string) ( $row['country_code'] ?? '' ) ) !== $country_code ) {
+							return false;
+						}
+						if ( $require_display_name && '' === trim( (string) ( $row['display_name'] ?? '' ) ) ) {
+							return false;
+						}
+						return true;
+					}
+				)
+			);
 			usort( $rows, static fn( array $a, array $b ): int => (int) ( $a['id'] ?? 0 ) <=> (int) ( $b['id'] ?? 0 ) );
 			return $this->rows_to_locations( array_slice( $rows, 0, $limit ) );
 		}
 
+		$where = array( 'id > %d' );
+		$args = array( $after_id );
+		if ( '' !== $country_code ) {
+			$where[] = 'country_code = %s';
+			$args[] = $country_code;
+		}
+		if ( $require_display_name ) {
+			$where[] = "display_name IS NOT NULL AND TRIM(display_name) != ''";
+		}
+		$args[] = $limit;
+
 		$rows = $this->wpdb->get_results(
-			$this->wpdb->prepare( "SELECT * FROM {$this->table_name()} WHERE id > %d ORDER BY id ASC LIMIT %d", $last_id, $limit ),
+			$this->wpdb->prepare( 'SELECT * FROM ' . $this->table_name() . ' WHERE ' . implode( ' AND ', $where ) . ' ORDER BY id ASC LIMIT %d', ...$args ),
 			ARRAY_A
 		);
 		return $this->rows_to_locations( is_array( $rows ) ? $rows : array() );
 	}
-
 	public function update_display_fields( Location $location, string $display_name ): bool {
 		if ( null === $location->id || $location->id <= 0 ) {
 			return false;

@@ -955,3 +955,21 @@ Default production policy is `ambiguous_only`: when auto-primary is confident (`
 `primary_only` is reserved for stricter storage where only the primary or best diagnostic row is kept. `all` is a debug/manual-analysis policy that stores every candidate even when a confident primary exists. The `all` mode is not intended for future 160000-location mass mapping because unrelated candidates would inflate `wdc_yandex_delivery_geo_mappings`.
 
 This policy keeps `multiple_matches` rows diagnostic: they are useful for admin review, but they are not valid delivery mappings unless a human later marks one as primary/manual.
+
+## Yandex Geo Mapping Batch Builder
+
+0.79.0 adds only an experimental batch builder for quality analysis of the existing WDC `location_id` -> Yandex `geo_id` mapping flow.
+
+The batch service stores state in option `wdc_yandex_delivery_geo_mapping_batch_state`, not in a new table. It processes short batches of RU locations with non-empty `display_name`, sorted by `id ASC` and `id > last_location_id`. Each location is handled through `YandexDeliveryGeoMappingService::detect_for_location_id()`, so query construction, `location/detect`, region-aware scoring, auto-primary and candidate storage policy stay in one existing path.
+
+Statistics are interpreted as:
+
+- `mapped`: saved mappings contain `is_primary=1`;
+- `ambiguous`: saved mappings exist without primary and status is `multiple_matches`;
+- `not_found`: status is `not_found`;
+- `errors`: status is `error` or an exception was caught;
+- `skipped_existing`: a primary mapping already existed before processing.
+
+Recommended first live run: `limit=1000`, `batch_size=25`. Evaluate `mapped / ambiguous / not_found / errors`, confidence buckets and `errors_last` before increasing scope. Do not run the full 160000 WDC locations yet.
+
+Still intentionally not implemented in this stage: checkout, pricing-calculator, pickup-point selection, map, full Russia PVZ import, coordinate fallback through `pickup-points/list`, shipments, statuses, documents, cron or autosync.
