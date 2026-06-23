@@ -76,10 +76,14 @@ final class YandexDeliveryGeoMatchScorer {
 		}
 
 		$type_match = '' !== $wdc_place['type'] && '' !== $candidate_place['type'] && $wdc_place['type'] === $candidate_place['type'];
+		$type_equivalent = $type_match && '' !== $wdc_place['type_text'] && '' !== $candidate_place['type_text'] && $wdc_place['type_text'] !== $candidate_place['type_text'];
 		$type_mismatch = '' !== $wdc_place['type'] && '' !== $candidate_place['type'] && $wdc_place['type'] !== $candidate_place['type'];
 		if ( $type_match ) {
 			$components['type'] = 5.0;
 			$matched_by[] = 'type_match';
+			if ( $type_equivalent ) {
+				$matched_by[] = 'type_equivalent';
+			}
 		} elseif ( $type_mismatch ) {
 			$matched_by[] = 'type_mismatch';
 		}
@@ -246,21 +250,23 @@ final class YandexDeliveryGeoMatchScorer {
 		return ! $locality_exact && (bool) preg_match( '/(^|\s)(сельсовет|муниципальный\s+округ|городской\s+округ)($|\s)/u', $full );
 	}
 
-	/** @return array{name:string,type:string} */
+	/** @return array{name:string,type:string,type_text:string} */
 	private function split_typed_name( string $type, string $name ): array {
 		$canonical_type = $this->canonical_type( $type );
+		$type_text = '' !== $canonical_type ? $this->normalize_common( $type ) : '';
 		$name = trim( $name );
 		$normalized = $this->normalize_common( $name );
 		$type_patterns = $this->type_patterns();
 		foreach ( $type_patterns as $pattern => $canonical ) {
-			if ( preg_match( '/^' . $pattern . '\s+/u', $normalized ) ) {
+			if ( preg_match( '/^(' . $pattern . ')\s+/u', $normalized, $matches ) ) {
 				$canonical_type = '' !== $canonical_type ? $canonical_type : $canonical;
+				$type_text = '' !== $type_text ? $type_text : (string) ( $matches[1] ?? '' );
 				$normalized = preg_replace( '/^' . $pattern . '\s+/u', '', $normalized ) ?? $normalized;
 				break;
 			}
 		}
 
-		return array( 'name' => $normalized, 'type' => $canonical_type );
+		return array( 'name' => $normalized, 'type' => $canonical_type, 'type_text' => $type_text );
 	}
 
 	private function canonical_type( string $type ): string {
@@ -277,8 +283,9 @@ final class YandexDeliveryGeoMatchScorer {
 	/** @return array<string,string> */
 	private function type_patterns(): array {
 		return array(
+			'поселок\s+городского\s+типа|пгт' => 'urban_settlement',
 			'рабочий\s+поселок|рп' => 'work_settlement',
-			'поселок|посёлок|п' => 'settlement',
+			'поселок|пос|п' => 'settlement',
 			'город|г' => 'city',
 			'село|с' => 'selo',
 			'деревня|д' => 'village',
@@ -293,7 +300,7 @@ final class YandexDeliveryGeoMatchScorer {
 
 	private function normalize_name_text( string $value ): string {
 		$value = $this->normalize_common( $value );
-		$value = preg_replace( '/(^|\s)(рабочий\s+поселок|город|село|деревня|поселок|посёлок|хутор|станица|аул|слобода|снт|кп|рп|ст|сл|г|с|д|п|х)($|\s)/u', ' ', $value ) ?? $value;
+		$value = preg_replace( '/(^|\s)(поселок\s+городского\s+типа|рабочий\s+поселок|город|село|деревня|поселок|хутор|станица|аул|слобода|снт|кп|пгт|пос|рп|ст|сл|г|с|д|п|х)($|\s)/u', ' ', $value ) ?? $value;
 		$value = preg_replace( '/\s+/u', ' ', trim( $value ) );
 
 		return is_string( $value ) ? $value : '';
@@ -303,7 +310,7 @@ final class YandexDeliveryGeoMatchScorer {
 		$value = str_replace( array( 'Ё', 'ё' ), array( 'Е', 'е' ), $value );
 		$value = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
 		$value = str_replace( array( '(', ')', '.', ';', ':', '/', '\\', '-' ), ' ', $value );
-		$value = preg_replace( '/(^|\s)(рабочий\s+поселок|город|село|деревня|поселок|посёлок|хутор|станица|аул|слобода|снт|кп|рп|ст|сл|г|с|д|п|х)($|\s)/u', ' ', $value ) ?? $value;
+		$value = preg_replace( '/(^|\s)(поселок\s+городского\s+типа|рабочий\s+поселок|город|село|деревня|поселок|хутор|станица|аул|слобода|снт|кп|пгт|пос|рп|ст|сл|г|с|д|п|х)($|\s)/u', ' ', $value ) ?? $value;
 		$value = preg_replace( '/\s*,\s*/u', ',', $value ) ?? $value;
 		$value = preg_replace( '/\s+/u', ' ', trim( $value ) );
 
@@ -312,10 +319,26 @@ final class YandexDeliveryGeoMatchScorer {
 
 	private function normalize_context_text( string $value ): string {
 		$value = $this->normalize_common( $value );
-		$value = preg_replace( '/\b(муниципальный\s+округ|городской\s+округ|район|р\s*н|область|обл|республика|респ|край)\b/u', ' ', $value ) ?? $value;
+		foreach ( $this->admin_context_patterns() as $pattern => $canonical ) {
+			$value = preg_replace( '/(^|\s)(' . $pattern . ')($|\s)/u', ' ' . $canonical . ' ', $value ) ?? $value;
+		}
+		$value = preg_replace( '/\b(муниципальный\s+округ|городской\s+округ|автономный\s+округ|район|область|республика|край)\b/u', ' ', $value ) ?? $value;
 		$value = preg_replace( '/\s+/u', ' ', trim( $value ) );
 
 		return is_string( $value ) ? $value : '';
+	}
+
+	/** @return array<string,string> */
+	private function admin_context_patterns(): array {
+		return array(
+			'республика|респ' => 'республика',
+			'район|р\s*н' => 'район',
+			'муниципальный\s+округ|мо' => 'муниципальный округ',
+			'городской\s+округ|го' => 'городской округ',
+			'автономный\s+округ|ао' => 'автономный округ',
+			'область|обл' => 'область',
+			'край' => 'край',
+		);
 	}
 
 	private function normalize_common( string $value ): string {
