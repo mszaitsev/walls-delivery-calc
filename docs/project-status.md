@@ -586,3 +586,7 @@ does not add DPD status API polling, cron/sync, shipment updates, live create, l
 - `location/detect` now uses `wp_wdc_locations.display_name` as the primary query string, without adding `Россия`; manual assembly remains only for missing display names.
 - `YandexDeliveryGeoMatchScorer` now scores locality, region, district/city context and settlement type, with caps for wrong regions, foreign hints, administrative units and weak substring matches.
 - Added `YandexDeliveryGeoDistance` as an isolated haversine utility for a future expensive distance-based validation fallback; no full Russia import, checkout or pickup map was implemented.
+### 2026-06-23 - Yandex Delivery candidate storage policy 0.78.0
+
+- `YandexDeliveryGeoMappingService` now defaults to `ambiguous_only` candidate storage: confident auto-primary results save only the primary row, while ambiguous results keep all candidates for review.
+- The Yandex geo admin tab and integration notes document that candidates are diagnostic and runtime code should use only `is_primary=1` / `find_primary_geo_id()`.

@@ -11,11 +11,17 @@ use WallsShop\WDC\Locations\ValueObjects\Location;
 defined( 'ABSPATH' ) || exit;
 
 final class YandexDeliveryGeoMappingService {
+	private const CANDIDATE_STORAGE_PRIMARY_ONLY = 'primary_only';
+	private const CANDIDATE_STORAGE_AMBIGUOUS_ONLY = 'ambiguous_only';
+	private const CANDIDATE_STORAGE_ALL = 'all';
+	private const DEFAULT_CANDIDATE_STORAGE_POLICY = self::CANDIDATE_STORAGE_AMBIGUOUS_ONLY;
+
 	public function __construct(
 		private LocationRepository $locations,
 		private YandexDeliveryApiClient $api,
 		private YandexDeliveryGeoMappingRepository $repository,
-		private YandexDeliveryGeoMatchScorer $scorer
+		private YandexDeliveryGeoMatchScorer $scorer,
+		private string $candidate_storage_policy = self::DEFAULT_CANDIDATE_STORAGE_POLICY
 	) {
 	}
 
@@ -117,16 +123,17 @@ final class YandexDeliveryGeoMappingService {
 		usort( $rows, static fn( array $left, array $right ): int => (float) $right['confidence'] <=> (float) $left['confidence'] );
 		$best = (float) ( $rows[0]['confidence'] ?? 0 );
 		$second = isset( $rows[1] ) ? (float) $rows[1]['confidence'] : null;
+		$confident_primary = false;
 		if ( 1 === count( $rows ) ) {
 			$rows[0]['status'] = YandexDeliveryGeoMappingStatus::MAPPED;
 			$rows[0]['is_primary'] = $best >= 60 ? 1 : 0;
-			unset( $rows[0]['scoring'] );
-			return $rows;
-		}
-		if ( $best >= 95 && ( null === $second || $second <= $best - 15 ) ) {
+			$confident_primary = $best >= 60;
+		} elseif ( $best >= 95 && ( null === $second || $second <= $best - 15 ) ) {
 			$rows[0]['status'] = YandexDeliveryGeoMappingStatus::MAPPED;
 			$rows[0]['is_primary'] = 1;
+			$confident_primary = true;
 		}
+		$rows = $this->apply_candidate_storage_policy( $rows, $confident_primary );
 		foreach ( $rows as $index => $row ) {
 			unset( $rows[ $index ]['scoring'] );
 		}
@@ -134,6 +141,28 @@ final class YandexDeliveryGeoMappingService {
 		return $rows;
 	}
 
+	/** @param array<int,array<string,mixed>> $rows @return array<int,array<string,mixed>> */
+	private function apply_candidate_storage_policy( array $rows, bool $confident_primary ): array {
+		$policy = $this->candidate_storage_policy;
+		if ( ! in_array( $policy, array( self::CANDIDATE_STORAGE_PRIMARY_ONLY, self::CANDIDATE_STORAGE_AMBIGUOUS_ONLY, self::CANDIDATE_STORAGE_ALL ), true ) ) {
+			$policy = self::DEFAULT_CANDIDATE_STORAGE_POLICY;
+		}
+		if ( self::CANDIDATE_STORAGE_ALL === $policy ) {
+			return $rows;
+		}
+		if ( $confident_primary ) {
+			foreach ( $rows as $row ) {
+				if ( ! empty( $row['is_primary'] ) ) {
+					return array( $row );
+				}
+			}
+		}
+		if ( self::CANDIDATE_STORAGE_PRIMARY_ONLY === $policy ) {
+			return array_slice( $rows, 0, 1 );
+		}
+
+		return $rows;
+	}
 	public function confidence( Location $location, string $locality, string $region, int $variant_count = 1 ): float {
 		if ( $variant_count > 1 ) {
 			return 40.00;
