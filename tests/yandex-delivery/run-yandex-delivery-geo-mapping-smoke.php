@@ -124,9 +124,11 @@ yd_geo_assert( str_contains( $service_source, 'is_string( $variant[\'address\'] 
 yd_geo_assert( str_contains( $scorer_source, 'final class YandexDeliveryGeoMatchScorer' ) && str_contains( $scorer_source, 'foreign_country_hint' ) && str_contains( $scorer_source, 'matched_by' ), 'Scorer source must contain deterministic smart geo match logic.' );
 yd_geo_assert( str_contains( $scorer_source, 'district_match' ) && str_contains( $scorer_source, 'city_context_match' ) && str_contains( $scorer_source, 'type_match' ) && str_contains( $scorer_source, 'components' ), 'Scorer source must contain district/context/type scoring and component diagnostics.' );
 yd_geo_assert( str_contains( $scorer_source, 'type_equivalent' ) && str_contains( $scorer_source, 'поселок\\s+городского\\s+типа|пгт' ) && str_contains( $scorer_source, 'муниципальный\\s+округ|мо' ), 'Scorer source must contain settlement type and administrative synonym dictionaries.' );
-$long_type_pattern_pos = strpos( $scorer_source, "'поселок\\s+городского\\s+типа|пгт' => 'urban_settlement'" );
-$short_type_pattern_pos = strpos( $scorer_source, "'поселок|пос|п' => 'settlement'" );
-yd_geo_assert( false !== $long_type_pattern_pos && false !== $short_type_pattern_pos && $long_type_pattern_pos < $short_type_pattern_pos, 'Scorer type_patterns() must check long urban settlement pattern before short settlement pattern.' );
+$long_type_pos = strpos( $scorer_source, 'поселок\s+городского\s+типа|пгт' );
+$short_type_pos = strpos( $scorer_source, 'поселок|пос|п' );
+yd_geo_assert( false !== $long_type_pos, 'Scorer type patterns must contain long urban-settlement pattern.' );
+yd_geo_assert( false !== $short_type_pos, 'Scorer type patterns must contain short settlement pattern.' );
+yd_geo_assert( $long_type_pos < $short_type_pos, 'Long urban-settlement type pattern must be checked before short settlement pattern.' );
 yd_geo_assert( str_contains( $plugin_source, 'YandexDeliveryGeoMatchScorer::class' ) && str_contains( $plugin_source, 'new YandexDeliveryGeoMatchScorer()' ), 'Plugin must register YandexDeliveryGeoMatchScorer in the container.' );
 yd_geo_assert( str_contains( $plugin_source, '$this->container->get( YandexDeliveryGeoMatchScorer::class )' ), 'Plugin must pass YandexDeliveryGeoMatchScorer into YandexDeliveryGeoMappingService.' );
 yd_geo_assert( ! str_contains( $service_source, 'new YandexDeliveryGeoMatchScorer()' ) && ! str_contains( $service_source, '??= new YandexDeliveryGeoMatchScorer' ), 'Geo mapping service must not fallback-construct the scorer.' );
