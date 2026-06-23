@@ -124,7 +124,9 @@ foreach ( array( 'detect_for_location_id', 'locationDetect', 'YandexDeliveryApiC
 	yd_geo_analysis_assert( ! str_contains( $service_source, $forbidden ), 'Analysis service must not call mapping/API/checkout/pricing/pickup code: ' . $forbidden );
 }
 
-yd_geo_analysis_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_geo_analysis'] = 'Yandex geo analysis';" ), 'Admin UI must expose Yandex geo analysis tab.' );
+yd_geo_analysis_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_geo'] = 'Маппинг geo_id';" ) && ! str_contains( $admin_source, "\$tabs['yandex_delivery_geo_analysis']" ), 'Admin navigation must expose geo analysis inside the consolidated mapping tab only.' );
+yd_geo_analysis_assert( str_contains( $admin_source, 'Аналитика маппинга' ) && str_contains( $admin_source, 'Статистика confidence' ) && str_contains( $admin_source, 'Статистика статусов' ) && str_contains( $admin_source, 'Проблемные регионы' ) && str_contains( $admin_source, 'Типы населённых пунктов' ) && str_contains( $admin_source, 'Сигналы сопоставления' ) && str_contains( $admin_source, 'Низкая уверенность' ), 'Consolidated mapping tab must render Russian analysis sections.' );
+yd_geo_analysis_assert( str_contains( $admin_source, 'name="tab" value="yandex_delivery_geo"' ), 'Yandex geo analysis filter must return to the consolidated mapping tab.' );
 $analysis_tab_start = strpos( $admin_source, 'function render_yandex_delivery_geo_analysis_tab' );
 $analysis_tab_end   = strpos( $admin_source, 'function render_yandex_delivery_geo_batch_tab', false === $analysis_tab_start ? 0 : $analysis_tab_start );
 $analysis_tab_source = false !== $analysis_tab_start && false !== $analysis_tab_end ? substr( $admin_source, $analysis_tab_start, $analysis_tab_end - $analysis_tab_start ) : '';
@@ -136,6 +138,6 @@ yd_geo_analysis_assert( str_contains( $admin_source, '?YandexDeliveryGeoAnalysis
 yd_geo_analysis_assert( str_contains( $plugin_source, 'YandexDeliveryGeoAnalysisService::class' ), 'Plugin source must reference YandexDeliveryGeoAnalysisService::class.' );
 yd_geo_analysis_assert( preg_match( '/container->register\(\s*YandexDeliveryGeoAnalysisService::class\s*,\s*fn\(\):\s*YandexDeliveryGeoAnalysisService\s*=>\s*new\s+YandexDeliveryGeoAnalysisService\(\s*\$this->container->get\(\s*LocationRepository::class\s*\)\s*\)\s*\)/s', $plugin_source ) === 1, 'Plugin container must register YandexDeliveryGeoAnalysisService with the LocationRepository dependency.' );
 yd_geo_analysis_assert( preg_match( '/new\s+DeliveryServicesAdminPage\(.*\$this->container->get\(\s*YandexDeliveryGeoAnalysisService::class\s*\)/s', $plugin_source ) === 1, 'Plugin must pass YandexDeliveryGeoAnalysisService into DeliveryServicesAdminPage.' );
-yd_geo_analysis_assert( str_contains( $version_source, '0.84.0' ), 'Plugin version must be 0.84.0.' );
+yd_geo_analysis_assert( str_contains( $version_source, '0.85.0' ), 'Plugin version must be 0.85.0.' );
 
 echo "Yandex Delivery geo analysis smoke OK\n";

@@ -180,9 +180,11 @@ yd_geo_coverage_assert( str_contains( $service_source, '\'geo_id\' => (int) $geo
 yd_geo_coverage_assert( ! str_contains( $service_source, "'limit'" ) && ! str_contains( $service_source, 'page_token' ), 'coverage service must not use pagination fields.' );
 yd_geo_coverage_assert( str_contains( $service_source, 'count( $sample ) < 5' ), 'coverage service must cap sample_points_json at 5.' );
 yd_geo_coverage_assert( ! str_contains( $service_source, 'raw_response' ) && ! str_contains( $service_source, '\'response\' => $response' ), 'coverage service must not persist full raw response.' );
-yd_geo_coverage_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_geo_coverage'] = 'Yandex coverage';" ), 'Admin UI must expose Yandex coverage tab.' );
-yd_geo_coverage_assert( str_contains( $admin_source, 'check_yandex_delivery_geo_coverage' ), 'Admin UI must handle coverage check action.' );
+yd_geo_coverage_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_geo_coverage'] = 'Покрытие Яндекса';" ) && ! str_contains( $admin_source, "\$tabs['yandex_delivery_geo_batch']" ) && ! str_contains( $admin_source, "\$tabs['yandex_delivery_geo_analysis']" ), 'Admin UI must expose Yandex coverage tab and hide old technical Yandex tabs.' );
+yd_geo_coverage_assert( str_contains( $admin_source, 'check_yandex_delivery_geo_coverage' ) && str_contains( $admin_source, 'Проверить покрытие' ), 'Admin UI must handle coverage check action.' );
+yd_geo_coverage_assert( str_contains( $admin_source, 'yandex_delivery_geo_coverage_location_query' ) && str_contains( $admin_source, 'Найти населённый пункт' ), 'Coverage tab must expose location name search.' );
+yd_geo_coverage_assert( str_contains( $admin_source, "'check_yandex_delivery_geo_coverage' => 'yandex_delivery_geo_coverage'" ), 'Coverage action must redirect back to the coverage tab.' );
 yd_geo_coverage_assert( str_contains( $plugin_source, 'YandexDeliveryGeoCoverageRepository::class' ) && str_contains( $plugin_source, 'YandexDeliveryGeoCoverageService::class' ), 'Plugin DI must register coverage repository and service.' );
-yd_geo_coverage_assert( str_contains( $version_source, '0.84.0' ), 'Plugin version must be 0.84.0.' );
+yd_geo_coverage_assert( str_contains( $version_source, '0.85.0' ), 'Plugin version must be 0.85.0.' );
 
 echo "Yandex Delivery geo coverage smoke OK\n";

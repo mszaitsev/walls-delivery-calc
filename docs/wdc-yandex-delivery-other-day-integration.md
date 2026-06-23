@@ -1,9 +1,23 @@
 # WDC Yandex Delivery Other-Day Integration
 
-Status: Phase 1 foundation/API/settings implemented in 0.72.0; pickup-point storage/import, checkout, order recalculation and shipments remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_id mapping, coverage discovery and admin UX consolidation are implemented through 0.85.0; checkout, pricing, order recalculation, shipments and full Russia PVZ import remain planned.
 
 Date: 2026-06-22.
 
+## 0.85.0 Admin UX consolidation
+
+The Yandex Delivery admin surface now follows the intended working model:
+
+```text
+Данные для входа
+Маппинг geo_id
+Покрытие Яндекса
+Яндекс ПВЗ
+```
+
+`Маппинг geo_id` contains manual geo_id search, batch mapping controls, mapping analytics and a placeholder for manual `needs_review` processing. `Покрытие Яндекса` stays a selective/manual coverage check, not a mass import. `Яндекс ПВЗ` is the future pickup-point workspace; the current Moscow `geo_id=213` import remains a test diagnostic.
+
+Architecture decision: coverage batch as a separate mass stage is not needed. The future PVZ import should run over confirmed mapped geo_id values and update `covered`/`not_covered` while importing real points.
 ## 1. Scope
 
 This document covers only Yandex Delivery API for `Доставка по России` / delivery in another day.
