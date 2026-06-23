@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 000000FE A0AC:74BD
+Volume serial number is 00000041 A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -95,6 +95,7 @@ C:.
 |           0031_create_dpd_pickup_points_table.php
 |           0032_create_yandex_delivery_pickup_points_table.php
 |           0033_create_yandex_delivery_geo_mappings_table.php
+|           0034_create_yandex_delivery_geo_coverage_table.php
 |
 +---docs
 |   |   development-workflow.md
@@ -307,6 +308,9 @@ C:.
 |   |       |
 |   |       +---Geo
 |   |       |       YandexDeliveryGeoAnalysisService.php
+|   |       |       YandexDeliveryGeoCoverageRepository.php
+|   |       |       YandexDeliveryGeoCoverageService.php
+|   |       |       YandexDeliveryGeoCoverageStatus.php
 |   |       |       YandexDeliveryGeoDistance.php
 |   |       |       YandexDeliveryGeoMappingBatchService.php
 |   |       |       YandexDeliveryGeoMappingRepository.php
@@ -783,6 +787,7 @@ C:.
             run-yandex-delivery-foundation-smoke.php
             run-yandex-delivery-geo-analysis-smoke.php
             run-yandex-delivery-geo-batch-smoke.php
+            run-yandex-delivery-geo-coverage-smoke.php
             run-yandex-delivery-geo-mapping-smoke.php
             run-yandex-delivery-geo-resolution-smoke.php
             run-yandex-delivery-pickup-smoke.php
