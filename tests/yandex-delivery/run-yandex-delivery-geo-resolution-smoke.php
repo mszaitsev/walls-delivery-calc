@@ -115,6 +115,43 @@ function yd_geo_resolution_gumerovo_location( int $id ): array {
 		'active' => 1,
 	);
 }
+
+function yd_geo_resolution_city_context_location( int $id, string $city, string $place, string $place_type, string $region ): array {
+	return array(
+		'id' => $id,
+		'country_code' => 'RU',
+		'region_name' => $region,
+		'region_type' => 'респ',
+		'city_name' => $city,
+		'city_type' => 'г',
+		'place_name' => $place,
+		'place_type' => $place_type,
+		'display_name' => 'г ' . $city . ', ' . $place_type . ' ' . $place,
+		'active' => 1,
+	);
+}
+
+function yd_geo_resolution_maikop_podgorny_candidates(): array {
+	return array(
+		array( 'geo_id' => 8101, 'address' => 'посёлок Подгорный, городской округ Майкоп, Республика Адыгея (Адыгея)' ),
+		array( 'geo_id' => 8102, 'address' => 'посёлок Подгорный, Красногвардейский район, Республика Адыгея (Адыгея)' ),
+	);
+}
+
+function yd_geo_resolution_ufa_arkaul_candidates(): array {
+	return array(
+		array( 'geo_id' => 8201, 'address' => 'деревня Аркаул, городской округ Уфа, Республика Башкортостан' ),
+		array( 'geo_id' => 8202, 'address' => 'деревня Аркаул, Благовещенский район, Республика Башкортостан' ),
+		array( 'geo_id' => 8203, 'address' => 'деревня Аркаул, Караидельский район, Республика Башкортостан' ),
+	);
+}
+
+function yd_geo_resolution_salavat_candidates(): array {
+	return array(
+		array( 'geo_id' => 8301, 'address' => 'город Салават, городской округ Салават, Республика Башкортостан' ),
+		array( 'geo_id' => 8302, 'address' => 'СНТ Салават, Республика Башкортостан' ),
+	);
+}
 $policy = new YandexDeliveryGeoResolutionPolicy();
 $decision = $policy->resolve( array( yd_geo_resolution_candidate( 100, 100.0, array( 'locality_exact', 'region_match' ) ), yd_geo_resolution_candidate( 101, 55.0, array( 'weak_substring' ) ) ) );
 yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::MAPPED === $decision['resolution'] && 100 === $decision['primary_geo_id'], 'Confident best candidate with wide second gap must resolve to mapped primary.' );
@@ -136,6 +173,39 @@ $duplicate_district_decision = $policy->resolve(
 );
 yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::NEEDS_REVIEW === $duplicate_district_decision['resolution'], 'District tie-breaker must not map when a close candidate has the same locality/region/district signals.' );
 
+$maikop_decision = $policy->resolve(
+	array(
+		yd_geo_resolution_candidate( 8101, 95.0, array( 'locality_exact', 'region_match', 'city_context_match', 'type_match' ) ),
+		yd_geo_resolution_candidate( 8102, 95.0, array( 'locality_exact', 'region_match', 'type_match' ) ),
+	)
+);
+yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::MAPPED === $maikop_decision['resolution'] && 8101 === $maikop_decision['primary_geo_id'] && 'city_context_tiebreak_primary' === $maikop_decision['reason'], 'Maykop Podgorny city-context tie-breaker must select the city district candidate.' );
+
+$ufa_decision = $policy->resolve(
+	array(
+		yd_geo_resolution_candidate( 8201, 95.0, array( 'locality_exact', 'region_match', 'city_context_match', 'type_match' ) ),
+		yd_geo_resolution_candidate( 8202, 95.0, array( 'locality_exact', 'region_match', 'type_match' ) ),
+		yd_geo_resolution_candidate( 8203, 95.0, array( 'locality_exact', 'region_match', 'type_match' ) ),
+	)
+);
+yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::MAPPED === $ufa_decision['resolution'] && 8201 === $ufa_decision['primary_geo_id'] && 'city_context_tiebreak_primary' === $ufa_decision['reason'], 'Ufa Arkaul city-context tie-breaker must select the city district candidate.' );
+
+$salavat_decision = $policy->resolve(
+	array(
+		yd_geo_resolution_candidate( 8301, 95.0, array( 'locality_exact', 'region_match', 'city_context_match', 'type_match' ) ),
+		yd_geo_resolution_candidate( 8302, 95.0, array( 'locality_exact', 'region_match', 'type_mismatch' ) ),
+	)
+);
+yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::MAPPED === $salavat_decision['resolution'] && 8301 === $salavat_decision['primary_geo_id'] && 'city_context_tiebreak_primary' === $salavat_decision['reason'], 'Salavat city-context tie-breaker must select the city candidate over СНТ.' );
+
+$duplicate_city_context_decision = $policy->resolve(
+	array(
+		yd_geo_resolution_candidate( 8401, 95.0, array( 'locality_exact', 'region_match', 'city_context_match', 'type_match' ) ),
+		yd_geo_resolution_candidate( 8402, 95.0, array( 'locality_exact', 'region_match', 'city_context_match', 'type_match' ) ),
+	)
+);
+yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::NEEDS_REVIEW === $duplicate_city_context_decision['resolution'], 'City-context tie-breaker must not map when a close candidate has the same city-context signals.' );
+
 $decision = $policy->resolve( array( yd_geo_resolution_candidate( 200, 55.0, array( 'locality_exact', 'region_mismatch' ) ) ) );
 yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::NEEDS_REVIEW === $decision['resolution'], 'locality_exact with wrong region must be needs_review, not not_found.' );
 
@@ -155,6 +225,9 @@ $GLOBALS['wpdb']->locations = array(
 	yd_geo_resolution_location( 2, 'Новосибирск' ),
 	yd_geo_resolution_location( 3, 'Пусто' ),
 	yd_geo_resolution_gumerovo_location( 706 ),
+	yd_geo_resolution_city_context_location( 707, 'Майкоп', 'Подгорный', 'пос', 'Адыгея' ),
+	yd_geo_resolution_city_context_location( 708, 'Уфа', 'Аркаул', 'д', 'Башкортостан' ),
+	yd_geo_resolution_city_context_location( 709, 'Салават', 'Салават', 'г', 'Башкортостан' ),
 );
 
 $settings = new YandexDeliverySettings( new SettingsRepository(), new EncryptionService() );
@@ -168,7 +241,10 @@ $service = new YandexDeliveryGeoMappingService(
 			yd_geo_resolution_response( array( array( 'geo_id' => 43, 'address' => 'Казань, Республика Татарстан (Татарстан)' ) ) ),
 			yd_geo_resolution_response( array( array( 'geo_id' => 65, 'address' => 'Новосибирск, Франция' ) ) ),
 			yd_geo_resolution_response( array() ),
-			yd_geo_resolution_response( array( array( 'geo_id' => 168754, 'address' => 'деревня Гумерово, Таштамакский сельсовет, Аургазинский район, Республика Башкортостан' ), array( 'geo_id' => 99694, 'address' => 'деревня Гумерово, Петровский сельсовет, Ишимбайский район, Республика Башкортостан' ), array( 'geo_id' => 189353, 'address' => 'деревня Гумерово, Кадыргуловский сельсовет, Давлекановский район, Республика Башкортостан' ), array( 'geo_id' => 168051, 'address' => 'деревня Староитикеево, Батыровский сельсовет, Аургазинский район, Республика Башкортостан' ) ) )
+			yd_geo_resolution_response( array( array( 'geo_id' => 168754, 'address' => 'деревня Гумерово, Таштамакский сельсовет, Аургазинский район, Республика Башкортостан' ), array( 'geo_id' => 99694, 'address' => 'деревня Гумерово, Петровский сельсовет, Ишимбайский район, Республика Башкортостан' ), array( 'geo_id' => 189353, 'address' => 'деревня Гумерово, Кадыргуловский сельсовет, Давлекановский район, Республика Башкортостан' ), array( 'geo_id' => 168051, 'address' => 'деревня Староитикеево, Батыровский сельсовет, Аургазинский район, Республика Башкортостан' ) ) ),
+			yd_geo_resolution_response( yd_geo_resolution_maikop_podgorny_candidates() ),
+			yd_geo_resolution_response( yd_geo_resolution_ufa_arkaul_candidates() ),
+			yd_geo_resolution_response( yd_geo_resolution_salavat_candidates() )
 		)
 	),
 	$repository,
@@ -192,6 +268,18 @@ $gumero_result = $service->detect_for_location_id( 706 );
 $gumero_rows = $repository->find_by_location_id( 706 );
 yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::MAPPED === $gumero_result['status'] && 1 === count( $gumero_rows ) && 1 === (int) $gumero_rows[0]['is_primary'] && 168754 === $repository->find_primary_geo_id( 706 ), 'Gumerovo service integration must save one mapped primary row.' );
 
+$maikop_result = $service->detect_for_location_id( 707 );
+$maikop_rows = $repository->find_by_location_id( 707 );
+yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::MAPPED === $maikop_result['status'] && 1 === count( $maikop_rows ) && 1 === (int) $maikop_rows[0]['is_primary'] && 8101 === $repository->find_primary_geo_id( 707 ), 'Maykop Podgorny service integration must save one city-context mapped primary row.' );
+
+$ufa_result = $service->detect_for_location_id( 708 );
+$ufa_rows = $repository->find_by_location_id( 708 );
+yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::MAPPED === $ufa_result['status'] && 1 === count( $ufa_rows ) && 1 === (int) $ufa_rows[0]['is_primary'] && 8201 === $repository->find_primary_geo_id( 708 ), 'Ufa Arkaul service integration must save one city-context mapped primary row.' );
+
+$salavat_result = $service->detect_for_location_id( 709 );
+$salavat_rows = $repository->find_by_location_id( 709 );
+yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::MAPPED === $salavat_result['status'] && 1 === count( $salavat_rows ) && 1 === (int) $salavat_rows[0]['is_primary'] && 8301 === $repository->find_primary_geo_id( 709 ), 'Salavat service integration must save one city-context mapped primary row.' );
+
 
 $GLOBALS['wdc_yandex_delivery_geo_resolution_options'] = array();
 $settings->save_from_admin( array( YandexDeliverySettings::ENVIRONMENT_KEY => YandexDeliverySettings::ENV_TEST, 'yandex_delivery_test_bearer_token' => 'secret-test-token', YandexDeliverySettings::TEST_PLATFORM_STATION_ID_KEY => 'sender-1' ) );
@@ -210,6 +298,23 @@ $batch->start( 1, 1 );
 $batch_state = $batch->run_step();
 yd_geo_resolution_assert( 1 === $batch_state['mapped'] && 0 === $batch_state['ambiguous'] && 0 === $batch_state['errors'], 'Batch classifier must count Gumerovo district tie-breaker result as mapped without ambiguity or errors.' );
 
+$GLOBALS['wdc_yandex_delivery_geo_resolution_options'] = array();
+$settings->save_from_admin( array( YandexDeliverySettings::ENVIRONMENT_KEY => YandexDeliverySettings::ENV_TEST, 'yandex_delivery_test_bearer_token' => 'secret-test-token', YandexDeliverySettings::TEST_PLATFORM_STATION_ID_KEY => 'sender-1' ) );
+$GLOBALS['wpdb']->locations = array( yd_geo_resolution_city_context_location( 20, 'Уфа', 'Аркаул', 'д', 'Башкортостан' ) );
+$GLOBALS['wpdb']->yandex_delivery_geo_mappings = array();
+$city_batch_repository = new YandexDeliveryGeoMappingRepository( $GLOBALS['wpdb'] );
+$city_batch_service = new YandexDeliveryGeoMappingService(
+	new LocationRepository( $GLOBALS['wpdb'] ),
+	new YandexDeliveryApiClient( $settings, new YdGeoResolutionFakeHttp( yd_geo_resolution_response( yd_geo_resolution_ufa_arkaul_candidates() ) ) ),
+	$city_batch_repository,
+	new YandexDeliveryGeoMatchScorer(),
+	new YandexDeliveryGeoResolutionPolicy()
+);
+$city_batch = new YandexDeliveryGeoMappingBatchService( new LocationRepository( $GLOBALS['wpdb'] ), $city_batch_repository, $city_batch_service );
+$city_batch->start( 1, 1 );
+$city_batch_state = $city_batch->run_step();
+yd_geo_resolution_assert( 1 === $city_batch_state['mapped'] && 0 === $city_batch_state['ambiguous'] && 0 === $city_batch_state['errors'], 'Batch classifier must count city-context tie-breaker result as mapped without ambiguity or errors.' );
+
 $status_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingStatus.php' );
 $policy_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoResolutionPolicy.php' );
 $service_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingService.php' );
@@ -225,6 +330,7 @@ yd_geo_resolution_assert( str_contains( $service_source, 'YandexDeliveryGeoResol
 yd_geo_resolution_assert( str_contains( $batch_source, 'YandexDeliveryGeoMappingStatus::NEEDS_REVIEW' ), 'Batch service must classify needs_review.' );
 yd_geo_resolution_assert( '' !== $primary_source && ! str_contains( $primary_source, 'NEEDS_REVIEW' ) && str_contains( $primary_source, 'is_primary' ), 'find_primary_geo_id() must not use needs_review as a working mapping.' );
 yd_geo_resolution_assert( str_contains( $policy_source, 'district_tiebreak_primary' ) && str_contains( $policy_source, 'locality_exact' ) && str_contains( $policy_source, 'region_match' ) && str_contains( $policy_source, 'district_match' ) && str_contains( $policy_source, 'type_match' ), 'Resolution policy source must contain district tie-breaker exact locality/region/district/type guard.' );
+yd_geo_resolution_assert( str_contains( $policy_source, 'city_context_tiebreak_primary' ) && str_contains( $policy_source, 'city_context_match' ) && str_contains( $policy_source, 'has_city_context_exact_signal' ), 'Resolution policy source must contain city-context tie-breaker guard.' );
 yd_geo_resolution_assert( str_contains( $plugin_source, 'YandexDeliveryGeoResolutionPolicy::class' ) && str_contains( $plugin_source, 'new YandexDeliveryGeoResolutionPolicy()' ) && str_contains( $plugin_source, '$this->container->get( YandexDeliveryGeoResolutionPolicy::class )' ), 'Plugin must register and inject YandexDeliveryGeoResolutionPolicy.' );
 
 echo "Yandex Delivery geo resolution smoke OK\n";

@@ -21,6 +21,7 @@ final class YandexDeliveryGeoResolutionPolicy {
 	private const PRIMARY_CONFIDENCE_THRESHOLD = 95.0;
 	private const PRIMARY_SECOND_GAP = 15.0;
 	private const DISTRICT_TIEBREAK_CONFIDENCE_WINDOW = 10.0;
+	private const CITY_CONTEXT_TIEBREAK_CONFIDENCE_WINDOW = 10.0;
 
 	/**
 	 * @param array<int,array<string,mixed>> $candidates
@@ -46,6 +47,10 @@ final class YandexDeliveryGeoResolutionPolicy {
 
 		if ( null !== $primary_geo_id && $best_confidence >= self::PRIMARY_CONFIDENCE_THRESHOLD && $this->has_full_district_exact_signal( $best ) && $this->is_unique_district_tiebreak_primary( $best, $candidates, $best_confidence ) ) {
 			return $this->decision( YandexDeliveryGeoMappingStatus::MAPPED, $primary_geo_id, 'district_tiebreak_primary', $best_confidence );
+		}
+
+		if ( null !== $primary_geo_id && $best_confidence >= self::PRIMARY_CONFIDENCE_THRESHOLD && $this->has_city_context_exact_signal( $best ) && $this->is_unique_city_context_tiebreak_primary( $best, $candidates, $best_confidence ) ) {
+			return $this->decision( YandexDeliveryGeoMappingStatus::MAPPED, $primary_geo_id, 'city_context_tiebreak_primary', $best_confidence );
 		}
 
 		if ( $this->has_signal( $candidates, 'locality_exact' ) ) {
@@ -116,6 +121,35 @@ final class YandexDeliveryGeoResolutionPolicy {
 			&& in_array( 'region_match', $matched_by, true )
 			&& in_array( 'district_match', $matched_by, true );
 	}
+
+	/** @param array<string,mixed> $candidate */
+	private function has_city_context_exact_signal( array $candidate ): bool {
+		$matched_by = $this->matched_by( $candidate );
+
+		return in_array( 'locality_exact', $matched_by, true )
+			&& in_array( 'region_match', $matched_by, true )
+			&& in_array( 'city_context_match', $matched_by, true );
+	}
+
+	/** @param array<string,mixed> $best @param array<int,array<string,mixed>> $candidates */
+	private function is_unique_city_context_tiebreak_primary( array $best, array $candidates, float $best_confidence ): bool {
+		$best_geo_id = isset( $best['yandex_geo_id'] ) && is_numeric( $best['yandex_geo_id'] ) ? (int) $best['yandex_geo_id'] : 0;
+		$minimum_confidence = $best_confidence - self::CITY_CONTEXT_TIEBREAK_CONFIDENCE_WINDOW;
+
+		foreach ( $candidates as $candidate ) {
+			$candidate_geo_id = isset( $candidate['yandex_geo_id'] ) && is_numeric( $candidate['yandex_geo_id'] ) ? (int) $candidate['yandex_geo_id'] : 0;
+			if ( $candidate_geo_id === $best_geo_id || (float) ( $candidate['confidence'] ?? 0 ) < $minimum_confidence ) {
+				continue;
+			}
+
+			if ( $this->has_city_context_exact_signal( $candidate ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	/** @param array<int,array<string,mixed>> $candidates */
 	private function has_signal( array $candidates, string $signal ): bool {
 		foreach ( $candidates as $candidate ) {
