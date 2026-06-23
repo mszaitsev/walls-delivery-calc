@@ -946,3 +946,12 @@ Multiple geo_id for a large city is still a working hypothesis from Yandex FAQ, 
 The current scorer stores diagnostics in `raw_json.scoring`: `confidence`, `matched_by`, `reason` and component scores for base, region, district, city/context, type and penalty.
 
 Future distance-based fallback: around 155000 of 160000 WDC locations have coordinates, and Yandex `pickup-points/list` returns coordinates for pickup points. If text scoring cannot reach the auto-primary threshold for an unresolved/ambiguous location, a later expensive fallback may call `pickup-points/list(geo_id)` for candidate geo IDs, compare pickup point coordinates with WDC location coordinates and prefer the geo_id whose nearest or median pickup-point set is geographically closest. This must stay a last resort for unresolved/ambiguous locations, not a full Russia import, checkout flow or pickup map.
+## Yandex geo_id candidate storage policy
+
+Candidates returned by Yandex `location/detect` are diagnostic candidates, not working geo_id mappings. The working mapping for checkout/pricing/pickup selection is only the row with `is_primary=1`; future runtime code must continue to use `find_primary_geo_id()`.
+
+Default production policy is `ambiguous_only`: when auto-primary is confident (`best confidence >= 95` and the second candidate is absent or at least 15 points lower), only the primary row is stored. When the result is ambiguous and no primary is assigned, all candidates are stored for manual review.
+
+`primary_only` is reserved for stricter storage where only the primary or best diagnostic row is kept. `all` is a debug/manual-analysis policy that stores every candidate even when a confident primary exists. The `all` mode is not intended for future 160000-location mass mapping because unrelated candidates would inflate `wdc_yandex_delivery_geo_mappings`.
+
+This policy keeps `multiple_matches` rows diagnostic: they are useful for admin review, but they are not valid delivery mappings unless a human later marks one as primary/manual.

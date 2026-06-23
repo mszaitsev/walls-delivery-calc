@@ -1330,6 +1330,7 @@ final class DeliveryServicesAdminPage {
 		?>
 		<h3><?php echo esc_html__( 'Yandex geo_id', 'walls-delivery-calc' ); ?></h3>
 		<p class="description"><?php echo esc_html__( 'Слой сопоставляет WDC location_id с одним или несколькими geo_id Яндекс.Доставки через location/detect. Полный импорт РФ здесь не запускается.', 'walls-delivery-calc' ); ?></p>
+		<p class="description"><?php echo esc_html__( 'В рабочем режиме при уверенном совпадении сохраняется только основной geo_id. Все candidates сохраняются только для неоднозначных результатов или debug-режима.', 'walls-delivery-calc' ); ?></p>
 		<table class="widefat striped" style="max-width: 980px; margin: 12px 0;">
 			<thead><tr><th><?php echo esc_html__( 'Метрика', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Значение', 'walls-delivery-calc' ); ?></th></tr></thead>
 			<tbody>
