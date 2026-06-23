@@ -546,6 +546,6 @@ The order-admin delivery recalculation stage is complete and HPOS-audited. The f
 - прямые PHP entrypoints, например `tests/domain/run-domain-smoke.php`, `tests/checkout/run-checkout-smoke.php` и `tests/runtime/run-no-legacy-smoke.php`.
 ### Yandex Delivery geo matching 0.77.0
 
-- `src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMatchScorer.php` performs deterministic region/district/type-aware scoring for `location/detect` candidates.
+- `src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMatchScorer.php` performs deterministic region/district/type-aware scoring for `location/detect` candidates. As of 0.80.0 it canonicalizes administrative aliases (`респ`, `р-н`, `МО`, `ГО`, `АО`) and settlement type synonyms (`пгт`, `пос`, `ст`, `х`, `с`, `д`) before scoring, and emits `type_equivalent` diagnostics when equivalent types use different wording.
 - `src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoDistance.php` contains a pure haversine utility reserved for future distance-based validation.
 - `YandexDeliveryGeoMappingService::build_search_query()` prefers `Location::display_name` and only falls back to manual query assembly when it is empty.

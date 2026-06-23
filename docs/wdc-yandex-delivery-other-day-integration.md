@@ -945,6 +945,12 @@ Multiple geo_id for a large city is still a working hypothesis from Yandex FAQ, 
 
 The current scorer stores diagnostics in `raw_json.scoring`: `confidence`, `matched_by`, `reason` and component scores for base, region, district, city/context, type and penalty.
 
+### 0.80.0 scorer synonym note
+
+The scorer now canonicalizes common administrative context aliases before comparison: `респ`/`республика`, `р-н`/`район`, `МО`/`муниципальный округ`, `ГО`/`городской округ`, `АО`/`автономный округ`, plus existing region words such as `обл`/`область` and `край`. Settlement type comparison uses canonical type codes, so `пгт` and `поселок городского типа` are equivalent, alongside `г`/`город`, `пос`/`поселок`, `ст`/`станица`, `х`/`хутор`, `с`/`село` and `д`/`деревня`.
+
+When a candidate matches through equivalent but differently written settlement types, `raw_json.scoring.matched_by` includes `type_equivalent` in addition to `type_match`. The Тлюстенхабль case (`респ Адыгея, Теучежский р-н, пгт Тлюстенхабль` vs `поселок городского типа Тлюстенхабль, Теучежский район, Республика Адыгея`) is expected to score as a high-confidence exact match. This stage does not add checkout, pricing, pickup-point changes, distance fallback or batch-builder changes.
+
 Future distance-based fallback: around 155000 of 160000 WDC locations have coordinates, and Yandex `pickup-points/list` returns coordinates for pickup points. If text scoring cannot reach the auto-primary threshold for an unresolved/ambiguous location, a later expensive fallback may call `pickup-points/list(geo_id)` for candidate geo IDs, compare pickup point coordinates with WDC location coordinates and prefer the geo_id whose nearest or median pickup-point set is geographically closest. This must stay a last resort for unresolved/ambiguous locations, not a full Russia import, checkout flow or pickup map.
 ## Yandex geo_id candidate storage policy
 
