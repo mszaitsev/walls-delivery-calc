@@ -72,6 +72,7 @@ final class YandexDeliveryGeoAnalysisService {
         $stats = [
             'mapped'           => 0,
             'multiple_matches' => 0,
+            'needs_review'     => 0,
             'not_found'        => 0,
             'manual'           => 0,
             'error'            => 0,

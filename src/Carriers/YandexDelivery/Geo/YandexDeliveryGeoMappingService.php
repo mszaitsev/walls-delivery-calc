@@ -21,6 +21,7 @@ final class YandexDeliveryGeoMappingService {
 		private YandexDeliveryApiClient $api,
 		private YandexDeliveryGeoMappingRepository $repository,
 		private YandexDeliveryGeoMatchScorer $scorer,
+		private YandexDeliveryGeoResolutionPolicy $resolution_policy,
 		private string $candidate_storage_policy = self::DEFAULT_CANDIDATE_STORAGE_POLICY
 	) {
 	}
@@ -121,19 +122,16 @@ final class YandexDeliveryGeoMappingService {
 			return array( $this->empty_mapping( $location, $query, $body ) );
 		}
 		usort( $rows, static fn( array $left, array $right ): int => (float) $right['confidence'] <=> (float) $left['confidence'] );
-		$best = (float) ( $rows[0]['confidence'] ?? 0 );
-		$second = isset( $rows[1] ) ? (float) $rows[1]['confidence'] : null;
-		$confident_primary = false;
-		if ( 1 === count( $rows ) ) {
-			if ( $best >= 60 ) {
-				$rows[0]['status'] = YandexDeliveryGeoMappingStatus::MAPPED;
-				$rows[0]['is_primary'] = 1;
-				$confident_primary = true;
-			}
-		} elseif ( $best >= 95 && ( null === $second || $second <= $best - 15 ) ) {
-			$rows[0]['status'] = YandexDeliveryGeoMappingStatus::MAPPED;
-			$rows[0]['is_primary'] = 1;
-			$confident_primary = true;
+		$resolution = $this->resolution_policy->resolve( $rows );
+		if ( YandexDeliveryGeoMappingStatus::NOT_FOUND === $resolution['resolution'] ) {
+			return array( $this->empty_mapping( $location, $query, array( 'response' => $body, 'resolution' => $resolution ) ) );
+		}
+
+		$confident_primary = YandexDeliveryGeoMappingStatus::MAPPED === $resolution['resolution'];
+		foreach ( $rows as $index => $row ) {
+			$is_primary = $confident_primary && null !== $resolution['primary_geo_id'] && (int) ( $row['yandex_geo_id'] ?? 0 ) === (int) $resolution['primary_geo_id'];
+			$rows[ $index ]['status'] = $is_primary ? YandexDeliveryGeoMappingStatus::MAPPED : ( $confident_primary ? YandexDeliveryGeoMappingStatus::MULTIPLE_MATCHES : YandexDeliveryGeoMappingStatus::NEEDS_REVIEW );
+			$rows[ $index ]['is_primary'] = $is_primary ? 1 : 0;
 		}
 		$rows = $this->apply_candidate_storage_policy( $rows, $confident_primary );
 		foreach ( $rows as $index => $row ) {
