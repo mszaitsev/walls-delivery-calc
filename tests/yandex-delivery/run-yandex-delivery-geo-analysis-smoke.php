@@ -126,7 +126,10 @@ foreach ( array( 'detect_for_location_id', 'locationDetect', 'YandexDeliveryApiC
 
 yd_geo_analysis_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_geo_analysis'] = 'Yandex geo analysis';" ), 'Admin UI must expose Yandex geo analysis tab.' );
 yd_geo_analysis_assert( str_contains( $admin_source, 'get_low_confidence_rows' ) && str_contains( $admin_source, 'max_confidence' ), 'Admin UI must render analysis dashboard and max_confidence filter.' );
-yd_geo_analysis_assert( str_contains( $plugin_source, 'YandexDeliveryGeoAnalysisService::class' ), 'Plugin container must register YandexDeliveryGeoAnalysisService.' );
-yd_geo_analysis_assert( str_contains( $version_source, '0.81.0' ), 'Plugin version must be 0.81.0.' );
+yd_geo_analysis_assert( str_contains( $admin_source, '?YandexDeliveryGeoAnalysisService $yandex_delivery_geo_analysis' ), 'DeliveryServicesAdminPage must receive YandexDeliveryGeoAnalysisService through constructor DI.' );
+yd_geo_analysis_assert( str_contains( $plugin_source, 'YandexDeliveryGeoAnalysisService::class' ), 'Plugin source must reference YandexDeliveryGeoAnalysisService::class.' );
+yd_geo_analysis_assert( preg_match( '/container->register\(\s*YandexDeliveryGeoAnalysisService::class\s*,\s*fn\(\):\s*YandexDeliveryGeoAnalysisService\s*=>\s*new\s+YandexDeliveryGeoAnalysisService\(\s*\$this->container->get\(\s*LocationRepository::class\s*\)\s*\)\s*\)/s', $plugin_source ) === 1, 'Plugin container must register YandexDeliveryGeoAnalysisService with the LocationRepository dependency.' );
+yd_geo_analysis_assert( preg_match( '/new\s+DeliveryServicesAdminPage\(.*\$this->container->get\(\s*YandexDeliveryGeoAnalysisService::class\s*\)/s', $plugin_source ) === 1, 'Plugin must pass YandexDeliveryGeoAnalysisService into DeliveryServicesAdminPage.' );
+yd_geo_analysis_assert( str_contains( $version_source, '0.81.1' ), 'Plugin version must be 0.81.1.' );
 
 echo "Yandex Delivery geo analysis smoke OK\n";
