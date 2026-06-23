@@ -256,8 +256,8 @@ yd_pickup_assert( ! isset( $GLOBALS['wdc_yandex_delivery_pickup_options']['wdc_y
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
-yd_pickup_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_pickup'] = 'ПВЗ / точки сдачи';" ), 'Admin page must register Yandex pickup tab.' );
-yd_pickup_assert( ! str_contains( $admin_source, 'run_yandex_delivery_pickup_import' ) && str_contains( $admin_source, 'Импортировать точки Яндекс' ), 'Admin page must use AJAX Yandex pickup import instead of sync POST action.' );
+yd_pickup_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_pickup'] = 'Яндекс ПВЗ';" ), 'Admin page must register Yandex pickup tab.' );
+yd_pickup_assert( ! str_contains( $admin_source, 'run_yandex_delivery_pickup_import' ) && str_contains( $admin_source, 'Запустить тестовый импорт' ), 'Admin page must use AJAX Yandex pickup import instead of sync POST action.' );
 yd_pickup_assert( str_contains( $admin_source, 'reset_import()' ) && str_contains( $admin_source, 'Сбросить результат и lock' ), 'Admin reset action must clear Yandex pickup report and import lock.' );
 yd_pickup_assert( str_contains( $admin_source, 'Москва, geo_id=213' ) && ! str_contains( $admin_source, 'data-wdc-yandex-page-size' ), 'Admin page must show fixed Moscow geo_id import notice and no active page-size input.' );
 yd_pickup_assert( file_exists( $js_asset_path ), 'Yandex pickup AJAX import JS asset must exist.' );
@@ -269,6 +269,6 @@ yd_pickup_assert( str_contains( $js_source, 'var originalMessage = message' ) &&
 yd_pickup_assert( str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_start' ) && str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_step' ) && str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_reset' ) && str_contains( $admin_source, 'wp_ajax_wdc_yandex_delivery_pickup_import_status' ), 'Admin page must register Yandex pickup AJAX import actions.' );
 yd_pickup_assert( ! preg_match( '/yandex_delivery.*(cron|autosync)|YandexDelivery.*(Cron|AutoSync)/i', $plugin_source ), 'Yandex pickup stage must not register cron/autosync.' );
 yd_pickup_assert( ! str_contains( $plugin_source, 'YandexDeliveryQuoteCarrier' ) && ! str_contains( $plugin_source, 'offers/create' ), 'Yandex pickup stage must not add checkout quote or shipment creation.' );
-yd_pickup_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/walls-delivery-calc.php' ), '0.84.0' ), 'Plugin version must be 0.84.0.' );
+yd_pickup_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/walls-delivery-calc.php' ), '0.85.0' ), 'Plugin version must be 0.85.0.' );
 
 echo "Yandex Delivery pickup points smoke test passed.\n";
