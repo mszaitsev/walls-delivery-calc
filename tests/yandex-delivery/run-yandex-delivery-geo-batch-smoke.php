@@ -18,6 +18,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingRepository
 use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingService;
 use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingStatus;
 use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMatchScorer;
+use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoResolutionPolicy;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
@@ -161,7 +162,7 @@ $http = new YdGeoBatchFakeHttp(
 	yd_geo_batch_response( array() ),
 	new YandexDeliveryApiException( 'timeout', array( 'error_code' => 'timeout' ) )
 );
-$mapping_service = new YandexDeliveryGeoMappingService( $locations, new YandexDeliveryApiClient( $settings, $http ), $repository, new YandexDeliveryGeoMatchScorer() );
+$mapping_service = new YandexDeliveryGeoMappingService( $locations, new YandexDeliveryApiClient( $settings, $http ), $repository, new YandexDeliveryGeoMatchScorer(), new YandexDeliveryGeoResolutionPolicy() );
 $batch = new YandexDeliveryGeoMappingBatchService( $locations, $repository, $mapping_service );
 
 $state = $batch->start( 0, 0 );
@@ -193,7 +194,7 @@ $weak_single_repository = new YandexDeliveryGeoMappingRepository( $GLOBALS['wpdb
 $weak_single_http = new YdGeoBatchFakeHttp(
 	yd_geo_batch_response( array( array( 'geo_id' => 155, 'address' => 'Тлюстенхабль, Франция' ) ) )
 );
-$weak_single_service = new YandexDeliveryGeoMappingService( new LocationRepository( $GLOBALS['wpdb'] ), new YandexDeliveryApiClient( $settings, $weak_single_http ), $weak_single_repository, new YandexDeliveryGeoMatchScorer() );
+$weak_single_service = new YandexDeliveryGeoMappingService( new LocationRepository( $GLOBALS['wpdb'] ), new YandexDeliveryApiClient( $settings, $weak_single_http ), $weak_single_repository, new YandexDeliveryGeoMatchScorer(), new YandexDeliveryGeoResolutionPolicy() );
 $weak_single_batch = new YandexDeliveryGeoMappingBatchService( new LocationRepository( $GLOBALS['wpdb'] ), $weak_single_repository, $weak_single_service );
 $state = $weak_single_batch->start( 1, 1 );
 $state = $weak_single_batch->run_step();
@@ -209,7 +210,7 @@ for ( $i = 10; $i < 22; ++$i ) {
 }
 $error_http = new YdGeoBatchFakeHttp( ...$error_responses );
 $error_repository = new YandexDeliveryGeoMappingRepository( $GLOBALS['wpdb'] );
-$error_service = new YandexDeliveryGeoMappingService( new LocationRepository( $GLOBALS['wpdb'] ), new YandexDeliveryApiClient( $settings, $error_http ), $error_repository, new YandexDeliveryGeoMatchScorer() );
+$error_service = new YandexDeliveryGeoMappingService( new LocationRepository( $GLOBALS['wpdb'] ), new YandexDeliveryApiClient( $settings, $error_http ), $error_repository, new YandexDeliveryGeoMatchScorer(), new YandexDeliveryGeoResolutionPolicy() );
 $error_batch = new YandexDeliveryGeoMappingBatchService( new LocationRepository( $GLOBALS['wpdb'] ), $error_repository, $error_service );
 $state = $error_batch->start( 12, 12 );
 $state = $error_batch->run_step();

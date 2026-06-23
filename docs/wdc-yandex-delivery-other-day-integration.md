@@ -986,3 +986,17 @@ Still intentionally not implemented in this stage: checkout, pricing-calculator,
 The admin tab `Yandex geo analysis` sits after `Yandex geo batch` and uses a GET `max_confidence` filter defaulting to `59.99`. It shows confidence buckets from real mapping rows, status counts, top low-confidence regions, top low-confidence settlement types, top `matched_by` patterns parsed from `raw_json.scoring.matched_by`, and the lowest-confidence rows with `location_id`, `display_name`, `geo_id`, `confidence`, `status`, `matched_by` and `reason`.
 
 The goal is to understand which settlements landed in low-confidence buckets such as `40-59`, `1-39` and `0`, and why, before deciding whether any scorer changes are justified later. This stage does not change scorer logic, batch builder logic, checkout, pricing-calculator, pickup-point import/selection, coordinate fallback, shipments, statuses or documents.
+
+## Yandex Mapping Resolution Engine
+
+0.82.0 adds a resolution layer between Yandex `location/detect` scoring and saved mapping rows. The layer is intentionally narrow: it does not change scorer logic, does not call pickup-points/list and does not implement coordinate fallback yet.
+
+Resolution outcomes:
+
+- `mapped`: one safe working primary, currently confidence `>=95` with at least a 15-point gap from the second candidate;
+- `needs_review`: candidates exist, but WDC cannot safely decide mapped/not_found automatically;
+- `not_found`: Yandex returned no meaningful locality/title/substring/region-district context candidate.
+
+Important rule: `locality_exact` with a wrong or foreign region is `needs_review`, not `not_found`. Such rows are not working geo_id mappings, but they should remain visible for manual review and future coordinate checks because region data may differ between WDC and Yandex or a candidate may still be geographically close.
+
+`needs_review` rows always keep `is_primary=0`. Runtime code must continue to use only primary rows (`is_primary=1`, normally via `find_primary_geo_id()`). The batch builder does not get a new counter; `needs_review` contributes to the existing `ambiguous` count. Checkout, pricing-calculator, PVZ import/selection, pickup map, shipments, statuses, documents and autosync remain out of scope.

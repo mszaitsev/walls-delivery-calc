@@ -1,3 +1,10 @@
+## Yandex Mapping Resolution Engine 0.82.0
+
+- `src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoResolutionPolicy.php` is the decision layer above scored Yandex `location/detect` candidates. It returns `mapped`, `needs_review` or `not_found`, a primary geo_id when safe, a reason and confidence.
+- `src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingStatus.php` now includes `needs_review`. This status is diagnostic only: it is not a working geo_id and checkout/runtime code must still use only rows with `is_primary=1` through `find_primary_geo_id()`.
+- Resolution rules: confidence `>=95` with at least a 15-point gap maps the best candidate; `locality_exact` without confident primary becomes `needs_review`; `locality_exact` plus wrong/foreign region is `needs_review`, not `not_found`; region+district/type context without locality also becomes `needs_review`; truly irrelevant results become one NULL-geo `not_found` diagnostic row.
+- `YandexDeliveryGeoMappingService` receives `YandexDeliveryGeoResolutionPolicy` from `src/Core/Plugin.php`, saves mapped primary rows, stores needs_review candidates with `is_primary=0`, and keeps not_found as one NULL `yandex_geo_id` row. `YandexDeliveryGeoMappingBatchService` counts `needs_review` in the existing `ambiguous` counter.
+- `tests/yandex-delivery/run-yandex-delivery-geo-resolution-smoke.php` covers mapped, needs_review, not_found, service integration, batch integration and source guards. No checkout, pricing, PVZ import/selection, shipment creation, full PVZ import or autosync code is added.
 ## Yandex Low Confidence Analysis 0.81.0
 
 - `src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoAnalysisService.php` is a read-only analysis service for already saved rows in `wdc_yandex_delivery_geo_mappings`. It does not call Yandex APIs, does not run `location/detect`, and does not rebuild mappings.

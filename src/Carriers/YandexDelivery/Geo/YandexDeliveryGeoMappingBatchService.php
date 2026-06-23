@@ -143,7 +143,7 @@ final class YandexDeliveryGeoMappingBatchService {
 		}
 		if ( $has_primary ) {
 			++$state['mapped'];
-		} elseif ( array() !== $saved && YandexDeliveryGeoMappingStatus::MULTIPLE_MATCHES === $status ) {
+		} elseif ( array() !== $saved && in_array( $status, array( YandexDeliveryGeoMappingStatus::MULTIPLE_MATCHES, YandexDeliveryGeoMappingStatus::NEEDS_REVIEW ), true ) ) {
 			++$state['ambiguous'];
 		} elseif ( YandexDeliveryGeoMappingStatus::NOT_FOUND === $status ) {
 			++$state['not_found'];

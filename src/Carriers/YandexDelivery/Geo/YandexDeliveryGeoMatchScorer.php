@@ -128,6 +128,9 @@ final class YandexDeliveryGeoMatchScorer {
 		}
 
 		$score_before_caps = $score;
+		if ( $type_mismatch && ! $type_match ) {
+			$score = max( 0.0, $score - 25.0 );
+		}
 		if ( array() !== $caps ) {
 			$score = min( $score, min( $caps ) );
 		}
