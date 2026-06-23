@@ -1409,13 +1409,13 @@ final class DeliveryServicesAdminPage {
 	private function yandex_delivery_geo_scoring_summary( array $row ): string {
 		$raw = json_decode( (string) ( $row['raw_json'] ?? '' ), true );
 		$scoring = is_array( $raw ) && is_array( $raw['scoring'] ?? null ) ? $raw['scoring'] : array();
-		$reason = is_scalar( $scoring['reason'] ?? null ) ? trim( (string) $scoring['reason'] ) : '';
-		if ( '' !== $reason ) {
-			return $reason;
-		}
 		$matched_by = is_array( $scoring['matched_by'] ?? null ) ? array_values( array_filter( array_map( 'strval', $scoring['matched_by'] ) ) ) : array();
+		if ( array() !== $matched_by ) {
+			return implode( ', ', $matched_by );
+		}
+		$reason = is_scalar( $scoring['reason'] ?? null ) ? trim( (string) $scoring['reason'] ) : '';
 
-		return array() !== $matched_by ? implode( ', ', $matched_by ) : '—';
+		return '' !== $reason ? $reason : '—';
 	}
 	/** @param array<string,mixed> $state */
 	private function yandex_delivery_pickup_import_state_summary( array $state ): string {

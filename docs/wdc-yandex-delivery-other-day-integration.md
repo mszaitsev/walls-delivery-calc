@@ -935,3 +935,14 @@ Practical scoring rules for the current stage:
 - additional candidates such as Парголово/Шушары/Колпино for Санкт-Петербург are stored as candidates, but are treated as separate localities/territories unless they match the WDC location.
 
 The scorer is intended to prepare future automation for 160k locations, but ambiguous cases still require manual confirmation. This stage does not add checkout, pricing calculator integration, pickup-point selection, full Russia pickup import, or mass mapping.
+### 0.77.0 region-aware geo scoring note
+
+Yandex location/detect query source: WDC uses `wp_wdc_locations.display_name` as the primary query source. `display_name` already contains region, district and settlement from WDC location normalization, for example `Краснодарский край, Анапский р-н, хутор Воскресенский`. Country is not added because Yandex Delivery Russia API works only for Russia. Manual query assembly remains only as a fallback for legacy/incomplete locations without `display_name`.
+
+The scorer is region/district-aware: it uses WDC `region_name`, `district_name`, `city_name`, `resolved_place_name()` and `resolved_place_type()`. For Yandex string addresses, the first comma-separated part is treated as candidate locality and the remaining parts as region/district/city context. Settlement type is stripped for name comparison, but a matching type such as `хутор` to `хутор` adds confidence. Wrong-region exact names, foreign hints, administrative units and weak substring matches are capped low.
+
+Multiple geo_id for a large city is still a working hypothesis from Yandex FAQ, not a proven property of the WDC database. It must be rechecked later against real pickup-points/list results and the completed mapping database. Additional `location/detect` variants are candidates, not automatically valid geo_id values for the same WDC location.
+
+The current scorer stores diagnostics in `raw_json.scoring`: `confidence`, `matched_by`, `reason` and component scores for base, region, district, city/context, type and penalty.
+
+Future distance-based fallback: around 155000 of 160000 WDC locations have coordinates, and Yandex `pickup-points/list` returns coordinates for pickup points. If text scoring cannot reach the auto-primary threshold for an unresolved/ambiguous location, a later expensive fallback may call `pickup-points/list(geo_id)` for candidate geo IDs, compare pickup point coordinates with WDC location coordinates and prefer the geo_id whose nearest or median pickup-point set is geographically closest. This must stay a last resort for unresolved/ambiguous locations, not a full Russia import, checkout flow or pickup map.

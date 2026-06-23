@@ -60,6 +60,12 @@ final class YandexDeliveryGeoMappingService {
 	}
 
 	public function build_search_query( Location $location ): string {
+		$display_name = preg_replace( '/\s+/u', ' ', trim( $location->display_name ) );
+		$display_name = is_string( $display_name ) ? $display_name : '';
+		if ( '' !== $display_name ) {
+			return $display_name;
+		}
+
 		$place = $location->resolved_place_name();
 		$parts = array(
 			'Россия',
