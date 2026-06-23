@@ -1438,9 +1438,7 @@ final class DeliveryServicesAdminPage {
 		<?php
 	}
 	private function render_yandex_delivery_geo_analysis_tab( DeliveryService $service ): void {
-		if ( 'yandex_delivery' !== $service->carrier_code() ) {
-			$this->render_service_card( $service );
-
+		if ( ! $this->is_yandex_delivery_service( $service ) ) {
 			return;
 		}
 

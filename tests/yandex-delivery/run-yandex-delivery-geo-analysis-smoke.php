@@ -125,11 +125,17 @@ foreach ( array( 'detect_for_location_id', 'locationDetect', 'YandexDeliveryApiC
 }
 
 yd_geo_analysis_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_geo_analysis'] = 'Yandex geo analysis';" ), 'Admin UI must expose Yandex geo analysis tab.' );
+$analysis_tab_start = strpos( $admin_source, 'function render_yandex_delivery_geo_analysis_tab' );
+$analysis_tab_end   = strpos( $admin_source, 'function render_yandex_delivery_geo_batch_tab', false === $analysis_tab_start ? 0 : $analysis_tab_start );
+$analysis_tab_source = false !== $analysis_tab_start && false !== $analysis_tab_end ? substr( $admin_source, $analysis_tab_start, $analysis_tab_end - $analysis_tab_start ) : '';
+yd_geo_analysis_assert( '' !== $analysis_tab_source, 'Smoke must find render_yandex_delivery_geo_analysis_tab source slice.' );
+yd_geo_analysis_assert( ! str_contains( $analysis_tab_source, '->carrier_code()' ), 'Yandex geo analysis tab must not call missing DeliveryService::carrier_code().' );
+yd_geo_analysis_assert( str_contains( $analysis_tab_source, 'is_yandex_delivery_service( $service )' ), 'Yandex geo analysis tab must use existing is_yandex_delivery_service() guard.' );
 yd_geo_analysis_assert( str_contains( $admin_source, 'get_low_confidence_rows' ) && str_contains( $admin_source, 'max_confidence' ), 'Admin UI must render analysis dashboard and max_confidence filter.' );
 yd_geo_analysis_assert( str_contains( $admin_source, '?YandexDeliveryGeoAnalysisService $yandex_delivery_geo_analysis' ), 'DeliveryServicesAdminPage must receive YandexDeliveryGeoAnalysisService through constructor DI.' );
 yd_geo_analysis_assert( str_contains( $plugin_source, 'YandexDeliveryGeoAnalysisService::class' ), 'Plugin source must reference YandexDeliveryGeoAnalysisService::class.' );
 yd_geo_analysis_assert( preg_match( '/container->register\(\s*YandexDeliveryGeoAnalysisService::class\s*,\s*fn\(\):\s*YandexDeliveryGeoAnalysisService\s*=>\s*new\s+YandexDeliveryGeoAnalysisService\(\s*\$this->container->get\(\s*LocationRepository::class\s*\)\s*\)\s*\)/s', $plugin_source ) === 1, 'Plugin container must register YandexDeliveryGeoAnalysisService with the LocationRepository dependency.' );
 yd_geo_analysis_assert( preg_match( '/new\s+DeliveryServicesAdminPage\(.*\$this->container->get\(\s*YandexDeliveryGeoAnalysisService::class\s*\)/s', $plugin_source ) === 1, 'Plugin must pass YandexDeliveryGeoAnalysisService into DeliveryServicesAdminPage.' );
-yd_geo_analysis_assert( str_contains( $version_source, '0.81.1' ), 'Plugin version must be 0.81.1.' );
+yd_geo_analysis_assert( str_contains( $version_source, '0.81.2' ), 'Plugin version must be 0.81.2.' );
 
 echo "Yandex Delivery geo analysis smoke OK\n";
