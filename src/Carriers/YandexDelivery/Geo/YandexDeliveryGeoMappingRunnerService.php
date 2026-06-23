@@ -187,7 +187,12 @@ final class YandexDeliveryGeoMappingRunnerService {
 
 	/** @param array<string,mixed> $delta @return array<string,mixed> */
 	private function apply_step_delta( string $session_id, array $delta ): array {
-		if ( ! $this->acquire_lock( 10 ) ) {
+		if ( ! $this->acquire_lock( 60 ) ) {
+			$state = $this->current_state();
+			$state['status'] = 'error';
+			$state['updated_at'] = $this->now();
+			$state['message'] = 'Не удалось применить delta runner: state lock busy.';
+			$this->save_state( $state );
 			return $this->current_state();
 		}
 
@@ -198,7 +203,7 @@ final class YandexDeliveryGeoMappingRunnerService {
 				$state['updated_at'] = $this->now();
 				$state['message'] = 'Неверный session_id runner.';
 				$this->save_state( $state );
-				return $state;
+				return $this->current_state();
 			}
 
 			foreach ( array( 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors' ) as $key ) {
@@ -213,7 +218,7 @@ final class YandexDeliveryGeoMappingRunnerService {
 			}
 			$this->save_state( $state );
 
-			return $state;
+			return $this->current_state();
 		} finally {
 			$this->release_lock();
 		}
