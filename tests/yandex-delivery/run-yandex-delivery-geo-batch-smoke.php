@@ -107,13 +107,48 @@ $admin_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/DeliveryServic
 $plugin_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Core/Plugin.php' );
 yd_geo_batch_assert( str_contains( $batch_source, 'detect_for_location_id' ), 'Batch service must use detect_for_location_id.' );
 yd_geo_batch_assert( ! str_contains( $batch_source, 'locationDetect' ), 'Batch service must not call location/detect directly.' );
-yd_geo_batch_assert( str_contains( $location_repository_source, 'find_batch_after_id( int $after_id, int $limit = 500, string $country_code = \'RU\', bool $require_display_name = false )' ), 'LocationRepository must expose extended find_batch_after_id helper.' );
+yd_geo_batch_assert( str_contains( $location_repository_source, 'find_batch_after_id(' ), 'LocationRepository source must contain find_batch_after_id().' );
+yd_geo_batch_assert( str_contains( $location_repository_source, 'public function find_batch_after_id( int $after_id, int $limit, string $country_code = \'RU\', bool $require_display_name = true ): array' ), 'LocationRepository must expose the Yandex geo batch helper signature.' );
 yd_geo_batch_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_geo_batch'] = 'Yandex geo batch';" ) && str_contains( $admin_source, 'start_yandex_delivery_geo_batch' ) && str_contains( $admin_source, 'run_yandex_delivery_geo_batch_step' ), 'Admin UI must expose Yandex geo batch tab and actions.' );
 yd_geo_batch_assert( str_contains( $plugin_source, 'YandexDeliveryGeoMappingBatchService::class' ), 'Plugin must register YandexDeliveryGeoMappingBatchService.' );
 foreach ( array( 'CheckoutOrchestrator', 'pricing', 'pickupPointsList', 'YandexDeliveryPickupPointImportService' ) as $forbidden ) {
 	yd_geo_batch_assert( ! str_contains( $batch_source, $forbidden ), 'Batch service must not call checkout/pricing/pickup import code: ' . $forbidden );
 }
 
+foreach ( array( '$wpdb', 'SELECT', 'FROM wp_wdc_locations' ) as $forbidden_sql ) {
+	yd_geo_batch_assert( ! str_contains( $batch_source, $forbidden_sql ), 'Batch service must use LocationRepository instead of direct location SQL: ' . $forbidden_sql );
+}
+
+$GLOBALS['wpdb']->locations = array(
+	yd_geo_batch_location( 10, 'Десять' ),
+	yd_geo_batch_location( 20, 'Двадцать' ),
+	yd_geo_batch_location( 30, 'Тридцать' ),
+	yd_geo_batch_location( 40, 'Сорок' ),
+);
+$helper_repository = new LocationRepository( $GLOBALS['wpdb'] );
+$helper_batch = $helper_repository->find_batch_after_id( 20, 2 );
+yd_geo_batch_assert( 2 === count( $helper_batch ) && 30 === $helper_batch[0]->id && 40 === $helper_batch[1]->id, 'find_batch_after_id(20, 2) must return Location objects for ids 30 and 40.' );
+$GLOBALS['wpdb']->locations = array(
+	array_merge( yd_geo_batch_location( 10, 'RU 10' ), array( 'country_code' => 'RU' ) ),
+	array_merge( yd_geo_batch_location( 20, 'KZ 20' ), array( 'country_code' => 'KZ' ) ),
+	array_merge( yd_geo_batch_location( 30, 'RU 30' ), array( 'country_code' => 'RU', 'display_name' => '' ) ),
+	array_merge( yd_geo_batch_location( 40, 'RU 40' ), array( 'country_code' => 'RU' ) ),
+);
+$ru_rows = $helper_repository->find_batch_after_id( 0, 10, 'RU', false );
+$kz_rows = $helper_repository->find_batch_after_id( 0, 10, 'KZ', false );
+yd_geo_batch_assert( array( 10, 30, 40 ) === array_map( static fn( $location ): int => (int) $location->id, $ru_rows ), 'find_batch_after_id() must filter RU rows in test doubles.' );
+yd_geo_batch_assert( array( 20 ) === array_map( static fn( $location ): int => (int) $location->id, $kz_rows ), 'find_batch_after_id() must filter KZ rows in test doubles.' );
+$display_rows = $helper_repository->find_batch_after_id( 0, 10, 'RU', true );
+yd_geo_batch_assert( array( 10, 40 ) === array_map( static fn( $location ): int => (int) $location->id, $display_rows ), 'find_batch_after_id() must exclude empty display_name when required.' );
+$GLOBALS['wpdb']->locations = array(
+	yd_geo_batch_location( 1, 'Уже Основной' ),
+	yd_geo_batch_location( 2, 'Новосибирск' ),
+	yd_geo_batch_location( 3, 'Бердск' ),
+	yd_geo_batch_location( 4, 'Не найден' ),
+	yd_geo_batch_location( 5, 'Ошибка' ),
+	array( 'id' => 6, 'country_code' => 'KZ', 'display_name' => 'Казахстан, Алматы', 'active' => 1 ),
+	array( 'id' => 7, 'country_code' => 'RU', 'display_name' => '', 'active' => 1 ),
+);
 $settings = new YandexDeliverySettings( new SettingsRepository(), new EncryptionService() );
 $settings->save_from_admin( array( YandexDeliverySettings::ENVIRONMENT_KEY => YandexDeliverySettings::ENV_TEST, 'yandex_delivery_test_bearer_token' => 'secret-test-token', YandexDeliverySettings::TEST_PLATFORM_STATION_ID_KEY => 'sender-1' ) );
 $locations = new LocationRepository( $GLOBALS['wpdb'] );

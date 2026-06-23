@@ -1473,7 +1473,7 @@ final class LocationRepository {
 	/**
 	 * @return array<int,Location>
 	 */
-	public function find_batch_after_id( int $after_id, int $limit = 500, string $country_code = 'RU', bool $require_display_name = false ): array {
+	public function find_batch_after_id( int $after_id, int $limit, string $country_code = 'RU', bool $require_display_name = true ): array {
 		$after_id = max( 0, $after_id );
 		$limit = max( 1, min( 1000, $limit ) );
 		$country_code = strtoupper( trim( $country_code ) );
@@ -1482,13 +1482,13 @@ final class LocationRepository {
 				array_filter(
 					$this->test_location_rows(),
 					static function ( array $row ) use ( $after_id, $country_code, $require_display_name ): bool {
-						if ( (int) ( $row['id'] ?? 0 ) <= $after_id ) {
+						if ( (int) ( $row['id'] ?? 0 ) <= $after_id || 1 !== (int) ( $row['active'] ?? 1 ) ) {
 							return false;
 						}
 						if ( '' !== $country_code && strtoupper( (string) ( $row['country_code'] ?? '' ) ) !== $country_code ) {
 							return false;
 						}
-						if ( $require_display_name && '' === trim( (string) ( $row['display_name'] ?? '' ) ) ) {
+						if ( $require_display_name && '' === (string) ( $row['display_name'] ?? '' ) ) {
 							return false;
 						}
 						return true;
@@ -1499,14 +1499,14 @@ final class LocationRepository {
 			return $this->rows_to_locations( array_slice( $rows, 0, $limit ) );
 		}
 
-		$where = array( 'id > %d' );
+		$where = array( 'active = 1', 'id > %d' );
 		$args = array( $after_id );
 		if ( '' !== $country_code ) {
 			$where[] = 'country_code = %s';
 			$args[] = $country_code;
 		}
 		if ( $require_display_name ) {
-			$where[] = "display_name IS NOT NULL AND TRIM(display_name) != ''";
+			$where[] = "display_name IS NOT NULL AND display_name != ''";
 		}
 		$args[] = $limit;
 
