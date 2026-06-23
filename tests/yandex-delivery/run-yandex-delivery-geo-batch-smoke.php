@@ -126,6 +126,7 @@ $GLOBALS['wpdb']->locations = array(
 	yd_geo_batch_location( 40, 'Сорок' ),
 );
 $helper_repository = new LocationRepository( $GLOBALS['wpdb'] );
+yd_geo_batch_assert( method_exists( $helper_repository, 'find_batch_after_id' ), 'LocationRepository instance must have find_batch_after_id().' );
 $helper_batch = $helper_repository->find_batch_after_id( 20, 2 );
 yd_geo_batch_assert( 2 === count( $helper_batch ) && 30 === $helper_batch[0]->id && 40 === $helper_batch[1]->id, 'find_batch_after_id(20, 2) must return Location objects for ids 30 and 40.' );
 $GLOBALS['wpdb']->locations = array(
