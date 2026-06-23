@@ -100,9 +100,41 @@ function yd_geo_resolution_location( int $id, string $name, string $region = 'Н
 	return array( 'id' => $id, 'country_code' => 'RU', 'region_name' => $region, 'city_name' => $name, 'place_name' => $name, 'place_type' => 'г', 'display_name' => $region . ', г ' . $name, 'active' => 1 );
 }
 
+function yd_geo_resolution_gumerovo_location( int $id ): array {
+	return array(
+		'id' => $id,
+		'country_code' => 'RU',
+		'region_name' => 'Башкортостан',
+		'region_type' => 'респ',
+		'district_name' => 'Аургазинский',
+		'district_type' => 'р-н',
+		'city_name' => '',
+		'place_name' => 'Гумерово',
+		'place_type' => 'д',
+		'display_name' => 'респ Башкортостан, Аургазинский р-н, деревня Гумерово',
+		'active' => 1,
+	);
+}
 $policy = new YandexDeliveryGeoResolutionPolicy();
 $decision = $policy->resolve( array( yd_geo_resolution_candidate( 100, 100.0, array( 'locality_exact', 'region_match' ) ), yd_geo_resolution_candidate( 101, 55.0, array( 'weak_substring' ) ) ) );
 yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::MAPPED === $decision['resolution'] && 100 === $decision['primary_geo_id'], 'Confident best candidate with wide second gap must resolve to mapped primary.' );
+$gumero_decision = $policy->resolve(
+	array(
+		yd_geo_resolution_candidate( 168754, 100.0, array( 'locality_exact', 'region_match', 'district_match', 'type_match', 'type_equivalent' ) ),
+		yd_geo_resolution_candidate( 99694, 95.0, array( 'locality_exact', 'region_match', 'type_match', 'type_equivalent' ) ),
+		yd_geo_resolution_candidate( 189353, 95.0, array( 'locality_exact', 'region_match', 'type_match', 'type_equivalent' ) ),
+		yd_geo_resolution_candidate( 168051, 0.0, array( 'region_match', 'district_match', 'type_match', 'type_equivalent' ) ),
+	)
+);
+yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::MAPPED === $gumero_decision['resolution'] && 168754 === $gumero_decision['primary_geo_id'] && 'district_tiebreak_primary' === $gumero_decision['reason'], 'Gumerovo district tie-breaker must select the unique locality/region/district/type candidate.' );
+
+$duplicate_district_decision = $policy->resolve(
+	array(
+		yd_geo_resolution_candidate( 7001, 100.0, array( 'locality_exact', 'region_match', 'district_match', 'type_match' ) ),
+		yd_geo_resolution_candidate( 7002, 96.0, array( 'locality_exact', 'region_match', 'district_match', 'type_match' ) ),
+	)
+);
+yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::NEEDS_REVIEW === $duplicate_district_decision['resolution'], 'District tie-breaker must not map when a close candidate has the same locality/region/district signals.' );
 
 $decision = $policy->resolve( array( yd_geo_resolution_candidate( 200, 55.0, array( 'locality_exact', 'region_mismatch' ) ) ) );
 yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::NEEDS_REVIEW === $decision['resolution'], 'locality_exact with wrong region must be needs_review, not not_found.' );
@@ -122,6 +154,7 @@ $GLOBALS['wpdb']->locations = array(
 	yd_geo_resolution_location( 1, 'Казань', 'Республика Татарстан' ),
 	yd_geo_resolution_location( 2, 'Новосибирск' ),
 	yd_geo_resolution_location( 3, 'Пусто' ),
+	yd_geo_resolution_gumerovo_location( 706 ),
 );
 
 $settings = new YandexDeliverySettings( new SettingsRepository(), new EncryptionService() );
@@ -134,7 +167,8 @@ $service = new YandexDeliveryGeoMappingService(
 		new YdGeoResolutionFakeHttp(
 			yd_geo_resolution_response( array( array( 'geo_id' => 43, 'address' => 'Казань, Республика Татарстан (Татарстан)' ) ) ),
 			yd_geo_resolution_response( array( array( 'geo_id' => 65, 'address' => 'Новосибирск, Франция' ) ) ),
-			yd_geo_resolution_response( array() )
+			yd_geo_resolution_response( array() ),
+			yd_geo_resolution_response( array( array( 'geo_id' => 168754, 'address' => 'деревня Гумерово, Таштамакский сельсовет, Аургазинский район, Республика Башкортостан' ), array( 'geo_id' => 99694, 'address' => 'деревня Гумерово, Петровский сельсовет, Ишимбайский район, Республика Башкортостан' ), array( 'geo_id' => 189353, 'address' => 'деревня Гумерово, Кадыргуловский сельсовет, Давлекановский район, Республика Башкортостан' ), array( 'geo_id' => 168051, 'address' => 'деревня Староитикеево, Батыровский сельсовет, Аургазинский район, Республика Башкортостан' ) ) )
 		)
 	),
 	$repository,
@@ -154,14 +188,19 @@ $not_found = $service->detect_for_location_id( 3 );
 $not_found_rows = $repository->find_by_location_id( 3 );
 yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::NOT_FOUND === $not_found['status'] && 1 === count( $not_found_rows ) && null === $not_found_rows[0]['yandex_geo_id'], 'not_found resolution must save one NULL geo_id diagnostic row.' );
 
+$gumero_result = $service->detect_for_location_id( 706 );
+$gumero_rows = $repository->find_by_location_id( 706 );
+yd_geo_resolution_assert( YandexDeliveryGeoMappingStatus::MAPPED === $gumero_result['status'] && 1 === count( $gumero_rows ) && 1 === (int) $gumero_rows[0]['is_primary'] && 168754 === $repository->find_primary_geo_id( 706 ), 'Gumerovo service integration must save one mapped primary row.' );
+
+
 $GLOBALS['wdc_yandex_delivery_geo_resolution_options'] = array();
 $settings->save_from_admin( array( YandexDeliverySettings::ENVIRONMENT_KEY => YandexDeliverySettings::ENV_TEST, 'yandex_delivery_test_bearer_token' => 'secret-test-token', YandexDeliverySettings::TEST_PLATFORM_STATION_ID_KEY => 'sender-1' ) );
-$GLOBALS['wpdb']->locations = array( yd_geo_resolution_location( 10, 'Новосибирск' ) );
+$GLOBALS['wpdb']->locations = array( yd_geo_resolution_gumerovo_location( 10 ) );
 $GLOBALS['wpdb']->yandex_delivery_geo_mappings = array();
 $batch_repository = new YandexDeliveryGeoMappingRepository( $GLOBALS['wpdb'] );
 $batch_service = new YandexDeliveryGeoMappingService(
 	new LocationRepository( $GLOBALS['wpdb'] ),
-	new YandexDeliveryApiClient( $settings, new YdGeoResolutionFakeHttp( yd_geo_resolution_response( array( array( 'geo_id' => 65, 'address' => 'Новосибирск, Франция' ) ) ) ) ),
+	new YandexDeliveryApiClient( $settings, new YdGeoResolutionFakeHttp( yd_geo_resolution_response( array( array( 'geo_id' => 168754, 'address' => 'деревня Гумерово, Таштамакский сельсовет, Аургазинский район, Республика Башкортостан' ), array( 'geo_id' => 99694, 'address' => 'деревня Гумерово, Петровский сельсовет, Ишимбайский район, Республика Башкортостан' ), array( 'geo_id' => 189353, 'address' => 'деревня Гумерово, Кадыргуловский сельсовет, Давлекановский район, Республика Башкортостан' ), array( 'geo_id' => 168051, 'address' => 'деревня Староитикеево, Батыровский сельсовет, Аургазинский район, Республика Башкортостан' ) ) ) ) ),
 	$batch_repository,
 	new YandexDeliveryGeoMatchScorer(),
 	new YandexDeliveryGeoResolutionPolicy()
@@ -169,9 +208,10 @@ $batch_service = new YandexDeliveryGeoMappingService(
 $batch = new YandexDeliveryGeoMappingBatchService( new LocationRepository( $GLOBALS['wpdb'] ), $batch_repository, $batch_service );
 $batch->start( 1, 1 );
 $batch_state = $batch->run_step();
-yd_geo_resolution_assert( 1 === $batch_state['ambiguous'] && 0 === $batch_state['errors'], 'Batch classifier must count needs_review as ambiguous without errors.' );
+yd_geo_resolution_assert( 1 === $batch_state['mapped'] && 0 === $batch_state['ambiguous'] && 0 === $batch_state['errors'], 'Batch classifier must count Gumerovo district tie-breaker result as mapped without ambiguity or errors.' );
 
 $status_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingStatus.php' );
+$policy_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoResolutionPolicy.php' );
 $service_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingService.php' );
 $batch_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingBatchService.php' );
 $repository_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingRepository.php' );
@@ -184,6 +224,7 @@ yd_geo_resolution_assert( str_contains( $status_source, "NEEDS_REVIEW = 'needs_r
 yd_geo_resolution_assert( str_contains( $service_source, 'YandexDeliveryGeoResolutionPolicy' ) && str_contains( $service_source, 'resolution_policy->resolve' ), 'YandexDeliveryGeoMappingService must use YandexDeliveryGeoResolutionPolicy.' );
 yd_geo_resolution_assert( str_contains( $batch_source, 'YandexDeliveryGeoMappingStatus::NEEDS_REVIEW' ), 'Batch service must classify needs_review.' );
 yd_geo_resolution_assert( '' !== $primary_source && ! str_contains( $primary_source, 'NEEDS_REVIEW' ) && str_contains( $primary_source, 'is_primary' ), 'find_primary_geo_id() must not use needs_review as a working mapping.' );
+yd_geo_resolution_assert( str_contains( $policy_source, 'district_tiebreak_primary' ) && str_contains( $policy_source, 'locality_exact' ) && str_contains( $policy_source, 'region_match' ) && str_contains( $policy_source, 'district_match' ) && str_contains( $policy_source, 'type_match' ), 'Resolution policy source must contain district tie-breaker exact locality/region/district/type guard.' );
 yd_geo_resolution_assert( str_contains( $plugin_source, 'YandexDeliveryGeoResolutionPolicy::class' ) && str_contains( $plugin_source, 'new YandexDeliveryGeoResolutionPolicy()' ) && str_contains( $plugin_source, '$this->container->get( YandexDeliveryGeoResolutionPolicy::class )' ), 'Plugin must register and inject YandexDeliveryGeoResolutionPolicy.' );
 
 echo "Yandex Delivery geo resolution smoke OK\n";
