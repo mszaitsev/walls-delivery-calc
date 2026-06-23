@@ -805,6 +805,45 @@ The Phase 2 pickup/dropoff import is manual AJAX only. The admin tab starts a se
 
 Yandex pickup/dropoff import remains manual-only and page-streamed. Production imports use a conservative default `yandex_delivery_pickup_import_page_size=100`; the admin pickup tab can set 20..500, and the import report records `page_size`, `pages` and `memory_peak_mb`. Use 50 or 100 if a large Yandex page exhausts PHP memory during response decoding.
 
+### 0.84.0 coverage discovery foundation note
+
+This stage answers a narrower operational question: which already mapped WDC locations actually have Yandex pickup/dropoff coverage. It is manual/selective and intentionally does not load or store the full Russia pickup-point database.
+
+Implemented:
+
+- migration `0034_create_yandex_delivery_geo_coverage_table.php` creates `wdc_yandex_delivery_geo_coverage`;
+- statuses are `covered`, `not_covered`, `no_geo_id`, `error` and `unknown`;
+- `YandexDeliveryGeoCoverageService::check_location()` uses only `YandexDeliveryGeoMappingRepository::find_primary_geo_id($location_id)` as the working geo_id source;
+- if no primary geo_id exists, the result is `no_geo_id` and Yandex API is not called;
+- if a primary geo_id exists, the service calls `POST /api/b2b/platform/pickup-points/list` with exactly `{"type":"pickup_point","geo_id":<int>}` for this coverage check, with no `limit` and no pagination;
+- response points can come from `points`, `pickup_points`, `items`, `result` or a root array;
+- `operators_json` stores aggregate counts by `operator_id`;
+- `sample_points_json` stores only the first 5 compact points with `id`, `operator_id`, `dropoff` and `address`;
+- `raw_stats_json` stores compact stats only, not the full raw response;
+- the Yandex admin tab order is now `Данные для входа`, `ПВЗ / точки сдачи`, `Yandex geo_id`, `Yandex geo batch`, `Yandex geo analysis`, `Yandex coverage`;
+- smoke coverage is in `tests/yandex-delivery/run-yandex-delivery-geo-coverage-smoke.php`.
+
+Coverage status semantics:
+
+- `covered`: successful response contains at least one pickup/dropoff point;
+- `not_covered`: primary geo_id exists, request succeeds and returns zero points;
+- `no_geo_id`: no working primary geo_id exists for the WDC location;
+- `error`: API/transport/normalization exception;
+- `unknown`: fallback/default for invalid stored values.
+
+Still intentionally not implemented in 0.84.0: checkout, pricing, PVZ map, PVZ selection, shipment creation, full Russia PVZ import, coordinate fallback or autosync.
+
+Required Yandex smoke list for this stage:
+
+```bash
+php tests/yandex-delivery/run-yandex-delivery-foundation-smoke.php
+php tests/yandex-delivery/run-yandex-delivery-pickup-smoke.php
+php tests/yandex-delivery/run-yandex-delivery-geo-mapping-smoke.php
+php tests/yandex-delivery/run-yandex-delivery-geo-batch-smoke.php
+php tests/yandex-delivery/run-yandex-delivery-geo-analysis-smoke.php
+php tests/yandex-delivery/run-yandex-delivery-geo-resolution-smoke.php
+php tests/yandex-delivery/run-yandex-delivery-geo-coverage-smoke.php
+```
 ### Phase 3 — checkout and order recalculation
 
 - `YandexDeliveryQuoteCarrier`;
