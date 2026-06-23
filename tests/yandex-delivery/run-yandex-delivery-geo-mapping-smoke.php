@@ -22,6 +22,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Infrastructure\Security\EncryptionService;
 use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\ValueObjects\Location;
 
 function yd_geo_assert( bool $condition, string $message ): void {
 	if ( ! $condition ) {
@@ -94,6 +95,7 @@ $GLOBALS['wpdb']->locations = array(
 	array( 'id' => 25, 'country_code' => 'RU', 'region_name' => 'Новосибирская область', 'district_name' => 'Новосибирский район', 'district_type' => 'р-н', 'city_name' => '', 'city_type' => '', 'place_name' => 'Гусиный Брод', 'place_type' => 'с', 'display_name' => '', 'active' => 1 ),
 	array( 'id' => 26, 'country_code' => 'RU', 'region_name' => 'респ Адыгея', 'district_name' => 'Теучежский', 'district_type' => 'р-н', 'city_name' => '', 'city_type' => '', 'place_name' => 'Тлюстенхабль', 'place_type' => 'пгт', 'display_name' => 'респ Адыгея, Теучежский р-н, пгт Тлюстенхабль', 'active' => 1 ),
 	array( 'id' => 27, 'country_code' => 'RU', 'region_name' => 'Краснодарский край', 'district_name' => 'Анапа', 'district_type' => 'МО', 'city_name' => '', 'city_type' => '', 'place_name' => 'Воскресенский', 'place_type' => 'х', 'display_name' => 'Краснодарский край, МО Анапа, х Воскресенский', 'active' => 1 ),
+	array( 'id' => 155, 'country_code' => 'RU', 'region_name' => 'Адыгея', 'region_type' => 'респ.', 'district_name' => 'Теучежский', 'district_type' => 'р-н', 'settlement_name' => 'Тлюстенхабль', 'settlement_type' => 'пгт.', 'place_name' => 'Тлюстенхабль', 'place_type' => 'пгт.', 'display_name' => 'респ Адыгея, Теучежский р-н, пгт Тлюстенхабль', 'active' => 1 ),
 );
 
 $migration_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0033_create_yandex_delivery_geo_mappings_table.php' );
@@ -122,6 +124,9 @@ yd_geo_assert( str_contains( $service_source, 'is_string( $variant[\'address\'] 
 yd_geo_assert( str_contains( $scorer_source, 'final class YandexDeliveryGeoMatchScorer' ) && str_contains( $scorer_source, 'foreign_country_hint' ) && str_contains( $scorer_source, 'matched_by' ), 'Scorer source must contain deterministic smart geo match logic.' );
 yd_geo_assert( str_contains( $scorer_source, 'district_match' ) && str_contains( $scorer_source, 'city_context_match' ) && str_contains( $scorer_source, 'type_match' ) && str_contains( $scorer_source, 'components' ), 'Scorer source must contain district/context/type scoring and component diagnostics.' );
 yd_geo_assert( str_contains( $scorer_source, 'type_equivalent' ) && str_contains( $scorer_source, 'поселок\\s+городского\\s+типа|пгт' ) && str_contains( $scorer_source, 'муниципальный\\s+округ|мо' ), 'Scorer source must contain settlement type and administrative synonym dictionaries.' );
+$long_type_pattern_pos = strpos( $scorer_source, "'поселок\\s+городского\\s+типа|пгт' => 'urban_settlement'" );
+$short_type_pattern_pos = strpos( $scorer_source, "'поселок|пос|п' => 'settlement'" );
+yd_geo_assert( false !== $long_type_pattern_pos && false !== $short_type_pattern_pos && $long_type_pattern_pos < $short_type_pattern_pos, 'Scorer type_patterns() must check long urban settlement pattern before short settlement pattern.' );
 yd_geo_assert( str_contains( $plugin_source, 'YandexDeliveryGeoMatchScorer::class' ) && str_contains( $plugin_source, 'new YandexDeliveryGeoMatchScorer()' ), 'Plugin must register YandexDeliveryGeoMatchScorer in the container.' );
 yd_geo_assert( str_contains( $plugin_source, '$this->container->get( YandexDeliveryGeoMatchScorer::class )' ), 'Plugin must pass YandexDeliveryGeoMatchScorer into YandexDeliveryGeoMappingService.' );
 yd_geo_assert( ! str_contains( $service_source, 'new YandexDeliveryGeoMatchScorer()' ) && ! str_contains( $service_source, '??= new YandexDeliveryGeoMatchScorer' ), 'Geo mapping service must not fallback-construct the scorer.' );
@@ -178,6 +183,10 @@ $score = $scorer->score( $location_repository->find_by_id( 24 ), array( 'geo_id'
 yd_geo_assert( ! in_array( 'locality_exact', $score['matched_by'], true ) && $score['confidence'] <= 30, 'Administrative unit context must not become locality_exact for Voskresensky.' );
 $score = $scorer->score( $location_repository->find_by_id( 26 ), array( 'geo_id' => 155, 'address' => 'посёлок городского типа Тлюстенхабль, Теучежский район, Республика Адыгея' ), 1 );
 yd_geo_assert( $score['confidence'] >= 95 && in_array( 'locality_exact', $score['matched_by'], true ) && in_array( 'region_match', $score['matched_by'], true ) && in_array( 'district_match', $score['matched_by'], true ) && in_array( 'type_match', $score['matched_by'], true ) && in_array( 'type_equivalent', $score['matched_by'], true ), 'Tlyustenkhabl pgt/type synonyms and republic/district abbreviations must score as a strong exact match.' );
+$live_tlyustenkhabl_location = Location::from_array( array( 'id' => 155, 'country_code' => 'RU', 'region_name' => 'Адыгея', 'region_type' => 'респ.', 'district_name' => 'Теучежский', 'district_type' => 'р-н', 'settlement_name' => 'Тлюстенхабль', 'settlement_type' => 'пгт.', 'place_name' => 'Тлюстенхабль', 'place_type' => 'пгт.', 'display_name' => 'респ Адыгея, Теучежский р-н, пгт Тлюстенхабль' ) );
+$live_tlyustenkhabl_variant = array( 'geo_id' => 120190, 'address' => 'посёлок городского типа Тлюстенхабль, Тлюстенхабльское городское поселение, Теучежский район, Республика Адыгея (Адыгея)' );
+$live_tlyustenkhabl_score = $scorer->score( $live_tlyustenkhabl_location, $live_tlyustenkhabl_variant, 1 );
+yd_geo_assert( $live_tlyustenkhabl_score['confidence'] >= 95 && in_array( 'locality_exact', $live_tlyustenkhabl_score['matched_by'], true ) && in_array( 'region_match', $live_tlyustenkhabl_score['matched_by'], true ) && in_array( 'district_match', $live_tlyustenkhabl_score['matched_by'], true ) && in_array( 'type_match', $live_tlyustenkhabl_score['matched_by'], true ) && in_array( 'type_equivalent', $live_tlyustenkhabl_score['matched_by'], true ), 'Live Tlyustenkhabl scorer result must keep high confidence and full matched_by diagnostics.' );
 $score = $scorer->score( $location_repository->find_by_id( 27 ), array( 'geo_id' => 121571, 'address' => 'хутор Воскресенский, муниципальный округ Анапа, Краснодарский край' ), 1 );
 yd_geo_assert( $score['confidence'] >= 95 && in_array( 'district_match', $score['matched_by'], true ), 'MO abbreviation must match municipal district context.' );
 $score = $scorer->score( $location_repository->find_by_id( 21 ), array( 'geo_id' => 2, 'address' => 'Санкт-Петербург' ), 2 );
@@ -217,6 +226,12 @@ yd_geo_assert( true === $success_result['success'] && 1 === count( $after_succes
 $payload = json_decode( (string) $success_http->calls[0]['args']['body'], true );
 yd_geo_assert( array( 'location' => 'Новосибирская область, г Новосибирск' ) === $payload, 'location/detect request must send display_name search string.' );
 yd_geo_assert( (float) $success_result['mappings'][0]['confidence'] >= 95.00, 'confidence must be high when locality and region match.' );
+$live_tlyustenkhabl_http = new YdGeoFakeHttp( new YandexDeliveryApiResponse( 200, json_encode( array( 'locations' => array( $live_tlyustenkhabl_variant ) ), JSON_UNESCAPED_UNICODE ) ?: '{}' ) );
+$live_tlyustenkhabl_repository = new YandexDeliveryGeoMappingRepository( $GLOBALS['wpdb'] );
+$live_tlyustenkhabl_service = new YandexDeliveryGeoMappingService( new LocationRepository( $GLOBALS['wpdb'] ), new YandexDeliveryApiClient( $settings, $live_tlyustenkhabl_http ), $live_tlyustenkhabl_repository, new YandexDeliveryGeoMatchScorer() );
+$live_tlyustenkhabl_result = $live_tlyustenkhabl_service->detect_for_location_id( 155 );
+$live_tlyustenkhabl_rows = $live_tlyustenkhabl_repository->find_by_location_id( 155 );
+yd_geo_assert( true === $live_tlyustenkhabl_result['success'] && YandexDeliveryGeoMappingStatus::MAPPED === $live_tlyustenkhabl_result['status'] && 1 === count( $live_tlyustenkhabl_rows ) && 1 === (int) $live_tlyustenkhabl_rows[0]['is_primary'] && (float) $live_tlyustenkhabl_rows[0]['confidence'] >= 95.00, 'Live Tlyustenkhabl detect must save one primary mapped row with high confidence.' );
 yd_geo_assert( 70.00 === $success_service->confidence( ( new LocationRepository( $GLOBALS['wpdb'] ) )->find_by_id( 10 ), 'Новосибирск', 'Другой регион', 1 ), 'confidence must be 70 when only locality matches.' );
 $normalized_multiple = $success_service->normalize_detect_response( ( new LocationRepository( $GLOBALS['wpdb'] ) )->find_by_id( 10 ), 'query', array( 'body' => array( 'variants' => array( array( 'geoId' => 1, 'address' => array( 'locality' => 'Новосибирск', 'region' => 'Новосибирская область' ) ), array( 'id' => 2, 'name' => 'Новосибирск', 'region_name' => 'Новосибирская область' ) ) ) ) );
 yd_geo_assert( 2 === count( $normalized_multiple ) && YandexDeliveryGeoMappingStatus::MULTIPLE_MATCHES === $normalized_multiple[0]['status'] && (float) $normalized_multiple[0]['confidence'] >= 95.00 && empty( $normalized_multiple[0]['is_primary'] ), 'normalization must keep equally strong duplicate variants ambiguous.' );
