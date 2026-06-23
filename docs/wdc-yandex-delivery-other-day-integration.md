@@ -979,3 +979,10 @@ Statistics are interpreted as:
 Recommended first live run: `limit=1000`, `batch_size=25`. Evaluate `mapped / ambiguous / not_found / errors`, confidence buckets and `errors_last` before increasing scope. Do not run the full 160000 WDC locations yet.
 
 Still intentionally not implemented in this stage: checkout, pricing-calculator, pickup-point selection, map, full Russia PVZ import, coordinate fallback through `pickup-points/list`, shipments, statuses, documents, cron or autosync.
+## Yandex Low Confidence Analysis
+
+0.81.0 adds a read-only dashboard for analyzing saved Yandex geo mapping results after the first batch runs. `YandexDeliveryGeoAnalysisService` reads existing `wdc_yandex_delivery_geo_mappings` rows and related WDC locations only; it does not call Yandex, does not run `location/detect`, does not execute the scorer again and does not create or update mappings.
+
+The admin tab `Yandex geo analysis` sits after `Yandex geo batch` and uses a GET `max_confidence` filter defaulting to `59.99`. It shows confidence buckets from real mapping rows, status counts, top low-confidence regions, top low-confidence settlement types, top `matched_by` patterns parsed from `raw_json.scoring.matched_by`, and the lowest-confidence rows with `location_id`, `display_name`, `geo_id`, `confidence`, `status`, `matched_by` and `reason`.
+
+The goal is to understand which settlements landed in low-confidence buckets such as `40-59`, `1-39` and `0`, and why, before deciding whether any scorer changes are justified later. This stage does not change scorer logic, batch builder logic, checkout, pricing-calculator, pickup-point import/selection, coordinate fallback, shipments, statuses or documents.
