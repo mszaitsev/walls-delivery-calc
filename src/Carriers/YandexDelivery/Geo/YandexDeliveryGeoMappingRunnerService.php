@@ -11,7 +11,10 @@ defined( 'ABSPATH' ) || exit;
 
 final class YandexDeliveryGeoMappingRunnerService {
 	public const OPTION_KEY = 'wdc_yandex_delivery_geo_mapping_runner_state';
-	private const BATCH_SIZE = 20;
+	private const LOCK_KEY = 'wdc_yandex_delivery_geo_mapping_runner_state_lock';
+	private const BATCH_SIZE = 30;
+	private const WORKER_COUNT = 3;
+	private const LOCK_TTL = 120;
 
 	public function __construct(
 		private LocationRepository $locations,
@@ -54,78 +57,64 @@ final class YandexDeliveryGeoMappingRunnerService {
 
 	/** @return array<string,mixed> */
 	public function run_step( string $session_id = '' ): array {
-		$state = $this->current_state();
-		if ( 'running' !== (string) $state['status'] ) {
-			return $state;
-		}
-		if ( '' !== $session_id && $session_id !== (string) $state['session_id'] ) {
-			$state['status'] = 'error';
-			$state['updated_at'] = $this->now();
-			$state['message'] = 'Неверный session_id runner.';
-			$this->save_state( $state );
+		$reservation = $this->reserve_batch( $session_id );
+		$ids = is_array( $reservation['ids'] ?? null ) ? $reservation['ids'] : null;
+		$state = is_array( $reservation['state'] ?? null ) ? $reservation['state'] : $this->current_state();
+		if ( null === $ids || array() === $ids ) {
 			return $state;
 		}
 
-		try {
-			$ids = 'retry_errors' === (string) $state['mode']
-				? $this->mappings->find_technical_error_location_ids_after( (int) $state['last_location_id'], self::BATCH_SIZE )
-				: array_map(
-					static fn( Location $location ): int => (int) $location->id,
-					array_filter( $this->locations->find_batch_after_id( (int) $state['last_location_id'], self::BATCH_SIZE, 'RU', true ), static fn( mixed $location ): bool => $location instanceof Location && null !== $location->id )
-				);
-		} catch ( Throwable $exception ) {
-			$state['status'] = 'error';
-			$state['updated_at'] = $this->now();
-			$state['message'] = $this->truncate( $exception->getMessage(), 500 );
-			$state = $this->append_error( $state, 0, $exception->getMessage() );
-			$this->save_state( $state );
-			return $state;
-		}
-
-		if ( array() === $ids ) {
-			return $this->finish_done( $state );
-		}
-
+		$delta = array(
+			'processed' => 0,
+			'mapped' => 0,
+			'needs_review' => 0,
+			'not_found' => 0,
+			'tech_errors' => 0,
+			'errors_last' => array(),
+		);
 		foreach ( $ids as $location_id ) {
 			$location_id = (int) $location_id;
 			if ( $location_id <= 0 ) {
 				continue;
 			}
-			$state['last_location_id'] = $location_id;
 
 			if ( 'full' === (string) $state['mode'] ) {
 				$this->mappings->delete_location_mappings( $location_id );
 			}
 
-			++$state['processed'];
+			++$delta['processed'];
 			$result = $this->mapping_service->detect_for_runner( $location_id );
-			$state = $this->classify_result( $state, $location_id, $result );
+			$delta = $this->classify_result( $delta, $location_id, $result );
 		}
 
-		$state['updated_at'] = $this->now();
-		$state['message'] = 'Шаг выполнен.';
-		$this->save_state( $state );
-
-		return $state;
+		return $this->apply_step_delta( $session_id, $delta );
 	}
 
 	/** @return array<string,mixed> */
 	public function pause(): array {
-		$state = $this->current_state();
-		if ( 'running' === (string) $state['status'] ) {
-			$state['status'] = 'paused';
-			$state['updated_at'] = $this->now();
-			$state['message'] = 'Маппинг поставлен на паузу.';
-			$this->save_state( $state );
+		if ( ! $this->acquire_lock( 10 ) ) {
+			return $this->current_state();
 		}
+		try {
+			$state = $this->current_state();
+			if ( 'running' === (string) $state['status'] ) {
+				$state['status'] = 'paused';
+				$state['updated_at'] = $this->now();
+				$state['message'] = 'Маппинг поставлен на паузу.';
+				$this->save_state( $state );
+			}
 
-		return $state;
+			return $state;
+		} finally {
+			$this->release_lock();
+		}
 	}
 
 	/** @return array<string,mixed> */
 	public function reset(): array {
 		if ( function_exists( 'delete_option' ) ) {
 			delete_option( self::OPTION_KEY );
+			delete_option( self::LOCK_KEY );
 		} else {
 			$this->save_state( $this->default_state() );
 		}
@@ -142,6 +131,92 @@ final class YandexDeliveryGeoMappingRunnerService {
 	public function is_running(): bool {
 		$state = $this->current_state();
 		return 'running' === (string) $state['status'];
+	}
+
+	/** @return array{ids:?array<int,int>,state:array<string,mixed>} */
+	private function reserve_batch( string $session_id = '' ): array {
+		if ( ! $this->acquire_lock( 10 ) ) {
+			return array( 'ids' => null, 'state' => $this->current_state() );
+		}
+
+		try {
+			$state = $this->current_state();
+			if ( 'running' !== (string) $state['status'] ) {
+				return array( 'ids' => null, 'state' => $state );
+			}
+			if ( '' !== $session_id && $session_id !== (string) $state['session_id'] ) {
+				$state['status'] = 'error';
+				$state['updated_at'] = $this->now();
+				$state['message'] = 'Неверный session_id runner.';
+				$this->save_state( $state );
+				return array( 'ids' => null, 'state' => $state );
+			}
+
+			try {
+				$ids = 'retry_errors' === (string) $state['mode']
+					? $this->mappings->find_technical_error_location_ids_after( (int) $state['next_location_id'], self::BATCH_SIZE )
+					: array_map(
+						static fn( Location $location ): int => (int) $location->id,
+						array_filter( $this->locations->find_batch_after_id( (int) $state['next_location_id'], self::BATCH_SIZE, 'RU', true ), static fn( mixed $location ): bool => $location instanceof Location && null !== $location->id )
+					);
+			} catch ( Throwable $exception ) {
+				$state['status'] = 'error';
+				$state['updated_at'] = $this->now();
+				$state['message'] = $this->truncate( $exception->getMessage(), 500 );
+				$state = $this->append_error( $state, 0, $exception->getMessage() );
+				$this->save_state( $state );
+				return array( 'ids' => null, 'state' => $state );
+			}
+
+			$ids = array_values( array_filter( array_map( 'intval', $ids ), static fn( int $id ): bool => $id > 0 ) );
+			if ( array() === $ids ) {
+				$state = $this->finish_done( $state );
+				return array( 'ids' => array(), 'state' => $state );
+			}
+
+			$state['next_location_id'] = max( $ids );
+			$state['updated_at'] = $this->now();
+			$state['message'] = sprintf( 'Зарезервирован batch до location_id %d.', (int) $state['next_location_id'] );
+			$this->save_state( $state );
+
+			return array( 'ids' => $ids, 'state' => $state );
+		} finally {
+			$this->release_lock();
+		}
+	}
+
+	/** @param array<string,mixed> $delta @return array<string,mixed> */
+	private function apply_step_delta( string $session_id, array $delta ): array {
+		if ( ! $this->acquire_lock( 10 ) ) {
+			return $this->current_state();
+		}
+
+		try {
+			$state = $this->current_state();
+			if ( '' !== $session_id && $session_id !== (string) $state['session_id'] ) {
+				$state['status'] = 'error';
+				$state['updated_at'] = $this->now();
+				$state['message'] = 'Неверный session_id runner.';
+				$this->save_state( $state );
+				return $state;
+			}
+
+			foreach ( array( 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors' ) as $key ) {
+				$state[ $key ] = max( 0, (int) ( $state[ $key ] ?? 0 ) ) + max( 0, (int) ( $delta[ $key ] ?? 0 ) );
+			}
+			$errors = is_array( $state['errors_last'] ?? null ) ? $state['errors_last'] : array();
+			$delta_errors = is_array( $delta['errors_last'] ?? null ) ? $delta['errors_last'] : array();
+			$state['errors_last'] = array_slice( array_merge( $errors, $delta_errors ), -10 );
+			$state['updated_at'] = $this->now();
+			if ( 'done' !== (string) $state['status'] ) {
+				$state['message'] = 'Шаг выполнен.';
+			}
+			$this->save_state( $state );
+
+			return $state;
+		} finally {
+			$this->release_lock();
+		}
 	}
 
 	/** @param array<string,mixed> $state @param array<string,mixed> $result @return array<string,mixed> */
@@ -203,7 +278,7 @@ final class YandexDeliveryGeoMappingRunnerService {
 			'session_id' => '',
 			'started_at' => '',
 			'updated_at' => '',
-			'last_location_id' => 0,
+			'next_location_id' => 0,
 			'processed' => 0,
 			'mapped' => 0,
 			'needs_review' => 0,
@@ -213,6 +288,7 @@ final class YandexDeliveryGeoMappingRunnerService {
 			'message' => '',
 			'errors_last' => array(),
 			'batch_size' => self::BATCH_SIZE,
+			'worker_count' => self::WORKER_COUNT,
 		);
 	}
 
@@ -221,11 +297,12 @@ final class YandexDeliveryGeoMappingRunnerService {
 		$normalized = array_replace( $this->default_state(), $state );
 		$normalized['status'] = in_array( (string) $normalized['status'], array( 'idle', 'running', 'paused', 'done', 'error' ), true ) ? (string) $normalized['status'] : 'idle';
 		$normalized['mode'] = in_array( (string) $normalized['mode'], array( 'full', 'retry_errors' ), true ) ? (string) $normalized['mode'] : 'full';
-		foreach ( array( 'last_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'total_estimated' ) as $key ) {
+		foreach ( array( 'next_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'total_estimated' ) as $key ) {
 			$normalized[ $key ] = max( 0, (int) $normalized[ $key ] );
 		}
 		$normalized = array_intersect_key( $normalized, $this->default_state() );
 		$normalized['batch_size'] = self::BATCH_SIZE;
+		$normalized['worker_count'] = self::WORKER_COUNT;
 		$normalized['errors_last'] = array_slice( is_array( $normalized['errors_last'] ) ? $normalized['errors_last'] : array(), -10 );
 
 		return $normalized;
@@ -235,6 +312,37 @@ final class YandexDeliveryGeoMappingRunnerService {
 	private function save_state( array $state ): void {
 		if ( function_exists( 'update_option' ) ) {
 			update_option( self::OPTION_KEY, $this->normalize_state( $state ), false );
+		}
+	}
+
+	private function acquire_lock( int $attempts = 1 ): bool {
+		if ( ! function_exists( 'add_option' ) || ! function_exists( 'delete_option' ) || ! function_exists( 'get_option' ) ) {
+			return true;
+		}
+		$attempts = max( 1, $attempts );
+		for ( $attempt = 0; $attempt < $attempts; ++$attempt ) {
+			$now = time();
+			if ( add_option( self::LOCK_KEY, (string) $now, '', 'no' ) ) {
+				return true;
+			}
+			$locked_at = (int) get_option( self::LOCK_KEY, 0 );
+			if ( $locked_at > 0 && ( $now - $locked_at ) > self::LOCK_TTL ) {
+				delete_option( self::LOCK_KEY );
+				if ( add_option( self::LOCK_KEY, (string) $now, '', 'no' ) ) {
+					return true;
+				}
+			}
+			if ( $attempt + 1 < $attempts && function_exists( 'usleep' ) ) {
+				usleep( 50000 );
+			}
+		}
+
+		return false;
+	}
+
+	private function release_lock(): void {
+		if ( function_exists( 'delete_option' ) ) {
+			delete_option( self::LOCK_KEY );
 		}
 	}
 

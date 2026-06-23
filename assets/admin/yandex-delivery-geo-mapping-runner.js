@@ -4,6 +4,7 @@
 	var config = window.wdcYandexDeliveryGeoMappingRunner || {};
 	var state = config.initialState || {};
 	var running = false;
+	var activeWorkers = {};
 
 	function qs(selector) {
 		return document.querySelector(selector);
@@ -44,10 +45,15 @@
 		}
 	}
 
+	function workerCount() {
+		var count = Number(state.worker_count || 3);
+		return Math.max(1, Math.min(3, count || 3));
+	}
+
 	function render(nextState) {
 		state = nextState || state || {};
-		['status', 'mode', 'session_id', 'last_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'total_estimated', 'updated_at', 'message', 'batch_size'].forEach(function (field) {
-			setText(field, state[field] || (field === 'batch_size' ? '20' : ''));
+		['status', 'mode', 'session_id', 'next_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'total_estimated', 'updated_at', 'message', 'worker_count', 'batch_size'].forEach(function (field) {
+			setText(field, state[field] || (field === 'batch_size' ? '30' : (field === 'worker_count' ? '3' : '')));
 		});
 		var done = Number(state.processed || 0);
 		var total = Number(state.total_estimated || 0);
@@ -78,29 +84,39 @@
 		});
 	}
 
-	function loop() {
-		if (!running || !state || state.status !== 'running') {
-			running = false;
+	function stopWorkers() {
+		running = false;
+		activeWorkers = {};
+	}
+
+	function workerLoop(workerId) {
+		if (!running || !state || state.status !== 'running' || !activeWorkers[workerId]) {
+			delete activeWorkers[workerId];
 			return;
 		}
-		post('step', {session_id: state.session_id || ''}).then(function (nextState) {
+		post('step', {session_id: state.session_id || '', worker_id: workerId}).then(function (nextState) {
 			render(nextState);
-			if (nextState.status === 'running') {
-				window.setTimeout(loop, 250);
+			if (running && nextState.status === 'running' && activeWorkers[workerId]) {
+				window.setTimeout(function () { workerLoop(workerId); }, 250);
 			} else {
-				running = false;
+				delete activeWorkers[workerId];
 			}
 		}).catch(function (error) {
-			running = false;
+			stopWorkers();
 			render(Object.assign({}, state, {status: 'error', message: error.message || 'AJAX error'}));
 		});
 	}
 
 	function startLoop(nextState) {
 		render(nextState);
+		stopWorkers();
 		running = state.status === 'running';
-		if (running) {
-			loop();
+		if (!running) {
+			return;
+		}
+		for (var i = 1; i <= workerCount(); i += 1) {
+			activeWorkers[i] = true;
+			workerLoop(i);
 		}
 	}
 
@@ -116,12 +132,12 @@
 		} else if (action === 'retry_errors') {
 			post('retry_errors').then(startLoop);
 		} else if (action === 'step') {
-			post('step', {session_id: state.session_id || ''}).then(render);
+			post('step', {session_id: state.session_id || '', worker_id: 'manual'}).then(render);
 		} else if (action === 'pause') {
-			running = false;
+			stopWorkers();
 			post('pause').then(render);
 		} else if (action === 'reset') {
-			running = false;
+			stopWorkers();
 			post('reset').then(render);
 		}
 	});

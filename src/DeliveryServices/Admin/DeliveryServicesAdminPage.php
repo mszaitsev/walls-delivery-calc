@@ -1726,7 +1726,7 @@ final class DeliveryServicesAdminPage {
 			'status' => 'Статус',
 			'mode' => 'Режим',
 			'session_id' => 'session_id',
-			'last_location_id' => 'last_location_id',
+			'next_location_id' => 'next_location_id',
 			'processed' => 'processed',
 			'mapped' => 'mapped',
 			'needs_review' => 'needs_review',
@@ -1739,7 +1739,7 @@ final class DeliveryServicesAdminPage {
 		);
 		?>
 		<h3><?php echo esc_html__( 'Массовый маппинг', 'walls-delivery-calc' ); ?></h3>
-		<p class="description"><?php echo esc_html__( 'Полный маппинг всегда полностью перестраивает сопоставление geo_id для всей базы населённых пунктов. Обработка идет батчами по 20, состояние сохраняется после закрытия страницы.', 'walls-delivery-calc' ); ?></p>
+		<p class="description"><?php echo esc_html__( 'Полный маппинг всегда полностью перестраивает сопоставление geo_id для всей базы населённых пунктов. Обработка идет тремя параллельными browser-worker батчами по 30, состояние сохраняется после закрытия страницы.', 'walls-delivery-calc' ); ?></p>
 		<div class="notice notice-info inline wdc-yandex-geo-runner-notice" style="display:none;"><p><?php echo esc_html__( 'Сейчас выполняется массовый маппинг. Ручная обработка временно заблокирована.', 'walls-delivery-calc' ); ?></p></div>
 		<table class="widefat striped wdc-yandex-geo-runner-state" style="max-width: 980px; margin: 12px 0;">
 			<thead><tr><th><?php echo esc_html__( 'Поле', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Значение', 'walls-delivery-calc' ); ?></th></tr></thead>
