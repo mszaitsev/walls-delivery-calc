@@ -1516,6 +1516,39 @@ final class LocationRepository {
 		);
 		return $this->rows_to_locations( is_array( $rows ) ? $rows : array() );
 	}
+	public function count_batch_locations( string $country_code = 'RU', bool $require_display_name = true ): int {
+		$country_code = strtoupper( trim( $country_code ) );
+		if ( $this->has_test_location_rows() ) {
+			$count = 0;
+			foreach ( $this->test_location_rows() as $row ) {
+				if ( 1 !== (int) ( $row['active'] ?? 1 ) ) {
+					continue;
+				}
+				if ( '' !== $country_code && strtoupper( (string) ( $row['country_code'] ?? '' ) ) !== $country_code ) {
+					continue;
+				}
+				if ( $require_display_name && '' === (string) ( $row['display_name'] ?? '' ) ) {
+					continue;
+				}
+				++$count;
+			}
+			return $count;
+		}
+
+		$where = array( 'active = 1' );
+		$args = array();
+		if ( '' !== $country_code ) {
+			$where[] = 'country_code = %s';
+			$args[] = $country_code;
+		}
+		if ( $require_display_name ) {
+			$where[] = "display_name IS NOT NULL AND display_name != ''";
+		}
+		$sql = 'SELECT COUNT(*) FROM ' . $this->table_name() . ' WHERE ' . implode( ' AND ', $where );
+		$value = array() === $args ? $this->wpdb->get_var( $sql ) : $this->wpdb->get_var( $this->wpdb->prepare( $sql, ...$args ) );
+
+		return is_numeric( $value ) ? max( 0, (int) $value ) : 0;
+	}
 	public function update_display_fields( Location $location, string $display_name ): bool {
 		if ( null === $location->id || $location->id <= 0 ) {
 			return false;

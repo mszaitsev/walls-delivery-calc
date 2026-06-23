@@ -60,6 +60,26 @@ final class YandexDeliveryGeoMappingService {
 			return array( 'success' => false, 'status' => YandexDeliveryGeoMappingStatus::ERROR, 'query' => $query, 'message' => $exception->getMessage(), 'mappings' => array( $mapping ) );
 		}
 	}
+	/** @return array<string,mixed> */
+	public function detect_for_runner( int $location_id ): array {
+		$location = $this->locations->find_by_id( $location_id );
+		if ( ! $location instanceof Location ) {
+			return array( 'success' => false, 'status' => YandexDeliveryGeoMappingStatus::NOT_FOUND, 'message' => 'Населенный пункт WDC не найден.', 'mappings' => array(), 'technical_error' => false );
+		}
+		$query = $this->build_search_query( $location );
+		$result = $this->detect_for_location_id( $location_id );
+		$status = (string) ( $result['status'] ?? '' );
+		if ( YandexDeliveryGeoMappingStatus::ERROR === $status ) {
+			$marker = $this->repository->save_technical_error_marker( $location_id, $query, (string) ( $result['message'] ?? 'Yandex location/detect technical error.' ) );
+			$result['mappings'] = array( $marker );
+			$result['technical_error'] = true;
+			$result['query'] = $query;
+			return $result;
+		}
+
+		$result['technical_error'] = false;
+		return $result;
+	}
 
 	/** @return array<int,Location> */
 	public function search_locations( string $query, int $limit = 10 ): array {

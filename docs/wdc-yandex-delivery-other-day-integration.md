@@ -1,6 +1,13 @@
+## 0.86.0 Yandex Geo Mapping Runner
+
+The `Маппинг geo_id` tab now contains a production runner for full automatic mapping of the WDC locations base. It processes active RU locations with non-empty `display_name` in fixed batches of 20, stores state in `wdc_yandex_delivery_geo_mapping_runner_state`, survives page refresh, and can continue, pause or reset from the admin UI.
+
+Technical `location/detect` failures use marker `999999999`. This marker is not a working geo_id, is never primary, and exists only to make failed locations searchable for retry. The retry-errors mode processes only marker rows and replaces or clears the marker when a normal mapped/needs_review/not_found result is produced.
+
+Manual mapping actions are blocked while the runner is `running`. Coverage batch, PVZ import, checkout and pricing remain out of scope for this stage.
 # WDC Yandex Delivery Other-Day Integration
 
-Status: foundation/API/settings, pickup diagnostics, geo_id mapping, coverage discovery and admin UX consolidation are implemented through 0.85.0; checkout, pricing, order recalculation, shipments and full Russia PVZ import remain planned.
+Status: foundation/API/settings, pickup diagnostics, geo_id mapping, coverage discovery, admin UX consolidation and full geo mapping runner are implemented through 0.86.0; checkout, pricing, order recalculation, shipments and full Russia PVZ import remain planned.
 
 Date: 2026-06-22.
 

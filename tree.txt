@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 000000AE A0AC:74BD
+Volume serial number is 0000004F A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -22,6 +22,7 @@ C:.
 |   |       russian-post-pickup-import.js
 |   |       shipments-admin.css
 |   |       shipments-admin.js
+|   |       yandex-delivery-geo-mapping-runner.js
 |   |       yandex-delivery-pickup-import.js
 |   |
 |   +---frontend
@@ -314,6 +315,7 @@ C:.
 |   |       |       YandexDeliveryGeoDistance.php
 |   |       |       YandexDeliveryGeoMappingBatchService.php
 |   |       |       YandexDeliveryGeoMappingRepository.php
+|   |       |       YandexDeliveryGeoMappingRunnerService.php
 |   |       |       YandexDeliveryGeoMappingService.php
 |   |       |       YandexDeliveryGeoMappingStatus.php
 |   |       |       YandexDeliveryGeoMatchScorer.php
@@ -790,4 +792,5 @@ C:.
             run-yandex-delivery-geo-coverage-smoke.php
             run-yandex-delivery-geo-mapping-smoke.php
             run-yandex-delivery-geo-resolution-smoke.php
+            run-yandex-delivery-geo-runner-smoke.php
             run-yandex-delivery-pickup-smoke.php

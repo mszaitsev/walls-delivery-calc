@@ -1,0 +1,174 @@
+<?php
+declare(strict_types=1);
+
+defined( 'ABSPATH' ) || define( 'ABSPATH', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
+defined( 'ARRAY_A' ) || define( 'ARRAY_A', 'ARRAY_A' );
+defined( 'WDC_SECRET_KEY' ) || define( 'WDC_SECRET_KEY', 'yandex-delivery-geo-runner-smoke-key' );
+defined( 'WDC_PLUGIN_DIR' ) || define( 'WDC_PLUGIN_DIR', dirname( __DIR__, 2 ) . DIRECTORY_SEPARATOR );
+
+require_once WDC_PLUGIN_DIR . 'src/Core/Autoloader.php';
+( new WallsShop\WDC\Core\Autoloader( 'WallsShop\\WDC\\', WDC_PLUGIN_DIR . 'src' ) )->register();
+
+use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiClient;
+use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiException;
+use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryApiResponse;
+use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryHttpClientInterface;
+use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingRepository;
+use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingRunnerService;
+use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingService;
+use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingStatus;
+use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMatchScorer;
+use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoResolutionPolicy;
+use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
+use WallsShop\WDC\Infrastructure\Security\EncryptionService;
+use WallsShop\WDC\Infrastructure\Settings\SettingsRepository;
+use WallsShop\WDC\Locations\Storage\LocationRepository;
+
+function yd_geo_runner_assert( bool $condition, string $message ): void {
+	if ( ! $condition ) {
+		throw new RuntimeException( $message );
+	}
+}
+
+function current_time( string $type ): string { return '2026-06-24 12:00:00'; }
+function wp_salt( string $scheme = '' ): string { return 'yandex-delivery-geo-runner-smoke-salt-' . $scheme; }
+function wp_generate_uuid4(): string { static $i = 0; ++$i; return 'runner-session-' . $i; }
+function get_option( string $key, mixed $default = false ): mixed { return $GLOBALS['wdc_yandex_delivery_geo_runner_options'][ $key ] ?? $default; }
+function update_option( string $key, mixed $value, bool|string $autoload = false ): bool { $GLOBALS['wdc_yandex_delivery_geo_runner_options'][ $key ] = $value; return true; }
+function delete_option( string $key ): bool { unset( $GLOBALS['wdc_yandex_delivery_geo_runner_options'][ $key ] ); return true; }
+function sanitize_key( string $key ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( $key ) ) ?? ''; }
+function sanitize_text_field( mixed $value ): string { return trim( strip_tags( (string) $value ) ); }
+function wp_unslash( mixed $value ): mixed { return $value; }
+function wp_json_encode( mixed $value, int $flags = 0, int $depth = 512 ): string|false { return json_encode( $value, $flags, $depth ); }
+function dbDelta( string|array $queries = '', bool $execute = true ): array { return array(); }
+
+if ( ! class_exists( 'wpdb' ) ) {
+	class wpdb {
+		public string $prefix = 'wp_';
+		public array $locations = array();
+		public array $yandex_delivery_geo_mappings = array();
+
+		public function prepare( string $query, mixed ...$args ): string {
+			foreach ( $args as $arg ) {
+				$replacement = is_int( $arg ) || is_float( $arg ) ? (string) $arg : "'" . str_replace( "'", "''", (string) $arg ) . "'";
+				$query = preg_replace( '/%[sdf]/', $replacement, $query, 1 ) ?? $query;
+			}
+			return $query;
+		}
+
+		public function esc_like( string $text ): string { return addcslashes( $text, '_%\\' ); }
+	}
+}
+
+final class YdGeoRunnerFakeHttp implements YandexDeliveryHttpClientInterface {
+	public array $calls = array();
+
+	public function request( string $method, string $url, array $args = array() ): YandexDeliveryApiResponse {
+		$this->calls[] = compact( 'method', 'url', 'args' );
+		$payload = json_decode( (string) ( $args['body'] ?? '{}' ), true );
+		$query = (string) ( $payload['location'] ?? '' );
+		if ( str_contains( $query, 'Retry Error' ) || str_contains( $query, 'Ошибка' ) ) {
+			throw new YandexDeliveryApiException( 'timeout for ' . $query, array( 'error_code' => 'timeout' ) );
+		}
+		if ( str_contains( $query, 'Retry Empty' ) || str_contains( $query, 'Пусто' ) ) {
+			return new YandexDeliveryApiResponse( 200, '{"locations":[]}' );
+		}
+		$geo_id = 100000 + count( $this->calls );
+		if ( str_contains( $query, 'Retry Success' ) ) {
+			$geo_id = 501;
+		}
+		$locality = preg_replace( '/^.*г\s+/u', '', $query ) ?: $query;
+		return new YandexDeliveryApiResponse( 200, json_encode( array( 'locations' => array( array( 'geo_id' => $geo_id, 'locality' => $locality, 'region' => 'Новосибирская область' ) ) ), JSON_UNESCAPED_UNICODE ) ?: '{}' );
+	}
+}
+
+function yd_geo_runner_location( int $id, string $name, string $country = 'RU', bool $active = true, string $display = 'auto' ): array {
+	$display_name = 'auto' === $display ? 'Новосибирская область, г ' . $name : $display;
+	return array( 'id' => $id, 'country_code' => $country, 'region_name' => 'Новосибирская область', 'city_name' => $name, 'place_name' => $name, 'place_type' => 'г', 'display_name' => $display_name, 'active' => $active ? 1 : 0 );
+}
+
+function yd_geo_runner_service( wpdb $wpdb, YdGeoRunnerFakeHttp $http ): YandexDeliveryGeoMappingRunnerService {
+	$settings = new YandexDeliverySettings( new SettingsRepository(), new EncryptionService() );
+	$settings->save_from_admin( array( YandexDeliverySettings::ENVIRONMENT_KEY => YandexDeliverySettings::ENV_TEST, 'yandex_delivery_test_bearer_token' => 'secret-test-token', YandexDeliverySettings::TEST_PLATFORM_STATION_ID_KEY => 'sender-1' ) );
+	$repository = new YandexDeliveryGeoMappingRepository( $wpdb );
+	$mapping_service = new YandexDeliveryGeoMappingService( new LocationRepository( $wpdb ), new YandexDeliveryApiClient( $settings, $http ), $repository, new YandexDeliveryGeoMatchScorer(), new YandexDeliveryGeoResolutionPolicy() );
+	return new YandexDeliveryGeoMappingRunnerService( new LocationRepository( $wpdb ), $repository, $mapping_service );
+}
+
+$GLOBALS['wdc_yandex_delivery_geo_runner_options'] = array();
+$GLOBALS['wpdb'] = new wpdb();
+for ( $i = 1; $i <= 25; ++$i ) {
+	$GLOBALS['wpdb']->locations[] = yd_geo_runner_location( $i, 'Город ' . $i );
+}
+$GLOBALS['wpdb']->locations[] = yd_geo_runner_location( 30, 'KZ City', 'KZ' );
+$GLOBALS['wpdb']->locations[] = yd_geo_runner_location( 31, 'No Display', 'RU', true, '' );
+$repository = new YandexDeliveryGeoMappingRepository( $GLOBALS['wpdb'] );
+$repository->save_mapping( array( 'location_id' => 1, 'yandex_geo_id' => 65, 'status' => YandexDeliveryGeoMappingStatus::MAPPED, 'confidence' => 100, 'is_primary' => 1 ) );
+$http = new YdGeoRunnerFakeHttp();
+$runner = yd_geo_runner_service( $GLOBALS['wpdb'], $http );
+$state = $runner->start_full();
+yd_geo_runner_assert( 'full' === $state['mode'] && 'running' === $state['status'] && 25 === (int) $state['total_estimated'] && 20 === (int) $state['batch_size'], 'start_full() must start full mode with fixed batch size 20 and full estimated total.' );
+$state = $runner->run_step( (string) $state['session_id'] );
+yd_geo_runner_assert( 20 === (int) $state['last_location_id'] && 19 === (int) $state['processed'] && 1 === (int) $state['skipped_existing'] && 19 === count( $http->calls ), 'Full runner first step must process id ASC in batches of 20 and skip existing primary.' );
+$runner_after_refresh = yd_geo_runner_service( $GLOBALS['wpdb'], $http );
+$state_after_refresh = $runner_after_refresh->current_state();
+yd_geo_runner_assert( 20 === (int) $state_after_refresh['last_location_id'] && 19 === (int) $state_after_refresh['processed'], 'current_state() must preserve progress after refresh.' );
+$state = $runner_after_refresh->run_step( (string) $state_after_refresh['session_id'] );
+yd_geo_runner_assert( 25 === (int) $state['last_location_id'] && 24 === (int) $state['processed'], 'Second full runner step must continue after last_location_id.' );
+$state = $runner_after_refresh->run_step( (string) $state['session_id'] );
+yd_geo_runner_assert( 'done' === $state['status'], 'Full runner must finish as done when locations are exhausted.' );
+
+$GLOBALS['wdc_yandex_delivery_geo_runner_options'] = array();
+$GLOBALS['wpdb'] = new wpdb();
+$GLOBALS['wpdb']->locations = array(
+	yd_geo_runner_location( 101, 'Retry Success' ),
+	yd_geo_runner_location( 102, 'Retry Empty' ),
+	yd_geo_runner_location( 103, 'Retry Error' ),
+	yd_geo_runner_location( 104, 'Normal City' ),
+);
+$repository = new YandexDeliveryGeoMappingRepository( $GLOBALS['wpdb'] );
+$repository->save_technical_error_marker( 101, 'Retry Success', 'old timeout' );
+$repository->save_technical_error_marker( 102, 'Retry Empty', 'old timeout' );
+$repository->save_technical_error_marker( 103, 'Retry Error', 'old timeout' );
+$http = new YdGeoRunnerFakeHttp();
+$runner = yd_geo_runner_service( $GLOBALS['wpdb'], $http );
+$state = $runner->retry_errors();
+yd_geo_runner_assert( 'retry_errors' === $state['mode'] && 3 === (int) $state['total_estimated'], 'retry_errors() must estimate only technical marker rows.' );
+$state = $runner->run_step( (string) $state['session_id'] );
+yd_geo_runner_assert( 3 === count( $http->calls ) && 103 === (int) $state['last_location_id'] && 1 === (int) $state['mapped'] && 1 === (int) $state['not_found'] && 1 === (int) $state['tech_errors'], 'Retry runner must process only marker rows and classify success/not_found/new error.' );
+yd_geo_runner_assert( 501 === $repository->find_primary_geo_id( 101 ), 'Successful retry must replace marker with correct primary geo_id.' );
+yd_geo_runner_assert( null === $repository->find_primary_geo_id( 102 ) && YandexDeliveryGeoMappingStatus::NOT_FOUND === (string) $repository->find_by_location_id( 102 )[0]['status'], 'Retry not_found must clear marker and save normal not_found row.' );
+yd_geo_runner_assert( array( 103 ) === $repository->find_technical_error_location_ids_after( 0, 20 ), 'Retry technical error must keep marker for another retry.' );
+$state = $runner->run_step( (string) $state['session_id'] );
+yd_geo_runner_assert( 'done' === $state['status'], 'Retry runner must finish as done after marker ids are exhausted.' );
+
+$marker = $repository->find_by_location_id( 103 )[0];
+yd_geo_runner_assert( YandexDeliveryGeoMappingRepository::TECHNICAL_ERROR_GEO_ID === (int) $marker['yandex_geo_id'] && empty( $marker['is_primary'] ) && YandexDeliveryGeoMappingStatus::ERROR === (string) $marker['status'], 'Technical marker must be saved as non-primary yandex_geo_id=999999999 with error status.' );
+yd_geo_runner_assert( null === $repository->find_primary_geo_id( 103 ), 'find_primary_geo_id() must never return technical marker 999999999.' );
+yd_geo_runner_assert( false === $repository->set_primary( 103, YandexDeliveryGeoMappingRepository::TECHNICAL_ERROR_GEO_ID ), 'set_primary() must reject technical marker 999999999.' );
+
+$runner_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingRunnerService.php' );
+$repository_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingRepository.php' );
+$service_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingService.php' );
+$admin_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
+$plugin_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Core/Plugin.php' );
+$js_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'assets/admin/yandex-delivery-geo-mapping-runner.js' );
+$version_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'walls-delivery-calc.php' );
+
+yd_geo_runner_assert( str_contains( $runner_source, 'private const BATCH_SIZE = 20' ) && ! str_contains( $runner_source, 'DEFAULT_LIMIT' ) && ! str_contains( $runner_source, 'clamp_limit' ), 'Runner service must use fixed batch size 20 and no limit setting.' );
+yd_geo_runner_assert( str_contains( $runner_source, "\$state['status'] = 'done'" ) && str_contains( $runner_source, "\$state['mode'] = 'retry_errors'" ), 'Runner state must support done and retry_errors mode.' );
+yd_geo_runner_assert( str_contains( $repository_source, 'TECHNICAL_ERROR_GEO_ID = 999999999' ) && str_contains( $repository_source, 'save_technical_error_marker' ) && str_contains( $repository_source, 'find_technical_error_location_ids_after' ) && str_contains( $repository_source, 'clear_technical_error_marker' ) && str_contains( $repository_source, 'is_technical_error_geo_id' ), 'Repository must expose technical marker helpers.' );
+yd_geo_runner_assert( str_contains( $service_source, 'detect_for_runner' ) && str_contains( $service_source, 'save_technical_error_marker' ), 'Mapping service must expose runner-safe detection and save marker on technical errors.' );
+foreach ( array( 'wdc_yandex_delivery_geo_mapping_runner_start', 'wdc_yandex_delivery_geo_mapping_runner_retry_errors', 'wdc_yandex_delivery_geo_mapping_runner_step', 'wdc_yandex_delivery_geo_mapping_runner_pause', 'wdc_yandex_delivery_geo_mapping_runner_reset', 'wdc_yandex_delivery_geo_mapping_runner_status' ) as $action ) {
+	yd_geo_runner_assert( str_contains( $admin_source, $action ), 'Admin AJAX action missing: ' . $action );
+}
+yd_geo_runner_assert( str_contains( $admin_source, 'Сейчас выполняется массовый маппинг. Ручная обработка временно заблокирована.' ) && str_contains( $admin_source, '$this->yandex_delivery_geo_runner->is_running()' ), 'Admin POST/UI must block manual mapping while runner is running.' );
+yd_geo_runner_assert( str_contains( $admin_source, 'is_technical_error_geo_id( $row_geo_id )' ) && ! str_contains( $admin_source, 'yandex_delivery_geo_batch_limit' ) && ! str_contains( $admin_source, 'yandex_delivery_geo_batch_size' ), 'Admin UI must hide primary action for marker and remove legacy limit/batch_size fields.' );
+yd_geo_runner_assert( str_contains( $plugin_source, 'YandexDeliveryGeoMappingRunnerService::class' ), 'Plugin must register runner service.' );
+yd_geo_runner_assert( str_contains( $js_source, "post('step'" ) && str_contains( $js_source, 'startLoop' ) && str_contains( $js_source, "status === 'running'" ), 'Runner JS must call AJAX step loop while running.' );
+yd_geo_runner_assert( str_contains( $version_source, '0.86.0' ), 'Plugin version must be 0.86.0.' );
+foreach ( array( 'CheckoutOrchestrator', 'pricing', 'pickupPointsList', 'YandexDeliveryPickupPointImportService' ) as $forbidden ) {
+	yd_geo_runner_assert( ! str_contains( $runner_source, $forbidden ), 'Runner must not touch checkout/pricing/PVZ import code: ' . $forbidden );
+}
+
+echo "Yandex Delivery geo mapping runner smoke OK\n";
