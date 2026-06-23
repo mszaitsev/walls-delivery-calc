@@ -1,3 +1,5 @@
+0.87.3 note: simplified the Yandex Geo Mapping Runner back to one browser worker with BATCH_SIZE=50. The runner keeps next_location_id, full/retry_errors modes, pause/reset and technical marker handling, but removes WORKER_COUNT/worker_count from state/UI and removes parallel worker JS markers. Scoring, resolution policy, coverage, PVZ import, checkout and pricing were not changed.
+
 0.87.2 note: fixed Yandex Geo Mapping Runner counter aggregation for parallel browser workers. `apply_step_delta()` now waits longer for the option lock, applies each worker delta to the fresh state read under the lock, saves the aggregate, and returns the fresh persisted state so 3 workers x 30 rows advance processed and status counters by 90. Reservation, retry_errors selection, coverage, PVZ import, checkout and pricing were not changed.
 
 0.87.1 note: fixed the Yandex Geo Mapping Runner admin state table so `worker_count=3` is displayed next to `batch_size=30` on the `Маппинг geo_id` tab. Runner reservation, retry_errors, coverage, PVZ import, checkout and pricing logic were not changed.

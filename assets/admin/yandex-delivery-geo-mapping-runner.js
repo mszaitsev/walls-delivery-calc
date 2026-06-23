@@ -4,7 +4,6 @@
 	var config = window.wdcYandexDeliveryGeoMappingRunner || {};
 	var state = config.initialState || {};
 	var running = false;
-	var activeWorkers = {};
 
 	function qs(selector) {
 		return document.querySelector(selector);
@@ -45,15 +44,10 @@
 		}
 	}
 
-	function workerCount() {
-		var count = Number(state.worker_count || 3);
-		return Math.max(1, Math.min(3, count || 3));
-	}
-
 	function render(nextState) {
 		state = nextState || state || {};
-		['status', 'mode', 'session_id', 'next_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'total_estimated', 'updated_at', 'message', 'worker_count', 'batch_size'].forEach(function (field) {
-			setText(field, state[field] || (field === 'batch_size' ? '30' : (field === 'worker_count' ? '3' : '')));
+		['status', 'mode', 'session_id', 'next_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'total_estimated', 'updated_at', 'message', 'batch_size'].forEach(function (field) {
+			setText(field, state[field] || (field === 'batch_size' ? '50' : ''));
 		});
 		var done = Number(state.processed || 0);
 		var total = Number(state.total_estimated || 0);
@@ -84,39 +78,29 @@
 		});
 	}
 
-	function stopWorkers() {
-		running = false;
-		activeWorkers = {};
-	}
-
-	function workerLoop(workerId) {
-		if (!running || !state || state.status !== 'running' || !activeWorkers[workerId]) {
-			delete activeWorkers[workerId];
+	function loop() {
+		if (!running || !state || state.status !== 'running') {
+			running = false;
 			return;
 		}
-		post('step', {session_id: state.session_id || '', worker_id: workerId}).then(function (nextState) {
+		post('step', {session_id: state.session_id || ''}).then(function (nextState) {
 			render(nextState);
-			if (running && nextState.status === 'running' && activeWorkers[workerId]) {
-				window.setTimeout(function () { workerLoop(workerId); }, 250);
+			if (nextState.status === 'running') {
+				window.setTimeout(loop, 250);
 			} else {
-				delete activeWorkers[workerId];
+				running = false;
 			}
 		}).catch(function (error) {
-			stopWorkers();
+			running = false;
 			render(Object.assign({}, state, {status: 'error', message: error.message || 'AJAX error'}));
 		});
 	}
 
 	function startLoop(nextState) {
 		render(nextState);
-		stopWorkers();
 		running = state.status === 'running';
-		if (!running) {
-			return;
-		}
-		for (var i = 1; i <= workerCount(); i += 1) {
-			activeWorkers[i] = true;
-			workerLoop(i);
+		if (running) {
+			loop();
 		}
 	}
 
@@ -132,12 +116,12 @@
 		} else if (action === 'retry_errors') {
 			post('retry_errors').then(startLoop);
 		} else if (action === 'step') {
-			post('step', {session_id: state.session_id || '', worker_id: 'manual'}).then(render);
+			post('step', {session_id: state.session_id || ''}).then(render);
 		} else if (action === 'pause') {
-			stopWorkers();
+			running = false;
 			post('pause').then(render);
 		} else if (action === 'reset') {
-			stopWorkers();
+			running = false;
 			post('reset').then(render);
 		}
 	});

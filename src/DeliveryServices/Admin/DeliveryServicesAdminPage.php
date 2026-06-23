@@ -1735,12 +1735,11 @@ final class DeliveryServicesAdminPage {
 			'total_estimated' => 'total_estimated',
 			'updated_at' => 'updated_at',
 			'message' => 'message',
-			'worker_count' => 'worker_count',
 			'batch_size' => 'batch_size',
 		);
 		?>
 		<h3><?php echo esc_html__( 'Массовый маппинг', 'walls-delivery-calc' ); ?></h3>
-		<p class="description"><?php echo esc_html__( 'Полный маппинг всегда полностью перестраивает сопоставление geo_id для всей базы населённых пунктов. Обработка идет тремя параллельными browser-worker батчами по 30, состояние сохраняется после закрытия страницы.', 'walls-delivery-calc' ); ?></p>
+		<p class="description"><?php echo esc_html__( 'Полный маппинг всегда полностью перестраивает сопоставление geo_id для всей базы населённых пунктов. Обработка идет одним browser-worker батчами по 50, состояние сохраняется после закрытия страницы.', 'walls-delivery-calc' ); ?></p>
 		<div class="notice notice-info inline wdc-yandex-geo-runner-notice" style="display:none;"><p><?php echo esc_html__( 'Сейчас выполняется массовый маппинг. Ручная обработка временно заблокирована.', 'walls-delivery-calc' ); ?></p></div>
 		<table class="widefat striped wdc-yandex-geo-runner-state" style="max-width: 980px; margin: 12px 0;">
 			<thead><tr><th><?php echo esc_html__( 'Поле', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Значение', 'walls-delivery-calc' ); ?></th></tr></thead>

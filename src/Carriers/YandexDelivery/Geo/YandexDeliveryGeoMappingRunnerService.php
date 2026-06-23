@@ -12,8 +12,7 @@ defined( 'ABSPATH' ) || exit;
 final class YandexDeliveryGeoMappingRunnerService {
 	public const OPTION_KEY = 'wdc_yandex_delivery_geo_mapping_runner_state';
 	private const LOCK_KEY = 'wdc_yandex_delivery_geo_mapping_runner_state_lock';
-	private const BATCH_SIZE = 30;
-	private const WORKER_COUNT = 3;
+	private const BATCH_SIZE = 50;
 	private const LOCK_TTL = 120;
 
 	public function __construct(
@@ -293,7 +292,6 @@ final class YandexDeliveryGeoMappingRunnerService {
 			'message' => '',
 			'errors_last' => array(),
 			'batch_size' => self::BATCH_SIZE,
-			'worker_count' => self::WORKER_COUNT,
 		);
 	}
 
@@ -307,7 +305,6 @@ final class YandexDeliveryGeoMappingRunnerService {
 		}
 		$normalized = array_intersect_key( $normalized, $this->default_state() );
 		$normalized['batch_size'] = self::BATCH_SIZE;
-		$normalized['worker_count'] = self::WORKER_COUNT;
 		$normalized['errors_last'] = array_slice( is_array( $normalized['errors_last'] ) ? $normalized['errors_last'] : array(), -10 );
 
 		return $normalized;
