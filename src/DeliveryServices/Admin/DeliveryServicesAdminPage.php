@@ -21,6 +21,7 @@ use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointImportReport;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointImportService;
 use WallsShop\WDC\Carriers\Dpd\Pickup\DpdPickupPointRepository;
 use WallsShop\WDC\Carriers\YandexDelivery\Api\YandexDeliveryConnectionDiagnosticService;
+use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoAnalysisService;
 use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingBatchService;
 use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingRepository;
 use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingService;
@@ -123,7 +124,8 @@ final class DeliveryServicesAdminPage {
 		private ?YandexDeliveryPickupPointService $yandex_delivery_pickup_service = null,
 		private ?YandexDeliveryGeoMappingRepository $yandex_delivery_geo_mappings = null,
 		private ?YandexDeliveryGeoMappingService $yandex_delivery_geo_mapping_service = null,
-		private ?YandexDeliveryGeoMappingBatchService $yandex_delivery_geo_batch = null
+		private ?YandexDeliveryGeoMappingBatchService $yandex_delivery_geo_batch = null,
+		private ?YandexDeliveryGeoAnalysisService $yandex_delivery_geo_analysis = null
 	) {
 	}
 
@@ -917,6 +919,7 @@ final class DeliveryServicesAdminPage {
 			$tabs['yandex_delivery_pickup'] = 'ПВЗ / точки сдачи';
 			$tabs['yandex_delivery_geo'] = 'Yandex geo_id';
 			$tabs['yandex_delivery_geo_batch'] = 'Yandex geo batch';
+			$tabs['yandex_delivery_geo_analysis'] = 'Yandex geo analysis';
 		}
 		if ( $this->is_dpd_service( $service ) ) {
 			$tabs['tariffs'] = 'Тарифы';
@@ -949,6 +952,7 @@ final class DeliveryServicesAdminPage {
 			'yandex_delivery_pickup' => $this->render_yandex_delivery_pickup_tab( $service ),
 			'yandex_delivery_geo' => $this->render_yandex_delivery_geo_tab( $service ),
 			'yandex_delivery_geo_batch' => $this->render_yandex_delivery_geo_batch_tab( $service ),
+			'yandex_delivery_geo_analysis' => $this->render_yandex_delivery_geo_analysis_tab( $service ),
 			'dpd_geography' => $this->render_dpd_geography_tab( $service ),
 			'dpd_pickup' => $this->render_dpd_pickup_tab( $service ),
 			'dpd_tariff' => $this->render_dpd_tariff_tab( $service ),
@@ -1431,6 +1435,83 @@ final class DeliveryServicesAdminPage {
 				</tbody>
 			</table>
 		<?php endif; ?>
+		<?php
+	}
+	private function render_yandex_delivery_geo_analysis_tab( DeliveryService $service ): void {
+		if ( ! $this->is_yandex_delivery_service( $service ) ) {
+			return;
+		}
+
+		if ( null === $this->yandex_delivery_geo_analysis ) {
+			echo '<p>' . esc_html__( 'Yandex geo analysis service is not available.', 'walls-delivery-calc' ) . '</p>';
+
+			return;
+		}
+
+		$max_confidence = 59.99;
+		if ( isset( $_GET['max_confidence'] ) ) {
+			$max_confidence = (float) str_replace( ',', '.', sanitize_text_field( wp_unslash( $_GET['max_confidence'] ) ) );
+		}
+
+		$bucket_stats  = $this->yandex_delivery_geo_analysis->get_bucket_statistics();
+		$status_stats  = $this->yandex_delivery_geo_analysis->get_status_statistics();
+		$top_regions   = $this->yandex_delivery_geo_analysis->get_top_regions( $max_confidence );
+		$top_types     = $this->yandex_delivery_geo_analysis->get_top_settlement_types( $max_confidence );
+		$top_patterns  = $this->yandex_delivery_geo_analysis->get_top_matched_by_patterns( $max_confidence );
+		$low_rows      = $this->yandex_delivery_geo_analysis->get_low_confidence_rows( $max_confidence, 100 );
+		$bucket_labels = array(
+			'100'   => '100',
+			'95_99' => '95-99',
+			'80_94' => '80-94',
+			'60_79' => '60-79',
+			'40_59' => '40-59',
+			'1_39'  => '1-39',
+			'0'     => '0',
+		);
+		?>
+		<h3><?php echo esc_html__( 'Yandex geo analysis', 'walls-delivery-calc' ); ?></h3>
+		<p class="description"><?php echo esc_html__( 'Read-only analysis of saved Yandex geo mappings. This tab does not call Yandex APIs or rebuild mappings.', 'walls-delivery-calc' ); ?></p>
+		<form method="get" style="margin: 16px 0;">
+			<input type="hidden" name="page" value="<?php echo esc_attr( self::MENU_SLUG ); ?>">
+			<input type="hidden" name="service" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<input type="hidden" name="tab" value="yandex_delivery_geo_analysis">
+			<label>max_confidence <input class="small-text" type="number" min="0" max="100" step="0.01" name="max_confidence" value="<?php echo esc_attr( (string) $max_confidence ); ?>"></label>
+			<?php submit_button( __( 'Apply', 'walls-delivery-calc' ), 'secondary', 'submit', false ); ?>
+		</form>
+		<h3><?php echo esc_html__( 'Bucket statistics', 'walls-delivery-calc' ); ?></h3>
+		<table class="widefat striped" style="max-width: 520px; margin: 12px 0;">
+			<thead><tr><th><?php echo esc_html__( 'Bucket', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Count', 'walls-delivery-calc' ); ?></th></tr></thead>
+			<tbody><?php foreach ( $bucket_labels as $bucket_key => $bucket_label ) : ?><tr><td><?php echo esc_html( $bucket_label ); ?></td><td><?php echo esc_html( (string) (int) ( $bucket_stats[ $bucket_key ] ?? 0 ) ); ?></td></tr><?php endforeach; ?></tbody>
+		</table>
+		<h3><?php echo esc_html__( 'Status statistics', 'walls-delivery-calc' ); ?></h3>
+		<table class="widefat striped" style="max-width: 520px; margin: 12px 0;">
+			<thead><tr><th><?php echo esc_html__( 'Status', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Count', 'walls-delivery-calc' ); ?></th></tr></thead>
+			<tbody><?php foreach ( $status_stats as $status => $count ) : ?><tr><td><?php echo esc_html( (string) $status ); ?></td><td><?php echo esc_html( (string) (int) $count ); ?></td></tr><?php endforeach; ?></tbody>
+		</table>
+		<h3><?php echo esc_html__( 'Top regions', 'walls-delivery-calc' ); ?></h3>
+		<table class="widefat striped" style="max-width: 680px; margin: 12px 0;">
+			<thead><tr><th><?php echo esc_html__( 'Region', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Count', 'walls-delivery-calc' ); ?></th></tr></thead>
+			<tbody><?php foreach ( $top_regions as $row ) : ?><tr><td><?php echo esc_html( (string) $row['region'] ); ?></td><td><?php echo esc_html( (string) (int) $row['count'] ); ?></td></tr><?php endforeach; ?></tbody>
+		</table>
+		<h3><?php echo esc_html__( 'Top settlement types', 'walls-delivery-calc' ); ?></h3>
+		<table class="widefat striped" style="max-width: 680px; margin: 12px 0;">
+			<thead><tr><th><?php echo esc_html__( 'Type', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Count', 'walls-delivery-calc' ); ?></th></tr></thead>
+			<tbody><?php foreach ( $top_types as $row ) : ?><tr><td><?php echo esc_html( (string) $row['type'] ); ?></td><td><?php echo esc_html( (string) (int) $row['count'] ); ?></td></tr><?php endforeach; ?></tbody>
+		</table>
+		<h3><?php echo esc_html__( 'Top matched_by patterns', 'walls-delivery-calc' ); ?></h3>
+		<table class="widefat striped" style="max-width: 680px; margin: 12px 0;">
+			<thead><tr><th><?php echo esc_html__( 'Pattern', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Count', 'walls-delivery-calc' ); ?></th></tr></thead>
+			<tbody><?php foreach ( $top_patterns as $row ) : ?><tr><td><?php echo esc_html( (string) $row['pattern'] ); ?></td><td><?php echo esc_html( (string) (int) $row['count'] ); ?></td></tr><?php endforeach; ?></tbody>
+		</table>
+		<h3><?php echo esc_html__( 'Low confidence rows', 'walls-delivery-calc' ); ?></h3>
+		<table class="widefat striped">
+			<thead><tr><th>location_id</th><th>display_name</th><th>geo_id</th><th>confidence</th><th>status</th><th>matched_by</th><th>reason</th></tr></thead>
+			<tbody>
+				<?php foreach ( $low_rows as $row ) : ?>
+					<tr><td><?php echo esc_html( (string) $row['location_id'] ); ?></td><td><?php echo esc_html( (string) $row['display_name'] ); ?></td><td><?php echo esc_html( (string) $row['yandex_geo_id'] ); ?></td><td><?php echo esc_html( number_format( (float) $row['confidence'], 2, '.', '' ) ); ?></td><td><?php echo esc_html( (string) $row['status'] ); ?></td><td><?php echo esc_html( (string) $row['matched_by'] ); ?></td><td><?php echo esc_html( (string) $row['reason'] ); ?></td></tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
 		<?php
 	}
 	private function render_yandex_delivery_geo_batch_tab( DeliveryService $service ): void {

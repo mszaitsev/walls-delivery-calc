@@ -1,3 +1,10 @@
+## Yandex Low Confidence Analysis 0.81.0
+
+- `src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoAnalysisService.php` is a read-only analysis service for already saved rows in `wdc_yandex_delivery_geo_mappings`. It does not call Yandex APIs, does not run `location/detect`, and does not rebuild mappings.
+- The service returns bucket statistics (`100`, `95_99`, `80_94`, `60_79`, `40_59`, `1_39`, `0`), status statistics (`mapped`, `multiple_matches`, `not_found`, `manual`, `error`), top low-confidence regions, top settlement types, top `matched_by` patterns parsed from `raw_json.scoring.matched_by`, and the lowest-confidence rows with WDC `display_name`.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` adds the Yandex tab order `Данные для входа`, `ПВЗ / точки сдачи`, `Yandex geo_id`, `Yandex geo batch`, `Yandex geo analysis`. The analysis tab has a GET `max_confidence` filter defaulting to `59.99` and renders read-only dashboard tables.
+- `src/Core/Plugin.php` registers `YandexDeliveryGeoAnalysisService` and passes it into `DeliveryServicesAdminPage`. `tests/yandex-delivery/run-yandex-delivery-geo-analysis-smoke.php` covers bucket/status stats, region/type aggregation, `matched_by` aggregation, low-confidence row fields and source guards against detect/API/checkout/pricing/pickup calls.
+- This tool is only for analyzing first batch results and identifying which settlements landed in low confidence buckets. Scorer behavior, batch builder behavior, checkout, pricing, PVZ import, pickup selection, shipments, statuses and documents are unchanged.
 ## Yandex Geo Mapping Batch Builder 0.79.0
 
 - `src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingBatchService.php` owns the experimental option-backed batch state in `wdc_yandex_delivery_geo_mapping_batch_state`. State includes status/session/timestamps, last processed `location_id`, limit, batch size, processed/mapped/ambiguous/not_found/errors/skipped_existing counters, confidence buckets, message and `errors_last` capped at 10 compact rows.
