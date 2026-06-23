@@ -1,5 +1,5 @@
 Folder PATH listing
-Volume serial number is 0000002C A0AC:74BD
+Volume serial number is 0000007B A0AC:74BD
 C:.
 |   .gitignore
 |   README.md
@@ -307,6 +307,7 @@ C:.
 |   |       |
 |   |       +---Geo
 |   |       |       YandexDeliveryGeoDistance.php
+|   |       |       YandexDeliveryGeoMappingBatchService.php
 |   |       |       YandexDeliveryGeoMappingRepository.php
 |   |       |       YandexDeliveryGeoMappingService.php
 |   |       |       YandexDeliveryGeoMappingStatus.php
@@ -778,5 +779,6 @@ C:.
     |
     \---yandex-delivery
             run-yandex-delivery-foundation-smoke.php
+            run-yandex-delivery-geo-batch-smoke.php
             run-yandex-delivery-geo-mapping-smoke.php
             run-yandex-delivery-pickup-smoke.php
