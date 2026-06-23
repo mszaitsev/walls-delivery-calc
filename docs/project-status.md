@@ -1,3 +1,5 @@
+0.79.3 note: fixed Yandex Geo Mapping single-candidate classification. A single weak `location/detect` candidate with confidence below 60 now remains `multiple_matches` without primary instead of producing `mapped` with `is_primary=0`, so the batch builder counts it as ambiguous rather than an unclassifiable error. No new Yandex Delivery functionality was added.
+
 0.79.2 note: hardened the Yandex Geo Mapping Batch Builder bugfix verification. The geo batch smoke now instantiates LocationRepository with the fake DB and asserts method_exists(..., 'find_batch_after_id') before calling the helper, proving the method is present in the loaded class. No new Yandex Delivery functionality was added.
 
 0.79.1 note: fixed Yandex Geo Mapping Batch Builder repository helper contract. LocationRepository::find_batch_after_id() now has the explicit RU/display-name batch signature used by YandexDeliveryGeoMappingBatchService, filters active rows for both real DB and test doubles, and remains covered by geo batch smoke guards. No new Yandex Delivery functionality was added.

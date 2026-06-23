@@ -184,6 +184,22 @@ $state = $batch->reset();
 yd_geo_batch_assert( 'idle' === $state['status'] && 0 === $state['processed'] && array() === $state['errors_last'], 'reset() must clear state.' );
 
 $GLOBALS['wdc_yandex_delivery_geo_batch_options'] = array();
+$GLOBALS['wpdb']->locations = array(
+	yd_geo_batch_location( 8, 'Тлюстенхабль', 'Республика Адыгея' ),
+);
+$GLOBALS['wpdb']->yandex_delivery_geo_mappings = array();
+$settings->save_from_admin( array( YandexDeliverySettings::ENVIRONMENT_KEY => YandexDeliverySettings::ENV_TEST, 'yandex_delivery_test_bearer_token' => 'secret-test-token', YandexDeliverySettings::TEST_PLATFORM_STATION_ID_KEY => 'sender-1' ) );
+$weak_single_repository = new YandexDeliveryGeoMappingRepository( $GLOBALS['wpdb'] );
+$weak_single_http = new YdGeoBatchFakeHttp(
+	yd_geo_batch_response( array( array( 'geo_id' => 155, 'address' => 'Тлюстенхабль, Франция' ) ) )
+);
+$weak_single_service = new YandexDeliveryGeoMappingService( new LocationRepository( $GLOBALS['wpdb'] ), new YandexDeliveryApiClient( $settings, $weak_single_http ), $weak_single_repository, new YandexDeliveryGeoMatchScorer() );
+$weak_single_batch = new YandexDeliveryGeoMappingBatchService( new LocationRepository( $GLOBALS['wpdb'] ), $weak_single_repository, $weak_single_service );
+$state = $weak_single_batch->start( 1, 1 );
+$state = $weak_single_batch->run_step();
+yd_geo_batch_assert( 1 === $state['processed'] && 1 === $state['ambiguous'] && 0 === $state['errors'], 'single weak candidate must be classified as ambiguous without batch errors.' );
+
+$GLOBALS['wdc_yandex_delivery_geo_batch_options'] = array();
 $GLOBALS['wpdb']->locations = array();
 $GLOBALS['wpdb']->yandex_delivery_geo_mappings = array();
 $error_responses = array();

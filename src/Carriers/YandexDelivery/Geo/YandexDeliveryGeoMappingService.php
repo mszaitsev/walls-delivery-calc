@@ -125,9 +125,11 @@ final class YandexDeliveryGeoMappingService {
 		$second = isset( $rows[1] ) ? (float) $rows[1]['confidence'] : null;
 		$confident_primary = false;
 		if ( 1 === count( $rows ) ) {
-			$rows[0]['status'] = YandexDeliveryGeoMappingStatus::MAPPED;
-			$rows[0]['is_primary'] = $best >= 60 ? 1 : 0;
-			$confident_primary = $best >= 60;
+			if ( $best >= 60 ) {
+				$rows[0]['status'] = YandexDeliveryGeoMappingStatus::MAPPED;
+				$rows[0]['is_primary'] = 1;
+				$confident_primary = true;
+			}
 		} elseif ( $best >= 95 && ( null === $second || $second <= $best - 15 ) ) {
 			$rows[0]['status'] = YandexDeliveryGeoMappingStatus::MAPPED;
 			$rows[0]['is_primary'] = 1;
