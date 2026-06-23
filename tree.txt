@@ -306,6 +306,7 @@ C:.
 |   |       |       YandexDeliveryHttpClientInterface.php
 |   |       |
 |   |       +---Geo
+|   |       |       YandexDeliveryGeoDistance.php
 |   |       |       YandexDeliveryGeoMappingRepository.php
 |   |       |       YandexDeliveryGeoMappingService.php
 |   |       |       YandexDeliveryGeoMappingStatus.php
@@ -779,4 +780,3 @@ C:.
             run-yandex-delivery-foundation-smoke.php
             run-yandex-delivery-geo-mapping-smoke.php
             run-yandex-delivery-pickup-smoke.php
-
