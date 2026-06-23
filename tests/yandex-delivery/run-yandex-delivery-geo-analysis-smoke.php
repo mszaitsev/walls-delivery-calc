@@ -138,6 +138,6 @@ yd_geo_analysis_assert( str_contains( $admin_source, '?YandexDeliveryGeoAnalysis
 yd_geo_analysis_assert( str_contains( $plugin_source, 'YandexDeliveryGeoAnalysisService::class' ), 'Plugin source must reference YandexDeliveryGeoAnalysisService::class.' );
 yd_geo_analysis_assert( preg_match( '/container->register\(\s*YandexDeliveryGeoAnalysisService::class\s*,\s*fn\(\):\s*YandexDeliveryGeoAnalysisService\s*=>\s*new\s+YandexDeliveryGeoAnalysisService\(\s*\$this->container->get\(\s*LocationRepository::class\s*\)\s*\)\s*\)/s', $plugin_source ) === 1, 'Plugin container must register YandexDeliveryGeoAnalysisService with the LocationRepository dependency.' );
 yd_geo_analysis_assert( preg_match( '/new\s+DeliveryServicesAdminPage\(.*\$this->container->get\(\s*YandexDeliveryGeoAnalysisService::class\s*\)/s', $plugin_source ) === 1, 'Plugin must pass YandexDeliveryGeoAnalysisService into DeliveryServicesAdminPage.' );
-yd_geo_analysis_assert( str_contains( $version_source, '0.86.0' ), 'Plugin version must be 0.86.0.' );
+yd_geo_analysis_assert( str_contains( $version_source, '0.86.1' ), 'Plugin version must be 0.86.1.' );
 
 echo "Yandex Delivery geo analysis smoke OK\n";

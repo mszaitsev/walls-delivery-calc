@@ -46,10 +46,10 @@
 
 	function render(nextState) {
 		state = nextState || state || {};
-		['status', 'mode', 'session_id', 'last_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'skipped_existing', 'total_estimated', 'updated_at', 'message', 'batch_size'].forEach(function (field) {
+		['status', 'mode', 'session_id', 'last_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'total_estimated', 'updated_at', 'message', 'batch_size'].forEach(function (field) {
 			setText(field, state[field] || (field === 'batch_size' ? '20' : ''));
 		});
-		var done = Number(state.processed || 0) + Number(state.skipped_existing || 0);
+		var done = Number(state.processed || 0);
 		var total = Number(state.total_estimated || 0);
 		var percent = total > 0 ? Math.min(100, Math.floor(done / total * 100)) : 0;
 		var bar = qs('[data-wdc-yandex-geo-runner-progress-bar]');

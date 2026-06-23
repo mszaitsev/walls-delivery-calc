@@ -93,9 +93,8 @@ final class YandexDeliveryGeoMappingRunnerService {
 			}
 			$state['last_location_id'] = $location_id;
 
-			if ( 'full' === (string) $state['mode'] && null !== $this->mappings->find_primary_geo_id( $location_id ) ) {
-				++$state['skipped_existing'];
-				continue;
+			if ( 'full' === (string) $state['mode'] ) {
+				$this->mappings->delete_location_mappings( $location_id );
 			}
 
 			++$state['processed'];
@@ -210,7 +209,6 @@ final class YandexDeliveryGeoMappingRunnerService {
 			'needs_review' => 0,
 			'not_found' => 0,
 			'tech_errors' => 0,
-			'skipped_existing' => 0,
 			'total_estimated' => 0,
 			'message' => '',
 			'errors_last' => array(),
@@ -223,9 +221,10 @@ final class YandexDeliveryGeoMappingRunnerService {
 		$normalized = array_replace( $this->default_state(), $state );
 		$normalized['status'] = in_array( (string) $normalized['status'], array( 'idle', 'running', 'paused', 'done', 'error' ), true ) ? (string) $normalized['status'] : 'idle';
 		$normalized['mode'] = in_array( (string) $normalized['mode'], array( 'full', 'retry_errors' ), true ) ? (string) $normalized['mode'] : 'full';
-		foreach ( array( 'last_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'skipped_existing', 'total_estimated' ) as $key ) {
+		foreach ( array( 'last_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'total_estimated' ) as $key ) {
 			$normalized[ $key ] = max( 0, (int) $normalized[ $key ] );
 		}
+		$normalized = array_intersect_key( $normalized, $this->default_state() );
 		$normalized['batch_size'] = self::BATCH_SIZE;
 		$normalized['errors_last'] = array_slice( is_array( $normalized['errors_last'] ) ? $normalized['errors_last'] : array(), -10 );
 

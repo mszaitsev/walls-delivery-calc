@@ -1,6 +1,6 @@
-## Yandex Geo Mapping Runner 0.86.0
+## Yandex Geo Mapping Runner 0.86.1
 
-- `src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingRunnerService.php` is the production runner for full WDC `location_id` -> Yandex `geo_id` mapping. It stores state in option `wdc_yandex_delivery_geo_mapping_runner_state`, supports `full` and `retry_errors` modes, uses fixed `BATCH_SIZE = 20`, continues by `last_location_id`, and finishes with `done` when no rows remain.
+- `src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingRunnerService.php` is the production runner for full WDC `location_id` -> Yandex `geo_id` mapping. It stores state in option `wdc_yandex_delivery_geo_mapping_runner_state`, supports `full` and `retry_errors` modes, uses fixed `BATCH_SIZE = 20`, continues by `last_location_id`, deletes old mappings before each full-mode remap, never skips existing primary mappings in full mode, and finishes with `done` when no rows remain.
 - Full mode processes active RU locations with non-empty `display_name` in `id ASC` order through the existing `YandexDeliveryGeoMappingService::detect_for_runner()` wrapper. Existing working primary mappings are skipped; technical failures do not stop the batch.
 - Technical failures are represented by marker `YandexDeliveryGeoMappingRepository::TECHNICAL_ERROR_GEO_ID = 999999999`. Marker rows have `status=error`, `confidence=0`, `is_primary=0` and compact raw JSON. `find_primary_geo_id()` and `set_primary()` reject this marker.
 - Retry mode selects only locations with marker `999999999`. A successful retry replaces the marker with a normal mapped/needs_review/not_found result; a repeated technical failure updates the marker and `errors_last`.

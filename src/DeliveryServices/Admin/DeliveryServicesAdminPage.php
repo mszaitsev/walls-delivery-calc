@@ -1719,7 +1719,7 @@ final class DeliveryServicesAdminPage {
 			$this->render_yandex_delivery_pickup_action_result();
 		}
 		$state = $this->yandex_delivery_geo_runner->current_state();
-		$done = (int) ( $state['processed'] ?? 0 ) + (int) ( $state['skipped_existing'] ?? 0 );
+		$done = (int) ( $state['processed'] ?? 0 );
 		$total = max( 0, (int) ( $state['total_estimated'] ?? 0 ) );
 		$percent = $total > 0 ? min( 100, (int) floor( ( $done / $total ) * 100 ) ) : 0;
 		$rows = array(
@@ -1732,7 +1732,6 @@ final class DeliveryServicesAdminPage {
 			'needs_review' => 'needs_review',
 			'not_found' => 'not_found',
 			'tech_errors' => 'tech_errors',
-			'skipped_existing' => 'skipped_existing',
 			'total_estimated' => 'total_estimated',
 			'updated_at' => 'updated_at',
 			'message' => 'message',
@@ -1740,7 +1739,7 @@ final class DeliveryServicesAdminPage {
 		);
 		?>
 		<h3><?php echo esc_html__( 'Массовый маппинг', 'walls-delivery-calc' ); ?></h3>
-		<p class="description"><?php echo esc_html__( 'Production runner обрабатывает всю реальную базу активных RU locations с непустым display_name батчами по 20. Состояние сохраняется после закрытия страницы.', 'walls-delivery-calc' ); ?></p>
+		<p class="description"><?php echo esc_html__( 'Полный маппинг всегда полностью перестраивает сопоставление geo_id для всей базы населённых пунктов. Обработка идет батчами по 20, состояние сохраняется после закрытия страницы.', 'walls-delivery-calc' ); ?></p>
 		<div class="notice notice-info inline wdc-yandex-geo-runner-notice" style="display:none;"><p><?php echo esc_html__( 'Сейчас выполняется массовый маппинг. Ручная обработка временно заблокирована.', 'walls-delivery-calc' ); ?></p></div>
 		<table class="widefat striped wdc-yandex-geo-runner-state" style="max-width: 980px; margin: 12px 0;">
 			<thead><tr><th><?php echo esc_html__( 'Поле', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Значение', 'walls-delivery-calc' ); ?></th></tr></thead>
