@@ -48,7 +48,7 @@
 
 	function render(nextState) {
 		state = nextState || state || {};
-		['status', 'mode', 'session_id', 'next_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'total_estimated', 'updated_at', 'message', 'batch_size'].forEach(function (field) {
+		['status', 'mode', 'session_id', 'next_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'technical_error_markers_count', 'total_estimated', 'eta_finished_at', 'average_locations_per_second', 'elapsed_seconds', 'remaining_seconds', 'updated_at', 'message', 'batch_size'].forEach(function (field) {
 			setText(field, state[field] || (field === 'batch_size' ? '50' : ''));
 		});
 		var done = Number(state.processed || 0);

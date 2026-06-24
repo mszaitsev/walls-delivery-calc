@@ -46,7 +46,7 @@ final class YandexDeliveryGeoMappingRunnerService {
 		$state['message'] = 'Полный маппинг запущен.';
 		$this->save_state( $state );
 
-		return $state;
+		return $this->current_state();
 	}
 
 	/** @return array<string,mixed> */
@@ -65,7 +65,7 @@ final class YandexDeliveryGeoMappingRunnerService {
 		$state['message'] = sprintf( 'Маппинг необработанных запущен с location_id %d.', $start_from );
 		$this->save_state( $state );
 
-		return $state;
+		return $this->current_state();
 	}
 
 	/** @return array<string,mixed> */
@@ -81,7 +81,7 @@ final class YandexDeliveryGeoMappingRunnerService {
 		$state['message'] = 'Повторная обработка технических ошибок запущена.';
 		$this->save_state( $state );
 
-		return $state;
+		return $this->current_state();
 	}
 
 	/** @return array<string,mixed> */
@@ -133,7 +133,7 @@ final class YandexDeliveryGeoMappingRunnerService {
 				$this->save_state( $state );
 			}
 
-			return $state;
+			return $this->current_state();
 		} finally {
 			$this->release_lock();
 		}
@@ -288,7 +288,7 @@ final class YandexDeliveryGeoMappingRunnerService {
 		$state['message'] = 'Готово.';
 		$this->save_state( $state );
 
-		return $state;
+		return $this->current_state();
 	}
 
 	/** @param array<string,mixed> $state @return array<string,mixed> */
@@ -343,7 +343,12 @@ final class YandexDeliveryGeoMappingRunnerService {
 			'needs_review' => 0,
 			'not_found' => 0,
 			'tech_errors' => 0,
+			'technical_error_markers_count' => 0,
 			'total_estimated' => 0,
+			'eta_finished_at' => '',
+			'average_locations_per_second' => 0,
+			'elapsed_seconds' => 0,
+			'remaining_seconds' => 0,
 			'message' => '',
 			'errors_last' => array(),
 			'batch_size' => self::BATCH_SIZE,
@@ -355,14 +360,58 @@ final class YandexDeliveryGeoMappingRunnerService {
 		$normalized = array_replace( $this->default_state(), $state );
 		$normalized['status'] = in_array( (string) $normalized['status'], array( 'idle', 'running', 'paused', 'done', 'error' ), true ) ? (string) $normalized['status'] : 'idle';
 		$normalized['mode'] = in_array( (string) $normalized['mode'], array( 'full', 'retry_errors', 'unprocessed' ), true ) ? (string) $normalized['mode'] : 'full';
-		foreach ( array( 'next_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'total_estimated' ) as $key ) {
+		foreach ( array( 'next_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'technical_error_markers_count', 'total_estimated', 'elapsed_seconds', 'remaining_seconds' ) as $key ) {
 			$normalized[ $key ] = max( 0, (int) $normalized[ $key ] );
 		}
 		$normalized = array_intersect_key( $normalized, $this->default_state() );
 		$normalized['batch_size'] = self::BATCH_SIZE;
 		$normalized['errors_last'] = array_slice( is_array( $normalized['errors_last'] ) ? $normalized['errors_last'] : array(), -10 );
 
-		return $normalized;
+		return $this->refresh_metrics( $normalized );
+	}
+
+	/** @param array<string,mixed> $state @return array<string,mixed> */
+	private function refresh_metrics( array $state ): array {
+		$state['technical_error_markers_count'] = $this->mappings->count_technical_error_markers();
+		if ( 'paused' === (string) ( $state['status'] ?? '' ) && '' !== (string) ( $state['eta_finished_at'] ?? '' ) ) {
+			return $state;
+		}
+		$started_at = trim( (string) ( $state['started_at'] ?? '' ) );
+		$now_timestamp = $this->timestamp_from_mysql( $this->now() );
+		$started_timestamp = '' !== $started_at ? $this->timestamp_from_mysql( $started_at ) : 0;
+		$elapsed = $started_timestamp > 0 && $now_timestamp > $started_timestamp ? $now_timestamp - $started_timestamp : 0;
+		$state['elapsed_seconds'] = $elapsed;
+		$processed = max( 0, (int) ( $state['processed'] ?? 0 ) );
+		$total = max( 0, (int) ( $state['total_estimated'] ?? 0 ) );
+		if ( 'done' === (string) ( $state['status'] ?? '' ) || $processed <= 0 || $elapsed <= 0 || $total <= 0 || $processed >= $total ) {
+			$state['eta_finished_at'] = '';
+			$state['average_locations_per_second'] = 0;
+			$state['remaining_seconds'] = 0;
+			return $state;
+		}
+
+		$rate = $processed / $elapsed;
+		$remaining = max( 0, $total - $processed );
+		$remaining_seconds = $rate > 0 ? (int) ceil( $remaining / $rate ) : 0;
+		$state['average_locations_per_second'] = round( $rate, 4 );
+		$state['remaining_seconds'] = $remaining_seconds;
+		$state['eta_finished_at'] = $remaining_seconds > 0 ? $this->format_timestamp( $now_timestamp + $remaining_seconds ) : '';
+
+		return $state;
+	}
+
+	private function timestamp_from_mysql( string $value ): int {
+		$timestamp = strtotime( $value );
+
+		return false === $timestamp ? 0 : (int) $timestamp;
+	}
+
+	private function format_timestamp( int $timestamp ): string {
+		if ( function_exists( 'wp_date' ) ) {
+			return wp_date( 'Y-m-d H:i:s', $timestamp );
+		}
+
+		return date( 'Y-m-d H:i:s', $timestamp );
 	}
 
 	/** @param array<string,mixed> $state */
