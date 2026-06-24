@@ -380,6 +380,89 @@ final class YandexDeliveryGeoMappingRepository {
 
 		return $count;
 	}
+
+	/** @return array{matched_locations:int,checked_candidates:int,removed_candidates:int,converted_to_not_found:int} */
+	public function cleanup_needs_review_by_region( string $region_fragment ): array {
+		$fragment = trim( $region_fragment );
+		$stats = array(
+			'matched_locations' => 0,
+			'checked_candidates' => 0,
+			'removed_candidates' => 0,
+			'converted_to_not_found' => 0,
+		);
+		if ( '' === $fragment ) {
+			return $stats;
+		}
+
+		if ( $this->has_test_rows() ) {
+			$matched_locations = array();
+			$location_ids_to_review = array();
+			foreach ( $this->wpdb->yandex_delivery_geo_mappings as $index => $row ) {
+				$location_id = (int) ( $row['location_id'] ?? 0 );
+				if ( $location_id <= 0 || YandexDeliveryGeoMappingStatus::NEEDS_REVIEW !== (string) ( $row['status'] ?? '' ) || ! empty( $row['is_primary'] ) || $this->is_technical_error_geo_id( (int) ( $row['yandex_geo_id'] ?? 0 ) ) ) {
+					continue;
+				}
+				$meta = $this->test_location_meta( $location_id );
+				if ( ! $this->contains_fragment( (string) ( $meta['location_region_name'] ?? $meta['region_name'] ?? '' ), $fragment ) ) {
+					continue;
+				}
+				$matched_locations[ $location_id ] = true;
+				$location_ids_to_review[ $location_id ] = true;
+				++$stats['checked_candidates'];
+				if ( ! $this->contains_fragment( (string) ( $row['yandex_locality'] ?? '' ), $fragment ) ) {
+					unset( $this->wpdb->yandex_delivery_geo_mappings[ $index ] );
+					++$stats['removed_candidates'];
+				}
+			}
+			$this->wpdb->yandex_delivery_geo_mappings = array_values( $this->wpdb->yandex_delivery_geo_mappings );
+			$stats['matched_locations'] = count( $matched_locations );
+			foreach ( array_keys( $location_ids_to_review ) as $location_id ) {
+				if ( null === $this->find_primary_geo_id( (int) $location_id ) && ! $this->location_has_needs_review_candidates( (int) $location_id ) ) {
+					$this->save_cleanup_not_found( (int) $location_id, $fragment );
+					++$stats['converted_to_not_found'];
+				}
+			}
+
+			return $stats;
+		}
+
+		$this->create_schema_if_needed();
+		$rows = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				'SELECT m.*, l.region_name AS location_region_name FROM ' . $this->table_name() . ' m INNER JOIN ' . $this->locations_table_name() . ' l ON l.id = m.location_id WHERE m.status = %s AND m.is_primary = 0 AND l.region_name LIKE %s ORDER BY m.location_id ASC, m.id ASC',
+				YandexDeliveryGeoMappingStatus::NEEDS_REVIEW,
+				'%' . $this->wpdb->esc_like( $fragment ) . '%'
+			),
+			ARRAY_A
+		);
+		$matched_locations = array();
+		$location_ids_to_review = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$location_id = (int) ( $row['location_id'] ?? 0 );
+			$row_id = (int) ( $row['id'] ?? 0 );
+			if ( $location_id <= 0 || $row_id <= 0 || $this->is_technical_error_geo_id( (int) ( $row['yandex_geo_id'] ?? 0 ) ) ) {
+				continue;
+			}
+			$matched_locations[ $location_id ] = true;
+			$location_ids_to_review[ $location_id ] = true;
+			++$stats['checked_candidates'];
+			if ( ! $this->contains_fragment( (string) ( $row['yandex_locality'] ?? '' ), $fragment ) ) {
+				$deleted = $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $this->table_name() . ' WHERE id = %d AND status = %s AND is_primary = 0', $row_id, YandexDeliveryGeoMappingStatus::NEEDS_REVIEW ) );
+				if ( is_numeric( $deleted ) && (int) $deleted > 0 ) {
+					++$stats['removed_candidates'];
+				}
+			}
+		}
+		$stats['matched_locations'] = count( $matched_locations );
+		foreach ( array_keys( $location_ids_to_review ) as $location_id ) {
+			if ( null === $this->find_primary_geo_id( (int) $location_id ) && ! $this->location_has_needs_review_candidates( (int) $location_id ) ) {
+				$this->save_cleanup_not_found( (int) $location_id, $fragment );
+				++$stats['converted_to_not_found'];
+			}
+		}
+
+		return $stats;
+	}
 	/** @param array<string,mixed> $filters @return array<int,array<string,mixed>> */
 	public function search( array $filters = array() ): array {
 		$limit = max( 1, min( 100, (int) ( $filters['limit'] ?? 20 ) ) );
@@ -772,6 +855,60 @@ final class YandexDeliveryGeoMappingRepository {
 		}
 
 		return $this->json( $raw );
+	}
+
+
+	private function contains_fragment( string $haystack, string $fragment ): bool {
+		$haystack = trim( $haystack );
+		$fragment = trim( $fragment );
+		if ( '' === $haystack || '' === $fragment ) {
+			return false;
+		}
+		if ( function_exists( 'mb_stripos' ) ) {
+			return false !== mb_stripos( $haystack, $fragment );
+		}
+
+		return false !== stripos( $haystack, $fragment );
+	}
+
+	private function location_has_needs_review_candidates( int $location_id ): bool {
+		if ( $location_id <= 0 ) {
+			return false;
+		}
+		if ( $this->has_test_rows() ) {
+			foreach ( $this->test_rows() as $row ) {
+				if ( (int) ( $row['location_id'] ?? 0 ) === $location_id && YandexDeliveryGeoMappingStatus::NEEDS_REVIEW === (string) ( $row['status'] ?? '' ) ) {
+					return true;
+				}
+			}
+
+			return false;
+		}
+		$value = $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT COUNT(*) FROM ' . $this->table_name() . ' WHERE location_id = %d AND status = %s', $location_id, YandexDeliveryGeoMappingStatus::NEEDS_REVIEW ) );
+
+		return is_numeric( $value ) && (int) $value > 0;
+	}
+
+	private function save_cleanup_not_found( int $location_id, string $region_fragment ): void {
+		$this->save_mapping(
+			array(
+				'location_id' => $location_id,
+				'yandex_geo_id' => null,
+				'status' => YandexDeliveryGeoMappingStatus::NOT_FOUND,
+				'confidence' => 0,
+				'is_primary' => 0,
+				'raw_json' => $this->json(
+					array(
+						'manual_cleanup' => array(
+							'action' => 'region_cleanup_not_found',
+							'region_fragment' => $region_fragment,
+							'cleaned_at' => $this->now(),
+							'source' => 'admin',
+						),
+					)
+				),
+			)
+		);
 	}
 
 	private function locations_table_name(): string {

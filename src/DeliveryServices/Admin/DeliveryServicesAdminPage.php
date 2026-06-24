@@ -656,7 +656,26 @@ final class DeliveryServicesAdminPage {
 						$this->yandex_delivery_settings->save_pickup_action_result( array( 'type' => $type, 'title' => 'Ручная проверка geo_id', 'message' => $result_message, 'details' => array( 'processed' => $count, 'blocked' => count( $blocked_ids ), 'next_location_id' => $manual_limit ) ) );
 					}
 				}
-			}			if ( 'check_yandex_delivery_geo_coverage' === $action && $this->yandex_delivery_geo_coverage_service instanceof YandexDeliveryGeoCoverageService && $this->yandex_delivery_settings instanceof YandexDeliverySettings ) {
+			}
+			if ( 'cleanup_yandex_delivery_geo_needs_review_by_region' === $action && $this->yandex_delivery_geo_mappings instanceof YandexDeliveryGeoMappingRepository && $this->yandex_delivery_settings instanceof YandexDeliverySettings ) {
+				$region_fragment = isset( $_POST['yandex_delivery_geo_cleanup_region_fragment'] ) ? sanitize_text_field( wp_unslash( $_POST['yandex_delivery_geo_cleanup_region_fragment'] ) ) : '';
+				if ( $this->yandex_delivery_geo_runner instanceof YandexDeliveryGeoMappingRunnerService && $this->yandex_delivery_geo_runner->is_running() ) {
+					$this->yandex_delivery_settings->save_pickup_action_result( array( 'type' => 'warning', 'title' => 'Очистка needs_review по региону', 'message' => $this->yandex_delivery_geo_manual_locked_message(), 'details' => array( 'region' => $region_fragment ) ) );
+				} elseif ( '' === trim( $region_fragment ) ) {
+					$this->yandex_delivery_settings->save_pickup_action_result( array( 'type' => 'warning', 'title' => 'Очистка needs_review по региону', 'message' => 'Введите название региона.', 'details' => array() ) );
+				} else {
+					$stats = $this->yandex_delivery_geo_mappings->cleanup_needs_review_by_region( $region_fragment );
+					$this->yandex_delivery_settings->save_pickup_action_result(
+						array(
+							'type' => (int) ( $stats['checked_candidates'] ?? 0 ) > 0 ? 'success' : 'warning',
+							'title' => 'Очистка needs_review по региону',
+							'message' => sprintf( 'Проверено location: %d. Проверено candidates: %d. Удалено candidates: %d. Переведено в not_found: %d.', (int) ( $stats['matched_locations'] ?? 0 ), (int) ( $stats['checked_candidates'] ?? 0 ), (int) ( $stats['removed_candidates'] ?? 0 ), (int) ( $stats['converted_to_not_found'] ?? 0 ) ),
+							'details' => array_merge( array( 'region' => $region_fragment ), $stats ),
+						)
+					);
+				}
+			}
+			if ( 'check_yandex_delivery_geo_coverage' === $action && $this->yandex_delivery_geo_coverage_service instanceof YandexDeliveryGeoCoverageService && $this->yandex_delivery_settings instanceof YandexDeliverySettings ) {
 				$location_id = isset( $_POST['yandex_delivery_geo_coverage_location_id'] ) ? max( 0, (int) $_POST['yandex_delivery_geo_coverage_location_id'] ) : 0;
 				$result = $this->yandex_delivery_geo_coverage_service->check_location( $location_id );
 				$status = (string) ( $result['coverage_status'] ?? YandexDeliveryGeoCoverageStatus::UNKNOWN );
@@ -1624,6 +1643,17 @@ final class DeliveryServicesAdminPage {
 			'yandex_delivery_geo_review_per_page' => (int) $args['per_page'],
 		);
 		?>
+		<h3><?php echo esc_html__( 'Очистка needs_review по региону', 'walls-delivery-calc' ); ?></h3>
+		<p class="description"><?php echo esc_html__( 'Проверяет только location, у которых region_name содержит введенную строку. Удаляет candidates needs_review, если адрес Яндекса не содержит этот регион.', 'walls-delivery-calc' ); ?></p>
+		<form method="post" style="margin: 12px 0 20px;">
+			<?php wp_nonce_field( 'wdc_delivery_services' ); ?>
+			<input type="hidden" name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>">
+			<input type="hidden" name="wdc_delivery_services_action" value="cleanup_yandex_delivery_geo_needs_review_by_region">
+			<input type="hidden" name="tab" value="yandex_delivery_geo">
+			<table class="form-table" role="presentation">
+				<tr><th scope="row"><?php echo esc_html__( 'Название региона', 'walls-delivery-calc' ); ?></th><td><input class="regular-text" type="text" name="yandex_delivery_geo_cleanup_region_fragment" value="" placeholder="<?php echo esc_attr__( 'Адыгея', 'walls-delivery-calc' ); ?>"> <button class="button" type="submit" <?php disabled( $runner_running ); ?>><?php echo esc_html__( 'Проверить', 'walls-delivery-calc' ); ?></button></td></tr>
+			</table>
+		</form>
 		<h3><?php echo esc_html__( 'Ручная проверка спорных совпадений', 'walls-delivery-calc' ); ?></h3>
 		<p class="description"><?php echo esc_html__( 'Очередь показывает grouped needs_review по location_id: подтвердите подходящие geo_id, затем выберите оставшиеся location_id на странице и массово откажите в сопоставлении.', 'walls-delivery-calc' ); ?></p>
 		<?php if ( $runner_running ) : ?>

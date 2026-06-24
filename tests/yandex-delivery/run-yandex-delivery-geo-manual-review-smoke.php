@@ -92,12 +92,34 @@ $repository->save_mapping( array( 'location_id' => 7, 'yandex_geo_id' => 777, 's
 yd_geo_manual_assert( 2 === $repository->bulk_reject_locations( array( 6, 7 ), 'bulk obvious reject' ), 'bulk_reject_locations must return processed count.' );
 yd_geo_manual_assert( YandexDeliveryGeoMappingStatus::NOT_FOUND === (string) $repository->find_by_location_id( 6 )[0]['status'] && YandexDeliveryGeoMappingStatus::NOT_FOUND === (string) $repository->find_by_location_id( 7 )[0]['status'], 'Bulk reject must save not_found for each selected location.' );
 
+$GLOBALS['wpdb']->locations[] = array( 'id' => 8, 'display_name' => 'респ Адыгея, поселок Комсомольский', 'region_name' => 'Адыгея', 'place_type' => 'п' );
+$GLOBALS['wpdb']->locations[] = array( 'id' => 9, 'display_name' => 'респ Адыгея, с Мусорное', 'region_name' => 'Адыгея', 'place_type' => 'с' );
+$GLOBALS['wpdb']->locations[] = array( 'id' => 10, 'display_name' => 'Пермский край, г Пермь', 'region_name' => 'Пермский край', 'place_type' => 'г' );
+$GLOBALS['wpdb']->locations[] = array( 'id' => 11, 'display_name' => 'респ Адыгея, г Безопасный', 'region_name' => 'Адыгея', 'place_type' => 'г' );
+$GLOBALS['wpdb']->locations[] = array( 'id' => 12, 'display_name' => 'респ Адыгея, с Техошибка', 'region_name' => 'Адыгея', 'place_type' => 'с' );
+$repository->save_mapping( array( 'location_id' => 8, 'yandex_geo_id' => 801, 'yandex_locality' => 'посёлок Комсомольский, Республика Адыгея', 'status' => YandexDeliveryGeoMappingStatus::NEEDS_REVIEW, 'confidence' => 60, 'is_primary' => 0 ) );
+$repository->save_mapping( array( 'location_id' => 8, 'yandex_geo_id' => 802, 'yandex_locality' => 'Комсомольский, Пермский край', 'status' => YandexDeliveryGeoMappingStatus::NEEDS_REVIEW, 'confidence' => 61, 'is_primary' => 0 ) );
+$repository->save_mapping( array( 'location_id' => 9, 'yandex_geo_id' => 901, 'yandex_locality' => 'Мусорное, Пермский край', 'status' => YandexDeliveryGeoMappingStatus::NEEDS_REVIEW, 'confidence' => 62, 'is_primary' => 0 ) );
+$repository->save_mapping( array( 'location_id' => 10, 'yandex_geo_id' => 1001, 'yandex_locality' => 'Пермь, Пермский край', 'status' => YandexDeliveryGeoMappingStatus::NEEDS_REVIEW, 'confidence' => 63, 'is_primary' => 0 ) );
+$repository->save_mapping( array( 'location_id' => 11, 'yandex_geo_id' => 1101, 'yandex_locality' => 'Маппед, Пермский край', 'status' => YandexDeliveryGeoMappingStatus::MAPPED, 'confidence' => 100, 'is_primary' => 1 ) );
+$repository->save_mapping( array( 'location_id' => 11, 'yandex_geo_id' => 1102, 'yandex_locality' => 'Manual, Пермский край', 'status' => YandexDeliveryGeoMappingStatus::MANUAL, 'confidence' => 100, 'is_primary' => 0 ) );
+$repository->save_technical_error_marker( 12, 'Техошибка', 'timeout' );
+$cleanup = $repository->cleanup_needs_review_by_region( 'Адыг' );
+yd_geo_manual_assert( array( 'matched_locations' => 2, 'checked_candidates' => 3, 'removed_candidates' => 2, 'converted_to_not_found' => 1 ) === $cleanup, 'cleanup_needs_review_by_region() must remove mismatching candidates by partial region fragment and convert empty locations to not_found.' );
+$rows8 = $repository->find_by_location_id( 8 );
+yd_geo_manual_assert( 1 === count( array_filter( $rows8, static fn( array $row ): bool => YandexDeliveryGeoMappingStatus::NEEDS_REVIEW === (string) $row['status'] ) ) && 801 === (int) $rows8[0]['yandex_geo_id'], 'Region cleanup must keep candidate whose Yandex locality contains the region fragment.' );
+$rows9 = $repository->find_by_location_id( 9 );
+yd_geo_manual_assert( 1 === count( $rows9 ) && YandexDeliveryGeoMappingStatus::NOT_FOUND === (string) $rows9[0]['status'], 'Region cleanup must convert a location to not_found when all needs_review candidates are removed and no primary exists.' );
+yd_geo_manual_assert( YandexDeliveryGeoMappingStatus::NEEDS_REVIEW === (string) $repository->find_by_location_id( 10 )[0]['status'], 'Region cleanup must skip locations whose region_name does not contain the fragment.' );
+yd_geo_manual_assert( 2 === count( $repository->find_by_location_id( 11 ) ) && 1101 === $repository->find_primary_geo_id( 11 ), 'Region cleanup must not delete mapped/manual rows.' );
+yd_geo_manual_assert( YandexDeliveryGeoMappingRepository::TECHNICAL_ERROR_GEO_ID === (int) $repository->find_by_location_id( 12 )[0]['yandex_geo_id'], 'Region cleanup must not delete technical marker rows.' );
+
 $repository_source = file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingRepository.php' ) ?: '';
 $admin_source = file_get_contents( WDC_PLUGIN_DIR . 'src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' ) ?: '';
 $project_status = file_get_contents( WDC_PLUGIN_DIR . 'docs/project-status.md' ) ?: '';
 $plugin_source = file_get_contents( WDC_PLUGIN_DIR . 'walls-delivery-calc.php' ) ?: '';
 
-yd_geo_manual_assert( str_contains( $repository_source, 'function find_needs_review_locations' ) && str_contains( $repository_source, 'function approve_mapping' ) && str_contains( $repository_source, 'function bulk_reject_locations' ), 'Repository must expose manual review methods.' );
+yd_geo_manual_assert( str_contains( $repository_source, 'function find_needs_review_locations' ) && str_contains( $repository_source, 'function approve_mapping' ) && str_contains( $repository_source, 'function bulk_reject_locations' ) && str_contains( $repository_source, 'function cleanup_needs_review_by_region' ) && str_contains( $repository_source, 'contains_fragment' ), 'Repository must expose manual review and region cleanup methods.' );
 preg_match( '/private function render_yandex_delivery_geo_manual_review_section[\s\S]*?private function render_yandex_delivery_geo_analysis_tab/', $admin_source, $manual_match );
 $manual_section = (string) ( $manual_match[0] ?? '' );
 yd_geo_manual_assert( str_contains( $manual_section, 'style="width: 100%;"' ) && str_contains( $manual_section, 'widefat striped' ), 'Manual queue table must use full available width.' );
@@ -105,10 +127,10 @@ yd_geo_manual_assert( ! str_contains( $manual_section, '<th><?php echo esc_html_
 yd_geo_manual_assert( str_contains( $manual_section, '<strong><code>geo_id=' ) && str_contains( $manual_section, 'class="description">confidence=' ), 'Candidate block must show the first-line geo_id/address in bold and separate diagnostic text.' );
 yd_geo_manual_assert( ! str_contains( $manual_section, 'placeholder="<?php echo esc_attr( __( \'Комментарий' ) && str_contains( $manual_section, 'Отказать выбранным в сопоставлении' ), 'Manual queue must remove reject comments and expose bulk reject action.' );
 yd_geo_manual_assert( str_contains( $manual_section, 'wdc-yandex-geo-review-select-page' ) && str_contains( $manual_section, 'wdc-yandex-geo-review-location-checkbox' ), 'Manual queue must provide select-page checkbox.' );
-yd_geo_manual_assert( str_contains( $admin_source, 'approve_yandex_delivery_geo_mapping' ) && str_contains( $admin_source, 'reject_yandex_delivery_geo_mapping' ) && str_contains( $admin_source, 'bulk_reject_yandex_delivery_geo_mapping' ), 'Manual review POST actions must exist.' );
+yd_geo_manual_assert( str_contains( $admin_source, 'approve_yandex_delivery_geo_mapping' ) && str_contains( $admin_source, 'reject_yandex_delivery_geo_mapping' ) && str_contains( $admin_source, 'bulk_reject_yandex_delivery_geo_mapping' ) && str_contains( $admin_source, 'cleanup_yandex_delivery_geo_needs_review_by_region' ) && str_contains( $admin_source, 'Очистка needs_review по региону' ), 'Manual review POST actions and region cleanup UI must exist.' );
 yd_geo_manual_assert( str_contains( $admin_source, 'is_running()' ) && str_contains( $admin_source, 'Ручная обработка будет доступна после завершения или постановки процесса на паузу.' ) && ! str_contains( $admin_source, 'Ручная обработка временно заблокирована' ), 'Manual review handlers/UI must keep runner running guard.' );
 yd_geo_manual_assert( str_contains( $admin_source, 'max_location_id_exclusive' ) && str_contains( $admin_source, "array( 'full', 'unprocessed' )" ) && str_contains( $admin_source, 'Очередь ограничена уже обработанной частью полного маппинга' ) && str_contains( $admin_source, 'Ручная обработка доступна только для уже обработанной части полного маппинга' ), 'Admin source must guard paused full/unprocessed-runner manual review by next_location_id.' );
-yd_geo_manual_assert( str_contains( $plugin_source, 'Version: 0.90.1' ) && str_contains( $plugin_source, "WDC_VERSION', '0.90.1" ), 'Plugin version must be 0.90.1.' );
-yd_geo_manual_assert( str_contains( $project_status, '0.90.1 Yandex Geo Mapping Runner Pause Race Fix' ), 'Project status must document runner pause race fix.' );
+yd_geo_manual_assert( str_contains( $plugin_source, 'Version: 0.91.0' ) && str_contains( $plugin_source, "WDC_VERSION', '0.91.0" ), 'Plugin version must be 0.91.0.' );
+yd_geo_manual_assert( str_contains( $project_status, '0.91.0 Yandex Geo Manual Region Cleanup' ), 'Project status must document manual region cleanup.' );
 
 echo "Yandex Delivery geo manual review smoke test passed.\n";
