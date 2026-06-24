@@ -1752,11 +1752,29 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 
+		$show_analysis = isset( $_GET['yandex_delivery_geo_show_analysis'] ) && '1' === (string) $_GET['yandex_delivery_geo_show_analysis'];
 		$max_confidence = 59.99;
 		if ( isset( $_GET['max_confidence'] ) ) {
 			$max_confidence = (float) str_replace( ',', '.', sanitize_text_field( wp_unslash( $_GET['max_confidence'] ) ) );
 		}
-
+		$analysis_url = add_query_arg(
+			array(
+				'page' => self::MENU_SLUG,
+				'service' => $service->service_key,
+				'tab' => 'yandex_delivery_geo',
+				'yandex_delivery_geo_show_analysis' => 1,
+				'max_confidence' => $max_confidence,
+			),
+			admin_url( 'admin.php' )
+		);
+		?>
+		<h3><?php echo esc_html__( 'Аналитика маппинга', 'walls-delivery-calc' ); ?></h3>
+		<p class="description"><?php echo esc_html__( 'Аналитика не считается автоматически при открытии вкладки, чтобы не загружать большую таблицу mappings. Нажмите кнопку, чтобы построить отчёт по запросу.', 'walls-delivery-calc' ); ?></p>
+		<?php if ( ! $show_analysis ) : ?>
+			<p><a class="button" href="<?php echo esc_url( $analysis_url ); ?>"><?php echo esc_html__( 'Показать аналитику', 'walls-delivery-calc' ); ?></a></p>
+			<?php return; ?>
+		<?php endif; ?>
+		<?php
 		$bucket_stats  = $this->yandex_delivery_geo_analysis->get_bucket_statistics();
 		$status_stats  = $this->yandex_delivery_geo_analysis->get_status_statistics();
 		$top_regions   = $this->yandex_delivery_geo_analysis->get_top_regions( $max_confidence );
@@ -1773,14 +1791,14 @@ final class DeliveryServicesAdminPage {
 			'0'     => '0',
 		);
 		?>
-		<h3><?php echo esc_html__( 'Аналитика маппинга', 'walls-delivery-calc' ); ?></h3>
-		<p class="description"><?php echo esc_html__( 'Аналитика сохранённых сопоставлений geo_id. Этот блок не вызывает API Яндекса и не перестраивает маппинг.', 'walls-delivery-calc' ); ?></p>
+		<p class="description"><?php echo esc_html__( 'Аналитика сохранённых сопоставлений geo_id. Bucket/status/regions/types считаются SQL-агрегацией, matched_by показан по ограниченной выборке низкой уверенности.', 'walls-delivery-calc' ); ?></p>
 		<form method="get" style="margin: 16px 0;">
 			<input type="hidden" name="page" value="<?php echo esc_attr( self::MENU_SLUG ); ?>">
 			<input type="hidden" name="service" value="<?php echo esc_attr( $service->service_key ); ?>">
 			<input type="hidden" name="tab" value="yandex_delivery_geo">
+			<input type="hidden" name="yandex_delivery_geo_show_analysis" value="1">
 			<label>max_confidence <input class="small-text" type="number" min="0" max="100" step="0.01" name="max_confidence" value="<?php echo esc_attr( (string) $max_confidence ); ?>"></label>
-			<?php submit_button( __( 'Применить', 'walls-delivery-calc' ), 'secondary', 'submit', false ); ?>
+			<?php submit_button( __( 'Обновить аналитику', 'walls-delivery-calc' ), 'secondary', 'submit', false ); ?>
 		</form>
 		<h3><?php echo esc_html__( 'Статистика confidence', 'walls-delivery-calc' ); ?></h3>
 		<table class="widefat striped" style="max-width: 520px; margin: 12px 0;">
@@ -1803,6 +1821,7 @@ final class DeliveryServicesAdminPage {
 			<tbody><?php foreach ( $top_types as $row ) : ?><tr><td><?php echo esc_html( (string) $row['type'] ); ?></td><td><?php echo esc_html( (string) (int) $row['count'] ); ?></td></tr><?php endforeach; ?></tbody>
 		</table>
 		<h3><?php echo esc_html__( 'Сигналы сопоставления', 'walls-delivery-calc' ); ?></h3>
+		<p class="description"><?php echo esc_html__( 'matched_by считается только по ограниченной выборке до 1000 low-confidence rows, чтобы не читать весь raw_json.', 'walls-delivery-calc' ); ?></p>
 		<table class="widefat striped" style="max-width: 680px; margin: 12px 0;">
 			<thead><tr><th><?php echo esc_html__( 'Сигнал', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Количество', 'walls-delivery-calc' ); ?></th></tr></thead>
 			<tbody><?php foreach ( $top_patterns as $row ) : ?><tr><td><?php echo esc_html( (string) $row['pattern'] ); ?></td><td><?php echo esc_html( (string) (int) $row['count'] ); ?></td></tr><?php endforeach; ?></tbody>
@@ -1818,6 +1837,7 @@ final class DeliveryServicesAdminPage {
 		</table>
 		<?php
 	}
+
 	private function render_yandex_delivery_geo_coverage_tab( DeliveryService $service ): void {
 		if ( ! $this->is_yandex_delivery_service( $service ) ) {
 			return;

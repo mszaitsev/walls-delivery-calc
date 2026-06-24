@@ -185,6 +185,6 @@ yd_geo_coverage_assert( str_contains( $admin_source, 'check_yandex_delivery_geo_
 yd_geo_coverage_assert( str_contains( $admin_source, 'yandex_delivery_geo_coverage_location_query' ) && str_contains( $admin_source, 'Найти населённый пункт' ), 'Coverage tab must expose location name search.' );
 yd_geo_coverage_assert( str_contains( $admin_source, "'check_yandex_delivery_geo_coverage' => 'yandex_delivery_geo_coverage'" ), 'Coverage action must redirect back to the coverage tab.' );
 yd_geo_coverage_assert( str_contains( $plugin_source, 'YandexDeliveryGeoCoverageRepository::class' ) && str_contains( $plugin_source, 'YandexDeliveryGeoCoverageService::class' ), 'Plugin DI must register coverage repository and service.' );
-yd_geo_coverage_assert( str_contains( $version_source, '0.91.1' ), 'Plugin version must be 0.91.1.' );
+yd_geo_coverage_assert( str_contains( $version_source, '0.91.2' ), 'Plugin version must be 0.91.2.' );
 
 echo "Yandex Delivery geo coverage smoke OK\n";
