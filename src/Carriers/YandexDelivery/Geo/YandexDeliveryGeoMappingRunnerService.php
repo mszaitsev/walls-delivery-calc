@@ -227,6 +227,7 @@ final class YandexDeliveryGeoMappingRunnerService {
 
 		try {
 			$state = $this->current_state();
+			$status_before_delta = (string) $state['status'];
 			if ( '' !== $session_id && $session_id !== (string) $state['session_id'] ) {
 				$state['status'] = 'error';
 				$state['updated_at'] = $this->now();
@@ -242,7 +243,7 @@ final class YandexDeliveryGeoMappingRunnerService {
 			$delta_errors = is_array( $delta['errors_last'] ?? null ) ? $delta['errors_last'] : array();
 			$state['errors_last'] = array_slice( array_merge( $errors, $delta_errors ), -10 );
 			$state['updated_at'] = $this->now();
-			if ( 'done' !== (string) $state['status'] ) {
+			if ( 'running' === $status_before_delta ) {
 				$state['message'] = 'Шаг выполнен.';
 			}
 			$this->save_state( $state );

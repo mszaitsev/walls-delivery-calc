@@ -133,6 +133,24 @@ yd_geo_runner_assert( 'running' === (string) $new_full['status'] && (string) $ne
 
 $GLOBALS['wdc_yandex_delivery_geo_runner_options'] = array();
 $GLOBALS['wpdb'] = new wpdb();
+for ( $i = 1; $i <= 120; ++$i ) {
+	$GLOBALS['wpdb']->locations[] = yd_geo_runner_location( $i, 'Pause Race ' . $i );
+}
+$http = new YdGeoRunnerFakeHttp();
+$runner = yd_geo_runner_service( $GLOBALS['wpdb'], $http );
+$state = $runner->start_full();
+$state = $runner->run_step( (string) $state['session_id'] );
+$paused = $runner->pause();
+yd_geo_runner_assert( 'paused' === (string) $paused['status'] && 'Маппинг поставлен на паузу.' === (string) $paused['message'], 'pause() must return fresh paused state.' );
+$apply_delta = new ReflectionMethod( YandexDeliveryGeoMappingRunnerService::class, 'apply_step_delta' );
+$apply_delta->setAccessible( true );
+$late = $apply_delta->invoke( $runner, (string) $paused['session_id'], array( 'processed' => 5, 'mapped' => 2, 'needs_review' => 1, 'not_found' => 1, 'tech_errors' => 1, 'errors_last' => array( array( 'location_id' => 55, 'message' => 'late timeout', 'checked_at' => '2026-06-24 12:00:00' ) ) ) );
+yd_geo_runner_assert( 'paused' === (string) $late['status'] && 'Маппинг поставлен на паузу.' === (string) $late['message'] && 55 === (int) $late['processed'] && 52 === (int) $late['mapped'] && 50 === (int) $late['next_location_id'], 'Late apply_step_delta() after pause must add counters but keep paused status/message and reservation cursor.' );
+$after_paused_step = $runner->run_step( (string) $late['session_id'] );
+yd_geo_runner_assert( 'paused' === (string) $after_paused_step['status'] && 55 === (int) $after_paused_step['processed'], 'run_step() after pause must not reserve or process another batch.' );
+
+$GLOBALS['wdc_yandex_delivery_geo_runner_options'] = array();
+$GLOBALS['wpdb'] = new wpdb();
 $GLOBALS['wpdb']->locations = array(
 	yd_geo_runner_location( 101, 'Retry Success' ),
 	yd_geo_runner_location( 102, 'Retry Empty' ),
@@ -183,7 +201,7 @@ $plugin_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Core/Plugin.p
 $js_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'assets/admin/yandex-delivery-geo-mapping-runner.js' );
 $version_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'walls-delivery-calc.php' );
 
-yd_geo_runner_assert( str_contains( $runner_source, 'private const BATCH_SIZE = 50' ) && str_contains( $runner_source, 'eta_finished_at' ) && str_contains( $runner_source, 'average_locations_per_second' ) && str_contains( $runner_source, 'remaining_seconds' ) && str_contains( $runner_source, 'count_technical_error_markers' ) && ! str_contains( $runner_source, 'WORKER_COUNT' ) && ! str_contains( $runner_source, 'worker_count' ) && ! str_contains( $runner_source, 'DEFAULT_LIMIT' ) && ! str_contains( $runner_source, 'clamp_limit' ), 'Runner service must use fixed batch size 50, ETA fields, persistent marker count, no worker_count and no limit setting.' );
+yd_geo_runner_assert( str_contains( $runner_source, 'private const BATCH_SIZE = 50' ) && str_contains( $runner_source, 'eta_finished_at' ) && str_contains( $runner_source, 'average_locations_per_second' ) && str_contains( $runner_source, 'remaining_seconds' ) && str_contains( $runner_source, 'count_technical_error_markers' ) && str_contains( $runner_source, '$status_before_delta' ) && str_contains( $runner_source, "'running' === " . "$" . "status_before_delta" ) && str_contains( $runner_source, "'running' !== (string) " . "$" . "state['status']" ) && ! str_contains( $runner_source, 'WORKER_COUNT' ) && ! str_contains( $runner_source, 'worker_count' ) && ! str_contains( $runner_source, 'DEFAULT_LIMIT' ) && ! str_contains( $runner_source, 'clamp_limit' ), 'Runner service must use fixed batch size 50, ETA fields, persistent marker count, reserve running guard and paused-safe delta handling.' );
 yd_geo_runner_assert( str_contains( $runner_source, "\$state['status'] = 'done'" ) && str_contains( $runner_source, "\$state['mode'] = 'retry_errors'" ) && str_contains( $runner_source, "\$state['mode'] = 'unprocessed'" ), 'Runner state must support done, retry_errors and unprocessed mode.' );
 yd_geo_runner_assert( ! str_contains( $runner_source, 'find_primary_geo_id( $location_id )' ), 'Full runner must not skip existing primary mappings.' );
 yd_geo_runner_assert( str_contains( $runner_source, 'reserve_batch' ) && str_contains( $runner_source, 'next_location_id' ) && str_contains( $runner_source, "array( 'full', 'unprocessed' )" ) && str_contains( $runner_source, 'delete_location_mappings( $location_id )' ), 'Full/unprocessed runner must reserve with next_location_id and delete old mapping rows before remapping each location.' );
@@ -197,8 +215,8 @@ yd_geo_runner_assert( str_contains( $admin_source, 'Ручная обработ�
 yd_geo_runner_assert( str_contains( $admin_source, 'is_technical_error_geo_id( $row_geo_id )' ) && str_contains( $admin_source, 'Маппинг необработанных' ) && str_contains( $admin_source, 'Запустить / продолжить полный маппинг' ) && ! str_contains( $admin_source, 'yandex_delivery_geo_batch_limit' ) && ! str_contains( $admin_source, 'yandex_delivery_geo_batch_size' ), 'Admin UI must expose recovery/full resume controls, hide primary action for marker and remove legacy limit/batch_size fields.' );
 yd_geo_runner_assert( ! str_contains( $admin_source, "'worker_count' => 'worker_count'" ) && str_contains( $admin_source, "'batch_size' => 'batch_size'" ) && str_contains( $admin_source, 'eta_finished_at' ) && str_contains( $admin_source, 'technical_error_markers_count' ), 'Admin runner state table must show batch_size, ETA and marker count while hiding worker_count.' );
 yd_geo_runner_assert( str_contains( $plugin_source, 'YandexDeliveryGeoMappingRunnerService::class' ), 'Plugin must register runner service.' );
-yd_geo_runner_assert( str_contains( $js_source, 'function loop()' ) && str_contains( $js_source, "post('step'" ) && str_contains( $js_source, 'stopRequested' ) && str_contains( $js_source, 'activeSessionId' ) && str_contains( $js_source, 'nextState.session_id !== sessionId' ) && str_contains( $js_source, "post('start_unprocessed'" ) && str_contains( $js_source, 'eta_finished_at' ) && str_contains( $js_source, 'technical_error_markers_count' ) && ! str_contains( $js_source, 'activeWorkers' ) && ! str_contains( $js_source, 'workerLoop' ) && ! str_contains( $js_source, 'worker_id' ) && ! str_contains( $js_source, 'workerCount' ), 'Runner JS must render ETA/marker fields, use one guarded loop, no parallel worker markers, and ignore stale responses after pause.' );
-yd_geo_runner_assert( str_contains( $version_source, '0.90.0' ), 'Plugin version must be 0.90.0.' );
+yd_geo_runner_assert( str_contains( $js_source, 'function loop()' ) && str_contains( $js_source, "post('step'" ) && str_contains( $js_source, 'stopRequested' ) && str_contains( $js_source, 'activeSessionId' ) && str_contains( $js_source, 'nextState.session_id !== sessionId' ) && str_contains( $js_source, "post('start_unprocessed'" ) && str_contains( $js_source, "if (nextState.status === 'running')" ) && str_contains( $js_source, 'eta_finished_at' ) && str_contains( $js_source, 'technical_error_markers_count' ) && ! str_contains( $js_source, 'activeWorkers' ) && ! str_contains( $js_source, 'workerLoop' ) && ! str_contains( $js_source, 'worker_id' ) && ! str_contains( $js_source, 'workerCount' ), 'Runner JS must render ETA/marker fields, bootstrap only running status, use one guarded loop, no parallel worker markers, and ignore stale responses after pause.' );
+yd_geo_runner_assert( str_contains( $version_source, '0.90.1' ), 'Plugin version must be 0.90.1.' );
 foreach ( array( 'CheckoutOrchestrator', 'pricing', 'pickupPointsList', 'YandexDeliveryPickupPointImportService' ) as $forbidden ) {
 	yd_geo_runner_assert( ! str_contains( $runner_source, $forbidden ), 'Runner must not touch checkout/pricing/PVZ import code: ' . $forbidden );
 }
