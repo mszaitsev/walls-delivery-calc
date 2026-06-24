@@ -1,3 +1,11 @@
+## Yandex Geo Mapping Runner 0.87.0
+
+- `src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingRunnerService.php` is the production runner for full WDC `location_id` -> Yandex `geo_id` mapping. It stores state in option `wdc_yandex_delivery_geo_mapping_runner_state`, supports `full` and `retry_errors` modes, uses fixed `BATCH_SIZE = 30`, reserves work ahead with `next_location_id` under an option lock, exposes `WORKER_COUNT = 3`, deletes old mappings before each full-mode remap, never skips existing primary mappings in full mode, and finishes with `done` when no rows remain.
+- Full mode processes active RU locations with non-empty `display_name` in `id ASC` order through the existing `YandexDeliveryGeoMappingService::detect_for_runner()` wrapper. Existing working primary mappings are skipped; technical failures do not stop the batch.
+- Technical failures are represented by marker `YandexDeliveryGeoMappingRepository::TECHNICAL_ERROR_GEO_ID = 999999999`. Marker rows have `status=error`, `confidence=0`, `is_primary=0` and compact raw JSON. `find_primary_geo_id()` and `set_primary()` reject this marker.
+- Retry mode selects only locations with marker `999999999`. A successful retry replaces the marker with a normal mapped/needs_review/not_found result; a repeated technical failure updates the marker and `errors_last`.
+- `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` renders the runner inside `Маппинг geo_id`: status fields, progress bar, latest technical errors and buttons `Запустить полный маппинг`, `Обработать тех.ошибки`, `Выполнить шаг`, `Пауза`, `Сбросить прогресс`. Manual detect and primary actions are blocked while state is `running`.
+- `assets/admin/yandex-delivery-geo-mapping-runner.js` starts/retries the runner through admin-ajax, loops `step` calls while the page stays open, refreshes progress after every step and resumes a running state on page open. This stage does not add PVZ import, coverage batch, checkout or pricing.
 ## Yandex Admin UX Consolidation 0.85.0
 
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` now renders the Yandex Delivery admin tabs as `Данные для входа`, `Маппинг geo_id`, `Покрытие Яндекса`, `Яндекс ПВЗ`.

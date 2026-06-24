@@ -6,6 +6,8 @@ namespace WallsShop\WDC\Carriers\YandexDelivery\Geo;
 defined( 'ABSPATH' ) || exit;
 
 final class YandexDeliveryGeoMappingRepository {
+	public const TECHNICAL_ERROR_GEO_ID = 999999999;
+
 	private object $wpdb;
 
 	public function __construct( ?object $wpdb = null ) {
@@ -108,7 +110,7 @@ final class YandexDeliveryGeoMappingRepository {
 
 	public function find_primary_geo_id( int $location_id ): ?int {
 		foreach ( $this->find_by_location_id( $location_id ) as $row ) {
-			if ( ! empty( $row['is_primary'] ) && null !== ( $row['yandex_geo_id'] ?? null ) && (int) $row['yandex_geo_id'] > 0 ) {
+			if ( ! empty( $row['is_primary'] ) && null !== ( $row['yandex_geo_id'] ?? null ) && (int) $row['yandex_geo_id'] > 0 && ! $this->is_technical_error_geo_id( (int) $row['yandex_geo_id'] ) ) {
 				return (int) $row['yandex_geo_id'];
 			}
 		}
@@ -117,7 +119,7 @@ final class YandexDeliveryGeoMappingRepository {
 	}
 
 	public function set_primary( int $location_id, int $yandex_geo_id ): bool {
-		if ( $location_id <= 0 || $yandex_geo_id <= 0 ) {
+		if ( $location_id <= 0 || $yandex_geo_id <= 0 || $this->is_technical_error_geo_id( $yandex_geo_id ) ) {
 			return false;
 		}
 		$this->create_schema_if_needed();
@@ -142,6 +144,89 @@ final class YandexDeliveryGeoMappingRepository {
 		return is_numeric( $result ) && (int) $result > 0;
 	}
 
+	public function save_technical_error_marker( int $location_id, string $source_query, string $message ): array {
+		return $this->save_mapping(
+			array(
+				'location_id' => $location_id,
+				'yandex_geo_id' => self::TECHNICAL_ERROR_GEO_ID,
+				'source_query' => $source_query,
+				'status' => YandexDeliveryGeoMappingStatus::ERROR,
+				'confidence' => 0,
+				'is_primary' => 0,
+				'raw_json' => $this->json(
+					array(
+						'type' => 'technical_error',
+						'message' => $this->truncate( $message, 500 ),
+						'marker_geo_id' => self::TECHNICAL_ERROR_GEO_ID,
+						'updated_at' => $this->now(),
+					)
+				),
+			)
+		);
+	}
+
+	/** @return array<int,int> */
+	public function find_technical_error_location_ids_after( int $after_id, int $limit ): array {
+		$after_id = max( 0, $after_id );
+		$limit = max( 1, min( 1000, $limit ) );
+		if ( $this->has_test_rows() ) {
+			$ids = array_values(
+				array_unique(
+					array_map(
+						static fn( array $row ): int => (int) ( $row['location_id'] ?? 0 ),
+						array_filter(
+							$this->test_rows(),
+							fn( array $row ): bool => (int) ( $row['location_id'] ?? 0 ) > $after_id
+								&& $this->is_technical_error_geo_id( (int) ( $row['yandex_geo_id'] ?? 0 ) )
+						)
+					)
+				)
+			);
+			sort( $ids );
+			return array_slice( array_filter( $ids, static fn( int $id ): bool => $id > 0 ), 0, $limit );
+		}
+		$this->create_schema_if_needed();
+		$rows = $this->wpdb->get_col( $this->wpdb->prepare( 'SELECT DISTINCT location_id FROM ' . $this->table_name() . ' WHERE location_id > %d AND yandex_geo_id = %d ORDER BY location_id ASC LIMIT %d', $after_id, self::TECHNICAL_ERROR_GEO_ID, $limit ) );
+
+		return is_array( $rows ) ? array_values( array_map( 'intval', $rows ) ) : array();
+	}
+
+	public function count_technical_error_markers(): int {
+		if ( $this->has_test_rows() ) {
+			$ids = array();
+			foreach ( $this->test_rows() as $row ) {
+				if ( $this->is_technical_error_geo_id( (int) ( $row['yandex_geo_id'] ?? 0 ) ) ) {
+					$ids[ (int) ( $row['location_id'] ?? 0 ) ] = true;
+				}
+			}
+			unset( $ids[0] );
+			return count( $ids );
+		}
+		$this->create_schema_if_needed();
+		$value = $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT COUNT(DISTINCT location_id) FROM ' . $this->table_name() . ' WHERE yandex_geo_id = %d', self::TECHNICAL_ERROR_GEO_ID ) );
+
+		return is_numeric( $value ) ? max( 0, (int) $value ) : 0;
+	}
+	public function clear_technical_error_marker( int $location_id ): void {
+		if ( $location_id <= 0 ) {
+			return;
+		}
+		if ( $this->has_test_rows() ) {
+			$this->wpdb->yandex_delivery_geo_mappings = array_values(
+				array_filter(
+					$this->wpdb->yandex_delivery_geo_mappings,
+					fn( array $row ): bool => ! ( (int) ( $row['location_id'] ?? 0 ) === $location_id && $this->is_technical_error_geo_id( (int) ( $row['yandex_geo_id'] ?? 0 ) ) )
+				)
+			);
+			return;
+		}
+		$this->create_schema_if_needed();
+		$this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $this->table_name() . ' WHERE location_id = %d AND yandex_geo_id = %d', $location_id, self::TECHNICAL_ERROR_GEO_ID ) );
+	}
+
+	public function is_technical_error_geo_id( int $geo_id ): bool {
+		return self::TECHNICAL_ERROR_GEO_ID === $geo_id;
+	}
 	public function delete_location_mappings( int $location_id ): int {
 		if ( $location_id <= 0 ) {
 			return 0;
@@ -392,5 +477,14 @@ final class YandexDeliveryGeoMappingRepository {
 
 	private function now(): string {
 		return function_exists( 'current_time' ) ? current_time( 'mysql' ) : gmdate( 'Y-m-d H:i:s' );
+	}
+	/** @param array<string,mixed> $value */
+	private function json( array $value ): string {
+		return ( function_exists( 'wp_json_encode' ) ? wp_json_encode( $value, JSON_UNESCAPED_UNICODE ) : json_encode( $value, JSON_UNESCAPED_UNICODE ) ) ?: '{}';
+	}
+
+	private function truncate( string $value, int $length ): string {
+		$value = trim( $value );
+		return function_exists( 'mb_substr' ) ? mb_substr( $value, 0, $length ) : substr( $value, 0, $length );
 	}
 }
