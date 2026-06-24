@@ -664,6 +664,9 @@ final class YandexDeliveryGeoMappingRepository {
 
 	/** @param array<string,mixed> $row @param array<string,mixed> $args */
 	private function matches_needs_review_filters( array $row, array $args ): bool {
+		if ( isset( $args['max_location_id_exclusive'] ) && (int) $args['max_location_id_exclusive'] > 0 && (int) ( $row['location_id'] ?? 0 ) >= (int) $args['max_location_id_exclusive'] ) {
+			return false;
+		}
 		$search = trim( (string) ( $args['search'] ?? '' ) );
 		if ( '' !== $search ) {
 			$haystack = implode( ' ', array( (string) ( $row['display_name'] ?? '' ), (string) ( $row['source_query'] ?? '' ), (string) ( $row['yandex_locality'] ?? '' ), (string) ( $row['yandex_region'] ?? '' ) ) );
@@ -697,6 +700,10 @@ final class YandexDeliveryGeoMappingRepository {
 	private function needs_review_where_sql( array $args ): array {
 		$where = array( 'm.status = %s' );
 		$sql_args = array( YandexDeliveryGeoMappingStatus::NEEDS_REVIEW );
+		if ( isset( $args['max_location_id_exclusive'] ) && (int) $args['max_location_id_exclusive'] > 0 ) {
+			$where[] = 'm.location_id < %d';
+			$sql_args[] = (int) $args['max_location_id_exclusive'];
+		}
 		if ( '' !== trim( (string) ( $args['search'] ?? '' ) ) ) {
 			$like = '%' . $this->wpdb->esc_like( trim( (string) $args['search'] ) ) . '%';
 			$where[] = '(l.display_name LIKE %s OR m.source_query LIKE %s OR m.yandex_locality LIKE %s OR m.yandex_region LIKE %s)';

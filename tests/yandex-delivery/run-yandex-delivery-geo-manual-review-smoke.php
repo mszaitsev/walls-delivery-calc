@@ -66,6 +66,9 @@ yd_geo_manual_assert( 2 === $repository->count_needs_review_locations(), 'Queue 
 yd_geo_manual_assert( 1 === count( $repository->find_needs_review_locations( array( 'page' => 1, 'per_page' => 1 ) ) ) && 1 === count( $repository->find_needs_review_locations( array( 'page' => 2, 'per_page' => 1 ) ) ), 'Queue pagination must page grouped locations.' );
 yd_geo_manual_assert( 1 === count( $repository->find_needs_review_locations( array( 'search' => 'Бердск', 'per_page' => 10 ) ) ), 'Queue search filter must match display_name/candidate text.' );
 yd_geo_manual_assert( 0 === count( $repository->find_needs_review_locations( array( 'search' => 'Омск', 'per_page' => 10 ) ) ), 'Mapped/not_found rows must not enter needs_review queue.' );
+yd_geo_manual_assert( 1 === count( $repository->find_needs_review_locations( array( 'max_location_id_exclusive' => 2, 'per_page' => 10 ) ) ), 'Queue max_location_id_exclusive filter must keep only location_id below the cursor.' );
+yd_geo_manual_assert( 1 === $repository->count_needs_review_locations( array( 'max_location_id_exclusive' => 2 ) ), 'Queue count must honor max_location_id_exclusive.' );
+yd_geo_manual_assert( 0 === count( $repository->find_needs_review_locations( array( 'max_location_id_exclusive' => 1, 'per_page' => 10 ) ) ), 'Queue max_location_id_exclusive must exclude equal and greater location_id values.' );
 
 yd_geo_manual_assert( true === $repository->approve_mapping( 1, 111 ), 'approve_mapping must accept an existing candidate.' );
 $approved_rows = $repository->find_by_location_id( 1 );
@@ -95,10 +98,17 @@ $project_status = file_get_contents( WDC_PLUGIN_DIR . 'docs/project-status.md' )
 $plugin_source = file_get_contents( WDC_PLUGIN_DIR . 'walls-delivery-calc.php' ) ?: '';
 
 yd_geo_manual_assert( str_contains( $repository_source, 'function find_needs_review_locations' ) && str_contains( $repository_source, 'function approve_mapping' ) && str_contains( $repository_source, 'function bulk_reject_locations' ), 'Repository must expose manual review methods.' );
-yd_geo_manual_assert( str_contains( $admin_source, 'Ручная проверка спорных совпадений' ) && str_contains( $admin_source, 'Подтвердить' ) && str_contains( $admin_source, 'Отказать в сопоставлении' ), 'Manual review UI must expose heading and action buttons.' );
+preg_match( '/private function render_yandex_delivery_geo_manual_review_section[\s\S]*?private function render_yandex_delivery_geo_analysis_tab/', $admin_source, $manual_match );
+$manual_section = (string) ( $manual_match[0] ?? '' );
+yd_geo_manual_assert( str_contains( $manual_section, 'style="width: 100%;"' ) && str_contains( $manual_section, 'widefat striped' ), 'Manual queue table must use full available width.' );
+yd_geo_manual_assert( ! str_contains( $manual_section, '<th><?php echo esc_html__( \'Отказ\'' ) && str_contains( $manual_section, 'Подтвердить' ), 'Manual queue must remove reject column and keep approve column.' );
+yd_geo_manual_assert( str_contains( $manual_section, '<code>geo_id=' ) && str_contains( $manual_section, 'class="description">confidence=' ), 'Candidate block must separate first-line address from diagnostic text.' );
+yd_geo_manual_assert( ! str_contains( $manual_section, 'placeholder="<?php echo esc_attr( __( \'Комментарий' ) && str_contains( $manual_section, 'Отказать выбранным в сопоставлении' ), 'Manual queue must remove reject comments and expose bulk reject action.' );
+yd_geo_manual_assert( str_contains( $manual_section, 'wdc-yandex-geo-review-select-page' ) && str_contains( $manual_section, 'wdc-yandex-geo-review-location-checkbox' ), 'Manual queue must provide select-page checkbox.' );
 yd_geo_manual_assert( str_contains( $admin_source, 'approve_yandex_delivery_geo_mapping' ) && str_contains( $admin_source, 'reject_yandex_delivery_geo_mapping' ) && str_contains( $admin_source, 'bulk_reject_yandex_delivery_geo_mapping' ), 'Manual review POST actions must exist.' );
 yd_geo_manual_assert( str_contains( $admin_source, 'is_running()' ) && str_contains( $admin_source, 'Ручная обработка будет доступна после завершения или постановки процесса на паузу.' ) && ! str_contains( $admin_source, 'Ручная обработка временно заблокирована' ), 'Manual review handlers/UI must keep runner running guard.' );
-yd_geo_manual_assert( str_contains( $plugin_source, 'Version: 0.88.1' ) && str_contains( $plugin_source, "WDC_VERSION', '0.88.1" ), 'Plugin version must be 0.88.1.' );
-yd_geo_manual_assert( str_contains( $project_status, '0.88.1 Yandex Geo Manual Review Queue' ), 'Project status must document manual review queue.' );
+yd_geo_manual_assert( str_contains( $admin_source, 'max_location_id_exclusive' ) && str_contains( $admin_source, 'Очередь ограничена уже обработанной частью полного маппинга' ) && str_contains( $admin_source, 'Ручная обработка доступна только для уже обработанной части полного маппинга' ), 'Admin source must guard paused full-runner manual review by next_location_id.' );
+yd_geo_manual_assert( str_contains( $plugin_source, 'Version: 0.89.0' ) && str_contains( $plugin_source, "WDC_VERSION', '0.89.0" ), 'Plugin version must be 0.89.0.' );
+yd_geo_manual_assert( str_contains( $project_status, '0.89.0 Yandex Geo Manual Review Queue' ), 'Project status must document manual review queue.' );
 
 echo "Yandex Delivery geo manual review smoke test passed.\n";
