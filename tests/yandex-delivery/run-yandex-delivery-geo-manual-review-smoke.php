@@ -37,8 +37,12 @@ $GLOBALS['wpdb'] = new class() {
 	public function esc_like( string $text ): string { return addcslashes( $text, '_%\\' ); }
 };
 
-function yd_geo_manual_raw( array $matched_by, string $reason ): string {
-	return json_encode( array( 'scoring' => array( 'matched_by' => $matched_by, 'reason' => $reason ) ), JSON_UNESCAPED_UNICODE ) ?: '{}';
+function yd_geo_manual_raw( array $matched_by, string $reason, string $address = '' ): string {
+	$raw = array( 'scoring' => array( 'matched_by' => $matched_by, 'reason' => $reason ) );
+	if ( '' !== $address ) {
+		$raw['variant'] = array( 'address' => $address );
+	}
+	return json_encode( $raw, JSON_UNESCAPED_UNICODE ) ?: '{}';
 }
 
 $GLOBALS['wpdb']->locations = array(
@@ -97,7 +101,7 @@ $GLOBALS['wpdb']->locations[] = array( 'id' => 9, 'display_name' => 'респ А
 $GLOBALS['wpdb']->locations[] = array( 'id' => 10, 'display_name' => 'Пермский край, г Пермь', 'region_name' => 'Пермский край', 'place_type' => 'г' );
 $GLOBALS['wpdb']->locations[] = array( 'id' => 11, 'display_name' => 'респ Адыгея, г Безопасный', 'region_name' => 'Адыгея', 'place_type' => 'г' );
 $GLOBALS['wpdb']->locations[] = array( 'id' => 12, 'display_name' => 'респ Адыгея, с Техошибка', 'region_name' => 'Адыгея', 'place_type' => 'с' );
-$repository->save_mapping( array( 'location_id' => 8, 'yandex_geo_id' => 801, 'yandex_locality' => 'посёлок Комсомольский, Республика Адыгея', 'status' => YandexDeliveryGeoMappingStatus::NEEDS_REVIEW, 'confidence' => 60, 'is_primary' => 0 ) );
+$repository->save_mapping( array( 'location_id' => 8, 'yandex_geo_id' => 801, 'yandex_locality' => 'посёлок Комсомольский', 'status' => YandexDeliveryGeoMappingStatus::NEEDS_REVIEW, 'confidence' => 60, 'is_primary' => 0, 'raw_json' => yd_geo_manual_raw( array(), '', 'посёлок Комсомольский, Республика Адыгея' ) ) );
 $repository->save_mapping( array( 'location_id' => 8, 'yandex_geo_id' => 802, 'yandex_locality' => 'Комсомольский, Пермский край', 'status' => YandexDeliveryGeoMappingStatus::NEEDS_REVIEW, 'confidence' => 61, 'is_primary' => 0 ) );
 $repository->save_mapping( array( 'location_id' => 9, 'yandex_geo_id' => 901, 'yandex_locality' => 'Мусорное, Пермский край', 'status' => YandexDeliveryGeoMappingStatus::NEEDS_REVIEW, 'confidence' => 62, 'is_primary' => 0 ) );
 $repository->save_mapping( array( 'location_id' => 10, 'yandex_geo_id' => 1001, 'yandex_locality' => 'Пермь, Пермский край', 'status' => YandexDeliveryGeoMappingStatus::NEEDS_REVIEW, 'confidence' => 63, 'is_primary' => 0 ) );
@@ -107,7 +111,7 @@ $repository->save_technical_error_marker( 12, 'Техошибка', 'timeout' );
 $cleanup = $repository->cleanup_needs_review_by_region( 'Адыг' );
 yd_geo_manual_assert( array( 'matched_locations' => 2, 'checked_candidates' => 3, 'removed_candidates' => 2, 'converted_to_not_found' => 1 ) === $cleanup, 'cleanup_needs_review_by_region() must remove mismatching candidates by partial region fragment and convert empty locations to not_found.' );
 $rows8 = $repository->find_by_location_id( 8 );
-yd_geo_manual_assert( 1 === count( array_filter( $rows8, static fn( array $row ): bool => YandexDeliveryGeoMappingStatus::NEEDS_REVIEW === (string) $row['status'] ) ) && 801 === (int) $rows8[0]['yandex_geo_id'], 'Region cleanup must keep candidate whose Yandex locality contains the region fragment.' );
+yd_geo_manual_assert( 1 === count( array_filter( $rows8, static fn( array $row ): bool => YandexDeliveryGeoMappingStatus::NEEDS_REVIEW === (string) $row['status'] ) ) && 801 === (int) $rows8[0]['yandex_geo_id'], 'Region cleanup must keep candidate whose Yandex locality or raw_json address contains the region fragment.' );
 $rows9 = $repository->find_by_location_id( 9 );
 yd_geo_manual_assert( 1 === count( $rows9 ) && YandexDeliveryGeoMappingStatus::NOT_FOUND === (string) $rows9[0]['status'], 'Region cleanup must convert a location to not_found when all needs_review candidates are removed and no primary exists.' );
 yd_geo_manual_assert( YandexDeliveryGeoMappingStatus::NEEDS_REVIEW === (string) $repository->find_by_location_id( 10 )[0]['status'], 'Region cleanup must skip locations whose region_name does not contain the fragment.' );
@@ -121,6 +125,7 @@ $plugin_source = file_get_contents( WDC_PLUGIN_DIR . 'walls-delivery-calc.php' )
 
 yd_geo_manual_assert( str_contains( $repository_source, 'function find_needs_review_locations' ) && str_contains( $repository_source, 'function approve_mapping' ) && str_contains( $repository_source, 'function bulk_reject_locations' ) && str_contains( $repository_source, 'function cleanup_needs_review_by_region' ) && str_contains( $repository_source, 'contains_fragment' ), 'Repository must expose manual review and region cleanup methods.' );
 yd_geo_manual_assert( str_contains( $repository_source, 'REGION_CLEANUP_LOCATION_BATCH = 500' ) && str_contains( $repository_source, 'count_region_cleanup_locations' ) && str_contains( $repository_source, 'count_region_cleanup_candidates' ) && str_contains( $repository_source, 'find_region_cleanup_location_ids_after' ) && str_contains( $repository_source, 'DELETE m FROM' ) && ! str_contains( $repository_source, 'SELECT m.*, l.region_name AS location_region_name FROM ' ), 'Region cleanup real DB path must use SQL counts, batched location ids and DELETE JOIN instead of loading all candidates.' );
+yd_geo_manual_assert( str_contains( $repository_source, 'candidate_contains_region_fragment' ) && str_contains( $repository_source, "(string) ( \$row['raw_json'] ?? '' )" ) && str_contains( $repository_source, 'm.raw_json IS NULL OR m.raw_json NOT LIKE %s' ), 'Region cleanup must keep candidates when raw_json variant/address contains the region fragment.' );
 yd_geo_manual_assert( str_contains( $repository_source, 'SELECT DISTINCT m.location_id FROM {$mapping_table}' ) && str_contains( $repository_source, 'LIMIT %d OFFSET %d' ) && str_contains( $repository_source, 'm.location_id IN ({$placeholders})' ), 'Needs review queue real DB path must page grouped location_id values before loading candidate rows.' );
 preg_match( '/private function render_yandex_delivery_geo_manual_review_section[\s\S]*?private function render_yandex_delivery_geo_analysis_tab/', $admin_source, $manual_match );
 $manual_section = (string) ( $manual_match[0] ?? '' );
@@ -130,11 +135,13 @@ yd_geo_manual_assert( str_contains( $manual_section, '<strong><code>geo_id=' ) &
 yd_geo_manual_assert( ! str_contains( $manual_section, 'placeholder="<?php echo esc_attr( __( \'Комментарий' ) && str_contains( $manual_section, 'Отказать выбранным в сопоставлении' ), 'Manual queue must remove reject comments and expose bulk reject action.' );
 yd_geo_manual_assert( str_contains( $manual_section, 'wdc-yandex-geo-review-select-page' ) && str_contains( $manual_section, 'wdc-yandex-geo-review-location-checkbox' ), 'Manual queue must provide select-page checkbox.' );
 yd_geo_manual_assert( str_contains( $admin_source, 'approve_yandex_delivery_geo_mapping' ) && str_contains( $admin_source, 'reject_yandex_delivery_geo_mapping' ) && str_contains( $admin_source, 'bulk_reject_yandex_delivery_geo_mapping' ) && str_contains( $admin_source, 'cleanup_yandex_delivery_geo_needs_review_by_region' ) && str_contains( $admin_source, 'Очистка needs_review по региону' ), 'Manual review POST actions and region cleanup UI must exist.' );
+yd_geo_manual_assert( str_contains( $manual_section, 'name="page" value="<?php echo esc_attr( self::MENU_SLUG ); ?>"' ) && str_contains( $manual_section, 'name="service_key" value="<?php echo esc_attr( $service->service_key ); ?>"' ) && str_contains( $manual_section, 'name="service" value="<?php echo esc_attr( $service->service_key ); ?>"' ) && str_contains( $manual_section, 'name="tab" value="yandex_delivery_geo"' ), 'Region cleanup form must preserve page/service/service_key/tab hidden fields.' );
+yd_geo_manual_assert( substr_count( $admin_source, 'cleanup_yandex_delivery_geo_needs_review_by_region' ) >= 5 && str_contains( $admin_source, "'cleanup_yandex_delivery_geo_needs_review_by_region' => 'yandex_delivery_geo'" ) && str_contains( $admin_source, "'title' => 'Очистка needs_review по региону'" ), 'Region cleanup must be registered for handling, redirected back to mapping tab, and show action result title.' );
 yd_geo_manual_assert( ! str_contains( $manual_section, '->cleanup_needs_review_by_region(' ) && 1 === substr_count( $admin_source, '->cleanup_needs_review_by_region(' ), 'Manual review render must not execute region cleanup; cleanup must be called only from the POST handler.' );
 yd_geo_manual_assert( str_contains( $admin_source, 'yandex_delivery_geo_show_analysis' ) && str_contains( $admin_source, 'Показать аналитику' ) && str_contains( $admin_source, '! $show_analysis' ), 'Mapping tab render must not call heavy analysis by default.' );
 yd_geo_manual_assert( str_contains( $admin_source, 'is_running()' ) && str_contains( $admin_source, 'Ручная обработка будет доступна после завершения или постановки процесса на паузу.' ) && ! str_contains( $admin_source, 'Ручная обработка временно заблокирована' ), 'Manual review handlers/UI must keep runner running guard.' );
 yd_geo_manual_assert( str_contains( $admin_source, 'max_location_id_exclusive' ) && str_contains( $admin_source, "array( 'full', 'unprocessed' )" ) && str_contains( $admin_source, 'Очередь ограничена уже обработанной частью полного маппинга' ) && str_contains( $admin_source, 'Ручная обработка доступна только для уже обработанной части полного маппинга' ), 'Admin source must guard paused full/unprocessed-runner manual review by next_location_id.' );
-yd_geo_manual_assert( str_contains( $plugin_source, 'Version: 0.91.2' ) && str_contains( $plugin_source, "WDC_VERSION', '0.91.2" ), 'Plugin version must be 0.91.2.' );
-yd_geo_manual_assert( str_contains( $project_status, '0.91.2 Yandex Geo Analysis Render Memory Safety' ), 'Project status must document manual region cleanup.' );
+yd_geo_manual_assert( str_contains( $plugin_source, 'Version: 0.91.3' ) && str_contains( $plugin_source, "WDC_VERSION', '0.91.3" ), 'Plugin version must be 0.91.3.' );
+yd_geo_manual_assert( str_contains( $project_status, '0.91.3 Yandex Geo Manual Region Cleanup Redirect' ), 'Project status must document manual region cleanup.' );
 
 echo "Yandex Delivery geo manual review smoke test passed.\n";

@@ -410,7 +410,7 @@ final class YandexDeliveryGeoMappingRepository {
 				$matched_locations[ $location_id ] = true;
 				$location_ids_to_review[ $location_id ] = true;
 				++$stats['checked_candidates'];
-				if ( ! $this->contains_fragment( (string) ( $row['yandex_locality'] ?? '' ), $fragment ) ) {
+				if ( ! $this->candidate_contains_region_fragment( $row, $fragment ) ) {
 					unset( $this->wpdb->yandex_delivery_geo_mappings[ $index ] );
 					++$stats['removed_candidates'];
 				}
@@ -442,14 +442,14 @@ final class YandexDeliveryGeoMappingRepository {
 			}
 			$after_location_id = max( $location_ids );
 			$placeholders = implode( ',', array_fill( 0, count( $location_ids ), '%d' ) );
-			$delete_sql = "DELETE m FROM {$mapping_table} m INNER JOIN {$location_table} l ON l.id = m.location_id WHERE m.status = %s AND m.is_primary = 0 AND (m.yandex_geo_id IS NULL OR m.yandex_geo_id != %d) AND l.region_name LIKE %s AND m.location_id IN ({$placeholders}) AND (m.yandex_locality IS NULL OR m.yandex_locality NOT LIKE %s)";
+			$delete_sql = "DELETE m FROM {$mapping_table} m INNER JOIN {$location_table} l ON l.id = m.location_id WHERE m.status = %s AND m.is_primary = 0 AND (m.yandex_geo_id IS NULL OR m.yandex_geo_id != %d) AND l.region_name LIKE %s AND m.location_id IN ({$placeholders}) AND (m.yandex_locality IS NULL OR m.yandex_locality NOT LIKE %s) AND (m.raw_json IS NULL OR m.raw_json NOT LIKE %s)";
 			$deleted = $this->wpdb->query(
 				$this->wpdb->prepare(
 					$delete_sql,
 					...array_merge(
 						array( YandexDeliveryGeoMappingStatus::NEEDS_REVIEW, self::TECHNICAL_ERROR_GEO_ID, $region_like ),
 						$location_ids,
-						array( $region_like )
+						array( $region_like, $region_like )
 					)
 				)
 			);
@@ -861,6 +861,11 @@ final class YandexDeliveryGeoMappingRepository {
 		return $this->json( $raw );
 	}
 
+
+	/** @param array<string,mixed> $row */
+	private function candidate_contains_region_fragment( array $row, string $fragment ): bool {
+		return $this->contains_fragment( (string) ( $row['yandex_locality'] ?? '' ), $fragment ) || $this->contains_fragment( (string) ( $row['raw_json'] ?? '' ), $fragment );
+	}
 
 	private function count_region_cleanup_locations( string $region_like ): int {
 		$value = $this->wpdb->get_var(
