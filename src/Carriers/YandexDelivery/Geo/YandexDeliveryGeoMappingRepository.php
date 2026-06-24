@@ -7,6 +7,7 @@ defined( 'ABSPATH' ) || exit;
 
 final class YandexDeliveryGeoMappingRepository {
 	public const TECHNICAL_ERROR_GEO_ID = 999999999;
+	private const REGION_CLEANUP_LOCATION_BATCH = 500;
 
 	private object $wpdb;
 
@@ -427,42 +428,45 @@ final class YandexDeliveryGeoMappingRepository {
 		}
 
 		$this->create_schema_if_needed();
-		$rows = $this->wpdb->get_results(
-			$this->wpdb->prepare(
-				'SELECT m.*, l.region_name AS location_region_name FROM ' . $this->table_name() . ' m INNER JOIN ' . $this->locations_table_name() . ' l ON l.id = m.location_id WHERE m.status = %s AND m.is_primary = 0 AND l.region_name LIKE %s ORDER BY m.location_id ASC, m.id ASC',
-				YandexDeliveryGeoMappingStatus::NEEDS_REVIEW,
-				'%' . $this->wpdb->esc_like( $fragment ) . '%'
-			),
-			ARRAY_A
-		);
-		$matched_locations = array();
-		$location_ids_to_review = array();
-		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
-			$location_id = (int) ( $row['location_id'] ?? 0 );
-			$row_id = (int) ( $row['id'] ?? 0 );
-			if ( $location_id <= 0 || $row_id <= 0 || $this->is_technical_error_geo_id( (int) ( $row['yandex_geo_id'] ?? 0 ) ) ) {
-				continue;
+		$mapping_table = $this->table_name();
+		$location_table = $this->locations_table_name();
+		$region_like = '%' . $this->wpdb->esc_like( $fragment ) . '%';
+		$stats['matched_locations'] = $this->count_region_cleanup_locations( $region_like );
+		$stats['checked_candidates'] = $this->count_region_cleanup_candidates( $region_like );
+
+		$after_location_id = 0;
+		while ( true ) {
+			$location_ids = $this->find_region_cleanup_location_ids_after( $region_like, $after_location_id, self::REGION_CLEANUP_LOCATION_BATCH );
+			if ( array() === $location_ids ) {
+				break;
 			}
-			$matched_locations[ $location_id ] = true;
-			$location_ids_to_review[ $location_id ] = true;
-			++$stats['checked_candidates'];
-			if ( ! $this->contains_fragment( (string) ( $row['yandex_locality'] ?? '' ), $fragment ) ) {
-				$deleted = $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $this->table_name() . ' WHERE id = %d AND status = %s AND is_primary = 0', $row_id, YandexDeliveryGeoMappingStatus::NEEDS_REVIEW ) );
-				if ( is_numeric( $deleted ) && (int) $deleted > 0 ) {
-					++$stats['removed_candidates'];
+			$after_location_id = max( $location_ids );
+			$placeholders = implode( ',', array_fill( 0, count( $location_ids ), '%d' ) );
+			$delete_sql = "DELETE m FROM {$mapping_table} m INNER JOIN {$location_table} l ON l.id = m.location_id WHERE m.status = %s AND m.is_primary = 0 AND (m.yandex_geo_id IS NULL OR m.yandex_geo_id != %d) AND l.region_name LIKE %s AND m.location_id IN ({$placeholders}) AND (m.yandex_locality IS NULL OR m.yandex_locality NOT LIKE %s)";
+			$deleted = $this->wpdb->query(
+				$this->wpdb->prepare(
+					$delete_sql,
+					...array_merge(
+						array( YandexDeliveryGeoMappingStatus::NEEDS_REVIEW, self::TECHNICAL_ERROR_GEO_ID, $region_like ),
+						$location_ids,
+						array( $region_like )
+					)
+				)
+			);
+			if ( is_numeric( $deleted ) && (int) $deleted > 0 ) {
+				$stats['removed_candidates'] += (int) $deleted;
+			}
+			foreach ( $location_ids as $location_id ) {
+				if ( null === $this->find_primary_geo_id( (int) $location_id ) && ! $this->location_has_needs_review_candidates( (int) $location_id ) ) {
+					$this->save_cleanup_not_found( (int) $location_id, $fragment );
+					++$stats['converted_to_not_found'];
 				}
-			}
-		}
-		$stats['matched_locations'] = count( $matched_locations );
-		foreach ( array_keys( $location_ids_to_review ) as $location_id ) {
-			if ( null === $this->find_primary_geo_id( (int) $location_id ) && ! $this->location_has_needs_review_candidates( (int) $location_id ) ) {
-				$this->save_cleanup_not_found( (int) $location_id, $fragment );
-				++$stats['converted_to_not_found'];
 			}
 		}
 
 		return $stats;
 	}
+
 	/** @param array<string,mixed> $filters @return array<int,array<string,mixed>> */
 	public function search( array $filters = array() ): array {
 		$limit = max( 1, min( 100, (int) ( $filters['limit'] ?? 20 ) ) );
@@ -857,6 +861,49 @@ final class YandexDeliveryGeoMappingRepository {
 		return $this->json( $raw );
 	}
 
+
+	private function count_region_cleanup_locations( string $region_like ): int {
+		$value = $this->wpdb->get_var(
+			$this->wpdb->prepare(
+				'SELECT COUNT(DISTINCT m.location_id) FROM ' . $this->table_name() . ' m INNER JOIN ' . $this->locations_table_name() . ' l ON l.id = m.location_id WHERE m.status = %s AND m.is_primary = 0 AND (m.yandex_geo_id IS NULL OR m.yandex_geo_id != %d) AND l.region_name LIKE %s',
+				YandexDeliveryGeoMappingStatus::NEEDS_REVIEW,
+				self::TECHNICAL_ERROR_GEO_ID,
+				$region_like
+			)
+		);
+
+		return is_numeric( $value ) ? max( 0, (int) $value ) : 0;
+	}
+
+	private function count_region_cleanup_candidates( string $region_like ): int {
+		$value = $this->wpdb->get_var(
+			$this->wpdb->prepare(
+				'SELECT COUNT(*) FROM ' . $this->table_name() . ' m INNER JOIN ' . $this->locations_table_name() . ' l ON l.id = m.location_id WHERE m.status = %s AND m.is_primary = 0 AND (m.yandex_geo_id IS NULL OR m.yandex_geo_id != %d) AND l.region_name LIKE %s',
+				YandexDeliveryGeoMappingStatus::NEEDS_REVIEW,
+				self::TECHNICAL_ERROR_GEO_ID,
+				$region_like
+			)
+		);
+
+		return is_numeric( $value ) ? max( 0, (int) $value ) : 0;
+	}
+
+	/** @return array<int,int> */
+	private function find_region_cleanup_location_ids_after( string $region_like, int $after_location_id, int $limit ): array {
+		$limit = max( 1, min( self::REGION_CLEANUP_LOCATION_BATCH, $limit ) );
+		$ids = $this->wpdb->get_col(
+			$this->wpdb->prepare(
+				'SELECT DISTINCT m.location_id FROM ' . $this->table_name() . ' m INNER JOIN ' . $this->locations_table_name() . ' l ON l.id = m.location_id WHERE m.status = %s AND m.is_primary = 0 AND (m.yandex_geo_id IS NULL OR m.yandex_geo_id != %d) AND l.region_name LIKE %s AND m.location_id > %d ORDER BY m.location_id ASC LIMIT %d',
+				YandexDeliveryGeoMappingStatus::NEEDS_REVIEW,
+				self::TECHNICAL_ERROR_GEO_ID,
+				$region_like,
+				$after_location_id,
+				$limit
+			)
+		);
+
+		return is_array( $ids ) ? array_values( array_filter( array_map( 'intval', $ids ) ) ) : array();
+	}
 
 	private function contains_fragment( string $haystack, string $fragment ): bool {
 		$haystack = trim( $haystack );
