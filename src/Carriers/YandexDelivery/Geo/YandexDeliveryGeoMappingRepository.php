@@ -304,9 +304,9 @@ final class YandexDeliveryGeoMappingRepository {
 					$found = true;
 				}
 				$this->wpdb->yandex_delivery_geo_mappings[ $index ]['is_primary'] = $is_target ? 1 : 0;
+				$this->wpdb->yandex_delivery_geo_mappings[ $index ]['status'] = $is_target ? YandexDeliveryGeoMappingStatus::MAPPED : YandexDeliveryGeoMappingStatus::MULTIPLE_MATCHES;
 				$this->wpdb->yandex_delivery_geo_mappings[ $index ]['updated_at'] = $now;
 				if ( $is_target ) {
-					$this->wpdb->yandex_delivery_geo_mappings[ $index ]['status'] = YandexDeliveryGeoMappingStatus::MAPPED;
 					$this->wpdb->yandex_delivery_geo_mappings[ $index ]['raw_json'] = $this->with_manual_review_audit( (string) ( $row['raw_json'] ?? '' ), 'approved', '' );
 				}
 			}
@@ -319,7 +319,7 @@ final class YandexDeliveryGeoMappingRepository {
 			return false;
 		}
 		$raw_json = (string) $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT raw_json FROM ' . $this->table_name() . ' WHERE id = %d LIMIT 1', (int) $target_id ) );
-		$this->wpdb->query( $this->wpdb->prepare( 'UPDATE ' . $this->table_name() . ' SET is_primary = 0, updated_at = %s WHERE location_id = %d', $now, $location_id ) );
+		$this->wpdb->query( $this->wpdb->prepare( 'UPDATE ' . $this->table_name() . ' SET is_primary = 0, status = %s, updated_at = %s WHERE location_id = %d AND id != %d', YandexDeliveryGeoMappingStatus::MULTIPLE_MATCHES, $now, $location_id, (int) $target_id ) );
 		$result = $this->wpdb->query(
 			$this->wpdb->prepare(
 				'UPDATE ' . $this->table_name() . ' SET status = %s, is_primary = 1, raw_json = %s, updated_at = %s WHERE id = %d',

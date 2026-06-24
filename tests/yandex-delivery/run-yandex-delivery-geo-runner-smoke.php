@@ -170,12 +170,12 @@ yd_geo_runner_assert( str_contains( $service_source, 'detect_for_runner' ) && st
 foreach ( array( 'wdc_yandex_delivery_geo_mapping_runner_start', 'wdc_yandex_delivery_geo_mapping_runner_retry_errors', 'wdc_yandex_delivery_geo_mapping_runner_step', 'wdc_yandex_delivery_geo_mapping_runner_pause', 'wdc_yandex_delivery_geo_mapping_runner_reset', 'wdc_yandex_delivery_geo_mapping_runner_status' ) as $action ) {
 	yd_geo_runner_assert( str_contains( $admin_source, $action ), 'Admin AJAX action missing: ' . $action );
 }
-yd_geo_runner_assert( str_contains( $admin_source, 'Сейчас выполняется массовый маппинг. Ручная обработка временно заблокирована.' ) && str_contains( $admin_source, '$this->yandex_delivery_geo_runner->is_running()' ), 'Admin POST/UI must block manual mapping while runner is running.' );
+yd_geo_runner_assert( str_contains( $admin_source, 'Ручная обработка будет доступна после завершения или постановки процесса на паузу.' ) && str_contains( $admin_source, '$this->yandex_delivery_geo_runner->is_running()' ), 'Admin POST/UI must block manual mapping while runner is running.' );
 yd_geo_runner_assert( str_contains( $admin_source, 'is_technical_error_geo_id( $row_geo_id )' ) && ! str_contains( $admin_source, 'yandex_delivery_geo_batch_limit' ) && ! str_contains( $admin_source, 'yandex_delivery_geo_batch_size' ), 'Admin UI must hide primary action for marker and remove legacy limit/batch_size fields.' );
 yd_geo_runner_assert( ! str_contains( $admin_source, "'worker_count' => 'worker_count'" ) && str_contains( $admin_source, "'batch_size' => 'batch_size'" ), 'Admin runner state table must show batch_size and hide worker_count.' );
 yd_geo_runner_assert( str_contains( $plugin_source, 'YandexDeliveryGeoMappingRunnerService::class' ), 'Plugin must register runner service.' );
 yd_geo_runner_assert( str_contains( $js_source, 'function loop()' ) && str_contains( $js_source, "post('step'" ) && ! str_contains( $js_source, 'activeWorkers' ) && ! str_contains( $js_source, 'workerLoop' ) && ! str_contains( $js_source, 'worker_id' ) && ! str_contains( $js_source, 'workerCount' ), 'Runner JS must use one loop and no parallel worker markers.' );
-yd_geo_runner_assert( str_contains( $version_source, '0.88.0' ), 'Plugin version must be 0.88.0.' );
+yd_geo_runner_assert( str_contains( $version_source, '0.88.1' ), 'Plugin version must be 0.88.1.' );
 foreach ( array( 'CheckoutOrchestrator', 'pricing', 'pickupPointsList', 'YandexDeliveryPickupPointImportService' ) as $forbidden ) {
 	yd_geo_runner_assert( ! str_contains( $runner_source, $forbidden ), 'Runner must not touch checkout/pricing/PVZ import code: ' . $forbidden );
 }

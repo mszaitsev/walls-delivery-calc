@@ -43,7 +43,7 @@ function yd_geo_manual_raw( array $matched_by, string $reason ): string {
 
 $GLOBALS['wpdb']->locations = array(
 	array( 'id' => 1, 'display_name' => 'Новосибирская область, г Новосибирск', 'region_name' => 'Новосибирская область', 'place_type' => 'г' ),
-	array( 'id' => 2, 'display_name' => 'Новосибирская область, г Бердск', 'region_name' => 'Новосибирская область', 'place_type' => 'г' ),
+	array( 'id' => 2, 'display_name' => 'Регион Бердск, г Бердск', 'region_name' => 'Регион Бердск', 'place_type' => 'г' ),
 	array( 'id' => 3, 'display_name' => 'Томская область, с Спорное', 'region_name' => 'Томская область', 'place_type' => 'с' ),
 	array( 'id' => 4, 'display_name' => 'Омская область, г Омск', 'region_name' => 'Омская область', 'place_type' => 'г' ),
 	array( 'id' => 5, 'display_name' => 'Алтайский край, с Ошибка', 'region_name' => 'Алтайский край', 'place_type' => 'с' ),
@@ -71,7 +71,9 @@ yd_geo_manual_assert( true === $repository->approve_mapping( 1, 111 ), 'approve_
 $approved_rows = $repository->find_by_location_id( 1 );
 $approved_raw = json_decode( (string) $approved_rows[0]['raw_json'], true );
 yd_geo_manual_assert( 111 === $repository->find_primary_geo_id( 1 ) && YandexDeliveryGeoMappingStatus::MAPPED === (string) $approved_rows[0]['status'] && 1 === (int) $approved_rows[0]['is_primary'], 'Approve must make selected candidate mapped + primary.' );
-yd_geo_manual_assert( 0 === (int) $approved_rows[1]['is_primary'], 'Approve must keep other candidates non-primary.' );
+yd_geo_manual_assert( 0 === (int) $approved_rows[1]['is_primary'] && YandexDeliveryGeoMappingStatus::NEEDS_REVIEW !== (string) $approved_rows[1]['status'], 'Approve must keep other candidates non-primary and clear needs_review status.' );
+$queue_after_approve = $repository->find_needs_review_locations( array( 'search' => 'Новосибирск', 'per_page' => 10 ) );
+yd_geo_manual_assert( 0 === count( $queue_after_approve ), 'Approved location must disappear from needs_review queue.' );
 yd_geo_manual_assert( 'approved' === (string) ( $approved_raw['manual_review']['action'] ?? '' ) && 'admin' === (string) ( $approved_raw['manual_review']['source'] ?? '' ), 'Approve must write manual_review approved audit.' );
 yd_geo_manual_assert( false === $repository->approve_mapping( 5, YandexDeliveryGeoMappingRepository::TECHNICAL_ERROR_GEO_ID ), 'Technical marker 999999999 must not be approvable.' );
 
@@ -95,8 +97,8 @@ $plugin_source = file_get_contents( WDC_PLUGIN_DIR . 'walls-delivery-calc.php' )
 yd_geo_manual_assert( str_contains( $repository_source, 'function find_needs_review_locations' ) && str_contains( $repository_source, 'function approve_mapping' ) && str_contains( $repository_source, 'function bulk_reject_locations' ), 'Repository must expose manual review methods.' );
 yd_geo_manual_assert( str_contains( $admin_source, 'Ручная проверка спорных совпадений' ) && str_contains( $admin_source, 'Подтвердить' ) && str_contains( $admin_source, 'Отказать в сопоставлении' ), 'Manual review UI must expose heading and action buttons.' );
 yd_geo_manual_assert( str_contains( $admin_source, 'approve_yandex_delivery_geo_mapping' ) && str_contains( $admin_source, 'reject_yandex_delivery_geo_mapping' ) && str_contains( $admin_source, 'bulk_reject_yandex_delivery_geo_mapping' ), 'Manual review POST actions must exist.' );
-yd_geo_manual_assert( str_contains( $admin_source, 'is_running()' ) && str_contains( $admin_source, 'Ручная обработка временно заблокирована' ), 'Manual review handlers/UI must keep runner running guard.' );
-yd_geo_manual_assert( str_contains( $plugin_source, 'Version: 0.88.0' ) && str_contains( $plugin_source, "WDC_VERSION', '0.88.0" ), 'Plugin version must be 0.88.0.' );
-yd_geo_manual_assert( str_contains( $project_status, '0.88.0 Yandex Geo Manual Review Queue' ), 'Project status must document manual review queue.' );
+yd_geo_manual_assert( str_contains( $admin_source, 'is_running()' ) && str_contains( $admin_source, 'Ручная обработка будет доступна после завершения или постановки процесса на паузу.' ) && ! str_contains( $admin_source, 'Ручная обработка временно заблокирована' ), 'Manual review handlers/UI must keep runner running guard.' );
+yd_geo_manual_assert( str_contains( $plugin_source, 'Version: 0.88.1' ) && str_contains( $plugin_source, "WDC_VERSION', '0.88.1" ), 'Plugin version must be 0.88.1.' );
+yd_geo_manual_assert( str_contains( $project_status, '0.88.1 Yandex Geo Manual Review Queue' ), 'Project status must document manual review queue.' );
 
 echo "Yandex Delivery geo manual review smoke test passed.\n";

@@ -591,7 +591,7 @@ final class DeliveryServicesAdminPage {
 			if ( 'run_yandex_delivery_geo_detect' === $action && $this->yandex_delivery_geo_mapping_service instanceof YandexDeliveryGeoMappingService && $this->yandex_delivery_settings instanceof YandexDeliverySettings ) {
 				$location_id = isset( $_POST['yandex_delivery_geo_location_id'] ) ? (int) $_POST['yandex_delivery_geo_location_id'] : 0;
 				if ( $this->yandex_delivery_geo_runner instanceof YandexDeliveryGeoMappingRunnerService && $this->yandex_delivery_geo_runner->is_running() ) {
-					$this->yandex_delivery_settings->save_pickup_action_result( array( 'type' => 'warning', 'title' => 'Маппинг geo_id', 'message' => 'Сейчас выполняется массовый маппинг. Ручная обработка временно заблокирована.', 'details' => array( 'location_id' => $location_id ) ) );
+					$this->yandex_delivery_settings->save_pickup_action_result( array( 'type' => 'warning', 'title' => 'Маппинг geo_id', 'message' => $this->yandex_delivery_geo_manual_locked_message(), 'details' => array( 'location_id' => $location_id ) ) );
 				} else {
 					$result = $this->yandex_delivery_geo_mapping_service->detect_for_location_id( $location_id );
 					$this->yandex_delivery_settings->save_pickup_action_result(
@@ -614,7 +614,7 @@ final class DeliveryServicesAdminPage {
 				$location_id = isset( $_POST['yandex_delivery_geo_location_id'] ) ? (int) $_POST['yandex_delivery_geo_location_id'] : 0;
 				$geo_id = isset( $_POST['yandex_delivery_geo_id'] ) ? (int) $_POST['yandex_delivery_geo_id'] : 0;
 				if ( $this->yandex_delivery_geo_runner instanceof YandexDeliveryGeoMappingRunnerService && $this->yandex_delivery_geo_runner->is_running() ) {
-					$this->yandex_delivery_settings->save_pickup_action_result( array( 'type' => 'warning', 'title' => 'Маппинг geo_id', 'message' => 'Сейчас выполняется массовый маппинг. Ручная обработка временно заблокирована.', 'details' => array( 'location_id' => $location_id, 'yandex_geo_id' => $geo_id ) ) );
+					$this->yandex_delivery_settings->save_pickup_action_result( array( 'type' => 'warning', 'title' => 'Маппинг geo_id', 'message' => $this->yandex_delivery_geo_manual_locked_message(), 'details' => array( 'location_id' => $location_id, 'yandex_geo_id' => $geo_id ) ) );
 				} else {
 					$ok = $this->yandex_delivery_geo_mappings->set_primary( $location_id, $geo_id );
 					$this->yandex_delivery_settings->save_pickup_action_result( array( 'type' => $ok ? 'success' : 'error', 'title' => 'Маппинг geo_id', 'message' => $ok ? 'Основной geo_id сохранен.' : 'Не удалось сделать geo_id основным.', 'details' => array( 'location_id' => $location_id, 'yandex_geo_id' => $geo_id ) ) );
@@ -625,7 +625,7 @@ final class DeliveryServicesAdminPage {
 				$geo_id = isset( $_POST['yandex_delivery_geo_review_geo_id'] ) ? max( 0, (int) $_POST['yandex_delivery_geo_review_geo_id'] ) : 0;
 				$message = isset( $_POST['yandex_delivery_geo_review_message'] ) ? sanitize_text_field( wp_unslash( $_POST['yandex_delivery_geo_review_message'] ) ) : '';
 				if ( $this->yandex_delivery_geo_runner instanceof YandexDeliveryGeoMappingRunnerService && $this->yandex_delivery_geo_runner->is_running() ) {
-					$this->yandex_delivery_settings->save_pickup_action_result( array( 'type' => 'warning', 'title' => 'Ручная проверка geo_id', 'message' => 'Сейчас выполняется массовый маппинг. Ручная обработка временно заблокирована.', 'details' => array( 'action' => $action, 'location_id' => $location_id, 'yandex_geo_id' => $geo_id ) ) );
+					$this->yandex_delivery_settings->save_pickup_action_result( array( 'type' => 'warning', 'title' => 'Ручная проверка geo_id', 'message' => $this->yandex_delivery_geo_manual_locked_message(), 'details' => array( 'action' => $action, 'location_id' => $location_id, 'yandex_geo_id' => $geo_id ) ) );
 				} else {
 					if ( 'approve_yandex_delivery_geo_mapping' === $action ) {
 						$ok = $this->yandex_delivery_geo_mappings->approve_mapping( $location_id, $geo_id );
@@ -1500,7 +1500,7 @@ final class DeliveryServicesAdminPage {
 		<p class="description"><?php echo esc_html__( 'Сопоставление WDC location_id с geo_id Яндекс.Доставки через location/detect. Полный импорт РФ здесь не запускается.', 'walls-delivery-calc' ); ?></p>
 		<p class="description"><?php echo esc_html__( 'В рабочем режиме при уверенном совпадении сохраняется только основной geo_id. Все candidates сохраняются только для неоднозначных результатов или debug-режима.', 'walls-delivery-calc' ); ?></p>
 		<?php if ( $runner_running ) : ?>
-			<div class="notice notice-warning inline"><p><?php echo esc_html__( 'Сейчас выполняется массовый маппинг. Ручная обработка временно заблокирована.', 'walls-delivery-calc' ); ?></p></div>
+			<div class="notice notice-warning inline"><p><?php echo esc_html( $this->yandex_delivery_geo_manual_locked_message() ); ?></p></div>
 		<?php endif; ?>
 		<table class="widefat striped" style="max-width: 980px; margin: 12px 0;">
 			<thead><tr><th><?php echo esc_html__( 'Метрика', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Значение', 'walls-delivery-calc' ); ?></th></tr></thead>
@@ -1609,7 +1609,7 @@ final class DeliveryServicesAdminPage {
 		<h3><?php echo esc_html__( 'Ручная проверка спорных совпадений', 'walls-delivery-calc' ); ?></h3>
 		<p class="description"><?php echo esc_html__( 'Очередь показывает grouped needs_review по location_id: можно подтвердить конкретный geo_id, отказать в сопоставлении для населённого пункта или массово отказать очевидным случаям.', 'walls-delivery-calc' ); ?></p>
 		<?php if ( $runner_running ) : ?>
-			<div class="notice notice-warning inline"><p><?php echo esc_html__( 'Сейчас выполняется массовый маппинг. Ручная обработка временно заблокирована.', 'walls-delivery-calc' ); ?></p></div>
+			<div class="notice notice-warning inline"><p><?php echo esc_html( $this->yandex_delivery_geo_manual_locked_message() ); ?></p></div>
 		<?php endif; ?>
 		<form method="get" style="max-width: 1180px; margin: 12px 0;">
 			<input type="hidden" name="page" value="<?php echo esc_attr( self::MENU_SLUG ); ?>">
@@ -1886,7 +1886,7 @@ final class DeliveryServicesAdminPage {
 		?>
 		<h3><?php echo esc_html__( 'Массовый маппинг', 'walls-delivery-calc' ); ?></h3>
 		<p class="description"><?php echo esc_html__( 'Полный маппинг всегда полностью перестраивает сопоставление geo_id для всей базы населённых пунктов. Обработка идет одним browser-worker батчами по 50, состояние сохраняется после закрытия страницы.', 'walls-delivery-calc' ); ?></p>
-		<div class="notice notice-info inline wdc-yandex-geo-runner-notice" style="display:none;"><p><?php echo esc_html__( 'Сейчас выполняется массовый маппинг. Ручная обработка временно заблокирована.', 'walls-delivery-calc' ); ?></p></div>
+		<div class="notice notice-info inline wdc-yandex-geo-runner-notice" style="display:none;"><p><?php echo esc_html( $this->yandex_delivery_geo_manual_locked_message() ); ?></p></div>
 		<table class="widefat striped wdc-yandex-geo-runner-state" style="max-width: 980px; margin: 12px 0;">
 			<thead><tr><th><?php echo esc_html__( 'Поле', 'walls-delivery-calc' ); ?></th><th><?php echo esc_html__( 'Значение', 'walls-delivery-calc' ); ?></th></tr></thead>
 			<tbody>
@@ -1933,6 +1933,9 @@ final class DeliveryServicesAdminPage {
 		$encoded = wp_json_encode( $decoded, JSON_UNESCAPED_UNICODE );
 
 		return false !== $encoded ? $encoded : $json;
+	}
+	private function yandex_delivery_geo_manual_locked_message(): string {
+		return __( 'Сейчас выполняется массовый маппинг geo_id. Ручная обработка будет доступна после завершения или постановки процесса на паузу.', 'walls-delivery-calc' );
 	}
 	/** @param array<string,mixed> $row */
 	private function yandex_delivery_geo_scoring_summary( array $row ): string {
