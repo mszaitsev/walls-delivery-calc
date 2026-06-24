@@ -13,6 +13,7 @@ final class YandexDeliveryGeoMappingRunnerService {
 	public const OPTION_KEY = 'wdc_yandex_delivery_geo_mapping_runner_state';
 	private const LOCK_KEY = 'wdc_yandex_delivery_geo_mapping_runner_state_lock';
 	private const BATCH_SIZE = 50;
+	private const UNPROCESSED_SAFETY_OFFSET = 5;
 	private const LOCK_TTL = 120;
 
 	public function __construct(
@@ -24,6 +25,16 @@ final class YandexDeliveryGeoMappingRunnerService {
 
 	/** @return array<string,mixed> */
 	public function start_full(): array {
+		$current = $this->current_state();
+		if ( 'paused' === (string) $current['status'] && 'full' === (string) $current['mode'] && '' !== (string) $current['session_id'] && (int) $current['next_location_id'] > 0 ) {
+			$current['status'] = 'running';
+			$current['updated_at'] = $this->now();
+			$current['message'] = 'Маппинг продолжен.';
+			$this->save_state( $current );
+
+			return $this->current_state();
+		}
+
 		$state = $this->default_state();
 		$now = $this->now();
 		$state['status'] = 'running';
@@ -33,6 +44,25 @@ final class YandexDeliveryGeoMappingRunnerService {
 		$state['updated_at'] = $now;
 		$state['total_estimated'] = $this->locations->count_batch_locations( 'RU', true );
 		$state['message'] = 'Полный маппинг запущен.';
+		$this->save_state( $state );
+
+		return $state;
+	}
+
+	/** @return array<string,mixed> */
+	public function start_unprocessed(): array {
+		$last_processed = $this->mappings->find_max_processed_location_id();
+		$start_from = max( 1, $last_processed - self::UNPROCESSED_SAFETY_OFFSET );
+		$state = $this->default_state();
+		$now = $this->now();
+		$state['status'] = 'running';
+		$state['mode'] = 'unprocessed';
+		$state['session_id'] = $this->session_id();
+		$state['started_at'] = $now;
+		$state['updated_at'] = $now;
+		$state['next_location_id'] = $start_from;
+		$state['total_estimated'] = $this->count_locations_from( $start_from );
+		$state['message'] = sprintf( 'Маппинг необработанных запущен с location_id %d.', $start_from );
 		$this->save_state( $state );
 
 		return $state;
@@ -77,7 +107,7 @@ final class YandexDeliveryGeoMappingRunnerService {
 				continue;
 			}
 
-			if ( 'full' === (string) $state['mode'] ) {
+			if ( in_array( (string) $state['mode'], array( 'full', 'unprocessed' ), true ) ) {
 				$this->mappings->delete_location_mappings( $location_id );
 			}
 
@@ -274,6 +304,31 @@ final class YandexDeliveryGeoMappingRunnerService {
 		return $state;
 	}
 
+	private function count_locations_from( int $start_from ): int {
+		$after_id = max( 0, $start_from - 1 );
+		$count = 0;
+		while ( true ) {
+			$locations = $this->locations->find_batch_after_id( $after_id, 1000, 'RU', true );
+			if ( array() === $locations ) {
+				break;
+			}
+			$last_id = $after_id;
+			foreach ( $locations as $location ) {
+				if ( ! $location instanceof Location || null === $location->id ) {
+					continue;
+				}
+				$last_id = max( $last_id, (int) $location->id );
+				++$count;
+			}
+			if ( $last_id <= $after_id || count( $locations ) < 1000 ) {
+				break;
+			}
+			$after_id = $last_id;
+		}
+
+		return $count;
+	}
+
 	/** @return array<string,mixed> */
 	private function default_state(): array {
 		return array(
@@ -299,7 +354,7 @@ final class YandexDeliveryGeoMappingRunnerService {
 	private function normalize_state( array $state ): array {
 		$normalized = array_replace( $this->default_state(), $state );
 		$normalized['status'] = in_array( (string) $normalized['status'], array( 'idle', 'running', 'paused', 'done', 'error' ), true ) ? (string) $normalized['status'] : 'idle';
-		$normalized['mode'] = in_array( (string) $normalized['mode'], array( 'full', 'retry_errors' ), true ) ? (string) $normalized['mode'] : 'full';
+		$normalized['mode'] = in_array( (string) $normalized['mode'], array( 'full', 'retry_errors', 'unprocessed' ), true ) ? (string) $normalized['mode'] : 'full';
 		foreach ( array( 'next_location_id', 'processed', 'mapped', 'needs_review', 'not_found', 'tech_errors', 'total_estimated' ) as $key ) {
 			$normalized[ $key ] = max( 0, (int) $normalized[ $key ] );
 		}

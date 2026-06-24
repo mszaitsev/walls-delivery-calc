@@ -4,6 +4,8 @@
 	var config = window.wdcYandexDeliveryGeoMappingRunner || {};
 	var state = config.initialState || {};
 	var running = false;
+	var stopRequested = false;
+	var activeSessionId = '';
 
 	function qs(selector) {
 		return document.querySelector(selector);
@@ -78,19 +80,36 @@
 		});
 	}
 
+	function stopLoop() {
+		running = false;
+		stopRequested = true;
+	}
+
 	function loop() {
-		if (!running || !state || state.status !== 'running') {
+		if (!running || stopRequested || !state || state.status !== 'running') {
 			running = false;
 			return;
 		}
-		post('step', {session_id: state.session_id || ''}).then(function (nextState) {
+		var sessionId = activeSessionId || state.session_id || '';
+		post('step', {session_id: sessionId}).then(function (nextState) {
+			if (stopRequested || !running) {
+				return;
+			}
+			if (sessionId && nextState.session_id && nextState.session_id !== sessionId) {
+				render(nextState);
+				running = false;
+				return;
+			}
 			render(nextState);
-			if (nextState.status === 'running') {
+			if (!stopRequested && running && nextState.status === 'running') {
 				window.setTimeout(loop, 250);
 			} else {
 				running = false;
 			}
 		}).catch(function (error) {
+			if (stopRequested) {
+				return;
+			}
 			running = false;
 			render(Object.assign({}, state, {status: 'error', message: error.message || 'AJAX error'}));
 		});
@@ -98,7 +117,9 @@
 
 	function startLoop(nextState) {
 		render(nextState);
+		stopRequested = false;
 		running = state.status === 'running';
+		activeSessionId = state.session_id || '';
 		if (running) {
 			loop();
 		}
@@ -113,15 +134,17 @@
 		var action = button.getAttribute('data-wdc-yandex-geo-runner-action');
 		if (action === 'start') {
 			post('start').then(startLoop);
+		} else if (action === 'start_unprocessed') {
+			post('start_unprocessed').then(startLoop);
 		} else if (action === 'retry_errors') {
 			post('retry_errors').then(startLoop);
 		} else if (action === 'step') {
 			post('step', {session_id: state.session_id || ''}).then(render);
 		} else if (action === 'pause') {
-			running = false;
+			stopLoop();
 			post('pause').then(render);
 		} else if (action === 'reset') {
-			running = false;
+			stopLoop();
 			post('reset').then(render);
 		}
 	});

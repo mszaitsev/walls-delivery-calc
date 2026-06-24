@@ -147,6 +147,7 @@ final class DeliveryServicesAdminPage {
 		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_import_reset', array( $this, 'ajax_yandex_delivery_pickup_import_reset' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_import_status', array( $this, 'ajax_yandex_delivery_pickup_import_status' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_geo_mapping_runner_start', array( $this, 'ajax_yandex_delivery_geo_mapping_runner_start' ) );
+		add_action( 'wp_ajax_wdc_yandex_delivery_geo_mapping_runner_start_unprocessed', array( $this, 'ajax_yandex_delivery_geo_mapping_runner_start_unprocessed' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_geo_mapping_runner_retry_errors', array( $this, 'ajax_yandex_delivery_geo_mapping_runner_retry_errors' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_geo_mapping_runner_step', array( $this, 'ajax_yandex_delivery_geo_mapping_runner_step' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_geo_mapping_runner_pause', array( $this, 'ajax_yandex_delivery_geo_mapping_runner_pause' ) );
@@ -309,6 +310,13 @@ final class DeliveryServicesAdminPage {
 			return;
 		}
 		wp_send_json_success( $this->yandex_delivery_geo_runner->start_full() );
+	}
+
+	public function ajax_yandex_delivery_geo_mapping_runner_start_unprocessed(): void {
+		if ( ! $this->can_handle_yandex_delivery_geo_mapping_runner_ajax() ) {
+			return;
+		}
+		wp_send_json_success( $this->yandex_delivery_geo_runner->start_unprocessed() );
 	}
 
 	public function ajax_yandex_delivery_geo_mapping_runner_retry_errors(): void {
@@ -1658,7 +1666,7 @@ final class DeliveryServicesAdminPage {
 							<td>
 								<?php foreach ( $item['candidates'] as $candidate ) : ?>
 									<div class="wdc-yandex-geo-review-candidate" style="margin-bottom: 12px;">
-										<div><code>geo_id=<?php echo esc_html( (string) ( $candidate['yandex_geo_id'] ?? '' ) ); ?></code> <?php echo esc_html( (string) $candidate['yandex_locality'] ); ?></div>
+										<div><strong><code>geo_id=<?php echo esc_html( (string) ( $candidate['yandex_geo_id'] ?? '' ) ); ?></code> <?php echo esc_html( (string) $candidate['yandex_locality'] ); ?></strong></div>
 										<div class="description">confidence=<?php echo esc_html( number_format( (float) $candidate['confidence'], 2, '.', '' ) ); ?>; matched_by=<?php echo esc_html( implode( ', ', array_map( 'strval', is_array( $candidate['matched_by'] ?? null ) ? $candidate['matched_by'] : array() ) ) ); ?><?php if ( '' !== (string) ( $candidate['reason'] ?? '' ) ) : ?><br><?php echo esc_html( (string) $candidate['reason'] ); ?><?php endif; ?></div>
 									</div>
 								<?php endforeach; ?>
@@ -1911,12 +1919,14 @@ final class DeliveryServicesAdminPage {
 		</div>
 		<p><span data-wdc-yandex-geo-runner-progress-text><?php echo esc_html( (string) $percent ); ?>%</span></p>
 		<p class="wdc-yandex-geo-runner-actions">
-			<button class="button button-primary" type="button" data-wdc-yandex-geo-runner-action="start"><?php echo esc_html__( 'Запустить полный маппинг', 'walls-delivery-calc' ); ?></button>
+			<button class="button button-primary" type="button" data-wdc-yandex-geo-runner-action="start"><?php echo esc_html__( 'Запустить / продолжить полный маппинг', 'walls-delivery-calc' ); ?></button>
+			<button class="button" type="button" data-wdc-yandex-geo-runner-action="start_unprocessed"><?php echo esc_html__( 'Маппинг необработанных', 'walls-delivery-calc' ); ?></button>
 			<button class="button" type="button" data-wdc-yandex-geo-runner-action="retry_errors"><?php echo esc_html__( 'Обработать тех.ошибки', 'walls-delivery-calc' ); ?></button>
 			<button class="button" type="button" data-wdc-yandex-geo-runner-action="step"><?php echo esc_html__( 'Выполнить шаг', 'walls-delivery-calc' ); ?></button>
 			<button class="button" type="button" data-wdc-yandex-geo-runner-action="pause"><?php echo esc_html__( 'Пауза', 'walls-delivery-calc' ); ?></button>
 			<button class="button" type="button" data-wdc-yandex-geo-runner-action="reset"><?php echo esc_html__( 'Сбросить прогресс', 'walls-delivery-calc' ); ?></button>
 		</p>
+		<p class="description"><?php echo esc_html__( 'Маппинг необработанных используется для восстановления после прерывания: стартует с последнего найденного location_id в таблице mappings минус 5.', 'walls-delivery-calc' ); ?></p>
 		<h3><?php echo esc_html__( 'Последние технические ошибки', 'walls-delivery-calc' ); ?></h3>
 		<table class="widefat striped" style="max-width: 980px; margin: 12px 0;">
 			<thead><tr><th>location_id</th><th><?php echo esc_html__( 'Сообщение', 'walls-delivery-calc' ); ?></th><th>checked_at</th></tr></thead>
@@ -1951,7 +1961,7 @@ final class DeliveryServicesAdminPage {
 		}
 		$state = $this->yandex_delivery_geo_runner->current_state();
 		$status = (string) ( $state['status'] ?? '' );
-		if ( 'full' !== (string) ( $state['mode'] ?? '' ) || ! in_array( $status, array( 'paused', 'running' ), true ) ) {
+		if ( ! in_array( (string) ( $state['mode'] ?? '' ), array( 'full', 'unprocessed' ), true ) || ! in_array( $status, array( 'paused', 'running' ), true ) ) {
 			return 0;
 		}
 

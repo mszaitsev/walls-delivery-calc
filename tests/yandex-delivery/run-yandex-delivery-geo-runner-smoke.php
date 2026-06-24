@@ -116,12 +116,19 @@ yd_geo_runner_assert( ! array_key_exists( 'skipped_existing', $state ), 'Runner 
 $runner_after_refresh = yd_geo_runner_service( $GLOBALS['wpdb'], $http );
 $state_after_refresh = $runner_after_refresh->current_state();
 yd_geo_runner_assert( 50 === (int) $state_after_refresh['next_location_id'] && 50 === (int) $state_after_refresh['processed'], 'current_state() must preserve reservation progress after refresh.' );
-$state = $runner_after_refresh->run_step( (string) $state_after_refresh['session_id'] );
+$paused = $runner_after_refresh->pause();
+$resumed = $runner_after_refresh->start_full();
+yd_geo_runner_assert( 'running' === (string) $resumed['status'] && (string) $state_after_refresh['session_id'] === (string) $resumed['session_id'] && 50 === (int) $resumed['next_location_id'] && 50 === (int) $resumed['processed'] && 'Маппинг продолжен.' === (string) $resumed['message'], 'start_full() from paused full state must resume without resetting cursor, counters or session.' );
+$state = $runner_after_refresh->run_step( (string) $resumed['session_id'] );
 yd_geo_runner_assert( 100 === (int) $state['next_location_id'] && 100 === (int) $state['processed'], 'Single worker second step must continue with location_id 51..100.' );
 $state = $runner_after_refresh->run_step( (string) $state['session_id'] );
 yd_geo_runner_assert( 120 === (int) $state['next_location_id'] && 120 === (int) $state['processed'], 'Single worker third step must finish remaining locations 101..120.' );
 $state = $runner_after_refresh->run_step( (string) $state['session_id'] );
 yd_geo_runner_assert( 'done' === $state['status'], 'Full runner must finish as done when locations are exhausted.' );
+$finished_session = (string) $state['session_id'];
+$reset_state = $runner_after_refresh->reset();
+$new_full = $runner_after_refresh->start_full();
+yd_geo_runner_assert( 'running' === (string) $new_full['status'] && (string) $new_full['session_id'] !== $finished_session && 0 === (int) $new_full['next_location_id'] && 0 === (int) $new_full['processed'], 'After reset, start_full() must create a new full session from the beginning.' );
 
 $GLOBALS['wdc_yandex_delivery_geo_runner_options'] = array();
 $GLOBALS['wpdb'] = new wpdb();
@@ -152,6 +159,21 @@ yd_geo_runner_assert( YandexDeliveryGeoMappingRepository::TECHNICAL_ERROR_GEO_ID
 yd_geo_runner_assert( null === $repository->find_primary_geo_id( 103 ), 'find_primary_geo_id() must never return technical marker 999999999.' );
 yd_geo_runner_assert( false === $repository->set_primary( 103, YandexDeliveryGeoMappingRepository::TECHNICAL_ERROR_GEO_ID ), 'set_primary() must reject technical marker 999999999.' );
 
+$GLOBALS['wdc_yandex_delivery_geo_runner_options'] = array();
+$GLOBALS['wpdb'] = new wpdb();
+for ( $i = 47709; $i <= 47714; ++$i ) {
+	$GLOBALS['wpdb']->locations[] = yd_geo_runner_location( $i, 'Recovery ' . $i );
+}
+$repository = new YandexDeliveryGeoMappingRepository( $GLOBALS['wpdb'] );
+$repository->save_mapping( array( 'location_id' => 47713, 'yandex_geo_id' => 87713, 'status' => YandexDeliveryGeoMappingStatus::MAPPED, 'confidence' => 100, 'is_primary' => 1 ) );
+$repository->save_mapping( array( 'location_id' => 47714, 'yandex_geo_id' => null, 'status' => YandexDeliveryGeoMappingStatus::NOT_FOUND, 'confidence' => 0, 'is_primary' => 0 ) );
+yd_geo_runner_assert( 47714 === $repository->find_max_processed_location_id(), 'find_max_processed_location_id() must return the latest processed mapping location_id.' );
+$http = new YdGeoRunnerFakeHttp();
+$runner = yd_geo_runner_service( $GLOBALS['wpdb'], $http );
+$state = $runner->start_unprocessed();
+yd_geo_runner_assert( 'unprocessed' === (string) $state['mode'] && 'running' === (string) $state['status'] && 47709 === (int) $state['next_location_id'] && 0 === (int) $state['processed'] && 6 === (int) $state['total_estimated'], 'start_unprocessed() must use max processed location_id minus safety offset 5 and reset counters.' );
+yd_geo_runner_assert( str_contains( (string) $state['message'], 'location_id 47709' ), 'start_unprocessed() message must mention recovery start location_id.' );
+
 $runner_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingRunnerService.php' );
 $repository_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingRepository.php' );
 $service_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingService.php' );
@@ -161,21 +183,21 @@ $js_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'assets/admin/yandex-d
 $version_source = (string) file_get_contents( WDC_PLUGIN_DIR . 'walls-delivery-calc.php' );
 
 yd_geo_runner_assert( str_contains( $runner_source, 'private const BATCH_SIZE = 50' ) && ! str_contains( $runner_source, 'WORKER_COUNT' ) && ! str_contains( $runner_source, 'worker_count' ) && ! str_contains( $runner_source, 'DEFAULT_LIMIT' ) && ! str_contains( $runner_source, 'clamp_limit' ), 'Runner service must use fixed batch size 50, no worker_count and no limit setting.' );
-yd_geo_runner_assert( str_contains( $runner_source, "\$state['status'] = 'done'" ) && str_contains( $runner_source, "\$state['mode'] = 'retry_errors'" ), 'Runner state must support done and retry_errors mode.' );
+yd_geo_runner_assert( str_contains( $runner_source, "\$state['status'] = 'done'" ) && str_contains( $runner_source, "\$state['mode'] = 'retry_errors'" ) && str_contains( $runner_source, "\$state['mode'] = 'unprocessed'" ), 'Runner state must support done, retry_errors and unprocessed mode.' );
 yd_geo_runner_assert( ! str_contains( $runner_source, 'find_primary_geo_id( $location_id )' ), 'Full runner must not skip existing primary mappings.' );
-yd_geo_runner_assert( str_contains( $runner_source, 'reserve_batch' ) && str_contains( $runner_source, 'next_location_id' ) && str_contains( $runner_source, 'delete_location_mappings( $location_id )' ), 'Full runner must reserve with next_location_id and delete old mapping rows before remapping each location.' );
+yd_geo_runner_assert( str_contains( $runner_source, 'reserve_batch' ) && str_contains( $runner_source, 'next_location_id' ) && str_contains( $runner_source, "array( 'full', 'unprocessed' )" ) && str_contains( $runner_source, 'delete_location_mappings( $location_id )' ), 'Full/unprocessed runner must reserve with next_location_id and delete old mapping rows before remapping each location.' );
 yd_geo_runner_assert( ! str_contains( $runner_source, 'skipped_existing' ) && ! str_contains( $admin_source, 'skipped_existing' ) && ! str_contains( $js_source, 'skipped_existing' ), 'Runner state, admin UI and JS must not expose skipped_existing.' );
-yd_geo_runner_assert( str_contains( $repository_source, 'TECHNICAL_ERROR_GEO_ID = 999999999' ) && str_contains( $repository_source, 'save_technical_error_marker' ) && str_contains( $repository_source, 'find_technical_error_location_ids_after' ) && str_contains( $repository_source, 'clear_technical_error_marker' ) && str_contains( $repository_source, 'is_technical_error_geo_id' ), 'Repository must expose technical marker helpers.' );
+yd_geo_runner_assert( str_contains( $repository_source, 'TECHNICAL_ERROR_GEO_ID = 999999999' ) && str_contains( $repository_source, 'save_technical_error_marker' ) && str_contains( $repository_source, 'find_technical_error_location_ids_after' ) && str_contains( $repository_source, 'clear_technical_error_marker' ) && str_contains( $repository_source, 'is_technical_error_geo_id' ) && str_contains( $repository_source, 'find_max_processed_location_id' ), 'Repository must expose technical marker and recovery helpers.' );
 yd_geo_runner_assert( str_contains( $service_source, 'detect_for_runner' ) && str_contains( $service_source, 'save_technical_error_marker' ), 'Mapping service must expose runner-safe detection and save marker on technical errors.' );
-foreach ( array( 'wdc_yandex_delivery_geo_mapping_runner_start', 'wdc_yandex_delivery_geo_mapping_runner_retry_errors', 'wdc_yandex_delivery_geo_mapping_runner_step', 'wdc_yandex_delivery_geo_mapping_runner_pause', 'wdc_yandex_delivery_geo_mapping_runner_reset', 'wdc_yandex_delivery_geo_mapping_runner_status' ) as $action ) {
+foreach ( array( 'wdc_yandex_delivery_geo_mapping_runner_start', 'wdc_yandex_delivery_geo_mapping_runner_start_unprocessed', 'wdc_yandex_delivery_geo_mapping_runner_retry_errors', 'wdc_yandex_delivery_geo_mapping_runner_step', 'wdc_yandex_delivery_geo_mapping_runner_pause', 'wdc_yandex_delivery_geo_mapping_runner_reset', 'wdc_yandex_delivery_geo_mapping_runner_status' ) as $action ) {
 	yd_geo_runner_assert( str_contains( $admin_source, $action ), 'Admin AJAX action missing: ' . $action );
 }
 yd_geo_runner_assert( str_contains( $admin_source, 'Ручная обработка будет доступна после завершения или постановки процесса на паузу.' ) && str_contains( $admin_source, '$this->yandex_delivery_geo_runner->is_running()' ), 'Admin POST/UI must block manual mapping while runner is running.' );
-yd_geo_runner_assert( str_contains( $admin_source, 'is_technical_error_geo_id( $row_geo_id )' ) && ! str_contains( $admin_source, 'yandex_delivery_geo_batch_limit' ) && ! str_contains( $admin_source, 'yandex_delivery_geo_batch_size' ), 'Admin UI must hide primary action for marker and remove legacy limit/batch_size fields.' );
+yd_geo_runner_assert( str_contains( $admin_source, 'is_technical_error_geo_id( $row_geo_id )' ) && str_contains( $admin_source, 'Маппинг необработанных' ) && str_contains( $admin_source, 'Запустить / продолжить полный маппинг' ) && ! str_contains( $admin_source, 'yandex_delivery_geo_batch_limit' ) && ! str_contains( $admin_source, 'yandex_delivery_geo_batch_size' ), 'Admin UI must expose recovery/full resume controls, hide primary action for marker and remove legacy limit/batch_size fields.' );
 yd_geo_runner_assert( ! str_contains( $admin_source, "'worker_count' => 'worker_count'" ) && str_contains( $admin_source, "'batch_size' => 'batch_size'" ), 'Admin runner state table must show batch_size and hide worker_count.' );
 yd_geo_runner_assert( str_contains( $plugin_source, 'YandexDeliveryGeoMappingRunnerService::class' ), 'Plugin must register runner service.' );
-yd_geo_runner_assert( str_contains( $js_source, 'function loop()' ) && str_contains( $js_source, "post('step'" ) && ! str_contains( $js_source, 'activeWorkers' ) && ! str_contains( $js_source, 'workerLoop' ) && ! str_contains( $js_source, 'worker_id' ) && ! str_contains( $js_source, 'workerCount' ), 'Runner JS must use one loop and no parallel worker markers.' );
-yd_geo_runner_assert( str_contains( $version_source, '0.89.0' ), 'Plugin version must be 0.89.0.' );
+yd_geo_runner_assert( str_contains( $js_source, 'function loop()' ) && str_contains( $js_source, "post('step'" ) && str_contains( $js_source, 'stopRequested' ) && str_contains( $js_source, 'activeSessionId' ) && str_contains( $js_source, 'nextState.session_id !== sessionId' ) && str_contains( $js_source, "post('start_unprocessed'" ) && ! str_contains( $js_source, 'activeWorkers' ) && ! str_contains( $js_source, 'workerLoop' ) && ! str_contains( $js_source, 'worker_id' ) && ! str_contains( $js_source, 'workerCount' ), 'Runner JS must use one guarded loop, no parallel worker markers, and ignore stale responses after pause.' );
+yd_geo_runner_assert( str_contains( $version_source, '0.89.1' ), 'Plugin version must be 0.89.1.' );
 foreach ( array( 'CheckoutOrchestrator', 'pricing', 'pickupPointsList', 'YandexDeliveryPickupPointImportService' ) as $forbidden ) {
 	yd_geo_runner_assert( ! str_contains( $runner_source, $forbidden ), 'Runner must not touch checkout/pricing/PVZ import code: ' . $forbidden );
 }

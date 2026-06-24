@@ -207,6 +207,22 @@ final class YandexDeliveryGeoMappingRepository {
 
 		return is_numeric( $value ) ? max( 0, (int) $value ) : 0;
 	}
+
+	public function find_max_processed_location_id(): int {
+		if ( $this->has_test_rows() ) {
+			$max = 0;
+			foreach ( $this->test_rows() as $row ) {
+				$max = max( $max, (int) ( $row['location_id'] ?? 0 ) );
+			}
+
+			return $max;
+		}
+		$this->create_schema_if_needed();
+		$value = $this->wpdb->get_var( 'SELECT MAX(location_id) FROM ' . $this->table_name() );
+
+		return is_numeric( $value ) ? max( 0, (int) $value ) : 0;
+	}
+
 	public function clear_technical_error_marker( int $location_id ): void {
 		if ( $location_id <= 0 ) {
 			return;
