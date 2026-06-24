@@ -175,7 +175,7 @@ yd_geo_runner_assert( str_contains( $admin_source, 'is_technical_error_geo_id( $
 yd_geo_runner_assert( ! str_contains( $admin_source, "'worker_count' => 'worker_count'" ) && str_contains( $admin_source, "'batch_size' => 'batch_size'" ), 'Admin runner state table must show batch_size and hide worker_count.' );
 yd_geo_runner_assert( str_contains( $plugin_source, 'YandexDeliveryGeoMappingRunnerService::class' ), 'Plugin must register runner service.' );
 yd_geo_runner_assert( str_contains( $js_source, 'function loop()' ) && str_contains( $js_source, "post('step'" ) && ! str_contains( $js_source, 'activeWorkers' ) && ! str_contains( $js_source, 'workerLoop' ) && ! str_contains( $js_source, 'worker_id' ) && ! str_contains( $js_source, 'workerCount' ), 'Runner JS must use one loop and no parallel worker markers.' );
-yd_geo_runner_assert( str_contains( $version_source, '0.87.3' ), 'Plugin version must be 0.87.3.' );
+yd_geo_runner_assert( str_contains( $version_source, '0.88.0' ), 'Plugin version must be 0.88.0.' );
 foreach ( array( 'CheckoutOrchestrator', 'pricing', 'pickupPointsList', 'YandexDeliveryPickupPointImportService' ) as $forbidden ) {
 	yd_geo_runner_assert( ! str_contains( $runner_source, $forbidden ), 'Runner must not touch checkout/pricing/PVZ import code: ' . $forbidden );
 }

@@ -1,3 +1,8 @@
+0.88.0 Yandex Geo Manual Review Queue
+
+Manual review is available in Маппинг geo_id: grouped needs_review rows can be filtered, approved as mapped primary, rejected to normal not_found, or bulk rejected. These actions are unavailable while the runner status is running. PVZ import, checkout and pricing remain out of scope.
+
+
 ## 0.87.0 Yandex Geo Mapping Runner
 
 The `Маппинг geo_id` tab now contains a production runner for full automatic mapping of the WDC locations base. It processes active RU locations with non-empty `display_name` in fixed batches of 30, stores state in `wdc_yandex_delivery_geo_mapping_runner_state`, reserves batches with `next_location_id` before processing, and the admin JS runs three bounded browser workers in parallel. A full run always rebuilds mappings for every selected location: old rows for that location are deleted before remapping, and existing primary/manual/error mappings are not skipped.
@@ -22,7 +27,7 @@ The Yandex Delivery admin surface now follows the intended working model:
 Яндекс ПВЗ
 ```
 
-`Маппинг geo_id` contains manual geo_id search, batch mapping controls, mapping analytics and a placeholder for manual `needs_review` processing. `Покрытие Яндекса` stays a selective/manual coverage check, not a mass import. `Яндекс ПВЗ` is the future pickup-point workspace; the current Moscow `geo_id=213` import remains a test diagnostic.
+`Маппинг geo_id` contains manual geo_id search, the browser-driven full runner, mapping analytics and a working manual `needs_review` queue for approving a candidate geo_id or rejecting a WDC location as `not_found`. `Покрытие Яндекса` stays a selective/manual coverage check, not a mass import. `Яндекс ПВЗ` is the future pickup-point workspace; the current Moscow `geo_id=213` import remains a test diagnostic.
 
 Architecture decision: coverage batch as a separate mass stage is not needed. The future PVZ import should run over confirmed mapped geo_id values and update `covered`/`not_covered` while importing real points.
 ## 1. Scope
@@ -864,6 +869,8 @@ php tests/yandex-delivery/run-yandex-delivery-geo-batch-smoke.php
 php tests/yandex-delivery/run-yandex-delivery-geo-analysis-smoke.php
 php tests/yandex-delivery/run-yandex-delivery-geo-resolution-smoke.php
 php tests/yandex-delivery/run-yandex-delivery-geo-coverage-smoke.php
+php tests/yandex-delivery/run-yandex-delivery-geo-runner-smoke.php
+php tests/yandex-delivery/run-yandex-delivery-geo-manual-review-smoke.php
 ```
 ### Phase 3 — checkout and order recalculation
 

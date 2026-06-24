@@ -790,6 +790,7 @@ C:.
             run-yandex-delivery-geo-analysis-smoke.php
             run-yandex-delivery-geo-batch-smoke.php
             run-yandex-delivery-geo-coverage-smoke.php
+            run-yandex-delivery-geo-manual-review-smoke.php
             run-yandex-delivery-geo-mapping-smoke.php
             run-yandex-delivery-geo-resolution-smoke.php
             run-yandex-delivery-geo-runner-smoke.php
