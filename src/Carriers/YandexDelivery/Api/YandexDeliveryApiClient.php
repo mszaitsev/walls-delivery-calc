@@ -128,7 +128,11 @@ final class YandexDeliveryApiClient {
 	 * @param array<string,mixed> $payload
 	 */
 	private function rawRequest( string $method, string $path, array $payload, YandexDeliveryCredentials $credentials ): YandexDeliveryApiResponse {
-		$body = ( function_exists( 'wp_json_encode' ) ? wp_json_encode( $payload ) : json_encode( $payload ) ) ?: '{}';
+		if ( array() === $payload ) {
+			$body = '{}';
+		} else {
+			$body = ( function_exists( 'wp_json_encode' ) ? wp_json_encode( $payload ) : json_encode( $payload ) ) ?: '{}';
+		}
 		$args = array(
 			'timeout' => $this->settings->request_timeout(),
 			'headers' => array(

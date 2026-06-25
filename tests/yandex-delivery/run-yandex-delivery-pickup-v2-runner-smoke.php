@@ -71,6 +71,10 @@ $raw_start = strpos( $api_source, 'public function pickupPointsListRawJson' );
 $raw_end = false === $raw_start ? false : strpos( $api_source, 'public function locationDetect', $raw_start );
 $raw_block = false !== $raw_start && false !== $raw_end ? substr( $api_source, $raw_start, $raw_end - $raw_start ) : '';
 yd_v2_runner_assert( '' !== $raw_block && ! str_contains( $raw_block, 'json_decode( $response->body, true )' ), 'Raw pickup list download must not json_decode the whole response body.' );
+$raw_request_start = strpos( $api_source, 'private function rawRequest' );
+$raw_request_end = false === $raw_request_start ? false : strpos( $api_source, 'private function extractErrorMessage', $raw_request_start );
+$raw_request_block = false !== $raw_request_start && false !== $raw_request_end ? substr( $api_source, $raw_request_start, $raw_request_end - $raw_request_start ) : '';
+yd_v2_runner_assert( '' !== $raw_request_block && str_contains( $raw_request_block, 'array() === $payload' ) && str_contains( $raw_request_block, "\$body = '{}';" ), 'Raw API request must encode empty payload as JSON object.' );
 yd_v2_runner_assert( str_contains( $reader_source, '$array_depth' ) && str_contains( $reader_source, 'break 2' ), 'Stream reader source must stop after target array closes.' );
 
 $repository = new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] );
@@ -89,6 +93,7 @@ $api = new YandexDeliveryApiClient( $settings, $http );
 $runner = new YandexDeliveryPickupPointV2RunnerService( $api, new YandexDeliveryPickupPointV2ImportService( new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] ), null, $reader ) );
 $state = $runner->start_full_api_sync();
 yd_v2_runner_assert( in_array( $state['status'], array( 'ready_to_import', 'importing' ), true ) && is_file( (string) $state['json_file_path'] ), 'Runner start must download JSON file and prepare import.' );
+yd_v2_runner_assert( '{}' === (string) $http->calls[0]['args']['body'], 'Runner API request with empty payload must send JSON object, not array.' );
 $payload = json_decode( (string) $http->calls[0]['args']['body'], true );
 yd_v2_runner_assert( array() === $payload && ! array_key_exists( 'type', $payload ) && ! array_key_exists( 'geo_id', $payload ), 'Runner API request payload must be empty without type or geo_id.' );
 $path_before_reset = (string) $state['json_file_path'];
