@@ -8,6 +8,13 @@ defined( 'ABSPATH' ) || exit;
 final class CompactWeeklyScheduleFormatter {
 	private const DAY_ORDER = array( 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс' );
 	private const DAY_ALIASES = array(
+		'1' => 'Пн',
+		'2' => 'Вт',
+		'3' => 'Ср',
+		'4' => 'Чт',
+		'5' => 'Пт',
+		'6' => 'Сб',
+		'7' => 'Вс',
 		'пн' => 'Пн',
 		'понедельник' => 'Пн',
 		'вт' => 'Вт',

@@ -76,8 +76,9 @@ final class YandexDeliveryPickupPointV2ImportService {
 		$address = is_array( $row['address'] ?? null ) ? $row['address'] : array();
 		$position = is_array( $row['position'] ?? null ) ? $row['position'] : array();
 		$coordinates = is_array( $row['coordinates'] ?? null ) ? $row['coordinates'] : array();
-		$location_details = $row['location_details'] ?? $row['locationDetails'] ?? null;
-		$station_contact = $row['station_contact'] ?? $row['stationContact'] ?? null;
+		$contact = is_array( $row['contact'] ?? null ) ? $row['contact'] : array();
+		$location_details = $row['location_details'] ?? $row['locationDetails'] ?? $row['address'] ?? null;
+		$station_contact = $row['station_contact'] ?? $row['stationContact'] ?? $row['contact'] ?? null;
 		$raw_json = $this->json( $row );
 
 		return array(
@@ -101,7 +102,7 @@ final class YandexDeliveryPickupPointV2ImportService {
 			'latitude' => $this->first( $row['latitude'] ?? null, $row['lat'] ?? null, $position['latitude'] ?? null, $coordinates['latitude'] ?? null, $coordinates['lat'] ?? null ),
 			'longitude' => $this->first( $row['longitude'] ?? null, $row['lon'] ?? null, $row['lng'] ?? null, $position['longitude'] ?? null, $coordinates['longitude'] ?? null, $coordinates['lon'] ?? null, $coordinates['lng'] ?? null ),
 			'instruction' => $this->first( $row['instruction'] ?? null, $address['comment'] ?? null ),
-			'phone' => $this->first( $row['phone'] ?? null, $row['phone_number'] ?? null ),
+			'phone' => $this->first( $row['phone'] ?? null, $row['phone_number'] ?? null, $contact['phone'] ?? null ),
 			'schedule_text' => $this->schedule_formatter->format( $row['schedule'] ?? null ),
 			'is_yandex_branded' => $this->bool( $row['is_yandex_branded'] ?? $row['isYandexBranded'] ?? false ),
 			'is_market_partner' => $this->bool( $row['is_market_partner'] ?? $row['isMarketPartner'] ?? false ),

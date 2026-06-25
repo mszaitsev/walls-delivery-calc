@@ -123,6 +123,73 @@ yd_pickup_v2_assert( str_contains( (string) $normalized['station_contact_json'],
 yd_pickup_v2_assert( ! array_key_exists( 'payment_methods', $normalized ) && ! array_key_exists( 'pickup_services', $normalized ) && ! array_key_exists( 'available_for_c2c_dropoff', $normalized ), 'Normalizer must exclude unused fields.' );
 yd_pickup_v2_assert( 40 === strlen( (string) $normalized['raw_hash'] ), 'Normalizer must compute SHA1 raw_hash.' );
 
+$real_restrictions = array();
+foreach ( range( 1, 7 ) as $day ) {
+	$real_restrictions[] = array(
+		'days' => array( $day ),
+		'time_from' => array( 'hours' => 9, 'minutes' => 0 ),
+		'time_to' => array( 'hours' => 21, 'minutes' => 0 ),
+	);
+}
+$real_raw = array(
+	'id' => '0193ce8e4735706382d7869c4a1d9e4d',
+	'operator_station_id' => '10031767577',
+	'operator_id' => 'market_l4g',
+	'name' => 'Пункт выдачи заказов Яндекс Маркета',
+	'type' => 'pickup_point',
+	'position' => array(
+		'latitude' => 55.046301,
+		'longitude' => 82.936428,
+	),
+	'address' => array(
+		'geoId' => 102058,
+		'country' => 'Россия',
+		'region' => 'Новосибирская область',
+		'subRegion' => '',
+		'locality' => 'Новосибирск',
+		'street' => 'улица Некрасова',
+		'house' => '82',
+		'housing' => '',
+		'apartment' => '',
+		'building' => '',
+		'comment' => 'Пройти один квартал от станции метро Маршала Покрышкина.',
+		'full_address' => 'Новосибирск улица Некрасова 82',
+		'postal_code' => '630005',
+	),
+	'contact' => array(
+		'phone' => '+74951570020',
+	),
+	'schedule' => array(
+		'time_zone' => 7,
+		'restrictions' => $real_restrictions,
+	),
+	'is_yandex_branded' => true,
+	'is_market_partner' => true,
+	'is_dark_store' => false,
+	'is_post_office' => false,
+	'available_for_dropoff' => true,
+	'available_for_c2c_dropoff' => true,
+	'pickup_services' => array(
+		'is_fitting_allowed' => true,
+	),
+	'payment_methods' => array(
+		'already_paid',
+	),
+);
+$real_normalized = $service->normalizePickupPoint( $real_raw );
+yd_pickup_v2_assert( null !== $real_normalized, 'Real Yandex fixture must normalize.' );
+yd_pickup_v2_assert( '' !== (string) $real_normalized['schedule_text'], 'Real Yandex fixture schedule_text must not be empty.' );
+yd_pickup_v2_assert( str_contains( (string) $real_normalized['schedule_text'], 'Пн–Вс' ), 'Real Yandex fixture schedule_text must contain compact weekday range.' );
+yd_pickup_v2_assert( str_contains( (string) $real_normalized['schedule_text'], '09:00–21:00' ), 'Real Yandex fixture schedule_text must contain formatted time range.' );
+yd_pickup_v2_assert( str_contains( (string) $real_normalized['location_details_json'], '"geoId":102058' ), 'Real Yandex fixture LocationDetails JSON must contain geoId.' );
+yd_pickup_v2_assert( str_contains( (string) $real_normalized['location_details_json'], 'Новосибирская область' ), 'Real Yandex fixture LocationDetails JSON must contain region.' );
+yd_pickup_v2_assert( str_contains( (string) $real_normalized['location_details_json'], 'Новосибирск' ), 'Real Yandex fixture LocationDetails JSON must contain locality.' );
+yd_pickup_v2_assert( str_contains( (string) $real_normalized['location_details_json'], 'Новосибирск улица Некрасова 82' ), 'Real Yandex fixture LocationDetails JSON must contain full_address.' );
+yd_pickup_v2_assert( str_contains( (string) $real_normalized['station_contact_json'], '+74951570020' ), 'Real Yandex fixture StationContact JSON must contain phone.' );
+yd_pickup_v2_assert( '+74951570020' === (string) $real_normalized['phone'], 'Real Yandex fixture phone column must use contact.phone.' );
+yd_pickup_v2_assert( ! array_key_exists( 'payment_methods', $real_normalized ), 'Real Yandex fixture must not normalize payment_methods.' );
+yd_pickup_v2_assert( ! array_key_exists( 'pickup_services', $real_normalized ), 'Real Yandex fixture must not normalize pickup_services.' );
+yd_pickup_v2_assert( ! array_key_exists( 'available_for_c2c_dropoff', $real_normalized ), 'Real Yandex fixture must not normalize available_for_c2c_dropoff.' );
 $save = $repository->upsert( array( $normalized ) );
 yd_pickup_v2_assert( 1 === $save['saved'] && 1 === $repository->count(), 'Repository must upsert a normalized v2 point.' );
 yd_pickup_v2_assert( null !== $repository->find( '63e07227-30f8-4afc-bc3f-22b76fa1672c' ), 'Repository find must return the v2 point.' );

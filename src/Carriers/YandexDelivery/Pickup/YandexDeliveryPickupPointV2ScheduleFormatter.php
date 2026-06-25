@@ -74,6 +74,9 @@ final class YandexDeliveryPickupPointV2ScheduleFormatter {
 		if ( is_array( $work ) ) {
 			$work = $this->time_pair( $work );
 		}
+		if ( ( null === $work || '' === $work ) && is_array( $row['time_from'] ?? null ) && is_array( $row['time_to'] ?? null ) ) {
+			$work = $this->time_pair( array( 'from' => $row['time_from'], 'to' => $row['time_to'] ) );
+		}
 		$break = $row['break'] ?? $row['breakTime'] ?? $row['break_time'] ?? null;
 		if ( is_array( $break ) ) {
 			$break = $this->time_pair( $break );
@@ -108,9 +111,24 @@ final class YandexDeliveryPickupPointV2ScheduleFormatter {
 	 * @param array<int|string,mixed> $value
 	 */
 	private function time_pair( array $value ): string {
-		$from = $value['from'] ?? $value['start'] ?? $value['start_time'] ?? $value['startTime'] ?? null;
-		$to = $value['to'] ?? $value['end'] ?? $value['end_time'] ?? $value['endTime'] ?? null;
+		$from = $this->time_value( $value['from'] ?? $value['start'] ?? $value['start_time'] ?? $value['startTime'] ?? null );
+		$to = $this->time_value( $value['to'] ?? $value['end'] ?? $value['end_time'] ?? $value['endTime'] ?? null );
 
-		return is_scalar( $from ) && is_scalar( $to ) ? (string) $from . '-' . (string) $to : '';
+		return '' !== $from && '' !== $to ? $from . '-' . $to : '';
+	}
+
+	private function time_value( mixed $value ): string {
+		if ( is_array( $value ) ) {
+			$hours = $value['hours'] ?? $value['hour'] ?? null;
+			$minutes = $value['minutes'] ?? $value['minute'] ?? 0;
+			if ( is_numeric( $hours ) && is_numeric( $minutes ) ) {
+				return sprintf( '%02d:%02d', max( 0, min( 23, (int) $hours ) ), max( 0, min( 59, (int) $minutes ) ) );
+			}
+		}
+		if ( is_scalar( $value ) ) {
+			return trim( (string) $value );
+		}
+
+		return '';
 	}
 }
