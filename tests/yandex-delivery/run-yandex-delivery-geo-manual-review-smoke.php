@@ -141,7 +141,7 @@ yd_geo_manual_assert( ! str_contains( $manual_section, '->cleanup_needs_review_b
 yd_geo_manual_assert( str_contains( $admin_source, 'yandex_delivery_geo_show_analysis' ) && str_contains( $admin_source, 'Показать аналитику' ) && str_contains( $admin_source, '! $show_analysis' ), 'Mapping tab render must not call heavy analysis by default.' );
 yd_geo_manual_assert( str_contains( $admin_source, 'is_running()' ) && str_contains( $admin_source, 'Ручная обработка будет доступна после завершения или постановки процесса на паузу.' ) && ! str_contains( $admin_source, 'Ручная обработка временно заблокирована' ), 'Manual review handlers/UI must keep runner running guard.' );
 yd_geo_manual_assert( str_contains( $admin_source, 'max_location_id_exclusive' ) && str_contains( $admin_source, "array( 'full', 'unprocessed' )" ) && str_contains( $admin_source, 'Очередь ограничена уже обработанной частью полного маппинга' ) && str_contains( $admin_source, 'Ручная обработка доступна только для уже обработанной части полного маппинга' ), 'Admin source must guard paused full/unprocessed-runner manual review by next_location_id.' );
-yd_geo_manual_assert( str_contains( $plugin_source, 'Version: 0.91.3' ) && str_contains( $plugin_source, "WDC_VERSION', '0.91.3" ), 'Plugin version must be 0.91.3.' );
-yd_geo_manual_assert( str_contains( $project_status, '0.91.3 Yandex Geo Manual Region Cleanup Redirect' ), 'Project status must document manual region cleanup.' );
+yd_geo_manual_assert( str_contains( $plugin_source, 'Version: 0.92.0' ) && str_contains( $plugin_source, "WDC_VERSION', '0.92.0" ), 'Plugin version must be 0.92.0.' );
+yd_geo_manual_assert( str_contains( $project_status, '0.92.0 Yandex Geo Region Keyword Auto Filter' ), 'Project status must document manual region cleanup.' );
 
 echo "Yandex Delivery geo manual review smoke test passed.\n";

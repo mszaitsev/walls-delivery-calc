@@ -16,14 +16,18 @@ final class YandexDeliveryGeoMappingService {
 	private const CANDIDATE_STORAGE_ALL = 'all';
 	private const DEFAULT_CANDIDATE_STORAGE_POLICY = self::CANDIDATE_STORAGE_AMBIGUOUS_ONLY;
 
+	private YandexDeliveryGeoRegionKeywordFilter $region_keyword_filter;
+
 	public function __construct(
 		private LocationRepository $locations,
 		private YandexDeliveryApiClient $api,
 		private YandexDeliveryGeoMappingRepository $repository,
 		private YandexDeliveryGeoMatchScorer $scorer,
 		private YandexDeliveryGeoResolutionPolicy $resolution_policy,
-		private string $candidate_storage_policy = self::DEFAULT_CANDIDATE_STORAGE_POLICY
+		private string $candidate_storage_policy = self::DEFAULT_CANDIDATE_STORAGE_POLICY,
+		?YandexDeliveryGeoRegionKeywordFilter $region_keyword_filter = null
 	) {
+		$this->region_keyword_filter = $region_keyword_filter ?? new YandexDeliveryGeoRegionKeywordFilter();
 	}
 
 	/** @return array<string,mixed> */
@@ -141,6 +145,27 @@ final class YandexDeliveryGeoMappingService {
 		if ( array() === $rows ) {
 			return array( $this->empty_mapping( $location, $query, $body ) );
 		}
+		$region_filter = $this->region_keyword_filter->filter( $location, $rows );
+		$rows = $region_filter['rows'];
+		if ( array() === $rows ) {
+			return array(
+				$this->empty_mapping(
+					$location,
+					$query,
+					array(
+						'response' => $body,
+						'region_keyword_filter' => array(
+							'keyword' => (string) ( $region_filter['keyword'] ?? '' ),
+							'removed_candidates' => (int) ( $region_filter['removed_candidates'] ?? 0 ),
+							'reason' => 'No Yandex candidate contains WDC region keyword.',
+						),
+					)
+				),
+			);
+		}
+		if ( (int) ( $region_filter['removed_candidates'] ?? 0 ) > 0 ) {
+			$rows = $this->annotate_region_keyword_filter( $rows, (string) ( $region_filter['keyword'] ?? '' ), (int) ( $region_filter['removed_candidates'] ?? 0 ) );
+		}
 		usort( $rows, static fn( array $left, array $right ): int => (float) $right['confidence'] <=> (float) $left['confidence'] );
 		$resolution = $this->resolution_policy->resolve( $rows );
 		if ( YandexDeliveryGeoMappingStatus::NOT_FOUND === $resolution['resolution'] ) {
@@ -156,6 +181,24 @@ final class YandexDeliveryGeoMappingService {
 		$rows = $this->apply_candidate_storage_policy( $rows, $confident_primary );
 		foreach ( $rows as $index => $row ) {
 			unset( $rows[ $index ]['scoring'] );
+		}
+
+		return $rows;
+	}
+
+
+	/** @param array<int,array<string,mixed>> $rows @return array<int,array<string,mixed>> */
+	private function annotate_region_keyword_filter( array $rows, string $keyword, int $removed_candidates ): array {
+		foreach ( $rows as $index => $row ) {
+			$raw = json_decode( (string) ( $row['raw_json'] ?? '' ), true );
+			if ( ! is_array( $raw ) ) {
+				$raw = array();
+			}
+			$raw['region_keyword_filter'] = array(
+				'keyword' => $keyword,
+				'removed_candidates' => $removed_candidates,
+			);
+			$rows[ $index ]['raw_json'] = $this->json( $raw );
 		}
 
 		return $rows;
