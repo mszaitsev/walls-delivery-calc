@@ -10,9 +10,11 @@ final class YandexDeliveryPickupPointV2ImportService {
 
 	public function __construct(
 		private YandexDeliveryPickupPointV2Repository $repository,
-		private ?YandexDeliveryPickupPointV2ScheduleFormatter $schedule_formatter = null
+		private ?YandexDeliveryPickupPointV2ScheduleFormatter $schedule_formatter = null,
+		private ?YandexDeliveryPickupPointV2JsonStreamReader $stream_reader = null
 	) {
 		$this->schedule_formatter ??= new YandexDeliveryPickupPointV2ScheduleFormatter();
+		$this->stream_reader ??= new YandexDeliveryPickupPointV2JsonStreamReader();
 	}
 
 	/**
@@ -61,6 +63,56 @@ final class YandexDeliveryPickupPointV2ImportService {
 		return $report;
 	}
 
+	/**
+	 * @return array{processed:int,normalized:int,saved:int,skipped_invalid:int,next_offset:int,done:bool,memory_peak_mb:string}
+	 */
+	public function import_from_json_file_streamed( string $filename, int $offset = 0, int $limit = 500 ): array {
+		$offset = max( 0, $offset );
+		$limit = max( 1, min( 5000, $limit ) );
+		$processed = 0;
+		$seen = 0;
+		$normalized = array();
+		$skipped = 0;
+		$done = true;
+
+		foreach ( $this->stream_reader->read_points( $filename ) as $point ) {
+			if ( $seen < $offset ) {
+				++$seen;
+				continue;
+			}
+			if ( $processed >= $limit ) {
+				$done = false;
+				break;
+			}
+			++$seen;
+			++$processed;
+			$row = $this->normalizePickupPoint( $point );
+			if ( null === $row ) {
+				++$skipped;
+				continue;
+			}
+			$normalized[] = $row;
+		}
+
+		$save = array( 'saved' => 0, 'skipped_invalid' => 0 );
+		if ( array() !== $normalized ) {
+			$save = $this->repository->upsert( $normalized );
+		}
+		unset( $normalized );
+		if ( function_exists( 'gc_collect_cycles' ) ) {
+			gc_collect_cycles();
+		}
+
+		return array(
+			'processed' => $processed,
+			'normalized' => max( 0, $processed - $skipped ),
+			'saved' => (int) ( $save['saved'] ?? 0 ),
+			'skipped_invalid' => $skipped + (int) ( $save['skipped_invalid'] ?? 0 ),
+			'next_offset' => $offset + $processed,
+			'done' => $done,
+			'memory_peak_mb' => $this->memory_peak_mb(),
+		);
+	}
 	/** @return array<string,mixed>|null */
 	public function normalizePickupPoint( mixed $raw ): ?array {
 		$row = $this->to_array( $raw );
@@ -203,6 +255,10 @@ final class YandexDeliveryPickupPointV2ImportService {
 		$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $value, JSON_UNESCAPED_UNICODE ) : json_encode( $value, JSON_UNESCAPED_UNICODE );
 
 		return is_string( $json ) ? $json : null;
+	}
+
+	private function memory_peak_mb(): string {
+		return function_exists( 'memory_get_peak_usage' ) ? (string) round( memory_get_peak_usage( true ) / 1048576, 1 ) : '0';
 	}
 
 	private function now(): string {

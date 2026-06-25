@@ -163,6 +163,64 @@ final class YandexDeliveryPickupPointV2Repository {
 		return (int) $this->wpdb->get_var( $sql );
 	}
 
+	public function count_all(): int {
+		return $this->count( array( 'active' => null ) );
+	}
+
+	public function count_active(): int {
+		return $this->count( array( 'active' => 1 ) );
+	}
+
+	/** @return array<string,int> */
+	public function count_by_type(): array {
+		if ( $this->has_test_rows() ) {
+			$counts = array();
+			foreach ( $this->wpdb->yandex_delivery_pickup_points_v2 as $row ) {
+				$type = trim( (string) ( $row['type'] ?? '' ) );
+				if ( '' !== $type ) {
+					$counts[ $type ] = ( $counts[ $type ] ?? 0 ) + 1;
+				}
+			}
+			return $counts;
+		}
+		$rows = $this->wpdb->get_results( 'SELECT type, COUNT(*) AS total FROM ' . $this->table_name() . ' GROUP BY type', ARRAY_A );
+		$counts = array();
+		foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+			$counts[ (string) $row['type'] ] = (int) $row['total'];
+		}
+		return $counts;
+	}
+
+	public function count_unique_geo_ids(): int {
+		if ( $this->has_test_rows() ) {
+			$ids = array();
+			foreach ( $this->wpdb->yandex_delivery_pickup_points_v2 as $row ) {
+				$id = (string) ( $row['yandex_geo_id'] ?? '' );
+				if ( '' !== $id && '0' !== $id ) {
+					$ids[ $id ] = true;
+				}
+			}
+			return count( $ids );
+		}
+		$this->create_schema_if_needed();
+		return (int) $this->wpdb->get_var( 'SELECT COUNT(DISTINCT yandex_geo_id) FROM ' . $this->table_name() . ' WHERE yandex_geo_id IS NOT NULL AND yandex_geo_id > 0' );
+	}
+
+	public function latest_seen_at(): string {
+		if ( $this->has_test_rows() ) {
+			$latest = '';
+			foreach ( $this->wpdb->yandex_delivery_pickup_points_v2 as $row ) {
+				$value = (string) ( $row['last_seen_at'] ?? '' );
+				if ( $value > $latest ) {
+					$latest = $value;
+				}
+			}
+			return $latest;
+		}
+		$this->create_schema_if_needed();
+		return (string) $this->wpdb->get_var( 'SELECT MAX(last_seen_at) FROM ' . $this->table_name() );
+	}
+
 	/** @param array<int,string> $where @param array<int,mixed> $args @param array<string,mixed> $filters */
 	private function append_where( array &$where, array &$args, array $filters ): void {
 		if ( ! array_key_exists( 'active', $filters ) || null !== $filters['active'] ) {

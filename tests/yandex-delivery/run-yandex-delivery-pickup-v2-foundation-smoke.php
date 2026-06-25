@@ -61,7 +61,7 @@ foreach ( array( 'normalizePickupPoint', 'import_from_json_file', 'array_chunk( 
 	yd_pickup_v2_assert( str_contains( $import_source, $fragment ), 'V2 import service must contain ' . $fragment . '.' );
 }
 yd_pickup_v2_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_pickup_v2'] = 'Яндекс ПВЗ v2';" ), 'Admin page must register the Yandex pickup v2 tab.' );
-yd_pickup_v2_assert( str_contains( $admin_source, 'Это новая архитектура импорта ПВЗ.' ) && ! str_contains( $admin_source, 'wdc_yandex_delivery_pickup_v2_import_start' ), 'V2 tab must be informational only.' );
+yd_pickup_v2_assert( str_contains( $admin_source, 'Скачать и импортировать полный список' ) && ! str_contains( $admin_source, 'Текущий импорт пока недоступен' ), 'V2 tab must render runner UI instead of the old placeholder.' );
 
 $repository = new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] );
 $schema = $repository->schema();

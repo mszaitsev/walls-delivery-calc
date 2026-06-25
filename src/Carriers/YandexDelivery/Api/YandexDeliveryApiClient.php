@@ -20,8 +20,36 @@ final class YandexDeliveryApiClient {
 	 * @param array<string,mixed> $payload
 	 * @return array<string,mixed>
 	 */
-	public function pickupPointsList( array $payload ): array {
+	public function pickupPointsList( array $payload = array() ): array {
 		return $this->authorizedJsonRequest( 'POST', YandexDeliveryEndpoints::PICKUP_POINTS_LIST_PATH, $payload );
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
+	 */
+	public function pickupPointsListRawJson( array $payload = array() ): string {
+		$credentials = $this->settings->credentials();
+		if ( ! $credentials->is_complete() ) {
+			throw new YandexDeliveryApiException(
+				'Данные для входа Яндекс.Доставки не заполнены.',
+				array_merge( $this->settings->diagnostic_context(), array( 'error_code' => 'credentials_missing' ) )
+			);
+		}
+		$response = $this->rawRequest( 'POST', YandexDeliveryEndpoints::PICKUP_POINTS_LIST_PATH, $payload, $credentials );
+		if ( $response->status_code < 200 || $response->status_code >= 300 ) {
+			$data = $response->json();
+			$message = is_array( $data ) && array() !== $data ? $this->extractErrorMessage( $data, $response->status_code ) : $response->body;
+			throw new YandexDeliveryApiException( $this->safeMessage( $message, $response->status_code ), array( 'http_code' => $response->status_code, 'endpoint' => YandexDeliveryEndpoints::PICKUP_POINTS_LIST_PATH, 'request' => $this->settings->sanitize_for_diagnostics( $payload ) ) );
+		}
+		if ( '' === trim( $response->body ) ) {
+			throw new YandexDeliveryApiException( 'Яндекс.Доставка вернула пустой JSON.', array( 'endpoint' => YandexDeliveryEndpoints::PICKUP_POINTS_LIST_PATH, 'error_code' => 'empty_json' ) );
+		}
+		json_decode( $response->body, true );
+		if ( JSON_ERROR_NONE !== json_last_error() ) {
+			throw new YandexDeliveryApiException( 'Яндекс.Доставка вернула некорректный JSON.', array( 'endpoint' => YandexDeliveryEndpoints::PICKUP_POINTS_LIST_PATH, 'error_code' => 'malformed_json' ) );
+		}
+
+		return $response->body;
 	}
 
 	/**

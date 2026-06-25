@@ -33,6 +33,8 @@ use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoRegionKeywordFilt
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointImportService;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointRepository;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointService;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2Repository;
+use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointV2RunnerService;
 use WallsShop\WDC\Carriers\YandexDelivery\YandexDeliverySettings;
 use WallsShop\WDC\Carriers\RussianPost\Admin\RussianPostCountriesAdminPage;
 use WallsShop\WDC\Carriers\RussianPost\RussianPostDomesticSettings;
@@ -127,6 +129,8 @@ final class DeliveryServicesAdminPage {
 		private ?YandexDeliveryPickupPointRepository $yandex_delivery_pickup_points = null,
 		private ?YandexDeliveryPickupPointImportService $yandex_delivery_pickup_importer = null,
 		private ?YandexDeliveryPickupPointService $yandex_delivery_pickup_service = null,
+		private ?YandexDeliveryPickupPointV2Repository $yandex_delivery_pickup_v2_repository = null,
+		private ?YandexDeliveryPickupPointV2RunnerService $yandex_delivery_pickup_v2_runner = null,
 		private ?YandexDeliveryGeoMappingRepository $yandex_delivery_geo_mappings = null,
 		private ?YandexDeliveryGeoMappingService $yandex_delivery_geo_mapping_service = null,
 		private ?YandexDeliveryGeoMappingBatchService $yandex_delivery_geo_batch = null,
@@ -147,6 +151,11 @@ final class DeliveryServicesAdminPage {
 		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_import_step', array( $this, 'ajax_yandex_delivery_pickup_import_step' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_import_reset', array( $this, 'ajax_yandex_delivery_pickup_import_reset' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_import_status', array( $this, 'ajax_yandex_delivery_pickup_import_status' ) );
+		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_v2_runner_start', array( $this, 'ajax_yandex_delivery_pickup_v2_runner_start' ) );
+		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_v2_runner_start_import', array( $this, 'ajax_yandex_delivery_pickup_v2_runner_start_import' ) );
+		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_v2_runner_step', array( $this, 'ajax_yandex_delivery_pickup_v2_runner_step' ) );
+		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_v2_runner_pause', array( $this, 'ajax_yandex_delivery_pickup_v2_runner_pause' ) );
+		add_action( 'wp_ajax_wdc_yandex_delivery_pickup_v2_runner_reset', array( $this, 'ajax_yandex_delivery_pickup_v2_runner_reset' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_geo_mapping_runner_start', array( $this, 'ajax_yandex_delivery_geo_mapping_runner_start' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_geo_mapping_runner_start_unprocessed', array( $this, 'ajax_yandex_delivery_geo_mapping_runner_start_unprocessed' ) );
 		add_action( 'wp_ajax_wdc_yandex_delivery_geo_mapping_runner_retry_errors', array( $this, 'ajax_yandex_delivery_geo_mapping_runner_retry_errors' ) );
@@ -229,7 +238,24 @@ final class DeliveryServicesAdminPage {
 				)
 			);
 		}
-	}
+		if ( self::MENU_SLUG === $page && YandexDeliverySettings::SERVICE_KEY === $service && 'yandex_delivery_pickup_v2' === $tab ) {
+			wp_enqueue_script(
+				'wdc-yandex-delivery-pickup-v2-runner-admin',
+				$this->asset_url( 'assets/admin/yandex-delivery-pickup-v2-runner.js' ),
+				array(),
+				$this->asset_version(),
+				true
+			);
+			wp_localize_script(
+				'wdc-yandex-delivery-pickup-v2-runner-admin',
+				'wdcYandexDeliveryPickupV2Runner',
+				array(
+					'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+					'nonce' => wp_create_nonce( 'wdc_yandex_delivery_pickup_v2_runner' ),
+					'initialState' => $this->yandex_delivery_pickup_v2_runner instanceof YandexDeliveryPickupPointV2RunnerService ? $this->yandex_delivery_pickup_v2_runner->current_state() : array(),
+				)
+			);
+		}	}
 
 	public function add_menu_page(): void {
 		add_submenu_page(
@@ -356,6 +382,57 @@ final class DeliveryServicesAdminPage {
 		wp_send_json_success( $this->yandex_delivery_geo_runner->current_state() );
 	}
 
+	public function ajax_yandex_delivery_pickup_v2_runner_start(): void {
+		if ( ! $this->can_handle_yandex_delivery_pickup_v2_runner_ajax() ) {
+			return;
+		}
+		wp_send_json_success( $this->yandex_delivery_pickup_v2_runner->start_full_api_sync() );
+	}
+
+	public function ajax_yandex_delivery_pickup_v2_runner_start_import(): void {
+		if ( ! $this->can_handle_yandex_delivery_pickup_v2_runner_ajax() ) {
+			return;
+		}
+		wp_send_json_success( $this->yandex_delivery_pickup_v2_runner->start_import() );
+	}
+
+	public function ajax_yandex_delivery_pickup_v2_runner_step(): void {
+		if ( ! $this->can_handle_yandex_delivery_pickup_v2_runner_ajax() ) {
+			return;
+		}
+		wp_send_json_success( $this->yandex_delivery_pickup_v2_runner->run_import_step() );
+	}
+
+	public function ajax_yandex_delivery_pickup_v2_runner_pause(): void {
+		if ( ! $this->can_handle_yandex_delivery_pickup_v2_runner_ajax() ) {
+			return;
+		}
+		wp_send_json_success( $this->yandex_delivery_pickup_v2_runner->pause() );
+	}
+
+	public function ajax_yandex_delivery_pickup_v2_runner_reset(): void {
+		if ( ! $this->can_handle_yandex_delivery_pickup_v2_runner_ajax() ) {
+			return;
+		}
+		wp_send_json_success( $this->yandex_delivery_pickup_v2_runner->reset() );
+	}
+
+	private function can_handle_yandex_delivery_pickup_v2_runner_ajax(): bool {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 );
+			return false;
+		}
+		if ( ! check_ajax_referer( 'wdc_yandex_delivery_pickup_v2_runner', 'nonce', false ) ) {
+			wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 );
+			return false;
+		}
+		if ( ! $this->yandex_delivery_pickup_v2_runner instanceof YandexDeliveryPickupPointV2RunnerService ) {
+			wp_send_json_error( array( 'message' => __( 'Runner Яндекс ПВЗ v2 недоступен.', 'walls-delivery-calc' ) ), 500 );
+			return false;
+		}
+
+		return true;
+	}
 	private function can_handle_yandex_delivery_geo_mapping_runner_ajax(): bool {
 		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
 			wp_send_json_error( array( 'message' => __( 'Недостаточно прав.', 'walls-delivery-calc' ) ), 403 );
@@ -1520,14 +1597,77 @@ final class DeliveryServicesAdminPage {
 		if ( ! $this->is_yandex_delivery_service( $service ) ) {
 			return;
 		}
+		$state = $this->yandex_delivery_pickup_v2_runner instanceof YandexDeliveryPickupPointV2RunnerService ? $this->yandex_delivery_pickup_v2_runner->current_state() : array();
+		$stats = $this->yandex_delivery_pickup_v2_repository instanceof YandexDeliveryPickupPointV2Repository ? array(
+			'total' => $this->yandex_delivery_pickup_v2_repository->count_all(),
+			'active' => $this->yandex_delivery_pickup_v2_repository->count_active(),
+			'unique_geo_ids' => $this->yandex_delivery_pickup_v2_repository->count_unique_geo_ids(),
+			'by_type' => $this->yandex_delivery_pickup_v2_repository->count_by_type(),
+			'latest_seen_at' => $this->yandex_delivery_pickup_v2_repository->latest_seen_at(),
+		) : array();
 		?>
 		<h3><?php echo esc_html__( 'Яндекс ПВЗ v2', 'walls-delivery-calc' ); ?></h3>
-		<div class="notice notice-info inline" style="max-width: 860px;">
-			<p><?php echo esc_html__( 'Это новая архитектура импорта ПВЗ.', 'walls-delivery-calc' ); ?></p>
-			<p><?php echo esc_html__( 'Разработка ведется параллельно существующей реализации.', 'walls-delivery-calc' ); ?></p>
-			<p><?php echo esc_html__( 'Текущий импорт пока недоступен.', 'walls-delivery-calc' ); ?></p>
+		<p class="description" style="max-width: 960px;"><?php echo esc_html__( 'Запрос выполняется без type и geo_id, чтобы получить все точки, которые отдаёт Яндекс. Сырой JSON сохраняется во временный файл и не удаляется после импорта.', 'walls-delivery-calc' ); ?></p>
+		<div id="wdc-yandex-delivery-pickup-v2-runner" data-wdc-yandex-pickup-v2-runner data-wdc-yandex-v2-status="<?php echo esc_attr( (string) ( $state['status'] ?? 'idle' ) ); ?>">
+			<p>
+				<button type="button" class="button button-primary" data-wdc-yandex-v2-start><?php echo esc_html__( 'Скачать и импортировать полный список', 'walls-delivery-calc' ); ?></button>
+				<button type="button" class="button" data-wdc-yandex-v2-continue><?php echo esc_html__( 'Продолжить импорт', 'walls-delivery-calc' ); ?></button>
+				<button type="button" class="button" data-wdc-yandex-v2-pause><?php echo esc_html__( 'Пауза', 'walls-delivery-calc' ); ?></button>
+				<button type="button" class="button button-secondary" data-wdc-yandex-v2-reset><?php echo esc_html__( 'Сбросить состояние', 'walls-delivery-calc' ); ?></button>
+			</p>
+			<div class="notice notice-info inline" style="max-width: 1120px;">
+				<p data-wdc-yandex-v2-summary><?php echo esc_html( (string) ( $state['status'] ?? 'idle' ) . ': ' . (string) ( $state['message'] ?? '' ) ); ?></p>
+				<table class="widefat striped" style="max-width: 1120px;">
+					<tbody>
+						<?php foreach ( $this->yandex_delivery_pickup_v2_state_rows() as $key => $label ) : ?>
+							<tr><th scope="row"><?php echo esc_html( $label ); ?></th><td data-wdc-yandex-v2-field="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $this->yandex_delivery_pickup_v2_state_value( $state, $key ) ); ?></td></tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+			</div>
 		</div>
+		<h3><?php echo esc_html__( 'Статистика БД', 'walls-delivery-calc' ); ?></h3>
+		<table class="widefat striped" style="max-width: 760px;">
+			<tbody>
+				<tr><th scope="row"><?php echo esc_html__( 'Всего точек в БД', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $stats['total'] ?? 0 ) ); ?></td></tr>
+				<tr><th scope="row"><?php echo esc_html__( 'Активных', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $stats['active'] ?? 0 ) ); ?></td></tr>
+				<tr><th scope="row"><?php echo esc_html__( 'Уникальных geoId', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $stats['unique_geo_ids'] ?? 0 ) ); ?></td></tr>
+				<tr><th scope="row"><?php echo esc_html__( 'Типы точек', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( wp_json_encode( $stats['by_type'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '{}' ); ?></td></tr>
+				<tr><th scope="row"><?php echo esc_html__( 'Последнее обновление', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $stats['latest_seen_at'] ?? '' ) ); ?></td></tr>
+			</tbody>
+		</table>
 		<?php
+	}
+
+	/** @return array<string,string> */
+	private function yandex_delivery_pickup_v2_state_rows(): array {
+		return array(
+			'status' => 'Статус',
+			'session_id' => 'session_id',
+			'json_file_path' => 'json_file_path',
+			'json_file_size_bytes' => 'json_file_size_bytes',
+			'downloaded_at' => 'downloaded_at',
+			'offset' => 'offset',
+			'processed' => 'processed',
+			'normalized' => 'normalized',
+			'saved' => 'saved',
+			'skipped_invalid' => 'skipped_invalid',
+			'errors_count' => 'errors_count',
+			'batch_size' => 'batch_size',
+			'memory_peak_mb' => 'memory_peak_mb',
+			'updated_at' => 'updated_at',
+			'message' => 'message',
+		);
+	}
+
+	/** @param array<string,mixed> $state */
+	private function yandex_delivery_pickup_v2_state_value( array $state, string $key ): string {
+		$value = $state[ $key ] ?? '';
+		if ( is_array( $value ) ) {
+			return wp_json_encode( $value, JSON_UNESCAPED_UNICODE ) ?: '';
+		}
+
+		return is_scalar( $value ) ? (string) $value : '';
 	}
 
 	/** @param array<string,mixed> $state */
