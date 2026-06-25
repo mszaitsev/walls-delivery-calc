@@ -1089,6 +1089,7 @@ final class DeliveryServicesAdminPage {
 			$tabs['yandex_delivery_geo'] = 'Маппинг geo_id';
 			$tabs['yandex_delivery_geo_coverage'] = 'Покрытие Яндекса';
 			$tabs['yandex_delivery_pickup'] = 'Яндекс ПВЗ';
+			$tabs['yandex_delivery_pickup_v2'] = 'Яндекс ПВЗ v2';
 		}
 		if ( $this->is_dpd_service( $service ) ) {
 			$tabs['tariffs'] = 'Тарифы';
@@ -1119,6 +1120,7 @@ final class DeliveryServicesAdminPage {
 			'dpd_settings' => $this->render_dpd_settings_tab( $service ),
 			'yandex_delivery_settings' => $this->render_yandex_delivery_settings_tab( $service ),
 			'yandex_delivery_pickup' => $this->render_yandex_delivery_pickup_tab( $service ),
+			'yandex_delivery_pickup_v2' => $this->render_yandex_delivery_pickup_v2_tab( $service ),
 			'yandex_delivery_geo', 'yandex_delivery_geo_batch', 'yandex_delivery_geo_analysis' => $this->render_yandex_delivery_geo_tab( $service ),
 			'yandex_delivery_geo_coverage' => $this->render_yandex_delivery_geo_coverage_tab( $service ),
 			'dpd_geography' => $this->render_dpd_geography_tab( $service ),
@@ -1514,6 +1516,19 @@ final class DeliveryServicesAdminPage {
 		<?php
 	}
 
+	private function render_yandex_delivery_pickup_v2_tab( DeliveryService $service ): void {
+		if ( ! $this->is_yandex_delivery_service( $service ) ) {
+			return;
+		}
+		?>
+		<h3><?php echo esc_html__( 'Яндекс ПВЗ v2', 'walls-delivery-calc' ); ?></h3>
+		<div class="notice notice-info inline" style="max-width: 860px;">
+			<p><?php echo esc_html__( 'Это новая архитектура импорта ПВЗ.', 'walls-delivery-calc' ); ?></p>
+			<p><?php echo esc_html__( 'Разработка ведется параллельно существующей реализации.', 'walls-delivery-calc' ); ?></p>
+			<p><?php echo esc_html__( 'Текущий импорт пока недоступен.', 'walls-delivery-calc' ); ?></p>
+		</div>
+		<?php
+	}
 
 	/** @param array<string,mixed> $state */
 	private function render_yandex_delivery_geo_tab( DeliveryService $service ): void {
