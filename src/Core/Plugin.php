@@ -62,6 +62,7 @@ use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingRepository
 use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingService;
 use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMappingRunnerService;
 use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoResolutionPolicy;
+use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoRegionKeywordFilter;
 use WallsShop\WDC\Carriers\YandexDelivery\Geo\YandexDeliveryGeoMatchScorer;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointImportService;
 use WallsShop\WDC\Carriers\YandexDelivery\Pickup\YandexDeliveryPickupPointNormalizer;
@@ -305,7 +306,8 @@ final class Plugin {
 		$this->container->register( YandexDeliveryGeoCoverageService::class, fn(): YandexDeliveryGeoCoverageService => new YandexDeliveryGeoCoverageService( $this->container->get( YandexDeliveryApiClient::class ), $this->container->get( YandexDeliveryGeoMappingRepository::class ), $this->container->get( YandexDeliveryGeoCoverageRepository::class ) ) );
 		$this->container->register( YandexDeliveryGeoMatchScorer::class, fn(): YandexDeliveryGeoMatchScorer => new YandexDeliveryGeoMatchScorer() );
 		$this->container->register( YandexDeliveryGeoResolutionPolicy::class, fn(): YandexDeliveryGeoResolutionPolicy => new YandexDeliveryGeoResolutionPolicy() );
-		$this->container->register( YandexDeliveryGeoMappingService::class, fn(): YandexDeliveryGeoMappingService => new YandexDeliveryGeoMappingService( $this->container->get( LocationRepository::class ), $this->container->get( YandexDeliveryApiClient::class ), $this->container->get( YandexDeliveryGeoMappingRepository::class ), $this->container->get( YandexDeliveryGeoMatchScorer::class ), $this->container->get( YandexDeliveryGeoResolutionPolicy::class ) ) );
+		$this->container->register( YandexDeliveryGeoRegionKeywordFilter::class, fn(): YandexDeliveryGeoRegionKeywordFilter => new YandexDeliveryGeoRegionKeywordFilter() );
+		$this->container->register( YandexDeliveryGeoMappingService::class, fn(): YandexDeliveryGeoMappingService => new YandexDeliveryGeoMappingService( $this->container->get( LocationRepository::class ), $this->container->get( YandexDeliveryApiClient::class ), $this->container->get( YandexDeliveryGeoMappingRepository::class ), $this->container->get( YandexDeliveryGeoMatchScorer::class ), $this->container->get( YandexDeliveryGeoResolutionPolicy::class ), 'ambiguous_only', $this->container->get( YandexDeliveryGeoRegionKeywordFilter::class ) ) );
 		$this->container->register( YandexDeliveryGeoMappingBatchService::class, fn(): YandexDeliveryGeoMappingBatchService => new YandexDeliveryGeoMappingBatchService( $this->container->get( LocationRepository::class ), $this->container->get( YandexDeliveryGeoMappingRepository::class ), $this->container->get( YandexDeliveryGeoMappingService::class ) ) );
 		$this->container->register( YandexDeliveryGeoMappingRunnerService::class, fn(): YandexDeliveryGeoMappingRunnerService => new YandexDeliveryGeoMappingRunnerService( $this->container->get( LocationRepository::class ), $this->container->get( YandexDeliveryGeoMappingRepository::class ), $this->container->get( YandexDeliveryGeoMappingService::class ) ) );
 		$this->container->register( DpdSoapClientInterface::class, fn(): DpdSoapClientInterface => new DpdSoapClient( $this->container->get( DpdSettings::class )->request_timeout() ) );

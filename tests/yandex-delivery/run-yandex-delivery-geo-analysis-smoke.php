@@ -125,7 +125,8 @@ foreach ( array( 'detect_for_location_id', 'locationDetect', 'YandexDeliveryApiC
 }
 
 yd_geo_analysis_assert( str_contains( $admin_source, "\$tabs['yandex_delivery_geo'] = 'Маппинг geo_id';" ) && ! str_contains( $admin_source, "\$tabs['yandex_delivery_geo_analysis']" ), 'Admin navigation must expose geo analysis inside the consolidated mapping tab only.' );
-yd_geo_analysis_assert( str_contains( $admin_source, 'Аналитика маппинга' ) && str_contains( $admin_source, 'Статистика confidence' ) && str_contains( $admin_source, 'Статистика статусов' ) && str_contains( $admin_source, 'Проблемные регионы' ) && str_contains( $admin_source, 'Типы населённых пунктов' ) && str_contains( $admin_source, 'Сигналы сопоставления' ) && str_contains( $admin_source, 'Низкая уверенность' ), 'Consolidated mapping tab must render Russian analysis sections.' );
+yd_geo_analysis_assert( str_contains( $admin_source, 'Аналитика маппинга' ) && str_contains( $admin_source, 'Показать аналитику' ) && str_contains( $admin_source, 'yandex_delivery_geo_show_analysis' ) && str_contains( $admin_source, '! $show_analysis' ) && str_contains( $admin_source, 'Обновить аналитику' ), 'Consolidated mapping tab must gate analysis behind explicit show_analysis flag.' );
+yd_geo_analysis_assert( str_contains( $admin_source, 'Статистика confidence' ) && str_contains( $admin_source, 'Статистика статусов' ) && str_contains( $admin_source, 'Проблемные регионы' ) && str_contains( $admin_source, 'Типы населённых пунктов' ) && str_contains( $admin_source, 'Сигналы сопоставления' ) && str_contains( $admin_source, 'Низкая уверенность' ), 'Consolidated mapping tab must keep Russian analysis sections for explicit render.' );
 yd_geo_analysis_assert( str_contains( $admin_source, 'name="tab" value="yandex_delivery_geo"' ), 'Yandex geo analysis filter must return to the consolidated mapping tab.' );
 $analysis_tab_start = strpos( $admin_source, 'function render_yandex_delivery_geo_analysis_tab' );
 $analysis_tab_end   = strpos( $admin_source, 'function render_yandex_delivery_geo_batch_tab', false === $analysis_tab_start ? 0 : $analysis_tab_start );
@@ -133,11 +134,15 @@ $analysis_tab_source = false !== $analysis_tab_start && false !== $analysis_tab_
 yd_geo_analysis_assert( '' !== $analysis_tab_source, 'Smoke must find render_yandex_delivery_geo_analysis_tab source slice.' );
 yd_geo_analysis_assert( ! str_contains( $analysis_tab_source, '->carrier_code()' ), 'Yandex geo analysis tab must not call missing DeliveryService::carrier_code().' );
 yd_geo_analysis_assert( str_contains( $analysis_tab_source, 'is_yandex_delivery_service( $service )' ), 'Yandex geo analysis tab must use existing is_yandex_delivery_service() guard.' );
-yd_geo_analysis_assert( str_contains( $admin_source, 'get_low_confidence_rows' ) && str_contains( $admin_source, 'max_confidence' ), 'Admin UI must render analysis dashboard and max_confidence filter.' );
+yd_geo_analysis_assert( str_contains( $admin_source, 'get_low_confidence_rows' ) && str_contains( $admin_source, 'max_confidence' ), 'Admin UI must render analysis dashboard and max_confidence filter only after explicit show flag.' );
+yd_geo_analysis_assert( str_contains( $service_source, 'GROUP BY bucket' ) && str_contains( $service_source, 'GROUP BY status' ) && str_contains( $service_source, 'GROUP BY region' ) && str_contains( $service_source, 'GROUP BY type' ), 'Analysis service must use SQL GROUP BY aggregation for real DB bucket/status/region/type stats.' );
+yd_geo_analysis_assert( ! preg_match( '/SELECT\s+\*\s+FROM\s+\{\$table\}(?![\s\S]{0,120}LIMIT)/', $service_source ), 'Analysis service must not contain unbounded SELECT * over mappings.' );
+yd_geo_analysis_assert( str_contains( $service_source, 'MATCHED_BY_SAMPLE_LIMIT = 1000' ) && str_contains( $service_source, 'self::MATCHED_BY_SAMPLE_LIMIT' ), 'matched_by aggregation must be limited to a bounded sample.' );
+yd_geo_analysis_assert( str_contains( $service_source, 'SELECT id, location_id, yandex_geo_id, source_query, status, confidence, raw_json FROM {$table}' ) && str_contains( $service_source, "\$sql .= ' LIMIT %d'" ), 'Low confidence/raw_json reads must select only required columns and always apply LIMIT.' );
 yd_geo_analysis_assert( str_contains( $admin_source, '?YandexDeliveryGeoAnalysisService $yandex_delivery_geo_analysis' ), 'DeliveryServicesAdminPage must receive YandexDeliveryGeoAnalysisService through constructor DI.' );
 yd_geo_analysis_assert( str_contains( $plugin_source, 'YandexDeliveryGeoAnalysisService::class' ), 'Plugin source must reference YandexDeliveryGeoAnalysisService::class.' );
 yd_geo_analysis_assert( preg_match( '/container->register\(\s*YandexDeliveryGeoAnalysisService::class\s*,\s*fn\(\):\s*YandexDeliveryGeoAnalysisService\s*=>\s*new\s+YandexDeliveryGeoAnalysisService\(\s*\$this->container->get\(\s*LocationRepository::class\s*\)\s*\)\s*\)/s', $plugin_source ) === 1, 'Plugin container must register YandexDeliveryGeoAnalysisService with the LocationRepository dependency.' );
 yd_geo_analysis_assert( preg_match( '/new\s+DeliveryServicesAdminPage\(.*\$this->container->get\(\s*YandexDeliveryGeoAnalysisService::class\s*\)/s', $plugin_source ) === 1, 'Plugin must pass YandexDeliveryGeoAnalysisService into DeliveryServicesAdminPage.' );
-yd_geo_analysis_assert( str_contains( $version_source, '0.87.3' ), 'Plugin version must be 0.87.3.' );
+yd_geo_analysis_assert( str_contains( $version_source, '0.92.0' ), 'Plugin version must be 0.92.0.' );
 
 echo "Yandex Delivery geo analysis smoke OK\n";

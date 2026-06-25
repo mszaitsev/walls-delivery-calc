@@ -1,3 +1,4 @@
+- 0.88.0 Yandex Geo Manual Review Queue: YandexDeliveryGeoMappingRepository exposes grouped needs_review queue methods plus approve/reject/bulk reject transitions; the Маппинг geo_id tab blocks those manual actions while the runner is running.
 ## Yandex Geo Mapping Runner 0.87.0
 
 - `src/Carriers/YandexDelivery/Geo/YandexDeliveryGeoMappingRunnerService.php` is the production runner for full WDC `location_id` -> Yandex `geo_id` mapping. It stores state in option `wdc_yandex_delivery_geo_mapping_runner_state`, supports `full` and `retry_errors` modes, uses fixed `BATCH_SIZE = 30`, reserves work ahead with `next_location_id` under an option lock, exposes `WORKER_COUNT = 3`, deletes old mappings before each full-mode remap, never skips existing primary mappings in full mode, and finishes with `done` when no rows remain.
@@ -9,7 +10,7 @@
 ## Yandex Admin UX Consolidation 0.85.0
 
 - `src/DeliveryServices/Admin/DeliveryServicesAdminPage.php` now renders the Yandex Delivery admin tabs as `Данные для входа`, `Маппинг geo_id`, `Покрытие Яндекса`, `Яндекс ПВЗ`.
-- `Маппинг geo_id` visually consolidates the old technical geo tabs: manual `location/detect` search and primary selection, mass mapping controls (`start/run step/pause/reset` actions), read-only mapping analytics, and a placeholder for future manual review of `needs_review` rows.
+- `Маппинг geo_id` visually consolidates the old technical geo tabs: manual `location/detect` search and primary selection, mass mapping controls (`start/run step/pause/reset` actions), read-only mapping analytics, and a working manual review queue for `needs_review` rows with approve/reject/bulk reject actions.
 - `Покрытие Яндекса` remains a diagnostic/manual coverage tool. It can find WDC locations by name, run one `check_yandex_delivery_geo_coverage` check by `location_id`, show `covered`/`not_covered`/`no_geo_id`/`error`/`unknown` stats and list the latest checks.
 - `Яндекс ПВЗ` is the future pickup-point workspace. The current Moscow-only `geo_id=213` import is kept as a clearly labeled test diagnostic, not as full Russia import.
 - Redirects for `run_yandex_delivery_geo_detect`, `set_yandex_delivery_geo_primary`, `start_yandex_delivery_geo_batch`, `run_yandex_delivery_geo_batch_step`, `pause_yandex_delivery_geo_batch`, `reset_yandex_delivery_geo_batch` and `check_yandex_delivery_geo_coverage` return to the new consolidated tabs.

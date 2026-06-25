@@ -247,7 +247,7 @@ $service = new YandexDeliveryGeoMappingService(
 		$settings,
 		new YdGeoResolutionFakeHttp(
 			yd_geo_resolution_response( array( array( 'geo_id' => 43, 'address' => 'Казань, Республика Татарстан (Татарстан)' ) ) ),
-			yd_geo_resolution_response( array( array( 'geo_id' => 65, 'address' => 'Новосибирск, Франция' ) ) ),
+			yd_geo_resolution_response( array( array( 'geo_id' => 65, 'address' => 'Новосибирск, Новосибирская область, Франция' ) ) ),
 			yd_geo_resolution_response( array() ),
 			yd_geo_resolution_response( array( array( 'geo_id' => 168754, 'address' => 'деревня Гумерово, Таштамакский сельсовет, Аургазинский район, Республика Башкортостан' ), array( 'geo_id' => 99694, 'address' => 'деревня Гумерово, Петровский сельсовет, Ишимбайский район, Республика Башкортостан' ), array( 'geo_id' => 189353, 'address' => 'деревня Гумерово, Кадыргуловский сельсовет, Давлекановский район, Республика Башкортостан' ), array( 'geo_id' => 168051, 'address' => 'деревня Староитикеево, Батыровский сельсовет, Аургазинский район, Республика Башкортостан' ) ) ),
 			yd_geo_resolution_response( yd_geo_resolution_maikop_podgorny_candidates() ),

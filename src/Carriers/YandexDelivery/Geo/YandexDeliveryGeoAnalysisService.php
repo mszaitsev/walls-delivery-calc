@@ -9,8 +9,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Carriers\YandexDelivery\Geo;
 
-use WallsShop\WDC\Locations\ValueObjects\Location;
 use WallsShop\WDC\Locations\Storage\LocationRepository;
+use WallsShop\WDC\Locations\ValueObjects\Location;
 
 use function defined;
 use function is_array;
@@ -21,6 +21,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 final class YandexDeliveryGeoAnalysisService {
+    private const MATCHED_BY_SAMPLE_LIMIT = 1000;
+
     private object $wpdb;
 
     /** @var array<int, Location|null> */
@@ -57,9 +59,33 @@ final class YandexDeliveryGeoAnalysisService {
     public function get_bucket_statistics(): array {
         $stats = $this->empty_bucket_statistics();
 
-        foreach ( $this->mapping_rows() as $row ) {
-            $bucket = $this->confidence_bucket( (float) ( $row['confidence'] ?? 0 ) );
-            ++$stats[ $bucket ];
+        if ( $this->has_test_rows() ) {
+            foreach ( $this->mapping_rows() as $row ) {
+                $bucket = $this->confidence_bucket( (float) ( $row['confidence'] ?? 0 ) );
+                ++$stats[ $bucket ];
+            }
+
+            return $stats;
+        }
+
+        $rows = $this->wpdb->get_results(
+            'SELECT CASE
+                WHEN confidence >= 100 THEN \'100\'
+                WHEN confidence >= 95 THEN \'95_99\'
+                WHEN confidence >= 80 THEN \'80_94\'
+                WHEN confidence >= 60 THEN \'60_79\'
+                WHEN confidence >= 40 THEN \'40_59\'
+                WHEN confidence > 0 THEN \'1_39\'
+                ELSE \'0\'
+            END AS bucket, COUNT(*) AS total FROM ' . $this->table_name() . ' GROUP BY bucket',
+            ARRAY_A
+        );
+
+        foreach ( is_array( $rows ) ? $rows : [] as $row ) {
+            $bucket = (string) ( $row['bucket'] ?? '' );
+            if ( isset( $stats[ $bucket ] ) ) {
+                $stats[ $bucket ] = (int) ( $row['total'] ?? 0 );
+            }
         }
 
         return $stats;
@@ -78,11 +104,23 @@ final class YandexDeliveryGeoAnalysisService {
             'error'            => 0,
         ];
 
-        foreach ( $this->mapping_rows() as $row ) {
-            $status = (string) ( $row['status'] ?? '' );
+        if ( $this->has_test_rows() ) {
+            foreach ( $this->mapping_rows() as $row ) {
+                $status = (string) ( $row['status'] ?? '' );
 
+                if ( isset( $stats[ $status ] ) ) {
+                    ++$stats[ $status ];
+                }
+            }
+
+            return $stats;
+        }
+
+        $rows = $this->wpdb->get_results( 'SELECT status, COUNT(*) AS total FROM ' . $this->table_name() . ' GROUP BY status', ARRAY_A );
+        foreach ( is_array( $rows ) ? $rows : [] as $row ) {
+            $status = (string) ( $row['status'] ?? '' );
             if ( isset( $stats[ $status ] ) ) {
-                ++$stats[ $status ];
+                $stats[ $status ] = (int) ( $row['total'] ?? 0 );
             }
         }
 
@@ -93,11 +131,28 @@ final class YandexDeliveryGeoAnalysisService {
      * @return array<int, array{region:string,count:int}>
      */
     public function get_top_regions( float $max_confidence = 59.99, int $limit = 10 ): array {
-        return $this->top_location_field(
-            $max_confidence,
-            $limit,
-            'region',
-            static fn ( ?Location $location ): string => $location?->region_name ?: 'не указан'
+        if ( $this->has_test_rows() ) {
+            return $this->top_location_field(
+                $max_confidence,
+                $limit,
+                'region',
+                static fn ( ?Location $location ): string => $location?->region_name ?: 'не указан'
+            );
+        }
+
+        $limit = $this->clamp_limit( $limit, 1, 100 );
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT COALESCE(NULLIF(l.region_name, \'\'), \'не указан\') AS region, COUNT(DISTINCT m.location_id) AS total FROM ' . $this->table_name() . ' m LEFT JOIN ' . $this->locations_table_name() . ' l ON l.id = m.location_id WHERE m.confidence <= %f GROUP BY region ORDER BY total DESC, region ASC LIMIT %d',
+                $this->clamp_confidence( $max_confidence ),
+                $limit
+            ),
+            ARRAY_A
+        );
+
+        return array_map(
+            static fn ( array $row ): array => array( 'region' => (string) ( $row['region'] ?? 'не указан' ), 'count' => (int) ( $row['total'] ?? 0 ) ),
+            is_array( $rows ) ? $rows : []
         );
     }
 
@@ -105,11 +160,43 @@ final class YandexDeliveryGeoAnalysisService {
      * @return array<int, array{type:string,count:int}>
      */
     public function get_top_settlement_types( float $max_confidence = 59.99, int $limit = 10 ): array {
-        return $this->top_location_field(
-            $max_confidence,
-            $limit,
-            'type',
-            fn ( ?Location $location ): string => $this->settlement_type_label( $location )
+        if ( $this->has_test_rows() ) {
+            return $this->top_location_field(
+                $max_confidence,
+                $limit,
+                'type',
+                fn ( ?Location $location ): string => $this->settlement_type_label( $location )
+            );
+        }
+
+        $limit = $this->clamp_limit( $limit, 1, 100 );
+        $raw_type = "LOWER(TRIM(REPLACE(COALESCE(NULLIF(l.settlement_type, ''), NULLIF(l.place_type, ''), NULLIF(l.city_type, ''), ''), '.', '')))";
+        $label_sql = "CASE {$raw_type}
+            WHEN 'г' THEN 'город'
+            WHEN 'с' THEN 'село'
+            WHEN 'д' THEN 'деревня'
+            WHEN 'х' THEN 'хутор'
+            WHEN 'ст' THEN 'станица'
+            WHEN 'п' THEN 'поселок'
+            WHEN 'пос' THEN 'поселок'
+            WHEN 'поселок' THEN 'поселок'
+            WHEN 'посёлок' THEN 'поселок'
+            WHEN 'пгт' THEN 'пгт'
+            WHEN '' THEN 'не указан'
+            ELSE {$raw_type}
+        END";
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT ' . $label_sql . ' AS type, COUNT(DISTINCT m.location_id) AS total FROM ' . $this->table_name() . ' m LEFT JOIN ' . $this->locations_table_name() . ' l ON l.id = m.location_id WHERE m.confidence <= %f GROUP BY type ORDER BY total DESC, type ASC LIMIT %d',
+                $this->clamp_confidence( $max_confidence ),
+                $limit
+            ),
+            ARRAY_A
+        );
+
+        return array_map(
+            static fn ( array $row ): array => array( 'type' => (string) ( $row['type'] ?? 'не указан' ), 'count' => (int) ( $row['total'] ?? 0 ) ),
+            is_array( $rows ) ? $rows : []
         );
     }
 
@@ -119,7 +206,7 @@ final class YandexDeliveryGeoAnalysisService {
     public function get_top_matched_by_patterns( float $max_confidence = 59.99, int $limit = 20 ): array {
         $counts = [];
 
-        foreach ( $this->mapping_rows( $this->clamp_confidence( $max_confidence ) ) as $row ) {
+        foreach ( $this->mapping_rows( $this->clamp_confidence( $max_confidence ), self::MATCHED_BY_SAMPLE_LIMIT, true ) as $row ) {
             foreach ( $this->matched_by_values( $row ) as $pattern ) {
                 if ( '' === $pattern ) {
                     continue;
@@ -146,7 +233,8 @@ final class YandexDeliveryGeoAnalysisService {
 
         $table = $this->table_name();
         $args  = [];
-        $sql   = "SELECT * FROM {$table}";
+        $limit = $this->clamp_limit( $limit > 0 ? $limit : self::MATCHED_BY_SAMPLE_LIMIT, 1, self::MATCHED_BY_SAMPLE_LIMIT );
+        $sql   = "SELECT id, location_id, yandex_geo_id, source_query, status, confidence, raw_json FROM {$table}";
 
         if ( null !== $max_confidence ) {
             $sql    .= ' WHERE confidence <= %f';
@@ -154,11 +242,8 @@ final class YandexDeliveryGeoAnalysisService {
         }
 
         $sql .= $sort_lowest_first ? ' ORDER BY confidence ASC, id DESC' : ' ORDER BY id ASC';
-
-        if ( $limit > 0 ) {
-            $sql    .= ' LIMIT %d';
-            $args[] = $limit;
-        }
+        $sql .= ' LIMIT %d';
+        $args[] = $limit;
 
         if ( ! empty( $args ) && method_exists( $this->wpdb, 'prepare' ) ) {
             $sql = $this->wpdb->prepare( $sql, ...$args );
@@ -171,6 +256,10 @@ final class YandexDeliveryGeoAnalysisService {
 
     private function table_name(): string {
         return (string) $this->wpdb->prefix . 'wdc_yandex_delivery_geo_mappings';
+    }
+
+    private function locations_table_name(): string {
+        return (string) $this->wpdb->prefix . 'wdc_locations';
     }
 
     private function has_test_rows(): bool {
