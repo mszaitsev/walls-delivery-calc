@@ -26,6 +26,7 @@ final class YandexDeliveryPickupPointV2JsonStreamReader {
 			$last_string = '';
 			$expecting_value_for = '';
 			$pre_depth = 0;
+			$array_depth = 0;
 
 			while ( false !== ( $chunk = fread( $handle, self::CHUNK_SIZE ) ) && '' !== $chunk ) {
 				$length = strlen( $chunk );
@@ -65,6 +66,7 @@ final class YandexDeliveryPickupPointV2JsonStreamReader {
 						if ( '[' === $char ) {
 							if ( 0 === $pre_depth || in_array( $expecting_value_for, self::POINT_ARRAY_KEYS, true ) ) {
 								$in_array = true;
+								$array_depth = 1;
 								$expecting_value_for = '';
 								continue;
 							}
@@ -89,6 +91,17 @@ final class YandexDeliveryPickupPointV2JsonStreamReader {
 					}
 
 					if ( 0 === $object_depth ) {
+						if ( '[' === $char ) {
+							++$array_depth;
+							continue;
+						}
+						if ( ']' === $char ) {
+							--$array_depth;
+							if ( $array_depth <= 0 ) {
+								break 2;
+							}
+							continue;
+						}
 						if ( '{' === $char ) {
 							$object_depth = 1;
 							$object_json = '{';

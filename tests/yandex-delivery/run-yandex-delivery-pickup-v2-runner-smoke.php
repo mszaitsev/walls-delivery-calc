@@ -59,8 +59,19 @@ foreach ( array( array( $point( 'a' ), $point( 'b' ) ), array( 'points' => array
 	@unlink( $file );
 	yd_v2_runner_assert( count( $rows ) >= 2 && isset( $rows[0]['id'] ), 'Stream reader must yield objects from supported response shape.' );
 }
+$meta_file = $write_json( array( 'points' => array( array( 'id' => 'point-1', 'type' => 'pickup_point' ) ), 'meta' => array( 'id' => 'must-not-be-read-as-point' ) ) );
+$meta_rows = iterator_to_array( $reader->read_points( $meta_file ) );
+@unlink( $meta_file );
+yd_v2_runner_assert( 1 === count( $meta_rows ) && 'point-1' === (string) ( $meta_rows[0]['id'] ?? '' ), 'Stream reader must stop after target points array and not read meta as point.' );
+yd_v2_runner_assert( ! in_array( 'must-not-be-read-as-point', array_map( static fn( array $row ): string => (string) ( $row['id'] ?? '' ), $meta_rows ), true ), 'Stream reader must not yield meta object after target array.' );
 $reader_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2JsonStreamReader.php' );
 yd_v2_runner_assert( ! str_contains( $reader_source, 'file_get_contents' ), 'Stream reader must not load the whole file with file_get_contents.' );
+$api_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Api/YandexDeliveryApiClient.php' );
+$raw_start = strpos( $api_source, 'public function pickupPointsListRawJson' );
+$raw_end = false === $raw_start ? false : strpos( $api_source, 'public function locationDetect', $raw_start );
+$raw_block = false !== $raw_start && false !== $raw_end ? substr( $api_source, $raw_start, $raw_end - $raw_start ) : '';
+yd_v2_runner_assert( '' !== $raw_block && ! str_contains( $raw_block, 'json_decode( $response->body, true )' ), 'Raw pickup list download must not json_decode the whole response body.' );
+yd_v2_runner_assert( str_contains( $reader_source, '$array_depth' ) && str_contains( $reader_source, 'break 2' ), 'Stream reader source must stop after target array closes.' );
 
 $repository = new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] );
 $importer = new YandexDeliveryPickupPointV2ImportService( $repository, null, $reader );

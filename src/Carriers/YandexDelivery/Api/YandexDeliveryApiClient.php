@@ -41,12 +41,17 @@ final class YandexDeliveryApiClient {
 			$message = is_array( $data ) && array() !== $data ? $this->extractErrorMessage( $data, $response->status_code ) : $response->body;
 			throw new YandexDeliveryApiException( $this->safeMessage( $message, $response->status_code ), array( 'http_code' => $response->status_code, 'endpoint' => YandexDeliveryEndpoints::PICKUP_POINTS_LIST_PATH, 'request' => $this->settings->sanitize_for_diagnostics( $payload ) ) );
 		}
-		if ( '' === trim( $response->body ) ) {
+		$body = trim( $response->body );
+		if ( '' === $body ) {
 			throw new YandexDeliveryApiException( 'Яндекс.Доставка вернула пустой JSON.', array( 'endpoint' => YandexDeliveryEndpoints::PICKUP_POINTS_LIST_PATH, 'error_code' => 'empty_json' ) );
 		}
-		json_decode( $response->body, true );
-		if ( JSON_ERROR_NONE !== json_last_error() ) {
-			throw new YandexDeliveryApiException( 'Яндекс.Доставка вернула некорректный JSON.', array( 'endpoint' => YandexDeliveryEndpoints::PICKUP_POINTS_LIST_PATH, 'error_code' => 'malformed_json' ) );
+		$first = $body[0];
+		if ( '{' !== $first && '[' !== $first ) {
+			throw new YandexDeliveryApiException( 'Яндекс.Доставка вернула ответ, не похожий на JSON.', array( 'endpoint' => YandexDeliveryEndpoints::PICKUP_POINTS_LIST_PATH, 'error_code' => 'not_json_like' ) );
+		}
+		$last = substr( $body, -1 );
+		if ( ( '{' === $first && '}' !== $last ) || ( '[' === $first && ']' !== $last ) ) {
+			throw new YandexDeliveryApiException( 'Яндекс.Доставка вернула незавершенный JSON.', array( 'endpoint' => YandexDeliveryEndpoints::PICKUP_POINTS_LIST_PATH, 'error_code' => 'truncated_json' ) );
 		}
 
 		return $response->body;
