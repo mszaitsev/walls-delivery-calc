@@ -165,4 +165,20 @@
 		runningStatus: 'building',
 		initialState: config.geoBuilderInitialState || {}
 	});
+	runner({
+		root: '[data-wdc-yandex-location-mapping-v2]',
+		fieldSelector: '[data-wdc-yandex-location-mapping-v2-field]',
+		fieldAttribute: 'data-wdc-yandex-location-mapping-v2-field',
+		summarySelector: '[data-wdc-yandex-location-mapping-v2-summary]',
+		statusAttribute: 'data-wdc-yandex-location-mapping-v2-status',
+		startSelector: '[data-wdc-yandex-location-mapping-v2-start]',
+		pauseSelector: '[data-wdc-yandex-location-mapping-v2-pause]',
+		resetSelector: '[data-wdc-yandex-location-mapping-v2-reset]',
+		startAction: 'wdc_yandex_location_mapping_v2_start',
+		stepAction: 'wdc_yandex_location_mapping_v2_step',
+		pauseAction: 'wdc_yandex_location_mapping_v2_pause',
+		resetAction: 'wdc_yandex_location_mapping_v2_reset',
+		runningStatus: 'mapping',
+		initialState: config.locationMappingInitialState || {}
+	});
 }());
