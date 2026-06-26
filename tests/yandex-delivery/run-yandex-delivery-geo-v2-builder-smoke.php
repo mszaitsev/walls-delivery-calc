@@ -107,7 +107,30 @@ $reset = $runner->reset();
 yd_geo_v2_assert( 'idle' === $reset['status'] && 0 === $reset['offset'], 'Geo v2 reset must clear state.' );
 
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
+$plugin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Core/Plugin.php' );
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/yandex-delivery-pickup-v2-runner.js' );
+$constructor_start = strpos( $admin_source, 'public function __construct' );
+$constructor_end = false === $constructor_start ? false : strpos( $admin_source, ') {', $constructor_start );
+$constructor_block = false !== $constructor_start && false !== $constructor_end ? substr( $admin_source, $constructor_start, $constructor_end - $constructor_start ) : '';
+$plugin_start = strpos( $plugin_source, 'new DeliveryServicesAdminPage' );
+$plugin_end = false === $plugin_start ? false : strpos( $plugin_source, '$this->container->register( OrderQuoteRequestMapper::class', $plugin_start );
+$plugin_block = false !== $plugin_start && false !== $plugin_end ? substr( $plugin_source, $plugin_start, $plugin_end - $plugin_start ) : '';
+$constructor_order = array(
+	strpos( $constructor_block, 'YandexDeliveryPickupPointV2Repository $yandex_delivery_pickup_v2_repository' ),
+	strpos( $constructor_block, 'YandexDeliveryPickupPointV2RunnerService $yandex_delivery_pickup_v2_runner' ),
+	strpos( $constructor_block, 'YandexDeliveryGeoV2Repository $yandex_delivery_geo_v2_repository' ),
+	strpos( $constructor_block, 'YandexDeliveryGeoV2BuilderRunnerService $yandex_delivery_geo_v2_builder_runner' ),
+	strpos( $constructor_block, 'YandexDeliveryGeoMappingRepository $yandex_delivery_geo_mappings' ),
+);
+$plugin_order = array(
+	strpos( $plugin_block, 'YandexDeliveryPickupPointV2Repository::class' ),
+	strpos( $plugin_block, 'YandexDeliveryPickupPointV2RunnerService::class' ),
+	strpos( $plugin_block, 'YandexDeliveryGeoV2Repository::class' ),
+	strpos( $plugin_block, 'YandexDeliveryGeoV2BuilderRunnerService::class' ),
+	strpos( $plugin_block, 'YandexDeliveryGeoMappingRepository::class' ),
+);
+yd_geo_v2_assert( ! in_array( false, $constructor_order, true ) && $constructor_order === array_values( array_filter( $constructor_order, 'is_int' ) ) && $constructor_order === array_values( $constructor_order ) && $constructor_order[0] < $constructor_order[1] && $constructor_order[1] < $constructor_order[2] && $constructor_order[2] < $constructor_order[3] && $constructor_order[3] < $constructor_order[4], 'Admin constructor must keep pickup v2, geo v2, then old mapping dependency order.' );
+yd_geo_v2_assert( ! in_array( false, $plugin_order, true ) && $plugin_order[0] < $plugin_order[1] && $plugin_order[1] < $plugin_order[2] && $plugin_order[2] < $plugin_order[3] && $plugin_order[3] < $plugin_order[4], 'Plugin DI arguments must match constructor order and keep old mapping after geo v2 args.' );
 yd_geo_v2_assert( str_contains( $admin_source, 'Агрегация geoId v2' ) && str_contains( $admin_source, 'Построить geoId v2' ), 'Admin v2 tab must contain geo v2 builder UI.' );
 yd_geo_v2_assert( str_contains( $admin_source, 'wdc_yandex_delivery_geo_v2_builder_start' ) && str_contains( $admin_source, 'wdc_yandex_delivery_geo_v2_builder_step' ), 'Geo v2 AJAX actions must be registered.' );
 yd_geo_v2_assert( str_contains( $admin_source, 'wp_send_json_success' ) && str_contains( $admin_source, 'wp_send_json_error' ) && str_contains( $admin_source, 'register_yandex_pickup_v2_ajax_shutdown_guard' ), 'Geo v2 AJAX handlers must use JSON-safe wrapper.' );

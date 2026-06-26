@@ -131,6 +131,8 @@ final class DeliveryServicesAdminPage {
 		private ?YandexDeliveryPickupPointService $yandex_delivery_pickup_service = null,
 		private ?YandexDeliveryPickupPointV2Repository $yandex_delivery_pickup_v2_repository = null,
 		private ?YandexDeliveryPickupPointV2RunnerService $yandex_delivery_pickup_v2_runner = null,
+		private ?YandexDeliveryGeoV2Repository $yandex_delivery_geo_v2_repository = null,
+		private ?YandexDeliveryGeoV2BuilderRunnerService $yandex_delivery_geo_v2_builder_runner = null,
 		private ?YandexDeliveryGeoMappingRepository $yandex_delivery_geo_mappings = null,
 		private ?YandexDeliveryGeoMappingService $yandex_delivery_geo_mapping_service = null,
 		private ?YandexDeliveryGeoMappingBatchService $yandex_delivery_geo_batch = null,
