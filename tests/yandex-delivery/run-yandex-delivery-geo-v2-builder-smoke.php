@@ -33,11 +33,13 @@ $GLOBALS['wpdb'] = new wpdb();
 
 $repository = new YandexDeliveryGeoV2Repository( $GLOBALS['wpdb'] );
 $schema = $repository->schema();
-foreach ( array( 'yandex_geo_id bigint(20) unsigned NOT NULL', 'points_count int(10) unsigned NOT NULL DEFAULT 0', 'dropoff_count int(10) unsigned NOT NULL DEFAULT 0', 'types_json longtext NULL', 'operators_json longtext NULL', 'centroid_lat decimal(10,7) NULL', 'sample_points_json longtext NULL', 'raw_stats_json longtext NULL', 'UNIQUE KEY yandex_geo_id (yandex_geo_id)', 'KEY region_locality (region(80), locality(120))' ) as $needle ) {
+foreach ( array( 'yandex_geo_id bigint(20) unsigned NOT NULL', 'points_count int(10) unsigned NOT NULL DEFAULT 0', 'dropoff_count int(10) unsigned NOT NULL DEFAULT 0', 'types_json longtext NULL', 'operators_json longtext NULL', 'centroid_lat decimal(10,7) NULL', 'coverage_radius_km decimal(10,3) NULL', 'coverage_radius_safe_km decimal(10,3) NULL', 'sample_points_json longtext NULL', 'raw_stats_json longtext NULL', 'UNIQUE KEY yandex_geo_id (yandex_geo_id)', 'KEY region_locality (region(80), locality(120))' ) as $needle ) {
 	yd_geo_v2_assert( str_contains( $schema, $needle ), 'Geo v2 schema must contain: ' . $needle );
 }
-$upsert = $repository->upsert( array( 'yandex_geo_id' => 999, 'region' => 'Тест', 'locality' => 'Город', 'points_count' => 1, 'dropoff_count' => 1, 'types_json' => '{}', 'operators_json' => '{}', 'sample_points_json' => '[]', 'raw_stats_json' => '{}', 'active' => 1 ) );
-yd_geo_v2_assert( 1 === $upsert['saved'] && 999 === (int) ( $repository->find_by_geo_id( 999 )['yandex_geo_id'] ?? 0 ), 'Geo v2 repository must upsert and find by geo id.' );
+$upsert = $repository->upsert( array( 'yandex_geo_id' => 999, 'region' => 'Тест', 'locality' => 'Город', 'points_count' => 1, 'dropoff_count' => 1, 'coverage_radius_km' => 1.23456, 'coverage_radius_safe_km' => 2.34567, 'types_json' => '{}', 'operators_json' => '{}', 'sample_points_json' => '[]', 'raw_stats_json' => '{}', 'active' => 1 ) );
+$found999 = $repository->find_by_geo_id( 999 );
+yd_geo_v2_assert( 1 === $upsert['saved'] && 999 === (int) ( $found999['yandex_geo_id'] ?? 0 ), 'Geo v2 repository must upsert and find by geo id.' );
+yd_geo_v2_assert( 1.235 === (float) ( $found999['coverage_radius_km'] ?? 0 ) && 2.346 === (float) ( $found999['coverage_radius_safe_km'] ?? 0 ), 'Geo v2 repository must normalize and return coverage radius fields.' );
 $repository->truncate();
 
 $pickup = static function ( int $geo_id, string $id, int $dropoff, float $lat, float $lon, string $type = 'pickup_point', string $operator = 'market_l4g' ): array {
@@ -62,14 +64,16 @@ $GLOBALS['wpdb']->yandex_delivery_pickup_points_v2[] = $pickup( 100, 'g100-c', 0
 for ( $i = 1; $i <= 31; ++$i ) {
 	$GLOBALS['wpdb']->yandex_delivery_pickup_points_v2[] = $pickup( 200, 'g200-' . $i, $i % 2, 50.0 + $i / 100, 80.0 + $i / 100, 'pickup_point', 'op-c' );
 }
+$GLOBALS['wpdb']->yandex_delivery_pickup_points_v2[] = $pickup( 300, 'g300-a', 1, 54.0, 82.0 );
+$GLOBALS['wpdb']->yandex_delivery_pickup_points_v2[] = array_merge( $pickup( 400, 'g400-a', 0, 0.0, 0.0 ), array( 'region' => '', 'locality' => 'Без координат' ) );
 $GLOBALS['wpdb']->yandex_delivery_pickup_points_v2[] = $pickup( 0, 'g0', 1, 1.0, 1.0 );
-$GLOBALS['wpdb']->yandex_delivery_pickup_points_v2[] = array_merge( $pickup( 300, 'inactive', 1, 1.0, 1.0 ), array( 'active' => 0 ) );
+$GLOBALS['wpdb']->yandex_delivery_pickup_points_v2[] = array_merge( $pickup( 500, 'inactive', 1, 1.0, 1.0 ), array( 'active' => 0 ) );
 
 $builder = new YandexDeliveryGeoV2BuilderService( $repository, $GLOBALS['wpdb'] );
 $step1 = $builder->build_all( 1, 0 );
 yd_geo_v2_assert( 1 === $step1['processed_geo_ids'] && 1 === $step1['saved'] && 1 === $step1['next_offset'] && false === $step1['done'], 'Builder offset must apply to unique geo ids.' );
 $step2 = $builder->build_all( 10, 1 );
-yd_geo_v2_assert( 1 === $step2['processed_geo_ids'] && true === $step2['done'], 'Builder second step must finish remaining geo ids.' );
+yd_geo_v2_assert( 3 === $step2['processed_geo_ids'] && true === $step2['done'], 'Builder second step must finish remaining geo ids.' );
 
 $geo100 = $repository->find_by_geo_id( 100 );
 yd_geo_v2_assert( null !== $geo100, 'Geo 100 aggregate must exist.' );
@@ -89,9 +93,16 @@ $geo200 = $repository->find_by_geo_id( 200 );
 $sample200 = json_decode( (string) ( $geo200['sample_points_json'] ?? '[]' ), true );
 yd_geo_v2_assert( 31 === (int) ( $geo200['points_count'] ?? 0 ) && 3 === count( $sample200 ), 'Geo 200 must sample first, every 30th, and last.' );
 yd_geo_v2_assert( 'g200-1' === $sample200[0]['platform_station_id'] && 'g200-30' === $sample200[1]['platform_station_id'] && 'g200-31' === $sample200[2]['platform_station_id'], 'Geo 200 sample ids must be first/every 30th/last.' );
-yd_geo_v2_assert( null === $repository->find_by_geo_id( 0 ) && null === $repository->find_by_geo_id( 300 ), 'Geo 0/null and inactive pickups must not be aggregated.' );
+yd_geo_v2_assert( (float) ( $geo100['coverage_radius_km'] ?? 0 ) > 0.0 && (float) ( $geo100['coverage_radius_safe_km'] ?? 0 ) > (float) ( $geo100['coverage_radius_km'] ?? 0 ), 'Geo 100 coverage radius must be positive and safe radius must be larger.' );
+yd_geo_v2_assert( array_key_exists( 'coverage_radius_km', $raw100 ) && array_key_exists( 'coverage_radius_safe_km', $raw100 ), 'raw_stats_json must contain coverage radius fields.' );
+$geo300 = $repository->find_by_geo_id( 300 );
+yd_geo_v2_assert( null !== $geo300 && 0.0 === (float) ( $geo300['coverage_radius_km'] ?? -1 ) && 1.0 === (float) ( $geo300['coverage_radius_safe_km'] ?? 0 ), 'Single-coordinate geo must have zero factual radius and 1 km safe radius.' );
+$geo400 = $repository->find_by_geo_id( 400 );
+yd_geo_v2_assert( null !== $geo400 && null === $geo400['coverage_radius_km'] && null === $geo400['coverage_radius_safe_km'], 'Geo without valid coordinates must have null coverage radius fields.' );
+yd_geo_v2_assert( null === $repository->find_by_geo_id( 0 ) && null === $repository->find_by_geo_id( 500 ), 'Geo 0/null and inactive pickups must not be aggregated.' );
 $stats = $repository->statistics();
-yd_geo_v2_assert( 2 === $stats['total'] && 2 === $stats['active'] && 34 === $stats['points_total'] && $stats['dropoff_total'] > 0, 'Geo v2 statistics must aggregate totals.' );
+yd_geo_v2_assert( 4 === $stats['total'] && 4 === $stats['active'] && 36 === $stats['points_total'] && $stats['dropoff_total'] > 0, 'Geo v2 statistics must aggregate totals.' );
+yd_geo_v2_assert( 1 === $stats['no_region'] && 1 === $stats['no_dropoff'] && null !== $stats['max_coverage_radius_km'] && null !== $stats['avg_coverage_radius_km'] && null !== $stats['max_coverage_radius_safe_km'] && null !== $stats['avg_coverage_radius_safe_km'], 'Geo v2 statistics must include coverage and data-quality counters.' );
 
 $runner_repository = new YandexDeliveryGeoV2Repository( $GLOBALS['wpdb'] );
 $runner = new YandexDeliveryGeoV2BuilderRunnerService( new YandexDeliveryGeoV2BuilderService( $runner_repository, $GLOBALS['wpdb'] ) );
@@ -133,6 +144,9 @@ yd_geo_v2_assert( ! in_array( false, $constructor_order, true ) && $constructor_
 yd_geo_v2_assert( str_contains( $admin_source, 'use WallsShop\\WDC\\Carriers\\YandexDelivery\\GeoV2\\YandexDeliveryGeoV2Repository;' ) && str_contains( $admin_source, 'use WallsShop\\WDC\\Carriers\\YandexDelivery\\GeoV2\\YandexDeliveryGeoV2BuilderRunnerService;' ) && ! str_contains( $admin_source, 'WallsShop\\WDC\\DeliveryServices\\Admin\\YandexDeliveryGeoV2Repository' ), 'Admin page must import GeoV2 constructor types from carrier namespace.' );
 yd_geo_v2_assert( ! in_array( false, $plugin_order, true ) && $plugin_order[0] < $plugin_order[1] && $plugin_order[1] < $plugin_order[2] && $plugin_order[2] < $plugin_order[3] && $plugin_order[3] < $plugin_order[4], 'Plugin DI arguments must match constructor order and keep old mapping after geo v2 args.' );
 yd_geo_v2_assert( str_contains( $admin_source, 'Агрегация geoId v2' ) && str_contains( $admin_source, 'Построить geoId v2' ), 'Admin v2 tab must contain geo v2 builder UI.' );
+foreach ( array( 'geoId без региона', 'geoId без dropoff', 'Макс. coverage radius', 'Средний coverage radius', 'Макс. safe radius', 'Средний safe radius' ) as $needle ) {
+	yd_geo_v2_assert( str_contains( $admin_source, $needle ), 'Admin geo v2 statistics must contain: ' . $needle );
+}
 yd_geo_v2_assert( str_contains( $admin_source, 'wdc_yandex_delivery_geo_v2_builder_start' ) && str_contains( $admin_source, 'wdc_yandex_delivery_geo_v2_builder_step' ), 'Geo v2 AJAX actions must be registered.' );
 yd_geo_v2_assert( str_contains( $admin_source, 'wp_send_json_success' ) && str_contains( $admin_source, 'wp_send_json_error' ) && str_contains( $admin_source, 'register_yandex_pickup_v2_ajax_shutdown_guard' ), 'Geo v2 AJAX handlers must use JSON-safe wrapper.' );
 yd_geo_v2_assert( str_contains( $js_source, 'data-wdc-yandex-geo-v2-builder' ) && str_contains( $js_source, 'wdc_yandex_delivery_geo_v2_builder_step' ) && str_contains( $js_source, "runningStatus: 'building'" ), 'JS must contain the second geo v2 builder loop.' );

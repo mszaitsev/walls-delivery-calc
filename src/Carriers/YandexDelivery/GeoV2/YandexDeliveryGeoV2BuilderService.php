@@ -101,6 +101,13 @@ final class YandexDeliveryGeoV2BuilderService {
 		}
 		$coordinate_stats = $this->coordinate_stats( $coords );
 		$sample = $this->sample_points( $points );
+		$raw_stats = array(
+			'valid_coordinate_points' => count( $coords ),
+			'invalid_coordinate_points' => count( $points ) - count( $coords ),
+			'sample_points_count' => count( $sample ),
+			'coverage_radius_km' => $coordinate_stats['coverage_radius_km'],
+			'coverage_radius_safe_km' => $coordinate_stats['coverage_radius_safe_km'],
+		);
 
 		return array_merge(
 			array(
@@ -115,7 +122,7 @@ final class YandexDeliveryGeoV2BuilderService {
 				'first_point_id' => $first_point_id,
 				'first_full_address' => $first_full_address,
 				'sample_points_json' => $this->json( $sample ),
-				'raw_stats_json' => $this->json( array( 'valid_coordinate_points' => count( $coords ), 'invalid_coordinate_points' => count( $points ) - count( $coords ), 'sample_points_count' => count( $sample ) ) ),
+				'raw_stats_json' => $this->json( $raw_stats ),
 				'active' => 1,
 				'built_at' => $this->now(),
 			),
@@ -169,19 +176,40 @@ final class YandexDeliveryGeoV2BuilderService {
 	/** @param array<int,array{0:float,1:float}> $coords @return array<string,float|null> */
 	private function coordinate_stats( array $coords ): array {
 		if ( array() === $coords ) {
-			return array( 'min_lat' => null, 'max_lat' => null, 'min_lon' => null, 'max_lon' => null, 'centroid_lat' => null, 'centroid_lon' => null );
+			return array( 'min_lat' => null, 'max_lat' => null, 'min_lon' => null, 'max_lon' => null, 'centroid_lat' => null, 'centroid_lon' => null, 'coverage_radius_km' => null, 'coverage_radius_safe_km' => null );
 		}
 		$lats = array_column( $coords, 0 );
 		$lons = array_column( $coords, 1 );
+		$centroid_lat = array_sum( $lats ) / count( $lats );
+		$centroid_lon = array_sum( $lons ) / count( $lons );
+		$coverage_radius = 0.0;
+		foreach ( $coords as $coord ) {
+			$coverage_radius = max( $coverage_radius, $this->distance_km( $centroid_lat, $centroid_lon, $coord[0], $coord[1] ) );
+		}
+		$coverage_radius = round( $coverage_radius, 3 );
 
 		return array(
 			'min_lat' => round( min( $lats ), 7 ),
 			'max_lat' => round( max( $lats ), 7 ),
 			'min_lon' => round( min( $lons ), 7 ),
 			'max_lon' => round( max( $lons ), 7 ),
-			'centroid_lat' => round( array_sum( $lats ) / count( $lats ), 7 ),
-			'centroid_lon' => round( array_sum( $lons ) / count( $lons ), 7 ),
+			'centroid_lat' => round( $centroid_lat, 7 ),
+			'centroid_lon' => round( $centroid_lon, 7 ),
+			'coverage_radius_km' => $coverage_radius,
+			'coverage_radius_safe_km' => round( max( $coverage_radius * 1.10, $coverage_radius + 1.0 ), 3 ),
 		);
+	}
+
+	private function distance_km( float $lat1, float $lon1, float $lat2, float $lon2 ): float {
+		$earth_radius_km = 6371.0;
+		$delta_lat = deg2rad( $lat2 - $lat1 );
+		$delta_lon = deg2rad( $lon2 - $lon1 );
+		$rad_lat1 = deg2rad( $lat1 );
+		$rad_lat2 = deg2rad( $lat2 );
+		$a = sin( $delta_lat / 2 ) ** 2 + cos( $rad_lat1 ) * cos( $rad_lat2 ) * sin( $delta_lon / 2 ) ** 2;
+		$c = 2 * atan2( sqrt( $a ), sqrt( 1 - $a ) );
+
+		return $earth_radius_km * $c;
 	}
 
 	/** @param array<string,int> $counts */

@@ -38,6 +38,8 @@ final class YandexDeliveryGeoV2Repository {
 			max_lon decimal(10,7) NULL,
 			centroid_lat decimal(10,7) NULL,
 			centroid_lon decimal(10,7) NULL,
+			coverage_radius_km decimal(10,3) NULL,
+			coverage_radius_safe_km decimal(10,3) NULL,
 			first_point_id varchar(128) NOT NULL DEFAULT '',
 			first_full_address text NULL,
 			sample_points_json longtext NULL,
@@ -152,6 +154,12 @@ final class YandexDeliveryGeoV2Repository {
 				'dropoff_total' => array_sum( array_map( static fn( array $row ): int => (int) ( $row['dropoff_count'] ?? 0 ), $rows ) ),
 				'top_regions' => $this->top_counts( $rows, 'region' ),
 				'top_localities' => $this->top_counts( $rows, 'locality' ),
+				'no_region' => count( array_filter( $rows, static fn( array $row ): bool => '' === trim( (string) ( $row['region'] ?? '' ) ) ) ),
+				'no_dropoff' => count( array_filter( $rows, static fn( array $row ): bool => 0 === (int) ( $row['dropoff_count'] ?? 0 ) ) ),
+				'max_coverage_radius_km' => $this->max_numeric( $rows, 'coverage_radius_km' ),
+				'avg_coverage_radius_km' => $this->avg_numeric( $rows, 'coverage_radius_km' ),
+				'max_coverage_radius_safe_km' => $this->max_numeric( $rows, 'coverage_radius_safe_km' ),
+				'avg_coverage_radius_safe_km' => $this->avg_numeric( $rows, 'coverage_radius_safe_km' ),
 			);
 		}
 		$this->create_schema_if_needed();
@@ -163,6 +171,12 @@ final class YandexDeliveryGeoV2Repository {
 			'dropoff_total' => (int) $this->wpdb->get_var( 'SELECT COALESCE(SUM(dropoff_count), 0) FROM ' . $this->table_name() ),
 			'top_regions' => $this->fetch_group_counts( 'region' ),
 			'top_localities' => $this->fetch_group_counts( 'locality' ),
+			'no_region' => (int) $this->wpdb->get_var( 'SELECT COUNT(*) FROM ' . $this->table_name() . " WHERE region = ''" ),
+			'no_dropoff' => (int) $this->wpdb->get_var( 'SELECT COUNT(*) FROM ' . $this->table_name() . ' WHERE dropoff_count = 0' ),
+			'max_coverage_radius_km' => $this->nullable_float_var( 'SELECT MAX(coverage_radius_km) FROM ' . $this->table_name() ),
+			'avg_coverage_radius_km' => $this->nullable_float_var( 'SELECT AVG(coverage_radius_km) FROM ' . $this->table_name() ),
+			'max_coverage_radius_safe_km' => $this->nullable_float_var( 'SELECT MAX(coverage_radius_safe_km) FROM ' . $this->table_name() ),
+			'avg_coverage_radius_safe_km' => $this->nullable_float_var( 'SELECT AVG(coverage_radius_safe_km) FROM ' . $this->table_name() ),
 		);
 	}
 
@@ -177,7 +191,7 @@ final class YandexDeliveryGeoV2Repository {
 
 	/** @return array<int,string> */
 	private function columns(): array {
-		return array( 'yandex_geo_id', 'region', 'sub_region', 'locality', 'points_count', 'dropoff_count', 'types_json', 'operators_json', 'min_lat', 'max_lat', 'min_lon', 'max_lon', 'centroid_lat', 'centroid_lon', 'first_point_id', 'first_full_address', 'sample_points_json', 'raw_stats_json', 'active', 'built_at', 'created_at', 'updated_at' );
+		return array( 'yandex_geo_id', 'region', 'sub_region', 'locality', 'points_count', 'dropoff_count', 'types_json', 'operators_json', 'min_lat', 'max_lat', 'min_lon', 'max_lon', 'centroid_lat', 'centroid_lon', 'coverage_radius_km', 'coverage_radius_safe_km', 'first_point_id', 'first_full_address', 'sample_points_json', 'raw_stats_json', 'active', 'built_at', 'created_at', 'updated_at' );
 	}
 
 	/** @param array<string,mixed> $row @return array<string,mixed>|null */
@@ -202,6 +216,9 @@ final class YandexDeliveryGeoV2Repository {
 		}
 		foreach ( array( 'min_lat', 'max_lat', 'min_lon', 'max_lon', 'centroid_lat', 'centroid_lon' ) as $column ) {
 			$normalized[ $column ] = is_numeric( $row[ $column ] ?? null ) ? round( (float) $row[ $column ], 7 ) : null;
+		}
+		foreach ( array( 'coverage_radius_km', 'coverage_radius_safe_km' ) as $column ) {
+			$normalized[ $column ] = is_numeric( $row[ $column ] ?? null ) ? round( (float) $row[ $column ], 3 ) : null;
 		}
 		$normalized['first_point_id'] = $this->string( $row['first_point_id'] ?? '', 128 );
 		$normalized['active'] = empty( $row['active'] ) ? 0 : 1;
@@ -307,11 +324,31 @@ final class YandexDeliveryGeoV2Repository {
 		return $counts;
 	}
 
+	/** @param array<int,array<string,mixed>> $rows */
+	private function max_numeric( array $rows, string $column ): ?float {
+		$values = array_values( array_map( 'floatval', array_filter( array_column( $rows, $column ), 'is_numeric' ) ) );
+
+		return array() === $values ? null : round( max( $values ), 3 );
+	}
+
+	/** @param array<int,array<string,mixed>> $rows */
+	private function avg_numeric( array $rows, string $column ): ?float {
+		$values = array_values( array_map( 'floatval', array_filter( array_column( $rows, $column ), 'is_numeric' ) ) );
+
+		return array() === $values ? null : round( array_sum( $values ) / count( $values ), 3 );
+	}
+
+	private function nullable_float_var( string $sql ): ?float {
+		$value = $this->wpdb->get_var( $sql );
+
+		return is_numeric( $value ) ? round( (float) $value, 3 ) : null;
+	}
+
 	private function column_type( string $column ): string {
 		if ( in_array( $column, array( 'yandex_geo_id', 'points_count', 'dropoff_count', 'active' ), true ) ) {
 			return 'int';
 		}
-		if ( in_array( $column, array( 'min_lat', 'max_lat', 'min_lon', 'max_lon', 'centroid_lat', 'centroid_lon' ), true ) ) {
+		if ( in_array( $column, array( 'min_lat', 'max_lat', 'min_lon', 'max_lon', 'centroid_lat', 'centroid_lon', 'coverage_radius_km', 'coverage_radius_safe_km' ), true ) ) {
 			return 'float';
 		}
 

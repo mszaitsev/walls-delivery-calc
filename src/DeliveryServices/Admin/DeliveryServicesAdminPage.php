@@ -1757,6 +1757,12 @@ final class DeliveryServicesAdminPage {
 				<tr><th scope="row"><?php echo esc_html__( 'Активных geoId', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $geo_v2_stats['active'] ?? 0 ) ); ?></td></tr>
 				<tr><th scope="row"><?php echo esc_html__( 'Всего ПВЗ в geo_v2', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $geo_v2_stats['points_total'] ?? 0 ) ); ?></td></tr>
 				<tr><th scope="row"><?php echo esc_html__( 'Всего dropoff', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $geo_v2_stats['dropoff_total'] ?? 0 ) ); ?></td></tr>
+				<tr><th scope="row"><?php echo esc_html__( 'geoId без региона', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $geo_v2_stats['no_region'] ?? 0 ) ); ?></td></tr>
+				<tr><th scope="row"><?php echo esc_html__( 'geoId без dropoff', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( (string) ( $geo_v2_stats['no_dropoff'] ?? 0 ) ); ?></td></tr>
+				<tr><th scope="row"><?php echo esc_html__( 'Макс. coverage radius', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( null === ( $geo_v2_stats['max_coverage_radius_km'] ?? null ) ? '' : (string) $geo_v2_stats['max_coverage_radius_km'] ); ?></td></tr>
+				<tr><th scope="row"><?php echo esc_html__( 'Средний coverage radius', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( null === ( $geo_v2_stats['avg_coverage_radius_km'] ?? null ) ? '' : (string) $geo_v2_stats['avg_coverage_radius_km'] ); ?></td></tr>
+				<tr><th scope="row"><?php echo esc_html__( 'Макс. safe radius', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( null === ( $geo_v2_stats['max_coverage_radius_safe_km'] ?? null ) ? '' : (string) $geo_v2_stats['max_coverage_radius_safe_km'] ); ?></td></tr>
+				<tr><th scope="row"><?php echo esc_html__( 'Средний safe radius', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( null === ( $geo_v2_stats['avg_coverage_radius_safe_km'] ?? null ) ? '' : (string) $geo_v2_stats['avg_coverage_radius_safe_km'] ); ?></td></tr>
 				<tr><th scope="row"><?php echo esc_html__( 'Топ регионов', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( wp_json_encode( $geo_v2_stats['top_regions'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '{}' ); ?></td></tr>
 				<tr><th scope="row"><?php echo esc_html__( 'Топ населённых пунктов', 'walls-delivery-calc' ); ?></th><td><?php echo esc_html( wp_json_encode( $geo_v2_stats['top_localities'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '{}' ); ?></td></tr>
 			</tbody>
