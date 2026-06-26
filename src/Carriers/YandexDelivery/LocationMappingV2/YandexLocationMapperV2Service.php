@@ -50,6 +50,7 @@ final class YandexLocationMapperV2Service {
 		}
 		$diagnostics = array();
 		$candidates = $this->find_candidates( $geo, $diagnostics );
+		$candidates = $this->apply_dominance_rule( $candidates, $geo );
 		if ( array() === $candidates ) {
 			return array( $this->mapping_row( $geo, array(), 'no_match', 0, null, array(), array_merge( array( 'candidate_count' => 0 ), $diagnostics ) ) );
 		}
@@ -103,12 +104,16 @@ final class YandexLocationMapperV2Service {
 				$matched_by[] = 'region';
 			}
 			$matched_by[] = 'coordinates';
+			$type_score = $this->normalizer->type_match_score( $locality_raw, $location );
+			$yandex_type = $this->normalizer->detect_locality_type( $locality_raw );
+			$wdc_type = $this->normalizer->detect_location_type( $location );
 			$candidates[] = array(
 				'location' => $location,
 				'distance_km' => $distance,
-				'confidence' => $this->confidence( true, $region_match && '' !== $region, $coordinate_match ),
+				'type_score' => $type_score,
+				'confidence' => $this->confidence( true, $region_match && '' !== $region, $coordinate_match, $type_score ),
 				'matched_by' => $matched_by,
-				'raw' => array( 'distance' => $distance, 'radius' => $safe_radius, 'threshold' => $threshold, 'candidate_count' => 0, 'region_matched' => $region_match, 'locality_source' => $effective_locality['source'], 'locality_raw' => $effective_locality['raw'], 'effective_locality' => $effective_locality['value'], 'sql_search_terms' => $search_terms, 'candidate_count_before_filters' => 0, 'candidate_count_after_filters' => 0 ),
+				'raw' => array( 'distance' => $distance, 'radius' => $safe_radius, 'threshold' => $threshold, 'candidate_count' => 0, 'region_matched' => $region_match, 'locality_source' => $effective_locality['source'], 'locality_raw' => $effective_locality['raw'], 'effective_locality' => $effective_locality['value'], 'yandex_type' => $yandex_type, 'wdc_type' => $wdc_type, 'type_score' => $type_score, 'sql_search_terms' => $search_terms, 'candidate_count_before_filters' => 0, 'candidate_count_after_filters' => 0 ),
 			);
 		}
 		$count = count( $candidates );
@@ -122,12 +127,62 @@ final class YandexLocationMapperV2Service {
 		usort(
 			$candidates,
 			static fn( array $a, array $b ): int => ( (int) ( $b['confidence'] ?? 0 ) <=> (int) ( $a['confidence'] ?? 0 ) )
+				?: ( (int) ( $b['type_score'] ?? 0 ) <=> (int) ( $a['type_score'] ?? 0 ) )
 				?: ( (float) ( $a['distance_km'] ?? 999999 ) <=> (float) ( $b['distance_km'] ?? 999999 ) )
 		);
 
 		return $candidates;
 	}
 
+	/** @param array<int,array<string,mixed>> $candidates @param array<string,mixed> $geo @return array<int,array<string,mixed>> */
+	private function apply_dominance_rule( array $candidates, array $geo ): array {
+		if ( count( $candidates ) <= 1 ) {
+			return $candidates;
+		}
+		$primary = $candidates[0];
+		$second = $candidates[1];
+		$primary_distance = is_numeric( $primary['distance_km'] ?? null ) ? (float) $primary['distance_km'] : 999999.0;
+		$second_distance = is_numeric( $second['distance_km'] ?? null ) ? (float) $second['distance_km'] : 999999.0;
+		$safe_radius = is_numeric( $geo['coverage_radius_safe_km'] ?? null ) ? (float) $geo['coverage_radius_safe_km'] : 0.0;
+		$local_accept_distance = max( 5.0, $safe_radius + 2.0 );
+		$primary_type_score = (int) ( $primary['type_score'] ?? 0 );
+		$second_type_score = (int) ( $second['type_score'] ?? 0 );
+		if ( $primary_distance > $local_accept_distance || $primary_type_score < 0 ) {
+			return $candidates;
+		}
+		$reason = '';
+		if ( $second_distance - $primary_distance >= 5.0 ) {
+			$reason = 'distance_gap';
+		} elseif ( $primary_type_score > $second_type_score ) {
+			$reason = 'type_score';
+		}
+		if ( '' === $reason ) {
+			return $candidates;
+		}
+		$primary['raw']['dominance_auto_pick'] = true;
+		$primary['raw']['dominance_reason'] = $reason;
+		$primary['raw']['rejected_candidates'] = $this->dominance_rejected_candidates( array_slice( $candidates, 1, 10 ) );
+
+		return array( $primary );
+	}
+
+	/** @param array<int,array<string,mixed>> $candidates @return array<int,array<string,mixed>> */
+	private function dominance_rejected_candidates( array $candidates ): array {
+		$rejected = array();
+		foreach ( $candidates as $candidate ) {
+			$location = is_array( $candidate['location'] ?? null ) ? $candidate['location'] : array();
+			$raw = is_array( $candidate['raw'] ?? null ) ? $candidate['raw'] : array();
+			$rejected[] = array(
+				'location_id' => (int) ( $location['id'] ?? 0 ),
+				'distance' => $candidate['distance_km'] ?? null,
+				'confidence' => $candidate['confidence'] ?? null,
+				'type_score' => $candidate['type_score'] ?? ( $raw['type_score'] ?? null ),
+				'locality_raw' => (string) ( $raw['locality_raw'] ?? '' ),
+			);
+		}
+
+		return $rejected;
+	}
 	/** @param array<string,mixed> $geo @param array<string,mixed> $location @param array<int,string> $matched_by @param array<string,mixed> $raw */
 	private function mapping_row( array $geo, array $location, string $status, int $confidence, ?float $distance, array $matched_by, array $raw, bool $primary = true ): array {
 		$geo_id = (int) ( $geo['yandex_geo_id'] ?? 0 );
@@ -213,8 +268,10 @@ final class YandexLocationMapperV2Service {
 		return trim( $value );
 	}
 
-	private function confidence( bool $locality, bool $region, bool $coordinates ): int {
-		return 40 + ( $locality ? 30 : 0 ) + ( $region ? 20 : 0 ) + ( $coordinates ? 10 : 0 );
+	private function confidence( bool $locality, bool $region, bool $coordinates, int $type_score = 0 ): int {
+		$score = 40 + ( $locality ? 30 : 0 ) + ( $region ? 20 : 0 ) + ( $coordinates ? 10 : 0 ) + $type_score;
+
+		return max( 0, min( 120, $score ) );
 	}
 
 	private function distance_km( float $lat1, float $lon1, float $lat2, float $lon2 ): float {

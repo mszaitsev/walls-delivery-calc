@@ -106,6 +106,75 @@ final class YandexLocationMappingV2NameNormalizer {
 		return array_values( $variants );
 	}
 
+	public function detect_locality_type( string $value ): string {
+		$value = $this->normalize_text( $value );
+		foreach ( array(
+			'поселок городского типа' => 'urban',
+			'рабочий поселок' => 'urban',
+			'пгт' => 'urban',
+			'рп' => 'urban',
+			'город' => 'city',
+			'г' => 'city',
+			'село' => 'village',
+			'с' => 'village',
+			'деревня' => 'hamlet',
+			'д' => 'hamlet',
+			'поселок' => 'settlement',
+			'пос' => 'settlement',
+			'п' => 'settlement',
+		) as $alias => $group ) {
+			$quoted = preg_quote( $alias, '/' );
+			if ( preg_match( '/(^|\s)' . $quoted . '($|\s)/u', $value ) ) {
+				return $group;
+			}
+		}
+
+		return 'other';
+	}
+
+	public function normalize_type( string $type ): string {
+		$type = $this->normalize_text( $type );
+		return match ( $type ) {
+			'г', 'город' => 'city',
+			'пгт', 'рп', 'рабочий поселок', 'поселок городского типа' => 'urban',
+			'с', 'село' => 'village',
+			'д', 'деревня' => 'hamlet',
+			'п', 'пос', 'поселок' => 'settlement',
+			default => '',
+		};
+	}
+
+	/** @param array<string,mixed> $location */
+	public function type_match_score( string $yandex_locality_raw, array $location ): int {
+		$yandex_type = $this->detect_locality_type( $yandex_locality_raw );
+		if ( 'other' === $yandex_type ) {
+			return 0;
+		}
+		$wdc_type = $this->detect_location_type( $location );
+		if ( '' === $wdc_type ) {
+			return 0;
+		}
+
+		return $yandex_type === $wdc_type ? 20 : -20;
+	}
+
+	/** @param array<string,mixed> $location */
+	public function detect_location_type( array $location ): string {
+		$effective = $this->effective_location_locality( $location );
+		$source = (string) ( $effective['source'] ?? '' );
+		$type = match ( $source ) {
+			'city_name' => (string) ( $location['city_type'] ?? '' ),
+			'settlement_name' => (string) ( $location['settlement_type'] ?? ( $location['place_type'] ?? '' ) ),
+			'place_name' => (string) ( $location['place_type'] ?? ( $location['settlement_type'] ?? '' ) ),
+			default => (string) ( $location['place_type'] ?? ( $location['settlement_type'] ?? ( $location['city_type'] ?? '' ) ) ),
+		};
+		$normalized = $this->normalize_type( $type );
+		if ( '' !== $normalized ) {
+			return $normalized;
+		}
+
+		return $this->detect_locality_type( (string) ( $effective['raw'] ?? '' ) ) === 'other' ? '' : $this->detect_locality_type( (string) ( $effective['raw'] ?? '' ) );
+	}
 	private function base_search_term( string $raw, string $normalized_base ): string {
 		if ( '' === $normalized_base ) {
 			return '';
