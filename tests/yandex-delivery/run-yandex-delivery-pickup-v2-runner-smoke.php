@@ -44,7 +44,15 @@ if ( ! class_exists( 'wpdb' ) ) {
 final class YdV2RunnerHttp implements YandexDeliveryHttpClientInterface {
 	public array $calls = array();
 	public function __construct( private string $body ) {}
-	public function request( string $method, string $url, array $args = array() ): YandexDeliveryApiResponse { $this->calls[] = compact( 'method', 'url', 'args' ); return new YandexDeliveryApiResponse( 200, $this->body ); }
+	public function request( string $method, string $url, array $args = array() ): YandexDeliveryApiResponse {
+		$this->calls[] = compact( 'method', 'url', 'args' );
+		if ( ! empty( $args['stream'] ) && isset( $args['filename'] ) ) {
+			file_put_contents( (string) $args['filename'], $this->body );
+			return new YandexDeliveryApiResponse( 200, '' );
+		}
+
+		return new YandexDeliveryApiResponse( 200, $this->body );
+	}
 }
 
 $GLOBALS['yd_v2_runner_options'] = array();
@@ -67,14 +75,20 @@ yd_v2_runner_assert( ! in_array( 'must-not-be-read-as-point', array_map( static 
 $reader_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Pickup/YandexDeliveryPickupPointV2JsonStreamReader.php' );
 yd_v2_runner_assert( ! str_contains( $reader_source, 'file_get_contents' ), 'Stream reader must not load the whole file with file_get_contents.' );
 $api_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/Api/YandexDeliveryApiClient.php' );
+$download_start = strpos( $api_source, 'public function pickupPointsListDownloadToFile' );
+$download_end = false === $download_start ? false : strpos( $api_source, 'public function pickupPointsListRawJson', $download_start );
+$download_block = false !== $download_start && false !== $download_end ? substr( $api_source, $download_start, $download_end - $download_start ) : '';
+yd_v2_runner_assert( '' !== $download_block, 'API client must expose pickupPointsListDownloadToFile().' );
+yd_v2_runner_assert( str_contains( $download_block, "'stream' => true" ) && str_contains( $download_block, "'filename' => " . '$target_file' ), 'Download-to-file API method must pass stream and filename HTTP args.' );
+yd_v2_runner_assert( ! str_contains( $download_block, 'json_decode' ) && ! str_contains( $download_block, 'trim( $response->body' ), 'Download-to-file API method must not decode or trim the full response body.' );
 $raw_start = strpos( $api_source, 'public function pickupPointsListRawJson' );
 $raw_end = false === $raw_start ? false : strpos( $api_source, 'public function locationDetect', $raw_start );
 $raw_block = false !== $raw_start && false !== $raw_end ? substr( $api_source, $raw_start, $raw_end - $raw_start ) : '';
-yd_v2_runner_assert( '' !== $raw_block && ! str_contains( $raw_block, 'json_decode( $response->body, true )' ), 'Raw pickup list download must not json_decode the whole response body.' );
-$raw_request_start = strpos( $api_source, 'private function rawRequest' );
-$raw_request_end = false === $raw_request_start ? false : strpos( $api_source, 'private function extractErrorMessage', $raw_request_start );
-$raw_request_block = false !== $raw_request_start && false !== $raw_request_end ? substr( $api_source, $raw_request_start, $raw_request_end - $raw_request_start ) : '';
-yd_v2_runner_assert( '' !== $raw_request_block && str_contains( $raw_request_block, 'array() === $payload' ) && str_contains( $raw_request_block, "\$body = '{}';" ), 'Raw API request must encode empty payload as JSON object.' );
+yd_v2_runner_assert( '' !== $raw_block && ! str_contains( $raw_block, 'json_decode( $response->body, true )' ), 'Raw pickup list diagnostics method must not json_decode the whole response body.' );
+$encode_start = strpos( $api_source, 'private function encodePayloadBody' );
+$encode_end = false === $encode_start ? false : strpos( $api_source, 'private function extractErrorMessage', $encode_start );
+$encode_block = false !== $encode_start && false !== $encode_end ? substr( $api_source, $encode_start, $encode_end - $encode_start ) : '';
+yd_v2_runner_assert( '' !== $encode_block && str_contains( $encode_block, 'array() === $payload' ) && str_contains( $encode_block, "return '{}';" ), 'Raw API request must encode empty payload as JSON object.' );
 yd_v2_runner_assert( str_contains( $reader_source, '$array_depth' ) && str_contains( $reader_source, 'break 2' ), 'Stream reader source must stop after target array closes.' );
 
 $repository = new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] );
@@ -88,15 +102,45 @@ yd_v2_runner_assert( 3 === $repository->count_all() && 2 === $repository->count_
 
 $settings = new YandexDeliverySettings( new SettingsRepository(), new EncryptionService() );
 $settings->save_from_admin( array( YandexDeliverySettings::ENVIRONMENT_KEY => YandexDeliverySettings::ENV_TEST, 'yandex_delivery_test_bearer_token' => 'token', YandexDeliverySettings::TEST_PLATFORM_STATION_ID_KEY => 'station' ) );
+$download_http = new YdV2RunnerHttp( '{"points":[]}' );
+$download_api = new YandexDeliveryApiClient( $settings, $download_http );
+$download_file = tempnam( sys_get_temp_dir(), 'yd-v2-download-' );
+$download_result = $download_api->pickupPointsListDownloadToFile( array(), $download_file );
+yd_v2_runner_assert( is_file( $download_file ) && '{"points":[]}' === (string) file_get_contents( $download_file ), 'Download-to-file API method must create target JSON file.' );
+yd_v2_runner_assert( 200 === $download_result['http_code'] && $download_result['size_bytes'] > 0 && $download_result['file'] === $download_file, 'Download-to-file API method must return HTTP code, file and size.' );
+yd_v2_runner_assert( '{}' === (string) $download_http->calls[0]['args']['body'] && true === $download_http->calls[0]['args']['stream'] && $download_file === $download_http->calls[0]['args']['filename'], 'Download-to-file API request must stream empty-payload JSON object into target file.' );
+@unlink( $download_file );
 $http = new YdV2RunnerHttp( (string) file_get_contents( $file ) );
 $api = new YandexDeliveryApiClient( $settings, $http );
 $runner = new YandexDeliveryPickupPointV2RunnerService( $api, new YandexDeliveryPickupPointV2ImportService( new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] ), null, $reader ) );
 $state = $runner->start_full_api_sync();
 yd_v2_runner_assert( in_array( $state['status'], array( 'ready_to_import', 'importing' ), true ) && is_file( (string) $state['json_file_path'] ), 'Runner start must download JSON file and prepare import.' );
 yd_v2_runner_assert( 'start' === (string) ( $state['last_action'] ?? '' ) && array_key_exists( 'last_http_status', $state ) && array_key_exists( 'last_error_context', $state ), 'Runner state must expose debug fields.' );
+yd_v2_runner_assert( $state['json_file_size_bytes'] > 0, 'Runner state must store downloaded file size.' );
+yd_v2_runner_assert( true === $http->calls[0]['args']['stream'] && (string) $state['json_file_path'] === $http->calls[0]['args']['filename'], 'Runner download must use HTTP stream directly into JSON file.' );
 yd_v2_runner_assert( '{}' === (string) $http->calls[0]['args']['body'], 'Runner API request with empty payload must send JSON object, not array.' );
 $payload = json_decode( (string) $http->calls[0]['args']['body'], true );
 yd_v2_runner_assert( array() === $payload && ! array_key_exists( 'type', $payload ) && ! array_key_exists( 'geo_id', $payload ), 'Runner API request payload must be empty without type or geo_id.' );
+$validator = new ReflectionMethod( YandexDeliveryPickupPointV2RunnerService::class, 'validate_json_file_container' );
+$validator->setAccessible( true );
+foreach ( array( '{ "points": [] }', '[{}]' ) as $valid_json_container ) {
+	$valid_file = tempnam( sys_get_temp_dir(), 'yd-v2-valid-' );
+	file_put_contents( $valid_file, $valid_json_container );
+	$validator->invoke( $runner, $valid_file );
+	@unlink( $valid_file );
+}
+foreach ( array( '<p>error</p>', '' ) as $invalid_json_container ) {
+	$invalid_file = tempnam( sys_get_temp_dir(), 'yd-v2-invalid-' );
+	file_put_contents( $invalid_file, $invalid_json_container );
+	$rejected = false;
+	try {
+		$validator->invoke( $runner, $invalid_file );
+	} catch ( Throwable ) {
+		$rejected = true;
+	}
+	@unlink( $invalid_file );
+	yd_v2_runner_assert( $rejected, 'Runner JSON file validator must reject empty files and HTML responses.' );
+}
 $path_before_reset = (string) $state['json_file_path'];
 $state = $runner->start_import();
 yd_v2_runner_assert( 'importing' === $state['status'], 'Runner start_import must switch to importing.' );
@@ -124,6 +168,12 @@ $v2_ajax_block = false !== $v2_ajax_start && false !== $v2_ajax_end ? substr( $a
 yd_v2_runner_assert( '' !== $v2_ajax_block && str_contains( $v2_ajax_block, 'catch ( \Throwable $exception )' ) && str_contains( $v2_ajax_block, 'wp_send_json_error' ), 'V2 AJAX handlers must return JSON errors from catch.' );
 yd_v2_runner_assert( '' !== $v2_ajax_block && ! str_contains( $v2_ajax_block, 'wp_die' ), 'V2 AJAX handlers must not use wp_die for nonce/capability failures.' );
 yd_v2_runner_assert( str_contains( $admin_source, 'register_yandex_pickup_v2_ajax_shutdown_guard' ) && str_contains( $admin_source, 'register_shutdown_function' ) && str_contains( $admin_source, 'Fatal error:' ), 'V2 AJAX handlers must register fatal shutdown JSON guard.' );
+$download_method_start = strpos( $runner_source, 'public function download_full_json' );
+$download_method_end = false === $download_method_start ? false : strpos( $runner_source, 'public function start_import', $download_method_start );
+$runner_download_block = false !== $download_method_start && false !== $download_method_end ? substr( $runner_source, $download_method_start, $download_method_end - $download_method_start ) : '';
+yd_v2_runner_assert( '' !== $runner_download_block && ! str_contains( $runner_download_block, 'pickupPointsListRawJson' ) && str_contains( $runner_download_block, 'pickupPointsListDownloadToFile' ), 'Runner download must use download-to-file API method, not raw JSON string method.' );
+yd_v2_runner_assert( '' !== $runner_download_block && ! str_contains( $runner_download_block, 'file_put_contents( $file, $json' ), 'Runner download must not write a full in-memory JSON string to file.' );
+yd_v2_runner_assert( str_contains( $runner_source, 'validate_json_file_container' ) && str_contains( $runner_source, 'first_non_whitespace_byte' ) && str_contains( $runner_source, 'last_non_whitespace_byte' ) && str_contains( $runner_source, 'fseek' ), 'Runner must validate downloaded JSON container from first/last bytes.' );
 yd_v2_runner_assert( str_contains( $runner_source, 'import_from_json_file_streamed' ) && ! str_contains( $runner_source, 'import_from_json_file(' ), 'Runner must use streamed import, not whole-file import.' );
 yd_v2_runner_assert( str_contains( $import_source, 'file_get_contents' ) && str_contains( $import_source, 'import_from_json_file_streamed' ), 'Old small-file import may remain while streamed import exists.' );
 

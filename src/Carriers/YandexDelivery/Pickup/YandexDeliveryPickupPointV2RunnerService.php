@@ -37,26 +37,25 @@ final class YandexDeliveryPickupPointV2RunnerService {
 		$state = $state ?: $this->current_state();
 		$state['last_action'] = 'start';
 		try {
-			$json = $this->api->pickupPointsListRawJson( array() );
 			$file = $this->json_file_path();
 			$dir = dirname( $file );
 			if ( function_exists( 'wp_mkdir_p' ) ) {
 				wp_mkdir_p( $dir );
-			} elseif ( ! is_dir( $dir ) ) {
-				mkdir( $dir, 0755, true );
+			} elseif ( ! is_dir( $dir ) && ! mkdir( $dir, 0755, true ) && ! is_dir( $dir ) ) {
+				throw new \RuntimeException( 'Не удалось создать директорию для JSON файла Яндекс ПВЗ v2.' );
 			}
-			if ( false === file_put_contents( $file, $json ) ) {
-				throw new \RuntimeException( 'Не удалось сохранить JSON файл Яндекс ПВЗ v2.' );
-			}
+			$result = $this->api->pickupPointsListDownloadToFile( array(), $file );
+			$this->validate_json_file_container( $file );
 			$state['status'] = 'ready_to_import';
 			$state['json_file_path'] = $file;
-			$state['json_file_size_bytes'] = is_file( $file ) ? (int) filesize( $file ) : 0;
+			$state['json_file_size_bytes'] = (int) $result['size_bytes'];
+			$state['last_http_status'] = (string) ( $result['http_code'] ?? '' );
 			$state['downloaded_at'] = $this->now();
 			$state['updated_at'] = $state['downloaded_at'];
 			$state['message'] = 'JSON сохранен. Можно запускать импорт.';
 			$state['memory_peak_mb'] = $this->memory_peak_mb();
 		} catch ( YandexDeliveryApiException|\Throwable $exception ) {
-			$state = $this->fail( $state, $exception->getMessage(), $this->exception_context( $exception ) );
+			$state = $this->fail( $state, $exception->getMessage(), array_merge( array( 'action' => 'download_to_file', 'file' => $file ?? '', 'size_bytes' => isset( $file ) && is_file( $file ) ? (int) filesize( $file ) : 0 ), $this->exception_context( $exception ) ) );
 		}
 		$this->save_state( $state );
 
@@ -217,6 +216,71 @@ final class YandexDeliveryPickupPointV2RunnerService {
 		}
 
 		return $context;
+	}
+	private function validate_json_file_container( string $file ): void {
+		if ( ! is_file( $file ) || ! is_readable( $file ) ) {
+			throw new \RuntimeException( 'JSON файл Яндекс ПВЗ v2 недоступен для чтения.' );
+		}
+		$size = (int) filesize( $file );
+		if ( $size <= 0 ) {
+			throw new \RuntimeException( 'JSON файл Яндекс ПВЗ v2 пустой.' );
+		}
+		$handle = fopen( $file, 'rb' );
+		if ( false === $handle ) {
+			throw new \RuntimeException( 'Не удалось открыть JSON файл Яндекс ПВЗ v2.' );
+		}
+		try {
+			$first = $this->first_non_whitespace_byte( $handle );
+			$last = $this->last_non_whitespace_byte( $handle, $size );
+		} finally {
+			fclose( $handle );
+		}
+		if ( null === $first || null === $last ) {
+			throw new \RuntimeException( 'JSON файл Яндекс ПВЗ v2 не содержит данных.' );
+		}
+		if ( ( '{' === $first && '}' === $last ) || ( '[' === $first && ']' === $last ) ) {
+			return;
+		}
+
+		throw new \RuntimeException( 'Яндекс.Доставка вернула файл, не похожий на JSON.' );
+	}
+
+	/** @param resource $handle */
+	private function first_non_whitespace_byte( mixed $handle ): ?string {
+		rewind( $handle );
+		while ( ! feof( $handle ) ) {
+			$chunk = fread( $handle, 8192 );
+			if ( false === $chunk || '' === $chunk ) {
+				break;
+			}
+			$length = strlen( $chunk );
+			for ( $i = 0; $i < $length; ++$i ) {
+				$byte = $chunk[$i];
+				if ( ! ctype_space( $byte ) ) {
+					return $byte;
+				}
+			}
+		}
+
+		return null;
+	}
+
+	/** @param resource $handle */
+	private function last_non_whitespace_byte( mixed $handle, int $size ): ?string {
+		for ( $position = $size - 1; $position >= 0; --$position ) {
+			if ( 0 !== fseek( $handle, $position ) ) {
+				break;
+			}
+			$byte = fread( $handle, 1 );
+			if ( false === $byte || '' === $byte ) {
+				continue;
+			}
+			if ( ! ctype_space( $byte ) ) {
+				return $byte;
+			}
+		}
+
+		return null;
 	}
 	private function json_file_path(): string {
 		$uploads = function_exists( 'wp_upload_dir' ) ? wp_upload_dir() : array();

@@ -26,6 +26,70 @@ final class YandexDeliveryApiClient {
 
 	/**
 	 * @param array<string,mixed> $payload
+	 * @return array{http_code:int,file:string,size_bytes:int}
+	 */
+	public function pickupPointsListDownloadToFile( array $payload, string $target_file ): array {
+		$credentials = $this->settings->credentials();
+		if ( ! $credentials->is_complete() ) {
+			throw new YandexDeliveryApiException(
+				'Данные для входа Яндекс.Доставки не заполнены.',
+				array_merge( $this->settings->diagnostic_context(), array( 'error_code' => 'credentials_missing' ) )
+			);
+		}
+		if ( '' === trim( $target_file ) ) {
+			throw new YandexDeliveryApiException( 'Не указан файл для сохранения JSON Яндекс.Доставки.', array( 'error_code' => 'target_file_missing' ) );
+		}
+
+		$response = $this->rawRequest(
+			'POST',
+			YandexDeliveryEndpoints::PICKUP_POINTS_LIST_PATH,
+			$payload,
+			$credentials,
+			array(
+				'stream' => true,
+				'filename' => $target_file,
+			)
+		);
+		$size = is_file( $target_file ) ? (int) filesize( $target_file ) : 0;
+		if ( $response->status_code < 200 || $response->status_code >= 300 ) {
+			if ( is_file( $target_file ) ) {
+				@unlink( $target_file );
+			}
+			$data = $response->json();
+			$message = is_array( $data ) && array() !== $data ? $this->extractErrorMessage( $data, $response->status_code ) : $response->body;
+			throw new YandexDeliveryApiException(
+				$this->safeMessage( $message, $response->status_code ),
+				array(
+					'http_code' => $response->status_code,
+					'endpoint' => YandexDeliveryEndpoints::PICKUP_POINTS_LIST_PATH,
+					'request' => $this->settings->sanitize_for_diagnostics( $payload ),
+					'file' => $target_file,
+					'size_bytes' => $size,
+				)
+			);
+		}
+		if ( $size <= 0 ) {
+			throw new YandexDeliveryApiException(
+				'Яндекс.Доставка вернула пустой JSON файл.',
+				array(
+					'http_code' => $response->status_code,
+					'endpoint' => YandexDeliveryEndpoints::PICKUP_POINTS_LIST_PATH,
+					'error_code' => 'empty_json_file',
+					'file' => $target_file,
+					'size_bytes' => $size,
+				)
+			);
+		}
+
+		return array(
+			'http_code' => $response->status_code,
+			'file' => $target_file,
+			'size_bytes' => $size,
+		);
+	}
+
+	/**
+	 * @param array<string,mixed> $payload
 	 */
 	public function pickupPointsListRawJson( array $payload = array() ): string {
 		$credentials = $this->settings->credentials();
@@ -126,21 +190,20 @@ final class YandexDeliveryApiClient {
 
 	/**
 	 * @param array<string,mixed> $payload
+	 * @param array<string,mixed> $extra_args
 	 */
-	private function rawRequest( string $method, string $path, array $payload, YandexDeliveryCredentials $credentials ): YandexDeliveryApiResponse {
-		if ( array() === $payload ) {
-			$body = '{}';
-		} else {
-			$body = ( function_exists( 'wp_json_encode' ) ? wp_json_encode( $payload ) : json_encode( $payload ) ) ?: '{}';
-		}
-		$args = array(
-			'timeout' => $this->settings->request_timeout(),
-			'headers' => array(
-				'Authorization' => 'Bearer ' . $credentials->bearer_token,
-				'Accept' => 'application/json',
-				'Content-Type' => 'application/json',
+	private function rawRequest( string $method, string $path, array $payload, YandexDeliveryCredentials $credentials, array $extra_args = array() ): YandexDeliveryApiResponse {
+		$args = array_merge(
+			array(
+				'timeout' => $this->settings->request_timeout(),
+				'headers' => array(
+					'Authorization' => 'Bearer ' . $credentials->bearer_token,
+					'Accept' => 'application/json',
+					'Content-Type' => 'application/json',
+				),
+				'body' => $this->encodePayloadBody( $payload ),
 			),
-			'body' => $body,
+			$extra_args
 		);
 
 		try {
@@ -159,6 +222,15 @@ final class YandexDeliveryApiClient {
 				$exception
 			);
 		}
+	}
+
+	/** @param array<string,mixed> $payload */
+	private function encodePayloadBody( array $payload ): string {
+		if ( array() === $payload ) {
+			return '{}';
+		}
+
+		return ( function_exists( 'wp_json_encode' ) ? wp_json_encode( $payload ) : json_encode( $payload ) ) ?: '{}';
 	}
 
 	/** @param array<string,mixed> $data */
@@ -190,4 +262,3 @@ final class YandexDeliveryApiClient {
 		return substr( $message, 0, 180 );
 	}
 }
-
