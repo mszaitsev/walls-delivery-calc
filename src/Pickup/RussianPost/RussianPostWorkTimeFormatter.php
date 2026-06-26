@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace WallsShop\WDC\Pickup\RussianPost;
 
+use WallsShop\WDC\Pickup\Schedule\CompactWeeklyScheduleFormatter;
+
 defined( 'ABSPATH' ) || exit;
 
 final class RussianPostWorkTimeFormatter {
@@ -15,6 +17,10 @@ final class RussianPostWorkTimeFormatter {
 		'сб' => 'Сб',
 		'вс' => 'Вс',
 	);
+
+	public function __construct( private ?CompactWeeklyScheduleFormatter $formatter = null ) {
+		$this->formatter ??= new CompactWeeklyScheduleFormatter();
+	}
 
 	/**
 	 * @param mixed $work_time
@@ -36,7 +42,7 @@ final class RussianPostWorkTimeFormatter {
 			$parsed[] = $item;
 		}
 
-		return $this->render_groups( $parsed );
+		return $this->formatter->format_items( $parsed );
 	}
 
 	/**
