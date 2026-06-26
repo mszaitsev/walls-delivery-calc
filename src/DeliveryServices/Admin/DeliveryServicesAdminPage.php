@@ -1764,6 +1764,7 @@ final class DeliveryServicesAdminPage {
 		$geo_v2_stats = $this->yandex_delivery_geo_v2_repository instanceof YandexDeliveryGeoV2Repository ? $this->yandex_delivery_geo_v2_repository->statistics() : array();
 		$location_mapping_v2_state = $this->yandex_location_mapping_v2_runner instanceof YandexLocationMappingV2Runner ? $this->yandex_location_mapping_v2_runner->current_state() : array();
 		$location_mapping_v2_stats = $this->yandex_location_mapping_v2_repository instanceof YandexLocationMappingV2Repository ? $this->yandex_location_mapping_v2_repository->statistics() : array();
+		$location_mapping_v2_no_match = $this->yandex_location_mapping_v2_repository instanceof YandexLocationMappingV2Repository ? $this->yandex_location_mapping_v2_repository->find_recent_no_match( 20 ) : array();
 		?>
 		<h3><?php echo esc_html__( 'Яндекс ПВЗ v2', 'walls-delivery-calc' ); ?></h3>
 		<p class="description" style="max-width: 960px;"><?php echo esc_html__( 'Запрос выполняется без type и geo_id, чтобы получить все точки, которые отдаёт Яндекс. Сырой JSON сохраняется во временный файл и не удаляется после импорта.', 'walls-delivery-calc' ); ?></p>
@@ -1854,6 +1855,24 @@ final class DeliveryServicesAdminPage {
 				<tr><th scope="row">no_match</th><td><?php echo esc_html( (string) ( $location_mapping_v2_stats['no_match'] ?? 0 ) ); ?></td></tr>
 				<tr><th scope="row">avg confidence</th><td><?php echo esc_html( null === ( $location_mapping_v2_stats['avg_confidence'] ?? null ) ? '' : (string) $location_mapping_v2_stats['avg_confidence'] ); ?></td></tr>
 				<tr><th scope="row">avg distance</th><td><?php echo esc_html( null === ( $location_mapping_v2_stats['avg_distance'] ?? null ) ? '' : (string) $location_mapping_v2_stats['avg_distance'] ); ?></td></tr>
+			</tbody>
+		</table>
+		<h3><?php echo esc_html__( 'Последние no_match', 'walls-delivery-calc' ); ?></h3>
+		<table class="widefat striped" style="max-width: 1120px;">
+			<thead><tr><th>geo_id</th><th>region</th><th>locality</th><th>first_full_address</th><th>sql_search_terms</th></tr></thead>
+			<tbody>
+				<?php foreach ( $location_mapping_v2_no_match as $item ) : ?>
+					<tr>
+						<td><?php echo esc_html( (string) ( $item['yandex_geo_id'] ?? '' ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $item['region'] ?? '' ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $item['locality'] ?? '' ) ); ?></td>
+						<td><?php echo esc_html( (string) ( $item['first_full_address'] ?? '' ) ); ?></td>
+						<td><code><?php echo esc_html( wp_json_encode( $item['sql_search_terms'] ?? array(), JSON_UNESCAPED_UNICODE ) ?: '[]' ); ?></code></td>
+					</tr>
+				<?php endforeach; ?>
+				<?php if ( array() === $location_mapping_v2_no_match ) : ?>
+					<tr><td colspan="5"><?php echo esc_html__( 'Нет данных.', 'walls-delivery-calc' ); ?></td></tr>
+				<?php endif; ?>
 			</tbody>
 		</table>
 		<?php

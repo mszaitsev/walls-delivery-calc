@@ -151,6 +151,25 @@ final class YandexLocationMappingV2Repository {
 		);
 	}
 
+	/** @return array<int,array<string,mixed>> */
+	public function find_recent_no_match( int $limit = 20 ): array {
+		$limit = max( 1, min( 100, $limit ) );
+		if ( $this->has_test_rows() ) {
+			$geo_rows = property_exists( $this->wpdb, 'yandex_delivery_geo_v2' ) && is_array( $this->wpdb->yandex_delivery_geo_v2 ) ? $this->wpdb->yandex_delivery_geo_v2 : array();
+			$geo_by_id = array();
+			foreach ( $geo_rows as $geo ) {
+				$geo_by_id[ (int) ( $geo['yandex_geo_id'] ?? 0 ) ] = $geo;
+			}
+			$rows = array_values( array_filter( $this->wpdb->yandex_location_mapping_v2, static fn( array $row ): bool => 'no_match' === (string) ( $row['status'] ?? '' ) ) );
+			usort( $rows, static fn( array $a, array $b ): int => strcmp( (string) ( $b['updated_at'] ?? '' ), (string) ( $a['updated_at'] ?? '' ) ) ?: (int) ( $b['yandex_geo_id'] ?? 0 ) <=> (int) ( $a['yandex_geo_id'] ?? 0 ) );
+			return array_map( fn( array $row ): array => $this->no_match_row( $row, $geo_by_id[ (int) ( $row['yandex_geo_id'] ?? 0 ) ] ?? array() ), array_slice( $rows, 0, $limit ) );
+		}
+		$this->create_schema_if_needed();
+		$sql = 'SELECT m.yandex_geo_id, m.raw_json, m.updated_at, g.region, g.locality, g.first_full_address FROM ' . $this->table_name() . ' m LEFT JOIN ' . $this->geo_table_name() . ' g ON g.yandex_geo_id = m.yandex_geo_id WHERE m.status = %s ORDER BY m.updated_at DESC, m.yandex_geo_id DESC LIMIT %d';
+		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, 'no_match', $limit ), ARRAY_A );
+		return array_map( fn( array $row ): array => $this->no_match_row( $row, $row ), is_array( $rows ) ? $rows : array() );
+	}
+
 	public function truncate(): void {
 		if ( $this->has_test_rows() ) {
 			$this->wpdb->yandex_location_mapping_v2 = array();
@@ -294,8 +313,25 @@ final class YandexLocationMappingV2Repository {
 		return '' === $value ? null : $value;
 	}
 
+	/** @param array<string,mixed> $mapping @param array<string,mixed> $geo @return array<string,mixed> */
+	private function no_match_row( array $mapping, array $geo ): array {
+		$raw = json_decode( (string) ( $mapping['raw_json'] ?? '' ), true );
+		$terms = is_array( $raw ) && is_array( $raw['sql_search_terms'] ?? null ) ? array_values( array_map( 'strval', $raw['sql_search_terms'] ) ) : array();
+		return array(
+			'yandex_geo_id' => (int) ( $mapping['yandex_geo_id'] ?? 0 ),
+			'region' => (string) ( $geo['region'] ?? '' ),
+			'locality' => (string) ( $geo['locality'] ?? '' ),
+			'first_full_address' => (string) ( $geo['first_full_address'] ?? '' ),
+			'sql_search_terms' => $terms,
+			'updated_at' => (string) ( $mapping['updated_at'] ?? '' ),
+		);
+	}
 	private function table_name(): string {
 		return $this->wpdb->prefix . 'wdc_yandex_location_mapping_v2';
+	}
+
+	private function geo_table_name(): string {
+		return $this->wpdb->prefix . 'wdc_yandex_delivery_geo_v2';
 	}
 
 	private function has_test_rows(): bool {
