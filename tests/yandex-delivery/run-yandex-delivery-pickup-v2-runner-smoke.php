@@ -93,6 +93,7 @@ $api = new YandexDeliveryApiClient( $settings, $http );
 $runner = new YandexDeliveryPickupPointV2RunnerService( $api, new YandexDeliveryPickupPointV2ImportService( new YandexDeliveryPickupPointV2Repository( $GLOBALS['wpdb'] ), null, $reader ) );
 $state = $runner->start_full_api_sync();
 yd_v2_runner_assert( in_array( $state['status'], array( 'ready_to_import', 'importing' ), true ) && is_file( (string) $state['json_file_path'] ), 'Runner start must download JSON file and prepare import.' );
+yd_v2_runner_assert( 'start' === (string) ( $state['last_action'] ?? '' ) && array_key_exists( 'last_http_status', $state ) && array_key_exists( 'last_error_context', $state ), 'Runner state must expose debug fields.' );
 yd_v2_runner_assert( '{}' === (string) $http->calls[0]['args']['body'], 'Runner API request with empty payload must send JSON object, not array.' );
 $payload = json_decode( (string) $http->calls[0]['args']['body'], true );
 yd_v2_runner_assert( array() === $payload && ! array_key_exists( 'type', $payload ) && ! array_key_exists( 'geo_id', $payload ), 'Runner API request payload must be empty without type or geo_id.' );
@@ -116,6 +117,13 @@ yd_v2_runner_assert( str_contains( $admin_source, 'без type и geo_id' ), 'V2
 yd_v2_runner_assert( str_contains( $admin_source, "'yandex_delivery_pickup_v2' ===" ) && str_contains( $admin_source, 'yandex-delivery-pickup-v2-runner.js' ), 'V2 runner JS must be enqueued only on Yandex pickup v2 tab.' );
 yd_v2_runner_assert( ! str_contains( $admin_source, 'Текущий импорт пока недоступен' ), 'V2 tab placeholder must be removed.' );
 yd_v2_runner_assert( str_contains( $js_source, 'wdc_yandex_delivery_pickup_v2_runner_start' ) && str_contains( $js_source, 'wdc_yandex_delivery_pickup_v2_runner_step' ), 'V2 JS must call runner AJAX actions.' );
+yd_v2_runner_assert( str_contains( $js_source, 'response.text()' ) && str_contains( $js_source, 'JSON.parse' ) && str_contains( $js_source, 'Сервер вернул не JSON' ), 'V2 JS must safely diagnose non-JSON AJAX responses.' );
+$v2_ajax_start = strpos( $admin_source, 'public function ajax_yandex_delivery_pickup_v2_runner_start' );
+$v2_ajax_end = false === $v2_ajax_start ? false : strpos( $admin_source, 'private function can_handle_yandex_delivery_geo_mapping_runner_ajax', $v2_ajax_start );
+$v2_ajax_block = false !== $v2_ajax_start && false !== $v2_ajax_end ? substr( $admin_source, $v2_ajax_start, $v2_ajax_end - $v2_ajax_start ) : '';
+yd_v2_runner_assert( '' !== $v2_ajax_block && str_contains( $v2_ajax_block, 'catch ( \Throwable $exception )' ) && str_contains( $v2_ajax_block, 'wp_send_json_error' ), 'V2 AJAX handlers must return JSON errors from catch.' );
+yd_v2_runner_assert( '' !== $v2_ajax_block && ! str_contains( $v2_ajax_block, 'wp_die' ), 'V2 AJAX handlers must not use wp_die for nonce/capability failures.' );
+yd_v2_runner_assert( str_contains( $admin_source, 'register_yandex_pickup_v2_ajax_shutdown_guard' ) && str_contains( $admin_source, 'register_shutdown_function' ) && str_contains( $admin_source, 'Fatal error:' ), 'V2 AJAX handlers must register fatal shutdown JSON guard.' );
 yd_v2_runner_assert( str_contains( $runner_source, 'import_from_json_file_streamed' ) && ! str_contains( $runner_source, 'import_from_json_file(' ), 'Runner must use streamed import, not whole-file import.' );
 yd_v2_runner_assert( str_contains( $import_source, 'file_get_contents' ) && str_contains( $import_source, 'import_from_json_file_streamed' ), 'Old small-file import may remain while streamed import exists.' );
 

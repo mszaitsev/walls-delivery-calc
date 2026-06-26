@@ -383,38 +383,71 @@ final class DeliveryServicesAdminPage {
 	}
 
 	public function ajax_yandex_delivery_pickup_v2_runner_start(): void {
-		if ( ! $this->can_handle_yandex_delivery_pickup_v2_runner_ajax() ) {
-			return;
-		}
-		wp_send_json_success( $this->yandex_delivery_pickup_v2_runner->start_full_api_sync() );
+		$this->handle_yandex_delivery_pickup_v2_runner_ajax( 'start', fn(): array => $this->yandex_delivery_pickup_v2_runner->start_full_api_sync() );
 	}
 
 	public function ajax_yandex_delivery_pickup_v2_runner_start_import(): void {
-		if ( ! $this->can_handle_yandex_delivery_pickup_v2_runner_ajax() ) {
-			return;
-		}
-		wp_send_json_success( $this->yandex_delivery_pickup_v2_runner->start_import() );
+		$this->handle_yandex_delivery_pickup_v2_runner_ajax( 'start_import', fn(): array => $this->yandex_delivery_pickup_v2_runner->start_import() );
 	}
 
 	public function ajax_yandex_delivery_pickup_v2_runner_step(): void {
-		if ( ! $this->can_handle_yandex_delivery_pickup_v2_runner_ajax() ) {
-			return;
-		}
-		wp_send_json_success( $this->yandex_delivery_pickup_v2_runner->run_import_step() );
+		$this->handle_yandex_delivery_pickup_v2_runner_ajax( 'step', fn(): array => $this->yandex_delivery_pickup_v2_runner->run_import_step() );
 	}
 
 	public function ajax_yandex_delivery_pickup_v2_runner_pause(): void {
-		if ( ! $this->can_handle_yandex_delivery_pickup_v2_runner_ajax() ) {
-			return;
-		}
-		wp_send_json_success( $this->yandex_delivery_pickup_v2_runner->pause() );
+		$this->handle_yandex_delivery_pickup_v2_runner_ajax( 'pause', fn(): array => $this->yandex_delivery_pickup_v2_runner->pause() );
 	}
 
 	public function ajax_yandex_delivery_pickup_v2_runner_reset(): void {
+		$this->handle_yandex_delivery_pickup_v2_runner_ajax( 'reset', fn(): array => $this->yandex_delivery_pickup_v2_runner->reset() );
+	}
+
+	/** @param callable():array<string,mixed> $callback */
+	private function handle_yandex_delivery_pickup_v2_runner_ajax( string $last_action, callable $callback ): void {
+		$this->register_yandex_pickup_v2_ajax_shutdown_guard();
 		if ( ! $this->can_handle_yandex_delivery_pickup_v2_runner_ajax() ) {
 			return;
 		}
-		wp_send_json_success( $this->yandex_delivery_pickup_v2_runner->reset() );
+		try {
+			$state = $callback();
+			$state['last_action'] = $state['last_action'] ?? $last_action;
+			wp_send_json_success( $state );
+		} catch ( \Throwable $exception ) {
+			wp_send_json_error(
+				array(
+					'message' => $exception->getMessage(),
+					'last_action' => $last_action,
+					'file' => $exception->getFile(),
+					'line' => $exception->getLine(),
+				),
+				500
+			);
+		}
+	}
+
+	private function register_yandex_pickup_v2_ajax_shutdown_guard(): void {
+		static $registered = false;
+		if ( $registered ) {
+			return;
+		}
+		$registered = true;
+		register_shutdown_function(
+			static function (): void {
+				$error = error_get_last();
+				if ( $error && in_array( (int) $error['type'], array( E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR ), true ) ) {
+					if ( ! headers_sent() ) {
+						wp_send_json_error(
+							array(
+								'message' => 'Fatal error: ' . (string) $error['message'],
+								'file' => (string) $error['file'],
+								'line' => (int) $error['line'],
+							),
+							500
+						);
+					}
+				}
+			}
+		);
 	}
 
 	private function can_handle_yandex_delivery_pickup_v2_runner_ajax(): bool {
@@ -423,7 +456,7 @@ final class DeliveryServicesAdminPage {
 			return false;
 		}
 		if ( ! check_ajax_referer( 'wdc_yandex_delivery_pickup_v2_runner', 'nonce', false ) ) {
-			wp_send_json_error( array( 'message' => __( 'Ошибка проверки безопасности.', 'walls-delivery-calc' ) ), 403 );
+			wp_send_json_error( array( 'message' => __( 'Сессия истекла. Обновите страницу.', 'walls-delivery-calc' ) ), 403 );
 			return false;
 		}
 		if ( ! $this->yandex_delivery_pickup_v2_runner instanceof YandexDeliveryPickupPointV2RunnerService ) {
@@ -1655,6 +1688,9 @@ final class DeliveryServicesAdminPage {
 			'errors_count' => 'errors_count',
 			'batch_size' => 'batch_size',
 			'memory_peak_mb' => 'memory_peak_mb',
+			'last_action' => 'last_action',
+			'last_http_status' => 'last_http_status',
+			'last_error_context' => 'last_error_context',
 			'updated_at' => 'updated_at',
 			'message' => 'message',
 		);

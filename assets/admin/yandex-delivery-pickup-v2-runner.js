@@ -24,12 +24,31 @@
 		body.append('action', action);
 		body.append('nonce', config.nonce);
 		return window.fetch(config.ajaxUrl, { method: 'POST', credentials: 'same-origin', body: body })
-			.then(function (response) { return response.json(); })
-			.then(function (payload) {
-				if (!payload || !payload.success) {
-					throw new Error(payload && payload.data && payload.data.message ? payload.data.message : 'Yandex pickup v2 runner request failed.');
-				}
-				return payload.data || {};
+			.then(function (response) {
+				return response.text().then(function (text) {
+					var payload = null;
+
+					try {
+						payload = JSON.parse(text);
+					} catch (e) {
+						throw new Error(
+							'Сервер вернул не JSON. HTTP ' +
+							response.status +
+							'. Начало ответа: ' +
+							text.slice(0, 300)
+						);
+					}
+
+					if (!payload || !payload.success) {
+						throw new Error(
+							payload && payload.data && payload.data.message
+								? payload.data.message
+								: 'Yandex pickup v2 runner request failed.'
+						);
+					}
+
+					return payload.data || {};
+				});
 			});
 	}
 
