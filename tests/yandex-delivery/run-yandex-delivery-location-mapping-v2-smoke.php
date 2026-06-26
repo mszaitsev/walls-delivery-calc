@@ -57,6 +57,9 @@ $GLOBALS['wpdb']->yandex_delivery_geo_v2 = array(
 	$geo( 300, '', 'Москва г', 55.7558, 37.6173 ),
 	$geo( 400, 'Тестовая область', 'Нетгорода', 50.0, 50.0 ),
 	$geo( 500, 'Новосибирская область', 'Далёкий', 55.0, 82.0 ),
+	$geo( 600, 'Москва и Московская область', 'Москва', 55.7558, 37.6173 ),
+	$geo( 700, 'Новосибирская область', 'Краснообск', 54.0000, 82.0000 ),
+	$geo( 800, 'Новосибирская область', 'Сортировка', 55.1000, 82.1000 ),
 );
 $GLOBALS['wpdb']->wdc_locations = array(
 	$location( 10, 'Новосибирская область', 'Новосибирск', '', 55.0302, 82.9204 ),
@@ -64,17 +67,20 @@ $GLOBALS['wpdb']->wdc_locations = array(
 	$location( 21, 'Новосибирская область', '', 'Бердск', 54.7600, 83.1100 ),
 	$location( 30, 'Москва', 'г Москва', '', 55.7558, 37.6173 ),
 	$location( 50, 'Новосибирская область', 'Далёкий', '', 60.0, 90.0 ),
+	$location( 70, 'Новосибирская область', 'Новосибирск', 'Краснообск', 54.0000, 82.0000 ),
+	$location( 80, 'Другой регион', 'Сортировка', '', 55.1000, 82.1000 ),
+	$location( 81, 'Новосибирская область', 'Сортировка', '', 55.1000, 82.1000 ),
 );
 
 $mapper = new YandexLocationMapperV2Service( $repository, $GLOBALS['wpdb'] );
 $result = $mapper->build_all( 10, 0 );
-yd_location_mapping_v2_assert( 5 === $result['processed_geo_ids'] && 2 === $result['mapped'] && 1 === $result['needs_review'] && 2 === $result['no_match'] && true === $result['done'], 'Mapper batch must classify mapped, needs_review, and no_match geo ids.' );
+yd_location_mapping_v2_assert( 8 === $result['processed_geo_ids'] && 4 === $result['mapped'] && 2 === $result['needs_review'] && 2 === $result['no_match'] && true === $result['done'], 'Mapper batch must classify mapped, needs_review, and no_match geo ids.' );
 $geo100 = $repository->find_by_geo( 100 );
 yd_location_mapping_v2_assert( 1 === count( $geo100 ) && 'mapped' === $geo100[0]['status'] && 100.0 === (float) $geo100[0]['confidence'] && 1 === (int) $geo100[0]['is_primary'], 'Single candidate must be mapped with full confidence.' );
 $matched_by100 = json_decode( (string) $geo100[0]['matched_by_json'], true );
 $raw100 = json_decode( (string) $geo100[0]['raw_json'], true );
 yd_location_mapping_v2_assert( in_array( 'locality', $matched_by100, true ) && in_array( 'region', $matched_by100, true ) && in_array( 'coordinates', $matched_by100, true ), 'matched_by_json must include locality, region, and coordinates.' );
-yd_location_mapping_v2_assert( array_key_exists( 'distance', $raw100 ) && array_key_exists( 'radius', $raw100 ) && array_key_exists( 'threshold', $raw100 ) && 1 === (int) $raw100['candidate_count'], 'raw_json must contain distance, radius, threshold, and candidate_count.' );
+yd_location_mapping_v2_assert( array_key_exists( 'distance', $raw100 ) && array_key_exists( 'radius', $raw100 ) && array_key_exists( 'threshold', $raw100 ) && true === $raw100['region_matched'] && 'city_name' === $raw100['locality_source'] && 1 === (int) $raw100['candidate_count'], 'raw_json must contain distance, radius, threshold, region_matched, locality_source, and candidate_count.' );
 $geo200 = $repository->find_by_geo( 200 );
 yd_location_mapping_v2_assert( 2 === count( $geo200 ) && 'needs_review' === $geo200[0]['status'] && 1 === (int) $geo200[0]['is_primary'], 'Multiple candidates must be saved as needs_review variants.' );
 $geo300 = $repository->find_by_geo( 300 );
@@ -82,15 +88,24 @@ yd_location_mapping_v2_assert( 1 === count( $geo300 ) && 'mapped' === $geo300[0]
 $geo400 = $repository->find_by_geo( 400 );
 $geo500 = $repository->find_by_geo( 500 );
 yd_location_mapping_v2_assert( 'no_match' === $geo400[0]['status'] && 0 === (int) $geo400[0]['location_id'] && 'no_match' === $geo500[0]['status'], 'Missing and far candidates must become no_match.' );
+$geo600 = $repository->find_by_geo( 600 );
+$raw600 = json_decode( (string) $geo600[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 1 === count( $geo600 ) && 'mapped' === $geo600[0]['status'] && 80.0 === (float) $geo600[0]['confidence'] && false === $raw600['region_matched'], 'Region mismatch must not block locality and coordinate match.' );
+$geo700 = $repository->find_by_geo( 700 );
+$raw700 = json_decode( (string) $geo700[0]['raw_json'], true );
+yd_location_mapping_v2_assert( 1 === count( $geo700 ) && 'mapped' === $geo700[0]['status'] && 'settlement_name' === $raw700['locality_source'], 'Mapper must match locality through settlement_name.' );
+$geo800 = $repository->find_by_geo( 800 );
+$primary800 = array_values( array_filter( $geo800, static fn( array $row ): bool => 1 === (int) $row['is_primary'] ) );
+yd_location_mapping_v2_assert( 2 === count( $geo800 ) && 1 === count( $primary800 ) && 81 === (int) $primary800[0]['location_id'] && 100.0 === (float) $primary800[0]['confidence'], 'Candidate sorting must prefer higher confidence before distance.' );
 $stats = $repository->statistics();
-yd_location_mapping_v2_assert( 6 === $stats['total'] && 2 === $stats['mapped'] && 2 === $stats['needs_review'] && 2 === $stats['no_match'] && null !== $stats['avg_confidence'] && null !== $stats['avg_distance'], 'Repository statistics must count statuses and averages.' );
+yd_location_mapping_v2_assert( 10 === $stats['total'] && 4 === $stats['mapped'] && 4 === $stats['needs_review'] && 2 === $stats['no_match'] && null !== $stats['avg_confidence'] && null !== $stats['avg_distance'], 'Repository statistics must count statuses and averages.' );
 
 $runner_repository = new YandexLocationMappingV2Repository( $GLOBALS['wpdb'] );
 $runner = new YandexLocationMappingV2Runner( new YandexLocationMapperV2Service( $runner_repository, $GLOBALS['wpdb'] ), $runner_repository );
 $state = $runner->start();
 yd_location_mapping_v2_assert( 'mapping' === $state['status'] && 0 === count( $GLOBALS['wpdb']->yandex_location_mapping_v2 ), 'Runner start must truncate and switch to mapping.' );
 $state = $runner->run_step();
-yd_location_mapping_v2_assert( 'done' === $state['status'] && 5 === $state['processed'] && 2 === $state['mapped'] && 1 === $state['needs_review'] && 2 === $state['no_match'] && null !== $state['avg_confidence'] && null !== $state['avg_distance'], 'Runner step must update mapping counters and averages.' );
+yd_location_mapping_v2_assert( 'done' === $state['status'] && 8 === $state['processed'] && 4 === $state['mapped'] && 2 === $state['needs_review'] && 2 === $state['no_match'] && null !== $state['avg_confidence'] && null !== $state['avg_distance'], 'Runner step must update mapping counters and averages.' );
 $runner->start();
 $paused = $runner->pause();
 $after_pause = $runner->run_step();
@@ -107,6 +122,7 @@ yd_location_mapping_v2_assert( str_contains( $admin_source, 'wdc_yandex_location
 yd_location_mapping_v2_assert( str_contains( $js_source, 'data-wdc-yandex-location-mapping-v2' ) && str_contains( $js_source, 'wdc_yandex_location_mapping_v2_step' ) && str_contains( $js_source, "runningStatus: 'mapping'" ), 'JS must contain independent location mapping v2 loop.' );
 yd_location_mapping_v2_assert( str_contains( $plugin_source, 'YandexLocationMappingV2Repository::class' ) && str_contains( $plugin_source, 'YandexLocationMapperV2Service::class' ) && str_contains( $plugin_source, 'YandexLocationMappingV2Runner::class' ), 'Plugin DI must register location mapping v2 services.' );
 yd_location_mapping_v2_assert( ! str_contains( $mapper_source, 'locationDetect' ) && ! str_contains( $mapper_source, 'YandexDeliveryApiClient' ) && ! str_contains( $mapper_source, '/api/' ), 'Location mapping v2 mapper must stay offline and not call Yandex API.' );
+yd_location_mapping_v2_assert( ! str_contains( $mapper_source, 'region_name LIKE' ) && str_contains( $mapper_source, 'location_locality_variants' ) && str_contains( $mapper_source, 'locality_source' ), 'Mapper source must keep region out of SQL, compare all locality variants, and store locality_source.' );
 yd_location_mapping_v2_assert( str_contains( (string) file_get_contents( dirname( __DIR__, 2 ) . '/database/migrations/0038_create_yandex_location_mapping_v2.php' ), 'YandexLocationMappingV2Repository' ), 'Migration 0038 must create mapping v2 schema via repository.' );
 
 echo "Yandex Delivery location mapping v2 smoke OK\n";

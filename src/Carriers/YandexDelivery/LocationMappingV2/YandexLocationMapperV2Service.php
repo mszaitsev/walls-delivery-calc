@@ -71,15 +71,12 @@ final class YandexLocationMapperV2Service {
 		$safe_radius = is_numeric( $geo['coverage_radius_safe_km'] ?? null ) ? (float) $geo['coverage_radius_safe_km'] : 0.0;
 		$threshold = max( 50.0, $safe_radius + 10.0 );
 		$candidates = array();
-		foreach ( $this->fetch_location_candidates( (string) ( $geo['locality'] ?? '' ), (string) ( $geo['region'] ?? '' ) ) as $location ) {
-			$location_locality = $this->normalize_location_locality( $location );
-			if ( '' === $location_locality || $location_locality !== $locality ) {
+		foreach ( $this->fetch_location_candidates( (string) ( $geo['locality'] ?? '' ) ) as $location ) {
+			$locality_match = $this->matching_location_locality( $location, $locality );
+			if ( null === $locality_match ) {
 				continue;
 			}
-			$region_match = '' === $region || $this->normalize_region( (string) ( $location['region_name'] ?? '' ) ) === $region;
-			if ( '' !== $region && ! $region_match ) {
-				continue;
-			}
+			$region_match = '' !== $region && $this->normalize_region( (string) ( $location['region_name'] ?? '' ) ) === $region;
 			$distance = null;
 			$coordinate_match = false;
 			if ( null !== $centroid_lat && null !== $centroid_lon && is_numeric( $location['latitude'] ?? null ) && is_numeric( $location['longitude'] ?? null ) ) {
@@ -99,7 +96,7 @@ final class YandexLocationMapperV2Service {
 				'distance_km' => $distance,
 				'confidence' => $this->confidence( true, $region_match && '' !== $region, $coordinate_match ),
 				'matched_by' => $matched_by,
-				'raw' => array( 'distance' => $distance, 'radius' => $safe_radius, 'threshold' => $threshold, 'candidate_count' => 0 ),
+				'raw' => array( 'distance' => $distance, 'radius' => $safe_radius, 'threshold' => $threshold, 'candidate_count' => 0, 'region_matched' => $region_match, 'locality_source' => $locality_match['source'] ),
 			);
 		}
 		$count = count( $candidates );
@@ -107,7 +104,11 @@ final class YandexLocationMapperV2Service {
 			$candidate['raw']['candidate_count'] = $count;
 		}
 		unset( $candidate );
-		usort( $candidates, static fn( array $a, array $b ): int => (float) ( $a['distance_km'] ?? 999999 ) <=> (float) ( $b['distance_km'] ?? 999999 ) );
+		usort(
+			$candidates,
+			static fn( array $a, array $b ): int => ( (int) ( $b['confidence'] ?? 0 ) <=> (int) ( $a['confidence'] ?? 0 ) )
+				?: ( (float) ( $a['distance_km'] ?? 999999 ) <=> (float) ( $b['distance_km'] ?? 999999 ) )
+		);
 
 		return $candidates;
 	}
@@ -148,33 +149,41 @@ final class YandexLocationMapperV2Service {
 	}
 
 	/** @return array<int,array<string,mixed>> */
-	private function fetch_location_candidates( string $locality, string $region ): array {
+	private function fetch_location_candidates( string $locality ): array {
 		if ( $this->has_test_locations() ) {
 			return array_values( array_filter( $this->wpdb->wdc_locations, static fn( array $row ): bool => ! isset( $row['active'] ) || ! empty( $row['active'] ) ) );
 		}
 		$like_locality = '%' . $this->wpdb->esc_like( trim( $locality ) ) . '%';
 		$where = '(city_name LIKE %s OR settlement_name LIKE %s OR display_name LIKE %s) AND active = 1';
 		$params = array( $like_locality, $like_locality, $like_locality );
-		if ( '' !== trim( $region ) ) {
-			$where .= ' AND region_name LIKE %s';
-			$params[] = '%' . $this->wpdb->esc_like( trim( $region ) ) . '%';
-		}
 		$sql = 'SELECT * FROM ' . $this->locations_table_name() . ' WHERE ' . $where . ' LIMIT 500';
 		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, ...$params ), ARRAY_A );
 
 		return is_array( $rows ) ? $rows : array();
 	}
 
-	/** @param array<string,mixed> $location */
-	private function normalize_location_locality( array $location ): string {
-		foreach ( array( 'city_name', 'settlement_name', 'display_name' ) as $key ) {
-			$normalized = $this->normalize_place( (string) ( $location[ $key ] ?? '' ) );
-			if ( '' !== $normalized ) {
-				return $normalized;
+	/** @param array<string,mixed> $location @return array{source:string,value:string}|null */
+	private function matching_location_locality( array $location, string $target ): ?array {
+		foreach ( $this->location_locality_variants( $location ) as $variant ) {
+			if ( $variant['value'] === $target ) {
+				return $variant;
 			}
 		}
 
-		return '';
+		return null;
+	}
+
+	/** @param array<string,mixed> $location @return array<int,array{source:string,value:string}> */
+	private function location_locality_variants( array $location ): array {
+		$variants = array();
+		foreach ( array( 'city_name', 'settlement_name', 'display_name' ) as $key ) {
+			$normalized = $this->normalize_place( (string) ( $location[ $key ] ?? '' ) );
+			if ( '' !== $normalized && ! isset( $variants[ $normalized ] ) ) {
+				$variants[ $normalized ] = array( 'source' => $key, 'value' => $normalized );
+			}
+		}
+
+		return array_values( $variants );
 	}
 
 	private function normalize_place( string $value ): string {
