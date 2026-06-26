@@ -66,6 +66,21 @@ final class YandexLocationMappingV2NameNormalizer {
 		return array_slice( array_values( $terms ), 0, self::MAX_SEARCH_TERMS );
 	}
 
+	/** @param array<string,mixed> $location @return array{source:string,value:string,raw:string}|null */
+	public function effective_location_locality( array $location ): ?array {
+		foreach ( array( 'place_name', 'settlement_name', 'city_name', 'display_name' ) as $source ) {
+			$raw = trim( (string) ( $location[ $source ] ?? '' ) );
+			if ( '' === $raw ) {
+				continue;
+			}
+			$value = $this->normalize_place( $raw );
+			if ( '' !== $value ) {
+				return array( 'source' => $source, 'value' => $value, 'raw' => $raw );
+			}
+		}
+
+		return null;
+	}
 	/** @param array<string,mixed> $location @return array<int,array{source:string,value:string}> */
 	public function location_locality_variants( array $location ): array {
 		$variants = array();

@@ -84,8 +84,8 @@ final class YandexLocationMapperV2Service {
 		$diagnostics['candidate_count_before_filters'] = count( $sql_candidates );
 		$candidates = array();
 		foreach ( $sql_candidates as $location ) {
-			$locality_match = $this->matching_location_locality( $location, $locality );
-			if ( null === $locality_match ) {
+			$effective_locality = $this->normalizer->effective_location_locality( $location );
+			if ( null === $effective_locality || $effective_locality['value'] !== $locality ) {
 				continue;
 			}
 			$region_match = '' !== $region && $this->normalize_region( (string) ( $location['region_name'] ?? '' ) ) === $region;
@@ -108,7 +108,7 @@ final class YandexLocationMapperV2Service {
 				'distance_km' => $distance,
 				'confidence' => $this->confidence( true, $region_match && '' !== $region, $coordinate_match ),
 				'matched_by' => $matched_by,
-				'raw' => array( 'distance' => $distance, 'radius' => $safe_radius, 'threshold' => $threshold, 'candidate_count' => 0, 'region_matched' => $region_match, 'locality_source' => $locality_match['source'], 'sql_search_terms' => $search_terms, 'candidate_count_before_filters' => 0, 'candidate_count_after_filters' => 0 ),
+				'raw' => array( 'distance' => $distance, 'radius' => $safe_radius, 'threshold' => $threshold, 'candidate_count' => 0, 'region_matched' => $region_match, 'locality_source' => $effective_locality['source'], 'locality_raw' => $effective_locality['raw'], 'effective_locality' => $effective_locality['value'], 'sql_search_terms' => $search_terms, 'candidate_count_before_filters' => 0, 'candidate_count_after_filters' => 0 ),
 			);
 		}
 		$count = count( $candidates );
@@ -175,7 +175,7 @@ final class YandexLocationMapperV2Service {
 						if ( isset( $row['active'] ) && empty( $row['active'] ) ) {
 							return false;
 						}
-						$haystack = mb_strtolower( implode( ' ', array( (string) ( $row['city_name'] ?? '' ), (string) ( $row['settlement_name'] ?? '' ), (string) ( $row['display_name'] ?? '' ) ) ), 'UTF-8' );
+						$haystack = mb_strtolower( implode( ' ', array( (string) ( $row['city_name'] ?? '' ), (string) ( $row['settlement_name'] ?? '' ), (string) ( $row['place_name'] ?? '' ), (string) ( $row['display_name'] ?? '' ) ) ), 'UTF-8' );
 						foreach ( $terms as $term ) {
 							if ( '' !== $term && str_contains( $haystack, $term ) ) {
 								return true;
@@ -191,7 +191,8 @@ final class YandexLocationMapperV2Service {
 		$params = array();
 		foreach ( $search_terms as $term ) {
 			$like = '%' . $this->wpdb->esc_like( trim( $term ) ) . '%';
-			$where_parts[] = '(city_name LIKE %s OR settlement_name LIKE %s OR display_name LIKE %s)';
+			$where_parts[] = '(city_name LIKE %s OR settlement_name LIKE %s OR place_name LIKE %s OR display_name LIKE %s)';
+			$params[] = $like;
 			$params[] = $like;
 			$params[] = $like;
 			$params[] = $like;
@@ -203,16 +204,6 @@ final class YandexLocationMapperV2Service {
 		return is_array( $rows ) ? $rows : array();
 	}
 
-	/** @param array<string,mixed> $location @return array{source:string,value:string}|null */
-	private function matching_location_locality( array $location, string $target ): ?array {
-		foreach ( $this->normalizer->location_locality_variants( $location ) as $variant ) {
-			if ( $variant['value'] === $target ) {
-				return $variant;
-			}
-		}
-
-		return null;
-	}
 
 	private function normalize_region( string $value ): string {
 		$value = str_replace( 'ё', 'е', mb_strtolower( trim( $value ), 'UTF-8' ) );
