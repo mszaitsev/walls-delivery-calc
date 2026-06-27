@@ -26,6 +26,7 @@ final class YandexLocationMappingV2NameNormalizer {
 	}
 
 	public function normalize_place( string $value ): string {
+		$value = $this->without_parentheses( $value );
 		$value = $this->normalize_text( $value );
 		if ( '' === $value ) {
 			return '';
@@ -43,13 +44,22 @@ final class YandexLocationMappingV2NameNormalizer {
 	/** @return array<int,string> */
 	public function search_terms_for_locality( string $value ): array {
 		$raw = trim( $value );
-		$base = $this->normalize_place( $raw );
-		$base_term = $this->base_search_term( $raw, $base );
+		$raw_without_parentheses = $this->without_parentheses( $raw );
 		$terms = array();
 		$this->add_term( $terms, $raw );
-		$this->add_term( $terms, $base_term );
+		$this->add_term( $terms, $raw_without_parentheses );
 
-		if ( '' !== $base_term ) {
+		$bases = array();
+		foreach ( array_unique( array( $raw, $raw_without_parentheses ) ) as $source ) {
+			$base = $this->normalize_place( $source );
+			$base_term = $this->base_search_term( $source, $base );
+			if ( '' !== $base_term ) {
+				$bases[ mb_strtolower( $base_term, 'UTF-8' ) ] = $base_term;
+				$this->add_term( $terms, $base_term );
+			}
+		}
+
+		foreach ( $bases as $base_term ) {
 			foreach ( $this->preferred_type_aliases( $raw ) as $type ) {
 				$this->add_term( $terms, $type . ' ' . $base_term );
 				$this->add_term( $terms, $base_term . ' ' . $type );
@@ -58,12 +68,20 @@ final class YandexLocationMappingV2NameNormalizer {
 				$this->add_term( $terms, $type . ' ' . $base_term );
 				$this->add_term( $terms, $base_term . ' ' . $type );
 				if ( count( $terms ) >= self::MAX_SEARCH_TERMS ) {
-					break;
+					break 2;
 				}
 			}
 		}
 
 		return array_slice( array_values( $terms ), 0, self::MAX_SEARCH_TERMS );
+	}
+
+	public function base_name_for_locality( string $value ): string {
+		$without_parentheses = $this->without_parentheses( $value );
+		$base = $this->normalize_place( $without_parentheses );
+		$base_term = $this->base_search_term( $without_parentheses, $base );
+
+		return '' !== $base_term ? $base_term : $base;
 	}
 
 	/** @param array<string,mixed> $location @return array{source:string,value:string,raw:string}|null */
@@ -81,6 +99,7 @@ final class YandexLocationMappingV2NameNormalizer {
 
 		return null;
 	}
+
 	/** @param array<string,mixed> $location @return array<int,array{source:string,value:string}> */
 	public function location_locality_variants( array $location ): array {
 		$variants = array();
@@ -109,10 +128,24 @@ final class YandexLocationMappingV2NameNormalizer {
 	public function detect_locality_type( string $value ): string {
 		$value = $this->normalize_text( $value );
 		foreach ( array(
+			'железнодорожная станция' => 'station',
 			'поселок городского типа' => 'urban',
+			'городской поселок' => 'urban',
 			'рабочий поселок' => 'urban',
+			'дачный поселок' => 'urban',
+			'сельский поселок' => 'village',
+			'станица' => 'village',
+			'ст ца' => 'village',
+			'стца' => 'village',
+			'местечко' => 'settlement',
+			'массив' => 'area',
+			'ж д ст' => 'station',
+			'п ст' => 'station',
+			'м в' => 'area',
 			'пгт' => 'urban',
 			'рп' => 'urban',
+			'гп' => 'urban',
+			'дп' => 'urban',
 			'город' => 'city',
 			'г' => 'city',
 			'село' => 'village',
@@ -122,6 +155,9 @@ final class YandexLocationMappingV2NameNormalizer {
 			'поселок' => 'settlement',
 			'пос' => 'settlement',
 			'п' => 'settlement',
+			'хутор' => 'farm',
+			'х' => 'farm',
+			'ст' => 'station',
 		) as $alias => $group ) {
 			$quoted = preg_quote( $alias, '/' );
 			if ( preg_match( '/(^|\s)' . $quoted . '($|\s)/u', $value ) ) {
@@ -136,10 +172,13 @@ final class YandexLocationMappingV2NameNormalizer {
 		$type = $this->normalize_text( $type );
 		return match ( $type ) {
 			'г', 'город' => 'city',
-			'пгт', 'рп', 'рабочий поселок', 'поселок городского типа' => 'urban',
-			'с', 'село' => 'village',
+			'пгт', 'рп', 'гп', 'дп', 'рабочий поселок', 'городской поселок', 'дачный поселок', 'поселок городского типа' => 'urban',
+			'с', 'село', 'сельский поселок', 'станица', 'ст ца', 'стца' => 'village',
 			'д', 'деревня' => 'hamlet',
-			'п', 'пос', 'поселок' => 'settlement',
+			'п', 'пос', 'поселок', 'местечко' => 'settlement',
+			'п ст', 'ж д ст', 'железнодорожная станция', 'ст' => 'station',
+			'х', 'хутор' => 'farm',
+			'м в', 'массив' => 'area',
 			default => '',
 		};
 	}
@@ -173,8 +212,37 @@ final class YandexLocationMappingV2NameNormalizer {
 			return $normalized;
 		}
 
-		return $this->detect_locality_type( (string) ( $effective['raw'] ?? '' ) ) === 'other' ? '' : $this->detect_locality_type( (string) ( $effective['raw'] ?? '' ) );
+		$detected = $this->detect_locality_type( (string) ( $effective['raw'] ?? '' ) );
+
+		return 'other' === $detected ? '' : $detected;
 	}
+
+	public function is_territorial_like( string $locality ): bool {
+		$value = $this->normalize_text( $locality );
+		foreach ( array(
+			'производственно административная зона',
+			'садоводческое товарищество',
+			'садовое товарищество',
+			'административный округ',
+			'муниципальный округ',
+			'городское поселение',
+			'городской округ',
+			'сельское поселение',
+			'территория',
+			'район',
+			'снт',
+			'днп',
+			'кп',
+			'зона',
+		) as $needle ) {
+			if ( str_contains( $value, $needle ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	private function base_search_term( string $raw, string $normalized_base ): string {
 		if ( '' === $normalized_base ) {
 			return '';
@@ -187,6 +255,7 @@ final class YandexLocationMappingV2NameNormalizer {
 
 		return trim( mb_substr( $raw, $position, mb_strlen( $normalized_base, 'UTF-8' ), 'UTF-8' ) );
 	}
+
 	/** @return array<int,string> */
 	private function preferred_type_aliases( string $value ): array {
 		$value = $this->normalize_text( $value );
@@ -197,17 +266,26 @@ final class YandexLocationMappingV2NameNormalizer {
 		if ( preg_match( '/(^|\s)(рп|рабочий поселок)($|\s)/u', $value ) ) {
 			$groups[] = array( 'рабочий поселок', 'рп' );
 		}
+		if ( preg_match( '/(^|\s)(гп|городской поселок)($|\s)/u', $value ) ) {
+			$groups[] = array( 'городской поселок', 'гп' );
+		}
+		if ( preg_match( '/(^|\s)(дп|дачный поселок)($|\s)/u', $value ) ) {
+			$groups[] = array( 'дачный поселок', 'дп' );
+		}
 		if ( preg_match( '/(^|\s)(пгт|поселок городского типа)($|\s)/u', $value ) ) {
 			$groups[] = array( 'поселок городского типа', 'пгт' );
 		}
 		if ( preg_match( '/(^|\s)(д|деревня)($|\s)/u', $value ) ) {
 			$groups[] = array( 'деревня', 'д' );
 		}
-		if ( preg_match( '/(^|\s)(с|село)($|\s)/u', $value ) ) {
-			$groups[] = array( 'село', 'с' );
+		if ( preg_match( '/(^|\s)(с|село|сельский поселок|станица|ст ца|стца)($|\s)/u', $value ) ) {
+			$groups[] = array( 'село', 'с', 'станица' );
 		}
-		if ( preg_match( '/(^|\s)(п|пос|поселок)($|\s)/u', $value ) ) {
-			$groups[] = array( 'поселок', 'пос', 'п' );
+		if ( preg_match( '/(^|\s)(п|пос|поселок|местечко)($|\s)/u', $value ) ) {
+			$groups[] = array( 'поселок', 'пос', 'п', 'местечко' );
+		}
+		if ( preg_match( '/(^|\s)(п ст|ж д ст|железнодорожная станция|ст)($|\s)/u', $value ) ) {
+			$groups[] = array( 'железнодорожная станция', 'ж д ст', 'п ст', 'ст' );
 		}
 		$aliases = array();
 		foreach ( $groups as $group ) {
@@ -218,16 +296,21 @@ final class YandexLocationMappingV2NameNormalizer {
 
 		return array_values( $aliases );
 	}
+
 	/** @param array<string,array<string,array{display?:string,position?:string}>> $type_rules @return array<int,string> */
 	private function build_type_aliases( array $type_rules ): array {
 		$aliases = array(
+			'железнодорожная станция', 'ж/д_ст', 'п/ст',
 			'поселок городского типа', 'посёлок городского типа', 'пгт',
+			'городской поселок', 'городской посёлок', 'гп',
+			'дачный поселок', 'дачный посёлок', 'дп',
 			'рабочий поселок', 'рабочий посёлок', 'рп',
+			'сельский поселок', 'сельский посёлок',
 			'город', 'г', 'г.',
 			'деревня', 'д', 'д.',
 			'село', 'с', 'с.',
 			'поселок', 'посёлок', 'пос', 'пос.', 'п', 'п.',
-			'хутор', 'х', 'х.', 'станица', 'ст', 'ст.', 'аул', 'слобода', 'снт', 'кп',
+			'хутор', 'х', 'х.', 'станица', 'ст-ца', 'стца', 'ст', 'ст.', 'местечко', 'м-в', 'массив', 'аул', 'снт', 'кп',
 		);
 		foreach ( array( 'city', 'place' ) as $scope ) {
 			foreach ( is_array( $type_rules[ $scope ] ?? null ) ? $type_rules[ $scope ] : array() as $source => $rule ) {
@@ -271,7 +354,15 @@ final class YandexLocationMappingV2NameNormalizer {
 
 	private function normalize_text( string $value ): string {
 		$value = str_replace( 'ё', 'е', mb_strtolower( trim( $value ), 'UTF-8' ) );
-		$value = preg_replace( '/[«»"\'`.,()]+/u', ' ', $value ) ?? $value;
+		$value = str_replace( array( 'ж/д_ст', 'п/ст', 'ст-ца', 'м-в' ), array( 'ж д ст', 'п ст', 'ст ца', 'м в' ), $value );
+		$value = preg_replace( '/[«»"\'`.,()\/_]+/u', ' ', $value ) ?? $value;
+		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
+
+		return trim( $value );
+	}
+
+	private function without_parentheses( string $value ): string {
+		$value = preg_replace( '/\s*\([^)]*\)\s*/u', ' ', $value ) ?? $value;
 		$value = preg_replace( '/\s+/u', ' ', $value ) ?? $value;
 
 		return trim( $value );
