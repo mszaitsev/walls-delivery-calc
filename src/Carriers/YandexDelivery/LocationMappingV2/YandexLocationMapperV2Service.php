@@ -464,6 +464,7 @@ final class YandexLocationMapperV2Service {
 		}
 		$safe_radius = is_numeric( $geo['coverage_radius_safe_km'] ?? null ) ? (float) $geo['coverage_radius_safe_km'] : 0.0;
 		$territory_radius = min( 25.0, max( 10.0, $safe_radius + 5.0 ) );
+		$territory_bbox = $this->territory_bounding_box( $centroid_lat, $territory_radius );
 		$locations = $this->fetch_nearby_locations_for_territory( $centroid_lat, $centroid_lon, $mapped_regions, $territory_radius );
 		$nearest = null;
 		foreach ( $locations as $location ) {
@@ -494,6 +495,7 @@ final class YandexLocationMapperV2Service {
 				'reason' => 'territory_fallback',
 				'territory_fallback_reason' => 'territory_like_coordinate_match',
 				'territory_radius_km' => round( $territory_radius, 3 ),
+				'territory_bbox' => $territory_bbox,
 				'territory_candidates_checked' => count( $locations ),
 				'locality_source' => (string) ( $effective['source'] ?? '' ),
 				'locality_raw' => (string) ( $effective['raw'] ?? '' ),
@@ -678,11 +680,23 @@ final class YandexLocationMapperV2Service {
 			);
 		}
 		$placeholders = implode( ',', array_fill( 0, count( $regions ), '%s' ) );
+		$bbox = $this->territory_bounding_box( $lat, $radius_km );
 		$sql = 'SELECT * FROM ' . $this->locations_table_name() . ' WHERE active = 1 AND region_name IN (' . $placeholders . ') AND latitude BETWEEN %f AND %f AND longitude BETWEEN %f AND %f LIMIT 1000';
-		$params = array_merge( array_values( $regions ), array( $lat - 0.2, $lat + 0.2, $lon - 0.3, $lon + 0.3 ) );
+		$params = array_merge( array_values( $regions ), array( $lat - $bbox['lat_delta'], $lat + $bbox['lat_delta'], $lon - $bbox['lon_delta'], $lon + $bbox['lon_delta'] ) );
 		$rows = $this->wpdb->get_results( $this->wpdb->prepare( $sql, ...$params ), ARRAY_A );
 
 		return is_array( $rows ) ? $rows : array();
+	}
+
+	/** @return array{lat_delta:float,lon_delta:float} */
+	private function territory_bounding_box( float $lat, float $radius_km ): array {
+		$lat_delta = $radius_km / 111.0;
+		$lon_delta = $radius_km / ( 111.0 * max( 0.2, cos( deg2rad( $lat ) ) ) );
+
+		return array(
+			'lat_delta' => round( $lat_delta, 6 ),
+			'lon_delta' => round( $lon_delta, 6 ),
+		);
 	}
 
 	/** @param array<string,mixed> $location */
