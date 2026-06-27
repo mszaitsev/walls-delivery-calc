@@ -102,8 +102,9 @@ $GLOBALS['wpdb']->wdc_locations = array(
 	$location( 820, 'Волгоградская область', '', '', 48.66, 44.06, 'железнодорожная станция Качалино', '', '', 'ст' ),
 	$location( 830, 'Московская область', '', '', 56.02, 35.53, 'Коптязино', '', '', 'д' ),
 	$location( 840, 'Московская область', '', '', 55.0, 37.0, 'Совсем другое', '', '', 'д' ),
+	$location( 841, 'Тульская область', '', '', 55.01, 37.0, 'Тоже другое', '', '', 'д' ),
 );
-foreach ( array( 'Брянская область', 'Волгоградская область', 'Московская область' ) as $region ) {
+foreach ( array( 'Брянская область', 'Волгоградская область', 'Московская область', 'Тульская область' ) as $region ) {
 	$region_repository->save_mapping( $region, array( $region ) );
 }
 $coordinate_service = new YandexGeoV2RegionEnrichmentService( $geo_repository, $GLOBALS['wpdb'], new YandexLocationMappingV2NameNormalizer(), $region_repository );
@@ -123,6 +124,18 @@ $low_score = $coordinate_service->enrich_one( $GLOBALS['wpdb']->yandex_delivery_
 $row840 = $geo_repository->find_by_geo_id( 840 );
 $raw840 = json_decode( (string) ( $row840['raw_stats_json'] ?? '' ), true );
 yd_geo_v2_region_enrichment_assert( 'not_found' === $low_score['status'] && 'coordinate_fallback_low_score' === $low_score['reason'] && ! empty( $raw840['region_enrichment']['audit']['diagnostics']['coordinate_search']['rejected_samples'] ), 'Low-score coordinate fallback candidates must be rejected with diagnostics.' );
+$GLOBALS['wpdb']->yandex_delivery_geo_v2 = array(
+	$geo( 845, '', 'Качалино ст', 48.59, 44.06, 3.0, 10 ),
+);
+$GLOBALS['wpdb']->wdc_locations = array(
+	$location( 845, 'Волгоградская область', '', '', 48.60, 44.06, 'Совсем другое 1', '', '', 'д' ),
+	$location( 846, 'Волгоградская область', '', '', 48.61, 44.07, 'Совсем другое 2', '', '', 'д' ),
+);
+$region_only = $coordinate_service->enrich_one( $GLOBALS['wpdb']->yandex_delivery_geo_v2[0] );
+$row845 = $geo_repository->find_by_geo_id( 845 );
+$raw845 = json_decode( (string) ( $row845['raw_stats_json'] ?? '' ), true );
+yd_geo_v2_region_enrichment_assert( 'updated' === $region_only['status'] && 'Волгоградская область' === $region_only['region'] && 'coordinate_fallback_single_nearby_region' === $region_only['reason'] && 'coordinate_fallback_region_only' === (string) ( $raw845['region_enrichment']['audit']['search_path'] ?? '' ) && in_array( 'single_nearby_region', $raw845['region_enrichment']['audit']['matched_by'] ?? array(), true ), 'Coordinate fallback region-only must update when nearby rows share one WDC region.' );
+yd_geo_v2_region_enrichment_assert( ! empty( $raw845['region_enrichment']['audit']['nearby_region_counts']['Волгоградская область'] ) && isset( $raw845['region_enrichment']['audit']['nearby_region_min_distances']['Волгоградская область'] ), 'Region-only audit must contain nearby region counts and min distances.' );
 $GLOBALS['wpdb']->yandex_delivery_geo_v2 = array(
 	array_merge( $geo( 850, '', 'Повтор г', 55.0, 37.0, 3.0, 10 ), array( 'raw_stats_json' => '{"keep":true,"region_enrichment":{"status":"not_found"}}' ) ),
 );
@@ -166,7 +179,7 @@ $runner_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carri
 $admin_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/DeliveryServices/Admin/DeliveryServicesAdminPage.php' );
 $js_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/assets/admin/yandex-delivery-pickup-v2-runner.js' );
 $mapper_source = (string) file_get_contents( dirname( __DIR__, 2 ) . '/src/Carriers/YandexDelivery/LocationMappingV2/YandexLocationMapperV2Service.php' );
-yd_geo_v2_region_enrichment_assert( str_contains( $service_source, 'YandexGeoV2RegionEnrichmentService' ) && str_contains( $service_source, 'find_pending_empty_region_rows_for_enrichment' ) && str_contains( $service_source, 'coordinate_fallback' ) && str_contains( $service_source, 'diagnostics' ) && str_contains( $runner_source, 'YandexGeoV2RegionEnrichmentRunner' ) && str_contains( $runner_source, 'private const BATCH_SIZE = 10' ) && str_contains( $runner_source, 'count_pending_empty_region_rows_for_enrichment' ), 'Enrichment service and runner must use pending rows with batch size 10.' );
+yd_geo_v2_region_enrichment_assert( str_contains( $service_source, 'YandexGeoV2RegionEnrichmentService' ) && str_contains( $service_source, 'find_pending_empty_region_rows_for_enrichment' ) && str_contains( $service_source, 'coordinate_fallback' ) && str_contains( $service_source, 'coordinate_fallback_region_only' ) && str_contains( $service_source, 'nearby_region_counts' ) && str_contains( $service_source, 'diagnostics' ) && str_contains( $runner_source, 'YandexGeoV2RegionEnrichmentRunner' ) && str_contains( $runner_source, 'private const BATCH_SIZE = 10' ) && str_contains( $runner_source, 'count_pending_empty_region_rows_for_enrichment' ), 'Enrichment service and runner must use pending rows with batch size 10.' );
 yd_geo_v2_region_enrichment_assert( str_contains( $geo_repository_source, 'update_region_from_location' ) && str_contains( $geo_repository_source, 'mark_region_enrichment_attempt' ) && str_contains( $geo_repository_source, 'find_pending_empty_region_rows_for_enrichment' ) && str_contains( $geo_repository_source, 'count_pending_empty_region_rows_for_enrichment' ) && str_contains( $geo_repository_source, 'reset_region_enrichment_attempts_for_empty_regions' ), 'Geo v2 repository must expose region enrichment update, attempt, and pending methods.' );
 yd_geo_v2_region_enrichment_assert( str_contains( $admin_source, 'Обогащение пустых регионов geo_v2' ) && str_contains( $admin_source, 'Осталось необработанных пустых регионов' ) && str_contains( $admin_source, 'Запустить обогащение регионов' ) && str_contains( $admin_source, 'wdc_yandex_geo_v2_region_enrichment_start' ), 'Admin UI must contain geo_v2 region enrichment block, pending count, and AJAX actions.' );
 yd_geo_v2_region_enrichment_assert( str_contains( $js_source, 'data-wdc-yandex-geo-v2-region-enrichment' ) && str_contains( $js_source, 'enriching_regions' ), 'JS must contain geo_v2 region enrichment loop.' );

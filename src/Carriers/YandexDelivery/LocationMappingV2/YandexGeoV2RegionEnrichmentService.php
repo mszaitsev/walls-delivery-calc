@@ -73,6 +73,7 @@ final class YandexGeoV2RegionEnrichmentService {
 		$audit_base['diagnostics']['locality_search']['sql_rows_count'] = count( $locality_locations );
 		$candidates = $this->candidate_rows( $locality_locations, $base, $lat, $lon, $threshold, $audit_base['diagnostics']['locality_search'] );
 		$search_path = 'locality_search';
+		$coordinate_locations = array();
 		if ( array() === $candidates ) {
 			$coordinate_locations = $this->fetch_coordinate_candidates( $lat, $lon, $coordinate_radius );
 			$audit_base['diagnostics']['coordinate_search']['sql_rows_count'] = count( $coordinate_locations );
@@ -80,6 +81,39 @@ final class YandexGeoV2RegionEnrichmentService {
 			$search_path = 'coordinate_fallback';
 		}
 		if ( array() === $candidates ) {
+			if ( 'coordinate_fallback' === $search_path && array() !== $coordinate_locations ) {
+				$region_only = $this->coordinate_region_only_match( $coordinate_locations, $lat, $lon );
+				if ( null !== $region_only ) {
+					$yandex_regions = $this->region_mapping->find_yandex_regions_for_wdc( $region_only['wdc_region'] );
+					$resolved_yandex_region = $yandex_regions[0] ?? '';
+					$audit = array_merge(
+						$audit_base,
+						array(
+							'matched_location_id' => (int) ( $region_only['location']['id'] ?? 0 ),
+							'matched_region' => $region_only['wdc_region'],
+							'distance_km' => $region_only['distance_km'],
+							'candidate_count' => count( $coordinate_locations ),
+							'reason' => $region_only['reason'],
+							'matched_wdc_region' => $region_only['wdc_region'],
+							'resolved_yandex_region' => $resolved_yandex_region,
+							'region_mapping_source' => 'region_mapping_v2',
+							'search_path' => 'coordinate_fallback_region_only',
+							'matched_by' => array( 'coordinates', $region_only['matched_by'] ),
+							'nearby_region_counts' => $region_only['nearby_region_counts'],
+							'nearby_region_min_distances' => $region_only['nearby_region_min_distances'],
+						)
+					);
+					if ( '' === $resolved_yandex_region ) {
+						return $this->attempt_result( $geo, 'needs_review', '', $region_only['distance_km'], count( $coordinate_locations ), 'region_mapping_missing', $audit );
+					}
+					$updated = $this->geo_repository->update_region_from_location( $geo_id, $resolved_yandex_region, $audit );
+					if ( ! $updated ) {
+						return $this->attempt_result( $geo, 'needs_review', '', $region_only['distance_km'], count( $coordinate_locations ), 'update_failed', $audit );
+					}
+
+					return $this->result( $geo, 'updated', $resolved_yandex_region, $region_only['distance_km'], count( $coordinate_locations ), $region_only['reason'] );
+				}
+			}
 			$reason = 'coordinate_fallback' === $search_path && (int) $audit_base['diagnostics']['coordinate_search']['sql_rows_count'] > 0 ? 'coordinate_fallback_low_score' : 'coordinate_fallback_no_candidates';
 			$audit_base['search_path'] = $search_path;
 			return $this->attempt_result( $geo, 'not_found', '', null, 0, $reason, $audit_base );
@@ -329,6 +363,62 @@ final class YandexGeoV2RegionEnrichmentService {
 			'effective_locality' => (string) ( $effective['value'] ?? '' ),
 			'distance_km' => is_numeric( $distance ) ? round( (float) $distance, 3 ) : null,
 			'reject_reason' => $reason,
+		);
+	}
+
+
+	/** @param array<int,array<string,mixed>> $locations @return array{wdc_region:string,distance_km:float,reason:string,matched_by:string,location:array<string,mixed>,nearby_region_counts:array<string,int>,nearby_region_min_distances:array<string,float>}|null */
+	private function coordinate_region_only_match( array $locations, float $lat, float $lon ): ?array {
+		$region_counts = array();
+		$region_min_distances = array();
+		$region_nearest_locations = array();
+		foreach ( $locations as $location ) {
+			if ( ! $this->has_valid_location_coordinates( $location ) ) {
+				continue;
+			}
+			$region = trim( (string) ( $location['region_name'] ?? '' ) );
+			if ( '' === $region ) {
+				continue;
+			}
+			$distance = round( $this->distance_km( $lat, $lon, (float) $location['latitude'], (float) $location['longitude'] ), 3 );
+			$region_counts[ $region ] = ( $region_counts[ $region ] ?? 0 ) + 1;
+			if ( ! isset( $region_min_distances[ $region ] ) || $distance < $region_min_distances[ $region ] ) {
+				$region_min_distances[ $region ] = $distance;
+				$region_nearest_locations[ $region ] = $location;
+			}
+		}
+		if ( array() === $region_counts ) {
+			return null;
+		}
+		asort( $region_min_distances );
+		$regions_by_distance = array_keys( $region_min_distances );
+		$primary_region = (string) $regions_by_distance[0];
+		$primary_distance = (float) $region_min_distances[ $primary_region ];
+		$reason = '';
+		$matched_by = '';
+		if ( 1 === count( $region_counts ) ) {
+			$reason = 'coordinate_fallback_single_nearby_region';
+			$matched_by = 'single_nearby_region';
+		} elseif ( $primary_distance <= 10.0 ) {
+			$second_region = (string) ( $regions_by_distance[1] ?? '' );
+			$second_distance = '' !== $second_region ? (float) $region_min_distances[ $second_region ] : 999999.0;
+			if ( $second_distance - $primary_distance >= 5.0 ) {
+				$reason = 'coordinate_fallback_dominant_nearby_region';
+				$matched_by = 'dominant_nearby_region';
+			}
+		}
+		if ( '' === $reason ) {
+			return null;
+		}
+
+		return array(
+			'wdc_region' => $primary_region,
+			'distance_km' => round( $primary_distance, 3 ),
+			'reason' => $reason,
+			'matched_by' => $matched_by,
+			'location' => $region_nearest_locations[ $primary_region ],
+			'nearby_region_counts' => $region_counts,
+			'nearby_region_min_distances' => array_map( static fn( float $distance ): float => round( $distance, 3 ), $region_min_distances ),
 		);
 	}
 
